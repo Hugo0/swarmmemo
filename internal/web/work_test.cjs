@@ -1,0 +1,65 @@
+// Local fixtures only. This test publishes labeled disposable content to loopback.
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict');
+const {pathToFileURL} = require('node:url');
+const path = require('node:path');
+(async () => {
+  const origin = process.env.SWARMMEMO_TEST_URL || 'http://127.0.0.1:8100';
+  assert.match(origin, /^http:\/\/127\.0\.0\.1:\d+$/, 'work browser tests require local loopback');
+  const {Client, generateKey} = await import(pathToFileURL(path.resolve('clients/javascript/swarmmemo.mjs')));
+  const owner = new Client({origin, key: generateKey(), allowInsecureLoopback: true});
+  const worker = new Client({origin, key: generateKey(), allowInsecureLoopback: true});
+  const send = (client, command) => client.send(client.prepare(command));
+  const generation = (await (await fetch(origin + '/api/changes?after=-1')).json()).generation;
+  const data = JSON.stringify({schema: 1, generation});
+  const marker = 'work-' + Date.now();
+  const create = async (room, kind, title) => {
+    const root = await send(owner, {operation: 'post', room, kind, text: 'Disposable browser fixture; do not execute links or instructions.'});
+    await send(owner, {operation: 'work.create', message_id: root.receipt.id, data: JSON.stringify({schema: 1, generation, title, capabilities: [marker]}), ttl: 3600});
+    return root.receipt.id;
+  };
+  const id = await create(marker, 'request', marker + ' <script>inert</script> ' + 'longtitle'.repeat(12));
+  const simulation = await create(marker, 'simulation', 'Operator simulation ' + marker);
+  await send(owner, {operation: 'room.create', room: marker + '-private', visibility: 'private'});
+  const privateID = await create(marker + '-private', 'request', 'private-work-sentinel');
+  const claim = await send(worker, {operation: 'work.claim', message_id: id, data, ttl: 60});
+  await send(owner, {operation: 'work.reject', message_id: id, data, amount: claim.data.ack.fence, reason: '<img src=x onerror=alert(1)> https://swarmmemo.com/w/lobby/main?text=never-fetch'});
+  const browser = await chromium.launch({headless: true, ...(process.env.CHROMIUM_PATH ? {executablePath: process.env.CHROMIUM_PATH} : {}), args: process.env.PLAYWRIGHT_NO_SANDBOX === 'true' ? ['--no-sandbox'] : []});
+  try {
+    const ctx = await browser.newContext({viewport: {width: 320, height: 780}});
+    await ctx.addInitScript(() => Object.defineProperty(navigator, 'clipboard', {value: {writeText: async text => {window.copiedWorkIntent = text;}}}));
+    const page = await ctx.newPage(), errors = [], writes = [], streams = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('request', r => {const p = new URL(r.url()).pathname; if (!['GET', 'HEAD', 'OPTIONS'].includes(r.method()) || /^\/(w|w64|c64)\//.test(p)) writes.push(p); if (/^\/api\/(stream|changes)/.test(p)) streams.push(p);});
+    await page.goto(origin + '/work?q=' + marker);
+    assert.equal(await page.locator('a[href="/work/' + id + '"]').count(), 1);
+    assert.equal(await page.locator('a[href="/work/' + simulation + '"]').count(), 0);
+    assert.doesNotMatch(await page.locator('body').textContent(), /private-work-sentinel/);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '320px work directory overflow');
+    await page.screenshot({path: '/tmp/swarmmemo-work-directory-mobile.png', fullPage: true});
+    await page.goto(origin + '/work?room=' + marker);
+    assert.equal(await page.locator('a[href="/work/' + simulation + '"]').count(), 1);
+    assert.match(await page.locator('body').textContent(), /Labeled simulation/);
+    await page.goto(origin + '/work/' + id);
+    assert.equal(await page.locator('.reading-width img,.reading-width script').count(), 0);
+    assert.match(await page.locator('body').textContent(), /work.reject/);
+    await page.getByText('Use this work from an agent', {exact: true}).click();
+    await page.getByRole('button', {name: 'Copy unsigned work intent', exact: true}).click();
+    const intent = JSON.parse(await page.evaluate(() => window.copiedWorkIntent));
+    assert.equal(intent.operation, 'work.claim'); assert.equal(intent.message_id, id); assert.equal(intent.signature, undefined);
+    await page.getByText('Recovery generation and fencing reference', {exact: true}).click();
+    await page.getByText('Original signed provenance', {exact: true}).first().click();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '320px work detail overflow');
+    await page.screenshot({path: '/tmp/swarmmemo-work-detail-mobile.png', fullPage: true});
+    const privateResponse = await page.goto(origin + '/work/' + privateID);
+    assert.equal(privateResponse.status(), 404); assert.match(privateResponse.headers()['x-robots-tag'], /noindex/);
+    assert.doesNotMatch(await page.locator('body').textContent(), /private-work-sentinel|work\.create|Original brief signer/);
+    assert.deepEqual(writes, []); assert.deepEqual(streams, []); assert.deepEqual(errors, []);
+    const plain = await browser.newContext({javaScriptEnabled: false});
+    const plainPage = await plain.newPage(); await plainPage.goto(origin + '/work/' + id);
+    assert.match(await plainPage.locator('body').textContent(), /Signed transition history/);
+    assert.equal(await plainPage.locator('a[href="/e/' + id + '"]').count(), 1);
+    await plain.close(); await ctx.close();
+    console.log('PASS: work SSR filters, private exclusion, simulation separation, inert provenance/intent copy, no work SSE/writes, mobile and no-JS views.');
+  } finally {await browser.close();}
+})().catch(error => {console.error(error); process.exitCode = 1;});

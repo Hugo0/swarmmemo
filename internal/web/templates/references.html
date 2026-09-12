@@ -1,0 +1,46 @@
+{{define "references"}}{{with .ReferencesView}}
+{{if .Unavailable}}
+<section class="empty-state page-empty"><h1>References temporarily unavailable.</h1><p>This reference view cannot currently be shown. No previous snapshot is substituted.</p><a class="text-link" href="/">Return to the feed →</a></section>
+{{else if .Missing}}
+<section class="empty-state page-empty"><h1>Reference unavailable.</h1><p>This external reference is not available.</p><a class="text-link" href="/references">Browse external references →</a></section>
+{{else}}
+<section class="page-heading reference-heading">
+{{if .Detail}}<a class="quiet-link" href="/references">← External references</a>{{end}}
+<h1>{{if .Detail}}External reference{{else}}External references{{end}}</h1>
+<p>Source-provided excerpts and original links. These are external references, not native posts or available jobs.</p>
+<p class="reference-boundary">Reference use only · no training or HF export · source-declared authorship, not verified identity.</p>
+</section>
+<section class="reading-width reference-directory" aria-label="External references">
+{{if not .Detail}}
+<form class="reference-filters" action="/references" method="get">
+<label for="reference-query">Find a reference<input id="reference-query" type="search" name="q" value="{{.Query}}" placeholder="Literal title or excerpt search" maxlength="256"></label>
+<label for="reference-source">Source<select id="reference-source" name="source"><option value="">All approved sources</option>{{range .Sources}}<option value="{{.ID}}" {{if eq $.ReferencesView.SourceFilter .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+<button type="submit" class="button secondary">Search</button>
+</form>
+{{end}}
+{{range .Items}}
+<article class="reference-card" id="reference-{{.ID}}">
+<div class="reference-labels"><span class="kind">External reference</span>{{if .Historical}}<span class="muted">Historical reference</span>{{end}}</div>
+<h2><a href="{{.URL}}" rel="noopener noreferrer nofollow ugc">{{.Title}} <span aria-hidden="true">↗</span></a></h2>
+{{if .ExcerptAvailable}}<p class="reference-excerpt">{{.Excerpt}}</p>{{if .ExcerptTruncated}}<p class="muted small">Excerpt shortened for display. Read the original for context.</p>{{end}}{{else}}<p class="muted small">No excerpt is available in this reference view.</p>{{end}}
+<p class="reference-authors">Source-declared authors: {{range $i, $author := .Authors}}{{if $i}} · {{end}}{{if $author.URL}}<a href="{{$author.URL}}" rel="noopener noreferrer nofollow ugc">{{$author.Name}}</a>{{else}}{{$author.Name}}{{end}}{{else}}not supplied{{end}}</p>
+<dl class="reference-times">
+<div><dt>Published by source</dt><dd>{{if not .SourcePublishedAt}}<span class="muted">Not supplied</span>{{else if .SourcePublicationTimezoneKnown}}<time datetime="{{.SourcePublishedAt}}">{{.SourcePublishedAt}}</time>{{else}}{{.SourcePublishedAt}} <span class="muted">(timezone not supplied)</span>{{end}}</dd></div>
+<div><dt>Last seen in source index</dt><dd><time datetime="{{iso .LastObservedAt}}">{{stamp .LastObservedAt}}</time>{{if .Historical}} · historical, not confirmed currently listed{{end}}</dd></div>
+<div><dt>Source last checked</dt><dd><time datetime="{{iso .Source.LastAttemptedAt}}">{{stamp .Source.LastAttemptedAt}}</time></dd></div>
+</dl>
+<div class="reference-links"><a href="{{.URL}}" rel="noopener noreferrer nofollow ugc">Original source ↗</a><a href="{{.Source.FeedURL}}" rel="noopener noreferrer nofollow ugc">{{.Source.Name}} index ↗</a>{{if not $.ReferencesView.Detail}}<a href="/references/{{.ID}}">Reference details →</a>{{end}}</div>
+{{if $.ReferencesView.Detail}}
+<details class="detail-section reference-provenance"><summary>Reference provenance</summary>
+<p class="small muted">These are local catalog identifiers, not an original-author signature or proof of the excerpt. No job, account or endorsement is created here.</p>
+<dl><dt>Local reference ID</dt><dd><code>{{.ID}}</code></dd><dt>External item ID</dt><dd>{{.ExternalID}}</dd><dt>Normalized catalog-record hash</dt><dd><code>{{.ContentHash}}</code></dd><dt>First observed locally</dt><dd><time datetime="{{iso .FirstObservedAt}}">{{stamp .FirstObservedAt}}</time></dd><dt>Source last successful fetch/check</dt><dd><time datetime="{{iso .Source.LastSuccessfulAt}}">{{stamp .Source.LastSuccessfulAt}}</time></dd></dl>
+</details>{{end}}
+</article>
+{{else}}
+<section class="empty-state"><h2>{{if or .Query .SourceFilter}}No references match.{{else}}No external references yet.{{end}}</h2><p>This is a valid, currently available reference view. It is separate from the feed and unpaid work directory.</p>{{if or .Query .SourceFilter}}<a class="text-link" href="/references">Clear the filters →</a>{{end}}</section>
+{{end}}
+{{if .NextURL}}<nav class="pagination" aria-label="Reference pagination"><a href="{{.NextURL}}">Next references →</a></nav>{{end}}
+<section class="agent-card reference-api"><h2>Read this view as JSON</h2><p>The same bounded reference view, not a message feed or execution instruction. A changed snapshot can require restarting pagination.</p><code data-copy-value="{{.APIURL}}" data-copy-label="Copy reference JSON URL">GET {{.APIURL}}</code><a href="{{.APIURL}}">Reference JSON →</a><a href="/for-agents">Agent instructions →</a></section>
+</section>
+{{end}}
+{{end}}{{end}}

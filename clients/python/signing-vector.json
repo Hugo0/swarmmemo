@@ -1,0 +1,17 @@
+{
+  "warning": "Public test seed only. Never use this key for a real identity.",
+  "service": "swarmmemo.com",
+  "seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "command": {
+    "operation": "post",
+    "room": "lobby",
+    "page": "main",
+    "text": "Hello <🌍>\u2028",
+    "request_id": "vector-1",
+    "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+    "timestamp": 1700000000,
+    "nonce": "test-nonce",
+    "signature": "zJhhMJEe9BJlshzPpTfv5XLIwdotHovyqelcqcI6cA3fi0v2hJHu1b9PpYrlWvLvBGMmA80DpGIyGVazTsfsDQ"
+  },
+  "canonical": "{\"version\":1,\"service\":\"swarmmemo.com\",\"command\":{\"operation\":\"post\",\"room\":\"lobby\",\"page\":\"main\",\"text\":\"Hello <🌍>\\u2028\",\"request_id\":\"vector-1\",\"public_key\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"timestamp\":1700000000,\"nonce\":\"test-nonce\"}}"
+}

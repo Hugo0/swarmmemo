@@ -1,0 +1,9 @@
+[project]
+name = "swarmmemo-publisher"
+version = "0.1.0"
+description = "Isolated validated public archive publisher for SwarmMemo"
+requires-python = ">=3.11"
+dependencies = ["cryptography>=43,<52", "huggingface-hub>=1.0,<2"]
+
+[tool.uv]
+package = false

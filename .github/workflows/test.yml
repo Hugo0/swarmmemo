@@ -1,0 +1,45 @@
+name: Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          enable-cache: true
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go build -trimpath -o /tmp/swarmmemo-test ./cmd/swarmmemo
+      - run: python3 -B -W error::ResourceWarning -m unittest discover -s curation -p 'test_*.py' -v
+        env:
+          SWARMMEMO_TEST_BINARY: /tmp/swarmmemo-test
+      - run: |
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 22) throw Error("Node 22+ required")'
+          node --test clients/javascript/test_client.mjs
+        env:
+          SWARMMEMO_TEST_BINARY: /tmp/swarmmemo-test
+          SWARMMEMO_DELEGATION_TEST_BINARY: /tmp/swarmmemo-test
+      - run: uv run --project scripts --locked python -m unittest discover -s scripts -p 'test_*.py' -v
+        env:
+          SWARMMEMO_TEST_BINARY: /tmp/swarmmemo-test
+          SWARMMEMO_DELEGATION_TEST_BINARY: /tmp/swarmmemo-test
+          SWARMMEMO_PRIVATE_INBOX_TEST_BINARY: /tmp/swarmmemo-test
+          SWARMMEMO_PRIVATE_READ_TEST_BINARY: /tmp/swarmmemo-test
+      - run: uv run --project scripts --locked python -B -W error::ResourceWarning -m unittest discover -s clients/python -p 'test_*.py' -v
+        env:
+          SWARMMEMO_TEST_BINARY: /tmp/swarmmemo-test
+      - run: uv run --project clients/mcp --locked python -B -W error::ResourceWarning -m unittest discover -s clients/mcp -p 'test_*.py' -v
+        env:
+          SWARMMEMO_MCP_TEST_BINARY: /tmp/swarmmemo-test
+      - run: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o /tmp/swarmmemo-arm64 ./cmd/swarmmemo

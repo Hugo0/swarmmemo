@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "scope": "Bounded read-only discovery from user-provided collusion.wiki and Hacker News thread 49563355. Mention does not establish historical swarm use.",
+  "sources": [
+    {
+      "name": "DSE Wiki",
+      "url": "https://www.wikiservice.at/dse/wiki.cgi?action=browse&id=RecentChanges&days=150",
+      "discovery_url": "https://news.ycombinator.com/item?id=49563657",
+      "status": "historical_agent_activity_reported",
+      "findings": "Three sampled original pages are now empty; use disclosed research examples with attribution. Public logs may expose visitor IPs; do not mirror access logs.",
+      "import_status": "summary_only_no_verified_bulk_license",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "FractalWiki",
+      "url": "https://www.wikiservice.at/fractal/wiki.cgi?TestPage",
+      "discovery_url": "https://news.ycombinator.com/item?id=49567486",
+      "status": "live_self_declared_agent_post",
+      "findings": "CentaurAgent's dated invitation survives in normal page view. A HeraldAgent invitation exists only in the inspected diff and was not imported.",
+      "import_status": "one_direct_summary_ready",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "ProbierWiki",
+      "url": "https://www.wikiservice.at/probier/wiki.cgi?AgentPovertyStatusLegendTX987",
+      "discovery_url": "https://news.ycombinator.com/item?id=49563657",
+      "status": "live_candidate_scratchpad",
+      "findings": "Schema references survive. Original author's identity is unspecified; agent-like page name alone proves nothing. Separate human welcome to CentaurAgent not imported as agent speech.",
+      "import_status": "provenance_review",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "Wiki4D",
+      "url": "https://prowiki.org/wiki4d/wiki.cgi?AgentStatusPovertyMembersTX",
+      "discovery_url": "https://news.ycombinator.com/item?id=49563796",
+      "status": "live_candidate_scratchpad",
+      "findings": "Schema links survive; RecentChanges identifies ResearchAgentMembers. Page displays FDL notice, but full license version and attribution chain were not reviewed.",
+      "import_status": "provenance_and_license_review",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "GruenderWiki",
+      "url": "https://www.wikiservice.at/gruender/wiki.cgi?DataUsaBridgePlaceResearch",
+      "discovery_url": "https://news.ycombinator.com/item?id=49571227",
+      "status": "live_candidate_scratchpad",
+      "findings": "Public data references survive; RecentChanges labels OpenResearchHelper on June 22. Context suggests an agent but does not authenticate one.",
+      "import_status": "provenance_review",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "DorfWiki",
+      "url": "https://www.dorfwiki.org/wiki.cgi?action=rc&days=105&edits=1&all=1",
+      "discovery_url": "https://news.ycombinator.com/item?id=49566977",
+      "status": "historical_candidate_hn_claim",
+      "findings": "RecentChanges is reachable. Initial bounded view contained substantial legitimate human activity; no agent content was selected or copied.",
+      "import_status": "needs_targeted_primary_verification",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "Ludism Seattle Cosmic Wiki",
+      "url": "https://www.ludism.org/scwiki?action=browse;diff=1;id=SandBox",
+      "discovery_url": "https://news.ycombinator.com/item?id=49571227",
+      "status": "removed_candidate_in_public_diff",
+      "findings": "Current content is a test marker; data-query references occur in removed diff content. No original body imported.",
+      "import_status": "excluded_removed_or_unattributed",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "Ludism Mentat Wiki",
+      "url": "https://www.ludism.org/mentat?action=browse;diff=1;id=SandBox",
+      "discovery_url": "https://news.ycombinator.com/item?id=49571227",
+      "status": "opaque_live_candidate",
+      "findings": "Current Gale-labeled post contains an opaque encoded envelope. Payload not decoded, copied into batch, or executed. Page displays CC BY-SA 3.0.",
+      "import_status": "excluded_unknown_payload",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "Ludism Sandbox Wiki",
+      "url": "https://www.ludism.org/sandbox?action=browse;diff=2;id=AubergineStew",
+      "discovery_url": "https://news.ycombinator.com/item?id=49564286",
+      "status": "live_unattributed_research_links",
+      "findings": "Page changed by Test on May 26 contains a public-document link and rendering-proxy link. Not sufficient evidence of genuine agent authorship.",
+      "import_status": "excluded_unconfirmed_authorship",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "AP Chemistry Wiki",
+      "url": "https://tmcleod.org/cgi-bin/apchem/wiki.cgi?FederalDataReferenceXYZ",
+      "discovery_url": "https://news.ycombinator.com/item?id=49568239",
+      "status": "live_candidate_scratchpad",
+      "findings": "Federal-spending research references survive. No original author supplied; unrelated teaching/quiz material deliberately not imported.",
+      "import_status": "provenance_review",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "The Colony",
+      "url": "https://thecolony.ai/for-agents",
+      "discovery_url": "https://news.ycombinator.com/item?id=49567486",
+      "status": "live_purpose_built_agent_venue",
+      "findings": "Public API returned agent-tagged posts. Terms at /terms prohibit commercial scraping/harvesting without permission; stopped after bounded discovery and terms check. No posts selected for import.",
+      "import_status": "permission_required",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "Open Agent Forum",
+      "url": "https://openagentforum.com",
+      "discovery_url": "https://www.wikiservice.at/fractal/wiki.cgi?action=browse&diff=4&id=TestPage",
+      "status": "promotion_seen_not_verified",
+      "findings": "Mentioned by self-described HeraldAgent in a wiki diff, not evidence this venue was used by historical OpenAI swarms. No access or import performed.",
+      "import_status": "not_inspected",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "aweb.ai",
+      "url": "https://aweb.ai",
+      "discovery_url": "https://news.ycombinator.com/item?id=49568326",
+      "status": "hn_operator_claim",
+      "findings": "HN commenter reports agents creating teams. Original public threads and reuse terms not inspected.",
+      "import_status": "not_inspected",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "agentin.work",
+      "url": "https://agentin.work",
+      "discovery_url": "https://news.ycombinator.com/item?id=49563848",
+      "status": "hn_creator_claim",
+      "findings": "Creator describes coding-agent knowledge sharing. Original public threads and reuse terms not inspected.",
+      "import_status": "not_inspected",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "honorcommit",
+      "url": "https://honorcommit.com",
+      "discovery_url": "https://news.ycombinator.com/item?id=49567351",
+      "status": "hn_new_venue_announcement",
+      "findings": "Creator announces a write-flexible board; not evidence of historical swarm use. Original public posts not inspected.",
+      "import_status": "not_inspected",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "Moltbook",
+      "url": "https://www.moltbook.com",
+      "discovery_url": "https://news.ycombinator.com/item?id=49566142",
+      "status": "terms_reviewed_automation_prohibited",
+      "findings": "Terms at https://www.moltbook.com/terms (updated March 15, 2026) prohibit collection, automated indexing and mirroring. Do not enable scheduled collection, including metadata-only indexing, without permission. No posts or profiles imported.",
+      "import_status": "permission_required",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "publictestwiki.com",
+      "url": "https://publictestwiki.com",
+      "discovery_url": "https://collusion.wiki/#timeline",
+      "status": "attempt_reported",
+      "findings": "The published report describes attempts to edit this venue, not a verified surviving conversation selected for import.",
+      "import_status": "not_inspected",
+      "checked_at": "2026-09-05"
+    },
+    {
+      "name": "texteditors.org",
+      "url": "http://texteditors.org",
+      "discovery_url": "https://collusion.wiki/#the-agents-gain-write-to-the-internet-via-get-requests",
+      "status": "attempt_reported",
+      "findings": "Referenced in the report's write-surface discussion. No post or current access verified.",
+      "import_status": "not_inspected",
+      "checked_at": "2026-09-05"
+    }
+  ]
+}

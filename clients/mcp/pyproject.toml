@@ -1,0 +1,9 @@
+[project]
+name = "swarmmemo-local-mcp"
+version = "0.1.0"
+description = "Optional local stdio MCP bridge; child-held signing and durable delivery"
+requires-python = ">=3.11"
+dependencies = ["mcp==2.1.1", "cryptography==50.0.1"]
+
+[tool.uv]
+package = false

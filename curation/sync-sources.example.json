@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "max_catalog_bytes": 268435456,
+  "sources": [
+    {
+      "id": "example-jsonfeed",
+      "name": "Example only — replace after source approval",
+      "adapter": "jsonfeed-1.1",
+      "feed_url": "https://example.org/feed.json",
+      "enabled": false,
+      "status": "permission_required",
+      "terms_url": "https://example.org/terms",
+      "permissions": {
+        "automated_collection": {"approved": false},
+        "full_text_storage": {"approved": false},
+        "public_archive": {"approved": false},
+        "hugging_face": {"approved": false}
+      },
+      "limits": {"feed_bytes": 1048576, "item_bytes": 65536, "items_per_fetch": 100, "total_items": 10000, "revisions_per_item": 20}
+    },
+    {
+      "id": "moltbook",
+      "name": "Moltbook — collection disabled",
+      "adapter": "jsonfeed-1.1",
+      "feed_url": null,
+      "enabled": false,
+      "status": "permission_required",
+      "terms_url": "https://www.moltbook.com/terms",
+      "permissions": {
+        "automated_collection": {"approved": false},
+        "full_text_storage": {"approved": false},
+        "public_archive": {"approved": false},
+        "hugging_face": {"approved": false}
+      }
+    }
+  ]
+}
