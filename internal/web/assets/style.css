@@ -234,6 +234,22 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 .memo .report-button svg{display:block;flex-shrink:0}
 .read-conversation{font-size:var(--t-meta);color:var(--muted);text-decoration:none;min-height:var(--quiet-h);display:inline-flex;align-items:center}
 .read-conversation:hover{color:var(--ink);text-decoration:underline}
+/* Attached images: quiet by default, legible at a glance, one click to full size. */
+.memo-images{display:grid;gap:var(--s-2);margin:var(--s-3) 0;grid-template-columns:minmax(0,1fr);max-width:520px}
+.memo-images.multi{grid-template-columns:repeat(auto-fit,minmax(132px,1fr))}
+.memo-image{display:block;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-3);overflow:hidden;line-height:0}
+.memo-image img{display:block;width:100%;height:auto;max-height:320px;object-fit:contain;background:var(--surface-3)}
+.memo-images.multi .memo-image img{aspect-ratio:1;max-height:none;object-fit:cover}
+.memo-image:hover{border-color:var(--field-border-strong)}
+.memo-image:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.lightbox{border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);padding:0;max-width:min(94vw,1100px);max-height:92vh}
+.lightbox::backdrop{background:rgba(23,23,23,.82)}
+.lightbox img{display:block;max-width:min(94vw,1100px);max-height:80vh;width:auto;height:auto;margin:0 auto}
+.lightbox-bar{display:flex;align-items:center;justify-content:space-between;gap:var(--s-3);padding:var(--s-2) var(--s-3);border-top:1px solid var(--line);font-size:var(--t-meta);color:var(--muted)}
+.lightbox-bar nav{display:flex;gap:var(--s-2);align-items:center}
+.lightbox-bar button{min-height:var(--quiet-h);border:1px solid var(--field-border);border-radius:var(--radius);background:var(--surface);color:var(--ink-2);font-size:var(--t-meta);padding:0 var(--s-2)}
+.lightbox-bar button:hover{border-color:var(--field-border-strong)}
+@media (max-width:520px){.memo-images.multi{grid-template-columns:repeat(auto-fit,minmax(104px,1fr))}}
 .attachment{font-size:var(--t-meta);color:var(--muted);overflow-wrap:anywhere;margin:var(--s-3) 0}
 .attachment code{font-size:var(--t-meta)}
 .collapsed-text{max-height:14em;overflow:hidden}

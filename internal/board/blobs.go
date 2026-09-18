@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"mime"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -53,6 +54,14 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		}
 		if _, _, err = mime.ParseMediaType(mediaType); err != nil {
 			return Result{}, problem(400, "invalid_media_type", "Use a valid MIME content type.")
+		}
+		// A declared image type must be borne out by the bytes: the page renders
+		// what the metadata claims, so a mismatch would put an unrenderable or
+		// mislabelled file into an <img>. SVG is refused outright.
+		if base := InlineImageType(mediaType); strings.HasPrefix(strings.ToLower(mediaType), "image/") {
+			if base == "" || ImageMediaType(data) != base {
+				return Result{}, problem(400, "invalid_image", "An image attachment must be "+inlineImageFormats+", its bytes must match its declared media type, and it must be under "+strconv.Itoa(InlineImagePixels/(1<<20))+" megapixels. SVG is not accepted because it can carry script; send it as a download type instead.")
+			}
 		}
 		ttl := c.TTL
 		if ttl == 0 {

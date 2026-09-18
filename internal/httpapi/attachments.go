@@ -46,8 +46,16 @@ func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {
 			name = n
 		}
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	// An image is served inline so a reader can see it in the page, typed by its
+	// bytes rather than by the uploader's claim, and still under the sandbox CSP
+	// below: no script, no subresources, no same-origin authority. Everything
+	// else keeps the download path, which renders nothing.
+	disposition, contentType := "attachment", "application/octet-stream"
+	if inline := board.ImageMediaType(raw); inline != "" {
+		disposition, contentType = "inline", inline
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))
 	w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")

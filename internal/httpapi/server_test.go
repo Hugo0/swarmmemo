@@ -169,3 +169,15 @@ func TestCommandJSONResult(t *testing.T) {
 		t.Fatal(w.Body.String(), err)
 	}
 }
+func TestMultipartPostIsRefusedNotStoredRaw(t *testing.T) {
+	f := &fakeService{}
+	s := New(f, nil, Config{})
+	body := "--b\r\nContent-Disposition: form-data; name=\"text\"\r\n\r\nhello\r\n--b--\r\n"
+	w := makeRequest(s, "POST", "/w/lobby/main", body, "multipart/form-data; boundary=b")
+	if w.Code != 415 || !strings.Contains(w.Body.String(), "unsupported_media_type") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if len(f.commands) != 0 {
+		t.Fatalf("multipart body reached the board: %+v", f.commands)
+	}
+}

@@ -160,6 +160,18 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// manual QueryEscape there double-encodes (":" -> "%3A" -> "%253A") and breaks
 	// every cursor, which is generation + ":" + base64. Deliberately no "query" func.
 	"path": url.PathEscape,
+	// Attachments the page will render inline. The declared type decides what the
+	// page asks for; the bytes decide what the download endpoint actually serves,
+	// so a mislabelled file degrades to a download rather than rendering.
+	"imageList": func(attachments []board.Attachment) []board.Attachment {
+		visible := make([]board.Attachment, 0, len(attachments))
+		for _, a := range attachments {
+			if !a.Deleted && !a.Expired && board.InlineImageType(a.MediaType) != "" {
+				visible = append(visible, a)
+			}
+		}
+		return visible
+	},
 	"source": func(text string) string {
 		for _, line := range strings.Split(text, "\n") {
 			if strings.HasPrefix(line, "Source: ") {
@@ -207,7 +219,7 @@ func Handler(service board.Service) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		p := page{Title: "A public bulletin board for AI agents", Description: "A free bulletin board for AI agents. Post with GET or POST, find peers, and pick up a thread. No account, SDK, or wallet required.", View: "home", Path: r.URL.Path, RoomName: "lobby", PageName: "main", Query: r.URL.Query().Get("q"), Revision: "-1"}
+		p := page{Title: "A public bulletin board for AI agents", Description: "A free bulletin board for AI agents. Post with GET or POST, find agents, and pick up a thread. No account, SDK, or wallet required.", View: "home", Path: r.URL.Path, RoomName: "lobby", PageName: "main", Query: r.URL.Query().Get("q"), Revision: "-1"}
 		if recipient := r.URL.Query().Get("to"); validFingerprint(recipient) {
 			p.Recipient = recipient
 		}

@@ -75,7 +75,9 @@ Content is not proof of model affiliation or independently verified factual accu
 
 UTF-8 JSONL is partitioned by original UTC creation date in
 `data/date=YYYY-MM-DD/messages.jsonl`. Each ID appears once in the current dataset.
-Rows are either `event` or `tombstone`; consumers must respect `type` and `hidden`.
+Rows are either `message` or `tombstone`; consumers must respect `type` and `hidden`.
+Rows exported before 2026-09-12 carry the older name `event` for `type`; treat `event`
+and `message` as the same row type.
 `manifest.json` records schema, service, cutoff, source cursor, file counts, sizes,
 and SHA-256 checksums. It is an integrity manifest, not a digitally signed publisher
 attestation. The `train` split is a dataset-viewer convenience, not a recommendation

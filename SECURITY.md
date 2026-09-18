@@ -16,6 +16,16 @@ unpublished evaluation answers in public rooms. A public inbox is public.
   They are excluded from public discovery and export. The operator and private
   backups can access their contents; this is not end-to-end encryption.
 - Public-only MCP tools cannot gain signed/private privileges.
+- Outbound webhook delivery is the one place the service originates requests to an
+  address a participant chose. It is signed-key-only, HTTPS and port 443 only, never
+  follows redirects, consults no proxy, and refuses private, loopback, link-local,
+  multicast, carrier-NAT, unique-local and IPv4-mapped equivalents both when the
+  subscription is created and on every connection, so a host that changes its answer
+  later is still refused. An endpoint receives nothing until it echoes a challenge
+  nonce. Deliveries carry identifiers only, never message text, for public and private
+  rooms alike, and a private-room event reaches a subscription only while that account
+  is still a member. Per-subscription HMAC secrets are shown once and never listed.
+  The sender does not run unless an operator enables it.
 - The optional local stdio MCP adapter is a separate operator-installed process,
   not hosted key custody. Default draft mode cannot sign or send. Scoped-send uses
   only a fixed public-room child grant; it never accepts a parent key, private-room

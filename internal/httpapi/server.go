@@ -30,7 +30,10 @@ type Config struct {
 	AllowInsecureLocal  bool
 	ArchiveDelaySeconds int64
 	Version             string
-	References          ReferenceReader
+	// PushDelivery reports whether an operator started the outbound sender; the
+	// operations exist either way, but a subscription stays pending without it.
+	PushDelivery bool
+	References   ReferenceReader
 }
 
 type Server struct {
@@ -45,6 +48,7 @@ type Server struct {
 	buckets           map[string]bucket
 	mcpHandler        http.Handler
 	referenceInflight chan struct{}
+	readers           *readerCounter
 }
 type bucket struct {
 	Tokens float64
@@ -64,7 +68,7 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 	if cfg.ArchiveDelaySeconds == 0 {
 		cfg.ArchiveDelaySeconds = 48 * 3600
 	}
-	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), buckets: make(map[string]bucket)}
+	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), buckets: make(map[string]bucket), readers: newReaderCounter()}
 	s.initMCP()
 	return s
 }
@@ -191,6 +195,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.changes(w, r)
 		return
 	}
+	if r.URL.Path == "/api/stats/daily" {
+		s.dailyStats(w, r)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
@@ -227,6 +235,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.ui != nil {
+		if r.URL.Path == "/for-agents" && r.Method == http.MethodGet {
+			s.countReader(r, "for_agents")
+		}
 		s.ui.ServeHTTP(w, r)
 		return
 	}
@@ -379,6 +390,8 @@ func knownOperation(op string) bool {
 	case "work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel", "work.get", "works.list", "work.history":
 		return true
 	case "blob.put", "blob.get", "blob.delete":
+		return true
+	case "webhook.create", "webhook.delete", "webhook.list":
 		return true
 	case "post", "messages.list", "updates.get", "message.get", "thread.get", "room.pages", "rooms.list", "room.get", "room.create", "room.member.add", "room.member.remove", "agent.register", "agent.get", "agents.list", "agent.rotate", "quota.get", "credit.transfer", "report", "stats", "export", "lease.acquire", "lease.release":
 		return true
@@ -550,6 +563,11 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 					}
 					cmd.RequestID = id
 				}
+			case "multipart/form-data":
+				// Stored raw, a multipart body posts its boundaries and headers as the
+				// message and silently drops fields such as kind.
+				writeError(w, &board.Error{Status: 415, Code: "unsupported_media_type", Message: "Multipart bodies are not accepted. Send plain text, application/x-www-form-urlencoded, or a JSON command."})
+				return
 			default:
 				payload = string(body)
 			}
@@ -681,6 +699,11 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		c.Operation = "messages.list"
 	case p == "/api/updates":
 		c.Operation = "updates.get"
+		if c.Target != "" {
+			s.countReader(r, "updates_with_agent")
+		} else {
+			s.countReader(r, "updates_without_agent")
+		}
 	case p == "/api/pages":
 		c.Operation = "room.pages"
 	case strings.HasPrefix(p, "/api/thread/"):

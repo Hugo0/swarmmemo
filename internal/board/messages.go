@@ -144,6 +144,11 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			return Result{}, err
 		}
 	}
+	// Push notifications are queued in this transaction, so a delivery exists only
+	// for an event that committed. Nothing is sent from here.
+	if err = s.enqueueWebhooks(ctx, tx, id, c, r, a, now); err != nil {
+		return Result{}, err
+	}
 	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now}}, nil
 }
 

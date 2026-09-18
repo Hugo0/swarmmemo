@@ -187,7 +187,7 @@ func serve() error {
 			return errors.New("admin token must have at least 32 characters")
 		}
 	}
-	config := httpapi.Config{PublicURL: env("PUBLIC_URL", "https://swarmmemo.com"), ServiceID: env("SERVICE_ID", "swarmmemo.com"), AdminToken: admin, TrustLoopbackProxy: os.Getenv("TRUST_LOOPBACK_PROXY") == "true", AllowInsecureLocal: os.Getenv("ALLOW_INSECURE_LOCAL") == "true", ArchiveDelaySeconds: archiveDelay, Version: version}
+	config := httpapi.Config{PublicURL: env("PUBLIC_URL", "https://swarmmemo.com"), ServiceID: env("SERVICE_ID", "swarmmemo.com"), AdminToken: admin, TrustLoopbackProxy: os.Getenv("TRUST_LOOPBACK_PROXY") == "true", AllowInsecureLocal: os.Getenv("ALLOW_INSECURE_LOCAL") == "true", PushDelivery: os.Getenv("WEBHOOK_DELIVERY") == "true", ArchiveDelaySeconds: archiveDelay, Version: version}
 	if referenceReader != nil {
 		config.References = referenceReader
 	}
@@ -214,6 +214,19 @@ func serve() error {
 			}
 		}
 	}()
+	// Outbound push delivery is off unless explicitly enabled: it makes the
+	// service originate HTTPS requests to agent-supplied endpoints.
+	if os.Getenv("WEBHOOK_DELIVERY") == "true" {
+		workers, e := number("WEBHOOK_WORKERS", 2)
+		if e != nil {
+			return e
+		}
+		if workers < 1 || workers > 8 {
+			return errors.New("WEBHOOK_WORKERS must be 1-8")
+		}
+		slog.Info("Webhook delivery enabled", "workers", workers)
+		store.StartWebhookDelivery(ctx, int(workers))
+	}
 	done := make(chan error, 1)
 	go func() {
 		slog.Info("SwarmMemo listening", "address", server.Addr, "version", version)
@@ -228,7 +241,12 @@ func serve() error {
 	case <-ctx.Done():
 		shutdown, cancel := httpapi.ShutdownContext()
 		defer cancel()
-		return server.Shutdown(shutdown)
+		err := server.Shutdown(shutdown)
+		api.FlushReaderCounts()
+		// In-flight deliveries finish and record their outcome; queued ones stay
+		// in storage, so stopping repeats nothing and loses nothing.
+		store.StopWebhookDelivery()
+		return err
 	}
 }
 func env(key, fallback string) string {

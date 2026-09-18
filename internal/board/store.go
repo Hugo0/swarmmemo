@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -63,6 +64,14 @@ type Store struct {
 	privateRateMu      sync.Mutex
 	privateRates       map[string]privateReadBucket
 	privateServiceRate privateReadBucket
+	// Outbound webhook delivery. webhookInsecure and webhookClient exist only for
+	// in-package tests; there is no configuration that reaches them, so no
+	// deployment can turn the address filter off.
+	webhookWG       sync.WaitGroup
+	webhookOnce     sync.Once
+	webhookClient   *http.Client
+	webhookPoll     time.Duration
+	webhookInsecure bool
 }
 
 const schema = `
@@ -235,7 +244,7 @@ func Open(path string, config Config) (*Store, error) {
 			}
 		}
 	}
-	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema); err != nil {
+	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema); err != nil {
 		return fail(err)
 	}
 	if err = migratePrivateRead(migration); err != nil {
@@ -402,6 +411,8 @@ func mutation(op string) bool {
 		return true
 	case "delegation.create", "delegation.revoke":
 		return true
+	case "webhook.create", "webhook.delete":
+		return true
 	}
 	return false
 }
@@ -442,6 +453,9 @@ func validateCommandFields(c Command) error {
 		"delegation.revoke":     "target data",
 		"delegation.get":        "target",
 		"delegations.list":      "cursor limit",
+		"webhook.create":        "data",
+		"webhook.delete":        "target",
+		"webhook.list":          "cursor limit",
 		"quota.get":             "",
 		"credit.transfer":       "target amount",
 		"report":                "message_id reason",
@@ -665,6 +679,10 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.changeDelegation(ctx, tx, c, a, now)
 	case "delegation.get", "delegations.list":
 		return s.readDelegation(ctx, tx, c, a, now)
+	case "webhook.create", "webhook.delete":
+		return s.changeWebhook(ctx, tx, c, a, now)
+	case "webhook.list":
+		return s.readWebhooks(ctx, tx, c, a, now)
 	case "quota.get":
 		return s.readQuota(ctx, tx, a, now)
 	case "credit.transfer":

@@ -127,5 +127,6 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.countMCPInitialize(r)
 	s.mcpHandler.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), peerContextKey{}, s.peer(r))))
 }

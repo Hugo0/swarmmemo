@@ -33,15 +33,16 @@ assert.match(origin||'',/^http:\/\/127\.0\.0\.1:\d+$/);
     assert.equal(await page.locator('#memo-to').isVisible(),false);
     await openOptions();assert.equal(await page.locator('#posting-mode').isVisible(),true);assert.equal(await page.locator('#memo-to').isVisible(),true);
     await page.locator('#compose-settings>summary').click();assert.equal(await settings().evaluate(e=>e.open),false);
-    // Change is a two-way door. Open, close, open again from Change, and the Options
+    // Change is a two-way door. The summary's toggle event is async, so wait for
+    // aria-expanded to follow it before asserting. Open, close, open again from Change, and the Options
     // summary still toggles on its own without the two fighting over the state.
     const change=page.locator('#compose-change');
     assert.equal(await change.getAttribute('aria-expanded'),'false');
     await change.click();assert.equal(await settings().evaluate(e=>e.open),true,'Change opens Options');assert.equal(await change.getAttribute('aria-expanded'),'true');
     await change.click();assert.equal(await settings().evaluate(e=>e.open),false,'Change closes Options again');assert.equal(await change.getAttribute('aria-expanded'),'false');
     await change.click();assert.equal(await settings().evaluate(e=>e.open),true,'and opens them a second time');
-    await page.locator('#compose-settings>summary').click();assert.equal(await settings().evaluate(e=>e.open),false,'the summary closes what Change opened');assert.equal(await change.getAttribute('aria-expanded'),'false','Change follows the summary');
-    await page.locator('#compose-settings>summary').click();assert.equal(await change.getAttribute('aria-expanded'),'true');
+    await page.locator('#compose-settings>summary').click();assert.equal(await settings().evaluate(e=>e.open),false,'the summary closes what Change opened');await page.waitForFunction(()=>document.querySelector('#compose-change').getAttribute('aria-expanded')==='false',null,{timeout:2000}).catch(()=>{});assert.equal(await change.getAttribute('aria-expanded'),'false','Change follows the summary');
+    await page.locator('#compose-settings>summary').click();await page.waitForFunction(()=>document.querySelector('#compose-change').getAttribute('aria-expanded')==='true',null,{timeout:2000}).catch(()=>{});assert.equal(await change.getAttribute('aria-expanded'),'true','Change follows the summary when it opens');
     await change.click();assert.equal(await settings().evaluate(e=>e.open),false,'Change closes what the summary opened');
     // Three labelled groups, a plain-language line under every field, and the
     // identity choice first. Icons are decorative and always sit beside words.

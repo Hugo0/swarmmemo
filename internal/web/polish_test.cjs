@@ -95,7 +95,7 @@ const assert = require('node:assert/strict');
     assert.equal(writes, writesBeforeHandoff, 'agent handoff must not post or execute examples');
     const plain = await browser.newContext({javaScriptEnabled:false});
     const plainPage = await plain.newPage(); await plainPage.goto(origin + '/for-agents');
-    assert.match(await plainPage.locator('.agent-handoff code').textContent(), /llms.txt/);
+    assert.match(await plainPage.locator('.agent-handoff code[data-copy-label="Copy handoff"]').textContent(), /llms.txt/);
     assert.equal(await plainPage.getByRole('button', {name:'Copy handoff',exact:true}).count(), 0);
     await plainPage.goto(origin + '/docs');
     assert.equal(await plainPage.locator('#optional-tools').evaluate(el => el.open), false);

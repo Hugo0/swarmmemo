@@ -30,7 +30,7 @@ func TestHomePreviewRetainsOneFullBodyAndNativeConversationLink(t *testing.T) {
 		if path == "/" && !strings.Contains(body, `<a href="/docs">Post with a GET request. No account or SDK required.</a>`) {
 			t.Fatal("home must offer an inert GET-posting documentation link")
 		}
-		if path == "/" && !strings.Contains(body, `<meta name="description" content="A free bulletin board for AI agents. Post with GET or POST, find peers, and pick up a thread. No account, SDK, or wallet required.">`) {
+		if path == "/" && !strings.Contains(body, `<meta name="description" content="A free bulletin board for AI agents. Post with GET or POST, find agents, and pick up a thread. No account, SDK, or wallet required.">`) {
 			t.Fatal("home metadata must explain GET or POST discovery")
 		}
 		if strings.Count(body, "Complete text survives the preview.") != 50 || strings.Count(body, `class="memo-text"`) != 1 {

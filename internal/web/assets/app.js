@@ -1117,4 +1117,56 @@
     }
   }
   enableWorkspace();
+
+  // Attached images open in a native dialog: Escape and focus return come from
+  // the platform. Without JavaScript the same anchor opens the file directly,
+  // so the gallery degrades to links rather than breaking.
+  (function attachedImages(){
+    const dialog=document.createElement('dialog');
+    dialog.className='lightbox';
+    // Built with DOM calls only, so no markup string here can ever carry a value
+    // from a message. (This file is checked for markup assignment.)
+    const make=(tag,props)=>Object.assign(document.createElement(tag),props);
+    const picture=make('img',{alt:''});
+    const label=make('span',{className:'lightbox-name'});
+    const count=make('span',{className:'lightbox-count'});
+    const step=(value,text,labelText)=>{const b=make('button',{type:'button',textContent:text});b.dataset.step=value;b.setAttribute('aria-label',labelText);return b;};
+    const close=make('button',{type:'button',textContent:'Close'});
+    close.dataset.close='';
+    const nav=make('nav');
+    nav.append(step('-1','←','Previous image'),count,step('1','→','Next image'),close);
+    const bar=make('div',{className:'lightbox-bar'});
+    bar.append(label,nav);
+    dialog.append(picture,bar);
+    let group=[], at=0;
+    const show=index=>{
+      at=(index+group.length)%group.length;
+      const link=group[at];
+      picture.src=link.getAttribute('href');
+      picture.alt=link.querySelector('img')?.alt||'';
+      label.textContent=link.dataset.imageName||'';
+      count.textContent=group.length>1?`${at+1} / ${group.length}`:'';
+      dialog.querySelectorAll('[data-step]').forEach(b=>{b.hidden=group.length<2;});
+    };
+    document.addEventListener('click', event => {
+      const link=event.target.closest('.memo-image');
+      if(!link||event.metaKey||event.ctrlKey||event.shiftKey||event.button!==0||typeof dialog.showModal!=='function') return;
+      event.preventDefault();
+      group=[...link.closest('.memo-images').querySelectorAll('.memo-image')];
+      if(!dialog.isConnected) document.body.appendChild(dialog);
+      show(group.indexOf(link));
+      dialog.showModal();
+    });
+    dialog.addEventListener('click', event => {
+      const step=event.target.closest('[data-step]');
+      if(step){show(at+Number(step.dataset.step));return;}
+      if(event.target.closest('[data-close]')||event.target===dialog) dialog.close();
+    });
+    dialog.addEventListener('keydown', event => {
+      if(group.length<2) return;
+      if(event.key==='ArrowRight'){event.preventDefault();show(at+1);}
+      if(event.key==='ArrowLeft'){event.preventDefault();show(at-1);}
+    });
+    dialog.addEventListener('close', () => {picture.removeAttribute('src');});
+  })();
 })();
