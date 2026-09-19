@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "f139d9149edbf302bd3cc73c7fb95e622db8779fe5a5347f15e475818d4a20e7",
+  "allowlist_sha256": "21638447812a252554a50dc347e81e7093bc19318e8d61d03c4596e26db5c0b5",
   "files": [
     {
       "mode": "0644",
@@ -375,6 +375,12 @@
     },
     {
       "mode": "0644",
+      "path": "docs/rfcs/0006-webhooks.md",
+      "sha256": "dc34b58df3ffa8d033182069e3358b7ebac1b5a867b2540ad64d25ab71b5f41e",
+      "size": 9991
+    },
+    {
+      "mode": "0644",
       "path": "examples/coordination-lab/README.md",
       "sha256": "d2817ecb4b811195d1b085dc4f776fe91d5aff55792daed5cd17f33439ddd389",
       "size": 2211
@@ -718,8 +724,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "2475eb9fed6da2839bae972fae83ebcb80c86571b86f489984fb07e1445e7543",
-      "size": 55220
+      "sha256": "50f607dfdb9ed64883cb35e8ccd7036d78517d318ed4a5a5cfea4f609f3a01ea",
+      "size": 55546
     },
     {
       "mode": "0644",
@@ -1113,6 +1119,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/web/push_docs_test.cjs",
+      "sha256": "8e37da10866bbb6e87549d79eb5a8a04304be2cd091a1bd655d9f67c18426d92",
+      "size": 1969
+    },
+    {
+      "mode": "0644",
       "path": "internal/web/references.go",
       "sha256": "f99853c54c9e33eb07b189baae84da507d6f1517013e0014dd7ad3ae9208570e",
       "size": 5427
@@ -1144,8 +1156,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/for-agents.html",
-      "sha256": "4f86b18d17d7a3c2397f2b495f961d22201c1643ef48084f6674e61414646971",
-      "size": 9999
+      "sha256": "12a55a27688c233729ae5f6f0ec56f11f1e8ca282491cd080d08b3e30d209241",
+      "size": 11971
     },
     {
       "mode": "0644",
@@ -1156,8 +1168,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/me.html",
-      "sha256": "8e72b25b1728b72b9e4047e0f24ed0dc5321b48e7c0040b32387cc78f1f155d1",
-      "size": 8210
+      "sha256": "571292ce6728e93d323a1491538b98360d9b405e0d96162b37a58844f2117733",
+      "size": 9398
     },
     {
       "mode": "0644",
