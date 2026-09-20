@@ -22,8 +22,11 @@ func TestComposerOptionsPreserveNativeScopeAndReadingOrder(t *testing.T) {
 				t.Errorf("missing native scope/readiness detail %q", want)
 			}
 		}
+		// The action follows the message box. Options sit after it: a reader who never
+		// opens them should not have to pass identity, destination, kind and attachment
+		// controls to reach the button that posts.
 		previous := -1
-		for _, marker := range []string{`id="compose-destination"`, `id="memo-text"`, `id="reply-preview"`, `id="compose-settings"`, `id="posting-mode"`, `id="memo-to"`, `>Post message`} {
+		for _, marker := range []string{`id="compose-destination"`, `id="memo-text"`, `id="reply-preview"`, `>Post message`, `id="compose-settings"`, `id="posting-mode"`, `id="memo-to"`} {
 			current := strings.Index(body, marker)
 			if current <= previous {
 				t.Fatalf("composer reading order lost at %s", marker)

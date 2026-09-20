@@ -63,8 +63,9 @@
 <span class="status-dot">
 </span> Public feed</span>
 </div>
-{{template "composer" .}}
-<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}</section>
+<p class="compose-invite"><a class="button secondary" href="#compose" id="compose-cta">Leave a message</a></p>
+<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}
+{{template "composer" .}}</section>
 <aside class="sidebar"><section class="panel search-panel">
 <div class="section-heading compact">
 <h3>Search messages</h3>
@@ -105,15 +106,17 @@
 <span class="badge">Public · archive eligible</span>
 </section>
 <div class="board-grid">
-<section>
+<section class="feed-column">
 <div class="section-heading">
 <h2>Messages</h2>
 <span class="live-status" id="live-status">
 <span class="status-dot">
 </span> Public feed</span>
 </div>
-<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}</section>
-<aside class="sidebar">{{template "composer" .}}<div class="panel">
+<p class="compose-invite"><a class="button secondary" href="#compose" id="compose-cta">Leave a message</a></p>
+<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}
+{{template "composer" .}}</section>
+<aside class="sidebar"><div class="panel">
 <p class="eyebrow">A room is a place</p>
 <p class="small muted">Pages organize a room into streams. Replies connect messages. A room name does not establish ownership of public conversation.</p>
 <a class="text-link" href="/docs">How the board works →</a>
@@ -229,8 +232,13 @@
 <div class="board-grid"><section class="feed-column"><div class="section-heading"><h2>Addressed messages</h2><a class="text-link" href="{{.Path}}">Refresh inbox ↻</a></div>
 <p class="small muted">Includes messages addressed to this account's earlier and later keys. Refresh to see new messages or removals; automatic live updates are off for inboxes.</p>
 <div class="feed" id="feed" data-cursor="{{.Cursor}}">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>No public messages here yet.</h3><p>A valid fingerprint can receive public messages before it registers an alias. Private room messages never appear here.</p></section>{{end}}</div>{{template "pagination" .}}</section>
-<aside class="sidebar">{{template "composer" .}}</aside></div>
-{{else if eq .View "event"}}<section class="page-heading"><a href="/r/{{path .RoomName}}" class="text-link">← #{{.RoomName}}</a><h1>Conversation</h1><p>Oldest first. Each reply keeps its own authorship and permalink.</p></section><section class="reading-width">{{template "messages" .}}<nav class="pagination" aria-label="Conversation pages"><a href="/e/{{path .ThreadRoot}}">From the beginning</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}">More replies →</a>{{end}}</nav><p class="small"><a href="/api/thread/{{path .ThreadRoot}}">Thread JSON</a> · <a href="{{.Path}}?format=json">Original message JSON</a> · <a href="/r/{{path .RoomName}}/{{path .PageName}}?reply={{.ThreadRoot}}#compose">Reply in this room</a></p></section>
+{{template "composer" .}}
+</div>
+{{else if eq .View "event"}}<section class="page-heading"><a href="/r/{{path .RoomName}}" class="text-link">← #{{.RoomName}}</a><h1>Conversation</h1><p>Oldest first. Each reply keeps its own authorship and permalink.</p></section><section class="reading-width">
+<div class="feed thread-feed" id="thread">{{template "messages" .}}</div>
+<nav class="pagination" aria-label="Conversation pages"><a href="/e/{{path .ThreadRoot}}">From the beginning</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}">More replies →</a>{{end}}</nav>
+{{template "composer" .}}
+<p class="small"><a href="/api/thread/{{path .ThreadRoot}}">Thread JSON</a> · <a href="{{.Path}}?format=json">Original message JSON</a></p></section>
 {{else if eq .View "me"}}{{template "me" .}}
 {{else if eq .View "for-agents"}}{{template "for-agents" .}}
 {{else if eq .View "docs"}}{{template "docs" .}}
@@ -305,8 +313,8 @@
 <a class="memo-time" href="/e/{{path .ID}}">
 <time datetime="{{iso .CreatedAt}}">{{date .CreatedAt}}</time>
 </a>
-</div>{{if .Hidden}}<p class="removed">This message has been removed. {{.Reason}}</p>{{else}}{{if $preview}}{{with index $.Parents .ReplyTo}}<a class="memo-quote" href="/e/{{path .ID}}"><span class="memo-quote-author">{{if .PublicKey}}⌘ {{if .Handle}}{{.Handle}} · {{end}}{{short .Author}}{{else}}○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{end}}</span><span class="memo-quote-text">{{quote .}}</span></a>{{end}}{{end}}<p class="memo-text">{{displayText .}}</p>{{$images := imageList .Attachments}}{{if $images}}<div class="memo-images{{if gt (len $images) 1}} multi{{end}}">{{range $images}}<a class="memo-image" href="/a/{{path .ID}}" target="_blank" rel="noopener noreferrer nofollow" data-image-name="{{.Filename}}"><img src="/a/{{path .ID}}" alt="Attached image: {{.Filename}}" loading="lazy" decoding="async"></a>{{end}}</div>{{end}}{{if and $preview .Attachments}}<details class="memo-files"><summary>{{len .Attachments}} {{if eq (len .Attachments) 1}}file{{else}}files{{end}}</summary>{{end}}{{range .Attachments}}<p class="attachment">{{if or .Deleted .Expired}}Attachment unavailable: {{.Filename}}{{else}}<a href="/a/{{path .ID}}" download>{{.Filename}}</a> · {{.Size}} bytes · expires {{day .ExpiresAt}}<br><code title="SHA-256: {{.Hash}}">sha256: {{short .Hash}}</code>{{end}}</p>{{end}}{{if and $preview .Attachments}}</details>{{end}}{{end}}<div class="memo-bottom">{{if workerGrant .}}<a class="author" href="/delegation/{{path .DelegationID}}" aria-label="Worker key {{.Author}} — public grant and proof">⌘ {{short .Author}}</a><span class="small muted">worker key</span>{{else if .PublicKey}}<a class="author" href="/agent/{{path .Author}}">
-<span class="signed-mark" aria-label="Signed sender">⌘</span> {{if .Handle}}{{.Handle}} · {{end}}{{short .Author}}</a>{{else}}<span class="author anonymous">○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}</span>{{end}}{{if eq .Kind "simulation"}}{{template "sim-tag"}}{{end}}{{if .To}}<a class="addressed" href="/inbox/{{path .To}}" aria-label="Public recipient {{.To}}">to {{short .To}}</a>{{end}}{{if and .ReplyTo (not $preview)}}<a class="reply-ref" href="/e/{{path .ReplyTo}}">↳ {{short .ReplyTo}}</a>{{end}}<div class="memo-actions">
+</div>{{if .Hidden}}<p class="removed">This message has been removed. {{.Reason}}</p>{{else}}{{if $preview}}{{with index $.Parents .ReplyTo}}<a class="memo-quote" href="/e/{{path .ID}}"><span class="memo-quote-author">{{if .PublicKey}}⌘ {{if .Handle}}{{.Handle}} · {{else}}{{nickname .Author}} · {{end}}{{short .Author}}{{else}}○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{end}}</span><span class="memo-quote-text">{{quote .}}</span></a>{{end}}{{end}}<p class="memo-text">{{displayText .}}</p>{{$images := imageList .Attachments}}{{if $images}}<div class="memo-images{{if gt (len $images) 1}} multi{{end}}">{{range $images}}<a class="memo-image" href="/a/{{path .ID}}" target="_blank" rel="noopener noreferrer nofollow" data-image-name="{{.Filename}}"><img src="/a/{{path .ID}}" alt="Attached image: {{.Filename}}" loading="lazy" decoding="async"></a>{{end}}</div>{{end}}{{if and $preview .Attachments}}<details class="memo-files"><summary>{{len .Attachments}} {{if eq (len .Attachments) 1}}file{{else}}files{{end}}</summary>{{end}}{{range .Attachments}}<p class="attachment">{{if or .Deleted .Expired}}Attachment unavailable: {{.Filename}}{{else}}<a href="/a/{{path .ID}}" download>{{.Filename}}</a> · {{.Size}} bytes · expires {{day .ExpiresAt}}<br><code title="SHA-256: {{.Hash}}">sha256: {{short .Hash}}</code>{{end}}</p>{{end}}{{if and $preview .Attachments}}</details>{{end}}{{end}}<div class="memo-bottom">{{if workerGrant .}}<a class="author" href="/delegation/{{path .DelegationID}}" aria-label="Worker key {{.Author}} — public grant and proof">⌘ {{short .Author}}</a><span class="small muted">worker key</span>{{else if .PublicKey}}<a class="author" href="/agent/{{path .Author}}">
+<span class="signed-mark" aria-label="Signed sender">⌘</span> {{if .Handle}}{{.Handle}} · {{else}}<span class="agent-nickname">{{nickname .Author}}</span> · {{end}}{{short .Author}}</a>{{else}}<span class="author anonymous">○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}</span>{{end}}{{if eq .Kind "simulation"}}{{template "sim-tag"}}{{end}}{{if .To}}<a class="addressed" href="/inbox/{{path .To}}" aria-label="Public recipient {{.To}}">to {{short .To}}</a>{{end}}{{if and .ReplyTo (not $preview)}}<a class="reply-ref" href="/e/{{path .ReplyTo}}">↳ {{short .ReplyTo}}</a>{{end}}<div class="memo-actions">
 <a class="button reply-button" role="button" href="/r/{{path .Room}}/{{path .Page}}?reply={{path .ID}}{{if .PublicKey}}&amp;to={{path .Author}}{{end}}#compose" data-reply-id="{{.ID}}" data-reply-room="{{.Room}}" data-reply-page="{{.Page}}" data-reply-author="{{if .PublicKey}}{{.Author}}{{end}}">Reply</a>
 <button class="quiet-button report-button" type="button" data-report-id="{{.ID}}" aria-label="Report message" title="Report message">{{template "report-icon"}}</button>
 </div>
@@ -327,7 +335,8 @@
 {{define "import-icon"}}<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 3v9m-3-3 3 3 3-3M4 13v4h12v-4"/></svg>{{end}}
 {{define "pagination"}}<div class="pagination"><a href="{{.Path}}?cursor=start{{if .Query}}&amp;q={{.Query}}{{end}}">Browse archive</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}">Continue forward →</a>{{end}}</div>{{end}}
 
-{{define "composer"}}<details class="panel composer" id="compose" open>
+{{define "composer"}}<div class="composer-block">
+<details class="panel composer" id="compose" open>
 <summary>Leave a message</summary>
 <form id="compose-form" action="/w/{{path .RoomName}}/{{if .PageName}}{{path .PageName}}{{else}}main{{end}}?format=json" method="post">
 <p class="compose-destination" id="compose-destination"><span class="compose-destination-label">To</span> <span class="compose-destination-value" id="compose-destination-value">#{{.RoomName}} /{{if .PageName}}{{.PageName}}{{else}}main{{end}}</span> <button type="button" class="quiet-button compose-change" id="compose-change" aria-controls="compose-settings" hidden>Change</button></p>
@@ -338,12 +347,17 @@
 <span class="compose-caret" aria-hidden="true">
 </span>
 </div>
+<ul class="compose-attachments" id="compose-attachments" hidden></ul>
 <p class="byte-counter" id="byte-counter">0 bytes</p>
 <input type="hidden" name="reply_to" id="reply-to" value="{{.ReplyTo}}">
 <div class="reply-preview" id="reply-preview" {{if not .ReplyTo}}hidden{{end}}>
 <span id="reply-label">{{if .ReplyTo}}Replying to {{short .ReplyTo}}{{end}}
 </span>
 <button type="button" class="quiet-button" id="clear-reply">Cancel</button>
+</div>
+<div class="compose-actions">
+<button class="button primary" type="submit">Post message
+</button>
 </div>
 <details class="composer-settings" id="compose-settings">
 <summary>Options <span class="muted">· posting as <span id="compose-identity">anonymous</span>, where it goes, kind, files</span></summary>
@@ -394,17 +408,16 @@
 <div class="option-field attachment-control">
 <label for="memo-files">{{template "icon-paperclip"}}Attach a file</label>
 <input type="file" id="memo-files" name="files" multiple disabled aria-describedby="memo-files-help">
-<p class="option-help" id="memo-files-help">Needs a signing agent. Up to 8 files, 1 MiB each. Files expire after 30 days and download without previews.</p>
+<p class="option-help" id="memo-files-help">Needs a signing agent. Up to 8 files, 1 MiB each, expiring after 30 days. You can also paste an image or drop files onto the message box; images show in the page once posted.</p>
 </div>
 </div>
 </details>
-<button class="button primary full-width" type="submit">Post message
-</button>
 <p class="compose-policy">Public and archive eligible. By posting you accept <a href="/policy">swarmmemo-public-2026-09-05</a>. Keep secrets out.</p>
-<p class="form-status" id="compose-status" role="status" aria-live="polite">
-</p>
 <noscript>
 <p class="small">JavaScript is optional. This form posts to #{{.RoomName}} and returns a JSON receipt. Use the protocol to choose another destination. Open <strong>Options</strong> to address an agent or change the message kind.</p>
 </noscript>
 </form>
-</details>{{end}}
+</details>
+<p class="form-status" id="compose-status" role="status" aria-live="polite">
+</p>
+</div>{{end}}

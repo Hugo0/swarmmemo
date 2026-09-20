@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "21638447812a252554a50dc347e81e7093bc19318e8d61d03c4596e26db5c0b5",
+  "allowlist_sha256": "db73fe14720b41e6bc11e65a8d7eebf1567654cf3c724852b2bef90cc29aaa0d",
   "files": [
     {
       "mode": "0644",
@@ -946,8 +946,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/app.js",
-      "sha256": "65bd3a05bfa397c24eb7e47f464689bdcdc6d57cecd4e5d130976f8750dcb6c3",
-      "size": 91945
+      "sha256": "8ca833f1c37e9f9cbd0a58a86e5d4a66ded87b999e318a6845efdc76d1329a3c",
+      "size": 97721
     },
     {
       "mode": "0644",
@@ -958,14 +958,14 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/style.css",
-      "sha256": "977bb4be50fcde1060afd23d8454d161276f04bbd5da90112594b54d60853bc1",
-      "size": 44244
+      "sha256": "29cda2cef836489f740b9f027e12e5945383afd810eba5dd5ae1282f5bda5222",
+      "size": 46778
     },
     {
       "mode": "0644",
       "path": "internal/web/browser_identity_test.cjs",
-      "sha256": "5be40b172e16e39a9fd614979cc3e019fecdbf98eb196f8a7b3195769fb26284",
-      "size": 18173
+      "sha256": "2942ed8e9ba9f933690573d51c004deebf882d1573c2f6451f8b52b1ce9c3235",
+      "size": 18271
     },
     {
       "mode": "0644",
@@ -982,8 +982,8 @@
     {
       "mode": "0644",
       "path": "internal/web/composer_conversion_test.cjs",
-      "sha256": "0925e33862374ffc4571b96bb7ebe3e3fb9daf9641d3661e49274bd36b57a44b",
-      "size": 17517
+      "sha256": "e13e2897ad2163247ac1bb15928c249e84c677f407758b6e6927079f139feb39",
+      "size": 17764
     },
     {
       "mode": "0644",
@@ -994,14 +994,14 @@
     {
       "mode": "0644",
       "path": "internal/web/composer_options_test.cjs",
-      "sha256": "19c21138829de740894e7b500a6a8c4b166d5ffedf17ce1dfad77bc7966f8daa",
-      "size": 17389
+      "sha256": "d3541421eac440029bdc1671c7088323070f42f6ac554492c5e8060578d9b831",
+      "size": 17522
     },
     {
       "mode": "0644",
       "path": "internal/web/composer_options_test.go",
-      "sha256": "96ccecdb6cf9c5f6377cfd65940c409c5027218fb9ba9a0be2d04aeea1a88e61",
-      "size": 4403
+      "sha256": "a6598b1b1b006dee6f33b3bcc1ce6ac24bda5fd3265cf96f9e5365ab1e662075",
+      "size": 4614
     },
     {
       "mode": "0644",
@@ -1066,8 +1066,8 @@
     {
       "mode": "0644",
       "path": "internal/web/inbox_test.cjs",
-      "sha256": "d423ca9cf54cd69a4009a3072a56286ba24573c498ba1dc77ecf351042d9727b",
-      "size": 9917
+      "sha256": "3d78eef2c6671ec8156b57718b23550ad3cdc8a7141a4b707cbb194e575babc5",
+      "size": 10062
     },
     {
       "mode": "0644",
@@ -1098,6 +1098,24 @@
       "path": "internal/web/migration.go",
       "sha256": "5eae772164d604fd5b96466254abc46e91cb92b8af7c65bcabbc38af4b375730",
       "size": 3724
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/names.go",
+      "sha256": "9f778d86e80a42cfe9d69221dbfda4f92eaa7f0f0c963f4eae619fb1b6ada08e",
+      "size": 2572
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/names_test.go",
+      "sha256": "1d949c09422b379e222a73bd72f9b7e19267f38322f400aa5711b26dc385f4c1",
+      "size": 2606
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/nicknames_test.cjs",
+      "sha256": "8204e901385585ac7bca980dcf5619357ba4b242cae5ded94af2ee5eb517ab41",
+      "size": 3389
     },
     {
       "mode": "0644",
@@ -1174,8 +1192,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/page.html",
-      "sha256": "b29e9aca304baacdb01c4147e2e1b3bd8408098a23ea5169ec5b44fc1642142b",
-      "size": 33686
+      "sha256": "fba9c88dbef3dc31e2a8d4f62a24301e93de1a860b639c61646d0e87b2bea84f",
+      "size": 34168
     },
     {
       "mode": "0644",
@@ -1191,9 +1209,15 @@
     },
     {
       "mode": "0644",
+      "path": "internal/web/thread_reply_test.cjs",
+      "sha256": "be1d7b8ec697066b99ccd6e57ed8e98a5e79cfef1e02ffa78490e57afbf9d094",
+      "size": 7969
+    },
+    {
+      "mode": "0644",
       "path": "internal/web/web.go",
-      "sha256": "4c594dea7f4e3069d53aba5637f31b0829749291b100cf38a0f5d61ea8c8adeb",
-      "size": 20453
+      "sha256": "b416a874f9a106caabab97361aac01df149c395dd13e3c8dff360457ec8e153f",
+      "size": 20852
     },
     {
       "mode": "0644",

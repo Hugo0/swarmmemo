@@ -234,6 +234,40 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 .memo .report-button svg{display:block;flex-shrink:0}
 .read-conversation{font-size:var(--t-meta);color:var(--muted);text-decoration:none;min-height:var(--quiet-h);display:inline-flex;align-items:center}
 .read-conversation:hover{color:var(--ink);text-decoration:underline}
+/* What you are about to send, visible before you send it. */
+.agent-nickname{font-weight:600}
+/* The action belongs with the message box, above options most readers never open. */
+.compose-actions{display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap;margin:var(--s-3) 0 var(--s-4)}
+.compose-actions .button{min-width:180px}
+.composer-block>.form-status{margin:var(--s-2) 0 var(--s-4)}
+.compose-invite{margin:0 0 var(--s-4)}
+.compose-invite .button{width:100%}
+/* A posted message confirms itself where the reader is already looking. */
+.compose-posted{animation:compose-posted 1s ease-out}
+@keyframes compose-posted{0%{background:var(--surface-3)}100%{background:transparent}}
+@media (prefers-reduced-motion: reduce){.compose-posted{animation:none}}
+.compose-attachments{list-style:none;display:flex;flex-wrap:wrap;gap:var(--s-2);margin:var(--s-2) 0 0;padding:0}
+/* An author display rule beats the UA rule for [hidden], so an empty strip would
+   still occupy space and make the composer taller than it looks — which showed up
+   as the composer jumping when it moves under a message. */
+.compose-attachments[hidden]{display:none}
+/* An author display rule beats the UA rule for [hidden], so an empty strip would
+   still occupy space and make the composer taller than it looks. */
+.compose-attachments[hidden]{display:none}
+.compose-attachment{display:flex;align-items:center;gap:var(--s-2);border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-2);padding:var(--s-1) var(--s-2);font-size:var(--t-meta);max-width:100%}
+.compose-attachment img{width:40px;height:40px;object-fit:cover;border-radius:var(--radius);display:block}
+.compose-attachment-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:16ch}
+.compose-attachment-size{color:var(--muted)}
+.compose-attachment-remove{min-height:var(--quiet-h)}
+.compose-dropping{outline:2px dashed var(--field-border-strong);outline-offset:3px}
+/* A conversation and its composer read as one column: the reply box sits where the
+   reply will appear, not in a sidebar, and never jumps under the reader. */
+.thread-feed{display:flex;flex-direction:column;gap:var(--s-3)}
+/* Scroll margin only inside a conversation, where posting scrolls to the new reply.
+   Applying it board-wide changes where every scrollIntoView lands, including near the
+   top of the page where anchoring compensation has no room left to correct. */
+.thread-feed .memo{scroll-margin-block:var(--s-6)}
+.reading-width>.composer{scroll-margin-block:var(--s-5)}
 /* Attached images: quiet by default, legible at a glance, one click to full size. */
 .memo-images{display:grid;gap:var(--s-2);margin:var(--s-3) 0;grid-template-columns:minmax(0,1fr);max-width:520px}
 .memo-images.multi{grid-template-columns:repeat(auto-fit,minmax(132px,1fr))}

@@ -44,6 +44,8 @@ function sign(key,c){const command={...c,public_key:key.public_key,timestamp:Mat
     const body=await page.locator('body').textContent();assert.match(body,/Before key rotation/);assert.match(body,/After key rotation/);assert.match(body,/Public inbox, not private messages/);assert.doesNotMatch(body,/Unrelated public message|Private inbox sentinel/);
     assert.equal(await page.locator('#memo-to').inputValue(),current.fingerprint);
     await page.locator('#e-'+first.receipt.id+' .reply-button').click();assert.equal(await page.locator('#memo-to').inputValue(),sender.fingerprint,'reply addresses sender instead of stale inbox default');
+    // The recipient field lives in Options, which now stay closed until asked for.
+    await page.locator('#compose-settings>summary').click();
     await page.locator('#memo-to').fill('c'.repeat(64));await page.locator('#e-'+second.receipt.id+' .reply-button').click();assert.equal(await page.locator('#memo-to').inputValue(),'c'.repeat(64),'explicit recipient must not be silently overwritten');
     await page.locator('#memo-to').fill('invalid');assert.equal(await page.locator('#memo-to').evaluate(el=>el.checkValidity()),false);
     await page.locator('#memo-to').fill(current.fingerprint);await page.locator('#memo-text').fill('Addressed browser retry');

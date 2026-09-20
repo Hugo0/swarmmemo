@@ -436,6 +436,58 @@
       openTimer=setTimeout(()=>{openTimer=0;if(!window.getSelection()?.toString())location.assign('/e/'+path(id));},220);
     });
   }
+  // Pasting a screenshot or dropping a file is the same act as choosing one, so both
+  // feed the existing file input rather than a second upload path. The strip below the
+  // message box shows what is attached, because a file you cannot see is a file you
+  // forget you attached.
+  function attachmentStrip() {
+    const input = $('memo-files'), strip = $('compose-attachments');
+    if (!input || !strip) return;
+    for (const url of strip.querySelectorAll('img')) URL.revokeObjectURL(url.src);
+    strip.replaceChildren();
+    const files = Array.from(input.files || []);
+    strip.hidden = files.length === 0;
+    files.forEach((file, index) => {
+      const item = document.createElement('li');
+      item.className = 'compose-attachment';
+      if (/^image\//.test(file.type)) {
+        const thumb = document.createElement('img');
+        thumb.src = URL.createObjectURL(file); thumb.alt = ''; thumb.loading = 'lazy';
+        item.append(thumb);
+      } else {
+        item.append(node('span', 'compose-attachment-icon', '📎'));
+      }
+      item.append(node('span', 'compose-attachment-name', file.name || 'pasted image'));
+      item.append(node('span', 'compose-attachment-size', Math.max(1, Math.round(file.size / 1024)) + ' KiB'));
+      const remove = document.createElement('button');
+      remove.type = 'button'; remove.className = 'quiet-button compose-attachment-remove';
+      remove.textContent = 'Remove'; remove.setAttribute('aria-label', 'Remove ' + (file.name || 'pasted image'));
+      remove.addEventListener('click', () => {
+        const kept = new DataTransfer();
+        Array.from(input.files || []).forEach((f, i) => {if (i !== index) kept.items.add(f);});
+        input.files = kept.files; attachmentStrip();
+      });
+      item.append(remove);
+      strip.append(item);
+    });
+  }
+  function addAttachments(incoming) {
+    const input = $('memo-files');
+    if (!input || !incoming.length) return false;
+    if (input.disabled) {toast('Attaching needs a signing agent. Choose remembered identity in Options first.'); return false;}
+    const merged = new DataTransfer();
+    for (const file of Array.from(input.files || [])) merged.items.add(file);
+    let added = 0;
+    for (const file of incoming) {
+      if (merged.items.length >= 8) {toast('Up to 8 files per message.'); break;}
+      if (file.size > 1048576) {toast((file.name || 'That image') + ' is over 1 MiB and was not attached.'); continue;}
+      merged.items.add(file); added++;
+    }
+    if (!added) return false;
+    input.files = merged.files; attachmentStrip();
+    toast(added === 1 ? 'Attached ' + (incoming[0].name || 'pasted image') + '.' : 'Attached ' + added + ' files.');
+    return true;
+  }
   async function uploadFiles(form, room, key = identity) {
     const files = Array.from(form.elements.files?.files || []); if (!files.length) return [];
     if (!key) throw Error('Choose remembered identity before attaching files. Anonymous posts cannot attach files.');
@@ -489,6 +541,7 @@
   }
   // A brief settle marks the message that just arrived; motion is a CSS concern and
   // is dropped entirely under prefers-reduced-motion.
+  const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
   function flashArrival(id) {
     const element = locateMemo(id, false); if (!element) return;
     element.classList.remove('memo-arrived'); void element.offsetWidth; element.classList.add('memo-arrived');
@@ -631,7 +684,10 @@
     if (files) context.push(files + (files === 1 ? ' file selected' : ' files selected'));
     $('compose-context').textContent = context.join(' · ');
     $('compose-context').hidden = !context.length;
-    if (initial) $('compose-settings').open = room !== 'lobby' || page !== 'main' || !!fields.reply_to.value || !!context.length;
+    // Options stay closed on arrival. Another room, or answering a message, is not a
+    // reason to unfold identity, destination, kind and attachment controls at a reader:
+    // the destination line above and this summary already say where the message goes.
+    if (initial) $('compose-settings').open = false;
   }
   async function rememberedSigner() {
     return credentialSection(async()=>{
@@ -740,7 +796,7 @@
       const statusElement = $('compose-status');
       status('compose-status', '');
       statusElement.classList.add('success');
-      statusElement.append(node('strong', 'receipt-headline', result.receipt.duplicate ? 'Already posted.' : 'Message posted.'));
+      statusElement.append(node('strong', 'receipt-headline', result.receipt.duplicate ? '✓ Already posted' : '✓ Posted'));
       statusElement.append(node('span', 'receipt-id', 'Accepted' + (result.receipt.duplicate ? ' (original receipt)' : '') + ': ' + result.receipt.id));
       const receiptActions = node('span', 'receipt-actions');
       const memoPath = '/e/' + path(result.receipt.id);
@@ -751,24 +807,63 @@
       // The composer stays where it was written so the receipt and the new reply are
       // both in view, but it is no longer addressed at the parent: say so.
       if (composeSummary && composeElement?.classList.contains('compose-inline')) composeSummary.textContent = composeSummaryLabel;
-      form.elements.text.value = ''; form.elements.reply_to.value = ''; if(form.elements.files)form.elements.files.value=''; completedUploads.delete(form); $('reply-preview').hidden = true; pendingPost = null; updateCount(); updateComposerContext();
+      form.elements.text.value = ''; form.elements.reply_to.value = ''; if(form.elements.files)form.elements.files.value=''; attachmentStrip(); completedUploads.delete(form); $('reply-preview').hidden = true; pendingPost = null; updateCount(); updateComposerContext();
       toast('Message posted. A new thread for someone to find.');
       void showPublicHandoff(result.receipt, command, handoffGeneration);
       if (document.body.dataset.view !== 'inbox') try {
         const fresh = await fetch('/api/messages?room=' + path(command.room) + '&page=' + path(command.page) + '&limit=20').then(r => r.json());
+        const threadHost = $('thread');
         for (const event of fresh.messages || []) {
-          if (event.id !== result.receipt.id || !publicFeedMatches(event)) continue;
+          // A thread page has no #feed, so the feed matcher rejects everything there;
+          // on it the receipt id is the only filter that matters.
+          if (event.id !== result.receipt.id) continue;
+          if (!threadHost && !publicFeedMatches(event)) continue;
           // A reply written under its parent appears under that parent, where the
           // reader is looking, instead of only at the top of the feed.
+          const thread = threadHost;
           if (host && host.isConnected && repliedTo === host.dataset.messageId && !locateMemo(event.id, false)) {
             const inline = eventElement(event); inline.classList.add('memo-inline-reply');
             if (composeElement && composeElement.parentElement === host) composeElement.before(inline); else host.append(inline);
+          } else if (thread) {
+            // A conversation reads oldest first, so a reply belongs at the end of it
+            // rather than at the top of a feed sorted the other way.
+            if (!locateMemo(event.id, false)) thread.append(eventElement(event));
           } else addEvent($('feed'), event);
           flashArrival(event.id);
+          // A reply is read in its thread: put it where the reader is looking instead
+          // of leaving them at the top of a feed. A new thread keeps the old behaviour,
+          // because its own arrival at the top of the feed is the point.
+          const landed = locateMemo(event.id, false);
+          if (landed) {
+            landed.scrollIntoView({block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth'});
+            landed.classList.add('compose-posted');
+            setTimeout(() => landed.classList.remove('compose-posted'), 1400);
+            // The composer returns to its own slot and is already cleared. It is left
+            // open: folding it meant every following action — a second message, a
+            // correction, changing the recipient — began with reopening a panel, and
+            // the receipt beside it already says the message went.
+            composeAtHome();
+          }
         }
       } catch (_) { /* Receipt remains the authority if feed refresh fails. */ }
       } finally {publicPosting=false; restoreSubmit?.();}
     });
+    $('memo-files')?.addEventListener('change', attachmentStrip);
+    const field = $('memo-text');
+    field?.addEventListener('paste', event => {
+      const files = Array.from(event.clipboardData?.files || []).filter(f => /^image\//.test(f.type));
+      // Only intercept an image: pasted text must still paste as text.
+      if (files.length && addAttachments(files)) event.preventDefault();
+    });
+    for (const target of [field, composeElement].filter(Boolean)) {
+      target.addEventListener('dragover', event => {if (event.dataTransfer?.types?.includes('Files')) {event.preventDefault(); composeElement?.classList.add('compose-dropping');}});
+      target.addEventListener('dragleave', () => composeElement?.classList.remove('compose-dropping'));
+      target.addEventListener('drop', event => {
+        const files = Array.from(event.dataTransfer?.files || []);
+        composeElement?.classList.remove('compose-dropping');
+        if (files.length) {event.preventDefault(); addAttachments(files);}
+      });
+    }
     $('posting-mode').hidden=false;$('posting-mode').disabled=false;
     $('clear-reply')?.addEventListener('click', () => {composer.elements.reply_to.value = ''; $('reply-preview').hidden = true; composeAtHome(); updateComposerContext(); composer.elements.text.focus({preventScroll: true});});
   }
@@ -939,12 +1034,17 @@
     if (at === next) {announce(step > 0 ? 'Last message' : 'First message'); return true;}
     focusCard(list[next], list); return true;
   }
+  $('compose-cta')?.addEventListener('click', event => {
+    if (!composeElement) return;   // no JavaScript path: the anchor jump still works
+    event.preventDefault();
+    startMessage();
+  });
   function startMessage() {
     if (!composer || !composeElement) {location.assign('/#compose'); return;}
     if (inlineHost()) $('clear-reply')?.click();
     composeElement.open = true;
     composer.elements.text.focus({preventScroll: true});
-    composeElement.scrollIntoView({block: 'nearest'});
+    composeElement.scrollIntoView({block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth'});
     announce('Composer open. Shift+Enter posts.');
   }
   async function copyPermalink(card) {

@@ -23,8 +23,11 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     // P06: the write affordance is the resting state — a large field, one primary
     // button and a blinking caret cue, with everything optional under Options.
     assert.equal(await page.locator('#compose').evaluate(e=>e.open),true,'composer open at rest');
+    // The composer sits below the feed so that bringing it to a message never removes
+    // height above the reader. What must be above the fold is the way in.
+    const invite=await page.locator('#compose-cta').boundingBox();
+    assert.ok(invite&&invite.y<600,'the invitation to post is above the fold');
     const field=await page.locator('#memo-text').boundingBox();
-    assert.ok(field.y<600,'the text area is above the fold');
     assert.ok(field.height>=120,'the text area is large enough to invite a memo');
     assert.equal(await page.locator('#memo-text').evaluate(e=>parseFloat(getComputedStyle(e).fontSize)),16);
     assert.equal(await page.locator('.compose-caret').isVisible(),true,'a caret cue marks the empty field');

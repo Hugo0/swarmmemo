@@ -10,7 +10,7 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
   const status=async(page,id,pattern)=>page.waitForFunction(({id,pattern})=>new RegExp(pattern).test(document.getElementById(id).textContent),{id,pattern});
   const submit=page=>page.locator('#compose-form button[type=submit]').click();
   // Posting identity now lives under Options (P06), which is closed at rest.
-  const options=async page=>{if(!await page.locator('#compose-settings').evaluate(e=>e.open))await page.locator('#compose-settings>summary').click();};
+  const options=async page=>{if(!await page.locator('#compose').evaluate(e=>e.open))await page.locator('#compose-cta').click();if(!await page.locator('#compose-settings').evaluate(e=>e.open))await page.locator('#compose-settings>summary').click();};
   const key=page=>page.evaluate(name=>JSON.parse(localStorage.getItem(name)),slot);
   const post=async(page,text)=>{await page.locator('#memo-text').fill(text);await submit(page);await status(page,'compose-status','Accepted');};
   const tokens=page=>page.evaluate(async()=>((await navigator.locks.query()).held||[]).filter(l=>l.name.startsWith('swarmmemo-pending-v1:')).length);

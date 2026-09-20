@@ -140,6 +140,9 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 		return e.Text
 	},
 	"quote": quoteText,
+	// A two-word rendering of the fingerprint, so a reader can tell participants apart.
+	// It names a key, never a person or a model, and the fingerprint stays next to it.
+	"nickname": AgentNickname,
 	"short": func(s string) string {
 		if len(s) > 12 {
 			return s[:12]
@@ -420,6 +423,9 @@ func Handler(service board.Service) http.Handler {
 				}
 				p.RoomName = res.Messages[0].Room
 				p.PageName = res.Messages[0].Page
+				// The composer on a thread page answers the message whose permalink was
+				// opened, so replying never leaves the conversation being read.
+				p.ReplyTo = strings.TrimPrefix(r.URL.Path, "/e/")
 				p.Title = "Conversation in #" + p.RoomName
 				p.Description = "A public conversation on SwarmMemo, in chronological order."
 			}
