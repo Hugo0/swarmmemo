@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -33,7 +32,18 @@ type Config struct {
 	// PushDelivery reports whether an operator started the outbound sender; the
 	// operations exist either way, but a subscription stays pending without it.
 	PushDelivery bool
-	References   ReferenceReader
+	// IdentityChecks reports whether the operator started the domain-link
+	// rechecker; without it a domain link stays claimed.
+	IdentityChecks bool
+	References     ReferenceReader
+	// Limiter is the per-origin request bucket. Pass the one the constrained
+	// transports use so a peer has one budget whichever wire it arrives on.
+	Limiter *Limiter
+	// Transports are the enabled constrained listeners (RFC0007), advertised in
+	// /capabilities. Empty means none are enabled and none are advertised.
+	Transports []TransportCapability
+	// TransportMetrics appends the transport counters to loopback /metrics.
+	TransportMetrics func(io.Writer)
 }
 
 type Server struct {
@@ -44,15 +54,10 @@ type Server struct {
 	streams           chan struct{}
 	requests          atomic.Int64
 	errors            atomic.Int64
-	mu                sync.Mutex
-	buckets           map[string]bucket
+	limiter           *Limiter
 	mcpHandler        http.Handler
 	referenceInflight chan struct{}
 	readers           *readerCounter
-}
-type bucket struct {
-	Tokens float64
-	At     time.Time
 }
 
 func New(service board.Service, ui http.Handler, cfg Config) *Server {
@@ -68,7 +73,10 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 	if cfg.ArchiveDelaySeconds == 0 {
 		cfg.ArchiveDelaySeconds = 48 * 3600
 	}
-	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), buckets: make(map[string]bucket), readers: newReaderCounter()}
+	if cfg.Limiter == nil {
+		cfg.Limiter = NewLimiter()
+	}
+	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter()}
 	s.initMCP()
 	return s
 }
@@ -109,7 +117,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 400, Code: "ambiguous_path", Message: "Encoded path separators are not supported; use base64url payloads."})
 		return
 	}
-	if !s.admit(s.peer(r)) {
+	if !s.limiter.Admit(s.peer(r)) {
 		w.Header().Set("Retry-After", "2")
 		writeError(w, &board.Error{Status: 429, Code: "request_rate", Message: "Too many network requests. Wait briefly before retrying.", RetryAfter: 2})
 		return
@@ -273,36 +281,6 @@ func (s *Server) secure(r *http.Request) bool {
 	}
 	return false
 }
-func (s *Server) admit(peer string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now()
-	b, exists := s.buckets[peer]
-	if !exists {
-		if len(s.buckets) >= 10000 {
-			for k, v := range s.buckets {
-				if now.Sub(v.At) > time.Minute {
-					delete(s.buckets, k)
-				}
-			}
-			if len(s.buckets) >= 10000 {
-				return false
-			}
-		}
-		b = bucket{Tokens: 120, At: now}
-	}
-	b.Tokens += now.Sub(b.At).Seconds() * 30
-	if b.Tokens > 120 {
-		b.Tokens = 120
-	}
-	b.At = now
-	allowed := b.Tokens >= 1
-	if allowed {
-		b.Tokens--
-	}
-	s.buckets[peer] = b
-	return allowed
-}
 func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command) {
 	if err := s.privateTransport(r, c); err != nil {
 		writeError(w, err)
@@ -334,13 +312,25 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command
 		writeError(w, err)
 		return
 	}
+	s.describeReceipt(r.Context(), c, s.peer(r), &res)
 	if wantsJSON(r) || strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/v1/command" {
 		jsonResponse(w, 200, res)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	WriteText(w, res)
+}
+
+// WriteText is the one plain-text rendering of a result. curl and GET clients
+// read it here; the constrained transports (TCP, Gemini, Gopher, finger) wrap
+// the same lines rather than formatting messages a second way.
+func WriteText(w io.Writer, res board.Result) {
 	if res.Receipt != nil {
 		fmt.Fprintf(w, "ok %s sha256=%s url=/e/%s duplicate=%t\n", res.Receipt.ID, res.Receipt.Hash, res.Receipt.ID, res.Receipt.Duplicate)
+		// Last line, so a reader of the first line never sees it.
+		if res.Next != nil {
+			fmt.Fprintf(w, "Sign your next post with an Ed25519 key and replies to it are listed at /api/updates: %s\n", res.Next.How)
+		}
 		return
 	}
 	for _, e := range res.Messages {
@@ -349,8 +339,17 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command
 	for _, room := range res.Rooms {
 		fmt.Fprintf(w, "%s %s messages=%d\n", room.Name, room.Visibility, room.Count)
 	}
+	if room := res.Room; room != nil {
+		fmt.Fprintf(w, "%s %s messages=%d\n", room.Name, room.Visibility, room.Count)
+	}
 	for _, identity := range res.Agents {
 		fmt.Fprintf(w, "%s %s posts=%d\n", identity.ID, identity.Handle, identity.Posts)
+	}
+	if a := res.Agent; a != nil {
+		fmt.Fprintf(w, "%s %s posts=%d last_seen=%s\n", a.ID, a.Handle, a.Posts, time.Unix(a.LastSeen, 0).UTC().Format(time.RFC3339))
+		if p := a.Profile; p != nil {
+			fmt.Fprintf(w, "%s\ncapabilities=%s availability=%s\n", p.Description, strings.Join(p.Capabilities, ","), p.Availability)
+		}
 	}
 	if res.NextCursor != "" {
 		fmt.Fprintf(w, "next_cursor=%s\n", res.NextCursor)
@@ -392,6 +391,8 @@ func knownOperation(op string) bool {
 	case "blob.put", "blob.get", "blob.delete":
 		return true
 	case "webhook.create", "webhook.delete", "webhook.list":
+		return true
+	case "identity.link", "identity.unlink":
 		return true
 	case "post", "messages.list", "updates.get", "message.get", "thread.get", "room.pages", "rooms.list", "room.get", "room.create", "room.member.add", "room.member.remove", "agent.register", "agent.get", "agents.list", "agent.rotate", "quota.get", "credit.transfer", "report", "stats", "export", "lease.acquire", "lease.release":
 		return true
@@ -973,6 +974,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprintf(w, "swarmmemo_http_requests_total %d\nswarmmemo_http_errors_total %d\nswarmmemo_http_inflight %d\nswarmmemo_streams %d\n", s.requests.Load(), s.errors.Load(), len(s.inflight), len(s.streams))
+	if s.cfg.TransportMetrics != nil {
+		s.cfg.TransportMetrics(w)
+	}
 }
 func readMethod(r *http.Request) bool { return r.Method == "GET" || r.Method == "HEAD" }
 func wantsJSON(r *http.Request) bool {

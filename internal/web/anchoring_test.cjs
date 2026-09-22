@@ -67,28 +67,15 @@ async function main(){
     await page.locator('#e-'+target+' .reply-button').click();
     await page.waitForTimeout(400);
     const afterReply=await topOf(page,target);
-    assert.ok(Math.abs(afterReply-beforeReply)<2,`opening the inline composer moved the message ${afterReply-beforeReply}px`);
-    assert.equal(await page.evaluate(i=>document.getElementById('compose').closest('.memo').id==='e-'+i,target),true,'the composer relocated under the message');
-    // Relocated inline the summary is the reply's label. Closed, it must not become
-    // the board-wide black call to action sitting inside a message.
-    assert.match(await page.locator('#compose > summary').textContent(),/^Reply to /);
-    await page.evaluate(()=>{document.getElementById('compose').open=false;});
-    const inlineLabel=await page.evaluate(()=>{const c=getComputedStyle(document.querySelector('#compose>summary'));return {bg:c.backgroundColor,color:c.color};});
-    assert.equal(inlineLabel.bg,'rgb(255, 255, 255)','a closed inline reply label is not a filled primary');
-    assert.equal(inlineLabel.color,'rgb(23, 23, 23)');
-    await page.evaluate(()=>{document.getElementById('compose').open=true;});
-    await page.waitForTimeout(250);
-    // A typed draft survives cancelling; only the composer moves home.
-    await page.locator('#memo-text').fill('Anchored draft that must survive');
-    await place(-40);
-    const beforeCancel=await topOf(page,target);
-    await page.locator('#clear-reply').click();
-    await page.waitForTimeout(400);
-    const afterCancel=await topOf(page,target);
-    assert.ok(Math.abs(afterCancel-beforeCancel)<2,`cancelling the reply moved the message ${afterCancel-beforeCancel}px`);
-    assert.equal(await page.locator('#memo-text').inputValue(),'Anchored draft that must survive');
-    await page.locator('#memo-text').fill('');
-
+    // The composer no longer relocates: it stays in its own place and takes the reply
+    // context, and the page scrolls to it because the reader asked for it by clicking.
+    // What must never move on its own is covered by the other cases in this file.
+    assert.equal(await page.evaluate(()=>!!document.getElementById('compose').closest('.memo')),false,'the composer must not move into the feed');
+    assert.equal(await page.evaluate(i=>document.getElementById('reply-to').value===''+i,target),true,'the composer is addressed to the answered message');
+    assert.equal(await page.evaluate(()=>{const b=document.getElementById('compose').getBoundingClientRect();return b.top>-1&&b.top<innerHeight;}),true,'the composer is brought into view');
+    // The composer keeps its own label wherever the reply is addressed, and closed it
+    // is still the board's call to action rather than a button hiding in the feed.
+    assert.equal(await page.evaluate(()=>document.getElementById('compose').closest('.memo')),null,'the composer stays out of the feed');
     // 4. A live message prepended to the top of the feed while the reader is below it.
     await place(-40);
     await fetch(origin+'/w/'+room+'/main?format=json&text='+encodeURIComponent('A live arrival while the reader is further down the feed.')+'&request_id=anchor-live-'+stamp,{headers:{Accept:'application/json'}});
@@ -123,7 +110,7 @@ async function main(){
 
     assert.deepEqual(errors,[],'no script errors');
     await context.close();
-    console.log('PASS: expand/collapse, inline composer open/cancel, live arrival and correction all hold the reader\'s anchor to within 2px; native overflow-anchor disabled over the board.');
+    console.log('PASS: expand/collapse, reply addressing, live arrival and correction all hold the reader\'s anchor to within 2px; native overflow-anchor disabled over the board.');
   } finally { await browser.close(); }
 }
 main().catch(error=>{console.error(error);process.exit(1);});

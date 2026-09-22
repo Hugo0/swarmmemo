@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	mathrand "math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -72,6 +74,14 @@ type Store struct {
 	webhookClient   *http.Client
 	webhookPoll     time.Duration
 	webhookInsecure bool
+	// Identity link rechecks. identityTXT and identityJitter are replaced only by
+	// in-package tests, so no test reaches real DNS.
+	identityWG     sync.WaitGroup
+	identityChecks atomic.Bool
+	identityTXT    func(context.Context, string) ([]string, error)
+	identityJitter func() float64
+	identityRateMu sync.Mutex
+	identityRates  map[string]privateReadBucket
 }
 
 const schema = `
@@ -135,7 +145,7 @@ CREATE TABLE IF NOT EXISTS audit (
 CREATE TABLE IF NOT EXISTS leases (
  room TEXT NOT NULL REFERENCES rooms(name), name TEXT NOT NULL, account TEXT NOT NULL,
  fence INTEGER NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(room,name));
-PRAGMA user_version=9;
+PRAGMA user_version=10;
 `
 
 func Open(path string, config Config) (*Store, error) {
@@ -160,6 +170,13 @@ func Open(path string, config Config) (*Store, error) {
 	if config.ArchiveDelaySeconds < 0 {
 		config.ArchiveDelaySeconds = 0
 	}
+	reserved := []string{}
+	for _, name := range append([]string{config.ServiceID}, config.ReservedDomains...) {
+		if domain, ok := normalizeLinkDomain(name); ok {
+			reserved = append(reserved, domain)
+		}
+	}
+	config.ReservedDomains = reserved
 	if path != ":memory:" {
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			return nil, err
@@ -207,8 +224,8 @@ func Open(path string, config Config) (*Store, error) {
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fail(err)
 	}
-	if version > 9 {
-		return fail(fmt.Errorf("database schema %d is newer than supported version 9", version))
+	if version > 10 {
+		return fail(fmt.Errorf("database schema %d is newer than supported version 10", version))
 	}
 	migration, err := db.Begin()
 	if err != nil {
@@ -244,7 +261,7 @@ func Open(path string, config Config) (*Store, error) {
 			}
 		}
 	}
-	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema); err != nil {
+	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema); err != nil {
 		return fail(err)
 	}
 	if err = migratePrivateRead(migration); err != nil {
@@ -280,7 +297,7 @@ func Open(path string, config Config) (*Store, error) {
 	if _, err = db.Exec("INSERT OR IGNORE INTO meta(key,value) VALUES('generation',?)", randomID()); err != nil {
 		return fail(err)
 	}
-	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), privateRates: map[string]privateReadBucket{}}
+	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}}
 	if err = db.QueryRow("SELECT value FROM meta WHERE key='generation'").Scan(&s.generation); err != nil {
 		return fail(err)
 	}
@@ -413,6 +430,8 @@ func mutation(op string) bool {
 		return true
 	case "webhook.create", "webhook.delete":
 		return true
+	case "identity.link", "identity.unlink":
+		return true
 	}
 	return false
 }
@@ -456,6 +475,8 @@ func validateCommandFields(c Command) error {
 		"webhook.create":        "data",
 		"webhook.delete":        "target",
 		"webhook.list":          "cursor limit",
+		"identity.link":         "data",
+		"identity.unlink":       "data",
 		"quota.get":             "",
 		"credit.transfer":       "target amount",
 		"report":                "message_id reason",
@@ -683,6 +704,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.changeWebhook(ctx, tx, c, a, now)
 	case "webhook.list":
 		return s.readWebhooks(ctx, tx, c, a, now)
+	case "identity.link", "identity.unlink":
+		return s.changeIdentityLink(ctx, tx, c, a, now)
 	case "quota.get":
 		return s.readQuota(ctx, tx, a, now)
 	case "credit.transfer":

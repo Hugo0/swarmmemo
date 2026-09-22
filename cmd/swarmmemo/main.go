@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/httpapi"
+	"swarmmemo/internal/transport"
 	"swarmmemo/internal/web"
 )
 
@@ -171,7 +173,12 @@ func serve() error {
 	if e != nil {
 		return e
 	}
-	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: 16384, ArchiveDelaySeconds: archiveDelay})
+	publicURL := env("PUBLIC_URL", "https://swarmmemo.com")
+	reserved := []string{}
+	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
+		reserved = append(reserved, parsed.Hostname())
+	}
+	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: 16384, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved})
 	if e != nil {
 		return e
 	}
@@ -187,10 +194,19 @@ func serve() error {
 			return errors.New("admin token must have at least 32 characters")
 		}
 	}
-	config := httpapi.Config{PublicURL: env("PUBLIC_URL", "https://swarmmemo.com"), ServiceID: env("SERVICE_ID", "swarmmemo.com"), AdminToken: admin, TrustLoopbackProxy: os.Getenv("TRUST_LOOPBACK_PROXY") == "true", AllowInsecureLocal: os.Getenv("ALLOW_INSECURE_LOCAL") == "true", PushDelivery: os.Getenv("WEBHOOK_DELIVERY") == "true", ArchiveDelaySeconds: archiveDelay, Version: version}
+	identityChecks := os.Getenv("IDENTITY_CHECKS") == "true"
+	config := httpapi.Config{PublicURL: publicURL, IdentityChecks: identityChecks, ServiceID: env("SERVICE_ID", "swarmmemo.com"), AdminToken: admin, TrustLoopbackProxy: os.Getenv("TRUST_LOOPBACK_PROXY") == "true", AllowInsecureLocal: os.Getenv("ALLOW_INSECURE_LOCAL") == "true", PushDelivery: os.Getenv("WEBHOOK_DELIVERY") == "true", ArchiveDelaySeconds: archiveDelay, Version: version}
 	if referenceReader != nil {
 		config.References = referenceReader
 	}
+	// Constrained transports (RFC0007) are each off until an operator sets an
+	// address. They share HTTP's per-origin limiter, so a peer has one budget.
+	config.Limiter = httpapi.NewLimiter()
+	transports, e := transport.New(store, config.Limiter, transport.ConfigFromEnv(os.Getenv, config.PublicURL))
+	if e != nil {
+		return e
+	}
+	config.Transports, config.TransportMetrics = transports.Capabilities(), transports.WriteMetrics
 	api := httpapi.New(store, web.Handler(store), config)
 	server := &http.Server{Addr: env("LISTEN_ADDR", "127.0.0.1:8080"), Handler: api, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -227,6 +243,15 @@ func serve() error {
 		slog.Info("Webhook delivery enabled", "workers", workers)
 		store.StartWebhookDelivery(ctx, int(workers))
 	}
+	if e := transports.Start(ctx); e != nil {
+		return e
+	}
+	// Domain-link rechecks are off unless explicitly enabled: they make the
+	// service resolve TXT records under agent-chosen names.
+	if identityChecks {
+		slog.Info("Identity link rechecks enabled")
+		store.StartIdentityChecks(ctx)
+	}
 	done := make(chan error, 1)
 	go func() {
 		slog.Info("SwarmMemo listening", "address", server.Addr, "version", version)
@@ -246,6 +271,7 @@ func serve() error {
 		// In-flight deliveries finish and record their outcome; queued ones stay
 		// in storage, so stopping repeats nothing and loses nothing.
 		store.StopWebhookDelivery()
+		store.StopIdentityChecks()
 		return err
 	}
 }

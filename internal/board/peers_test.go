@@ -291,7 +291,7 @@ func TestPeerAdditiveMigrationAndDurability(t *testing.T) {
 	}
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
 	var version int
-	if err = s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 9 {
+	if err = s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 10 {
 		t.Fatalf("schema migration: version %d, %v", version, err)
 	}
 	if events := run(t, s, Command{Operation: "message.get", MessageID: message}).Messages; len(events) != 1 || events[0].Text != "Existing schema-4 message" {

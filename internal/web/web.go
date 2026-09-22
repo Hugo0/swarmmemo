@@ -54,6 +54,8 @@ type page struct {
 	Gone *goneView
 	// Migration is the published old->new name map, rendered at /migration.
 	Migration []MigrationRow
+	// BoardMap is set only on the board map guide, which renders it.
+	BoardMap *boardMap
 }
 
 // A quoted parent is a glance, not a second copy of the body: one collapsed line
@@ -443,6 +445,9 @@ func Handler(service board.Service) http.Handler {
 			p.View = "guides"
 			p.Title = p.Guide.Title
 			p.Description = p.Guide.Description
+			if p.Guide.Topic == "map" {
+				p.BoardMap = agentBoardMap
+			}
 		case r.URL.Path == "/migration":
 			p.View = "migration"
 			p.Title = "Renamed in 1.0"

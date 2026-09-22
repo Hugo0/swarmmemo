@@ -653,25 +653,6 @@
   const composeSummary = composeElement?.querySelector(':scope > summary');
   const composeSummaryLabel = composeSummary?.textContent;
   if (composeElement && composeHome) {composeHome.hidden = true; composeElement.before(composeHome);}
-  function inlineHost() { return composeElement?.classList.contains('compose-inline') ? composeElement.closest('.memo') : null; }
-  function composeInline(article, replyID) {
-    if (!composeElement || !article) return;
-    // Moving the composer out of its home slot shortens everything above the feed.
-    // The message being answered must not slide up while the reader looks at it.
-    keepAnchored(article, () => {
-      if (composeElement.parentElement !== article) article.append(composeElement);
-      composeElement.classList.add('compose-inline');
-      if (composeSummary) composeSummary.textContent = 'Reply to ' + String(replyID || '').slice(0, 12);
-    }, 260);
-  }
-  function composeAtHome() {
-    if (!composeElement || !composeHome || !composeElement.classList.contains('compose-inline')) return;
-    keepAnchored(inlineHost() || readerAnchor(), () => {
-      composeHome.after(composeElement);
-      composeElement.classList.remove('compose-inline');
-      if (composeSummary) composeSummary.textContent = composeSummaryLabel;
-    }, 260);
-  }
   function updateComposerContext(initial = false) {
     if (!composer) return;
     const fields = composer.elements;
@@ -792,7 +773,6 @@
       const result = await request({...command, request_id: pendingPost.id},false,false,pendingPost.key);
       // Only a server receipt turns the composer green. There is no optimistic insert:
       // a message shown as published must have been published.
-      const host = inlineHost();
       const statusElement = $('compose-status');
       status('compose-status', '');
       statusElement.classList.add('success');
@@ -806,7 +786,6 @@
       const repliedTo = command.reply_to;
       // The composer stays where it was written so the receipt and the new reply are
       // both in view, but it is no longer addressed at the parent: say so.
-      if (composeSummary && composeElement?.classList.contains('compose-inline')) composeSummary.textContent = composeSummaryLabel;
       form.elements.text.value = ''; form.elements.reply_to.value = ''; if(form.elements.files)form.elements.files.value=''; attachmentStrip(); completedUploads.delete(form); $('reply-preview').hidden = true; pendingPost = null; updateCount(); updateComposerContext();
       toast('Message posted. A new thread for someone to find.');
       void showPublicHandoff(result.receipt, command, handoffGeneration);
@@ -821,10 +800,7 @@
           // A reply written under its parent appears under that parent, where the
           // reader is looking, instead of only at the top of the feed.
           const thread = threadHost;
-          if (host && host.isConnected && repliedTo === host.dataset.messageId && !locateMemo(event.id, false)) {
-            const inline = eventElement(event); inline.classList.add('memo-inline-reply');
-            if (composeElement && composeElement.parentElement === host) composeElement.before(inline); else host.append(inline);
-          } else if (thread) {
+          if (thread) {
             // A conversation reads oldest first, so a reply belongs at the end of it
             // rather than at the top of a feed sorted the other way.
             if (!locateMemo(event.id, false)) thread.append(eventElement(event));
@@ -842,7 +818,6 @@
             // open: folding it meant every following action — a second message, a
             // correction, changing the recipient — began with reopening a panel, and
             // the receipt beside it already says the message went.
-            composeAtHome();
           }
         }
       } catch (_) { /* Receipt remains the authority if feed refresh fails. */ }
@@ -865,7 +840,7 @@
       });
     }
     $('posting-mode').hidden=false;$('posting-mode').disabled=false;
-    $('clear-reply')?.addEventListener('click', () => {composer.elements.reply_to.value = ''; $('reply-preview').hidden = true; composeAtHome(); updateComposerContext(); composer.elements.text.focus({preventScroll: true});});
+    $('clear-reply')?.addEventListener('click', () => {composer.elements.reply_to.value = ''; $('reply-preview').hidden = true; updateComposerContext(); composer.elements.text.focus({preventScroll: true});});
   }
   document.addEventListener('click', event => {
     const reply = event.target.closest('.reply-button');
@@ -879,17 +854,12 @@
       if (!recipientEdited) {composer.elements.to.value = recipient; toast(recipient ? 'Public reply addressed to sender ' + recipient.slice(0,12) + '. Review To before posting.' : 'This sender has no signing identity. Your reply is public and unaddressed.');}
       else toast('Your chosen recipient is unchanged. Review To before posting this public reply.');
       $('reply-label').textContent = 'Replying to ' + reply.dataset.replyId.slice(0, 12); $('reply-preview').hidden = false;
-      // Open under the message being answered, with the parent still above it. Only
-      // one composer exists, so only one inline composer can ever be open.
-      const article = reply.closest('.memo');
-      const inline = article && article.dataset.messageId === reply.dataset.replyId;
-      if (inline) composeInline(article, reply.dataset.replyId); else composeAtHome();
+      // The composer never moves. It used to relocate under the answered message,
+      // which meant lifting a thousand pixels out of the column and shifting the page
+      // under the reader. One box, in one place, carrying the reply context.
       $('compose').open = true;
       composer.elements.text.focus({preventScroll: true});
-      // An inline composer is already under the message the reader just clicked, and
-      // scrolling to it would drag that message out from under them. Only the distant
-      // home composer is worth moving the page for.
-      if (!inline) $('compose').scrollIntoView({block: 'nearest'});
+      $('compose').scrollIntoView({block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth'});
       updateComposerContext();
     }
     const report = event.target.closest('.report-button');
@@ -1041,7 +1011,7 @@
   });
   function startMessage() {
     if (!composer || !composeElement) {location.assign('/#compose'); return;}
-    if (inlineHost()) $('clear-reply')?.click();
+    if (composer?.elements.reply_to.value) $('clear-reply')?.click();
     composeElement.open = true;
     composer.elements.text.focus({preventScroll: true});
     composeElement.scrollIntoView({block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth'});
@@ -1140,8 +1110,12 @@
         else if (target.matches('input,textarea')) target.blur();
         return;
       }
-      const host = inlineHost();
-      if (host) {$('clear-reply')?.click(); host.focus({preventScroll: true}); announce('Reply closed. Your text is kept.');}
+      if (composer?.elements.reply_to.value) {
+        const answered = locateMemo(composer.elements.reply_to.value, false);
+        $('clear-reply')?.click();
+        answered?.focus({preventScroll: true});
+        announce('Reply cleared. Your text is kept.');
+      }
       return;
     }
     if (typingTarget(target) || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -1171,7 +1145,7 @@
       }
       case 'r': {
         const reply = card?.querySelector('.reply-button');
-        if (reply) {reply.click(); if (composeElement?.classList.contains('compose-inline')) announce('Reply composer open under this message.');} else handled = false;
+        if (reply) {reply.click(); announce('Composer open, addressed to this message.');} else handled = false;
         break;
       }
       case '.': case 'e': {

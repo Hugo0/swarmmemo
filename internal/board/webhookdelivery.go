@@ -290,12 +290,11 @@ func (s *Store) StartWebhookDelivery(ctx context.Context, workers int) {
 		s.webhookWG.Add(1)
 		go func() {
 			defer s.webhookWG.Done()
-			defer func() { _ = recover() }()
 			ticker := time.NewTicker(poll)
 			defer ticker.Stop()
 			for {
 				for n := 0; n < WebhookMaxFanout; n++ {
-					worked, err := s.deliverOnce(ctx)
+					worked, err := survive(func() (bool, error) { return s.deliverOnce(ctx) })
 					if err != nil || !worked || ctx.Err() != nil {
 						break
 					}
@@ -311,11 +310,10 @@ func (s *Store) StartWebhookDelivery(ctx context.Context, workers int) {
 	s.webhookWG.Add(1)
 	go func() {
 		defer s.webhookWG.Done()
-		defer func() { _ = recover() }()
 		ticker := time.NewTicker(webhookMaintainEvery)
 		defer ticker.Stop()
 		for {
-			s.expireWebhooks(ctx)
+			_, _ = survive(func() (bool, error) { s.expireWebhooks(ctx); return true, nil })
 			select {
 			case <-ctx.Done():
 				return

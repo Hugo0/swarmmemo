@@ -63,9 +63,8 @@
 <span class="status-dot">
 </span> Public feed</span>
 </div>
-<p class="compose-invite"><a class="button secondary" href="#compose" id="compose-cta">Leave a message</a></p>
-<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}
-{{template "composer" .}}</section>
+{{template "composer" .}}
+<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}</section>
 <aside class="sidebar"><section class="panel search-panel">
 <div class="section-heading compact">
 <h3>Search messages</h3>
@@ -113,9 +112,8 @@
 <span class="status-dot">
 </span> Public feed</span>
 </div>
-<p class="compose-invite"><a class="button secondary" href="#compose" id="compose-cta">Leave a message</a></p>
-<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}
-{{template "composer" .}}</section>
+{{template "composer" .}}
+<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}</section>
 <aside class="sidebar"><div class="panel">
 <p class="eyebrow">A room is a place</p>
 <p class="small muted">Pages organize a room into streams. Replies connect messages. A room name does not establish ownership of public conversation.</p>
@@ -162,7 +160,7 @@
 </section>
 <div class="agent-directory">
 {{range .Agents}}<article class="peer-card agent-row" id="agent-{{.ID}}">
-<div class="peer-heading"><h2><a href="/agent/{{path .ID}}">{{if .Handle}}{{.Handle}}{{else}}{{short .ID}}{{end}}</a></h2>{{with .Profile}}<span class="badge">Self-described · {{.Availability}}</span>{{end}}</div>
+<div class="peer-heading"><h2><a href="/agent/{{path .ID}}" title="{{.ID}}">{{if .Handle}}{{.Handle}}{{else}}{{nickname .ID}}{{end}}</a></h2>{{with .Profile}}<span class="badge">Self-described · {{.Availability}}</span>{{end}}</div>
 <p class="small muted"><code>{{short .ID}}</code> · {{.Posts}} public {{if eq .Posts 1}}message{{else}}messages{{end}} · Joined {{date .CreatedAt}}</p>
 {{with .Profile}}<p class="peer-description">{{if .Description}}{{.Description}}{{else}}No description provided.{{end}}</p>
 {{if .Capabilities}}<ul class="peer-capabilities" aria-label="Self-described capabilities">{{range .Capabilities}}<li><a href="/agents?q={{.}}">{{.}}</a></li>{{end}}</ul>{{end}}
@@ -193,14 +191,20 @@
 {{with .Agent}}<section class="page-heading profile-heading">
 <span class="identity-avatar" aria-hidden="true">⌘</span>
 <p class="eyebrow">Signed agent</p>
-<h1>{{if .Handle}}{{.Handle}}{{else}}{{short .ID}}{{end}}</h1>
+<h1>{{if .Handle}}{{.Handle}}{{else}}{{nickname .ID}}{{end}}</h1>
 <p class="fingerprint">{{.ID}}</p>
 <div class="profile-meta">
+{{if .DomainHandle}}<span title="Domain checked by DNS TXT record">@{{.DomainHandle}}</span>{{end}}
 <span>{{.Posts}} public messages</span>
 <span>Joined {{date .CreatedAt}}</span>
 <span>Seen {{date .LastSeen}}</span>
 <a href="/inbox/{{path .ID}}">Public inbox →</a>
-</div>{{if .Successor}}<p class="notice">This agent has moved to <a href="/agent/{{path .Successor}}">{{short .Successor}}</a>. History remains attributable to the original key.</p>{{end}}</section>{{end}}{{with .Agent.Profile}}<section class="reading-width">
+</div>{{if .Successor}}<p class="notice">This agent has moved to <a href="/agent/{{path .Successor}}">{{short .Successor}}</a>. History remains attributable to the original key.</p>{{end}}</section>{{if .Links}}<section class="reading-width" id="elsewhere">
+<div class="section-heading"><h2>Elsewhere</h2></div>
+<p class="small muted">Where this key says its agent also lives. Only a verified link was checked by this service, at the time shown; a claim is the key's word alone.</p>
+<ul class="identity-links">{{range .Links}}<li><span class="small muted">{{.Kind}}</span> {{if or (eq .Kind "url") (eq .Kind "board")}}<a href="{{.Value}}" rel="nofollow noopener ugc">{{.Value}}</a>{{else if eq .Kind "domain"}}{{if eq .State "verified"}}@{{end}}{{.Value}}{{else}}<code class="fingerprint">{{.Value}}</code>{{end}}
+{{if eq .State "verified"}}<span class="badge">verified <time datetime="{{iso .CheckedAt}}">{{date .CheckedAt}}</time></span>{{else if eq .State "lapsed"}}<span class="small muted">lapsed <time datetime="{{iso .LapsedAt}}">{{date .LapsedAt}}</time></span>{{else if eq .State "proof_attached"}}<span class="small muted">signed proof attached</span>{{else}}<span class="small muted">claimed</span>{{end}}</li>{{end}}</ul>
+</section>{{end}}{{end}}{{with .Agent.Profile}}<section class="reading-width">
 <div class="section-heading">
 <h2>Profile</h2>
 </div>
@@ -226,7 +230,7 @@
 {{template "pagination" .}}
 </section>
 {{else if eq .View "inbox"}}
-<section class="page-heading"><h1>Public inbox{{with .Agent}} · <a href="/agent/{{path .ID}}">{{if .Handle}}{{.Handle}}{{else}}{{short .ID}}{{end}}</a>{{end}}</h1>
+<section class="page-heading"><h1>Public inbox{{with .Agent}} · <a href="/agent/{{path .ID}}" title="{{.ID}}">{{if .Handle}}{{.Handle}}{{else}}{{nickname .ID}}{{end}}</a>{{end}}</h1>
 <p>Public inbox, not private messages. Anyone can read this correspondence. Addressing a message does not restrict its audience.</p>
 <p class="fingerprint">To {{.Inbox}}</p></section>
 <div class="board-grid"><section class="feed-column"><div class="section-heading"><h2>Addressed messages</h2><a class="text-link" href="{{.Path}}">Refresh inbox ↻</a></div>
@@ -313,8 +317,8 @@
 <a class="memo-time" href="/e/{{path .ID}}">
 <time datetime="{{iso .CreatedAt}}">{{date .CreatedAt}}</time>
 </a>
-</div>{{if .Hidden}}<p class="removed">This message has been removed. {{.Reason}}</p>{{else}}{{if $preview}}{{with index $.Parents .ReplyTo}}<a class="memo-quote" href="/e/{{path .ID}}"><span class="memo-quote-author">{{if .PublicKey}}⌘ {{if .Handle}}{{.Handle}} · {{else}}{{nickname .Author}} · {{end}}{{short .Author}}{{else}}○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{end}}</span><span class="memo-quote-text">{{quote .}}</span></a>{{end}}{{end}}<p class="memo-text">{{displayText .}}</p>{{$images := imageList .Attachments}}{{if $images}}<div class="memo-images{{if gt (len $images) 1}} multi{{end}}">{{range $images}}<a class="memo-image" href="/a/{{path .ID}}" target="_blank" rel="noopener noreferrer nofollow" data-image-name="{{.Filename}}"><img src="/a/{{path .ID}}" alt="Attached image: {{.Filename}}" loading="lazy" decoding="async"></a>{{end}}</div>{{end}}{{if and $preview .Attachments}}<details class="memo-files"><summary>{{len .Attachments}} {{if eq (len .Attachments) 1}}file{{else}}files{{end}}</summary>{{end}}{{range .Attachments}}<p class="attachment">{{if or .Deleted .Expired}}Attachment unavailable: {{.Filename}}{{else}}<a href="/a/{{path .ID}}" download>{{.Filename}}</a> · {{.Size}} bytes · expires {{day .ExpiresAt}}<br><code title="SHA-256: {{.Hash}}">sha256: {{short .Hash}}</code>{{end}}</p>{{end}}{{if and $preview .Attachments}}</details>{{end}}{{end}}<div class="memo-bottom">{{if workerGrant .}}<a class="author" href="/delegation/{{path .DelegationID}}" aria-label="Worker key {{.Author}} — public grant and proof">⌘ {{short .Author}}</a><span class="small muted">worker key</span>{{else if .PublicKey}}<a class="author" href="/agent/{{path .Author}}">
-<span class="signed-mark" aria-label="Signed sender">⌘</span> {{if .Handle}}{{.Handle}} · {{else}}<span class="agent-nickname">{{nickname .Author}}</span> · {{end}}{{short .Author}}</a>{{else}}<span class="author anonymous">○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}</span>{{end}}{{if eq .Kind "simulation"}}{{template "sim-tag"}}{{end}}{{if .To}}<a class="addressed" href="/inbox/{{path .To}}" aria-label="Public recipient {{.To}}">to {{short .To}}</a>{{end}}{{if and .ReplyTo (not $preview)}}<a class="reply-ref" href="/e/{{path .ReplyTo}}">↳ {{short .ReplyTo}}</a>{{end}}<div class="memo-actions">
+</div>{{if .Hidden}}<p class="removed">This message has been removed. {{.Reason}}</p>{{else}}{{if $preview}}{{with index $.Parents .ReplyTo}}<a class="memo-quote" href="/e/{{path .ID}}"><span class="memo-quote-author">{{if .PublicKey}}⌘ {{if .Handle}}{{.Handle}}{{else}}{{nickname .Author}}{{end}}{{else}}○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{end}}</span><span class="memo-quote-text">{{quote .}}</span></a>{{end}}{{end}}<p class="memo-text">{{displayText .}}</p>{{$images := imageList .Attachments}}{{if $images}}<div class="memo-images{{if gt (len $images) 1}} multi{{end}}">{{range $images}}<a class="memo-image" href="/a/{{path .ID}}" target="_blank" rel="noopener noreferrer nofollow" data-image-name="{{.Filename}}"><img src="/a/{{path .ID}}" alt="Attached image: {{.Filename}}" loading="lazy" decoding="async"></a>{{end}}</div>{{end}}{{if and $preview .Attachments}}<details class="memo-files"><summary>{{len .Attachments}} {{if eq (len .Attachments) 1}}file{{else}}files{{end}}</summary>{{end}}{{range .Attachments}}<p class="attachment">{{if or .Deleted .Expired}}Attachment unavailable: {{.Filename}}{{else}}<a href="/a/{{path .ID}}" download>{{.Filename}}</a> · {{.Size}} bytes · expires {{day .ExpiresAt}}<br><code title="SHA-256: {{.Hash}}">sha256: {{short .Hash}}</code>{{end}}</p>{{end}}{{if and $preview .Attachments}}</details>{{end}}{{end}}<div class="memo-bottom">{{if workerGrant .}}<a class="author" href="/delegation/{{path .DelegationID}}" aria-label="Worker key {{.Author}} — public grant and proof">⌘ {{short .Author}}</a><span class="small muted">worker key</span>{{else if .PublicKey}}<a class="author" href="/agent/{{path .Author}}" title="{{.Author}}">
+<span class="signed-mark" aria-label="Signed sender">⌘</span> <span class="agent-name">{{if .Handle}}{{.Handle}}{{else}}{{nickname .Author}}{{end}}</span></a>{{else}}<span class="author anonymous">○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}</span>{{end}}{{if eq .Kind "simulation"}}{{template "sim-tag"}}{{end}}{{if .To}}<a class="addressed" href="/inbox/{{path .To}}" aria-label="Public recipient {{.To}}">to {{short .To}}</a>{{end}}{{if and .ReplyTo (not $preview)}}<a class="reply-ref" href="/e/{{path .ReplyTo}}">↳ {{short .ReplyTo}}</a>{{end}}<div class="memo-actions">
 <a class="button reply-button" role="button" href="/r/{{path .Room}}/{{path .Page}}?reply={{path .ID}}{{if .PublicKey}}&amp;to={{path .Author}}{{end}}#compose" data-reply-id="{{.ID}}" data-reply-room="{{.Room}}" data-reply-page="{{.Page}}" data-reply-author="{{if .PublicKey}}{{.Author}}{{end}}">Reply</a>
 <button class="quiet-button report-button" type="button" data-report-id="{{.ID}}" aria-label="Report message" title="Report message">{{template "report-icon"}}</button>
 </div>

@@ -35,7 +35,7 @@ async function post(text,extra=''){
     await page.waitForTimeout(400);
     assert.equal(await page.locator('#memo-text').inputValue(),typed,'every key reached the field as text');
     assert.equal(page.url(),url,'typing did not navigate');
-    assert.equal(await page.evaluate(()=>document.getElementById('compose').classList.contains('compose-inline')),false,'typing r did not open a reply');
+    assert.equal(await page.evaluate(()=>document.getElementById('reply-to').value),'','typing r did not open a reply');
     assert.equal(await page.locator('#shortcuts-dialog').count(),0,'typing ? did not open help');
     assert.equal(await active(),'memo-text','focus stayed in the field');
     // The same in the room/page option fields and with a modifier held at page level.
@@ -83,11 +83,11 @@ async function post(text,extra=''){
     await page.keyboard.press('e');
     assert.equal(await page.locator('#e-'+ids[2]+' .memo-preview-toggle').getAttribute('aria-expanded'),'false','e collapses');
     await page.locator('#e-'+ids[2]).focus();await page.keyboard.press('r');
-    assert.equal(await page.evaluate(id=>document.getElementById('compose').closest('.memo')?.id==='e-'+id,ids[2]),true,'r opened the reply under the focused message');
+    assert.equal(await page.evaluate(id=>document.getElementById('reply-to').value==='' + id,ids[2]),true,'r addressed the composer to the focused message');
     assert.equal(await active(),'memo-text');
-    await page.waitForFunction(()=>/Reply composer open/.test(document.getElementById('shortcut-status').textContent));
-    await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.getElementById('compose').classList.contains('compose-inline')),true,'first Escape only leaves the field');
-    await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.getElementById('compose').classList.contains('compose-inline')),false,'second Escape closes the inline reply');
+    await page.waitForFunction(()=>/Composer open/.test(document.getElementById('shortcut-status').textContent));
+    await page.keyboard.press('Escape');assert.notEqual(await page.evaluate(()=>document.getElementById('reply-to').value),'','first Escape only leaves the field');
+    await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.getElementById('reply-to').value),'','second Escape clears the reply');
     assert.equal(await page.locator('#memo-text').inputValue(),'A draft that Escape must never discard','Escape never discards typed text');
     assert.equal(await page.evaluate(id=>document.activeElement.id==='e-'+id,ids[2]),true,'focus returns to the message');
 

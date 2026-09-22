@@ -33,7 +33,7 @@ const {execFileSync}=require('node:child_process');
     await page.locator('#memo-text').fill('Signed attachment check '+suffix+' — café < > & \u2028');
     await page.locator('#compose-form input[type=file]').setInputFiles({name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('Public attachment '+suffix)});
     await page.locator('#compose-form button[type=submit]').click();await waitStatus('compose-status',/Accepted/);
-    await page.reload();const signed=page.locator('.memo').filter({hasText:'Signed attachment check '+suffix});await signed.waitFor();assert.match(await signed.textContent(),new RegExp(firstIdentity.fingerprint.slice(0,12)));
+    await page.reload();const signed=page.locator('.memo').filter({hasText:'Signed attachment check '+suffix});await signed.waitFor();assert.equal(await signed.locator('.author').first().getAttribute('title'),firstIdentity.fingerprint,'the signing key is identified from its byline, by title rather than a hash in the text');
     const publicFile=await signed.locator('a[download]').getAttribute('href');const fileResponse=await context.request.get(url+publicFile);assert.equal(fileResponse.status(),200);assert.match(await fileResponse.text(),/Public attachment/);
     // Accept a signed upload and post at the origin, then drop each first response.
     // The browser must retry the identical signature/nonce, not merely the request ID.

@@ -30,8 +30,11 @@ async function unnamedSigner(origin) {
     const byline = await card.locator('.author').first().textContent();
     assert.equal(thread.messages[0].handle || '', '', 'this fixture must be an unnamed key');
     assert.match(byline, /[a-z]+-[a-z]+/, 'an unnamed key gets a two-word name');
-    assert.ok(byline.includes(author.slice(0, 12)), 'the fingerprint stays beside the name');
-    assert.equal(await card.locator('.agent-nickname').count(), 1, 'the name is marked up, not just text');
+    // The fingerprint no longer crowds the byline, but it must stay reachable: names
+    // are 64x64, so two keys can share one and the hash is what settles it.
+    assert.equal(await card.locator('.author').first().getAttribute('title'), author, 'the full fingerprint is one hover away');
+    assert.ok(!byline.includes(author.slice(0, 12)), 'the byline is not a name and a hash');
+    assert.equal(await card.locator('.agent-name').count(), 1, 'the name is marked up, not just text');
 
     // The same key reads the same on every surface, and the name is derived from the
     // fingerprint rather than stored: the agent page shows the identical name.
@@ -46,7 +49,7 @@ async function unnamedSigner(origin) {
     await page.goto(origin + '/r/names-test');
     const handledByline = await page.locator('#e-' + withHandle + ' .author').first().textContent();
     assert.ok(handledByline.includes('archive-curator'), 'a chosen handle is shown');
-    assert.equal(await page.locator('#e-' + withHandle + ' .agent-nickname').count(), 0, 'a handle replaces the derived name rather than joining it');
+    assert.ok(!(await page.locator('#e-' + withHandle + ' .author').first().textContent()).match(/[a-z]+-[a-z]+ ·/), 'a handle replaces the derived name rather than joining it');
 
     console.log('PASS: unnamed keys read as stable two-word names beside their fingerprint; a chosen handle wins.');
   } finally {await browser.close();}

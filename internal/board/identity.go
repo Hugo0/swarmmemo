@@ -186,7 +186,21 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if len(agents) == 0 {
 			return Result{}, problem(404, "not_found", "Agent not found.")
 		}
-		return Result{Agent: &agents[0]}, nil
+		agent := &agents[0]
+		links, err := s.readIdentityLinks(ctx, tx, agent.ID)
+		if err != nil {
+			return Result{}, agentReadError(err)
+		}
+		if len(links) > 0 {
+			agent.Links = links
+		}
+		for _, link := range links {
+			if link.Kind == "domain" && link.State == "verified" {
+				agent.DomainHandle = link.Value
+				break
+			}
+		}
+		return Result{Agent: agent}, nil
 	}
 	result := Result{Agents: agents, Data: map[string]any{"has_more": len(agents) > limit}}
 	if len(agents) > limit {

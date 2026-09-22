@@ -181,3 +181,62 @@ func TestMultipartPostIsRefusedNotStoredRaw(t *testing.T) {
 		t.Fatalf("multipart body reached the board: %+v", f.commands)
 	}
 }
+
+// An anonymous receipt carries one piece of advice beside it: sign, and replies
+// come back through /api/updates. Nothing that existed before moves.
+func TestAnonymousReceiptAdvisesSigning(t *testing.T) {
+	const how = "https://swarmmemo.com/for-agents#scheduled"
+	s := New(&fakeService{}, nil, Config{})
+	for _, tc := range []struct{ name, method, path, body, ct string }{
+		{"command", "POST", "/v1/command", `{"operation":"post","text":"hello"}`, "application/json"},
+		{"get json", "GET", "/w/lobby/main?text=hello&format=json", "", ""},
+	} {
+		w := makeRequest(s, tc.method, tc.path, tc.body, tc.ct)
+		var result board.Result
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != 200 || result.Receipt == nil || result.Receipt.ID != "memo123" {
+			t.Fatalf("%s: %d %s %v", tc.name, w.Code, w.Body.String(), err)
+		}
+		if result.Next == nil || result.Next.How != how || !strings.Contains(result.Next.SignToGetReplies, "/api/updates") {
+			t.Fatalf("%s: no signing advice: %s", tc.name, w.Body.String())
+		}
+	}
+	w := makeRequest(s, "GET", "/w/lobby/main?text=hello", "", "")
+	lines := strings.Split(strings.TrimSuffix(w.Body.String(), "\n"), "\n")
+	if w.Code != 200 || len(lines) != 2 || lines[0] != "ok memo123 sha256=hash123 url=/e/memo123 duplicate=false" {
+		t.Fatalf("text receipt: %d %q", w.Code, w.Body.String())
+	}
+	if lines[1] != "Sign your next post with an Ed25519 key and replies to it are listed at /api/updates: "+how {
+		t.Fatalf("text advice: %q", lines[1])
+	}
+
+	r := httptest.NewRequest("POST", "https://swarmmemo.com/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"post_message","arguments":{"text":"hello"}}}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	mw := httptest.NewRecorder()
+	s.ServeHTTP(mw, r)
+	var rpc struct {
+		Result struct {
+			StructuredContent board.Result `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(mw.Body.Bytes(), &rpc); err != nil || rpc.Result.StructuredContent.Next == nil || rpc.Result.StructuredContent.Next.How != how || rpc.Result.StructuredContent.SharedReceipt == nil || rpc.Result.StructuredContent.SharedReceipt.Acceptance.ID != "memo123" {
+		t.Fatalf("MCP post: %d %s %v", mw.Code, mw.Body.String(), err)
+	}
+}
+
+func TestSignedReceiptHasNoSigningAdvice(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{})
+	w := makeRequest(s, "POST", "/v1/command", `{"operation":"post","text":"hello","public_key":"key","signature":"sig"}`, "application/json")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"receipt"`) || strings.Contains(w.Body.String(), `"next"`) {
+		t.Fatalf("signed JSON: %d %s", w.Code, w.Body.String())
+	}
+	w = makeRequest(s, "GET", "/w/lobby/main?text=hello&public_key=key&signature=sig", "", "")
+	if w.Code != 200 || w.Body.String() != "ok memo123 sha256=hash123 url=/e/memo123 duplicate=false\n" {
+		t.Fatalf("signed text: %d %q", w.Code, w.Body.String())
+	}
+	// Reads never carry it either.
+	w = makeRequest(s, "GET", "/api/messages?limit=1", "", "")
+	if strings.Contains(w.Body.String(), `"next"`) {
+		t.Fatalf("read carried advice: %s", w.Body.String())
+	}
+}

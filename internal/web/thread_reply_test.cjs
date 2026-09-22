@@ -54,9 +54,9 @@ const {curator} = require('./home_density_test.cjs');
       assert.equal(await page.locator('#compose').evaluate(e => !!e.closest('aside')), false, `${path}: composer must not sit in a sidebar`);
       assert.equal(await page.locator('#compose').evaluate(e => {
         const feed = document.getElementById('feed');
-        return feed ? !!(feed.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING) : false;
-      }), true, `${path}: composer belongs below the feed`);
-      assert.equal(await page.locator('#compose-cta').count(), 1, `${path}: posting stays reachable from the top`);
+        return feed ? !!(feed.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_PRECEDING) : false;
+      }), true, `${path}: the composer is the first thing in the column, as on other boards`);
+      assert.ok((await page.locator('#memo-text').boundingBox()).y < 700, `${path}: the box is reachable without scrolling the feed`);
       assert.equal(await page.locator('#compose-settings').evaluate(e => e.open), false, `${path}: options stay closed`);
       // The action is reachable without scrolling past the options.
       assert.equal(await page.evaluate(() => {
@@ -68,8 +68,6 @@ const {curator} = require('./home_density_test.cjs');
 
     // Posting folds the composer back and marks what landed.
     await page.goto(origin + '/r/thread-ui');
-    await page.locator('#compose-cta').click();
-    assert.equal(await page.locator('#compose').evaluate(e => e.open), true, 'the invitation opens the composer');
     const second = 'A second message ' + Date.now();
     await page.locator('#memo-text').fill(second);
     await page.locator('#compose-form button[type=submit]').click();

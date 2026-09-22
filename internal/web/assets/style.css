@@ -235,17 +235,15 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 .read-conversation{font-size:var(--t-meta);color:var(--muted);text-decoration:none;min-height:var(--quiet-h);display:inline-flex;align-items:center}
 .read-conversation:hover{color:var(--ink);text-decoration:underline}
 /* What you are about to send, visible before you send it. */
-.agent-nickname{font-weight:600}
 /* The action belongs with the message box, above options most readers never open. */
 .compose-actions{display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap;margin:var(--s-3) 0 var(--s-4)}
 .compose-actions .button{min-width:180px}
 .composer-block>.form-status{margin:var(--s-2) 0 var(--s-4)}
-.compose-invite{margin:0 0 var(--s-4)}
-.compose-invite .button{width:100%}
 /* A posted message confirms itself where the reader is already looking. */
 .compose-posted{animation:compose-posted 1s ease-out}
 @keyframes compose-posted{0%{background:var(--surface-3)}100%{background:transparent}}
 @media (prefers-reduced-motion: reduce){.compose-posted{animation:none}}
+.agent-name{font-weight:500}
 .compose-attachments{list-style:none;display:flex;flex-wrap:wrap;gap:var(--s-2);margin:var(--s-2) 0 0;padding:0}
 /* An author display rule beats the UA rule for [hidden], so an empty strip would
    still occupy space and make the composer taller than it looks — which showed up
@@ -300,12 +298,6 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 /* Inline reply. There is exactly one composer; JavaScript relocates that element
    under the message being answered and returns it on Cancel. The no-JavaScript path
    never moves it and keeps the fixed form action. */
-.memo>.compose-inline{margin:var(--s-3) 0 0;padding:var(--s-3) 0 0;border-top:1px solid var(--line)}
-.memo>.compose-inline[open]{padding-bottom:0;border-bottom:0}
-.compose-inline form{max-width:none;margin-top:0}
-.memo>.compose-inline[open]>summary{font-size:var(--t-ui);font-weight:600;min-height:auto;margin-bottom:var(--s-2)}
-.compose-inline .compose-policy{margin-top:var(--s-2)}
-.compose-inline .compose-field textarea{min-height:104px}
 /* The parent is already directly above, so the nested reply never quotes it twice. */
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo-inline-reply>.memo-quote{display:none}
 /* A reply posted from an inline composer is shown where it was written, in full. */
@@ -375,8 +367,6 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .composer>summary::-webkit-details-marker{display:none}
 .composer>summary::before{content:"";width:0;height:0;border-left:5px solid currentColor;border-top:4px solid transparent;border-bottom:4px solid transparent;flex-shrink:0;transition:transform 120ms ease}
 .composer>summary:hover{background:var(--primary-hover);border-color:var(--primary-hover);color:var(--primary-ink);text-decoration:none}
-.composer.compose-inline>summary{background:var(--surface);border-color:var(--field-border);color:var(--ink);font-size:var(--t-ui)}
-.composer.compose-inline>summary:hover{background:var(--surface-2);border-color:var(--line-strong);color:var(--ink)}
 .composer[open]>summary{border-color:transparent;background:transparent;color:var(--ink);padding:0;min-height:32px;font-size:var(--t-heading);font-weight:600;margin-bottom:var(--s-3)}
 .composer[open]>summary::before{transform:rotate(90deg)}
 .composer[open]>summary:hover{background:transparent;border-color:transparent;color:var(--ink);text-decoration:underline;text-underline-offset:4px}
@@ -449,7 +439,7 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .agent-handoff{white-space:pre-wrap;overflow-wrap:anywhere}
 
 /* ---------- sidebar cards, tiles ---------- */
-.rooms-panel h3{font-size:var(--t-ui)}
+.sidebar .section-heading.compact h3{font-size:var(--t-ui)}
 .room-line{display:flex;justify-content:space-between;gap:10px;text-decoration:none;font-size:var(--t-ui);padding:9px 0;overflow-wrap:anywhere}
 .room-line:hover{text-decoration:underline}
 .agent-card{border-top:1px solid var(--line);padding-top:var(--s-5)}
@@ -582,7 +572,6 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
   .memo-actions{margin-left:0;width:100%;justify-content:flex-start;gap:var(--s-4);padding-top:var(--s-1)}
   .memo-quote{padding-left:var(--s-2)}
   .memo-quote-author{margin-bottom:2px}
-  .memo>.compose-inline{padding-left:0}
   .memo-depth-1{margin-left:var(--s-2)}
   .memo-depth-2{margin-left:calc(var(--s-2)*2)}
   .memo-depth-3{margin-left:calc(var(--s-2)*3)}

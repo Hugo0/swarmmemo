@@ -3,7 +3,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
 const origin = process.env.SWARMMEMO_TEST_URL;
 assert.match(origin || '', /^http:\/\/127\.0\.0\.1:\d+$/);
-const paths = ['/guides', '/guides/agent-message-board-incident', '/guides/agent-communication-networks', '/guides/http-agent-messaging', '/guides/4chan-for-agents', '/guides/what-people-try-on-agents', '/guides/post-with-one-http-request', '/guides/where-agents-can-post'];
+const paths = ['/guides', '/guides/agent-message-board-incident', '/guides/agent-communication-networks', '/guides/http-agent-messaging', '/guides/4chan-for-agents', '/guides/what-people-try-on-agents', '/guides/post-with-one-http-request', '/guides/where-agents-can-post', '/guides/agent-board-map'];
 (async () => {
   const browser = await chromium.launch({headless: true, ...(process.env.CHROMIUM_PATH ? {executablePath: process.env.CHROMIUM_PATH} : {})});
   try {
@@ -28,6 +28,14 @@ const paths = ['/guides', '/guides/agent-message-board-incident', '/guides/agent
           if (javaScriptEnabled) {
             await copy.focus();
             assert.equal(await copy.evaluate(e => e === document.activeElement), true);
+          }
+          if (path === '/guides/agent-board-map') {
+            // nofollow only on completeness links; the lookalike domain is text, never a link.
+            assert.equal(await page.locator('a[href*="moltsbooks"]').count(), 0);
+            assert.match(await page.locator('article.prose').innerText(), /moltsbooks\.com/);
+            const nofollow = page.locator('a[rel~="nofollow"]');
+            assert.ok(await nofollow.count() > 0);
+            assert.equal(await nofollow.count(), await page.locator('section:has(> h2:text-is("Listed for completeness")) a[rel="nofollow noopener"]').count());
           }
           if (process.env.SWARMMEMO_SCREENSHOT_DIR && !javaScriptEnabled && path === '/guides') {
             await page.screenshot({path: process.env.SWARMMEMO_SCREENSHOT_DIR + '/guides-' + width + '.png', fullPage: true});

@@ -149,7 +149,10 @@ func TestListingQuotesOnlyParentsAlreadyOnThePage(t *testing.T) {
 		if !strings.Contains(body, `<span class="memo-quote-text">A question with &lt;b&gt;markup&lt;/b&gt; and blank lines.</span>`) {
 			t.Errorf("%s: quoted parent text must be collapsed and escaped", path)
 		}
-		if !strings.Contains(body, `<span class="memo-quote-author">⌘ asker · `+strings.Repeat("a", 12)+`</span>`) {
+		// One label per sender: a handle when the key chose one, otherwise the name
+		// derived from the fingerprint. The hash is reachable from the byline's link
+		// rather than repeated in every quote.
+		if !strings.Contains(body, `<span class="memo-quote-author">⌘ asker</span>`) {
 			t.Errorf("%s: quoted parent must carry its signed authorship", path)
 		}
 		if strings.Count(body, long) != 1 {

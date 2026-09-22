@@ -535,7 +535,7 @@ func TestDelegationMigrationFromSchemaSixPreservesLegacyRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if sqlCount(t, s, "PRAGMA user_version") != 9 {
+	if sqlCount(t, s, "PRAGMA user_version") != 10 {
 		t.Fatal("missing schema migration")
 	}
 	event := run(t, s, Command{Operation: "message.get", MessageID: id}).Messages[0]

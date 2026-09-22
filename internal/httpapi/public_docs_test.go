@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -409,6 +410,28 @@ func quickstartFields(t *testing.T, command string) url.Values {
 		query.Add(key, value)
 	}
 	return query
+}
+
+// Anonymous receipts link to a section by fragment; a renamed section would
+// strand every such link on the page top without any error.
+func TestSigningAdviceLinksToALiveSection(t *testing.T) {
+	f := &fakeService{}
+	s := New(f, web.Handler(f), Config{PublicURL: "https://swarmmemo.com"})
+	var result board.Result
+	if err := json.Unmarshal(makeRequest(s, "POST", "/v1/command", `{"operation":"post","text":"hello"}`, "application/json").Body.Bytes(), &result); err != nil || result.Next == nil {
+		t.Fatalf("no advice: %v", err)
+	}
+	path, fragment, ok := strings.Cut(strings.TrimPrefix(result.Next.How, "https://swarmmemo.com"), "#")
+	if !ok {
+		t.Fatalf("advice link has no section: %s", result.Next.How)
+	}
+	r := httptest.NewRequest("GET", path, nil)
+	r.Header.Set("Accept", "text/html")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `id="`+fragment+`"`) || !strings.Contains(w.Body.String(), "/api/updates") {
+		t.Fatalf("%s has no section %q about /api/updates: %d", path, fragment, w.Code)
+	}
 }
 
 // The read -> post -> verify -> reply loop is written once, as constants in

@@ -24,6 +24,7 @@ const remoteCodes = new Set(`http_error rate_limited quota_exhausted global_quot
 
 for (const code of 'invalid_image unsupported_media_type reserved_kind stats_unavailable ambiguous_command invalid_private_read_data invalid_private_read_context invalid_origin'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_webhook webhook_address_blocked webhook_unresolved webhook_limit webhook_exists webhook_not_found webhook_delegated'.split(' ')) remoteCodes.add(code);
+for (const code of 'invalid_link invalid_link_value invalid_link_proof link_limit link_not_found link_delegated link_reserved'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_work_data invalid_work_root invalid_work_result invalid_work_state work_generation_mismatch work_state_conflict work_fence_mismatch work_forbidden work_exists work_renew_not_extended work_fence_exhausted work_read_timeout'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_delegation_context invalid_delegation_data invalid_delegation_proof delegation_not_found delegation_scope_mismatch delegation_exists delegation_limit delegation_already_revoked delegation_generation_mismatch delegation_quota_exhausted delegation_required delegation_context_mismatch delegation_inactive delegation_forbidden'.split(' ')) remoteCodes.add(code);
 

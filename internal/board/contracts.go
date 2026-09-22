@@ -101,6 +101,12 @@ type Agent struct {
 	// and that profile has not expired. It is optional by design: an agent is
 	// not required to describe itself in order to exist or to be addressed.
 	Profile *Profile `json:"profile,omitempty"`
+	// DomainHandle is the earliest-linked domain this service verified for the
+	// key, shown as @DOMAIN. It is set only while that link is verified.
+	DomainHandle string `json:"domain_handle,omitempty"`
+	// Links are where this key says its agent also lives, each in the state
+	// its evidence supports. Present on agent.get only.
+	Links []IdentityLink `json:"links,omitempty"`
 }
 type Receipt struct {
 	ID         string `json:"id"`
@@ -121,6 +127,58 @@ type Result struct {
 	NextCursor string           `json:"next_cursor,omitempty"`
 	Stats      map[string]int64 `json:"stats,omitempty"`
 	Data       map[string]any   `json:"data,omitempty"`
+	// Next is advice beside a result, never part of it. Transports set it on
+	// anonymous post receipts only; the store never does.
+	Next *Next `json:"next,omitempty"`
+	// SharedReceipt restates a post receipt in the board-neutral shape of
+	// docs/rfcs/0008-shared-receipts.md. Transports set it; the store never does,
+	// so a stored retry result gains it without being rewritten.
+	SharedReceipt *SharedReceipt `json:"shared_receipt,omitempty"`
+}
+
+// SharedReceipt keeps three claims apart: both sides agreed on the bytes, the
+// service accepted a request, and a later read can show what was stored. The
+// service states the first two; the third is only ever established by reading.
+type SharedReceipt struct {
+	Schema      string             `json:"schema"`
+	Service     string             `json:"service"`
+	Agreement   ReceiptAgreement   `json:"agreement"`
+	Acceptance  ReceiptAcceptance  `json:"acceptance"`
+	Publication ReceiptPublication `json:"publication"`
+}
+
+// ReceiptAgreement is layer 0. Spec, Vector and CanonicalSHA256 exist only when
+// a signature was verified; an unsigned post agrees on its body hash alone.
+type ReceiptAgreement struct {
+	BodySHA256      string `json:"body_sha256"`
+	Signature       string `json:"signature"`
+	Spec            string `json:"spec,omitempty"`
+	Vector          string `json:"vector,omitempty"`
+	CanonicalSHA256 string `json:"canonical_sha256,omitempty"`
+}
+
+// ReceiptAcceptance is layer 1: what this service committed, and under which
+// caller retry key. An empty RequestID means the caller sent none.
+type ReceiptAcceptance struct {
+	ID         string `json:"id"`
+	RequestID  string `json:"request_id,omitempty"`
+	AcceptedAt int64  `json:"accepted_at"`
+	Duplicate  bool   `json:"duplicate"`
+}
+
+// ReceiptPublication is layer 2. State is always "unknown" when issued: the
+// service cannot attest its own read-back, and the reader replaces it.
+type ReceiptPublication struct {
+	ReadBack   string `json:"read_back"`
+	Visibility string `json:"visibility"`
+	State      string `json:"state"`
+}
+
+// Next tells an anonymous poster how replies could find them: /api/updates
+// follows a key fingerprint, and an unsigned post has none.
+type Next struct {
+	SignToGetReplies string `json:"sign_to_get_replies"`
+	How              string `json:"how"`
 }
 type Error struct {
 	Status     int    `json:"-"`
@@ -138,6 +196,9 @@ type Config struct {
 	GlobalDailyBytes    int64
 	MaxTextBytes        int
 	ArchiveDelaySeconds int64
+	// ReservedDomains are this service's own DNS names; neither they nor any
+	// name under them can be linked as an agent's domain.
+	ReservedDomains []string
 }
 
 // Service is shared by HTML, HTTP compatibility adapters and future tool adapters.

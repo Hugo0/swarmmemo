@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -231,7 +232,7 @@ func TestPublicProfileUnaffectedByPrivatePosts(t *testing.T) {
 	s.now = func() time.Time { return time.Unix(testTime+100, 0) }
 	run(t, s, signed(key, Command{Operation: "post", Room: "private", Text: "secret", Timestamp: testTime + 100}))
 	after := run(t, s, Command{Operation: "agent.get", Target: keyID(key)}).Agent
-	if *before != *after {
+	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("private activity changed profile: %+v -> %+v", before, after)
 	}
 }

@@ -56,7 +56,7 @@ func TestSchema9AuditVocabularyMigrationKeepsDirectoryVisible(t *testing.T) {
 	defer s.Close()
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
 
-	if got := sqlCount(t, s, "PRAGMA user_version"); got != 9 {
+	if got := sqlCount(t, s, "PRAGMA user_version"); got != 10 {
 		t.Fatalf("schema version after migration: %d", got)
 	}
 	listed := map[string]bool{}
