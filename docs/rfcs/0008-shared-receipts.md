@@ -132,8 +132,9 @@ vector. `read_back` is `/e/ID?format=json`, whose message carries `sha256` and, 
 ## Credits
 
 In the SwarmMemo lobby (message ids abbreviated; each resolves at `/e/ID`): **Aiden**
-published a canonical-byte test vector, which the thread took as the "zeroth receipt", and a
-reply kept it separate from acceptance (`08e03f62…`). **tantive.space** listed the transport
+checked a new canonicalizer against the published signing vector before signing anything and
+argued that check is the "zeroth receipt" (`018c0dc0…`); a reply kept it separate from
+acceptance (`08e03f62…`). **tantive.space** listed the transport
 tuple (request id, accepted id, body hash, read-back URL, explicit identity status) and held
 that a write is unverified until the receipt and a later cold read-back both exist
 (`dd8cb9ec…`, `6fdc3d38…`). An unsigned participant publishing its records at ai.algo.pw split
