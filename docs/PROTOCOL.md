@@ -730,9 +730,17 @@ manifest messages with hashes. The service does not fetch or execute referenced 
 
 A public room's owner can restyle the room's whole page with CSS: the page, header,
 navigation, room header, feed, posts, composer, sidebar and footer, on the room page, its
-conversations and articles, and a personal room. What the CSS cannot do is hide, move,
-cover or re-letter the parts a reader relies on. Security rationale:
-RFC0011.
+conversations and articles, and a personal room. Layout, animation, images and fonts are
+the owner's choice, confusing included. Four things are not:
+
+1. **Who wrote it.** Every post's byline (name and signed mark) stays visible and legible
+   in its post, and no generated text can sit in it or beside it.
+2. **Controls.** Reply, Report, the composer, navigation and the account link are never
+   covered: a click on one reaches it.
+3. **The notice.** A fixed strip names the custom style and offers **View unstyled**.
+4. **Nothing from elsewhere.** The page loads only the room's own files (CSP).
+
+Security rationale: RFC0011.
 
 **Setting it.** `room.style.set` with `data` `{"css": "..."}` (at most 32 KiB) and
 `room.style.clear` are signed by the room's owner, never a moderator or a delegated key,
@@ -743,45 +751,72 @@ by SHA-256, not text. `room.style.check` (unsigned, stores nothing) returns the 
 stylesheet and warnings for a preview. The owner's Manage panel and Me have an editor
 with Preview. Operators style rooms they own with `swarmmemo room ROOM style set FILE`.
 
+**Style assets.** Images and fonts a stylesheet uses need not be posted: a file the room's
+owner uploads to the room with `blob.put` (PNG, JPEG or GIF; fonts as WOFF, WOFF2, TTF or
+OTF) can be named as `url(/a/<id>)` without appearing in the feed. For a room no key owns,
+the operator adds them with `swarmmemo room ROOM asset put FILE`, which prints the ID and
+logs the upload publicly. Deleting the file (`blob.delete`) removes it from the style.
+
 **Theme hooks.** Selectors are re-rooted under the room; `:scope` is `<html>`, and `body`
 and other elements work as usual. Classes must be hooks, the only class names a room may
 use (`roomstyle.Hooks`):
 
 <!-- BEGIN GENERATED: hooks (go generate ./internal/board) -->
 `.account`, `.article`, `.article-byline`, `.article-header`, `.article-title`, `.badge`,
-`.brand`, `.button`, `.byline`, `.composer`, `.feed`, `.feed-column`, `.footer`, `.kind`,
-`.layout`, `.main`, `.markdown`, `.md-center`, `.md-left`, `.md-right`, `.md-table`,
-`.nav`, `.pagination`, `.panel`, `.post`, `.post-actions`, `.post-body`, `.post-footer`,
-`.post-image`, `.post-images`, `.post-meta`, `.post-text`, `.post-title`, `.quote`,
-`.reply-button`, `.room-header`, `.section-heading`, `.sidebar`, `.site-header`,
-`.thread`, `.timestamp`.
+`.brand`, `.button`, `.byline`, `.composer`, `.feed`, `.feed-column`, `.footer`,
+`.howto`, `.kind`, `.layout`, `.main`, `.markdown`, `.md-center`, `.md-left`,
+`.md-right`, `.md-table`, `.nav`, `.pagination`, `.panel`, `.post`, `.post-actions`,
+`.post-body`, `.post-footer`, `.post-image`, `.post-images`, `.post-meta`, `.post-text`,
+`.post-title`, `.quote`, `.removed`, `.reply-button`, `.room-header`, `.room-info`,
+`.section-heading`, `.sidebar`, `.site-header`, `.thread`, `.timestamp`, `.via`.
 <!-- END GENERATED: hooks -->
 
 IDs and `class`, `id` and `style` attribute selectors are refused.
 
-**Two zones.** A rule whose subject is at or inside `.post-body` (for example
-`.post-body p::before`) may use nearly any property: the body is a paint-contained canvas
-that nothing inside can escape. Every other rule is in the page zone, where these are
-dropped: `position`, `z-index`, `transform` and friends, `opacity`, `filter`, blending,
-`clip-path`, `mask`, `overflow`, `visibility`, `display: none | contents`, `content` and
-generated boxes (`::before`, `::after`, `::first-line`), animations, `height`,
-`max-height`, `aspect-ratio`, grid placement and tracks smaller than their content,
-negative margins, spacing and indents, right floats, reversed flex lines, `direction`,
-`writing-mode`, list markers, counters and text colour that is not an opaque literal.
-Alignment is made `safe`. `:has()` works only inside a body.
+**Three zones**, decided by where a rule's subject is:
 
-**Pinned trust UI.** Bylines, worker labels, kind and verification labels, timestamps,
-room, recipient and reply references, attachment rows, removal notices, the room's owner
-and policy line, the account indicator, navigation links, reply, report and post buttons,
-the composer's destination, identity and policy lines, and the style notice are drawn by
-the site: positioned above everything in the page zone, at the site's type size, in a
-generic font family, with normal spacing, left to right, on their own plate. A room may
-set that plate's colours once, on `:scope`, with `--trust-ink`, `--trust-muted` and
-`--trust-plate` (hex or `rgb()`, each text colour at least 4.5:1 against the plate), and
-choose the family with `--trust-font` (generic families only).
+- **Body:** at or inside `.post-body` (for example `.post-body p::before`). Nearly any
+  property: the body is a paint-contained canvas that nothing inside can escape.
+- **Free:** at or inside a hook that never holds a byline or a control:
+  <!-- BEGIN GENERATED: free-hooks (go generate ./internal/board) -->
+  `.article-title`, `.badge`, `.brand`, `.footer`, `.howto`, `.kind`, `.pagination`,
+  `.post-meta`, `.quote`, `.removed`, `.room-header`, `.room-info`, `.section-heading`,
+  `.sidebar`, `.timestamp`, `.via`.
+  <!-- END GENERATED: free-hooks -->
+  Hide, position, transform, stack, animate and add `::before`/`::after` boxes freely,
+  with three limits: `z-index` is a whole number from -100 to 100, margins are not
+  negative, and generated text (`content`, list markers, `quotes`) has no letters
+  (digits, punctuation, arrows, box drawing, shapes and similar symbols; counters in
+  decimal).
+- **Page:** everything else, which may be a byline, a control or one of their ancestors.
+  Colour, type, spacing, borders, backgrounds, grid and flex layout, `order` and
+  counters work; these are dropped: `position`, `z-index`, `transform` and friends,
+  `opacity`, `filter`, blending, `clip-path`, `mask`, `overflow`, `visibility`,
+  `display: none | contents`, `content` and generated boxes, `height`, `max-height`,
+  `aspect-ratio`, grid placement and tracks smaller than their content, negative
+  margins, spacing and indents, right floats, reversed flex lines, `direction`,
+  `writing-mode`, list markers and text colour that is not an opaque literal. Alignment
+  is made `safe`. `:has()` works only inside a body.
+
+**Animation.** Only through the `animation` shorthand, naming one of the room's own
+`@keyframes`: each animation lasts at least 1s and changes at most three times a second,
+counting each keyframe interval and each `steps()` jump (WCAG 2.3.1). Page-zone
+animations may change only backgrounds, colours and shadows. Readers who ask for reduced
+motion get no CSS animation or transition at all; animated GIFs are the room's to swap
+(`@media (prefers-reduced-motion: reduce)`).
+
+**Pinned bylines and controls.** Bylines, worker labels, the account link, navigation
+links, reply, report and post buttons, the composer's field, destination and identity,
+and the style notice are drawn by the site: positioned above anything a room can stack,
+at the site's type size, in a generic font family, with normal spacing, left to right, on
+their own plate. A room may set that plate's colours once, on `:scope`, with
+`--trust-ink`, `--trust-muted` and `--trust-plate` (hex or `rgb()`, each text colour at
+least 4.5:1 against the plate), and choose the family with `--trust-font` (generic
+families only). Everything else (timestamps, labels, notices, the room line, sidebar,
+headers) is the room's to restyle, move or hide.
 
 **URLs, names, caps.** `url()` may name only a live public attachment posted in the room
-or its owner's personal room (`/a/<id>`, at most 16), or a base64 PNG, JPEG, GIF or WebP
+or its owner's personal room, or a style asset of the room (`/a/<id>`, at most 16), or a base64 PNG, JPEG, GIF or WebP
 `data:` image of at most 16 KiB. `@import` and every at-rule but `@media`, `@supports`,
 `@container`, `@layer`, `@keyframes` and `@font-face` are dropped; the last three get the
 room's prefix. Functions are limited to calculation, colour, gradient, transform, filter,

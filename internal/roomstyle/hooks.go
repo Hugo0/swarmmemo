@@ -12,7 +12,9 @@ import (
 // names the page's own class. The public names stay stable when markup changes;
 // only this map moves. Every other class on the page is reserved and a selector
 // naming it is dropped. Adding a hook is a security decision: a hook on a trust
-// element must also be pinned in internal/web/assets/style.css (@layer room-trust).
+// element (a byline or a control) must also be pinned in
+// internal/web/assets/style.css (@layer room-trust), and a hook listed in
+// FreeClasses must never contain one.
 var Hooks = map[string]string{
 	// Page chrome.
 	"site-header": "topbar",
@@ -28,6 +30,8 @@ var Hooks = map[string]string{
 	"feed":            "feed",
 	"thread":          "thread-feed",
 	"sidebar":         "sidebar",
+	"room-info":       "room-governance",
+	"howto":           "via-howto",
 	"panel":           "panel",
 	"section-heading": "section-heading",
 	"composer":        "composer",
@@ -47,6 +51,8 @@ var Hooks = map[string]string{
 	"byline":       "author",
 	"timestamp":    "memo-time",
 	"kind":         "kind",
+	"via":          "via",
+	"removed":      "removed",
 	"badge":        "badge",
 	"reply-button": "reply-button",
 	// Long-form posts.
@@ -60,6 +66,16 @@ var Hooks = map[string]string{
 	"md-right":       "md-right",
 	"md-center":      "md-center",
 }
+
+// FreeClasses are the page classes of hooks that never contain a byline or a
+// control (Reply, Report, the composer, navigation, the account link). A rule
+// whose subject is at or below one of them is in the free zone: it may hide,
+// position, transform and animate what it matches, because nothing it matches
+// is trust UI, and the site draws bylines and controls above every box the
+// free zone can stack (it caps z-index). internal/web's page test holds every
+// rendered page to this: no trust element inside a free element.
+var FreeClasses = []string{"sidebar", "room-governance", "via-howto", "page-heading", "section-heading", "footer", "brand",
+	"memo-meta", "memo-time", "kind", "badge", "via", "removed", "memo-quote", "pagination", "article-title"}
 
 // BodyClass is the canvas root's class: selectors whose subject is at or below
 // it are in the body zone.
@@ -95,6 +111,18 @@ var hookList = sync.OnceValue(func() string {
 	names := make([]string, 0, len(Hooks))
 	for name := range Hooks {
 		names = append(names, "."+name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, " ")
+})
+
+// freeHookList names the free hooks, for messages.
+var freeHookList = sync.OnceValue(func() string {
+	var names []string
+	for name, class := range Hooks {
+		if slices.Contains(FreeClasses, class) {
+			names = append(names, "."+name)
+		}
 	}
 	sort.Strings(names)
 	return strings.Join(names, " ")

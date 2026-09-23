@@ -53,6 +53,9 @@ func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {
 	disposition, contentType := "attachment", "application/octet-stream"
 	if inline := board.ImageMediaType(raw); inline != "" {
 		disposition, contentType = "inline", inline
+	} else if font := board.FontMediaType(raw); font != "" {
+		// A room stylesheet's @font-face loads it; it stays a download elsewhere.
+		contentType = font
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))

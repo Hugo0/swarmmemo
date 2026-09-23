@@ -172,7 +172,7 @@ func TestRoomCanvasInPersonalAndPolicyRooms(t *testing.T) {
 	s := personalStyled{base}
 	for _, path := range []string{"/@" + key[:12], "/r/lobby", "/e/m1"} {
 		body := get(t, s, path, "swarmmemo.com").Body.String()
-		inside, outside := classesByCanvas(t, body)
+		inside, outside, _ := classesByCanvas(t, body)
 		if len(inside) == 0 {
 			t.Fatalf("%s: no canvas rendered", path)
 		}

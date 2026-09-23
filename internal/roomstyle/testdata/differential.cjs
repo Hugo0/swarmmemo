@@ -14,12 +14,12 @@ const fs = require('node:fs');
   try {
     const page = await browser.newPage();
     await page.goto('about:blank');
-    const bad = await page.evaluate(({scope, cases}) => {
+    const bad = await page.evaluate(({scope, cases, free}) => {
       const bad = [];
       const ruleTypes = ['CSSStyleRule', 'CSSMediaRule', 'CSSSupportsRule', 'CSSContainerRule', 'CSSLayerBlockRule',
         'CSSLayerStatementRule', 'CSSKeyframesRule', 'CSSKeyframeRule', 'CSSFontFaceRule'];
       // Page-zone properties that could hide, move, stack, clip or draw (zones.go).
-      const pageDenied = /^(position|z-index|top|left|right|bottom|inset.*|transform.*|translate|rotate|scale|perspective.*|zoom|opacity|filter|backdrop-filter|mix-blend-mode|isolation|will-change|clip|clip-path|mask.*|contain|contain-intrinsic.*|content-visibility|visibility|content|overflow.*|line-clamp|text-indent|height|max-height|block-size|max-block-size|aspect-ratio|order|direction|unicode-bidi|writing-mode|text-orientation|animation.*|offset.*|list-style.*|counter-.*|quotes|hyphenate-character|columns|column-count|column-width|column-span|break-.*|grid-(row|column|area)(-.*)?|grid-template-areas|anchor-.*|position-.*|view-transition-.*|container|container-type)$/;
+      const pageDenied = /^(position|z-index|top|left|right|bottom|inset.*|transform.*|translate|rotate|scale|perspective.*|zoom|opacity|filter|backdrop-filter|mix-blend-mode|isolation|will-change|clip|clip-path|mask.*|contain|contain-intrinsic.*|content-visibility|visibility|content|overflow.*|line-clamp|text-indent|height|max-height|block-size|max-block-size|aspect-ratio|direction|unicode-bidi|writing-mode|text-orientation|offset.*|list-style.*|quotes|hyphenate-character|columns|column-count|column-width|column-span|break-.*|grid-(row|column|area)(-.*)?|grid-template-areas|anchor-.*|position-.*|view-transition-.*|container|container-type)$/;
       // Drop what cannot load anything before looking for url() and friends:
       // the allowed URL forms and strings go; escaped name characters outside
       // strings are decoded, since u\72l( is url( to a tokenizer.
@@ -69,14 +69,29 @@ const fs = require('node:fs');
             if (type === 'CSSStyleRule') {
               if (!selectors(rule.selectorText).every(s => s.trim().startsWith('.' + scope))) bad.push(['selector', rule.selectorText, c.in, c.out]);
               if (rule.cssRules && rule.cssRules.length) bad.push(['nested rule', rule.cssText, c.in, c.out]);
-              const afterBody = rule.selectorText.split('.room-body').slice(1).join('');
-              const pageZone = !rule.selectorText.includes('.room-body') || /[~+]/.test(afterBody);
+              // A selector is outside the page zone when it names the canvas root or
+              // a free hook with no sibling step after it (selector.go); a rule is
+              // page-zone when any of its selectors is.
+              const zoneOf = sel => {
+                let zone = 'page';
+                for (const [cls, z] of [['room-body', 'body'], ...free.map(f => [f, 'free'])]) {
+                  const re = new RegExp('\\.' + cls + '(?![\\w-])');
+                  const parts = sel.split(re);
+                  if (parts.length > 1 && !/[~+]/.test(parts[parts.length - 1]) && zone !== 'body') zone = z;
+                }
+                return zone;
+              };
+              const zones = selectors(rule.selectorText).map(zoneOf);
+              const pageZone = zones.includes('page');
+              const freeZone = !pageZone && zones.includes('free');
               for (let i = 0; i < rule.style.length; i++) {
                 const prop = rule.style[i], value = inert(rule.style.getPropertyValue(prop));
                 if (/(^|[^\w\-\u0080-\u{10ffff}])url\(/iu.test(value)) bad.push(['url', prop, value, c.in, c.out]);
                 if (/(^|[^\w\-\u0080-\u{10ffff}])(-webkit-)?(image-set|image|cross-fade|element|src|paint)\(/iu.test(value)) bad.push(['loading function', prop, value, c.in, c.out]);
                 if (pageZone && pageDenied.test(prop) && !(prop === 'height' && value === 'auto')) bad.push(['page-zone property', prop, value, rule.selectorText, c.in, c.out]);
                 if (pageZone && prop.startsWith('-') && !prop.startsWith('--')) bad.push(['page-zone vendor property', prop, c.in, c.out]);
+                if (freeZone && prop === 'z-index' && Math.abs(parseInt(value, 10)) > 100) bad.push(['free-zone z-index', value, c.in, c.out]);
+                if ((pageZone || freeZone) && prop === 'content' && /\p{L}/u.test(value.replace(/ALLOWED|\\[0-9a-f]+ ?|counter\([^)]*\)|url\([^)]*\)|\b(none|normal|open-quote|close-quote|no-open-quote|no-close-quote|decimal-leading-zero|decimal)\b/g, ''))) bad.push(['letters in generated text', value, c.in, c.out]);
               }
             }
             if (type === 'CSSFontFaceRule') {

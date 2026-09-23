@@ -34,7 +34,7 @@ func variety(room string) []board.Message {
 	image := board.Attachment{ID: "0123456789abcdef0123456789abcdef", Filename: "a.png", MediaType: "image/png", Size: 9, Hash: strings.Repeat("0", 64)}
 	file := board.Attachment{ID: "fedcba9876543210fedcba9876543210", Filename: "notes.txt", MediaType: "text/plain", Size: 9, Hash: strings.Repeat("1", 64)}
 	return []board.Message{
-		{ID: "m1", Sequence: 1, Room: room, Page: "main", Kind: "note", Text: "anonymous", Handle: "claimed"},
+		{ID: "m1", Sequence: 1, Room: room, Page: "main", Kind: "note", Text: "anonymous", Handle: "claimed", Via: "dns"},
 		{ID: "m2", Sequence: 2, Room: room, Page: "main", Kind: "request", Text: "signed", PublicKey: key, Author: key, Handle: "weaver", To: key, ReplyTo: "m1"},
 		{ID: "m3", Sequence: 3, Room: room, Page: "ideas", Kind: "imported", Curated: true, Text: curatorDisclosure + "\nsummary\nSource: https://example.com/x"},
 		{ID: "m4", Sequence: 4, Room: room, Page: "main", Kind: "simulation", Text: "sim", PublicKey: key, Author: key, DelegationID: key},
@@ -49,7 +49,11 @@ func styled(styles map[string]string, visibility string) *styledService {
 	s.execute = func(c board.Command) (board.Result, error) {
 		switch c.Operation {
 		case "room.get":
-			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: visibility}}, nil
+			r := &board.Room{Name: c.Room, Visibility: visibility, Policy: &board.RoomPolicy{Write: "open", Reply: "anyone", Rules: "Be kind."}}
+			if c.Room == "wire" {
+				r.Policy.WriteVia = []string{"dns"}
+			}
+			return board.Result{OK: true, Room: r}, nil
 		case "messages.list":
 			return board.Result{OK: true, Messages: variety(c.Room)}, nil
 		case "thread.get":
@@ -79,16 +83,27 @@ var (
 )
 
 // classesByCanvas walks the page's tags and reports every class used inside a
-// canvas and every class used outside one.
-func classesByCanvas(t *testing.T, body string) (inside, outside map[string]bool) {
+// canvas and every class used outside one. inFree maps each class (and each
+// id, as "#id", and each form control, as "<tag>") used inside a free-hook
+// element to that element's class.
+func classesByCanvas(t *testing.T, body string) (inside, outside map[string]bool, inFree map[string]string) {
 	t.Helper()
-	inside, outside = map[string]bool{}, map[string]bool{}
+	inside, outside, inFree = map[string]bool{}, map[string]bool{}, map[string]string{}
 	type open struct {
 		tag    string
 		canvas bool
+		free   string
 	}
 	var stack []open
 	depth := 0
+	free := func() string {
+		for i := len(stack) - 1; i >= 0; i-- {
+			if stack[i].free != "" {
+				return stack[i].free
+			}
+		}
+		return ""
+	}
 	for _, m := range tagPattern.FindAllStringSubmatch(body, -1) {
 		closing, tag, attrs, self := m[1] == "/", strings.ToLower(m[2]), m[3], m[4] == "/"
 		if closing {
@@ -108,6 +123,17 @@ func classesByCanvas(t *testing.T, body string) (inside, outside map[string]bool
 		if c := classPattern.FindStringSubmatch(attrs); c != nil {
 			classes = strings.Fields(c[1])
 		}
+		if holder := free(); holder != "" {
+			for _, c := range classes {
+				inFree[c] = holder
+			}
+			if id := idPattern.FindStringSubmatch(attrs); id != nil {
+				inFree["#"+id[1]] = holder
+			}
+			if slices.Contains([]string{"button", "textarea", "input", "select", "form"}, tag) {
+				inFree["<"+tag+">"] = holder
+			}
+		}
 		for _, c := range classes {
 			if depth > 0 {
 				inside[c] = true
@@ -122,29 +148,50 @@ func classesByCanvas(t *testing.T, body string) (inside, outside map[string]bool
 		if canvas {
 			depth++
 		}
-		stack = append(stack, open{tag, canvas})
+		holder := ""
+		for _, c := range classes {
+			if slices.Contains(roomstyle.FreeClasses, c) {
+				holder = c
+			}
+		}
+		stack = append(stack, open{tag, canvas, holder})
 	}
 	if depth != 0 {
 		t.Fatalf("unbalanced canvas markup")
 	}
-	return inside, outside
+	return inside, outside, inFree
 }
 
-// trustUI is the reserved set: elements whose look a room may colour but never
-// hide, move, cover, shrink or re-letter. Each is pinned in style.css.
-var trustUI = []string{".memo-meta", ".author", ".worker-label", ".via", ".badge", ".kind", ".addressed", ".reply-ref", ".memo-quote-author",
-	".attachment", ".removed", ".notice", ".reply-button", ".report-button", ".compose-destination", ".compose-context", ".reply-preview",
-	".compose-actions .button", ".compose-policy", "[id=compose-identity]", ".site-nav a", ".workspace-link", ".article-byline", ".room-facts", ".publication-address"}
+var idPattern = regexp.MustCompile(`\bid="([^"]*)"`)
+
+// trustUI is the reserved set: bylines and controls, whose look a room may
+// colour but never hide, cover, shrink or re-letter. Each is pinned in style.css.
+var trustUI = []string{".author", ".worker-label", ".reply-button", ".report-button", ".compose-destination",
+	".compose-actions .button", "[id=compose-identity]", ".site-nav a", ".workspace-link", ".article-byline",
+	".composer>summary", "[id=memo-text]", "[id=clear-reply]", "[id=compose-settings]>summary"}
+
+// trustClasses and trustIDs are what no free-hook element may contain: the
+// bylines, the controls and the composer.
+var (
+	trustClasses = []string{"author", "worker-label", "reply-button", "report-button", "memo-actions", "memo-bottom", "compose-destination", "compose-actions",
+		"composer", "site-nav", "workspace-link", "article-byline", "room-style-strip", "memo", "room-canvas", "feed"}
+	trustIDs = []string{"#compose", "#compose-form", "#memo-text", "#compose-identity", "#clear-reply", "#room-style-toggle"}
+)
 
 // The trust-UI rule, checked on the rendered page rather than trusted to the
 // templates. A canvas (the body zone, where room CSS may do almost anything)
-// holds only body classes; trust UI is outside every canvas, where the page-zone
-// rules and the pins apply; every trust element is pinned; every hook exists.
+// holds only body classes; bylines and controls are outside every canvas and
+// every free-hook element, where the page-zone rules and the pins apply; every
+// trust element is pinned; every hook exists.
 func TestCanvasHoldsOnlyContentAndTrustUIStaysOutside(t *testing.T) {
-	sheet, _, _ := roomstyle.Sanitize("p{color:red}", "lobby")
 	seen := map[string]bool{}
-	for _, path := range []string{"/r/lobby", "/e/m1", "/e/m2"} {
-		w := get(t, styled(map[string]string{"lobby": "p{color:red}"}, "public"), path, "swarmmemo.com")
+	for _, path := range []string{"/r/lobby", "/e/m1", "/e/m2", "/r/wire"} {
+		room := "lobby"
+		if path == "/r/wire" {
+			room = "wire"
+		}
+		sheet, _, _ := roomstyle.Sanitize("p{color:red}", room)
+		w := get(t, styled(map[string]string{room: "p{color:red}"}, "public"), path, "swarmmemo.com")
 		body := w.Body.String()
 		if !strings.Contains(body, `<html lang="en" class="room-styled `+sheet.Scope+`">`) {
 			t.Errorf("%s: <html> does not carry the room classes", path)
@@ -152,9 +199,14 @@ func TestCanvasHoldsOnlyContentAndTrustUIStaysOutside(t *testing.T) {
 		if !regexp.MustCompile(`<body [^>]*>\n<p class="room-style-strip" id="room-style-strip">`).MatchString(body) {
 			t.Errorf("%s: the disclosure is not the first thing in <body>", path)
 		}
-		inside, outside := classesByCanvas(t, body)
+		inside, outside, inFree := classesByCanvas(t, body)
 		if len(inside) == 0 {
 			t.Fatalf("%s: no canvas rendered", path)
+		}
+		for _, trust := range append(slices.Clone(trustClasses), trustIDs...) {
+			if holder, ok := inFree[trust]; ok {
+				t.Errorf("%s: %s is inside a .%s, where free-zone CSS can hide or cover it", path, trust, holder)
+			}
 		}
 		for c := range inside {
 			seen[c] = true
@@ -168,7 +220,7 @@ func TestCanvasHoldsOnlyContentAndTrustUIStaysOutside(t *testing.T) {
 				t.Errorf("%s: body class %q is used outside a canvas", path, c)
 			}
 		}
-		for _, trust := range []string{"memo-meta", "memo-bottom", "author", "removed", "room-style-strip", "composer", "memo-actions", "report-button", "kind", "topbar", "attachment"} {
+		for _, trust := range []string{"memo-bottom", "author", "room-style-strip", "memo-actions", "report-button", "topbar"} {
 			if !outside[trust] || inside[trust] {
 				t.Errorf("%s: trust class %q not rendered outside the canvas", path, trust)
 			}
@@ -186,7 +238,7 @@ func TestCanvasHoldsOnlyContentAndTrustUIStaysOutside(t *testing.T) {
 	css, _ := files.ReadFile("assets/style.css")
 	layer := string(css[strings.Index(string(css), "@layer room-trust{"):])
 	layer = layer[:strings.Index(layer, "\n}\n")]
-	for _, trust := range append(trustUI, ".room-canvas .md-host", "#room-style-strip", ":where(.room-canvas){") {
+	for _, trust := range append(trustUI, ".room-canvas .md-host", "#room-style-strip", ":where(.room-canvas){", "prefers-reduced-motion:reduce") {
 		if !strings.Contains(layer, trust) {
 			t.Errorf("trust element %q is not pinned in @layer room-trust", trust)
 		}

@@ -1,9 +1,12 @@
 package roomstyle
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -37,8 +40,8 @@ func sanitize(t *testing.T, css string) (Stylesheet, []Warning) {
 
 func TestExamplesPassWithoutWarnings(t *testing.T) {
 	paths, _ := filepath.Glob("examples/*.css")
-	if len(paths) != 4 {
-		t.Fatalf("want 4 example themes, found %v", paths)
+	if len(paths) != 5 {
+		t.Fatalf("want 5 example themes, found %v", paths)
 	}
 	for _, path := range paths {
 		src, err := os.ReadFile(path)
@@ -67,11 +70,34 @@ func TestProtocolRoomStylesPassWithoutWarnings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, warnings := sanitize(t, string(src)); len(warnings) != 0 {
-			t.Errorf("%s: %v", path, warnings)
+		// apply-styles.sh replaces url("/a/ASSET:file") with the uploaded asset's
+		// ID; here each file gets a stand-in ID the room is told it owns, and the
+		// file must exist.
+		ids := map[string]bool{}
+		css := assetRef.ReplaceAllStringFunc(string(src), func(ref string) string {
+			name := strings.TrimPrefix(ref, "ASSET:")
+			if _, err := os.Stat(filepath.Join(filepath.Dir(path), "assets", name)); err != nil {
+				t.Errorf("%s names a missing asset %s", path, name)
+			}
+			sum := sha256.Sum256([]byte(name))
+			id := hex.EncodeToString(sum[:16])
+			ids[id] = true
+			return id
+		})
+		out, warnings, err := SanitizeWith(css, "protocol", Options{Attachment: func(id string) bool { return ids[id] }})
+		if err != nil || len(warnings) != 0 {
+			t.Errorf("%s: %v %v", path, err, warnings)
+		}
+		if again, rewarn, err := SanitizeWith(out.CSS, "protocol", Options{Attachment: func(id string) bool { return ids[id] }}); err != nil || again.CSS != out.CSS || len(rewarn) != 0 {
+			t.Errorf("%s: not idempotent: %v %v", path, err, rewarn)
+		}
+		if len(ids) > MaxAttachments {
+			t.Errorf("%s names %d assets; a stylesheet may name %d", path, len(ids), MaxAttachments)
 		}
 	}
 }
+
+var assetRef = regexp.MustCompile(`ASSET:[A-Za-z0-9._-]+`)
 
 func TestScopingAndHooks(t *testing.T) {
 	S := "." + ScopeClass(room)
@@ -205,7 +231,28 @@ func TestAdversarialCorpus(t *testing.T) {
 	// Full-page attacks: each tries to hide, cover, move away or forge trust UI
 	// from the page zone. The marker after "=>" must not survive.
 	for name, attack := range map[string]string{
-		"cover the nav":             `.sidebar{position:fixed;inset:0;z-index:99;background:#fff} => position`,
+		"cover the nav":             `.post-footer{position:fixed;inset:0;z-index:99;background:#fff} => position`,
+		"free zone above bylines":   `.sidebar{position:fixed;inset:0;z-index:101;background:#fff} => z-index`,
+		"free zone z-index var":     `.room-header{position:relative;z-index:var(--z)} => z-index`,
+		"free zone z-index calc":    `.post-meta{position:relative;z-index:calc(100 + 1)} => z-index`,
+		"free zone pulls feed up":   `.room-header{margin-bottom:-99999px} => margin`,
+		"free pseudo pulls feed up": `.room-header::after{content:"";display:block;margin-block-end:calc(1px*cos(180deg))} => margin`,
+		"free fake byline":          `.post-meta::after{content:"⌘ weaver"} => weaver`,
+		"free fake check":           `.post-meta::after{content:"✓"} => ✓`,
+		"free escaped letters":      `.post-meta::after{content:"\77 eaver"} => eaver`,
+		"free fullwidth letters":    `.via::after{content:"ｗｅａｖｅｒ"} => ｗ`,
+		"free circled letters":      `.via::after{content:"ⓦⓔⓐⓥⓔⓡ"} => ⓦ`,
+		"free math letters":         `.via::after{content:"𝐰𝐞𝐚𝐯𝐞𝐫"} => 𝐰`,
+		"free bidi control":         `.via::after{content:"\202e 123"} => 123`,
+		"free attr":                 `.post-meta::after{content:attr(title)} => attr`,
+		"free var content":          `.post-meta::after{content:var(--name)} => content`,
+		"free roman counter":        `.post-meta::before{content:counter(item, upper-roman)} => upper-roman`,
+		"free counters separator":   `.post-meta::before{content:counters(item, "by weaver")} => weaver`,
+		"free alpha marker":         `.sidebar li{list-style-type:lower-alpha} => lower-alpha`,
+		"free string marker":        `.sidebar li{list-style:"weaver "} => weaver`,
+		"free quotes":               `.sidebar q{quotes:"weaver" "!"} => weaver`,
+		"free has probe":            `.sidebar:has(a){color:red} => has(`,
+		"free keyword content":      `.post-meta::before{content:weaver} => weaver`,
 		"z-index war":               `.post{z-index:2147483647} => z-index`,
 		"byline transparent":        `.byline{color:transparent} => color`,
 		"byline alpha":              `.post-footer{color:rgb(0 0 0 / .01)} => color`,
@@ -224,7 +271,7 @@ func TestAdversarialCorpus(t *testing.T) {
 		"fake verified before":      `.post-meta::before{content:"verified";position:absolute} => verified`,
 		"fake verified first-line":  `.post-footer::first-line{color:red} => first-line`,
 		"strip offscreen":           `p{transform:translateX(-9999px)} => transform`,
-		"translate property":        `.room-header{translate:0 -9999px} => translate`,
+		"translate property":        `.feed{translate:0 -9999px} => translate`,
 		"filter opacity":            `:scope{filter:opacity(0)} => filter`,
 		"opacity":                   `.post-footer{opacity:0} => opacity`,
 		"clip-path":                 `.post-footer{clip-path:inset(50%)} => clip-path`,
@@ -245,10 +292,29 @@ func TestAdversarialCorpus(t *testing.T) {
 		"negative margin infinity":  `.post-footer{margin-top:calc(1px * -infinity)} => margin`,
 		"negative spacing sin":      `.byline{word-spacing:calc(1px*sin(270deg))} => word-spacing`,
 		"vertical-align length":     `.byline{vertical-align:9999px} => vertical-align`,
-		"huge outline":              `.sidebar{outline:3000px solid #fff} => outline`,
-		"outline offset":            `.sidebar{outline-offset:-3000px} => outline`,
+		"huge outline":              `.post{outline:3000px solid #fff} => outline`,
+		"outline offset":            `.post-footer{outline-offset:-3000px} => outline`,
 		"zoom":                      `body{zoom:.01} => zoom`,
-		"animation":                 `.post{animation:k 1s} => animation`,
+		"animation of a site name":  `.post{animation:compose-posted 1s} => animation`,
+		"animation hides byline":    `@keyframes k{to{opacity:0}}.post-footer{animation:k 1s forwards} => animation:`,
+		"animation moves byline":    `@keyframes k{to{transform:translateX(-9999px)}}.post{animation:k 1s forwards} => animation:`,
+		"animation display none":    `@keyframes k{to{display:none}}.post{animation:k 1s forwards} => animation:`,
+		"animation visibility":      `@keyframes k{to{visibility:hidden}}.nav{animation:k 1s forwards} => animation:`,
+		"animation stacks":          `@keyframes k{to{z-index:9;position:relative}}.feed{animation:k 1s forwards} => animation:`,
+		"animation token":           `@keyframes k{to{--t-meta:0px}}.post{animation:k 1s forwards} => animation:`,
+		"animation free z-index":    `@keyframes k{to{z-index:500}}.sidebar{position:fixed;animation:k 1s forwards} => animation:`,
+		"animation free letters":    `@keyframes k{to{content:"weaver"}}.post-meta::after{content:"";animation:k 1s forwards} => animation:`,
+		"flash fast":                `@keyframes k{to{background:#fff}}.post{animation:k .1s infinite alternate} => animation:`,
+		"flash steps":               `@keyframes k{to{background-color:#fff}}.post{animation:k 2s steps(20) infinite} => animation:`,
+		"flash many stops":          `@keyframes k{0%,20%,40%,60%,80%{color:#000}10%,30%,50%,70%,90%{color:#fff}}.post{animation:k 1s infinite} => animation:`,
+		"flash keyframe steps":      `@keyframes k{from{background-color:#000;animation-timing-function:steps(50)}to{background-color:#fff}}.post-body{animation:k 1s infinite} => steps(50)`,
+		"flash longhand duration":   `@keyframes k{to{background-color:#fff}}.post{animation:k 2s infinite}.post{animation-duration:.05s} => .05s`,
+		"flash longhand timing":     `.post-body{animation-timing-function:steps(99)} => steps(99)`,
+		"flash via var":             `@keyframes k{to{background-color:#fff}}.post{animation:k var(--d) infinite} => animation:`,
+		"flash in body":             `@keyframes k{to{background-color:#fff}}.post-body{animation:k .2s infinite alternate} => animation:`,
+		"flash webkit":              `@keyframes k{to{background-color:#fff}}.post-body{-webkit-animation:k .2s infinite} => webkit`,
+		"scroll-driven":             `.post-body{animation-timeline:scroll()} => timeline`,
+		"no duration":               `@keyframes k{to{background-color:#fff}}.post{animation:k infinite} => animation:`,
 		"all unset":                 `.nav a{all:unset} => all:`,
 		"touch-action":              `:scope{touch-action:none} => touch-action`,
 		"line-clamp":                `.post-footer{-webkit-line-clamp:1} => clamp`,
@@ -259,14 +325,14 @@ func TestAdversarialCorpus(t *testing.T) {
 		"will-change":               `.post{will-change:transform} => will-change`,
 		"blend":                     `.post{mix-blend-mode:difference} => blend`,
 		"list marker string":        `.post-footer{display:list-item;list-style-type:"verified "} => verified`,
-		"counter text":              `.post{counter-reset:verified} => verified`,
+		"counter string":            `.post{counter-reset:"verified" 1} => verified`,
 		"hyphenate string":          `.post-footer{hyphenate-character:"verified"} => verified`,
 		"emphasis mark":             `.byline{text-emphasis:"✓"} => emphasis`,
 		"text security":             `.byline{-webkit-text-security:disc} => security`,
 		"underline over text":       `.byline{text-decoration:underline 40px #fff;text-underline-offset:-20px} => underline`,
 		"strike out byline":         `.byline{text-decoration:line-through 8px #fff;text-decoration-style:double} => line-through`,
-		"strike out from ancestor":  `.post-meta{text-decoration-line:line-through;text-decoration-thickness:8px} => line-through`,
-		"decoration line via var":   `:scope{--l:line-through}.post-meta{text-decoration-line:var(--l)} => text-decoration-line`,
+		"strike out from ancestor":  `.post-footer{text-decoration-line:line-through;text-decoration-thickness:8px} => line-through`,
+		"decoration line via var":   `:scope{--l:line-through}.post-footer{text-decoration-line:var(--l)} => text-decoration-line`,
 		"svg geometry":              `.post-actions path{d:path("M0 0")} => d:`,
 		"height collapse":           `.post{height:0} => height`,
 		"aspect-ratio collapse":     `.post-footer{aspect-ratio:100/1} => aspect-ratio`,
@@ -275,9 +341,10 @@ func TestAdversarialCorpus(t *testing.T) {
 		"grid fixed tracks":         `.feed{grid-auto-rows:1px} => grid-auto-rows`,
 		"reversed flex":             `.post-footer{flex-direction:row-reverse} => reverse`,
 		"right float":               `.post{float:right} => float`,
-		"byline below the body":     `.post{display:flex;flex-direction:column}.post-meta{order:9} => order`,
+		"order out of range":        `.post{display:flex}.post-footer{order:99999} => order`,
+		"order via var":             `.post{display:flex}.post-footer{order:var(--o)} => order`,
 		"posts in columns":          `.feed{columns:3} => columns`,
-		"post split across columns": `.feed{column-count:3}.post-meta{break-before:column} => break`,
+		"post split across columns": `.feed{column-count:3}.post-footer{break-before:column} => break`,
 		"size containment":          `.post{container-type:size} => container`,
 		"container shorthand":       `.post{container:x / size} => container`,
 		"unsafe alignment":          `.post-footer{justify-content:unsafe flex-end} => unsafe`,
@@ -291,7 +358,7 @@ func TestAdversarialCorpus(t *testing.T) {
 		"trust ink twice":           `:scope{--trust-ink:#000}:scope{--trust-ink:#fff;--trust-plate:#000} => --trust`,
 		// Prefixed aliases of refused properties, which Chromium still honours.
 		"webkit opacity":        `.site-header{-webkit-opacity:0} => opacity`,
-		"webkit transform":      `.post-meta{-webkit-transform:scale(0)} => transform`,
+		"webkit transform":      `.post-footer{-webkit-transform:scale(0)} => transform`,
 		"webkit filter":         `.post{-webkit-filter:opacity(0)} => filter`,
 		"webkit clip-path":      `.post-footer{-webkit-clip-path:inset(50%)} => clip-path`,
 		"webkit animation":      `.post{-webkit-animation:k 1s} => animation`,

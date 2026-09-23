@@ -55,9 +55,20 @@ type declMode uint8
 const (
 	declStyle declMode = iota // a body-zone style rule
 	declPage                  // a page-zone style rule: see zones.go
+	declFree                  // a free-zone style rule: see free.go
 	declKeyframe
 	declFontFace
 )
+
+func (m declMode) zone() zone {
+	switch m {
+	case declPage:
+		return zonePage
+	case declFree:
+		return zoneFree
+	}
+	return zoneBody
+}
 
 // declarations sanitizes a style block's contents into output component values.
 func (s *sanitizer) declarations(kids []cv, mode declMode) []cv {
@@ -135,9 +146,19 @@ func (s *sanitizer) declaration(d declaration, mode declMode) ([]cv, string) {
 	if name == TrustFont && !genericFamilyList(out) {
 		return nil, TrustFont + " takes only generic families (serif, sans-serif, monospace, system-ui, ...)"
 	}
-	if mode == declPage {
+	if isAnimation(name) {
+		if why := animationDeclaration(name, out, mode.zone(), mode == declKeyframe, s.frames); why != "" {
+			return nil, why
+		}
+	}
+	switch mode {
+	case declPage:
 		out = pageRewrite(name, out)
 		if why := pageDeclaration(name, out); why != "" {
+			return nil, why
+		}
+	case declFree:
+		if why := freeDeclaration(name, out); why != "" {
 			return nil, why
 		}
 	}

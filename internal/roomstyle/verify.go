@@ -30,10 +30,31 @@ func Verify(css, scope string) error {
 	if err := trustKnobs(rules, scope); err != nil {
 		return err
 	}
-	return verifyRules(rules, scope, 0)
+	frames := keyframeSet{}
+	collectFrames(rules, frames, 0)
+	return verifyRules(rules, scope, frames, 0)
 }
 
-func verifyRules(rules []rule, scope string, depth int) error {
+// collectFrames classifies the output's own @keyframes, for the animation check.
+func collectFrames(rules []rule, frames keyframeSet, depth int) {
+	for _, r := range rules {
+		if r.block == nil || depth > MaxAtDepth {
+			continue
+		}
+		switch asciiLower(r.at) {
+		case "media", "supports", "container", "layer":
+			collectFrames(parseRules(r.block.kids, false), frames, depth+1)
+		case "keyframes":
+			if p := trim(r.prelude); len(p) == 1 && p[0].kind == tIdent {
+				if info, any := classifyFrames(r.block.kids, func(d declaration) ([]cv, bool) { return d.value, true }); any {
+					frames.add(p[0].value, info)
+				}
+			}
+		}
+	}
+}
+
+func verifyRules(rules []rule, scope string, frames keyframeSet, depth int) error {
 	if depth > MaxAtDepth {
 		return errors.New("at-rules nest too deep")
 	}
@@ -43,23 +64,23 @@ func verifyRules(rules []rule, scope string, depth int) error {
 		}
 		switch asciiLower(r.at) {
 		case "":
-			// One output rule is one zone; a page-zone selector makes it a page rule.
-			page := false
+			// One output rule is one zone; its most restricted selector decides.
+			z := zoneBody
 			for _, sel := range splitCommas(r.prelude) {
-				body, err := verifySelector(sel, scope)
+				sz, err := verifySelector(sel, scope)
 				if err != nil {
 					return err
 				}
-				page = page || !body
+				z = min(z, sz)
 			}
-			if err := verifyDeclarations(r.block.kids, false, page); err != nil {
+			if err := verifyDeclarations(r.block.kids, false, z, false, frames); err != nil {
 				return err
 			}
 		case "media", "supports", "container":
 			if !conditionOK(r.prelude, 0) {
 				return errors.New("unsupported condition")
 			}
-			if err := verifyRules(parseRules(r.block.kids, false), scope, depth+1); err != nil {
+			if err := verifyRules(parseRules(r.block.kids, false), scope, frames, depth+1); err != nil {
 				return err
 			}
 		case "layer":
@@ -69,7 +90,7 @@ func verifyRules(rules []rule, scope string, depth int) error {
 				}
 			}
 			if r.block != nil {
-				if err := verifyRules(parseRules(r.block.kids, false), scope, depth+1); err != nil {
+				if err := verifyRules(parseRules(r.block.kids, false), scope, frames, depth+1); err != nil {
 					return err
 				}
 			}
@@ -81,7 +102,7 @@ func verifyRules(rules []rule, scope string, depth int) error {
 				if kf.at != "" {
 					return errors.New("at-rule inside keyframes")
 				}
-				if err := verifyDeclarations(kf.block.kids, false, false); err != nil {
+				if err := verifyDeclarations(kf.block.kids, false, zoneBody, true, frames); err != nil {
 					return err
 				}
 			}
@@ -98,7 +119,7 @@ func verifyRules(rules []rule, scope string, depth int) error {
 					return errors.New("font src is not an attachment")
 				}
 			}
-			if err := verifyDeclarations(r.block.kids, true, false); err != nil {
+			if err := verifyDeclarations(r.block.kids, true, zoneBody, false, frames); err != nil {
 				return err
 			}
 		default:
@@ -108,39 +129,43 @@ func verifyRules(rules []rule, scope string, depth int) error {
 	return nil
 }
 
-// verifySelector checks one output selector and reports whether it is in the
-// body zone, recomputing the zone from the text rather than trusting the
-// sanitizer's decision.
-func verifySelector(sel []cv, scope string) (bool, error) {
+// verifySelector checks one output selector and reports its zone, recomputing
+// the zone from the text rather than trusting the sanitizer's decision.
+func verifySelector(sel []cv, scope string) (zone, error) {
 	if len(sel) < 2 || !delimIs(sel[0], ".") || sel[1].kind != tIdent || sel[1].value != scope {
-		return false, errors.New("selector does not start at the room root")
+		return zonePage, errors.New("selector does not start at the room root")
 	}
 	rest := trim(sel[2:])
 	if len(rest) > 0 && (delimIs(rest[0], "+") || delimIs(rest[0], "~")) {
-		return false, errors.New("selector reaches a sibling of the room root")
+		return zonePage, errors.New("selector reaches a sibling of the room root")
 	}
-	// The subject is in a body when some compound names the body root and the
-	// step after that compound is a descendant or child step.
-	body, cur := false, false
+	// The subject is in a body (or free element) when some compound names the
+	// body root (or a free hook) and the step after that compound is a
+	// descendant or child step; a sibling step off it leaves.
+	in, cur := zonePage, zonePage
 	for i, v := range rest {
 		switch {
-		case v.kind == tIdent && i > 0 && delimIs(rest[i-1], ".") && v.value == BodyClass:
-			cur = true
+		case v.kind == tIdent && i > 0 && delimIs(rest[i-1], "."):
+			cur = max(cur, classZone(v.value))
 		case v.kind == tWhitespace || isCombinator(v):
 			if v.kind == tWhitespace && i+1 < len(rest) && isCombinator(rest[i+1]) {
 				continue
 			}
-			if cur {
-				body = !delimIs(v, "+") && !delimIs(v, "~")
+			if cur != zonePage {
+				if !delimIs(v, "+") && !delimIs(v, "~") {
+					in = max(in, cur)
+				} else if in < cur {
+					in = zonePage
+				}
 			}
-			cur = false
+			cur = zonePage
 		}
 	}
-	body = body || cur
-	return body, verifySelectorTokens(rest, body)
+	z := max(in, cur)
+	return z, verifySelectorTokens(rest, z)
 }
 
-func verifySelectorTokens(list []cv, body bool) error {
+func verifySelectorTokens(list []cv, z zone) error {
 	for i, v := range list {
 		afterColon := i > 0 && list[i-1].kind == tColon
 		afterDot := i > 0 && delimIs(list[i-1], ".")
@@ -156,8 +181,8 @@ func verifySelectorTokens(list []cv, body bool) error {
 			switch {
 			case name == "scope" || name == "root" || name == "host":
 				return errors.New("selector names :scope, :root or :host")
-			case !body && slices.Contains(bodyPseudoElements, name) && !slices.Contains(pagePseudoElements, name):
-				return fmt.Errorf("::%s outside a body", name)
+			case z == zonePage && slices.Contains(bodyPseudoElements, name) && !slices.Contains(pagePseudoElements, name):
+				return fmt.Errorf("::%s in the page zone", name)
 			}
 		case v.kind == tIdent && slices.Contains(forbiddenTypes, asciiLower(v.value)):
 			return errors.New("selector names the page root or a non-rendered element")
@@ -170,11 +195,11 @@ func verifySelectorTokens(list []cv, body bool) error {
 			if !slices.Contains(conditionFunctions, name) || name == "url" {
 				return errors.New("unexpected function in selector")
 			}
-			if name == "has" && !body {
+			if name == "has" && z != zoneBody {
 				return errors.New(":has() outside a body")
 			}
 			// Attribute values in [] can name anything; they select nothing.
-			if err := verifySelectorTokens(v.kids, body); err != nil {
+			if err := verifySelectorTokens(v.kids, z); err != nil {
 				return err
 			}
 		}
@@ -182,7 +207,7 @@ func verifySelectorTokens(list []cv, body bool) error {
 	return nil
 }
 
-func verifyDeclarations(kids []cv, fontFace, page bool) error {
+func verifyDeclarations(kids []cv, fontFace bool, z zone, keyframe bool, frames keyframeSet) error {
 	decls, dropped := parseDeclarations(kids)
 	if len(dropped) > 0 {
 		return errors.New("malformed declaration")
@@ -194,9 +219,20 @@ func verifyDeclarations(kids []cv, fontFace, page bool) error {
 		if err := verifyValue(d.value, fontFace && d.name == "src"); err != nil {
 			return err
 		}
-		if page {
+		if isAnimation(d.name) {
+			if why := animationDeclaration(d.name, d.value, z, keyframe, frames); why != "" {
+				return fmt.Errorf("%s: %s", d.name, why)
+			}
+		}
+		switch {
+		case fontFace || keyframe:
+		case z == zonePage:
 			if why := pageDeclaration(d.name, d.value); why != "" {
 				return fmt.Errorf("page-zone %s: %s", d.name, why)
+			}
+		case z == zoneFree:
+			if why := freeDeclaration(d.name, d.value); why != "" {
+				return fmt.Errorf("free-zone %s: %s", d.name, why)
 			}
 		}
 	}

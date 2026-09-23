@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"swarmmemo/internal/roomstyle"
@@ -42,8 +43,9 @@ type RoomStyle struct {
 	Source string
 	// Owner is the owner's current key fingerprint; empty for operator rooms.
 	Owner string
-	// Attachment reports whether id is a live public attachment posted in this
-	// room or in its owner's personal room.
+	// Attachment reports whether id is a file the stylesheet may name: a live
+	// public attachment posted in this room or its owner's personal room, or a
+	// style asset of this room (styleAttachment).
 	Attachment func(id string) bool
 }
 
@@ -76,9 +78,15 @@ type queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-// styleAttachment is the one definition of an attachment a room's CSS may name:
-// not deleted, not expired, in a public room that is this room or its owner's
-// personal room, and attached to at least one visible message.
+// styleAttachment is the one definition of a file a room's CSS may name: not
+// deleted, not expired, in a public room, and either
+//
+//   - an attachment of at least one visible message in this room or its owner's
+//     personal room, or
+//   - a style asset: a file uploaded to this very room by the room's owner (by
+//     the operator, for a room with no owning key) and not posted only in
+//     messages a moderator hid. Assets let a stylesheet use backgrounds, sprites
+//     and fonts without posting each one into the feed.
 func styleAttachment(ctx context.Context, q queryer, room, owner, id string, now int64) (bool, error) {
 	personal := ""
 	if owner != "" {
@@ -86,10 +94,112 @@ func styleAttachment(ctx context.Context, q queryer, room, owner, id string, now
 	}
 	var n int
 	err := q.QueryRowContext(ctx, `SELECT count(*) FROM blobs b JOIN rooms r ON r.name=b.room
- WHERE b.id=? AND b.room IN (?,?) AND b.deleted=0 AND (b.expires_at=0 OR b.expires_at>?) AND r.visibility='public'
- AND EXISTS (SELECT 1 FROM event_attachments ea JOIN events e ON e.id=ea.event_id WHERE ea.blob_id=b.id AND e.hidden=0)`,
-		id, room, personal, now).Scan(&n)
+ WHERE b.id=? AND b.deleted=0 AND (b.expires_at=0 OR b.expires_at>?) AND r.visibility='public' AND (
+  (b.room IN (?,?) AND EXISTS (SELECT 1 FROM event_attachments ea JOIN events e ON e.id=ea.event_id WHERE ea.blob_id=b.id AND e.hidden=0))
+  OR (b.room=? AND b.account=? AND (NOT EXISTS (SELECT 1 FROM event_attachments ea WHERE ea.blob_id=b.id)
+   OR EXISTS (SELECT 1 FROM event_attachments ea JOIN events e ON e.id=ea.event_id WHERE ea.blob_id=b.id AND e.hidden=0))))`,
+		id, now, room, personal, room, assetAccount(owner)).Scan(&n)
 	return n > 0, err
+}
+
+// assetAccount is the uploader whose files in a room are its style assets: the
+// owner, or the operator for a room no key owns. A signed account is a key
+// fingerprint, so it can never be "operator".
+func assetAccount(owner string) string {
+	if owner == "" {
+		return operatorActor
+	}
+	return owner
+}
+
+// StyleAssetTypes are the file types an operator may add as a room style
+// asset: the inline image types and fonts.
+const StyleAssetTypes = "PNG, JPEG, GIF, WOFF, WOFF2, TTF or OTF"
+
+// FontMediaType returns a font's media type from its first bytes, or "".
+func FontMediaType(data []byte) string {
+	switch {
+	case bytes.HasPrefix(data, []byte("wOF2")):
+		return "font/woff2"
+	case bytes.HasPrefix(data, []byte("wOFF")):
+		return "font/woff"
+	case bytes.HasPrefix(data, []byte{0, 1, 0, 0}), bytes.HasPrefix(data, []byte("true")):
+		return "font/ttf"
+	case bytes.HasPrefix(data, []byte("OTTO")):
+		return "font/otf"
+	}
+	return ""
+}
+
+// OperatorAsset stores a style asset in an operator-owned public room from the
+// local CLI: an image or font the room's stylesheet may then name as
+// url(/a/<id>) without posting it. It is recorded in the room's public
+// moderation log by hash and size.
+func (s *Store) OperatorAsset(ctx context.Context, room, filename string, data []byte) (Attachment, error) {
+	mediaType := ImageMediaType(data)
+	if mediaType == "" {
+		mediaType = FontMediaType(data)
+	}
+	switch {
+	case len(data) == 0 || len(data) > AttachmentBytes:
+		return Attachment{}, problem(413, "attachment_size", fmt.Sprintf("A style asset must be 1 byte to %d KiB.", AttachmentBytes>>10))
+	case mediaType == "":
+		return Attachment{}, problem(400, "invalid_image", "A style asset must be "+StyleAssetTypes+".")
+	case filename == "" || !utf8.ValidString(filename) || strings.ContainsAny(filename, "/\\") || strings.IndexFunc(filename, unicode.IsControl) >= 0:
+		return Attachment{}, problem(400, "invalid_filename", "Use a filename without paths or control characters.")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Attachment{}, err
+	}
+	defer tx.Rollback()
+	var visibility, owner string
+	err = tx.QueryRowContext(ctx, "SELECT visibility,owner FROM rooms WHERE name=?", room).Scan(&visibility, &owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Attachment{}, problem(404, "not_found", "Room not found.")
+	}
+	if err != nil {
+		return Attachment{}, err
+	}
+	if owner != "" {
+		return Attachment{}, problem(403, "owner_required", "This room is owned by a key; its owner uploads assets with blob.put.")
+	}
+	if visibility != "public" {
+		return Attachment{}, problem(403, "public_rooms_only", "Room styles apply to public rooms only.")
+	}
+	now := s.now().Unix()
+	sum := sha256.Sum256(data)
+	b := Attachment{ID: randomID(), Room: room, Filename: filename, MediaType: mediaType, Hash: hex.EncodeToString(sum[:]), Size: int64(len(data)), CreatedAt: now}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO blobs(id,room,account,filename,media_type,hash,size,created_at,expires_at,data) VALUES(?,?,?,?,?,?,?,?,0,?)",
+		b.ID, b.Room, operatorActor, b.Filename, b.MediaType, b.Hash, b.Size, now, data); err != nil {
+		return Attachment{}, err
+	}
+	detail, _ := json.Marshal(map[string]any{"id": b.ID, "sha256": b.Hash, "bytes": b.Size, "media_type": b.MediaType})
+	if err = writeLog(ctx, tx, logEntry{room: room, action: "style.asset", actor: operatorActor, target: b.ID, detail: string(detail)}, now); err != nil {
+		return Attachment{}, err
+	}
+	if err = audit(ctx, tx, "room.style.asset", operatorActor, room, string(detail), now); err != nil {
+		return Attachment{}, err
+	}
+	return b, tx.Commit()
+}
+
+// OperatorAssets lists the style assets the operator uploaded to a room.
+func (s *Store) OperatorAssets(ctx context.Context, room string) ([]Attachment, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+blobColumns+" FROM blobs WHERE room=? AND account=? AND deleted=0 ORDER BY created_at,id", room, operatorActor)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Attachment
+	for rows.Next() {
+		b, err := scanBlob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
 }
 
 // applyStyle is room.style.set and room.style.clear, shared by the owner's

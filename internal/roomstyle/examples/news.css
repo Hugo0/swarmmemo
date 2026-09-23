@@ -1,0 +1,63 @@
+/* A dense link-aggregator front page: an orange bar, a beige page, one line per post
+   with its rank, the byline and time on a small grey line under it, nothing else.
+   Shows what the free zone and the page-zone layout rules allow: the sidebar and the
+   room's explainer are gone, the header is one line, and each post is re-laid out. */
+:scope {
+  --trust-ink: #000000;
+  --trust-muted: #5a5a5a;
+  --trust-plate: #f6f6ef;
+  --trust-font: sans-serif;
+  --ink: #000000;
+  --ink-2: #222222;
+  --muted: #828282;
+  --faint: #828282;
+  --line: #e0e0d8;
+  --line-strong: #ff6600;
+  --surface: #f6f6ef;
+  --surface-2: #eeeee4;
+  --surface-3: #e6e6da;
+  --field-border: #a0a0a0;
+  --field-border-strong: #000000;
+  --focus: #ff6600;
+  --primary-fill: #ff6600;
+  --primary-ink: #000000;
+  --primary-hover: #ff8533;
+  background: #ffffff;
+}
+body { font-family: Verdana, Geneva, sans-serif; font-size: 10pt; color: #000; background: #fff; }
+.main { max-width: 85%; min-width: 0; background: #f6f6ef; padding: 0 0 20px; }
+.site-header { background: #ff6600; border: 0; max-width: 85%; margin: 8px auto 0; padding: 2px 6px; }
+.brand { color: #000; font-weight: 700; font-size: 10pt; }
+.nav a { font-size: 10pt; }
+
+/* The room header collapses to a title line; its explainer text goes. */
+.room-header { padding: 8px 10px 4px; max-width: none; }
+.room-header h1 { font-size: 12pt; font-weight: 700; }
+.room-header p, .room-header .badge { display: none; }
+.room-info { margin: 0 10px 6px; font-size: 8pt; color: #828282; max-width: none; }
+.sidebar { display: none; }
+.layout { display: block; }
+.section-heading { display: none; }
+.composer { background: #f6f6ef; border: 0; margin: 0 10px 12px; }
+
+/* One post, one ranked line: the title first, then a grey subline with the byline. */
+.feed { counter-reset: rank; padding: 0 10px; }
+.post { counter-increment: rank; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px;
+  padding: 3px 0 7px 0 !important; border: 0; }
+.post > * { flex: 1 1 100%; }
+.post-meta { order: 2; flex: 0 1 auto; margin: 0 !important; position: relative; font-size: 7pt; color: #828282; }
+.post-meta::before { content: "|"; margin-right: 4px; color: #828282; }
+.post-meta .kind, .via, .quote { display: none; }
+.post-footer { order: 1; flex: 0 1 auto; margin: 0 0 0 34px; gap: 4px; }
+.post-body::before { content: counter(rank) ". ▲"; display: inline-block; min-width: 30px; margin-right: 4px;
+  text-align: right; color: #828282; font-size: 10pt; }
+.post-body .post-text { display: inline !important; font-size: 10pt !important; line-height: 1.3 !important; color: #000;
+  -webkit-line-clamp: 1 !important; max-height: 1.3em !important; white-space: nowrap !important; overflow: hidden; }
+.post-body .post-images { display: none; }
+.pagination { padding: 6px 44px; }
+.pagination a { color: #000; }
+.footer { border-top: 2px solid #ff6600; max-width: 85%; margin: 0 auto; }
+
+@media (max-width: 700px) {
+  .main, .site-header, .footer { max-width: none; }
+}

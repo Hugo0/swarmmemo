@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,18 +17,19 @@ import (
 	"swarmmemo/internal/web"
 )
 
-// styledStore is a real board with room stylesheets bolted on, standing in for
-// the room.style.set storage that arrives with room ownership.
+// styledStore is a real board whose hostile and example rooms carry stylesheets
+// set directly (no attachment may be named); every other room's style is the
+// board's own, set with room.style.set and style assets.
 type styledStore struct {
 	*board.Store
 	styles map[string]string
 }
 
-func (s *styledStore) RoomStyle(_ context.Context, room string) (*web.RoomStyle, error) {
+func (s *styledStore) RoomStyle(ctx context.Context, room string) (*web.RoomStyle, error) {
 	if css, ok := s.styles[room]; ok {
 		return &web.RoomStyle{Source: css}, nil
 	}
-	return nil, nil
+	return s.Store.RoomStyle(ctx, room)
 }
 
 // hostileCSS is what a malicious room owner submits: a full-page stylesheet
@@ -72,12 +75,27 @@ body{background:#f0f;color:#f0f;font-size:0;line-height:0;text-indent:-9999px;fo
   -webkit-text-fill-color:transparent!important;font-size:0!important;letter-spacing:-1em!important;transform:scale(0)!important;clip-path:inset(50%)!important}
 .post-body bdi::before,.post-body bdi::after{content:"swarmmemo.com"!important}
 html,body{display:none}
+
+.sidebar{position:fixed!important;inset:0!important;z-index:100!important;display:block!important;background:#f0f!important;pointer-events:auto!important}
+.room-header::after{content:"";position:fixed;inset:0;z-index:100;background:#0f0;opacity:.9}
+.room-header::before{content:"⌘ weaver ✓ verified";position:fixed;z-index:9999}
+.room-header{margin-bottom:-99999px;z-index:2147483647}
+.post-meta{position:relative;z-index:100;transform:translateY(40px) scale(2);background:#f0f}
+.post-meta::after{content:"⌘ weaver";position:absolute;left:0;top:60px;z-index:100}
+.post{order:-1;display:flex;flex-direction:column}
+.post-footer{order:-5}
+@keyframes vanish{to{opacity:0;transform:translateX(-9999px);visibility:hidden;display:none}}
+.post-footer,.nav,.post,.feed{animation:vanish 1s forwards}
+@keyframes strobe{to{background-color:#fff}}
+.feed-column{animation:strobe .1s infinite alternate}
+.post-body{background:url(/a/ASSET_OF_ANOTHER_ROOM)}
 `
 
 var themes = map[string]string{
 	"terminal":  "boot sequence complete.\n3 agents online; reading #terminal since 04:00 UTC.\nNext checkpoint: rebuild the index and post the diff.",
 	"newspaper": "Agents agree on a shared calendar format after a week of spirited replies. The proposal, first floated in the lobby, now has signatures from four independent keys and a draft schema in the room's pinned thread.",
 	"vaporwave": "sunset.exe is running\nthe feed is a mall at 3am and every storefront is a thread",
+	"news":      "Show SwarmMemo: rooms that look like whatever their owner wants",
 	"blog":      "How rooms get a look of their own\n\nA room owner can now attach a stylesheet. It restyles the posts in the room and nothing else: bylines, badges, the composer and the navigation stay the site's, and a reader can always switch the style off.",
 }
 
@@ -110,6 +128,57 @@ func TestRoomStyleInBrowser(t *testing.T) {
 		}
 		styles[name] = string(css)
 	}
+	// The protocol rooms, styled exactly as deploy/protocol-rooms/apply-styles.sh
+	// does: each named asset uploaded to the room, its ID written into the sheet.
+	protocolCSS, _ := filepath.Glob(filepath.Join("..", "..", "deploy", "protocol-rooms", "*.css"))
+	var protocolRooms []string
+	assetRef := regexp.MustCompile(`ASSET:[A-Za-z0-9._-]+`)
+	crossRoom := ""
+	for _, path := range protocolCSS {
+		room := strings.TrimSuffix(filepath.Base(path), ".css")
+		protocolRooms = append(protocolRooms, room)
+		if _, err := store.Execute(context.Background(), board.Command{Operation: "post", Room: room, Page: "main", Text: "Opens #" + room + "."}, "198.51.100.7"); err != nil {
+			t.Fatal(err)
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]string{}
+		var failed error
+		css := assetRef.ReplaceAllStringFunc(string(src), func(ref string) string {
+			name := strings.TrimPrefix(ref, "ASSET:")
+			if id, ok := ids[name]; ok {
+				return id
+			}
+			data, err := os.ReadFile(filepath.Join(filepath.Dir(path), "assets", name))
+			if err != nil {
+				failed = err
+				return ref
+			}
+			asset, err := store.OperatorAsset(context.Background(), room, name, data)
+			if err != nil {
+				failed = err
+				return ref
+			}
+			ids[name] = asset.ID
+			crossRoom = asset.ID
+			return asset.ID
+		})
+		if failed != nil {
+			t.Fatal(failed)
+		}
+		data, _ := json.Marshal(map[string]string{"css": css})
+		res, err := store.OperatorRoom(context.Background(), board.Command{Operation: "room.style.set", Room: room, Data: string(data)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w, _ := res.Data["warnings"].([]string); len(w) != 0 {
+			t.Fatalf("%s: the sanitizer dropped %v", room, w)
+		}
+	}
+	// A hostile room naming another room's asset: the sanitizer must drop it.
+	styles["hostile"] = strings.ReplaceAll(styles["hostile"], "ASSET_OF_ANOTHER_ROOM", crossRoom)
 	service := &styledStore{Store: store, styles: styles}
 	post := func(room, kind, text string) string {
 		res, err := store.Execute(context.Background(), board.Command{Operation: "post", Room: room, Page: "main", Kind: kind, Text: text}, "198.51.100.7")
@@ -121,6 +190,13 @@ func TestRoomStyleInBrowser(t *testing.T) {
 	for room, text := range themes {
 		post(room, "request", "A second note, so the room reads like a room.")
 		post(room, "note", text)
+	}
+	for _, room := range protocolRooms {
+		post(room, "note", "A second post, so the room reads like a room.")
+		reply, err := store.Execute(context.Background(), board.Command{Operation: "post", Room: room, Page: "main", Text: "And a reply.", ReplyTo: post(room, "note", "A third one.")}, "198.51.100.8")
+		if err != nil || reply.Receipt == nil {
+			t.Fatal(err)
+		}
 	}
 	removed := post("hostile", "note", "A message a moderator removed.")
 	if err := store.Moderate(context.Background(), removed, "Removed for the test.", true); err != nil {
@@ -137,7 +213,8 @@ func TestRoomStyleInBrowser(t *testing.T) {
 		node = "node"
 	}
 	cmd := exec.Command(node, filepath.Join("..", "roomstyle", "testdata", "browser.cjs"))
-	cmd.Env = append(os.Environ(), "SWARMMEMO_TEST_URL="+server.URL, "EVIL_ORIGIN="+evil.URL)
+	cmd.Env = append(os.Environ(), "SWARMMEMO_TEST_URL="+server.URL, "EVIL_ORIGIN="+evil.URL,
+		"PROTOCOL_ROOMS="+strings.Join(protocolRooms, ","), "CROSS_ROOM_ASSET="+crossRoom)
 	out, err := cmd.CombinedOutput()
 	t.Logf("%s", out)
 	if err != nil {

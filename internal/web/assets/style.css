@@ -220,78 +220,80 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .memo-time{margin-left:auto;font-size:var(--t-meta);white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
 a.memo-time:hover{color:var(--ink);text-decoration:underline}
 .memo-text{white-space:pre-wrap;font-size:var(--t-body);line-height:1.8;margin-bottom:var(--s-4)}
-/* Room style (internal/roomstyle, RFC0011). A room's CSS restyles its whole page but
-   may not hide, move, cover or re-letter trust UI. Post bodies are canvases: body-zone
+/* Room style (internal/roomstyle, RFC0011). A room's CSS restyles its whole page, and
+   what it makes of the page is the room's business. Four things are not: each post's
+   byline stays visible and legible in its post; controls (Reply, Report, the composer,
+   navigation, the account link) are never covered; the custom-style notice stays on
+   screen; nothing loads from elsewhere (the CSP). Post bodies are canvases: body-zone
    CSS stays inside them. Everything in @layer room-trust is pinned: a layered
    !important declaration outranks every room declaration whatever its specificity.
    Selectors use :where() so that, inside the layer, source order alone decides.
    Values are literals, site tokens a room cannot redefine (roomstyle.fixedTokens),
-   or the four checked knobs (roomstyle.TrustKnobs). */
+   or the four checked knobs (roomstyle.TrustKnobs). Bylines and controls are drawn at
+   z-index 1000, above anything a room can stack (roomstyle.MaxFreeZIndex). */
 .room-canvas{display:flow-root;position:relative;z-index:0;isolation:isolate;overflow:clip;contain:inline-size layout paint style}
 @layer room-trust{
   /* The canvas is what keeps body-zone CSS in, so its containment cannot change. */
   html.room-styled :where(.room-canvas){display:flow-root!important;position:relative!important;z-index:0!important;isolation:isolate!important;
     overflow:clip!important;contain:inline-size layout paint style!important;float:none!important;visibility:visible!important;opacity:1!important;
     transform:none!important;filter:none!important;clip-path:none!important;mask:none!important}
-  /* Posts and the rows that hold trust elements are never narrower than their content
-     and are placed only by the flow, so no two of them can be made to overlap. */
-  html.room-styled :where(.memo,.memo>*,.memo-actions,.post-article>*,.article-header>*,.site-nav,.compose-actions){min-width:min-content!important;
+  /* Posts and the rows that hold bylines and controls are never narrower than their
+     content and are placed only by the flow, so no two of them can be made to overlap. */
+  html.room-styled :where(.memo,.memo-bottom,.memo-actions,.article-byline,.site-nav,.compose-actions){min-width:min-content!important;
     float:none!important;height:auto!important;max-height:none!important;grid-area:auto!important}
-  /* Trust elements, and everything inside them, read as the site draws them. */
-  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
-    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
-    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address) *{color:inherit!important;background:none!important}
-  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
-    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
-    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address),
-  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
-    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
-    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address) *{visibility:visible!important;opacity:1!important;pointer-events:auto!important;cursor:auto!important;
+  /* Bylines and controls, and everything inside them, read as the site draws them. */
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,.compose-destination,.compose-actions .button,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline) *{color:inherit!important;background:none!important}
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,.compose-destination,.compose-actions .button,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline),
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,.compose-destination,.compose-actions .button,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline) *{visibility:visible!important;opacity:1!important;pointer-events:auto!important;cursor:auto!important;
     letter-spacing:normal!important;word-spacing:normal!important;text-indent:0!important;line-height:1.5!important;
     direction:ltr!important;unicode-bidi:isolate!important;writing-mode:horizontal-tb!important;
     -webkit-text-fill-color:currentcolor!important;-webkit-text-stroke:0!important;-webkit-text-security:none!important;text-emphasis:none!important;
     text-shadow:none!important;font-size-adjust:none!important;font-stretch:normal!important;font-variation-settings:normal!important}
-  /* Each trust element is a positioned box above every page-zone box (the page zone
-     has none of its own) and every canvas (z-index 0), on its own plate, at least as
-     wide as its text. */
-  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
-    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
-    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address){position:relative!important;z-index:1!important;inset:auto!important;float:none!important;
+  /* Each byline and control is a positioned box above every box a room can stack
+     (the page zone stacks nothing; the free zone stays at or below z-index 100) and
+     every canvas (z-index 0), on its own plate, at least as wide as its text. The
+     composer's fields are included for position only: the room may colour them. */
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,.compose-destination,.compose-actions .button,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline,.composer>summary,[id=memo-text],[id=clear-reply],[id=compose-settings]>summary){
+    position:relative!important;z-index:1000!important;inset:auto!important;float:none!important;
     overflow:visible!important;transform:none!important;translate:none!important;rotate:none!important;scale:none!important;filter:none!important;
-    clip-path:none!important;mask:none!important;zoom:1!important;content-visibility:visible!important;box-sizing:border-box!important;
+    clip-path:none!important;mask:none!important;zoom:1!important;content-visibility:visible!important;visibility:visible!important;opacity:1!important;
+    pointer-events:auto!important;animation:none!important}
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,.compose-destination,.compose-actions .button,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline){box-sizing:border-box!important;
     width:auto!important;height:auto!important;max-height:none!important;max-width:none!important;min-width:min-content!important;
     background-color:var(--trust-plate,#fff)!important;background-image:none!important;color:var(--trust-muted,#707070)!important}
-  html.room-styled :where(.author,.reply-button,.compose-actions .button,.compose-destination,[id=compose-identity],.notice,.site-nav a,.workspace-link){
+  html.room-styled :where(.author,.reply-button,.compose-actions .button,.compose-destination,[id=compose-identity],.site-nav a,.workspace-link){
     color:var(--trust-ink,#171717)!important}
   html.room-styled :where(.workspace-link){max-width:50vw!important}
+  /* The composer's decorative caret sits over its field. */
+  html.room-styled :where(.compose-caret){z-index:1001!important}
   /* Short labels never break into a column of letters, however narrow a room makes their row. */
-  html.room-styled :where(.author,.worker-label,.via,.badge,.kind,.memo-time,.reply-button,.report-button,.site-nav a,.workspace-link,.addressed,.reply-ref),
-  html.room-styled :where(.author,.memo-time,.workspace-link) *{white-space:nowrap!important;overflow-wrap:normal!important;word-break:normal!important}
-  /* Trust text keeps the site's type scale and a generic family (the room may pick
-     which one with --trust-font, never a web font that could redraw its glyphs). */
-  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
-    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
-    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address) *{font-family:inherit!important}
-  html.room-styled :where(.author,.worker-label,.attachment,.removed,.notice,.reply-button,.report-button,.compose-destination,.compose-context,
-    .compose-actions .button,.compose-policy,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,.room-facts){font-family:var(--trust-font,var(--sans))!important}
-  html.room-styled :where(.memo-meta,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.reply-preview,.publication-address,.attachment code){
-    font-family:var(--trust-font,var(--mono))!important}
-  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.reply-button,.report-button,
-    .reply-preview,.compose-policy,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address){font-size:var(--t-meta)!important}
-  html.room-styled :where(.removed,.notice,.compose-destination,.compose-context){font-size:var(--t-ui)!important}
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,.site-nav a,.workspace-link),
+  html.room-styled :where(.author,.workspace-link) *{white-space:nowrap!important;overflow-wrap:normal!important;word-break:normal!important}
+  /* Byline and control text keeps the site's type scale and a generic family (the room
+     may pick which one with --trust-font, never a web font that could redraw its glyphs). */
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,.compose-destination,.compose-actions .button,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline) *{font-family:inherit!important}
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,.compose-destination,
+    .compose-actions .button,[id=compose-identity],.site-nav a,.workspace-link,.article-byline){font-family:var(--trust-font,var(--sans))!important}
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,[id=compose-identity],.site-nav a,.workspace-link,.article-byline){font-size:var(--t-meta)!important}
+  html.room-styled :where(.compose-destination){font-size:var(--t-ui)!important}
   html.room-styled :where(.compose-actions .button){font-size:14px!important}
-  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.reply-button,.report-button,
-    .reply-preview,.compose-policy,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address,.removed,.notice,.compose-destination,
-    .compose-context,.compose-actions .button) *{font-size:inherit!important}
-  /* Icons that carry meaning (report, imported provenance) and the account dot. */
-  html.room-styled :where(.report-button,.provenance-icon) :where(svg){display:block!important;width:14px!important;height:14px!important}
-  html.room-styled :where(.report-button,.provenance-icon) :where(svg,svg *){fill:none!important;stroke:currentcolor!important;stroke-width:1.5!important;
+  html.room-styled :where(.author,.worker-label,.reply-button,.report-button,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,
+    .compose-destination,.compose-actions .button) *{font-size:inherit!important}
+  /* The report icon and the account dot. */
+  html.room-styled :where(.report-button) :where(svg){display:block!important;width:14px!important;height:14px!important}
+  html.room-styled :where(.report-button) :where(svg,svg *){fill:none!important;stroke:currentcolor!important;stroke-width:1.5!important;
     stroke-opacity:1!important;stroke-dasharray:none!important;visibility:visible!important;opacity:1!important}
   html.room-styled :where(.workspace-link .identity-dot){display:inline-block!important;width:6px!important;height:6px!important;
     border:1px solid var(--trust-muted,#707070)!important;border-radius:50%!important;background:transparent!important}
   html.room-styled :where(.workspace-link .identity-dot.active){background:var(--trust-muted,#707070)!important}
   /* The disclosure: always on screen, always the site's own look, always clickable. */
-  html.room-styled :where(#room-style-strip){all:revert!important;position:fixed!important;right:12px!important;bottom:12px!important;z-index:30!important;
+  html.room-styled :where(#room-style-strip){all:revert!important;position:fixed!important;right:12px!important;bottom:12px!important;z-index:2000!important;
     display:flex!important;flex-wrap:wrap!important;align-items:center!important;gap:4px 12px!important;box-sizing:border-box!important;
     max-width:calc(100vw - 24px)!important;margin:0!important;padding:6px 10px!important;background:#fff!important;color:#171717!important;
     border:1px solid #171717!important;border-radius:2px!important;box-shadow:0 2px 10px rgba(0,0,0,.3)!important;
@@ -313,7 +315,13 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
     color:#444!important;-webkit-text-fill-color:#444!important;background:#fff!important;visibility:visible!important;opacity:1!important;
     -webkit-text-security:none!important;text-emphasis:none!important;direction:ltr!important;unicode-bidi:isolate!important}
   :where(.room-canvas .md-host)::before,:where(.room-canvas .md-host)::after{content:none!important}
+  /* Readers who ask for reduced motion get none, whatever the room animates. */
+  @media (prefers-reduced-motion:reduce){
+    html.room-styled,html.room-styled *,html.room-styled ::before,html.room-styled ::after,html.room-styled ::marker{
+      animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  }
 }
+
 .room-style-css{width:100%;font:16px/1.5 var(--mono);tab-size:2}
 .room-style-warnings{margin:var(--s-3) 0 0;padding-left:var(--s-5);font-size:var(--t-meta);color:var(--ink-2)}
 .room-style-strip{display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-3);width:fit-content;max-width:calc(100% - 32px);margin:var(--s-3) auto 0;padding:2px var(--s-2);border:1px dashed var(--line-strong);font:var(--t-meta)/1.6 var(--mono);color:var(--ink-2)}

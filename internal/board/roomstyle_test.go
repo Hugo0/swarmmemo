@@ -95,7 +95,8 @@ func TestPersonalRoomStyleAndServing(t *testing.T) {
 }
 
 // url() may name a live public attachment posted, visibly, in the room or in
-// its owner's personal room; nothing else.
+// its owner's personal room, or a style asset: a file the owner uploaded to
+// this room and did not post only in hidden messages. Nothing else.
 func TestRoomStyleAttachments(t *testing.T) {
 	s := openTest(t, Config{})
 	owner, other := keyFor(177), keyFor(178)
@@ -113,6 +114,8 @@ func TestRoomStyleAttachments(t *testing.T) {
 	inPersonal := post(owner, personal(owner))
 	elsewhere := post(other, "elsewhere")
 	unposted := upload(t, s, owner, "gallery", "never posted", 3600)
+	strangers := upload(t, s, other, "gallery", "a stranger's upload", 3600)
+	personalAsset := upload(t, s, owner, personal(owner), "the owner's, but not in this room", 3600)
 	hidden := post(owner, "gallery")
 	var hiddenEvent string
 	if err := s.db.QueryRow("SELECT event_id FROM event_attachments WHERE blob_id=?", hidden.ID).Scan(&hiddenEvent); err != nil {
@@ -129,7 +132,8 @@ func TestRoomStyleAttachments(t *testing.T) {
 	if err != nil || style == nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[string]bool{inRoom.ID: true, inPersonal.ID: true, elsewhere.ID: false, unposted.ID: false, hidden.ID: false, expired.ID: false, "nope": false} {
+	for id, want := range map[string]bool{inRoom.ID: true, inPersonal.ID: true, elsewhere.ID: false, unposted.ID: true, strangers.ID: false,
+		personalAsset.ID: false, hidden.ID: false, expired.ID: false, "nope": false} {
 		if got := style.Attachment(id); got != want {
 			t.Errorf("attachment %s: %v, want %v", id, got, want)
 		}
@@ -167,6 +171,90 @@ func TestOperatorRoomStyle(t *testing.T) {
 	if _, err := s.OperatorRoom(testContext, Command{Operation: "room.style.clear", Room: "guides"}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// The operator adds style assets to rooms no key owns: images and fonts only,
+// logged publicly; a room that passes to a key stops naming them.
+func TestOperatorStyleAssets(t *testing.T) {
+	s := openTest(t, Config{})
+	owner := keyFor(181)
+	register(t, s, owner)
+	run(t, s, Command{Operation: "post", Room: "wires", Text: "opens an operator room"})
+	run(t, s, Command{Operation: "post", Room: "other-wires", Text: "opens another"})
+	run(t, s, signed(owner, Command{Operation: "room.create", Room: "keyed"}))
+	gif := []byte("GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;")
+	asset, err := s.OperatorAsset(testContext, "wires", "cat.gif", gif)
+	if err != nil || asset.MediaType != "image/gif" || asset.Room != "wires" {
+		t.Fatalf("asset: %+v %v", asset, err)
+	}
+	font, err := s.OperatorAsset(testContext, "wires", "term.woff2", append([]byte("wOF2"), make([]byte, 60)...))
+	if err != nil || font.MediaType != "font/woff2" {
+		t.Fatalf("font asset: %+v %v", font, err)
+	}
+	for name, attempt := range map[string]func() error{
+		"text":  func() error { _, err := s.OperatorAsset(testContext, "wires", "x.txt", []byte("hello")); return err },
+		"svg":   func() error { _, err := s.OperatorAsset(testContext, "wires", "x.svg", []byte("<svg/>")); return err },
+		"empty": func() error { _, err := s.OperatorAsset(testContext, "wires", "x.gif", nil); return err },
+		"too big": func() error {
+			_, err := s.OperatorAsset(testContext, "wires", "x.gif", append(gif, make([]byte, AttachmentBytes)...))
+			return err
+		},
+		"path":      func() error { _, err := s.OperatorAsset(testContext, "wires", "../x.gif", gif); return err },
+		"key-owned": func() error { _, err := s.OperatorAsset(testContext, "keyed", "x.gif", gif); return err },
+		"no room":   func() error { _, err := s.OperatorAsset(testContext, "nowhere", "x.gif", gif); return err },
+	} {
+		if attempt() == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if entry := modlog(t, s, "wires")[0]; entry.Action != "style.asset" || entry.Actor != operatorActor || !strings.Contains(entry.Detail, font.Hash) {
+		t.Fatalf("asset log entry: %+v", entry)
+	}
+	if list, err := s.OperatorAssets(testContext, "wires"); err != nil || len(list) != 2 {
+		t.Fatalf("list: %v %v", list, err)
+	}
+	css := "@font-face{font-family:term;src:url(/a/" + font.ID + ")} :scope{background:url(/a/" + asset.ID + ")}"
+	data, _ := json.Marshal(map[string]string{"css": css})
+	res, err := s.OperatorRoom(testContext, Command{Operation: "room.style.set", Room: "wires", Data: string(data)})
+	if err != nil || len(res.Data["warnings"].([]string)) != 0 {
+		t.Fatalf("style naming assets: %+v %v", res.Data, err)
+	}
+	// Another room cannot name them, even the operator's.
+	if style, _ := styleFor(t, s, "other-wires"); style.Attachment(asset.ID) {
+		t.Error("another room named the asset")
+	}
+	// Once a key owns the room, the operator's uploads are no longer its assets.
+	if _, err := s.OperatorRoom(testContext, Command{Operation: "room.owner.transfer", Room: "wires", Target: keyID(owner)}); err != nil {
+		t.Fatal(err)
+	}
+	if style, _ := styleFor(t, s, "wires"); style.Attachment(asset.ID) {
+		t.Error("the operator's asset outlived the room's transfer to a key")
+	}
+	if _, err := s.OperatorAsset(testContext, "wires", "late.gif", gif); err == nil {
+		t.Error("operator added an asset to a key-owned room")
+	}
+	// The owner's own upload is the room's asset now.
+	own := run(t, s, signed(owner, Command{Operation: "blob.put", Room: "wires", Data: base64.RawURLEncoding.EncodeToString(gif), Filename: "own.gif", MediaType: "image/gif"})).Data["blob"].(Attachment)
+	if style, _ := styleFor(t, s, "wires"); !style.Attachment(own.ID) {
+		t.Error("the owner's upload is not an asset")
+	}
+}
+
+// styleFor returns a room's serving style, setting a trivial one if it has none.
+func styleFor(t *testing.T, s *Store, room string) (*RoomStyle, error) {
+	t.Helper()
+	style, err := s.RoomStyle(testContext, room)
+	if style == nil {
+		data, _ := json.Marshal(map[string]string{"css": ":scope{color:#000}"})
+		if _, err := s.OperatorRoom(testContext, Command{Operation: "room.style.set", Room: room, Data: string(data)}); err != nil {
+			t.Fatal(err)
+		}
+		style, err = s.RoomStyle(testContext, room)
+	}
+	if style == nil {
+		t.Fatalf("no style for %s: %v", room, err)
+	}
+	return style, err
 }
 
 // Schema 13 adds room_styles. A schema 12 database with rooms, policies and a

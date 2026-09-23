@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "7f9b45e9211cee301d77fa5ef1f74cc972f960c02f7f400e74c68aeecb846983",
+  "allowlist_sha256": "ef1f7dba368829c174e2e7c41f73958c63f221aa8b5979ef9e1f15016b28e52e",
   "files": [
     {
       "mode": "0644",
@@ -232,8 +232,8 @@
     {
       "mode": "0644",
       "path": "cmd/swarmmemo/main.go",
-      "sha256": "92ef49e875d6746f8dc0796d071df3229d64e6205fb3e3925718213f5b463c2a",
-      "size": 13860
+      "sha256": "ea8b713896950a55c5f146d109f0e5214d119b23aa0e0e56693bff60bea88506",
+      "size": 15107
     },
     {
       "mode": "0644",
@@ -370,8 +370,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "78b980751f379b96621598038ce531c1e0c3001730d8d638f709cf7fb7802607",
-      "size": 105230
+      "sha256": "a3180ca97fcae1ccc75371f2def3ee3095b529a195a48acdf35cd5f814e20ba3",
+      "size": 107516
     },
     {
       "mode": "0644",
@@ -724,14 +724,14 @@
     {
       "mode": "0644",
       "path": "internal/board/roomstyle.go",
-      "sha256": "f9204886973f12c16b07c63130786c4acfb29c101eca6eafff72150c421a9c1a",
-      "size": 10142
+      "sha256": "aae2cc08a0743f173607a5e65ed920de4bed132f01838ae61ced0bfa0c860e49",
+      "size": 14959
     },
     {
       "mode": "0644",
       "path": "internal/board/roomstyle_test.go",
-      "sha256": "53f5b205a5e7b6ca50e4bd505b17061f2dcb06e4a20388f5f9bb4e3307d805eb",
-      "size": 12499
+      "sha256": "247551113c5e0147f74929588367a0ff35177ca8887aa68db95098e14b9d9f46",
+      "size": 17213
     },
     {
       "mode": "0644",
@@ -748,8 +748,8 @@
     {
       "mode": "0644",
       "path": "internal/board/sources_test.go",
-      "sha256": "f6fb870e51416026815e505a26b7105a04a4e7f08d10ed746becca3c4174c762",
-      "size": 19439
+      "sha256": "304a495ccec1d7000695cbfe4dbce80d34b278532bd14b6897460bdc4d37b270",
+      "size": 19730
     },
     {
       "mode": "0644",
@@ -862,8 +862,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/attachments.go",
-      "sha256": "ddc4fbb16c04f11273f8b9839cc3608e1a969b3253335e3582ae333d8019e671",
-      "size": 2106
+      "sha256": "fb784597074c94db0e266fa721237252ff62b59eedae3bd3dc3ceecbd299c0f5",
+      "size": 2262
     },
     {
       "mode": "0644",
@@ -1048,8 +1048,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/roomstyle_browser_test.go",
-      "sha256": "ba0aba199c7cbb38491fb47e4743b396614e8c0774726d1a2692723d4ad20255",
-      "size": 7645
+      "sha256": "5ee6e8af5b8d78244a1db203f48d3f4069d83321a51e0792a510cf64a2affd1f",
+      "size": 11134
     },
     {
       "mode": "0644",
@@ -1251,21 +1251,33 @@
     },
     {
       "mode": "0644",
+      "path": "internal/roomstyle/animation.go",
+      "sha256": "2ff5af649cb000432e24ef93df34b4a8dafbf8aa11bb6d57fcb1621029377d75",
+      "size": 9812
+    },
+    {
+      "mode": "0644",
       "path": "internal/roomstyle/atrules.go",
-      "sha256": "1341a0e8cd9d31256297fd143009667ebdf7e5239323c3d0de3fa54b649d84ce",
-      "size": 6238
+      "sha256": "a78a5a3899390c8931800f2d049d76312b12e29cf7f66154714b0df34801f251",
+      "size": 7631
     },
     {
       "mode": "0644",
       "path": "internal/roomstyle/browser_test.go",
-      "sha256": "9865597135eba8af67fc4051a34d55ef722b7ff2cd22a24f050e06a3537b7566",
-      "size": 8903
+      "sha256": "b85a392d7109bfe7cc94a04b36af4d02fbdfa749061ad520db5d77fe2840306f",
+      "size": 8924
     },
     {
       "mode": "0644",
       "path": "internal/roomstyle/examples/blog.css",
       "sha256": "223cd300a48cad9a47f6cd0c05a1659e5731a6b54c17670b7bd3e01683f82b46",
       "size": 2780
+    },
+    {
+      "mode": "0644",
+      "path": "internal/roomstyle/examples/news.css",
+      "sha256": "b659e1c3eedf7e272ea425cf1944597a6b0e9a787fa1c320aa552dea24c833c7",
+      "size": 2988
     },
     {
       "mode": "0644",
@@ -1287,6 +1299,18 @@
     },
     {
       "mode": "0644",
+      "path": "internal/roomstyle/free.go",
+      "sha256": "3e8ca186c4ad6351eeb76e7454e85fa66fe5375b8eb338cd2bed04f1a6119ca3",
+      "size": 6405
+    },
+    {
+      "mode": "0644",
+      "path": "internal/roomstyle/free_test.go",
+      "sha256": "def28b04792be27dec95287221790b000ee43e2f6956167c23f15f8fd8a1b166",
+      "size": 5204
+    },
+    {
+      "mode": "0644",
       "path": "internal/roomstyle/fuzz_test.go",
       "sha256": "dfdfefb49b4e98c03b1282a9b801f5973ddc3f3b5995a68b810aa6465adfff8e",
       "size": 1891
@@ -1294,8 +1318,8 @@
     {
       "mode": "0644",
       "path": "internal/roomstyle/hooks.go",
-      "sha256": "0d78161927d1cd27c5a95b751bbaaffd412fe821d6759604346a17969adce5e6",
-      "size": 4753
+      "sha256": "8cd5075979991939d2434d9dd7d217759b4c9a4267559424a0964a40e4bd11ae",
+      "size": 6030
     },
     {
       "mode": "0644",
@@ -1312,20 +1336,20 @@
     {
       "mode": "0644",
       "path": "internal/roomstyle/roomstyle.go",
-      "sha256": "3bbfec46692c266a382847535d66228b1d8588c22c338a9151c7f686057819b5",
-      "size": 9393
+      "sha256": "a4b0dc486e7e18be52e2fcb73db1bc9292d787129e7f22d808fd1420f0fdf5c5",
+      "size": 10483
     },
     {
       "mode": "0644",
       "path": "internal/roomstyle/roomstyle_test.go",
-      "sha256": "7226f47e82a10b2cfb54c4f6e1b6d5e042329229cba1ce8dd951faafeccdb98e",
-      "size": 24163
+      "sha256": "859e70566257b7fbedb2ad735a7ea03f99e4ee88c4d2816b532995013a6201c7",
+      "size": 29631
     },
     {
       "mode": "0644",
       "path": "internal/roomstyle/selector.go",
-      "sha256": "b5e6b0b55bd60f1b57977a09656a1c0c0c387273676fb19352b9bbff3b3fdbb8",
-      "size": 11415
+      "sha256": "67cd863e1e9c94a55689f63afb2659f297f19dfaafb839ebc473d77954c68941",
+      "size": 12297
     },
     {
       "mode": "0644",
@@ -1336,14 +1360,14 @@
     {
       "mode": "0644",
       "path": "internal/roomstyle/testdata/browser.cjs",
-      "sha256": "9c1e45e4f6c876999f8c8893c60c72dd8a183465036c915994aaa4b25e63e9de",
-      "size": 16175
+      "sha256": "9c54fe0c17a1d310d4d30f19113c473abde14602beb551b9006936e0d70e275c",
+      "size": 20650
     },
     {
       "mode": "0644",
       "path": "internal/roomstyle/testdata/differential.cjs",
-      "sha256": "1fdcb4652514b73e859a42c399286d4140aa9ae57ec615c80e12358b4571de63",
-      "size": 6741
+      "sha256": "66d98d0d8ba9f5aa06aa585e854b74c4a0dd4166aa92ef17bc0a6ee956ce453c",
+      "size": 7871
     },
     {
       "mode": "0644",
@@ -1354,20 +1378,20 @@
     {
       "mode": "0644",
       "path": "internal/roomstyle/values.go",
-      "sha256": "50139513fff0d3e6eb9cc7a6aab377d586a63a89ee2d2a85eafec7afd82b563b",
-      "size": 13319
+      "sha256": "b569a272eefbc0ca48d4bc6792b1539836df6657a4d6a7103ff73ebcc329a2f8",
+      "size": 13771
     },
     {
       "mode": "0644",
       "path": "internal/roomstyle/verify.go",
-      "sha256": "e7e8a5eff5e076a3c5025db7317c615172bb02db0c342c2b2bef16a2ed94a68c",
-      "size": 8294
+      "sha256": "4a466cf24f2683d9a9f9d934082fc7fa2e99705860baf97d02201ce128b3275d",
+      "size": 9604
     },
     {
       "mode": "0644",
       "path": "internal/roomstyle/zones.go",
-      "sha256": "263f338ca60c5ca3a184b32498045ccbe254b76b4794ae20359f043ddf647bc6",
-      "size": 16019
+      "sha256": "62f1afa9ffde4b2de9bd23a0c8e81111f5c92ebe518d3ff66051eaae3f681870",
+      "size": 17364
     },
     {
       "mode": "0644",
@@ -1510,8 +1534,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/style.css",
-      "sha256": "c9748f3c19a89771730160081e4d3f7f26c921b3b04009ca20e4a1ed3f652108",
-      "size": 66860
+      "sha256": "699e29b9e1198af5ed6bff4a7166f70374290dedf648ca7c12f1a167155ef435",
+      "size": 66515
     },
     {
       "mode": "0644",
@@ -1780,14 +1804,14 @@
     {
       "mode": "0644",
       "path": "internal/web/rooms.go",
-      "sha256": "3b3f7eb9ee9f47b45b0df1f654fd97efd9e4bf1e4b6178962dfef2ac4f14edeb",
-      "size": 9386
+      "sha256": "3208fa353cb4510c84e2610abc5ab04c8ee4f46c48d472f77d5390fc18b187d0",
+      "size": 9438
     },
     {
       "mode": "0644",
       "path": "internal/web/rooms_test.go",
-      "sha256": "c607b400f5f7a76db86d1705b0b63e34158c481a3d6cabdd2cada849e4e49e49",
-      "size": 7775
+      "sha256": "985fd750965b6112847289d42f92d7be72c5c473c00f1221aa80d9b011f5ddfa",
+      "size": 7778
     },
     {
       "mode": "0644",
@@ -1804,8 +1828,8 @@
     {
       "mode": "0644",
       "path": "internal/web/roomstyle_test.go",
-      "sha256": "87a773b33d970ce606e0b99e867863359afa57aace446db1fbcfa65989df4963",
-      "size": 14498
+      "sha256": "8ea580357c1c70301199d76a8d0c563e66e4d6e42d4030b3e469a622e6b53d43",
+      "size": 16257
     },
     {
       "mode": "0644",

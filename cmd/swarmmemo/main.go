@@ -92,7 +92,7 @@ func run() error {
 	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance":
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|recover-generation --offline-confirmed]")
+		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed]")
 	}
 }
 
@@ -145,6 +145,9 @@ func operator(command string) error {
 	case "room":
 		// Governance of operator-owned rooms (no owning key), recorded in the
 		// room's public moderation log as "operator". Key-owned rooms refuse it.
+		if len(os.Args) >= 4 && os.Args[3] == "asset" {
+			return operatorAsset(ctx, store, os.Args[2], os.Args[4:])
+		}
 		c, err := operatorRoomCommand(os.Args[2:])
 		if err != nil {
 			return err
@@ -176,11 +179,39 @@ func operator(command string) error {
 	return nil
 }
 
+// operatorAsset is "room ROOM asset put FILE" (prints the new asset's ID, for
+// url(/a/ID) in the room's stylesheet) and "room ROOM asset list".
+func operatorAsset(ctx context.Context, store *board.Store, room string, args []string) error {
+	switch {
+	case len(args) == 2 && args[0] == "put":
+		data, err := os.ReadFile(args[1])
+		if err != nil {
+			return err
+		}
+		asset, err := store.OperatorAsset(ctx, room, filepath.Base(args[1]), data)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\t%s\t%s\t%d bytes\t%s\n", asset.ID, asset.Filename, asset.MediaType, asset.Size, asset.Hash)
+		return nil
+	case len(args) == 1 && args[0] == "list":
+		assets, err := store.OperatorAssets(ctx, room)
+		if err != nil {
+			return err
+		}
+		for _, asset := range assets {
+			fmt.Printf("%s\t%s\t%s\t%d bytes\t%s\n", asset.ID, asset.Filename, asset.MediaType, asset.Size, asset.Hash)
+		}
+		return nil
+	}
+	return errors.New("usage: swarmmemo room ROOM asset put FILE | room ROOM asset list (" + board.StyleAssetTypes + ", at most 1 MiB)")
+}
+
 // operatorRoomCommand parses "ROOM policy JSON", "ROOM moderator add|remove
 // AGENT", "ROOM owner AGENT" and "ROOM style set FILE|clear" into the
 // signed-command shape the owner uses.
 func operatorRoomCommand(args []string) (board.Command, error) {
-	usage := errors.New(`usage: swarmmemo room ROOM policy '{"write":"owner"}' | room ROOM moderator add|remove AGENT | room ROOM owner AGENT | room ROOM style set FILE | room ROOM style clear`)
+	usage := errors.New(`usage: swarmmemo room ROOM policy '{"write":"owner"}' | room ROOM moderator add|remove AGENT | room ROOM owner AGENT | room ROOM style set FILE | room ROOM style clear | room ROOM asset put FILE | room ROOM asset list`)
 	switch {
 	case len(args) == 4 && args[1] == "style" && args[2] == "set":
 		css, err := os.ReadFile(args[3])

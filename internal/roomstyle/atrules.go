@@ -135,6 +135,49 @@ func (s *sanitizer) layerNames(prelude []cv, statement bool) ([]cv, bool) {
 	return out, true
 }
 
+// classifyKeyframes fills s.frames with every @keyframes the output will
+// hold, before any rule is emitted, so an animation can be checked against
+// keyframes defined later in the sheet. It skips exactly what emission drops
+// (a group with a bad condition or nested too deep, a malformed name, a
+// keyframe with no surviving declaration), so the output, sanitized again,
+// classifies the same.
+func (s *sanitizer) classifyKeyframes(rules []rule, depth int) {
+	for _, r := range rules {
+		if r.at == "" || s.err != nil {
+			continue
+		}
+		switch asciiLower(r.at) {
+		case "media", "supports", "container":
+			if r.block != nil && depth < MaxAtDepth {
+				if prelude := collapse(r.prelude); len(prelude) > 0 && conditionOK(prelude, 0) {
+					s.classifyKeyframes(parseRules(r.block.kids, false), depth+1)
+				}
+			}
+		case "layer":
+			if r.block != nil && depth < MaxAtDepth {
+				if _, ok := s.layerNames(r.prelude, false); ok {
+					s.classifyKeyframes(parseRules(r.block.kids, false), depth+1)
+				}
+			}
+		case "keyframes":
+			name, ok := keyframesName(r.prelude)
+			if !ok || r.block == nil {
+				continue
+			}
+			info, any := classifyFrames(r.block.kids, func(d declaration) ([]cv, bool) {
+				if d.important {
+					return nil, false
+				}
+				v, why := s.declaration(d, declKeyframe)
+				return v, why == ""
+			})
+			if any {
+				s.frames.add(s.prefixed(name), info)
+			}
+		}
+	}
+}
+
 func (s *sanitizer) keyframesRule(r rule) {
 	name, ok := keyframesName(r.prelude)
 	if !ok || r.block == nil {

@@ -1,6 +1,9 @@
 // Package roomstyle turns a room owner's arbitrary CSS into a stylesheet that
-// restyles the whole room page (nav, header, feed, posts, composer, footer)
-// without being able to hide, cover, move away or forge trust UI.
+// restyles the whole room page (nav, header, feed, posts, composer, footer).
+// The room may make its page look like anything, confusing included; what it
+// cannot do is harm the reader: hide or forge who wrote a post, cover or
+// hijack a control, hide the notice that the page is custom-styled, or make
+// the reader's browser fetch anything but the room's own images and fonts.
 //
 // The boundary is what CSS may change, not where it applies:
 //
@@ -11,15 +14,24 @@
 //     canvas root) is in the body zone and may use almost any property: the page
 //     draws each canvas with contain: layout paint style, isolation and
 //     overflow: clip, so nothing there paints outside it.
-//   - Every other rule is in the page zone, where nothing may hide, move off the
+//   - A rule whose subject is at or below a free hook (the sidebar, headers,
+//     footer, a post's meta line, labels: FreeClasses), none of which holds a
+//     byline or a control, is in the free zone: it may hide, position, stack,
+//     transform and decorate, with z-index capped, no negative margins and no
+//     letters in generated text.
+//   - Every other rule is in the page zone, which holds the bylines, the
+//     controls and all their ancestors. There nothing may hide, move off the
 //     page origin, overlay or stack: no position, z-index, transform, opacity,
 //     filter, clip, mask, overflow, visibility, content, pseudo-element boxes,
-//     animation, negative margins, display:none or translucent text colour.
-//     Without positioned or stacking boxes, nothing in the page zone can cover
-//     the trust elements, which the site pins (position, z-index, font, spacing,
-//     bidi) in @layer room-trust with !important, which no room rule outranks.
-//   - url() may name only a verified attachment of the room (/a/<id>) or a small
-//     inline raster image. Nothing else can make a reader's browser fetch.
+//     negative margins, display:none or translucent text colour; animations
+//     change only backgrounds and colours. With no stacking context in the page
+//     zone, the site's pins (@layer room-trust, !important, which no room rule
+//     outranks) draw every byline and control above anything a room stacks.
+//   - Animations pass a flash-rate check in every zone (animation.go), and the
+//     site stops them all for readers who prefer reduced motion.
+//   - url() may name only a verified attachment or asset of the room (/a/<id>)
+//     or a small inline raster image. Nothing else can make a reader's browser
+//     fetch.
 //   - Global names (@keyframes, @font-face families, @layer) are prefixed; site
 //     tokens other than colours cannot be redefined.
 //   - The output is re-serialized from parsed tokens, then re-parsed and checked
@@ -106,10 +118,11 @@ func SanitizeWith(css, roomID string, opts Options) (Stylesheet, []Warning, erro
 	if err != nil {
 		return Stylesheet{}, nil, err
 	}
-	s := &sanitizer{scope: scope, opts: opts, keyframes: map[string]bool{}, families: map[string]bool{}, urls: map[string]bool{}, checked: map[string]bool{}}
+	s := &sanitizer{scope: scope, opts: opts, keyframes: map[string]bool{}, frames: keyframeSet{}, families: map[string]bool{}, urls: map[string]bool{}, checked: map[string]bool{}}
 	rules := parseRules(values, true)
 	s.knobErr = trustKnobs(rules, scope)
 	s.collectNames(rules, 0)
+	s.classifyKeyframes(rules, 0)
 	s.rules(rules, 0)
 	if s.err != nil {
 		return Stylesheet{}, s.warnings, s.err
@@ -135,6 +148,7 @@ type sanitizer struct {
 	warnings  []Warning
 	dropped   int
 	keyframes map[string]bool // declared @keyframes names, as written
+	frames    keyframeSet     // what each (prefixed) @keyframes name animates
 	families  map[string]bool // declared @font-face families, lowercased
 	nRules    int
 	nSelector int
@@ -227,24 +241,29 @@ func (s *sanitizer) newline() {
 }
 
 // styleRule emits a rule once per zone: page-zone selectors get the restricted
-// declaration set, body-zone selectors the full one.
+// declaration set, free-zone selectors the free set, body-zone selectors the
+// full one.
 func (s *sanitizer) styleRule(r rule, depth int) {
-	var page, body [][]cv
+	var page, free, body [][]cv
 	for _, complex := range splitCommas(r.prelude) {
-		scoped, inBody, why := s.selector(complex)
+		scoped, z, why := s.selector(complex)
 		if why != "" {
 			s.warn(r.line, "dropped selector %q: %s", clip(serialize(complex)), why)
 			continue
 		}
-		if inBody {
+		switch z {
+		case zoneBody:
 			body = append(body, scoped)
-		} else {
+		case zoneFree:
+			free = append(free, scoped)
+		default:
 			page = append(page, scoped)
 		}
 	}
 	s.scopeRule = depth == 0 && isScopeOnly(r.prelude, s.scope)
 	s.emitRule(page, r.block.kids, declPage)
 	s.scopeRule = false
+	s.emitRule(free, r.block.kids, declFree)
 	s.emitRule(body, r.block.kids, declStyle)
 }
 

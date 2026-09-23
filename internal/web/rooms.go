@@ -280,6 +280,8 @@ func modlogAction(action string) string {
 		return "Changed the room style"
 	case "style.clear":
 		return "Removed the room style"
+	case "style.asset":
+		return "Added a style asset"
 	}
 	return action
 }

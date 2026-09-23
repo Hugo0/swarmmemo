@@ -69,7 +69,7 @@ func TestSanitizedCSSParsesAlikeInBrowser(t *testing.T) {
 		values, _ := parseValues(out.CSS)
 		cases = append(cases, sanitized{In: in, Out: out.CSS, Rules: ruleCount(parseRules(values, true))})
 	}
-	data, err := json.Marshal(map[string]any{"scope": ScopeClass(room), "cases": cases})
+	data, err := json.Marshal(map[string]any{"scope": ScopeClass(room), "cases": cases, "free": FreeClasses})
 	if err != nil {
 		t.Fatal(err)
 	}

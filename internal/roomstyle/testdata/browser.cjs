@@ -1,10 +1,12 @@
 // Room style in a real browser. Driven by TestRoomStyleInBrowser
 // (internal/httpapi/roomstyle_browser_test.go), which serves a board whose
 // "hostile" room carries a full-page stylesheet built to cover, hide, move,
-// shrink and forge trust UI, and whose theme rooms carry
-// internal/roomstyle/examples. A room style must not: contact another origin,
-// cover or hide any trust element, change how trust text reads, or survive the
-// reader's opt-out. The CSP must stop what the sanitizer would have stopped.
+// shrink and forge trust UI, whose theme rooms carry internal/roomstyle/examples,
+// and whose protocol rooms carry deploy/protocol-rooms with their assets. A room
+// may make its page look like anything; it must not: hide, cover or re-letter a
+// byline, cover a control, hide the style notice, contact another origin, keep
+// animating for a reader who asked for reduced motion, or survive the reader's
+// opt-out. The CSP must stop what the sanitizer would have stopped.
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -14,10 +16,36 @@ const evil = process.env.EVIL_ORIGIN;
 const shots = process.env.SCREENSHOT_DIR;
 const prefix = process.env.SCREENSHOT_PREFIX || 'css2';
 
-// Every trust element on a room page, conversation page or article.
-const trust = ['.site-nav a', '.workspace-link', '.memo-meta', '.memo .memo-time', '.memo .author', '.kind', '.badge',
-  '.removed', '.reply-button', '.report-button', '.compose-destination', '.compose-policy', '#compose-identity',
-  '.compose-actions .button', '.room-facts', '#room-style-strip', '#room-style-toggle'];
+// The trust elements on a room page: bylines and controls. Everything else
+// (timestamps, labels, notices, the sidebar, headers) is the room's to restyle.
+const trust = ['.site-nav a', '.workspace-link', '.memo .author', '.reply-button', '.report-button', '.compose-destination',
+  '#compose-identity', '.compose-actions .button', '#room-style-strip', '#room-style-toggle'];
+// Composer fields: never covered, but the room may colour them.
+const fields = ['#memo-text', '.composer > summary'];
+const protocolRooms = (process.env.PROTOCOL_ROOMS || '').split(',').filter(Boolean);
+
+// No ancestor of a byline or control may be hidden, moved, clipped or stacked:
+// that is what keeps the pinned z-index above everything a room stacks.
+async function cleanAncestors(page, selectors) {
+  const problems = await page.evaluate(selectors => {
+    const out = [];
+    for (const selector of selectors) for (const el of [...document.querySelectorAll(selector)].slice(0, 3)) {
+      for (let n = el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
+        if (n.matches('#compose-settings > summary')) continue; // itself pinned on top
+        const s = getComputedStyle(n);
+        const bad = [s.display === 'none' && 'display', s.visibility !== 'visible' && 'visibility', s.opacity !== '1' && 'opacity',
+          s.transform !== 'none' && 'transform', s.filter !== 'none' && 'filter', s.clipPath !== 'none' && 'clip-path',
+          (s.maskImage || s.webkitMaskImage || 'none') !== 'none' && 'mask', s.zIndex !== 'auto' && 'z-index',
+          !['static', 'relative'].includes(s.position) && 'position', s.isolation !== 'auto' && 'isolation',
+          s.mixBlendMode !== 'normal' && 'blend', /hidden|clip/.test(s.overflow) && 'overflow', s.contain !== 'none' && 'contain']
+          .filter(Boolean);
+        if (bad.length) out.push(`${selector} ancestor <${n.tagName.toLowerCase()} class="${n.className}">: ${bad.join(', ')}`);
+      }
+    }
+    return out;
+  }, selectors);
+  return [...new Set(problems)];
+}
 
 // A trust element is on screen, is what a click at its centre lands on, and
 // reads as the site draws it: opaque text, real size, normal spacing, left to
@@ -92,8 +120,13 @@ async function trusted(page, selector, {min = 1, pinnedText = true} = {}) {
     assert.ok(await page.evaluate(() => document.getElementById('room-style')?.sheet?.cssRules.length > 0), 'room stylesheet did not load');
     const css = await (await page.request.get(origin + await page.getAttribute('#room-style', 'href'))).text();
     assert.ok(!css.includes('127.0.0.1'), 'sanitized CSS kept a foreign URL:\n' + css);
-    const pageZone = css.split('\n').filter(rule => !rule.includes('.room-body')).join('\n');
-    assert.equal(pageZone.match(/position|z-index|opacity|transform|visibility|[{;]content:|overflow|clip|mask|filter/g), null, 'page-zone rules kept hostile parts:\n' + pageZone);
+    const outsideBodies = css.split('\n').filter(rule => !rule.includes('.room-body')).join('\n');
+    assert.ok(!/weaver|verified/.test(outsideBodies), 'generated text outside a body kept letters:\n' + outsideBodies);
+    assert.ok(!css.includes(process.env.CROSS_ROOM_ASSET), 'another room\'s asset survived');
+    assert.ok(!/animation:[^;]*(vanish|strobe)/.test(css), 'a hiding or strobing animation survived:\n' + css);
+    assert.ok(/z-index:100;/.test(css) && /position:fixed/.test(css), 'the free zone should keep its overlay (it is drawn under bylines and controls)');
+    // No ancestor of a byline or control is stacked, moved, clipped or hidden.
+    assert.deepEqual(await cleanAncestors(page, [...trust.filter(s => !s.startsWith('#room-style')), ...fields]), []);
     assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(255, 0, 255)', 'the page zone should be styled');
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.room-body')).backgroundColor), 'rgb(255, 0, 255)', 'the body zone should be styled');
     if (shots) {
@@ -107,7 +140,11 @@ async function trusted(page, selector, {min = 1, pinnedText = true} = {}) {
       await page.evaluate(() => document.querySelector('.memo .author').scrollIntoView({block: 'center'}));
       await page.screenshot({path: path.join(shots, `${prefix}-hostile-posts.png`)});
     }
+    // A full-viewport free-zone overlay (z-index 100) is up, and still every byline
+    // and control is on top and clickable.
+    assert.ok(await page.evaluate(() => getComputedStyle(document.querySelector('.sidebar')).position === 'fixed'), 'the overlay should apply');
     for (const selector of trust) await trusted(page, selector);
+    for (const selector of fields) await trusted(page, selector, {pinnedText: false});
     // The disclosure is pinned on screen: fixed, inside the viewport, site colours.
     const strip = await page.$eval('#room-style-strip', el => {
       const s = getComputedStyle(el), r = el.getBoundingClientRect();
@@ -191,7 +228,7 @@ async function trusted(page, selector, {min = 1, pinnedText = true} = {}) {
     await page.goto(origin + '/e/' + article.receipt.id);
     await page.waitForLoadState('load');
     assert.ok(await page.evaluate(() => document.getElementById('room-style')?.sheet?.cssRules.length > 0), 'style not linked on the article');
-    for (const selector of ['.article-byline', '.post-article .author', '.memo .author', '.memo .memo-time', '.site-nav a', '#room-style-toggle']) await trusted(page, selector);
+    for (const selector of ['.article-byline', '.post-article .author', '.memo .author', '.report-button', '.site-nav a', '#room-style-toggle']) await trusted(page, selector);
     assert.equal(await page.textContent('.room-canvas .md-host'), 'evil.example');
     const host = await page.$eval('.room-canvas .md-host', el => {
       const s = getComputedStyle(el);
@@ -205,8 +242,9 @@ async function trusted(page, selector, {min = 1, pinnedText = true} = {}) {
       await page.screenshot({path: path.join(shots, `${prefix}-hostile-article.png`)});
     }
 
-    // 7. The example themes, desktop and mobile, with the same trust checks.
-    for (const theme of ['terminal', 'newspaper', 'vaporwave', 'blog']) {
+    // 7. The example themes and the protocol rooms, desktop and mobile, with the
+    // same trust checks.
+    for (const theme of ['terminal', 'newspaper', 'vaporwave', 'blog', 'news', ...protocolRooms]) {
       for (const [label, viewport] of [['desktop', {width: 1280, height: 900}], ['mobile', {width: 390, height: 844}]]) {
         const shot = await browser.newContext({viewport, deviceScaleFactor: label === 'mobile' ? 2 : 1});
         const themed = await shot.newPage();
@@ -214,13 +252,40 @@ async function trusted(page, selector, {min = 1, pinnedText = true} = {}) {
         await themed.goto(origin + '/r/' + theme);
         await themed.waitForLoadState('load');
         assert.ok(await themed.evaluate(() => document.getElementById('room-style')?.sheet?.cssRules.length > 0), theme + ' did not load');
-        for (const selector of ['.memo .author', '.memo .memo-time', '.site-nav a', '#room-style-toggle']) await trusted(themed, selector);
+        for (const selector of ['.memo .author', '.report-button', '.site-nav a', '#room-style-toggle']) await trusted(themed, selector);
+        assert.deepEqual(await cleanAncestors(themed, ['.memo .author', '.report-button', '.site-nav a']), [], theme);
+        assert.ok(await themed.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), theme + ' scrolls sideways');
         if (shots) {
           // Fold the composer so the frame shows the page and the posts.
           await themed.evaluate(() => {document.getElementById('compose').open = false; scrollTo(0, 0);});
           await themed.screenshot({path: path.join(shots, `${prefix}-${theme}-${label}.png`), fullPage: label === 'desktop'});
         }
         await shot.close();
+      }
+    }
+
+    // 8. Assets and motion. #netcat names its font and GIFs as style assets; they
+    // load. Its animations run, and stop for a reader who prefers reduced motion.
+    if (protocolRooms.includes('netcat')) {
+      for (const motion of ['no-preference', 'reduce']) {
+        const ctx = await browser.newContext({reducedMotion: motion});
+        const cat = await ctx.newPage();
+        watch(cat);
+        const assets = [];
+        cat.on('response', r => { if (new URL(r.url()).pathname.startsWith('/a/')) assets.push(r.status()); });
+        await cat.goto(origin + '/r/netcat');
+        await cat.waitForLoadState('load');
+        await cat.evaluate(() => document.fonts.ready);
+        const state = await cat.evaluate(() => ({
+          body: getComputedStyle(document.body).animationName,
+          walker: getComputedStyle(document.querySelector('.page-heading'), '::after').animationName,
+          font: [...document.fonts].some(f => f.status === 'loaded' && /-vt/.test(f.family)),
+        }));
+        assert.ok(assets.length >= 2 && assets.every(s => s === 200), `assets ${assets}`);
+        assert.ok(state.font, 'the room font did not load from its asset');
+        if (motion === 'reduce') assert.deepEqual([state.body, state.walker], ['none', 'none'], 'animations run under reduced motion');
+        else assert.ok(state.body !== 'none' && state.walker !== 'none', 'room animations did not run: ' + JSON.stringify(state));
+        await ctx.close();
       }
     }
 

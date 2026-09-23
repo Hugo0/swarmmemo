@@ -6,11 +6,26 @@ import (
 	"strings"
 )
 
-// The page zone is every element outside a post body, including every trust
-// element and all of its ancestors. A page-zone rule may restyle colour, type,
-// spacing, borders, backgrounds and layout, but nothing that can hide an
-// element, take it off the page origin, lay a box over another, or make text
-// unreadable by transparency:
+// Three zones, by where a rule's subject is (selector.go):
+//
+//   - body: inside a post's canvas, which the site contains and clips. Almost
+//     anything goes.
+//   - free: at or below a free hook (FreeClasses), which never contains a
+//     byline or a control. Almost anything goes there too, including hiding,
+//     positioning, transforms and generated boxes, with four limits: z-index is
+//     a literal between -100 and 100 (the site draws bylines and controls at
+//     1000, above anything the free zone can stack); no negative margins (a
+//     free element's margin can pull the page's following content above its
+//     origin, where it cannot be scrolled to); generated and list-marker text
+//     has no letters (so it cannot spell a name or "verified" beside a byline);
+//     and animations pass the flash-rate check.
+//   - page: everything else, which may be a byline, a control or an ancestor
+//     of one. The rest of this comment is about this zone.
+//
+// A page-zone rule may restyle colour, type, spacing, borders, backgrounds and
+// layout, reorder siblings, and animate backgrounds and colours, but nothing
+// that can hide an element, take it off the page origin, lay a box over
+// another, or make text unreadable by transparency:
 //
 //   - no positioned or stacking boxes (position, z-index, transform, opacity,
 //     filter, isolation, blend modes, will-change, contain): with none, nothing
@@ -18,7 +33,8 @@ import (
 //     positioned boxes on top;
 //   - no clipping or hiding (overflow, clip, clip-path, mask, visibility,
 //     content-visibility, display:none or contents, line clamps);
-//   - no generated content (content) and no animations;
+//   - no generated content (content), and animations only of backgrounds and
+//     colours (pageAnimatable);
 //   - no negative margins, spacing or text-indent, no right floats, reversed
 //     flex lines, direction or writing-mode changes, and alignment only "safe":
 //     all of these can push content to the left of the page origin, where it
@@ -49,18 +65,19 @@ var (
 		"direction", "unicode-bidi", "writing-mode", "text-orientation",
 		// Text a room could inject outside a body: list markers, counters,
 		// quotes, hyphenation strings and emphasis marks; and text masking.
-		"list-style", "list-style-type", "list-style-image", "list-style-position", "counter-reset", "counter-increment", "counter-set",
+		"list-style", "list-style-type", "list-style-image", "list-style-position",
 		"quotes", "hyphenate-character", "-webkit-text-security",
 		// SVG geometry, which would redraw an icon.
 		"d", "r", "cx", "cy", "rx", "ry", "x", "y",
-		// Reordering and fragmenting: order moves a byline below its own body, next
-		// to the following post; columns and forced breaks split a post (and its
-		// Reply button) across columns; size containment collapses a box to nothing.
-		"order", "columns", "column-count", "column-width", "column-span", "column-fill",
+		// Fragmenting: columns and forced breaks split a post (and its Reply
+		// button) across columns; size containment collapses a box to nothing.
+		// (order is allowed: it reorders siblings in flow and never overlaps them.)
+		"columns", "column-count", "column-width", "column-span", "column-fill",
 		"break-before", "break-after", "break-inside", "page-break-before", "page-break-after", "page-break-inside",
 		"container", "container-type",
 	}
-	bodyOnlyPrefixes = []string{"inset", "mask", "-webkit-mask", "animation", "offset", "-webkit-text-stroke", "contain-intrinsic", "text-emphasis"}
+	// Animations are checked in every zone by animation.go.
+	bodyOnlyPrefixes = []string{"inset", "mask", "-webkit-mask", "offset", "-webkit-text-stroke", "contain-intrinsic", "text-emphasis"}
 	// Page-zone display values: every one draws the element's content.
 	pageDisplays = []string{"block", "inline", "inline-block", "flex", "inline-flex", "grid", "inline-grid", "flow-root", "flow",
 		"initial", "inherit", "unset", "revert", "revert-layer"}
@@ -156,6 +173,16 @@ func pageDeclaration(name string, value []cv) string {
 	case name == "float":
 		if len(value) != 1 || value[0].kind != tIdent || !slices.Contains([]string{"left", "none", "inline-start", "initial", "inherit", "unset", "revert", "revert-layer"}, asciiLower(value[0].value)) {
 			return "outside a post body only float: left or none (a right float wider than its column overflows the page's left edge)"
+		}
+	case name == "order":
+		if !integer(value, 1000) {
+			return "order takes a whole number between -1000 and 1000"
+		}
+	case name == "counter-reset" || name == "counter-increment" || name == "counter-set":
+		for _, v := range value {
+			if v.kind != tWhitespace && v.kind != tIdent && !(v.kind == tNumber && integer([]cv{v}, 1<<20)) {
+				return "counters take names and whole numbers"
+			}
 		}
 	case slices.Contains(alignments, name):
 		if !safeAlignment(value) {

@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -496,7 +497,15 @@ func generatedSections(t *testing.T) map[string]string {
 	for _, name := range groups {
 		fmt.Fprintf(&via, "\n`write_via` may name the group `%s`, meaning `%s`.\n", name, strings.Join(viaGroups[name], "` `"))
 	}
-	return map[string]string{"operations": ops.String(), "limits": limits.String(), "errors": errs.String(), "hooks": wrapList("", hooks, ""), "vias": via.String()}
+	var free []string
+	for i, name := range names {
+		if slices.Contains(roomstyle.FreeClasses, roomstyle.Hooks[name]) {
+			free = append(free, hooks[i])
+		}
+	}
+	return map[string]string{"operations": ops.String(), "limits": limits.String(), "errors": errs.String(), "hooks": wrapList("", hooks, ""), "vias": via.String(),
+		// Inside a list item: indented, and the end marker keeps its indent.
+		"free-hooks": wrapList("  ", free, "  ") + "  "}
 }
 
 // wrapList joins items with ", " and wraps them at 88 columns, starting after
