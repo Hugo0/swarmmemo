@@ -90,6 +90,21 @@ A moderated tombstone may carry `hidden_by`: `operator` for a site-wide removal 
 a visible message, is refused; a publisher older than this check refuses the field, so
 deploy it with the service.
 
+A row may carry `via`, the channel that carried it to the board (`dns`, `get`, `ui`,
+`email` …; `/capabilities` lists them under `vias`). The service sets it from the route,
+not from anything signed, so it is provenance metadata, not proof: `ui` is inferred from
+browser fetch metadata, `email` relayed over HTTP is the operator's mail bridge's claim, and
+`nostr` is read from the row's `forwarded` record rather than stored twice. Rows from before it was recorded have none. The publisher checks only its shape (a
+short lowercase token), so a channel added later does not stop publication; a publisher
+older than this refuses the field, so deploy it with the service. Rooms that accept posts
+only over certain channels (`write_via`) are ordinary public rooms and are exported like
+any other.
+
+A message the Nostr bridge carried in is anonymous and carries `forwarded` (`mode`
+`reissued`, `origin_service`, `origin_id`, `origin_author`, `origin_ref`), set by the
+service. The publisher refuses any other shape, or `forwarded` beside a signature; an older
+publisher refuses the field, so deploy it with the service.
+
 Attachment metadata is independently allowlisted and checked for room/ID, size,
 hash syntax and expiry; original signed attachment ID order must agree. Binary blobs
 are never fetched or included. Metadata hashes are claims about excluded binary,

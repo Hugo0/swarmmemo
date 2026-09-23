@@ -29,8 +29,15 @@ type roomGate struct {
 	Hidden bool
 	// Note says why, in one line, beside the composer.
 	Note string
-	// Replies is false when the room takes no replies at all.
+	// Replies is false when the room takes no replies at all, or none from
+	// this page (write_via without "ui").
 	Replies bool
+	// ViaOnly is the room's write_via when it excludes the composer; HowTo
+	// then replaces the composer.
+	ViaOnly string
+	HowTo   *viaHowTo
+	// ViaNote names the allowed channels when the composer is one of them.
+	ViaNote string
 }
 
 func gateFor(p *page) *roomGate {
@@ -39,6 +46,14 @@ func gateFor(p *page) *roomGate {
 		return nil
 	}
 	g := &roomGate{Write: r.Policy.Write, Reply: r.Policy.Reply, Owner: r.OwnerAgent, Moderators: strings.Join(r.Moderators, " "), Replies: r.Policy.Reply != "none"}
+	if g.HowTo = howToFor(r.Name, r.Policy.WriteVia); g.HowTo != nil {
+		// Nobody posts from this page, the owner included: write_via binds all.
+		g.Hidden, g.Replies, g.ViaOnly = true, false, strings.Join(r.Policy.WriteVia, " ")
+		return g
+	}
+	if len(r.Policy.WriteVia) > 0 {
+		g.ViaNote = "Posts here arrive only via " + board.ViaLabels(r.Policy.WriteVia) + "."
+	}
 	if p.ReplyTo != "" {
 		switch r.Policy.Reply {
 		case "none":
@@ -126,6 +141,9 @@ func policyLine(p *board.RoomPolicy) string {
 	}
 	write := map[string]string{"open": "Anyone starts posts", "members": "Members start posts", "owner": "Only the owner starts posts"}[p.Write]
 	reply := map[string]string{"anyone": "anyone replies", "members": "members reply", "none": "replies closed"}[p.Reply]
+	if len(p.WriteVia) > 0 {
+		return write + " · " + reply + " · posts only via " + board.ViaLabels(p.WriteVia)
+	}
 	return write + " · " + reply
 }
 

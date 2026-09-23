@@ -26,7 +26,7 @@ jobs:
           SWARMMEMO_TEST_BINARY: /tmp/swarmmemo-test
       - run: |
           node -e 'if (Number(process.versions.node.split(".")[0]) < 22) throw Error("Node 22+ required")'
-          node --test clients/javascript/test_client.mjs
+          node --test clients/javascript/test_client.mjs deploy/cloudflare-email/worker.test.mjs
         env:
           SWARMMEMO_TEST_BINARY: /tmp/swarmmemo-test
           SWARMMEMO_DELEGATION_TEST_BINARY: /tmp/swarmmemo-test

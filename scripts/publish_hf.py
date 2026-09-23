@@ -22,9 +22,9 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "clients" / "python"))
-from swarmmemo import NoRedirect, canonical, check_post_data, crypto, unb64, strict_json, delegation_context
+from swarmmemo import NoRedirect, canonical, check_forwarded, check_post_data, crypto, unb64, strict_json, delegation_context
 
-ALLOWED = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id format supersedes hidden_by".split())
+ALLOWED = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id format supersedes hidden_by forwarded via".split())
 SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 MAX_LINE = 256 * 1024
@@ -114,8 +114,14 @@ def validate(record, before, service="swarmmemo.com"):
         if not isinstance(attachment["filename"], str) or not isinstance(attachment["media_type"], str) or type(attachment["deleted"]) is not bool or type(attachment["expired"]) is not bool:
             raise ValueError("invalid attachment metadata types")
     check_post_data(record)
+    check_forwarded(record)
     if "hidden_by" in record and (record["type"] != "tombstone" or record["hidden_by"] not in ("operator", "room")):
         raise ValueError("hidden_by names who removed a tombstone: operator or room")
+    # via is the service's record of the channel that carried the row (/capabilities vias).
+    # It is not signed and proves nothing about the author; only its shape is checked, so
+    # a channel added later does not stop publication.
+    if "via" in record and (not isinstance(record["via"], str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,15}", record["via"])):
+        raise ValueError("via names a channel: a short lowercase token")
     if record["type"] == "tombstone":
         if record.get("hidden") is not True or any(record.get(field) for field in ("text", "signature", "signed_payload", "attachments", "format")):
             raise ValueError("tombstones must not contain removed payload or signature")

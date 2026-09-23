@@ -211,6 +211,31 @@ func TestCapabilitiesAdvertiseExactlyWhatIsEnabled(t *testing.T) {
 	if _, err := New(store, nil, Config{GeminiAddr: ":1965"}); err == nil {
 		t.Fatal("gemini enabled without a certificate")
 	}
+	// Email relayed by an external worker is advertised only, never listened for.
+	mail, err := New(store, nil, ConfigFromEnv(func(k string) string {
+		return map[string]string{"SWARMMEMO_TRANSPORT_EMAIL_DOMAIN": "Post.SwarmMemo.com."}[k]
+	}, "https://swarmmemo.com"))
+	if err != nil || len(mail.listeners) != 0 {
+		t.Fatalf("email opened a listener: %v %v", err, mail.listeners)
+	}
+	got = caps(httpapi.Config{Transports: mail.Capabilities()})
+	if len(got) != 1 {
+		t.Fatalf("expected email only: %v", got)
+	}
+	em := got[0].(map[string]any)
+	limits := em["limits"].(map[string]any)
+	if em["name"] != "email" || em["address"] != "ROOM@post.swarmmemo.com" || em["example"] != "post@post.swarmmemo.com" || em["access"] != "write" ||
+		!strings.HasPrefix(em["signed_commands"].(string), "required") || limits["command_bytes"] != float64(8187) || limits["message_bytes"] != float64(65536) {
+		t.Fatalf("email entry: %v", em)
+	}
+	var metrics strings.Builder
+	mail.WriteMetrics(&metrics)
+	if metrics.Len() != 0 {
+		t.Fatalf("email has no counters here: %q", metrics.String())
+	}
+	if _, err := New(store, nil, Config{EmailDomain: "not a name"}); err == nil {
+		t.Fatal("invalid email domain accepted")
+	}
 }
 
 // Hostile message text reaches every text wire as inert data: no terminal

@@ -56,6 +56,14 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(p.PrivateInboxError, "signed_event_field_mismatch"):
             p.validate_private_event(event(self.key, visibility="public"), self.binding)
 
+    def test_via_is_a_channel_token(self):
+        for via in ("ui", "command", "c64"):
+            value = {**event(self.key), "via": via}
+            self.assertIs(p.validate_private_event(value, self.binding), value)
+        for via in ("", "UI", "a" * 17, 1):
+            with self.subTest(via=via), self.assertRaisesRegex(p.PrivateInboxError, "invalid_event_metadata"):
+                p.validate_private_event({**event(self.key), "via": via}, self.binding)
+
     def test_private_restrictions_and_tampered_signature_projection(self):
         original = event(self.key)
         cases = [{"visibility": "public"}, {"archive_eligible": True}, {"room": "secret-b"},

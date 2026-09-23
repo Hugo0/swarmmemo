@@ -209,6 +209,19 @@ class PublisherTests(unittest.TestCase):
                        event(hidden_by="operator")):
             with self.subTest(record=record), self.assertRaises(ValueError): publisher.validate(record, 999999)
 
+    def test_via_is_a_channel_token_on_any_row(self):
+        for via in ("dns", "x-text", "ui", "some-future-wire"):
+            publisher.validate(event(via=via), 999999)
+            publisher.validate(event(type="tombstone", hidden=True, text="", reason="removed", hidden_by="operator", via=via), 999999)
+        for via in ("", "DNS", "dns ", "-dns", "a" * 17, 1, None, ["dns"]):
+            with self.subTest(via=via), self.assertRaises(ValueError): publisher.validate(event(via=via), 999999)
+
+    def test_bridge_provenance_is_exported_only_in_its_service_shape(self):
+        carried = {"mode": "reissued", "origin_service": "nostr", "origin_id": "ab" * 32, "origin_author": "npub1xyz", "origin_ref": "nostr:nevent1xyz"}
+        publisher.validate(event(forwarded=carried), 999999)
+        for bad in (dict(carried, mode="verbatim"), dict(carried, extra="x"), [], "nostr"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError): publisher.validate(event(forwarded=bad), 999999)
+
     def test_paginated_fetch_and_bounds(self):
         rows = [event(i, id="event-" + str(i)) for i in range(1, 7)]
         with server(rows) as url:

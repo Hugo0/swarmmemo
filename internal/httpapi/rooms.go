@@ -9,6 +9,7 @@ func roomPolicyCapabilities() map[string]any {
 		"operations":             []string{"room.policy.set", "room.moderator.add", "room.moderator.remove", "room.owner.transfer", "room.hide", "room.restore", "room.modlog", "room.style.set", "room.style.clear", "room.style.check"},
 		"write_policies":         []string{"open", "members", "owner"},
 		"reply_policies":         []string{"anyone", "members", "none"},
+		"write_via":              map[string]any{"meaning": "the only channels (message via) that may post in the room, top-level and replies, owner included; empty means any", "values": viaNames(), "groups": board.ViaGroups(), "edits": "a new version of your own message may arrive on any channel", "refusal": "403 room_via_restricted", "instructions": "/protocol.md#message-provenance-via"},
 		"default":                map[string]string{"write": "open", "reply": "anyone"},
 		"rules_bytes":            board.RoomRulesBytes,
 		"maximum_moderators":     board.RoomModeratorLimit,

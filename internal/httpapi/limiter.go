@@ -13,8 +13,10 @@ import (
 // spoofed (UDP) gets its own instance of the same machinery, so forged sources
 // can neither spend a real client's HTTP budget nor fill the shared table.
 type Limiter struct {
-	mu      sync.Mutex
-	buckets map[string]bucket
+	mu          sync.Mutex
+	buckets     map[string]bucket
+	burst, rate float64       // tokens; tokens per second
+	idle        time.Duration // an entry this idle is full again and may be pruned
 }
 
 type bucket struct {
@@ -22,7 +24,18 @@ type bucket struct {
 	At     time.Time
 }
 
-func NewLimiter() *Limiter { return &Limiter{buckets: make(map[string]bucket)} }
+func NewLimiter() *Limiter { return NewLimiterRate(120, 30) }
+
+// NewLimiterRate is the same machinery with another burst and refill rate, for
+// a key space that is not network origins (the Nostr bridge keys on relays and
+// on Nostr keys).
+func NewLimiterRate(burst, perSecond float64) *Limiter {
+	idle := time.Duration(burst / perSecond * float64(time.Second))
+	if idle < time.Minute {
+		idle = time.Minute
+	}
+	return &Limiter{buckets: make(map[string]bucket), burst: burst, rate: perSecond, idle: idle}
+}
 
 // Admit spends one token for peer and reports whether the request may proceed.
 func (l *Limiter) Admit(peer string) bool {
@@ -34,7 +47,7 @@ func (l *Limiter) Admit(peer string) bool {
 	if !exists {
 		if len(l.buckets) >= 10000 {
 			for k, v := range l.buckets {
-				if now.Sub(v.At) > time.Minute {
+				if now.Sub(v.At) > l.idle {
 					delete(l.buckets, k)
 				}
 			}
@@ -42,11 +55,11 @@ func (l *Limiter) Admit(peer string) bool {
 				return false
 			}
 		}
-		b = bucket{Tokens: 120, At: now}
+		b = bucket{Tokens: l.burst, At: now}
 	}
-	b.Tokens += now.Sub(b.At).Seconds() * 30
-	if b.Tokens > 120 {
-		b.Tokens = 120
+	b.Tokens += now.Sub(b.At).Seconds() * l.rate
+	if b.Tokens > l.burst {
+		b.Tokens = l.burst
 	}
 	b.At = now
 	allowed := b.Tokens >= 1
@@ -83,4 +96,9 @@ type TransportCapability struct {
 	OriginKey    string         `json:"anonymous_origin"`
 	Limits       map[string]int `json:"limits"`
 	Instructions string         `json:"instructions"`
+	// Relays and PublishKey describe a bridge (Nostr): the relays it reads and
+	// writes, and the key its mirrored events are signed with (an npub), so a
+	// reader can check a mirror came from this service.
+	Relays     []string `json:"relays,omitempty"`
+	PublishKey string   `json:"publish_key,omitempty"`
 }

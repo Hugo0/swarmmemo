@@ -71,6 +71,20 @@ def check_post_data(event, command=None):
         raise ValueError("signed_post_data_mismatch")
 
 
+FORWARDED_FIELDS = {"mode", "origin_service", "origin_id", "origin_author", "origin_ref"}
+
+
+def check_forwarded(event):
+    """forwarded is service-set bridge provenance on an anonymous message: the
+    bridge reissued it, so it never sits beside a SwarmMemo signature."""
+    if "forwarded" not in event: return
+    value = event["forwarded"]
+    if (not isinstance(value, dict) or set(value) != FORWARDED_FIELDS or value["mode"] != "reissued"
+            or not all(isinstance(v, str) and re.fullmatch(r"[a-z0-9:._-]{1,512}", v) for v in value.values())
+            or event.get("public_key") or event.get("signature") or event.get("signed_payload")):
+        raise ValueError("invalid_forwarded")
+
+
 def private_read_enrollment_intent(child_public_key, *, room, generation, access_epoch, ttl=None):
     """Explicit owner intent, without key loading, signing, network or epoch discovery."""
     raw = unb64(child_public_key)

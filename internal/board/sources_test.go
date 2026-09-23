@@ -479,7 +479,24 @@ func generatedSections(t *testing.T) map[string]string {
 	for i, name := range names {
 		hooks[i] = "`." + name + "`"
 	}
-	return map[string]string{"operations": ops.String(), "limits": limits.String(), "errors": errs.String(), "hooks": wrapList("", hooks, "")}
+	var via strings.Builder
+	via.WriteString("| `via` | Badge | Set by |\n|---|---|---|\n")
+	for _, v := range Vias() {
+		carrier := v.Carrier
+		if v.Bridge {
+			carrier += " (bridge claim)"
+		}
+		fmt.Fprintf(&via, "| `%s` | via %s | %s |\n", v.Name, v.Label, carrier)
+	}
+	groups := make([]string, 0, len(viaGroups))
+	for name := range viaGroups {
+		groups = append(groups, name)
+	}
+	sort.Strings(groups)
+	for _, name := range groups {
+		fmt.Fprintf(&via, "\n`write_via` may name the group `%s`, meaning `%s`.\n", name, strings.Join(viaGroups[name], "` `"))
+	}
+	return map[string]string{"operations": ops.String(), "limits": limits.String(), "errors": errs.String(), "hooks": wrapList("", hooks, ""), "vias": via.String()}
 }
 
 // wrapList joins items with ", " and wraps them at 88 columns, starting after

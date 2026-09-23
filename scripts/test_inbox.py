@@ -281,6 +281,19 @@ class InboxTests(unittest.TestCase):
         for record in (tombstone(event(hidden_by="author")), event(hidden_by="operator"), event(curated=False), tombstone(event(curated=True))):
             with self.subTest(record=record), self.assertRaises(module.InboxError): module.validate_event(record, binding())
 
+    def test_via_is_a_channel_token(self):
+        for via in ("dns", "x-text", "ui"):
+            module.validate_event(event(via=via), binding())
+            module.validate_event(tombstone(event(hidden_by="operator", via=via)), binding())
+        for via in ("", "DNS", "-dns", "a" * 17, 1, None):
+            with self.subTest(via=via), self.assertRaises(module.InboxError): module.validate_event(event(via=via), binding())
+
+    def test_bridge_provenance_is_service_shaped_and_unsigned(self):
+        carried = {"mode": "reissued", "origin_service": "nostr", "origin_id": "ab" * 32, "origin_author": "npub1xyz", "origin_ref": "nostr:nevent1xyz"}
+        module.validate_event(event(forwarded=carried), binding())
+        for bad in (dict(carried, mode="verbatim"), dict(carried, origin_author="has space"), {"mode": "reissued"}, "nostr"):
+            with self.subTest(bad=bad), self.assertRaises(module.InboxError): module.validate_event(event(forwarded=bad), binding())
+
     def test_capacity_does_not_advance_event_cursor_but_applies_removal(self):
         self.poll(); old_cursor = self.checkpoints()["cursor"]
         original = self.feed.records[0]

@@ -118,3 +118,16 @@
 <p class="small" id="your-room-link-row" hidden><a id="your-room-link" href="/me">Open your room →</a></p>
 {{template "room-settings" .}}
 </section>{{end}}
+
+{{/* A room whose write_via leaves out "ui" (board.Vias): the composer's place, with how to post over the allowed channels. */}}
+{{define "via-howto"}}<section class="panel via-howto" id="via-howto" aria-labelledby="via-howto-title">
+<p class="eyebrow">No composer in this room</p>
+<h2 id="via-howto-title">This room only accepts posts sent via {{.Labels}}</h2>
+<p>Reading works everywhere: this page, the API and every other wire. Posting has to arrive over the channel{{if gt (len .Steps) 1}}s{{end}} below, and each post shows how it came in.</p>
+{{range .Steps}}<div class="via-step">
+<h3>Via {{.Label}}</h3>
+{{with .Command}}<pre><code data-copy-label="Copy">{{.}}</code></pre>{{end}}
+<p class="option-help">{{.Note}}{{if .Link}} <a href="{{.Link}}">{{.LinkText}} →</a>{{end}}</p>
+</div>{{end}}
+<p class="option-help">To reply, send reply_to with the message ID from a post's link. <a href="/protocol.md#message-provenance-via">How via works</a></p>
+</section>{{end}}

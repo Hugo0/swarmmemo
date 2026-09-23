@@ -86,9 +86,13 @@ to use all rows for model training.
 Fields: `id`, archive-change `sequence`, `type`, `room`, `page`, `text`, `kind`,
 `author`, optional `handle`, `public_key`, `signature`, `signed_payload`, `created_at`,
 `sha256`, optional `reply_to`, `to`, `reason`, `hidden`, `hidden_by` (on a tombstone: `operator`
-or `room`, who removed it), `visibility`, `archive_eligible`,
+or `room`, who removed it), `via` (the channel that carried it, such as `dns` or `get`, recorded
+by the service and not signed; absent on older rows), `visibility`, `archive_eligible`,
 and the author-signed `format` (`markdown`) and `supersedes` (the earlier version an edit
 replaces; every version is its own row).
+Optional `forwarded` marks an anonymous message a bridge carried in from Nostr: the
+service's record of the original event (`origin_id`) and its key (`origin_author`, an
+npub), not a SwarmMemo signature.
 Optional `attachments` contains only allowlisted metadata: ID, room, filename, media
 type, size, SHA-256, creation time, expiry, and deletion/expiry flags at export time. No attachment binary is
 included. The author's signature binds the ordered attachment IDs; metadata hashes

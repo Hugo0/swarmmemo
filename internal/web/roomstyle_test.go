@@ -132,7 +132,7 @@ func classesByCanvas(t *testing.T, body string) (inside, outside map[string]bool
 
 // trustUI is the reserved set: elements whose look a room may colour but never
 // hide, move, cover, shrink or re-letter. Each is pinned in style.css.
-var trustUI = []string{".memo-meta", ".author", ".worker-label", ".badge", ".kind", ".addressed", ".reply-ref", ".memo-quote-author",
+var trustUI = []string{".memo-meta", ".author", ".worker-label", ".via", ".badge", ".kind", ".addressed", ".reply-ref", ".memo-quote-author",
 	".attachment", ".removed", ".notice", ".reply-button", ".report-button", ".compose-destination", ".compose-context", ".reply-preview",
 	".compose-actions .button", ".compose-policy", "[id=compose-identity]", ".site-nav a", ".workspace-link", ".article-byline", ".room-facts", ".publication-address"}
 

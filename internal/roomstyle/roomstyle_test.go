@@ -55,6 +55,24 @@ func TestExamplesPassWithoutWarnings(t *testing.T) {
 	}
 }
 
+// The protocol rooms' stylesheets (deploy/protocol-rooms, set by the operator)
+// are held to the same bar as the examples: the sanitizer drops nothing.
+func TestProtocolRoomStylesPassWithoutWarnings(t *testing.T) {
+	paths, _ := filepath.Glob("../../deploy/protocol-rooms/*.css")
+	if len(paths) < 10 {
+		t.Fatalf("want the protocol room themes, found %v", paths)
+	}
+	for _, path := range paths {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, warnings := sanitize(t, string(src)); len(warnings) != 0 {
+			t.Errorf("%s: %v", path, warnings)
+		}
+	}
+}
+
 func TestScopingAndHooks(t *testing.T) {
 	S := "." + ScopeClass(room)
 	for css, want := range map[string]string{

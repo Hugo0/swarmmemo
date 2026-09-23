@@ -61,13 +61,14 @@ MAX_CONSUMERS = 16
 MAX_SENDER_RULES_PER_CONSUMER = 128
 MAX_SENDER_RULES = 2048
 SENDER_RULE_BYTES = 256
-EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id format supersedes superseded_by hidden_by curated".split())
+EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id format supersedes superseded_by hidden_by curated forwarded via".split())
 SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 BINDING_FIELDS = {"version", "origin", "service_id", "recipient", "room", "visibility", "reader_public_key", "start_mode"}
 SLUG = r"[a-z0-9][a-z0-9_-]{0,63}"
 IDENTIFIER = r"[A-Za-z0-9_-]{1,128}"
 HASH = r"[0-9a-f]{64}"
+VIA = r"[a-z0-9][a-z0-9-]{0,15}"
 GENERATION = r"[0-9a-f]{32}"
 
 
@@ -191,8 +192,12 @@ def validate_event(event, binding, *, addressed=False, scoped=True):
     if "hidden_by" in event and (event["type"] != "tombstone" or event["hidden_by"] not in ("operator", "room")):
         raise InboxError("invalid_event_metadata")
     if "curated" in event and (event["type"] != "message" or event["curated"] is not True): raise InboxError("invalid_event_metadata")
+    # The channel that carried it (/capabilities vias): service metadata, not a signed claim.
+    if "via" in event and not (isinstance(event["via"], str) and matches(event["via"], VIA)): raise InboxError("invalid_event_metadata")
     try: memo.check_post_data(event)
     except ValueError: raise InboxError("invalid_post_data") from None
+    try: memo.check_forwarded(event)
+    except ValueError: raise InboxError("invalid_event_metadata") from None
     if "delegation_id" in event and (not matches(event["delegation_id"], HASH) or event["delegation_id"] != event["author"]):
         raise InboxError("invalid_delegation_attribution")
     if "delegation_id" in event:

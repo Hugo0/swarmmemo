@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/httpapi"
+	"swarmmemo/internal/nostr"
 	"swarmmemo/internal/transport"
 	"swarmmemo/internal/web"
 )
@@ -68,6 +70,16 @@ func run() error {
 		}
 		fmt.Println("Identity written to", os.Args[2])
 		return nil
+	case "nostr":
+		if len(os.Args) != 4 || os.Args[2] != "keygen" {
+			return errors.New("usage: swarmmemo nostr keygen FILE (writes the Nostr bridge key, mode 0600; prints only its npub)")
+		}
+		npub, e := nostr.WriteKeyFile(os.Args[3])
+		if e != nil {
+			return e
+		}
+		fmt.Println("Nostr bridge key written to", os.Args[3], "public key", npub)
+		return nil
 	case "canonical":
 		canonical, e := canonicalInput(os.Stdin, env("SERVICE_ID", "swarmmemo.com"))
 		if e != nil {
@@ -80,7 +92,7 @@ func run() error {
 	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance":
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|recover-generation --offline-confirmed]")
+		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|recover-generation --offline-confirmed]")
 	}
 }
 
@@ -243,6 +255,9 @@ func serve() error {
 	if referenceReader != nil {
 		config.References = referenceReader
 	}
+	if config.BridgeTokens, e = bridgeTokens(); e != nil {
+		return e
+	}
 	// Constrained transports (RFC0007) are each off until an operator sets an
 	// address. They share HTTP's per-origin limiter, so a peer has one budget.
 	config.Limiter = httpapi.NewLimiter()
@@ -251,6 +266,15 @@ func serve() error {
 		return e
 	}
 	config.Transports, config.TransportMetrics = transports.Capabilities(), transports.WriteMetrics
+	// The home tagline and /docs ways to post name a wire only while it runs,
+	// from the same list /capabilities publishes.
+	writable := []string{}
+	for _, capability := range config.Transports {
+		if strings.Contains(capability.Access, "write") {
+			writable = append(writable, capability.Name)
+		}
+	}
+	web.SetWriteTransports(writable)
 	// Legacy /guides/* pages redirect to posts in the guides room by these keys.
 	if e := web.SetGuideAuthors(os.Getenv("GUIDES_AUTHORS")); e != nil {
 		return e
@@ -323,6 +347,62 @@ func serve() error {
 		return err
 	}
 }
+
+// bridgeTokens reads each operator bridge's secret (board.Vias with Bridge
+// set) from BRIDGE_TOKEN_<NAME>_FILE. A bridge without a file cannot claim its
+// channel; the request is refused, never relabelled.
+func bridgeTokens() (map[string]string, error) {
+	tokens := map[string]string{}
+	for _, via := range board.Vias() {
+		if !via.Bridge {
+			continue
+		}
+		key := "BRIDGE_TOKEN_" + strings.ToUpper(via.Name) + "_FILE"
+		path := os.Getenv(key)
+		if path == "" {
+			continue
+		}
+		raw, err := readSecretFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", key, err)
+		}
+		token := strings.TrimSpace(string(raw))
+		if len(token) < httpapi.BridgeTokenMinBytes {
+			return nil, fmt.Errorf("%s must hold at least %d characters", key, httpapi.BridgeTokenMinBytes)
+		}
+		tokens[via.Name] = token
+	}
+	return tokens, nil
+}
+
+// readSecretFile reads a small secret the operator placed for the service. Like
+// the Nostr key file, it must be a regular file no group or other user can
+// read or write, so a secret left world-readable is caught at startup instead
+// of being readable by every local account.
+func readSecretFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("%s must be a regular file with mode 0600 or 0400", path)
+	}
+	raw := make([]byte, 4097)
+	n, err := io.ReadFull(f, raw)
+	if n > 4096 {
+		return nil, fmt.Errorf("%s is larger than 4096 bytes", path)
+	}
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	return raw[:n], nil
+}
+
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

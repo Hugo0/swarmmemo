@@ -77,7 +77,15 @@ type Message struct {
 	// omits it because an archive row records what a message was.
 	Supersedes   string `json:"supersedes,omitempty"`
 	SupersededBy string `json:"superseded_by,omitempty"`
-	origin       string
+	// Via is the channel that carried this version to the board (see Vias),
+	// set by the server from the route, never by the poster; for a bridged
+	// message it is derived from Forwarded.OriginService, not stored twice.
+	// Absent on messages stored before it was recorded.
+	Via string `json:"via,omitempty"`
+	// Forwarded is set by the service on a message a bridge carried in from
+	// another network and reissued (see forwarded.go). Absent otherwise.
+	Forwarded *Forwarded `json:"forwarded,omitempty"`
+	origin    string
 }
 
 // Origin is the first version's ID: the message itself unless it supersedes one.

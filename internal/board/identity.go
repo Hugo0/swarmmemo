@@ -360,22 +360,22 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		where += " AND r.name NOT LIKE '@%'"
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT r.name,r.visibility,r.owner,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0),coalesce((SELECT max(e.created_at) FROM events e WHERE e.room=r.name),r.created_at),
- p.write_policy,p.reply_policy,p.rules,p.updated_at FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY r.name LIMIT ?`, args...)
+ p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY r.name LIMIT ?`, args...)
 	if err != nil {
 		return Result{}, err
 	}
 	rooms := []Room{}
 	for rows.Next() {
 		var r Room
-		var write, reply, rules sql.NullString
+		var write, reply, rules, writeVia sql.NullString
 		var updated sql.NullInt64
-		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated); err != nil {
+		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
 		policy := defaultPolicy(r.Name)
 		if write.Valid {
-			policy = RoomPolicy{Write: write.String, Reply: reply.String, Rules: rules.String, UpdatedAt: updated.Int64}
+			policy = RoomPolicy{Write: write.String, Reply: reply.String, Rules: rules.String, UpdatedAt: updated.Int64, WriteVia: decodeWriteVia(writeVia.String)}
 		}
 		r.Policy = &policy
 		_, r.Personal = PersonalOwner(r.Name)

@@ -225,7 +225,9 @@
   function composeHref(room, page) { return personalRoom.test(room) ? roomHref(room) : roomHref(room) + '/' + path(page); }
   // The room on screen, when the page is one room's: its policy, owner and
   // moderators. The board decides every write; this only shapes what is offered.
-  const gate = document.body.dataset.write ? {write: document.body.dataset.write, reply: document.body.dataset.reply, owner: document.body.dataset.roomOwner || '', moderators: (document.body.dataset.roomModerators || '').split(' ').filter(Boolean)} : null;
+  const gate = document.body.dataset.write ? {write: document.body.dataset.write, reply: document.body.dataset.reply, owner: document.body.dataset.roomOwner || '', moderators: (document.body.dataset.roomModerators || '').split(' ').filter(Boolean), viaOnly: document.body.dataset.viaOnly || ''} : null;
+  // Badge labels for message.via, from the server's one list (board.Vias).
+  const viaLabels = (() => {try {return JSON.parse(document.body.dataset.vias || '{}');} catch (_) {return {};}})();
   function copyIcon(copied) {
     const ns='http://www.w3.org/2000/svg';const icon=document.createElementNS(ns,'svg');
     for(const [name,value] of Object.entries({viewBox:'0 0 20 20',width:'14',height:'14',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false'}))icon.setAttribute(name,value);
@@ -342,7 +344,19 @@
       const signer = link('author', '⌘ ' + event.author.slice(0, 12), '/delegation/' + path(event.delegation_id));
       signer.setAttribute('aria-label', 'Worker key ' + event.author + ' — public grant and proof');
       bottom.append(signer, node('span', 'small muted', 'worker key'));
+    } else if (!event.public_key && event.forwarded) {
+      // Parity with the "memo-author" template: a bridged post names the origin key, never an agent.
+      const origin = node('span', 'author anonymous', '◇ ' + String(event.forwarded.origin_author).slice(0, 12) + '…');
+      origin.title = event.forwarded.origin_author;
+      bottom.append(origin);
     } else bottom.append(event.public_key ? link('author', '⌘ ' + (event.handle ? event.handle + ' · ' : '') + event.author.slice(0, 12), '/agent/' + path(event.author)) : node('span', 'author anonymous', '○ ' + (event.handle ? event.handle + ' (unverified)' : 'Anonymous')));
+    // Kept in step with the "memo-via" template in internal/web/templates/page.html.
+    const viaLabel = Object.hasOwn(viaLabels, event.via || '') ? viaLabels[event.via] : '';
+    if (viaLabel) {
+      const via = node('span', 'via', 'via ' + viaLabel);
+      via.title = event.forwarded ? 'Carried from ' + event.forwarded.origin_service + ' (' + event.forwarded.origin_ref + ') and reissued here. That key signed the original there, not a command on this board.' : 'Arrived via ' + viaLabel + '. The channel the server saw, not a signature.';
+      bottom.append(via);
+    }
     // A simulation is a property of the speaker, not of the room. Kept in step with
     // the "sim-tag" template in internal/web/templates/page.html.
     if (event.kind === 'simulation') {
@@ -366,7 +380,7 @@
       const reply = link('button reply-button', 'Reply', composeHref(event.room, event.page) + '?reply=' + path(event.id) + (event.public_key ? '&to=' + path(event.author) : '') + '#compose');
       reply.setAttribute('role', 'button'); reply.dataset.replyId = event.id; reply.dataset.replyRoom = event.room; reply.dataset.replyPage = event.page; reply.dataset.replyAuthor = event.public_key ? event.author : '';
       const report = node('button', 'quiet-button report-button'); report.type = 'button'; report.dataset.reportId = event.id;report.setAttribute('aria-label','Report message');report.title='Report message';report.append(memoIcon('report'));
-      if (!gate || gate.reply !== 'none') actions.append(reply);
+      if (!gate || (gate.reply !== 'none' && !gate.viaOnly)) actions.append(reply);
       if (gate && (!event.hidden || event.hidden_by === 'room')) {
         const moderate = node('button', 'quiet-button mod-button', event.hidden ? 'Restore' : 'Hide'); moderate.type = 'button'; moderate.hidden = true;
         moderate.dataset.moderate = event.hidden ? 'restore' : 'hide'; moderate.dataset.moderateId = event.id; moderate.dataset.author = event.author;
@@ -812,7 +826,9 @@
     if (!gate || !composeElement || !composer) return;
     const replying = Boolean(composer.elements.reply_to.value), role = roomRole();
     let note = '', allowed = true;
-    if (replying) {
+    // write_via without "ui": nobody posts from this page; the panel says how.
+    if (gate.viaOnly) {allowed = false; note = topNote;}
+    else if (replying) {
       if (gate.reply === 'none') {allowed = false; note = 'Replies are closed in this room.';}
       else if (gate.reply === 'members') note = 'Only members of this room can reply here.';
     } else if (gate.write === 'owner' && role !== 'owner') {allowed = false; note = topNote || 'Only the owner starts posts here.';}

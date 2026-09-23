@@ -194,7 +194,7 @@ func TestSchema13RoomStyleMigration(t *testing.T) {
 	}
 	defer s.Close()
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
-	if got := sqlCount(t, s, "PRAGMA user_version"); got != SchemaVersion || SchemaVersion != 13 {
+	if got := sqlCount(t, s, "PRAGMA user_version"); got != SchemaVersion || SchemaVersion < 13 {
 		t.Fatalf("user_version %d", got)
 	}
 	if r := roomGet(t, s, "kept"); r.Policy.Write != "owner" || r.Policy.Rules != "Be kind." || r.Style != nil || len(modlog(t, s, "kept")) != 1 {

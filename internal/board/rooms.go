@@ -73,12 +73,14 @@ func PersonalOwner(room string) (string, bool) {
 	return room[1:], true
 }
 
-// RoomPolicy is who may start posts and who may reply in one room.
+// RoomPolicy is who may start posts and who may reply in one room, and over
+// which channels (WriteVia, see Vias; empty means any).
 type RoomPolicy struct {
-	Write     string `json:"write"`
-	Reply     string `json:"reply"`
-	Rules     string `json:"rules,omitempty"`
-	UpdatedAt int64  `json:"updated_at,omitempty"`
+	Write     string   `json:"write"`
+	Reply     string   `json:"reply"`
+	Rules     string   `json:"rules,omitempty"`
+	WriteVia  []string `json:"write_via,omitempty"`
+	UpdatedAt int64    `json:"updated_at,omitempty"`
 }
 
 // ModerationEntry is one public, per-room governance record.
@@ -108,10 +110,12 @@ func defaultPolicy(room string) RoomPolicy {
 
 func loadPolicy(ctx context.Context, tx *sql.Tx, room string) (RoomPolicy, error) {
 	p := defaultPolicy(room)
-	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at FROM room_policies WHERE room=?", room).Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt)
+	var writeVia string
+	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via FROM room_policies WHERE room=?", room).Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
+	p.WriteVia = decodeWriteVia(writeVia)
 	return p, err
 }
 
@@ -139,10 +143,19 @@ func roomRole(ctx context.Context, tx *sql.Tx, r Room, a actor) (string, error) 
 
 // authorizeRoomPost is the room policy check for the one post path. Every
 // transport and write alias reaches the board through post, so none can skip it.
-func authorizeRoomPost(ctx context.Context, tx *sql.Tx, r Room, a actor, reply bool) error {
+// via is the channel the adapter recorded; write_via binds top-level posts and
+// replies alike, and everyone, the owner included.
+func authorizeRoomPost(ctx context.Context, tx *sql.Tx, r Room, a actor, reply bool, via string) error {
 	p, err := loadPolicy(ctx, tx, r.Name)
 	if err != nil {
 		return err
+	}
+	if !ViaAllowed(p.WriteVia, via) {
+		arrived := "an unrecorded channel"
+		if v, ok := LookupVia(via); ok {
+			arrived = v.Label
+		}
+		return problem(403, "room_via_restricted", "This room accepts posts sent via "+ViaLabels(p.WriteVia)+" only, and this one arrived via "+arrived+"; it has not been published. Read the room over any channel; its page, and room.get's policy.write_via, say how to post.")
 	}
 	role, err := roomRole(ctx, tx, r, a)
 	if err != nil {
@@ -304,8 +317,8 @@ func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, now int
 		if err != nil {
 			return logEntry{}, Result{}, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at) VALUES(?,?,?,?,?)
- ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at`, r.Name, p.Write, p.Reply, p.Rules, now); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via) VALUES(?,?,?,?,?,?)
+ ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at,write_via=excluded.write_via`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia)); err != nil {
 			return logEntry{}, Result{}, err
 		}
 		p.UpdatedAt = now
@@ -369,14 +382,15 @@ func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, now int
 // value, so an owner can change one setting without restating the others.
 func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string) (RoomPolicy, error) {
 	var in struct {
-		Write *string `json:"write"`
-		Reply *string `json:"reply"`
-		Rules *string `json:"rules"`
+		Write    *string         `json:"write"`
+		Reply    *string         `json:"reply"`
+		Rules    *string         `json:"rules"`
+		WriteVia json.RawMessage `json:"write_via"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader([]byte(data)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil) {
-		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules".`)
+	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil) {
+		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via".`)
 	}
 	p, err := loadPolicy(ctx, tx, room)
 	if err != nil {
@@ -390,6 +404,11 @@ func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string) (RoomPolicy
 	}
 	if in.Rules != nil {
 		p.Rules = *in.Rules
+	}
+	if in.WriteVia != nil {
+		if p.WriteVia, err = parseWriteVia(in.WriteVia); err != nil {
+			return p, err
+		}
 	}
 	switch {
 	case p.Write != "open" && p.Write != "members" && p.Write != "owner":

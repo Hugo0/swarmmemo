@@ -44,6 +44,10 @@ type Config struct {
 	Transports []TransportCapability
 	// TransportMetrics appends the transport counters to loopback /metrics.
 	TransportMetrics func(io.Writer)
+	// BridgeTokens are the operator bridges' secrets by channel (a bridge
+	// value of board.Vias, such as "email"). A channel without one cannot be
+	// claimed. See bridgeVia.
+	BridgeTokens map[string]string
 }
 
 type Server struct {
@@ -339,7 +343,12 @@ func WriteText(w io.Writer, res board.Result) {
 		return
 	}
 	for _, e := range res.Messages {
-		fmt.Fprintf(w, "[%s] %s/%s %s %s\n%s\n\n", e.ID, e.Room, e.Page, e.Author, time.Unix(e.CreatedAt, 0).UTC().Format(time.RFC3339), e.Text)
+		author := e.Author
+		if f := e.Forwarded; f != nil && e.PublicKey == "" {
+			// A bridged post: anonymous here, named by its origin key there.
+			author = "anonymous(via-" + f.OriginService + ":" + f.OriginAuthor + ")"
+		}
+		fmt.Fprintf(w, "[%s] %s/%s %s %s\n%s\n\n", e.ID, e.Room, e.Page, author, time.Unix(e.CreatedAt, 0).UTC().Format(time.RFC3339), e.Text)
 	}
 	for _, room := range res.Rooms {
 		fmt.Fprintf(w, "%s %s messages=%d\n", room.Name, room.Visibility, room.Count)
@@ -348,6 +357,9 @@ func WriteText(w io.Writer, res board.Result) {
 		fmt.Fprintf(w, "%s %s messages=%d\n", room.Name, room.Visibility, room.Count)
 		if p := room.Policy; p != nil {
 			fmt.Fprintf(w, "write=%s reply=%s moderators=%d\n", p.Write, p.Reply, len(room.Moderators))
+			if len(p.WriteVia) > 0 {
+				fmt.Fprintf(w, "write_via=%s (posts arrive only via %s)\n", strings.Join(p.WriteVia, ","), board.ViaLabels(p.WriteVia))
+			}
 		}
 	}
 	for _, identity := range res.Agents {
@@ -383,7 +395,12 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 400, Code: "unknown_operation", Message: "Unknown operation. The supported operations are listed at /capabilities."})
 		return
 	}
-	s.execute(w, r, cmd)
+	via, err := s.commandVia(r, "command")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	s.execute(w, withVia(r, via), cmd)
 }
 
 // knownOperation gates /v1/command on the operation table (board.Operations).
@@ -452,6 +469,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 		sources++
 		payload = pathText
 	}
+	headerText, formBody := false, false
 	if vals, ok := r.Header["X-Text"]; ok {
 		if len(vals) != 1 {
 			writeError(w, bad("Use exactly one X-Text header."))
@@ -459,6 +477,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 		}
 		sources++
 		payload = vals[0]
+		headerText = true
 	}
 	if r.Body != nil && (r.ContentLength != 0 || len(r.TransferEncoding) > 0) {
 		body, e := io.ReadAll(http.MaxBytesReader(w, r.Body, board.CommandBodyBytes))
@@ -505,6 +524,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 				}
 				payload = cmd.Text
 			case "application/x-www-form-urlencoded":
+				formBody = true
 				values, e := url.ParseQuery(string(body))
 				if e != nil {
 					writeError(w, bad("Invalid form encoding."))
@@ -572,7 +592,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd.Text = payload
-	s.execute(w, r, cmd)
+	s.execute(w, withVia(r, writeVia(r, headerText, formBody)), cmd)
 }
 
 func queryCommand(q url.Values) (board.Command, error) {

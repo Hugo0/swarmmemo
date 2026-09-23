@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS leases (
 
 // SchemaVersion is this binary's database schema. Opening a newer database fails
 // rather than guessing, so a binary rollback needs the pre-deploy snapshot.
-const SchemaVersion = 13
+const SchemaVersion = 14
 
 func Open(path string, config Config) (*Store, error) {
 	if config.ServiceID == "" {
@@ -266,7 +266,7 @@ func Open(path string, config Config) (*Store, error) {
 			}
 		}
 	}
-	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
+	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
 		return fail(err)
 	}
 	if err = migratePrivateRead(migration); err != nil {
@@ -278,6 +278,11 @@ func Open(path string, config Config) (*Store, error) {
 	}
 	// Schema 12: room policy and room-scoped moderation. Additive.
 	if err = migrateRoomPolicy(migration); err != nil {
+		return fail(err)
+	}
+	// Schema 14: message provenance (events.via) and room policy write_via.
+	// Additive, keyed on the columns, so it renumbers cleanly.
+	if err = migrateVia(migration); err != nil {
 		return fail(err)
 	}
 	// Schema 13: room styles (RFC0011), a new table created above. Additive.

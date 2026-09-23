@@ -43,6 +43,10 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if len(c.ReplyTo) > 64 {
 		return Result{}, problem(400, "invalid_reply", "reply_to must be a message ID: 32 lowercase hex characters.")
 	}
+	forward, forwarded := forwardedFrom(ctx)
+	if forwarded && (a.signed || !validForwarded(forward)) {
+		return Result{}, problem(400, "invalid_request", "A bridged post is anonymous and carries valid provenance.")
+	}
 	var data postData
 	if c.Data != "" {
 		if !a.signed {
@@ -106,10 +110,19 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	// Room policy is checked before any charge, so a refused post costs nothing.
 	// A new version of the author's own message is not a new post: the policy
 	// admitted the original, and tightening it later never freezes an edit.
+	// That includes write_via: an edit may arrive on any channel, and records
+	// the one it did arrive on.
 	// checkSupersession below still requires the same author, room, page and
 	// reply_to, and refuses a hidden original.
+	// A bridged post's channel is its origin network (write_via sees
+	// "nostr"); it is read back from the forward record, so the via
+	// column stays empty rather than holding the same fact twice.
+	via, storedVia := ViaFrom(ctx), ViaFrom(ctx)
+	if forwarded {
+		via, storedVia = messageVia("", &forward), ""
+	}
 	if data.Supersedes == "" {
-		if err = authorizeRoomPost(ctx, tx, r, a, c.ReplyTo != ""); err != nil {
+		if err = authorizeRoomPost(ctx, tx, r, a, c.ReplyTo != "", via); err != nil {
 			return Result{}, err
 		}
 	}
@@ -156,9 +169,14 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err = tx.QueryRowContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET value=value+1 RETURNING value", scope).Scan(&displaySeq); err != nil {
 		return Result{}, err
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO events(display_seq,id,room,page,text,kind,author,account,handle,public_key,signature,payload,created_at,hash,reply_to,recipient,format,supersedes,origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, displaySeq, id, c.Room, c.Page, c.Text, c.Kind, a.id, a.account, handle, key, signature, payload, now, hashString, c.ReplyTo, c.To, data.Format, data.Supersedes, origin)
+	res, err := tx.ExecContext(ctx, `INSERT INTO events(display_seq,id,room,page,text,kind,author,account,handle,public_key,signature,payload,created_at,hash,reply_to,recipient,format,supersedes,origin,via) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, displaySeq, id, c.Room, c.Page, c.Text, c.Kind, a.id, a.account, handle, key, signature, payload, now, hashString, c.ReplyTo, c.To, data.Format, data.Supersedes, origin, storedVia)
 	if err != nil {
 		return Result{}, err
+	}
+	if forwarded {
+		if err = recordForwarded(ctx, tx, id, forward); err != nil {
+			return Result{}, err
+		}
 	}
 	if a.grant != nil {
 		if _, err = tx.ExecContext(ctx, "INSERT INTO event_delegations(event_id,grant_id) VALUES(?,?)", id, a.grant.ID); err != nil {
@@ -221,7 +239,7 @@ func claimOnPost(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64)
 	return want, nil, nil
 }
 
-const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id),''),e.hidden_by`
+const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id),''),e.hidden_by,e.via,` + forwardColumn
 
 type scanner interface{ Scan(...any) error }
 
@@ -241,7 +259,10 @@ func curatorPost(kind, handle, publicKey string) bool {
 
 func scanEvent(row scanner) (Message, error) {
 	var e Message
-	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy)
+	var forward string
+	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward)
+	e.Forwarded = parseForwarded(forward)
+	e.Via = messageVia(e.Via, e.Forwarded)
 	e.Type = "message"
 	e.ArchiveEligible = e.Visibility == "public"
 	e.Curated = curatorPost(e.Kind, e.Handle, e.PublicKey)
@@ -465,10 +486,13 @@ func (s *Store) export(ctx context.Context, tx *sql.Tx, c Command, now int64) (R
 	for rows.Next() {
 		var e Message
 		var change int64
-		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &change); err != nil {
+		var forward string
+		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &change); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
+		e.Forwarded = parseForwarded(forward)
+		e.Via = messageVia(e.Via, e.Forwarded)
 		e.Sequence = change
 		e.Type = "message"
 		e.ArchiveEligible = true

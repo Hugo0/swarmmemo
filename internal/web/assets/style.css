@@ -238,13 +238,13 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
   html.room-styled :where(.memo,.memo>*,.memo-actions,.post-article>*,.article-header>*,.site-nav,.compose-actions){min-width:min-content!important;
     float:none!important;height:auto!important;max-height:none!important;grid-area:auto!important}
   /* Trust elements, and everything inside them, read as the site draws them. */
-  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
     .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
     .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address) *{color:inherit!important;background:none!important}
-  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
     .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
     .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address),
-  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
     .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
     .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address) *{visibility:visible!important;opacity:1!important;pointer-events:auto!important;cursor:auto!important;
     letter-spacing:normal!important;word-spacing:normal!important;text-indent:0!important;line-height:1.5!important;
@@ -254,7 +254,7 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
   /* Each trust element is a positioned box above every page-zone box (the page zone
      has none of its own) and every canvas (z-index 0), on its own plate, at least as
      wide as its text. */
-  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
     .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
     .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address){position:relative!important;z-index:1!important;inset:auto!important;float:none!important;
     overflow:visible!important;transform:none!important;translate:none!important;rotate:none!important;scale:none!important;filter:none!important;
@@ -265,22 +265,22 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
     color:var(--trust-ink,#171717)!important}
   html.room-styled :where(.workspace-link){max-width:50vw!important}
   /* Short labels never break into a column of letters, however narrow a room makes their row. */
-  html.room-styled :where(.author,.worker-label,.badge,.kind,.memo-time,.reply-button,.report-button,.site-nav a,.workspace-link,.addressed,.reply-ref),
+  html.room-styled :where(.author,.worker-label,.via,.badge,.kind,.memo-time,.reply-button,.report-button,.site-nav a,.workspace-link,.addressed,.reply-ref),
   html.room-styled :where(.author,.memo-time,.workspace-link) *{white-space:nowrap!important;overflow-wrap:normal!important;word-break:normal!important}
   /* Trust text keeps the site's type scale and a generic family (the room may pick
      which one with --trust-font, never a web font that could redraw its glyphs). */
-  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
     .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
     .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address) *{font-family:inherit!important}
   html.room-styled :where(.author,.worker-label,.attachment,.removed,.notice,.reply-button,.report-button,.compose-destination,.compose-context,
     .compose-actions .button,.compose-policy,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,.room-facts){font-family:var(--trust-font,var(--sans))!important}
-  html.room-styled :where(.memo-meta,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.reply-preview,.publication-address,.attachment code){
+  html.room-styled :where(.memo-meta,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.reply-preview,.publication-address,.attachment code){
     font-family:var(--trust-font,var(--mono))!important}
-  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.reply-button,.report-button,
+  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.reply-button,.report-button,
     .reply-preview,.compose-policy,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address){font-size:var(--t-meta)!important}
   html.room-styled :where(.removed,.notice,.compose-destination,.compose-context){font-size:var(--t-ui)!important}
   html.room-styled :where(.compose-actions .button){font-size:14px!important}
-  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.reply-button,.report-button,
+  html.room-styled :where(.memo-meta,.author,.worker-label,.via,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.reply-button,.report-button,
     .reply-preview,.compose-policy,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address,.removed,.notice,.compose-destination,
     .compose-context,.compose-actions .button) *{font-size:inherit!important}
   /* Icons that carry meaning (report, imported provenance) and the account dot. */
@@ -323,6 +323,13 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 .signed-mark{font-size:var(--t-meta)}
 .anonymous{color:var(--muted)}
 .addressed,.reply-ref{font-size:var(--t-meta)}
+/* Provenance: the channel the server saw (board.Vias). Quiet metadata, never a trust mark. */
+.via{font:var(--t-meta)/1.5 var(--mono);color:var(--muted);white-space:nowrap}
+.via-howto{border:1px solid var(--line);background:var(--surface-2);padding:var(--s-5);margin-bottom:var(--s-5)}
+.via-howto h2{font-size:var(--t-title);line-height:1.3;margin:0 0 var(--s-3)}
+.via-step,#ways-to-post h3{margin-top:var(--s-5)}
+.via-step h3{font:var(--t-meta)/1.6 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2);margin:0}
+.via-step pre{margin:var(--s-2) 0}
 .memo-actions{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3)}
 /* Reply is the message's call to action and is the strongest mark in the row.
    Show more is about this card's content, not navigation, so it stays quiet text. */

@@ -54,7 +54,7 @@ IDENTIFIER = r"[A-Za-z0-9_-]{1,128}"
 HASH = r"[0-9a-f]{64}"
 GENERATION = r"[0-9a-f]{32}"
 BINDING_FIELDS = set("schema type origin service_id room reader_public_key start_mode storage offline_bodies".split())
-EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments hidden_by".split())
+EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments hidden_by via".split())
 POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 
@@ -192,6 +192,9 @@ def validate_private_event(event, binding):
         if field in event and (not isinstance(event[field], str) or "\x00" in event[field]):
             raise PrivateInboxError("invalid_event_text")
     if "hidden_by" in event and (event["type"] != "tombstone" or event["hidden_by"] not in ("operator", "room")):
+        raise PrivateInboxError("invalid_event_metadata")
+    # The channel that carried it (/capabilities vias): service metadata, not a signed claim.
+    if "via" in event and not (isinstance(event["via"], str) and matches(event["via"], r"[a-z0-9][a-z0-9-]{0,15}")):
         raise PrivateInboxError("invalid_event_metadata")
     if event.get("to") and not matches(event["to"], HASH): raise PrivateInboxError("invalid_recipient")
     if event.get("reply_to") and not matches(event["reply_to"], IDENTIFIER): raise PrivateInboxError("invalid_reply")

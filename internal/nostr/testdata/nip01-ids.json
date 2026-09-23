@@ -1,0 +1,109 @@
+[
+ {
+  "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "created_at": 1700000000,
+  "kind": 1,
+  "tags": [],
+  "content": "hello",
+  "serialized": "[0,\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",1700000000,1,[],\"hello\"]",
+  "id": "bde202ea7642ff9910600c7edc948a1f4220f0cbf5e4fb2b7efafa681bbb5285"
+ },
+ {
+  "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "created_at": 1727000000,
+  "kind": 1,
+  "tags": [
+   [
+    "t",
+    "swarmmemo"
+   ],
+   [
+    "t",
+    "swarmmemo-lobby"
+   ]
+  ],
+  "content": "Hello from Nostr #swarmmemo",
+  "serialized": "[0,\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",1727000000,1,[[\"t\",\"swarmmemo\"],[\"t\",\"swarmmemo-lobby\"]],\"Hello from Nostr #swarmmemo\"]",
+  "id": "6db76836c006e6e0d57683ef31c458de94144020b10c1e4f2f4eeee37f976cfb"
+ },
+ {
+  "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "created_at": 0,
+  "kind": 0,
+  "tags": [],
+  "content": "",
+  "serialized": "[0,\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",0,0,[],\"\"]",
+  "id": "438633166bd72a6b099ca89b06018a96fc9a175ce81b44a853b1242fcca7ae0b"
+ },
+ {
+  "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "created_at": 1727000001,
+  "kind": 1,
+  "tags": [
+   [
+    "e",
+    "5c83da77af1dec6d7289834998ad7aafbd9e2191396d75ec3cc27f5a77226f36",
+    "wss://relay.example",
+    "reply"
+   ],
+   [
+    "p",
+    "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+   ]
+  ],
+  "content": "quote \" backslash \\ slash / newline \n cr \r tab \t bs \b ff \f",
+  "serialized": "[0,\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",1727000001,1,[[\"e\",\"5c83da77af1dec6d7289834998ad7aafbd9e2191396d75ec3cc27f5a77226f36\",\"wss://relay.example\",\"reply\"],[\"p\",\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\"]],\"quote \\\" backslash \\\\ slash / newline \\n cr \\r tab \\t bs \\b ff \\f\"]",
+  "id": "ad3d4082385d00e8ba8e6ee7ac51fbc259e8343de95a9e1337c5ce855969ee53"
+ },
+ {
+  "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "created_at": 1727000002,
+  "kind": 1,
+  "tags": [
+   [
+    "t",
+    "x\u0001y"
+   ]
+  ],
+  "content": "ctl \u0000 \u0001 \u001f del \u007f",
+  "serialized": "[0,\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",1727000002,1,[[\"t\",\"x\\u0001y\"]],\"ctl \\u0000 \\u0001 \\u001f del \u007f\"]",
+  "id": "2882daa76c1ca6c571080b56fb080f50f83654c315dc84894daa8ffe85f1c643"
+ },
+ {
+  "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "created_at": 1727000003,
+  "kind": 30023,
+  "tags": [
+   [
+    "d",
+    "a"
+   ],
+   [
+    "title",
+    "\u00dcn\u00efc\u00f6d\u00e9 \ud83d\ude80"
+   ]
+  ],
+  "content": "emoji \ud83d\ude80 cjk \u6f22\u5b57 ls \u2028 ps \u2029 html </script> & < >",
+  "serialized": "[0,\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",1727000003,30023,[[\"d\",\"a\"],[\"title\",\"\u00dcn\u00efc\u00f6d\u00e9 \ud83d\ude80\"]],\"emoji \ud83d\ude80 cjk \u6f22\u5b57 ls \u2028 ps \u2029 html </script> & < >\"]",
+  "id": "9637dffdb54929ba454f5cf27d0f3a957fcfad9080358b9ec14992fabb0b1a5d"
+ },
+ {
+  "pubkey": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+  "created_at": 1727000004,
+  "kind": 1,
+  "tags": [
+   [
+    "a"
+   ],
+   [
+    "b",
+    "",
+    ""
+   ],
+   []
+  ],
+  "content": "empty and ragged tags",
+  "serialized": "[0,\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",1727000004,1,[[\"a\"],[\"b\",\"\",\"\"],[]],\"empty and ragged tags\"]",
+  "id": "94ca20d2be86c3d91c652aad8a5d21d8e72a8a614c878b28895f58467969b091"
+ }
+]

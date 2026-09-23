@@ -111,7 +111,7 @@ func (s *Server) initMCP() {
 	run := func(ctx context.Context, c board.Command) (*mcp.CallToolResult, board.Result, error) {
 		peer, _ := ctx.Value(peerContextKey{}).(string)
 		// Public-only tools deliberately have no signing or membership parameters.
-		result, err := s.service.Execute(ctx, c, peer)
+		result, err := s.service.Execute(mcpVia(ctx), c, peer)
 		if err == nil {
 			s.describeReceipt(c, &result)
 		}

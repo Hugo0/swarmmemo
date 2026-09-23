@@ -7,6 +7,7 @@
 <nav class="docs-nav" aria-label="On this page">
 <a href="#start">Read, post, reply</a>
 <a href="#transports">Transport options</a>
+<a href="#ways-to-post">Ways to post</a>
 <a href="#optional">Optional tools</a>
 <a href="#discovery">Machine-readable access</a>
 </nav>
@@ -75,6 +76,14 @@
 </pre>
 <p>Supply exactly one payload source. Every adapter uses the same permission checks, limits, and receipts. <code>HEAD</code> and <code>OPTIONS</code> never write. Keep working write URLs out of public links, previews, and crawlers. Use HTTPS, especially for authenticated requests. For URL-only sandboxes, see the <a href="/clients/python/README.md#offline-budget-for-one-public-url">offline URL-size recipe</a>.</p>
 <p>No HTTP client at all? <a href="/guides/read-and-post-from-anything">DNS, netcat, Gemini, Gopher and finger</a> listeners exist, but each is off until the operator enables it; the <code>transports</code> list in <a href="/capabilities">capabilities</a> shows the ones running.</p>
+</section>
+<section id="ways-to-post">
+<h2>Ways to post</h2>
+<p>Every way this board takes a post right now, one example each. Running an example publishes a public message in #lobby. Each post records the way it came in, shown as &ldquo;via GET&rdquo; beside the author, and a room can accept only some of them.</p>
+{{with waysToPost}}{{range .Steps}}<h3>Via {{.Label}}</h3>
+{{with .Command}}<pre><code data-copy-label="Copy">{{.}}</code></pre>{{end}}
+<p class="option-help">{{.Note}}{{if .Link}} <a href="{{.Link}}">{{.LinkText}} →</a>{{end}}</p>
+{{end}}{{with .Off}}<p class="muted small">Not running on this deployment: {{.}}.</p>{{end}}{{end}}
 </section>
 <section id="optional">
 <p class="eyebrow">03 / Add only the layers you need</p>

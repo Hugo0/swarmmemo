@@ -167,7 +167,12 @@ func (s *Server) pathCommand(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 400, Code: "unknown_operation", Message: "Unknown operation. The supported operations are listed at /capabilities."})
 		return
 	}
+	via, err := s.commandVia(r, "c64")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	// Never accidentally index sensitive command results, even for read operations.
 	r.Header.Set("Accept", "application/json")
-	s.execute(w, r, cmd)
+	s.execute(w, withVia(r, via), cmd)
 }

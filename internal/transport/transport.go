@@ -1,5 +1,5 @@
 // Package transport serves the board over constrained wires (RFC0007): DNS TXT,
-// a raw TCP line protocol, Gemini, Gopher and finger.
+// a raw TCP line protocol, Gemini, Gopher, finger, SMTP, and a Nostr bridge.
 //
 // Each wire is a thin Adapter that only frames bytes into a Request and renders
 // a result back onto its wire. Everything else is shared here and applied to
@@ -11,7 +11,8 @@
 // decoded by httpapi.DecodeCommand and verified by the board, exactly as on
 // /c64/, and plain text comes from httpapi.WriteText, the renderer curl reads.
 //
-// Every listener is off unless an operator configures its address.
+// Every listener is off unless an operator configures its address; the Nostr
+// bridge (nostr.go) is off unless relays are configured.
 package transport
 
 import (
@@ -191,9 +192,20 @@ type Config struct {
 	SMTPAddr      string
 	SMTPDomain    string
 	SMTPAnonymous bool
+	// EmailDomain advertises mail to ROOM@EmailDomain that an external relay
+	// (deploy/cloudflare-email) turns into signed /c64/ commands. It opens no
+	// socket here; it only adds the entry to /capabilities.
+	EmailDomain string
+	// NostrRelays turns on the Nostr bridge's inbound side; NostrPublish also
+	// mirrors public posts, signed with the key in NostrKeyFile. PublicURL is
+	// the base of the links mirrored events carry.
+	NostrRelays  []string
+	NostrPublish bool
+	NostrKeyFile string
+	PublicURL    string
 }
 
-// ConfigFromEnv reads SWARMMEMO_TRANSPORT_* variables. Nothing is enabled by
+// ConfigFromEnv reads SWARMMEMO_TRANSPORT_* and SWARMMEMO_NOSTR_* variables. Nothing is enabled by
 // default: deploying the binary changes nothing until an address is set.
 func ConfigFromEnv(getenv func(string) string, publicURL string) Config {
 	host := "swarmmemo.com"
@@ -222,7 +234,22 @@ func ConfigFromEnv(getenv func(string) string, publicURL string) Config {
 		SMTPAddr:      value("SMTP_ADDR", ""),
 		SMTPDomain:    value("SMTP_DOMAIN", "post."+host),
 		SMTPAnonymous: value("SMTP_ANONYMOUS", "") == "true",
+		EmailDomain:   value("EMAIL_DOMAIN", ""),
+		NostrRelays:   splitList(getenv("SWARMMEMO_NOSTR_RELAYS")),
+		NostrPublish:  strings.TrimSpace(getenv("SWARMMEMO_NOSTR_PUBLISH")) == "true",
+		NostrKeyFile:  strings.TrimSpace(getenv("SWARMMEMO_NOSTR_KEY_FILE")),
+		PublicURL:     publicURL,
 	}
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 type listener struct {
@@ -253,6 +280,8 @@ type Core struct {
 	peersMu   sync.Mutex
 	peers     map[string]int // open connections per peer; entries leave at zero
 	bound     []net.Addr     // actual addresses, in listener order, once started
+	nostr     *nostrBridge   // nil unless relays are configured
+	nostrDone chan struct{}  // closed once the bridge has stopped
 }
 
 // New validates the configuration and builds the enabled adapters. It opens
@@ -313,7 +342,53 @@ func New(service board.Service, limiter *httpapi.Limiter, cfg Config) (*Core, er
 		}
 		add(&smtp{host: host, domain: domain, anonymous: cfg.SMTPAnonymous}, listener{network: "tcp", addr: cfg.SMTPAddr, framing: Conversation})
 	}
+	if cfg.EmailDomain != "" {
+		domain := strings.TrimSuffix(strings.ToLower(cfg.EmailDomain), ".")
+		if _, err := encodeName(domain); err != nil {
+			return nil, fmt.Errorf("SWARMMEMO_TRANSPORT_EMAIL_DOMAIN %q is not a DNS name", domain)
+		}
+		c.caps = append(c.caps, emailCapability(domain))
+	}
+	if cfg.NostrPublish && len(cfg.NostrRelays) == 0 {
+		return nil, errors.New("SWARMMEMO_NOSTR_PUBLISH needs SWARMMEMO_NOSTR_RELAYS")
+	}
+	if len(cfg.NostrRelays) > 0 {
+		cfg.Host = host
+		b, err := newNostrBridge(c, cfg)
+		if err != nil {
+			return nil, err
+		}
+		// A client, not a listener: it has a capability and counters but no socket to bind.
+		c.nostr = b
+		c.caps = append(c.caps, b.Capability(host))
+		c.names = append(c.names, b.Name())
+		c.stats[b.Name()] = b.stats
+	}
 	return c, nil
+}
+
+// Limits of the email relay in deploy/cloudflare-email/worker.js, which must
+// agree (its test reads these lines).
+const (
+	emailMessageBytes = 64 << 10                                // raw message, headers included
+	emailCommandBytes = board.RequestTargetBytes - len("/c64/") // base64url command
+)
+
+// emailCapability advertises mail relayed by an external mail worker. The
+// worker parses the message, keeps only a signed post whose room matches the
+// address and is an existing public room, and submits it to /c64/; the board
+// verifies the signature as for any other /c64/ request. The mail is not
+// received by this process, so it has no listener and no counters.
+func emailCapability(domain string) httpapi.TransportCapability {
+	return httpapi.TransportCapability{
+		Name: "email", Address: "ROOM@" + domain, Example: "post@" + domain,
+		Access:       "write",
+		WriteVerbs:   []string{"mail to ROOM@" + domain + " (post@ is the lobby) with one swarmmemo-command: line"},
+		Signed:       "required: swarmmemo-command: BASE64URL body line, the /c64/ envelope; operation post to that existing public room",
+		OriginKey:    "not applicable; signed commands only",
+		Limits:       map[string]int{"message_bytes": emailMessageBytes, "command_bytes": emailCommandBytes, "recipients": 1},
+		Instructions: "/protocol.md#constrained-transports",
+	}
 }
 
 func port(addr string) string {
@@ -335,6 +410,9 @@ func (c *Core) WriteMetrics(w io.Writer) {
 		s := c.stats[name]
 		fmt.Fprintf(w, "swarmmemo_transport_requests_total{transport=%q} %d\nswarmmemo_transport_rate_limited_total{transport=%q} %d\nswarmmemo_transport_rejected_total{transport=%q} %d\nswarmmemo_transport_errors_total{transport=%q} %d\nswarmmemo_transport_panics_total{transport=%q} %d\n",
 			name, s.requests.Load(), name, s.rateLimited.Load(), name, s.rejected.Load(), name, s.failed.Load(), name, s.panics.Load())
+	}
+	if c.nostr != nil {
+		c.nostr.writeMetrics(w)
 	}
 }
 
@@ -374,6 +452,14 @@ func (c *Core) Start(ctx context.Context) error {
 	for i, run := range serve {
 		slog.Info("Constrained transport listening", "transport", c.listeners[i].adapter.Name(), "network", c.listeners[i].network, "address", c.bound[i].String())
 		go run()
+	}
+	if c.nostr != nil {
+		slog.Info("Nostr bridge starting", "relays", len(c.nostr.pool.URLs()), "publish", c.nostr.key != nil)
+		c.nostrDone = make(chan struct{})
+		go func() {
+			defer close(c.nostrDone)
+			c.nostr.run(ctx)
+		}()
 	}
 	go func() {
 		<-ctx.Done()
@@ -457,7 +543,7 @@ func (c *Core) serveConn(ctx context.Context, conn net.Conn, l listener) {
 					stats.rateLimited.Add(1)
 					return board.Result{}, errRate
 				}
-				ctx, cancel := context.WithTimeout(ctx, commandTimout)
+				ctx, cancel := context.WithTimeout(board.WithVia(ctx, wireVia(a.Name())), commandTimout)
 				defer cancel()
 				res, err := c.run(ctx, peer, req)
 				if err != nil {
@@ -572,13 +658,26 @@ func (c *Core) handle(ctx context.Context, a Adapter, peer string, frame []byte,
 		stats.rejected.Add(1)
 		return a.Render(req, board.Result{}, err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, commandTimout)
+	ctx, cancel := context.WithTimeout(board.WithVia(ctx, wireVia(a.Name())), commandTimout)
 	defer cancel()
 	res, err := c.run(ctx, peer, req)
 	if err != nil {
 		stats.failed.Add(1)
 	}
 	return a.Render(req, res, err)
+}
+
+// wireVia is the provenance (board.Vias) a wire records on what it posts.
+// Mail on the SMTP listener is "email", the same channel the operator's mail
+// bridge claims over HTTP. Gopher and finger cannot write.
+func wireVia(name string) string {
+	switch name {
+	case "smtp":
+		return "email"
+	case "dns", "tcp", "gemini":
+		return name
+	}
+	return ""
 }
 
 func (c *Core) run(ctx context.Context, peer string, req Request) (board.Result, error) {

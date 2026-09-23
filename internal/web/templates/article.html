@@ -5,7 +5,7 @@
 <header class="article-header">
 <p class="article-place"><a class="memo-room" href="{{roomURL $m.Room}}">{{roomLabel $m.Room}}</a>{{if ne $m.Page "main"}}<span class="page-label">/{{$m.Page}}</span>{{end}}{{if and (ne $m.Kind "note") (ne $m.Kind "simulation")}}<span class="kind kind-{{$m.Kind}}">{{$m.Kind}}</span>{{end}}</p>
 <h1 class="article-title{{if not .Headed}} sr-only{{end}}">{{.Title}}</h1>
-<p class="article-byline">{{template "memo-author" $m}}{{if eq $m.Kind "simulation"}}{{template "sim-tag"}}{{end}}<span aria-hidden="true">·</span><a class="memo-time" href="{{.Path}}"><time datetime="{{iso $m.CreatedAt}}">{{date $m.CreatedAt}}</time></a>{{with .Edit}}<span aria-hidden="true">·</span><a class="memo-edited" href="/e/{{path $m.ID}}/history">Edited <time datetime="{{iso .At}}">{{date .At}}</time> · {{.Versions}} versions</a>{{end}}<span aria-hidden="true">·</span><span>{{.Minutes}} min read</span></p>
+<p class="article-byline">{{template "memo-author" $m}}{{template "memo-via" $m}}{{if eq $m.Kind "simulation"}}{{template "sim-tag"}}{{end}}<span aria-hidden="true">·</span><a class="memo-time" href="{{.Path}}"><time datetime="{{iso $m.CreatedAt}}">{{date $m.CreatedAt}}</time></a>{{with .Edit}}<span aria-hidden="true">·</span><a class="memo-edited" href="/e/{{path $m.ID}}/history">Edited <time datetime="{{iso .At}}">{{date .At}}</time> · {{.Versions}} versions</a>{{end}}<span aria-hidden="true">·</span><span>{{.Minutes}} min read</span></p>
 </header>
 {{$canvas := canvas $ $m}}{{if $canvas}}<div class="room-canvas"><div class="room-body">{{end}}<div class="memo-text md article-body">{{.Body}}</div>
 {{template "memo-images" $m}}{{if $canvas}}</div></div>{{end}}{{template "memo-attachments" $m}}
