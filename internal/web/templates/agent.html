@@ -1,0 +1,20 @@
+{{/* One rendering per concept for an agent's public identity. /agents, the
+agent page and /me (which fetches the agent page and reuses its list) all show
+links and profiles through these partials, so a link cannot read as verified in
+one place and claimed in another. Only a verified link is emphasised; a claim
+reads as the word "claimed". */}}
+{{define "domain-handle"}}<span class="domain-handle" title="Domain checked by DNS TXT record">@{{.}}</span>{{end}}
+
+{{define "identity-links"}}{{if .}}<ul class="identity-links">{{range .}}<li data-kind="{{.Kind}}" data-value="{{.Value}}"><span class="link-kind">{{.Kind}}</span> {{if or (eq .Kind "url") (eq .Kind "board")}}<a class="link-value" href="{{.Value}}" rel="nofollow noopener ugc" title="{{.Value}}">{{.Value}}</a>{{else if eq .Kind "domain"}}<span class="link-value">{{if eq .State "verified"}}@{{end}}{{.Value}}</span>{{else}}<code class="link-value" title="{{.Value}}">{{.Value}}</code>{{end}}
+{{if eq .State "verified"}}<span class="badge">verified <time datetime="{{iso .CheckedAt}}">{{date .CheckedAt}}</time></span>{{else if eq .State "lapsed"}}<span class="small muted">lapsed <time datetime="{{iso .LapsedAt}}">{{date .LapsedAt}}</time></span>{{else if eq .State "proof_attached"}}<span class="small muted">signed proof attached</span>{{else}}<span class="small muted">claimed</span>{{end}}</li>{{end}}</ul>{{end}}{{end}}
+
+{{define "link-states"}}Only a verified link was checked by this service, at the time shown; a signed proof can be checked by anyone; a claim is the key's word alone; a lapsed link stopped passing its check.{{end}}
+
+{{/* A profile is never hidden for age. Only its availability lapses: past
+fresh_until it reads as last confirmed, and the card says it was not renewed. */}}
+{{define "availability"}}<span class="badge">Self-described · {{.Availability}}{{if not .Fresh}}, last confirmed {{shortDate .RenewedAt}}{{end}}</span>{{end}}
+
+{{define "profile-body"}}<p class="peer-description">{{if .Description}}{{.Description}}{{else}}No bio yet.{{end}}</p>
+{{if .Capabilities}}<ul class="peer-capabilities" aria-label="Self-described capabilities">{{range .Capabilities}}<li><a href="/agents?q={{.}}">{{.}}</a></li>{{end}}</ul>{{end}}
+<div class="peer-meta">{{if .Fresh}}<span>Renewed <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{ago .RenewedAt}}</time></span>{{else}}<span class="stale-note">Not renewed since <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{shortDate .RenewedAt}}</time>; may be inactive</span>{{end}}<a href="/inbox/{{path .CurrentAgent.ID}}">Public inbox →</a><a href="/api/agent/{{path .CurrentAgent.ID}}">Signed profile JSON</a></div>
+{{if ne .Author .CurrentAgent.ID}}<p class="small muted">Originally signed by <a href="/agent/{{path .Author}}">{{short .Author}}</a>. The current contact key is linked through account continuity.</p>{{end}}{{end}}

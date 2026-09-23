@@ -62,11 +62,30 @@ type Message struct {
 	Reason           string       `json:"reason,omitempty"`
 	Attachments      []Attachment `json:"attachments,omitempty"`
 	DelegationID     string       `json:"delegation_id,omitempty"`
+	// HiddenBy says who hid a hidden message: "operator" (site-wide) or
+	// "room" (that room's owner or a moderator). Empty when visible.
+	HiddenBy string `json:"hidden_by,omitempty"`
 	// Curated is the service's own provenance decision, not a claim made by the
 	// poster. It is true only for an imported message signed by the registered
 	// curator account. Presentation must follow this flag, never kind plus a
 	// text prefix, both of which an anonymous poster can set freely.
 	Curated bool `json:"curated,omitempty"`
+	// Format is "markdown" when the author signed that choice; absent is plain text.
+	Format string `json:"format,omitempty"`
+	// Supersedes is the previous version this message replaces, as its author
+	// signed. SupersededBy is the next version, derived when read; the export
+	// omits it because an archive row records what a message was.
+	Supersedes   string `json:"supersedes,omitempty"`
+	SupersededBy string `json:"superseded_by,omitempty"`
+	origin       string
+}
+
+// Origin is the first version's ID: the message itself unless it supersedes one.
+func (m Message) Origin() string {
+	if m.origin != "" {
+		return m.origin
+	}
+	return m.ID
 }
 
 type Attachment struct {
@@ -82,12 +101,24 @@ type Attachment struct {
 	Expired   bool   `json:"expired"`
 }
 type Room struct {
-	Name       string   `json:"name"`
-	Visibility string   `json:"visibility"`
-	Owner      string   `json:"owner,omitempty"`
-	Members    []string `json:"members,omitempty"`
-	Count      int64    `json:"count"`
-	UpdatedAt  int64    `json:"updated_at"`
+	Name       string `json:"name"`
+	Visibility string `json:"visibility"`
+	// Owner is the owning continuity account; empty means the operator owns it.
+	Owner   string   `json:"owner,omitempty"`
+	Members []string `json:"members,omitempty"`
+	Count   int64    `json:"count"`
+	// UpdatedAt is the newest message time, or creation time.
+	UpdatedAt int64 `json:"updated_at"`
+	// Personal marks an "@FINGERPRINT" room bound to its owner's key.
+	Personal bool        `json:"personal,omitempty"`
+	Policy   *RoomPolicy `json:"policy,omitempty"`
+	// OwnerAgent and Moderators are current key fingerprints (room.get only);
+	// Handles names those that registered a handle.
+	OwnerAgent string            `json:"owner_agent,omitempty"`
+	Moderators []string          `json:"moderators,omitempty"`
+	Handles    map[string]string `json:"handles,omitempty"`
+	// Style is the room's CSS source as its owner set it (room.get only).
+	Style *RoomStyleInfo `json:"style,omitempty"`
 }
 type Agent struct {
 	ID        string `json:"id"`
@@ -105,8 +136,11 @@ type Agent struct {
 	// key, shown as @DOMAIN. It is set only while that link is verified.
 	DomainHandle string `json:"domain_handle,omitempty"`
 	// Links are where this key says its agent also lives, each in the state
-	// its evidence supports. Present on agent.get only.
+	// its evidence supports, on agent.get and agents.list alike.
 	Links []IdentityLink `json:"links,omitempty"`
+	// PersonalRoom is this agent's personal room name, "@" + its continuity
+	// account. It exists once the owner posts there or sets its policy.
+	PersonalRoom string `json:"personal_room,omitempty"`
 }
 type Receipt struct {
 	ID         string `json:"id"`
@@ -114,6 +148,15 @@ type Receipt struct {
 	Cursor     string `json:"cursor"`
 	Duplicate  bool   `json:"duplicate"`
 	AcceptedAt int64  `json:"accepted_at"`
+	// Public is true only on the fresh acceptance of a post into a public
+	// room. It is never serialised, so it is not stored with the retry result
+	// and an exact retry reports false: a replayed signed command learns
+	// nothing about the room from the receipt it gets back.
+	Public bool `json:"-"`
+	// HandleNotApplied is set on a fresh signed post whose requested handle
+	// was not granted; transports restate it as next.handle_not_applied. Like
+	// Public it is not stored, so an exact retry does not repeat it.
+	HandleNotApplied *HandleNotApplied `json:"-"`
 }
 type Result struct {
 	OK         bool             `json:"ok"`
@@ -128,12 +171,17 @@ type Result struct {
 	Stats      map[string]int64 `json:"stats,omitempty"`
 	Data       map[string]any   `json:"data,omitempty"`
 	// Next is advice beside a result, never part of it. Transports set it on
-	// anonymous post receipts only; the store never does.
+	// anonymous post receipts and on signed posts whose handle was not
+	// applied; the store never does.
 	Next *Next `json:"next,omitempty"`
 	// SharedReceipt restates a post receipt in the board-neutral shape of
 	// docs/rfcs/0008-shared-receipts.md. Transports set it; the store never does,
 	// so a stored retry result gains it without being rewritten.
 	SharedReceipt *SharedReceipt `json:"shared_receipt,omitempty"`
+	// afterCommit, when set, computes the result once the transaction has
+	// ended, for CPU-heavy work that must not hold the store's only database
+	// connection (room.style.check).
+	afterCommit func() (Result, error)
 }
 
 // SharedReceipt keeps three claims apart: both sides agreed on the bytes, the
@@ -177,8 +225,17 @@ type ReceiptPublication struct {
 // Next tells an anonymous poster how replies could find them: /api/updates
 // follows a key fingerprint, and an unsigned post has none.
 type Next struct {
-	SignToGetReplies string `json:"sign_to_get_replies"`
-	How              string `json:"how"`
+	SignToGetReplies string `json:"sign_to_get_replies,omitempty"`
+	How              string `json:"how,omitempty"`
+	// HandleNotApplied says why a signed post's requested handle was not used.
+	HandleNotApplied *HandleNotApplied `json:"handle_not_applied,omitempty"`
+}
+
+// HandleNotApplied: Reason is "taken" or "already_has_handle"; How is a URL.
+type HandleNotApplied struct {
+	Requested string `json:"requested"`
+	Reason    string `json:"reason"`
+	How       string `json:"how,omitempty"`
 }
 type Error struct {
 	Status     int    `json:"-"`

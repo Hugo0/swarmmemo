@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,6 +64,7 @@ type Store struct {
 	cursorMu           sync.RWMutex
 	now                func() time.Time
 	privateSlots       chan struct{}
+	styleSlots         chan struct{} // bounds sanitizing caller CSS; see styleSlot
 	privateRateMu      sync.Mutex
 	privateRates       map[string]privateReadBucket
 	privateServiceRate privateReadBucket
@@ -145,8 +147,11 @@ CREATE TABLE IF NOT EXISTS audit (
 CREATE TABLE IF NOT EXISTS leases (
  room TEXT NOT NULL REFERENCES rooms(name), name TEXT NOT NULL, account TEXT NOT NULL,
  fence INTEGER NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(room,name));
-PRAGMA user_version=10;
 `
+
+// SchemaVersion is this binary's database schema. Opening a newer database fails
+// rather than guessing, so a binary rollback needs the pre-deploy snapshot.
+const SchemaVersion = 13
 
 func Open(path string, config Config) (*Store, error) {
 	if config.ServiceID == "" {
@@ -162,7 +167,7 @@ func Open(path string, config Config) (*Store, error) {
 		config.GlobalDailyBytes = 64 << 20
 	}
 	if config.MaxTextBytes <= 0 {
-		config.MaxTextBytes = 16 << 10
+		config.MaxTextBytes = TextBytes
 	}
 	if config.ArchiveDelaySeconds == 0 {
 		config.ArchiveDelaySeconds = 48 * 3600
@@ -224,8 +229,8 @@ func Open(path string, config Config) (*Store, error) {
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fail(err)
 	}
-	if version > 10 {
-		return fail(fmt.Errorf("database schema %d is newer than supported version 10", version))
+	if version > SchemaVersion {
+		return fail(fmt.Errorf("database schema %d is newer than supported version %d", version, SchemaVersion))
 	}
 	migration, err := db.Begin()
 	if err != nil {
@@ -261,12 +266,21 @@ func Open(path string, config Config) (*Store, error) {
 			}
 		}
 	}
-	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema); err != nil {
+	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
 		return fail(err)
 	}
 	if err = migratePrivateRead(migration); err != nil {
 		return fail(err)
 	}
+	// Schema 11: signed post data (format, supersession). Additive columns.
+	if err = migratePostData(migration); err != nil {
+		return fail(err)
+	}
+	// Schema 12: room policy and room-scoped moderation. Additive.
+	if err = migrateRoomPolicy(migration); err != nil {
+		return fail(err)
+	}
+	// Schema 13: room styles (RFC0011), a new table created above. Additive.
 	for _, column := range []struct{ table, name string }{{"works", "attempt_grant_id"}, {"work_transitions", "delegation_id"}} {
 		var exists int
 		if err = migration.QueryRow("SELECT count(*) FROM pragma_table_info(?) WHERE name=?", column.table, column.name).Scan(&exists); err != nil {
@@ -288,6 +302,9 @@ func Open(path string, config Config) (*Store, error) {
 			return fail(err)
 		}
 	}
+	if _, err = extendLegacyBlobs(migration, time.Now().Unix()); err != nil {
+		return fail(err)
+	}
 	if _, err = migration.Exec(`INSERT OR IGNORE INTO counters(scope,value) SELECT CASE WHEN r.visibility='public' THEN 'public' ELSE 'room:'||r.name END,max(e.display_seq) FROM events e JOIN rooms r ON r.name=e.room GROUP BY 1`); err != nil {
 		return fail(err)
 	}
@@ -297,7 +314,7 @@ func Open(path string, config Config) (*Store, error) {
 	if _, err = db.Exec("INSERT OR IGNORE INTO meta(key,value) VALUES('generation',?)", randomID()); err != nil {
 		return fail(err)
 	}
-	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}}
+	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}}
 	if err = db.QueryRow("SELECT value FROM meta WHERE key='generation'").Scan(&s.generation); err != nil {
 		return fail(err)
 	}
@@ -383,8 +400,8 @@ func (s *Store) parseCursorFor(cursor string, kind byte) (int64, error) {
 	return n, nil
 }
 
-var slug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
-var handleRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$`)
+var slug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,` + strconv.Itoa(SlugMaxChars-1) + `}$`)
+var handleRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,` + strconv.Itoa(HandleMaxChars-1) + `}$`)
 var fingerprintRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type actor struct {
@@ -410,7 +427,7 @@ func (s *Store) authenticate(cmd Command, source string) (actor, error) {
 	if err != nil || len(sig) != ed25519.SignatureSize || base64.RawURLEncoding.EncodeToString(sig) != cmd.Signature || !ed25519.Verify(key, a.canonical, sig) {
 		return a, problem(401, "invalid_signature", "Signature does not match the complete canonical command.")
 	}
-	if cmd.Nonce == "" || len(cmd.Nonce) > 128 {
+	if cmd.Nonce == "" || len(cmd.Nonce) > RequestIDBytes {
 		return a, problem(400, "nonce_required", "Signed requests require a nonce of 1–128 bytes.")
 	}
 	a.id = fingerprint(key)
@@ -420,80 +437,22 @@ func (s *Store) authenticate(cmd Command, source string) (actor, error) {
 	return a, nil
 }
 
-func mutation(op string) bool {
-	switch op {
-	case "post", "room.create", "room.member.add", "room.member.remove", "agent.register", "agent.rotate", "credit.transfer", "report", "lease.acquire", "lease.release", "blob.put", "blob.delete", "agent.profile.publish", "agent.profile.remove":
-		return true
-	case "work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel":
-		return true
-	case "delegation.create", "delegation.revoke":
-		return true
-	case "webhook.create", "webhook.delete":
-		return true
-	case "identity.link", "identity.unlink":
-		return true
-	}
-	return false
+// mutation reports whether an operation writes: see Operation.Mutation.
+func mutation(name string) bool {
+	op, ok := LookupOperation(name)
+	return ok && op.Mutation
 }
 
 func validateCommandFields(c Command) error {
 	if c.PrivateRead != nil || privateReadControl(c.Operation) {
 		return validatePrivateReadFields(c)
 	}
-	fields := map[string]string{
-		"post":                  "room page text kind reply_to to handle visibility attachments",
-		"messages.list":         "room page cursor limit query to target kind",
-		"updates.get":           "target cursor limit",
-		"message.get":           "message_id room",
-		"thread.get":            "message_id cursor limit",
-		"room.pages":            "room cursor limit",
-		"rooms.list":            "room query limit",
-		"room.get":              "room",
-		"room.create":           "room visibility members",
-		"room.member.add":       "room target",
-		"room.member.remove":    "room target",
-		"agent.register":        "handle",
-		"agent.rotate":          "target proof",
-		"agent.get":             "target",
-		"agents.list":           "query cursor limit",
-		"agent.profile.publish": "data ttl",
-		"agent.profile.remove":  "",
-		"work.create":           "message_id data ttl",
-		"work.claim":            "message_id data ttl",
-		"work.renew":            "message_id data amount ttl",
-		"work.submit":           "message_id data amount target",
-		"work.accept":           "message_id data amount",
-		"work.reject":           "message_id data amount reason",
-		"work.cancel":           "message_id data reason",
-		"work.get":              "message_id",
-		"works.list":            "room kind query target cursor limit",
-		"work.history":          "message_id cursor limit",
-		"delegation.create":     "room target ttl amount data proof",
-		"delegation.revoke":     "target data",
-		"delegation.get":        "target",
-		"delegations.list":      "cursor limit",
-		"webhook.create":        "data",
-		"webhook.delete":        "target",
-		"webhook.list":          "cursor limit",
-		"identity.link":         "data",
-		"identity.unlink":       "data",
-		"quota.get":             "",
-		"credit.transfer":       "target amount",
-		"report":                "message_id reason",
-		"stats":                 "",
-		"export":                "cursor before limit",
-		"lease.acquire":         "room target ttl",
-		"lease.release":         "room target amount",
-		"blob.put":              "room data filename media_type ttl visibility",
-		"blob.get":              "message_id target",
-		"blob.delete":           "message_id target reason",
-	}
-	extra, exists := fields[c.Operation]
+	op, exists := LookupOperation(c.Operation)
 	if !exists {
-		return problem(400, "unknown_operation", "Unknown operation; see /docs for supported commands.")
+		return problem(400, "unknown_operation", "Unknown operation. The supported operations are listed at /capabilities.")
 	}
 	allowed := map[string]bool{}
-	for _, field := range strings.Fields("operation public_key signature timestamp nonce request_id delegation " + extra) {
+	for _, field := range strings.Fields("operation public_key signature timestamp nonce request_id delegation " + op.Fields) {
 		allowed[field] = true
 	}
 	encoded, _ := json.Marshal(c)
@@ -525,9 +484,9 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 	}
 	dataLimit := 65536
 	if cmd.Operation == "blob.put" {
-		dataLimit = base64.RawURLEncoding.EncodedLen(1 << 20)
+		dataLimit = base64.RawURLEncoding.EncodedLen(AttachmentBytes)
 	}
-	if len(cmd.RequestID) > 128 || len(cmd.Query) > 256 || len(cmd.Reason) > 2048 || len(cmd.Data) > dataLimit || len(cmd.Target) > 256 || len(cmd.Members) > 100 || len(cmd.Attachments) > 8 || len(cmd.Filename) > 128 || len(cmd.MediaType) > 256 {
+	if len(cmd.RequestID) > RequestIDBytes || len(cmd.Query) > QueryBytes || len(cmd.Reason) > ReasonBytes || len(cmd.Data) > dataLimit || len(cmd.Target) > 256 || len(cmd.Members) > RoomMembersMax || len(cmd.Attachments) > AttachmentsPerMessage || len(cmd.Filename) > 128 || len(cmd.MediaType) > 256 {
 		return empty, problem(400, "field_limit", "A request field exceeds its documented limit.")
 	}
 	if cmd.Delegation != nil && !validDelegationContext(cmd.Delegation) {
@@ -546,6 +505,11 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 	}
 	if len(a.canonical) > envelopeLimit {
 		return empty, problem(413, "envelope_too_large", "The canonical envelope exceeds the metadata and text budget.")
+	}
+	if cmd.Operation == "room.style.set" && a.signed {
+		if err := s.preflightStyle(ctx, cmd); err != nil {
+			return empty, err
+		}
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -625,7 +589,7 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 		}
 	}
 	if a.signed {
-		if cmd.Timestamp < now-300 || cmd.Timestamp > now+300 {
+		if cmd.Timestamp < now-SignatureWindowSeconds || cmd.Timestamp > now+SignatureWindowSeconds {
 			return empty, problem(401, "stale_signature", "New signed commands must be within five minutes of server time; exact successful mutation retries may reuse their original envelope.")
 		}
 		if successor != "" {
@@ -667,6 +631,13 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 	if err = tx.Commit(); err != nil {
 		return empty, err
 	}
+	if result.afterCommit != nil {
+		result, err = result.afterCommit()
+		if err != nil {
+			return empty, err
+		}
+		result.OK = true
+	}
 	return result, nil
 }
 
@@ -686,6 +657,14 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readRooms(ctx, tx, c, a)
 	case "room.create", "room.member.add", "room.member.remove":
 		return s.changeRoom(ctx, tx, c, a, now)
+	case "room.policy.set", "room.moderator.add", "room.moderator.remove", "room.owner.transfer", "room.style.set", "room.style.clear":
+		return s.changeRoomGovernance(ctx, tx, c, a, now)
+	case "room.style.check":
+		return s.checkRoomStyle(ctx, tx, c, a, now)
+	case "room.hide", "room.restore":
+		return s.moderateInRoom(ctx, tx, c, a, now)
+	case "room.modlog":
+		return s.readModerationLog(ctx, tx, c, a)
 	case "agent.register", "agent.rotate":
 		return s.changeAgent(ctx, tx, c, a, now)
 	case "agent.get", "agents.list":
@@ -719,7 +698,7 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 	case "blob.put", "blob.get", "blob.delete":
 		return s.blob(ctx, tx, c, a, now)
 	default:
-		return Result{}, problem(400, "unknown_operation", "Unknown operation; see /docs for supported commands.")
+		return Result{}, problem(400, "unknown_operation", "Unknown operation. The supported operations are listed at /capabilities.")
 	}
 }
 

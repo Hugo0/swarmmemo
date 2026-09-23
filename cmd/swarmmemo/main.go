@@ -77,10 +77,10 @@ func run() error {
 		return e
 	case "serve":
 		return serve()
-	case "backup", "integrity", "reports", "moderate", "recover-generation", "maintenance":
+	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance":
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|recover-generation --offline-confirmed]")
+		return errors.New("usage: swarmmemo [serve|version|keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|recover-generation --offline-confirmed]")
 	}
 }
 
@@ -130,6 +130,25 @@ func operator(command string) error {
 			return err
 		}
 		fmt.Println("Moderation recorded for", os.Args[2])
+	case "room":
+		// Governance of operator-owned rooms (no owning key), recorded in the
+		// room's public moderation log as "operator". Key-owned rooms refuse it.
+		c, err := operatorRoomCommand(os.Args[2:])
+		if err != nil {
+			return err
+		}
+		res, err := store.OperatorRoom(ctx, c)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Room change recorded for", c.Room)
+		// room.style.set reports what the sanitizer dropped, exactly as an owner sees it.
+		if warnings, _ := res.Data["warnings"].([]string); len(warnings) > 0 {
+			fmt.Println("The style was saved; the sanitizer dropped:")
+			for _, w := range warnings {
+				fmt.Println("  " + w)
+			}
+		}
 	case "recover-generation":
 		if len(os.Args) != 3 || os.Args[2] != "--offline-confirmed" {
 			return errors.New("stop the application first, then run swarmmemo recover-generation --offline-confirmed on the restored database")
@@ -143,6 +162,31 @@ func operator(command string) error {
 		fmt.Println("Recovery generation rotated. Reapply any newer removal records before opening traffic.")
 	}
 	return nil
+}
+
+// operatorRoomCommand parses "ROOM policy JSON", "ROOM moderator add|remove
+// AGENT", "ROOM owner AGENT" and "ROOM style set FILE|clear" into the
+// signed-command shape the owner uses.
+func operatorRoomCommand(args []string) (board.Command, error) {
+	usage := errors.New(`usage: swarmmemo room ROOM policy '{"write":"owner"}' | room ROOM moderator add|remove AGENT | room ROOM owner AGENT | room ROOM style set FILE | room ROOM style clear`)
+	switch {
+	case len(args) == 4 && args[1] == "style" && args[2] == "set":
+		css, err := os.ReadFile(args[3])
+		if err != nil {
+			return board.Command{}, err
+		}
+		data, _ := json.Marshal(map[string]string{"css": string(css)})
+		return board.Command{Operation: "room.style.set", Room: args[0], Data: string(data)}, nil
+	case len(args) == 3 && args[1] == "style" && args[2] == "clear":
+		return board.Command{Operation: "room.style.clear", Room: args[0]}, nil
+	case len(args) == 3 && args[1] == "policy":
+		return board.Command{Operation: "room.policy.set", Room: args[0], Data: args[2]}, nil
+	case len(args) == 4 && args[1] == "moderator" && (args[2] == "add" || args[2] == "remove"):
+		return board.Command{Operation: "room.moderator." + args[2], Room: args[0], Target: args[3]}, nil
+	case len(args) == 3 && args[1] == "owner":
+		return board.Command{Operation: "room.owner.transfer", Room: args[0], Target: args[2]}, nil
+	}
+	return board.Command{}, usage
 }
 
 func serve() error {
@@ -178,7 +222,7 @@ func serve() error {
 	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
 		reserved = append(reserved, parsed.Hostname())
 	}
-	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: 16384, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved})
+	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved})
 	if e != nil {
 		return e
 	}
@@ -207,6 +251,10 @@ func serve() error {
 		return e
 	}
 	config.Transports, config.TransportMetrics = transports.Capabilities(), transports.WriteMetrics
+	// Legacy /guides/* pages redirect to posts in the guides room by these keys.
+	if e := web.SetGuideAuthors(os.Getenv("GUIDES_AUTHORS")); e != nil {
+		return e
+	}
 	api := httpapi.New(store, web.Handler(store), config)
 	server := &http.Server{Addr: env("LISTEN_ADDR", "127.0.0.1:8080"), Handler: api, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

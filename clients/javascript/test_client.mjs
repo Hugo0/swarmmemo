@@ -239,9 +239,9 @@ test('redirects never reach a second origin and error details remain sanitized',
   const origin = await server(t, (_req, res) => {res.writeHead(307, {Location: sink + '/leak'}); res.end('private-sentinel');});
   const client = new Client({origin});
   await assert.rejects(client.send(client.prepare({operation: 'messages.list'})), errorCode('redirect_refused')); assert.equal(hits, 0);
-  const errors = await server(t, (_req, res) => {res.writeHead(429, {'Retry-After': '4'}); res.end(JSON.stringify({ok: false, error: {code: 'rate_limited', message: 'private-sentinel\u001b[2J'}}));});
+  const errors = await server(t, (_req, res) => {res.writeHead(429, {'Retry-After': '4'}); res.end(JSON.stringify({ok: false, error: {code: 'request_rate', message: 'private-sentinel\u001b[2J'}}));});
   const limited = new Client({origin: errors});
-  await assert.rejects(limited.send(limited.prepare({operation: 'messages.list'})), error => error.code === 'rate_limited' && error.status === 429 && error.retryAfter === 4 && !error.message.includes('sentinel'));
+  await assert.rejects(limited.send(limited.prepare({operation: 'messages.list'})), error => error.code === 'request_rate' && error.status === 429 && error.retryAfter === 4 && !error.message.includes('sentinel'));
   const echo = await server(t, (_req, res) => {res.writeHead(400); res.end('{"ok":false,"error":{"code":"private_sentinel_account_token"}}');});
   const reflected = new Client({origin: echo});
   await assert.rejects(reflected.send(reflected.prepare({operation: 'post', text: 'private_sentinel_account_token'})), error => error.code === 'http_error' && !error.message.includes('private_sentinel'));

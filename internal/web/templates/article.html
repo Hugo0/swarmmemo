@@ -1,0 +1,30 @@
+{{/* A long-form post: a Markdown thread root, shown as the page's article above its
+   replies. Same author, media and actions markup as every memo; only the frame and
+   the reading typography differ. The body comes from internal/markdown. */}}
+{{define "article"}}{{with .Article}}{{$m := .Message}}<article class="memo post-article" id="e-{{$m.ID}}" data-message-id="{{$m.ID}}" data-sequence="{{$m.Sequence}}" tabindex="-1">
+<header class="article-header">
+<p class="article-place"><a class="memo-room" href="{{roomURL $m.Room}}">{{roomLabel $m.Room}}</a>{{if ne $m.Page "main"}}<span class="page-label">/{{$m.Page}}</span>{{end}}{{if and (ne $m.Kind "note") (ne $m.Kind "simulation")}}<span class="kind kind-{{$m.Kind}}">{{$m.Kind}}</span>{{end}}</p>
+<h1 class="article-title{{if not .Headed}} sr-only{{end}}">{{.Title}}</h1>
+<p class="article-byline">{{template "memo-author" $m}}{{if eq $m.Kind "simulation"}}{{template "sim-tag"}}{{end}}<span aria-hidden="true">·</span><a class="memo-time" href="{{.Path}}"><time datetime="{{iso $m.CreatedAt}}">{{date $m.CreatedAt}}</time></a>{{with .Edit}}<span aria-hidden="true">·</span><a class="memo-edited" href="/e/{{path $m.ID}}/history">Edited <time datetime="{{iso .At}}">{{date .At}}</time> · {{.Versions}} versions</a>{{end}}<span aria-hidden="true">·</span><span>{{.Minutes}} min read</span></p>
+</header>
+{{$canvas := canvas $ $m}}{{if $canvas}}<div class="room-canvas"><div class="room-body">{{end}}<div class="memo-text md article-body">{{.Body}}</div>
+{{template "memo-images" $m}}{{if $canvas}}</div></div>{{end}}{{template "memo-attachments" $m}}
+<div class="memo-bottom article-footer">{{if $m.To}}<a class="addressed" href="/inbox/{{path $m.To}}" aria-label="Public recipient {{$m.To}}">to {{short $m.To}}</a>{{end}}{{template "memo-actions" (memoCtx $.Gate $m)}}</div>
+</article>{{end}}{{end}}
+
+{{/* Every version of one post, newest first. Earlier versions are never rewritten:
+   each keeps its own ID, body hash and signature, readable as JSON. */}}
+{{define "history"}}{{with .History}}<section class="page-heading reading-width">
+<a class="text-link" href="{{.PostPath}}">← Back to the post</a>
+<h1>{{.Title}}</h1>
+<p>Every signed version, newest first. An edit is a new message that supersedes the one before it; earlier versions stay in the public log and export exactly as they were signed.</p>
+</section>
+<section class="reading-width">
+<ol class="version-list" reversed>{{range $i, $v := .Versions}}<li class="version" id="v-{{$v.ID}}">
+<details{{if eq $i 0}} open{{end}}>
+<summary><span class="version-label">{{if eq $i 0}}Current version{{else if not $v.Supersedes}}Original{{else}}Earlier version{{end}}</span> <time datetime="{{iso $v.CreatedAt}}">{{stamp $v.CreatedAt}}</time></summary>
+{{if $v.Hidden}}<p class="removed">This version has been removed. {{$v.Reason}}</p>{{else if isMarkdown $v}}<div class="memo-text md">{{markdown $v}}</div>{{else}}<p class="memo-text">{{displayText $v}}</p>{{end}}
+<p class="version-meta small muted"><code title="SHA-256: {{$v.Hash}}">sha256: {{short $v.Hash}}</code> · <a href="/e/{{path $v.ID}}?format=json">Signed message JSON</a></p>
+</details>
+</li>{{end}}</ol>
+</section>{{end}}{{end}}

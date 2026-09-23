@@ -103,13 +103,21 @@ func TestPeerSignatureBytesExpiryRemovalAndReplay(t *testing.T) {
 	if !ed25519.Verify(keyBytes, []byte(card.SignedPayload), sig) {
 		t.Fatal("public card signature does not verify")
 	}
-	s.now = func() time.Time { return time.Unix(testTime+60, 0) }
-	noProfile(t, s, keyID(key))
-	if cards := listedProfiles(t, s, Command{Operation: "agents.list"}); len(cards) != 0 {
-		t.Fatal("expired card appeared in directory")
+	if !card.Fresh || card.RenewedAt != testTime || card.FreshUntil != card.ExpiresAt {
+		t.Fatalf("a new profile must read fresh, renewed now, with expires_at as the alias of fresh_until: %+v", card)
 	}
-	run(t, s, command) // Exact retry neither renews nor recreates the card.
-	noProfile(t, s, keyID(key))
+	// Past fresh_until the profile is not hidden: it stays, marked unconfirmed.
+	s.now = func() time.Time { return time.Unix(testTime+60, 0) }
+	if stale := getPeer(t, s, keyID(key)); stale.Fresh || stale.Description != card.Description || stale.FreshUntil != testTime+60 {
+		t.Fatalf("an unrenewed profile must stay readable and read stale: %+v", stale)
+	}
+	if cards := listedProfiles(t, s, Command{Operation: "agents.list"}); len(cards) != 1 || cards[0].Fresh {
+		t.Fatalf("an unrenewed profile must stay in the directory, marked stale: %+v", cards)
+	}
+	run(t, s, command) // Exact retry does not renew the card.
+	if again := getPeer(t, s, keyID(key)); again.Fresh || again.RenewedAt != testTime {
+		t.Fatalf("an exact retry renewed the profile: %+v", again)
+	}
 	newCommand := signed(key, Command{Operation: "agent.profile.publish", Data: testPeerData, Timestamp: testTime + 60})
 	run(t, s, newCommand)
 	if card = getPeer(t, s, keyID(key)); card.ExpiresAt != testTime+60+PeerDefaultTTL {
@@ -291,7 +299,7 @@ func TestPeerAdditiveMigrationAndDurability(t *testing.T) {
 	}
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
 	var version int
-	if err = s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 10 {
+	if err = s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
 		t.Fatalf("schema migration: version %d, %v", version, err)
 	}
 	if events := run(t, s, Command{Operation: "message.get", MessageID: message}).Messages; len(events) != 1 || events[0].Text != "Existing schema-4 message" {
@@ -321,6 +329,57 @@ func TestPeerAdditiveMigrationAndDurability(t *testing.T) {
 
 // noProfile asserts that an agent is still present and addressable while carrying
 // no profile. Expiry and removal retire the profile, never the agent behind it.
+// The directory lists newest first by default and most recently active on
+// request, with a keyset cursor bound to its order: a page boundary holds
+// while agents keep arriving, and a cursor from another order is refused.
+func TestAgentDirectoryOrders(t *testing.T) {
+	s := openTest(t, Config{})
+	at := func(offset int64) int64 {
+		s.now = func() time.Time { return time.Unix(testTime+offset, 0) }
+		return testTime + offset
+	}
+	keys := []ed25519.PrivateKey{keyFor(90), keyFor(91), keyFor(92)}
+	for i, key := range keys {
+		ts := at(int64(i) * 100)
+		run(t, s, signed(key, Command{Operation: "agent.register", Timestamp: ts}))
+	}
+	ts := at(500) // The oldest agent posts last: it is the most recently active.
+	run(t, s, signed(keys[0], Command{Operation: "post", Room: "lobby", Text: "still here", Timestamp: ts}))
+	ids := func(c Command) string {
+		var out []string
+		for {
+			res := run(t, s, c)
+			for _, agent := range res.Agents {
+				out = append(out, agent.ID)
+			}
+			if res.NextCursor == "" {
+				return strings.Join(out, ",")
+			}
+			c.Cursor = res.NextCursor
+		}
+	}
+	newest := strings.Join([]string{keyID(keys[2]), keyID(keys[1]), keyID(keys[0])}, ",")
+	if got := ids(Command{Operation: "agents.list", Limit: 1}); got != newest {
+		t.Fatalf("default order is not newest first: %v", got)
+	}
+	if got := ids(Command{Operation: "agents.list", Kind: "new", Limit: 2}); got != newest {
+		t.Fatalf("sort=new differs from the default: %v", got)
+	}
+	active := strings.Join([]string{keyID(keys[0]), keyID(keys[2]), keyID(keys[1])}, ",")
+	if got := ids(Command{Operation: "agents.list", Kind: "active", Limit: 1}); got != active {
+		t.Fatalf("sort=active is not most recently active first: %v", got)
+	}
+	// A page boundary survives a newer agent arriving mid-traversal.
+	first := run(t, s, Command{Operation: "agents.list", Limit: 1})
+	ts = at(600)
+	run(t, s, signed(keyFor(93), Command{Operation: "agent.register", Timestamp: ts}))
+	if next := run(t, s, Command{Operation: "agents.list", Limit: 1, Cursor: first.NextCursor}); len(next.Agents) != 1 || next.Agents[0].ID != keyID(keys[1]) {
+		t.Fatalf("keyset page shifted: %+v", next.Agents)
+	}
+	fails(t, s, Command{Operation: "agents.list", Kind: "active", Cursor: first.NextCursor}, "invalid_cursor")
+	fails(t, s, Command{Operation: "agents.list", Kind: "oldest"}, "invalid_query")
+}
+
 func noProfile(t *testing.T, s *Store, target string) {
 	t.Helper()
 	res := run(t, s, Command{Operation: "agent.get", Target: target})

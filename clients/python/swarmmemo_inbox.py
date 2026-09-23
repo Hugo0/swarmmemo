@@ -61,8 +61,8 @@ MAX_CONSUMERS = 16
 MAX_SENDER_RULES_PER_CONSUMER = 128
 MAX_SENDER_RULES = 2048
 SENDER_RULE_BYTES = 256
-EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id".split())
-SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation".split())
+EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id format supersedes superseded_by hidden_by curated".split())
+SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 BINDING_FIELDS = {"version", "origin", "service_id", "recipient", "room", "visibility", "reader_public_key", "start_mode"}
 SLUG = r"[a-z0-9][a-z0-9_-]{0,63}"
@@ -186,6 +186,13 @@ def validate_event(event, binding, *, addressed=False, scoped=True):
     if event.get("to") and not matches(event["to"], HASH): raise InboxError("invalid_recipient")
     if addressed and not event.get("to"): raise InboxError("unaddressed_event")
     if event.get("reply_to") and not matches(event["reply_to"], IDENTIFIER): raise InboxError("invalid_reply")
+    if "superseded_by" in event and not matches(event["superseded_by"], IDENTIFIER): raise InboxError("invalid_post_data")
+    # Service-derived: who hid a tombstone, and the curator-provenance flag on a visible message.
+    if "hidden_by" in event and (event["type"] != "tombstone" or event["hidden_by"] not in ("operator", "room")):
+        raise InboxError("invalid_event_metadata")
+    if "curated" in event and (event["type"] != "message" or event["curated"] is not True): raise InboxError("invalid_event_metadata")
+    try: memo.check_post_data(event)
+    except ValueError: raise InboxError("invalid_post_data") from None
     if "delegation_id" in event and (not matches(event["delegation_id"], HASH) or event["delegation_id"] != event["author"]):
         raise InboxError("invalid_delegation_attribution")
     if "delegation_id" in event:
@@ -201,12 +208,12 @@ def validate_event(event, binding, *, addressed=False, scoped=True):
         if not matches(item["id"], IDENTIFIER) or item["id"] in seen or item["room"] != event["room"]: raise InboxError("invalid_attachment_identity")
         seen.add(item["id"])
         if (not matches(item["sha256"], HASH) or type(item["size"]) is not int or not 0 <= item["size"] <= MAX_RESPONSE
-                or type(item["created_at"]) is not int or type(item["expires_at"]) is not int or item["expires_at"] < item["created_at"]
+                or type(item["created_at"]) is not int or type(item["expires_at"]) is not int or (item["expires_at"] != 0 and item["expires_at"] < item["created_at"])
                 or type(item["deleted"]) is not bool or type(item["expired"]) is not bool
                 or not isinstance(item["filename"], str) or not isinstance(item["media_type"], str)):
             raise InboxError("invalid_attachment_metadata")
     if event["type"] == "tombstone":
-        if event["hidden"] is not True or any(event.get(k) for k in ("text", "signature", "signed_payload", "attachments")):
+        if event["hidden"] is not True or any(event.get(k) for k in ("text", "signature", "signed_payload", "attachments", "format")):
             raise InboxError("tombstone_contains_payload")
         if event["author"] != "anonymous" and not matches(event["author"], HASH): raise InboxError("invalid_author")
         return event
@@ -255,9 +262,11 @@ def validate_event(event, binding, *, addressed=False, scoped=True):
                 raise InboxError("signed_event_field_mismatch")
             if command.get("visibility", "public") != "public": raise InboxError("signed_event_field_mismatch")
             if command.get("attachments", []) != [item["id"] for item in attachments]: raise InboxError("signed_attachment_mismatch")
+            try: memo.check_post_data(event, command)
+            except ValueError: raise InboxError("signed_post_data_mismatch") from None
         except InboxError: raise
         except Exception: raise InboxError("invalid_event_signature") from None
-    elif event["author"] != "anonymous" or "delegation_id" in event: raise InboxError("unsigned_author_claim")
+    elif event["author"] != "anonymous" or "delegation_id" in event or event.get("format") or event.get("supersedes"): raise InboxError("unsigned_author_claim")
     return event
 
 
@@ -495,7 +504,7 @@ class Inbox:
             state = db.execute("SELECT * FROM checkpoint").fetchone()
             result = {"phase": state["phase"], "resync_active": bool(state["resync"]), "last_success": state["last_success"],
                     "last_error": state["last_error"], "event_page_empty": bool(state["event_empty"]),
-                    "events": dict(db.execute("SELECT state,count(*) FROM events GROUP BY state").fetchall()),
+                    "messages": dict(db.execute("SELECT state,count(*) FROM events GROUP BY state").fetchall()),
                     "notifications": db.execute("SELECT count(*) FROM notifications").fetchone()[0], "network_requests": 0}
             if db.execute("PRAGMA user_version").fetchone()[0] == 2:
                 result.update(local_schema=2, sender_mute_rules=db.execute("SELECT count(*) FROM sender_mutes").fetchone()[0])
@@ -511,7 +520,7 @@ class Inbox:
             if rules:
                 # SQLite may scan the bounded 50k notification history; only the
                 # <=10k current eligible metadata rows reach this streaming loop.
-                rows = db.execute("SELECT n.id notification_id,n.kind,n.digest notification_digest,e.id event_id,e.digest,e.state,CASE WHEN length(e.immutable)<=? THEN e.immutable ELSE NULL END immutable FROM notifications n JOIN events e ON e.id=n.event_id LEFT JOIN acknowledgements a ON a.notification=n.id AND a.consumer=? WHERE a.notification IS NULL AND n.id=e.current_notification AND n.digest=e.digest AND (e.state IN ('tombstoned','unavailable') OR (e.state='ready' AND ?='ready')) ORDER BY n.id", (MAX_EVENT, consumer, phase))
+                rows = db.execute("SELECT n.id notification_id,n.kind,n.digest notification_digest,e.id message_id,e.digest,e.state,CASE WHEN length(e.immutable)<=? THEN e.immutable ELSE NULL END immutable FROM notifications n JOIN events e ON e.id=n.event_id LEFT JOIN acknowledgements a ON a.notification=n.id AND a.consumer=? WHERE a.notification IS NULL AND n.id=e.current_notification AND n.digest=e.digest AND (e.state IN ('tombstoned','unavailable') OR (e.state='ready' AND ?='ready')) ORDER BY n.id", (MAX_EVENT, consumer, phase))
                 result = []
                 for count, row in enumerate(rows, 1):
                     if count > MAX_EVENTS: raise InboxError("cache_integrity_error")
@@ -522,7 +531,7 @@ class Inbox:
                     result.append(item)
                     if len(result) == limit: break
                 return result
-            rows = db.execute("SELECT n.id notification_id,n.kind,n.digest notification_digest,e.id event_id,e.digest,e.state FROM notifications n JOIN events e ON e.id=n.event_id LEFT JOIN acknowledgements a ON a.notification=n.id AND a.consumer=? WHERE a.notification IS NULL AND n.id=e.current_notification AND n.digest=e.digest AND (e.state IN ('tombstoned','unavailable') OR (e.state='ready' AND ?='ready')) ORDER BY n.id LIMIT ?", (consumer, phase, limit)).fetchall()
+            rows = db.execute("SELECT n.id notification_id,n.kind,n.digest notification_digest,e.id message_id,e.digest,e.state FROM notifications n JOIN events e ON e.id=n.event_id LEFT JOIN acknowledgements a ON a.notification=n.id AND a.consumer=? WHERE a.notification IS NULL AND n.id=e.current_notification AND n.digest=e.digest AND (e.state IN ('tombstoned','unavailable') OR (e.state='ready' AND ?='ready')) ORDER BY n.id LIMIT ?", (consumer, phase, limit)).fetchall()
             return [{"notification_id": r["notification_id"], "message_id": r["message_id"], "kind": r["kind"], "state": r["state"], "snapshot_digest": r["digest"]} for r in rows]
 
     def notification(self, db, consumer, notification_id, *, metadata_only=False):
@@ -755,8 +764,11 @@ class Inbox:
             if status == 404:
                 if single: return None, None
                 raise InboxError("source_http_error")
-            if (set(result) - {"ok", "messages", "next_cursor", "generation"} or result.get("ok") is not True
-                    or not matches(result.get("generation"), GENERATION)): raise InboxError("invalid_event_response")
+            # data.has_more is the only data the message reads carry (PROTOCOL.md).
+            if (set(result) - {"ok", "messages", "next_cursor", "generation", "data"} or result.get("ok") is not True
+                    or not matches(result.get("generation"), GENERATION)
+                    or ("data" in result and (not isinstance(result["data"], dict) or set(result["data"]) != {"has_more"}
+                                              or type(result["data"]["has_more"]) is not bool))): raise InboxError("invalid_event_response")
             if result["generation"] != generation: raise InboxError("cursor_reset")
             records = result.get("messages", [])
             if not isinstance(records, list) or len(records) > (1 if single else 100): raise InboxError("event_page_limit")
@@ -793,7 +805,7 @@ class Inbox:
                 # IDs absent from that traversal, and only then exposes bodies.
                 while True:
                     state = db.execute("SELECT * FROM checkpoint").fetchone()
-                    if state["phase"] in ("messages", "ready"):
+                    if state["phase"] in ("events", "ready"):
                         query = {"to": self.binding["recipient"], "limit": 100}
                         if self.binding["room"]: query["room"] = self.binding["room"]
                         if state["cursor"]: query["cursor"] = state["cursor"]
@@ -805,7 +817,7 @@ class Inbox:
                         try:
                             with db:
                                 for record in records: self.receive(db, record, now, state["round"])
-                                phase = "messages" if state["resync"] and records else ("revalidate" if state["resync"] else "corrections")
+                                phase = "events" if state["resync"] and records else ("revalidate" if state["resync"] else "corrections")
                                 db.execute("UPDATE checkpoint SET cursor=?,event_empty=?,phase=?,last_error=NULL", (cursor or state["cursor"], int(not records), phase))
                         except InboxError as error:
                             if str(error) not in ("catalog_capacity", "event_capacity", "notification_capacity"): raise

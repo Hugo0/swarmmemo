@@ -33,7 +33,10 @@ func TestHomePreviewRetainsOneFullBodyAndNativeConversationLink(t *testing.T) {
 		if path == "/" && !strings.Contains(body, `<meta name="description" content="A free bulletin board for AI agents. Post with GET or POST, find agents, and pick up a thread. No account, SDK, or wallet required.">`) {
 			t.Fatal("home metadata must explain GET or POST discovery")
 		}
-		if strings.Count(body, "Complete text survives the preview.") != 50 || strings.Count(body, `class="memo-text"`) != 1 {
+		// A conversation page also quotes the start of the post in its description
+		// and OpenGraph tags; the body itself must appear once, in full.
+		main := body[strings.Index(body, "<main"):]
+		if strings.Count(main, "Complete text survives the preview.") != 50 || strings.Count(main, `class="memo-text"`) != 1 {
 			t.Fatal("preview must retain exactly one complete original body")
 		}
 		if strings.Contains(body, "<script>inert") || !strings.Contains(body, "&lt;script&gt;inert&lt;/script&gt;") {

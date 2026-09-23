@@ -47,7 +47,7 @@ for the normal daily job.
 ## Validation and boundary
 
 Every exported row must explicitly say `visibility: public`, `archive_eligible: true`,
-and `type: event` or `tombstone`. Unknown fields fail closed, so adding an internal
+and `type: message` or `tombstone`. Unknown fields fail closed, so adding an internal
 field cannot silently publish it. The exporter bounds response lines, total run bytes,
 page count, and network timeouts. It refuses cursor loops, out-of-order records,
 unexpected content types, malformed IDs, invalid hashes, incomplete signature metadata,
@@ -77,6 +77,18 @@ ordinary redacted metadata, never the removed signature or canonical payload;
 without those bytes a tombstone is not independently signature-verifiable. The
 public inbox remains public-only, and its removal latch prevents a later stale
 visible event from restoring locally removed text.
+
+Signed post data is checked the same way. A row may carry `format` (`markdown`) and
+`supersedes` (the earlier version a signed edit replaces) only when the signed command's
+`data` says exactly that; an unsigned row carrying either is refused. Tombstones keep
+`supersedes` but not `format`. The derived `superseded_by` is never exported, so consumers
+rebuild version chains from `supersedes`. A publisher older than this check refuses such
+rows, so deploy it with the service.
+
+A moderated tombstone may carry `hidden_by`: `operator` for a site-wide removal or
+`room` for one by that room's owner or a moderator. Any other value, or `hidden_by` on
+a visible message, is refused; a publisher older than this check refuses the field, so
+deploy it with the service.
 
 Attachment metadata is independently allowlisted and checked for room/ID, size,
 hash syntax and expiry; original signed attachment ID order must agree. Binary blobs
@@ -115,7 +127,7 @@ See [CURATION.md](CURATION.md) for the review and attribution process.
 
 1. Read from the last verified publication cursor with one fixed cutoff.
 2. Validate all fetched records before changing materialized partitions.
-3. Upsert rows by event ID into their original UTC date partition. Later tombstones
+3. Upsert rows by message ID into their original UTC date partition. Later tombstones
    replace the old body in current files; reversals/corrections update the same row.
 4. Write stable JSONL sorted by ID and a deterministic manifest with cursor, cutoff,
    schema, provenance, counts, sizes, and SHA-256 checksums.

@@ -49,7 +49,7 @@ assert.match(origin||'',/^http:\/\/127\.0\.0\.1:\d+$/);
     await openOptions();
     assert.deepEqual(await page.locator('#compose-settings .option-group-title').allTextContents(),['Who is posting','Where it goes','More']);
     assert.deepEqual(await page.locator('#compose-settings [role=group]').evaluateAll(gs=>gs.map(g=>document.getElementById(g.getAttribute('aria-labelledby')).textContent)),['Who is posting','Where it goes','More']);
-    for(const [field,help] of [['#memo-room',/Rooms are topics/],['#memo-page',/named stream inside the room/],['#memo-to',/It stays public: this is not a private message/],['#memo-kind',/Leave it as Note/],['#memo-files',/1 MiB each, expiring after 30 days/]]){
+    for(const [field,help] of [['#memo-room',/Rooms are topics/],['#memo-page',/named stream inside the room/],['#memo-to',/It stays public: this is not a private message/],['#memo-kind',/Leave it as Note/],['#memo-files',/1 MiB each, kept until you delete them/]]){
       const id=await page.locator(field).getAttribute('aria-describedby');assert.ok(id,field+' has help');
       assert.match(await page.locator('#'+id).textContent(),help);assert.equal(await page.locator('#'+id).isVisible(),true,field+' help is shown inline');
     }

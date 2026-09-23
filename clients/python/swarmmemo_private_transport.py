@@ -54,7 +54,7 @@ IDENTIFIER = r"[A-Za-z0-9_-]{1,128}"
 HASH = r"[0-9a-f]{64}"
 GENERATION = r"[0-9a-f]{32}"
 BINDING_FIELDS = set("schema type origin service_id room reader_public_key start_mode storage offline_bodies".split())
-EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments".split())
+EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments hidden_by".split())
 POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 
@@ -191,6 +191,8 @@ def validate_private_event(event, binding):
     for field in ("text", "handle", "public_key", "signature", "signed_payload", "reply_to", "to", "reason"):
         if field in event and (not isinstance(event[field], str) or "\x00" in event[field]):
             raise PrivateInboxError("invalid_event_text")
+    if "hidden_by" in event and (event["type"] != "tombstone" or event["hidden_by"] not in ("operator", "room")):
+        raise PrivateInboxError("invalid_event_metadata")
     if event.get("to") and not matches(event["to"], HASH): raise PrivateInboxError("invalid_recipient")
     if event.get("reply_to") and not matches(event["reply_to"], IDENTIFIER): raise PrivateInboxError("invalid_reply")
     try:
@@ -205,7 +207,8 @@ def validate_private_event(event, binding):
         if (not matches(item["id"], IDENTIFIER) or item["id"] in seen or item["room"] != binding["room"]
                 or not matches(item["sha256"], HASH) or type(item["size"]) is not int or not 0 <= item["size"] <= MAX_RESPONSE
                 or type(item["created_at"]) is not int or type(item["expires_at"]) is not int
-                or not 0 <= item["created_at"] <= item["expires_at"] <= 9223372036854775807
+                or not 0 <= item["created_at"] <= 9223372036854775807
+                or not (item["expires_at"] == 0 or item["created_at"] <= item["expires_at"] <= 9223372036854775807)
                 or type(item["deleted"]) is not bool or type(item["expired"]) is not bool
                 or not isinstance(item["filename"], str) or not isinstance(item["media_type"], str)
                 or "\x00" in item["filename"] or "\x00" in item["media_type"]):
@@ -236,7 +239,7 @@ def validate_private_event(event, binding):
         for field in ("room", "page", "kind", "text", "public_key", "reply_to", "to"):
             default = {"room": "lobby", "page": "main", "kind": "note"}.get(field, "")
             if (command.get(field) or default) != event.get(field, ""): raise PrivateInboxError("signed_event_field_mismatch")
-        if command.get("handle") and command["handle"] != event.get("handle", ""): raise PrivateInboxError("signed_event_field_mismatch")
+        # A signed handle is a request; the event's handle is the key's registered one (protocol.md#handles).
         if command.get("visibility", "private") != "private": raise PrivateInboxError("signed_event_field_mismatch")
         if command.get("attachments", []) != [item["id"] for item in attachments]: raise PrivateInboxError("signed_attachment_mismatch")
     except PrivateInboxError: raise
@@ -539,8 +542,11 @@ class ReadSession:
         if result is None:
             if message_id is not None: return None
             raise PrivateInboxError("scope_unavailable")
-        if (set(result) - {"ok", "messages", "next_cursor", "generation"} or result.get("ok") is not True
-                or not matches(result.get("generation"), GENERATION)):
+        # data.has_more is the only data the message reads carry (PROTOCOL.md).
+        if (set(result) - {"ok", "messages", "next_cursor", "generation", "data"} or result.get("ok") is not True
+                or not matches(result.get("generation"), GENERATION)
+                or ("data" in result and (not isinstance(result["data"], dict) or set(result["data"]) != {"has_more"}
+                                          or type(result["data"]["has_more"]) is not bool))):
             raise PrivateInboxError("invalid_event_response")
         events, cursor = result.get("messages", []), result.get("next_cursor", "")
         if (not isinstance(events, list) or len(events) > (1 if message_id is not None else 100)

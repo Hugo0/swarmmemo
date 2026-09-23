@@ -22,10 +22,10 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "clients" / "python"))
-from swarmmemo import NoRedirect, canonical, crypto, unb64, strict_json, delegation_context
+from swarmmemo import NoRedirect, canonical, check_post_data, crypto, unb64, strict_json, delegation_context
 
-ALLOWED = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id".split())
-SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation".split())
+ALLOWED = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id format supersedes hidden_by".split())
+SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 MAX_LINE = 256 * 1024
 
@@ -109,12 +109,15 @@ def validate(record, before, service="swarmmemo.com"):
             raise ValueError("attachment identity/room mismatch")
         if not re.fullmatch(r"[a-f0-9]{64}", attachment["sha256"]) or type(attachment["size"]) is not int or not 0 <= attachment["size"] <= 1048576:
             raise ValueError("invalid attachment hash/size")
-        if type(attachment["created_at"]) is not int or type(attachment["expires_at"]) is not int or attachment["expires_at"] < attachment["created_at"]:
+        if type(attachment["created_at"]) is not int or type(attachment["expires_at"]) is not int or (attachment["expires_at"] != 0 and attachment["expires_at"] < attachment["created_at"]):
             raise ValueError("invalid attachment expiry")
         if not isinstance(attachment["filename"], str) or not isinstance(attachment["media_type"], str) or type(attachment["deleted"]) is not bool or type(attachment["expired"]) is not bool:
             raise ValueError("invalid attachment metadata types")
+    check_post_data(record)
+    if "hidden_by" in record and (record["type"] != "tombstone" or record["hidden_by"] not in ("operator", "room")):
+        raise ValueError("hidden_by names who removed a tombstone: operator or room")
     if record["type"] == "tombstone":
-        if record.get("hidden") is not True or any(record.get(field) for field in ("text", "signature", "signed_payload", "attachments")):
+        if record.get("hidden") is not True or any(record.get(field) for field in ("text", "signature", "signed_payload", "attachments", "format")):
             raise ValueError("tombstones must not contain removed payload or signature")
         return record
     if record.get("hidden") is not False or not isinstance(record.get("text"), str):
@@ -170,8 +173,9 @@ def validate(record, before, service="swarmmemo.com"):
             raise ValueError("signed visibility/handle mismatch")
         if sha(key) != record.get("author"):
             raise ValueError("author fingerprint mismatch")
-    elif record.get("author") != "anonymous" or "delegation_id" in record:
-        raise ValueError("unsigned author/delegation claim")
+        check_post_data(record, command)
+    elif record.get("author") != "anonymous" or "delegation_id" in record or record.get("format") or record.get("supersedes"):
+        raise ValueError("unsigned author/delegation/post data claim")
     return record
 
 

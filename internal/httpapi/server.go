@@ -104,8 +104,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, &board.Error{Status: 500, Code: "internal", Message: "Request failed. Retry with the same request ID."})
 		}
 	}()
-	if len(r.RequestURI) > 8192 {
-		writeError(w, &board.Error{Status: 414, Code: "url_too_large", Message: "Request URL exceeds 8192 bytes. Use a body or smaller chunks."})
+	if len(r.RequestURI) > board.RequestTargetBytes {
+		writeError(w, &board.Error{Status: 414, Code: "url_too_large", Message: fmt.Sprintf("Request URL exceeds %d bytes. Use a body or smaller chunks.", board.RequestTargetBytes)})
 		return
 	}
 	if _, err := url.ParseQuery(r.URL.RawQuery); err != nil {
@@ -312,7 +312,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command
 		writeError(w, err)
 		return
 	}
-	s.describeReceipt(r.Context(), c, s.peer(r), &res)
+	s.describeReceipt(c, &res)
 	if wantsJSON(r) || strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/v1/command" {
 		jsonResponse(w, 200, res)
 		return
@@ -327,8 +327,13 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command
 func WriteText(w io.Writer, res board.Result) {
 	if res.Receipt != nil {
 		fmt.Fprintf(w, "ok %s sha256=%s url=/e/%s duplicate=%t\n", res.Receipt.ID, res.Receipt.Hash, res.Receipt.ID, res.Receipt.Duplicate)
-		// Last line, so a reader of the first line never sees it.
-		if res.Next != nil {
+		// Advice follows the ok line, so a reader of the first line never sees it.
+		// The handle line reads the receipt, so text wires that skip
+		// describeReceipt (TCP and the rest) still say why a handle was not used.
+		if h := res.Receipt.HandleNotApplied; h != nil {
+			fmt.Fprintf(w, "handle not applied: requested=%s reason=%s see /for-agents#handle\n", h.Requested, h.Reason)
+		}
+		if res.Next != nil && res.Next.SignToGetReplies != "" {
 			fmt.Fprintf(w, "Sign your next post with an Ed25519 key and replies to it are listed at /api/updates: %s\n", res.Next.How)
 		}
 		return
@@ -341,6 +346,9 @@ func WriteText(w io.Writer, res board.Result) {
 	}
 	if room := res.Room; room != nil {
 		fmt.Fprintf(w, "%s %s messages=%d\n", room.Name, room.Visibility, room.Count)
+		if p := room.Policy; p != nil {
+			fmt.Fprintf(w, "write=%s reply=%s moderators=%d\n", p.Write, p.Reply, len(room.Moderators))
+		}
 	}
 	for _, identity := range res.Agents {
 		fmt.Fprintf(w, "%s %s posts=%d\n", identity.ID, identity.Handle, identity.Posts)
@@ -367,38 +375,19 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cmd board.Command
-	if err := decodeJSON(w, r, &cmd, 2<<20); err != nil {
+	if err := decodeJSON(w, r, &cmd, board.CommandBodyBytes); err != nil {
 		writeError(w, err)
 		return
 	}
 	if !knownOperation(cmd.Operation) && cmd.PrivateRead == nil {
-		writeError(w, &board.Error{Status: 400, Code: "unknown_operation", Message: "Unknown command operation. See /capabilities."})
+		writeError(w, &board.Error{Status: 400, Code: "unknown_operation", Message: "Unknown operation. The supported operations are listed at /capabilities."})
 		return
 	}
 	s.execute(w, r, cmd)
 }
-func knownOperation(op string) bool {
-	if op == "agent.profile.publish" || op == "agent.profile.remove" || op == "agent.get" || op == "agents.list" {
-		return true
-	}
-	switch op {
-	case "private_read.create", "private_read.revoke", "private_read.get", "private_read.list":
-		return true
-	case "delegation.create", "delegation.revoke", "delegation.get", "delegations.list":
-		return true
-	case "work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel", "work.get", "works.list", "work.history":
-		return true
-	case "blob.put", "blob.get", "blob.delete":
-		return true
-	case "webhook.create", "webhook.delete", "webhook.list":
-		return true
-	case "identity.link", "identity.unlink":
-		return true
-	case "post", "messages.list", "updates.get", "message.get", "thread.get", "room.pages", "rooms.list", "room.get", "room.create", "room.member.add", "room.member.remove", "agent.register", "agent.get", "agents.list", "agent.rotate", "quota.get", "credit.transfer", "report", "stats", "export", "lease.acquire", "lease.release":
-		return true
-	}
-	return false
-}
+
+// knownOperation gates /v1/command on the operation table (board.Operations).
+func knownOperation(op string) bool { return board.KnownOperation(op) }
 
 func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
@@ -472,7 +461,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 		payload = vals[0]
 	}
 	if r.Body != nil && (r.ContentLength != 0 || len(r.TransferEncoding) > 0) {
-		body, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
+		body, e := io.ReadAll(http.MaxBytesReader(w, r.Body, board.CommandBodyBytes))
 		if e != nil {
 			writeError(w, &board.Error{Status: 413, Code: "body_too_large", Message: "Request body exceeds 2 MiB."})
 			return
@@ -677,7 +666,18 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		methodError(w)
 		return
 	}
-	c, e := queryCommand(r.URL.Query())
+	query := r.URL.Query()
+	// The agent directory's order is ?sort=new|active. It travels as the
+	// command's kind field, and no other read or write accepts the name.
+	if (r.URL.Path == "/api/agents" || r.URL.Path == "/who") && query.Has("sort") {
+		if query.Has("kind") {
+			writeError(w, bad("Use sort, not kind, to order agents."))
+			return
+		}
+		query["kind"] = query["sort"]
+		delete(query, "sort")
+	}
+	c, e := queryCommand(query)
 	if e != nil {
 		writeError(w, e)
 		return
@@ -710,7 +710,7 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "/api/thread/"):
 		id := strings.TrimPrefix(p, "/api/thread/")
 		if id == "" || strings.Contains(id, "/") || (c.MessageID != "" && c.MessageID != id) {
-			writeError(w, bad("Expected /api/thread/EVENT_ID with no conflicting message_id."))
+			writeError(w, bad("Expected /api/thread/MESSAGE_ID with no conflicting message_id."))
 			return
 		}
 		c.Operation = "thread.get"
@@ -731,7 +731,7 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "/api/work/"):
 		parts := strings.Split(strings.TrimPrefix(p, "/api/work/"), "/")
 		if parts[0] == "" || len(parts) > 2 || (len(parts) == 2 && parts[1] != "history") || (c.MessageID != "" && c.MessageID != parts[0]) {
-			writeError(w, bad("Expected /api/work/EVENT_ID or /api/work/EVENT_ID/history with no conflicting message_id."))
+			writeError(w, bad("Expected /api/work/MESSAGE_ID or /api/work/MESSAGE_ID/history with no conflicting message_id."))
 			return
 		}
 		c.Operation = "work.get"
@@ -750,15 +750,23 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		c.Operation = "agent.get"
 		c.Target = id
 	case strings.HasPrefix(p, "/api/room/"):
-		c.Operation = "room.get"
-		c.Room = strings.TrimPrefix(p, "/api/room/")
+		// /api/room/ROOM, or /api/room/ROOM/modlog for its public moderation log.
+		room, rest, nested := strings.Cut(strings.TrimPrefix(p, "/api/room/"), "/")
+		if nested && rest != "modlog" || c.Room != "" && c.Room != room {
+			writeError(w, bad("Expected /api/room/ROOM or /api/room/ROOM/modlog with no conflicting room."))
+			return
+		}
+		c.Operation, c.Room = "room.get", room
+		if nested {
+			c.Operation = "room.modlog"
+		}
 	case strings.HasPrefix(p, "/e/"):
 		c.Operation = "message.get"
 		c.MessageID = strings.TrimPrefix(p, "/e/")
 	case strings.HasPrefix(p, "/inbox/"):
 		id := strings.TrimPrefix(p, "/inbox/")
 		if id == "" || strings.Contains(id, "/") || (c.To != "" && c.To != id) {
-			writeError(w, bad("Expected /inbox/IDENTITY with no conflicting to."))
+			writeError(w, bad("Expected /inbox/AGENT with no conflicting to."))
 			return
 		}
 		c.Operation = "messages.list"

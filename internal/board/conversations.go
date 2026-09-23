@@ -95,6 +95,12 @@ type threadReference struct {
 	seq              int64
 }
 
+// threadParent is a message's place in its thread: the message it replies to,
+// or, for a new version of a root post, the version it supersedes. A version
+// keeps its original's reply_to, so either way every version and every reply to
+// any version resolves to the same root.
+const threadParent = `CASE WHEN reply_to<>'' THEN reply_to ELSE supersedes END`
+
 func resolveThreadRoot(ctx context.Context, tx *sql.Tx, current threadReference) (threadReference, error) {
 	// Older, same-room parents make cycles impossible and avoid inspecting any
 	// cross-room content, including malformed legacy parent relationships.
@@ -103,7 +109,7 @@ func resolveThreadRoot(ctx context.Context, tx *sql.Tx, current threadReference)
 			return threadReference{}, problem(400, "thread_depth_limit", "Thread ancestry exceeds the 256-parent read limit; use the room feed.")
 		}
 		var parent threadReference
-		err := tx.QueryRowContext(ctx, "SELECT id,room,reply_to,seq FROM events WHERE id=? AND room=? AND seq<?", current.parent, current.room, current.seq).Scan(&parent.id, &parent.room, &parent.parent, &parent.seq)
+		err := tx.QueryRowContext(ctx, "SELECT id,room,"+threadParent+",seq FROM events WHERE id=? AND room=? AND seq<?", current.parent, current.room, current.seq).Scan(&parent.id, &parent.room, &parent.parent, &parent.seq)
 		if errors.Is(err, sql.ErrNoRows) {
 			return threadReference{}, problem(400, "invalid_thread", "Thread contains an invalid parent relationship.")
 		}
@@ -121,15 +127,21 @@ func resolveThreadRoot(ctx context.Context, tx *sql.Tx, current threadReference)
 // one sentinel row; neither a broad root nor a deep tree can allocate beyond it.
 func threadReferences(ctx context.Context, tx *sql.Tx, root threadReference) ([]threadReference, error) {
 	refs := []threadReference{root}
+	seen := map[string]bool{root.id: true}
 	for start := 0; start < len(refs); {
 		end := min(start+128, len(refs))
-		args := make([]any, 0, end-start+2)
+		ids := make([]any, 0, end-start)
 		for _, ref := range refs[start:end] {
-			args = append(args, ref.id)
+			ids = append(ids, ref.id)
 		}
-		args = append(args, root.room, ThreadTraversalLimit-len(refs)+1)
-		query := `SELECT e.id,e.seq FROM events e INDEXED BY events_reply JOIN events p ON p.id=e.reply_to
- WHERE e.reply_to IN (` + strings.TrimSuffix(strings.Repeat("?,", end-start), ",") + `) AND e.room=? AND e.seq>p.seq LIMIT ?`
+		marks := strings.TrimSuffix(strings.Repeat("?,", end-start), ",")
+		args := append(append(append(append([]any{}, ids...), root.room), ids...), root.room, ThreadTraversalLimit-len(refs)+1)
+		// Replies, and newer versions of a message (children through supersedes).
+		// A version of a reply is found both ways, so rows are deduplicated below.
+		query := `SELECT id,seq FROM (SELECT e.id,e.seq FROM events e INDEXED BY events_reply JOIN events p ON p.id=e.reply_to
+ WHERE e.reply_to IN (` + marks + `) AND e.room=? AND e.seq>p.seq
+ UNION SELECT e.id,e.seq FROM events e INDEXED BY events_supersedes JOIN events p ON p.id=e.supersedes
+ WHERE e.supersedes IN (` + marks + `) AND e.supersedes<>'' AND e.room=? AND e.seq>p.seq) LIMIT ?`
 		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, conversationError(err)
@@ -140,6 +152,10 @@ func threadReferences(ctx context.Context, tx *sql.Tx, root threadReference) ([]
 				rows.Close()
 				return nil, conversationError(err)
 			}
+			if seen[ref.id] {
+				continue
+			}
+			seen[ref.id] = true
 			if len(refs) == ThreadTraversalLimit {
 				rows.Close()
 				return nil, problem(400, "thread_too_large", "Thread exceeds the 10000-event traversal limit; use the room's cursor feed.")
@@ -159,12 +175,12 @@ func threadReferences(ctx context.Context, tx *sql.Tx, root threadReference) ([]
 
 func (s *Store) readThread(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	if c.MessageID == "" || len(c.MessageID) > 64 {
-		return Result{}, problem(400, "invalid_message_id", "thread.get requires a message message_id of at most 64 characters.")
+		return Result{}, problem(400, "invalid_message_id", "thread.get requires a message_id of at most 64 characters.")
 	}
 	ctx, cancel := context.WithTimeout(ctx, ConversationReadTimeout)
 	defer cancel()
 	var current threadReference
-	err := tx.QueryRowContext(ctx, "SELECT id,room,reply_to,seq FROM events WHERE id=?", c.MessageID).Scan(&current.id, &current.room, &current.parent, &current.seq)
+	err := tx.QueryRowContext(ctx, "SELECT id,room,"+threadParent+",seq FROM events WHERE id=?", c.MessageID).Scan(&current.id, &current.room, &current.parent, &current.seq)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Result{}, problem(404, "not_found", "Thread not found.")
 	}
@@ -241,8 +257,8 @@ func (s *Store) readThread(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 }
 
 func (s *Store) readRoomPages(ctx context.Context, tx *sql.Tx, c Command, a actor) (Result, error) {
-	if !slug.MatchString(c.Room) {
-		return Result{}, problem(400, "invalid_slug", "room.pages requires an explicit lowercase room slug.")
+	if !ValidRoomName(c.Room) {
+		return Result{}, problem(400, "invalid_slug", "room.pages requires an explicit lowercase room slug or personal room.")
 	}
 	ctx, cancel := context.WithTimeout(ctx, ConversationReadTimeout)
 	defer cancel()

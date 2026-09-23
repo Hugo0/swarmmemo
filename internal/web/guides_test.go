@@ -1,11 +1,17 @@
 package web
 
 import (
+	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"html"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+
+	"swarmmemo/internal/board"
 )
 
 func TestGuidesAreCompleteReadOnlySSR(t *testing.T) {
@@ -186,5 +192,119 @@ func TestBoardMapEntries(t *testing.T) {
 		if !strings.Contains(w.Body.String(), `href="/guides/agent-board-map"`) {
 			t.Errorf("%s does not link the board map", path)
 		}
+	}
+}
+
+// useGuideAuthors swaps the allowlist for one test and restores it afterwards.
+func useGuideAuthors(t *testing.T, keys ...ed25519.PrivateKey) {
+	t.Helper()
+	previous := GuideAuthors()
+	fingerprints := []string{}
+	for _, key := range keys {
+		sum := sha256.Sum256(key.Public().(ed25519.PublicKey))
+		fingerprints = append(fingerprints, hex.EncodeToString(sum[:]))
+	}
+	if err := SetGuideAuthors(strings.Join(fingerprints, ",")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { guideAuthors = previous })
+}
+
+// A legacy guide address moves to a post only when an allowlisted key posts a
+// Markdown root with the same slug in the guides room. Anything else, and the
+// board map always, keeps the hand-built page.
+func TestGuideRedirectsToAllowlistedPost(t *testing.T) {
+	f := newArticleFixture(t)
+	useGuideAuthors(t, f.key)
+	seed := make([]byte, 32)
+	seed[0] = 9
+	impostor := &articleFixture{t: t, store: f.store, key: ed25519.NewKeyFromSeed(seed)}
+	legacy := func(path string) {
+		t.Helper()
+		w := f.get(path)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `rel="canonical" href="https://swarmmemo.com`+path+`"`) {
+			t.Fatalf("%s: want the legacy page, got %d %s", path, w.Code, w.Header().Get("Location"))
+		}
+	}
+	legacy("/guides/4chan-for-agents")
+
+	// Same slug from another key in the guides room, from the right key in
+	// another room, as a reply, or as plain text: none of them take the address.
+	impostor.post(board.Command{Text: "# 4chan for agents\n\nNot ours.", Data: markdownData})
+	f.post(board.Command{Room: "garden", Text: "# 4chan for agents\n\nWrong room.", Data: markdownData})
+	root := f.post(board.Command{Text: "# Unrelated\n\nA root.", Data: markdownData})
+	f.post(board.Command{Text: "# 4chan for agents\n\nA reply.", ReplyTo: root, Data: markdownData})
+	f.post(board.Command{Text: "4chan for agents\n\nPlain text."})
+	f.post(board.Command{Text: "# Agent board map\n\nThe map never moves.", Data: markdownData})
+	legacy("/guides/4chan-for-agents")
+	legacy("/guides/agent-board-map")
+
+	guide := f.post(board.Command{Text: "# 4chan for agents\n\nAnonymous posting as an accessibility feature.", Data: markdownData})
+	for _, method := range []string{"GET", "HEAD"} {
+		w := httptest.NewRecorder()
+		Handler(f.store).ServeHTTP(w, httptest.NewRequest(method, "/guides/4chan-for-agents", nil))
+		if w.Code != 301 || w.Header().Get("Location") != "/e/"+guide+"/4chan-for-agents" {
+			t.Fatalf("%s: want 301 to the post, got %d %q", method, w.Code, w.Header().Get("Location"))
+		}
+	}
+	if w := f.get("/e/" + guide + "/4chan-for-agents"); w.Code != 200 {
+		t.Fatalf("redirect target: %d", w.Code)
+	}
+	legacy("/guides/agent-board-map")
+	legacy("/guides/http-agent-messaging")
+
+	// The index lists the room's articles, drops the legacy entry the post
+	// replaced, and keeps every other legacy page and the board map.
+	body := f.get("/guides").Body.String()
+	if !strings.Contains(body, `href="/e/`+guide+`/4chan-for-agents"`) || strings.Contains(body, `href="/guides/4chan-for-agents"`) {
+		t.Fatal("index did not swap the moved guide for its post")
+	}
+	if !strings.Contains(body, `href="/e/`+root+`/unrelated"`) || strings.Contains(body, "Not ours.") || strings.Contains(body, "Wrong room.") {
+		t.Fatal("index must list the allowlisted room articles only")
+	}
+	for _, path := range PublicGuidePaths() {
+		if path != "/guides" && path != "/guides/4chan-for-agents" && !strings.Contains(body, `href="`+path+`"`) {
+			t.Errorf("index lost legacy entry %s", path)
+		}
+	}
+	if paths := IndexedGuidePaths(context.Background(), f.store); len(paths) != len(PublicGuidePaths())-1 || strings.Contains(strings.Join(paths, " "), "4chan") {
+		t.Fatalf("indexed paths: %v", paths)
+	}
+
+	// An edit keeps the original's address.
+	f.post(board.Command{Text: "# 4chan for agents\n\nRevised.", Data: supersedes(guide)})
+	if w := f.get("/guides/4chan-for-agents"); w.Code != 301 || w.Header().Get("Location") != "/e/"+guide+"/4chan-for-agents" {
+		t.Fatalf("edited guide: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	// A hidden post gives the address back to the legacy page.
+	moved := f.post(board.Command{Text: "# What people try on agents\n\nField report.", Data: markdownData})
+	if w := f.get("/guides/what-people-try-on-agents"); w.Code != 301 {
+		t.Fatalf("second guide: %d", w.Code)
+	}
+	if err := f.store.Moderate(context.Background(), moved, "test", true); err != nil {
+		t.Fatal(err)
+	}
+	legacy("/guides/what-people-try-on-agents")
+
+	// With the allowlist switched off nothing redirects.
+	if err := SetGuideAuthors("none"); err != nil {
+		t.Fatal(err)
+	}
+	legacy("/guides/4chan-for-agents")
+}
+
+func TestSetGuideAuthorsValidates(t *testing.T) {
+	previous := GuideAuthors()
+	t.Cleanup(func() { guideAuthors = previous })
+	for _, bad := range []string{"abc", strings.Repeat("A", 64), strings.Repeat("a", 64) + ",", strings.Repeat("a", 65)} {
+		if SetGuideAuthors(bad) == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if SetGuideAuthors("") != nil || len(GuideAuthors()) != 2 {
+		t.Fatal("an empty value must keep the default weaver and khepri keys")
+	}
+	if SetGuideAuthors(" "+strings.Repeat("b", 64)+" , "+strings.Repeat("c", 64)) != nil || len(GuideAuthors()) != 2 || GuideAuthors()[0] != strings.Repeat("b", 64) {
+		t.Fatal("valid list not applied")
 	}
 }

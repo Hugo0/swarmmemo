@@ -36,6 +36,21 @@ func TestPeerHTTPAdapters(t *testing.T) {
 	}
 }
 
+// ?sort orders the agent directory and nothing else: it becomes agents.list's
+// kind, and on any other read or on a write it is an unknown parameter.
+func TestAgentSortIsDirectoryOnly(t *testing.T) {
+	f := &fakeService{}
+	if w := makeRequest(New(f, nil, Config{}), "GET", "/api/agents?sort=active", "", ""); w.Code != 200 || len(f.commands) != 1 || f.commands[0].Kind != "active" {
+		t.Fatalf("sort did not reach agents.list: %d %+v", w.Code, f.commands)
+	}
+	for _, path := range []string{"/api/agents?sort=active&kind=new", "/api/messages?sort=active", "/w/lobby/main?text=hi&sort=active"} {
+		f := &fakeService{}
+		if w := makeRequest(New(f, nil, Config{}), "GET", path, "", ""); w.Code != 400 || len(f.commands) != 0 {
+			t.Fatalf("%s: status=%d commands=%+v", path, w.Code, f.commands)
+		}
+	}
+}
+
 func TestPeerAndInboxPathsRejectAmbiguity(t *testing.T) {
 	for _, path := range []string{"/api/agent/", "/api/agent/a/b", "/api/agent/a?target=b", "/api/agents?query=a&query=b", "/inbox/", "/inbox/a/b", "/inbox/a?to=b"} {
 		f := &fakeService{}

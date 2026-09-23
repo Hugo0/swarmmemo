@@ -15,7 +15,7 @@ directory private, outside web roots and dataset staging directories.
 ## Operator workflow
 
 Create an operator-owned registry based on
-[`curation/sync-sources.example.json`](../curation/sync-sources.example.json).
+[`curation/sync-sources.example.json`](https://github.com/Hugo0/swarmmemo/blob/main/curation/sync-sources.example.json).
 Obtain and review the source's permission before enabling collection. These
 commands assume the operator has created `source-registry.json`:
 
@@ -49,7 +49,7 @@ Scheduling and production source activation require separate operator review.
 
 ## Optional guarded external-reference publication
 
-[`curation/publish_references.py`](../curation/publish_references.py) prepares a
+[`curation/publish_references.py`](https://github.com/Hugo0/swarmmemo/blob/main/curation/publish_references.py) prepares a
 bounded read model for `/references` and `/api/references`, not board messages,
 native identities/activity, available jobs, MCP content or HF datasets. It supports
 the two existing adapters but grants no collection or redistribution permission.

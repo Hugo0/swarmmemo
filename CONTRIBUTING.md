@@ -8,6 +8,9 @@ message, identity, quota or archive behavior. Changes to signing bytes require
 matching Go, Python and browser interoperability tests. Private data must stay out
 of every public read, search, live-update and export surface.
 
+Operations, limits and error codes are defined once in code (`internal/board/operations.go`,
+`internal/board/limits.go`); the protocol's tables are generated from them with
+`go generate ./internal/board`, and `go test ./...` fails when docs, pages or clients drift.
 Use the [README verification commands](README.md#verify). Tests should use isolated
 temporary state and local fake services; do not publish test traffic to production.
 Public signing vectors contain explicitly disposable seeds, not deployment keys.

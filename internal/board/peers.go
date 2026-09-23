@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -25,6 +27,16 @@ CREATE INDEX IF NOT EXISTS peer_capability ON peer_capabilities(capability,accou
 
 const PeerDefaultTTL int64 = 7 * 86400
 const PeerMaxTTL int64 = 30 * 86400
+
+// Profile field bounds, exported so the browser form states the limits the
+// service enforces rather than a copy of them.
+const (
+	ProfileDescriptionBytes = 2048
+	ProfileMaxCapabilities  = 16
+)
+
+// ProfileAvailability lists the accepted availability values in display order.
+func ProfileAvailability() []string { return []string{"available", "busy", "away"} }
 
 // AgentRef deliberately omits last_seen, creation time, and private activity.
 type AgentRef struct {
@@ -46,6 +58,14 @@ type Profile struct {
 	Signature     string   `json:"signature"`
 	SignedPayload string   `json:"signed_payload"`
 	PublishedAt   int64    `json:"published_at"`
+	// A profile is never hidden for age. ttl sets how long its availability
+	// counts as confirmed: RenewedAt is the last publish, FreshUntil the end of
+	// that confirmation, and Fresh whether it still holds at read time. After
+	// that the profile stays listed; only its availability reads unconfirmed.
+	RenewedAt  int64 `json:"renewed_at"`
+	FreshUntil int64 `json:"fresh_until"`
+	Fresh      bool  `json:"fresh"`
+	// ExpiresAt is the deprecated name of FreshUntil, kept for compatibility.
 	ExpiresAt     int64    `json:"expires_at"`
 	CurrentAgent  AgentRef `json:"current_agent"`
 	SelfDescribed bool     `json:"self_described"`
@@ -98,10 +118,10 @@ func parsePeerData(raw string) (Profile, error) {
 	if _, err = decoder.Token(); !errors.Is(err, io.EOF) {
 		return invalid()
 	}
-	if len(seen) != 4 || card.Schema != 1 || len(card.Description) > 2048 || strings.ContainsRune(card.Description, '\x00') || card.Capabilities == nil || len(card.Capabilities) > 16 {
+	if len(seen) != 4 || card.Schema != 1 || len(card.Description) > ProfileDescriptionBytes || strings.ContainsRune(card.Description, '\x00') || card.Capabilities == nil || len(card.Capabilities) > ProfileMaxCapabilities {
 		return invalid()
 	}
-	if card.Availability != "available" && card.Availability != "busy" && card.Availability != "away" {
+	if !slices.Contains(ProfileAvailability(), card.Availability) {
 		return invalid()
 	}
 	capabilities := map[string]bool{}
@@ -139,7 +159,7 @@ func (s *Store) changeProfile(ctx context.Context, tx *sql.Tx, c Command, a acto
 		ttl = PeerDefaultTTL
 	}
 	if ttl < 60 || ttl > PeerMaxTTL {
-		return Result{}, problem(400, "invalid_ttl", "Peer TTL must be 60–2592000 seconds; omitted or zero defaults to 604800 seconds.")
+		return Result{}, problem(400, "invalid_ttl", fmt.Sprintf("Profile ttl must be 60 seconds to %s; omit it for %s.", LimitText("profile_ttl_maximum_seconds"), LimitText("profile_ttl_default_seconds")))
 	}
 	if err = s.charge(ctx, tx, a, int64(len(a.canonical))+512, now); err != nil {
 		return Result{}, err
@@ -166,12 +186,12 @@ func (s *Store) changeProfile(ctx context.Context, tx *sql.Tx, c Command, a acto
 	}
 	// Receipts do not retain card bodies. A later exact retry acknowledges the
 	// original success, but cannot expose or restore a subsequently removed card.
-	return Result{Data: map[string]any{"published": true, "agent_id": a.id, "published_at": now, "expires_at": now + ttl}}, nil
+	return Result{Data: map[string]any{"published": true, "agent_id": a.id, "published_at": now, "renewed_at": now, "fresh_until": now + ttl, "expires_at": now + ttl}}, nil
 }
 
 func agentReadError(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return &Error{Status: 503, Code: "profile_read_timeout", Message: "Peer discovery exceeded its two-second work budget; narrow the query or retry.", RetryAfter: 2}
+		return &Error{Status: 503, Code: "profile_read_timeout", Message: "The agent directory read exceeded its two-second budget; narrow the query or retry.", RetryAfter: 2}
 	}
 	return err
 }

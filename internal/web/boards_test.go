@@ -128,7 +128,7 @@ func readJSON(t *testing.T, name string) any {
 }
 
 func TestBoardsJSONMatchesSchema(t *testing.T) {
-	schema := readJSON(t, "boards.schema.json")
+	schema := readJSON(t, "boardlist/boards.schema.json")
 	var data any
 	if err := json.Unmarshal(boardsJSON, &data); err != nil {
 		t.Fatal(err)

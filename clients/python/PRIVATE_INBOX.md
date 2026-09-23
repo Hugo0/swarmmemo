@@ -182,7 +182,7 @@ child = message.keygen(child_path)  # Exclusive creation; fails if already prese
 child_key = message.load_key(child_path)
 intent = message.private_read_enrollment_intent(
     child["public_key"], room=room, generation=state["generation"],
-    access_epoch=state["access_epoch"],  # Default24h; optional explicit ttl<=7days.
+    access_epoch=state["access_epoch"],  # Default 24 hours; optional explicit ttl up to 7 days.
 )
 queue.enqueue("reader-enrollment-1", intent)
 delivery_status = queue.flush(owner, 1, target_key=child_key)
@@ -235,7 +235,7 @@ Use the same `pending`, explicit `read_current`, `ack` and `resync` calls docume
 above. Schema2 checks that the child fingerprint matches the binding, requires the
 v3 capability descriptor, and sends only HTTPS JSON POST. It reads the dedicated
 minimal `data.private_room` shape; there is no ordinary-member fallback. Pages are
-fixed at10events. A pathological oversized page fails instead of truncating or
+fixed at 10 events. A pathological oversized page fails instead of truncating or
 automatically retrying with weaker limits. `429`/`503`/timeout mean uncertainty,
 not proof of removal; observed signed scope denial freezes delivery.
 
@@ -253,15 +253,15 @@ if revocation["state"] != "acknowledged":
 ```
 
 Revocation is prepaid at enrollment; no remaining allowance is needed. Default
-lifetime24hours, maximum7days, no renew/top-up/reactivate. Actual member removal
+lifetime 24 hours, maximum 7 days, no renew/top-up/reactivate. Actual member removal
 disables all existing read grants in that room; no-op removal does not. Re-add
 does not revive them. Owner-key rotation and service recovery also disable grants.
 Resync cannot revive inactive authority: enroll a fresh child and create a fresh
 catalog, then reconcile acknowledgements deliberately. Schema1 remove/re-add
 observation limits above remain unchanged; schema2 has explicit epoch invalidation.
 
-Admission caps are8active grants per owner and room,256global;4096historical per
-owner and room,32768global. Historical keys are not garbage-collected. Each grant
-reserves16KiB of owner/service logical capacity, not physical disk space or a
+Admission caps are 8 active grants per owner and room, 256 global; 4096 historical per
+owner and room, 32768 global. Historical keys are not garbage-collected. Each grant
+reserves 16 KiB of owner/service logical capacity, not physical disk space or a
 lifetime read-byte budget. Long-lived frequent key replacement eventually hits
 the historical cap. Keep this operational limit in mind before automating churn.

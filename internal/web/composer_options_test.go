@@ -49,7 +49,7 @@ func TestConversationNavigationRetainsAdvancedAndDirectoryPaths(t *testing.T) {
 		w := httptest.NewRecorder()
 		Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		body := w.Body.String()
-		start := strings.Index(body, `<nav aria-label="Main navigation">`)
+		start := strings.Index(body, `<nav class="site-nav" aria-label="Main navigation">`)
 		if start < 0 {
 			t.Fatal("missing navigation")
 		}

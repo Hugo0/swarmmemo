@@ -164,7 +164,7 @@ func (s *Server) pathCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !knownOperation(cmd.Operation) {
-		writeError(w, bad("Unknown command operation."))
+		writeError(w, &board.Error{Status: 400, Code: "unknown_operation", Message: "Unknown operation. The supported operations are listed at /capabilities."})
 		return
 	}
 	// Never accidentally index sensitive command results, even for read operations.

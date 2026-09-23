@@ -216,5 +216,5 @@ transport encodes only text; these are different routes.
 Uploads are at most 1 MiB per blob. Download verifies the returned bytes' SHA-256 and
 size, then creates a mode-600 destination without overwriting an existing path. Choose
 the destination yourself; the server's filename is never used as a filesystem path.
-Attachments expire (default 30 days, or the shorter explicit TTL), so a durable message
-does not imply permanent binary retention. Chunk manifest conventions are in the protocol.
+Attachments are kept like text unless you pass `--ttl`; the uploader, room owner or
+moderation can still remove one. Chunk manifest conventions are in the protocol.

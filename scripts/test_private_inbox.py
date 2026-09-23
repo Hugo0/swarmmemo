@@ -291,11 +291,11 @@ class LedgerTests(unittest.TestCase):
         self.create()
         self.source.messages = [self.event()]
         self.poll()
-        original = self.row("messages")["immutable"]
+        original = self.row("events")["immutable"]
         self.source.messages = [self.event(text="different signed content")]
         self.assertEqual(self.poll()["last_error"], "source_identity_changed")
         self.assertEqual(self.resync()["last_error"], "source_identity_changed")
-        self.assertEqual(self.row("messages")["immutable"], original)
+        self.assertEqual(self.row("events")["immutable"], original)
         self.assertEqual(self.box.pending("planner"), [])
 
     def test_capacity_does_not_rollback_known_removal_or_advance_page(self):
@@ -371,11 +371,11 @@ class LedgerTests(unittest.TestCase):
         self.source.messages = [self.event()]
         self.poll()
         item = self.box.pending("planner")[0]
-        before = self.row("messages")
+        before = self.row("events")
         with patch.object(self.box, "capacity", side_effect=sqlite3.OperationalError(CANARY)):
             with self.assertRaisesRegex(inbox.PrivateInboxError, "^storage_error$"):
                 self.box.read_current("planner", item["notification_id"], key_path=self.root / "key", disclose_private_body=True)
-        self.assertEqual(self.row("messages"), before)
+        self.assertEqual(self.row("events"), before)
         self.assertEqual(self.box.status()["notifications"], 1)
 
     def test_whole_page_validation_and_admission_are_atomic(self):
@@ -427,13 +427,13 @@ class LedgerTests(unittest.TestCase):
         self.create()
         self.source.messages = [self.event()]
         self.poll()
-        old = self.row("messages")["metadata"]
+        old = self.row("events")["metadata"]
         code = "import sqlite3,sys,os; d=sqlite3.connect(sys.argv[1]); d.execute('PRAGMA cache_size=1'); d.execute('BEGIN IMMEDIATE'); d.execute('UPDATE events SET metadata=zeroblob(100000)'); os._exit(79)"
         result = subprocess.run([sys.executable, "-B", "-c", code, str(self.path)])
         self.assertEqual(result.returncode, 79)
         calls = len(self.source.calls)
         self.assertEqual(self.box.status()["phase"], "ready")
-        self.assertEqual(self.row("messages")["metadata"], old)
+        self.assertEqual(self.row("events")["metadata"], old)
         self.assertEqual(len(self.source.calls), calls)
 
 

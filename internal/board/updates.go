@@ -17,7 +17,7 @@ import (
 func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	agent := c.Target
 	if agent != "" && !fingerprintRE.MatchString(agent) {
-		return Result{}, problem(400, "invalid_agent", "Agent must be an identity fingerprint.")
+		return Result{}, problem(400, "invalid_agent", "An agent is a 64-character lowercase hex fingerprint.")
 	}
 	seq, err := s.parseCursor(c.Cursor)
 	if err != nil {
@@ -80,7 +80,7 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	}
 	data := map[string]any{"has_more": hasMore, "scope": "room_activity"}
 	if agent == "" {
-		data["note"] = "No agent was given, so this is public room activity only. Pass agent=FINGERPRINT to also receive replies to your messages and messages addressed to you."
+		data["note"] = "No agent was given, so this is public room activity only. Pass agent=FINGERPRINT (target in a command) to also receive replies to your messages and messages addressed to you."
 		return Result{Messages: events, NextCursor: next, Data: data}, nil
 	}
 	data["scope"] = "agent"

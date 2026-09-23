@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"unicode/utf8"
@@ -89,7 +90,7 @@ func linkError(code string) error {
 	case "link_not_found":
 		return problem(404, "link_not_found", "This key has no link of that kind and value.")
 	case "link_limit":
-		return problem(409, "link_limit", "This key already holds the maximum of 8 identity links; unlink one first.")
+		return problem(409, "link_limit", fmt.Sprintf("This key already holds the maximum of %d identity links; unlink one first.", IdentityLinkMaxPerKey))
 	case "link_delegated":
 		return problem(403, "link_delegated", "A scoped child grant cannot link or unlink identities for its parent.")
 	case "invalid_link_value":
@@ -340,22 +341,36 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 	return Result{Data: data}, nil
 }
 
-// readIdentityLinks returns one key's links in the order they were made. The
-// state is stored, never inferred here: the only writers are link, unlink and
-// the rechecker, each of which sets the state it proved.
-func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agent string) ([]IdentityLink, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT kind,value,proof,state,created_at,checked_at,lapsed_at FROM identity_links WHERE agent=? ORDER BY created_at,kind,value LIMIT ?", agent, IdentityLinkMaxPerKey)
+// readIdentityLinks returns each listed key's links in the order they were
+// made, in one query however many keys are asked for, so the directory shows
+// links without a read per agent. The state is stored, never inferred here:
+// the only writers are link, unlink and the rechecker, each of which sets the
+// state it proved.
+func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agents ...string) (map[string][]IdentityLink, error) {
+	links := map[string][]IdentityLink{}
+	if len(agents) == 0 {
+		return links, nil
+	}
+	args := make([]any, 0, len(agents)+1)
+	for _, agent := range agents {
+		args = append(args, agent)
+	}
+	args = append(args, IdentityLinkMaxPerKey*len(agents))
+	rows, err := tx.QueryContext(ctx, "SELECT agent,kind,value,proof,state,created_at,checked_at,lapsed_at FROM identity_links WHERE agent IN (?"+
+		strings.Repeat(",?", len(agents)-1)+") ORDER BY agent,created_at,kind,value LIMIT ?", args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	links := []IdentityLink{}
 	for rows.Next() {
 		var l IdentityLink
-		var proof string
+		var agent, proof string
 		var checked, lapsed int64
-		if err = rows.Scan(&l.Kind, &l.Value, &proof, &l.State, &l.LinkedAt, &checked, &lapsed); err != nil {
+		if err = rows.Scan(&agent, &l.Kind, &l.Value, &proof, &l.State, &l.LinkedAt, &checked, &lapsed); err != nil {
 			return nil, err
+		}
+		if len(links[agent]) >= IdentityLinkMaxPerKey {
+			continue
 		}
 		switch l.State {
 		case "verified":
@@ -371,7 +386,31 @@ func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agent string)
 				l.Statement = LinkStatement(s.config.ServiceID, agent, l.Value)
 			}
 		}
-		links = append(links, l)
+		links[agent] = append(links[agent], l)
 	}
 	return links, rows.Err()
+}
+
+// attachIdentityLinks sets each agent's links and, while a domain link is
+// verified, the earliest such domain as its @handle. One rule serves a single
+// agent and the directory, so the handle cannot mean two things.
+func (s *Store) attachIdentityLinks(ctx context.Context, tx *sql.Tx, agents []Agent) error {
+	ids := make([]string, len(agents))
+	for i := range agents {
+		ids[i] = agents[i].ID
+	}
+	links, err := s.readIdentityLinks(ctx, tx, ids...)
+	if err != nil {
+		return err
+	}
+	for i := range agents {
+		agents[i].Links = links[agents[i].ID]
+		for _, link := range agents[i].Links {
+			if link.Kind == "domain" && link.State == "verified" {
+				agents[i].DomainHandle = link.Value
+				break
+			}
+		}
+	}
+	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"mime"
 	"strconv"
 	"strings"
@@ -38,8 +39,8 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		if err != nil || base64.RawURLEncoding.EncodeToString(data) != c.Data {
 			return Result{}, problem(400, "invalid_base64", "Attachment data must use canonical unpadded base64url.")
 		}
-		if len(data) == 0 || len(data) > 1<<20 {
-			return Result{}, problem(413, "attachment_size", "Attachments must contain 1–1048576 decoded bytes.")
+		if len(data) == 0 || len(data) > AttachmentBytes {
+			return Result{}, problem(413, "attachment_size", fmt.Sprintf("A file must be 1 byte to %d KiB, decoded.", AttachmentBytes>>10))
 		}
 		filename := c.Filename
 		if filename == "" {
@@ -63,18 +64,20 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 				return Result{}, problem(400, "invalid_image", "An image attachment must be "+inlineImageFormats+", its bytes must match its declared media type, and it must be under "+strconv.Itoa(InlineImagePixels/(1<<20))+" megapixels. SVG is not accepted because it can carry script; send it as a download type instead.")
 			}
 		}
-		ttl := c.TTL
-		if ttl == 0 {
-			ttl = 30 * 86400
+		// Files are kept like message text: no server-imposed lifetime. An explicit
+		// ttl is the uploader's own removal choice and is honoured.
+		ttl, expires := c.TTL, int64(0)
+		if ttl < 0 || ttl > AttachmentMaxTTL {
+			return Result{}, problem(400, "invalid_ttl", "A file ttl is optional: omit it to keep the file, or give a positive number of seconds after which it is removed.")
 		}
-		if ttl < 1 || ttl > 30*86400 {
-			return Result{}, problem(400, "invalid_ttl", "Attachment TTL must be 1–2592000 seconds (30 days).")
+		if ttl > 0 {
+			expires = now + ttl
 		}
 		if err = s.charge(ctx, tx, a, int64(len(data)+len(filename)+len(mediaType)+512), now); err != nil {
 			return Result{}, err
 		}
 		hash := sha256.Sum256(data)
-		b := Attachment{ID: randomID(), Room: c.Room, Filename: filename, MediaType: mediaType, Hash: hex.EncodeToString(hash[:]), Size: int64(len(data)), CreatedAt: now, ExpiresAt: now + ttl}
+		b := Attachment{ID: randomID(), Room: c.Room, Filename: filename, MediaType: mediaType, Hash: hex.EncodeToString(hash[:]), Size: int64(len(data)), CreatedAt: now, ExpiresAt: expires}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO blobs(id,room,account,filename,media_type,hash,size,created_at,expires_at,data) VALUES(?,?,?,?,?,?,?,?,?,?)", b.ID, b.Room, a.account, b.Filename, b.MediaType, b.Hash, b.Size, b.CreatedAt, b.ExpiresAt, data); err != nil {
 			return Result{}, err
 		}
@@ -125,11 +128,11 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			}
 		}
 		b.Deleted = true
-		b.Expired = b.ExpiresAt <= now
+		b.Expired = blobExpired(b.ExpiresAt, now)
 		return Result{Data: map[string]any{"blob": b}}, nil
 	}
-	if b.Deleted || b.ExpiresAt <= now {
-		return Result{}, problem(410, "attachment_gone", "This attachment was deleted or its stated retention period expired.")
+	if b.Deleted || blobExpired(b.ExpiresAt, now) {
+		return Result{}, problem(410, "attachment_gone", "This attachment was deleted, or the ttl its uploader set has passed.")
 	}
 	var total, visible int
 	if err = tx.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(CASE WHEN e.hidden=0 THEN 1 ELSE 0 END),0) FROM event_attachments ea JOIN events e ON e.id=ea.event_id WHERE ea.blob_id=?", id).Scan(&total, &visible); err != nil {
@@ -162,7 +165,7 @@ func (s *Store) attachToPost(ctx context.Context, tx *sql.Tx, c Command, eventID
 		if b.Room != c.Room {
 			return problem(404, "not_found", "Attachment not found in this room.")
 		}
-		if b.Deleted || b.ExpiresAt <= now {
+		if b.Deleted || blobExpired(b.ExpiresAt, now) {
 			return problem(410, "attachment_gone", "An attachment was deleted or expired; upload a new copy.")
 		}
 		// A hidden-only reference cannot be republished to circumvent moderation.
@@ -195,7 +198,7 @@ func (s *Store) loadAttachments(ctx context.Context, tx *sql.Tx, events []Messag
 				rows.Close()
 				return err
 			}
-			b.Expired = b.ExpiresAt <= now
+			b.Expired = blobExpired(b.ExpiresAt, now)
 			events[i].Attachments = append(events[i].Attachments, b)
 		}
 		err = rows.Err()
@@ -207,10 +210,44 @@ func (s *Store) loadAttachments(ctx context.Context, tx *sql.Tx, events []Messag
 	return nil
 }
 
-// PruneExpiredBlobs removes expired payload bytes, retaining their metadata and
-// immutable message references. Invoke from the operator maintenance timer.
+// AttachmentMaxTTL bounds an explicit ttl only so now+ttl cannot overflow; it is
+// not a retention limit.
+const AttachmentMaxTTL = int64(1) << 40
+
+// blobExpired reports whether an uploader-set ttl has passed. expires_at 0 means
+// the file has no expiry.
+func blobExpired(expiresAt, now int64) bool { return expiresAt != 0 && expiresAt <= now }
+
+// legacyBlobLifetime was the server default and cap before files were kept
+// indefinitely (2026-09-23). Clients sent it by default, so it is not treated
+// as an uploader's choice.
+const legacyBlobLifetime = 30 * 86400
+
+// extendLegacyBlobs clears the old server-imposed expiry from live files, once.
+// Bytes already pruned cannot be recovered and are left as they are; shorter
+// explicit ttls are kept.
+func extendLegacyBlobs(tx *sql.Tx, now int64) (int64, error) {
+	var done int
+	if err := tx.QueryRow("SELECT count(*) FROM meta WHERE key='blob_legacy_expiry_cleared'").Scan(&done); err != nil || done > 0 {
+		return 0, err
+	}
+	r, err := tx.Exec("UPDATE blobs SET expires_at=0 WHERE deleted=0 AND data IS NOT NULL AND expires_at>? AND expires_at-created_at=?", now, legacyBlobLifetime)
+	if err != nil {
+		return 0, err
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.Exec("INSERT INTO meta(key,value) VALUES('blob_legacy_expiry_cleared',?)", strconv.FormatInt(n, 10))
+	return n, err
+}
+
+// PruneExpiredBlobs removes payload bytes whose uploader-set ttl passed,
+// retaining their metadata and immutable message references. Files without a
+// ttl (expires_at 0) are never touched. Invoke from the operator maintenance timer.
 func (s *Store) PruneExpiredBlobs(ctx context.Context) (int64, error) {
-	r, err := s.db.ExecContext(ctx, "UPDATE blobs SET data=NULL WHERE expires_at<=? AND data IS NOT NULL", s.now().Unix())
+	r, err := s.db.ExecContext(ctx, "UPDATE blobs SET data=NULL WHERE expires_at>0 AND expires_at<=? AND data IS NOT NULL", s.now().Unix())
 	if err != nil {
 		return 0, err
 	}

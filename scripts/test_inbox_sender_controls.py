@@ -58,7 +58,7 @@ class SenderControlsTests(unittest.TestCase):
     def ledger(self):
         with closing(sqlite3.connect(self.path)) as db:
             return {table: db.execute("SELECT * FROM " + table).fetchall() for table in
-                    ("binding", "checkpoint", "messages", "notifications", "consumers", "acknowledgements")}
+                    ("binding", "checkpoint", "events", "notifications", "consumers", "acknowledgements")}
 
     def enable(self): self.inbox.sender_controls_enable()
 
@@ -222,7 +222,7 @@ class SenderControlsTests(unittest.TestCase):
                 def authorizer(action, table, column, *_):
                     if action == sqlite3.SQLITE_READ:
                         reads.append((table, column))
-                        if table == "messages" and column == "snapshot": return sqlite3.SQLITE_DENY
+                        if table == "events" and column == "snapshot": return sqlite3.SQLITE_DENY
                     return sqlite3.SQLITE_OK
                 db.set_authorizer(authorizer)
                 yield db
@@ -233,7 +233,7 @@ class SenderControlsTests(unittest.TestCase):
             self.assertTrue(self.inbox.read("planner", audit[0]["notification_id"])["muted"])
             with self.assertRaisesRegex(module.InboxError, "sender_muted"):
                 self.inbox.read("planner", audit[0]["notification_id"], True)
-        self.assertNotIn(("messages", "snapshot"), reads)
+        self.assertNotIn(("events", "snapshot"), reads)
         self.inbox.sender_unmute("planner", self.signer)
         with patch.object(self.inbox, "metadata_signer", side_effect=AssertionError("zero-rule fast path")):
             self.assertEqual(self.inbox.pending("planner", 1)[0]["message_id"], "prefix0")
@@ -250,7 +250,7 @@ class SenderControlsTests(unittest.TestCase):
         with self.assertRaisesRegex(module.InboxError, "invalid_sender_policy"): self.inbox.status()
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("DELETE FROM sender_mutes"); db.execute("INSERT INTO sender_mutes VALUES('planner',?)", (self.signer,))
-        raw = before["messages"][0][2]
+        raw = before["events"][0][2]
         for transform in (lambda value: {**value, "extra": "no"}, lambda value: {**value, "author": "f" * 64},
                           lambda value: {**value, "created_at": True}, lambda value: {**value, "room": "INVALID"}):
             with self.subTest(transform=transform):

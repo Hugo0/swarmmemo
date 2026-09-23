@@ -7,7 +7,7 @@ import "swarmmemo/internal/board"
 // no signing key of its own yet, and a reader must not look for one.
 func (s *Server) identityLinkCapabilities() map[string]any {
 	return map[string]any{
-		"operations": []string{"identity.link", "identity.unlink"}, "read": "/api/agent/AGENT (agent.links, agent.domain_handle)",
+		"operations": []string{"identity.link", "identity.unlink"}, "read": "/api/agent/AGENT and /api/agents (links, domain_handle)", "browser_control": "/me",
 		"signed_only": true, "anonymous": false, "delegated": false, "mcp_write": false,
 		"kinds":           board.LinkKinds(),
 		"states":          map[string]string{"claimed": "this key said so; nothing shows the other side agrees", "proof_attached": "the other side signed a statement anyone can verify offline", "verified": "this service checked live state at checked_at", "lapsed": "a verified check stopped passing at lapsed_at"},

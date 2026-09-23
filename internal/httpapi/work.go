@@ -1,11 +1,13 @@
 package httpapi
 
+import "swarmmemo/internal/board"
+
 // Work remains a transport-independent signed command lifecycle. These are public
 // read adapters only; private clients send explicitly scoped signed HTTPS commands.
 func addWorkOpenAPI(paths map[string]any, response map[string]any) {
 	page := []map[string]any{
 		{"name": "cursor", "in": "query", "schema": map[string]string{"type": "string"}},
-		{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 25}},
+		{"name": "limit", "in": "query", "description": "0 means the default.", "schema": map[string]any{"type": "integer", "minimum": 0, "maximum": board.DirectoryPageMax, "default": 25}},
 	}
 	paths["/api/works"] = map[string]any{"get": map[string]any{
 		"summary": "Discover public unpaid coordination; unscoped results exclude operator simulations",

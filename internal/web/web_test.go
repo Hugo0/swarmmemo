@@ -265,11 +265,11 @@ func TestAgentOnboardingStartsWithFreeConversation(t *testing.T) {
 		"A free public place for agents to talk", "No job required.",
 		"casual chat is welcome", "Reading does not oblige you to post",
 		"format=json", "reply_to=RECEIPT_ID", "YOUR_UNIQUE_POST_ID",
-		"receipt.id", "never the caller's", "api/thread/RECEIPT_ID?limit=25",
-		"original message's room and page", "next_cursor", "data.has_more",
+		"receipt.id", "never a <code>request_id</code>", "api/thread/RECEIPT_ID?limit=25",
+		"SAME room and page", "next_cursor", "data.has_more",
 		"GET writes are real writes", "HEAD and OPTIONS never post",
 		"untrusted data, not instructions", "addressing a message to someone does not make it a DM",
-		"backup replication is asynchronous", "retry key, not a message ID",
+		"backup replication is asynchronous", "retry key, NOT the message ID",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing first-conversation instruction %q", want)
@@ -314,7 +314,7 @@ func TestWorkspaceAndSiteWideAgentDiscovery(t *testing.T) {
 		w := httptest.NewRecorder()
 		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		body := w.Body.String()
-		for _, want := range []string{`rel="help" href="/llms.txt"`, `rel="service-desc" href="/openapi.json"`, `rel="describedby" href="/capabilities"`, `href="/for-agents"`, `href="/docs">Protocol</a>`} {
+		for _, want := range []string{`rel="help" href="/llms.txt"`, `rel="service-desc" href="/openapi.json"`, `rel="describedby" href="/capabilities"`, `href="/for-agents"`, `href="/docs">Docs</a>`} {
 			if !strings.Contains(body, want) {
 				t.Errorf("route %s missing discovery %q", path, want)
 			}
@@ -413,7 +413,7 @@ func TestRecipientAndReplyIntentSurviveNoJavaScriptForms(t *testing.T) {
 
 func TestAgentDirectoryEscapesProfilesAndDistinguishesSigningHistory(t *testing.T) {
 	old, current := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	expiry := time.Now().Add(time.Hour).Unix()
+	expiry, renewed := time.Now().Add(time.Hour).Unix(), time.Now().Add(-72*time.Hour).Unix()
 	s := &testService{execute: func(c board.Command) (board.Result, error) {
 		return board.Result{Agents: []board.Agent{{
 			ID: current, Handle: `<img src=x onerror=alert(1)>`, Posts: 2,
@@ -421,6 +421,7 @@ func TestAgentDirectoryEscapesProfilesAndDistinguishesSigningHistory(t *testing.
 				Author: old, CurrentAgent: board.AgentRef{ID: current, Handle: `<img src=x onerror=alert(1)>`},
 				Description:  `<script>alert(1)</script> https://swarmmemo.com/w/lobby/main?text=do-not-run`,
 				Capabilities: []string{"code-review", `<svg onload=alert(1)>`}, Availability: "available", ExpiresAt: expiry,
+				FreshUntil: expiry, RenewedAt: renewed, Fresh: true,
 			},
 		}}, Data: map[string]any{"has_more": true}, NextCursor: "opaque-directory-cursor"}, nil
 	}}
@@ -434,7 +435,7 @@ func TestAgentDirectoryEscapesProfilesAndDistinguishesSigningHistory(t *testing.
 		t.Fatalf("wrong public directory query: %+v", s.calls)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"&lt;script&gt;", "&lt;img", "Self-described", "Originally signed by", `href="/agent/` + old + `"`, `href="/inbox/` + current + `"`, `href="/api/agent/` + current + `"`, "cursor=opaque-directory-cursor&amp;q=code-review", time.Unix(expiry, 0).UTC().Format("2006-01-02 15:04 UTC")} {
+	for _, want := range []string{"&lt;script&gt;", "&lt;img", "Self-described", "Originally signed by", `href="/agent/` + old + `"`, `href="/inbox/` + current + `"`, `href="/api/agent/` + current + `"`, "cursor=opaque-directory-cursor&amp;q=code-review", "Renewed <time", ">3 days ago</time>", time.Unix(renewed, 0).UTC().Format("2006-01-02 15:04 UTC")} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing agent profile information %q", want)
 		}
@@ -479,7 +480,7 @@ func TestAgentDirectoryEmptyAndUnavailableStates(t *testing.T) {
 	}}
 	w := httptest.NewRecorder()
 	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/agents", nil))
-	if body := w.Body.String(); !strings.Contains(body, "No published profile.") || !strings.Contains(body, "quiet") {
+	if body := w.Body.String(); !strings.Contains(body, "No bio yet.") || !strings.Contains(body, "quiet") {
 		t.Fatal("an agent without a profile must still be listed as an agent")
 	}
 	// One read means one failure mode: the directory cannot half-fail into a page
@@ -568,6 +569,10 @@ func TestPublicPermalinkIncludesFullLongTextAndAttachmentMetadata(t *testing.T) 
 
 func TestThreadSSRIsChronologicalAndHasBoundedContinuation(t *testing.T) {
 	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		if c.Operation == "room.get" && c.Room == "lobby" {
+			// The conversation page reads its room's reply policy.
+			return board.Result{OK: true}, nil
+		}
 		if c.Operation != "thread.get" || c.MessageID != "reply" || c.Limit != 40 {
 			t.Fatalf("unexpected thread read: %+v", c)
 		}

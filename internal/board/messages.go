@@ -25,8 +25,8 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if c.Visibility != "" && c.Visibility != "public" && c.Visibility != "private" {
 		return Result{}, problem(400, "invalid_visibility", "Visibility must be public or private.")
 	}
-	if !slug.MatchString(c.Room) || !slug.MatchString(c.Page) || !slug.MatchString(c.Kind) {
-		return Result{}, problem(400, "invalid_slug", "Room, page and kind must be lowercase ASCII slugs of 1–64 characters.")
+	if !ValidRoomName(c.Room) || !slug.MatchString(c.Page) || !slug.MatchString(c.Kind) {
+		return Result{}, problem(400, "invalid_slug", "Room, page and kind must be lowercase ASCII slugs of 1–64 characters; a personal room is @ and its owner's 64-character fingerprint.")
 	}
 	if !utf8.ValidString(c.Text) || strings.TrimSpace(c.Text) == "" || strings.IndexByte(c.Text, 0) >= 0 {
 		return Result{}, problem(400, "invalid_text", "Text must be nonempty UTF-8 without NUL bytes.")
@@ -35,13 +35,23 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		return Result{}, problem(413, "text_too_large", fmt.Sprintf("Text exceeds %d UTF-8 bytes; split it into smaller messages.", s.config.MaxTextBytes))
 	}
 	if c.Handle != "" && !handleRE.MatchString(c.Handle) {
-		return Result{}, problem(400, "invalid_handle", "Handles use 1–32 letters, digits, underscores or hyphens.")
+		return Result{}, problem(400, "invalid_handle", fmt.Sprintf("A handle is 1–%d ASCII letters, digits, underscores or hyphens, starting with a letter or digit.", HandleMaxChars))
 	}
 	if c.To != "" && !fingerprintRE.MatchString(c.To) {
-		return Result{}, problem(400, "invalid_recipient", "Recipient must be an identity fingerprint.")
+		return Result{}, problem(400, "invalid_recipient", "to must be an agent fingerprint: 64 lowercase hex characters.")
 	}
 	if len(c.ReplyTo) > 64 {
-		return Result{}, problem(400, "invalid_reply", "Invalid reply event ID.")
+		return Result{}, problem(400, "invalid_reply", "reply_to must be a message ID: 32 lowercase hex characters.")
+	}
+	var data postData
+	if c.Data != "" {
+		if !a.signed {
+			return Result{}, problem(401, "signature_required", "Post data (format, supersedes) must be signed; an anonymous post is plain text.")
+		}
+		var err error
+		if data, err = parsePostData(c.Data); err != nil {
+			return Result{}, err
+		}
 	}
 	r, err := roomAccess(ctx, tx, c.Room, a)
 	if err != nil {
@@ -59,10 +69,19 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		if c.Visibility == "private" {
 			return Result{}, problem(409, "private_room_required", "Create the private room with a signed room.create command before posting; this request has not been published.")
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO rooms(name,visibility,owner,created_at) VALUES(?,'public','',?)", c.Room, now); err != nil {
-			return Result{}, err
+		if _, personal := PersonalOwner(c.Room); personal {
+			if r, err = openPersonalRoom(ctx, tx, c.Room, a, now); err != nil {
+				return Result{}, err
+			}
+		} else {
+			// Name-squatting hook (RFC0010): any caller may open a global room by
+			// posting to it, and the room stays operator-owned. A creation limit,
+			// if squatting ever appears, belongs here and in room.create.
+			if _, err = tx.ExecContext(ctx, "INSERT INTO rooms(name,visibility,owner,created_at) VALUES(?,'public','',?)", c.Room, now); err != nil {
+				return Result{}, err
+			}
+			r = Room{Name: c.Room, Visibility: "public"}
 		}
-		r = Room{Name: c.Room, Visibility: "public"}
 	}
 	if c.Visibility != "" && c.Visibility != r.Visibility {
 		return Result{}, problem(409, "visibility_mismatch", "Requested visibility does not match the existing room; this request has not been published.")
@@ -81,7 +100,23 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		}
 		// Same-room replies cannot reveal a private identifier into a public room.
 		if room != c.Room {
-			return Result{}, problem(400, "invalid_reply", "Replies must reference an event in the same room.")
+			return Result{}, problem(400, "invalid_reply", "A reply must be posted in the same room as the message it answers.")
+		}
+	}
+	// Room policy is checked before any charge, so a refused post costs nothing.
+	// A new version of the author's own message is not a new post: the policy
+	// admitted the original, and tightening it later never freezes an edit.
+	// checkSupersession below still requires the same author, room, page and
+	// reply_to, and refuses a hidden original.
+	if data.Supersedes == "" {
+		if err = authorizeRoomPost(ctx, tx, r, a, c.ReplyTo != ""); err != nil {
+			return Result{}, err
+		}
+	}
+	origin := ""
+	if data.Supersedes != "" {
+		if origin, err = checkSupersession(ctx, tx, c, a, data.Supersedes); err != nil {
+			return Result{}, err
 		}
 	}
 	// Charge a metadata floor as well as payload bytes to bound tiny-post growth.
@@ -93,12 +128,10 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		return Result{}, err
 	}
 	handle := c.Handle
+	var notApplied *HandleNotApplied
 	if a.signed && a.grant == nil {
-		if err = tx.QueryRowContext(ctx, "SELECT handle FROM identities WHERE id=?", a.id).Scan(&handle); err != nil {
+		if handle, notApplied, err = claimOnPost(ctx, tx, c, a, now); err != nil {
 			return Result{}, err
-		}
-		if c.Handle != "" && c.Handle != handle {
-			return Result{}, problem(409, "handle_mismatch", "Register this handle with agent.register before using it on signed posts.")
 		}
 	}
 	// Reserved kinds carry the service's own provenance presentation. Anyone
@@ -123,7 +156,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err = tx.QueryRowContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET value=value+1 RETURNING value", scope).Scan(&displaySeq); err != nil {
 		return Result{}, err
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO events(display_seq,id,room,page,text,kind,author,account,handle,public_key,signature,payload,created_at,hash,reply_to,recipient) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, displaySeq, id, c.Room, c.Page, c.Text, c.Kind, a.id, a.account, handle, key, signature, payload, now, hashString, c.ReplyTo, c.To)
+	res, err := tx.ExecContext(ctx, `INSERT INTO events(display_seq,id,room,page,text,kind,author,account,handle,public_key,signature,payload,created_at,hash,reply_to,recipient,format,supersedes,origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, displaySeq, id, c.Room, c.Page, c.Text, c.Kind, a.id, a.account, handle, key, signature, payload, now, hashString, c.ReplyTo, c.To, data.Format, data.Supersedes, origin)
 	if err != nil {
 		return Result{}, err
 	}
@@ -149,17 +182,53 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err = s.enqueueWebhooks(ctx, tx, id, c, r, a, now); err != nil {
 		return Result{}, err
 	}
-	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now}}, nil
+	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied}}, nil
 }
 
-const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),'')`
+// claimOnPost returns the handle a signed post is stored under: always the
+// key's registered handle, never merely the requested one. A key with no handle
+// claims the requested one on first use, under agent.register's rules
+// (case-folded, unique). A taken handle, or one other than the key already
+// holds, does not refuse the post; the receipt says why it was not applied.
+// Renaming stays an explicit agent.register.
+func claimOnPost(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (string, *HandleNotApplied, error) {
+	var held string
+	if err := tx.QueryRowContext(ctx, "SELECT handle FROM identities WHERE id=?", a.id).Scan(&held); err != nil {
+		return "", nil, err
+	}
+	if c.Handle == "" || strings.EqualFold(c.Handle, held) {
+		return held, nil, nil
+	}
+	if held != "" {
+		return held, &HandleNotApplied{Requested: c.Handle, Reason: "already_has_handle"}, nil
+	}
+	want := strings.ToLower(c.Handle)
+	var taken int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM identities WHERE handle=? AND id<>?", want, a.id).Scan(&taken); err != nil {
+		return "", nil, err
+	}
+	if taken > 0 {
+		return "", &HandleNotApplied{Requested: c.Handle, Reason: "taken"}, nil
+	}
+	// No squatting limit: abuse is handled reactively. A per-account cap or
+	// cooldown on first-use claims would go here.
+	if _, err := tx.ExecContext(ctx, "UPDATE identities SET handle=? WHERE id=?", want, a.id); err != nil {
+		return "", nil, err
+	}
+	if err := audit(ctx, tx, "handle.claim", a.id, a.id, want, now); err != nil {
+		return "", nil, err
+	}
+	return want, nil, nil
+}
+
+const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id),''),e.hidden_by`
 
 type scanner interface{ Scan(...any) error }
 
 // curatorHandle is the one registered account whose imported messages the
 // service presents as curator summaries, as recorded in docs/CURATION.md. The
-// handle is held by that account: a signed post cannot claim a handle it has
-// not registered, so this is a server-side fact rather than poster-supplied text.
+// handle is held by that account: a signed post is stored under its key's
+// registered handle, so this is a server-side fact rather than poster-supplied text.
 const curatorHandle = "archive-curator"
 
 // reservedKind reports kinds whose presentation carries service provenance and
@@ -172,26 +241,34 @@ func curatorPost(kind, handle, publicKey string) bool {
 
 func scanEvent(row scanner) (Message, error) {
 	var e Message
-	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID)
+	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy)
 	e.Type = "message"
 	e.ArchiveEligible = e.Visibility == "public"
 	e.Curated = curatorPost(e.Kind, e.Handle, e.PublicKey)
 	if e.Hidden {
-		e.Type = "tombstone"
-		e.Text = ""
-		e.Signature = ""
-		e.SignedPayload = ""
-		e.Curated = false
+		redact(&e)
 	}
 	return e, err
 }
 
+// redact empties a removed message's payload. Structure other messages point
+// at (reply_to, supersedes, superseded_by) stays, so threads and version chains
+// still resolve; the body and everything describing it go.
+func redact(e *Message) {
+	e.Type = "tombstone"
+	e.Text = ""
+	e.Signature = ""
+	e.SignedPayload = ""
+	e.Curated = false
+	e.Format = ""
+}
+
 func limitValue(n int) int {
 	if n <= 0 {
-		return 50
+		return PageDefault
 	}
-	if n > 200 {
-		return 200
+	if n > PageMax {
+		return PageMax
 	}
 	return n
 }
@@ -217,7 +294,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	if c.To != "" {
 		if !fingerprintRE.MatchString(c.To) {
-			return Result{}, problem(400, "invalid_recipient", "Recipient must be an identity fingerprint.")
+			return Result{}, problem(400, "invalid_recipient", "to must be an agent fingerprint: 64 lowercase hex characters.")
 		}
 		// Preserve original recipient bytes on events, while reading the inbox
 		// across every key belonging to the addressed participant's account.
@@ -253,7 +330,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		args = append(args, c.MessageID)
 		e, err := scanEvent(tx.QueryRowContext(ctx, "SELECT "+eventColumns+" FROM events e JOIN rooms r ON r.name=e.room WHERE "+strings.Join(where, " AND "), args...))
 		if errors.Is(err, sql.ErrNoRows) {
-			return Result{}, problem(404, "not_found", "Event not found.")
+			return Result{}, problem(404, "not_found", "Message not found.")
 		}
 		if err != nil {
 			return Result{}, err
@@ -388,25 +465,27 @@ func (s *Store) export(ctx context.Context, tx *sql.Tx, c Command, now int64) (R
 	for rows.Next() {
 		var e Message
 		var change int64
-		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &change); err != nil {
+		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &change); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
 		e.Sequence = change
 		e.Type = "message"
 		e.ArchiveEligible = true
+		// An archive row records what a message was, not what happened to it later:
+		// superseded_by is derived when read, so the export carries only the
+		// immutable supersedes pointer and a consumer rebuilds chains from it.
+		e.SupersededBy = ""
 		// A previously queued tombstone may now join a restored but still-young
 		// event. Preserve the removal at this revision; the pending original and
 		// restoration changes will publish its body once the age gate is satisfied.
 		if !e.Hidden && e.CreatedAt > eligibleBefore {
 			e.Hidden = true
 			e.Reason = "archive_age_pending"
+			e.HiddenBy = ""
 		}
 		if e.Hidden {
-			e.Type = "tombstone"
-			e.Text = ""
-			e.Signature = ""
-			e.SignedPayload = ""
+			redact(&e)
 		}
 		events = append(events, e)
 		seq = change
@@ -449,25 +528,28 @@ func (s *Store) Moderate(ctx context.Context, eventID, reason string, hide bool)
 		return err
 	}
 	defer tx.Rollback()
-	var visibility string
-	if err = tx.QueryRowContext(ctx, "SELECT r.visibility FROM events e JOIN rooms r ON r.name=e.room WHERE e.id=?", eventID).Scan(&visibility); errors.Is(err, sql.ErrNoRows) {
-		return problem(404, "not_found", "Event not found.")
+	var room, visibility string
+	if err = tx.QueryRowContext(ctx, "SELECT e.room,r.visibility FROM events e JOIN rooms r ON r.name=e.room WHERE e.id=?", eventID).Scan(&room, &visibility); errors.Is(err, sql.ErrNoRows) {
+		return problem(404, "not_found", "Message not found.")
 	} else if err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "UPDATE events SET hidden=?,reason=? WHERE id=?", hide, reason, eventID); err != nil {
+	now := s.now().Unix()
+	// The operator's hide overrides a room's and only the operator reverses it.
+	if err = setHidden(ctx, tx, eventID, visibility, hide, reason, hiddenByOperator, now); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE reports SET resolved=1 WHERE event_id=?", eventID); err != nil {
 		return err
 	}
-	now := s.now().Unix()
-	if visibility == "public" {
-		if _, err = tx.ExecContext(ctx, "INSERT INTO changes(event_id,changed_at,urgent) VALUES(?,?,1)", eventID, now); err != nil {
-			return err
-		}
+	if err = audit(ctx, tx, "moderate", operatorActor, eventID, reason, now); err != nil {
+		return err
 	}
-	if err = audit(ctx, tx, "moderate", "operator", eventID, reason, now); err != nil {
+	action := "restore"
+	if hide {
+		action = "hide"
+	}
+	if err = writeLog(ctx, tx, logEntry{room: room, action: action, actor: operatorActor, target: eventID, reason: reason}, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -480,7 +562,7 @@ func (s *Store) report(ctx context.Context, tx *sql.Tx, c Command, a actor, now 
 	var room string
 	err := tx.QueryRowContext(ctx, "SELECT room FROM events WHERE id=?", c.MessageID).Scan(&room)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Result{}, problem(404, "not_found", "Event not found.")
+		return Result{}, problem(404, "not_found", "Message not found.")
 	}
 	if err != nil {
 		return Result{}, err

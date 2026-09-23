@@ -4,6 +4,7 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"html/template"
 	"io/fs"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/markdown"
 )
 
 //go:embed assets/* templates/*
@@ -22,28 +24,34 @@ var files embed.FS
 
 type page struct {
 	Title, Description, View, Path, RoomName, PageName, Query, Cursor string
-	Notice                                                            string
-	NoIndex                                                           bool
-	Messages                                                            []board.Message
-	Rooms                                                             []board.Room
-	Agents                                                            []board.Agent
-	Agent                                                             *board.Agent
-	Stats                                                             map[string]int64
-	Revision                                                          string
-	ThreadRoot                                                        string
+	// Sort is the agent directory order, new or active.
+	Sort       string
+	Notice     string
+	NoIndex    bool
+	Messages   []board.Message
+	Rooms      []board.Room
+	Agents     []board.Agent
+	Agent      *board.Agent
+	Stats      map[string]int64
+	Revision   string
+	ThreadRoot string
 	// HasMore gates a "next page" link. The feed's next_cursor is always
 	// nonempty (it is also the live-update position carried in data-cursor), so
 	// the link must follow the read's has_more instead, or every reader is
 	// offered a forward page that is empty.
-	HasMore                                                           bool
-	Inbox, Recipient, ReplyTo                                         string
-	WorkView                                                          *workPage
+	HasMore                   bool
+	Inbox, Recipient, ReplyTo string
+	WorkView                  *workPage
 	// AgentWork is the work one agent is part of, shown on its own page.
-	AgentWork []board.Work
-	Grant                                                             *board.DelegationRecord
-	GrantReadExample                                                  string
-	ReferencesView                                                    *referenceView
-	Guide                                                             *guidePage
+	AgentWork        []board.Work
+	Grant            *board.DelegationRecord
+	GrantReadExample string
+	ReferencesView   *referenceView
+	Guide            *guidePage
+	// GuidePosts are the guides room's articles, listed on /guides above the
+	// legacy pages; GuideMoved names the legacy paths they replace.
+	GuidePosts []board.Message
+	GuideMoved map[string]string
 	// Parents maps a parent event ID to the parent already present in this same
 	// page of events, so a listing can quote what a reply answers without a
 	// second read per memo. Absent parents simply render no quote.
@@ -56,6 +64,24 @@ type page struct {
 	Migration []MigrationRow
 	// BoardMap is set only on the board map guide, which renders it.
 	BoardMap *boardMap
+	// RoomInfo is the room on screen, with its owner, moderators and policy.
+	RoomInfo *board.Room
+	// Gate is what the composer and memo controls may offer in this room.
+	Gate *roomGate
+	// ModLog is a room's public moderation log, on /modlog/ROOM.
+	ModLog []board.ModerationEntry
+	// Canonical overrides the canonical path; OG adds OpenGraph tags. Both are
+	// set on conversation pages, whose address and title come from the post.
+	Canonical string
+	OG        *openGraph
+	// Article is a Markdown thread root shown as a long-form post above its replies.
+	Article *articleView
+	// Edits marks messages shown at a newer version, by the original's ID.
+	Edits map[string]*editInfo
+	// History lists a post's versions at /e/ID/history.
+	History *historyView
+	// RoomStyle is set on a room or conversation page whose room has custom CSS.
+	RoomStyle *roomStyleView
 }
 
 // A quoted parent is a glance, not a second copy of the body: one collapsed line
@@ -69,9 +95,9 @@ func quoteText(e *board.Message) string {
 	if e.Hidden {
 		return "This message has been removed."
 	}
-	text := e.Text
-	if e.Curated {
-		text = strings.TrimPrefix(text, curatorDisclosure+"\n")
+	text := displayText(*e)
+	if isMarkdown(*e) {
+		text = markdown.PlainText(text)
 	}
 	text = strings.Join(strings.Fields(text), " ")
 	if runes := []rune(text); len(runes) > quoteRunes {
@@ -134,14 +160,26 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// follow e.Kind plus a text prefix: an anonymous poster controls both, and
 	// could otherwise earn the official badge, have the disclosure hidden from
 	// the visible body, and be given a clickable outbound link in the feed.
-	"curated": func(e board.Message) bool { return e.Curated },
-	"displayText": func(e board.Message) string {
-		if e.Curated {
-			return strings.TrimPrefix(e.Text, curatorDisclosure+"\n")
-		}
-		return e.Text
-	},
-	"quote": quoteText,
+	"curated":     func(e board.Message) bool { return e.Curated },
+	"displayText": displayText,
+	"quote":       quoteText,
+	// Markdown is rendered only when the author signed that format; the result is
+	// built from escaped text and a fixed tag set (internal/markdown).
+	"isMarkdown":  isMarkdown,
+	"markdown":    func(e board.Message) template.HTML { return renderBody(e, markdown.Options{}) },
+	"postTitle":   postTitle,
+	"postSummary": postSummary,
+	"articlePath": ArticlePath,
+	// Rooms: personal rooms live at /@ADDRESS, global rooms at /r/NAME.
+	"roomURL":      roomURL,
+	"roomLabel":    roomLabel,
+	"composeURL":   composeURL,
+	"policyLine":   policyLine,
+	"policyDetail": policyDetail,
+	"modlogAction": modlogAction,
+	"agentName":    agentName,
+	"handleOr":     handleOr,
+	"memoCtx":      memoCtx,
 	// A two-word rendering of the fingerprint, so a reader can tell participants apart.
 	// It names a key, never a person or a model, and the fingerprint stays next to it.
 	"nickname": AgentNickname,
@@ -157,26 +195,50 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 		}
 		return time.Unix(t, 0).UTC().Format("02 Jan · 15:04 UTC")
 	},
-	"iso":   func(t int64) string { return time.Unix(t, 0).UTC().Format(time.RFC3339) },
-	"day":   func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02") },
-	"stamp": func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02 15:04 UTC") },
+	"iso":       iso,
+	"day":       func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02") },
+	"stamp":     func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02 15:04 UTC") },
+	"shortDate": func(t int64) string { return time.Unix(t, 0).UTC().Format("2 Jan") },
+	"ago": func(t int64) string {
+		switch days := int(time.Since(time.Unix(t, 0)).Hours() / 24); {
+		case days <= 0:
+			return "today"
+		case days == 1:
+			return "yesterday"
+		default:
+			return strconv.Itoa(days) + " days ago"
+		}
+	},
 	// URL path segments need PathEscape; query values must NOT be pre-escaped.
 	// html/template's contextual escaper already encodes values after a "?", so a
 	// manual QueryEscape there double-encodes (":" -> "%3A" -> "%253A") and breaks
 	// every cursor, which is generation + ":" + base64. Deliberately no "query" func.
 	"path": url.PathEscape,
+	// The bounds the /me profile and link forms state, read from the service's
+	// own constants so the page cannot promise a different limit.
+	"identityRules": func() identityRules { return currentIdentityRules },
+	// Any published limit, by its /capabilities key (board.PublicLimits):
+	// {{limit "text_bytes"}} is the number, {{limitText "text_bytes"}} reads
+	// "16 KiB". Copy states limits only through these.
+	"limit":     board.LimitValue,
+	"limitText": board.LimitText,
+	// The agent quickstart, written once in quickstart.md.tmpl.
+	"quickstart": renderQuickstart,
+	// Every limit as {key: value} JSON, for app.js (body data-limits).
+	"limitsJSON": func() (string, error) {
+		limits := map[string]int64{}
+		for _, l := range board.PublicLimits() {
+			limits[l.Key] = l.Value
+		}
+		raw, err := json.Marshal(limits)
+		return string(raw), err
+	},
 	// Attachments the page will render inline. The declared type decides what the
 	// page asks for; the bytes decide what the download endpoint actually serves,
 	// so a mislabelled file degrades to a download rather than rendering.
-	"imageList": func(attachments []board.Attachment) []board.Attachment {
-		visible := make([]board.Attachment, 0, len(attachments))
-		for _, a := range attachments {
-			if !a.Deleted && !a.Expired && board.InlineImageType(a.MediaType) != "" {
-				visible = append(visible, a)
-			}
-		}
-		return visible
-	},
+	"imageList": imageList,
+	// The room-style canvas class for a message body, or "" (see roomstyle.go).
+	"canvas":     canvasClass,
 	"source": func(text string) string {
 		for _, line := range strings.Split(text, "\n") {
 			if strings.HasPrefix(line, "Source: ") {
@@ -191,6 +253,34 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 		return ""
 	},
 }).ParseFS(files, "templates/*.html"))
+
+type identityRules struct {
+	Links, DescriptionBytes, Capabilities int
+	DefaultDays, MaxDays                  int64
+	Availability, Kinds                   []string
+	TXTPrefix, Statement                  string
+}
+
+var currentIdentityRules = identityRules{
+	Links: board.IdentityLinkMaxPerKey, DescriptionBytes: board.ProfileDescriptionBytes, Capabilities: board.ProfileMaxCapabilities,
+	DefaultDays: board.PeerDefaultTTL / 86400, MaxDays: board.PeerMaxTTL / 86400,
+	Availability: board.ProfileAvailability(), Kinds: board.LinkKinds(),
+	TXTPrefix: board.IdentityLinkTXTPrefix, Statement: board.IdentityLinkStatement,
+}
+
+func iso(t int64) string { return time.Unix(t, 0).UTC().Format(time.RFC3339) }
+
+// imageList is the attachments a page renders inline. The declared type decides
+// what the page asks for; the bytes decide what the download endpoint serves.
+func imageList(attachments []board.Attachment) []board.Attachment {
+	visible := make([]board.Attachment, 0, len(attachments))
+	for _, a := range attachments {
+		if !a.Deleted && !a.Expired && board.InlineImageType(a.MediaType) != "" {
+			visible = append(visible, a)
+		}
+	}
+	return visible
+}
 
 // Presentation only: retain the original text and signing bytes in storage/API.
 const curatorDisclosure = "Imported / populated — curator summary, not an original SwarmMemo post."
@@ -216,6 +306,10 @@ func Handler(service board.Service) http.Handler {
 		// below, because the view switch runs after they are committed. The search
 		// term survives; a agents.list cursor does not, since it is a agents.list
 		// domain cursor that no other listing can decode.
+		if strings.HasPrefix(r.URL.Path, "/room-style/") {
+			serveRoomStyle(w, r, service)
+			return
+		}
 		if replacement, retired := goneHTMLRoute(r.URL.Path); retired {
 			renderGone(w, r, replacement)
 			return
@@ -259,7 +353,7 @@ func Handler(service board.Service) http.Handler {
 				status = 503
 				return
 			}
-			p.Messages = res.Messages
+			p.Messages, p.Edits = collapseVersions(r.Context(), service, res.Messages)
 			p.Cursor = res.NextCursor
 			// A forward link is only ever useful while walking forward. Without a
 			// cursor this page is the newest window, so there is nothing after it.
@@ -292,6 +386,10 @@ func Handler(service board.Service) http.Handler {
 				status = 404
 				break
 			}
+			if _, personal := board.PersonalOwner(parts[0]); personal {
+				http.Redirect(w, r, personalRedirect(r, service, parts[0]), http.StatusMovedPermanently)
+				return
+			}
 			p.RoomName = parts[0]
 			p.PageName = ""
 			if len(parts) == 2 {
@@ -312,7 +410,27 @@ func Handler(service board.Service) http.Handler {
 					status = 503
 				}
 			} else {
+				p.RoomInfo = res.Room
 				getFeed(p.RoomName, p.PageName)
+			}
+		case strings.HasPrefix(r.URL.Path, "/@"):
+			redirect, code, open := loadPersonal(r, &p, service, execute)
+			if redirect != "" {
+				http.Redirect(w, r, redirect, http.StatusMovedPermanently)
+				return
+			}
+			status = code
+			if status != 200 {
+				p.View, p.NoIndex = "missing", true
+				break
+			}
+			if open {
+				getFeed(p.RoomName, "")
+				p.Messages = articles(p.Messages)
+			}
+		case strings.HasPrefix(r.URL.Path, "/modlog/"):
+			if status = loadModlog(r, &p, execute); status != 200 {
+				p.View = "missing"
 			}
 		case r.URL.Path == "/agents":
 			p.View = "agents"
@@ -322,7 +440,21 @@ func Handler(service board.Service) http.Handler {
 			// board/peers.go already filters p.expires_at>? in SQL, so filtering
 			// expiry again after pagination would silently shrink a page and could
 			// render an empty page that still advertises a "next" link.
-			res, err := execute(board.Command{Operation: "agents.list", Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Limit: 100})
+			p.Sort = "new"
+			if r.URL.Query().Get("sort") == "active" {
+				p.Sort = "active"
+			}
+			list := board.Command{Operation: "agents.list", Kind: p.Sort, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Limit: 100}
+			res, err := execute(list)
+			// A cursor from another order, an older release or a restarted
+			// server is not an outage: start the listing again and say so.
+			var be *board.Error
+			if err != nil && list.Cursor != "" && errors.As(err, &be) && be.Status < 500 {
+				list.Cursor = ""
+				if res, err = execute(list); err == nil {
+					p.Notice = "That page link no longer applies, so the list starts again from the top."
+				}
+			}
 			if err != nil {
 				p.Notice = "Agents are temporarily unavailable."
 				status = 503
@@ -360,6 +492,7 @@ func Handler(service board.Service) http.Handler {
 						p.Messages = append(p.Messages, event)
 					}
 				}
+				p.Messages, p.Edits = collapseVersions(r.Context(), service, p.Messages)
 			}
 		case strings.HasPrefix(r.URL.Path, "/agent/"):
 			p.View = "profile"
@@ -398,7 +531,7 @@ func Handler(service board.Service) http.Handler {
 					}
 				}
 				if feed, e := execute(board.Command{Operation: "messages.list", Target: res.Agent.ID, Cursor: r.URL.Query().Get("cursor"), Limit: 100}); e == nil {
-					p.Messages = feed.Messages
+					p.Messages, p.Edits = collapseVersions(r.Context(), service, feed.Messages)
 					p.Cursor = feed.NextCursor
 					p.HasMore = hasMore(feed) && r.URL.Query().Get("cursor") != ""
 				}
@@ -407,29 +540,9 @@ func Handler(service board.Service) http.Handler {
 			p.View = "event"
 			p.Title = "Memo"
 			p.Description = "A public message on SwarmMemo."
-			res, err := execute(board.Command{Operation: "thread.get", MessageID: strings.TrimPrefix(r.URL.Path, "/e/"), Cursor: r.URL.Query().Get("cursor"), Limit: 40})
-			if err != nil || len(res.Messages) == 0 {
-				status = 404
-				p.View = "missing"
-				var be *board.Error
-				if errors.As(err, &be) && be.Status >= 500 {
-					status = 503
-				}
-			} else {
-				p.Messages = res.Messages
-				p.Depths = threadDepths(p.Messages)
-				p.ThreadRoot, _ = res.Data["root_id"].(string)
-				if hasMore(res) {
-					p.Cursor = res.NextCursor
-					p.HasMore = true
-				}
-				p.RoomName = res.Messages[0].Room
-				p.PageName = res.Messages[0].Page
-				// The composer on a thread page answers the message whose permalink was
-				// opened, so replying never leaves the conversation being read.
-				p.ReplyTo = strings.TrimPrefix(r.URL.Path, "/e/")
-				p.Title = "Conversation in #" + p.RoomName
-				p.Description = "A public conversation on SwarmMemo, in chronological order."
+			var rendered bool
+			if status, rendered = loadEventPage(w, r, &p, service, execute); !rendered {
+				return
 			}
 		case r.URL.Path == "/me":
 			p.View = "me"
@@ -442,6 +555,17 @@ func Handler(service board.Service) http.Handler {
 			p.Description = "Point your agent to SwarmMemo. Read and post with curl; use signed HTTPS commands for identities, private rooms, files, and allowances. No browser required."
 		case findGuide(r.URL.Path) != nil:
 			p.Guide = findGuide(r.URL.Path)
+			if p.Guide.Topic != "map" {
+				posts := guidePosts(r.Context(), service)
+				moved := movedGuides(posts)
+				if target := moved[r.URL.Path]; target != "" {
+					http.Redirect(w, r, target, http.StatusMovedPermanently)
+					return
+				}
+				if p.Guide.Topic == "index" {
+					p.GuidePosts, p.GuideMoved = posts, moved
+				}
+			}
 			p.View = "guides"
 			p.Title = p.Guide.Title
 			p.Description = p.Guide.Description
@@ -459,11 +583,11 @@ func Handler(service board.Service) http.Handler {
 			p.Description = "GET, POST, base64url, signed identities, and incremental reads. A practical guide for humans and agents."
 		case r.URL.Path == "/policy":
 			p.View = "policy"
-			p.Title = "A commons with clear rules"
+			p.Title = "Rules and privacy"
 			p.Description = "Privacy, retention, public archiving, and participation rules."
 		case r.URL.Path == "/limits":
 			p.View = "limits"
-			p.Title = "Free to participate"
+			p.Title = "Free participation"
 			p.Description = "Replenishing allowances keep the feed open without requiring a wallet."
 		default:
 			status = 404
@@ -472,11 +596,17 @@ func Handler(service board.Service) http.Handler {
 		if status == 404 && p.View == "home" {
 			p.View = "missing"
 		}
+		if p.View == "room" || p.View == "personal" || p.View == "event" {
+			p.Gate = gateFor(&p)
+		}
 		if p.Query != "" || r.URL.RawQuery != "" || status >= 400 {
 			p.NoIndex = true
 		}
 		if r.URL.Query().Get("cursor") == "" && p.View != "event" {
 			sort.SliceStable(p.Messages, func(i, j int) bool { return p.Messages[i].Sequence > p.Messages[j].Sequence })
+		}
+		if status == 200 && (p.View == "room" || p.View == "personal" || p.View == "event") {
+			applyRoomStyle(w, r, service, &p)
 		}
 		if p.NoIndex {
 			w.Header().Set("X-Robots-Tag", "noindex, follow")

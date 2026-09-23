@@ -263,6 +263,24 @@ class InboxTests(unittest.TestCase):
             self.assertNotEqual(result["phase"], "ready")
             self.assertEqual(result["messages"], {})
 
+    def test_message_pages_accept_only_has_more_data(self):
+        for data, accepted in (({"has_more": False}, True), ({"has_more": "no"}, False), ({"has_more": False, "extra": 1}, False), ([], False)):
+            fresh = module.Inbox(Path(self.temp.name) / ("data" + str(len(self.feed.calls)) + ".sqlite"), binding()); fresh.create()
+            def fetch(path, deadline):
+                status, result = self.feed.fetch(path, deadline)
+                if path.startswith("/api/messages"): result["data"] = data
+                return status, result
+            with self.subTest(data=data), patch.object(fresh, "_fetch", side_effect=fetch):
+                fresh.poll()
+                self.assertEqual(fresh.poll()["phase"] == "ready", accepted)
+
+    def test_service_derived_removal_and_curator_fields(self):
+        for remover in ("operator", "room"):
+            module.validate_event(tombstone(event(hidden_by=remover)), binding())
+        module.validate_event(event(curated=True), binding())
+        for record in (tombstone(event(hidden_by="author")), event(hidden_by="operator"), event(curated=False), tombstone(event(curated=True))):
+            with self.subTest(record=record), self.assertRaises(module.InboxError): module.validate_event(record, binding())
+
     def test_capacity_does_not_advance_event_cursor_but_applies_removal(self):
         self.poll(); old_cursor = self.checkpoints()["cursor"]
         original = self.feed.records[0]

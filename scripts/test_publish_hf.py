@@ -166,11 +166,48 @@ class PublisherTests(unittest.TestCase):
         bad = deepcopy(record); bad["author"] = "another-author"
         with self.assertRaises(ValueError): publisher.validate(bad, 999999)
 
+    def test_signed_post_data_is_additive_and_must_match(self):
+        private, _, _ = client.crypto()
+        key = private.from_private_bytes(bytes(range(32)))
+        author = hashlib.sha256(client.public_bytes(key)).hexdigest()
+        def signed(data, **fields):
+            command = client.sign({"operation": "post", "text": "# Title\n\nBody", "data": data, "timestamp": 172800, "nonce": "n-" + data[-8:]}, key)
+            return event(text=command["text"], author=author, public_key=command["public_key"], signature=command["signature"],
+                         signed_payload=client.canonical(command).decode(), **fields)
+        original = "a" * 32
+        publisher.validate(signed('{"schema":1,"format":"markdown"}', format="markdown"), 999999)
+        publisher.validate(signed('{"schema":1,"format":"markdown","supersedes":"%s"}' % original, format="markdown", supersedes=original), 999999)
+        # The exported fields must be exactly what the author signed.
+        for data, fields in (('{"schema":1,"format":"markdown"}', {}),
+                             ('{"schema":1,"format":"markdown"}', {"format": "markdown", "supersedes": original}),
+                             ('{"schema":1,"supersedes":"%s"}' % original, {"supersedes": "b" * 32}),
+                             ('{"schema":1,"format":"html"}', {"format": "html"}),
+                             ('{"schema":1,"format":"markdown","format":"markdown"}', {"format": "markdown"}),
+                             ('{"schema":1,"format":"markdown","theme":"x"}', {"format": "markdown"})):
+            with self.subTest(data=data, fields=fields), self.assertRaises(ValueError):
+                publisher.validate(signed(data, **fields), 999999)
+        # Only a signature can carry post data; a derived pointer is never exported.
+        for change in ({"format": "markdown"}, {"supersedes": original}, {"superseded_by": original}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                publisher.validate(event(**change), 999999)
+        # A tombstone keeps its place in a version chain but nothing about its body.
+        tombstone = event(type="tombstone", hidden=True, text="", supersedes=original)
+        publisher.validate(tombstone, 999999)
+        with self.assertRaises(ValueError): publisher.validate(dict(tombstone, format="markdown"), 999999)
+
     def test_refuses_private_unknown_and_removed_payload(self):
         for change in ({"visibility": "private"}, {"archive_eligible": False}, {"ip": "192.0.2.1"},
                        {"hidden": True}, {"sha256": "invalid"}, {"type": "tombstone"}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 publisher.validate(event(**change), 999999)
+
+    def test_hidden_by_names_the_remover_only_on_tombstones(self):
+        for remover in ("operator", "room"):
+            publisher.validate(event(type="tombstone", hidden=True, text="", reason="removed", hidden_by=remover), 999999)
+        for record in (event(type="tombstone", hidden=True, text="", hidden_by="author"),
+                       event(type="tombstone", hidden=True, text="", hidden_by=""),
+                       event(hidden_by="operator")):
+            with self.subTest(record=record), self.assertRaises(ValueError): publisher.validate(record, 999999)
 
     def test_paginated_fetch_and_bounds(self):
         rows = [event(i, id="event-" + str(i)) for i in range(1, 7)]

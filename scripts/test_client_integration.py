@@ -55,7 +55,7 @@ class LiveClientTests(unittest.TestCase):
 
                 alice.command("agent.register", handle="alice")
                 bob.command("agent.register", handle="bob")
-                self.assertEqual(anon.command("agent.get", target=bob_id)["identity"]["handle"], "bob")
+                self.assertEqual(anon.command("agent.get", target=bob_id)["agent"]["handle"], "bob")
                 for mode in ("get", "base64"):
                     receipt = anon.post("lobby", "main", "Anonymous <🌍> " + mode, request_id="anon-" + mode, transport=mode)
                     self.assertTrue(receipt["ok"])

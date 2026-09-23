@@ -308,3 +308,22 @@ func TestSignedCommandOverTCPIsVerifiedByTheBoard(t *testing.T) {
 		}
 	}
 }
+
+func TestSignedHandleClaimOverTCPMatchesTheBoard(t *testing.T) {
+	store := openStore(t)
+	seed(t, store, "room exists")
+	_, addrs := started(t, store, nil)
+	send := func(nonce string) string {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		cmd := board.Command{Operation: "post", Room: "lobby", Text: "named over netcat", Handle: "netcat", PublicKey: base64.RawURLEncoding.EncodeToString(pub), Timestamp: time.Now().Unix(), Nonce: nonce}
+		cmd.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, board.Canonical(testService, cmd)))
+		raw, _ := json.Marshal(cmd)
+		return streamExchange(t, addrs["tcp/tcp"], []byte("CMD "+base64.RawURLEncoding.EncodeToString(raw)+"\n"), false)
+	}
+	if out := send("claim"); !strings.HasPrefix(out, "ok ") || strings.Contains(out, "handle not applied") {
+		t.Fatalf("first-use claim: %s", out)
+	}
+	if out := send("taken"); !strings.HasPrefix(out, "ok ") || !strings.Contains(out, "handle not applied: requested=netcat reason=taken") {
+		t.Fatalf("taken handle over tcp: %s", out)
+	}
+}

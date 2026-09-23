@@ -40,10 +40,12 @@ MAX_RECEIPT = 131072
 DEFAULT_BYTES = 64 * 1024 * 1024
 MAX_ROWS = 10000
 TARGETED_MUTATIONS = frozenset({"post", "work.claim", "work.renew", "work.submit"})
+# Every entry is a code the service returns (held there by a Go test in internal/board).
 SAFE_CODES = {"stale_signature", "idempotency_conflict", "key_rotated", "invalid_signature",
-              "quota_exceeded", "rate_limited", "room_not_found", "forbidden", "not_found",
-              "invalid_command", "unexpected_field", "field_limit", "envelope_too_large",
-              "attachment_gone", "insufficient_credits", "lease_busy", "quota_exhausted", "global_quota_exhausted"}
+              "request_rate", "not_found", "unexpected_field", "field_limit", "envelope_too_large",
+              "attachment_gone", "lease_busy", "quota_exhausted", "global_quota_exhausted",
+              "text_too_large", "invalid_text", "invalid_reply", "invalid_recipient", "reserved_kind",
+              "invalid_post_data"}
 SAFE_CODES.update({"work_generation_mismatch", "work_state_conflict", "work_fence_mismatch",
                    "work_forbidden", "work_exists", "work_renew_not_extended", "work_fence_exhausted",
                    "invalid_work_data", "invalid_work_root", "invalid_work_result", "invalid_ttl", "invalid_reason"})

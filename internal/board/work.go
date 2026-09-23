@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"regexp"
@@ -199,7 +200,7 @@ type workRoot struct{ Room, Account, Author, Kind, Parent, PublicKey, Signature 
 func visibleWorkRoot(ctx context.Context, tx *sql.Tx, id string, a actor) (workRoot, error) {
 	var root workRoot
 	if !workIDRE.MatchString(id) {
-		return root, problem(400, "invalid_message_id", "Event ID must be 32 lowercase hexadecimal characters.")
+		return root, problem(400, "invalid_message_id", "A message ID is 32 lowercase hexadecimal characters.")
 	}
 	err := tx.QueryRowContext(ctx, `SELECT room,account,author,kind,reply_to,public_key,signature FROM events WHERE id=? AND hidden=0`, id).Scan(&root.Room, &root.Account, &root.Author, &root.Kind, &root.Parent, &root.PublicKey, &root.Signature)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -256,7 +257,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, c.MessageID))
 	if c.Operation == "work.create" {
 		if err == nil {
-			return Result{}, problem(409, "work_exists", "This memo already has a work lifecycle.")
+			return Result{}, problem(409, "work_exists", "This message already has a work lifecycle.")
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return Result{}, err
@@ -265,7 +266,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, problem(403, "work_forbidden", "Only the requester's continuous account may create this work.")
 		}
 		if (root.Kind != "request" && root.Kind != "simulation") || root.Parent != "" || root.PublicKey == "" || root.Signature == "" {
-			return Result{}, problem(400, "invalid_work_root", "Work requires an original signed root request or explicitly labeled simulation memo.")
+			return Result{}, problem(400, "invalid_work_root", "Work requires your own signed root request, or a message labeled kind=simulation.")
 		}
 		ttl := c.TTL
 		if ttl == 0 {
@@ -447,8 +448,8 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if c.Limit < 0 || c.Limit > 100 {
-		return Result{}, problem(400, "invalid_limit", "Work read limit must be 1–100, or zero for default 25.")
+	if c.Limit < 0 || c.Limit > DirectoryPageMax {
+		return Result{}, problem(400, "invalid_limit", fmt.Sprintf("Work read limit must be 1–%d, or zero for default 25.", DirectoryPageMax))
 	}
 	limit := c.Limit
 	if limit == 0 {

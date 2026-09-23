@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,12 +15,12 @@ import (
 
 func lookupAccount(ctx context.Context, tx *sql.Tx, id string) (string, error) {
 	if !fingerprintRE.MatchString(id) {
-		return "", problem(400, "invalid_agent", "Use the 64-character lowercase hex identity fingerprint.")
+		return "", problem(400, "invalid_agent", "An agent is a 64-character lowercase hex fingerprint.")
 	}
 	var account string
 	err := tx.QueryRowContext(ctx, "SELECT account FROM identities WHERE id=?", id).Scan(&account)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", problem(404, "agent_not_found", "The target identity must register first.")
+		return "", problem(404, "agent_not_found", "That agent is not registered; it registers by signing any write, such as a post.")
 	}
 	return account, err
 }
@@ -30,7 +31,7 @@ func (s *Store) changeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	}
 	if c.Operation == "agent.register" {
 		if c.Handle != "" && !handleRE.MatchString(c.Handle) {
-			return Result{}, problem(400, "invalid_handle", "Handles use 1–32 ASCII letters, numbers, underscores or hyphens.")
+			return Result{}, problem(400, "invalid_handle", fmt.Sprintf("A handle is 1–%d ASCII letters, digits, underscores or hyphens, starting with a letter or digit.", HandleMaxChars))
 		}
 		handle := strings.ToLower(c.Handle)
 		var taken int
@@ -39,7 +40,7 @@ func (s *Store) changeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor,
 				return Result{}, err
 			}
 			if taken > 0 {
-				return Result{}, problem(409, "handle_taken", "That handle belongs to another identity.")
+				return Result{}, problem(409, "handle_taken", "That handle belongs to another agent.")
 			}
 		}
 		if err := s.charge(ctx, tx, a, 512, now); err != nil {
@@ -67,7 +68,7 @@ func (s *Store) changeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		return Result{}, err
 	}
 	if exists > 0 {
-		return Result{}, problem(409, "agent_exists", "Rotate into a fresh key; existing identities cannot merge quota accounts.")
+		return Result{}, problem(409, "agent_exists", "Rotate into a fresh key: two existing agents cannot be merged.")
 	}
 	if err = s.charge(ctx, tx, a, 512, now); err != nil {
 		return Result{}, err
@@ -95,8 +96,8 @@ func (s *Store) changeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor,
 func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if c.Limit < 0 || c.Limit > 100 {
-		return Result{}, problem(400, "invalid_limit", "Agent list limit must be 1–100, or zero for the default.")
+	if c.Limit < 0 || c.Limit > DirectoryPageMax {
+		return Result{}, problem(400, "invalid_limit", fmt.Sprintf("Agent list limit must be 1–%d, or zero for the default.", DirectoryPageMax))
 	}
 	if !utf8.ValidString(c.Query) || strings.ContainsRune(c.Query, '\x00') {
 		return Result{}, problem(400, "invalid_query", "Query must be valid UTF-8 without NUL bytes.")
@@ -106,10 +107,19 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	// keys (including keys that only remove an absent profile) never enter discovery.
 	public := `(EXISTS(SELECT 1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0) OR EXISTS(SELECT 1 FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish')))`
 	where := public
-	// The first argument belongs to the profile join, which precedes WHERE in the
-	// statement; every later argument is appended in statement order.
-	args := []any{now}
-	cursor := conversationCursor{Version: 1, Domain: "agents.list", Scope: c.Query}
+	args := []any{}
+	// The directory lists newest first by default, or most recently active. The
+	// order is part of the cursor's scope, so a cursor from one order (or from
+	// the old by-fingerprint order) is refused as invalid_cursor, never misread.
+	sortKey := "created"
+	switch c.Kind {
+	case "", "new":
+	case "active":
+		sortKey = "seen"
+	default:
+		return Result{}, problem(400, "invalid_query", "Agent sort must be new or active.")
+	}
+	cursor := conversationCursor{Version: 1, Domain: "agents.list", Scope: sortKey + "\n" + c.Query}
 	limit := limitValue(c.Limit)
 	if c.Operation == "agent.get" {
 		target := c.Target
@@ -120,17 +130,16 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		args = append(args, a.account, target, strings.ToLower(target))
 	} else {
 		var err error
-		if cursor, err = s.decodeConversationCursor(c.Cursor, "agents.list", c.Query); err != nil {
+		if cursor, err = s.decodeConversationCursor(c.Cursor, "agents.list", cursor.Scope); err != nil {
 			return Result{}, err
 		}
-		if cursor.Page != "" && !fingerprintRE.MatchString(cursor.Page) {
+		if cursor.Page != "" && (!fingerprintRE.MatchString(cursor.Page) || cursor.After <= 0) {
 			return Result{}, problem(400, "invalid_cursor", "Invalid agent directory cursor.")
 		}
 		// One row per participant. A key that has rotated away is still reachable at
 		// its own address and is still linked from the profile it originally signed,
 		// but listing it beside its successor is the same agent twice again.
-		where += " AND i.successor='' AND i.id>?"
-		args = append(args, cursor.Page)
+		where += " AND i.successor=''"
 	}
 	if c.Query != "" {
 		// One search box over one list: an agent matches on its handle or on
@@ -139,16 +148,26 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			" OR EXISTS(SELECT 1 FROM peer_capabilities pc WHERE pc.account=i.account AND pc.capability=lower(?)))"
 		args = append(args, c.Query, c.Query, c.Query)
 	}
-	args = append(args, limit+1)
 	// Public timestamps derive solely from public messages or explicit opt-ins. A
-	// private write cannot update a public agent's last_seen or post count.
+	// private write cannot update a public agent's last_seen or post count. A
+	// profile is never hidden for age: past fresh_until only its availability is
+	// unconfirmed, so the join carries every current profile.
 	query := `SELECT i.id,i.public_key,i.handle,
- coalesce((SELECT min(t) FROM (SELECT min(e.created_at) AS t FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT min(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0),
- coalesce((SELECT max(t) FROM (SELECT max(e.created_at) AS t FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT max(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0),
+ coalesce((SELECT min(t) FROM (SELECT min(e.created_at) AS t FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT min(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS created,
+ coalesce((SELECT max(t) FROM (SELECT max(e.created_at) AS t FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT max(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS seen,
  (SELECT count(*) FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0),i.successor,
  p.description,p.capabilities,p.availability,p.author,p.public_key,p.signature,p.payload,p.published_at,p.expires_at
- FROM identities i LEFT JOIN peer_cards p ON p.account=i.account AND p.expires_at>? AND i.successor=''
- WHERE ` + where + ` ORDER BY i.id LIMIT ?`
+ FROM identities i LEFT JOIN peer_cards p ON p.account=i.account AND i.successor=''
+ WHERE ` + where
+	if c.Operation == "agent.get" {
+		query += " ORDER BY i.id LIMIT ?"
+	} else {
+		// Keyset over the public timestamp, newest first, fingerprint as the
+		// tiebreak, so a page boundary is stable while agents keep arriving.
+		query = "SELECT * FROM (" + query + ") WHERE (?='' OR " + sortKey + "<? OR (" + sortKey + "=? AND id<?)) ORDER BY " + sortKey + " DESC, id DESC LIMIT ?"
+		args = append(args, cursor.Page, cursor.After, cursor.After, cursor.Page)
+	}
+	args = append(args, limit+1)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return Result{}, agentReadError(err)
@@ -170,6 +189,7 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 				Schema: 1, SelfDescribed: true, Description: description.String, Availability: availability.String,
 				Author: author.String, PublicKey: profileKey.String, Signature: signature.String, SignedPayload: payload.String,
 				PublishedAt: publishedAt.Int64, ExpiresAt: expiresAt.Int64,
+				RenewedAt: publishedAt.Int64, FreshUntil: expiresAt.Int64, Fresh: now < expiresAt.Int64,
 				CurrentAgent: AgentRef{ID: agent.ID, PublicKey: agent.PublicKey, Handle: agent.Handle},
 			}
 			if err = json.Unmarshal([]byte(capabilities.String), &profile.Capabilities); err != nil {
@@ -186,27 +206,29 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if len(agents) == 0 {
 			return Result{}, problem(404, "not_found", "Agent not found.")
 		}
-		agent := &agents[0]
-		links, err := s.readIdentityLinks(ctx, tx, agent.ID)
-		if err != nil {
+		if err = s.attachIdentityLinks(ctx, tx, agents[:1]); err != nil {
 			return Result{}, agentReadError(err)
 		}
-		if len(links) > 0 {
-			agent.Links = links
+		var account string
+		if err = tx.QueryRowContext(ctx, "SELECT account FROM identities WHERE id=?", agents[0].ID).Scan(&account); err != nil {
+			return Result{}, agentReadError(err)
 		}
-		for _, link := range links {
-			if link.Kind == "domain" && link.State == "verified" {
-				agent.DomainHandle = link.Value
-				break
-			}
-		}
-		return Result{Agent: agent}, nil
+		agents[0].PersonalRoom = PersonalRoom(account)
+		return Result{Agent: &agents[0]}, nil
 	}
 	result := Result{Agents: agents, Data: map[string]any{"has_more": len(agents) > limit}}
 	if len(agents) > limit {
 		result.Agents = agents[:limit]
-		cursor.Page = result.Agents[limit-1].ID
+		last := result.Agents[limit-1]
+		cursor.Page, cursor.After = last.ID, last.CreatedAt
+		if sortKey == "seen" {
+			cursor.After = last.LastSeen
+		}
 		result.NextCursor = s.encodeConversationCursor(cursor)
+	}
+	// The directory shows links too; one query covers the whole page.
+	if err = s.attachIdentityLinks(ctx, tx, result.Agents); err != nil {
+		return Result{}, agentReadError(err)
 	}
 	return result, nil
 }
@@ -215,10 +237,19 @@ func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err := requireSigned(a); err != nil {
 		return Result{}, err
 	}
-	if !slug.MatchString(c.Room) {
-		return Result{}, problem(400, "invalid_slug", "Room names must be lowercase ASCII slugs of 1–64 characters.")
+	if c.Operation == "room.create" && !slug.MatchString(c.Room) {
+		// "@" names belong to keys: a global room can never enter that namespace.
+		return Result{}, problem(400, "invalid_slug", "Room names must be lowercase ASCII slugs of 1–64 characters; @ names are personal rooms, opened by their owner's first post.")
+	}
+	if !ValidRoomName(c.Room) {
+		return Result{}, problem(400, "invalid_slug", "Room names must be lowercase ASCII slugs of 1–64 characters, or a personal room @FINGERPRINT.")
+	}
+	if c.Operation == "room.create" && reservedRoomNames[c.Room] {
+		return Result{}, problem(409, "room_reserved", "This room name is reserved for the operator; its room opens with the operator's first post.")
 	}
 	if c.Operation == "room.create" {
+		// Name-squatting hook (RFC0010): no creation limit today beyond the
+		// allowance charge below. Add one here, reactively, if squatting appears.
 		visibility := c.Visibility
 		if visibility == "" {
 			visibility = "public"
@@ -282,8 +313,8 @@ func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM members WHERE room=?", c.Room).Scan(&count); err != nil {
 			return Result{}, err
 		}
-		if count >= 101 {
-			return Result{}, problem(409, "member_limit", "Rooms support up to 100 invited members plus their owner.")
+		if count >= RoomMembersMax+1 {
+			return Result{}, problem(409, "member_limit", fmt.Sprintf("A private room holds up to %d invited members plus its owner.", RoomMembersMax))
 		}
 		_, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO members(room,account) VALUES(?,?)", c.Room, target)
 	} else {
@@ -323,17 +354,31 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		args = append(args, c.Query)
 	}
 	args = append(args, limitValue(c.Limit))
-	rows, err := tx.QueryContext(ctx, `SELECT r.name,r.visibility,r.owner,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0),coalesce((SELECT max(e.created_at) FROM events e WHERE e.room=r.name),r.created_at) FROM rooms r WHERE `+where+` ORDER BY r.name LIMIT ?`, args...)
+	if c.Operation == "rooms.list" {
+		// The room directory lists shared rooms. Personal rooms are reached
+		// through their owners, at /@ADDRESS and agent.get's personal_room.
+		where += " AND r.name NOT LIKE '@%'"
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT r.name,r.visibility,r.owner,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0),coalesce((SELECT max(e.created_at) FROM events e WHERE e.room=r.name),r.created_at),
+ p.write_policy,p.reply_policy,p.rules,p.updated_at FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY r.name LIMIT ?`, args...)
 	if err != nil {
 		return Result{}, err
 	}
 	rooms := []Room{}
 	for rows.Next() {
 		var r Room
-		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt); err != nil {
+		var write, reply, rules sql.NullString
+		var updated sql.NullInt64
+		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
+		policy := defaultPolicy(r.Name)
+		if write.Valid {
+			policy = RoomPolicy{Write: write.String, Reply: reply.String, Rules: rules.String, UpdatedAt: updated.Int64}
+		}
+		r.Policy = &policy
+		_, r.Personal = PersonalOwner(r.Name)
 		rooms = append(rooms, r)
 	}
 	err = rows.Err()
@@ -346,6 +391,9 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 			return Result{}, problem(404, "not_found", "Room not found.")
 		}
 		r := rooms[0]
+		if err = roomDetails(ctx, tx, &r); err != nil {
+			return Result{}, err
+		}
 		// Public memberships are administrative metadata, visible only to the owner.
 		if a.grant == nil && (r.Visibility == "private" || r.Owner == a.account) {
 			rows, err := tx.QueryContext(ctx, "SELECT i.id FROM members m JOIN identities i ON i.account=m.account WHERE m.room=? AND i.successor='' ORDER BY i.id", r.Name)
@@ -369,4 +417,15 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		return Result{Room: &r}, nil
 	}
 	return Result{Rooms: rooms}, nil
+}
+
+// reservedRoomNames are rooms the operator runs but may not have opened yet.
+// room.create would otherwise let any key claim one first and own it, with no
+// operator path to reclaim it (the guides redirect and the protocol rooms depend
+// on these being operator-owned). A plain post still opens them as operator rooms.
+var reservedRoomNames = map[string]bool{
+	"guides": true,
+	"get": true, "post": true, "put": true, "mkcol": true, "ui": true, "command": true, "c64": true, "x-text": true,
+	"dns": true, "netcat": true, "tcp": true, "gemini": true, "gopher": true, "finger": true,
+	"email": true, "nostr": true, "mcp": true,
 }

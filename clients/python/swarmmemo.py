@@ -47,6 +47,30 @@ def private_read_context(value):
     except ValueError: raise ValueError("invalid_private_read_context") from None
 
 
+def post_data(value):
+    """A post's signed data string: schema 1 with format "markdown" and/or supersedes MESSAGE_ID."""
+    data = strict_json(value) if isinstance(value, str) and len(value.encode()) <= 1024 else None
+    if (not isinstance(data, dict) or set(data) - {"schema", "format", "supersedes"}
+            or type(data.get("schema")) is not int or data["schema"] != 1 or not {"format", "supersedes"} & set(data)
+            or ("format" in data and data["format"] != "markdown")
+            or ("supersedes" in data and (not isinstance(data["supersedes"], str) or not re.fullmatch(r"[a-f0-9]{32}", data["supersedes"])))):
+        raise ValueError("invalid_post_data")
+    return {"format": data.get("format", ""), "supersedes": data.get("supersedes", "")}
+
+
+def check_post_data(event, command=None):
+    """An event's format and supersedes must be exactly what its author signed in
+    data; an unsigned event carries neither. A tombstone keeps supersedes only."""
+    for field in ("format", "supersedes"):
+        if field in event and not isinstance(event[field], str): raise ValueError("invalid_post_data")
+    if event.get("format", "markdown") != "markdown" or ("supersedes" in event and not re.fullmatch(r"[a-f0-9]{32}", event["supersedes"])):
+        raise ValueError("invalid_post_data")
+    if command is None: return
+    signed = post_data(command["data"]) if "data" in command else {"format": "", "supersedes": ""}
+    if signed != {"format": event.get("format", ""), "supersedes": event.get("supersedes", "")}:
+        raise ValueError("signed_post_data_mismatch")
+
+
 def private_read_enrollment_intent(child_public_key, *, room, generation, access_epoch, ttl=None):
     """Explicit owner intent, without key loading, signing, network or epoch discovery."""
     raw = unb64(child_public_key)
@@ -298,13 +322,15 @@ class Client:
         command["proof"] = b64(child_key.sign(canonical(command, self.service)))
         return command
 
-    def upload(self, room, path: Path, media_type="application/octet-stream", ttl=2592000, request_id=None):
+    def upload(self, room, path: Path, media_type="application/octet-stream", ttl=None, request_id=None):
         with path.open("rb") as stream:
             content = stream.read(1024 * 1024 + 1)
         if len(content) > 1024 * 1024:
             raise ValueError("attachment exceeds 1 MiB; split it into documented chunks")
+        # No ttl keeps the file; a ttl is the uploader's own removal time.
+        extra = {} if ttl is None else {"ttl": ttl}
         return self.command("blob.put", room=room, data=b64(content), filename=path.name,
-                            media_type=media_type, ttl=ttl, request_id=request_id or uuid.uuid4().hex)
+                            media_type=media_type, request_id=request_id or uuid.uuid4().hex, **extra)
 
     def download(self, message_id, path: Path):
         result = self.command("blob.get", message_id=message_id)
@@ -415,7 +441,7 @@ def main(argv=None):
     transfer.add_argument("--request-id", default=None)
     rotate = commands.add_parser("rotate"); rotate.add_argument("new_key", type=Path)
     upload = commands.add_parser("upload"); upload.add_argument("room"); upload.add_argument("path", type=Path)
-    upload.add_argument("--media-type", default="application/octet-stream"); upload.add_argument("--ttl", type=int, default=2592000)
+    upload.add_argument("--media-type", default="application/octet-stream"); upload.add_argument("--ttl", type=int, default=None, help="optional seconds until removal; omit to keep the file")
     upload.add_argument("--request-id")
     download = commands.add_parser("download"); download.add_argument("id"); download.add_argument("path", type=Path)
     delete = commands.add_parser("blob-delete"); delete.add_argument("id")

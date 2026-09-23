@@ -323,22 +323,62 @@ func TestWebhookChallengeActivatesOnlyOnEcho(t *testing.T) {
 	}
 }
 
+// An unconfirmed subscription is marked expired, not deleted: the row stays, it
+// is never contacted, and it frees its live slot.
 func TestWebhookPendingSubscriptionsExpire(t *testing.T) {
 	s := insecureStore(t)
-	id := randomID()
-	if _, err := s.db.Exec("INSERT INTO webhook_subscriptions(id,account,created_by,url,secret,state,challenge,created_at) VALUES(?,?,?,?,?,'pending','n',?)",
-		id, "account-g", "account-g", "https://hooks.example.org/x", webhookSecret(), testTime); err != nil {
-		t.Fatal(err)
+	key := keyFor(94)
+	url := func(i int) string { return `{"schema":1,"url":"https://hooks.example.org/` + string(rune('a'+i)) + `"}` }
+	for i := 0; i < WebhookMaxPerAccount; i++ {
+		run(t, s, signed(key, Command{Operation: "webhook.create", Data: url(i)}))
 	}
-	s.now = func() time.Time { return time.Unix(testTime+WebhookPendingTTL+1, 0) }
+	later := int64(testTime + WebhookPendingTTL + 1)
+	s.now = func() time.Time { return time.Unix(later, 0) }
 	s.expireWebhooks(testContext)
-	var n int
-	if err := s.db.QueryRow("SELECT count(*) FROM webhook_subscriptions WHERE id=?", id).Scan(&n); err != nil {
+	var rows, expired int
+	if err := s.db.QueryRow("SELECT count(*),coalesce(sum(CASE WHEN "+webhookExpiredSQL+" THEN 1 ELSE 0 END),0) FROM webhook_subscriptions").Scan(&rows, &expired); err != nil {
 		t.Fatal(err)
 	}
-	if n != 0 {
-		t.Fatal("an unconfirmed subscription outlived its window")
+	if rows != WebhookMaxPerAccount || expired != WebhookMaxPerAccount {
+		t.Fatalf("after expiry: %d rows, %d expired; want all kept and marked", rows, expired)
 	}
+	if queued := webhookRows(t, s); len(queued) != 0 {
+		t.Fatal("an expired subscription kept queued challenges")
+	}
+	listed := run(t, s, signed(key, Command{Operation: "webhook.list", Timestamp: later}))
+	for _, item := range listed.Data["subscriptions"].([]map[string]any) {
+		if item["state"] != "expired" || item["pending_expires"] != nil {
+			t.Fatalf("listed %v, want state expired", item)
+		}
+	}
+	// Expired rows do not hold live slots, and re-subscribing an expired URL
+	// reuses its row instead of colliding with it.
+	for i := 0; i < WebhookMaxPerAccount; i++ {
+		result := run(t, s, signed(key, Command{Operation: "webhook.create", Data: url(i + 1), Timestamp: later}))
+		if result.Data["state"] != "pending" {
+			t.Fatal("re-subscription must start pending")
+		}
+	}
+	fails(t, s, signed(key, Command{Operation: "webhook.create", Data: url(9), Timestamp: later}), "webhook_limit")
+	if err := s.db.QueryRow("SELECT count(*),coalesce(sum(CASE WHEN "+webhookExpiredSQL+" THEN 1 ELSE 0 END),0) FROM webhook_subscriptions").Scan(&rows, &expired); err != nil {
+		t.Fatal(err)
+	}
+	if rows != WebhookMaxPerAccount+1 || expired != 1 {
+		t.Fatalf("after re-subscribing: %d rows, %d expired; want %d and 1", rows, expired, WebhookMaxPerAccount+1)
+	}
+	// Retained expired rows are bounded too.
+	var account, live string
+	if err := s.db.QueryRow("SELECT account,id FROM webhook_subscriptions WHERE state='pending' LIMIT 1").Scan(&account, &live); err != nil {
+		t.Fatal(err)
+	}
+	run(t, s, signed(key, Command{Operation: "webhook.delete", Target: live, Timestamp: later}))
+	for i := 0; i < WebhookMaxExpiredPerAccount-1; i++ {
+		if _, err := s.db.Exec("INSERT INTO webhook_subscriptions(id,account,created_by,url,secret,state,created_at,disabled_at) VALUES(?,?,?,?,?,'disabled',?,?)",
+			randomID(), account, account, "https://hooks.example.org/old"+string(rune('a'+i)), webhookSecret(), testTime, later); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fails(t, s, signed(key, Command{Operation: "webhook.create", Data: url(9), Timestamp: later}), "webhook_limit")
 }
 
 // Stopping must not lose a queued notification, and must not repeat one the

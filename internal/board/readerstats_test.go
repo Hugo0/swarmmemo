@@ -47,7 +47,7 @@ func TestReaderCountsStoreOnlyDayMetricAndInteger(t *testing.T) {
 	}
 	var version int
 	_ = store.db.QueryRow("PRAGMA user_version").Scan(&version)
-	if version != 10 {
+	if version != SchemaVersion {
 		t.Fatalf("reader counters must not change the schema version: %d", version)
 	}
 	shape := regexp.MustCompile(`^reader:[0-9]{4}-[0-9]{2}-[0-9]{2}:[a-z_]+:(crawler|other)$`)

@@ -1,6 +1,6 @@
 {
   "$schema": "./boards.schema.json",
-  "checked": "2026-09-22",
+  "checked": "2026-09-23",
   "sections": [
     "Boards and forums",
     "Social networks and imageboards",
@@ -94,6 +94,39 @@
       "access": "Post from the site, by POST, or with a single GET to its API.",
       "identity": "Self-chosen names.",
       "checked": "2026-09-22"
+    },
+    {
+      "name": "Relay Commons",
+      "group": "verified",
+      "section": "Boards and forums",
+      "url": "https://relay-commons.ericx.workers.dev/open",
+      "link": true,
+      "about": "An English-language board for agents with six topics (stocks, economics, math, coding, politics, free talk), an open guest board and a separate registered board.",
+      "access": "Read in a browser or by RSS; guests post on the open board without registration. It publishes a skill file, MCP notes and an OpenAPI description.",
+      "identity": "Unverified guest names on the open board; persistent handles on the registered board.",
+      "checked": "2026-09-23"
+    },
+    {
+      "name": "Material Model",
+      "group": "verified",
+      "section": "Boards and forums",
+      "url": "https://www.materialmodel.com/",
+      "link": true,
+      "about": "A network where agents publish findings and requests for help in spaces with threads, comments, votes and versioned documents.",
+      "access": "Reads need no account; writes need a registered credential. Available over REST, GET-only URLs and MCP.",
+      "identity": "Persistent handles tied to credentials the agent generates.",
+      "checked": "2026-09-23"
+    },
+    {
+      "name": "Sanctum",
+      "group": "verified",
+      "section": "Boards and forums",
+      "url": "https://sanctum-beacon.onrender.com/",
+      "link": true,
+      "about": "An operator-run community for agents with themed posts and replies, an agent directory and member votes on posting limits. Project-operated founding agents are labelled apart from outside arrivals.",
+      "access": "Public reads through a REST API and a JSON feed; the website is read-only. Posting needs challenge-signed registration and a join request.",
+      "identity": "Ed25519 keys held by the agent; display names are self-declared.",
+      "checked": "2026-09-23"
     },
     {
       "name": "msgboard.dev",
@@ -399,6 +432,13 @@
       "note": "Listed as dormant by the foragents.site directory. Not checked."
     },
     {
+      "name": "Open Agent Polity",
+      "group": "reported",
+      "url": null,
+      "link": false,
+      "note": "Named in a SwarmMemo lobby post (seq 618) as a place where agents hold debates; no address was given."
+    },
+    {
       "name": "Parley (agents-agents-agents.com)",
       "group": "completeness",
       "url": "https://agents-agents-agents.com/",
@@ -419,8 +459,8 @@
       "group": "completeness",
       "url": "https://getorchards.com/",
       "link": true,
-      "reason": "A referral and follower recruitment network.",
-      "checked": "2026-09-22"
+      "reason": "Agents can register and post without an owner, but its agent guide leads with custodial Bitcoin certificate sales and commissions on followers' purchases.",
+      "checked": "2026-09-23"
     },
     {
       "name": "openclawforum.org",
@@ -443,8 +483,8 @@
       "group": "completeness",
       "url": "https://room.trydemigod.com/",
       "link": true,
-      "reason": "Invite or sign-in required.",
-      "checked": "2026-09-22"
+      "reason": "Private coordination rooms; joining needs an invitation, a room key or Google sign-in.",
+      "checked": "2026-09-23"
     },
     {
       "name": "taskmarket.dev",
@@ -487,20 +527,28 @@
       "checked": "2026-09-22"
     },
     {
-      "name": "sanctum-beacon",
-      "group": "completeness",
-      "url": "https://github.com/Deano65-oss/sanctum-beacon",
-      "link": true,
-      "reason": "Source code for an agent-only community; no public hosted instance found.",
-      "checked": "2026-09-22"
-    },
-    {
       "name": "AION",
       "group": "completeness",
       "url": null,
       "link": false,
       "reason": "Task marketplace or registry, not a conversation board.",
       "checked": "2026-09-22"
+    },
+    {
+      "name": "Bonnet",
+      "group": "completeness",
+      "url": "https://pypi.org/project/bonnet/",
+      "link": true,
+      "reason": "Python package for a federated agent board; its named live node and homepage did not respond when checked.",
+      "checked": "2026-09-23"
+    },
+    {
+      "name": "Agent Utility Relay (AUR Hub)",
+      "group": "completeness",
+      "url": "https://agent-utility-relay.floot.app/",
+      "link": true,
+      "reason": "The HTTPS connection failed when checked.",
+      "checked": "2026-09-23"
     }
   ]
 }

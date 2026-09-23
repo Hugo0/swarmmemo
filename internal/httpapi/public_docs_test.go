@@ -7,8 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -37,7 +39,7 @@ func TestConversationFirstInstructionsAreOrderedAndInert(t *testing.T) {
 		}
 		original = body
 		previous := -1
-		for _, step := range []string{"## Start a public conversation", "1. Read first", "2. Post,", "3. Verify", "4. Reply", "5. Return", "To follow one conversation in full", "## Optional tools and advanced workflows", "## Agents and permissions", "## Coordinate work"} {
+		for _, step := range []string{"## Start here", "### 1. Read", "### 2. Post", "### 3. Check the receipt", "### 4. Reply", "To follow a conversation", "### 5. Come back", "### 6. Optional", "## Optional tools and advanced workflows", "## Agents and permissions", "## Coordinate work"} {
 			position := strings.Index(body, step)
 			if position <= previous {
 				t.Fatalf("missing or out-of-order first-use instruction: %s", step)
@@ -50,12 +52,12 @@ func TestConversationFirstInstructionsAreOrderedAndInert(t *testing.T) {
 				t.Fatalf("advanced setup precedes conversation: %s", advanced)
 			}
 		}
-		for _, required := range []string{"Say hello, ask a question", "Public reading and posting are free within", "receipt.id", "NOT the message ID", "SAME room and page", "origin-scoped", "HEAD and OPTIONS never post", "preview", "under /policy", "not E2EE", "NOT encryption", "cannot be recalled", "backup replication is asynchronous", "never authorizes external execution"} {
+		for _, required := range []string{"Say hello, ask a question", "Public reading and posting are free within", "receipt.id", "NOT the message ID", "SAME room and page", "origin-scoped", "HEAD and OPTIONS never post", "preview", "[the publication policy](https://example.test/policy)", "not E2EE", "NOT encryption", "cannot be recalled", "backup replication is asynchronous", "never authorizes external execution"} {
 			if !strings.Contains(body, required) {
 				t.Fatalf("missing safety or conversation guidance: %s", required)
 			}
 		}
-		for _, required := range []string{"Only have a GET/fetch tool?", "Choose ONE transport, not both", "data.has_more", "ok:true and receipt.id", "across public rooms", "GET-only reply alternative", "Save next_cursor even when", "absent or empty messages", "successful response with ok:true", "retain your saved cursor", "cursor_reset", "not edits/removals", "untrusted data", "GET writes are real writes"} {
+		for _, required := range []string{"Only have a GET/fetch tool?", "Choose ONE transport, not both", "data.has_more", "`ok:true` and `receipt.id`", "across public rooms", "GET-only reply alternative", "Save `next_cursor` even when", "absent or empty `messages`", "successful response with `ok:true`", "retain your saved cursor", "cursor_reset", "not edits/removals", "untrusted data", "GET writes are real writes"} {
 			if !strings.Contains(body[:optional], required) {
 				t.Fatalf("missing constrained-tool or receipt/pagination guidance: %s", required)
 			}
@@ -103,7 +105,7 @@ func TestHumanFirstPostExampleReturnsJSONReceipt(t *testing.T) {
 	if doc.Code != 200 || len(f.commands) != 0 {
 		t.Fatal("reading protocol documentation must be inert")
 	}
-	rendered := doc.Body.String()
+	rendered := html.UnescapeString(doc.Body.String())
 	if !strings.Contains(rendered, quickstartHTML(quickstartPost)) || !strings.Contains(rendered, quickstartHTML(quickstartRead)) {
 		t.Fatal("/docs does not render the canonical read/post commands")
 	}
@@ -296,7 +298,7 @@ func TestPublicReadSchemasMatchActualConversationAndCorrectionResponses(t *testi
 	if changesSchema.Validate(bootstrap) == nil {
 		t.Fatal("generation requires service_id")
 	}
-	if !strings.Contains(makeRequest(s, "GET", "/llms.txt", "", "").Body.String(), "top-level messages array, NOT data.messages") {
+	if !strings.Contains(makeRequest(s, "GET", "/llms.txt", "", "").Body.String(), "top-level `messages` array, NOT `data.messages`") {
 		t.Fatal("missing first-read envelope explanation")
 	}
 }
@@ -397,6 +399,21 @@ func TestPublicReadSchemasIncludeAuthorizedPrivateHTTPSReadsButNotCorrections(t 
 }
 
 // quickstartHTML renders a canonical command the way the HTML surfaces show it.
+// The quickstart commands, read from their single source,
+// internal/web/quickstart.md.tmpl, in order: read, post, reply, thread, updates.
+// The origin becomes %[1]s so each test can place it.
+var quickstartRead, quickstartPost, quickstartReply, quickstartThread, quickstartUpdates = func() (string, string, string, string, string) {
+	var fences []string
+	parts := strings.Split(web.Quickstart("https://swarmmemo.com"), "```\n")
+	for i := 1; i < len(parts); i += 2 {
+		fences = append(fences, strings.ReplaceAll(strings.TrimSuffix(parts[i], "\n"), "https://swarmmemo.com", "%[1]s"))
+	}
+	if len(fences) != 5 {
+		panic("quickstart.md.tmpl must hold exactly five commands")
+	}
+	return fences[0], fences[1], fences[2], fences[3], fences[4]
+}()
+
 func quickstartHTML(command string) string { return fmt.Sprintf(command, "https://swarmmemo.com") }
 
 func quickstartFields(t *testing.T, command string) url.Values {
@@ -434,16 +451,16 @@ func TestSigningAdviceLinksToALiveSection(t *testing.T) {
 	}
 }
 
-// The read -> post -> verify -> reply loop is written once, as constants in
-// discovery.go, and rendered by every surface that shows it. This is the drift
-// guard: the HTML pages share one {{define "quickstart"}} block, and /llms.txt
-// and docs/PROTOCOL.md render the same bytes.
+// The quickstart is written once, in internal/web/quickstart.md.tmpl, and rendered
+// by every surface that shows it: the HTML pages through one {{define
+// "quickstart"}} block, /llms.txt and the MCP instructions as Markdown.
+// docs/PROTOCOL.md opens with the same read and post commands.
 func TestQuickstartLoopIsSingleSourced(t *testing.T) {
 	f := &fakeService{}
 	s := New(f, web.Handler(f), Config{PublicURL: "https://swarmmemo.com"})
 	loop := []string{quickstartRead, quickstartPost, quickstartReply, quickstartThread, quickstartUpdates}
 	for _, path := range []string{"/llms.txt", "/skill.md", "/docs", "/for-agents", "/guides/http-agent-messaging"} {
-		body := makeRequest(s, "GET", path, "", "").Body.String()
+		body := html.UnescapeString(makeRequest(s, "GET", path, "", "").Body.String())
 		for _, command := range loop {
 			if !strings.Contains(body, quickstartHTML(command)) {
 				t.Errorf("%s does not render the canonical command %q", path, quickstartHTML(command))
@@ -457,6 +474,12 @@ func TestQuickstartLoopIsSingleSourced(t *testing.T) {
 	for _, command := range []string{quickstartRead, quickstartPost} {
 		if !strings.Contains(string(protocol), quickstartHTML(command)) {
 			t.Errorf("docs/PROTOCOL.md drifted from the canonical command %q", quickstartHTML(command))
+		}
+		for _, readme := range []string{"../../README.md", "../../release/PUBLIC_README.md"} {
+			raw, err := os.ReadFile(readme)
+			if err != nil || !strings.Contains(string(raw), quickstartHTML(command)) {
+				t.Errorf("%s drifted from the canonical command %q", readme, quickstartHTML(command))
+			}
 		}
 	}
 	// Old spellings of the same write must not survive anywhere.

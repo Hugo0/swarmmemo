@@ -1,0 +1,64 @@
+/* Broadsheet: the whole room on newsprint, set in serif, with a masthead. */
+:scope {
+  /* Trust text (bylines, times, labels) on its own plate, contrast-checked. */
+  --trust-ink: #1d1a14;
+  --trust-muted: #5d5546;
+  --trust-plate: #f4efe1;
+  --ink: #1d1a14;
+  --ink-2: #3a342a;
+  --muted: #5d5546;
+  --faint: #8a8170;
+  --line: #cfc6b0;
+  --line-strong: #1d1a14;
+  --surface: #f4efe1;
+  --surface-2: #efe8d6;
+  --surface-3: #e9e2cf;
+  --field-border: #b9b09a;
+  --field-border-strong: #5d5546;
+  --focus: #1d1a14;
+  --primary-fill: #1d1a14;
+  --primary-ink: #f4efe1;
+  --primary-hover: #3a342a;
+  --trust-font: serif;
+  background: #f4efe1;
+}
+
+body { font-family: Georgia, "Times New Roman", serif; color: #1d1a14; }
+
+.site-header { border-bottom: 4px double #1d1a14; }
+.brand { font-family: Georgia, serif; font-variant: small-caps; letter-spacing: .04em; }
+.nav a { font-family: Georgia, serif; text-transform: uppercase; letter-spacing: .14em; color: #3a342a; }
+.nav a[aria-current] { color: #1d1a14; }
+
+.room-header { text-align: center; border-bottom: 1px solid #1d1a14; padding-bottom: 20px; }
+.room-header h1 { font-family: Georgia, "Times New Roman", serif; font-size: 58px; font-weight: 700; }
+.room-header p { font-style: italic; color: #3a342a; margin-left: auto; margin-right: auto; }
+.section-heading h2 { font-family: Georgia, serif; font-variant: small-caps; letter-spacing: .06em; }
+
+.post { border-bottom: 1px solid #1d1a14; }
+.post-meta { border-bottom: 1px solid #cfc6b0; padding-bottom: 6px; }
+.post-body { padding: 10px 0 2px; }
+.post-body .post-text {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 17px !important;
+  line-height: 1.6 !important;
+  text-align: justify;
+  hyphens: auto;
+  color: #1d1a14;
+}
+.post-body .post-text::first-letter {
+  float: left;
+  font-size: 3.2em;
+  line-height: .85;
+  font-weight: 700;
+  padding: 4px 6px 0 0;
+}
+.post-body .post-text::first-line { font-variant: small-caps; letter-spacing: .04em; }
+.post-body .post-image { border: 1px solid #1d1a14; background: #e9e2cf; }
+.post-body .post-image img { filter: grayscale(1) contrast(1.15); mix-blend-mode: multiply; }
+
+.panel { border-top: 3px double #1d1a14; border-bottom: 1px solid #1d1a14; padding: 12px 0; }
+.sidebar p, .sidebar a { font-family: Georgia, serif; }
+.composer { border-top: 1px solid #1d1a14; }
+.button { border-radius: 0; font-family: Georgia, serif; }
+.footer { border-top: 4px double #1d1a14; }

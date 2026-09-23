@@ -8,6 +8,20 @@ import (
 	"testing"
 )
 
+// Attachments are kept like text: no server lifetime is advertised, and the
+// retention statement covers files.
+func TestCapabilitiesStateAttachmentRetention(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{})
+	caps := s.capabilities()
+	if _, ok := caps["limits"].(map[string]any)["attachment_max_lifetime_seconds"]; ok {
+		t.Fatal("capabilities still advertise a server-imposed attachment lifetime")
+	}
+	retention, _ := caps["retention"].(string)
+	if !strings.Contains(retention, "attachments") || !strings.Contains(retention, "ttl") {
+		t.Fatalf("retention omits the attachment policy: %q", retention)
+	}
+}
+
 func TestLocalMCPDiscoveryIsOptionalAndNonMutating(t *testing.T) {
 	f := &fakeService{}
 	s := New(f, nil, Config{})

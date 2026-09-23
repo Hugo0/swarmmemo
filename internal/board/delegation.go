@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 )
@@ -138,6 +139,12 @@ type DelegationRecord struct {
 	RevocationSignature string   `json:"revocation_signature,omitempty"`
 }
 
+// delegable reports whether a scoped worker key may be granted an operation.
+func delegable(name string) bool {
+	op, ok := LookupOperation(name)
+	return ok && op.Delegable
+}
+
 func delegationError(code string) error {
 	status, message := 403, "The delegated request is not authorized."
 	switch code {
@@ -220,8 +227,6 @@ func delegationState(ctx context.Context, tx *sql.Tx, g delegationRow, now int64
 	return "active", nil
 }
 
-var delegationOperations = map[string]bool{"post": true, "messages.list": true, "message.get": true, "thread.get": true, "room.get": true, "room.pages": true, "works.list": true, "work.get": true, "work.history": true, "work.claim": true, "work.renew": true, "work.submit": true}
-
 func (s *Store) authorizeDelegation(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) error {
 	if a.grant == nil {
 		return nil
@@ -248,7 +253,7 @@ func (s *Store) authorizeDelegation(ctx context.Context, tx *sql.Tx, c Command, 
 			allowed = true
 		}
 	}
-	if !delegationOperations[c.Operation] || !allowed {
+	if !delegable(c.Operation) || !allowed {
 		return delegationError("delegation_forbidden")
 	}
 	room := c.Room
@@ -306,7 +311,7 @@ func parseDelegationData(raw string, create bool) (string, []string, error) {
 		}
 		seen := map[string]bool{}
 		for _, op := range operations {
-			if !delegationOperations[op] || seen[op] {
+			if !delegable(op) || seen[op] {
 				return "", nil, delegationError("invalid_delegation_data")
 			}
 			seen[op] = true
@@ -335,8 +340,8 @@ func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a a
 	}
 	var g delegationRow
 	if c.Operation == "delegation.create" {
-		if c.TTL < 60 || c.TTL > 7*86400 {
-			return Result{}, problem(400, "invalid_ttl", "Grant TTL must be 60–604800 seconds.")
+		if c.TTL < 60 || c.TTL > DelegationMaxTTL {
+			return Result{}, problem(400, "invalid_ttl", fmt.Sprintf("Grant ttl must be 60 seconds to %s.", LimitText("delegation_ttl_maximum_seconds")))
 		}
 		if c.Amount <= 0 || c.Amount > s.config.GlobalDailyBytes {
 			return Result{}, problem(400, "invalid_amount", "Grant lifetime ceiling must be positive and within configured global daily capacity.")
@@ -360,7 +365,7 @@ func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a a
 		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM delegations g JOIN identities i ON i.id=g.issuer_id WHERE g.parent_account=? AND g.revoked_at=0 AND g.expires_at>? AND g.generation=? AND i.successor=''", a.account, now, current).Scan(&exists); err != nil {
 			return Result{}, err
 		}
-		if exists >= 32 {
+		if exists >= DelegationMaxActive {
 			return Result{}, delegationError("delegation_limit")
 		}
 		// Reserve retained enrollment, its one future revocation and request metadata.

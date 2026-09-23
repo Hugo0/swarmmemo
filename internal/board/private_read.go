@@ -294,7 +294,7 @@ func privateReadBound(value any, limit int) error {
 	return nil
 }
 func privateReadFresh(c Command, now int64) error {
-	if c.Timestamp < now-300 || c.Timestamp > now+300 {
+	if c.Timestamp < now-SignatureWindowSeconds || c.Timestamp > now+SignatureWindowSeconds {
 		return problem(401, "stale_signature", "New signed commands must be within five minutes of server time.")
 	}
 	return nil

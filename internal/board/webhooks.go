@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/url"
@@ -60,6 +61,9 @@ const (
 	WebhookPendingTTL        = 3600
 	WebhookMaxURLBytes       = 512
 
+	// WebhookMaxExpiredPerAccount bounds retained never-confirmed subscriptions.
+	WebhookMaxExpiredPerAccount = 32
+
 	webhookBaseBackoff = 30
 	webhookMaxBackoff  = 3600
 	webhookLeaseSecond = 120
@@ -80,7 +84,7 @@ func webhookError(code string) error {
 	case "webhook_unresolved":
 		return problem(400, "webhook_unresolved", "The callback host does not resolve to any usable public address.")
 	}
-	return problem(400, "invalid_webhook", "Data must be a strict schema-1 JSON object with an https URL of up to 512 bytes, no credentials, no fragment and no port other than 443.")
+	return problem(400, "invalid_webhook", fmt.Sprintf("Data must be a strict schema-1 JSON object with an https URL of up to %d bytes, no credentials, no fragment and no port other than 443.", WebhookMaxURLBytes))
 }
 
 // webhookBlocked holds the ranges IsGlobalUnicast and friends do not already
@@ -282,19 +286,27 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 	if err = s.checkWebhookHost(ctx, u); err != nil {
 		return Result{}, err
 	}
-	var held int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM webhook_subscriptions WHERE account=?", a.account).Scan(&held); err != nil {
+	// Expired rows are kept but do not hold a live slot; they have their own,
+	// larger cap so retained history stays bounded. Re-subscribing an expired URL
+	// reuses its row, since (account,url) is unique.
+	var held, expired, sameURL int
+	if err = tx.QueryRowContext(ctx, "SELECT coalesce(sum(CASE WHEN "+webhookExpiredSQL+" THEN 0 ELSE 1 END),0),coalesce(sum(CASE WHEN "+webhookExpiredSQL+" THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN "+webhookExpiredSQL+" AND url=? THEN 1 ELSE 0 END),0) FROM webhook_subscriptions WHERE account=?", u.String(), a.account).Scan(&held, &expired, &sameURL); err != nil {
 		return Result{}, err
 	}
-	if held >= WebhookMaxPerAccount {
+	if held >= WebhookMaxPerAccount || (sameURL == 0 && expired >= WebhookMaxExpiredPerAccount) {
 		return Result{}, webhookError("webhook_limit")
 	}
 	if err = s.charge(ctx, tx, a, int64(len(a.canonical))+512, now); err != nil {
 		return Result{}, err
 	}
 	id, secret, nonce := randomID(), webhookSecret(), randomID()
-	_, err = tx.ExecContext(ctx, "INSERT INTO webhook_subscriptions(id,account,created_by,url,secret,state,challenge,created_at) VALUES(?,?,?,?,?,'pending',?,?)",
-		id, a.account, a.id, u.String(), secret, nonce, now)
+	if sameURL > 0 {
+		_, err = tx.ExecContext(ctx, "UPDATE webhook_subscriptions SET id=?,created_by=?,secret=?,state='pending',challenge=?,created_at=?,confirmed_at=0,disabled_at=0,failures=0,last_error='' WHERE account=? AND url=? AND "+webhookExpiredSQL,
+			id, a.id, secret, nonce, now, a.account, u.String())
+	} else {
+		_, err = tx.ExecContext(ctx, "INSERT INTO webhook_subscriptions(id,account,created_by,url,secret,state,challenge,created_at) VALUES(?,?,?,?,?,'pending',?,?)",
+			id, a.account, a.id, u.String(), secret, nonce, now)
+	}
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return Result{}, webhookError("webhook_exists")
@@ -349,7 +361,11 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 		if err != nil {
 			return Result{}, err
 		}
-		item := map[string]any{"subscription_id": w.ID, "url": w.URL, "state": w.State, "created_at": w.Created, "consecutive_failures": w.Failures}
+		state := w.State
+		if state == "disabled" && w.Confirmed == 0 {
+			state = "expired"
+		}
+		item := map[string]any{"subscription_id": w.ID, "url": w.URL, "state": state, "created_at": w.Created, "consecutive_failures": w.Failures}
 		if w.Confirmed != 0 {
 			item["confirmed_at"] = w.Confirmed
 		}

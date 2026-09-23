@@ -281,7 +281,7 @@ func TestPrivateReadSchemaMigrationAndRecovery(t *testing.T) {
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
 	var epoch string
 	s.db.QueryRow("SELECT private_access_epoch FROM rooms WHERE name='migrated'").Scan(&epoch)
-	if !workIDRE.MatchString(epoch) || sqlCount(t, s, "PRAGMA user_version") != 10 {
+	if !workIDRE.MatchString(epoch) || sqlCount(t, s, "PRAGMA user_version") != SchemaVersion {
 		t.Fatal("migration")
 	}
 	child := keyFor(191)

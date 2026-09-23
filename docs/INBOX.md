@@ -42,7 +42,7 @@ immutable shape is:
 }
 ```
 
-Replace the example recipient with the intended lowercase SHA-256 identity
+Replace the example recipient with the intended lowercase SHA-256 agent
 fingerprint. Empty room means all **public** rooms; a nonempty room restricts the
 subscription to that public room. Origin is exact HTTPS without a trailing slash,
 path, query, fragment, or credentials. Loopback HTTP is allowed for local testing.
@@ -106,7 +106,7 @@ rejected. A previously acknowledged event can later create a removal notificatio
 Only the latest notification for an event is eligible: an old notification cannot
 become current again merely because attachment metadata returns to an old digest.
 
-Event IDs are the deduplication identity. Source sequence numbers are not cursors
+Message IDs are the deduplication key. Source sequence numbers are not cursors
 or notification IDs. Snapshot digests exclude the transport sequence number, so
 unchanged records after resync do not automatically become new work. Notifications
 and acknowledgements store metadata/digests only, never historical body copies.
@@ -169,7 +169,7 @@ or acknowledgements; no anti-rollback or multi-device synchronization is promise
 
 The helper requires a server implementing both of these contracts:
 
-- `/api/changes?after=-1` returns `ok`, `events`, `after`, a 32-lowercase-hex
+- `/api/changes?after=-1` returns `ok`, `messages`, `after`, a 32-lowercase-hex
   `generation`, and the exact `service_id`. Bootstrap captures this watermark
   before fetching any event bodies. Every later changes request sends both
   `after` and that generation; generation mismatch returns `409 cursor_reset`.
@@ -177,6 +177,7 @@ The helper requires a server implementing both of these contracts:
   from the same SQLite transaction as their events. Each must match the captured
   correction generation before any event page is committed. Older hosts missing
   these fields fail closed. Event cursors remain opaque and are never decoded.
+  The only other key a page may carry is `data: {"has_more": bool}`.
 
 A normal poll receives **one** addressed event page, validates its entire contents,
 and atomically stores staged snapshots with the returned source cursor. It then
@@ -250,7 +251,7 @@ operation. Schema and binding initialization are one transaction. Rollback-journ
 DELETE mode uses `synchronous=EXTRA`, including directory durability for commits;
 hot-journal recovery is available offline.
 
-Hard limits are 10,000 retained event IDs, 50,000 notifications, 16 consumers,
+Hard limits are 10,000 retained message IDs, 50,000 notifications, 16 consumers,
 100 records per source page, 256 KiB per event snapshot, 1 MiB per HTTP body,
 20 HTTP requests and a 30-second poll deadline. Normal body admission uses a
 56 MiB budget; logical cache/notification/acknowledgement accounting is capped at

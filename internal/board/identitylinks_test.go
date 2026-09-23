@@ -471,6 +471,37 @@ func TestDomainLinkVerifiesLapsesAndRecovers(t *testing.T) {
 	}
 }
 
+// The directory carries the same links and @handle as agent.get, read for the
+// whole page at once, and each agent gets only its own links.
+func TestDirectoryCarriesEachAgentsOwnLinks(t *testing.T) {
+	s, dns := linkTest(t)
+	a, b, none := keyFor(60), keyFor(61), keyFor(62)
+	for _, key := range []ed25519.PrivateKey{a, b, none} {
+		register(t, s, key)
+	}
+	run(t, s, linkCommand(a, "identity.link", "domain", "a.example.org"))
+	run(t, s, linkCommand(a, "identity.link", "url", "https://a.example.org/about"))
+	run(t, s, linkCommand(b, "identity.link", "nostr", strings.Repeat("b", 64)))
+	dns.answers["_swarmmemo.a.example.org."] = []string{IdentityLinkTXTPrefix + keyID(a)}
+	advance(t, s, testTime)
+	listed := map[string]Agent{}
+	for _, agent := range run(t, s, Command{Operation: "agents.list", Limit: 100}).Agents {
+		listed[agent.ID] = agent
+	}
+	if got := listed[keyID(a)]; got.DomainHandle != "a.example.org" || len(got.Links) != 2 || got.Links[0].State != "verified" || got.Links[1].Kind != "url" {
+		t.Fatalf("agent a in the directory: %+v", got)
+	}
+	if got := listed[keyID(b)]; got.DomainHandle != "" || len(got.Links) != 1 || got.Links[0].Kind != "nostr" || got.Links[0].State != "claimed" {
+		t.Fatalf("agent b in the directory: %+v", got)
+	}
+	if got := listed[keyID(none)]; got.Links != nil || got.DomainHandle != "" {
+		t.Fatalf("an agent without links gained some: %+v", got)
+	}
+	if one := agentLinks(t, s, a); len(one.Links) != 2 || one.DomainHandle != "a.example.org" {
+		t.Fatalf("agent.get disagrees with the directory: %+v", one)
+	}
+}
+
 func TestDomainTXTForAnotherKeyDoesNotVerify(t *testing.T) {
 	s, dns := linkTest(t)
 	owner, impostor := keyFor(51), keyFor(52)
@@ -644,7 +675,7 @@ func TestSchema10MigrationAddsIdentityLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
-	if got := sqlCount(t, s, "PRAGMA user_version"); got != 10 {
+	if got := sqlCount(t, s, "PRAGMA user_version"); got != SchemaVersion {
 		t.Fatalf("user_version after migration: %d", got)
 	}
 	if n := sqlCount(t, s, "SELECT count(*) FROM sqlite_master WHERE name IN ('identity_links','identity_link_checks')"); n != 2 {
@@ -657,7 +688,7 @@ func TestSchema10MigrationAddsIdentityLinks(t *testing.T) {
 	if got := sqlCount(t, s, "SELECT count(*) FROM pragma_foreign_key_check"); got != 0 {
 		t.Fatal("foreign key violations after migration")
 	}
-	if _, err = s.db.Exec("PRAGMA user_version=11"); err != nil {
+	if _, err = s.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion+1)); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {

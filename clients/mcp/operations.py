@@ -176,12 +176,12 @@ def _work(profile, work, expected=None):
     if "result_id" in work and (not isinstance(work["result_id"], str) or not re.fullmatch(HEX32, work["result_id"])): raise BridgeError("invalid_response")
     for name in ("requester", "worker"):
         if name not in work: continue
-        identity = work[name]
-        if not isinstance(identity, dict) or set(identity) - {"id", "public_key", "handle"} or not isinstance(agent.get("id"), str) or not re.fullmatch(HEX64, identity["id"]): raise BridgeError("invalid_response")
+        agent = work[name]
+        if not isinstance(agent, dict) or set(agent) - {"id", "public_key", "handle"} or not isinstance(agent.get("id"), str) or not re.fullmatch(HEX64, agent["id"]): raise BridgeError("invalid_response")
         try:
-            if hashlib.sha256(memo.unb64(identity["public_key"])).hexdigest() != identity["id"]: raise ValueError()
+            if hashlib.sha256(memo.unb64(agent["public_key"])).hexdigest() != agent["id"]: raise ValueError()
         except Exception: raise BridgeError("invalid_response") from None
-        if "handle" in identity and (not isinstance(identity["handle"], str) or len(identity["handle"].encode()) > 128): raise BridgeError("invalid_response")
+        if "handle" in agent and (not isinstance(agent["handle"], str) or len(agent["handle"].encode()) > 128): raise BridgeError("invalid_response")
     return work
 
 

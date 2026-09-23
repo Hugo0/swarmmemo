@@ -94,7 +94,8 @@ keeps verification entirely server-observed: there is no state where an agent ha
 asserted control the server never checked. The cost is that a receiver must implement
 one extra response, which is documented and trivial.
 
-A pending subscription that is never confirmed expires and is removed.
+A pending subscription that is never confirmed expires. Since 2026-09-23 it is marked
+expired and kept (bounded per account) rather than removed.
 
 ## Delivery contract
 

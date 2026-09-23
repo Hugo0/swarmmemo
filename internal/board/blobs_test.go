@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +69,8 @@ func TestAttachmentBoundsExpiryAndNoQuotaDoubleSpend(t *testing.T) {
 	fails(t, s, Command{Operation: "blob.put", Room: "files", Data: "eA"}, "signature_required")
 	fails(t, s, signed(key, Command{Operation: "blob.put", Room: "files", Data: "eA=="}), "invalid_base64")
 	fails(t, s, signed(key, Command{Operation: "blob.put", Room: "files", Data: "eA", Filename: "../secret"}), "invalid_filename")
-	fails(t, s, signed(key, Command{Operation: "blob.put", Room: "files", Data: "eA", TTL: 2592001}), "invalid_ttl")
+	fails(t, s, signed(key, Command{Operation: "blob.put", Room: "files", Data: "eA", TTL: -1}), "invalid_ttl")
+	fails(t, s, signed(key, Command{Operation: "blob.put", Room: "files", Data: "eA", TTL: AttachmentMaxTTL + 1}), "invalid_ttl")
 	large := signed(key, Command{Operation: "blob.put", Room: "files", Data: base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("x", 1<<20))), RequestID: "full-size"})
 	result := run(t, s, large)
 	used := run(t, s, signed(key, Command{Operation: "quota.get"})).Data["used_bytes"]
@@ -80,6 +82,11 @@ func TestAttachmentBoundsExpiryAndNoQuotaDoubleSpend(t *testing.T) {
 		t.Fatal("attachment retry double charge")
 	}
 	expiring := upload(t, s, key, "files", "temporary", 1)
+	kept := upload(t, s, key, "files", "kept", 0)
+	long := upload(t, s, key, "files", "long", 2592001)
+	if kept.ExpiresAt != 0 || long.ExpiresAt != testTime+2592001 {
+		t.Fatalf("no-ttl upload expires at %d, explicit long ttl at %d", kept.ExpiresAt, long.ExpiresAt)
+	}
 	s.now = func() time.Time { return time.Unix(testTime+2, 0) }
 	fails(t, s, Command{Operation: "blob.get", MessageID: expiring.ID}, "attachment_gone")
 	n, err := s.PruneExpiredBlobs(testContext)
@@ -89,6 +96,89 @@ func TestAttachmentBoundsExpiryAndNoQuotaDoubleSpend(t *testing.T) {
 	var retained int
 	if err = s.db.QueryRow("SELECT count(*) FROM blobs WHERE id=? AND data IS NULL", expiring.ID).Scan(&retained); err != nil || retained != 1 {
 		t.Fatal("expiry left bytes or removed metadata")
+	}
+	// Ten years on, a file uploaded without a ttl is still served and never pruned;
+	// the explicit ttl, however long, is honoured.
+	s.now = func() time.Time { return time.Unix(testTime+10*365*86400, 0) }
+	got := run(t, s, Command{Operation: "blob.get", MessageID: kept.ID})
+	if got.Data["data"] != base64.RawURLEncoding.EncodeToString([]byte("kept")) || got.Data["blob"].(Attachment).Expired {
+		t.Fatal("a no-ttl attachment expired")
+	}
+	fails(t, s, Command{Operation: "blob.get", MessageID: long.ID}, "attachment_gone")
+	if n, err = s.PruneExpiredBlobs(testContext); err != nil || n != 1 {
+		t.Fatalf("second prune %d %v, want only the explicit ttl", n, err)
+	}
+	if err = s.db.QueryRow("SELECT count(*) FROM blobs WHERE id=? AND data IS NOT NULL AND expires_at=0", kept.ID).Scan(&retained); err != nil || retained != 1 {
+		t.Fatal("prune touched a no-ttl attachment")
+	}
+	run(t, s, signed(key, Command{Operation: "blob.delete", MessageID: kept.ID, Timestamp: testTime + 10*365*86400}))
+	fails(t, s, Command{Operation: "blob.get", MessageID: kept.ID}, "attachment_gone")
+}
+
+// Files stored under the old 30-day server default are extended once at startup;
+// shorter explicit ttls, deleted files and already-pruned bytes are left alone.
+func TestLegacyAttachmentExpiryIsClearedOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "board.sqlite")
+	s, err := Open(path, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.now = func() time.Time { return time.Unix(testTime, 0) }
+	run(t, s, Command{Operation: "post", Room: "files", Text: "attachments"})
+	now := time.Now().Unix()
+	rows := []struct {
+		id              string
+		created, expiry int64
+		deleted         int
+		data            any
+	}{
+		{"legacy-default", now - 100, now - 100 + legacyBlobLifetime, 0, []byte("x")},
+		{"explicit-short", now - 100, now + 3600, 0, []byte("x")},
+		{"legacy-deleted", now - 100, now - 100 + legacyBlobLifetime, 1, nil},
+		{"legacy-pruned", now - 40*86400, now - 10*86400, 0, nil},
+	}
+	for _, r := range rows {
+		if _, err = s.db.Exec("INSERT INTO blobs(id,room,account,filename,media_type,hash,size,created_at,expires_at,deleted,data) VALUES(?,'files','a','f','text/plain','h',1,?,?,?,?)", r.id, r.created, r.expiry, r.deleted, r.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = s.db.Exec("DELETE FROM meta WHERE key='blob_legacy_expiry_cleared'"); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if s, err = Open(path, Config{}); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, r := range rows {
+		var expiry int64
+		if err = s.db.QueryRow("SELECT expires_at FROM blobs WHERE id=?", r.id).Scan(&expiry); err != nil {
+			t.Fatal(err)
+		}
+		want := r.expiry
+		if r.id == "legacy-default" {
+			want = 0
+		}
+		if expiry != want {
+			t.Fatalf("%s expires_at %d, want %d", r.id, expiry, want)
+		}
+	}
+	var recorded string
+	if err = s.db.QueryRow("SELECT value FROM meta WHERE key='blob_legacy_expiry_cleared'").Scan(&recorded); err != nil || recorded != "1" {
+		t.Fatalf("extension not recorded once: %q %v", recorded, err)
+	}
+	// Once recorded, a later explicit 30-day ttl is not rewritten on restart.
+	if _, err = s.db.Exec("UPDATE blobs SET expires_at=created_at+? WHERE id='legacy-default'", legacyBlobLifetime); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if s, err = Open(path, Config{}); err != nil {
+		t.Fatal(err)
+	}
+	var expiry int64
+	defer s.Close()
+	if err = s.db.QueryRow("SELECT expires_at FROM blobs WHERE id='legacy-default'").Scan(&expiry); err != nil || expiry == 0 {
+		t.Fatal("the one-time extension ran again")
 	}
 }
 

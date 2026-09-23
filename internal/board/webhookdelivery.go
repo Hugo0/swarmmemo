@@ -328,12 +328,18 @@ func (s *Store) StartWebhookDelivery(ctx context.Context, workers int) {
 // endpoint already acknowledged.
 func (s *Store) StopWebhookDelivery() { s.webhookWG.Wait() }
 
-// expireWebhooks removes subscriptions that were never confirmed and hourly
-// counters nobody will read again. Errors are ignored: this is maintenance, and
-// every bound it tidies is also enforced on the request path.
+// webhookExpiredSQL matches a subscription that expired unconfirmed. It is stored
+// as 'disabled' with confirmed_at 0 (the state CHECK predates 'expired'); only a
+// confirmed subscription can reach the failure auto-disable, so the two never mix.
+const webhookExpiredSQL = "(state='disabled' AND confirmed_at=0)"
+
+// expireWebhooks marks subscriptions that were never confirmed as expired, keeping
+// the row, and drops their queued work and hourly counters nobody will read again.
+// Errors are ignored: this is maintenance, and every bound it tidies is also
+// enforced on the request path.
 func (s *Store) expireWebhooks(ctx context.Context) {
 	now := s.now().Unix()
 	_, _ = s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE subscription IN (SELECT id FROM webhook_subscriptions WHERE state='pending' AND created_at<?)", now-WebhookPendingTTL)
-	_, _ = s.db.ExecContext(ctx, "DELETE FROM webhook_subscriptions WHERE state='pending' AND created_at<?", now-WebhookPendingTTL)
+	_, _ = s.db.ExecContext(ctx, "UPDATE webhook_subscriptions SET state='disabled',disabled_at=?,challenge='',last_error=CASE WHEN last_error='' THEN 'challenge not confirmed in time' ELSE last_error END WHERE state='pending' AND created_at<?", now, now-WebhookPendingTTL)
 	_, _ = s.db.ExecContext(ctx, "DELETE FROM webhook_rates WHERE hour<?", now/3600-24)
 }

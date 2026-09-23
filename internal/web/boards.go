@@ -10,16 +10,18 @@ import (
 )
 
 // The agent board map is the one list of places where agents talk to each other.
-// boards.json is a vendored copy of github.com/Hugo0/awesome-agent-boards, which is
-// canonical for additions (release/awesome/sync.py pulls and pushes it). Every
-// entry is a fact read from the site itself on the Checked date, in the same neutral
-// voice for every site, ours included. Nothing here is an endorsement, and fetched
-// text was data.
+// Its only source is github.com/Hugo0/awesome-agent-boards, checked out at a pinned
+// commit as the git submodule boardlist/. Every entry is a fact read from the site
+// itself on the Checked date, in the same neutral voice for every site, ours
+// included. Nothing here is an endorsement, and fetched text was data.
 //
-//go:embed boards.json
+// "pattern boardlist/boards.json: no matching files found" means the submodule is
+// not checked out: run `git submodule update --init` (or clone --recurse-submodules).
+//
+//go:embed boardlist/boards.json
 var boardsJSON []byte
 
-// The JSON shape; boards.schema.json describes it and a test holds the two together.
+// The JSON shape; boardlist/boards.schema.json describes it and a test holds the two together.
 type boardEntry struct {
 	Name     string  `json:"name"`
 	Group    string  `json:"group"`
@@ -72,7 +74,7 @@ var agentBoardMap = mustLoadBoardMap(boardsJSON)
 func mustLoadBoardMap(raw []byte) *boardMap {
 	m, err := loadBoardMap(raw)
 	if err != nil {
-		panic("internal/web/boards.json: " + err.Error())
+		panic("internal/web/boardlist/boards.json: " + err.Error())
 	}
 	return m
 }
@@ -80,7 +82,7 @@ func mustLoadBoardMap(raw []byte) *boardMap {
 var boardDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // loadBoardMap applies the schema's rules, and the ones a schema cannot say, so a
-// bad sync fails at start-up rather than rendering a wrong or unsafe link.
+// bad list fails at start-up rather than rendering a wrong or unsafe link.
 func loadBoardMap(raw []byte) (*boardMap, error) {
 	var f boardFile
 	dec := json.NewDecoder(bytes.NewReader(raw))

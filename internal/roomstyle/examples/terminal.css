@@ -1,0 +1,90 @@
+/* Phosphor terminal: the whole room as a green-on-black console. */
+:scope {
+  /* Trust text (bylines, times, labels) on its own plate, contrast-checked. */
+  --trust-ink: #7dff9b;
+  --trust-muted: #3fa45b;
+  --trust-plate: #050b07;
+  --ink: #7dff9b;
+  --ink-2: #5fd67c;
+  --muted: #3fa45b;
+  --faint: #2f7a45;
+  --line: #143d22;
+  --line-strong: #2f8f4a;
+  --surface: #050b07;
+  --surface-2: #08140c;
+  --surface-3: #0c1c11;
+  --field-border: #1d5a30;
+  --field-border-strong: #2f8f4a;
+  --focus: #7dff9b;
+  --primary-fill: #7dff9b;
+  --primary-ink: #041007;
+  --primary-hover: #b6ffc6;
+  --trust-font: ui-monospace, monospace;
+  background: #050b07;
+  color-scheme: dark;
+}
+
+body {
+  color: #7dff9b;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  background:
+    repeating-linear-gradient(0deg, rgb(0 0 0 / .22) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at 50% -10%, #12301b 0%, #050b07 60%) fixed;
+}
+
+.site-header { border-bottom: 1px dashed #2f8f4a; }
+.brand { color: #7dff9b; text-shadow: 0 0 8px rgb(125 255 155 / .6); }
+.nav a { color: #5fd67c; text-transform: lowercase; }
+.nav a[aria-current] { color: #b6ffc6; }
+.account { color: #5fd67c; }
+
+.room-header h1 {
+  font-family: ui-monospace, monospace;
+  color: #b6ffc6;
+  text-shadow: 0 0 12px rgb(125 255 155 / .55);
+}
+.room-header p { color: #3fa45b; }
+
+.post { border-bottom: 1px dashed #143d22; }
+.post-body {
+  background: #000;
+  border: 1px solid #1d5a30;
+  border-radius: 6px;
+  box-shadow: inset 0 0 40px rgb(0 0 0 / .9);
+  padding: 14px 18px 4px;
+  margin-bottom: 10px;
+}
+.post-body::before {
+  content: "guest@room:~$ cat memo.txt";
+  display: block;
+  font-size: 12px;
+  color: #2f8f4a;
+  margin-bottom: 6px;
+}
+.post-body .post-text {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: #7dff9b;
+  text-shadow: 0 0 2px #7dff9b, 0 0 10px rgb(125 255 155 / .35);
+}
+.post-body .post-text::after {
+  content: "";
+  display: inline-block;
+  width: .6em;
+  height: 1.1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: #7dff9b;
+  animation: blink 1.1s steps(1) infinite;
+}
+.post-body .post-image { filter: sepia(1) hue-rotate(70deg) saturate(3) brightness(.9); border-color: #2f8f4a; }
+
+.composer, .panel { border: 1px dashed #1d5a30; background: #08140c; }
+.composer textarea { background: #000; color: #7dff9b; caret-color: #7dff9b; }
+.button { border-radius: 0; }
+.footer { border-top: 1px dashed #143d22; }
+
+@keyframes blink { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .post-body .post-text::after { animation: none; }
+}

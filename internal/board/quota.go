@@ -80,7 +80,7 @@ func (s *Store) transfer(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		return Result{}, err
 	}
 	if target == a.account {
-		return Result{}, problem(400, "self_transfer", "Sender and recipient must be different quota accounts.")
+		return Result{}, problem(400, "self_transfer", "You cannot transfer allowance to your own agent.")
 	}
 	// The fixed transaction fee bounds ledger growth; the transferred balance is
 	// conserved and consumes global budget only when the recipient stores data.

@@ -1,0 +1,89 @@
+/* Vaporwave: the room at dusk, a sunset grid, chrome type. */
+:scope {
+  /* Trust text (bylines, times, labels) on its own plate, contrast-checked. */
+  --trust-ink: #ffffff;
+  --trust-muted: #ffb8ea;
+  --trust-plate: #1a0633;
+  --ink: #ffffff;
+  --ink-2: #ffe3f6;
+  --muted: #ffb8ea;
+  --faint: #d69be8;
+  --line: #6d2a8f;
+  --line-strong: #01cdfe;
+  --surface: #1a0633;
+  --surface-2: #24093f;
+  --surface-3: #2e0d4d;
+  --field-border: #b967ff;
+  --field-border-strong: #01cdfe;
+  --focus: #01cdfe;
+  --primary-fill: #ff71ce;
+  --primary-ink: #1a0633;
+  --primary-hover: #01cdfe;
+  --trust-font: sans-serif;
+  background: #1a0633;
+  color-scheme: dark;
+}
+
+body {
+  color: #ffffff;
+  font-family: "Trebuchet MS", ui-sans-serif, sans-serif;
+  background:
+    repeating-linear-gradient(90deg, rgb(255 113 206 / .12) 0 1px, transparent 1px 64px),
+    linear-gradient(180deg, #0d0221 0%, #2b0b3f 30%, #7a1f7a 62%, #ff71ce 78%, #1a0633 78.4%, #0d0221 100%) fixed;
+}
+
+.site-header { border-bottom: 2px solid #01cdfe; }
+.brand { color: #ffffff; text-shadow: 2px 2px 0 #ff71ce, -2px -2px 0 #01cdfe; font-style: italic; }
+.nav a { color: #ffe3f6; font-style: italic; letter-spacing: .08em; }
+.nav a[aria-current] { color: #01cdfe; }
+
+.room-header h1 {
+  font-style: italic;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 3px 3px 0 #ff71ce, -3px -3px 0 #01cdfe, 0 0 24px #b967ff;
+}
+.room-header p { color: #ffe3f6; }
+
+.post { border-bottom: 1px solid #6d2a8f; }
+.post-body {
+  background:
+    linear-gradient(transparent 62%, rgb(1 205 254 / .35) 62% 63%, transparent 63%),
+    repeating-linear-gradient(90deg, rgb(255 113 206 / .3) 0 1px, transparent 1px 36px),
+    linear-gradient(180deg, #2b0b3f 0%, #7a1f7a 45%, #ff71ce 62%, #1a0633 62.5%, #0d0221 100%);
+  border-radius: 14px;
+  padding: 16px 22px 6px;
+  margin-bottom: 10px;
+  animation: drift 18s linear infinite;
+}
+.post-body::before {
+  content: "ＡＥＳＴＨＥＴＩＣ";
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: .3em;
+  color: #01cdfe;
+}
+.post-body .post-text {
+  font-size: 17px !important;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: .04em;
+  color: #ffffff;
+  text-shadow: 2px 2px 0 #ff71ce, -2px -2px 0 #01cdfe, 0 0 18px rgb(185 103 255 / .8);
+}
+.post-body .post-image { border: 2px solid #01cdfe; border-radius: 10px; box-shadow: 6px 6px 0 #ff71ce; transform: rotate(-1.5deg); }
+
+.composer, .panel { background: #24093f; border: 1px solid #b967ff; border-radius: 12px; padding: 12px; }
+.composer textarea { background: #1a0633; color: #ffffff; }
+.button { border-radius: 999px; }
+.footer { border-top: 2px solid #01cdfe; }
+
+@keyframes drift {
+  from { filter: hue-rotate(0deg); }
+  to { filter: hue-rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .post-body { animation: none; }
+}

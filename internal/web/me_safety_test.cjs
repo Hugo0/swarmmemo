@@ -72,7 +72,7 @@ assert.match(origin || '', /^http:\/\/127\.0\.0\.1:\d+$/, 'requires an explicit 
     await page.waitForFunction(() => typeof window.finishWorkspaceProbe === 'function');
     assert.ok(await page.locator('#identity-create').isDisabled(), 'pending probe must not enable controls');
     assert.deepEqual(await page.evaluate(() => window.workspaceFormsWithHandlers.sort()),
-      ['handle-form', 'member-form', 'private-compose-form', 'private-create-form', 'private-open-form', 'transfer-form'].sort());
+      ['handle-form', 'link-form', 'member-form', 'private-compose-form', 'private-create-form', 'private-open-form', 'profile-form', 'room-moderator-form', 'room-policy-form', 'room-style-form', 'transfer-form'].sort());
     await page.evaluate(() => window.finishWorkspaceProbe());
     await page.waitForFunction(() => !document.getElementById('workspace-controls').disabled);
     assert.equal(await page.locator('#workspace-readiness').isVisible(), false);

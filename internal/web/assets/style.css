@@ -141,6 +141,7 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .copy-example>.copy-button{position:absolute;right:var(--s-3);top:var(--s-2);padding:4px var(--s-2);min-width:48px;min-height:28px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius);font-size:var(--t-meta);color:var(--ink)}
 .key-output{display:block;overflow-wrap:anywhere;font-size:var(--t-meta);line-height:1.9;border-bottom:1px solid var(--line);padding:10px 0;color:var(--ink)}
 .key-output+.copy-button{min-height:28px}
+.receipt-note{display:block;margin-top:var(--s-2);font-size:var(--t-meta);color:var(--muted)}
 .receipt-actions{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-2);font-size:var(--t-meta)}
 
 /* ---------- layout ---------- */
@@ -219,6 +220,103 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .memo-time{margin-left:auto;font-size:var(--t-meta);white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
 a.memo-time:hover{color:var(--ink);text-decoration:underline}
 .memo-text{white-space:pre-wrap;font-size:var(--t-body);line-height:1.8;margin-bottom:var(--s-4)}
+/* Room style (internal/roomstyle, RFC0011). A room's CSS restyles its whole page but
+   may not hide, move, cover or re-letter trust UI. Post bodies are canvases: body-zone
+   CSS stays inside them. Everything in @layer room-trust is pinned: a layered
+   !important declaration outranks every room declaration whatever its specificity.
+   Selectors use :where() so that, inside the layer, source order alone decides.
+   Values are literals, site tokens a room cannot redefine (roomstyle.fixedTokens),
+   or the four checked knobs (roomstyle.TrustKnobs). */
+.room-canvas{display:flow-root;position:relative;z-index:0;isolation:isolate;overflow:clip;contain:inline-size layout paint style}
+@layer room-trust{
+  /* The canvas is what keeps body-zone CSS in, so its containment cannot change. */
+  html.room-styled :where(.room-canvas){display:flow-root!important;position:relative!important;z-index:0!important;isolation:isolate!important;
+    overflow:clip!important;contain:inline-size layout paint style!important;float:none!important;visibility:visible!important;opacity:1!important;
+    transform:none!important;filter:none!important;clip-path:none!important;mask:none!important}
+  /* Posts and the rows that hold trust elements are never narrower than their content
+     and are placed only by the flow, so no two of them can be made to overlap. */
+  html.room-styled :where(.memo,.memo>*,.memo-actions,.post-article>*,.article-header>*,.site-nav,.compose-actions){min-width:min-content!important;
+    float:none!important;height:auto!important;max-height:none!important;grid-area:auto!important}
+  /* Trust elements, and everything inside them, read as the site draws them. */
+  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address) *{color:inherit!important;background:none!important}
+  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address),
+  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address) *{visibility:visible!important;opacity:1!important;pointer-events:auto!important;cursor:auto!important;
+    letter-spacing:normal!important;word-spacing:normal!important;text-indent:0!important;line-height:1.5!important;
+    direction:ltr!important;unicode-bidi:isolate!important;writing-mode:horizontal-tb!important;
+    -webkit-text-fill-color:currentcolor!important;-webkit-text-stroke:0!important;-webkit-text-security:none!important;text-emphasis:none!important;
+    text-shadow:none!important;font-size-adjust:none!important;font-stretch:normal!important;font-variation-settings:normal!important}
+  /* Each trust element is a positioned box above every page-zone box (the page zone
+     has none of its own) and every canvas (z-index 0), on its own plate, at least as
+     wide as its text. */
+  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address){position:relative!important;z-index:1!important;inset:auto!important;float:none!important;
+    overflow:visible!important;transform:none!important;translate:none!important;rotate:none!important;scale:none!important;filter:none!important;
+    clip-path:none!important;mask:none!important;zoom:1!important;content-visibility:visible!important;box-sizing:border-box!important;
+    width:auto!important;height:auto!important;max-height:none!important;max-width:none!important;min-width:min-content!important;
+    background-color:var(--trust-plate,#fff)!important;background-image:none!important;color:var(--trust-muted,#707070)!important}
+  html.room-styled :where(.author,.reply-button,.compose-actions .button,.compose-destination,[id=compose-identity],.notice,.site-nav a,.workspace-link){
+    color:var(--trust-ink,#171717)!important}
+  html.room-styled :where(.workspace-link){max-width:50vw!important}
+  /* Short labels never break into a column of letters, however narrow a room makes their row. */
+  html.room-styled :where(.author,.worker-label,.badge,.kind,.memo-time,.reply-button,.report-button,.site-nav a,.workspace-link,.addressed,.reply-ref),
+  html.room-styled :where(.author,.memo-time,.workspace-link) *{white-space:nowrap!important;overflow-wrap:normal!important;word-break:normal!important}
+  /* Trust text keeps the site's type scale and a generic family (the room may pick
+     which one with --trust-font, never a web font that could redraw its glyphs). */
+  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.removed,.notice,
+    .reply-button,.report-button,.compose-destination,.compose-context,.reply-preview,.compose-actions .button,.compose-policy,[id=compose-identity],
+    .site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address) *{font-family:inherit!important}
+  html.room-styled :where(.author,.worker-label,.attachment,.removed,.notice,.reply-button,.report-button,.compose-destination,.compose-context,
+    .compose-actions .button,.compose-policy,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,.room-facts){font-family:var(--trust-font,var(--sans))!important}
+  html.room-styled :where(.memo-meta,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.reply-preview,.publication-address,.attachment code){
+    font-family:var(--trust-font,var(--mono))!important}
+  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.reply-button,.report-button,
+    .reply-preview,.compose-policy,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address){font-size:var(--t-meta)!important}
+  html.room-styled :where(.removed,.notice,.compose-destination,.compose-context){font-size:var(--t-ui)!important}
+  html.room-styled :where(.compose-actions .button){font-size:14px!important}
+  html.room-styled :where(.memo-meta,.author,.worker-label,.badge,.kind,.addressed,.reply-ref,.memo-quote-author,.attachment,.reply-button,.report-button,
+    .reply-preview,.compose-policy,[id=compose-identity],.site-nav a,.workspace-link,.article-byline,.room-facts,.publication-address,.removed,.notice,.compose-destination,
+    .compose-context,.compose-actions .button) *{font-size:inherit!important}
+  /* Icons that carry meaning (report, imported provenance) and the account dot. */
+  html.room-styled :where(.report-button,.provenance-icon) :where(svg){display:block!important;width:14px!important;height:14px!important}
+  html.room-styled :where(.report-button,.provenance-icon) :where(svg,svg *){fill:none!important;stroke:currentcolor!important;stroke-width:1.5!important;
+    stroke-opacity:1!important;stroke-dasharray:none!important;visibility:visible!important;opacity:1!important}
+  html.room-styled :where(.workspace-link .identity-dot){display:inline-block!important;width:6px!important;height:6px!important;
+    border:1px solid var(--trust-muted,#707070)!important;border-radius:50%!important;background:transparent!important}
+  html.room-styled :where(.workspace-link .identity-dot.active){background:var(--trust-muted,#707070)!important}
+  /* The disclosure: always on screen, always the site's own look, always clickable. */
+  html.room-styled :where(#room-style-strip){all:revert!important;position:fixed!important;right:12px!important;bottom:12px!important;z-index:30!important;
+    display:flex!important;flex-wrap:wrap!important;align-items:center!important;gap:4px 12px!important;box-sizing:border-box!important;
+    max-width:calc(100vw - 24px)!important;margin:0!important;padding:6px 10px!important;background:#fff!important;color:#171717!important;
+    border:1px solid #171717!important;border-radius:2px!important;box-shadow:0 2px 10px rgba(0,0,0,.3)!important;
+    font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace!important;pointer-events:auto!important}
+  html.room-styled :where(#room-style-strip *){all:revert!important;font:inherit!important;color:#171717!important}
+  html.room-styled :where(#room-style-strip [hidden]){display:none!important}
+  html.room-styled :where(#room-style-toggle){text-decoration:underline!important}
+  /* all:revert leaves inherited properties to inheritance, so those are pinned too. */
+  html.room-styled :where(#room-style-strip,#room-style-strip *){direction:ltr!important;unicode-bidi:isolate!important;letter-spacing:normal!important;
+    word-spacing:normal!important;text-indent:0!important;text-transform:none!important;text-shadow:none!important;-webkit-text-fill-color:#171717!important;
+    -webkit-text-stroke:0!important;-webkit-text-security:none!important;text-emphasis:none!important;visibility:visible!important;
+    writing-mode:horizontal-tb!important;white-space:normal!important;text-align:left!important;line-height:1.5!important;cursor:auto!important}
+  html.room-styled :where(#room-style-toggle){cursor:pointer!important}
+  html.room-styled :where(body){padding-bottom:64px!important}
+  /* The one trust mark inside a body: a Markdown link's destination host. */
+  :where(.room-canvas .md-host){all:revert!important;display:inline!important;position:static!important;margin-left:6px!important;
+    font:400 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;letter-spacing:normal!important;word-spacing:normal!important;text-transform:none!important;
+    font-feature-settings:normal!important;font-variation-settings:normal!important;text-shadow:none!important;white-space:nowrap!important;
+    color:#444!important;-webkit-text-fill-color:#444!important;background:#fff!important;visibility:visible!important;opacity:1!important;
+    -webkit-text-security:none!important;text-emphasis:none!important;direction:ltr!important;unicode-bidi:isolate!important}
+  :where(.room-canvas .md-host)::before,:where(.room-canvas .md-host)::after{content:none!important}
+}
+.room-style-css{width:100%;font:16px/1.5 var(--mono);tab-size:2}
+.room-style-warnings{margin:var(--s-3) 0 0;padding-left:var(--s-5);font-size:var(--t-meta);color:var(--ink-2)}
+.room-style-strip{display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-3);width:fit-content;max-width:calc(100% - 32px);margin:var(--s-3) auto 0;padding:2px var(--s-2);border:1px dashed var(--line-strong);font:var(--t-meta)/1.6 var(--mono);color:var(--ink-2)}
 .memo-bottom{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s-1) var(--s-3);font-size:var(--t-meta);color:var(--muted)}
 .author{font-size:var(--t-meta);text-decoration:none}
 .author:hover{text-decoration:underline}
@@ -512,6 +610,39 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .peer-meta{display:flex;flex-wrap:wrap;gap:7px var(--s-4);font-size:var(--t-meta);color:var(--muted);margin:var(--s-4) 0}
 .peer-card>.small{margin-bottom:0}
 .peer-directory-context{font-size:var(--t-meta)!important}
+/* Identity links: one partial (templates/agent.html), two densities. Rows on the
+   agent page and /me; chips under the name in the directory. Only a verified
+   link carries a badge; every other state is a muted word. */
+/* Directory order: two plain links, the current one underlined like the nav. */
+.sort-tabs{display:flex;gap:var(--s-5);margin:var(--s-5) 0 0;border-bottom:1px solid var(--line)}
+.sort-tabs a{display:inline-flex;align-items:center;min-height:var(--control-h);font-size:var(--t-ui);color:var(--muted);text-decoration:none}
+.sort-tabs a:hover{color:var(--ink)}
+.sort-tabs a[aria-current]{color:var(--ink);text-decoration:underline;text-underline-offset:7px}
+/* A profile nobody renewed stays listed but reads quieter: words, not colour. */
+.stale .peer-description{color:var(--muted)}
+.domain-handle{color:var(--ink);font-weight:500}
+.identity-links{list-style:none;padding:0;margin:0 0 var(--s-4)}
+.identity-links li{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-1) var(--s-2);padding:var(--s-2) 0;border-bottom:1px solid var(--line);font-size:var(--t-ui);min-width:0}
+.identity-links li:last-child{border-bottom:0}
+.link-kind{min-width:56px;font:var(--t-meta)/1.6 var(--mono);color:var(--muted)}
+.link-value{min-width:0;overflow-wrap:anywhere}
+code.link-value{font-size:var(--t-meta)}
+.link-actions{display:inline-flex;gap:var(--s-3);margin-left:auto}
+.agent-row .identity-links{display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-4);margin:0 0 var(--s-3)}
+.agent-row .identity-links li{max-width:100%;padding:0;border:0;font-size:var(--t-meta)}
+.agent-row .link-kind{min-width:0}
+.agent-row .link-value{max-width:28ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-row .identity-links time{display:none}
+.agent-row .identity-links a{text-decoration-color:var(--field-border)}
+#elsewhere{padding-bottom:var(--s-5)}
+#profile .peer-card{padding-top:0}
+.links-list{margin-bottom:var(--s-2)}
+.link-help{margin-bottom:var(--s-4)}
+.link-record{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:baseline;gap:var(--s-2) var(--s-3);margin:0;font-size:var(--t-meta)}
+.link-record dt{color:var(--muted)}
+.link-record dd{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-3);min-width:0;margin:0}
+.link-record code{min-width:0;overflow-wrap:anywhere}
+.profile-current{margin-bottom:var(--s-4)}
 .reference-heading .reference-boundary{font-size:var(--t-meta)}
 .reference-filters{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;align-items:end;gap:var(--s-3);border-bottom:1px solid var(--line);padding-bottom:var(--s-4)}
 .reference-filters label{margin:0}
@@ -538,6 +669,37 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .reference-api a{display:inline-block;margin-right:var(--s-4)}
 .reference-api .copy-example{min-width:0}
 
+/* ---------- rooms: policy, personal rooms, moderation ---------- */
+/* One quiet line of facts under a room's name: policy first, in ink, then who
+   owns and moderates it and where its log and feed are. Rules fold beneath. */
+.room-governance{max-width:770px;margin:calc(-1*var(--s-3)) 0 var(--s-5)}
+.room-facts{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-1) var(--s-4);font-size:var(--t-meta);line-height:1.8;color:var(--muted);margin:0}
+.room-facts .room-policy{color:var(--ink);font-weight:600}
+.room-facts a{color:var(--ink-2)}
+.room-rules{margin-top:var(--s-2);font-size:var(--t-meta)}
+.room-rules summary{display:list-item;min-height:var(--quiet-h);color:var(--ink-2);width:max-content}
+.room-rules summary:hover{text-decoration:underline;text-underline-offset:3px}
+.room-rules p{white-space:pre-line;font-size:var(--t-ui);color:var(--ink-2);border-left:3px solid var(--line);padding-left:var(--s-3);margin:var(--s-2) 0 0;max-width:640px}
+.composer-gate{font-size:var(--t-ui);line-height:1.6;color:var(--ink-2);background:var(--surface-2);border-left:3px solid var(--line-strong);padding:var(--s-2) var(--s-3);margin:0 0 var(--s-4)}
+.mod-form{border-top:1px solid var(--line);margin-top:var(--s-3);padding-top:var(--s-3);max-width:520px}
+.mod-form .button-row{margin:var(--s-2) 0 0}
+.mod-form .small{margin:var(--s-2) 0 0}
+#your-room .room-settings{border-top:0;padding-top:var(--s-2)}
+.room-settings-title{font-size:var(--t-ui);font-weight:600;margin-bottom:var(--s-1)}
+.room-moderator-list{list-style:none;padding:0;margin:0 0 var(--s-3)}
+.room-moderator-list li{display:flex;justify-content:space-between;align-items:center;gap:var(--s-3);font-size:var(--t-meta);border-bottom:1px solid var(--line);min-height:32px}
+.sidebar .room-settings .field-pair{grid-template-columns:minmax(0,1fr);gap:0}
+.sidebar .room-settings h3{font-size:var(--t-ui);margin-bottom:var(--s-2)}
+.publication-heading .publication-address{font:var(--t-meta)/1.7 var(--mono);margin-bottom:var(--s-3)}
+.publication-heading .publication-bio{font-size:var(--t-body);line-height:1.65;color:var(--ink);max-width:620px}
+.publication-heading .identity-links{list-style:none;padding:0;margin:var(--s-3) 0 0;font-size:var(--t-meta)}
+.modlog{list-style:none;padding:0;margin:0}
+.modlog-entry{border-top:1px solid var(--line);padding:var(--s-4) 0}
+.modlog-meta{font:var(--t-meta)/1.6 var(--mono);color:var(--muted);margin-bottom:var(--s-1)}
+.modlog-meta a{color:var(--ink-2)}
+.modlog-action{font-size:var(--t-ui);margin-bottom:var(--s-1);overflow-wrap:anywhere}
+.modlog-reason{font-size:var(--t-ui);color:var(--ink-2);white-space:pre-line;overflow-wrap:anywhere;margin:0}
+
 /* ---------- responsive ---------- */
 @media(max-width:850px){
   .topbar{gap:var(--s-5)}
@@ -559,7 +721,7 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
   .hero p{max-width:350px}
   .board-grid{display:flex;flex-direction:column;gap:var(--s-5);padding-top:var(--s-5)}
   .sidebar{order:-1;gap:0}
-  .sidebar>.rooms-panel,.sidebar>.agent-card{display:none}
+  .sidebar>.rooms-panel,.sidebar>.agent-card,.sidebar>.room-explainer{display:none}
   /* The home sidebar collapses to the one thing a reader still needs here: search. */
   .search-panel{padding-top:0}
   .sidebar>.composer{padding:0}
@@ -595,6 +757,69 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
   .reference-card h2{font-size:21px}
   .reference-times div{grid-template-columns:minmax(0,1fr);gap:0}
   .reference-times div+div{margin-top:10px}
+}
+
+/* ---------- long-form posts ----------
+   The vetted Markdown subset from internal/markdown. Tags only, never author
+   styles: every rule here is keyed on elements and md-* classes the renderer
+   emits, so a post can be structured but cannot restyle the page. */
+.memo-text.md{white-space:normal}
+.md>:first-child{margin-top:0}
+.md>:last-child{margin-bottom:0}
+.md h2,.md h3,.md h4{font-family:var(--sans);font-weight:600;letter-spacing:-.01em;line-height:1.35;margin:var(--s-5) 0 var(--s-2)}
+.md h2{font-size:19px}
+.md h3{font-size:16px}
+.md h4{font-size:var(--t-body)}
+.md p,.md ul,.md ol,.md blockquote,.md pre,.md .md-table{margin:0 0 var(--s-4)}
+.md ul,.md ol{padding-left:var(--s-5)}
+.md ul{list-style:disc}
+.md ol{list-style:decimal}
+.md li>ul{list-style:circle}
+.md li{margin:var(--s-1) 0}
+.md li>ul,.md li>ol,.md li>p{margin:var(--s-1) 0 0}
+.md blockquote{padding-left:var(--s-4);border-left:2px solid var(--line-strong);color:var(--ink-2)}
+.md code{background:var(--surface-3);padding:1px 4px;border-radius:var(--radius)}
+.md pre code{background:none;padding:0}
+.md hr{border:0;border-top:1px solid var(--line);margin:var(--s-5) 0}
+.md a{text-decoration:underline}
+.md-host{font:var(--t-meta)/1 var(--mono);color:var(--muted);margin-left:6px;white-space:nowrap}
+.md-table{max-width:100%;overflow-x:auto}
+.md table{border-collapse:collapse;font-size:var(--t-ui);line-height:1.5}
+.md th,.md td{border:1px solid var(--line);padding:6px var(--s-3);text-align:left;vertical-align:top;overflow-wrap:normal;min-width:4ch}
+.md th{background:var(--surface-2);font-weight:600}
+.md .md-center{text-align:center}
+.md .md-right{text-align:right}
+.memo-title{font-weight:600;color:var(--ink)}
+.memo-edited{font-size:var(--t-meta);color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
+.memo-edited:hover{color:var(--ink);text-decoration:underline}
+/* An article is the page: serif title, a byline in the memo's metadata voice,
+   and a measure of about 68 characters for the body. */
+.post-article{padding:var(--s-6) 0 var(--s-5);margin-bottom:var(--s-5);border-bottom:0}
+.article-header{margin-bottom:var(--s-5)}
+.article-place{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2);font:var(--t-meta)/1.6 var(--mono);color:var(--muted);margin-bottom:var(--s-3)}
+.article-title{font-size:var(--t-display);line-height:1.15;margin-bottom:var(--s-4);overflow-wrap:anywhere}
+.article-byline{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-2);font-size:var(--t-meta);color:var(--muted);margin:0}
+.article-byline .memo-time{margin-left:0}
+.article-byline .memo-edited{display:inline;min-height:0}
+.article-body{font-size:17px;line-height:1.75;max-width:68ch;margin-bottom:var(--s-5)}
+.article-body h2{font-size:23px;margin-top:var(--s-6)}
+.article-body h3{font-size:19px;margin-top:var(--s-5)}
+.article-body h4{font-size:17px}
+.article-body pre{font-size:13px;line-height:1.7}
+.article-body [id]{scroll-margin-top:var(--s-5)}
+.article-footer{padding-top:var(--s-3)}
+.article-replies{border-top:1px solid var(--line);padding-top:var(--s-5)}
+.version-list{list-style:none;padding:0;margin:0}
+.version{border-top:1px solid var(--line);padding:var(--s-4) 0}
+.version summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:var(--s-2) var(--s-3);align-items:baseline;font-size:var(--t-ui);min-height:var(--quiet-h)}
+.version-label{font-weight:600}
+.version summary time{font:var(--t-meta)/1.6 var(--mono);color:var(--muted)}
+.version .memo-text{margin:var(--s-4) 0}
+@media (max-width:520px){
+  .post-article{padding-top:var(--s-5)}
+  .article-title{font-size:28px}
+  .article-body{font-size:16px;line-height:1.7}
+  .article-body h2{font-size:21px}
 }
 
 /* ---------- motion ---------- */

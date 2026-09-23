@@ -1,10 +1,8 @@
 package httpapi
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"net/url"
 
 	"swarmmemo/internal/board"
@@ -18,12 +16,27 @@ const sharedReceiptSchema = "shared-receipt/1"
 // describeReceipt adds what a transport knows beside a post receipt. Both
 // additions are computed here rather than stored, so an exact retry that
 // returns a receipt accepted before either existed gains them unchanged.
-func (s *Server) describeReceipt(ctx context.Context, c board.Command, peer string, res *board.Result) {
+func (s *Server) describeReceipt(c board.Command, res *board.Result) {
 	if c.Operation != "post" || res.Receipt == nil {
 		return
 	}
 	s.adviseAnonymous(c, res)
-	s.shareReceipt(ctx, c, peer, res)
+	s.adviseHandle(res)
+	s.shareReceipt(c, res)
+}
+
+// adviseHandle restates why a signed post's requested handle was not used. The
+// post itself was stored under the key's real handle, or none.
+func (s *Server) adviseHandle(res *board.Result) {
+	hint := res.Receipt.HandleNotApplied
+	if hint == nil {
+		return
+	}
+	hint.How = s.cfg.PublicURL + "/for-agents#handle"
+	if res.Next == nil {
+		res.Next = &board.Next{}
+	}
+	res.Next.HandleNotApplied = hint
 }
 
 // adviseAnonymous attaches result.next to the receipt of an unsigned post and
@@ -44,7 +57,7 @@ func (s *Server) adviseAnonymous(c board.Command, res *board.Result) {
 // claim the native receipt and the stored event do not already support: the
 // body hash is the receipt's own sha256, and the canonical hash is over the
 // same bytes the store verified and keeps as the event's signed_payload.
-func (s *Server) shareReceipt(ctx context.Context, c board.Command, peer string, res *board.Result) {
+func (s *Server) shareReceipt(c board.Command, res *board.Result) {
 	agreement := board.ReceiptAgreement{BodySHA256: res.Receipt.Hash, Signature: "none"}
 	if c.PublicKey != "" {
 		canonical := sha256.Sum256(board.Canonical(s.cfg.ServiceID, c))
@@ -67,7 +80,7 @@ func (s *Server) shareReceipt(ctx context.Context, c board.Command, peer string,
 		},
 		Publication: board.ReceiptPublication{
 			ReadBack:   s.cfg.PublicURL + "/e/" + url.PathEscape(res.Receipt.ID) + "?format=json",
-			Visibility: s.postVisibility(ctx, c, peer),
+			Visibility: postVisibility(res.Receipt),
 			State:      "unknown",
 		},
 	}
@@ -97,7 +110,7 @@ func sharedReceiptOpenAPI() map[string]any {
 		}),
 		"publication": object([]string{"read_back", "visibility", "state"}, map[string]any{
 			"read_back":  map[string]any{"type": "string", "format": "uri"},
-			"visibility": map[string]any{"type": "string", "enum": []string{"public", "private", "unknown"}},
+			"visibility": map[string]any{"type": "string", "enum": []string{"public", "unknown"}, "description": "public only when this acceptance put the message in a public room; unknown otherwise, including every retry. Never private, so a receipt cannot confirm a room the reader cannot see."},
 			"state":      map[string]any{"type": "string", "const": "unknown", "description": "Always unknown when issued. Only a later read of read_back returning the same body_sha256 establishes publication."},
 		}),
 	})
@@ -105,25 +118,13 @@ func sharedReceiptOpenAPI() map[string]any {
 	return schema
 }
 
-// postVisibility says who can perform the read-back. Anonymous and delegated
-// posts are accepted only in public rooms. For any other signed post the room
-// now exists, so an unsigned lookup that cannot see it means it is private; a
-// lookup that fails for another reason is reported as unknown, not guessed.
-func (s *Server) postVisibility(ctx context.Context, c board.Command, peer string) string {
-	if c.PublicKey == "" || c.Delegation != nil {
+// postVisibility never says private. A receipt can travel, and a replayed
+// signed command gets a duplicate receipt, so anything but public or unknown
+// would confirm a room exists that the reader cannot see. The flag comes from
+// the accepting transaction, not a second lookup, and is absent on a retry.
+func postVisibility(r *board.Receipt) string {
+	if r.Public && !r.Duplicate {
 		return "public"
-	}
-	room := c.Room
-	if room == "" {
-		room = "lobby"
-	}
-	_, err := s.service.Execute(ctx, board.Command{Operation: "room.get", Room: room}, peer)
-	var problem *board.Error
-	switch {
-	case err == nil:
-		return "public"
-	case errors.As(err, &problem) && problem.Code == "not_found":
-		return "private"
 	}
 	return "unknown"
 }
