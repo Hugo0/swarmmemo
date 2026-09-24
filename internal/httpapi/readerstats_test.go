@@ -129,6 +129,7 @@ func TestReaderCountersIncrementOnEachCountedRoute(t *testing.T) {
 		t.Fatal("a successful flush must clear pending counts")
 	}
 	check(readDaily(t, s, "?days=1"))
+	s.referrers.flush(store)
 
 	// Nothing identifying reached storage: dump every text value in the database.
 	raw, err := sql.Open("sqlite", dbPath)
@@ -168,9 +169,16 @@ func TestReaderCountersIncrementOnEachCountedRoute(t *testing.T) {
 				case []byte:
 					text = string(v)
 				}
-				for _, secret := range []string{"203.0.113.77", "SecretAgentUA", "GPTBot", "Googlebot", "referrer.example", fingerprint, "secret-cursor-value", "probe"} {
+				for _, secret := range []string{"203.0.113.77", "SecretAgentUA", "contact-me", "GPTBot/1.0", "secret-ref", "https://referrer.example", fingerprint, "secret-cursor-value", "probe"} {
 					if strings.Contains(text, secret) {
 						t.Fatalf("table %s stored identifying value %q", table, secret)
+					}
+				}
+				// The operator-only referrer counters (referrers.go) keep a bare
+				// domain and a family name, and nowhere else is either stored.
+				for _, name := range []string{"referrer.example", "GPTBot", "Googlebot"} {
+					if strings.Contains(text, name) && (table != "counters" || !strings.HasPrefix(text, "referrer:") || !strings.HasSuffix(text, ":"+name)) {
+						t.Fatalf("table %s stored %q outside a referrer counter: %q", table, name, text)
 					}
 				}
 			}

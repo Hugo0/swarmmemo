@@ -47,7 +47,7 @@ var vias = []Via{
 	{Name: "dns", Label: "DNS", Carrier: "a signed command in DNS TXT queries (DNS write)", Transports: []string{"dns"}},
 	{Name: "tcp", Label: "netcat", Carrier: "the TCP line protocol: `POST` or `CMD` over netcat", Transports: []string{"tcp"}},
 	{Name: "gemini", Label: "Gemini", Carrier: "a Gemini input prompt", Transports: []string{"gemini"}},
-	{Name: "email", Label: "email", Carrier: "mail to `ROOM@post.HOST`: the SMTP listener, or the operator's email bridge", Bridge: true, Transports: []string{"smtp", "email"}},
+	{Name: "email", Label: "email", Carrier: "mail to the address `/capabilities` lists: `ROOM@HOST` through the operator's email bridge, or the SMTP listener", Bridge: true, Transports: []string{"smtp", "email"}},
 	{Name: "nostr", Label: "Nostr", Carrier: "a Nostr note the in-process Nostr bridge reissued; read back from the message's `forwarded.origin_service`", Transports: []string{"nostr"}},
 }
 

@@ -133,6 +133,21 @@ func TestSupersession(t *testing.T) {
 	}
 }
 
+// sitemapArticles is the Markdown thread roots the sitemap lists, each at its
+// newest version under its first ID.
+func sitemapArticles(t *testing.T, s *Store) []Message {
+	t.Helper()
+	var articles []Message
+	if err := s.PublicSitemapPosts(testContext, 0, 1000, func(m Message) {
+		if m.Format == PostFormatMarkdown {
+			articles = append(articles, m)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return articles
+}
+
 func TestSupersessionExportAndArticles(t *testing.T) {
 	s := openTest(t, Config{ArchiveDelaySeconds: -1})
 	author := keyFor(204)
@@ -146,9 +161,9 @@ func TestSupersessionExportAndArticles(t *testing.T) {
 	s.now = func() time.Time { return time.Unix(testTime+60, 0) }
 	v2 := run(t, s, signed(author, Command{Operation: "post", Room: "guides", Text: "# Article v2\n\nTwo.", Timestamp: testTime + 60, Data: dataJSON(`"format":"markdown","supersedes":"` + v1.ID + `"`)})).Receipt
 
-	articles, err := s.PublicArticles(testContext, 10)
-	if err != nil || len(articles) != 1 || articles[0].ID != v2.ID || articles[0].Origin() != v1.ID {
-		t.Fatalf("articles: %v %+v", err, articles)
+	articles := sitemapArticles(t, s)
+	if len(articles) != 1 || articles[0].ID != v1.ID || !strings.HasPrefix(articles[0].Text, "# Article v2") || articles[0].CreatedAt != testTime+60 {
+		t.Fatalf("articles: %+v", articles)
 	}
 
 	export := run(t, s, Command{Operation: "export", Before: testTime + 120})
@@ -228,10 +243,7 @@ func TestHiddenOriginalStopsVersions(t *testing.T) {
 	if err := s.Moderate(testContext, a1, "spam", true); err != nil {
 		t.Fatal(err)
 	}
-	articles, err := s.PublicArticles(testContext, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
+	articles := sitemapArticles(t, s)
 	guides, err := s.PublicRoomArticles(testContext, "blog", []string{keyID(author)}, 10)
 	if err != nil {
 		t.Fatal(err)

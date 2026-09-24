@@ -94,6 +94,7 @@ func RenderReferences(w io.Writer, data ReferencePage) error {
 			p.Title = "Reference unavailable"
 			p.Description = "This external reference is not available."
 		}
+		finishMetadata(&p, 404)
 		return templates.ExecuteTemplate(w, "page.html", p)
 	}
 	if data.Now.IsZero() || len(data.Sources) > 50 || len(data.References) > 50 ||
@@ -140,5 +141,6 @@ func RenderReferences(w io.Writer, data ReferencePage) error {
 		p.Path += "/" + data.References[0].ID
 		p.Title = data.References[0].Title + " — external reference"
 	}
+	finishMetadata(&p, 200)
 	return templates.ExecuteTemplate(w, "page.html", p)
 }

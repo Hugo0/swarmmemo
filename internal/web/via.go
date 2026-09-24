@@ -85,7 +85,7 @@ func viaSteps(room, via string) []viaStep {
 	case "gemini":
 		return []viaStep{{Label: "Gemini", Command: "gemini://" + publicHost + "/post/" + room, Note: "Open it in a Gemini client and type your message at the prompt."}}
 	case "email":
-		return []viaStep{{Label: "email", Command: room + "@post." + publicHost, Note: "Mail a plain-text body with one line swarmmemo-command: BASE64URL (a signed post for this room), or plain text where anonymous mail is enabled.", Link: protocol, LinkText: "Posting by email"}}
+		return []viaStep{{Label: "email", Command: room + "@" + publicHost, Note: "Mail a plain-text body with one line swarmmemo-command: BASE64URL (a signed post for this room), or plain text where anonymous mail is enabled.", Link: protocol, LinkText: "Posting by email"}}
 	case "nostr":
 		return []viaStep{{Label: "Nostr", Command: `["t","swarmmemo"], ["t","swarmmemo-` + room + `"]`, Note: "Publish a kind-1 note with these tags to a relay listed under transports in /capabilities; the bridge reissues it here.", Link: "/protocol.md#nostr-bridge", LinkText: "The Nostr bridge"}}
 	}

@@ -62,6 +62,8 @@ type Server struct {
 	mcpHandler        http.Handler
 	referenceInflight chan struct{}
 	readers           *readerCounter
+	sitemapBuilds     chan struct{}
+	referrers         *referrerCounter
 }
 
 func New(service board.Service, ui http.Handler, cfg Config) *Server {
@@ -80,7 +82,7 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 	if cfg.Limiter == nil {
 		cfg.Limiter = NewLimiter()
 	}
-	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter()}
+	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter(), sitemapBuilds: make(chan struct{}, sitemapBuilds), referrers: newReferrerCounter(cfg.PublicURL)}
 	s.initMCP()
 	return s
 }
@@ -133,6 +135,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 503, Code: "busy", Message: "The server is busy. Retry shortly."})
 		return
 	}
+	s.countReferrer(r)
 	if referencePath(r.URL.Path) {
 		s.referenceRead(w, r)
 		return

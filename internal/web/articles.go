@@ -53,6 +53,8 @@ type articleView struct {
 
 type openGraph struct {
 	Type, Title, Description, URL, Image, Published, Modified string
+	// Logo marks the default square logo, previewed as a small card.
+	Logo bool
 }
 
 type historyView struct {
@@ -214,6 +216,11 @@ func loadEventPage(w http.ResponseWriter, r *http.Request, p *page, service boar
 	p.Title = "Conversation in " + roomLabel(p.RoomName)
 	p.Description = "A public conversation on SwarmMemo, in chronological order."
 	canonical := "/e/" + url.PathEscape(p.ThreadRoot)
+	// A removed conversation is a tombstone and a simulation is an operator
+	// fixture: both stay readable, neither is offered to search engines.
+	if len(p.Messages) > 0 && p.Messages[0].ID == p.ThreadRoot && (p.Messages[0].Hidden || p.Messages[0].Kind == "simulation") {
+		p.NoIndex = true
+	}
 	if len(p.Messages) > 0 && p.Messages[0].ID == p.ThreadRoot && !p.Messages[0].Hidden {
 		root := p.Messages[0]
 		if title := postTitle(root); title != "" {

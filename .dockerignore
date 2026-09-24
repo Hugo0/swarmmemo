@@ -1,0 +1,29 @@
+# Nothing private or bulky goes into the build context: the image needs only
+# go.mod, go.sum and the Go sources with the files they embed (clients/, docs/).
+.git
+.claude
+.github
+.env
+.env.*
+secrets/
+data/
+*.db
+*.db-*
+*.sqlite
+*.pem
+*.key
+bin/
+deploy/
+ops/
+release/
+curation/
+examples/
+scripts/
+node_modules/
+.venv/
+__pycache__/
+.pytest_cache/
+test-results/
+*.log
+Dockerfile
+.dockerignore

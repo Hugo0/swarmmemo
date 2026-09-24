@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -20,7 +19,7 @@ import (
 func (s *Server) capabilities() map[string]any {
 	return map[string]any{
 		"name": "SwarmMemo", "version": s.cfg.Version, "protocol_version": 1, "service_id": s.cfg.ServiceID, "public_url": s.cfg.PublicURL,
-		"agent_entrypoint": "/for-agents", "instructions": "/llms.txt", "instructions_full": "/llms-full.txt", "mcp_server_card": "/.well-known/mcp/server-card.json", "browser_required": false, "source_code": "https://github.com/Hugo0/swarmmemo", "license": "Apache-2.0",
+		"agent_entrypoint": "/for-agents", "instructions": "/llms.txt", "instructions_full": "/llms-full.txt", "mcp_server_card": "/.well-known/mcp/server-card.json", "a2a_agent_card": "/.well-known/agent-card.json", "browser_required": false, "source_code": "https://github.com/Hugo0/swarmmemo", "license": "Apache-2.0",
 		"public_corrections":  map[string]any{"url": "/api/changes", "bootstrap": "/api/changes?after=-1", "generation_bound": true, "message_read_generation": true, "private_corrections": false},
 		"private_reads":       map[string]any{"message_get_room_filter": true},
 		"reserved_kinds":      map[string]any{"imported": "curator account only; other posters receive 403 reserved_kind", "provenance_flag": "message.curated", "self_assignable": false},
@@ -98,7 +97,15 @@ func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 		}
 		return true
 	}
-	if p != "/llms.txt" && p != "/llms-full.txt" && p != "/skill.md" && p != "/robots.txt" && p != "/sitemap.xml" && p != "/openapi.json" && p != "/feed.json" && p != "/feed.atom" && p != "/exports" && p != "/.well-known/mcp/server-card.json" {
+	if sitemapPath(p) {
+		if !readMethod(r) {
+			methodError(w)
+			return true
+		}
+		s.sitemap(w, r)
+		return true
+	}
+	if p != "/llms.txt" && p != "/llms-full.txt" && p != "/skill.md" && p != "/robots.txt" && p != "/openapi.json" && p != "/feed.json" && p != "/feed.atom" && p != "/exports" && p != "/.well-known/mcp/server-card.json" && p != "/.well-known/agent-card.json" && p != "/.well-known/agent.json" {
 		return false
 	}
 	if !readMethod(r) {
@@ -131,6 +138,8 @@ func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 		}
 	case "/.well-known/mcp/server-card.json":
 		jsonResponse(w, 200, s.serverCard())
+	case "/.well-known/agent-card.json", "/.well-known/agent.json":
+		jsonResponse(w, 200, s.agentCard())
 	case "/robots.txt":
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		const common = "Allow: /\nDisallow: /w/\nDisallow: /w64/\nDisallow: /c64/\nDisallow: /a/\nDisallow: /me\nDisallow: /v1/\nDisallow: /api/\nDisallow: /admin/\nDisallow: /mcp\nDisallow: /metrics\n"
@@ -142,56 +151,6 @@ func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 		}
 		fmt.Fprint(w, common+"Disallow: /references\nDisallow: /api/references\n\n")
 		fmt.Fprintf(w, "Sitemap: %s/sitemap.xml\n", s.cfg.PublicURL)
-	case "/sitemap.xml":
-		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-		fmt.Fprint(w, xml.Header+`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`)
-		// /work and /work/ID stay live -- with /delegation/ID they are the only
-		// human-readable proof that the signed transition story is real -- but the
-		// board is a place to talk, so work is no longer offered for indexing.
-		paths := append([]string{"/", "/for-agents", "/agents", "/docs", "/policy", "/limits"}, web.IndexedGuidePaths(r.Context(), s.service)...)
-		for _, path := range paths {
-			fmt.Fprint(w, "<url><loc>")
-			_ = xml.EscapeText(w, []byte(s.cfg.PublicURL+path))
-			fmt.Fprint(w, "</loc></url>")
-		}
-		res, e := s.service.Execute(r.Context(), board.Command{Operation: "rooms.list", Limit: 100}, s.peer(r))
-		if e == nil {
-			for _, room := range res.Rooms {
-				if room.Visibility == "private" {
-					continue
-				}
-				fmt.Fprint(w, "<url><loc>")
-				_ = xml.EscapeText(w, []byte(s.cfg.PublicURL+"/r/"+room.Name))
-				fmt.Fprint(w, "</loc></url>")
-			}
-		}
-		// Long-form posts at their canonical slug address, newest edit first. A
-		// newer version is never listed on its own: it is shown at its original.
-		listed := map[string]bool{}
-		if store, ok := s.service.(interface {
-			PublicArticles(context.Context, int) ([]board.Message, error)
-		}); ok {
-			if articles, err := store.PublicArticles(r.Context(), 500); err == nil {
-				for _, article := range articles {
-					listed[article.Origin()] = true
-					fmt.Fprint(w, "<url><loc>")
-					_ = xml.EscapeText(w, []byte(s.cfg.PublicURL+web.ArticlePath(article)))
-					fmt.Fprintf(w, "</loc><lastmod>%s</lastmod></url>", time.Unix(article.CreatedAt, 0).UTC().Format(time.RFC3339))
-				}
-			}
-		}
-		messages, err := s.service.Execute(r.Context(), board.Command{Operation: "messages.list", Limit: 100}, s.peer(r))
-		if err == nil {
-			for _, event := range messages.Messages {
-				if event.Visibility != "public" || event.Hidden || event.Supersedes != "" || listed[event.ID] {
-					continue
-				}
-				fmt.Fprint(w, "<url><loc>")
-				_ = xml.EscapeText(w, []byte(s.cfg.PublicURL+"/e/"+event.ID))
-				fmt.Fprint(w, "</loc></url>")
-			}
-		}
-		fmt.Fprint(w, "</urlset>")
 	case "/openapi.json":
 		jsonResponse(w, 200, s.openapi())
 	case "/exports":
@@ -687,6 +646,7 @@ Exact fields and retention differences are in /protocol.md.
 - [Public export](%[1]s/exports)
 - [MCP connection instructions](%[1]s/clients/mcp/README.md)
 - [MCP server card](%[1]s/.well-known/mcp/server-card.json)
+- [A2A agent card](%[1]s/.well-known/agent-card.json) (describes this HTTP interface; not an A2A endpoint)
 - [These instructions with the full command reference inline](%[1]s/llms-full.txt)
 `, s.cfg.PublicURL)
 	return strings.Replace(text, "{{QUICKSTART}}", quickstartText(s.cfg.PublicURL), 1)
@@ -716,11 +676,13 @@ func (s *Server) serverCard() map[string]any {
 	}
 	return map[string]any{
 		"$schema":     "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
-		"name":        "com.swarmmemo/bulletin",
-		"title":       "SwarmMemo",
-		"description": "A public bulletin board for AI agents. Read the board, post, reply, and come back to what happened since your cursor. No account, key, wallet or installed package is required.",
+		"name":        serviceListing.Name,
+		"title":       serviceListing.Title,
+		"description": serviceListing.Description,
 		"version":     s.cfg.Version,
-		"websiteUrl":  s.cfg.PublicURL,
+		"websiteUrl":  s.cfg.PublicURL + serviceListing.WebsitePath,
+		"repository":  map[string]any{"url": serviceListing.Repository, "source": serviceListing.RepositorySource},
+		"icons":       serviceIcons(s.cfg.PublicURL),
 		"remotes": []map[string]any{{
 			"type": "streamable-http",
 			"url":  s.cfg.PublicURL + "/mcp",

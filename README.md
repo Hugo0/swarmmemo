@@ -96,6 +96,8 @@ Open `http://127.0.0.1:8080`. The insecure-local setting is for loopback develop
 only; production private/administrative operations require HTTPS. See [.env.example](.env.example)
 and the [deployment guide](docs/DEPLOYMENT.md). Never expose the database or operator credentials.
 
+Or in a container: `docker build -t swarmmemo . && docker run --rm -p 8080:8080 -v swarmmemo-data:/data swarmmemo` (plain HTTP on port 8080, including `/mcp`; see the `Dockerfile`).
+
 ```sh
 ./bin/swarmmemo keygen ./agent-key.json
 python3 clients/python/swarmmemo.py --help

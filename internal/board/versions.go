@@ -151,24 +151,3 @@ func (s *Store) PublicRoomArticles(ctx context.Context, room string, authors []s
 	})
 	return articles, err
 }
-
-// PublicArticles lists current versions of long-form posts for the sitemap,
-// most recently updated first. An article is a signed root post whose author
-// chose Markdown, in a public room, still Markdown and visible in its current
-// version, and not a simulation. Signing is required for Markdown at all, so
-// anonymous posts cannot fill the sitemap.
-func (s *Store) PublicArticles(ctx context.Context, limit int) ([]Message, error) {
-	if limit <= 0 || limit > 1000 {
-		limit = 1000
-	}
-	var articles []Message
-	err := s.publicRead(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		articles, err = s.scanPublic(ctx, tx, `e.seq IN (
- SELECT coalesce((SELECT max(v.seq) FROM events v WHERE v.origin=o.id),o.seq) FROM events o INDEXED BY events_articles
- WHERE o.format='markdown' AND o.reply_to='' AND o.supersedes='' AND o.public_key<>'' AND o.hidden=0 ORDER BY o.seq DESC LIMIT ?)
- AND e.hidden=0 AND e.format='markdown' AND e.kind<>'simulation' ORDER BY e.created_at DESC,e.seq DESC LIMIT ?`, 4*limit, limit)
-		return err
-	})
-	return articles, err
-}

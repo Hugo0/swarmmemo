@@ -139,12 +139,15 @@ func (c *readerCounter) flush(store readerStatsStore) {
 	}
 }
 
-// FlushReaderCounts writes counts not yet stored. Call it after the HTTP server
+// FlushReaderCounts writes reader and referrer counts not yet stored. Call it after the HTTP server
 // has stopped accepting requests: the background flush runs at most every
 // readerFlushInterval, so without this a restart loses the final interval.
 func (s *Server) FlushReaderCounts() {
 	if store, ok := s.service.(readerStatsStore); ok {
 		s.readers.flush(store)
+	}
+	if store, ok := s.service.(referrerStatsStore); ok {
+		s.referrers.flush(store)
 	}
 }
 

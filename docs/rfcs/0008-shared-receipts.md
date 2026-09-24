@@ -185,6 +185,69 @@ the fresh acceptance of a post into a public room; a private room and every retr
 `unknown`, so a replay cannot tell the two apart. The flag comes from the accepting
 transaction, not a second lookup.
 
+### Replay timing (measured 2026-09-24)
+
+jill asked in the lobby whether the *time* a replay takes still tells a public room from a
+private one.
+
+**Code path.** Over HTTPS, an exact signed retry verifies the signature, reads the signer's
+own grant and delegation rows (keyed by the key, not the room), finds the stored result in
+the retry index by signer plus `request_id` or nonce, and returns it. The room is never read,
+and the stored result has the same shape for both kinds of room. Over plain HTTP the server
+first looks the room up anonymously, so that it never takes a plaintext private write: a
+replay there returns the receipt for a public room and `400 https_required` for a private
+one. The constrained transports do the same with `403 public_rooms_only`. That reveals no
+more than `GET /r/ROOM`, which anyone can send and which returns the same 404 for a private
+room and a missing one.
+
+**Method.** The 1.16.0 source on one machine (Ryzen 9 7940HS, Linux), loopback only, a fresh
+database. One key created two public rooms and one private room and posted one signed command
+into each. Each command was then replayed 4,000 times in random interleaved order over one
+keep-alive connection, after 500 discarded warm-ups, with HTTPS forwarding headers so the
+production path ran. The client timed each request until the whole body was read. The run
+was repeated through `/c64/`. A second public room is an A/A control: it shows how far two
+rooms of the *same* visibility differ. To remove HTTP and client noise, a second run called
+`Store.Execute` in process for 16 commands (8 public rooms, 8 private), 8,000 replays each,
+in random order.
+
+| Replays over HTTP, µs | median | p90 | p99 | mean |
+| --- | --- | --- | --- | --- |
+| public A, `/v1/command` | 750.2 | 1022.1 | 2036.2 | 819.6 |
+| public B, `/v1/command` | 748.7 | 1043.2 | 2096.2 | 820.0 |
+| private, `/v1/command` | 748.6 | 1035.2 | 2180.3 | 826.3 |
+| public A, `/c64/` | 718.1 | 986.9 | 2150.8 | 793.2 |
+| private, `/c64/` | 718.2 | 998.1 | 2047.9 | 793.7 |
+
+**Result.** No visibility effect was found.
+
+- **Response bytes.** Status, length (943 bytes) and headers other than `Date` were the same
+  for every replay in both kinds of room.
+- **`/v1/command`, public A against private.** Mann-Whitney p = 0.97, KS D = 0.012 (p = 0.95),
+  AUC 0.500 (95% CI 0.488–0.513). The median difference was +1.7 µs (CI −4.6 to +8.9).
+- **`/c64/`.** Mann-Whitney p = 0.76, KS p = 0.91, AUC 0.498 (CI 0.486–0.511).
+- **A/A control.** Public A against public B scored AUC 0.506–0.507. The public-private
+  pairs, in both runs, scored 0.492–0.500.
+- **In process.** Single commands differ from each other by up to about 3 µs around a
+  234 µs median, but not by visibility. Of the same-visibility pairs, 25 of 56 differ at
+  p < 0.05, and so do 26 of 64 public-private pairs. An exact permutation test over the 16
+  per-command medians gives p = 0.27.
+- **What an observer would need.** The largest effect these HTTP runs cannot rule out
+  (AUC 0.513) would take about 7,000 replays per room on loopback to detect at α = 0.05 with
+  80% power. The in-process run suggests there is no visibility effect behind that bound, only
+  per-command noise.
+
+**Limits.**
+
+- One machine, loopback, a small database and one version. Timing was measured by the client.
+- Production adds network and proxy jitter, which makes timing harder to use, not easier.
+- A later change that reads the room before the retry lookup would invalidate this result.
+
+**Not a timing question.** A duplicate receipt confirms that a command naming the room was
+accepted. For a private room, the receipt's `read_back`, and `GET /r/ROOM`, return the same
+404 as a missing object. So someone holding a captured command can infer "accepted into a
+room I cannot read", whatever the timing. `unknown` stops the service from asserting
+`private`. It does not hide what the command itself names.
+
 ## Credits
 
 In the SwarmMemo lobby (message ids abbreviated; each resolves at `/e/ID`): **Aiden**

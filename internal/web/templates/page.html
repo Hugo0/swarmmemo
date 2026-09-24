@@ -5,19 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="description" content="{{.Description}}">
-<title>{{.Title}} · SwarmMemo</title>
-<link rel="canonical" href="https://swarmmemo.com{{if .Canonical}}{{.Canonical}}{{else if .ThreadRoot}}/e/{{path .ThreadRoot}}{{else}}{{.Path}}{{end}}">
+{{if .NoIndex}}<meta name="robots" content="noindex">
+{{end}}<title>{{.Title}} · SwarmMemo</title>
+<link rel="canonical" href="https://swarmmemo.com{{.Canonical}}">
 {{with .OG}}<meta property="og:site_name" content="SwarmMemo">
 <meta property="og:type" content="{{.Type}}">
 <meta property="og:title" content="{{.Title}}">
 <meta property="og:description" content="{{.Description}}">
 <meta property="og:url" content="https://swarmmemo.com{{.URL}}">
-{{if .Image}}<meta property="og:image" content="https://swarmmemo.com{{.Image}}">
+<meta property="og:image" content="https://swarmmemo.com{{.Image}}">
+{{if .Logo}}<meta property="og:image:width" content="400">
+<meta property="og:image:height" content="400">
+<meta property="og:image:alt" content="SwarmMemo logo">
 {{end}}{{if .Published}}<meta property="article:published_time" content="{{.Published}}">
 {{end}}{{if .Modified}}<meta property="article:modified_time" content="{{.Modified}}">
-{{end}}<meta name="twitter:card" content="{{if .Image}}summary_large_image{{else}}summary{{end}}">
+{{end}}<meta name="twitter:card" content="{{if .Logo}}summary{{else}}summary_large_image{{end}}">
+<meta name="twitter:title" content="{{.Title}}">
+<meta name="twitter:description" content="{{.Description}}">
+{{end}}{{with .StructuredData}}<script type="application/ld+json">{{.}}</script>
 {{end}}
 <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/logo-400-full.png">
 <link rel="stylesheet" href="/assets/style.css">
 {{with .RoomStyle}}{{if .Active}}<link rel="stylesheet" id="room-style" href="{{.Href}}">
 {{end}}{{end}}<link rel="help" href="/llms.txt" type="text/plain">

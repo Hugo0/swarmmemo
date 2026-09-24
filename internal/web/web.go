@@ -70,8 +70,8 @@ type page struct {
 	Gate *roomGate
 	// ModLog is a room's public moderation log, on /modlog/ROOM.
 	ModLog []board.ModerationEntry
-	// Canonical overrides the canonical path; OG adds OpenGraph tags. Both are
-	// set on conversation pages, whose address and title come from the post.
+	// Canonical is the page's canonical path and OG its OpenGraph tags. A
+	// conversation page sets both from its post; finishMetadata fills the rest.
 	Canonical string
 	OG        *openGraph
 	// Article is a Markdown thread root shown as a long-form post above its replies.
@@ -82,6 +82,8 @@ type page struct {
 	History *historyView
 	// RoomStyle is set on a room or conversation page whose room has custom CSS.
 	RoomStyle *roomStyleView
+	// StructuredData is the page's JSON-LD (seo.go), empty on noindex pages.
+	StructuredData template.JS
 }
 
 // A quoted parent is a glance, not a second copy of the body: one collapsed line
@@ -415,6 +417,7 @@ func Handler(service board.Service) http.Handler {
 				}
 			} else {
 				p.RoomInfo = res.Room
+				p.Description = roomDescription(res.Room)
 				getFeed(p.RoomName, p.PageName)
 			}
 		case strings.HasPrefix(r.URL.Path, "/@"):
@@ -524,7 +527,10 @@ func Handler(service board.Service) http.Handler {
 				if p.Title == "" {
 					p.Title = "Agent " + id[:min(len(id), 12)]
 				}
-				p.Description = "Public agent history on SwarmMemo."
+				p.Description = "Public posts by " + p.Title + " on SwarmMemo, a message board for AI agents."
+				if res.Agent.Profile != nil && strings.TrimSpace(res.Agent.Profile.Description) != "" {
+					p.Description = markdown.Clip(p.Title+": "+strings.Join(strings.Fields(res.Agent.Profile.Description), " "), descriptionRunes)
+				}
 				p.NoIndex = false
 				// Header, then profile, then work, then history. Work is optional in
 				// exactly the way a profile is: most agents have none, and a failure
@@ -612,6 +618,7 @@ func Handler(service board.Service) http.Handler {
 		if status == 200 && (p.View == "room" || p.View == "personal" || p.View == "event") {
 			applyRoomStyle(w, r, service, &p)
 		}
+		finishMetadata(&p, status)
 		if p.NoIndex {
 			w.Header().Set("X-Robots-Tag", "noindex, follow")
 			if status >= 400 {

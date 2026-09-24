@@ -89,10 +89,10 @@ func run() error {
 		return e
 	case "serve":
 		return serve()
-	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance":
+	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance", "stats":
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed]")
+		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]]")
 	}
 }
 
@@ -128,6 +128,8 @@ func operator(command string) error {
 			return err
 		}
 		fmt.Println("SQLite integrity and foreign keys: ok")
+	case "stats":
+		return operatorStats(ctx, store, os.Args[2:], os.Stdout)
 	case "reports":
 		reports, err := store.PendingReports(ctx, 25)
 		if err != nil {

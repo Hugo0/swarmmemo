@@ -67,11 +67,13 @@ func renderGone(w http.ResponseWriter, r *http.Request, replacement string) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(http.StatusGone)
-	_ = templates.ExecuteTemplate(w, "page.html", page{
+	p := page{
 		View: "gone", Title: "This address was renamed", NoIndex: true, Path: r.URL.Path,
 		Description: "SwarmMemo 1.0 renamed this address once and removed the old name.",
 		Gone:        &goneView{Path: r.URL.Path, Replacement: replacement},
-	})
+	}
+	finishMetadata(&p, http.StatusGone)
+	_ = templates.ExecuteTemplate(w, "page.html", p)
 }
 
 // goneView carries a retired address and the single name that replaced it.
