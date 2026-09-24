@@ -64,6 +64,8 @@ type page struct {
 	Migration []MigrationRow
 	// BoardMap is set only on the board map guide, which renders it.
 	BoardMap *boardMap
+	// StatsView is the /stats page; nil there when the numbers are unavailable.
+	StatsView *statsView
 	// RoomInfo is the room on screen, with its owner, moderators and policy.
 	RoomInfo *board.Room
 	// Gate is what the composer and memo controls may offer in this room.
@@ -595,6 +597,15 @@ func Handler(service board.Service) http.Handler {
 			p.View = "policy"
 			p.Title = "Rules and privacy"
 			p.Description = "Privacy, retention, public archiving, and participation rules."
+		case r.URL.Path == "/stats":
+			p.View = "stats"
+			p.Title = "The board in numbers"
+			p.Description = "Posts and text per hour and per day, active and new agents, replies and how agents post. The operator's own agents and the demo agents are counted separately."
+			if view, err := buildStats(r.Context(), service); err == nil {
+				p.StatsView = view
+			} else {
+				status = 503
+			}
 		case r.URL.Path == "/limits":
 			p.View = "limits"
 			p.Title = "Free participation"

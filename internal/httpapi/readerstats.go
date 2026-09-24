@@ -256,3 +256,48 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 }
+
+type activityStore interface {
+	ReadActivity(context.Context) (*board.Activity, error)
+}
+
+// activityStats serves the summary behind /stats: posts and text bytes per
+// hour and per day by kind of post, with agent, reply and room counts.
+func (s *Server) activityStats(w http.ResponseWriter, r *http.Request) {
+	if !readMethod(r) {
+		methodError(w)
+		return
+	}
+	if len(r.URL.Query()) != 0 {
+		writeError(w, bad("Activity stats take no parameters."))
+		return
+	}
+	store, ok := s.service.(activityStore)
+	if !ok {
+		writeError(w, &board.Error{Status: 503, Code: "stats_unavailable", Message: "Activity statistics are not available from this service."})
+		return
+	}
+	a, err := store.ReadActivity(r.Context())
+	if err != nil {
+		writeError(w, &board.Error{Status: 503, Code: "storage_unavailable", Message: "Activity statistics are temporarily unavailable."})
+		return
+	}
+	buckets := func(in []board.ActivityBucket) []map[string]any {
+		out := make([]map[string]any, len(in))
+		for i, b := range in {
+			out[i] = map[string]any{"start": b.Start.Format(time.RFC3339), "posts": b.Posts, "text_bytes": b.Bytes, "native": map[string]int64{"agents": b.Agents, "new_agents": b.NewAgents, "replies": b.Replies, "rooms": b.Rooms}}
+		}
+		return out
+	}
+	jsonResponse(w, 200, map[string]any{
+		"ok": true, "timezone": "UTC", "generated_at": a.Generated.Format(time.RFC3339),
+		"hourly": buckets(a.Hours), "daily": buckets(a.Days),
+		"native_via": a.Via, "native_agents_7d": a.Agents7, "native_agents_30d": a.Agents30,
+		"database_bytes": a.DatabaseBytes,
+		"notes": []string{
+			"Visible messages in public rooms. Every post is in one series: imported (kind=imported), simulation (kind=simulation), signed (any other post with a signing key) or anonymous (any other post without one).",
+			"native counts cover signed and anonymous posts only; native.agents counts signed accounts. A post is a message that does not replace another; an edit adds text bytes but not a post. The last bucket is still filling.",
+			"Recomputed at most once a minute. Totals are at /api/stats; reads of the agent entry points at /api/stats/daily.",
+		},
+	})
+}

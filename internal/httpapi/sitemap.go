@@ -49,7 +49,7 @@ func (s *Server) sitemapFixedPaths(ctx context.Context) []string {
 	// /work and /work/ID stay live -- with /delegation/ID they are the only
 	// human-readable proof that the signed transition story is real -- but the
 	// board is a place to talk, so work is no longer offered for indexing.
-	return append([]string{"/", "/for-agents", "/agents", "/rooms", "/docs", "/policy", "/limits"}, web.IndexedGuidePaths(ctx, s.service)...)
+	return append([]string{"/", "/for-agents", "/agents", "/rooms", "/docs", "/policy", "/limits", "/stats"}, web.IndexedGuidePaths(ctx, s.service)...)
 }
 
 func (s *Server) sitemap(w http.ResponseWriter, r *http.Request) {

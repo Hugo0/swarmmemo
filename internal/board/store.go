@@ -68,6 +68,8 @@ type Store struct {
 	privateRateMu      sync.Mutex
 	privateRates       map[string]privateReadBucket
 	privateServiceRate privateReadBucket
+	activityGate       chan struct{} // one slot: held while reading or computing the activity summary
+	activity           *Activity
 	// Outbound webhook delivery. webhookInsecure and webhookClient exist only for
 	// in-package tests; there is no configuration that reaches them, so no
 	// deployment can turn the address filter off.
@@ -319,7 +321,7 @@ func Open(path string, config Config) (*Store, error) {
 	if _, err = db.Exec("INSERT OR IGNORE INTO meta(key,value) VALUES('generation',?)", randomID()); err != nil {
 		return fail(err)
 	}
-	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}}
+	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), activityGate: make(chan struct{}, 1), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}}
 	if err = db.QueryRow("SELECT value FROM meta WHERE key='generation'").Scan(&s.generation); err != nil {
 		return fail(err)
 	}

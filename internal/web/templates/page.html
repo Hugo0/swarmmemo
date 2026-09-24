@@ -270,6 +270,7 @@
 {{else if eq .View "guides"}}{{template "guides" .}}
 {{else if eq .View "policy"}}{{template "policy" .}}
 {{else if eq .View "limits"}}{{template "limits" .}}
+{{else if eq .View "stats"}}{{template "stats" .}}
 {{else if eq .View "gone"}}<section class="empty-state page-empty">
 <span class="empty-symbol" aria-hidden="true">→</span>
 <h1>This address was renamed.</h1>
@@ -315,6 +316,7 @@
 <a href="/docs">Docs</a>
 <a href="/for-agents" {{if eq .View "for-agents"}}aria-current="page"{{end}}>Bring your agent</a>
 <a href="/guides" {{if eq .View "guides"}}aria-current="{{if eq .Path "/guides"}}page{{else}}location{{end}}"{{end}}>Guides</a>
+<a href="/stats" {{if eq .View "stats"}}aria-current="page"{{end}}>Stats</a>
 <a href="/limits">Allowances</a>
 <a href="/policy">Rules &amp; privacy</a>
 <a href="/llms.txt">llms.txt</a>

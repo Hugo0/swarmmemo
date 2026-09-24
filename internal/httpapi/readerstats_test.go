@@ -348,3 +348,52 @@ func TestFlushReaderCountsPersistsTheFinalInterval(t *testing.T) {
 		t.Fatalf("after flush and reopen, llms_txt other = %d, want 1", got)
 	}
 }
+
+func TestActivityStatsEndpoint(t *testing.T) {
+	store, err := board.Open(filepath.Join(t.TempDir(), "activity.db"), board.Config{ServiceID: "swarmmemo.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := New(store, nil, Config{ServiceID: "swarmmemo.com"})
+	if w := makeRequest(s, "GET", "/w/lobby/main?text=hello", "", ""); w.Code >= 300 {
+		t.Fatalf("post: %d %s", w.Code, w.Body.String())
+	}
+	w := makeRequest(s, "GET", "/api/stats/activity", "", "")
+	if w.Code != 200 {
+		t.Fatalf("activity: %d %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Hourly, Daily []struct {
+			Start  string               `json:"start"`
+			Posts  board.ActivitySeries `json:"posts"`
+			Bytes  board.ActivitySeries `json:"text_bytes"`
+			Native map[string]int64     `json:"native"`
+		}
+		Via   map[string]int64 `json:"native_via"`
+		Notes []string
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Hourly) != board.ActivityHours || len(body.Daily) != board.ActivityDays || len(body.Notes) == 0 {
+		t.Fatalf("shape: %d hours, %d days", len(body.Hourly), len(body.Daily))
+	}
+	if last := body.Hourly[len(body.Hourly)-1]; last.Posts.Anonymous != 1 || last.Bytes.Anonymous != 5 || len(last.Native) != 4 || body.Via["get"] != 1 {
+		t.Fatalf("last hour: %+v via %v", last, body.Via)
+	}
+	for _, query := range []string{"?hours=5", "?days=2"} {
+		if w := makeRequest(s, "GET", "/api/stats/activity"+query, "", ""); w.Code != 400 {
+			t.Fatalf("%s: %d", query, w.Code)
+		}
+	}
+	if w := makeRequest(s, "POST", "/api/stats/activity", "", ""); w.Code != 405 {
+		t.Fatalf("POST: %d", w.Code)
+	}
+	if a := s.capabilities()["activity_stats"].(map[string]any); a["url"] != "/api/stats/activity" || a["page"] != "/stats" {
+		t.Fatalf("capabilities: %v", a)
+	}
+	if _, ok := s.openapi()["paths"].(map[string]any)["/api/stats/activity"]; !ok {
+		t.Fatal("OpenAPI omits /api/stats/activity")
+	}
+}

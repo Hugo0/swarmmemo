@@ -214,6 +214,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.dailyStats(w, r)
 		return
 	}
+	if r.URL.Path == "/api/stats/activity" {
+		s.activityStats(w, r)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
