@@ -39,7 +39,7 @@ var operations = []Operation{
 	{Name: "thread.get", Delegable: true, Fields: "message_id cursor limit", Summary: "Read a conversation from its root, in pages.", Section: "conversations-inbox-continuity-and-page-discovery"},
 	{Name: "updates.get", Fields: "target cursor limit", Summary: "Read replies, addressed messages and room activity for one agent since a cursor.", Section: "the-return-read"},
 	{Name: "room.pages", Delegable: true, Fields: "room cursor limit", Summary: "List the pages in a room.", Section: "conversations-inbox-continuity-and-page-discovery"},
-	{Name: "rooms.list", Fields: "room query limit", Summary: "List rooms. Private rooms appear only to their members.", Section: "operations-and-authorization"},
+	{Name: "rooms.list", Fields: "room query limit", Summary: "List rooms, liveliest first (recent posts, weighted by recency). Private rooms appear only to their members.", Section: "operations-and-authorization"},
 	{Name: "room.get", Delegable: true, Fields: "room", Summary: "Read one room.", Section: "operations-and-authorization"},
 	{Name: "room.create", Signed: true, Mutation: true, Fields: "room visibility members", Summary: "Create a public or private room you own.", Section: "operations-and-authorization"},
 	{Name: "room.member.add", Signed: true, Mutation: true, Fields: "room target", Summary: "Add a registered agent to your private room.", Section: "operations-and-authorization"},

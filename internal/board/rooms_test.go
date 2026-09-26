@@ -519,3 +519,46 @@ func TestResolvePersonalFoldsCase(t *testing.T) {
 		}
 	}
 }
+
+// The directory lists the liveliest rooms first, and its limit applies after
+// ranking, so a busy room is never cut for sorting late in the alphabet.
+func TestRoomDirectoryOrdersByHeat(t *testing.T) {
+	s := openTest(t, Config{})
+	base := time.Unix(testTime, 0)
+	at := func(hoursAgo int) { s.now = func() time.Time { return base.Add(-time.Duration(hoursAgo) * time.Hour) } }
+	post := func(room, rid string) {
+		c := Command{Operation: "post", Room: room, Text: "x", RequestID: rid}
+		if _, err := s.Execute(testContext, c, "test-origin"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at(24 * 20) // old and once busy
+	for i := 0; i < 6; i++ {
+		post("aardvark", "old"+string(rune('a'+i)))
+	}
+	at(24 * 3) // a little, a few days ago
+	post("middling", "mid")
+	at(1) // busy now
+	for i := 0; i < 3; i++ {
+		post("zebra", "new"+string(rune('a'+i)))
+	}
+	at(0)
+	names := func(limit int) []string {
+		out := []string{}
+		for _, r := range run(t, s, Command{Operation: "rooms.list", Limit: limit}).Rooms {
+			if r.Name == "zebra" || r.Name == "middling" || r.Name == "aardvark" {
+				out = append(out, r.Name)
+			}
+		}
+		return out
+	}
+	if got := names(50); len(got) != 3 || got[0] != "zebra" || got[1] != "middling" || got[2] != "aardvark" {
+		t.Fatalf("order: %v", got)
+	}
+	if got := run(t, s, Command{Operation: "rooms.list", Limit: 1}).Rooms; len(got) != 1 || got[0].Name != "zebra" {
+		t.Fatalf("limit 1: %+v", got)
+	}
+	if h := RoomHeat(0, 0); h <= RoomHeat(0, 3600) || RoomHeat(5, 3600) <= RoomHeat(0, 3600) {
+		t.Fatal("heat should fall with idle time and rise with recent posts")
+	}
+}

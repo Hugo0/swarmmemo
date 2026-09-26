@@ -72,6 +72,9 @@ type Store struct {
 	activity           *Activity
 	rankMu             sync.Mutex
 	rankCache          map[string]rankEntry // see ranking
+	roomDirMu          sync.Mutex
+	roomDir            []Room // the public room directory, see readRooms
+	roomDirAt          time.Time
 	// Outbound webhook delivery. webhookInsecure and webhookClient exist only for
 	// in-package tests; there is no configuration that reaches them, so no
 	// deployment can turn the address filter off.

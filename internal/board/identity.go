@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -343,10 +345,38 @@ func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	return Result{Data: map[string]any{"room": c.Room, "member": c.Target, "operation": c.Operation}}, nil
 }
 
+// The room directory lists the liveliest rooms first: RoomHeat weighs a room's
+// posts over the last RoomHeatWindow by how long ago its latest post was, the
+// same shape as a post's hot rank. A busy room stays up while it is busy; a
+// quiet one sinks but stays listed. The scan reads the RoomDirectoryScan most
+// recently active rooms, so a flood of new empty rooms cannot hide the rest.
+const (
+	RoomHeatWindow    = 7 * 86400
+	RoomDirectoryScan = 1000
+	RoomDirectoryTTL  = 30 * time.Second
+)
+
+// RoomHeat is (posts in the window + 1) / (hours since the last post + 2)^1.5.
+func RoomHeat(recentPosts, idleSeconds int64) float64 {
+	hours := math.Max(float64(idleSeconds), 0) / 3600
+	return float64(recentPosts+1) / math.Pow(hours+2, 1.5)
+}
+
 func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (Result, error) {
 	if c.Operation == "room.get" {
 		if _, err := roomAccess(ctx, tx, c.Room, a); err != nil {
 			return Result{}, err
+		}
+	}
+	// The anonymous, unfiltered directory is the home page's; it is shared for
+	// RoomDirectoryTTL, since ranking counts every room's posts.
+	public := c.Operation == "rooms.list" && a.account == "" && c.Room == "" && c.Query == ""
+	if public {
+		s.roomDirMu.Lock()
+		cached, at := s.roomDir, s.roomDirAt
+		s.roomDirMu.Unlock()
+		if age := s.now().Sub(at); cached != nil && age >= 0 && age < RoomDirectoryTTL {
+			return Result{Rooms: append([]Room(nil), cached[:min(len(cached), limitValue(c.Limit))]...)}, nil
 		}
 	}
 	where := `(r.visibility='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=r.name AND m.account=?))`
@@ -359,23 +389,31 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		where += " AND instr(r.name,?)>0"
 		args = append(args, c.Query)
 	}
-	args = append(args, limitValue(c.Limit))
+	now := s.now().Unix()
+	// The directory is ordered by RoomHeat, so the SQL reads the most recently
+	// active rooms first and the limit applies after ranking.
+	sqlLimit, order := limitValue(c.Limit), "r.name"
 	if c.Operation == "rooms.list" {
 		// The room directory lists shared rooms. Personal rooms are reached
 		// through their owners, at /@ADDRESS and agent.get's personal_room.
 		where += " AND r.name NOT LIKE '@%'"
+		sqlLimit, order = RoomDirectoryScan, "5 DESC, r.name"
 	}
+	args = append([]any{now - RoomHeatWindow}, args...)
+	args = append(args, sqlLimit)
 	rows, err := tx.QueryContext(ctx, `SELECT r.name,r.visibility,r.owner,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0),coalesce((SELECT max(e.created_at) FROM events e WHERE e.room=r.name),r.created_at),
- p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY r.name LIMIT ?`, args...)
+ p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0 AND e.created_at>=?) FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
 	if err != nil {
 		return Result{}, err
 	}
 	rooms := []Room{}
+	heat := map[string]float64{}
 	for rows.Next() {
 		var r Room
 		var write, reply, rules, writeVia sql.NullString
 		var updated sql.NullInt64
-		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia); err != nil {
+		var recent int64
+		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia, &recent); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
@@ -385,12 +423,22 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		}
 		r.Policy = &policy
 		_, r.Personal = PersonalOwner(r.Name)
+		heat[r.Name] = RoomHeat(recent, now-r.UpdatedAt)
 		rooms = append(rooms, r)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return Result{}, err
+	}
+	if c.Operation == "rooms.list" {
+		sort.SliceStable(rooms, func(i, j int) bool { return heat[rooms[i].Name] > heat[rooms[j].Name] })
+		if public {
+			s.roomDirMu.Lock()
+			s.roomDir, s.roomDirAt = append([]Room(nil), rooms...), s.now()
+			s.roomDirMu.Unlock()
+		}
+		rooms = rooms[:min(len(rooms), limitValue(c.Limit))]
 	}
 	if c.Operation == "room.get" {
 		if len(rooms) == 0 {

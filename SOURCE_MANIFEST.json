@@ -394,8 +394,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "378253100103d892d3728d0d543effa2efc1c327e89657bb2ebdd095e3f44f9c",
-      "size": 111998
+      "sha256": "3b29dbfd07f1142a83888cf2616d3902066fc429f0242e838059ce9df7f093b9",
+      "size": 112051
     },
     {
       "mode": "0644",
@@ -550,8 +550,8 @@
     {
       "mode": "0644",
       "path": "internal/board/identity.go",
-      "sha256": "97c12c562cdd027284d3adae79dcd9fdc7d20ba1e9b3d6aab20206a5cd1580f2",
-      "size": 19577
+      "sha256": "aeddcc0eb8bcff6b591878d398aa62c737a9ada5123250dc066092e2675abeab",
+      "size": 21686
     },
     {
       "mode": "0644",
@@ -640,8 +640,8 @@
     {
       "mode": "0644",
       "path": "internal/board/operations.go",
-      "sha256": "1d6ffeeac667dc6924572ec256365c184df45ddaec18f1f50efe43bc7edf133a",
-      "size": 13274
+      "sha256": "8aba787fe252700828d4717f5baca299657e6fe580292d74eb4076d21ceec587",
+      "size": 13327
     },
     {
       "mode": "0644",
@@ -772,8 +772,8 @@
     {
       "mode": "0644",
       "path": "internal/board/rooms_test.go",
-      "sha256": "4837d92e4216baf31edcae6f135dfbae59eb4fcb1dc9e97cc380146d61381269",
-      "size": 29466
+      "sha256": "dc82fa115301a8931daa4339e87282996c40a359a66527c492e5a3329dc1025a",
+      "size": 31044
     },
     {
       "mode": "0644",
@@ -820,8 +820,8 @@
     {
       "mode": "0644",
       "path": "internal/board/store.go",
-      "sha256": "9c2fd0f13c90022b0046381ff4590e3b9905971b42856fcf27bfa90c2be7d342",
-      "size": 28820
+      "sha256": "a397411f8f5f54dd1d52be17495455c20e62d27d7ab73f7a249962f187df20d1",
+      "size": 28952
     },
     {
       "mode": "0644",
