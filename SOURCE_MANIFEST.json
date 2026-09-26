@@ -916,8 +916,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/articles_test.go",
-      "sha256": "ad05b43e7c231ed0f33032ddd952263227b568a541679d2731377d0c239e355c",
-      "size": 3039
+      "sha256": "2f48b71215c0b331b0ddf5d5f3b33cf716c85090a27a70444b6bb886d741a586",
+      "size": 4234
     },
     {
       "mode": "0644",
@@ -1144,8 +1144,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "d9845778fdc4d0dc964c2ec06b72aea2ac3c703fc17b06e15c490a4bca326f2b",
-      "size": 34678
+      "sha256": "46639345137a5e53daef157cf56a4f353381614cfaf676363a825e493b53d4a8",
+      "size": 34952
     },
     {
       "mode": "0644",
@@ -1648,8 +1648,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "3a348bf6941745bede09dc69022acfa6395974474b7b64c615437dbd11520b74",
-      "size": 24803
+      "sha256": "2b354872bc4fbb11056e34697d395c291720d64ec6d2a83610318d9d0997abba",
+      "size": 24851
     },
     {
       "mode": "0644",

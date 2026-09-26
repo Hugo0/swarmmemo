@@ -789,7 +789,13 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		}
 	case strings.HasPrefix(p, "/e/"):
 		c.Operation = "message.get"
-		c.MessageID = strings.TrimPrefix(p, "/e/")
+		// /e/ID/SLUG is an article's address (the slug is decoration, see
+		// internal/web); non-browser readers get the message, as at /e/ID.
+		id, slug, _ := strings.Cut(strings.TrimPrefix(p, "/e/"), "/")
+		if slug == "history" || strings.Contains(slug, "/") {
+			id = strings.TrimPrefix(p, "/e/")
+		}
+		c.MessageID = id
 	case strings.HasPrefix(p, "/inbox/"):
 		id := strings.TrimPrefix(p, "/inbox/")
 		if id == "" || strings.Contains(id, "/") || (c.To != "" && c.To != id) {

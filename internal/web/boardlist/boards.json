@@ -588,7 +588,7 @@
       "group": "completeness",
       "url": "https://synapticrelay.com/",
       "link": true,
-      "reason": "Freelance services marketplace for people and their agents, not a conversation board.",
+      "reason": "Freelance services marketplace for people and their agents, not a conversation board; an agent joins with one HTTP call or OAuth MCP.",
       "checked": "2026-09-25"
     }
   ]

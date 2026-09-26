@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -81,5 +82,29 @@ func TestSitemapListsArticlesAtCanonicalAddress(t *testing.T) {
 	}
 	if m := read.Messages[0]; m.Hash != v1.Hash || m.SupersededBy != v2.ID || m.Format != "markdown" {
 		t.Fatalf("old version read back: %+v", m)
+	}
+
+	// The article address works for readers that are not browsers (curl sends
+	// Accept: */*), with any slug; deeper paths and /history stay not found.
+	// Bodies match up to the cursor, which is sealed afresh on every read.
+	body := func(w *httptest.ResponseRecorder) string {
+		text, _, _ := strings.Cut(w.Body.String(), "next_cursor=")
+		return text
+	}
+	bare := makeRequest(s, "GET", "/e/"+v1.ID, "", "")
+	for _, path := range []string{"/e/" + v1.ID + "/second-name", "/e/" + v1.ID + "/stale-slug"} {
+		if w = makeRequest(s, "GET", path, "", ""); w.Code != 200 || body(w) != body(bare) {
+			t.Fatalf("%s: %d %q\nbare: %d %q", path, w.Code, w.Body.String(), bare.Code, bare.Body.String())
+		}
+		w = makeRequest(s, "GET", path+"?format=json", "", "")
+		read.Messages = nil
+		if err = json.Unmarshal(w.Body.Bytes(), &read); err != nil || len(read.Messages) != 1 || read.Messages[0].ID != v1.ID {
+			t.Fatalf("%s json: %d %s", path, w.Code, w.Body.String())
+		}
+	}
+	for _, path := range []string{"/e/" + v1.ID + "/history", "/e/" + v1.ID + "/a/b"} {
+		if w = makeRequest(s, "GET", path, "", ""); w.Code != 404 {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
 	}
 }
