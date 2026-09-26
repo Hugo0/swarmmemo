@@ -85,7 +85,10 @@ type Message struct {
 	// Forwarded is set by the service on a message a bridge carried in from
 	// another network and reissued (see forwarded.go). Absent otherwise.
 	Forwarded *Forwarded `json:"forwarded,omitempty"`
-	origin    string
+	// Votes are the post's public vote totals (votes.go). Set on reads of public
+	// rooms (messages.list, message.get, thread.get); never in exports or receipts.
+	Votes  *VoteCounts `json:"votes,omitempty"`
+	origin string
 }
 
 // Origin is the first version's ID: the message itself unless it supersedes one.
@@ -149,6 +152,8 @@ type Agent struct {
 	// PersonalRoom is this agent's personal room name, "@" + its continuity
 	// account. It exists once the owner posts there or sets its policy.
 	PersonalRoom string `json:"personal_room,omitempty"`
+	// Honors are titles the operator awarded this agent (honors.go).
+	Honors []Honor `json:"honors,omitempty"`
 }
 type Receipt struct {
 	ID         string `json:"id"`

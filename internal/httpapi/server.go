@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -703,6 +704,54 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		}
 		query["kind"] = query["sort"]
 		delete(query, "sort")
+	}
+	// Message listings take ?sort=new|hot|top&bias=B&offset=N, carried as the
+	// read's data (board.ListOptions); the signed command format is unchanged.
+	if p := r.URL.Path; (p == "/api/messages" || p == "/recent" || p == "/search" || strings.HasPrefix(p, "/r/")) && (query.Has("sort") || query.Has("bias") || query.Has("offset")) {
+		if query.Has("data") {
+			writeError(w, bad("Use sort, bias and offset, or data, not both."))
+			return
+		}
+		opts := map[string]any{}
+		for _, key := range []string{"sort", "bias", "offset"} {
+			if !query.Has(key) {
+				continue
+			}
+			if len(query[key]) != 1 {
+				writeError(w, bad(key+" may be given once."))
+				return
+			}
+			value := query.Get(key)
+			switch key {
+			case "sort":
+				if value != "new" && value != "hot" && value != "top" {
+					writeError(w, bad("sort for messages is new, hot or top."))
+					return
+				}
+				opts[key] = value
+			case "bias":
+				f, err := strconv.ParseFloat(value, 64)
+				if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+					writeError(w, bad("bias must be a number from 0 to 4."))
+					return
+				}
+				opts[key] = f
+			case "offset":
+				n, err := strconv.Atoi(value)
+				if err != nil {
+					writeError(w, bad("offset must be a whole number."))
+					return
+				}
+				opts[key] = n
+			}
+			delete(query, key)
+		}
+		encoded, err := json.Marshal(opts)
+		if err != nil {
+			writeError(w, bad("Invalid sort options."))
+			return
+		}
+		query.Set("data", string(encoded))
 	}
 	c, e := queryCommand(query)
 	if e != nil {

@@ -451,6 +451,8 @@ def main(argv=None):
     room = commands.add_parser("room-create"); room.add_argument("room"); room.add_argument("--private", action="store_true")
     for action in ("member-add", "member-remove"):
         member = commands.add_parser(action); member.add_argument("room"); member.add_argument("target")
+    vote = commands.add_parser("vote", help="vote a public post up or down, or clear your vote")
+    vote.add_argument("message_id"); vote.add_argument("direction", choices=["up", "down", "clear"])
     transfer = commands.add_parser("transfer"); transfer.add_argument("target"); transfer.add_argument("amount", type=int)
     transfer.add_argument("--request-id", default=None)
     rotate = commands.add_parser("rotate"); rotate.add_argument("new_key", type=Path)
@@ -476,6 +478,9 @@ def main(argv=None):
             elif args.action == "room-create": result = client.command("room.create", room=args.room, visibility="private" if args.private else "public")
             elif args.action in ("member-add", "member-remove"):
                 result = client.command("room.member." + args.action.split("-")[1], room=args.room, target=args.target)
+            elif args.action == "vote":
+                value = {"up": 1, "down": -1, "clear": 0}[args.direction]
+                result = client.command("vote", message_id=args.message_id, data=json.dumps({"value": value}), request_id=uuid.uuid4().hex)
             elif args.action == "transfer":
                 result = client.command("credit.transfer", target=args.target, amount=args.amount, request_id=args.request_id or uuid.uuid4().hex)
             elif args.action == "rotate": result = client.rotate(load_key(args.new_key))

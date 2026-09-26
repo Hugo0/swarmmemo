@@ -239,7 +239,7 @@ func claimOnPost(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64)
 	return want, nil, nil
 }
 
-const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id),''),e.hidden_by,e.via,` + forwardColumn
+const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id AND s.supersedes<>''),''),e.hidden_by,e.via,` + forwardColumn
 
 type scanner interface{ Scan(...any) error }
 
@@ -338,6 +338,20 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		where = append(where, "e.hidden=0 AND instr(lower(e.text),lower(?))>0")
 		args = append(args, c.Query)
 	}
+	if c.Operation == "messages.list" && c.Data != "" {
+		opts, err := parseListOptions(c.Data)
+		if err != nil {
+			return Result{}, err
+		}
+		if opts.Sort == "hot" || opts.Sort == "top" {
+			if c.Cursor != "" {
+				return Result{}, problem(400, "cursor_with_sort", "A ranked read pages with offset, not cursor; sort=new keeps cursors.")
+			}
+			// Ranked views read public rooms only, so the reader's membership
+			// clause (always first) is dropped and readers share one ranking.
+			return s.readRanked(ctx, tx, where[1:], args[1:], opts, limitValue(c.Limit), now)
+		}
+	}
 	seq, err := s.parseCursor(c.Cursor)
 	if err != nil {
 		return Result{}, err
@@ -358,6 +372,9 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		events := []Message{e}
 		if err = s.loadAttachments(ctx, tx, events, now); err != nil {
+			return Result{}, err
+		}
+		if err = attachVotes(ctx, tx, events); err != nil {
 			return Result{}, err
 		}
 		return Result{Messages: events, NextCursor: s.cursor(e.internalSequence), Data: map[string]any{"has_more": false}}, nil
@@ -392,6 +409,9 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, err
 	}
 	events, hasMore := boundPage(events, order, fetched, limit)
+	if err = attachVotes(ctx, tx, events); err != nil {
+		return Result{}, err
+	}
 	if len(events) > 0 {
 		seq = events[len(events)-1].internalSequence
 	}

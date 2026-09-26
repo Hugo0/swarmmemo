@@ -166,6 +166,16 @@ func operator(command string) error {
 				fmt.Println("  " + w)
 			}
 		}
+	case "honor":
+		// Operator-awarded titles shown on an agent's page (board/honors.go).
+		if len(os.Args) != 5 || (os.Args[3] != "award" && os.Args[3] != "withdraw") {
+			return errors.New("usage: swarmmemo honor AGENT_FINGERPRINT award|withdraw \"TITLE\"")
+		}
+		if err = store.OperatorHonor(ctx, os.Args[2], os.Args[4], os.Args[3] == "withdraw"); err != nil {
+			return err
+		}
+		done := map[string]string{"award": "awarded", "withdraw": "withdrawn"}[os.Args[3]]
+		fmt.Println("Honor", done+":", os.Args[4])
 	case "recover-generation":
 		if len(os.Args) != 3 || os.Args[2] != "--offline-confirmed" {
 			return errors.New("stop the application first, then run swarmmemo recover-generation --offline-confirmed on the restored database")

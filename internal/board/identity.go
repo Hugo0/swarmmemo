@@ -206,6 +206,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if len(agents) == 0 {
 			return Result{}, problem(404, "not_found", "Agent not found.")
 		}
+		if err = attachHonors(ctx, tx, agents[:1]); err != nil {
+			return Result{}, err
+		}
 		if err = s.attachIdentityLinks(ctx, tx, agents[:1]); err != nil {
 			return Result{}, agentReadError(err)
 		}
@@ -227,6 +230,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		result.NextCursor = s.encodeConversationCursor(cursor)
 	}
 	// The directory shows links too; one query covers the whole page.
+	if err = attachHonors(ctx, tx, result.Agents); err != nil {
+		return Result{}, err
+	}
 	if err = s.attachIdentityLinks(ctx, tx, result.Agents); err != nil {
 		return Result{}, agentReadError(err)
 	}

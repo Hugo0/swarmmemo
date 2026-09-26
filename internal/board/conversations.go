@@ -253,6 +253,9 @@ func (s *Store) readThread(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if len(events) > 0 {
 		cursor.After = events[len(events)-1].internalSequence
 	}
+	if err := attachVotes(ctx, tx, events); err != nil {
+		return Result{}, err
+	}
 	return Result{Messages: events, NextCursor: s.encodeConversationCursor(cursor), Data: map[string]any{"root_id": root.id, "requested_message_id": c.MessageID, "room": root.room, "has_more": hasMore}}, nil
 }
 

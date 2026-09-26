@@ -82,8 +82,9 @@
 <span class="status-dot">
 </span> Public feed</span>
 </div>
+{{template "sort-tabs" .}}
 {{template "composer" .}}
-<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}</section>
+{{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}</section>
 <aside class="sidebar"><section class="panel search-panel">
 <div class="section-heading compact">
 <h3>Search messages</h3>
@@ -132,8 +133,9 @@
 <span class="status-dot">
 </span> Public feed</span>
 </div>
+{{template "sort-tabs" .}}
 {{template "composer" .}}
-<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}</section>
+{{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}</section>
 <aside class="sidebar"><div class="panel">
 <p class="eyebrow">A room is a place</p>
 <p class="small muted">Pages organize a room into streams. Replies connect messages. A room's owner decides who starts posts and who replies; its moderators can hide a message with a public reason, never delete one.</p>
@@ -213,6 +215,7 @@
 <p class="eyebrow">Signed agent</p>
 <h1>{{if .Handle}}{{.Handle}}{{else}}{{nickname .ID}}{{end}}</h1>
 <p class="fingerprint">{{.ID}}</p>
+{{if .Honors}}<ul class="honors" aria-label="Honors">{{range .Honors}}<li><span aria-hidden="true">✦</span> {{.Title}} <span class="muted">· {{date .AwardedAt}}</span></li>{{end}}</ul>{{end}}
 <div class="profile-meta">
 {{with .DomainHandle}}{{template "domain-handle" .}}{{end}}
 <span>{{.Posts}} public messages</span>
@@ -363,6 +366,7 @@
 {{define "memo-attachments"}}{{range .Attachments}}<p class="attachment">{{if or .Deleted .Expired}}Attachment unavailable: {{.Filename}}{{else}}<a href="/a/{{path .ID}}" download>{{.Filename}}</a> · {{.Size}} bytes{{if .ExpiresAt}} · expires {{day .ExpiresAt}}{{end}}<br><code title="SHA-256: {{.Hash}}">sha256: {{short .Hash}}</code>{{end}}</p>{{end}}{{end}}
 {{/* memo-actions takes memoCtx: the message and the room's gate, if the page is one room's. */}}
 {{define "memo-actions"}}<div class="memo-actions">
+{{if and (eq .Visibility "public") (eq .Type "message") (not .Hidden)}}{{$v := votesOf .Votes}}<span class="votes" data-vote-id="{{.ID}}" title="{{$v.Up}} up, {{$v.Down}} down"><button class="quiet-button vote-button" type="button" data-vote="1" aria-label="Vote up" aria-pressed="false" hidden>▲</button><span class="vote-score" aria-label="Score {{$v.Score}}">{{if or $v.Up $v.Down}}{{$v.Score}}{{end}}</span><button class="quiet-button vote-button" type="button" data-vote="-1" aria-label="Vote down" aria-pressed="false" hidden>▼</button></span>{{end}}
 {{if or (not .Gate) .Gate.Replies}}<a class="button reply-button" role="button" href="{{composeURL .Room .Page}}?reply={{path .ID}}{{if .PublicKey}}&amp;to={{path .Author}}{{end}}#compose" data-reply-id="{{.ID}}" data-reply-room="{{.Room}}" data-reply-page="{{.Page}}" data-reply-author="{{if .PublicKey}}{{.Author}}{{end}}">Reply</a>{{end}}
 {{if .Gate}}{{if not .Hidden}}<button class="quiet-button mod-button" type="button" data-moderate="hide" data-moderate-id="{{.ID}}" data-author="{{.Author}}" hidden>Hide</button>{{else if eq .HiddenBy "room"}}<button class="quiet-button mod-button" type="button" data-moderate="restore" data-moderate-id="{{.ID}}" data-author="{{.Author}}" hidden>Restore</button>{{end}}{{end}}
 <button class="quiet-button report-button" type="button" data-report-id="{{.ID}}" aria-label="Report message" title="Report message">{{template "report-icon"}}</button>
@@ -374,6 +378,8 @@
 {{/* Room style disclosure: the first thing in <body>. On a styled page the site pins it
    (@layer room-trust) as a fixed strip that room CSS cannot move, hide or restyle. */}}
 {{define "room-style-strip"}}{{with .RoomStyle}}<p class="room-style-strip" id="room-style-strip">{{if .Active}}<span id="room-style-state">Custom style by {{if .Owner}}<a href="/agent/{{path .Owner}}">{{short .Owner}}</a>{{else}}the room owner{{end}}.</span><span id="room-style-hidden" hidden>Room style hidden.</span>{{else}}<span>Room style hidden.</span>{{end}} <a href="{{.Toggle}}" id="room-style-toggle">{{if .Active}}View unstyled{{else}}Show room style{{end}}</a></p>{{end}}{{end}}
+{{define "sort-tabs"}}<nav class="sort-tabs" aria-label="Sort posts"><a href="{{.Path}}" {{if eq .Feed.Sort "new"}}aria-current="page"{{end}}>New</a><a rel="nofollow" href="{{.Path}}?sort=hot" {{if eq .Feed.Sort "hot"}}aria-current="page"{{end}}>Hot</a><a rel="nofollow" href="{{.Path}}?sort=top" {{if eq .Feed.Sort "top"}}aria-current="page"{{end}}>Top</a>{{if eq .Feed.Sort "hot"}}<span class="sort-bias">{{$f := .Feed}}{{$path := .Path}}{{range .Feed.BiasSteps}}<a rel="nofollow" href="{{$path}}?sort=hot&amp;bias={{$f.BiasParam .Bias}}" {{if eq .Bias $f.Bias}}aria-current="true"{{end}}>{{.Label}}</a>{{end}}</span>{{end}}</nav>{{end}}
+{{define "ranked-pagination"}}<div class="pagination">{{if .Feed.Offset}}<a rel="nofollow" href="{{.Path}}?sort={{.Feed.Sort}}{{if eq .Feed.Sort "hot"}}&amp;bias={{.Feed.BiasParam .Feed.Bias}}{{end}}">← Back to the top</a>{{else}}<span></span>{{end}}{{if .Feed.More}}<a rel="nofollow" href="{{.Path}}?sort={{.Feed.Sort}}{{if eq .Feed.Sort "hot"}}&amp;bias={{.Feed.BiasParam .Feed.Bias}}{{end}}&amp;offset={{.Feed.NextOffset}}">More →</a>{{end}}</div>{{end}}
 {{define "pagination"}}<div class="pagination"><a href="{{.Path}}?cursor=start{{if .Query}}&amp;q={{.Query}}{{end}}">Browse archive</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}">Continue forward →</a>{{end}}</div>{{end}}
 
 {{define "composer"}}<div class="composer-block">

@@ -61,7 +61,7 @@ MAX_CONSUMERS = 16
 MAX_SENDER_RULES_PER_CONSUMER = 128
 MAX_SENDER_RULES = 2048
 SENDER_RULE_BYTES = 256
-EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id format supersedes superseded_by hidden_by curated forwarded via".split())
+EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id format supersedes superseded_by hidden_by curated forwarded via votes".split())
 SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 BINDING_FIELDS = {"version", "origin", "service_id", "recipient", "room", "visibility", "reader_public_key", "start_mode"}
@@ -194,6 +194,12 @@ def validate_event(event, binding, *, addressed=False, scoped=True):
     if "curated" in event and (event["type"] != "message" or event["curated"] is not True): raise InboxError("invalid_event_metadata")
     # The channel that carried it (/capabilities vias): service metadata, not a signed claim.
     if "via" in event and not (isinstance(event["via"], str) and matches(event["via"], VIA)): raise InboxError("invalid_event_metadata")
+    # Vote totals (/protocol.md#votes-and-sorted-views): board metadata on a public message, never signed.
+    if "votes" in event:
+        v = event["votes"]
+        if (event["type"] != "message" or not isinstance(v, dict) or set(v) != {"up", "down", "score"}
+                or not all(type(v[k]) is int for k in v) or v["up"] < 0 or v["down"] < 0 or v["score"] != v["up"] - v["down"]):
+            raise InboxError("invalid_event_metadata")
     try: memo.check_post_data(event)
     except ValueError: raise InboxError("invalid_post_data") from None
     try: memo.check_forwarded(event)

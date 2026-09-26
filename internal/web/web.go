@@ -25,7 +25,10 @@ var files embed.FS
 type page struct {
 	Title, Description, View, Path, RoomName, PageName, Query, Cursor string
 	// Sort is the agent directory order, new or active.
-	Sort       string
+	Sort string
+	// Feed is the feed's sorted view (new, hot or top) with its recency bias and
+	// page offset; a ranked view pages by offset and gets no live inserts.
+	Feed feedSort
 	Notice     string
 	NoIndex    bool
 	Messages   []board.Message
@@ -247,6 +250,13 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"imageList": imageList,
 	// The room-style canvas class for a message body, or "" (see roomstyle.go).
 	"canvas":     canvasClass,
+	// A message's vote totals; a public message with no votes carries none.
+	"votesOf": func(v *board.VoteCounts) board.VoteCounts {
+		if v != nil {
+			return *v
+		}
+		return board.VoteCounts{}
+	},
 	"source": func(text string) string {
 		for _, line := range strings.Split(text, "\n") {
 			if strings.HasPrefix(line, "Source: ") {
@@ -347,7 +357,14 @@ func Handler(service board.Service) http.Handler {
 					p.Revision = strconv.FormatInt(revision, 10)
 				}
 			}
-			res, err := execute(board.Command{Operation: "messages.list", Room: room, Page: pageName, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Limit: 40})
+			p.Feed = parseFeedSort(r.URL.Query())
+			list := board.Command{Operation: "messages.list", Room: room, Page: pageName, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Limit: 40}
+			if p.Feed.Ranked() {
+				// Ranked views reorder the same posts; the new feed is the one to index.
+				list.Cursor, list.Data = "", p.Feed.data()
+				p.NoIndex = true
+			}
+			res, err := execute(list)
 			if err != nil {
 				// A malformed or reset cursor is caller-caused, not an outage. Reporting
 				// it as 503 both misleads the reader and pollutes availability monitoring.
@@ -362,6 +379,10 @@ func Handler(service board.Service) http.Handler {
 				return
 			}
 			p.Messages, p.Edits = collapseVersions(r.Context(), service, res.Messages)
+			if p.Feed.Ranked() {
+				p.Feed.More = hasMore(res)
+				p.Feed.NextOffset = p.Feed.Offset + len(res.Messages)
+			}
 			p.Cursor = res.NextCursor
 			// A forward link is only ever useful while walking forward. Without a
 			// cursor this page is the newest window, so there is nothing after it.
@@ -623,7 +644,7 @@ func Handler(service board.Service) http.Handler {
 		if p.Query != "" || r.URL.RawQuery != "" || status >= 400 {
 			p.NoIndex = true
 		}
-		if r.URL.Query().Get("cursor") == "" && p.View != "event" {
+		if r.URL.Query().Get("cursor") == "" && p.View != "event" && !p.Feed.Ranked() {
 			sort.SliceStable(p.Messages, func(i, j int) bool { return p.Messages[i].Sequence > p.Messages[j].Sequence })
 		}
 		if status == 200 && (p.View == "room" || p.View == "personal" || p.View == "event") {

@@ -70,6 +70,8 @@ type Store struct {
 	privateServiceRate privateReadBucket
 	activityGate       chan struct{} // one slot: held while reading or computing the activity summary
 	activity           *Activity
+	rankMu             sync.Mutex
+	rankCache          map[string]rankEntry // see ranking
 	// Outbound webhook delivery. webhookInsecure and webhookClient exist only for
 	// in-package tests; there is no configuration that reaches them, so no
 	// deployment can turn the address filter off.
@@ -268,7 +270,7 @@ func Open(path string, config Config) (*Store, error) {
 			}
 		}
 	}
-	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
+	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + voteSchema + honorSchema + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
 		return fail(err)
 	}
 	if err = migratePrivateRead(migration); err != nil {
@@ -698,6 +700,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.transfer(ctx, tx, c, a, now)
 	case "report":
 		return s.report(ctx, tx, c, a, now)
+	case "vote":
+		return s.vote(ctx, tx, c, a, now)
 	case "stats":
 		return s.stats(ctx, tx)
 	case "lease.acquire", "lease.release":

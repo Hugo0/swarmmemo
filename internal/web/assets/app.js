@@ -138,7 +138,7 @@
     const readEpoch=credentialEpoch;
     const key=selectedKey ? {...selectedKey} : null;
     if (requireIdentity && !key) throw Error('Create or import a signing key first.');
-    const mutation = /^(post|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore)|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete))/.test(command.operation);
+    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore)|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete))/.test(command.operation);
     const intentCommand={...command};delete intentCommand.request_id;delete intentCommand.nonce;delete intentCommand.timestamp;delete intentCommand.signature;delete intentCommand.proof;
     const intent=mutation?JSON.stringify([key?.public_key||'',intentCommand]):'';
     let record=pendingRequests.get(intent);
@@ -380,6 +380,7 @@
       const reply = link('button reply-button', 'Reply', composeHref(event.room, event.page) + '?reply=' + path(event.id) + (event.public_key ? '&to=' + path(event.author) : '') + '#compose');
       reply.setAttribute('role', 'button'); reply.dataset.replyId = event.id; reply.dataset.replyRoom = event.room; reply.dataset.replyPage = event.page; reply.dataset.replyAuthor = event.public_key ? event.author : '';
       const report = node('button', 'quiet-button report-button'); report.type = 'button'; report.dataset.reportId = event.id;report.setAttribute('aria-label','Report message');report.title='Report message';report.append(memoIcon('report'));
+      if (event.visibility === 'public' && !event.hidden) actions.append(voteControls(event));
       if (!gate || (gate.reply !== 'none' && !gate.viaOnly)) actions.append(reply);
       if (gate && (!event.hidden || event.hidden_by === 'room')) {
         const moderate = node('button', 'quiet-button mod-button', event.hidden ? 'Restore' : 'Hide'); moderate.type = 'button'; moderate.hidden = true;
@@ -1056,6 +1057,8 @@
     }
     const moderate = event.target.closest('.mod-button');
     if (moderate) openModeration(moderate);
+    const vote = event.target.closest('.vote-button');
+    if (vote) castVote(vote);
     const report = event.target.closest('.report-button');
     if (report) {
       const reason = prompt('What should the operator review? Please include a short reason, without private credentials.'); if (!reason?.trim()) return;
@@ -1063,6 +1066,30 @@
       request({operation: 'report', message_id: report.dataset.reportId, reason: reason.trim(), request_id: uuid()}).then(() => toast('Report received for operator review.')).catch(error => toast(error.message)).finally(() => {report.disabled = false;});
     }
   });
+  // Votes: ▲ and ▼ sign a vote with this browser's key; pressing a pressed
+  // button again clears the vote. The score shown is the board's reply.
+  function voteControls(event) {
+    const box = node('span', 'votes'); box.dataset.voteId = event.id;
+    const v = event.votes || {up: 0, down: 0, score: 0};
+    box.title = `${v.up} up, ${v.down} down`;
+    const button = (value, label, text) => { const b = node('button', 'quiet-button vote-button', text); b.type = 'button'; b.dataset.vote = value; b.setAttribute('aria-label', label); b.setAttribute('aria-pressed', 'false'); return b; };
+    const score = node('span', 'vote-score', v.up || v.down ? String(v.score) : ''); score.setAttribute('aria-label', 'Score ' + v.score);
+    box.append(button('1', 'Vote up', '▲'), score, button('-1', 'Vote down', '▼'));
+    return box;
+  }
+  function castVote(button) {
+    const box = button.closest('.votes'); if (!box) return;
+    const pressed = button.getAttribute('aria-pressed') === 'true';
+    const value = pressed ? 0 : Number(button.dataset.vote);
+    for (const b of box.querySelectorAll('.vote-button')) b.disabled = true;
+    request({operation: 'vote', message_id: box.dataset.voteId, data: JSON.stringify({value}), request_id: uuid()}, true).then(result => {
+      const v = result.data?.votes || {up: 0, down: 0, score: 0};
+      const score = box.querySelector('.vote-score'); score.textContent = v.up || v.down ? String(v.score) : ''; score.setAttribute('aria-label', 'Score ' + v.score);
+      box.title = `${v.up} up, ${v.down} down`;
+      for (const b of box.querySelectorAll('.vote-button')) b.setAttribute('aria-pressed', String(value !== 0 && Number(b.dataset.vote) === value));
+    }).catch(error => toast(error.message)).finally(() => { for (const b of box.querySelectorAll('.vote-button')) b.disabled = false; });
+  }
+  for (const b of document.querySelectorAll('.vote-button')) b.hidden = false;
   function openModeration(button) {
     const article = button.closest('.memo'); if (!article) return;
     article.querySelector('.mod-form')?.remove();

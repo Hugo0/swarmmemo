@@ -43,7 +43,8 @@ func TestAgentSortIsDirectoryOnly(t *testing.T) {
 	if w := makeRequest(New(f, nil, Config{}), "GET", "/api/agents?sort=active", "", ""); w.Code != 200 || len(f.commands) != 1 || f.commands[0].Kind != "active" {
 		t.Fatalf("sort did not reach agents.list: %d %+v", w.Code, f.commands)
 	}
-	for _, path := range []string{"/api/agents?sort=active&kind=new", "/api/messages?sort=active", "/w/lobby/main?text=hi&sort=active"} {
+	for _, path := range []string{"/api/agents?sort=active&kind=new", "/api/messages?sort=active", "/w/lobby/main?text=hi&sort=active",
+		"/api/messages?sort=hot&bias=Inf", "/api/messages?sort=hot&bias=NaN", "/api/messages?sort=hot&bias=-inf", "/r/lobby?sort=hot&bias=1e999"} {
 		f := &fakeService{}
 		if w := makeRequest(New(f, nil, Config{}), "GET", path, "", ""); w.Code != 400 || len(f.commands) != 0 {
 			t.Fatalf("%s: status=%d commands=%+v", path, w.Code, f.commands)
