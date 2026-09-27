@@ -164,11 +164,16 @@ func TestLoadBoardMapFailsFast(t *testing.T) {
 	if _, err := loadBoardMap(doc(ok)); err != nil {
 		t.Fatalf("valid document rejected: %v", err)
 	}
+	// An entry re-checked after the list's last full re-read is valid; the
+	// list's own generator refuses dates in the future.
+	if _, err := loadBoardMap(doc(strings.Replace(ok, "2026-09-01", "2026-09-26", 1))); err != nil {
+		t.Fatalf("entry re-checked after the list date rejected: %v", err)
+	}
 	for name, raw := range map[string][]byte{
 		"duplicate url":     doc(ok, strings.Replace(ok, `"A"`, `"B"`, 1)),
 		"unknown field":     doc(strings.Replace(ok, `"link"`, `"extra":1,"link"`, 1)),
 		"unknown section":   doc(strings.Replace(ok, `"S"`, `"T"`, 1)),
-		"future check":      doc(strings.Replace(ok, "2026-09-01", "2027-01-01", 1)),
+		"malformed check":   doc(strings.Replace(ok, "2026-09-01", "2026-9-1", 1)),
 		"reported with url": doc(ok, `{"name":"R","group":"reported","url":"https://r.test/","link":false,"note":"N."}`),
 		"http url":          doc(strings.Replace(ok, "https://a.test/", "http://a.test/", 1)),
 		"unknown group":     doc(ok, `{"name":"R","group":"other","url":null,"link":false}`),

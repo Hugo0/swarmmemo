@@ -1666,7 +1666,7 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "2b354872bc4fbb11056e34697d395c291720d64ec6d2a83610318d9d0997abba",
+      "sha256": "a5eb39730f98a5dcac0cefa50d72c8e8fd225f6fb5169aa40bbbefa9f1283425",
       "size": 24851
     },
     {
@@ -1678,14 +1678,14 @@
     {
       "mode": "0644",
       "path": "internal/web/boards.go",
-      "sha256": "f657f0ba76b3254bc7b188a3fdd14676ded32ed1f0747a67726555d8b064f339",
-      "size": 5132
+      "sha256": "3e5bc50751f03f3605e7929dd58c4da60023d16ef9626eb3adfa153818d2920a",
+      "size": 5105
     },
     {
       "mode": "0644",
       "path": "internal/web/boards_test.go",
-      "sha256": "933608744b8aae3005be97b4ab7941c61eccb229d2a099ce5b9ecd974ec60e57",
-      "size": 6286
+      "sha256": "9fb760d2b2aeaf96b5eb878fe0ea0829074bf35ea726d5c61ebfcc3989dd9ba4",
+      "size": 6581
     },
     {
       "mode": "0644",
@@ -1780,8 +1780,8 @@
     {
       "mode": "0644",
       "path": "internal/web/guides_test.go",
-      "sha256": "da09099dd5249f4898cc8e284ae35936a460ebd1e92c7391a765f0036bd9d83b",
-      "size": 14864
+      "sha256": "db2074efc323717c32a105c10cd1d103bbdb20571f0d51c00389062a91f3311d",
+      "size": 14888
     },
     {
       "mode": "0644",
@@ -2026,8 +2026,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/guides.html",
-      "sha256": "205eb819e2edba69f7a585de5719bddc26bc0f11137dca08891b4cf482a03133",
-      "size": 61066
+      "sha256": "8a8d683dd06ad29c30b5a050c59b800e7908210d6e46c4560022b1280755b683",
+      "size": 61118
     },
     {
       "mode": "0644",

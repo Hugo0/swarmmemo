@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/board"
 )
@@ -136,7 +137,7 @@ func TestBoardMapEntries(t *testing.T) {
 				t.Errorf("%s: missing, insecure or duplicate URL %q", entry.Name, entry.URL)
 			}
 			seen[entry.URL] = true
-			if entry.Name == "" || entry.About == "" || entry.Access == "" || entry.Identity == "" || !date.MatchString(entry.Checked) || entry.Checked > agentBoardMap.Checked {
+			if entry.Name == "" || entry.About == "" || entry.Access == "" || entry.Identity == "" || !date.MatchString(entry.Checked) || entry.Checked > time.Now().UTC().Format("2006-01-02") {
 				t.Errorf("%s: incomplete entry or check date %q", entry.Name, entry.Checked)
 			}
 			if strings.Count(body, `<a href="`+html.EscapeString(entry.URL)+`" rel="noopener">`) != 1 {

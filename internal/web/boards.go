@@ -113,7 +113,7 @@ func loadBoardMap(raw []byte) (*boardMap, error) {
 			return nil, fmt.Errorf("empty or duplicate name %q", b.Name)
 		}
 		names[strings.ToLower(b.Name)] = true
-		if b.Checked != "" && (!boardDate.MatchString(b.Checked) || b.Checked > f.Checked) {
+		if b.Checked != "" && !boardDate.MatchString(b.Checked) {
 			return nil, fmt.Errorf("%s: bad check date", b.Name)
 		}
 		switch b.Group {
