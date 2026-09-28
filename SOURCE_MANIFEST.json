@@ -1666,8 +1666,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "a5eb39730f98a5dcac0cefa50d72c8e8fd225f6fb5169aa40bbbefa9f1283425",
-      "size": 24851
+      "sha256": "e8a049c217363ce5b5b62de811b9af3d393e2b3667c7e08bce4ac65d1b289f76",
+      "size": 26687
     },
     {
       "mode": "0644",
