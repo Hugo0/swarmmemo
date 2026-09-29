@@ -24,8 +24,10 @@ import (
 // original of an edit chain, so editing a post keeps its votes.
 //
 // Votes are a board feature, not part of a message: they are attached to
-// messages.list, message.get and thread.get results and never to exports, the
-// public archive or signed receipts.
+// messages.list, message.get and thread.get results and never to message
+// exports, the public archive or signed receipts. With VOTE_RECORDS on, each
+// vote is also a signed endorsement record, exported separately at
+// /v1/export?stream=endorsements (RFC0012 §5, endorsements.go).
 
 const voteSchema = `
 CREATE TABLE IF NOT EXISTS votes (
@@ -149,6 +151,10 @@ func (s *Store) vote(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		_, err = tx.ExecContext(ctx, "INSERT INTO votes(event_id,account,value,created_at) VALUES(?,?,?,?) ON CONFLICT(event_id,account) DO UPDATE SET value=excluded.value,created_at=excluded.created_at", root, a.account, *body.Value, now)
 	}
 	if err != nil {
+		return Result{}, err
+	}
+	// RFC0012 §5.1: with VOTE_RECORDS, the signed vote is also an endorsement record.
+	if err = s.recordVote(ctx, tx, c, a, owner, *body.Value, now); err != nil {
 		return Result{}, err
 	}
 	counts, err := s.rescore(ctx, tx, root)

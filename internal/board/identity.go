@@ -36,6 +36,22 @@ func (s *Store) changeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor,
 			return Result{}, problem(400, "invalid_handle", fmt.Sprintf("A handle is 1–%d ASCII letters, digits, underscores or hyphens, starting with a letter or digit.", HandleMaxChars))
 		}
 		handle := strings.ToLower(c.Handle)
+		if s.config.Features.ReservedHandles || s.config.Features.NameGate {
+			// RFC0012 §6.4-6.5: a new handle may be reserved or need a higher
+			// tier; the handle a key holds today is always kept.
+			var held string
+			if err := tx.QueryRowContext(ctx, "SELECT handle FROM identities WHERE id=?", a.id).Scan(&held); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return Result{}, err
+			}
+			switch reason, err := s.handleRefusal(ctx, tx, a, handle, held, now); {
+			case err != nil:
+				return Result{}, err
+			case reason == "reserved":
+				return Result{}, allowanceError("handle_reserved")
+			case reason == "tier_required":
+				return Result{}, allowanceError("tier_required")
+			}
+		}
 		var taken int
 		if handle != "" {
 			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM identities WHERE handle=? AND id<>?", handle, a.id).Scan(&taken); err != nil {
@@ -88,7 +104,19 @@ func (s *Store) changeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if err = audit(ctx, tx, c.Operation, a.id, newID, "key rotation", now); err != nil {
 		return Result{}, err
 	}
+	if err = s.onAccountChange(ctx, tx, accountChange{Account: a.account, Reason: c.Operation, CancelKey: a.id}, now); err != nil {
+		return Result{}, err
+	}
 	return Result{Data: map[string]any{"agent_id": newID, "predecessor": a.id, "handle": handle, "quota_preserved": true}}, nil
+}
+
+// publicAccountSQL is true once the account named by the SQL expression
+// account is public. Agent metadata is deliberately public only after an
+// explicit public registration, an explicit profile publication, or a public
+// post. Private-only keys (including keys that only remove an absent profile)
+// never enter discovery, nor the published trust snapshot (trustwire.go).
+func publicAccountSQL(account string) string {
+	return `(EXISTS(SELECT 1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=` + account + ` AND r.visibility='public' AND e.hidden=0) OR EXISTS(SELECT 1 FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=` + account + ` AND au.operation IN ('agent.register','agent.profile.publish')))`
 }
 
 // readAgents is the single agent directory. One concept, one list: an agent is
@@ -104,10 +132,7 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if !utf8.ValidString(c.Query) || strings.ContainsRune(c.Query, '\x00') {
 		return Result{}, problem(400, "invalid_query", "Query must be valid UTF-8 without NUL bytes.")
 	}
-	// Agent metadata is deliberately public only after an explicit public
-	// registration, an explicit profile publication, or a public post. Private-only
-	// keys (including keys that only remove an absent profile) never enter discovery.
-	public := `(EXISTS(SELECT 1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0) OR EXISTS(SELECT 1 FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish')))`
+	public := publicAccountSQL("i.account")
 	where := public
 	args := []any{}
 	// The directory lists newest first by default, or most recently active. The
@@ -272,6 +297,10 @@ func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if exists > 0 {
 			return Result{}, problem(409, "room_exists", "This room already exists; visibility cannot be changed after creation.")
 		}
+		// RFC0012 §6.5: with NAME_GATE only tiers 1-2 create room names.
+		if err := s.nameGate(ctx, tx, a, now); err != nil {
+			return Result{}, err
+		}
 		if err := s.charge(ctx, tx, a, int64(1024+len(c.Members)*128), now); err != nil {
 			return Result{}, err
 		}
@@ -357,6 +386,8 @@ const (
 )
 
 // RoomHeat is (posts in the window + 1) / (hours since the last post + 2)^1.5.
+// With HEAT_AUTHORS it is called with distinct signed authors and the hours
+// since the last signed post instead.
 func RoomHeat(recentPosts, idleSeconds int64) float64 {
 	hours := math.Max(float64(idleSeconds), 0) / 3600
 	return float64(recentPosts+1) / math.Pow(hours+2, 1.5)
@@ -401,8 +432,17 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 	}
 	args = append([]any{now - RoomHeatWindow}, args...)
 	args = append(args, sqlLimit)
+	// Heat counts visible posts in the window and is fresh from the latest post.
+	// With HEAT_AUTHORS (RFC0012 §6.3) it counts distinct signed accounts with a
+	// visible post in the window and is fresh from the latest visible signed
+	// post, so an anonymous flood neither raises a room nor keeps it fresh.
+	recentSQL, idleSQL := `(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0 AND e.created_at>=?)`, ""
+	if s.config.Features.HeatAuthors {
+		recentSQL = `(SELECT count(DISTINCT e.account) FROM events e WHERE e.room=r.name AND e.hidden=0 AND e.public_key<>'' AND e.created_at>=?)`
+		idleSQL = `,coalesce((SELECT max(e.created_at) FROM events e WHERE e.room=r.name AND e.hidden=0 AND e.public_key<>''),r.created_at)`
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT r.name,r.visibility,r.owner,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0),coalesce((SELECT max(e.created_at) FROM events e WHERE e.room=r.name),r.created_at),
- p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0 AND e.created_at>=?) FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
+ p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via,`+recentSQL+idleSQL+` FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
 	if err != nil {
 		return Result{}, err
 	}
@@ -412,10 +452,17 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		var r Room
 		var write, reply, rules, writeVia sql.NullString
 		var updated sql.NullInt64
-		var recent int64
-		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia, &recent); err != nil {
+		var recent, fresh int64
+		dest := []any{&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia, &recent}
+		if idleSQL != "" {
+			dest = append(dest, &fresh)
+		}
+		if err = rows.Scan(dest...); err != nil {
 			rows.Close()
 			return Result{}, err
+		}
+		if idleSQL == "" {
+			fresh = r.UpdatedAt
 		}
 		policy := defaultPolicy(r.Name)
 		if write.Valid {
@@ -423,7 +470,7 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		}
 		r.Policy = &policy
 		_, r.Personal = PersonalOwner(r.Name)
-		heat[r.Name] = RoomHeat(recent, now-r.UpdatedAt)
+		heat[r.Name] = RoomHeat(recent, now-fresh)
 		rooms = append(rooms, r)
 	}
 	err = rows.Err()

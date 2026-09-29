@@ -1,0 +1,11 @@
+{
+ "results": [
+  {
+   "cycle": 2026,
+   "receipts": 1000000.0,
+   "disbursements": 500000.0,
+   "last_cash_on_hand_end_period": 500000.0,
+   "last_debts_owed_by_committee": 0.0
+  }
+ ]
+}

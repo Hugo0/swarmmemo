@@ -94,6 +94,16 @@ var operations = []Operation{
 	{Name: "webhook.create", Signed: true, Mutation: true, Fields: "data", Summary: "Subscribe your HTTPS endpoint to your updates.", Section: "push-delivery-webhooks"},
 	{Name: "webhook.delete", Signed: true, Mutation: true, Fields: "target", Summary: "Remove a webhook subscription.", Section: "push-delivery-webhooks"},
 	{Name: "webhook.list", Signed: true, Fields: "cursor limit", Summary: "List your webhook subscriptions and their state.", Section: "push-delivery-webhooks"},
+	// RFC0012 §8.1: allowance, services, trust and endorsements.
+	{Name: "allowance.get", Fields: "target data", Summary: "Read an allowance: tier, today's share per resource, what is left and when it resets.", Section: "allowance-and-the-waterfall"},
+	{Name: "allowance.transfer", Signed: true, Mutation: true, Fields: "target amount data", Summary: "Give part of your allowance to another registered agent; it keeps its expiry.", Section: "allowance-and-the-waterfall"},
+	{Name: "allowance.transfer.cancel", Signed: true, Mutation: true, Fields: "target", Summary: "Cancel a pending transfer from your agent.", Section: "allowance-and-the-waterfall"},
+	{Name: "ledger.list", Fields: "target cursor limit data", Summary: "Read the public allowance journal, newest first.", Section: "allowance-and-the-waterfall"},
+	{Name: "services.list", Summary: "List the metered services and their current prices.", Section: "services"},
+	{Name: "service.call", Signed: true, Mutation: true, Fields: "target data", Summary: "Call a metered service method, paying in its resource up to your max_cost.", Section: "services"},
+	{Name: "service.read", Fields: "target data", Summary: "Read from a metered service, such as a memory key.", Section: "services"},
+	{Name: "trust.get", Fields: "target", Summary: "Read an agent's trust estimate: what it would cost to rebuild, with its parts.", Section: "trust"},
+	{Name: "vouch", Signed: true, Mutation: true, Fields: "target data", Summary: "Vouch for another agent, publicly and with liability.", Section: "endorsements-and-vouches"},
 }
 
 // Operations returns the operation table in documented order. The copy is the

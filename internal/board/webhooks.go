@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"swarmmemo/internal/safenet"
 )
 
 // Webhooks push the same three things /api/updates already returns to a key —
@@ -87,46 +89,16 @@ func webhookError(code string) error {
 	return problem(400, "invalid_webhook", fmt.Sprintf("Data must be a strict schema-1 JSON object with an https URL of up to %d bytes, no credentials, no fragment and no port other than 443.", WebhookMaxURLBytes))
 }
 
-// webhookBlocked holds the ranges IsGlobalUnicast and friends do not already
-// cover, or cover inconsistently between families. The predicate checks stay
-// alongside it; both run on every address.
-var webhookBlocked = func() []*net.IPNet {
-	nets := []*net.IPNet{}
-	for _, cidr := range []string{
-		"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
-		"172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16",
-		"198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
-		"::/128", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
-		"2001::/32", "2002::/16", "64:ff9b::/96", "100::/64", "2001:db8::/32",
-	} {
-		_, n, err := net.ParseCIDR(cidr)
-		if err != nil {
-			panic(err)
-		}
-		nets = append(nets, n)
-	}
-	return nets
-}()
-
-// publicWebhookIP is the single address decision. An IPv4-mapped IPv6 literal is
-// unwrapped first, so ::ffff:127.0.0.1 cannot slip past the v4 ranges.
+// publicWebhookIP is the single address decision, shared with every other
+// outbound request through internal/safenet.
 func publicWebhookIP(ip net.IP) error {
-	if ip == nil {
+	switch safenet.PublicIP(ip) {
+	case nil:
+		return nil
+	case safenet.ErrUnresolved:
 		return webhookError("webhook_unresolved")
 	}
-	if v4 := ip.To4(); v4 != nil {
-		ip = v4
-	}
-	if !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
-		ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() {
-		return webhookError("webhook_address_blocked")
-	}
-	for _, n := range webhookBlocked {
-		if n.Contains(ip) {
-			return webhookError("webhook_address_blocked")
-		}
-	}
-	return nil
+	return webhookError("webhook_address_blocked")
 }
 
 // parseWebhookURL rejects everything about a URL that is not a plain public

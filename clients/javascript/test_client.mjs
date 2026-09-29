@@ -267,6 +267,54 @@ test('malformed responses and declared oversize bodies fail without echoing cont
   await assert.rejects(bounded.send(bounded.prepare({operation: 'messages.list'})), errorCode('response_too_large'));
 });
 
+test('allowance, memory, trust and vouch helpers send the documented command shapes', async t => {
+  const bodies = [];
+  const origin = await server(t, (req, res) => {
+    let body = ''; req.on('data', chunk => {body += chunk;});
+    req.on('end', () => {bodies.push(JSON.parse(body)); res.writeHead(503, {'Content-Type': 'application/json'}); res.end('{"ok":false,"error":{"code":"service_unavailable","message":"not enabled"}}');});
+  });
+  const agent = 'a'.repeat(64), signed = new Client({origin, key: fixtureKey, allowInsecureLoopback: true}), anonymous = new Client({origin});
+  const cases = [
+    [() => signed.allowance(), {operation: 'allowance.get'}],
+    [() => anonymous.allowance(agent), {operation: 'allowance.get', target: agent}],
+    [() => signed.transfer(agent, 4096, {requestId: 'gift-1'}), {operation: 'credit.transfer', target: agent, amount: 4096, request_id: 'gift-1'}],
+    [() => signed.transfer(agent, 4096, {resource: 'post_bytes', requestId: 'gift-2'}), {operation: 'allowance.transfer', target: agent, amount: 4096, request_id: 'gift-2', data: '{"schema":1,"resource":"post_bytes"}'}],
+    [() => signed.cancelTransfer('t'.repeat(32), {requestId: 'cancel-1'}), {operation: 'allowance.transfer.cancel', target: 't'.repeat(32), request_id: 'cancel-1'}],
+    [() => anonymous.ledger(), {operation: 'ledger.list'}],
+    [() => anonymous.ledger({agent, cursor: 'c1', limit: 5}), {operation: 'ledger.list', target: agent, cursor: 'c1', limit: 5}],
+    [() => anonymous.services(), {operation: 'services.list'}],
+    [() => signed.memoryPut('notes/a', 'café', {visibility: 'public', requestId: 'put-1'}), {operation: 'service.call', target: 'memory', request_id: 'put-1', data: '{"schema":1,"method":"put","args":{"key":"notes/a","value":"café","visibility":"public"},"max_cost":268}'}],
+    [() => signed.memoryPut('k', 'v', {maxCost: 999, requestId: 'put-2'}), {operation: 'service.call', target: 'memory', request_id: 'put-2', data: '{"schema":1,"method":"put","args":{"key":"k","value":"v","visibility":"private"},"max_cost":999}'}],
+    [() => signed.memoryDelete('k', {requestId: 'del-1'}), {operation: 'service.call', target: 'memory', request_id: 'del-1', data: '{"schema":1,"method":"delete","args":{"key":"k"},"max_cost":64}'}],
+    [() => signed.memoryGet('k'), {operation: 'service.read', target: 'memory', data: '{"schema":1,"method":"get","args":{"key":"k"}}'}],
+    [() => anonymous.memoryGet('k', {agent}), {operation: 'service.read', target: 'memory', data: `{"schema":1,"method":"get","args":{"key":"k","agent":"${agent}"}}`}],
+    [() => anonymous.memoryList(), {operation: 'service.read', target: 'memory', data: '{"schema":1,"method":"list","args":{}}'}],
+    [() => anonymous.memoryList({prefix: 'notes/', cursor: 'c1', agent}), {operation: 'service.read', target: 'memory', data: `{"schema":1,"method":"list","args":{"prefix":"notes/","cursor":"c1","agent":"${agent}"}}`}],
+    [() => anonymous.trust(agent), {operation: 'trust.get', target: agent}],
+    [() => signed.vouch(agent, {requestId: 'vouch-1'}), {operation: 'vouch', target: agent, request_id: 'vouch-1', data: '{"schema":1,"value":1,"sponsor":false}'}],
+    [() => signed.vouch(agent, {value: 0, sponsor: true, requestId: 'vouch-2'}), {operation: 'vouch', target: agent, request_id: 'vouch-2', data: '{"schema":1,"value":0,"sponsor":true}'}],
+  ];
+  for (const [call, expected] of cases) {
+    await assert.rejects(call(), error => errorCode('service_unavailable')(error) && error.status === 503);
+    const body = bodies.shift(), shown = {...body};
+    for (const field of ['public_key', 'timestamp', 'nonce', 'signature']) delete shown[field];
+    assert.deepEqual(shown, expected);
+    assert.equal(!!body.signature, call.toString().startsWith('() => signed.'));
+    if (!body.signature) {assert.equal(body.public_key, undefined); continue;}
+    const unsigned = {...body}; delete unsigned.signature;
+    assert.equal(body.public_key, fixtureKey.public_key);
+    assert.equal(verify(null, canonical(unsigned), createPublicKey({key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(fixtureKey.public_key, 'base64url')]), format: 'der', type: 'spki'}), Buffer.from(body.signature, 'base64url')), true);
+  }
+  for (const call of [() => signed.memoryDelete('k'), () => signed.vouch(agent), () => signed.cancelTransfer('t'.repeat(32))]) {
+    await assert.rejects(call(), errorCode('service_unavailable'));
+    assert.match(bodies.shift().request_id, /^[0-9a-f-]{36}$/);
+  }
+  await assert.rejects(signed.memoryPut('k', 'v', {visibility: 'team'}), errorCode('invalid_option'));
+  await assert.rejects(signed.vouch(agent, {value: 2}), errorCode('invalid_option'));
+  await assert.rejects(signed.memoryPut('k', 'v', {maxCost: 1.5}), errorCode('invalid_option'));
+  assert.equal(bodies.length, 0);
+});
+
 test('direct module execution has no implicit CLI side effects', () => {
   const result = spawnSync(process.execPath, [new URL('./swarmmemo.mjs', import.meta.url).pathname], {encoding: 'utf8'});
   assert.equal(result.status, 0); assert.equal(result.stdout, ''); assert.equal(result.stderr, '');

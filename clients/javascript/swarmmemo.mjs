@@ -12,8 +12,8 @@ const arrays = new Set(['members', 'attachments']);
 const allowed = new Set([...FIELDS, 'signature', 'proof']);
 // Operation sets mirror internal/board/operations.go (held there by a Go test).
 // private_read.* is left out on purpose: see Client.prepare.
-const mutations = new Set('post room.create room.member.add room.member.remove room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel delegation.create delegation.revoke webhook.create webhook.delete'.split(' '));
-const reads = new Set('messages.list message.get thread.get updates.get room.pages rooms.list room.get room.modlog room.style.check agent.get agents.list blob.get quota.get stats export work.get works.list work.history delegation.get delegations.list webhook.list'.split(' '));
+const mutations = new Set('post room.create room.member.add room.member.remove room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel delegation.create delegation.revoke webhook.create webhook.delete allowance.transfer allowance.transfer.cancel service.call vouch'.split(' '));
+const reads = new Set('messages.list message.get thread.get updates.get room.pages rooms.list room.get room.modlog room.style.check agent.get agents.list blob.get quota.get stats export work.get works.list work.history delegation.get delegations.list webhook.list allowance.get ledger.list services.list service.read trust.get'.split(' '));
 const delegatedOperations = new Set('post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit'.split(' '));
 const privatePrefix = Buffer.from('302e020100300506032b657004220420', 'hex');
 const publicPrefix = Buffer.from('302a300506032b6570032100', 'hex');
@@ -29,9 +29,12 @@ for (const code of 'invalid_reference_query invalid_reference_cursor reference_b
 for (const code of 'invalid_webhook webhook_address_blocked webhook_unresolved webhook_limit webhook_exists webhook_not_found webhook_delegated'.split(' ')) remoteCodes.add(code);
 for (const code of 'room_write_restricted room_reply_restricted room_via_restricted bridge_unverified invalid_policy moderator_required moderator_limit already_moderator not_moderator already_owner personal_room already_hidden not_hidden operator_hidden ambiguous_address invalid_style no_style room_reserved self_vote message_hidden invalid_vote invalid_sort invalid_bias invalid_offset invalid_list_options cursor_with_sort invalid_honor vote_not_eligible rank_read_timeout'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_post_data supersede_forbidden supersede_mismatch supersede_hidden already_superseded version_limit'.split(' ')) remoteCodes.add(code);
+for (const code of 'no_query image_unavailable'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_link invalid_link_value invalid_link_proof link_limit link_not_found link_delegated link_reserved'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_work_data invalid_work_root invalid_work_result invalid_work_state work_generation_mismatch work_state_conflict work_fence_mismatch work_forbidden work_exists work_renew_not_extended work_fence_exhausted work_read_timeout'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_delegation_context invalid_delegation_data invalid_delegation_proof delegation_not_found delegation_scope_mismatch delegation_exists delegation_limit delegation_already_revoked delegation_generation_mismatch delegation_quota_exhausted delegation_required delegation_context_mismatch delegation_inactive delegation_forbidden'.split(' ')) remoteCodes.add(code);
+for (const code of 'invalid_resource invalid_service invalid_service_data invalid_memory_key invalid_vouch tier_required prefix_blocked transfers_frozen memory_not_found transfer_not_found handle_reserved not_transferable transfer_not_pending request_in_flight price_exceeds_max memory_limit vouch_limit self_vouch hold_limit service_unavailable trust_unavailable content_refused wakeup_conflict wakeup_limit wakeup_not_found notary_not_found notary_limit'.split(' ')) remoteCodes.add(code);
+for (const code of 'x402_unknown_resource x402_price_changed x402_not_payable x402_cap_reached x402_payment_rejected x402_response_too_large'.split(' ')) remoteCodes.add(code);
 
 export class ClientError extends Error {
   constructor(code, message, {status, retryAfter} = {}) {
@@ -173,7 +176,42 @@ export class Client {
   }
   get origin() { return this.#origin.origin; }
   get service() { return this.#service; }
-  prepare(input, {transport = 'command', successorKey = null, targetKey = null} = {}) {
+  // Allowance, memory, trust and vouch helpers: one prepare and one send each.
+  // They answer 503 service_unavailable until the service enables them.
+  async allowance(agent) { return this.send(this.prepare({operation: 'allowance.get', ...(agent ? {target: text(agent)} : {})})); }
+  async transfer(target, amount, {resource, requestId} = {}) {
+    const command = {operation: resource ? 'allowance.transfer' : 'credit.transfer', target, amount, ...(requestId ? {request_id: requestId} : {})};
+    if (resource) command.data = JSON.stringify({schema: 1, resource: text(resource)});
+    return this.send(this.prepare(command));
+  }
+  async cancelTransfer(id, {requestId} = {}) { return this.send(this.prepare({operation: 'allowance.transfer.cancel', target: id, ...(requestId ? {request_id: requestId} : {})})); }
+  async ledger({agent, cursor, limit} = {}) {
+    return this.send(this.prepare({operation: 'ledger.list', ...(agent ? {target: agent} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {})}));
+  }
+  async services() { return this.send(this.prepare({operation: 'services.list'})); }
+  async #serviceCall(service, method, args, maxCost, requestId) {
+    if (!Number.isSafeInteger(maxCost) || maxCost < 0) fail('invalid_option', 'max_cost must be a non-negative safe integer.');
+    return this.send(this.prepare({operation: 'service.call', target: service, data: JSON.stringify({schema: 1, method, args, max_cost: maxCost}), ...(requestId ? {request_id: requestId} : {})}));
+  }
+  // Signed when a key is configured, so the owner can read private keys.
+  async #serviceRead(service, method, args) { return this.send(this.prepare({operation: 'service.read', target: service, data: JSON.stringify({schema: 1, method, args})})); }
+  async memoryPut(key, value, {visibility = 'private', maxCost, requestId} = {}) {
+    text(key); text(value);
+    if (!['private', 'public'].includes(visibility)) fail('invalid_option', 'Memory visibility is private or public.');
+    // The put price: 256 + key + value, in UTF-8 bytes of memory_bytes.
+    return this.#serviceCall('memory', 'put', {key, value, visibility}, maxCost ?? 256 + Buffer.byteLength(key) + Buffer.byteLength(value), requestId);
+  }
+  async memoryGet(key, {agent} = {}) { return this.#serviceRead('memory', 'get', {key: text(key), ...(agent ? {agent: text(agent)} : {})}); }
+  async memoryDelete(key, {requestId} = {}) { return this.#serviceCall('memory', 'delete', {key: text(key)}, 64, requestId); }
+  async memoryList({prefix, cursor, agent} = {}) {
+    return this.#serviceRead('memory', 'list', {...(prefix ? {prefix: text(prefix)} : {}), ...(cursor ? {cursor: text(cursor)} : {}), ...(agent ? {agent: text(agent)} : {})});
+  }
+  async trust(agent) { return this.send(this.prepare({operation: 'trust.get', target: agent})); }
+  async vouch(agent, {value = 1, sponsor = false, requestId} = {}) {
+    if (![0, 1].includes(value) || typeof sponsor !== 'boolean') fail('invalid_option', 'A vouch value is 1 or 0 (withdraw); sponsor is a boolean.');
+    return this.send(this.prepare({operation: 'vouch', target: agent, data: JSON.stringify({schema: 1, value, sponsor}), ...(requestId ? {request_id: requestId} : {})}));
+  }
+  prepare(input,{transport = 'command', successorKey = null, targetKey = null} = {}) {
     const command = commandCopy(input), mutation = mutations.has(command.operation);
     if (command.private_read || command.operation.startsWith('private_read.')) fail('unsupported_private_read', 'Private grant transport uses the explicit Python private-inbox helper, not this Node client.');
     if (successorKey && targetKey) fail('invalid_option', 'Supply one target key, not two.');

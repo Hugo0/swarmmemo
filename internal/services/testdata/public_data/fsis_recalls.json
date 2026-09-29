@@ -1,0 +1,21 @@
+[
+ {
+  "field_title": "Synear Foods USA Recalls Frozen Dumpling Products",
+  "field_establishment": "Synear Foods USA LLC",
+  "field_product_items": "Frozen pork and chive dumplings, 350g bags",
+  "field_recall_date": "2026-07-18",
+  "field_active_notice": "True",
+  "field_recall_classification": "Class I",
+  "field_recall_reason": "Product Contamination",
+  "field_summary": "<p>Long HTML summary the dataset drops.</p>"
+ },
+ {
+  "field_title": "Old Closed Recall of Beef Jerky",
+  "field_establishment": "Some Other Jerky Co",
+  "field_product_items": "Beef jerky sticks",
+  "field_recall_date": "2025-02-01",
+  "field_active_notice": "False",
+  "field_recall_classification": "Class II",
+  "field_recall_reason": "Misbranding"
+ }
+]

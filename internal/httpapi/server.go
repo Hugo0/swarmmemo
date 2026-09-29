@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/cards"
 )
 
 type Config struct {
@@ -49,6 +50,11 @@ type Config struct {
 	// value of board.Vias, such as "email"). A channel without one cannot be
 	// claimed. See bridgeVia.
 	BridgeTokens map[string]string
+	// Features are the RFC0012 flags (board.Features); the zero value is all off.
+	Features board.Features
+	// Images serves post and room images (IMAGES); nil leaves every route and
+	// response exactly as it is without them.
+	Images *cards.Service
 }
 
 type Server struct {
@@ -182,7 +188,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			methodError(w)
 			return
 		}
-		jsonResponse(w, 200, s.capabilities())
+		jsonResponse(w, 200, s.capabilitiesWith(s.liveCatalog(r)))
 		return
 	}
 	if r.URL.Path == "/time" {
@@ -191,6 +197,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		jsonResponse(w, 200, map[string]any{"unix": time.Now().Unix(), "utc": time.Now().UTC().Format(time.RFC3339)})
+		return
+	}
+	if s.cfg.Images != nil && s.imageRoute(w, r) {
 		return
 	}
 	if s.discovery(w, r) {
@@ -246,6 +255,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.ui.ServeHTTP(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/") && s.rfc0012Route(w, r) {
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/recent" || r.URL.Path == "/rooms" || r.URL.Path == "/who" || r.URL.Path == "/search" || strings.HasPrefix(r.URL.Path, "/e/") || strings.HasPrefix(r.URL.Path, "/r/") || strings.HasPrefix(r.URL.Path, "/inbox/") {
 		s.read(w, r)
 		return
@@ -294,6 +306,7 @@ func (s *Server) secure(r *http.Request) bool {
 	return false
 }
 func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command) {
+	r = withClient(r)
 	if err := s.privateTransport(r, c); err != nil {
 		writeError(w, err)
 		return
@@ -325,6 +338,12 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command
 		return
 	}
 	s.describeReceipt(c, &res)
+	if s.cfg.Images != nil {
+		if c.Operation == "room.hide" || c.Operation == "room.restore" {
+			s.forgetImage(c.MessageID)
+		}
+		s.addImageURLs(&res)
+	}
 	if wantsJSON(r) || strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/v1/command" {
 		jsonResponse(w, 200, res)
 		return
@@ -348,8 +367,10 @@ func WriteText(w io.Writer, res board.Result) {
 		if res.Next != nil && res.Next.SignToGetReplies != "" {
 			fmt.Fprintf(w, "Sign your next post with an Ed25519 key and replies to it are listed at /api/updates: %s\n", res.Next.How)
 		}
+		writeAllowanceLine(w, res)
 		return
 	}
+	writeAllowanceLine(w, res)
 	for _, e := range res.Messages {
 		author := e.Author
 		if f := e.Forwarded; f != nil && e.PublicKey == "" {
@@ -864,6 +885,9 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		methodError(w)
 		return
 	}
+	if r.URL.Query().Has("stream") && s.exportStream(w, r) {
+		return
+	}
 	c, e := queryCommand(r.URL.Query())
 	if e != nil {
 		writeError(w, e)
@@ -1034,6 +1058,9 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 401, Code: "unauthorized", Message: "Administrative credential required."})
 		return
 	}
+	if s.moderationAdmin(w, r) { // read-only steward routes; declines while MODERATION is off
+		return
+	}
 	if r.URL.Path != "/admin/moderate" || r.Method != "POST" {
 		http.NotFound(w, r)
 		return
@@ -1051,6 +1078,7 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, e)
 		return
 	}
+	s.forgetImage(body.MessageID)
 	jsonResponse(w, 200, map[string]bool{"ok": true})
 }
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
@@ -1064,6 +1092,14 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprintf(w, "swarmmemo_http_requests_total %d\nswarmmemo_http_errors_total %d\nswarmmemo_http_inflight %d\nswarmmemo_streams %d\n", s.requests.Load(), s.errors.Load(), len(s.inflight), len(s.streams))
+	// RFC0012 §3.3: shadow comparisons since start; the rollout gate for
+	// ALLOWANCE_LEDGER=on is zero unexplained ones.
+	if shadow, ok := s.service.(interface {
+		LedgerShadowCounts() (agree, explained, unexplained int64)
+	}); ok && s.cfg.Features.Ledger != board.LedgerOff {
+		agree, explained, unexplained := shadow.LedgerShadowCounts()
+		fmt.Fprintf(w, "swarmmemo_allowance_shadow_agree_total %d\nswarmmemo_allowance_shadow_explained_total %d\nswarmmemo_allowance_shadow_unexplained_total %d\n", agree, explained, unexplained)
+	}
 	if s.cfg.TransportMetrics != nil {
 		s.cfg.TransportMetrics(w)
 	}

@@ -92,6 +92,9 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	// One message can belong to more than one reason; every returned message
 	// appears under each reason it satisfies, so nothing is silently recategorised.
 	data["replies"], data["addressed"], data["room_activity"] = replies, addressed, activity
+	if err = s.serviceNotices(ctx, tx, data, agent, c.Cursor, a, now); err != nil {
+		return Result{}, err
+	}
 	return Result{Messages: events, NextCursor: next, Data: data}, nil
 }
 

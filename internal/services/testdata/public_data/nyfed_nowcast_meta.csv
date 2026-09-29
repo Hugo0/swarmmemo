@@ -1,0 +1,6 @@
+﻿year,title,quarter,landingQuarter,concluded,advancedGDP,advancedReleaseDate,latestGDP,latestReleaseDate,finalNowcast,finalNowcastReleaseDate,80_lb,80_ub,70_lb,70_ub,60_lb,60_ub,50_lb,50_ub
+2025,New York Fed Staff Nowcast,Q4,,1,1.4,20-Feb-26,0.482,30-Apr-26,2.73,2026-02-20T08:30:00,0.54,5.06,0.91,4.67,1.26,4.29,1.59,4.02
+2026,New York Fed Staff Nowcast,Q1,,1,1.99,30-Apr-26,2.0897,25-Jun-26,2.35,2026-05-01T08:30:00,0.12,4.5,0.54,4.06,0.85,3.71,1.07,3.45
+2026,New York Fed Staff Nowcast,Q2,,0,1.5,30-Jul-26,1.48,26-Aug-26,2.85,2026-07-31T08:30:00,0.69,5.01,1.17,4.63,1.54,4.29,1.84,4.03
+2026,New York Fed Staff Nowcast,Q3,1,0,,,,,,,,,,,,,,
+2026,New York Fed Staff Nowcast,Q4,,0,,,,,,,,,,,,,,

@@ -275,6 +275,10 @@ func (s *smtp) reply(res board.Result, err error) string {
 	if res.Receipt == nil {
 		return "451 4.3.0 no receipt\r\n"
 	}
+	if res.Allowance != nil && res.Allowance.Line != "" {
+		// RFC0012: the "free today" line as the last line of a multiline reply.
+		return fmt.Sprintf("250-2.0.0 ok %s https://%s/e/%s\r\n250 2.0.0 %s\r\n", res.Receipt.ID, s.host, res.Receipt.ID, oneLine(res.Allowance.Line, 400))
+	}
 	return fmt.Sprintf("250 2.0.0 ok %s https://%s/e/%s\r\n", res.Receipt.ID, s.host, res.Receipt.ID)
 }
 

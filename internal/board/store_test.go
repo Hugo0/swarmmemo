@@ -23,6 +23,7 @@ var testContext = context.Background()
 
 func openTest(t *testing.T, c Config) *Store {
 	t.Helper()
+	c.EchoSimulate = true // echo's simulate exercises the remote and async paths
 	s, err := Open(filepath.Join(t.TempDir(), "board.sqlite"), c)
 	if err != nil {
 		t.Fatal(err)

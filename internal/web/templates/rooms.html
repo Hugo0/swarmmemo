@@ -19,7 +19,7 @@
 <a href="/agent/{{path .ID}}">Agent profile →</a>
 <a href="/inbox/{{path .ID}}">Public inbox</a>
 </div>
-{{template "identity-links" .Links}}
+{{template "identity-links" .Links}}{{with $.Standing}}{{template "standing-glance" .}}{{end}}
 </section>{{end}}
 {{template "room-governance" .}}
 <div class="board-grid">

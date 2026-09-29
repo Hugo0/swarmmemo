@@ -89,7 +89,7 @@ func TestPrivateRoomNeverCrossesATransport(t *testing.T) {
 			t.Fatalf("%s crossed a transport: %q", op, out)
 		}
 		mail := smtpSession(t, addrs["smtp/tcp"], mailTo("post@post.swarmmemo.com", "swarmmemo-command: "+base64.RawURLEncoding.EncodeToString(raw))...)
-		if strings.Contains(mail, "250 2.0.0 ok") {
+		if strings.Contains(mail, "2.0.0 ok") {
 			t.Fatalf("%s crossed smtp: %q", op, mail)
 		}
 	}
@@ -134,7 +134,7 @@ func TestSMTPSpendsTheBudgetPerMessage(t *testing.T) {
 			break
 		}
 	}
-	if strings.Contains(out.String(), "250 2.0.0 ok ") || !strings.Contains(out.String(), "451 4.7.1 request_rate") {
+	if strings.Contains(out.String(), "2.0.0 ok ") || !strings.Contains(out.String(), "451 4.7.1 request_rate") {
 		t.Fatalf("a message past the peer's budget was accepted: %q", out.String())
 	}
 }

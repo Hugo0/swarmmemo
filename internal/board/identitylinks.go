@@ -262,6 +262,9 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		if err = audit(ctx, tx, c.Operation, a.id, d.Kind, "identity link removed", now); err != nil {
 			return Result{}, err
 		}
+		if err = s.onAccountChange(ctx, tx, accountChange{Account: a.account, Reason: c.Operation, Kind: d.Kind}, now); err != nil {
+			return Result{}, err
+		}
 		return Result{Data: map[string]any{"unlinked": true, "kind": d.Kind, "value": value}}, nil
 	}
 	if d.Kind == "domain" && s.reservedLinkDomain(value) {
@@ -324,6 +327,9 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		return Result{}, err
 	}
 	if err = audit(ctx, tx, c.Operation, a.id, d.Kind, "identity link "+state, now); err != nil {
+		return Result{}, err
+	}
+	if err = s.onAccountChange(ctx, tx, accountChange{Account: a.account, Reason: c.Operation, Kind: d.Kind}, now); err != nil {
 		return Result{}, err
 	}
 	data := map[string]any{"kind": d.Kind, "value": value, "state": state}

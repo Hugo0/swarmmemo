@@ -79,8 +79,11 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			}
 		} else {
 			// Name-squatting hook (RFC0010): any caller may open a global room by
-			// posting to it, and the room stays operator-owned. A creation limit,
-			// if squatting ever appears, belongs here and in room.create.
+			// posting to it, and the room stays operator-owned. With NAME_GATE
+			// (RFC0012 §6.5) only tiers 1-2 may; the refusal publishes nothing.
+			if err = s.nameGate(ctx, tx, a, now); err != nil {
+				return Result{}, err
+			}
 			if _, err = tx.ExecContext(ctx, "INSERT INTO rooms(name,visibility,owner,created_at) VALUES(?,'public','',?)", c.Room, now); err != nil {
 				return Result{}, err
 			}
@@ -143,7 +146,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	handle := c.Handle
 	var notApplied *HandleNotApplied
 	if a.signed && a.grant == nil {
-		if handle, notApplied, err = claimOnPost(ctx, tx, c, a, now); err != nil {
+		if handle, notApplied, err = s.claimOnPost(ctx, tx, c, a, now); err != nil {
 			return Result{}, err
 		}
 	}
@@ -208,8 +211,10 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 // claims the requested one on first use, under agent.register's rules
 // (case-folded, unique). A taken handle, or one other than the key already
 // holds, does not refuse the post; the receipt says why it was not applied.
-// Renaming stays an explicit agent.register.
-func claimOnPost(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (string, *HandleNotApplied, error) {
+// Renaming stays an explicit agent.register. With RESERVED_HANDLES or
+// NAME_GATE (RFC0012 §6.4-6.5) a reserved handle, or a claim below the name
+// tier, is not applied either ("reserved", "tier_required").
+func (s *Store) claimOnPost(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (string, *HandleNotApplied, error) {
 	var held string
 	if err := tx.QueryRowContext(ctx, "SELECT handle FROM identities WHERE id=?", a.id).Scan(&held); err != nil {
 		return "", nil, err
@@ -221,6 +226,13 @@ func claimOnPost(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64)
 		return held, &HandleNotApplied{Requested: c.Handle, Reason: "already_has_handle"}, nil
 	}
 	want := strings.ToLower(c.Handle)
+	reason, err := s.handleRefusal(ctx, tx, a, want, held, now)
+	if err != nil {
+		return "", nil, err
+	}
+	if reason != "" {
+		return "", &HandleNotApplied{Requested: c.Handle, Reason: reason}, nil
+	}
 	var taken int
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM identities WHERE handle=? AND id<>?", want, a.id).Scan(&taken); err != nil {
 		return "", nil, err

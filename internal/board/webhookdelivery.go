@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"swarmmemo/internal/safenet"
 )
 
 // The sender is a bounded worker pool over a table, not a goroutine per event.
@@ -36,32 +38,18 @@ const (
 // being connected to, after resolution, so a hostname that answered with a public
 // address at creation and a private one at delivery time is refused here.
 func (s *Store) webhookDial(ctx context.Context, network, addr string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, err
-	}
-	dialer := &net.Dialer{Timeout: webhookDialTimeout}
 	if s.webhookInsecure {
+		dialer := &net.Dialer{Timeout: webhookDialTimeout}
 		return dialer.DialContext(ctx, network, addr)
 	}
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
-	if err != nil || len(ips) == 0 {
+	conn, err := safenet.Dial(ctx, network, addr, webhookDialTimeout)
+	switch {
+	case errors.Is(err, safenet.ErrBlocked):
+		return nil, webhookError("webhook_address_blocked")
+	case errors.Is(err, safenet.ErrUnresolved):
 		return nil, webhookError("webhook_unresolved")
 	}
-	var last error = webhookError("webhook_unresolved")
-	for _, ip := range ips {
-		if err = publicWebhookIP(ip); err != nil {
-			// One blocked address disqualifies the host: a resolver that returns a
-			// public and a private answer together is exactly the rebinding shape.
-			return nil, err
-		}
-		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-		if err == nil {
-			return conn, nil
-		}
-		last = err
-	}
-	return nil, last
+	return conn, err
 }
 
 func (s *Store) webhookHTTP() *http.Client {

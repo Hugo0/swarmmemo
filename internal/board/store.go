@@ -28,6 +28,10 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"swarmmemo/internal/ledger"
+	"swarmmemo/internal/services"
+	"swarmmemo/internal/trust"
 )
 
 // Canonical preserves protocol-v1 bytes for ordinary commands; an explicit
@@ -91,6 +95,15 @@ type Store struct {
 	identityJitter func() float64
 	identityRateMu sync.Mutex
 	identityRates  map[string]privateReadBucket
+	// RFC0012 state, one field per builder; each type is declared in the file
+	// its builder owns (see rfc0012.go).
+	design0  design0State
+	levers   leverState
+	ledger   ledgerState
+	services servicesState
+	trust    trustState
+	// The moderation engine (moderationwire.go); nil while MODERATION is off.
+	moderation moderationState
 }
 
 const schema = `
@@ -273,7 +286,11 @@ func Open(path string, config Config) (*Store, error) {
 			}
 		}
 	}
-	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + voteSchema + honorSchema + fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
+	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + voteSchema + honorSchema +
+		// RFC0012 §7 fragments, in this fixed order; each only creates tables and
+		// indexes, so SchemaVersion does not change.
+		design0Schema + ledger.Schema + services.Schema + trust.Schema + endorsementSchema +
+		fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
 		return fail(err)
 	}
 	if err = migratePrivateRead(migration); err != nil {
@@ -326,8 +343,14 @@ func Open(path string, config Config) (*Store, error) {
 	if _, err = db.Exec("INSERT OR IGNORE INTO meta(key,value) VALUES('generation',?)", randomID()); err != nil {
 		return fail(err)
 	}
+	if config.NotaryKeyFile == "" && path != ":memory:" {
+		config.NotaryKeyFile = filepath.Join(filepath.Dir(path), services.NotaryKeyFileName)
+	}
 	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), activityGate: make(chan struct{}, 1), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}}
 	if err = db.QueryRow("SELECT value FROM meta WHERE key='generation'").Scan(&s.generation); err != nil {
+		return fail(err)
+	}
+	if err = s.openRFC0012(); err != nil {
 		return fail(err)
 	}
 	secret := make([]byte, 32)
@@ -419,6 +442,8 @@ var fingerprintRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 type actor struct {
 	id, account, publicKey string
 	signed                 bool
+	operation              string // the command's operation, for the ledger's journal
+	client                 string // anonymous only: Subject.Client (RFC0012 §6.2)
 	canonical              []byte
 	requestNamespace       string
 	grant                  *delegationRow
@@ -427,7 +452,7 @@ type actor struct {
 func (s *Store) authenticate(cmd Command, source string) (actor, error) {
 	a := actor{canonical: Canonical(s.config.ServiceID, cmd)}
 	if cmd.PublicKey == "" && cmd.Signature == "" {
-		a.account = "anon:" + fingerprint([]byte(source))
+		a.account = s.anonymousAccount(source)
 		a.id = "anonymous"
 		return a, nil
 	}
@@ -498,6 +523,10 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 	if cmd.Operation == "blob.put" {
 		dataLimit = base64.RawURLEncoding.EncodedLen(AttachmentBytes)
 	}
+	serviceCall := cmd.Operation == "service.call" && s.services.engine != nil
+	if serviceCall {
+		dataLimit = ServiceDataBytes // a full memory value (RFC0012 §3.2)
+	}
 	if len(cmd.RequestID) > RequestIDBytes || len(cmd.Query) > QueryBytes || len(cmd.Reason) > ReasonBytes || len(cmd.Data) > dataLimit || len(cmd.Target) > 256 || len(cmd.Members) > RoomMembersMax || len(cmd.Attachments) > AttachmentsPerMessage || len(cmd.Filename) > 128 || len(cmd.MediaType) > 256 {
 		return empty, problem(400, "field_limit", "A request field exceeds its documented limit.")
 	}
@@ -508,12 +537,19 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 	if err != nil {
 		return empty, err
 	}
+	a.operation = cmd.Operation
+	if !a.signed {
+		a.client = s.anonymousClient(ctx, source)
+	}
 	if err := validateCommandFields(cmd); err != nil {
 		return empty, err
 	}
 	envelopeLimit := s.config.MaxTextBytes*2 + 8192
 	if cmd.Operation == "blob.put" {
 		envelopeLimit = dataLimit + 8192
+	}
+	if serviceCall {
+		envelopeLimit = 2*dataLimit + 8192 // data is JSON-escaped once more in the envelope
 	}
 	if len(a.canonical) > envelopeLimit {
 		return empty, problem(413, "envelope_too_large", "The canonical envelope exceeds the metadata and text budget.")
@@ -529,6 +565,10 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 	}
 	defer tx.Rollback()
 	now := s.now().Unix()
+	// RFC0012 levers (signed-only, block-prefix) refuse here, before any work.
+	if err = s.admit(ctx, tx, cmd, a, source, now); err != nil {
+		return empty, err
+	}
 	privateGrant, err := resolvePrivateRead(ctx, tx, cmd, a)
 	if err != nil {
 		return empty, err
@@ -578,9 +618,22 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 		if a.signed {
 			keys = append(keys, "nonce:"+cmd.Nonce)
 		}
+		// RFC0012 §6.2: until 01:00 UTC an anonymous retry also finds a receipt
+		// stored under yesterday's salted pseudonym.
+		namespaces := []string{a.requestNamespace}
+		if !a.signed {
+			if previous := s.previousAnonymousAccount(source, now); previous != "" && previous != a.requestNamespace {
+				namespaces = append(namespaces, previous)
+			}
+		}
 		for _, key := range keys {
 			var storedDigest, stored string
-			err = tx.QueryRowContext(ctx, "SELECT digest,result FROM requests WHERE actor=? AND request_key=?", a.requestNamespace, key).Scan(&storedDigest, &stored)
+			for _, namespace := range namespaces {
+				err = tx.QueryRowContext(ctx, "SELECT digest,result FROM requests WHERE actor=? AND request_key=?", namespace, key).Scan(&storedDigest, &stored)
+				if !errors.Is(err, sql.ErrNoRows) {
+					break
+				}
+			}
 			if err == nil {
 				if digest != storedDigest {
 					return empty, problem(409, "idempotency_conflict", "This request ID or nonce already belongs to a different command; use a new identifier.")
@@ -592,6 +645,10 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 				// Never return previously stored private content; mutation receipts contain only IDs.
 				if result.Receipt != nil {
 					result.Receipt.Duplicate = true
+				}
+				// RFC0012 §2.5: a service call still running is request_in_flight.
+				if cmd.Operation == "service.call" {
+					return s.serviceRetry(ctx, tx, a, result, now)
 				}
 				return result, nil
 			}
@@ -605,7 +662,17 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 			return empty, problem(401, "stale_signature", "New signed commands must be within five minutes of server time; exact successful mutation retries may reuse their original envelope.")
 		}
 		if successor != "" {
-			return empty, problem(401, "key_rotated", "This key was rotated; use its successor key.")
+			// The one exception (RFC0012 §2.4): a key rotated away may cancel a
+			// transfer its own rotation's breaker is holding.
+			allowed := false
+			if cmd.Operation == "allowance.transfer.cancel" {
+				if allowed, err = s.rotatedKeyMayCancel(ctx, tx, cmd, a, now); err != nil {
+					return empty, err
+				}
+			}
+			if !allowed {
+				return empty, problem(401, "key_rotated", "This key was rotated; use its successor key.")
+			}
 		}
 		if mutation(cmd.Operation) && a.grant == nil {
 			if _, err = tx.ExecContext(ctx, "INSERT INTO identities(id,public_key,account,created_at,last_seen) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen", a.id, a.publicKey, a.account, now, now); err != nil {
@@ -640,9 +707,14 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 			}
 		}
 	}
+	// After the receipt is stored, so the note is never part of a retry result.
+	if err = s.allowanceNote(ctx, tx, a, &result, now); err != nil {
+		return empty, err
+	}
 	if err = tx.Commit(); err != nil {
 		return empty, err
 	}
+	s.screenPost(ctx, cmd, a, result) // MODERATION: queue a fresh public post; nothing when off
 	if result.afterCommit != nil {
 		result, err = result.afterCommit()
 		if err != nil {
@@ -711,6 +783,20 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.lease(ctx, tx, c, a, now)
 	case "blob.put", "blob.get", "blob.delete":
 		return s.blob(ctx, tx, c, a, now)
+	case "allowance.get":
+		return s.readAllowance(ctx, tx, c, a, now)
+	case "allowance.transfer", "allowance.transfer.cancel":
+		return s.changeAllowance(ctx, tx, c, a, now)
+	case "ledger.list":
+		return s.readLedger(ctx, tx, c, a, now)
+	case "services.list", "service.read":
+		return s.readServices(ctx, tx, c, a, now)
+	case "service.call":
+		return s.callService(ctx, tx, c, a, now)
+	case "trust.get":
+		return s.readTrust(ctx, tx, c, a, now)
+	case "vouch":
+		return s.vouch(ctx, tx, c, a, now)
 	default:
 		return Result{}, problem(400, "unknown_operation", "Unknown operation. The supported operations are listed at /capabilities.")
 	}

@@ -35,6 +35,7 @@ import (
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/httpapi"
+	"swarmmemo/internal/web"
 )
 
 // Wire is what every transport declares: its name, its reduced limits and its
@@ -292,6 +293,14 @@ func New(service board.Service, limiter *httpapi.Limiter, cfg Config) (*Core, er
 	}
 	c := &Core{service: service, limiter: limiter, datagrams: httpapi.NewLimiter(), stats: map[string]*counters{}, peers: map[string]int{}}
 	host := strings.ToLower(cfg.Host)
+	// RFC0012: help texts explain the free daily allowance only while the
+	// allowance ledger decides what a write may spend.
+	allowance := web.LedgerLive(web.ServiceFeatures(service))
+	origin := cfg.PublicURL
+	if origin == "" {
+		origin = "https://" + host
+	}
+	help := newCatalogHelp(web.ServiceFeatures(service), origin)
 	add := func(a Wire, ls ...listener) {
 		for i := range ls {
 			ls[i].adapter = a
@@ -313,10 +322,11 @@ func New(service board.Service, limiter *httpapi.Limiter, cfg Config) (*Core, er
 		if cfg.DNSWrite {
 			d.writes = newReassembly()
 		}
+		d.allowance, d.help = allowance, help
 		add(d, listener{network: "udp", addr: cfg.DNSAddr, framing: Datagram}, listener{network: "tcp", addr: cfg.DNSAddr, framing: LengthPrefixed})
 	}
 	if cfg.TCPAddr != "" {
-		add(lineProtocol{host: host, port: port(cfg.TCPAddr)}, listener{network: "tcp", addr: cfg.TCPAddr, framing: Line})
+		add(lineProtocol{host: host, port: port(cfg.TCPAddr), allowance: allowance, help: help}, listener{network: "tcp", addr: cfg.TCPAddr, framing: Line})
 	}
 	if cfg.GeminiAddr != "" {
 		if cfg.GeminiCert == "" || cfg.GeminiKey == "" {

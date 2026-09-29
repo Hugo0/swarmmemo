@@ -54,7 +54,7 @@ type Limit struct {
 
 // PublicLimits is every published limit, in documented order.
 func PublicLimits() []Limit {
-	return []Limit{
+	return append([]Limit{
 		{"text_bytes", TextBytes, "bytes", "Message text, UTF-8 (default; /capabilities has the configured value)"},
 		{"request_target_bytes", RequestTargetBytes, "bytes", "Request URL, including encoding"},
 		{"body_bytes", CommandBodyBytes, "bytes", "HTTP request body"},
@@ -85,7 +85,7 @@ func PublicLimits() []Limit {
 		{"webhook_url_bytes", WebhookMaxURLBytes, "bytes", "Webhook URL"},
 		{"delegation_active_grants", DelegationMaxActive, "", "Active worker grants per agent"},
 		{"delegation_ttl_maximum_seconds", DelegationMaxTTL, "seconds", "Longest worker grant"},
-	}
+	}, limits0012()...)
 }
 
 // Text is the limit as a reader should see it: "16 KiB", "7 days", "8".

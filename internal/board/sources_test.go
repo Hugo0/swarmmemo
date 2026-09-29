@@ -3,7 +3,7 @@ package board
 // Drift guards for the service's facts. The operation table (operations.go),
 // the limits (limits.go) and the error codes the code returns are the single
 // source of truth; everything that restates them is either generated from them
-// here or held to them here. See docs/project/SOURCES.md.
+// here or held to them here. See docs/SOURCES.md.
 //
 // Regenerate the generated sections of docs/PROTOCOL.md with:
 //
@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"swarmmemo/internal/roomstyle"
+	"swarmmemo/internal/services"
 )
 
 // dispatchedOperations reads the operation names the store actually routes: the
@@ -181,7 +182,7 @@ func serviceErrorCodes(t *testing.T) map[string]map[int]bool {
 		return ""
 	}
 	// Helpers that choose the status from the code; the store package owns them.
-	helpers := map[string]func(string) error{"delegationError": delegationError, "privateReadError": privateReadError, "webhookError": webhookError, "linkError": linkError}
+	helpers := map[string]func(string) error{"delegationError": delegationError, "privateReadError": privateReadError, "webhookError": webhookError, "linkError": linkError, "allowanceError": allowanceError}
 	var unresolved []string
 	for _, dir := range []string{".", "../httpapi", "../web", "../references", "../transport", "../roomstyle", "../markdown"} {
 		files, _ := filepath.Glob(filepath.Join(dir, "*.go"))
@@ -503,9 +504,55 @@ func generatedSections(t *testing.T) map[string]string {
 			free = append(free, hooks[i])
 		}
 	}
-	return map[string]string{"operations": ops.String(), "limits": limits.String(), "errors": errs.String(), "hooks": wrapList("", hooks, ""), "vias": via.String(),
+	sections := map[string]string{"operations": ops.String(), "limits": limits.String(), "errors": errs.String(), "hooks": wrapList("", hooks, ""), "vias": via.String(),
 		// Inside a list item: indented, and the end marker keeps its indent.
 		"free-hooks": wrapList("  ", free, "  ") + "  "}
+	// The services: an overview, then each service's head, from the catalogue.
+	catalog := services.Catalog(services.Known())
+	var overview strings.Builder
+	overview.WriteString("| Service | What it gives an agent | Methods | Paid in |\n|---|---|---|---|\n")
+	for _, e := range catalog {
+		names, paid := []string{}, []string{}
+		for _, m := range e.Methods {
+			names = append(names, "`"+m.Name+"`")
+			if m.Resource != "" && !slices.Contains(paid, "`"+m.Resource+"`") {
+				paid = append(paid, "`"+m.Resource+"`")
+			}
+		}
+		fmt.Fprintf(&overview, "| [`%s`](%s) | %s | %s | %s |\n", e.ID, strings.TrimPrefix(e.Docs, "/protocol.md"), e.Line, strings.Join(names, " "), strings.Join(paid, " "))
+	}
+	sections["services"] = overview.String()
+	for _, e := range catalog {
+		var b strings.Builder
+		fmt.Fprintf(&b, "Service `%s`, when `services.list` lists it. %s\n\n", e.ID, e.Line)
+		b.WriteString("| Method | Call | Price (parameter version 0) | Arguments (* required) |\n|---|---|---|---|\n")
+		for _, m := range e.Methods {
+			args := []string{}
+			for _, a := range m.Args {
+				req := ""
+				if a.Required {
+					req = "*"
+				}
+				args = append(args, fmt.Sprintf("`%s`%s %s: %s", a.Name, req, a.Type, strings.ReplaceAll(a.Note, "|", "\\|")))
+			}
+			if len(args) == 0 {
+				args = append(args, "none")
+			}
+			fmt.Fprintf(&b, "| `%s` | `%s` | %s | %s |\n", m.Name, m.Access(), strings.ReplaceAll(m.PriceText(), "|", "\\|"), strings.Join(args, "; "))
+		}
+		if len(e.Limits) > 0 {
+			b.WriteString("\nLimits: ")
+			parts := []string{}
+			for _, l := range e.Limits {
+				parts = append(parts, fmt.Sprintf("`%s` %s", l.Key, l.Text()))
+			}
+			b.WriteString(strings.Join(parts, ", ") + ".\n")
+		}
+		m := e.Primary()
+		fmt.Fprintf(&b, "\nExample `%s` data (`%s`, target `%s`):\n\n```json\n%s\n```\n", m.Name, m.Operation, e.ID, m.Data(m.MaxCost()))
+		sections["service-"+e.ID] = b.String()
+	}
+	return sections
 }
 
 // wrapList joins items with ", " and wraps them at 88 columns, starting after

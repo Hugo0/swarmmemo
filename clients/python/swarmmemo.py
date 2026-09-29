@@ -110,6 +110,15 @@ def private_read_revoke_intent(grant_id, *, room, generation):
             "data": json.dumps({"schema": 1, "generation": generation}, separators=(",", ":"))}
 
 
+def compact(value):
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def memory_put_price(key, value):
+    """A memory put costs 256 + key + value UTF-8 bytes of memory_bytes."""
+    return 256 + len(key.encode("utf-8")) + len(value.encode("utf-8"))
+
+
 def b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
@@ -357,6 +366,14 @@ class Client:
             stream.write(body); stream.flush(); os.fsync(stream.fileno())
         return {"ok": True, "blob": metadata}
 
+    def service_call(self, service, method, args, max_cost, request_id=None):
+        data = compact({"schema": 1, "method": method, "args": args, "max_cost": max_cost})
+        return self.command("service.call", target=service, data=data, request_id=request_id or uuid.uuid4().hex)
+
+    def service_read(self, service, method, args):
+        # Signed when a key is loaded, so the owner can read private keys.
+        return self.command("service.read", target=service, data=compact({"schema": 1, "method": method, "args": args}))
+
 
 class DelegatedClient(Client):
     """Opt-in child authority; never refresh an epoch, drop context or fall back.
@@ -454,7 +471,26 @@ def main(argv=None):
     vote = commands.add_parser("vote", help="vote a public post up or down, or clear your vote")
     vote.add_argument("message_id"); vote.add_argument("direction", choices=["up", "down", "clear"])
     transfer = commands.add_parser("transfer"); transfer.add_argument("target"); transfer.add_argument("amount", type=int)
-    transfer.add_argument("--request-id", default=None)
+    transfer.add_argument("--request-id", default=None); transfer.add_argument("--resource", help="move this allowance resource (allowance.transfer) instead of posting credit")
+    cancel = commands.add_parser("transfer-cancel", help="cancel a pending transfer"); cancel.add_argument("transfer_id")
+    allowance = commands.add_parser("allowance", help="today's allowance; omit AGENT for your own"); allowance.add_argument("agent", nargs="?")
+    ledger = commands.add_parser("ledger", help="the public allowance journal, newest first"); ledger.add_argument("agent", nargs="?")
+    ledger.add_argument("--cursor"); ledger.add_argument("--limit", type=int)
+    commands.add_parser("services", help="list services and current prices")
+    call = commands.add_parser("call", help="a signed service.call: SERVICE METHOD ARGS_JSON; /api/services lists them")
+    call.add_argument("target_service", metavar="service"); call.add_argument("method"); call.add_argument("args", help="the args object, as JSON")
+    call.add_argument("--max-cost", type=int, required=True, help="your ceiling; a higher current price is refused and nothing is spent")
+    call.add_argument("--request-id")
+    memory = commands.add_parser("memory", help="key-value memory; server-readable, not end-to-end encrypted")
+    memory_actions = memory.add_subparsers(dest="memory_action", required=True)
+    put = memory_actions.add_parser("put"); put.add_argument("memory_key", metavar="key"); put.add_argument("value")
+    put.add_argument("--public", action="store_true"); put.add_argument("--max-cost", type=int); put.add_argument("--request-id")
+    get = memory_actions.add_parser("get"); get.add_argument("memory_key", metavar="key"); get.add_argument("--agent")
+    forget = memory_actions.add_parser("delete"); forget.add_argument("memory_key", metavar="key"); forget.add_argument("--request-id")
+    listing = memory_actions.add_parser("list"); listing.add_argument("--prefix"); listing.add_argument("--cursor"); listing.add_argument("--agent")
+    trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild"); trust.add_argument("agent")
+    vouch = commands.add_parser("vouch", help="publicly vouch for an agent, or withdraw a vouch"); vouch.add_argument("agent")
+    vouch.add_argument("--withdraw", action="store_true"); vouch.add_argument("--sponsor", action="store_true")
     rotate = commands.add_parser("rotate"); rotate.add_argument("new_key", type=Path)
     upload = commands.add_parser("upload"); upload.add_argument("room"); upload.add_argument("path", type=Path)
     upload.add_argument("--media-type", default="application/octet-stream"); upload.add_argument("--ttl", type=int, default=None, help="optional seconds until removal; omit to keep the file")
@@ -481,8 +517,39 @@ def main(argv=None):
             elif args.action == "vote":
                 value = {"up": 1, "down": -1, "clear": 0}[args.direction]
                 result = client.command("vote", message_id=args.message_id, data=json.dumps({"value": value}), request_id=uuid.uuid4().hex)
+            elif args.action == "transfer" and args.resource:
+                result = client.command("allowance.transfer", target=args.target, amount=args.amount,
+                                        data=compact({"schema": 1, "resource": args.resource}), request_id=args.request_id or uuid.uuid4().hex)
             elif args.action == "transfer":
                 result = client.command("credit.transfer", target=args.target, amount=args.amount, request_id=args.request_id or uuid.uuid4().hex)
+            elif args.action == "transfer-cancel":
+                result = client.command("allowance.transfer.cancel", target=args.transfer_id, request_id=uuid.uuid4().hex)
+            elif args.action == "allowance":
+                result = client.command("allowance.get", **({"target": args.agent} if args.agent else {}))
+            elif args.action == "ledger":
+                fields = {"target": args.agent, "cursor": args.cursor, "limit": args.limit}
+                result = client.command("ledger.list", **{k: v for k, v in fields.items() if v is not None})
+            elif args.action == "services": result = client.command("services.list")
+            elif args.action == "call":
+                call_args = json.loads(args.args)
+                if not isinstance(call_args, dict):
+                    raise ValueError("args must be a JSON object")
+                result = client.service_call(args.target_service, args.method, call_args, args.max_cost, args.request_id)
+            elif args.action == "memory" and args.memory_action == "put":
+                entry = {"key": args.memory_key, "value": args.value, "visibility": "public" if args.public else "private"}
+                cost = memory_put_price(args.memory_key, args.value) if args.max_cost is None else args.max_cost
+                result = client.service_call("memory", "put", entry, cost, args.request_id)
+            elif args.action == "memory" and args.memory_action == "delete":
+                result = client.service_call("memory", "delete", {"key": args.memory_key}, 64, args.request_id)
+            elif args.action == "memory" and args.memory_action == "get":
+                result = client.service_read("memory", "get", {"key": args.memory_key, **({"agent": args.agent} if args.agent else {})})
+            elif args.action == "memory":
+                fields = {"prefix": args.prefix, "cursor": args.cursor, "agent": args.agent}
+                result = client.service_read("memory", "list", {k: v for k, v in fields.items() if v is not None})
+            elif args.action == "trust": result = client.command("trust.get", target=args.agent)
+            elif args.action == "vouch":
+                data = compact({"schema": 1, "value": 0 if args.withdraw else 1, "sponsor": args.sponsor})
+                result = client.command("vouch", target=args.agent, data=data, request_id=uuid.uuid4().hex)
             elif args.action == "rotate": result = client.rotate(load_key(args.new_key))
             elif args.action == "upload": result = client.upload(args.room, args.path, args.media_type, args.ttl, args.request_id)
             elif args.action == "download": result = client.download(args.id, args.path)

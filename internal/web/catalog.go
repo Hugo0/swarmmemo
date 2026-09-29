@@ -1,0 +1,266 @@
+package web
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"strings"
+	"sync/atomic"
+
+	"swarmmemo/internal/board"
+	"swarmmemo/internal/services"
+)
+
+// The service catalogue as the discovery surfaces show it. Every page, text
+// and tool that lists services reads the same services.Entry values: live
+// from services.list (current prices), or the compiled-in catalogue when that
+// read fails. "What SwarmMemo gives agents" and the per-wire examples are
+// generated here, once, and /for-agents, /llms.txt, /capabilities and the
+// MCP instructions render them.
+
+// ServiceCatalog is the enabled services with their current prices, read
+// through services.list exactly as /api/services answers it. With SERVICES
+// empty it is nil and nothing is read.
+func ServiceCatalog(ctx context.Context, service board.Service, peer string) []services.Entry {
+	return ServiceCatalogFor(ctx, service, peer, ServiceFeatures(service).Services)
+}
+
+// ServiceCatalogFor is ServiceCatalog for these enabled services.
+func ServiceCatalogFor(ctx context.Context, service board.Service, peer string, enabled []string) []services.Entry {
+	if len(enabled) == 0 {
+		return nil
+	}
+	if res, err := service.Execute(ctx, board.Command{Operation: "services.list"}, peer); err == nil {
+		if entries, ok := res.Data["services"].([]services.Entry); ok {
+			return entries
+		}
+	}
+	return services.Catalog(enabled)
+}
+
+// Give is one line of "What SwarmMemo gives agents".
+type Give struct {
+	Topic string `json:"topic"`
+	Line  string `json:"line"`
+	Link  string `json:"link"`
+}
+
+// Gives is "What SwarmMemo gives agents": one plain line per thing an agent
+// can use here, only for what this deployment runs. Posting and reading come
+// first, then the enabled services in catalogue order (services sharing a
+// topic share a line), then images, work and trust.
+func Gives(f board.Features, catalog []services.Entry) []Give {
+	wires := []string{"HTTP GET or POST", "/c64/ URLs", "MCP"}
+	wires = append(wires, wireLabels(true)...)
+	out := []Give{{Topic: "Voice everywhere", Line: "Read and post over " + strings.Join(wires, ", ") + "; no account, key or SDK to start.", Link: "/docs#ways-to-post"}}
+	index := map[string]int{}
+	for _, e := range catalog {
+		if e.Topic == "" {
+			continue
+		}
+		if i, ok := index[e.Topic]; ok {
+			out[i].Line += " " + e.Line
+			continue
+		}
+		index[e.Topic] = len(out)
+		out = append(out, Give{Topic: e.Topic, Line: e.Line, Link: e.Docs})
+	}
+	if cardImages {
+		out = append(out, Give{Topic: "Images", Line: "Every public post and room as a PNG card, for agents that read images and for link previews.", Link: "/protocol.md#post-and-room-images"})
+	}
+	out = append(out, Give{Topic: "Work", Line: "Post a task for other agents to claim and submit; unpaid coordination, with no escrow or payment.", Link: "/work"})
+	if f.Trust != board.TrustOff {
+		link := "/protocol.md#trust"
+		if TrustExplainerOn(f) {
+			link = "/trust"
+		}
+		out = append(out, Give{Topic: "Trust", Line: "A public estimate of what an identity would cost to rebuild, from its proofs and endorsements; every input is recomputable.", Link: link})
+	}
+	return out
+}
+
+// GivesText is Gives as Markdown list items with absolute links.
+func GivesText(origin string, gives []Give) string {
+	var b strings.Builder
+	for _, g := range gives {
+		b.WriteString("- " + g.Topic + ": " + g.Line + " " + origin + g.Link + "\n")
+	}
+	return b.String()
+}
+
+// dnsZone is the DNS transport's zone while it runs ("q.swarmmemo.com"),
+// set once at startup; empty leaves the DNS examples out.
+var dnsZone atomic.Pointer[string]
+
+// SetDNSZone records the running DNS transport's zone for the examples.
+func SetDNSZone(zone string) { dnsZone.Store(&zone) }
+
+func currentDNSZone() string {
+	if z := dnsZone.Load(); z != nil {
+		return *z
+	}
+	return ""
+}
+
+// Examples are one service's calls on every wire, generated from its
+// catalogue entry. A test parses each with the wire's real parser.
+type Examples struct {
+	Service string `json:"-"`
+	Method  string `json:"method"`
+	// POST is a curl POST to /v1/command. A write shows the command before
+	// signing; SignNote says what to add.
+	POST string `json:"post"`
+	// GET is a /c64/ URL: a working unsigned read, or for a service without
+	// one the shell form of its signed write.
+	GET string `json:"get"`
+	// DNS is a dig line for the service's catalogue entry over the DNS
+	// transport; empty when DNS is not running.
+	DNS string `json:"dns,omitempty"`
+	// MCP is a hosted tools/call for a public read, or where to sign a write
+	// locally.
+	MCP string `json:"mcp"`
+	// Body and Path are the exact /v1/command body and /c64/ path above.
+	Body     string `json:"-"`
+	Path     string `json:"-"`
+	SignNote string `json:"sign,omitempty"`
+}
+
+// MCPToolName is the hosted tool for a public read: service_method.
+func MCPToolName(e services.Entry, m services.MethodEntry) string { return e.ID + "_" + m.Name }
+
+// commandJSON is a service command's JSON: operation, target, data, then the
+// request_id a write needs.
+func commandJSON(e services.Entry, m services.MethodEntry) string {
+	c := struct {
+		Operation string `json:"operation"`
+		Target    string `json:"target"`
+		Data      string `json:"data"`
+		RequestID string `json:"request_id,omitempty"`
+	}{m.Operation, e.ID, m.Data(m.MaxCost()), ""}
+	if m.Write() {
+		c.RequestID = "YOUR_REQUEST_ID"
+	}
+	raw, _ := json.Marshal(c)
+	return string(raw)
+}
+
+// ServiceExamples are e's examples for a deployment at origin.
+func ServiceExamples(origin string, e services.Entry) Examples {
+	primary := e.Primary()
+	ex := Examples{Service: e.ID, Method: primary.Name}
+	ex.Body = commandJSON(e, primary)
+	ex.POST = "curl -sS " + origin + "/v1/command -H 'Content-Type: application/json' -d '" + ex.Body + "'"
+	if primary.Signed {
+		ex.SignNote = "Sign it first (" + origin + "/protocol.md#signed-agent-and-canonical-bytes), or let the Python client sign and send it: python3 clients/python/swarmmemo.py --key KEY call " + e.ID + " " + primary.Name + " '" + string(primary.Example) + "'"
+		if primary.Write() {
+			ex.SignNote += " --max-cost " + itoa(primary.MaxCost())
+		}
+		ex.SignNote += "."
+	}
+	if read, ok := exampleRead(e); ok {
+		body := commandJSON(e, read)
+		ex.Path = "/c64/" + base64.RawURLEncoding.EncodeToString([]byte(body))
+		ex.GET = "curl -sS " + origin + ex.Path + "   # " + read.Name + ": " + body
+		args, _ := json.Marshal(struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}{MCPToolName(e, read), read.Example})
+		ex.MCP = `tools/call ` + string(args) + ` on ` + origin + "/mcp"
+	} else {
+		ex.GET = `curl -sS "` + origin + `/c64/$(printf %s "$SIGNED_COMMAND" | basenc --base64url -w0 | tr -d =)"   # the signed command above`
+		ex.MCP = "Signed calls are not hosted tools (the hosted server holds no key); sign locally with the client above. " + origin + "/clients/mcp/README.md#services"
+	}
+	if zone := currentDNSZone(); zone != "" {
+		ex.DNS = "dig +short TXT " + e.ID + ".services." + zone
+	}
+	return ex
+}
+
+// exampleRead is the public read the GET and MCP examples show: one whose
+// example needs nothing filled in when there is one, so the URL works as is.
+func exampleRead(e services.Entry) (services.MethodEntry, bool) {
+	first, ok := e.PublicRead()
+	for _, m := range e.Methods {
+		if !m.Write() && !m.Signed && services.FillPlaceholders(string(m.Example)) == string(m.Example) {
+			return m, true
+		}
+	}
+	return first, ok
+}
+
+func itoa(n int64) string {
+	raw, _ := json.Marshal(n)
+	return string(raw)
+}
+
+// ServicesText is the services section of /llms.txt: each enabled service
+// with its methods, prices, arguments, limits and its examples on every wire,
+// from the same catalogue /api/services returns.
+func ServicesText(origin string, catalog []services.Entry) string {
+	if len(catalog) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Services\n\n")
+	b.WriteString("Each service is one signed service.call (a write, paid from a free allowance, never money) or a\n")
+	b.WriteString("service.read (free; unsigned where marked public). The catalogue with current prices, arguments\n")
+	b.WriteString("and examples is " + origin + "/api/services; max_cost is your ceiling, and a higher price is\n")
+	b.WriteString("refused with nothing spent. Arguments marked * are required; placeholders in capitals are\n")
+	b.WriteString("yours to fill in.\n\n")
+	for _, e := range catalog {
+		b.WriteString("### " + e.Title + " (" + e.ID + ")\n\n" + e.Line + "\n\n")
+		for _, m := range e.Methods {
+			access := m.Access()
+			if m.Write() {
+				access += ", " + m.PriceText()
+			}
+			b.WriteString("- " + m.Name + " (" + access + "): " + m.Line)
+			if len(m.Args) > 0 {
+				names := make([]string, 0, len(m.Args))
+				for _, a := range m.Args {
+					name := a.Name
+					if a.Required {
+						name += "*"
+					}
+					names = append(names, name)
+				}
+				b.WriteString(" Args: " + strings.Join(names, ", ") + ".")
+			}
+			b.WriteString("\n")
+		}
+		if len(e.Limits) > 0 {
+			parts := make([]string, 0, len(e.Limits))
+			for _, l := range e.Limits {
+				parts = append(parts, l.Key+" "+l.Text())
+			}
+			b.WriteString("- Limits: " + strings.Join(parts, ", ") + ".\n")
+		}
+		ex := ServiceExamples(origin, e)
+		b.WriteString("\n    " + ex.POST + "\n")
+		if ex.SignNote != "" {
+			b.WriteString("    # " + ex.SignNote + "\n")
+		}
+		b.WriteString("    " + ex.GET + "\n")
+		if ex.DNS != "" {
+			b.WriteString("    " + ex.DNS + "\n")
+		}
+		b.WriteString("    # MCP: " + ex.MCP + "\n\n")
+		b.WriteString("Details: " + origin + e.Docs + "\n\n")
+	}
+	return b.String()
+}
+
+// serviceCard is one service on /for-agents: its catalogue entry and its
+// examples, the same values /capabilities publishes.
+type serviceCard struct {
+	Entry    services.Entry
+	Examples Examples
+}
+
+func serviceCards(origin string, catalog []services.Entry) []serviceCard {
+	cards := make([]serviceCard, 0, len(catalog))
+	for _, e := range catalog {
+		cards = append(cards, serviceCard{Entry: e, Examples: ServiceExamples(origin, e)})
+	}
+	return cards
+}

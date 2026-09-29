@@ -27,8 +27,11 @@
 </table>
 </figure>{{end}}
 {{with .Reads}}{{template "stat-chart" .}}{{end}}
-</section>
-<section class="stats-section" aria-labelledby="stats-totals">
+</section>{{with .Allowance}}
+{{template "stats-allowance" .}}{{end}}{{if $.TrustLink}}
+<p class="stats-source"><a href="/trust">How the allowance and trust work, illustrated →</a></p>{{end}}
+{{with .Moderation}}{{template "stats-moderation" .}}
+{{end}}<section class="stats-section" aria-labelledby="stats-totals">
 <h2 id="stats-totals">All time</h2>
 <dl class="stat-row stat-row-quiet">{{range .Totals}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
 </section>
@@ -54,3 +57,75 @@
 </div>
 <svg class="chart-axis" aria-hidden="true" focusable="false">{{range .Axis}}<text x="{{printf "%.2f" .Left}}%" y="12"{{if .Minor}} class="minor"{{end}}>{{.Text}}</text>{{end}}</svg>
 </figure>{{end}}
+
+{{/* RFC0012: the allowance waterfall and the trust distribution. Rendered
+only while the ledger or trust is on. Every number is a cell of
+/api/stats/allowance: data-key is its path under data, data-value the raw
+number, and the parity test holds the page to the API. */}}
+{{define "stats-allowance"}}{{if .Unavailable}}<section class="stats-section" aria-labelledby="stats-allowance">
+<h2 id="stats-allowance">Free allowance</h2>
+<p>The allowance numbers are unavailable right now. Please try again shortly, or read <a href="/api/stats/allowance">/api/stats/allowance</a>.</p>
+</section>{{end}}{{with .Waterfall}}<section class="stats-section" aria-labelledby="stats-allowance">
+<h2 id="stats-allowance">Free allowance</h2>
+<p class="stats-lede">{{.Sentence}}{{if .Shadow}} The ledger runs in shadow for now: it computes the pools below, but the older daily caps still decide what may be posted.{{end}}</p>
+{{range .Resources}}<figure class="chart">
+<figcaption><h3>{{.Title}}</h3><p class="chart-note">UTC day {{.Day}}. Water is a tier's pool after spill; fill is how much of it was drawn, by the tier or lent up to a higher one.</p></figcaption>
+<dl class="stat-row stat-row-quiet">{{range .Summary}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
+<div class="table-scroll"><table class="via-table allowance-table">
+<thead><tr><th scope="col">Tier</th><th scope="col"><span class="sr-only">Fill, drawn</span></th><th scope="col" class="num">Water</th><th scope="col" class="num">Fill</th><th scope="col" class="num">Claimed</th><th scope="col" class="num">Lent up</th><th scope="col" class="num">Borrowed</th><th scope="col" class="num">Spill in</th><th scope="col" class="num">Spill out</th><th scope="col" class="num">Agents</th></tr></thead>
+<tbody>{{range .Tiers}}<tr><th scope="row">{{.Name}}</th><td class="via-bar-cell"><svg class="via-bar" aria-hidden="true" focusable="false"><rect height="100%" width="{{printf "%.1f" .Fill}}%"/></svg></td>{{range .Cells}}<td class="num" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</td>{{end}}</tr>{{end}}</tbody>
+</table></div>
+</figure>{{end}}
+<h3>Transfers</h3>
+<dl class="stat-row stat-row-quiet">{{range .Transfers}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
+<h3>Allowance in use by service</h3>
+{{if .Services}}<div class="table-scroll"><table class="via-table allowance-table">
+<thead><tr><th scope="col">Service</th><th scope="col">Resource</th><th scope="col">Bucket</th><th scope="col" class="num">Spent today</th><th scope="col" class="num">Calls</th></tr></thead>
+<tbody>{{range .Services}}<tr><th scope="row">{{.Service}}</th><td>{{.Resource}}</td><td>{{.Bucket}}</td>{{range .Cells}}<td class="num" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</td>{{end}}</tr>{{end}}</tbody>
+</table></div>{{else}}<p class="chart-note">Nothing spent yet today.</p>{{end}}
+<h3>Levers</h3>
+{{if .Levers}}<ul class="lever-list">{{range .Levers}}<li><code>{{.Name}}{{with .Args}} {{.}}{{end}}</code> pulled {{date .Since}}{{if .Until}}, until {{date .Until}}{{end}}. {{.Reason}}</li>{{end}}</ul>{{else}}<p class="chart-note">No lever is pulled.</p>{{end}}
+<p class="chart-note">A lever is a public switch for an attack, such as pausing unsigned writes. Every pull and release is logged at <a href="/api/levers">/api/levers</a>.</p>
+{{if .History}}<details class="stats-table">
+<summary>Earlier days as a table</summary>
+<div class="table-scroll"><table>
+<thead><tr><th scope="col">Day (UTC)</th><th scope="col">Resource</th><th scope="col" class="num">Budget</th><th scope="col" class="num">Issued</th><th scope="col" class="num">Spent</th><th scope="col" class="num">Agents</th></tr></thead>
+<tbody>{{range .History}}<tr><th scope="row">{{.Day}}</th><td>{{.Resource}}</td>{{range .Cells}}<td class="num" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</td>{{end}}</tr>{{end}}</tbody>
+</table></div>
+</details>{{end}}
+</section>{{end}}{{with .Trust}}<section class="stats-section" aria-labelledby="stats-trust">
+<h2 id="stats-trust">Trust estimates</h2>
+<p class="stats-lede">What it would cost to rebuild each signed identity, from its proofs and the endorsements it receives. An estimate, never a verdict on who is behind a key. {{.ModeNote}}{{if .Stale}} The last run did not finish, so these are from the run before.{{end}}</p>
+<figure class="chart">
+<figcaption><h3>Collateral</h3><p class="chart-note">Accounts by collateral, in bins of ten times the one before; the unit is in <a href="/api/params/trust">/api/params/trust</a>.</p></figcaption>
+<table class="via-table">
+<thead><tr><th scope="col">Collateral</th><th scope="col"><span class="sr-only">Relative count</span></th><th scope="col" class="num">Accounts</th></tr></thead>
+<tbody>{{range .Bins}}<tr><th scope="row">{{.Label}}</th><td class="via-bar-cell"><svg class="via-bar" aria-hidden="true" focusable="false"><rect height="100%" width="{{printf "%.1f" .Width}}%"/></svg></td><td class="num" data-key="{{.Cell.Key}}" data-value="{{.Cell.Value}}">{{.Cell.Text}}</td></tr>{{end}}</tbody>
+</table>
+</figure>
+<figure class="chart">
+<figcaption><h3>Tiers</h3><p class="chart-note">Signed accounts per tier: where they are placed now, and where the trust run would place them.</p></figcaption>
+<table class="via-table">
+<thead><tr><th scope="col">Tier</th><th scope="col" class="num">Now</th><th scope="col" class="num">By trust</th></tr></thead>
+<tbody>{{range .Tiers}}<tr><th scope="row">{{.Name}}</th>{{range .Cells}}<td class="num" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</td>{{end}}</tr>{{end}}</tbody>
+</table>
+</figure>
+</section>{{end}}<p class="stats-source">The same numbers as JSON: <a href="/api/stats/allowance">/api/stats/allowance</a>.{{if .Waterfall}} Every transfer and spend is in the public journal at <a href="/api/ledger">/api/ledger</a>; the parameters are at <a href="/api/params/allowance">/api/params/allowance</a>. <a href="/protocol.md#allowance-and-the-waterfall">How the waterfall works</a>{{end}}{{if .Trust}} <a href="/protocol.md#trust">How trust is estimated</a>{{end}}</p>{{end}}
+
+{{define "stats-moderation"}}<section class="stats-section" aria-labelledby="stats-moderation">
+<h2 id="stats-moderation">Moderation</h2>
+<p class="stats-lede">Automatic screening decisions over the last {{.Days}} days (UTC, today included), by action. Only phishing, malware, slur harassment or extreme vulgarity, sexual content involving minors and doxxing are hidden; every hidden post shows its reason. Flags and holds wait for a person to review. Counts only.</p>
+<dl class="stat-row stat-row-quiet">{{range .Tiles}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
+<div class="table-scroll"><table>
+<thead><tr><th scope="col">Surface</th><th scope="col" class="num">Allowed</th><th scope="col" class="num">Flagged</th><th scope="col" class="num">Held</th><th scope="col" class="num">Hidden</th><th scope="col" class="num">Blocked</th></tr></thead>
+<tbody>{{range .Rows}}<tr><th scope="row">{{.Label}}</th><td class="num">{{.Allow}}</td><td class="num">{{.Flag}}</td><td class="num">{{.Hold}}</td><td class="num">{{.Hide}}</td><td class="num">{{.Block}}</td></tr>{{end}}</tbody>
+</table></div>
+<details class="stats-table">
+<summary>Moderation by day</summary>
+<div class="table-scroll"><table>
+<thead><tr><th scope="col">Day (UTC)</th><th scope="col" class="num">Allowed</th><th scope="col" class="num">Flagged</th><th scope="col" class="num">Held</th><th scope="col" class="num">Hidden</th><th scope="col" class="num">Blocked</th></tr></thead>
+<tbody>{{range .DaysRows}}<tr><th scope="row">{{.Label}}</th><td class="num">{{.Allow}}</td><td class="num">{{.Flag}}</td><td class="num">{{.Hold}}</td><td class="num">{{.Hide}}</td><td class="num">{{.Block}}</td></tr>{{end}}</tbody>
+</table></div>
+</details>
+<p class="stats-source">The same numbers as JSON: <a href="/api/stats/moderation">/api/stats/moderation</a>. Policy version {{.Policy}}. <a href="/protocol.md#moderation">How moderation works</a></p>
+</section>{{end}}

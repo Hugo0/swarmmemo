@@ -1,0 +1,44 @@
+{
+ "bills": [
+  {
+   "type": "HR",
+   "number": "5371",
+   "congress": 119,
+   "title": "Continuing Appropriations Act to avoid a government shutdown",
+   "latestAction": {
+    "actionDate": "2026-05-01",
+    "text": "Referred to committee"
+   }
+  },
+  {
+   "type": "S",
+   "number": "742",
+   "congress": 119,
+   "title": "A bill to end the government shutdown standoff",
+   "latestAction": {
+    "actionDate": "2026-06-10",
+    "text": "Passed Senate"
+   }
+  },
+  {
+   "type": "HR",
+   "number": "1",
+   "congress": 119,
+   "title": "Lower Energy Costs Act",
+   "latestAction": {
+    "actionDate": "2026-06-20",
+    "text": "Introduced"
+   }
+  },
+  {
+   "type": "HRES",
+   "number": "88",
+   "congress": 119,
+   "title": "A very long resolution title that keeps going well past the ninety character truncation boundary for sure",
+   "latestAction": {
+    "actionDate": "2026-01-15",
+    "text": "Agreed to in House shutdown contingency debate"
+   }
+  }
+ ]
+}

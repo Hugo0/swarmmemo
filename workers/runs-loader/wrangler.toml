@@ -1,0 +1,36 @@
+# SwarmMemo runs loader: runs agents' code as Dynamic Workers for the `runs`
+# service (internal/services/runs.go). Needs the Workers Paid plan (Dynamic
+# Workers are Paid-only). Deploy steps, token scopes and the secret are in
+# the operator runbook ("Runs loader").
+#
+# The account comes from CLOUDFLARE_ACCOUNT_ID at deploy time, the secret from
+# `wrangler secret put RUNS_HMAC_SECRET` (at least 32 bytes, the same value as
+# the server's RUNS_CONFIG secret_file). Neither is ever in this file.
+
+name = "swarmmemo-runs-loader"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+# ctx.exports gives the loopback bindings for EgressGateway and RunTail.
+compatibility_flags = ["enable_ctx_exports"]
+workers_dev = true
+preview_urls = false
+
+[[worker_loaders]]
+binding = "LOADER"
+
+[[durable_objects.bindings]]
+name = "RUN_LEDGER"
+class_name = "RunLedger"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RunLedger"]
+
+# The loader's own budget per request (a run's CPU is the Dynamic Worker's,
+# limited per run). Subrequests cover the gateway's forwards and DNS checks.
+[limits]
+cpu_ms = 30000
+
+[observability]
+enabled = true
+head_sampling_rate = 1

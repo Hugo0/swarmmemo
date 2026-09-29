@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/cards"
 	"swarmmemo/internal/httpapi"
 	"swarmmemo/internal/nostr"
 	"swarmmemo/internal/transport"
@@ -89,10 +90,14 @@ func run() error {
 		return e
 	case "serve":
 		return serve()
-	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance", "stats":
+	case "x402": // x402.go
+		return x402Command(os.Args[2:], os.Stdout)
+	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance", "stats",
+		"tier", "params", "allowance", "lever", "trust", // RFC0012, rfc0012.go
+		"moderation": // moderation.go
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]]")
+		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|moderation]")
 	}
 }
 
@@ -101,7 +106,11 @@ func operator(command string) error {
 	if _, err := os.Stat(path); err != nil {
 		return err
 	}
-	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com")})
+	features, err := featuresFromEnvironment()
+	if err != nil {
+		return err
+	}
+	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), Features: features, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE")})
 	if err != nil {
 		return err
 	}
@@ -109,6 +118,10 @@ func operator(command string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	switch command {
+	case "tier", "params", "allowance", "lever", "trust":
+		return rfc0012Operator(ctx, store, command, os.Args[2:], os.Stdout)
+	case "moderation":
+		return operatorModeration(ctx, store, os.Args[2:], os.Stdout)
 	case "maintenance":
 		n, err := store.PruneExpiredBlobs(ctx)
 		if err != nil {
@@ -272,12 +285,16 @@ func serve() error {
 	if e != nil {
 		return e
 	}
+	features, e := featuresFromEnvironment()
+	if e != nil {
+		return e
+	}
 	publicURL := env("PUBLIC_URL", "https://swarmmemo.com")
 	reserved := []string{}
 	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
 		reserved = append(reserved, parsed.Hostname())
 	}
-	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved})
+	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE")})
 	if e != nil {
 		return e
 	}
@@ -294,7 +311,7 @@ func serve() error {
 		}
 	}
 	identityChecks := os.Getenv("IDENTITY_CHECKS") == "true"
-	config := httpapi.Config{PublicURL: publicURL, IdentityChecks: identityChecks, ServiceID: env("SERVICE_ID", "swarmmemo.com"), AdminToken: admin, TrustLoopbackProxy: os.Getenv("TRUST_LOOPBACK_PROXY") == "true", AllowInsecureLocal: os.Getenv("ALLOW_INSECURE_LOCAL") == "true", PushDelivery: os.Getenv("WEBHOOK_DELIVERY") == "true", ArchiveDelaySeconds: archiveDelay, Version: version}
+	config := httpapi.Config{PublicURL: publicURL, IdentityChecks: identityChecks, ServiceID: env("SERVICE_ID", "swarmmemo.com"), AdminToken: admin, TrustLoopbackProxy: os.Getenv("TRUST_LOOPBACK_PROXY") == "true", AllowInsecureLocal: os.Getenv("ALLOW_INSECURE_LOCAL") == "true", PushDelivery: os.Getenv("WEBHOOK_DELIVERY") == "true", ArchiveDelaySeconds: archiveDelay, Version: version, Features: features}
 	if referenceReader != nil {
 		config.References = referenceReader
 	}
@@ -316,11 +333,26 @@ func serve() error {
 		if strings.Contains(capability.Access, "write") {
 			writable = append(writable, capability.Name)
 		}
+		if capability.Name == "dns" {
+			web.SetDNSZone(capability.Address) // the services' DNS examples
+		}
 	}
 	web.SetWriteTransports(writable)
 	// Legacy /guides/* pages redirect to posts in the guides room by these keys.
 	if e := web.SetGuideAuthors(os.Getenv("GUIDES_AUTHORS")); e != nil {
 		return e
+	}
+	// Post and room images are off unless IMAGES=true (internal/cards).
+	imageConfig, imagesOn, e := cards.ConfigFromEnv(os.Getenv, dir)
+	if e != nil {
+		return e
+	}
+	if imagesOn {
+		if config.Images, e = cards.New(imageConfig, web.CardSource(store)); e != nil {
+			return e
+		}
+		web.SetCardImages(true)
+		slog.Info("Post and room images enabled", "renderer", imageConfig.Renderer)
 	}
 	api := httpapi.New(store, web.Handler(store), config)
 	server := &http.Server{Addr: env("LISTEN_ADDR", "127.0.0.1:8080"), Handler: api, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
@@ -367,6 +399,9 @@ func serve() error {
 		slog.Info("Identity link rechecks enabled")
 		store.StartIdentityChecks(ctx)
 	}
+	// RFC0012 background work (sweeper, job worker, trust run) for the
+	// enabled flags; with every flag off it starts nothing.
+	store.StartRFC0012(ctx)
 	done := make(chan error, 1)
 	go func() {
 		slog.Info("SwarmMemo listening", "address", server.Addr, "version", version)
@@ -387,6 +422,7 @@ func serve() error {
 		// in storage, so stopping repeats nothing and loses nothing.
 		store.StopWebhookDelivery()
 		store.StopIdentityChecks()
+		store.StopRFC0012()
 		return err
 	}
 }

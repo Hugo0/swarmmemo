@@ -1,0 +1,1140 @@
+#!/usr/bin/env python3
+"""Independent verifier for SwarmMemo's trust runs (RFC0012 §4.8). Stdlib only.
+
+Three commands:
+
+  recompute.py verify EXPORT.jsonl [--service swarmmemo.com]
+      Checks every line of /v1/export?stream=endorsements offline: the Ed25519
+      signature over signed_payload with public_key (a pure-Python RFC 8032
+      verifier, cofactorless like Go's crypto/ed25519), and that the signed
+      command is the record (service, operation, message or target, value,
+      sponsor). legacy_vote and unsigned records carry weight 0 and are counted,
+      not verified. Exit status 1 if any signed record fails.
+
+  recompute.py endorsements EXPORT.jsonl [--service swarmmemo.com]
+      Verifies the export as above and prints each record as a trust input
+      line ({"type":"endorsement",...}); unsigned votes become kind "unsigned".
+
+  recompute.py run SNAPSHOT.jsonl
+      Recomputes a trust run from its inputs and prints the output as canonical
+      JSON (sorted keys, no spaces), which must equal the published run byte for
+      byte. The input is the run's snapshot: one JSON record per line, typed
+      meta, params, account, post, endorsement, proof, breaker, transfer, claim,
+      prior, penalty and sponsorship, the format of internal/trust's golden
+      fixture (testdata/golden_inputs.jsonl).
+
+The algorithm is the published one (RFC0012 §4.2–4.5), restated here from the
+specification rather than translated from the Go reference, and checked against
+the reference's golden fixture by test_recompute.py. Every amount is an
+integer; divisions truncate toward zero as Go's do; curves are published daily
+factors applied one whole day at a time with floor. The flow is Dinic's
+algorithm specified down to edge insertion order and the path search, since a
+maximum flow's split over sinks is not unique.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import sys
+
+DAY = 86400
+PPM = 1_000_000
+
+
+# ---------------------------------------------------------------------------
+# Integer and JSON helpers
+
+
+def gdiv(a: int, b: int) -> int:
+    """Go's integer division: truncates toward zero."""
+    q = abs(a) // abs(b)
+    return q if (a >= 0) == (b > 0) else -q
+
+
+def day_of(t: int) -> int:
+    return -gdiv(-t + DAY - 1, DAY) if t < 0 else t // DAY
+
+
+def canonical(value) -> str:
+    """Canonical JSON: sorted keys, no whitespace, UTF-8, no HTML escaping."""
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
+def _go_quote(s: str) -> str:
+    """A string as Go's json.Marshal writes it (HTML characters escaped)."""
+    text = json.dumps(s, ensure_ascii=False)
+    for raw, esc in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"), ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
+        text = text.replace(raw, esc)
+    return text
+
+
+# Record fields in the reference's declaration order, with their zero values:
+# a record's sort key is its json.Marshal form, every field omitempty but type.
+RECORD_FIELDS = [
+    ("type", ""), ("schema", 0), ("as_of", 0), ("prior_runs", 0), ("pause_new_keys_since", 0), ("events_seq", 0),
+    ("endorsements_seq", 0), ("ledger_seq", 0), ("version", 0), ("body", None), ("account", ""), ("created_at", 0),
+    ("first_seen", 0), ("id", ""), ("reply_to", ""), ("reply_to_account", ""), ("seq", 0), ("kind", ""), ("voter", ""),
+    ("target", ""), ("message_id", ""), ("value", 0), ("sponsor", False), ("link_value", ""), ("state", ""),
+    ("checked_at", 0), ("link_account", ""), ("started_at", 0), ("trust_until", 0), ("from", ""), ("to", ""),
+    ("amount", 0), ("day", 0), ("claimed", 0), ("spent", 0), ("flow_sum", 0), ("standing", False), ("evidence", ""),
+    ("fraction_ppm", 0), ("ends_at", 0), ("invitee", ""), ("sponsor_account", ""), ("high_water", 0),
+]
+FIELD_ZERO = dict(RECORD_FIELDS)
+RECORD_TYPES = {"meta", "params", "account", "post", "endorsement", "proof", "breaker", "transfer", "claim", "prior",
+                "penalty", "sponsorship"}
+
+
+def record_key(r: dict) -> str:
+    parts = []
+    for name, zero in RECORD_FIELDS:
+        value = r.get(name, zero)
+        if name != "type" and (value == zero or value is None):
+            continue
+        if isinstance(value, bool):
+            encoded = "true" if value else "false"
+        elif isinstance(value, int):
+            encoded = str(value)
+        elif isinstance(value, str):
+            encoded = _go_quote(value)
+        else:
+            encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+        parts.append(_go_quote(name) + ":" + encoded)
+    return "{" + ",".join(parts) + "}"
+
+
+class Rec(dict):
+    """A trust input record; absent fields read as their zero value."""
+
+    def __getattr__(self, name):
+        return self.get(name, FIELD_ZERO.get(name))
+
+
+# ---------------------------------------------------------------------------
+# Snapshot and parameters
+
+
+class InputError(ValueError):
+    pass
+
+
+PARAM_KEYS = {
+    "schema", "collateral_unit", "seeds", "seeds_reason", "service_accounts", "proofs", "domain_suffixes",
+    "proof_fresh_days", "history", "window_days", "n_max", "k_out", "edges", "unit_per_share", "edge_cap_ppm",
+    "lambda_ppm", "root_cap_shares", "fill_steps", "own_avg_runs", "active_days", "activity_days", "seeds_b",
+    "max_work", "max_seconds", "theta_trusted", "theta_proven", "endorsement_unit_price", "weight_cap_ppm",
+    "weight_per_unit_ppm", "detectors", "liability", "sponsor",
+}
+PARAM_SECTIONS = {
+    "history": {"day_price", "days_cap", "half_life_days", "day_factor_ppm"},
+    "seeds_b": {"min_roots", "theta_anchor", "min_age_days", "active_days", "of_days", "min_members"},
+    "detectors": {"version", "funnel_k", "funnel_days", "funnel_spend_ppm", "ring_min", "ring_inside_ppm"},
+    "liability": {"phi_ppm", "phi_max_ppm", "penalty_days", "edge_days"},
+    "sponsor": {"window_days", "slots_per_share", "dividend_ppm", "dividend_days", "daily_cap", "resource"},
+}
+PROOF_KEYS = {"forge", "rent", "curve", "half_life_days", "day_factor_ppm"}
+EDGE_KEYS = {"base_ppm", "half_life_days", "day_factor_ppm"}
+
+
+def check_params(body: dict) -> None:
+    """Strict shape check: every field present, none unknown, integers where
+    integers belong. Bounds are the reference's to publish; a verifier only
+    needs to refuse what it cannot read the same way."""
+    def exact(obj, keys, where):
+        if not isinstance(obj, dict) or set(obj) != keys:
+            raise InputError(f"params {where}: fields must be exactly {sorted(keys)}")
+    exact(body, PARAM_KEYS, "body")
+    for section, keys in PARAM_SECTIONS.items():
+        exact(body[section], keys, section)
+    for kind in ("domain", "ed25519", "board", "url", "nostr"):
+        exact(body["proofs"].get(kind), PROOF_KEYS, "proofs." + kind)
+    if set(body["proofs"]) != {"domain", "ed25519", "board", "url", "nostr"}:
+        raise InputError("params proofs: exactly domain, ed25519, board, url and nostr")
+    for kind in ("vote", "vouch", "reply", "legacy_vote"):
+        exact(body["edges"].get(kind), EDGE_KEYS, "edges." + kind)
+    if set(body["edges"]) != {"vote", "vouch", "reply", "legacy_vote"}:
+        raise InputError("params edges: exactly vote, vouch, reply and legacy_vote")
+    if body["schema"] != 1:
+        raise InputError("params schema must be 1")
+
+    def ints(obj, where):
+        for k, v in obj.items():
+            if isinstance(v, dict):
+                ints(v, where + "." + k)
+            elif isinstance(v, bool) or (isinstance(v, float)):
+                raise InputError(f"params {where}.{k} must be an integer")
+    ints(body, "body")
+
+
+class Snapshot:
+    def __init__(self):
+        self.meta = Rec()
+        self.params = None
+        self.params_version = 0
+        self.lists = {t: [] for t in RECORD_TYPES - {"meta", "params"}}
+
+    def __getattr__(self, name):
+        lists = self.__dict__.get("lists", {})
+        singular = {"accounts": "account", "posts": "post", "endorsements": "endorsement", "proofs": "proof",
+                    "breakers": "breaker", "transfers": "transfer", "claims": "claim", "priors": "prior",
+                    "penalties": "penalty", "sponsorships": "sponsorship"}
+        if name in singular:
+            return lists[singular[name]]
+        raise AttributeError(name)
+
+
+def read_snapshot(lines) -> Snapshot:
+    snap = Snapshot()
+    for n, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError as e:
+            raise InputError(f"line {n}: {e}") from e
+        if not isinstance(raw, dict) or raw.get("type") not in RECORD_TYPES:
+            raise InputError(f"line {n}: unknown record type {raw.get('type') if isinstance(raw, dict) else raw!r}")
+        unknown = set(raw) - set(FIELD_ZERO)
+        if unknown:
+            raise InputError(f"line {n}: unknown field(s) {sorted(unknown)}")
+        for k, v in raw.items():
+            zero = FIELD_ZERO[k]
+            if k == "body":
+                continue
+            if isinstance(zero, bool) != isinstance(v, bool) or type(v) is not type(zero):
+                raise InputError(f"line {n}: field {k} has the wrong type")
+        rec = Rec(raw)
+        if rec.type == "meta":
+            snap.meta = rec
+        elif rec.type == "params":
+            check_params(rec.body)
+            snap.params = rec.body
+            snap.params_version = rec.version
+        else:
+            snap.lists[rec.type].append(rec)
+    if snap.params is None:
+        raise InputError("the snapshot has no params record")
+    return snap
+
+
+# ---------------------------------------------------------------------------
+# Curves, roots
+
+
+class Curves:
+    """1e6 × f^days, one whole day at a time with floor; ages past 3650 days
+    use 3650. The run never evaluates a float."""
+
+    def __init__(self):
+        self.tables = {}
+
+    def decay(self, factor: int, days: int) -> int:
+        if days <= 0:
+            return PPM
+        days = min(days, 3650)
+        table = self.tables.setdefault(factor, [PPM])
+        while len(table) <= days:
+            table.append(table[-1] * factor // PPM)
+        return table[days]
+
+    def ramp(self, factor: int, days: int) -> int:
+        return PPM - self.decay(factor, days)
+
+
+class UnionFind(dict):
+    """Union-find over strings; the smaller representative wins a union."""
+
+    def find(self, x):
+        while True:
+            p = self.get(x)
+            if p is None or p == x:
+                return x
+            gp = self.get(p, "")
+            if gp != "" and gp != p:
+                self[x] = gp
+            x = p
+
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra == rb:
+            return
+        if rb < ra:
+            ra, rb = rb, ra
+        self[ra] = ra
+        self[rb] = ra
+
+
+def domain_root(domain: str, suffixes: set) -> str:
+    """"domain:" + one label under the longest listed multi-label public
+    suffix, else the last two labels."""
+    d = domain.lower()
+    if d.endswith("."):
+        d = d[:-1]
+    labels = d.split(".")
+    keep = 2
+    for i in range(1, len(labels) - 1):
+        if ".".join(labels[i:]) in suffixes:
+            keep = len(labels) - i + 1
+            break
+    keep = min(keep, len(labels))
+    return "domain:" + ".".join(labels[len(labels) - keep:])
+
+
+# ---------------------------------------------------------------------------
+# Dinic max-flow, specified exactly
+
+
+class WorkExceeded(RuntimeError):
+    pass
+
+
+class Network:
+    """add(u, v, c) appends edge e = u→v (capacity c) and its reverse e^1
+    (capacity 0) to u's and v's lists. A phase is a BFS from s over each
+    node's list in insertion order, then repeated single-path searches with a
+    per-node pointer: at u take the first edge from it[u] on with residual > 0
+    into level[u]+1; at a dead end step back and advance the parent's pointer;
+    reaching t push the bottleneck. Every edge examined counts as work."""
+
+    def __init__(self, n: int, max_work: int, work: int):
+        self.adj = [[] for _ in range(n)]
+        self.to = []
+        self.cap = []
+        self.work = work
+        self.max_work = max_work
+
+    def add(self, u: int, v: int, c: int) -> int:
+        e = len(self.to)
+        self.to += [v, u]
+        self.cap += [c, 0]
+        self.adj[u].append(e)
+        self.adj[v].append(e + 1)
+        return e
+
+    def flow_on(self, e: int) -> int:
+        return self.cap[e ^ 1]
+
+    def tick(self):
+        self.work += 1
+        if self.work > self.max_work:
+            raise WorkExceeded("max_work exceeded")
+
+    def maxflow(self, s: int, t: int):
+        n = len(self.adj)
+        while True:
+            level = [-1] * n
+            level[s] = 0
+            queue = [s]
+            head = 0
+            while head < len(queue):
+                u = queue[head]
+                head += 1
+                for e in self.adj[u]:
+                    self.tick()
+                    v = self.to[e]
+                    if self.cap[e] > 0 and level[v] < 0:
+                        level[v] = level[u] + 1
+                        queue.append(v)
+            if level[t] < 0:
+                return
+            it = [0] * n
+            while self._augment(s, t, level, it) > 0:
+                pass
+
+    def _augment(self, s, t, level, it) -> int:
+        path = []
+        u = s
+        while True:
+            if u == t:
+                f = 1 << 62
+                for e in path:
+                    f = min(f, self.cap[e])
+                for e in path:
+                    self.cap[e] -= f
+                    self.cap[e ^ 1] += f
+                return f
+            advanced = False
+            edges = self.adj[u]
+            while it[u] < len(edges):
+                self.tick()
+                e = edges[it[u]]
+                v = self.to[e]
+                if self.cap[e] > 0 and level[v] == level[u] + 1:
+                    path.append(e)
+                    u = v
+                    advanced = True
+                    break
+                it[u] += 1
+            if advanced:
+                continue
+            if not path:
+                return 0
+            e = path.pop()
+            u = self.to[e ^ 1]
+            it[u] += 1
+
+
+def run_flow(graph: dict, seeds: list, pool: int, max_work: int, work: int):
+    """Stake-bounded capacity flow from seeds (sorted node indices): in-node i,
+    out-node n+i, hub j at 2n+j, then S and T. Inserted in order: in→out
+    transit edges by node (a seed passes the whole pool); graph edges by (src,
+    dst); sink edges by node, capacity 0, raised to U×k/steps at level k; hub→T
+    edges; S→seed edges, pool/len(seeds) each."""
+    n = graph["n"]
+    node_flow, edge_flow = [0] * n, [0] * len(graph["src"])
+    if not seeds or n == 0:
+        return node_flow, edge_flow, work
+    hubs = graph["hubs"]
+    S, T = 2 * n + hubs, 2 * n + hubs + 1
+    net = Network(T + 1, max_work, work)
+    seed_set = set(seeds)
+    for i in range(n):
+        net.add(i, n + i, pool if i in seed_set else graph["transit"][i])
+    edge_ids = []
+    for k in range(len(graph["src"])):
+        c = graph["cap"][k]
+        edge_ids.append(net.add(n + graph["src"][k], graph["dst"][k], c) if c > 0 else -1)
+    sink = []
+    for i in range(n):
+        hub = graph["hub"][i]
+        sink.append(net.add(i, 2 * n + hub if hub >= 0 else T, 0))
+    for j in range(hubs):
+        net.add(2 * n + j, T, graph["hub_cap"])
+    per_seed = max(1, pool // len(seeds))
+    for s in seeds:
+        net.add(S, s, per_seed)
+    done = 0
+    for k in range(1, graph["steps"] + 1):
+        level = graph["node_cap"] * k // graph["steps"]
+        for e in sink:
+            net.cap[e] += level - done
+        done = level
+        net.maxflow(S, T)
+    for i, e in enumerate(sink):
+        node_flow[i] = net.flow_on(e)
+    for k, e in enumerate(edge_ids):
+        if e >= 0:
+            edge_flow[k] = net.flow_on(e)
+    return node_flow, edge_flow, net.work
+
+
+# ---------------------------------------------------------------------------
+# Detectors
+
+
+def evidence_id(kind: str, D: int, members: list) -> str:
+    digest = hashlib.sha256(f"{kind}\n{D}\n{','.join(members)}".encode()).hexdigest()
+    return f"{kind}-{digest[:24]}"
+
+
+def strongly_connected(n: int, edges: list) -> list:
+    """Tarjan's components, visiting nodes 0..n-1 and each node's edges in
+    (src, dst) order."""
+    adj = [[] for _ in range(n)]
+    for src, dst, _ in edges:
+        adj[src].append(dst)
+    index, low, on = [-1] * n, [0] * n, [False] * n
+    stack, out, counter = [], [], [0]
+
+    sys.setrecursionlimit(max(sys.getrecursionlimit(), 4 * n + 1000))
+
+    def visit(v):
+        index[v] = low[v] = counter[0]
+        counter[0] += 1
+        stack.append(v)
+        on[v] = True
+        for w in adj[v]:
+            if index[w] < 0:
+                visit(w)
+                low[v] = min(low[v], low[w])
+            elif on[w]:
+                low[v] = min(low[v], index[w])
+        if low[v] == index[v]:
+            comp = []
+            while True:
+                w = stack.pop()
+                on[w] = False
+                comp.append(w)
+                if w == v:
+                    break
+            out.append(comp)
+
+    for v in range(n):
+        if index[v] < 0:
+            visit(v)
+    return out
+
+
+def detect(p, snap, as_of, D, service, nodes, edges) -> list:
+    """funnel: a recipient of transfers from ≥ funnel_k distinct accounts in
+    the last funnel_days, each of which spent ≤ funnel_spend_ppm of its claims
+    those days. ring: a strongly connected set of ≥ ring_min nodes, each taking
+    ≥ ring_inside_ppm of its inbound weight from inside, sharing a member with
+    a funnel."""
+    d = p["detectors"]
+    out = []
+    start = as_of - d["funnel_days"] * DAY
+    claimed, spent = {}, {}
+    for r in snap.claims:
+        if D - d["funnel_days"] <= r.day < D:
+            claimed[r.account] = claimed.get(r.account, 0) + r.claimed
+            spent[r.account] = spent.get(r.account, 0) + r.spent
+    senders = {}
+    for r in snap.transfers:
+        f, t = r["from"] if "from" in r else "", r.to
+        if r.created_at < start or r.created_at >= as_of or f == t or f == "" or t == "" or f in service or t in service or r.amount <= 0:
+            continue
+        senders.setdefault(t, set()).add(f)
+    in_funnel = {}
+    for to in sorted(senders):
+        farm = [s for s in senders[to] if claimed.get(s, 0) > 0 and spent.get(s, 0) * PPM <= d["funnel_spend_ppm"] * claimed[s]]
+        if len(farm) < d["funnel_k"]:
+            continue
+        members = sorted(farm + [to])
+        ev = {"id": evidence_id("funnel", D, members), "kind": "funnel", "members": members, "detector_version": d["version"],
+              "detail": canonical({"recipient": to, "senders": len(farm), "window_days": d["funnel_days"]})}
+        for m in members:
+            in_funnel.setdefault(m, ev["id"])
+        out.append(ev)
+    if not in_funnel:
+        return out
+    for scc in strongly_connected(len(nodes), edges):
+        if len(scc) < d["ring_min"]:
+            continue
+        inside = set(scc)
+        inw, total = {}, {}
+        for src, dst, w in edges:
+            if dst in inside:
+                total[dst] = total.get(dst, 0) + w
+                if src in inside:
+                    inw[dst] = inw.get(dst, 0) + w
+        ok = all(total.get(v, 0) != 0 and inw.get(v, 0) * PPM >= d["ring_inside_ppm"] * total[v] for v in scc)
+        members = sorted(nodes[v] for v in scc)
+        funnels = [in_funnel[m] for m in members if m in in_funnel]
+        if not ok or not funnels:
+            continue
+        out.append({"id": evidence_id("ring", D, members), "kind": "ring", "members": members, "detector_version": d["version"],
+                    "detail": canonical({"size": len(members), "funnel": min(funnels)})})
+    out.sort(key=lambda e: e["id"])
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The run
+
+
+def compute(snap: Snapshot) -> dict:
+    p = snap.params
+    as_of = snap.meta.as_of
+    D = day_of(as_of)
+    ws = as_of - p["window_days"] * DAY
+    U = p["unit_per_share"]
+    cv = Curves()
+    service = set(p["service_accounts"])
+    edges_p = p["edges"]
+
+    first_seen = {}
+    for r in snap.accounts:
+        if r.first_seen > 0 and (first_seen.get(r.account, 0) == 0 or r.first_seen < first_seen[r.account]):
+            first_seen[r.account] = r.first_seen
+
+    # Posts in the window, and activity.
+    posts = sorted((r for r in snap.posts if ws <= r.created_at < as_of and r.account != "" and r.account not in service),
+                   key=lambda r: (r.created_at, r.id))
+    post_by_id, activity, last_seen = {}, {}, {}
+
+    def active(a, t):
+        activity.setdefault(a, set()).add(day_of(t))
+
+    def seen(a, t):
+        if t > last_seen.get(a, 0):
+            last_seen[a] = t
+
+    for r in posts:
+        post_by_id[r.id] = r
+        active(r.account, r.created_at)
+        seen(r.account, r.created_at)
+
+    # Endorsements: the latest record per vote (voter, message) and per vouch
+    # (voter, target) decides.
+    ends = sorted((r for r in snap.endorsements if r.created_at < as_of and r.voter != "" and r.voter not in service), key=lambda r: r.seq)
+    latest_vote, latest_vouch = {}, {}
+    for r in ends:
+        if r.kind in ("vote", "legacy_vote", "unsigned"):
+            latest_vote[(r.voter, r.message_id)] = r
+        elif r.kind == "vouch":
+            latest_vouch[(r.voter, r.target)] = r
+        if r.created_at >= ws:
+            active(r.voter, r.created_at)
+            seen(r.voter, r.created_at)
+            if r.target != "" and r.target not in service:
+                seen(r.target, r.created_at)
+    current = sorted(list(latest_vote.values()) + list(latest_vouch.values()), key=lambda r: r.seq)
+    down_votes = {}
+    for r in current:
+        if r.kind == "vote" and r.value == -1 and r.created_at >= ws and r.target != "":
+            down_votes[r.target] = down_votes.get(r.target, 0) + 1
+
+    # Nodes: seeds first, then the most recently active, up to n_max.
+    candidates = sorted((a for a in last_seen if a not in service), key=lambda a: (-last_seen[a], a))
+    is_node = {s for s in p["seeds"] if s not in service}
+    for a in candidates:
+        if len(is_node) >= p["n_max"]:
+            break
+        is_node.add(a)
+    nodes = sorted(is_node)
+    index = {a: i for i, a in enumerate(nodes)}
+
+    # Roots: fresh verified domains and attached ed25519 keys join accounts.
+    suffixes = set(p["domain_suffixes"])
+    proofs = sorted(snap.proofs, key=record_key)
+    fresh = as_of - p["proof_fresh_days"] * DAY
+
+    def counts(r):
+        if r.kind == "domain":
+            return r.state == "verified" and fresh <= r.checked_at <= as_of and r.created_at <= as_of
+        if r.kind == "ed25519":
+            return r.state in ("proof_attached", "verified") and r.created_at <= as_of
+        return r.state == "verified" and r.created_at <= as_of
+
+    roots = UnionFind()
+    for r in proofs:
+        if r.account in service or not counts(r):
+            continue
+        if r.kind == "domain":
+            roots.union(r.account, domain_root(r.link_value, suffixes))
+        elif r.kind == "ed25519" and r.link_account != "" and r.link_account not in service:
+            roots.union(r.account, r.link_account)
+    label = {}
+    for x in list(roots):
+        rep = roots.find(x)
+        cur = label.get(rep)
+        is_domain = x.startswith("domain:")
+        cur_domain = cur is not None and cur.startswith("domain:")
+        if cur is None or (is_domain and not cur_domain) or (is_domain == cur_domain and x < cur):
+            label[rep] = x
+
+    def root_of(a):
+        return label[roots.find(a)] if a in roots else a
+
+    flow_sum, standing = {}, set()
+    for r in snap.priors:
+        flow_sum[r.account] = flow_sum.get(r.account, 0) + r.flow_sum
+        if r.standing:
+            standing.add(r.account)
+
+    # Breakers, pause-new-keys and active penalties.
+    reset = {r.account for r in snap.breakers if r.started_at <= as_of < r.trust_until}
+    since = snap.meta.pause_new_keys_since
+    if since > 0:
+        reset |= {a for a, t in first_seen.items() if t > since}
+    penalty = {}
+    for r in snap.penalties:
+        if r.ends_at > as_of and r.fraction_ppm > penalty.get(r.account, 0):
+            penalty[r.account] = min(r.fraction_ppm, PPM)
+
+    # Edge contributions.
+    contribs = []
+    for r in current:
+        if r.created_at < ws or r.target == "" or r.value != 1:
+            continue
+        if r.kind in ("vote", "legacy_vote", "vouch"):
+            contribs.append((r.voter, r.target, r.kind, r.created_at, edges_p[r.kind]["base_ppm"]))
+    replied = set()
+    for r in posts:
+        if r.reply_to_account == "" or r.reply_to_account == r.account:
+            continue
+        key = (r.account, r.reply_to_account, day_of(r.created_at))
+        if key in replied:
+            continue
+        replied.add(key)
+        contribs.append((r.account, r.reply_to_account, "reply", r.created_at, edges_p["reply"]["base_ppm"]))
+    pair_sum, pair_recent, pair_kinds = {}, {}, {}
+    recent = as_of - p["liability"]["edge_days"] * DAY
+    for src, dst, kind, at, base in contribs:
+        if src == dst or src in service or dst in service or src not in is_node or dst not in is_node:
+            continue
+        if root_of(src) == root_of(dst) or src in reset or penalty.get(src, 0) >= PPM:
+            continue
+        v = base * cv.decay(edges_p[kind]["day_factor_ppm"], D - day_of(at)) // PPM
+        if v <= 0:
+            continue
+        k = (src, dst)
+        pair_sum[k] = pair_sum.get(k, 0) + v
+        if at >= recent:
+            pair_recent[k] = pair_recent.get(k, 0) + v
+        pair_kinds.setdefault(k, set()).add("vote" if kind == "legacy_vote" else kind)
+
+    def saturate(s):
+        return PPM * s // (PPM + s)
+
+    by_src = {}
+    for (src, dst), s in pair_sum.items():
+        w = saturate(s)
+        if w > 0:
+            by_src.setdefault(index[src], []).append((index[src], index[dst], w))
+    edges = []
+    for lst in by_src.values():
+        lst.sort(key=lambda e: (-e[2], e[1]))
+        edges += lst[:p["k_out"]]
+    edges.sort(key=lambda e: (e[0], e[1]))
+
+    # Own average and transit, from published runs.
+    def active_days(a, lo, hi):
+        return sum(1 for d in activity.get(a, ()) if lo <= d < hi)
+
+    prior_runs = snap.meta.prior_runs
+    own_avg, transit = [0] * len(nodes), [0] * len(nodes)
+    for i, a in enumerate(nodes):
+        if prior_runs <= 0:
+            continue
+        span = p["activity_days"]
+        fs = first_seen.get(a, 0)
+        if fs > 0:
+            span = max(1, min(p["activity_days"], D - day_of(fs)))
+        share = min(PPM, gdiv(active_days(a, D - p["activity_days"], D) * PPM, span))
+        avg = min(U, gdiv(flow_sum.get(a, 0), prior_runs))
+        own_avg[i] = gdiv(avg * share, PPM)
+        if a not in reset:
+            transit[i] = gdiv(gdiv(p["lambda_ppm"] * own_avg[i], PPM) * (PPM - penalty.get(a, 0)), PPM)
+
+    # Proof collateral: min(forge, rent) × curve(age), saturating per root.
+    account_proofs = {}
+    for r in proofs:
+        if r.account in service or r.created_at > as_of:
+            continue
+        price = p["proofs"].get(r.kind, {"forge": 0, "rent": 0, "curve": "", "day_factor_ppm": 0})
+        part = {"kind": r.kind, "value": r.link_value, "state": r.state, "forge": price["forge"], "rent": price["rent"],
+                "curve": price["curve"], "age_days": max(0, D - day_of(r.created_at)), "weight_ppm": 0, "contribution": 0,
+                "saturated_by": "", "note": ""}
+        if r.kind == "domain":
+            part["root"] = domain_root(r.link_value, suffixes)
+        elif r.kind == "ed25519":
+            part["root"] = "key:" + r.link_account
+        else:
+            part["root"] = r.kind + ":" + r.link_value
+        if not counts(r):
+            part["note"] = "not counted in this state"
+        elif price["curve"] == "ramp":
+            part["weight_ppm"] = min(500000, cv.ramp(price["day_factor_ppm"], part["age_days"]))
+            part["note"] = "verified age unknown: at most half weight, bounded by the link's age"
+        else:
+            part["weight_ppm"] = PPM
+        part["contribution"] = min(price["forge"], price["rent"]) * part["weight_ppm"] // PPM
+        account_proofs.setdefault(r.account, []).append(part)
+    # History: days with a post that drew a reply or an up vote from another
+    # root with standing in the previous run.
+    qualified = {}
+
+    def qualify(post, by):
+        if by == "" or by == post.account or by in service or by not in standing or root_of(by) == root_of(post.account):
+            return
+        qualified.setdefault(post.account, set()).add(day_of(post.created_at))
+
+    for r in posts:
+        if r.reply_to != "" and r.reply_to in post_by_id:
+            qualify(post_by_id[r.reply_to], r.account)
+    for r in current:
+        if r.kind == "vote" and r.value == 1 and r.message_id in post_by_id:
+            qualify(post_by_id[r.message_id], r.voter)
+    h = p["history"]
+    for a, days in qualified.items():
+        n = min(len(days), h["days_cap"])
+        part = {"kind": "history", "value": f"{len(days)} days", "root": "history:" + a, "state": "computed",
+                "forge": n * h["day_price"], "rent": n * h["day_price"], "curve": "ramp", "age_days": D - min(days),
+                "saturated_by": "", "note": "lagged one run"}
+        part["weight_ppm"] = cv.ramp(h["day_factor_ppm"], part["age_days"])
+        part["contribution"] = part["forge"] * part["weight_ppm"] // PPM
+        account_proofs.setdefault(a, []).append(part)
+    proof_total, distinct_roots, non_domain_max = {}, {}, {}
+    for a, parts in account_proofs.items():
+        parts.sort(key=lambda x: (x["root"], -x["contribution"], x["kind"], x["value"]))
+        total = 0
+        for i, part in enumerate(parts):
+            if i > 0 and parts[i - 1]["root"] == part["root"]:
+                best = parts[i - 1]
+                part["saturated_by"] = best["saturated_by"] or best["kind"] + ":" + best["value"]
+                continue
+            total += part["contribution"]
+            if part["contribution"] > 0:
+                distinct_roots[a] = distinct_roots.get(a, 0) + 1
+                if not part["root"].startswith("domain:"):
+                    non_domain_max[a] = max(non_domain_max.get(a, 0), part["contribution"])
+        proof_total[a] = total
+
+    # Seed sets A (the parameters) and B (the public anchor rule).
+    seeds_a = sorted(index[s] for s in p["seeds"] if s in index)
+    seeds_a_list = sorted(s for s in p["seeds"] if s in index)
+    rule = p["seeds_b"]
+    seeds_b, seeds_b_list = [], []
+    for i, a in enumerate(nodes):
+        fs = first_seen.get(a, 0)
+        anchored = distinct_roots.get(a, 0) >= rule["min_roots"] or non_domain_max.get(a, 0) >= max(1, rule["theta_anchor"])
+        if (anchored and fs > 0 and fs <= as_of - rule["min_age_days"] * DAY
+                and active_days(a, D - rule["of_days"], D) >= rule["active_days"] and penalty.get(a, 0) == 0):
+            seeds_b.append(i)
+            seeds_b_list.append(a)
+    use_b = len(seeds_b) >= rule["min_members"]
+    H = sum(1 for a in nodes if active_days(a, D - p["active_days"], D) > 0)
+    pool = U * max(H, 1)
+
+    # The flow graph: per-root hubs for roots with two or more nodes.
+    groups = {}
+    for i, a in enumerate(nodes):
+        groups.setdefault(root_of(a), []).append(i)
+    hub_labels = sorted(l for l, members in groups.items() if len(members) >= 2)
+    hub = [-1] * len(nodes)
+    for j, l in enumerate(hub_labels):
+        for i in groups[l]:
+            hub[i] = j
+    graph = {"n": len(nodes), "transit": transit, "hub": hub, "hubs": len(hub_labels), "hub_cap": p["root_cap_shares"] * U,
+             "node_cap": U, "steps": p["fill_steps"], "src": [e[0] for e in edges], "dst": [e[1] for e in edges],
+             "cap": [p["edge_cap_ppm"] * U * e[2] // 10**12 for e in edges]}
+    fa_node, fa_edge, work = run_flow(graph, seeds_a, pool, p["max_work"], 0)
+    fb_node, fb_edge = fa_node, fa_edge
+    if use_b:
+        fb_node, fb_edge, work = run_flow(graph, seeds_b, pool, p["max_work"], work)
+
+    def flow_of(i):
+        return min(fa_node[i], fb_node[i]) if use_b else fa_node[i]
+
+    def edge_flow(k):
+        return min(fa_edge[k], fb_edge[k]) if use_b else fa_edge[k]
+
+    in_edges = {}
+    for k, e in enumerate(edges):
+        in_edges.setdefault(e[1], []).append(k)
+
+    # Evidence and liability.
+    evidence = detect(p, snap, as_of, D, service, nodes, edges)
+    lia = p["liability"]
+    penalties = []
+    for ev in evidence:
+        members = set(ev["members"])
+        for m in ev["members"]:
+            penalties.append({"account": m, "evidence": ev["id"], "fraction_ppm": PPM, "starts_at": as_of, "ends_at": as_of + lia["penalty_days"] * DAY})
+        into = {}
+        for (src, dst), s in pair_recent.items():
+            if dst in members and src not in members and src not in service:
+                into[src] = into.get(src, 0) + s
+        for u, s in into.items():
+            pen = min(lia["phi_max_ppm"], lia["phi_ppm"] * saturate(s) // PPM)
+            if pen > 0:
+                penalties.append({"account": u, "evidence": ev["id"], "fraction_ppm": pen, "starts_at": as_of, "ends_at": as_of + lia["penalty_days"] * DAY})
+    penalties.sort(key=lambda x: (x["account"], x["evidence"]))
+    effective = dict(penalty)
+    for pen in penalties:
+        effective[pen["account"]] = max(effective.get(pen["account"], 0), pen["fraction_ppm"])
+
+    # Scores: every node and every account with a proof.
+    seed_a, seed_b = set(seeds_a_list), set(seeds_b_list) if use_b else set()
+    flow_total, scores = {}, []
+    for a in sorted(set(nodes) | set(account_proofs)):
+        parts = {"proofs": account_proofs.get(a, []), "endorsers": [], "endorsers_total": 0, "down_votes": down_votes.get(a, 0),
+                 "penalty_ppm": effective.get(a, 0), "own_avg": 0, "transit": 0, "seed": "", "reset": a in reset}
+        sc = {"account": a, "root": root_of(a), "proof_collateral": proof_total.get(a, 0), "flow_a": 0, "flow_b": None, "flow": 0, "parts": parts}
+        if a in index:
+            i = index[a]
+            sc["flow_a"] = fa_node[i]
+            if use_b:
+                sc["flow_b"] = fb_node[i]
+            sc["flow"] = flow_of(i)
+            parts["own_avg"], parts["transit"] = own_avg[i], transit[i]
+            endorsers = []
+            for k in in_edges.get(i, []):
+                src = nodes[edges[k][0]]
+                endorsers.append({"agent": src, "kinds": sorted(pair_kinds[(src, a)]), "weight_ppm": edges[k][2], "flow": edge_flow(k)})
+            endorsers.sort(key=lambda x: (-x["flow"], -x["weight_ppm"], x["agent"]))
+            parts["endorsers_total"] = len(endorsers)
+            parts["endorsers"] = endorsers[:20]
+        parts["seed"] = ("a" if a in seed_a else "") + ("b" if a in seed_b else "")
+        flow_total[a] = sc["flow"]
+        sc["collateral"] = sc["proof_collateral"] + sc["flow"] * p["endorsement_unit_price"]
+        if sc["flow"] > 0 and sc["flow"] >= p["theta_trusted"]:
+            sc["tier"] = 1
+        elif sc["proof_collateral"] > 0 and sc["proof_collateral"] >= p["theta_proven"]:
+            sc["tier"] = 2
+        else:
+            sc["tier"] = 3
+        sc["weight_ppm"] = gdiv((PPM + min(p["weight_cap_ppm"], sc["collateral"] * p["weight_per_unit_ppm"])) * (PPM - effective.get(a, 0)), PPM)
+        scores.append(sc)
+
+    sponsorships, dividends = sponsor(p, snap, as_of, service, first_seen, reset, index, own_avg, root_of, pair_sum, flow_total,
+                                      lambda x: [] if x not in index else [(nodes[edges[k][0]], edge_flow(k)) for k in in_edges.get(index[x], [])])
+
+    max_transit = max([transit[i] for i, a in enumerate(nodes) if a not in seed_a and a not in seed_b] or [0])
+    body = canonical(p)
+    return {
+        "schema": 1, "as_of": as_of, "params_version": snap.params_version,
+        "params_sha256": hashlib.sha256(body.encode()).hexdigest(),
+        "inputs": {"events_seq": snap.meta.events_seq, "endorsements_seq": snap.meta.endorsements_seq, "ledger_seq": snap.meta.ledger_seq,
+                   "prior_runs": prior_runs, "accounts": len(snap.accounts), "posts": len(posts), "endorsements": len(ends),
+                   "proofs": len(snap.proofs), "transfers": len(snap.transfers)},
+        "nodes": len(nodes), "edges": len(edges), "pool_units": pool, "active_accounts": H,
+        "seeds_a": seeds_a_list, "seeds_b": seeds_b_list, "seeds_b_used": use_b,
+        "capture_bound": {"unit_per_share": U, "edge_cap_units": p["edge_cap_ppm"] * U // PPM, "lambda_ppm": p["lambda_ppm"],
+                          "max_transit_units": max_transit, "pool_units": pool,
+                          "statement": "Whatever the number of sybils, a region behind k attack edges receives at most k x edge_cap_units flow units, and at most max_transit_units through any one non-seed endorser."},
+        "scores": scores, "evidence": evidence, "penalties": penalties, "sponsorships": sponsorships, "dividends": dividends,
+    }
+
+
+def sponsor(p, snap, as_of, service, first_seen, reset, index, own_avg, root_of, pair_sum, flow_total, inflow):
+    """A vouch with sponsor:true within the invitee's first window_days (the
+    earliest wins, within the sponsor's daily slots) is a sponsorship. A new
+    high of the invitee's independent inflow (edges from endorsers outside both
+    roots and not endorsed by the sponsor) earns dividend_ppm of the rise,
+    within dividend_days and daily_cap."""
+    U, sp = p["unit_per_share"], p["sponsor"]
+    prev = {}
+    for r in snap.sponsorships:
+        prev[r.invitee] = r
+    vouches = sorted((r for r in snap.endorsements if r.kind == "vouch" and r.sponsor and r.value == 1 and r.created_at < as_of
+                      and r.voter != r.target and r.voter != "" and r.target != "" and r.voter not in service and r.target not in service),
+                     key=lambda r: r.seq)
+    used, chosen = {}, {}
+    for r in vouches:
+        fs = first_seen.get(r.target, 0)
+        if fs == 0 or r.created_at > fs + sp["window_days"] * DAY or root_of(r.voter) == root_of(r.target):
+            continue
+        if r.target in chosen:
+            continue
+        own = own_avg[index[r.voter]] if r.voter in index else 0
+        slots = 0 if r.voter in reset else (2 * sp["slots_per_share"] * min(U, own) + U) // (2 * U)
+        key = (r.voter, day_of(r.created_at))
+        if used.get(key, 0) >= slots:
+            continue
+        used[key] = used.get(key, 0) + 1
+        chosen[r.target] = r
+    ships, divs, paid = [], [], {}
+    for x in sorted(chosen):
+        r = chosen[x]
+        s = r.voter
+        old = prev.get(x)
+        hw = old.high_water if old is not None and old.sponsor_account == s else 0
+        indep = 0
+        for agent, flow in inflow(x):
+            if agent == s or root_of(agent) == root_of(s) or root_of(agent) == root_of(x) or pair_sum.get((s, agent), 0) > 0:
+                continue
+            indep += flow
+        indep = min(indep, flow_total.get(x, 0))
+        ends = r.created_at + sp["dividend_days"] * DAY
+        if as_of < ends and indep > hw:
+            units = min(gdiv(sp["dividend_ppm"] * (indep - hw), PPM), sp["daily_cap"] - paid.get(s, 0))
+            if units > 0:
+                paid[s] = paid.get(s, 0) + units
+                divs.append({"sponsor": s, "invitee": x, "units": units})
+        ships.append({"invitee": x, "sponsor": s, "record_seq": r.seq, "created_at": r.created_at, "ends_at": ends, "high_water": max(hw, indep)})
+    return ships, divs
+
+
+# ---------------------------------------------------------------------------
+# Ed25519 verification (RFC 8032 §5.1.7), cofactorless like Go's
+
+
+_P = 2**255 - 19
+_L = 2**252 + 27742317777372353535851937790883648493
+_D = -121665 * pow(121666, _P - 2, _P) % _P
+_SQRT_M1 = pow(2, (_P - 1) // 4, _P)
+
+
+def _add(a, b):
+    x1, y1, z1, t1 = a
+    x2, y2, z2, t2 = b
+    A = (y1 - x1) * (y2 - x2) % _P
+    B = (y1 + x1) * (y2 + x2) % _P
+    C = 2 * t1 * t2 * _D % _P
+    Dd = 2 * z1 * z2 % _P
+    E, F, G, H = B - A, Dd - C, Dd + C, B + A
+    return (E * F % _P, G * H % _P, F * G % _P, E * H % _P)
+
+
+def _mul(s, point):
+    q = (0, 1, 1, 0)
+    while s > 0:
+        if s & 1:
+            q = _add(q, point)
+        point = _add(point, point)
+        s >>= 1
+    return q
+
+
+def _decode_point(b: bytes):
+    if len(b) != 32:
+        return None
+    y = int.from_bytes(b, "little")
+    sign = y >> 255
+    y = (y & ((1 << 255) - 1)) % _P  # like Go, accept a non-canonical y
+    x2 = (y * y - 1) * pow(_D * y * y + 1, _P - 2, _P) % _P
+    x = pow(x2, (_P + 3) // 8, _P)
+    if (x * x - x2) % _P != 0:
+        x = x * _SQRT_M1 % _P
+    if (x * x - x2) % _P != 0:
+        return None
+    if x & 1 != sign:
+        if x == 0:
+            return None
+        x = _P - x
+    return (x, y, 1, x * y % _P)
+
+
+def _encode_point(pt) -> bytes:
+    x, y, z, _ = pt
+    zi = pow(z, _P - 2, _P)
+    x, y = x * zi % _P, y * zi % _P
+    return (y | ((x & 1) << 255)).to_bytes(32, "little")
+
+
+_BASE = _decode_point((4 * pow(5, _P - 2, _P) % _P).to_bytes(32, "little"))
+
+
+def ed25519_verify(public: bytes, message: bytes, signature: bytes) -> bool:
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    a = _decode_point(public)
+    if a is None:
+        return False
+    s = int.from_bytes(signature[32:], "little")
+    if s >= _L:
+        return False
+    k = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(), "little") % _L
+    neg_a = ((_P - a[0]) % _P, a[1], a[2], (_P - a[3]) % _P)
+    r = _add(_mul(s, _BASE), _mul(k, neg_a))
+    return _encode_point(r) == signature[:32]
+
+
+def b64url(text: str) -> bytes:
+    """Unpadded base64url, canonical only."""
+    raw = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    if base64.urlsafe_b64encode(raw).rstrip(b"=").decode() != text:
+        raise ValueError("not canonical unpadded base64url")
+    return raw
+
+
+# ---------------------------------------------------------------------------
+# Endorsement export
+
+
+EXPORT_FIELDS = {"type", "seq", "message_id", "target", "voter", "public_key", "value", "sponsor", "created_at",
+                 "signed_payload", "signature"}
+
+
+def verify_record(record: dict, service: str) -> str | None:
+    """None if a signed record verifies; otherwise why not. Unsigned and
+    legacy records return "unsigned" (weight 0, nothing to verify)."""
+    if set(record) - EXPORT_FIELDS:
+        return "unknown fields"
+    if record.get("signature") is None or record.get("type") == "legacy_vote":
+        return "unsigned"
+    try:
+        key, sig = b64url(record["public_key"]), b64url(record["signature"])
+    except (ValueError, KeyError, TypeError):
+        return "public_key or signature is not base64url"
+    payload = record.get("signed_payload", "")
+    if not ed25519_verify(key, payload.encode(), sig):
+        return "signature does not verify"
+    try:
+        envelope = json.loads(payload)
+        command = envelope["command"]
+    except (ValueError, KeyError, TypeError):
+        return "signed_payload is not a command envelope"
+    if envelope.get("service") != service:
+        return "signed for another service"
+    if command.get("public_key") != record["public_key"]:
+        return "signed public_key differs"
+    if command.get("operation") != record["type"]:
+        return "signed operation differs"
+    try:
+        data = json.loads(command.get("data", ""))
+    except ValueError:
+        return "signed data is not JSON"
+    if not isinstance(data, dict):
+        return "signed data is not an object"
+    if record["type"] == "vote":
+        if command.get("message_id") != record.get("message_id") or data.get("value") != record["value"] or isinstance(data.get("value"), bool):
+            return "signed vote differs"
+    elif record["type"] == "vouch":
+        if set(data) - {"schema", "value", "sponsor"} or data.get("schema") != 1 or data.get("value") not in (0, 1) \
+                or isinstance(data.get("value"), bool) or data.get("value") != record["value"] \
+                or bool(data.get("sponsor", False)) != bool(record.get("sponsor")):
+            return "signed vouch differs"
+    else:
+        return "unknown record type"
+    return None
+
+
+def read_export(lines, service: str):
+    """Yields (record, problem) for each export line."""
+    for n, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            yield {"line": n}, "not JSON"
+            continue
+        if not isinstance(record, dict):
+            yield {"line": n}, "not an object"
+            continue
+        yield record, verify_record(record, service)
+
+
+def trust_input(record: dict) -> dict:
+    """An export record as a trust input line; zero fields omitted."""
+    kind = record["type"]
+    if kind == "vote" and record.get("signature") is None:
+        kind = "unsigned"
+    out = {"type": "endorsement", "seq": record.get("seq", 0), "kind": kind, "voter": record.get("voter", ""),
+           "target": record.get("target", ""), "message_id": record.get("message_id", ""), "value": record.get("value", 0),
+           "sponsor": bool(record.get("sponsor", False)), "created_at": record.get("created_at", 0)}
+    return {k: v for k, v in out.items() if k == "type" or v not in (0, "", False)}
+
+
+# ---------------------------------------------------------------------------
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    for name in ("verify", "endorsements"):
+        cmd = sub.add_parser(name)
+        cmd.add_argument("export")
+        cmd.add_argument("--service", default="swarmmemo.com")
+    cmd = sub.add_parser("run")
+    cmd.add_argument("snapshot")
+    args = parser.parse_args(argv)
+    if args.command == "run":
+        with open(args.snapshot, encoding="utf-8") as f:
+            snap = read_snapshot(f)
+        sys.stdout.write(canonical(compute(snap)))
+        return 0
+    counts = {"verified": 0, "unsigned": 0, "failed": 0}
+    out = []
+    with open(args.export, encoding="utf-8") as f:
+        for record, problem in read_export(f, args.service):
+            if problem is None:
+                counts["verified"] += 1
+            elif problem == "unsigned":
+                counts["unsigned"] += 1
+            else:
+                counts["failed"] += 1
+                print(f"seq {record.get('seq', record.get('line'))}: {problem}", file=sys.stderr)
+                continue
+            out.append(record)
+    if args.command == "endorsements":
+        if counts["failed"]:
+            return 1
+        for record in out:
+            print(canonical(trust_input(record)))
+        return 0
+    print(canonical(counts))
+    return 1 if counts["failed"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

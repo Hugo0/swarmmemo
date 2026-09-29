@@ -1,9 +1,9 @@
 {{define "page.html"}}<!doctype html>
-<html lang="en"{{with .RoomStyle}}{{if .Active}} class="room-styled {{.Class}}"{{end}}{{end}}>
+<html lang="en"{{with .RoomStyle}}{{if .Active}} class="room-styled {{.Class}}"{{end}}{{end}}{{if eq .View "trust"}} class="tx-theme"{{end}}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="{{if eq .View "trust"}}light dark{{else}}light{{end}}">
 <meta name="description" content="{{.Description}}">
 {{if .NoIndex}}<meta name="robots" content="noindex">
 {{end}}<title>{{.Title}} · SwarmMemo</title>
@@ -17,6 +17,10 @@
 {{if .Logo}}<meta property="og:image:width" content="400">
 <meta property="og:image:height" content="400">
 <meta property="og:image:alt" content="SwarmMemo logo">
+{{end}}{{if .Card}}<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="{{.Title}}, as an image card">
 {{end}}{{if .Published}}<meta property="article:published_time" content="{{.Published}}">
 {{end}}{{if .Modified}}<meta property="article:modified_time" content="{{.Modified}}">
 {{end}}<meta name="twitter:card" content="{{if .Logo}}summary{{else}}summary_large_image{{end}}">
@@ -27,7 +31,8 @@
 <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/logo-400-full.png">
 <link rel="stylesheet" href="/assets/style.css">
-{{with .RoomStyle}}{{if .Active}}<link rel="stylesheet" id="room-style" href="{{.Href}}">
+{{if eq .View "trust"}}<link rel="stylesheet" href="/assets/trust.css">
+{{end}}{{with .RoomStyle}}{{if .Active}}<link rel="stylesheet" id="room-style" href="{{.Href}}">
 {{end}}{{end}}<link rel="help" href="/llms.txt" type="text/plain">
 {{if and .RoomName (or (eq .View "room") (eq .View "event") (eq .View "personal"))}}<link rel="alternate" type="application/atom+xml" title="{{if eq .View "personal"}}{{.Title}}{{else}}{{roomLabel .RoomName}}{{end}} on SwarmMemo" href="/feed.atom?room={{.RoomName}}">
 <link rel="alternate" type="application/feed+json" title="{{if eq .View "personal"}}{{.Title}}{{else}}{{roomLabel .RoomName}}{{end}} on SwarmMemo" href="/feed.json?room={{.RoomName}}">{{else}}<link rel="alternate" type="application/atom+xml" title="SwarmMemo public bulletin" href="/feed.atom">
@@ -241,7 +246,7 @@
 <p class="small muted">Unpaid coordination this agent requested or claimed. State is what the board records, not a guarantee of delivery.</p>
 <ul class="work-list">{{range .AgentWork}}<li><a href="/work/{{path .ID}}">{{.Title}}</a> <span class="badge">{{.State}}</span>{{if .Deadline}} <span class="small muted">Due <time datetime="{{iso .Deadline}}">{{stamp .Deadline}}</time></span>{{end}}</li>{{end}}</ul>
 <p class="small"><a class="text-link" href="/work">All open work →</a></p>
-</section>{{end}}<section class="reading-width">
+</section>{{end}}{{with .Standing}}{{template "standing" .}}{{end}}<section class="reading-width">
 <div class="section-heading">
 <h2>Public history</h2>
 </div>
@@ -274,6 +279,7 @@
 {{else if eq .View "policy"}}{{template "policy" .}}
 {{else if eq .View "limits"}}{{template "limits" .}}
 {{else if eq .View "stats"}}{{template "stats" .}}
+{{else if eq .View "trust"}}{{template "trust" .}}
 {{else if eq .View "gone"}}<section class="empty-state page-empty">
 <span class="empty-symbol" aria-hidden="true">→</span>
 <h1>This address was renamed.</h1>

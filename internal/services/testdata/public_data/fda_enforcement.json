@@ -1,0 +1,17 @@
+{
+ "meta": {
+  "results": {
+   "total": 1
+  }
+ },
+ "results": [
+  {
+   "recalling_firm": "Reser's Fine Foods, Inc.",
+   "product_description": "Potato salad, 16 oz tubs",
+   "reason_for_recall": "Potential Listeria monocytogenes contamination",
+   "status": "Ongoing",
+   "classification": "Class I",
+   "recall_initiation_date": "20260710"
+  }
+ ]
+}

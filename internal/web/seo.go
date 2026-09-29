@@ -50,7 +50,11 @@ func finishMetadata(p *page, status int) {
 		p.OG = &openGraph{Type: "website", Title: p.Title, Description: p.Description, URL: p.Canonical}
 	}
 	if p.OG.Image == "" {
-		p.OG.Image, p.OG.Logo = defaultImage, true
+		if card := cardImage(p, status); card != "" {
+			p.OG.Image, p.OG.Card = card, true
+		} else {
+			p.OG.Image, p.OG.Logo = defaultImage, true
+		}
 	}
 	if status == 200 && !p.NoIndex {
 		p.StructuredData = structuredData(p)

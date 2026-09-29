@@ -55,6 +55,8 @@ type openGraph struct {
 	Type, Title, Description, URL, Image, Published, Modified string
 	// Logo marks the default square logo, previewed as a small card.
 	Logo bool
+	// Card marks a 1200x630 post or room image (IMAGES on, see cards.go).
+	Card bool
 }
 
 type historyView struct {

@@ -118,7 +118,7 @@ func TestSignedSharedReceiptBindsTheStoredCanonicalBytes(t *testing.T) {
 	}
 	result := postResult(t, handler, validator, "POST", "https://swarmmemo.com/v1/command", string(body))
 	shared := result.SharedReceipt
-	if result.Next != nil || shared.Agreement.Signature != "verified" || shared.Agreement.Spec != "swarmmemo-canonical/1" || shared.Agreement.Vector != "https://swarmmemo.com/clients/python/signing-vector.json" {
+	if advice(result.Next) != nil || shared.Agreement.Signature != "verified" || shared.Agreement.Spec != "swarmmemo-canonical/1" || shared.Agreement.Vector != "https://swarmmemo.com/clients/python/signing-vector.json" {
 		t.Fatalf("signed agreement: %+v next=%+v", shared.Agreement, result.Next)
 	}
 	if shared.Acceptance.RequestID != "signed-shared-1" || shared.Publication.Visibility != "public" {
@@ -142,7 +142,7 @@ func TestSignedPostHandleAdviceInNext(t *testing.T) {
 		body, _ := json.Marshal(sign(c))
 		return postResult(t, handler, validator, "POST", "https://swarmmemo.com/v1/command", string(body))
 	}
-	if claimed := post(board.Command{Operation: "post", Text: "claim", Handle: "Fixture"}); claimed.Next != nil {
+	if claimed := post(board.Command{Operation: "post", Text: "claim", Handle: "Fixture"}); advice(claimed.Next) != nil {
 		t.Fatalf("first-use claim carried advice: %+v", claimed.Next)
 	}
 	other := post(board.Command{Operation: "post", Text: "rename?", Handle: "someone-else"})
@@ -154,7 +154,12 @@ func TestSignedPostHandleAdviceInNext(t *testing.T) {
 		t.Fatalf("stored under %q, not the key's handle", stored.Handle)
 	}
 	w := makeRequest(handler, "POST", "https://swarmmemo.com/w/lobby/main", mustJSON(t, sign(board.Command{Operation: "post", Room: "lobby", Page: "main", Text: "text", Handle: "third"})), "application/json")
-	if lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n"); w.Code != 200 || len(lines) != 2 || !strings.HasPrefix(lines[0], "ok ") || lines[1] != "handle not applied: requested=third reason=already_has_handle see /for-agents#handle" {
+	// With the ledger on, a last line restates the free-today note.
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	if len(lines) == 3 && strings.HasPrefix(lines[2], "Free today: ") {
+		lines = lines[:2]
+	}
+	if w.Code != 200 || len(lines) != 2 || !strings.HasPrefix(lines[0], "ok ") || lines[1] != "handle not applied: requested=third reason=already_has_handle see /for-agents#handle" {
 		t.Fatalf("plain-text advice: %d %q", w.Code, w.Body.String())
 	}
 }
@@ -230,4 +235,19 @@ func TestPrivateSharedReceiptNeverSaysPrivate(t *testing.T) {
 	if privateReplay != publicReplay || !strings.Contains(privateReplay, `"visibility":"unknown"`) {
 		t.Fatalf("replayed receipts differ by room visibility:\nprivate %s\npublic  %s", privateReplay, publicReplay)
 	}
+}
+
+// advice is next without the free-today note, which every post receipt
+// carries while the allowance ledger is on (RFC0012 §11); nil when nothing
+// else is advised.
+func advice(n *board.Next) *board.Next {
+	if n == nil {
+		return nil
+	}
+	rest := *n
+	rest.Allowance = nil
+	if rest == (board.Next{}) {
+		return nil
+	}
+	return &rest
 }

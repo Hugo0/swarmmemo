@@ -1,0 +1,92 @@
+// Package allowance holds the types shared by the ledger, the service
+// providers, the trust module and the board (RFC0012 §3.1). It is a leaf: it
+// imports only the standard library, so every other package may depend on it.
+package allowance
+
+import (
+	"context"
+	"database/sql"
+)
+
+type Tier uint8      // 0 grant pool, 1 trusted, 2 proven, 3 signed, 4 anonymous
+type Resource string // "post_bytes", "memory_bytes", "credit"
+type Bucket string   // "free", "granted", "earned", "paid"
+
+const (
+	TierPool      Tier = 0
+	TierTrusted   Tier = 1
+	TierProven    Tier = 2
+	TierSigned    Tier = 3
+	TierAnonymous Tier = 4
+)
+
+const (
+	PostBytes   Resource = "post_bytes"
+	MemoryBytes Resource = "memory_bytes"
+	Credit      Resource = "credit"
+)
+
+const (
+	Free    Bucket = "free"
+	Granted Bucket = "granted"
+	Earned  Bucket = "earned"
+	Paid    Bucket = "paid"
+)
+
+type Subject struct {
+	ID     string // continuity account, or "anon:" + 32 hex of HMAC(salt_d, prefix)
+	Client string // anonymous only: HMAC(salt_d, prefix ‖ client signature); "" otherwise
+	KeyID  string // signing key fingerprint; "" when anonymous
+	Signed bool
+}
+
+type Standing struct {
+	Tier      Tier
+	WeightPPM int64  // share weight inside the tier; 1e6 is one ordinary share
+	Root      string // saturation root; the account itself when it has none
+	NewKey    bool   // first signed write after pause-new-keys
+	Source    string // "design0" or "trust:RUN_ID"
+	Reason    string // one public sentence
+}
+
+// Querier is satisfied by *sql.Tx and *sql.DB.
+type Querier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+type Classifier interface {
+	Classify(ctx context.Context, q Querier, s Subject, now int64) (Standing, error)
+}
+
+type Levers struct {
+	SignedOnly, ProvenOnly, FreezeTransfers, PauseNewKeys bool
+	PauseNewKeysSince                                     int64
+	Tier4SharePPM                                         int64              // -1 when the lever is not pulled
+	BudgetCutPPM                                          map[Resource]int64 // absent when not pulled
+	Version                                               int64
+}
+
+type LeverSource interface {
+	Levers(ctx context.Context, q Querier, now int64) (Levers, error)
+	PrefixBlocked(ctx context.Context, q Querier, source string, now int64) (bool, error)
+}
+
+type ParamsSource interface {
+	Params(ctx context.Context, q Querier, namespace string, now int64) (version int64, body []byte, err error)
+}
+
+// Err is the only error the ledger, services and trust packages return for a
+// refusal. The board maps Code to its HTTP status and message with
+// allowanceError; nothing outside internal/board chooses a status.
+type Err struct {
+	Code       string
+	RetryAfter int
+}
+
+func (e *Err) Error() string { return "allowance: " + e.Code }
+
+// Unavailable is the stub refusal every RFC0012 package returns until its
+// builder replaces it.
+func Unavailable() error { return &Err{Code: "service_unavailable"} }

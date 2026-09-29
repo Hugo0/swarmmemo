@@ -34,7 +34,7 @@ func TestEveryWireRecordsItsViaAndWriteViaHolds(t *testing.T) {
 		}
 		return strings.Join(last, "")
 	}
-	posted := func(out string) bool { return strings.HasPrefix(out, "ok ") || strings.Contains(out, "250 2.0.0 ok") }
+	posted := func(out string) bool { return strings.HasPrefix(out, "ok ") || strings.Contains(out, "2.0.0 ok") }
 
 	sends := []struct {
 		via, text string

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"swarmmemo/internal/allowance"
 )
 
 func (s *Store) dailyLimit(a actor) int64 {
@@ -24,6 +26,11 @@ func rateError(now int64, code, message string) error {
 	return &Error{Status: 429, Code: code, Message: message, RetryAfter: int(86400 - now%86400)}
 }
 
+// charge spends cost posting bytes for a in the command's transaction. The
+// delegation ceiling is checked first whatever the path; ALLOWANCE_LEDGER
+// (RFC0012 §3.3) then picks who decides: off, the legacy quota rows (with
+// ALLOWANCE_TIERS, Design 0's tiered caps); shadow, the legacy rows decide and
+// the ledger computes the same spend without effect; on, the ledger.
 func (s *Store) charge(ctx context.Context, tx *sql.Tx, a actor, cost, now int64) error {
 	if a.grant != nil {
 		var remaining int64
@@ -33,6 +40,29 @@ func (s *Store) charge(ctx context.Context, tx *sql.Tx, a actor, cost, now int64
 		if cost < 0 || cost > remaining {
 			return delegationError("delegation_quota_exhausted")
 		}
+	}
+	var err error
+	switch s.config.Features.Ledger {
+	case LedgerOn:
+		err = s.ledgerCharge(ctx, tx, a, cost, now)
+	case LedgerShadow:
+		err = s.legacyCharge(ctx, tx, a, cost, now)
+		if serr := s.ledgerShadow(ctx, tx, a, cost, now, err); serr != nil {
+			return serr
+		}
+	default:
+		err = s.legacyCharge(ctx, tx, a, cost, now)
+	}
+	if err == nil && a.grant != nil {
+		_, err = tx.ExecContext(ctx, "UPDATE delegations SET used_bytes=used_bytes+? WHERE child_id=?", cost, a.grant.ID)
+	}
+	return err
+}
+
+// legacyCharge is the per-actor and global quota rows.
+func (s *Store) legacyCharge(ctx context.Context, tx *sql.Tx, a actor, cost, now int64) error {
+	if s.config.Features.AllowanceTiers {
+		return s.tierCharge(ctx, tx, a, cost, now)
 	}
 	day := now / 86400
 	used, incoming, err := quotaRow(ctx, tx, a.account, day)
@@ -54,21 +84,43 @@ func (s *Store) charge(ctx context.Context, tx *sql.Tx, a actor, cost, now int64
 		return err
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO quota(actor,day,used) VALUES('global',?,?) ON CONFLICT(actor,day) DO UPDATE SET used=used+excluded.used", day, cost)
-	if err == nil && a.grant != nil {
-		_, err = tx.ExecContext(ctx, "UPDATE delegations SET used_bytes=used_bytes+? WHERE child_id=?", cost, a.grant.ID)
-	}
 	return err
 }
 
 func (s *Store) readQuota(ctx context.Context, tx *sql.Tx, a actor, now int64) (Result, error) {
+	if s.config.Features.Ledger == LedgerOn {
+		return s.quotaBalance(ctx, tx, a, now)
+	}
 	used, incoming, err := quotaRow(ctx, tx, a.account, now/86400)
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Data: map[string]any{"daily_bytes": s.dailyLimit(a), "used_bytes": used, "incoming_bytes": incoming, "remaining_bytes": s.dailyLimit(a) + incoming - used, "resets_at": (now/86400 + 1) * 86400, "unit": "byte", "post_overhead_bytes": 512}}, nil
+	limit, err := s.quotaLimit(ctx, tx, a, now) // RFC0012 §6.1: the tier's cap with ALLOWANCE_TIERS
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Data: map[string]any{"daily_bytes": limit, "used_bytes": used, "incoming_bytes": incoming, "remaining_bytes": limit + incoming - used, "resets_at": (now/86400 + 1) * 86400, "unit": "byte", "post_overhead_bytes": 512}}, nil
 }
 
+// transfer is credit.transfer. ALLOWANCE_LEDGER picks who decides, as in
+// charge: on, the ledger (allowance.transfer's post_bytes alias, with its
+// result fields kept); shadow, the legacy rows, with the ledger's transfer
+// compared; off, the legacy rows alone.
 func (s *Store) transfer(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
+	switch s.config.Features.Ledger {
+	case LedgerOn:
+		if err := requireSigned(a); err != nil {
+			return Result{}, err
+		}
+		return s.ledgerTransfer(ctx, tx, c, a, allowance.PostBytes, now)
+	case LedgerShadow:
+		return s.shadowedTransfer(ctx, tx, c, a, now)
+	}
+	return s.legacyTransfer(ctx, tx, c, a, now)
+}
+
+// legacyTransfer is credit.transfer on the legacy quota rows.
+func (s *Store) legacyTransfer(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	if err := requireSigned(a); err != nil {
 		return Result{}, err
 	}
@@ -92,7 +144,11 @@ func (s *Store) transfer(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if err != nil {
 		return Result{}, err
 	}
-	if c.Amount > s.dailyLimit(a)+incoming-used {
+	limit, err := s.quotaLimit(ctx, tx, a, now) // RFC0012 §6.1: the tier's cap with ALLOWANCE_TIERS
+	if err != nil {
+		return Result{}, err
+	}
+	if c.Amount > limit+incoming-used {
 		return Result{}, rateError(now, "quota_exhausted", "Insufficient remaining allowance for this transfer and its 256-byte transaction fee.")
 	}
 	_, targetIncoming, err := quotaRow(ctx, tx, target, day)

@@ -35,6 +35,12 @@ type statsView struct {
 	Via       []viaRow
 	Reads     *statChart
 	Table     []statsRow
+	// Allowance is the RFC0012 waterfall and trust section (allowance.go);
+	// nil while the ledger and trust are off.
+	Allowance *allowanceSection
+	// Moderation is the moderation section; nil (and not drawn) while
+	// MODERATION is off (stats_moderation.go).
+	Moderation *moderationView
 }
 
 type statTile struct{ Label, Value, Note string }
@@ -226,6 +232,8 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 		d := days[i]
 		v.Table = append(v.Table, statsRow{Day: d.Start.Format("2006-01-02"), Signed: count(d.Posts.Signed), Anonymous: count(d.Posts.Anonymous), Other: count(d.Posts.Simulation + d.Posts.Imported), TextBytes: count(d.Bytes.Total()), Agents: count(d.Agents), NewAgents: count(d.NewAgents), Replies: count(d.Replies), Rooms: count(d.Rooms), Reads: count(d.Reads + d.CrawlerReads)})
 	}
+	v.Allowance = buildAllowanceSection(ctx, service, a.Generated)
+	v.Moderation = buildModerationStats(ctx, service)
 	return v, nil
 }
 

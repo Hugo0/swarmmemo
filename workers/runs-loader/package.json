@@ -1,0 +1,10 @@
+{
+  "name": "swarmmemo-runs-loader",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/loader.test.mjs",
+    "check": "tsc -p tsconfig.json",
+    "deploy": "wrangler deploy"
+  }
+}

@@ -1,6 +1,10 @@
 package board
 
-import "context"
+import (
+	"context"
+
+	"swarmmemo/internal/services"
+)
 
 // Command is the versioned, transport-independent request. Signing uses Canonical.
 // All payload fields participate in signing; Signature and possession Proof do not.
@@ -87,8 +91,11 @@ type Message struct {
 	Forwarded *Forwarded `json:"forwarded,omitempty"`
 	// Votes are the post's public vote totals (votes.go). Set on reads of public
 	// rooms (messages.list, message.get, thread.get); never in exports or receipts.
-	Votes  *VoteCounts `json:"votes,omitempty"`
-	origin string
+	Votes *VoteCounts `json:"votes,omitempty"`
+	// ImageURL is the post's card image (/e/ID.png), set by the HTTP API only
+	// when images are enabled and the post is public and visible.
+	ImageURL string `json:"image_url,omitempty"`
+	origin   string
 }
 
 // Origin is the first version's ID: the message itself unless it supersedes one.
@@ -130,6 +137,8 @@ type Room struct {
 	Handles    map[string]string `json:"handles,omitempty"`
 	// Style is the room's CSS source as its owner set it (room.get only).
 	Style *RoomStyleInfo `json:"style,omitempty"`
+	// ImageURL is the room's card image (/r/ROOM.png), set like Message.ImageURL.
+	ImageURL string `json:"image_url,omitempty"`
 }
 type Agent struct {
 	ID        string `json:"id"`
@@ -191,6 +200,10 @@ type Result struct {
 	// docs/rfcs/0008-shared-receipts.md. Transports set it; the store never does,
 	// so a stored retry result gains it without being rewritten.
 	SharedReceipt *SharedReceipt `json:"shared_receipt,omitempty"`
+	// Allowance is the RFC0012 "free today" note (AllowanceNote), set after the
+	// receipt is stored, so it is never persisted in requests and an exact retry
+	// does not repeat it. Transports restate it as next.allowance.
+	Allowance *AllowanceNote `json:"-"`
 	// afterCommit, when set, computes the result once the transaction has
 	// ended, for CPU-heavy work that must not hold the store's only database
 	// connection (room.style.check).
@@ -242,6 +255,22 @@ type Next struct {
 	How              string `json:"how,omitempty"`
 	// HandleNotApplied says why a signed post's requested handle was not used.
 	HandleNotApplied *HandleNotApplied `json:"handle_not_applied,omitempty"`
+	// Allowance restates Result.Allowance (RFC0012 §11). Transports set it.
+	Allowance *AllowanceNote `json:"allowance,omitempty"`
+}
+
+// AllowanceNote is what a caller got today and how to get more (RFC0012 §11):
+// Line is the one sentence text wires print after the ok line.
+type AllowanceNote struct {
+	Line        string `json:"line"`
+	Resource    string `json:"resource"`
+	Tier        int    `json:"tier"`
+	Entitlement int64  `json:"entitlement"`
+	Remaining   int64  `json:"remaining"`
+	ResetsAt    int64  `json:"resets_at"`
+	More        string `json:"more,omitempty"`
+	// Services is the service catalogue's URL while any service is enabled.
+	Services string `json:"services,omitempty"`
 }
 
 // HandleNotApplied: Reason is "taken" or "already_has_handle"; How is a URL.
@@ -269,6 +298,20 @@ type Config struct {
 	// ReservedDomains are this service's own DNS names; neither they nor any
 	// name under them can be linked as an agent's domain.
 	ReservedDomains []string
+	// Features are the RFC0012 flags (features.go); the zero value is all off.
+	Features Features
+	// X402 is the x402 relay's loaded configuration (services.LoadX402Config);
+	// nil leaves x402 unconfigured even when SERVICES names it.
+	X402 *services.X402Config
+	// Moderation configures the engine when Features.Moderation is on.
+	Moderation ModerationConfig
+	// NotaryKeyFile is the notary key file (NOTARY_KEY_FILE), which signs
+	// notary and run receipts; read, or created at 0600, when SERVICES names
+	// notary or runs. Empty means notary.key beside the database.
+	NotaryKeyFile string
+	// EchoSimulate lets echo's args.simulate stand in for an upstream. Tests
+	// only; no environment variable sets it.
+	EchoSimulate bool
 }
 
 // Service is shared by HTML, HTTP compatibility adapters and future tool adapters.

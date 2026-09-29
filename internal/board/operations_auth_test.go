@@ -174,7 +174,10 @@ func matrixOutcome(f *matrixFixture, c Command) string {
 // and from a scoped worker key, measured with this same matrix. Operations
 // added since are listed with their intent.
 var v113Unsigned = "agent.get agents.list blob.get delegation.get export message.get messages.list post quota.get report room.get room.pages rooms.list stats thread.get updates.get work.get work.history works.list"
-var addedUnsigned = "room.modlog room.style.check" // public reads; check stores nothing
+
+// addedUnsigned are public reads added since 1.13.0 (room.style.check stores
+// nothing; allowance.get and ledger.list answer unsigned with the ledger on).
+var addedUnsigned = "room.modlog room.style.check allowance.get ledger.list"
 var v113Delegable = "post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit"
 
 // freeMutations succeed without spending allowance, as they did in 1.13.0: a

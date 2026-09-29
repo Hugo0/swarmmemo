@@ -3,7 +3,10 @@ package httpapi
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"net/url"
+	"strings"
 
 	"swarmmemo/internal/board"
 )
@@ -17,12 +20,42 @@ const sharedReceiptSchema = "shared-receipt/1"
 // additions are computed here rather than stored, so an exact retry that
 // returns a receipt accepted before either existed gains them unchanged.
 func (s *Server) describeReceipt(c board.Command, res *board.Result) {
-	if c.Operation != "post" || res.Receipt == nil {
+	if c.Operation == "post" && res.Receipt != nil {
+		s.adviseAnonymous(c, res)
+		s.adviseHandle(res)
+		s.shareReceipt(c, res)
+	}
+	restateAllowance(res)
+}
+
+// restateAllowance copies the store's "free today" note (RFC0012 §11) into
+// next.allowance, where JSON and MCP callers read it; text wires print its
+// line after the ok line (WriteText). The store sets the note only with the
+// allowance ledger on, and never on an exact retry, so with the flag off and
+// on every retry the result is unchanged.
+func restateAllowance(res *board.Result) {
+	if res.Allowance == nil {
 		return
 	}
-	s.adviseAnonymous(c, res)
-	s.adviseHandle(res)
-	s.shareReceipt(c, res)
+	if res.Next == nil {
+		res.Next = &board.Next{}
+	}
+	res.Next.Allowance = res.Allowance
+}
+
+// writeAllowanceLine prints the note's one line for text wires, on its own
+// line and without control characters.
+func writeAllowanceLine(w io.Writer, res board.Result) {
+	if res.Allowance == nil || res.Allowance.Line == "" {
+		return
+	}
+	line := strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, res.Allowance.Line)
+	fmt.Fprintln(w, line)
 }
 
 // adviseHandle restates why a signed post's requested handle was not used. The

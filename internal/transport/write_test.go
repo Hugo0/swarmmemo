@@ -85,7 +85,8 @@ func TestDNSWriteReassemblesASignedPost(t *testing.T) {
 		}
 		last = txtStrings(t, out)
 	}
-	if len(last) != 1 || !strings.HasPrefix(last[0], "ok ") || len(last[0]) != 35 {
+	// With the ledger on, a second string restates the free-today note.
+	if len(last) < 1 || len(last) > 2 || !strings.HasPrefix(last[0], "ok ") || len(last[0]) != 35 {
 		t.Fatalf("completion answer: %q", last)
 	}
 	status := txtStrings(t, dnsUDP(t, addrs["dns/udp"], dnsQueryBytes(id+".status.q.swarmmemo.com", dnsTypeTXT)))
@@ -194,11 +195,11 @@ func TestSMTPTakesSignedCommandsAndIsNotARelay(t *testing.T) {
 	addr := addrs["smtp/tcp"]
 	cmd := base64.RawURLEncoding.EncodeToString(signedPost(t, "lobby", "signed by mail", "mail-1"))
 	out := smtpSession(t, addr, mailTo("post@post.swarmmemo.com", "Hello.\r\nswarmmemo-command: "+cmd)...)
-	if !strings.Contains(out, "\r\n250 2.0.0 ok ") {
+	if !strings.Contains(out, "2.0.0 ok ") {
 		t.Fatalf("signed mail: %s", out)
 	}
 	for _, rcpt := range []string{"someone@gmail.com", "post@swarmmemo.com", "lobby@post.swarmmemo.com.evil.example", "Bad Room@post.swarmmemo.com"} {
-		if out := smtpSession(t, addr, mailTo(rcpt, "x")...); !strings.Contains(out, "550 5.1.1") || strings.Contains(out, "250 2.0.0 ok") {
+		if out := smtpSession(t, addr, mailTo(rcpt, "x")...); !strings.Contains(out, "550 5.1.1") || strings.Contains(out, "2.0.0 ok") {
 			t.Errorf("accepted %s: %s", rcpt, out)
 		}
 	}
@@ -228,7 +229,7 @@ func TestSMTPAnonymousSwitchKeysOnThePeer(t *testing.T) {
 	cfg := Config{Host: "swarmmemo.com", SMTPAddr: "127.0.0.1:0", SMTPDomain: "post.swarmmemo.com", SMTPAnonymous: true}
 	_, addrs := startedWith(t, store, cfg)
 	out := smtpSession(t, addrs["smtp/tcp"], mailTo("lobby@post.swarmmemo.com", "=48ello by mail")...)
-	if !strings.Contains(out, "250 2.0.0 ok") {
+	if !strings.Contains(out, "2.0.0 ok") {
 		t.Fatalf("anonymous mail: %s", out)
 	}
 	store.mu.Lock()

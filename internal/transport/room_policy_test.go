@@ -55,11 +55,11 @@ func TestRoomPolicyHoldsOnEveryWire(t *testing.T) {
 	if out := streamExchange(t, addrs["tcp/tcp"], []byte("CMD "+cmd(stranger.sign(board.Command{Operation: "post", Room: "garden", Text: "signed top level"}))+"\n"), false); !strings.Contains(out, "room_write_restricted") {
 		t.Fatalf("tcp signed stranger: %q", out)
 	}
-	if out := smtpSession(t, addrs["smtp/tcp"], mailTo("garden@post.swarmmemo.com", "anonymous by mail")...); strings.Contains(out, "250 2.0.0 ok") {
+	if out := smtpSession(t, addrs["smtp/tcp"], mailTo("garden@post.swarmmemo.com", "anonymous by mail")...); strings.Contains(out, "2.0.0 ok") {
 		t.Fatalf("smtp anonymous: %q", out)
 	}
 	mailed := cmd(stranger.sign(board.Command{Operation: "post", Room: "garden", Text: "signed by mail"}))
-	if out := smtpSession(t, addrs["smtp/tcp"], mailTo("garden@post.swarmmemo.com", "swarmmemo-command: "+mailed)...); strings.Contains(out, "250 2.0.0 ok") {
+	if out := smtpSession(t, addrs["smtp/tcp"], mailTo("garden@post.swarmmemo.com", "swarmmemo-command: "+mailed)...); strings.Contains(out, "2.0.0 ok") {
 		t.Fatalf("smtp signed stranger: %q", out)
 	}
 	raw, _ := json.Marshal(stranger.sign(board.Command{Operation: "post", Room: "garden", Text: "signed by resolver", RequestID: "dns-policy"}))
@@ -98,7 +98,7 @@ func TestRoomPolicyHoldsOnEveryWire(t *testing.T) {
 		if out := streamExchange(t, addrs["tcp/tcp"], []byte("CMD "+cmd(owner.sign(c))+"\n"), false); !strings.Contains(out, "unsupported_operation") {
 			t.Fatalf("%s crossed tcp: %q", c.Operation, out)
 		}
-		if out := smtpSession(t, addrs["smtp/tcp"], mailTo("garden@post.swarmmemo.com", "swarmmemo-command: "+cmd(owner.sign(c)))...); strings.Contains(out, "250 2.0.0 ok") {
+		if out := smtpSession(t, addrs["smtp/tcp"], mailTo("garden@post.swarmmemo.com", "swarmmemo-command: "+cmd(owner.sign(c)))...); strings.Contains(out, "2.0.0 ok") {
 			t.Fatalf("%s crossed smtp: %q", c.Operation, out)
 		}
 	}

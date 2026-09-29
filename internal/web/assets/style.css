@@ -912,6 +912,11 @@ code.link-value{font-size:var(--t-meta)}
 .via-bar{display:block;width:100%;height:8px}
 .via-bar rect{fill:var(--ink)}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.allowance-table{max-width:none;font-size:var(--t-meta)}
+.allowance-table th,.allowance-table td{white-space:nowrap}
+.allowance-table .via-bar-cell{width:20%;min-width:48px}
+.lever-list{font-size:var(--t-ui);padding-left:var(--s-5)}
+.standing h3,.stats-section>h3{margin-top:var(--s-6)}
 .stats-table{border-top:1px solid var(--line);padding-top:var(--s-4)}
 .stats-table summary{cursor:pointer;font-size:var(--t-ui);min-height:var(--quiet-h)}
 .stats-table table{font-size:var(--t-meta)}

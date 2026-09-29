@@ -57,6 +57,7 @@ SAFE_CODES.update({"invalid_private_read_context", "invalid_private_read_data", 
                    "private_read_exists", "private_read_limit", "private_read_generation_mismatch",
                    "private_read_epoch_mismatch", "private_read_already_revoked", "private_read_rate_limited",
                    "private_read_response_limit", "invalid_limit"})
+SAFE_CODES.update({"signed_only", "prefix_blocked", "tier_required", "handle_reserved", "service_unavailable"})
 DELEGATION_LOCAL_CODES = {"invalid_delegation_context", "delegation_required", "delegation_context_mismatch", "delegation_key_mismatch",
                           "delegation_client_binding_mismatch", "delegation_forbidden", "delegation_scope_mismatch",
                           "delegation_public_post_required", "delegation_generation_mismatch", "delegation_signed_envelope_required"}

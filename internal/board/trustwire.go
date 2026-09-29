@@ -1,0 +1,855 @@
+package board
+
+// Trust module wiring (RFC0012 §4), owned by builder D: the paged input
+// reader, the nightly runner, trust.get, the public run and evidence reads,
+// the distribution for /stats and classifier v1. With TRUST off (the zero
+// Features) nothing here runs and trust.get answers 503 as before.
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"io"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"swarmmemo/internal/allowance"
+	"swarmmemo/internal/trust"
+)
+
+// trustState is the trust runner the Store carries (Store.trust).
+type trustState struct {
+	mu     sync.Mutex // one run at a time in this process
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	// endorsements reads the endorsement records (E's EndorsementPage);
+	// replaced only by in-package tests.
+	endorsements func(ctx context.Context, after int64, limit int) ([]EndorsementRecord, int64, error)
+	// computed is called between computation and writes; tests only.
+	computed func()
+	// pages counts input pages read, for tests and the run log.
+	pages atomic.Int64
+	// Effective tier counts for /stats, cached per run (effectiveTierCounts).
+	tierMu     sync.Mutex
+	tierRun    int64
+	tierAt     int64
+	tierCounts map[string]int64
+}
+
+// TrustRunAfter is how long after 00:00 UTC the nightly run starts.
+const TrustRunAfter = 30 * time.Minute
+
+func (s *Store) openTrust() error { return nil }
+
+// startTrust starts the nightly run while TRUST is shadow or allocation.
+func (s *Store) startTrust(ctx context.Context) {
+	if s.config.Features.Trust == TrustOff {
+		return
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	s.trust.cancel = cancel
+	s.trust.wg.Add(1)
+	go func() {
+		defer s.trust.wg.Done()
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			s.trustNightly(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+func (s *Store) stopTrust() {
+	if s.trust.cancel != nil {
+		s.trust.cancel()
+	}
+	s.trust.wg.Wait()
+}
+
+// trustNightly runs today's run once it is due and none was recorded for
+// today's as-of time.
+func (s *Store) trustNightly(ctx context.Context) {
+	now := s.now().UTC()
+	asOf := now.Truncate(24 * time.Hour)
+	if now.Sub(asOf) < TrustRunAfter {
+		return
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM trust_runs WHERE as_of=? AND state<>'running'", asOf.Unix()).Scan(&n); err != nil || n > 0 {
+		return
+	}
+	_, _ = s.RunTrust(ctx)
+}
+
+// trustDB gives the trust module short transactions on the one connection.
+type trustDB struct{ s *Store }
+
+func (d trustDB) Read(ctx context.Context, fn func(allowance.Querier) error) error {
+	tx, err := d.s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return fn(tx)
+}
+
+func (d trustDB) Write(ctx context.Context, fn func(allowance.Querier) error) error {
+	tx, err := d.s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// trustParams reads the current trust parameter version from the params
+// table (§2.7) and falls back to the compiled-in version 1 when there is
+// none. A stored body that does not parse stops the run.
+func trustParams(ctx context.Context, q allowance.Querier, now int64) (trust.Params, error) {
+	if ok, err := tableExists(ctx, q, "params"); err != nil || !ok {
+		return trust.DefaultParams(), err
+	}
+	var version int64
+	var body string
+	err := q.QueryRowContext(ctx, "SELECT version,body FROM params WHERE namespace=? AND effective_at<=? ORDER BY version DESC LIMIT 1", trust.ParamsNamespace, now).Scan(&version, &body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return trust.DefaultParams(), nil
+	}
+	if err != nil {
+		return trust.Params{}, err
+	}
+	return trust.ParseParams(version, []byte(body))
+}
+
+func tableExists(ctx context.Context, q allowance.Querier, name string) (bool, error) {
+	var n int
+	err := q.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", name).Scan(&n)
+	return n > 0, err
+}
+
+// RunTrust computes and records one run as of today's 00:00 UTC.
+func (s *Store) RunTrust(ctx context.Context) (trust.RunSummary, error) {
+	if s.config.Features.Trust == TrustOff {
+		return trust.RunSummary{}, allowanceError("service_unavailable")
+	}
+	s.trust.mu.Lock()
+	defer s.trust.mu.Unlock()
+	now := s.now().Unix()
+	asOf := now - now%86400
+	db := trustDB{s}
+	var p trust.Params
+	if err := db.Read(ctx, func(q allowance.Querier) (err error) { p, err = trustParams(ctx, q, now); return err }); err != nil {
+		return trust.RunSummary{}, err
+	}
+	sum, err := trust.Run(ctx, db, trustInputs{s}, p, asOf, now, s.trust.computed)
+	if err != nil || sum.State != "done" {
+		return sum, err
+	}
+	// TODO(RFC0012 §4.5, TRUST_LIABILITY): forfeit the penalised fraction of
+	// each penalised endorser's granted and earned balances. The ledger API
+	// (§12.0.1) has no forfeit operation yet, so penalties act on allocation
+	// weight only and TRUST_LIABILITY has no ledger effect until one exists.
+	return sum, s.payTrustDividends(ctx, sum.ID, p, now)
+}
+
+// payTrustDividends mints a run's sponsor dividends as earned units from the
+// day's tier-0 pool (§4.5) with TRUST_DIVIDENDS on, TRUST=allocation and the
+// ledger on (shadow has no ledger effect, §4.6). Each dividend is its own
+// short transaction; one the pool cannot fund stays unpaid, and so does the
+// rest of the run's, until a later run tries again. One a sponsor refuses
+// for its own reasons stays unpaid alone; the others are still paid.
+func (s *Store) payTrustDividends(ctx context.Context, run int64, p trust.Params, now int64) error {
+	f := s.config.Features
+	if !f.TrustDividends || f.Trust != TrustAllocation || f.Ledger != LedgerOn {
+		return nil
+	}
+	type dividend struct {
+		sponsor, invitee string
+		run, units       int64
+	}
+	var due []dividend
+	if err := (trustDB{s}).Read(ctx, func(q allowance.Querier) error {
+		rows, err := q.QueryContext(ctx, "SELECT run_id,sponsor,invitee,units FROM trust_dividends WHERE paid=0 AND units>0 AND run_id<=? ORDER BY run_id,sponsor,invitee LIMIT 500", run)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var d dividend
+			if err = rows.Scan(&d.run, &d.sponsor, &d.invitee, &d.units); err != nil {
+				return err
+			}
+			due = append(due, d)
+		}
+		return rows.Err()
+	}); err != nil {
+		return err
+	}
+	for _, d := range due {
+		err := (trustDB{s}).Write(ctx, func(q allowance.Querier) error {
+			reason := "sponsor dividend for " + d.invitee + ", trust run " + strconv.FormatInt(d.run, 10)
+			if err := s.ledger.led.Mint(ctx, q, d.sponsor, allowance.Resource(p.Sponsor.Resource), allowance.Earned, d.units, reason, now); err != nil {
+				return err
+			}
+			_, err := q.ExecContext(ctx, "UPDATE trust_dividends SET paid=? WHERE run_id=? AND sponsor=? AND invitee=?", d.units, d.run, d.sponsor, d.invitee)
+			return err
+		})
+		var refusal *allowance.Err
+		if errors.As(err, &refusal) {
+			if refusal.Code == "global_quota_exhausted" {
+				return nil // the pool is dry today: the rest waits for a later run
+			}
+			// This sponsor cannot take it now (recipient_limit, say): it
+			// waits for a later run, and the next sponsors are still paid.
+			continue
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WriteTrustInputs writes the snapshot a run as of today's 00:00 UTC would
+// read, as JSONL: what a verifier needs to recompute it (§4.8).
+func (s *Store) WriteTrustInputs(ctx context.Context, w io.Writer) error {
+	now := s.now().Unix()
+	asOf := now - now%86400
+	db := trustDB{s}
+	var p trust.Params
+	if err := db.Read(ctx, func(q allowance.Querier) (err error) { p, err = trustParams(ctx, q, now); return err }); err != nil {
+		return err
+	}
+	snap := trust.Snapshot{Params: p, Meta: trust.Meta{Schema: 1, AsOf: asOf}}
+	if err := (trustInputs{s}).Read(ctx, asOf, p, snap.Add); err != nil {
+		return err
+	}
+	snap.Meta.AsOf = asOf
+	return snap.WriteJSONL(w)
+}
+
+// LiftTrustEvidence lifts evidence and its penalties with a public reason.
+func (s *Store) LiftTrustEvidence(ctx context.Context, id, reason string) error {
+	return trustDB{s}.Write(ctx, func(q allowance.Querier) error { return trust.Lift(ctx, q, id, reason, s.now().Unix()) })
+}
+
+// trustInputs is the paged input reader (trust.Inputs): every page is at most
+// trust.PageRows rows in its own short read transaction.
+type trustInputs struct{ s *Store }
+
+func (in trustInputs) page(ctx context.Context, fn func(q allowance.Querier) error) error {
+	in.s.trust.pages.Add(1)
+	return trustDB{in.s}.Read(ctx, fn)
+}
+
+// Read emits the meta record, then posts, endorsements, proofs, accounts,
+// breakers, transfers, claims, priors, penalties and sponsorships.
+func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit func(trust.Record) error) error {
+	s := in.s
+	const rows = trust.PageRows
+	windowStart := asOf - p.WindowDays*86400
+	meta := trust.Record{Type: "meta", Schema: 1, AsOf: asOf}
+	accounts := map[string]bool{}
+	exists := map[string]bool{}
+	if err := in.page(ctx, func(q allowance.Querier) error {
+		for _, name := range []string{"account_breakers", "ledger_transfers", "allowance_claims", "ledger_entries"} {
+			ok, err := tableExists(ctx, q, name)
+			if err != nil {
+				return err
+			}
+			exists[name] = ok
+		}
+		if err := q.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT id FROM trust_runs WHERE state='done' ORDER BY id DESC LIMIT ?)", p.OwnAvgRuns).Scan(&meta.PriorRuns); err != nil {
+			return err
+		}
+		if err := q.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM events WHERE created_at<?", asOf).Scan(&meta.EventsSeq); err != nil {
+			return err
+		}
+		if exists["ledger_entries"] {
+			if err := q.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM ledger_entries WHERE created_at<?", asOf).Scan(&meta.LedgerSeq); err != nil {
+				return err
+			}
+		}
+		levers, err := s.leverSource().Levers(ctx, q, asOf)
+		if err == nil && levers.PauseNewKeys {
+			meta.PauseNewKeysSince = levers.PauseNewKeysSince
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Posts: signed, visible, native, non-edit posts in public rooms.
+	var after int64
+	if err := in.page(ctx, func(q allowance.Querier) error {
+		return q.QueryRowContext(ctx, "SELECT coalesce(min(seq),1)-1 FROM events WHERE created_at>=?", windowStart).Scan(&after)
+	}); err != nil {
+		return err
+	}
+	for {
+		var batch []trust.Record
+		if err := in.page(ctx, func(q allowance.Querier) error {
+			r, err := q.QueryContext(ctx, `SELECT e.seq,e.id,e.account,e.created_at,e.reply_to,coalesce(p.account,'') FROM events e JOIN rooms r ON r.name=e.room
+ LEFT JOIN events p ON p.id=e.reply_to AND p.hidden=0 AND p.public_key<>''
+ WHERE e.seq>? AND r.visibility='public' AND e.hidden=0 AND e.public_key<>'' AND e.kind NOT IN ('imported','simulation') AND e.supersedes=''
+ AND e.created_at>=? AND e.created_at<? ORDER BY e.seq LIMIT ?`, after, windowStart, asOf, rows)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			for r.Next() {
+				var rec trust.Record
+				if err = r.Scan(&after, &rec.ID, &rec.Account, &rec.CreatedAt, &rec.ReplyTo, &rec.ReplyToAccount); err != nil {
+					return err
+				}
+				rec.Type = "post"
+				batch = append(batch, rec)
+			}
+			return r.Err()
+		}); err != nil {
+			return err
+		}
+		for _, rec := range batch {
+			accounts[rec.Account] = true
+			if err := emit(rec); err != nil {
+				return err
+			}
+		}
+		if len(batch) < rows {
+			break
+		}
+	}
+
+	// Endorsement records, resolved to accounts, page by page.
+	read := s.trust.endorsements
+	if read == nil {
+		read = s.EndorsementPage
+	}
+	oldest := asOf - max(p.WindowDays, p.Sponsor.WindowDays+p.Sponsor.DividendDays)*86400
+	for after = 0; ; {
+		records, next, err := read(ctx, after, rows)
+		if err != nil {
+			var be *Error
+			if errors.As(err, &be) && be.Code == "service_unavailable" {
+				break // endorsement records are not built yet: no edges
+			}
+			return err
+		}
+		s.trust.pages.Add(1)
+		var batch []trust.Record
+		if err = in.page(ctx, func(q allowance.Querier) error {
+			for _, e := range records {
+				if e.CreatedAt >= asOf || e.CreatedAt < oldest {
+					continue
+				}
+				rec := trust.Record{Type: "endorsement", Seq: e.Seq, Kind: e.Type, Value: int64(e.Value), CreatedAt: e.CreatedAt}
+				if e.Type == "vote" && (e.Signature == nil || *e.Signature == "") {
+					rec.Kind = "unsigned"
+				}
+				if e.Sponsor != nil {
+					rec.Sponsor = *e.Sponsor
+				}
+				var err error
+				if rec.Voter, err = resolveAccount(ctx, q, e.Voter); err != nil {
+					return err
+				}
+				if e.MessageID != "" {
+					var root string
+					err = q.QueryRowContext(ctx, `SELECT o.id,o.account FROM events e JOIN events o ON o.id=coalesce(nullif(e.origin,''),e.id) WHERE e.id=?`, e.MessageID).Scan(&root, &rec.Target)
+					if errors.Is(err, sql.ErrNoRows) {
+						continue
+					}
+					if err != nil {
+						return err
+					}
+					rec.MessageID = root
+				} else if rec.Target, err = resolveAccount(ctx, q, e.Target); err != nil {
+					return err
+				}
+				if rec.Voter == "" || rec.Target == "" {
+					continue
+				}
+				if rec.Seq > meta.EndorsementsSeq {
+					meta.EndorsementsSeq = rec.Seq
+				}
+				batch = append(batch, rec)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, rec := range batch {
+			accounts[rec.Voter], accounts[rec.Target] = true, true
+			if err = emit(rec); err != nil {
+				return err
+			}
+		}
+		if len(records) == 0 || next <= after {
+			break
+		}
+		after = next
+	}
+
+	// Proofs: the links of each public account's current key. An account that
+	// agent.get and trust.get treat as not found (private rooms only) is left
+	// out, so the published snapshot never names it (security review 1.20,
+	// M11). A linked ed25519 key's account is named only when it is public too.
+	for after = 0; ; {
+		var batch []trust.Record
+		scanned := 0
+		if err := in.page(ctx, func(q allowance.Querier) error {
+			r, err := q.QueryContext(ctx, `SELECT l.rowid,i.account,l.kind,l.value,l.state,l.created_at,l.checked_at,
+ coalesce((SELECT o.account FROM identities o WHERE l.kind='ed25519' AND o.public_key=l.value AND `+publicAccountSQL("o.account")+`),''),
+ `+publicAccountSQL("i.account")+`
+ FROM identity_links l JOIN identities i ON i.id=l.agent WHERE l.rowid>? AND i.successor='' ORDER BY l.rowid LIMIT ?`, after, rows)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			for r.Next() {
+				rec := trust.Record{Type: "proof"}
+				var public bool
+				if err = r.Scan(&after, &rec.Account, &rec.Kind, &rec.LinkValue, &rec.State, &rec.CreatedAt, &rec.CheckedAt, &rec.LinkAccount, &public); err != nil {
+					return err
+				}
+				scanned++
+				if public && rec.CreatedAt < asOf {
+					if rec.CheckedAt >= asOf {
+						rec.CheckedAt = 0 // checked after the as-of time: not yet known then
+					}
+					batch = append(batch, rec)
+				}
+			}
+			return r.Err()
+		}); err != nil {
+			return err
+		}
+		for _, rec := range batch {
+			accounts[rec.Account] = true
+			if err := emit(rec); err != nil {
+				return err
+			}
+		}
+		if scanned < rows {
+			break
+		}
+	}
+
+	// Accounts: first public appearance, 500 per page.
+	list := make([]string, 0, len(accounts))
+	for a := range accounts {
+		list = append(list, a)
+	}
+	for start := 0; start < len(list); start += 500 {
+		chunk := list[start:min(start+500, len(list))]
+		var batch []trust.Record
+		if err := in.page(ctx, func(q allowance.Querier) error {
+			for _, a := range chunk {
+				var first int64
+				if err := q.QueryRowContext(ctx, `SELECT coalesce(min(t),0) FROM (SELECT min(e.created_at) AS t FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=? AND r.visibility='public' AND e.hidden=0
+ UNION ALL SELECT min(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=? AND au.operation IN ('agent.register','agent.profile.publish'))`, a, a).Scan(&first); err != nil {
+					return err
+				}
+				if first > 0 && first < asOf {
+					batch = append(batch, trust.Record{Type: "account", Account: a, FirstSeen: first})
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, rec := range batch {
+			if err := emit(rec); err != nil {
+				return err
+			}
+		}
+	}
+
+	day := asOf / 86400
+	funnelFrom := asOf - p.Detectors.FunnelDays*86400
+	// paged reads query with (cursor, args..., rows) until a short page.
+	paged := func(query string, args []any, scan func(r *sql.Rows) (trust.Record, int64, error)) error {
+		var cursor int64
+		for {
+			var batch []trust.Record
+			if err := in.page(ctx, func(q allowance.Querier) error {
+				bound := make([]any, 0, len(args)+2)
+				bound = append(append(append(bound, cursor), args...), rows)
+				r, err := q.QueryContext(ctx, query, bound...)
+				if err != nil {
+					return err
+				}
+				defer r.Close()
+				for r.Next() {
+					rec, next, err := scan(r)
+					if err != nil {
+						return err
+					}
+					cursor = next
+					batch = append(batch, rec)
+				}
+				return r.Err()
+			}); err != nil {
+				return err
+			}
+			for _, rec := range batch {
+				if err := emit(rec); err != nil {
+					return err
+				}
+			}
+			if len(batch) < rows {
+				return nil
+			}
+		}
+	}
+	if exists["account_breakers"] {
+		if err := paged("SELECT seq,account,started_at,trust_until FROM account_breakers WHERE seq>? AND trust_until>? AND started_at<? ORDER BY seq LIMIT ?", []any{asOf, asOf},
+			func(r *sql.Rows) (trust.Record, int64, error) {
+				rec := trust.Record{Type: "breaker"}
+				var seq int64
+				err := r.Scan(&seq, &rec.Account, &rec.StartedAt, &rec.TrustUntil)
+				return rec, seq, err
+			}); err != nil {
+			return err
+		}
+	}
+	if exists["ledger_transfers"] {
+		if err := paged("SELECT rowid,from_account,to_account,amount,done_at FROM ledger_transfers WHERE rowid>? AND state='done' AND done_at>=? AND done_at<? ORDER BY rowid LIMIT ?", []any{funnelFrom, asOf},
+			func(r *sql.Rows) (trust.Record, int64, error) {
+				rec := trust.Record{Type: "transfer"}
+				var id int64
+				err := r.Scan(&id, &rec.From, &rec.To, &rec.Amount, &rec.CreatedAt)
+				return rec, id, err
+			}); err != nil {
+			return err
+		}
+	}
+	// Claims and spends of post_bytes for the funnel detector; the detector
+	// sums both per account over its window.
+	if exists["allowance_claims"] {
+		if err := paged("SELECT rowid,subject,day,granted FROM allowance_claims WHERE rowid>? AND resource='post_bytes' AND day>=? AND day<? AND subject NOT LIKE 'anon:%' ORDER BY rowid LIMIT ?",
+			[]any{day - p.Detectors.FunnelDays, day},
+			func(r *sql.Rows) (trust.Record, int64, error) {
+				rec := trust.Record{Type: "claim"}
+				var id int64
+				err := r.Scan(&id, &rec.Account, &rec.Day, &rec.Claimed)
+				return rec, id, err
+			}); err != nil {
+			return err
+		}
+	}
+	if exists["ledger_entries"] {
+		if err := paged("SELECT seq,account,day,abs(amount) FROM ledger_entries WHERE seq>? AND kind='spend' AND resource='post_bytes' AND day>=? AND day<? AND account NOT LIKE 'anon:%' ORDER BY seq LIMIT ?",
+			[]any{day - p.Detectors.FunnelDays, day},
+			func(r *sql.Rows) (trust.Record, int64, error) {
+				rec := trust.Record{Type: "claim"}
+				var seq int64
+				err := r.Scan(&seq, &rec.Account, &rec.Day, &rec.Spent)
+				return rec, seq, err
+			}); err != nil {
+			return err
+		}
+	}
+	var latest int64
+	if err := in.page(ctx, func(q allowance.Querier) error {
+		return q.QueryRowContext(ctx, "SELECT coalesce(max(id),0) FROM trust_runs WHERE state='done'").Scan(&latest)
+	}); err != nil {
+		return err
+	}
+	var cursor string
+	for {
+		var batch []trust.Record
+		if err := in.page(ctx, func(q allowance.Querier) error {
+			r, err := q.QueryContext(ctx, `SELECT account,sum(flow),max(run_id=? AND (flow>0 OR proof_collateral>0)) FROM trust_scores
+ WHERE run_id IN (SELECT id FROM trust_runs WHERE state='done' ORDER BY id DESC LIMIT ?) AND account>? GROUP BY account ORDER BY account LIMIT ?`, latest, p.OwnAvgRuns, cursor, rows)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			for r.Next() {
+				rec := trust.Record{Type: "prior"}
+				if err = r.Scan(&rec.Account, &rec.FlowSum, &rec.Standing); err != nil {
+					return err
+				}
+				cursor = rec.Account
+				batch = append(batch, rec)
+			}
+			return r.Err()
+		}); err != nil {
+			return err
+		}
+		for _, rec := range batch {
+			if err := emit(rec); err != nil {
+				return err
+			}
+		}
+		if len(batch) < rows {
+			break
+		}
+	}
+	if err := paged(`SELECT p.id,p.account,p.evidence_id,p.fraction_ppm,p.ends_at FROM trust_penalties p JOIN trust_evidence e ON e.id=p.evidence_id
+ WHERE p.id>? AND e.lifted_at=0 AND p.ends_at>? AND p.starts_at<? ORDER BY p.id LIMIT ?`, []any{asOf, asOf},
+		func(r *sql.Rows) (trust.Record, int64, error) {
+			rec := trust.Record{Type: "penalty"}
+			var id int64
+			err := r.Scan(&id, &rec.Account, &rec.Evidence, &rec.FractionPPM, &rec.EndsAt)
+			return rec, id, err
+		}); err != nil {
+		return err
+	}
+	if err := paged("SELECT rowid,invitee,sponsor,high_water FROM trust_sponsorships WHERE rowid>? ORDER BY rowid LIMIT ?", nil,
+		func(r *sql.Rows) (trust.Record, int64, error) {
+			rec := trust.Record{Type: "sponsorship"}
+			var id int64
+			err := r.Scan(&id, &rec.Invitee, &rec.SponsorOf, &rec.HighWater)
+			return rec, id, err
+		}); err != nil {
+		return err
+	}
+	return emit(meta)
+}
+
+// resolveAccount maps a key fingerprint (or an account) to its continuity
+// account; an unknown id is returned as is.
+func resolveAccount(ctx context.Context, q allowance.Querier, id string) (string, error) {
+	if id == "" {
+		return "", nil
+	}
+	var account string
+	err := q.QueryRowContext(ctx, "SELECT account FROM identities WHERE id=?", id).Scan(&account)
+	if errors.Is(err, sql.ErrNoRows) {
+		return id, nil
+	}
+	return account, err
+}
+
+// readTrust is trust.get (§4.7): what it would cost to rebuild an agent's
+// standing, with its parts. Never a boolean.
+func (s *Store) readTrust(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
+	mode := s.config.Features.Trust
+	if mode == TrustOff {
+		return Result{}, allowanceError("service_unavailable")
+	}
+	target := c.Target
+	if target == "" && a.signed {
+		target = a.id
+	}
+	if target == "" {
+		return Result{}, problem(400, "invalid_agent", "Name the agent: target is its fingerprint or handle.")
+	}
+	public := `(EXISTS(SELECT 1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0) OR EXISTS(SELECT 1 FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish')))`
+	var id, account string
+	err := tx.QueryRowContext(ctx, "SELECT i.id,i.account FROM identities i WHERE (i.id=? OR i.handle=?) AND ("+public+" OR i.account=?)", target, strings.ToLower(target), a.account).Scan(&id, &account)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Result{}, problem(404, "not_found", "Agent not found.")
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	opt := trust.AnswerOptions{Agent: id, Mode: mode.String(), Now: now, ArchiveDelay: s.config.ArchiveDelaySeconds}
+	if ok, err := tableExists(ctx, tx, "account_breakers"); err != nil {
+		return Result{}, err
+	} else if ok {
+		if err = tx.QueryRowContext(ctx, "SELECT coalesce(max(trust_until),0) FROM account_breakers WHERE account=? AND trust_until>?", account, now).Scan(&opt.BreakerUntil); err != nil {
+			return Result{}, err
+		}
+		opt.BreakerActive = opt.BreakerUntil > now
+	}
+	classifier := s.classifier() // classifier v1 under TRUST=allocation
+	opt.EffectiveReason = "shadow: Design 0 rules allocate"
+	if mode == TrustAllocation {
+		opt.EffectiveReason = "allocation: the latest trust run allocates"
+	}
+	if st, err := classifier.Classify(ctx, tx, allowance.Subject{ID: account, KeyID: id, Signed: true}, now); err == nil {
+		tier := int64(st.Tier)
+		opt.Effective = &tier
+	} else {
+		opt.EffectiveReason = "the allocation classifier is not available"
+	}
+	report, err := trust.Answer(ctx, tx, account, opt)
+	if err != nil {
+		return Result{}, fromAllowance(err)
+	}
+	return Result{Data: report}, nil
+}
+
+// TrustDistribution is the public trust distribution for /stats (§11): the
+// latest run's collateral histogram in log10 bins (bin i counts
+// 10^i <= collateral < 10^(i+1); bin 0 also holds 0), and per tier how many
+// of its accounts allocation places there now (tier_counts) and how many the
+// run would place there (would_be_counts). In shadow the effective tiers come
+// from the allocation classifier, counted once per run and cached; when that
+// classifier is not available tier_counts is empty.
+func (s *Store) TrustDistribution(ctx context.Context) (map[string]any, error) {
+	mode := s.config.Features.Trust
+	if mode == TrustOff {
+		return nil, allowanceError("service_unavailable")
+	}
+	now := s.now().Unix()
+	var h trust.Histogram
+	if err := (trustDB{s}).Read(ctx, func(q allowance.Querier) (err error) { h, err = trust.Distribution(ctx, q, now); return err }); err != nil {
+		return nil, err
+	}
+	wouldBe := map[string]int64{}
+	for tier, n := range h.TierCounts {
+		wouldBe[strconv.Itoa(int(tier))] = n
+	}
+	effective := wouldBe
+	if mode == TrustShadow {
+		var err error
+		if effective, err = s.effectiveTierCounts(ctx, h.RunID, now); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{"mode": mode.String(), "run": h.RunID, "as_of": h.AsOf, "stale": h.Stale, "collateral_log10_bins": h.CollateralLog10Bins,
+		"tier_counts": effective, "would_be_counts": wouldBe}, nil
+}
+
+// trustTierCacheSeconds is how long effective tier counts are reused.
+const trustTierCacheSeconds = 600
+
+// effectiveTierCounts classifies the run's accounts with the allocation
+// classifier, 500 per short read, and caches the counts per run.
+func (s *Store) effectiveTierCounts(ctx context.Context, run, now int64) (map[string]int64, error) {
+	t := &s.trust
+	t.tierMu.Lock()
+	defer t.tierMu.Unlock()
+	if t.tierRun == run && now-t.tierAt < trustTierCacheSeconds && t.tierCounts != nil {
+		return t.tierCounts, nil
+	}
+	counts := map[string]int64{}
+	classifier := s.classifier()
+	cursor := ""
+	for run > 0 {
+		var accounts []string
+		err := (trustDB{s}).Read(ctx, func(q allowance.Querier) error {
+			rows, err := q.QueryContext(ctx, "SELECT account FROM trust_scores WHERE run_id=? AND account>? ORDER BY account LIMIT 500", run, cursor)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var a string
+				if err = rows.Scan(&a); err != nil {
+					return err
+				}
+				accounts = append(accounts, a)
+			}
+			if err = rows.Err(); err != nil {
+				return err
+			}
+			for _, a := range accounts {
+				st, err := classifier.Classify(ctx, q, allowance.Subject{ID: a, Signed: true}, now)
+				if err != nil {
+					return errClassifierUnavailable
+				}
+				counts[strconv.Itoa(int(st.Tier))]++
+			}
+			return nil
+		})
+		if errors.Is(err, errClassifierUnavailable) {
+			counts = map[string]int64{}
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(accounts) < 500 {
+			break
+		}
+		cursor = accounts[len(accounts)-1]
+	}
+	t.tierRun, t.tierAt, t.tierCounts = run, now, counts
+	return counts, nil
+}
+
+var errClassifierUnavailable = errors.New("trust: the allocation classifier is not available")
+
+// TrustRuns lists runs newest first (/api/trust/runs); next is the before
+// cursor for the following page, 0 at the end.
+func (s *Store) TrustRuns(ctx context.Context, before int64, limit int) (runs []map[string]any, next int64, err error) {
+	if s.config.Features.Trust == TrustOff {
+		return nil, 0, allowanceError("service_unavailable")
+	}
+	err = trustDB{s}.Read(ctx, func(q allowance.Querier) (err error) { runs, err = trust.Runs(ctx, q, before, limit); return err })
+	if err == nil && len(runs) == limit {
+		next = runs[len(runs)-1]["id"].(int64)
+	}
+	return runs, next, err
+}
+
+// TrustRun is one run with its inputs, parameters and capture bound.
+func (s *Store) TrustRun(ctx context.Context, id int64) (run map[string]any, err error) {
+	if s.config.Features.Trust == TrustOff {
+		return nil, allowanceError("service_unavailable")
+	}
+	var ok bool
+	err = trustDB{s}.Read(ctx, func(q allowance.Querier) (err error) { run, ok, err = trust.RunDetail(ctx, q, id); return err })
+	if err == nil && !ok {
+		err = problem(404, "not_found", "No trust run with that ID; /api/trust/runs lists them.")
+	}
+	return run, err
+}
+
+// TrustSnapshot opens run id's published input snapshot, JSONL decompressed
+// as it is read (at most trust.SnapshotBytesMax), with its sha256 and size.
+func (s *Store) TrustSnapshot(ctx context.Context, id int64) (r io.Reader, sha string, n int64, err error) {
+	if s.config.Features.Trust == TrustOff {
+		return nil, "", 0, allowanceError("service_unavailable")
+	}
+	var ok bool
+	err = trustDB{s}.Read(ctx, func(q allowance.Querier) (err error) { r, sha, n, ok, err = trust.OpenSnapshot(ctx, q, id); return err })
+	if err == nil && !ok {
+		err = problem(404, "not_found", "That trust run kept no input snapshot (it is missing, aborted, or over the size bound); /api/trust/runs/ID shows its snapshot field.")
+	}
+	return r, sha, n, err
+}
+
+// TrustEvidence lists evidence newest first (/api/trust/evidence).
+func (s *Store) TrustEvidence(ctx context.Context, before int64, limit int) (evidence []map[string]any, next int64, err error) {
+	if s.config.Features.Trust == TrustOff {
+		return nil, 0, allowanceError("service_unavailable")
+	}
+	err = trustDB{s}.Read(ctx, func(q allowance.Querier) (err error) {
+		evidence, next, err = trust.EvidenceList(ctx, q, before, limit)
+		return err
+	})
+	return evidence, next, err
+}
+
+// trustClassifier is classifier v1 (§4.4): signed accounts are classified
+// from their row in the latest run (no row: tier 3 at weight 1e6);
+// anonymous subjects go to fallback (Design 0). It is used only with
+// TRUST=allocation.
+func (s *Store) trustClassifier(fallback allowance.Classifier) allowance.Classifier {
+	return trustClassifier{fallback: fallback}
+}
+
+type trustClassifier struct{ fallback allowance.Classifier }
+
+func (c trustClassifier) Classify(ctx context.Context, q allowance.Querier, subject allowance.Subject, now int64) (allowance.Standing, error) {
+	if !subject.Signed {
+		return c.fallback.Classify(ctx, q, subject, now)
+	}
+	score, ok, err := trust.Current(ctx, q, subject.ID)
+	if err != nil {
+		return allowance.Standing{}, err
+	}
+	if !ok {
+		return allowance.Standing{Tier: allowance.TierSigned, WeightPPM: 1e6, Root: subject.ID, Source: "trust", Reason: "No row in the latest trust run: signed tier at one share."}, nil
+	}
+	run := strconv.FormatInt(score.RunID, 10)
+	return allowance.Standing{Tier: score.Tier, WeightPPM: score.WeightPPM, Root: score.Root, Source: "trust:" + run,
+		Reason: "Tier and weight from trust run " + run + "; parts at /api/agent/" + subject.ID + "/trust."}, nil
+}

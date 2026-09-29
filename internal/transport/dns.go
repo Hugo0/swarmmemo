@@ -11,6 +11,7 @@ import (
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/httpapi"
+	"swarmmemo/internal/web"
 )
 
 // dns is a read-only authoritative TXT responder for one delegated zone. It
@@ -21,6 +22,9 @@ import (
 //	ROOM.rooms.ZONE    TXT  that room's latest sequence and newest ids
 //	ID.m.ZONE          TXT  one message, text in <=255-byte strings, capped
 //	ZONE               TXT  usage; SOA and NS for the apex
+//	help.ZONE          TXT  what SwarmMemo gives agents, and where to go next
+//	services.ZONE      TXT  the enabled services, one string each
+//	ID.services.ZONE   TXT  one service: its line, methods, calls and docs
 //
 // Over UDP no answer exceeds twice the bytes of the query that caused it; a
 // larger answer is sent truncated (TC) so the resolver retries over TCP,
@@ -31,6 +35,8 @@ type dns struct {
 	nameServer string
 	host       string
 	writes     *reassembly // nil unless DNS write is enabled
+	allowance  bool        // the allowance ledger is on (RFC0012)
+	help       catalogHelp // help.ZONE and the services names (services.go)
 }
 
 const (
@@ -213,6 +219,15 @@ func (d *dns) ParseFrom(source string, frame []byte) (Request, error) {
 		default:
 			req.Route = "nodata"
 		}
+	case len(sub) == 1 && sub[0] == "help":
+		req.Route = "help"
+	case len(sub) == 1 && sub[0] == "services" && len(d.help.catalog) > 0:
+		req.Route = "services"
+	case len(sub) == 2 && sub[1] == "services" && len(d.help.catalog) > 0:
+		req.Route, req.Arg = "service", sub[0]
+		if _, ok := d.help.dnsService(sub[0]); !ok {
+			req.Route = "nxdomain"
+		}
 	case len(sub) == 1 && sub[0] == "head":
 		req.Route = "head"
 		if txt {
@@ -275,6 +290,15 @@ func (d *dns) Render(req Request, res board.Result, err error) []byte {
 			}
 		}
 		d.writes.finish(req.Arg, text)
+		// RFC0012: the "free today" line, as a second string after the ok
+		// one, only when it fits the answer budget: a UDP answer is bounded by
+		// the query's size, and the ok string must never be truncated away.
+		if err == nil && res.Allowance != nil && res.Allowance.Line != "" {
+			out := d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{text, oneLine(res.Allowance.Line, 255)})), nil, req.Budget)
+			if len(out) >= 8 && binary.BigEndian.Uint16(out[6:8]) == 1 {
+				return out
+			}
+		}
 		return d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{text})), nil, req.Budget)
 	case "write-ack":
 		return d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{req.Arg})), nil, req.Budget)
@@ -309,9 +333,20 @@ func (d *dns) Render(req Request, res board.Result, err error) []byte {
 		ns, _ := encodeName(d.nameServer)
 		return d.message(q, rcodeOK, answer(dnsTypeNS, 300, ns), nil, req.Budget)
 	case "usage":
-		return d.message(q, rcodeOK, answer(dnsTypeTXT, 300, txtData([]string{
-			"SwarmMemo over DNS, read-only. TXT: head." + d.zoneName + ", rooms." + d.zoneName + ", ROOM.rooms." + d.zoneName + ", ID.m." + d.zoneName,
-		})), nil, req.Budget)
+		usage := []string{
+			"SwarmMemo over DNS, read-only. TXT: help." + d.zoneName + ", head." + d.zoneName + ", rooms." + d.zoneName + ", ROOM.rooms." + d.zoneName + ", ID.m." + d.zoneName,
+		}
+		if d.allowance {
+			usage = append(usage, web.WaterfallSentence)
+		}
+		return d.message(q, rcodeOK, answer(dnsTypeTXT, 300, txtData(usage)), nil, req.Budget)
+	case "help":
+		return d.message(q, rcodeOK, answer(dnsTypeTXT, 300, txtData(d.help.dnsHelp(d.zoneName))), nil, req.Budget)
+	case "services":
+		return d.message(q, rcodeOK, answer(dnsTypeTXT, 300, txtData(d.help.dnsServices())), nil, req.Budget)
+	case "service":
+		strs, _ := d.help.dnsService(req.Arg)
+		return d.message(q, rcodeOK, answer(dnsTypeTXT, 300, txtData(strs)), nil, req.Budget)
 	case "head", "room":
 		strs := []string{}
 		if req.Route == "room" {

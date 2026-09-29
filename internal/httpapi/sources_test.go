@@ -4,7 +4,7 @@ package httpapi
 // document resolves, links into the source repository point at files the
 // public snapshot publishes, known-wrong claims stay gone, and pages state
 // limits through the board constants rather than as literals.
-// See docs/project/SOURCES.md.
+// See docs/SOURCES.md.
 
 import (
 	"encoding/json"
@@ -254,6 +254,9 @@ func TestCopyStatesLimitsThroughConstants(t *testing.T) {
 			}
 			for _, pattern := range patterns {
 				if m := regexp.MustCompile(pattern).FindString(line); m != "" {
+					if m == "1000" && strings.HasSuffix(path, ".js") {
+						continue // milliseconds per second in a script, not the 1,000 limits
+					}
 					t.Errorf("%s:%d states %q literally; use the %s limit (limitText %q in templates, board.LimitText in Go)", path, i+1, m, forbidden[pattern], forbidden[pattern])
 				}
 			}

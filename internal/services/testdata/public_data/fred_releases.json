@@ -1,0 +1,16 @@
+{
+ "releases": [
+  {
+   "id": 53,
+   "name": "Gross Domestic Product"
+  },
+  {
+   "id": 10,
+   "name": "Consumer Price Index"
+  },
+  {
+   "id": 50,
+   "name": "Employment Situation"
+  }
+ ]
+}
