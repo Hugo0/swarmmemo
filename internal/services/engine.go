@@ -140,6 +140,9 @@ type CallRecord struct {
 	FinishedAt    int64  `json:"finished_at,omitempty"`
 	DueAt         int64  `json:"due_at,omitempty"`
 	Error         string `json:"error,omitempty"` // failed: why; nothing was charged
+	// RequestID is an unsigned call's request_id, its retry key; the board
+	// sets it on the answer (a random one when the caller gave none).
+	RequestID string `json:"request_id,omitempty"`
 }
 
 func receiptData(r ledger.Receipt) map[string]any {

@@ -100,9 +100,12 @@ func TestAnonServicesAllowlistAndBilling(t *testing.T) {
 	if !errors.As(err, &e) || e.Status != 401 || e.Code != "signature_required" || !strings.Contains(e.Message, "notary.stamp") {
 		t.Fatalf("memory put without a key: %v", err)
 	}
-	// A request_id is required: it is the only retry key.
-	if code, status := codeOf(func() error { _, err := stampFrom(s, "198.51.100.7", "no id", "", 1); return err }()); code != "invalid_request" || status != 400 {
-		t.Fatalf("no request_id: %s %d", code, status)
+	// A request_id of the caller's own must be long enough (left out, one is made).
+	if code, status := codeOf(func() error {
+		_, err := s.Execute(testContext, Command{Operation: "service.call", Target: "notary", Data: svcData("stamp", map[string]any{"text": "short id"}, 1), RequestID: "short-id"}, "198.51.100.7")
+		return err
+	}()); code != "invalid_request" || status != 400 {
+		t.Fatalf("short request_id: %s %d", code, status)
 	}
 	// max_cost below the price: refused, nothing spent.
 	before := anonCreditSpent(t, s)

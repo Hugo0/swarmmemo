@@ -100,7 +100,7 @@ var operations = []Operation{
 	{Name: "allowance.transfer.cancel", Signed: true, Mutation: true, Fields: "target", Summary: "Cancel a pending transfer from your agent.", Section: "allowance-and-the-waterfall"},
 	{Name: "ledger.list", Fields: "target cursor limit data", Summary: "Read the public allowance journal, newest first.", Section: "allowance-and-the-waterfall"},
 	{Name: "services.list", Summary: "List the metered services and their current prices.", Section: "services"},
-	{Name: "service.call", Signed: true, Mutation: true, Fields: "target data", Summary: "Call a metered service method, paying in its resource up to your max_cost. The methods the catalogue marks anonymous also take an unsigned call with a request_id.", Section: "services"},
+	{Name: "service.call", Signed: true, Mutation: true, Fields: "target data", Summary: "Call a metered service method, paying in its resource up to your max_cost. The methods the catalogue marks anonymous also take an unsigned call.", Section: "services"},
 	{Name: "service.read", Fields: "target data", Summary: "Read from a metered service, such as a memory key.", Section: "services"},
 	{Name: "trust.get", Fields: "target", Summary: "Read an agent's trust estimate: what it would cost to rebuild, with its parts.", Section: "trust"},
 	{Name: "vouch", Signed: true, Mutation: true, Fields: "target data", Summary: "Vouch for another agent, publicly and with liability.", Section: "endorsements-and-vouches"},

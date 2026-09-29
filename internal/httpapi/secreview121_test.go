@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -191,19 +192,34 @@ func TestSecReview121IPv6Slash48SharesOneCreditShare(t *testing.T) {
 
 // L3: a request_id shorter than 16 characters is refused with the rule,
 // so a neighbour in the same /24 cannot squat the documented or a guessable
-// one; the examples show a placeholder that is refused, never a shared id.
+// one; the examples carry no request_id (the board makes a random one), and
+// a placeholder pasted as it is counts as left out, never a shared id.
 func TestSecReview121RequestIDSquatInSameNetwork(t *testing.T) {
 	_, s := anonCallServer(t, 2000)
-	for _, id := range []string{"my-first-call", "1", "test", services.AnonymousRequestIDExample} {
+	for _, id := range []string{"my-first-call", "1", "test"} {
 		w := secReq(s, "GET", "/call/notary/stamp?text=squat&max_cost=1&request_id="+id, "", "198.51.100.200:1", nil)
-		if w.Code != 400 || !strings.Contains(w.Body.String(), "at least 16 characters") {
+		if w.Code != 400 || !strings.Contains(w.Body.String(), "leave it out") || !regexp.MustCompile(`request_id=[0-9a-f]{32}\)`).MatchString(w.Body.String()) {
 			t.Fatalf("request_id %q: %d %s", id, w.Code, w.Body.String())
 		}
 	}
 	caps := decodeResult(t, secReq(s, "GET", "/capabilities", "", "198.51.100.17:1", nil).Body.Bytes())
 	example, _ := dig(caps, "services", "without_key", "example").(string)
-	if !strings.HasSuffix(example, "request_id="+services.AnonymousRequestIDExample) || len(services.AnonymousRequestIDExample) >= services.AnonymousRequestIDMin {
-		t.Fatalf("the example's request_id is not a refused placeholder: %q", example)
+	if strings.Contains(example, "request_id") || !strings.HasPrefix(dig(caps, "services", "without_key", "request_id").(string), "optional: ") {
+		t.Fatalf("the example carries a request_id: %q", example)
+	}
+	// Two neighbours pasting the same placeholder get two random ids: the
+	// second is its own call, not the first one's answer.
+	var ids []any
+	for _, ip := range []string{"198.51.100.200:1", "198.51.100.201:1"} {
+		w := secReq(s, "GET", "/call/notary/stamp?text=same&max_cost=1&request_id=RANDOM_16_CHARS", "", ip, nil)
+		body := decodeResult(t, w.Body.Bytes())
+		if w.Code != 200 || dig(body, "data", "call", "request_id") == "RANDOM_16_CHARS" {
+			t.Fatalf("placeholder: %d %s", w.Code, w.Body.String())
+		}
+		ids = append(ids, dig(body, "data", "call", "id"))
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("two callers pasting a placeholder shared one call: %v", ids)
 	}
 	// A neighbour with a random id is served.
 	if w := secReq(s, "GET", "/call/notary/stamp?text=mine&max_cost=1&request_id=5f0c1e7a9b3d42e8a1c6", "", "198.51.100.17:1", nil); w.Code != 200 {

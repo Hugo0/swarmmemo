@@ -251,10 +251,36 @@ func (s *Store) admitUnsignedCall(ctx context.Context, tx *sql.Tx, c Command, no
 	// Everyone on the caller's network shares its request_id namespace, so
 	// a short or guessable one could already be taken (security review
 	// 1.21, L3).
+	// Execute makes one when it is left out.
 	if len(c.RequestID) < AnonymousRequestIDMin {
-		return problem(400, "invalid_request", fmt.Sprintf("A service.call without a key needs a request_id of at least %d characters, new for each call (for example 32 random hex digits): everyone on your network shares one request_id namespace, so a short or guessable one may already be taken. An exact retry with the same one returns the first answer and is never charged twice.", AnonymousRequestIDMin))
+		return problem(400, "invalid_request", fmt.Sprintf("request_id is too short: leave it out and one is made for you, or use %d or more random characters, new per call (for example request_id=%s). Everyone on your network shares one request_id namespace, so a short one may already be taken.", AnonymousRequestIDMin, services.NewRequestID()))
 	}
 	return nil
+}
+
+// stampRequestID puts an unsigned call's request_id in its answer, as
+// call.request_id, and when the board made it, says how to retry with it.
+func stampRequestID(res *Result, requestID string, generated bool) {
+	if res.Data == nil {
+		return
+	}
+	switch call := res.Data["call"].(type) {
+	case services.CallRecord:
+		call.RequestID = requestID
+		res.Data["call"] = call
+	case *services.CallRecord:
+		call.RequestID = requestID
+	case map[string]any:
+		call["request_id"] = requestID
+	default:
+		return
+	}
+	if generated {
+		if res.Next == nil {
+			res.Next = &Next{}
+		}
+		res.Next.Retry = "To retry this call without being charged twice, send the same fields with request_id=" + requestID + "; a new call needs no request_id."
+	}
 }
 
 // AnonymousRequestIDMin is the shortest request_id an unsigned service.call

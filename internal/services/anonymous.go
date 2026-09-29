@@ -10,6 +10,8 @@ package services
 // protocol) is generated from the Method fields and the helpers here.
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,17 +33,14 @@ const (
 	// AnonymousRequestIDMin is the shortest request_id an unsigned call
 	// takes: every caller on one network shares its request_id namespace,
 	// so a short or shared one could be taken by a neighbour first (security
-	// review 1.21, L3).
+	// review 1.21, L3). Left out, the board makes a random one
+	// (NewRequestID) and returns it.
 	AnonymousRequestIDMin = 16
-	// AnonymousRequestIDExample is the request_id the examples show: a
-	// placeholder, shorter than AnonymousRequestIDMin so it is refused with
-	// the rule if pasted as it is, never an id every reader would share.
-	AnonymousRequestIDExample = "RANDOM_16_CHARS"
 )
 
 // CallPathPrefix is the HTTP route of a service call as one URL:
-// /call/SERVICE/METHOD?ARG=VALUE&max_cost=N&request_id=ID. Only unsigned
-// calls use it; a signed call is a JSON command.
+// /call/SERVICE/METHOD?ARG=VALUE, with max_cost and request_id optional.
+// Only unsigned calls use it; a signed call is a JSON command.
 const CallPathPrefix = "/call/"
 
 // AnonRate bounds a method's unsigned calls in fixed one-minute and UTC-day
@@ -88,7 +87,14 @@ type NoKey struct {
 const NoKeyNetwork = "one credit share per network: an IPv4 /24 or an IPv6 /48, keyed by a salted hash that changes daily"
 
 // NoKeyRequestID says how an unsigned call is retried.
-const NoKeyRequestID = "required, at least 16 characters and random (everyone on your network shares one namespace): an exact retry with the same request_id returns the first answer and is never charged twice; use a new one for a new call"
+const NoKeyRequestID = "optional: left out, a random one is made and returned as call.request_id; send it back on a retry and the retry returns the first answer and is never charged twice. If you choose your own, use 16 or more random characters, new per call (everyone on your network shares one namespace)"
+
+// NoKeyUsage is the shape of a call without a key, for usage lines.
+const NoKeyUsage = CallPathPrefix + "SERVICE/METHOD?ARG=VALUE (max_cost and request_id optional)"
+
+// NoKeyRetryText is the line the text surfaces print about the optional
+// fields.
+const NoKeyRetryText = "max_cost (your ceiling; left out, the quote for the arguments) and request_id are optional. The answer carries call.request_id: send it back as request_id=... on a retry and the retry returns the first answer, never charged twice. Your own request_id must be 16 or more random characters, new per call (everyone on your network shares one namespace)."
 
 // NoKeyFor describes the catalogue's anonymous methods at credits a network
 // a day and allCredits for every anonymous caller. origin prefixes the
@@ -147,9 +153,8 @@ func NoKeyLine(catalog []Entry, credits int64) string {
 }
 
 // NoKeyExample is the example URL: a public_data fetch of sea ice extent
-// when that runs, else the first anonymous method's example. Its request_id
-// is the placeholder AnonymousRequestIDExample, for the caller to replace
-// with a random one.
+// when that runs, else the first anonymous method's example. It carries the
+// method's arguments only, so it works pasted as it is.
 func NoKeyExample(origin string, catalog []Entry) string {
 	var first string
 	for _, e := range catalog {
@@ -157,7 +162,7 @@ func NoKeyExample(origin string, catalog []Entry) string {
 			if !m.Write() || !m.Anonymous {
 				continue
 			}
-			path, err := CallPath(e, m, AnonymousRequestIDExample)
+			path, err := CallPath(e, m)
 			if err != nil {
 				continue
 			}
@@ -173,11 +178,12 @@ func NoKeyExample(origin string, catalog []Entry) string {
 }
 
 // CallPath is m's example as one URL path with its query:
-// /call/SERVICE/METHOD?ARG=VALUE&...&max_cost=N&request_id=ID. A string
+// /call/SERVICE/METHOD?ARG=VALUE&..., its arguments only: max_cost and
+// request_id are optional, so the URL works pasted as it is. A string
 // argument is its text, a number or boolean its literal, an object or array
 // its JSON; an empty object is left out. Argument placeholders are filled
-// with their stand-ins; requestID is written as given.
-func CallPath(e Entry, m MethodEntry, requestID string) (string, error) {
+// with their stand-ins.
+func CallPath(e Entry, m MethodEntry) (string, error) {
 	var args map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(FillPlaceholders(string(m.Example))), &args); err != nil {
 		return "", err
@@ -202,9 +208,6 @@ func CallPath(e Entry, m MethodEntry, requestID string) (string, error) {
 		}
 		q = append(q, url.QueryEscape(a.Name)+"="+url.QueryEscape(text))
 	}
-	if m.Write() {
-		q = append(q, "max_cost="+strconv.FormatInt(m.MaxCost(), 10), "request_id="+url.QueryEscape(requestID))
-	}
 	path := CallPathPrefix + e.ID + "/" + m.Name
 	if len(q) > 0 {
 		path += "?" + strings.Join(q, "&")
@@ -219,6 +222,12 @@ const (
 	CallFieldRequestID = "request_id"
 )
 
+// CallDefaultMaxCost is the max_cost of an unsigned call that gives none:
+// no ceiling of its own, so the quote for its arguments is what it may cost
+// (the engine reserves and records the quote, never max_cost), bounded by
+// the network's free share like every unsigned call.
+const CallDefaultMaxCost = MaxCostMax
+
 var callIntegerRE = regexp.MustCompile(`^-?(0|[1-9][0-9]{0,17})$`)
 
 // ErrCallArgs is a /call/ URL or CALL line whose fields do not fit the method.
@@ -228,7 +237,9 @@ var ErrCallArgs = errors.New("services: call fields do not fit the method")
 // URL's fields (or a TCP CALL line's), typed by the method's documented
 // arguments: a string argument is taken as text, an integer, number or
 // boolean must be its JSON literal, an object or array its JSON. max_cost is
-// required for a write and refused for a read; request_id is returned apart.
+// refused for a read; left out of a write (these wires carry unsigned calls
+// only) it is CallDefaultMaxCost, so the quote for the arguments is the
+// ceiling. request_id is returned apart.
 // Unknown fields are refused. The provider's strict parser checks the rest.
 func CallData(m MethodEntry, fields url.Values, skip ...string) (data, requestID string, err error) {
 	bad := func(format string, a ...any) (string, string, error) {
@@ -299,7 +310,7 @@ func CallData(m MethodEntry, fields url.Values, skip ...string) (data, requestID
 		args[key] = raw
 	}
 	if m.Write() && maxCost < 0 {
-		return bad("max_cost is required: your ceiling, in %s", m.Resource)
+		maxCost = CallDefaultMaxCost
 	}
 	var b strings.Builder
 	b.WriteString(`{"schema":1,"method":`)
@@ -360,4 +371,34 @@ func Thousands(n int64) string {
 		return "-" + b.String()
 	}
 	return b.String()
+}
+
+// NewRequestID is a random request_id for an unsigned call that gives none:
+// 32 hex digits, which no neighbour on the network can guess or take first.
+func NewRequestID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// placeholderRequestIDRE is the shape of a placeholder: capitals, digits
+// and underscores, perhaps in <>, {} or [] (RANDOM_16_CHARS, YOUR_ID,
+// <REQUEST_ID>).
+var placeholderRequestIDRE = regexp.MustCompile(`^[<{\[]?[A-Z][A-Z0-9_]*[>}\]]?$`)
+
+// PlaceholderRequestID reports whether id is an example's placeholder pasted
+// as it is, rather than an id the caller chose: an unsigned call treats it
+// as left out and makes a random one. A placeholder is all capitals and
+// names itself (RANDOM, YOUR, UNIQUE, REQUEST_ID, CHARS, PLACEHOLDER), which
+// a random id never does by accident.
+func PlaceholderRequestID(id string) bool {
+	if !placeholderRequestIDRE.MatchString(id) {
+		return false
+	}
+	for _, word := range []string{"RANDOM", "YOUR", "UNIQUE", "REQUEST_ID", "CHARS", "PLACEHOLDER"} {
+		if strings.Contains(id, word) {
+			return true
+		}
+	}
+	return false
 }

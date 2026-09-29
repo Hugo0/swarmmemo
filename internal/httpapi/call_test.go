@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
@@ -81,8 +82,7 @@ func TestCallRouteWithoutAKey(t *testing.T) {
 		code                   string
 	}{
 		{"GET", "/call/memory/put?key=k&value=v&max_cost=300&request_id=m1", "", "", 401, "signature_required"},
-		{"GET", "/call/notary/stamp?text=x&max_cost=1", "", "", 400, "invalid_request"},                                                // no request_id
-		{"GET", "/call/notary/stamp?text=x&request_id=z", "", "", 400, "invalid_request"},                                              // no max_cost
+		{"GET", "/call/notary/stamp?text=x&request_id=z", "", "", 400, "invalid_request"},                                              // short request_id
 		{"GET", "/call/notary/stamp?text=x&max_cost=0&request_id=request-id-00000z0", "", "", 409, "price_exceeds_max"},                // ceiling below price
 		{"GET", "/call/notary/stamp?text=x&max_cost=1&request_id=short-id", "", "", 400, "invalid_request"},                            // request_id under 16 characters
 		{"GET", "/call/notary/stamp?text=x&max_cost=1&request_id=z1&nope=1", "", "", 400, "invalid_request"},                           // unknown field
@@ -122,17 +122,13 @@ func TestCallSurfacesSayItOnce(t *testing.T) {
 	caps := decodeResult(t, makeRequest(s, "GET", "https://swarmmemo.com/capabilities", "", "").Body.Bytes())
 	nk, _ := dig(caps, "services", "without_key").(map[string]any)
 	line := "No key needed for the notary: 2,000 credits a day per network."
-	example := "https://swarmmemo.com/call/notary/stamp?text=Plan+for+2026-09-29%3A+ship+the+catalogue.&max_cost=1&request_id=" + services.AnonymousRequestIDExample
+	example := "https://swarmmemo.com/call/notary/stamp?text=Plan+for+2026-09-29%3A+ship+the+catalogue."
 	if nk["available"] != true || nk["line"] != line || nk["example"] != example || nk["credits_per_day"] != float64(2000) || nk["all_credits_per_day"] != float64(160000) {
 		t.Fatalf("capabilities without_key: %+v", nk)
 	}
-	// The example works once its placeholder request_id is replaced with a
-	// random one; pasted as it is, it is refused with the rule.
-	if w := makeRequest(s, "GET", example, "", ""); w.Code != 400 || !strings.Contains(w.Body.String(), "at least 16 characters") {
+	// The example works pasted as it is.
+	if w := makeRequest(s, "GET", example, "", ""); w.Code != 200 {
 		t.Fatalf("the example URL as pasted: %d %s", w.Code, w.Body.String())
-	}
-	if w := makeRequest(s, "GET", strings.Replace(example, services.AnonymousRequestIDExample, "3f9a0c2b7e5d4a61b8c0", 1), "", ""); w.Code != 200 {
-		t.Fatalf("the example URL: %d %s", w.Code, w.Body.String())
 	}
 	api := makeRequest(s, "GET", "https://swarmmemo.com/api/services", "", "").Body.String()
 	if !strings.Contains(api, `"anonymous":true`) || !strings.Contains(api, `"without_key"`) || !strings.Contains(api, line) {
@@ -163,6 +159,11 @@ func TestCallSurfacesSayItOnce(t *testing.T) {
 	if dig(out, "result", "isError") == true || dig(out, "result", "structuredContent", "data", "call", "state") != "done" {
 		t.Fatalf("MCP call without a key: %+v", out)
 	}
+	// Without max_cost or request_id, as the example shows.
+	out = mcpCall(t, server.URL, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"notary_stamp","arguments":{"text":"bare"}}}`)
+	if dig(out, "result", "isError") == true || dig(out, "result", "structuredContent", "data", "call", "state") != "done" || len(fmt.Sprint(dig(out, "result", "structuredContent", "data", "call", "request_id"))) != 32 {
+		t.Fatalf("MCP call with the fewest arguments: %+v", out)
+	}
 	out = mcpCall(t, server.URL, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"notary_stamp","arguments":{"text":"short id","max_cost":1,"request_id":"mcp-1"}}}`)
 	if dig(out, "result", "isError") != true && dig(out, "error") == nil {
 		t.Fatalf("an MCP call with a short request_id must be refused: %+v", out)
@@ -183,7 +184,7 @@ func TestCallSurfacesSayItOnce(t *testing.T) {
 			t.Fatalf("%s: no-key example %s", e.ID, ex.NoKey)
 		}
 		data, rid, err := services.CallData(m, u.Query())
-		if _, perr := services.ParseData(data, true); err != nil || perr != nil || rid == "" {
+		if _, perr := services.ParseData(data, true); err != nil || perr != nil || rid != "" {
 			t.Fatalf("%s: no-key example %s: %v %v", e.ID, ex.NoKey, err, perr)
 		}
 	}

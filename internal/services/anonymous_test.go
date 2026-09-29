@@ -83,7 +83,7 @@ func TestAnonymousAllowlistIsTheCatalogue(t *testing.T) {
 	if line := services.NoKeyLine(all, 2000); line != "No key needed for the notary, text screening, small-model inference and public data: 2,000 credits a day per network." {
 		t.Fatalf("line: %q", line)
 	}
-	if ex := services.NoKeyExample("https://swarmmemo.com", all); ex != "https://swarmmemo.com/call/public_data/fetch?dataset=sea_ice_extent&max_cost=5&request_id=RANDOM_16_CHARS" {
+	if ex := services.NoKeyExample("https://swarmmemo.com", all); ex != "https://swarmmemo.com/call/public_data/fetch?dataset=sea_ice_extent" {
 		t.Fatalf("example: %q", ex)
 	}
 	on := services.NoKeyFor("", all, 2000, 160000, "")
@@ -276,7 +276,7 @@ func TestCallDataFromURLFields(t *testing.T) {
 		if !ok {
 			t.Fatal(id)
 		}
-		path, err := services.CallPath(e, m, "r1")
+		path, err := services.CallPath(e, m)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
@@ -284,12 +284,16 @@ func TestCallDataFromURLFields(t *testing.T) {
 		if err != nil || u.Path != services.CallPathPrefix+svc+"/"+name {
 			t.Fatalf("%s: %q %v", id, path, err)
 		}
+		if u.Query().Has("max_cost") || u.Query().Has("request_id") {
+			t.Fatalf("%s: the example carries optional fields: %q", id, path)
+		}
 		data, rid, err := services.CallData(m, u.Query())
-		if err != nil || rid != "r1" {
+		if err != nil || rid != "" {
 			t.Fatalf("%s: %v %q", id, err, rid)
 		}
+		// Left out, max_cost is no ceiling of the caller's own: the quote is.
 		d, err := services.ParseData(data, true)
-		if err != nil || d.Method != name || d.MaxCost != m.MaxCost() {
+		if err != nil || d.Method != name || d.MaxCost != services.CallDefaultMaxCost {
 			t.Fatalf("%s: data %s: %+v %v", id, data, d, err)
 		}
 		// The URL carries the example's arguments (an empty params object
@@ -314,7 +318,6 @@ func TestCallDataFromURLFields(t *testing.T) {
 		m     services.MethodEntry
 		query string
 	}{
-		{fetch, "dataset=x"},                                // no max_cost
 		{fetch, "dataset=x&max_cost=-1"},                    // negative
 		{fetch, "dataset=x&max_cost=1.5"},                   // fraction
 		{fetch, "dataset=x&dataset=y&max_cost=1"},           // repeated
@@ -333,6 +336,23 @@ func TestCallDataFromURLFields(t *testing.T) {
 	data, _, err := services.CallData(complete, q)
 	if err != nil || data != `{"schema":1,"method":"complete","args":{"model":"small","messages":[{"role":"user","content":"hi & bye"}],"max_tokens":64},"max_cost":300}` {
 		t.Fatalf("inference from a URL: %s %v", data, err)
+	}
+}
+
+func TestPlaceholderRequestID(t *testing.T) {
+	for _, id := range []string{"RANDOM_16_CHARS", "RANDOM_ID", "YOUR_UNIQUE_POST_ID", "REQUEST_ID", "<REQUEST_ID>", "{RANDOM}", "[YOUR_ID]", "PLACEHOLDER"} {
+		if !services.PlaceholderRequestID(id) {
+			t.Errorf("%q is a placeholder", id)
+		}
+	}
+	for _, id := range []string{"", "my-first-call", "random_16_chars", "3F9A0C2B7E5D4A61B8C0", "MY_CALL_2026_0001", "test", services.NewRequestID()} {
+		if services.PlaceholderRequestID(id) {
+			t.Errorf("%q is not a placeholder", id)
+		}
+	}
+	a, b := services.NewRequestID(), services.NewRequestID()
+	if len(a) != 32 || a == b || len(a) < services.AnonymousRequestIDMin {
+		t.Fatalf("NewRequestID: %q %q", a, b)
 	}
 }
 

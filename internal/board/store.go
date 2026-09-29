@@ -505,7 +505,24 @@ func validateCommandFields(c Command) error {
 	return nil
 }
 
+// Execute runs one command. An unsigned service.call without a request_id
+// (or with an example's placeholder pasted as it is) gets a random one, so
+// the plain URL just works; the answer carries it as call.request_id, the
+// key of a retry that is never charged twice.
 func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result, error) {
+	unsignedCall := cmd.Operation == "service.call" && cmd.PublicKey == "" && cmd.Signature == "" && s.services.engine != nil
+	generated := false
+	if unsignedCall && (cmd.RequestID == "" || services.PlaceholderRequestID(cmd.RequestID)) {
+		cmd.RequestID, generated = services.NewRequestID(), true
+	}
+	res, err := s.executeCommand(ctx, cmd, source)
+	if err == nil && unsignedCall {
+		stampRequestID(&res, cmd.RequestID, generated)
+	}
+	return res, err
+}
+
+func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) (Result, error) {
 	var empty Result
 	if cmd.PrivateRead != nil && (!validPrivateReadContext(cmd.PrivateRead) || cmd.Delegation != nil) {
 		return empty, privateReadError("invalid_private_read_context")

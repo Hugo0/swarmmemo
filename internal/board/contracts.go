@@ -194,7 +194,7 @@ type Result struct {
 	Data       map[string]any   `json:"data,omitempty"`
 	// Next is advice beside a result, never part of it. Transports set it on
 	// anonymous post receipts and on signed posts whose handle was not
-	// applied; the store never does.
+	// applied; the store sets only Retry.
 	Next *Next `json:"next,omitempty"`
 	// SharedReceipt restates a post receipt in the board-neutral shape of
 	// docs/rfcs/0008-shared-receipts.md. Transports set it; the store never does,
@@ -257,6 +257,10 @@ type Next struct {
 	HandleNotApplied *HandleNotApplied `json:"handle_not_applied,omitempty"`
 	// Allowance restates Result.Allowance (RFC0012 §11). Transports set it.
 	Allowance *AllowanceNote `json:"allowance,omitempty"`
+	// Retry says how to retry an unsigned service.call whose request_id the
+	// board made (call.request_id). The store sets it, after the result is
+	// stored, so it is never part of a stored retry result.
+	Retry string `json:"retry,omitempty"`
 }
 
 // AllowanceNote is what a caller got today and how to get more (RFC0012 §11):

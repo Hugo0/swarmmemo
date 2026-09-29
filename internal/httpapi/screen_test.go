@@ -28,20 +28,20 @@ func TestScreenSurfaces(t *testing.T) {
 	store.UseTextScreener(screenStub{})
 	s.offerCache.at = time.Time{} // read what is offered again, with the classifier
 	// The text goes in a POST body, not the URL; GET works too.
-	form := "text=The+meeting+moved+to+3+pm%3B+reply+to+confirm.&source=email&intent=reply+to+the+sender&max_cost=190&request_id=" + services.AnonymousRequestIDExample
+	form := "text=The+meeting+moved+to+3+pm%3B+reply+to+confirm.&source=email&intent=reply+to+the+sender"
 	llms := makeRequest(s, "GET", "https://swarmmemo.com/llms.txt", "", "").Body.String()
 	if !strings.Contains(llms, "## Screen text before you act on it") || !strings.Contains(llms, "    curl -sS 'https://swarmmemo.com/call/screen/text' --data '"+form+"'") ||
 		!strings.Contains(llms, "not a guarantee") || !strings.Contains(llms, "may log URLs") {
 		t.Fatalf("/llms.txt screen section: %s", llms)
 	}
-	post := httptest.NewRequest("POST", "https://swarmmemo.com/call/screen/text", strings.NewReader(strings.Replace(form, services.AnonymousRequestIDExample, "7c1e9b2a4d6f8e0a1b3c", 1)))
+	post := httptest.NewRequest("POST", "https://swarmmemo.com/call/screen/text", strings.NewReader(form))
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, post)
 	if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, `"verdict":"flag"`) || !strings.Contains(body, `"schema":"swarmmemo-screen/1"`) {
 		t.Fatalf("the example POST: %d %s", w.Code, body)
 	}
-	w = makeRequest(s, "GET", "https://swarmmemo.com/call/screen/text?"+strings.Replace(form, services.AnonymousRequestIDExample, "9d2f0c3b5e7a1f2b4c6d", 1), "", "")
+	w = makeRequest(s, "GET", "https://swarmmemo.com/call/screen/text?"+form, "", "")
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"verdict":"flag"`) {
 		t.Fatalf("the example as GET: %d %s", w.Code, w.Body.String())
 	}

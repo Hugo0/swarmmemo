@@ -8,6 +8,7 @@ package httpapi
 // service.read as the GET route: {"schema":1,"method":"get","args":{"agent","key"}}.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -81,7 +82,14 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	usage := "Call a service without a key as " + services.CallPathPrefix + "SERVICE/METHOD?ARG=VALUE&max_cost=N&request_id=ID; " + board.ServicesCatalogueURL + " lists the methods and their arguments."
+	// A URL opened in a browser tab is answered with indented JSON, so a
+	// person reads it as it is.
+	if r.Header.Get("Sec-Fetch-Dest") == "document" {
+		iw := &indentWriter{ResponseWriter: w}
+		defer iw.flush()
+		w = iw
+	}
+	usage := "Call a service without a key as " + services.NoKeyUsage + "; " + board.ServicesCatalogueURL + " lists the methods and their arguments."
 	id, name, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, services.CallPathPrefix), "/")
 	if !ok || id == "" || name == "" || strings.Contains(name, "/") {
 		writeError(w, bad(usage))
@@ -134,6 +142,24 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 	// Never index a call's answer, and always answer in JSON.
 	r.Header.Set("Accept", "application/json")
 	s.execute(w, withVia(r, strings.ToLower(r.Method)), c)
+}
+
+// indentWriter holds a JSON answer and writes it indented.
+type indentWriter struct {
+	http.ResponseWriter
+	buf bytes.Buffer
+}
+
+func (i *indentWriter) Write(b []byte) (int, error) { return i.buf.Write(b) }
+
+func (i *indentWriter) flush() {
+	var out bytes.Buffer
+	if json.Indent(&out, bytes.TrimSpace(i.buf.Bytes()), "", "  ") != nil {
+		_, _ = i.ResponseWriter.Write(i.buf.Bytes())
+		return
+	}
+	out.WriteByte('\n')
+	_, _ = i.ResponseWriter.Write(out.Bytes())
 }
 
 // unsignedCall reports whether c is a service.call without a key: billed to

@@ -66,9 +66,7 @@ func TestTCPCallWithoutAKey(t *testing.T) {
 	}
 	for line, want := range map[string]string{
 		"CALL memory.put key=k&value=v&max_cost=300&request_id=m1": "signature_required",
-		"CALL notary.stamp text=x&max_cost=1":                      "invalid_request", // no request_id
-		"CALL notary.stamp text=x&max_cost=1&request_id=t1":        "at least 16 characters",
-		"CALL notary.stamp text=x&request_id=r":                    "invalid_request", // no max_cost
+		"CALL notary.stamp text=x&max_cost=1&request_id=t1":        "leave it out",
 		"CALL nope.x max_cost=1&request_id=r":                      "invalid_service",
 		"CALL notary":                                              "invalid_request",
 	} {
@@ -79,6 +77,30 @@ func TestTCPCallWithoutAKey(t *testing.T) {
 	help := streamExchange(t, tcp, []byte("HELP\n"), false)
 	if !strings.Contains(help, "No key needed for the notary: 2,000 credits a day per network.") || !strings.Contains(help, "CALL notary.stamp text=") || !strings.Contains(help, "CALL <service.method>") {
 		t.Fatalf("HELP: %s", help)
+	}
+	// HELP's example works pasted as it is: no max_cost, no request_id; the
+	// answer carries the random request_id the board made.
+	var example string
+	for _, line := range strings.Split(help, "\n") {
+		if l := strings.TrimSpace(line); strings.HasPrefix(l, "CALL notary.stamp ") {
+			example = l
+		}
+	}
+	if example == "" || strings.Contains(example, "max_cost") || strings.Contains(example, "request_id") {
+		t.Fatalf("HELP's CALL example: %q", example)
+	}
+	out = streamExchange(t, tcp, []byte(example+"\n"), false)
+	var bare struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Call struct {
+				State     string
+				RequestID string `json:"request_id"`
+			} `json:"call"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &bare); err != nil || !bare.OK || bare.Data.Call.State != "done" || len(bare.Data.Call.RequestID) != 32 {
+		t.Fatalf("HELP's example: %v %s", err, out)
 	}
 	// DNS names the URL and never carries the call.
 	d := testDNS(t)

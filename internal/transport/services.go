@@ -128,7 +128,7 @@ func (h catalogHelp) lineText() string {
 	}
 	b.WriteString(h.catalogueLine() + "\n")
 	if n := h.noKey(); n.Available {
-		b.WriteString(n.Line + " Over TCP: CALL SERVICE.METHOD ARG=VALUE&max_cost=N&request_id=ID, for example (replace " + services.AnonymousRequestIDExample + " with 16 or more random characters, new per call):\n  " + h.noKeyTCPExample(n) + "\n")
+		b.WriteString(n.Line + " Over TCP: CALL SERVICE.METHOD ARG=VALUE (max_cost and request_id optional; the answer's call.request_id retries it without a second charge), for example:\n  " + h.noKeyTCPExample(n) + "\n")
 		b.WriteString("Or one URL: " + n.Example + "\n")
 	}
 	return b.String()
@@ -195,7 +195,7 @@ func (h catalogHelp) dnsService(id string) ([]string, bool) {
 		if n := h.noKey(); n.Available {
 			for _, m := range e.Methods {
 				if m.Write() && m.Anonymous {
-					if path, err := services.CallPath(e, m, services.AnonymousRequestIDExample); err == nil {
+					if path, err := services.CallPath(e, m); err == nil {
 						out = append(out, oneLine("No key: "+h.origin+path, 255))
 						break
 					}
