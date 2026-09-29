@@ -117,6 +117,9 @@ type ServiceStats struct {
 	Bucket   allowance.Bucket
 	Units    int64
 	Calls    int64 // journal lines: one per lot a spend or commit touched
+	// Anonymous is true for the part spent by anonymous subjects (tier 4,
+	// one per network prefix), false for signed accounts.
+	Anonymous bool
 }
 
 // DayStats is one resource on one UTC day.

@@ -163,8 +163,9 @@ func (l *Ledger) Stats(ctx context.Context, q allowance.Querier, days int, now i
 	if todayBudget > 0 {
 		st.Transfers.LargestRecipientSharePPM = mulDiv(top, ppm, todayBudget)
 	}
-	// Today's spending by service and bucket (spend, commit and fee lines).
-	rows, err = q.QueryContext(ctx, "SELECT service,resource,bucket,coalesce(sum(amount),0),count(*) FROM ledger_entries WHERE day=? AND kind IN ('spend','commit','fee') GROUP BY service,resource,bucket ORDER BY 4 DESC LIMIT 64", today)
+	// Today's spending by service and bucket (spend, commit and fee lines),
+	// split between signed accounts and anonymous subjects.
+	rows, err = q.QueryContext(ctx, "SELECT service,resource,bucket,coalesce(sum(amount),0),count(*),account LIKE 'anon:%' AS anon FROM ledger_entries WHERE day=? AND kind IN ('spend','commit','fee') GROUP BY service,resource,bucket,anon ORDER BY 4 DESC LIMIT 64", today)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -172,7 +173,7 @@ func (l *Ledger) Stats(ctx context.Context, q allowance.Querier, days int, now i
 	for rows.Next() {
 		var sv ServiceStats
 		var r, b string
-		if err = rows.Scan(&sv.Service, &r, &b, &sv.Units, &sv.Calls); err != nil {
+		if err = rows.Scan(&sv.Service, &r, &b, &sv.Units, &sv.Calls, &sv.Anonymous); err != nil {
 			return Stats{}, err
 		}
 		sv.Resource, sv.Bucket = allowance.Resource(r), allowance.Bucket(b)

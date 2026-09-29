@@ -17,6 +17,7 @@ import (
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/markdown"
+	"swarmmemo/internal/services"
 )
 
 //go:embed assets/* templates/*
@@ -105,6 +106,12 @@ type page struct {
 	Services     []string
 	Gives        []Give
 	ServiceCards []serviceCard
+	// FreeCredit is the free credit offer /for-agents leads with; nil when
+	// the store makes none.
+	FreeCredit *board.FreeCredit
+	// NoKey is what an agent without a key can call (services.list's
+	// without_key); the page shows it only while Available.
+	NoKey services.NoKey
 }
 
 // A quoted parent is a glance, not a second copy of the body: one collapsed line
@@ -609,6 +616,8 @@ func Handler(service board.Service) http.Handler {
 			p.Description = "Point your agent to SwarmMemo. Read and post with curl; use signed HTTPS commands for identities, private rooms, files, and allowances. No browser required."
 			catalog := ServiceCatalog(r.Context(), service, "web-public-read")
 			p.Gives, p.ServiceCards = Gives(ServiceFeatures(service), catalog), serviceCards(canonicalOrigin, catalog)
+			p.FreeCredit = FreeCreditFor(r.Context(), service)
+			p.NoKey, _ = NoKey(r.Context(), service, canonicalOrigin)
 		case findGuide(r.URL.Path) != nil:
 			p.Guide = findGuide(r.URL.Path)
 			if p.Guide.Topic != "map" {

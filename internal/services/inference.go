@@ -45,6 +45,13 @@ const (
 	InferenceOutputTokensMax = 4096
 	// InferenceDefaultMaxTokens is max_tokens when a call leaves it out.
 	InferenceDefaultMaxTokens = 256
+	// InferenceAnonymousModel is the one model alias an unsigned call may
+	// name, and InferenceAnonymousMaxTokens its most output tokens.
+	// InferenceAnonymousPromptBytes bounds the summed message content of an
+	// unsigned call (security review 1.21, L2).
+	InferenceAnonymousModel       = "small"
+	InferenceAnonymousMaxTokens   = 256
+	InferenceAnonymousPromptBytes = 2 << 10
 	// InferenceInputTokensMax bounds the input tokens a call can be charged
 	// for: a token is at least one byte of prompt, plus a fixed allowance per
 	// message and per request for the chat template.
@@ -170,11 +177,15 @@ type InferenceScreener interface {
 }
 
 // ScreenInput is what a screener sees: Stage "prompt" (Text is the messages
-// as JSON) or "output" (Text is the reply).
+// as JSON) or "output" (Text is the reply). Signed is false for a call
+// without a key: a screener that cannot judge its text (the classifier is
+// down or over its spend cap) must then answer an error, never let it
+// through flagged, so the call fails closed (security review 1.21, L1).
 type ScreenInput struct {
-	Stage string
-	Model string // the caller's alias
-	Text  string
+	Stage  string
+	Model  string // the caller's alias
+	Text   string
+	Signed bool
 }
 
 type ScreenVerdict struct {
@@ -473,7 +484,10 @@ func (*inference) Describe() Descriptor {
 				{"temperature", "number", false, "0 to 2"},
 			},
 			Example:        json.RawMessage(`{"model":"MODEL_ALIAS","messages":[{"role":"user","content":"Name three uses of a message board for agents."}],"max_tokens":200}`),
-			ExampleMaxCost: 400}},
+			ExampleMaxCost: 400,
+			Anonymous:      true, AnonymousLabel: "small-model inference",
+			AnonymousNote: "model " + InferenceAnonymousModel + " only, max_tokens at most " + strconv.Itoa(InferenceAnonymousMaxTokens) + ", messages up to " + strconv.Itoa(InferenceAnonymousPromptBytes/1024) + " KiB of text; prompts and outputs are screened, and refused if the screen is not running",
+			AnonymousRate: AnonRate{CallerPerMinute: 5, CallerPerDay: 50, AllPerMinute: 30, AllPerDay: 2000}}},
 		MaxDuration:   InferenceMaxDuration,
 		StoredBodyMax: InferenceStoredBodyBytes,
 	}
@@ -641,6 +655,24 @@ func (p *inference) parseInference(raw json.RawMessage) (inferencePlan, error) {
 	return plan, nil
 }
 
+// CheckAnonymous narrows an unsigned call: only the small model, at most
+// InferenceAnonymousMaxTokens output tokens and InferenceAnonymousPromptBytes
+// of message content, and only while a screener (moderation) sees every
+// prompt and output, so it fails closed.
+func (p *inference) CheckAnonymous(c Call) error {
+	plan, err := p.parseInference(c.Args)
+	if err != nil {
+		return err
+	}
+	if plan.alias != InferenceAnonymousModel || plan.maxTokens > InferenceAnonymousMaxTokens || plan.promptBytes > InferenceAnonymousPromptBytes {
+		return refusal("anonymous_limit")
+	}
+	if p.cfg == nil || p.cfg.Screener == nil {
+		return refusal("anonymous_unscreened")
+	}
+	return nil
+}
+
 // compactJSON encodes v without HTML escaping, so the record keeps the text
 // as sent.
 func compactJSON(v any) []byte {
@@ -704,7 +736,7 @@ func (p *inference) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) 
 		return Result{}, refusal("upstream_unavailable")
 	}
 	if s := p.cfg.Screener; s != nil {
-		v, err := s.Screen(ctx, ScreenInput{Stage: "prompt", Model: plan.alias, Text: string(plan.prompt)})
+		v, err := s.Screen(ctx, ScreenInput{Stage: "prompt", Model: plan.alias, Text: string(plan.prompt), Signed: c.Subject.Signed})
 		if err != nil {
 			return Result{}, refusal("upstream_unavailable")
 		}
@@ -771,7 +803,7 @@ func (p *inference) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) 
 		}
 		p.releaseSpend(up, day, reserve-used)
 		reply.Output = strings.ReplaceAll(reply.Output, key, "[redacted]")
-		return p.result(ctx, plan, up, r.Model, reply, attempts, min(surcharge+used+unbilled, quoteMax))
+		return p.result(ctx, plan, up, r.Model, reply, attempts, min(surcharge+used+unbilled, quoteMax), c.Subject.Signed)
 	}
 	failure := "upstream_unavailable"
 	for _, a := range attempts {
@@ -811,13 +843,18 @@ func (p *inference) billedFailure(plan inferencePlan, attempts []attempt, failur
 
 // result builds the call record: the body keeps the prompt, the output and
 // the model (the public run log); Public keeps sizes and hashes.
-func (p *inference) result(ctx context.Context, plan inferencePlan, up *InferenceUpstream, model string, reply inferenceReply, attempts []attempt, used int64) (Result, error) {
+func (p *inference) result(ctx context.Context, plan inferencePlan, up *InferenceUpstream, model string, reply inferenceReply, attempts []attempt, used int64, signed bool) (Result, error) {
 	outHash := sha256.Sum256([]byte(reply.Output))
 	promptHash := sha256.Sum256(plan.prompt)
 	output, hidden := reply.Output, ""
 	if s := p.cfg.Screener; s != nil {
-		v, err := s.Screen(ctx, ScreenInput{Stage: "output", Model: plan.alias, Text: reply.Output})
+		v, err := s.Screen(ctx, ScreenInput{Stage: "output", Model: plan.alias, Text: reply.Output, Signed: signed})
 		if err != nil {
+			if !signed {
+				// An unsigned call's output is never returned unscreened:
+				// refused, and refunded (security review 1.21, L1).
+				return Result{}, refusal("anonymous_unscreened")
+			}
 			return Result{}, refusal("upstream_unavailable")
 		}
 		if v.Hide {

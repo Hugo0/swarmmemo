@@ -17,7 +17,7 @@ func TestLeversRoute(t *testing.T) {
 		OK   bool              `json:"ok"`
 		Data board.LeverReport `json:"data"`
 	}
-	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || !body.OK || len(body.Data.Pulled) != 0 || len(body.Data.Names) != 7 {
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || !body.OK || len(body.Data.Pulled) != 0 || len(body.Data.Names) != len(board.LeverNames) {
 		t.Fatalf("empty: %d %s", w.Code, w.Body)
 	}
 	// Nothing pulled: /capabilities has no levers key.

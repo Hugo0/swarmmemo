@@ -444,6 +444,7 @@ type actor struct {
 	signed                 bool
 	operation              string // the command's operation, for the ledger's journal
 	client                 string // anonymous only: Subject.Client (RFC0012 §6.2)
+	creditAccount          string // anonymous only: the pseudonym of its credit share (the IPv6 /48)
 	canonical              []byte
 	requestNamespace       string
 	grant                  *delegationRow
@@ -452,7 +453,8 @@ type actor struct {
 func (s *Store) authenticate(cmd Command, source string) (actor, error) {
 	a := actor{canonical: Canonical(s.config.ServiceID, cmd)}
 	if cmd.PublicKey == "" && cmd.Signature == "" {
-		a.account = s.anonymousAccount(source)
+		// The pseudonym is derived at the command's clock (anonymousActor),
+		// so its salt's day is the command's day (security review 1.21, L5).
 		a.id = "anonymous"
 		return a, nil
 	}
@@ -538,9 +540,6 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 		return empty, err
 	}
 	a.operation = cmd.Operation
-	if !a.signed {
-		a.client = s.anonymousClient(ctx, source)
-	}
 	if err := validateCommandFields(cmd); err != nil {
 		return empty, err
 	}
@@ -565,6 +564,7 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 	}
 	defer tx.Rollback()
 	now := s.now().Unix()
+	s.anonymousActor(ctx, &a, cmd, source, now)
 	// RFC0012 levers (signed-only, block-prefix) refuse here, before any work.
 	if err = s.admit(ctx, tx, cmd, a, source, now); err != nil {
 		return empty, err
@@ -622,15 +622,16 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 		// stored under yesterday's salted pseudonym.
 		namespaces := []string{a.requestNamespace}
 		if !a.signed {
-			if previous := s.previousAnonymousAccount(source, now); previous != "" && previous != a.requestNamespace {
+			if previous := s.previousAnonymousAccount(source, now, anonymousV6Bits(cmd.Operation)); previous != "" && previous != a.requestNamespace {
 				namespaces = append(namespaces, previous)
 			}
 		}
 		for _, key := range keys {
-			var storedDigest, stored string
+			var storedDigest, stored, found string
 			for _, namespace := range namespaces {
 				err = tx.QueryRowContext(ctx, "SELECT digest,result FROM requests WHERE actor=? AND request_key=?", namespace, key).Scan(&storedDigest, &stored)
 				if !errors.Is(err, sql.ErrNoRows) {
+					found = namespace
 					break
 				}
 			}
@@ -648,7 +649,14 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 				}
 				// RFC0012 §2.5: a service call still running is request_in_flight.
 				if cmd.Operation == "service.call" {
-					return s.serviceRetry(ctx, tx, a, result, now)
+					// The call belongs to the account its receipt was found
+					// under: across midnight, an anonymous caller's
+					// yesterday's pseudonym (security review 1.21, L6).
+					caller := a
+					if !a.signed && found != "" {
+						caller.account = found
+					}
+					return s.serviceRetry(ctx, tx, caller, result, now)
 				}
 				return result, nil
 			}

@@ -9,7 +9,8 @@ package board
 //	"anon:" + hex(HMAC-SHA256(salt_d, prefix))[:32]
 //
 // where prefix is the caller's IPv6 /64 or IPv4 /24 (an IPv4-mapped IPv6
-// address counts as IPv4, a zone is dropped) and any source that is not an
+// address counts as IPv4, a zone is dropped), or for an unsigned service.call
+// (which spends credit) the IPv6 /48, and any source that is not an
 // address ("nostr-bridge", "web-public-read") is hashed whole. salt_d is 32
 // random bytes made at the first anonymous request of each UTC day. It lives
 // in memory only, never in the database, so no backup can recompute a
@@ -36,6 +37,12 @@ const (
 	// anonymous subject covers.
 	AnonPrefixV6Bits = 64
 	AnonPrefixV4Bits = 24
+	// AnonCreditPrefixV6Bits is the IPv6 prefix one anonymous caller of a
+	// service (an unsigned service.call, billed in credit) covers: a /48,
+	// the smallest allocation a tunnel broker or ISP hands out for free,
+	// so holding one does not multiply the credit share by 65,536 /64s
+	// (security review 1.21, M3). Posting stays keyed on the /64.
+	AnonCreditPrefixV6Bits = 48
 	// AnonSaltGraceSeconds is how long into a UTC day the previous day's
 	// salt survives, for exact retries across midnight.
 	AnonSaltGraceSeconds = 3600
@@ -55,19 +62,50 @@ type anonSalts struct {
 	timer *time.Timer
 }
 
-// anonymousAccount is the continuity account of an unsigned caller.
-func (s *Store) anonymousAccount(source string) string {
+// anonymousAccount is the continuity account of an unsigned caller at now
+// (the command's clock, so the salt and the day agree), keyed on v6Bits of an
+// IPv6 address: AnonPrefixV6Bits, or AnonCreditPrefixV6Bits for an unsigned
+// service.call.
+func (s *Store) anonymousAccount(source string, now int64, v6Bits int) string {
 	if !s.config.Features.AnonPrefix {
+		if v6Bits != AnonPrefixV6Bits {
+			// Credit is keyed on the network even while posting is keyed on
+			// the whole address: one address per share would let an IPv6
+			// caller multiply it without bound.
+			return "anon:" + fingerprint([]byte("credit\x00"+anonPrefixKeyBits(source, v6Bits)))
+		}
 		return "anon:" + fingerprint([]byte(source))
 	}
-	cur, _ := s.anonSalt(s.now().Unix())
-	return anonPseudonym(cur, anonPrefixKey(source))
+	cur, _ := s.anonSalt(now)
+	return anonPseudonym(cur, anonPrefixKeyBits(source, v6Bits))
 }
 
-// previousAnonymousAccount is the caller's pseudonym under the previous day's
-// salt while that salt survives (until 01:00 UTC), else "". It does no I/O, so
-// it is safe inside a transaction.
-func (s *Store) previousAnonymousAccount(source string, now int64) string {
+// anonymousActor names an unsigned caller at the command's clock now: its
+// pseudonym (keyed on the /48 for a service call, else the /64) and its
+// client descriptor. A signed actor is left as it is.
+func (s *Store) anonymousActor(ctx context.Context, a *actor, cmd Command, source string, now int64) {
+	if a.signed {
+		return
+	}
+	a.account = s.anonymousAccount(source, now, anonymousV6Bits(cmd.Operation))
+	a.creditAccount = s.anonymousAccount(source, now, AnonCreditPrefixV6Bits)
+	a.client = s.anonymousClient(ctx, source, now)
+}
+
+// anonymousV6Bits is the IPv6 prefix an unsigned command of operation op is
+// keyed on: the /48 for a service call (it spends credit), else the /64.
+func anonymousV6Bits(op string) int {
+	if op == "service.call" {
+		return AnonCreditPrefixV6Bits
+	}
+	return AnonPrefixV6Bits
+}
+
+// previousAnonymousAccount is the caller's pseudonym (keyed on v6Bits, as
+// anonymousAccount) under the previous day's salt while that salt survives
+// (until 01:00 UTC), else "". It does no I/O, so it is safe inside a
+// transaction.
+func (s *Store) previousAnonymousAccount(source string, now int64, v6Bits int) string {
 	if !s.config.Features.AnonPrefix {
 		return ""
 	}
@@ -77,19 +115,19 @@ func (s *Store) previousAnonymousAccount(source string, now int64) string {
 	if st.prev == nil || st.day != now/86400 || now%86400 >= AnonSaltGraceSeconds {
 		return ""
 	}
-	return anonPseudonym(st.prev, anonPrefixKey(source))
+	return anonPseudonym(st.prev, anonPrefixKeyBits(source, v6Bits))
 }
 
 // anonymousClient is Subject.Client for an unsigned caller: HMAC(salt_d,
-// prefix ‖ client signature), where the client signature is the channel and,
-// over HTTP, the User-Agent product token. Empty while ANON_PREFIX is off. It
-// can only narrow a prefix's allowance, never widen it: the prefix stays the
-// subject.
-func (s *Store) anonymousClient(ctx context.Context, source string) string {
+// prefix ‖ client signature), where the prefix is always the /64 (or /24)
+// and the client signature is the channel and, over HTTP, the User-Agent
+// product token. Empty while ANON_PREFIX is off. It can only narrow a
+// prefix's allowance, never widen it: the prefix stays the subject.
+func (s *Store) anonymousClient(ctx context.Context, source string, now int64) string {
 	if !s.config.Features.AnonPrefix {
 		return ""
 	}
-	cur, _ := s.anonSalt(s.now().Unix())
+	cur, _ := s.anonSalt(now)
 	mac := hmac.New(sha256.New, cur)
 	mac.Write([]byte("client\x00" + anonPrefixKey(source) + "\x00" + ViaFrom(ctx) + "\x00" + clientFrom(ctx)))
 	return hex.EncodeToString(mac.Sum(nil))[:32]
@@ -116,14 +154,17 @@ func clientFrom(ctx context.Context) string {
 
 // anonPrefixKey is the salted hash's input for source: "ip:" and the masked
 // prefix for an address, "src:" and the whole string otherwise. The two forms
-// cannot collide.
-func anonPrefixKey(source string) string {
+// cannot collide, nor can prefixes of different lengths.
+func anonPrefixKey(source string) string { return anonPrefixKeyBits(source, AnonPrefixV6Bits) }
+
+// anonPrefixKeyBits is anonPrefixKey with an IPv6 address masked to v6Bits.
+func anonPrefixKeyBits(source string, v6Bits int) string {
 	addr, err := netip.ParseAddr(source)
 	if err != nil {
 		return "src:" + source
 	}
 	addr = addr.WithZone("").Unmap()
-	bits := AnonPrefixV6Bits
+	bits := v6Bits
 	if addr.Is4() {
 		bits = AnonPrefixV4Bits
 	}

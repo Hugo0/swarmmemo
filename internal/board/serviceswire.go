@@ -10,6 +10,9 @@ import (
 	"crypto/ed25519"
 	"database/sql"
 	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"swarmmemo/internal/allowance"
@@ -165,7 +168,9 @@ func (s *Store) readServices(ctx context.Context, tx *sql.Tx, c Command, a actor
 	var data map[string]any
 	var err error
 	if c.Operation == "services.list" {
-		data, err = e.Catalogue(ctx, tx, now)
+		if data, err = e.Catalogue(ctx, tx, now); err == nil {
+			data["without_key"] = s.noKey(ctx, tx, now)
+		}
 	} else {
 		data, err = e.Read(ctx, tx, services.Request{Service: c.Target, Data: c.Data, Subject: subject(a)}, now)
 	}
@@ -179,16 +184,29 @@ func (s *Store) readServices(ctx context.Context, tx *sql.Tx, c Command, a actor
 // transaction; a Remote or Async call reserves here, and runs and settles
 // after commit through afterCommit.
 func (s *Store) callService(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
-	if err := requireSigned(a); err != nil {
-		return Result{}, err
-	}
 	e := s.services.engine
 	if e == nil {
+		if err := requireSigned(a); err != nil {
+			return Result{}, err
+		}
 		return Result{}, allowanceError("service_unavailable")
+	}
+	if !a.signed {
+		if err := s.admitUnsignedCall(ctx, tx, c, now); err != nil {
+			s.logUnsignedCall(ctx, c, a, "", err)
+			return Result{}, err
+		}
 	}
 	out, err := e.Call(ctx, tx, services.Request{Service: c.Target, Data: c.Data, Subject: subject(a), RequestKey: serviceRequestKey(c)}, now)
 	if err != nil {
-		return Result{}, serviceError(err)
+		err = s.callError(ctx, tx, now, err, a)
+		if !a.signed {
+			s.logUnsignedCall(ctx, c, a, "", err)
+		}
+		return Result{}, err
+	}
+	if !a.signed {
+		s.logUnsignedCall(ctx, c, a, callState(out.Data), nil)
 	}
 	res := Result{Data: out.Data}
 	if after := out.After; after != nil {
@@ -201,6 +219,162 @@ func (s *Store) callService(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		}
 	}
 	return res, nil
+}
+
+// admitUnsignedCall is what an unsigned service.call must pass before the
+// engine sees it: a method the catalogue marks anonymous, credit for the
+// anonymous tier (none while the signed-services lever is pulled), and a
+// request_id (its only retry key: it has no nonce).
+func (s *Store) admitUnsignedCall(ctx context.Context, tx *sql.Tx, c Command, now int64) error {
+	if !s.services.engine.Anonymous(c.Target, c.Data) {
+		return s.anonymousNotAllowed(ctx, tx, now)
+	}
+	// The kill switch (the signed-services lever) and a zero anonymous
+	// credit share both land here, before anything is parsed or reserved.
+	if n := s.noKey(ctx, tx, now); !n.Available {
+		return problem(403, "signed_only", "Service calls without a key are off right now: "+n.Why+". Sign the command with an Ed25519 key.")
+	}
+	// Everyone on the caller's network shares its request_id namespace, so
+	// a short or guessable one could already be taken (security review
+	// 1.21, L3).
+	if len(c.RequestID) < AnonymousRequestIDMin {
+		return problem(400, "invalid_request", fmt.Sprintf("A service.call without a key needs a request_id of at least %d characters, new for each call (for example 32 random hex digits): everyone on your network shares one request_id namespace, so a short or guessable one may already be taken. An exact retry with the same one returns the first answer and is never charged twice.", AnonymousRequestIDMin))
+	}
+	return nil
+}
+
+// AnonymousRequestIDMin is the shortest request_id an unsigned service.call
+// takes.
+const AnonymousRequestIDMin = services.AnonymousRequestIDMin
+
+// anonymousNotAllowed is the refusal of an unsigned call to a method that
+// needs a key; it names the methods that do not and, when there is one,
+// what signing gets the caller.
+func (s *Store) anonymousNotAllowed(ctx context.Context, tx *sql.Tx, now int64) error {
+	methods := services.AnonymousMethods(services.Catalog(s.config.Features.Services))
+	msg := "This service method needs an Ed25519 signed command."
+	if len(methods) > 0 && s.noKey(ctx, tx, now).Available {
+		msg += " Without a key you can call " + strings.Join(methods, ", ") + "; see " + ServicesCatalogueURL + "."
+	}
+	if offer := s.freeCredit(ctx, tx, now); offer != nil {
+		msg += " " + offer.Line + " " + offer.Signing
+	}
+	return problem(401, "signature_required", msg)
+}
+
+// callError maps an engine refusal, in words for the caller: a caller
+// without a key hears about its network's share, not an agent's.
+func (s *Store) callError(ctx context.Context, tx *sql.Tx, now int64, err error, a actor) error {
+	var e *allowance.Err
+	if !errors.As(err, &e) {
+		return serviceError(err)
+	}
+	switch {
+	case e.Code == "anonymous_not_allowed":
+		return s.anonymousNotAllowed(ctx, tx, now)
+	case !a.signed && e.Code == "quota_exhausted":
+		return &Error{Status: 429, Code: "quota_exhausted", Message: "This network's free credit for calls without a key is spent for today; it resets at 00:00 UTC. A signed key has its own, larger share.", RetryAfter: e.RetryAfter}
+	case !a.signed && e.Code == "global_quota_exhausted" && e.RetryAfter > 0 && int64(e.RetryAfter) < 86400-now%86400:
+		// The anonymous tier's day is released hour by hour (ledger
+		// tier4Room): this hour's part is spent, not the day.
+		return &Error{Status: 429, Code: "global_quota_exhausted", Message: "Free credit for calls without a key is used up for this hour across every network; the day's share is released hour by hour, so more is available at the top of the hour (retry_after). A signed key draws from its own tier.", RetryAfter: e.RetryAfter}
+	case !a.signed && e.Code == "global_quota_exhausted":
+		return &Error{Status: 429, Code: "global_quota_exhausted", Message: "Free credit for calls without a key is used up for today across every network; it resets at 00:00 UTC. A signed key draws from its own tier.", RetryAfter: e.RetryAfter}
+	case !a.signed && e.Code == "notary_limit":
+		return &Error{Status: 429, Code: "notary_limit", Message: fmt.Sprintf("This network made %d notary receipts without a key today, the most allowed; the count resets at 00:00 UTC.", services.NotaryPerAnonymousDay)}
+	}
+	return serviceError(err)
+}
+
+// callState is a call's state from its answer, for the log.
+func callState(data map[string]any) string {
+	if rec, ok := data["call"].(services.CallRecord); ok {
+		return rec.State
+	}
+	return ""
+}
+
+// logUnsignedCall writes one line per unsigned service.call, so abuse can be
+// reviewed daily: the caller's pseudonym (salted, changes daily), the
+// service, method, channel and client product, and the outcome. Never the
+// address, the arguments or the result.
+func (s *Store) logUnsignedCall(ctx context.Context, c Command, a actor, state string, err error) {
+	method := "?"
+	if d, perr := services.ParseData(c.Data, true); perr == nil {
+		method = d.Method
+	}
+	attrs := []any{"subject", a.account, "service", c.Target, "method", method, "via", ViaFrom(ctx), "client", clientFrom(ctx)}
+	if err != nil {
+		code := "error"
+		var be *Error
+		if errors.As(err, &be) {
+			code = be.Code
+		}
+		slog.Info("Service call without a key refused", append(attrs, "code", code)...)
+		return
+	}
+	slog.Info("Service call without a key", append(attrs, "state", state)...)
+}
+
+// noKey is services.list's without_key: what an agent without a key can
+// call and how much, from the allowance parameters and the levers in force.
+func (s *Store) noKey(ctx context.Context, q allowance.Querier, now int64) services.NoKey {
+	catalog := services.Catalog(s.config.Features.Services)
+	if inf := s.services.inference; inf == nil || inf.Screener == nil {
+		// Unsigned inference fails closed without moderation's screen, so
+		// nothing offers it.
+		for i := range catalog {
+			if catalog[i].ID == "inference" {
+				for j := range catalog[i].Methods {
+					catalog[i].Methods[j].Anonymous = false
+				}
+			}
+		}
+	}
+	why := ""
+	var credits, all int64
+	switch {
+	case s.config.Features.Ledger == LedgerOff:
+		why = "the allowance ledger is off"
+	default:
+		p, _, err := s.ledger.led.Params(ctx, q, now)
+		if err != nil {
+			why = "the allowance parameters cannot be read"
+			break
+		}
+		rp := p.Resources[allowance.Credit]
+		if rp == nil {
+			why = "no credit resource"
+			break
+		}
+		credits = rp.Cap[3]
+		all = rp.Budget * rp.ShareMaxPPM[3] / 1_000_000
+		snap, err := s.leverSnapshot(ctx, q)
+		if err != nil {
+			why = "the levers cannot be read"
+			break
+		}
+		lv := snap.levers(now)
+		if lv.Tier4SharePPM >= 0 {
+			all = min(all, rp.Budget*lv.Tier4SharePPM/1_000_000)
+		}
+		if cut, ok := lv.BudgetCutPPM[allowance.Credit]; ok {
+			all -= all * max(0, min(cut, 1_000_000)) / 1_000_000
+		}
+		if lv.SignedServices || lv.SignedOnly || lv.ProvenOnly {
+			why = "paused by a public lever; see /api/levers"
+		}
+	}
+	return services.NoKeyFor("", catalog, credits, all, why)
+}
+
+// NoKey is what an agent without a key can call today (services.list's
+// without_key), for the discovery surfaces. It reads outside any command.
+func (s *Store) NoKey(ctx context.Context) services.NoKey {
+	if len(s.config.Features.Services) == 0 {
+		return services.NoKey{}
+	}
+	return s.noKey(ctx, s.db, s.now().Unix())
 }
 
 // serviceRequestKey is the call's retry key, the same one the requests table
@@ -242,6 +416,10 @@ func serviceError(err error) error {
 		return problem(404, "not_found", "No service call with that ID belongs to your agent; the call's receipt names its ID.")
 	case "request_rate":
 		return &Error{Status: 429, Code: "request_rate", Message: "Too many service requests (reads, or public_data dataset requests, whose limit follows your tier); wait retry_after seconds.", RetryAfter: e.RetryAfter}
+	case services.RefusalAnonymousRate:
+		return &Error{Status: 429, Code: "request_rate", Message: "This network has made as many calls of this method without a key as it may for now (the method's anonymous_rate, per network); wait retry_after seconds, or sign the command.", RetryAfter: e.RetryAfter}
+	case services.RefusalAnonymousRateAll:
+		return &Error{Status: 429, Code: "request_rate", Message: "Calls of this method without a key are at their limit for every network together right now (the method's anonymous_rate); wait retry_after seconds, or sign the command: a signed call is not counted against it.", RetryAfter: e.RetryAfter}
 	case "upstream_failed":
 		return problem(503, "service_unavailable", "The service call failed and nothing was charged; retry with a new request ID.")
 	case "upstream_busy":
@@ -250,6 +428,10 @@ func serviceError(err error) error {
 		return &Error{Status: 503, Code: "service_unavailable", Message: "No upstream for this service can be called right now (none configured, suspended, or its daily budget is spent), and nothing was charged. services.list shows what is available; budgets reset at 00:00 UTC.", RetryAfter: 60}
 	case "content_refused":
 		return problem(403, "content_refused", "Moderation refused this request, and nothing was charged.")
+	case "anonymous_limit":
+		return problem(401, "signature_required", fmt.Sprintf("Without a key, inference takes model %q, max_tokens up to %d and messages of up to %d bytes of text in all; sign the command for other models, longer prompts or longer answers.", services.InferenceAnonymousModel, services.InferenceAnonymousMaxTokens, services.InferenceAnonymousPromptBytes))
+	case "anonymous_unscreened":
+		return &Error{Status: 503, Code: "service_unavailable", Message: "Inference without a key needs moderation, which is not running now, and nothing was charged; sign the command, or retry later.", RetryAfter: 60}
 	case "upstream_unknown":
 		return &Error{Status: 503, Code: "service_unavailable", Message: `The call's outcome is not known yet; read it with service.read {"method":"status"}, or retry with the same request ID.`, RetryAfter: 5}
 	case "x402_unknown_resource":

@@ -91,6 +91,16 @@ type Method struct {
 	Example        json.RawMessage
 	PriceNote      string
 	ExampleMaxCost int64
+	// Anonymous marks a write anyone may call without a key (anonymous.go):
+	// billed in credit to the caller's network, within that network's free
+	// daily share. AnonymousLabel names the service in the one "no key
+	// needed" line ("public data"), AnonymousNote says what an unsigned call
+	// may not do that a signed one may, and AnonymousRate bounds unsigned
+	// calls per network and for every anonymous caller together.
+	Anonymous      bool
+	AnonymousLabel string
+	AnonymousNote  string
+	AnonymousRate  AnonRate
 }
 
 type Descriptor struct {

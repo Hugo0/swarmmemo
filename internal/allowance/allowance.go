@@ -62,10 +62,14 @@ type Classifier interface {
 
 type Levers struct {
 	SignedOnly, ProvenOnly, FreezeTransfers, PauseNewKeys bool
-	PauseNewKeysSince                                     int64
-	Tier4SharePPM                                         int64              // -1 when the lever is not pulled
-	BudgetCutPPM                                          map[Resource]int64 // absent when not pulled
-	Version                                               int64
+	// SignedServices is the signed-services lever: unsigned service calls
+	// are refused and the anonymous tier gets no credit (its credit pool and
+	// every anonymous credit share are zero until it is released).
+	SignedServices    bool
+	PauseNewKeysSince int64
+	Tier4SharePPM     int64              // -1 when the lever is not pulled
+	BudgetCutPPM      map[Resource]int64 // absent when not pulled
+	Version           int64
 }
 
 type LeverSource interface {

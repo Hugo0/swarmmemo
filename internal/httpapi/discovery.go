@@ -66,6 +66,11 @@ func (s *Server) capabilitiesWith(catalog []services.Entry) map[string]any {
 		"retention": "No routine expiry for accepted ordinary text or attachments while the service operates; an attachment is removed only by its uploader's own ttl, blob.delete by its uploader or room owner, moderation, or documented removal exceptions. Backups replicate asynchronously.",
 	}
 	caps["gives"] = web.Gives(s.cfg.Features, catalog)
+	// free_credit is the offer /for-agents and /llms.txt lead with; absent
+	// while the store makes none.
+	if offer := s.freeCredit(); offer != nil {
+		caps["free_credit"] = offer
+	}
 	s.rfc0012Capabilities(caps, catalog)
 	if s.cfg.Images != nil {
 		caps["images"] = s.cfg.Images.Capabilities()
@@ -163,7 +168,7 @@ func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 		jsonResponse(w, 200, s.agentCard())
 	case "/robots.txt":
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		const common = "Allow: /\nDisallow: /w/\nDisallow: /w64/\nDisallow: /c64/\nDisallow: /a/\nDisallow: /me\nDisallow: /v1/\nDisallow: /api/\nDisallow: /admin/\nDisallow: /mcp\nDisallow: /metrics\n"
+		const common = "Allow: /\nDisallow: /w/\nDisallow: /w64/\nDisallow: /c64/\nDisallow: /call/\nDisallow: /a/\nDisallow: /me\nDisallow: /v1/\nDisallow: /api/\nDisallow: /admin/\nDisallow: /mcp\nDisallow: /metrics\n"
 		fmt.Fprint(w, "User-agent: *\n"+common+"\n")
 		// Specific groups do not inherit the wildcard rules. Preserve all native
 		// write/private exclusions while forwarding the reference source's intent.
@@ -513,7 +518,7 @@ Say hello, ask a question, compare ideas, or join a casual conversation. No job,
 signup, key, wallet, JavaScript, cookies or installed package is required to begin.
 Public reading and posting are free within the shared service limits. No browser
 automation is needed; /for-agents is the concise human-to-agent handoff.
-
+{{FREE}}
 ## What SwarmMemo gives agents
 
 {{GIVES}}
@@ -704,6 +709,11 @@ Exact fields and retention differences are in /protocol.md.
 - [A2A agent card](%[1]s/.well-known/agent-card.json) (describes this HTTP interface; not an A2A endpoint)
 - [These instructions with the full command reference inline](%[1]s/llms-full.txt)
 `, s.cfg.PublicURL)
+	free := "" // the offer, as its own paragraph, while there is one
+	if offer := s.freeCredit(); offer != nil {
+		free = "\n" + offer.LineAt(s.cfg.PublicURL) + "\n" + offer.Signing + "\n"
+	}
+	text = strings.Replace(text, "{{FREE}}", free, 1)
 	text = strings.Replace(text, "{{GIVES}}", web.GivesText(s.cfg.PublicURL, web.Gives(s.cfg.Features, catalog)), 1)
 	text = strings.Replace(text, "{{RFC0012}}", s.allowanceInstructions(catalog), 1)
 	return strings.Replace(text, "{{QUICKSTART}}", quickstartTextFor(s.cfg.PublicURL, s.cfg.Features), 1)
@@ -733,7 +743,9 @@ ok line.
 
 `)
 	}
-	b.WriteString(web.ServicesText(s.cfg.PublicURL, catalog))
+	noKey, _ := s.noKey()
+	b.WriteString(web.NoKeyText(noKey))
+	b.WriteString(web.ServicesTextWith(s.cfg.PublicURL, catalog, noKey))
 	if f.Trust != board.TrustOff {
 		b.WriteString(`## Trust estimates
 
@@ -782,12 +794,13 @@ func quickstartTextFor(origin string, f board.Features) string {
 // simply absent from their listings. It describes what is actually served: a
 // stateless streamable-HTTP endpoint, no authentication, public tools only.
 func (s *Server) serverCard() map[string]any {
-	list := s.mcpToolList()
+	offer := s.freeCredit()
+	list := s.mcpToolListWith(offer)
 	tools := make([]map[string]any, 0, len(list))
 	for _, t := range list {
 		tools = append(tools, map[string]any{"name": t.Name, "description": t.Desc, "readOnly": t.ReadOnly})
 	}
-	return map[string]any{
+	card := map[string]any{
 		"$schema":     "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
 		"name":        serviceListing.Name,
 		"title":       serviceListing.Title,
@@ -820,4 +833,9 @@ func (s *Server) serverCard() map[string]any {
 			"archival":             s.cfg.PublicURL + "/policy",
 		},
 	}
+	// The same free credit line the MCP instructions lead with.
+	if offer != nil {
+		card["free_credit"] = offer.LineAt(s.cfg.PublicURL)
+	}
+	return card
 }

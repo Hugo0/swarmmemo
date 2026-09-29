@@ -79,11 +79,51 @@ func limits(d *dayState, rp *ResourceParams, lv allowance.Levers) [5]int64 {
 		share = clamp(lv.Tier4SharePPM, 0, ppm)
 	}
 	l[4] = mulDiv(d.BudgetEffective, share, ppm)
-	if lv.SignedOnly || lv.ProvenOnly {
+	if anonymousOff(d.Resource, lv) {
 		l[4] = 0
 	}
 	return l
 }
+
+// anonymousOff reports whether the levers give the anonymous tier nothing
+// of resource r: signed-only and proven-only for every resource,
+// signed-services for credit.
+func anonymousOff(r allowance.Resource, lv allowance.Levers) bool {
+	return lv.SignedOnly || lv.ProvenOnly || lv.SignedServices && r == allowance.Credit
+}
+
+// tier4Room is what tier-4 lots may still draw at now: the tier's limit
+// (its share of the effective budget, or the lever's) as released so far
+// today (tier4Released), less what they drew. Spill from tier 3 can leave
+// tier 4 more water than that; it is never spent by tier 4 (it may still be
+// lent to higher tiers), so the anonymous tier's spend stays within its
+// share whatever spills down. hourly reports that the hourly release, not
+// the day's limit, is what binds.
+func tier4Room(d *dayState, rp *ResourceParams, lv allowance.Levers, now int64) (room int64, hourly bool) {
+	day := limits(d, rp, lv)[4]
+	released := tier4Released(d, rp, day, now)
+	return max(0, released-d.Pools[4].Claimed), released < day
+}
+
+// tier4Released is how much of the anonymous tier's day limit lim tier-4
+// lots may have drawn by now. Where the parameters cap the tier below the
+// whole budget (share_max_ppm[3] < 100%, as for credit), the day is released
+// over the day: a sixth at 00:00 UTC, then a 24th each hour, cumulatively,
+// all of it from 20:00 (tier4ReleaseStart). One burst takes at most what has
+// been released so far, never the whole day at once (security review 1.21,
+// M3); what an hour leaves unused carries forward. At a full share (posting's
+// default) nothing is held back.
+func tier4Released(d *dayState, rp *ResourceParams, lim, now int64) int64 {
+	if rp.ShareMaxPPM[3] >= ppm {
+		return lim
+	}
+	hours := clamp((now-d.Day*86400)/3600, 0, 24)
+	return min(lim, mulDiv(lim, tier4ReleaseStart+hours, 24))
+}
+
+// tier4ReleaseStart is the 24ths of a capped anonymous tier's day released
+// at 00:00 UTC (tier4Released).
+const tier4ReleaseStart = 4
 
 // computeOpen is OpenDay without writing: sizes from the budget, reserves and
 // the smoothed demand of the previous opened day (prev may be nil).
@@ -179,6 +219,12 @@ func spill(d *dayState, rp *ResourceParams, now int64) []spillEvent {
 	for t := 1; t <= 3; t++ {
 		keep := mulDivCeil(max(0, d.Pools[t].Want-d.Pools[t].Claimed), ppm-f, ppm)
 		x := max(0, d.Pools[t].avail()-keep)
+		if t == 3 {
+			// Tier 4 never holds more than its share of the budget: what
+			// would spill past it stays with tier 3 (tier4Room bounds the
+			// draws too, for levers pulled after a spill).
+			x = min(x, max(0, mulDiv(d.BudgetEffective, rp.ShareMaxPPM[3], ppm)-d.Pools[4].Size-d.Pools[4].SpillIn))
+		}
 		if x > 0 {
 			d.Pools[t].SpillOut += x
 			d.Pools[t+1].SpillIn += x
@@ -248,7 +294,7 @@ func undraw(d *dayState, t int, x int64) {
 // the tier holds (overbooking).
 func entitlement(d *dayState, rp *ResourceParams, lv allowance.Levers, st allowance.Standing, rootGranted int64) int64 {
 	t := int(st.Tier)
-	if t == 4 && (lv.SignedOnly || lv.ProvenOnly) || t == 3 && lv.ProvenOnly {
+	if t == 4 && anonymousOff(d.Resource, lv) || t == 3 && lv.ProvenOnly {
 		return 0
 	}
 	p := d.Pools[t]

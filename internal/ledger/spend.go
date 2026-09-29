@@ -237,6 +237,20 @@ type op struct {
 	day     int64
 	now     int64
 	d, orig dayState
+	// hourBound is set by planSpend when the anonymous tier's hourly
+	// release (tier4Released) is what left a spend short.
+	hourBound bool
+}
+
+// refusal is the refusal of a spend planSpend left short: the day's, or,
+// when the anonymous tier's hourly release bound it, global_quota_exhausted
+// with retry_after at the next hour, when more is released.
+func (o *op) refusal(short string, c claimRow) error {
+	code := o.shortCode(short, c)
+	if code == "global_quota_exhausted" && o.hourBound {
+		return &allowance.Err{Code: code, RetryAfter: int(3600 - mod(o.now, 3600))}
+	}
+	return refuseDay(code, o.now)
 }
 
 func (o *op) entry(kind, account string, amount int64) entry {
@@ -366,7 +380,7 @@ func (o *op) shortCode(short string, c claimRow) string {
 	if short != "quota_exhausted" || c.Granted != 0 || c.Tier < 1 || c.Tier > 4 || o.rp.Cap[c.Tier-1] == 0 {
 		return short
 	}
-	if c.Tier == 4 && (o.lv.SignedOnly || o.lv.ProvenOnly) || c.Tier == 3 && o.lv.ProvenOnly {
+	if c.Tier == 4 && anonymousOff(o.r, o.lv) || c.Tier == 3 && o.lv.ProvenOnly {
 		return short
 	}
 	return "global_quota_exhausted"
@@ -383,6 +397,7 @@ func (o *op) planSpend(lots []lot, units int64, ok func(lot) bool) (parts []part
 	d = o.d
 	var got int64
 	dry := false
+	o.hourBound = false
 	for _, x := range lots {
 		if got >= units {
 			break
@@ -396,8 +411,17 @@ func (o *op) planSpend(lots []lot, units int64, ok func(lot) bool) (parts []part
 		}
 		if x.Bucket == allowance.Free {
 			t := int(x.OriginTier)
-			if can := drawable(&d, o.rp, t); can < take {
+			can := drawable(&d, o.rp, t)
+			hourly := false
+			if t == 4 {
+				room, byHour := tier4Room(&d, o.rp, o.lv, o.now)
+				if room < can {
+					can, hourly = room, byHour
+				}
+			}
+			if can < take {
 				take, dry = can, true
+				o.hourBound = o.hourBound || hourly
 			}
 			if take <= 0 {
 				continue
@@ -484,7 +508,7 @@ func (l *Ledger) debit(ctx context.Context, q allowance.Querier, o *op, s allowa
 	o.capOwn(lots, c)
 	parts, d, short := o.planSpend(lots, units, nil)
 	if short != "" {
-		return refuseDay(o.shortCode(short, c), o.now)
+		return o.refusal(short, c)
 	}
 	np := nonpaid(parts)
 	if o.d.SpentNonpaid+np > o.rp.SpendCeiling {

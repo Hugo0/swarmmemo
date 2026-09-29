@@ -83,8 +83,15 @@ type MethodEntry struct {
 	Args      []Arg  `json:"args"`
 	// Example is a valid args object for this method.
 	Example json.RawMessage `json:"example"`
+	// Anonymous is true for a write callable without a key (anonymous.go);
+	// AnonymousNote and AnonymousRate are its extra bounds when unsigned.
+	Anonymous     bool      `json:"anonymous"`
+	AnonymousNote string    `json:"anonymous_note,omitempty"`
+	AnonymousRate *AnonRate `json:"anonymous_rate,omitempty"`
 	// exampleMaxCost overrides the max_cost the examples send.
 	exampleMaxCost int64
+	// anonymousLabel names the service in the "no key needed" line.
+	anonymousLabel string
 }
 
 // MarshalJSON flattens Extra into the entry.
@@ -129,10 +136,13 @@ func (m MethodEntry) Data(maxCost int64) string {
 	return b.String()
 }
 
-// Access is how the method is called: "service.call, signed",
+// Access is how the method is called: "service.call, signed", "service.call,
+// signed or no key",
 // "service.read, public" or "service.read, signed, your own".
 func (m MethodEntry) Access() string {
 	switch {
+	case m.Operation == "service.call" && m.Anonymous:
+		return "service.call, signed or no key"
 	case m.Operation == "service.call":
 		return "service.call, signed"
 	case m.Signed:
@@ -222,6 +232,10 @@ func (r *Registry) catalog(prices Prices, extras bool) []Entry {
 			me := MethodEntry{Name: m.Name, Operation: "service.read", Signed: m.Signed, ArgsMax: m.ArgsMax, Price: "free", Line: m.Line, Args: m.Args, Example: m.Example}
 			if m.Write {
 				me.Operation, me.Resource, me.Price, me.PriceNote, me.exampleMaxCost = "service.call", string(m.Resource), prices.of(d.ID, m), m.PriceNote, m.ExampleMaxCost
+				if m.Anonymous {
+					rate := m.AnonymousRate
+					me.Anonymous, me.AnonymousNote, me.AnonymousRate, me.anonymousLabel = true, m.AnonymousNote, &rate, m.AnonymousLabel
+				}
 			}
 			if me.Args == nil {
 				me.Args = []Arg{}

@@ -35,6 +35,7 @@ import (
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/httpapi"
+	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
 )
 
@@ -300,7 +301,23 @@ func New(service board.Service, limiter *httpapi.Limiter, cfg Config) (*Core, er
 	if origin == "" {
 		origin = "https://" + host
 	}
-	help := newCatalogHelp(web.ServiceFeatures(service), origin)
+	help := newCatalogHelp(web.ServiceFeatures(service), origin, service)
+	// The offer follows the live allowance parameters, read at most once a
+	// minute so a flood of help queries never becomes a flood of reads.
+	var offerMu sync.Mutex
+	var offerAt time.Time
+	var offer *board.FreeCredit
+	help.offer = func() *board.FreeCredit {
+		offerMu.Lock()
+		defer offerMu.Unlock()
+		if !offerAt.IsZero() && time.Since(offerAt) < time.Minute {
+			return offer
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		offer, offerAt = web.FreeCreditFor(ctx, service), time.Now()
+		return offer
+	}
 	add := func(a Wire, ls ...listener) {
 		for i := range ls {
 			ls[i].adapter = a
@@ -710,7 +727,7 @@ func (c *Core) run(ctx context.Context, peer string, req Request) (board.Result,
 // (private rooms, identity management, delegation, private reads) stays there:
 // Gemini's certificate is trust-on-first-use and the rest are plaintext.
 func (c *Core) execute(ctx context.Context, peer string, cmd board.Command) (board.Result, error) {
-	if err := permitted(cmd); err != nil {
+	if err := permitted(board.ViaFrom(ctx), cmd); err != nil {
 		return board.Result{}, err
 	}
 	if cmd.Operation == "post" {
@@ -728,12 +745,28 @@ func (c *Core) execute(ctx context.Context, peer string, cmd board.Command) (boa
 	return c.service.Execute(ctx, cmd, peer)
 }
 
-func permitted(cmd board.Command) error {
+// permitted is the command policy of wire (the board.Vias value a wire
+// records, "tcp" for the line protocol).
+func permitted(wire string, cmd board.Command) error {
 	if cmd.PrivateRead != nil || cmd.Delegation != nil {
 		return &board.Error{Status: 400, Code: "https_required", Message: "Private reads and delegated commands use HTTPS JSON POST /v1/command."}
 	}
 	switch cmd.Operation {
 	case "post":
+		return nil
+	case "service.call", "service.read":
+		// Only without a key: the board refuses methods that need one.
+		// Signed calls stay on HTTPS.
+		if cmd.PublicKey != "" || cmd.Signature != "" {
+			return &board.Error{Status: 400, Code: "https_required", Message: "Signed service calls use HTTPS POST /v1/command."}
+		}
+		// A call is billed to the caller's network, so it is taken only
+		// where the peer is a real connection: the TCP CALL verb. DNS
+		// (a shared resolver over spoofable UDP), mail and Nostr relays
+		// name no caller's network (security review 1.21, L7).
+		if cmd.Operation == "service.call" && wire != "tcp" {
+			return &board.Error{Status: 400, Code: "unsupported_operation", Message: "A service call without a key is taken over HTTP (" + services.CallPathPrefix + "SERVICE/METHOD), MCP or the TCP CALL verb, not this wire."}
+		}
 		return nil
 	case "messages.list", "message.get", "thread.get", "rooms.list", "room.get", "agent.get":
 		if cmd.PublicKey != "" || cmd.Signature != "" {
@@ -741,7 +774,7 @@ func permitted(cmd board.Command) error {
 		}
 		return nil
 	}
-	return &board.Error{Status: 400, Code: "unsupported_operation", Message: "Constrained transports carry public reads and posts only. Use HTTPS /v1/command for other operations."}
+	return &board.Error{Status: 400, Code: "unsupported_operation", Message: "Constrained transports carry public reads, posts and service calls without a key only. Use HTTPS /v1/command for other operations."}
 }
 
 // readFrame reads exactly one request, never more than max bytes.

@@ -41,10 +41,13 @@ const (
 	LeverBlockPrefix     = "block-prefix"
 	LeverProvenOnly      = "proven-only"
 	LeverFreezeTransfers = "freeze-transfers"
+	// LeverSignedServices turns anonymous service calls off at once:
+	// unsigned service.call is refused and the anonymous tier gets no credit.
+	LeverSignedServices = "signed-services"
 )
 
 // LeverNames are the levers the CLI accepts.
-var LeverNames = []string{LeverTier4Shrink, LeverSignedOnly, LeverPauseNewKeys, LeverCutBudget, LeverBlockPrefix, LeverProvenOnly, LeverFreezeTransfers}
+var LeverNames = []string{LeverTier4Shrink, LeverSignedOnly, LeverPauseNewKeys, LeverCutBudget, LeverBlockPrefix, LeverProvenOnly, LeverFreezeTransfers, LeverSignedServices}
 
 // Lever bounds. A blocked prefix is at least an IPv4 /8 or an IPv6 /16 (wider
 // is signed-only's job); an --until more than a year away is refused as a
@@ -173,6 +176,8 @@ func (snap leverSnapshot) levers(now int64) allowance.Levers {
 			l.ProvenOnly = true
 		case LeverFreezeTransfers:
 			l.FreezeTransfers = true
+		case LeverSignedServices:
+			l.SignedServices = true
 		case LeverPauseNewKeys:
 			l.PauseNewKeys, l.PauseNewKeysSince = true, r.pulledAt
 		case LeverTier4Shrink:

@@ -77,6 +77,7 @@ func workCandidateRead(phase context.Context, s *Store, c Command, query string,
 	if err != nil {
 		return result, timing, err
 	}
+	s.anonymousActor(ctx, &a, c, "local-synthetic-mixed", s.now().Unix())
 	if err = validateCommandFields(c); err != nil {
 		return result, timing, err
 	}

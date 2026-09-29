@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strconv"
 
 	"swarmmemo/internal/allowance"
 )
@@ -19,8 +20,10 @@ import (
 const (
 	// NotaryTextBytes bounds the text the notary hashes for a caller.
 	NotaryTextBytes = 16 << 10
-	// NotaryPerAccountDay bounds new receipts per account per UTC day.
-	NotaryPerAccountDay = 1000
+	// NotaryPerAccountDay bounds new receipts per account per UTC day;
+	// NotaryPerAnonymousDay bounds them per anonymous caller (one network).
+	NotaryPerAccountDay   = 1000
+	NotaryPerAnonymousDay = 100
 	// NotarySchema names the receipt format; a breaking change is a new name.
 	NotarySchema = "swarmmemo-notary/1"
 	// notaryArgsMax leaves room for a full text JSON-escaped.
@@ -66,13 +69,18 @@ func (*notary) Describe() Descriptor {
 		Limits: []Limit{
 			{"notary_text_bytes", NotaryTextBytes, "bytes", "Text hashed by one stamp"},
 			{"notary_receipts_per_day", NotaryPerAccountDay, "", "New receipts per agent per UTC day"},
+			{"notary_receipts_per_day_without_key", NotaryPerAnonymousDay, "", "New receipts per network per UTC day, without a key"},
 		},
 		Mode: Local,
 		Methods: []Method{
 			{Name: "stamp", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: notaryArgsMax, Price: Price{Base: 1},
-				Line:    "Get a signed receipt for a hash or a text; the first receipt for a hash stands, and a repeat returns it for 1 credit.",
-				Args:    []Arg{{"hash", "string", false, "a lowercase SHA-256 hex digest"}, {"text", "string", false, "or up to 16 KiB of text, hashed and never stored"}},
-				Example: json.RawMessage(`{"text":"Plan for 2026-09-29: ship the catalogue."}`)},
+				Line:      "Get a signed receipt for a hash or a text; the first receipt for a hash stands, and a repeat returns it for 1 credit.",
+				Args:      []Arg{{"hash", "string", false, "a lowercase SHA-256 hex digest"}, {"text", "string", false, "or up to 16 KiB of text, hashed and never stored"}},
+				Example:   json.RawMessage(`{"text":"Plan for 2026-09-29: ship the catalogue."}`),
+				Anonymous: true, AnonymousLabel: "the notary", AnonymousNote: "at most " + strconv.Itoa(NotaryPerAnonymousDay) + " new receipts a day per network",
+				// Per network as well as for every network together, so one
+				// network cannot hold the shared windows (security review 1.21, M2).
+				AnonymousRate: AnonRate{CallerPerMinute: 10, CallerPerDay: 200, AllPerMinute: 120, AllPerDay: 20000}},
 			{Name: "get", ArgsMax: 256, Line: "Read the receipt for a hash; also GET /api/notary/HASH.",
 				Args: []Arg{{"hash", "string", true, "a lowercase SHA-256 hex digest"}}, Example: json.RawMessage(`{"hash":"SHA256_HEX"}`)},
 			{Name: "key", ArgsMax: 64, Line: "The notary's public key; also GET /api/notary/key."},
@@ -213,7 +221,7 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM notary_receipts WHERE account=? AND time>=?", c.Subject.ID, day).Scan(&today); err != nil {
 		return Result{}, err
 	}
-	if today >= NotaryPerAccountDay {
+	if today >= NotaryPerAccountDay || !c.Subject.Signed && today >= NotaryPerAnonymousDay {
 		return Result{}, refusal("notary_limit")
 	}
 	pub := key.Public().(ed25519.PublicKey)

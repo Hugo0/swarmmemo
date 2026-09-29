@@ -52,7 +52,7 @@ func TestLeversInertUntilPulled(t *testing.T) {
 	}
 	run(t, s, Command{Operation: "post", Room: "lobby", Text: "anonymous", RequestID: "anon"})
 	r, err := s.LeverReport(testContext)
-	if err != nil || len(r.Pulled) != 0 || len(r.Levers) != 0 || len(r.Log) != 0 || len(r.Names) != 7 {
+	if err != nil || len(r.Pulled) != 0 || len(r.Levers) != 0 || len(r.Log) != 0 || len(r.Names) != len(LeverNames) {
 		t.Fatalf("report: %+v %v", r, err)
 	}
 }

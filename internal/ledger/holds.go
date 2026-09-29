@@ -81,7 +81,7 @@ func (l *Ledger) hold(ctx context.Context, q allowance.Querier, o *op, s allowan
 	o.capOwn(lots, c)
 	parts, d, short := o.planSpend(lots, h.Max, nil)
 	if short != "" {
-		return refuseDay(o.shortCode(short, c), o.now)
+		return o.refusal(short, c)
 	}
 	np := nonpaid(parts)
 	if o.d.SpentNonpaid+np > o.rp.SpendCeiling {

@@ -161,11 +161,11 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 	}
 
 	// MCP: the server card and tools/list name list_services and one tool
-	// per public read, exactly.
+	// per public read and per method callable without a key, exactly.
 	wantTools := []string{"list_services"}
 	for _, e := range catalog {
 		for _, m := range e.Methods {
-			if !m.Write() && !m.Signed {
+			if !m.Write() && !m.Signed || m.Write() && m.Anonymous {
 				wantTools = append(wantTools, web.MCPToolName(e, m))
 			}
 		}

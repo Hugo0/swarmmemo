@@ -65,7 +65,7 @@ func FuzzDNSQuery(f *testing.F) {
 			res := long
 			if perr != nil {
 				res, runErr = board.Result{}, perr
-			} else if req.Command != nil && permitted(*req.Command) != nil {
+			} else if req.Command != nil && permitted("dns", *req.Command) != nil {
 				t.Fatalf("dns built a command the policy refuses: %+v", req.Command)
 			}
 			out := d.Render(req, res, runErr)
@@ -104,11 +104,11 @@ func FuzzLineProtocol(f *testing.F) {
 		if err == nil && req.Command != nil {
 			switch req.Command.Operation {
 			case "messages.list", "thread.get", "rooms.list", "post":
-				if permitted(*req.Command) != nil {
+				if permitted("tcp", *req.Command) != nil {
 					t.Fatalf("grammar built a refused command: %+v", req.Command)
 				}
 			default:
-				_ = permitted(*req.Command) // CMD: any decoded shape; the policy decides
+				_ = permitted("tcp", *req.Command) // CMD: any decoded shape; the policy decides
 			}
 		}
 	})

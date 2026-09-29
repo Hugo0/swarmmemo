@@ -16,7 +16,7 @@ import (
 func TestDNSAndLineHelpListTheCatalogue(t *testing.T) {
 	f := board.Features{Services: services.Known(), Trust: board.TrustShadow}
 	d := testDNS(t)
-	d.help = newCatalogHelp(f, "https://swarmmemo.com")
+	d.help = newCatalogHelp(f, "https://swarmmemo.com", nil)
 	budget := (*dns).Limits(nil).Response
 	ask := func(name string) (string, []byte) {
 		out := answerOnce(t, d, dnsQueryBytes(name, dnsTypeTXT), board.Result{}, nil, budget)
@@ -51,7 +51,7 @@ func TestDNSAndLineHelpListTheCatalogue(t *testing.T) {
 		t.Error("an unknown service must be NXDOMAIN")
 	}
 	// With no service enabled, services names do not exist; help still answers.
-	d.help = newCatalogHelp(board.Features{}, "https://swarmmemo.com")
+	d.help = newCatalogHelp(board.Features{}, "https://swarmmemo.com", nil)
 	if _, raw := ask("services.q.swarmmemo.com"); rcode(raw) != rcodeNXDomain {
 		t.Error("services.q while no service runs")
 	}
@@ -63,7 +63,7 @@ func TestDNSAndLineHelpListTheCatalogue(t *testing.T) {
 	}
 
 	helpReq := Request{Route: "help"}
-	out := string((lineProtocol{help: newCatalogHelp(f, "https://swarmmemo.com")}).Render(helpReq, board.Result{}, nil))
+	out := string((lineProtocol{help: newCatalogHelp(f, "https://swarmmemo.com", nil)}).Render(helpReq, board.Result{}, nil))
 	if !strings.HasPrefix(out, lineHelp) || !strings.Contains(out, "https://swarmmemo.com/api/services") {
 		t.Fatalf("HELP with services: %q", out)
 	}
@@ -72,7 +72,38 @@ func TestDNSAndLineHelpListTheCatalogue(t *testing.T) {
 			t.Errorf("HELP lacks %s", e.ID)
 		}
 	}
-	if got := string((lineProtocol{help: newCatalogHelp(board.Features{}, "https://swarmmemo.com")}).Render(helpReq, board.Result{}, nil)); got != lineHelp {
+	if got := string((lineProtocol{help: newCatalogHelp(board.Features{}, "https://swarmmemo.com", nil)}).Render(helpReq, board.Result{}, nil)); got != lineHelp {
 		t.Fatalf("HELP changed with no service: %q", got)
+	}
+}
+
+// While the store offers free credit, TCP HELP and help.ZONE lead with the
+// same line /llms.txt does, within the TCP answer size. The zone's own usage
+// answer stays small enough for plain UDP and points at help.ZONE.
+func TestHelpLeadsWithTheFreeCredit(t *testing.T) {
+	f := board.Features{Ledger: board.LedgerOn, Services: services.Known(), Trust: board.TrustShadow}
+	offer := board.FreeCreditOffer(100_000, f.Services)
+	line := offer.LineAt("https://swarmmemo.com")
+	help := newCatalogHelp(f, "https://swarmmemo.com", nil)
+	help.offer = func() *board.FreeCredit { return offer }
+
+	out := string((lineProtocol{allowance: true, help: help}).Render(Request{Route: "help"}, board.Result{}, nil))
+	if !strings.HasPrefix(out, line+"\n"+board.SigningLine+"\n"+lineHelp) {
+		t.Fatalf("HELP does not lead with the offer: %q", out)
+	}
+	d := testDNS(t)
+	d.allowance, d.help = true, help
+	budget := (*dns).Limits(nil).Response
+	raw := answerOnce(t, d, dnsQueryBytes("help.q.swarmmemo.com", dnsTypeTXT), board.Result{}, nil, budget)
+	if flag(raw, 0x0200) || !strings.Contains(string(raw), line) {
+		t.Errorf("help.q lacks the offer or is truncated: %q", raw)
+	}
+	if usage := answerOnce(t, d, dnsQueryBytes("q.swarmmemo.com", dnsTypeTXT), board.Result{}, nil, 512); flag(usage, 0x0200) {
+		t.Error("the zone's usage no longer fits plain UDP")
+	}
+	// No offer, no line.
+	help.offer = func() *board.FreeCredit { return nil }
+	if out := string((lineProtocol{help: help}).Render(Request{Route: "help"}, board.Result{}, nil)); !strings.HasPrefix(out, lineHelp) {
+		t.Fatalf("HELP without an offer: %q", out)
 	}
 }

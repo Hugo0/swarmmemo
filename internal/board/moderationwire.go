@@ -117,7 +117,9 @@ func (p postActuator) Apply(ctx context.Context, subject string, hide bool, reas
 
 var errNoModeration = errors.New("moderation: the engine is not open")
 
-// inferenceScreener is services.InferenceScreener over Engine.ScreenInference.
+// inferenceScreener is services.InferenceScreener over
+// Engine.ScreenInferenceFor: a call without a key that cannot be screened
+// fails closed.
 type inferenceScreener struct{ s *Store }
 
 func (m inferenceScreener) Screen(ctx context.Context, in services.ScreenInput) (services.ScreenVerdict, error) {
@@ -125,7 +127,7 @@ func (m inferenceScreener) Screen(ctx context.Context, in services.ScreenInput) 
 	if e == nil {
 		return services.ScreenVerdict{}, errNoModeration
 	}
-	hide, reason, err := e.ScreenInference(ctx, in.Stage, in.Model, in.Text)
+	hide, reason, err := e.ScreenInferenceFor(ctx, in.Stage, in.Model, in.Text, in.Signed)
 	return services.ScreenVerdict{Hide: hide, Reason: reason}, err
 }
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,13 +76,16 @@ type Config struct {
 // Engine is the service middleware: catalogue, strict parsing, pricing,
 // metering, the call record, idempotency and the Remote and Async flows.
 type Engine struct {
-	cfg    Config
-	slots  chan struct{}
-	base   context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	rateMu sync.Mutex
-	rates  map[string]rateWindow
+	cfg       Config
+	slots     chan struct{}
+	anonSlots chan struct{} // unsigned remote calls: at most AnonymousRemoteSlots of slots
+	base      context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	rateMu    sync.Mutex
+	rates     map[string]rateWindow
+	anonMu    sync.Mutex
+	anonRates map[string]*anonWindow // "service.method" (every anonymous caller) and "service.method|subject"
 }
 
 type rateWindow struct{ minute, count int64 }
@@ -101,7 +105,7 @@ func NewEngine(cfg Config) *Engine {
 		cfg.Now = func() int64 { return time.Now().Unix() }
 	}
 	base, cancel := context.WithCancel(context.Background())
-	return &Engine{cfg: cfg, slots: make(chan struct{}, RemoteSlots), base: base, cancel: cancel, rates: map[string]rateWindow{}}
+	return &Engine{cfg: cfg, slots: make(chan struct{}, RemoteSlots), anonSlots: make(chan struct{}, AnonymousRemoteSlots), base: base, cancel: cancel, rates: map[string]rateWindow{}, anonRates: map[string]*anonWindow{}}
 }
 
 // Registry is the engine's provider registry.
@@ -188,6 +192,22 @@ func (e *Engine) Catalogue(ctx context.Context, q allowance.Querier, now int64) 
 	}, nil
 }
 
+// Anonymous reports whether data names a method of service that takes an
+// unsigned service.call (Method.Anonymous). It parses leniently enough to
+// choose an error: anything it cannot read is not anonymous.
+func (e *Engine) Anonymous(service, data string) bool {
+	d, err := ParseData(data, true)
+	if err != nil {
+		return false
+	}
+	p, err := e.cfg.Registry.Lookup(service)
+	if err != nil {
+		return false
+	}
+	m, ok := p.Describe().method(d.Method)
+	return ok && m.Write && m.Anonymous
+}
+
 // resolve finds the provider and method a request names.
 func (e *Engine) resolve(req Request, d Data, write bool) (Provider, Descriptor, Method, error) {
 	p, err := e.cfg.Registry.Lookup(req.Service)
@@ -199,15 +219,23 @@ func (e *Engine) resolve(req Request, d Data, write bool) (Provider, Descriptor,
 	if !ok || m.Write != write || len(d.Args) > m.ArgsMax {
 		return nil, Descriptor{}, Method{}, refusal("invalid_service_data")
 	}
-	if m.Signed && !req.Subject.Signed {
+	// Only a method the catalogue marks Anonymous takes an unsigned call,
+	// whether or not it is marked Signed (security review 1.21, L7).
+	if write && !req.Subject.Signed && !m.Anonymous {
+		return nil, Descriptor{}, Method{}, refusal("anonymous_not_allowed")
+	}
+	if !write && m.Signed && !req.Subject.Signed {
 		return nil, Descriptor{}, Method{}, refusal("signature_required")
 	}
 	return p, desc, m, nil
 }
 
 // Call is service.call, in the command's transaction (§3.1 call flow).
-func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (Outcome, error) {
-	if !req.Subject.Signed || req.RequestKey == "" {
+func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (_ Outcome, err error) {
+	anonymous := !req.Subject.Signed
+	// An unsigned call is an anonymous subject's (one network prefix), with a
+	// request_id as its retry key: it has no nonce.
+	if req.RequestKey == "" || anonymous && (!strings.HasPrefix(req.Subject.ID, "anon:") || !strings.HasPrefix(req.RequestKey, "id:")) {
 		return Outcome{}, refusal("signature_required")
 	}
 	d, err := ParseData(req.Data, true)
@@ -217,6 +245,13 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 	p, desc, m, err := e.resolve(req, d, true)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if anonymous {
+		if checker, ok := p.(AnonymousChecker); ok {
+			if err = checker.CheckAnonymous(Call{Service: desc.ID, Method: m.Name, Args: d.Args, Subject: req.Subject, RequestKey: req.RequestKey, Now: now}); err != nil {
+				return Outcome{}, err
+			}
+		}
 	}
 	version, prices, err := e.prices(ctx, tx, now)
 	if err != nil {
@@ -239,6 +274,22 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 		if err = admitter.Admit(ctx, tx, c); err != nil {
 			return Outcome{}, err
 		}
+	}
+	if anonymous {
+		// The call counts in the anonymous windows only if it goes through:
+		// a refusal from here on (the ledger's quota_exhausted, a full hold
+		// table) gives its place back, so one network cannot fill the windows
+		// every network shares with free refused calls (security review
+		// 1.21, M2).
+		release, aerr := e.admitAnonymous(desc.ID, m, req.Subject.ID, now)
+		if aerr != nil {
+			return Outcome{}, aerr
+		}
+		defer func() {
+			if err != nil {
+				release()
+			}
+		}()
 	}
 	mode := desc.Mode
 	if moder, ok := p.(Moder); ok {
@@ -284,6 +335,15 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 	}
 	if running >= e.cfg.HoldsPerAccount || total >= e.cfg.HoldsTotal {
 		return Outcome{}, &allowance.Err{Code: "hold_limit", RetryAfter: 5}
+	}
+	if anonymous {
+		var anon int
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM service_calls WHERE state='running' AND account LIKE 'anon:%'").Scan(&anon); err != nil {
+			return Outcome{}, err
+		}
+		if anon >= AnonymousHoldsTotal {
+			return Outcome{}, &allowance.Err{Code: "hold_limit", RetryAfter: 5}
+		}
 	}
 	ttl := int64(desc.MaxDuration/time.Second) + holdGrace
 	hold, err := e.cfg.Meter.Reserve(ctx, tx, req.Subject, quote.Resource, quote.Max, req.RequestKey, ref, ttl, now)
@@ -331,6 +391,18 @@ func (e *Engine) finish(pc pendingCall) (map[string]any, error) {
 	deadline := pc.desc.MaxDuration
 	wait := time.NewTimer(deadline)
 	defer wait.Stop()
+	if !pc.call.Subject.Signed {
+		// Unsigned calls share AnonymousRemoteSlots of the slots, so they can
+		// never keep a signed call from an upstream.
+		select {
+		case e.anonSlots <- struct{}{}:
+			defer func() { <-e.anonSlots }()
+		case <-wait.C:
+			return e.settle(e.base, pc.account, pc.rec.ID, "", Result{}, refusal("upstream_busy"))
+		case <-e.base.Done():
+			return nil, refusal("upstream_unknown")
+		}
+	}
 	select {
 	case e.slots <- struct{}{}:
 		defer func() { <-e.slots }()
@@ -517,7 +589,7 @@ func failureCode(code string) string {
 	switch code {
 	case "upstream_busy", "upstream_unavailable", "content_refused", "invalid_service_data", "memory_not_found", "memory_limit", "invalid_memory_key",
 		"service_unavailable", "x402_unknown_resource", "x402_price_changed", "x402_not_payable", "x402_cap_reached",
-		"x402_payment_rejected", "x402_response_too_large":
+		"x402_payment_rejected", "x402_response_too_large", "anonymous_unscreened":
 		return code
 	}
 	return "upstream_failed"
@@ -526,6 +598,8 @@ func failureCode(code string) string {
 // Retry answers an exact retry of a service.call whose result the board
 // stored (§2.5 idempotency): a finished call returns its stored or final
 // result; a call still running is 409 request_in_flight with retry_after.
+// account is the one the call was made by: for an anonymous retry across
+// midnight, yesterday's pseudonym, under which its receipt was found.
 func (e *Engine) Retry(ctx context.Context, q allowance.Querier, account string, stored map[string]any, now int64) (map[string]any, error) {
 	call, _ := stored["call"].(map[string]any)
 	state, _ := call["state"].(string)
@@ -832,4 +906,107 @@ func newCallID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// anonWindow counts unsigned calls in the current minute and UTC day.
+type anonWindow struct{ minute, mcount, day, dcount int64 }
+
+// roll starts new windows when the minute or the day changed.
+func (w *anonWindow) roll(now int64) {
+	if w.minute != now/60 {
+		w.minute, w.mcount = now/60, 0
+	}
+	if w.day != now/86400 {
+		w.day, w.dcount = now/86400, 0
+	}
+}
+
+// room reports whether one more call fits perMinute and perDay (a zero bound
+// is not enforced); retry is the seconds until the binding window resets.
+func (w *anonWindow) room(perMinute, perDay, now int64) (bool, int) {
+	w.roll(now)
+	switch {
+	case perDay > 0 && w.dcount >= perDay:
+		return false, int(86400 - now%86400)
+	case perMinute > 0 && w.mcount >= perMinute:
+		return false, int(60 - now%60)
+	}
+	return true, 0
+}
+
+// Refusals of admitAnonymous: the caller's own network is past its bound
+// (AnonRate.CallerPerMinute, CallerPerDay), or every network together is
+// (AllPerMinute, AllPerDay). The board answers both 429 request_rate, each
+// in its own words.
+const (
+	RefusalAnonymousRate    = "anonymous_rate"
+	RefusalAnonymousRateAll = "anonymous_rate_all"
+)
+
+// admitAnonymous applies m's AnonymousRate to an unsigned call: first the
+// caller's own windows, then the windows every anonymous caller shares, so a
+// caller past its own bound never touches the shared ones. A call counts
+// only when both have room, and release gives its place back when the call
+// is refused after admission (Call does that). The table is bounded; when it
+// is full of live callers it fails closed.
+func (e *Engine) admitAnonymous(service string, m Method, subject string, now int64) (release func(), err error) {
+	r := m.AnonymousRate
+	key := service + "." + m.Name
+	e.anonMu.Lock()
+	defer e.anonMu.Unlock()
+	window := func(k string) (*anonWindow, error) {
+		if w := e.anonRates[k]; w != nil {
+			return w, nil
+		}
+		if len(e.anonRates) >= rateEntriesMax {
+			for k, w := range e.anonRates {
+				if w.day != now/86400 {
+					delete(e.anonRates, k)
+				}
+			}
+			if len(e.anonRates) >= rateEntriesMax {
+				return nil, &allowance.Err{Code: RefusalAnonymousRateAll, RetryAfter: 60}
+			}
+		}
+		w := &anonWindow{}
+		e.anonRates[k] = w
+		return w, nil
+	}
+	var counted []*anonWindow
+	if r.CallerPerMinute > 0 || r.CallerPerDay > 0 {
+		mine, err := window(key + "|" + subject)
+		if err != nil {
+			return nil, err
+		}
+		if ok, retry := mine.room(r.CallerPerMinute, r.CallerPerDay, now); !ok {
+			return nil, &allowance.Err{Code: RefusalAnonymousRate, RetryAfter: retry}
+		}
+		counted = append(counted, mine)
+	}
+	all, err := window(key)
+	if err != nil {
+		return nil, err
+	}
+	if ok, retry := all.room(r.AllPerMinute, r.AllPerDay, now); !ok {
+		return nil, &allowance.Err{Code: RefusalAnonymousRateAll, RetryAfter: retry}
+	}
+	counted = append(counted, all)
+	for _, w := range counted {
+		w.mcount++
+		w.dcount++
+	}
+	minute, day := now/60, now/86400
+	return func() {
+		e.anonMu.Lock()
+		defer e.anonMu.Unlock()
+		for _, w := range counted {
+			// A window that rolled over since then started without this call.
+			if w.minute == minute && w.mcount > 0 {
+				w.mcount--
+			}
+			if w.day == day && w.dcount > 0 {
+				w.dcount--
+			}
+		}
+	}, nil
 }

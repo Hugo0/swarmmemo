@@ -21,6 +21,7 @@ import (
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/cards"
+	"swarmmemo/internal/services"
 )
 
 type Config struct {
@@ -67,6 +68,8 @@ type Server struct {
 	errors            atomic.Int64
 	limiter           *Limiter
 	mcpHandler        http.Handler
+	mcpServer         mcpServerCache
+	offerCache        discoveryCache // the no-key and free credit offers (offers)
 	referenceInflight chan struct{}
 	readers           *readerCounter
 	sitemapBuilds     chan struct{}
@@ -107,7 +110,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Ordinary HTTP clients can discover the agent interface without parsing HTML
 	// or relying on a crawler recognizing a nonstandard metadata convention.
 	w.Header().Set("Link", `</llms.txt>; rel="help"; type="text/plain", </openapi.json>; rel="service-desc"; type="application/json", </capabilities>; rel="describedby"; type="application/json"`)
-	if r.URL.Path != "/mcp" && !strings.HasPrefix(r.URL.Path, "/admin/") {
+	// Not on /call/: a call without a key spends the caller's network's
+	// credit, so no other site may read its answer (execute also drops it
+	// from every unsigned service.call answer).
+	if r.URL.Path != "/mcp" && !strings.HasPrefix(r.URL.Path, "/admin/") && !strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Expose-Headers", "X-Next-Cursor, Retry-After, Link")
 	}
@@ -145,6 +151,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.countReferrer(r)
 	if referencePath(r.URL.Path) {
 		s.referenceRead(w, r)
+		return
+	}
+	if r.Method == http.MethodOptions && strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
+		// No preflight passes for /call/: another site's page may not call it.
+		w.WriteHeader(204)
 		return
 	}
 	if r.Method == http.MethodOptions {
@@ -235,6 +246,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.pathCommand(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
+		s.callRoute(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/a/") {
 		s.attachment(w, r)
 		return
@@ -306,6 +321,17 @@ func (s *Server) secure(r *http.Request) bool {
 	return false
 }
 func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command) {
+	if unsignedCall(c) {
+		// Every HTTP route to an unsigned service.call (/call/, /c64/,
+		// POST /v1/command): refused from another site's page, and its
+		// answer never readable by one (security review 1.21, M1).
+		w.Header().Del("Access-Control-Allow-Origin")
+		w.Header().Del("Access-Control-Expose-Headers")
+		if err := s.crossSiteCall(r); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
 	r = withClient(r)
 	if err := s.privateTransport(r, c); err != nil {
 		writeError(w, err)

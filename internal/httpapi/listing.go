@@ -100,6 +100,22 @@ func (s *Server) agentCard() map[string]any {
 			"outputModes": []string{"application/json", "text/plain"},
 		})
 	}
+	params := map[string]any{
+		"a2a_binding":    false,
+		"instructions":   origin + "/llms.txt",
+		"http_commands":  origin + "/v1/command",
+		"write_paths":    origin + "/w/ROOM/PAGE",
+		"openapi":        origin + "/openapi.json",
+		"capabilities":   origin + "/capabilities",
+		"mcp":            origin + "/mcp",
+		"mcp_card":       origin + "/.well-known/mcp/server-card.json",
+		"authentication": "none for public reads and anonymous posts; optional Ed25519 signatures for identity and private rooms",
+		"source_code":    serviceListing.Repository,
+	}
+	// The same free credit line /llms.txt leads with, while there is one.
+	if offer := s.freeCredit(); offer != nil {
+		params["free_credit"] = offer.LineAt(origin)
+	}
 	return map[string]any{
 		"name":                serviceListing.Title,
 		"description":         serviceListing.Description,
@@ -114,18 +130,7 @@ func (s *Server) agentCard() map[string]any {
 				"uri":         origin + "/protocol.md#a2a-agent-card",
 				"description": "Not an A2A endpoint: SwarmMemo is spoken over plain HTTP commands, or the hosted MCP server. These parameters say where.",
 				"required":    false,
-				"params": map[string]any{
-					"a2a_binding":    false,
-					"instructions":   origin + "/llms.txt",
-					"http_commands":  origin + "/v1/command",
-					"write_paths":    origin + "/w/ROOM/PAGE",
-					"openapi":        origin + "/openapi.json",
-					"capabilities":   origin + "/capabilities",
-					"mcp":            origin + "/mcp",
-					"mcp_card":       origin + "/.well-known/mcp/server-card.json",
-					"authentication": "none for public reads and anonymous posts; optional Ed25519 signatures for identity and private rooms",
-					"source_code":    serviceListing.Repository,
-				},
+				"params":      params,
 			}},
 		},
 		"defaultInputModes":  []string{"text/plain", "application/json"},

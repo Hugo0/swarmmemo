@@ -95,7 +95,7 @@ func TestDesign0FlagsOffKeepsTodaysKeying(t *testing.T) {
 	if account != "anon:"+fingerprint([]byte(src)) {
 		t.Fatalf("flags off changed anonymous keying: %s", account)
 	}
-	if s.anonymousClient(testContext, src) != "" || s.previousAnonymousAccount(src, testTime) != "" {
+	if s.anonymousClient(testContext, src, s.now().Unix()) != "" || s.previousAnonymousAccount(src, testTime, AnonPrefixV6Bits) != "" {
 		t.Fatal("client descriptor or previous pseudonym with ANON_PREFIX off")
 	}
 	if n := sqlCount(t, s, "SELECT count(*) FROM meta WHERE key LIKE 'anon_salt%'"); n != 0 {
@@ -188,8 +188,8 @@ func TestAnonPrefixOneSubjectPerPrefix(t *testing.T) {
 		t.Fatalf("another /64 shares the cap: %v", err)
 	}
 	// IPv4 per /24, and an IPv4-mapped address is the same subject.
-	a := s.anonymousAccount("198.51.100.7")
-	if a != s.anonymousAccount("198.51.100.200") || a != s.anonymousAccount("::ffff:198.51.100.1") || a == s.anonymousAccount("198.51.101.7") {
+	a := s.anonymousAccount("198.51.100.7", s.now().Unix(), AnonPrefixV6Bits)
+	if a != s.anonymousAccount("198.51.100.200", s.now().Unix(), AnonPrefixV6Bits) || a != s.anonymousAccount("::ffff:198.51.100.1", s.now().Unix(), AnonPrefixV6Bits) || a == s.anonymousAccount("198.51.101.7", s.now().Unix(), AnonPrefixV6Bits) {
 		t.Fatal("IPv4 prefixes not keyed per /24")
 	}
 	if !anonPseudonymRE.MatchString(a) {
@@ -215,10 +215,10 @@ func TestAnonClientOnlyNarrows(t *testing.T) {
 	s := openTest(t, Config{ArchiveDelaySeconds: -1, AnonymousDailyBytes: 1500, Features: Features{AnonPrefix: true}})
 	src := "203.0.113.40"
 	curl, python := WithClient(testContext, "curl"), WithClient(testContext, "python-requests")
-	if s.anonymousClient(curl, src) == s.anonymousClient(python, src) || s.anonymousClient(curl, src) != s.anonymousClient(curl, "203.0.113.41") {
+	if s.anonymousClient(curl, src, s.now().Unix()) == s.anonymousClient(python, src, s.now().Unix()) || s.anonymousClient(curl, src, s.now().Unix()) != s.anonymousClient(curl, "203.0.113.41", s.now().Unix()) {
 		t.Fatal("client descriptor does not follow the User-Agent product within a prefix")
 	}
-	if c := s.anonymousClient(WithClient(testContext, strings.Repeat("x", 33)), src); c != s.anonymousClient(testContext, src) || len(c) != 32 {
+	if c := s.anonymousClient(WithClient(testContext, strings.Repeat("x", 33)), src, s.now().Unix()); c != s.anonymousClient(testContext, src, s.now().Unix()) || len(c) != 32 {
 		t.Fatal("an overlong product widened the descriptor")
 	}
 	// Varying the User-Agent never gives a prefix more than its cap.
@@ -254,7 +254,7 @@ func TestAnonSaltRotatesDailyAndIsDestroyed(t *testing.T) {
 	}
 	s.Close()
 	s = open(on, testTime+10)
-	first := s.anonymousAccount(src)
+	first := s.anonymousAccount(src, s.now().Unix(), AnonPrefixV6Bits)
 	if first == "anon:"+fingerprint([]byte(src)) || stored(s) != 0 {
 		t.Fatal("no salted pseudonym, or a salt in the database")
 	}
@@ -262,19 +262,19 @@ func TestAnonSaltRotatesDailyAndIsDestroyed(t *testing.T) {
 	// The salt lives in memory only, so a backup cannot recompute a
 	// pseudonym: a restart the same day starts a new one.
 	s = open(on, testTime+7200)
-	restarted := s.anonymousAccount(src)
+	restarted := s.anonymousAccount(src, s.now().Unix(), AnonPrefixV6Bits)
 	if restarted == first || stored(s) != 0 {
 		t.Fatal("a restart recovered the day's salt")
 	}
 	// The next day's pseudonym differs; yesterday's is kept until 01:00 UTC.
 	d0At(s, testTime+86400+60)
-	second := s.anonymousAccount(src)
-	if second == restarted || s.previousAnonymousAccount(src, testTime+86400+60) != restarted || stored(s) != 0 {
+	second := s.anonymousAccount(src, s.now().Unix(), AnonPrefixV6Bits)
+	if second == restarted || s.previousAnonymousAccount(src, testTime+86400+60, AnonPrefixV6Bits) != restarted || stored(s) != 0 {
 		t.Fatal("rotation lost the previous salt inside the grace")
 	}
 	// After 01:00 the timer (or the next anonymous request) destroys it.
 	s.expireSalt(testTime + 86400 + AnonSaltGraceSeconds + 1)
-	if s.previousAnonymousAccount(src, testTime+86400+AnonSaltGraceSeconds+1) != "" || s.design0.salts.prev != nil {
+	if s.previousAnonymousAccount(src, testTime+86400+AnonSaltGraceSeconds+1, AnonPrefixV6Bits) != "" || s.design0.salts.prev != nil {
 		t.Fatal("yesterday's salt survived 01:00")
 	}
 	// A day with no anonymous request destroys the day-old current salt too.
@@ -283,7 +283,7 @@ func TestAnonSaltRotatesDailyAndIsDestroyed(t *testing.T) {
 		t.Fatal("a stale current salt survived")
 	}
 	d0At(s, testTime+2*86400+AnonSaltGraceSeconds+2)
-	if third := s.anonymousAccount(src); third == second || stored(s) != 0 {
+	if third := s.anonymousAccount(src, s.now().Unix(), AnonPrefixV6Bits); third == second || stored(s) != 0 {
 		t.Fatal("a new day reused a salt or stored one")
 	}
 	s.Close()
@@ -297,7 +297,7 @@ func TestAnonSaltConcurrentFirstUse(t *testing.T) {
 	for i := 0; i < 16; i++ {
 		go func(i int) {
 			_, err := d0Exec(s, fmt.Sprintf("203.0.113.%d", i), Command{Operation: "post", Text: fmt.Sprint("race ", i)})
-			names <- s.anonymousAccount("203.0.113.1")
+			names <- s.anonymousAccount("203.0.113.1", s.now().Unix(), AnonPrefixV6Bits)
 			done <- err
 		}(i)
 	}

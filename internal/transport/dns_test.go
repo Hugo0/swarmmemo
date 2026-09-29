@@ -143,7 +143,7 @@ func TestDNSRoutesBuildOnlyPublicReads(t *testing.T) {
 		strings.Repeat("c", 32) + ".m.q.swarmmemo.com": "message.get",
 	} {
 		req, err := d.Parse(dnsQueryBytes(name, dnsTypeTXT))
-		if err != nil || req.Command == nil || req.Command.Operation != op || permitted(*req.Command) != nil {
+		if err != nil || req.Command == nil || req.Command.Operation != op || permitted("dns", *req.Command) != nil {
 			t.Errorf("%s: %+v %v", name, req.Command, err)
 		}
 	}

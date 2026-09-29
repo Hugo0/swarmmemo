@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"io"
 	"net"
@@ -108,6 +109,17 @@ var publicDataTierLimits = map[allowance.Tier]pdLimit{
 	allowance.TierProven:    {120, 20000},
 	allowance.TierSigned:    {30, 2000},
 	allowance.TierAnonymous: {10, 200},
+}
+
+// publicDataAnonymousNote is what fetch and bulk allow without a key: the
+// anonymous tier's per-caller limits.
+func publicDataAnonymousNote(bulk bool) string {
+	l := publicDataTierLimits[allowance.TierAnonymous]
+	note := fmt.Sprintf("per network, %d dataset requests a minute and %d a day", l.PerMinute, l.PerDay)
+	if bulk {
+		note += "; a bulk call counts each of its requests"
+	}
+	return note
 }
 
 // pdWindow counts one key's use in the current minute and day.
@@ -226,12 +238,16 @@ func (*publicData) Describe() Descriptor {
 		Methods: []Method{
 			{Name: "fetch", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: PublicDataArgsMax,
 				Line: "One dataset request.", PriceNote: "the dataset's price (1 credit by default); the datasets read lists each", ExampleMaxCost: 5,
-				Args:    []Arg{{"dataset", "string", true, "an id from the datasets read"}, {"params", "object", false, "the dataset's parameters"}},
-				Example: json.RawMessage(`{"dataset":"sea_ice_extent","params":{}}`)},
+				Args:      []Arg{{"dataset", "string", true, "an id from the datasets read"}, {"params", "object", false, "the dataset's parameters"}},
+				Example:   json.RawMessage(`{"dataset":"sea_ice_extent","params":{}}`),
+				Anonymous: true, AnonymousLabel: "public data", AnonymousNote: publicDataAnonymousNote(false),
+				AnonymousRate: AnonRate{AllPerMinute: 60, AllPerDay: 5000}},
 			{Name: "bulk", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: PublicDataArgsMax,
 				Line: "Up to 10 dataset requests, answered in order.", PriceNote: "each request's dataset price (1 credit by default)", ExampleMaxCost: 20,
-				Args:    []Arg{{"requests", "array", true, `up to 10 {"dataset","params"}`}},
-				Example: json.RawMessage(`{"requests":[{"dataset":"sea_ice_extent","params":{}},{"dataset":"us_nowcasts","params":{"measure":"gdp"}}]}`)},
+				Args:      []Arg{{"requests", "array", true, `up to 10 {"dataset","params"}`}},
+				Example:   json.RawMessage(`{"requests":[{"dataset":"sea_ice_extent","params":{}},{"dataset":"us_nowcasts","params":{"measure":"gdp"}}]}`),
+				Anonymous: true, AnonymousLabel: "public data", AnonymousNote: publicDataAnonymousNote(true),
+				AnonymousRate: AnonRate{AllPerMinute: 15, AllPerDay: 500}},
 			{Name: "datasets", ArgsMax: 256, Line: "The catalogue: each dataset with its parameters, source, licence and price."},
 		},
 		MaxDuration:   PublicDataMaxDuration,

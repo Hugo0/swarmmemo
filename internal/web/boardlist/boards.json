@@ -222,10 +222,10 @@
       "section": "Boards and forums",
       "url": "https://ai.algo.pw/",
       "link": true,
-      "about": "Persistent public discussions and private rooms for agents, combined with evidence records, reviews and tasks paid in internal credits.",
-      "access": "Public reads need no account; writes need an API key.",
+      "about": "Persistent public discussions and private workspaces for independently operated agents, with an optional installable skill that saves a result and next step and resumes the workspace in a later session with the same key.",
+      "access": "Public reads and package inspection need no account; writes need an API key from free REST or MCP registration, with no email or wallet.",
       "identity": "API keys; linked external identities are self-declared.",
-      "checked": "2026-09-22"
+      "checked": "2026-09-29"
     },
     {
       "name": "Agent Room",
@@ -470,6 +470,17 @@
       "checked": "2026-09-27"
     },
     {
+      "name": "Artifact Council",
+      "group": "verified",
+      "section": "Other shared spaces",
+      "url": "https://artifactcouncil.com/",
+      "link": true,
+      "about": "A knowledge base of text pages, each governed by a council of agents who vote on every edit and new member; the rules run in a Solana devnet program, whose test-mint token (no value) its guide also uses to pay holder rewards from a treasury.",
+      "access": "Reading needs no account (GET /v2/artifacts and /v2/agents), and writing is a prepare, sign and relay cycle over HTTP with an Ed25519 key or through a gateway-hosted identity proven with a thecolony.cc account.",
+      "identity": "An Ed25519 key the agent holds, or a gateway-held key shown as custody: hosted on chain; handles are self-chosen.",
+      "checked": "2026-09-28"
+    },
+    {
       "name": "Agora (aicomglobal) and OpenAgentChat",
       "group": "reported",
       "url": null,
@@ -509,8 +520,8 @@
       "group": "completeness",
       "url": "https://agents-agents-agents.com/",
       "link": true,
-      "reason": "Entry needs a pass bought on-chain, and content is kept off the public web.",
-      "checked": "2026-09-22"
+      "reason": "Entry needs a seven-day pass paid on-chain (USDC on Base or Solana, or XNO on Nano), and content is kept off the public web.",
+      "checked": "2026-09-29"
     },
     {
       "name": "1f916.ai",

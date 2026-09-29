@@ -500,7 +500,7 @@ func (s *Store) quotaBalance(ctx context.Context, tx *sql.Tx, a actor, now int64
 	if err != nil {
 		return Result{}, fromAllowance(err)
 	}
-	resources, err := s.balances(ctx, tx, subject(a), now)
+	resources, err := s.balances(ctx, tx, subject(a), creditSubject(a, subject(a)), now)
 	if err != nil {
 		return Result{}, err
 	}
@@ -510,11 +510,17 @@ func (s *Store) quotaBalance(ctx context.Context, tx *sql.Tx, a actor, now int64
 
 var resourceOrder = []allowance.Resource{allowance.PostBytes, allowance.MemoryBytes, allowance.Credit}
 
-// balances is one row per resource for allowance.get and quota.get.
-func (s *Store) balances(ctx context.Context, tx *sql.Tx, subj allowance.Subject, now int64) ([]map[string]any, error) {
+// balances is one row per resource for allowance.get and quota.get. credit
+// is the subject whose credit row is shown: subj, except for an anonymous
+// caller reading its own, whose credit share is its IPv6 /48's (creditSubject).
+func (s *Store) balances(ctx context.Context, tx *sql.Tx, subj, credit allowance.Subject, now int64) ([]map[string]any, error) {
 	var out []map[string]any
 	for _, r := range resourceOrder {
-		b, err := s.ledger.led.Balance(ctx, tx, subj, r, now)
+		who := subj
+		if r == allowance.Credit {
+			who = credit
+		}
+		b, err := s.ledger.led.Balance(ctx, tx, who, r, now)
 		if err != nil {
 			return nil, fromAllowance(err)
 		}
@@ -552,6 +558,17 @@ func allowanceTarget(ctx context.Context, tx *sql.Tx, c Command, a actor) (allow
 	return allowance.Subject{ID: account, Signed: true}, c.Target, nil
 }
 
+// creditSubject is the subject whose credit a read shows for subj: an
+// anonymous caller's own credit share is keyed on its IPv6 /48 (the account
+// an unsigned service.call spends from, AnonCreditPrefixV6Bits), its posting
+// on the /64.
+func creditSubject(a actor, subj allowance.Subject) allowance.Subject {
+	if !a.signed && subj.ID == a.account && a.creditAccount != "" {
+		subj.ID = a.creditAccount
+	}
+	return subj
+}
+
 // readAllowance is allowance.get: tier, today's share per resource, what is
 // left and when it resets. A read writes nothing: before the day's first
 // spend the share is prospective.
@@ -577,7 +594,7 @@ func (s *Store) readAllowance(ctx context.Context, tx *sql.Tx, c Command, a acto
 	if err != nil {
 		return Result{}, fromAllowance(err)
 	}
-	resources, err := s.balances(ctx, tx, subj, now)
+	resources, err := s.balances(ctx, tx, subj, creditSubject(a, subj), now)
 	if err != nil {
 		return Result{}, err
 	}
@@ -731,12 +748,26 @@ func (s *Store) allowanceNote(ctx context.Context, tx *sql.Tx, a actor, res *Res
 		More: "/capabilities#allowance",
 	}
 	// The first-call line also names the service catalogue while any service
-	// runs, so every wire that prints the line points at it.
+	// runs, so every wire that prints the line points at it, and with it the
+	// free credit a signed key gets (FreeCredit).
 	if len(s.config.Features.Services) > 0 {
-		res.Allowance.Line += " Services: " + ServicesCatalogueURL + "."
+		if offer := s.freeCredit(ctx, tx, now); offer != nil {
+			res.Allowance.Line += " " + offer.note()
+		} else {
+			res.Allowance.Line += " Services: " + ServicesCatalogueURL + "."
+		}
 		res.Allowance.Services = ServicesCatalogueURL
 	}
 	return nil
+}
+
+// subjectsLabel names who spent a row of the services statistics: signed
+// accounts or anonymous subjects (one per network prefix).
+func subjectsLabel(anonymous bool) string {
+	if anonymous {
+		return "anonymous"
+	}
+	return "signed"
 }
 
 // ServicesCatalogueURL is the service catalogue: GET /api/services, the
@@ -801,7 +832,7 @@ func (s *Store) AllowanceStats(ctx context.Context, days int) (map[string]any, e
 	}
 	services := []map[string]any{}
 	for _, sv := range st.Services {
-		services = append(services, map[string]any{"service": sv.Service, "resource": string(sv.Resource), "bucket": string(sv.Bucket), "units": sv.Units, "calls": sv.Calls})
+		services = append(services, map[string]any{"service": sv.Service, "resource": string(sv.Resource), "bucket": string(sv.Bucket), "units": sv.Units, "calls": sv.Calls, "subjects": subjectsLabel(sv.Anonymous)})
 	}
 	levers, err := pulledLevers(ctx, tx)
 	if err != nil {

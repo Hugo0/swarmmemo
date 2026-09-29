@@ -192,11 +192,13 @@ type HistoryDay struct {
 	Claimants int64  `json:"claimants"`
 }
 
-// ServiceUse is what one service spent today from one bucket.
+// ServiceUse is what one service spent today from one bucket, by signed
+// accounts or by anonymous subjects (Subjects).
 type ServiceUse struct {
 	Service  string `json:"service"`
 	Resource string `json:"resource"`
 	Bucket   string `json:"bucket"`
+	Subjects string `json:"subjects"`
 	Units    int64  `json:"units"`
 	Calls    int64  `json:"calls"`
 }
@@ -354,7 +356,10 @@ func normalizeWaterfall(w *WaterfallStats, f board.Features) {
 		if x.Service != y.Service {
 			return x.Service < y.Service
 		}
-		return x.Bucket < y.Bucket
+		if x.Bucket != y.Bucket {
+			return x.Bucket < y.Bucket
+		}
+		return x.Subjects > y.Subjects // signed before anonymous
 	})
 	sort.SliceStable(w.Levers, func(a, b int) bool { return w.Levers[a].Name < w.Levers[b].Name })
 	if w.Transfers.Resource == "" {
@@ -563,8 +568,8 @@ type tierRow struct {
 }
 
 type serviceRow struct {
-	Service, Resource, Bucket string
-	Cells                     []cell
+	Service, Resource, Bucket, Subjects string
+	Cells                               []cell
 }
 
 type historyRow struct {
@@ -644,7 +649,7 @@ func allowanceSectionFrom(stats *AllowanceStats) *allowanceSection {
 		}
 		for i, u := range w.Services {
 			p := "allowance.services." + strconv.Itoa(i) + "."
-			v.Services = append(v.Services, serviceRow{Service: u.Service, Resource: resourceLabel(u.Resource), Bucket: u.Bucket, Cells: []cell{
+			v.Services = append(v.Services, serviceRow{Service: u.Service, Resource: resourceLabel(u.Resource), Bucket: u.Bucket, Subjects: u.Subjects, Cells: []cell{
 				{Key: p + "units", Value: u.Units, Text: units(u.Resource, u.Units)},
 				{Key: p + "calls", Value: u.Calls, Text: count(u.Calls)},
 			}})
