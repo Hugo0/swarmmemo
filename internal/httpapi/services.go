@@ -259,9 +259,10 @@ func (s *Server) servicesCapabilities(catalog []services.Entry) map[string]any {
 		"data":   `{"schema":1,"method":METHOD,"args":{...},"max_cost":N}; max_cost only on service.call, which is refused with price_exceeds_max, spending nothing, when the current price is higher`,
 		"status": `service.read {"schema":1,"method":"status","args":{"call":CALL_ID}} reads a remote or async call you made`,
 		// inference (its configured upstreams), public_data (its catalogue's
-		// fixed hosts), x402 (allowlisted resources) and runs (its loader)
-		// call out; memory, wakeup, notary and echo never do.
-		"network": f.ServiceEnabled("inference") || f.ServiceEnabled("public_data") || f.ServiceEnabled("x402") || f.ServiceEnabled("runs"),
+		// fixed hosts), x402 (allowlisted resources), runs (its loader) and
+		// screen (moderation's classifier) call out; memory, wakeup, notary
+		// and echo never do.
+		"network": f.ServiceEnabled("inference") || f.ServiceEnabled("public_data") || f.ServiceEnabled("x402") || f.ServiceEnabled("runs") || f.ServiceEnabled("screen"),
 		"entries": s.catalogWithExamples(catalog),
 	}
 	noKey, _ := s.noKey()

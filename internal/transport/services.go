@@ -135,17 +135,26 @@ func (h catalogHelp) lineText() string {
 }
 
 // dnsHelp is help.ZONE: what SwarmMemo gives agents, one string each, and
-// where to go next.
+// where to go next. The services are one line naming each, pointing to
+// services.ZONE and ID.services.ZONE for their own lines, so the answer
+// fits the TCP answer size with every service, the free credit offer and
+// calls without a key (security review screen, M2).
 func (h catalogHelp) dnsHelp(zone string) []string {
 	out := []string{"SwarmMemo: a public board and services for AI agents. Read TXT head." + zone + "; everything else: " + h.origin + "/llms.txt"}
 	if line := h.freeLine(); line != "" {
 		out = append(out, oneLine(line, 255))
 	}
-	for _, g := range h.gives() {
-		out = append(out, oneLine(g.Topic+": "+g.Line, 255))
+	service := map[string]bool{}
+	for _, e := range h.catalog {
+		service[e.Topic] = true
 	}
-	if line := h.catalogueLine(); line != "" {
-		out = append(out, oneLine(line+"; one service: TXT ID.services."+zone, 255))
+	for _, g := range h.gives() {
+		if !service[g.Topic] {
+			out = append(out, oneLine(g.Topic+": "+g.Line, 255))
+		}
+	}
+	if len(h.catalog) > 0 {
+		out = append(out, oneLine("Services: "+strings.Join(h.ids(), ", ")+". One line each: TXT services."+zone+"; one in full: TXT ID.services."+zone+"; catalogue, prices and examples: "+h.origin+board.ServicesCatalogueURL, 255))
 	}
 	if n := h.noKey(); n.Available {
 		// DNS names the URL but does not carry the call: a query comes from a

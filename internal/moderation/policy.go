@@ -89,8 +89,11 @@ type JevPolicy struct {
 	// DailySpendCapMicroUSD bounds a UTC day's Jev spend; 0 turns Jev off.
 	DailySpendCapMicroUSD int64 `json:"daily_spend_cap_microusd"`
 	PricePerMTokMicroUSD  int64 `json:"price_per_mtok_microusd"` // input tokens
-	MaxTextBytes          int   `json:"max_text_bytes"`
-	TimeoutMS             int   `json:"timeout_ms"`
+	// ScreenDailySpendCapMicroUSD is the part of that cap the screen service
+	// (screen.text) may spend in a UTC day, counted in both; 0 turns it off.
+	ScreenDailySpendCapMicroUSD int64 `json:"screen_daily_spend_cap_microusd"`
+	MaxTextBytes                int   `json:"max_text_bytes"`
+	TimeoutMS                   int   `json:"timeout_ms"`
 }
 
 // SurfacePolicy is one surface's configuration.
@@ -252,6 +255,8 @@ func (j *JevPolicy) validate() error {
 		return errors.New("moderation policy: jev.model must be a pinned model name such as jev-1.13.0")
 	case j.DailySpendCapMicroUSD < 0 || j.DailySpendCapMicroUSD > 1e12:
 		return errors.New("moderation policy: jev.daily_spend_cap_microusd must be 0 (Jev off) to 1e12")
+	case j.ScreenDailySpendCapMicroUSD < 0 || j.ScreenDailySpendCapMicroUSD > j.DailySpendCapMicroUSD:
+		return errors.New("moderation policy: jev.screen_daily_spend_cap_microusd must be 0 (screening off) to daily_spend_cap_microusd")
 	case j.PricePerMTokMicroUSD < 1 || j.PricePerMTokMicroUSD > 1e9:
 		return errors.New("moderation policy: jev.price_per_mtok_microusd must be 1 to 1e9")
 	case j.MaxTextBytes < 256 || j.MaxTextBytes > 64<<10:
@@ -598,17 +603,22 @@ var defaultLabels = map[string]string{
 	"denied_address":    "denied address",
 }
 
+// flagAt is the moderation standard's flag threshold: a category at or above
+// it is flagged for review. The screen service signs its receipts' verdicts
+// at the same p (services.ScreenThreshold).
+const flagAt = 0.60
+
 // DefaultPolicy is version 0, compiled in: the moderation standard. A fresh
 // copy each call, so callers may not alter the one in force.
 func DefaultPolicy() *Policy {
 	severe := func(label string, hide Action) *CategoryPolicy {
-		return &CategoryPolicy{Label: label, Thresholds: []Threshold{{0.90, hide}, {0.60, Flag}}}
+		return &CategoryPolicy{Label: label, Thresholds: []Threshold{{0.90, hide}, {flagAt, Flag}}}
 	}
 	flagOnly := func(label string) *CategoryPolicy {
-		return &CategoryPolicy{Label: label, Thresholds: []Threshold{{0.60, Flag}}}
+		return &CategoryPolicy{Label: label, Thresholds: []Threshold{{flagAt, Flag}}}
 	}
 	hardSevere := func(label string, hide Action) *CategoryPolicy {
-		return &CategoryPolicy{Label: label, Hard: true, Thresholds: []Threshold{{0.90, hide}, {0.60, Flag}}}
+		return &CategoryPolicy{Label: label, Hard: true, Thresholds: []Threshold{{0.90, hide}, {flagAt, Flag}}}
 	}
 	hardBlock := func(label string) *CategoryPolicy {
 		return &CategoryPolicy{Label: label, Hard: true, Thresholds: []Threshold{{1, Block}}}
@@ -640,11 +650,11 @@ func DefaultPolicy() *Policy {
 		Burst:         &Burst{WindowSeconds: 3600, Max: 20, Mode: "alert"},
 		MaxBytes:      256 << 10,
 		Categories: map[string]*CategoryPolicy{
-			"malware": {Label: "malware", Hard: true, Thresholds: []Threshold{{0.90, Block}, {0.60, Flag}}},
-			"mining":  {Label: "crypto mining", Hard: true, Thresholds: []Threshold{{0.90, Block}, {0.60, Flag}}},
+			"malware": {Label: "malware", Hard: true, Thresholds: []Threshold{{0.90, Block}, {flagAt, Flag}}},
+			"mining":  {Label: "crypto mining", Hard: true, Thresholds: []Threshold{{0.90, Block}, {flagAt, Flag}}},
 			"size":    hardBlock("too large"),
 		},
-		Default: &CategoryPolicy{Thresholds: []Threshold{{0.60, Flag}}}, // flag the rest
+		Default: &CategoryPolicy{Thresholds: []Threshold{{flagAt, Flag}}}, // flag the rest
 		Rules:   defaultCodeRules(),
 	}
 	egress := &SurfacePolicy{
@@ -673,7 +683,7 @@ func DefaultPolicy() *Policy {
 		Categories: map[string]*CategoryPolicy{
 			"minors": hardSevere("sexual content involving minors", Block),
 		},
-		Default: &CategoryPolicy{Thresholds: []Threshold{{0.60, Flag}}},
+		Default: &CategoryPolicy{Thresholds: []Threshold{{flagAt, Flag}}},
 	}
 	output := &SurfacePolicy{
 		Classifiers:   []string{"jev"},
@@ -695,9 +705,12 @@ func DefaultPolicy() *Policy {
 		Jev: JevPolicy{
 			Model:                 "jev-1.13.0",
 			DailySpendCapMicroUSD: 2_000_000, // $2 a day
-			PricePerMTokMicroUSD:  42_000,    // $0.042 per million input tokens
-			MaxTextBytes:          12_000,
-			TimeoutMS:             30_000,
+			// Screening for agents (screen.text) may use a quarter of it, so
+			// board moderation always keeps $1.50.
+			ScreenDailySpendCapMicroUSD: 500_000,
+			PricePerMTokMicroUSD:        42_000, // $0.042 per million input tokens
+			MaxTextBytes:                12_000,
+			TimeoutMS:                   30_000,
 		},
 		Surfaces: map[Surface]*SurfacePolicy{
 			SurfacePost:            post,

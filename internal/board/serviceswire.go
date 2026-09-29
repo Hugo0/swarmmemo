@@ -37,7 +37,8 @@ type servicesState struct {
 	inference  *services.InferenceConfig  // nil unless SERVICES names inference
 	runs       *services.RunsConfig       // nil unless SERVICES names runs
 	publicData *services.PublicDataConfig // nil unless SERVICES names public_data
-	notaryKey  ed25519.PrivateKey         // nil unless SERVICES names notary or runs
+	notaryKey  ed25519.PrivateKey         // nil unless SERVICES names notary, runs or screen
+	screener   services.TextScreener      // screen's classifier; nil unless MODERATION is on
 }
 
 func (s *Store) openServices() error {
@@ -80,7 +81,10 @@ func (s *Store) openServices() error {
 		}
 		s.services.publicData = cfg
 	}
-	if s.config.Features.ServiceEnabled("notary") || s.config.Features.ServiceEnabled("runs") {
+	if s.config.Features.Moderation {
+		s.services.screener = textScreener{s}
+	}
+	if s.config.Features.ServiceEnabled("notary") || s.config.Features.ServiceEnabled("runs") || s.config.Features.ServiceEnabled("screen") {
 		key, err := services.LoadOrCreateNotaryKey(s.config.NotaryKeyFile)
 		if err != nil {
 			return err
@@ -114,7 +118,7 @@ func (s *Store) newServiceEngine(meter services.Meter, params allowance.ParamsSo
 func (s *Store) serviceDeps() services.Deps {
 	return services.Deps{Accounts: accountResolver{}, DB: s.db, Dial: s.webhookDial, X402: s.config.X402,
 		Inference: s.services.inference, Runs: s.services.runs, Board: serviceBoardView{}, ServiceID: s.config.ServiceID,
-		PublicData: s.services.publicData, Classifier: s.classifier(), NotaryKey: s.services.notaryKey, EchoSimulate: s.config.EchoSimulate}
+		PublicData: s.services.publicData, Classifier: s.classifier(), NotaryKey: s.services.notaryKey, TextScreener: s.services.screener, EchoSimulate: s.config.EchoSimulate}
 }
 
 // UseServiceMeter replaces the ledger and price source the services use. It
@@ -123,6 +127,16 @@ func (s *Store) serviceDeps() services.Deps {
 func (s *Store) UseServiceMeter(meter services.Meter, params allowance.ParamsSource) {
 	if s.services.engine != nil {
 		s.services.engine = s.newServiceEngine(meter, params)
+	}
+}
+
+// UseTextScreener replaces screen's classifier (moderation's Jev). It exists
+// for wire tests, which have no Jev; call it right after Open, before
+// UseServiceMeter. It does nothing while SERVICES is empty.
+func (s *Store) UseTextScreener(ts services.TextScreener) {
+	if s.services.engine != nil {
+		s.services.screener = ts
+		s.services.engine = s.newServiceEngine(s.serviceMeter(), s.ledger.params)
 	}
 }
 
@@ -320,14 +334,13 @@ func (s *Store) logUnsignedCall(ctx context.Context, c Command, a actor, state s
 // call and how much, from the allowance parameters and the levers in force.
 func (s *Store) noKey(ctx context.Context, q allowance.Querier, now int64) services.NoKey {
 	catalog := services.Catalog(s.config.Features.Services)
-	if inf := s.services.inference; inf == nil || inf.Screener == nil {
-		// Unsigned inference fails closed without moderation's screen, so
-		// nothing offers it.
-		for i := range catalog {
-			if catalog[i].ID == "inference" {
-				for j := range catalog[i].Methods {
-					catalog[i].Methods[j].Anonymous = false
-				}
+	// Unsigned inference fails closed without moderation's screen, and screen
+	// without a classifier that can answer, so nothing offers them.
+	off := map[string]bool{"inference": s.services.inference == nil || s.services.inference.Screener == nil, "screen": !services.ScreenReady(ctx, s.services.screener, s.services.notaryKey)}
+	for i := range catalog {
+		if off[catalog[i].ID] {
+			for j := range catalog[i].Methods {
+				catalog[i].Methods[j].Anonymous = false
 			}
 		}
 	}

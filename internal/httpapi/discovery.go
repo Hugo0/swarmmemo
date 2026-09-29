@@ -745,6 +745,7 @@ ok line.
 	}
 	noKey, _ := s.noKey()
 	b.WriteString(web.NoKeyText(noKey))
+	b.WriteString(web.ScreenText(s.cfg.PublicURL, catalog, noKey))
 	b.WriteString(web.ServicesTextWith(s.cfg.PublicURL, catalog, noKey))
 	if f.Trust != board.TrustOff {
 		b.WriteString(`## Trust estimates

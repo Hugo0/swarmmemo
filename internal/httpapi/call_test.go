@@ -20,9 +20,12 @@ import (
 // or POST, answered in JSON; the same call is a hosted MCP tool. Every
 // surface says so from the same catalogue and parameters.
 
-func anonCallServer(t *testing.T, anonCap int64) (*board.Store, *Server) {
+func anonCallServer(t *testing.T, anonCap int64, enabled ...string) (*board.Store, *Server) {
 	t.Helper()
-	f := board.Features{Services: []string{"notary", "memory"}, Ledger: board.LedgerOn, AnonPrefix: true}
+	if len(enabled) == 0 {
+		enabled = []string{"notary", "memory"}
+	}
+	f := board.Features{Services: enabled, Ledger: board.LedgerOn, AnonPrefix: true}
 	store, err := board.Open(filepath.Join(t.TempDir(), "board.sqlite"), board.Config{ServiceID: "swarmmemo.com", Features: f})
 	if err != nil {
 		t.Fatal(err)

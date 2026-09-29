@@ -150,32 +150,41 @@ type NotaryReceipt struct {
 	Signature string `json:"signature"`
 }
 
-func encodePayload(p NotaryPayload) []byte {
-	var b bytes.Buffer
-	e := json.NewEncoder(&b)
-	e.SetEscapeHTML(false)
-	_ = e.Encode(p)
-	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'})
+// signPayload signs a receipt payload with key: p's JSON (fields in struct
+// order, no spaces, no HTML escaping) and the base64url Ed25519 signature
+// over exactly those bytes. Notary, run and screen receipts all sign this way.
+func signPayload(key ed25519.PrivateKey, p any) (payload, signature string) {
+	b := canonicalJSON(p)
+	return string(b), base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, b))
+}
+
+// verifyPayload checks a receipt payload offline against a public key
+// (base64url, as published): the signature over the payload bytes as given,
+// and that the payload is p's canonical form, decoded strictly into p. It
+// returns the key's ID, for the caller to compare with the payload's.
+func verifyPayload(publicKey, payload, signature string, p any) (string, bool) {
+	key, err := base64.RawURLEncoding.DecodeString(publicKey)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return "", false
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(signature)
+	if err != nil || len(sig) != ed25519.SignatureSize || !ed25519.Verify(ed25519.PublicKey(key), []byte(payload), sig) {
+		return "", false
+	}
+	if err = StrictObject([]byte(payload), p); err != nil || !bytes.Equal(canonicalJSON(p), []byte(payload)) {
+		return "", false
+	}
+	return keyID(key), true
 }
 
 // VerifyNotaryReceipt checks a receipt offline against the notary's public
 // key (base64url, as published): the signature over the payload bytes, and
 // that every repeated field equals the payload's.
 func VerifyNotaryReceipt(publicKey string, r NotaryReceipt) bool {
-	key, err := base64.RawURLEncoding.DecodeString(publicKey)
-	if err != nil || len(key) != ed25519.PublicKeySize {
-		return false
-	}
-	sig, err := base64.RawURLEncoding.DecodeString(r.Signature)
-	if err != nil || len(sig) != ed25519.SignatureSize || !ed25519.Verify(ed25519.PublicKey(key), []byte(r.Payload), sig) {
-		return false
-	}
 	var p NotaryPayload
-	if err = StrictObject([]byte(r.Payload), &p); err != nil || !bytes.Equal(encodePayload(p), []byte(r.Payload)) {
-		return false
-	}
-	return p.Schema == NotarySchema && p.Schema == r.Schema && p.Hash == r.Hash && p.Time == r.Time && p.Seq == r.Seq &&
-		p.ServiceID == r.ServiceID && p.KeyID == r.KeyID && p.KeyID == keyID(key)
+	id, ok := verifyPayload(publicKey, r.Payload, r.Signature, &p)
+	return ok && p.Schema == NotarySchema && p.Schema == r.Schema && p.Hash == r.Hash && p.Time == r.Time && p.Seq == r.Seq &&
+		p.ServiceID == r.ServiceID && p.KeyID == r.KeyID && p.KeyID == id
 }
 
 func keyID(public []byte) string {
@@ -230,13 +239,12 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 		return Result{}, err
 	}
 	p := NotaryPayload{Schema: NotarySchema, ServiceID: n.serviceID, KeyID: keyID(pub), Seq: seq, Time: c.Now, Hash: hash}
-	payload := encodePayload(p)
-	signature := base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, payload))
-	if _, err = tx.ExecContext(ctx, "UPDATE notary_receipts SET key_id=?, payload=?, signature=? WHERE seq=?", p.KeyID, string(payload), signature, seq); err != nil {
+	payload, signature := signPayload(key, p)
+	if _, err = tx.ExecContext(ctx, "UPDATE notary_receipts SET key_id=?, payload=?, signature=? WHERE seq=?", p.KeyID, payload, signature, seq); err != nil {
 		return Result{}, err
 	}
 	r := NotaryReceipt{Schema: NotarySchema, Hash: hash, Time: c.Now, Seq: seq, ServiceID: n.serviceID, KeyID: p.KeyID,
-		PublicKey: base64.RawURLEncoding.EncodeToString(pub), Payload: string(payload), Signature: signature}
+		PublicKey: base64.RawURLEncoding.EncodeToString(pub), Payload: payload, Signature: signature}
 	body, _ := json.Marshal(map[string]any{"receipt": r, "duplicate": false})
 	return Result{Body: body, Used: c.Price.For(0), Public: public}, nil
 }
@@ -289,20 +297,25 @@ func (n *notary) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 		}
 		return json.Marshal(map[string]any{"receipt": r})
 	case "key":
-		var a struct{}
-		if err := StrictObject(c.Args, &a); err != nil {
-			return nil, err
-		}
-		key, err := n.signingKey()
-		if err != nil {
-			return nil, err
-		}
-		pub := key.Public().(ed25519.PublicKey)
-		return json.Marshal(map[string]any{
-			"schema": NotarySchema, "service_id": n.serviceID, "algorithm": "ed25519",
-			"public_key": base64.RawURLEncoding.EncodeToString(pub), "key_id": keyID(pub),
-			"verify": "Ed25519 over the receipt's payload bytes exactly as given (base64url signature and key, no padding); the payload's fields must equal the receipt's, and key_id is the SHA-256 of the public key.",
-		})
+		return keyRead(c.Args, n.key, NotarySchema, n.serviceID)
 	}
 	return nil, refusal("invalid_service_data")
+}
+
+// keyRead answers a receipt service's "key" read: the public key that signs
+// its receipts (schema), and how to verify one.
+func keyRead(args json.RawMessage, key ed25519.PrivateKey, schema, serviceID string) (json.RawMessage, error) {
+	var a struct{}
+	if err := StrictObject(args, &a); err != nil {
+		return nil, err
+	}
+	if len(key) != ed25519.PrivateKeySize {
+		return nil, refusal("service_unavailable")
+	}
+	pub := key.Public().(ed25519.PublicKey)
+	return json.Marshal(map[string]any{
+		"schema": schema, "service_id": serviceID, "algorithm": "ed25519",
+		"public_key": base64.RawURLEncoding.EncodeToString(pub), "key_id": keyID(pub),
+		"verify": "Ed25519 over the receipt's payload bytes exactly as given (base64url signature and key, no padding); the payload's fields must equal the receipt's, and key_id is the SHA-256 of the public key.",
+	})
 }

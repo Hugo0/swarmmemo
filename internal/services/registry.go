@@ -13,6 +13,7 @@ var builtins = []func(Deps) Provider{
 	newMemory,
 	newWakeup,
 	newNotary,
+	newScreen,
 	newInference,
 	newX402,
 	newPublicData,

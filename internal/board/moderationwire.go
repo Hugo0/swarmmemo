@@ -131,6 +131,22 @@ func (m inferenceScreener) Screen(ctx context.Context, in services.ScreenInput) 
 	return services.ScreenVerdict{Hide: hide, Reason: reason}, err
 }
 
+// textScreener is services.TextScreener over Engine.ScreenText, for the
+// screen service.
+type textScreener struct{ s *Store }
+
+func (m textScreener) ScreenText(ctx context.Context, text, source, intent string) (services.TextScreen, error) {
+	if e := m.s.moderation.engine; e != nil {
+		return e.ScreenText(ctx, text, source, intent)
+	}
+	return services.TextScreen{}, errNoModeration
+}
+
+func (m textScreener) ScreenAvailable(ctx context.Context) bool {
+	e := m.s.moderation.engine
+	return e != nil && e.ScreenAvailable(ctx)
+}
+
 // runScreener is services.RunScreener over Engine.Screen. Code (run.code) is
 // screened as text: allow and flag run, hold waits for a reviewer, hide and
 // block refuse. The egress log arrives after the run, and the loader's

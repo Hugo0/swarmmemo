@@ -16,6 +16,7 @@ var argShapes = map[string]any{
 	"notary.stamp": notaryStampArgs{}, "notary.get": struct {
 		Hash string `json:"hash"`
 	}{}, "notary.key": struct{}{},
+	"screen.text": screenArgs{}, "screen.key": struct{}{}, "screen.verify": screenVerifyArgs{},
 	"inference.complete": inferenceArgs{},
 	"x402.call":          x402Args{}, "x402.resources": struct{}{},
 	"public_data.fetch": pdRequestArgs{}, "public_data.bulk": struct {
@@ -90,6 +91,8 @@ func TestCatalogExamplesParse(t *testing.T) {
 				_, err = parseWakeupRef(args)
 			case "notary.stamp":
 				_, err = parseStamp(args)
+			case "screen.text":
+				_, err = parseScreen(args)
 			case "public_data.fetch", "public_data.bulk":
 				_, err = parsePublicData(m.Name, args, now)
 			case "runs.run":

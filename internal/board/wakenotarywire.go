@@ -144,6 +144,8 @@ func providerError(code string) error {
 		return problem(404, "wakeup_not_found", "None of your wake-ups has that key or ID; service.read wakeup list shows yours.")
 	case "wakeup_room_not_found":
 		return problem(404, "not_found", "No room by that name is readable by you.")
+	case "screen_text_limit":
+		return problem(401, "signature_required", fmt.Sprintf("Without a key, screen.text takes up to %d bytes of text; sign the command for up to %d.", services.ScreenAnonymousTextBytes, services.ScreenTextBytes))
 	case "notary_not_found":
 		return problem(404, "notary_not_found", "No receipt for that hash; stamp it with service.call notary stamp.")
 	case "notary_limit":

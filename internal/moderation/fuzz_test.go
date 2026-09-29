@@ -3,6 +3,8 @@ package moderation
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
+	"unsafe"
 )
 
 // FuzzParsePolicy: the policy parser never panics, and whatever it accepts
@@ -54,4 +56,50 @@ func FuzzParsePolicy(f *testing.F) {
 			t.Fatal("canonical form is not stable")
 		}
 	})
+}
+
+// FuzzJevChunks: chunks are at most n bytes of the text itself, valid UTF-8
+// for valid text, in order and overlapping or touching, so a whole split
+// leaves no byte unscreened; and any text up to jevChunksCover(n) is split
+// whole (security review screen, M1).
+func FuzzJevChunks(f *testing.F) {
+	f.Add("hello", 256)
+	f.Add(strings.Repeat("é€😀a", 5000), 2493)
+	f.Add(strings.Repeat("a", 16384), 1024)
+	f.Fuzz(func(t *testing.T, text string, n int) {
+		n = 256 + abs(n%(16<<10))
+		text = strings.ToValidUTF8(text, "?")
+		if text == "" {
+			return
+		}
+		chunks, whole := jevChunks(text, n)
+		if len(chunks) == 0 || len(chunks) > jevChunksMax {
+			t.Fatalf("%d chunks", len(chunks))
+		}
+		base := uintptr(unsafe.Pointer(unsafe.StringData(text)))
+		covered, last := 0, -1 // text[:covered] is in some chunk
+		for i, c := range chunks {
+			at := int(uintptr(unsafe.Pointer(unsafe.StringData(c))) - base)
+			if len(c) == 0 || len(c) > n || !utf8.ValidString(c) || at <= last || at < 0 || at+len(c) > len(text) || text[at:at+len(c)] != c {
+				t.Fatalf("chunk %d: %d bytes at %d", i, len(c), at)
+			}
+			if whole && at > covered {
+				t.Fatalf("a whole split skips bytes %d to %d", covered, at)
+			}
+			covered, last = max(covered, at+len(c)), at
+		}
+		if whole && covered != len(text) {
+			t.Fatalf("a whole split covers %d of %d bytes", covered, len(text))
+		}
+		if len(text) <= jevChunksCover(n) && !whole {
+			t.Fatalf("%d bytes at %d-byte chunks (cover %d) not split whole", len(text), n, jevChunksCover(n))
+		}
+	})
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

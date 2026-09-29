@@ -57,8 +57,8 @@ func TestSec120_PayloadPastJevTruncationIsCaught(t *testing.T) {
 
 func TestSec120_JevChunksCoverTheText(t *testing.T) {
 	text := strings.Repeat("é", 20000) // 40,000 bytes, two-byte runes
-	chunks := jevChunks(text, 12000)
-	if len(chunks) < 4 || len(chunks) > jevChunksMax {
+	chunks, whole := jevChunks(text, 12000)
+	if !whole || len(chunks) < 4 || len(chunks) > jevChunksMax {
 		t.Fatalf("%d chunks", len(chunks))
 	}
 	covered := 0
@@ -71,8 +71,8 @@ func TestSec120_JevChunksCoverTheText(t *testing.T) {
 	if covered < len(text) || !strings.HasSuffix(text, chunks[len(chunks)-1]) {
 		t.Fatal("the chunks do not cover the text")
 	}
-	if n := len(jevChunks(strings.Repeat("a", 256<<10), 256)); n != jevChunksMax {
-		t.Fatalf("a long text at the smallest chunk size: %d chunks", n)
+	if chunks, whole := jevChunks(strings.Repeat("a", 256<<10), 256); len(chunks) != jevChunksMax || whole {
+		t.Fatalf("a long text at the smallest chunk size: %d chunks, whole %v", len(chunks), whole)
 	}
 }
 

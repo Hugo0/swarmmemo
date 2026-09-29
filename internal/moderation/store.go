@@ -45,6 +45,9 @@ CREATE INDEX IF NOT EXISTS moderation_jobs_due ON moderation_jobs(created_at) WH
 CREATE TABLE IF NOT EXISTS moderation_spend (
  day INTEGER PRIMARY KEY, spent_microusd INTEGER NOT NULL DEFAULT 0, calls INTEGER NOT NULL DEFAULT 0,
  tokens INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS moderation_screen_spend (
+ day INTEGER PRIMARY KEY, spent_microusd INTEGER NOT NULL DEFAULT 0, calls INTEGER NOT NULL DEFAULT 0,
+ tokens INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS moderation_domains (
  site TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('seen','allowed','denied')),
  first_seen INTEGER NOT NULL, first_agent TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL);
@@ -177,12 +180,32 @@ func (e *Engine) Alerts(ctx context.Context, limit int) ([]Alert, error) {
 }
 
 // reserveSpend adds estimate to the day's spend if it stays within the cap.
-// The reservation is durable, so a crash never forgets money spent.
-func (e *Engine) reserveSpend(ctx context.Context, day, estimate, cap int64) error {
+// The reservation is durable, so a crash never forgets money spent. A screen
+// service call is also added to the screen's own row, within its sub-cap, in
+// the same transaction: screening never spends past either, and board
+// moderation always keeps the cap less the sub-cap.
+func (e *Engine) reserveSpend(ctx context.Context, day, estimate int64, j JevPolicy, screen bool) error {
+	tx, err := e.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = reserveIn(ctx, tx, "moderation_spend", day, estimate, j.DailySpendCapMicroUSD); err == nil && screen {
+		err = reserveIn(ctx, tx, "moderation_screen_spend", day, estimate, j.ScreenDailySpendCapMicroUSD)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// reserveIn adds estimate to table's row for day if it stays within cap.
+// table is one of the two spend tables, never input.
+func reserveIn(ctx context.Context, tx *sql.Tx, table string, day, estimate, cap int64) error {
 	if cap <= 0 || estimate > cap {
 		return errSpendCap
 	}
-	res, err := e.db.ExecContext(ctx, `INSERT INTO moderation_spend(day,spent_microusd,calls,tokens) VALUES(?,?,0,0)
+	res, err := tx.ExecContext(ctx, `INSERT INTO `+table+`(day,spent_microusd,calls,tokens) VALUES(?,?,0,0)
 		ON CONFLICT(day) DO UPDATE SET spent_microusd=spent_microusd+excluded.spent_microusd WHERE spent_microusd+excluded.spent_microusd<=?`, day, estimate, cap)
 	if err != nil {
 		return err
@@ -194,14 +217,21 @@ func (e *Engine) reserveSpend(ctx context.Context, day, estimate, cap int64) err
 }
 
 // settleSpend corrects the day's spend by delta (the actual cost minus the
-// reservation, or minus the reservation for a call that failed).
-func (e *Engine) settleSpend(ctx context.Context, day, delta, tokens int64, called bool) {
+// reservation, or minus the reservation for a call that failed), and the
+// screen's row too for a screen call.
+func (e *Engine) settleSpend(ctx context.Context, day, delta, tokens int64, called, screen bool) {
 	calls := 0
 	if called {
 		calls = 1
 	}
-	if _, err := e.db.ExecContext(ctx, "UPDATE moderation_spend SET spent_microusd=max(0,spent_microusd+?),calls=calls+?,tokens=tokens+? WHERE day=?", delta, calls, tokens, day); err != nil {
-		slog.Error("moderation: spend not settled", "error", err)
+	tables := []string{"moderation_spend"}
+	if screen {
+		tables = append(tables, "moderation_screen_spend")
+	}
+	for _, table := range tables {
+		if _, err := e.db.ExecContext(ctx, "UPDATE "+table+" SET spent_microusd=max(0,spent_microusd+?),calls=calls+?,tokens=tokens+? WHERE day=?", delta, calls, tokens, day); err != nil {
+			slog.Error("moderation: spend not settled", "error", err)
+		}
 	}
 }
 

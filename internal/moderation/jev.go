@@ -41,6 +41,7 @@ const (
 var (
 	errJevUnavailable = errors.New("moderation: jev unavailable")
 	errSpendCap       = errors.New("moderation: jev daily spend cap reached")
+	errJevTextTooLong = errors.New("moderation: text needs more jev chunks than a screen makes")
 )
 
 type netConn = net.Conn
@@ -199,23 +200,27 @@ type jevResponse struct {
 // Text longer than the policy's max_text_bytes is screened in overlapping
 // chunks, each its own Jev call, and each category scores the most any chunk
 // gave it: a payload after filler is seen (security review 1.20, M9). Past
-// jevChunksMax chunks, the head chunks and the last one are screened.
+// jevChunksMax chunks, the head chunks and the last one are screened; a
+// screen service call refuses such a text instead (security review screen,
+// M1).
 const (
 	jevChunksMax    = 8
 	jevChunkOverlap = 512
 )
 
 // jevChunks splits text into chunks of at most n bytes on UTF-8 boundaries,
-// each starting jevChunkOverlap bytes before the previous one ended.
-func jevChunks(text string, n int) []string {
+// each starting jevChunkOverlap bytes before the previous one ended. whole
+// is false when the text needs more than jevChunksMax chunks, and the last
+// chunk is then its tail, leaving a middle part unscreened.
+func jevChunks(text string, n int) (chunks []string, whole bool) {
 	if len(text) <= n {
-		return []string{text}
+		return []string{text}, true
 	}
 	overlap := min(jevChunkOverlap, n/4)
 	var out []string
 	for start := 0; start < len(text); {
-		if len(out) == jevChunksMax-1 {
-			return append(out, truncateTail(text, n)) // the rest: its tail
+		if len(out) == jevChunksMax-1 && len(text)-start > n {
+			return append(out, truncateTail(text, n)), false // the rest: its tail
 		}
 		end := min(start+n, len(text))
 		for end > start+1 && end < len(text) && !utf8.RuneStart(text[end]) {
@@ -231,7 +236,14 @@ func jevChunks(text string, n int) []string {
 		}
 		start = next
 	}
-	return out
+	return out, true
+}
+
+// jevChunksCover is the longest text jevChunks always splits whole at chunks
+// of n bytes: every chunk after the first moves on by at least n less the
+// overlap and a partial rune.
+func jevChunksCover(n int) int {
+	return n + (jevChunksMax-1)*(n-min(jevChunkOverlap, n/4)-(utf8.UTFMax-1))
 }
 
 // truncateTail is the last n bytes or fewer of s, starting on a rune.
@@ -248,67 +260,92 @@ func truncateTail(s string, n int) string {
 
 // classifyJev asks Jev, within the day's spend cap, once per chunk of the text.
 func (e *Engine) classifyJev(ctx context.Context, pol *Policy, s Surface, subj Subject, c Content, now int64) (classResult, error) {
+	questions, state := jevRequest(s, subj)
+	return e.jevChunked(ctx, pol, c.Text, now, questions, state, false)
+}
+
+// jevRequest is the questions surface s asks and the state around one chunk
+// of its text.
+func jevRequest(s Surface, subj Subject) (map[string]jevQuestion, func(text string) any) {
+	switch s {
+	case SurfaceRunCode:
+		return codeQuestions, func(text string) any {
+			return map[string]any{"service": codeNote, "code": map[string]any{"text": text}}
+		}
+	case SurfacePost:
+		return textQuestions, func(text string) any {
+			return map[string]any{"board": boardNote, "message": map[string]any{"room": subj.Room, "signed": subj.Signed, "text": text}}
+		}
+	}
+	return textQuestions, func(text string) any {
+		return map[string]any{"service": inferenceNote, "stage": string(s), "message": map[string]any{"text": text}}
+	}
+}
+
+// jevChunked asks Jev the questions over each chunk of text (at most
+// max_text_bytes), one call per chunk. Every chunk's estimate is reserved
+// against the day's cap at once, before the first call, so a cap refusal
+// never comes after Jev billed a chunk (security review screen, L1); each
+// call then settles at its reported usage. Each category scores the most any
+// chunk gave it. cost sums what Jev reported, and is 0 when any chunk
+// reported no usable usage. screen marks the screen service's call: it is
+// also held to the screen sub-cap, and must cover the whole text.
+func (e *Engine) jevChunked(ctx context.Context, pol *Policy, text string, now int64, questions map[string]jevQuestion, state func(string) any, screen bool) (classResult, error) {
 	r := classResult{scores: map[string]float64{}}
 	if e.jev.keyFile == "" {
 		return r, errJevUnavailable
 	}
-	for _, chunk := range jevChunks(c.Text, pol.Jev.MaxTextBytes) {
-		cr, err := e.classifyJevText(ctx, pol, s, subj, chunk, now)
+	chunks, whole := jevChunks(text, pol.Jev.MaxTextBytes)
+	if screen && !whole {
+		return r, errJevTextTooLong
+	}
+	bodies := make([][]byte, len(chunks))
+	var reserved int64
+	for i, chunk := range chunks {
+		body, err := json.Marshal(map[string]any{"model": pol.Jev.Model, "state": state(truncateUTF8(chunk, pol.Jev.MaxTextBytes)), "questions": questions})
 		if err != nil {
 			return r, err
 		}
-		for k, v := range cr.scores {
-			r.scores[k] = max(r.scores[k], v)
-		}
-		r.model = cr.model
+		// A token is at least one byte, so the body's length bounds the tokens.
+		bodies[i], reserved = body, reserved+microUSD(int64(len(body)), pol.Jev.PricePerMTokMicroUSD)
 	}
-	return r, nil
-}
-
-// classifyJevText is one Jev call over text (at most max_text_bytes).
-func (e *Engine) classifyJevText(ctx context.Context, pol *Policy, s Surface, subj Subject, text string, now int64) (classResult, error) {
-	r := classResult{scores: map[string]float64{}}
-	text = truncateUTF8(text, pol.Jev.MaxTextBytes)
-	questions := textQuestions
-	var state any
-	switch {
-	case s == SurfaceRunCode:
-		questions = codeQuestions
-		state = map[string]any{"service": codeNote, "code": map[string]any{"text": text}}
-	case s == SurfacePost:
-		state = map[string]any{"board": boardNote, "message": map[string]any{"room": subj.Room, "signed": subj.Signed, "text": text}}
-	default:
-		state = map[string]any{"service": inferenceNote, "stage": string(s), "message": map[string]any{"text": text}}
-	}
-	body, err := json.Marshal(map[string]any{"model": pol.Jev.Model, "state": state, "questions": questions})
-	if err != nil {
-		return r, err
-	}
-	// A token is at least one byte, so the body's length bounds the tokens.
-	estimate := microUSD(int64(len(body)), pol.Jev.PricePerMTokMicroUSD)
 	day := now / 86400
-	if err := e.reserveSpend(ctx, day, estimate, pol.Jev.DailySpendCapMicroUSD); err != nil {
-		if errors.Is(err, errSpendCap) {
+	if err := e.reserveSpend(ctx, day, reserved, pol.Jev, screen); err != nil {
+		switch {
+		case errors.Is(err, errSpendCap) && screen:
+			e.alertOnce(ctx, Alert{Kind: "spend_cap", Surface: SurfaceScreen, Detail: fmt.Sprintf("Jev spend for screen.text reached its sub-cap of %d microUSD or the day's cap of %d; screen calls fail closed until 00:00 UTC", pol.Jev.ScreenDailySpendCapMicroUSD, pol.Jev.DailySpendCapMicroUSD), At: now}, day*86400)
+		case errors.Is(err, errSpendCap):
 			e.alertOnce(ctx, Alert{Kind: "spend_cap", Detail: fmt.Sprintf("Jev daily spend cap of %d microUSD reached; surfaces fall to on_unavailable until 00:00 UTC", pol.Jev.DailySpendCapMicroUSD), At: now}, day*86400)
 		}
 		return r, err
 	}
-	out, err := e.jev.call(ctx, body, time.Duration(pol.Jev.TimeoutMS)*time.Millisecond, questions)
-	if err != nil {
-		e.settleSpend(ctx, day, -estimate, 0, false)
-		return r, err
+	unbilled := false
+	for _, body := range bodies {
+		estimate := microUSD(int64(len(body)), pol.Jev.PricePerMTokMicroUSD)
+		out, err := e.jev.call(ctx, body, time.Duration(pol.Jev.TimeoutMS)*time.Millisecond, questions)
+		if err != nil {
+			e.settleSpend(ctx, day, -reserved, 0, false, screen) // this chunk's and the rest's
+			return r, err
+		}
+		reserved -= estimate
+		actual, tokens := estimate, out.Usage.InputTokens
+		if tokens > 0 && tokens <= int64(len(body)) {
+			actual = microUSD(tokens, pol.Jev.PricePerMTokMicroUSD)
+			r.cost += actual
+		} else {
+			unbilled = true
+		}
+		e.settleSpend(ctx, day, actual-estimate, tokens, true, screen)
+		for k, a := range out.Answers {
+			r.scores[k] = max(r.scores[k], *a.Noul)
+		}
+		r.model = pol.Jev.Model
+		if modelRE.MatchString(out.Model) {
+			r.model = out.Model
+		}
 	}
-	actual := estimate
-	if out.Usage.InputTokens > 0 && out.Usage.InputTokens <= int64(len(body)) {
-		actual = microUSD(out.Usage.InputTokens, pol.Jev.PricePerMTokMicroUSD)
-	}
-	e.settleSpend(ctx, day, actual-estimate, out.Usage.InputTokens, true)
-	for k, a := range out.Answers {
-		r.scores[k] = *a.Noul
-	}
-	r.model = pol.Jev.Model
-	if modelRE.MatchString(out.Model) {
-		r.model = out.Model
+	if unbilled {
+		r.cost = 0
 	}
 	return r, nil
 }

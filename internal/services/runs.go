@@ -750,31 +750,13 @@ type RunReceipt struct {
 	Signature string `json:"signature"`
 }
 
-func encodeRunPayload(p RunReceiptPayload) []byte {
-	var b bytes.Buffer
-	e := json.NewEncoder(&b)
-	e.SetEscapeHTML(false)
-	_ = e.Encode(p)
-	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'})
-}
-
 // VerifyRunReceipt checks a receipt offline against a public key (base64url):
 // the signature over the payload bytes, the payload's canonical form, and
 // that the repeated fields agree.
 func VerifyRunReceipt(publicKey string, r RunReceipt) bool {
-	key, err := base64.RawURLEncoding.DecodeString(publicKey)
-	if err != nil || len(key) != ed25519.PublicKeySize {
-		return false
-	}
-	sig, err := base64.RawURLEncoding.DecodeString(r.Signature)
-	if err != nil || len(sig) != ed25519.SignatureSize || !ed25519.Verify(ed25519.PublicKey(key), []byte(r.Payload), sig) {
-		return false
-	}
 	var p RunReceiptPayload
-	if err = StrictObject([]byte(r.Payload), &p); err != nil || !bytes.Equal(encodeRunPayload(p), []byte(r.Payload)) {
-		return false
-	}
-	return p.Schema == RunReceiptSchema && r.Schema == RunReceiptSchema && p.RunID == r.RunID && p.KeyID == r.KeyID && p.KeyID == sha256Of(key)
+	id, ok := verifyPayload(publicKey, r.Payload, r.Signature, &p)
+	return ok && p.Schema == RunReceiptSchema && r.Schema == RunReceiptSchema && p.RunID == r.RunID && p.KeyID == r.KeyID && p.KeyID == id
 }
 
 func (r *runs) signReceipt(ctx context.Context, p RunReceiptPayload) (RunReceipt, error) {
@@ -787,9 +769,9 @@ func (r *runs) signReceipt(ctx context.Context, p RunReceiptPayload) (RunReceipt
 	if p.ServiceID == "" {
 		p.ServiceID = "swarmmemo.com"
 	}
-	payload := encodeRunPayload(p)
+	payload, signature := signPayload(key, p)
 	return RunReceipt{Schema: RunReceiptSchema, RunID: p.RunID, KeyID: p.KeyID, PublicKey: base64.RawURLEncoding.EncodeToString(pub),
-		Payload: string(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, payload))}, nil
+		Payload: payload, Signature: signature}, nil
 }
 
 // ---------------------------------------------------------------- the run

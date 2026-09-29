@@ -8,8 +8,9 @@
 // (engine.go), and a provider's tables join Schema through its own Schema
 // method.
 //
-// Memory, wakeup and notary are local, and echo's Remote and Async paths
-// only simulate an upstream. Four providers make outbound requests:
+// Memory, wakeup and notary are local, screen asks moderation's classifier
+// (Deps.TextScreener), and echo's Remote and Async paths only simulate an
+// upstream. Four providers make outbound requests:
 // inference, only to the base URLs its operator configured; public_data,
 // only to the fixed hosts of its compiled-in catalogue; runs, only to the
 // loader URL its operator configured, all three through internal/safenet
@@ -226,6 +227,9 @@ type Deps struct {
 	// NOTARY_KEY_FILE), which signs notary and run receipts; nil leaves both
 	// services unavailable.
 	NotaryKey ed25519.PrivateKey
+	// TextScreener is screen's classifier (moderation's Jev, while MODERATION
+	// is on); nil leaves screen unavailable, and every call fails closed.
+	TextScreener TextScreener
 	// PublicData is public_data's configuration (its key directory); nil
 	// leaves every keyed dataset unavailable.
 	PublicData *PublicDataConfig

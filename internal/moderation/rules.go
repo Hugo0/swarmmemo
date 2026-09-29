@@ -11,6 +11,7 @@ const rulesScanBytes = 1 << 20
 type classResult struct {
 	scores map[string]float64
 	model  string
+	cost   int64 // Jev: what its calls cost, in microUSD
 }
 
 // classifyRules scores each rule's category at 1 when its regex matches.
