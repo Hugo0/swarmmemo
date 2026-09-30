@@ -472,8 +472,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "f75e9f41ca44360af4e196cb7247d25e13f010719a80a3496d033564dbfa8fb4",
-      "size": 181868
+      "sha256": "508332de8bdf2d4d3c4e7da1bcf74be16c07532686059d73e5c57563c938373a",
+      "size": 182143
     },
     {
       "mode": "0644",
@@ -2566,8 +2566,8 @@
     {
       "mode": "0644",
       "path": "internal/services/screen.go",
-      "sha256": "4a3a7a04d43cedb37295902e179ac36b7a931ffbc9532fc8b62ba133facfc1e0",
-      "size": 15550
+      "sha256": "3b51d5121dc76ee78a973247b3b6c1e6b35d9ff7c6c32c5a36965ef98998d1fc",
+      "size": 15908
     },
     {
       "mode": "0644",
@@ -2620,8 +2620,8 @@
     {
       "mode": "0644",
       "path": "internal/services/services.go",
-      "sha256": "d5ac7747a0ff0fe3b5337c97add976003a36c221eac3472ca6f3f6bb70929652",
-      "size": 13612
+      "sha256": "c83cfeb593e374e74cfb7c57c6a48e4fb94987a8939285e062a3abe68c110554",
+      "size": 13713
     },
     {
       "mode": "0644",
@@ -2830,8 +2830,8 @@
     {
       "mode": "0644",
       "path": "internal/services/x402.go",
-      "sha256": "9428a6eb8d562ba2554f0934d0d5d0deffbd6051355f0fcdb0e8e63c4e4dde4e",
-      "size": 48606
+      "sha256": "ba3977bb82e223d8e12b5c9a807482e73d3488acefd837ab287fc6c0fb4606ed",
+      "size": 49129
     },
     {
       "mode": "0644",
@@ -2842,14 +2842,14 @@
     {
       "mode": "0644",
       "path": "internal/services/x402_catalogue.go",
-      "sha256": "eb7d2311b6e141c245b4b2d03c3d80d0c75273bdd06b5f5bb5a0e0b1034a8cf0",
-      "size": 48956
+      "sha256": "1800e8bc6e96a14b2f95fe990a1e98d3509ced2d4c076802a1efea493eb4595d",
+      "size": 54679
     },
     {
       "mode": "0644",
       "path": "internal/services/x402_catalogue_test.go",
-      "sha256": "cdf1f4f92ffd202a51b603bbe7a6478fc153e1c51d5aff20d155934b9524911f",
-      "size": 34525
+      "sha256": "75ac49f364705ac858949774a6c9db974a4b32b0339b2d3cbd4575c07770d572",
+      "size": 44437
     },
     {
       "mode": "0644",
@@ -3580,8 +3580,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/for-agents.html",
-      "sha256": "7db09caa481b6a8e570947b81cbb819a180ea2d8da562b15cb2972f39f148e8a",
-      "size": 14106
+      "sha256": "d1635a020e2614c4e1cc8b595ef970e36afb094f3f25ea69040d1834f72c66f9",
+      "size": 14156
     },
     {
       "mode": "0644",

@@ -237,6 +237,8 @@ type Deps struct {
 	NotaryKey ed25519.PrivateKey
 	// TextScreener is screen's classifier (moderation's Jev, while MODERATION
 	// is on); nil leaves screen unavailable, and every call fails closed.
+	// x402 screens its candidates' summaries with it, in the background; nil
+	// leaves them withheld.
 	TextScreener TextScreener
 	// PublicData is public_data's configuration (its key directory); nil
 	// leaves every keyed dataset unavailable.

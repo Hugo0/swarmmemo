@@ -258,6 +258,21 @@ func VerifyScreenReceipt(publicKey string, r ScreenReceipt) (ScreenPayload, bool
 	return p, ok && p.Schema == ScreenSchema && r.Schema == ScreenSchema && p.KeyID == r.KeyID && p.KeyID == id
 }
 
+// categories are the screen's scores for ScreenCategories, rounded to four
+// decimals; false when one is missing or not a probability: the answer is
+// unusable, and the text was not screened.
+func (t TextScreen) categories() (map[string]float64, bool) {
+	out := make(map[string]float64, len(ScreenCategories))
+	for _, k := range ScreenCategories {
+		v, ok := t.Scores[k]
+		if !ok || !(v >= 0 && v <= 1) {
+			return nil, false
+		}
+		out[k] = math.Round(v*1e4) / 1e4
+	}
+	return out, true
+}
+
 // screenVerdict is flag when any category is at or above threshold.
 func screenVerdict(categories map[string]float64, threshold float64) string {
 	for _, v := range categories {
@@ -291,13 +306,9 @@ func (s *screen) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	if !screenModelRE.MatchString(res.Model) || res.CostMicroUSD <= 0 {
 		return Result{}, refusal("upstream_failed")
 	}
-	categories := map[string]float64{}
-	for _, k := range ScreenCategories {
-		v, ok := res.Scores[k]
-		if !ok || !(v >= 0 && v <= 1) {
-			return Result{}, refusal("upstream_failed")
-		}
-		categories[k] = math.Round(v*1e4) / 1e4
+	categories, ok := res.categories()
+	if !ok {
+		return Result{}, refusal("upstream_failed")
 	}
 	salt := make([]byte, screenSaltBytes)
 	if _, err = rand.Read(salt); err != nil {

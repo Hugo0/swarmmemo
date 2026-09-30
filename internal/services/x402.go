@@ -149,6 +149,9 @@ type X402Resource struct {
 	// Open marks a resource of the open catalogue: its summary is untrusted
 	// upstream text, and its payments count against the open sub-caps.
 	Open bool
+	// summaryStatus is how the resources read serves an open resource's
+	// summary (loadCatalogue sets it; servedSummary).
+	summaryStatus string
 	// Vetted marks an open resource the operator vetted (swarmmemo x402
 	// vet): only those are callable. Pinned resources are vetted by pinning.
 	Vetted bool
@@ -168,6 +171,9 @@ type x402 struct {
 	bundlers map[string]Bundler
 	client   *http.Client
 	cat      catalogueState // the open catalogue (x402_catalogue.go)
+	// screener is screen's classifier, which screens candidates' summaries
+	// in the background; nil leaves every candidate's summary withheld.
+	screener TextScreener
 }
 
 func newX402(d Deps) Provider {
@@ -175,7 +181,7 @@ func newX402(d Deps) Provider {
 	if d.X402 == nil || d.DB == nil || d.Dial == nil || d.X402.Signer == nil {
 		return x // not configured: listed if enabled, but every call is service_unavailable
 	}
-	x.cfg, x.db = d.X402, d.DB
+	x.cfg, x.db, x.screener = d.X402, d.DB, d.TextScreener
 	x.byID = map[string]*X402Resource{}
 	for i := range x.cfg.Resources {
 		indexResource(&x.cfg.Resources[i])
@@ -218,7 +224,7 @@ CREATE INDEX IF NOT EXISTS x402_payments_day ON x402_payments(day,account);
 }
 
 // X402VettingNote is how the resources read explains callable resources.
-const X402VettingNote = "Only vetted resources are callable (callable: true): pinned ones, and open ones the operator vetted. Candidates (vetted: false) are Bazaar listings with unreviewed, unscreened summaries; calling one is refused with x402_unvetted, and nothing is paid or charged. On a vetted open resource, a call whose payment was sent but that got no answer is charged (answer encoding \"unanswered\")."
+const X402VettingNote = "Only vetted resources are callable (callable: true): pinned ones, and open ones the operator vetted. Candidates (vetted: false) are Bazaar listings whose summary is shown only once it passed SwarmMemo's text screen (summary_status screened; pending or withheld leaves it empty); calling one is refused with x402_unvetted, and nothing is paid or charged. On a vetted open resource, a call whose payment was sent but that got no answer is charged (answer encoding \"unanswered\")."
 
 // X402Line is the aggregator in one line, on every discovery surface.
 const X402Line = "Pay-per-call APIs from the x402 Bazaar and other bundlers (search, scraping, crypto and market data, and more), billed to your credit; no wallet. Only operator-vetted resources can be called; other Bazaar listings are searchable candidates."
@@ -226,7 +232,7 @@ const X402Line = "Pay-per-call APIs from the x402 Bazaar and other bundlers (sea
 func (*x402) Describe() Descriptor {
 	return Descriptor{
 		ID:      "x402",
-		Summary: `Pay-per-call APIs from the x402 Bazaar and other bundlers without a wallet or an account: SwarmMemo pays the API (in USDC for x402) and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. Only vetted resources are callable: pinned ones and open ones the operator vetted. Other Bazaar listings are candidates (vetted: false), listed with their summaries, which are untrusted upstream text and not screened, and refused with x402_unvetted until the operator vets them.`,
+		Summary: `Pay-per-call APIs from the x402 Bazaar and other bundlers without a wallet or an account: SwarmMemo pays the API (in USDC for x402) and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. Only vetted resources are callable: pinned ones and open ones the operator vetted. Other Bazaar listings are candidates (vetted: false), listed with their summaries only once those passed SwarmMemo's text screen (summary_status), still untrusted upstream text, and refused with x402_unvetted until the operator vets them.`,
 		Title:   "x402 relay", Topic: "Tools across the internet",
 		Line: X402Line,
 		Limits: []Limit{
@@ -739,12 +745,12 @@ func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 			query = []string{}
 		}
 		entry := map[string]any{
-			"id": r.ID, "bundler": r.Bundler, "category": r.Category, "summary": r.Summary, "method": r.Method, "query": query, "body": r.Body,
+			"id": r.ID, "bundler": r.Bundler, "category": r.Category, "summary": r.servedSummary(), "method": r.Method, "query": query, "body": r.Body,
 			"max_price": formatUnits(m, x.cfg.Decimals), "max_cost": price.For(m), "max_response_bytes": r.MaxResponseBytes, "pinned": !r.Open,
 			"vetted": !r.Open || r.Vetted, "callable": x.callable(r),
 		}
 		if r.Open {
-			entry["text_is_untrusted"] = true
+			entry["text_is_untrusted"], entry["summary_status"] = true, r.summaryStatus
 		}
 		if st, ok := page.stats[r.ID]; ok {
 			entry["calls_30d"], entry["failed_30d"] = st.ok, st.failed

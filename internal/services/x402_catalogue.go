@@ -6,7 +6,9 @@ package services
 // (trusted, listed first) and its denylist is never imported past.
 //
 // Candidates and vetting. An imported resource is a candidate: searchable,
-// marked vetted: false with its untrusted summary, and never callable. The
+// marked vetted: false, and never callable. Its summary is untrusted upstream
+// text, served only once it passed screen's classifier (x402_summary_screens)
+// or the operator vetted the resource; until then it is withheld. The
 // Bazaar lists whatever anyone registers, and an upstream that holds our
 // signed authorization can settle it and still fail the call, so no open
 // resource is paid for until the operator vets it: pins it in the allowlist,
@@ -42,7 +44,8 @@ package services
 // resource not seen for three refresh intervals is stale, neither listed nor
 // callable, until it is seen again. The snapshot in memory is what Quote and
 // the resources read use (no I/O); the engine's worker loads it and starts
-// an import when one is due (Work), and the import runs in the background.
+// an import when one is due (Work), and the import and the screening of
+// summaries after it run in the background.
 // Every read of the database copies its rows into memory and closes them
 // before any filtering, so the one connection is never held for CPU work.
 
@@ -93,6 +96,14 @@ const (
 	// x402DenyAfter is how many open payments that left our hands without an
 	// answer (unknown or rejected) deny a recipient and its URL.
 	x402DenyAfter = 2
+	// x402ScreenPerRefresh bounds the candidate summaries one refresh
+	// screens: at 200 a refresh (every 360 minutes by default), 5000
+	// candidates are all screened within a week, for a few cents of the Jev
+	// budget each refresh. x402ScreenDeadline bounds the screening, apart
+	// from the import's deadline so a slow crawl never starves it.
+	x402ScreenPerRefresh = 200
+	x402ScreenDeadline   = 3 * time.Minute
+	x402ScreenIntent     = "show it to agents as the summary of a pay-per-call API they may search for and call"
 	// X402DiscoveryCDP is the default discovery API: Coinbase's facilitator,
 	// public and without a key. Its popularity figures are the only ones
 	// ranking trusts.
@@ -117,6 +128,8 @@ CREATE TABLE IF NOT EXISTS x402_vetted (
 CREATE TABLE IF NOT EXISTS x402_denied (
  kind TEXT NOT NULL CHECK(kind IN ('pay_to','url')), value TEXT NOT NULL, reason TEXT NOT NULL,
  denied_at INTEGER NOT NULL, cleared_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind, value));
+CREATE TABLE IF NOT EXISTS x402_summary_screens (
+ hash TEXT PRIMARY KEY, verdict TEXT NOT NULL CHECK(verdict IN ('pass','flag')), screened_at INTEGER NOT NULL);
 `
 
 // X402CatalogueConfig is the open catalogue's validated configuration.
@@ -574,8 +587,8 @@ func (x *x402) callable(r *X402Resource) bool {
 
 // Work is the engine worker's hook, every pass: it loads the snapshot when
 // it is missing or old, prunes old call counts once a UTC day, and starts a
-// background import when one is due. It runs outside any request's
-// transaction.
+// background import when one is due, which then screens the candidates'
+// summaries (screenSummaries). It runs outside any request's transaction.
 func (x *x402) Work(ctx context.Context, _ *sql.DB, now int64) (int, error) {
 	if x.cfg == nil {
 		return 0, nil
@@ -600,8 +613,11 @@ func (x *x402) Work(ctx context.Context, _ *sql.DB, now int64) (int, error) {
 	go func() {
 		defer x.cat.importing.Store(false)
 		ctx, cancel := context.WithTimeout(context.Background(), x402ImportDeadline)
-		defer cancel()
 		_, _ = x.importCatalogue(ctx, now) // the store's clock, as every load
+		cancel()
+		ctx, cancel = context.WithTimeout(context.Background(), x402ScreenDeadline)
+		defer cancel()
+		_, _ = x.screenSummaries(ctx, now)
 	}()
 	return 0, nil
 }
@@ -962,6 +978,7 @@ type catalogueRow struct {
 	query string
 	sig   bazaarSignal
 	seen  int64
+	hash  string // the summary's SHA-256, its key in x402_summary_screens
 }
 
 // loadCatalogue reads the fresh rows, our call counts and paid answers, the
@@ -991,6 +1008,7 @@ func (x *x402) loadCatalogue(ctx context.Context, now int64) error {
 	}
 	s.paid = hist.paid
 	var rows []catalogueRow
+	var verdicts map[string]string // summary hash → screen verdict
 	if cc := x.cfg.Catalogue; cc != nil {
 		stale := now - 3*int64(cc.Refresh/time.Second)
 		// Imports keep at most MaxResources each; three intervals of them
@@ -1013,6 +1031,18 @@ FROM x402_catalogue WHERE last_seen>=? AND id>? ORDER BY id LIMIT ?`, stale, aft
 			}
 			after = page[len(page)-1].r.ID
 		}
+		var hashes []string
+		seen := map[string]bool{}
+		for i := range rows {
+			c := &rows[i]
+			if c.hash = sha256Of([]byte(c.r.Summary)); !seen[c.hash] {
+				seen[c.hash] = true
+				hashes = append(hashes, c.hash)
+			}
+		}
+		if verdicts, err = x.readScreens(ctx, hashes); err != nil {
+			return err
+		}
 	}
 	// No connection is held from here on.
 	x.cat.denied.Store(hist.denied)
@@ -1031,6 +1061,7 @@ FROM x402_catalogue WHERE last_seen>=? AND id>? ORDER BY id LIMIT ?`, stale, aft
 			}
 			v, ok := hist.vetted[r.ID]
 			r.Vetted = ok && v.matches(r)
+			r.summaryStatus = summaryStatusOf(r, verdicts[c.hash])
 			s.importedAt = max(s.importedAt, c.seen)
 			s.signal[r.ID] = c.sig
 			keys[r] = x402RankKey{demoted: s.stats[r.ID].demoted(), vetted: r.Vetted, paid: hist.paid[r.ID], sig: c.sig, price: r.MaxAmount, id: r.ID}
@@ -1076,6 +1107,129 @@ func errCodeOf(err error) string {
 		return e.Code
 	}
 	return ""
+}
+
+// Summary screening.
+
+// An open resource's summary_status: its summary is served when the
+// operator vetted the resource or the summary passed the text screen, and
+// withheld (empty) when the screen flagged it or has not screened it yet.
+const (
+	summaryVetted   = "vetted"
+	summaryScreened = "screened"
+	summaryWithheld = "withheld"
+	summaryPending  = "pending"
+)
+
+// summaryStatusOf is r's summary_status, given its summary's screen verdict
+// ("" when not screened). An empty summary has nothing to withhold.
+func summaryStatusOf(r *X402Resource, verdict string) string {
+	switch {
+	case r.Vetted:
+		return summaryVetted
+	case verdict == "pass" || r.Summary == "":
+		return summaryScreened
+	case verdict == "flag":
+		return summaryWithheld
+	}
+	return summaryPending
+}
+
+// servedSummary is the summary the resources read serves: a pinned
+// resource's (the operator's text), an open one's only when vetted or
+// screened.
+func (r *X402Resource) servedSummary() string {
+	if !r.Open || r.summaryStatus == summaryVetted || r.summaryStatus == summaryScreened {
+		return r.Summary
+	}
+	return ""
+}
+
+// readScreens reads the screen verdicts of the summaries with these hashes,
+// x402LoadPage at a time.
+func (x *x402) readScreens(ctx context.Context, hashes []string) (map[string]string, error) {
+	out := make(map[string]string, len(hashes))
+	for start := 0; start < len(hashes); start += x402LoadPage {
+		chunk := hashes[start:min(start+x402LoadPage, len(hashes))]
+		args := make([]any, len(chunk))
+		for i, h := range chunk {
+			args[i] = h
+		}
+		got, err := queryAll(ctx, x.db, func(r *sql.Rows) ([2]string, error) {
+			var v [2]string
+			return v, r.Scan(&v[0], &v[1])
+		}, "SELECT hash,verdict FROM x402_summary_screens WHERE hash IN (?"+strings.Repeat(",?", len(chunk)-1)+")", args...)
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range got {
+			out[v[0]] = v[1]
+		}
+	}
+	return out, nil
+}
+
+// screenSummaries screens the pending summaries of the snapshot's open
+// resources with screen's classifier, best ranked first, at most
+// x402ScreenPerRefresh distinct texts, and records each verdict (at
+// ScreenThreshold) in x402_summary_screens by the text's SHA-256: an
+// identical text is screened once, a changed one again. It does nothing when
+// the classifier cannot answer now, and stops at its first error (among
+// them the screen sub-cap of the Jev budget spent); what is left stays
+// pending until the next refresh. The texts come from the snapshot and the
+// verdicts are written in one short transaction afterwards: no connection is
+// held while the classifier runs. Background only; it returns how many texts
+// it screened.
+func (x *x402) screenSummaries(ctx context.Context, now int64) (int, error) {
+	s := x.cat.snap.Load()
+	if s == nil || x.screener == nil || !x.screener.ScreenAvailable(ctx) {
+		return 0, nil
+	}
+	verdicts := map[string]string{}
+	var err error
+	for _, r := range s.open {
+		if len(verdicts) >= x402ScreenPerRefresh {
+			break
+		}
+		if r.summaryStatus != summaryPending {
+			continue
+		}
+		hash := sha256Of([]byte(r.Summary))
+		if _, done := verdicts[hash]; done {
+			continue
+		}
+		var res TextScreen
+		if res, err = x.screener.ScreenText(ctx, r.Summary, "tool", x402ScreenIntent); err != nil {
+			break
+		}
+		categories, ok := res.categories()
+		if !ok {
+			err = errors.New("x402: the summary screen's answer is unusable")
+			break
+		}
+		verdicts[hash] = screenVerdict(categories, ScreenThreshold)
+	}
+	if len(verdicts) == 0 {
+		return 0, err
+	}
+	// The screens are paid for: written and loaded even when the deadline
+	// ended the loop.
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	tx, werr := x.db.BeginTx(wctx, nil)
+	if werr != nil {
+		return 0, werr
+	}
+	defer tx.Rollback()
+	for hash, verdict := range verdicts {
+		if _, werr = tx.ExecContext(wctx, "INSERT INTO x402_summary_screens(hash,verdict,screened_at) VALUES(?,?,?) ON CONFLICT(hash) DO NOTHING", hash, verdict, now); werr != nil {
+			return 0, werr
+		}
+	}
+	if werr = tx.Commit(); werr != nil {
+		return 0, werr
+	}
+	return len(verdicts), errors.Join(err, x.loadCatalogue(wctx, now))
 }
 
 // Vetting.
