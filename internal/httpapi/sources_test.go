@@ -46,7 +46,7 @@ func get(s *Server, path, accept string) *httptest.ResponseRecorder {
 // servedSurfaces is every page and document an agent or a person is sent to.
 func servedSurfaces() []string {
 	pages := []string{"/", "/for-agents", "/docs", "/policy", "/limits", "/agents", "/me", "/rooms", "/migration",
-		"/privacy", "/terms", "/privacy.md", "/terms.md",
+		"/privacy", "/terms", "/privacy.md", "/terms.md", "/messages", "/messages.md",
 		"/llms.txt", "/llms-full.txt", "/skill.md", "/protocol.md",
 		"/docs/INBOX.md", "/docs/OUTBOX.md", "/docs/DATASET.md", "/docs/CURATION.md", "/docs/SOURCE_SYNC.md",
 		"/clients/python/README.md", "/clients/python/PRIVATE_INBOX.md", "/clients/python/FIRST_PUBLIC_WORK.md",
@@ -207,6 +207,14 @@ var stalePhrases = []struct{ pattern, why string }{
 	{`(?i)deliveries\s+an\s+hour\s+per\s+key`, "webhook caps are per agent"},
 	{`(?i)see\s+/docs\s+for\s+supported\s+commands`, "the operation list is /capabilities"},
 	{`(?i)setting\s+it\s+is\s+not\s+open\s+yet|arrive\s+with\s+room\s+ownership`, "room.style.set is wired"},
+	// The 1.24 docs audit (T47).
+	{`(?i)bulletin\s+board|message\s+board\s+for\s+AI\s+agents|durable\s+communication\s+service`, "1.24 positioning: the hub line (web.Tagline)"},
+	{`(?i)both\s+MCP\s+adapters\s+remain\s+public-only|public\s+reads\s+and\s+public\s+anonymous\s+posting\s+only|key\s+custody\s+are\s+deliberately\s+not\s+exposed|public-only\s+tools;\s+use\s+signed\s+HTTP`, "a hosted identity holds an inbox and private conversations over MCP"},
+	{`(?i)or\s+end-to-end\s+encryption\s+is\s+currently\s+implemented`, "sealed conversations are end-to-end encrypted"},
+	{`(?i)no\s+anonymous,\s+browser\s+or\s+delegated\s+form,\s+and\s+nobody\s+can\s+link`, "/me signs identity links with the browser's own key (friction 1095)"},
+	{`(?i)no\s+escrow\s+or\s+reward\s+is\s+promised`, "say that bounties are a separate paid program (friction 1094)"},
+	{"and `community`", "activity buckets carry native (friction 1088)"},
+	{`(?i)has\s+no\s+mail\s+address|email\s+(?:only\s+)?(?:for\s+)?(?:a\s+)?private\s+rooms?\s+with\s+a\s+plain\s+name|signing\s+wire\s+but\s+email`, "email carries conversations at ~NAME@ or _NAME@"},
 }
 
 func TestStalePhrasesStayGone(t *testing.T) {
@@ -215,6 +223,9 @@ func TestStalePhrasesStayGone(t *testing.T) {
 			continue // the old-to-new table names retired terms on purpose
 		}
 		for _, stale := range stalePhrases {
+			if source == "/guides/agent-board-map" && strings.HasPrefix(stale.why, "1.24 positioning") {
+				continue // generated from the awesome-agent-boards list, updated there
+			}
 			if m := regexp.MustCompile(stale.pattern).FindString(text); m != "" {
 				t.Errorf("%s says %q: %s", source, m, stale.why)
 			}

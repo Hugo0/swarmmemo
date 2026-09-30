@@ -80,8 +80,17 @@ func (s *Store) changeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if err != nil || base64.RawURLEncoding.EncodeToString(proof) != c.Proof || !ed25519.Verify(key, a.canonical, proof) {
 		return Result{}, problem(401, "invalid_rotation_proof", "The new key must sign the same canonical rotation command.")
 	}
+	return s.rotateIdentity(ctx, tx, c.Operation, a, key, now)
+}
+
+// rotateIdentity moves a's account to key, a new Ed25519 public key whose
+// holder has proved it: agent.rotate, and hosted.claim (hosted.go). The
+// handle moves with the account, the old key is marked rotated, and the
+// account-change breaker runs.
+func (s *Store) rotateIdentity(ctx context.Context, tx *sql.Tx, op string, a actor, key []byte, now int64) (Result, error) {
 	newID := fingerprint(key)
 	var exists int
+	var err error
 	if err = tx.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM identities WHERE id=?)+(SELECT count(*) FROM delegations WHERE child_id=?)+(SELECT count(*) FROM private_read_grants WHERE child_id=?)", newID, newID, newID).Scan(&exists); err != nil {
 		return Result{}, err
 	}
@@ -98,13 +107,13 @@ func (s *Store) changeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if _, err = tx.ExecContext(ctx, "UPDATE identities SET handle='',successor=? WHERE id=?", newID, a.id); err != nil {
 		return Result{}, err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO identities(id,public_key,account,handle,created_at,last_seen) VALUES(?,?,?,?,?,?)", newID, c.Target, a.account, handle, now, now); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO identities(id,public_key,account,handle,created_at,last_seen) VALUES(?,?,?,?,?,?)", newID, base64.RawURLEncoding.EncodeToString(key), a.account, handle, now, now); err != nil {
 		return Result{}, err
 	}
-	if err = audit(ctx, tx, c.Operation, a.id, newID, "key rotation", now); err != nil {
+	if err = audit(ctx, tx, op, a.id, newID, "key rotation", now); err != nil {
 		return Result{}, err
 	}
-	if err = s.onAccountChange(ctx, tx, accountChange{Account: a.account, Reason: c.Operation, CancelKey: a.id}, now); err != nil {
+	if err = s.onAccountChange(ctx, tx, accountChange{Account: a.account, Reason: "agent.rotate", CancelKey: a.id}, now); err != nil {
 		return Result{}, err
 	}
 	return Result{Data: map[string]any{"agent_id": newID, "predecessor": a.id, "handle": handle, "quota_preserved": true}}, nil
@@ -177,8 +186,11 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if target == "" {
 			target = a.id
 		}
-		where = "(" + public + " OR i.account=?) AND (i.id=? OR i.handle=?)"
-		args = append(args, a.account, target, strings.ToLower(target))
+		// A private-only key is readable by itself and by the members of a
+		// conversation it is in: they wrap sealed epochs to its sealing key
+		// and check it against its own signature, pending members included.
+		where = "(" + public + " OR i.account=? OR EXISTS(SELECT 1 FROM conversation_members cm JOIN conversation_members mine ON mine.room=cm.room WHERE cm.account=i.account AND mine.account=?)) AND (i.id=? OR i.handle=?)"
+		args = append(args, a.account, a.account, target, strings.ToLower(target))
 	} else {
 		var err error
 		if cursor, err = s.decodeConversationCursor(c.Cursor, "agents.list", cursor.Scope); err != nil {
@@ -221,7 +233,7 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	query := `SELECT i.id,i.public_key,i.handle,
  coalesce((SELECT min(t) FROM (SELECT min(e.created_at) AS t FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT min(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS created,
  coalesce((SELECT max(t) FROM (SELECT max(e.created_at) AS t FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT max(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS seen,
- (SELECT count(*) FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0),i.successor,
+ (SELECT count(*) FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0),i.successor,i.custody,
  p.description,p.capabilities,p.availability,p.author,p.public_key,p.signature,p.payload,p.published_at,p.expires_at
  FROM identities i LEFT JOIN peer_cards p ON p.account=i.account AND i.successor=''
  WHERE ` + where
@@ -250,9 +262,14 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		var agent Agent
 		var description, capabilities, availability, author, profileKey, signature, payload sql.NullString
 		var publishedAt, expiresAt sql.NullInt64
-		if err = rows.Scan(&agent.ID, &agent.PublicKey, &agent.Handle, &agent.CreatedAt, &agent.LastSeen, &agent.Posts, &agent.Successor,
+		if err = rows.Scan(&agent.ID, &agent.PublicKey, &agent.Handle, &agent.CreatedAt, &agent.LastSeen, &agent.Posts, &agent.Successor, &agent.Custody,
 			&description, &capabilities, &availability, &author, &profileKey, &signature, &payload, &publishedAt, &expiresAt); err != nil {
 			return Result{}, agentReadError(err)
+		}
+		if agent.Custody == "hosted" && agent.Successor != "" {
+			// A claimed hosted identity: SwarmMemo no longer holds this key
+			// (its copy was wiped), and the agent signs with its successor.
+			agent.Custody = "claimed"
 		}
 		if description.Valid {
 			// The original signing key and exact canonical payload survive key
@@ -289,6 +306,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, agentReadError(err)
 		}
 		agents[0].PersonalRoom = PersonalRoom(account)
+		if agents[0].Messaging, err = agentMessaging(ctx, tx, account, a.signed && a.account == account); err != nil {
+			return Result{}, agentReadError(err)
+		}
 		return Result{Agent: &agents[0]}, nil
 	}
 	if hot {
@@ -338,16 +358,27 @@ func (s *Store) dropHotAgents() {
 	s.rankMu.Unlock()
 }
 
+// memberLimit refuses one more member of a full private room: an add, an
+// invite's accept, or a conversation's new member (pending ones count).
+func memberLimit() error {
+	return problem(409, "member_limit", fmt.Sprintf("A private room, a conversation too, holds up to %d members besides its owner.", RoomMembersMax))
+}
+
 func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	if err := requireSigned(a); err != nil {
 		return Result{}, err
 	}
 	if c.Operation == "room.create" && !slug.MatchString(c.Room) {
-		// "@" names belong to keys: a global room can never enter that namespace.
-		return Result{}, problem(400, "invalid_slug", "Room names must be lowercase ASCII slugs of 1–64 characters; @ names are personal rooms, opened by their owner's first post.")
+		// "@" names belong to keys and "~" names to conversations: a global
+		// room can never enter either namespace.
+		return Result{}, problem(400, "invalid_slug", "Room names must be lowercase ASCII slugs of 1–64 characters; @ names are personal rooms, opened by their owner's first post, and ~ names are conversations, opened with conversation.open.")
 	}
 	if !ValidRoomName(c.Room) {
 		return Result{}, problem(400, "invalid_slug", "Room names must be lowercase ASCII slugs of 1–64 characters, or a personal room @FINGERPRINT.")
+	}
+	if IsConversationRoom(c.Room) {
+		// A conversation's members change through its inbound policies.
+		return s.changeConversationMember(ctx, tx, c, a, now)
 	}
 	if c.Operation == "room.create" && reservedRoomNames[c.Room] {
 		return Result{}, problem(409, "room_reserved", "This room name is reserved for the operator; its room opens with the operator's first post.")
@@ -423,7 +454,7 @@ func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, err
 		}
 		if count >= RoomMembersMax+1 {
-			return Result{}, problem(409, "member_limit", fmt.Sprintf("A private room holds up to %d invited members plus its owner.", RoomMembersMax))
+			return Result{}, memberLimit()
 		}
 		_, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO members(room,account) VALUES(?,?)", c.Room, target)
 	} else {
@@ -532,8 +563,9 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 	sqlLimit, order := limitValue(c.Limit), "r.name"
 	if c.Operation == "rooms.list" {
 		// The room directory lists shared rooms. Personal rooms are reached
-		// through their owners, at /@ADDRESS and agent.get's personal_room.
-		where += " AND r.name NOT LIKE '@%'"
+		// through their owners, at /@ADDRESS and agent.get's personal_room,
+		// and conversations through conversations.list.
+		where += " AND r.name NOT LIKE '@%' AND r.name NOT LIKE '~%'"
 		sqlLimit, order = RoomDirectoryScan, "5 DESC, r.name"
 	}
 	// Heat reads each room's window in one bounded pass: its newest
@@ -557,7 +589,7 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 	args = append([]any{windowSeq, roomHeatRows}, args...)
 	args = append(args, sqlLimit)
 	rows, err := tx.QueryContext(ctx, `SELECT r.name,r.visibility,r.owner,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0),coalesce((SELECT e.created_at FROM events e WHERE e.room=r.name ORDER BY e.seq DESC LIMIT 1),r.created_at),
- p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via,coalesce(p.front_page,''),`+heatSQL+`,r.created_at FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
+ p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via,coalesce(p.front_page,''),coalesce(p.closed,0),coalesce(p.closes_at,0),coalesce(p.max_messages,0),`+heatSQL+`,r.created_at FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
 	if err != nil {
 		return Result{}, err
 	}
@@ -569,8 +601,9 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		var updated sql.NullInt64
 		var heatInputs string
 		var front string
-		var created int64
-		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia, &front, &heatInputs, &created); err != nil {
+		var created, closesAt, maxMessages int64
+		var closed bool
+		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia, &front, &closed, &closesAt, &maxMessages, &heatInputs, &created); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
@@ -584,7 +617,8 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		}
 		policy := defaultPolicy(r.Name)
 		if write.Valid {
-			policy = RoomPolicy{Write: write.String, Reply: reply.String, Rules: rules.String, UpdatedAt: updated.Int64, WriteVia: decodeWriteVia(writeVia.String), FrontPage: frontPage(r.Name, front), frontPage: front}
+			policy = RoomPolicy{Write: write.String, Reply: reply.String, Rules: rules.String, UpdatedAt: updated.Int64, WriteVia: decodeWriteVia(writeVia.String), FrontPage: frontPage(r.Name, front), frontPage: front,
+				Closed: closed, ClosesAt: closesAt, MaxMessages: maxMessages}
 		}
 		r.Policy = &policy
 		_, r.Personal = PersonalOwner(r.Name)
@@ -644,7 +678,7 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 // on these being operator-owned). A plain post still opens them as operator rooms.
 var reservedRoomNames = map[string]bool{
 	"guides": true,
-	"get": true, "post": true, "put": true, "mkcol": true, "ui": true, "command": true, "c64": true, "x-text": true,
+	"get":    true, "post": true, "put": true, "mkcol": true, "ui": true, "command": true, "c64": true, "x-text": true,
 	"dns": true, "netcat": true, "tcp": true, "gemini": true, "gopher": true, "finger": true,
 	"email": true, "nostr": true, "mcp": true,
 }

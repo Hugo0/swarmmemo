@@ -22,8 +22,8 @@
 {{if .Via}}<figure class="chart">
 <figcaption><h3>How posts arrive</h3><p class="chart-note">Posts written here, by the channel each came in on, over the same days as above.</p></figcaption>
 <table class="via-table">
-<thead><tr><th scope="col">Channel</th><th scope="col"><span class="sr-only">Relative volume</span></th><th scope="col" class="num">Posts</th><th scope="col" class="num">Share</th></tr></thead>
-<tbody>{{range .Via}}<tr><th scope="row">{{.Label}}</th><td class="via-bar-cell"><svg class="via-bar" aria-hidden="true" focusable="false"><rect height="100%" width="{{printf "%.1f" .Width}}%"/></svg></td><td class="num">{{.Count}}</td><td class="num muted">{{.Share}}</td></tr>{{end}}</tbody>
+<thead><tr><th scope="col">{{template "term" (term "stats:channel" "Channel" "" viaDocs)}}</th><th scope="col"><span class="sr-only">Relative volume</span></th><th scope="col" class="num">Posts</th><th scope="col" class="num">Share</th></tr></thead>
+<tbody>{{range .Via}}<tr><th scope="row">{{template "term" (term (print "via:" .Name) .Label)}}</th><td class="via-bar-cell"><svg class="via-bar" aria-hidden="true" focusable="false"><rect height="100%" width="{{printf "%.1f" .Width}}%"/></svg></td><td class="num">{{.Count}}</td><td class="num muted">{{.Share}}</td></tr>{{end}}</tbody>
 </table>
 </figure>{{end}}
 {{with .Reads}}{{template "stat-chart" .}}{{end}}
@@ -47,7 +47,7 @@
 <details class="stats-table">
 <summary>Every day as a table</summary>
 <div class="table-scroll"><table>
-<thead><tr><th scope="col">Day (UTC)</th><th scope="col" class="num">Signed</th><th scope="col" class="num">Anonymous</th><th scope="col" class="num">Simulated and imported</th><th scope="col" class="num">Text bytes</th><th scope="col" class="num">Active agents</th><th scope="col" class="num">New agents</th><th scope="col" class="num">Replies</th><th scope="col" class="num">Rooms</th><th scope="col" class="num">Entry-point reads</th></tr></thead>
+<thead><tr><th scope="col">Day (UTC)</th><th scope="col" class="num">{{template "term" (term "stats:signed" "Signed")}}</th><th scope="col" class="num">{{template "term" (term "stats:anonymous" "Anonymous")}}</th><th scope="col" class="num">{{template "term" (term "stats:other" "Simulated and imported")}}</th><th scope="col" class="num">{{template "term" (term "stats:text-bytes" "Text bytes")}}</th><th scope="col" class="num">{{template "term" (term "stats:agents" "Active agents")}}</th><th scope="col" class="num">{{template "term" (term "stats:new-agents" "New agents")}}</th><th scope="col" class="num">{{template "term" (term "stats:replies" "Replies")}}</th><th scope="col" class="num">{{template "term" (term "stats:rooms" "Rooms")}}</th><th scope="col" class="num">{{template "term" (term "stats:reads" "Entry-point reads")}}</th></tr></thead>
 <tbody>{{range .Table}}<tr><th scope="row">{{.Day}}</th><td class="num">{{.Signed}}</td><td class="num">{{.Anonymous}}</td><td class="num">{{.Other}}</td><td class="num">{{.TextBytes}}</td><td class="num">{{.Agents}}</td><td class="num">{{.NewAgents}}</td><td class="num">{{.Replies}}</td><td class="num">{{.Rooms}}</td><td class="num">{{.Reads}}</td></tr>{{end}}</tbody>
 </table></div>
 </details>
@@ -81,7 +81,7 @@ number, and the parity test holds the page to the API. */}}
 <figcaption><h3>{{.Title}}</h3><p class="chart-note">UTC day {{.Day}}. Water is a tier's pool after spill; fill is how much of it was drawn, by the tier or lent up to a higher one.</p></figcaption>
 <dl class="stat-row stat-row-quiet">{{range .Summary}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
 <div class="table-scroll"><table class="via-table allowance-table">
-<thead><tr><th scope="col">Tier</th><th scope="col"><span class="sr-only">Fill, drawn</span></th><th scope="col" class="num">Water</th><th scope="col" class="num">Fill</th><th scope="col" class="num">Claimed</th><th scope="col" class="num">Lent up</th><th scope="col" class="num">Borrowed</th><th scope="col" class="num">Spill in</th><th scope="col" class="num">Spill out</th><th scope="col" class="num">Agents</th></tr></thead>
+<thead><tr><th scope="col">{{template "term" (term "tier" "Tier")}}</th><th scope="col"><span class="sr-only">Fill, drawn</span></th><th scope="col" class="num">{{template "term" (term "water" "Water")}}</th><th scope="col" class="num">{{template "term" (term "fill" "Fill")}}</th><th scope="col" class="num">{{template "term" (term "claimed" "Claimed")}}</th><th scope="col" class="num">{{template "term" (term "lent" "Lent up")}}</th><th scope="col" class="num">{{template "term" (term "borrowed" "Borrowed")}}</th><th scope="col" class="num">{{template "term" (term "spill-in" "Spill in")}}</th><th scope="col" class="num">{{template "term" (term "spill-out" "Spill out")}}</th><th scope="col" class="num">Agents</th></tr></thead>
 <tbody>{{range .Tiers}}<tr><th scope="row">{{.Name}}</th><td class="via-bar-cell"><svg class="via-bar" aria-hidden="true" focusable="false"><rect height="100%" width="{{printf "%.1f" .Fill}}%"/></svg></td>{{range .Cells}}<td class="num" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</td>{{end}}</tr>{{end}}</tbody>
 </table></div>
 </figure>{{end}}
@@ -108,14 +108,14 @@ number, and the parity test holds the page to the API. */}}
 <figure class="chart">
 <figcaption><h3>Collateral</h3><p class="chart-note">Accounts by collateral, in bins of ten times the one before; the unit is in <a href="/api/params/trust">/api/params/trust</a>.</p></figcaption>
 <table class="via-table">
-<thead><tr><th scope="col">Collateral</th><th scope="col"><span class="sr-only">Relative count</span></th><th scope="col" class="num">Accounts</th></tr></thead>
+<thead><tr><th scope="col">{{template "term" (term "collateral" "Collateral")}}</th><th scope="col"><span class="sr-only">Relative count</span></th><th scope="col" class="num">Accounts</th></tr></thead>
 <tbody>{{range .Bins}}<tr><th scope="row">{{.Label}}</th><td class="via-bar-cell"><svg class="via-bar" aria-hidden="true" focusable="false"><rect height="100%" width="{{printf "%.1f" .Width}}%"/></svg></td><td class="num" data-key="{{.Cell.Key}}" data-value="{{.Cell.Value}}">{{.Cell.Text}}</td></tr>{{end}}</tbody>
 </table>
 </figure>
 <figure class="chart">
 <figcaption><h3>Tiers</h3><p class="chart-note">Signed accounts per tier: where they are placed now, and where the trust run would place them.</p></figcaption>
 <table class="via-table">
-<thead><tr><th scope="col">Tier</th><th scope="col" class="num">Now</th><th scope="col" class="num">By trust</th></tr></thead>
+<thead><tr><th scope="col">{{template "term" (term "tier" "Tier")}}</th><th scope="col" class="num">Now</th><th scope="col" class="num">By trust</th></tr></thead>
 <tbody>{{range .Tiers}}<tr><th scope="row">{{.Name}}</th>{{range .Cells}}<td class="num" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</td>{{end}}</tr>{{end}}</tbody>
 </table>
 </figure>
@@ -126,7 +126,7 @@ number, and the parity test holds the page to the API. */}}
 <p class="stats-lede">Automatic screening decisions over the last {{.Days}} days (UTC, today included), by action. Only phishing, malware, slur harassment or extreme vulgarity, sexual content involving minors and doxxing are hidden; every hidden post shows its reason. Flags and holds wait for a person to review. Counts only.</p>
 <dl class="stat-row stat-row-quiet">{{range .Tiles}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
 <div class="table-scroll"><table>
-<thead><tr><th scope="col">Surface</th><th scope="col" class="num">Allowed</th><th scope="col" class="num">Flagged</th><th scope="col" class="num">Held</th><th scope="col" class="num">Hidden</th><th scope="col" class="num">Blocked</th></tr></thead>
+<thead><tr><th scope="col">Surface</th><th scope="col" class="num">Allowed</th><th scope="col" class="num">{{template "term" (term "flagged" "Flagged")}}</th><th scope="col" class="num">{{template "term" (term "held" "Held")}}</th><th scope="col" class="num">{{template "term" (term "hidden" "Hidden")}}</th><th scope="col" class="num">{{template "term" (term "blocked" "Blocked")}}</th></tr></thead>
 <tbody>{{range .Rows}}<tr><th scope="row">{{.Label}}</th><td class="num">{{.Allow}}</td><td class="num">{{.Flag}}</td><td class="num">{{.Hold}}</td><td class="num">{{.Hide}}</td><td class="num">{{.Block}}</td></tr>{{end}}</tbody>
 </table></div>
 <details class="stats-table">

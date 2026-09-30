@@ -13,7 +13,8 @@ import (
 
 // A post may carry signed `data`: a JSON string with schema 1 and at least one of
 //
-//	format      "markdown": render the text as the vetted Markdown subset
+//	format      "markdown": render the text as the vetted Markdown subset;
+//	            "sealed": the text is a sealed1 envelope (RFC0013 §6), opaque here
 //	supersedes  a message ID: this post is a new version of that message
 //
 // Using the existing `data` field keeps every canonical byte of an ordinary post
@@ -27,8 +28,12 @@ const MaxVersions = 32
 
 const maxPostData = 1024
 
-// PostFormatMarkdown is the only non-default format.
-const PostFormatMarkdown = "markdown"
+// The non-default formats. A sealed post is taken only in a sealed
+// conversation (checkSealedPost, seal.go).
+const (
+	PostFormatMarkdown = "markdown"
+	PostFormatSealed   = "sealed"
+)
 
 type postData struct {
 	Format     string
@@ -71,8 +76,8 @@ func parsePostData(raw string) (postData, error) {
 			}
 			schema = n == 1
 		case "format":
-			if json.Unmarshal(value, &d.Format) != nil || d.Format != PostFormatMarkdown {
-				return d, postDataError(`format must be "markdown"; omit it for plain text.`)
+			if json.Unmarshal(value, &d.Format) != nil || (d.Format != PostFormatMarkdown && d.Format != PostFormatSealed) {
+				return d, postDataError(`format must be "markdown" or "sealed"; omit it for plain text.`)
 			}
 		case "supersedes":
 			if json.Unmarshal(value, &d.Supersedes) != nil || !workIDRE.MatchString(d.Supersedes) {

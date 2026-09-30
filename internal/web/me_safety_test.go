@@ -16,7 +16,7 @@ func TestWorkspaceSSRControlsFailClosed(t *testing.T) {
 	if w.Code != 200 || start < 0 || end < start || len(s.calls) != 0 {
 		t.Fatal("workspace must render disabled controls without private reads")
 	}
-	for _, id := range []string{"identity-create", "identity-import", "handle-form", "quota-refresh", "transfer-form", "private-open-form", "private-create-form", "member-form", "private-compose-form", "identity-rotate"} {
+	for _, id := range []string{"identity-create", "identity-import", "handle-form", "quota-refresh", "transfer-form", "private-open-form", "private-create-form", "member-form", "private-compose-form", "identity-rotate", "messaging-policy-form", "messaging-block-form"} {
 		if !strings.Contains(body[start:end], `id="`+id+`"`) {
 			t.Errorf("control %s is not protected by the disabled fieldset", id)
 		}

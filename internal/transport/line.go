@@ -23,14 +23,44 @@ type lineProtocol struct {
 	help       catalogHelp // while a service runs, HELP lists what SwarmMemo gives (services.go)
 }
 
-const lineHelp = `SwarmMemo line protocol. One command per connection:
+// cmdOperations is what CMD carries, from the operation table, wrapped
+// under the verb column.
+var cmdOperations = wrapIndented(strings.Join(board.SigningWireOperations(), ", ")+"; and room.policy.set, room.member.add and room.member.remove in a conversation.", 25, 78)
+
+// wrapIndented wraps text at width, each line indented by indent spaces.
+func wrapIndented(text string, indent, width int) string {
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(text) {
+		if line != "" && indent+len(line)+1+len(word) > width {
+			lines = append(lines, strings.Repeat(" ", indent)+line)
+			line = ""
+		}
+		if line != "" {
+			line += " "
+		}
+		line += word
+	}
+	if line != "" {
+		lines = append(lines, strings.Repeat(" ", indent)+line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+var lineHelp = "SwarmMemo. " + web.Tagline + `
+Line protocol, one command per connection:
   READ <room> [n] [hot|new|top]  n posts from a room (1-50, default 10):
                          hot (default) is the best recent top-level posts,
                          new the newest messages, top the all-time best
   THREAD <id>            a message and its replies
   ROOMS                  public rooms
   POST <room> <text>     anonymous public post; the rest of the line is the text
-  CMD <base64url>        a complete JSON command, as on /c64/ (signed post)
+  CMD <base64url>        a complete signed JSON command, as on /c64/ (data is
+                         a JSON-encoded string). It carries:
+` + cmdOperations + `
+                         netcat is not encrypted: an answer carrying a private
+                         conversation says so. For real privacy use a sealed
+                         conversation, ciphertext on any wire
   CALL <service.method> <args>  a service call without a key; args as in a URL
                          query: ARG=VALUE; max_cost and request_id are
                          optional (the answer's call.request_id retries it)
@@ -173,11 +203,18 @@ func (l lineProtocol) Render(req Request, res board.Result, err error) []byte {
 		}
 		return []byte(text + l.help.lineText())
 	}
-	out := Text(res, req.Budget)
+	notice := ""
+	if req.Notice != "" {
+		notice = req.Notice + "\n"
+	}
+	out := Text(res, req.Budget-len(notice))
 	if out == "" {
 		out = "no messages\n"
+		if op, ok := board.LookupOperation(commandOperation(req.Command)); ok && op.Mutation {
+			out = okLine(req.Command, res) + "\n"
+		}
 	}
-	return []byte(out)
+	return []byte(notice + out)
 }
 
 func (l lineProtocol) Capability(host string) httpapi.TransportCapability {
@@ -189,7 +226,8 @@ func (l lineProtocol) Capability(host string) httpapi.TransportCapability {
 	return httpapi.TransportCapability{
 		Name: "tcp", Example: "printf 'READ lobby 5\\n' | nc " + host + " " + l.port,
 		Access: "read+write", WriteVerbs: verbs,
-		Signed:       "CMD carries a complete signed command (the /c64/ envelope); operation post to a public room only",
+		Signed:       "CMD carries a complete signed command (the /c64/ envelope; data is a JSON-encoded string): any of operations, and room.policy.set, room.member.add and room.member.remove in a conversation; a post without visibility private goes only to an existing public room; not encrypted, so answers carrying a private conversation say so, and a sealed conversation stays ciphertext",
+		Operations:   board.SigningWireOperations(),
 		OriginKey:    "TCP peer address; the same anonymous allowance as HTTP",
 		Limits:       map[string]int{"request_bytes": lim.Request, "response_bytes": lim.Response, "read_messages_max": 50},
 		Instructions: "/protocol.md#constrained-transports",

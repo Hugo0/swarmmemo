@@ -102,12 +102,20 @@ func (s *Store) openLedger() error {
 			Body:     moderation.DefaultParamsBody,
 			Validate: func(b []byte) error { _, err := moderation.ParseParamsBody(b); return err },
 		},
+		// Hosted identity issuance caps (RFC0013 §2.2, hosted.go).
+		HostedParamsNamespace: {
+			Version:  0,
+			Body:     hostedDefaultParams,
+			Validate: func(b []byte) error { _, err := parseHostedParams(b); return err },
+		},
 	}}
 	levers := s.leverSource()
 	if s.ledger.legacyParams {
 		levers = legacyLevers{levers}
 	}
-	s.ledger.led = ledger.New(ledger.Config{Classifier: ledgerClassifier{s}, Levers: levers, Params: s.ledger.params})
+	// Postage (RFC0013 §3.4) is a deposit: a lapsed hold goes back to its
+	// sender.
+	s.ledger.led = ledger.New(ledger.Config{Classifier: ledgerClassifier{s}, Levers: levers, Params: s.ledger.params, Deposits: []string{postageService}})
 	return nil
 }
 
@@ -176,6 +184,11 @@ func (s *Store) allowanceLedger() *ledger.Ledger { return s.ledger.led }
 type ledgerClassifier struct{ s *Store }
 
 func (c ledgerClassifier) Classify(ctx context.Context, q allowance.Querier, subject allowance.Subject, now int64) (allowance.Standing, error) {
+	// A hosted identity shares the anonymous tier, whichever classifier
+	// runs (RFC0013 §2.4).
+	if st, hosted := hostedStanding(subject); hosted {
+		return st, nil
+	}
 	st, err := c.s.classifier().Classify(ctx, q, subject, now)
 	var e *allowance.Err
 	if errors.As(err, &e) && e.Code == "service_unavailable" {
@@ -555,7 +568,12 @@ func allowanceTarget(ctx context.Context, tx *sql.Tx, c Command, a actor) (allow
 	if err != nil {
 		return allowance.Subject{}, "", err
 	}
-	return allowance.Subject{ID: account, Signed: true}, c.Target, nil
+	// RFC0013: an account whose current key SwarmMemo holds is hosted.
+	hosted, err := accountHosted(ctx, tx, account)
+	if err != nil {
+		return allowance.Subject{}, "", err
+	}
+	return allowance.Subject{ID: account, Signed: true, Hosted: hosted}, c.Target, nil
 }
 
 // creditSubject is the subject whose credit a read shows for subj: an

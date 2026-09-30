@@ -412,7 +412,7 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 			r, err := q.QueryContext(ctx, `SELECT l.rowid,i.account,l.kind,l.value,l.state,l.created_at,l.checked_at,
  coalesce((SELECT o.account FROM identities o WHERE l.kind='ed25519' AND o.public_key=l.value AND `+publicAccountSQL("o.account")+`),''),
  `+publicAccountSQL("i.account")+`
- FROM identity_links l JOIN identities i ON i.id=l.agent WHERE l.rowid>? AND i.successor='' ORDER BY l.rowid LIMIT ?`, after, rows)
+ FROM identity_links l JOIN identities i ON i.id=l.agent WHERE l.rowid>? AND i.successor='' AND NOT (l.kind='x25519' AND l.state='lapsed') ORDER BY l.rowid LIMIT ?`, after, rows)
 			if err != nil {
 				return err
 			}

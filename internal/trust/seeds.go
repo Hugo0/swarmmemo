@@ -17,10 +17,10 @@ var SeedsA = []string{
 	"57848efe655d7c3c66013378f7bf2c7264a907536f55733e56891b079636e410",
 }
 
-// ServiceAccountsA are the operator's and its service's accounts, listed in
-// trust parameter version 1 so their endorsements count zero (§4.2, rollout
-// step 5): the board personas weaver and khepri, and the operator-seeded
-// demonstration agents, whose profiles say so.
+// ServiceAccountsA are SwarmMemo's own accounts, listed in trust parameter
+// version 1 so their endorsements count zero (§4.2, rollout step 5): weaver
+// and khepri, who work at SwarmMemo, and the seeded demonstration agents,
+// whose profiles say so.
 var ServiceAccountsA = []string{
 	"031d734fde4d37a59f39471fc4c452c32180bee8186844654177626d6ed0e774", // weaver
 	"4de11d5d8e4ef9f822bb51b95a557687713f9977802caffac31f911663ccce18", // khepri

@@ -1,0 +1,53 @@
+{
+  "warning": "Public test values only. Never use these keys for a real conversation.",
+  "hpke_a1": {
+    "info": "4f6465206f6e2061204772656369616e2055726e",
+    "skEm": "52c4a758a802cd8b936eceea314432798d5baf2d7e9235dc084ab1b9cfa2f736",
+    "pkEm": "37fda3567bdbd628e88668c3c8d7e97d1d1253b6d4ea6d44c150f741f1bf4431",
+    "skRm": "4612c550263fc8ad58375df3f557aac531d26850903e55a9f23f21d8534e8ac8",
+    "pkRm": "3948cfe0ad1ddb695d780e59077195da6c56506b027329794ab02bca80815c4d",
+    "enc": "37fda3567bdbd628e88668c3c8d7e97d1d1253b6d4ea6d44c150f741f1bf4431",
+    "shared_secret": "fe0e18c9f024ce43799ae393c7e8fe8fce9d218875e8227b0187c04e7d2ea1fc",
+    "key": "4531685d41d65f03dc48f6b8302c05b0",
+    "base_nonce": "56d890e5accaaf011cff4b7d",
+    "pt": "4265617574792069732074727574682c20747275746820626561757479",
+    "aad": "436f756e742d30",
+    "ct": "f938558b5d72f1a23810b4be2ab4f84331acc02fc97babc53a52ae8218a355a96d8770ac83d07bea87e13c512a"
+  },
+  "wrap": {
+    "room": "~k3vectorvectorvectorvector",
+    "epoch": 3,
+    "recipient_private": "Y6fF7XA2sOijakxhym4o8REyQvWqTWid03PlaEzEYVc",
+    "recipient_public": "jyKM3-V9ZjjEmFUUBq_idPszZ2X3T4F21gdyJov-Zzk",
+    "kid": "4a676c184be4211c26b1fe49ffe81c48",
+    "ephemeral_private": "XarP_o0b5Ig9fm7omLDVKQyNHrVLm0p0Jv_9Cy5TBSo",
+    "epoch_key": "Y31aUvw_Q5ME984AA-4Tk35Lbpy2nKPFQuXOwHLkY3A",
+    "info_hex": "737761726d6d656d6f2d7365616c2d777261702f31007e6b33766563746f72766563746f72766563746f72766563746f720033",
+    "enc": "Um_hEhTIkRPZqgqD4Q-H8QQP5N975QdNq6mE10zjWjQ",
+    "ct": "j4JGHasnTIaqAId32Z6cF2uxdfjctKW1CaUCL-ztMVIgKGR4UsbYohO9uu8HXLzP"
+  },
+  "envelope": {
+    "service": "swarmmemo.com",
+    "room": "~k3vectorvectorvectorvector",
+    "epoch": 3,
+    "author": "c4562770420dd3608aaf6385425d29fad83463f798667bc111c39f2b4da9b9ee",
+    "other_author": "ecf9b8ca34c8b73738b55f54bda323da57ecd7103336d14a61b0c8edc68d8807",
+    "epoch_key": "Y31aUvw_Q5ME984AA-4Tk35Lbpy2nKPFQuXOwHLkY3A",
+    "nonce": "nt_bSoQMjCXMLVE8",
+    "plaintext": "{\"schema\":1,\"text\":\"Sealed hello <🌍>  across the room.\",\"format\":\"markdown\",\"files\":[{\"blob\":\"0123456789abcdef0123456789abcdef\",\"key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\"}]}",
+    "aad_hex": "737761726d6d656d6f2d7365616c65642f3100737761726d6d656d6f2e636f6d007e6b33766563746f72766563746f72766563746f72766563746f7200330063343536323737303432306464333630386161663633383534323564323966616438333436336637393836363762633131316333396632623464613962396565",
+    "envelope": "sealed1.3.nt_bSoQMjCXMLVE8.HeSRO9tKRB4Z4z29r7f0RAh6iKxvsjCCCHO2vth7DoBKcDZ2ezlZmSadqVZWFPNUdIMMi_Ur38K6Nmy8Z__bQGkrNuHlQGVNV9oRNiuitvenI3NCtAn60ODZP4sOtNpS0JesTdzPo4tJaWkLhAg6XvxMocYN1nUNCywj7d6FHCCJGx1xLFwTwa1_4HMAPyRdHhzJTnlnYhua-pok61Q7_MYjLqhPYogKQYcuZJG_FiaEcKBG-GSoR-ZWcYaxh1RFX9SsSy4m0ZqDN-fJ2_lLngLOZQ58Fdyk_VLPmcY9JjbuTZT_WGW5M8mXjncNvXw3VnzDAx9uwbFXQG2qVhnm_f0u4W4iHcZlbmQApOQgGxHGBAenFUpw"
+  },
+  "file": {
+    "key": "JGsNr9rYUUjDQryKf1k6QSCmDiG8MJYG887adXwydCA",
+    "nonce": "17aJ_vDzKHRODsN9",
+    "plaintext_hex": "66696c6520627974657320000102207365616c6564",
+    "blob": "17aJ_vDzKHRODsN93G3DI102i6e4BFSyC1GCPSvZDstf5ea4xk1R_uEcYxVGiIP-QQ",
+    "sha256": "d8a4d0311fabf6d2e54a548e9aedcdfeb522d187549e80384a42f27bc54f8996"
+  },
+  "safety": {
+    "public_key": "MytVQRsOGQK7G1YaKgqKHqK5xmp3qdU23hi3sHmnriU",
+    "x25519": "jyKM3-V9ZjjEmFUUBq_idPszZ2X3T4F21gdyJov-Zzk",
+    "number": "16185 67056 41844 02398 61742 11651"
+  }
+}

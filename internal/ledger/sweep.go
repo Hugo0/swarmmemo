@@ -1,14 +1,16 @@
 package ledger
 
 // The sweeper (RFC0012 §2.2, §2.5): expire due lots, settle expired holds at
-// their maximum (outcome unknown), execute due pending transfers and apply
-// daily demurrage. Each step handles at most limit rows, so one call is one
-// short transaction; the board runs it every minute while the ledger is on.
+// their maximum (outcome unknown; a deposit's is refunded), execute due
+// pending transfers and apply daily demurrage. Each step handles at most
+// limit rows, so one call is one short transaction; the board runs it every
+// minute while the ledger is on.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"swarmmemo/internal/allowance"
 )
@@ -53,17 +55,23 @@ func (l *Ledger) Sweep(ctx context.Context, q allowance.Querier, now int64, limi
 		}
 		n++
 	}
-	// 2. Service holds past their TTL settle at their maximum.
+	// 2. Service holds past their TTL settle at their maximum; a deposit's
+	// lapses to a refund.
 	holds, err := ids(ctx, q, "SELECT id FROM ledger_holds WHERE state='held' AND expires_at<=? AND service<>? LIMIT ?", now, ledgerService, limit)
 	if err != nil {
 		return n, err
 	}
 	for _, id := range holds {
-		h, ok, err := loadHold(ctx, q, id)
+		h, ok, err := loadHoldRow(ctx, q, id)
 		if err != nil || !ok {
 			return n, err
 		}
-		if _, err = l.settle(ctx, q, id, h.Max, "expired", "unknown", now); err != nil {
+		if slices.Contains(l.cfg.Deposits, h.Service) {
+			_, err = l.settle(ctx, q, id, 0, "refunded", "lapsed", now)
+		} else {
+			_, err = l.settle(ctx, q, id, h.Max, "expired", "unknown", now)
+		}
+		if err != nil {
 			return n, err
 		}
 		n++

@@ -95,7 +95,8 @@ func validatePrivateReadFields(c Command) error {
 			return privateReadError("invalid_private_read_data")
 		}
 	}
-	if !slug.MatchString(c.Room) || len(c.Cursor) > 4096 {
+	// A group conversation's owner may grant one; a DM refuses it later.
+	if (!slug.MatchString(c.Room) && !IsConversationRoom(c.Room)) || len(c.Cursor) > 4096 {
 		return privateReadError("invalid_private_read_data")
 	}
 	return nil
@@ -369,6 +370,14 @@ func (s *Store) privateReadOwner(ctx context.Context, tx *sql.Tx, c Command, a a
 	}
 	if err = tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='generation'").Scan(&current); err != nil {
 		return Result{}, err
+	}
+	if creating {
+		// A DM's reads are its two members' (RFC0013 decision 11).
+		if conv, ok, err := loadConversation(ctx, tx, c.Room); err != nil {
+			return Result{}, err
+		} else if ok && conv.Kind == "dm" {
+			return Result{}, problem(409, "conversation_grant_unsupported", "A DM takes no private read grants; its messages are for its two members. A group conversation's owner may grant one.")
+		}
 	}
 	if !creating && !revoking {
 		return s.readPrivateControl(ctx, tx, c, a, now, current, epoch)

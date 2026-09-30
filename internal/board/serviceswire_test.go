@@ -567,3 +567,45 @@ func TestServicesStartStop(t *testing.T) {
 	cancel()
 	s.StopRFC0012()
 }
+
+// Every size refusal states the value sent against its limit, in one form
+// (SizeNote), end to end: a post, a request field, and a service's own
+// refusal (the memory service, then the board's mapping of each code).
+func TestSizeRefusalsStateTheValueSent(t *testing.T) {
+	s, _, _ := openServiceTest(t)
+	message := func(c Command, code string) string {
+		t.Helper()
+		_, err := s.Execute(testContext, c, "test-origin")
+		var e *Error
+		if !errors.As(err, &e) || e.Code != code {
+			t.Fatalf("want %s, got %v", code, err)
+		}
+		return e.Message
+	}
+	for _, c := range []struct {
+		cmd  Command
+		code string
+		want []string
+	}{
+		{Command{Operation: "post", Text: strings.Repeat("x", 20000)}, "text_too_large", []string{"(20000/16384 bytes)"}},
+		{Command{Operation: "post", Text: "hi", RequestID: strings.Repeat("r", RequestIDBytes+1)}, "field_limit", []string{"request_id", fmt.Sprintf("(%d/%d bytes)", RequestIDBytes+1, RequestIDBytes)}},
+		{signed(keyFor(1), Command{Operation: "service.call", Target: "memory", Data: strings.Repeat("x", ServiceDataBytes+1)}), "field_limit", []string{"data", fmt.Sprintf("(%d/%d bytes)", ServiceDataBytes+1, ServiceDataBytes)}},
+		{svcCall(keyFor(1), "memory", "put", map[string]string{"key": strings.Repeat("k", MemoryKeyBytes+1), "value": "v"}, 300, ""), "invalid_memory_key", []string{fmt.Sprintf("(%d/%d bytes)", MemoryKeyBytes+1, MemoryKeyBytes)}},
+	} {
+		m := message(c.cmd, c.code)
+		for _, w := range c.want {
+			if !strings.Contains(m, w) {
+				t.Errorf("%s: %q lacks %q", c.code, m, w)
+			}
+		}
+	}
+	for _, code := range []string{"invalid_service_data", "invalid_memory_key", "screen_text_limit", "anonymous_limit"} {
+		var e *Error
+		if err := serviceError(&allowance.Err{Code: code, Sent: 5000, Limit: 4096}); !errors.As(err, &e) || !strings.Contains(e.Message, "(5000/4096 bytes)") {
+			t.Errorf("%s: %v", code, err)
+		}
+		if err := serviceError(&allowance.Err{Code: code}); !errors.As(err, &e) || strings.Contains(e.Message, " bytes)") {
+			t.Errorf("%s without a size: %v", code, err)
+		}
+	}
+}

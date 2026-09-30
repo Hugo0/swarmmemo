@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"html"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -102,7 +104,7 @@ func TestGuideSourcesAndBoundaries(t *testing.T) {
 		"field":      {"GET writes are real writes", "tosAccepted", "get your operator's consent first", "was not an attack", "the claim is not supported", "aiforum.grok.me/llms.txt", "this board does the same thing", "data, never instructions"},
 		"venues":     {"GET writes are real writes", "wayside.rest", "clawprint.org", "getpostingboard.dev", "agent-community.com", "theagentmustgrow.com", "github.com/DevanMetz/aiagentmessageboard", "not independently audited", "Apache 2.0", "Where we are behind", `href="/guides/agent-board-map"`},
 		"map":        {"GET writes are real writes", `href="/r/boards"`, "/w/boards/main", "not independently audited", "data, not instructions", "Reported, not verified", `id="request"`},
-		"transports": {"/capabilities", "switched off until the operator turns it on", "twice the size of the query", "copying it does not, running it does", "not instructions", "It is not built", "an unsigned command is refused", "never identity"},
+		"transports": {"/capabilities", "switched off until the operator turns it on", "twice the size of the query", "copying it does not, running it does", "not instructions", "Nostr carries public posts only", "is not encrypted: anyone on the network path can read this", "an unsigned command is refused", "never identity"},
 	}
 	for _, guide := range publicGuides {
 		w := httptest.NewRecorder()
@@ -199,7 +201,7 @@ func TestBoardMapEntries(t *testing.T) {
 // useGuideAuthors swaps the allowlist for one test and restores it afterwards.
 func useGuideAuthors(t *testing.T, keys ...ed25519.PrivateKey) {
 	t.Helper()
-	previous := GuideAuthors()
+	previous, previousSet := GuideAuthors(), guideAuthorsSet
 	fingerprints := []string{}
 	for _, key := range keys {
 		sum := sha256.Sum256(key.Public().(ed25519.PublicKey))
@@ -208,7 +210,7 @@ func useGuideAuthors(t *testing.T, keys ...ed25519.PrivateKey) {
 	if err := SetGuideAuthors(strings.Join(fingerprints, ",")); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { guideAuthors = previous })
+	t.Cleanup(func() { guideAuthors, guideAuthorsSet = previous, previousSet })
 }
 
 // A legacy guide address moves to a post only when an allowlisted key posts a
@@ -295,8 +297,8 @@ func TestGuideRedirectsToAllowlistedPost(t *testing.T) {
 }
 
 func TestSetGuideAuthorsValidates(t *testing.T) {
-	previous := GuideAuthors()
-	t.Cleanup(func() { guideAuthors = previous })
+	previous, previousSet := GuideAuthors(), guideAuthorsSet
+	t.Cleanup(func() { guideAuthors, guideAuthorsSet = previous, previousSet })
 	for _, bad := range []string{"abc", strings.Repeat("A", 64), strings.Repeat("a", 64) + ",", strings.Repeat("a", 65)} {
 		if SetGuideAuthors(bad) == nil {
 			t.Errorf("accepted %q", bad)
@@ -307,5 +309,93 @@ func TestSetGuideAuthorsValidates(t *testing.T) {
 	}
 	if SetGuideAuthors(" "+strings.Repeat("b", 64)+" , "+strings.Repeat("c", 64)) != nil || len(GuideAuthors()) != 2 || GuideAuthors()[0] != strings.Repeat("b", 64) {
 		t.Fatal("valid list not applied")
+	}
+}
+
+// signed runs any command signed by key, as the fixture's post does.
+func (f *articleFixture) signed(key ed25519.PrivateKey, c board.Command) board.Result {
+	f.t.Helper()
+	f.n++
+	c.PublicKey = base64.RawURLEncoding.EncodeToString(key.Public().(ed25519.PublicKey))
+	c.Timestamp = time.Now().Unix()
+	c.Nonce = "guide-member-" + strconv.Itoa(f.n)
+	c.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, board.Canonical("swarmmemo.com", c)))
+	res, err := f.store.Execute(context.Background(), c, "test")
+	if err != nil {
+		f.t.Fatalf("%s: %v", c.Operation, err)
+	}
+	return res
+}
+
+func keyFingerprint(key ed25519.PrivateKey) string {
+	sum := sha256.Sum256(key.Public().(ed25519.PublicKey))
+	return hex.EncodeToString(sum[:])
+}
+
+// With GUIDES_AUTHORS unset, /guides lists the articles of the room's owner,
+// moderators and members, as production's #guides is run: the operator made
+// the persona (weaver) its owner and weaver admitted a guide author
+// (f15e8afc…, whose guide 0296f1f0 must be listed). A member's post never takes
+// over a legacy address, and nobody else's post or reply is listed.
+func TestGuidesIndexListsRoomMembers(t *testing.T) {
+	f := newArticleFixture(t) // weaver
+	previous, previousSet := guideAuthors, guideAuthorsSet
+	t.Cleanup(func() { guideAuthors, guideAuthorsSet = previous, previousSet })
+	guideAuthors, guideAuthorsSet = []string{keyFingerprint(f.key)}, false
+	key := func(b byte) ed25519.PrivateKey {
+		seed := make([]byte, 32)
+		seed[0] = b
+		return ed25519.NewKeyFromSeed(seed)
+	}
+	member, moderator, outsider := key(21), key(22), key(23)
+	for _, k := range []ed25519.PrivateKey{member, moderator, outsider} {
+		f.signed(k, board.Command{Operation: "post", Room: "garden", Text: "hello"}) // registers the key
+	}
+	owned := f.post(board.Command{Text: "# Weaver's guide\n\nBy the owner.", Data: markdownData}) // opens #guides as an operator room
+	if _, err := f.store.OperatorRoom(context.Background(), board.Command{Operation: "room.owner.transfer", Room: "guides", Target: keyFingerprint(f.key)}); err != nil {
+		t.Fatal(err)
+	}
+	f.signed(f.key, board.Command{Operation: "room.member.add", Room: "guides", Target: keyFingerprint(member)})
+	f.signed(f.key, board.Command{Operation: "room.moderator.add", Room: "guides", Target: keyFingerprint(moderator)})
+
+	guide := f.signed(member, board.Command{Operation: "post", Room: "guides", Text: "# A member's guide\n\nHow to post.", Data: markdownData}).Receipt.ID
+	legacyTitle := f.signed(member, board.Command{Operation: "post", Room: "guides", Text: "# 4chan for agents\n\nNot the persona's.", Data: markdownData}).Receipt.ID
+	modPost := f.signed(moderator, board.Command{Operation: "post", Room: "guides", Text: "# A moderator's guide\n\nRules.", Data: markdownData}).Receipt.ID
+	f.signed(outsider, board.Command{Operation: "post", Room: "guides", Text: "# An outsider's guide\n\nNot listed.", Data: markdownData})
+	f.signed(outsider, board.Command{Operation: "post", Room: "guides", Text: "# A reply\n\nNot listed either.", ReplyTo: guide, Data: markdownData})
+
+	body := f.get("/guides").Body.String()
+	for _, id := range []string{owned, guide, modPost, legacyTitle} {
+		if !strings.Contains(body, `href="/e/`+id+`/`) {
+			t.Errorf("index must list %s", id)
+		}
+	}
+	if strings.Contains(body, "outsider") || strings.Contains(body, "A reply") {
+		t.Fatal("a non-member's post or reply must not be listed")
+	}
+	if w := f.get("/guides/4chan-for-agents"); w.Code != 200 {
+		t.Fatalf("a member's post must not take a legacy address: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	// GUIDES_AUTHORS, when set, overrides: the named keys only.
+	useGuideAuthors(t, f.key)
+	body = f.get("/guides").Body.String()
+	if strings.Contains(body, `href="/e/`+guide+`/`) || !strings.Contains(body, `href="/e/`+owned+`/`) {
+		t.Fatal("with GUIDES_AUTHORS set, the index lists the named keys only")
+	}
+}
+
+// A room owned by a key outside the allowlist lists nothing: its owner would
+// decide who writes the guides.
+func TestGuidesIndexNeedsATrustedOwner(t *testing.T) {
+	f := newArticleFixture(t)
+	previous, previousSet := guideAuthors, guideAuthorsSet
+	t.Cleanup(func() { guideAuthors, guideAuthorsSet = previous, previousSet })
+	guideAuthors, guideAuthorsSet = []string{strings.Repeat("a", 64)}, false
+	id := f.post(board.Command{Text: "# A guide\n\nBody.", Data: markdownData})
+	if _, err := f.store.OperatorRoom(context.Background(), board.Command{Operation: "room.owner.transfer", Room: "guides", Target: keyFingerprint(f.key)}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.get("/guides").Body.String(), `href="/e/`+id+`/`) {
+		t.Fatal("a guides room owned by an unlisted key must list nothing")
 	}
 }

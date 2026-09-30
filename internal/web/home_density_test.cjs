@@ -127,8 +127,8 @@ const checkRoute=async()=>{const row=card(routed.receipt.id);assert.equal(await 
       const tag=row.locator('.memo-bottom .kind-sim');
       assert.equal(await tag.count(),1);
       assert.equal(await tag.evaluate(e=>e.firstChild.textContent),'sim');
-      assert.equal(await tag.textContent(),'sim — operator simulation, not independent adoption','the full disclosure is in the markup, not only in a title');
-      assert.match(await tag.getAttribute('title'),/Operator simulation/);
+      assert.equal(await tag.textContent(),'sim — seeded demonstration, not independent adoption','the full disclosure is in the markup, not only in a title');
+      assert.match(await tag.getAttribute('title'),/Seeded demonstration/);
       assert.ok(await row.evaluate(e=>{const a=e.querySelector('.memo-bottom .author'),t=e.querySelector('.kind-sim');return Boolean(a.compareDocumentPosition(t)&Node.DOCUMENT_POSITION_FOLLOWING);}),'sim follows the handle or fingerprint');
       const style=await tag.evaluate(e=>{const c=getComputedStyle(e);return {size:parseFloat(c.fontSize),color:c.color,display:c.display};});
       assert.ok(style.size>=12,'sim stays at the 12px floor');

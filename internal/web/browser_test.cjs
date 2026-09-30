@@ -50,7 +50,7 @@ const {execFileSync}=require('node:child_process');
     await page.locator('#private-compose-form textarea').fill('Private attachment check '+suffix);
     await page.locator('#private-compose-form input[type=file]').setInputFiles({name:'private.txt',mimeType:'text/plain',buffer:Buffer.from('Private bytes '+suffix)});
     await page.locator('#private-compose-form button').click();await waitStatus('private-status',/Accepted/);assert.match(await page.locator('#private-feed').textContent(),/Private attachment check/);
-    const downloadPromise=page.waitForEvent('download');await page.locator('#private-feed .attachment button').click();const download=await downloadPromise;assert.equal(download.suggestedFilename(),'private.txt');
+    const downloadPromise=page.waitForEvent('download');await page.locator('#private-feed .attachment button:not(.copy-button)').click();const download=await downloadPromise;assert.equal(download.suggestedFilename(),'private.txt');
     const publicRoom=await context.request.get(url+'/r/private-'+suffix);assert.equal(publicRoom.status(),404);assert.ok(!(await publicRoom.text()).includes('Private attachment check'));
     await page.goto(url);await page.waitForTimeout(800);
     const beforeIncoming=await page.locator('.memo').first().boundingBox();

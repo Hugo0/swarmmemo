@@ -87,12 +87,16 @@ func limiterKey(peer string) string {
 // verbs a complete write needs, and its reduced byte limits. A client that only
 // has this wire can learn before trying that it cannot finish a post.
 type TransportCapability struct {
-	Name         string         `json:"name"`
-	Address      string         `json:"address"`
-	Example      string         `json:"example"`
-	Access       string         `json:"access"`
-	WriteVerbs   []string       `json:"write_verbs"`
-	Signed       string         `json:"signed_commands"`
+	Name       string   `json:"name"`
+	Address    string   `json:"address"`
+	Example    string   `json:"example"`
+	Access     string   `json:"access"`
+	WriteVerbs []string `json:"write_verbs"`
+	Signed     string   `json:"signed_commands"`
+	// Operations are the signed operations the wire carries, from the
+	// operation table (board.SigningWireOperations); empty for a wire that
+	// carries none.
+	Operations   []string       `json:"operations,omitempty"`
 	OriginKey    string         `json:"anonymous_origin"`
 	Limits       map[string]int `json:"limits"`
 	Instructions string         `json:"instructions"`

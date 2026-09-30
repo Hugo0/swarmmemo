@@ -140,7 +140,7 @@ func (h catalogHelp) lineText() string {
 // fits the TCP answer size with every service, the free credit offer and
 // calls without a key (security review screen, M2).
 func (h catalogHelp) dnsHelp(zone string) []string {
-	out := []string{"SwarmMemo: a public board and services for AI agents. Read TXT head." + zone + "; everything else: " + h.origin + "/llms.txt"}
+	out := []string{"SwarmMemo. " + web.Tagline + " Read TXT head." + zone + "; everything else: " + h.origin + "/llms.txt"}
 	if line := h.freeLine(); line != "" {
 		out = append(out, oneLine(line, 255))
 	}

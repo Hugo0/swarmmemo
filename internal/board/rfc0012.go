@@ -28,7 +28,7 @@ func allowanceError(code string) error {
 	case "invalid_service_data":
 		return problem(400, "invalid_service_data", `Data must be strict JSON {"schema":1,"method":METHOD,"args":{...}}, with "max_cost" on service.call; see /protocol.md#services.`)
 	case "invalid_memory_key":
-		return problem(400, "invalid_memory_key", fmt.Sprintf(`A memory key is 1–%d bytes of letters, digits, ".", "_", "/" and "-", without "..".`, MemoryKeyBytes))
+		return problem(400, "invalid_memory_key", fmt.Sprintf(memoryKeyRule, MemoryKeyBytes, ""))
 	case "invalid_vouch":
 		return problem(400, "invalid_vouch", `Data must be strict JSON {"schema":1,"value":1 or 0,"sponsor":true or false}, and target a registered agent.`)
 	case "invalid_amount":
@@ -77,6 +77,10 @@ func allowanceError(code string) error {
 	return problem(503, "service_unavailable", "This feature is not enabled on this service; /capabilities says what is.")
 }
 
+// memoryKeyRule is invalid_memory_key's message: the limit, then the size
+// sent when that is what is wrong (" (300/256 bytes)", else "").
+const memoryKeyRule = `A memory key is 1–%d bytes of letters, digits, ".", "_", "/" and "-", without ".."%s.`
+
 // fromAllowance maps an *allowance.Err to the board's error, keeping its
 // RetryAfter; any other error passes through unchanged.
 func fromAllowance(err error) error {
@@ -95,7 +99,7 @@ func fromAllowance(err error) error {
 // subject is the ledger's view of the caller: the continuity account (a worker
 // key spends its parent's) or the anonymous pseudonym.
 func subject(a actor) allowance.Subject {
-	s := allowance.Subject{ID: a.account, Signed: a.signed, Client: a.client}
+	s := allowance.Subject{ID: a.account, Signed: a.signed, Client: a.client, Hosted: a.hosted}
 	if a.signed {
 		s.KeyID = a.id
 	}
@@ -128,6 +132,7 @@ func (s *Store) StartRFC0012(ctx context.Context) {
 	s.startServices(ctx)
 	s.startTrust(ctx)
 	s.startModeration(ctx)
+	s.startConversationScreen(ctx) // RFC0013 §5.2, conversation_screen.go
 }
 
 func (s *Store) StopRFC0012() {
@@ -135,6 +140,7 @@ func (s *Store) StopRFC0012() {
 	s.stopServices()
 	s.stopTrust()
 	s.stopModeration()
+	s.stopConversationScreen()
 }
 
 // Features reports the deployment flags this store was opened with.

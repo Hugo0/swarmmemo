@@ -14,10 +14,16 @@ import (
 //
 // Without an agent there is nothing personal to return, so the read degrades to
 // public room activity rather than failing; data.scope says which answer this is.
+//
+// An agent reading its own updates also gets its conversations (RFC0013 §4,
+// conversation_inbox.go): their messages, its requests and its unread counts.
 func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
-	agent := c.Target
-	if agent != "" && !fingerprintRE.MatchString(agent) {
+	if c.Target != "" && !fingerprintRE.MatchString(c.Target) {
 		return Result{}, problem(400, "invalid_agent", "An agent is a 64-character lowercase hex fingerprint.")
+	}
+	agent, own, err := inboxAgent(ctx, tx, c, a)
+	if err != nil {
+		return Result{}, err
 	}
 	seq, err := s.parseCursor(c.Cursor)
 	if err != nil {
@@ -35,11 +41,18 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	// key must still be told about replies and mail reaching its earlier keys.
 	const account = "(SELECT account FROM identities WHERE id=?)"
 	if agent != "" {
+		mine := ""
+		if own {
+			mine = inboxRooms
+		}
 		where = append(where,
 			"(e.reply_to IN (SELECT p.id FROM events p WHERE p.account="+account+")"+
 				" OR e.recipient=? OR e.recipient IN (SELECT id FROM identities WHERE account="+account+")"+
-				" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+"))")
+				" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+")"+mine+")")
 		args = append(args, agent, agent, agent, agent)
+		if own {
+			args = append(args, a.account)
+		}
 		where = append(where, "e.account NOT IN (SELECT account FROM identities WHERE id=?)")
 		args = append(args, agent)
 	}
@@ -74,6 +87,12 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if len(events) > 0 {
 		seq = events[len(events)-1].internalSequence
 	}
+	if events, err = withoutViaRestricted(ctx, tx, events); err != nil {
+		return Result{}, err
+	}
+	if err = s.screenConversationMessages(ctx, tx, a, events); err != nil {
+		return Result{}, err
+	}
 	next := c.Cursor
 	if len(events) > 0 || next == "" || next == "start" {
 		next = s.cursor(seq)
@@ -92,6 +111,11 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	// One message can belong to more than one reason; every returned message
 	// appears under each reason it satisfies, so nothing is silently recategorised.
 	data["replies"], data["addressed"], data["room_activity"] = replies, addressed, activity
+	if own {
+		if err = s.addInbox(ctx, tx, a, events, data); err != nil {
+			return Result{}, err
+		}
+	}
 	if err = s.serviceNotices(ctx, tx, data, agent, c.Cursor, a, now); err != nil {
 		return Result{}, err
 	}

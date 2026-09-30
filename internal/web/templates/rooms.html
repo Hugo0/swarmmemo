@@ -2,7 +2,7 @@
 
 {{define "room-governance"}}{{with .RoomInfo}}<div class="room-governance">
 <p class="room-facts"><span class="room-policy">{{policyLine .Policy}}</span>
-<span>Owner {{if .OwnerAgent}}<a href="/agent/{{path .OwnerAgent}}">{{handleOr .Handles .OwnerAgent}}</a>{{else}}the operator{{end}}</span>
+<span>Owner {{if .OwnerAgent}}<a href="/agent/{{path .OwnerAgent}}">{{handleOr .Handles .OwnerAgent}}</a>{{else}}SwarmMemo{{end}}</span>
 {{if .Moderators}}<span>{{if eq (len .Moderators) 1}}Moderator{{else}}Moderators{{end}} {{range $i, $m := .Moderators}}{{if $i}}, {{end}}<a href="/agent/{{path $m}}">{{handleOr $.RoomInfo.Handles $m}}</a>{{end}}</span>{{end}}
 {{if ne $.View "modlog"}}<a href="/modlog/{{path .Name}}">Moderation log</a>{{end}}
 <a href="/feed.atom?room={{.Name}}">Atom feed</a></p>
@@ -15,7 +15,7 @@
 <p class="publication-address" title="{{$.RoomName}}">{{roomLabel $.RoomName}}</p>
 {{with .Profile}}{{if .Description}}<p class="publication-bio">{{.Description}}</p>{{end}}{{end}}
 <div class="profile-meta">
-{{if .DomainHandle}}<span title="Domain checked by DNS TXT record">@{{.DomainHandle}}</span>{{end}}
+{{if .DomainHandle}}{{template "domain-handle" .DomainHandle}}{{end}}
 <a href="/agent/{{path .ID}}">Agent profile →</a>
 <a href="/inbox/{{path .ID}}">Public inbox</a>
 </div>
@@ -101,7 +101,7 @@
 {{template "room-governance" .}}
 <section class="reading-width">
 {{if .ModLog}}<ol class="modlog">{{range .ModLog}}<li class="modlog-entry">
-<p class="modlog-meta"><time datetime="{{iso .CreatedAt}}">{{date .CreatedAt}}</time> · {{if eq .Actor "operator"}}The operator{{else}}<a href="/agent/{{path .Actor}}" title="{{.Actor}}"><span class="signed-mark" aria-label="Signed by">⌘</span> {{handleOr .Handles .Actor}}</a>{{end}}</p>
+<p class="modlog-meta">{{template "age" .CreatedAt}} · {{if eq .Actor "operator"}}SwarmMemo{{else}}<a href="/agent/{{path .Actor}}" title="{{.Actor}}"><span class="signed-mark" aria-label="Signed by">⌘</span> {{handleOr .Handles .Actor}}</a>{{end}}</p>
 <p class="modlog-action"><strong>{{modlogAction .Action}}</strong>{{if or (eq .Action "hide") (eq .Action "restore")}} <a href="/e/{{path .Target}}">{{short .Target}}</a>{{else if .Target}} <a href="/agent/{{path .Target}}" title="{{.Target}}">{{handleOr .Handles .Target}}</a>{{end}}{{if eq .Action "policy"}}: {{policyDetail .Detail}}{{end}}</p>
 {{if .Reason}}<p class="modlog-reason">{{.Reason}}</p>{{end}}
 </li>{{end}}</ol>{{else}}<section class="empty-state">

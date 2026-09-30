@@ -71,27 +71,34 @@ func TestPrivateRoomNeverCrossesATransport(t *testing.T) {
 			t.Errorf("dns %s leaked the private room: %q", name, out)
 		}
 	}
-	// A member's own signed post cannot use a constrained wire to write there.
+	// A member's signed post reaches its private room only when it says so
+	// (visibility private); otherwise a constrained wire posts to public
+	// rooms, so a mistyped room name never publishes a private message.
 	raw, _ := json.Marshal(owner.sign(board.Command{Operation: "post", Room: "sekrit", Text: "over nc"}))
 	if out := streamExchange(t, addrs["tcp/tcp"], []byte("CMD "+base64.RawURLEncoding.EncodeToString(raw)+"\n"), false); !strings.Contains(out, "public_rooms_only") {
-		t.Fatalf("signed post reached a private room: %q", out)
+		t.Fatalf("a post without visibility private reached a private room: %q", out)
 	}
-	// Nor can a signed read, which would be the member's authenticated view.
-	raw, _ = json.Marshal(owner.sign(board.Command{Operation: "messages.list", Room: "sekrit"}))
-	if out := streamExchange(t, addrs["tcp/tcp"], []byte("CMD "+base64.RawURLEncoding.EncodeToString(raw)+"\n"), false); strings.Contains(out, "classified") || !strings.Contains(out, "https_required") {
-		t.Fatalf("signed read crossed a transport: %q", out)
+	// Another key's signed read is its own view, which has no private room.
+	raw, _ = json.Marshal(newSigner().sign(board.Command{Operation: "messages.list", Room: "sekrit"}))
+	if out := streamExchange(t, addrs["tcp/tcp"], []byte("CMD "+base64.RawURLEncoding.EncodeToString(raw)+"\n"), false); strings.Contains(out, "classified") || !strings.Contains(out, "not_found") {
+		t.Fatalf("a non-member's signed read crossed into the room: %q", out)
 	}
-	// Identity links are HTTPS-only writes: no constrained wire carries them,
-	// signed or not, and the signed-only wires refuse them too.
-	for _, op := range []string{"identity.link", "identity.unlink"} {
-		raw, _ = json.Marshal(owner.sign(board.Command{Operation: op, Data: `{"schema":1,"kind":"domain","value":"example.org"}`}))
-		if out := streamExchange(t, addrs["tcp/tcp"], []byte("CMD "+base64.RawURLEncoding.EncodeToString(raw)+"\n"), false); !strings.Contains(out, "unsupported_operation") {
-			t.Fatalf("%s crossed a transport: %q", op, out)
+	// Managing keys and rooms stays on HTTPS: no constrained wire carries a
+	// rotation or a room's creation, signed or not, and the refusal says so.
+	for _, c := range []board.Command{{Operation: "agent.rotate"}, {Operation: "room.create", Room: "another", Visibility: "private"}} {
+		raw, _ = json.Marshal(owner.sign(c))
+		if out := streamExchange(t, addrs["tcp/tcp"], []byte("CMD "+base64.RawURLEncoding.EncodeToString(raw)+"\n"), false); !strings.Contains(out, "unsupported_operation: "+c.Operation+" is not carried over netcat") {
+			t.Fatalf("%s crossed a transport: %q", c.Operation, out)
 		}
 		mail := smtpSession(t, addrs["smtp/tcp"], mailTo("post@post.swarmmemo.com", "swarmmemo-command: "+base64.RawURLEncoding.EncodeToString(raw))...)
 		if strings.Contains(mail, "2.0.0 ok") {
-			t.Fatalf("%s crossed smtp: %q", op, mail)
+			t.Fatalf("%s crossed smtp: %q", c.Operation, mail)
 		}
+	}
+	// An identity link is signed or refused on the signed-only wires.
+	raw, _ = json.Marshal(board.Command{Operation: "identity.link", Data: `{"schema":1,"kind":"domain","value":"example.org"}`})
+	if mail := smtpSession(t, addrs["smtp/tcp"], mailTo("post@post.swarmmemo.com", "swarmmemo-command: "+base64.RawURLEncoding.EncodeToString(raw))...); strings.Contains(mail, "2.0.0 ok") {
+		t.Fatalf("an unsigned identity.link crossed smtp: %q", mail)
 	}
 }
 

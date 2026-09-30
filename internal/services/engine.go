@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"regexp"
 	"strings"
 	"sync"
@@ -219,8 +220,11 @@ func (e *Engine) resolve(req Request, d Data, write bool) (Provider, Descriptor,
 	}
 	desc := p.Describe()
 	m, ok := desc.method(d.Method)
-	if !ok || m.Write != write || len(d.Args) > m.ArgsMax {
+	if !ok || m.Write != write {
 		return nil, Descriptor{}, Method{}, refusal("invalid_service_data")
+	}
+	if len(d.Args) > m.ArgsMax {
+		return nil, Descriptor{}, Method{}, tooLarge("invalid_service_data", len(d.Args), m.ArgsMax)
 	}
 	// Only a method the catalogue marks Anonymous takes an unsigned call,
 	// whether or not it is marked Signed (security review 1.21, L7).
@@ -328,7 +332,12 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 		if err = e.insertCall(ctx, tx, req, c, rec, "", publicOf(res.Public), 0); err != nil {
 			return Outcome{}, err
 		}
-		return Outcome{Data: callData(desc.ID, m.Name, rec, res.Body, receipt)}, nil
+		data := callData(desc.ID, m.Name, rec, res.Body, receipt)
+		if len(res.Once) == 0 {
+			return Outcome{Data: data}, nil
+		}
+		// The receipt the board stores is Data; the answer is After's.
+		return Outcome{Data: data, After: func() (map[string]any, error) { return withOnce(data, res.Once), nil }}, nil
 	}
 	if desc.MaxDuration <= 0 || desc.MaxDuration > MaxDurationMax {
 		return Outcome{}, errors.New("services: remote provider without a valid MaxDuration")
@@ -435,7 +444,30 @@ func (e *Engine) finish(pc pendingCall) (map[string]any, error) {
 	if err == nil && pc.mode == Async && res.Job != nil {
 		return e.schedule(pc, *res.Job)
 	}
-	return e.settle(e.base, pc.account, pc.rec.ID, "", res, err)
+	data, err := e.settle(e.base, pc.account, pc.rec.ID, "", res, err)
+	if err != nil || len(res.Once) == 0 {
+		return data, err
+	}
+	return withOnce(data, res.Once), nil
+}
+
+// withOnce is a finished call's data with once's keys added to its result,
+// for the caller's first answer; data itself, as stored, is left alone. A
+// call that did not finish with a result gets nothing.
+func withOnce(data map[string]any, once json.RawMessage) map[string]any {
+	body, ok := data["result"].(json.RawMessage)
+	var merged, extra map[string]json.RawMessage
+	if !ok || json.Unmarshal(body, &merged) != nil || json.Unmarshal(once, &extra) != nil {
+		return data
+	}
+	maps.Copy(merged, extra)
+	raw, err := json.Marshal(merged)
+	if err != nil {
+		return data
+	}
+	out := maps.Clone(data)
+	out["result"] = json.RawMessage(raw)
+	return out
 }
 
 // schedule records an Async call's job; the worker settles it when due.

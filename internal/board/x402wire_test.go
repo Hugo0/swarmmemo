@@ -2,6 +2,7 @@ package board
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -43,6 +44,30 @@ func TestX402UnconfiguredIsUnavailable(t *testing.T) {
 	fails(t, s, svcRead(keyFor(1), "x402", "resources", map[string]any{}), "service_unavailable")
 	if len(svcSpends(t, s, meter)) != 0 {
 		t.Fatal("nothing may be charged")
+	}
+}
+
+// A 1.23 database gains x402_vetted.reason on open, its rows kept and read
+// as the operator's (an empty reason).
+func TestX402VettedReasonMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "migration.sqlite")
+	s, err := Open(path, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec("ALTER TABLE x402_vetted DROP COLUMN reason; INSERT INTO x402_vetted(id,url,method,pay_to,state,changed_at) VALUES('r','https://example.com/x','GET','0x1','vetted',1)"); err != nil {
+		s.Close()
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if s, err = Open(path, Config{}); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if sqlCount(t, s, "SELECT count(*) FROM x402_vetted WHERE id='r' AND state='vetted' AND reason=''") != 1 {
+		t.Fatal("the vetting row must survive the migration with an empty reason")
 	}
 }
 

@@ -13,6 +13,9 @@ import (
 // source or in any rendering of it.
 var legalDraftMarks = regexp.MustCompile(`(?i)\[(?:todo|assumed)\b|\bdraft\b|needs hugo|open questions for hugo|assumptions to confirm`)
 
+// legalUpdated is the date line every legal page carries under its title.
+var legalUpdated = regexp.MustCompile(`(?m)^Last updated: \d{4}-\d{2}-\d{2}\.`)
+
 func TestLegalPagesRenderFromTheirMarkdownSource(t *testing.T) {
 	for _, tc := range []struct{ path, title, other string }{
 		{"/privacy", "Privacy Policy", "/terms"},
@@ -25,7 +28,7 @@ func TestLegalPagesRenderFromTheirMarkdownSource(t *testing.T) {
 		if m := legalDraftMarks.FindString(string(src)); m != "" {
 			t.Errorf("%s source carries a drafting mark: %q", tc.path, m)
 		}
-		if !strings.Contains(string(src), "Last updated: 2026-09-29") {
+		if !legalUpdated.MatchString(string(src)) {
 			t.Errorf("%s source has no last-updated date", tc.path)
 		}
 		w := httptest.NewRecorder()

@@ -86,8 +86,43 @@ func (serviceBoardView) EventsAfter(ctx context.Context, q allowance.Querier, af
 		if out[i].Mentions, err = mentions(ctx, q, texts[i]); err != nil {
 			return nil, err
 		}
+		if IsConversationRoom(out[i].Room) {
+			if err = conversationWatchers(ctx, q, &out[i]); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return out, nil
+}
+
+// conversationWatchers fills a conversation message's members for message
+// wake-ups (RFC0013 §4): the active ones, and the requested ones asked in by
+// its author while it is among that author's first messages, the ones a
+// request shows.
+func conversationWatchers(ctx context.Context, q allowance.Querier, ev *services.BoardEvent) error {
+	ev.Conversation = true
+	var early int
+	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM events WHERE room=? AND account=? AND supersedes='' AND seq<=? LIMIT ?)", ev.Room, ev.Author, ev.Seq, RequestVisibleMessages+1).Scan(&early); err != nil {
+		return err
+	}
+	rows, err := q.QueryContext(ctx, "SELECT account,state,added_by FROM conversation_members WHERE room=? AND state IN ('active','requested') LIMIT ?", ev.Room, 2*(RoomMembersMax+1))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var account, state, addedBy string
+		if err = rows.Scan(&account, &state, &addedBy); err != nil {
+			return err
+		}
+		switch {
+		case state == memberActive:
+			ev.Members = append(ev.Members, account)
+		case addedBy == ev.Author && ev.Author != "" && early <= RequestVisibleMessages:
+			ev.RequestTo = append(ev.RequestTo, account)
+		}
+	}
+	return rows.Err()
 }
 
 // mentions resolves up to MentionsMax distinct @handles in text to accounts.
@@ -133,6 +168,12 @@ func (serviceBoardView) CanRead(ctx context.Context, q allowance.Querier, accoun
 	return member > 0, err
 }
 
+// screenTextLimit refuses an unsigned screen call's text over its limit;
+// sent states the size sent (" (5000/4096 bytes)", or "").
+func screenTextLimit(sent string) error {
+	return problem(401, "signature_required", fmt.Sprintf("Without a key, screen.text takes up to %d bytes of text%s; sign the command for up to %d.", services.ScreenAnonymousTextBytes, sent, services.ScreenTextBytes))
+}
+
 // providerError maps the wakeup and notary refusals; nil for any other code.
 func providerError(code string) error {
 	switch code {
@@ -145,7 +186,7 @@ func providerError(code string) error {
 	case "wakeup_room_not_found":
 		return problem(404, "not_found", "No room by that name is readable by you.")
 	case "screen_text_limit":
-		return problem(401, "signature_required", fmt.Sprintf("Without a key, screen.text takes up to %d bytes of text; sign the command for up to %d.", services.ScreenAnonymousTextBytes, services.ScreenTextBytes))
+		return screenTextLimit("")
 	case "notary_not_found":
 		return problem(404, "notary_not_found", "No receipt for that hash; stamp it with service.call notary stamp.")
 	case "notary_limit":

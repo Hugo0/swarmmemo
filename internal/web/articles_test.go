@@ -3,7 +3,9 @@ package web
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
@@ -82,7 +84,7 @@ func TestArticlePageSEOAndSlug(t *testing.T) {
 		`<meta property="article:published_time"`,
 		`<h1 class="article-title">Post with one HTTP request</h1>`,
 		`<h3 id="md-why-it-works">Why it works</h3>`,
-		`<a href="https://example.com/start" rel="nofollow noopener ugc"><bdi>signup</bdi></a><bdi class="md-host" dir="ltr">example.com</bdi>`,
+		`<a href="https://example.com/start" rel="nofollow ugc noopener noreferrer"><bdi>signup</bdi></a><bdi class="md-host" dir="ltr">example.com</bdi>`,
 		`min read`,
 		`id="e-` + reply + `"`,
 		`<h2>Replies</h2>`,
@@ -125,7 +127,7 @@ func TestPlainThreadKeepsItsAddress(t *testing.T) {
 		`<link rel="canonical" href="https://swarmmemo.com/e/` + id + `">`,
 		`<meta property="og:type" content="website">`,
 		`<h1>Conversation</h1>`,
-		`<p class="memo-text">First line &lt;b&gt;is&lt;/b&gt; the title` + "\n" + `second line</p>`,
+		`<div class="memo-text">First line &lt;b&gt;is&lt;/b&gt; the title` + "\n" + `second line</div>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("plain thread lacks %s", want)
@@ -195,14 +197,25 @@ func TestMarkdownTitleCannotInjectMarkup(t *testing.T) {
 	}
 }
 
-// Articles lose nothing in a listing: the feed shows a title and the start of
-// the prose, never raw Markdown or rendered headings.
+// Articles lose nothing in a listing: the feed shows a flattened preview, never
+// raw Markdown or rendered headings, and links to the whole post when it is cut.
 func TestFeedPreviewOfArticle(t *testing.T) {
 	f := newArticleFixture(t)
 	f.post(board.Command{Text: "# A guide\n\nThe **first** paragraph.\n\n- a list", Data: markdownData})
-	body := f.get("/r/guides").Body.String()
-	if !strings.Contains(body, `<p class="memo-text"><strong class="memo-title">A guide</strong>`+"\n"+`The first paragraph.</p>`) || strings.Contains(body, "# A guide") || strings.Contains(body, "<h2>A guide") {
-		t.Fatal("feed preview of an article")
+	long := f.post(board.Command{Text: "# Long\n\n" + strings.Repeat("## Section\n\nWords.\n\n", 30), Data: markdownData})
+	author := sha256.Sum256(f.key.Public().(ed25519.PublicKey))
+	for _, path := range []string{"/r/guides", "/agent/" + hex.EncodeToString(author[:])} {
+		body := f.get(path).Body.String()
+		if !strings.Contains(body, `<p class="memo-text md-preview"><strong class="memo-title">A guide</strong>`+"\n"+`The <strong>first</strong> paragraph.`+"\n"+`• a list</p>`) || strings.Contains(body, "# A guide") || regexp.MustCompile(`<h\d>(A guide|Section)`).MatchString(body) {
+			t.Fatalf("%s: feed preview of an article", path)
+		}
+		if !strings.Contains(body, `<a class="read-more" href="/e/`+long+`/long">Read more<span class="sr-only">: Long</span> →</a>`) || strings.Count(body, "read-more") != 1 {
+			t.Fatalf("%s: a cut preview links to the whole post, and only a cut one", path)
+		}
+	}
+	// The post's own page renders it whole.
+	if body := f.get("/e/" + long + "/long").Body.String(); strings.Count(body, "<h3 id=\"md-section") != 30 {
+		t.Fatal("the article page lost its sections")
 	}
 }
 

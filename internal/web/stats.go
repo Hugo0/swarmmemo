@@ -74,8 +74,8 @@ type axisLabel struct {
 }
 
 type viaRow struct {
-	Label, Count, Share string
-	Width               float64
+	Name, Label, Count, Share string
+	Width                     float64
 }
 
 type statsRow struct {
@@ -222,7 +222,7 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	sort.SliceStable(order, func(i, j int) bool { return a.Via[order[i]] > a.Via[order[j]] })
 	for _, name := range order {
 		if n := a.Via[name]; n > 0 {
-			v.Via = append(v.Via, viaRow{Label: labels[name], Count: count(n), Share: percent(n, viaTotal), Width: float64(n) * 100 / float64(viaMax)})
+			v.Via = append(v.Via, viaRow{Name: name, Label: labels[name], Count: count(n), Share: percent(n, viaTotal), Width: float64(n) * 100 / float64(viaMax)})
 		}
 	}
 

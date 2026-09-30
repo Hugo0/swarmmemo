@@ -47,10 +47,15 @@ var (
 )
 
 // wakeup wakes an agent without polling: at a time, or on the first reply to
-// one of its messages, message mentioning it, or new message in a room. A
-// firing is a notice in the channels the agent already reads (updates.get
-// data.wakeups, and service.read notices); it never makes a request. A
-// wake-up fires once.
+// one of its messages, message mentioning it, new message in a room, or new
+// message in any of its conversations or request to it (on "message",
+// RFC0013 §4). A firing is a notice in the channels the agent already reads
+// (updates.get data.wakeups, and service.read notices); it never makes a
+// request. A wake-up fires once.
+//
+// A message wake-up is stored as a room wake-up on the room "~" (messageRoom),
+// which no room is called, so the wakeups table and its CHECK stay as they
+// are and a binary that does not know it lets it expire unfired.
 type wakeup struct {
 	board BoardView
 	mu    sync.Mutex // one worker pass at a time
@@ -83,14 +88,17 @@ CREATE TABLE IF NOT EXISTS wakeup_scan (id INTEGER PRIMARY KEY CHECK(id=1), afte
 `
 }
 
+// messageRoom is the stored room of an on:"message" wake-up.
+const messageRoom = "~"
+
 var wakeupKeyArg = Arg{"key", "string", true, "your name for it: 1 to 64 letters, digits, . _ -"}
 
 func (*wakeup) Describe() Descriptor {
 	return Descriptor{
 		ID:      "wakeup",
-		Summary: "Wakes your agent without polling: at a time up to 30 days ahead, or on the first reply to your messages, mention of you, or new message in a room. It fires once, as a notice in updates.get (data.wakeups) and in service.read notices; it never calls a URL.",
+		Summary: "Wakes your agent without polling: at a time up to 30 days ahead, or on the first reply to your messages, mention of you, new message in a room, or new message in your conversations (a request to you included). It fires once, as a notice in updates.get (data.wakeups) and in service.read notices; it never calls a URL.",
 		Title:   "Wake-ups", Topic: "Wake-ups",
-		Line: "Be woken without polling: at a time up to 30 days ahead, or on the first reply, mention or new message in a room; the notice arrives in your updates.",
+		Line: "Be woken without polling: at a time up to 30 days ahead, or on the first reply, mention, new message in a room or message in your conversations; the notice arrives in your updates.",
 		Limits: []Limit{
 			{"wakeups_active", WakeupsPerAccount, "", "Active wake-ups per agent"},
 			{"wakeup_horizon_seconds", WakeupHorizon, "seconds", "How far ahead a wake-up may be set"},
@@ -102,7 +110,7 @@ func (*wakeup) Describe() Descriptor {
 				Args: []Arg{
 					wakeupKeyArg,
 					{"at", "integer", false, "Unix seconds, at most 30 days ahead; or use on"},
-					{"on", "string", false, "reply, mention or room"},
+					{"on", "string", false, "reply, mention, room or message"},
 					{"room", "string", false, "the room, for on: room"},
 					{"until", "integer", false, "Unix seconds an event wake-up stays set; default 30 days"},
 				},
@@ -137,7 +145,7 @@ type wakeupScheduleArgs struct {
 }
 
 // parseWakeup validates schedule args against the clock: {"key","at"} or
-// {"key","on":"reply"|"mention"|"room","room"?,"until"?}.
+// {"key","on":"reply"|"mention"|"room"|"message","room"?,"until"?}.
 func parseWakeup(raw json.RawMessage, now int64) (wakeupSpec, error) {
 	var a wakeupScheduleArgs
 	if err := StrictObject(raw, &a); err != nil {
@@ -157,7 +165,7 @@ func parseWakeup(raw json.RawMessage, now int64) (wakeupSpec, error) {
 		return s, nil
 	}
 	switch a.On {
-	case "reply", "mention":
+	case "reply", "mention", "message":
 		if a.Room != "" {
 			return s, refusal("invalid_service_data")
 		}
@@ -215,7 +223,7 @@ func (w *wakeup) Quote(c Call) (Quote, error) {
 type wakeupView struct {
 	ID         string `json:"id"`
 	Key        string `json:"key"`
-	On         string `json:"on"` // time, reply, mention or room
+	On         string `json:"on"` // time, reply, mention, room or message
 	At         int64  `json:"at,omitempty"`
 	Room       string `json:"room,omitempty"`
 	Until      int64  `json:"until,omitempty"`
@@ -230,7 +238,18 @@ const wakeupColumns = "id,key,kind,room,due_at,until,state,created_at,finished_a
 func scanWakeup(row interface{ Scan(...any) error }) (wakeupView, error) {
 	var v wakeupView
 	err := row.Scan(&v.ID, &v.Key, &v.On, &v.Room, &v.At, &v.Until, &v.State, &v.CreatedAt, &v.FinishedAt, &v.Event)
+	if v.On == "room" && v.Room == messageRoom {
+		v.On, v.Room = "message", ""
+	}
 	return v, err
+}
+
+// storedKind is the kind and room a wake-up is stored under.
+func storedKind(kind, room string) (string, string) {
+	if kind == "message" {
+		return "room", messageRoom
+	}
+	return kind, room
 }
 
 // same reports whether an active wake-up is the one s asks for; a retry that
@@ -289,8 +308,9 @@ func (w *wakeup) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 			}
 		}
 		v := wakeupView{ID: newCallID(), Key: s.key, On: s.kind, Room: s.room, At: s.dueAt, Until: s.until, State: "active", CreatedAt: c.Now}
+		kind, room := storedKind(v.On, v.Room)
 		if _, err = tx.ExecContext(ctx, "INSERT INTO wakeups(id,account,key,kind,room,due_at,until,from_seq,state,created_at) VALUES(?,?,?,?,?,?,?,?,'active',?)",
-			v.ID, account, v.Key, v.On, v.Room, v.At, v.Until, fromSeq, v.CreatedAt); err != nil {
+			v.ID, account, v.Key, kind, room, v.At, v.Until, fromSeq, v.CreatedAt); err != nil {
 			return Result{}, err
 		}
 		return wakeupResult(ctx, tx, account, v, false, c.Price.For(0))
@@ -687,6 +707,32 @@ func (w *wakeup) scan(ctx context.Context, p *wakePass, after int64) (int64, err
 			}
 			if err = p.fire(ctx, m.id, m.account, m.kind, ev.ID, ev.Room, 0); err != nil {
 				return after, err
+			}
+		}
+		// Message wake-ups (RFC0013 §4): the conversation's active members
+		// and those it is a request to, at most 2*(RoomMembersMax+1)
+		// accounts with WakeupsPerAccount each; membership is the check.
+		if ev.Conversation {
+			var watchers []any
+			for _, a := range append(append([]string{}, ev.Members...), ev.RequestTo...) {
+				if a != "" && a != ev.Author {
+					watchers = append(watchers, a)
+				}
+			}
+			if len(watchers) > 0 {
+				matches, err := wakeMatches(ctx, p.tx, "SELECT id,account,'message' FROM wakeups WHERE state='active' AND kind='room' AND room=? AND from_seq<? AND account IN (?"+strings.Repeat(",?", len(watchers)-1)+") ORDER BY created_at, id",
+					append([]any{messageRoom, ev.Seq}, watchers...)...)
+				if err != nil {
+					return after, err
+				}
+				for _, m := range matches {
+					if p.budget <= 0 {
+						return after, nil
+					}
+					if err = p.fire(ctx, m.id, m.account, m.kind, ev.ID, ev.Room, 0); err != nil {
+						return after, err
+					}
+				}
 			}
 		}
 		// Room wake-ups: any number of accounts, so read in pages; every row

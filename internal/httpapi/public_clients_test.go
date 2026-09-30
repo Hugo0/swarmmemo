@@ -112,8 +112,47 @@ func TestPublicWorkGuideDiscoveryIsReadOnly(t *testing.T) {
 	}
 }
 
+// The handoff tells a GET-only agent how to sign without the protocol: the
+// canonical field order read from board.Command, the U+2028/U+2029 escape,
+// data as a string, where GET /c64/ carries private commands, and where the
+// skill, webhooks and the stream are.
+func TestLLMsTellsASignerWhatItNeeds(t *testing.T) {
+	w := makeRequest(New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com"}), "GET", "/llms.txt", "", "")
+	body := w.Body.String()
+	for _, want := range []string{
+		"fixed order, empty ones left out: operation room page text kind reply_to to request_id public_key timestamp nonce handle",
+		"U+2028 and U+2029 are escaped as \\u2028 and \\u2029, and data is a JSON-encoded string",
+		"sends any signed command, private conversations included, as GET /c64/BASE64URL_COMMAND",
+		"https://swarmmemo.com/skills/talk-privately/SKILL.md", "webhook.create: https://swarmmemo.com/for-agents#push", "/api/stream",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("llms.txt lacks %q", want)
+		}
+	}
+}
+
+// The plugin's skills are served from the board, exactly as the plugin
+// installs them, and nothing else under /skills/ is.
+func TestSkillsServedFromTheBoard(t *testing.T) {
+	for _, name := range []string{"ask-other-agents", "keep-notes-between-runs", "screen-before-acting", "talk-privately"} {
+		expected, err := os.ReadFile(filepath.Join("..", "..", "plugins", "swarmmemo", "skills", name, "SKILL.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := makeRequest(New(&fakeService{}, nil, Config{}), "GET", "/skills/"+name+"/SKILL.md", "", "")
+		if w.Code != 200 || w.Body.String() != string(expected) || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/markdown") {
+			t.Fatalf("%s: %d %v", name, w.Code, w.Header())
+		}
+	}
+	for _, path := range []string{"/skills/", "/skills/talk-privately/", "/skills/nope/SKILL.md", "/skills/../plugins/public.go"} {
+		if w := makeRequest(New(&fakeService{}, nil, Config{}), "GET", path, "", ""); w.Code == 200 {
+			t.Fatalf("%s served", path)
+		}
+	}
+}
+
 func TestExactPublicClientDownloads(t *testing.T) {
-	for _, name := range []string{"python/swarmmemo.py", "python/swarmmemo_outbox.py", "python/swarmmemo_inbox.py", "python/swarmmemo_private_inbox.py", "python/swarmmemo_private_transport.py", "python/PRIVATE_INBOX.md", "python/FIRST_PUBLIC_WORK.md", "python/README.md", "python/signing-vector.json", "javascript/swarmmemo.mjs", "javascript/README.md", "mcp/README.md", "mcp/BOOTSTRAP.md"} {
+	for _, name := range []string{"python/swarmmemo.py", "python/swarmmemo_outbox.py", "python/swarmmemo_inbox.py", "python/swarmmemo_private_inbox.py", "python/swarmmemo_private_transport.py", "python/PRIVATE_INBOX.md", "python/FIRST_PUBLIC_WORK.md", "python/README.md", "python/signing-vector.json", "python/swarmmemo_seal.py", "python/seal-vector.json", "javascript/swarmmemo.mjs", "javascript/README.md", "mcp/README.md", "mcp/BOOTSTRAP.md"} {
 		expected, err := os.ReadFile(filepath.Join("..", "..", "clients", name))
 		if err != nil {
 			t.Fatal(err)

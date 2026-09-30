@@ -138,7 +138,7 @@
     const readEpoch=credentialEpoch;
     const key=selectedKey ? {...selectedKey} : null;
     if (requireIdentity && !key) throw Error('Create or import a signing key first.');
-    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore)|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete))/.test(command.operation);
+    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore)|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete)|conversation\.(open|respond|seal)|messaging\.policy\.set)/.test(command.operation);
     const intentCommand={...command};delete intentCommand.request_id;delete intentCommand.nonce;delete intentCommand.timestamp;delete intentCommand.signature;delete intentCommand.proof;
     const intent=mutation?JSON.stringify([key?.public_key||'',intentCommand]):'';
     let record=pendingRequests.get(intent);
@@ -169,7 +169,9 @@
       const error = result?.error || result || {};
       const message = typeof error === 'string' ? error : error.message || 'The request was not accepted.';
       const retry = error.retry_after || response.headers.get('Retry-After');
-      throw Error(message + (retry ? ` Retry after ${retry} seconds.` : ''));
+      // The code and details travel with the message: a caller may act on them
+      // (a sealed conversation rewraps on seal_members_mismatch, for one).
+      throw Object.assign(Error(message + (retry ? ` Retry after ${retry} seconds.` : '')), {code: typeof error.code === 'string' ? error.code : '', details: error.details});
     }
     if (result?.ok !== true || (command.operation==='post' && typeof result.receipt?.id!=='string')) {if(mutation)record.ambiguous=true;throw Error('The board returned an unreadable receipt. Your exact request is retained for retry.');}
     if(!mutation&&key&&(readEpoch!==credentialEpoch||identityDrift))throw Error('Your key changed while reading. The old response was discarded; no private content was displayed or downloaded.');
@@ -228,6 +230,23 @@
   const gate = document.body.dataset.write ? {write: document.body.dataset.write, reply: document.body.dataset.reply, owner: document.body.dataset.roomOwner || '', moderators: (document.body.dataset.roomModerators || '').split(' ').filter(Boolean), viaOnly: document.body.dataset.viaOnly || ''} : null;
   // Badge labels for message.via, from the server's one list (board.Vias).
   const viaLabels = (() => {try {return JSON.parse(document.body.dataset.vias || '{}');} catch (_) {return {};}})();
+  // The glossary's explanations of what a live post can show (web/glossary.go).
+  const terms = (() => {try {return JSON.parse(document.body.dataset.terms || '{}');} catch (_) {return {};}})();
+  // Kept in step with the "term" template: a label with a title, focusable for its tooltip.
+  function term(el, explanation) {
+    if (!explanation) return el;
+    el.classList.add('term'); el.title = explanation; if (el.tagName !== 'A') el.tabIndex = 0;
+    return el;
+  }
+  // A tooltip opens under its label and stays inside the window.
+  document.addEventListener('focusin', event => {
+    const el = event.target.closest?.('.term[title]'); if (!el) return;
+    const left = el.getBoundingClientRect().left, width = Math.min(280, innerWidth - 32);
+    el.style.setProperty('--tip-x', Math.min(0, innerWidth - 16 - left - width) + 'px');
+  });
+  // Escape dismisses it without moving focus; it returns on the next focus.
+  document.addEventListener('keydown', event => {if (event.key === 'Escape') document.activeElement?.closest?.('.term[title]')?.classList.add('tip-dismissed');});
+  document.addEventListener('focusout', event => event.target.classList?.remove('tip-dismissed'));
   function copyIcon(copied) {
     const ns='http://www.w3.org/2000/svg';const icon=document.createElementNS(ns,'svg');
     for(const [name,value] of Object.entries({viewBox:'0 0 20 20',width:'14',height:'14',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false'}))icon.setAttribute(name,value);
@@ -259,15 +278,125 @@
     });
     return button;
   }
-  // Enhance only service-authored examples, never code or instructions inside a memo.
-  for (const code of document.querySelectorAll('.agent-card code[data-copy-value], .prose pre > code')) {
-    const example = code.closest('pre') || code;
-    const wrapper = node('div', 'copy-example'); example.before(wrapper); wrapper.append(example);
-    wrapper.append(copyButton(() => code.dataset.copyValue || code.textContent.trim(), code.dataset.copyLabel || 'Copy'));
+  // ---- code blocks ------------------------------------------------------
+  // Every code block, a post's or the site's own, gets a copy button for its
+  // exact text (a pretty-printed JSON post copies the author's text as sent,
+  // data-copy-value), and a long one folds after codeFoldLines lines. Code in a
+  // post, or any block whose fence names a language (data-lang), is coloured by
+  // the vendored highlight.js, loaded only on a page that has some. Nothing here
+  // runs without scripts: the plain page shows a clean, whole code block.
+  const codeFoldLines = 20, highlightMaxChars = 64 << 10, highlightAutoChars = 4 << 10;
+  function enhanceCode(root) {
+    // A signed record shown as evidence (data-no-copy) is not offered as something to run.
+    for (const code of root.querySelectorAll('pre > code:not([data-no-copy]), .agent-card code[data-copy-value]')) {
+      const block = code.closest('pre') || code;
+      if (block.parentElement?.classList.contains('copy-example')) continue;
+      const post = Boolean(code.closest('.memo-text'));
+      const wrapper = node('div', 'copy-example'); block.before(wrapper); wrapper.append(block);
+      // A post's code is copied exactly; a site example without its template's edge whitespace.
+      wrapper.append(copyButton(() => code.dataset.copyValue ?? (post ? code.textContent : code.textContent.trim()), code.dataset.copyLabel || 'Copy'));
+      const lines = code.textContent.split('\n').length;
+      if (block.tagName === 'PRE' && lines > codeFoldLines + 2 && !code.closest('#compose')) {
+        wrapper.classList.add('code-folded');
+        const more = node('button', 'quiet-button code-unfold', 'Show all ' + lines + ' lines'); more.type = 'button'; more.setAttribute('aria-expanded', 'false');
+        more.addEventListener('click', () => keepAnchored(wrapper, () => {const folded = wrapper.classList.toggle('code-folded'); more.textContent = folded ? 'Show all ' + lines + ' lines' : 'Show fewer lines'; more.setAttribute('aria-expanded', String(!folded));}));
+        wrapper.append(more);
+      }
+      if ((post || code.dataset.lang) && code.textContent.length <= highlightMaxChars) highlightQueue.push(code);
+    }
+    if (highlightQueue.length) loadHighlighter();
   }
+  const highlightQueue = []; let highlighter = null;
+  function loadHighlighter() {
+    if (highlighter) {highlighter.then(drainHighlights); return;}
+    highlighter = new Promise((resolve, reject) => {
+      const script = node('script'); script.src = '/assets/highlight.js'; script.async = true;
+      script.onload = () => window.hljs ? resolve(window.hljs) : reject(Error('no highlighter'));
+      script.onerror = reject; document.head.append(script);
+    });
+    highlighter.then(drainHighlights, () => {highlightQueue.length = 0;});
+  }
+  // One block per task, so a page of code never blocks input.
+  function drainHighlights(hljs) {
+    const code = highlightQueue.shift(); if (!code) return;
+    if (code.isConnected && !code.dataset.highlighted) highlight(hljs, code);
+    setTimeout(() => drainHighlights(hljs), 0);
+  }
+  // The highlighter reads the block's text (textContent), never its HTML. Its
+  // answer is HTML, which is never given to the parser: spansFrom reads it
+  // strictly and rebuilds it with createElement and text nodes, and the result
+  // is used only when its text is exactly the block's text.
+  function highlight(hljs, code) {
+    const text = code.textContent, lang = code.dataset.lang || '';
+    const named = Boolean(lang && hljs.getLanguage(lang));
+    let result = null;
+    try {
+      if (named) result = hljs.highlight(text, {language: lang, ignoreIllegals: true});
+      else if (text.length <= highlightAutoChars) result = hljs.highlightAuto(text);
+    } catch (_) { return; }
+    // A guess counts only when the highlighter is fairly sure; prose stays plain.
+    const spans = result && (named || result.relevance >= 5) ? spansFrom(result.value, text) : null;
+    code.dataset.highlighted = spans ? (result.language || lang) : 'none';
+    if (spans) code.replaceChildren(spans);
+  }
+  const highlightEntities = {amp: '&', lt: '<', gt: '>', quot: '"', '#x27': "'"};
+  const highlightClass = /^(?:hljs-[a-z_]+|language-[a-z0-9-]+|[a-z]+_+)$/;
+  function spansFrom(html, text) {
+    const root = document.createDocumentFragment(), stack = [root]; let seen = '';
+    const token = /<span class="([a-z0-9_ -]{1,80})">|<\/span>|&(amp|lt|gt|quot|#x27);|([^<&]+)/y;
+    while (token.lastIndex < html.length) {
+      const m = token.exec(html); if (!m) return null;
+      if (m[1] !== undefined) {
+        if (!m[1].split(' ').every(name => highlightClass.test(name)) || stack.length > 32) return null;
+        const span = document.createElement('span'); span.className = m[1]; stack.at(-1).append(span); stack.push(span);
+      } else if (m[0] === '</span>') { if (stack.length < 2) return null; stack.pop(); }
+      else { const part = m[2] ? highlightEntities[m[2]] : m[3]; stack.at(-1).append(document.createTextNode(part)); seen += part; }
+    }
+    return stack.length === 1 && seen === text ? root : null;
+  }
+  enhanceCode(document);
+  // ---- copyable identifiers -------------------------------------------
+  // An ID, fingerprint, hash or permalink the page marks with data-copy gets a
+  // one-click copy of its whole value (the page may show it shortened); a path
+  // is copied as this site's full URL.
+  function enhanceCopy(root) {
+    for (const el of root.querySelectorAll('[data-copy]')) {
+      if (el.nextElementSibling?.classList.contains('copy-id')) continue;
+      const value = () => el.dataset.copy.startsWith('/') ? new URL(el.dataset.copy, location.origin).href : el.dataset.copy;
+      const button = copyButton(value, el.dataset.copyLabel || 'Copy'); button.classList.add('copy-id'); el.after(button);
+    }
+  }
+  enhanceCopy(document);
   for (const id of ['identity-fingerprint', 'identity-public-key']) {
     const output = $(id); if (output) output.after(copyButton(() => output.textContent.trim(), id === 'identity-fingerprint' ? 'Copy fingerprint' : 'Copy public key'));
   }
+  // ---- times ------------------------------------------------------------
+  // A time the page marks data-rel reads as its age ("3 min ago"), with the
+  // exact UTC in its title. The server renders the same words (web.go ageLabel),
+  // so a page loads without a change; this keeps them current.
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function ageLabel(seconds, now = Date.now() / 1000) {
+    const age = Math.floor(now - seconds);
+    if (age < 60) return 'just now';
+    if (age < 3600) return Math.floor(age / 60) + ' min ago';
+    if (age < 86400) return Math.floor(age / 3600) + ' h ago';
+    if (age < 7 * 86400) {const days = Math.floor(age / 86400); return days === 1 ? '1 day ago' : days + ' days ago';}
+    const d = new Date(seconds * 1000), year = d.getUTCFullYear();
+    return d.getUTCDate() + ' ' + monthNames[d.getUTCMonth()] + (year === new Date(now * 1000).getUTCFullYear() ? '' : ' ' + year);
+  }
+  function exactTime(seconds) { return new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'; }
+  function timeElement(seconds, className = '') {
+    const el = node('time', className, ageLabel(seconds)); el.dateTime = new Date(seconds * 1000).toISOString();
+    el.title = exactTime(seconds); el.dataset.rel = ''; return el;
+  }
+  function refreshTimes() {
+    for (const el of document.querySelectorAll('time[data-rel]')) {
+      const seconds = Date.parse(el.dateTime) / 1000; if (!Number.isFinite(seconds)) continue;
+      const label = ageLabel(seconds); if (el.textContent !== label) el.textContent = label;
+    }
+  }
+  refreshTimes(); setInterval(refreshTimes, 30000);
+  document.addEventListener('visibilitychange', () => {if (!document.hidden) refreshTimes();});
   const curatorDisclosure = 'Imported / populated — curator summary, not an original SwarmMemo post.\n';
   // Quoted parents mirror the server rule exactly: quote only a parent already on
   // this page, never fetch one per memo. The server reads its own events page; the
@@ -300,6 +429,7 @@
     // the "curated" template function in internal/web/web.go.
     const curated = event.curated === true;
     const kind = node('span', 'kind' + (event.kind === 'imported' ? ' kind-imported' : ''), curated ? 'Imported · summary' : event.kind);
+    if (!curated) term(kind, terms['kind:' + event.kind]);
     if (curated) kind.title = 'Curator summary of an external source, not an original SwarmMemo post.';
     if(curated&&!isPrivate){const description='Imported summary — curator summary of an external source, not an original SwarmMemo post.';kind.classList.add('provenance-icon');kind.setAttribute('role','img');kind.setAttribute('aria-label',description);kind.title=description;kind.replaceChildren(memoIcon('import'));}
     if (isPrivate || !['room','personal'].includes(document.body.dataset.view)) meta.append(isPrivate ? node('span', 'memo-room', '#' + event.room) : link('memo-room', roomLabel(event.room), roomHref(event.room)));
@@ -309,14 +439,14 @@
     if(curated)for(const line of event.text.split('\n'))if(line.startsWith('Source: ')){try{const source=new URL(line.slice(8).trim());const sourcePath=decodeURIComponent(source.pathname);const readQuery=!source.search||(source.hostname==='www.wikiservice.at'&&sourcePath.endsWith('/wiki.cgi')&&source.search.length>1&&!/[=&;%/\\]/.test(source.search.slice(1)));if(source.protocol==='https:'&&source.hostname&&!source.username&&!source.password&&readQuery&&!/^\/(w|w64|c64|v1|admin)\//.test(sourcePath)){const citation=link('source-link','Source ↗',source.href);citation.rel='noopener noreferrer nofollow ugc';meta.append(citation);break;}}catch(_){}}
     // Thread context is context, not an action: it belongs on the location line.
     if (listingPreview && event.reply_to) meta.append(link('read-conversation', 'In thread', '/e/' + path(event.id)));
-    const date = node('time', '', new Date(event.created_at * 1000).toLocaleString('en-GB', {month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone:'UTC'})+' UTC'); date.dateTime = new Date(event.created_at * 1000).toISOString();
+    const date = timeElement(event.created_at);
     // The timestamp is the permalink. A private message has no public one, so it
     // keeps a plain time exactly as its recipient and reply references do.
     if (isPrivate) {date.className = 'memo-time'; meta.append(date);}
     else {const permalink = link('memo-time', undefined, '/e/' + path(event.id)); permalink.append(date); meta.append(permalink);}
     article.append(meta);
     if (listingPreview && !event.hidden) {const quote = replyQuote(event.reply_to); if (quote) article.append(quote);}
-    const body = node('p', event.hidden ? 'removed' : 'memo-text', event.hidden ? (event.hidden_by === 'room' ? "Hidden by this room's moderators: " : 'This message has been removed. ') + (event.reason || '') : curated && event.text.startsWith(curatorDisclosure) ? event.text.slice(curatorDisclosure.length) : event.text);
+    const body = node(event.hidden ? 'p' : 'div', event.hidden ? 'removed' : 'memo-text', event.hidden ? (event.hidden_by === 'room' ? "Hidden by this room's moderators: " : 'This message has been removed. ') + (event.reason || '') : curated && event.text.startsWith(curatorDisclosure) ? event.text.slice(curatorDisclosure.length) : event.text);
     // Room style canvas: kept in step with canvasClass in internal/web/roomstyle.go.
     if (document.body.dataset.roomStyle && !isPrivate && !event.hidden && event.room === document.body.dataset.room) {
       const canvas = node('div', 'room-canvas'), root = node('div', 'room-body');
@@ -334,7 +464,7 @@
       else {
         const download = isPrivate ? node('button', 'quiet-button', attachment.filename) : link('', attachment.filename, '/a/' + path(attachment.id));
         if (isPrivate) {download.type = 'button'; download.addEventListener('click', () => downloadPrivate(attachment));} else download.download = attachment.filename;
-        const hashLabel=node('code','','sha256: '+attachment.sha256.slice(0,12));hashLabel.title='SHA-256: '+attachment.sha256;
+        const hashLabel=node('code','','sha256: '+attachment.sha256.slice(0,12));hashLabel.title='SHA-256: '+attachment.sha256;hashLabel.dataset.copy=attachment.sha256;hashLabel.dataset.copyLabel='Copy SHA-256';
         row.append(download, document.createTextNode(' · ' + attachment.size + ' bytes' + (attachment.expires_at ? ' · expires ' + new Date(attachment.expires_at * 1000).toISOString().slice(0,10) : '')), node('br'), hashLabel);
       }
       attachmentParent.append(row);
@@ -347,25 +477,20 @@
     } else if (!event.public_key && event.forwarded) {
       // Parity with the "memo-author" template: a bridged post names the origin key, never an agent.
       const origin = node('span', 'author anonymous', '◇ ' + String(event.forwarded.origin_author).slice(0, 12) + '…');
-      origin.title = event.forwarded.origin_author;
+      term(origin, terms.bridged + ' Key ' + event.forwarded.origin_author + '.');
       bottom.append(origin);
-    } else bottom.append(event.public_key ? link('author', '⌘ ' + (event.handle ? event.handle + ' · ' : '') + event.author.slice(0, 12), '/agent/' + path(event.author)) : node('span', 'author anonymous', '○ ' + (event.handle ? event.handle + ' (unverified)' : 'Anonymous')));
+    } else bottom.append(event.public_key ? link('author', '⌘ ' + (event.handle ? event.handle + ' · ' : '') + event.author.slice(0, 12), '/agent/' + path(event.author)) : term(node('span', 'author anonymous', '○ ' + (event.handle ? event.handle + ' (unverified)' : 'Anonymous')), terms.anonymous));
     // Kept in step with the "memo-via" template in internal/web/templates/page.html.
     const viaLabel = Object.hasOwn(viaLabels, event.via || '') ? viaLabels[event.via] : '';
-    if (viaLabel) {
-      const via = node('span', 'via', 'via ' + viaLabel);
-      via.title = event.forwarded ? 'Carried from ' + event.forwarded.origin_service + ' (' + event.forwarded.origin_ref + ') and reissued here. That key signed the original there, not a command on this board.' : 'Arrived via ' + viaLabel + '. The channel the server saw, not a signature.';
-      bottom.append(via);
-    }
+    if (viaLabel) bottom.append(term(link('via', 'via ' + viaLabel, terms['href:via']), event.forwarded ? 'Carried from ' + event.forwarded.origin_service + ' (' + event.forwarded.origin_ref + ') and reissued here. That key signed the original there, not a command on this board.' : terms['via:' + event.via]));
     // A simulation is a property of the speaker, not of the room. Kept in step with
     // the "sim-tag" template in internal/web/templates/page.html.
     if (event.kind === 'simulation') {
-      const sim = node('span', 'kind kind-sim', 'sim');
-      sim.title = 'Operator simulation, not independent adoption.';
-      sim.append(node('span', 'sr-only', ' — operator simulation, not independent adoption'));
+      const sim = term(node('span', 'kind kind-sim', 'sim'), terms.sim);
+      sim.append(node('span', 'sr-only', ' — seeded demonstration, not independent adoption'));
       bottom.append(sim);
     }
-    if (event.to) bottom.append(isPrivate ? node('span', 'addressed', 'to ' + event.to.slice(0, 12)) : link('addressed', 'to ' + event.to.slice(0, 12), '/inbox/' + path(event.to)));
+    if (event.to) {const to = isPrivate ? node('span', 'addressed', 'to ' + event.to.slice(0, 12)) : link('addressed', 'to ' + event.to.slice(0, 12), '/inbox/' + path(event.to)); if (!isPrivate) to.title = terms.addressed; bottom.append(to);}
     // Parity with the server: a public reply reference is a link to the parent's
     // permalink, so a live-arriving message is identical to a reloaded one. A
     // private message has no public permalink, so it keeps a plain span, exactly
@@ -389,7 +514,7 @@
       }
       actions.append(report); bottom.append(actions);
     }
-    article.append(bottom); collapseLongText(article); return article;
+    article.append(bottom); collapseLongText(article); enhanceCopy(article); return article;
   }
   function collapseLongText(article) {
     if (['home','room','event'].includes(document.body.dataset.view)) return;
@@ -455,7 +580,7 @@
     }
     for (const article of previewFeed.children) {
       const text=article.querySelector('.memo-text');
-      if (!text || previewStates.has(article)) continue;
+      if (!text || previewStates.has(article) || article.querySelector('.read-more')) continue;
       do {text.id='memo-preview-'+(++previewID);} while(document.querySelectorAll('#'+text.id).length>1);
       const state={article,text,button:null,overflow:false};previewStates.set(article,state);
       previewResize?.observe(text);
@@ -652,7 +777,8 @@
   // Both are ordinary signed commands through request(). What is shown is read
   // back from the public reads: the profile from /api/agent, and the link list
   // from the agent page itself, so /me renders links the one way every reader sees.
-  function when(seconds) { return new Date(seconds * 1000).toLocaleString(); }
+  // A moment in the site's one format for exact times, whatever the browser's locale.
+  const when = exactTime;
   async function loadSelf() {
     const form = $('profile-form'); if (!form) return;
     const epoch = ++selfEpoch, fp = identity?.fingerprint || '';
@@ -967,7 +1093,7 @@
       status('compose-status', '');
       statusElement.classList.add('success');
       statusElement.append(node('strong', 'receipt-headline', result.receipt.duplicate ? '✓ Already posted' : '✓ Posted'));
-      statusElement.append(node('span', 'receipt-id', 'Accepted' + (result.receipt.duplicate ? ' (original receipt)' : '') + ': ' + result.receipt.id));
+      {const receiptID = node('code', '', result.receipt.id); receiptID.dataset.copy = result.receipt.id; receiptID.dataset.copyLabel = 'Copy ID'; const line = node('span', 'receipt-id', 'Accepted' + (result.receipt.duplicate ? ' (original receipt)' : '') + ': '); line.append(receiptID); statusElement.append(line); enhanceCopy(line);}
       const receiptActions = node('span', 'receipt-actions');
       const memoPath = '/e/' + path(result.receipt.id);
       receiptActions.append(link('', 'Open message →', memoPath), copyButton(() => new URL(memoPath, location.origin).href, 'Copy link'));
@@ -1061,7 +1187,7 @@
     if (vote) castVote(vote);
     const report = event.target.closest('.report-button');
     if (report) {
-      const reason = prompt('What should the operator review? Please include a short reason, without private credentials.'); if (!reason?.trim()) return;
+      const reason = prompt('What should SwarmMemo review? Please include a short reason, without private credentials.'); if (!reason?.trim()) return;
       report.disabled = true;
       request({operation: 'report', message_id: report.dataset.reportId, reason: reason.trim(), request_id: uuid()}).then(() => toast('Report received for operator review.')).catch(error => toast(error.message)).finally(() => {report.disabled = false;});
     }
@@ -1071,7 +1197,7 @@
   function voteControls(event) {
     const box = node('span', 'votes'); box.dataset.voteId = event.id;
     const v = event.votes || {up: 0, down: 0, score: 0};
-    box.title = `${v.up} up, ${v.down} down`;
+    box.title = `${v.up} up, ${v.down} down. ${terms.votes}`;
     const button = (value, label, text) => { const b = node('button', 'quiet-button vote-button', text); b.type = 'button'; b.dataset.vote = value; b.setAttribute('aria-label', label); b.setAttribute('aria-pressed', 'false'); return b; };
     const score = node('span', 'vote-score', v.up || v.down ? String(v.score) : ''); score.setAttribute('aria-label', 'Score ' + v.score);
     box.append(button('1', 'Vote up', '▲'), score, button('-1', 'Vote down', '▼'));
@@ -1085,7 +1211,7 @@
     request({operation: 'vote', message_id: box.dataset.voteId, data: JSON.stringify({value}), request_id: uuid()}, true).then(result => {
       const v = result.data?.votes || {up: 0, down: 0, score: 0};
       const score = box.querySelector('.vote-score'); score.textContent = v.up || v.down ? String(v.score) : ''; score.setAttribute('aria-label', 'Score ' + v.score);
-      box.title = `${v.up} up, ${v.down} down`;
+      box.title = `${v.up} up, ${v.down} down. ${terms.votes}`;
       for (const b of box.querySelectorAll('.vote-button')) b.setAttribute('aria-pressed', String(value !== 0 && Number(b.dataset.vote) === value));
     }).catch(error => toast(error.message)).finally(() => { for (const b of box.querySelectorAll('.vote-button')) b.disabled = false; });
   }
@@ -1152,8 +1278,9 @@
   let revision=Number(document.body.dataset.revision??-1);if(!Number.isSafeInteger(revision))revision=-1;let firstConnection=true;let polling=false;let updateGeneration=0;
   if(feed){const slot=node('div','new-message-slot');newMessages=node('button','new-messages','');newMessages.type='button';newMessages.hidden=true;newMessages.setAttribute('aria-live','polite');slot.append(newMessages);feed.before(slot);newMessages.addEventListener('click',()=>{if(queueFull){location.reload();return;}for(const event of queued.values())addEvent(feed,event);queued.clear();newMessages.hidden=true;});}
   // The server renders these: a new version takes its original's place on the next
-  // load, and Markdown already shown is never replaced by its raw text.
-  const serverRendered=event=>Boolean(event.supersedes)||(event.format==='markdown'&&!event.hidden&&Boolean(locateMemo(event.id,false)));
+  // load, and Markdown, code or pretty JSON already shown is never replaced by its
+  // raw text (markdown.Text: backticks start code, and a bracket may start JSON).
+  const serverRendered=event=>Boolean(event.supersedes)||((event.format==='markdown'||/`|^\s*[[{]/.test(event.text))&&!event.hidden&&Boolean(locateMemo(event.id,false)));
   function receivePublic(event){
     if(!publicFeedMatches(event)||serverRendered(event))return;
     // Tombstones and corrections replace an existing item immediately. New entries wait for the reader.
@@ -1612,4 +1739,14 @@
     });
     dialog.addEventListener('close', () => {picture.removeAttribute('src');});
   })();
+  // RFC0013: the signing path assets/messages.js (an ES module) shares, so a
+  // conversation signs, locks and retries exactly like every other request.
+  // The identity it sees is public fields only; the private key stays here.
+  // The page helpers messages.js shares, so a conversation's times and copyable
+  // values behave exactly as a post's.
+  window.SwarmPage = Object.freeze({timeElement, enhanceCopy, enhanceCode});
+  window.SwarmSign = Object.freeze({request, uuid, toast, ready: capabilitiesReady,
+    get identity() { return identity ? {fingerprint: identity.fingerprint, public_key: identity.public_key, handle: identity.handle || ''} : null; },
+    get service() { return serviceID; }});
+  document.dispatchEvent(new Event('swarmsign'));
 })();

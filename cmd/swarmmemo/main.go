@@ -113,7 +113,7 @@ func operator(command string) error {
 	if err != nil {
 		return err
 	}
-	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), Features: features, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE")})
+	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), Features: features, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE")})
 	if err != nil {
 		return err
 	}
@@ -299,7 +299,7 @@ func serve() error {
 	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
 		reserved = append(reserved, parsed.Hostname())
 	}
-	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE")})
+	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE")})
 	if e != nil {
 		return e
 	}

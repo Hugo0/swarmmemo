@@ -58,7 +58,7 @@ func TestScreenWithoutAKey(t *testing.T) {
 	jev := &stubScreener{}
 	s := openScreen(t, jev)
 	nk, _ := run(t, s, Command{Operation: "services.list"}).Data["without_key"].(services.NoKey)
-	if !nk.Available || strings.Join(nk.Methods, ",") != "screen.text" || !strings.Contains(nk.Line, "text screening") {
+	if !nk.Available || strings.Join(nk.Methods, ",") != "screen.text,screen.leak" || !strings.Contains(nk.Line, "text screening and leak checks") {
 		t.Fatalf("without_key: %+v", nk)
 	}
 	const canary = "canary-9d41"
@@ -104,8 +104,9 @@ func TestScreenWithoutAKey(t *testing.T) {
 }
 
 // Without a classifier that can answer (MODERATION off, or Jev with no key
-// or no screen sub-cap), screen offers no call without a key and lists as
-// unavailable, and a signed call fails closed before anything is reserved.
+// or no screen sub-cap), screen.text is offered to no call without a key and
+// lists as unavailable, and a signed call fails closed before anything is
+// reserved; screen.leak's patterns, which need no classifier, stay offered.
 func TestScreenOffWithoutModeration(t *testing.T) {
 	off := &stubScreener{}
 	off.off.Store(true)
@@ -113,7 +114,7 @@ func TestScreenOffWithoutModeration(t *testing.T) {
 		s := openScreen(t, jev)
 		list := run(t, s, Command{Operation: "services.list"}).Data
 		nk, _ := list["without_key"].(services.NoKey)
-		if len(nk.Methods) != 0 || nk.Available {
+		if strings.Join(nk.Methods, ",") != "screen.leak" || !strings.Contains(nk.Line, "leak checks") {
 			t.Fatalf("without_key with no classifier: %+v", nk)
 		}
 		if entries, _ := list["services"].([]services.Entry); len(entries) != 1 || entries[0].Extra["available"] != false {
@@ -124,6 +125,30 @@ func TestScreenOffWithoutModeration(t *testing.T) {
 			t.Fatalf("signed screen with no classifier: %v", err)
 		}
 	}
+}
+
+// screen.leak through the store, signed and without a key: the first answer
+// carries the redacted copy, an exact retry answers from the stored receipt
+// without it, and no table holds the text. Its patterns need no moderation.
+func TestScreenLeakStoresNoText(t *testing.T) {
+	s := openScreen(t, nil)
+	secret := "sk_" + "live_" + strings.Repeat("4eC3", 6)
+	text := "canary-4b2f key " + secret
+	c := signed(keyFor(1), Command{Operation: "service.call", Target: "screen", Data: svcData("leak", map[string]any{"text": text}, 1), RequestID: "leak-1", Timestamp: testTime + 23*3600})
+	first := run(t, s, c)
+	if svcField(t, first.Data, "result", "redacted") != "canary-4b2f key «REDACTED:stripe_live»" || svcField(t, first.Data, "result", "verdict") != "hold" || svcField(t, first.Data, "call", "cost") != float64(0) {
+		t.Fatalf("first answer: %+v", first.Data)
+	}
+	again := run(t, s, c)
+	if svcField(t, again.Data, "result", "redacted") != nil || svcField(t, again.Data, "result", "verdict") != "hold" || svcField(t, again.Data, "call", "id") != svcField(t, first.Data, "call", "id") {
+		t.Fatalf("retry: %+v", again.Data)
+	}
+	anon := Command{Operation: "service.call", Target: "screen", Data: svcData("leak", map[string]any{"text": text, "audience": "conversation"}, 1), RequestID: anonID("leak")}
+	r, err := s.Execute(testContext, anon, "198.51.100.7")
+	if err != nil || svcField(t, r.Data, "result", "redacted") != "canary-4b2f key «REDACTED:stripe_live»" {
+		t.Fatalf("without a key: %+v %v", r.Data, err)
+	}
+	assertNoTextStored(t, s, "canary-4b2f")
 }
 
 // assertNoTextStored fails if any column of any table of the store holds s.

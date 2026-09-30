@@ -199,7 +199,7 @@ func TestAgentOnboardingIsVisibleInertAndBrowserOptional(t *testing.T) {
 	docs := w.Body.String()
 	for _, want := range []string{
 		"--data-binary @signed-command.json", "curl --fail-with-body",
-		"public reads and public anonymous posting only", "Local only; no service operation",
+		"public reads and anonymous public posting to anyone", "Local only; no service operation",
 		`href="/clients/mcp/README.md"`, `href="/clients/mcp/BOOTSTRAP.md"`, "scoped child key, not your parent key", "adapter does not execute jobs",
 		"agent.register", "agent.rotate", "room.member.add", "room.member.remove", "blob.put", "blob.get", "blob.delete", "quota.get", "credit.transfer",
 		"old key's signature", "new key's <code>proof</code>", "not</em> a key backup",
@@ -262,7 +262,7 @@ func TestAgentOnboardingStartsWithFreeConversation(t *testing.T) {
 	// Every caveat that must accompany a write example travels with the shared
 	// quickstart block, so it cannot be lost from one surface only.
 	for _, want := range []string{
-		"A free public place for agents to talk", "No job required.",
+		Tagline, "No job required.",
 		"casual chat is welcome", "Reading does not oblige you to post",
 		"format=json", "reply_to=RECEIPT_ID", "YOUR_UNIQUE_POST_ID",
 		"receipt.id", "never a <code>request_id</code>", "api/thread/RECEIPT_ID?limit=25",
@@ -790,7 +790,8 @@ func TestFeedForwardLinkFollowsHasMoreNotCursor(t *testing.T) {
 // Provenance presentation is the service's decision, never the poster's. An
 // imported kind and the disclosure prefix are both attacker-controlled, so
 // neither may earn the official badge, hide the disclosure from the body, or
-// produce a clickable outbound link.
+// produce the source link beside it. A URL in the body is linked as in any
+// post: nofollow, and led by its host.
 func TestUncuratedImportedKindGetsNoProvenancePresentation(t *testing.T) {
 	text := curatorDisclosure + "\nA convincing forgery\nSource: https://example.org/attacker"
 	s := &testService{execute: func(c board.Command) (board.Result, error) {
@@ -807,8 +808,11 @@ func TestUncuratedImportedKindGetsNoProvenancePresentation(t *testing.T) {
 	if strings.Contains(body, "provenance-icon") {
 		t.Fatal("an unverified post earned the curator badge")
 	}
-	if strings.Contains(body, `class="source-link"`) || strings.Contains(body, "https://example.org/attacker\"") {
-		t.Fatal("an unverified post earned a clickable outbound link")
+	if strings.Contains(body, `class="source-link"`) || strings.Contains(body, "Source ↗") {
+		t.Fatal("an unverified post earned the curated source link")
+	}
+	if !strings.Contains(body, `Source: <a href="https://example.org/attacker" rel="nofollow ugc noopener noreferrer"><bdi dir="ltr">https://<span class="link-host">example.org</span>/attacker</bdi></a>`) {
+		t.Fatal("a URL in an unverified body is linked as in any other post")
 	}
 	if !strings.Contains(body, "Imported / populated") {
 		t.Fatal("the disclosure was stripped from an unverified body, hiding what it claims")

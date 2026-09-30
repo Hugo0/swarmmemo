@@ -13,7 +13,9 @@ package services
 // signed authorization can settle it and still fail the call, so no open
 // resource is paid for until the operator vets it: pins it in the allowlist,
 // or runs swarmmemo x402 vet ID, which binds the vetting to the resource's
-// URL, method and recipient (a changed recipient is a new candidate). A
+// URL, method and recipient (a changed recipient is a new candidate), or
+// configures the auto-vet rule (X402AutoVet), which vets what CDP's figures
+// support at each import and never overrides the operator. A
 // vetted open resource is callable under the open sub-caps; when a
 // signature has left our hands and the call ends without an answer (the
 // upstream failed after it, or re-asked with 402), the agent is charged, as
@@ -124,7 +126,7 @@ CREATE TABLE IF NOT EXISTS x402_resource_days (
 CREATE INDEX IF NOT EXISTS x402_resource_days_day ON x402_resource_days(day);
 CREATE TABLE IF NOT EXISTS x402_vetted (
  id TEXT PRIMARY KEY, url TEXT NOT NULL, method TEXT NOT NULL, pay_to TEXT NOT NULL,
- state TEXT NOT NULL CHECK(state IN ('vetted','unvetted')), changed_at INTEGER NOT NULL);
+ state TEXT NOT NULL CHECK(state IN ('vetted','unvetted')), changed_at INTEGER NOT NULL, reason TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS x402_denied (
  kind TEXT NOT NULL CHECK(kind IN ('pay_to','url')), value TEXT NOT NULL, reason TEXT NOT NULL,
  denied_at INTEGER NOT NULL, cleared_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind, value));
@@ -146,24 +148,56 @@ type X402CatalogueConfig struct {
 	MinPayers        int64
 	OpenDaily        int64
 	RecipientDaily   int64
+	// AutoVet is the optional vetting rule (nil: only the operator vets).
+	AutoVet *X402AutoVet
 	// trusted is the one discovery URL whose popularity figures ranking
 	// trusts: X402DiscoveryCDP (tests name their fake).
 	trusted string
 }
 
 type x402CatalogueFile struct {
-	DiscoveryURLs    []string    `json:"discovery_urls"`
-	RefreshMinutes   json.Number `json:"refresh_minutes"`
-	PageSize         json.Number `json:"page_size"`
-	MaxPages         json.Number `json:"max_pages"`
-	MaxResources     json.Number `json:"max_resources"`
-	MaxPrice         string      `json:"max_price"`
-	MaxResponseBytes json.Number `json:"max_response_bytes"`
-	TimeoutSeconds   json.Number `json:"timeout_seconds"`
-	MinPayers        json.Number `json:"min_payers_30d"`
-	OpenDaily        string      `json:"open_daily"`
-	RecipientDaily   string      `json:"recipient_daily"`
+	DiscoveryURLs    []string         `json:"discovery_urls"`
+	RefreshMinutes   json.Number      `json:"refresh_minutes"`
+	PageSize         json.Number      `json:"page_size"`
+	MaxPages         json.Number      `json:"max_pages"`
+	MaxResources     json.Number      `json:"max_resources"`
+	MaxPrice         string           `json:"max_price"`
+	MaxResponseBytes json.Number      `json:"max_response_bytes"`
+	TimeoutSeconds   json.Number      `json:"timeout_seconds"`
+	MinPayers        json.Number      `json:"min_payers_30d"`
+	OpenDaily        string           `json:"open_daily"`
+	RecipientDaily   string           `json:"recipient_daily"`
+	AutoVet          *x402AutoVetFile `json:"auto_vet"`
 }
+
+// X402AutoVet is the catalogue's vetting rule: at each import it vets the
+// candidates CDP lists as curated or with at least MinPayers payers in 30
+// days, priced at most MaxPrice, whose category is not excluded. Only the
+// trusted discovery's signal counts (another discovery's is zeroed), a
+// resource the automatic denylist refuses is never admitted, and the rule
+// never touches a vetting the operator decided (vet or unvet) or rebinds a
+// changed recipient. What it vetted it re-evaluates at every import, and
+// unvets when it no longer matches. Its version is the rule itself, recorded
+// as the vetting's reason.
+type X402AutoVet struct {
+	MinPayers int64
+	MaxPrice  int64
+	Exclude   []string // sorted
+	Version   string   // x402AutoVetPrefix + the rule, e.g. "auto_vet/1 curated|payers>=5 price<=0.02 exclude=adult,gambling"
+}
+
+type x402AutoVetFile struct {
+	MinPayers         json.Number `json:"min_payers_30d"`
+	MaxPrice          string      `json:"max_price"`
+	ExcludeCategories []string    `json:"exclude_categories"`
+}
+
+// x402AutoVetPrefix starts every reason the rule records; any other reason
+// ("operator", or "" before 1.24) is the operator's.
+const x402AutoVetPrefix = "auto_vet/1 "
+
+// x402VetByOperator is the reason swarmmemo x402 vet and unvet record.
+const x402VetByOperator = "operator"
 
 // X402Deny is what the open catalogue never admits: a host that is or is
 // under a denied domain, a URL under a denied prefix, a denied recipient, a
@@ -250,8 +284,86 @@ func (c *X402Config) parseCatalogue(f *x402CatalogueFile) error {
 	if cc.MaxPrice > c.PerCall || cc.MaxPrice > cc.RecipientDaily || cc.RecipientDaily > cc.OpenDaily || cc.OpenDaily > c.GlobalDaily {
 		return errors.New("x402: catalogue caps must satisfy max_price <= recipient_daily <= open_daily <= caps.global_daily, and max_price <= caps.per_call")
 	}
+	if f.AutoVet != nil {
+		a, err := parseAutoVet(f.AutoVet, cc.MaxPrice, c.Decimals)
+		if err != nil {
+			return err
+		}
+		cc.AutoVet = a
+	}
 	c.Catalogue = cc
 	return nil
+}
+
+// parseAutoVet validates catalogue.auto_vet. Absent fields take the rule
+// the operator applied by hand before it existed: curated or at least 5
+// payers, at most the catalogue's max_price, not adult or gambling.
+func parseAutoVet(f *x402AutoVetFile, maxPrice int64, decimals int) (*X402AutoVet, error) {
+	bad := func(field string) error {
+		return fmt.Errorf("x402: config field catalogue.auto_vet.%s is invalid", field)
+	}
+	a := &X402AutoVet{MinPayers: 5, MaxPrice: maxPrice, Exclude: []string{"adult", "gambling"}}
+	if f.MinPayers != "" {
+		n, err := strconv.ParseInt(f.MinPayers.String(), 10, 64)
+		if err != nil || n < 1 || n > 1_000_000 {
+			return nil, bad("min_payers_30d (1 to 1000000)")
+		}
+		a.MinPayers = n
+	}
+	if f.MaxPrice != "" {
+		n, ok := parseUnits(f.MaxPrice, decimals)
+		if !ok || n <= 0 || n > maxPrice {
+			return nil, bad("max_price (above 0, at most catalogue.max_price)")
+		}
+		a.MaxPrice = n
+	}
+	if f.ExcludeCategories != nil { // [] excludes nothing
+		if len(f.ExcludeCategories) > len(x402Categories)+1 {
+			return nil, bad("exclude_categories")
+		}
+		a.Exclude = nil
+		for _, cat := range f.ExcludeCategories {
+			if !x402CategoryRE.MatchString(cat) {
+				return nil, bad("exclude_categories")
+			}
+			if !slices.Contains(a.Exclude, cat) {
+				a.Exclude = append(a.Exclude, cat)
+			}
+		}
+		slices.Sort(a.Exclude)
+	}
+	a.Version = fmt.Sprintf("%scurated|payers>=%d price<=%s exclude=%s", x402AutoVetPrefix, a.MinPayers, formatUnits(a.MaxPrice, decimals), strings.Join(a.Exclude, ","))
+	return a, nil
+}
+
+// Describe is the rule in words, for the resources read.
+func (a *X402AutoVet) Describe(decimals int) string {
+	out := fmt.Sprintf("CDP-curated or at least %d payers in 30 days, at most %s", a.MinPayers, formatUnits(a.MaxPrice, decimals))
+	if len(a.Exclude) > 0 {
+		out += ", not " + strings.Join(a.Exclude, " or ")
+	}
+	return out
+}
+
+// matches reports whether the rule vets r, listed with sig (the trusted
+// discovery's signal, or zero).
+func (a *X402AutoVet) matches(r *X402Resource, sig bazaarSignal) bool {
+	return (sig.Curated || sig.Known && sig.Payers >= a.MinPayers) && r.MaxAmount <= a.MaxPrice && !slices.Contains(a.Exclude, r.Category)
+}
+
+// decide is the rule's verdict on r at an import, given its x402_vetted row
+// (has: one exists): whether r is vetted, and whether that is a change to
+// record. A row the operator decided, or one bound to another recipient, is
+// left as it is.
+func (a *X402AutoVet) decide(r *X402Resource, sig bazaarSignal, row x402Vetting, has bool) (vetted, write bool) {
+	if a == nil || has && (!strings.HasPrefix(row.reason, x402AutoVetPrefix) || !row.matches(r)) {
+		return r.Vetted, false
+	}
+	vetted = a.matches(r, sig)
+	if !has {
+		return vetted, vetted
+	}
+	return vetted, (row.state == "vetted") != vetted || vetted && row.reason != a.Version
 }
 
 // parseDeny validates the allowlist's "deny" section; domains_file, when
@@ -650,25 +762,27 @@ func queryAll[T any](ctx context.Context, db *sql.DB, scan func(*sql.Rows) (T, e
 	return out, rows.Err()
 }
 
-// x402Vetting is one vetted resource's binding: vetting holds only while
-// the resource keeps this URL, method and recipient.
-type x402Vetting struct{ url, method, payTo string }
+// x402Vetting is one x402_vetted row: its binding (vetting holds only while
+// the resource keeps this URL, method and recipient), its state and who
+// decided it (reason: x402VetByOperator, "" before 1.24, or the auto-vet
+// rule's version).
+type x402Vetting struct{ url, method, payTo, state, reason string }
 
 func (v x402Vetting) matches(r *X402Resource) bool {
 	return v.url == r.URL && v.method == r.Method && v.payTo == r.PayTo.String()
 }
 
 // history is what the import and the load rank by, read from our own
-// records: vetted resources, paid answers per resource in the stats window,
-// and the automatic denies.
+// records: the vetting rows (vetted: those in state vetted), paid answers
+// per resource in the stats window, and the automatic denies.
 type x402History struct {
-	vetted map[string]x402Vetting
-	paid   map[string]int64
-	denied *x402Denied
+	vetted, rows map[string]x402Vetting
+	paid         map[string]int64
+	denied       *x402Denied
 }
 
 func (x *x402) readHistory(ctx context.Context, now int64) (x402History, error) {
-	h := x402History{vetted: map[string]x402Vetting{}, paid: map[string]int64{}, denied: &x402Denied{payTo: map[string]bool{}, url: map[string]bool{}}}
+	h := x402History{vetted: map[string]x402Vetting{}, rows: map[string]x402Vetting{}, paid: map[string]int64{}, denied: &x402Denied{payTo: map[string]bool{}, url: map[string]bool{}}}
 	type kv struct {
 		k string
 		n int64
@@ -687,15 +801,18 @@ func (x *x402) readHistory(ctx context.Context, now int64) (x402History, error) 
 		id string
 		v  x402Vetting
 	}
-	vetted, err := queryAll(ctx, x.db, func(r *sql.Rows) (vet, error) {
+	rows, err := queryAll(ctx, x.db, func(r *sql.Rows) (vet, error) {
 		var v vet
-		return v, r.Scan(&v.id, &v.v.url, &v.v.method, &v.v.payTo)
-	}, "SELECT id,url,method,pay_to FROM x402_vetted WHERE state='vetted'")
+		return v, r.Scan(&v.id, &v.v.url, &v.v.method, &v.v.payTo, &v.v.state, &v.v.reason)
+	}, "SELECT id,url,method,pay_to,state,reason FROM x402_vetted")
 	if err != nil {
 		return h, err
 	}
-	for _, v := range vetted {
-		h.vetted[v.id] = v.v
+	for _, v := range rows {
+		h.rows[v.id] = v.v
+		if v.v.state == "vetted" {
+			h.vetted[v.id] = v.v
+		}
 	}
 	denied, err := queryAll(ctx, x.db, func(r *sql.Rows) ([2]string, error) {
 		var d [2]string
@@ -853,6 +970,7 @@ func (x *x402) importCatalogue(ctx context.Context, now int64) (int, error) {
 	}
 	all := make([]*X402Resource, 0, len(byID))
 	keys := map[*X402Resource]x402RankKey{}
+	var decided []*X402Resource // the auto-vet rule's changes, to record
 	for id, f := range byID {
 		if conflict[id] {
 			continue
@@ -860,6 +978,11 @@ func (x *x402) importCatalogue(ctx context.Context, now int64) (int, error) {
 		r := &f.r
 		v, ok := hist.vetted[id]
 		r.Vetted = ok && v.matches(r)
+		row, has := hist.rows[id]
+		var changed bool
+		if r.Vetted, changed = cc.AutoVet.decide(r, f.sig, row, has); changed {
+			decided = append(decided, r)
+		}
 		keys[r] = x402RankKey{vetted: r.Vetted, paid: hist.paid[id], sig: f.sig, price: r.MaxAmount, id: id}
 		all = append(all, r)
 	}
@@ -893,11 +1016,40 @@ ON CONFLICT(id) DO UPDATE SET pay_to=excluded.pay_to, amount=excluded.amount, qu
 			return 0, x.importFailed(err)
 		}
 	}
+	if err = x.recordAutoVets(ctx, decided, cc.AutoVet, now); err != nil {
+		return 0, x.importFailed(err)
+	}
 	if firstErr != nil && len(all) == 0 {
 		return 0, x.importFailed(firstErr)
 	}
 	x.cat.lastError.Store(nil)
 	return len(all), x.loadCatalogue(ctx, now)
+}
+
+// recordAutoVets writes the rule's verdicts in x402_vetted, a batch per
+// transaction. The update never lands on a row the operator decided (or
+// rebound) since the history was read: the operator always wins.
+func (x *x402) recordAutoVets(ctx context.Context, decided []*X402Resource, rule *X402AutoVet, now int64) error {
+	for start := 0; start < len(decided); start += x402UpsertBatch {
+		tx, err := x.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		for _, r := range decided[start:min(start+x402UpsertBatch, len(decided))] {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO x402_vetted(id,url,method,pay_to,state,reason,changed_at) VALUES(?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET state=excluded.state, reason=excluded.reason, changed_at=excluded.changed_at
+ WHERE substr(x402_vetted.reason,1,?)=? AND x402_vetted.url=excluded.url AND x402_vetted.method=excluded.method AND x402_vetted.pay_to=excluded.pay_to`,
+				r.ID, r.URL, r.Method, r.PayTo.String(), map[bool]string{true: "vetted", false: "unvetted"}[r.Vetted], rule.Version, now,
+				len(x402AutoVetPrefix), x402AutoVetPrefix); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func b2i(b bool) int {
@@ -1061,6 +1213,7 @@ FROM x402_catalogue WHERE last_seen>=? AND id>? ORDER BY id LIMIT ?`, stale, aft
 			}
 			v, ok := hist.vetted[r.ID]
 			r.Vetted = ok && v.matches(r)
+			r.autoVetted = r.Vetted && strings.HasPrefix(v.reason, x402AutoVetPrefix)
 			r.summaryStatus = summaryStatusOf(r, verdicts[c.hash])
 			s.importedAt = max(s.importedAt, c.seen)
 			s.signal[r.ID] = c.sig
@@ -1114,6 +1267,8 @@ func errCodeOf(err error) string {
 // An open resource's summary_status: its summary is served when the
 // operator vetted the resource or the summary passed the text screen, and
 // withheld (empty) when the screen flagged it or has not screened it yet.
+// The auto-vet rule reads no summary, so what it vetted is screened as a
+// candidate is.
 const (
 	summaryVetted   = "vetted"
 	summaryScreened = "screened"
@@ -1125,7 +1280,7 @@ const (
 // ("" when not screened). An empty summary has nothing to withhold.
 func summaryStatusOf(r *X402Resource, verdict string) string {
 	switch {
-	case r.Vetted:
+	case r.Vetted && !r.autoVetted:
 		return summaryVetted
 	case verdict == "pass" || r.Summary == "":
 		return summaryScreened
@@ -1263,9 +1418,9 @@ func VetX402(ctx context.Context, db *sql.DB, id string, vet bool, now int64) (X
 	}
 	defer tx.Rollback()
 	state := map[bool]string{true: "vetted", false: "unvetted"}[vet]
-	if _, err = tx.ExecContext(ctx, `INSERT INTO x402_vetted(id,url,method,pay_to,state,changed_at) VALUES(?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET url=excluded.url, method=excluded.method, pay_to=excluded.pay_to, state=excluded.state, changed_at=excluded.changed_at`,
-		id, v.URL, v.Method, v.PayTo, state, now); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO x402_vetted(id,url,method,pay_to,state,reason,changed_at) VALUES(?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET url=excluded.url, method=excluded.method, pay_to=excluded.pay_to, state=excluded.state, reason=excluded.reason, changed_at=excluded.changed_at`,
+		id, v.URL, v.Method, v.PayTo, state, x402VetByOperator, now); err != nil {
 		return v, err
 	}
 	if vet {
@@ -1356,7 +1511,10 @@ func parseX402Search(raw json.RawMessage, decimals int) (x402Search, error) {
 		return x402Search{}, err
 	}
 	s := x402Search{limit: x402PageDefault, category: a.Category}
-	if len(a.Query) > x402SearchBytes || (a.Category != "" && !x402CategoryRE.MatchString(a.Category)) {
+	if len(a.Query) > x402SearchBytes {
+		return x402Search{}, tooLarge("invalid_service_data", len(a.Query), x402SearchBytes)
+	}
+	if a.Category != "" && !x402CategoryRE.MatchString(a.Category) {
 		return x402Search{}, refusal("invalid_service_data")
 	}
 	for _, w := range strings.Fields(strings.ToLower(a.Query)) {

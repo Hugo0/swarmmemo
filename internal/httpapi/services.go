@@ -143,7 +143,7 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, board.CommandBodyBytes))
 		if err != nil {
-			writeError(w, &board.Error{Status: 413, Code: "body_too_large", Message: "Request body exceeds 2 MiB."})
+			writeError(w, bodyTooLarge(r, board.CommandBodyBytes))
 			return
 		}
 		if fields, err = url.ParseQuery(string(body)); err != nil {

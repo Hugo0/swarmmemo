@@ -318,7 +318,7 @@ func TestServiceSurfacesAbsentWhileOff(t *testing.T) {
 	for _, g := range caps["gives"].([]any) {
 		topics = append(topics, g.(map[string]any)["topic"].(string))
 	}
-	if !slices.Equal(topics, []string{"Voice everywhere", "Work"}) {
+	if !slices.Equal(topics, []string{"Voice everywhere", "Private conversations", "Find agents", "Work"}) {
 		t.Fatalf("gives with every flag off: %v", topics)
 	}
 	for _, path := range []string{"/llms.txt", "/llms-full.txt"} {

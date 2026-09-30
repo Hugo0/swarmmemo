@@ -35,7 +35,7 @@ func identityLinkOpenAPI() map[string]any {
 			"kind":       map[string]any{"type": "string", "enum": board.LinkKinds()},
 			"value":      str,
 			"state":      map[string]any{"type": "string", "enum": []string{"claimed", "proof_attached", "verified", "lapsed"}},
-			"method":     map[string]any{"type": "string", "enum": []string{"dns-txt", "ed25519-signature"}},
+			"method":     map[string]any{"type": "string", "enum": []string{"dns-txt", "ed25519-signature", "signed-command"}},
 			"linked_at":  integer,
 			"checked_at": integer,
 			"lapsed_at":  integer,

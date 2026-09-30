@@ -261,7 +261,7 @@ func truncateTail(s string, n int) string {
 // classifyJev asks Jev, within the day's spend cap, once per chunk of the text.
 func (e *Engine) classifyJev(ctx context.Context, pol *Policy, s Surface, subj Subject, c Content, now int64) (classResult, error) {
 	questions, state := jevRequest(s, subj)
-	return e.jevChunked(ctx, pol, c.Text, now, questions, state, false)
+	return e.jevChunked(ctx, pol, c.Text, now, questions, state, nil)
 }
 
 // jevRequest is the questions surface s asks and the state around one chunk
@@ -288,15 +288,15 @@ func jevRequest(s Surface, subj Subject) (map[string]jevQuestion, func(text stri
 // never comes after Jev billed a chunk (security review screen, L1); each
 // call then settles at its reported usage. Each category scores the most any
 // chunk gave it. cost sums what Jev reported, and is 0 when any chunk
-// reported no usable usage. screen marks the screen service's call: it is
-// also held to the screen sub-cap, and must cover the whole text.
-func (e *Engine) jevChunked(ctx context.Context, pol *Policy, text string, now int64, questions map[string]jevQuestion, state func(string) any, screen bool) (classResult, error) {
+// reported no usable usage. A pool (a screening service's call) also holds
+// the call to that sub-cap, and the call must cover the whole text.
+func (e *Engine) jevChunked(ctx context.Context, pol *Policy, text string, now int64, questions map[string]jevQuestion, state func(string) any, pool *jevPool) (classResult, error) {
 	r := classResult{scores: map[string]float64{}}
 	if e.jev.keyFile == "" {
 		return r, errJevUnavailable
 	}
 	chunks, whole := jevChunks(text, pol.Jev.MaxTextBytes)
-	if screen && !whole {
+	if pool != nil && !whole {
 		return r, errJevTextTooLong
 	}
 	bodies := make([][]byte, len(chunks))
@@ -310,10 +310,10 @@ func (e *Engine) jevChunked(ctx context.Context, pol *Policy, text string, now i
 		bodies[i], reserved = body, reserved+microUSD(int64(len(body)), pol.Jev.PricePerMTokMicroUSD)
 	}
 	day := now / 86400
-	if err := e.reserveSpend(ctx, day, reserved, pol.Jev, screen); err != nil {
+	if err := e.reserveSpend(ctx, day, reserved, pol.Jev, pool); err != nil {
 		switch {
-		case errors.Is(err, errSpendCap) && screen:
-			e.alertOnce(ctx, Alert{Kind: "spend_cap", Surface: SurfaceScreen, Detail: fmt.Sprintf("Jev spend for screen.text reached its sub-cap of %d microUSD or the day's cap of %d; screen calls fail closed until 00:00 UTC", pol.Jev.ScreenDailySpendCapMicroUSD, pol.Jev.DailySpendCapMicroUSD), At: now}, day*86400)
+		case errors.Is(err, errSpendCap) && pool != nil:
+			e.alertOnce(ctx, Alert{Kind: "spend_cap", Surface: pool.surface, Detail: fmt.Sprintf(pool.alert, pool.cap(pol.Jev), pol.Jev.DailySpendCapMicroUSD), At: now}, day*86400)
 		case errors.Is(err, errSpendCap):
 			e.alertOnce(ctx, Alert{Kind: "spend_cap", Detail: fmt.Sprintf("Jev daily spend cap of %d microUSD reached; surfaces fall to on_unavailable until 00:00 UTC", pol.Jev.DailySpendCapMicroUSD), At: now}, day*86400)
 		}
@@ -324,7 +324,7 @@ func (e *Engine) jevChunked(ctx context.Context, pol *Policy, text string, now i
 		estimate := microUSD(int64(len(body)), pol.Jev.PricePerMTokMicroUSD)
 		out, err := e.jev.call(ctx, body, time.Duration(pol.Jev.TimeoutMS)*time.Millisecond, questions)
 		if err != nil {
-			e.settleSpend(ctx, day, -reserved, 0, false, screen) // this chunk's and the rest's
+			e.settleSpend(ctx, day, -reserved, 0, false, pool) // this chunk's and the rest's
 			return r, err
 		}
 		reserved -= estimate
@@ -335,7 +335,7 @@ func (e *Engine) jevChunked(ctx context.Context, pol *Policy, text string, now i
 		} else {
 			unbilled = true
 		}
-		e.settleSpend(ctx, day, actual-estimate, tokens, true, screen)
+		e.settleSpend(ctx, day, actual-estimate, tokens, true, pool)
 		for k, a := range out.Answers {
 			r.scores[k] = max(r.scores[k], *a.Noul)
 		}

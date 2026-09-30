@@ -36,6 +36,20 @@ func sameOrigin(r *http.Request) bool {
 	return r.Header.Get("Sec-Fetch-Site") == "same-origin"
 }
 
+// methodVia is the channel of a request no route recorded one for: its
+// method's (a read is "get").
+func methodVia(method string) string {
+	switch method {
+	case http.MethodPost:
+		return "post"
+	case http.MethodPut:
+		return "put"
+	case "MKCOL":
+		return "mkcol"
+	}
+	return "get"
+}
+
 // writeVia is the channel of a /w, /w64 or /v1/events write. An X-Text header
 // names the channel whatever the method; the site's own no-script composer (a
 // same-origin form POST) is "ui"; otherwise the method decides.

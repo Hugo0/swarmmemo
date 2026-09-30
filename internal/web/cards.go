@@ -87,10 +87,7 @@ func (s cardSource) PostCard(ctx context.Context, id string) (cards.Card, error)
 		meta = append(meta, "edited")
 	}
 	title := postTitle(post)
-	body := displayText(post)
-	if isMarkdown(post) {
-		body = markdown.PlainText(body)
-	}
+	body := postPlain(post)
 	// The title is the body's first line; the card shows it once.
 	body = strings.TrimSpace(body)
 	if first, rest, _ := strings.Cut(body, "\n"); strings.TrimSpace(first) == title || markdown.Clip(first, titleRunes) == title {

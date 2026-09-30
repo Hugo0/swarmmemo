@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawn, spawnSync} from 'node:child_process';
 import {createPrivateKey, createPublicKey, sign, verify} from 'node:crypto';
-import {Client, DelegatedClient, ClientError, canonical, delegationContext, generateKey, importKey, writeKey, loadKey} from './swarmmemo.mjs';
+import {Client, DelegatedClient, ClientError, canonical, delegationContext, generateKey, importKey, writeKey, loadKey, conversationRoom, loadSeal} from './swarmmemo.mjs';
 
 const vector = JSON.parse(await readFile(new URL('../python/signing-vector.json', import.meta.url), 'utf8'));
 const fixtureKey = importKey({private_key: Buffer.from(vector.seed_hex, 'hex').toString('base64url'), public_key: vector.command.public_key});
@@ -194,6 +194,33 @@ test('keyed dispatch cannot switch signer; unkeyed relay preserves nonce-only si
   assert.equal(relay.prepare(envelope).command.request_id, undefined);
   await relay.send(prepared); assert.deepEqual(received, envelope);
   assert.doesNotThrow(() => new Client({origin: 'http://remote.example'}));
+});
+
+test('conversation and sealed commands are signed exactly, with the shared seal module', async t => {
+  const bodies = [];
+  const origin = await server(t, (req, res) => {let body = ''; req.on('data', chunk => {body += chunk;}); req.on('end', () => {bodies.push(JSON.parse(body)); res.setHeader('Content-Type', 'application/json'); res.end('{"ok":true,"receipt":{"id":"x"}}');});});
+  const client = new Client({origin, key: fixtureKey, allowInsecureLoopback: true});
+  const rooms = new Set(Array.from({length: 64}, conversationRoom));
+  assert.equal(rooms.size, 64);
+  for (const room of rooms) assert.match(room, /^~[a-z2-7]{26}$/);
+  await client.openConversation({members: ['a'.repeat(64)], sealed: true});
+  await client.conversation([...rooms][0], {markRead: true, reveal: ['b'.repeat(32)]});
+  await client.respond([...rooms][0], 'accept');
+  await assert.rejects(client.respond([...rooms][0], 'maybe'), errorCode('invalid_option'));
+  const seal = await loadSeal();
+  const pair = await seal.generateKeyPair();
+  await client.publishSealKey(seal.b64(pair.publicKey));
+  const data = await seal.rotationData(seal.newEpochKey(), [...rooms][0], 1, 1, [{agent: 'a'.repeat(64), x25519: seal.b64(pair.publicKey)}]);
+  await client.sealRotate([...rooms][0], data);
+  await client.postSealed([...rooms][0], 'sealed1.1.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA');
+  assert.deepEqual(bodies.map(b => b.operation), ['conversation.open', 'conversation.get', 'conversation.respond', 'identity.link', 'conversation.seal', 'post']);
+  assert.match(bodies[0].room, /^~[a-z2-7]{26}$/);
+  assert.deepEqual(JSON.parse(bodies[0].data), {schema: 1, kind: 'dm', sealed: true});
+  assert.deepEqual(JSON.parse(bodies[1].data), {schema: 1, mark_read: true, reveal: ['b'.repeat(32)]});
+  assert.deepEqual(JSON.parse(bodies[3].data), {schema: 1, kind: 'x25519', value: seal.b64(pair.publicKey)});
+  assert.equal(JSON.parse(bodies[4].data).wraps[0].kid, await seal.kid(pair.publicKey));
+  assert.deepEqual(JSON.parse(bodies[5].data), {schema: 1, format: 'sealed'});
+  for (const body of bodies) assert.equal(verify(null, canonical(body), createPublicKey({key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(body.public_key, 'base64url')]), format: 'der', type: 'spki'}), Buffer.from(body.signature, 'base64url')), true);
 });
 
 test('origins are plain, signed HTTP is explicit loopback only, dispatch is bound', async () => {

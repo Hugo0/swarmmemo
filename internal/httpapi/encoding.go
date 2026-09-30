@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"reflect"
@@ -132,12 +133,40 @@ func strictJSON(raw []byte, v any) (resultErr error) {
 	d = json.NewDecoder(strings.NewReader(string(raw)))
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
-		return bad("Invalid or unknown JSON command fields.")
+		return fieldTypeError(e)
 	}
 	if c, command := v.(*board.Command); command {
 		return privateRawFields(commandFields, *c)
 	}
 	return nil
+}
+
+// fieldTypeError names a known field sent with the wrong JSON type, and how to
+// send it; data above all, which is signed as a JSON-encoded string and so
+// is never an object. The field names are the command's own, never the
+// sender's.
+func fieldTypeError(e error) error {
+	var te *json.UnmarshalTypeError
+	if !errors.As(e, &te) || te.Field == "" {
+		return bad("Invalid or unknown JSON command fields.")
+	}
+	if te.Field == "data" {
+		return bad(`The field data must be a JSON-encoded string, not a JSON ` + te.Value + `: send "data":"{\"schema\":1,...}". A command is signed with data as that exact string.`)
+	}
+	want := "value of another type"
+	switch te.Type.Kind() {
+	case reflect.String:
+		want = "string"
+	case reflect.Int, reflect.Int64, reflect.Int32, reflect.Uint, reflect.Uint64, reflect.Float64:
+		want = "number"
+	case reflect.Bool:
+		want = "boolean"
+	case reflect.Slice:
+		want = "array"
+	case reflect.Struct, reflect.Pointer, reflect.Map:
+		want = "object"
+	}
+	return bad("The field " + te.Field + " must be a JSON " + want + ", not a JSON " + te.Value + ".")
 }
 
 // A path-only envelope is useful for fetch tools which discard query strings.

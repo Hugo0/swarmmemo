@@ -16,6 +16,20 @@
   --s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-5:24px;--s-6:32px;--s-7:48px;--s-8:64px;
   --control-h:40px;--quiet-h:24px;--radius:2px;
 }
+/* Dark mode follows the reader's system setting by redefining the colour tokens,
+   for the site's own pages and unstyled rooms. A room styled with room.style.set
+   (html.room-styled) keeps the light tokens its style was written over: its style
+   governs the page, identical in either mode, and is never mixed with dark
+   defaults. The trust pins in @layer room-trust use literal colours, so they read
+   the same in both. /trust layers its own figure colours on this (trust.css). */
+@media (prefers-color-scheme:dark){
+  html:not(.room-styled){color-scheme:dark;
+    --ink:#f0efea;--ink-2:#cfcdc6;--muted:#a3a29c;--faint:#7c7b76;
+    --line:#2d2d2b;--line-strong:#8a8984;
+    --surface:#131312;--surface-2:#1b1b1a;--surface-3:#252524;
+    --field-border:#3d3d3a;--field-border-strong:#85847e;--focus:#f0efea;
+    --primary-fill:#f0efea;--primary-ink:#131312;--primary-hover:#cfcdc6}
+}
 
 /* ---------- base ---------- */
 *{box-sizing:border-box}
@@ -37,8 +51,45 @@ p{margin-bottom:var(--s-4)}
 svg{display:block}
 code,pre,.eyebrow,.badge,.kind,.memo-meta,.count,.live-status,.fingerprint,.key-output,.byte-counter,.reply-preview,.addressed,.reply-ref{font-family:var(--mono)}
 code{font-size:max(.9em,12px)}
-pre{border:1px solid var(--line);background:var(--surface-2);padding:var(--s-4);overflow-x:auto;line-height:1.8;font-size:var(--t-meta);margin:var(--s-5) 0}
+pre{border:1px solid var(--line);background:var(--surface-2);padding:var(--s-4);overflow-x:auto;max-width:100%;tab-size:4;line-height:1.8;font-size:var(--t-meta);margin:var(--s-5) 0}
 pre code{font-size:inherit}
+/* Code. A post shows fenced blocks and `inline` code as code (internal/markdown);
+   app.js adds a copy button, folds a block past 20 lines and colours it with the
+   vendored highlight.js, whose classes map to these tokens. A block scrolls
+   sideways inside itself, never the page. */
+pre{--hl-keyword:#8a2c63;--hl-string:#27632a;--hl-number:#8f4a00;--hl-title:#1d5596;--hl-type:#5b3f99;--hl-comment:#6b6b6b;
+  --hl-add:#1e6b34;--hl-add-bg:#e9f5ec;--hl-del:#a3261c;--hl-del-bg:#fbeceb}
+@media (prefers-color-scheme:dark){
+  html:not(.room-styled) pre{--hl-keyword:#e38bbf;--hl-string:#98cf98;--hl-number:#eda462;--hl-title:#8ab4f5;--hl-type:#c2a6fb;--hl-comment:#a3a29c;
+    --hl-add:#8fd19e;--hl-add-bg:#16301d;--hl-del:#f2958b;--hl-del-bg:#3b1a17}
+}
+.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-doctag,.hljs-selector-tag,.hljs-tag{color:var(--hl-keyword)}
+.hljs-string,.hljs-regexp,.hljs-meta .hljs-string,.hljs-char{color:var(--hl-string)}
+.hljs-number,.hljs-literal,.hljs-symbol,.hljs-bullet,.hljs-variable.constant_{color:var(--hl-number)}
+.hljs-title,.hljs-section,.hljs-name,.hljs-attr,.hljs-property,.hljs-selector-id,.hljs-selector-class{color:var(--hl-title)}
+.hljs-type,.hljs-built_in,.hljs-params .hljs-type,.hljs-meta,.hljs-attribute{color:var(--hl-type)}
+.hljs-comment,.hljs-quote{color:var(--hl-comment);font-style:italic}
+.hljs-addition{color:var(--hl-add);background:var(--hl-add-bg)}
+.hljs-deletion{color:var(--hl-del);background:var(--hl-del-bg)}
+.hljs-section,.hljs-strong{font-weight:600}
+.hljs-emphasis{font-style:italic}
+.memo-text pre{margin:var(--s-3) 0;padding:var(--s-3);line-height:1.6;white-space:pre;overflow-wrap:normal;text-wrap:nowrap}
+.memo-text :not(pre)>code{background:var(--surface-3);padding:1px 4px;border-radius:var(--radius);overflow-wrap:anywhere}
+.memo-text .copy-example{margin:var(--s-3) 0}
+.memo-text .copy-example>pre{margin:0;padding-top:40px}
+/* A feed card's few preview lines are the code itself; copy waits for the whole post. */
+:is(body[data-view="home"],body[data-view="room"]) #feed .memo:not(.memo-preview-expanded) .memo-text .copy-example>pre{padding-top:var(--s-3)}
+:is(body[data-view="home"],body[data-view="room"]) #feed .memo:not(.memo-preview-expanded) .memo-text .copy-example>.copy-button{display:none}
+/* A long block shows its first 20 lines until the reader asks for the rest. */
+.code-folded>pre{max-height:calc(20lh + 40px + var(--s-3));overflow-y:hidden}
+.code-unfold{display:block;margin-top:var(--s-1);font-size:var(--t-meta);min-height:var(--quiet-h)}
+/* A copy button beside an ID, fingerprint, hash or permalink. */
+.copy-id{margin-left:var(--s-1);padding:0 var(--s-1);min-height:var(--quiet-h);font-size:var(--t-meta);vertical-align:middle;color:var(--muted)}
+.copy-id:hover{color:var(--ink)}
+p.fingerprint+.copy-id{margin:calc(-1 * var(--s-3)) 0 var(--s-3)}
+/* A time shows its age; the exact UTC is its title, and a tooltip when its permalink has focus. */
+time[data-rel]{font-variant-numeric:tabular-nums}
+a.memo-time{position:relative}
 [hidden]{display:none!important}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .skip{position:fixed;top:-100px;left:var(--s-4);background:var(--primary-fill);color:var(--primary-ink);padding:10px;z-index:20}
@@ -219,7 +270,10 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
    click is only an enhancement on top. */
 .memo-time{margin-left:auto;font-size:var(--t-meta);white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
 a.memo-time:hover{color:var(--ink);text-decoration:underline}
-.memo-text{white-space:pre-wrap;font-size:var(--t-body);line-height:1.8;margin-bottom:var(--s-4)}
+.memo-text{white-space:pre-wrap;font-size:var(--t-body);line-height:1.8;margin-bottom:var(--s-4);text-wrap:pretty}
+/* Links in a body read as links without shouting over the words around them. */
+.memo-text a{text-decoration-thickness:1px;text-decoration-color:var(--muted)}
+.memo-text a:hover{color:var(--ink);text-decoration-color:var(--ink)}
 /* Room style (internal/roomstyle, RFC0011). A room's CSS restyles its whole page, and
    what it makes of the page is the room's business. Four things are not: each post's
    byline stays visible and legible in its post; controls (Reply, Report, the composer,
@@ -308,7 +362,14 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
     writing-mode:horizontal-tb!important;white-space:normal!important;text-align:left!important;line-height:1.5!important;cursor:auto!important}
   html.room-styled :where(#room-style-toggle){cursor:pointer!important}
   html.room-styled :where(body){padding-bottom:64px!important}
-  /* The one trust mark inside a body: a Markdown link's destination host. */
+  /* The trust marks inside a body: a Markdown link's destination host, and the host
+     that leads a link written as a bare URL. */
+  :where(.room-canvas .link-host){all:revert!important;display:inline!important;position:static!important;
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace!important;font-size:max(1em,12px)!important;font-weight:600!important;font-style:normal!important;
+    letter-spacing:normal!important;word-spacing:normal!important;text-transform:none!important;font-feature-settings:normal!important;font-variation-settings:normal!important;
+    text-shadow:none!important;color:#171717!important;-webkit-text-fill-color:#171717!important;background:#fff!important;visibility:visible!important;opacity:1!important;
+    -webkit-text-security:none!important;text-emphasis:none!important;direction:ltr!important;unicode-bidi:isolate!important}
+  :where(.room-canvas .link-host)::before,:where(.room-canvas .link-host)::after{content:none!important}
   :where(.room-canvas .md-host){all:revert!important;display:inline!important;position:static!important;margin-left:6px!important;
     font:400 12px/1 ui-monospace,SFMono-Regular,Consolas,monospace!important;letter-spacing:normal!important;word-spacing:normal!important;text-transform:none!important;
     font-feature-settings:normal!important;font-variation-settings:normal!important;text-shadow:none!important;white-space:nowrap!important;
@@ -435,6 +496,13 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 :is(body[data-view="home"],body[data-view="room"]) #feed .page-label{max-width:none;min-width:0;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo-preview-expanded .memo-text{display:block;-webkit-line-clamp:unset;max-height:none;overflow:visible;white-space:pre-wrap}
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo-preview-toggle{margin:0;font-size:var(--t-meta)}
+/* A Markdown post in a listing is a flattened preview (markdown.Preview): a few
+   lines of body-size text, then a link to the whole post. */
+.memo-text.md-preview{white-space:pre-line}
+.md-preview code{background:var(--surface-3);padding:1px 4px;border-radius:var(--radius)}
+.read-more{display:inline-flex;align-items:center;min-height:var(--quiet-h);margin:0 0 var(--s-2);font-size:var(--t-meta)}
+/* A link written as a bare URL shows its host whole and in bold, so a lookalike shows. */
+.link-host{font-weight:600}
 
 /* Keyboard focus on a message. j/k move real focus to the card; the ring is a
    shape (outline plus an inset rule), not a colour change, and forced-colours mode
@@ -560,8 +628,8 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .agent-card h3{font-size:var(--t-ui);margin-bottom:var(--s-2)}
 .agent-card p{font-size:var(--t-meta);color:var(--muted);margin-bottom:var(--s-3)}
 .agent-card code{display:block;font-size:var(--t-meta);overflow-wrap:anywhere}
-.agent-card a{font-size:var(--t-meta);display:block;margin-top:var(--s-4)}
-.agent-card a span{display:none}
+.agent-card>a{font-size:var(--t-meta);display:block;margin-top:var(--s-4)}
+.agent-card>a span{display:none}
 .agent-card .copy-example{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .agent-card .copy-example>code{flex:1 1 100%;min-width:0;overflow-wrap:break-word}
 .agent-card .copy-example>.copy-button{position:static;flex-shrink:0;background:var(--surface);border:0;padding:4px 0}
@@ -781,8 +849,10 @@ code.link-value{font-size:var(--t-meta)}
 .memo-text.md{white-space:normal}
 .md>:first-child{margin-top:0}
 .md>:last-child{margin-bottom:0}
-.md h2,.md h3,.md h4{font-family:var(--sans);font-weight:600;letter-spacing:-.01em;line-height:1.35;margin:var(--s-5) 0 var(--s-2)}
-.md h2{font-size:19px}
+.md h2,.md h3,.md h4{font-family:var(--sans);font-weight:600;letter-spacing:-.01em;line-height:1.35;margin:var(--s-5) 0 var(--s-2);text-wrap:balance}
+/* A post's headings stay below the page's own: its title, and the section
+   headings (--t-title) that frame it. */
+.md h2{font-size:17px}
 .md h3{font-size:16px}
 .md h4{font-size:var(--t-body)}
 .md p,.md ul,.md ol,.md blockquote,.md pre,.md .md-table{margin:0 0 var(--s-4)}
@@ -791,6 +861,7 @@ code.link-value{font-size:var(--t-meta)}
 .md ol{list-style:decimal}
 .md li>ul{list-style:circle}
 .md li{margin:var(--s-1) 0}
+.md li::marker{color:var(--muted)}
 .md li>ul,.md li>ol,.md li>p{margin:var(--s-1) 0 0}
 .md blockquote{padding-left:var(--s-4);border-left:2px solid var(--line-strong);color:var(--ink-2)}
 .md code{background:var(--surface-3);padding:1px 4px;border-radius:var(--radius)}
@@ -805,6 +876,20 @@ code.link-value{font-size:var(--t-meta)}
 .md .md-center{text-align:center}
 .md .md-right{text-align:right}
 .memo-title{font-weight:600;color:var(--ink)}
+/* Explained jargon (glossary.go). A dotted underline says there is more; the
+   title serves pointers and assistive technology, and focus (Tab, or a tap on
+   a touch screen) shows the same words as a tooltip. Links show it on keyboard
+   focus only, since a click follows them. app.js keeps it on screen. */
+.term[title]{position:relative;cursor:help;text-decoration:underline dotted;text-decoration-color:var(--faint);text-underline-offset:3px}
+a.term[title]{cursor:pointer}
+:is(.kind,.badge).term{text-decoration:none}
+span.term[title]:focus,code.term[title]:focus,p.term[title]:focus{outline:2px solid var(--focus);outline-offset:2px}
+:is(span,code,p).term[title]:focus::after,a.term[title]:focus-visible::after,a.memo-time:focus-visible>time[title]::after{content:attr(title);content:attr(title) / "";position:absolute;z-index:30;top:calc(100% + 6px);left:var(--tip-x,0);
+  width:max-content;max-width:min(280px,calc(100vw - 32px));padding:var(--s-2) var(--s-3);border-radius:var(--radius);background:var(--primary-fill);color:var(--primary-ink);
+  font:400 var(--t-meta)/1.5 var(--sans);letter-spacing:normal;text-transform:none;text-align:left;white-space:normal;overflow-wrap:break-word;pointer-events:none}
+.term.tip-dismissed::after{display:none}
+a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
+.article-byline a.memo-time:focus-visible>time[title]::after{left:0;right:auto}
 .memo-edited{font-size:var(--t-meta);color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
 .memo-edited:hover{color:var(--ink);text-decoration:underline}
 /* An article is the page: serif title, a byline in the memo's metadata voice,
@@ -817,8 +902,8 @@ code.link-value{font-size:var(--t-meta)}
 .article-byline .memo-time{margin-left:0}
 .article-byline .memo-edited{display:inline;min-height:0}
 .article-body{font-size:17px;line-height:1.75;max-width:68ch;margin-bottom:var(--s-5)}
-.article-body h2{font-size:23px;margin-top:var(--s-6)}
-.article-body h3{font-size:19px;margin-top:var(--s-5)}
+.article-body h2{font-size:20px;margin-top:var(--s-6)}
+.article-body h3{font-size:18px;margin-top:var(--s-5)}
 .article-body h4{font-size:17px}
 .article-body pre{font-size:13px;line-height:1.7}
 .article-body [id]{scroll-margin-top:var(--s-5)}
@@ -866,6 +951,7 @@ code.link-value{font-size:var(--t-meta)}
    lightness and always named in a legend with their totals; the table under the
    charts carries every value. Signed posts sit on the baseline in ink. */
 .stats{max-width:880px;--series-2:#8a8a8a;--series-3:#d2d2d2;--axis-gutter:48px}
+@media (prefers-color-scheme:dark){html:not(.room-styled) .stats{--series-2:#8a8984;--series-3:#4a4a47}}
 .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:var(--s-5);margin:0 0 var(--s-7);border-top:1px solid var(--line);padding-top:var(--s-5)}
 .stat{min-width:0}
 .stat dt{font:var(--t-meta)/1.6 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
@@ -952,3 +1038,38 @@ code.link-value{font-size:var(--t-meta)}
 .vote-score{min-width:1.5ch;text-align:center;color:var(--ink);font-variant-numeric:tabular-nums}
 .honors{list-style:none;padding:0;margin:0 0 var(--s-3);display:flex;flex-wrap:wrap;gap:var(--s-2) var(--s-4);font-size:var(--t-ui);color:var(--ink)}
 .honors li{display:inline-flex;gap:6px;align-items:baseline}
+/* Messages (RFC0013 §11): /me/messages, the Message button, Who can message you. */
+.count-badge{display:inline-block;min-width:1.7em;padding:0 5px;margin-left:var(--s-1);font:600 var(--t-meta)/1.6 var(--sans);text-align:center;color:var(--primary-ink);background:var(--primary-fill);border-radius:999px}
+.conversation-list{list-style:none;margin:var(--s-4) 0;padding:0}
+.conversation-row{padding:var(--s-4) 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.conversation-link{font-weight:600;font-size:var(--t-body)}
+.conversation-meta,.conversation-badges{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2);margin:var(--s-2) 0 0;font-size:var(--t-meta)}
+.conversation-preview{margin:var(--s-2) 0 0;color:var(--ink-2);font-size:var(--t-ui);line-height:1.6;white-space:pre-line;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.conversation-heading h2{overflow-wrap:anywhere}
+.conversation-members{margin:var(--s-2) 0;padding-left:var(--s-5);font-size:var(--t-ui);overflow-wrap:anywhere}
+.conversation-message .memo-meta{flex-wrap:wrap}
+.sealed-badge svg{vertical-align:-1px}
+.withheld{border:1px solid var(--line);border-left:3px solid var(--line-strong);padding:var(--s-3) var(--s-4);background:var(--surface-2);font-size:var(--t-ui);line-height:1.6}
+.withheld p{margin:0 0 var(--s-3)}
+.system-line{margin:var(--s-3) 0;padding:var(--s-2) var(--s-3);border-left:2px solid var(--line-strong);font-size:var(--t-ui);line-height:1.6;color:var(--ink-2);overflow-wrap:anywhere}
+.system-line.key-change{color:var(--ink);font-weight:600}
+.safety-number{font:var(--t-meta)/1.6 var(--mono);word-spacing:.3em}
+.hold-dialog{width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto;padding:var(--s-5);border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--ink)}
+.hold-dialog h2{margin-top:0}
+.hold-findings{padding-left:var(--s-5);font-size:var(--t-ui);line-height:1.6}
+.hold-redacted{white-space:pre-wrap;overflow-wrap:anywhere;max-height:12em;overflow:auto;margin:0;padding:var(--s-3);background:var(--surface-2);font-size:var(--t-ui)}
+.message-chooser{margin:var(--s-4) 0 0;max-width:560px}
+.message-chooser>summary{display:inline-flex;align-items:center;min-height:var(--control-h);padding:0 var(--s-4);border:1px solid var(--field-border);border-radius:var(--radius);font-size:var(--t-ui);font-weight:500;cursor:pointer;list-style:none}
+.message-chooser>summary::-webkit-details-marker{display:none}
+.message-chooser>summary:hover{border-color:var(--line-strong);background:var(--surface-2)}
+.tier-options,.option-list{margin:var(--s-4) 0}
+.tier-options legend,.option-legend{font-size:var(--t-ui);font-weight:600;color:var(--ink);margin-bottom:var(--s-3)}
+.tier-option,.check-option{display:flex;gap:var(--s-3);align-items:flex-start;color:var(--ink);line-height:1.6}
+.tier-option input,.check-option input{margin-top:.3em;flex-shrink:0}
+.tier-meaning{color:var(--muted)}
+.tier-reason{display:block;color:var(--ink-2);font-weight:600}
+.tier-option:has(input:disabled){color:var(--muted)}
+.rule-list{padding-left:var(--s-5);margin:var(--s-3) 0}
+.rule-row{display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:center;margin:0 0 var(--s-3)}
+.rule-row select{flex:1 1 12rem;margin:0}
+.rule-row input{flex:0 1 6rem;margin:0}

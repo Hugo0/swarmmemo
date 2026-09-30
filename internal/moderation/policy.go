@@ -92,10 +92,15 @@ type JevPolicy struct {
 	DailySpendCapMicroUSD int64 `json:"daily_spend_cap_microusd"`
 	PricePerMTokMicroUSD  int64 `json:"price_per_mtok_microusd"` // input tokens
 	// ScreenDailySpendCapMicroUSD is the part of that cap the screen service
-	// (screen.text) may spend in a UTC day, counted in both; 0 turns it off.
-	ScreenDailySpendCapMicroUSD int64 `json:"screen_daily_spend_cap_microusd"`
-	MaxTextBytes                int   `json:"max_text_bytes"`
-	TimeoutMS                   int   `json:"timeout_ms"`
+	// (screen.text, screen.leak) may spend in a UTC day, counted in both; 0
+	// turns it off. ConversationScreenDailySpendCapMicroUSD is the part
+	// conversation screening may, which SwarmMemo pays for (RFC0013 §5.2);
+	// 0 leaves conversation messages unscreened. Together they stay within
+	// the cap, so board moderation keeps the rest.
+	ScreenDailySpendCapMicroUSD             int64 `json:"screen_daily_spend_cap_microusd"`
+	ConversationScreenDailySpendCapMicroUSD int64 `json:"conversation_screen_daily_spend_cap_microusd"`
+	MaxTextBytes                            int   `json:"max_text_bytes"`
+	TimeoutMS                               int   `json:"timeout_ms"`
 }
 
 // SurfacePolicy is one surface's configuration.
@@ -259,6 +264,8 @@ func (j *JevPolicy) validate() error {
 		return errors.New("moderation policy: jev.daily_spend_cap_microusd must be 0 (Jev off) to 1e12")
 	case j.ScreenDailySpendCapMicroUSD < 0 || j.ScreenDailySpendCapMicroUSD > j.DailySpendCapMicroUSD:
 		return errors.New("moderation policy: jev.screen_daily_spend_cap_microusd must be 0 (screening off) to daily_spend_cap_microusd")
+	case j.ConversationScreenDailySpendCapMicroUSD < 0 || j.ConversationScreenDailySpendCapMicroUSD > j.DailySpendCapMicroUSD-j.ScreenDailySpendCapMicroUSD:
+		return errors.New("moderation policy: jev.conversation_screen_daily_spend_cap_microusd must be 0 (conversation screening off) to daily_spend_cap_microusd less screen_daily_spend_cap_microusd")
 	case j.PricePerMTokMicroUSD < 1 || j.PricePerMTokMicroUSD > 1e9:
 		return errors.New("moderation policy: jev.price_per_mtok_microusd must be 1 to 1e9")
 	case j.MaxTextBytes < 256 || j.MaxTextBytes > 64<<10:
@@ -726,13 +733,15 @@ func DefaultPolicy() *Policy {
 		Version: 0,
 		Jev: JevPolicy{
 			Model:                 "jev-1.13.0",
-			DailySpendCapMicroUSD: 2_000_000, // $2 a day
-			// Screening for agents (screen.text) may use a quarter of it, so
-			// board moderation always keeps $1.50.
-			ScreenDailySpendCapMicroUSD: 500_000,
-			PricePerMTokMicroUSD:        42_000, // $0.042 per million input tokens
-			MaxTextBytes:                12_000,
-			TimeoutMS:                   30_000,
+			DailySpendCapMicroUSD: 3_000_000, // $3 a day
+			// Screening for agents (screen.text, screen.leak) may use $0.50
+			// of it and conversation screening, which SwarmMemo pays for, $1
+			// (RFC0013 Decision 6), so board moderation always keeps $1.50.
+			ScreenDailySpendCapMicroUSD:             500_000,
+			ConversationScreenDailySpendCapMicroUSD: 1_000_000,
+			PricePerMTokMicroUSD:                    42_000, // $0.042 per million input tokens
+			MaxTextBytes:                            12_000,
+			TimeoutMS:                               30_000,
 		},
 		Surfaces: map[Surface]*SurfacePolicy{
 			SurfacePost:            post,

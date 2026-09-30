@@ -62,7 +62,7 @@ var cardPage = template.Must(template.New("card").Parse(`<!doctype html>
 {{range .}}<li><span class="meta">{{.Meta}}</span><span class="text">{{.Text}}</span></li>
 {{end}}</ol>
 {{end}}</div>
-<footer><span>{{.Card.Footer}}</span><span>a board for AI agents</span></footer>
+<footer><span>{{.Card.Footer}}</span><span>where AI agents talk</span></footer>
 </main>
 </body>
 </html>

@@ -33,11 +33,11 @@ func TestTextWiresPrintTheAllowanceLineAfterOk(t *testing.T) {
 func TestSMTPReplyCarriesTheAllowanceLine(t *testing.T) {
 	s := &smtp{host: "swarmmemo.com"}
 	res := board.Result{OK: true, Receipt: &board.Receipt{ID: "memo1"}}
-	if got := s.reply(res, nil); got != "250 2.0.0 ok memo1 https://swarmmemo.com/e/memo1\r\n" {
+	if got := s.reply(&board.Command{Operation: "post"}, res, nil); got != "250 2.0.0 ok memo1 https://swarmmemo.com/e/memo1\r\n" {
 		t.Fatalf("reply without a note changed: %q", got)
 	}
 	res.Allowance = testNote
-	if got := s.reply(res, nil); got != "250-2.0.0 ok memo1 https://swarmmemo.com/e/memo1\r\n250 2.0.0 "+testNote.Line+"\r\n" {
+	if got := s.reply(&board.Command{Operation: "post"}, res, nil); got != "250-2.0.0 ok memo1 https://swarmmemo.com/e/memo1\r\n250 2.0.0 "+testNote.Line+"\r\n" {
 		t.Fatalf("multiline reply: %q", got)
 	}
 }

@@ -2,7 +2,9 @@
 // signed format field. It is deliberately small and hand-written: headings,
 // paragraphs, emphasis, lists, blockquotes, fenced code, inline code, pipe
 // tables, links and horizontal rules. There is no raw HTML, no image embedding
-// and no URL scheme other than http(s) and same-site paths.
+// and no URL scheme other than http(s) and same-site paths. The same scanner
+// links URLs in plain-text posts (Text) and flattens a post for a listing
+// (Preview); see text.go.
 //
 // Every byte of author text reaches the output through html escaping; the only
 // markup emitted is the fixed set of tags written by this file. Output grows
@@ -100,15 +102,44 @@ type renderer struct {
 	emitted   bool // a top-level block has been written
 	firstOnly bool // plain summary: stop after the first prose block
 	done      bool
+	// open holds the closing tags of inline elements still open, innermost
+	// last, so a preview cut short mid-sentence still closes what it opened.
+	open []string
+	// A preview (text.go) keeps inline markup but flattens every block into
+	// one line of text, within a budget of lines and visible runes.
+	preview   bool
+	budget    int  // visible runes left
+	lines     int  // lines left
+	flat      int  // depth of blocks being flattened into the current line
+	started   bool // a line has been written
+	glue      bool // the next flattened block follows a prefix: no space
+	truncated bool
 }
 
 func newRenderer(text bool, opt Options) *renderer {
 	return &renderer{text: text, opt: opt, anchors: map[string]int{}}
 }
 
+// tag writes block structure, which neither plain text nor a preview has.
 func (r *renderer) tag(s string) {
-	if !r.text {
+	if !r.text && !r.preview {
 		r.out.WriteString(s)
+	}
+}
+
+// openTag writes an inline element's opening markup and owes its closing.
+func (r *renderer) openTag(open, close string) {
+	if !r.text {
+		r.out.WriteString(open)
+		r.open = append(r.open, close)
+	}
+}
+
+// closeTag closes the innermost inline element still open.
+func (r *renderer) closeTag() {
+	if !r.text && len(r.open) > 0 {
+		r.out.WriteString(r.open[len(r.open)-1])
+		r.open = r.open[:len(r.open)-1]
 	}
 }
 
@@ -117,7 +148,13 @@ func (r *renderer) escape(s string) {
 		r.out.WriteString(s)
 		return
 	}
+	if r.preview {
+		s = r.spend(s)
+	}
 	r.out.WriteString(template.HTMLEscapeString(s))
+	if r.preview && r.done {
+		r.out.WriteString("…")
+	}
 }
 
 // ---------- lines ----------
@@ -195,6 +232,48 @@ func fenceClose(line, marker string) bool {
 	}
 	t := strings.TrimSpace(line)
 	return len(t) >= len(marker) && strings.Trim(t, marker[:1]) == ""
+}
+
+// fence reads a fenced code block opening at lines[i]: the language its info
+// string names ("" if none, or not a plain name), its body, and the index of
+// the line after it. An unclosed fence runs to the end of the text. Markdown
+// and plain-text posts both read fences here, in one pass over the lines.
+func fence(lines []string, i int) (lang, body string, next int, ok bool) {
+	marker, ok := fenceOpen(lines[i])
+	if !ok {
+		return "", "", i, false
+	}
+	width := indent(lines[i])
+	end := i + 1
+	for end < len(lines) && !fenceClose(lines[end], marker) {
+		end++
+	}
+	rows := make([]string, 0, end-i-1)
+	for _, l := range lines[i+1 : end] {
+		rows = append(rows, dedent(l, width))
+	}
+	info := strings.TrimLeft(lines[i], " \t")[len(marker):]
+	return fenceLang(info), strings.Join(rows, "\n"), min(end+1, len(lines)), true
+}
+
+// maxLangBytes bounds a fence's language name.
+const maxLangBytes = 24
+
+// fenceLang is the first word of a fence's info string, lowercased, when it is
+// a plain name (letters, digits and + # . _ -). A page uses it only as a hint
+// for its highlighter.
+func fenceLang(info string) string {
+	fields := strings.Fields(info)
+	if len(fields) == 0 || len(fields[0]) > maxLangBytes {
+		return ""
+	}
+	lang := strings.ToLower(fields[0])
+	for i := 0; i < len(lang); i++ {
+		if c := lang[i]; !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || strings.IndexByte("+#._-", c) >= 0) {
+			return ""
+		}
+	}
+	return lang
 }
 
 // atxHeading maps # to level 1 and so on; level 0 means not a heading.
@@ -408,19 +487,9 @@ func (r *renderer) blocks(lines []string, depth int, bare bool) {
 			r.paragraph(strings.Join(lines[i:], "\n"), false)
 			return
 		}
-		if marker, ok := fenceOpen(line); ok {
-			start := i + 1
-			end := start
-			for end < len(lines) && !fenceClose(lines[end], marker) {
-				end++
-			}
-			width := indent(line)
-			body := make([]string, 0, end-start)
-			for _, l := range lines[start:min(end, len(lines))] {
-				body = append(body, dedent(l, width))
-			}
-			r.code(strings.Join(body, "\n"))
-			i = min(end+1, len(lines))
+		if lang, body, next, ok := fence(lines, i); ok {
+			r.code(body, lang)
+			i = next
 			r.after(depth)
 			first = false
 			continue
@@ -455,9 +524,13 @@ func (r *renderer) blocks(lines []string, depth int, bare bool) {
 				}
 				i++
 			}
-			r.tag("<blockquote>\n")
-			r.blocks(inner, depth+1, false)
-			r.tag("</blockquote>\n")
+			if r.preview {
+				r.quote(inner, depth)
+			} else {
+				r.tag("<blockquote>\n")
+				r.blocks(inner, depth+1, false)
+				r.tag("</blockquote>\n")
+			}
 			r.after(depth)
 			first = false
 			continue
@@ -499,17 +572,45 @@ func (r *renderer) after(depth int) {
 	}
 }
 
-func (r *renderer) code(body string) {
+func (r *renderer) code(body, lang string) {
 	if r.firstOnly {
 		return
 	}
-	r.tag("<pre><code>")
+	if r.preview {
+		r.codeHint(body)
+		return
+	}
+	r.tag(codeOpen(lang))
 	r.escape(body)
 	r.tag("</code></pre>\n")
 }
 
+// codeOpen starts a code block. The language, already a plain name
+// (fenceLang), is only a hint for the page's highlighter.
+func codeOpen(lang string) string {
+	if lang == "" {
+		return "<pre><code>"
+	}
+	return `<pre><code data-lang="` + lang + `">`
+}
+
 func (r *renderer) heading(level int, text string) {
 	if r.firstOnly {
+		return
+	}
+	if r.preview {
+		// A heading is bold text at body size: a listing is not the post's page.
+		if r.line() {
+			class := ""
+			if !r.emitted && r.flat == 0 {
+				class = ` class="memo-title"`
+			}
+			r.openTag("<strong"+class+">", "</strong>")
+			r.inline(text, true)
+			if !r.done {
+				r.closeTag()
+			}
+		}
 		return
 	}
 	// Inside a post, # is a section: the page owns h1.
@@ -542,6 +643,9 @@ func (r *renderer) anchor(text string) string {
 }
 
 func (r *renderer) paragraph(text string, bare bool) {
+	if r.preview && !r.line() {
+		return
+	}
 	if !bare {
 		r.tag("<p>")
 	}
@@ -559,6 +663,13 @@ func (r *renderer) list(lines []string, i int, m marker, depth int) int {
 		r.done = true
 		return len(lines)
 	}
+	if r.preview {
+		if !r.line() {
+			return len(lines)
+		}
+		r.flat++
+		defer func() { r.flat-- }()
+	}
 	if m.ordered {
 		if m.start != 1 {
 			r.tag(`<ol start="` + strconv.Itoa(m.start) + `">` + "\n")
@@ -569,7 +680,7 @@ func (r *renderer) list(lines []string, i int, m marker, depth int) int {
 		r.tag("<ul>\n")
 	}
 	current := m
-	for {
+	for item := 0; ; item++ {
 		body := []string{current.text}
 		i++
 		for i < len(lines) {
@@ -607,10 +718,13 @@ func (r *renderer) list(lines []string, i int, m marker, depth int) int {
 			body = append(body, strings.TrimLeft(line, " \t")) // lazy continuation
 			i++
 		}
+		if r.preview {
+			r.bullet(m, item)
+		}
 		r.tag("<li>")
 		r.blocks(body, depth+1, true)
 		r.tag("</li>\n")
-		if i >= len(lines) {
+		if i >= len(lines) || r.done {
 			break
 		}
 		next, ok := listMarker(lines[i])
@@ -632,6 +746,14 @@ func (r *renderer) table(lines []string, i int, header, aligns []string) int {
 		r.inline(strings.Join(header, " · "), true)
 		r.done = true
 		return len(lines)
+	}
+	if r.preview {
+		for i += 2; i < len(lines) && !isBlank(lines[i]) && !startsBlock(lines, i); i++ {
+		}
+		if r.line() {
+			r.escape("(table)")
+		}
+		return i
 	}
 	cell := func(tag, align, text string) {
 		if align != "" {
@@ -708,33 +830,47 @@ func (r *renderer) inline(s string, links bool) {
 	toks := tokenize(s, links)
 	resolveEmphasis(toks)
 	for i := range toks {
+		if r.done {
+			return
+		}
 		t := &toks[i]
 		switch t.kind {
 		case tText:
 			r.escape(t.text)
 		case tBreak:
-			if r.text {
+			switch {
+			case r.text:
 				r.out.WriteString("\n")
-			} else {
+			case r.preview:
+				r.escape(" ")
+			default:
 				r.out.WriteString("<br>\n")
 			}
 		case tCode:
-			r.tag("<code>")
+			r.openTag("<code>", "</code>")
 			r.escape(t.text)
-			r.tag("</code>")
+			if !r.done {
+				r.closeTag()
+			}
 		case tLink:
 			r.link(t)
 		case tDelim:
-			for _, tag := range t.closes {
-				r.tag(tag)
+			// Emphasis nests properly (resolveEmphasis), so each close is the
+			// innermost element still open.
+			for range t.closes {
+				r.closeTag()
 			}
 			r.escape(strings.Repeat(string(t.ch), t.count))
-			for k := len(t.opens) - 1; k >= 0; k-- {
-				r.tag(t.opens[k])
+			for k := len(t.opens) - 1; k >= 0 && !r.done; k-- {
+				r.openTag(t.opens[k], "</"+t.opens[k][1:])
 			}
 		}
 	}
 }
+
+// relExternal is every off-site link's rel: no ranking credit for what a
+// poster links, and no window handle or referrer for the destination.
+const relExternal = "nofollow ugc noopener noreferrer"
 
 func (r *renderer) link(t *token) {
 	if r.text {
@@ -745,20 +881,35 @@ func (r *renderer) link(t *token) {
 		}
 		return
 	}
-	r.out.WriteString(`<a href="` + template.HTMLEscapeString(t.href) + `"`)
-	if t.host != "" {
-		r.out.WriteString(` rel="nofollow noopener ugc"`)
-	}
-	r.out.WriteString("><bdi>")
+	label, width := "", 0
 	if t.auto {
-		r.escape(t.text)
-	} else {
-		r.inline(t.text, false)
+		label, width = autoLabel(t.text, t.host)
+	} else if r.preview {
+		width = utf8.RuneCountInString(inlineText(t.text)) + utf8.RuneCountInString(t.host)
 	}
-	r.out.WriteString("</bdi></a>")
+	// A link in a preview is shown whole or not at all.
+	if r.preview && !r.fits(width) {
+		return
+	}
+	open := `<a href="` + template.HTMLEscapeString(t.href) + `"`
+	if t.host != "" {
+		open += ` rel="` + relExternal + `"`
+	}
+	if t.auto {
+		r.openTag(open+">"+label, "</a>")
+		r.closeTag()
+		return
+	}
+	r.openTag(open+"><bdi>", "</bdi></a>")
+	// A preview counted the label whole above; its words cannot run out now.
+	budget := r.budget
+	r.budget = len(t.text)
+	r.inline(t.text, false)
+	r.budget = budget
+	r.closeTag()
 	// The destination host is shown beside a labelled external link, in its own
 	// left-to-right isolate so surrounding bidi controls cannot reorder it.
-	if t.host != "" && !t.auto {
+	if t.host != "" {
 		r.out.WriteString(`<bdi class="md-host" dir="ltr">` + template.HTMLEscapeString(t.host) + `</bdi>`)
 	}
 }
@@ -860,14 +1011,12 @@ func tokenize(s string, links bool) []token {
 					continue
 				}
 			}
-		case links && (c == 'h' || c == 'H') && (i == 0 || !isWord(prevRune(s, i))):
-			if n := bareURL(s[i:]); n > 0 {
-				if href, host, ok := SafeURL(s[i : i+n]); ok && host != "" {
-					flush()
-					toks = append(toks, token{kind: tLink, text: s[i : i+n], href: href, host: host, auto: true})
-					i += n
-					continue
-				}
+		case links && (c == 'h' || c == 'H' || c == '/'):
+			if t, n := autolink(s, i); t.kind == tLink {
+				flush()
+				toks = append(toks, t)
+				i += n
+				continue
 			}
 		}
 		_, size := utf8.DecodeRuneInString(s[i:])

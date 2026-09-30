@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS ledger_holds (
  request_key TEXT NOT NULL, service TEXT NOT NULL, method TEXT NOT NULL,
  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, UNIQUE(account,request_key));
 CREATE INDEX IF NOT EXISTS ledger_holds_open ON ledger_holds(expires_at) WHERE state='held';
+CREATE INDEX IF NOT EXISTS ledger_holds_account_open ON ledger_holds(account,service) WHERE state='held';
 CREATE TABLE IF NOT EXISTS ledger_hold_parts (
  hold_id TEXT NOT NULL REFERENCES ledger_holds(id), lot_id INTEGER NOT NULL REFERENCES ledger_lots(id),
  units INTEGER NOT NULL, PRIMARY KEY(hold_id,lot_id));

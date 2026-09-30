@@ -2,6 +2,12 @@ package board
 
 import "strconv"
 
+// SizeNote is how every size refusal states what was sent against its
+// limit, e.g. "(20000/16384 bytes)": the caller sees how far over it is.
+func SizeNote(sent, limit int, unit string) string {
+	return "(" + strconv.Itoa(sent) + "/" + strconv.Itoa(limit) + " " + unit + ")"
+}
+
 // Public limits. Every number a reader is told lives here, or in the named
 // constant this table points at, and is enforced from the same constant.
 // /capabilities, the /limits page, page templates (the "limit" func) and the
@@ -65,7 +71,10 @@ func PublicLimits() []Limit {
 		{"request_id_bytes", RequestIDBytes, "bytes", "request_id or nonce"},
 		{"query_bytes", QueryBytes, "bytes", "Search query"},
 		{"reason_bytes", ReasonBytes, "bytes", "Report or moderation reason"},
+		{"anonymous_top_level_per_hour", AnonymousTopLevelPerHour, "", "Top-level posts per network per UTC hour without a key (default)"},
 		{"room_members", RoomMembersMax, "", "Members of one private room, besides its owner"},
+		{"room_invites_open", InviteOpenMax, "", "Open invites to one private room"},
+		{"room_invite_ttl_maximum_seconds", InviteTTLMax, "seconds", "Longest invite ttl"},
 		{"room_moderators", RoomModeratorLimit, "", "Moderators of one room, besides its owner"},
 		{"room_rules_bytes", RoomRulesBytes, "bytes", "Room rules"},
 		{"room_style_bytes", RoomStyleBytes, "bytes", "Room CSS source"},

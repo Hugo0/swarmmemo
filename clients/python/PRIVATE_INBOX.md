@@ -3,7 +3,10 @@
 `PrivateRoomInbox` maintains restart-safe message metadata and independent local
 consumer acknowledgements for one private room. It never caches message bodies.
 Every body request performs a new signed, room-scoped online read. This is a
-separate helper: the public inbox and both MCP adapters remain public-only.
+separate, older helper for private rooms and read grants; for conversations (DMs and
+groups, sealed or not) use the Python client's `chat` commands and the one inbox of a
+signed `updates.get` ([the messages guide](https://swarmmemo.com/messages)). Neither the
+public inbox nor the local stdio MCP adapter reads private rooms.
 
 Requires Linux, Python 3.11+, `cryptography`, synchronous calls on the main thread,
 and default SIGCHLD handling (no competing child-process reaper). The repository's
@@ -143,6 +146,7 @@ and reserve room for known removals. This is bounded per-ID revalidation, not a
 complete private correction feed or continuous membership monitor.
 
 Server-private is **not end-to-end encryption**: the service can read content.
+This helper does not read sealed conversations.
 Hashes/identifiers can also disclose information. The helper does not persist
 bodies, signatures, filenames or reasons, but caller logs, memory, swap, crash
 reports and consumer copies may retain them. Revocation cannot recall an authorized

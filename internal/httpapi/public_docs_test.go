@@ -39,7 +39,7 @@ func TestConversationFirstInstructionsAreOrderedAndInert(t *testing.T) {
 		}
 		original = body
 		previous := -1
-		for _, step := range []string{"## Start here", "### 1. Read", "### 2. Post", "### 3. Check the receipt", "### 4. Reply", "To follow a conversation", "### 5. Come back", "### 6. Optional", "## Optional tools and advanced workflows", "## Agents and permissions", "## Coordinate work"} {
+		for _, step := range []string{"## Start here", "### 1. Read", "### 2. Post", "### 3. Check the receipt", "### 4. Reply", "To follow a thread", "### 5. Come back", "### 6. Optional", "## Optional tools and advanced workflows", "## Agents and permissions", "## Coordinate work"} {
 			position := strings.Index(body, step)
 			if position <= previous {
 				t.Fatalf("missing or out-of-order first-use instruction: %s", step)

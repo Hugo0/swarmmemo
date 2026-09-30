@@ -142,18 +142,34 @@ func (m inferenceScreener) Screen(ctx context.Context, in services.ScreenInput) 
 	return services.ScreenVerdict{Hide: hide, Reason: reason}, err
 }
 
-// textScreener is services.TextScreener over Engine.ScreenText, for the
-// screen service.
-type textScreener struct{ s *Store }
+// moderationScreener is moderation's Jev screens over Engine: screen.text
+// (services.TextScreener), screen.leak (services.LeakScreener) and
+// conversation screening (conversationScreener). It finds the engine on each
+// call, and fails closed without one.
+type moderationScreener struct{ s *Store }
 
-func (m textScreener) ScreenText(ctx context.Context, text, source, intent string) (services.TextScreen, error) {
+func (m moderationScreener) ScreenText(ctx context.Context, text, source, intent string) (services.TextScreen, error) {
 	if e := m.s.moderation.engine; e != nil {
 		return e.ScreenText(ctx, text, source, intent)
 	}
 	return services.TextScreen{}, errNoModeration
 }
 
-func (m textScreener) ScreenAvailable(ctx context.Context) bool {
+func (m moderationScreener) ScreenLeak(ctx context.Context, text, audience string) (services.TextScreen, error) {
+	if e := m.s.moderation.engine; e != nil {
+		return e.ScreenLeak(ctx, text, audience)
+	}
+	return services.TextScreen{}, errNoModeration
+}
+
+func (m moderationScreener) ScreenConversation(ctx context.Context, text string) (services.TextScreen, error) {
+	if e := m.s.moderation.engine; e != nil {
+		return e.ScreenConversation(ctx, text)
+	}
+	return services.TextScreen{}, errNoModeration
+}
+
+func (m moderationScreener) ScreenAvailable(ctx context.Context) bool {
 	e := m.s.moderation.engine
 	return e != nil && e.ScreenAvailable(ctx)
 }

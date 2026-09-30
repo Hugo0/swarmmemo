@@ -8,7 +8,6 @@ package httpapi
 import (
 	"encoding/json"
 	"html"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,23 +24,16 @@ import (
 // allowlist is tested against the whole catalogue.
 var everyService = board.Features{Ledger: board.LedgerOn, Trust: board.TrustShadow, Services: []string{"memory", "wakeup", "notary", "screen", "inference", "x402", "public_data", "runs", "echo"}}
 
-// mcpPost sends one JSON-RPC request to an MCP path and decodes the result.
+// mcpPost sends one JSON-RPC request to an MCP path (mcpRequest) and decodes
+// its result into result.
 func mcpPost(t *testing.T, s *Server, path, body string, result any) {
 	t.Helper()
-	r := httptest.NewRequest("POST", path, strings.NewReader(body))
-	r.RemoteAddr = "198.51.100.8:12345"
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json, text/event-stream")
-	w := httptest.NewRecorder()
-	s.ServeHTTP(w, r)
-	var envelope struct {
-		Result json.RawMessage `json:"result"`
-		Error  json.RawMessage `json:"error"`
+	out := mcpRequest(t, s, path, "", body)
+	raw, err := json.Marshal(out["result"])
+	if out["error"] != nil || err != nil {
+		t.Fatalf("POST %s: %v", path, out)
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil || w.Code != 200 || len(envelope.Error) != 0 {
-		t.Fatalf("POST %s: %d %v %s", path, w.Code, err, w.Body.String())
-	}
-	if err := json.Unmarshal(envelope.Result, result); err != nil {
+	if err = json.Unmarshal(raw, result); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -313,6 +305,14 @@ func TestPluginPackage(t *testing.T) {
 	read("plugin.json", &openai)
 	s := New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com", Features: everyService})
 	assistant := listTools(t, s, web.AssistantMCPPath)
+	// Where hosted identities are on, as in production, the profile also
+	// carries their tools, which the skills may name.
+	_, hosted := hostedServer(t)
+	for name, tool := range listTools(t, hosted, web.AssistantMCPPath) {
+		if _, ok := assistant[name]; !ok {
+			assistant[name] = tool
+		}
+	}
 	cases := openai.Extensions.OpenAI.Review.TestCases
 	if len(cases.Positive) != 5 || len(cases.Negative) != 3 {
 		t.Errorf("OpenAI review needs 5 positive and 3 negative cases: %d, %d", len(cases.Positive), len(cases.Negative))
@@ -330,7 +330,7 @@ func TestPluginPackage(t *testing.T) {
 	frontmatter := regexp.MustCompile(`(?s)\A---\nname: ([^\n]+)\ndescription: ([^\n]+)\n---\n`)
 	tool := regexp.MustCompile("`([a-z]+_[a-z_]+)`")
 	skills, _ := filepath.Glob(filepath.Join(root, "skills", "*", "SKILL.md"))
-	if len(skills) != 3 {
+	if len(skills) != 4 {
 		t.Fatalf("skills: %v", skills)
 	}
 	for _, path := range skills {

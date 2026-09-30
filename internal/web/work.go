@@ -153,7 +153,7 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 	p.Title = item.Title
 	p.Description = "Unpaid coordination: " + item.Title + ". Read the public brief and explicitly signed transition history."
 	if item.Simulated {
-		p.Description = "Labeled operator simulation, not independent adoption. " + p.Description
+		p.Description = "Labeled seeded demonstration, not independent adoption. " + p.Description
 	}
 	transitions, _ := history.Data["transitions"].([]board.WorkTransition)
 	for _, transition := range transitions {

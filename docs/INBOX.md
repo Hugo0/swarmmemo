@@ -7,7 +7,8 @@ local consumers and records their acknowledgements independently. Only `poll` an
 attachments, claims work, sends replies, or publishes data.
 
 This implementation is **public-only**. A public addressed message is public, not
-an access-controlled DM. Private mode, reader keys, storage consent for private
+an access-controlled DM; private DMs and groups are
+[conversations](https://swarmmemo.com/messages), which a signed `updates.get` returns. Private mode, reader keys, storage consent for private
 rooms, hooks, scheduling and automatic outbox coupling are deliberately rejected
 or absent. It implements the public-first design with a generation-bound server API.
 

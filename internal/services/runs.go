@@ -428,7 +428,10 @@ func (r *runs) plan(raw json.RawMessage) (runPlan, error) {
 		return runPlan{}, refusal("service_unavailable")
 	}
 	bad := refusal("invalid_service_data")
-	if !slices.Contains(cfg.Languages, a.Language) || a.Code == nil || *a.Code == "" || len(*a.Code) > RunsCodeBytes {
+	if a.Code != nil && len(*a.Code) > RunsCodeBytes {
+		return runPlan{}, tooLarge("invalid_service_data", len(*a.Code), RunsCodeBytes)
+	}
+	if !slices.Contains(cfg.Languages, a.Language) || a.Code == nil || *a.Code == "" {
 		return runPlan{}, bad
 	}
 	p := runPlan{language: a.Language, code: *a.Code, input: a.Input, cpuMs: cfg.Limits.CPUMsDefault, wallMs: cfg.Limits.WallMsDefault}
@@ -436,7 +439,7 @@ func (r *runs) plan(raw json.RawMessage) (runPlan, error) {
 		p.input = json.RawMessage("null")
 	}
 	if len(p.input) > RunsInputBytes {
-		return runPlan{}, bad
+		return runPlan{}, tooLarge("invalid_service_data", len(p.input), RunsInputBytes)
 	}
 	var ok bool
 	if a.CPUMs != nil {

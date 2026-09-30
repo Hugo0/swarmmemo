@@ -488,6 +488,13 @@ func TestCatalogueConfigValidation(t *testing.T) {
 	if cc := cfg.Catalogue; cc.MaxPrice != 20000 || cc.OpenDaily != 500000 || cc.RecipientDaily != 100000 || cc.DiscoveryURLs[0] != X402DiscoveryCDP || cc.MinPayers != 1 {
 		t.Fatalf("catalogue defaults: %+v", cc)
 	}
+	if cfg.Catalogue.AutoVet != nil {
+		t.Fatal("auto-vet must stay off unless configured")
+	}
+	cfg, _ = ParseX402Config([]byte(fmt.Sprintf(base, `,"catalogue":{"auto_vet":{}}`)), []byte(empty), signer)
+	if a := cfg.Catalogue.AutoVet; a == nil || a.Version != "auto_vet/1 curated|payers>=5 price<=0.02 exclude=adult,gambling" {
+		t.Fatalf("auto_vet defaults (the rule the operator applied by hand): %+v", a)
+	}
 	for name, c := range map[string][2]string{
 		"http discovery":        {`,"catalogue":{"discovery_urls":["http://example.com/d"]}`, empty},
 		"private discovery":     {`,"catalogue":{"discovery_urls":["https://127.0.0.1/d"]}`, empty},
@@ -497,6 +504,12 @@ func TestCatalogueConfigValidation(t *testing.T) {
 		"huge page":             {`,"catalogue":{"page_size":5000}`, empty},
 		"fast refresh":          {`,"catalogue":{"refresh_minutes":1}`, empty},
 		"unknown field":         {`,"catalogue":{"trust_everything":true}`, empty},
+		"auto_vet unknown":      {`,"catalogue":{"auto_vet":{"vet_everything":true}}`, empty},
+		"auto_vet no payers":    {`,"catalogue":{"auto_vet":{"min_payers_30d":0}}`, empty},
+		"auto_vet over price":   {`,"catalogue":{"max_price":"0.01","auto_vet":{"max_price":"0.02"}}`, empty},
+		"auto_vet zero price":   {`,"catalogue":{"auto_vet":{"max_price":"0"}}`, empty},
+		"auto_vet bad category": {`,"catalogue":{"auto_vet":{"exclude_categories":["Adult!"]}}`, empty},
+		"auto_vet not object":   {`,"catalogue":{"auto_vet":true}`, empty},
 		"bad deny domain":       {``, `{"schema":1,"version":1,"resources":[],"deny":{"domains":["https://x.com/"]}}`},
 		"bad deny pay_to":       {``, `{"schema":1,"version":1,"resources":[],"deny":{"pay_to":["0x12"]}}`},
 		"missing domains file":  {``, `{"schema":1,"version":1,"resources":[],"deny":{"domains_file":"/nonexistent"}}`},
@@ -1001,5 +1014,113 @@ func TestCatalogueSummaryScreenNoPoolUnderTx(t *testing.T) {
 	}
 	if got := summaries(t, resultOf(out)); got[openIDFor("/open/search", "GET")] != [2]string{"Web search API <b>fast</b>", "screened"} {
 		t.Fatalf("served under the transaction: %v", got)
+	}
+}
+
+// vettings is x402_vetted as "state reason @changed_at" by id.
+func vettings(t *testing.T, db *sql.DB) map[string]string {
+	t.Helper()
+	rows, err := db.Query("SELECT id,state,reason,changed_at FROM x402_vetted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, state, reason string
+		var at int64
+		if err = rows.Scan(&id, &state, &reason, &at); err != nil {
+			t.Fatal(err)
+		}
+		out[id] = fmt.Sprintf("%s %s @%d", state, reason, at)
+	}
+	return out
+}
+
+// The auto-vet rule vets what matches it at each import, records its
+// version, leaves the operator's decisions and the automatic denies alone,
+// re-evaluates what it vetted, and writes nothing when nothing changed.
+func TestCatalogueAutoVet(t *testing.T) {
+	cfg := catalogueConfig(t, `{}`, strings.TrimSuffix(testCatalogue, "}")+`,"auto_vet":{"min_payers_30d":20}}`)
+	rule := cfg.Catalogue.AutoVet
+	if rule.Version != "auto_vet/1 curated|payers>=20 price<=0.002 exclude=adult,gambling" {
+		t.Fatalf("version %q", rule.Version)
+	}
+	h, x := newCatalogueHarness(t, &fakeX402{price: 1500}, &fakeBazaar{items: testBazaarItems()}, cfg)
+	ctx := context.Background()
+	search, scrape, weather := openIDFor("/open/search", "GET"), openIDFor("/open/scrape", "POST"), openIDFor("/open/weather", "GET")
+	if _, err := x.importCatalogue(ctx, h.now); err != nil {
+		t.Fatal(err)
+	}
+	// search: 50 payers; scrape: curated; weather: no signal, left a candidate.
+	auto := func(at int64) string { return fmt.Sprintf("vetted %s @%d", rule.Version, at) }
+	if got := vettings(t, h.db); len(got) != 2 || got[search] != auto(h.now) || got[scrape] != auto(h.now) {
+		t.Fatalf("after the first import: %v", got)
+	}
+	snap := x.cat.snap.Load()
+	if r := snap.byID[search]; !r.Vetted || !x.callable(r) || r.summaryStatus != summaryPending || snap.byID[weather].Vetted {
+		t.Fatalf("an auto-vetted resource is callable, its summary still screened: %+v", r)
+	}
+	// Idempotent: the same rule over the same listing writes nothing.
+	before := vettings(t, h.db)
+	if _, err := x.importCatalogue(ctx, h.now+60); err != nil {
+		t.Fatal(err)
+	}
+	if got := vettings(t, h.db); fmt.Sprint(got) != fmt.Sprint(before) {
+		t.Fatalf("a second import changed the vettings: %v, was %v", got, before)
+	}
+	// The operator unvets scrape and vets weather by hand; an automatic deny
+	// lands on search's URL.
+	for id, vet := range map[string]bool{scrape: false, weather: true} {
+		if _, err := VetX402(ctx, h.db, id, vet, h.now+100); err != nil {
+			t.Fatal(err)
+		}
+	}
+	searchURL := canonicalX402URL("https://example.com/open/search")
+	if _, err := h.db.Exec("INSERT INTO x402_denied(kind,value,reason,denied_at) VALUES('url',?,'unanswered_payments',?)", searchURL, h.now+100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := x.importCatalogue(ctx, h.now+200); err != nil {
+		t.Fatal(err)
+	}
+	got := vettings(t, h.db)
+	if got[scrape] != fmt.Sprintf("unvetted operator @%d", h.now+100) || got[weather] != fmt.Sprintf("vetted operator @%d", h.now+100) {
+		t.Fatalf("the rule overrode the operator: %v", got)
+	}
+	var cleared int64
+	_ = h.db.QueryRow("SELECT cleared_at FROM x402_denied WHERE value=?", searchURL).Scan(&cleared)
+	if cleared != 0 || x.cat.snap.Load().byID[search] != nil {
+		t.Fatalf("an automatic deny must hold against the rule (cleared_at %d)", cleared)
+	}
+	if _, err := h.db.Exec("UPDATE x402_denied SET cleared_at=? WHERE value=?", h.now+250, searchURL); err != nil {
+		t.Fatal(err)
+	}
+	// A stricter rule unvets what the old one vetted, and only that.
+	x.cfg.Catalogue.AutoVet, _ = parseAutoVet(&x402AutoVetFile{MinPayers: "100", ExcludeCategories: []string{}}, cfg.Catalogue.MaxPrice, 6)
+	stricter := x.cfg.Catalogue.AutoVet.Version
+	if _, err := x.importCatalogue(ctx, h.now+300); err != nil {
+		t.Fatal(err)
+	}
+	got = vettings(t, h.db)
+	if got[search] != fmt.Sprintf("unvetted %s @%d", stricter, h.now+300) || got[scrape] != fmt.Sprintf("unvetted operator @%d", h.now+100) ||
+		got[weather] != fmt.Sprintf("vetted operator @%d", h.now+100) {
+		t.Fatalf("re-evaluation: %v", got)
+	}
+	if r := x.cat.snap.Load().byID[search]; r == nil || r.Vetted || x.callable(r) {
+		t.Fatalf("search must be a candidate again: %+v", r)
+	}
+	// Without a rule, nothing is written.
+	x.cfg.Catalogue.AutoVet = nil
+	before = vettings(t, h.db)
+	if _, err := x.importCatalogue(ctx, h.now+400); err != nil {
+		t.Fatal(err)
+	}
+	if got := vettings(t, h.db); fmt.Sprint(got) != fmt.Sprint(before) {
+		t.Fatalf("no rule, yet the vettings changed: %v", got)
+	}
+	// The resources read states the rule.
+	x.cfg.Catalogue.AutoVet = rule
+	if cat := h.resources(`{}`)["catalogue"].(map[string]any); cat["auto_vet"] != "CDP-curated or at least 20 payers in 30 days, at most 0.002, not adult or gambling" {
+		t.Fatalf("catalogue: %v", cat)
 	}
 }

@@ -32,7 +32,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		return Result{}, problem(400, "invalid_text", "Text must be nonempty UTF-8 without NUL bytes.")
 	}
 	if len(c.Text) > s.config.MaxTextBytes {
-		return Result{}, problem(413, "text_too_large", fmt.Sprintf("Text exceeds %d UTF-8 bytes; split it into smaller messages.", s.config.MaxTextBytes))
+		return Result{}, problem(413, "text_too_large", "Text is too long "+SizeNote(len(c.Text), s.config.MaxTextBytes, "bytes")+"; split it into smaller messages.")
 	}
 	if c.Handle != "" && !handleRE.MatchString(c.Handle) {
 		return Result{}, problem(400, "invalid_handle", fmt.Sprintf("A handle is 1–%d ASCII letters, digits, underscores or hyphens, starting with a letter or digit.", HandleMaxChars))
@@ -63,11 +63,15 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		if !errors.As(err, &accessError) || accessError.Code != "not_found" {
 			return Result{}, err
 		}
+		if err2 := requestedPoster(ctx, tx, c.Room, a); err2 != nil {
+			return Result{}, err2
+		}
 		var count int
 		if err2 := tx.QueryRowContext(ctx, "SELECT count(*) FROM rooms WHERE name=?", c.Room).Scan(&count); err2 != nil {
 			return Result{}, err2
 		}
-		if count != 0 {
+		// A conversation opens only through conversation.open (RFC0013 §3.1).
+		if count != 0 || IsConversationRoom(c.Room) {
 			return Result{}, err
 		}
 		if c.Visibility == "private" {
@@ -92,6 +96,35 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	}
 	if c.Visibility != "" && c.Visibility != r.Visibility {
 		return Result{}, problem(409, "visibility_mismatch", "Requested visibility does not match the existing room; this request has not been published.")
+	}
+	// RFC0013: a conversation's limits, sealing and request rules, checked
+	// before any charge, so a refused post costs nothing.
+	conv, isConversation, err := loadConversation(ctx, tx, r.Name)
+	if err != nil {
+		return Result{}, err
+	}
+	if !isConversation {
+		conv = conversationRow{Room: r.Name}
+	}
+	if data.Format == PostFormatSealed || conv.Sealed {
+		// §6: a sealed room takes only a sealed envelope of its current
+		// epoch, and only a sealed room takes one.
+		if err = s.checkSealedPost(ctx, tx, conv, c, a); err != nil {
+			return Result{}, err
+		}
+	}
+	messages := int64(-1)
+	if isConversation {
+		messages = conv.MessageCount
+	}
+	if err = checkRoomLimits(ctx, tx, r.Name, data.Supersedes == "", messages, now); err != nil {
+		return Result{}, err
+	}
+	pending := false
+	if isConversation {
+		if pending, err = s.checkRequestPost(ctx, tx, conv, c, a, data.Supersedes == "", now); err != nil {
+			return Result{}, err
+		}
 	}
 	if c.ReplyTo != "" {
 		var room string
@@ -132,6 +165,13 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	origin := ""
 	if data.Supersedes != "" {
 		if origin, err = checkSupersession(ctx, tx, c, a, data.Supersedes); err != nil {
+			return Result{}, err
+		}
+	}
+	// A bridged post's subject is its origin key, not a network, and the
+	// bridge already rates each key and itself (transport/nostr.go).
+	if !a.signed && !forwarded && c.ReplyTo == "" && data.Supersedes == "" {
+		if err = s.countAnonymousThread(ctx, tx, a, now); err != nil {
 			return Result{}, err
 		}
 	}
@@ -193,6 +233,11 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err = s.attachToPost(ctx, tx, c, id, now); err != nil {
 		return Result{}, err
 	}
+	if isConversation {
+		if err = s.conversationPosted(ctx, tx, conv, a, seq, data.Supersedes == "", pending, now); err != nil {
+			return Result{}, err
+		}
+	}
 	if r.Visibility == "public" {
 		if _, err = tx.ExecContext(ctx, "INSERT INTO changes(event_id,changed_at) VALUES(?,?)", id, now); err != nil {
 			return Result{}, err
@@ -203,7 +248,11 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err = s.enqueueWebhooks(ctx, tx, id, c, r, a, now); err != nil {
 		return Result{}, err
 	}
-	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied}}, nil
+	applied := ""
+	if a.signed && a.grant == nil && c.Handle != "" && notApplied == nil {
+		applied = handle
+	}
+	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied}}, nil
 }
 
 // claimOnPost returns the handle a signed post is stored under: always the
@@ -251,7 +300,7 @@ func (s *Store) claimOnPost(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	return want, nil, nil
 }
 
-const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id AND s.supersedes<>''),''),e.hidden_by,e.via,` + forwardColumn
+const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id AND s.supersedes<>''),''),e.hidden_by,e.via,` + forwardColumn + `,` + custodyColumn
 
 type scanner interface{ Scan(...any) error }
 
@@ -272,12 +321,14 @@ func curatorPost(kind, handle, publicKey string) bool {
 func scanEvent(row scanner) (Message, error) {
 	var e Message
 	var forward string
-	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward)
+	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody)
 	e.Forwarded = parseForwarded(forward)
 	e.Via = messageVia(e.Via, e.Forwarded)
 	e.Type = "message"
 	e.ArchiveEligible = e.Visibility == "public"
 	e.Curated = curatorPost(e.Kind, e.Handle, e.PublicKey)
+	// Only a sealed conversation takes a sealed post (checkSealedPost).
+	e.Sealed = e.Format == PostFormatSealed
 	if e.Hidden {
 		redact(&e)
 	}
@@ -418,6 +469,9 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if err = attachScores(ctx, tx, events); err != nil {
 			return Result{}, err
 		}
+		if err = s.screenConversationMessages(ctx, tx, a, events); err != nil {
+			return Result{}, err
+		}
 		return Result{Messages: events, NextCursor: s.cursor(e.internalSequence), Data: map[string]any{"has_more": false}}, nil
 	}
 	order := "DESC"
@@ -444,6 +498,9 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	rows.Close()
 	res, err := s.finishPage(ctx, tx, c, events, order, limit, seq, now)
+	if err == nil {
+		err = s.screenConversationMessages(ctx, tx, a, res.Messages)
+	}
 	if err == nil && c.firstContact {
 		res.Data["sort"] = "new"
 	}
@@ -559,7 +616,7 @@ func (s *Store) export(ctx context.Context, tx *sql.Tx, c Command, now int64) (R
 		var e Message
 		var change int64
 		var forward string
-		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &change); err != nil {
+		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody, &change); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
@@ -711,4 +768,91 @@ func (s *Store) stats(ctx context.Context, tx *sql.Tx) (Result, error) {
 		stats[key] = n
 	}
 	return Result{Stats: stats}, nil
+}
+
+// requestedPoster explains a post a requested member cannot make yet: it has
+// no room access until it accepts (RFC0013 §3.4).
+func requestedPoster(ctx context.Context, tx *sql.Tx, room string, a actor) error {
+	if !a.signed || !IsConversationRoom(room) {
+		return nil
+	}
+	m, ok, err := loadMember(ctx, tx, room, a.account)
+	if err != nil || !ok || m.State != memberRequested {
+		return err
+	}
+	return problem(409, "request_pending", "Accept this conversation request with conversation.respond before posting in it; this request has not been published.")
+}
+
+// checkRequestPost applies the request rules to a post into conv (RFC0013
+// §3.4): while no other member has answered (posted, accepted or joined by
+// invite), the author may send RequestPosts messages of at most
+// RequestPostBytes (a new version of one keeps the byte bound and is not
+// counted again). It says whether this post counts as a pending one. Whether
+// the others were delivered, asked or dropped makes no difference here.
+func (s *Store) checkRequestPost(ctx context.Context, tx *sql.Tx, conv conversationRow, c Command, a actor, original bool, now int64) (bool, error) {
+	var others, answered int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(acknowledged),0) FROM conversation_members WHERE room=? AND account<>?", conv.Room, a.account).Scan(&others, &answered); err != nil {
+		return false, err
+	}
+	if others == 0 || answered > 0 {
+		return false, nil
+	}
+	p, err := s.conversationParams(ctx, tx, now)
+	if err != nil {
+		return false, err
+	}
+	m, _, err := loadMember(ctx, tx, conv.Room, a.account)
+	if err != nil {
+		return false, err
+	}
+	if int64(len(c.Text)) > p.RequestPostBytes || (original && m.RequestPosts >= p.RequestPosts) {
+		sent := ""
+		if int64(len(c.Text)) > p.RequestPostBytes {
+			sent = " " + SizeNote(len(c.Text), int(p.RequestPostBytes), "bytes")
+		}
+		return false, problem(409, "request_pending", fmt.Sprintf("Until someone answers, a conversation takes %d messages of at most %d bytes from you%s; this request has not been published.", p.RequestPosts, p.RequestPostBytes, sent))
+	}
+	return original, nil
+}
+
+// conversationPosted records a post into conv: the conversation's newest
+// message and count, the author's read marker (its own message is read, once
+// it has read what others posted before it: posting never marks their
+// messages read), its pending count, and that it has now acted, which
+// returns any postage held for it.
+func (s *Store) conversationPosted(ctx context.Context, tx *sql.Tx, conv conversationRow, a actor, seq int64, original, pending bool, now int64) error {
+	added := 0
+	if original {
+		added = 1
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE conversations SET last_seq=?,message_count=message_count+? WHERE room=?", seq, added, conv.Room); err != nil {
+		return err
+	}
+	counted := 0
+	if pending {
+		counted = 1
+	}
+	m, _, err := loadMember(ctx, tx, conv.Room, a.account)
+	if err != nil {
+		return err
+	}
+	readSeq := m.ReadSeq
+	if unread, _, err := unreadCount(ctx, tx, conv.Room, a.account, m.ReadSeq); err != nil {
+		return err
+	} else if unread == 0 {
+		readSeq = seq
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE conversation_members SET read_seq=?,request_posts=request_posts+? WHERE room=? AND account=?", readSeq, counted, conv.Room, a.account); err != nil {
+		return err
+	}
+	if m.Acknowledged {
+		return nil
+	}
+	if m, _, err = loadMember(ctx, tx, conv.Room, a.account); err != nil {
+		return err
+	}
+	if m, err = setMemberState(ctx, tx, memberChange{Room: conv.Room, Account: a.account, State: m.State, Acknowledge: true}, now); err != nil {
+		return err
+	}
+	return s.releasePostage(ctx, tx, m, false, now)
 }

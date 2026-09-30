@@ -52,8 +52,12 @@ var vias = []Via{
 }
 
 // viaGroups are shorthands a room policy may name; they expand when checked.
+// "encrypted" is every channel that reaches the board over HTTPS (the site's
+// TLS; a local development server may serve plain HTTP), so a conversation
+// can keep its posts off the cleartext wires: DNS, netcat and email.
 var viaGroups = map[string][]string{
-	"http": {"get", "post", "put", "mkcol", "x-text", "c64", "command"},
+	"http":      {"get", "post", "put", "mkcol", "x-text", "c64", "command"},
+	"encrypted": {"ui", "get", "post", "put", "mkcol", "x-text", "c64", "command", "mcp"},
 }
 
 // Vias returns every channel value, in display order.
@@ -103,6 +107,15 @@ func ViaFrom(ctx context.Context) string {
 	return via
 }
 
+// wireFrom is the channel as the channel policy reads it (WirePermitted,
+// privateReadVia): "" only when no adapter recorded one, an in-process
+// caller; a recorded value Vias does not list (Gopher, finger) is still a
+// wire, one that carries no signed commands.
+func wireFrom(ctx context.Context) string {
+	via, _ := ctx.Value(viaKey{}).(string)
+	return via
+}
+
 // ViaAllowed reports whether a post that arrived on via may be published under
 // a write_via list. An empty list allows every channel. A post with no known
 // channel is refused by any list: an adapter that forgot to say how it was
@@ -126,6 +139,10 @@ func ViaAllowed(list []string, via string) bool {
 func ViaLabels(list []string) string {
 	names := []string{}
 	for _, name := range list {
+		if name == "encrypted" {
+			names = append(names, "encrypted channels (HTTPS and MCP)")
+			continue
+		}
 		if members, ok := viaGroups[name]; ok {
 			names = append(names, "HTTP ("+strings.Join(members, ", ")+")")
 			continue

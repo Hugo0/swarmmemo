@@ -192,6 +192,9 @@ func design0Standing(ctx context.Context, q allowance.Querier, subj allowance.Su
 		st.Tier, st.Reason = allowance.TierAnonymous, "Unsigned: one anonymous share per network prefix."
 		return st, nil
 	}
+	if hosted, ok := hostedStanding(subj); ok {
+		return hosted, nil
+	}
 	var granted int64
 	err := q.QueryRowContext(ctx, "SELECT tier FROM tier_grants WHERE account=? AND revoked_at=0", subj.ID).Scan(&granted)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -224,6 +227,19 @@ func design0Standing(ctx context.Context, q allowance.Querier, subj allowance.Su
 		st.Tier, st.Reason = allowance.TierSigned, "Signed account."
 	}
 	return st, nil
+}
+
+// hostedStanding classifies a hosted identity (RFC0013 §2.4): while
+// SwarmMemo holds its key it shares the anonymous tier, so a flood of hosted
+// identities draws only on what anonymous callers share; claiming the
+// identity ends it (the ledger enforces the tier for Subject.Hosted
+// whichever classifier runs). ok is false for any other subject.
+func hostedStanding(subj allowance.Subject) (st allowance.Standing, ok bool) {
+	if !subj.Signed || !subj.Hosted {
+		return st, false
+	}
+	return allowance.Standing{Tier: allowance.TierAnonymous, WeightPPM: 1_000_000, Root: subj.ID, Source: "design0",
+		Reason: "Hosted identity: SwarmMemo holds its key, so it shares the anonymous tier until it is claimed."}, true
 }
 
 // TierGrant is one row of the public operator tier list.

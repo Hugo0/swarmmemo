@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"swarmmemo/internal/board"
@@ -20,6 +22,11 @@ func viaFixture(t *testing.T) (*board.Store, *Server) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
+	// Every route posts a thread from one address: lift the anonymous thread
+	// rate (board's TestAnonymousThreadRate covers it).
+	if _, err = store.SetAllowanceParams(t.Context(), board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000}`), "test", 0); err != nil {
+		t.Fatal(err)
+	}
 	return store, New(store, nil, Config{BridgeTokens: map[string]string{"email": testBridgeToken}})
 }
 
@@ -228,6 +235,71 @@ func TestWriteViaOnHTTPRoutes(t *testing.T) {
 	for _, want := range []string{`"vias":[`, `"write_via":{`, `"name":"dns"`} {
 		if !strings.Contains(caps, want) {
 			t.Fatalf("/capabilities lacks %s", want)
+		}
+	}
+}
+
+// viaRecorder is a board.Service that records the channel each command
+// reached the board with.
+type viaRecorder struct {
+	board.Service
+	mu   sync.Mutex
+	seen map[string]string // "METHOD TARGET operation" -> via
+	path string
+}
+
+func (v *viaRecorder) Execute(ctx context.Context, c board.Command, peer string) (board.Result, error) {
+	v.mu.Lock()
+	v.seen[v.path+" "+c.Operation] = board.ViaFrom(ctx)
+	v.mu.Unlock()
+	return v.Service.Execute(ctx, c, peer)
+}
+
+// Every HTTP route that reaches the board says which channel it served: an
+// empty via is an in-process caller, which the channel policy and the
+// encrypted-only reads trust (board.WirePermitted), so no request from the
+// network may arrive without one. Each route family is tried; a route that
+// skips serveHTTP's default fails here.
+func TestEveryHTTPRouteReachesTheBoardWithAChannel(t *testing.T) {
+	store, _ := viaFixture(t)
+	rec := &viaRecorder{Service: store, seen: map[string]string{}}
+	s := New(rec, nil, Config{PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com"})
+	posted, err := store.Execute(t.Context(), board.Command{Operation: "post", Room: "lobby", Text: "to read"}, "198.51.100.10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, agent := posted.Receipt.ID, strings.Repeat("a", 64)
+	command := `{"operation":"post","room":"lobby","text":"hello"}`
+	mcpRead := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_messages","arguments":{"room":"lobby"}}}`
+	for _, r := range []struct{ method, target, body, ct string }{
+		{"GET", "/api/messages", "", ""}, {"GET", "/recent", "", ""}, {"GET", "/search?query=read", "", ""},
+		{"GET", "/r/lobby", "", ""}, {"GET", "/r/lobby/main", "", ""}, {"HEAD", "/api/messages", "", ""},
+		{"GET", "/api/updates?target=" + agent, "", ""}, {"GET", "/api/pages?room=lobby", "", ""},
+		{"GET", "/api/thread/" + id, "", ""}, {"GET", "/e/" + id, "", ""},
+		{"GET", "/api/rooms", "", ""}, {"GET", "/rooms", "", ""}, {"GET", "/api/agents", "", ""}, {"GET", "/who", "", ""},
+		{"GET", "/api/works", "", ""}, {"GET", "/api/delegation/x", "", ""}, {"GET", "/api/work/" + id, "", ""},
+		{"GET", "/api/stats", "", ""}, {"GET", "/api/agent/" + agent, "", ""}, {"GET", "/api/room/lobby", "", ""},
+		{"GET", "/api/room/lobby/modlog", "", ""}, {"GET", "/inbox/" + agent, "", ""}, {"GET", "/a/x", "", ""},
+		{"GET", "/feed", "", ""}, {"GET", "/v1/export", "", ""}, {"GET", "/api/allowance", "", ""}, {"GET", "/api/ledger", "", ""},
+		{"GET", "/w/lobby/main?text=hi", "", ""}, {"POST", "/w/lobby/main", "hi", "text/plain"},
+		{"POST", "/v1/command", command, "application/json"}, {"GET", c64(command), "", ""},
+		{"POST", "https://swarmmemo.com/mcp", mcpRead, "application/json"},
+	} {
+		rec.path = r.method + " " + r.target
+		req := httptest.NewRequest(r.method, r.target, strings.NewReader(r.body))
+		req.RemoteAddr = "198.51.100.9:12345"
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		if r.ct != "" {
+			req.Header.Set("Content-Type", r.ct)
+		}
+		s.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	if len(rec.seen) < 25 {
+		t.Fatalf("only %d commands reached the board; the route list above is stale: %v", len(rec.seen), rec.seen)
+	}
+	for call, via := range rec.seen {
+		if via == "" {
+			t.Errorf("%s reached the board with no channel, as if in-process", call)
 		}
 	}
 }

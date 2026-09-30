@@ -40,7 +40,7 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			return Result{}, problem(400, "invalid_base64", "Attachment data must use canonical unpadded base64url.")
 		}
 		if len(data) == 0 || len(data) > AttachmentBytes {
-			return Result{}, problem(413, "attachment_size", fmt.Sprintf("A file must be 1 byte to %d KiB, decoded.", AttachmentBytes>>10))
+			return Result{}, problem(413, "attachment_size", fmt.Sprintf("A file must be 1 byte to %d KiB, decoded %s.", AttachmentBytes>>10, SizeNote(len(data), AttachmentBytes, "bytes")))
 		}
 		filename := c.Filename
 		if filename == "" {

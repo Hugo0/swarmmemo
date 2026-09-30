@@ -38,8 +38,9 @@ type partial struct {
 }
 
 type status struct {
-	text string
-	at   time.Time
+	text   string
+	notice string // the cleartext label of the completing answer, repeated by MSGID.status
+	at     time.Time
 }
 
 const (
@@ -101,7 +102,7 @@ func (d *dns) parseWrite(req *Request, sub []string, txt bool, source string) bo
 	// The same strict decoder as /c64/; the board verifies the signature.
 	cmd, err := httpapi.DecodeCommand(raw)
 	if err != nil {
-		d.writes.finish(sub[0], "error "+boardError(err).Code)
+		d.writes.finish(sub[0], "error "+boardError(err).Code, "")
 		req.Route, req.Arg = "write-status", sub[0]
 		return true
 	}
@@ -209,28 +210,30 @@ func (r *reassembly) addFrom(source, id string, i, n int, chunk string) (command
 	r.drop(id)
 	raw, err := base32Lower.DecodeString(encoded)
 	if err != nil {
-		r.record(id, "error invalid_encoding", now)
+		r.record(id, "error invalid_encoding", "", now)
 		return nil, "error invalid_encoding"
 	}
 	// Until the board answers, a status read says so; a panic leaves this.
-	r.record(id, "error not_completed", now)
+	r.record(id, "error not_completed", "", now)
 	return raw, ""
 }
 
-func (r *reassembly) lookup(id string) string {
+// lookup is MSGID.status: the outcome and, for a finished command, its
+// cleartext label ("" when it has none).
+func (r *reassembly) lookup(id string) (text, notice string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
 	if st, ok := r.statuses[id]; ok && now.Sub(st.at) < writeStatusTTL {
-		return st.text
+		return st.text, st.notice
 	}
 	if p, ok := r.partials[id]; ok && now.Sub(p.created) < writeExpiry {
-		return "pending " + strconv.Itoa(p.have) + "/" + strconv.Itoa(p.n)
+		return "pending " + strconv.Itoa(p.have) + "/" + strconv.Itoa(p.n), ""
 	}
-	return "unknown"
+	return "unknown", ""
 }
 
-func (r *reassembly) record(id, text string, now time.Time) {
+func (r *reassembly) record(id, text, notice string, now time.Time) {
 	if _, ok := r.statuses[id]; !ok && len(r.statuses) >= writeMaxStatuses {
 		r.sweep(now)
 		if len(r.statuses) >= writeMaxStatuses {
@@ -244,19 +247,21 @@ func (r *reassembly) record(id, text string, now time.Time) {
 			delete(r.statuses, oldest)
 		}
 	}
-	r.statuses[id] = status{text: text, at: now}
+	r.statuses[id] = status{text: text, notice: notice, at: now}
 }
 
-// finish records the board's answer for a completed command.
-func (r *reassembly) finish(id, text string) {
+// finish records the board's answer for a completed command, with its
+// cleartext label, so a status query can repeat what a short UDP answer
+// had no room for.
+func (r *reassembly) finish(id, text, notice string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.record(id, text, r.now())
+	r.record(id, text, notice, r.now())
 }
 
 func (r *reassembly) fail(id, text string, now time.Time) {
 	r.drop(id)
-	r.record(id, text, now)
+	r.record(id, text, "", now)
 }
 
 func (r *reassembly) drop(id string) {

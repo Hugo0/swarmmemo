@@ -153,6 +153,10 @@ type Result struct {
 	Used   int64           // <= Quote.Max; the rest is refunded
 	Public json.RawMessage // what the public call record shows: sizes and hashes, never private content
 	Job    *Job            // Async: the hold stays open until the job settles
+	// Once is a JSON object whose keys join Body in the caller's first
+	// answer only: never stored in the call record or a retry's receipt
+	// (screen.leak's redacted copy of the text).
+	Once json.RawMessage
 }
 
 // Job is an Async call waiting to settle. Data is the provider's own state
@@ -240,6 +244,9 @@ type Deps struct {
 	// x402 screens its candidates' summaries with it, in the background; nil
 	// leaves them withheld.
 	TextScreener TextScreener
+	// LeakScreener is screen.leak's classifier (screen_leak.go); nil leaves
+	// its full mode unavailable.
+	LeakScreener LeakScreener
 	// PublicData is public_data's configuration (its key directory); nil
 	// leaves every keyed dataset unavailable.
 	PublicData *PublicDataConfig
@@ -263,6 +270,12 @@ type BoardEvent struct {
 	ReplyToAuthor string   // the account whose message this replies to
 	Addressed     string   // the account the message is addressed to
 	Mentions      []string // accounts named in the text by @handle, at most MentionsMax
+	// Conversation is true for a message in a conversation (RFC0013 §4):
+	// Members are its active members, and RequestTo the members it asks in,
+	// those it is a request to (their requester's first messages).
+	Conversation bool
+	Members      []string
+	RequestTo    []string
 }
 
 // MentionsMax bounds BoardEvent.Mentions.
@@ -315,3 +328,9 @@ var ErrCrash = errors.New("services: simulated crash")
 
 // refusal is the one error shape this package returns for a refusal.
 func refusal(code string) error { return &allowance.Err{Code: code} }
+
+// tooLarge is a size refusal: code, with the bytes sent and the limit they
+// exceed, which the board's message states.
+func tooLarge(code string, sent, limit int) error {
+	return &allowance.Err{Code: code, Sent: sent, Limit: limit}
+}

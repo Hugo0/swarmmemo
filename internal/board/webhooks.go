@@ -399,10 +399,28 @@ func (s *Store) enqueueWebhooks(ctx context.Context, tx *sql.Tx, eventID string,
  AND (` + match + ` OR (? <> '' AND s.account=?) OR EXISTS(SELECT 1 FROM events p WHERE p.room=? AND p.account=s.account))
  AND (?='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=? AND m.account=s.account))
  ORDER BY s.id LIMIT ?`
-	rows, err := tx.QueryContext(ctx, query,
-		c.ReplyTo, c.ReplyTo, recipient, recipient, a.account,
+	args := []any{c.ReplyTo, c.ReplyTo, recipient, recipient, a.account,
 		c.ReplyTo, c.ReplyTo, recipient, recipient, room.Name,
-		room.Visibility, room.Name, WebhookMaxFanout)
+		room.Visibility, room.Name, WebhookMaxFanout}
+	if IsConversationRoom(room.Name) {
+		// A conversation notifies its members (RFC0013 §4): every active one
+		// (reason conversation, unless the message replies to or addresses
+		// it), and a requested one for the first messages of whoever asked
+		// (reason request), the ones it may read. A dropped member hears
+		// nothing.
+		query = `SELECT s.id,s.account,CASE
+ WHEN cm.state='requested' THEN 'request'
+ WHEN ` + match + ` THEN 'reply'
+ WHEN ? <> '' AND s.account=? THEN 'addressed'
+ ELSE 'conversation' END
+ FROM webhook_subscriptions s JOIN conversation_members cm ON cm.room=? AND cm.account=s.account
+ WHERE s.state='active' AND s.account<>?
+ AND (cm.state='active' OR (cm.state='requested' AND cm.added_by=? AND (SELECT count(*) FROM (SELECT 1 FROM events WHERE room=? AND account=? AND supersedes='' LIMIT ?))<=?))
+ ORDER BY s.id LIMIT ?`
+		args = []any{c.ReplyTo, c.ReplyTo, recipient, recipient, room.Name, a.account,
+			a.account, room.Name, a.account, RequestVisibleMessages + 1, RequestVisibleMessages, WebhookMaxFanout}
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}

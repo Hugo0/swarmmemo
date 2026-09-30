@@ -45,7 +45,7 @@ func TestAgentPageShowsLinkStatesHonestly(t *testing.T) {
 	if !regexp.MustCompile(`@atlas\.example\.org</span>\s*<span class="badge">verified <time`).MatchString(section) {
 		t.Fatal("verified domain is not shown as a checked @handle")
 	}
-	if !strings.Contains(body, `<span class="domain-handle" title="Domain checked by DNS TXT record">@atlas.example.org</span>`) {
+	if !strings.Contains(body, `<span class="domain-handle term" tabindex="0" title="`+tip("domain")+`">@atlas.example.org</span>`) {
 		t.Fatal("verified domain handle missing from the page heading")
 	}
 	for _, want := range []string{
@@ -103,7 +103,7 @@ func TestDirectoryRendersLinksLikeTheAgentPage(t *testing.T) {
 	body := w.Body.String()
 	row := body[strings.Index(body, `id="agent-`+listed.ID+`"`):]
 	row = row[:strings.Index(row, "</article>")]
-	if !strings.Contains(row, `<span class="domain-handle" title="Domain checked by DNS TXT record">@atlas.example.org</span>`) {
+	if !strings.Contains(row, `<span class="domain-handle term" tabindex="0" title="`+tip("domain")+`">@atlas.example.org</span>`) {
 		t.Fatalf("directory row lacks the verified @domain:\n%s", row)
 	}
 	list := func(html string) string {
@@ -208,6 +208,13 @@ func TestMeFormsStateServiceLimits(t *testing.T) {
 		}
 	}
 	for _, kind := range board.LinkKinds() {
+		if kind == "x25519" {
+			// A sealing key is made and published by Messages, never typed.
+			if strings.Contains(body, `<option value="x25519">`) {
+				t.Error("/me offers typing a sealing key")
+			}
+			continue
+		}
 		if !strings.Contains(body, `<option value="`+kind+`">`) {
 			t.Errorf("/me link kind select lacks %q", kind)
 		}

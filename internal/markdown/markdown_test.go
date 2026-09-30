@@ -29,14 +29,14 @@ func TestSubset(t *testing.T) {
 		{"# Title\n\nBody *em* and **strong**.", "<h2>Title</h2>\n<p>Body <em>em</em> and <strong>strong</strong>.</p>\n"},
 		{"## Sub\n### Deep\n#### Deeper", "<h3>Sub</h3>\n<h4>Deep</h4>\n<h4>Deeper</h4>\n"},
 		{"a `x < y` b", "<p>a <code>x &lt; y</code> b</p>\n"},
-		{"```go\nif a < b {\n\treturn\n}\n```", "<pre><code>if a &lt; b {\n\treturn\n}</code></pre>\n"},
+		{"```go\nif a < b {\n\treturn\n}\n```", "<pre><code data-lang=\"go\">if a &lt; b {\n\treturn\n}</code></pre>\n"},
 		{"- one\n- two\n  - nested\n- three", "<ul>\n<li>one</li>\n<li>two<ul>\n<li>nested</li>\n</ul>\n</li>\n<li>three</li>\n</ul>\n"},
 		{"3. c\n4. d", "<ol start=\"3\">\n<li>c</li>\n<li>d</li>\n</ol>\n"},
 		{"> quoted\n> more", "<blockquote>\n<p>quoted\nmore</p>\n</blockquote>\n"},
 		{"a\n\n---\n\nb", "<p>a</p>\n<hr>\n<p>b</p>\n"},
 		{"| a | b |\n|:--|--:|\n| 1 | 2 |", "<div class=\"md-table\"><table>\n<thead><tr><th class=\"md-left\">a</th><th class=\"md-right\">b</th></tr></thead>\n<tbody>\n<tr><td class=\"md-left\">1</td><td class=\"md-right\">2</td></tr>\n</tbody>\n</table></div>\n"},
-		{"[docs](https://example.com/docs)", "<p><a href=\"https://example.com/docs\" rel=\"nofollow noopener ugc\"><bdi>docs</bdi></a><bdi class=\"md-host\" dir=\"ltr\">example.com</bdi></p>\n"},
-		{"see https://example.com/a_(b). ok", "<p>see <a href=\"https://example.com/a_(b)\" rel=\"nofollow noopener ugc\"><bdi>https://example.com/a_(b)</bdi></a>. ok</p>\n"},
+		{"[docs](https://example.com/docs)", "<p><a href=\"https://example.com/docs\" rel=\"nofollow ugc noopener noreferrer\"><bdi>docs</bdi></a><bdi class=\"md-host\" dir=\"ltr\">example.com</bdi></p>\n"},
+		{"see https://example.com/a_(b). ok", "<p>see <a href=\"https://example.com/a_(b)\" rel=\"nofollow ugc noopener noreferrer\"><bdi dir=\"ltr\">https://<span class=\"link-host\">example.com</span>/a_(b)</bdi></a>. ok</p>\n"},
 		{"[protocol](/docs)", "<p><a href=\"/docs\"><bdi>protocol</bdi></a></p>\n"},
 		{"line one  \nline two", "<p>line one<br>\nline two</p>\n"},
 		{"\\*not em\\*", "<p>*not em*</p>\n"},
@@ -83,8 +83,9 @@ func TestTitleSummarySlug(t *testing.T) {
 
 // tagRE lists every tag in the output. Only this file's fixed vocabulary may appear.
 var tagRE = regexp.MustCompile(`<(/?)([a-zA-Z0-9]+)([^>]*)>`)
-var allowedTags = map[string]bool{"p": true, "h2": true, "h3": true, "h4": true, "em": true, "strong": true, "code": true, "pre": true, "ul": true, "ol": true, "li": true, "blockquote": true, "hr": true, "br": true, "a": true, "bdi": true, "div": true, "table": true, "thead": true, "tbody": true, "tr": true, "th": true, "td": true}
-var attrRE = regexp.MustCompile(`^(?: (?:href="(?:https?://|/|#md-)[^"]*"|rel="nofollow noopener ugc"|class="md-(?:host|table|left|right|center)"|dir="ltr"|start="\d+"|id="md-[a-z0-9-]+"))*$`)
+var copyValueRE = regexp.MustCompile(` data-copy-value="[^"<>]*"`)
+var allowedTags = map[string]bool{"span": true, "p": true, "h2": true, "h3": true, "h4": true, "em": true, "strong": true, "code": true, "pre": true, "ul": true, "ol": true, "li": true, "blockquote": true, "hr": true, "br": true, "a": true, "bdi": true, "div": true, "table": true, "thead": true, "tbody": true, "tr": true, "th": true, "td": true}
+var attrRE = regexp.MustCompile(`^(?: (?:href="(?:https?://|/|#md-)[^"]*"|rel="nofollow ugc noopener noreferrer"|class="(?:md-(?:host|table|left|right|center)|link-host|memo-title)"|dir="ltr"|start="\d+"|id="md-[a-z0-9-]+"|data-lang="[a-z0-9+#._-]{1,24}"|data-copy-value="[^"<>]*"))*$`)
 
 // checkSafe asserts the structural safety properties on any output.
 func checkSafe(t testing.TB, src, out string) {
@@ -107,8 +108,9 @@ func checkSafe(t testing.TB, src, out string) {
 			t.Fatalf("output introduced %q for %q", bad, src)
 		}
 		// When the input contains the string it must only survive as escaped text,
-		// never inside a tag.
-		for _, m := range tagRE.FindAllString(lower, -1) {
+		// never inside a tag. The one attribute that carries author text,
+		// data-copy-value (escaped; attrRE holds its shape), is inert.
+		for _, m := range tagRE.FindAllString(copyValueRE.ReplaceAllString(lower, ""), -1) {
 			if strings.Contains(m, bad) {
 				t.Fatalf("%q reached a tag for %q: %s", bad, src, m)
 			}
@@ -304,7 +306,7 @@ func TestScaling(t *testing.T) {
 }
 
 func FuzzRender(f *testing.F) {
-	for _, seed := range []string{"# T\n\n*a* **b** `c` [d](https://e.example) <https://f.example>\n\n- g\n  - h\n1. i\n\n> j\n\n```\nk\n```\n\n| l | m |\n|---|:-:|\n| n | o |\n\n---", "[x](javascript:alert(1))", "<script>", "\u202e[x](https://y.example)", "***a**b*", "- [x](/docs)\n\n  para"} {
+	for _, seed := range []string{"# T\n\n*a* **b** `c` [d](https://e.example) <https://f.example>\n\n- g\n  - h\n1. i\n\n> j\n\n```\nk\n```\n\n| l | m |\n|---|:-:|\n| n | o |\n\n---", "[x](javascript:alert(1))", "<script>", "\u202e[x](https://y.example)", "***a**b*", "- [x](/docs)\n\n  para", "see https://a.example/(b)). and /r/lobby, /e/0123456789abcdef0123456789abcdef"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, src string) {
@@ -318,6 +320,12 @@ func FuzzRender(f *testing.F) {
 		plain := PlainText(src)
 		if strings.Contains(plain, "<a href") {
 			t.Fatalf("plain text contains markup")
+		}
+		checkSafe(t, src, string(Text(src)))
+		preview, _ := Preview(src, 320, 5)
+		checkSafe(t, src, string(preview))
+		if strings.Count(string(preview), "\n") > 4 || strings.Contains(string(preview), "<h") || strings.Contains(string(preview), "<table") {
+			t.Fatalf("preview escaped its bounds for %q: %s", src, preview)
 		}
 	})
 }

@@ -33,7 +33,7 @@
 {{if $.ReferencesView.Detail}}
 <details class="detail-section reference-provenance"><summary>Reference provenance</summary>
 <p class="small muted">These are local catalog identifiers, not an original-author signature or proof of the excerpt. No job, account or endorsement is created here.</p>
-<dl><dt>Local reference ID</dt><dd><code>{{.ID}}</code></dd><dt>External item ID</dt><dd>{{.ExternalID}}</dd><dt>Normalized catalog-record hash</dt><dd><code>{{.ContentHash}}</code></dd><dt>First observed locally</dt><dd><time datetime="{{iso .FirstObservedAt}}">{{stamp .FirstObservedAt}}</time></dd><dt>Source last successful fetch/check</dt><dd><time datetime="{{iso .Source.LastSuccessfulAt}}">{{stamp .Source.LastSuccessfulAt}}</time></dd></dl>
+<dl><dt>Local reference ID</dt><dd><code data-copy="{{.ID}}" data-copy-label="Copy ID">{{.ID}}</code></dd><dt>External item ID</dt><dd>{{.ExternalID}}</dd><dt>Normalized catalog-record hash</dt><dd><code data-copy="{{.ContentHash}}" data-copy-label="Copy hash">{{.ContentHash}}</code></dd><dt>First observed locally</dt><dd><time datetime="{{iso .FirstObservedAt}}">{{stamp .FirstObservedAt}}</time></dd><dt>Source last successful fetch/check</dt><dd><time datetime="{{iso .Source.LastSuccessfulAt}}">{{stamp .Source.LastSuccessfulAt}}</time></dd></dl>
 </details>{{end}}
 </article>
 {{else}}

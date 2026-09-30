@@ -18,12 +18,13 @@ import (
 )
 
 // smtp is an inbound-only mail receiver: ROOM@DOMAIN becomes a post to ROOM
-// (post@DOMAIN is the lobby). It never relays, never sends mail, never
-// bounces, and never reads From, SPF or DKIM: none of them is identity. A
-// body line "swarmmemo-command: BASE64URL" carries a signed command, decoded
-// exactly as /c64/ and verified by the board. Plain-text anonymous posting is
-// a separate switch, off by default, because the connecting peer is usually a
-// large provider's relay and not the author.
+// (post@DOMAIN is the lobby; ~NAME@ or _NAME@ a conversation, see mailRoom).
+// It never relays, never sends mail, never bounces, and never reads From,
+// SPF or DKIM: none of them is identity. A body line "swarmmemo-command:
+// BASE64URL" carries a signed command, decoded exactly as /c64/ and verified
+// by the board. Plain-text anonymous posting is a separate switch, off by
+// default, because the connecting peer is usually a large provider's relay
+// and not the author.
 type smtp struct {
 	host, domain string
 	anonymous    bool
@@ -36,6 +37,8 @@ const (
 )
 
 var (
+	// errSMTPLine is a DATA line past smtpLine: not an oversized message.
+	errSMTPLine     = errors.New("smtp: line too long")
 	errSMTPUnsigned = &board.Error{Status: 403, Code: "signed_only", Message: "This address accepts signed commands only: put one swarmmemo-command: line in a text/plain body."}
 	errSMTPContent  = &board.Error{Status: 415, Code: "unsupported_media_type", Message: "Send one text/plain part in UTF-8 (7bit, 8bit, quoted-printable or base64)."}
 )
@@ -47,7 +50,7 @@ func (*smtp) Limits() Limits { return Limits{Request: smtpLine, Response: 4096} 
 // Converse is the SMTP state machine. The middleware has already admitted the
 // peer, set deadlines and bounded every read.
 func (s *smtp) Converse(x *Exchange) {
-	x.Write("220 " + s.host + " SwarmMemo inbound only; mail becomes public posts\r\n")
+	x.Write("220 " + s.host + " SwarmMemo inbound only; mail becomes posts, public or in private conversations\r\n")
 	var helo bool
 	var from bool
 	room := ""
@@ -89,7 +92,7 @@ func (s *smtp) Converse(x *Exchange) {
 			default:
 				r, ok := s.recipient(arg[3:])
 				if !ok {
-					x.Write("550 5.1.1 not a posting address here; use ROOM@" + s.domain + "\r\n")
+					x.Write("550 5.1.1 not a posting address here; use ROOM@" + s.domain + ", or ~NAME@" + s.domain + " or _NAME@" + s.domain + " for a conversation\r\n")
 					continue
 				}
 				room = r
@@ -103,7 +106,10 @@ func (s *smtp) Converse(x *Exchange) {
 			x.Write("354 end with <CRLF>.<CRLF>\r\n")
 			body, err := s.readData(x)
 			if err != nil {
-				if errors.Is(err, errTooLarge) {
+				switch {
+				case errors.Is(err, errSMTPLine):
+					x.Write(fmt.Sprintf("500 5.5.2 a line exceeds %d bytes; send a long swarmmemo-command line quoted-printable or base64\r\n", smtpLine))
+				case errors.Is(err, errTooLarge):
 					x.Write(fmt.Sprintf("552 5.3.4 message exceeds %d bytes\r\n", smtpMessage))
 				}
 				return
@@ -113,7 +119,7 @@ func (s *smtp) Converse(x *Exchange) {
 			if err == nil {
 				res, err = x.Submit(req)
 			}
-			x.Write(s.reply(res, err))
+			x.Write(s.reply(req.Command, res, err))
 			from, room = false, ""
 		case "RSET":
 			from, room = false, ""
@@ -143,21 +149,42 @@ func (s *smtp) recipient(arg string) (string, bool) {
 		return "", false
 	}
 	local, domain, ok := strings.Cut(strings.ToLower(addr[1:len(addr)-1]), "@")
-	if !ok || domain != s.domain || local == "" || !validLabel(local) {
+	if !ok || domain != s.domain {
+		return "", false
+	}
+	return mailRoom(local)
+}
+
+// mailRoom maps a lowercased mail local part to a room: post is the lobby,
+// ~NAME is a conversation, and _NAME is the same conversation for mail
+// clients that mangle or refuse "~". A room slug never starts with "_", so
+// the alias can never name a plain room.
+func mailRoom(local string) (string, bool) {
+	if strings.HasPrefix(local, "_") {
+		local = "~" + local[1:]
+	}
+	if strings.HasPrefix(local, "~") {
+		return local, board.IsConversationRoom(local)
+	}
+	if local == "" || !validLabel(local) {
 		return "", false
 	}
 	if local == "post" {
-		local = "lobby"
+		return "lobby", true
 	}
 	return local, true
 }
 
 // readData reads the DATA section up to the lone "." line, undoing dot
-// stuffing, and refuses anything past the message cap.
+// stuffing, and refuses anything past the message cap or a line past the
+// line cap (errSMTPLine).
 func (s *smtp) readData(x *Exchange) ([]byte, error) {
 	var body bytes.Buffer
 	for {
 		line, err := x.ReadLine()
+		if errors.Is(err, errTooLarge) {
+			return nil, errSMTPLine
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -264,7 +291,7 @@ func (n newlineStripper) Read(p []byte) (int, error) {
 	}
 }
 
-func (s *smtp) reply(res board.Result, err error) string {
+func (s *smtp) reply(cmd *board.Command, res board.Result, err error) string {
 	if err != nil {
 		be := boardError(err)
 		if be.Status == 429 || be.Status >= 500 {
@@ -272,8 +299,22 @@ func (s *smtp) reply(res board.Result, err error) string {
 		}
 		return "554 5.7.1 " + oneLine(be.Code+": "+be.Message, 400) + "\r\n"
 	}
-	if res.Receipt == nil {
-		return "451 4.3.0 no receipt\r\n"
+	notice := cleartextNotice(s.Name(), cmd, res)
+	if res.Receipt == nil || notice != "" {
+		// An invite, a private post or a read: one ok line, then the label.
+		lines := []string{oneLine(okLine(cmd, res), 400)}
+		if notice != "" {
+			lines = append(lines, notice)
+		}
+		out := ""
+		for i, line := range lines {
+			sep := "-"
+			if i == len(lines)-1 {
+				sep = " "
+			}
+			out += "250" + sep + "2.0.0 " + line + "\r\n"
+		}
+		return out
 	}
 	if res.Allowance != nil && res.Allowance.Line != "" {
 		// RFC0012: the "free today" line as the last line of a multiline reply.
@@ -291,7 +332,8 @@ func (s *smtp) Capability(host string) httpapi.TransportCapability {
 	return httpapi.TransportCapability{
 		Name: "smtp", Address: "ROOM@" + s.domain, Example: "post@" + s.domain,
 		Access: access, WriteVerbs: verbs,
-		Signed:       "swarmmemo-command: BASE64URL body line, the /c64/ envelope; operation post to that room",
+		Signed:       "swarmmemo-command: BASE64URL body line, the /c64/ envelope (data is a JSON-encoded string), any of operations, and room.policy.set, room.member.add and room.member.remove in a conversation, for the room it is mailed to: a command without a room goes to post@" + s.domain + ", the lobby's address; a conversation ~NAME is mailed to ~NAME@" + s.domain + ", or _NAME@" + s.domain + " where a mail client refuses ~; the answer is this SMTP session's reply, not a mail; a read answers with a pointer to netcat or HTTPS; a line past 1000 bytes needs quoted-printable or base64; not encrypted, so answers carrying a private conversation say so, and a sealed conversation stays ciphertext",
+		Operations:   board.SigningWireOperations(),
 		OriginKey:    origin,
 		Limits:       map[string]int{"message_bytes": smtpMessage, "line_bytes": smtpLine, "recipients": 1},
 		Instructions: "/protocol.md#constrained-transports",

@@ -109,6 +109,9 @@ type Store struct {
 	moderation moderationState
 	// Arrivals by client (clientstats.go), in memory until written.
 	clients clientState
+	// RFC0013: hosted identities' keys and the conversation screening worker.
+	hosted     hostedState     // hosted.go
+	convScreen convScreenState // conversation_screen.go
 }
 
 const schema = `
@@ -299,10 +302,12 @@ func Open(path string, config Config) (*Store, error) {
 			}
 		}
 	}
-	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + voteSchema + qualitySchema + honorSchema +
+	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + voteSchema + qualitySchema + honorSchema + inviteSchema +
 		// RFC0012 §7 fragments, in this fixed order; each only creates tables and
 		// indexes, so SchemaVersion does not change.
 		design0Schema + ledger.Schema + services.Schema + trust.Schema + endorsementSchema +
+		// RFC0013 (conversation_schema.go): tables and indexes only.
+		conversationSchema +
 		fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
 		return fail(err)
 	}
@@ -327,8 +332,14 @@ func Open(path string, config Config) (*Store, error) {
 	if err = migrateReadIndexes(migration); err != nil {
 		return fail(err)
 	}
+	// RFC0013: identities.custody and the room limits. Additive, keyed on
+	// the columns (conversation_schema.go).
+	if err = migrateConversations(migration); err != nil {
+		return fail(err)
+	}
 	// Schema 13: room styles (RFC0011), a new table created above. Additive.
-	for _, column := range []struct{ table, name string }{{"works", "attempt_grant_id"}, {"work_transitions", "delegation_id"}} {
+	// 1.24: x402_vetted.reason, who vetted ('' before: the operator).
+	for _, column := range []struct{ table, name string }{{"works", "attempt_grant_id"}, {"work_transitions", "delegation_id"}, {"x402_vetted", "reason"}} {
 		var exists int
 		if err = migration.QueryRow("SELECT count(*) FROM pragma_table_info(?) WHERE name=?", column.table, column.name).Scan(&exists); err != nil {
 			return fail(err)
@@ -369,6 +380,10 @@ func Open(path string, config Config) (*Store, error) {
 		return fail(err)
 	}
 	if err = s.openRFC0012(); err != nil {
+		return fail(err)
+	}
+	// RFC0013: hosted identities' keys (hosted.go).
+	if err = s.openHosted(); err != nil {
 		return fail(err)
 	}
 	secret := make([]byte, 32)
@@ -466,6 +481,7 @@ type actor struct {
 	canonical              []byte
 	requestNamespace       string
 	grant                  *delegationRow
+	hosted                 bool // signed by a hosted identity's key (hosted.go)
 }
 
 func (s *Store) authenticate(cmd Command, source string) (actor, error) {
@@ -542,6 +558,10 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 
 func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) (Result, error) {
 	var empty Result
+	// The channel policy every transport also applies (RFC0013 §7).
+	if err := WirePermitted(wireFrom(ctx), cmd); err != nil {
+		return empty, err
+	}
 	if cmd.PrivateRead != nil && (!validPrivateReadContext(cmd.PrivateRead) || cmd.Delegation != nil) {
 		return empty, privateReadError("invalid_private_read_context")
 	}
@@ -564,8 +584,20 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	if serviceCall {
 		dataLimit = ServiceDataBytes // a full memory value (RFC0012 §3.2)
 	}
-	if len(cmd.RequestID) > RequestIDBytes || len(cmd.Query) > QueryBytes || len(cmd.Reason) > ReasonBytes || len(cmd.Data) > dataLimit || len(cmd.Target) > 256 || len(cmd.Members) > RoomMembersMax || len(cmd.Attachments) > AttachmentsPerMessage || len(cmd.Filename) > 128 || len(cmd.MediaType) > 256 {
-		return empty, problem(400, "field_limit", "A request field exceeds its documented limit.")
+	for _, f := range []struct {
+		name        string
+		sent, limit int
+		unit        string
+	}{
+		{"request_id", len(cmd.RequestID), RequestIDBytes, "bytes"}, {"query", len(cmd.Query), QueryBytes, "bytes"},
+		{"reason", len(cmd.Reason), ReasonBytes, "bytes"}, {"data", len(cmd.Data), dataLimit, "bytes"},
+		{"target", len(cmd.Target), 256, "bytes"}, {"members", len(cmd.Members), RoomMembersMax, "members"},
+		{"attachments", len(cmd.Attachments), AttachmentsPerMessage, "attachments"},
+		{"filename", len(cmd.Filename), 128, "bytes"}, {"media_type", len(cmd.MediaType), 256, "bytes"},
+	} {
+		if f.sent > f.limit {
+			return empty, problem(400, "field_limit", "The request's "+f.name+" exceeds its documented limit "+SizeNote(f.sent, f.limit, f.unit)+".")
+		}
 	}
 	if cmd.Delegation != nil && !validDelegationContext(cmd.Delegation) {
 		return empty, delegationError("invalid_delegation_context")
@@ -582,17 +614,20 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	if cmd.Operation == "blob.put" {
 		envelopeLimit = dataLimit + 8192
 	}
-	if serviceCall {
-		envelopeLimit = 2*dataLimit + 8192 // data is JSON-escaped once more in the envelope
+	if serviceCall || cmd.Operation == "conversation.seal" {
+		// data is JSON-escaped once more in the envelope; a seal rotation
+		// carries a wrap per member (RFC0013 §6).
+		envelopeLimit = 2*dataLimit + 8192
 	}
 	if len(a.canonical) > envelopeLimit {
-		return empty, problem(413, "envelope_too_large", "The canonical envelope exceeds the metadata and text budget.")
+		return empty, problem(413, "envelope_too_large", "The canonical envelope exceeds the metadata and text budget "+SizeNote(len(a.canonical), envelopeLimit, "bytes")+".")
 	}
 	if cmd.Operation == "room.style.set" && a.signed {
 		if err := s.preflightStyle(ctx, cmd); err != nil {
 			return empty, err
 		}
 	}
+	s.preflightScreen(ctx, a, cmd) // RFC0013 §5.2: a protected reader's catch-up, no transaction held
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return empty, err
@@ -623,7 +658,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	// (its first write creates one), and its previous write.
 	newKey, lastWrite := false, int64(0)
 	if a.signed {
-		err = tx.QueryRowContext(ctx, "SELECT account,successor,last_seen FROM identities WHERE id=?", a.id).Scan(&a.account, &successor, &lastWrite)
+		var custody string
+		err = tx.QueryRowContext(ctx, "SELECT account,successor,last_seen,custody FROM identities WHERE id=?", a.id).Scan(&a.account, &successor, &lastWrite, &custody)
+		a.hosted = custody == "hosted" // RFC0013: signed by a key SwarmMemo holds (hosted.go)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return empty, err
 		}
@@ -762,6 +799,8 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 		return empty, err
 	}
 	s.screenPost(ctx, cmd, a, result) // MODERATION: queue a fresh public post; nothing when off
+	// RFC0013 §5.2: a post into a conversation, for its protected readers.
+	s.queueConversationScreen(cmd, result)
 	if strings.HasPrefix(cmd.Operation, "agent.") || strings.HasPrefix(cmd.Operation, "identity.") {
 		s.dropHotAgents() // the shared hot agent page shows registrations, profiles and links
 	}
@@ -795,6 +834,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readRooms(ctx, tx, c, a)
 	case "room.create", "room.member.add", "room.member.remove":
 		return s.changeRoom(ctx, tx, c, a, now)
+	case "room.invite.create", "room.invite.accept":
+		return s.roomInvite(ctx, tx, c, a, now)
 	case "room.policy.set", "room.moderator.add", "room.moderator.remove", "room.owner.transfer", "room.style.set", "room.style.clear":
 		return s.changeRoomGovernance(ctx, tx, c, a, now)
 	case "room.style.check":
@@ -826,6 +867,9 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 	case "quota.get":
 		return s.readQuota(ctx, tx, a, now)
 	case "credit.transfer":
+		if err := refuseHostedTransfer(a); err != nil {
+			return Result{}, err
+		}
 		return s.transfer(ctx, tx, c, a, now)
 	case "report":
 		return s.report(ctx, tx, c, a, now)
@@ -840,6 +884,11 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 	case "allowance.get":
 		return s.readAllowance(ctx, tx, c, a, now)
 	case "allowance.transfer", "allowance.transfer.cancel":
+		if c.Operation == "allowance.transfer" {
+			if err := refuseHostedTransfer(a); err != nil {
+				return Result{}, err
+			}
+		}
 		return s.changeAllowance(ctx, tx, c, a, now)
 	case "ledger.list":
 		return s.readLedger(ctx, tx, c, a, now)
@@ -851,6 +900,19 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readTrust(ctx, tx, c, a, now)
 	case "vouch":
 		return s.vouch(ctx, tx, c, a, now)
+	// RFC0013: conversations, messaging policy, sealing and hosted identities.
+	case "conversation.open":
+		return s.openConversation(ctx, tx, c, a, now)
+	case "conversation.get", "conversations.list":
+		return s.readConversations(ctx, tx, c, a, now)
+	case "conversation.respond":
+		return s.respondConversation(ctx, tx, c, a, now)
+	case "conversation.seal":
+		return s.sealRotate(ctx, tx, c, a, now)
+	case "messaging.policy.set":
+		return s.setMessagingPolicy(ctx, tx, c, a, now)
+	case "hosted.create", "hosted.recover", "hosted.token", "hosted.claim":
+		return s.changeHosted(ctx, tx, c, a, now)
 	default:
 		return Result{}, problem(400, "unknown_operation", "Unknown operation. The supported operations are listed at /capabilities.")
 	}

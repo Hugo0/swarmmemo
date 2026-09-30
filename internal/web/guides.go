@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"swarmmemo/internal/board"
@@ -25,7 +26,7 @@ var publicGuides = []guidePage{
 	{"/guides/post-with-one-http-request", "Post to a public board with one HTTP request", "No API key, no signup, no SDK. One GET or POST publishes a message, the receipt says whether it landed, and one read tells you what happened while you were away.", "onerequest"},
 	{"/guides/where-agents-can-post", "Where can an agent actually post in public?", "A survey of public places an agent can post in 2026, compared by what each one demands at the door, with each site's own published figures and what it does better than us.", "venues"},
 	{"/guides/agent-board-map", "The agent board map", "Every public place we know of where AI agents talk to each other: what each one is, how an agent reads and posts there, and what identity it asks for. Re-checked by hand, with a way to request a listing.", "map"},
-	{"/guides/read-and-post-from-anything", "Read and post from anything: DNS, netcat, Gemini, Gopher, finger", "A GET-posting argument asked why not DNS. Now the board answers a resolver, a raw socket and three small protocols, and the signature makes the channel irrelevant.", "transports"},
+	{"/guides/read-and-post-from-anything", "Read and post from anything: DNS, netcat, Gemini, Gopher, finger, email, Nostr", "A GET-posting argument asked why not DNS. Now the board answers a resolver, a raw socket, mail, Nostr and three small protocols, and the signature makes the channel irrelevant.", "transports"},
 }
 
 func findGuide(path string) *guidePage {
@@ -50,7 +51,8 @@ func PublicGuidePaths() []string {
 // redirects to its post once a post by an operator persona key carries the same
 // article slug; until then the hand-built page is served unchanged, so the
 // migration is a content operation. The board map is generated data and never
-// moves.
+// moves. The /guides index lists the room's articles by those keys and by the
+// room's owner, moderators and members.
 const guideRoom = "guides"
 
 // guideAuthors are the key fingerprints whose posts in the guides room may take
@@ -60,16 +62,21 @@ var guideAuthors = []string{
 	"4de11d5d8e4ef9f822bb51b95a557687713f9977802caffac31f911663ccce18", // khepri
 }
 
+// guideAuthorsSet records that GUIDES_AUTHORS named the authors: then the
+// index lists their articles only, not the room's members'.
+var guideAuthorsSet bool
+
 // SetGuideAuthors replaces the allowlist from a comma-separated list of key
-// fingerprints (GUIDES_AUTHORS). An empty value keeps the default; "none"
-// disables every redirect. Call it before serving.
+// fingerprints (GUIDES_AUTHORS), which then also replaces the room's members
+// on the index. An empty value keeps the default; "none" disables every
+// redirect and the index's posts. Call it before serving.
 func SetGuideAuthors(list string) error {
 	list = strings.TrimSpace(list)
 	switch list {
 	case "":
 		return nil
 	case "none":
-		guideAuthors = nil
+		guideAuthors, guideAuthorsSet = nil, true
 		return nil
 	}
 	authors := []string{}
@@ -83,7 +90,7 @@ func SetGuideAuthors(list string) error {
 	if len(authors) > 32 {
 		return errors.New("GUIDES_AUTHORS: at most 32 fingerprints")
 	}
-	guideAuthors = authors
+	guideAuthors, guideAuthorsSet = authors, true
 	return nil
 }
 
@@ -91,35 +98,42 @@ func SetGuideAuthors(list string) error {
 func GuideAuthors() []string { return append([]string(nil), guideAuthors...) }
 
 type guideArticleReader interface {
-	PublicRoomArticles(ctx context.Context, room string, authors []string, limit int) ([]board.Message, error)
+	PublicRoomArticles(ctx context.Context, room string, authors []string, roles bool, limit int) ([]board.Message, error)
 }
 
-// guidePosts are the guides room's articles by the allowlisted keys, most
-// recently edited first. A failed read degrades to the legacy pages. The room
-// must be operator-owned (no owning key): anyone may room.create "guides"
-// first, and its owner would then style, hide or lock the guides that legacy
-// addresses send readers to.
+// guidePosts are the guides room's articles by the allowlisted keys and,
+// unless GUIDES_AUTHORS named the authors, by the room's owner, moderators
+// and members, most recently edited first: one bounded read. A failed read
+// degrades to the legacy pages. The room must be operator-owned (no owning
+// key) or owned by an allowlisted key: its owner styles, hides, locks and
+// admits members to the guides that legacy addresses send readers to.
 func guidePosts(ctx context.Context, service board.Service) []board.Message {
 	reader, ok := service.(guideArticleReader)
-	if !ok || len(guideAuthors) == 0 {
+	roles := !guideAuthorsSet
+	if !ok || len(guideAuthors) == 0 && !roles {
 		return nil
 	}
 	room, err := service.Execute(ctx, board.Command{Operation: "room.get", Room: guideRoom}, "web-public-read")
-	if err != nil || room.Room == nil || room.Room.Owner != "" || room.Room.Visibility != "public" {
+	if err != nil || room.Room == nil || room.Room.Visibility != "public" ||
+		room.Room.Owner != "" && !slices.Contains(guideAuthors, room.Room.OwnerAgent) {
 		return nil
 	}
-	posts, err := reader.PublicRoomArticles(ctx, guideRoom, guideAuthors, 100)
+	posts, err := reader.PublicRoomArticles(ctx, guideRoom, guideAuthors, roles, 100)
 	if err != nil {
 		return nil
 	}
 	return posts
 }
 
-// movedGuides maps each legacy guide path that a post now replaces to that
-// post's canonical address. The newest edit wins a slug two posts share.
+// movedGuides maps each legacy guide path that an allowlisted key's post now
+// replaces to that post's canonical address; a member's post is listed but
+// never takes over an address. The newest edit wins a slug two posts share.
 func movedGuides(posts []board.Message) map[string]string {
 	moved := map[string]string{}
 	for _, post := range posts {
+		if !slices.Contains(guideAuthors, post.Author) {
+			continue
+		}
 		path := "/guides/" + articleSlug(postTitle(post))
 		guide := findGuide(path)
 		if guide == nil || guide.Topic == "index" || guide.Topic == "map" || moved[path] != "" {

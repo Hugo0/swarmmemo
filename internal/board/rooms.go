@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -46,6 +47,8 @@ const (
 	RoomRulesBytes = 2048
 	// RoomModeratorLimit bounds moderators per room, owner excluded.
 	RoomModeratorLimit = 16
+	// RoomMaxMessagesLimit bounds room.policy.set max_messages.
+	RoomMaxMessagesLimit = 1_000_000
 	// operatorActor names the operator in the public log; it is not a key.
 	operatorActor = "operator"
 	// Who hid a message. A room can reverse only its own.
@@ -55,12 +58,21 @@ const (
 
 var personalRoomRE = regexp.MustCompile(`^@[0-9a-f]{64}$`)
 
-// ValidRoomName reports whether name addresses a room: a global slug, or a
-// personal room "@" + its owner's account fingerprint. Only slugs can ever be
-// created as global rooms.
+// conversationRoomRE is a conversation's room (RFC0013 §3.1): "~" and 26
+// base32 characters, 16 random bytes the creating client proposes, so the
+// name is never derived from its members.
+var conversationRoomRE = regexp.MustCompile(`^~[a-z2-7]{26}$`)
+
+// ValidRoomName reports whether name addresses a room: a global slug, a
+// personal room "@" + its owner's account fingerprint, or a conversation
+// "~" + 26 base32 characters. Only slugs can ever be created as global
+// rooms; conversations open only through conversation.open.
 func ValidRoomName(name string) bool {
-	return slug.MatchString(name) || personalRoomRE.MatchString(name)
+	return slug.MatchString(name) || personalRoomRE.MatchString(name) || conversationRoomRE.MatchString(name)
 }
+
+// IsConversationRoom reports whether name is in the conversation namespace.
+func IsConversationRoom(name string) bool { return conversationRoomRE.MatchString(name) }
 
 // PersonalRoom is the canonical room name for an account's personal room.
 func PersonalRoom(account string) string { return "@" + account }
@@ -75,15 +87,21 @@ func PersonalOwner(room string) (string, bool) {
 
 // RoomPolicy is who may start posts and who may reply in one room, over
 // which channels (WriteVia, see Vias; empty means any), and whether the room
-// shows in the default all-rooms feed (FrontPage, frontpage.go).
+// shows in the default all-rooms feed (FrontPage, frontpage.go). Closed,
+// ClosesAt and MaxMessages are the generic limits (RFC0013 §3.1): a closed
+// room, or one past closes_at, takes no posts, and max_messages bounds its
+// original messages; it stays readable and nothing is deleted. 0 is unset.
 type RoomPolicy struct {
-	Write     string   `json:"write"`
-	Reply     string   `json:"reply"`
-	Rules     string   `json:"rules,omitempty"`
-	WriteVia  []string `json:"write_via,omitempty"`
-	FrontPage bool     `json:"front_page"`
-	UpdatedAt int64    `json:"updated_at,omitempty"`
-	frontPage string   // stored: "", "on" or "off"
+	Write       string   `json:"write"`
+	Reply       string   `json:"reply"`
+	Rules       string   `json:"rules,omitempty"`
+	WriteVia    []string `json:"write_via,omitempty"`
+	FrontPage   bool     `json:"front_page"`
+	Closed      bool     `json:"closed,omitempty"`
+	ClosesAt    int64    `json:"closes_at,omitempty"`
+	MaxMessages int64    `json:"max_messages,omitempty"`
+	UpdatedAt   int64    `json:"updated_at,omitempty"`
+	frontPage   string   // stored: "", "on" or "off"
 }
 
 // ModerationEntry is one public, per-room governance record.
@@ -114,13 +132,45 @@ func defaultPolicy(room string) RoomPolicy {
 func loadPolicy(ctx context.Context, tx *sql.Tx, room string) (RoomPolicy, error) {
 	p := defaultPolicy(room)
 	var writeVia string
-	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via,front_page FROM room_policies WHERE room=?", room).Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia, &p.frontPage)
+	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages FROM room_policies WHERE room=?", room).
+		Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia, &p.frontPage, &p.Closed, &p.ClosesAt, &p.MaxMessages)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
 	p.WriteVia = decodeWriteVia(writeVia)
 	p.FrontPage = frontPage(room, p.frontPage)
 	return p, err
+}
+
+// roomClosed reports whether p takes no posts at now.
+func roomClosed(p RoomPolicy, now int64) bool {
+	return p.Closed || (p.ClosesAt > 0 && now >= p.ClosesAt)
+}
+
+// checkRoomLimits refuses a post the room's limits do not take: none in a
+// closed room, and no original past max_messages (a new version of an
+// existing message is not one). count is the room's original messages, or
+// -1 to count them here, at most max_messages.
+func checkRoomLimits(ctx context.Context, tx *sql.Tx, room string, original bool, count, now int64) error {
+	p, err := loadPolicy(ctx, tx, room)
+	if err != nil {
+		return err
+	}
+	if roomClosed(p, now) {
+		return problem(409, "room_closed", "This room is closed: it stays readable but takes no posts; this request has not been published. Its owner (either member of a DM) reopens it with room.policy.set.")
+	}
+	if !original || p.MaxMessages == 0 {
+		return nil
+	}
+	if count < 0 {
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM events WHERE room=? AND supersedes='' LIMIT ?)", room, p.MaxMessages).Scan(&count); err != nil {
+			return err
+		}
+	}
+	if count >= p.MaxMessages {
+		return problem(409, "room_message_limit", fmt.Sprintf("This room holds at most %d messages and is full; this request has not been published.", p.MaxMessages))
+	}
+	return nil
 }
 
 // roomRole is the caller's standing in a room: owner, moderator, member or
@@ -159,7 +209,12 @@ func authorizeRoomPost(ctx context.Context, tx *sql.Tx, r Room, a actor, reply b
 		if v, ok := LookupVia(via); ok {
 			arrived = v.Label
 		}
-		return problem(403, "room_via_restricted", "This room accepts posts sent via "+ViaLabels(p.WriteVia)+" only, and this one arrived via "+arrived+"; it has not been published. Read the room over any channel; its page, and room.get's policy.write_via, say how to post.")
+		if r.Visibility == "private" && via != "" && !slices.Contains(viaGroups["encrypted"], via) {
+			// The read refusal's advice (privateReadVia): an encrypted-only
+			// conversation keeps its text off cleartext wires.
+			return problem(403, "room_via_restricted", "This private room takes posts and reads over "+ViaLabels(p.WriteVia)+" only, and this post arrived via "+arrived+"; it has not been published. Post it over HTTPS or MCP; to talk privately over "+arrived+" itself, use a sealed conversation, whose messages cross every wire as ciphertext.")
+		}
+		return problem(403, "room_via_restricted", "This room accepts posts sent via "+ViaLabels(p.WriteVia)+" only, and this one arrived via "+arrived+"; it has not been published. Its page, and room.get's policy.write_via, say how to post.")
 	}
 	role, err := roomRole(ctx, tx, r, a)
 	if err != nil {
@@ -288,7 +343,22 @@ func (s *Store) changeRoomGovernance(ctx context.Context, tx *sql.Tx, c Command,
 			return Result{}, err
 		}
 	}
-	if r.Owner == "" || r.Owner != a.account {
+	// Either member of a DM governs it (RFC0013 §3.1): its limits and
+	// channels are the pair's to set.
+	dmMember := false
+	if c.Operation == "room.policy.set" && IsConversationRoom(r.Name) {
+		conv, _, err := loadConversation(ctx, tx, r.Name)
+		if err != nil {
+			return Result{}, err
+		}
+		dmMember = conv.Kind == "dm"
+	}
+	if IsConversationRoom(r.Name) && c.Operation != "room.policy.set" {
+		// A conversation has no other metadata: its membership is its own
+		// (room.member.*, conversation.respond, invites) and so is its owner.
+		return Result{}, problem(409, "conversation_room", "A conversation's room takes room.policy.set (its limits and channels) and room.member.add/remove; moderators, styles and ownership are for shared rooms.")
+	}
+	if (r.Owner == "" || r.Owner != a.account) && !dmMember {
 		// A moderator may take the room off the front page, and nothing else.
 		role, err := roomRole(ctx, tx, r, a)
 		if err != nil {
@@ -329,8 +399,9 @@ func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, operato
 		if err != nil {
 			return logEntry{}, Result{}, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via,front_page) VALUES(?,?,?,?,?,?,?)
- ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at,write_via=excluded.write_via,front_page=excluded.front_page`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia), p.frontPage); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages) VALUES(?,?,?,?,?,?,?,?,?,?)
+ ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at,write_via=excluded.write_via,front_page=excluded.front_page,
+ closed=excluded.closed,closes_at=excluded.closes_at,max_messages=excluded.max_messages`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia), p.frontPage, p.Closed, p.ClosesAt, p.MaxMessages); err != nil {
 			return logEntry{}, Result{}, err
 		}
 		p.UpdatedAt = now
@@ -398,16 +469,19 @@ func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, operato
 // off; true on a room whose default is off needs the operator.
 func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bool) (RoomPolicy, error) {
 	var in struct {
-		Write     *string         `json:"write"`
-		Reply     *string         `json:"reply"`
-		Rules     *string         `json:"rules"`
-		WriteVia  json.RawMessage `json:"write_via"`
-		FrontPage json.RawMessage `json:"front_page"`
+		Write       *string         `json:"write"`
+		Reply       *string         `json:"reply"`
+		Rules       *string         `json:"rules"`
+		WriteVia    json.RawMessage `json:"write_via"`
+		FrontPage   json.RawMessage `json:"front_page"`
+		Closed      *bool           `json:"closed"`
+		ClosesAt    *int64          `json:"closes_at"`
+		MaxMessages *int64          `json:"max_messages"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader([]byte(data)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil && in.FrontPage == nil) {
-		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via", "front_page".`)
+	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil && in.FrontPage == nil && in.Closed == nil && in.ClosesAt == nil && in.MaxMessages == nil) {
+		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via", "front_page", "closed", "closes_at", "max_messages".`)
 	}
 	p, err := loadPolicy(ctx, tx, room)
 	if err != nil {
@@ -446,6 +520,15 @@ func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bo
 	if in.Rules != nil {
 		p.Rules = *in.Rules
 	}
+	if in.Closed != nil {
+		p.Closed = *in.Closed
+	}
+	if in.ClosesAt != nil {
+		p.ClosesAt = *in.ClosesAt
+	}
+	if in.MaxMessages != nil {
+		p.MaxMessages = *in.MaxMessages
+	}
 	if in.WriteVia != nil {
 		if p.WriteVia, err = parseWriteVia(in.WriteVia); err != nil {
 			return p, err
@@ -456,8 +539,14 @@ func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bo
 		return p, problem(400, "invalid_policy", `write must be "open", "members" or "owner".`)
 	case p.Reply != "anyone" && p.Reply != "members" && p.Reply != "none":
 		return p, problem(400, "invalid_policy", `reply must be "anyone", "members" or "none".`)
-	case len(p.Rules) > RoomRulesBytes || !utf8.ValidString(p.Rules) || strings.IndexByte(p.Rules, 0) >= 0:
+	case len(p.Rules) > RoomRulesBytes:
+		return p, problem(400, "invalid_policy", "rules are too long "+SizeNote(len(p.Rules), RoomRulesBytes, "bytes")+".")
+	case !utf8.ValidString(p.Rules) || strings.IndexByte(p.Rules, 0) >= 0:
 		return p, problem(400, "invalid_policy", fmt.Sprintf("rules must be UTF-8 text of at most %d bytes.", RoomRulesBytes))
+	case p.ClosesAt < 0 || p.ClosesAt > 1<<40:
+		return p, problem(400, "invalid_policy", "closes_at is a UNIX time in seconds, or 0 for none.")
+	case p.MaxMessages < 0 || p.MaxMessages > RoomMaxMessagesLimit:
+		return p, problem(400, "invalid_policy", fmt.Sprintf("max_messages is 0 (no limit) to %d.", RoomMaxMessagesLimit))
 	}
 	return p, nil
 }

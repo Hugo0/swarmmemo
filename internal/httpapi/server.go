@@ -23,7 +23,6 @@ import (
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/cards"
 	"swarmmemo/internal/services"
-	"swarmmemo/internal/web"
 )
 
 type Config struct {
@@ -80,6 +79,9 @@ type Server struct {
 	// mcpAssistantHandler serves web.AssistantMCPPath, the profile without
 	// payment tools (mcp.go).
 	mcpAssistantHandler http.Handler
+	// hostedLimiter is the per-token bucket of hosted identities' tool calls
+	// (mcp_conversations.go).
+	hostedLimiter *Limiter
 }
 
 func New(service board.Service, ui http.Handler, cfg Config) *Server {
@@ -98,7 +100,8 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 	if cfg.Limiter == nil {
 		cfg.Limiter = NewLimiter()
 	}
-	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter(), sitemapBuilds: make(chan struct{}, sitemapBuilds), referrers: newReferrerCounter(cfg.PublicURL)}
+	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter(), sitemapBuilds: make(chan struct{}, sitemapBuilds), referrers: newReferrerCounter(cfg.PublicURL),
+		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0)}
 	s.initMCP()
 	return s
 }
@@ -167,6 +170,11 @@ func routeClass(path string) string {
 
 func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	s.requests.Add(1)
+	// Every request reaches the board with the channel it arrived on: a
+	// route that knows better (the write paths, /v1/command, MCP) records its
+	// own; any other is its HTTP method's. The board takes no recorded
+	// channel for an in-process caller, which no HTTP request is.
+	r = withVia(r, methodVia(r.Method))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -181,7 +189,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	// Not on /call/: a call without a key spends the caller's network's
 	// credit, so no other site may read its answer (execute also drops it
 	// from every unsigned service.call answer).
-	if r.URL.Path != "/mcp" && r.URL.Path != web.AssistantMCPPath && !strings.HasPrefix(r.URL.Path, "/admin/") && !strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
+	_, _, isMCP := mcpPath(r.URL.Path)
+	if !isMCP && !strings.HasPrefix(r.URL.Path, "/admin/") && !strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Expose-Headers", "X-Next-Cursor, Retry-After, Link")
 	}
@@ -192,7 +201,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	if len(r.RequestURI) > board.RequestTargetBytes {
-		writeError(w, &board.Error{Status: 414, Code: "url_too_large", Message: fmt.Sprintf("Request URL exceeds %d bytes. Use a body or smaller chunks.", board.RequestTargetBytes)})
+		writeError(w, &board.Error{Status: 414, Code: "url_too_large", Message: "Request URL is too long " + board.SizeNote(len(r.RequestURI), board.RequestTargetBytes, "bytes") + ". Use a body or smaller chunks."})
 		return
 	}
 	if _, err := url.ParseQuery(r.URL.RawQuery); err != nil {
@@ -236,6 +245,12 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodTrace || r.Method == http.MethodConnect {
 		methodError(w)
+		return
+	}
+	if !isMCP && strings.HasPrefix(bearerToken(r.Header.Get("Authorization")), board.HostedTokenPrefix) {
+		// A hosted token authenticates only the MCP handlers (RFC0013 §2.3):
+		// anywhere else it is refused, never ignored into an anonymous call.
+		writeError(w, &board.Error{Status: 401, Code: "hosted_token_invalid", Message: "A hosted identity token works only on the hosted MCP server at /mcp; see /capabilities."})
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/admin/") {
@@ -288,7 +303,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.discovery(w, r) {
 		return
 	}
-	if r.URL.Path == "/mcp" || r.URL.Path == web.AssistantMCPPath {
+	if isMCP {
 		s.mcp(w, r)
 		return
 	}
@@ -461,6 +476,8 @@ func WriteText(w io.Writer, res board.Result) {
 		// describeReceipt (TCP and the rest) still say why a handle was not used.
 		if h := res.Receipt.HandleNotApplied; h != nil {
 			fmt.Fprintf(w, "handle not applied: requested=%s reason=%s see /for-agents#handle\n", h.Requested, h.Reason)
+		} else if res.Receipt.HandleApplied != "" {
+			fmt.Fprintf(w, "handle applied: %s\n", res.Receipt.HandleApplied)
 		}
 		if res.Next != nil && res.Next.SignToGetReplies != "" {
 			fmt.Fprintf(w, "Sign your next post with an Ed25519 key and replies to it are listed at /api/updates: %s\n", res.Next.How)
@@ -469,6 +486,20 @@ func WriteText(w io.Writer, res board.Result) {
 		return
 	}
 	writeAllowanceLine(w, res)
+	// A room invite: its code, shown once, or the room it admitted a key to.
+	if code, ok := res.Data["code"].(string); ok {
+		fmt.Fprintf(w, "invite %s expires_at=%v\n", code, res.Data["expires_at"])
+	} else if member, ok := res.Data["member"].(string); ok && res.Data["invite_id"] != nil {
+		fmt.Fprintf(w, "joined %v as %s\n", res.Data["room"], member)
+	}
+	writeConversationText(w, res)
+	if p, ok := res.Data["policy"].(board.RoomPolicy); ok {
+		fmt.Fprintf(w, "policy %v write=%s reply=%s closed=%t closes_at=%d max_messages=%d", res.Data["room"], p.Write, p.Reply, p.Closed, p.ClosesAt, p.MaxMessages)
+		if len(p.WriteVia) > 0 {
+			fmt.Fprintf(w, " write_via=%s (posts arrive only via %s)", strings.Join(p.WriteVia, ","), board.ViaLabels(p.WriteVia))
+		}
+		fmt.Fprintln(w)
+	}
 	for _, e := range res.Messages {
 		author := e.Author
 		if f := e.Forwarded; f != nil && e.PublicKey == "" {
@@ -609,7 +640,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil && (r.ContentLength != 0 || len(r.TransferEncoding) > 0) {
 		body, e := io.ReadAll(http.MaxBytesReader(w, r.Body, board.CommandBodyBytes))
 		if e != nil {
-			writeError(w, &board.Error{Status: 413, Code: "body_too_large", Message: "Request body exceeds 2 MiB."})
+			writeError(w, bodyTooLarge(r, board.CommandBodyBytes))
 			return
 		}
 		if len(body) > 0 {
@@ -1236,10 +1267,22 @@ func methodError(w http.ResponseWriter) {
 	w.Header().Set("Allow", "GET, POST, PUT, MKCOL, OPTIONS")
 	writeError(w, &board.Error{Status: 405, Code: "method_not_allowed", Message: "This method is not supported here. HEAD and OPTIONS never publish messages."})
 }
+
+// bodyTooLarge refuses a request body over limit bytes, stating its
+// Content-Length when it sent one (a streamed body's size is not read past
+// the limit).
+func bodyTooLarge(r *http.Request, limit int64) *board.Error {
+	note := "(more than " + strconv.FormatInt(limit, 10) + " bytes)"
+	if r.ContentLength > limit {
+		note = board.SizeNote(int(r.ContentLength), int(limit), "bytes")
+	}
+	return &board.Error{Status: 413, Code: "body_too_large", Message: "Request body is too long " + note + "."}
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any, max int64) error {
 	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, max))
 	if e != nil {
-		return &board.Error{Status: 413, Code: "body_too_large", Message: "Request body exceeds the supported limit."}
+		return bodyTooLarge(r, max)
 	}
 	return strictJSON(raw, v)
 }
@@ -1250,11 +1293,19 @@ func jsonResponse(w http.ResponseWriter, status int, v any) {
 	e.SetEscapeHTML(false)
 	_ = e.Encode(v)
 }
-func writeError(w http.ResponseWriter, e error) {
+
+// apiError is the error every surface shows for e: the board's own, or a
+// uniform internal one that says nothing of the cause.
+func apiError(e error) *board.Error {
 	var be *board.Error
 	if !errors.As(e, &be) {
 		be = &board.Error{Status: 500, Code: "internal", Message: "The request could not be completed."}
 	}
+	return be
+}
+
+func writeError(w http.ResponseWriter, e error) {
+	be := apiError(e)
 	if be.RetryAfter > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(be.RetryAfter))
 	}

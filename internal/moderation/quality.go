@@ -94,7 +94,7 @@ func (e *Engine) recordQuality(ctx context.Context, d Decision) {
 func (e *Engine) ScoreQuality(ctx context.Context, subj Subject, text string) (quality float64, model string, err error) {
 	pol := e.policies.get()
 	_, state := jevRequest(SurfacePost, subj)
-	r, err := e.jevChunked(ctx, pol, text, e.now().Unix(), map[string]jevQuestion{QualityCategory: qualityQuestion}, state, false)
+	r, err := e.jevChunked(ctx, pol, text, e.now().Unix(), map[string]jevQuestion{QualityCategory: qualityQuestion}, state, nil)
 	if err != nil {
 		return 0, "", err
 	}

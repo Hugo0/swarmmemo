@@ -12,19 +12,20 @@ const arrays = new Set(['members', 'attachments']);
 const allowed = new Set([...FIELDS, 'signature', 'proof']);
 // Operation sets mirror internal/board/operations.go (held there by a Go test).
 // private_read.* is left out on purpose: see Client.prepare.
-const mutations = new Set('post room.create room.member.add room.member.remove room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel delegation.create delegation.revoke webhook.create webhook.delete allowance.transfer allowance.transfer.cancel service.call vouch'.split(' '));
-const reads = new Set('messages.list message.get thread.get updates.get room.pages rooms.list room.get room.modlog room.style.check agent.get agents.list blob.get quota.get stats export work.get works.list work.history delegation.get delegations.list webhook.list allowance.get ledger.list services.list service.read trust.get'.split(' '));
+const mutations = new Set('post room.create room.member.add room.member.remove room.invite.create room.invite.accept room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel delegation.create delegation.revoke webhook.create webhook.delete allowance.transfer allowance.transfer.cancel service.call vouch conversation.open conversation.respond conversation.seal messaging.policy.set hosted.create hosted.recover hosted.token hosted.claim'.split(' '));
+const reads = new Set('messages.list message.get thread.get updates.get room.pages rooms.list room.get room.modlog room.style.check agent.get agents.list blob.get quota.get stats export work.get works.list work.history delegation.get delegations.list webhook.list allowance.get ledger.list services.list service.read trust.get conversations.list conversation.get'.split(' '));
 const delegatedOperations = new Set('post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit'.split(' '));
 const privatePrefix = Buffer.from('302e020100300506032b657004220420', 'hex');
 const publicPrefix = Buffer.from('302a300506032b6570032100', 'hex');
 const records = new WeakMap();
 const MAX_RESPONSE = 8 * 1024 * 1024;
 // Never reflect arbitrary remote strings, even if they resemble safe identifiers.
-const remoteCodes = new Set(`http_error quota_exhausted global_quota_exhausted request_rate busy internal storage_unavailable updates_unavailable stream_capacity unauthorized https_required invalid_request method_not_allowed ambiguous_path body_too_large url_too_large unknown_operation unexpected_field field_limit envelope_too_large signature_required nonce_required invalid_key invalid_signature stale_signature key_rotated idempotency_conflict invalid_cursor cursor_reset invalid_revision not_found agent_not_found invalid_agent invalid_handle handle_taken agent_exists invalid_target_key invalid_rotation_proof invalid_slug invalid_visibility visibility_mismatch private_room_required room_exists owner_required member_limit owner_membership invalid_text text_too_large invalid_recipient invalid_reply invalid_reason reason_required invalid_message_id invalid_thread thread_depth_limit thread_too_large conversation_read_timeout invalid_amount self_transfer recipient_limit invalid_lease lease_busy lease_not_owned stale_fence invalid_ttl invalid_base64 invalid_filename invalid_media_type duplicate_attachment attachment_size attachment_gone invalid_limit invalid_query invalid_profile profile_read_timeout`.split(' '));
+const remoteCodes = new Set(`http_error quota_exhausted global_quota_exhausted request_rate busy internal storage_unavailable updates_unavailable stream_capacity unauthorized https_required invalid_request method_not_allowed ambiguous_path body_too_large url_too_large unknown_operation unexpected_field field_limit envelope_too_large signature_required nonce_required invalid_key invalid_signature stale_signature key_rotated idempotency_conflict invalid_cursor cursor_reset invalid_revision not_found agent_not_found invalid_agent invalid_handle handle_taken agent_exists invalid_target_key invalid_rotation_proof invalid_slug invalid_visibility visibility_mismatch private_room_required room_exists owner_required member_limit owner_membership invite_invalid invite_limit already_member invalid_text text_too_large invalid_recipient invalid_reply invalid_reason reason_required invalid_message_id invalid_thread thread_depth_limit thread_too_large conversation_read_timeout invalid_amount self_transfer recipient_limit invalid_lease lease_busy lease_not_owned stale_fence invalid_ttl invalid_base64 invalid_filename invalid_media_type duplicate_attachment attachment_size attachment_gone invalid_limit invalid_query invalid_profile profile_read_timeout`.split(' '));
 
 for (const code of 'invalid_image unsupported_media_type reserved_kind stats_unavailable ambiguous_command invalid_private_read_data invalid_private_read_context invalid_origin route_gone'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_private_read_proof private_read_exists private_read_limit private_read_generation_mismatch private_read_epoch_mismatch private_read_already_revoked private_read_rate_limited private_read_response_limit'.split(' ')) remoteCodes.add(code);
-for (const code of 'request_too_large unsupported_operation signed_only public_rooms_only forwarding_refused'.split(' ')) remoteCodes.add(code);
+for (const code of 'request_too_large unsupported_operation signed_only public_rooms_only forwarding_refused mcp_only'.split(' ')) remoteCodes.add(code);
+for (const code of 'hosted_unavailable hosted_token_invalid hosted_auth_required hosted_issuance_limit hosted_required hosted_transfer recovery_invalid token_limit invalid_hosted_data'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_reference_query invalid_reference_cursor reference_busy reference_not_found reference_cursor_reset reference_response_limit references_unavailable'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_webhook webhook_address_blocked webhook_unresolved webhook_limit webhook_exists webhook_not_found webhook_delegated'.split(' ')) remoteCodes.add(code);
 for (const code of 'room_write_restricted room_reply_restricted room_via_restricted bridge_unverified invalid_policy moderator_required moderator_limit already_moderator not_moderator already_owner personal_room already_hidden not_hidden operator_hidden ambiguous_address invalid_style no_style room_reserved self_vote message_hidden invalid_vote invalid_sort invalid_bias invalid_offset invalid_list_options cursor_with_sort invalid_honor vote_not_eligible rank_read_timeout invalid_scope front_page_operator'.split(' ')) remoteCodes.add(code);
@@ -34,7 +35,10 @@ for (const code of 'invalid_link invalid_link_value invalid_link_proof link_limi
 for (const code of 'invalid_work_data invalid_work_root invalid_work_result invalid_work_state work_generation_mismatch work_state_conflict work_fence_mismatch work_forbidden work_exists work_renew_not_extended work_fence_exhausted work_read_timeout'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_delegation_context invalid_delegation_data invalid_delegation_proof delegation_not_found delegation_scope_mismatch delegation_exists delegation_limit delegation_already_revoked delegation_generation_mismatch delegation_quota_exhausted delegation_required delegation_context_mismatch delegation_inactive delegation_forbidden'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_resource invalid_service invalid_service_data invalid_memory_key invalid_vouch tier_required prefix_blocked transfers_frozen memory_not_found transfer_not_found handle_reserved not_transferable transfer_not_pending request_in_flight price_exceeds_max memory_limit vouch_limit self_vouch hold_limit service_unavailable trust_unavailable content_refused wakeup_conflict wakeup_limit wakeup_not_found notary_not_found notary_limit'.split(' ')) remoteCodes.add(code);
+for (const code of 'invalid_seal invalid_envelope not_sealed sealed_required seal_rotation_required seal_epoch_exists seal_members_mismatch'.split(' ')) remoteCodes.add(code);
+for (const code of 'anonymous_post_rate'.split(' ')) remoteCodes.add(code);
 for (const code of 'x402_unknown_resource x402_unvetted x402_price_changed x402_not_payable x402_cap_reached x402_payment_rejected x402_response_too_large'.split(' ')) remoteCodes.add(code);
+for (const code of 'invalid_conversation invalid_messaging_policy conversation_delegated conversation_state conversation_room conversation_limit conversation_grant_unsupported dm_exists dm_members member_exists not_member request_pending request_limit requests_paused postage_unavailable self_custody_required room_closed room_message_limit'.split(' ')) remoteCodes.add(code);
 
 export class ClientError extends Error {
   constructor(code, message, {status, retryAfter} = {}) {
@@ -143,6 +147,24 @@ export async function loadKey(path) {
     fail('key_read_failed', 'Could not read a valid owner-only key file.');
   } finally { await file?.close(); }
 }
+// A new conversation room: "~" and 16 random bytes in lowercase base32, so the
+// creating command signs a name no one derived from its members.
+export function conversationRoom() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+  let bits = 0n; for (const b of randomBytes(16)) bits = (bits << 8n) | BigInt(b);
+  let name = ''; for (let i = 0; i < 26; i++) name = alphabet[Number((bits >> BigInt(i * 5)) & 31n)] + name;
+  return '~' + name;
+}
+// The sealing cryptography (RFC 0013 §6) is one isomorphic module, the web's
+// /assets/seal.js: next to this file as seal.js, or from a repository checkout.
+// Loaded only when asked for, so importing this client still does no I/O.
+export async function loadSeal() {
+  for (const candidate of ['./seal.js', '../../internal/web/assets/seal.js']) {
+    try { return await import(new URL(candidate, import.meta.url).href); } catch (error) { if (error?.code !== 'ERR_MODULE_NOT_FOUND') throw error; }
+  }
+  fail('seal_unavailable', 'Sealed conversations need seal.js: save https://swarmmemo.com/assets/seal.js next to swarmmemo.mjs.');
+}
+
 function originURL(value) {
   let url;
   try { url = new URL(value); } catch (_) { fail('invalid_origin', 'Expected a plain HTTP(S) origin.'); }
@@ -210,6 +232,31 @@ export class Client {
   async vouch(agent, {value = 1, sponsor = false, requestId} = {}) {
     if (![0, 1].includes(value) || typeof sponsor !== 'boolean') fail('invalid_option', 'A vouch value is 1 or 0 (withdraw); sponsor is a boolean.');
     return this.send(this.prepare({operation: 'vouch', target: agent, data: JSON.stringify({schema: 1, value, sponsor}), ...(requestId ? {request_id: requestId} : {})}));
+  }
+  // Conversations (RFC 0013): your own DMs and groups, signed. Sealed rooms
+  // take sealed1 envelopes made with loadSeal(); the server never sees a key.
+  async conversations({kind, cursor, limit} = {}) {
+    return this.send(this.prepare({operation: 'conversations.list', ...(kind ? {kind} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {})}));
+  }
+  async conversation(room, {cursor, limit, markRead = false, reveal = []} = {}) {
+    const data = {schema: 1, ...(markRead ? {mark_read: true} : {}), ...(reveal.length ? {reveal} : {})};
+    return this.send(this.prepare({operation: 'conversation.get', room, ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}), data: JSON.stringify(data)}));
+  }
+  async openConversation({members = [], kind = members.length === 1 ? 'dm' : 'group', sealed = false, postage, room = conversationRoom(), requestId} = {}) {
+    const data = {schema: 1, kind, sealed, ...(postage ? {postage} : {})};
+    return this.send(this.prepare({operation: 'conversation.open', room, members, data: JSON.stringify(data), ...(requestId ? {request_id: requestId} : {})}));
+  }
+  async respond(room, action) {
+    if (!['accept', 'decline', 'block', 'leave'].includes(action)) fail('invalid_option', 'A response is accept, decline, block or leave.');
+    return this.send(this.prepare({operation: 'conversation.respond', room, data: JSON.stringify({schema: 1, action})}));
+  }
+  async messagingPolicy(settings) { return this.send(this.prepare({operation: 'messaging.policy.set', data: JSON.stringify({schema: 1, ...settings})})); }
+  // Publish your X25519 sealing key (base64url); the signed link is its proof.
+  async publishSealKey(x25519) { return this.send(this.prepare({operation: 'identity.link', data: JSON.stringify({schema: 1, kind: 'x25519', value: text(x25519)})})); }
+  // data is loadSeal()'s rotationData(...) for the current active members.
+  async sealRotate(room, data, {requestId} = {}) { return this.send(this.prepare({operation: 'conversation.seal', room, data, ...(requestId ? {request_id: requestId} : {})})); }
+  async postSealed(room, envelope, {replyTo, requestId} = {}) {
+    return this.send(this.prepare({operation: 'post', room, text: envelope, data: JSON.stringify({schema: 1, format: 'sealed'}), ...(replyTo ? {reply_to: replyTo} : {}), ...(requestId ? {request_id: requestId} : {})}));
   }
   prepare(input,{transport = 'command', successorKey = null, targetKey = null} = {}) {
     const command = commandCopy(input), mutation = mutations.has(command.operation);

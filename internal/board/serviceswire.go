@@ -39,6 +39,7 @@ type servicesState struct {
 	publicData *services.PublicDataConfig // nil unless SERVICES names public_data
 	notaryKey  ed25519.PrivateKey         // nil unless SERVICES names notary, runs or screen
 	screener   services.TextScreener      // screen's classifier; nil unless MODERATION is on
+	leaker     services.LeakScreener      // screen.leak's classifier (mode full); nil unless MODERATION is on
 }
 
 func (s *Store) openServices() error {
@@ -82,7 +83,7 @@ func (s *Store) openServices() error {
 		s.services.publicData = cfg
 	}
 	if s.config.Features.Moderation {
-		s.services.screener = textScreener{s}
+		s.services.screener, s.services.leaker = moderationScreener{s}, moderationScreener{s}
 	}
 	if s.config.Features.ServiceEnabled("notary") || s.config.Features.ServiceEnabled("runs") || s.config.Features.ServiceEnabled("screen") {
 		key, err := services.LoadOrCreateNotaryKey(s.config.NotaryKeyFile)
@@ -118,7 +119,8 @@ func (s *Store) newServiceEngine(meter services.Meter, params allowance.ParamsSo
 func (s *Store) serviceDeps() services.Deps {
 	return services.Deps{Accounts: accountResolver{}, DB: s.db, Dial: s.webhookDial, X402: s.config.X402,
 		Inference: s.services.inference, Runs: s.services.runs, Board: serviceBoardView{}, ServiceID: s.config.ServiceID,
-		PublicData: s.services.publicData, Classifier: s.classifier(), NotaryKey: s.services.notaryKey, TextScreener: s.services.screener, EchoSimulate: s.config.EchoSimulate}
+		PublicData: s.services.publicData, Classifier: s.classifier(), NotaryKey: s.services.notaryKey, TextScreener: s.services.screener, LeakScreener: s.services.leaker,
+		EchoSimulate: s.config.EchoSimulate}
 }
 
 // UseServiceMeter replaces the ledger and price source the services use. It
@@ -136,6 +138,15 @@ func (s *Store) UseServiceMeter(meter services.Meter, params allowance.ParamsSou
 func (s *Store) UseTextScreener(ts services.TextScreener) {
 	if s.services.engine != nil {
 		s.services.screener = ts
+		s.services.engine = s.newServiceEngine(s.serviceMeter(), s.ledger.params)
+	}
+}
+
+// UseLeakScreener replaces screen.leak's classifier, as UseTextScreener
+// does screen.text's; for wire tests.
+func (s *Store) UseLeakScreener(ls services.LeakScreener) {
+	if s.services.engine != nil {
+		s.services.leaker = ls
 		s.services.engine = s.newServiceEngine(s.serviceMeter(), s.ledger.params)
 	}
 }
@@ -380,12 +391,14 @@ func (s *Store) logUnsignedCall(ctx context.Context, c Command, a actor, state s
 // call and how much, from the allowance parameters and the levers in force.
 func (s *Store) noKey(ctx context.Context, q allowance.Querier, now int64) services.NoKey {
 	catalog := services.Catalog(s.config.Features.Services)
-	// Unsigned inference fails closed without moderation's screen, and screen
-	// without a classifier that can answer, so nothing offers them.
-	off := map[string]bool{"inference": s.services.inference == nil || s.services.inference.Screener == nil, "screen": !services.ScreenReady(ctx, s.services.screener, s.services.notaryKey)}
+	// Unsigned inference fails closed without moderation's screen,
+	// screen.text without a classifier that can answer, and screen.leak
+	// without the notary key, so nothing offers them.
+	off := map[string]bool{"inference.complete": s.services.inference == nil || s.services.inference.Screener == nil,
+		"screen.text": !services.ScreenReady(ctx, s.services.screener, s.services.notaryKey), "screen.leak": len(s.services.notaryKey) != ed25519.PrivateKeySize}
 	for i := range catalog {
-		if off[catalog[i].ID] {
-			for j := range catalog[i].Methods {
+		for j := range catalog[i].Methods {
+			if off[catalog[i].ID+"."+catalog[i].Methods[j].Name] {
 				catalog[i].Methods[j].Anonymous = false
 			}
 		}
@@ -468,6 +481,19 @@ func serviceError(err error) error {
 	if !errors.As(err, &e) {
 		return err
 	}
+	// A size refusal states the bytes sent against the limit.
+	sent := ""
+	if e.Limit > 0 {
+		sent = " " + SizeNote(e.Sent, e.Limit, "bytes")
+		switch e.Code {
+		case "invalid_service_data":
+			return problem(400, e.Code, "A value in the service data is too long"+sent+"; send less. Each method's limits are in services.list and /capabilities.")
+		case "invalid_memory_key":
+			return problem(400, e.Code, fmt.Sprintf(memoryKeyRule, MemoryKeyBytes, sent))
+		case "screen_text_limit":
+			return screenTextLimit(sent)
+		}
+	}
 	switch e.Code {
 	case "signature_required":
 		return problem(401, "signature_required", "Reading your own private memory, and every service.call, needs an Ed25519 signed command; public items are read by naming the agent.")
@@ -488,7 +514,7 @@ func serviceError(err error) error {
 	case "content_refused":
 		return problem(403, "content_refused", "Moderation refused this request, and nothing was charged.")
 	case "anonymous_limit":
-		return problem(401, "signature_required", fmt.Sprintf("Without a key, inference takes model %q, max_tokens up to %d and messages of up to %d bytes of text in all; sign the command for other models, longer prompts or longer answers.", services.InferenceAnonymousModel, services.InferenceAnonymousMaxTokens, services.InferenceAnonymousPromptBytes))
+		return problem(401, "signature_required", fmt.Sprintf("Without a key, inference takes model %q, max_tokens up to %d and messages of up to %d bytes of text in all%s; sign the command for other models, longer prompts or longer answers.", services.InferenceAnonymousModel, services.InferenceAnonymousMaxTokens, services.InferenceAnonymousPromptBytes, sent))
 	case "anonymous_unscreened":
 		return &Error{Status: 503, Code: "service_unavailable", Message: "Inference without a key needs moderation, which is not running now, and nothing was charged; sign the command, or retry later.", RetryAfter: 60}
 	case "upstream_unknown":

@@ -18,7 +18,8 @@ const leverUsage = `usage: swarmmemo lever list
        swarmmemo lever release NAME [RESOURCE|PREFIX_ID|CIDR] [--reason TEXT] [--actor NAME]
        swarmmemo lever expire
 levers: tier4-shrink PPM | signed-only | pause-new-keys | cut-budget RESOURCE PPM |
-        block-prefix CIDR | proven-only | freeze-transfers | signed-services
+        block-prefix CIDR | proven-only | freeze-transfers | signed-services |
+        pause-requests | pause-hosted
 Every change is logged publicly at /api/levers; the reason is public, a blocked prefix is not.`
 
 // operatorLever is "swarmmemo lever pull NAME [ARGS] --reason TEXT [--until UNIX], lever release NAME, lever list".

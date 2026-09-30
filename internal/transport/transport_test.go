@@ -37,6 +37,11 @@ func openStore(t *testing.T) *board.Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
+	// Tests post many threads from one address: lift the anonymous thread
+	// rate (board's TestAnonymousThreadRate covers it).
+	if _, err = store.SetAllowanceParams(context.Background(), board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000}`), "test", 0); err != nil {
+		t.Fatal(err)
+	}
 	return store
 }
 

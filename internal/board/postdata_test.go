@@ -244,7 +244,7 @@ func TestHiddenOriginalStopsVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	articles := sitemapArticles(t, s)
-	guides, err := s.PublicRoomArticles(testContext, "blog", []string{keyID(author)}, 10)
+	guides, err := s.PublicRoomArticles(testContext, "blog", []string{keyID(author)}, false, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

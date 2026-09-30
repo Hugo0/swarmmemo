@@ -2,11 +2,14 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"swarmmemo/internal/allowance"
 )
 
 // argShapes is each method's args type as its own parser decodes it.
@@ -16,7 +19,7 @@ var argShapes = map[string]any{
 	"notary.stamp": notaryStampArgs{}, "notary.get": struct {
 		Hash string `json:"hash"`
 	}{}, "notary.key": struct{}{},
-	"screen.text": screenArgs{}, "screen.key": struct{}{}, "screen.verify": screenVerifyArgs{},
+	"screen.text": screenArgs{}, "screen.leak": leakArgs{}, "screen.key": struct{}{}, "screen.verify": screenVerifyArgs{},
 	"inference.complete": inferenceArgs{},
 	"x402.call":          x402Args{}, "x402.resources": x402SearchArgs{},
 	"public_data.fetch": pdRequestArgs{}, "public_data.bulk": struct {
@@ -93,6 +96,8 @@ func TestCatalogExamplesParse(t *testing.T) {
 				_, err = parseStamp(args)
 			case "screen.text":
 				_, err = parseScreen(args)
+			case "screen.leak":
+				_, err = parseLeak(args)
 			case "public_data.fetch", "public_data.bulk":
 				_, err = parsePublicData(m.Name, args, now)
 			case "runs.run":
@@ -136,3 +141,38 @@ func TestCatalogIsServicesList(t *testing.T) {
 		t.Fatalf("static catalogue differs from services.list:\n%s\n%s", a, bb)
 	}
 }
+
+// A size refusal carries the bytes sent and the limit, which the board's
+// message states; a refusal for anything else carries none.
+func TestSizeRefusalsCarryTheValueSent(t *testing.T) {
+	text := func(n int) string { return `"` + strings.Repeat("x", n) + `"` }
+	sized := func(err error) (code string, sent, limit int) {
+		var e *allowance.Err
+		if !errors.As(err, &e) {
+			return "", 0, 0
+		}
+		return e.Code, e.Sent, e.Limit
+	}
+	for name, c := range map[string]struct {
+		err         error
+		code        string
+		sent, limit int
+	}{
+		"screen text":    {second(parseScreen(json.RawMessage(`{"text":` + text(ScreenTextBytes+1) + `}`))), "invalid_service_data", ScreenTextBytes + 1, ScreenTextBytes},
+		"leak text":      {second(parseLeak(json.RawMessage(`{"text":` + text(ScreenTextBytes+2) + `}`))), "invalid_service_data", ScreenTextBytes + 2, ScreenTextBytes},
+		"memory value":   {second(parsePut(json.RawMessage(`{"key":"k","value":` + text(MemoryValueBytes+1) + `}`))), "invalid_service_data", MemoryValueBytes + 1, MemoryValueBytes},
+		"memory key":     {memoryKeyError(strings.Repeat("k", MemoryKeyBytes+1)), "invalid_memory_key", MemoryKeyBytes + 1, MemoryKeyBytes},
+		"notary text":    {second(parseStamp(json.RawMessage(`{"text":` + text(NotaryTextBytes+1) + `}`))), "invalid_service_data", NotaryTextBytes + 1, NotaryTextBytes},
+		"x402 search":    {second(parseX402Search(json.RawMessage(`{"query":`+text(x402SearchBytes+1)+`}`), 6)), "invalid_service_data", x402SearchBytes + 1, x402SearchBytes},
+		"anonymous text": {(*screen)(nil).CheckAnonymous(Call{Method: "text", Args: json.RawMessage(`{"text":` + text(ScreenAnonymousTextBytes+1) + `}`)}), "screen_text_limit", ScreenAnonymousTextBytes + 1, ScreenAnonymousTextBytes},
+	} {
+		if code, sent, limit := sized(c.err); code != c.code || sent != c.sent || limit != c.limit {
+			t.Errorf("%s: %s %d/%d, want %s %d/%d", name, code, sent, limit, c.code, c.sent, c.limit)
+		}
+	}
+	if _, sent, limit := sized(memoryKeyError("a..b")); sent != 0 || limit != 0 {
+		t.Fatal("a malformed key is not a size refusal")
+	}
+}
+
+func second[T any](_ T, err error) error { return err }

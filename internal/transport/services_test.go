@@ -96,6 +96,13 @@ func TestHelpLeadsWithTheFreeCredit(t *testing.T) {
 	if usage := answerOnce(t, d, dnsQueryBytes("q.swarmmemo.com", dnsTypeTXT), board.Result{}, nil, 512); flag(usage, 0x0200) {
 		t.Error("the zone's usage no longer fits plain UDP")
 	}
+	// With DNS write on, the usage also names writes and says DNS is
+	// cleartext, and still fits.
+	d.writes = newReassembly()
+	if usage := answerOnce(t, d, dnsQueryBytes("q.swarmmemo.com", dnsTypeTXT), board.Result{}, nil, 512); flag(usage, 0x0200) || !strings.Contains(string(usage), "not encrypted") {
+		t.Errorf("the zone's usage with DNS write on: %q", usage)
+	}
+	d.writes = nil
 	// No offer, no line.
 	help.offer = func() *board.FreeCredit { return nil }
 	if out := string((lineProtocol{help: help}).Render(Request{Route: "help"}, board.Result{}, nil)); !strings.HasPrefix(out, lineHelp) {

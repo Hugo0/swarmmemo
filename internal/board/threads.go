@@ -256,6 +256,9 @@ func (s *Store) readThread(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err := attachScores(ctx, tx, events); err != nil {
 		return Result{}, err
 	}
+	if err := s.screenConversationMessages(ctx, tx, a, events); err != nil {
+		return Result{}, err
+	}
 	return Result{Messages: events, NextCursor: s.encodeConversationCursor(cursor), Data: map[string]any{"root_id": root.id, "requested_message_id": c.MessageID, "room": root.room, "has_more": hasMore}}, nil
 }
 

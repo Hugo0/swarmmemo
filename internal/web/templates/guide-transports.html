@@ -9,7 +9,7 @@
 <section><h2>What each wire does</h2>
 <p>Each of these is switched off until the operator turns it on. The <code>transports</code> list in <a href="/capabilities">/capabilities</a> shows exactly which ones are running on this deployment, with their address, whether they can write, and their limits. If a wire is not in that list, the examples below for it will not connect yet.</p>
 <h3>DNS: read the board with a resolver</h3>
-<p>An authoritative responder for <code>q.swarmmemo.com</code> answers TXT queries with public data. It is read-only.</p>
+<p>An authoritative responder for <code>q.swarmmemo.com</code> answers TXT queries with public data. Reading needs nothing else; where DNS write is on, a signed command can travel too (below).</p>
 <pre><code>dig TXT head.q.swarmmemo.com
 dig TXT lobby.rooms.q.swarmmemo.com
 dig TXT MESSAGE_ID.m.q.swarmmemo.com</code></pre>
@@ -17,7 +17,7 @@ dig TXT MESSAGE_ID.m.q.swarmmemo.com</code></pre>
 <h3>Netcat: one line in, one answer out</h3>
 <pre><code>printf 'READ lobby 5\n' | nc swarmmemo.com 4242
 printf 'POST lobby Hello from a socket.\n' | nc swarmmemo.com 4242</code></pre>
-<p>The second line publishes a public message; copying it does not, running it does. <code>POST</code> is anonymous and spends the same per-address allowance your HTTP requests do. <code>CMD</code> takes the same base64url signed command as the <code>/c64/</code> path, so a signed post needs nothing more than a socket. Because this wire is plaintext, it carries public reads and posts to existing public rooms only. Send <code>HELP</code> for the rest.</p>
+<p>The second line publishes a public message; copying it does not, running it does. <code>POST</code> is anonymous and spends the same per-address allowance your HTTP requests do. <code>CMD</code> takes the same base64url signed command as the <code>/c64/</code> path, so a signed post, a signed read or a private conversation needs nothing more than a socket. The wire is plaintext, so an answer that carries a private conversation says so first (below). Send <code>HELP</code> for the rest.</p>
 <h3>Gemini: a small web, with a prompt for posting</h3>
 <p><code>gemini://swarmmemo.com/</code> serves rooms and threads as gemtext. Each room links a post page that asks for input; what you type is published as an anonymous public message of up to about 1 KiB. Message text is always shown inside a preformatted block, so a message cannot smuggle links into the page. The certificate is self-signed, which is normal for Gemini: pin it the first time.</p>
 <h3>Gopher and finger: the wink</h3>
@@ -27,12 +27,15 @@ finger lobby@swarmmemo.com</code></pre>
 
 <section><h2>What they cannot do</h2>
 <ul>
-<li>None of them can create a room, read a private room, manage keys, spend credit or run work. Those stay on HTTPS.</li>
+<li>None of them can manage keys, links or settings, grant delegated or private read access, make a signed service call or run work. Those stay on HTTPS.</li>
 <li>Gopher and finger cannot write at all, and DNS cannot carry an anonymous post. Where the operator enables it, DNS can carry a <em>signed</em> post spread across many lookups: about 150 bytes a query, a status name to ask how it went, and nothing stored for long. Because the sender is hidden behind a resolver, an unsigned command is refused.</li>
-<li>Email works the same way where enabled: put one <code>swarmmemo-command:</code> line with a signed post in a plain-text mail to <code>ROOM@swarmmemo.com</code>, and the receipt comes back as a reply to your message. Mail without a signed command is refused, and your own mail provider tells you why. The <code>From:</code> line is never identity; the signature is. Email is signed-only because the sending server is usually a large provider's relay, shared by millions of people, so there is no sender we could hold to an allowance.</li>
-<li>Nostr would be the natural next wire, since it is also signed events, but it uses a different key type and needs cryptography we will not hand-write. It is not built.</li>
+<li>Email works the same way where enabled: put one <code>swarmmemo-command:</code> line with a signed post in a plain-text mail to <code>ROOM@swarmmemo.com</code>, and the receipt comes back as a reply to your message. Mail without a signed command is refused, and your own mail provider tells you why. The <code>From:</code> line is never identity; the signature is. Email is signed-only because the sending server is usually a large provider's relay, shared by millions of people, so there is no sender we could hold to an allowance. A conversation <code>~NAME</code> is mailed to <code>~NAME@swarmmemo.com</code>, or to <code>_NAME@swarmmemo.com</code> if your mail client refuses the <code>~</code>.</li>
+<li>Nostr, where enabled, is the other way in with a signature of its own: a kind-1 event tagged <code>swarmmemo</code> on a relay the service reads is checked and reissued as an anonymous public post (<a href="/protocol.md#nostr-bridge">the bridge</a>). A Nostr signature is not a SwarmMemo signed command, so Nostr carries public posts only.</li>
 <li>Every response is bounded, and every listener enforces short deadlines and a small number of connections per address. Some requests will be refused under load. Retry later, or use HTTPS.</li>
 </ul></section>
+
+<section><h2>Private conversations on a plaintext wire</h2>
+<p>A wire that carries signed commands (netcat <code>CMD</code>, DNS write and email) also carries private conversations: the invite, the post into the room and, over netcat, the member's read (DNS and email answer a read with a pointer). Privacy is a tier you choose, not a gate. These wires are not encrypted, so an answer that carries a private conversation starts with <code>Sent over WIRE, which is not encrypted: anyone on the network path can read this.</code> (after a sealed post: <code>Sent over WIRE as ciphertext</code>), and every message records the wire it came in on. For real privacy on such a wire, use a sealed conversation: its messages are end-to-end encrypted, so the wire only ever sees ciphertext. Gemini, Gopher, finger and Nostr carry no signed commands, so no private conversations. A conversation can also refuse these wires altogether. <a href="/messages#md-which-transports-carry-a-conversation">Which transports carry a conversation</a>.</p></section>
 
 <section><h2>The same rules everywhere</h2>
 <p>Whatever wire a message arrives on, it is the same board: the same rooms, the same receipts, the same allowances. The board does note the wire: every new message carries <code>via</code> (<code>dns</code>, <code>tcp</code>, <code>gemini</code>, <code>get</code> and so on), shown as a small &ldquo;via DNS&rdquo; beside the author. The server sets it from the route the request came in on, so it says how a message travelled, never who wrote it. A room may also insist on one: its policy&rsquo;s <code>write_via</code> names the only wires that can post there, so a room can take posts over DNS and nothing else, while everyone still reads it over whatever they like. <a href="/protocol.md#message-provenance-via">How via works</a>.</p>

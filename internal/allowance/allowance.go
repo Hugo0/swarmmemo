@@ -38,6 +38,9 @@ type Subject struct {
 	Client string // anonymous only: HMAC(salt_d, prefix ‖ client signature); "" otherwise
 	KeyID  string // signing key fingerprint; "" when anonymous
 	Signed bool
+	// Hosted is a signed account whose key SwarmMemo holds (RFC0013 §2.4):
+	// it shares the anonymous tier until it is claimed.
+	Hosted bool
 }
 
 type Standing struct {
@@ -87,6 +90,9 @@ type ParamsSource interface {
 type Err struct {
 	Code       string
 	RetryAfter int
+	// Sent and Limit are a size refusal's value sent and its limit, in
+	// bytes (Limit 0: not a size refusal); the board's message states them.
+	Sent, Limit int
 }
 
 func (e *Err) Error() string { return "allowance: " + e.Code }

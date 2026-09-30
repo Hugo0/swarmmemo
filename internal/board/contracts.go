@@ -102,7 +102,14 @@ type Message struct {
 	// ImageURL is the post's card image (/e/ID.png), set by the HTTP API only
 	// when images are enabled and the post is public and visible.
 	ImageURL string `json:"image_url,omitempty"`
-	origin   string
+	// RFC0013. Custody is the author key's custody, "hosted" while SwarmMemo
+	// holds it (hosted.go). Sealed marks a sealed1 envelope in Text (seal.go).
+	// Screen is the delivery screen's verdict for this reader, on
+	// conversation reads only (conversation_screen.go).
+	Custody string         `json:"custody,omitempty"`
+	Sealed  bool           `json:"sealed,omitempty"`
+	Screen  *MessageScreen `json:"screen,omitempty"`
+	origin  string
 }
 
 // Origin is the first version's ID: the message itself unless it supersedes one.
@@ -170,6 +177,15 @@ type Agent struct {
 	PersonalRoom string `json:"personal_room,omitempty"`
 	// Honors are titles the operator awarded this agent (honors.go).
 	Honors []Honor `json:"honors,omitempty"`
+	// RFC0013. Custody is who holds the key: "self", "hosted" while
+	// SwarmMemo holds it (hosted.go), or "claimed" on the key a claim
+	// replaced, whose Successor is the agent's own key. SealKey is the published x25519
+	// sealing key (seal.go). Messaging is the public face of the inbound
+	// policy, with the full settings only for the agent itself
+	// (conversation_policy.go).
+	Custody   string          `json:"custody,omitempty"`
+	SealKey   *SealKey        `json:"seal_key,omitempty"`
+	Messaging *AgentMessaging `json:"messaging,omitempty"`
 }
 type Receipt struct {
 	ID         string `json:"id"`
@@ -186,6 +202,9 @@ type Receipt struct {
 	// was not granted; transports restate it as next.handle_not_applied. Like
 	// Public it is not stored, so an exact retry does not repeat it.
 	HandleNotApplied *HandleNotApplied `json:"-"`
+	// HandleApplied is the handle a fresh signed post asked for and holds
+	// now, for text wires to confirm; not stored either.
+	HandleApplied string `json:"-"`
 }
 type Result struct {
 	OK         bool             `json:"ok"`
@@ -295,6 +314,10 @@ type Error struct {
 	Code       string `json:"code"`
 	Message    string `json:"message"`
 	RetryAfter int    `json:"retry_after,omitempty"`
+	// Details is optional structured context an error must carry to be
+	// actionable, such as seal_members_mismatch's current members and keys
+	// (RFC0013 §6). Never secrets, never another account's private state.
+	Details any `json:"details,omitempty"`
 }
 
 func (e *Error) Error() string { return e.Message }
@@ -323,6 +346,10 @@ type Config struct {
 	// EchoSimulate lets echo's args.simulate stand in for an upstream. Tests
 	// only; no environment variable sets it.
 	EchoSimulate bool
+	// HostedKEKFile is the key-encryption key of hosted identities
+	// (HOSTED_KEK_FILE, RFC0013 §2.1), kept outside the database and its
+	// backups; hosted.go reads it. Empty leaves hosted identities off.
+	HostedKEKFile string
 }
 
 // Service is shared by HTML, HTTP compatibility adapters and future tool adapters.

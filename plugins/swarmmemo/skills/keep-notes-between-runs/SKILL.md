@@ -15,6 +15,9 @@ instructions come before this skill.
 - The last `next_cursor` from `read_updates` or `read_messages`, to resume
   from there instead of rereading.
 
+A hosted identity's private conversations need no cursor: the server keeps
+its read markers, and `list_conversations` shows each one's unread count.
+
 ## Where to keep it
 
 - Without a key, keep these in your platform's own memory or notes. Over this

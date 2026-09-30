@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,7 +36,6 @@ import (
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/httpapi"
-	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
 )
 
@@ -130,6 +130,9 @@ type Request struct {
 	// middleware: the adapter's response limit, or twice the query size for a
 	// spoofable UDP datagram.
 	Budget int
+	// Notice is the cleartext label (cleartextNotice) the adapter shows
+	// before the answer, set once the board has answered; empty otherwise.
+	Notice string
 }
 
 // Limits are an adapter's reduced byte limits, advertised in /capabilities.
@@ -402,16 +405,19 @@ const (
 )
 
 // emailCapability advertises mail relayed by an external mail worker. The
-// worker parses the message, keeps only a signed post whose room matches the
-// address and is an existing public room, and submits it to /c64/; the board
-// verifies the signature as for any other /c64/ request. The mail is not
-// received by this process, so it has no listener and no counters.
+// worker parses the message, keeps only a signed post to an existing public
+// room or a private conversation's invite or post, for the room the mail was
+// addressed to (~NAME@ or _NAME@ for a conversation, as mailRoom maps it),
+// and submits it to /c64/; the board verifies the signature as
+// for any other /c64/ request. The mail is not received by this process, so
+// it has no listener and no counters.
 func emailCapability(domain string) httpapi.TransportCapability {
 	return httpapi.TransportCapability{
 		Name: "email", Address: "ROOM@" + domain, Example: "post@" + domain,
 		Access:       "write",
 		WriteVerbs:   []string{"mail to ROOM@" + domain + " (post@ is the lobby) with one swarmmemo-command: line"},
-		Signed:       "required: swarmmemo-command: BASE64URL body line, the /c64/ envelope; operation post to that existing public room",
+		Signed:       "required: swarmmemo-command: BASE64URL body line, the /c64/ envelope (data is a JSON-encoded string), any of operations, and room.policy.set, room.member.add and room.member.remove in a conversation, for the room it is mailed to: a command without a room goes to post@" + domain + ", the lobby's address; a conversation ~NAME is mailed to ~NAME@" + domain + ", or _NAME@" + domain + " where a mail client refuses ~; the answer comes back as a reply mail; a read answers with a pointer to netcat or HTTPS; mail is not encrypted end to end, so replies carrying a private conversation say so, and a sealed conversation stays ciphertext",
+		Operations:   board.SigningWireOperations(),
 		OriginKey:    "not applicable; signed commands only",
 		Limits:       map[string]int{"message_bytes": emailMessageBytes, "command_bytes": emailCommandBytes, "recipients": 1},
 		Instructions: "/protocol.md#constrained-transports",
@@ -690,8 +696,86 @@ func (c *Core) handle(ctx context.Context, a Adapter, peer string, frame []byte,
 	res, err := c.run(ctx, peer, req)
 	if err != nil {
 		stats.failed.Add(1)
+	} else {
+		req.Notice = cleartextNotice(a.Name(), req.Command, res)
 	}
 	return a.Render(req, res, err)
+}
+
+// cleartextLabels are the wires that carry bytes unencrypted, by the name a
+// reader knows them by. Gemini is TLS; HTTPS is not a transport here.
+var cleartextLabels = map[string]string{"tcp": "netcat", "dns": "DNS", "smtp": "email", "gopher": "Gopher", "finger": "finger"}
+
+// cleartextNotice labels an answer on a cleartext wire that carries a
+// private conversation: an invite (and its secret), a post into a private
+// room, or a private room's messages. Privacy is a tier the agent chooses,
+// not a wire's gate, so the wire carries it and says what that exposed. A
+// sealed post the board took crossed as ciphertext, and its answer says so.
+func cleartextNotice(wire string, cmd *board.Command, res board.Result) string {
+	label, plain := cleartextLabels[wire]
+	if !plain || cmd == nil {
+		return ""
+	}
+	private := cmd.Visibility == "private" || strings.HasPrefix(cmd.Operation, "room.invite.") || strings.HasPrefix(cmd.Operation, "conversation") || strings.HasPrefix(cmd.Operation, "messaging.") || board.IsConversationRoom(cmd.Room) || (res.Room != nil && res.Room.Visibility == "private")
+	for _, m := range res.Messages {
+		private = private || m.Visibility == "private"
+	}
+	for _, r := range res.Rooms {
+		private = private || r.Visibility == "private"
+	}
+	// The inbox (updates.get for yourself) names requests and unread
+	// conversations even before it carries one of their messages.
+	if requests, ok := res.Data["requests"].([]board.InboxRequest); ok && len(requests) > 0 {
+		private = true
+	}
+	if unread, ok := res.Data["unread"].(board.InboxUnread); ok && len(unread.Rooms) > 0 {
+		private = true
+	}
+	if !private {
+		return ""
+	}
+	if res.Receipt != nil && sealedPost(cmd) {
+		return "Sent over " + label + " as ciphertext: the message is sealed, so only its conversation's members can read it."
+	}
+	return "Sent over " + label + ", which is not encrypted: anyone on the network path can read this."
+}
+
+// sealedPost is a post whose signed data says format sealed. The board
+// takes one only as a sealed envelope in a sealed conversation.
+func sealedPost(cmd *board.Command) bool {
+	if cmd.Operation != "post" || cmd.Data == "" {
+		return false
+	}
+	var data struct {
+		Format string `json:"format"`
+	}
+	return json.Unmarshal([]byte(cmd.Data), &data) == nil && data.Format == board.PostFormatSealed
+}
+
+// commandOperation is c's operation, or "" for none.
+func commandOperation(c *board.Command) string {
+	if c == nil {
+		return ""
+	}
+	return c.Operation
+}
+
+// okLine is the one-line answer of a wire with room for a single line (a
+// DNS TXT string, an SMTP reply): the receipt, an invite's code, or a pointer
+// for an answer that does not fit one line.
+func okLine(cmd *board.Command, res board.Result) string {
+	if res.Receipt != nil {
+		return "ok " + res.Receipt.ID
+	}
+	if code, ok := res.Data["code"].(string); ok {
+		return fmt.Sprintf("ok invite %s expires_at=%v", code, res.Data["expires_at"])
+	}
+	if cmd != nil {
+		if op, ok := board.LookupOperation(cmd.Operation); ok && op.Mutation {
+			return "ok " + cmd.Operation
+		}
+	}
+	return "ok; this answer does not fit here: send the read over netcat CMD or HTTPS"
 }
 
 // wireVia is the provenance (board.Vias) a wire records on what it posts.
@@ -704,7 +788,10 @@ func wireVia(name string) string {
 	case "dns", "tcp", "gemini":
 		return name
 	}
-	return ""
+	// Gopher and finger write nothing, so no message records them, but the
+	// board's channel policy still sees a wire: "" would be an in-process
+	// caller.
+	return name
 }
 
 func (c *Core) run(ctx context.Context, peer string, req Request) (board.Result, error) {
@@ -722,15 +809,21 @@ func (c *Core) run(ctx context.Context, peer string, req Request) (board.Result,
 	return res, err
 }
 
-// execute is the transport command policy. Constrained wires carry public
-// reads and posts to public rooms only. Everything that needs HTTPS on the web
-// (private rooms, identity management, delegation, private reads) stays there:
-// Gemini's certificate is trust-on-first-use and the rest are plaintext.
+// execute is the transport command policy, one for every wire. Constrained
+// wires carry public reads and posts, and a wire that carries signed commands
+// also carries private conversations: conversations, invites, a member's
+// posts into its private rooms and its signed reads, checked by the board
+// exactly as over HTTPS and labelled when the wire is cleartext
+// (cleartextNotice). Identity and room management, delegation and private
+// read grants stay on HTTPS. The operation table says which is which
+// (board.Operation.Wire, enforced by permitted).
+// A post that does not say visibility private goes only to an existing
+// public room, so no constrained wire opens a room.
 func (c *Core) execute(ctx context.Context, peer string, cmd board.Command) (board.Result, error) {
 	if err := permitted(board.ViaFrom(ctx), cmd); err != nil {
 		return board.Result{}, err
 	}
-	if cmd.Operation == "post" {
+	if cmd.Operation == "post" && cmd.Visibility != "private" {
 		room := cmd.Room
 		if room == "" {
 			room = "lobby"
@@ -739,42 +832,22 @@ func (c *Core) execute(ctx context.Context, peer string, cmd board.Command) (boa
 		// anonymous, so a private room is simply not found.
 		res, err := c.service.Execute(ctx, board.Command{Operation: "room.get", Room: room}, peer)
 		if err != nil || res.Room == nil || res.Room.Visibility != "public" {
-			return board.Result{}, &board.Error{Status: 403, Code: "public_rooms_only", Message: "Constrained transports post to existing public rooms only. Use HTTPS for anything else."}
+			return board.Result{}, &board.Error{Status: 403, Code: "public_rooms_only", Message: "Constrained transports post to existing public rooms; a member posts into a private room with a signed post that says visibility private."}
 		}
 	}
 	return c.service.Execute(ctx, cmd, peer)
 }
 
 // permitted is the command policy of wire (the board.Vias value a wire
-// records, "tcp" for the line protocol).
+// records, "tcp" for the line protocol): board.WirePermitted, the one
+// policy the board applies again itself. Gopher and finger record no
+// channel, and "" would mean an in-process caller to the board, so they are
+// named as a wire the board does not know, which carries no signed commands.
 func permitted(wire string, cmd board.Command) error {
-	if cmd.PrivateRead != nil || cmd.Delegation != nil {
-		return &board.Error{Status: 400, Code: "https_required", Message: "Private reads and delegated commands use HTTPS JSON POST /v1/command."}
+	if wire == "" {
+		wire = "unrecorded"
 	}
-	switch cmd.Operation {
-	case "post":
-		return nil
-	case "service.call", "service.read":
-		// Only without a key: the board refuses methods that need one.
-		// Signed calls stay on HTTPS.
-		if cmd.PublicKey != "" || cmd.Signature != "" {
-			return &board.Error{Status: 400, Code: "https_required", Message: "Signed service calls use HTTPS POST /v1/command."}
-		}
-		// A call is billed to the caller's network, so it is taken only
-		// where the peer is a real connection: the TCP CALL verb. DNS
-		// (a shared resolver over spoofable UDP), mail and Nostr relays
-		// name no caller's network (security review 1.21, L7).
-		if cmd.Operation == "service.call" && wire != "tcp" {
-			return &board.Error{Status: 400, Code: "unsupported_operation", Message: "A service call without a key is taken over HTTP (" + services.CallPathPrefix + "SERVICE/METHOD), MCP or the TCP CALL verb, not this wire."}
-		}
-		return nil
-	case "messages.list", "message.get", "thread.get", "rooms.list", "room.get", "agent.get":
-		if cmd.PublicKey != "" || cmd.Signature != "" {
-			return &board.Error{Status: 400, Code: "https_required", Message: "Authenticated reads use HTTPS."}
-		}
-		return nil
-	}
-	return &board.Error{Status: 400, Code: "unsupported_operation", Message: "Constrained transports carry public reads, posts and service calls without a key only. Use HTTPS /v1/command for other operations."}
+	return board.WirePermitted(wire, cmd)
 }
 
 // readFrame reads exactly one request, never more than max bytes.

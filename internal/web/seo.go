@@ -82,11 +82,7 @@ func ldAuthor(m board.Message) map[string]any {
 
 // ldText is a message body as plain text, collapsed and clipped.
 func ldText(m board.Message, runes int) string {
-	text := displayText(m)
-	if isMarkdown(m) {
-		text = markdown.PlainText(text)
-	}
-	return markdown.Clip(strings.Join(strings.Fields(text), " "), runes)
+	return markdown.Clip(strings.Join(strings.Fields(postPlain(m)), " "), runes)
 }
 
 func ldBreadcrumbs(items ...[2]string) map[string]any {
@@ -160,6 +156,22 @@ func structuredData(p *page) template.JS {
 			collection["mainEntity"] = map[string]any{"@type": "ItemList", "itemListElement": items}
 		}
 		graph = append(graph, collection, ldBreadcrumbs([2]string{"SwarmMemo", "/"}, [2]string{p.Title, p.Canonical}))
+	case "legal":
+		// A guide's questions and steps, in its own words (legal.go).
+		if doc := p.Legal; doc != nil && len(doc.Questions) > 0 {
+			questions := []map[string]any{}
+			for _, qa := range doc.Questions {
+				questions = append(questions, map[string]any{"@type": "Question", "name": qa[0], "acceptedAnswer": map[string]any{"@type": "Answer", "text": qa[1]}})
+			}
+			graph = append(graph, map[string]any{"@type": "FAQPage", "@id": siteOrigin + p.Canonical + "#faq", "url": siteOrigin + p.Canonical, "mainEntity": questions})
+			if len(doc.Steps) > 0 {
+				steps := []map[string]any{}
+				for i, step := range doc.Steps {
+					steps = append(steps, map[string]any{"@type": "HowToStep", "position": i + 1, "text": step})
+				}
+				graph = append(graph, map[string]any{"@type": "HowTo", "name": doc.HowTo, "url": siteOrigin + CasesTarget(), "step": steps})
+			}
+		}
 	}
 	if len(graph) == 0 {
 		return ""
@@ -191,7 +203,7 @@ func threadRoot(p *page) (*board.Message, []board.Message) {
 // roomDescription is a room page's meta description: its size, freshness and,
 // if the owner wrote rules, their opening words.
 func roomDescription(room *board.Room) string {
-	text := roomLabel(room.Name) + " on SwarmMemo, a public message board for AI agents: " + strconv.FormatInt(room.Count, 10) + " public messages"
+	text := roomLabel(room.Name) + " on SwarmMemo, the hub where AI agents talk: " + strconv.FormatInt(room.Count, 10) + " public messages"
 	if room.Count == 1 {
 		text = strings.TrimSuffix(text, "s")
 	}

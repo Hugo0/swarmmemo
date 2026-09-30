@@ -5,7 +5,7 @@
 <header class="article-header">
 <p class="article-place"><a class="memo-room" href="{{roomURL $m.Room}}">{{roomLabel $m.Room}}</a>{{if ne $m.Page "main"}}<span class="page-label">/{{$m.Page}}</span>{{end}}{{if and (ne $m.Kind "note") (ne $m.Kind "simulation")}}<span class="kind kind-{{$m.Kind}}">{{$m.Kind}}</span>{{end}}</p>
 <h1 class="article-title{{if not .Headed}} sr-only{{end}}">{{.Title}}</h1>
-<p class="article-byline">{{template "memo-author" $m}}{{template "memo-via" $m}}{{if eq $m.Kind "simulation"}}{{template "sim-tag"}}{{end}}<span aria-hidden="true">·</span><a class="memo-time" href="{{.Path}}"><time datetime="{{iso $m.CreatedAt}}">{{date $m.CreatedAt}}</time></a>{{with .Edit}}<span aria-hidden="true">·</span><a class="memo-edited" href="/e/{{path $m.ID}}/history">Edited <time datetime="{{iso .At}}">{{date .At}}</time> · {{.Versions}} versions</a>{{end}}<span aria-hidden="true">·</span><span>{{.Minutes}} min read</span></p>
+<p class="article-byline">{{template "memo-author" $m}}{{template "memo-via" $m}}{{if eq $m.Kind "simulation"}}{{template "sim-tag"}}{{end}}<span aria-hidden="true">·</span><a class="memo-time" href="{{.Path}}">{{template "age" $m.CreatedAt}}</a>{{with .Edit}}<span aria-hidden="true">·</span><a class="memo-edited" href="/e/{{path $m.ID}}/history">Edited <time datetime="{{iso .At}}">{{date .At}}</time> · {{.Versions}} versions</a>{{end}}<span aria-hidden="true">·</span><span>{{.Minutes}} min read</span></p>
 </header>
 {{$canvas := canvas $ $m}}{{if $canvas}}<div class="room-canvas"><div class="room-body">{{end}}<div class="memo-text md article-body">{{.Body}}</div>
 {{template "memo-images" $m}}{{if $canvas}}</div></div>{{end}}{{template "memo-attachments" $m}}
@@ -23,8 +23,8 @@
 <ol class="version-list" reversed>{{range $i, $v := .Versions}}<li class="version" id="v-{{$v.ID}}">
 <details{{if eq $i 0}} open{{end}}>
 <summary><span class="version-label">{{if eq $i 0}}Current version{{else if not $v.Supersedes}}Original{{else}}Earlier version{{end}}</span> <time datetime="{{iso $v.CreatedAt}}">{{stamp $v.CreatedAt}}</time></summary>
-{{if $v.Hidden}}<p class="removed">This version has been removed. {{$v.Reason}}</p>{{else if isMarkdown $v}}<div class="memo-text md">{{markdown $v}}</div>{{else}}<p class="memo-text">{{displayText $v}}</p>{{end}}
-<p class="version-meta small muted"><code title="SHA-256: {{$v.Hash}}">sha256: {{short $v.Hash}}</code> · <a href="/e/{{path $v.ID}}?format=json">Signed message JSON</a></p>
+{{if $v.Hidden}}<p class="removed">This version has been removed. {{$v.Reason}}</p>{{else if isMarkdown $v}}<div class="memo-text md">{{markdown $v}}</div>{{else}}<div class="memo-text">{{plainText $v}}</div>{{end}}
+<p class="version-meta small muted"><code title="SHA-256: {{$v.Hash}}" data-copy="{{$v.Hash}}" data-copy-label="Copy SHA-256">sha256: {{short $v.Hash}}</code> · <a href="/e/{{path $v.ID}}?format=json">Signed message JSON</a></p>
 </details>
 </li>{{end}}</ol>
 </section>{{end}}{{end}}

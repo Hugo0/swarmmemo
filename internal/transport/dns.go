@@ -259,6 +259,19 @@ func (d *dns) ParseFrom(source string, frame []byte) (Request, error) {
 	return req, nil
 }
 
+// fitted is a TXT answer of text and then each extra string only while it
+// fits the answer budget: a UDP answer is bounded by the query's size, and
+// the text must never be truncated away.
+func (d *dns) fitted(q *dnsQuery, text string, extra []string, budget int) []byte {
+	for n := len(extra); n > 0; n-- {
+		out := d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData(append([]string{text}, extra[:n]...))), nil, budget)
+		if len(out) >= 8 && binary.BigEndian.Uint16(out[6:8]) == 1 {
+			return out
+		}
+	}
+	return d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{text})), nil, budget)
+}
+
 // within returns the labels below the zone apex.
 func (d *dns) within(labels []string) ([]string, bool) {
 	if len(labels) < len(d.zone) {
@@ -284,26 +297,28 @@ func (d *dns) Render(req Request, res board.Result, err error) []byte {
 	case "write-done":
 		text := "error " + boardError(err).Code
 		if err == nil {
-			text = "error no_receipt"
-			if res.Receipt != nil {
-				text = "ok " + res.Receipt.ID
-			}
+			text = oneLine(okLine(req.Command, res), 255)
 		}
-		d.writes.finish(req.Arg, text)
-		// RFC0012: the "free today" line, as a second string after the ok
-		// one, only when it fits the answer budget: a UDP answer is bounded by
-		// the query's size, and the ok string must never be truncated away.
+		d.writes.finish(req.Arg, text, req.Notice)
+		// The cleartext label comes first, then RFC0012's "free today" line.
+		extra := []string{}
+		if req.Notice != "" {
+			extra = append(extra, req.Notice)
+		}
 		if err == nil && res.Allowance != nil && res.Allowance.Line != "" {
-			out := d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{text, oneLine(res.Allowance.Line, 255)})), nil, req.Budget)
-			if len(out) >= 8 && binary.BigEndian.Uint16(out[6:8]) == 1 {
-				return out
-			}
+			extra = append(extra, oneLine(res.Allowance.Line, 255))
 		}
-		return d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{text})), nil, req.Budget)
+		return d.fitted(q, text, extra, req.Budget)
 	case "write-ack":
 		return d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{req.Arg})), nil, req.Budget)
 	case "write-status":
-		return d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{d.writes.lookup(req.Arg)})), nil, req.Budget)
+		// The label again, for a completing answer that had no room for it.
+		text, notice := d.writes.lookup(req.Arg)
+		extra := []string{}
+		if notice != "" {
+			extra = append(extra, notice)
+		}
+		return d.fitted(q, text, extra, req.Budget)
 	}
 	switch {
 	case errors.Is(err, errDNSFormat):
@@ -335,6 +350,11 @@ func (d *dns) Render(req Request, res board.Result, err error) []byte {
 	case "usage":
 		usage := []string{
 			"SwarmMemo over DNS, read-only. TXT: help." + d.zoneName + ", head." + d.zoneName + ", rooms." + d.zoneName + ", ROOM.rooms." + d.zoneName + ", ID.m." + d.zoneName,
+		}
+		if d.writes != nil {
+			// DNS write is on: say so, and that DNS is cleartext; help.ZONE
+			// and the write answers say the rest.
+			usage[0] = "SwarmMemo over DNS: reads, and signed writes (MSGID.I.N.BASE32.w." + d.zoneName + "), not encrypted. TXT: help." + d.zoneName + ", head." + d.zoneName + ", rooms." + d.zoneName + ", ROOM.rooms." + d.zoneName + ", ID.m." + d.zoneName
 		}
 		if d.allowance {
 			usage = append(usage, web.WaterfallSentence)
@@ -517,7 +537,8 @@ func (d *dns) Capability(host string) httpapi.TransportCapability {
 			Access: "read+write",
 			WriteVerbs: []string{"TXT MSGID.I.N.BASE32[.BASE32...].w." + d.zoneName + " for each chunk I of N",
 				"TXT MSGID.status." + d.zoneName},
-			Signed:       "required for writes: a complete signed post command, lowercase unpadded base32, 16-32 character [a-z0-9] MSGID",
+			Signed:       "required for writes: a complete signed command (data is a JSON-encoded string), any of operations, and room.policy.set, room.member.add and room.member.remove in a conversation, lowercase unpadded base32, 16-32 character [a-z0-9] MSGID; not encrypted, so answers carrying a private conversation say so (MSGID.status repeats the label; over TCP it always fits), and a sealed conversation stays ciphertext; a signed read answers with a pointer to netcat or HTTPS",
+			Operations:   board.SigningWireOperations(),
 			OriginKey:    "none; the source is a resolver, so anonymous writes are refused",
 			Limits:       map[string]int{"request_bytes": dnsMaxQuery, "message_text_bytes": dnsTextCap, "udp_response_to_query_ratio": 2, "head_ids": dnsHeadIDs, "write_chunks_max": writeMaxChunks, "write_encoded_bytes_max": writeMaxEncoded, "write_expiry_seconds": int(writeExpiry.Seconds()), "write_ttl_seconds": 0},
 			Instructions: "/protocol.md#constrained-transports",

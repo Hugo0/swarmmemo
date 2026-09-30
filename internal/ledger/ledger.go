@@ -166,6 +166,10 @@ type Config struct {
 	Classifier allowance.Classifier
 	Levers     allowance.LeverSource
 	Params     allowance.ParamsSource
+	// Deposits are the services whose holds are deposits, not calls
+	// (RFC0013 postage): one that lapses used nothing, so the sweeper
+	// refunds it rather than settling it at its maximum.
+	Deposits []string
 }
 
 // Bounds (§10).
@@ -177,6 +181,11 @@ const (
 	SweepMax            = 500
 	JournalPageMax      = 100
 	journalScanMax      = 2000
+
+	// DepositHoldsPerAccount bounds one account's open deposits (RFC0013
+	// postage: one per conversation and recipient, held a day), as many as
+	// the conversations it may keep open.
+	DepositHoldsPerAccount = 1000
 )
 
 // Ledger is safe for concurrent use; every method runs inside the caller's
@@ -265,15 +274,16 @@ func (l *Ledger) levers(ctx context.Context, q allowance.Querier, now int64) (al
 	return lv, nil
 }
 
-// classify asks the classifier and normalises its answer: an unsigned subject
-// is always tier 4, a signed one never is, weights are 0–1e9.
+// classify asks the classifier and normalises its answer: an unsigned or
+// hosted subject is always tier 4, any other signed one never is, weights
+// are 0–1e9.
 func (l *Ledger) classify(ctx context.Context, q allowance.Querier, s allowance.Subject, now int64) (allowance.Standing, error) {
 	st, err := l.cfg.Classifier.Classify(ctx, q, s, now)
 	if err != nil {
 		return allowance.Standing{}, err
 	}
 	switch {
-	case !s.Signed:
+	case !s.Signed || s.Hosted:
 		st.Tier = allowance.TierAnonymous
 	case st.Tier < allowance.TierTrusted || st.Tier > allowance.TierSigned:
 		st.Tier = allowance.TierSigned

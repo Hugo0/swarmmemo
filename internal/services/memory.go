@@ -119,15 +119,30 @@ type memoryListArgs struct {
 	Limit  json.RawMessage `json:"limit"`
 }
 
+// memoryKeyError refuses k unless it is a memory key, stating a key's size
+// when that is what is wrong; nil for a memory key.
+func memoryKeyError(k string) error {
+	switch {
+	case len(k) > MemoryKeyBytes:
+		return tooLarge("invalid_memory_key", len(k), MemoryKeyBytes)
+	case !ValidMemoryKey(k):
+		return refusal("invalid_memory_key")
+	}
+	return nil
+}
+
 func parsePut(raw json.RawMessage) (memoryPut, error) {
 	var a memoryPut
 	if err := StrictObject(raw, &a); err != nil {
 		return a, err
 	}
-	if !ValidMemoryKey(a.Key) {
-		return a, refusal("invalid_memory_key")
+	if err := memoryKeyError(a.Key); err != nil {
+		return a, err
 	}
-	if a.Value == nil || len(*a.Value) > MemoryValueBytes || strings.ContainsRune(*a.Value, 0) {
+	if a.Value != nil && len(*a.Value) > MemoryValueBytes {
+		return a, tooLarge("invalid_service_data", len(*a.Value), MemoryValueBytes)
+	}
+	if a.Value == nil || strings.ContainsRune(*a.Value, 0) {
 		return a, refusal("invalid_service_data")
 	}
 	switch a.Visibility {
@@ -145,8 +160,8 @@ func parseKeyArgs(raw json.RawMessage, agentAllowed bool) (memoryKeyArgs, error)
 	if err := StrictObject(raw, &a); err != nil {
 		return a, err
 	}
-	if !ValidMemoryKey(a.Key) {
-		return a, refusal("invalid_memory_key")
+	if err := memoryKeyError(a.Key); err != nil {
+		return a, err
 	}
 	if a.Agent != "" && (!agentAllowed || !agentRE.MatchString(a.Agent)) {
 		return a, refusal("invalid_service_data")
@@ -321,11 +336,16 @@ func (m *memory) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 			}
 			limit = n
 		}
-		if a.Prefix != "" && (len(a.Prefix) > MemoryKeyBytes || !memoryKeyRE.MatchString(a.Prefix) || strings.Contains(a.Prefix, "..")) {
+		if len(a.Prefix) > MemoryKeyBytes {
+			return nil, tooLarge("invalid_memory_key", len(a.Prefix), MemoryKeyBytes)
+		}
+		if a.Prefix != "" && (!memoryKeyRE.MatchString(a.Prefix) || strings.Contains(a.Prefix, "..")) {
 			return nil, refusal("invalid_memory_key")
 		}
-		if a.After != "" && !ValidMemoryKey(a.After) {
-			return nil, refusal("invalid_memory_key")
+		if a.After != "" {
+			if err := memoryKeyError(a.After); err != nil {
+				return nil, err
+			}
 		}
 		account, owner, err := m.owner(ctx, q, c.Subject, a.Agent)
 		if err != nil {

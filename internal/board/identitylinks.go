@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS identity_links (
 CREATE INDEX IF NOT EXISTS identity_link_checks ON identity_links(next_check_at) WHERE next_check_at>0;
 `
 
+// retiredSealKey is a sealing key a newer x25519 link replaced: kept on
+// record, lapsed, but no longer one of the key's links, so it neither
+// counts toward IdentityLinkMaxPerKey nor shows (seal.go).
+const retiredSealKey = "(kind='x25519' AND state='lapsed')"
+
 const (
 	IdentityLinkMaxPerKey = 8
 	// IdentityLinkStatement is the exact prefix another Ed25519 key signs; the
@@ -80,10 +85,22 @@ var linkKinds = map[string]linkKind{
 	"nostr":   {normalize: normalizeNostrKey, attach: claimOnly},
 	"url":     {normalize: normalizeLinkURL, attach: claimOnly},
 	"board":   {normalize: normalizeLinkURL, attach: claimOnly},
+	// x25519 publishes the key's sealing key (RFC0013 §6, seal.go). The
+	// signed identity.link itself is its proof, stored and shown with it.
+	"x25519": {normalize: normalizeX25519Key, attach: selfSignedOnly, method: "signed-command"},
 }
 
 // LinkKinds lists the accepted kinds for discovery, in a stable order.
-func LinkKinds() []string { return []string{"domain", "ed25519", "nostr", "url", "board"} }
+func LinkKinds() []string { return []string{"domain", "ed25519", "nostr", "url", "board", "x25519"} }
+
+// selfSignedOnly takes no separate proof: the link's own signed command is
+// the proof (see changeIdentityLink).
+func selfSignedOnly(_ *Store, _, _, proof string) (string, error) {
+	if proof != "" {
+		return "", linkError("invalid_link_proof")
+	}
+	return "proof_attached", nil
+}
 
 func linkError(code string) error {
 	switch code {
@@ -100,7 +117,7 @@ func linkError(code string) error {
 	case "link_reserved":
 		return problem(400, "link_reserved", "This service's own domains cannot be linked by an agent.")
 	}
-	return problem(400, "invalid_link", `Data must be a strict JSON object {"schema":1,"kind":KIND,"value":VALUE} with an optional "proof", at most 1024 bytes; kind is domain, ed25519, nostr, url or board.`)
+	return problem(400, "invalid_link", `Data must be a strict JSON object {"schema":1,"kind":KIND,"value":VALUE} with an optional "proof", at most 1024 bytes; kind is domain, ed25519, nostr, url, board or x25519.`)
 }
 
 func claimOnly(_ *Store, _, _, proof string) (string, error) {
@@ -277,6 +294,22 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 	if err != nil {
 		return Result{}, err
 	}
+	if d.Kind == "x25519" {
+		// A sealing key is only as private as the key that publishes it; a
+		// key SwarmMemo holds cannot make "only members can read" true.
+		if a.hosted {
+			return Result{}, selfCustodyRequired("You")
+		}
+		// One sealing key per key: publishing a new one retires the old,
+		// which wraps then stop using. A retired key stays, lapsed at the
+		// time it was replaced (nothing is deleted), so the key behind an
+		// old epoch's wraps is still on record. The signed command is the
+		// proof.
+		d.Proof = encodeSealLinkProof(c.Signature, a.canonical)
+		if _, err = tx.ExecContext(ctx, "UPDATE identity_links SET state='lapsed',lapsed_at=? WHERE agent=? AND kind='x25519' AND value<>? AND state<>'lapsed'", now, a.id, value); err != nil {
+			return Result{}, err
+		}
+	}
 	var existing string
 	var attempted int64
 	err = tx.QueryRowContext(ctx, "SELECT state,attempted_at FROM identity_links WHERE agent=? AND kind=? AND value=?", a.id, d.Kind, value).Scan(&existing, &attempted)
@@ -286,7 +319,7 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 	found := err == nil
 	if !found {
 		var held int
-		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM identity_links WHERE agent=?", a.id).Scan(&held); err != nil {
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM identity_links WHERE agent=? AND NOT "+retiredSealKey, a.id).Scan(&held); err != nil {
 			return Result{}, err
 		}
 		if held >= IdentityLinkMaxPerKey {
@@ -363,7 +396,7 @@ func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agents ...str
 	}
 	args = append(args, IdentityLinkMaxPerKey*len(agents))
 	rows, err := tx.QueryContext(ctx, "SELECT agent,kind,value,proof,state,created_at,checked_at,lapsed_at FROM identity_links WHERE agent IN (?"+
-		strings.Repeat(",?", len(agents)-1)+") ORDER BY agent,created_at,kind,value LIMIT ?", args...)
+		strings.Repeat(",?", len(agents)-1)+") AND NOT "+retiredSealKey+" ORDER BY agent,created_at,kind,value LIMIT ?", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -391,6 +424,9 @@ func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agents ...str
 			if l.Kind == "ed25519" {
 				l.Statement = LinkStatement(s.config.ServiceID, agent, l.Value)
 			}
+			if p, ok := decodeSealLinkProof(proof); ok && l.Kind == "x25519" {
+				l.Proof, l.Statement = p.Signature, p.SignedPayload
+			}
 		}
 		links[agent] = append(links[agent], l)
 	}
@@ -412,6 +448,7 @@ func (s *Store) attachIdentityLinks(ctx context.Context, tx *sql.Tx, agents []Ag
 	for i := range agents {
 		agents[i].Links = links[agents[i].ID]
 		for _, link := range agents[i].Links {
+			attachSealKey(&agents[i], link)
 			if link.Kind == "domain" && link.State == "verified" {
 				agents[i].DomainHandle = link.Value
 				break

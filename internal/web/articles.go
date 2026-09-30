@@ -21,6 +21,10 @@ const (
 	titleRunes       = 70
 	descriptionRunes = 160
 	slugBytes        = 60
+	// A listing shows a Markdown post flattened to at most this many lines
+	// and visible runes (markdown.Preview), then a link to the whole post.
+	previewLines = 5
+	previewRunes = 320
 	// historySuffix names the version list at /e/ID/history. A slug can never
 	// equal it, so the two addresses cannot collide.
 	historySuffix = "history"
@@ -66,19 +70,23 @@ type historyView struct {
 
 func isMarkdown(m board.Message) bool { return !m.Hidden && m.Format == board.PostFormatMarkdown }
 
-// postTitle is the leading heading of a Markdown post, else its first line.
+// A post's metadata (page title, description, cards, JSON-LD) is written for
+// search results and link previews, which show no markup: it is read from the
+// post as Markdown and flattened to plain words (markdown.Title, Summary and
+// PlainText), whatever format the post was signed in. A plain-text post that
+// opens with "# Heading" is titled "Heading"; its page still shows the # as
+// written.
+
+// postTitle is a post's leading heading, else its first line of plain words.
 func postTitle(m board.Message) string {
 	if m.Hidden {
 		return ""
 	}
 	text := displayText(m)
-	if isMarkdown(m) {
-		if title := markdown.Title(text); title != "" {
-			return markdown.Clip(title, titleRunes)
-		}
-		text = markdown.PlainText(text)
+	if title := markdown.Title(text); title != "" {
+		return markdown.Clip(title, titleRunes)
 	}
-	for _, line := range strings.Split(text, "\n") {
+	for _, line := range strings.Split(markdown.PlainText(text), "\n") {
 		if strings.TrimSpace(line) != "" {
 			return markdown.Clip(line, titleRunes)
 		}
@@ -86,15 +94,41 @@ func postTitle(m board.Message) string {
 	return ""
 }
 
-// postSummary is the prose after a Markdown title, else the whole plain text.
+// postSummary is the first prose after a post's title, in plain words.
 func postSummary(m board.Message) string {
 	if m.Hidden {
 		return ""
 	}
-	if isMarkdown(m) {
-		return markdown.Clip(markdown.Summary(displayText(m)), descriptionRunes)
+	return markdown.Clip(markdown.Summary(displayText(m)), descriptionRunes)
+}
+
+// postPlain is a post's body as plain words, for cards and JSON-LD.
+func postPlain(m board.Message) string { return markdown.PlainText(displayText(m)) }
+
+// postPreview is a Markdown post as a listing shows it.
+type postPreview struct {
+	Body template.HTML
+	// More is set when the post has more than the preview shows.
+	More bool
+}
+
+// previewOf flattens a Markdown post for a listing; empty for any other post,
+// or when flat is false.
+func previewOf(m board.Message, flat bool) postPreview {
+	if !flat || !isMarkdown(m) {
+		return postPreview{}
 	}
-	return markdown.Clip(displayText(m), descriptionRunes)
+	body, more := markdown.Preview(displayText(m), previewRunes, previewLines)
+	return postPreview{Body: body, More: more}
+}
+
+// postPath is where a post reads in full: an article's canonical address, or
+// the conversation page of any other post.
+func postPath(m board.Message) string {
+	if isMarkdown(m) && m.ReplyTo == "" {
+		return ArticlePath(m)
+	}
+	return "/e/" + url.PathEscape(m.ID)
 }
 
 // articleSlug is the readable, non-authoritative part of an article's URL.
@@ -128,6 +162,10 @@ func displayText(m board.Message) string {
 func renderBody(m board.Message, opt markdown.Options) template.HTML {
 	if !isMarkdown(m) {
 		return ""
+	}
+	// One JSON value is shown as JSON, whichever format it was signed in.
+	if pretty, ok := markdown.PrettyJSON(displayText(m)); ok {
+		return pretty
 	}
 	return markdown.Render(displayText(m), opt)
 }

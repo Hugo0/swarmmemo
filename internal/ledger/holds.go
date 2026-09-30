@@ -12,6 +12,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"swarmmemo/internal/allowance"
 )
@@ -24,7 +26,10 @@ const ledgerService = "ledger"
 // Holds are unique on (account, requestKey): a retry while the hold is open is
 // request_in_flight with retry_after; once settled it returns the hold as it
 // ended with hold_not_held (the call's stored result answers such a retry).
-// At most HoldsPerAccount open holds per account and HoldsTotal in all.
+// At most HoldsPerAccount open holds per account and HoldsTotal in all; a
+// deposit (Config.Deposits) is its own class, at most DepositHoldsPerAccount
+// per account, and never counts against the calls' holds: a day-long deposit
+// must not crowd paid calls out.
 func (l *Ledger) Reserve(ctx context.Context, q allowance.Querier, s allowance.Subject, r allowance.Resource, max int64, requestKey string, ref Ref, ttl int64, now int64) (Hold, error) {
 	if max <= 0 || max > maxUnits {
 		return Hold{}, refuse("invalid_amount")
@@ -41,12 +46,26 @@ func (l *Ledger) Reserve(ctx context.Context, q allowance.Querier, s allowance.S
 		}
 		return h, err
 	}
-	var open, mine int
-	if err := q.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(account=?),0) FROM ledger_holds WHERE state='held' AND service<>?", s.ID, ledgerService).Scan(&open, &mine); err != nil {
-		return Hold{}, err
-	}
-	if open >= HoldsTotal || mine >= HoldsPerAccount {
-		return Hold{}, refuse("hold_limit")
+	if slices.Contains(l.cfg.Deposits, ref.Service) {
+		var mine int
+		if err := q.QueryRowContext(ctx, "SELECT count(*) FROM ledger_holds WHERE state='held' AND account=? AND service=?", s.ID, ref.Service).Scan(&mine); err != nil {
+			return Hold{}, err
+		}
+		if mine >= DepositHoldsPerAccount {
+			return Hold{}, refuse("hold_limit")
+		}
+	} else {
+		args := []any{s.ID, ledgerService}
+		for _, d := range l.cfg.Deposits {
+			args = append(args, d)
+		}
+		var open, mine int
+		if err := q.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(account=?),0) FROM ledger_holds WHERE state='held' AND service NOT IN (?"+strings.Repeat(",?", len(l.cfg.Deposits))+")", args...).Scan(&open, &mine); err != nil {
+			return Hold{}, err
+		}
+		if open >= HoldsTotal || mine >= HoldsPerAccount {
+			return Hold{}, refuse("hold_limit")
+		}
 	}
 	o, err := l.open(ctx, q, r, now)
 	if err != nil {
@@ -156,6 +175,11 @@ func (l *Ledger) Commit(ctx context.Context, q allowance.Querier, holdID string,
 func (l *Ledger) Refund(ctx context.Context, q allowance.Querier, holdID string, reason string, now int64) error {
 	_, err := l.settle(ctx, q, holdID, 0, "refunded", reason, now)
 	return err
+}
+
+// GetHold reads one hold as it stands; ok is false when there is none.
+func (l *Ledger) GetHold(ctx context.Context, q allowance.Querier, id string) (Hold, bool, error) {
+	return loadHold(ctx, q, id)
 }
 
 type holdPart struct {

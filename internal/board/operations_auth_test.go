@@ -21,7 +21,7 @@ type matrixFixture struct {
 	owner, other, third, child, child2 ed25519.PrivateKey
 	child3, rotated                    ed25519.PrivateKey
 	grant                              *DelegationContext
-	m, m2, m3, blob                    string
+	m, m2, m3, blob, invite            string
 }
 
 func matrixPub(k ed25519.PrivateKey) string {
@@ -44,6 +44,7 @@ func matrixSetup(t *testing.T) *matrixFixture {
 	run(t, s, signed(f.owner, Command{Operation: "lease.acquire", Room: "pub", Target: "l1", TTL: 60}))
 	f.grant = enroll(t, s, f.owner, f.child, "pub", 3600, 1<<20)
 	privateReadEnroll(t, s, f.owner, f.child3, "priv")
+	f.invite = run(t, s, signed(f.owner, Command{Operation: "room.invite.create", Room: "priv"})).Data["secret"].(string)
 	return f
 }
 
@@ -73,6 +74,10 @@ func matrixBase(f *matrixFixture, op string) (Command, ed25519.PrivateKey) {
 		c.Room, c.Visibility = "newroom", "public"
 	case "room.member.add", "room.member.remove":
 		c.Room, c.Target = "priv", keyID(f.other)
+	case "room.invite.create":
+		c.Room = "priv"
+	case "room.invite.accept":
+		c.Room, c.Data = "priv", f.invite
 	case "room.policy.set":
 		c.Room, c.Data = "pub", `{"write":"owner"}`
 	case "room.moderator.add", "room.moderator.remove", "room.owner.transfer":
@@ -238,7 +243,8 @@ func TestOperationAuthorityMatrix(t *testing.T) {
 			t.Errorf("%s: an unsigned write spent no allowance", op.Name)
 		}
 		// Room governance: never by a key that neither owns nor moderates.
-		if strings.HasPrefix(op.Name, "room.") && op.Signed && op.Name != "room.create" {
+		// An invite's secret, not ownership, is what admits its acceptor.
+		if strings.HasPrefix(op.Name, "room.") && op.Signed && op.Name != "room.create" && op.Name != "room.invite.accept" {
 			if n := got["nonowner"]; n != "owner_required" && n != "moderator_required" && n != "not_found" {
 				t.Errorf("room operation not refused to a non-owner: %s", line)
 			}

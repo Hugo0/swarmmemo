@@ -153,8 +153,9 @@ type X402Resource struct {
 	// summary (loadCatalogue sets it; servedSummary).
 	summaryStatus string
 	// Vetted marks an open resource the operator vetted (swarmmemo x402
-	// vet): only those are callable. Pinned resources are vetted by pinning.
-	Vetted bool
+	// vet) or the catalogue's auto-vet rule did (autoVetted): only those are
+	// callable. Pinned resources are vetted by pinning.
+	Vetted, autoVetted bool
 	// Derived once by indexResource: the canonical URL, the host, its
 	// registrable domain and the lower-cased search text.
 	canon, host, domain, text string
@@ -224,7 +225,7 @@ CREATE INDEX IF NOT EXISTS x402_payments_day ON x402_payments(day,account);
 }
 
 // X402VettingNote is how the resources read explains callable resources.
-const X402VettingNote = "Only vetted resources are callable (callable: true): pinned ones, and open ones the operator vetted. Candidates (vetted: false) are Bazaar listings whose summary is shown only once it passed SwarmMemo's text screen (summary_status screened; pending or withheld leaves it empty); calling one is refused with x402_unvetted, and nothing is paid or charged. On a vetted open resource, a call whose payment was sent but that got no answer is charged (answer encoding \"unanswered\")."
+const X402VettingNote = "Only vetted resources are callable (callable: true): pinned ones, and open ones the operator vetted, by hand or by its auto-vet rule when one is set (the resources read states it as catalogue.auto_vet, e.g. CDP-curated or at least 5 payers in 30 days, at most 0.02 USDC, not adult or gambling; a resource the rule vetted keeps its summary screened like a candidate's). Candidates (vetted: false) are Bazaar listings whose summary is shown only once it passed SwarmMemo's text screen (summary_status screened; pending or withheld leaves it empty); calling one is refused with x402_unvetted, and nothing is paid or charged. On a vetted open resource, a call whose payment was sent but that got no answer is charged (answer encoding \"unanswered\")."
 
 // X402Line is the aggregator in one line, on every discovery surface.
 const X402Line = "Pay-per-call APIs from the x402 Bazaar and other bundlers (search, scraping, crypto and market data, and more), billed to your credit; no wallet. Only operator-vetted resources can be called; other Bazaar listings are searchable candidates."
@@ -311,7 +312,10 @@ func (x *x402) plan(c Call) (x402Plan, error) {
 		return x402Plan{}, refusal("invalid_service_data")
 	}
 	for k, v := range a.Query {
-		if !slices.Contains(res.Query, k) || q.Has(k) || len(v) > X402QueryValueBytes || !utf8.ValidString(v) {
+		if len(v) > X402QueryValueBytes {
+			return x402Plan{}, tooLarge("invalid_service_data", len(v), X402QueryValueBytes)
+		}
+		if !slices.Contains(res.Query, k) || q.Has(k) || !utf8.ValidString(v) {
 			return x402Plan{}, refusal("invalid_service_data")
 		}
 		q.Set(k, v)
@@ -319,7 +323,7 @@ func (x *x402) plan(c Call) (x402Plan, error) {
 	u.RawQuery = q.Encode()
 	p := x402Plan{res: res, url: u.String(), max: min(res.MaxAmount, x.cfg.PerCall)}
 	if len(p.url) > X402URLBytes {
-		return x402Plan{}, refusal("invalid_service_data")
+		return x402Plan{}, tooLarge("invalid_service_data", len(p.url), X402URLBytes)
 	}
 	switch {
 	case len(a.Body) > 0 && (!res.Body || !isObject(a.Body)):
@@ -766,6 +770,9 @@ func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 	catalogue := map[string]any{"pinned": len(x.cfg.Resources), "open": page.open, "imported_at": page.importedAt, "enabled": x.cfg.Catalogue != nil}
 	if cc := x.cfg.Catalogue; cc != nil {
 		caps["open_daily"], caps["recipient_daily"], caps["open_max_price"] = cu(cc.OpenDaily), cu(cc.RecipientDaily), cu(cc.MaxPrice)
+		if a := cc.AutoVet; a != nil {
+			catalogue["auto_vet"] = a.Describe(x.cfg.Decimals)
+		}
 		today["open_spent"], today["open_remaining"] = cu(openSpent), cu(max(0, cc.OpenDaily-openSpent))
 	}
 	body := map[string]any{

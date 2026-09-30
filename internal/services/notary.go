@@ -103,7 +103,7 @@ func parseStamp(raw json.RawMessage) (string, error) {
 	switch {
 	case a.Text != nil && a.Hash == "":
 		if len(*a.Text) > NotaryTextBytes {
-			return "", refusal("invalid_service_data")
+			return "", tooLarge("invalid_service_data", len(*a.Text), NotaryTextBytes)
 		}
 		sum := sha256.Sum256([]byte(*a.Text))
 		return hex.EncodeToString(sum[:]), nil

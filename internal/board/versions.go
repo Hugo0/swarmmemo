@@ -117,11 +117,14 @@ func (s *Store) PublicVersions(ctx context.Context, id string) ([]Message, error
 }
 
 // PublicRoomArticles lists the current versions of articles rooted in one
-// public room by the given key fingerprints, most recently updated first. It
-// is how the web finds the posts that replace its hand-built guide pages; a
-// version is by the same key as its original, and both are checked.
-func (s *Store) PublicRoomArticles(ctx context.Context, room string, authors []string, limit int) ([]Message, error) {
-	if len(authors) == 0 || room == "" {
+// public room by the given key fingerprints and, with roles, by the room's
+// owner, moderators and members (their accounts, as they stand now), most
+// recently updated first. It is how the web finds the guides room's posts;
+// a version is by an admitted author as its original is, and both are
+// checked. One statement: the role lists are bounded (RoomMembersMax,
+// RoomModeratorLimit) and read through their primary keys.
+func (s *Store) PublicRoomArticles(ctx context.Context, room string, authors []string, roles bool, limit int) ([]Message, error) {
+	if len(authors) == 0 && !roles || room == "" {
 		return []Message{}, nil
 	}
 	if limit <= 0 || limit > 200 {
@@ -130,23 +133,33 @@ func (s *Store) PublicRoomArticles(ctx context.Context, room string, authors []s
 	if len(authors) > 32 {
 		authors = authors[:32]
 	}
-	marks := strings.TrimSuffix(strings.Repeat("?,", len(authors)), ",")
-	args := []any{room}
-	for _, a := range authors {
-		args = append(args, a)
+	// admitted is the author test for events alias x, and its arguments.
+	admitted := func(x string) (string, []any) {
+		var terms []string
+		var args []any
+		if len(authors) > 0 {
+			terms = append(terms, x+".author IN ("+strings.TrimSuffix(strings.Repeat("?,", len(authors)), ",")+")")
+			for _, a := range authors {
+				args = append(args, a)
+			}
+		}
+		if roles {
+			terms = append(terms, x+".account IN (SELECT owner FROM rooms WHERE name=? AND owner<>'' UNION ALL SELECT account FROM room_moderators WHERE room=? UNION ALL SELECT account FROM members WHERE room=?)")
+			args = append(args, room, room, room)
+		}
+		return "(" + strings.Join(terms, " OR ") + ")", args
 	}
-	args = append(args, limit)
-	for _, a := range authors {
-		args = append(args, a)
-	}
+	origin, originArgs := admitted("o")
+	version, versionArgs := admitted("e")
+	args := append(append(append([]any{room}, originArgs...), limit), versionArgs...)
 	args = append(args, limit)
 	var articles []Message
 	err := s.publicRead(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		articles, err = s.scanPublic(ctx, tx, `e.seq IN (
  SELECT coalesce((SELECT max(v.seq) FROM events v WHERE v.origin=o.id),o.seq) FROM events o
- WHERE o.room=? AND o.author IN (`+marks+`) AND o.format='markdown' AND o.reply_to='' AND o.supersedes='' AND o.public_key<>'' AND o.hidden=0 ORDER BY o.seq DESC LIMIT ?)
- AND e.author IN (`+marks+`) AND e.hidden=0 AND e.format='markdown' AND e.kind<>'simulation' ORDER BY e.created_at DESC,e.seq DESC LIMIT ?`, args...)
+ WHERE o.room=? AND `+origin+` AND o.format='markdown' AND o.reply_to='' AND o.supersedes='' AND o.public_key<>'' AND o.hidden=0 ORDER BY o.seq DESC LIMIT ?)
+ AND `+version+` AND e.hidden=0 AND e.format='markdown' AND e.kind<>'simulation' ORDER BY e.created_at DESC,e.seq DESC LIMIT ?`, args...)
 		return err
 	})
 	return articles, err

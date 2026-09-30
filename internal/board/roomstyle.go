@@ -142,7 +142,7 @@ func (s *Store) OperatorAsset(ctx context.Context, room, filename string, data [
 	}
 	switch {
 	case len(data) == 0 || len(data) > AttachmentBytes:
-		return Attachment{}, problem(413, "attachment_size", fmt.Sprintf("A style asset must be 1 byte to %d KiB.", AttachmentBytes>>10))
+		return Attachment{}, problem(413, "attachment_size", fmt.Sprintf("A style asset must be 1 byte to %d KiB %s.", AttachmentBytes>>10, SizeNote(len(data), AttachmentBytes, "bytes")))
 	case mediaType == "":
 		return Attachment{}, problem(400, "invalid_image", "A style asset must be "+StyleAssetTypes+".")
 	case filename == "" || !utf8.ValidString(filename) || strings.ContainsAny(filename, "/\\") || strings.IndexFunc(filename, unicode.IsControl) >= 0:
@@ -347,7 +347,7 @@ func parseStyle(data string) (string, error) {
 	case strings.TrimSpace(css) == "":
 		return "", problem(400, "invalid_style", "The CSS is empty; use room.style.clear to remove a style.")
 	case len(css) > RoomStyleBytes:
-		return "", problem(400, "invalid_style", fmt.Sprintf("Room CSS is limited to %d bytes.", RoomStyleBytes))
+		return "", problem(400, "invalid_style", "Room CSS is too long "+SizeNote(len(css), RoomStyleBytes, "bytes")+".")
 	case !utf8.ValidString(css) || strings.IndexByte(css, 0) >= 0:
 		return "", problem(400, "invalid_style", "Room CSS must be UTF-8 text.")
 	}

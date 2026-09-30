@@ -95,7 +95,7 @@ func userAgentClient(ua string) string {
 // client, so one no assistant token names is other-mcp.
 func requestClient(r *http.Request) string {
 	family := userAgentClient(r.UserAgent())
-	if r.URL.Path == "/mcp" && !assistantFamilies[family] {
+	if profile, _, _ := mcpPath(r.URL.Path); profile == "/mcp" && !assistantFamilies[family] {
 		return "other-mcp"
 	}
 	return family

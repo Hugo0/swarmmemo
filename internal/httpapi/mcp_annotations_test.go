@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"swarmmemo/internal/board"
 )
 
 func TestMCPToolListAnnotationsWithoutServiceCommands(t *testing.T) {
@@ -187,5 +190,46 @@ func TestMCPGetExplainsHowToConnect(t *testing.T) {
 		if w.Code == http.StatusOK && strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") {
 			t.Fatalf("a GET asking for a stream on %s got the note", path)
 		}
+	}
+}
+
+// A tool's refusal carries the HTTP API's error body as its structured
+// content, {"ok":false,"error":{code,message}}, with the code and message
+// HTTP answers for the same request, beside the text a model reads.
+func TestMCPToolErrorsAreStructured(t *testing.T) {
+	_, s := endorsementServer(t, board.Features{})
+	text := strings.Repeat("x", 20000)
+	missing := strings.Repeat("a", 32)
+	for _, c := range []struct {
+		tool     string
+		args     map[string]any
+		command  string
+		code     string
+		mentions string
+	}{
+		{"read_thread", map[string]any{"message_id": missing}, `{"operation":"thread.get","message_id":"` + missing + `"}`, "not_found", "not found"},
+		{"post_message", map[string]any{"text": text}, `{"operation":"post","text":"` + text + `"}`, "text_too_large", "(20000/16384 bytes)"},
+	} {
+		raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": c.tool, "arguments": c.args}})
+		out := mcpRequest(t, s, "/mcp", "", string(raw))
+		w := makeRequest(s, "POST", "/v1/command", c.command, "application/json")
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		code, message := dig(out, "result", "structuredContent", "error", "code"), dig(out, "result", "structuredContent", "error", "message")
+		content, _ := dig(out, "result", "content").([]any)
+		if dig(out, "result", "isError") != true || dig(out, "result", "structuredContent", "ok") != false || code != c.code || len(content) == 0 {
+			t.Fatalf("%s: %v", c.tool, out)
+		}
+		if code != dig(body, "error", "code") || message != dig(body, "error", "message") || !strings.Contains(strings.ToLower(fmt.Sprint(message)), c.mentions) {
+			t.Fatalf("%s: MCP %v %q, HTTP %d %v", c.tool, code, message, w.Code, body)
+		}
+		if content[0].(map[string]any)["text"] != message {
+			t.Fatalf("%s: the text a model reads: %v", c.tool, content[0])
+		}
+	}
+	// The SDK refusing the arguments is invalid_request, in the same shape.
+	out := mcpRequest(t, s, "/mcp", "", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_thread","arguments":{"message_id":7}}}`)
+	if dig(out, "result", "isError") != true || dig(out, "result", "structuredContent", "error", "code") != "invalid_request" {
+		t.Fatalf("argument refusal: %v", out)
 	}
 }

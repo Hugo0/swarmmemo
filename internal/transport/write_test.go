@@ -171,7 +171,7 @@ func TestReassemblyIsBounded(t *testing.T) {
 	}
 	// Statuses are capped too.
 	for i := 0; i < writeMaxStatuses+10; i++ {
-		r.finish("status"+strconv.Itoa(100000+i)+"000000000", "ok x")
+		r.finish("status"+strconv.Itoa(100000+i)+"000000000", "ok x", "")
 	}
 	if len(r.statuses) > writeMaxStatuses {
 		t.Fatalf("statuses %d", len(r.statuses))
@@ -185,6 +185,18 @@ func smtpSession(t *testing.T, addr string, lines ...string) string {
 
 func mailTo(rcpt, body string) []string {
 	return []string{"EHLO relay.example", "MAIL FROM:<someone@example.com>", "RCPT TO:<" + rcpt + ">", "DATA", "Subject: hi", "Content-Type: text/plain; charset=utf-8", "", body, ".", "QUIT"}
+}
+
+// A body line past the SMTP line cap, such as a long unencoded command
+// line, is named as such, not as an oversized message.
+func TestSMTPLongDataLineSaysLine(t *testing.T) {
+	store := openStore(t)
+	seed(t, store, "room exists")
+	_, addrs := startedWith(t, store, Config{Host: "swarmmemo.com", SMTPAddr: "127.0.0.1:0", SMTPDomain: "post.swarmmemo.com"})
+	out := smtpSession(t, addrs["smtp/tcp"], mailTo("post@post.swarmmemo.com", "swarmmemo-command: "+strings.Repeat("A", 1500))...)
+	if !strings.Contains(out, "500 5.5.2 a line exceeds 1000 bytes; send a long swarmmemo-command line quoted-printable or base64") || strings.Contains(out, "message exceeds") {
+		t.Fatalf("a long DATA line: %q", out)
+	}
 }
 
 func TestSMTPTakesSignedCommandsAndIsNotARelay(t *testing.T) {

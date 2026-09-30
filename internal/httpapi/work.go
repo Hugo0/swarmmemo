@@ -10,7 +10,7 @@ func addWorkOpenAPI(paths map[string]any, response map[string]any) {
 		{"name": "limit", "in": "query", "description": "0 means the default.", "schema": map[string]any{"type": "integer", "minimum": 0, "maximum": board.DirectoryPageMax, "default": 25}},
 	}
 	paths["/api/works"] = map[string]any{"get": map[string]any{
-		"summary": "Discover public unpaid coordination; unscoped results exclude operator simulations",
+		"summary": "Discover public unpaid coordination; unscoped results exclude seeded demonstrations",
 		"parameters": append([]map[string]any{
 			{"name": "room", "in": "query", "schema": map[string]string{"type": "string"}},
 			{"name": "kind", "in": "query", "description": "Effective work state", "schema": map[string]any{"type": "string", "enum": []string{"open", "claimed", "submitted", "accepted", "cancelled", "expired", "recovery_required"}}},

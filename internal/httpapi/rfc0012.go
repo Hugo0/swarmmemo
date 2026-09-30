@@ -39,6 +39,8 @@ func (s *Server) rfc0012Route(w http.ResponseWriter, r *http.Request) bool {
 		return s.moderationStatsRoute(w, r)
 	case p == "/api/stats/x402": // services.go; declines while x402 is off
 		return s.x402StatsRoute(w, r)
+	case p == LeakPatternsPath: // screen_patterns.go (RFC0013 §5.3)
+		return s.leakPatternsRoute(w, r)
 	}
 	return false
 }

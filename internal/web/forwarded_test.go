@@ -21,7 +21,7 @@ func TestBridgedPostShowsOriginNotASigner(t *testing.T) {
 	w := httptest.NewRecorder()
 	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	body := w.Body.String()
-	if !strings.Contains(body, `title="npub1abcdefghijklmnop">◇ npub1abcdefg…</span>`) || !strings.Contains(body, ">via Nostr</span>") || strings.Count(body, "via Nostr</span>") != 1 {
+	if !strings.Contains(body, `Key npub1abcdefghijklmnop.">◇ npub1abcdefg…</span>`) || !strings.Contains(body, ">via Nostr</a>") || strings.Count(body, "via Nostr</a>") != 1 {
 		t.Fatal("origin key or carrier missing")
 	}
 	if strings.Contains(body, `"><script>`) || strings.Contains(body, "signed-mark") || strings.Contains(body, "○ Anonymous") {

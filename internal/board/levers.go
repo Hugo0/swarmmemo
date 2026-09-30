@@ -44,10 +44,17 @@ const (
 	// LeverSignedServices turns anonymous service calls off at once:
 	// unsigned service.call is refused and the anonymous tier gets no credit.
 	LeverSignedServices = "signed-services"
+	// LeverPauseRequests stops new conversation requests (RFC0013 §10):
+	// reaching anyone not already a contact answers 503 requests_paused,
+	// whatever their inbound policy, so the pause reveals no policy.
+	LeverPauseRequests = "pause-requests"
+	// LeverPauseHosted stops hosted identities at once (RFC0013 §2.2): no
+	// new ones are issued and no hosted key signs, until it is released.
+	LeverPauseHosted = "pause-hosted"
 )
 
 // LeverNames are the levers the CLI accepts.
-var LeverNames = []string{LeverTier4Shrink, LeverSignedOnly, LeverPauseNewKeys, LeverCutBudget, LeverBlockPrefix, LeverProvenOnly, LeverFreezeTransfers, LeverSignedServices}
+var LeverNames = []string{LeverTier4Shrink, LeverSignedOnly, LeverPauseNewKeys, LeverCutBudget, LeverBlockPrefix, LeverProvenOnly, LeverFreezeTransfers, LeverSignedServices, LeverPauseRequests, LeverPauseHosted}
 
 // Lever bounds. A blocked prefix is at least an IPv4 /8 or an IPv6 /16 (wider
 // is signed-only's job); an --until more than a year away is refused as a
@@ -190,6 +197,21 @@ func (snap leverSnapshot) levers(now int64) allowance.Levers {
 		}
 	}
 	return l
+}
+
+// leverPulled reports whether the lever name (one without arguments) is
+// pulled at now, read in the command's transaction.
+func (s *Store) leverPulled(ctx context.Context, q allowance.Querier, name string, now int64) (bool, error) {
+	snap, err := s.leverSnapshot(ctx, q)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range snap.rows {
+		if r.name == name && leverActive(r.state, r.until, now) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // blocked reports whether source, a peer address, is inside an active

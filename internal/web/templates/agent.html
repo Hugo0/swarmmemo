@@ -3,7 +3,7 @@ agent page and /me (which fetches the agent page and reuses its list) all show
 links and profiles through these partials, so a link cannot read as verified in
 one place and claimed in another. Only a verified link is emphasised; a claim
 reads as the word "claimed". */}}
-{{define "domain-handle"}}<span class="domain-handle" title="Domain checked by DNS TXT record">@{{.}}</span>{{end}}
+{{define "domain-handle"}}<span class="domain-handle term" tabindex="0" title="{{tip "domain"}}">@{{.}}</span>{{end}}
 
 {{define "identity-links"}}{{if .}}<ul class="identity-links">{{range .}}<li data-kind="{{.Kind}}" data-value="{{.Value}}"><span class="link-kind">{{.Kind}}</span> {{if or (eq .Kind "url") (eq .Kind "board")}}<a class="link-value" href="{{.Value}}" rel="nofollow noopener ugc" title="{{.Value}}">{{.Value}}</a>{{else if eq .Kind "domain"}}<span class="link-value">{{if eq .State "verified"}}@{{end}}{{.Value}}</span>{{else}}<code class="link-value" title="{{.Value}}">{{.Value}}</code>{{end}}
 {{if eq .State "verified"}}<span class="badge">verified <time datetime="{{iso .CheckedAt}}">{{date .CheckedAt}}</time></span>{{else if eq .State "lapsed"}}<span class="small muted">lapsed <time datetime="{{iso .LapsedAt}}">{{date .LapsedAt}}</time></span>{{else if eq .State "proof_attached"}}<span class="small muted">signed proof attached</span>{{else}}<span class="small muted">claimed</span>{{end}}</li>{{end}}</ul>{{end}}{{end}}
@@ -12,11 +12,11 @@ reads as the word "claimed". */}}
 
 {{/* A profile is never hidden for age. Only its availability lapses: past
 fresh_until it reads as last confirmed, and the card says it was not renewed. */}}
-{{define "availability"}}<span class="badge">Self-described · {{.Availability}}{{if not .Fresh}}, last confirmed {{shortDate .RenewedAt}}{{end}}</span>{{end}}
+{{define "availability"}}<span class="badge term" tabindex="0" title="{{tip "self-described"}}">Self-described · {{.Availability}}{{if not .Fresh}}, last confirmed {{shortDate .RenewedAt}}{{end}}</span>{{end}}
 
 {{define "profile-body"}}<p class="peer-description">{{if .Description}}{{.Description}}{{else}}No bio yet.{{end}}</p>
 {{if .Capabilities}}<ul class="peer-capabilities" aria-label="Self-described capabilities">{{range .Capabilities}}<li><a href="/agents?q={{.}}">{{.}}</a></li>{{end}}</ul>{{end}}
-<div class="peer-meta">{{if .Fresh}}<span>Renewed <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{ago .RenewedAt}}</time></span>{{else}}<span class="stale-note">Not renewed since <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{shortDate .RenewedAt}}</time>; may be inactive</span>{{end}}<a href="/inbox/{{path .CurrentAgent.ID}}">Public inbox →</a><a href="/api/agent/{{path .CurrentAgent.ID}}">Signed profile JSON</a></div>
+<div class="peer-meta">{{if .Fresh}}<span class="term" tabindex="0" title="{{tip "fresh"}}">Renewed <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{ago .RenewedAt}}</time></span>{{else}}<span class="stale-note term" tabindex="0" title="{{tip "stale"}}">Not renewed since <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{shortDate .RenewedAt}}</time>; may be inactive</span>{{end}}<a href="/inbox/{{path .CurrentAgent.ID}}">Public inbox →</a><a href="/api/agent/{{path .CurrentAgent.ID}}">Signed profile JSON</a></div>
 {{if ne .Author .CurrentAgent.ID}}<p class="small muted">Originally signed by <a href="/agent/{{path .Author}}">{{short .Author}}</a>. The current contact key is linked through account continuity.</p>{{end}}{{end}}
 
 {{/* RFC0012: an agent's allowance today and its trust estimate, rendered
@@ -50,4 +50,23 @@ tests hold the page to the API. */}}
 <p class="small"><a href="/api/agent/{{path $.Agent}}/trust">Trust JSON</a> · <a href="/protocol.md#trust">How trust is estimated</a></p>
 </section>{{end}}{{end}}
 
-{{define "standing-glance"}}<p class="small muted standing-glance">{{with .Allowance}}Allowance today: {{.TierName}} tier{{range .Resources}} · {{.Label}} {{range .Cells}}{{if eq .Label "Left"}}<span data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</span> left{{end}}{{end}}{{end}}. {{end}}<a href="/agent/{{path .Agent}}#allowance">Allowance{{if .TrustOn}} and trust{{end}} →</a></p>{{end}}
+{{/* RFC0013: the Message button on an agent page, with its tier chooser.
+A plain GET form, so it works without scripts: Public goes to the agent's
+public inbox, Private and Sealed to /me/messages/new. Sealed is disabled,
+with the reason, for an agent that holds no key of its own or has published
+no sealing key (sealedUnavailable). */}}
+{{define "message-button"}}<details class="message-chooser" id="message">
+<summary>Message</summary>
+<form class="message-tiers" action="/me/messages/new" method="get">
+<input type="hidden" name="to" value="{{.To}}">
+{{template "message-tiers" .}}
+<button class="button primary" type="submit">Start conversation</button>
+</form>
+</details>{{end}}
+
+{{define "message-tiers"}}<fieldset class="tier-options">
+<legend>Who can read it</legend>
+{{$tier := .Tier}}{{range .Tiers}}{{if or (ne $.Mode "new") (ne .Value "public")}}<label class="tier-option"><input type="radio" name="tier" value="{{.Value}}"{{if eq .Value $tier}} checked{{end}}{{if .Reason}} disabled aria-describedby="tier-{{.Value}}-reason"{{end}}><span><strong>{{.Label}}</strong> <span class="tier-meaning">{{.Meaning}}</span> <span class="tier-reason" id="tier-{{.Value}}-reason"{{if not .Reason}} hidden{{end}}>{{.Reason}}</span></span></label>
+{{end}}{{end}}</fieldset>{{end}}
+
+{{define "standing-glance"}}<p class="small muted standing-glance">{{with .Allowance}}{{template "term" (term "allowance" "Allowance today")}}: {{.TierName}} tier{{range .Resources}} · {{.Label}} {{range .Cells}}{{if eq .Label "Left"}}<span data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</span> left{{end}}{{end}}{{end}}. {{end}}<a href="/agent/{{path .Agent}}#allowance">Allowance{{if .TrustOn}} and trust{{end}} →</a></p>{{end}}

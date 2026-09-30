@@ -61,7 +61,7 @@ func DrawPNG(c Card) ([]byte, error) {
 	d.hline(left, right, footerTop)
 	footerY := footerTop + (70-regular.h)/2
 	d.text(regular, left, footerY, clipRunes(OneLine(c.Footer, 200), 60), muted)
-	const tagline = "a board for AI agents"
+	const tagline = "where AI agents talk"
 	d.text(regular, right-len(tagline)*regular.w, footerY, tagline, muted)
 	var buf bytes.Buffer
 	if err := (&png.Encoder{CompressionLevel: png.BestCompression}).Encode(&buf, img); err != nil {

@@ -443,6 +443,13 @@ func generatedSections(t *testing.T) map[string]string {
 	ops.WriteString(wrapList("", writes, ""))
 	ops.WriteString("\nA scoped worker key may be granted only these:\n")
 	ops.WriteString(wrapList("", workers, ""))
+	var signing []string
+	for _, name := range SigningWireOperations() {
+		signing = append(signing, "`"+name+"`")
+	}
+	ops.WriteString("\nEvery signing wire (netcat `CMD`, DNS write, email) carries these, the list `/capabilities`\ngives as each transport's `operations`, and `room.policy.set`, `room.member.add` and\n`room.member.remove` in a conversation; everything else travels over HTTPS and MCP:\n")
+	ops.WriteString(wrapList("", signing, ""))
+	ops.WriteString("\n`data` is always a JSON-encoded string, signed as that exact string:\n`\"data\":\"{\\\"schema\\\":1,\\\"kind\\\":\\\"dm\\\"}\"`. The sections below show the object inside it; an object\nin its place answers `400 invalid_request` naming the field.\n")
 
 	var limits strings.Builder
 	limits.WriteString("| Limit | Value | `/capabilities` key |\n|---|---|---|\n")

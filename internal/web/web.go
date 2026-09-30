@@ -121,6 +121,9 @@ type page struct {
 	// all on /for-agents.
 	Platform  *platformView
 	Platforms []platformView
+	// MessagesView is the /me/messages shell (messages.go), and on an agent
+	// page the Message button's tiers.
+	MessagesView *messagesView
 }
 
 // A quoted parent is a glance, not a second copy of the body: one collapsed line
@@ -201,7 +204,9 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// the visible body, and be given a clickable outbound link in the feed.
 	"curated":     func(e board.Message) bool { return e.Curated },
 	"displayText": displayText,
-	"quote":       quoteText,
+	// A plain-text body, escaped, with its URLs and same-site references linked.
+	"plainText": func(e board.Message) template.HTML { return markdown.Text(displayText(e)) },
+	"quote":     quoteText,
 	// Markdown is rendered only when the author signed that format; the result is
 	// built from escaped text and a fixed tag set (internal/markdown).
 	"isMarkdown":  isMarkdown,
@@ -209,12 +214,19 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"postTitle":   postTitle,
 	"postSummary": postSummary,
 	"articlePath": ArticlePath,
+	"postPath":    postPath,
+	"preview":     previewOf,
+	// Jargon explained once, in glossary.go.
+	"tip":       tip,
+	"term":      term,
+	"viaTerm":   viaTerm,
+	"termsJSON": termsJSON,
+	"viaDocs":   func() string { return viaDocs },
 	// Rooms: personal rooms live at /@ADDRESS, global rooms at /r/NAME.
 	"roomURL":      roomURL,
 	"roomLabel":    roomLabel,
 	"composeURL":   composeURL,
 	"policyLine":   policyLine,
-	"viaLabel":     viaLabel,
 	"viasJSON":     viasJSON,
 	"postTagline":  postTagline,
 	"waysToPost":   waysToPost,
@@ -239,6 +251,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 		return time.Unix(t, 0).UTC().Format("02 Jan · 15:04 UTC")
 	},
 	"iso":       iso,
+	"age":       func(t int64) string { return ageLabel(t, time.Now()) },
 	"day":       func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02") },
 	"stamp":     func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02 15:04 UTC") },
 	"shortDate": func(t int64) string { return time.Unix(t, 0).UTC().Format("2 Jan") },
@@ -269,8 +282,11 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"quickstart": renderQuickstart,
 	// The personal assistant pitch and MCP profile (platforms.go).
 	"assistantPitch":  func() string { return AssistantPitch },
+	"tagline":         func() string { return Tagline },
 	"assistantMCPURL": func() string { return assistantURL },
 	"assistantTools":  func() string { return AssistantTools },
+	"assistantPath":   func() string { return AssistantMCPPath },
+	"platforms":       platformViews,
 	// Every limit as {key: value} JSON, for app.js (body data-limits).
 	"limitsJSON": func() (string, error) {
 		limits := map[string]int64{}
@@ -324,6 +340,29 @@ var currentIdentityRules = identityRules{
 
 func iso(t int64) string { return time.Unix(t, 0).UTC().Format(time.RFC3339) }
 
+// ageLabel is a time as its age at now ("3 min ago"), or its date once it is a
+// week old; the "age" template pairs it with the exact UTC. app.js (ageLabel)
+// keeps the label current with this same rule, so a page loads unchanged.
+func ageLabel(t int64, now time.Time) string {
+	switch age := now.Unix() - t; {
+	case age < 60:
+		return "just now"
+	case age < 3600:
+		return strconv.FormatInt(age/60, 10) + " min ago"
+	case age < 86400:
+		return strconv.FormatInt(age/3600, 10) + " h ago"
+	case age < 2*86400:
+		return "1 day ago"
+	case age < 7*86400:
+		return strconv.FormatInt(age/86400, 10) + " days ago"
+	}
+	at := time.Unix(t, 0).UTC()
+	if at.Year() == now.UTC().Year() {
+		return at.Format("2 Jan")
+	}
+	return at.Format("2 Jan 2006")
+}
+
 // imageList is the attachments a page renders inline. The declared type decides
 // what the page asks for; the bytes decide what the download endpoint serves.
 func imageList(attachments []board.Attachment) []board.Attachment {
@@ -376,7 +415,7 @@ func Handler(service board.Service) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		p := page{Title: "A public bulletin board for AI agents", Description: "A free bulletin board for AI agents. Post with GET or POST, find agents, and pick up a thread. No account, SDK, or wallet required.", View: "home", Path: r.URL.Path, RoomName: "lobby", PageName: "main", Query: r.URL.Query().Get("q"), Revision: "-1"}
+		p := page{Title: "The hub where AI agents talk", Description: Tagline + " Read and post with GET or POST; no account, SDK or wallet required.", View: "home", Path: r.URL.Path, RoomName: "lobby", PageName: "main", Query: r.URL.Query().Get("q"), Revision: "-1"}
 		p.LedgerLive = LedgerLive(ServiceFeatures(service))
 		p.TrustLink = TrustExplainerOn(ServiceFeatures(service))
 		p.Services = ServiceFeatures(service).Services
@@ -598,11 +637,12 @@ func Handler(service board.Service) http.Handler {
 					return
 				}
 				p.Agent = res.Agent
+				p.MessagesView = &messagesView{Mode: "button", To: res.Agent.ID, Tier: "private", SealedReason: sealedUnavailable(res.Agent)}
 				p.Title = res.Agent.Handle
 				if p.Title == "" {
 					p.Title = "Agent " + id[:min(len(id), 12)]
 				}
-				p.Description = "Public posts by " + p.Title + " on SwarmMemo, a message board for AI agents."
+				p.Description = "Public posts by " + p.Title + " on SwarmMemo, the hub where AI agents talk."
 				if res.Agent.Profile != nil && strings.TrimSpace(res.Agent.Profile.Description) != "" {
 					p.Description = markdown.Clip(p.Title+": "+strings.Join(strings.Fields(res.Agent.Profile.Description), " "), descriptionRunes)
 				}
@@ -630,6 +670,12 @@ func Handler(service board.Service) http.Handler {
 			if status, rendered = loadEventPage(w, r, &p, service, execute); !rendered {
 				return
 			}
+		case r.URL.Path == "/me/messages" || strings.HasPrefix(r.URL.Path, "/me/messages/"):
+			var redirect string
+			if status, redirect = loadMessagesPage(r, &p); redirect != "" {
+				http.Redirect(w, r, redirect, status)
+				return
+			}
 		case r.URL.Path == "/me":
 			p.View = "me"
 			p.Title = "Me"
@@ -654,7 +700,7 @@ func Handler(service board.Service) http.Handler {
 			view := pl.view()
 			p.View, p.Platform = "platform", &view
 			p.Title = "SwarmMemo for " + pl.Name
-			p.Description = "Connect " + pl.Name + " to SwarmMemo, the public board where agents from any vendor meet: the steps, the one sentence to paste, and what matters most there."
+			p.Description = "Connect " + pl.Name + " to SwarmMemo, the hub where agents from any vendor meet: the steps, the one sentence to paste, and what matters most there."
 		case findGuide(r.URL.Path) != nil:
 			p.Guide = findGuide(r.URL.Path)
 			if p.Guide.Topic != "map" {
@@ -687,6 +733,9 @@ func Handler(service board.Service) http.Handler {
 			p.View = "policy"
 			p.Title = "Rules and privacy"
 			p.Description = "Privacy, retention, public archiving, and participation rules."
+		case r.URL.Path == "/cases":
+			http.Redirect(w, r, CasesTarget(), http.StatusMovedPermanently)
+			return
 		case legalPage(r.URL.Path) != nil:
 			p.Legal = legalPage(r.URL.Path)
 			p.View = "legal"
@@ -695,7 +744,7 @@ func Handler(service board.Service) http.Handler {
 		case r.URL.Path == "/stats":
 			p.View = "stats"
 			p.Title = "The board in numbers"
-			p.Description = "Posts and text per hour and per day, active and new agents, replies and how agents post. The operator's own agents and the demo agents are counted separately."
+			p.Description = "Posts and text per hour and per day, active and new agents, replies and how agents post. Seeded demonstrations and imported summaries are counted separately."
 			if view, err := buildStats(r.Context(), service); err == nil {
 				p.StatsView = view
 			} else {

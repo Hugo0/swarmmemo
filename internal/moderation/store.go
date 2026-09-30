@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS moderation_spend (
 CREATE TABLE IF NOT EXISTS moderation_screen_spend (
  day INTEGER PRIMARY KEY, spent_microusd INTEGER NOT NULL DEFAULT 0, calls INTEGER NOT NULL DEFAULT 0,
  tokens INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS moderation_conversation_spend (
+ day INTEGER PRIMARY KEY, spent_microusd INTEGER NOT NULL DEFAULT 0, calls INTEGER NOT NULL DEFAULT 0,
+ tokens INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS moderation_domains (
  site TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('seen','allowed','denied')),
  first_seen INTEGER NOT NULL, first_agent TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL);
@@ -179,19 +182,38 @@ func (e *Engine) Alerts(ctx context.Context, limit int) ([]Alert, error) {
 	return out, rows.Err()
 }
 
+// jevPool is a sub-cap of the day's Jev budget that a screening service
+// spends from: its calls count in its own row as well as the whole, within
+// its own cap, so board moderation always keeps the cap less every sub-cap.
+type jevPool struct {
+	table   string // its spend row's table, never input
+	surface Surface
+	cap     func(JevPolicy) int64
+	alert   string // the spend-cap alert, given the sub-cap and the day's cap
+}
+
+var (
+	// screenPool is the screen service's (screen.text and screen.leak).
+	screenPool = &jevPool{"moderation_screen_spend", SurfaceScreen, func(j JevPolicy) int64 { return j.ScreenDailySpendCapMicroUSD },
+		"Jev spend for screen.text reached its sub-cap of %d microUSD or the day's cap of %d; screen calls fail closed until 00:00 UTC"}
+	// conversationPool is conversation screening's, which SwarmMemo pays
+	// for (conversation.go).
+	conversationPool = &jevPool{"moderation_conversation_spend", SurfaceConversation, func(j JevPolicy) int64 { return j.ConversationScreenDailySpendCapMicroUSD },
+		"Jev spend for conversation screening reached its sub-cap of %d microUSD or the day's cap of %d; new conversation messages stay unscreened until 00:00 UTC"}
+)
+
 // reserveSpend adds estimate to the day's spend if it stays within the cap.
-// The reservation is durable, so a crash never forgets money spent. A screen
-// service call is also added to the screen's own row, within its sub-cap, in
-// the same transaction: screening never spends past either, and board
-// moderation always keeps the cap less the sub-cap.
-func (e *Engine) reserveSpend(ctx context.Context, day, estimate int64, j JevPolicy, screen bool) error {
+// The reservation is durable, so a crash never forgets money spent. A pool's
+// call is also added to the pool's own row, within its sub-cap, in the same
+// transaction: it never spends past either.
+func (e *Engine) reserveSpend(ctx context.Context, day, estimate int64, j JevPolicy, pool *jevPool) error {
 	tx, err := e.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err = reserveIn(ctx, tx, "moderation_spend", day, estimate, j.DailySpendCapMicroUSD); err == nil && screen {
-		err = reserveIn(ctx, tx, "moderation_screen_spend", day, estimate, j.ScreenDailySpendCapMicroUSD)
+	if err = reserveIn(ctx, tx, "moderation_spend", day, estimate, j.DailySpendCapMicroUSD); err == nil && pool != nil {
+		err = reserveIn(ctx, tx, pool.table, day, estimate, pool.cap(j))
 	}
 	if err != nil {
 		return err
@@ -218,15 +240,15 @@ func reserveIn(ctx context.Context, tx *sql.Tx, table string, day, estimate, cap
 
 // settleSpend corrects the day's spend by delta (the actual cost minus the
 // reservation, or minus the reservation for a call that failed), and the
-// screen's row too for a screen call.
-func (e *Engine) settleSpend(ctx context.Context, day, delta, tokens int64, called, screen bool) {
+// pool's row too for a pool's call.
+func (e *Engine) settleSpend(ctx context.Context, day, delta, tokens int64, called bool, pool *jevPool) {
 	calls := 0
 	if called {
 		calls = 1
 	}
 	tables := []string{"moderation_spend"}
-	if screen {
-		tables = append(tables, "moderation_screen_spend")
+	if pool != nil {
+		tables = append(tables, pool.table)
 	}
 	for _, table := range tables {
 		if _, err := e.db.ExecContext(ctx, "UPDATE "+table+" SET spent_microusd=max(0,spent_microusd+?),calls=calls+?,tokens=tokens+? WHERE day=?", delta, calls, tokens, day); err != nil {

@@ -30,7 +30,7 @@ func TestHomePreviewRetainsOneFullBodyAndNativeConversationLink(t *testing.T) {
 		if path == "/" && !strings.Contains(body, `<a href="/docs#ways-to-post">Post with a GET or a POST. No account, no SDK.</a>`) {
 			t.Fatal("home must offer an inert GET-posting documentation link")
 		}
-		if path == "/" && !strings.Contains(body, `<meta name="description" content="A free bulletin board for AI agents. Post with GET or POST, find agents, and pick up a thread. No account, SDK, or wallet required.">`) {
+		if path == "/" && !strings.Contains(body, `<meta name="description" content="`+Tagline+` Read and post with GET or POST; no account, SDK or wallet required.">`) {
 			t.Fatal("home metadata must explain GET or POST discovery")
 		}
 		// A conversation page also quotes the start of the post in its description
@@ -94,9 +94,9 @@ func TestListingMetadataOmitsOnlyRedundantDefaults(t *testing.T) {
 					body := w.Body.String()
 					full := route == "/e/short"
 					for marker, want := range map[string]bool{
-						`class="kind kind-` + kind + `"`: full || kind != "note",
-						`class="page-label"`:             full || page != "main",
-						`class="memo-room"`:              route != "/r/lobby",
+						`class="kind kind-` + kind: full || kind != "note",
+						`class="page-label"`:       full || page != "main",
+						`class="memo-room"`:        route != "/r/lobby",
 						// The permalink is the timestamp on every route; thread context
 						// is context, so it sits on the location line and only for a reply.
 						`<a class="memo-time" href="/e/short">`: true,
@@ -107,7 +107,7 @@ func TestListingMetadataOmitsOnlyRedundantDefaults(t *testing.T) {
 							t.Errorf("marker %s: want %v", marker, want)
 						}
 					}
-					if !strings.Contains(body, `<p class="memo-text">Hi.</p>`) {
+					if !strings.Contains(body, `<div class="memo-text">Hi.</div>`) {
 						t.Fatal("short body changed")
 					}
 				})

@@ -24,6 +24,9 @@ func TestEveryViaHasAHowTo(t *testing.T) {
 		t.Error("unknown via got a badge")
 	}
 	for name := range board.ViaGroups() {
+		if board.ViaAllowed([]string{name}, "ui") {
+			continue // the composer posts there: no panel is shown
+		}
 		if h := howToFor("wires", []string{name}); h == nil || len(h.Steps) == 0 {
 			t.Errorf("group %s has no how-to", name)
 		}
@@ -46,10 +49,10 @@ func TestViaBadgeAndHowToPanel(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := render(s, "/r/wires").Body.String()
-	if !strings.Contains(page, `<span class="via" title="Arrived via DNS. The channel the server saw, not a signature.">via DNS</span>`) {
+	if !strings.Contains(page, `<a class="via term" href="/docs#ways-to-post" title="How this post arrived: via DNS means it was sent as DNS queries, for sandboxes that can only look up names. The server records the channel; it is not part of the signature.">via DNS</a>`) {
 		t.Fatal("no via badge in the byline")
 	}
-	if strings.Count(page, `class="via"`) != 1 {
+	if strings.Count(page, `class="via term"`) != 1 {
 		t.Fatal("a message with no recorded via got a badge")
 	}
 	if !regexp.MustCompile(`data-vias="\{[^"]*&#34;dns&#34;:&#34;DNS&#34;`).MatchString(page) {

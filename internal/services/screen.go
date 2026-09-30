@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/allowance"
+	"swarmmemo/internal/leakscan"
 )
 
 // Screen bounds.
@@ -95,6 +96,7 @@ type screen struct {
 	serviceID string
 	key       ed25519.PrivateKey
 	screener  TextScreener
+	leaker    LeakScreener // screen.leak's mode full (screen_leak.go)
 }
 
 func newScreen(d Deps) Provider {
@@ -102,7 +104,7 @@ func newScreen(d Deps) Provider {
 	if id == "" {
 		id = "swarmmemo.com"
 	}
-	return &screen{serviceID: id, key: d.NotaryKey, screener: d.TextScreener}
+	return &screen{serviceID: id, key: d.NotaryKey, screener: d.TextScreener, leaker: d.LeakScreener}
 }
 
 func (*screen) Describe() Descriptor {
@@ -110,9 +112,10 @@ func (*screen) Describe() Descriptor {
 		ID: "screen",
 		Summary: "Screen text before you act on it: the probability that it carries prompt injection, data exfiltration, phishing, malware or text aimed at the classifier, from the Jev classifier, a verdict at your threshold, and a receipt signed with the notary key, its verdict at " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + ", that proves the text was screened without revealing it. " +
 			"A signal with a known error rate, not a guarantee. Stateless: the text is never stored, only its hash, the cost and the result. No spans: finding them would cost about twice as much. " +
-			"If the classifier cannot answer, or its daily budget is spent, the call fails and nothing is charged; it never passes text it did not screen.",
+			"If the classifier cannot answer, or its daily budget is spent, the call fails and nothing is charged; it never passes text it did not screen. " +
+			"leak checks text you are about to send for secrets, personal data and private infrastructure, with the published patterns (1 credit) or with them and the classifier.",
 		Title: "Screening", Topic: "Screening",
-		Line: "Check text for prompt injection, phishing and malware before you act on it; signed receipt, text never stored.",
+		Line: "Check text for prompt injection, phishing and malware before you act on it, and for secrets and personal data before you send it; signed receipts, text never stored.",
 		Limits: []Limit{
 			{"screen_text_bytes", ScreenTextBytes, "bytes", "Text of one call"},
 			{"screen_text_bytes_without_key", ScreenAnonymousTextBytes, "bytes", "Text of one call without a key"},
@@ -132,9 +135,10 @@ func (*screen) Describe() Descriptor {
 				Example:   json.RawMessage(`{"text":"The meeting moved to 3 pm; reply to confirm.","source":"email","intent":"reply to the sender"}`),
 				Anonymous: true, AnonymousLabel: "text screening", AnonymousNote: "text up to " + strconv.Itoa(ScreenAnonymousTextBytes/1024) + " KiB",
 				AnonymousRate: AnonRate{CallerPerMinute: 10, CallerPerDay: 100, AllPerMinute: 60, AllPerDay: 3000}},
+			leakMethod,
 			{Name: "key", ArgsMax: 64, Line: "The public key that signs screen receipts (the notary's)."},
-			{Name: "verify", ArgsMax: screenArgsMax + 4096, Line: "Check a screen receipt's signature and read what it says; give the text (and intent) to check its hash too.",
-				Args: []Arg{{"receipt", "object", true, "the receipt a screen returned"}, {"text", "string", false, "the screened text, to check against the receipt's salted hash"},
+			{Name: "verify", ArgsMax: screenArgsMax + 4096, Line: "Check a screen or leak receipt's signature and read what it says; give the text (and intent) to check its hash too.",
+				Args: []Arg{{"receipt", "object", true, "the receipt a screen or leak returned"}, {"text", "string", false, "the screened text, to check against the receipt's salted hash"},
 					{"intent", "string", false, "the intent given, to check likewise"}},
 				Example: json.RawMessage(`{"receipt":{"schema":"swarmmemo-screen/1","key_id":"KEY_ID","public_key":"PUBLIC_KEY","payload":"PAYLOAD","signature":"SIGNATURE"}}`)},
 		},
@@ -142,11 +146,22 @@ func (*screen) Describe() Descriptor {
 	}
 }
 
-// CatalogueExtra says whether screening runs now, and what it scores.
+// CatalogueExtra says whether screening runs now, and what it scores; leak
+// says the same of screen.leak, whose patterns need only the notary key.
 func (s *screen) CatalogueExtra() map[string]any {
+	ctx := context.Background()
+	modes := []string{}
+	if len(s.key) == ed25519.PrivateKeySize {
+		modes = append(modes, "patterns")
+		if s.leaker != nil && s.leaker.ScreenAvailable(ctx) {
+			modes = append(modes, "full")
+		}
+	}
 	return map[string]any{
-		"available": ScreenReady(context.Background(), s.screener, s.key), "categories": ScreenCategories, "sources": ScreenSources,
+		"available": ScreenReady(ctx, s.screener, s.key), "categories": ScreenCategories, "sources": ScreenSources,
 		"receipt_schema": ScreenSchema, "receipt_threshold": ScreenThreshold, "stores_text": false, "spans": false, "calibration": "/protocol.md#screening-calibration",
+		"leak": map[string]any{"modes": modes, "categories": LeakCategories, "audiences": LeakAudiences, "receipt_schema": LeakSchema,
+			"patterns": "/api/screen/leak-patterns", "patterns_version": leakscan.Version},
 	}
 }
 
@@ -179,7 +194,13 @@ func parseScreen(raw json.RawMessage) (screenPlan, error) {
 	if p.source == "" {
 		p.source = "unknown"
 	}
-	if a.Text == nil || *a.Text == "" || len(*a.Text) > ScreenTextBytes || len(a.Intent) > ScreenIntentBytes || !slices.Contains(ScreenSources, p.source) {
+	if a.Text != nil && len(*a.Text) > ScreenTextBytes {
+		return p, tooLarge("invalid_service_data", len(*a.Text), ScreenTextBytes)
+	}
+	if len(a.Intent) > ScreenIntentBytes {
+		return p, tooLarge("invalid_service_data", len(a.Intent), ScreenIntentBytes)
+	}
+	if a.Text == nil || *a.Text == "" || !slices.Contains(ScreenSources, p.source) {
 		return p, refusal("invalid_service_data")
 	}
 	p.text = *a.Text
@@ -195,24 +216,48 @@ func parseScreen(raw json.RawMessage) (screenPlan, error) {
 
 // CheckAnonymous bounds the text of a call without a key.
 func (*screen) CheckAnonymous(c Call) error {
-	p, err := parseScreen(c.Args)
-	if err != nil {
-		return err
+	var text string
+	if c.Method == "leak" {
+		p, err := parseLeak(c.Args)
+		if err != nil {
+			return err
+		}
+		text = p.text
+	} else {
+		p, err := parseScreen(c.Args)
+		if err != nil {
+			return err
+		}
+		text = p.text
 	}
-	if len(p.text) > ScreenAnonymousTextBytes {
-		return refusal("screen_text_limit")
+	if len(text) > ScreenAnonymousTextBytes {
+		return tooLarge("screen_text_limit", len(text), ScreenAnonymousTextBytes)
 	}
 	return nil
 }
 
-// Quote reserves the price's ceiling for the text. A screen with no
-// classifier or no key is refused here, before anything is reserved.
+// Quote reserves the price's ceiling for the text: screen.leak's patterns
+// alone are 1. A screen with no classifier it needs, or no key, is refused
+// here, before anything is reserved.
 func (s *screen) Quote(c Call) (Quote, error) {
+	ctx := context.Background()
+	if c.Method == "leak" {
+		p, err := parseLeak(c.Args)
+		switch {
+		case err != nil:
+			return Quote{}, refusal("invalid_service_data")
+		case len(s.key) != ed25519.PrivateKeySize, p.mode == "full" && (s.leaker == nil || !s.leaker.ScreenAvailable(ctx)):
+			return Quote{}, refusal("upstream_unavailable")
+		case p.mode == "patterns":
+			return Quote{Resource: allowance.Credit, Max: leakPatternsPrice}, nil
+		}
+		return Quote{Resource: allowance.Credit, Max: c.Price.For(int64(len(p.text)))}, nil
+	}
 	p, err := parseScreen(c.Args)
 	if c.Method != "text" || err != nil {
 		return Quote{}, refusal("invalid_service_data")
 	}
-	if !ScreenReady(context.Background(), s.screener, s.key) {
+	if !ScreenReady(ctx, s.screener, s.key) {
 		return Quote{}, refusal("upstream_unavailable")
 	}
 	return Quote{Resource: allowance.Credit, Max: c.Price.For(int64(len(p.text)))}, nil
@@ -288,7 +333,22 @@ func saltedSHA256(salt []byte, s string) string {
 	return sha256Of(append(slices.Clip(salt), s...))
 }
 
+// ModeFor runs screen.leak's patterns in the command itself: they are
+// local, bounded regular expressions with no classifier and no price, so
+// nothing is reserved; a classifier's call stays remote.
+func (s *screen) ModeFor(c Call) Mode {
+	if c.Method == "leak" {
+		if p, err := parseLeak(c.Args); err == nil && p.mode == "patterns" {
+			return Local
+		}
+	}
+	return Remote
+}
+
 func (s *screen) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
+	if c.Method == "leak" {
+		return s.runLeak(ctx, c)
+	}
 	p, err := parseScreen(c.Args)
 	if err != nil {
 		return Result{}, err
@@ -345,17 +405,28 @@ func (s *screen) Read(_ context.Context, _ allowance.Querier, c Call) (json.RawM
 			return nil, refusal("service_unavailable")
 		}
 		public := base64.RawURLEncoding.EncodeToString(s.key.Public().(ed25519.PublicKey))
-		p, ok := VerifyScreenReceipt(public, a.Receipt)
-		if !ok || a.Receipt.PublicKey != public {
+		// A screen.text receipt, or a screen.leak one: the same envelope,
+		// told apart by its schema.
+		var screened any
+		var saltHex, textSHA, intentSHA string
+		ok := a.Receipt.PublicKey == public
+		if a.Receipt.Schema == LeakSchema {
+			p, valid := VerifyLeakReceipt(public, a.Receipt)
+			screened, saltHex, textSHA, ok = p, p.Salt, p.TextSHA256, ok && valid
+		} else {
+			p, valid := VerifyScreenReceipt(public, a.Receipt)
+			screened, saltHex, textSHA, intentSHA, ok = p, p.Salt, p.TextSHA256, p.IntentSHA256, ok && valid
+		}
+		if !ok {
 			return json.Marshal(map[string]any{"valid": false, "public_key": public})
 		}
-		out := map[string]any{"valid": true, "public_key": public, "screened": p}
-		salt, err := hex.DecodeString(p.Salt)
+		out := map[string]any{"valid": true, "public_key": public, "screened": screened}
+		salt, err := hex.DecodeString(saltHex)
 		if a.Text != nil {
-			out["text_matches"] = err == nil && saltedSHA256(salt, *a.Text) == p.TextSHA256
+			out["text_matches"] = err == nil && saltedSHA256(salt, *a.Text) == textSHA
 		}
 		if a.Intent != nil {
-			out["intent_matches"] = err == nil && p.IntentSHA256 != "" && saltedSHA256(salt, *a.Intent) == p.IntentSHA256
+			out["intent_matches"] = err == nil && intentSHA != "" && saltedSHA256(salt, *a.Intent) == intentSHA
 		}
 		return json.Marshal(out)
 	}

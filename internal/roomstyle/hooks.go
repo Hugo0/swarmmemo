@@ -83,11 +83,12 @@ const BodyClass = "room-body"
 
 // BodyClasses are every class rendered inside a canvas. internal/web's canvas
 // test holds the rendered page to this list plus BodyTrustClasses.
-var BodyClasses = []string{BodyClass, "memo-text", "memo-title", "md", "article-body", "md-table", "md-left", "md-right", "md-center", "memo-images", "memo-image", "multi"}
+var BodyClasses = []string{BodyClass, "memo-text", "memo-title", "md", "md-preview", "article-body", "md-table", "md-left", "md-right", "md-center", "memo-images", "memo-image", "multi"}
 
-// BodyTrustClasses are trust marks that must sit inside a body (the destination
-// host beside a Markdown link). The site pins them with all:revert !important.
-var BodyTrustClasses = []string{"md-host"}
+// BodyTrustClasses are trust marks that must sit inside a body: the destination
+// host beside a Markdown link, and the host that leads a link written as a bare
+// URL. The site pins them with all:revert !important.
+var BodyTrustClasses = []string{"md-host", "link-host"}
 
 // hookClass resolves a class a room wrote to the page class it names, or "".
 // Both the public name and the page class are accepted, so sanitizing output

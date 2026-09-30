@@ -28,8 +28,14 @@ func openTest(t *testing.T, c Config) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.now = func() time.Time { return time.Unix(testTime, 0) }
 	t.Cleanup(func() { _ = s.Close() })
+	// Tests post many threads from one source, some at clocks set in the
+	// past; the anonymous thread rate has its own test (postrate_test.go).
+	s.now = func() time.Time { return time.Unix(1, 0) }
+	if _, err = s.SetAllowanceParams(testContext, PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000000}`), "tests post many threads from one source", 0); err != nil {
+		t.Fatal(err)
+	}
+	s.now = func() time.Time { return time.Unix(testTime, 0) }
 	return s
 }
 func keyFor(n byte) ed25519.PrivateKey {

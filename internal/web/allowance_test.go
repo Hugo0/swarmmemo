@@ -78,7 +78,7 @@ func TestStandingGlance(t *testing.T) {
 	if err := templates.ExecuteTemplate(&b, "standing-glance", &standingView{Agent: "abc", Allowance: agentAllowanceFrom(answer), TrustOn: true}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Allowance today: signed tier", `data-key="resources.0.remaining" data-value="4063232">3.9 MB</span> left`, `href="/agent/abc#allowance">Allowance and trust →`} {
+	for _, want := range []string{">Allowance today</span>: signed tier", `data-key="resources.0.remaining" data-value="4063232">3.9 MB</span> left`, `href="/agent/abc#allowance">Allowance and trust →`} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("glance lacks %q: %s", want, b.String())
 		}

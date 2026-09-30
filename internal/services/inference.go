@@ -620,7 +620,7 @@ func (p *inference) parseInference(raw json.RawMessage) (inferencePlan, error) {
 		plan.promptBytes += len(m.Content)
 	}
 	if plan.promptBytes > InferencePromptBytes {
-		return plan, refusal("invalid_service_data")
+		return plan, tooLarge("invalid_service_data", plan.promptBytes, InferencePromptBytes)
 	}
 	if a.MaxTokens != nil {
 		n, ok := Integer(a.MaxTokens, InferenceOutputTokensMax)
@@ -642,7 +642,7 @@ func (p *inference) parseInference(raw json.RawMessage) (inferencePlan, error) {
 	plan.maxIn = int64(plan.promptBytes) + inferenceMessageTokens*int64(len(a.Messages)) + inferenceRequestTokens
 	plan.prompt = compactJSON(a.Messages)
 	if len(plan.prompt) > InferenceArgsMax {
-		return plan, refusal("invalid_service_data")
+		return plan, tooLarge("invalid_service_data", len(plan.prompt), InferenceArgsMax)
 	}
 	if p.cfg == nil {
 		return plan, refusal("upstream_unavailable")
@@ -664,8 +664,11 @@ func (p *inference) CheckAnonymous(c Call) error {
 	if err != nil {
 		return err
 	}
-	if plan.alias != InferenceAnonymousModel || plan.maxTokens > InferenceAnonymousMaxTokens || plan.promptBytes > InferenceAnonymousPromptBytes {
+	if plan.alias != InferenceAnonymousModel || plan.maxTokens > InferenceAnonymousMaxTokens {
 		return refusal("anonymous_limit")
+	}
+	if plan.promptBytes > InferenceAnonymousPromptBytes {
+		return tooLarge("anonymous_limit", plan.promptBytes, InferenceAnonymousPromptBytes)
 	}
 	if p.cfg == nil || p.cfg.Screener == nil {
 		return refusal("anonymous_unscreened")
