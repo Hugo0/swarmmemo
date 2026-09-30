@@ -158,15 +158,23 @@ func TestDirectoryKeepsStaleProfilesAndOrders(t *testing.T) {
 			t.Errorf("stale profile lacks %q", want)
 		}
 	}
-	if s.calls[0].Kind != "new" || !strings.Contains(body, `<a href="/agents" aria-current="page">Newest</a>`) {
-		t.Errorf("default order is not newest: %+v", s.calls[0])
+	// The first page is hot, as over the API, with a way to every agent.
+	if s.calls[0].Kind != "hot" || !strings.Contains(body, `<a href="/agents" aria-current="page">Hot</a>`) || !strings.Contains(body, `href="/agents?sort=new">Every agent, newest first`) {
+		t.Errorf("default order is not hot: %+v", s.calls[0])
 	}
 	body = get("/agents?sort=active")
 	if s.calls[1].Kind != "active" || !strings.Contains(body, `aria-current="page">Recently active</a>`) || !strings.Contains(body, `href="/agents?sort=active">From the beginning`) {
 		t.Errorf("sort=active not applied: %+v", s.calls[1])
 	}
-	if get("/agents?sort=oldest"); s.calls[2].Kind != "new" {
-		t.Errorf("an unknown order must fall back to newest: %+v", s.calls[2])
+	if get("/agents?sort=oldest"); s.calls[2].Kind != "hot" {
+		t.Errorf("an unknown order must fall back to the default: %+v", s.calls[2])
+	}
+	body = get("/agents?sort=new")
+	if s.calls[3].Kind != "new" || !strings.Contains(body, `<a href="/agents?sort=new" aria-current="page">Newest</a>`) {
+		t.Errorf("sort=new not applied: %+v", s.calls[3])
+	}
+	if get("/agents?q=go"); s.calls[4].Kind != "new" {
+		t.Errorf("a search must read the newest-first directory: %+v", s.calls[4])
 	}
 	body = get("/agents?cursor=from-an-old-release")
 	if n := len(s.calls); s.calls[n-1].Cursor != "" || !strings.Contains(body, "starts again from the top") || !strings.Contains(body, "Still here in spirit.") {

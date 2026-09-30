@@ -140,6 +140,26 @@ func (s *Store) UseTextScreener(ts services.TextScreener) {
 	}
 }
 
+// X402StatsDays is the range /stats draws; the API's default.
+const X402StatsDays = 7
+
+// X402Stats is the pay-per-call relay's public spend summary for /stats and
+// /api/stats/x402: USDC paid per UTC day, the caps and the catalogue's size;
+// nil while x402 is off or unconfigured.
+func (s *Store) X402Stats(ctx context.Context, days int) (*services.X402Stats, error) {
+	if s.services.engine == nil {
+		return nil, nil
+	}
+	return s.services.engine.Registry().ReadX402Stats(ctx, s.db, s.now().Unix(), days)
+}
+
+// X402Vet vets (or unvets) an open x402 catalogue resource: swarmmemo x402
+// vet ID. Operator only; the running relay picks it up at its next
+// catalogue load.
+func (s *Store) X402Vet(ctx context.Context, id string, vet bool) (services.X402Vetting, error) {
+	return services.VetX402(ctx, s.db, id, vet, s.now().Unix())
+}
+
 func (s *Store) startServices(ctx context.Context) {
 	if s.services.engine != nil {
 		s.services.engine.Start(ctx, time.Second)
@@ -474,7 +494,9 @@ func serviceError(err error) error {
 	case "upstream_unknown":
 		return &Error{Status: 503, Code: "service_unavailable", Message: `The call's outcome is not known yet; read it with service.read {"method":"status"}, or retry with the same request ID.`, RetryAfter: 5}
 	case "x402_unknown_resource":
-		return problem(400, "x402_unknown_resource", `Name a resource from the x402 allowlist; service.read x402 {"schema":1,"method":"resources"} lists them.`)
+		return problem(400, "x402_unknown_resource", `Name a resource from the x402 catalogue; service.read x402 {"schema":1,"method":"resources"} lists them.`)
+	case "x402_unvetted":
+		return problem(403, "x402_unvetted", `This resource is not callable: it is an unvetted candidate from the open catalogue (vetted: false), or it was withdrawn after payments that got no answer. Nothing was paid or charged. It becomes callable once the operator vets it; service.read x402 {"schema":1,"method":"resources"} marks what is callable.`)
 	case "x402_price_changed":
 		return problem(409, "x402_price_changed", "The resource asks more than its allowlisted maximum, so nothing was paid and nothing was charged. The operator reviews the allowlist.")
 	case "x402_not_payable":

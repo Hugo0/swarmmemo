@@ -23,6 +23,7 @@ import (
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/cards"
 	"swarmmemo/internal/services"
+	"swarmmemo/internal/web"
 )
 
 type Config struct {
@@ -75,6 +76,10 @@ type Server struct {
 	readers           *readerCounter
 	sitemapBuilds     chan struct{}
 	referrers         *referrerCounter
+
+	// mcpAssistantHandler serves web.AssistantMCPPath, the profile without
+	// payment tools (mcp.go).
+	mcpAssistantHandler http.Handler
 }
 
 func New(service board.Service, ui http.Handler, cfg Config) *Server {
@@ -176,7 +181,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	// Not on /call/: a call without a key spends the caller's network's
 	// credit, so no other site may read its answer (execute also drops it
 	// from every unsigned service.call answer).
-	if r.URL.Path != "/mcp" && !strings.HasPrefix(r.URL.Path, "/admin/") && !strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
+	if r.URL.Path != "/mcp" && r.URL.Path != web.AssistantMCPPath && !strings.HasPrefix(r.URL.Path, "/admin/") && !strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Expose-Headers", "X-Next-Cursor, Retry-After, Link")
 	}
@@ -212,6 +217,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.countReferrer(r)
+	r = r.WithContext(board.WithClientFamily(r.Context(), requestClient(r)))
 	if referencePath(r.URL.Path) {
 		s.referenceRead(w, r)
 		return
@@ -262,6 +268,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			methodError(w)
 			return
 		}
+		if r.Method == http.MethodGet {
+			s.countClient(r, "discovery")
+		}
 		jsonResponse(w, 200, s.capabilitiesWith(s.liveCatalog(r)))
 		return
 	}
@@ -279,7 +288,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.discovery(w, r) {
 		return
 	}
-	if r.URL.Path == "/mcp" {
+	if r.URL.Path == "/mcp" || r.URL.Path == web.AssistantMCPPath {
 		s.mcp(w, r)
 		return
 	}
@@ -815,15 +824,16 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		query["kind"] = query["sort"]
 		delete(query, "sort")
 	}
-	// Message listings take ?sort=new|hot|top&bias=B&offset=N, carried as the
-	// read's data (board.ListOptions); the signed command format is unchanged.
-	if p := r.URL.Path; (p == "/api/messages" || p == "/recent" || p == "/search" || strings.HasPrefix(p, "/r/")) && (query.Has("sort") || query.Has("bias") || query.Has("offset")) {
+	// Message listings take ?sort=new|hot|top&bias=B&offset=N&scope=front|all,
+	// carried as the read's data (board.ListOptions); the signed command
+	// format is unchanged.
+	if p := r.URL.Path; (p == "/api/messages" || p == "/recent" || p == "/search" || strings.HasPrefix(p, "/r/")) && (query.Has("sort") || query.Has("bias") || query.Has("offset") || query.Has("scope")) {
 		if query.Has("data") {
 			writeError(w, bad("Use sort, bias and offset, or data, not both."))
 			return
 		}
 		opts := map[string]any{}
-		for _, key := range []string{"sort", "bias", "offset"} {
+		for _, key := range []string{"sort", "bias", "offset", "scope"} {
 			if !query.Has(key) {
 				continue
 			}
@@ -836,6 +846,12 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 			case "sort":
 				if value != "new" && value != "hot" && value != "top" {
 					writeError(w, bad("sort for messages is new, hot or top."))
+					return
+				}
+				opts[key] = value
+			case "scope":
+				if value != "front" && value != "all" {
+					writeError(w, bad("scope for messages is front (front-page rooms, the default) or all (every public room)."))
 					return
 				}
 				opts[key] = value
@@ -880,9 +896,15 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		if len(parts) == 2 {
 			c.Page = parts[1]
 		}
+		c = board.FirstContact(c)
 	case p == "/search":
 		c.Operation = "messages.list"
-	case p == "/api/messages" || p == "/recent":
+	case p == "/api/messages":
+		// A first read with no order, cursor or filter is the hot view
+		// (board.FirstContact); /recent stays newest first.
+		c.Operation = "messages.list"
+		c = board.FirstContact(c)
+	case p == "/recent":
 		c.Operation = "messages.list"
 	case p == "/api/updates":
 		c.Operation = "updates.get"
@@ -1020,8 +1042,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			writeError(w, bad("Duplicate stream query field."))
 			return
 		}
-		if key != "cursor" && key != "room" && key != "page" && key != "after" {
-			writeError(w, bad("Public stream supports cursor, room, page, and after only."))
+		if key != "cursor" && key != "room" && key != "page" && key != "after" && key != "scope" {
+			writeError(w, bad("Public stream supports cursor, room, page, after and scope only."))
 			return
 		}
 	}
@@ -1037,7 +1059,17 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, bad("Streaming unavailable; use polling."))
 		return
 	}
-	cmd := board.Command{Operation: "messages.list", Room: q.Get("room"), Page: q.Get("page"), Cursor: q.Get("cursor"), Limit: 50}
+	// The stream carries every public room unless scope=front asks for the
+	// front page only (board/frontpage.go), as the home page does.
+	cmd := board.Command{Operation: "messages.list", Room: q.Get("room"), Page: q.Get("page"), Cursor: q.Get("cursor"), Limit: 50, Data: board.AllRooms}
+	switch q.Get("scope") {
+	case "front":
+		cmd.Data = `{"scope":"front"}`
+	case "", "all":
+	default:
+		writeError(w, bad("Stream scope is all (the default) or front."))
+		return
+	}
 	var revision int64 = -1
 	if value := q.Get("after"); value != "" {
 		var err error

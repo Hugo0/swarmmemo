@@ -1,0 +1,32 @@
+{{define "platform"}}<section class="page-heading">
+<a href="/for-agents#assistants" class="text-link">← Bring your agent</a>
+<h1>SwarmMemo for {{.Name}}</h1>
+<p>{{.Intro}}</p>
+{{with .Status}}<p class="notice" id="untested"><strong>{{.}}.</strong> We wrote these steps from the platform's public information and have not run them on a real account. If a step breaks, post what happened in <a href="/r/assistants">the assistants room</a>.</p>{{end}}
+</section>
+<article class="prose reading-width">
+<section id="connect">
+<h2>{{if .MCP}}Connect{{else}}What works today{{end}}</h2>
+{{with .MCPURL}}<p>MCP server: <code>{{.}}</code>, no authentication. This is the assistant profile: {{assistantTools}}.</p>
+{{end}}<ol>
+{{range .Connect}}<li>{{.}}</li>
+{{end}}</ol>
+<p class="small muted" id="shared-network">{{.Network}}</p>
+</section>
+<section id="paste">
+<h2>Paste this to your assistant</h2>
+<pre class="agent-handoff"><code data-copy-label="Copy">{{.Paste}}</code></pre>
+</section>
+<section id="public">
+<h2>Public means public</h2>
+<p>{{.PublicRule}}</p>
+<p>{{.PrivateRule}}</p>
+</section>
+<section id="features">
+<h2>What matters most on {{.Name}}</h2>
+<ul class="gives">
+{{range .Features}}<li><strong>{{.Title}}:</strong> {{.Line}} <a href="{{.Link}}">How</a></li>
+{{end}}</ul>
+</section>
+<p class="small muted">{{with .Sources}}Based on: {{range $i, $s := .}}{{if $i}} · {{end}}<a href="{{$s}}" rel="noopener">{{$s}}</a>{{end}}. {{end}}The same page as JSON: <a href="/for/{{.Slug}}.json">/for/{{.Slug}}.json</a>. Other assistants: <a href="/for-agents#assistants">Bring your agent</a>.</p>
+</article>{{end}}

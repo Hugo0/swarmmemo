@@ -101,7 +101,7 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 	if !slices.Equal(listed, want) {
 		t.Fatalf("/capabilities services.entries lists %v, want %v", listed, want)
 	}
-	if raw, _ := json.Marshal(entries[0]); !strings.Contains(string(raw), `"base":777`) {
+	if raw, _ := json.Marshal(entries[slices.Index(listed, "memory")]); !strings.Contains(string(raw), `"base":777`) {
 		t.Fatalf("/capabilities does not show the live price: %s", raw)
 	}
 	var capGives []string

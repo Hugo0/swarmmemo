@@ -231,7 +231,7 @@ func (d *dns) ParseFrom(source string, frame []byte) (Request, error) {
 	case len(sub) == 1 && sub[0] == "head":
 		req.Route = "head"
 		if txt {
-			req.Command = &board.Command{Operation: "messages.list", Limit: dnsHeadIDs}
+			req.Command = &board.Command{Operation: "messages.list", Limit: dnsHeadIDs, Data: board.AllRooms}
 		}
 	case len(sub) == 1 && sub[0] == "rooms":
 		req.Route = "rooms"

@@ -40,6 +40,10 @@ type Options struct {
 	Anchors bool
 	// SkipTitle omits a leading heading, for a page that shows it as its h1.
 	SkipTitle bool
+	// Document keeps a heading at its own level (## is h2), never above h2,
+	// for a page whose h1 is the document's own title. A post shifts every
+	// heading down one level instead.
+	Document bool
 }
 
 // Render returns the post as HTML. It is safe to place in an html/template
@@ -510,6 +514,9 @@ func (r *renderer) heading(level int, text string) {
 	}
 	// Inside a post, # is a section: the page owns h1.
 	n := min(level+1, 4)
+	if r.opt.Document {
+		n = min(max(level, 2), 4)
+	}
 	open := "<h" + strconv.Itoa(n)
 	if r.opt.Anchors {
 		if id := r.anchor(inlineText(text)); id != "" {

@@ -240,7 +240,16 @@ func TestPublicReadSchemasMatchActualConversationAndCorrectionResponses(t *testi
 	if len(feed["messages"].([]any)) != 1 || feed["data"].(map[string]any)["has_more"] != false {
 		t.Fatal("events must be top-level alongside feed has_more metadata")
 	}
-	if full := read("/api/messages?limit=1", 200, feedSchema); full["data"].(map[string]any)["has_more"] != true {
+	// The first read is the hot view when it ranks a page of posts, and newest
+	// first on a board this quiet; it says which. The chronological feed
+	// cannot know its end, so a page it fills to the limit reports has_more.
+	if feed["data"].(map[string]any)["sort"] != "new" {
+		t.Fatal("a first read of a quiet board must fall back to newest first")
+	}
+	if ranked := read("/api/messages?limit=1", 200, feedSchema); ranked["data"].(map[string]any)["sort"] != "hot" {
+		t.Fatal("a first read with a page of ranked posts must be the hot view")
+	}
+	if full := read("/api/messages?sort=new&limit=1", 200, feedSchema); full["data"].(map[string]any)["has_more"] != true {
 		t.Fatal("a page filled to the requested limit must report has_more")
 	}
 	threadURL := "/api/thread/" + root + "?limit=1"
@@ -667,5 +676,70 @@ func TestEmbeddedPublicDocumentationAndPrivateExclusion(t *testing.T) {
 	}
 	if len(f.commands) != 0 {
 		t.Fatal("documentation invoked command service")
+	}
+}
+
+// The legal pages have one source each (docs/legal): the page and its Markdown
+// twin agree, and every discovery surface points at both.
+func TestLegalPagesAndTheirDiscovery(t *testing.T) {
+	f := &fakeService{}
+	s := New(f, web.Handler(f), Config{PublicURL: "https://example.test"})
+	for _, path := range []string{"/privacy", "/terms"} {
+		src, ok := publicdocs.Legal(path)
+		if !ok {
+			t.Fatalf("%s has no source", path)
+		}
+		twin := makeRequest(s, "GET", path+".md", "", "")
+		if twin.Code != 200 || twin.Body.String() != string(src) || !strings.HasPrefix(twin.Header().Get("Content-Type"), "text/plain") {
+			t.Errorf("%s.md must serve the page's exact Markdown source: %d", path, twin.Code)
+		}
+		if head := makeRequest(s, "HEAD", path+".md", "", ""); head.Code != 200 || head.Body.Len() != 0 {
+			t.Errorf("HEAD %s.md: %d", path, head.Code)
+		}
+		if makeRequest(s, "POST", path+".md", "x", "text/plain").Code != 405 {
+			t.Errorf("%s.md accepted a mutation", path)
+		}
+		page := makeRequest(s, "GET", path, "", "")
+		title := strings.TrimPrefix(strings.SplitN(string(src), "\n", 2)[0], "# ")
+		if page.Code != 200 || !strings.Contains(page.Body.String(), "<h1>"+title+"</h1>") {
+			t.Errorf("%s: %d, want the rendered %q", path, page.Code, title)
+		}
+	}
+	for _, path := range []string{"/legal/privacy.md", "/docs/legal/privacy.md", "/policy.md", "/privacy.md/", "/terms.MD"} {
+		if _, ok := publicdocs.ReadPath(path); ok {
+			t.Errorf("%s exposes a legal source under an undocumented alias", path)
+		}
+	}
+	var caps struct {
+		Legal map[string]string `json:"legal"`
+	}
+	if w := makeRequest(s, "GET", "/capabilities", "", ""); json.Unmarshal(w.Body.Bytes(), &caps) != nil ||
+		caps.Legal["privacy"] != "/privacy" || caps.Legal["terms"] != "/terms" ||
+		caps.Legal["privacy_markdown"] != "/privacy.md" || caps.Legal["terms_markdown"] != "/terms.md" || caps.Legal["summary"] != "/policy" {
+		t.Fatalf("/capabilities legal: %v", caps.Legal)
+	}
+	for _, path := range []string{"/llms.txt", "/llms-full.txt"} {
+		body := makeRequest(s, "GET", path, "", "").Body.String()
+		for _, want := range []string{"[Privacy Policy](https://example.test/privacy)", "[Terms of Use](https://example.test/terms)", "(https://example.test/privacy.md)", "(https://example.test/terms.md)", "(https://example.test/policy)"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing %s", path, want)
+			}
+		}
+	}
+	var card struct {
+		Safety map[string]any `json:"safety"`
+	}
+	if w := makeRequest(s, "GET", "/.well-known/mcp/server-card.json", "", ""); json.Unmarshal(w.Body.Bytes(), &card) != nil ||
+		card.Safety["privacy_policy"] != "https://example.test/privacy" || card.Safety["terms_of_use"] != "https://example.test/terms" || card.Safety["archival"] != "https://example.test/policy" {
+		t.Fatalf("server card safety: %v", card.Safety)
+	}
+	sitemap := makeRequest(s, "GET", "/sitemap.xml", "", "").Body.String()
+	for _, want := range []string{"<loc>https://example.test/privacy</loc>", "<loc>https://example.test/terms</loc>", "<loc>https://example.test/policy</loc>"} {
+		if !strings.Contains(sitemap, want) {
+			t.Errorf("sitemap missing %s", want)
+		}
+	}
+	if len(f.commands) != 0 {
+		t.Fatal("reading the legal pages dispatched commands")
 	}
 }

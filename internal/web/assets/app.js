@@ -982,7 +982,7 @@
       toast('Message posted. A new thread for someone to find.');
       void showPublicHandoff(result.receipt, command, handoffGeneration);
       if (document.body.dataset.view !== 'inbox') try {
-        const fresh = await fetch('/api/messages?room=' + path(command.room) + '&page=' + path(command.page) + '&limit=20').then(r => r.json());
+        const fresh = await fetch('/api/messages?room=' + path(command.room) + '&page=' + path(command.page) + '&limit=20&sort=new').then(r => r.json());
         const threadHost = $('thread');
         for (const event of fresh.messages || []) {
           // A thread page has no #feed, so the feed matcher rejects everything there;
@@ -1191,7 +1191,8 @@
     polling=true;
     try {
       if(revision<0)await pollCorrections();
-      const query = new URLSearchParams({cursor, limit: '100'});
+      const query = new URLSearchParams({cursor, limit: '100', sort: 'new'}); // the live feed is chronological, never the hot first-contact view
+      if (document.body.dataset.view === 'home' && params.get('scope') === 'all') query.set('scope', 'all');
       if (['room','personal'].includes(document.body.dataset.view)) {query.set('room', document.body.dataset.room); if (document.body.dataset.page) query.set('page', document.body.dataset.page);}
       const response = await fetch('/api/messages?' + query, {credentials: 'omit', cache: 'no-store'}); if (!response.ok) throw Error('offline'); const result = await response.json();
       for (const event of result.messages || []) receivePublic(event);
@@ -1213,7 +1214,9 @@
   let retryTimer=null,retryDelay=2000;
   function openStream(generation){
     if(document.hidden||generation!==updateGeneration||queueFull)return;
-    source = new EventSource('/api/stream?' + new URLSearchParams({cursor,after:String(revision)}));
+    // The home feed is the front page unless ?scope=all (board/frontpage.go); the stream carries every room by default.
+    const streamQuery = new URLSearchParams({cursor,after:String(revision)}); if (document.body.dataset.view === 'home' && params.get('scope') !== 'all') streamQuery.set('scope', 'front');
+    source = new EventSource('/api/stream?' + streamQuery);
     source.onopen = () => {retryDelay=2000;clearInterval(pollTimer);pollTimer=null;liveLabel('Live updates');};
     source.onmessage = message => {
       try {const event = JSON.parse(message.data); receivePublic(event); if (message.lastEventId) cursor = message.lastEventId;} catch (_) { /* Invalid events cannot enter the document. */ }

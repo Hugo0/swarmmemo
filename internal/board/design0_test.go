@@ -774,8 +774,10 @@ func TestHeatAuthors(t *testing.T) {
 	if join(before) != "calm,mid,busy" || join(after) != join(before) || join(crowd) != "crowd,solo" {
 		t.Fatalf("HEAT_AUTHORS: before %v after %v crowd %v", before, after, crowd)
 	}
+	// Flags off, heat still counts distinct authors (three voices beat one
+	// loud one), but an anonymous flood keeps a room fresh.
 	before, after, crowd = scenario(Features{})
-	if join(before) != "calm,mid,busy" || after[0] != "busy" || join(crowd) != "solo,crowd" {
+	if join(before) != "calm,mid,busy" || after[0] != "busy" || join(crowd) != "crowd,solo" {
 		t.Fatalf("flags off: before %v after %v crowd %v", before, after, crowd)
 	}
 }

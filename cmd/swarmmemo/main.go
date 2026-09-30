@@ -91,13 +91,16 @@ func run() error {
 	case "serve":
 		return serve()
 	case "x402": // x402.go
+		if x402VetCommand(os.Args[2:]) {
+			return operator(command)
+		}
 		return x402Command(os.Args[2:], os.Stdout)
 	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance", "stats",
 		"tier", "params", "allowance", "lever", "trust", // RFC0012, rfc0012.go
 		"moderation": // moderation.go
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|moderation]")
+		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|moderation]")
 	}
 }
 
@@ -122,6 +125,8 @@ func operator(command string) error {
 		return rfc0012Operator(ctx, store, command, os.Args[2:], os.Stdout)
 	case "moderation":
 		return operatorModeration(ctx, store, os.Args[2:], os.Stdout)
+	case "x402":
+		return operatorX402(ctx, store, os.Args[2:], os.Stdout)
 	case "maintenance":
 		n, err := store.PruneExpiredBlobs(ctx)
 		if err != nil {

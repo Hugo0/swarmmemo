@@ -111,6 +111,17 @@ func (p postActuator) Apply(ctx context.Context, subject string, hide bool, reas
 	return p.s.Moderate(ctx, subject, reason, hide)
 }
 
+// RecordQuality keeps the screen's quality score for ranking (ranking.go).
+func (p postActuator) RecordQuality(ctx context.Context, subject string, quality float64, model string) error {
+	return p.s.RecordQuality(ctx, subject, quality, model)
+}
+
+// RecordFlag keeps whether the screen's flag on a post is open for review;
+// ranked views leave an open one out (ranking.go).
+func (p postActuator) RecordFlag(ctx context.Context, subject string, open bool) error {
+	return p.s.RecordFlag(ctx, subject, open)
+}
+
 // The services' moderation hooks. They look the engine up on every call, so
 // they can be set while the services open (before openModeration), and a
 // call that finds no engine fails closed.

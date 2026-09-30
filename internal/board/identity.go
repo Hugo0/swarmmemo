@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -116,7 +116,7 @@ func (s *Store) changeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor,
 // post. Private-only keys (including keys that only remove an absent profile)
 // never enter discovery, nor the published trust snapshot (trustwire.go).
 func publicAccountSQL(account string) string {
-	return `(EXISTS(SELECT 1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=` + account + ` AND r.visibility='public' AND e.hidden=0) OR EXISTS(SELECT 1 FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=` + account + ` AND au.operation IN ('agent.register','agent.profile.publish')))`
+	return `(EXISTS(SELECT 1 FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=` + account + ` AND r.visibility='public' AND e.hidden=0) OR EXISTS(SELECT 1 FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=` + account + ` AND au.operation IN ('agent.register','agent.profile.publish')))`
 }
 
 // readAgents is the single agent directory. One concept, one list: an agent is
@@ -135,19 +135,43 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	public := publicAccountSQL("i.account")
 	where := public
 	args := []any{}
-	// The directory lists newest first by default, or most recently active. The
-	// order is part of the cursor's scope, so a cursor from one order (or from
-	// the old by-fingerprint order) is refused as invalid_cursor, never misread.
-	sortKey := "created"
+	// The directory's first page, unless searched, is hot by default
+	// (hotAgents, one page); sort=new lists newest first and sort=active most
+	// recently active first. The order is part of the cursor's scope, so a
+	// cursor from one order (or from the old by-fingerprint order) is refused
+	// as invalid_cursor, never misread; a cursor without a sort is the
+	// newest-first directory's, as it always was.
+	sortKey, hot := "created", false
 	switch c.Kind {
-	case "", "new":
+	case "":
+		hot = c.Operation == "agents.list" && c.Cursor == "" && c.Query == ""
+	case "new":
+	case "hot":
+		if c.Cursor != "" {
+			return Result{}, problem(400, "cursor_with_sort", "The hot agent list is one page; sort=new or sort=active pages the directory with a cursor.")
+		}
+		hot = true
 	case "active":
 		sortKey = "seen"
 	default:
-		return Result{}, problem(400, "invalid_query", "Agent sort must be new or active.")
+		return Result{}, problem(400, "invalid_query", "Agent sort must be hot, new or active.")
+	}
+	if hot {
+		sortKey = "seen"
 	}
 	cursor := conversationCursor{Version: 1, Domain: "agents.list", Scope: sortKey + "\n" + c.Query}
 	limit := limitValue(c.Limit)
+	if hot {
+		// The hot page is the same for every reader; it is shared for
+		// HotAgentsTTL (a change to an agent's registration, profile or links
+		// drops it), so a stream of reads costs one ranking a minute.
+		s.rankMu.Lock()
+		cached, at := s.hotAgentsCached, s.hotAgentsAt
+		s.rankMu.Unlock()
+		if age := s.now().Sub(at); cached != nil && age >= 0 && age < HotAgentsTTL {
+			return s.hotAgentPage(ctx, tx, cached, limit)
+		}
+	}
 	if c.Operation == "agent.get" {
 		target := c.Target
 		if target == "" {
@@ -168,6 +192,21 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		// but listing it beside its successor is the same agent twice again.
 		where += " AND i.successor=''"
 	}
+	var hotOrder map[string]int
+	if hot {
+		// The hot page ranks cheaply first (hotAgentIDs), then reads full rows
+		// (first post, post count) for the agents it shows only.
+		ids, err := hotAgentIDs(ctx, tx, public, now)
+		if err != nil {
+			return Result{}, agentReadError(err)
+		}
+		hotOrder = make(map[string]int, len(ids))
+		for i, id := range ids {
+			hotOrder[id] = i
+			args = append(args, id)
+		}
+		where += " AND i.id IN (''" + strings.Repeat(",?", len(ids)) + ")"
+	}
 	if c.Query != "" {
 		// One search box over one list: an agent matches on its handle or on
 		// anything in the profile it published for itself.
@@ -180,13 +219,15 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	// profile is never hidden for age: past fresh_until only its availability is
 	// unconfirmed, so the join carries every current profile.
 	query := `SELECT i.id,i.public_key,i.handle,
- coalesce((SELECT min(t) FROM (SELECT min(e.created_at) AS t FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT min(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS created,
- coalesce((SELECT max(t) FROM (SELECT max(e.created_at) AS t FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT max(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS seen,
- (SELECT count(*) FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0),i.successor,
+ coalesce((SELECT min(t) FROM (SELECT min(e.created_at) AS t FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT min(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS created,
+ coalesce((SELECT max(t) FROM (SELECT max(e.created_at) AS t FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT max(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS seen,
+ (SELECT count(*) FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0),i.successor,
  p.description,p.capabilities,p.availability,p.author,p.public_key,p.signature,p.payload,p.published_at,p.expires_at
  FROM identities i LEFT JOIN peer_cards p ON p.account=i.account AND i.successor=''
  WHERE ` + where
 	if c.Operation == "agent.get" {
+		query += " ORDER BY i.id LIMIT ?"
+	} else if hot {
 		query += " ORDER BY i.id LIMIT ?"
 	} else {
 		// Keyset over the public timestamp, newest first, fingerprint as the
@@ -194,7 +235,11 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		query = "SELECT * FROM (" + query + ") WHERE (?='' OR " + sortKey + "<? OR (" + sortKey + "=? AND id<?)) ORDER BY " + sortKey + " DESC, id DESC LIMIT ?"
 		args = append(args, cursor.Page, cursor.After, cursor.After, cursor.Page)
 	}
-	args = append(args, limit+1)
+	if hot {
+		args = append(args, len(hotOrder))
+	} else {
+		args = append(args, limit+1)
+	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return Result{}, agentReadError(err)
@@ -246,6 +291,13 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		agents[0].PersonalRoom = PersonalRoom(account)
 		return Result{Agent: &agents[0]}, nil
 	}
+	if hot {
+		sort.SliceStable(agents, func(i, j int) bool { return hotOrder[agents[i].ID] < hotOrder[agents[j].ID] })
+		s.rankMu.Lock()
+		s.hotAgentsCached, s.hotAgentsAt = agents, s.now()
+		s.rankMu.Unlock()
+		return s.hotAgentPage(ctx, tx, agents, limit)
+	}
 	result := Result{Agents: agents, Data: map[string]any{"has_more": len(agents) > limit}}
 	if len(agents) > limit {
 		result.Agents = agents[:limit]
@@ -264,6 +316,26 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, agentReadError(err)
 	}
 	return result, nil
+}
+
+// hotAgentPage is the first limit agents of a hot ranking (never modified:
+// the page gets copies), with honors and links. It is one page: no cursor.
+func (s *Store) hotAgentPage(ctx context.Context, tx *sql.Tx, ranked []Agent, limit int) (Result, error) {
+	page := append([]Agent(nil), ranked[:min(len(ranked), limit)]...)
+	if err := attachHonors(ctx, tx, page); err != nil {
+		return Result{}, err
+	}
+	if err := s.attachIdentityLinks(ctx, tx, page); err != nil {
+		return Result{}, agentReadError(err)
+	}
+	return Result{Agents: page, Data: map[string]any{"has_more": false, "sort": "hot"}}, nil
+}
+
+// dropHotAgents forgets the shared hot agent page.
+func (s *Store) dropHotAgents() {
+	s.rankMu.Lock()
+	s.hotAgentsCached = nil
+	s.rankMu.Unlock()
 }
 
 func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
@@ -385,12 +457,46 @@ const (
 	RoomDirectoryTTL  = 30 * time.Second
 )
 
-// RoomHeat is (posts in the window + 1) / (hours since the last post + 2)^1.5.
-// With HEAT_AUTHORS it is called with distinct signed authors and the hours
-// since the last signed post instead.
-func RoomHeat(recentPosts, idleSeconds int64) float64 {
-	hours := math.Max(float64(idleSeconds), 0) / 3600
-	return float64(recentPosts+1) / math.Pow(hours+2, 1.5)
+// RoomHeat is (distinct authors in the window + 1) times (0.5 + the mean
+// quality of the window's scored posts), over (hours since the last post +
+// 2)^1.5 (ranking.go's decay). A room nobody scored counts quality as neutral
+// (0.5), so its factor is 1; a room of filler sinks to half and one of useful
+// posts rises by half. With HEAT_AUTHORS the authors are signed ones and the
+// hours count from the last signed post.
+func RoomHeat(authors int64, quality *float64, idleSeconds int64) float64 {
+	return Ranking.Decay(float64(authors+1)*(0.5+Ranking.quality(quality)), idleSeconds, 1.5)
+}
+
+// roomHeatRows bounds the posts one room's heat reads: its newest visible
+// posts of the window.
+const roomHeatRows = 500
+
+// parseHeatInputs reads readRooms' heat column: "authors quality signed_at",
+// "-" for a missing value.
+func parseHeatInputs(v string) (authors int64, quality *float64, signedAt *int64) {
+	f := strings.Fields(v)
+	if len(f) != 3 {
+		return 0, nil, nil
+	}
+	authors, _ = strconv.ParseInt(f[0], 10, 64)
+	if q, err := strconv.ParseFloat(f[1], 64); err == nil {
+		quality = &q
+	}
+	if at, err := strconv.ParseInt(f[2], 10, 64); err == nil {
+		signedAt = &at
+	}
+	return authors, quality, signedAt
+}
+
+// windowStart is the first sequence of a window that began at t (see
+// seqAtOrBefore), so a window's read is an index range, not a scan.
+func (s *Store) windowStart(ctx context.Context, tx *sql.Tx, t int64) (int64, error) {
+	var top int64
+	if err := tx.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM events").Scan(&top); err != nil {
+		return 0, err
+	}
+	seq, err := seqAtOrBefore(ctx, tx, t-1, top)
+	return seq + 1, err
 }
 
 func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (Result, error) {
@@ -430,19 +536,28 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		where += " AND r.name NOT LIKE '@%'"
 		sqlLimit, order = RoomDirectoryScan, "5 DESC, r.name"
 	}
-	args = append([]any{now - RoomHeatWindow}, args...)
-	args = append(args, sqlLimit)
-	// Heat counts visible posts in the window and is fresh from the latest post.
-	// With HEAT_AUTHORS (RFC0012 §6.3) it counts distinct signed accounts with a
-	// visible post in the window and is fresh from the latest visible signed
-	// post, so an anonymous flood neither raises a room nor keeps it fresh.
-	recentSQL, idleSQL := `(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0 AND e.created_at>=?)`, ""
-	if s.config.Features.HeatAuthors {
-		recentSQL = `(SELECT count(DISTINCT e.account) FROM events e WHERE e.room=r.name AND e.hidden=0 AND e.public_key<>'' AND e.created_at>=?)`
-		idleSQL = `,coalesce((SELECT max(e.created_at) FROM events e WHERE e.room=r.name AND e.hidden=0 AND e.public_key<>''),r.created_at)`
+	// Heat reads each room's window in one bounded pass: its newest
+	// roomHeatRows visible posts since the window began (events_room_seq,
+	// from the window's first sequence), for the distinct accounts, those
+	// posts' mean quality score and the latest signed post. Many voices beat
+	// one loud one. With HEAT_AUTHORS (RFC0012 §6.3) it counts distinct signed
+	// accounts only and is fresh from the latest visible signed post of that
+	// pass (else the room's creation), so an anonymous flood neither raises a
+	// room nor keeps it fresh.
+	windowSeq, err := s.windowStart(ctx, tx, now-RoomHeatWindow)
+	if err != nil {
+		return Result{}, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT r.name,r.visibility,r.owner,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0),coalesce((SELECT max(e.created_at) FROM events e WHERE e.room=r.name),r.created_at),
- p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via,`+recentSQL+idleSQL+` FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
+	authors := "count(DISTINCT w.account)"
+	if s.config.Features.HeatAuthors {
+		authors = "count(DISTINCT CASE WHEN w.public_key<>'' THEN w.account END)"
+	}
+	heatSQL := `(SELECT ` + authors + `||' '||ifnull(avg(q.quality),'-')||' '||ifnull(max(CASE WHEN w.public_key<>'' THEN w.created_at END),'-')
+ FROM (SELECT e.id,e.account,e.public_key,e.created_at FROM events e WHERE e.room=r.name AND e.seq>=? AND e.hidden=0 ORDER BY e.seq DESC LIMIT ?) w LEFT JOIN event_quality q ON q.event_id=w.id)`
+	args = append([]any{windowSeq, roomHeatRows}, args...)
+	args = append(args, sqlLimit)
+	rows, err := tx.QueryContext(ctx, `SELECT r.name,r.visibility,r.owner,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0),coalesce((SELECT e.created_at FROM events e WHERE e.room=r.name ORDER BY e.seq DESC LIMIT 1),r.created_at),
+ p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via,coalesce(p.front_page,''),`+heatSQL+`,r.created_at FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
 	if err != nil {
 		return Result{}, err
 	}
@@ -452,25 +567,28 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		var r Room
 		var write, reply, rules, writeVia sql.NullString
 		var updated sql.NullInt64
-		var recent, fresh int64
-		dest := []any{&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia, &recent}
-		if idleSQL != "" {
-			dest = append(dest, &fresh)
-		}
-		if err = rows.Scan(dest...); err != nil {
+		var heatInputs string
+		var front string
+		var created int64
+		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia, &front, &heatInputs, &created); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
-		if idleSQL == "" {
-			fresh = r.UpdatedAt
+		recent, quality, signedAt := parseHeatInputs(heatInputs)
+		fresh := r.UpdatedAt
+		if s.config.Features.HeatAuthors {
+			fresh = created
+			if signedAt != nil {
+				fresh = *signedAt
+			}
 		}
 		policy := defaultPolicy(r.Name)
 		if write.Valid {
-			policy = RoomPolicy{Write: write.String, Reply: reply.String, Rules: rules.String, UpdatedAt: updated.Int64, WriteVia: decodeWriteVia(writeVia.String)}
+			policy = RoomPolicy{Write: write.String, Reply: reply.String, Rules: rules.String, UpdatedAt: updated.Int64, WriteVia: decodeWriteVia(writeVia.String), FrontPage: frontPage(r.Name, front), frontPage: front}
 		}
 		r.Policy = &policy
 		_, r.Personal = PersonalOwner(r.Name)
-		heat[r.Name] = RoomHeat(recent, now-fresh)
+		heat[r.Name] = RoomHeat(recent, quality, now-fresh)
 		rooms = append(rooms, r)
 	}
 	err = rows.Err()

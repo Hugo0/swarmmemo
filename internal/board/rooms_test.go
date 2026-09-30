@@ -558,7 +558,11 @@ func TestRoomDirectoryOrdersByHeat(t *testing.T) {
 	if got := run(t, s, Command{Operation: "rooms.list", Limit: 1}).Rooms; len(got) != 1 || got[0].Name != "zebra" {
 		t.Fatalf("limit 1: %+v", got)
 	}
-	if h := RoomHeat(0, 0); h <= RoomHeat(0, 3600) || RoomHeat(5, 3600) <= RoomHeat(0, 3600) {
-		t.Fatal("heat should fall with idle time and rise with recent posts")
+	good, filler := 0.9, 0.1
+	if h := RoomHeat(0, nil, 0); h <= RoomHeat(0, nil, 3600) || RoomHeat(5, nil, 3600) <= RoomHeat(0, nil, 3600) {
+		t.Fatal("heat should fall with idle time and rise with recent authors")
+	}
+	if !(RoomHeat(3, &good, 3600) > RoomHeat(3, nil, 3600) && RoomHeat(3, nil, 3600) > RoomHeat(3, &filler, 3600)) {
+		t.Fatal("heat should rise with the room's post quality, neutral when unscored")
 	}
 }

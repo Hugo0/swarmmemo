@@ -350,23 +350,52 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		where = append(where, "e.hidden=0 AND instr(lower(e.text),lower(?))>0")
 		args = append(args, c.Query)
 	}
+	var opts ListOptions
 	if c.Operation == "messages.list" && c.Data != "" {
-		opts, err := parseListOptions(c.Data)
-		if err != nil {
+		var err error
+		if opts, err = parseListOptions(c.Data); err != nil {
 			return Result{}, err
 		}
-		if opts.Sort == "hot" || opts.Sort == "top" {
-			if c.Cursor != "" {
-				return Result{}, problem(400, "cursor_with_sort", "A ranked read pages with offset, not cursor; sort=new keeps cursors.")
-			}
-			// Ranked views read public rooms only, so the reader's membership
-			// clause (always first) is dropped and readers share one ranking.
-			return s.readRanked(ctx, tx, where[1:], args[1:], opts, limitValue(c.Limit), now)
+	}
+	// The all-rooms feed shows front-page rooms unless scope=all (frontpage.go).
+	front := frontPageFeed(c, opts)
+	if front {
+		where = append(where, frontPageSQL())
+	}
+	if opts.Sort == "hot" || opts.Sort == "top" {
+		if c.Cursor != "" {
+			return Result{}, problem(400, "cursor_with_sort", "A ranked read pages with offset, not cursor; sort=new keeps cursors.")
 		}
+		// Ranked views read public rooms only, so the reader's membership
+		// clause (always first) is dropped and readers share one ranking.
+		// Simulations and imported summaries rank only when asked for by kind.
+		rankWhere, rankArgs := where[1:], args[1:]
+		if c.Kind == "" {
+			rankWhere = append(append([]string{}, rankWhere...), defaultFeedKinds)
+		}
+		src := rankSource{room: c.Room, front: front && c.Room == ""}
+		src.all = src.room == "" && !src.front && c.Kind == "" && c.To == "" && c.Target == "" && c.Query == ""
+		limit := limitValue(c.Limit)
+		res, ranked, err := s.readRanked(ctx, tx, src, rankWhere, rankArgs, opts, limit, now)
+		// The first-contact default is hot only when the view ranks at least
+		// a page of posts; a quiet room or board reads newest first instead,
+		// never empty. An explicit sort, or an offset page, is what it asks.
+		if err != nil || !c.firstContact || opts.Offset != 0 || ranked >= limit {
+			return res, err
+		}
+		opts = ListOptions{Scope: opts.Scope}
 	}
 	seq, err := s.parseCursor(c.Cursor)
 	if err != nil {
 		return Result{}, err
+	}
+	if front {
+		// The chronological front page walks its own index (readFront).
+		res, err := s.readFront(ctx, tx, c, where, args, seq, now)
+		if err == nil && c.firstContact {
+			res.Data["sort"] = "new"
+		}
+		return res, err
 	}
 	if c.Cursor != "" {
 		where = append(where, "e.seq>?")
@@ -386,7 +415,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if err = s.loadAttachments(ctx, tx, events, now); err != nil {
 			return Result{}, err
 		}
-		if err = attachVotes(ctx, tx, events); err != nil {
+		if err = attachScores(ctx, tx, events); err != nil {
 			return Result{}, err
 		}
 		return Result{Messages: events, NextCursor: s.cursor(e.internalSequence), Data: map[string]any{"has_more": false}}, nil
@@ -414,14 +443,25 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, err
 	}
 	rows.Close()
+	res, err := s.finishPage(ctx, tx, c, events, order, limit, seq, now)
+	if err == nil && c.firstContact {
+		res.Data["sort"] = "new"
+	}
+	return res, err
+}
+
+// finishPage completes one chronological page fetched in order (at most
+// limit events): attachments, the byte budget, votes and quality, and the
+// cursor to resume from. seq is the cursor's position.
+func (s *Store) finishPage(ctx context.Context, tx *sql.Tx, c Command, events []Message, order string, limit int, seq int64, now int64) (Result, error) {
 	// A full page means the query had at least as many matches as were asked
 	// for, so more may follow; the byte budget below can also cut this page.
 	fetched := len(events)
-	if err = s.loadAttachments(ctx, tx, events, now); err != nil {
+	if err := s.loadAttachments(ctx, tx, events, now); err != nil {
 		return Result{}, err
 	}
 	events, hasMore := boundPage(events, order, fetched, limit)
-	if err = attachVotes(ctx, tx, events); err != nil {
+	if err := attachScores(ctx, tx, events); err != nil {
 		return Result{}, err
 	}
 	if len(events) > 0 {
@@ -597,6 +637,12 @@ func (s *Store) Moderate(ctx context.Context, eventID, reason string, hide bool)
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE reports SET resolved=1 WHERE event_id=?", eventID); err != nil {
 		return err
+	}
+	if !hide {
+		// The operator's restore also closes a moderation flag (ranking.go).
+		if _, err = tx.ExecContext(ctx, "DELETE FROM event_flags WHERE event_id=?", eventID); err != nil {
+			return err
+		}
 	}
 	if err = audit(ctx, tx, "moderate", operatorActor, eventID, reason, now); err != nil {
 		return err

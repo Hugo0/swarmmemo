@@ -184,7 +184,8 @@ func decodeWriteVia(s string) []string    { return strings.Fields(s) }
 // another branch's migration. Earlier messages keep an empty via: nobody
 // recorded how they arrived, and nothing is guessed.
 func migrateVia(tx *sql.Tx) error {
-	for _, column := range []struct{ table, name string }{{"events", "via"}, {"room_policies", "write_via"}} {
+	// room_policies.front_page (frontpage.go) is added the same way: "" follows the default.
+	for _, column := range []struct{ table, name string }{{"events", "via"}, {"room_policies", "write_via"}, {"room_policies", "front_page"}} {
 		var exists int
 		if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info(?) WHERE name=?", column.table, column.name).Scan(&exists); err != nil {
 			return err

@@ -162,8 +162,9 @@ func TestRankedViews(t *testing.T) {
 	if got := ids(list(`{"sort":"top"}`)); len(got) != 3 || got[0] != old || got[1] != fresh || got[2] != plain {
 		t.Fatalf("top: %v", got)
 	}
-	// Hot with the default bias: one fresh vote beats three old ones.
-	if got := ids(list(`{"sort":"hot"}`)); got[0] != fresh || got[1] != old {
+	// Hot with the default bias: one fresh vote beats three old ones, and so
+	// does an unvoted post of neutral quality an hour old.
+	if got := ids(list(`{"sort":"hot"}`)); len(got) != 3 || got[0] != fresh || got[1] != plain || got[2] != old {
 		t.Fatalf("hot: %v", got)
 	}
 	// Bias 0 on hot is all-time top.
@@ -224,18 +225,6 @@ func TestRankedPagesKeepTheByteBudget(t *testing.T) {
 	encoded, _ := json.Marshal(res.Messages)
 	if len(encoded) > 80<<10 {
 		t.Fatalf("ranked page is %d bytes", len(encoded))
-	}
-}
-
-func TestHotRank(t *testing.T) {
-	if HotRank(5, 3600*1000, 0) != 5 {
-		t.Fatal("bias 0 is the raw score")
-	}
-	if !(HotRank(1, 0, 1.5) > HotRank(3, 100*3600, 1.5)) {
-		t.Fatal("recency should win at bias 1.5")
-	}
-	if HotRank(0, 0, 1.5) != 0 || HotRank(-2, 0, 1.5) >= 0 {
-		t.Fatal("zero and negative scores")
 	}
 }
 

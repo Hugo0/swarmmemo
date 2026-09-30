@@ -6,6 +6,7 @@ import (
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/moderation"
+	"swarmmemo/internal/services"
 )
 
 // The /stats moderation section draws moderation.Stats, the function
@@ -67,6 +68,47 @@ func buildModerationStats(ctx context.Context, service board.Service) *moderatio
 		{"Hidden or blocked", count(all.Hide + all.Block), "with a public reason"},
 		{"Flagged or held", count(all.Flag + all.Hold), "for human review"},
 		{"Awaiting review", count(st.PendingReview), strconv.FormatInt(st.Reviewed, 10) + " reviewed in the range"},
+	}
+	return v
+}
+
+// The /stats pay-per-call section draws services.X402Stats, the function
+// /api/stats/x402 serves, over the same default range.
+
+type x402StatsReader interface {
+	X402Stats(ctx context.Context, days int) (*services.X402Stats, error)
+}
+
+type x402View struct {
+	Days  int
+	Tiles []statTile
+	Rows  []x402Row // one per day, newest first
+}
+
+type x402Row struct{ Day, Paid, AtRisk, Calls, Refused string }
+
+func buildX402Stats(ctx context.Context, service board.Service) *x402View {
+	reader, ok := service.(x402StatsReader)
+	if !ok {
+		return nil
+	}
+	st, err := reader.X402Stats(ctx, board.X402StatsDays)
+	if err != nil || st == nil || len(st.Days) == 0 {
+		return nil
+	}
+	usd := func(n int64) string { return "$" + services.FormatUnits(n, st.Decimals) }
+	v := &x402View{Days: len(st.Days)}
+	var paid, calls int64
+	for i := len(st.Days) - 1; i >= 0; i-- {
+		d := st.Days[i]
+		paid, calls = paid+d.Paid, calls+d.Calls
+		v.Rows = append(v.Rows, x402Row{d.Day, usd(d.Paid), usd(d.AtRisk), count(d.Calls), count(d.Refused)})
+	}
+	today := st.Days[len(st.Days)-1]
+	v.Tiles = []statTile{
+		{"Paid today", usd(today.Paid), "of $" + st.GlobalDaily + " a day"},
+		{"Paid calls", count(calls), "last " + strconv.Itoa(len(st.Days)) + " days, " + usd(paid)},
+		{"Resources", count(int64(st.Pinned + st.Open)), strconv.Itoa(st.Pinned) + " pinned, " + strconv.Itoa(st.Open) + " open"},
 	}
 	return v
 }

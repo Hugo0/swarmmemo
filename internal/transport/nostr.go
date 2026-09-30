@@ -333,13 +333,13 @@ func (b *nostrBridge) watch(ctx context.Context) {
 		more := false
 		b.step(func() {
 			if cursor == "" {
-				res, err := b.read(ctx, board.Command{Operation: "messages.list", Limit: 1})
+				res, err := b.read(ctx, board.Command{Operation: "messages.list", Limit: 1, Data: board.AllRooms})
 				if err == nil {
 					cursor = res.NextCursor
 				}
 				return
 			}
-			res, err := b.read(ctx, board.Command{Operation: "messages.list", Cursor: cursor, Limit: 50})
+			res, err := b.read(ctx, board.Command{Operation: "messages.list", Cursor: cursor, Limit: 50, Data: board.AllRooms})
 			var be *board.Error
 			if errors.As(err, &be) && (be.Status == 400 || be.Status == 409) {
 				cursor = "" // a cursor from before a restore: start again from now

@@ -196,7 +196,7 @@ func TestSchema11PostDataMigration(t *testing.T) {
 	}
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
 	legacy := run(t, s, Command{Operation: "post", Text: "from schema 10"}).Receipt
-	if _, err = s.db.Exec(`DROP INDEX events_supersedes; DROP INDEX events_origin; DROP INDEX events_articles;
+	if _, err = s.db.Exec(`DROP INDEX events_supersedes; DROP INDEX events_origin; DROP INDEX events_articles; DROP INDEX events_front_top1; DROP INDEX events_top1;
  ALTER TABLE events DROP COLUMN format; ALTER TABLE events DROP COLUMN supersedes; ALTER TABLE events DROP COLUMN origin;
  PRAGMA user_version=10`); err != nil {
 		t.Fatal(err)

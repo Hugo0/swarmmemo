@@ -237,7 +237,7 @@ class FullProcessTests(unittest.TestCase):
             rejected = await self.call(client, "deliver_intent", self.target(denied))
             self.assertEqual(rejected["item"]["state"], "blocked")
             self.assertEqual(rejected["item"]["last_error"], "delegation_inactive")
-            events = self.get("/api/messages?room=lab")["messages"]
+            events = self.get("/api/messages?room=lab&sort=new")["messages"]
             self.assertEqual(len(events), 2)
             self.assertFalse(any(event["text"] == "Must not be accepted" for event in events))
             self.assertEqual(len(self.get("/api/thread/" + self.work_id)["messages"]), 2)

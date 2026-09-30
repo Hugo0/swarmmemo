@@ -52,6 +52,8 @@ type fakeX402 struct {
 	payHdrs  int
 	lastQ    string
 	lastBody string
+	// extra answers other paths: a fake Bazaar, a fake bundler.
+	extra map[string]http.Handler
 }
 
 func (f *fakeX402) requirement() map[string]any {
@@ -67,6 +69,10 @@ func (f *fakeX402) requirement() map[string]any {
 }
 
 func (f *fakeX402) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h, ok := f.extra[r.URL.Path]; ok {
+		h.ServeHTTP(w, r)
+		return
+	}
 	f.mu.Lock()
 	f.lastQ = r.URL.RawQuery
 	if r.Body != nil {
@@ -239,6 +245,14 @@ func newX402Harness(t *testing.T, fake *fakeX402, caps string) *x402Harness {
 
 func newX402HarnessWith(t *testing.T, fake *fakeX402, caps, resources string) *x402Harness {
 	t.Helper()
+	return newX402HarnessCfg(t, fake, testX402Config(t, caps, resources))
+}
+
+// newX402HarnessCfg builds the harness on cfg. Every upstream is the one
+// fake at example.com (the host httptest's certificate names); other fakes
+// answer paths of it (fakeX402.extra).
+func newX402HarnessCfg(t *testing.T, fake *fakeX402, cfg *X402Config) *x402Harness {
+	t.Helper()
 	if fake.nonces == nil {
 		fake.nonces = map[string]int{}
 	}
@@ -248,7 +262,7 @@ func newX402HarnessWith(t *testing.T, fake *fakeX402, caps, resources string) *x
 	h := &x402Harness{t: t, fake: fake, now: 1_700_000_000}
 	h.srv = httptest.NewTLSServer(fake)
 	t.Cleanup(h.srv.Close)
-	h.cfg = testX402Config(t, caps, resources)
+	h.cfg = cfg
 	h.cfg.rootCAs = h.srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "x.db"))
 	if err != nil {

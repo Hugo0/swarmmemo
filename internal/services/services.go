@@ -15,7 +15,10 @@
 // only to the fixed hosts of its compiled-in catalogue; runs, only to the
 // loader URL its operator configured, all three through internal/safenet
 // (inference.go, publicdata.go, runs.go, runsloader.go); and x402, only to
-// operator-allowlisted URLs through Deps.Dial (x402.go).
+// catalogued resources (the operator's allowlist, and the open catalogue
+// imported from its configured discovery URLs under fixed guardrails) and
+// its bundlers' fixed endpoints, through Deps.Dial (x402.go,
+// x402_catalogue.go, bundler.go).
 package services
 
 import (
@@ -133,6 +136,11 @@ type Call struct {
 	// Prices is the whole price table under PricesVersion (a reader that
 	// quotes its provider's write methods uses it).
 	Prices Prices
+	// Quoted is the call's quote (Quote.Max), set once quoted: what Run may
+	// use at most, so a provider whose inputs can change between the quote
+	// and the run (x402's catalogue) refuses rather than exceed it. Zero
+	// before the quote.
+	Quoted int64
 }
 
 type Quote struct {

@@ -46,6 +46,8 @@ type fakeJev struct {
 	requests atomic.Int64
 	tokens   int64
 	lastBody map[string]any
+	lastAsks map[string]bool // the question keys of the last request
+	raw      map[string]any  // answers sent as they are (nil: leave the question out)
 }
 
 func newFakeJev(t *testing.T) *fakeJev {
@@ -69,12 +71,22 @@ func newFakeJev(t *testing.T) *fakeJev {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.lastBody = req.State
+		f.lastAsks = map[string]bool{}
+		for k := range req.Questions {
+			f.lastAsks[k] = true
+		}
 		if f.status != 0 {
 			w.WriteHeader(f.status)
 			return
 		}
 		answers := map[string]any{}
 		for k := range req.Questions {
+			if v, ok := f.raw[k]; ok {
+				if v != nil {
+					answers[k] = v
+				}
+				continue
+			}
 			p, ok := f.p[k]
 			if !ok {
 				p = 0.01
@@ -91,6 +103,16 @@ func (f *fakeJev) set(p map[string]float64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.p = p
+}
+
+// answerRaw sends answer as it is for question k (nil leaves k out).
+func (f *fakeJev) answerRaw(k string, answer any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.raw == nil {
+		f.raw = map[string]any{}
+	}
+	f.raw[k] = answer
 }
 
 func (f *fakeJev) fail(status int) {

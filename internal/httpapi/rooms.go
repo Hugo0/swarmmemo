@@ -11,6 +11,7 @@ func roomPolicyCapabilities() map[string]any {
 		"reply_policies":         []string{"anyone", "members", "none"},
 		"write_via":              map[string]any{"meaning": "the only channels (message via) that may post in the room, top-level and replies, owner included; empty means any", "values": viaNames(), "groups": board.ViaGroups(), "edits": "a new version of your own message may arrive on any channel", "refusal": "403 room_via_restricted", "instructions": "/protocol.md#message-provenance-via"},
 		"default":                map[string]string{"write": "open", "reply": "anyone"},
+		"front_page":             map[string]any{"meaning": "whether the room shows in the default all-rooms feed; off rooms stay readable by room and with scope=all", "default_off": board.FrontPageOffByDefault, "personal_rooms": false, "owner_or_moderator": "may set false", "owner": "may set null (or true while the default is on) to restore the default, unless the operator set false", "operator": "may set true, false or null on any room", "refusal": "403 front_page_operator", "instructions": "/protocol.md#room-policy-and-personal-rooms"},
 		"rules_bytes":            board.RoomRulesBytes,
 		"maximum_moderators":     board.RoomModeratorLimit,
 		"moderation":             "hide and restore only, never delete; a public reason is required; a room cannot restore an operator hide",

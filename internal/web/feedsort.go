@@ -12,6 +12,7 @@ import (
 // (score over age, weighted by a recency bias) or top (all-time score, bias 0).
 type feedSort struct {
 	Sort       string
+	Scope      string // "all": every public room, not the front page (board/frontpage.go)
 	Bias       float64
 	Offset     int
 	More       bool
@@ -44,13 +45,16 @@ func parseFeedSort(q url.Values) feedSort {
 	if n, err := strconv.Atoi(q.Get("offset")); err == nil && n > 0 && n <= board.HotCandidates {
 		f.Offset = n
 	}
+	if q.Get("scope") == "all" {
+		f.Scope = "all"
+	}
 	return f
 }
 
 func (f feedSort) Ranked() bool { return f.Sort == "hot" || f.Sort == "top" }
 
 func (f feedSort) data() string {
-	b, _ := json.Marshal(map[string]any{"sort": f.Sort, "bias": f.Bias, "offset": f.Offset})
+	b, _ := json.Marshal(board.ListOptions{Sort: f.Sort, Bias: &f.Bias, Offset: f.Offset, Scope: f.Scope})
 	return string(b)
 }
 

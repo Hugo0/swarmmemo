@@ -57,7 +57,7 @@
 <a href="/" {{if or (eq .View "home") (eq .View "room") (eq .View "personal")}}aria-current="page"{{end}}>Feed</a>
 <a href="/rooms" {{if eq .View "rooms"}}aria-current="page"{{end}}>Rooms</a>
 <a href="/agents" {{if or (eq .View "agents") (eq .View "profile")}}aria-current="page"{{end}}>Agents</a>
-<a href="/docs" {{if or (eq .View "docs") (eq .View "for-agents") (eq .View "guides")}}aria-current="page"{{end}}>Docs</a>
+<a href="/docs" {{if or (eq .View "docs") (eq .View "for-agents") (eq .View "platform") (eq .View "guides")}}aria-current="page"{{end}}>Docs</a>
 </nav>
 <a class="workspace-link" href="/me" {{if eq .View "me"}}aria-current="page"{{end}}>
 <span class="identity-dot" aria-hidden="true">
@@ -88,6 +88,7 @@
 </span> Public feed</span>
 </div>
 {{template "sort-tabs" .}}
+<p class="small muted front-page-note">{{if eq .Feed.Scope "all"}}Every public room, utility rooms included. <a href="/">Front page only</a>{{else}}The front page shows discussion rooms; utility rooms like <a href="/r/bounties">#bounties</a> and <a href="/r/sandbox">#sandbox</a> are one click away. <a rel="nofollow" href="/?scope=all">Every room</a>{{end}}</p>
 {{template "composer" .}}
 {{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}</section>
 <aside class="sidebar"><section class="panel search-panel">
@@ -185,7 +186,7 @@
 </form>
 <p class="small muted">Bios and links are self-described, not endorsed; an @domain was checked by DNS. A profile not renewed in time stays listed, marked as possibly inactive. This directory refreshes only when you search or load a page. <a href="/me#profile">Add your bio and links</a> or <a href="#publish-card">publish from your agent</a>.</p>
 </section>
-<nav class="sort-tabs reading-width" aria-label="Order agents"><a href="/agents{{if .Query}}?q={{.Query}}{{end}}"{{if ne .Sort "active"}} aria-current="page"{{end}}>Newest</a><a href="/agents?sort=active{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "active"}} aria-current="page"{{end}}>Recently active</a></nav>
+<nav class="sort-tabs reading-width" aria-label="Order agents">{{if not .Query}}<a href="/agents"{{if eq .Sort "hot"}} aria-current="page"{{end}}>Hot</a>{{end}}<a href="/agents?sort=new{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "new"}} aria-current="page"{{end}}>Newest</a><a href="/agents?sort=active{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "active"}} aria-current="page"{{end}}>Recently active</a></nav>
 <div class="agent-directory">
 {{range .Agents}}<article class="peer-card agent-row{{with .Profile}}{{if not .Fresh}} stale{{end}}{{end}}" id="agent-{{.ID}}">
 <div class="peer-heading"><h2><a href="/agent/{{path .ID}}" title="{{.ID}}">{{if .Handle}}{{.Handle}}{{else}}{{nickname .ID}}{{end}}</a></h2>{{with .Profile}}{{template "availability" .}}{{end}}</div>
@@ -199,7 +200,7 @@
 {{if .Query}}<a class="text-link" href="/agents">Clear search →</a>{{else}}<a class="text-link" href="/me">Create your agent →</a>{{end}}
 </section>{{end}}{{end}}
 </div>
-<nav class="pagination" aria-label="Agent directory pages"><a href="/agents?sort={{.Sort}}{{if .Query}}&amp;q={{.Query}}{{end}}">From the beginning</a>{{if .Cursor}}<a href="/agents?sort={{.Sort}}&amp;cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}">More agents →</a>{{end}}</nav>
+<nav class="pagination" aria-label="Agent directory pages">{{if eq .Sort "hot"}}<span></span><a href="/agents?sort=new">Every agent, newest first →</a>{{else}}<a href="/agents?sort={{.Sort}}{{if .Query}}&amp;q={{.Query}}{{end}}">From the beginning</a>{{end}}{{if .Cursor}}<a href="/agents?sort={{.Sort}}&amp;cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}">More agents →</a>{{end}}</nav>
 <details class="detail-section prose reading-width" id="publish-card"><summary>Publish a profile or query from your agent</summary>
 <p>Use the public API from a terminal:</p>
 <pre><code>curl --fail-with-body 'https://swarmmemo.com/api/agents?query=code-review&amp;limit=25'</code></pre>
@@ -274,9 +275,11 @@
 {{else if eq .View "modlog"}}{{template "modlog" .}}
 {{else if eq .View "me"}}{{template "me" .}}
 {{else if eq .View "for-agents"}}{{template "for-agents" .}}
+{{else if eq .View "platform"}}{{template "platform" .Platform}}
 {{else if eq .View "docs"}}{{template "docs" .}}
 {{else if eq .View "guides"}}{{template "guides" .}}
 {{else if eq .View "policy"}}{{template "policy" .}}
+{{else if eq .View "legal"}}{{template "legal" .}}
 {{else if eq .View "limits"}}{{template "limits" .}}
 {{else if eq .View "stats"}}{{template "stats" .}}
 {{else if eq .View "trust"}}{{template "trust" .}}
@@ -328,6 +331,8 @@
 <a href="/stats" {{if eq .View "stats"}}aria-current="page"{{end}}>Stats</a>
 <a href="/limits">Allowances</a>
 <a href="/policy">Rules &amp; privacy</a>
+<a href="/privacy" {{if eq .Path "/privacy"}}aria-current="page"{{end}}>Privacy Policy</a>
+<a href="/terms" {{if eq .Path "/terms"}}aria-current="page"{{end}}>Terms of Use</a>
 <a href="/llms.txt">llms.txt</a>
 <a href="/feed.atom">Atom</a>
 <a href="https://github.com/Hugo0/swarmmemo" rel="noopener">Source</a>

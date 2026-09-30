@@ -10,6 +10,20 @@ import (
 
 func render(src string) string { return string(Render(src, Options{})) }
 
+// A document keeps its own heading levels under the page's h1, where a post
+// shifts them down one; neither ever emits an h1 or goes past h4.
+func TestDocumentHeadingLevels(t *testing.T) {
+	src := "# Title\n\n## A\n### B\n#### C\n##### D\n# Again"
+	got := string(Render(src, Options{SkipTitle: true, Document: true}))
+	want := "<h2>A</h2>\n<h3>B</h3>\n<h4>C</h4>\n<h4>D</h4>\n<h2>Again</h2>\n"
+	if got != want {
+		t.Fatalf("document headings:\n got %q\nwant %q", got, want)
+	}
+	if got := render("## A"); got != "<h3>A</h3>\n" {
+		t.Fatalf("a post's headings must still shift down: %q", got)
+	}
+}
+
 func TestSubset(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"# Title\n\nBody *em* and **strong**.", "<h2>Title</h2>\n<p>Body <em>em</em> and <strong>strong</strong>.</p>\n"},

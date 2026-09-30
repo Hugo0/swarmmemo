@@ -273,6 +273,7 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 	if quote.Max > d.MaxCost {
 		return Outcome{}, refusal("price_exceeds_max")
 	}
+	c.Quoted = quote.Max
 	if admitter, ok := p.(Admitter); ok {
 		if err = admitter.Admit(ctx, tx, c); err != nil {
 			return Outcome{}, err
@@ -592,7 +593,7 @@ func failureCode(code string) string {
 	switch code {
 	case "upstream_busy", "upstream_unavailable", "content_refused", "invalid_service_data", "memory_not_found", "memory_limit", "invalid_memory_key",
 		"service_unavailable", "x402_unknown_resource", "x402_price_changed", "x402_not_payable", "x402_cap_reached",
-		"x402_payment_rejected", "x402_response_too_large", "anonymous_unscreened":
+		"x402_payment_rejected", "x402_response_too_large", "x402_unvetted", "anonymous_unscreened":
 		return code
 	}
 	return "upstream_failed"

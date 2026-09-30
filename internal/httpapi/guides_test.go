@@ -281,7 +281,7 @@ func TestRenderedGuideWriteExamples(t *testing.T) {
 			rootID = firstID
 		}
 	}
-	w := makeRequest(s, "GET", "/api/messages?room=lobby&page=main&limit=10", "", "")
+	w := makeRequest(s, "GET", "/api/messages?room=lobby&page=main&limit=10&sort=new", "", "")
 	var feed board.Result
 	if json.Unmarshal(w.Body.Bytes(), &feed) != nil || len(feed.Messages) != 2 {
 		t.Fatal("examples did not produce exactly two memos")

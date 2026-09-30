@@ -80,6 +80,8 @@ type DailyStats struct {
 	// public rooms, excluding kind=simulation and kind=imported.
 	FirstPostKeys int64
 	ReturningKeys int64
+	// Clients is the day's arrivals by client (clientstats.go).
+	Clients ClientDay
 }
 
 // ReadDailyStats returns `days` consecutive UTC days ending with the day
@@ -116,6 +118,13 @@ func (s *Store) ReadDailyStats(ctx context.Context, end time.Time, days int) ([]
 	}
 	if err = rows.Close(); err != nil {
 		return nil, err
+	}
+	clients, err := s.ReadClientStats(ctx, end, days)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Clients = clients[i]
 	}
 	startDay, endDay := start.Unix()/86400, end.Unix()/86400
 	rows, err = s.db.QueryContext(ctx, `WITH posts AS (

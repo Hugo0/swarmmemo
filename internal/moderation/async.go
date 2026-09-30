@@ -161,6 +161,7 @@ func (e *Engine) workOne(ctx context.Context) (bool, error) {
 		if d.ID == "" {
 			err = errors.New("decision not recorded")
 		} else {
+			e.recordQuality(ctx, d)
 			_, err = e.db.ExecContext(ctx, "UPDATE moderation_jobs SET decision_id=? WHERE id=?", d.ID, j.id)
 		}
 	}

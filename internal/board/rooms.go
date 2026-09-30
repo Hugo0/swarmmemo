@@ -73,14 +73,17 @@ func PersonalOwner(room string) (string, bool) {
 	return room[1:], true
 }
 
-// RoomPolicy is who may start posts and who may reply in one room, and over
-// which channels (WriteVia, see Vias; empty means any).
+// RoomPolicy is who may start posts and who may reply in one room, over
+// which channels (WriteVia, see Vias; empty means any), and whether the room
+// shows in the default all-rooms feed (FrontPage, frontpage.go).
 type RoomPolicy struct {
 	Write     string   `json:"write"`
 	Reply     string   `json:"reply"`
 	Rules     string   `json:"rules,omitempty"`
 	WriteVia  []string `json:"write_via,omitempty"`
+	FrontPage bool     `json:"front_page"`
 	UpdatedAt int64    `json:"updated_at,omitempty"`
+	frontPage string   // stored: "", "on" or "off"
 }
 
 // ModerationEntry is one public, per-room governance record.
@@ -103,19 +106,20 @@ type ModerationEntry struct {
 
 func defaultPolicy(room string) RoomPolicy {
 	if personalRoomRE.MatchString(room) {
-		return RoomPolicy{Write: "owner", Reply: "anyone"}
+		return RoomPolicy{Write: "owner", Reply: "anyone", FrontPage: frontPageDefault(room)}
 	}
-	return RoomPolicy{Write: "open", Reply: "anyone"}
+	return RoomPolicy{Write: "open", Reply: "anyone", FrontPage: frontPageDefault(room)}
 }
 
 func loadPolicy(ctx context.Context, tx *sql.Tx, room string) (RoomPolicy, error) {
 	p := defaultPolicy(room)
 	var writeVia string
-	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via FROM room_policies WHERE room=?", room).Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia)
+	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via,front_page FROM room_policies WHERE room=?", room).Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia, &p.frontPage)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
 	p.WriteVia = decodeWriteVia(writeVia)
+	p.FrontPage = frontPage(room, p.frontPage)
 	return p, err
 }
 
@@ -285,12 +289,19 @@ func (s *Store) changeRoomGovernance(ctx context.Context, tx *sql.Tx, c Command,
 		}
 	}
 	if r.Owner == "" || r.Owner != a.account {
-		return Result{}, problem(403, "owner_required", "Only the room owner can change its policy, style, moderators or ownership.")
+		// A moderator may take the room off the front page, and nothing else.
+		role, err := roomRole(ctx, tx, r, a)
+		if err != nil {
+			return Result{}, err
+		}
+		if role != "moderator" || c.Operation != "room.policy.set" || !frontPageOptOut(c.Data) {
+			return Result{}, problem(403, "owner_required", "Only the room owner can change its policy, style, moderators or ownership; a moderator may set {\"front_page\":false}.")
+		}
 	}
 	if err = s.charge(ctx, tx, a, int64(256+len(c.Data)), now); err != nil {
 		return Result{}, err
 	}
-	entry, result, err := applyGovernance(ctx, tx, c, r, now)
+	entry, result, err := applyGovernance(ctx, tx, c, r, false, now)
 	if err != nil {
 		return Result{}, err
 	}
@@ -306,19 +317,20 @@ func (s *Store) changeRoomGovernance(ctx context.Context, tx *sql.Tx, c Command,
 	return result, nil
 }
 
-// applyGovernance is shared by the signed owner path and the operator CLI for
-// operator-owned rooms. It never checks authority; callers do.
-func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, now int64) (logEntry, Result, error) {
+// applyGovernance is shared by the signed owner path and the operator CLI.
+// It never checks who may act; callers do. operator is the operator's own
+// authority, the only one that may put a room on the front page.
+func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, operator bool, now int64) (logEntry, Result, error) {
 	switch c.Operation {
 	case "room.style.set", "room.style.clear":
 		return applyStyle(ctx, tx, c, r, now)
 	case "room.policy.set":
-		p, err := parsePolicy(ctx, tx, r.Name, c.Data)
+		p, err := parsePolicy(ctx, tx, r.Name, c.Data, operator)
 		if err != nil {
 			return logEntry{}, Result{}, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via) VALUES(?,?,?,?,?,?)
- ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at,write_via=excluded.write_via`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia)); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via,front_page) VALUES(?,?,?,?,?,?,?)
+ ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at,write_via=excluded.write_via,front_page=excluded.front_page`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia), p.frontPage); err != nil {
 			return logEntry{}, Result{}, err
 		}
 		p.UpdatedAt = now
@@ -380,21 +392,50 @@ func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, now int
 
 // parsePolicy reads room.policy.set data. Omitted fields keep their current
 // value, so an owner can change one setting without restating the others.
-func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string) (RoomPolicy, error) {
+// front_page is true, false or null (the default, frontpage.go). Without the
+// operator's authority: false takes the room off (unless the operator already
+// did); true or null put it back to its default, unless the operator took it
+// off; true on a room whose default is off needs the operator.
+func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bool) (RoomPolicy, error) {
 	var in struct {
-		Write    *string         `json:"write"`
-		Reply    *string         `json:"reply"`
-		Rules    *string         `json:"rules"`
-		WriteVia json.RawMessage `json:"write_via"`
+		Write     *string         `json:"write"`
+		Reply     *string         `json:"reply"`
+		Rules     *string         `json:"rules"`
+		WriteVia  json.RawMessage `json:"write_via"`
+		FrontPage json.RawMessage `json:"front_page"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader([]byte(data)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil) {
-		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via".`)
+	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil && in.FrontPage == nil) {
+		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via", "front_page".`)
 	}
 	p, err := loadPolicy(ctx, tx, room)
 	if err != nil {
 		return p, err
+	}
+	if in.FrontPage != nil {
+		operatorOff := p.frontPage == frontPageOperatorOff
+		switch v := string(bytes.TrimSpace(in.FrontPage)); {
+		case v == "false" && operator:
+			p.frontPage = frontPageOperatorOff
+		case v == "false":
+			if !operatorOff {
+				p.frontPage = frontPageOff
+			}
+		case v != "true" && v != "null":
+			return p, problem(400, "invalid_policy", "front_page must be true, false or null (the room's default).")
+		case operator && v == "true":
+			p.frontPage = frontPageOn
+		case operator:
+			p.frontPage = ""
+		case operatorOff:
+			return p, problem(403, "front_page_operator", "The operator took this room off the front page; only the operator puts it back.")
+		case v == "null" || frontPageDefault(room):
+			p.frontPage = ""
+		case !p.FrontPage:
+			return p, problem(403, "front_page_operator", "Only the operator puts a room on the front page; a room's owner or moderators may take it off, and its owner may set it back to the default with null.")
+		}
+		p.FrontPage = frontPage(room, p.frontPage)
 	}
 	if in.Write != nil {
 		p.Write = *in.Write
@@ -574,7 +615,9 @@ func roomDetails(ctx context.Context, tx *sql.Tx, r *Room) error {
 // OperatorRoom applies a governance command to an operator-owned room (one
 // with no owning key) on the operator's authority, from the local CLI. It is
 // never reachable through Execute. Keys own every other room, including all
-// personal rooms, and only their owners change them.
+// personal rooms, and only their owners change them, except that the operator
+// may set any room's front_page (frontpage.go): on, off (which the owner
+// cannot reverse) or back to the default.
 func (s *Store) OperatorRoom(ctx context.Context, c Command) (Result, error) {
 	switch c.Operation {
 	case "room.policy.set", "room.moderator.add", "room.moderator.remove", "room.owner.transfer", "room.style.set", "room.style.clear":
@@ -594,11 +637,11 @@ func (s *Store) OperatorRoom(ctx context.Context, c Command) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if r.Owner != "" {
-		return Result{}, problem(403, "owner_required", "This room is owned by a key; only its owner changes it.")
+	if r.Owner != "" && (c.Operation != "room.policy.set" || !frontPageOnly(c.Data)) {
+		return Result{}, problem(403, "owner_required", "This room is owned by a key; only its owner changes it (the operator may set only its front_page).")
 	}
 	now := s.now().Unix()
-	entry, result, err := applyGovernance(ctx, tx, c, r, now)
+	entry, result, err := applyGovernance(ctx, tx, c, r, true, now)
 	if err != nil {
 		return Result{}, err
 	}

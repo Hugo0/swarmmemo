@@ -2,14 +2,15 @@ package board
 
 // The database stall watchdog. The store has one database connection
 // (MaxOpenConns 1): a request that holds it and waits on something else
-// stalls every other request until a deadline ends it. The watchdog samples
-// the pool's counters once a second and, when the connection stays in use
-// while callers keep queueing for it, logs a warning and writes one goroutine
-// dump, so the holder can be found. It reads no rows and logs no request data.
+// stalls every other request until a deadline ends it. Counting waiters
+// cannot tell that from ordinary queueing (the first version warned on every
+// busy minute), so the watchdog probes instead: every few seconds it asks the
+// pool for the connection with a short deadline, and when that fails several
+// times in a row it logs a warning and writes one goroutine dump, so the
+// holder can be found. It reads no rows and logs no request data.
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,25 +21,32 @@ import (
 )
 
 const (
-	dbWatchTick   = time.Second
-	dbStallTicks  = 3                // consecutive stalled samples before a warning
-	dbStallRepeat = 10 * time.Minute // at most one warning and dump per this
+	dbWatchTick    = 5 * time.Second
+	dbProbeTimeout = 2 * time.Second
+	dbStallTicks   = 3                // consecutive failed probes before a warning
+	dbStallRepeat  = 10 * time.Minute // at most one warning and dump per this
 )
 
 // WatchDB runs the stall watchdog until ctx ends. Goroutine dumps go to
 // dumpDir as goroutines-<unix>.txt (mode 0600); "" writes none.
 func (s *Store) WatchDB(ctx context.Context, dumpDir string) {
-	w := &dbWatch{stats: s.db.Stats, dumpDir: dumpDir, now: time.Now}
+	probe := func(ctx context.Context) error {
+		conn, err := s.db.Conn(ctx)
+		if err != nil {
+			return err
+		}
+		return conn.Close()
+	}
+	w := &dbWatch{probe: probe, dumpDir: dumpDir, now: time.Now}
 	go w.run(ctx, dbWatchTick)
 }
 
 type dbWatch struct {
-	stats   func() sql.DBStats
+	probe   func(context.Context) error
 	dumpDir string
 	now     func() time.Time
 
 	mu     sync.Mutex
-	prev   sql.DBStats
 	streak int
 	warned time.Time
 	warns  int // for tests
@@ -47,28 +55,28 @@ type dbWatch struct {
 func (w *dbWatch) run(ctx context.Context, tick time.Duration) {
 	t := time.NewTicker(tick)
 	defer t.Stop()
-	w.prev = w.stats()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			w.sample(tick)
+			pctx, cancel := context.WithTimeout(ctx, dbProbeTimeout)
+			err := w.probe(pctx)
+			cancel()
+			if ctx.Err() != nil {
+				return
+			}
+			w.sample(err)
 		}
 	}
 }
 
-// sample takes one reading. A stalled sample is the connection in use while
-// the time callers spent waiting for it grew by at least a tick, or new
-// callers started waiting (a caller still waiting adds no wait time yet).
-func (w *dbWatch) sample(tick time.Duration) {
+// sample records one probe: nil when the connection was free within the
+// probe's deadline.
+func (w *dbWatch) sample(probeErr error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	cur := w.stats()
-	waited := cur.WaitDuration - w.prev.WaitDuration
-	queued := cur.WaitCount - w.prev.WaitCount
-	w.prev = cur
-	if cur.InUse < 1 || (waited < tick && queued == 0) {
+	if probeErr == nil {
 		w.streak = 0
 		return
 	}
@@ -82,7 +90,7 @@ func (w *dbWatch) sample(tick time.Duration) {
 	}
 	w.warned = now
 	w.warns++
-	attrs := []any{"in_use", cur.InUse, "wait_count", cur.WaitCount, "wait_duration", cur.WaitDuration.Round(time.Millisecond).String(), "stalled_seconds", w.streak}
+	attrs := []any{"failed_probes", w.streak, "probe_timeout", dbProbeTimeout.String(), "error", probeErr.Error()}
 	if path, err := w.dump(now); err != nil {
 		attrs = append(attrs, "dump_error", err.Error())
 	} else if path != "" {

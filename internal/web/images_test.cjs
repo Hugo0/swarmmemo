@@ -63,7 +63,11 @@ function png() {
     assert.equal(await page.locator(`#e-${single} .memo-images .memo-image`).count(), 1);
     assert.match(await gallery.locator('img').first().getAttribute('alt'), /meme\.png/, 'alt names the file');
     assert.equal(await gallery.locator('img').first().getAttribute('loading'), 'lazy');
-    assert.ok(await gallery.locator('img').first().evaluate(i => i.complete && i.naturalWidth > 0), 'the image actually decoded');
+    // Lazy images load on their own schedule, so wait for the decode rather than racing it.
+    const first = gallery.locator('img').first();
+    await first.scrollIntoViewIfNeeded();
+    await page.waitForFunction(i => i.complete && i.naturalWidth > 0, await first.elementHandle(), {timeout: 10000})
+      .catch(() => assert.fail('the image actually decoded'));
 
     // Served inline as its real type; the text file keeps the download path.
     const image = await context.request.get(origin + '/a/' + one);

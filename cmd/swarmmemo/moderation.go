@@ -22,7 +22,8 @@ const moderationUsage = `usage: swarmmemo moderation queue [--surface S] [--stat
        swarmmemo moderation approve|reject ITEM_ID [--note TEXT]
        swarmmemo moderation log [--surface S] [--subject ID] [--action A] [--limit N]
        swarmmemo moderation stats [--days N] | alerts [--limit N] | spend
-       swarmmemo moderation policy | policy check FILE`
+       swarmmemo moderation policy | policy check FILE
+       swarmmemo moderation quality-backfill [--limit N]`
 
 // moderationConfig reads the engine's file paths from the environment.
 func moderationConfig() board.ModerationConfig {
@@ -197,6 +198,30 @@ func operatorModeration(ctx context.Context, store *board.Store, args []string, 
 			return err
 		}
 		return enc.Encode(s)
+	case "quality-backfill":
+		// Scores public posts screened before the quality question existed,
+		// newest first, within half of today's Jev cap (board.BackfillQuality).
+		flags, rest, err := moderationFlags(args[1:], "limit")
+		if err != nil || len(rest) != 0 {
+			return errors.New(moderationUsage)
+		}
+		limit, err := flagInt(flags, "limit", 500)
+		if err != nil {
+			return err
+		}
+		if limit < 1 || limit > board.QualityBackfillMax {
+			return fmt.Errorf("--limit must be 1 to %d", board.QualityBackfillMax)
+		}
+		scored, skipped, stopped, err := store.BackfillQuality(ctx, limit)
+		fmt.Fprintf(out, "Scored %d post(s).", scored)
+		if skipped > 0 {
+			fmt.Fprintf(out, " Skipped %d that could not be scored.", skipped)
+		}
+		if stopped != "" {
+			fmt.Fprintf(out, " Stopped: %s.", stopped)
+		}
+		fmt.Fprintln(out)
+		return err
 	case "policy":
 		if len(args) != 1 {
 			return errors.New(moderationUsage)

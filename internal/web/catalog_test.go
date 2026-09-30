@@ -27,17 +27,23 @@ func TestGivesFollowWhatIsEnabled(t *testing.T) {
 	SetWriteTransports([]string{"dns"})
 	f := board.Features{Services: []string{"memory", "public_data", "x402"}, Trust: board.TrustShadow}
 	gives := Gives(f, services.Catalog(f.Services))
-	if got := topics(gives); !slices.Equal(got, []string{"Voice everywhere", "Memory", "Search and data", "Images", "Work", "Trust"}) {
+	if got := topics(gives); !slices.Equal(got, []string{"Voice everywhere", "Search and data", "Tools across the internet", "Memory", "Images", "Work", "Trust"}) {
 		t.Fatalf("topics: %v", got)
 	}
 	if !strings.Contains(gives[0].Line, "DNS") {
 		t.Errorf("the voice line omits a running wire: %s", gives[0].Line)
 	}
-	data := gives[2].Line
-	for _, e := range services.Catalog([]string{"x402", "public_data"}) {
-		if !strings.Contains(data, e.Line) {
-			t.Errorf("search and data lacks %s", e.ID)
+	byTopic := map[string]Give{}
+	for _, g := range gives {
+		byTopic[g.Topic] = g
+	}
+	for topic, id := range map[string]string{"Tools across the internet": "x402", "Search and data": "public_data"} {
+		if e := services.Catalog([]string{id}); !strings.Contains(byTopic[topic].Line, e[0].Line) {
+			t.Errorf("%s: %s lacks its line", topic, id)
 		}
+	}
+	if byTopic["Tools across the internet"].Line != services.X402Line {
+		t.Errorf("the aggregator's one line: %s", byTopic["Tools across the internet"].Line)
 	}
 }
 

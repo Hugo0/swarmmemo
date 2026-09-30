@@ -25,6 +25,9 @@ func (s *Server) rfc0012Route(w http.ResponseWriter, r *http.Request) bool {
 	case p == "/api/allowance", p == "/api/ledger", strings.HasPrefix(p, "/api/params/"):
 		return s.ledgerRoute(w, r)
 	case p == "/api/services", strings.HasPrefix(p, "/api/memory/"), strings.HasPrefix(p, "/api/notary/"):
+		if p == "/api/services" && r.Method == http.MethodGet {
+			s.countClient(r, "discovery")
+		}
 		return s.servicesRoute(w, r)
 	case strings.HasPrefix(p, "/api/agent/") && strings.HasSuffix(p, "/trust"), p == "/api/trust/runs", strings.HasPrefix(p, "/api/trust/runs/"), p == "/api/trust/evidence":
 		return s.trustRoute(w, r)
@@ -34,6 +37,8 @@ func (s *Server) rfc0012Route(w http.ResponseWriter, r *http.Request) bool {
 		return s.allowanceStatsRoute(w, r)
 	case p == "/api/stats/moderation": // moderation.go; declines while MODERATION is off
 		return s.moderationStatsRoute(w, r)
+	case p == "/api/stats/x402": // services.go; declines while x402 is off
+		return s.x402StatsRoute(w, r)
 	}
 	return false
 }

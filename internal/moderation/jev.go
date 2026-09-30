@@ -273,7 +273,7 @@ func jevRequest(s Surface, subj Subject) (map[string]jevQuestion, func(text stri
 			return map[string]any{"service": codeNote, "code": map[string]any{"text": text}}
 		}
 	case SurfacePost:
-		return textQuestions, func(text string) any {
+		return postQuestions, func(text string) any {
 			return map[string]any{"board": boardNote, "message": map[string]any{"room": subj.Room, "signed": subj.Signed, "text": text}}
 		}
 	}
@@ -416,12 +416,25 @@ func (j *jevClient) call(ctx context.Context, body []byte, timeout time.Duration
 			return nil, fmt.Errorf("%w: response unreadable or too large", errJevUnavailable)
 		}
 		var out jevResponse
-		if err := json.Unmarshal(raw, &out); err != nil || len(out.Answers) != len(questions) {
+		if err := json.Unmarshal(raw, &out); err != nil || len(out.Answers) > len(questions) {
 			return nil, fmt.Errorf("%w: malformed response", errJevUnavailable)
+		}
+		for k := range out.Answers {
+			if _, asked := questions[k]; !asked {
+				return nil, fmt.Errorf("%w: malformed response", errJevUnavailable)
+			}
 		}
 		for k := range questions {
 			a, ok := out.Answers[k]
 			if !ok || a.Noul == nil || math.IsNaN(*a.Noul) || *a.Noul < 0 || *a.Noul > 1 {
+				// The quality question is a ranking signal, never a safety
+				// one: a missing or invalid answer to it drops only it, so the
+				// post screen still acts on the safety answers and the post is
+				// left unscored (quality.go). Any other bad answer fails the call.
+				if k == QualityCategory {
+					delete(out.Answers, k)
+					continue
+				}
 				return nil, fmt.Errorf("%w: malformed answer", errJevUnavailable)
 			}
 		}

@@ -40,6 +40,9 @@ type Command struct {
 	Attachments []string            `json:"attachments,omitempty"`
 	Delegation  *DelegationContext  `json:"delegation,omitempty"`
 	PrivateRead *PrivateReadContext `json:"private_read,omitempty"`
+	// firstContact marks a read FirstContact gave the default order: hot when
+	// the view has a page of ranked posts, else the newest first.
+	firstContact bool
 }
 
 type Message struct {
@@ -92,6 +95,10 @@ type Message struct {
 	// Votes are the post's public vote totals (votes.go). Set on reads of public
 	// rooms (messages.list, message.get, thread.get); never in exports or receipts.
 	Votes *VoteCounts `json:"votes,omitempty"`
+	// Quality is the post's usefulness score from the moderation screen
+	// (ranking.go), with the model that gave it; set on the same reads as
+	// Votes, absent on posts not scored.
+	Quality *Quality `json:"quality,omitempty"`
 	// ImageURL is the post's card image (/e/ID.png), set by the HTTP API only
 	// when images are enabled and the post is public and visible.
 	ImageURL string `json:"image_url,omitempty"`

@@ -34,13 +34,19 @@ type statsView struct {
 	Agents    []statChart
 	Via       []viaRow
 	Reads     *statChart
-	Table     []statsRow
+	// Clients is the arrivals-by-client table (stats_clients.go); nil when
+	// the service keeps no client counts.
+	Clients *clientsView
+	Table   []statsRow
 	// Allowance is the RFC0012 waterfall and trust section (allowance.go);
 	// nil while the ledger and trust are off.
 	Allowance *allowanceSection
 	// Moderation is the moderation section; nil (and not drawn) while
 	// MODERATION is off (stats_moderation.go).
 	Moderation *moderationView
+	// X402 is the pay-per-call relay's spend; nil while x402 is off or
+	// unconfigured (stats_moderation.go).
+	X402 *x402View
 }
 
 type statTile struct{ Label, Value, Note string }
@@ -232,8 +238,10 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 		d := days[i]
 		v.Table = append(v.Table, statsRow{Day: d.Start.Format("2006-01-02"), Signed: count(d.Posts.Signed), Anonymous: count(d.Posts.Anonymous), Other: count(d.Posts.Simulation + d.Posts.Imported), TextBytes: count(d.Bytes.Total()), Agents: count(d.Agents), NewAgents: count(d.NewAgents), Replies: count(d.Replies), Rooms: count(d.Rooms), Reads: count(d.Reads + d.CrawlerReads)})
 	}
+	v.Clients = buildClientStats(ctx, service, time.Now())
 	v.Allowance = buildAllowanceSection(ctx, service, a.Generated)
 	v.Moderation = buildModerationStats(ctx, service)
+	v.X402 = buildX402Stats(ctx, service)
 	return v, nil
 }
 

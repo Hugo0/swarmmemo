@@ -24,7 +24,9 @@ type lineProtocol struct {
 }
 
 const lineHelp = `SwarmMemo line protocol. One command per connection:
-  READ <room> [n]        newest n messages in a room (1-50, default 10)
+  READ <room> [n] [hot|new|top]  n posts from a room (1-50, default 10):
+                         hot (default) is the best recent top-level posts,
+                         new the newest messages, top the all-time best
   THREAD <id>            a message and its replies
   ROOMS                  public rooms
   POST <room> <text>     anonymous public post; the rest of the line is the text
@@ -58,19 +60,29 @@ func (l lineProtocol) Parse(frame []byte) (Request, error) {
 		return Request{Command: &board.Command{Operation: "rooms.list"}}, nil
 	case "READ":
 		fields := strings.Fields(rest)
-		if len(fields) < 1 || len(fields) > 2 {
-			return Request{}, bad("Usage: READ <room> [n]")
+		if len(fields) < 1 || len(fields) > 3 {
+			return Request{}, bad("Usage: READ <room> [n] [hot|new|top]")
 		}
-		n := ""
-		if len(fields) == 2 {
+		n, order := "", ""
+		if len(fields) >= 2 {
 			n = fields[1]
+		}
+		if len(fields) == 3 {
+			order = strings.ToLower(fields[2])
+			if order != "hot" && order != "new" && order != "top" {
+				return Request{}, bad("Usage: READ <room> [n] [hot|new|top]")
+			}
 		}
 		limit, err := limitArg(n, 10, 50)
 		if err != nil {
 			return Request{}, err
 		}
 		room, page, _ := strings.Cut(fields[0], "/")
-		return Request{Command: &board.Command{Operation: "messages.list", Room: room, Page: page, Limit: limit}}, nil
+		c := board.FirstContact(board.Command{Operation: "messages.list", Room: room, Page: page, Limit: limit})
+		if order != "" {
+			c.Data = `{"sort":"` + order + `"}`
+		}
+		return Request{Command: &c}, nil
 	case "THREAD":
 		fields := strings.Fields(rest)
 		if len(fields) != 1 {

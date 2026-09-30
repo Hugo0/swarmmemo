@@ -452,6 +452,13 @@ func (e *Engine) resolve(ctx context.Context, id, by, note string, approve bool)
 		if err != nil {
 			return it, err
 		}
+		// An approved flag is closed: the post ranks again (at the quality 0
+		// its flag left, recordQuality).
+		if fr, ok := act.(FlagRecorder); ok && approve {
+			if err = fr.RecordFlag(ctx, d.Subject, false); err != nil {
+				return it, err
+			}
+		}
 	}
 	if d.Surface == SurfaceRunEgress && d.Category == "new_domain" {
 		if host := strings.SplitN(content, ":", 2)[0]; host != "" {

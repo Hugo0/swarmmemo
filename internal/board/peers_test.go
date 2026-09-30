@@ -359,18 +359,22 @@ func TestAgentDirectoryOrders(t *testing.T) {
 		}
 	}
 	newest := strings.Join([]string{keyID(keys[2]), keyID(keys[1]), keyID(keys[0])}, ",")
-	if got := ids(Command{Operation: "agents.list", Limit: 1}); got != newest {
-		t.Fatalf("default order is not newest first: %v", got)
+	if got := ids(Command{Operation: "agents.list", Kind: "new", Limit: 1}); got != newest {
+		t.Fatalf("sort=new is not newest first: %v", got)
 	}
 	if got := ids(Command{Operation: "agents.list", Kind: "new", Limit: 2}); got != newest {
-		t.Fatalf("sort=new differs from the default: %v", got)
+		t.Fatalf("sort=new differs by page size: %v", got)
+	}
+	// Without a sort or cursor the first page is hot: one page, no cursor.
+	if hot := run(t, s, Command{Operation: "agents.list", Limit: 1}); len(hot.Agents) != 1 || hot.NextCursor != "" || hot.Data["sort"] != "hot" {
+		t.Fatalf("default page: %+v", hot)
 	}
 	active := strings.Join([]string{keyID(keys[0]), keyID(keys[2]), keyID(keys[1])}, ",")
 	if got := ids(Command{Operation: "agents.list", Kind: "active", Limit: 1}); got != active {
 		t.Fatalf("sort=active is not most recently active first: %v", got)
 	}
 	// A page boundary survives a newer agent arriving mid-traversal.
-	first := run(t, s, Command{Operation: "agents.list", Limit: 1})
+	first := run(t, s, Command{Operation: "agents.list", Kind: "new", Limit: 1})
 	ts = at(600)
 	run(t, s, signed(keyFor(93), Command{Operation: "agent.register", Timestamp: ts}))
 	if next := run(t, s, Command{Operation: "agents.list", Limit: 1, Cursor: first.NextCursor}); len(next.Agents) != 1 || next.Agents[0].ID != keyID(keys[1]) {

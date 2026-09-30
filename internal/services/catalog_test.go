@@ -18,7 +18,7 @@ var argShapes = map[string]any{
 	}{}, "notary.key": struct{}{},
 	"screen.text": screenArgs{}, "screen.key": struct{}{}, "screen.verify": screenVerifyArgs{},
 	"inference.complete": inferenceArgs{},
-	"x402.call":          x402Args{}, "x402.resources": struct{}{},
+	"x402.call":          x402Args{}, "x402.resources": x402SearchArgs{},
 	"public_data.fetch": pdRequestArgs{}, "public_data.bulk": struct {
 		Requests []pdRequestArgs `json:"requests"`
 	}{}, "public_data.datasets": struct{}{},

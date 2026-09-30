@@ -6,17 +6,18 @@ import (
 )
 
 // builtins is every provider this build carries, in catalogue order (the
-// order "What SwarmMemo gives agents" lists them in). Adding a provider is its
-// own file, with its catalogue fields filled in (catalog.go), plus one line
-// here; every discovery surface then lists it.
+// order "What SwarmMemo gives agents" lists them in): the most useful first,
+// screening and the services a caller can use without a key, then memory.
+// Adding a provider is its own file, with its catalogue fields filled in
+// (catalog.go), plus one line here; every discovery surface then lists it.
 var builtins = []func(Deps) Provider{
-	newMemory,
-	newWakeup,
-	newNotary,
 	newScreen,
 	newInference,
-	newX402,
 	newPublicData,
+	newX402,
+	newNotary,
+	newMemory,
+	newWakeup,
 	newRuns,
 	newEcho,
 }

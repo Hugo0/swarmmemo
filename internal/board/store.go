@@ -76,6 +76,9 @@ type Store struct {
 	activity           *Activity
 	rankMu             sync.Mutex
 	rankCache          map[string]rankEntry // see ranking
+	rankPinned         map[string]rankEntry // the base rankings offset pages read
+	hotAgentsAt        time.Time            // the shared hot agent page, see readAgents
+	hotAgentsCached    []Agent
 	roomDirMu          sync.Mutex
 	roomDir            []Room // the public room directory, see readRooms
 	roomDirAt          time.Time
@@ -104,6 +107,8 @@ type Store struct {
 	trust    trustState
 	// The moderation engine (moderationwire.go); nil while MODERATION is off.
 	moderation moderationState
+	// Arrivals by client (clientstats.go), in memory until written.
+	clients clientState
 }
 
 const schema = `
@@ -294,7 +299,7 @@ func Open(path string, config Config) (*Store, error) {
 			}
 		}
 	}
-	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + voteSchema + honorSchema +
+	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + voteSchema + qualitySchema + honorSchema +
 		// RFC0012 §7 fragments, in this fixed order; each only creates tables and
 		// indexes, so SchemaVersion does not change.
 		design0Schema + ledger.Schema + services.Schema + trust.Schema + endorsementSchema +
@@ -315,6 +320,11 @@ func Open(path string, config Config) (*Store, error) {
 	// Schema 14: message provenance (events.via) and room policy write_via.
 	// Additive, keyed on the columns, so it renumbers cleanly.
 	if err = migrateVia(migration); err != nil {
+		return fail(err)
+	}
+	// Read indexes for the front page and rankings, and the ranking's flag
+	// table (frontpage.go). Additive, created when missing.
+	if err = migrateReadIndexes(migration); err != nil {
 		return fail(err)
 	}
 	// Schema 13: room styles (RFC0011), a new table created above. Additive.
@@ -609,11 +619,15 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 		return result, nil
 	}
 	var successor string
+	// Arrivals by client (clientstats.go): a signed key with no identity yet
+	// (its first write creates one), and its previous write.
+	newKey, lastWrite := false, int64(0)
 	if a.signed {
-		err = tx.QueryRowContext(ctx, "SELECT account,successor FROM identities WHERE id=?", a.id).Scan(&a.account, &successor)
+		err = tx.QueryRowContext(ctx, "SELECT account,successor,last_seen FROM identities WHERE id=?", a.id).Scan(&a.account, &successor, &lastWrite)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return empty, err
 		}
+		newKey = err != nil
 	}
 	if privateReadControl(cmd.Operation) {
 		result, err := s.privateReadOwner(ctx, tx, cmd, a, successor, now)
@@ -748,6 +762,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 		return empty, err
 	}
 	s.screenPost(ctx, cmd, a, result) // MODERATION: queue a fresh public post; nothing when off
+	if strings.HasPrefix(cmd.Operation, "agent.") || strings.HasPrefix(cmd.Operation, "identity.") {
+		s.dropHotAgents() // the shared hot agent page shows registrations, profiles and links
+	}
 	if result.afterCommit != nil {
 		result, err = result.afterCommit()
 		if err != nil {
@@ -755,6 +772,10 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 		}
 		result.OK = true
 	}
+	if !mutation(cmd.Operation) || a.grant != nil {
+		newKey, lastWrite = false, 0 // not a write of the key's own
+	}
+	s.countClientCommand(ctx, a, cmd, source, newKey, lastWrite, now)
 	return result, nil
 }
 

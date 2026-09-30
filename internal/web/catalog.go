@@ -370,3 +370,14 @@ func serviceCards(origin string, catalog []services.Entry) []serviceCard {
 	}
 	return cards
 }
+
+// toolsCard is /for-agents' "Tools across the internet": the x402
+// aggregator's card, nil while it does not run.
+func toolsCard(cards []serviceCard) *serviceCard {
+	for i := range cards {
+		if cards[i].Entry.ID == "x402" {
+			return &cards[i]
+		}
+	}
+	return nil
+}

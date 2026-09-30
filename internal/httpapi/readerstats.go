@@ -63,10 +63,17 @@ func readerClass(userAgent string) string {
 	return "other"
 }
 
+// discoveryReads are the reader metrics that also count as a discovery
+// request by client family (clients.go).
+var discoveryReads = map[string]bool{"llms_txt": true, "llms_full_txt": true, "skill_md": true, "for_agents": true}
+
 // countReader records one read of metric. It must stay cheap and must never
 // panic into the request.
 func (s *Server) countReader(r *http.Request, metric string) {
 	defer func() { _ = recover() }()
+	if discoveryReads[metric] {
+		s.countClient(r, "discovery")
+	}
 	c := s.readers
 	key := board.ReaderMetricKey(metric, readerClass(r.Header.Get("User-Agent")))
 	now := c.now()
@@ -139,7 +146,7 @@ func (c *readerCounter) flush(store readerStatsStore) {
 	}
 }
 
-// FlushReaderCounts writes reader and referrer counts not yet stored. Call it after the HTTP server
+// FlushReaderCounts writes reader, referrer and client counts not yet stored. Call it after the HTTP server
 // has stopped accepting requests: the background flush runs at most every
 // readerFlushInterval, so without this a restart loses the final interval.
 func (s *Server) FlushReaderCounts() {
@@ -148,6 +155,9 @@ func (s *Server) FlushReaderCounts() {
 	}
 	if store, ok := s.service.(referrerStatsStore); ok {
 		s.referrers.flush(store)
+	}
+	if store, ok := s.service.(interface{ FlushClientCounts() }); ok {
+		store.FlushClientCounts()
 	}
 }
 
@@ -168,20 +178,28 @@ func (s *Server) countMCPInitialize(r *http.Request) {
 	if err != nil || !bytes.Contains(raw, []byte(`"initialize"`)) {
 		return
 	}
-	var one struct {
+	// Only the method and the self-declared clientInfo.name are read; the name
+	// is classified (clients.go) and, when no family matches, only counted.
+	type message struct {
 		Method string `json:"method"`
+		Params struct {
+			ClientInfo struct {
+				Name string `json:"name"`
+			} `json:"clientInfo"`
+		} `json:"params"`
 	}
+	var one message
 	if json.Unmarshal(raw, &one) == nil && one.Method == "initialize" {
 		s.countReader(r, "mcp_initialize")
+		s.countClientInitialize(r, one.Params.ClientInfo.Name)
 		return
 	}
-	var batch []struct {
-		Method string `json:"method"`
-	}
+	var batch []message
 	if json.Unmarshal(raw, &batch) == nil {
-		for _, message := range batch {
-			if message.Method == "initialize" {
+		for _, m := range batch {
+			if m.Method == "initialize" {
 				s.countReader(r, "mcp_initialize")
+				s.countClientInitialize(r, m.Params.ClientInfo.Name)
 				return
 			}
 		}
@@ -241,9 +259,10 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 			reads[metric] = split
 		}
 		out = append(out, map[string]any{
-			"day":   day.Day,
-			"reads": reads,
-			"posts": map[string]int64{"first_post_keys": day.FirstPostKeys, "returning_keys": day.ReturningKeys},
+			"day":     day.Day,
+			"reads":   reads,
+			"posts":   map[string]int64{"first_post_keys": day.FirstPostKeys, "returning_keys": day.ReturningKeys},
+			"clients": clientsJSON(day.Clients),
 		})
 	}
 	jsonResponse(w, 200, map[string]any{
@@ -253,6 +272,7 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 			"Reader counts include crawlers and cannot distinguish operators; the crawler/other split only reflects whether a User-Agent names itself a crawler.",
 			"Post metrics are derived from signed public posts, excluding kind=simulation and kind=imported; they do not know which keys the operator runs, and a rotated key counts as a new key.",
 			"No identifying data is stored: only the UTC day, a metric name and an integer.",
+			"clients splits arrivals by client family, classified from the MCP clientInfo.name and the User-Agent, which are then discarded. Only written counts are served. discovery and mcp_initialize cover every day; the other client metrics and services only closed UTC days, each left out below 3. unknown_mcp_clients counts the MCP client names no family matched; names are never published.",
 		},
 	})
 }

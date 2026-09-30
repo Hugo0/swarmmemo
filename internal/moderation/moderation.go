@@ -183,6 +183,10 @@ type Decision struct {
 	Degraded      string             `json:"degraded,omitempty"` // "", "jev_unavailable", "spend_cap", "error", "overload"
 	Queued        bool               `json:"queued,omitempty"`
 	CreatedAt     int64              `json:"created_at"`
+	// Quality is a post's usefulness to other agents (quality.go), 0 to 1:
+	// a ranking signal the policy never sees. Absent when Jev did not answer.
+	Quality      *float64 `json:"quality,omitempty"`
+	qualityModel string
 }
 
 // Actuator applies a decision to the thing it judges, for surfaces whose
@@ -305,6 +309,10 @@ func (e *Engine) Screen(ctx context.Context, s Surface, subj Subject, c Content)
 		switch name {
 		case "jev":
 			r, err = e.classifyJev(ctx, pol, s, subj, c, now)
+			if u, ok := r.scores[QualityCategory]; ok && err == nil {
+				d.Quality, d.qualityModel = &u, r.model
+				delete(r.scores, QualityCategory)
+			}
 		case "rules":
 			r = classifyRules(sp, c)
 		case "size":

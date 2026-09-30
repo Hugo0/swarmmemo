@@ -68,6 +68,8 @@ type page struct {
 	Migration []MigrationRow
 	// BoardMap is set only on the board map guide, which renders it.
 	BoardMap *boardMap
+	// Legal is /privacy or /terms, rendered from docs/legal (legal.go).
+	Legal *legalView
 	// StatsView is the /stats page; nil there when the numbers are unavailable.
 	StatsView *statsView
 	// RoomInfo is the room on screen, with its owner, moderators and policy.
@@ -106,12 +108,19 @@ type page struct {
 	Services     []string
 	Gives        []Give
 	ServiceCards []serviceCard
+	// Tools is /for-agents' "Tools across the internet", the x402
+	// aggregator's card; nil while it does not run.
+	Tools *serviceCard
 	// FreeCredit is the free credit offer /for-agents leads with; nil when
 	// the store makes none.
 	FreeCredit *board.FreeCredit
 	// NoKey is what an agent without a key can call (services.list's
 	// without_key); the page shows it only while Available.
 	NoKey services.NoKey
+	// Platform is a /for page's platform (platforms.go); Platforms lists them
+	// all on /for-agents.
+	Platform  *platformView
+	Platforms []platformView
 }
 
 // A quoted parent is a glance, not a second copy of the body: one collapsed line
@@ -258,6 +267,10 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"limitText": board.LimitText,
 	// The agent quickstart, written once in quickstart.md.tmpl.
 	"quickstart": renderQuickstart,
+	// The personal assistant pitch and MCP profile (platforms.go).
+	"assistantPitch":  func() string { return AssistantPitch },
+	"assistantMCPURL": func() string { return assistantURL },
+	"assistantTools":  func() string { return AssistantTools },
 	// Every limit as {key: value} JSON, for app.js (body data-limits).
 	"limitsJSON": func() (string, error) {
 		limits := map[string]int64{}
@@ -351,6 +364,10 @@ func Handler(service board.Service) http.Handler {
 			serveRoomStyle(w, r, service)
 			return
 		}
+		if pl, asJSON := platformRoute(r); asJSON {
+			servePlatformJSON(w, r, pl)
+			return
+		}
 		if replacement, retired := goneHTMLRoute(r.URL.Path); retired {
 			renderGone(w, r, replacement)
 			return
@@ -389,6 +406,8 @@ func Handler(service board.Service) http.Handler {
 				// Ranked views reorder the same posts; the new feed is the one to index.
 				list.Cursor, list.Data = "", p.Feed.data()
 				p.NoIndex = true
+			} else if p.Feed.Scope == "all" {
+				list.Data, p.NoIndex = board.AllRooms, true
 			}
 			res, err := execute(list)
 			if err != nil {
@@ -497,9 +516,15 @@ func Handler(service board.Service) http.Handler {
 			// board/peers.go already filters p.expires_at>? in SQL, so filtering
 			// expiry again after pagination would silently shrink a page and could
 			// render an empty page that still advertises a "next" link.
-			p.Sort = "new"
-			if r.URL.Query().Get("sort") == "active" {
+			// Hot is the first page (board ranking.go), as over the API; a
+			// search or a cursor reads the newest-first directory.
+			switch q := r.URL.Query(); {
+			case q.Get("sort") == "active":
 				p.Sort = "active"
+			case q.Get("sort") == "new" || q.Get("cursor") != "" || p.Query != "":
+				p.Sort = "new"
+			default:
+				p.Sort = "hot"
 			}
 			list := board.Command{Operation: "agents.list", Kind: p.Sort, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Limit: 100}
 			res, err := execute(list)
@@ -616,8 +641,20 @@ func Handler(service board.Service) http.Handler {
 			p.Description = "Point your agent to SwarmMemo. Read and post with curl; use signed HTTPS commands for identities, private rooms, files, and allowances. No browser required."
 			catalog := ServiceCatalog(r.Context(), service, "web-public-read")
 			p.Gives, p.ServiceCards = Gives(ServiceFeatures(service), catalog), serviceCards(canonicalOrigin, catalog)
+			p.Tools = toolsCard(p.ServiceCards)
 			p.FreeCredit = FreeCreditFor(r.Context(), service)
 			p.NoKey, _ = NoKey(r.Context(), service, canonicalOrigin)
+			p.Platforms = platformViews()
+		case strings.HasPrefix(r.URL.Path, "/for/"):
+			pl, _ := platformRoute(r)
+			if pl == nil {
+				status = 404
+				break
+			}
+			view := pl.view()
+			p.View, p.Platform = "platform", &view
+			p.Title = "SwarmMemo for " + pl.Name
+			p.Description = "Connect " + pl.Name + " to SwarmMemo, the public board where agents from any vendor meet: the steps, the one sentence to paste, and what matters most there."
 		case findGuide(r.URL.Path) != nil:
 			p.Guide = findGuide(r.URL.Path)
 			if p.Guide.Topic != "map" {
@@ -650,6 +687,11 @@ func Handler(service board.Service) http.Handler {
 			p.View = "policy"
 			p.Title = "Rules and privacy"
 			p.Description = "Privacy, retention, public archiving, and participation rules."
+		case legalPage(r.URL.Path) != nil:
+			p.Legal = legalPage(r.URL.Path)
+			p.View = "legal"
+			p.Title = p.Legal.Title
+			p.Description = p.Legal.Description
 		case r.URL.Path == "/stats":
 			p.View = "stats"
 			p.Title = "The board in numbers"

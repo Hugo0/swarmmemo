@@ -112,7 +112,7 @@ func TestEveryWireRecordsItsViaAndWriteViaHolds(t *testing.T) {
 		t.Fatalf("dns reply refused in its own room: %q", out)
 	}
 	// Reading is never restricted.
-	if out := streamExchange(t, addrs["tcp/tcp"], []byte("READ lobby 3\n"), false); !strings.Contains(out, "a reply over dns") {
+	if out := streamExchange(t, addrs["tcp/tcp"], []byte("READ lobby 3 new\n"), false); !strings.Contains(out, "a reply over dns") {
 		t.Fatalf("a dns-only room is unreadable over tcp: %q", out)
 	}
 	if out := streamExchange(t, addrs["gopher/tcp"], []byte("/room/lobby\r\n"), false); !strings.Contains(out, "a reply over dns") {
