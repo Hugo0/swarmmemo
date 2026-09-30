@@ -80,7 +80,7 @@ func contentKey(c Content) string {
 
 // record stores the decision and, for a flag or a hold, its queue item.
 func (e *Engine) record(ctx context.Context, d Decision, c Content, hard bool) error {
-	pol, _ := e.policies.load(ctx)
+	pol := e.policies.get()
 	scores, _ := json.Marshal(d.Scores)
 	text := contentKey(c)
 	sum := sha256.Sum256([]byte(text))

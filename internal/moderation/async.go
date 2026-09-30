@@ -53,6 +53,20 @@ func (e *Engine) Start(ctx context.Context, poll time.Duration) {
 	if poll <= 0 {
 		poll = time.Second
 	}
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		ticker := time.NewTicker(policyReloadEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = e.ReloadPolicy(ctx)
+			}
+		}
+	}()
 	for i := 0; i < e.opts.Workers; i++ {
 		e.wg.Add(1)
 		go func() {
@@ -78,6 +92,16 @@ func (e *Engine) Start(ctx context.Context, poll time.Duration) {
 			}
 		}()
 	}
+}
+
+// ReloadPolicy rereads the policy in force now (the parameter store, else the
+// file) and swaps it in; on an error the previous policy stays. It reads on
+// the pool, so it must not run inside a transaction holding the connection.
+// Start runs it every policyReloadEvery.
+func (e *Engine) ReloadPolicy(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return e.policies.refresh(ctx)
 }
 
 // Stop ends the workers and waits for the job in hand to finish.

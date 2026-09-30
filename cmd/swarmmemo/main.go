@@ -402,6 +402,9 @@ func serve() error {
 	// RFC0012 background work (sweeper, job worker, trust run) for the
 	// enabled flags; with every flag off it starts nothing.
 	store.StartRFC0012(ctx)
+	// Warn (and dump goroutines to DATA_DIR) when the one database
+	// connection stalls.
+	store.WatchDB(ctx, dir)
 	done := make(chan error, 1)
 	go func() {
 		slog.Info("SwarmMemo listening", "address", server.Addr, "version", version)

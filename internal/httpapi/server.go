@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
@@ -97,7 +98,69 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 	return s
 }
 
+// slowRequest is how long a request may take before it is logged (method,
+// route class, status and duration only: never the URL, query or body).
+const slowRequest = 5 * time.Second
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	sw := &statusWriter{ResponseWriter: w}
+	defer func() {
+		if d := time.Since(start); d > slowRequest && r.URL.Path != "/api/stream" {
+			status := sw.status
+			if status == 0 {
+				status = 200
+			}
+			slog.Warn("Slow request", "method", r.Method, "route", routeClass(r.URL.Path), "status", status, "duration", d.Round(time.Millisecond).String())
+		}
+	}()
+	s.serveHTTP(sw, r)
+}
+
+// statusWriter records the response status for the slow-request log. Unwrap
+// keeps http.ResponseController working; Flush keeps http.Flusher.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	if w.status == 0 {
+		w.status = code
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = 200
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// routeClass is a path's route prefix for logs: the first segment, or the
+// first two under /api/ and /v1/, never an identifier or a query.
+func routeClass(path string) string {
+	parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 3)
+	class := "/" + parts[0]
+	if (parts[0] == "api" || parts[0] == "v1") && len(parts) > 1 {
+		class += "/" + parts[1]
+	}
+	if len(class) > 48 {
+		class = class[:48]
+	}
+	return class
+}
+
+func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	s.requests.Add(1)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")

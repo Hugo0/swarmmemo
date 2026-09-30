@@ -51,7 +51,7 @@ func screenReady(pol *Policy) bool {
 // ScreenAvailable says whether ScreenText can answer now: a Jev key and a
 // policy it can run under (services.TextScreener).
 func (e *Engine) ScreenAvailable(ctx context.Context) bool {
-	pol, _ := e.policies.load(ctx)
+	pol := e.policies.get()
 	return e.jev.keyFile != "" && screenReady(pol)
 }
 
@@ -62,7 +62,7 @@ func (e *Engine) ScreenAvailable(ctx context.Context) bool {
 // nothing. It records nothing: no decision, no review item, no text. Any
 // error means the text was not screened.
 func (e *Engine) ScreenText(ctx context.Context, text, source, intent string) (services.TextScreen, error) {
-	pol, _ := e.policies.load(ctx)
+	pol := e.policies.get()
 	if !screenReady(pol) {
 		return services.TextScreen{}, errJevUnavailable
 	}

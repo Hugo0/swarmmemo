@@ -173,6 +173,10 @@ CREATE TABLE IF NOT EXISTS leases (
 // rather than guessing, so a binary rollback needs the pre-deploy snapshot.
 const SchemaVersion = 14
 
+// connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
+// syntax. journal_mode=WAL is stored in the database file and set at Open.
+const connPragmas = "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(FULL)"
+
 func Open(path string, config Config) (*Store, error) {
 	if config.ServiceID == "" {
 		config.ServiceID = "swarmmemo.com"
@@ -225,13 +229,17 @@ func Open(path string, config Config) (*Store, error) {
 			}
 		}
 	}
-	dsn := path
+	// The per-connection PRAGMAs go in the DSN, so the driver applies them to
+	// every connection it opens: database/sql replaces the connection after
+	// a query is interrupted (a context ends mid-statement), and a replacement
+	// opened without them would run with no busy timeout and no foreign keys.
+	dsn := path + "?" + connPragmas
 	if path != ":memory:" {
 		abs, err := filepath.Abs(path)
 		if err != nil {
 			return nil, err
 		}
-		dsn = (&url.URL{Scheme: "file", Path: abs}).String()
+		dsn = (&url.URL{Scheme: "file", Path: abs, RawQuery: connPragmas}).String()
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

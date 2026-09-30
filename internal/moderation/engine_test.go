@@ -133,6 +133,9 @@ func TestPolicyVersioning(t *testing.T) {
 	}
 	writePolicy(t, dir, v2)
 	v.clock.add(policyReloadEvery + time.Second)
+	if err := e.ReloadPolicy(ctx); err != nil {
+		t.Fatal(err)
+	}
 	d2 := e.Screen(ctx, SurfacePost, Subject{ID: "m2"}, Content{Text: "x"})
 	if d2.Action != Hide || d2.PolicyVersion != 2 || !strings.Contains(d2.Reason, "policy=v2") {
 		t.Fatalf("v2: %+v", d2)
@@ -140,6 +143,9 @@ func TestPolicyVersioning(t *testing.T) {
 	// A broken edit keeps the last good version and alerts once.
 	writePolicy(t, dir, `{"schema":1,"version":3,"surfaces":{"post":{"bogus":true}}}`)
 	v.clock.add(policyReloadEvery + time.Second)
+	if err := e.ReloadPolicy(ctx); err == nil {
+		t.Fatal("a broken policy reloaded without an error")
+	}
 	d3 := e.Screen(ctx, SurfacePost, Subject{ID: "m3"}, Content{Text: "x"})
 	if d3.PolicyVersion != 2 {
 		t.Fatalf("bad reload: %+v", d3)

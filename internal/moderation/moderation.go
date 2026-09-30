@@ -256,7 +256,7 @@ func New(o Options) (*Engine, error) {
 	e := &Engine{db: o.DB, opts: o, now: o.Now, actors: map[Surface]Actuator{}, wake: make(chan struct{}, 1)}
 	e.jev = newJevClient(o)
 	e.policies = &policySource{params: o.Params, file: o.PolicyFile, db: o.DB, alert: e.raise, now: o.Now}
-	if _, err := e.policies.load(context.Background()); err != nil {
+	if err := e.policies.refresh(context.Background()); err != nil && e.policies.cur.Load() == nil {
 		return nil, err
 	}
 	return e, nil
@@ -276,10 +276,10 @@ func (e *Engine) actuator(s Surface) Actuator {
 	return e.actors[s]
 }
 
-// Policy is the policy in force now.
-func (e *Engine) Policy(ctx context.Context) *Policy {
-	p, _ := e.policies.load(ctx)
-	return p
+// Policy is the policy in force now, from memory: it does no I/O, so it is
+// safe inside a transaction that holds the database connection.
+func (e *Engine) Policy(context.Context) *Policy {
+	return e.policies.get()
 }
 
 // Screen classifies content on surface s, decides, logs the decision and
@@ -288,7 +288,7 @@ func (e *Engine) Policy(ctx context.Context) *Policy {
 func (e *Engine) Screen(ctx context.Context, s Surface, subj Subject, c Content) Decision {
 	now := e.now().Unix()
 	spec, ok := surfaceSpec(s)
-	pol, _ := e.policies.load(ctx)
+	pol := e.policies.get()
 	d := Decision{Surface: s, Subject: bound(subj.ID, 128), Agent: bound(subj.Agent, 128), PolicyVersion: pol.Version, Scores: map[string]float64{}, CreatedAt: now}
 	if !ok {
 		d.Action, d.Proposed, d.Degraded = Block, Block, "error"

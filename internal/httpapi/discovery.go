@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -25,8 +26,12 @@ func (s *Server) capabilities() map[string]any { return s.capabilitiesWith(s.sta
 // liveCatalog is services.list, as /api/services answers it.
 func (s *Server) staticCatalog() []services.Entry { return services.Catalog(s.cfg.Features.Services) }
 
+// liveCatalog is read with a discoveryReadTimeout: its routes run before the request
+// deadline, and a read that cannot finish falls back to the static catalogue.
 func (s *Server) liveCatalog(r *http.Request) []services.Entry {
-	return web.ServiceCatalogFor(r.Context(), s.service, s.peer(r), s.cfg.Features.Services)
+	ctx, cancel := context.WithTimeout(r.Context(), discoveryReadTimeout)
+	defer cancel()
+	return web.ServiceCatalogFor(ctx, s.service, s.peer(r), s.cfg.Features.Services)
 }
 
 func (s *Server) capabilitiesWith(catalog []services.Entry) map[string]any {

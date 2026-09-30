@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/netip"
 	"os"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"swarmmemo/internal/allowance"
@@ -421,9 +423,14 @@ func (e *EgressPolicy) validate(def EgressPolicy) error {
 	return nil
 }
 
-// policySource reads the policy in force: the parameter store when it has a
-// version, else the file, else version 0. It caches for policyReloadEvery and
-// keeps the last good policy when a newer one does not parse.
+// policySource holds the policy in force: the parameter store when it has a
+// version, else the file, else version 0. Readers take the current policy
+// from an atomic pointer and never do I/O: a request path may hold the only
+// database connection in its own transaction (MaxOpenConns 1), and a policy
+// read on the pool there would wait on itself until the request's deadline.
+// The engine's own goroutine refreshes it every policyReloadEvery, outside
+// any caller's transaction, and keeps the last good policy when a newer one
+// does not parse or the parameter store cannot be read.
 type policySource struct {
 	params allowance.ParamsSource
 	file   string
@@ -431,44 +438,59 @@ type policySource struct {
 	alert  func(Alert)
 	now    func() time.Time
 
-	mu      sync.Mutex
-	cur     *Policy
-	at      time.Time
+	cur atomic.Pointer[Policy]
+
+	mu      sync.Mutex // serializes refresh; never taken on a request path
 	lastBad string
 }
 
-func (ps *policySource) load(ctx context.Context) (*Policy, error) {
+// get is the policy in force. It does no I/O and takes no lock.
+func (ps *policySource) get() *Policy {
+	if p := ps.cur.Load(); p != nil {
+		return p
+	}
+	return DefaultPolicy()
+}
+
+// refresh reads the policy in force and swaps it in. It does I/O on the pool,
+// so it must never run inside a caller's transaction. With no policy yet (at
+// New) and a policy file set, a policy that cannot be read is an error, so
+// New refuses to start on it; afterwards the previous policy stays.
+func (ps *policySource) refresh(ctx context.Context) error {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	now := ps.now()
-	if ps.cur != nil && now.Sub(ps.at) < policyReloadEvery && now.After(ps.at.Add(-time.Second)) {
-		return ps.cur, nil
-	}
-	p, err := ps.read(ctx, now)
-	ps.at = now
+	prev := ps.cur.Load()
+	p, err := ps.read(ctx, ps.now(), prev != nil)
 	if err != nil {
-		if ps.cur == nil && ps.file != "" {
-			return DefaultPolicy(), err // New refuses to start on it
+		if prev == nil && ps.file != "" {
+			return err
 		}
+		slog.Warn("moderation: policy not reloaded; keeping the previous version", "error", bound(err.Error(), 200))
 		if msg := err.Error(); msg != ps.lastBad {
 			ps.lastBad = msg
 			if ps.alert != nil {
 				ps.alert(Alert{Kind: "policy", Detail: "policy not loaded, keeping the previous version: " + bound(msg, 200)})
 			}
 		}
-		if ps.cur == nil {
-			ps.cur = DefaultPolicy()
+		if prev == nil {
+			ps.cur.Store(DefaultPolicy())
 		}
-		return ps.cur, nil
+		return err
 	}
 	ps.lastBad = ""
-	ps.cur = p
-	return p, nil
+	ps.cur.Store(p)
+	return nil
 }
 
-func (ps *policySource) read(ctx context.Context, now time.Time) (*Policy, error) {
+// read reads the policy in force. A parameter store that cannot be read is an
+// error once there is a previous policy to keep (have): falling through to
+// the file or version 0 would silently loosen a stored policy.
+func (ps *policySource) read(ctx context.Context, now time.Time, have bool) (*Policy, error) {
 	if ps.params != nil {
 		version, body, err := ps.params.Params(ctx, ps.db, ParamsNamespace, now.Unix())
+		if err != nil && have {
+			return nil, fmt.Errorf("params %s: %w", ParamsNamespace, err)
+		}
 		if err == nil && version > 0 && len(body) > 0 {
 			p, err := parseStored(body, version)
 			if err != nil {

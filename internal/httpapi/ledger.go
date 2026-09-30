@@ -113,5 +113,7 @@ func (s *Server) allowanceCapabilities() map[string]any {
 	if !ok {
 		return nil
 	}
-	return store.AllowanceCapabilities(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), discoveryReadTimeout)
+	defer cancel()
+	return store.AllowanceCapabilities(ctx)
 }
