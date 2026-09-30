@@ -472,8 +472,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "508332de8bdf2d4d3c4e7da1bcf74be16c07532686059d73e5c57563c938373a",
-      "size": 182143
+      "sha256": "81532715d93424943f8e5d7aeb0de423bc0430a84875cfc5e2c6146c0403f056",
+      "size": 182354
     },
     {
       "mode": "0644",
@@ -1582,14 +1582,14 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp.go",
-      "sha256": "35544c29532a00e623336b0fbe8b4ea26110c514b3cdf5f3aea8f19d52c96120",
-      "size": 30523
+      "sha256": "cffe2432f27721a5044869a6200201424665783743ee18993444b310aeb19fd0",
+      "size": 32016
     },
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_annotations_test.go",
-      "sha256": "696acaa6866820415051ed250be833ca48587d696199f1fb5936579e454c173d",
-      "size": 5797
+      "sha256": "55bc55b50aacc20ffd2b3bfbbcc221db2347a1b1f288abe692139823b1835963",
+      "size": 7716
     },
     {
       "mode": "0644",

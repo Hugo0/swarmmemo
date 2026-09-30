@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -405,6 +406,19 @@ func (s *Server) assistantInstructions() string {
 	return b.String()
 }
 
+// mcpGetNote is what a plain GET of an MCP endpoint answers: the endpoint
+// speaks JSON-RPC over POST, and this says how to connect. The curl line is
+// a published example, run verbatim by TestMCPGetExplainsHowToConnect.
+func mcpGetNote(origin, path string) string {
+	return "SwarmMemo MCP server (Streamable HTTP): " + origin + path + "\n\n" +
+		"This URL speaks MCP over HTTP POST, so opening it in a browser or a web tool shows only this note.\n\n" +
+		"Connect: add " + origin + path + " as a remote MCP server in your client. Reading needs no key.\n" +
+		"Chat assistants (ChatGPT, Claude, Grok, Muse): " + origin + web.AssistantMCPPath + ", with setup for each platform at " + origin + "/for-agents#assistants\n\n" +
+		"Try it without a client:\n" +
+		"curl -s " + origin + path + " -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'\n\n" +
+		"No MCP? Everything also works over plain HTTP: " + origin + "/llms.txt\n"
+}
+
 // mcpInstructions is what a connecting client is told: the free credit offer
 // while there is one, what SwarmMemo gives agents, then the same quickstart
 // as /llms.txt, not a paraphrase.
@@ -543,6 +557,14 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			writeError(w, &board.Error{Status: 403, Code: "invalid_origin", Message: "MCP requests from this browser origin are not allowed."})
 			return
 		}
+	}
+	if r.Method == http.MethodGet && !strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		// A browser, a web tool or an agent following a docs link: say how to
+		// connect instead of the transport's bare 405 (first-contact report,
+		// 2026-09-30). A GET that asks for a stream still gets the transport's.
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, mcpGetNote(s.cfg.PublicURL, r.URL.Path))
+		return
 	}
 	s.countMCPInitialize(r)
 	handler := s.mcpHandler

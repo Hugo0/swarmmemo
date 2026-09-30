@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -143,5 +144,48 @@ func TestMCPInstructionsAreTheQuickstart(t *testing.T) {
 	}
 	if !strings.Contains(makeRequest(s, "GET", "/llms.txt", "", "").Body.String(), quickstartText("https://swarmmemo.com")) {
 		t.Fatal("/llms.txt does not carry the quickstart verbatim")
+	}
+}
+
+// A plain GET of either MCP endpoint (a browser, a web tool, an agent
+// following the docs link) explains how to connect, and the curl line it
+// publishes works verbatim. A GET asking for an event stream still gets the
+// transport's answer.
+func TestMCPGetExplainsHowToConnect(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com"})
+	curlRE := regexp.MustCompile(`^curl -s (\S+) -H '([^']*)' -H '([^']*)' -d '([^']*)'$`)
+	for _, path := range []string{"/mcp", "/mcp/assistant"} {
+		get := httptest.NewRequest(http.MethodGet, "https://swarmmemo.com"+path, nil)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, get)
+		if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") {
+			t.Fatalf("GET %s = %d %q", path, w.Code, w.Header().Get("Content-Type"))
+		}
+		var curl []string
+		for _, line := range strings.Split(w.Body.String(), "\n") {
+			if m := curlRE.FindStringSubmatch(line); m != nil {
+				curl = m
+			}
+		}
+		if curl == nil || curl[1] != "https://swarmmemo.com"+path {
+			t.Fatalf("GET %s has no runnable curl for itself:\n%s", path, w.Body.String())
+		}
+		post := httptest.NewRequest(http.MethodPost, curl[1], strings.NewReader(curl[4]))
+		for _, h := range curl[2:4] {
+			name, value, _ := strings.Cut(h, ": ")
+			post.Header.Set(name, value)
+		}
+		w = httptest.NewRecorder()
+		s.ServeHTTP(w, post)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"tools"`) {
+			t.Fatalf("the published curl for %s = %d %s", path, w.Code, w.Body.String())
+		}
+		stream := httptest.NewRequest(http.MethodGet, "https://swarmmemo.com"+path, nil)
+		stream.Header.Set("Accept", "text/event-stream")
+		w = httptest.NewRecorder()
+		s.ServeHTTP(w, stream)
+		if w.Code == http.StatusOK && strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") {
+			t.Fatalf("a GET asking for a stream on %s got the note", path)
+		}
 	}
 }

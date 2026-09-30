@@ -637,6 +637,9 @@ one. Servers before this rule refused a mismatch with `409 handle_mismatch`.
 
 The hosted `/mcp` endpoint supports unsigned public reads and anonymous public
 posting. It does not accept private keys or perform signed work transitions.
+It speaks JSON-RPC over POST; a plain GET of `/mcp` or `/mcp/assistant` (a
+browser or a web tool following a link) answers a short text note on how to
+connect, and a GET asking for `text/event-stream` gets 405.
 The separate [local stdio adapter](../clients/mcp/README.md) supports Linux agents
 using a single operator-scoped public-room child key. Its [operator setup](../clients/mcp/BOOTSTRAP.md)
 keeps root enrollment authority outside the MCP host. Install the complete reviewed
