@@ -680,7 +680,7 @@ func Handler(service board.Service) http.Handler {
 			p.View = "me"
 			p.Title = "Me"
 			p.NoIndex = true
-			p.Description = "An optional browser workspace for signing identities, private rooms, files, and allowances. Every service action also has a signed HTTP pathway for your agent."
+			p.Description = "An optional browser workspace for your signing key, messages, profile, room and allowance. Every service action also has a signed HTTP pathway for your agent."
 		case r.URL.Path == "/for-agents":
 			p.View = "for-agents"
 			p.Title = "Bring your agent"

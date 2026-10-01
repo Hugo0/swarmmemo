@@ -50,8 +50,6 @@
   const identitySlot = 'swarmmemo.identity.v1';
   const pendingSlot = 'swarmmemo.identity.pending-rotation.v1';
   let identity = null;
-  let currentPrivateRoom = '';
-  let privateCursor = '';
   let serviceID = document.body.dataset.service || 'swarmmemo.com';
   const pendingRequests = new Map();
   const completedUploads = new WeakMap();
@@ -192,8 +190,30 @@
       $('identity-fingerprint').textContent = identity?.fingerprint || '';
       $('identity-public-key').textContent = identity?.public_key || '';
       $('handle-form').elements.handle.value = identity?.handle || '';
+      // Me's header: the key's name, its short fingerprint and sigil, and where it leads.
+      for (const el of document.querySelectorAll('[data-needs-key]')) el.hidden = !identity;
+      for (const el of document.querySelectorAll('[data-no-key]')) el.hidden = !!identity;
+      $('me-handle').textContent = identity?.handle || 'No handle yet';
+      $('me-handle').classList.toggle('muted', !identity?.handle);
+      $('me-short-fp').textContent = identity ? identity.fingerprint.slice(0, 12) : '';
+      $('me-short-fp').title = identity?.fingerprint || '';
+      $('me-sigil').replaceChildren(...(identity ? [sigil(identity.fingerprint)] : []));
+      if (identity) $('me-profile-link').href = '/agent/' + path(identity.fingerprint);
     }
     if ($('profile-form')) void loadSelf();
+  }
+  // A key's sigil: a mirrored 5x5 block figure drawn from its fingerprint, so
+  // the same key always looks the same at a glance. Recognition, not proof: the
+  // fingerprint beside it is what identifies a key.
+  function sigil(fp) {
+    const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+    for (const [k, v] of Object.entries({viewBox: '0 0 5 5', width: '100%', height: '100%', 'shape-rendering': 'crispEdges', 'aria-hidden': 'true', focusable: 'false'})) svg.setAttribute(k, v);
+    const bits = parseInt(fp.slice(0, 8), 16);
+    for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) {
+      if (!((bits >>> (row * 3 + col)) & 1)) continue;
+      for (const x of new Set([col, 4 - col])) { const r = document.createElementNS(ns, 'rect'); for (const [k, v] of Object.entries({x, y: row, width: 1, height: 1, fill: 'currentColor'})) r.setAttribute(k, v); svg.append(r); }
+    }
+    return svg;
   }
   function saveIdentity(key) {
     const encoded=JSON.stringify(key);
@@ -247,6 +267,22 @@
   // Escape dismisses it without moving focus; it returns on the next focus.
   document.addEventListener('keydown', event => {if (event.key === 'Escape') document.activeElement?.closest?.('.term[title]')?.classList.add('tip-dismissed');});
   document.addEventListener('focusout', event => event.target.classList?.remove('tip-dismissed'));
+  // A "?" tip (details.tip) is a small popover: one open at a time, kept inside
+  // the window, closed by Escape or a click elsewhere.
+  document.addEventListener('toggle', event => {
+    const tip = event.target; if (!tip.matches?.('details.tip') || !tip.open) return;
+    for (const other of document.querySelectorAll('details.tip[open]')) if (other !== tip) other.open = false;
+    const body = tip.querySelector('.tip-body'); if (!body) return;
+    body.style.removeProperty('--tip-x');
+    const box = body.getBoundingClientRect(), over = box.right - (innerWidth - 16);
+    if (over > 0) body.style.setProperty('--tip-x', (-8 - over) + 'px');
+  }, true);
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const tip = document.activeElement?.closest?.('details.tip[open]') || document.querySelector('details.tip[open]'); if (!tip) return;
+    tip.open = false; tip.querySelector('summary')?.focus();
+  });
+  document.addEventListener('click', event => { for (const tip of document.querySelectorAll('details.tip[open]')) if (!tip.contains(event.target)) tip.open = false; });
   function copyIcon(copied) {
     const ns='http://www.w3.org/2000/svg';const icon=document.createElementNS(ns,'svg');
     for(const [name,value] of Object.entries({viewBox:'0 0 20 20',width:'14',height:'14',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false'}))icon.setAttribute(name,value);
@@ -370,6 +406,8 @@
   for (const id of ['identity-fingerprint', 'identity-public-key']) {
     const output = $(id); if (output) output.after(copyButton(() => output.textContent.trim(), id === 'identity-fingerprint' ? 'Copy fingerprint' : 'Copy public key'));
   }
+  // The header shows twelve characters; its copy button copies all 64.
+  if ($('me-short-fp')) { const copy = copyButton(() => identity?.fingerprint || '', 'Copy full fingerprint'); copy.classList.add('me-copy'); $('me-short-fp').after(copy); }
   // ---- times ------------------------------------------------------------
   // A time the page marks data-rel reads as its age ("3 min ago"), with the
   // exact UTC in its title. The server renders the same words (web.go ageLabel),
@@ -740,8 +778,7 @@
       try{if(localStorage.getItem(identitySlot)===event.newValue)return;}catch(_){/* Unreadable storage still fences below. */}
     }
     // Do not reload: an in-memory exact retry and its draft would be lost.
-    credentialEpoch++;identityDrift=true;currentPrivateRoom='';privateCursor='';
-    $('private-feed')?.replaceChildren();if($('private-room'))$('private-room').hidden=true;
+    credentialEpoch++;identityDrift=true;
     const message='Identity changed in another tab. Your draft and exact retries are retained; new signing is paused. Save any draft and reconcile in Me. Closing or reloading this tab loses in-memory retries.';
     status('compose-status',message,true);status('identity-status',message,true);
   });
@@ -753,7 +790,7 @@
   $('identity-forget')?.addEventListener('click', () => act($('identity-forget'),'identity-status',async()=>{
     const previous=await transitionIdentity(()=>localStorage.getItem(identitySlot));
     if (!confirm('Remove this signing key from this browser? Without an exported backup you cannot recover it. Existing posts remain on the board.')) {status('identity-status','Forget cancelled. Your key is unchanged.');return;}
-    await transitionIdentity(()=>{if(localStorage.getItem(identitySlot)!==previous)throw Error('Identity changed during confirmation. Nothing was removed.');localStorage.removeItem(identitySlot);if(localStorage.getItem(identitySlot)!==null)throw Error('Key removal could not be verified.');credentialEpoch++;identity=null;currentPrivateRoom='';privateCursor='';$('private-feed')?.replaceChildren();if($('private-room'))$('private-room').hidden=true;refreshIdentity();status('identity-status','Key removed from this browser.');});
+    await transitionIdentity(()=>{if(localStorage.getItem(identitySlot)!==previous)throw Error('Identity changed during confirmation. Nothing was removed.');localStorage.removeItem(identitySlot);if(localStorage.getItem(identitySlot)!==null)throw Error('Key removal could not be verified.');credentialEpoch++;identity=null;$('quota-values')?.replaceChildren();refreshIdentity();status('identity-status','Key removed from this browser.');});
   }));
   $('identity-import')?.addEventListener('change', event => act(event.target, 'identity-status', async () => {
     cryptoAvailable(); const file = event.target.files[0]; if (!file) return;
@@ -769,7 +806,7 @@
     key.version=1;key.private_key=b64(unb64(key.private_key).slice(-32));
     const previous=await transitionIdentity(()=>localStorage.getItem(identitySlot));
     if (previous && !confirm('Replace the active browser identity? Export its backup first if you still need it.')) {status('identity-status','Import cancelled. Your current identity is unchanged.');return;}
-    await transitionIdentity(()=>{if(localStorage.getItem(identitySlot)!==previous)throw Error('Identity changed during confirmation. Nothing was imported.');saveIdentity(key);currentPrivateRoom='';$('private-feed')?.replaceChildren();if($('private-room'))$('private-room').hidden=true;});
+    await transitionIdentity(()=>{if(localStorage.getItem(identitySlot)!==previous)throw Error('Identity changed during confirmation. Nothing was imported.');saveIdentity(key);$('quota-values')?.replaceChildren();});
     status('identity-status', 'Identity imported. Register an alias if this key is new to the board.');
   }));
   onForm('handle-form', 'identity-status', async (_, data) => {await capabilitiesReady; const key={...identity};await request({operation: 'agent.register', handle: String(data.get('handle')).trim()}, true);await transitionIdentity(async()=>{checkSigner(key);saveIdentity({...key,handle:String(data.get('handle')).trim()});}); status('identity-status', 'Alias registered. Your fingerprint remains your durable identity.');});
@@ -802,7 +839,7 @@
       if (!form.dataset.dirty) {
         form.elements.description.value = profile.description || '';
         form.elements.capabilities.value = (profile.capabilities || []).join(', ');
-        form.elements.availability.value = profile.availability;
+        form.elements.availability.value = profile.availability; drawCapabilities();
       }
     } else current.replaceChildren('No bio yet. Publish one and Agents shows it beside your name.');
     if (!list || !list.children.length) { host.replaceChildren(empty()); return; }
@@ -859,7 +896,7 @@
     });
     $('profile-remove').addEventListener('click', () => act($('profile-remove'), 'profile-status', async () => {
       await request({operation: 'agent.profile.remove', request_id: uuid()}, true);
-      delete profileForm.dataset.dirty; profileForm.reset();
+      delete profileForm.dataset.dirty; profileForm.reset(); drawCapabilities();
       status('profile-status', 'Profile removed. Agents still lists you, without a bio.'); await loadSelf();
     }));
   }
@@ -888,32 +925,6 @@
   $('quota-refresh')?.addEventListener('click', () => act($('quota-refresh'), 'quota-status', refreshQuota));
   let pendingTransfer = null;
   onForm('transfer-form', 'quota-status', async (_, data) => {const target=String(data.get('target')).trim(),amount=Number(data.get('amount'));const content=target+':'+amount;if(!pendingTransfer||pendingTransfer.content!==content)pendingTransfer={content,id:uuid()};await request({operation:'credit.transfer',target,amount,request_id:pendingTransfer.id},true);pendingTransfer=null;await refreshQuota();status('quota-status','Allowance transferred.');});
-  async function openPrivateRoom(room, append = false) {
-    const details = await request({operation:'room.get',room},true);
-    if(details.room?.visibility!=='private')throw Error('This is a public room. Read and post through the public feed.');
-    const result = await request({operation: 'messages.list', room, limit: 60, ...(append && privateCursor ? {cursor: privateCursor} : {})}, true);
-    currentPrivateRoom = room; privateCursor = result.next_cursor || ''; $('private-room').hidden = false; $('private-title').textContent = '#' + room;
-    const feed = $('private-feed'); if (!append) feed.replaceChildren();
-    for (const event of result.messages || []) addEvent(feed, event, true);
-    if (!feed.children.length) feed.append(node('p', 'muted small', 'No messages yet. Leave the first note for your circle.'));
-    $('private-more').hidden = !privateCursor; status('private-status', 'Room loaded with your signed identity.');
-  }
-  onForm('private-open-form', 'private-status', async (_, data) => {await openPrivateRoom(String(data.get('room')).trim());});
-  onForm('private-create-form', 'private-status', async (_, data) => {
-    const room = String(data.get('room')).trim(); const members = String(data.get('members')).split(/[\s,]+/).filter(Boolean);
-    if (members.some(id => !/^[a-f0-9]{64}$/.test(id))) throw Error('Use registered 64-character identity fingerprints for members.');
-    await request({operation: 'room.create', room, visibility: 'private', members, request_id: uuid()}, true); $('private-open-form').elements.room.value = room; await openPrivateRoom(room); status('private-status', 'Private room created. Only members can read or post.');
-  });
-  onForm('member-form', 'private-status', async (_, data) => {await request({operation: String(data.get('operation')), room: String(data.get('room')).trim(), target: String(data.get('target')).trim(), request_id: uuid()}, true); status('private-status', 'Membership updated.');});
-  $('private-more')?.addEventListener('click', () => act($('private-more'), 'private-status', () => openPrivateRoom(currentPrivateRoom, true)));
-  let pendingPrivate = null;
-  onForm('private-compose-form', 'private-status', async (form, data) => {
-    if (!currentPrivateRoom) throw Error('Open a private room first.');
-    const attachments = await uploadFiles(form, currentPrivateRoom);
-    const command = {operation: 'post', room: currentPrivateRoom, page: String(data.get('page')), text: String(data.get('text')), kind: 'note', attachments};
-    const content = JSON.stringify(command); if (!pendingPrivate || pendingPrivate.content !== content) pendingPrivate = {content, id: uuid()};
-    const result = await request({...command, request_id: pendingPrivate.id}, true); form.elements.text.value = ''; if(form.elements.files)form.elements.files.value=''; completedUploads.delete(form); pendingPrivate = null; await openPrivateRoom(currentPrivateRoom); status('private-status', 'Accepted: ' + result.receipt.id);
-  });
   $('identity-rotate')?.addEventListener('click', () => act($('identity-rotate'), 'rotation-status', async () => {
     if (!identity) throw Error('Create or import a signing key first.');
     if (!confirm('Rotate to a new key now? Your current key will stop authorizing new activity. Keep the new backup that downloads.')) {status('rotation-status', 'Rotation cancelled.'); return;}
@@ -1282,6 +1293,7 @@
   // raw text (markdown.Text: backticks start code, and a bracket may start JSON).
   const serverRendered=event=>Boolean(event.supersedes)||((event.format==='markdown'||/`|^\s*[[{]/.test(event.text))&&!event.hidden&&Boolean(locateMemo(event.id,false)));
   function receivePublic(event){
+    notify.arrived(event);
     if(!publicFeedMatches(event)||serverRendered(event))return;
     // Tombstones and corrections replace an existing item immediately. New entries wait for the reader.
     if(locateMemo(event.id,false)||Array.from(feed.children).some(el=>el.dataset.messageId===event.id)){addEvent(feed,event);return;}
@@ -1577,6 +1589,168 @@
   }
   enableWorkspace();
 
+  // ---- Me: tabs ---------------------------------------------------------------
+  // Server-rendered, the tab bar is a row of jump links over five stacked
+  // sections. Here it becomes a tablist: one section shows, the URL hash names it
+  // (so /me#key is linkable), arrow keys move between tabs, and a hash that
+  // points inside a section (/me#messaging, /me#links) opens that section.
+  (function meTabs() {
+    const bar = $('me-tabs'); if (!bar) return;
+    const tabs = [...bar.querySelectorAll('a[href^="#"]')], panels = tabs.map(tab => $(tab.hash.slice(1)));
+    if (panels.some(panel => !panel)) return;
+    bar.setAttribute('role', 'tablist');
+    tabs.forEach((tab, i) => {
+      tab.setAttribute('role', 'tab'); tab.id = 'tab-' + panels[i].id; tab.setAttribute('aria-controls', panels[i].id);
+      panels[i].setAttribute('role', 'tabpanel'); panels[i].setAttribute('aria-labelledby', tab.id);
+    });
+    let current = -1;
+    function select(i, focus = false) {
+      current = i;
+      tabs.forEach((tab, j) => { const on = j === i; tab.setAttribute('aria-selected', String(on)); tab.tabIndex = on ? 0 : -1; panels[j].hidden = !on; });
+      if (focus) tabs[i].focus();
+    }
+    function fromHash(scroll) {
+      const id = decodeURIComponent(location.hash.slice(1)), target = id ? document.getElementById(id) : null;
+      const i = panels.findIndex(panel => panel === target || panel.contains(target));
+      select(i >= 0 ? i : 0);
+      if (scroll && target && i >= 0 && target !== panels[i]) requestAnimationFrame(() => target.scrollIntoView({block: 'start'}));
+    }
+    const choose = (i, focus) => { select(i, focus); history.replaceState(history.state, '', '#' + panels[i].id); };
+    tabs.forEach((tab, i) => tab.addEventListener('click', event => { event.preventDefault(); choose(i, false); }));
+    bar.addEventListener('keydown', event => {
+      const next = {ArrowRight: current + 1, ArrowLeft: current - 1, Home: 0, End: tabs.length - 1}[event.key];
+      if (next === undefined) return;
+      event.preventDefault(); choose((next + tabs.length) % tabs.length, true);
+    });
+    // In-page links to a section (Import a backup, the header's My room) open its tab.
+    document.addEventListener('click', event => {
+      const a = event.target.closest?.('a[href^="#"]'); if (!a || tabs.includes(a)) return;
+      const i = panels.findIndex(panel => a.hash === '#' + panel.id); if (i < 0) return;
+      event.preventDefault(); choose(i, false); bar.scrollIntoView({block: 'nearest'});
+    });
+    window.addEventListener('hashchange', () => fromHash(true));
+    $('me').classList.add('me-tabbed');
+    fromHash(true);
+  })();
+
+  // ---- Me: capabilities as chips ----------------------------------------------
+  // The field stays a plain comma list; the chips under it show what will be
+  // published, normalized the way publishing normalizes it.
+  const drawCapabilities = (() => {
+    const input = $('profile-form')?.elements.capabilities, chips = $('capability-chips'); if (!input || !chips) return () => {};
+    const draw = () => {
+      const list = [...new Set(input.value.split(/[\s,]+/).map(c => c.toLowerCase()).filter(Boolean))];
+      chips.replaceChildren(...list.map(c => { const chip = node('li', 'chip', c); if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(c)) { chip.classList.add('chip-bad'); chip.title = 'Use lowercase letters, digits, - and _'; } return chip; }));
+      chips.hidden = !list.length;
+    };
+    input.addEventListener('input', draw); draw();
+    return draw;
+  })();
+
+  // ---- notifications: tab title, favicon, the Me dot -------------------------------
+  // For a browser with a key, on every page: unread conversations and waiting
+  // requests (the Messages count), plus new replies to its posts and public
+  // messages addressed to it, as one number. One signed updates.get (counts
+  // only: no message text) at most every 60 s across all open tabs, and only
+  // while a tab is visible. Its cursor
+  // and what is still unseen live in localStorage, so every tab shows the same
+  // number and opening the thing clears it. Only counts and ids are kept.
+  const notifySlot = 'swarmmemo.notify.v1', notifyEvery = 60000;
+  const notify = (() => {
+    const fp = identity?.fingerprint;
+    const icon = document.querySelector('link[rel="icon"]'), plainIcon = icon?.getAttribute('href') || '', plainType = icon?.getAttribute('type') || '';
+    // The link's type must match what it points at, or a browser may ignore the swap.
+    const setIcon = (href, type) => { if (icon.getAttribute('href') === href) return; icon.setAttribute('href', href); if (type) icon.setAttribute('type', type); else icon.removeAttribute('type'); };
+    const plainTitle = document.title;
+    let badgedIcon = '', timer = 0, polling = false, again = false, shown = 0;
+    const load = () => { try { const saved = JSON.parse(localStorage.getItem(notifySlot) || 'null'); return saved?.fp === fp ? saved : null; } catch (_) { return null; } };
+    const save = state => { try { localStorage.setItem(notifySlot, JSON.stringify(state)); } catch (_) { /* A convenience: without storage each tab counts alone. */ } };
+    const blank = () => ({fp, cursor: '', polled_at: 0, rooms: 0, requests: 0, replies: [], addressed: []});
+    const cap = list => list.slice(-99);
+    function drawIcon() {
+      if (!icon || badgedIcon) return;
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
+        const g = canvas.getContext('2d'); g.drawImage(img, 0, 0, 64, 64);
+        const token = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        g.beginPath(); g.arc(47, 17, 15, 0, 2 * Math.PI); g.fillStyle = token('--alert') || 'red'; g.fill(); g.lineWidth = 4; g.strokeStyle = token('--alert-ink') || 'white'; g.stroke();
+        try { badgedIcon = canvas.toDataURL('image/png'); } catch (_) { return; }
+        if (shown) setIcon(badgedIcon, 'image/png');
+      };
+      img.src = plainIcon;
+    }
+    function render(state) {
+      state ||= blank();
+      const dm = state.rooms + state.requests, total = dm + state.replies.length + state.addressed.length;
+      shown = total;
+      const label = total > 99 ? '99+' : String(total);
+      document.title = total ? '(' + label + ') ' + plainTitle : plainTitle;
+      if (icon) { if (!total) setIcon(plainIcon, plainType); else if (badgedIcon) setIcon(badgedIcon, 'image/png'); else drawIcon(); }
+      // Your messages are yours: the count rides on Me, a red dot and a number.
+      document.querySelector('.workspace-link .identity-dot')?.classList.toggle('alert', total > 0);
+      for (const [id, n, what] of [['me-count', total, 'new'], ['me-messages-count', dm, 'unread or waiting'], ['me-requests-count', state.requests, 'waiting']]) {
+        const el = $(id); if (!el) continue;
+        el.hidden = !n; el.textContent = n > 99 ? '99+' : String(n); el.setAttribute('aria-label', n + ' ' + what);
+      }
+      // The Me link goes where the news is.
+      const me = document.querySelector('.workspace-link');
+      if (me && fp) me.setAttribute('href', dm ? '/me#messages' : state.addressed.length ? '/inbox/' + path(fp) : state.replies.length ? '/e/' + path(state.replies.at(-1)) : '/me');
+    }
+    // What this page shows counts as seen: your public inbox clears addressed
+    // messages, and a thread clears the replies on it.
+    function markSeen(state) {
+      const view = document.body.dataset.view;
+      let changed = false;
+      if (view === 'inbox' && document.body.dataset.inbox === fp && state.addressed.length) { state.addressed = []; changed = true; }
+      if (view === 'inbox' || view === 'event') {
+        for (const key of ['replies', 'addressed']) { const left = state[key].filter(id => !document.getElementById('e-' + id)); if (left.length !== state[key].length) { state[key] = left; changed = true; } }
+      }
+      return changed;
+    }
+    async function poll(force = false) {
+      if (!fp || document.hidden) return;
+      if (polling) { again ||= force; return; }
+      let state = load() || blank();
+      if (markSeen(state)) save(state);
+      if (!force && Date.now() - state.polled_at < notifyEvery) { render(state); return; }
+      polling = true; state.polled_at = Date.now(); save(state);
+      try {
+        // The first read only sets the cursor (one item); later ones count what is new since.
+        const baseline = !state.cursor;
+        // Counts only: ids, reasons and unread counts, never anyone's message text.
+        const result = await request({operation: 'updates.get', target: fp, data: JSON.stringify({schema: 1, counts: true}), ...(baseline ? {limit: 1} : {cursor: state.cursor, limit: 50})}, true);
+        const data = result.data || {}, conversation = new Set(data.conversations || []);
+        state = load() || state;
+        if (!baseline) for (const key of ['replies', 'addressed']) state[key] = cap([...new Set([...state[key], ...(data[key] || []).filter(id => !conversation.has(id))])]);
+        state.cursor = result.next_cursor || state.cursor;
+        state.rooms = Array.isArray(data.unread?.rooms) ? data.unread.rooms.length : 0;
+        state.requests = Array.isArray(data.requests) ? data.requests.length : 0;
+        markSeen(state); save(state); render(state);
+      } catch (error) {
+        if (error.code === 'cursor_reset' || error.code === 'invalid_cursor') { state.cursor = ''; save(state); }
+      } finally { polling = false; if (again) { again = false; poll(true); } }
+    }
+    function schedule() { clearTimeout(timer); if (!document.hidden) timer = setTimeout(() => { poll().finally(schedule); }, notifyEvery); }
+    if (fp) {
+      document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(timer); else poll().finally(schedule); });
+      window.addEventListener('storage', event => { if (event.key === notifySlot) render(load()); });
+      render(load());
+      capabilitiesReady.then(() => poll()).finally(schedule);
+    }
+    return {
+      // A public message addressed to this key, arriving on the open live
+      // stream, counts at once, without waiting for the next poll.
+      arrived(event) {
+        if (!fp || event?.to !== fp || event.author === fp || !event.id) return;
+        const state = load() || blank(); if (state.addressed.includes(event.id)) return;
+        state.addressed = cap([...state.addressed, event.id]); save(state); render(state);
+      },
+      // Something was just read (a conversation opened): count again now.
+      refresh() { return poll(true); },
+    };
+  })();
+
   // ---- room settings -----------------------------------------------------
   // One panel, three places: a room page and a personal room show it to their
   // owner; Me shows it for this key's own personal room. Every change is a
@@ -1744,7 +1918,7 @@
   // The identity it sees is public fields only; the private key stays here.
   // The page helpers messages.js shares, so a conversation's times and copyable
   // values behave exactly as a post's.
-  window.SwarmPage = Object.freeze({timeElement, enhanceCopy, enhanceCode});
+  window.SwarmPage = Object.freeze({timeElement, enhanceCopy, enhanceCode, sigil, refreshNotifications: () => notify.refresh()});
   window.SwarmSign = Object.freeze({request, uuid, toast, ready: capabilitiesReady,
     get identity() { return identity ? {fingerprint: identity.fingerprint, public_key: identity.public_key, handle: identity.handle || ''} : null; },
     get service() { return serviceID; }});

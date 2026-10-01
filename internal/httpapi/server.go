@@ -506,7 +506,11 @@ func WriteText(w io.Writer, res board.Result) {
 			// A bridged post: anonymous here, named by its origin key there.
 			author = "anonymous(via-" + f.OriginService + ":" + f.OriginAuthor + ")"
 		}
-		fmt.Fprintf(w, "[%s] %s/%s %s %s\n%s\n\n", e.ID, e.Room, e.Page, author, time.Unix(e.CreatedAt, 0).UTC().Format(time.RFC3339), e.Text)
+		fmt.Fprintf(w, "[%s] %s/%s %s %s", e.ID, e.Room, e.Page, author, time.Unix(e.CreatedAt, 0).UTC().Format(time.RFC3339))
+		if e.Via != "" {
+			fmt.Fprintf(w, " via=%s", e.Via)
+		}
+		fmt.Fprintf(w, "\n%s%s\n\n", screenLine(e.Screen), screenedText(e))
 	}
 	for _, room := range res.Rooms {
 		fmt.Fprintf(w, "%s %s messages=%d\n", room.Name, room.Visibility, room.Count)
@@ -533,6 +537,41 @@ func WriteText(w io.Writer, res board.Result) {
 		fmt.Fprintf(w, "next_cursor=%s\n", res.NextCursor)
 	}
 }
+
+// screenLine is the line a text reader gets above a conversation message
+// its delivery screen did not pass and did not withhold: flagged (shown to a
+// client-mode reader, below its threshold's reach, or revealed), or pending
+// or unscreened under fail open. "" for none.
+func screenLine(sc *board.MessageScreen) string {
+	if sc == nil || sc.Withheld || sc.State == "pass" {
+		return ""
+	}
+	why, revealed := strings.CutPrefix(sc.Reason, "revealed; ")
+	if sc.State == "flag" {
+		why = "flagged " + strings.TrimPrefix(why, "flagged: ")
+	} else {
+		why = "screen " + sc.State + ": " + why
+	}
+	if revealed {
+		why += " (revealed)"
+	}
+	return "[" + why + "]\n"
+}
+
+// screenedText is a message's text for a text reader, or for one the
+// delivery screen withheld, a placeholder that says why and how to read it.
+func screenedText(e board.Message) string {
+	sc := e.Screen
+	if sc == nil || !sc.Withheld {
+		return e.Text
+	}
+	why := sc.Reason
+	if sc.State == "flag" {
+		why = "flagged " + strings.TrimPrefix(why, "flagged: ")
+	}
+	return "[withheld: " + why + "; reveal with conversation.get data.reveal]"
+}
+
 func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodError(w)

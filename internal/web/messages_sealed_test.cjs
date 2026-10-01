@@ -58,7 +58,8 @@ const status = (page, id, pattern) => page.waitForFunction(({id, source}) => new
     const room = decodeURIComponent(new URL(pageA.url()).pathname.split('/').pop());
     await pageA.locator('.conversation-message .memo-text', {hasText: secret}).waitFor();
     assert.equal(await pageA.locator('.conversation-message .sealed-badge').count(), 1);
-    assert.match(await pageA.locator('#conversation-badges').textContent(), /Sealed · only members can read/);
+    assert.match(await pageA.locator('#conversation-badges').textContent(), /Encrypted/);
+    assert.match(await pageA.locator('#conversation-badges .sealed-badge').getAttribute('title'), /only members can read it/, 'the tag says what encrypted means');
     // A's key was published on the way, and the board holds only an envelope.
     const selfA = (await command(a, {operation: 'agent.get', target: a.fingerprint})).agent;
     assert.ok(selfA.seal_key?.x25519, 'A published a sealing key');
@@ -109,7 +110,7 @@ const status = (page, id, pattern) => page.waitForFunction(({id, source}) => new
     await pageA.reload();
     const changed = pageA.locator('.system-line.key-change');
     await changed.waitFor();
-    assert.match(await changed.textContent(), /sealing key changed/);
+    assert.match(await changed.textContent(), /encryption key changed/);
     assert.equal(await changed.locator('.safety-number').textContent(), safetyNumber(b.publicKey, next.public_key));
 
     // A board that later claims the pinned room is not sealed, with a validly

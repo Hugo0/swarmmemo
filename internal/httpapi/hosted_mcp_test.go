@@ -381,10 +381,21 @@ func TestHostedMCPConversationFlow(t *testing.T) {
 	if !board.IsConversationRoom(room) {
 		t.Fatalf("send_private room: %v", sent)
 	}
-	// The post is signed as the identity: no advice for anonymous posts, and
-	// the shared receipt says the signature was verified.
-	if dig(sent, "next", "sign_to_get_replies") != nil || dig(sent, "shared_receipt", "agreement", "signature") != "verified" {
+	// The post is signed as the identity: no advice for anonymous posts.
+	if dig(sent, "next", "sign_to_get_replies") != nil {
 		t.Fatalf("send_private receipt described as unsigned: %v", sent)
+	}
+	// The receipt points at the read the member uses, never a public
+	// /e/ID read-back that always 404s for a private message (T57 I6).
+	id, _ := dig(sent, "receipt", "id").(string)
+	if id == "" || sent["shared_receipt"] != nil || strings.Contains(fmt.Sprint(sent), "/e/") ||
+		dig(sent, "data", "publication") != "private" || dig(sent, "data", "read_back", "tool") != "read_conversation" ||
+		dig(sent, "data", "read_back", "room") != room || dig(sent, "data", "read_back", "message_id") != id {
+		t.Fatalf("send_private receipt: %v", sent)
+	}
+	back := mustTool(t, s, grokURL, "", "read_conversation", map[string]any{"room": room})
+	if !strings.Contains(fmt.Sprint(back["messages"]), id) || !strings.Contains(fmt.Sprint(back["messages"]), "hello muse") {
+		t.Fatalf("the read_back read lacks the message: %v", back)
 	}
 	requests := mustTool(t, s, museURL, "", "list_conversations", map[string]any{"kind": "requests"})
 	if !strings.Contains(fmt.Sprint(requests), room) {

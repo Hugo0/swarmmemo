@@ -259,17 +259,30 @@ func (d *dns) ParseFrom(source string, frame []byte) (Request, error) {
 	return req, nil
 }
 
-// fitted is a TXT answer of text and then each extra string only while it
-// fits the answer budget: a UDP answer is bounded by the query's size, and
-// the text must never be truncated away.
-func (d *dns) fitted(q *dnsQuery, text string, extra []string, budget int) []byte {
-	for n := len(extra); n > 0; n-- {
-		out := d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData(append([]string{text}, extra[:n]...))), nil, budget)
+// fitted is a TXT answer of text, then the required strings (the cleartext
+// label), then each optional string (the free-today line) only while it fits
+// the answer budget: a UDP answer is bounded by the query's size, and the text
+// must never be truncated away. When text and the required strings do not
+// fit, the answer carries the text with TC set, so a resolver retries over
+// TCP, where it all fits, rather than taking an answer that silently lost
+// the label.
+func (d *dns) fitted(q *dnsQuery, text string, required, optional []string, budget int) []byte {
+	base := append([]string{text}, required...)
+	for n := len(optional); n >= 0; n-- {
+		out := d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData(append(base[:len(base):len(base)], optional[:n]...))), nil, budget)
 		if len(out) >= 8 && binary.BigEndian.Uint16(out[6:8]) == 1 {
 			return out
 		}
 	}
-	return d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{text})), nil, budget)
+	return d.reply(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{text})), nil, budget, true)
+}
+
+// labelOf is a write answer's required strings: the cleartext label, if any.
+func labelOf(notice string) []string {
+	if notice == "" {
+		return nil
+	}
+	return []string{notice}
 }
 
 // within returns the labels below the zone apex.
@@ -300,25 +313,20 @@ func (d *dns) Render(req Request, res board.Result, err error) []byte {
 			text = oneLine(okLine(req.Command, res), 255)
 		}
 		d.writes.finish(req.Arg, text, req.Notice)
-		// The cleartext label comes first, then RFC0012's "free today" line.
-		extra := []string{}
-		if req.Notice != "" {
-			extra = append(extra, req.Notice)
-		}
+		// The cleartext label must come along; RFC0012's "free today" line
+		// follows when it fits.
+		var optional []string
 		if err == nil && res.Allowance != nil && res.Allowance.Line != "" {
-			extra = append(extra, oneLine(res.Allowance.Line, 255))
+			optional = append(optional, oneLine(res.Allowance.Line, 255))
 		}
-		return d.fitted(q, text, extra, req.Budget)
+		return d.fitted(q, text, labelOf(req.Notice), optional, req.Budget)
 	case "write-ack":
 		return d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{req.Arg})), nil, req.Budget)
 	case "write-status":
-		// The label again, for a completing answer that had no room for it.
+		// The outcome with its label: a status query, and a completing chunk
+		// retried (over TCP, after a truncated UDP answer).
 		text, notice := d.writes.lookup(req.Arg)
-		extra := []string{}
-		if notice != "" {
-			extra = append(extra, notice)
-		}
-		return d.fitted(q, text, extra, req.Budget)
+		return d.fitted(q, text, labelOf(notice), nil, req.Budget)
 	}
 	switch {
 	case errors.Is(err, errDNSFormat):
@@ -401,7 +409,11 @@ func (d *dns) Render(req Request, res board.Result, err error) []byte {
 		if m.Handle != "" {
 			by = m.Handle
 		}
-		strs := []string{clean(fmt.Sprintf("%s/%s seq=%d by=%s", m.Room, m.Page, m.Sequence, by))}
+		head := fmt.Sprintf("%s/%s seq=%d by=%s", m.Room, m.Page, m.Sequence, by)
+		if m.Via != "" {
+			head += " via=" + m.Via // as the other text wires print it
+		}
+		strs := []string{clean(head)}
 		text := clean(m.Text)
 		if len(text) > dnsTextCap {
 			cut := dnsTextCap
@@ -490,6 +502,12 @@ func encodeName(name string) ([]byte, error) {
 // message builds a response. If it would exceed budget it is sent as header
 // and question only, with TC set: never larger than the query itself.
 func (d *dns) message(q *dnsQuery, rcode uint16, ans, auth *rr, budget int) []byte {
+	return d.reply(q, rcode, ans, auth, budget, false)
+}
+
+// reply is message with TC set when truncated: a partial answer that tells
+// the resolver to retry over TCP for the rest.
+func (d *dns) reply(q *dnsQuery, rcode uint16, ans, auth *rr, budget int, truncated bool) []byte {
 	build := func(ans, auth *rr, tc bool) []byte {
 		flags := uint16(0x8000) | q.opcode<<11 | 0x0400 | rcode
 		if q.rd {
@@ -523,7 +541,7 @@ func (d *dns) message(q *dnsQuery, rcode uint16, ans, auth *rr, budget int) []by
 		}
 		return b
 	}
-	out := build(ans, auth, false)
+	out := build(ans, auth, truncated)
 	if len(out) > budget {
 		out = build(nil, nil, true)
 	}
@@ -537,7 +555,7 @@ func (d *dns) Capability(host string) httpapi.TransportCapability {
 			Access: "read+write",
 			WriteVerbs: []string{"TXT MSGID.I.N.BASE32[.BASE32...].w." + d.zoneName + " for each chunk I of N",
 				"TXT MSGID.status." + d.zoneName},
-			Signed:       "required for writes: a complete signed command (data is a JSON-encoded string), any of operations, and room.policy.set, room.member.add and room.member.remove in a conversation, lowercase unpadded base32, 16-32 character [a-z0-9] MSGID; not encrypted, so answers carrying a private conversation say so (MSGID.status repeats the label; over TCP it always fits), and a sealed conversation stays ciphertext; a signed read answers with a pointer to netcat or HTTPS",
+			Signed:       "required for writes: a complete signed command (data is a JSON-encoded string), any of operations, and room.policy.set, room.member.add and room.member.remove in a conversation, lowercase unpadded base32, 16-32 character [a-z0-9] MSGID; not encrypted, so answers carrying a private conversation say so (a UDP answer without room for the label sets TC, so the resolver retries over TCP, where it always fits; MSGID.status repeats it), and a sealed conversation stays ciphertext; a signed read answers with a pointer to netcat or HTTPS",
 			Operations:   board.SigningWireOperations(),
 			OriginKey:    "none; the source is a resolver, so anonymous writes are refused",
 			Limits:       map[string]int{"request_bytes": dnsMaxQuery, "message_text_bytes": dnsTextCap, "udp_response_to_query_ratio": 2, "head_ids": dnsHeadIDs, "write_chunks_max": writeMaxChunks, "write_encoded_bytes_max": writeMaxEncoded, "write_expiry_seconds": int(writeExpiry.Seconds()), "write_ttl_seconds": 0},

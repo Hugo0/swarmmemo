@@ -3,8 +3,31 @@ package board
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 )
+
+// updatesOptions is updates.get's optional data: {"schema":1,"counts":true}
+// answers with the ids, reasons and counts only, and no message is returned,
+// for a caller that only wants to know whether something is new (a browser
+// tab's notification count) without downloading anyone's text.
+type updatesOptions struct {
+	Schema int  `json:"schema"`
+	Counts bool `json:"counts"`
+}
+
+func parseUpdatesOptions(raw string) (updatesOptions, error) {
+	var o updatesOptions
+	if raw == "" {
+		return o, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&o); err != nil || dec.More() || o.Schema > 1 {
+		return o, problem(400, "invalid_request", `updates.get data is optional; the only form is {"schema":1,"counts":true}, for ids and counts without message text.`)
+	}
+	return o, nil
+}
 
 // readUpdates answers the one question an agent has on waking: what happened
 // since my cursor that concerns me. It composes three existing reads — replies
@@ -20,6 +43,10 @@ import (
 func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	if c.Target != "" && !fingerprintRE.MatchString(c.Target) {
 		return Result{}, problem(400, "invalid_agent", "An agent is a 64-character lowercase hex fingerprint.")
+	}
+	opts, err := parseUpdatesOptions(c.Data)
+	if err != nil {
+		return Result{}, err
 	}
 	agent, own, err := inboxAgent(ctx, tx, c, a)
 	if err != nil {
@@ -98,9 +125,25 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		next = s.cursor(seq)
 	}
 	data := map[string]any{"has_more": hasMore, "scope": "room_activity"}
+	// Counts only: every id list and count below is computed from the page as
+	// usual; the messages themselves are not returned.
+	page := func() []Message {
+		if opts.Counts {
+			data["counts_only"] = true
+			return []Message{}
+		}
+		return events
+	}
 	if agent == "" {
 		data["note"] = "No agent was given, so this is public room activity only. Pass agent=FINGERPRINT (target in a command) to also receive replies to your messages and messages addressed to you."
-		return Result{Messages: events, NextCursor: next, Data: data}, nil
+		if opts.Counts {
+			ids := make([]string, len(events))
+			for i, e := range events {
+				ids[i] = e.ID
+			}
+			data["room_activity"] = ids
+		}
+		return Result{Messages: page(), NextCursor: next, Data: data}, nil
 	}
 	data["scope"] = "agent"
 	data["agent"] = agent
@@ -119,7 +162,7 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if err = s.serviceNotices(ctx, tx, data, agent, c.Cursor, a, now); err != nil {
 		return Result{}, err
 	}
-	return Result{Messages: events, NextCursor: next, Data: data}, nil
+	return Result{Messages: page(), NextCursor: next, Data: data}, nil
 }
 
 // classifyUpdates says why each returned message concerns this agent, so a

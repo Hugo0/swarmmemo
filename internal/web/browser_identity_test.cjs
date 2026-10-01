@@ -55,7 +55,7 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
     await options(a);
     await a.getByRole('radio',{name:'Anonymous',exact:true}).click();
     assert.ok(await a.getByRole('radio',{name:'Remember me on this device'}).isChecked());
-    await b.goto(origin+'/me');await b.locator('#identity-forget').click();
+    await b.goto(origin+'/me#key');await b.locator('#identity-forget').click();
     await status(b,'identity-status','unresolved request');assert.equal((await key(b)).public_key,first.public_key);
     await b.locator('#identity-import').setInputFiles({name:'same-key.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(first))});
     await status(b,'identity-status','unresolved request');
@@ -112,7 +112,7 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
 
     const recovery=await browser.newContext({acceptDownloads:true}),p=await recovery.newPage();
     await p.goto(origin+'/#compose');await post(p,'Rotation recovery setup');const original=await key(p);
-    await p.goto(origin+'/me');let rotationWire='';
+    await p.goto(origin+'/me#key');let rotationWire='';
     await p.route('**/v1/command',async route=>{
       if(route.request().postDataJSON().operation!=='agent.rotate')return route.continue();
       rotationWire=route.request().postData();assert.equal((await route.fetch()).status(),200);await route.abort('failed');
@@ -123,7 +123,7 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
     assert.equal(await p.evaluate(name=>localStorage.getItem(name),rotationSlot),pendingRaw);
     // Closing releases live token locks, not server authority. Saved rotation
     // material remains for an explicit exact replay; no general outbox claim.
-    await p.close();const next=await recovery.newPage();await next.goto(origin+'/me');assert.equal(await tokens(next),0);
+    await p.close();const next=await recovery.newPage();await next.goto(origin+'/me#key');assert.equal(await tokens(next),0);
     await next.locator('#identity-forget').click();await status(next,'identity-status','Pending rotation');
     await next.route('**/v1/command',async route=>{if(route.request().postDataJSON().operation==='agent.rotate')assert.equal(route.request().postData(),rotationWire);await route.continue();});
     next.once('dialog',d=>d.accept());await next.locator('#identity-rotate').click();await status(next,'rotation-status','Key rotated');
@@ -135,24 +135,19 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
     alias.once('dialog',d=>d.dismiss());await alias.locator('#identity-import').setInputFiles({name:'cancel.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(original))});
     await status(alias,'identity-status','Import cancelled');assert.equal((await key(alias)).public_key,newKey.public_key);
     await alias.setViewportSize({width:320,height:850});assert.ok(await alias.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-    // Hold a legitimate private read across a credential-change event. Clearing
+    // Hold a legitimate signed read across a credential-change event. Clearing
     // existing content is insufficient unless its delayed response is fenced too.
-    const room='identity-read-'+Date.now().toString(36);
-    await next.locator('#private-create-form').locator('..').locator('summary').click();
-    await next.locator('#private-create-form input[name=room]').fill(room);await next.locator('#private-create-form button').click();await status(next,'private-status','Private room created');
-    await next.locator('#private-compose-form textarea').fill('Old-key delayed private sentinel');await next.locator('#private-compose-form button').click();await status(next,'private-status','Accepted');
     let releaseRead, enteredRead;const entered=new Promise(resolve=>enteredRead=resolve);
     await next.route('**/v1/command',async route=>{
-      if(route.request().postDataJSON().operation!=='messages.list')return route.continue();
+      if(route.request().postDataJSON().operation!=='quota.get')return route.continue();
       const response=await route.fetch();enteredRead();await new Promise(resolve=>releaseRead=resolve);await route.fulfill({response});
     });
-    await next.locator('#private-open-form button').click();await entered;
+    await next.locator('#tab-more').click();await next.locator('#quota-refresh').click();await entered;
     const other=await recovery.newPage();await other.goto(origin+'/for-agents');await other.evaluate(name=>localStorage.removeItem(name),slot);
-    await status(next,'identity-status','Identity changed in another tab');assert.equal(await next.locator('#private-feed').textContent(),'');
-    releaseRead();await status(next,'private-status','old response was discarded');assert.equal(await next.locator('#private-feed').textContent(),'');
-    assert.equal(await next.locator('#private-room').isVisible(),false);
+    await status(next,'identity-status','Identity changed in another tab');assert.equal(await next.locator('#quota-values').textContent(),'');
+    releaseRead();await status(next,'quota-status','old response was discarded');assert.equal(await next.locator('#quota-values').textContent(),'');
     await recovery.close();
-    console.log('PASS: global32 pending-token admission, rotation unknown/forget guard, explicit exact recovery after tab close, backup/import/cancellation, origin separation, private response epoch fencing.');
+    console.log('PASS: global32 pending-token admission, rotation unknown/forget guard, explicit exact recovery after tab close, backup/import/cancellation, origin separation, signed read epoch fencing.');
 
     const plain=await browser.newContext({javaScriptEnabled:false}),n=await plain.newPage();await n.goto(origin+'/#compose');
     assert.equal(await n.locator('#memo-text').isVisible(),true,'no-JS composer is open at rest');

@@ -17,7 +17,7 @@ const assert = require('node:assert/strict');
     }
     assert.equal(await push.locator('input, textarea, form').count(), 0, 'push docs must not offer a form');
 
-    await page.goto(origin + '/me');
+    await page.goto(origin + '/me#push-delivery');
     const panel = page.locator('#push-delivery');
     await panel.waitFor();
     assert.ok((await panel.textContent()).includes('no form here'), '/me must say why there is no form');

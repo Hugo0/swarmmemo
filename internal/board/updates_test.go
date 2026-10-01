@@ -175,3 +175,40 @@ func TestImportedKindIsReservedToTheCuratorAccount(t *testing.T) {
 		}
 	}
 }
+
+// Counts only: the same ids, reasons and cursor, and no message text, so a
+// notification count never downloads anyone's words.
+func TestUpdatesCountsOnlyReturnsIdsWithoutMessages(t *testing.T) {
+	s := openTest(t, updatesConfig())
+	mine, other := keyFor(1), keyFor(2)
+	run(t, s, signed(mine, Command{Operation: "agent.register", Handle: "counter"}))
+	run(t, s, signed(other, Command{Operation: "agent.register", Handle: "writer"}))
+	me := keyID(mine)
+	root := run(t, s, signed(mine, Command{Operation: "post", Room: "workshop", Text: "A question."})).Receipt.ID
+	saved := run(t, s, signed(mine, Command{Operation: "updates.get", Target: me, Limit: 1, Data: `{"schema":1,"counts":true}`})).NextCursor
+	reply := run(t, s, signed(other, Command{Operation: "post", Room: "workshop", Text: "A secret answer.", ReplyTo: root})).Receipt.ID
+	mail := run(t, s, signed(other, Command{Operation: "post", Room: "lobby", Text: "A secret note.", To: me})).Receipt.ID
+
+	full := run(t, s, signed(mine, Command{Operation: "updates.get", Target: me, Cursor: saved}))
+	counts := run(t, s, signed(mine, Command{Operation: "updates.get", Target: me, Cursor: saved, Data: `{"schema":1,"counts":true}`}))
+	if len(counts.Messages) != 0 || counts.Data["counts_only"] != true {
+		t.Fatalf("counts only returned %d messages: %v", len(counts.Messages), counts.Data)
+	}
+	if len(ids(counts, "replies")) != 1 || ids(counts, "replies")[0] != reply || len(ids(counts, "addressed")) != 1 || ids(counts, "addressed")[0] != mail {
+		t.Fatalf("counts only lost the reasons: %v", counts.Data)
+	}
+	if len(full.Messages) != 2 || counts.NextCursor == "" || counts.NextCursor == saved {
+		t.Fatal("counts only must advance the cursor as the full read does")
+	}
+	if after := run(t, s, signed(mine, Command{Operation: "updates.get", Target: me, Cursor: counts.NextCursor, Data: `{"schema":1,"counts":true}`})); len(ids(after, "replies"))+len(ids(after, "addressed")) != 0 {
+		t.Fatalf("the counts cursor replays what it already counted: %v", after.Data)
+	}
+	if _, ok := counts.Data["unread"]; !ok {
+		t.Fatal("read for yourself, counts only keeps the inbox counts")
+	}
+	for _, bad := range []string{`{"schema":1,"counts":true,"text":true}`, `not json`, `{"schema":2}`} {
+		if _, err := s.Execute(testContext, signed(mine, Command{Operation: "updates.get", Target: me, Data: bad}), "test-origin"); err == nil || !strings.Contains(err.Error(), "counts") {
+			t.Errorf("data %s was not refused: %v", bad, err)
+		}
+	}
+}

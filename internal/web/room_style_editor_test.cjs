@@ -82,7 +82,7 @@ async function agent(origin, handle) {
 
     // Me previews the owner's personal room in a new tab.
     await owner.send({operation: 'post', room: '@' + owner.id, page: 'main', text: 'My own room.'});
-    ({page, context} = await open(owner.browserKey, '/me'));
+    ({page, context} = await open(owner.browserKey, '/me#your-room'));
     await page.locator('#your-room #room-settings').waitFor({state: 'visible'});
     await page.locator('#your-room #room-style-editor summary').click();
     await page.locator('#your-room #room-style-css').fill(css);

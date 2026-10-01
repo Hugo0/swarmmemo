@@ -12,7 +12,13 @@ const assert = require('node:assert/strict');
   const page = await context.newPage(); const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   let writes = 0;
-  page.on('request', request => {if (/\/(w|w64|c64)\//.test(new URL(request.url()).pathname) || request.method() === 'POST') writes++;});
+  // The header's notification counts and Me's recent conversations are signed
+  // reads a page with a key makes on its own; they post and execute nothing.
+  const ownReads = new Set(['updates.get', 'conversations.list']);
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/v1/command' && ownReads.has(request.postDataJSON()?.operation)) return;
+    if (/\/(w|w64|c64)\//.test(new URL(request.url()).pathname) || request.method() === 'POST') writes++;
+  });
   try {
     await page.goto(origin);
     const copyURL=page.getByRole('button', {name:'Copy agent entry URL', exact:true});
@@ -91,7 +97,7 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('#signed-commands h3').isVisible(), true, 'existing deep links reveal optional tools');
     const workspace = await page.goto(origin + '/me');
     assert.equal(workspace.headers()['x-robots-tag'], 'noindex, follow');
-    assert.match(await page.locator('.workspace-onboarding').textContent(), /This browser is optional/);
+    assert.match(await page.locator('#agent-commands').textContent(), /This browser is optional/);
     assert.equal(writes, writesBeforeHandoff, 'agent handoff must not post or execute examples');
     const plain = await browser.newContext({javaScriptEnabled:false});
     const plainPage = await plain.newPage(); await plainPage.goto(origin + '/for-agents');

@@ -33,22 +33,22 @@ assert.match(origin || '', /^http:\/\/127\.0\.0\.1:\d+$/, 'requires an explicit 
       assert.equal(await page.locator('#workspace-controls').getAttribute('disabled'), '', mode);
       assert.equal(await page.locator('#workspace-controls input:enabled, #workspace-controls textarea:enabled, #workspace-controls select:enabled, #workspace-controls button:enabled').count(), 0, mode);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), mode + ' mobile overflow');
-      // Even a programmatic submission cannot serialize disabled private fields.
+      // Even a programmatic submission cannot serialize disabled signing fields.
       // Real keyboard/pointer users cannot edit or submit these controls at all.
       const submit = () => page.evaluate(() => {
-        const form = document.getElementById('private-create-form');
-        form.elements.room.value = 'synthetic-private-room-sentinel';
-        form.elements.members.value = 'a'.repeat(64);
-        if (new FormData(form).has('room') || new FormData(form).has('members')) throw Error('Disabled metadata serialized');
+        const form = document.getElementById('transfer-form');
+        form.elements.target.value = 'synthetic-transfer-sentinel';
+        form.elements.amount.value = '5';
+        if (new FormData(form).has('target') || new FormData(form).has('amount')) throw Error('Disabled metadata serialized');
         form.requestSubmit();
       });
       if (['no-js', 'blocked-script', 'startup-error'].includes(mode)) {
         await Promise.all([page.waitForNavigation({waitUntil: 'load'}), submit()]);
       } else {
         await submit();
-        assert.equal((await page.locator('#private-status').textContent()).trim(), '', 'disabled handler must not attempt signing');
+        assert.equal((await page.locator('#quota-status').textContent()).trim(), '', 'disabled handler must not attempt signing');
       }
-      assert.ok(urls.every(url => !url.includes('sentinel') && !url.includes('members=') && !url.includes('room=')), mode + ' metadata entered URL');
+      assert.ok(urls.every(url => !url.includes('sentinel') && !url.includes('target=') && !url.includes('amount=')), mode + ' metadata entered URL');
       assert.equal(writes.length, 0, mode + ' unexpectedly wrote');
       assert.ok(!new URL(page.url()).search, mode + ' submitted private query');
       await context.close();
@@ -72,7 +72,7 @@ assert.match(origin || '', /^http:\/\/127\.0\.0\.1:\d+$/, 'requires an explicit 
     await page.waitForFunction(() => typeof window.finishWorkspaceProbe === 'function');
     assert.ok(await page.locator('#identity-create').isDisabled(), 'pending probe must not enable controls');
     assert.deepEqual(await page.evaluate(() => window.workspaceFormsWithHandlers.sort()),
-      ['handle-form', 'link-form', 'member-form', 'messaging-block-form', 'messaging-policy-form', 'private-compose-form', 'private-create-form', 'private-open-form', 'profile-form', 'room-moderator-form', 'room-policy-form', 'room-style-form', 'transfer-form'].sort());
+      ['handle-form', 'link-form', 'messaging-block-form', 'messaging-policy-form', 'profile-form', 'room-moderator-form', 'room-policy-form', 'room-style-form', 'transfer-form'].sort());
     await page.evaluate(() => window.finishWorkspaceProbe());
     await page.waitForFunction(() => !document.getElementById('workspace-controls').disabled);
     assert.equal(await page.locator('#workspace-readiness').isVisible(), false);

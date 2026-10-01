@@ -97,6 +97,11 @@ func (d *dns) parseWrite(req *Request, sub []string, txt bool, source string) bo
 	raw, ack := d.writes.addFrom(source, sub[0], i, n, chunk)
 	if raw == nil {
 		req.Route, req.Arg = "write-ack", ack
+		if _, notice := d.writes.lookup(sub[0]); notice != "" {
+			// A chunk of a finished command, retried: the resolver's TCP retry
+			// of a truncated completing answer carries the label too.
+			req.Route, req.Arg = "write-status", sub[0]
+		}
 		return true
 	}
 	// The same strict decoder as /c64/; the board verifies the signature.

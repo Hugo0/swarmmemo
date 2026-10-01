@@ -388,6 +388,49 @@ class PublishedCommandTests(unittest.TestCase):
         self.assertGreater(checked, 30)
 
 
+class ArgumentOrderTests(unittest.TestCase):
+    """Flags may sit anywhere among a chat command's arguments (T57 I3)."""
+    def parse(self, *argv):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            try:
+                return memo.build_parser().parse_args(["--key", "KEY.json", *argv])
+            except SystemExit:
+                self.fail(f"{argv}: {err.getvalue()}")
+
+    def test_flags_anywhere(self):
+        for argv in (["chat", "dm", "AGENT", "--sealed", "msg.txt"], ["chat", "dm", "--sealed", "AGENT", "msg.txt"],
+                     ["chat", "dm", "AGENT", "msg.txt", "--sealed"]):
+            args = self.parse(*argv)
+            self.assertEqual((args.target, args.file, args.sealed), ("AGENT", "msg.txt", True), argv)
+        args = self.parse("chat", "dm", "AGENT", "--sealed", "-")
+        self.assertEqual((args.target, args.file, args.sealed), ("AGENT", "-", True))
+        args = self.parse("chat", "dm", "AGENT", "--postage", "5", "msg.txt", "--approved")
+        self.assertEqual((args.file, args.postage, args.approved), ("msg.txt", 5, True))
+        args = self.parse("chat", "send", "--approved", "ROOM", "-")
+        self.assertEqual((args.room, args.file, args.approved), ("ROOM", "-", True))
+        args = self.parse("chat", "dm", "AGENT")
+        self.assertEqual((args.target, args.file, args.sealed), ("AGENT", None, False))
+        args = self.parse("chat", "policy", "block", "A", "B")
+        self.assertEqual(args.agents, ["A", "B"])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            memo.build_parser().parse_args(["chat", "dm", "AGENT", "--sealed", "a", "b"])
+
+
+class FreeCallTests(unittest.TestCase):
+    """A free service call needs no --max-cost (T57 I4)."""
+    parse = ArgumentOrderTests.parse
+
+    def test_call_needs_no_max_cost_for_a_free_method(self):
+        self.assertEqual(self.parse("call", "screen", "leak", '{"text":"hello"}').max_cost, 0)
+        self.assertEqual(self.parse("call", "screen", "leak", "{}", "--max-cost", "7").max_cost, 7)
+        sent = []
+        with patch.object(memo, "load_key", return_value=None), \
+             patch.object(memo.Client, "service_call", lambda self, *a: sent.append(a) or {"ok": True}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(memo.main(["--key", "KEY.json", "call", "screen", "leak", '{"text":"hello"}']), 0)
+        self.assertEqual(sent, [("screen", "leak", {"text": "hello"}, 0, None)])
+
+
 @unittest.skipUnless(os.environ.get("SWARMMEMO_TEST_BINARY"), "set SWARMMEMO_TEST_BINARY for a real board")
 class LiveChatTests(unittest.TestCase):
     """Agents with their own homes, on a disposable loopback board without

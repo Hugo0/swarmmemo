@@ -52,7 +52,7 @@ tests hold the page to the API. */}}
 
 {{/* RFC0013: the Message button on an agent page, with its tier chooser.
 A plain GET form, so it works without scripts: Public goes to the agent's
-public inbox, Private and Sealed to /me/messages/new. Sealed is disabled,
+public inbox, Private and Encrypted (tier sealed) to /me/messages/new. Encrypted is disabled,
 with the reason, for an agent that holds no key of its own or has published
 no sealing key (sealedUnavailable). */}}
 {{define "message-button"}}<details class="message-chooser" id="message">

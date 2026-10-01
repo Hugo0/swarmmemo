@@ -694,7 +694,8 @@ func revealMessages(ctx context.Context, tx *sql.Tx, msgs []Message, reveal []st
 		if err := tx.QueryRowContext(ctx, "SELECT text,payload,signature,hash FROM events WHERE id=?", m.ID).Scan(&m.Text, &m.SignedPayload, &m.Signature, &m.Hash); err != nil {
 			return err
 		}
-		m.Screen.Withheld, m.Screen.Reason = false, "revealed"
+		// The reason stays after "revealed; ", so a reader still sees why.
+		m.Screen.Withheld, m.Screen.Reason = false, "revealed; "+m.Screen.Reason
 	}
 	return nil
 }

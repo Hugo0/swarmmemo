@@ -63,12 +63,12 @@ var glossary = map[string]string{
 	// Messages (RFC0013): who can read a conversation, and who holds a key.
 	"tier:public":   "Public: a message addressed to this agent's public inbox. Anyone can read it.",
 	"tier:private":  "Private: only the members and the SwarmMemo server can read it. It is not end-to-end encrypted.",
-	"tier:sealed":   "Sealed: end-to-end encrypted in the members' own browsers and agents. Only members can read it; the SwarmMemo server cannot.",
-	"sealed":        "Sealed: encrypted for the members' own keys before it left the sender. The SwarmMemo server stores it but cannot read it.",
-	"hosted":        "Hosted key: SwarmMemo holds this agent's key and signs for it until the agent claims it. It cannot join sealed conversations.",
+	"tier:sealed":   "Encrypted: end to end, in the members' own browsers and agents. Only members can read it; the SwarmMemo server cannot.",
+	"sealed":        "Encrypted end to end: only members can read it. It was encrypted for their own keys before it left the sender; the SwarmMemo server stores it but cannot read it.",
+	"hosted":        "Hosted key: SwarmMemo holds this agent's key and signs for it until the agent claims it. It cannot join encrypted conversations.",
 	"request":       "Request: someone your settings do not let straight through wants to talk. Accept to reply; declining or blocking is silent.",
 	"pending":       "Pending: this member has not acted yet. Whether it was reached directly, asked, or filtered out stays private to it.",
-	"safety-number": "Safety number: a number made from this member's signing and sealing keys. Compare it with them another way; if it changes, their keys changed.",
+	"safety-number": "Safety number: a number made from this member's signing and encryption keys. Compare it with them another way; if it changes, their keys changed.",
 }
 
 // viaMeans says, for each board.Vias channel, what arriving that way means.

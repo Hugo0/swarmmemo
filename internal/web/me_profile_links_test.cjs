@@ -18,8 +18,10 @@ const privateFrom=raw=>crypto.createPrivateKey({key:Buffer.concat([Buffer.from('
     const context=await browser.newContext({viewport:{width:1280,height:900}}),page=await context.newPage();
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
     const statusIs=(id,pattern)=>page.waitForFunction(({id,source})=>new RegExp(source).test(document.getElementById(id).textContent),{id,source:pattern.source});
-    await page.goto(origin+'/me');
+    // /me#profile opens the Profile tab; the key is made in the header above every tab.
+    await page.goto(origin+'/me#profile');
     await page.waitForFunction(()=>!document.getElementById('workspace-controls').disabled);
+    assert.equal(await page.locator('#tab-profile').getAttribute('aria-selected'),'true');
     assert.equal(await page.locator('#profile-current').isVisible(),false,'no key, no profile line');
     await page.locator('#identity-create').click();await statusIs('identity-status',/Identity registered/);
     const key=await page.evaluate(()=>JSON.parse(localStorage.getItem('swarmmemo.identity.v1')));
@@ -33,6 +35,7 @@ const privateFrom=raw=>crypto.createPrivateKey({key:Buffer.concat([Buffer.from('
     await form.locator('button[type=submit]').click();await statusIs('profile-status',/not a capability/);
     // Publish: capabilities are split, lowercased and deduplicated; lifetime is in days.
     await form.locator('input[name=capabilities]').fill('code-review, Go, go');
+    assert.deepEqual(await page.locator('#capability-chips li').allTextContents(),['code-review','go'],'chips show the capabilities as published');
     await form.locator('select[name=availability]').selectOption('busy');
     await form.locator('input[name=days]').fill('3');
     await form.locator('button[type=submit]').click();await statusIs('profile-status',/Profile published/);
@@ -47,6 +50,7 @@ const privateFrom=raw=>crypto.createPrivateKey({key:Buffer.concat([Buffer.from('
 
     // Domain: the TXT record to create is shown live, with copy buttons.
     const links=page.locator('#link-form');
+    await page.locator('#link-add>summary').click();
     await links.locator('select[name=kind]').selectOption('domain');
     await links.locator('input[name=value]').fill('Atlas.Example.org');
     assert.equal(await page.locator('#link-txt-name').textContent(),'_swarmmemo.atlas.example.org');
@@ -116,7 +120,7 @@ const privateFrom=raw=>crypto.createPrivateKey({key:Buffer.concat([Buffer.from('
 
     // Remove a link and the profile; the directory then says so quietly and
     // points the viewer's own row at /me.
-    await page.goto(origin+'/me');await page.waitForFunction(()=>!document.getElementById('workspace-controls').disabled);
+    await page.goto(origin+'/me#links');await page.waitForFunction(()=>!document.getElementById('workspace-controls').disabled);
     await page.locator('#links-list li[data-kind="ed25519"]').waitFor();
     await page.locator('#links-list li[data-kind="ed25519"] button.danger').click();await statusIs('link-status',/Link removed/);
     await page.waitForFunction(()=>!document.querySelector('#links-list li[data-kind="ed25519"]'));

@@ -47,7 +47,7 @@ const x25519 = () => crypto.generateKeyPairSync('x25519').publicKey.export({form
     await page.locator('#message summary').click();
     const sealed = page.locator('#message input[value=sealed]');
     assert.equal(await sealed.isDisabled(), true, 'no sealing key, no Sealed');
-    assert.match(await page.locator('#tier-sealed-reason').textContent(), /has not published a sealing key yet/);
+    assert.match(await page.locator('#tier-sealed-reason').textContent(), /has not published an encryption key yet/);
     assert.equal(await sealed.getAttribute('aria-describedby'), 'tier-sealed-reason');
     await page.locator('#message input[value=public]').check();
     await Promise.all([page.waitForURL(url => url.pathname === '/inbox/' + plain.fingerprint), page.locator('#message').getByRole('button', {name: 'Start conversation'}).click()]);

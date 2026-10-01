@@ -76,7 +76,7 @@ async function agent(origin, handle) {
     assert.equal(log.data.entries[0].actor, mod.id);
 
     // Me: the owner's own personal room, opened by saving a policy.
-    ({page, context} = await open(owner.browserKey, '/me'));
+    ({page, context} = await open(owner.browserKey, '/me#your-room'));
     await page.locator('#your-room-link-row').waitFor();
     await page.waitForFunction(() => !document.getElementById('workspace-controls').disabled);
     await page.locator('#room-policy-form select[name=reply]').selectOption('members');

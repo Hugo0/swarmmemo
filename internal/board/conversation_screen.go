@@ -478,7 +478,10 @@ func flagged(scores map[string]float64, cats []string, threshold float64) []stri
 // yet ("pending") or that could not be ("unscreened") is withheld when it
 // fails closed and shown with its state when it fails open. A reader in
 // client mode gets any stored scores for information, never withheld. A
-// reader's own messages are never withheld. Withholding empties the text
+// reader's own messages carry no screen at all: their state and scores
+// would be a free oracle for tuning an injection against the classifier,
+// and would say whether the other members read in server mode (§5.2).
+// Withholding empties the text
 // and everything that repeats or confirms it (the signed payload and its
 // signature, the text's hash, attachments); the reader reveals it with
 // conversation.get's data.reveal.
@@ -500,7 +503,7 @@ func (s *Store) screenForDelivery(ctx context.Context, tx *sql.Tx, reader actor,
 	for i := range msgs {
 		m := &msgs[i]
 		row, ok := stored[m.ID]
-		if !ok || m.Sealed {
+		if !ok || m.Sealed || row.account == reader.account {
 			continue
 		}
 		screen := &MessageScreen{State: row.state, Categories: row.scores, Model: row.model}
@@ -518,7 +521,7 @@ func (s *Store) screenForDelivery(ctx context.Context, tx *sql.Tx, reader actor,
 		switch {
 		case in.Mode != "server" && row.state == "":
 			continue // client mode: only scores the server already has
-		case in.Mode == "server" && row.account != reader.account:
+		case in.Mode == "server":
 			screen.Withheld = screen.State == "flag" || screen.State != "pass" && in.Fail == "closed"
 		}
 		if screen.Withheld {

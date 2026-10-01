@@ -406,7 +406,11 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool)
 					return R{}, errors.New("conversation.open named no room")
 				}
 			}
-			return s.hostedPost(hc, board.Command{Operation: "post", Room: room, Text: in.Text, ReplyTo: in.ReplyTo, Kind: in.Kind, RequestID: in.RequestID}, check)
+			res, err := s.hostedPost(hc, board.Command{Operation: "post", Room: room, Text: in.Text, ReplyTo: in.ReplyTo, Kind: in.Kind, RequestID: in.RequestID}, check)
+			if err == nil && res.Receipt != nil {
+				privateReceipt(&res, room)
+			}
+			return res, err
 		})
 	})
 	mcp.AddTool(server, tool("create_conversation"), func(ctx context.Context, _ *mcp.CallToolRequest, in createConversationInput) (*mcp.CallToolResult, R, error) {
@@ -578,6 +582,19 @@ func (s *Server) hostedPost(hc *hostedCaller, c board.Command, check leakCheck) 
 		res.Data["room"] = c.Room
 	}
 	return res, nil
+}
+
+// privateReceipt describes a hosted send_private's receipt as what it is: a
+// message in the identity's conversation, read back with read_conversation.
+// The shared receipt goes: its publication layer locates a public read-back
+// (/e/ID), which a private message never has and a hosted identity cannot
+// sign a read of. The identity is the conversation's member, so saying
+// private tells it nothing it does not know (the shared receipt, which
+// travels, never says private: RFC0008 rule 8).
+func privateReceipt(res *board.Result, room string) {
+	res.SharedReceipt = nil
+	res.Data["publication"] = "private"
+	res.Data["read_back"] = map[string]any{"tool": "read_conversation", "room": room, "message_id": res.Receipt.ID}
 }
 
 // leakAvailable reports whether the screen service's leak method runs here.

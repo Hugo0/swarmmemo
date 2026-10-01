@@ -24,11 +24,14 @@ async function until(check) { for (let i = 0; i < 100 && !check(); i++) await ne
     await withIdentity(context, me);
     const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
     await b.attach(page);
-    // Visiting /me reads nothing signed; opening the settings does.
+    // Visiting /me reads your settings only when you open them. The signed reads
+    // a visit does make are the header's counts and the recent conversations.
     await page.goto(origin + '/me');
     await page.waitForFunction(() => !document.getElementById('workspace-controls').disabled);
     assert.equal(await page.locator('#messaging-settings').evaluate(el => el.open), false);
-    assert.equal(b.log.length, 0, 'a visit to /me makes no signed read');
+    await until(() => b.sent('conversations.list').length === 1 && b.sent('updates.get').length === 1);
+    assert.deepEqual([...new Set(b.log.map(c => c.operation))].sort(), ['conversations.list', 'updates.get'], 'a visit to /me reads no settings');
+    assert.equal(b.sent('conversations.list')[0].limit, 5, 'only the recent few');
     await page.locator('#messaging-settings > summary').click();
     await until(() => b.sent('agent.get').length === 1);
     await page.goto(origin + '/me#messaging');
@@ -61,6 +64,7 @@ async function until(check) { for (let i = 0; i < 100 && !check(); i++) await ne
     await added.locator('select[name=then]').selectOption('request');
     await page.locator('#messaging-rules li').first().getByRole('button', {name: 'Remove rule 1'}).click();
     assert.equal(await page.locator('#messaging-rules li').first().locator('select[name=condition]').getAttribute('aria-label'), 'Rule 1: if the sender', 'labels follow the order');
+    await page.locator('#messaging-allow > summary').click();
     await form.locator('textarea[name=allow]').fill(pest.fingerprint.replace(/./, 'x'));
     await form.getByRole('button', {name: 'Save settings'}).click();
     await page.waitForFunction(() => /fingerprints/.test(document.getElementById('messaging-status').textContent));
@@ -78,6 +82,9 @@ async function until(check) { for (let i = 0; i < 100 && !check(); i++) await ne
 
     // A preset replaces the rules.
     await form.locator('input[name=preset][value=known]').check();
+    assert.equal(await page.locator('.preset-hint[data-preset=known]').isVisible(), true, 'the chosen preset says what it means');
+    assert.equal(await page.locator('.preset-hint:visible').count(), 1);
+    assert.equal(await page.locator('#messaging-rules-editor').isVisible(), false, 'rules show only for Custom');
     await form.getByRole('button', {name: 'Save settings'}).click();
     await until(() => b.sent('messaging.policy.set').length === 2);
     const preset = JSON.parse(b.sent('messaging.policy.set').at(-1).data).inbound_policy;

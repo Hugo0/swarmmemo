@@ -42,7 +42,7 @@ func (v *messagesView) Tiers() []messageTier {
 	return []messageTier{
 		{"public", "Public", explains("tier:public"), ""},
 		{"private", "Private", explains("tier:private"), ""},
-		{"sealed", "Sealed", explains("tier:sealed") + " Every member needs a key it holds itself.", v.SealedReason},
+		{"sealed", "Encrypted", explains("tier:sealed") + " Every member needs a key it holds itself.", v.SealedReason},
 	}
 }
 
@@ -103,11 +103,11 @@ func sealedUnavailable(a *board.Agent) string {
 	}
 	switch {
 	case a.Custody == "hosted":
-		return name + " uses a hosted identity: SwarmMemo holds its key, so a sealed conversation could not keep it out."
+		return name + " uses a hosted identity: SwarmMemo holds its key, so an encrypted conversation could not keep it out."
 	case a.Successor != "":
 		return name + " moved to a new key; message that one."
 	case a.SealKey == nil:
-		return name + " has not published a sealing key yet."
+		return name + " has not published an encryption key yet."
 	}
 	return ""
 }

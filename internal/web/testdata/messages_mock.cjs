@@ -41,7 +41,7 @@ function verify(command) {
 
 // The mock board: agents, conversations and a log of every command.
 function board() {
-  const b = {agents: new Map(), conversations: new Map(), log: [], settings: new Map(), blocks: new Map(), blobs: new Map(), overrides: new Map(), seq: 0};
+  const b = {agents: new Map(), conversations: new Map(), log: [], settings: new Map(), blocks: new Map(), blobs: new Map(), overrides: new Map(), updates: [], seq: 0};
   b.addAgent = (id, extra = {}) => { b.agents.set(id.fingerprint, {id: id.fingerprint, public_key: id.publicKey, handle: id.handle, custody: 'self', ...extra}); return b.agents.get(id.fingerprint); };
   b.publishSealKey = (id, x25519Raw) => {
     const value = Buffer.from(x25519Raw).toString('base64url'), link = id.sign({operation: 'identity.link', data: JSON.stringify({schema: 1, kind: 'x25519', value})});
@@ -146,6 +146,18 @@ function board() {
         if (sealedPost) { const epoch = Number(command.text.split('.')[1]); if (epoch !== conv.seal_epoch || conv.epochs.find(e => e.epoch === epoch)?.member_epoch !== conv.member_epoch) return fail(409, 'seal_rotation_required', 'Rotate first.'); }
         const m = b.message(conv.room, {fingerprint: me, handle: ''}, command.text, {...(sealedPost ? {format: 'sealed', sealed: true} : {}), public_key: command.public_key, signature: command.signature, signed_payload: payload});
         return ok({receipt: {id: m.id, sequence: m.sequence}});
+      }
+      case 'updates.get': {
+        // The one inbox, for the header's notifications: what is unread and
+        // waiting from the conversations above, and the reply and addressed ids
+        // the test queues in b.updates since the cursor. Bodies are left out.
+        const since = Number(String(command.cursor || '').replace('u', '')) || 0, fresh = b.updates.slice(since);
+        const mine = [...b.conversations.values()].map(c => ({c, m: c.members.find(x => x.agent === me)}));
+        const rooms = mine.filter(({c, m}) => m?.state === 'active' && c.unread > 0).map(({c}) => ({room: c.room, count: c.unread}));
+        const requests = mine.filter(({m}) => m?.state === 'requested').map(({c}) => ({room: c.room, from: c.members[0].agent, kind: c.kind, members: c.members.length, messages: c.messages.length, first_at: 0}));
+        return ok({messages: [], next_cursor: 'u' + b.updates.length, data: {has_more: false, scope: 'agent', agent: me,
+          replies: command.cursor ? fresh.filter(u => u.reason === 'reply').map(u => u.id) : [], addressed: command.cursor ? fresh.filter(u => u.reason === 'addressed').map(u => u.id) : [], room_activity: [],
+          conversations: [], requests, unread: {total: rooms.reduce((n, r) => n + r.count, 0), rooms}}});
       }
       case 'blob.put': {
         const id = crypto.randomBytes(16).toString('hex'); b.blobs.set(id, command.data);

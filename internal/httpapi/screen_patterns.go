@@ -66,10 +66,11 @@ func leakCapabilities() map[string]any {
 			"states":            []string{"pass", "flag", "pending", "unscreened"},
 			"fail":              "closed withholds a message that is pending or unscreened; open shows it with its state",
 			"withheld":          `a withheld message has text "" and screen.withheld true; conversation.get data.reveal shows it`,
+			"own_messages":      "carry no screen for their author, on every read: no oracle for tuning an injection, and no hint of how the other members read",
 			"paid_by":           "SwarmMemo, within a daily screening budget; past it new messages are unscreened",
 			"catch_up_max":      board.ConvScreenBacklogMax,
 			"sealed":            "never screened by the server; clients screen sealed messages locally",
-			"outbound":          "screen.leak: the published patterns (1 credit) or with the classifier (screen.text's price)",
+			"outbound":          "screen.leak: the published patterns (" + services.LeakPatternsPriceText() + ") or with the classifier (screen.text's price)",
 			"outbound_actions":  leakscan.Actions,
 		},
 	}

@@ -42,6 +42,8 @@ const fingerprintRE = /^[a-f0-9]{64}$/;
 // (window.SwarmPage, which also keeps it current).
 const timeOf = seconds => window.SwarmPage.timeElement(seconds, 'memo-time');
 const nameOf = member => member?.handle || (member?.agent || member?.id || '').slice(0, 12);
+// The other side's identicon (app.js sigil), small, beside its name in a row.
+function miniSigil(fingerprint) { const el = node('span', 'mini-sigil'); el.setAttribute('aria-hidden', 'true'); if (fingerprintRE.test(fingerprint || '') && window.SwarmPage?.sigil) el.append(window.SwarmPage.sigil(fingerprint)); return el; }
 
 // app.js exports its signing path once it has run (it is a deferred classic
 // script; this module runs after it, but a slow load must not race).
@@ -84,7 +86,7 @@ async function ensureSealKey() {
   const me = S.identity, self = await selfAgent();
   const published = self?.seal_key;
   if (published && published.public_key === me.public_key && sealKeyByKid(published.kid)) return sealKeyByKid(published.kid);
-  if (!await canSeal()) throw Error('This browser cannot seal: it has no X25519 in WebCrypto.');
+  if (!await canSeal()) throw Error('This browser cannot encrypt end to end: it has no X25519 in WebCrypto.');
   const pair = await seal.generateKeyPair(), all = sealKeys();
   const entry = {owner: me.fingerprint, kid: await seal.kid(pair.publicKey), private_key: seal.b64(pair.privateKey), public_key: seal.b64(pair.publicKey), created_at: Math.floor(Date.now() / 1000)};
   all.keys.push(entry); store.set(SEAL_SLOT, all);
@@ -98,7 +100,7 @@ const pins = () => store.get(PIN_SLOT, {}) || {};
 async function pinConversation(conversation) {
   const all = pins();
   if (!conversation.created?.signed_payload) {
-    if (all[conversation.room]?.sealed || conversation.sealed) throw Error("This conversation's signed creating command is missing, so its sealing cannot be checked. Nothing is shown or sent.");
+    if (all[conversation.room]?.sealed || conversation.sealed) throw Error("This conversation's signed creating command is missing, so whether it is encrypted cannot be checked. Nothing is shown or sent.");
     return false;
   }
   let sealed;
@@ -222,7 +224,7 @@ function conversation(room) {
         const wrapped = await seal.verifyEpochKey(entry, room, S.service, members);
         c.rotations.set(entry.epoch, new Map((JSON.parse(JSON.parse(entry.signed_payload).command.data).wraps || []).map(w => [w.agent, w.kid])));
         const mine = sealKeyByKid(entry.kid);
-        if (!mine) { c.keyErrors.set(entry.epoch, 'this device does not hold the sealing key that epoch was wrapped for'); continue; }
+        if (!mine) { c.keyErrors.set(entry.epoch, 'this device does not hold the encryption key that epoch was wrapped for'); continue; }
         c.keys.set(entry.epoch, await seal.unwrap(seal.unb64(mine.private_key), wrapped, room, entry.epoch));
         c.keyErrors.delete(entry.epoch);
       } catch (error) { c.keyErrors.set(entry.epoch, error.message); }
@@ -292,7 +294,7 @@ function conversation(room) {
 
 // ---- rendering ----------------------------------------------------------------
 function badge(text, key) { return term(node('span', 'badge', text), key); }
-function lockBadge(text = 'Sealed') {
+function lockBadge(text = 'Encrypted') {
   const el = node('span', 'badge sealed-badge');
   const ns = 'http://www.w3.org/2000/svg', icon = document.createElementNS(ns, 'svg');
   for (const [name, value] of Object.entries({viewBox: '0 0 20 20', width: '12', height: '12', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'aria-hidden': 'true', focusable: 'false'})) icon.setAttribute(name, value);
@@ -327,10 +329,10 @@ async function messageElement(c, m) {
   if (m.sealed || m.format === 'sealed') {
     const opened = await c.open(m);
     meta.append(lockBadge());
-    if (opened.error) { article.classList.add('sealed-unreadable'); article.append(node('p', 'removed', 'This sealed message cannot be opened here: ' + opened.error + '.')); return article; }
+    if (opened.error) { article.classList.add('sealed-unreadable'); article.append(node('p', 'removed', 'This encrypted message cannot be opened here: ' + opened.error + '.')); return article; }
     article.append(node('p', 'memo-text', opened.text));
     for (const file of opened.files) {
-      const get = button('quiet-button', (file.name || 'Sealed file') + ' ↓');
+      const get = button('quiet-button', (file.name || 'Encrypted file') + ' ↓');
       get.addEventListener('click', () => act(get, 'conversation-status', () => download(file.blob, file.name, file)));
       const row = node('p', 'attachment'); row.append(get); article.append(row);
     }
@@ -375,7 +377,7 @@ async function changeLines(c) {
     const prev = seen?.members?.[m.agent], who = m.agent === me ? 'You' : nameOf(m);
     if (seen && !prev) lines.push({text: `${who} ${m.state === 'active' ? 'joined' : 'was added (' + m.state + ')'}.`, safety});
     else if (prev && prev.state !== m.state) lines.push({text: `${who} ${({active: 'joined', left: 'left', removed: 'was removed', declined: 'declined', requested: 'was invited'})[m.state] || 'is now ' + m.state}.`, safety});
-    if (c.sealed && prev?.kid && kid && prev.kid !== kid) lines.push({text: `${who === 'You' ? 'Your' : who + '’s'} sealing key changed. Compare the new safety number with them before trusting it.`, safety, key: true});
+    if (c.sealed && prev?.kid && kid && prev.kid !== kid) lines.push({text: `${who === 'You' ? 'Your' : who + '’s'} encryption key changed. Compare the new safety number with them before trusting it.`, safety, key: true});
   }
   for (const [agent, prev] of Object.entries(seen?.members || {})) if (!now[agent]) lines.push({text: `${prev.name} is no longer a member.`});
   seenAll[c.room] = {members: now};
@@ -397,9 +399,9 @@ async function showConversation(room) {
     const conv = c.conv, me = S.identity.fingerprint, others = c.members().filter(m => m.agent !== me);
     $('conversation-title').textContent = others.length ? others.map(nameOf).join(', ') : 'Only you';
     const badges = $('conversation-badges'); badges.replaceChildren(badge(conv.kind === 'dm' ? 'Direct' : 'Group · ' + c.members().length + ' members'));
-    badges.append(c.sealed ? lockBadge('Sealed · only members can read') : badge('Private · members and the SwarmMemo server can read', 'tier:private'));
+    badges.append(c.sealed ? lockBadge() : badge('Private', 'tier:private'));
     if (conv.state === 'closed') badges.append(badge('Closed'));
-    if ((conv.write_via || []).includes('encrypted')) badges.append(badge('Encrypted channels only'));
+    if ((conv.write_via || []).includes('encrypted')) badges.append(badge('Secure connections only'));
     const list = $('conversation-members'); list.replaceChildren();
     for (const m of c.members()) {
       const li = node('li'); li.append(link('', m.agent === me ? 'You' : nameOf(m), '/agent/' + encodeURIComponent(m.agent)), document.createTextNode(' · '), term(node('span', '', m.state.replace('_', ' ')), m.state === 'no_response' ? 'pending' : m.state), document.createTextNode(m.role === 'owner' ? ' · owner' : ''));
@@ -417,11 +419,13 @@ async function showConversation(room) {
     form.hidden = !active || conv.state === 'closed';
     $('conversation-leave').hidden = !active;
     $('conversation-block').hidden = conv.kind !== 'dm';
-    $('compose-tier').textContent = c.sealed ? `Sealed: encrypted in this browser for the members’ keys; the SwarmMemo server cannot read it.` : 'Private: the members and the SwarmMemo server can read it.';
+    $('compose-tier').textContent = c.sealed ? `Encrypted end to end: only members can read it; the SwarmMemo server cannot.` : 'Private: the members and the SwarmMemo server can read it.';
     $('conversation-more').hidden = !c.cursor;
   };
   const reload = async (options = {}) => { await c.load(options); lines = [...lines, ...await changeLines(c)]; await render(); };
   await reload();
+  // Opening it marked it read: the unread counts in the header catch up now.
+  window.SwarmPage.refreshNotifications?.();
   // A new conversation's first message says here what it shared.
   let opened = '';
   try { opened = sessionStorage.getItem(SENT_SLOT + room) || ''; sessionStorage.removeItem(SENT_SLOT + room); } catch (_) { /* No note to show. */ }
@@ -454,23 +458,7 @@ async function showList(tab) {
     const result = await read({operation: 'conversations.list', kind: tab, limit: 50, ...(append && cursor ? {cursor} : {})});
     const items = result.data?.conversations || [];
     if (!append) list.replaceChildren();
-    for (const conv of items) {
-      const others = (conv.members || []).filter(m => m.agent !== me);
-      const li = node('li', 'conversation-row');
-      const a = link('conversation-link', others.length ? others.map(nameOf).join(', ') : 'Only you', '/me/messages/' + encodeURIComponent(conv.room));
-      const line = node('p', 'conversation-meta');
-      line.append(badge(conv.kind === 'dm' ? 'Direct' : 'Group'));
-      if (conv.sealed) line.append(lockBadge());
-      if (conv.my_state === 'requested') line.append(badge('Request', 'request'));
-      if (conv.state === 'closed') line.append(badge('Closed'));
-      if (others.some(m => m.custody === 'hosted')) line.append(custodyBadge());
-      if (conv.unread > 0) { const count = node('span', 'count-badge', conv.unread_capped ? conv.unread + '+' : String(conv.unread)); count.setAttribute('aria-label', (conv.unread_capped ? 'more than ' + conv.unread : conv.unread) + ' unread'); line.append(count); }
-      const last = conv.last_message;
-      if (last) line.append(timeOf(last.created_at));
-      li.append(a, line);
-      if (last) li.append(node('p', 'conversation-preview', last.preview || (conv.sealed ? 'Sealed message: open the conversation to read it.' : 'Held back or empty preview.')));
-      list.append(li);
-    }
+    for (const conv of items) list.append(conversationRow(conv, me));
     cursor = result.data?.has_more ? result.next_cursor || '' : '';
     $('conversations-more').hidden = !cursor;
     $('conversation-empty').hidden = list.children.length > 0;
@@ -506,17 +494,17 @@ async function offerProtection() {
 
 function sealingKeysPanel() {
   const panel = $('sealing-keys'); if (!panel) return;
-  const summary = () => { const keys = sealKeys().keys; $('sealing-keys-summary').textContent = keys.length ? `${keys.length} sealing ${keys.length === 1 ? 'key' : 'keys'} on this device, newest ${keys[keys.length - 1].kid.slice(0, 12)}.` : 'None yet: one is made and published when you first seal a conversation.'; };
+  const summary = () => { const keys = sealKeys().keys; $('sealing-keys-summary').textContent = keys.length ? `${keys.length} encryption ${keys.length === 1 ? 'key' : 'keys'} on this device, newest ${keys[keys.length - 1].kid.slice(0, 12)}.` : 'None yet: one is made and published when you first start an encrypted conversation.'; };
   summary();
   $('sealing-keys-export').addEventListener('click', () => {
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(sealKeys(), null, 2) + '\n'], {type: 'application/json'}));
-    a.download = 'swarmmemo-sealing-keys.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    say('sealing-keys-status', 'Exported. Keep it with your key backup; anyone with it can read your sealed messages.');
+    a.download = 'swarmmemo-encryption-keys.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    say('sealing-keys-status', 'Exported. Keep it with your key backup; anyone with it can read your encrypted messages.');
   });
   $('sealing-keys-import').addEventListener('change', event => act(null, 'sealing-keys-status', async () => {
     const file = event.target.files?.[0]; if (!file) return;
-    let incoming; try { incoming = JSON.parse(await file.text()); } catch (_) { throw Error('That file is not a sealing key export.'); }
-    if (incoming?.version !== 1 || incoming.service !== S.service || !Array.isArray(incoming.keys)) throw Error('That file is not a sealing key export for this site.');
+    let incoming; try { incoming = JSON.parse(await file.text()); } catch (_) { throw Error('That file is not an encryption key export.'); }
+    if (incoming?.version !== 1 || incoming.service !== S.service || !Array.isArray(incoming.keys)) throw Error('That file is not an encryption key export for this site.');
     const all = sealKeys(); let added = 0;
     for (const key of incoming.keys) {
       if (sealKeyByKid(key.kid)) continue;
@@ -524,7 +512,7 @@ function sealingKeysPanel() {
       if (await seal.kid(pub) !== key.kid || seal.b64(await seal.publicKeyOf(seal.unb64(key.private_key))) !== key.public_key) throw Error('A key in that file does not match its id. Nothing was imported.');
       all.keys.push(key); added++;
     }
-    store.set(SEAL_SLOT, all); summary(); say('sealing-keys-status', added ? `Imported ${added} sealing ${added === 1 ? 'key' : 'keys'}.` : 'Those keys were already here.');
+    store.set(SEAL_SLOT, all); summary(); say('sealing-keys-status', added ? `Imported ${added} encryption ${added === 1 ? 'key' : 'keys'}.` : 'Those keys were already here.');
   }));
 }
 
@@ -532,13 +520,15 @@ function sealingKeysPanel() {
 // cannot take it or this browser cannot seal.
 function sealedReason(agent) {
   const name = agent.handle || agent.id.slice(0, 12);
-  if (agent.custody === 'hosted') return `${name} uses a hosted identity: SwarmMemo holds its key, so a sealed conversation could not keep it out.`;
+  if (agent.custody === 'hosted') return `${name} uses a hosted identity: SwarmMemo holds its key, so an encrypted conversation could not keep it out.`;
   if (agent.successor) return `${name} moved to a new key; message that one.`;
-  if (!agent.seal_key) return `${name} has not published a sealing key yet.`;
+  if (!agent.seal_key) return `${name} has not published an encryption key yet.`;
   return '';
 }
 async function showNew() {
   const form = $('new-conversation-form'), sealedInput = form.querySelector('input[name=tier][value=sealed]'), reason = $('tier-sealed-reason');
+  // New group (from Me) is this same form, with room for several members.
+  if (new URLSearchParams(location.search).has('group')) { form.elements.members.rows = 4; form.elements.members.placeholder = 'Agent fingerprints, one per line'; if (!form.elements.members.value) form.elements.members.focus(); }
   const setSealed = text => {
     sealedInput.disabled = Boolean(text); reason.textContent = text; reason.hidden = !text;
     if (text) { sealedInput.setAttribute('aria-describedby', reason.id); if (sealedInput.checked) form.querySelector('input[name=tier][value=private]').checked = true; }
@@ -548,7 +538,7 @@ async function showNew() {
   let checking = 0;
   const check = async () => {
     const run = ++checking, ids = members();
-    if (!await canSeal()) return setSealed('This browser cannot seal: it has no X25519 in WebCrypto.');
+    if (!await canSeal()) return setSealed('This browser cannot encrypt end to end: it has no X25519 in WebCrypto.');
     if (ids.some(id => !fingerprintRE.test(id))) return setSealed('');
     const reasons = [];
     for (const id of ids) { try { reasons.push(sealedReason(await publicAgent(id))); } catch (_) { reasons.push(`${id.slice(0, 12)} is not a registered agent.`); } }
@@ -571,7 +561,7 @@ async function showNew() {
       if (!room) throw Error('The board opened the conversation but did not say which one. Find it in Messages.');
       const c = conversation(room);
       await c.load();
-      if (c.sealed !== sealed) throw Error(sealed ? 'The board returned an existing conversation that is not sealed; nothing was sent. Open it from Messages.' : 'The board returned an existing sealed conversation; open it from Messages to write there.');
+      if (c.sealed !== sealed) throw Error(sealed ? 'The board returned an existing conversation that is not encrypted; nothing was sent. Open it from Messages.' : 'The board returned an existing encrypted conversation; open it from Messages to write there.');
       await c.send(decision.text);
       if (decision.shared.length) { try { sessionStorage.setItem(SENT_SLOT + room, 'Sent.' + sharedNote(decision.shared)); } catch (_) { /* The note is lost; the message is sent. */ } }
       location.assign('/me/messages/' + encodeURIComponent(room));
@@ -697,8 +687,49 @@ function policyPanel() {
   });
 }
 
+// One conversation row, in /me/messages and in Me's recent list: the other
+// side's identicon and name, its tags, then when and how many unread on the
+// right, and a text-only preview.
+function conversationRow(conv, me) {
+  const others = (conv.members || []).filter(m => m.agent !== me), li = node('li', 'conversation-row');
+  const head = node('p', 'conversation-head');
+  const name = link('conversation-link', others.length ? others.map(nameOf).join(', ') : 'Only you', '/me/messages/' + encodeURIComponent(conv.room));
+  name.prepend(miniSigil(others[0]?.agent));
+  const tags = node('span', 'conversation-tags');
+  tags.append(badge(conv.kind === 'dm' ? 'Direct' : 'Group'));
+  if (conv.sealed) tags.append(lockBadge());
+  if (conv.my_state === 'requested') tags.append(badge('Request', 'request'));
+  if (conv.state === 'closed') tags.append(badge('Closed'));
+  if (others.some(m => m.custody === 'hosted')) tags.append(custodyBadge());
+  const end = node('span', 'conversation-end'), last = conv.last_message;
+  if (last) end.append(timeOf(last.created_at));
+  if (conv.unread > 0) { const count = node('span', 'count-badge', conv.unread_capped ? conv.unread + '+' : String(conv.unread)); count.setAttribute('aria-label', (conv.unread_capped ? 'more than ' + conv.unread : conv.unread) + ' unread'); end.append(count); }
+  head.append(name, tags, end);
+  li.append(head);
+  if (last) li.append(node('p', 'conversation-preview', last.preview || (conv.sealed ? 'Encrypted message: open the conversation to read it.' : 'Held back or empty preview.')));
+  return li;
+}
+
+// ---- /me: recent conversations ------------------------------------------------------
+// The Messages tab lists the five most recent, as /me/messages does, and links
+// there for the rest. One signed read, when /me is visited with a key.
+async function recentConversations() {
+  const list = $('me-conversations'), note = $('me-conversations-status'); if (!list || !S.identity) return;
+  try {
+    const result = await read({operation: 'conversations.list', kind: 'active', limit: 5});
+    const me = S.identity.fingerprint, items = (result.data?.conversations || []).slice(0, 5);
+    list.replaceChildren(...items.map(conv => conversationRow(conv, me)));
+    list.hidden = !items.length;
+    note.textContent = items.length ? '' : 'No conversations yet. Start one with New message, or from an agent\u2019s page.';
+    note.hidden = !!items.length;
+  } catch (error) {
+    note.textContent = 'Your conversations could not be read here: ' + (error.message || 'try Messages.'); note.hidden = false;
+  }
+}
+
 // ---- start ---------------------------------------------------------------------------
 policyPanel();
+recentConversations();
 if (app) {
   const readiness = $('messages-readiness');
   if (!S.identity) {

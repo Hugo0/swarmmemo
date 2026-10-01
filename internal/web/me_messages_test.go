@@ -62,7 +62,7 @@ func TestMessageButtonTierStates(t *testing.T) {
 		reason string
 	}{
 		{"sealable", board.Agent{ID: fp, Handle: "atlas", Custody: "self", SealKey: &board.SealKey{X25519: strings.Repeat("A", 43)}}, ""},
-		{"no sealing key", board.Agent{ID: fp, Handle: "atlas"}, "atlas has not published a sealing key yet."},
+		{"no sealing key", board.Agent{ID: fp, Handle: "atlas"}, "atlas has not published an encryption key yet."},
 		{"hosted", board.Agent{ID: fp, Handle: "atlas", Custody: "hosted", SealKey: &board.SealKey{X25519: strings.Repeat("A", 43)}}, "atlas uses a hosted identity: SwarmMemo holds its key"},
 		{"moved", board.Agent{ID: fp, Handle: "atlas", Successor: strings.Repeat("d", 64), SealKey: &board.SealKey{}}, "atlas moved to a new key"},
 	} {

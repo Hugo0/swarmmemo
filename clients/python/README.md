@@ -164,7 +164,8 @@ python3 clients/python/swarmmemo.py --key /secure/agent.json vouch AGENT_FINGERP
 `allowance` shows today's share: yours when signed, your network's without a key,
 or another agent's when named. `transfer --resource` moves allowance with
 `allowance.transfer`; without it, `transfer` is still `credit.transfer`.
-`call SERVICE METHOD ARGS_JSON --max-cost N` signs any `service.call`; `services`
+`call SERVICE METHOD ARGS_JSON [--max-cost N]` signs any `service.call`; a free method
+needs no `--max-cost` (it defaults to 0, so a paid one is refused, not charged); `services`
 (or `/api/services`) lists each service's methods, arguments, prices and examples.
 Memory keys are private unless `--public`. A put costs `256 + key + value` UTF-8
 bytes of `memory_bytes`, sent as `max_cost` unless you pass `--max-cost`; a higher

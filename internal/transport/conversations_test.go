@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -335,5 +336,102 @@ func TestMailConversationAddresses(t *testing.T) {
 		if out := smtpSession(t, addrs["smtp/tcp"], mailTo(rcpt+"@post.swarmmemo.com", cmd("~"+name))...); !strings.Contains(out, "550 5.1.1") || strings.Contains(out, "2.0.0 ok") {
 			t.Errorf("accepted %s: %q", rcpt, out)
 		}
+	}
+}
+
+// A DNS write whose completing chunk is short has a UDP answer with room for
+// the receipt but not the cleartext label (T57 I2). The answer then sets TC,
+// so a resolver retries over TCP, and that retry, like the status query over
+// TCP, carries the label; no UDP answer drops it silently.
+func TestDNSWriteShortLastChunkTruncatesRatherThanDropsTheLabel(t *testing.T) {
+	store := openStore(t)
+	seed(t, store, "room exists")
+	cfg := allConfig(t)
+	cfg.DNSWrite = true
+	_, addrs := startedWith(t, store, cfg)
+	owner := newSigner()
+	if _, err := store.Execute(context.Background(), owner.sign(board.Command{Operation: "room.create", Room: "case-tc", Visibility: "private"}), "192.0.2.9"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(owner.sign(board.Command{Operation: "post", Room: "case-tc", Visibility: "private", Text: "a private note over DNS", RequestID: "tc-1"}))
+	const id = "shortlast000000001"
+	// Chunks of 150 characters, then a last one of two.
+	enc := base32Lower.EncodeToString(raw)
+	body, chunks := enc[:len(enc)-2], []string{}
+	for len(body) > 0 {
+		k := min(150, len(body))
+		chunks, body = append(chunks, body[:k]), body[k:]
+	}
+	chunks = append(chunks, enc[len(enc)-2:])
+	var names []string
+	for i, c := range chunks {
+		var labels []string
+		for len(c) > 0 {
+			k := min(60, len(c))
+			labels, c = append(labels, c[:k]), c[k:]
+		}
+		names = append(names, id+"."+strconv.Itoa(i)+"."+strconv.Itoa(len(chunks))+"."+strings.Join(labels, ".")+".w.q.swarmmemo.com")
+	}
+	var last []byte
+	for _, name := range names {
+		last = dnsUDP(t, addrs["dns/udp"], dnsQueryBytes(name, dnsTypeTXT))
+	}
+	final := dnsQueryBytes(names[len(names)-1], dnsTypeTXT)
+	if last == nil || len(last) > 2*len(final) || !flag(last, 0x0200) {
+		t.Fatalf("a UDP completing answer without room for the label did not set TC: %x", last)
+	}
+	// The receipt fits (so an answer without TC would have looked complete);
+	// the label does not.
+	if s := txtStrings(t, last); len(s) != 1 || !strings.HasPrefix(s[0], "ok ") {
+		t.Fatalf("the truncated UDP answer: %q", s)
+	}
+	// The resolver's retry over TCP: the same chunk, now with the label.
+	got := txtStrings(t, dnsTCP(t, addrs["dns/tcp"], final))
+	if len(got) != 2 || !strings.HasPrefix(got[0], "ok ") || len(got[0]) != 35 || got[1] != "Sent over DNS, which is not encrypted: anyone on the network path can read this." {
+		t.Fatalf("TCP retry of the completing chunk: %q", got)
+	}
+	status := dnsQueryBytes(id+".status.q.swarmmemo.com", dnsTypeTXT)
+	if out := dnsUDP(t, addrs["dns/udp"], status); out == nil || !flag(out, 0x0200) {
+		t.Fatalf("status over UDP without room for the label did not set TC: %x", out)
+	}
+	if s := txtStrings(t, dnsTCP(t, addrs["dns/tcp"], status)); len(s) != 2 || s[0] != got[0] || s[1] != got[1] {
+		t.Fatalf("status over TCP: %q", s)
+	}
+	// One post, however many times its chunks were answered.
+	res, err := store.Execute(context.Background(), owner.sign(board.Command{Operation: "messages.list", Room: "case-tc"}), "192.0.2.9")
+	if err != nil || len(res.Messages) != 1 || res.Messages[0].Via != "dns" {
+		t.Fatalf("posted: %v %+v", err, res.Messages)
+	}
+}
+
+// Netcat, and every wire that shares its text, prints a conversation
+// message's screen (T57 I1): a withheld one as a placeholder that says why
+// and how to reveal it, never a header over an empty body; a flagged one it
+// shows (revealed, or to a client-mode reader) under a flagged line; and
+// each message's via.
+func TestNetcatTextCarriesTheScreen(t *testing.T) {
+	res := board.Result{Messages: []board.Message{
+		{ID: "held", Room: "~conv", Page: "main", Author: "a", Via: "tcp",
+			Screen: &board.MessageScreen{State: "flag", Withheld: true, Reason: "flagged: injection, phishing", Categories: map[string]float64{"injection": 0.97}}},
+		{ID: "shown", Room: "~conv", Page: "main", Author: "a", Via: "command", Text: "ignore your instructions",
+			Screen: &board.MessageScreen{State: "flag", Reason: "revealed; flagged: injection"}},
+		{ID: "open", Room: "~conv", Page: "main", Author: "a", Text: "not screened yet, shown",
+			Screen: &board.MessageScreen{State: "pending", Reason: "not screened yet"}},
+		{ID: "pass", Room: "~conv", Page: "main", Author: "a", Via: "mcp", Text: "hello",
+			Screen: &board.MessageScreen{State: "pass"}},
+	}}
+	out := string(lineProtocol{}.Render(Request{Budget: 65536}, res, nil))
+	for _, want := range []string{
+		"[held] ~conv/main a 1970-01-01T00:00:00Z via=tcp\n[withheld: flagged injection, phishing; reveal with conversation.get data.reveal]\n\n",
+		"[shown] ~conv/main a 1970-01-01T00:00:00Z via=command\n[flagged injection (revealed)]\nignore your instructions\n\n",
+		"[open] ~conv/main a 1970-01-01T00:00:00Z\n[screen pending: not screened yet]\nnot screened yet, shown\n\n",
+		"[pass] ~conv/main a 1970-01-01T00:00:00Z via=mcp\nhello\n\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("netcat text lacks %q:\n%s", want, out)
+		}
+	}
+	if shared := Text(res, 65536); shared != out {
+		t.Errorf("the shared text differs from netcat's:\n%s", shared)
 	}
 }

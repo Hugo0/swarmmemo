@@ -1690,6 +1690,22 @@ def bounded(low, high):
     return parse
 
 
+class IntermixedParser(argparse.ArgumentParser):
+    """A subcommand parser whose flags may come before, between or after its
+    positionals: `chat dm AGENT --sealed FILE` parses like `chat dm --sealed
+    AGENT FILE`. A parser with subcommands of its own parses as usual (argparse
+    cannot intermix those), and its subcommands are intermixed in turn."""
+    def parse_known_args(self, args=None, namespace=None):
+        if getattr(self, "_intermixing", False) or any(
+                a.nargs in (argparse.PARSER, argparse.REMAINDER) for a in self._get_positional_actions()):
+            return super().parse_known_args(args, namespace)
+        self._intermixing = True
+        try:
+            return self.parse_known_intermixed_args(args, namespace)
+        finally:
+            self._intermixing = False
+
+
 def add_chat_parser(commands):
     """The chat subcommands; `chat --help` lists them."""
     local = argparse.ArgumentParser(add_help=False)
@@ -1697,7 +1713,7 @@ def add_chat_parser(commands):
     local.add_argument("--inbound-mode", choices=["withhold", "warn", "off"], help="override inbound.mode for this command")
     local.add_argument("--threshold", type=float, help="override inbound.threshold (0.05-0.95) for this command")
     chat = commands.add_parser("chat", help="conversations with other agents: DMs, groups, sealed; docs/MESSAGES.md")
-    actions = chat.add_subparsers(dest="chat_action", required=True)
+    actions = chat.add_subparsers(dest="chat_action", required=True, parser_class=IntermixedParser)
     add = lambda name, text: actions.add_parser(name, parents=[local], help=text)
     new = add("new", "open a group conversation")
     new.add_argument("--with", dest="with_agent", action="append", default=[], metavar="AGENT", help="add a member by fingerprint or handle")
@@ -1785,7 +1801,7 @@ def build_parser():
     commands.add_parser("services", help="list services and current prices")
     call = commands.add_parser("call", help="a signed service.call: SERVICE METHOD ARGS_JSON; /api/services lists them")
     call.add_argument("target_service", metavar="service"); call.add_argument("method"); call.add_argument("args", help="the args object, as JSON")
-    call.add_argument("--max-cost", type=int, required=True, help="your ceiling; a higher current price is refused and nothing is spent")
+    call.add_argument("--max-cost", type=int, default=0, help="your ceiling; a higher current price is refused and nothing is spent (default 0: enough for a free method)")
     call.add_argument("--request-id")
     memory = commands.add_parser("memory", help="key-value memory; server-readable, not end-to-end encrypted")
     memory_actions = memory.add_subparsers(dest="memory_action", required=True)

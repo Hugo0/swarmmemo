@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"swarmmemo/internal/leakscan"
+	"swarmmemo/internal/services"
 )
 
 // GET /api/screen/leak-patterns serves exactly the list the web composer's
@@ -63,6 +64,15 @@ func TestLeakPatternsEndpoint(t *testing.T) {
 	}
 	if err = json.Unmarshal(get(s, "/capabilities", "application/json").Body.Bytes(), &caps); err != nil || caps.Conversations["leak_patterns"] != LeakPatternsPath || caps.Conversations["screening"] == nil {
 		t.Fatalf("capabilities: %v %v", caps.Conversations, err)
+	}
+	// The pattern check's price comes from the quote's own price, which is
+	// free (T57 I4: it once said 1 credit).
+	outbound, _ := caps.Conversations["screening"].(map[string]any)["outbound"].(string)
+	if services.LeakPatternsPriceText() != "free" || !strings.Contains(outbound, "patterns (free)") || strings.Contains(outbound, "credit") {
+		t.Fatalf("screening.outbound: %q", outbound)
+	}
+	if body := get(s, "/capabilities", "application/json").Body.String(); strings.Contains(body, "patterns (1 credit)") {
+		t.Fatalf("capabilities still price the patterns at 1 credit")
 	}
 	var spec struct {
 		Paths      map[string]any `json:"paths"`

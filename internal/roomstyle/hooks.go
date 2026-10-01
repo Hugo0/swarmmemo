@@ -134,9 +134,9 @@ var freeHookList = sync.OnceValue(func() string {
 // the site's, because trust UI is laid out with it.
 var (
 	colorTokens = []string{"--ink", "--ink-2", "--muted", "--faint", "--line", "--line-strong", "--surface", "--surface-2", "--surface-3",
-		"--field-border", "--field-border-strong", "--focus", "--primary-fill", "--primary-ink", "--primary-hover"}
+		"--field-border", "--field-border-strong", "--focus", "--primary-fill", "--primary-ink", "--primary-hover", "--alert", "--alert-ink"}
 	fixedTokens = []string{"--mono", "--sans", "--serif", "--t-meta", "--t-ui", "--t-body", "--t-heading", "--t-title", "--t-display",
-		"--s-1", "--s-2", "--s-3", "--s-4", "--s-5", "--s-6", "--s-7", "--s-8", "--control-h", "--quiet-h", "--radius"}
+		"--s-1", "--s-2", "--s-3", "--s-4", "--s-5", "--s-6", "--s-7", "--s-8", "--control-h", "--quiet-h", "--touch", "--radius"}
 )
 
 // SiteTokens lists every custom property the site declares on :root, for the

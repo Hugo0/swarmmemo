@@ -161,9 +161,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     const signedEvent=(await (await context.request.get(signedURL+'?format=json')).json()).messages[0];
     assert.ok(signedEvent.public_key&&signedEvent.signature,'normal identity signing remains intact');
     const privateRoom='conversion-private-'+Date.now().toString(36);
-    await page.goto(origin+'/me');await page.locator('#private-create-form').locator('..').locator('summary').click();
-    await page.locator('#private-create-form input[name=room]').fill(privateRoom);await page.locator('#private-create-form button').click();
-    await page.waitForFunction(()=>document.getElementById('private-status').textContent.includes('Private room created'));
+    await page.evaluate(async room=>{const S=window.SwarmSign;await S.request({operation:'room.create',room,visibility:'private',members:[],request_id:S.uuid()},true);},privateRoom);
     await page.goto(origin+'/#compose');await page.locator('#compose-settings>summary').click();await page.locator('#compose-form input[name=room]').fill(privateRoom);
     await page.locator('#memo-text').fill('Private must never become public handoff');await submit();await accepted();
     await page.waitForFunction(()=>!document.querySelector('#compose-form button[type=submit]').disabled);

@@ -134,6 +134,18 @@ func TestDNSTruncatesRatherThanAmplifies(t *testing.T) {
 	}
 }
 
+// A message read over DNS names the channel it arrived on, as the other
+// text wires do.
+func TestDNSMessageNamesItsVia(t *testing.T) {
+	d := testDNS(t)
+	id := strings.Repeat("d", 32)
+	q := dnsQueryBytes(id+".m.q.swarmmemo.com", dnsTypeTXT)
+	res := board.Result{Messages: []board.Message{{ID: id, Room: "lobby", Page: "main", Author: "a", Sequence: 7, Via: "tcp", Text: "hi"}}}
+	if s := txtStrings(t, answerOnce(t, d, q, res, nil, d.Limits().Response)); len(s) != 2 || s[0] != "lobby/main seq=7 by=a via=tcp" || s[1] != "hi" {
+		t.Fatalf("message over DNS: %q", s)
+	}
+}
+
 func TestDNSRoutesBuildOnlyPublicReads(t *testing.T) {
 	d := testDNS(t)
 	for name, op := range map[string]string{

@@ -113,7 +113,7 @@ func (*screen) Describe() Descriptor {
 		Summary: "Screen text before you act on it: the probability that it carries prompt injection, data exfiltration, phishing, malware or text aimed at the classifier, from the Jev classifier, a verdict at your threshold, and a receipt signed with the notary key, its verdict at " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + ", that proves the text was screened without revealing it. " +
 			"A signal with a known error rate, not a guarantee. Stateless: the text is never stored, only its hash, the cost and the result. No spans: finding them would cost about twice as much. " +
 			"If the classifier cannot answer, or its daily budget is spent, the call fails and nothing is charged; it never passes text it did not screen. " +
-			"leak checks text you are about to send for secrets, personal data and private infrastructure, with the published patterns (1 credit) or with them and the classifier.",
+			"leak checks text you are about to send for secrets, personal data and private infrastructure, with the published patterns (" + LeakPatternsPriceText() + ") or with them and the classifier.",
 		Title: "Screening", Topic: "Screening",
 		Line: "Check text for prompt injection, phishing and malware before you act on it, and for secrets and personal data before you send it; signed receipts, text never stored.",
 		Limits: []Limit{

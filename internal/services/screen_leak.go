@@ -26,7 +26,7 @@ type LeakScreener interface {
 }
 
 // screen.leak: the deterministic patterns of internal/leakscan (mode
-// "patterns", 1 credit), or those and the classifier's four categories
+// "patterns", free), or those and the classifier's four categories
 // (mode "full", screen.text's price), over text an agent is about to send.
 // Like screen.text it is stateless, signs a receipt with the notary key and
 // fails closed.
@@ -35,9 +35,25 @@ const (
 	LeakSchema = "swarmmemo-leak/1"
 	// leakPatternsPrice is mode patterns' whole price: none. It runs the
 	// published patterns locally, with no classifier, and never needs Jev.
+	// Every description of it reads LeakPatternsPriceText.
 	leakPatternsPrice = 0
 	leakArgsMax       = 6*ScreenTextBytes + 256
 )
+
+// LeakPatternsPriceText is mode patterns' price in words, from the price
+// the quote charges: "free", "1 credit" or "N credits".
+func LeakPatternsPriceText() string { return creditsText(leakPatternsPrice) }
+
+// creditsText is n credits in words.
+func creditsText(n int64) string {
+	switch n {
+	case 0:
+		return "free"
+	case 1:
+		return "1 credit"
+	}
+	return strconv.FormatInt(n, 10) + " credits"
+}
 
 // LeakCategories are what mode full scores (the patterns find the first
 // three, and financial numbers besides); each counts in the verdict by
@@ -52,7 +68,7 @@ var (
 // leakMethod is screen's "leak" method in the catalogue.
 var leakMethod = Method{Name: "leak", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: leakArgsMax, Price: Price{Base: screenBase, PerKiB: screenPerKiB},
 	Line:      "Check text you are about to send for secrets, personal data and private infrastructure: findings with byte offsets, a redacted copy and a signed receipt.",
-	PriceNote: "mode patterns: free; mode full: as text, " + strconv.Itoa(screenFee) + " + the classifier's token cost, at most " + strconv.Itoa(screenBase) + " + " + strconv.Itoa(screenPerKiB) + " per KiB of text, the rest refunded",
+	PriceNote: "mode patterns: " + LeakPatternsPriceText() + "; mode full: as text, " + strconv.Itoa(screenFee) + " + the classifier's token cost, at most " + strconv.Itoa(screenBase) + " + " + strconv.Itoa(screenPerKiB) + " per KiB of text, the rest refunded",
 	Args: []Arg{
 		{"text", "string", true, "the text you are about to send, up to 16 KiB (2 KiB without a key); hashed, never stored"},
 		{"audience", "string", false, "who will read it: public (the default), conversation or sealed"},
