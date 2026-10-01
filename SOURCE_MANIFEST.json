@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "184639c022615dd666c94e3090cbef31617e956ea28a0a8f86bbdb3ccc636e34",
+  "allowlist_sha256": "f174214484aca901600f4717cd4d2a1f0008ab44c6f83c60bc7532d8abd4fd8c",
   "files": [
     {
       "mode": "0644",
@@ -238,8 +238,8 @@
     {
       "mode": "0644",
       "path": "clients/python/test_private_transport.py",
-      "sha256": "bd62d50323bc82ee04a87c6f93e6b4576354502fa4db028ee786a0e3009c7ac0",
-      "size": 28363
+      "sha256": "f5fc5cd73a0422f679941608f6adfb6d7631461d5c06ed7b98e2964a1a8a6d76",
+      "size": 28480
     },
     {
       "mode": "0644",
@@ -3411,6 +3411,42 @@
     },
     {
       "mode": "0644",
+      "path": "internal/web/assets/film-16x9.mp4",
+      "sha256": "d630dd9e1c1e764f2a33f267ed707927a47e9fbcc6eb8cded34c6b469026b6bf",
+      "size": 4005308
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/film-1x1.mp4",
+      "sha256": "ec590e5645951777f739c6593a31365729415716d3a754ccdae027fe6173805c",
+      "size": 2778435
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/film-poster-16x9.jpg",
+      "sha256": "ea97c8c5195e3333a656e4b1d55ca1272acbe9fc3d4ab50bcde626a85bbd90c8",
+      "size": 37341
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/film-poster-1x1.jpg",
+      "sha256": "3f660c8fc9180c9977540addb63d4b7976ad9ac9752823c4b869cd4749eeb65a",
+      "size": 28002
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/film-transcript.txt",
+      "sha256": "504dedde7f65aa1ad4a499d9fe574d389a3fedf1268284caedde5ef4f8aea2cd",
+      "size": 5458
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/film.js",
+      "sha256": "595bd7cc9897e05e66d5e8a7e97d32cce596786fa65fa73dc1a8858618e62981",
+      "size": 2063
+    },
+    {
+      "mode": "0644",
       "path": "internal/web/assets/highlight.js",
       "sha256": "3b2facf9339b7c89c407aa4a8fdf477aaf25529e081aca662fb356dd4e03fdb2",
       "size": 61832
@@ -3460,8 +3496,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/style.css",
-      "sha256": "e3bd27dad1fc961b720a43f808cad23f47dc36251f8a50c83676f71641dfff77",
-      "size": 98875
+      "sha256": "8e6340ef9f72ad9d66dd414b77b6f9524d5d3b89a239dee7cca87f4e1ef09fca",
+      "size": 100257
     },
     {
       "mode": "0644",
@@ -3478,8 +3514,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "f15a2f9eef77f88acb0d686c4107e38984360a62c4441c27662364c96be70fbd",
-      "size": 27829
+      "sha256": "5ec5adec076eb2313a48749609731281dc2aa4dfe9290f393248be22e3938eb5",
+      "size": 28010
     },
     {
       "mode": "0644",
@@ -3600,6 +3636,24 @@
       "path": "internal/web/feedsort.go",
       "sha256": "6b4c788ddfb7c4f8810ef600fad7120631e374f814893e3288bf9b6535d0af52",
       "size": 1743
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/film.go",
+      "sha256": "97bc3a70c2630886b9d29360c3c7099e3124f80898f0aed92a1f7bb230bee213",
+      "size": 814
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/film_test.cjs",
+      "sha256": "610f07c6252d60742b3b2eaee12ddb46e02f5d47ee3b98bf03ddafa3ec7d9b7b",
+      "size": 4863
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/film_test.go",
+      "sha256": "bf1fcfb5c127cba63e83c5967f545b07913f7effb0adda688807df6b0ed7c3f4",
+      "size": 3071
     },
     {
       "mode": "0644",
@@ -3970,8 +4024,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/docs.html",
-      "sha256": "d293ec68a3c257feb4324e44ab8ecdb0717f7f5cec644da82c28594d0faa47c1",
-      "size": 22234
+      "sha256": "8c5676e69d14818746cc42bc5deb0d5d09e292c08e3268cb2346c93a2f920880",
+      "size": 22297
     },
     {
       "mode": "0644",
@@ -4006,8 +4060,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/page.html",
-      "sha256": "c162e194dcb54df12f49867261c6564c1b500c757c8d08b5d06e2778d2e44791",
-      "size": 45403
+      "sha256": "120d8e9bfe99014c87b0e54e1043f10115737f9e0a3e27d804b7a923b603d5ff",
+      "size": 47005
     },
     {
       "mode": "0644",

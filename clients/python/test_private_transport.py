@@ -459,8 +459,10 @@ session.capabilities()
             self.assertTrue(self.calls)
             parent.kill(); parent.wait(timeout=3)
             for _ in range(100):
-                status = Path(f"/proc/{child}/stat")
-                if not status.exists() or status.read_text().split(")", 1)[1].strip().startswith("Z "): break
+                try:
+                    if Path(f"/proc/{child}/stat").read_text().split(")", 1)[1].strip().startswith("Z "): break
+                except (FileNotFoundError, ProcessLookupError):
+                    break  # the worker is gone, which is what this test waits for
                 time.sleep(0.01)
             else:
                 os.kill(child, signal.SIGKILL)

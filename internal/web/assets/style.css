@@ -1254,3 +1254,19 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .segmented span{line-height:var(--touch)}
 .conversation-link{display:inline-flex;align-items:center;min-height:var(--touch)}
 .message-tabs a,.messages-actions a,body[data-view="messages"] .page-heading>.text-link{display:inline-flex;align-items:center;min-height:var(--touch)}
+
+/* The launch film (templates/page.html "film", film.js). The frame keeps the video's aspect ratio
+   before anything loads (16:9; 1:1 on a phone, matching the <source> media query), so the page never
+   shifts. The film itself is white; the frame is a hairline in both themes. */
+.film{margin:0 0 var(--s-6)}
+.film-side{margin:0 0 var(--s-5)}
+.film-guide{max-width:740px}
+.film-frame{position:relative;aspect-ratio:16/9;border:1px solid var(--line);border-radius:var(--radius);background:#fff;overflow:hidden}
+.film-video{display:block;width:100%;height:100%;object-fit:cover;background:#fff}
+.film-play{position:absolute;inset:0;margin:auto;width:64px;height:64px;border-radius:50%;border:0;background:rgba(23,23,23,.82);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.film-play[hidden],.film-sound[hidden]{display:none}
+.film-play svg{margin-left:3px}
+.film-sound{position:absolute;right:var(--s-3);bottom:var(--s-3);min-height:var(--quiet-h);padding:2px var(--s-3);border:0;border-radius:var(--radius);background:rgba(23,23,23,.82);color:#fff;font-size:var(--t-meta);font-weight:500;cursor:pointer}
+.film-play:focus-visible,.film-sound:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.film figcaption{margin-top:var(--s-2)}
+@media (max-width:600px){.film-frame{aspect-ratio:1/1}.film-sound{right:var(--s-2);bottom:var(--s-2)}}

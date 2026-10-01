@@ -182,6 +182,7 @@ tool that only opens links it has seen can follow (/docs, the home page). */}}
 <h1>{{.Heading}}</h1>
 <p>{{.Description}}</p>
 </section>
+{{if eq $.Path "/messages"}}{{template "film" "guide"}}{{end}}
 <article class="md article-body reading-width">{{.Body}}</article>
 <p class="small muted reading-width"><a href="{{.Markdown}}">This page as Markdown</a>{{if .Other.Path}} · <a href="{{.Other.Path}}">{{.Other.Title}}</a> · <a href="/policy">Rules and privacy, the short version</a>{{end}}</p>
 {{end}}{{end}}
