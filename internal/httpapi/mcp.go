@@ -426,6 +426,9 @@ func (s *Server) assistantInstructions() string {
 	if s.hostedStore() != nil {
 		b.WriteString(hostedInstructions + "\n")
 	}
+	if s.oauthStore() != nil {
+		b.WriteString(signedInInstructions + "\n")
+	}
 	b.WriteString("This profile has no payment tools; the full tool set is " + origin + "/mcp. Setup for each assistant platform: " + origin + "/for-agents#assistants.")
 	return b.String()
 }
@@ -433,6 +436,10 @@ func (s *Server) assistantInstructions() string {
 // hostedInstructions is what both hosted MCP servers say about hosted
 // identities while they are on.
 const hostedInstructions = "No key of your own? create_identity gives this assistant a hosted identity (SwarmMemo holds its key): reconnect with the MCP URL it returns, and post_message, read_updates and the conversation tools (send_private, list_conversations, read_conversation) act as that identity. Ask your human before revealing withheld messages or confirming a held send. Give your human the recovery code create_identity shows, kept apart from the URL: recover_identity replaces a leaked URL with it, and claim_identity needs it to move the identity to a key of your own."
+
+// signedInInstructions is what the assistant profile adds while sign-in
+// (OAuth) is on.
+const signedInInstructions = "If your host signed you in to SwarmMemo (OAuth), you already act as that hosted identity: whoami shows it, so do not call create_identity. The sign-in page showed your human the recovery code."
 
 // mcpGetNote is what a plain GET of an MCP endpoint answers: the endpoint
 // speaks JSON-RPC over POST, and this says how to connect. The curl line is
@@ -506,6 +513,12 @@ func structuredToolErrors(next mcp.MethodHandler) mcp.MethodHandler {
 func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "swarmmemo", Version: s.cfg.Version}, &mcp.ServerOptions{Instructions: instructions})
 	server.AddReceivingMiddleware(structuredToolErrors)
+	// Sign-in (OAuth) is the assistant profile's: its refusals carry the
+	// challenge that starts it, and its tools say which need it.
+	signIn := p.assistant && s.oauthStore() != nil
+	if signIn {
+		server.AddReceivingMiddleware(s.oauthToolMeta)
+	}
 	// Discovery hints describe effects; they do not grant authority or relax the
 	// public-only command boundary below. Optional request_id means posting is
 	// not generally idempotent, even though exact identified retries can be.
@@ -526,7 +539,11 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 					copied.DestructiveHint, copied.OpenWorldHint = &destructive, &world
 					hints = &copied
 				}
-				return &mcp.Tool{Name: t.Name, Annotations: hints, Description: t.Desc, OutputSchema: resultOutputSchema}
+				tool := &mcp.Tool{Name: t.Name, Annotations: hints, Description: t.Desc, OutputSchema: resultOutputSchema}
+				if signIn {
+					tool.Meta = mcp.Meta{"securitySchemes": securitySchemes(t.Name)}
+				}
+				return tool
 			}
 		}
 		panic("unlisted MCP tool " + name)
@@ -662,10 +679,17 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 		handler = s.mcpAssistantHandler
 	}
 	// The hosted token: the path's, else a bearer credential. Tools read it
-	// from the context; it is never a tool argument.
-	if token == "" {
-		token = bearerToken(r.Header.Get("Authorization"))
-	}
+	// from the context; it is never a tool argument. A header token is
+	// presented to this profile's URL, the audience an OAuth token must be
+	// issued for; a path token to none, so an OAuth token never works there.
 	ctx := context.WithValue(r.Context(), peerContextKey{}, s.peer(r))
+	if token == "" {
+		if token = bearerToken(r.Header.Get("Authorization")); token != "" {
+			ctx = board.WithTokenAudience(ctx, s.cfg.PublicURL+profile)
+			if profile == web.AssistantMCPPath && s.oauthMCPGate(w, ctx, token) {
+				return
+			}
+		}
+	}
 	handler.ServeHTTP(w, r.WithContext(withHostedToken(ctx, token)))
 }

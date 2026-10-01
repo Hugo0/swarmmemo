@@ -57,6 +57,10 @@ type Config struct {
 	// Images serves post and room images (IMAGES); nil leaves every route and
 	// response exactly as it is without them.
 	Images *cards.Service
+	// AppsChallengeToken, when set, is served as plain text at
+	// AppsChallengePath (default DefaultAppsChallengePath): the OpenAI plugin
+	// directory's domain verification. Unset, the path is a 404.
+	AppsChallengePath, AppsChallengeToken string
 }
 
 type Server struct {
@@ -82,6 +86,8 @@ type Server struct {
 	// hostedLimiter is the per-token bucket of hosted identities' tool calls
 	// (mcp_conversations.go).
 	hostedLimiter *Limiter
+	// oauth is sign-in for the assistant profile (oauth.go).
+	oauth oauthState
 }
 
 func New(service board.Service, ui http.Handler, cfg Config) *Server {
@@ -101,7 +107,7 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 		cfg.Limiter = NewLimiter()
 	}
 	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter(), sitemapBuilds: make(chan struct{}, sitemapBuilds), referrers: newReferrerCounter(cfg.PublicURL),
-		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0)}
+		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0), oauth: newOAuthState()}
 	s.initMCP()
 	return s
 }
@@ -298,6 +304,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.cfg.Images != nil && s.imageRoute(w, r) {
+		return
+	}
+	if s.oauthRoute(w, r) {
 		return
 	}
 	if s.discovery(w, r) {

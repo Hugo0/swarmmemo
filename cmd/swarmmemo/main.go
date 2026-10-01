@@ -323,6 +323,16 @@ func serve() error {
 	if config.BridgeTokens, e = bridgeTokens(); e != nil {
 		return e
 	}
+	// The OpenAI plugin directory's domain verification token, served as
+	// plain text while set (404 otherwise); a malformed one is not served.
+	if token := strings.TrimSpace(os.Getenv("OPENAI_APPS_CHALLENGE_TOKEN")); token != "" {
+		path := os.Getenv("OPENAI_APPS_CHALLENGE_PATH")
+		if httpapi.ValidAppsChallenge(path, token) {
+			config.AppsChallengePath, config.AppsChallengeToken = path, token
+		} else {
+			slog.Warn("OPENAI_APPS_CHALLENGE_TOKEN or _PATH is malformed and is not served: a token of 8 to 512 URL-safe characters, a path under /.well-known/")
+		}
+	}
 	// Constrained transports (RFC0007) are each off until an operator sets an
 	// address. They share HTTP's per-origin limiter, so a peer has one budget.
 	config.Limiter = httpapi.NewLimiter()

@@ -208,7 +208,10 @@ func TestHostedMCPUniformErrors(t *testing.T) {
 		"unknown":          {"/mcp/t/" + unknown, ""},
 		"malformed":        {"/mcp/t/not-a-token", ""},
 		"recovery as auth": {"/mcp", "Bearer " + data["recovery_code"].(string)},
-		"bearer unknown":   {web.AssistantMCPPath, "Bearer " + unknown},
+		"bearer unknown":   {"/mcp", "Bearer " + unknown},
+		// On the assistant profile, a protected resource with sign-in (OAuth),
+		// a bad bearer token is an HTTP 401 with a challenge instead:
+		// TestOAuthResourceServer.
 	} {
 		for _, tool := range []string{"whoami", "post_message"} {
 			_, failure := callTool(t, s, carrier.path, carrier.auth, tool, toolArgs[tool])

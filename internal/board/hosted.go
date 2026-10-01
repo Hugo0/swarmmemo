@@ -334,10 +334,15 @@ func (s *Store) hostedToken(ctx context.Context, token string, now int64) (hoste
 	hash := hostedHash(token)
 	var state string
 	var lastUsed int64
-	err := s.db.QueryRowContext(ctx, `SELECT k.account,k.public_key,k.sealed_private_key,k.kek_id,k.state,t.last_used_at
- FROM hosted_tokens t JOIN hosted_keys k ON k.account=t.account WHERE t.token_sha256=? AND t.revoked_at=0`, hash).
-		Scan(&t.account, &t.publicKey, &t.sealed, &t.kekID, &state, &lastUsed)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && state != "active" {
+	var resource sql.NullString
+	var expires, ended sql.NullInt64
+	// An OAuth access token (oauth.go) is also bound to its resource, which
+	// only a header carries, and expires; any other token is neither.
+	err := s.db.QueryRowContext(ctx, `SELECT k.account,k.public_key,k.sealed_private_key,k.kek_id,k.state,t.last_used_at,f.resource,f.access_expires_at,f.revoked_at
+ FROM hosted_tokens t JOIN hosted_keys k ON k.account=t.account LEFT JOIN oauth_families f ON f.access_sha256=t.token_sha256 WHERE t.token_sha256=? AND t.revoked_at=0`, hash).
+		Scan(&t.account, &t.publicKey, &t.sealed, &t.kekID, &state, &lastUsed, &resource, &expires, &ended)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (state != "active" ||
+		resource.Valid && (resource.String != tokenAudience(ctx) || expires.Int64 <= now || ended.Int64 != 0)) {
 		return hostedTokenRow{}, hostedTokenInvalid()
 	}
 	if err != nil {
@@ -663,6 +668,9 @@ func (s *Store) recoverHosted(ctx context.Context, tx *sql.Tx, c Command, a acto
 		return Result{}, err
 	}
 	n, _ := revoked.RowsAffected()
+	if err = revokeOAuthConnections(ctx, tx, account, "", "recovered", now); err != nil {
+		return Result{}, err
+	}
 	if _, err = tx.ExecContext(ctx, "UPDATE hosted_keys SET recovery_sha256=? WHERE account=?", recoveryHash, account); err != nil {
 		return Result{}, err
 	}
@@ -697,7 +705,7 @@ func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedD
 	}
 	switch d.Action {
 	case "list":
-		rows, err := tx.QueryContext(ctx, "SELECT token_id,label,created_at,last_used_at FROM hosted_tokens WHERE account=? AND revoked_at=0 ORDER BY created_at,token_id LIMIT ?", a.account, HostedTokensMax)
+		rows, err := tx.QueryContext(ctx, "SELECT token_id,label,created_at,last_used_at FROM hosted_tokens t WHERE account=? AND revoked_at=0"+oauthLiveFilter+" ORDER BY created_at,token_id LIMIT ?", a.account, now, HostedTokensMax+OAuthConnectionsMax)
 		if err != nil {
 			return Result{}, err
 		}
@@ -713,10 +721,10 @@ func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedD
 		if err = rows.Err(); err != nil {
 			return Result{}, err
 		}
-		return Result{Data: map[string]any{"tokens": tokens, "max": HostedTokensMax}}, nil
+		return Result{Data: map[string]any{"tokens": tokens, "max": HostedTokensMax, "oauth_max": OAuthConnectionsMax}}, nil
 	case "create":
 		var live int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM hosted_tokens WHERE account=? AND revoked_at=0", a.account).Scan(&live); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM hosted_tokens t WHERE account=? AND revoked_at=0"+oauthOwnTokenFilter, a.account).Scan(&live); err != nil {
 			return Result{}, err
 		}
 		if live >= HostedTokensMax {
@@ -735,6 +743,15 @@ func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedD
 		data := map[string]any{"token_id": hostedTokenID(hash), "label": d.Label, "notice": "The token is shown once, in this answer: only its hash is stored."}
 		return Result{Data: data, afterCommit: hostedShown(data, token, "")}, nil
 	case "revoke":
+		// An OAuth connection whose token this is ends with it, so its
+		// refresh token cannot make a new one.
+		target := d.Target
+		if target == "all" {
+			target = ""
+		}
+		if err := revokeOAuthConnections(ctx, tx, a.account, target, "revoked", now); err != nil {
+			return Result{}, err
+		}
 		query, args := "UPDATE hosted_tokens SET revoked_at=? WHERE account=? AND revoked_at=0", []any{now, a.account}
 		if d.Target != "all" {
 			query, args = query+" AND token_id=?", append(args, d.Target)
@@ -790,6 +807,9 @@ func (s *Store) claimHosted(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	}
 	revoked, err := tx.ExecContext(ctx, "UPDATE hosted_tokens SET revoked_at=? WHERE account=? AND revoked_at=0", now, a.account)
 	if err != nil {
+		return Result{}, err
+	}
+	if err = revokeOAuthConnections(ctx, tx, a.account, "", "claimed", now); err != nil {
 		return Result{}, err
 	}
 	n, _ := revoked.RowsAffected()

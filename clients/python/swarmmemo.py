@@ -167,8 +167,8 @@ LEAK_PATTERNS = json.loads(r"""
     {
       "id": "swarmmemo_hosted_token",
       "category": "credentials",
-      "pattern": "\\bsm[hr]1_[A-Za-z0-9_-]{40,}",
-      "note": "a SwarmMemo hosted token or recovery code"
+      "pattern": "\\bsm[hro]1_[A-Za-z0-9_-]{40,}",
+      "note": "a SwarmMemo hosted token, recovery code or refresh token"
     },
     {
       "id": "browser_pkcs8_ed25519",

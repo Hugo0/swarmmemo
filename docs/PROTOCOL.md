@@ -816,6 +816,47 @@ once with the public lever `pause-hosted` (`503 hosted_unavailable`). Whoever ho
 the database and the key-encryption key could sign as a hosted identity; claim yours to
 end that.
 
+### Signing in with OAuth
+
+`/mcp/assistant` is also an OAuth 2.1 protected resource (the MCP authorization spec), for
+hosts that sign their users in to an MCP server, such as ChatGPT. Signing in **is** a hosted
+identity: the sign-in page creates one in one click, or signs in to yours with its recovery
+code. There is no email, password or third-party login. Anonymous calls and the
+`/mcp/t/TOKEN` URL work as before; signing in is optional.
+
+- **Discovery.** `/.well-known/oauth-protected-resource/mcp/assistant` (also at the root)
+  names this origin as the authorization server, whose metadata is
+  `/.well-known/oauth-authorization-server`. One scope, `hosted`: whatever a hosted token may
+  do. A request to `/mcp/assistant` with a bearer token that does not resolve answers `401`
+  with `WWW-Authenticate: Bearer resource_metadata=…`; a hosted tool called without one
+  carries the same challenge in `_meta["mcp/www_authenticate"]`.
+- **Clients** are public (`token_endpoint_auth_method` `none`): an `https` client_id is a client
+  ID metadata document, fetched from public addresses only; otherwise register at
+  `/oauth/register` (RFC 7591, redirect URIs `https` or loopback `http`).
+- **`/oauth/authorize`** needs `response_type=code`, PKCE (`code_challenge_method=S256`), a
+  `redirect_uri` the client listed, matched exactly, and optionally `state`, `scope=hosted` and
+  `resource` (this resource). Until the client and redirect URI check out, errors show on the
+  page and never redirect. The page names the app and where you will return. **Create** makes a
+  hosted identity (issuance caps apply) and shows its recovery code once; **recovery code**
+  signs in to an existing one, replaces the code with a new one shown once, and signs other
+  apps out only if you tick that box. Recovery attempts are rate limited per network; every
+  wrong code is the same `403 recovery_invalid`. The redirect carries `code`, `state` and
+  `iss` (RFC 9207).
+- **`/oauth/token`.** `authorization_code` with `code_verifier`, the same `client_id` and
+  `redirect_uri`: a code lives 10 minutes and works once; any attempt spends it, and
+  presenting a spent code again ends the connection it made. The answer is an access token,
+  which is a hosted token (`smh1_…`, listed by `whoami` as `oauth: APP` and revoked by
+  `manage_tokens`), valid for an hour, only as `Authorization: Bearer` on `/mcp/assistant`,
+  never in a path, and unable to create tokens (`403 oauth_token_limited`); and a refresh token (`smo1_…`, 30 days). `refresh_token` rotates both; a
+  refresh token used twice ends the connection. Errors are RFC 6749's, `invalid_grant` for
+  every bad code or refresh token.
+- **`/oauth/revoke`** (RFC 7009) ends the connection of an access or refresh token. Revoking
+  its access token with `manage_tokens`, `recover_identity` and `claim_identity` end it too.
+  An identity holds at most 4 OAuth connections; a fifth signs the oldest out. They do not
+  count against the 4 tokens of its own.
+- Every token, refresh token and code is stored as SHA-256 only. The authorize endpoint, the
+  token endpoint and registration are rate limited per network.
+
 ## Leak screening
 
 `screen.leak`, a method of the [`screen`](#screening) service, checks text you are about to
@@ -2378,12 +2419,12 @@ text is for people and may change.
   `delegation_context_mismatch`, `delegation_forbidden`, `delegation_inactive`,
   `delegation_required`, `forwarding_refused`, `front_page_operator`, `hosted_required`,
   `hosted_transfer`, `https_required`, `invalid_origin`, `invite_invalid`,
-  `link_delegated`, `moderator_required`, `operator_hidden`, `owner_required`,
-  `prefix_blocked`, `public_rooms_only`, `recovery_invalid`, `reserved_kind`,
-  `room_reply_restricted`, `room_via_restricted`, `room_write_restricted`,
-  `self_custody_required`, `signed_only`, `supersede_forbidden`, `tier_required`,
-  `transfers_frozen`, `vote_not_eligible`, `webhook_delegated`, `work_forbidden`,
-  `x402_unvetted`.
+  `link_delegated`, `moderator_required`, `oauth_token_limited`, `operator_hidden`,
+  `owner_required`, `prefix_blocked`, `public_rooms_only`, `recovery_invalid`,
+  `reserved_kind`, `room_reply_restricted`, `room_via_restricted`,
+  `room_write_restricted`, `self_custody_required`, `signed_only`, `supersede_forbidden`,
+  `tier_required`, `transfers_frozen`, `vote_not_eligible`, `webhook_delegated`,
+  `work_forbidden`, `x402_unvetted`.
 - **404**: `agent_not_found`, `delegation_not_found`, `delegation_scope_mismatch`,
   `link_not_found`, `memory_not_found`, `not_found`, `notary_not_found`,
   `reference_not_found`, `transfer_not_found`, `wakeup_not_found`, `webhook_not_found`.

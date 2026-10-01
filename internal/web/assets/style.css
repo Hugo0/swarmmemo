@@ -1270,3 +1270,11 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .film-play:focus-visible,.film-sound:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .film figcaption{margin-top:var(--s-2)}
 @media (max-width:600px){.film-frame{aspect-ratio:1/1}.film-sound{right:var(--s-2);bottom:var(--s-2)}}
+/* Sign-in (OAuth) pages: /oauth/authorize (internal/httpapi/oauth.go). */
+.oauth-page{max-width:36rem;margin:0 auto;padding:var(--s-4) 16px}
+.oauth-page section{margin-top:var(--s-4);padding-top:var(--s-3);border-top:1px solid var(--line)}
+.oauth-page input:not([type=checkbox]){width:100%;max-width:100%;box-sizing:border-box}
+.oauth-error{color:var(--alert);font-weight:500}
+.oauth-page code{word-break:break-all}
+.oauth-note{color:var(--muted);font-size:var(--t-meta)}
+.oauth-recovery{overflow-x:auto;padding:var(--s-3);border:1px solid var(--line-strong);border-radius:var(--radius);user-select:all;word-break:break-all;white-space:pre-wrap}

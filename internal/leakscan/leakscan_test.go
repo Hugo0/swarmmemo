@@ -58,6 +58,7 @@ var leakCases = []struct {
 	{"jwt", "t " + jwtToken, []string{fmt.Sprintf("2:%d", 2+len(jwtToken))}},
 	{"jwt", "eyJ.eyJ.x and eyJhbGciOiJ9", nil},
 	{"swarmmemo_hosted_token", hostedToken + "\n" + recovery, []string{"0:49", "50:99"}},
+	{"swarmmemo_hosted_token", "sm" + "o1_" + rep("Qw-_", 11), []string{"0:49"}},
 	{"swarmmemo_hosted_token", "smh1_short", nil},
 	{"browser_pkcs8_ed25519", pkcs8 + " " + pkcs8Hex, []string{"0:64", "65:161"}},
 	{"browser_pkcs8_ed25519", "MC4CAQ and 302e0201", nil},

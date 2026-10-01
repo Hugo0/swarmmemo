@@ -482,6 +482,20 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool)
 	})
 	mcp.AddTool(server, tool("manage_tokens"), func(ctx context.Context, _ *mcp.CallToolRequest, in manageTokensInput) (*mcp.CallToolResult, R, error) {
 		return as(ctx, func(hc *hostedCaller) (R, error) {
+			// An OAuth connection's token expires and is bound to one
+			// resource; a token it minted would be neither, and would
+			// survive the connection's revocation.
+			if in.Action == "create" {
+				if o := s.oauthStore(); o != nil {
+					limited, err := o.OAuthAccessToken(hc.ctx, hc.token)
+					if err != nil {
+						return R{}, err
+					}
+					if limited {
+						return R{}, &board.Error{Status: 403, Code: "oauth_token_limited", Message: "A sign-in (OAuth) connection cannot create hosted tokens; it can list and revoke them. Use recover_identity with the recovery code for a token of your own."}
+					}
+				}
+			}
 			data := map[string]any{"action": in.Action}
 			if in.Target != "" {
 				data["target"] = in.Target
@@ -689,6 +703,7 @@ func (s *Server) hostedCapabilities() map[string]any {
 		"mcp_only":  true, "operations": []string{"hosted.create", "hosted.recover", "hosted.token", "hosted.claim"},
 		"tools":    tools,
 		"carriers": []string{"/mcp/t/TOKEN", web.AssistantMCPPath + "/t/TOKEN", "Authorization: Bearer TOKEN on /mcp or " + web.AssistantMCPPath},
+		"oauth":    s.oauthCapabilities(),
 		"secrets": map[string]any{"token_prefix": board.HostedTokenPrefix, "recovery_prefix": board.HostedRecoveryPrefix, "stored": "sha256 only", "shown": "once",
 			"never": "a tool argument; a token on any other route answers 401 hosted_token_invalid"},
 		"tokens_max": board.HostedTokensMax, "rate": map[string]any{"per_minute": hostedRatePerMinute, "burst": hostedBurst, "per": "token"},

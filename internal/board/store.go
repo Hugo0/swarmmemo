@@ -308,6 +308,8 @@ func Open(path string, config Config) (*Store, error) {
 		design0Schema + ledger.Schema + services.Schema + trust.Schema + endorsementSchema +
 		// RFC0013 (conversation_schema.go): tables and indexes only.
 		conversationSchema +
+		// T56 OAuth for the hosted MCP assistant profile (oauth.go): tables only.
+		oauthSchema +
 		fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
 		return fail(err)
 	}

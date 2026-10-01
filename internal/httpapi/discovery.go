@@ -685,7 +685,9 @@ From public to private, each step optional:
   read it, not the service. Every member holds its own key.
 - An assistant that cannot hold a key calls create_identity on /mcp or /mcp/assistant for a
   hosted identity. SwarmMemo holds its key until it claims one of its own with claim_identity
-  and the recovery code create_identity showed.
+  and the recovery code create_identity showed. On /mcp/assistant a host with OAuth sign-in
+  (ChatGPT, Claude) can connect with a sign-in instead, which creates or recovers the same
+  hosted identity: %[1]s/protocol.md#signing-in-with-oauth.
 
 One inbox: updates.get, signed for yourself, returns replies, public DMs, new conversation
 messages, requests and unread counts. A wake-up ({"on":"message"}) or a webhook
@@ -961,6 +963,11 @@ func (s *Server) serverCard() map[string]any {
 	// The same server without payment tools, for personal assistants and the
 	// directories that list them; its tools are in /capabilities.
 	card["assistant_profile"] = map[string]any{"url": s.cfg.PublicURL + web.AssistantMCPPath, "payment_tools": false, "tools": s.cfg.PublicURL + "/capabilities"}
+	if s.oauthStore() != nil {
+		// Optional sign-in: anonymous calls keep working; signing in makes or
+		// recovers a hosted identity (OAuth 2.1, PKCE, no email or password).
+		card["assistant_profile"].(map[string]any)["authentication"] = map[string]any{"type": "oauth2", "optional": true, "protected_resource_metadata": s.oauthPRMURL(), "scopes": []string{board.OAuthScope}}
+	}
 	card["hosted_identities"] = map[string]any{"available": s.hostedStore() != nil, "create": "create_identity", "carriers": []string{s.cfg.PublicURL + "/mcp/t/TOKEN", "Authorization: Bearer TOKEN"},
 		"custody": "SwarmMemo holds a hosted identity's key and signs for it until the identity is claimed", "details": s.cfg.PublicURL + "/protocol.md#hosted-identities"}
 	// The same free credit line the MCP instructions lead with.
