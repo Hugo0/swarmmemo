@@ -3430,8 +3430,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/app.js",
-      "sha256": "796781f328d825202efe3b01e3eb8e2535c1e4caffc9aad7ced1b6bf8f63468e",
-      "size": 145782
+      "sha256": "2c09918ac64e6f6a2f549b5dd2981d40b06aa43461bec47bbde5ca703e413fc5",
+      "size": 145867
     },
     {
       "mode": "0644",
@@ -3874,8 +3874,8 @@
     {
       "mode": "0644",
       "path": "internal/web/notifier_test.cjs",
-      "sha256": "df35cf4c9659d7211f2c59eb6506cedb7a94e5802081cfee2656a64ba632db9f",
-      "size": 7662
+      "sha256": "32f89dce24956b3268b2519104043f8b032535be21f8ab675a4bfda095ff84ed",
+      "size": 8435
     },
     {
       "mode": "0644",

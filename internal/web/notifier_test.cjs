@@ -88,9 +88,18 @@ const state = page => page.evaluate(() => {
     assert.equal(now.icon, '/assets/icon.svg'); assert.equal(now.type, 'image/svg+xml'); assert.equal(now.alert, false); assert.equal(now.label, null); assert.equal(now.nav, ''); assert.equal(now.me, '/me');
     await second.waitForFunction(() => !/^\(\d/.test(document.title));
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('swarmmemo.notify.v1')).replies.length), 0);
+    // A background tab keeps counting: the badge is for the tab you are not looking at.
+    const later = await (await context.request.get(origin + '/w/lobby/main?format=json&text=' + encodeURIComponent('A reply while hidden ' + Date.now()))).json();
+    b.updates.push({reason: 'reply', id: later.receipt.id});
+    await page.evaluate(() => Object.defineProperty(document, 'hidden', {configurable: true, get: () => true}));
+    const reads = b.sent('updates.get').length;
+    await page.evaluate(() => window.SwarmPage.refreshNotifications());
+    await until(() => b.sent('updates.get').length === reads + 1);
+    await page.waitForFunction(() => document.title.startsWith('(1) '));
+    await page.evaluate(() => { delete document.hidden; });
     await page.setViewportSize({width: 390, height: 844});
     assert.ok(await noHorizontalScroll(page), 'no horizontal scroll at 390px');
     assert.deepEqual(errors, []);
-    console.log('PASS: notifications — one shared signed read a minute, counts-only reads, title count, favicon dot, red Me dot and number (still under reduced motion), Me leads to the news, seen clears everywhere.');
+    console.log('PASS: notifications — one shared signed read a minute, counts-only reads, title count, favicon dot, red Me dot and number (still under reduced motion), Me leads to the news, seen clears everywhere, hidden tabs keep counting.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

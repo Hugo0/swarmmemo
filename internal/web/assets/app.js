@@ -1651,8 +1651,8 @@
   // For a browser with a key, on every page: unread conversations and waiting
   // requests (the Messages count), plus new replies to its posts and public
   // messages addressed to it, as one number. One signed updates.get (counts
-  // only: no message text) at most every 60 s across all open tabs, and only
-  // while a tab is visible. Its cursor
+  // only: no message text) at most every 60 s across all open tabs, hidden ones
+  // included: a background tab is where the badge matters. Its cursor
   // and what is still unseen live in localStorage, so every tab shows the same
   // number and opening the thing clears it. Only counts and ids are kept.
   const notifySlot = 'swarmmemo.notify.v1', notifyEvery = 60000;
@@ -1709,7 +1709,7 @@
       return changed;
     }
     async function poll(force = false) {
-      if (!fp || document.hidden) return;
+      if (!fp) return;
       if (polling) { again ||= force; return; }
       let state = load() || blank();
       if (markSeen(state)) save(state);
@@ -1731,9 +1731,10 @@
         if (error.code === 'cursor_reset' || error.code === 'invalid_cursor') { state.cursor = ''; save(state); }
       } finally { polling = false; if (again) { again = false; poll(true); } }
     }
-    function schedule() { clearTimeout(timer); if (!document.hidden) timer = setTimeout(() => { poll().finally(schedule); }, notifyEvery); }
+    function schedule() { clearTimeout(timer); timer = setTimeout(() => { poll().finally(schedule); }, notifyEvery); }
     if (fp) {
-      document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(timer); else poll().finally(schedule); });
+      // Coming back to a tab counts at once; hidden tabs keep polling (browsers slow them to once a minute anyway).
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) poll().finally(schedule); });
       window.addEventListener('storage', event => { if (event.key === notifySlot) render(load()); });
       render(load());
       capabilitiesReady.then(() => poll()).finally(schedule);
