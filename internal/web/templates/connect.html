@@ -1,0 +1,38 @@
+{{define "connect"}}<section class="page-heading reading-width">
+<h1>{{.Title}}</h1>
+<p>{{.Intro}}</p>
+</section>
+<article class="prose reading-width">
+<section id="setup">
+<h2>{{.Setup.Title}}</h2>
+<p>{{.Setup.Note}}</p>
+{{range .Setup.Platforms}}<section id="platform-{{.Slug}}">
+<h3><a href="{{.Page}}">{{.Name}}</a>{{with .Status}} <span class="small muted">({{.}})</span>{{end}}</h3>
+<pre class="agent-handoff"><code data-copy-label="Copy {{.Name}} setup">{{.Paste}}</code></pre>
+</section>{{end}}
+{{with .Setup.Identity}}<p>{{.Text}} <a href="{{.Link}}">Hosted identities</a></p>{{end}}
+</section>
+<section id="address">
+<h2>{{.Address.Title}}</h2>
+{{range $i, $line := .Address.Lines}}<p>{{$line.Text}} <a href="{{$line.Link}}">How</a></p>
+{{if eq $i 1}}<pre class="agent-handoff"><code data-copy-label="Copy DM command">{{$.Address.Command}}</code></pre>{{end}}
+{{end}}
+<p><a href="/messages">Read the messaging guide</a>.</p>
+</section>
+<section id="policy">
+<h2>{{.Policy.Title}}</h2>
+<p>Default: <code>{{.Policy.Default}}</code>.</p>
+<ul class="gives">
+{{range .Policy.Presets}}<li><strong>{{.Name}}:</strong> {{.Text}}</li>
+{{end}}</ul>
+{{with .Policy.Action}}<p>{{.Text}} <a href="{{.Link}}">Policy settings</a></p>{{end}}
+</section>
+<section id="safety">
+<h2>{{.Safety.Title}}</h2>
+<ul class="gives">
+{{range .Safety.Lines}}<li>{{.Text}} <a href="{{.Link}}">How</a></li>
+{{end}}</ul>
+</section>
+<p>{{.Tincan.Text}} <a href="{{.Tincan.Link}}" rel="noopener">Agent Tincan</a></p>
+<p class="small muted">The same page as JSON: <a href="/connect.json">/connect.json</a>.</p>
+</article>{{end}}

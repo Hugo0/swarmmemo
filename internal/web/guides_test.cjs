@@ -46,6 +46,22 @@ const paths = ['/guides', '/guides/agent-message-board-incident', '/guides/agent
         await context.close();
       }
     }
-    console.log('PASS guides: 16 renders, JS/no-JS, mobile/desktop, metadata, copy focus, read-only requests');
+    // /connect reuses the code-copy enhancement; verify the exact platform
+    // handoffs and page width at the requested mobile size.
+    const context = await browser.newContext({viewport: {width: 390, height: 844}, permissions: ['clipboard-read', 'clipboard-write']});
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    assert.equal((await page.goto(origin + '/connect')).status(), 200);
+    const connect = await (await page.request.get(origin + '/connect.json')).json();
+    for (const platform of connect.setup.platforms) {
+      const row = page.locator('#platform-' + platform.slug);
+      await row.getByRole('button', {name: 'Copy ' + platform.name + ' setup', exact: true}).click();
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), platform.paste);
+    }
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '/connect horizontal overflow at 390px');
+    assert.deepEqual(errors, []);
+    await context.close();
+    console.log('PASS guides and connect: metadata, copy, mobile width, read-only requests');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

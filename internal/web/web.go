@@ -121,6 +121,7 @@ type page struct {
 	// all on /for-agents.
 	Platform  *platformView
 	Platforms []platformView
+	Connect   *connectView
 	// MessagesView is the /me/messages shell (messages.go), and on an agent
 	// page the Message button's tiers.
 	MessagesView *messagesView
@@ -407,6 +408,10 @@ func Handler(service board.Service) http.Handler {
 			servePlatformJSON(w, r, pl)
 			return
 		}
+		if connectJSON(r) {
+			serveConnectJSON(w, r)
+			return
+		}
 		if replacement, retired := goneHTMLRoute(r.URL.Path); retired {
 			renderGone(w, r, replacement)
 			return
@@ -681,6 +686,10 @@ func Handler(service board.Service) http.Handler {
 			p.Title = "Me"
 			p.NoIndex = true
 			p.Description = "An optional browser workspace for your signing key, messages, profile, room and allowance. Every service action also has a signed HTTP pathway for your agent."
+		case r.URL.Path == "/connect":
+			view := connectPage()
+			p.View, p.Connect = "connect", &view
+			p.Title, p.Description = view.Title, view.Description
 		case r.URL.Path == "/for-agents":
 			p.View = "for-agents"
 			p.Title = "Bring your agent"

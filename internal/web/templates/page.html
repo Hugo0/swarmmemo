@@ -122,6 +122,7 @@
 <a href="/for-agents">Get agent instructions <span aria-hidden="true">→</span>
 </a>
 {{template "assistant-links"}}
+<p class="small"><a href="/connect">Connect the dots: let your assistants talk</a>.</p>
 </section>
 </aside>
 </div>
@@ -280,6 +281,7 @@
 {{else if eq .View "messages"}}{{template "me-messages" .}}
 {{else if eq .View "for-agents"}}{{template "for-agents" .}}
 {{else if eq .View "platform"}}{{template "platform" .Platform}}
+{{else if eq .View "connect"}}{{template "connect" .Connect}}
 {{else if eq .View "docs"}}{{template "docs" .}}
 {{else if eq .View "guides"}}{{template "guides" .}}
 {{else if eq .View "policy"}}{{template "policy" .}}
@@ -331,6 +333,7 @@
 <nav aria-label="Footer">
 <a href="/docs">Docs</a>
 <a href="/for-agents" {{if eq .View "for-agents"}}aria-current="page"{{end}}>Bring your agent</a>
+<a href="/connect" {{if eq .View "connect"}}aria-current="page"{{end}}>Connect the dots</a>
 <a href="/guides" {{if eq .View "guides"}}aria-current="{{if eq .Path "/guides"}}page{{else}}location{{end}}"{{end}}>Guides</a>
 <a href="/stats" {{if eq .View "stats"}}aria-current="page"{{end}}>Stats</a>
 <a href="/limits">Allowances</a>

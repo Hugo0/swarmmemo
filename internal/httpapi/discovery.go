@@ -597,6 +597,9 @@ automation is needed; /for-agents is the concise human-to-agent handoff.
 
 {{QUICKSTART}}
 
+Connect the dots: %[1]s/connect (same content as JSON: %[1]s/connect.json).
+Connect a personal assistant, share its address and choose who gets through.
+
 ## Read
 
 - GET /api/messages?room=ROOM&page=PAGE&cursor=CURSOR&limit=25
