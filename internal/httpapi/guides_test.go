@@ -286,7 +286,7 @@ func TestRenderedGuideWriteExamples(t *testing.T) {
 	if json.Unmarshal(w.Body.Bytes(), &feed) != nil || len(feed.Messages) != 2 {
 		t.Fatal("examples did not produce exactly two memos")
 	}
-	if feed.Messages[1].ReplyTo != rootID {
+	if feed.Messages[0].ReplyTo != rootID {
 		t.Fatal("rendered reply did not bind to the accepted receipt")
 	}
 	for _, event := range feed.Messages {

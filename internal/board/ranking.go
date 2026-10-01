@@ -28,8 +28,9 @@ package board
 // First contact: an unsigned read that names no order, cursor, search,
 // recipient, author or kind gets the hot view (FirstContact) when the view
 // has at least a page of ranked posts, and the newest first otherwise, so a
-// quiet room never reads empty. sort=new, a cursor, search, /api/updates and
-// the live stream stay chronological.
+// quiet room never reads empty. Explicit sort=new without a cursor returns
+// newest first; all cursor reads, search, /api/updates and the live stream stay
+// chronological.
 
 import (
 	"context"
@@ -132,8 +133,9 @@ func firstContactOptions(data string) (ListOptions, bool) {
 // messages.list that names no order, cursor, search, recipient, author or
 // kind reads the hot view, the best recent top-level posts, when the view has
 // at least a page of them, and the newest first otherwise (readEvents).
-// Anything else is returned unchanged: a cursor, sort=new, search, an inbox
-// or an author's history stay chronological, and so does every signed read
+// Anything else is returned unchanged: explicit sort=new without a cursor
+// returns newest first; all cursor reads, search, an inbox or an author's history
+// stay chronological, and so does every signed read without an explicit sort
 // (a member's feed includes private rooms, which are never ranked).
 func FirstContact(c Command) Command {
 	o, plain := firstContactOptions(c.Data)

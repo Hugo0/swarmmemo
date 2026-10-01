@@ -167,7 +167,7 @@ const (
 // (a cursor reads forward from it, no cursor reads the newest). The rooms the
 // operator put on the front page are read on their own (events_room_seq) and
 // merged in.
-func (s *Store) readFront(ctx context.Context, tx *sql.Tx, c Command, where []string, args []any, cursorSeq int64, now int64) (Result, error) {
+func (s *Store) readFront(ctx context.Context, tx *sql.Tx, c Command, where []string, args []any, cursorSeq int64, now int64, newest bool) (Result, error) {
 	order, cmp, agg, bound := "DESC", "<", "min", int64(math.MaxInt64)
 	if c.Cursor != "" {
 		order, cmp, agg, bound = "ASC", ">", "max", cursorSeq
@@ -244,7 +244,7 @@ func (s *Store) readFront(ctx context.Context, tx *sql.Tx, c Command, where []st
 	})
 	events = events[:min(len(events), limit)]
 	fetched := len(events)
-	res, err := s.finishPage(ctx, tx, c, events, order, limit, cursorSeq, now)
+	res, err := s.finishPage(ctx, tx, c, events, order, limit, cursorSeq, now, newest)
 	if err != nil || !truncated || fetched >= limit {
 		return res, err
 	}

@@ -13,6 +13,44 @@ func feedIDs(r Result) map[string]bool {
 	return out
 }
 
+// A bounded initial scan still merges operator-enabled rooms and keeps the
+// newest delivered message as its forward polling cursor.
+func TestNewestFrontPageAcrossExcludedFlood(t *testing.T) {
+	s := openTest(t, Config{})
+	run(t, s, Command{Operation: "post", Room: "lobby", Text: "oldest"})
+	bounty := run(t, s, Command{Operation: "post", Room: "bounties", Text: "older bounty"}).Receipt.ID
+	if _, err := s.OperatorRoom(testContext, Command{Operation: "room.policy.set", Room: "bounties", Data: `{"front_page":true}`}); err != nil {
+		t.Fatal(err)
+	}
+	owner := keyFor(172)
+	run(t, s, signed(owner, Command{Operation: "room.create", Room: "noisy"}))
+	run(t, s, signed(owner, Command{Operation: "room.policy.set", Room: "noisy", Data: `{"front_page":false}`}))
+	flood := postAs(t, s, owner, Command{Room: "noisy", Text: "excluded", RequestID: "flood"})
+	secFlood(t, s, flood, FrontScanRows+100)
+	late := run(t, s, Command{Operation: "post", Room: "lobby", Text: "newest"}).Receipt.ID
+	c := Command{Operation: "messages.list", Limit: 5, Data: `{"sort":"new"}`}
+	first := run(t, s, c)
+	if got := strings.Join(secIDs(first), ","); got != late+","+bounty || first.Data["has_more"] != true {
+		t.Fatalf("initial page lost the newest or operator-enabled message: %v, %v", got, first.Data)
+	}
+	if first.Messages[0].Sequence <= first.Messages[1].Sequence {
+		t.Fatal("initial page must descend by sequence")
+	}
+	c.Cursor = first.NextCursor
+	if empty := run(t, s, c); len(empty.Messages) != 0 || empty.NextCursor != c.Cursor {
+		t.Fatal("scan boundary must not move the cursor behind delivered messages")
+	}
+	newLobby := run(t, s, Command{Operation: "post", Room: "lobby", Text: "new lobby arrival"}).Receipt.ID
+	newBounty := run(t, s, Command{Operation: "post", Room: "bounties", Text: "new bounty arrival"}).Receipt.ID
+	for _, data := range []string{c.Data, ""} {
+		c.Data = data
+		second := run(t, s, c)
+		if got := strings.Join(secIDs(second), ","); got != newLobby+","+newBounty || second.Data["has_more"] != false {
+			t.Fatalf("forward poll skipped or repeated messages: %s, %v", got, second.Data)
+		}
+	}
+}
+
 // The default all-rooms feed shows front-page rooms only, in every order;
 // a room read, scope=all, search and /api/updates still see the rest.
 func TestFrontPageFeed(t *testing.T) {

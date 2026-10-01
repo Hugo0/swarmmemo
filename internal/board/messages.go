@@ -442,7 +442,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	if front {
 		// The chronological front page walks its own index (readFront).
-		res, err := s.readFront(ctx, tx, c, where, args, seq, now)
+		res, err := s.readFront(ctx, tx, c, where, args, seq, now, opts.Sort == "new" && c.Cursor == "")
 		if err == nil && c.firstContact {
 			res.Data["sort"] = "new"
 		}
@@ -497,7 +497,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, err
 	}
 	rows.Close()
-	res, err := s.finishPage(ctx, tx, c, events, order, limit, seq, now)
+	res, err := s.finishPage(ctx, tx, c, events, order, limit, seq, now, opts.Sort == "new" && c.Cursor == "")
 	if err == nil {
 		err = s.screenConversationMessages(ctx, tx, a, res.Messages)
 	}
@@ -510,7 +510,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 // finishPage completes one chronological page fetched in order (at most
 // limit events): attachments, the byte budget, votes and quality, and the
 // cursor to resume from. seq is the cursor's position.
-func (s *Store) finishPage(ctx context.Context, tx *sql.Tx, c Command, events []Message, order string, limit int, seq int64, now int64) (Result, error) {
+func (s *Store) finishPage(ctx context.Context, tx *sql.Tx, c Command, events []Message, order string, limit int, seq int64, now int64, newest bool) (Result, error) {
 	// A full page means the query had at least as many matches as were asked
 	// for, so more may follow; the byte budget below can also cut this page.
 	fetched := len(events)
@@ -527,6 +527,13 @@ func (s *Store) finishPage(ctx context.Context, tx *sql.Tx, c Command, events []
 	next := c.Cursor
 	if len(events) > 0 || next == "" || next == "start" {
 		next = s.cursor(seq)
+	}
+	// Only the uncursored sort=new presentation changes. Keep the newest
+	// delivered sequence as the cursor so every subsequent read polls forward.
+	if newest {
+		for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+			events[i], events[j] = events[j], events[i]
+		}
 	}
 	return Result{Messages: events, NextCursor: next, Data: map[string]any{"has_more": hasMore}}, nil
 }

@@ -212,7 +212,7 @@ func TestRankedViewsExcludeHiddenSimulationsAndImports(t *testing.T) {
 	}
 }
 
-// Explicit and cursor reads stay chronological; updates.get too.
+// All cursor reads and updates.get stay chronological; uncursored new descends.
 func TestChronologicalReadsUnchanged(t *testing.T) {
 	s := openTest(t, Config{})
 	key := keyFor(63)
@@ -230,7 +230,10 @@ func TestChronologicalReadsUnchanged(t *testing.T) {
 	if got := order(run(t, s, Command{Operation: "messages.list", Room: "lobby", Cursor: "start"})); got != want {
 		t.Fatalf("cursor read: %v", got)
 	}
-	if got := order(run(t, s, Command{Operation: "messages.list", Room: "lobby", Data: `{"sort":"new"}`})); got != want {
+	if got := order(run(t, s, Command{Operation: "messages.list", Room: "lobby", Cursor: "start", Data: `{"sort":"new"}`})); got != want {
+		t.Fatalf("sort=new with cursor: %v", got)
+	}
+	if got := order(run(t, s, Command{Operation: "messages.list", Room: "lobby", Data: `{"sort":"new"}`})); got != strings.Join([]string{last, reply, root}, ",") {
 		t.Fatalf("sort=new: %v", got)
 	}
 	if got := order(run(t, s, Command{Operation: "messages.list", Room: "lobby"})); got != want {

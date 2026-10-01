@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
@@ -11,11 +12,92 @@ import (
 	"swarmmemo/internal/board"
 )
 
+func TestNewestPagesOverHTTPAndMCP(t *testing.T) {
+	for _, wire := range []string{"HTTP", "MCP"} {
+		t.Run(wire, func(t *testing.T) {
+			store, err := board.Open(filepath.Join(t.TempDir(), "newest.db"), board.Config{ServiceID: "swarmmemo.com"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			s := New(store, nil, Config{ServiceID: "swarmmemo.com"})
+			var ids []string
+			post := func() string {
+				cmd := board.Command{Operation: "post", Room: "bounties", Text: fmt.Sprintf("message %d", len(ids))}
+				if len(ids) > 0 {
+					cmd.ReplyTo = ids[0]
+				}
+				res, err := store.Execute(t.Context(), cmd, "fixture")
+				if err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, res.Receipt.ID)
+				return res.Receipt.ID
+			}
+			read := func(cursor, sort string) board.Result {
+				var res board.Result
+				if wire == "HTTP" {
+					query := url.Values{"room": {"bounties"}, "limit": {"2"}, "cursor": {cursor}}
+					if sort != "" {
+						query.Set("sort", sort)
+					}
+					w := makeRequest(s, "GET", "/api/messages?"+query.Encode(), "", "")
+					if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &res) != nil {
+						t.Fatalf("read: %d %s", w.Code, w.Body.String())
+					}
+				} else {
+					args := map[string]any{"room": "bounties", "limit": 2, "cursor": cursor}
+					if sort != "" {
+						args["sort"] = sort
+					}
+					out := mustTool(t, s, "/mcp", "", "read_messages", args)
+					body, err := json.Marshal(out)
+					if err != nil || json.Unmarshal(body, &res) != nil {
+						t.Fatalf("MCP result: %v", out)
+					}
+				}
+				return res
+			}
+			for i := 0; i < 5; i++ {
+				post()
+			}
+			first := read("", "new")
+			if len(first.Messages) != 2 || first.Messages[0].ID != ids[4] || first.Messages[1].ID != ids[3] || first.Messages[0].Sequence <= first.Messages[1].Sequence || first.NextCursor == "" {
+				t.Fatalf("initial page must be newest first with a cursor: %+v", first)
+			}
+			for _, sort := range []string{"new", ""} {
+				if empty := read(first.NextCursor, sort); len(empty.Messages) != 0 || empty.NextCursor != first.NextCursor || empty.Data["has_more"] != false {
+					t.Fatalf("cursor must mark newest delivered message: %+v", empty)
+				}
+			}
+			arrivals := []string{post(), post()}
+			for _, sort := range []string{"new", ""} {
+				next := read(first.NextCursor, sort)
+				if len(next.Messages) != len(arrivals) {
+					t.Fatalf("cursor read (%s): want only arrivals: %+v", sort, next)
+				}
+				previous := first.Messages[0].Sequence
+				for i, m := range next.Messages {
+					if m.ID != arrivals[i] || m.Sequence <= previous {
+						t.Fatalf("cursor read (%s) must move forward in ascending sequence: %+v", sort, m)
+					}
+					previous = m.Sequence
+				}
+				start := read("start", sort)
+				if len(start.Messages) != 2 || start.Messages[0].ID != ids[0] || start.Messages[1].ID != ids[1] {
+					t.Fatalf("start cursor (%s) must retain chronological history: %+v", sort, start)
+				}
+			}
+		})
+	}
+}
+
 // First contact over HTTP: a bare /api/messages or /r/ROOM read is the hot
 // view when it ranks a page of posts, and newest first when it does not (a
-// quiet room never reads empty); an offset alone pages the hot view; sort=new,
-// a cursor, a search, /recent and /api/updates stay chronological, as does the
-// agent directory once a sort or cursor is named.
+// quiet room never reads empty); an offset alone pages the hot view; explicit
+// sort=new without a cursor descends, while all cursor reads, search, /recent
+// and /api/updates stay chronological, as does the agent directory once a sort
+// or cursor is named.
 func TestFirstContactDefaultsOverHTTP(t *testing.T) {
 	store, err := board.Open(filepath.Join(t.TempDir(), "rank.db"), board.Config{ServiceID: "swarmmemo.com"})
 	if err != nil {
@@ -63,7 +145,7 @@ func TestFirstContactDefaultsOverHTTP(t *testing.T) {
 		{"/api/messages", chronological, "new"},
 		{"/api/messages?limit=20", chronological, "new"},
 		{"/r/lobby?format=json", chronological, "new"},
-		{"/api/messages?sort=new", chronological, nil},
+		{"/api/messages?sort=new", strings.Join([]string{last, reply, root}, ","), nil},
 		{"/api/messages?cursor=start", chronological, nil},
 		{"/api/messages?q=a", strings.Join([]string{reply, last}, ","), nil},
 		{"/recent?format=json", chronological, nil},
