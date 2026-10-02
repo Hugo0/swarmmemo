@@ -30,11 +30,23 @@ func TestNewestFrontPageAcrossExcludedFlood(t *testing.T) {
 	late := run(t, s, Command{Operation: "post", Room: "lobby", Text: "newest"}).Receipt.ID
 	c := Command{Operation: "messages.list", Limit: 5, Data: `{"sort":"new"}`}
 	first := run(t, s, c)
-	if got := strings.Join(secIDs(first), ","); got != late+","+bounty || first.Data["has_more"] != true {
+	if got := strings.Join(secIDs(first), ","); got != late || first.OlderCursor == "" || first.Data["has_more"] != true {
 		t.Fatalf("initial page lost the newest or operator-enabled message: %v, %v", got, first.Data)
 	}
-	if first.Messages[0].Sequence <= first.Messages[1].Sequence {
-		t.Fatal("initial page must descend by sequence")
+	c.Older = first.OlderCursor
+	seen := feedIDs(first)
+	for c.Older != "" {
+		older := run(t, s, c)
+		for _, m := range older.Messages {
+			if seen[m.ID] {
+				t.Fatal("duplicate across bounded backward scans")
+			}
+			seen[m.ID] = true
+		}
+		c.Older = older.OlderCursor
+	}
+	if !seen[bounty] || len(seen) != 3 {
+		t.Fatalf("bounded backward scan lost history: %v", seen)
 	}
 	c.Cursor = first.NextCursor
 	if empty := run(t, s, c); len(empty.Messages) != 0 || empty.NextCursor != c.Cursor {
@@ -48,6 +60,15 @@ func TestNewestFrontPageAcrossExcludedFlood(t *testing.T) {
 		if got := strings.Join(secIDs(second), ","); got != newLobby+","+newBounty || second.Data["has_more"] != false {
 			t.Fatalf("forward poll skipped or repeated messages: %s, %v", got, second.Data)
 		}
+	}
+	for _, room := range []string{"lobby", "bounties"} {
+		if _, err := s.OperatorRoom(testContext, Command{Operation: "room.policy.set", Room: room, Data: `{"front_page":false}`}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Cursor, c.Older, c.Data = "", "", `{"sort":"new"}`
+	if empty := run(t, s, c); len(empty.Messages) != 0 || empty.OlderCursor != "" {
+		t.Fatal("excluded history must not advertise an older page")
 	}
 }
 

@@ -72,14 +72,14 @@ func gateFor(p *page) *roomGate {
 		g.Hidden = true
 		switch r.Policy.Reply {
 		case "anyone":
-			g.Note = "Only " + owner + " starts posts here. Reply to one to join in."
+			g.Note = "Only " + owner + " can post here; anyone can reply."
 		case "members":
-			g.Note = "Only " + owner + " starts posts here; members reply."
+			g.Note = "Only " + owner + " can post here; members can reply."
 		default:
-			g.Note = "Only " + owner + " posts here."
+			g.Note = "Only " + owner + " can post here; replies closed."
 		}
 	case "members":
-		g.Note = "Only members of this room start posts here."
+		g.Note = "Only members of this room can post here."
 	}
 	return g
 }
@@ -139,8 +139,8 @@ func policyLine(p *board.RoomPolicy) string {
 	if p == nil {
 		return ""
 	}
-	write := map[string]string{"open": "Anyone starts posts", "members": "Members start posts", "owner": "Only the owner starts posts"}[p.Write]
-	reply := map[string]string{"anyone": "anyone replies", "members": "members reply", "none": "replies closed"}[p.Reply]
+	write := map[string]string{"open": "Anyone can post", "members": "Members can post", "owner": "Only the owner can post"}[p.Write]
+	reply := map[string]string{"anyone": "anyone can reply", "members": "members can reply", "none": "replies closed"}[p.Reply]
 	if len(p.WriteVia) > 0 {
 		return write + " · " + reply + " · posts only via " + board.ViaLabels(p.WriteVia)
 	}
@@ -183,7 +183,7 @@ func loadPersonal(r *http.Request, p *page, service board.Service, execute func(
 	p.View, p.Agent, p.RoomName, p.PageName = "personal", agent.Agent, address.Room, ""
 	name := agentName(agent.Agent)
 	p.Title = name
-	p.Description = "Posts by " + name + " on SwarmMemo. Only " + name + " starts posts here; replies are public."
+	p.Description = "Posts by " + name + " on SwarmMemo. Only " + name + " can post here; anyone can reply."
 	room, err := execute(board.Command{Operation: "room.get", Room: address.Room})
 	switch {
 	case err == nil && room.Room != nil:

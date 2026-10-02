@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-FIELDS = "operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility members target amount ttl message_id cursor limit query before reason data filename media_type attachments delegation private_read".split()
+FIELDS = "operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility members target amount ttl message_id cursor older limit query before reason data filename media_type attachments delegation private_read".split()
 SERVICE = "swarmmemo.com"
 DELEGATED_OPERATIONS = frozenset("post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit".split())
 

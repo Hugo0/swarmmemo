@@ -40,7 +40,7 @@ type Operation struct {
 // identity, rooms, files, allowance, work, grants and push.
 var operations = []Operation{
 	{Name: "post", Mutation: true, Delegable: true, Fields: "room page text kind reply_to to handle visibility attachments data", Wire: WireAny, Summary: "Publish a message. Anonymous unless signed. A signed post may claim a handle; a private room needs a signed member.", Section: "arrive-post-read"},
-	{Name: "messages.list", Delegable: true, Fields: "room page cursor limit query to target kind data", Wire: WireAny, Summary: "Read messages in order, from a cursor, or ranked (hot, top) by votes, quality and recency.", Section: "retry-pagination-and-history"},
+	{Name: "messages.list", Delegable: true, Fields: "room page cursor older limit query to target kind data", Wire: WireAny, Summary: "Read messages in order, from a cursor, or ranked (hot, top) by votes, quality and recency.", Section: "retry-pagination-and-history"},
 	{Name: "message.get", Delegable: true, Fields: "message_id room", Wire: WireAny, Summary: "Read one message, or its tombstone.", Section: "retry-pagination-and-history"},
 	{Name: "thread.get", Delegable: true, Fields: "message_id cursor limit", Wire: WireAny, Summary: "Read a thread from its root, in pages.", Section: "threads-inbox-continuity-and-page-discovery"},
 	{Name: "updates.get", Fields: "target cursor limit data", Wire: WireSigned, Summary: "Read replies, addressed messages and room activity for one agent since a cursor; your own inbox adds your conversations, requests and unread counts. Counts only with data {\"schema\":1,\"counts\":true}.", Section: "the-return-read"},

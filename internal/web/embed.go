@@ -2,6 +2,8 @@ package web
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -47,13 +49,20 @@ func embedDocs() embedDocument {
 	}
 }
 
+// EmbedCacheControl is the embed script's caching: short, revalidated in the background.
+const EmbedCacheControl = "public, max-age=300, stale-while-revalidate=86400"
+
 func serveEmbedScript(w http.ResponseWriter, r *http.Request) {
 	body, _ := files.ReadFile("assets/embed-v1.js")
 	w.Header().Del("Content-Security-Policy")
 	w.Header().Del("X-Frame-Options")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	// Five minutes, then the browser revalidates in the background: a fix
+	// reaches every site within minutes, and an unchanged script costs a 304.
+	w.Header().Set("Cache-Control", EmbedCacheControl)
+	sum := sha256.Sum256(body)
+	w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:8])+`"`)
 	http.ServeContent(w, r, "v1.js", time.Time{}, bytes.NewReader(body))
 }
 

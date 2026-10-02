@@ -169,6 +169,9 @@ const (
 // merged in.
 func (s *Store) readFront(ctx context.Context, tx *sql.Tx, c Command, where []string, args []any, cursorSeq int64, now int64, newest bool) (Result, error) {
 	order, cmp, agg, bound := "DESC", "<", "min", int64(math.MaxInt64)
+	if c.Older != "" {
+		bound = cursorSeq
+	}
 	if c.Cursor != "" {
 		order, cmp, agg, bound = "ASC", ">", "max", cursorSeq
 	}
@@ -230,6 +233,10 @@ func (s *Store) readFront(ctx context.Context, tx *sql.Tx, c Command, where []st
 			// Nothing past the walk's end yet: the next read resumes there.
 			q, qargs = q+" AND e.seq<=?", append(qargs, edge)
 		}
+		if truncated && newest {
+			// Do not jump past unscanned default rooms to an opted-in room.
+			q, qargs = q+" AND e.seq>=?", append(qargs, edge)
+		}
 		got, err := scan(q+" ORDER BY e.seq "+order+" LIMIT ?", append(append(qargs[:2:2], args...), append(qargs[2:], limit)...))
 		if err != nil {
 			return Result{}, err
@@ -249,6 +256,12 @@ func (s *Store) readFront(ctx context.Context, tx *sql.Tx, c Command, where []st
 		return res, err
 	}
 	res.Data["has_more"] = true
+	if newest && len(res.Messages) == 0 {
+		// Even an empty scan must let a backward reader continue past rooms
+		// that are no longer visible or no longer on the front page.
+		opts, _ := parseListOptions(c.Data)
+		res.OlderCursor = s.olderCursor(edge, c, opts)
+	}
 	if order == "ASC" && len(res.Messages) == fetched {
 		// The page ends where the walk did, so the reader moves past it.
 		res.NextCursor = s.cursor(edge)

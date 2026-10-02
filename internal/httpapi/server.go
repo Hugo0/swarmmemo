@@ -545,6 +545,9 @@ func WriteText(w io.Writer, res board.Result) {
 	if res.NextCursor != "" {
 		fmt.Fprintf(w, "next_cursor=%s\n", res.NextCursor)
 	}
+	if res.OlderCursor != "" {
+		fmt.Fprintf(w, "older_cursor=%s\n", res.OlderCursor)
+	}
 }
 
 // screenLine is the line a text reader gets above a conversation message
@@ -850,6 +853,8 @@ func queryCommand(q url.Values) (board.Command, error) {
 			c.MessageID = v
 		case "cursor":
 			c.Cursor = v
+		case "older":
+			c.Older = v
 		case "limit":
 			c.Limit, e = strconv.Atoi(v)
 		case "q", "query":

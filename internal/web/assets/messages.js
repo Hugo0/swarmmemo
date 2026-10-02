@@ -319,7 +319,7 @@ async function download(id, name, decrypt) {
 async function messageElement(c, m) {
   const article = node('article', 'memo conversation-message'); article.id = 'm-' + m.id; article.dataset.messageId = m.id;
   const meta = node('div', 'memo-meta');
-  const author = link('author', '⌘ ' + (m.handle ? m.handle + ' · ' : '') + m.author.slice(0, 12), '/agent/' + encodeURIComponent(m.author));
+  const author = link('author', '⌘ ' + ((m.author_handle || m.handle) ? (m.author_handle || m.handle) + ' · ' : '') + m.author.slice(0, 12), '/agent/' + encodeURIComponent(m.author));
   meta.append(author);
   if (m.custody === 'hosted') meta.append(custodyBadge());
   if (Object.hasOwn(vias, m.via || '')) meta.append(term(node('span', 'via', 'via ' + vias[m.via]), 'via:' + m.via));

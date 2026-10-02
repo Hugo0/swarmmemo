@@ -776,7 +776,7 @@ func TestFeedForwardLinkFollowsHasMoreNotCursor(t *testing.T) {
 			if got := strings.Contains(body, "Continue forward"); got != tc.want {
 				t.Fatalf("forward link rendered=%v want %v", got, tc.want)
 			}
-			if !strings.Contains(body, "Browse archive") {
+			if !strings.Contains(body, "From the beginning") {
 				t.Fatal("the archive entry point must always remain")
 			}
 			// Live updates still need the resume position even with no link.
@@ -852,5 +852,43 @@ func TestReplyReferenceIsALinkOnBothRenderingSurfaces(t *testing.T) {
 	}
 	if strings.Contains(source, "innerHTML") {
 		t.Fatal("app.js must never assign innerHTML")
+	}
+}
+
+func TestOlderFeedLinksAndServerRead(t *testing.T) {
+	for _, path := range []string{"/?q=needle&scope=all&older=previous", "/r/lobby?older=previous", "/r/lobby/notes?older=previous"} {
+		t.Run(path, func(t *testing.T) {
+			var command board.Command
+			s := &testService{execute: func(c board.Command) (board.Result, error) {
+				if c.Operation == "messages.list" {
+					command = c
+					return board.Result{OK: true, Messages: []board.Message{{ID: "older-post", Sequence: 4, Room: "lobby", Page: "notes", Text: "Older content"}}, NextCursor: "forward", OlderCursor: "next:older&token", Data: map[string]any{"has_more": true}}, nil
+				}
+				if c.Operation == "room.get" {
+					return board.Result{OK: true, Room: &board.Room{Name: "lobby", Visibility: "public"}}, nil
+				}
+				return board.Result{OK: true}, nil
+			}}
+			w := httptest.NewRecorder()
+			Handler(s).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+			if w.Code != 200 {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			if command.Older != "previous" || command.Cursor != "" || !strings.Contains(command.Data, `"sort":"new"`) {
+				t.Fatalf("wrong older read: %+v", command)
+			}
+			body := w.Body.String()
+			for _, needle := range []string{"Older content", "Load older posts", "From the beginning", "older=next%3Aolder%26token", `role="status"`, `aria-live="polite"`} {
+				if !strings.Contains(body, needle) {
+					t.Fatalf("missing %s", needle)
+				}
+			}
+			if strings.Contains(body, "Continue forward") {
+				t.Fatal("newest feed offers a forward link")
+			}
+			if strings.Contains(path, "scope=all") && (!strings.Contains(body, "scope=all") || command.Query != "needle") {
+				t.Fatal("filter lost")
+			}
+		})
 	}
 }

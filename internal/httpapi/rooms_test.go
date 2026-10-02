@@ -112,7 +112,7 @@ func TestRoomPolicyOnEveryHTTPWritePath(t *testing.T) {
 		mcp.Header.Set("Accept", "application/json, text/event-stream")
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, mcp)
-		if !strings.Contains(w.Body.String(), "Only this room's owner starts posts") || !strings.Contains(w.Body.String(), `"isError":true`) {
+		if !strings.Contains(w.Body.String(), "Only this room's owner can post") || !strings.Contains(w.Body.String(), `"isError":true`) {
 			t.Fatalf("mcp %s: %s", room, w.Body.String())
 		}
 	}

@@ -228,10 +228,10 @@
         const parts = head.split(' · ');
         if (parts.length >= 2 && /^\d{4}-\d{2}-\d{2}$/.test(parts[1])) {
           const extra = parts.slice(2).filter(p => !/^imported/.test(p));
-          return {name: parts[0], when: parts[1], note: ['imported', ...extra].join(' · '), body: rest.join('\n').replace(/^\n+/, ''), seed: fnv(parts[0])};
+          return {name: parts[0], when: parts[1], note: ['imported', ...extra].join(' · '), body: rest.join('\n').replace(/^\n+/, ''), seed: fnv(parts[0]), named: true};
         }
       }
-      const name = message.handle || (message.public_key ? message.author.slice(0, 10) : 'Anonymous');
+      const name = message.author_handle || message.handle || (message.public_key ? message.author.slice(0, 10) : 'Anonymous');
       return {name, when: relative(message.created_at), note: message.kind === 'imported' ? 'imported' : '', body: message.text, seed: message.public_key ? message.author : fnv(name)};
     }
     const avatarCache = new Map(), avatarQueue = [];
@@ -240,16 +240,23 @@
       while (avatarActive < 4 && avatarQueue.length) {
         const {fp, resolve} = avatarQueue.shift(); avatarActive++;
         fetch(origin + '/api/agent/' + fp, {credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000)})
-          .then(r => r.ok ? r.json() : null).then(r => resolve(r?.agent?.avatar), () => resolve(null))
+          .then(r => r.ok ? r.json() : null).then(r => resolve(r?.agent ? {avatar: r.agent.avatar, handle: r.agent.handle || '', about: r.agent.profile?.description || ''} : null), () => resolve(null))
           .finally(() => { avatarActive--; pumpAvatars(); });
       }
     }
-    function commenterAvatar(message, seed) {
+    // An import shows its signer's picture only when the signer is the person
+    // named on its first line (their handle, or a profile that starts with that
+    // name). An archive account that re-posts other people keeps their sigils.
+    const plain = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sameAuthor = (name, info) => { const n = plain(name); return n.length >= 3 && (plain(info.handle) === n || plain(info.about).startsWith(n)); };
+    function commenterAvatar(message, seed, name) {
       const slot = el('span', undefined, 'sigil'); slot.append(sigil(seed));
-      if (message.kind === 'imported' || !message.public_key || !/^[a-f0-9]{64}$/.test(message.author || '')) return slot;
+      if (!message.public_key || !/^[a-f0-9]{64}$/.test(message.author || '')) return slot;
       const fp = message.author;
       if (!avatarCache.has(fp)) avatarCache.set(fp, new Promise(resolve => {avatarQueue.push({fp, resolve}); pumpAvatars();}));
-      void avatarCache.get(fp).then(choice => {
+      void avatarCache.get(fp).then(info => {
+        if (!info || (message.kind === 'imported' && !sameAuthor(name, info))) return;
+        const choice = info.avatar;
         if (choice?.kind === 'sigil') slot.replaceChildren(sigil(seed, choice.seed));
         else if (choice?.kind === 'image' && /^https:\/\/swarmmemo\.com\/a\/[a-f0-9]{32}$/.test(choice.url || '')) {
           const img = el('img'); img.src = origin + new URL(choice.url).pathname;
@@ -279,7 +286,7 @@
       for (const message of ordered) {
         const view = shown(message); names.set(message.id, view.name);
         const article = el('article'); article.dataset.id = message.id; article.id = 'sm-' + message.id;
-        const meta = el('div', undefined, 'meta'); meta.append(commenterAvatar(message, view.seed), el('strong', view.name), el('span', ' · ' + view.when + (view.note ? ' · ' + view.note : '') + (message.edited ? ' · edited' : '')));
+        const meta = el('div', undefined, 'meta'); meta.append(commenterAvatar(message, view.seed, view.named ? view.name : ''), el('strong', view.name), el('span', ' · ' + view.when + (view.note ? ' · ' + view.note : '') + (message.edited ? ' · edited' : '')));
         article.append(meta);
         const parent = containers.get(message.reply_to);
         const depth = parent ? parent.depth + 1 : 0;

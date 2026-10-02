@@ -300,7 +300,7 @@ func (s *Store) claimOnPost(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	return want, nil, nil
 }
 
-const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id AND s.supersedes<>''),''),e.hidden_by,e.via,` + forwardColumn + `,` + custodyColumn
+const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id AND s.supersedes<>''),''),e.hidden_by,e.via,` + forwardColumn + `,` + custodyColumn + `,coalesce((SELECT i.handle FROM identities i WHERE i.id=e.author),'')`
 
 type scanner interface{ Scan(...any) error }
 
@@ -321,7 +321,7 @@ func curatorPost(kind, handle, publicKey string) bool {
 func scanEvent(row scanner) (Message, error) {
 	var e Message
 	var forward string
-	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody)
+	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody, &e.AuthorHandle)
 	e.Forwarded = parseForwarded(forward)
 	e.Via = messageVia(e.Via, e.Forwarded)
 	e.Type = "message"
@@ -409,6 +409,9 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 	}
 	// The all-rooms feed shows front-page rooms unless scope=all (frontpage.go).
+	if c.Older != "" && (opts.Sort != "new" || c.Cursor != "") {
+		return Result{}, problem(400, "invalid_cursor", "Use older with sort=new and without cursor.")
+	}
 	front := frontPageFeed(c, opts)
 	if front {
 		where = append(where, frontPageSQL())
@@ -440,13 +443,29 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err != nil {
 		return Result{}, err
 	}
+	if c.Older != "" {
+		seq, err = s.parseOlderCursor(c.Older, c, opts)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	if front {
 		// The chronological front page walks its own index (readFront).
 		res, err := s.readFront(ctx, tx, c, where, args, seq, now, opts.Sort == "new" && c.Cursor == "")
+		if err == nil && opts.Sort == "new" {
+			err = s.attachOlderCursor(ctx, tx, &res, c, opts, where, args)
+		}
 		if err == nil && c.firstContact {
 			res.Data["sort"] = "new"
 		}
 		return res, err
+	}
+	// Keep the unbounded scope for continuation detection. Forward cursors
+	// still read ascending; older is an exclusive descending boundary.
+	olderWhere, olderArgs := append([]string{}, where...), append([]any{}, args...)
+	if c.Older != "" {
+		where = append(where, "e.seq<?")
+		args = append(args, seq)
 	}
 	if c.Cursor != "" {
 		where = append(where, "e.seq>?")
@@ -500,6 +519,9 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	res, err := s.finishPage(ctx, tx, c, events, order, limit, seq, now, opts.Sort == "new" && c.Cursor == "")
 	if err == nil {
 		err = s.screenConversationMessages(ctx, tx, a, res.Messages)
+	}
+	if err == nil && opts.Sort == "new" {
+		err = s.attachOlderCursor(ctx, tx, &res, c, opts, olderWhere, olderArgs)
 	}
 	if err == nil && c.firstContact {
 		res.Data["sort"] = "new"
@@ -623,10 +645,12 @@ func (s *Store) export(ctx context.Context, tx *sql.Tx, c Command, now int64) (R
 		var e Message
 		var change int64
 		var forward string
-		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody, &change); err != nil {
+		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody, &e.AuthorHandle, &change); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
+		// Exports carry what was signed; the current handle is a live read.
+		e.AuthorHandle = ""
 		e.Forwarded = parseForwarded(forward)
 		e.Via = messageVia(e.Via, e.Forwarded)
 		e.Sequence = change

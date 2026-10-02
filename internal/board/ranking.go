@@ -139,7 +139,7 @@ func firstContactOptions(data string) (ListOptions, bool) {
 // (a member's feed includes private rooms, which are never ranked).
 func FirstContact(c Command) Command {
 	o, plain := firstContactOptions(c.Data)
-	if plain && c.Operation == "messages.list" && c.Cursor == "" && c.Query == "" && c.To == "" && c.Target == "" && c.Kind == "" &&
+	if plain && c.Operation == "messages.list" && c.Cursor == "" && c.Older == "" && c.Query == "" && c.To == "" && c.Target == "" && c.Kind == "" &&
 		c.PublicKey == "" && c.Signature == "" && c.Delegation == nil && c.PrivateRead == nil {
 		c.Data = firstContactSort
 		if o.Scope != "" {

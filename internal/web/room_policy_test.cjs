@@ -42,7 +42,7 @@ async function agent(origin, handle) {
     // A stranger: no composer for a top-level post, a clear line, Reply still offered.
     let {page, context} = await open(null, '/r/' + room, 320);
     assert.equal(await page.locator('#compose').isHidden(), true, 'owner-only room hides the composer');
-    assert.match(await page.locator('#composer-gate').textContent(), /Only the owner starts posts here/);
+    assert.match(await page.locator('#composer-gate').textContent(), /Only the owner can post here/);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile overflow');
     await page.locator('#e-' + root + ' .reply-button').click();
     assert.equal(await page.locator('#compose').isVisible(), true, 'replying reopens the composer');
@@ -56,7 +56,7 @@ async function agent(origin, handle) {
     // The owner: composer and controls.
     ({page, context} = await open(owner.browserKey, '/r/' + room));
     await page.locator('#room-settings').waitFor();
-    assert.equal(await page.locator('#compose').isVisible(), true, 'the owner may start posts');
+    assert.equal(await page.locator('#compose').isVisible(), true, 'the owner can post');
     assert.equal(await page.locator('#room-policy-form select[name=write]').inputValue(), 'owner');
     await context.close();
 

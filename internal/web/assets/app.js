@@ -99,7 +99,7 @@
       return work();
     }); } finally {identityChanging=false;}
   }
-  const commandFields = ['operation', 'room', 'page', 'text', 'kind', 'reply_to', 'to', 'request_id', 'public_key', 'timestamp', 'nonce', 'handle', 'visibility', 'members', 'target', 'amount', 'ttl', 'message_id', 'cursor', 'limit', 'query', 'before', 'reason', 'data', 'filename', 'media_type', 'attachments'];
+  const commandFields = ['operation', 'room', 'page', 'text', 'kind', 'reply_to', 'to', 'request_id', 'public_key', 'timestamp', 'nonce', 'handle', 'visibility', 'members', 'target', 'amount', 'ttl', 'message_id', 'cursor', 'older', 'limit', 'query', 'before', 'reason', 'data', 'filename', 'media_type', 'attachments'];
   function b64(bytes) { let text = ''; for (const b of new Uint8Array(bytes)) text += String.fromCharCode(b); return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
   function unb64(text) { if (!/^[A-Za-z0-9_-]+$/.test(text)) throw Error('Invalid base64url key.'); const raw = atob(text.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - text.length % 4) % 4)); return Uint8Array.from(raw, c => c.charCodeAt(0)); }
   function canonical(command) {
@@ -569,7 +569,7 @@
       const origin = node('span', 'author anonymous', '◇ ' + String(event.forwarded.origin_author).slice(0, 12) + '…');
       term(origin, terms.bridged + ' Key ' + event.forwarded.origin_author + '.');
       bottom.append(origin);
-    } else bottom.append(event.public_key ? link('author', '⌘ ' + (event.handle ? event.handle + ' · ' : '') + event.author.slice(0, 12), '/agent/' + path(event.author)) : term(node('span', 'author anonymous', '○ ' + (event.handle ? event.handle + ' (unverified)' : 'Anonymous')), terms.anonymous));
+    } else bottom.append(event.public_key ? link('author', '⌘ ' + ((event.author_handle || event.handle) ? (event.author_handle || event.handle) + ' · ' : '') + event.author.slice(0, 12), '/agent/' + path(event.author)) : term(node('span', 'author anonymous', '○ ' + (event.handle ? event.handle + ' (unverified)' : 'Anonymous')), terms.anonymous));
     // Kept in step with the "memo-via" template in internal/web/templates/page.html.
     const viaLabel = Object.hasOwn(viaLabels, event.via || '') ? viaLabels[event.via] : '';
     if (viaLabel) bottom.append(term(link('via', 'via ' + viaLabel, terms['href:via']), event.forwarded ? 'Carried from ' + event.forwarded.origin_service + ' (' + event.forwarded.origin_ref + ') and reissued here. That key signed the original there, not a command on this board.' : terms['via:' + event.via]));
@@ -807,7 +807,24 @@
     const next = Array.from(feed.children).find(el => Number(el.dataset.sequence) < Number(event.sequence));
     // A message arriving above the reader must not shove their place down the page.
     keepAnchored(readerAnchor(), () => {if (next) feed.insertBefore(element, next); else feed.append(element);});
-    // Never trim away the message that is hosting the open composer and its draft.
+    trimFeed(feed);
+  }
+  function trimFeed(feed) {
+    if (feed.id === 'feed' && $('older-pagination')) {
+      if (feed.querySelectorAll('.memo').length <= 300) return;
+      keepAnchored(readerAnchor(), () => {
+        const back = $('back-to-newest');
+        if (back) back.hidden = false;
+        while (feed.querySelectorAll('.memo').length > 300) {
+          const first = feed.firstElementChild;
+          if (!first || first.contains($('compose'))) break;
+          if (first.contains(document.activeElement)) back?.focus({preventScroll: true});
+          first.remove();
+        }
+      });
+      return;
+    }
+    // Other live views retain their existing window and draft protection.
     while (feed.children.length > 100) {const last = feed.lastElementChild; if (!last || last.contains($('compose'))) break; last.remove();}
   }
   // A brief settle marks the message that just arrived; motion is a CSS concern and
@@ -1066,8 +1083,8 @@
     else if (replying) {
       if (gate.reply === 'none') {allowed = false; note = 'Replies are closed in this room.';}
       else if (gate.reply === 'members') note = 'Only members of this room can reply here.';
-    } else if (gate.write === 'owner' && role !== 'owner') {allowed = false; note = topNote || 'Only the owner starts posts here.';}
-    else if (gate.write === 'members' && role !== 'owner') note = 'Only members of this room start posts here.';
+    } else if (gate.write === 'owner' && role !== 'owner') {allowed = false; note = topNote || 'Only the owner can post here.';}
+    else if (gate.write === 'members' && role !== 'owner') note = 'Only members of this room can post here.';
     composeElement.hidden = !allowed;
     if (gateNote) {gateNote.textContent = note; gateNote.hidden = !note;}
   }
@@ -1367,6 +1384,65 @@
     if (event.target.classList?.contains('memo-files')) holdReaderPlace(event.target.closest('.memo'));
   }, true);
   const params = new URLSearchParams(location.search);
+  function olderFeed() {
+    const pagination = $('older-pagination'), feed = $('feed');
+    if (!pagination || !feed) return;
+    const link = $('load-older'), sentinel = $('older-sentinel'), status = $('older-status');
+    const back = node('a', 'back-to-newest', '↑ Back to newest');
+    back.id = 'back-to-newest'; back.href = pagination.dataset.newest;
+    back.hidden = !params.has('older'); feed.before(back);
+    let older = pagination.dataset.older, busy = false, failed = false, observer;
+    async function loadOlder() {
+      if (busy || !older) return;
+      busy = true; failed = false;
+      status.textContent = 'Loading older posts…';
+      link.setAttribute('aria-disabled', 'true'); feed.setAttribute('aria-busy', 'true');
+      const requested = older;
+      try {
+        const query = new URLSearchParams(pagination.dataset.query); query.set('older', requested);
+        const response = await fetch('/api/messages?' + query, {credentials: 'omit', cache: 'no-store'});
+        if (!response.ok) throw Error(response.status === 409 || response.status === 400 ? 'This page link has expired. Use Back to newest to start again.' : 'Older posts could not load. Select Load older posts to try again.');
+        const result = await response.json();
+        if (!result.ok) throw Error('Older posts could not load. Select Load older posts to try again.');
+        let count = 0;
+        for (const event of result.messages || []) {
+          if (document.body.dataset.view === 'personal' && event.reply_to) continue;
+          if (locateMemo(event.id, false)) continue;
+          addEvent(feed, event); count++;
+        }
+        applyModerationControls();
+        older = result.older_cursor || '';
+        pagination.dataset.older = older;
+        // This cursor recreates the page just loaded, not the next unread page.
+        const current = new URL(location.href); current.searchParams.delete('cursor');
+        current.searchParams.set('sort', 'new'); current.searchParams.set('older', requested);
+        history.replaceState(history.state, '', current);
+        link.hidden = !older;
+        if (older) {
+          current.searchParams.set('older', older); link.href = current.pathname + current.search;
+        } else observer?.disconnect();
+        status.textContent = count + ' older posts loaded' + (older ? '.' : ". You've reached the first post.");
+      } catch (error) {
+        failed = true; status.textContent = error.message || 'Older posts could not load. Select Load older posts to try again.';
+        back.hidden = false;
+      } finally {
+        busy = false; link.removeAttribute('aria-disabled'); feed.removeAttribute('aria-busy');
+      }
+      // An empty bounded scan or a short page may leave the sentinel in view.
+      if (older && !failed && sentinel.getBoundingClientRect().top < innerHeight + 500) requestAnimationFrame(loadOlder);
+    }
+    link.addEventListener('click', event => {
+      if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); loadOlder();
+    });
+    if ('IntersectionObserver' in window && older) {
+      observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting) && !failed) loadOlder();
+      }, {rootMargin: '500px 0px'});
+      observer.observe(sentinel);
+    }
+  }
+  olderFeed();
   function openComposerAnchor(){if(location.hash==='#compose'&&$('compose'))$('compose').open=true;}
   openComposerAnchor(); window.addEventListener('hashchange',openComposerAnchor);
   if (composer && params.get('reply')) {composer.elements.reply_to.value = params.get('reply'); $('reply-label').textContent = 'Replying to ' + params.get('reply').slice(0, 12); $('reply-preview').hidden = false;}
@@ -1436,7 +1512,7 @@
     } catch (_) {if(source?.readyState!==1)liveLabel('Reconnecting', 'offline');}finally{polling=false;}
   }
   async function startUpdates() {
-    if (!feed || params.get('q') || params.get('cursor') || document.hidden) return;
+    if (!feed || ['q', 'cursor', 'older', 'target', 'kind', 'to'].some(key => params.has(key)) || document.hidden) return;
     const generation=++updateGeneration;
     if(!firstConnection||revision<0){try{await pollCorrections();await refreshKnown();}catch(_){}}
     firstConnection=false;

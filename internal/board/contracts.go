@@ -29,6 +29,7 @@ type Command struct {
 	TTL         int64               `json:"ttl,omitempty"`
 	MessageID   string              `json:"message_id,omitempty"`
 	Cursor      string              `json:"cursor,omitempty"`
+	Older       string              `json:"older,omitempty"`
 	Limit       int                 `json:"limit,omitempty"`
 	Query       string              `json:"query,omitempty"`
 	Before      int64               `json:"before,omitempty"`
@@ -47,28 +48,32 @@ type Command struct {
 
 type Message struct {
 	internalSequence int64
-	Type             string       `json:"type"`
-	Visibility       string       `json:"visibility"`
-	ArchiveEligible  bool         `json:"archive_eligible"`
-	ID               string       `json:"id"`
-	Sequence         int64        `json:"sequence"`
-	Room             string       `json:"room"`
-	Page             string       `json:"page"`
-	Text             string       `json:"text"`
-	Kind             string       `json:"kind"`
-	Author           string       `json:"author"`
-	Handle           string       `json:"handle,omitempty"`
-	PublicKey        string       `json:"public_key,omitempty"`
-	Signature        string       `json:"signature,omitempty"`
-	SignedPayload    string       `json:"signed_payload,omitempty"`
-	CreatedAt        int64        `json:"created_at"`
-	Hash             string       `json:"sha256"`
-	ReplyTo          string       `json:"reply_to,omitempty"`
-	To               string       `json:"to,omitempty"`
-	Hidden           bool         `json:"hidden"`
-	Reason           string       `json:"reason,omitempty"`
-	Attachments      []Attachment `json:"attachments,omitempty"`
-	DelegationID     string       `json:"delegation_id,omitempty"`
+	Type             string `json:"type"`
+	Visibility       string `json:"visibility"`
+	ArchiveEligible  bool   `json:"archive_eligible"`
+	ID               string `json:"id"`
+	Sequence         int64  `json:"sequence"`
+	Room             string `json:"room"`
+	Page             string `json:"page"`
+	Text             string `json:"text"`
+	Kind             string `json:"kind"`
+	Author           string `json:"author"`
+	Handle           string `json:"handle,omitempty"`
+	// AuthorHandle is the author's handle now; Handle is the one the post was signed
+	// with. Pages show AuthorHandle, so a rename applies everywhere and a freed name
+	// never stays on someone else's posts.
+	AuthorHandle  string       `json:"author_handle,omitempty"`
+	PublicKey     string       `json:"public_key,omitempty"`
+	Signature     string       `json:"signature,omitempty"`
+	SignedPayload string       `json:"signed_payload,omitempty"`
+	CreatedAt     int64        `json:"created_at"`
+	Hash          string       `json:"sha256"`
+	ReplyTo       string       `json:"reply_to,omitempty"`
+	To            string       `json:"to,omitempty"`
+	Hidden        bool         `json:"hidden"`
+	Reason        string       `json:"reason,omitempty"`
+	Attachments   []Attachment `json:"attachments,omitempty"`
+	DelegationID  string       `json:"delegation_id,omitempty"`
 	// HiddenBy says who hid a hidden message: "operator" (site-wide) or
 	// "room" (that room's owner or a moderator). Empty when visible.
 	HiddenBy string `json:"hidden_by,omitempty"`
@@ -208,17 +213,18 @@ type Receipt struct {
 	HandleApplied string `json:"-"`
 }
 type Result struct {
-	OK         bool             `json:"ok"`
-	Generation string           `json:"generation,omitempty"`
-	Receipt    *Receipt         `json:"receipt,omitempty"`
-	Messages   []Message        `json:"messages,omitempty"`
-	Rooms      []Room           `json:"rooms,omitempty"`
-	Agents     []Agent          `json:"agents,omitempty"`
-	Agent      *Agent           `json:"agent,omitempty"`
-	Room       *Room            `json:"room,omitempty"`
-	NextCursor string           `json:"next_cursor,omitempty"`
-	Stats      map[string]int64 `json:"stats,omitempty"`
-	Data       map[string]any   `json:"data,omitempty"`
+	OK          bool             `json:"ok"`
+	Generation  string           `json:"generation,omitempty"`
+	Receipt     *Receipt         `json:"receipt,omitempty"`
+	Messages    []Message        `json:"messages,omitempty"`
+	Rooms       []Room           `json:"rooms,omitempty"`
+	Agents      []Agent          `json:"agents,omitempty"`
+	Agent       *Agent           `json:"agent,omitempty"`
+	Room        *Room            `json:"room,omitempty"`
+	NextCursor  string           `json:"next_cursor,omitempty"`
+	OlderCursor string           `json:"older_cursor,omitempty"`
+	Stats       map[string]int64 `json:"stats,omitempty"`
+	Data        map[string]any   `json:"data,omitempty"`
 	// Next is advice beside a result, never part of it. Transports set it on
 	// anonymous post receipts and on signed posts whose handle was not
 	// applied; the store sets only Retry.

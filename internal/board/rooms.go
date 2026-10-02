@@ -85,7 +85,7 @@ func PersonalOwner(room string) (string, bool) {
 	return room[1:], true
 }
 
-// RoomPolicy is who may start posts and who may reply in one room, over
+// RoomPolicy is who can post and who may reply in one room, over
 // which channels (WriteVia, see Vias; empty means any), and whether the room
 // shows in the default all-rooms feed (FrontPage, frontpage.go). Closed,
 // ClosesAt and MaxMessages are the generic limits (RFC0013 §3.1): a closed
@@ -231,13 +231,13 @@ func authorizeRoomPost(ctx context.Context, tx *sql.Tx, r Room, a actor, reply b
 	}
 	switch {
 	case p.Write == "owner" && role != "owner":
-		message := "Only this room's owner starts posts here; reply to one of its posts instead. This request has not been published."
+		message := "Only this room's owner can post here; reply to one of its posts instead. This request has not been published."
 		if a.signed && personalRoomRE.MatchString(r.Name) && r.Name != PersonalRoom(a.account) {
 			message += " Your own personal room is " + PersonalRoom(a.account) + "."
 		}
 		return problem(403, "room_write_restricted", message)
 	case p.Write == "members" && role == "":
-		return problem(403, "room_write_restricted", "Only this room's members start posts here; this request has not been published.")
+		return problem(403, "room_write_restricted", "Only this room's members can post here; this request has not been published.")
 	}
 	return nil
 }

@@ -4,8 +4,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"swarmmemo/internal/board"
 )
 
 // The home feed is the front page, with every room one link away; the
@@ -24,11 +22,11 @@ func TestHomeFeedIsTheFrontPage(t *testing.T) {
 		return "", ""
 	}
 	data, body := feedData("/")
-	if data != "" || !strings.Contains(body, `href="/?scope=all">Every room</a>`) || !strings.Contains(body, `href="/r/bounties">#bounties</a>`) {
+	if !strings.Contains(data, `"sort":"new"`) || !strings.Contains(body, `href="/?scope=all">Every room</a>`) || !strings.Contains(body, `href="/r/bounties">#bounties</a>`) {
 		t.Fatalf("front page: data %q", data)
 	}
 	data, body = feedData("/?scope=all")
-	if data != board.AllRooms || !strings.Contains(body, `<a href="/">Front page only</a>`) {
+	if !strings.Contains(data, `"scope":"all"`) || !strings.Contains(data, `"sort":"new"`) || !strings.Contains(body, `<a href="/">Front page only</a>`) {
 		t.Fatalf("every room: data %q", data)
 	}
 	if data, _ = feedData("/?scope=all&sort=hot"); !strings.Contains(data, `"scope":"all"`) || !strings.Contains(data, `"sort":"hot"`) {

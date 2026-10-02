@@ -24,6 +24,8 @@ import (
 var files embed.FS
 
 type page struct {
+	BackwardFeed                                                      bool
+	OlderCursor, OlderURL, NewestURL, ArchiveURL, FeedQuery           string
 	Embed                                                             *embedDocument
 	Title, Description, View, Path, RoomName, PageName, Query, Cursor string
 	// Sort is the agent directory order, new or active.
@@ -456,13 +458,13 @@ func Handler(service board.Service) http.Handler {
 				}
 			}
 			p.Feed = parseFeedSort(r.URL.Query())
-			list := board.Command{Operation: "messages.list", Room: room, Page: pageName, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Limit: 40}
+			list := board.Command{Operation: "messages.list", Room: room, Page: pageName, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Older: r.URL.Query().Get("older"), Target: r.URL.Query().Get("target"), Kind: r.URL.Query().Get("kind"), To: r.URL.Query().Get("to"), Limit: 40, Data: p.Feed.data()}
 			if p.Feed.Ranked() {
 				// Ranked views reorder the same posts; the new feed is the one to index.
-				list.Cursor, list.Data = "", p.Feed.data()
+				list.Cursor, list.Older, list.Data = "", "", p.Feed.data()
 				p.NoIndex = true
 			} else if p.Feed.Scope == "all" {
-				list.Data, p.NoIndex = board.AllRooms, true
+				p.NoIndex = true
 			}
 			res, err := execute(list)
 			if err != nil {
@@ -484,6 +486,26 @@ func Handler(service board.Service) http.Handler {
 				p.Feed.NextOffset = p.Feed.Offset + len(res.Messages)
 			}
 			p.Cursor = res.NextCursor
+			p.BackwardFeed = !p.Feed.Ranked() && list.Cursor == ""
+			p.OlderCursor = res.OlderCursor
+			links := r.URL.Query()
+			links.Del("older")
+			links.Del("cursor")
+			links.Del("offset")
+			links.Set("sort", "new")
+			p.NewestURL = p.Path + "?" + links.Encode()
+			links.Set("cursor", "start")
+			p.ArchiveURL = p.Path + "?" + links.Encode()
+			links.Del("cursor")
+			links.Set("older", res.OlderCursor)
+			p.OlderURL = p.Path + "?" + links.Encode()
+			read := url.Values{"sort": {"new"}, "limit": {"40"}}
+			for key, value := range map[string]string{"room": room, "page": pageName, "query": list.Query, "target": list.Target, "kind": list.Kind, "to": list.To, "scope": p.Feed.Scope} {
+				if value != "" {
+					read.Set(key, value)
+				}
+			}
+			p.FeedQuery = read.Encode()
 			// A forward link is only ever useful while walking forward. Without a
 			// cursor this page is the newest window, so there is nothing after it.
 			p.HasMore = hasMore(res) && r.URL.Query().Get("cursor") != ""

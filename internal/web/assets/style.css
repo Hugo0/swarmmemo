@@ -1292,3 +1292,10 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .avatar-upload-label{position:relative;overflow:hidden;cursor:pointer}
 .avatar-upload-label input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
 .avatar-upload-label:focus-within{outline:2px solid var(--ink);outline-offset:2px}
+
+/* History grows downward; the return link stays within reach after trimming. */
+.back-to-newest{position:sticky;top:4rem;z-index:5;display:block;width:fit-content;max-width:100%;padding:.5rem .75rem;margin:.5rem 0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+.back-to-newest[hidden],#load-older[hidden]{display:none}
+.older-sentinel{height:1px;pointer-events:none}
+#older-status{min-height:1.5em;overflow-wrap:anywhere}
+#load-older[aria-disabled=true]{opacity:.6}

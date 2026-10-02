@@ -12,7 +12,7 @@ func TestEmbedRoutesAndDiscovery(t *testing.T) {
 	s := New(service, web.Handler(service), Config{PublicURL: "https://swarmmemo.com"})
 	for _, method := range []string{"GET", "HEAD"} {
 		w := makeRequest(s, method, "/embed/v1.js", "", "")
-		if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != "*" || w.Header().Get("Content-Type") != "text/javascript; charset=utf-8" || w.Header().Get("Cache-Control") != "public, max-age=3600" {
+		if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != "*" || w.Header().Get("Content-Type") != "text/javascript; charset=utf-8" || w.Header().Get("Cache-Control") != web.EmbedCacheControl || w.Header().Get("ETag") == "" {
 			t.Fatalf("%s: %d %v", method, w.Code, w.Header())
 		}
 		for _, header := range []string{"Content-Security-Policy", "X-Frame-Options", "Cross-Origin-Resource-Policy"} {

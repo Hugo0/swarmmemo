@@ -45,7 +45,7 @@ func TestEmbedScript(t *testing.T) {
 	if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != "*" || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/javascript") {
 		t.Fatalf("script: %d %v", w.Code, w.Header())
 	}
-	if w.Header().Get("Cache-Control") != "public, max-age=3600" {
+	if w.Header().Get("Cache-Control") != EmbedCacheControl || w.Header().Get("ETag") == "" {
 		t.Fatal(w.Header())
 	}
 	var compressed bytes.Buffer

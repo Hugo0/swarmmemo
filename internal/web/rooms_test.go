@@ -74,7 +74,7 @@ func TestPersonalRoomAddresses(t *testing.T) {
 		t.Fatalf("personal page: %d %s", w.Code, body)
 	}
 	// Strangers are told who posts here; the composer waits for the owner.
-	if !strings.Contains(body, "Only writer starts posts here. Reply to one to join in.") || !strings.Contains(body, `id="compose" open hidden`) || !strings.Contains(body, `data-room-owner="`+owner.id+`"`) {
+	if !strings.Contains(body, "Only writer can post here; anyone can reply.") || !strings.Contains(body, `id="compose" open hidden`) || !strings.Contains(body, `data-room-owner="`+owner.id+`"`) {
 		t.Fatal("personal page does not gate its composer")
 	}
 	for _, alias := range []string{"/@writer", "/@WRITER", "/@" + owner.id, "/r/" + board.PersonalRoom(owner.id)} {
@@ -109,8 +109,8 @@ func TestRoomPageShowsPolicyAndModeration(t *testing.T) {
 
 	body := render(s, "/r/garden").Body.String()
 	for _, want := range []string{
-		"Only the owner starts posts · replies closed", ">writer</a>", ">keeper</a>", `href="/modlog/garden"`,
-		"Be &lt;b&gt;kind&lt;/b&gt;.", "Only the owner posts here.", `id="compose" open hidden`,
+		"Only the owner can post · replies closed", ">writer</a>", ">keeper</a>", `href="/modlog/garden"`,
+		"Be &lt;b&gt;kind&lt;/b&gt;.", "Only the owner can post here; replies closed.", `id="compose" open hidden`,
 		"moderators: Promotion.", `data-moderate="restore"`, `data-moderate="hide"`,
 	} {
 		if !strings.Contains(body, want) {
@@ -185,5 +185,42 @@ func TestRoomCanvasInPersonalAndPolicyRooms(t *testing.T) {
 				t.Errorf("%s: trust class %q not rendered outside the canvas", path, trust)
 			}
 		}
+	}
+}
+
+func TestOlderRoomPagesRenderActualHistory(t *testing.T) {
+	s, owner, _ := roomStore(t)
+	var ids []string
+	for i := 0; i < 85; i++ {
+		ids = append(ids, owner.run(t, s, board.Command{Operation: "post", Room: "history", Page: "notes", Text: fmt.Sprintf("post %d", i)}).Receipt.ID)
+	}
+	path := "/r/history/notes"
+	remaining := len(ids)
+	for page := 0; page < 3; page++ {
+		w := render(s, path)
+		if w.Code != 200 {
+			t.Fatalf("%s: %d", path, w.Code)
+		}
+		body := w.Body.String()
+		count := min(40, remaining)
+		previous := -1
+		for i := 0; i < count; i++ {
+			at := strings.Index(body, `data-message-id="`+ids[remaining-1-i]+`"`)
+			if at < 0 || at <= previous {
+				t.Fatal("server-rendered older page lost order or content")
+			}
+			previous = at
+		}
+		remaining -= count
+		_, link, _ := strings.Cut(body, `id="load-older" href="`)
+		href, _, _ := strings.Cut(link, `"`)
+		path = strings.ReplaceAll(href, "&amp;", "&")
+		if remaining == 0 && !strings.Contains(body, "You've reached the first post.") {
+			t.Fatal("missing end of history")
+		}
+	}
+	w := render(s, "/r/history/notes?older=garbage")
+	if w.Code != 400 {
+		t.Fatalf("invalid server-rendered cursor: %d", w.Code)
 	}
 }

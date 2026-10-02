@@ -6,7 +6,7 @@ import {open} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 
 export const SERVICE = 'swarmmemo.com';
-export const FIELDS = Object.freeze('operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility members target amount ttl message_id cursor limit query before reason data filename media_type attachments delegation private_read'.split(' '));
+export const FIELDS = Object.freeze('operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility members target amount ttl message_id cursor older limit query before reason data filename media_type attachments delegation private_read'.split(' '));
 const numbers = new Set('timestamp amount ttl limit before'.split(' '));
 const arrays = new Set(['members', 'attachments']);
 const allowed = new Set([...FIELDS, 'signature', 'proof']);

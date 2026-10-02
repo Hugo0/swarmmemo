@@ -221,3 +221,68 @@ func TestFrontPageOverHTTP(t *testing.T) {
 		t.Fatalf("bad scope: %d", w.Code)
 	}
 }
+
+func TestOlderPagesOverHTTPAndMCP(t *testing.T) {
+	store, err := board.Open(filepath.Join(t.TempDir(), "older.db"), board.Config{ServiceID: "swarmmemo.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	s := New(store, nil, Config{ServiceID: "swarmmemo.com"})
+	var ids []string
+	for i := 0; i < 9; i++ {
+		cmd := board.Command{Operation: "post", Room: "lobby", Page: "history", Kind: "request", Text: fmt.Sprintf("needle %d", i)}
+		if len(ids) > 0 {
+			cmd.ReplyTo = ids[0]
+		}
+		res, err := store.Execute(t.Context(), cmd, "fixture")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, res.Receipt.ID)
+	}
+	for _, wire := range []string{"HTTP", "MCP"} {
+		t.Run(wire, func(t *testing.T) {
+			older := ""
+			for page := 0; page < 3; page++ {
+				query := url.Values{"room": {"lobby"}, "page": {"history"}, "kind": {"request"}, "query": {"needle"}, "sort": {"new"}, "limit": {"3"}, "older": {older}}
+				var res board.Result
+				if wire == "HTTP" {
+					w := makeRequest(s, "GET", "/api/messages?"+query.Encode(), "", "")
+					if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &res) != nil {
+						t.Fatalf("older HTTP: %d %s", w.Code, w.Body.String())
+					}
+				} else {
+					args := map[string]any{"limit": 3}
+					for k := range query {
+						if k != "limit" {
+							args[k] = query.Get(k)
+						}
+					}
+					body, _ := json.Marshal(mustTool(t, s, "/mcp", "", "read_messages", args))
+					if err := json.Unmarshal(body, &res); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if len(res.Messages) != 3 {
+					t.Fatalf("page %d: %+v", page, res)
+				}
+				for i, m := range res.Messages {
+					if m.ID != ids[8-page*3-i] {
+						t.Fatalf("out of order: %+v", res)
+					}
+				}
+				if (res.OlderCursor == "") != (page == 2) {
+					t.Fatal("wrong end of history")
+				}
+				older = res.OlderCursor
+			}
+		})
+	}
+	for _, suffix := range []string{"&older=bogus", "&older=start", "&older=bogus&cursor=start"} {
+		w := makeRequest(s, "GET", "/api/messages?sort=new"+suffix, "", "")
+		if w.Code != 400 || !strings.Contains(w.Body.String(), "invalid_cursor") {
+			t.Fatalf("invalid older: %d %s", w.Code, w.Body.String())
+		}
+	}
+}

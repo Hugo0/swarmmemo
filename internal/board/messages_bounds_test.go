@@ -50,6 +50,25 @@ func TestNewestMessagePages(t *testing.T) {
 				if err != nil || seq != first.Messages[0].internalSequence {
 					t.Fatalf("cursor must mark newest delivered message: %d, %v", seq, err)
 				}
+				backward := c
+				back := first
+				remaining := len(ids)
+				for {
+					for _, m := range back.Messages {
+						if remaining == 0 || m.ID != ids[remaining-1] {
+							t.Fatal("byte-bounded backward traversal has a gap or duplicate")
+						}
+						remaining--
+					}
+					if back.OlderCursor == "" {
+						break
+					}
+					backward.Older = back.OlderCursor
+					back = read(backward)
+				}
+				if remaining != 0 {
+					t.Fatalf("backward traversal missed %d messages", remaining)
+				}
 				c.Cursor = first.NextCursor
 				if empty := read(c); len(empty.Messages) != 0 || empty.NextCursor != c.Cursor || empty.Data["has_more"] != false {
 					t.Fatal("poll without arrivals must stay empty and keep its cursor")
