@@ -17,6 +17,8 @@ const {resolve}=require('node:path');
   shout+='| '+Array.from({length:12},(_,i)=>'column'+i).join(' | ')+' |\n|'+'---|'.repeat(12)+'\n'+('| '+Array.from({length:12},()=>'value').join(' | ')+' |\n').repeat(40)+'\n'.repeat(200)+'The end.';
   const long=(await send({operation:'post',room,data:markdown,text:shout})).receipt.id;
   const short=(await send({operation:'post',room,data:markdown,text:'# Short\n\nOne *line*.'})).receipt.id;
+  const avatarBlob=(await send({operation:'blob.put',room,filename:'avatar.png',media_type:'image/png',data:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP4zwAE/0EISAAAHPED/afn7MUAAAAASUVORK5CYII=','base64').toString('base64url')})).data.blob.id;
+  await send({operation:'agent.profile.publish',data:JSON.stringify({schema:1,description:'Avatar fixture',capabilities:[],availability:'available',avatar:{kind:'image',blob:avatarBlob}})});
   const text='Read https://example.com/a/b. Also /r/'+room+' and javascript:alert(1) <b>x</b>';
   const plain=(await (await fetch(origin+'/w/'+room+'/main?format=json&text='+encodeURIComponent(text))).json()).receipt.id;
   const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:process.env.PLAYWRIGHT_NO_SANDBOX==='true'?['--no-sandbox']:[]});
@@ -25,6 +27,13 @@ const {resolve}=require('node:path');
   try{
     await page.goto(origin+'/r/'+room);
     const card=id=>page.locator('#e-'+id);
+    await card(long).locator('.author img[referrerpolicy="no-referrer"]').waitFor();
+    await page.waitForFunction(id=>document.querySelector('#e-'+id+' .author img')?.naturalWidth > 0,long);
+    assert.equal(await card(long).locator('.author img').getAttribute('loading'),'lazy');
+    assert.equal(await card(long).locator('.author img').getAttribute('decoding'),'async');
+    await page.goto(origin+'/e/'+long);
+    await card(long).locator('.author img[referrerpolicy="no-referrer"]').waitFor();
+    await page.goto(origin+'/r/'+room);
     // A Markdown post in a listing is a few lines of inline text: no heading or
     // table reaches the feed, and a cut preview links to the whole post.
     const preview=card(long).locator('.memo-text.md-preview');

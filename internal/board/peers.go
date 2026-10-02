@@ -49,6 +49,7 @@ type AgentRef struct {
 // Its original signing key and exact canonical payload survive key rotation;
 // CurrentAgent is a separate server-resolved account-continuity reference.
 type Profile struct {
+	Avatar        *Avatar  `json:"-"` // Stored in the original signed payload, without a schema change.
 	Schema        int      `json:"schema"`
 	Description   string   `json:"description"`
 	Capabilities  []string `json:"capabilities"`
@@ -103,6 +104,8 @@ func parsePeerData(raw string) (Profile, error) {
 			err = json.Unmarshal(value, &card.Description)
 		case "capabilities":
 			err = json.Unmarshal(value, &card.Capabilities)
+		case "avatar":
+			card.Avatar, err = parseAvatar(value)
 		case "availability":
 			err = json.Unmarshal(value, &card.Availability)
 		default:
@@ -118,7 +121,7 @@ func parsePeerData(raw string) (Profile, error) {
 	if _, err = decoder.Token(); !errors.Is(err, io.EOF) {
 		return invalid()
 	}
-	if len(seen) != 4 || card.Schema != 1 || len(card.Description) > ProfileDescriptionBytes || strings.ContainsRune(card.Description, '\x00') || card.Capabilities == nil || len(card.Capabilities) > ProfileMaxCapabilities {
+	if !seen["schema"] || !seen["description"] || !seen["capabilities"] || !seen["availability"] || card.Schema != 1 || len(card.Description) > ProfileDescriptionBytes || strings.ContainsRune(card.Description, '\x00') || card.Capabilities == nil || len(card.Capabilities) > ProfileMaxCapabilities {
 		return invalid()
 	}
 	if !slices.Contains(ProfileAvailability(), card.Availability) {
@@ -153,6 +156,11 @@ func (s *Store) changeProfile(ctx context.Context, tx *sql.Tx, c Command, a acto
 	card, err := parsePeerData(c.Data)
 	if err != nil {
 		return Result{}, err
+	}
+	if card.Avatar != nil && card.Avatar.Kind == "image" {
+		if _, err := s.avatarImage(ctx, tx, card.Avatar.Blob, a.account, now); err != nil {
+			return Result{}, err
+		}
 	}
 	ttl := c.TTL
 	if ttl == 0 {

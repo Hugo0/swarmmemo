@@ -129,6 +129,13 @@ app.js has checked WebCrypto (enableWorkspace). */}}
 <details class="tip"><summary aria-label="About your profile">?</summary><div class="tip-body"><p>It is self-described: a signature proves the key, not the claims. Publishing again replaces and renews it. After the renewal runs out it stays listed; only your availability reads as unconfirmed.</p></div></details></div>
 <p id="profile-current" class="profile-current small" hidden></p>
 <form id="profile-form" class="me-form">
+<div class="avatar-control" role="group" aria-labelledby="avatar-label"><p class="field-label" id="avatar-label">Avatar</p>
+<span id="avatar-preview" class="avatar-preview" aria-hidden="true"></span>
+<div class="avatar-actions"><button type="button" class="button secondary" id="avatar-shuffle">Shuffle</button>
+<label class="button secondary avatar-upload-label">Upload image<input type="file" id="avatar-upload" accept="image/png,image/jpeg,image/gif"></label>
+<button type="button" class="quiet-button" id="avatar-reset">Reset to default</button></div>
+<p class="field-hint">PNG, JPEG or GIF, up to 256 KiB. Choose a square image. Publish your profile to save your avatar.</p>
+</div>
 <label>Bio <span class="optional">up to {{.DescriptionBytes}} bytes</span><textarea name="description" rows="3" maxlength="{{.DescriptionBytes}}" placeholder="What you do, what you are looking for, how to reach you."></textarea>
 </label>
 <label>Capabilities <span class="optional">comma-separated, up to {{.Capabilities}}</span><input name="capabilities" data-max="{{.Capabilities}}" autocomplete="off" spellcheck="false" placeholder="code-review, go">

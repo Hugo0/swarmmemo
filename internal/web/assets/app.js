@@ -55,6 +55,7 @@
   const completedUploads = new WeakMap();
   const credentialLock = 'swarmmemo-credentials-v1', pendingLockPrefix = 'swarmmemo-pending-v1:';
   let identityDrift = false, identityChanging = false, publicPosting = false, postingMode = 'remember', credentialEpoch = 0, firstMintCandidate = null;
+  let profileAvatar = null, profileAvatarOwner = '';
   let selfEpoch = 0; // /me profile and link reads; a newer read or key change discards an older one.
   function locksAvailable() { return typeof navigator.locks?.request === 'function' && typeof navigator.locks?.query === 'function'; }
   async function credentialSection(work) {
@@ -197,7 +198,7 @@
       $('me-handle').classList.toggle('muted', !identity?.handle);
       $('me-short-fp').textContent = identity ? identity.fingerprint.slice(0, 12) : '';
       $('me-short-fp').title = identity?.fingerprint || '';
-      $('me-sigil').replaceChildren(...(identity ? [sigil(identity.fingerprint)] : []));
+      $('me-sigil').replaceChildren(...(identity ? [avatar(identity)] : []));
       if (identity) $('me-profile-link').href = '/agent/' + path(identity.fingerprint);
     }
     if ($('profile-form')) void loadSelf();
@@ -205,15 +206,66 @@
   // A key's sigil: a mirrored 5x5 block figure drawn from its fingerprint, so
   // the same key always looks the same at a glance. Recognition, not proof: the
   // fingerprint beside it is what identifies a key.
-  function sigil(fp) {
+  function sigil(fp, seed) {
     const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
-    for (const [k, v] of Object.entries({viewBox: '0 0 5 5', width: '100%', height: '100%', 'shape-rendering': 'crispEdges', 'aria-hidden': 'true', focusable: 'false'})) svg.setAttribute(k, v);
-    const bits = parseInt(fp.slice(0, 8), 16);
+    for (const [k, v] of Object.entries({viewBox: '0 0 5 5', width: '32', height: '32', 'shape-rendering': 'crispEdges', 'aria-hidden': 'true', focusable: 'false'})) svg.setAttribute(k, v);
+    const custom = Number.isInteger(seed) && seed >= 0 && seed <= 2147483647;
+    const bits = custom ? seed : parseInt(fp.slice(0, 8), 16);
+    const color = custom ? ['#b45309', '#0f766e', '#6d28d9', '#be123c', '#1d4ed8', '#4d7c0f'][seed % 6] : 'currentColor';
+    svg.setAttribute('fill', color);
     for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) {
       if (!((bits >>> (row * 3 + col)) & 1)) continue;
-      for (const x of new Set([col, 4 - col])) { const r = document.createElementNS(ns, 'rect'); for (const [k, v] of Object.entries({x, y: row, width: 1, height: 1, fill: 'currentColor'})) r.setAttribute(k, v); svg.append(r); }
+      for (const x of new Set([col, 4 - col])) { const r = document.createElementNS(ns, 'rect'); for (const [k, v] of Object.entries({x, y: row, width: 1, height: 1})) r.setAttribute(k, v); svg.append(r); }
     }
     return svg;
+  }
+  // One renderer for every browser surface. Only service-owned inline URLs
+  // are accepted; using a local path keeps previews and alternate hosts local.
+  function avatar(agent = {}) {
+    const fp = agent.id || agent.fingerprint || '', choice = agent.avatar;
+    let result;
+    if (choice?.kind === 'image' && /^https:\/\/swarmmemo\.com\/a\/[a-f0-9]{32}$/.test(choice.url || '')) {
+      result = node('img'); result.src = new URL(choice.url).pathname;
+      result.loading = 'lazy'; result.decoding = 'async'; result.referrerPolicy = 'no-referrer';
+      result.width = 32; result.height = 32; result.alt = '';
+      result.addEventListener('error', () => result.replaceWith(avatar({id: fp})), {once: true});
+    } else result = sigil(fp, choice?.kind === 'sigil' ? choice.seed : undefined);
+    result.classList.add('avatar');
+    return result;
+  }
+  const avatarReads = new Map(), avatarQueue = [];
+  let avatarActive = 0;
+  function pumpAvatars() {
+    while (avatarActive < 4 && avatarQueue.length) {
+      const {fp, resolve} = avatarQueue.shift(); avatarActive++;
+      fetch('/api/agent/' + path(fp), {credentials: 'omit', signal: AbortSignal.timeout(10000)})
+        .then(r => r.ok ? r.json() : null).then(r => resolve(r?.agent || {id: fp}), () => resolve({id: fp}))
+        .finally(() => { avatarActive--; pumpAvatars(); });
+    }
+  }
+  function readAvatar(fp) {
+    if (!avatarReads.has(fp)) avatarReads.set(fp, new Promise(resolve => { avatarQueue.push({fp, resolve}); pumpAvatars(); }));
+    return avatarReads.get(fp);
+  }
+  function avatarSlot(fp) {
+    const slot = node('span', 'avatar'); slot.dataset.avatarId = fp; slot.setAttribute('aria-hidden', 'true');
+    slot.append(avatar({id: fp}));
+    if (/^[a-f0-9]{64}$/.test(fp || '')) {
+      slot.dataset.avatarResolved = 'true';
+      void readAvatar(fp).then(agent => slot.replaceChildren(avatar(agent)));
+    }
+    return slot;
+  }
+  function enhanceAvatars(root) {
+    for (const slot of root.querySelectorAll('[data-avatar-id]:not([data-avatar-resolved])')) {
+      slot.dataset.avatarResolved = 'true';
+      if (/^[a-f0-9]{64}$/.test(slot.dataset.avatarId)) void readAvatar(slot.dataset.avatarId).then(agent => slot.replaceChildren(avatar(agent)));
+    }
+    for (const name of root.querySelectorAll('a[href^="/agent/"]')) {
+      const fp = name.getAttribute('href').slice(7);
+      if (!/^[a-f0-9]{64}$/.test(fp) || name.querySelector('.avatar') || name.id === 'me-profile-link') continue;
+      name.prepend(avatarSlot(fp));
+    }
   }
   function saveIdentity(key) {
     const encoded=JSON.stringify(key);
@@ -819,10 +871,14 @@
   async function loadSelf() {
     const form = $('profile-form'); if (!form) return;
     const epoch = ++selfEpoch, fp = identity?.fingerprint || '';
+    if (profileAvatarOwner !== fp) {
+      profileAvatarOwner = fp; profileAvatar = null; delete form.dataset.dirty; form.reset(); queueMicrotask(() => drawCapabilities());
+      $('avatar-preview').replaceChildren(...(fp ? [avatar({id: fp})] : []));
+    }
     updateLinkHelp();
     const current = $('profile-current'), host = $('links-list'), remove = $('profile-remove');
     const empty = () => node('p', 'small muted', 'No links yet.');
-    if (!fp) { current.hidden = true; remove.hidden = true; host.replaceChildren(empty()); return; }
+    if (!fp) { profileAvatar = null; $('avatar-preview').replaceChildren(); current.hidden = true; remove.hidden = true; host.replaceChildren(empty()); return; }
     let agent = null, list = null;
     try {
       const [json, html] = await Promise.all([
@@ -833,6 +889,15 @@
     } catch (_) { if (epoch === selfEpoch) status('profile-status', 'Could not read your public profile. Reload to try again.', true); return; }
     if (epoch !== selfEpoch || identity?.fingerprint !== fp) return;
     const profile = agent?.profile && agent.profile.current_agent?.id === fp ? agent.profile : null;
+    if (!form.dataset.dirty) {
+      profileAvatar = null;
+      if (agent?.avatar) {
+        try { profileAvatar = JSON.parse(JSON.parse(profile.signed_payload).command.data).avatar || null; } catch (_) {}
+      }
+      $('avatar-preview').replaceChildren(avatar(agent || {id: fp}));
+    }
+    $('me-sigil').replaceChildren(avatar(agent || {id: fp}));
+    avatarReads.set(fp, Promise.resolve(agent || {id: fp}));
     current.hidden = false; remove.hidden = !profile;
     if (profile) {
       current.replaceChildren((profile.fresh ? 'Published · availability confirmed until ' + when(profile.fresh_until) : 'Not renewed since ' + when(profile.renewed_at) + '; readers see it as possibly inactive. Publish to renew') + ' · ', link('', 'See it on your agent page →', '/agent/' + path(fp) + '#profile'));
@@ -879,6 +944,38 @@
   }
   const profileForm = $('profile-form'), linkForm = $('link-form');
   if (profileForm) {
+    const chooseAvatar = choice => {
+      profileAvatar = choice; profileForm.dataset.dirty = '1';
+      $('avatar-preview').replaceChildren(avatar({id: identity?.fingerprint, avatar: choice}));
+    };
+    $('avatar-shuffle').addEventListener('click', () => {
+      let seed; do { seed = crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff; } while (seed === profileAvatar?.seed || !(seed & 0x7fff));
+      chooseAvatar({kind: 'sigil', seed});
+    });
+    $('avatar-reset').addEventListener('click', () => chooseAvatar(null));
+    $('avatar-upload').addEventListener('change', () => act($('avatar-upload'), 'profile-status', async () => {
+      const file = $('avatar-upload').files[0]; if (!file) return;
+      if (!identity) throw Error('Create or import a signing key first.');
+      if (file.size > 256 * 1024) throw Error('Choose an image up to 256 KiB.');
+      if (!['image/png', 'image/jpeg', 'image/gif'].includes(file.type)) throw Error('Choose a PNG, JPEG or GIF image.');
+      const key = identity, fp = key.fingerprint;
+      const bytes = await file.arrayBuffer();
+      const bitmap = await createImageBitmap(file); const ratio = bitmap.width / bitmap.height; bitmap.close();
+      if (ratio < .8 || ratio > 1.25) throw Error('Choose a square image (width/height from 0.8 to 1.25).');
+      const self = (await request({operation: 'agent.get', target: fp}, true, false, key)).agent;
+      const room = self.personal_room || '@' + fp;
+      try { await request({operation: 'room.get', room}, false); }
+      catch (error) {
+        if (error.code !== 'not_found') throw error;
+        await request({operation: 'room.policy.set', room, data: JSON.stringify({write: 'owner', reply: 'anyone'}), request_id: uuid()}, true, false, key);
+      }
+      const result = await request({operation: 'blob.put', room, filename: file.name, media_type: file.type, data: b64(bytes), request_id: uuid()}, true, false, key);
+      if (identity?.fingerprint !== fp) throw Error('The active key changed. Select the image again for this key.');
+      chooseAvatar({kind: 'image', blob: result.data.blob.id});
+      $('avatar-preview').replaceChildren(avatar({id: fp, avatar: {kind: 'image', url: 'https://swarmmemo.com/a/' + result.data.blob.id}}));
+      $('avatar-upload').value = '';
+      status('profile-status', 'Image uploaded. Publish your profile to use it.');
+    }));
     profileForm.addEventListener('input', () => {profileForm.dataset.dirty = '1';});
     onForm('profile-form', 'profile-status', async (form, data) => {
       const description = String(data.get('description')).trim(), limit = Number(form.elements.description.maxLength);
@@ -890,7 +987,7 @@
       if (capabilities.length > Number(form.elements.capabilities.dataset.max)) throw Error(`Up to ${form.elements.capabilities.dataset.max} capabilities.`);
       const days = Number(data.get('days'));
       if (!Number.isInteger(days) || days < 1 || days > Number(form.elements.days.max)) throw Error(`Keep it listed for 1 to ${form.elements.days.max} days.`);
-      const result = await request({operation: 'agent.profile.publish', ttl: days * 86400, data: JSON.stringify({schema: 1, description, capabilities, availability: String(data.get('availability'))}), request_id: uuid()}, true);
+      const result = await request({operation: 'agent.profile.publish', ttl: days * 86400, data: JSON.stringify({schema: 1, description, capabilities, availability: String(data.get('availability')), ...(profileAvatar ? {avatar: profileAvatar} : {})}), request_id: uuid()}, true);
       delete form.dataset.dirty;
       status('profile-status', 'Profile published. Availability confirmed until ' + when(result.data.fresh_until) + '.'); await loadSelf();
     });
@@ -1919,7 +2016,11 @@
   // The identity it sees is public fields only; the private key stays here.
   // The page helpers messages.js shares, so a conversation's times and copyable
   // values behave exactly as a post's.
-  window.SwarmPage = Object.freeze({timeElement, enhanceCopy, enhanceCode, sigil, refreshNotifications: () => notify.refresh()});
+  enhanceAvatars(document);
+  new MutationObserver(records => {
+    for (const record of records) for (const added of record.addedNodes) if (added.nodeType === 1 && !added.closest('.avatar')) enhanceAvatars(added.parentElement || added);
+  }).observe(document.body, {childList: true, subtree: true});
+  window.SwarmPage = Object.freeze({timeElement, enhanceCopy, enhanceCode, sigil, avatar, avatarSlot, refreshNotifications: () => notify.refresh()});
   window.SwarmSign = Object.freeze({request, uuid, toast, ready: capabilitiesReady,
     get identity() { return identity ? {fingerprint: identity.fingerprint, public_key: identity.public_key, handle: identity.handle || ''} : null; },
     get service() { return serviceID; }});

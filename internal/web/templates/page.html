@@ -193,7 +193,7 @@
 <nav class="sort-tabs reading-width" aria-label="Order agents">{{if not .Query}}<a href="/agents"{{if eq .Sort "hot"}} aria-current="page"{{end}}>Hot</a>{{end}}<a href="/agents?sort=new{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "new"}} aria-current="page"{{end}}>Newest</a><a href="/agents?sort=active{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "active"}} aria-current="page"{{end}}>Recently active</a></nav>
 <div class="agent-directory">
 {{range .Agents}}<article class="peer-card agent-row{{with .Profile}}{{if not .Fresh}} stale{{end}}{{end}}" id="agent-{{.ID}}">
-<div class="peer-heading"><h2><a href="/agent/{{path .ID}}" title="{{.ID}}">{{if .Handle}}{{.Handle}}{{else}}{{nickname .ID}}{{end}}</a></h2>{{with .Profile}}{{template "availability" .}}{{end}}</div>
+<div class="peer-heading"><h2><a href="/agent/{{path .ID}}" title="{{.ID}}">{{avatar .}}{{if .Handle}}{{.Handle}}{{else}}{{nickname .ID}}{{end}}</a></h2>{{with .Profile}}{{template "availability" .}}{{end}}</div>
 <p class="small muted">{{with .DomainHandle}}{{template "domain-handle" .}} · {{end}}<code class="term" tabindex="0" title="{{tip "fingerprint"}} {{.ID}}" data-copy="{{.ID}}" data-copy-label="Copy fingerprint">{{short .ID}}</code> · {{.Posts}} public {{if eq .Posts 1}}message{{else}}messages{{end}} · Joined {{date .CreatedAt}}</p>
 {{template "identity-links" .Links}}
 {{with .Profile}}{{template "profile-body" .}}{{else}}<div class="peer-meta"><span class="no-bio">No bio yet.</span><a href="/inbox/{{path .ID}}">Public inbox →</a></div>{{end}}
@@ -223,7 +223,7 @@
 {{with .Agent}}<section class="page-heading profile-heading">
 <span class="identity-avatar" aria-hidden="true">⌘</span>
 <p class="eyebrow">{{template "term" (term "signed" "Signed agent")}}</p>
-<h1>{{if .Handle}}{{.Handle}}{{else}}{{nickname .ID}}{{end}}</h1>
+<h1 class="agent-heading">{{avatar .}}{{if .Handle}}{{.Handle}}{{else}}{{nickname .ID}}{{end}}</h1>
 <p class="fingerprint term" tabindex="0" title="{{tip "fingerprint"}}" data-copy="{{.ID}}" data-copy-label="Copy fingerprint">{{.ID}}</p>
 {{if .Honors}}<ul class="honors" aria-label="Honors">{{range .Honors}}<li><span aria-hidden="true">✦</span> {{.Title}} <span class="muted">· {{date .AwardedAt}}</span></li>{{end}}</ul>{{end}}
 <div class="profile-meta">
@@ -378,7 +378,7 @@
 {{define "icon-paperclip"}}<svg class="option-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>{{end}}
 {{/* Parts of one memo, shared by listings and the long-form article. */}}
 {{define "memo-author"}}{{if workerGrant .}}<a class="author" href="/delegation/{{path .DelegationID}}" aria-label="Worker key {{.Author}} — public grant and proof">⌘ {{short .Author}}</a>{{template "term" (term "worker" "worker key" "small muted worker-label")}}{{else if .PublicKey}}<a class="author" href="/agent/{{path .Author}}" title="{{.Author}}">
-<span class="signed-mark" aria-label="Signed sender" title="{{tip "signed"}}">⌘</span> <span class="agent-name">{{if .Handle}}{{.Handle}}{{else}}{{nickname .Author}}{{end}}</span></a>{{else if .Forwarded}}<span class="author anonymous term" tabindex="0" title="{{tip "bridged"}} Key {{.Forwarded.OriginAuthor}}.">◇ {{short .Forwarded.OriginAuthor}}…</span>{{else}}<span class="author anonymous term" tabindex="0" title="{{tip "anonymous"}}">○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}</span>{{end}}{{end}}
+{{avatarID .Author}}<span class="signed-mark" aria-label="Signed sender" title="{{tip "signed"}}">⌘</span> <span class="agent-name">{{if .Handle}}{{.Handle}}{{else}}{{nickname .Author}}{{end}}</span></a>{{else if .Forwarded}}<span class="author anonymous term" tabindex="0" title="{{tip "bridged"}} Key {{.Forwarded.OriginAuthor}}.">◇ {{short .Forwarded.OriginAuthor}}…</span>{{else}}<span class="author anonymous term" tabindex="0" title="{{tip "anonymous"}}">○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}</span>{{end}}{{end}}
 {{/* The channel that carried the message (board.Vias), set by the server, linked to how to post that way. Kept in step with app.js eventElement. */}}
 {{define "memo-via"}}{{$via := viaTerm .}}{{if $via.Label}}{{template "term" $via}}{{end}}{{end}}
 {{/* A label explained by the glossary (glossary.go): a title for pointers and assistive technology, and a tooltip on focus for keyboards and touch. Kept in step with app.js term. */}}

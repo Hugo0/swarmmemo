@@ -43,7 +43,7 @@ const fingerprintRE = /^[a-f0-9]{64}$/;
 const timeOf = seconds => window.SwarmPage.timeElement(seconds, 'memo-time');
 const nameOf = member => member?.handle || (member?.agent || member?.id || '').slice(0, 12);
 // The other side's identicon (app.js sigil), small, beside its name in a row.
-function miniSigil(fingerprint) { const el = node('span', 'mini-sigil'); el.setAttribute('aria-hidden', 'true'); if (fingerprintRE.test(fingerprint || '') && window.SwarmPage?.sigil) el.append(window.SwarmPage.sigil(fingerprint)); return el; }
+function miniSigil(fingerprint) { return window.SwarmPage.avatarSlot(fingerprint); }
 
 // app.js exports its signing path once it has run (it is a deferred classic
 // script; this module runs after it, but a slow load must not race).

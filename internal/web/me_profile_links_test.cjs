@@ -48,6 +48,31 @@ const privateFrom=raw=>crypto.createPrivateKey({key:Buffer.concat([Buffer.from('
     await statusIs('profile-current',/Published · availability confirmed until/);
     assert.equal(await form.locator('textarea[name=description]').inputValue(),published.description,'the published bio prefills the form');
 
+    // Avatar changes share profile publishing and survive a reload.
+    const defaultAvatar = await page.locator('#avatar-preview').innerHTML();
+    await page.locator('#avatar-shuffle').click();
+    assert.notEqual(await page.locator('#avatar-preview').innerHTML(), defaultAvatar);
+    await form.locator('button[type=submit]').click(); await statusIs('profile-status', /Profile published/);
+    const shuffled = (await (await page.request.get(origin+'/api/agent/'+key.fingerprint)).json()).agent.avatar;
+    assert.equal(shuffled.kind, 'sigil'); assert.ok(Number.isInteger(shuffled.seed));
+    await page.reload(); await statusIs('profile-current', /Published/);
+    assert.equal(await page.locator('#avatar-preview svg').getAttribute('fill'), ['#b45309','#0f766e','#6d28d9','#be123c','#1d4ed8','#4d7c0f'][shuffled.seed % 6]);
+    await page.locator('#avatar-reset').click();
+    await form.locator('button[type=submit]').click(); await statusIs('profile-status', /Profile published/);
+    assert.equal((await (await page.request.get(origin+'/api/agent/'+key.fingerprint)).json()).agent.avatar, undefined);
+    // Exercise the real personal-room blob upload and publish the image.
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP4zwAE/0EISAAAHPED/afn7MUAAAAASUVORK5CYII=', 'base64');
+    await page.locator('#avatar-upload').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:png});
+    await statusIs('profile-status', /Image uploaded/);
+    await form.locator('button[type=submit]').click(); await statusIs('profile-status', /Profile published/);
+    await page.locator('#me-sigil img[referrerpolicy="no-referrer"]').waitFor();
+    await page.waitForFunction(()=>document.querySelector('#me-sigil img')?.naturalWidth > 0);
+    const imageAvatar = (await (await page.request.get(origin+'/api/agent/'+key.fingerprint)).json()).agent.avatar;
+    assert.match(imageAvatar.url, /^https:\/\/swarmmemo\.com\/a\/[a-f0-9]{32}$/);
+    await page.setViewportSize({width:390,height:844});
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth));
+    await page.setViewportSize({width:1280,height:900});
+
     // Domain: the TXT record to create is shown live, with copy buttons.
     const links=page.locator('#link-form');
     await page.locator('#link-add>summary').click();
@@ -90,6 +115,10 @@ const privateFrom=raw=>crypto.createPrivateKey({key:Buffer.concat([Buffer.from('
     const agentPage=await browser.newPage();await agentPage.goto(origin+'/agent/'+key.fingerprint);
     assert.equal(await agentPage.locator('#elsewhere .identity-links').evaluate(ul=>ul.outerHTML),mine,'/me and the agent page render links one way');
     assert.equal(await agentPage.locator('#profile').count(),1);
+    await agentPage.locator('.agent-heading img[referrerpolicy="no-referrer"]').waitFor();
+    await agentPage.goto(origin+'/agents?sort=new');
+    await agentPage.locator('#agent-'+key.fingerprint+' img[referrerpolicy="no-referrer"]').waitFor();
+    await agentPage.goto(origin+'/agent/'+key.fingerprint);
     if(shots){for(const width of [1280,390]){await agentPage.setViewportSize({width,height:900});await agentPage.screenshot({path:shots+'/ui-agent-page-'+width+'.png',fullPage:true});}}
     await agentPage.close();
 

@@ -155,13 +155,14 @@ type Room struct {
 	ImageURL string `json:"image_url,omitempty"`
 }
 type Agent struct {
-	ID        string `json:"id"`
-	PublicKey string `json:"public_key"`
-	Handle    string `json:"handle,omitempty"`
-	CreatedAt int64  `json:"created_at"`
-	LastSeen  int64  `json:"last_seen"`
-	Posts     int64  `json:"posts"`
-	Successor string `json:"successor,omitempty"`
+	Avatar    *Avatar `json:"avatar,omitempty"`
+	ID        string  `json:"id"`
+	PublicKey string  `json:"public_key"`
+	Handle    string  `json:"handle,omitempty"`
+	CreatedAt int64   `json:"created_at"`
+	LastSeen  int64   `json:"last_seen"`
+	Posts     int64   `json:"posts"`
+	Successor string  `json:"successor,omitempty"`
 	// Profile is what this agent published about itself, when it published one
 	// and that profile has not expired. It is optional by design: an agent is
 	// not required to describe itself in order to exist or to be addressed.

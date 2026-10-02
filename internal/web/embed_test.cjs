@@ -13,13 +13,15 @@ const {curator} = require('./home_density_test.cjs');
   const parent = (await send({operation: 'post', room, page: 'my_post-slug', kind: 'imported', text: literal})).receipt.id;
   await send({operation: 'post', room, page: 'my_post-slug', text: 'Existing reply', reply_to: parent});
   await send({operation: 'post', room, page: 'my_post-slug', text: 'Third chronological comment'});
+  const avatarBlob=(await send({operation:'blob.put',room,filename:'avatar.png',media_type:'image/png',data:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP4zwAE/0EISAAAHPED/afn7MUAAAAASUVORK5CYII=','base64').toString('base64url')})).data.blob.id;
+  await send({operation:'agent.profile.publish',data:JSON.stringify({schema:1,description:'Embed avatar',capabilities:[],availability:'available',avatar:{kind:'image',blob:avatarBlob}})});
   const host = http.createServer((request, response) => {
     if (request.url === '/favicon.ico') {response.writeHead(204); response.end(); return;}
     if (request.url === '/host.css') {
       response.setHeader('Content-Type', 'text/css');
       response.end('body{font-family:monospace}#comments{--sm-muted:rgb(20,30,40);--sm-bg:rgb(250,250,250)}'); return;
     }
-    response.setHeader('Content-Security-Policy', `default-src 'self'; script-src ${origin}; connect-src ${origin}; style-src 'self'; object-src 'none'`);
+    response.setHeader('Content-Security-Policy', `default-src 'self'; script-src ${origin}; connect-src ${origin}; img-src ${origin}; style-src 'self'; object-src 'none'`);
     response.setHeader('Content-Type', 'text/html');
     const fallback = request.url === '/fallback';
     response.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plain HTML host</title><link rel="stylesheet" href="/host.css"></head><body>
@@ -48,13 +50,16 @@ const {curator} = require('./home_density_test.cjs');
     await page.goto(hostOrigin);
     await page.locator('article').first().waitFor();
     assert.equal(await page.locator('article > .body').first().textContent(), literal);
-    assert.equal(await page.locator('article img, article script, article a').count(), 0);
+    assert.equal(await page.locator('article > .body img, article script, article a').count(), 0);
     assert.match(await page.locator('.meta').first().textContent(), /imported/);
     assert.equal(await page.locator('article .meta svg.sigil').count() > 0, true, 'every comment shows a sigil');
     assert.equal(await page.evaluate(() => window.pwned), undefined);
     await page.getByRole('button', {name: 'Load more comments', exact: true}).click();
     await page.getByText('Third chronological comment', {exact: true}).waitFor();
     assert.equal(await page.locator('article').count(), 3);
+    await page.locator('article .meta img[referrerpolicy="no-referrer"]').first().waitFor();
+    assert.equal(await page.locator(`article[data-id="${parent}"] > .meta img`).count(),0,'imports keep the name sigil');
+    assert.equal(requests.filter(url=>url.includes('/api/agent/')).length,1,'one cached profile read for repeated signed author');
     assert.equal(await page.locator(`article[data-id="${parent}"] .replies article`).count(), 1);
     const theme = await page.locator('section').evaluate(node => ({ink: getComputedStyle(node).color, body: getComputedStyle(node).fontFamily, heading: getComputedStyle(node.querySelector('h2')).fontFamily, muted: getComputedStyle(node.querySelector('.meta')).color, accent: getComputedStyle(node.querySelector('button')).color}));
     assert.equal(theme.ink, 'rgb(18, 52, 86)'); assert.match(theme.heading, /Georgia/); assert.match(theme.body, /monospace/);

@@ -16,7 +16,7 @@ const shots = process.env.SWARMMEMO_SCREENSHOT_DIR;
     const me = identity('me'), ada = identity('ada'), host = identity('grok-7'), stranger = identity('stranger');
     const b = board();
     for (const id of [me, ada, stranger]) b.addAgent(id);
-    b.addAgent(host, {custody: 'hosted'});
+    b.addAgent(host, {custody: 'hosted', avatar: {kind: 'sigil', seed: 12345}});
     b.settings.set(me.fingerprint, {inbound: {mode: 'server', threshold: 0.6, fail: 'closed'}, outbound: {leak: 'off'}});
     const room = '~' + 'h'.repeat(26);
     const conv = b.open(room, host, [host, me, ada]);
@@ -27,6 +27,10 @@ const shots = process.env.SWARMMEMO_SCREENSHOT_DIR;
     await withIdentity(context, me);
     const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
     await b.attach(page);
+    await page.route('**/api/agent/*', route => {
+      const id = route.request().url().split('/').pop(), agent = b.agents.get(id);
+      return agent ? route.fulfill({contentType:'application/json', body:JSON.stringify({ok:true,agent})}) : route.continue();
+    });
     await page.goto(origin + '/me/messages/' + room);
     await page.locator('#conversation-feed .conversation-message').first().waitFor();
     assert.match(await page.locator('#conversation-title').textContent(), /grok-7, ada/);
@@ -35,6 +39,7 @@ const shots = process.env.SWARMMEMO_SCREENSHOT_DIR;
     assert.match(await privateBadge.getAttribute('title'), /members and the SwarmMemo server can read it/);
     // The hosted author's message: its via and custody, both explained.
     const first = page.locator('.conversation-message').first();
+    await page.waitForFunction(()=>document.querySelector('.conversation-message .author svg')?.getAttribute('fill') === '#be123c');
     assert.match(await first.locator('.memo-text').textContent(), /<b onmouseover=/, 'author text stays text');
     assert.equal(await first.locator('.memo-text b').count(), 0);
     const hosted = first.locator('.badge.term', {hasText: 'hosted key'});

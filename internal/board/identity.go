@@ -291,6 +291,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err = rows.Err(); err != nil {
 		return Result{}, agentReadError(err)
 	}
+	if err = s.attachAvatars(ctx, tx, agents, now); err != nil {
+		return Result{}, err
+	}
 	if c.Operation == "agent.get" {
 		if len(agents) == 0 {
 			return Result{}, problem(404, "not_found", "Agent not found.")
@@ -342,6 +345,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 // the page gets copies), with honors and links. It is one page: no cursor.
 func (s *Store) hotAgentPage(ctx context.Context, tx *sql.Tx, ranked []Agent, limit int) (Result, error) {
 	page := append([]Agent(nil), ranked[:min(len(ranked), limit)]...)
+	if err := s.attachAvatars(ctx, tx, page, s.now().Unix()); err != nil {
+		return Result{}, err
+	}
 	if err := attachHonors(ctx, tx, page); err != nil {
 		return Result{}, err
 	}

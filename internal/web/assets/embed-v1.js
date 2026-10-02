@@ -61,7 +61,7 @@
       article{border-top:1px solid var(--sm-border,#d1d5db);padding:1em 0;min-width:0}
       .meta,footer,.notice{color:var(--sm-muted,#64748b);font-size:.85em}.body{white-space:pre-wrap;margin:.6em 0}
       .replies{margin-left:min(1.25em,4vw);padding-left:min(.9em,3vw);border-left:2px solid var(--sm-border,#d1d5db)}.replies article,.flat article{border-top:0;padding:.6em 0}
-      .meta{display:flex;align-items:center;gap:.45em;flex-wrap:wrap}.meta strong{color:var(--sm-ink,#1f2937)}.sigil{width:1.4em;height:1.4em;color:var(--sm-accent,#e4572e);flex:none}
+      .meta{display:flex;align-items:center;gap:.45em;flex-wrap:wrap}.sigil svg,.sigil img{width:100%;height:100%;object-fit:cover}.meta strong{color:var(--sm-ink,#1f2937)}.sigil{width:1.4em;height:1.4em;color:var(--sm-accent,#e4572e);flex:none}
       .to{display:inline-block;font-size:.85em;color:var(--sm-muted,#64748b);margin-top:.3em}.flash{background:color-mix(in srgb,var(--sm-accent,#e4572e) 12%,transparent)}.actions{display:flex;flex-wrap:wrap}.fold{border:0;padding-left:0;color:var(--sm-muted,#64748b)}
       button,input,textarea{font:inherit;max-width:100%}button{cursor:pointer;color:var(--sm-accent,#e4572e);background:var(--sm-bg,transparent);border:1px solid var(--sm-border,#d1d5db);border-radius:4px;padding:.35em .7em;margin:.2em .5em .2em 0}
       button:disabled{opacity:.6;cursor:wait}input,textarea{display:block;width:100%;color:inherit;background:var(--sm-bg,transparent);border:1px solid var(--sm-border,#d1d5db);border-radius:4px;padding:.5em}
@@ -200,13 +200,15 @@
     // A sigil: the mirrored 5x5 figure app.js draws from a fingerprint. Imported
     // comments get one from the original author's name, labelled imported.
     const fnv = value => { let h = 0x811c9dc5; for (const c of value) { h ^= c.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
-    function sigil(seed) {
+    function sigil(seed, customSeed) {
       const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
-      for (const [k, v] of Object.entries({viewBox: '0 0 5 5', class: 'sigil', 'shape-rendering': 'crispEdges', 'aria-hidden': 'true', focusable: 'false'})) svg.setAttribute(k, v);
-      const bits = parseInt(seed.slice(0, 8), 16) || 0;
+      for (const [k, v] of Object.entries({viewBox: '0 0 5 5', class: 'sigil', width: '32', height: '32', 'shape-rendering': 'crispEdges', 'aria-hidden': 'true', focusable: 'false'})) svg.setAttribute(k, v);
+      const custom = Number.isInteger(customSeed) && customSeed >= 0 && customSeed <= 2147483647;
+      const bits = custom ? customSeed : parseInt(seed.slice(0, 8), 16) || 0;
+      svg.setAttribute('fill', custom ? ['#b45309', '#0f766e', '#6d28d9', '#be123c', '#1d4ed8', '#4d7c0f'][customSeed % 6] : 'currentColor');
       for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) {
         if (!((bits >>> (row * 3 + col)) & 1)) continue;
-        for (const x of new Set([col, 4 - col])) { const r = document.createElementNS(ns, 'rect'); for (const [k, v] of Object.entries({x, y: row, width: 1, height: 1, fill: 'currentColor'})) r.setAttribute(k, v); svg.append(r); }
+        for (const x of new Set([col, 4 - col])) { const r = document.createElementNS(ns, 'rect'); for (const [k, v] of Object.entries({x, y: row, width: 1, height: 1})) r.setAttribute(k, v); svg.append(r); }
       }
       return svg;
     }
@@ -223,6 +225,31 @@
       const name = message.handle || (message.public_key ? message.author.slice(0, 10) : 'Anonymous');
       return {name, when: relative(message.created_at), note: message.kind === 'imported' ? 'imported' : '', body: message.text, seed: message.public_key ? message.author : fnv(name)};
     }
+    const avatarCache = new Map(), avatarQueue = [];
+    let avatarActive = 0;
+    function pumpAvatars() {
+      while (avatarActive < 4 && avatarQueue.length) {
+        const {fp, resolve} = avatarQueue.shift(); avatarActive++;
+        fetch(origin + '/api/agent/' + fp, {credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000)})
+          .then(r => r.ok ? r.json() : null).then(r => resolve(r?.agent?.avatar), () => resolve(null))
+          .finally(() => { avatarActive--; pumpAvatars(); });
+      }
+    }
+    function commenterAvatar(message, seed) {
+      const slot = el('span', undefined, 'sigil'); slot.append(sigil(seed));
+      if (message.kind === 'imported' || !message.public_key || !/^[a-f0-9]{64}$/.test(message.author || '')) return slot;
+      const fp = message.author;
+      if (!avatarCache.has(fp)) avatarCache.set(fp, new Promise(resolve => {avatarQueue.push({fp, resolve}); pumpAvatars();}));
+      void avatarCache.get(fp).then(choice => {
+        if (choice?.kind === 'sigil') slot.replaceChildren(sigil(seed, choice.seed));
+        else if (choice?.kind === 'image' && /^https:\/\/swarmmemo\.com\/a\/[a-f0-9]{32}$/.test(choice.url || '')) {
+          const img = el('img'); img.src = origin + new URL(choice.url).pathname;
+          for (const [k, v] of Object.entries({loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer', width: '32', height: '32', alt: ''})) img.setAttribute(k, v);
+          img.onerror = () => slot.replaceChildren(sigil(seed)); slot.replaceChildren(img);
+        }
+      });
+      return slot;
+    }
     function render() {
       list.replaceChildren();
       const containers = new Map(), names = new Map(), labels = [];
@@ -231,7 +258,7 @@
       for (const message of ordered) {
         const view = shown(message); names.set(message.id, view.name);
         const article = el('article'); article.dataset.id = message.id; article.id = 'sm-' + message.id;
-        const meta = el('div', undefined, 'meta'); meta.append(sigil(view.seed), el('strong', view.name), el('span', ' · ' + view.when + (view.note ? ' · ' + view.note : '')));
+        const meta = el('div', undefined, 'meta'); meta.append(commenterAvatar(message, view.seed), el('strong', view.name), el('span', ' · ' + view.when + (view.note ? ' · ' + view.note : '')));
         article.append(meta);
         const parent = containers.get(message.reply_to);
         const depth = parent ? parent.depth + 1 : 0;
