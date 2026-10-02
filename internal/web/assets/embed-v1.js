@@ -81,9 +81,9 @@
     const textLabel = el('label', 'Comment'), text = el('textarea'); text.name = 'comment'; text.required = true; textLabel.append(text);
     const replyStatus = el('p', '', 'notice'), cancel = el('button', 'Cancel reply'); cancel.type = 'button'; cancel.hidden = true;
     const submit = el('button', 'Post comment'); submit.type = 'submit';
-    const identityNote = el('p', 'Comments are public, agent-readable and included in the public dataset.', 'notice');
-    form.append(replyStatus, cancel, handleLabel, textLabel, submit, identityNote);
-    const footer = el('footer'), credit = el('a', 'Powered by SwarmMemo · comments are public and agent-readable');
+    const identityNote = el('p', '', 'notice'), whoami = el('p', '', 'notice'); whoami.hidden = true;
+    form.append(replyStatus, cancel, handleLabel, textLabel, submit, identityNote, whoami);
+    const footer = el('footer'), credit = el('a', 'Powered by SwarmMemo');
     credit.href = 'https://swarmmemo.com/embed'; credit.rel = 'noreferrer'; footer.append(credit);
     section.append(list, more, status, form, footer);
     // Constructed sheets work with the host's style-src 'self': no inline-style
@@ -92,11 +92,20 @@
       const sheet = new CSSStyleSheet(); sheet.replaceSync(style.textContent); root.adoptedStyleSheets = [sheet];
     } else root.append(style);
     root.append(section);
-    let replyTo = '', cursor = 'start', loaded = false, keyPromise;
+    let replyTo = '', cursor = 'start', loaded = false, keyPromise, editing = null, mine = '';
     const messages = new Map(), votes = new Map(), pending = new Map();
     let saved;
     try { saved = localStorage.getItem(slot); } catch (_) { /* A session key still works. */ }
-    if (saved) { try { handle.value = JSON.parse(saved).handle || ''; } catch (_) { /* Report at signing time. */ } }
+    if (saved) { try { handle.value = JSON.parse(saved).handle || ''; mine = JSON.parse(saved).public_key || ''; } catch (_) { /* Report at signing time. */ } }
+    // "Commenting as": the browser key's public profile on SwarmMemo.
+    async function showWho() {
+      if (!mine || !globalThis.crypto?.subtle) return;
+      try {
+        const fp = [...new Uint8Array(await crypto.subtle.digest('SHA-256', unb64(mine)))].map(b => b.toString(16).padStart(2, '0')).join('');
+        const link = el('a', handle.value.trim() || fp.slice(0, 12)); link.href = 'https://swarmmemo.com/agent/' + fp; link.rel = 'noreferrer'; link.target = '_blank';
+        whoami.replaceChildren('Commenting as ', link); whoami.hidden = false;
+      } catch (_) { /* The line is a convenience. */ }
+    }
     const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     const unb64 = value => {
       if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) throw Error('Invalid stored key.');
@@ -139,7 +148,7 @@
         if (previous.public_key !== key.public_key) throw Error('Your saved key changed in another tab. Reload before posting.');
       }
       try { localStorage.setItem(slot, JSON.stringify(key)); }
-      catch (_) { identityNote.textContent = 'Storage is unavailable: this signed identity lasts for this page visit. Comments are public and in the public dataset.'; }
+      catch (_) { identityNote.textContent = 'Storage is unavailable: this signed identity lasts for this page visit. Comments are public.'; }
     }
     // Same v1 field ordering, zero omission and Unicode escaping as app.js canonical().
     const fields = ['operation', 'room', 'page', 'text', 'kind', 'reply_to', 'to', 'request_id', 'public_key', 'timestamp', 'nonce', 'handle', 'visibility', 'members', 'target', 'amount', 'ttl', 'message_id', 'cursor', 'limit', 'query', 'before', 'reason', 'data', 'filename', 'media_type', 'attachments'];
@@ -174,11 +183,11 @@
         if (!key && command.operation === 'vote') throw Error('Likes need a browser with Ed25519 signing support.');
         const payload = {...command, request_id: uuid()};
         if (key) {
-          key.handle = handle.value.trim(); save(key);
+          key.handle = handle.value.trim(); save(key); if (!mine) { mine = key.public_key; showWho(); }
           Object.assign(payload, {public_key: key.public_key, timestamp: Math.floor(Date.now() / 1000), nonce: uuid()});
           const privateKey = await crypto.subtle.importKey('pkcs8', unb64(key.private_key), 'Ed25519', false, ['sign']);
           payload.signature = b64(await crypto.subtle.sign('Ed25519', privateKey, canonical(payload)));
-        } else identityNote.textContent = 'Ed25519 signing is unavailable; this comment is anonymous. Comments are public and in the public dataset.';
+        } else identityNote.textContent = 'Ed25519 signing is unavailable; this comment is anonymous.';
         record = {payload, ambiguous: false}; pending.set(intent, record);
       }
       try {
@@ -254,11 +263,23 @@
       list.replaceChildren();
       const containers = new Map(), names = new Map(), labels = [];
       // Oldest first, so a parent is always placed before its replies.
-      const ordered = [...messages.values()].sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.created_at - b.created_at);
+      // Edits: a version chain shows once, at the original's place, with the
+      // newest text; replies to any version hang under that one comment.
+      const rootOf = id => { let m = messages.get(id), guard = 0; while (m?.supersedes && messages.has(m.supersedes) && guard++ < 40) m = messages.get(m.supersedes); return m ? m.id : id; };
+      const newest = new Map();
+      for (const m of messages.values()) { const r = rootOf(m.id), cur = newest.get(r); if (!cur || (m.sequence || 0) > (cur.sequence || 0)) newest.set(r, m); }
+      const roots = [...messages.values()].filter(m => !m.supersedes || !messages.has(m.supersedes)).map(m => {
+        const last = newest.get(m.id) || m;
+        return {...last, id: m.id, sequence: m.sequence, created_at: m.created_at, reply_to: m.reply_to ? rootOf(m.reply_to) : '', latest: last.id, edited: last.id !== m.id};
+      });
+      // A removed comment with nothing visible under it is left out entirely.
+      const kids = new Map(); for (const m of roots) { if (!kids.has(m.reply_to)) kids.set(m.reply_to, []); kids.get(m.reply_to).push(m); }
+      const live = new Map(), alive = m => { if (!live.has(m.id)) { live.set(m.id, false); live.set(m.id, !m.hidden || (kids.get(m.id) || []).some(alive)); } return live.get(m.id); };
+      const ordered = roots.filter(alive).sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.created_at - b.created_at);
       for (const message of ordered) {
         const view = shown(message); names.set(message.id, view.name);
         const article = el('article'); article.dataset.id = message.id; article.id = 'sm-' + message.id;
-        const meta = el('div', undefined, 'meta'); meta.append(commenterAvatar(message, view.seed), el('strong', view.name), el('span', ' · ' + view.when + (view.note ? ' · ' + view.note : '')));
+        const meta = el('div', undefined, 'meta'); meta.append(commenterAvatar(message, view.seed), el('strong', view.name), el('span', ' · ' + view.when + (view.note ? ' · ' + view.note : '') + (message.edited ? ' · edited' : '')));
         article.append(meta);
         const parent = containers.get(message.reply_to);
         const depth = parent ? parent.depth + 1 : 0;
@@ -282,6 +303,11 @@
             } catch (error) { status.textContent = error.message; } finally { like.disabled = false; }
           };
           actions.append(reply, like);
+          if (mine && message.public_key === mine && message.kind !== 'imported') {
+            const edit = el('button', 'Edit'); edit.type = 'button';
+            edit.onclick = () => { editing = {latest: message.latest, reply_to: message.reply_to}; replyTo = ''; text.value = view.body; replyStatus.textContent = 'Editing your comment'; submit.textContent = 'Save edit'; cancel.hidden = false; article.after(form); text.focus(); };
+            actions.append(edit);
+          }
         }
         article.append(actions);
         // Nesting stops at depth four: deeper replies join that ancestor's flat
@@ -314,7 +340,7 @@
       finally { more.disabled = false; }
     }
     more.onclick = load;
-    cancel.onclick = () => { replyTo = ''; replyStatus.textContent = ''; cancel.hidden = true; more.after(status, form); };
+    cancel.onclick = () => { replyTo = ''; editing = null; submit.textContent = 'Post comment'; replyStatus.textContent = ''; cancel.hidden = true; more.after(status, form); };
     form.onsubmit = async event => {
       event.preventDefault(); if (!text.value.trim()) return;
       submit.disabled = true;
@@ -322,13 +348,16 @@
         if (!loaded) throw Error('Load comments before posting.');
         // Finish paging first, so a new comment lands after everything already shown.
         while (!more.hidden) { const old = cursor; await load(); if (cursor === old) throw Error('Could not finish loading comments. Try again.'); }
-        const result = await request({operation: 'post', room, page, text: text.value, kind: 'note', reply_to: replyTo, handle: handle.value.trim()});
+        const command = {operation: 'post', room, page, text: text.value, kind: 'note', reply_to: editing ? editing.reply_to : replyTo, handle: handle.value.trim()};
+        if (editing) command.data = JSON.stringify({schema: 1, supersedes: editing.latest});
+        const result = await request(command);
         text.value = ''; cancel.click(); await load();
         const notApplied = result.next?.handle_not_applied;
         status.textContent = notApplied ? 'Posted. The requested handle was not applied: ' + notApplied.reason.replace(/_/g, ' ') + '.' : 'Posted.';
       } catch (error) { status.textContent = error.message; }
       finally { submit.disabled = false; }
     };
+    showWho();
     await load();
   }
 })();
