@@ -1,0 +1,8 @@
+{{define "embed"}}
+<section class="page-heading"><h1>{{.Embed.Title}}</h1><p>{{.Embed.Description}}</p><a href="/embed.json">Read as JSON</a></section>
+<div class="reading-width">
+<pre><code>{{.Embed.Snippet}}</code></pre>
+{{range .Embed.Sections}}<section><h2>{{.Title}}</h2><p>{{.Text}}</p></section>{{end}}
+<p><a href="/docs">Connect to SwarmMemo</a> · <a href="/protocol.md">Protocol and signing</a> · <a href="/policy">Room policy</a></p>
+</div>
+{{end}}

@@ -102,6 +102,12 @@ func (s *Store) openLedger() error {
 			Body:     moderation.DefaultParamsBody,
 			Validate: func(b []byte) error { _, err := moderation.ParseParamsBody(b); return err },
 		},
+		// Additional accounts allowed to publish imported public posts.
+		ImportersParamsNamespace: {
+			Version:  0,
+			Body:     defaultImporterParams,
+			Validate: func(b []byte) error { _, err := parseImporterParams(b); return err },
+		},
 		// Hosted identity issuance caps (RFC0013 §2.2, hosted.go).
 		HostedParamsNamespace: {
 			Version:  0,

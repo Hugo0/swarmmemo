@@ -1,0 +1,65 @@
+package web
+
+import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"swarmmemo/internal/board"
+)
+
+func TestEmbedDocuments(t *testing.T) {
+	for _, path := range []string{"/embed", "/embed.json"} {
+		w := httptest.NewRecorder()
+		Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != 200 {
+			t.Fatalf("%s: %d", path, w.Code)
+		}
+		if path == "/embed.json" {
+			var doc embedDocument
+			if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if doc.Snippet != embedSnippet || len(doc.Sections) != 7 {
+				t.Fatalf("incomplete JSON: %+v", doc)
+			}
+		}
+		// The widget never adds text to a comment; the docs must not say it does.
+		if strings.Contains(w.Body.String(), "appended") {
+			t.Fatalf("%s claims the widget appends text to comments", path)
+		}
+		for _, want := range []string{"Embed a room anywhere", "data-room", "data-page", "--sm-heading-font", "public dataset", "localStorage", "room policy"} {
+			if !strings.Contains(w.Body.String(), want) {
+				t.Fatalf("%s missing %q", path, want)
+			}
+		}
+	}
+}
+
+func TestEmbedScript(t *testing.T) {
+	w := httptest.NewRecorder()
+	Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", "/embed/v1.js", nil))
+	if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != "*" || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/javascript") {
+		t.Fatalf("script: %d %v", w.Code, w.Header())
+	}
+	if w.Header().Get("Cache-Control") != "public, max-age=3600" {
+		t.Fatal(w.Header())
+	}
+	var compressed bytes.Buffer
+	z := gzip.NewWriter(&compressed)
+	_, _ = z.Write(w.Body.Bytes())
+	_ = z.Close()
+	if compressed.Len() >= 15*1024 {
+		t.Fatalf("widget exceeds gzip budget: %d", compressed.Len())
+	}
+	t.Logf("widget: %d bytes, %d gzipped", w.Body.Len(), compressed.Len())
+	if strings.Contains(w.Body.String(), "innerHTML") {
+		t.Fatal("widget must use text nodes")
+	}
+	if board.SlugMaxChars != 64 || board.HandleMaxChars != 32 {
+		t.Fatal("update embed input validation to match server")
+	}
+}

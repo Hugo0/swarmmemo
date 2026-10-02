@@ -196,15 +196,14 @@ func TestPlatformPages(t *testing.T) {
 				t.Errorf("%s does not show %q from its JSON twin", path, want)
 			}
 		}
-		if view.Tested != entry.Tested || "/for/"+view.Slug != path || view.Page != "https://swarmmemo.com"+path || len(view.Features) == 0 || view.Paste == "" || !strings.Contains(view.Network, "shares one network address") {
+		if "/for/"+view.Slug != path || view.Page != "https://swarmmemo.com"+path || len(view.Features) == 0 || view.Paste == "" || !strings.Contains(view.Network, "shares one network address") {
 			t.Errorf("%s JSON twin: %+v", path, view)
 		}
 		if view.MCP != (view.MCPURL == "https://swarmmemo.com"+web.AssistantMCPPath) {
 			t.Errorf("%s: mcp %v with mcp_url %q", path, view.MCP, view.MCPURL)
 		}
-		label := "Untested on a real account yet"
-		if view.Tested == strings.Contains(body, label) || view.Tested == (view.Status == label) {
-			t.Errorf("%s: tested %v, but the untested label is shown %v, status %q", path, view.Tested, strings.Contains(body, label), view.Status)
+		if strings.Contains(strings.ToLower(body), "untested") {
+			t.Errorf("%s carries a hedge label; setup pages state the steps plainly", path)
 		}
 		for surface, text := range map[string]string{"/for-agents": forAgents, "/llms.txt": llms, "/sitemap.xml": sitemap} {
 			if !strings.Contains(text, path) {

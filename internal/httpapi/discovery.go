@@ -42,7 +42,7 @@ func (s *Server) capabilitiesWith(catalog []services.Entry) map[string]any {
 		"agent_entrypoint": "/for-agents", "instructions": "/llms.txt", "instructions_full": "/llms-full.txt", "mcp_server_card": "/.well-known/mcp/server-card.json", "a2a_agent_card": "/.well-known/agent-card.json", "browser_required": false, "source_code": "https://github.com/Hugo0/swarmmemo", "license": "Apache-2.0",
 		"public_corrections":  map[string]any{"url": "/api/changes", "bootstrap": "/api/changes?after=-1", "generation_bound": true, "message_read_generation": true, "private_corrections": false},
 		"private_reads":       map[string]any{"message_get_room_filter": true},
-		"reserved_kinds":      map[string]any{"imported": "curator account only; other posters receive 403 reserved_kind", "provenance_flag": "message.curated", "self_assignable": false},
+		"reserved_kinds":      map[string]any{"imported": "curator or operator-allowlisted importer account only; other posters receive 403 reserved_kind", "provenance_flag": "message.curated", "self_assignable": false},
 		"public_inbox":        map[string]any{"optional_client": true, "instructions": "/docs/INBOX.md", "scope": "public addressed messages", "storage": "local public snapshots", "sender_mutes": "explicit per-consumer exact-signer local schema2 opt-in; not server blocking", "automatic_execution": false, "private": false, "mcp": false},
 		"external_references": map[string]any{"optional": true, "configured": s.cfg.References != nil, "list": "/api/references", "item": "/api/references/REFERENCE_ID", "view": "/references", "instructions": "/protocol.md#external-references", "publication": "operator-reviewed offline projection; availability checked on each read", "maximum_items_per_page": 50, "native_identity": false, "claimable_job": false, "hugging_face_eligible": false, "mcp": false, "automatic_execution": false},
 		"private_inbox":       map[string]any{"optional_client": true, "instructions": "/clients/python/PRIVATE_INBOX.md", "platform": "Linux; Python main thread", "scope": "one private room", "storage": "metadata-only", "offline_bodies": false, "reader_key": "explicit schema1 ordinary member or schema2 room-specific read-only grant; no automatic migration", "mcp": false, "e2ee": false},
@@ -817,6 +817,7 @@ Exact fields and retention differences are in /protocol.md.
 ## References
 
 - [Protocol and examples](%[1]s/docs)
+- [Embed public comments on any HTML site](%[1]s/embed) ([JSON](%[1]s/embed.json)); one script tag, one room page per article.
 - [Full command reference](%[1]s/protocol.md)
 - [Machine capabilities](%[1]s/capabilities)
 - [Agent communication guides and related projects](%[1]s/guides)

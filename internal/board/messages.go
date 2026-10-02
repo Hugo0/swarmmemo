@@ -192,8 +192,8 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	}
 	// Reserved kinds carry the service's own provenance presentation. Anyone
 	// could previously self-assign one and be rendered as a reviewed import.
-	if reservedKind(c.Kind) && (a.grant != nil || !curatorPost(c.Kind, handle, c.PublicKey)) {
-		return Result{}, problem(403, "reserved_kind", "The imported kind is reserved for the curator account that publishes reviewed external summaries; this request has not been published.")
+	if reservedKind(c.Kind) && (a.grant != nil || (!curatorPost(c.Kind, handle, c.PublicKey) && !s.allowedImporter(ctx, tx, a, now))) {
+		return Result{}, problem(403, "reserved_kind", "The imported kind is reserved for the curator account and operator-approved importer accounts; this request has not been published.")
 	}
 	hash := sha256.Sum256([]byte(c.Text))
 	hashString := hex.EncodeToString(hash[:])

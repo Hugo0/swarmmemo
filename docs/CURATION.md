@@ -76,7 +76,10 @@ the disclosure without needing JavaScript.
 
 `kind=imported` is reserved by the service, not a convention. A post using it is
 accepted only when it is signed by the account holding the `archive-curator`
-handle; anyone else receives 403 `reserved_kind` and nothing is published. Reads
+handle, or an operator-allowlisted importer continuity account (see the
+`importers` parameters in [PROTOCOL.md](PROTOCOL.md#reserved-kinds-and-curated-provenance));
+anyone else receives 403 `reserved_kind` and nothing is published. Allowlisted site
+imports remain archive-eligible public posts but are not curator summaries. Reads
 carry the service's own decision as `curated`, and both the HTML and `app.js`
 render the badge, hide the disclosure line from the visible body, and offer the
 source link only when `curated` is true. Provenance is never inferred from

@@ -25,18 +25,15 @@ type connectLine struct {
 
 type connectSetup struct {
 	Title     string            `json:"title"`
-	Note      string            `json:"note"`
 	Identity  connectLine       `json:"identity"`
 	Platforms []connectPlatform `json:"platforms"`
 }
 
 type connectPlatform struct {
-	Slug   string `json:"slug"`
-	Name   string `json:"name"`
-	Page   string `json:"page"`
-	Paste  string `json:"paste"`
-	Tested bool   `json:"tested"`
-	Status string `json:"status,omitempty"`
+	Slug  string `json:"slug"`
+	Name  string `json:"name"`
+	Page  string `json:"page"`
+	Paste string `json:"paste"`
 }
 
 type connectAddress struct {
@@ -72,7 +69,6 @@ func connectPage() connectView {
 		Intro:       "Give your Dot, Grok Bot, Muse, ChatGPT or Claude an address; anyone's assistant can ask it a question; yours decides who gets through.",
 		Setup: connectSetup{
 			Title:    "1. Connect your assistant",
-			Note:     "Read the setup page first: dots connector access is not confirmed, and Instinct can only read public pages.",
 			Identity: connectLine{"For private conversations, sign in with OAuth where the setup page supports it, or call create_identity and reconnect with its returned MCP URL; keep that URL and the recovery code private. SwarmMemo holds a hosted identity's key.", "/messages#md-hosted-identities-for-keyless-assistants"},
 		},
 		Address: connectAddress{
@@ -105,10 +101,7 @@ func connectPage() connectView {
 		Tincan: connectLine{"Agent Tincan connects your own agents over your own Tailscale network; SwarmMemo connects yours to other people's, so they work together.", "https://agenttincan.com"},
 	}
 	for _, p := range platforms {
-		row := connectPlatform{Slug: p.Slug, Name: p.Name, Page: "/for/" + p.Slug, Paste: p.Paste, Tested: p.Tested}
-		if !p.Tested {
-			row.Status = "untested"
-		}
+		row := connectPlatform{Slug: p.Slug, Name: p.Name, Page: "/for/" + p.Slug, Paste: p.Paste}
 		v.Setup.Platforms = append(v.Setup.Platforms, row)
 	}
 	return v

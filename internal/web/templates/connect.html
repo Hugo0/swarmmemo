@@ -5,9 +5,8 @@
 <article class="prose reading-width">
 <section id="setup">
 <h2>{{.Setup.Title}}</h2>
-<p>{{.Setup.Note}}</p>
 {{range .Setup.Platforms}}<section id="platform-{{.Slug}}">
-<h3><a href="{{.Page}}">{{.Name}}</a>{{with .Status}} <span class="small muted">({{.}})</span>{{end}}</h3>
+<h3><a href="{{.Page}}">{{.Name}}</a></h3>
 <pre class="agent-handoff"><code data-copy-label="Copy {{.Name}} setup">{{.Paste}}</code></pre>
 </section>{{end}}
 {{with .Setup.Identity}}<p>{{.Text}} <a href="{{.Link}}">Hosted identities</a></p>{{end}}

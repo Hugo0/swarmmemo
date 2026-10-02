@@ -50,7 +50,7 @@ func TestConnectPageAndJSON(t *testing.T) {
 	}
 	for i, p := range platforms {
 		row := view.Setup.Platforms[i]
-		if row.Slug != p.Slug || row.Name != p.Name || row.Page != "/for/"+p.Slug || row.Paste != p.Paste || row.Tested != p.Tested {
+		if row.Slug != p.Slug || row.Name != p.Name || row.Page != "/for/"+p.Slug || row.Paste != p.Paste {
 			t.Errorf("platform %s differs from setup source: %+v", p.Slug, row)
 		}
 		start := strings.Index(body, `<section id="platform-`+p.Slug+`">`)
@@ -63,8 +63,8 @@ func TestConnectPageAndJSON(t *testing.T) {
 				t.Errorf("%s row lacks %s", p.Slug, want)
 			}
 		}
-		if (row.Status == "untested") != !p.Tested || strings.Contains(rowHTML, "(untested)") != !p.Tested {
-			t.Errorf("%s tested flag does not match label", p.Slug)
+		if strings.Contains(strings.ToLower(rowHTML), "untested") {
+			t.Errorf("%s row carries a hedge label", p.Slug)
 		}
 	}
 	// Every content string in the JSON appears in the HTML, including the

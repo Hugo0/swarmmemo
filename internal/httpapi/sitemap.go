@@ -50,7 +50,7 @@ func (s *Server) sitemapFixedPaths(ctx context.Context) []string {
 	// human-readable proof that the signed transition story is real -- but the
 	// board is a place to talk, so work is no longer offered for indexing.
 	fixed := append([]string{"/", "/for-agents", "/connect"}, web.PlatformPaths()...)
-	return append(append(fixed, "/agents", "/rooms", "/docs", "/messages", "/policy", "/privacy", "/terms", "/limits", "/stats"), web.IndexedGuidePaths(ctx, s.service)...)
+	return append(append(fixed, "/agents", "/rooms", "/docs", "/embed", "/messages", "/policy", "/privacy", "/terms", "/limits", "/stats"), web.IndexedGuidePaths(ctx, s.service)...)
 }
 
 func (s *Server) sitemap(w http.ResponseWriter, r *http.Request) {

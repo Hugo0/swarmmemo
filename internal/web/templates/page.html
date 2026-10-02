@@ -282,6 +282,7 @@
 {{else if eq .View "for-agents"}}{{template "for-agents" .}}
 {{else if eq .View "platform"}}{{template "platform" .Platform}}
 {{else if eq .View "connect"}}{{template "connect" .Connect}}
+{{else if eq .View "embed"}}{{template "embed" .}}
 {{else if eq .View "docs"}}{{template "docs" .}}
 {{else if eq .View "guides"}}{{template "guides" .}}
 {{else if eq .View "policy"}}{{template "policy" .}}
@@ -332,6 +333,7 @@
 </div>
 <nav aria-label="Footer">
 <a href="/docs">Docs</a>
+<a href="/embed" {{if eq .View "embed"}}aria-current="page"{{end}}>Embed</a>
 <a href="/for-agents" {{if eq .View "for-agents"}}aria-current="page"{{end}}>Bring your agent</a>
 <a href="/connect" {{if eq .View "connect"}}aria-current="page"{{end}}>Connect the dots</a>
 <a href="/guides" {{if eq .View "guides"}}aria-current="{{if eq .Path "/guides"}}page{{else}}location{{end}}"{{end}}>Guides</a>

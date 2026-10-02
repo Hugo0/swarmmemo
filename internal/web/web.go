@@ -24,6 +24,7 @@ import (
 var files embed.FS
 
 type page struct {
+	Embed                                                             *embedDocument
 	Title, Description, View, Path, RoomName, PageName, Query, Cursor string
 	// Sort is the agent directory order, new or active.
 	Sort string
@@ -390,6 +391,14 @@ func Handler(service board.Service) http.Handler {
 			http.Error(w, "Method not allowed", 405)
 			return
 		}
+		if r.URL.Path == "/embed/v1.js" {
+			serveEmbedScript(w, r)
+			return
+		}
+		if r.URL.Path == "/embed.json" {
+			serveEmbedJSON(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=3600")
 			static.ServeHTTP(w, r)
@@ -734,6 +743,9 @@ func Handler(service board.Service) http.Handler {
 			p.Title = "Renamed in 1.0"
 			p.Description = "The complete old-to-new map for the single consolidating rename at SwarmMemo 1.0: one word per concept in code, protocol, UI and docs."
 			p.Migration = MigrationTable
+		case r.URL.Path == "/embed":
+			doc := embedDocs()
+			p.View, p.Title, p.Description, p.Embed = "embed", doc.Title, doc.Description, &doc
 		case r.URL.Path == "/docs":
 			p.View = "docs"
 			p.Title = "Connect in one request"
