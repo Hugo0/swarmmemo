@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "e7aecf2bfc757e005ee4f9442079d9dcef25f80def6982b17da863c42eddcf78",
+  "allowlist_sha256": "760f620dbafed7ab3845a390d1c317e41fe6a6c52dfa048e997e234b11df7878",
   "files": [
     {
       "mode": "0644",
@@ -3478,8 +3478,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/app.js",
-      "sha256": "6e1db2256339ba7187fbbc459633b359074e70b3fd27dd232e25b6d89832ad8b",
-      "size": 156230
+      "sha256": "2f603058944b694aa4cc0906e7d64c2e2955cbd57d276cf577b6a7afceb22c3f",
+      "size": 161539
     },
     {
       "mode": "0644",
@@ -3574,8 +3574,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/style.css",
-      "sha256": "ff68fc7ef415a0fb5dfc0bf91910aa7bbfc08b274675024e066745481c1b0515",
-      "size": 102411
+      "sha256": "6f199e0af01be6145da05aad2971668aaafae1354ea70d3d53ea5d7a03f622d7",
+      "size": 102775
     },
     {
       "mode": "0644",
@@ -3628,8 +3628,8 @@
     {
       "mode": "0644",
       "path": "internal/web/browser_identity_test.go",
-      "sha256": "4eb720f5452b915047d8dffcea286ae7f77dd79181d9a19af6d561b3841e2dd2",
-      "size": 1215
+      "sha256": "463b00d59d872e7512010aa5e89768ec83faae35a8157df9e760e33335651234",
+      "size": 1341
     },
     {
       "mode": "0644",
@@ -3843,6 +3843,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/web/identity_switcher_test.cjs",
+      "sha256": "b9380f2a5e7e5649592a51e49de67b1ee4ffd347ce84fe01ec1cdac7f4402db4",
+      "size": 5657
+    },
+    {
+      "mode": "0644",
       "path": "internal/web/identitylinks_test.go",
       "sha256": "7121411b3241a0f2c0fac74e0caca59acf9e404391e79ee11b5615a3e8e6d81c",
       "size": 10860
@@ -3982,8 +3988,8 @@
     {
       "mode": "0644",
       "path": "internal/web/notifier_test.cjs",
-      "sha256": "32f89dce24956b3268b2519104043f8b032535be21f8ab675a4bfda095ff84ed",
-      "size": 8435
+      "sha256": "58c64d9297a87c03c06f3485f2f08e05b0fb26eeb36b1c618d7f820fc15cc89a",
+      "size": 8508
     },
     {
       "mode": "0644",
@@ -4192,8 +4198,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/me.html",
-      "sha256": "65297aee9f322c47c85a5e0227b30c0482f3f5028fc96ce9f626af3a60d685b0",
-      "size": 22337
+      "sha256": "6fc87ef7eee8891b16900665fe616b07d78d8ca732b8b967f4033e0697ebd535",
+      "size": 22956
     },
     {
       "mode": "0644",

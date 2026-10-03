@@ -37,6 +37,12 @@ app.js has checked WebCrypto (enableWorkspace). */}}
 <p id="identity-status" class="form-status" role="status"></p>
 </div>
 </header>
+<section class="identity-switcher" id="identity-switcher" aria-labelledby="identity-switcher-title" hidden>
+<h2 class="me-panel-title" id="identity-switcher-title">{{template "icon" "key"}}Keys in this browser</h2>
+<p class="small muted">Switch to sign as another of your identities. Each key keeps its own handle, messages and notifications.</p>
+<ul class="identity-list" id="identity-list"></ul>
+<p class="small"><button class="button secondary" type="button" id="identity-add">{{template "icon" "key"}}Create another key</button> <a class="quiet-link" href="#key">Import a backup</a></p>
+</section>
 <nav class="me-tabs" id="me-tabs" aria-label="Sections of Me">
 <a href="#messages">{{template "icon" "message"}}<span>Messages</span><span class="count-badge" id="me-messages-count" hidden></span></a>
 <a href="#profile">{{template "icon" "person"}}<span>Profile</span></a>
@@ -200,7 +206,7 @@ app.js has checked WebCrypto (enableWorkspace). */}}
 </dl>
 <ul class="action-list">
 <li data-needs-key hidden><button class="button secondary" id="identity-export" type="button">{{template "icon" "download"}}Export backup</button><div class="action-note">A file that can act as you. Keep it safe.</div></li>
-<li><label class="button secondary file-button">{{template "icon" "upload"}}Import a backup<input id="identity-import" class="sr-only" type="file" accept="application/json,.json"></label><div class="action-note">Only a key you own. It replaces the key in this browser.
+<li><label class="button secondary file-button">{{template "icon" "upload"}}Import a backup<input id="identity-import" class="sr-only" type="file" accept="application/json,.json"></label><div class="action-note">Only a key you own. It joins the keys in this browser and becomes active.
 <details class="tip"><summary aria-label="About importing">?</summary><div class="tip-body"><p>Changes are blocked while an open tab has an unresolved request or this browser has pending rotation recovery material. Reconcile in the original tab first.</p></div></details></div></li>
 <li data-needs-key hidden><button class="button secondary" type="button" id="identity-rotate">{{template "icon" "rotate"}}Rotate key</button><div class="action-note">A new key; your history and allowance carry over.
 <details class="tip"><summary aria-label="About rotation">?</summary><div class="tip-body"><p>Rotation introduces a new signing key with proof from both keys, and the old key stops authorizing new activity. Export your current key first and keep the new backup that downloads.</p></div></details></div></li>

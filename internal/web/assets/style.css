@@ -681,6 +681,11 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .me-sigil:empty{border-style:dashed;border-color:var(--field-border)}
 .me-who{min-width:0}
 .me-head h1{margin:0 0 var(--s-1);line-height:1.05}
+.identity-switcher{margin:var(--s-4) 0}
+.identity-list{list-style:none;margin:var(--s-2) 0;padding:0;display:grid;gap:var(--s-2)}
+.identity-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2)}
+.identity-row.active{font-weight:600}
+.identity-who{display:inline-flex;align-items:center;gap:var(--s-2);min-width:0;flex:1 1 12rem;overflow-wrap:anywhere}
 .me-id-line{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2) var(--s-3);min-height:var(--control-h)}
 .me-none{font-size:var(--t-ui);color:var(--muted)}
 .me-handle{font-size:var(--t-body);font-weight:600;overflow-wrap:anywhere}

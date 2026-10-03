@@ -87,7 +87,7 @@ const state = page => page.evaluate(() => {
     now = await state(page);
     assert.equal(now.icon, '/assets/icon.svg'); assert.equal(now.type, 'image/svg+xml'); assert.equal(now.alert, false); assert.equal(now.label, null); assert.equal(now.nav, ''); assert.equal(now.me, '/me');
     await second.waitForFunction(() => !/^\(\d/.test(document.title));
-    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('swarmmemo.notify.v1')).replies.length), 0);
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('swarmmemo.notify.v1:' + JSON.parse(localStorage.getItem('swarmmemo.identity.v1')).fingerprint)).replies.length), 0);
     // A background tab keeps counting: the badge is for the tab you are not looking at.
     const later = await (await context.request.get(origin + '/w/lobby/main?format=json&text=' + encodeURIComponent('A reply while hidden ' + Date.now()))).json();
     b.updates.push({reason: 'reply', id: later.receipt.id});

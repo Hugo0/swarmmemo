@@ -49,6 +49,11 @@
   }
   const identitySlot = 'swarmmemo.identity.v1';
   const pendingSlot = 'swarmmemo.identity.pending-rotation.v1';
+  // Several keys per browser: identitySlot stays the one active signer (every
+  // fence above and below reads it); savedSlot lists every key kept here,
+  // active included. A browser from before the list has only identitySlot: the
+  // list view adds it on read and the first key change persists it. Reads never write.
+  const savedSlot = 'swarmmemo.identities.v1';
   let identity = null;
   let serviceID = document.body.dataset.service || 'swarmmemo.com';
   const pendingRequests = new Map();
@@ -79,6 +84,18 @@
     let key;try {key=JSON.parse(raw);} catch (_) {throw Error('Your stored key is unreadable. Keep its backup and reconcile it in Me; it will not be overwritten.');}
     if (key.version!==1 || !key.public_key || !key.private_key || !/^[a-f0-9]{64}$/.test(key.fingerprint) || (key.service && key.service!==serviceID)) throw Error('Your stored key needs reconciliation in Me; it will not be overwritten.');
     return key;
+  }
+  function validSaved(key) { return key && key.version===1 && typeof key.public_key==='string' && typeof key.private_key==='string' && /^[a-f0-9]{64}$/.test(key.fingerprint) && (!key.service || key.service===serviceID); }
+  function savedIdentities() {
+    let list=[]; try {const parsed=JSON.parse(localStorage.getItem(savedSlot)||'[]'); if(Array.isArray(parsed)) list=parsed.filter(validSaved);} catch (_) {/* An unreadable list shows only the active key; it is never overwritten on a read. */}
+    let active=null; try {active=storedIdentity();} catch (_) {/* Reconcile in Me. */}
+    if (active && !list.some(k=>k.public_key===active.public_key)) list.unshift(active);
+    return list;
+  }
+  function writeSaved(list) {
+    const encoded=JSON.stringify(list);
+    try {localStorage.setItem(savedSlot,encoded);if(localStorage.getItem(savedSlot)!==encoded)throw Error('readback');}
+    catch (_) {throw Error('The list of keys in this browser could not be saved. Nothing was changed.');}
   }
   function pendingRotation() { try {return localStorage.getItem(pendingSlot);} catch (_) {throw Error('Cannot check pending key recovery state. No key change or signed request was made.');} }
   function checkSigner(key, rotation = false) {
@@ -201,8 +218,46 @@
       $('me-sigil').replaceChildren(...(identity ? [avatar(identity)] : []));
       if (identity) $('me-profile-link').href = '/agent/' + path(identity.fingerprint);
     }
+    drawSwitcher();
     if ($('profile-form')) void loadSelf();
   }
+  // The keys kept in this browser, on Me: the active one marked, the others one
+  // click from signing. Switching reloads the page so every count and read
+  // belongs to the new key; it is refused while a request is unresolved.
+  function drawSwitcher() {
+    const host = $('identity-list'); if (!host) return;
+    const list = savedIdentities();
+    $('identity-switcher').hidden = !list.length;
+    if ($('nav-identity') && list.length > 1) $('nav-identity').title = list.length + ' keys in this browser. Switch in Me.';
+    host.replaceChildren(...list.map(key => {
+      const active = key.public_key === identity?.public_key, row = node('li', 'identity-row' + (active ? ' active' : ''));
+      const who = node('span', 'identity-who'); who.append(avatar(key), node('strong', '', key.handle || 'No handle yet'), node('code', 'me-fp', key.fingerprint.slice(0, 12)));
+      row.append(who);
+      if (active) row.append(node('span', 'small muted', 'Active'));
+      else {
+        const use = node('button', 'button secondary', 'Switch'); use.type = 'button'; use.dataset.switch = key.public_key; use.setAttribute('aria-label', 'Switch to ' + (key.handle || key.fingerprint.slice(0, 12)));
+        const save = node('button', 'button secondary', 'Export'); save.type = 'button'; save.addEventListener('click', () => downloadKey(key));
+        const drop = node('button', 'button secondary danger-button', 'Remove'); drop.type = 'button'; drop.dataset.remove = key.public_key;
+        row.append(use, save, drop);
+      }
+      return row;
+    }));
+  }
+  $('identity-list')?.addEventListener('click', event => {
+    const button = event.target.closest('button[data-switch],button[data-remove]'); if (!button) return;
+    const pk = button.dataset.switch || button.dataset.remove;
+    act(button, 'identity-status', async () => {
+      const key = savedIdentities().find(k => k.public_key === pk); if (!key) throw Error('That key is no longer saved in this browser.');
+      const name = key.handle || key.fingerprint.slice(0, 12);
+      if (button.dataset.switch) {
+        await transitionIdentity(() => {if (!savedIdentities().some(k => k.public_key === pk)) throw Error('That key is no longer saved in this browser.'); saveIdentity(key);});
+        status('identity-status', 'Now signing as ' + name + '.'); location.reload(); return;
+      }
+      if (!confirm('Remove ' + name + ' from this browser? Export its backup first if you may need it; without one it cannot come back. Its posts stay on the board.')) {status('identity-status', 'Remove cancelled.'); return;}
+      await transitionIdentity(() => {if (identity?.public_key === pk) throw Error('That key became active. Use Forget key instead.'); writeSaved(savedIdentities().filter(k => k.public_key !== pk));});
+      drawSwitcher(); status('identity-status', name + ' removed from this browser.');
+    });
+  });
   // A key's sigil: a mirrored 5x5 block figure drawn from its fingerprint, so
   // the same key always looks the same at a glance. Recognition, not proof: the
   // fingerprint beside it is what identifies a key.
@@ -267,8 +322,10 @@
       name.prepend(avatarSlot(fp));
     }
   }
-  function saveIdentity(key) {
-    const encoded=JSON.stringify(key);
+  function saveIdentity(key, replaces = '') {
+    const encoded=JSON.stringify(key), list=savedIdentities().filter(k=>k.public_key!==replaces);
+    const at=list.findIndex(k=>k.public_key===key.public_key); if(at<0)list.push(key); else list[at]=key;
+    writeSaved(list);
     try {localStorage.setItem(identitySlot,encoded);if(localStorage.getItem(identitySlot)!==encoded)throw Error('readback');}
     catch (_) {throw Error('The key could not be verified in local storage. Nothing was posted. Retry storage or explicitly choose Anonymous; no replacement key was created.');}
     credentialEpoch++;identity={...key}; refreshIdentity();
@@ -840,6 +897,7 @@
   refreshIdentity();
   for(const input of document.querySelectorAll('input[type=file][name=files]'))input.disabled=false;
   window.addEventListener('storage', event => {
+    if (event.key === savedSlot) {drawSwitcher(); return;}
     if (event.key !== null && event.key !== identitySlot && event.key !== pendingSlot) return;
     // A queued first-mint event can arrive after this tab deliberately adopted
     // that exact stored key. Only this null->identical-full-value case is inert.
@@ -853,13 +911,14 @@
   });
   const capabilitiesReady = fetch('/capabilities', {credentials: 'omit'}).then(r => r.ok ? r.json() : null).then(data => {if (data?.service_id) serviceID = data.service_id;}).catch(() => {});
   $('identity-create')?.addEventListener('click', () => act($('identity-create'), 'identity-status', async () => {
-    await capabilitiesReady; await transitionIdentity(async()=>{if(storedIdentity())throw Error('A signing identity already exists. Import or reconcile it explicitly; creating another would replace it.');saveIdentity(await generateIdentity());}); await request({operation: 'agent.register'}, true); status('identity-status', 'Identity registered. Export a backup now so you can keep it.');
+    await capabilitiesReady; const had=!!identity; await transitionIdentity(async()=>{storedIdentity();saveIdentity(await generateIdentity());$('quota-values')?.replaceChildren();}); await request({operation: 'agent.register'}, true); status('identity-status', had ? 'Identity registered and active. Your other keys stay saved here; export a backup of this one now.' : 'Identity registered. Export a backup now so you can keep it.');
   }));
+  $('identity-add')?.addEventListener('click', () => $('identity-create')?.click());
   $('identity-export')?.addEventListener('click', () => {if (identity) downloadKey(identity);});
   $('identity-forget')?.addEventListener('click', () => act($('identity-forget'),'identity-status',async()=>{
     const previous=await transitionIdentity(()=>localStorage.getItem(identitySlot));
     if (!confirm('Remove this signing key from this browser? Without an exported backup you cannot recover it. Existing posts remain on the board.')) {status('identity-status','Forget cancelled. Your key is unchanged.');return;}
-    await transitionIdentity(()=>{if(localStorage.getItem(identitySlot)!==previous)throw Error('Identity changed during confirmation. Nothing was removed.');localStorage.removeItem(identitySlot);if(localStorage.getItem(identitySlot)!==null)throw Error('Key removal could not be verified.');credentialEpoch++;identity=null;$('quota-values')?.replaceChildren();refreshIdentity();status('identity-status','Key removed from this browser.');});
+    await transitionIdentity(()=>{if(localStorage.getItem(identitySlot)!==previous)throw Error('Identity changed during confirmation. Nothing was removed.');const gone=JSON.parse(previous||'null')?.public_key;writeSaved(savedIdentities().filter(k=>k.public_key!==gone));localStorage.removeItem(identitySlot);if(localStorage.getItem(identitySlot)!==null)throw Error('Key removal could not be verified.');credentialEpoch++;identity=null;$('quota-values')?.replaceChildren();refreshIdentity();status('identity-status',savedIdentities().length?'Key removed from this browser. Switch to one of your other keys to sign again.':'Key removed from this browser.');});
   }));
   $('identity-import')?.addEventListener('change', event => act(event.target, 'identity-status', async () => {
     cryptoAvailable(); const file = event.target.files[0]; if (!file) return;
@@ -874,9 +933,10 @@
     if (!await crypto.subtle.verify('Ed25519', publicKey, signature, challenge)) throw Error('The private and public keys do not match.');
     key.version=1;key.private_key=b64(unb64(key.private_key).slice(-32));
     const previous=await transitionIdentity(()=>localStorage.getItem(identitySlot));
-    if (previous && !confirm('Replace the active browser identity? Export its backup first if you still need it.')) {status('identity-status','Import cancelled. Your current identity is unchanged.');return;}
+    if (previous && JSON.parse(previous)?.public_key!==key.public_key && !confirm('Add this key and switch to it? Your current key stays saved in this browser.')) {status('identity-status','Import cancelled. Your current identity is unchanged.');return;}
+    const known=savedIdentities().find(k=>k.public_key===key.public_key); if(known&&!key.handle)key.handle=known.handle||'';
     await transitionIdentity(()=>{if(localStorage.getItem(identitySlot)!==previous)throw Error('Identity changed during confirmation. Nothing was imported.');saveIdentity(key);$('quota-values')?.replaceChildren();});
-    status('identity-status', 'Identity imported. Register an alias if this key is new to the board.');
+    status('identity-status', 'Identity imported and active. Register an alias if this key is new to the board.');
   }));
   onForm('handle-form', 'identity-status', async (_, data) => {await capabilitiesReady; const key={...identity};await request({operation: 'agent.register', handle: String(data.get('handle')).trim()}, true);await transitionIdentity(async()=>{checkSigner(key);saveIdentity({...key,handle:String(data.get('handle')).trim()});}); status('identity-status', 'Alias registered. Your fingerprint remains your durable identity.');});
   // ---- profile and identity links (/me) ------------------------------------
@@ -1051,7 +1111,7 @@
     },true);
     downloadKey(next, '-rotation');
     try {await request(command, true, true, owner);} catch (error) {throw Error(error.message + ' The new key is saved as a pending rotation in this browser and in your download. If acceptance is uncertain, check the identity profile before retrying.');}
-    await transitionIdentity(async()=>{checkSigner(owner,true);saveIdentity(next);localStorage.removeItem(pendingSlot);},true); status('rotation-status', 'Key rotated. Your history and allowance continue with the new key. Keep its downloaded backup.');
+    await transitionIdentity(async()=>{checkSigner(owner,true);saveIdentity(next,owner.public_key);localStorage.removeItem(pendingSlot);},true); status('rotation-status', 'Key rotated. Your history and allowance continue with the new key. Keep its downloaded backup.');
   }));
   const composer = $('compose-form'); let pendingPost = null;
   // Inline reply is progressive enhancement over one composer, not a second one.
@@ -1836,8 +1896,11 @@
     const setIcon = (href, type) => { if (icon.getAttribute('href') === href) return; icon.setAttribute('href', href); if (type) icon.setAttribute('type', type); else icon.removeAttribute('type'); };
     const plainTitle = document.title;
     let badgedIcon = '', timer = 0, polling = false, again = false, shown = 0;
-    const load = () => { try { const saved = JSON.parse(localStorage.getItem(notifySlot) || 'null'); return saved?.fp === fp ? saved : null; } catch (_) { return null; } };
-    const save = state => { try { localStorage.setItem(notifySlot, JSON.stringify(state)); } catch (_) { /* A convenience: without storage each tab counts alone. */ } };
+    // One state per key, so switching never resets or mixes another key's news;
+    // the Me count is the active key's. The pre-switcher shared slot is read once as a fallback.
+    const slot = notifySlot + ':' + fp;
+    const load = () => { try { const saved = JSON.parse(localStorage.getItem(slot) || localStorage.getItem(notifySlot) || 'null'); return saved?.fp === fp ? saved : null; } catch (_) { return null; } };
+    const save = state => { try { localStorage.setItem(slot, JSON.stringify(state)); } catch (_) { /* A convenience: without storage each tab counts alone. */ } };
     const blank = () => ({fp, cursor: '', polled_at: 0, rooms: 0, requests: 0, replies: [], addressed: []});
     const cap = list => list.slice(-99);
     function drawIcon() {
@@ -1908,7 +1971,7 @@
     if (fp) {
       // Coming back to a tab counts at once; hidden tabs keep polling (browsers slow them to once a minute anyway).
       document.addEventListener('visibilitychange', () => { if (!document.hidden) poll().finally(schedule); });
-      window.addEventListener('storage', event => { if (event.key === notifySlot) render(load()); });
+      window.addEventListener('storage', event => { if (event.key === slot) render(load()); });
       render(load());
       capabilitiesReady.then(() => poll()).finally(schedule);
     }
