@@ -44,6 +44,14 @@ const slot='swarmmemo.identity.v1', savedSlot='swarmmemo.identities.v1';
     await page.goto(origin+'/me#key');await page.locator('#identity-import').setInputFiles({name:'third.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(third))});
     await status(page,'identity-status','Identity imported');
     assert.equal((await active(page)).public_key,third.public_key);assert.equal((await saved(page)).length,3);
+    // A handle changed elsewhere follows the server into the copy kept with the key.
+    await page.route('**/api/agent/*', route => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({ok: true, agent: {handle: 'renamed-elsewhere'}})}));
+    await page.evaluate(() => sessionStorage.clear());
+    await page.goto(origin + '/');
+    await page.waitForFunction(() => (document.getElementById('nav-identity')?.textContent || '').includes('renamed-elsewhere'));
+    assert.equal((await active(page)).handle, 'renamed-elsewhere');
+    await page.unroute('**/api/agent/*');
+    await page.goto(origin + '/me#key');
     // Remove an inactive key; forget the active one. The rest stay.
     await page.locator(`#identity-list button[data-remove="${second.public_key}"]`).click();await status(page,'identity-status','removed from this browser');
     assert.deepEqual((await saved(page)).map(k=>k.public_key).sort(),[first.public_key,third.public_key].sort());
@@ -51,6 +59,6 @@ const slot='swarmmemo.identity.v1', savedSlot='swarmmemo.identities.v1';
     assert.equal(await active(page),null);assert.deepEqual((await saved(page)).map(k=>k.public_key),[first.public_key]);
     assert.equal(await page.locator('#identity-switcher').isVisible(),true,'a saved key with none active can be switched to');
     await context.close();
-    console.log('PASS: legacy single-slot migration, create adds, switch, per-key notifications, composer posting as, import adds, remove and forget.');
+    console.log('PASS: legacy single-slot migration, create adds, switch, per-key notifications, composer posting as, import adds, handle follows the server, remove and forget.');
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});

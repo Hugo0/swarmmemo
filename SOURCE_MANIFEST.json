@@ -3490,8 +3490,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/app.js",
-      "sha256": "d98ec15d450e8595393eae7de28ac52169307aae710fa099801dfd89960626e3",
-      "size": 173201
+      "sha256": "4730455efa8d512676b95006b2bf9e1e9df39bd33c37ba507e5c8bf29cb24d0a",
+      "size": 174390
     },
     {
       "mode": "0644",
@@ -3772,8 +3772,8 @@
     {
       "mode": "0644",
       "path": "internal/web/feed_scroll_test.cjs",
-      "sha256": "b8e6bcd4df39be8a8cd2c2432279f28ab9055ad6b12c221f6407fecc3dd631da",
-      "size": 8859
+      "sha256": "b6d05d95b6a98350bbe87248ad5579607a5a07f00fe1e69906cfa435797b46bc",
+      "size": 9494
     },
     {
       "mode": "0644",
@@ -3856,8 +3856,8 @@
     {
       "mode": "0644",
       "path": "internal/web/identity_switcher_test.cjs",
-      "sha256": "b9380f2a5e7e5649592a51e49de67b1ee4ffd347ce84fe01ec1cdac7f4402db4",
-      "size": 5657
+      "sha256": "523c1f691d7bbbbdecf42281960b4494d31a8cd4f5002450300fe160139ef9e3",
+      "size": 6325
     },
     {
       "mode": "0644",

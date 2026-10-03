@@ -57,6 +57,11 @@ assert.ok(process.env.SWARMMEMO_TEST_DATA && process.env.SWARMMEMO_TEST_BINARY, 
         const result = await response.json(); batches.push(...(result.messages || []).map(m => ({id: m.id, seq: m.sequence})));
       }
     });
+    // Scrolling alone never loads more: the footer must stay reachable.
+    const before = await page.locator('#older-pagination').getAttribute('data-older');
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)); await page.waitForTimeout(700);
+    assert.equal(await page.locator('#older-pagination').getAttribute('data-older'), before, 'reaching the bottom does not auto-load');
+    assert.ok(await page.locator('footer').first().isVisible(), 'the page footer is reachable');
     let sawCap = false;
     for (let i = 0; i < 12 && await page.locator('#older-pagination').getAttribute('data-older'); i++) {
       if ((await rows()).length === 280) await page.locator('#feed > .memo').first().locator('.reply-button').evaluate(e => e.focus({preventScroll: true}));
@@ -66,6 +71,7 @@ assert.ok(process.env.SWARMMEMO_TEST_DATA && process.env.SWARMMEMO_TEST_BINARY, 
         const row = Array.from(document.querySelectorAll('#feed > .memo')).find(e => e.getBoundingClientRect().bottom > 0);
         return row ? {id: row.id, top: row.getBoundingClientRect().top} : null;
       });
+      await page.getByRole('link', {name: 'Load older posts', exact: true}).click();
       await page.waitForFunction(() => document.getElementById('older-status').textContent === 'Loading older posts…');
       await page.waitForFunction(old => document.getElementById('older-pagination').dataset.older !== old, previous);
       await page.waitForTimeout(180);
@@ -111,7 +117,7 @@ assert.ok(process.env.SWARMMEMO_TEST_DATA && process.env.SWARMMEMO_TEST_BINARY, 
 
     await page.setViewportSize({width: 390, height: 844});
     await page.goto(origin + '/r/' + room + '/history');
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.getByRole('link', {name: 'Load older posts', exact: true}).click();
     await page.waitForFunction(() => document.querySelectorAll('#feed > .memo').length >= 80);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '390px has no horizontal scroll');
     // A failed application response leaves a usable retry link and a plain explanation.
@@ -119,7 +125,7 @@ assert.ok(process.env.SWARMMEMO_TEST_DATA && process.env.SWARMMEMO_TEST_BINARY, 
       if (new URL(route.request().url()).searchParams.has('older')) await route.fulfill({status: 200, contentType: 'application/json', body: '{"ok":false}'});
       else await route.continue();
     });
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.getByRole('link', {name: 'Load older posts', exact: true}).click();
     await page.waitForFunction(() => document.getElementById('older-status').textContent.includes('could not load'));
     assert.ok(await page.getByRole('link', {name: 'Load older posts', exact: true}).isVisible());
     await page.unroute('**/api/messages?*');
@@ -128,6 +134,6 @@ assert.ok(process.env.SWARMMEMO_TEST_DATA && process.env.SWARMMEMO_TEST_BINARY, 
     await page.goto(origin + '/r/' + room + '?sort=hot');
     assert.equal(await page.locator('#older-pagination').count(), 0, 'ranked pagination unchanged');
     assert.deepEqual(errors, [], 'no console or page errors');
-    console.log('PASS: 360 posts, descending/gap-free scroll, cap and anchoring, shareable URLs, no-JS, retry, 390px, ranked feeds, no console errors.');
+    console.log('PASS: 360 posts, deliberate Load older (no auto-load, footer reachable), descending/gap-free, cap and anchoring, shareable URLs, no-JS, retry, 390px, ranked feeds, no console errors.');
   } finally {await browser.close();}
 })().catch(error => {console.error(error); process.exitCode = 1;});

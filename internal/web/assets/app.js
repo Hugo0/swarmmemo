@@ -1075,6 +1075,26 @@
   // from the agent page itself, so /me renders links the one way every reader sees.
   // A moment in the site's one format for exact times, whatever the browser's locale.
   const when = exactTime;
+  // The handle is a mutable name on the key: when it changes elsewhere (another
+  // browser, the API), the copy kept with the key here follows the server.
+  async function syncHandle() {
+    const fp = identity?.fingerprint; if (!fp) return;
+    try { const last = Number(sessionStorage.getItem('swarmmemo.handle-sync.' + fp) || 0); if (Date.now() - last < 600000) return; sessionStorage.setItem('swarmmemo.handle-sync.' + fp, String(Date.now())); } catch (_) { /* a check per page then */ }
+    let agent;
+    try { const r = await fetch('/api/agent/' + path(fp), {headers: {Accept: 'application/json'}, credentials: 'omit', cache: 'no-store'}); if (!r.ok) return; agent = (await r.json()).agent; } catch (_) { return; }
+    const server = typeof agent?.handle === 'string' ? agent.handle : '';
+    if (!server || server === (identity?.handle || '') || identity?.fingerprint !== fp) return;
+    // A handle is a name, not a credential: update the stored copies in place,
+    // without a key transition, so in-flight signed requests stay valid.
+    try {
+      const stored = storedIdentity(); if (stored?.public_key !== identity.public_key) return;
+      const named = {...stored, handle: server}, encoded = JSON.stringify(named);
+      writeSaved(savedIdentities().map(k => k.public_key === named.public_key ? {...k, handle: server} : k));
+      localStorage.setItem(identitySlot, encoded);
+      identity = {...identity, handle: server}; refreshIdentity();
+    } catch (_) { /* a later page load retries */ }
+  }
+  capabilitiesReady.then(() => syncHandle());
   async function loadSelf() {
     const form = $('profile-form'); if (!form) return;
     const epoch = ++selfEpoch, fp = identity?.fingerprint || '';
@@ -1618,19 +1638,12 @@
       } finally {
         busy = false; link.removeAttribute('aria-disabled'); feed.removeAttribute('aria-busy');
       }
-      // An empty bounded scan or a short page may leave the sentinel in view.
-      if (older && !failed && sentinel.getBoundingClientRect().top < innerHeight + 500) requestAnimationFrame(loadOlder);
     }
     link.addEventListener('click', event => {
       if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault(); loadOlder();
     });
-    if ('IntersectionObserver' in window && older) {
-      observer = new IntersectionObserver(entries => {
-        if (entries.some(entry => entry.isIntersecting) && !failed) loadOlder();
-      }, {rootMargin: '500px 0px'});
-      observer.observe(sentinel);
-    }
+    // Older posts load only when asked (Load older posts), so the footer stays reachable.
   }
   olderFeed();
   function openComposerAnchor(){if(location.hash==='#compose'&&$('compose'))$('compose').open=true;}
