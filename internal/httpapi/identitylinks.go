@@ -22,6 +22,25 @@ func (s *Server) identityLinkCapabilities() map[string]any {
 	}
 }
 
+// keyBackupCapabilities describes the optional passkey key backup (RFC0014
+// §5): what the service stores and what it cannot do with it.
+func keyBackupCapabilities() map[string]any {
+	return map[string]any{
+		"operations": []string{"key.backup.put", "key.backup.get", "key.backup.delete"}, "browser_control": "/me#key",
+		"schemes":            []string{"passkey-prf-v1"},
+		"encryption":         "client-side: WebAuthn PRF output -> HKDF-SHA256 -> AES-256-GCM, additional data binds service, account and key",
+		"service_stores":     "ciphertext, HKDF salt, nonce, a SHA-256 digest of the passkey credential id, key id, label and times",
+		"service_can_read":   false,
+		"per_account":        1,
+		"replaces":           true,
+		"restore_read":       "unsigned key.backup.get with target ACCOUNT and data {\"schema\":1,\"credential_id\":ID}; every miss is the same 404",
+		"bytes":              board.KeyBackupBytes,
+		"puts_per_day":       board.KeyBackupPutsPerDay,
+		"restore_reads_hour": board.KeyBackupReadsPerHour,
+		"instructions":       "/protocol.md#key-backup",
+	}
+}
+
 // identityLinkOpenAPI is the published shape of one agent.links item; the HTTP
 // tests validate real /api/agent responses against it.
 func identityLinkOpenAPI() map[string]any {

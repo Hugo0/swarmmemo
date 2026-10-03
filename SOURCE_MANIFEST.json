@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "760f620dbafed7ab3845a390d1c317e41fe6a6c52dfa048e997e234b11df7878",
+  "allowlist_sha256": "5ba9ed1a3e6cc4e98c3c6cb424a95617dbf659b26e303cdb90f200742257e923",
   "files": [
     {
       "mode": "0644",
@@ -70,8 +70,8 @@
     {
       "mode": "0644",
       "path": "clients/javascript/swarmmemo.mjs",
-      "sha256": "2b4da4a7212919f7a872737bfb396cd4210cd808907b3b06c7805788e6839550",
-      "size": 37086
+      "sha256": "4918ecddca894137e37f045726a0398a4f2a26d61f235a06a60392ea1f99578f",
+      "size": 37198
     },
     {
       "mode": "0644",
@@ -502,8 +502,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "8b3b411b04030646eb0480e38fc87ebc8d2987b0b324770d9e380f2cc0278880",
-      "size": 235377
+      "sha256": "d397bf9d5a5a39b2f7766d4a5ede3eda77f88cee8b2896ca44b21dadbe606735",
+      "size": 238644
     },
     {
       "mode": "0644",
@@ -951,6 +951,18 @@
     },
     {
       "mode": "0644",
+      "path": "internal/board/keybackup.go",
+      "sha256": "f1bd5b1ef58bae0863f04647b50908b6c4cfe19df35308b60867cb36c0065e51",
+      "size": 12417
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/keybackup_test.go",
+      "sha256": "8c38708b604a104c89a928d61c06d5fb5d4b3a9fd377887264cbbdf0d25b9eda",
+      "size": 14164
+    },
+    {
+      "mode": "0644",
       "path": "internal/board/ledgerwire.go",
       "sha256": "019c6c7048f54cadb9f6957fdf1657f2c0bf49f24e749a53316d3cac8b9058c3",
       "size": 40368
@@ -976,8 +988,8 @@
     {
       "mode": "0644",
       "path": "internal/board/limits.go",
-      "sha256": "eaf2311950a62105d071fba499199bd91db3623cb19f1038f16df620a58176d7",
-      "size": 6625
+      "sha256": "aa6792b4b653729053a5bd5f8634eb5c839926b22bf138d753cd49ca8003f565",
+      "size": 6920
     },
     {
       "mode": "0644",
@@ -1066,8 +1078,8 @@
     {
       "mode": "0644",
       "path": "internal/board/operations.go",
-      "sha256": "21becce84b25fe6fabd60f308e5cd018b2bbbc51bc95409ea39d62d0bc7c6f98",
-      "size": 24491
+      "sha256": "ac42d5dc3b904932355cd73528fd2b13da2c96d97b993c292bc87a06231397ed",
+      "size": 25103
     },
     {
       "mode": "0644",
@@ -1354,8 +1366,8 @@
     {
       "mode": "0644",
       "path": "internal/board/store.go",
-      "sha256": "ee96ddaa86cbd97a893a71533320948f1bc70e9a12579d4bb30e2f263d11f019",
-      "size": 37963
+      "sha256": "febad018ae5e1c06f91fdb86fb9eb7a288b473e0416811e0fd0911daca278c63",
+      "size": 38288
     },
     {
       "mode": "0644",
@@ -1666,8 +1678,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "bfa228cb4a540c14a29ce3f8b3ba1916b8808104eaf51c66bf4f0147abb8da5c",
-      "size": 81425
+      "sha256": "b8ff696cd2a7408e0f96c318b2aafd7b92556757e69f183ce63086226108a6e0",
+      "size": 81657
     },
     {
       "mode": "0644",
@@ -1744,8 +1756,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/identitylinks.go",
-      "sha256": "a7f6253657836366840f8e7adea84b6b23f8c6d1d14ab9b9532a1aaad512b891",
-      "size": 4094
+      "sha256": "a2d6d18c5b86a30ae56a2afb3ab21bff4561e7d3d7ad66253e00396033275ed6",
+      "size": 5174
     },
     {
       "mode": "0644",
@@ -3478,8 +3490,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/app.js",
-      "sha256": "2f603058944b694aa4cc0906e7d64c2e2955cbd57d276cf577b6a7afceb22c3f",
-      "size": 161539
+      "sha256": "d98ec15d450e8595393eae7de28ac52169307aae710fa099801dfd89960626e3",
+      "size": 173201
     },
     {
       "mode": "0644",
@@ -3993,6 +4005,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/web/passkey_backup_test.cjs",
+      "sha256": "859d0d6a6bcb5fd8cb3ced363923552b89f249ecfaac2cf40fde50071b290836",
+      "size": 8512
+    },
+    {
+      "mode": "0644",
       "path": "internal/web/platforms.go",
       "sha256": "c3f67792fe42a016c2140c0e38990cd9bc6f02e99e67475fff2366db0a546e43",
       "size": 16627
@@ -4198,8 +4216,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/me.html",
-      "sha256": "6fc87ef7eee8891b16900665fe616b07d78d8ca732b8b967f4033e0697ebd535",
-      "size": 22956
+      "sha256": "134e995702cb9f1f9fd17eae3da596c09bdfe4a3364dfb134f51515f80c54afb",
+      "size": 24284
     },
     {
       "mode": "0644",

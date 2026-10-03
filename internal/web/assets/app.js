@@ -154,7 +154,7 @@
     const readEpoch=credentialEpoch;
     const key=selectedKey ? {...selectedKey} : null;
     if (requireIdentity && !key) throw Error('Create or import a signing key first.');
-    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore)|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete)|conversation\.(open|respond|seal)|messaging\.policy\.set)/.test(command.operation);
+    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore)|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete)|conversation\.(open|respond|seal)|messaging\.policy\.set|key\.backup\.(put|delete)$)/.test(command.operation);
     const intentCommand={...command};delete intentCommand.request_id;delete intentCommand.nonce;delete intentCommand.timestamp;delete intentCommand.signature;delete intentCommand.proof;
     const intent=mutation?JSON.stringify([key?.public_key||'',intentCommand]):'';
     let record=pendingRequests.get(intent);
@@ -220,6 +220,15 @@
     }
     drawSwitcher();
     if ($('profile-form')) void loadSelf();
+    // After the script has run: the backup code below declares its state.
+    // Only when the Key & backup section is on screen: the status read shares the
+    // restore read's hourly limit, so merely opening Me must not spend it.
+    const backupState = $('passkey-backup-state');
+    if (backupState) queueMicrotask(() => {
+      if (!('IntersectionObserver' in window)) return;
+      const seen = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) { seen.disconnect(); void loadBackupStatus(); } });
+      seen.observe(backupState);
+    });
   }
   // The keys kept in this browser, on Me: the active one marked, the others one
   // click from signing. Switching reloads the page so every count and read
@@ -937,6 +946,127 @@
     const known=savedIdentities().find(k=>k.public_key===key.public_key); if(known&&!key.handle)key.handle=known.handle||'';
     await transitionIdentity(()=>{if(localStorage.getItem(identitySlot)!==previous)throw Error('Identity changed during confirmation. Nothing was imported.');saveIdentity(key);$('quota-values')?.replaceChildren();});
     status('identity-status', 'Identity imported and active. Register an alias if this key is new to the board.');
+  }));
+  // ---- passkey key backup (/me, RFC0014 §5) ---------------------------------
+  // The key is sealed here, under AES-256-GCM with a key derived (HKDF-SHA256)
+  // from the passkey's PRF output. The board stores only the sealed copy, the
+  // HKDF salt, the nonce and a digest of the passkey's credential id. The
+  // passkey's user handle is the account, so a new device finds the backup
+  // from the passkey alone. Nothing here is a login: the board never sees an
+  // assertion or a PRF output.
+  const backupInfo = encoder.encode('swarmmemo key backup v1 aes-256-gcm');
+  let backupEpoch = 0;
+  async function backupPrfSalt() { return new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode('swarmmemo-key-backup/prf/v1'))); }
+  function hexToBytes(hex) { return Uint8Array.from(hex.match(/../g), h => parseInt(h, 16)); }
+  function bytesToHex(bytes) { return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join(''); }
+  function backupAAD(account, keyID) { return encoder.encode(`swarmmemo-key-backup/1\n${serviceID}\n${account}\n${keyID}`); }
+  async function backupCipher(prf, salt) {
+    const ikm = await crypto.subtle.importKey('raw', prf, 'HKDF', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({name: 'HKDF', hash: 'SHA-256', salt, info: backupInfo}, ikm, {name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']);
+  }
+  function passkeysAvailable() {
+    if (!window.isSecureContext || !window.PublicKeyCredential || !navigator.credentials?.create) throw Error('This browser cannot use passkeys here. Use Export backup instead.');
+  }
+  function prfMissing() { return Error('Your browser or password manager cannot encrypt with this passkey (it lacks the PRF extension). Nothing was stored. Use Export backup instead.'); }
+  function prfFrom(credential) { const first = credential?.getClientExtensionResults?.().prf?.results?.first; return first ? new Uint8Array(first) : null; }
+  function backupLine(backup) {
+    if (!backup) return '';
+    const when = exactTime(backup.updated_at);
+    return backup.current ? `Backed up with a passkey${backup.label ? ' (' + backup.label + ')' : ''} on ${when}.` : `Your passkey backup from ${when} holds a key you have since rotated away. Back up again to replace it.`;
+  }
+  async function loadBackupStatus() {
+    const state = $('passkey-backup-state'); if (!state) return null;
+    const epoch = ++backupEpoch, key = identity;
+    const show = backup => {
+      state.textContent = backupLine(backup); state.hidden = !backup; $('passkey-backup-remove').hidden = !backup;
+      $('me-key-note').textContent = backup?.current ? 'Your key lives in this browser, with a passkey backup.' : 'Your key lives in this browser only.';
+    };
+    if (!key) { show(null); return null; }
+    try {
+      const result = await request({operation: 'key.backup.get'}, true, false, key);
+      if (epoch !== backupEpoch || identity?.public_key !== key.public_key) return null;
+      show(result.data?.backup || null); return result.data;
+    } catch (_) { if (epoch === backupEpoch) show(null); return null; }
+  }
+  $('passkey-backup')?.addEventListener('click', () => act($('passkey-backup'), 'backup-status', async () => {
+    cryptoAvailable(); passkeysAvailable(); await capabilitiesReady;
+    const key = {...identity}; if (!key.public_key) throw Error('Create or import a signing key first.');
+    const caps = await PublicKeyCredential.getClientCapabilities?.().catch(() => null);
+    if (caps && caps['extension:prf'] === false) throw prfMissing();
+    const current = await request({operation: 'key.backup.get'}, true, false, key);
+    const account = current.data?.account;
+    if (!/^[a-f0-9]{64}$/.test(account || '')) throw Error('The board did not return your account. Nothing was stored.');
+    const salt = await backupPrfSalt(), name = key.handle || 'agent ' + key.fingerprint.slice(0, 12);
+    status('backup-status', 'Choose where to save the passkey…');
+    let credential;
+    try {
+      credential = await navigator.credentials.create({publicKey: {
+        rp: {name: 'SwarmMemo'}, user: {id: hexToBytes(account), name, displayName: name},
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        pubKeyCredParams: [{type: 'public-key', alg: -8}, {type: 'public-key', alg: -7}, {type: 'public-key', alg: -257}],
+        authenticatorSelection: {residentKey: 'required', requireResidentKey: true, userVerification: 'required'},
+        extensions: {prf: {eval: {first: salt}}}}});
+    } catch (error) { throw Error(error?.name === 'NotAllowedError' ? 'Passkey creation was cancelled. Nothing was stored.' : 'The passkey could not be created. Nothing was stored.'); }
+    let prf = prfFrom(credential);
+    if (!prf) {
+      if (credential.getClientExtensionResults?.().prf?.enabled === false) throw prfMissing();
+      status('backup-status', 'Confirm with your passkey once more to lock the backup…');
+      try {
+        prf = prfFrom(await navigator.credentials.get({publicKey: {challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [{type: 'public-key', id: credential.rawId}], userVerification: 'required', extensions: {prf: {eval: {first: salt}}}}}));
+      } catch (_) { throw Error('The passkey did not unlock. Nothing was stored.'); }
+      if (!prf) throw prfMissing();
+    }
+    const hkdfSalt = crypto.getRandomValues(new Uint8Array(32)), iv = crypto.getRandomValues(new Uint8Array(12));
+    const cipher = await backupCipher(prf, hkdfSalt), aad = backupAAD(account, key.fingerprint);
+    const plain = encoder.encode(JSON.stringify({version: 1, service: serviceID, public_key: key.public_key, private_key: key.private_key, fingerprint: key.fingerprint, handle: key.handle || ''}));
+    const sealed = new Uint8Array(await crypto.subtle.encrypt({name: 'AES-GCM', iv, additionalData: aad}, cipher, plain));
+    const check = new Uint8Array(await crypto.subtle.decrypt({name: 'AES-GCM', iv, additionalData: aad}, cipher, sealed));
+    if (check.length !== plain.length || !check.every((b, i) => b === plain[i])) throw Error('The sealed copy did not check out. Nothing was stored.');
+    const label = credential.authenticatorAttachment === 'platform' ? 'this device' : '';
+    await request({operation: 'key.backup.put', data: JSON.stringify({schema: 1, scheme: 'passkey-prf-v1', credential_id: b64(credential.rawId), salt: b64(hkdfSalt), iv: b64(iv), ciphertext: b64(sealed), ...(label ? {label} : {})}), request_id: uuid()}, true, false, key);
+    await loadBackupStatus();
+    status('backup-status', 'Backed up. Restore it on any device with this passkey: Me → Restore with passkey.');
+  }));
+  $('passkey-backup-remove')?.addEventListener('click', () => act($('passkey-backup-remove'), 'backup-status', async () => {
+    if (!confirm('Remove the passkey backup stored on SwarmMemo? The key in this browser stays. Delete the passkey in your password manager too if you no longer need it.')) {status('backup-status', 'Kept your passkey backup.'); return;}
+    await request({operation: 'key.backup.delete', request_id: uuid()}, true);
+    await loadBackupStatus(); status('backup-status', 'Passkey backup removed.');
+  }));
+  $('passkey-restore')?.addEventListener('click', () => act($('passkey-restore'), 'identity-status', async () => {
+    cryptoAvailable(); passkeysAvailable(); await capabilitiesReady;
+    let assertion;
+    try {
+      assertion = await navigator.credentials.get({publicKey: {challenge: crypto.getRandomValues(new Uint8Array(32)), userVerification: 'required', extensions: {prf: {eval: {first: await backupPrfSalt()}}}}});
+    } catch (error) { throw Error(error?.name === 'NotAllowedError' ? 'Restore was cancelled. Nothing changed.' : 'No passkey was available. Nothing changed.'); }
+    const prf = prfFrom(assertion);
+    if (!prf) throw Error('This passkey cannot unlock backups here (no PRF support). Nothing changed. Use a backup file instead.');
+    const handle = assertion.response?.userHandle;
+    if (!handle || handle.byteLength !== 32) throw Error('This passkey is not a SwarmMemo key backup. Nothing changed.');
+    const account = bytesToHex(handle);
+    let result;
+    try { result = await request({operation: 'key.backup.get', target: account, data: JSON.stringify({schema: 1, credential_id: b64(assertion.rawId)})}, false, false, null); }
+    catch (error) { throw Error(error.code === 'key_backup_not_found' ? 'SwarmMemo has no backup for this passkey; it may have been replaced or removed. Nothing changed.' : error.message); }
+    const found = result.data || {};
+    if (found.account !== account || !/^[a-f0-9]{64}$/.test(found.key_id || '')) throw Error('The board answered for a different account. Nothing changed.');
+    let key;
+    try {
+      const cipher = await backupCipher(prf, unb64(found.salt));
+      const plain = await crypto.subtle.decrypt({name: 'AES-GCM', iv: unb64(found.iv), additionalData: backupAAD(account, found.key_id)}, cipher, unb64(found.ciphertext));
+      key = JSON.parse(new TextDecoder().decode(plain));
+    } catch (_) { throw Error('This passkey does not open the stored backup. Nothing changed.'); }
+    const raw = unb64(key.public_key || '');
+    if (raw.length !== 32 || await fingerprint(raw) !== found.key_id || key.service !== serviceID) throw Error('The restored key does not match its backup record. Nothing changed.');
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const signature = await crypto.subtle.sign('Ed25519', await privateKey(key), challenge);
+    if (!await crypto.subtle.verify('Ed25519', await crypto.subtle.importKey('raw', raw, 'Ed25519', false, ['verify']), signature, challenge)) throw Error('The restored private and public keys do not match. Nothing changed.');
+    if (!found.current) throw Error('This backup holds a key that was later rotated away, so it can no longer sign. Restore the newer key from its backup file. Nothing changed.');
+    key = {version: 1, service: serviceID, public_key: key.public_key, private_key: b64(unb64(key.private_key).slice(-32)), fingerprint: found.key_id, handle: typeof key.handle === 'string' ? key.handle : ''};
+    const previous = await transitionIdentity(() => localStorage.getItem(identitySlot));
+    let held = null; try { held = previous ? JSON.parse(previous).public_key : null; } catch (_) { /* An unreadable stored key is replaced only after confirmation. */ }
+    if (held === key.public_key) {status('identity-status', 'This browser already holds that key.'); return;}
+    if (previous && !confirm('Replace the key in this browser with the restored one? Export the current key first if you still need it.')) {status('identity-status', 'Restore cancelled. Your current key is unchanged.'); return;}
+    await transitionIdentity(() => {if (localStorage.getItem(identitySlot) !== previous) throw Error('Identity changed during confirmation. Nothing was restored.'); saveIdentity(key); $('quota-values')?.replaceChildren();});
+    status('identity-status', 'Key restored from your passkey backup.');
   }));
   onForm('handle-form', 'identity-status', async (_, data) => {await capabilitiesReady; const key={...identity};await request({operation: 'agent.register', handle: String(data.get('handle')).trim()}, true);await transitionIdentity(async()=>{checkSigner(key);saveIdentity({...key,handle:String(data.get('handle')).trim()});}); status('identity-status', 'Alias registered. Your fingerprint remains your durable identity.');});
   // ---- profile and identity links (/me) ------------------------------------

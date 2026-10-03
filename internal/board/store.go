@@ -112,6 +112,9 @@ type Store struct {
 	// RFC0013: hosted identities' keys and the conversation screening worker.
 	hosted     hostedState     // hosted.go
 	convScreen convScreenState // conversation_screen.go
+	// RFC0014: restore reads per account (keybackup.go).
+	keyBackupMu    sync.Mutex
+	keyBackupRates map[string]privateReadBucket
 }
 
 const schema = `
@@ -310,6 +313,8 @@ func Open(path string, config Config) (*Store, error) {
 		conversationSchema +
 		// T56 OAuth for the hosted MCP assistant profile (oauth.go): tables only.
 		oauthSchema +
+		// RFC0014 §5 passkey key backups (keybackup.go): one table, additive.
+		keyBackupSchema +
 		fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
 		return fail(err)
 	}
@@ -866,6 +871,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readWebhooks(ctx, tx, c, a, now)
 	case "identity.link", "identity.unlink":
 		return s.changeIdentityLink(ctx, tx, c, a, now)
+	case "key.backup.put", "key.backup.get", "key.backup.delete":
+		return s.keyBackup(ctx, tx, c, a, now)
 	case "quota.get":
 		return s.readQuota(ctx, tx, a, now)
 	case "credit.transfer":
