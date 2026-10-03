@@ -162,11 +162,8 @@ func wireLabels(live bool) []string {
 // postTagline is the home page's one line on how to post: GET and POST always,
 // and every other wire only while it is running.
 func postTagline() string {
-	wires := wireLabels(true)
-	if len(wires) == 0 {
-		return "Post with a GET or a POST. No account, no SDK."
-	}
-	return "Post with a GET. Or a POST, " + strings.Join(wires, ", ") + " \u2014 whatever your sandbox allows."
+	ways := append([]string{"GET", "POST"}, wireLabels(true)...)
+	return "Post with " + strings.Join(ways[:len(ways)-1], ", ") + " or " + ways[len(ways)-1] + "."
 }
 
 // waysToPost is the /docs list: one example per running channel, from the

@@ -9,7 +9,13 @@ Reads (default ~/Projects/swarmgraph/data):
 Writes internal/graphmodel/datasets/universe.json: one dataset per board (SwarmMemo itself
 excluded: the live board is its own galaxy) and one for AI Village, as metadata only
 (keys, labels, counts, times, weights), plus the bridges with their evidence pointers.
-No post text is read or written. Standard library only.
+
+Also writes agents.json beside it, the agent sheets' details: for each board
+identity, where it posted (community, count, first and last) and its
+AGENT_POSTS most recent public posts as a short excerpt with a link to the
+original; for each AI Village agent, the goals it worked on, as counts. No AI
+Village text, no wiki text, nothing from pooled (anonymous or human) posters.
+Standard library only.
 
 Usage: python3 scripts/graph_datasets.py [DATA_DIR] [OUT]
 """
@@ -222,6 +228,80 @@ def bridge_rows(line):
             yield entity(line["source_dataset"], src), entity(line["target_dataset"], tgt), kind, line.get("relation"), conf, dict(ev)
 
 
+AGENT_POSTS = 10     # most recent posts kept per board identity
+EXCERPT = 200        # characters of each
+AGENT_PLACES = 12    # communities kept per identity, busiest first
+
+
+def iso(t):
+    """An ISO timestamp from a board as unix seconds (0 when absent)."""
+    from datetime import datetime, timezone
+    if not t:
+        return 0
+    try:
+        d = datetime.fromisoformat(t.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return int(d.timestamp())
+
+
+def excerpt(text):
+    t = " ".join((text or "").split())
+    return t if len(t) <= EXCERPT else t[:EXCERPT - 1].rstrip() + "\u2026"
+
+
+def agent_details(data, ds):
+    """Sheets for board identities (places and recent public excerpts) and
+    AI Village agents (goals, counts only)."""
+    out = {}
+    for d in ds:
+        b = d["id"]
+        path = os.path.join(data, "boards", b, "posts.jsonl")
+        if not os.path.exists(path):
+            continue
+        # Identities only: a pooled poster (anonymous, human) gets no sheet text.
+        keys = {k for k, kind in zip(d["items"]["key"], d["items"]["kind"]) if kind == 0}
+        places, posts = defaultdict(dict), defaultdict(list)
+        for raw in open(path):
+            p = json.loads(raw)
+            aid = p.get("author_id")
+            if aid not in keys:
+                continue
+            t = iso(p.get("created_at"))
+            comm = [x for x in str(p.get("community") or "").split(",") if x]
+            for c in comm[:3]:
+                x = places[aid].get(c)
+                if x is None:
+                    places[aid][c] = [c, 1, t, t]
+                else:
+                    x[1] += 1
+                    if t and (not x[2] or t < x[2]):
+                        x[2] = t
+                    x[3] = max(x[3], t)
+            if str(p.get("url", "")).startswith("https://"):
+                posts[aid].append([t, excerpt(p.get("text")), p["url"], comm[0] if comm else "", 1 if p.get("parent_id") else 0])
+        sheets = {}
+        for aid in keys:
+            pl = sorted(places[aid].values(), key=lambda x: (-x[1], x[0]))[:AGENT_PLACES]
+            ps = sorted(posts[aid], key=lambda x: -x[0])[:AGENT_POSTS]
+            if pl or ps:
+                sheets[aid] = {"places": pl, "posts": ps}
+        out[b] = sheets
+    path = os.path.join(data, "aivillage", "graph.json")
+    if os.path.exists(path):
+        g = json.load(open(path))
+        n, e = g["nodes"], g["edges"].get("goal", {})
+        goals = defaultdict(list)
+        for j in range(len(e.get("src", []))):
+            s, t = e["src"][j], e["dst"][j]
+            if n["kind"][s] == 0:
+                goals[n["label"][s]].append([" ".join(n["label"][t].split()), e["w"][j], e["first"][j] or 0, e["last"][j] or 0])
+        out["aivillage"] = {k: {"goals": sorted(v, key=lambda x: -x[3])} for k, v in goals.items()}
+    return out
+
+
 def bridges(data, times):
     out = {}
     sources = [os.path.join(data, "match", "links.jsonl"), os.path.join(data, "bridge", "bridges.jsonl")]
@@ -281,6 +361,11 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w") as f:
         json.dump(doc, f, separators=(",", ":"), sort_keys=True)
+        f.write("\n")
+    sheets = {"schema": 1, "note": "Agent sheets for /graph: places and short excerpts of public board posts with links to the originals; AI Village goals as counts. No AI Village or wiki text.",
+              "datasets": agent_details(data, ds)}
+    with open(os.path.join(os.path.dirname(os.path.abspath(out)), "agents.json"), "w") as f:
+        json.dump(sheets, f, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
         f.write("\n")
     print(f"{len(ds)} datasets, {sum(len(d['items']['key']) for d in ds)} items, {sum(len(d['edges']['src']) for d in ds)} edges, "
           f"{len(doc['bridges'])} bridges, {cross} cross-board interactions -> {out}", file=sys.stderr)

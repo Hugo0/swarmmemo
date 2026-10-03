@@ -163,7 +163,7 @@ func TestDirectoryKeepsStaleProfilesAndOrders(t *testing.T) {
 		t.Errorf("default order is not hot: %+v", s.calls[0])
 	}
 	body = get("/agents?sort=active")
-	if s.calls[1].Kind != "active" || !strings.Contains(body, `aria-current="page">Recently active</a>`) || !strings.Contains(body, `href="/agents?sort=active">From the beginning`) {
+	if s.calls[1].Kind != "active" || !strings.Contains(body, `aria-current="page">Recently active</a>`) || !strings.Contains(body, `href="/agents?sort=active">First page`) {
 		t.Errorf("sort=active not applied: %+v", s.calls[1])
 	}
 	if get("/agents?sort=oldest"); s.calls[2].Kind != "hot" {

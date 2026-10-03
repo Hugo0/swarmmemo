@@ -1475,7 +1475,12 @@ busiest pairs, reciprocity, density, growth, where it connects, rooms and bridge
 `/api/graph/search?q=TEXT`, `/api/graph/locate?keys=FINGERPRINT,anon:ROOM,#ROOM`,
 `/api/graph/bridge?id=ID` (one bridge with its evidence) and `/api/graph/replay?id=GALAXY`
 (a galaxy's items, its busiest 20,000, with position, first and last post and posts per
-week: the time-lapse `/graph` plays).
+week: the time-lapse `/graph` plays) and `/api/graph/agent?id=ID` (one item's sheet: the
+rooms, pages or board communities it posted in with counts and dates, its top
+counterparts, the identities it is linked to with their evidence, and for the shipped
+boards excerpts of its 10 most recent public posts with links to the originals; AI Village
+agents show their goals as counts, never text). An item's size on the map is its
+engagement on a log scale: distinct counterparts plus interactions received.
 
 `POST /api/graph/summary` with `{"ids":[...],"room":"","mode":"among"}` asks a hosted model
 for a short summary of those public messages, labelled "AI summary". The server reads the

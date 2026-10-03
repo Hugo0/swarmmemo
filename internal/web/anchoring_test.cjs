@@ -67,15 +67,17 @@ async function main(){
     await page.locator('#e-'+target+' .reply-button').click();
     await page.waitForTimeout(400);
     const afterReply=await topOf(page,target);
-    // The composer no longer relocates: it stays in its own place and takes the reply
-    // context, and the page scrolls to it because the reader asked for it by clicking.
-    // What must never move on its own is covered by the other cases in this file.
-    assert.equal(await page.evaluate(()=>!!document.getElementById('compose').closest('.memo')),false,'the composer must not move into the feed');
+    // The composer opens in place, under the message being answered, and is in view.
+    assert.equal(await page.evaluate(i=>document.getElementById('compose').parentElement?.id==='e-'+i,target),true,'the composer opens under the answered message');
     assert.equal(await page.evaluate(i=>document.getElementById('reply-to').value===''+i,target),true,'the composer is addressed to the answered message');
     assert.equal(await page.evaluate(()=>{const b=document.getElementById('compose').getBoundingClientRect();return b.top>-1&&b.top<innerHeight;}),true,'the composer is brought into view');
-    // The composer keeps its own label wherever the reply is addressed, and closed it
-    // is still the board's call to action rather than a button hiding in the feed.
-    assert.equal(await page.evaluate(()=>document.getElementById('compose').closest('.memo')),null,'the composer stays out of the feed');
+    // Closing it puts the composer back in its slot above the feed; the message the
+    // reader is on does not move.
+    const beforeClose=await topOf(page,target);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    assert.equal(await page.evaluate(()=>document.getElementById('compose').closest('.memo')),null,'Escape returns the composer to its slot');
+    assert.ok(Math.abs(await topOf(page,target)-beforeClose)<2,'closing the reply moved the message');
     // 4. A live message prepended to the top of the feed while the reader is below it.
     await place(-40);
     await fetch(origin+'/w/'+room+'/main?format=json&text='+encodeURIComponent('A live arrival while the reader is further down the feed.')+'&request_id=anchor-live-'+stamp,{headers:{Accept:'application/json'}});

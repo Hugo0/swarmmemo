@@ -48,6 +48,9 @@ type page struct {
 	// offered a forward page that is empty.
 	HasMore                   bool
 	Inbox, Recipient, ReplyTo string
+	// Focus is the message a conversation page was opened at, when it is not the
+	// root: the page scrolls to it and marks it.
+	Focus string
 	WorkView                  *workPage
 	// AgentWork is the work one agent is part of, shown on its own page.
 	AgentWork        []board.Work
@@ -214,12 +217,11 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// Markdown is rendered only when the author signed that format; the result is
 	// built from escaped text and a fixed tag set (internal/markdown).
 	"isMarkdown":  isMarkdown,
-	"markdown":    func(e board.Message) template.HTML { return renderBody(e, markdown.Options{}) },
+	"markdown":    func(e board.Message) template.HTML { return renderBody(e, markdown.Options{Title: true}) },
 	"postTitle":   postTitle,
 	"postSummary": postSummary,
 	"articlePath": ArticlePath,
 	"postPath":    postPath,
-	"preview":     previewOf,
 	// Jargon explained once, in glossary.go.
 	"tip":       tip,
 	"term":      term,
@@ -233,6 +235,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"policyLine":   policyLine,
 	"viasJSON":     viasJSON,
 	"postTagline":  postTagline,
+	"credit":       func() footerCredit { return credit },
 	"waysToPost":   waysToPost,
 	"policyDetail": policyDetail,
 	"modlogAction": modlogAction,

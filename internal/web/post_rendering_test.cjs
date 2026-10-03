@@ -34,17 +34,23 @@ const {resolve}=require('node:path');
     await page.goto(origin+'/e/'+long);
     await card(long).locator('.author img[referrerpolicy="no-referrer"]').waitFor();
     await page.goto(origin+'/r/'+room);
-    // A Markdown post in a listing is a few lines of inline text: no heading or
-    // table reaches the feed, and a cut preview links to the whole post.
-    const preview=card(long).locator('.memo-text.md-preview');
-    assert.equal(await preview.locator('h1,h2,h3,h4,table,ul,ol,blockquote,pre,hr').count(),0);
-    assert.ok((await preview.textContent()).split('\n').length<=5,'a preview is at most five lines');
+    // A Markdown post in a listing is the whole post, folded to a few lines of
+    // body-size text; Show more expands it in place, with no link to another page.
+    const body0=card(long).locator('.memo-text.md');
+    assert.equal(await body0.locator('h1,h2').first().evaluate(e=>getComputedStyle(e).fontSize),await body0.evaluate(e=>getComputedStyle(e).fontSize),'a folded heading reads at body size');
     assert.ok((await card(long).boundingBox()).height<260,'thirty headings and a table stay one card');
-    const more=card(long).locator('a.read-more');
-    assert.match(await more.getAttribute('href'),new RegExp('^/e/'+long+'/heading-1$'));
-    assert.equal(await card(long).locator('.memo-preview-toggle').count(),0,'a cut preview reads on at its link, not in place');
-    assert.equal(await card(short).locator('a.read-more').count(),0,'a whole preview has no read-more link');
-    assert.equal(await card(short).locator('.memo-text').innerHTML(),'<strong class="memo-title">Short</strong>\nOne <em>line</em>.');
+    assert.equal(await page.locator('a.read-more').count(),0,'no read-more link anywhere');
+    const toggle=card(long).getByRole('button',{name:'Show more',exact:true});
+    await toggle.scrollIntoViewIfNeeded();const top=(await card(long).boundingBox()).y;
+    await toggle.click();
+    assert.equal(new URL(page.url()).pathname,'/r/'+room,'Show more stays on the page');
+    assert.equal(await card(long).locator('.memo-preview-toggle').getAttribute('aria-expanded'),'true');
+    assert.ok(await card(long).getByText('The end.').isVisible(),'the whole post is shown in place');
+    assert.ok(Math.abs((await card(long).boundingBox()).y-top)<2,'the expanded card stays where it was');
+    assert.ok(parseFloat(await body0.locator('h2').first().evaluate(e=>getComputedStyle(e).fontSize))>15,'expanded, a heading is a heading');
+    await card(long).getByRole('button',{name:'Show less',exact:true}).click();
+    assert.equal(await card(short).locator('.memo-preview-toggle').count(),0,'a whole post has no Show more');
+    assert.match(await card(short).locator('.memo-text').innerHTML(),/Short/);
     // A plain post links its URL, led by the host, and a same-site room; the
     // rest is text.
     const body=card(plain).locator('.memo-text');

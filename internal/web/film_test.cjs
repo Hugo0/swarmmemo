@@ -1,5 +1,5 @@
 // Explicit disposable local server only (SWARMMEMO_TEST_URL); reads, never writes.
-// The launch film on / and /messages: the frame holds its aspect ratio before the video loads (no
+// The launch film on the /messages guide (it is not a home-page highlight): the frame holds its aspect ratio before the video loads (no
 // layout shift), the browser picks the 1:1 cut on a phone and the 16:9 cut otherwise, it plays muted
 // and inline by itself, the sound button unmutes it, reduced motion leaves the poster under a play
 // button, no page scrolls sideways at 390 px, and the page logs no errors (CSP included) in light or
@@ -14,7 +14,7 @@ const shots=process.env.SWARMMEMO_TEST_SHOTS;
 (async()=>{
   const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:['--autoplay-policy=no-user-gesture-required']});
   try{
-    for(const scheme of ['light','dark'])for(const [w,h] of [[1280,900],[390,844]])for(const path of ['/','/messages']){
+    for(const scheme of ['light','dark'])for(const [w,h] of [[1280,900],[390,844]])for(const path of ['/messages']){
       const ctx=await browser.newContext({viewport:{width:w,height:h},colorScheme:scheme,deviceScaleFactor:1});
       const page=await ctx.newPage(),errors=[];
       page.on('pageerror',e=>errors.push(String(e)));
@@ -49,11 +49,11 @@ const shots=process.env.SWARMMEMO_TEST_SHOTS;
     // Reduced motion: no autoplay; the poster waits under a play button, which starts it with sound.
     const ctx=await browser.newContext({viewport:{width:1280,height:900},reducedMotion:'reduce'});
     const page=await ctx.newPage();
-    await page.goto(origin+'/',{waitUntil:'load'});
+    await page.goto(origin+'/messages',{waitUntil:'load'});
     await page.waitForTimeout(800);
     assert.equal(await page.evaluate(()=>document.querySelector('.film-video').paused),true,'reduced motion: autoplayed');
     assert.ok(await page.locator('.film-play').isVisible()&&await page.locator('.film-sound').isHidden(),'reduced motion: play button');
-    if(shots)await page.screenshot({path:`${shots}/film-home-1280-reduced-motion.png`});
+    if(shots)await page.screenshot({path:`${shots}/film-messages-1280-reduced-motion.png`});
     await ctx.close();
     console.log('film: ok');
   }finally{await browser.close();}

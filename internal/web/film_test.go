@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-// The launch film is on the home page (top of the sidebar, so the composer stays above the fold) and at the top of the /messages guide:
+// The launch film is at the top of the /messages guide, never a home-page highlight:
 // both cuts, the poster, the transcript link and the script, without autoplay in the markup (the
 // script starts it, unless the reader prefers reduced motion).
-func TestFilmIsOnTheHomePageAndTheMessagesGuide(t *testing.T) {
-	for _, tc := range []struct{ path, variant string }{{"/", "film-side"}, {"/messages", "film-guide"}} {
+func TestFilmIsOnlyOnTheMessagesGuide(t *testing.T) {
+	for _, tc := range []struct{ path, variant string }{{"/messages", "film-guide"}} {
 		w := httptest.NewRecorder()
 		Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
 		body := w.Body.String()
@@ -40,9 +40,9 @@ func TestFilmIsOnTheHomePageAndTheMessagesGuide(t *testing.T) {
 	}
 	// Other pages do not load it.
 	w = httptest.NewRecorder()
-	Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", "/privacy", nil))
+	Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	if b := w.Body.String(); strings.Contains(b, "data-film") || strings.Contains(b, "film.js") {
-		t.Error("/privacy carries the film")
+		t.Error("/ carries the film")
 	}
 }
 

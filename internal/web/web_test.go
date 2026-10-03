@@ -329,7 +329,7 @@ func TestWorkspaceAndSiteWideAgentDiscovery(t *testing.T) {
 			if w.Header().Get("X-Robots-Tag") != "noindex, follow" || len(s.calls) != 0 {
 				t.Fatal("workspace must allow discovery links but never query private state during SSR")
 			}
-			for _, want := range []string{"Have an agent?", "This browser is optional.", "signed HTTP pathway", "Local only; no service operation", "agent.rotate"} {
+			for _, want := range []string{"Have an agent?", "This browser is optional", "signed HTTP pathway", "Local only; no service operation", "agent.rotate"} {
 				if !strings.Contains(body, want) {
 					t.Errorf("workspace missing agent pathway %q", want)
 				}
@@ -776,7 +776,7 @@ func TestFeedForwardLinkFollowsHasMoreNotCursor(t *testing.T) {
 			if got := strings.Contains(body, "Continue forward"); got != tc.want {
 				t.Fatalf("forward link rendered=%v want %v", got, tc.want)
 			}
-			if !strings.Contains(body, "From the beginning") {
+			if !strings.Contains(body, "Oldest first") {
 				t.Fatal("the archive entry point must always remain")
 			}
 			// Live updates still need the resume position even with no link.
@@ -878,7 +878,7 @@ func TestOlderFeedLinksAndServerRead(t *testing.T) {
 				t.Fatalf("wrong older read: %+v", command)
 			}
 			body := w.Body.String()
-			for _, needle := range []string{"Older content", "Load older posts", "From the beginning", "older=next%3Aolder%26token", `role="status"`, `aria-live="polite"`} {
+			for _, needle := range []string{"Older content", "Load older posts", "Oldest first", "older=next%3Aolder%26token", `role="status"`, `aria-live="polite"`} {
 				if !strings.Contains(body, needle) {
 					t.Fatalf("missing %s", needle)
 				}

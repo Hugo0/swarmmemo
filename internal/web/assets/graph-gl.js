@@ -465,7 +465,7 @@ export class Renderer {
       ptrs.set(e.pointerId, local(e));
       this.emit('interact');
       this.stopFlight(); this.spring = null;
-      if (ptrs.size === 1) { const p = local(e); down = { p, cam: { ...this.cam }, t: performance.now(), hist: [[performance.now(), p]] }; moved = false; this.drag = true; }
+      if (ptrs.size === 1) { const p = local(e); down = { p, cam: { ...this.cam }, t: performance.now(), hist: [[performance.now(), p]], slop: e.pointerType === 'mouse' ? 4 : 10 }; moved = false; this.drag = true; }
       if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: this.cam.z, mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], cam: { ...this.cam } }; moved = true; }
     });
     c.addEventListener('pointermove', (e) => {
@@ -480,7 +480,7 @@ export class Renderer {
       }
       if (down && ptrs.size === 1) {
         const dx = p[0] - down.p[0], dy = p[1] - down.p[1];
-        if (!moved && Math.hypot(dx, dy) > 4) moved = true;
+        if (!moved && Math.hypot(dx, dy) > down.slop) moved = true;
         if (moved) {
           this.cam = { x: down.cam.x - dx / down.cam.z, y: down.cam.y - dy / down.cam.z, z: down.cam.z };
           down.hist.push([performance.now(), p]); if (down.hist.length > 6) down.hist.shift();
@@ -489,12 +489,19 @@ export class Renderer {
         return;
       }
       const t = performance.now();
-      if (t - lastHover > 30) { lastHover = t; this.emit('hover', this.pick(p[0], p[1]), e); }
+      if (e.pointerType !== 'touch' && t - lastHover > 30) { lastHover = t; this.emit('hover', this.pick(p[0], p[1]), e); }
     });
     const up = (e) => {
       const p = local(e);
       ptrs.delete(e.pointerId);
-      if (pinch) { if (ptrs.size < 2) pinch = null; if (ptrs.size === 0) { down = null; this.drag = false; } this.emit('camera'); return; }
+      if (pinch) {
+        // The finger left on the glass pans on from where the pinch ended,
+        // never from where it began, and lifting it is never a tap.
+        if (ptrs.size < 2) pinch = null;
+        if (ptrs.size === 1) { const q = [...ptrs.values()][0]; down = { p: q, cam: { ...this.cam }, t: performance.now(), hist: [[performance.now(), q]], slop: 10 }; moved = true; }
+        if (ptrs.size === 0) { down = null; this.drag = false; }
+        this.emit('camera'); return;
+      }
       if (!down) return;
       this.drag = false;
       if (!moved) { const i = this.pick(p[0], p[1]); this.emit(i === null ? 'background' : 'click', i, e); }
@@ -516,21 +523,28 @@ export class Renderer {
     c.addEventListener('dblclick', (e) => { const p = local(e); this.zoomAt(p[0], p[1], 2.4); });
   }
 
-  // The topmost drawn point under a screen position: the smallest whose disc
-  // holds it (halos and clouds only when nothing smaller does).
-  pick(sx, sy) {
+  // The point a tap or click means. Every point is a target at least
+  // TARGET_PX across, whatever the zoom. A point whose own disc holds the
+  // position wins, the smallest first (the topmost); otherwise the nearest
+  // within its target; halos and clouds only when no point is near.
+  pick(sx, sy, targetPx = 24) {
     const { n, x, y, r, style } = this.pts;
     if (!n) return null;
-    const [wx, wy] = this.toWorld(sx, sy), z = this.cam.z, slop = 4 / z;
-    let best = null, bestR = Infinity, soft = null, softR = Infinity;
+    const [wx, wy] = this.toWorld(sx, sy), z = this.cam.z, reach = targetPx / 2 / z;
+    let inside = null, insideR = Infinity, near = null, nearD = Infinity, soft = null, softR = Infinity;
     for (let i = 0; i < n; i++) {
-      const s = style[i] & 7, rr = Math.max(r[i], (s === STYLE.msg ? 0.6 : 1.4) / z);
+      const s = style[i] & 7, halo = s === STYLE.halo || s === STYLE.cloud;
+      const rr = r[i], eff = halo ? rr : Math.max(rr, reach);
       const dx = x[i] - wx, dy = y[i] - wy;
-      if (Math.abs(dx) > rr + slop || Math.abs(dy) > rr + slop) continue;
-      if (dx * dx + dy * dy > (rr + slop) * (rr + slop)) continue;
-      if (s === STYLE.halo || s === STYLE.cloud) { if (rr < softR) { softR = rr; soft = i; } } else if (rr < bestR) { bestR = rr; best = i; }
+      if (Math.abs(dx) > eff || Math.abs(dy) > eff) continue;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > eff) continue;
+      if (halo) { if (rr < softR) { softR = rr; soft = i; } continue; }
+      // Message dots stand for their agent; they never beat a real disc.
+      const weight = s === STYLE.msg ? 1.5 : 1;
+      if (d <= rr && rr * weight < insideR) { insideR = rr * weight; inside = i; } else if ((d - rr) * weight < nearD) { nearD = (d - rr) * weight; near = i; }
     }
-    return best !== null ? best : soft;
+    return inside !== null ? inside : near !== null ? near : soft;
   }
   // Indices of drawn points (not halos) whose centres lie in a screen polygon.
   inPolygon(poly) {

@@ -359,6 +359,10 @@ func serve() error {
 	if e := web.SetGuideAuthors(os.Getenv("GUIDES_AUTHORS")); e != nil {
 		return e
 	}
+	// The operator's footer backlink, if any: deployment config, never in source.
+	if e := web.SetFooterCredit(os.Getenv("FOOTER_CREDIT_URL")); e != nil {
+		return e
+	}
 	// Post and room images are off unless IMAGES=true (internal/cards).
 	imageConfig, imagesOn, e := cards.ConfigFromEnv(os.Getenv, dir)
 	if e != nil {

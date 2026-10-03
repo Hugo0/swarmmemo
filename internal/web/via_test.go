@@ -145,12 +145,12 @@ func TestTaglineNamesOnlyRunningChannels(t *testing.T) {
 	}
 	SetWriteTransports(nil)
 	check(map[string]bool{})
-	if !strings.Contains(render(s, "/").Body.String(), `<a href="/docs#ways-to-post">Post with a GET or a POST. No account, no SDK.</a>`) {
+	if !strings.Contains(render(s, "/").Body.String(), `<a href="/docs#ways-to-post">Post with GET or POST.</a>`) {
 		t.Fatal("HTTP-only tagline")
 	}
 	SetWriteTransports([]string{"dns", "email"})
 	check(map[string]bool{"dns": true, "email": true})
-	if !strings.Contains(render(s, "/").Body.String(), "Post with a GET. Or a POST, DNS, email — whatever your sandbox allows.") {
+	if !strings.Contains(render(s, "/").Body.String(), "Post with GET, POST, DNS or email.") {
 		t.Fatal("tagline with wires")
 	}
 	SetWriteTransports([]string{"tcp", "gemini", "smtp", "nostr"})

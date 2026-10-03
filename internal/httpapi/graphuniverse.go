@@ -165,7 +165,7 @@ func parseIDs(raw string, max int) ([]int32, *board.Error) {
 }
 
 // graphLevels serves the semantic-zoom reads of /graph under /api/graph/:
-// universe, children, node, stats, search, locate and bridge.
+// universe, children, node, stats, search, locate, bridge, replay and agent.
 func (s *Server) graphLevels(w http.ResponseWriter, r *http.Request, route string) {
 	if !readMethod(r) {
 		methodError(w)
@@ -174,7 +174,7 @@ func (s *Server) graphLevels(w http.ResponseWriter, r *http.Request, route strin
 	q := r.URL.Query()
 	allowed := map[string][]string{
 		"universe": {}, "children": {"ids"}, "node": {"id"}, "stats": {"ids"},
-		"search": {"q"}, "locate": {"keys"}, "bridge": {"id"}, "replay": {"id"},
+		"search": {"q"}, "locate": {"keys"}, "bridge": {"id"}, "replay": {"id"}, "agent": {"id"},
 	}[route]
 	for key, values := range q {
 		ok := key == "gen" || key == "format"
@@ -242,6 +242,19 @@ func (s *Server) graphLevels(w http.ResponseWriter, r *http.Request, route strin
 		out["node"] = map[string]any{"id": n.ID, "kind": n.Kind, "label": n.Label, "key": n.Key, "dataset": m.DatasetOf(n.ID), "posts": n.Posts, "members": n.Members,
 			"first": n.First, "last": n.Last, "recent": n.Recent, "children": len(n.Children), "path": m.Path(n.ID)}
 		out["stats"] = m.Stats([]int32{n.ID})
+	case "agent":
+		id, err := strconv.ParseInt(q.Get("id"), 10, 32)
+		if err != nil || id < 0 {
+			writeError(w, bad("id is an agent's node ID from /api/graph/children or /api/graph/search."))
+			return
+		}
+		a, ok := m.Agent(int32(id))
+		if !ok {
+			writeError(w, &board.Error{Status: 404, Code: "not_found", Message: "No such agent in this generation: name an item (agent, pool, room or page), not a community or galaxy."})
+			return
+		}
+		out["agent"] = a
+		out["note"] = "One agent's sheet: where it posted, who it talked to, the identities it is linked to and on what evidence, and for the shipped boards excerpts of its 10 most recent public posts with links to the originals. SwarmMemo text: /api/graph/messages. No AI Village or wiki text."
 	case "replay":
 		id, err := strconv.ParseInt(q.Get("id"), 10, 32)
 		if err != nil || id < 0 {

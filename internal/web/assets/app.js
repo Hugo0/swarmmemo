@@ -628,18 +628,8 @@
       }
       actions.append(report); bottom.append(actions);
     }
-    article.append(bottom); collapseLongText(article); enhanceCopy(article); return article;
+    article.append(bottom); enhanceCopy(article); return article;
   }
-  function collapseLongText(article) {
-    if (['home','room','event'].includes(document.body.dataset.view)) return;
-    const text = article.querySelector('.memo-text');
-    if (!text || text.textContent.length <= 1200 || article.querySelector('.expand-memo')) return;
-    text.classList.add('collapsed-text');
-    const button = node('button', 'quiet-button expand-memo', 'Read full message'); button.type = 'button'; button.setAttribute('aria-expanded', 'false');
-    button.addEventListener('click', () => keepAnchored(article, () => {const collapsed = text.classList.toggle('collapsed-text');button.textContent = collapsed ? 'Read full message' : 'Collapse message'; button.setAttribute('aria-expanded', String(!collapsed));}));
-    text.after(button);
-  }
-  for (const article of document.querySelectorAll('.memo')) collapseLongText(article);
   // Room style opt-out. ?unstyled=1 works without JavaScript; this remembers the
   // choice per room in this browser only, and never reaches the server.
   const roomStyle = $('room-style'), roomStyleToggle = $('room-style-toggle');
@@ -651,13 +641,16 @@
     apply(off);
     roomStyleToggle.addEventListener('click', event => {event.preventDefault(); off = !off; try {if (off) localStorage.setItem(slot, '1'); else localStorage.removeItem(slot);} catch (_) {/* Not remembered. */} apply(off);});
   }
-  // Listing expansion is a layout enhancement, never a second copy of the body.
+  // One way to read a long message in a listing: the body is clamped and Show more
+  // expands it in place (Show less folds it back). Never a link to another page and
+  // never a second copy of the body. A conversation page shows every message whole.
   const previewFeed = ['home','room'].includes(document.body.dataset.view) ? $('feed') : null;
+  const previewHosts = document.body.dataset.view === 'event' ? [] : Array.from(document.querySelectorAll('.feed:not(.thread-feed)'));
   const previewStates = new Map(), previewFocus = new WeakSet();
   let previewFrame = 0, previewID = 0;
   const previewResize = typeof ResizeObserver === 'function' ? new ResizeObserver(schedulePreviews) : null;
   function schedulePreviews() {
-    if (!previewFeed || previewFrame) return;
+    if (!previewHosts.length || previewFrame) return;
     previewFrame = requestAnimationFrame(() => {previewFrame=0; for (const state of previewStates.values()) measurePreview(state);});
   }
   function measurePreview(state) {
@@ -670,7 +663,7 @@
     state.overflow=overflow;
     if (overflow || expanded) {
       if (!state.button) {
-        const button=node('button','quiet-button expand-memo memo-preview-toggle');button.type='button';
+        const button=node('button','quiet-button memo-preview-toggle');button.type='button';
         button.setAttribute('aria-controls',text.id);
         button.addEventListener('click',()=>setPreviewExpanded(state,!article.classList.contains('memo-preview-expanded')));
         article.querySelector('.memo-actions').prepend(button);state.button=button;
@@ -689,22 +682,24 @@
     keepAnchored(state.article,()=>{state.article.classList.toggle('memo-preview-expanded',expanded);measurePreview(state);});
   }
   function syncPreviews() {
-    for (const [article,state] of previewStates) if (!previewFeed.contains(article)) {
+    for (const [article,state] of previewStates) if (!article.isConnected) {
       previewResize?.unobserve(state.text);previewStates.delete(article);
     }
-    for (const article of previewFeed.children) {
-      const text=article.querySelector('.memo-text');
-      if (!text || previewStates.has(article) || article.querySelector('.read-more')) continue;
+    for (const host of previewHosts) for (const article of host.children) {
+      const text=article.querySelector(':scope > .memo-text, :scope > .room-canvas .memo-text');
+      if (!text || previewStates.has(article)) continue;
       do {text.id='memo-preview-'+(++previewID);} while(document.querySelectorAll('#'+text.id).length>1);
       const state={article,text,button:null,overflow:false};previewStates.set(article,state);
       previewResize?.observe(text);
     }
     schedulePreviews();
   }
-  if(previewFeed){
-    new MutationObserver(syncPreviews).observe(previewFeed,{childList:true});syncPreviews();
+  if(previewHosts.length){
+    const watch=new MutationObserver(syncPreviews);for(const host of previewHosts)watch.observe(host,{childList:true});syncPreviews();
     window.addEventListener('resize',schedulePreviews,{passive:true});
     document.fonts?.ready.then(schedulePreviews);document.fonts?.addEventListener('loadingdone',schedulePreviews);
+  }
+  if(previewFeed){
     // Clicking a listed message opens it. This is an enhancement layered over the
     // timestamp permalink, which is a real link and the only way in without
     // scripts: keyboard, middle-click, copy-link and screen readers all use that.
@@ -719,7 +714,7 @@
       if(event.defaultPrevented||event.button!==0||event.detail!==1||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
       const article=event.target.closest?.('.memo');
       if(!article||!article.dataset.messageId||!previewFeed.contains(article))return;
-      if(event.target.closest('a,button,summary,input,textarea,select,label,[role="button"],[contenteditable]'))return;
+      if(event.target.closest('a,button,summary,input,textarea,select,label,[role="button"],[contenteditable],#compose,.report-form'))return;
       if(window.getSelection()?.toString())return;
       const id=article.dataset.messageId;
       // Held for one double-click interval so selecting a word by double-clicking,
@@ -814,7 +809,7 @@
     // reader. Hold whatever they are on; if that is this very message, hold its
     // replacement instead.
     const anchor=readerAnchor();const anchored=anchor===existing||(anchor&&existing.contains(anchor));const before=anchorTop(anchor);
-    const expanded=existing.querySelector('.expand-memo')?.getAttribute('aria-expanded')==='true';const replacement=eventElement(event,isPrivate);if(expanded){replacement.querySelector('.memo-text')?.classList.remove('collapsed-text');const button=replacement.querySelector('.expand-memo');if(button){button.textContent='Collapse message';button.setAttribute('aria-expanded','true');}}if(existing.classList.contains('memo-preview-expanded')&&replacement.querySelector('.memo-text'))replacement.classList.add('memo-preview-expanded');if(previewFocus.has(existing)||existing.querySelector('.memo-preview-toggle')===document.activeElement)previewFocus.add(replacement);if(existing.querySelector('.memo-files')?.open)replacement.querySelector('.memo-files')?.setAttribute('open','');
+    const replacement=eventElement(event,isPrivate);if(existing.classList.contains('memo-preview-expanded')&&replacement.querySelector('.memo-text'))replacement.classList.add('memo-preview-expanded');if(previewFocus.has(existing)||existing.querySelector('.memo-preview-toggle')===document.activeElement)previewFocus.add(replacement);if(existing.querySelector('.memo-files')?.open)replacement.querySelector('.memo-files')?.setAttribute('open','');
     if (existing.classList.contains('memo-inline-reply')) replacement.classList.add('memo-inline-reply');
     // The open composer and any reply already shown beneath this message belong to the
     // reader, not to the server's version of the parent. Carry them onto the new node.
@@ -1225,14 +1220,39 @@
   // Inline reply is progressive enhancement over one composer, not a second one.
   // The server-rendered composer keeps its fixed form action, its readonly room/page
   // fields and its single set of ids; JavaScript only relocates that same element
-  // under the message being answered, and puts it back on Cancel. Without scripts the
-  // Reply control is a link-shaped button that navigates to ?reply=ID#compose exactly
-  // as before, and the composer never moves.
+  // under the message being answered, so the reader still sees what they answer,
+  // and puts it back on Cancel or Escape with the draft kept. Every listing and
+  // conversation does the same. While it is away, its slot offers a button that
+  // brings it back. Without scripts the Reply control is a link to ?reply=ID#compose
+  // and the composer never moves.
   const composeElement = $('compose');
-  const composeHome = composeElement ? node('span', 'compose-home') : null;
-  const composeSummary = composeElement?.querySelector(':scope > summary');
-  const composeSummaryLabel = composeSummary?.textContent;
-  if (composeElement && composeHome) {composeHome.hidden = true; composeElement.before(composeHome);}
+  const composeSummaryLabel = composeElement?.querySelector(':scope > summary')?.textContent.trim();
+  const composeHome = composeElement ? node('button', 'button secondary compose-home', composeSummaryLabel) : null;
+  if (composeElement && composeHome) {composeHome.type = 'button'; composeHome.hidden = true; composeElement.before(composeHome); composeHome.addEventListener('click', () => startMessage());}
+  // A thread page's composer answers the message whose permalink was opened; going
+  // back to the slot restores that, not an unaddressed top-level post.
+  const homeReplyTo = document.body.dataset.view === 'event' ? composer?.elements.reply_to.value || '' : '';
+  function inlineHost() { return composeElement?.classList.contains('compose-inline') ? composeElement.closest('.memo') : null; }
+  function setReply(id) {
+    composer.elements.reply_to.value = id;
+    $('reply-label').textContent = id ? 'Replying to ' + id.slice(0, 12) : '';
+    $('reply-preview').hidden = !id;
+  }
+  function composeInline(article) {
+    keepAnchored(article, () => {
+      article.append(composeElement);
+      composeElement.classList.add('compose-inline'); composeElement.open = true;
+      composeHome.hidden = false;
+    });
+    // Restart the expand animation even when moving straight from one message to another.
+    composeElement.classList.remove('compose-expanding'); void composeElement.offsetWidth; composeElement.classList.add('compose-expanding');
+  }
+  function composeAtHome() {
+    const host = inlineHost();
+    if (!host) return null;
+    keepAnchored(host, () => {composeHome.after(composeElement); composeElement.classList.remove('compose-inline', 'compose-expanding'); composeHome.hidden = true;});
+    return host;
+  }
   // The room's policy decides whether the composer is offered: a top-level post
   // needs the room's write policy, a reply its reply policy. Only the owner
   // passes an owner-only write policy; membership is the server's to check.
@@ -1394,10 +1414,8 @@
       statusElement.append(receiptActions);
       // The service says when replies cannot find their way back (result.next).
       if(result.next?.sign_to_get_replies)statusElement.append(node('span', 'receipt-note', 'Posted anonymously, so replies cannot reach an inbox. Choose “Remember me on this device” under Options to get them next time.'));
-      const repliedTo = command.reply_to;
-      // The composer stays where it was written so the receipt and the new reply are
-      // both in view, but it is no longer addressed at the parent: say so.
-      form.elements.text.value = ''; form.elements.reply_to.value = ''; if(form.elements.files)form.elements.files.value=''; attachmentStrip(); completedUploads.delete(form); $('reply-preview').hidden = true; pendingPost = null; updateCount(); updateComposerContext(); applyGate();
+      const host = inlineHost();
+      form.elements.text.value = ''; setReply(host ? homeReplyTo : ''); if(form.elements.files)form.elements.files.value=''; attachmentStrip(); completedUploads.delete(form); pendingPost = null; updateCount(); updateComposerContext(); applyGate();
       toast('Message posted. A new thread for someone to find.');
       void showPublicHandoff(result.receipt, command, handoffGeneration);
       if (document.body.dataset.view !== 'inbox') try {
@@ -1411,7 +1429,10 @@
           // A reply written under its parent appears under that parent, where the
           // reader is looking, instead of only at the top of the feed.
           const thread = threadHost;
-          if (thread) {
+          if (host && host.isConnected && command.reply_to === host.dataset.messageId && !locateMemo(event.id, false)) {
+            const inline = eventElement(event); inline.classList.add('memo-inline-reply');
+            composeElement.before(inline);
+          } else if (thread) {
             // A conversation reads oldest first, so a reply belongs at the end of it
             // rather than at the top of a feed sorted the other way.
             if (!locateMemo(event.id, false)) thread.append(eventElement(event));
@@ -1422,16 +1443,14 @@
           // because its own arrival at the top of the feed is the point.
           const landed = locateMemo(event.id, false);
           if (landed) {
-            landed.scrollIntoView({block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth'});
+            landed.scrollIntoView({block: host ? 'nearest' : 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth'});
             landed.classList.add('compose-posted');
             setTimeout(() => landed.classList.remove('compose-posted'), 1400);
-            // The composer returns to its own slot and is already cleared. It is left
-            // open: folding it meant every following action — a second message, a
-            // correction, changing the recipient — began with reopening a panel, and
-            // the receipt beside it already says the message went.
           }
         }
       } catch (_) { /* Receipt remains the authority if feed refresh fails. */ }
+      // The inline composer goes back to its slot, cleared and open.
+      if (host) composeAtHome();
       } finally {publicPosting=false; restoreSubmit?.();}
     });
     $('memo-files')?.addEventListener('change', attachmentStrip);
@@ -1451,7 +1470,13 @@
       });
     }
     $('posting-mode').hidden=false;$('posting-mode').disabled=false;
-    $('clear-reply')?.addEventListener('click', () => {composer.elements.reply_to.value = ''; $('reply-preview').hidden = true; updateComposerContext(); applyGate(); if (!composeElement.hidden) composer.elements.text.focus({preventScroll: true});});
+    $('clear-reply')?.addEventListener('click', () => {
+      // Cancel under a message closes the inline reply (draft kept) and returns focus
+      // to that message; Cancel in the slot unaddresses the composer.
+      const host = composeAtHome();
+      setReply(host ? homeReplyTo : ''); updateComposerContext(); applyGate();
+      if (host) host.focus({preventScroll: true}); else if (!composeElement.hidden) composer.elements.text.focus({preventScroll: true});
+    });
   }
   document.addEventListener('click', event => {
     const reply = event.target.closest('.reply-button');
@@ -1464,14 +1489,15 @@
       composer.elements.room.value = reply.dataset.replyRoom; composer.elements.page.value = reply.dataset.replyPage; composer.elements.reply_to.value = reply.dataset.replyId;
       if (!recipientEdited) {composer.elements.to.value = recipient; toast(recipient ? 'Public reply addressed to sender ' + recipient.slice(0,12) + '. Review To before posting.' : 'This sender has no signing identity. Your reply is public and unaddressed.');}
       else toast('Your chosen recipient is unchanged. Review To before posting this public reply.');
-      $('reply-label').textContent = 'Replying to ' + reply.dataset.replyId.slice(0, 12); $('reply-preview').hidden = false;
+      setReply(reply.dataset.replyId);
       applyGate();
-      // The composer never moves. It used to relocate under the answered message,
-      // which meant lifting a thousand pixels out of the column and shifting the page
-      // under the reader. One box, in one place, carrying the reply context.
-      $('compose').open = true;
+      // Open under the message being answered. keepAnchored holds that message still
+      // while the composer leaves its slot higher up the page.
+      const article = reply.closest('.memo');
+      if (article && article.dataset.messageId === reply.dataset.replyId) composeInline(article);
+      composeElement.open = true;
       composer.elements.text.focus({preventScroll: true});
-      $('compose').scrollIntoView({block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth'});
+      composeElement.scrollIntoView({block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth'});
       updateComposerContext();
     }
     const moderate = event.target.closest('.mod-button');
@@ -1620,6 +1646,9 @@
     // Older posts load only when asked (Load older posts), so the footer stays reachable.
   }
   olderFeed();
+  // A conversation opened at one of its replies goes to that reply: from a feed card,
+  // an In thread link or a shared permalink, the reader lands on what they clicked.
+  {const focused=document.querySelector('#thread .memo-focus');if(focused&&!location.hash){focused.scrollIntoView({block:'center'});focused.focus({preventScroll:true});}}
   function openComposerAnchor(){if(location.hash==='#compose'&&$('compose'))$('compose').open=true;}
   openComposerAnchor(); window.addEventListener('hashchange',openComposerAnchor);
   if (composer && params.get('reply')) {composer.elements.reply_to.value = params.get('reply'); $('reply-label').textContent = 'Replying to ' + params.get('reply').slice(0, 12); $('reply-preview').hidden = false;}
@@ -1757,7 +1786,7 @@
   });
   function startMessage() {
     if (!composer || !composeElement) {location.assign('/#compose'); return;}
-    if (composer?.elements.reply_to.value) $('clear-reply')?.click();
+    if (inlineHost()) {composeAtHome(); setReply(homeReplyTo); updateComposerContext(); applyGate();}
     if (composeElement.hidden) {announce(gateNote?.textContent || 'You cannot start a post in this room.'); return;}
     composeElement.open = true;
     composer.elements.text.focus({preventScroll: true});
@@ -1851,12 +1880,16 @@
     if (event.key === 'Escape') {
       // Escape never discards text: in a field it only leaves the field; outside one
       // it closes an inline reply, whose draft stays in the composer.
-      if (typingTarget(target)) {
-        if (target.closest('#compose')) {target.blur(); announce('Left the text field. Your text is kept. Press Escape again to close the reply.');}
-        else if (target.matches('input,textarea')) target.blur();
+      if (inlineHost() && (!typingTarget(target) || target.closest('#compose'))) {
+        $('clear-reply')?.click();
+        announce('Reply closed. Your text is kept.');
         return;
       }
-      if (composer?.elements.reply_to.value) {
+      if (typingTarget(target)) {
+        if (target.matches('input,textarea')) target.blur();
+        return;
+      }
+      if (composer?.elements.reply_to.value && composer.elements.reply_to.value !== homeReplyTo) {
         const answered = locateMemo(composer.elements.reply_to.value, false);
         $('clear-reply')?.click();
         answered?.focus({preventScroll: true});
@@ -1891,11 +1924,11 @@
       }
       case 'r': {
         const reply = card?.querySelector('.reply-button');
-        if (reply) {reply.click(); announce('Composer open, addressed to this message.');} else handled = false;
+        if (reply) {reply.click(); announce('Reply composer open under this message.');} else handled = false;
         break;
       }
       case '.': case 'e': {
-        const toggle = card?.querySelector('.memo-preview-toggle, .expand-memo');
+        const toggle = card?.querySelector('.memo-preview-toggle');
         if (toggle) {toggle.click(); announce(toggle.getAttribute('aria-expanded') === 'true' ? 'Showing the full message' : 'Showing less');}
         else if (card) announce('This message is already shown in full.'); else handled = false;
         break;

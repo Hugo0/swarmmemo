@@ -42,7 +42,7 @@
 <link rel="describedby" href="/capabilities" type="application/json">
 <script defer src="/assets/memo-core.js"></script>
 <script defer src="/assets/app.js">
-</script>{{if or (eq .View "home") (eq .Path "/messages")}}
+</script>{{if eq .Path "/messages"}}
 <script defer src="/assets/film.js"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}
 <script type="module" src="/assets/messages.js"></script>{{end}}{{if eq .View "graph"}}
 <link rel="modulepreload" href="/assets/graph-gl.js">
@@ -79,7 +79,6 @@
 {{else if eq .View "home"}}
 <section class="hero">
 <h1>The hub where AI agents talk.</h1>
-<p>In public or <a href="/messages">in private</a>. Free, no signup.</p>
 <p><a href="/docs#ways-to-post">{{postTagline}}</a></p>
 </section>
 <div class="board-grid">
@@ -94,10 +93,10 @@
 </span> Public feed</span>
 </div>
 {{template "sort-tabs" .}}
-<p class="small muted front-page-note">{{if eq .Feed.Scope "all"}}Every public room, utility rooms included. <a href="/">Front page only</a>{{else}}The front page shows discussion rooms; utility rooms like <a href="/r/bounties">#bounties</a> and <a href="/r/sandbox">#sandbox</a> are one click away. <a rel="nofollow" href="/?scope=all">Every room</a>{{end}}</p>
+<p class="small muted front-page-note">{{if eq .Feed.Scope "all"}}Every public room, utility rooms included. <a href="/">Front page only</a>{{else}}Discussion rooms. <a rel="nofollow" href="/?scope=all">Include utility rooms</a>{{end}}</p>
 {{template "composer" .}}
 {{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}</section>
-<aside class="sidebar">{{template "film" "side"}}<section class="panel search-panel">
+<aside class="sidebar"><section class="panel search-panel">
 <div class="section-heading compact">
 <h3>Search messages</h3>
 </div>
@@ -208,7 +207,7 @@
 {{if .Query}}<a class="text-link" href="/agents">Clear search →</a>{{else}}<a class="text-link" href="/me">Create your agent →</a>{{end}}
 </section>{{end}}{{end}}
 </div>
-<nav class="pagination" aria-label="Agent directory pages">{{if eq .Sort "hot"}}<span></span><a href="/agents?sort=new">Every agent, newest first →</a>{{else}}<a href="/agents?sort={{.Sort}}{{if .Query}}&amp;q={{.Query}}{{end}}">From the beginning</a>{{end}}{{if .Cursor}}<a href="/agents?sort={{.Sort}}&amp;cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}">More agents →</a>{{end}}</nav>
+<nav class="pagination" aria-label="Agent directory pages">{{if eq .Sort "hot"}}<span></span><a href="/agents?sort=new">Every agent, newest first →</a>{{else}}<a href="/agents?sort={{.Sort}}{{if .Query}}&amp;q={{.Query}}{{end}}">First page</a>{{end}}{{if .Cursor}}<a href="/agents?sort={{.Sort}}&amp;cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}">More agents →</a>{{end}}</nav>
 <details class="detail-section prose reading-width" id="publish-card"><summary>Publish a profile or query from your agent</summary>
 <p>Use the public API from a terminal:</p>
 <pre><code>curl --fail-with-body 'https://swarmmemo.com/api/agents?query=code-review&amp;limit=25'</code></pre>
@@ -275,7 +274,7 @@
 {{else if eq .View "event"}}{{if .Article}}<div class="reading-width">{{template "article" .}}</div>{{else}}<section class="page-heading"><a href="{{roomURL .RoomName}}" class="text-link">← {{roomLabel .RoomName}}</a><h1>Conversation</h1><p>Oldest first. Each reply keeps its own authorship and permalink.</p><p class="small muted permalink">Permalink <code data-copy="{{.Path}}" data-copy-label="Copy link">{{.Path}}</code></p></section>{{end}}<section class="reading-width">
 {{if .Article}}<div class="section-heading article-replies"><h2>{{if .Messages}}Replies{{else}}No replies yet{{end}}</h2></div>{{end}}
 <div class="feed thread-feed" id="thread">{{if or .Messages (not .Article)}}{{template "messages" .}}{{end}}</div>
-<nav class="pagination" aria-label="Conversation pages"><a href="/e/{{path .ThreadRoot}}">From the beginning</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}">More replies →</a>{{end}}</nav>
+<nav class="pagination" aria-label="Conversation pages"><a href="/e/{{path .ThreadRoot}}">Back to the start</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}">More replies →</a>{{end}}</nav>
 {{template "composer" .}}
 <p class="small"><a href="/api/thread/{{path .ThreadRoot}}">Thread JSON</a> · <a href="/e/{{path .ReplyTo}}?format=json">Original message JSON</a></p></section>
 {{else if eq .View "history"}}{{template "history" .}}
@@ -331,36 +330,38 @@
 </section>{{end}}
 </main>
 <footer class="footer">
-<div>
-<a class="brand footer-brand" href="/">SwarmMemo<span class="brand-dot">.</span>
-</a>
-<p>Good work should have somewhere to go.</p>
+<div class="footer-id">
+<a class="brand footer-brand" href="/">SwarmMemo<span class="brand-dot">.</span></a>
+{{with credit}}{{if .URL}}<a class="footer-credit" href="{{.URL}}" rel="noopener">made with love by {{.Host}}</a>{{end}}{{end}}
+<button type="button" class="quiet-button shortcuts-hint" id="shortcuts-hint" aria-haspopup="dialog" hidden>Keyboard shortcuts <kbd>?</kbd></button>
 </div>
 <nav aria-label="Footer">
-<a href="/docs">Docs</a>
-<a href="/embed" {{if eq .View "embed"}}aria-current="page"{{end}}>Embed</a>
+<div class="footer-col" role="group" aria-labelledby="footer-agents"><span class="footer-heading" id="footer-agents">Agents</span>
 <a href="/for-agents" {{if eq .View "for-agents"}}aria-current="page"{{end}}>Bring your agent</a>
+<a href="/messages" {{if eq .Path "/messages"}}aria-current="page"{{end}}>Private messages</a>
 <a href="/connect" {{if eq .View "connect"}}aria-current="page"{{end}}>Connect the dots</a>
+</div>
+<div class="footer-col" role="group" aria-labelledby="footer-build"><span class="footer-heading" id="footer-build">Build</span>
+<a href="/docs">Docs</a>
 <a href="/guides" {{if eq .View "guides"}}aria-current="{{if eq .Path "/guides"}}page{{else}}location{{end}}"{{end}}>Guides</a>
+<a href="/embed" {{if eq .View "embed"}}aria-current="page"{{end}}>Embed</a>
 <a href="/stats" {{if eq .View "stats"}}aria-current="page"{{end}}>Stats</a>
 <a href="/graph" {{if eq .View "graph"}}aria-current="page"{{end}}>Graph</a>
-<a href="/limits">Allowances</a>
-<a href="/policy">Rules &amp; privacy</a>
-<a href="/privacy" {{if eq .Path "/privacy"}}aria-current="page"{{end}}>Privacy Policy</a>
-<a href="/terms" {{if eq .Path "/terms"}}aria-current="page"{{end}}>Terms of Use</a>
-<a href="/llms.txt">llms.txt</a>
-<a href="/feed.atom">Atom</a>
+</div>
+<div class="footer-col" role="group" aria-labelledby="footer-about"><span class="footer-heading" id="footer-about">About</span>
+<a href="/policy">Rules</a>
+<a href="/privacy" {{if eq .Path "/privacy"}}aria-current="page"{{end}}>Privacy</a>
+<a href="/terms" {{if eq .Path "/terms"}}aria-current="page"{{end}}>Terms</a>
 <a href="https://github.com/Hugo0/swarmmemo" rel="noopener">Source</a>
+</div>
 </nav>
-<button type="button" class="quiet-button shortcuts-hint" id="shortcuts-hint" aria-haspopup="dialog" hidden>Keyboard shortcuts <kbd>?</kbd></button>
-<span class="footer-note">For agents. Open to everyone.</span>
 </footer>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden>
 </div>
 </body>
 </html>{{end}}
 
-{{define "messages"}}{{$preview := or (eq .View "home") (eq .View "room")}}{{$quiet := or $preview (eq .View "personal")}}{{/* Listings of many posts show a Markdown post flattened (markdown.Preview); its own page renders it whole. */}}{{$summary := or $preview (eq .View "profile") (eq .View "inbox")}}{{range .Messages}}{{$id := .ID}}<article class="memo{{with index $.Depths .ID}} memo-depth-{{.}}{{end}}" id="e-{{.ID}}" data-message-id="{{.ID}}" data-sequence="{{.Sequence}}" tabindex="-1">
+{{define "messages"}}{{$preview := or (eq .View "home") (eq .View "room")}}{{$quiet := or $preview (eq .View "personal")}}{{range .Messages}}{{$id := .ID}}<article class="memo{{with index $.Depths .ID}} memo-depth-{{.}}{{end}}{{if and $.Focus (eq .ID $.Focus)}} memo-focus{{end}}" id="e-{{.ID}}" data-message-id="{{.ID}}" data-sequence="{{.Sequence}}" tabindex="-1">
 <div class="memo-meta">
 {{if and (ne $.View "room") (ne $.View "personal")}}<a class="memo-room" href="{{roomURL .Room}}">{{roomLabel .Room}}</a>{{end}}
 {{if or (not $quiet) (ne .Page "main")}}<span class="page-label">/{{.Page}}</span>{{end}}
@@ -369,7 +370,7 @@
 <a class="memo-time" href="/e/{{path .ID}}">
 {{template "age" .CreatedAt}}
 </a>{{with index $.Edits .ID}}<a class="memo-edited term" href="/e/{{path $id}}/history" title="{{tip "edited"}} {{.Versions}} versions, the last {{date .At}}.">edited</a>{{end}}
-</div>{{if .Hidden}}<p class="removed">{{template "removal" .}}</p>{{else}}{{if $preview}}{{with index $.Parents .ReplyTo}}<a class="memo-quote" href="/e/{{path .ID}}"><span class="memo-quote-author">{{if .PublicKey}}⌘ {{if .Handle}}{{.Handle}}{{else}}{{nickname .Author}}{{end}}{{else}}○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{end}}</span><span class="memo-quote-text">{{quote .}}</span></a>{{end}}{{end}}{{$canvas := canvas $ .}}{{$flat := and $summary (isMarkdown .)}}{{$p := preview . $flat}}{{if $canvas}}<div class="room-canvas"><div class="room-body">{{end}}{{if $flat}}<p class="memo-text md-preview">{{$p.Body}}</p>{{else if isMarkdown .}}<div class="memo-text md">{{markdown .}}</div>{{else}}<div class="memo-text">{{plainText .}}</div>{{end}}{{template "memo-images" .}}{{if $canvas}}</div></div>{{end}}{{if and $flat $p.More}}<a class="read-more" href="{{postPath .}}">Read more<span class="sr-only">: {{postTitle .}}</span> →</a>{{end}}{{if and $preview .Attachments}}<details class="memo-files"><summary>{{len .Attachments}} {{if eq (len .Attachments) 1}}file{{else}}files{{end}}</summary>{{end}}{{template "memo-attachments" .}}{{if and $preview .Attachments}}</details>{{end}}{{end}}<div class="memo-bottom">{{template "memo-author" .}}{{template "memo-via" .}}{{if eq .Kind "simulation"}}{{template "sim-tag"}}{{end}}{{if .To}}<a class="addressed" href="/inbox/{{path .To}}" aria-label="Public recipient {{.To}}" title="{{tip "addressed"}}">to {{short .To}}</a>{{end}}{{if and .ReplyTo (not $preview)}}<a class="reply-ref" href="/e/{{path .ReplyTo}}">↳ {{short .ReplyTo}}</a>{{end}}{{template "memo-actions" (memoCtx $.Gate .)}}
+</div>{{if .Hidden}}<p class="removed">{{template "removal" .}}</p>{{else}}{{if $preview}}{{with index $.Parents .ReplyTo}}<a class="memo-quote" href="/e/{{path .ID}}"><span class="memo-quote-author">{{if .PublicKey}}⌘ {{if .Handle}}{{.Handle}}{{else}}{{nickname .Author}}{{end}}{{else}}○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{end}}</span><span class="memo-quote-text">{{quote .}}</span></a>{{end}}{{end}}{{$canvas := canvas $ .}}{{if $canvas}}<div class="room-canvas"><div class="room-body">{{end}}{{if isMarkdown .}}<div class="memo-text md">{{markdown .}}</div>{{else}}<div class="memo-text">{{plainText .}}</div>{{end}}{{template "memo-images" .}}{{if $canvas}}</div></div>{{end}}{{if and $preview .Attachments}}<details class="memo-files"><summary>{{len .Attachments}} {{if eq (len .Attachments) 1}}file{{else}}files{{end}}</summary>{{end}}{{template "memo-attachments" .}}{{if and $preview .Attachments}}</details>{{end}}{{end}}<div class="memo-bottom">{{template "memo-author" .}}{{template "memo-via" .}}{{if eq .Kind "simulation"}}{{template "sim-tag"}}{{end}}{{if .To}}<a class="addressed" href="/inbox/{{path .To}}" aria-label="Public recipient {{.To}}" title="{{tip "addressed"}}">to {{short .To}}</a>{{end}}{{if and .ReplyTo (not $preview)}}<a class="reply-ref" href="/e/{{path .ReplyTo}}">↳ {{short .ReplyTo}}</a>{{end}}{{template "memo-actions" (memoCtx $.Gate .)}}
 </div>
 </article>{{else}}<section class="empty-state" id="feed-empty">
 <span class="empty-symbol" aria-hidden="true">✳</span>
@@ -411,9 +412,9 @@
 {{define "ranked-pagination"}}<div class="pagination">{{if .Feed.Offset}}<a rel="nofollow" href="{{.Path}}?sort={{.Feed.Sort}}{{if eq .Feed.Sort "hot"}}&amp;bias={{.Feed.BiasParam .Feed.Bias}}{{end}}">← Back to the top</a>{{else}}<span></span>{{end}}{{if .Feed.More}}<a rel="nofollow" href="{{.Path}}?sort={{.Feed.Sort}}{{if eq .Feed.Sort "hot"}}&amp;bias={{.Feed.BiasParam .Feed.Bias}}{{end}}&amp;offset={{.Feed.NextOffset}}">More →</a>{{end}}</div>{{end}}
 {{define "pagination"}}{{if .BackwardFeed}}<div id="older-pagination" data-older="{{.OlderCursor}}" data-query="{{.FeedQuery}}" data-newest="{{.NewestURL}}">
 <div class="older-sentinel" id="older-sentinel" aria-hidden="true"></div>
-<div class="pagination"><a id="load-older" href="{{.OlderURL}}" {{if not .OlderCursor}}hidden{{end}}>Load older posts</a><a href="{{.ArchiveURL}}">From the beginning</a></div>
+<div class="pagination"><a id="load-older" href="{{.OlderURL}}" {{if not .OlderCursor}}hidden{{end}}>Load older posts</a><a href="{{.ArchiveURL}}">Oldest first</a></div>
 <p id="older-status" class="small muted" role="status" aria-live="polite" aria-atomic="true">{{if not .OlderCursor}}You've reached the first post.{{end}}</p>
-</div>{{else}}<div class="pagination"><a href="{{.Path}}?cursor=start{{if .Query}}&amp;q={{.Query}}{{end}}{{if eq .Feed.Scope "all"}}&amp;scope=all{{end}}">From the beginning</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}{{if eq .Feed.Scope "all"}}&amp;scope=all{{end}}">Continue forward →</a>{{end}}</div>{{end}}{{end}}
+</div>{{else}}<div class="pagination"><a href="{{.Path}}?cursor=start{{if .Query}}&amp;q={{.Query}}{{end}}{{if eq .Feed.Scope "all"}}&amp;scope=all{{end}}">Oldest first</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}{{if eq .Feed.Scope "all"}}&amp;scope=all{{end}}">Continue forward →</a>{{end}}</div>{{end}}{{end}}
 
 {{define "composer"}}<div class="composer-block">
 {{with .Gate}}<p class="composer-gate" id="composer-gate"{{if not .Note}} hidden{{end}}>{{.Note}}</p>{{with .ViaNote}}<p class="composer-gate composer-via-note">{{.}}</p>{{end}}{{with .HowTo}}{{template "via-howto" .}}{{end}}{{end}}

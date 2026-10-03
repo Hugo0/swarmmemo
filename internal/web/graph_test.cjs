@@ -7,7 +7,14 @@
 // node, a selection and a Shift-drag lasso open stats and the public messages
 // behind them as text, which export as JSONL and CSV and copy as a prompt; a
 // bridge opens its evidence; sound is on by default and starts on the first
-// gesture; replay plays and pauses; live posts pulse up close.
+// gesture; replay plays and pauses; live posts pulse up close. A first visit
+// opens the guided tour (Next, Back, a step that flies to an agent and opens
+// its sheet), remembered once skipped. Any agent opens a sheet: where it
+// posted, who it talked to and what it said (SwarmMemo text; for the other
+// boards excerpts linked to the originals; wiki pages without revision text;
+// AI Village goals without text). On a 390px touch screen a tap near an
+// agent opens its sheet, a tap on empty space closes it, and a pinch zooms
+// without selecting anything or jumping when one finger lifts first.
 const assert = require('node:assert/strict');
 const {identity, launch, noHorizontalScroll} = require('./testdata/messages_mock.cjs');
 const origin = process.env.SWARMMEMO_TEST_URL;
@@ -75,9 +82,54 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.equal(await page.evaluate(() => window.__swarmgraph.error || ''), '');
     const webgl = await page.evaluate(() => !!document.querySelector('#graph-canvas canvas'));
     assert.ok(webgl, 'the test browser renders WebGL');
-    // The intro starts close on SwarmMemo and pulls back; skipping it lands on the whole map.
+    // A first visit opens the tour; its first step starts close on SwarmMemo and pulls back.
     assert.ok(await page.evaluate(() => window.__swarmgraph.intro()), 'the first view plays the intro');
     await page.evaluate(() => window.__swarmgraph.skipIntro());
+    assert.ok(await page.locator('#graph-story').isVisible(), 'the tour opens a first visit');
+    assert.equal(await page.locator('#graph-story-title').textContent(), 'Where agents gather');
+    assert.match(await page.locator('#graph-story').textContent(), /not who built what/);
+    await page.locator('#graph-story-next').click();
+    assert.equal(await page.locator('#graph-story-title').textContent(), 'SwarmMemo, our board');
+    await page.locator('#graph-story-back').click();
+    assert.equal(await page.locator('#graph-story-title').textContent(), 'Where agents gather');
+    for (let i = 0; i < 3; i++) await page.locator('#graph-story-next').click();
+    assert.equal(await page.locator('#graph-story-title').textContent(), 'One agent that proves it');
+    // The step finds bridge-claude-cc; its sheet shows public excerpts linked to the original posts.
+    await page.locator('.graph-story-action').waitFor({timeout: 15000});
+    await page.locator('.graph-story-action').click();
+    assert.equal(await page.locator('#graph-story').isVisible(), false, 'opening a sheet ends the tour');
+    await page.waitForFunction(() => window.__swarmgraph.agent()?.label === 'bridge-claude-cc', null, {timeout: 15000});
+    let sheet = await page.evaluate(() => window.__swarmgraph.agent());
+    assert.ok(sheet.excerpts.length > 0 && sheet.excerpts.length <= 10 && sheet.places.length > 0, 'a board agent has places and at most 10 excerpts');
+    assert.ok(sheet.links.length > 0, 'its same-name identities on other boards are listed');
+    await page.locator('#graph-messages .graph-excerpt a[href^="https://"]').first().waitFor({timeout: 5000});
+    assert.equal(await page.locator('#graph-messages .graph-excerpt a').first().getAttribute('rel'), 'noopener noreferrer nofollow');
+    assert.match(await page.locator('#graph-sheet').textContent(), /Same name elsewhere[\s\S]*Where it posted/);
+    await page.locator('#graph-digest').click();
+    assert.match(await page.locator('#graph-summary-text').textContent(), /bridge-claude-cc has \d+ posts on/);
+    // A collusion.wiki label: the pages it edited, with links, and no revision text.
+    const sheetOf = async (q, ds) => {
+      const r = await page.evaluate(async ([q, ds]) => { const b = await (await fetch(`/api/graph/search?q=${encodeURIComponent(q)}&gen=${window.__swarmgraph.gen()}`)).json(); return b.results.find((x) => x.dataset === ds && x.label === q); }, [q, ds]);
+      assert.ok(r, q + ' is on the map');
+      await page.evaluate((r) => window.__swarmgraph.goTo(r.id, r.path), r);
+      await page.waitForFunction((q) => window.__swarmgraph.agent()?.label === q, q, {timeout: 15000});
+      return page.evaluate(() => window.__swarmgraph.agent());
+    };
+    sheet = await sheetOf('MapHelper', 'collusionwiki');
+    assert.ok(sheet.places.length > 0 && sheet.excerpts.length === 0, 'wiki pages, no wiki text');
+    assert.match(await page.locator('#graph-sheet').textContent(), /Pages it edited/);
+    assert.ok(await page.locator('#graph-sheet a[href^="https://www.wikiservice.at/dse/wiki.cgi?"]').count() > 0, 'a page links to its wiki');
+    assert.equal(await page.locator('#graph-messages .graph-excerpt').count(), 0);
+    assert.equal(await page.locator('#graph-export-csv').isVisible(), false, 'nothing to export outside SwarmMemo');
+    sheet = await sheetOf('GLM-5.2', 'aivillage');
+    assert.ok(sheet.goals.length > 0 && sheet.excerpts.length === 0 && sheet.peers.length > 0, 'AI Village: goals and counterparts, never text');
+    assert.match(await page.locator('#graph-sheet').textContent(), /Goals it worked on[\s\S]*Who it talked to[\s\S]*terms do not allow/);
+    await page.locator('#graph-panel-close').click();
+    // About this map reopens the tour; skipping it is remembered.
+    await page.locator('#graph-about').click();
+    assert.equal(await page.locator('#graph-story-title').textContent(), 'Where agents gather');
+    await page.locator('#graph-story-close').click();
+    assert.equal(await page.evaluate(() => localStorage.getItem('swarmmemo.graph.tour')), 'done');
     await page.waitForFunction(() => window.__swarmgraph.draw().bridges > 0, null, {timeout: 10000});
     const start = await page.evaluate(() => window.__swarmgraph.draw());
     assert.ok(start.count > 0 && start.bridges > 0, 'galaxies and bridges are drawn: ' + JSON.stringify(start));
@@ -107,6 +159,13 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.locator('#graph-search-results button').first().click();
     await page.waitForFunction((h) => document.getElementById('graph-panel-title').textContent === h && window.__swarmgraph.panel()?.count > 0, b.handle, {timeout: 15000});
     await page.waitForFunction(() => ['agents', 'messages'].includes(window.__swarmgraph.draw().level), null, {timeout: 10000});
+    // Its sheet: the room it posted in and who it talked to, both lit on the map.
+    await page.waitForFunction(() => window.__swarmgraph.agent()?.peers.length > 0, null, {timeout: 10000});
+    const smSheet = await page.locator('#graph-sheet').textContent();
+    assert.ok(smSheet.includes('Rooms it posted in') && smSheet.includes('#' + room), 'where it posted: ' + smSheet);
+    assert.ok(smSheet.includes('Who it talked to') && smSheet.includes(a.handle) && smSheet.includes(c.handle), 'who it talked to');
+    assert.ok(smSheet.includes('not who built what'), 'the caption says what lines mean');
+    assert.ok((await page.evaluate(() => window.__swarmgraph.selection())).ids.length >= 2, 'its places and counterparts are lit');
     assert.ok((await page.locator('#graph-messages').textContent()).includes('<img src=x'), 'markup shows as text');
     assert.equal(await page.locator('#injected').count(), 0, 'no element is injected from a message');
     assert.equal(await page.evaluate(() => window.__pwned), undefined);
@@ -189,6 +248,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.reload({waitUntil: 'load'});
     await page.waitForFunction(() => window.__swarmgraph?.ready, null, {timeout: 30000});
     assert.equal(await page.evaluate(() => window.__swarmgraph.sound().on), false, 'a muted visitor stays muted');
+    assert.equal(await page.locator('#graph-story').isVisible(), false, 'a returning visitor starts in free mode');
 
     // Main-thread long tasks (over 50 ms) so far, as PerformanceObserver saw
     // them. Reported, not asserted: this browser renders on the CPU.
@@ -205,6 +265,52 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     await phone.goto(origin + '/graph', {waitUntil: 'load'});
     await phone.waitForFunction(() => window.__swarmgraph?.ready, null, {timeout: 30000});
     assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll at 390px');
+    // The tour on a phone: Next by tap, then skip.
+    assert.ok(await phone.locator('#graph-story').isVisible(), 'the tour opens on a phone');
+    await phone.locator('#graph-story-next').tap();
+    assert.equal(await phone.locator('#graph-story-title').textContent(), 'SwarmMemo, our board');
+    assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll during the tour');
+    await phone.locator('#graph-story-close').tap();
+    await phone.evaluate((f) => window.__swarmgraph.goTo(f.id, f.path), found);
+    await phone.waitForFunction(() => window.__swarmgraph.panel()?.count > 0, null, {timeout: 15000});
+    // A bottom sheet within reach, and the map above it, not under it.
+    const [panelBox, stageBox] = await Promise.all([phone.locator('#graph-panel').boundingBox(), phone.locator('#graph-stage').boundingBox()]);
+    assert.ok(panelBox.y + panelBox.height >= 843 && panelBox.y > 300, 'the sheet sits at the bottom: ' + JSON.stringify(panelBox));
+    assert.ok(stageBox.y >= -1 && stageBox.y + stageBox.height <= panelBox.y + 1, 'the map stays above the sheet: ' + JSON.stringify(stageBox));
+    // Touch: a tap on empty space closes the sheet; a tap a few pixels off an agent opens it.
+    await wait(1200);
+    const target = await phone.evaluate((fp) => { const s = window.__swarmgraph; const id = s.find((n) => n.key === fp)[0]; return {id, at: s.screen([id])[0]}; }, b.fingerprint);
+    const empty = await phone.evaluate(() => { const s = window.__swarmgraph, st = document.getElementById('graph-stage').getBoundingClientRect(); for (let y = 60; y < st.height - 20; y += 9) for (let x = 12; x < st.width - 12; x += 9) if (s.pick(x, y) === null) return [x, y]; return null; });
+    assert.ok(empty, 'some empty space to tap');
+    let canvasBox = await phone.locator('#graph-canvas canvas').boundingBox();
+    await phone.touchscreen.tap(canvasBox.x + empty[0], canvasBox.y + empty[1]);
+    await phone.waitForFunction(() => document.getElementById('graph-panel').hidden, null, {timeout: 5000});
+    await wait(800);
+    canvasBox = await phone.locator('#graph-canvas canvas').boundingBox();
+    const at = await phone.evaluate((id) => window.__swarmgraph.screen([id])[0], target.id);
+    assert.equal(await phone.evaluate(([x, y]) => window.__swarmgraph.pick(x, y), [at[0] + 9, at[1] + 4]), target.id, 'a tap 9px off still picks the agent');
+    await phone.touchscreen.tap(canvasBox.x + at[0] + 9, canvasBox.y + at[1] + 4);
+    await phone.waitForFunction((h) => document.getElementById('graph-panel-title').textContent === h && window.__swarmgraph.panel()?.count > 0, b.handle, {timeout: 15000});
+    assert.match(await phone.locator('#graph-sheet').textContent(), /Rooms it posted in[\s\S]*Who it talked to/);
+    assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll with the sheet open');
+    // A pinch zooms; it selects nothing, and the finger left behind does not make the map jump.
+    await phone.locator('#graph-panel-close').tap();
+    await wait(600);
+    canvasBox = await phone.locator('#graph-canvas canvas').boundingBox();
+    const cdp = await phone.context().newCDPSession(phone);
+    const cx = canvasBox.x + canvasBox.width / 2, cy = canvasBox.y + canvasBox.height / 2;
+    const z0 = (await phone.evaluate(() => window.__swarmgraph.camera())).z;
+    await cdp.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x: cx - 30, y: cy, id: 1}, {x: cx + 30, y: cy, id: 2}]});
+    for (let k = 1; k <= 6; k++) await cdp.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [{x: cx - 30 - k * 12, y: cy, id: 1}, {x: cx + 30 + k * 12, y: cy, id: 2}]});
+    await cdp.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [{x: cx - 102, y: cy, id: 1}]}); // finger 2 lifts
+    const mid = await phone.evaluate(() => window.__swarmgraph.camera());
+    await cdp.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [{x: cx - 100, y: cy, id: 1}]});
+    const after1 = await phone.evaluate(() => window.__swarmgraph.camera());
+    await cdp.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
+    assert.ok(mid.z > z0 * 1.5, `the pinch zoomed: ${z0} -> ${mid.z}`);
+    assert.ok(Math.hypot(after1.x - mid.x, after1.y - mid.y) * after1.z < 6, 'the remaining finger pans on from where the pinch ended');
+    await wait(300);
+    assert.ok(await phone.locator('#graph-panel').isHidden(), 'a pinch never opens a sheet');
     await phone.evaluate((f) => window.__swarmgraph.goTo(f.id, f.path), found);
     await phone.waitForFunction(() => window.__swarmgraph.panel()?.count > 0, null, {timeout: 15000});
     await phone.locator('#graph-summarize').click();
@@ -213,6 +319,6 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll with the panel open');
 
     assert.deepEqual(errors, [], 'no console or page errors: ' + errors.join(' / '));
-    console.log('PASS: /graph shows public data only, stays still under live posts, zooms by level, searches, selects, exports, shows bridge evidence, sounds, replays and goes live.');
+    console.log('PASS: /graph shows public data only, tours, opens agent sheets (places, counterparts, text or excerpts, no village or wiki text), picks by touch at 390px, pinches without jumps, stays still under live posts, zooms by level, searches, selects, exports, shows bridge evidence, sounds, replays and goes live.');
   } finally { await browser.close(); }
 })().catch((e) => { console.error(e); process.exitCode = 1; });

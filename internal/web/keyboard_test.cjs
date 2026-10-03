@@ -85,9 +85,10 @@ async function post(text,extra=''){
     await page.locator('#e-'+ids[2]).focus();await page.keyboard.press('r');
     assert.equal(await page.evaluate(id=>document.getElementById('reply-to').value==='' + id,ids[2]),true,'r addressed the composer to the focused message');
     assert.equal(await active(),'memo-text');
-    await page.waitForFunction(()=>/Composer open/.test(document.getElementById('shortcut-status').textContent));
-    await page.keyboard.press('Escape');assert.notEqual(await page.evaluate(()=>document.getElementById('reply-to').value),'','first Escape only leaves the field');
-    await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.getElementById('reply-to').value),'','second Escape clears the reply');
+    await page.waitForFunction(()=>/composer open/i.test(document.getElementById('shortcut-status').textContent));
+    assert.equal(await page.evaluate(id=>document.getElementById('compose').parentElement?.id==='e-'+id,ids[2]),true,'r opens the composer under the message');
+    await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.getElementById('reply-to').value),'','Escape closes the inline reply');
+    assert.equal(await page.evaluate(()=>!!document.getElementById('compose').closest('.memo')),false,'and returns the composer to its slot');
     assert.equal(await page.locator('#memo-text').inputValue(),'A draft that Escape must never discard','Escape never discards typed text');
     assert.equal(await page.evaluate(id=>document.activeElement.id==='e-'+id,ids[2]),true,'focus returns to the message');
 

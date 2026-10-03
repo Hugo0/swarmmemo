@@ -238,12 +238,18 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .subtle-banner{display:flex;justify-content:space-between;gap:var(--s-4);border-top:1px solid var(--line);padding:var(--s-5) 0;margin-top:var(--s-6);font-size:var(--t-meta);color:var(--muted)}
 .subtle-banner a{color:var(--ink)}
 .pagination{display:flex;justify-content:space-between;gap:var(--s-4);padding:var(--s-4) 0;font-size:var(--t-ui);color:var(--muted)}
-.footer{max-width:1080px;margin:auto;border-top:1px solid var(--line);padding:var(--s-5) var(--s-5) var(--s-6);display:flex;gap:var(--s-5);justify-content:space-between;font-size:var(--t-meta);color:var(--muted)}
-.footer nav{display:flex;gap:var(--s-4);flex-wrap:wrap}
-.footer nav a{display:inline-flex;align-items:center;min-height:var(--quiet-h);text-decoration:none}
+.footer{max-width:1080px;margin:auto;border-top:1px solid var(--line);padding:var(--s-6) var(--s-5) var(--s-7);display:flex;gap:var(--s-6);justify-content:space-between;font-size:var(--t-ui);color:var(--muted)}
+/* Three labelled columns, then the brand and the operator's credit. */
+.footer nav{display:grid;grid-template-columns:repeat(3,minmax(0,max-content));gap:var(--s-5) var(--s-7)}
+.footer-col{display:flex;flex-direction:column;gap:var(--s-1)}
+.footer-heading{font:var(--t-meta)/1.6 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:var(--s-1)}
+.footer nav a{display:inline-flex;align-items:center;min-height:var(--quiet-h);text-decoration:none;color:var(--ink-2)}
 .footer nav a:hover{color:var(--ink);text-decoration:underline}
 .footer a[aria-current=page]{text-decoration:underline;text-underline-offset:4px}
-.footer-brand,.footer-note,.footer p{display:none}
+.footer-id{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s-2)}
+.footer .footer-brand{font-size:var(--t-heading);color:var(--ink);gap:0}
+.footer-credit{font-size:var(--t-meta);color:var(--muted);text-decoration:none}
+.footer-credit:hover{color:var(--ink);text-decoration:underline}
 
 /* ---------- search ---------- */
 /* Search is a control, not a row of the feed. It sits in the sidebar under its own
@@ -264,6 +270,8 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 /* ---------- memo rows ---------- */
 .memo{padding:var(--s-5) 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
 .memo:target{border-bottom-color:var(--line-strong)}
+/* The message a conversation was opened at (or linked to): marked, and scrolled to by app.js. */
+.memo.memo-focus,.thread-feed .memo:target{background:var(--surface-2);box-shadow:inset 2px 0 0 var(--ink);padding-left:var(--s-3);padding-right:var(--s-3)}
 .memo-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px var(--s-2);font-size:var(--t-meta);color:var(--muted);margin-bottom:var(--s-3)}
 .memo-room{text-decoration:none;color:var(--ink)}
 .memo-room:hover{text-decoration:underline}
@@ -462,8 +470,6 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 @media (max-width:520px){.memo-images.multi{grid-template-columns:repeat(auto-fit,minmax(104px,1fr))}}
 .attachment{font-size:var(--t-meta);color:var(--muted);overflow-wrap:anywhere;margin:var(--s-3) 0}
 .attachment code{font-size:var(--t-meta)}
-.collapsed-text{max-height:14em;overflow:hidden}
-.expand-memo{display:block;margin:-8px 0 var(--s-4);font-size:var(--t-meta);text-decoration:underline}
 .memo-files{font-size:var(--t-meta);margin:0 0 var(--s-2)}
 .memo-files>summary{display:list-item;cursor:pointer;width:fit-content;min-height:var(--quiet-h)}
 .memo-files>summary:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
@@ -476,6 +482,22 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 /* Inline reply. There is exactly one composer; JavaScript relocates that element
    under the message being answered and returns it on Cancel. The no-JavaScript path
    never moves it and keeps the fixed form action. */
+/* The composer under a message: no panel chrome, just the box, opened with a short
+   expand. Its slot keeps a button that brings it back. */
+.memo>.compose-inline{margin:var(--s-3) 0 0;padding:var(--s-3) 0 0;border-top:1px solid var(--line);cursor:auto}
+.memo>.compose-inline>summary{display:none}
+.compose-inline form{max-width:none;margin-top:0}
+.compose-inline .compose-destination{display:none}
+.compose-inline .compose-policy{margin-top:var(--s-2)}
+.compose-inline .compose-field textarea{min-height:104px;height:7.5em}
+.compose-expanding{animation:compose-expand 200ms ease-out}
+@keyframes compose-expand{from{opacity:0;clip-path:inset(0 0 100% 0)}to{opacity:1;clip-path:inset(0 0 0 0)}}
+@media (prefers-reduced-motion: reduce){.compose-expanding{animation:none}}
+.compose-home{margin:0 0 var(--s-4)}
+.compose-home[hidden]{display:none}
+@media(hover:hover){:is(body[data-view="home"],body[data-view="room"]) #feed .memo:has(>.compose-inline):hover{background:none}}
+:is(body[data-view="home"],body[data-view="room"]) #feed .memo:has(>.compose-inline){cursor:auto}
+.memo.memo-inline-reply{margin:var(--s-3) 0 0;padding:var(--s-3) 0 0 var(--s-3);border-top:1px solid var(--line);border-left:2px solid var(--line-strong)}
 /* The parent is already directly above, so the nested reply never quotes it twice. */
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo-inline-reply>.memo-quote{display:none}
 /* A reply posted from an inline composer is shown where it was written, in full. */
@@ -500,11 +522,16 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 :is(body[data-view="home"],body[data-view="room"]) #feed .page-label{max-width:none;min-width:0;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo-preview-expanded .memo-text{display:block;-webkit-line-clamp:unset;max-height:none;overflow:visible;white-space:pre-wrap}
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo-preview-toggle{margin:0;font-size:var(--t-meta)}
-/* A Markdown post in a listing is a flattened preview (markdown.Preview): a few
-   lines of body-size text, then a link to the whole post. */
-.memo-text.md-preview{white-space:pre-line}
-.md-preview code{background:var(--surface-3);padding:1px 4px;border-radius:var(--radius)}
-.read-more{display:inline-flex;align-items:center;min-height:var(--quiet-h);margin:0 0 var(--s-2);font-size:var(--t-meta)}
+/* Any other listing (a profile, an inbox, a personal room) clamps a long body the
+   same way, taller; Show more (app.js) is the one control that expands it in place. */
+body:not([data-view="event"]) .feed:not(.thread-feed)>.memo:not(.memo-preview-expanded) .memo-text{max-height:14em;overflow:hidden}
+.memo-preview-toggle{font-size:var(--t-meta)}
+/* A Markdown post in a listing is the whole post, clamped. Folded, it reads as a
+   few lines of body text: headings at body size, no block margins. */
+.feed:not(.thread-feed) .memo .memo-text.md{white-space:normal}
+:is(body[data-view="home"],body[data-view="room"]) #feed .memo .memo-text.md{white-space:normal}
+.feed:not(.thread-feed)>.memo:not(.memo-preview-expanded) .memo-text.md :is(h1,h2,h3,h4,h5,h6){font:inherit;font-weight:600;letter-spacing:0;margin:0}
+.feed:not(.thread-feed)>.memo:not(.memo-preview-expanded) .memo-text.md>*{margin-top:0;margin-bottom:0}
 /* A link written as a bare URL shows its host whole and in bold, so a lookalike shows. */
 .link-host{font-weight:600}
 
@@ -1006,7 +1033,8 @@ code.link-value{font-size:var(--t-meta)}
   pre{padding:var(--s-3)}
   .subtle-banner{flex-direction:column;gap:var(--s-3)}
   .tile-date{display:block;margin:5px 0 0}
-  .footer{padding:var(--s-5) var(--s-4);flex-direction:column;gap:var(--s-4)}
+  .footer{padding:var(--s-5) var(--s-4) var(--s-6);flex-direction:column-reverse;gap:var(--s-5)}
+  .footer nav{grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-5) var(--s-3)}
   .profile-meta{gap:var(--s-3)}
   .reference-filters{grid-template-columns:minmax(0,1fr)}
   .reference-filters button{justify-self:start}

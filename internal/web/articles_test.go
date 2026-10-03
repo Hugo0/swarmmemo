@@ -177,7 +177,7 @@ func TestEditedPostShowsCurrentVersionAndHistory(t *testing.T) {
 
 	feed := f.get("/r/guides").Body.String()
 	// The reply to the edit quotes its parent, which is the original shown at its newest version.
-	if strings.Count(feed, `<strong class="memo-title">Second title</strong>`) != 1 || !strings.Contains(feed, `<span class="memo-quote-text">Second title Second body.</span>`) || strings.Contains(feed, "First title") || strings.Contains(feed, `id="e-`+v2+`"`) || !strings.Contains(feed, `href="/e/`+v1+`/history"`) {
+	if strings.Count(feed, `<h2 class="memo-title">Second title</h2>`) != 1 || !strings.Contains(feed, `<span class="memo-quote-text">Second title Second body.</span>`) || strings.Contains(feed, "First title") || strings.Contains(feed, `id="e-`+v2+`"`) || !strings.Contains(feed, `href="/e/`+v1+`/history"`) {
 		t.Fatal("feed must show the post once, at its newest version, marked edited")
 	}
 	if w = f.get("/e/" + strings.Repeat("0", 32) + "/history"); w.Code != 404 {
@@ -197,8 +197,9 @@ func TestMarkdownTitleCannotInjectMarkup(t *testing.T) {
 	}
 }
 
-// Articles lose nothing in a listing: the feed shows a flattened preview, never
-// raw Markdown or rendered headings, and links to the whole post when it is cut.
+// Articles lose nothing in a listing: the feed renders the whole post, never raw
+// Markdown, and the reader expands it in place (app.js) rather than following a
+// read-more link to another page.
 func TestFeedPreviewOfArticle(t *testing.T) {
 	f := newArticleFixture(t)
 	f.post(board.Command{Text: "# A guide\n\nThe **first** paragraph.\n\n- a list", Data: markdownData})
@@ -206,11 +207,11 @@ func TestFeedPreviewOfArticle(t *testing.T) {
 	author := sha256.Sum256(f.key.Public().(ed25519.PublicKey))
 	for _, path := range []string{"/r/guides", "/agent/" + hex.EncodeToString(author[:])} {
 		body := f.get(path).Body.String()
-		if !strings.Contains(body, `<p class="memo-text md-preview"><strong class="memo-title">A guide</strong>`+"\n"+`The <strong>first</strong> paragraph.`+"\n"+`• a list</p>`) || strings.Contains(body, "# A guide") || regexp.MustCompile(`<h\d>(A guide|Section)`).MatchString(body) {
-			t.Fatalf("%s: feed preview of an article", path)
+		if !strings.Contains(body, `<div class="memo-text md">`) || strings.Contains(body, "# A guide") || !strings.Contains(body, "<strong>first</strong> paragraph.") {
+			t.Fatalf("%s: feed rendering of an article", path)
 		}
-		if !strings.Contains(body, `<a class="read-more" href="/e/`+long+`/long">Read more<span class="sr-only">: Long</span> →</a>`) || strings.Count(body, "read-more") != 1 {
-			t.Fatalf("%s: a cut preview links to the whole post, and only a cut one", path)
+		if strings.Count(body, "Section") < 30 || strings.Contains(body, "read-more") || strings.Contains(body, "md-preview") {
+			t.Fatalf("%s: a listing carries the whole post and no read-more link", path)
 		}
 	}
 	// The post's own page renders it whole.

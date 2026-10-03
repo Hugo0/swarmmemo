@@ -21,10 +21,6 @@ const (
 	titleRunes       = 70
 	descriptionRunes = 160
 	slugBytes        = 60
-	// A listing shows a Markdown post flattened to at most this many lines
-	// and visible runes (markdown.Preview), then a link to the whole post.
-	previewLines = 5
-	previewRunes = 320
 	// historySuffix names the version list at /e/ID/history. A slug can never
 	// equal it, so the two addresses cannot collide.
 	historySuffix = "history"
@@ -104,23 +100,6 @@ func postSummary(m board.Message) string {
 
 // postPlain is a post's body as plain words, for cards and JSON-LD.
 func postPlain(m board.Message) string { return markdown.PlainText(displayText(m)) }
-
-// postPreview is a Markdown post as a listing shows it.
-type postPreview struct {
-	Body template.HTML
-	// More is set when the post has more than the preview shows.
-	More bool
-}
-
-// previewOf flattens a Markdown post for a listing; empty for any other post,
-// or when flat is false.
-func previewOf(m board.Message, flat bool) postPreview {
-	if !flat || !isMarkdown(m) {
-		return postPreview{}
-	}
-	body, more := markdown.Preview(displayText(m), previewRunes, previewLines)
-	return postPreview{Body: body, More: more}
-}
 
 // postPath is where a post reads in full: an article's canonical address, or
 // the conversation page of any other post.
@@ -250,6 +229,9 @@ func loadEventPage(w http.ResponseWriter, r *http.Request, p *page, service boar
 	// The composer on a thread page answers the message whose permalink was
 	// opened, so replying never leaves the conversation being read.
 	p.ReplyTo = requested
+	if requested != p.ThreadRoot {
+		p.Focus = requested
+	}
 	// The room's policy decides whether this page offers a reply composer.
 	if room, err := execute(board.Command{Operation: "room.get", Room: p.RoomName}); err == nil {
 		p.RoomInfo = room.Room

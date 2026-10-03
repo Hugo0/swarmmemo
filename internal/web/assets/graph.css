@@ -119,3 +119,66 @@
 .graph-notes h2{font-size:var(--t-title)}
 .graph-notes li{margin-bottom:var(--s-2)}
 @media (prefers-reduced-motion:reduce){.graph-canvas{transition:none}}
+/* The sheet: a side panel on wide screens, a bottom sheet in reach of the
+   thumb on phones. The tour card and the About link sit on the stage. */
+.graph-panel-grip{display:none}
+.graph-sheet{font-size:var(--t-ui);min-width:0}
+.graph-sheet:empty{display:none}
+.graph-sheet h3{font-size:var(--t-meta);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:var(--s-4) 0 var(--s-2)}
+.graph-sheet dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:var(--s-2) var(--s-3);margin:var(--s-2) 0}
+.graph-sheet dt{font-size:var(--t-meta);color:var(--muted)}
+.graph-sheet dd{margin:0;font:600 var(--t-ui)/1.3 var(--mono);font-variant-numeric:tabular-nums}
+.graph-sheet ul{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.graph-sheet li{display:flex;gap:var(--s-2);align-items:baseline;justify-content:space-between;min-width:0;padding:5px 0;border-bottom:1px solid var(--line)}
+.graph-sheet li:last-child{border-bottom:0}
+.graph-sheet li>:first-child{min-width:0;overflow-wrap:anywhere}
+.graph-sheet li button,.graph-sheet .linkish{border:0;background:none;padding:0;color:inherit;font:inherit;text-align:left;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px;cursor:pointer;min-height:24px}
+.graph-sheet .n{font:var(--t-meta)/1.4 var(--mono);color:var(--muted);white-space:nowrap;flex:none;text-align:right}
+.graph-sheet .sub{display:block;font-size:var(--t-meta);color:var(--muted)}
+.graph-sheet .note{font-size:var(--t-meta);color:var(--muted);margin:var(--s-2) 0}
+.graph-sheet .chip{display:inline-block;font:var(--t-meta)/1.5 var(--mono);padding:0 6px;border:1px solid var(--line);border-radius:999px;color:var(--muted);margin-right:4px}
+.graph-sheet .chip.proof{color:var(--ink);border-color:var(--graph-bridge)}
+.graph-sheet .k{font-family:var(--mono);color:var(--muted);font-size:var(--t-meta);overflow-wrap:anywhere}
+.graph-excerpt{border-left:2px solid var(--line);padding:2px 0 2px var(--s-3);margin:var(--s-2) 0}
+.graph-excerpt p{margin:var(--s-1) 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.graph-excerpt .graph-msg-meta a{color:inherit}
+.graph-about{position:absolute;right:var(--s-3);bottom:var(--s-3);z-index:2;height:32px;padding:0 12px;border-radius:var(--radius);background:var(--graph-hud);border:1px solid var(--graph-hud-line);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);color:var(--graph-ink);font-size:var(--t-meta);cursor:pointer}
+.graph-about[hidden]{display:none}
+.graph-story{position:absolute;z-index:3;left:var(--s-3);bottom:var(--s-3);width:min(400px,calc(100% - 2 * var(--s-3)));padding:var(--s-3) var(--s-4);background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 12px 36px rgba(0,0,0,.22)}
+.graph-story[hidden]{display:none}
+.graph-story h2{font-size:var(--t-title);margin:0 0 var(--s-1)}
+.graph-story-step{font:var(--t-meta)/1.4 var(--mono);color:var(--muted);margin:0 0 var(--s-1)}
+.graph-story-text{font-size:var(--t-ui);line-height:1.5;margin:0}
+.graph-story-note{font-size:var(--t-meta);color:var(--muted);margin:var(--s-2) 0 0}
+.graph-story-nav{display:flex;align-items:center;gap:var(--s-2);margin-top:var(--s-3)}
+.graph-story-nav .button{min-height:40px;padding:0 var(--s-4)}
+.graph-story-nav .quiet-button{min-height:40px;margin-right:auto}
+.graph-story-dots{display:flex;gap:4px}
+.graph-story-dots i{width:6px;height:6px;border-radius:50%;background:var(--line)}
+.graph-story-dots i.on{background:var(--ink)}
+.graph-story-action{margin-top:var(--s-2)}
+.graph-stage.touring .graph-legend,.graph-app.panel-open .graph-legend,.graph-app.panel-open .graph-legend-toggle{display:none}
+.graph-legend .key{display:flex;gap:7px;align-items:center;color:var(--graph-muted);padding:2px 0;white-space:normal;max-width:240px}
+.graph-legend .key:first-of-type{border-top:1px solid var(--graph-hud-line);margin-top:4px;padding-top:6px}
+.graph-legend .key svg,.graph-legend .key i{flex:none}
+@media (max-width:999px){
+  .graph-panel{position:fixed;left:0;right:0;bottom:0;z-index:40;height:56vh;height:56svh;overflow:auto;overscroll-behavior:contain;margin:0;padding:var(--s-2) var(--s-4) calc(var(--s-5) + env(safe-area-inset-bottom));background:var(--surface);border:1px solid var(--line);border-bottom:0;border-radius:14px 14px 0 0;box-shadow:0 -12px 40px rgba(0,0,0,.28)}
+  .graph-panel-grip{display:block;width:40px;height:4px;border-radius:2px;background:var(--line);margin:2px auto var(--s-2)}
+  .graph-panel-head{position:sticky;top:calc(-1 * var(--s-2));background:var(--surface);padding:var(--s-1) 0;z-index:1;align-items:center}
+  .graph-panel-close{min-height:40px;min-width:64px}
+  .graph-panel-actions .button{min-height:40px}
+  /* The map stays fully visible above the sheet. */
+  .graph-app.panel-open .graph-stage{height:calc(44vh - 6px);height:calc(44svh - 6px);min-height:0}
+  .graph-app.panel-open .graph-controls{display:none}
+}
+@media (max-width:600px){
+  .graph-story{left:8px;right:8px;bottom:8px;width:auto;padding:var(--s-2) var(--s-3) var(--s-3)}
+  .graph-story h2{font-size:17px}
+  .graph-story-text{font-size:13.5px;line-height:1.45}
+  .graph-story-note{display:none}
+  .graph-story-nav{margin-top:var(--s-2)}
+  .graph-heading p{font-size:14px}
+  .graph-stage{height:68vh;height:68svh}
+  .graph-about{bottom:auto;top:52px;right:var(--s-3)}
+  .graph-stage.touring .graph-legend-toggle,.graph-stage.touring .graph-about{display:none}
+}

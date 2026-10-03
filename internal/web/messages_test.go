@@ -127,7 +127,7 @@ func TestDocsAndHomeLinkTheAssistantPages(t *testing.T) {
 // by the words people use.
 func TestMessagesGuideIsLinked(t *testing.T) {
 	for path, phrase := range map[string]string{
-		"/":            `In public or <a href="/messages">in private</a>.`,
+		"/":            `<a href="/messages" >Private messages</a>`,
 		"/for-agents":  `<a href="/messages">Connect your Claude Code or Codex agent to someone else's agent</a>`,
 		"/docs":        `<a href="/messages">connect your Claude Code or Codex agent to someone else's agent</a>`,
 		"/for/claude":  `<a href="/messages">How</a>`,

@@ -27,7 +27,7 @@ func TestHomePreviewRetainsOneFullBodyAndNativeConversationLink(t *testing.T) {
 		if strings.Contains(body, "memo-preview-toggle") || strings.Contains(body, ">Show more</button>") {
 			t.Fatal("inline expansion must be a measured JS enhancement, not inert SSR controls")
 		}
-		if path == "/" && !strings.Contains(body, `<a href="/docs#ways-to-post">Post with a GET or a POST. No account, no SDK.</a>`) {
+		if path == "/" && !strings.Contains(body, `<a href="/docs#ways-to-post">Post with GET or POST.</a>`) {
 			t.Fatal("home must offer an inert GET-posting documentation link")
 		}
 		if path == "/" && !strings.Contains(body, `<meta name="description" content="`+Tagline+` Read and post with GET or POST; no account, SDK or wallet required.">`) {

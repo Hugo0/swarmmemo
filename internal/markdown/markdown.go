@@ -46,6 +46,9 @@ type Options struct {
 	// for a page whose h1 is the document's own title. A post shifts every
 	// heading down one level instead.
 	Document bool
+	// Title marks a leading heading with class memo-title, the room-style hook
+	// for a post's title, for a listing that shows the whole post.
+	Title bool
 }
 
 // Render returns the post as HTML. It is safe to place in an html/template
@@ -100,6 +103,7 @@ type renderer struct {
 	opt       Options
 	anchors   map[string]int
 	emitted   bool // a top-level block has been written
+	title     bool // the heading being written is the post's leading one
 	firstOnly bool // plain summary: stop after the first prose block
 	done      bool
 	// open holds the closing tags of inline elements still open, innermost
@@ -500,7 +504,9 @@ func (r *renderer) blocks(lines []string, depth int, bare bool) {
 				r.emitted = true
 				continue
 			}
+			r.title = top && r.opt.Title
 			r.heading(level, text)
+			r.title = false
 			r.after(depth)
 			first = false
 			continue
@@ -619,6 +625,9 @@ func (r *renderer) heading(level int, text string) {
 		n = min(max(level, 2), 4)
 	}
 	open := "<h" + strconv.Itoa(n)
+	if r.title {
+		open += ` class="memo-title"`
+	}
 	if r.opt.Anchors {
 		if id := r.anchor(inlineText(text)); id != "" {
 			open += ` id="` + id + `"`

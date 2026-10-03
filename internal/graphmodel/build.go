@@ -452,8 +452,49 @@ func (m *Model) datasetLastWeek(di int16) int64 {
 	return m.Datasets[di].T1 / Week
 }
 
-// itemRadius is an item's disc: area grows with posts.
-func itemRadius(posts int64) float64 { return 1 + math.Sqrt(float64(posts)) }
+// itemRadius is an item's disc, on a log scale of its engagement (distinct
+// counterparts plus interactions received) with a little for its posts: an
+// agent that talks with many others is large; one that only posts, however
+// much, stays small.
+func itemRadius(posts int64, engagement float64) float64 {
+	return 1.5 + 2.4*math.Log2(1+engagement) + 0.3*math.Log2(1+float64(posts))
+}
+
+// galaxyRadius sizes a population by its conversation, damped: the summed
+// log engagement of its members, its two-way pairs, and a little for its
+// head count, so a board full of one-way posting does not dominate and a
+// quiet one stays visible.
+func (m *Model) galaxyRadius(di int16) float64 {
+	d := m.data[di]
+	var logSum float64
+	var members int
+	for i, it := range d.Items {
+		if it.Kind != KindIdentity && it.Kind != KindPool {
+			continue
+		}
+		members++
+		p, r := m.engagement(di, int32(i))
+		logSum += math.Log2(1 + float64(p) + r)
+	}
+	pairs := map[[2]int32]uint8{}
+	for _, e := range d.Edges {
+		if e.Member || e.Src == e.Dst {
+			continue
+		}
+		if e.Src < e.Dst {
+			pairs[[2]int32{e.Src, e.Dst}] |= 1
+		} else {
+			pairs[[2]int32{e.Dst, e.Src}] |= 2
+		}
+	}
+	twoWay := 0
+	for _, v := range pairs {
+		if v == 3 {
+			twoWay++
+		}
+	}
+	return 40 + 10*math.Sqrt(logSum) + 24*math.Sqrt(float64(twoWay)) + 6*math.Sqrt(float64(members))
+}
 
 // layout packs every node's children inside it, bottom-up, then places the
 // tree in absolute coordinates scaled into [0, Space].
@@ -465,7 +506,8 @@ func (m *Model) layout(root int32) {
 			if n.Kind == KindGalaxy {
 				n.R = 40 // a population known only through its bridges
 			} else if n.Item >= 0 {
-				n.R = itemRadius(n.Posts)
+				p, r := m.engagement(n.Dataset, n.Item)
+				n.R = itemRadius(n.Posts, float64(p)+r)
 				if n.Kind == KindRoom {
 					n.R = 1 + 0.35*math.Sqrt(float64(n.Posts)) // context, not a participant
 				}
@@ -501,10 +543,7 @@ func (m *Model) layout(root int32) {
 		n = &m.Nodes[id]
 		n.R = r*1.02 + 0.5
 		if n.Kind == KindGalaxy {
-			// Galaxies are sized by their population, not their post volume,
-			// so a small board stays visible beside a prolific one.
-			target := 40 + 30*math.Sqrt(float64(n.Members))
-			m.scale(id, target/n.R)
+			m.scale(id, m.galaxyRadius(n.Dataset)/n.R)
 		}
 		return n.R
 	}

@@ -177,3 +177,42 @@ func TestGraphReplayServesAGalaxyTimeline(t *testing.T) {
 		}
 	}
 }
+
+// TestGraphAgentSheet answers an agent's sheet (places, counterparts) for an
+// item, 404 for a container, and nothing private.
+func TestGraphAgentSheet(t *testing.T) {
+	f := newGraphFixtureT(t)
+	s := New(f.store, nil, Config{ServiceID: "swarmmemo.com"})
+	var u universeBody
+	_ = json.Unmarshal(graphGet(s, "/api/graph/universe", nil).Body.Bytes(), &u)
+	var loc struct {
+		Paths map[string][]int32 `json:"paths"`
+	}
+	_ = json.Unmarshal(graphGet(s, "/api/graph/locate?gen="+u.Generation+"&keys="+f.alice.id, nil).Body.Bytes(), &loc)
+	p := loc.Paths[f.alice.id]
+	if len(p) == 0 {
+		t.Fatal("alice not located")
+	}
+	w := graphGet(s, fmt.Sprintf("/api/graph/agent?gen=%s&id=%d", u.Generation, p[len(p)-1]), nil)
+	if w.Code != 200 {
+		t.Fatalf("agent: %d %s", w.Code, w.Body)
+	}
+	var r struct {
+		Agent graphmodel.AgentSheet `json:"agent"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	a := r.Agent
+	if a.Key != f.alice.id || a.Dataset != "swarmmemo" || len(a.Places) == 0 || len(a.Peers) == 0 || len(a.Excerpts) != 0 {
+		t.Fatalf("sheet %+v", a)
+	}
+	for _, banned := range []string{"PRIVATE", "ADDRESSED", "vault", f.secret.id, f.dm.id} {
+		if strings.Contains(w.Body.String(), banned) {
+			t.Errorf("agent sheet contains %q", banned)
+		}
+	}
+	if w := graphGet(s, fmt.Sprintf("/api/graph/agent?gen=%s&id=%d", u.Generation, u.Datasets[0].Node), nil); w.Code != 404 {
+		t.Errorf("a galaxy's sheet answered %d", w.Code)
+	}
+}

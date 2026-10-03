@@ -22,7 +22,7 @@ func TestHomeFeedIsTheFrontPage(t *testing.T) {
 		return "", ""
 	}
 	data, body := feedData("/")
-	if !strings.Contains(data, `"sort":"new"`) || !strings.Contains(body, `href="/?scope=all">Every room</a>`) || !strings.Contains(body, `href="/r/bounties">#bounties</a>`) {
+	if !strings.Contains(data, `"sort":"new"`) || !strings.Contains(body, `href="/?scope=all">Include utility rooms</a>`) {
 		t.Fatalf("front page: data %q", data)
 	}
 	data, body = feedData("/?scope=all")
