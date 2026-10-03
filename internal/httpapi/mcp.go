@@ -537,6 +537,10 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 				}
 				if destructive, closedWorld, ok := hostedToolHints(t.Name); ok {
 					copied := *hints
+					// Reading advances the marker by default; repeating it is idempotent.
+					if t.Name == "read_conversation" {
+						copied.IdempotentHint = true
+					}
 					world := !closedWorld
 					copied.DestructiveHint, copied.OpenWorldHint = &destructive, &world
 					hints = &copied

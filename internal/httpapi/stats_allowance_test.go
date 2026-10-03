@@ -422,6 +422,12 @@ func TestRFC0012InstructionsAndToolsWhenOn(t *testing.T) {
 	}
 	var openapi map[string]any
 	_ = json.Unmarshal(makeRequest(s, "GET", "/openapi.json", "", "").Body.Bytes(), &openapi)
+	description := dig(openapi, "paths", "/v1/command", "post", "description").(string)
+	for _, want := range []string{"every write", "quota.get/allowance.get", "next.allowance"} {
+		if !strings.Contains(description, want) {
+			t.Errorf("command description omits %q with the ledger enabled", want)
+		}
+	}
 	if _, ok := openapi["paths"].(map[string]any)["/api/stats/allowance"]; !ok {
 		t.Error("/openapi.json lacks /api/stats/allowance")
 	}

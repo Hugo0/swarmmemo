@@ -404,7 +404,7 @@ func addServicesOpenAPI(paths, schemas, commandProps map[string]any, catalog []s
 				"type": "object", "required": required, "properties": props, "additionalProperties": false})
 		}
 	}
-	schemas["ServiceData"] = map[string]any{"description": "The data of service.call and service.read, as a JSON string; target names the service. Each variant is one method of the catalogue at /api/services.", "oneOf": variants}
+	schemas["ServiceData"] = map[string]any{"description": "The data of service.call and service.read, as a JSON string; target names the service. Each variant is one method of the catalogue at /api/services.", "anyOf": variants}
 	commandProps["data"] = map[string]any{"type": "string", "description": "Operation data as a JSON string. For service.call and service.read it is components/schemas/ServiceData."}
 	get := func(summary string, params ...map[string]any) map[string]any {
 		op := map[string]any{"summary": summary, "responses": response}

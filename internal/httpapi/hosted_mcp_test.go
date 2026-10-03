@@ -325,7 +325,7 @@ func TestHostedToolsOnBothProfiles(t *testing.T) {
 		if f.Name == "" || a.Name == "" || f.Description != a.Description || string(f.InputSchema) != string(a.InputSchema) {
 			t.Fatalf("%s differs between the profiles or is missing", spec.Name)
 		}
-		want := map[string]bool{"readOnlyHint": spec.ReadOnly, "idempotentHint": spec.ReadOnly, "destructiveHint": spec.destructive, "openWorldHint": !spec.closedWorld}
+		want := map[string]bool{"readOnlyHint": spec.ReadOnly, "idempotentHint": spec.ReadOnly || spec.Name == "read_conversation", "destructiveHint": spec.destructive, "openWorldHint": !spec.closedWorld}
 		for hint, value := range want {
 			if f.Annotations[hint] != value {
 				t.Errorf("%s %s = %v, want %v", spec.Name, hint, f.Annotations[hint], value)
@@ -333,6 +333,12 @@ func TestHostedToolsOnBothProfiles(t *testing.T) {
 		}
 		if strings.Contains(string(f.InputSchema), `"token"`) {
 			t.Errorf("%s takes a token argument", spec.Name)
+		}
+	}
+	for _, profile := range []map[string]listedTool{full, assistant} {
+		annotations := profile["read_conversation"].Annotations
+		if annotations["readOnlyHint"] || !annotations["idempotentHint"] || annotations["destructiveHint"] {
+			t.Errorf("read_conversation moves the read marker but stays idempotent and non-destructive: %v", annotations)
 		}
 	}
 	for name, tool := range map[string]listedTool{"accept_request": full["accept_request"], "manage_tokens": full["manage_tokens"], "create_identity": full["create_identity"]} {

@@ -240,3 +240,82 @@ func TestSignedReceiptHasNoSigningAdvice(t *testing.T) {
 		t.Fatalf("read carried advice: %s", w.Body.String())
 	}
 }
+
+func TestRobotsPublicAPIAndWriteExclusions(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com"})
+	w := makeRequest(s, "GET", "/robots.txt", "", "")
+	if w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	// User-agent groups replace the wildcard group; within a group the
+	// longest matching path wins, with Allow winning ties.
+	type rule struct {
+		path  string
+		allow bool
+	}
+	groups := map[string][]rule{}
+	for _, block := range strings.Split(w.Body.String(), "\n\n") {
+		var agents []string
+		var rules []rule
+		for _, line := range strings.Split(block, "\n") {
+			key, value, ok := strings.Cut(line, ":")
+			if !ok {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			switch key {
+			case "User-agent":
+				agents = append(agents, strings.ToLower(value))
+			case "Allow", "Disallow":
+				rules = append(rules, rule{value, key == "Allow"})
+			}
+		}
+		for _, agent := range agents {
+			groups[agent] = rules
+		}
+	}
+	if len(groups["*"]) == 0 {
+		t.Fatal("missing wildcard rules")
+	}
+	allowed := func(agent, path string) bool {
+		rules, ok := groups[strings.ToLower(agent)]
+		if !ok {
+			rules = groups["*"]
+		}
+		longest, allow := -1, true
+		for _, rule := range rules {
+			if strings.HasPrefix(path, rule.path) && (len(rule.path) > longest || len(rule.path) == longest && rule.allow) {
+				longest, allow = len(rule.path), rule.allow
+			}
+		}
+		return allow
+	}
+	agents := []string{"Claude-User", "ChatGPT-User", "Perplexity-User", "meta-externalfetcher", "GenericAgent", "Googlebot"}
+	for agent := range groups {
+		agents = append(agents, agent)
+	}
+	for _, agent := range agents {
+		t.Run(agent, func(t *testing.T) {
+			for _, path := range []string{"/api/messages?limit=10", "/api/agents", "/api/updates", "/api/stats", "/api/trust/runs/1", "/api/params/allowance", "/llms.txt", "/docs"} {
+				if !allowed(agent, path) {
+					t.Errorf("public read disallowed: %s", path)
+				}
+			}
+			for _, path := range []string{"/call/public_data/fetch", "/v1/command", "/w/lobby/main", "/w64/payload", "/c64/payload", "/admin/status", "/mcp", "/mcp/assistant", "/metrics", "/a/attachment", "/me"} {
+				if allowed(agent, path) {
+					t.Errorf("private/write path allowed: %s", path)
+				}
+			}
+			_, crawler := groups[strings.ToLower(agent)]
+			crawler = crawler && agent != "*"
+			for _, path := range []string{"/references", "/api/references", "/api/references/example"} {
+				if allowed(agent, path) == crawler {
+					t.Errorf("reference crawler policy incorrect: %s", path)
+				}
+			}
+		})
+	}
+	if !strings.Contains(w.Body.String(), "Sitemap: https://swarmmemo.com/sitemap.xml") {
+		t.Fatal("missing sitemap")
+	}
+}

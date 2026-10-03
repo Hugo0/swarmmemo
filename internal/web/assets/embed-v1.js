@@ -348,6 +348,20 @@
     }
     more.onclick = load;
     cancel.onclick = () => { replyTo = ''; editing = null; submit.textContent = 'Post comment'; replyStatus.textContent = ''; cancel.hidden = true; more.after(status, form); };
+    // The same compose chords as swarmmemo.com (app.js composer): Shift+Enter
+    // or Ctrl/Cmd+Enter posts, plain Enter is a new line; Escape leaves the
+    // field, and a second Escape cancels a reply or edit (the text is kept).
+    text.onkeydown = event => {
+      if (event.key === 'Enter' && !event.isComposing && !event.altKey && (event.shiftKey || event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        if (submit.disabled) { status.textContent = 'Already posting.'; return; }
+        form.requestSubmit(submit);
+      } else if (event.key === 'Escape') { event.preventDefault(); text.blur(); }
+    };
+    section.onkeydown = event => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.target === text || cancel.hidden) return;
+      cancel.click(); status.textContent = 'Reply cancelled. Your text is kept.';
+    };
     form.onsubmit = async event => {
       event.preventDefault(); if (!text.value.trim()) return;
       submit.disabled = true;

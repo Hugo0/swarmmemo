@@ -188,9 +188,13 @@ func dateParam(name, doc string) pdParam {
 	return pdParam{Name: name, Kind: "date", Doc: doc}
 }
 
-func limitParam(def, max int64) pdParam {
+func limitParam(def, max int64, paging bool) pdParam {
+	doc := "most rows returned, newest first"
+	if paging {
+		doc += "; next_end_date pages back when passed as end_date"
+	}
 	return pdParam{Name: "limit", Kind: "int", Min: 1, Max: max, Default: strconv.FormatInt(def, 10),
-		Doc: "most rows returned, newest first; next_end_date pages back"}
+		Doc: doc}
 }
 
 func intOr(p *pdParams, name string, def int64) int64 {
@@ -327,7 +331,7 @@ var dsNOAAStation = &pdDataset{
 		dateParam("end_date", "last day; default yesterday (UTC)"),
 		{Name: "elements", Kind: "string", Pattern: regexp.MustCompile(`^[A-Z0-9]{4}(,[A-Z0-9]{4}){0,6}$`), Norm: pdUpper,
 			Default: noaaDefaultTy, Doc: "comma-separated subset of " + noaaDefaultTy},
-		limitParam(31, 200),
+		limitParam(31, 200, false),
 	},
 	Validate: func(p *pdParams, today time.Time) bool {
 		key := strings.ToUpper(p.Str("station"))
@@ -492,7 +496,7 @@ var dsSeaIce = &pdDataset{
 		dateParam("date", "the day to rank; default the latest available"),
 		dateParam("start_date", "series from this day (inclusive)"),
 		dateParam("end_date", "series to this day (inclusive)"),
-		limitParam(366, 1200),
+		limitParam(366, 1200, true),
 	},
 	Validate: func(p *pdParams, _ time.Time) bool { return pdDateWindow(p, 0) },
 	Run: func(ctx context.Context, r *pdRun, p *pdParams) (any, error) {
@@ -708,7 +712,7 @@ var dsRecalls = &pdDataset{
 				}
 				return s, true
 			}},
-		limitParam(10, 50),
+		limitParam(10, 50, false),
 	},
 	Run: func(ctx context.Context, r *pdRun, p *pdParams) (any, error) {
 		firm, status := p.Str("firm"), p.Str("status")
@@ -883,7 +887,7 @@ var dsCongressBills = &pdDataset{
 	Params: []pdParam{
 		{Name: "query", Kind: "string", Required: true, MaxLen: 200, Pattern: pdWordRE, Norm: pdTrim, Doc: "words that must all appear in the title or latest action"},
 		{Name: "congress", Kind: "int", Min: 1, Max: 999, Default: "the current Congress", Doc: "Congress number, e.g. 119"},
-		limitParam(8, 50),
+		limitParam(8, 50, false),
 	},
 	Validate: func(p *pdParams, today time.Time) bool {
 		if !p.Has("congress") {

@@ -192,7 +192,7 @@ func ServiceExamples(origin string, e services.Entry) Examples {
 		ex.MCP = `tools/call ` + string(args) + ` on ` + origin + "/mcp"
 	} else {
 		ex.GET = `curl -sS "` + origin + `/c64/$(printf %s "$SIGNED_COMMAND" | basenc --base64url -w0 | tr -d =)"   # the signed command above`
-		ex.MCP = "Signed calls are not hosted tools (the hosted server holds no key); sign locally with the client above. " + origin + "/clients/mcp/README.md#services"
+		ex.MCP = "Signed service calls are not hosted tools; sign locally with the client above. SwarmMemo holds the keys of hosted identities for their messaging tools. " + origin + "/clients/mcp/README.md#services"
 	}
 	if m, ok := anonymousWrite(e); ok {
 		if path, err := services.CallPath(e, m); err == nil {

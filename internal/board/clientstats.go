@@ -53,7 +53,7 @@ const (
 	// ClientCountMinimum is the smallest command count published for a
 	// family on a day; a smaller one is left out.
 	ClientCountMinimum    = 3
-	clientNamesPerDay     = 100    // unknown MCP client names told apart in memory per day
+	clientNamesPerDay     = 100    // unknown MCP client names told apart per process per UTC day; resets on restart
 	clientNamesLogged     = 20     // of which the most frequent are logged at the day's end
 	clientServicesPending = 64     // family:service keys held in memory per day
 	clientSubjectsPerDay  = 100000 // subjects told apart in memory per day (about 4 MB)
@@ -463,7 +463,8 @@ type ClientDay struct {
 	// Families holds only the families with a published count that day.
 	Families map[string]ClientFamilyDay
 	// UnknownMCPClients is how many distinct MCP client names no family
-	// matched were seen that day (the names are never published).
+	// matched were seen that day: at most 100 per process; restarts reset the
+	// cap and can recount names. The names are never published.
 	UnknownMCPClients int64
 }
 

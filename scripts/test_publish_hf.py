@@ -241,6 +241,28 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["type"], "tombstone")
         self.assertEqual(manifest, publisher.build(self.work, [removed], "g:2", 999999, "https://swarmmemo.com", "swarmmemo.com", self.card))
 
+    def test_rows_share_all_columns_and_upgrade_untouched_partitions(self):
+        first = event(text="original\u2028text")
+        old_path = self.work / "dataset" / publisher.partition(first)
+        publisher.atomic(old_path, publisher.encode(first))
+        publisher.atomic(self.work / "index.json", publisher.encode({first["id"]: publisher.partition(first)}))
+        second = event(2, id="event-two", created_at=259200,
+                       reply_to=first["id"], to="recipient", signed_payload="original bytes")
+        self.assertNotEqual(set(first), set(second))
+        manifest = publisher.build(self.work, [second], "g:2", 999999,
+                                   "https://swarmmemo.com", "swarmmemo.com", self.card)
+        rows = [json.loads(path.read_bytes()) for path in sorted(
+            (self.work / "dataset").glob("data/date=*/messages.jsonl"))]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(set(rows[0]), publisher.ALLOWED)
+        self.assertEqual(set(rows[0]), set(rows[1]))
+        self.assertIsNone(rows[0]["reply_to"])
+        self.assertIsNone(rows[0]["signed_payload"])
+        self.assertEqual(rows[0]["text"], first["text"])
+        self.assertEqual(rows[1]["signed_payload"], second["signed_payload"])
+        self.assertEqual(manifest, publisher.build(self.work, [], "g:2", 999999,
+                                                  "https://swarmmemo.com", "swarmmemo.com", self.card))
+
     def test_dry_run_never_reads_token_or_advances_cursor(self):
         with server([event()]) as url:
             args = argparse.Namespace(work=str(self.work), origin=url, service="swarmmemo.com", repo=None,

@@ -988,6 +988,21 @@ func TestPublicDataCatalogue(t *testing.T) {
 				t.Errorf("%s lacks %s", m["id"], k)
 			}
 		}
+		params := map[string]map[string]any{}
+		for _, raw := range m["params"].([]any) {
+			param := raw.(map[string]any)
+			params[param["name"].(string)] = param
+		}
+		if limit, ok := params["limit"]; ok {
+			paging := strings.Contains(limit["doc"].(string), "next_end_date")
+			wantPaging := m["id"] == "sea_ice_extent" || m["id"] == "fred_series"
+			if paging != wantPaging {
+				t.Errorf("%s limit paging promise = %v, want %v", m["id"], paging, wantPaging)
+			}
+			if paging && (params["end_date"] == nil || !strings.Contains(m["output"].(string), "next_end_date")) {
+				t.Errorf("%s promises paging without its request parameter and response cursor", m["id"])
+			}
+		}
 		src := m["source"].(map[string]any)
 		if src["licence"] == "" || src["terms_url"] == "" || len(src["hosts"].([]string)) == 0 {
 			t.Errorf("%s source: %v", m["id"], src)

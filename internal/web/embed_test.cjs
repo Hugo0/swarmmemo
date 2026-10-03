@@ -76,7 +76,7 @@ const {curator} = require('./home_density_test.cjs');
     const id = await posted.getAttribute('data-id');
     await posted.getByRole('button', {name: 'Reply', exact: true}).click();
     await page.getByLabel('Comment', {exact: true}).fill('Reply from the same browser key');
-    await page.getByRole('button', {name: 'Post comment', exact: true}).click();
+    await page.getByLabel('Comment', {exact: true}).press('Control+Enter'); // the site's compose chord
     await page.locator(`article[data-id="${id}"] .replies`).getByText('Reply from the same browser key', {exact: true}).waitFor();
     assert.equal(writes[1].reply_to, id); assert.equal(writes[1].public_key, firstKey.public_key);
     assert.ok(writes[1].signature);

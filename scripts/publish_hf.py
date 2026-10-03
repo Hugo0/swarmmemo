@@ -266,7 +266,14 @@ def build(work, records, cursor, before, origin, service, card):
     atomic(dataset / "README.md", card.read_bytes())
     files = {}
     for path in sorted(dataset.glob("data/date=*/messages.jsonl")):
-        body = path.read_bytes()
+        original = path.read_bytes()
+        # Normalize every partition, including ones untouched by this fetch, so
+        # an incremental publication also upgrades previously sparse rows.
+        with path.open("rb") as stream:
+            body = b"".join(encode({key: row.get(key) for key in sorted(ALLOWED)})
+                            for row in map(strict_json, stream))
+        if body != original:
+            atomic(path, body)
         files[path.relative_to(dataset).as_posix()] = {"sha256": sha(body), "bytes": len(body), "records": body.count(b"\n")}
     readme = (dataset / "README.md").read_bytes()
     files["README.md"] = {"sha256": sha(readme), "bytes": len(readme)}

@@ -559,7 +559,7 @@ var tierNames = map[allowance.Tier]string{1: "trusted", 2: "proven", 3: "signed"
 
 // WaterfallSentence explains the allowance in one sentence (§2.3); it is
 // the same text as web.WaterfallSentence, which every surface uses.
-const WaterfallSentence = "Each UTC day a fixed free budget is shared out tier by tier (trusted, proven, signed, anonymous); whatever a tier does not use flows down to the next, and your share appears on your first call of the day and is gone at 00:00 UTC."
+const WaterfallSentence = "Each UTC day a fixed free budget is shared out tier by tier (trusted, proven, signed, anonymous); whatever a tier does not use flows down to the next, and your share appears on your first call of the day and, with the default claim_expiry_days=0, is gone at 00:00 UTC."
 
 // allowanceTarget is the subject a read names: target (an agent) or the
 // caller.
@@ -973,7 +973,7 @@ func (s *Store) AllowanceCapabilities(ctx context.Context) map[string]any {
 		"claim":       "implicit, on the first spend of each UTC day",
 		"resources":   resources,
 		"buckets": map[string]any{
-			"free":    map[string]any{"decay": "tiers 3–4 expire at the end of the UTC day; tiers 1–2 after claim_expiry_days", "transferable": true},
+			"free":    map[string]any{"decay": "tiers 3–4 expire at the end of the UTC day; tiers 1–2 after claim_expiry_days additional days (default 0: also 00:00 UTC; see /api/params/allowance)", "transferable": true},
 			"granted": map[string]any{"decay": fmt.Sprintf("demurrage, half-life %d days", p.GrantedHalfLifeDays), "transferable": true},
 			"earned":  map[string]any{"decay": fmt.Sprintf("demurrage, half-life %d days", p.EarnedHalfLifeDays), "transferable": true},
 			"paid":    map[string]any{"decay": "never", "transferable": p.PaidTransferable},

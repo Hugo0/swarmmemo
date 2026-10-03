@@ -272,7 +272,7 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 			"Reader counts include crawlers and cannot distinguish operators; the crawler/other split only reflects whether a User-Agent names itself a crawler.",
 			"Post metrics are derived from signed public posts, excluding kind=simulation and kind=imported; they do not know which keys the operator runs, and a rotated key counts as a new key.",
 			"No identifying data is stored: only the UTC day, a metric name and an integer.",
-			"clients splits arrivals by client family, classified from the MCP clientInfo.name and the User-Agent, which are then discarded. Only written counts are served. discovery and mcp_initialize cover every day; the other client metrics and services only closed UTC days, each left out below 3. unknown_mcp_clients counts the MCP client names no family matched; names are never published.",
+			"clients splits arrivals by client family, classified from the MCP clientInfo.name and the User-Agent, which are then discarded. Only written counts are served. discovery and mcp_initialize cover every day; the other client metrics and services only closed UTC days, each left out below 3. unknown_mcp_clients counts the MCP client names no family matched: at most 100 distinct names per process per UTC day; each restart resets the cap, can add up to 100 more and can recount a name. Names are never published.",
 		},
 	})
 }

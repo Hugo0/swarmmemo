@@ -171,6 +171,7 @@ func (s *Server) trustCapabilities() map[string]any {
 		"operation":                   "trust.get",
 		"agent":                       "/api/agent/AGENT/trust",
 		"runs":                        "/api/trust/runs",
+		"run":                         "/api/trust/runs/ID",
 		"snapshot":                    "/api/trust/runs/ID/snapshot",
 		"evidence":                    "/api/trust/evidence",
 		"params":                      "/api/params/trust",
@@ -183,4 +184,46 @@ func (s *Server) trustCapabilities() map[string]any {
 		"ledger_effects":              false,
 		"allocation":                  f.Trust == board.TrustAllocation,
 	}
+}
+
+// addTrustOpenAPI describes the public reads used to inspect and reproduce runs.
+func (s *Server) addTrustOpenAPI(paths, response map[string]any) {
+	if s.cfg.Features.Trust == board.TrustOff {
+		return
+	}
+	for _, list := range []struct {
+		path, summary string
+		page, max     int
+	}{
+		{"/api/trust/runs", "List run summaries; read /api/trust/runs/{id} for inputs, capture_bound and snapshot", trustRunsPage, trustRunsMax},
+		{"/api/trust/evidence", "List public mechanical evidence for trust penalties", trustEvidencePage, trustEvidenceMax},
+	} {
+		paths[list.path] = map[string]any{"get": map[string]any{
+			"summary":     list.summary,
+			"description": "Newest first; pass data.next_before as before to read the next page.",
+			"parameters": []map[string]any{
+				{"name": "before", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1}},
+				{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": list.max, "default": list.page}},
+			}, "responses": response,
+		}}
+	}
+	id := []map[string]any{{"name": "id", "in": "path", "required": true, "schema": map[string]any{"type": "integer", "minimum": 1}}}
+	paths["/api/trust/runs/{id}"] = map[string]any{"get": map[string]any{
+		"summary":     "Read one run, including inputs, capture_bound, snapshot metadata, parameters and output_sha256",
+		"description": "No query parameters. data.snapshot is null when the run kept no snapshot.",
+		"parameters":  id, "responses": response,
+	}}
+	paths["/api/trust/runs/{id}/snapshot"] = map[string]any{"get": map[string]any{
+		"summary":     "Download the exact public inputs read by a run",
+		"description": "No query parameters. JSONL up to 64 MiB; X-Snapshot-SHA256 gives the content hash.",
+		"parameters":  id, "responses": map[string]any{"200": map[string]any{
+			"description": "Run input snapshot",
+			"content":     map[string]any{"application/x-ndjson": map[string]any{"schema": map[string]any{"type": "string"}}},
+		}},
+	}}
+	paths["/api/agent/{agent}/trust"] = map[string]any{"get": map[string]any{
+		"summary":    "Read an agent's trust estimate and its evidence",
+		"parameters": []map[string]any{{"name": "agent", "in": "path", "required": true, "schema": map[string]any{"type": "string"}}},
+		"responses":  response,
+	}}
 }

@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/jsonschema-go/jsonschema"
+
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
@@ -204,7 +206,7 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 	var openapi map[string]any
 	_ = json.Unmarshal(makeRequest(s, "GET", "/openapi.json", "", "").Body.Bytes(), &openapi)
 	var variants []string
-	for _, v := range dig(openapi, "components", "schemas", "ServiceData", "oneOf").([]any) {
+	for _, v := range dig(openapi, "components", "schemas", "ServiceData", "anyOf").([]any) {
 		variants = append(variants, v.(map[string]any)["title"].(string))
 	}
 	var methods []string
@@ -342,5 +344,46 @@ func TestServiceSurfacesAbsentWhileOff(t *testing.T) {
 		if c.Operation == "services.list" {
 			t.Fatal("a surface read services.list while no service is enabled")
 		}
+	}
+}
+
+func TestServiceKeyExamplesValidateAgainstOpenAPI(t *testing.T) {
+	s, _ := catalogServer(board.Features{Services: services.Known()})
+	var spec struct {
+		Components struct{ Schemas map[string]json.RawMessage }
+	}
+	if err := json.Unmarshal(makeRequest(s, "GET", "/openapi.json", "", "").Body.Bytes(), &spec); err != nil {
+		t.Fatal(err)
+	}
+	validators := map[string]*jsonschema.Resolved{}
+	for _, name := range []string{"Command", "ServiceData"} {
+		var schema jsonschema.Schema
+		if err := json.Unmarshal(spec.Components.Schemas[name], &schema); err != nil {
+			t.Fatal(err)
+		}
+		resolved, err := schema.Resolve(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		validators[name] = resolved
+	}
+	for _, target := range []string{"screen", "notary"} {
+		t.Run(target+".key", func(t *testing.T) {
+			const data = `{"schema":1,"method":"key","args":{}}`
+			request := map[string]any{"operation": "service.read", "target": target, "data": data}
+			if err := validators["Command"].Validate(request); err != nil {
+				t.Fatalf("command: %v", err)
+			}
+			var parsed any
+			if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+				t.Fatal(err)
+			}
+			if err := validators["ServiceData"].Validate(parsed); err != nil {
+				t.Fatalf("service data: %v", err)
+			}
+		})
+	}
+	if err := validators["ServiceData"].Validate(map[string]any{"schema": 1, "method": "nonexistent", "args": map[string]any{}}); err == nil {
+		t.Fatal("unknown service method validated")
 	}
 }

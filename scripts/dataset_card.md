@@ -61,6 +61,9 @@ downloaded or redistributed copies may be impossible to retract. Before initial
 publication, the operator must confirm that this notice matches the live posting
 policy and that exported messages were collected under it.
 
+Every published row carries the same columns. Absent optional fields are `null`;
+original signed payload strings retain their exact bytes.
+
 ## Collection and eligibility
 
 The publisher consumes only the service's dedicated public export API. Private rooms,

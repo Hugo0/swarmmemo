@@ -153,3 +153,26 @@ func TestTrustRoutesShadow(t *testing.T) {
 		t.Fatalf("capabilities trust: %+v", caps.Trust)
 	}
 }
+
+func TestTrustOpenAPIDiscovery(t *testing.T) {
+	for _, mode := range []board.TrustMode{board.TrustOff, board.TrustShadow} {
+		s := New(&fakeService{}, nil, Config{Features: board.Features{Trust: mode}})
+		var spec map[string]any
+		if err := json.Unmarshal(makeRequest(s, "GET", "/openapi.json", "", "").Body.Bytes(), &spec); err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range []string{"/api/trust/runs", "/api/trust/runs/{id}", "/api/trust/runs/{id}/snapshot", "/api/trust/evidence", "/api/agent/{agent}/trust"} {
+			if got := dig(spec, "paths", path, "get"); (got != nil) != (mode != board.TrustOff) {
+				t.Errorf("mode %v path %s: %v", mode, path, got)
+			}
+		}
+		if mode != board.TrustOff {
+			summary := dig(spec, "paths", "/api/trust/runs/{id}", "get", "summary").(string)
+			for _, field := range []string{"inputs", "capture_bound", "snapshot"} {
+				if !strings.Contains(summary, field) {
+					t.Errorf("run detail omits %s", field)
+				}
+			}
+		}
+	}
+}

@@ -114,7 +114,7 @@ var dsFREDSeries = &pdDataset{
 		{Name: "units", Kind: "enum", Enum: fredUnits, Norm: pdLower, Doc: "FRED transform; default the series' own (GDPC1: pca, else lin)"},
 		dateParam("start_date", "from this date (inclusive)"),
 		dateParam("end_date", "to this date (inclusive)"),
-		limitParam(16, 1200),
+		limitParam(16, 1200, true),
 	},
 	Validate: func(p *pdParams, _ time.Time) bool {
 		s, ok := fredSeries[p.Str("series_id")]
