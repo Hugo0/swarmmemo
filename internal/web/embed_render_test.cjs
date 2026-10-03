@@ -40,7 +40,9 @@ function mount(messages) {
     navigator: {},
   };
   sandbox.globalThis = sandbox;
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'assets/embed-v1.js'), 'utf8'), sandbox);
+  // The same bundle embed.go serves: memo-core.js and embed-v1.js in one closure.
+  const read = name => fs.readFileSync(path.join(__dirname, 'assets', name), 'utf8');
+  vm.runInNewContext('(() => {\n' + read('memo-core.js') + '\n' + read('embed-v1.js') + '})();\n', sandbox);
   return {body, done: async () => { for (let i = 0; i < 2000 && !(requests && sandbox.document.currentScript.parent.children[1]?.shadowRoot?.querySelectorAll('article').length); i++) await new Promise(r => setTimeout(r, 5)); }};
 }
 
@@ -65,5 +67,25 @@ function depthOf(node) { let max = 0; for (const c of node.children) max = Math.
   const flat = articles.find(a => a.dataset.id === 'm4').children.find(c => c.className === 'flat');
   assert.equal(flat.children.length, n - 5, 'replies past depth four share one flat list');
   assert.equal(articles.find(a => a.dataset.id === 'm3').querySelectorAll('button').find(b => b.className === 'fold').textContent, 'Hide replies');
-  console.log('PASS: ' + n + '-reply chain rendered in ' + elapsed + 'ms at DOM depth ' + depthOf(root) + '.');
+  // Header count, heart state and sorting of top-level comments (replies stay in order).
+  const small = mount([
+    {id: 'a', sequence: 1, created_at: 1e9, text: 'first', handle: 'ha', votes: {up: 0}},
+    {id: 'b', sequence: 2, created_at: 1e9 + 1, text: 'second', handle: 'hb', votes: {up: 5}},
+    {id: 'c', sequence: 3, created_at: 1e9 + 2, text: 'reply', handle: 'hc', reply_to: 'a', votes: {up: 9}},
+    {id: 'd', sequence: 4, created_at: 1e9 + 3, text: 'gone', hidden: true},
+  ]);
+  await small.done();
+  const sroot = small.body.children[1].shadowRoot;
+  const tops = () => sroot.querySelectorAll('article').filter(a => a.parent.parent?.tagName === 'section').map(a => a.dataset.id);
+  assert.equal(sroot.querySelectorAll('h2')[0].textContent, '3 comments', 'removed comments are not counted');
+  const heart = sroot.querySelectorAll('article').find(a => a.dataset.id === 'b').querySelectorAll('button').find(b => b.className === 'heart');
+  assert.equal(heart.getAttribute('aria-label'), 'Like (5)'); assert.equal(heart.getAttribute('aria-pressed'), 'false');
+  assert.match(sroot.querySelectorAll('time')[0].title, /UTC$/, 'exact time on hover');
+  assert.deepEqual(tops(), ['a', 'b']);
+  const sortButton = name => sroot.querySelectorAll('button').find(b => b.textContent === name);
+  sortButton('Newest').onclick(); assert.deepEqual(tops(), ['b', 'a']);
+  sortButton('Top').onclick(); assert.deepEqual(tops(), ['b', 'a'], 'top-level by likes; a reply\'s likes do not lift its parent');
+  assert.equal(sortButton('Top').getAttribute('aria-pressed'), 'true');
+  sortButton('Oldest').onclick(); assert.deepEqual(tops(), ['a', 'b']);
+  console.log('PASS: ' + n + '-reply chain rendered in ' + elapsed + 'ms at DOM depth ' + depthOf(root) + '; count, heart state and sort.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

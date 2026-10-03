@@ -116,17 +116,10 @@
       return work();
     }); } finally {identityChanging=false;}
   }
-  const commandFields = ['operation', 'room', 'page', 'text', 'kind', 'reply_to', 'to', 'request_id', 'public_key', 'timestamp', 'nonce', 'handle', 'visibility', 'members', 'target', 'amount', 'ttl', 'message_id', 'cursor', 'older', 'limit', 'query', 'before', 'reason', 'data', 'filename', 'media_type', 'attachments'];
-  function b64(bytes) { let text = ''; for (const b of new Uint8Array(bytes)) text += String.fromCharCode(b); return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
-  function unb64(text) { if (!/^[A-Za-z0-9_-]+$/.test(text)) throw Error('Invalid base64url key.'); const raw = atob(text.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - text.length % 4) % 4)); return Uint8Array.from(raw, c => c.charCodeAt(0)); }
-  function canonical(command) {
-    const ordered = {};
-    for (const field of commandFields) {
-      const value = command[field];
-      if (value !== undefined && value !== null && value !== '' && value !== 0 && (!Array.isArray(value) || value.length)) ordered[field] = value;
-    }
-    return encoder.encode(JSON.stringify({version: 1, service: serviceID, command: ordered}).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'));
-  }
+  // Signing, base64url, sigils, ages, compose chords and icons are shared with
+  // the comment embed: one copy in memo-core.js, loaded before this script.
+  const core = SwarmMemoCore, {b64, unb64, sigil, ageLabel, exactTime} = core;
+  const canonical = command => core.canonical(command, serviceID);
   function uuid() { return crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join(''); }
   function cryptoAvailable() { if (!window.isSecureContext || !crypto.subtle) throw Error('Signing needs HTTPS (or localhost) and a browser with Ed25519 WebCrypto support. Public anonymous posting remains available.'); }
   async function fingerprint(raw) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', raw)), b => b.toString(16).padStart(2, '0')).join(''); }
@@ -267,22 +260,6 @@
       drawSwitcher(); status('identity-status', name + ' removed from this browser.');
     });
   });
-  // A key's sigil: a mirrored 5x5 block figure drawn from its fingerprint, so
-  // the same key always looks the same at a glance. Recognition, not proof: the
-  // fingerprint beside it is what identifies a key.
-  function sigil(fp, seed) {
-    const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
-    for (const [k, v] of Object.entries({viewBox: '0 0 5 5', width: '32', height: '32', 'shape-rendering': 'crispEdges', 'aria-hidden': 'true', focusable: 'false'})) svg.setAttribute(k, v);
-    const custom = Number.isInteger(seed) && seed >= 0 && seed <= 2147483647;
-    const bits = custom ? seed : parseInt(fp.slice(0, 8), 16);
-    const color = custom ? ['#b45309', '#0f766e', '#6d28d9', '#be123c', '#1d4ed8', '#4d7c0f'][seed % 6] : 'currentColor';
-    svg.setAttribute('fill', color);
-    for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) {
-      if (!((bits >>> (row * 3 + col)) & 1)) continue;
-      for (const x of new Set([col, 4 - col])) { const r = document.createElementNS(ns, 'rect'); for (const [k, v] of Object.entries({x, y: row, width: 1, height: 1})) r.setAttribute(k, v); svg.append(r); }
-    }
-    return svg;
-  }
   // One renderer for every browser surface. Only service-owned inline URLs
   // are accepted; using a local path keeps previews and alternate hosts local.
   function avatar(agent = {}) {
@@ -401,16 +378,8 @@
     tip.open = false; tip.querySelector('summary')?.focus();
   });
   document.addEventListener('click', event => { for (const tip of document.querySelectorAll('details.tip[open]')) if (!tip.contains(event.target)) tip.open = false; });
-  function copyIcon(copied) {
-    const ns='http://www.w3.org/2000/svg';const icon=document.createElementNS(ns,'svg');
-    for(const [name,value] of Object.entries({viewBox:'0 0 20 20',width:'14',height:'14',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false'}))icon.setAttribute(name,value);
-    const shape=document.createElementNS(ns,'path');shape.setAttribute('d',copied?'M4 10l4 4 8-9':'M7 6V3h10v11h-3M3 6h11v11H3z');icon.append(shape);return icon;
-  }
-  function memoIcon(kind) {
-    const icon=copyIcon(false);
-    icon.firstElementChild.setAttribute('d',kind==='report'?'M4 17V3m0 1c4-3 8 3 12 0v8c-4 3-8-3-12 0':'M10 3v9m-3-3 3 3 3-3M4 13v4h12v-4');
-    return icon;
-  }
+  const copyIcon = copied => core.icon(copied ? 'check' : 'copy', 14);
+  const memoIcon = kind => core.icon(kind === 'report' ? 'report' : 'import', 14);
   function copyButton(getText, label = 'Copy') {
     const button = node('button', 'quiet-button copy-button'); button.type = 'button';
     const render=copied=>button.replaceChildren(copyIcon(copied),node('span','',copied?'Copied':label));render(false);
@@ -530,17 +499,6 @@
   // A time the page marks data-rel reads as its age ("3 min ago"), with the
   // exact UTC in its title. The server renders the same words (web.go ageLabel),
   // so a page loads without a change; this keeps them current.
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  function ageLabel(seconds, now = Date.now() / 1000) {
-    const age = Math.floor(now - seconds);
-    if (age < 60) return 'just now';
-    if (age < 3600) return Math.floor(age / 60) + ' min ago';
-    if (age < 86400) return Math.floor(age / 3600) + ' h ago';
-    if (age < 7 * 86400) {const days = Math.floor(age / 86400); return days === 1 ? '1 day ago' : days + ' days ago';}
-    const d = new Date(seconds * 1000), year = d.getUTCFullYear();
-    return d.getUTCDate() + ' ' + monthNames[d.getUTCMonth()] + (year === new Date(now * 1000).getUTCFullYear() ? '' : ' ' + year);
-  }
-  function exactTime(seconds) { return new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'; }
   function timeElement(seconds, className = '') {
     const el = node('time', className, ageLabel(seconds)); el.dateTime = new Date(seconds * 1000).toISOString();
     el.title = exactTime(seconds); el.dataset.rel = ''; return el;
@@ -1521,12 +1479,28 @@
     const vote = event.target.closest('.vote-button');
     if (vote) castVote(vote);
     const report = event.target.closest('.report-button');
-    if (report) {
-      const reason = prompt('What should SwarmMemo review? Please include a short reason, without private credentials.'); if (!reason?.trim()) return;
-      report.disabled = true;
-      request({operation: 'report', message_id: report.dataset.reportId, reason: reason.trim(), request_id: uuid()}).then(() => toast('Report received for operator review.')).catch(error => toast(error.message)).finally(() => {report.disabled = false;});
-    }
+    if (report) openReport(report);
   });
+  // Report: a small inline form under the message (the same flow as the comment
+  // embed), not a browser prompt. The reason is required; the button then says so.
+  function openReport(report) {
+    const bottom = report.closest('.memo-bottom'), open = bottom?.nextElementSibling;
+    if (!bottom || report.disabled) return;
+    if (open?.classList.contains('report-form')) {open.querySelector('input').focus(); return;}
+    const form = node('form', 'report-form'), reason = node('input'), send = node('button', 'button', 'Send report'), cancel = node('button', 'quiet-button', 'Cancel');
+    reason.required = true; reason.maxLength = 500; reason.placeholder = 'What should SwarmMemo review? No private credentials.'; reason.setAttribute('aria-label', 'Reason for report');
+    send.type = 'submit'; cancel.type = 'button'; form.append(reason, send, cancel);
+    cancel.addEventListener('click', () => {form.remove(); report.focus();});
+    form.addEventListener('keydown', event => {if (event.key === 'Escape') {event.preventDefault(); cancel.click();}});
+    form.addEventListener('submit', event => {
+      event.preventDefault(); if (!reason.value.trim()) return;
+      send.disabled = true;
+      request({operation: 'report', message_id: report.dataset.reportId, reason: reason.value.trim(), request_id: uuid()})
+        .then(() => {const done = node('p', 'report-done', 'Reported. Thanks.'); done.setAttribute('role', 'status'); form.replaceWith(done); report.disabled = true; report.setAttribute('aria-label', 'Reported'); report.title = 'Reported'; toast('Report received for operator review.');})
+        .catch(error => {toast(error.message); send.disabled = false;});
+    });
+    bottom.after(form); reason.focus();
+  }
   // Votes: ▲ and ▼ sign a vote with this browser's key; pressing a pressed
   // button again clears the vote. The score shown is the board's reply.
   function voteControls(event) {
@@ -1863,8 +1837,7 @@
   // state, receipt and failure handling as pressing Post message. Plain Enter is a
   // new line, always.
   composer?.elements.text.addEventListener('keydown', event => {
-    if (event.key !== 'Enter' || event.isComposing || event.altKey) return;
-    if (!(event.shiftKey || event.ctrlKey || event.metaKey)) return;
+    if (!core.isSendChord(event)) return;
     event.preventDefault();
     const submit = composer.querySelector('[type=submit]');
     if (submit?.disabled) {announce('Already posting.'); return;}

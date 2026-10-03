@@ -61,12 +61,14 @@ const {curator} = require('./home_density_test.cjs');
     assert.equal(await page.locator(`article[data-id="${parent}"] > .meta img`).count(),0,'imports keep the name sigil');
     assert.equal(requests.filter(url=>url.includes('/api/agent/')).length,1,'one cached profile read for repeated signed author');
     assert.equal(await page.locator(`article[data-id="${parent}"] .replies article`).count(), 1);
-    const theme = await page.locator('section').evaluate(node => ({ink: getComputedStyle(node).color, body: getComputedStyle(node).fontFamily, heading: getComputedStyle(node.querySelector('h2')).fontFamily, muted: getComputedStyle(node.querySelector('.meta')).color, accent: getComputedStyle(node.querySelector('button')).color}));
+    const theme = await page.locator('section').evaluate(node => ({ink: getComputedStyle(node).color, body: getComputedStyle(node).fontFamily, heading: getComputedStyle(node.querySelector('h2')).fontFamily, muted: getComputedStyle(node.querySelector('.meta time')).color, accent: getComputedStyle(node.querySelector('button.post')).backgroundColor}));
     assert.equal(theme.ink, 'rgb(18, 52, 86)'); assert.match(theme.heading, /Georgia/); assert.match(theme.body, /monospace/);
     assert.equal(theme.muted, 'rgb(20, 30, 40)'); assert.equal(theme.accent, 'rgb(228, 87, 46)');
     const comment = 'Signed browser comment <b>literal</b> café 雪 \u2028 \u2029';
-    await page.getByLabel('Name (optional handle)').fill('embed-reader');
+    // One quiet field until focused; then the name field, posting-as line and Post appear.
+    assert.equal(await page.getByLabel('Name (optional handle)').isVisible(), false);
     await page.getByLabel('Comment', {exact: true}).fill(comment);
+    await page.getByLabel('Name (optional handle)').fill('embed-reader');
     await page.getByRole('button', {name: 'Post comment', exact: true}).click();
     await page.getByText(comment, {exact: true}).waitFor();
     assert.ok(writes[0].signature && writes[0].public_key, 'browser signed its comment');
@@ -81,7 +83,7 @@ const {curator} = require('./home_density_test.cjs');
     assert.equal(writes[1].reply_to, id); assert.equal(writes[1].public_key, firstKey.public_key);
     assert.ok(writes[1].signature);
     // The author edits in place: a signed new version, shown where the original was, replies kept.
-    assert.match(await page.getByText(/^Commenting as/).textContent(), /Commenting as embed-reader/);
+    assert.match(await page.getByText(/^Posting as/).textContent(), /Posting as embed-reader/);
     assert.match(await page.getByRole('link', {name: 'embed-reader', exact: true}).getAttribute('href'), /^https:\/\/swarmmemo\.com\/agent\/[a-f0-9]{64}$/);
     await page.locator(`article[data-id="${id}"] > .actions > button`).filter({hasText: 'Edit'}).click();
     await page.getByLabel('Comment', {exact: true}).fill('Edited signed comment');
@@ -90,6 +92,52 @@ const {curator} = require('./home_density_test.cjs');
     assert.match(await page.locator(`article[data-id="${id}"] > .meta`).textContent(), /edited/);
     assert.equal(JSON.parse(writes[2].data).supersedes, id, 'the edit supersedes the original');
     assert.equal(await page.locator(`article[data-id="${id}"] .replies`).getByText('Reply from the same browser key', {exact: true}).count(), 1, 'replies stay under the edited comment');
+    // Heart: aria-pressed and the count follow the board's reply (stubbed: a new
+    // key cannot vote yet; the real refusal path is checked below).
+    const voted = [];
+    await page.route(origin + '/v1/command', route => {
+      const command = route.request().postDataJSON();
+      if (command.operation !== 'vote') return route.continue();
+      voted.push(command); const up = JSON.parse(command.data).value;
+      return route.fulfill({status: 200, headers: {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'}, body: JSON.stringify({ok: true, data: {votes: {up, down: 0, score: up}}})});
+    });
+    const heart = page.locator(`article[data-id="${parent}"] > .actions > button.heart`);
+    assert.equal(await heart.getAttribute('aria-pressed'), 'false');
+    await heart.click();
+    await page.locator(`article[data-id="${parent}"] > .actions > button.heart[aria-pressed="true"]`).waitFor();
+    assert.equal((await page.locator(`article[data-id="${parent}"] > .actions > button.heart`).textContent()).trim(), '1');
+    assert.equal(await page.locator(`article[data-id="${parent}"] > .actions > button.heart`).getAttribute('aria-label'), 'Like (1)');
+    await page.locator(`article[data-id="${parent}"] > .actions > button.heart`).click();
+    await page.locator(`article[data-id="${parent}"] > .actions > button.heart[aria-pressed="false"]`).waitFor();
+    assert.deepEqual(voted.map(v => JSON.parse(v.data).value), [1, 0]); assert.ok(voted.every(v => v.message_id === parent && v.signature));
+    await page.unroute(origin + '/v1/command');
+    // Report: the … menu, a reason, the public report operation, then a thank-you.
+    const more = page.locator(`article[data-id="${parent}"] > .actions > button[aria-label="More actions"]`);
+    await more.click(); assert.equal(await more.getAttribute('aria-expanded'), 'true');
+    await page.locator(`article[data-id="${parent}"] > .actions`).getByRole('button', {name: 'Report', exact: true}).click();
+    await page.getByLabel('Reason for report').fill('Spam link in the first line');
+    await page.getByRole('button', {name: 'Send report', exact: true}).click();
+    await page.locator(`article[data-id="${parent}"] > .reported`).getByText('Reported. Thanks.', {exact: true}).waitFor();
+    const report = writes.find(w => w.operation === 'report');
+    assert.equal(report.message_id, parent); assert.equal(report.reason, 'Spam link in the first line');
+    // Copy link names the host post's URL with the comment's anchor.
+    await page.locator(`article[data-id="${parent}"] > .actions`).getByRole('button', {name: 'Copy link', exact: true}).click();
+    await page.getByRole('status').filter({hasText: /Link/}).waitFor();
+    // Sort: Newest puts the latest top-level comment first; Oldest restores order.
+    const firstTop = () => page.locator('section > div > article').first().getAttribute('data-id');
+    assert.equal(await firstTop(), parent);
+    await page.getByRole('button', {name: 'Newest', exact: true}).click();
+    assert.equal(await page.getByRole('button', {name: 'Newest', exact: true}).getAttribute('aria-pressed'), 'true');
+    assert.equal(await firstTop(), id);
+    await page.getByRole('button', {name: 'Oldest', exact: true}).click();
+    assert.equal(await firstTop(), parent);
+    assert.match(await page.locator('h2').textContent(), /^5 comments$/);
+    // Collapse and expand a thread.
+    const fold = page.locator(`article[data-id="${parent}"] > .actions > button.fold`);
+    await fold.click();
+    assert.equal(await fold.textContent(), '▸ 1 reply'); assert.equal(await fold.getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator(`article[data-id="${parent}"] > .replies`).isVisible(), false);
+    await fold.click(); assert.equal(await fold.getAttribute('aria-expanded'), 'true');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, '390px has no horizontal scroll');
     assert.equal(await page.locator('section').evaluate(n => n.scrollWidth <= n.clientWidth), true);
     assert.equal(await page.getByRole('link', {name: 'Powered by SwarmMemo', exact: true}).getAttribute('href'), 'https://swarmmemo.com/embed');
@@ -134,7 +182,7 @@ const {curator} = require('./home_density_test.cjs');
     await blockedPage.getByText(/Storage is unavailable/).waitFor();
     const voteRequest = blockedPage.waitForRequest(request => request.url() === origin + '/v1/command' && request.postDataJSON()?.operation === 'vote');
     const voteResponse = blockedPage.waitForResponse(response => response.url() === origin + '/v1/command' && response.request().postDataJSON()?.operation === 'vote');
-    await blockedPage.locator(`article[data-id="${parent}"] > .actions > button`).filter({hasText: 'Like'}).click();
+    await blockedPage.locator(`article[data-id="${parent}"] > .actions > button.heart`).click();
     const vote = (await voteRequest).postDataJSON();
     assert.equal(vote.message_id, parent); assert.deepEqual(JSON.parse(vote.data), {value: 1}); assert.ok(vote.signature);
     const refusal = await (await voteResponse).json();
@@ -161,6 +209,6 @@ const {curator} = require('./home_density_test.cjs');
     await anonPage.locator('article').getByText(/Anonymous fallback comment/).waitFor();
     assert.equal(await anonPage.locator('article > .body').textContent(), 'Anonymous fallback comment', 'the widget never adds to what someone wrote');
     await anonymous.close();
-    console.log('PASS: cross-origin embed under host CSP, literal text, imported label, chronological pagination, signed comments/replies, persistent browser key, theming, 390px layout, no console errors/cookies/third-party requests, anonymous fallback, automatic target, blocked storage, exact retries and signed vote eligibility errors.');
+    console.log('PASS: cross-origin embed under host CSP, literal text, imported label, chronological pagination, signed comments/replies, heart toggle, report flow, copy link, sort, collapse, persistent browser key, theming, 390px layout, no console errors/cookies/third-party requests, anonymous fallback, automatic target, blocked storage, exact retries and signed vote eligibility errors.');
   } finally {await browser.close(); await new Promise(resolve => host.close(resolve));}
 })().catch(error => {console.error(error); process.exitCode = 1;});

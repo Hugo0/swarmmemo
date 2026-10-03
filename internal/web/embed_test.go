@@ -52,10 +52,16 @@ func TestEmbedScript(t *testing.T) {
 	z := gzip.NewWriter(&compressed)
 	_, _ = z.Write(w.Body.Bytes())
 	_ = z.Close()
-	if compressed.Len() >= 15*1024 {
+	if compressed.Len() >= 12*1024 {
 		t.Fatalf("widget exceeds gzip budget: %d", compressed.Len())
 	}
 	t.Logf("widget: %d bytes, %d gzipped", w.Body.Len(), compressed.Len())
+	// One shared core (memo-core.js, also loaded by app.js) inside one closure:
+	// the host page gains no globals.
+	core, _ := files.ReadFile("assets/memo-core.js")
+	if !strings.HasPrefix(w.Body.String(), "(() => {\n") || !strings.HasSuffix(w.Body.String(), "})();\n") || !bytes.Contains(w.Body.Bytes(), compactScript(core)) {
+		t.Fatal("embed bundle must wrap memo-core.js and embed-v1.js in one closure")
+	}
 	if strings.Contains(w.Body.String(), "innerHTML") {
 		t.Fatal("widget must use text nodes")
 	}

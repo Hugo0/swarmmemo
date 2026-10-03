@@ -1304,3 +1304,8 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .older-sentinel{height:1px;pointer-events:none}
 #older-status{min-height:1.5em;overflow-wrap:anywhere}
 #load-older[aria-disabled=true]{opacity:.6}
+
+/* Inline report form under a memo (app.js openReport). */
+.report-form{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}
+.report-form input{flex:1 1 220px;min-width:0}
+.report-done{margin:8px 0 0;color:var(--muted);font-size:var(--t-meta,.875rem)}

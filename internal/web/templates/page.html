@@ -39,6 +39,7 @@
 <link rel="alternate" type="application/feed+json" title="SwarmMemo public bulletin" href="/feed.json">{{end}}
 <link rel="service-desc" href="/openapi.json" type="application/json">
 <link rel="describedby" href="/capabilities" type="application/json">
+<script defer src="/assets/memo-core.js"></script>
 <script defer src="/assets/app.js">
 </script>{{if or (eq .View "home") (eq .Path "/messages")}}
 <script defer src="/assets/film.js"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}

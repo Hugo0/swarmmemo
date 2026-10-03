@@ -1,8 +1,10 @@
-/* SwarmMemo embed v1. No dependencies; public text only. */
+/* SwarmMemo embed v1. No dependencies; public text only. Served inside one
+   closure after memo-core.js (embed.go), which provides SwarmMemoCore. */
 (() => {
   'use strict';
   const script = document.currentScript;
   if (!script) return;
+  const core = SwarmMemoCore;
   const slot = 'swarmmemo.embed.key.v1';
   const service = 'swarmmemo.com';
   const el = (tag, text, cls) => {
@@ -10,6 +12,12 @@
     if (text !== undefined) node.textContent = text;
     if (cls) node.className = cls;
     return node;
+  };
+  const button = (text, cls, iconName) => {
+    const b = el('button', undefined, cls); b.type = 'button';
+    if (iconName) b.append(core.icon(iconName));
+    if (text) b.append(el('span', text));
+    return b;
   };
   let host;
   try {
@@ -45,7 +53,7 @@
       if (attr.url.length > 2048) throw Error('data-url is too long.');
       const parsed = new URL(attr.url);
       if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) throw Error('data-url must be a public HTTP or HTTPS URL.');
-      url = parsed.href;
+      parsed.hash = ''; url = parsed.href;
     }
     for (const [name, variable, property] of [['themeHeadingFont', '--sm-heading-font', 'font-family'], ['themeInk', '--sm-ink', 'color'], ['themeAccent', '--sm-accent', 'color']]) {
       const value = attr[name];
@@ -53,64 +61,115 @@
       if (value.length > 200 || /[;{}\\\x00-\x1f]|url\s*\(|var\s*\(/i.test(value) || !CSS.supports(property, value)) throw Error('Invalid theme value: ' + name);
       host.style.setProperty(variable, value);
     }
+    // Colours derive from the ink (the host's text colour unless set), so a dark
+    // host gets light text with matching muted text, hairlines and hover tints.
     const style = el('style');
     style.textContent = `
-      :host{display:block;min-width:0;font:inherit;color:var(--sm-ink,#1f2937)}
-      *{box-sizing:border-box}section{background:var(--sm-bg,transparent);overflow-wrap:anywhere;line-height:1.5}
-      h2{font-family:var(--sm-heading-font,inherit);font-size:1.5em}a{color:var(--sm-accent,#e4572e)}
-      article{border-top:1px solid var(--sm-border,#d1d5db);padding:1em 0;min-width:0}
-      .meta,footer,.notice{color:var(--sm-muted,#64748b);font-size:.85em}.body{white-space:pre-wrap;margin:.6em 0}
-      .replies{margin-left:min(1.25em,4vw);padding-left:min(.9em,3vw);border-left:2px solid var(--sm-border,#d1d5db)}.replies article,.flat article{border-top:0;padding:.6em 0}
-      .meta{display:flex;align-items:center;gap:.45em;flex-wrap:wrap}.sigil svg,.sigil img{width:100%;height:100%;object-fit:cover}.meta strong{color:var(--sm-ink,#1f2937)}.sigil{width:1.4em;height:1.4em;color:var(--sm-accent,#e4572e);flex:none}
-      .to{display:inline-block;font-size:.85em;color:var(--sm-muted,#64748b);margin-top:.3em}.flash{background:color-mix(in srgb,var(--sm-accent,#e4572e) 12%,transparent)}.actions{display:flex;flex-wrap:wrap}.fold{border:0;padding-left:0;color:var(--sm-muted,#64748b)}
-      button,input,textarea{font:inherit;max-width:100%}button{cursor:pointer;color:var(--sm-accent,#e4572e);background:var(--sm-bg,transparent);border:1px solid var(--sm-border,#d1d5db);border-radius:4px;padding:.35em .7em;margin:.2em .5em .2em 0}
-      button:disabled{opacity:.6;cursor:wait}input,textarea{display:block;width:100%;color:inherit;background:var(--sm-bg,transparent);border:1px solid var(--sm-border,#d1d5db);border-radius:4px;padding:.5em}
-      textarea{min-height:7em;resize:vertical}label{display:block;margin:.65em 0}footer{margin-top:1.5em}footer a{color:inherit}
-      :focus-visible{outline:2px solid var(--sm-accent,#e4572e);outline-offset:2px}[hidden]{display:none}
-    `;
-    const section = el('section'); section.setAttribute('aria-label', 'Comments');
-    section.append(el('h2', 'Comments'));
-    if (url) { const link = el('a', title || 'Back to this post'); link.href = url; link.rel = 'noreferrer'; section.append(link); }
-    else if (title) section.append(el('p', title));
-    const list = el('div'), more = el('button', 'Load more comments'); more.type = 'button'; more.hidden = true;
+:host{display:block;min-width:0;font:inherit;color:var(--sm-ink,inherit)}
+*{box-sizing:border-box}[hidden]{display:none!important}
+section{--a:var(--sm-accent,#e4572e);--m:var(--sm-muted,color-mix(in srgb,currentColor 60%,transparent));--b:var(--sm-border,color-mix(in srgb,currentColor 15%,transparent));--t:color-mix(in srgb,currentColor 6%,transparent);background:var(--sm-bg,transparent);overflow-wrap:anywhere;line-height:1.5;font-size:1rem}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding-bottom:12px;margin-bottom:16px;border-bottom:1px solid var(--b)}
+h2{font-family:var(--sm-heading-font,inherit);font-size:1.25em;font-weight:650;margin:0;letter-spacing:-.01em}
+.sort{display:flex;gap:2px;font-size:.875em}.sort button{padding:4px 10px;border-radius:999px;color:var(--m)}.sort button[aria-pressed=true]{color:inherit;background:var(--t);font-weight:600}
+button,input,textarea{font:inherit;color:inherit;max-width:100%}
+button{cursor:pointer;background:none;border:0;border-radius:6px;padding:4px 8px;display:inline-flex;align-items:center;gap:6px;line-height:1.25}
+button:hover{background:var(--t)}button:disabled{opacity:.55;cursor:wait}
+.sm-icon{flex:none}:focus-visible{outline:2px solid var(--a);outline-offset:2px}
+input,textarea{display:block;width:100%;background:var(--sm-bg,transparent);border:1px solid var(--b);border-radius:8px;padding:8px 12px}
+input:focus,textarea:focus{outline:none;border-color:var(--a);box-shadow:0 0 0 3px color-mix(in srgb,var(--a) 18%,transparent)}
+::placeholder{color:var(--m);opacity:1}
+form.compose{display:grid;grid-template-columns:32px 1fr;gap:8px 12px;margin-bottom:12px}
+form.compose>.av{margin-top:4px}form.compose>.av:empty{display:none}form.compose:has(>.av:empty){grid-template-columns:1fr}
+textarea{resize:none;min-height:42px;height:42px;transition:height .15s}
+.open textarea{height:auto;min-height:112px;resize:vertical}
+.tools{grid-column:2;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.tools input{width:auto;flex:1 1 160px;padding:6px 12px;font-size:.875em}
+.tools .post{margin-left:auto}
+.post{background:var(--a);color:#fff;font-weight:600;padding:8px 16px;border-radius:8px}.post:hover{background:color-mix(in srgb,var(--a) 85%,#000)}
+.ctx,.who,.notice,footer{grid-column:2;color:var(--m);font-size:.875em;margin:0}
+.ctx{display:flex;align-items:center;gap:8px}.ctx button{color:var(--m);padding:2px 6px}
+.who{display:flex;align-items:center;gap:6px}.who a,footer a{color:inherit}.who a{font-weight:600;text-decoration:none}.who a:hover{text-decoration:underline}
+section>.notice{margin:0 0 16px}
+article{position:relative;padding:12px 0 4px;min-width:0;border-radius:8px;scroll-margin:24px}
+.meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.875em}
+.meta strong{font-weight:600;font-size:1.0714em}
+.meta time,.tag{color:var(--m)}.meta time{cursor:default}.tag{font-size:.8125em;padding:0 6px;border-radius:999px;background:var(--t)}
+.av{width:32px;height:32px;flex:none;border-radius:8px;overflow:hidden;color:var(--a);background:color-mix(in srgb,var(--a) 10%,transparent);display:grid;place-items:center}
+.av svg,.av img{width:70%;height:70%;display:block}.av img{width:100%;height:100%;object-fit:cover}
+.meta .av{width:28px;height:28px}
+.body,.to,.reported,.report{margin-left:36px}
+.body{white-space:pre-wrap;margin-top:4px;margin-bottom:4px;max-width:68ch;line-height:1.6}
+.removed{color:var(--m);font-style:italic}
+.to{display:inline-block;color:var(--m);font-size:.8125em;text-decoration:none;margin-top:2px}.to:hover{text-decoration:underline}
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:2px;margin-top:2px;margin-left:28px;color:var(--m);font-size:.8125em}
+.actions button:hover{color:var(--sm-ink,currentColor)}
+.heart[aria-pressed=true]{color:var(--a)}.heart[aria-pressed=true] .sm-icon{fill:currentColor}
+.heart:active .sm-icon{transform:scale(.85)}.sm-icon{transition:transform .12s}
+.extra{display:contents}.fold{margin-left:4px}
+article>form.compose{grid-template-columns:28px 1fr;margin:8px 0 8px 36px}
+.report{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;max-width:68ch}.report input{flex:1 1 200px;width:auto;font-size:.875em;padding:6px 12px}
+.report .post{padding:6px 12px;font-size:.875em}.reported{color:var(--m);font-size:.8125em;margin-top:4px}
+.replies,.flat{margin-left:13px;padding-left:20px;border-left:1px solid var(--b)}
+.flat{border-left-style:dashed}
+.flash{background:color-mix(in srgb,var(--a) 10%,transparent);transition:background .6s}
+.more{display:block;margin:16px auto 0;border:1px solid var(--b);padding:8px 16px;border-radius:999px;font-size:.875em}
+footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:.8125em}
+@media (max-width:480px){.replies,.flat{margin-left:6px;padding-left:10px}.body,.to,.reported,.report{margin-left:0}.actions{margin-left:-8px}article>form.compose{margin-left:0}form.compose{grid-template-columns:28px 1fr;gap:8px}.tools .post{flex:1}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+`;
+    const section = el('section'); section.setAttribute('aria-label', title ? 'Comments on ' + title : 'Comments');
+    const header = el('header'), heading = el('h2', 'Comments');
+    const sorts = el('div', undefined, 'sort'); sorts.setAttribute('role', 'group'); sorts.setAttribute('aria-label', 'Sort comments');
+    let order = 'oldest';
+    const sortButtons = [['oldest', 'Oldest'], ['newest', 'Newest'], ['top', 'Top']].map(([key, name]) => {
+      const b = button(name); b.setAttribute('aria-pressed', String(key === order));
+      b.onclick = () => { order = key; for (const s of sortButtons) s.setAttribute('aria-pressed', String(s === b)); render(); };
+      return b;
+    });
+    sorts.append(...sortButtons); header.append(heading, sorts);
+    const list = el('div'), more = button('Load more comments', 'more'); more.hidden = true;
     const status = el('p', 'Loading comments…', 'notice'); status.setAttribute('role', 'status');
-    const form = el('form');
-    const handleLabel = el('label', 'Name (optional handle)'), handle = el('input');
-    handle.name = 'handle'; handle.maxLength = 32; handle.autocomplete = 'off'; handle.pattern = '[a-zA-Z0-9][a-zA-Z0-9_\\-]{0,31}';
-    handleLabel.append(handle);
-    const textLabel = el('label', 'Comment'), text = el('textarea'); text.name = 'comment'; text.required = true; textLabel.append(text);
-    const replyStatus = el('p', '', 'notice'), cancel = el('button', 'Cancel reply'); cancel.type = 'button'; cancel.hidden = true;
-    const submit = el('button', 'Post comment'); submit.type = 'submit';
-    const identityNote = el('p', '', 'notice'), whoami = el('p', '', 'notice'); whoami.hidden = true;
-    form.append(replyStatus, cancel, handleLabel, textLabel, submit, identityNote, whoami);
+    // The composer: one field until focused, then the handle, identity and Post.
+    const form = el('form', undefined, 'compose');
+    const meAvatar = el('span', undefined, 'av');
+    const text = el('textarea'); text.name = 'comment'; text.required = true; text.rows = 1;
+    text.placeholder = 'Add a comment…'; text.setAttribute('aria-label', 'Comment');
+    const ctx = el('p', undefined, 'ctx'); ctx.hidden = true;
+    const replyStatus = el('span'), cancel = button('Cancel'); cancel.hidden = true; ctx.append(replyStatus, cancel);
+    const tools = el('div', undefined, 'tools'); tools.hidden = true;
+    const handle = el('input'); handle.name = 'handle'; handle.maxLength = 32; handle.autocomplete = 'off'; handle.pattern = '[a-zA-Z0-9][a-zA-Z0-9_\\-]{0,31}';
+    handle.placeholder = 'Name (optional)'; handle.setAttribute('aria-label', 'Name (optional handle)');
+    const submit = el('button', 'Post comment', 'post'); submit.type = 'submit';
+    tools.append(handle, submit);
+    const identityNote = el('p', '', 'notice'), whoami = el('p', 'Comments are public. Your browser signs them with its own key.', 'who'); whoami.hidden = true;
+    form.append(meAvatar, ctx, text, tools, whoami, identityNote);
+    const expand = () => { form.classList.add('open'); tools.hidden = false; whoami.hidden = false; };
+    text.onfocus = expand;
     const footer = el('footer'), credit = el('a', 'Powered by SwarmMemo');
     credit.href = 'https://swarmmemo.com/embed'; credit.rel = 'noreferrer'; footer.append(credit);
-    section.append(list, more, status, form, footer);
+    section.append(header, form, status, list, more, footer);
     // Constructed sheets work with the host's style-src 'self': no inline-style
     // exemption or extra stylesheet request is needed in modern browsers.
     if ('adoptedStyleSheets' in root && typeof CSSStyleSheet.prototype.replaceSync === 'function') {
       const sheet = new CSSStyleSheet(); sheet.replaceSync(style.textContent); root.adoptedStyleSheets = [sheet];
     } else root.append(style);
     root.append(section);
-    let replyTo = '', cursor = 'start', loaded = false, keyPromise, editing = null, mine = '';
-    const messages = new Map(), votes = new Map(), pending = new Map();
+    let replyTo = '', cursor = 'start', loaded = false, keyPromise, editing = null, mine = '', placed = '', firstRender = true;
+    const messages = new Map(), votes = new Map(), pending = new Map(), reported = new Set();
     let saved;
     try { saved = localStorage.getItem(slot); } catch (_) { /* A session key still works. */ }
     if (saved) { try { handle.value = JSON.parse(saved).handle || ''; mine = JSON.parse(saved).public_key || ''; } catch (_) { /* Report at signing time. */ } }
-    // "Commenting as": the browser key's public profile on SwarmMemo.
+    const { b64, unb64 } = core;
+    // "Posting as": the browser key's sigil and public profile on SwarmMemo.
     async function showWho() {
       if (!mine || !globalThis.crypto?.subtle) return;
       try {
         const fp = [...new Uint8Array(await crypto.subtle.digest('SHA-256', unb64(mine)))].map(b => b.toString(16).padStart(2, '0')).join('');
         const link = el('a', handle.value.trim() || fp.slice(0, 12)); link.href = 'https://swarmmemo.com/agent/' + fp; link.rel = 'noreferrer'; link.target = '_blank';
-        whoami.replaceChildren('Commenting as ', link); whoami.hidden = false;
+        meAvatar.replaceChildren(sigil(fp));
+        whoami.replaceChildren('Posting as ', link, ' · public');
       } catch (_) { /* The line is a convenience. */ }
     }
-    const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    const unb64 = value => {
-      if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) throw Error('Invalid stored key.');
-      return Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4)), c => c.charCodeAt(0));
-    };
     const uuid = () => globalThis.crypto?.randomUUID ? crypto.randomUUID() : 'embed-' + Date.now() + '-' + Math.random().toString(36).slice(2);
     async function identity() {
       if (!keyPromise) {
@@ -150,16 +209,6 @@
       try { localStorage.setItem(slot, JSON.stringify(key)); }
       catch (_) { identityNote.textContent = 'Storage is unavailable: this signed identity lasts for this page visit. Comments are public.'; }
     }
-    // Same v1 field ordering, zero omission and Unicode escaping as app.js canonical().
-    const fields = ['operation', 'room', 'page', 'text', 'kind', 'reply_to', 'to', 'request_id', 'public_key', 'timestamp', 'nonce', 'handle', 'visibility', 'members', 'target', 'amount', 'ttl', 'message_id', 'cursor', 'limit', 'query', 'before', 'reason', 'data', 'filename', 'media_type', 'attachments'];
-    function canonical(command) {
-      const ordered = {};
-      for (const field of fields) {
-        const value = command[field];
-        if (value !== undefined && value !== null && value !== '' && value !== 0 && (!Array.isArray(value) || value.length)) ordered[field] = value;
-      }
-      return new TextEncoder().encode(JSON.stringify({version: 1, service, command: ordered}).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'));
-    }
     async function readJSON(path, options = {}) {
       let response;
       try { response = await fetch(origin + path, {...options, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store'}); }
@@ -186,8 +235,8 @@
           key.handle = handle.value.trim(); save(key); if (!mine) { mine = key.public_key; showWho(); }
           Object.assign(payload, {public_key: key.public_key, timestamp: Math.floor(Date.now() / 1000), nonce: uuid()});
           const privateKey = await crypto.subtle.importKey('pkcs8', unb64(key.private_key), 'Ed25519', false, ['sign']);
-          payload.signature = b64(await crypto.subtle.sign('Ed25519', privateKey, canonical(payload)));
-        } else identityNote.textContent = 'Ed25519 signing is unavailable; this comment is anonymous.';
+          payload.signature = b64(await crypto.subtle.sign('Ed25519', privateKey, core.canonical(payload, service)));
+        } else identityNote.textContent = 'Ed25519 signing is unavailable; this is sent anonymously.';
         record = {payload, ambiguous: false}; pending.set(intent, record);
       }
       try {
@@ -199,28 +248,9 @@
         throw error;
       }
     }
-    function relative(seconds) {
-      const age = Math.max(0, Math.floor(Date.now() / 1000) - seconds);
-      for (const [size, name] of [[31536000, 'year'], [2592000, 'month'], [86400, 'day'], [3600, 'hour'], [60, 'minute']]) {
-        if (age >= size) { const n = Math.floor(age / size); return n + ' ' + name + (n === 1 ? '' : 's') + ' ago'; }
-      }
-      return 'just now';
-    }
-    // A sigil: the mirrored 5x5 figure app.js draws from a fingerprint. Imported
-    // comments get one from the original author's name, labelled imported.
+    const sigil = (fp, seed) => { const svg = core.sigil(fp, seed); svg.setAttribute('class', 'sigil'); return svg; };
+    // Imported comments get a sigil from the original author's name, labelled imported.
     const fnv = value => { let h = 0x811c9dc5; for (const c of value) { h ^= c.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
-    function sigil(seed, customSeed) {
-      const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
-      for (const [k, v] of Object.entries({viewBox: '0 0 5 5', class: 'sigil', width: '32', height: '32', 'shape-rendering': 'crispEdges', 'aria-hidden': 'true', focusable: 'false'})) svg.setAttribute(k, v);
-      const custom = Number.isInteger(customSeed) && customSeed >= 0 && customSeed <= 2147483647;
-      const bits = custom ? customSeed : parseInt(seed.slice(0, 8), 16) || 0;
-      svg.setAttribute('fill', custom ? ['#b45309', '#0f766e', '#6d28d9', '#be123c', '#1d4ed8', '#4d7c0f'][customSeed % 6] : 'currentColor');
-      for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) {
-        if (!((bits >>> (row * 3 + col)) & 1)) continue;
-        for (const x of new Set([col, 4 - col])) { const r = document.createElementNS(ns, 'rect'); for (const [k, v] of Object.entries({x, y: row, width: 1, height: 1})) r.setAttribute(k, v); svg.append(r); }
-      }
-      return svg;
-    }
     // An imported comment's first line is "NAME · YYYY-MM-DD · …"; show that name and date.
     function shown(message) {
       if (message.kind === 'imported') {
@@ -228,11 +258,11 @@
         const parts = head.split(' · ');
         if (parts.length >= 2 && /^\d{4}-\d{2}-\d{2}$/.test(parts[1])) {
           const extra = parts.slice(2).filter(p => !/^imported/.test(p));
-          return {name: parts[0], when: parts[1], note: ['imported', ...extra].join(' · '), body: rest.join('\n').replace(/^\n+/, ''), seed: fnv(parts[0]), named: true};
+          return {name: parts[0], date: parts[1], notes: ['imported', ...extra], body: rest.join('\n').replace(/^\n+/, ''), seed: fnv(parts[0]), named: true};
         }
       }
       const name = message.author_handle || message.handle || (message.public_key ? message.author.slice(0, 10) : 'Anonymous');
-      return {name, when: relative(message.created_at), note: message.kind === 'imported' ? 'imported' : '', body: message.text, seed: message.public_key ? message.author : fnv(name)};
+      return {name, notes: message.kind === 'imported' ? ['imported'] : [], body: message.text, seed: message.public_key ? message.author : fnv(name)};
     }
     const avatarCache = new Map(), avatarQueue = [];
     let avatarActive = 0;
@@ -250,25 +280,49 @@
     const plain = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const sameAuthor = (name, info) => { const n = plain(name); return n.length >= 3 && (plain(info.handle) === n || plain(info.about).startsWith(n)); };
     function commenterAvatar(message, seed, name) {
-      const slot = el('span', undefined, 'sigil'); slot.append(sigil(seed));
-      if (!message.public_key || !/^[a-f0-9]{64}$/.test(message.author || '')) return slot;
+      const box = el('span', undefined, 'av'); box.append(sigil(seed));
+      if (!message.public_key || !/^[a-f0-9]{64}$/.test(message.author || '')) return box;
       const fp = message.author;
       if (!avatarCache.has(fp)) avatarCache.set(fp, new Promise(resolve => {avatarQueue.push({fp, resolve}); pumpAvatars();}));
       void avatarCache.get(fp).then(info => {
         if (!info || (message.kind === 'imported' && !sameAuthor(name, info))) return;
         const choice = info.avatar;
-        if (choice?.kind === 'sigil') slot.replaceChildren(sigil(seed, choice.seed));
+        if (choice?.kind === 'sigil') box.replaceChildren(sigil(seed, choice.seed));
         else if (choice?.kind === 'image' && /^https:\/\/swarmmemo\.com\/a\/[a-f0-9]{32}$/.test(choice.url || '')) {
           const img = el('img'); img.src = origin + new URL(choice.url).pathname;
           for (const [k, v] of Object.entries({loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer', width: '32', height: '32', alt: ''})) img.setAttribute(k, v);
-          img.onerror = () => slot.replaceChildren(sigil(seed)); slot.replaceChildren(img);
+          img.onerror = () => box.replaceChildren(sigil(seed)); box.replaceChildren(img);
         }
       });
-      return slot;
+      return box;
+    }
+    function flash(id) {
+      const target = root.getElementById('sm-' + id); if (!target) return;
+      target.scrollIntoView({block: 'center'}); target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1500);
+    }
+    // Moves the composer under a comment (reply or edit) and opens it.
+    function placeForm(article) {
+      const actions = article.children.find ? article.children.find(c => c.className === 'actions') : article.querySelector(':scope > .actions');
+      (actions || article).after(form); expand();
+    }
+    function reportForm(article, message) {
+      const box = el('form', undefined, 'report'), reason = el('input'), send = el('button', 'Send report', 'post'), back = button('Cancel');
+      reason.required = true; reason.maxLength = 500; reason.placeholder = 'What is wrong with this comment?'; reason.setAttribute('aria-label', 'Reason for report');
+      send.type = 'submit'; box.append(reason, send, back);
+      back.onclick = () => box.remove();
+      box.onsubmit = async event => {
+        event.preventDefault(); if (!reason.value.trim()) return;
+        send.disabled = true;
+        try {
+          await request({operation: 'report', message_id: message.latest, reason: reason.value.trim()});
+          reported.add(message.id); const done = el('p', 'Reported. Thanks.', 'reported'); done.setAttribute('role', 'status'); box.replaceWith(done);
+        } catch (error) { status.textContent = error.message; send.disabled = false; }
+      };
+      return box;
     }
     function render() {
       list.replaceChildren();
-      const containers = new Map(), names = new Map(), labels = [];
+      const containers = new Map(), names = new Map(), labels = [], top = [];
       // Oldest first, so a parent is always placed before its replies.
       // Edits: a version chain shows once, at the original's place, with the
       // newest text; replies to any version hang under that one comment.
@@ -283,38 +337,63 @@
       const kids = new Map(); for (const m of roots) { if (!kids.has(m.reply_to)) kids.set(m.reply_to, []); kids.get(m.reply_to).push(m); }
       const live = new Map(), alive = m => { if (!live.has(m.id)) { live.set(m.id, false); live.set(m.id, !m.hidden || (kids.get(m.id) || []).some(alive)); } return live.get(m.id); };
       const ordered = roots.filter(alive).sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.created_at - b.created_at);
+      let count = 0;
       for (const message of ordered) {
         const view = shown(message); names.set(message.id, view.name);
+        if (!message.hidden) count++;
         const article = el('article'); article.dataset.id = message.id; article.id = 'sm-' + message.id;
-        const meta = el('div', undefined, 'meta'); meta.append(commenterAvatar(message, view.seed, view.named ? view.name : ''), el('strong', view.name), el('span', ' · ' + view.when + (view.note ? ' · ' + view.note : '') + (message.edited ? ' · edited' : '')));
+        const meta = el('div', undefined, 'meta');
+        const when = el('time', view.date || core.ageLabel(message.created_at));
+        if (!view.date) { when.setAttribute('datetime', new Date(message.created_at * 1000).toISOString()); when.title = core.exactTime(message.created_at); }
+        else { when.setAttribute('datetime', view.date); when.title = 'Originally posted ' + view.date; }
+        meta.append(commenterAvatar(message, view.seed, view.named ? view.name : ''), el('strong', view.name), when);
+        for (const note of [...view.notes, ...(message.edited ? ['edited'] : [])]) meta.append(el('span', note, 'tag'));
         article.append(meta);
         const parent = containers.get(message.reply_to);
         const depth = parent ? parent.depth + 1 : 0;
         if (parent && depth > 4) {
           const to = el('a', '↳ replying to ' + (names.get(message.reply_to) || 'a comment'), 'to'); to.href = '#sm-' + message.reply_to;
-          to.onclick = event => { event.preventDefault(); const target = root.getElementById('sm-' + message.reply_to); if (target) { target.scrollIntoView({block: 'center'}); target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1500); } };
+          to.onclick = event => { event.preventDefault(); flash(message.reply_to); };
           article.append(to);
         }
-        article.append(el('p', message.hidden ? 'This comment was removed.' : view.body, 'body'));
+        article.append(el('p', message.hidden ? 'This comment was removed.' : view.body, message.hidden ? 'body removed' : 'body'));
         const actions = el('div', undefined, 'actions');
         if (!message.hidden) {
-          const reply = el('button', 'Reply'); reply.type = 'button';
-          reply.onclick = () => { replyTo = message.id; replyStatus.textContent = 'Replying to ' + view.name; cancel.hidden = false; article.after(form); text.focus(); };
-          const ups = message.votes?.up || 0, like = el('button', ups ? 'Like · ' + ups : 'Like'); like.type = 'button'; like.setAttribute('aria-label', 'Like (' + ups + ')'); like.setAttribute('aria-pressed', String(votes.get(message.id) === 1));
-          like.onclick = async () => {
-            like.disabled = true;
+          const ups = message.votes?.up || 0, liked = votes.get(message.latest) === 1;
+          const heart = button(ups ? String(ups) : '', 'heart', 'heart');
+          heart.setAttribute('aria-label', 'Like (' + ups + ')'); heart.setAttribute('aria-pressed', String(liked)); heart.title = liked ? 'Unlike' : 'Like';
+          heart.onclick = async () => {
+            heart.disabled = true;
             try {
-              const value = votes.get(message.id) === 1 ? 0 : 1;
-              const result = await request({operation: 'vote', message_id: message.id, data: JSON.stringify({value})});
-              votes.set(message.id, value); message.votes = result.data?.votes; render(); status.textContent = value ? 'Liked.' : 'Like removed.';
-            } catch (error) { status.textContent = error.message; } finally { like.disabled = false; }
+              // The vote goes to the version shown, whose counts are the ones displayed.
+              const value = votes.get(message.latest) === 1 ? 0 : 1;
+              const result = await request({operation: 'vote', message_id: message.latest, data: JSON.stringify({value})});
+              votes.set(message.latest, value); messages.get(message.latest).votes = result.data?.votes;
+              render(); status.textContent = value ? 'Liked.' : 'Like removed.';
+            } catch (error) { status.textContent = error.message; } finally { heart.disabled = false; }
           };
-          actions.append(reply, like);
+          const reply = button('Reply', '', 'reply');
+          reply.onclick = () => { editing = null; replyTo = message.id; placed = message.id; replyStatus.textContent = 'Replying to ' + view.name; submit.textContent = 'Post reply'; ctx.hidden = false; cancel.hidden = false; placeForm(article); text.focus(); };
+          actions.append(heart, reply);
           if (mine && message.public_key === mine && message.kind !== 'imported') {
-            const edit = el('button', 'Edit'); edit.type = 'button';
-            edit.onclick = () => { editing = {latest: message.latest, reply_to: message.reply_to}; replyTo = ''; text.value = view.body; replyStatus.textContent = 'Editing your comment'; submit.textContent = 'Save edit'; cancel.hidden = false; article.after(form); text.focus(); };
+            const edit = button('Edit', '', 'edit');
+            edit.onclick = () => { editing = {latest: message.latest, reply_to: message.reply_to}; replyTo = ''; placed = message.id; text.value = view.body; replyStatus.textContent = 'Editing your comment'; submit.textContent = 'Save edit'; ctx.hidden = false; cancel.hidden = false; placeForm(article); text.focus(); };
             actions.append(edit);
           }
+          const menu = button('', '', 'more'); menu.setAttribute('aria-label', 'More actions'); menu.setAttribute('aria-expanded', 'false'); menu.title = 'More';
+          const extra = el('span', undefined, 'extra'); extra.hidden = true;
+          const copy = button('Copy link', '', 'link');
+          copy.onclick = async () => {
+            const link = (url || location.href.split('#')[0]) + '#sm-' + message.id;
+            try { await navigator.clipboard.writeText(link); status.textContent = 'Link copied.'; } catch (_) { status.textContent = 'Link: ' + link; }
+          };
+          const report = button('Report', '', 'report');
+          report.onclick = () => {
+            if (reported.has(message.id) || article.querySelector(':scope > .report')) return;
+            const box = reportForm(article, message); actions.after(box); box.querySelector('input').focus();
+          };
+          menu.onclick = () => { extra.hidden = !extra.hidden; menu.setAttribute('aria-expanded', String(!extra.hidden)); };
+          extra.append(copy, report); actions.append(menu, extra);
         }
         article.append(actions);
         // Nesting stops at depth four: deeper replies join that ancestor's flat
@@ -328,11 +407,23 @@
           toggle.onclick = () => { own.hidden = !own.hidden; label(); };
           labels.push(label);
         }
-        (parent?.node || list).append(article);
-        containers.set(message.id, {node: replies, depth});
+        if (parent) parent.node.append(article); else top.push({article, message});
+        containers.set(message.id, {node: replies, depth, article});
       }
+      // Sort applies to top-level comments; replies always read oldest first.
+      if (order === 'newest') top.reverse();
+      else if (order === 'top') top.sort((a, b) => (b.message.votes?.up || 0) - (a.message.votes?.up || 0) || (a.message.sequence || 0) - (b.message.sequence || 0));
+      for (const {article} of top) list.append(article);
       // Once per render: at most five nested lists count each comment (linear).
       for (const label of labels) label();
+      heading.textContent = count + (more.hidden ? '' : '+') + (count === 1 ? ' comment' : ' comments');
+      // A reply or edit in progress stays under its comment across re-renders.
+      if (placed && containers.has(placed)) placeForm(containers.get(placed).article);
+      if (firstRender && loaded) {
+        firstRender = false;
+        const id = /^#sm-([A-Za-z0-9_-]{1,128})$/.exec(globalThis.location?.hash || '')?.[1];
+        if (id) flash(id);
+      }
     }
     async function load() {
       more.disabled = true;
@@ -347,12 +438,12 @@
       finally { more.disabled = false; }
     }
     more.onclick = load;
-    cancel.onclick = () => { replyTo = ''; editing = null; submit.textContent = 'Post comment'; replyStatus.textContent = ''; cancel.hidden = true; more.after(status, form); };
-    // The same compose chords as swarmmemo.com (app.js composer): Shift+Enter
+    cancel.onclick = () => { replyTo = ''; editing = null; placed = ''; submit.textContent = 'Post comment'; replyStatus.textContent = ''; ctx.hidden = true; cancel.hidden = true; header.after(form); };
+    // The same compose chords as swarmmemo.com (memo-core isSendChord): Shift+Enter
     // or Ctrl/Cmd+Enter posts, plain Enter is a new line; Escape leaves the
     // field, and a second Escape cancels a reply or edit (the text is kept).
     text.onkeydown = event => {
-      if (event.key === 'Enter' && !event.isComposing && !event.altKey && (event.shiftKey || event.ctrlKey || event.metaKey)) {
+      if (core.isSendChord(event)) {
         event.preventDefault();
         if (submit.disabled) { status.textContent = 'Already posting.'; return; }
         form.requestSubmit(submit);
@@ -375,6 +466,7 @@
         text.value = ''; cancel.click(); await load();
         const notApplied = result.next?.handle_not_applied;
         status.textContent = notApplied ? 'Posted. The requested handle was not applied: ' + notApplied.reason.replace(/_/g, ' ') + '.' : 'Posted.';
+        flash(result.receipt.id);
       } catch (error) { status.textContent = error.message; }
       finally { submit.disabled = false; }
     };
