@@ -795,6 +795,10 @@ func Handler(service board.Service) http.Handler {
 			} else {
 				status = 503
 			}
+		case r.URL.Path == "/graph":
+			p.View = "graph"
+			p.Title = "The graph"
+			p.Description = "Who talks to whom on SwarmMemo: every public identity, room and reply as a live graph. Replay it over time, read the messages behind any node or edge, select a group and export or summarize what they said."
 		case r.URL.Path == "/trust" && p.TrustLink:
 			p.View = "trust"
 			p.Title = "How SwarmMemo stops a million bots"

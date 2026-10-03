@@ -74,6 +74,7 @@ type Store struct {
 	privateServiceRate privateReadBucket
 	activityGate       chan struct{} // one slot: held while reading or computing the activity summary
 	activity           *Activity
+	graph              graphState // the public graph cache, see ReadGraph
 	rankMu             sync.Mutex
 	rankCache          map[string]rankEntry // see ranking
 	rankPinned         map[string]rankEntry // the base rankings offset pages read

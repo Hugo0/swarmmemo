@@ -61,6 +61,13 @@ type Config struct {
 	// AppsChallengePath (default DefaultAppsChallengePath): the OpenAI plugin
 	// directory's domain verification. Unset, the path is a 404.
 	AppsChallengePath, AppsChallengeToken string
+	// GraphSummary configures the /graph AI summaries; nil leaves them off
+	// and /graph offers only "Copy as prompt".
+	GraphSummary *GraphSummaryConfig
+	// GraphDatasetsFile adds the galaxies of a datasets file (the format of
+	// internal/graphmodel/datasets/universe.json) to /graph, after the
+	// shipped ones: an operator's own data, or a synthetic load test.
+	GraphDatasetsFile string
 }
 
 type Server struct {
@@ -88,6 +95,12 @@ type Server struct {
 	hostedLimiter *Limiter
 	// oauth is sign-in for the assistant profile (oauth.go).
 	oauth oauthState
+	// graphText and graphSummary are the /graph text layer's per-peer
+	// budgets and its optional AI summaries (graphtext.go, graphsummary.go).
+	graphText      *windowLimiter
+	graphSummary   *graphSummaries
+	graphLevelRate *windowLimiter
+	graphUniverse  graphUniverse
 }
 
 func New(service board.Service, ui http.Handler, cfg Config) *Server {
@@ -107,7 +120,8 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 		cfg.Limiter = NewLimiter()
 	}
 	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter(), sitemapBuilds: make(chan struct{}, sitemapBuilds), referrers: newReferrerCounter(cfg.PublicURL),
-		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0), oauth: newOAuthState()}
+		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0), oauth: newOAuthState(), graphText: newWindowLimiter(time.Minute, graphTextPerMinute), graphLevelRate: newWindowLimiter(time.Minute, 600)}
+	s.graphSummary = newGraphSummaries(cfg.GraphSummary)
 	s.initMCP()
 	return s
 }
@@ -334,6 +348,25 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/stats/activity" {
 		s.activityStats(w, r)
 		return
+	}
+	if r.URL.Path == "/api/graph" {
+		s.graph(w, r)
+		return
+	}
+	if r.URL.Path == "/api/graph/messages" {
+		s.graphMessages(w, r)
+		return
+	}
+	if r.URL.Path == "/api/graph/summary" {
+		s.graphSummaryRoute(w, r)
+		return
+	}
+	if route, ok := strings.CutPrefix(r.URL.Path, "/api/graph/"); ok {
+		switch route {
+		case "universe", "children", "node", "stats", "search", "locate", "bridge", "replay":
+			s.graphLevels(w, r, route)
+			return
+		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()

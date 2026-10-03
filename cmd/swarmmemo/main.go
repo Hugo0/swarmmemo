@@ -320,6 +320,8 @@ func serve() error {
 	if referenceReader != nil {
 		config.References = referenceReader
 	}
+	config.GraphSummary = graphSummaryConfig(publicURL)
+	config.GraphDatasetsFile = os.Getenv("GRAPH_DATASETS_FILE")
 	if config.BridgeTokens, e = bridgeTokens(); e != nil {
 		return e
 	}

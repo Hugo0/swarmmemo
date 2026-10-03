@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "5ba9ed1a3e6cc4e98c3c6cb424a95617dbf659b26e303cdb90f200742257e923",
+  "allowlist_sha256": "573f6b4ecfd6d79624c5c04d5cef956b04baed294ba1987fad5adb0ea4242d0d",
   "files": [
     {
       "mode": "0644",
@@ -279,6 +279,12 @@
     },
     {
       "mode": "0644",
+      "path": "cmd/swarmmemo/graphsummary.go",
+      "sha256": "ceb483e74116ad782004436a1154a49064cfe4bafe55206134945f7544ad1d32",
+      "size": 2829
+    },
+    {
+      "mode": "0644",
       "path": "cmd/swarmmemo/levers.go",
       "sha256": "2cdeb6a0794cce60627b1634f64c6830cff678c726185ca6965f5c36a66703a7",
       "size": 3508
@@ -292,8 +298,8 @@
     {
       "mode": "0644",
       "path": "cmd/swarmmemo/main.go",
-      "sha256": "eb11e336226a3031e7cbd4e3646cec7b59c787dc68db9192aa865b3ebf37d24f",
-      "size": 18229
+      "sha256": "0ebb27edd06612482a6ea3c88678e5076a5086843bc1f631cec414f65dbddcfb",
+      "size": 18343
     },
     {
       "mode": "0644",
@@ -502,8 +508,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "d397bf9d5a5a39b2f7766d4a5ede3eda77f88cee8b2896ca44b21dadbe606735",
-      "size": 238644
+      "sha256": "0565a1f783b2c0bffbffa951f7649b3a4e12f9ee436253d2e82060602d3640a3",
+      "size": 243058
     },
     {
       "mode": "0644",
@@ -514,8 +520,8 @@
     {
       "mode": "0644",
       "path": "docs/legal/privacy.md",
-      "sha256": "23141193cdd2b9bf12ecee9f9b655422d534442099c8ce363ea33bb71ee9be9f",
-      "size": 16303
+      "sha256": "79a266d099dd198f14fac73d40794ac7a371ef9715df84685267df298814ad5a",
+      "size": 16494
     },
     {
       "mode": "0644",
@@ -846,6 +852,30 @@
       "path": "internal/board/frontpage_test.go",
       "sha256": "3af97ebf57628d97e5aae385120738df83c9d87cab77f9a7b35a6d30e1a7a944",
       "size": 10712
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/graph.go",
+      "sha256": "804b43d2a0f0d874ec9c154c44832572537f43bad6c58c1693f52fae06a6a148",
+      "size": 11451
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/graph_test.go",
+      "sha256": "6ddf083b9ffde41e2111b63a21aabef5f9576f8036a91bd8196fc25308a446d1",
+      "size": 8644
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/graphdataset.go",
+      "sha256": "adf16fd64e9f9894221f532cdc18ef79c7443732af301f59b86e4839f9ddbbda",
+      "size": 3770
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/graphtext.go",
+      "sha256": "c81f9ea67cc5df6c4dc21b605db6ffdd4505221c6f69e9375c04ac2eb5ac8773",
+      "size": 6153
     },
     {
       "mode": "0644",
@@ -1366,8 +1396,8 @@
     {
       "mode": "0644",
       "path": "internal/board/store.go",
-      "sha256": "febad018ae5e1c06f91fdb86fb9eb7a288b473e0416811e0fd0911daca278c63",
-      "size": 38288
+      "sha256": "af79083456b06148c50f9395925ae0a89c859506be6ac23eb247c78375ab35ff",
+      "size": 38360
     },
     {
       "mode": "0644",
@@ -1599,6 +1629,54 @@
     },
     {
       "mode": "0644",
+      "path": "internal/graphmodel/build.go",
+      "sha256": "8848f441e39208fd553f6f345fcd94bbb99e8b3719efa018e0c99b1c18df2b70",
+      "size": 20107
+    },
+    {
+      "mode": "0644",
+      "path": "internal/graphmodel/datasets/universe.json",
+      "sha256": "bd85286e580e86650c9560ce773197014996a84de4834ced856078d533b88bda",
+      "size": 4390059
+    },
+    {
+      "mode": "0644",
+      "path": "internal/graphmodel/load.go",
+      "sha256": "e7555f6b2340d5df4b7b544f093ffb51f64723782a9dd2e6737b4abd930f945d",
+      "size": 4827
+    },
+    {
+      "mode": "0644",
+      "path": "internal/graphmodel/louvain.go",
+      "sha256": "de8132c3fbed722b18c4a6e964291e33d4d262e0889fb928e22e7ad798a5699d",
+      "size": 4472
+    },
+    {
+      "mode": "0644",
+      "path": "internal/graphmodel/model.go",
+      "sha256": "5a3444aa6cc4fa746784c208ec390570353995eb79e2286c5ad496dffc669df8",
+      "size": 5151
+    },
+    {
+      "mode": "0644",
+      "path": "internal/graphmodel/model_test.go",
+      "sha256": "e5852ee3e8c008cc2b6ae7e6c2c87548c3e35a67092997f9b2ed6b80cc0a316b",
+      "size": 10040
+    },
+    {
+      "mode": "0644",
+      "path": "internal/graphmodel/pack.go",
+      "sha256": "bd5240b6f5b24139e8e42406f9486bcb231ae0fe3d9930c2528e2196ee1a92e9",
+      "size": 2921
+    },
+    {
+      "mode": "0644",
+      "path": "internal/graphmodel/query.go",
+      "sha256": "769b0b61cd3145d800e704029e9bac72eeede507929a15f4b966a8a6abeb7b26",
+      "size": 17854
+    },
+    {
+      "mode": "0644",
       "path": "internal/httpapi/articles_test.go",
       "sha256": "2f48b71215c0b331b0ddf5d5f3b33cf716c85090a27a70444b6bb886d741a586",
       "size": 4234
@@ -1678,8 +1756,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "b8ff696cd2a7408e0f96c318b2aafd7b92556757e69f183ce63086226108a6e0",
-      "size": 81657
+      "sha256": "cb6efec607c860167cbce0d04422b9bddb842028b3e913ca41121978caa529c3",
+      "size": 90036
     },
     {
       "mode": "0644",
@@ -1734,6 +1812,48 @@
       "path": "internal/httpapi/gone_test.go",
       "sha256": "4d37a6ce3a759d9804403c8fb38efc50092716613c6093e2762d06f65a4ea76b",
       "size": 2698
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/graph.go",
+      "sha256": "8cab8169a30dcf5a7be27a362927666ef1d2ef2338bbdb3fce817a4a5c6753e1",
+      "size": 2219
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/graph_test.go",
+      "sha256": "29df75f8e654860d90d1583dc05326b5fde67a43ad87aad81abf39c6771b79c7",
+      "size": 11050
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/graphcommunity.go",
+      "sha256": "136b71d6ec19d0ec97eb87a4086979f2da0b35d1dd8082328c0e24f4be2e0553",
+      "size": 3091
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/graphlevels_test.go",
+      "sha256": "0127102d846fc942f5215c24141cf539567ef8bc77b0c11dbd941cd5a4c95b74",
+      "size": 6888
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/graphsummary.go",
+      "sha256": "98b858ebb5d7c25cba6aadfa74515146ec961fd57d2e3a955f185a380e2cc0cc",
+      "size": 17121
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/graphtext.go",
+      "sha256": "025081d7585b08684ad1a1a58597c0440203de39405fdb5832448f782523f5e4",
+      "size": 3689
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/graphuniverse.go",
+      "sha256": "d73413c1092f22ac507d589987d01d898eb09d62a1ab332d3a7ca99aa446e182",
+      "size": 9694
     },
     {
       "mode": "0644",
@@ -2038,8 +2158,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "1bd1c93a09c1b041152a91bea3b6db4e1cd9c2b83aa08bcc6c4833892168c3e6",
-      "size": 45946
+      "sha256": "3a0323bc6dd8da5e25a36efc1c02cef22afca53f711bbd6043e81ca97b02e82b",
+      "size": 47210
     },
     {
       "mode": "0644",
@@ -2074,8 +2194,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/sources_test.go",
-      "sha256": "cd2643f277d8a1508de9c412c0e561dc08247f3c5de733c675f8d3feddbb097e",
-      "size": 12770
+      "sha256": "7bdc892b02fed97fd61cf85f72f513d3a2036c83cf29b82056d8f4fc6d515447",
+      "size": 12780
     },
     {
       "mode": "0644",
@@ -3537,6 +3657,30 @@
     },
     {
       "mode": "0644",
+      "path": "internal/web/assets/graph-gl.js",
+      "sha256": "1611068596550c663fb286b6f56f4fdf0347875f265ab7f8d28ea0a548572edc",
+      "size": 32414
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/graph-worker.js",
+      "sha256": "956f311c72201aead8a36dc18d06dcb0a4230af6f0dcefca11d443ee9aec9e43",
+      "size": 1128
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/graph.css",
+      "sha256": "1da543d72f9ecf218e0cec0bd7f56577d8fba5703c0702497fc62afa032b36d9",
+      "size": 11429
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/graph.js",
+      "sha256": "41ed3bd7f5cb6b4d8180d81e22c2d804d4e61d095df71a441b3a496c50d6d5d0",
+      "size": 67888
+    },
+    {
+      "mode": "0644",
       "path": "internal/web/assets/highlight.js",
       "sha256": "3b2facf9339b7c89c407aa4a8fdf477aaf25529e081aca662fb356dd4e03fdb2",
       "size": 61832
@@ -3822,6 +3966,18 @@
       "path": "internal/web/glossary_test.go",
       "sha256": "b5202cd5dcea5b3c202ae1a23603e719ad570c023a21e07eaf51bd1f3a11cffb",
       "size": 4597
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/graph_page_test.go",
+      "sha256": "238713b5d825fc797a6c939c784d41fdec754f8c522eb2e1edfb83dd8477cbb6",
+      "size": 1927
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/graph_test.cjs",
+      "sha256": "53b6639a5fed8519b44777c89118540059d3364e6b08e9ed6dc3f0a0c7e4731d",
+      "size": 16732
     },
     {
       "mode": "0644",
@@ -4203,6 +4359,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/web/templates/graph.html",
+      "sha256": "080d4e15c32adebe432946a321c286aa9db7e41f15204524cee0fc746428aecf",
+      "size": 5978
+    },
+    {
+      "mode": "0644",
       "path": "internal/web/templates/guide-transports.html",
       "sha256": "5b3c41ee39a2ca88cc08a251d1c458db9aa3f663e5387dec365b546927870720",
       "size": 8802
@@ -4228,8 +4390,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/page.html",
-      "sha256": "44fdb6e0a4f64f1528c6b933e516f5012441376ec58ee0e16c9df17095086359",
-      "size": 48196
+      "sha256": "6b08920797e42cc744179db18817911342edc26b0d6ed0c2d4c8dc2a7b59fefc",
+      "size": 48542
     },
     {
       "mode": "0644",
@@ -4312,8 +4474,8 @@
     {
       "mode": "0644",
       "path": "internal/web/web.go",
-      "sha256": "154041a0094e9140960ae3905e1c00e7a4c73182721886a707fc673f589ec18c",
-      "size": 34452
+      "sha256": "059e32b86a477a79fe65e05225287b361c4d3ad865ffecbef19e9a6d7bf974b5",
+      "size": 34755
     },
     {
       "mode": "0644",
@@ -4410,6 +4572,24 @@
       "path": "scripts/dataset_card.md",
       "sha256": "7544d063f2ecc8355ede850b2827c5b811200586cf4b7a2f5d44d59784da36c9",
       "size": 9927
+    },
+    {
+      "mode": "0644",
+      "path": "scripts/graph_datasets.py",
+      "sha256": "f7a220c4cf13f88a9234c3983d8c432f31de612a2fab6a119e8825b55bbc8365",
+      "size": 14321
+    },
+    {
+      "mode": "0644",
+      "path": "scripts/graph_perf.cjs",
+      "sha256": "d975fe42665628cb7c915fd2dc10dff46dbcecef7fc471a750e35fb5586acf9c",
+      "size": 5053
+    },
+    {
+      "mode": "0644",
+      "path": "scripts/graph_synthetic.py",
+      "sha256": "3f3475cbe971c54262352fbebebd9b4f6e8e7fb87cc31692aaf90d4495bb9e13",
+      "size": 2066
     },
     {
       "mode": "0644",
