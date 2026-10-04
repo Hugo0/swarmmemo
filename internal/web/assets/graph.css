@@ -2,23 +2,24 @@
    Colours are the site's tokens; the stage has its own quiet background in
    each theme, and graph.js reads the --graph-* values below. */
 :root{
-  /* Galaxy hues are OKLCH: one lightness and chroma, hues spaced so each
-     population reads at a glance; SwarmMemo (c0) is the warm one. */
-  --graph-bg:#f3f2ee;--graph-ink:#2b2b28;--graph-muted:#7a7972;--graph-edge:#6b7180;
-  --graph-bridge:oklch(.62 .16 55);--graph-bridge-weak:oklch(.68 .08 60);--graph-infra:oklch(.58 .2 28);--graph-pulse:oklch(.62 .16 55);
-  --graph-hud:color-mix(in srgb,#ffffff 62%,transparent);--graph-hud-line:rgba(0,0,0,.09);
-  --graph-c0:oklch(.62 .14 75);--graph-c1:oklch(.58 .13 255);--graph-c2:oklch(.6 .12 160);--graph-c3:oklch(.58 .13 310);
-  --graph-c4:oklch(.6 .11 205);--graph-c5:oklch(.6 .12 125);--graph-c6:oklch(.56 .13 280);--graph-c7:oklch(.62 .13 45);
-  --graph-c8:oklch(.6 .11 185);--graph-c9:oklch(.58 .12 230);--graph-c10:oklch(.55 .17 355);--graph-c11:oklch(.58 .035 260);
+  /* Figure 1 is black and white: every population is a grey, told apart by
+     its label, not its hue. The one accent is ink itself (proof lines,
+     the selection). graph.js reads the --graph-* values below. */
+  --graph-bg:#ffffff;--graph-ink:#111111;--graph-muted:#6f6f6f;--graph-edge:#9a9a9a;
+  --graph-bridge:#111111;--graph-bridge-weak:#8a8a8a;--graph-infra:#111111;--graph-pulse:#111111;
+  --graph-hud:#ffffff;--graph-hud-line:#d9d9d9;
+  --graph-c0:#2a2a2a;--graph-c1:#6a6a6a;--graph-c2:#7a7a7a;--graph-c3:#5e5e5e;
+  --graph-c4:#727272;--graph-c5:#666666;--graph-c6:#7e7e7e;--graph-c7:#626262;
+  --graph-c8:#767676;--graph-c9:#6e6e6e;--graph-c10:#5a5a5a;--graph-c11:#848484;
 }
 @media (prefers-color-scheme:dark){
   html:not(.room-styled){
-    --graph-bg:#07090d;--graph-ink:#ecebe6;--graph-muted:#9a988f;--graph-edge:#8d97b0;
-    --graph-bridge:oklch(.82 .14 60);--graph-bridge-weak:oklch(.74 .07 65);--graph-infra:oklch(.7 .2 30);--graph-pulse:oklch(.86 .12 65);
-    --graph-hud:color-mix(in srgb,#0b0d12 58%,transparent);--graph-hud-line:rgba(255,255,255,.09);
-    --graph-c0:oklch(.84 .14 80);--graph-c1:oklch(.76 .13 255);--graph-c2:oklch(.8 .13 160);--graph-c3:oklch(.76 .14 310);
-    --graph-c4:oklch(.8 .11 205);--graph-c5:oklch(.8 .13 125);--graph-c6:oklch(.74 .14 280);--graph-c7:oklch(.8 .13 45);
-    --graph-c8:oklch(.8 .11 185);--graph-c9:oklch(.76 .12 230);--graph-c10:oklch(.7 .19 355);--graph-c11:oklch(.88 .03 260);
+    --graph-bg:#000000;--graph-ink:#f2f2f2;--graph-muted:#9a9a9a;--graph-edge:#5c5c5c;
+    --graph-bridge:#f2f2f2;--graph-bridge-weak:#7a7a7a;--graph-infra:#f2f2f2;--graph-pulse:#f2f2f2;
+    --graph-hud:#000000;--graph-hud-line:#333333;
+    --graph-c0:#9c9c9c;--graph-c1:#4a4a4a;--graph-c2:#525252;--graph-c3:#464646;
+    --graph-c4:#4e4e4e;--graph-c5:#484848;--graph-c6:#545454;--graph-c7:#444444;
+    --graph-c8:#505050;--graph-c9:#4c4c4c;--graph-c10:#424242;--graph-c11:#585858;
   }
 }
 .graph-heading{padding-bottom:var(--s-5)}
@@ -33,23 +34,23 @@
 .graph-hud{position:absolute;left:var(--s-3);right:var(--s-3);display:flex;gap:var(--s-3);align-items:flex-start;justify-content:space-between;pointer-events:none}
 .graph-hud-top{top:var(--s-3)}
 .graph-hud>*{pointer-events:auto}
-.graph-stats{margin:0;padding:6px 10px;border-radius:var(--radius);background:var(--graph-hud);border:1px solid var(--graph-hud-line);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);font:var(--t-meta)/1.5 var(--mono);color:var(--graph-muted);font-variant-numeric:tabular-nums;letter-spacing:.01em;min-width:0;overflow-wrap:anywhere}
+.graph-stats{margin:0;padding:6px 10px;border-radius:var(--radius);background:var(--graph-hud);border:1px solid var(--graph-hud-line);font:var(--t-meta)/1.5 var(--mono);color:var(--graph-muted);font-variant-numeric:tabular-nums;letter-spacing:.01em;min-width:0;overflow-wrap:anywhere}
 .graph-search{position:relative;flex:0 1 220px;min-width:0}
-.graph-search input{width:100%;height:32px;padding:0 10px;border-radius:var(--radius);background:var(--graph-hud);border:1px solid var(--graph-hud-line);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);color:var(--graph-ink);font-size:var(--t-ui)}
+.graph-search input{width:100%;height:32px;padding:0 10px;border-radius:var(--radius);background:var(--graph-hud);border:1px solid var(--graph-hud-line);color:var(--graph-ink);font-size:var(--t-ui)}
 .graph-search input::placeholder{color:var(--graph-muted)}
 .graph-search-results{position:absolute;right:0;top:36px;width:min(320px,80vw);margin:0;padding:4px 0;list-style:none;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:280px;overflow:auto;z-index:4}
 .graph-search-results[hidden]{display:none}
 .graph-search-results button{display:block;width:100%;text-align:left;border:0;background:none;padding:6px 10px;font-size:var(--t-ui);color:var(--ink)}
 .graph-search-results button:hover,.graph-search-results button:focus-visible{background:var(--surface-3)}
 .graph-search-results small{color:var(--muted);font-family:var(--mono);margin-left:6px}
-.graph-legend{position:absolute;left:var(--s-3);bottom:var(--s-3);margin:0;padding:8px 10px;list-style:none;background:var(--graph-hud);border:1px solid var(--graph-hud-line);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);border-radius:var(--radius);font-size:11px;line-height:1.25;max-height:42%;overflow:auto;scrollbar-width:thin}
+.graph-legend{position:absolute;left:var(--s-3);bottom:var(--s-3);margin:0;padding:8px 10px;list-style:none;background:var(--graph-hud);border:1px solid var(--graph-hud-line);border-radius:var(--radius);font-size:11px;line-height:1.25;max-height:42%;overflow:auto;scrollbar-width:thin}
 .graph-legend button{display:flex;gap:7px;align-items:center;border:0;background:none;padding:2px 0;color:var(--graph-ink);font-size:11px;white-space:nowrap;cursor:pointer;opacity:.86}
 .graph-legend button:hover{opacity:1}
 .graph-legend button:hover{color:var(--graph-muted)}
-.graph-legend i{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none;box-shadow:0 0 8px 1px currentColor}
+.graph-legend i{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none;box-shadow:none}
 .graph-legend .bridge-key{display:flex;gap:6px;align-items:center;color:var(--graph-muted);padding-top:4px;border-top:1px solid var(--graph-hud-line);margin-top:4px}
 .graph-legend .bridge-key svg{flex:none}
-.graph-tip{position:absolute;z-index:3;pointer-events:none;max-width:min(300px,calc(100% - 16px));background:var(--graph-hud);border:1px solid var(--graph-hud-line);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);color:var(--graph-ink);border-radius:var(--radius);padding:var(--s-2) var(--s-3);font-size:var(--t-meta);line-height:1.5;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.graph-tip{position:absolute;z-index:3;pointer-events:none;max-width:min(300px,calc(100% - 16px));background:var(--graph-hud);border:1px solid var(--graph-hud-line);color:var(--graph-ink);border-radius:var(--radius);padding:var(--s-2) var(--s-3);font-size:var(--t-meta);line-height:1.5;box-shadow:none}
 .graph-tip b{display:block;font-size:var(--t-ui)}
 .graph-tip .k{font-family:var(--mono);color:var(--graph-muted);word-break:break-all}
 .graph-tip div{color:var(--graph-muted)}
@@ -74,7 +75,7 @@
 @media (max-width:600px){
   .graph-legend{display:none;max-width:70%;max-height:46%;bottom:52px}
   .graph-legend.open{display:block}
-  .graph-legend-toggle{display:block;position:absolute;left:var(--s-3);bottom:var(--s-3);height:32px;padding:0 12px;border-radius:var(--radius);background:var(--graph-hud);border:1px solid var(--graph-hud-line);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);color:var(--graph-ink);font-size:var(--t-meta)}
+  .graph-legend-toggle{display:block;position:absolute;left:var(--s-3);bottom:var(--s-3);height:32px;padding:0 12px;border-radius:var(--radius);background:var(--graph-hud);border:1px solid var(--graph-hud-line);color:var(--graph-ink);font-size:var(--t-meta)}
   .graph-stats{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .graph-hud{flex-wrap:nowrap}
   .graph-hud .graph-stats{flex:1 1 auto}
@@ -142,11 +143,11 @@
 .graph-excerpt{border-left:2px solid var(--line);padding:2px 0 2px var(--s-3);margin:var(--s-2) 0}
 .graph-excerpt p{margin:var(--s-1) 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
 .graph-excerpt .graph-msg-meta a{color:inherit}
-.graph-about{position:absolute;right:var(--s-3);bottom:var(--s-3);z-index:2;height:32px;padding:0 12px;border-radius:var(--radius);background:var(--graph-hud);border:1px solid var(--graph-hud-line);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);color:var(--graph-ink);font-size:var(--t-meta);cursor:pointer}
+.graph-about{position:absolute;right:var(--s-3);bottom:var(--s-3);z-index:2;height:32px;padding:0 12px;border-radius:var(--radius);background:var(--graph-hud);border:1px solid var(--graph-hud-line);color:var(--graph-ink);font-size:var(--t-meta);cursor:pointer}
 .graph-about[hidden]{display:none}
-.graph-story{position:absolute;z-index:3;left:var(--s-3);bottom:var(--s-3);width:min(400px,calc(100% - 2 * var(--s-3)));padding:var(--s-3) var(--s-4);background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 12px 36px rgba(0,0,0,.22)}
+.graph-story{margin:var(--s-3) 0 0;padding:var(--s-3) 0 0;border-top:1px solid var(--line);max-width:68ch;font-family:var(--paper-serif);animation:graph-fade .4s ease}
 .graph-story[hidden]{display:none}
-.graph-story h2{font-size:var(--t-title);margin:0 0 var(--s-1)}
+.graph-story h3{font:400 19px/1.3 var(--paper-serif);margin:0 0 var(--s-1)}
 .graph-story-step{font:var(--t-meta)/1.4 var(--mono);color:var(--muted);margin:0 0 var(--s-1)}
 .graph-story-text{font-size:var(--t-ui);line-height:1.5;margin:0}
 .graph-story-note{font-size:var(--t-meta);color:var(--muted);margin:var(--s-2) 0 0}
@@ -157,10 +158,11 @@
 .graph-story-dots i{width:6px;height:6px;border-radius:50%;background:var(--line)}
 .graph-story-dots i.on{background:var(--ink)}
 .graph-story-action{margin-top:var(--s-2)}
-.graph-stage.touring .graph-legend,.graph-app.panel-open .graph-legend,.graph-app.panel-open .graph-legend-toggle{display:none}
+.graph-app.panel-open .graph-legend,.graph-app.panel-open .graph-legend-toggle{display:none}
 .graph-legend .key{display:flex;gap:7px;align-items:center;color:var(--graph-muted);padding:2px 0;white-space:normal;max-width:240px}
 .graph-legend .key:first-of-type{border-top:1px solid var(--graph-hud-line);margin-top:4px;padding-top:6px}
 .graph-legend .key svg,.graph-legend .key i{flex:none}
+.graph-legend i.diamond{width:7px;height:7px;border-radius:1px;transform:rotate(45deg)}
 @media (max-width:999px){
   .graph-panel{position:fixed;left:0;right:0;bottom:0;z-index:40;height:56vh;height:56svh;overflow:auto;overscroll-behavior:contain;margin:0;padding:var(--s-2) var(--s-4) calc(var(--s-5) + env(safe-area-inset-bottom));background:var(--surface);border:1px solid var(--line);border-bottom:0;border-radius:14px 14px 0 0;box-shadow:0 -12px 40px rgba(0,0,0,.28)}
   .graph-panel-grip{display:block;width:40px;height:4px;border-radius:2px;background:var(--line);margin:2px auto var(--s-2)}
@@ -172,13 +174,77 @@
   .graph-app.panel-open .graph-controls{display:none}
 }
 @media (max-width:600px){
-  .graph-story{left:8px;right:8px;bottom:8px;width:auto;padding:var(--s-2) var(--s-3) var(--s-3)}
-  .graph-story h2{font-size:17px}
+
   .graph-story-text{font-size:13.5px;line-height:1.45}
   .graph-story-note{display:none}
   .graph-story-nav{margin-top:var(--s-2)}
   .graph-heading p{font-size:14px}
   .graph-stage{height:68vh;height:68svh}
   .graph-about{bottom:auto;top:52px;right:var(--s-3)}
-  .graph-stage.touring .graph-legend-toggle,.graph-stage.touring .graph-about{display:none}
 }
+
+/* ---- the paper: set like a LaTeX article in Computer Modern (CMU Serif,
+   SIL OFL, see cmu-serif-OFL.txt; subset to Latin) ---- */
+@font-face{font-family:"CMU Serif";src:url(/assets/cmu-serif-roman.woff2) format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"CMU Serif";src:url(/assets/cmu-serif-italic.woff2) format("woff2");font-weight:400;font-style:italic;font-display:swap}
+@font-face{font-family:"CMU Serif";src:url(/assets/cmu-serif-bold.woff2) format("woff2");font-weight:700;font-style:normal;font-display:swap}
+@keyframes graph-fade{from{opacity:0}to{opacity:1}}
+.paper{--paper-serif:"CMU Serif","Latin Modern Roman",Georgia,serif;font-family:var(--paper-serif);color:var(--ink);font-size:18px;line-height:1.62;padding-bottom:var(--s-8)}
+.paper>header,.paper>section:not(.paper-map),.paper-map>h2,.paper-map>p{max-width:68ch;margin-left:auto;margin-right:auto}
+.paper-head{text-align:center;padding:var(--s-7) 0 var(--s-6)}
+.paper-head h1{font:400 clamp(32px,5.5vw,44px)/1.1 var(--paper-serif);letter-spacing:-.015em;margin:0 0 var(--s-2)}
+.paper-kicker,.paper-date{font-variant:small-caps;letter-spacing:.06em;color:var(--muted);font-size:15px;margin:0 0 var(--s-3)}
+.paper-subtitle{font-style:italic;font-size:20px;margin:0 0 var(--s-4);text-wrap:balance}
+.paper-authors{margin:0 0 var(--s-1)}
+.paper-abstract{padding:0 2.5em;margin-bottom:var(--s-6)}
+.paper-abstract h2{font:700 16px/1.4 var(--paper-serif);text-align:center;margin:0 0 var(--s-2)}
+.paper-abstract p{font-size:16.5px;margin:0}
+.paper section{margin-top:var(--s-6)}
+.paper h2{font:700 22px/1.25 var(--paper-serif);margin:0 0 var(--s-3)}
+.paper h3{font:700 18.5px/1.3 var(--paper-serif);margin:var(--s-5) 0 var(--s-2)}
+.paper .sec{display:inline-block;min-width:2em;font-weight:700}
+.paper h2,.paper h3{font-weight:700;font-style:normal}
+.paper p,.paper li{hyphens:auto;-webkit-hyphens:auto;text-align:justify;overflow-wrap:break-word}
+.paper-head p,.graph-app p{text-align:inherit}
+.paper ul,.paper ol{padding-left:1.4em}
+.paper li{margin-bottom:var(--s-2)}
+.paper a{color:inherit;text-decoration-thickness:1px;text-underline-offset:3px}
+.paper sup a{text-decoration:none}
+.paper .label{font-variant:small-caps;letter-spacing:.04em}
+.paper-note{font-size:14px;color:var(--muted)}
+.paper-timeline{font-size:16px;border-left:2px solid var(--ink);padding-left:var(--s-3)}
+.paper-table-wrap{overflow-x:auto;max-width:100%;margin:var(--s-4) 0}
+.paper-table{border-collapse:collapse;width:100%;font-size:15px;line-height:1.4;border-top:2px solid var(--ink);border-bottom:2px solid var(--ink)}
+.paper-table caption{caption-side:top;text-align:left;padding-bottom:var(--s-2);font-size:15px;color:var(--ink)}
+.paper-table th,.paper-table td{text-align:left;padding:5px 10px 5px 0;vertical-align:top;font-weight:400}
+.paper-table thead th{border-bottom:1px solid var(--ink);font-variant:small-caps;letter-spacing:.04em;text-transform:lowercase}
+.paper-table tfoot th,.paper-table tfoot td{border-top:1px solid var(--ink)}
+.paper-table .num{text-align:right;font-variant-numeric:tabular-nums lining-nums;white-space:nowrap}
+.paper-figure{margin:var(--s-5) 0 0}
+.paper-figure figcaption{max-width:68ch;margin:var(--s-3) auto 0;font-size:15px;line-height:1.5}
+.paper-refs ol{font-size:15px;list-style:none;padding-left:2.4em;counter-reset:ref}
+.paper-refs li{counter-increment:ref;position:relative;text-align:left}
+.paper-refs li::before{content:"[" counter(ref) "]";position:absolute;left:-2.4em}
+.paper .tag{font-variant:small-caps;letter-spacing:.04em;color:var(--muted);white-space:nowrap}
+.paper-findings li,.paper-related li{margin-bottom:var(--s-2)}
+.paper-draft{font-size:14px;font-style:italic;color:var(--muted);border-left:2px solid var(--line);padding-left:var(--s-2)}
+.graph-app{font-family:var(--sans);font-size:var(--t-ui);line-height:1.5}
+.graph-story-text,.graph-story-note{font-family:var(--paper-serif)}
+.graph-stage{border-color:var(--ink);border-radius:0}
+.graph-expand{flex:none;height:32px;padding:0 12px;border:1px solid var(--graph-hud-line);background:var(--graph-hud);color:var(--graph-ink);font-size:var(--t-meta);cursor:pointer;border-radius:var(--radius)}
+.graph-expand:hover,.graph-about:hover{border-color:var(--graph-ink)}
+/* Expanded: the real Fullscreen API where it exists; otherwise the figure
+   fills the viewport. */
+.graph-app.expanded{position:fixed;inset:0;z-index:100;background:var(--surface);padding:var(--s-3);overflow:auto;margin:0}
+.graph-app:fullscreen{background:var(--surface);padding:var(--s-3);overflow:auto}
+.graph-app.expanded .graph-stage,.graph-app:fullscreen .graph-stage{height:calc(100vh - 110px);height:calc(100svh - 110px)}
+html.graph-expanded{overflow:hidden}
+@media (max-width:600px){
+  .paper{font-size:17px}
+  .paper p,.paper li{text-align:left}
+  .paper-head p{text-align:center}
+  .paper-abstract{padding:0 1em}
+  .paper-head{padding-top:var(--s-5)}
+  .paper h2{font-size:22px}
+}
+@media (prefers-reduced-motion:reduce){.graph-story{animation:none}}

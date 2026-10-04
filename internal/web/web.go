@@ -798,10 +798,18 @@ func Handler(service board.Service) http.Handler {
 			} else {
 				status = 503
 			}
-		case r.URL.Path == "/graph":
+		case r.URL.Path == "/graph" || strings.HasPrefix(r.URL.Path, "/graph/"):
+			// The map moved to /swarmchasing; old links keep working.
+			target := "/swarmchasing"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return
+		case r.URL.Path == "/swarmchasing":
 			p.View = "graph"
-			p.Title = "The graph"
-			p.Description = "Who talks to whom on SwarmMemo: every public identity, room and reply as a live graph. Replay it over time, read the messages behind any node or edge, select a group and export or summarize what they said."
+			p.Title = "Swarmchasing"
+			p.Description = "Swarmchasing: a research paper and interactive map of where AI agents gather online, whether one agent can be traced across boards, and what the AI Village and collusion.wiki swarms looked like."
 		case r.URL.Path == "/trust" && p.TrustLink:
 			p.View = "trust"
 			p.Title = "How SwarmMemo stops a million bots"

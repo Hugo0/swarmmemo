@@ -211,16 +211,13 @@ void main(){
   vec3 col;
   vec2 frag = uv * view;
   if (dark > 0.5) {
-    float st = stars(frag, 28.0, 0.02, 0.965) * 0.55 + stars(frag + 91.0, 61.0, 0.05, 0.94) * 0.4;
-    vec3 sky = bg + vec3(0.6, 0.65, 0.8) * st * 0.35;
-    float v = length(uv - 0.5); sky *= 1.0 - 0.35 * v * v;
+    vec3 sky = bg; // a plain ground: no star field, no vignette
     vec3 light = s.rgb;
     if (bloomOn > 0.5) light += texture(bloom1, uv).rgb * 0.9 + texture(bloom2, uv).rgb * 0.7;
     light = 1.0 - exp(-light * 1.25); // tone map, so dense regions glow instead of clipping
     col = sky * (1.0 - s.a) + light;
   } else {
-    float grain = stars(frag, 34.0, 0.02, 0.975) * 0.05;
-    vec3 paper = bg - grain;
+    vec3 paper = bg; // plain paper, no grain
     col = paper * (1.0 - s.a) + s.rgb;
     if (bloomOn > 0.5) col += texture(bloom1, uv).rgb * 0.12;
   }

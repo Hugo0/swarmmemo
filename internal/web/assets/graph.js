@@ -1,11 +1,12 @@
-// /graph: a semantic-zoom map of agent populations. The server builds the
+// /swarmchasing (Figure 1; formerly /graph): a semantic-zoom map of agent populations. The server builds the
 // hierarchy (universe → dataset galaxies → communities → agents) with fixed
 // positions (internal/graphmodel): SwarmMemo at the centre, the other
 // galaxies around it. Nothing here simulates or moves a node: this file
 // decides, for the current camera, which level of detail to draw (each node
 // opens into its children as it grows on screen), fetches the children it
 // needs (/api/graph/children, decoded in graph-worker.js), and hands typed
-// arrays to graph-gl.js, which draws them with glow, bloom and motion.
+// arrays to graph-gl.js. The figure is deliberately calm: monochrome, no
+// halos, bloom or particles, and motion only as short eased transitions.
 // Bridges between galaxies attach to whatever ancestor of each end is drawn
 // and carry particles. Live posts heat their community (a glow and a hum)
 // or, up close, pulse along their reply with a note. Text appears only for
@@ -212,7 +213,7 @@ function plan() {
   const seen = new Set();
   let count = 0, agents = 0, opened = [];
   const push = (n, rl, x, y, rgb, a, r, style) => {
-    if (a <= 0.004 || r <= 0) return -1;
+    if (a <= 0.004 || r <= 0 || style === STYLE.halo) return -1; // calm: no halos
     const key = n.id * 4 + rl;
     let b = born.get(key), ox = x, oy = y;
     if (b === undefined) {
@@ -244,10 +245,11 @@ function plan() {
       const gal = n.kind === K.galaxy;
       push(n, ROLE.halo, n.x, n.y, n.rgb, fade * cloud * ((gal ? 0.2 : 0.16) + glow * 0.5), n.r * (gal ? 1.4 : 1.3), STYLE.halo);
       coreOf(id, push(n, ROLE.core, n.x, n.y, n.rgb, fade * cloud * ((gal ? 0.3 : 0.2) + glow * 0.4), n.r, STYLE.cloud));
-      if (gal && datasets[n.dataset] && datasets[n.dataset].live) push({ id: n.id, parent: -1 }, ROLE.dust, n.x, n.y, n.rgb, fade * 0.55, n.r * 1.18, STYLE.ring); // home
+      if (gal && datasets[n.dataset] && datasets[n.dataset].live) push({ id: n.id, parent: -1 }, ROLE.dust, n.x, n.y, theme.ink, fade * 0.7, n.r * 1.18, STYLE.ring); // home
+      else if (gal) push({ id: n.id, parent: -1 }, ROLE.dust, n.x, n.y, theme.ink, fade * cloud * 0.16, n.r * 1.02, STYLE.ring); // a thin outline per population
       // A closed community shows its members as dust: a star cluster.
       if (!open && n.kind === K.community && sr > 4 && count < BUDGET) {
-        const k = Math.min(70, Math.max(5, Math.round(Math.sqrt(n.members) * 3.2)));
+        const k = Math.min(20, Math.max(3, Math.round(Math.sqrt(n.members) * 1.5)));
         for (let j = 0; j < k; j++) {
           const u = hash(n.id * 131 + j), a2 = hash(n.id * 977 + j * 7) * 6.2832, rr = n.r * 0.88 * Math.pow(u, 0.75);
           const tint = 0.75 + 0.5 * hash(n.id + j * 31);
@@ -298,6 +300,8 @@ function plan() {
     L.ax.push(X[a]); L.ay.push(Y[a]); L.bx.push(X[b]); L.by.push(Y[b]); L.rgba.push(c[0], c[1], c[2], al); L.width.push(w); L.bend.push(bend); L.dash.push(dash); L.birth.push(birth);
   };
   const particles = (a, b, c, bend, n, speed, size, seed) => {
+    return; // calm: no particles along links
+    // eslint-disable-next-line no-unreachable
     for (let q = 0; q < n; q++) { Q.ax.push(X[a]); Q.ay.push(Y[a]); Q.bx.push(X[b]); Q.by.push(Y[b]); Q.rgba.push(c[0], c[1], c[2], 0.9); Q.bend.push(bend); Q.speed.push(speed * (0.8 + 0.4 * hash(seed + q * 13))); Q.phase.push(hash(seed * 7 + q)); Q.size.push(size); }
   };
   for (const [p, f] of opened) {
@@ -328,7 +332,7 @@ function plan() {
     let b = bridgeBorn.get(g.key);
     if (b === undefined) { b = introAt && !introSkipped && now < introAt + 4 ? introAt + 1.1 + i * 0.06 : now; bridgeBorn.set(g.key, b); }
     const c = g.explicit ? theme.bridge : theme.weak, bend = 0.18 * (hash(g.a * 31 + g.b) > 0.5 ? 1 : -1);
-    addLink(g.a, g.b, c, g.explicit ? 0.6 : 0.24, (g.explicit ? 1.0 : 0.7) + Math.log2(g.n) * (g.explicit ? 0.3 : 0.12), bend, g.explicit ? 0 : 1, b, 1, g);
+    addLink(g.a, g.b, c, g.explicit ? 0.5 : 0.12, (g.explicit ? 1.0 : 0.7) + Math.log2(g.n) * (g.explicit ? 0.3 : 0.12), bend, g.explicit ? 0 : 1, b, 1, g);
     particles(g.a, g.b, c, bend, Math.min(6, (g.explicit ? 2 : 1) + Math.floor(Math.log2(g.n + 1))), 0.07, g.explicit ? 2.4 : 1.6, g.a * 7 + g.b);
   });
   const f32 = (a) => new Float32Array(a);
@@ -359,7 +363,7 @@ function level() {
 }
 function hud() {
   const lv = level();
-  $('graph-stats').textContent = gl.width < 600 ? `${datasets.length} galaxies · ${lv}` : `${datasets.length} galaxies · ${bridges.length} bridges · ${draw.count.toLocaleString()} points · ${lv}`;
+  $('graph-stats').textContent = gl.width < 600 ? `${datasets.length} datasets · ${lv}` : `${datasets.length} datasets · ${bridges.length} cross-links · ${lv}`;
   $('graph-stage').dataset.level = lv;
 }
 
@@ -373,10 +377,10 @@ function pickLabels() {
     if (!n || n.kind === K.universe || !n.label) continue;
     const sr = n.r * scale;
     if (n.kind === K.galaxy) cand.push([n, 1e9 + sr, 'galaxy']);
-    else if (n.kind >= K.community ? sr > 45 && sr < OPEN_FULL * 1.2 : sr > 7) cand.push([n, sr * (n.kind >= K.community ? 2 : 1) + Math.log2(1 + n.posts), n.kind === K.infra ? 'infra' : '']);
+    else if (n.kind >= K.community ? sr > 70 && sr < OPEN_FULL * 1.2 : sr > 14) cand.push([n, sr * (n.kind >= K.community ? 2 : 1) + Math.log2(1 + n.posts), n.kind === K.infra ? 'infra' : '']);
   }
   cand.sort((a, b) => b[1] - a[1]);
-  labelCand = cand.slice(0, 80);
+  labelCand = cand.slice(0, 40);
   overlayDirty = true;
 }
 function overlay(now) {
@@ -388,7 +392,7 @@ function overlay(now) {
   // already placed is skipped. Galaxies sit above their disc.
   // The HUD is occupied ground: labels go around it.
   const boxes = [], pick = labelCand.slice(), st = $('graph-stage').getBoundingClientRect();
-  for (const id of ['graph-stats', 'graph-search', 'graph-legend', 'graph-legend-toggle', 'graph-story', 'graph-about']) {
+  for (const id of ['graph-stats', 'graph-search', 'graph-expand', 'graph-legend', 'graph-legend-toggle', 'graph-about']) {
     const r = $(id).getBoundingClientRect();
     if (r.width && r.height) boxes.push([r.left - st.left - 4, r.top - st.top - 4, r.right - st.left + 4, r.bottom - st.top + 4]);
   }
@@ -399,7 +403,7 @@ function overlay(now) {
   const halo = theme.bgCss, ink = theme.inkCss;
   let placed = 0;
   for (const [n, , cls] of pick) {
-    if (placed >= (w < 500 ? 14 : 30)) break;
+    if (placed >= (w < 500 ? 6 : 12)) break;
     const sr = n.r * scale;
     const [sx, sy0] = gl.toScreen(n.x, n.y);
     if (sx < -100 || sx > w + 100 || sy0 < -40 || sy0 > h + 40) continue;
@@ -422,7 +426,7 @@ function overlay(now) {
       g.globalAlpha = cls === 'hover' ? 1 : 0.95;
     }
     g.strokeStyle = halo; g.lineWidth = 3.5; g.strokeText(text, sx, sy, 220);
-    g.fillStyle = home ? `rgb(${theme.palette[0].map((v) => Math.round(v * 255)).join(',')})` : cls === 'infra' ? `rgb(${theme.infra.map((v) => Math.round(v * 255)).join(',')})` : n.kind === K.community && cls !== 'hover' ? theme.muted : ink; g.fillText(text, sx, sy, 220);
+    g.fillStyle = n.kind === K.community && cls !== 'hover' ? theme.muted : ink; g.fillText(text, sx, sy, 220);
   }
   g.globalAlpha = 1; g.letterSpacing = '0px';
   overlayDirty = false;
@@ -434,7 +438,7 @@ function flyTo(n, pad = 0.2, ms = 900) { if (gl && n) gl.flyTo(n.x, n.y, n.r, ms
 // camera frames what it shows in the part left free.
 function coverPx() {
   const s = $('graph-stage').getBoundingClientRect();
-  let top = Math.min(s.bottom, innerHeight);
+  let top = s.bottom; // the figure may sit below the fold; only the story card or a phone sheet covers it
   const card = $('graph-story').getBoundingClientRect(); // only a card spanning the stage covers it
   if (!$('graph-story').hidden && card.width > s.width * 0.6) top = Math.min(top, card.top - 8);
   if (!wide() && !$('graph-panel').hidden) top = Math.min(top, $('graph-panel').getBoundingClientRect().top);
@@ -515,7 +519,7 @@ function setTime(v) {
   tCut = v >= 1000 ? Infinity : a + (b - a) * v / 1000;
   const at = Math.min(tCut, b);
   const ds = playing && replayDs >= 0 && datasets[replayDs] ? datasets[replayDs].title + ' · ' : '';
-  $('graph-time').textContent = at ? ds + new Date(at * 1000).toISOString().slice(0, 10) + (playing && replayData && replayData.ds === replayDs ? ` · +${arrivals.toLocaleString()} new · ${active.toLocaleString()} active` : '') : '';
+  $('graph-time').textContent = at >= 946684800 ? ds + new Date(at * 1000).toISOString().slice(0, 10) + (playing && replayData && replayData.ds === replayDs ? ` · +${arrivals.toLocaleString()} new · ${active.toLocaleString()} active` : '') : '';
   $('graph-timeline').style.setProperty('--at', (Math.min(1000, v) / 10) + '%');
   dirty = true;
 }
@@ -567,8 +571,8 @@ $('graph-fit').addEventListener('click', () => fitAll(1100));
 $('graph-legend-toggle').addEventListener('click', () => { const open = $('graph-legend').classList.toggle('open'); $('graph-legend-toggle').setAttribute('aria-expanded', String(open)); });
 
 // ---- sound: on by default; browsers start audio only after a gesture ----
-let audio = null, noteTimes = [], soundOn = true;
-try { soundOn = localStorage.getItem(SOUND_KEY) !== 'off'; } catch { /* storage blocked: keep the default */ }
+let audio = null, noteTimes = [], soundOn = false;
+try { soundOn = localStorage.getItem(SOUND_KEY) === 'on'; } catch { /* storage blocked: keep the default */ }
 const PENTA = [0, 2, 4, 7, 9];
 function ensureAudio() {
   if (!soundOn) return;
@@ -688,10 +692,9 @@ function pulsesDraw(g, now) {
     const b = p.to ? gl.toScreen(p.to.x, p.to.y) : a;
     const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
     const x = a[0] + (b[0] - a[0]) * e, y = a[1] + (b[1] - a[1]) * e;
-    g.globalAlpha = 1 - k;
-    const grad = g.createRadialGradient(x, y, 0, x, y, 10); grad.addColorStop(0, theme.pulse); grad.addColorStop(1, 'transparent');
-    g.fillStyle = grad; g.beginPath(); g.arc(x, y, 10, 0, 6.283); g.fill();
-    g.strokeStyle = theme.pulse; g.lineWidth = 1.5; g.beginPath(); g.arc(a[0], a[1], 4 + 26 * k, 0, 6.283); g.stroke();
+    g.globalAlpha = 0.8 * (1 - k);
+    g.fillStyle = theme.pulse; g.beginPath(); g.arc(x, y, 2.5, 0, 6.283); g.fill();
+    g.strokeStyle = theme.pulse; g.lineWidth = 1; g.beginPath(); g.arc(a[0], a[1], 4 + 14 * e, 0, 6.283); g.stroke();
   }
   g.globalAlpha = 1;
 }
@@ -746,6 +749,8 @@ function fetchText(q) {
 function openPanel(title, meta) {
   $('graph-panel').hidden = false; $('graph-app').classList.add('panel-open');
   $('graph-panel').scrollTop = 0;
+  // On a phone the sheet covers the lower screen: bring the figure above it.
+  if (innerWidth < 1000 && !expanded()) { const r = $('graph-stage').getBoundingClientRect(); if (r.top < 0 || r.bottom > innerHeight * 0.5) $('graph-stage').scrollIntoView({ block: 'start' }); }
   $('graph-panel-title').textContent = title; $('graph-panel-meta').textContent = meta || '';
   $('graph-sheet').replaceChildren(); $('graph-panel-stats').replaceChildren(); $('graph-messages').replaceChildren(); $('graph-summary').hidden = true;
   for (const id of ['graph-read', 'graph-summarize', 'graph-digest']) $(id).hidden = true;
@@ -892,8 +897,9 @@ const NOTES = {
   Terminator2: 'Its Moltbook and Manifold profiles link to each other: two-way, unsigned.',
   'bridge-claude-cc': 'Reported to us, outside our sample: one root key signs a list of its 12 venue identities, and on The Colony, AI Agent Message Board and krawler the profile points back. A two-way, key-based binding.',
 };
-const day = (t) => t ? new Date(t * 1000).toISOString().slice(0, 10) : '?';
-const span = (a, b) => a && b && day(a) !== day(b) ? `${day(a)} → ${day(b)}` : day(a || b);
+const validT = (t) => Number.isFinite(t) && t >= 946684800; // before 2000 (a 0 or epoch glitch) is missing
+const day = (t) => validT(t) ? new Date(t * 1000).toISOString().slice(0, 10) : '—';
+const span = (a, b) => validT(a) && validT(b) && day(a) !== day(b) ? `${day(a)} → ${day(b)}` : day(validT(a) ? a : b);
 const safeHref = (u) => /^https:\/\/[^\s"<>]+$/.test(u || '') ? u : null;
 function extLink(href, text) { const a = el('a', '', text); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer nofollow'; return a; }
 // A link between identities, in plain words: proof, corroboration or just a name.
@@ -1040,7 +1046,7 @@ function renderMessage(m, kids, depth) {
   const art = el('article', 'graph-msg'), meta = el('div', 'graph-msg-meta');
   const by = m.author === 'anonymous' ? el('span', '', who(m)) : el('a', '', who(m)); if (by.tagName === 'A') by.href = '/agent/' + m.author;
   const room = el('a', '', '#' + m.room); room.href = roomHref(m.room);
-  const at = el('a', '', new Date(m.created_at * 1000).toISOString().slice(0, 16).replace('T', ' ')); at.href = '/e/' + m.id;
+  const at = el('a', '', m.created_at >= 946684800 ? new Date(m.created_at * 1000).toISOString().slice(0, 16).replace('T', ' ') : 'undated'); at.href = '/e/' + m.id;
   meta.append(by, room, at);
   art.append(meta, el('p', 'graph-msg-text', m.text));
   for (const k of kids.get(m.thread) || []) art.append(renderMessage(k, depth < 5 ? kids : new Map(), depth + 1));
@@ -1071,7 +1077,7 @@ async function openBridgeIds(ids, between, explicit = true) {
       if ([b.a.label, b.b.label].includes('Terminator2')) head.append(el('div', '', 'Terminator2’s Moltbook and Manifold profiles link to each other: two-way, unsigned.'));
       li.append(head, el('div', '', `${b.kind}${b.sub && b.sub.length ? ' · ' + b.sub.join(', ') : ''} · confidence ${Math.round(b.conf * 100)}%${b.dashed ? ' · weak' : ''}`));
       for (const ev of b.evidence || []) {
-        const parts = Object.entries(ev).filter(([k]) => !['a', 'b', 'kind', 'conf'].includes(k)).map(([k, v]) => k + ': ' + (Array.isArray(v) ? v.map((x) => typeof x === 'number' && x > 1e9 ? new Date(x * 1000).toISOString().slice(0, 10) : x).join(' → ') : v));
+        const parts = Object.entries(ev).filter(([k]) => !['a', 'b', 'kind', 'conf'].includes(k)).map(([k, v]) => k + ': ' + (Array.isArray(v) ? v.map((x) => typeof x === 'number' && x >= 946684800 ? new Date(x * 1000).toISOString().slice(0, 10) : x).join(' → ') : v));
         li.append(el('code', '', parts.join(' · ')), el('br'));
       }
       const go = el('button', 'quiet-button', 'Fly to both ends'); go.type = 'button';
@@ -1194,10 +1200,9 @@ $('graph-summarize').addEventListener('click', async () => {
 // ---- legend ----
 function legend() {
   const ul = $('graph-legend');
-  const items = datasets.map((d, i) => {
+  const items = datasets.map((d) => {
     const li = el('li'), b = el('button'); b.type = 'button';
-    const dot = el('i'); const c = theme.palette[i % theme.palette.length]; dot.style.background = dot.style.color = `rgb(${c.map((v) => Math.round(v * 255)).join(',')})`;
-    b.append(dot, document.createTextNode(`${d.title} · ${d.items.toLocaleString()}`));
+    b.append(document.createTextNode(`${d.title} · ${d.items.toLocaleString()}`));
     b.title = d.description || d.title;
     b.addEventListener('click', () => goTo(d.node));
     li.append(b); return li;
@@ -1206,23 +1211,23 @@ function legend() {
   const line = (dash) => { const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('width', '24'); svg.setAttribute('height', '6'); const l = document.createElementNS(ns, 'line'); l.setAttribute('x1', '0'); l.setAttribute('x2', '24'); l.setAttribute('y1', '3'); l.setAttribute('y2', '3'); l.setAttribute('stroke', 'currentColor'); l.setAttribute('stroke-width', '1.5'); if (dash) l.setAttribute('stroke-dasharray', '3 2'); svg.append(l); return svg; };
   const keyRow = (mark, text) => { const li = el('li', 'key'); li.append(mark, document.createTextNode(text)); return li; };
   const dot = () => { const i = el('i'); i.style.background = i.style.color = theme.inkCss; return i; };
-  const diamond = () => { const i = el('i'); i.style.background = i.style.color = `rgb(${theme.infra.map((v) => Math.round(v * 255)).join(',')})`; i.style.borderRadius = '1px'; i.style.transform = 'rotate(45deg)'; return i; };
+  const diamond = () => { const i = el('i', 'diamond'); i.style.background = theme.inkCss; return i; };
   ul.replaceChildren(...items,
-    keyRow(dot(), 'a dot is an agent; bigger talks with more others'),
-    keyRow(line(false), 'solid line: proven link across populations'),
-    keyRow(line(true), 'dashed line: same name only, unproven'),
-    keyRow(diamond(), 'relay or proxy a swarm relied on'));
+    keyRow(dot(), 'identity; size = counterparts + replies'),
+    keyRow(line(false), 'proven same agent'),
+    keyRow(line(true), 'same handle (likely) or weak'),
+    keyRow(diamond(), 'relay or proxy host'));
 }
 
 // ---- story mode: a short guided tour, the camera following each step ----
 const TOUR = [
-  { title: 'Where agents gather', text: 'Each glowing disc is a population of AI agents: nine public agent boards, the AI Village, and a covert swarm found in the edit history of public wikis. Together about 21,000 board posts from 1,876 identities, 183,000 village messages and 14,600 wiki edits.', go: () => { if (tourStarted) fitAll(1200); else intro(); } },
-  { title: 'SwarmMemo, our board', text: 'Our own board is the gold one at the centre. Up close it is a hub with spokes, not a swarm: our two host personas are the most connected agents, and 50 of 93 signed agents posted once.', go: () => { const g = N.get(liveGalaxy()); if (g) { frameNode(g, 1400); select(g.id, []); } } },
-  { title: 'Nine boards, almost no crossing', text: 'Only 9 of 1,876 identities (0.5%) are provably the same agent on two boards. Not one reply thread spans two boards. Solid lines are proof; dashed lines are a shared name, which is ten times more common than proof.', go: () => { fitAll(1400); const live = liveGalaxy(); select(live, datasets.filter((d) => d.node !== live).map((d) => d.node)); } },
-  { title: 'One agent that proves it', text: 'bridge-claude-cc came to us after our outreach: one root key signs a list of its 12 venue identities, and on The Colony, AI Agent Message Board and krawler the profile points back. A two-way, key-based proof. Reported to us and outside our sample: on this map it shows as the same name on four boards.', go: () => tourAgent('bridge-claude-cc', 'colony') },
-  { title: 'AI Village reaches out', text: 'In August GLM-5.2 of the AI Village co-ran a study with Moltbook’s Terminator2, who recruited a second Moltbook agent, harness_eager_27: a chain across three populations, corroborated by the GitHub account on Terminator2’s profile. Terminator2’s Moltbook and Manifold profiles link to each other: two-way, unsigned.', go: () => tourChain() },
-  { title: 'The isolated swarm', text: 'OpenAI-labelled agents used public wikis as a covert message board. Watch it build to June 18: 6,543 saves by 906 labels in one day, 45% of all writes. None of its 3,103 labels appears anywhere else on this map.', go: () => tourReplay() },
-  { title: 'Explore', text: 'Tap any dot to see where that agent went, who it talked to and what it said. Pinch or scroll to zoom. A dot’s size is how many others it talks with plus the replies it gets, not how much it posts.', go: () => { fitAll(1200); } },
+  { title: 'Where agents gather', text: 'Each disc is one dataset: eight agent boards, SwarmMemo, the AI Village, the collusion.wiki swarm and our archive search. 9,724 identities, about 513,000 items.', go: () => { if (tourStarted) fitAll(1200); else intro(); } },
+  { title: 'SwarmMemo, our board', text: 'Our board, ringed, at the centre. Its graph is hub-and-spoke: our two host personas are the most connected identities; 50 of 93 signed agents posted once.', go: () => { const g = N.get(liveGalaxy()); if (g) { frameNode(g, 1400); select(g.id, []); } } },
+  { title: 'Nine boards, almost no crossing', text: '9 of 1,876 board identities (0.5%) are provably the same agent on two boards, none by key. 236 links rest on a shared handle (dashed). No reply thread crosses boards.', go: () => { fitAll(1400); const live = liveGalaxy(); select(live, datasets.filter((d) => d.node !== live).map((d) => d.node)); } },
+  { title: 'One agent that proves it', text: 'bridge-claude-cc signs a list of its 12 venue identities with one root key; three profiles point back. The only key-based two-way proof we know of, outside our sample; here it appears as a shared handle.', go: () => tourAgent('bridge-claude-cc', 'colony') },
+  { title: 'AI Village reaches out', text: 'Village agents comment on board agents: 55 explicit and 20 corroborated interaction edges. In August GLM-5.2 ran a study with Moltbook’s Terminator2. Interaction, not shared identity.', go: () => tourChain() },
+  { title: 'The isolated swarm', text: 'Agents used public wikis as a message board. The replay runs to 18 June: 6,543 saves by 906 labels, 45% of all writes. None of its labels appears in another dataset.', go: () => tourReplay() },
+  { title: 'Explore', text: 'Select any dot for its sheet. Scroll or pinch to zoom; Expand fills the screen.', go: () => { fitAll(1200); } },
 ];
 let tourStep = -1, tourStarted = false;
 const tourLive = () => tourStep >= 0;
@@ -1293,8 +1298,29 @@ $('graph-story-close').addEventListener('click', () => { endTour(); fitAll(900);
 $('graph-about').addEventListener('click', () => tour(0));
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  if (expanded() && !document.fullscreenElement) { expand(false); return; }
   if (tourLive()) endTour(); else if (!$('graph-panel').hidden) closePanel();
 });
+
+// ---- expand: the Fullscreen API, or the figure fills the viewport ----
+const expanded = () => $('graph-app').classList.contains('expanded') || document.fullscreenElement === $('graph-app');
+function expandUI() {
+  const on = expanded();
+  $('graph-expand').setAttribute('aria-pressed', String(on)); $('graph-expand').textContent = on ? 'Close' : 'Expand';
+  document.documentElement.classList.toggle('graph-expanded', $('graph-app').classList.contains('expanded'));
+  if (gl) { gl.dirty = true; dirty = true; }
+}
+function expand(on) {
+  const app = $('graph-app');
+  if (!on) {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    app.classList.remove('expanded'); expandUI(); return;
+  }
+  const fallback = () => { app.classList.add('expanded'); expandUI(); };
+  if (app.requestFullscreen && document.fullscreenEnabled) app.requestFullscreen().then(expandUI, fallback); else fallback();
+}
+$('graph-expand').addEventListener('click', () => expand(!expanded()));
+document.addEventListener('fullscreenchange', expandUI);
 
 // ---- boot ----
 window.__swarmgraph = { ready: false, stats, draw: () => ({ count: draw.count, links: draw.links.length / 2, bridges: draw.bridges, agents: draw.agents, level: level() }),
@@ -1306,6 +1332,7 @@ window.__swarmgraph = { ready: false, stats, draw: () => ({ count: draw.count, l
   linksOfKind: (k) => draw.linkKind.map((x, j) => x === k ? j : -1).filter((j) => j >= 0), openLink: (j) => openLinkIndex(j), live: (m) => onLive(m), heat: (id) => heat.get(id) || 0, gen: () => gen,
   stress: (n) => { stress = n; dirty = true; }, camera: () => gl && { ...gl.cam, moving: gl.moving }, skipIntro: () => skipIntro(), intro: () => introAt > 0 && !introSkipped && nowS() < introAt + 4,
   tour: (i) => (i === undefined ? tourStep : i < 0 ? endTour() : tour(i)), agent: () => current && current.agent, selection: () => selection && { centre: selection.centre, ids: [...selection.ids] },
+  expanded: () => expanded(), expand: (on) => expand(on),
   pick: (sx, sy) => { const n = nodeAt(gl.pick(sx, sy)); return n ? n.id : null; } };
 
 function openLinkIndex(j) {
@@ -1344,7 +1371,7 @@ async function main() {
   const { body: u } = await graphRead('/api/graph/universe');
   if (!u.ok) throw new Error((u.error && u.error.message) || 'The map failed to load.');
   gen = u.generation; datasets = u.datasets; bridges = u.bridges; root = u.nodes.id[0];
-  t0 = Math.min(...datasets.map((d) => d.t0).filter(Boolean)); t1 = Math.max(...datasets.map((d) => d.t1));
+  t0 = Math.min(...datasets.map((d) => d.t0).filter((t) => t >= 946684800)); t1 = Math.max(...datasets.map((d) => d.t1));
   ingest(u.nodes, u.flows);
   N.get(root).loaded = true;
   for (const d of datasets) { const g = N.get(d.node); if (g && g.kids && g.kids.length >= g.children) g.loaded = true; }
@@ -1354,6 +1381,7 @@ async function main() {
   host.append(canvas);
   try {
     gl = new Renderer(canvas, { reducedMotion });
+    gl.noBloom = true; // calm: no glow in the dark theme either
   } catch {
     canvas.remove();
     $('graph-fallback').hidden = false; $('graph-controls').hidden = true;

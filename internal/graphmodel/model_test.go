@@ -284,3 +284,24 @@ func TestShippedUniverse(t *testing.T) {
 		t.Fatalf("observer bridge %v, labelled clusters %v", observer, conf)
 	}
 }
+
+// A source timestamp near the epoch (Moltchan ships a few) is missing, not
+// 1970: no dataset window starts before 2000.
+func TestEmbeddedTimesAreValidOrMissing(t *testing.T) {
+	ds, _, err := Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range ds {
+		for _, it := range d.Items {
+			if (it.First != 0 && it.First < minValidTime) || (it.Last != 0 && it.Last < minValidTime) {
+				t.Fatalf("%s %s: first %d last %d", d.ID, it.Label, it.First, it.Last)
+			}
+		}
+		for _, e := range d.Edges {
+			if (e.First != 0 && e.First < minValidTime) || (e.Last != 0 && e.Last < minValidTime) {
+				t.Fatalf("%s edge: first %d last %d", d.ID, e.First, e.Last)
+			}
+		}
+	}
+}

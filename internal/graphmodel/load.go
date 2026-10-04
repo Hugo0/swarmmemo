@@ -102,7 +102,7 @@ func Parse(raw []byte) ([]*Dataset, []Bridge, error) {
 		}
 		d := &Dataset{ID: fd.ID, Title: fd.Title, Description: fd.Description, Citation: fd.Citation, URL: fd.URL, Items: make([]Item, n), Clustered: len(fd.Items.Cluster) == n && n > 0}
 		for i := 0; i < n; i++ {
-			it := Item{Key: fd.Items.Key[i], Label: fd.Items.Label[i], Kind: fd.Items.Kind[i], Posts: fd.Items.Posts[i], First: fd.Items.First[i], Last: fd.Items.Last[i], Cluster: -1}
+			it := Item{Key: fd.Items.Key[i], Label: fd.Items.Label[i], Kind: fd.Items.Kind[i], Posts: fd.Items.Posts[i], First: validTime(fd.Items.First[i]), Last: validTime(fd.Items.Last[i]), Cluster: -1}
 			if i < len(fd.Items.Cluster) {
 				it.Cluster = fd.Items.Cluster[i]
 			}
@@ -112,6 +112,9 @@ func Parse(raw []byte) ([]*Dataset, []Bridge, error) {
 			if i < len(fd.Items.Weeks) && len(fd.Items.Weeks[i]) > 0 {
 				it.Weeks = make(map[int32]int32, len(fd.Items.Weeks[i]))
 				for _, wc := range fd.Items.Weeks[i] {
+					if wc[0] < minValidTime/604800 {
+						continue
+					}
 					it.Weeks[int32(wc[0])] += int32(wc[1])
 				}
 			}
@@ -140,10 +143,10 @@ func Parse(raw []byte) ([]*Dataset, []Bridge, error) {
 		for j := 0; j < m; j++ {
 			x := Edge{Src: e.Src[j], Dst: e.Dst[j], W: e.W[j]}
 			if j < len(e.First) {
-				x.First = e.First[j]
+				x.First = validTime(e.First[j])
 			}
 			if j < len(e.Last) {
-				x.Last = e.Last[j]
+				x.Last = validTime(e.Last[j])
 			}
 			if j < len(e.Member) {
 				x.Member = e.Member[j]
@@ -157,4 +160,16 @@ func Parse(raw []byte) ([]*Dataset, []Bridge, error) {
 		bridges = append(bridges, Bridge{A: BridgeEnd{b.A[0], b.A[1]}, B: BridgeEnd{b.B[0], b.B[1]}, Kind: b.Kind, Sub: b.Sub, Conf: b.Conf, Dashed: b.Dashed, Evidence: b.Evidence})
 	}
 	return out, bridges, nil
+}
+
+// minValidTime is 2000-01-01 UTC. A source timestamp before it (a zero or an
+// epoch-relative glitch such as 1970-01-01T00:20:52Z) is treated as missing,
+// so no dataset window, replay or sheet starts in 1970.
+const minValidTime = 946684800
+
+func validTime(t int64) int64 {
+	if t < minValidTime {
+		return 0
+	}
+	return t
 }

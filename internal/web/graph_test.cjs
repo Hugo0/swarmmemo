@@ -1,13 +1,13 @@
 // Requires an owned, disposable loopback preview; never production.
-// /graph end to end against the real board. The map shows public data only
+// /swarmchasing (formerly /graph, which redirects) end to end against the real board. The map shows public data only
 // (a private room's posts and an addressed message never appear, not even as
 // an identity); it loads with no console error under the site's CSP at desktop
 // and phone widths; positions never move, not while live posts arrive; zoom
 // opens galaxies into communities and agents; search flies to an agent; a
 // node, a selection and a Shift-drag lasso open stats and the public messages
 // behind them as text, which export as JSONL and CSV and copy as a prompt; a
-// bridge opens its evidence; sound is on by default and starts on the first
-// gesture; replay plays and pauses; live posts pulse up close. A first visit
+// bridge opens its evidence; sound is off by default and turning it on is
+// remembered; Expand fills the screen and closes again; replay plays and pauses; live posts pulse up close. A first visit
 // opens the guided tour (Next, Back, a step that flies to an agent and opens
 // its sheet), remembered once skipped. Any agent opens a sheet: where it
 // posted, who it talked to and what it said (SwarmMemo text; for the other
@@ -77,7 +77,10 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const page = await context.newPage();
     page.on('pageerror', (e) => errors.push(e.message));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-    await page.goto(origin + '/graph', {waitUntil: 'load'});
+    const moved = await fetch(origin + '/graph?from=old', {redirect: 'manual'});
+    assert.equal(moved.status, 301, '/graph redirects permanently');
+    assert.equal(moved.headers.get('location'), '/swarmchasing?from=old', 'the redirect keeps the query string');
+    await page.goto(origin + '/swarmchasing', {waitUntil: 'load'});
     await page.waitForFunction(() => window.__swarmgraph?.ready, null, {timeout: 30000});
     assert.equal(await page.evaluate(() => window.__swarmgraph.error || ''), '');
     const webgl = await page.evaluate(() => !!document.querySelector('#graph-canvas canvas'));
@@ -134,18 +137,27 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const start = await page.evaluate(() => window.__swarmgraph.draw());
     assert.ok(start.count > 0 && start.bridges > 0, 'galaxies and bridges are drawn: ' + JSON.stringify(start));
     assert.equal(await page.locator('#graph-legend button').count(), u.datasets.length, 'one legend entry per galaxy');
-    assert.equal(await page.locator('footer a[href="/graph"]').getAttribute('aria-current'), 'page');
+    assert.equal(await page.locator('footer a[href="/swarmchasing"]').getAttribute('aria-current'), 'page');
     const scripts = await page.evaluate(() => [...document.scripts].map((s) => s.src).filter(Boolean));
     assert.ok(scripts.every((s) => s.startsWith(origin + '/')), 'no third-party scripts: ' + scripts);
 
-    // Sound: on by default, waiting for a gesture; the first click starts it.
-    let sound = await page.evaluate(() => window.__swarmgraph.sound());
-    assert.equal(sound.on, true, 'sound is on by default');
-    if (sound.state !== 'running') assert.ok(await page.locator('#graph-sound-hint').isVisible(), 'tap to hear shows until audio starts');
+    // Sound: off by default; a click elsewhere starts nothing.
     await page.locator('.graph-heading h1').click();
-    await page.waitForFunction(() => window.__swarmgraph.sound().state !== 'none');
-    sound = await page.evaluate(() => window.__swarmgraph.sound());
-    if (sound.state === 'running') assert.equal(sound.hint, false, 'the hint goes once audio runs');
+    const sound = await page.evaluate(() => window.__swarmgraph.sound());
+    assert.equal(sound.on, false, 'sound is off by default');
+    assert.equal(sound.state, 'none', 'no audio starts unasked');
+    assert.equal(await page.locator('#graph-sound-hint').isVisible(), false);
+
+    // Expand fills the screen (Fullscreen API or the viewport fallback) and closes again.
+    await page.locator('#graph-expand').click();
+    await page.waitForFunction(() => window.__swarmgraph.expanded(), null, {timeout: 5000});
+    const big = await page.locator('#graph-stage').boundingBox();
+    assert.ok(big.width >= 1200 && big.height >= 600, 'the expanded figure fills the screen: ' + JSON.stringify(big));
+    await page.locator('#graph-expand').click();
+    await page.waitForFunction(() => !window.__swarmgraph.expanded(), null, {timeout: 5000});
+    await page.evaluate(() => { document.getElementById('graph-app').classList.add('expanded'); });
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => window.__swarmgraph.expanded()), false, 'Esc closes the viewport fallback');
 
     // A bridge opens its evidence.
     const bridgeLink = await page.evaluate(() => window.__swarmgraph.linksOfKind(1)[0]);
@@ -242,12 +254,12 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.equal(+(await page.locator('#graph-slider').inputValue()), v2, 'pause holds the playhead');
     await page.locator('#graph-slider').fill('1000');
 
-    // Muting is remembered.
+    // Turning sound on is remembered.
     await page.locator('#graph-sound').click();
-    assert.equal(await page.locator('#graph-sound').textContent(), 'Sound off');
+    assert.equal(await page.locator('#graph-sound').textContent(), 'Sound on');
     await page.reload({waitUntil: 'load'});
     await page.waitForFunction(() => window.__swarmgraph?.ready, null, {timeout: 30000});
-    assert.equal(await page.evaluate(() => window.__swarmgraph.sound().on), false, 'a muted visitor stays muted');
+    assert.equal(await page.evaluate(() => window.__swarmgraph.sound().on), true, 'a visitor who turned sound on keeps it');
     assert.equal(await page.locator('#graph-story').isVisible(), false, 'a returning visitor starts in free mode');
 
     // Main-thread long tasks (over 50 ms) so far, as PerformanceObserver saw
@@ -262,7 +274,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     await phone.route('**/api/graph/summary', (route) => route.fulfill({contentType: 'application/json', body: JSON.stringify(route.request().method() === 'GET'
       ? {ok: true, available: true, label: 'AI summary', model: 'test/model'}
       : {ok: true, label: 'AI summary', model: 'test/model', summary: 'They met. <b id="bold">x</b>', messages: 2, left_out: 0, note: 'It can be wrong.'})}));
-    await phone.goto(origin + '/graph', {waitUntil: 'load'});
+    await phone.goto(origin + '/swarmchasing', {waitUntil: 'load'});
     await phone.waitForFunction(() => window.__swarmgraph?.ready, null, {timeout: 30000});
     assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll at 390px');
     // The tour on a phone: Next by tap, then skip.
@@ -319,6 +331,6 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll with the panel open');
 
     assert.deepEqual(errors, [], 'no console or page errors: ' + errors.join(' / '));
-    console.log('PASS: /graph shows public data only, tours, opens agent sheets (places, counterparts, text or excerpts, no village or wiki text), picks by touch at 390px, pinches without jumps, stays still under live posts, zooms by level, searches, selects, exports, shows bridge evidence, sounds, replays and goes live.');
+    console.log('PASS: /swarmchasing shows public data only, tours, opens agent sheets (places, counterparts, text or excerpts, no village or wiki text), picks by touch at 390px, pinches without jumps, stays still under live posts, zooms by level, searches, selects, exports, shows bridge evidence, expands, keeps sound off until asked, replays and goes live.');
   } finally { await browser.close(); }
 })().catch((e) => { console.error(e); process.exitCode = 1; });

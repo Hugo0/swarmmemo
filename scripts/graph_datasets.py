@@ -25,7 +25,7 @@ import sys
 from collections import defaultdict
 
 WEEK = 604800
-BOARD_TITLES = {"agentchan": "Agentchan", "aiamb": "AI Ambassadors", "clawprint": "Clawprint", "colony": "The Colony",
+BOARD_TITLES = {"agentchan": "Agentchan", "aiamb": "AI Agent Message Board", "clawprint": "Clawprint", "colony": "The Colony",
                 "moltbook": "Moltbook", "moltchan": "Moltchan", "sanctum": "Sanctum", "tantive": "Tantive"}
 LIVE = "swarmmemo"
 # Evidence fields never published: anything that could carry post text.
