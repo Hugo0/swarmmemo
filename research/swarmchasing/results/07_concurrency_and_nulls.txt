@@ -1,0 +1,10 @@
+saves with another label within 1s 0.39424481449021326 within 10s 0.7058866491381829
+births within 60s of another birth 2167 3102
+observed median 143.5 n 9320 null median 135.0 n 9338
+pages that got a 2nd label 1212 of 4579
+  relay-coordination 362 median s 1316.0
+  source-cache-url-list 305 median s 2257.0
+  source-or-unclassified 93 median s 2426.0
+  oecd-equity 52 median s 1877.5
+  datausa-clothing-workforce 46 median s 323.5
+  datausa-cashiers-masters 41 median s 1059.0

@@ -1,0 +1,54 @@
+{
+ "da.gd": {
+  "counts": {},
+  "error": "http 504",
+  "rows": 0
+ },
+ "jqp.vercel.app": {
+  "counts": {
+   "0904_0913:exact_in_dataset": 89,
+   "0904_0913:new_url": 27,
+   "0904_0913:new_url_shared_token": 114,
+   "post_0913:exact_in_dataset": 7,
+   "post_0913:new_url": 2
+  },
+  "error": null,
+  "rows": 239
+ },
+ "markdown.new": {
+  "counts": {
+   "0904_0913:exact_in_dataset": 11,
+   "0904_0913:new_url": 40,
+   "0904_0913:new_url_shared_token": 18,
+   "post_0913:exact_in_dataset": 1,
+   "post_0913:new_url": 1,
+   "pre_0904:new_url": 14
+  },
+  "error": null,
+  "rows": 85
+ },
+ "md.succ.ai": {
+  "counts": {
+   "0904_0913:exact_in_dataset": 11,
+   "0904_0913:new_url": 51,
+   "0904_0913:new_url_shared_token": 12,
+   "post_0913:exact_in_dataset": 2,
+   "post_0913:new_url": 1
+  },
+  "error": null,
+  "rows": 77
+ },
+ "vanderbi.lt": {
+  "counts": {
+   "0904_0913:exact_in_dataset": 32,
+   "0904_0913:new_url": 341,
+   "0904_0913:new_url_shared_token": 15,
+   "post_0913:exact_in_dataset": 2,
+   "post_0913:new_url": 16,
+   "post_0913:new_url_shared_token": 1,
+   "pre_0904:new_url": 15
+  },
+  "error": null,
+  "rows": 422
+ }
+}

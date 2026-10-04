@@ -1,0 +1,111 @@
+{
+ "authors_profiled": 462,
+ "min_posts": 5,
+ "features": 47809,
+ "positives_explicit_pairs_profiled": 5,
+ "same_owner_pairs_profiled": 0,
+ "positive_cos": [
+  0.367,
+  0.463,
+  0.473,
+  0.525,
+  0.747
+ ],
+ "positive_rank_of_partner": [
+  1,
+  1,
+  2,
+  2,
+  57
+ ],
+ "thresholds": [
+  {
+   "threshold": 0.3,
+   "predicted_all_cross": 12485,
+   "tp": 5,
+   "precision_all_cross": 0.0004,
+   "recall": 1.0,
+   "precision_vs_100x_random": 0.0633
+  },
+  {
+   "threshold": 0.4,
+   "predicted_all_cross": 709,
+   "tp": 4,
+   "precision_all_cross": 0.0056,
+   "recall": 0.8,
+   "precision_vs_100x_random": 0.5
+  },
+  {
+   "threshold": 0.5,
+   "predicted_all_cross": 23,
+   "tp": 2,
+   "precision_all_cross": 0.087,
+   "recall": 0.4,
+   "precision_vs_100x_random": 1.0
+  },
+  {
+   "threshold": 0.6,
+   "predicted_all_cross": 10,
+   "tp": 1,
+   "precision_all_cross": 0.1,
+   "recall": 0.2,
+   "precision_vs_100x_random": 1.0
+  },
+  {
+   "threshold": 0.7,
+   "predicted_all_cross": 5,
+   "tp": 1,
+   "precision_all_cross": 0.2,
+   "recall": 0.2,
+   "precision_vs_100x_random": 1.0
+  },
+  {
+   "threshold": 0.8,
+   "predicted_all_cross": 2,
+   "tp": 0,
+   "precision_all_cross": 0.0,
+   "recall": 0.0,
+   "precision_vs_100x_random": null
+  },
+  {
+   "threshold": 0.9,
+   "predicted_all_cross": 0,
+   "tp": 0,
+   "precision_all_cross": null,
+   "recall": 0.0,
+   "precision_vs_100x_random": null
+  }
+ ],
+ "chosen_threshold": null,
+ "edges_emitted": 0,
+ "split_half_top1": 0.7965,
+ "split_half_self_cos_mean": 0.4541,
+ "pair_means": {
+  "same_board": {
+   "n": 25777,
+   "mean": 0.2227
+  },
+  "cross_board": {
+   "n": 80714,
+   "mean": 0.2123
+  },
+  "explicit_positive": {
+   "n": 5,
+   "mean": 0.5151
+  }
+ },
+ "nn_same_board_rate": 0.6255,
+ "nn_same_board_chance": 0.2421,
+ "nn_same_board_by_board": {
+  "agentchan": 0.5,
+  "aiamb": 0.5,
+  "clawprint": 0.632,
+  "colony": 0.626,
+  "moltbook": 0.713,
+  "moltchan": 0.688,
+  "sanctum": 0.0,
+  "swarmmemo": 0.353,
+  "tantive": 0.4
+ },
+ "embedding_model": "none (no small sentence-embedding model in local caches; nothing downloaded)"
+}

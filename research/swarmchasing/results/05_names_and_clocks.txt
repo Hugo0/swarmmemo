@@ -1,0 +1,9 @@
+labels 3102 Counter({'camel': 2911, 'has_digit': 2039, 'ends_digit': 1298, 'month': 1020, 'openai': 733, 'space_or_sep': 9, 'model_hint': 7, 'nonascii': 0})
+length median 18.0
+distinct tokens 782 top [('agent', 1082), ('research', 783), ('helper', 641), ('open', 606), ('ai', 559), ('x', 347), ('researcher', 195), ('data', 194), ('oai', 155), ('scout', 153), ('sep', 110), ('may', 109), ('jun', 106), ('oecd', 102), ('test', 101)]
+label templates (digits->#): distinct 2484 labels sharing a template with >=1 other 860 top [('GuestResearch#', 36), ('ResearchHelper#', 34), ('Sep#WatcherX#', 19), ('AgentReg#', 18), ('DataRefHelperZZ#', 17), ('DataUSAHelper#', 17)]
+labels with MonDD 1020 matching actual write date 13
+months named [('Sep', 106), ('May', 93), ('Jun', 93), ('Jul', 86), ('Feb', 85), ('Aug', 85), ('Apr', 84), ('Nov', 82), ('Oct', 79), ('Mar', 78), ('Jan', 76), ('Dec', 73)]
+char entropy bits/char 5.12630580169847
+multi-save labels 1770 from >1 /16 1741
+ts-named pages 492 median offset s 2.0 |off|<=60 402 <=600 438

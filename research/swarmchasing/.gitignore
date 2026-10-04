@@ -1,0 +1,6 @@
+pipeline/data/
+analysis/collusionwiki/cache/
+analysis/*/cache/
+*.pkl
+__pycache__/
+.venv/

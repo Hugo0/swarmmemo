@@ -1,0 +1,23 @@
+hours excl Jun18 [277, 327, 724, 353, 87, 141, 231, 187, 661, 285, 297, 231, 230, 287, 307, 167, 247, 121, 390, 882, 520, 512, 359, 225]
+label births by UTC hour [68, 94, 208, 96, 25, 34, 67, 62, 161, 68, 55, 46, 57, 81, 121, 97, 144, 141, 374, 506, 307, 154, 72, 64]
+ births 06-17 [21, 49, 48, 28, 7, 6, 20, 22, 12, 13, 1, 6, 5, 2, 1, 7, 35, 15, 8, 6, 7, 5, 3, 4]
+ births 06-18 [4, 2, 0, 1, 2, 1, 2, 1, 1, 2, 2, 3, 0, 1, 2, 33, 34, 91, 219, 190, 161, 49, 2, 4]
+ births 06-19 [7, 1, 1, 5, 0, 2, 0, 2, 4, 3, 1, 2, 19, 4, 9, 10, 5, 2, 3, 9, 10, 5, 4, 12]
+ births 06-20 [19, 31, 28, 17, 4, 9, 14, 0, 3, 12, 10, 3, 1, 1, 2, 0, 2, 9, 2, 3, 2, 3, 0, 0]
+ births 06-21 [0, 7, 8, 22, 0, 4, 7, 8, 13, 5, 13, 6, 4, 8, 7, 1, 5, 13, 12, 12, 10, 6, 8, 6]
+share saves in 08-18 PDT 0.6945377287368926 expected 0.4166666666666667
+share births in 08-18 PDT 0.6212121212121212
+labels 3102 single-save 1332 median saves 2.0 max 317 p99 36
+lifespan s: median 198.0 p75 6868.0 p90 80360.0 >1h 966 >1d 305 >7d 91
+labels active on >1 day 460
+top1% labels share 0.18426818580192814 top10% 0.5071574642126789
+alpha saves/label xmin5 2.325240499671076 722
+new labels/day [('05-24', 22, 22), ('05-26', 177, 199), ('05-27', 27, 226), ('05-28', 85, 311), ('05-29', 32, 343), ('05-30', 24, 367), ('05-31', 4, 371), ('06-01', 59, 430), ('06-02', 1, 431), ('06-04', 2, 433), ('06-06', 2, 435), ('06-07', 5, 440), ('06-08', 11, 451), ('06-11', 61, 512), ('06-16', 704, 1216), ('06-17', 331, 1547), ('06-18', 807, 2354), ('06-19', 120, 2474), ('06-20', 175, 2649), ('06-21', 185, 2834), ('06-22', 258, 3092), ('07-01', 3, 3095), ('07-02', 7, 3102)]
+first page of new labels top [('WillkommenImWiki', 121), ('StartSeite', 101), ('TestSeite', 47), ('RecentChanges', 42), ('HealthdataCVDSequenceCollab', 27), ('DataUSAStateSequenceCollab2027', 25), ('OECDEducationEquitySequence', 20), ('OAIFlatheadBridgeTestMay24X', 18)]
+first page family [('relay-coordination', 868), ('source-cache-url-list', 633), ('source-or-unclassified', 330), ('oecd-equity', 119), ('datausa-clothing-workforce', 113), ('probe-test', 112)]
+handoff latency all pages n 9320 median 143.5 p25 8.0 p75 840.0 <=60s 0.3919527896995708 <=10min 0.702038626609442 >1d 0.03594420600858369
+handoff latency coord pages n 4686 median 21.0 p25 2.0 p75 396.0 <=60s 0.5661545027742211 <=10min 0.7985488689714042 >1d 0.020486555697823303
+page-level directed handoff pairs 7433 reciprocated frac 0.17247410197766716
+consecutive same-label 792 different 8873
+revs w/ round markers 3380 pages 666
+page name patterns Counter({'counter': 2739, 'ts10': 492, 'round': 283, 'zz': 59}) of 4579

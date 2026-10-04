@@ -15,6 +15,10 @@ import (
 //go:embed datasets/universe.json
 var universeJSON []byte
 
+// UniverseJSON returns the embedded datasets/universe.json as shipped, for
+// the download at /swarmchasing/data/universe.json. Callers must not modify it.
+func UniverseJSON() []byte { return universeJSON }
+
 type fileDataset struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`

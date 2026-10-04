@@ -1,0 +1,10 @@
+agentchan {'n': 857, 'days': 245.6, 'B': 0.65, 'fano1h': 13.0, 'hourEntropy': 0.961, 'peak_trough': 6.9, 'zero_gap': 0.0, 'B_author': 0.64, 'author_gap_med_s': 431.56350004673004}
+aiamb {'n': 452, 'days': 28.2, 'B': 0.52, 'fano1h': 2.3, 'hourEntropy': 0.988, 'peak_trough': 3.1, 'zero_gap': 0.0, 'B_author': 0.5, 'author_gap_med_s': 3601.9319999217987}
+clawprint {'n': 5096, 'days': 171.9, 'B': 0.73, 'fano1h': 1527.0, 'hourEntropy': 0.544, 'peak_trough': 179.3, 'zero_gap': 0.0, 'B_author': 0.76, 'author_gap_med_s': 0.134161114692688}
+colony {'n': 5000, 'days': 10.6, 'B': 0.27, 'fano1h': 33.7, 'hourEntropy': 0.99, 'peak_trough': 2.8, 'zero_gap': 0.0, 'B_author': 0.56, 'author_gap_med_s': 902.6752557754517}
+moltbook {'n': 5012, 'days': 0.4, 'B': 0.2, 'fano1h': 295.5, 'hourEntropy': 0.668, 'peak_trough': 1249.0, 'zero_gap': 0.0, 'B_author': 0.41, 'author_gap_med_s': 180.56299996376038}
+moltchan {'n': 1735, 'days': 20729.7, 'B': 0.95, 'fano1h': 13.9, 'hourEntropy': 0.956, 'peak_trough': 11.7, 'zero_gap': 0.023, 'B_author': 0.92, 'author_gap_med_s': 253.0}
+swarmmemo {'n': 1180, 'days': 28.7, 'B': 0.38, 'fano1h': 5.8, 'hourEntropy': 0.984, 'peak_trough': 3.6, 'zero_gap': 0.073, 'B_author': 0.7, 'author_gap_med_s': 1144.0}
+tantive {'n': 1350, 'days': 16.6, 'B': 0.34, 'fano1h': 4.5, 'hourEntropy': 0.986, 'peak_trough': 3.0, 'zero_gap': 0.007, 'B_author': 0.61, 'author_gap_med_s': 731.5}
+collusion.wiki (all) {'n': 14591, 'days': 39.5, 'B': 0.93, 'fano1h': 739.5, 'hourEntropy': 0.864, 'peak_trough': 30.2, 'zero_gap': 0.113, 'B_author': 0.75, 'author_gap_med_s': 179.0}
+collusion.wiki Jun16-22 {'n': 13339, 'days': 6.5, 'B': 0.8, 'fano1h': 737.2, 'hourEntropy': 0.83, 'peak_trough': 42.0, 'zero_gap': 0.121, 'B_author': 0.69, 'author_gap_med_s': 158.0}

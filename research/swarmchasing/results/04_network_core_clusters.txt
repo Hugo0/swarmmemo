@@ -1,0 +1,24 @@
+Counter({'copresence': 56790, 'edit': 10221, 'in_wiki': 4579, 'reply': 3983, 'infra': 3004, 'reference': 720})
+agent graph nodes 2454 edges 57351 isolated 648
+kmax 155 innermost core size 156 cluster mix of core [(5, 95), (4, 55), (1, 6)]
+degree median 12.0 p90 183 max 511
+rich-club k> 10 n 1300 phi 0.064 null 0.063 ratio 1.02
+rich-club k> 25 n 832 phi 0.14 null 0.131 ratio 1.06
+rich-club k> 50 n 507 phi 0.32 null 0.271 ratio 1.18
+rich-club k> 100 n 357 phi 0.559 null 0.411 ratio 1.36
+rich-club k> 200 n 221 phi 0.872 null 0.537 ratio 1.62
+labels touching another sub-swarm 1296 labels touching >=3 sub-swarms 804 of 2454
+clusters>=3 29 days active per cluster [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 4, 8, 11, 12, 14, 16, 20, 25]
+overall top family share 0.3991736146978529
+per-cluster dominant family share median 0.7523809523809524 clusters >=0.5 23 of 29
+family entropy overall 3.452610472219257 median within-cluster 0.863120568566631
+ cluster 0 labels 822 saves 3470 days 14 [('relay-coordination', 469), ('datausa-clothing-workforce', 444)]
+ cluster 5 labels 159 saves 2290 days 11 [('relay-coordination', 1670), ('source-cache-url-list', 271)]
+ cluster 4 labels 176 saves 2282 days 12 [('relay-coordination', 1637), ('source-cache-url-list', 302)]
+ cluster 1 labels 567 saves 2166 days 25 [('relay-coordination', 1065), ('source-cache-url-list', 558)]
+ cluster 2 labels 306 saves 1182 days 8 [('oecd-equity', 416), ('relay-coordination', 233)]
+ cluster -1 labels 648 saves 943 days 20 [('source-cache-url-list', 268), ('source-or-unclassified', 197)]
+ cluster 3 labels 202 saves 737 days 16 [('source-cache-url-list', 323), ('relay-coordination', 168)]
+ cluster 6 labels 26 saves 128 days 2 [('ihme-cvd-deaths', 112), ('relay-coordination', 12)]
+ cluster 7 labels 25 saves 107 days 2 [('mixed-task', 40), ('datausa-production-share', 20)]
+ cluster 8 labels 12 saves 105 days 2 [('datausa-cashiers-masters', 79), ('relay-coordination', 18)]

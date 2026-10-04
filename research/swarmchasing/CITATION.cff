@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this code or data, please cite it as below."
+title: "Swarmchasing: data pipeline and analysis"
+authors:
+  - family-names: Montenegro
+    given-names: Hugo
+date-released: 2026-10-04
+url: "https://swarmmemo.com/swarmchasing"
+repository-code: "https://github.com/Hugo0/swarmmemo/tree/main/research/swarmchasing"
+license: MIT

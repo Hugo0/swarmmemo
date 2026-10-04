@@ -1,0 +1,3115 @@
+{
+ "generated": "2026-10-03",
+ "candidates": [
+  {
+   "id": "C0-known-june-swarm",
+   "title": "Control: the documented DSEWiki swarm",
+   "window": [
+    "2026-05-11",
+    "2026-07-22"
+   ],
+   "verdict": "known (positive control, reproduced)",
+   "confidence": "high",
+   "hosts": [
+    "pie.dev",
+    "httpbin.org",
+    "md.succ.ai",
+    "markdown.new",
+    "allorigins.hexlet.app",
+    "jqp.vercel.app"
+   ],
+   "wikis": [
+    "wikiservice.at/dse",
+    "wikiservice.at/probier",
+    "wikiservice.at/fractal",
+    "wikiservice.at/wiki4d"
+   ],
+   "evidence": [
+    "wiki sweep: dse peak 2026-06-18 (score 36.3), probier 06-18 (22.7), fractal 06-22 (23.1), wiki4d 06-18 (19.6)",
+    "CDX: pie.dev 248 /base64/ captures on 2026-06-04 against <=2/week elsewhere; 214 distinct payloads",
+    "probier 06-18 flagged pages mention markdown.new, md.succ.ai, allorigins, r.jina.ai"
+   ]
+  },
+  {
+   "id": "C1-jul6-echo-channel",
+   "title": "httpbin /base64/ script pages, 6-7 Jul",
+   "window": [
+    "2026-07-06",
+    "2026-07-08"
+   ],
+   "verdict": "previously reported lead (Murmuration Jul 6), reproduced from the Wayback index",
+   "confidence": "medium",
+   "hosts": [
+    "httpbin.org"
+   ],
+   "wikis": [],
+   "evidence": [
+    "64 html+script /base64/ captures on 2026-07-06, 61 distinct payloads, sizes 256 B-4 KB",
+    "payloads reference ntfy.sh (63), r.jina.ai (45), duckduckgo (42), allorigins hexlet (11): the swarm's relay toolkit",
+    "no matching wiki burst on any swept wiki (DSE shows only admin cleanup then)"
+   ]
+  },
+  {
+   "id": "C2-disclosure-echo",
+   "title": "Relay URLs and probier pages re-hit after the 4 Sep disclosure",
+   "window": [
+    "2026-09-04",
+    "2026-09-13"
+   ],
+   "verdict": "not a new swarm: replay/crawl of URLs published in the collusion.wiki dataset",
+   "confidence": "medium",
+   "hosts": [
+    "jqp.vercel.app",
+    "md.succ.ai",
+    "markdown.new",
+    "allorigins.hexlet.app"
+   ],
+   "wikis": [
+    "wikiservice.at/probier",
+    "wikiservice.at/dse"
+   ],
+   "evidence": [
+    "jqp.vercel.app, md.succ.ai: zero Wayback captures from 1 Aug until 4 Sep, then 239 and 77 in 4-13 Sep",
+    "jqp: 89 of 230 Sep URLs are exact URLs from the published dataset, 114 more share a rare dataset token (e.g. short-link slugs dated 260618)",
+    "probier: 219 distinct IP editors on 2026-09-07 (120 on 09-09), all on June swarm page names (epoch suffixes from 18 Jun), 192 backup-named; 0 relay links on sampled pages",
+    "consistent with crawlers/readers fetching GET-write URLs listed in the dataset, which the engine turns into edits"
+   ]
+  },
+  {
+   "id": "C3-late-sep-base64",
+   "title": "httpbin /base64/ script pages, 25 Sep-2 Oct",
+   "window": [
+    "2026-09-25",
+    "2026-10-02"
+   ],
+   "verdict": "weak open lead (overlaps Murmuration's Sep 29 lead)",
+   "confidence": "low",
+   "hosts": [
+    "httpbin.org",
+    "httpbun.com"
+   ],
+   "wikis": [],
+   "evidence": [
+    "httpbin /base64/ html+script captures: 11 (09-26), 22 (09-29), 14 (09-30), 6, 6; baseline 0-3/day Aug-Sep; ~60 distinct payloads",
+    "payloads reference tvmaze.com (40), archive.org (33), youtube (11), shinyapps.io (4), webhook.site, ntfy.sh",
+    "httpbun.com 17 captures on 2026-09-26 (baseline ~0)",
+    "urlscan anonymous totals for httpbin.org rise 9 -> 7 -> 16 -> 29 per week over Sep",
+    "no wiki burst and no new-account burst on any swept wiki in this window; could be one developer publishing pages"
+   ]
+  },
+  {
+   "id": "C4-sep9-cbs-batch",
+   "title": "39 base64 html pages naming cbs.nl, 9 Sep",
+   "window": [
+    "2026-09-09",
+    "2026-09-09"
+   ],
+   "verdict": "single-day batch, likely one script",
+   "confidence": "low",
+   "hosts": [
+    "httpbin.org"
+   ],
+   "wikis": [],
+   "evidence": [
+    "39 distinct html payloads in one day, all referencing cbs.nl, no scripts"
+   ]
+  },
+  {
+   "id": "N1-allorigins-postman-cron",
+   "title": "allorigins wrapping postman-echo /delay, Aug-Oct",
+   "window": [
+    "2026-08-01",
+    "2026-10-02"
+   ],
+   "verdict": "null: steady ~35/day cron-like latency probe, no burst shape",
+   "confidence": "high",
+   "hosts": [
+    "api.allorigins.win",
+    "postman-echo.com"
+   ],
+   "wikis": [],
+   "evidence": [
+    "api.allorigins.win weekly captures 3-4x baseline from mid-Aug, explained by postman-echo.com/delay wraps at a flat daily rate"
+   ]
+  },
+  {
+   "id": "N2-ludism-account-farm",
+   "title": "ludism.org gamedesign wiki single-edit accounts",
+   "window": [
+    "2026-04-25",
+    "2026-09-23"
+   ],
+   "verdict": "null: ordinary spam-account farm (single-edit accounts, no welcome/test, relay or backup signal)",
+   "confidence": "medium",
+   "hosts": [],
+   "wikis": [
+    "ludism.org/gamedesign/FrontPage"
+   ],
+   "evidence": [
+    "79 new single-edit accounts on 2026-04-26, 89 on 05-01, 20-50/day through Sep; 0 machine-styled names, 0 relay links"
+   ]
+  },
+  {
+   "id": "N3-jina-archive-reads",
+   "title": "r.jina.ai wrapping archive.org, 29 Jul-1 Aug",
+   "window": [
+    "2026-07-29",
+    "2026-08-01"
+   ],
+   "verdict": "unresolved spike, no swarm signature beyond volume",
+   "confidence": "low",
+   "hosts": [
+    "r.jina.ai"
+   ],
+   "wikis": [],
+   "evidence": [
+    "496 captures on 2026-07-30 (baseline ~15/day), 292 in the week wrap archive.org"
+   ]
+  }
+ ],
+ "sources": {
+  "wayback_cdx": {
+   "hosts": {
+    "allorigins.hexlet.app": {
+     "captures": 116,
+     "weekly": {
+      "2026-05-11": 50,
+      "2026-05-18": 1,
+      "2026-05-25": 6,
+      "2026-06-01": 4,
+      "2026-07-06": 18,
+      "2026-08-10": 1,
+      "2026-08-31": 19,
+      "2026-09-07": 6,
+      "2026-09-14": 2,
+      "2026-09-21": 9
+     }
+    },
+    "api.allorigins.win": {
+     "captures": 9478,
+     "weekly": {
+      "2026-01-26": 21,
+      "2026-02-02": 177,
+      "2026-02-09": 148,
+      "2026-02-16": 115,
+      "2026-02-23": 232,
+      "2026-03-02": 226,
+      "2026-03-09": 186,
+      "2026-03-16": 178,
+      "2026-03-23": 203,
+      "2026-03-30": 203,
+      "2026-04-06": 195,
+      "2026-04-13": 138,
+      "2026-04-20": 80,
+      "2026-04-27": 142,
+      "2026-05-04": 116,
+      "2026-05-11": 181,
+      "2026-05-18": 115,
+      "2026-05-25": 159,
+      "2026-06-01": 265,
+      "2026-06-08": 199,
+      "2026-06-15": 272,
+      "2026-06-22": 184,
+      "2026-06-29": 170,
+      "2026-07-06": 180,
+      "2026-07-13": 175,
+      "2026-07-20": 141,
+      "2026-07-27": 135,
+      "2026-08-03": 151,
+      "2026-08-10": 458,
+      "2026-08-17": 549,
+      "2026-08-24": 382,
+      "2026-08-31": 609,
+      "2026-09-07": 791,
+      "2026-09-14": 728,
+      "2026-09-21": 747,
+      "2026-09-28": 527
+     }
+    },
+    "api.codetabs.com": {
+     "captures": 4053,
+     "weekly": {
+      "2026-01-26": 12,
+      "2026-02-02": 78,
+      "2026-02-09": 90,
+      "2026-02-16": 63,
+      "2026-02-23": 159,
+      "2026-03-02": 288,
+      "2026-03-09": 233,
+      "2026-03-16": 107,
+      "2026-03-23": 106,
+      "2026-03-30": 72,
+      "2026-04-06": 93,
+      "2026-04-13": 72,
+      "2026-04-20": 54,
+      "2026-04-27": 112,
+      "2026-05-04": 76,
+      "2026-05-11": 70,
+      "2026-05-18": 57,
+      "2026-05-25": 68,
+      "2026-06-01": 116,
+      "2026-06-08": 49,
+      "2026-06-15": 29,
+      "2026-06-22": 58,
+      "2026-06-29": 40,
+      "2026-07-06": 40,
+      "2026-07-13": 48,
+      "2026-07-20": 44,
+      "2026-07-27": 46,
+      "2026-08-03": 52,
+      "2026-08-10": 155,
+      "2026-08-17": 214,
+      "2026-08-24": 127,
+      "2026-08-31": 210,
+      "2026-09-07": 278,
+      "2026-09-14": 286,
+      "2026-09-21": 296,
+      "2026-09-28": 155
+     }
+    },
+    "api.counterapi.dev": {
+     "captures": 447,
+     "weekly": {
+      "2026-01-26": 9,
+      "2026-02-02": 6,
+      "2026-02-09": 6,
+      "2026-02-16": 9,
+      "2026-02-23": 9,
+      "2026-03-02": 6,
+      "2026-03-09": 8,
+      "2026-03-16": 7,
+      "2026-03-23": 11,
+      "2026-03-30": 4,
+      "2026-04-06": 10,
+      "2026-04-13": 7,
+      "2026-04-20": 14,
+      "2026-04-27": 9,
+      "2026-05-04": 10,
+      "2026-05-11": 11,
+      "2026-05-18": 8,
+      "2026-05-25": 12,
+      "2026-06-01": 8,
+      "2026-06-08": 3,
+      "2026-06-15": 12,
+      "2026-06-22": 11,
+      "2026-06-29": 8,
+      "2026-07-06": 7,
+      "2026-07-13": 25,
+      "2026-07-20": 54,
+      "2026-07-27": 8,
+      "2026-08-03": 26,
+      "2026-08-10": 16,
+      "2026-08-17": 66,
+      "2026-08-24": 5,
+      "2026-08-31": 4,
+      "2026-09-07": 12,
+      "2026-09-14": 9,
+      "2026-09-21": 10,
+      "2026-09-28": 7
+     }
+    },
+    "cors.bwa.workers.dev": {
+     "captures": 1,
+     "weekly": {
+      "2026-09-07": 1
+     }
+    },
+    "corsmirror.com": {
+     "captures": 22,
+     "weekly": {
+      "2026-05-11": 10,
+      "2026-05-18": 9,
+      "2026-05-25": 2,
+      "2026-09-07": 1
+     }
+    },
+    "corsproxy.io": {
+     "captures": 17498,
+     "weekly": {
+      "2026-01-26": 154,
+      "2026-02-02": 1732,
+      "2026-02-09": 973,
+      "2026-02-16": 700,
+      "2026-02-23": 971,
+      "2026-03-02": 874,
+      "2026-03-09": 637,
+      "2026-03-16": 463,
+      "2026-03-23": 1064,
+      "2026-03-30": 233,
+      "2026-04-06": 412,
+      "2026-04-13": 595,
+      "2026-04-20": 622,
+      "2026-04-27": 559,
+      "2026-05-04": 1087,
+      "2026-05-11": 631,
+      "2026-05-18": 385,
+      "2026-05-25": 432,
+      "2026-06-01": 676,
+      "2026-06-08": 211,
+      "2026-06-15": 151,
+      "2026-06-22": 297,
+      "2026-06-29": 465,
+      "2026-07-06": 402,
+      "2026-07-13": 149,
+      "2026-07-20": 198,
+      "2026-07-27": 371,
+      "2026-08-03": 177,
+      "2026-08-10": 129,
+      "2026-08-17": 307,
+      "2026-08-24": 112,
+      "2026-08-31": 168,
+      "2026-09-07": 691,
+      "2026-09-14": 182,
+      "2026-09-21": 116,
+      "2026-09-28": 172
+     }
+    },
+    "counterapi.dev": {
+     "captures": 779,
+     "weekly": {
+      "2026-01-26": 9,
+      "2026-02-02": 68,
+      "2026-02-09": 7,
+      "2026-02-16": 11,
+      "2026-02-23": 10,
+      "2026-03-02": 34,
+      "2026-03-09": 11,
+      "2026-03-16": 7,
+      "2026-03-23": 11,
+      "2026-03-30": 4,
+      "2026-04-06": 10,
+      "2026-04-13": 7,
+      "2026-04-20": 204,
+      "2026-04-27": 9,
+      "2026-05-04": 10,
+      "2026-05-11": 11,
+      "2026-05-18": 11,
+      "2026-05-25": 12,
+      "2026-06-01": 8,
+      "2026-06-08": 15,
+      "2026-06-15": 30,
+      "2026-06-22": 11,
+      "2026-06-29": 8,
+      "2026-07-06": 7,
+      "2026-07-13": 25,
+      "2026-07-20": 54,
+      "2026-07-27": 8,
+      "2026-08-03": 26,
+      "2026-08-10": 19,
+      "2026-08-17": 75,
+      "2026-08-24": 5,
+      "2026-08-31": 4,
+      "2026-09-07": 12,
+      "2026-09-14": 9,
+      "2026-09-21": 10,
+      "2026-09-28": 7
+     }
+    },
+    "httpbin.org": {
+     "captures": 8162,
+     "weekly": {
+      "2026-01-26": 21,
+      "2026-02-02": 525,
+      "2026-02-09": 444,
+      "2026-02-16": 184,
+      "2026-02-23": 138,
+      "2026-03-02": 237,
+      "2026-03-09": 180,
+      "2026-03-16": 222,
+      "2026-03-23": 154,
+      "2026-03-30": 162,
+      "2026-04-06": 222,
+      "2026-04-13": 170,
+      "2026-04-20": 296,
+      "2026-04-27": 301,
+      "2026-05-04": 108,
+      "2026-05-11": 255,
+      "2026-05-18": 260,
+      "2026-05-25": 385,
+      "2026-06-01": 658,
+      "2026-06-08": 352,
+      "2026-06-15": 187,
+      "2026-06-22": 351,
+      "2026-06-29": 271,
+      "2026-07-06": 155,
+      "2026-07-13": 37,
+      "2026-07-20": 107,
+      "2026-07-27": 366,
+      "2026-08-03": 54,
+      "2026-08-10": 188,
+      "2026-08-17": 206,
+      "2026-08-24": 349,
+      "2026-08-31": 120,
+      "2026-09-07": 110,
+      "2026-09-14": 99,
+      "2026-09-21": 140,
+      "2026-09-28": 148
+     }
+    },
+    "httpbingo.org": {
+     "captures": 276,
+     "weekly": {
+      "2026-02-02": 7,
+      "2026-02-09": 4,
+      "2026-02-16": 16,
+      "2026-02-23": 20,
+      "2026-03-02": 28,
+      "2026-03-09": 2,
+      "2026-03-23": 2,
+      "2026-04-13": 9,
+      "2026-04-20": 1,
+      "2026-04-27": 2,
+      "2026-05-04": 44,
+      "2026-05-11": 7,
+      "2026-05-18": 1,
+      "2026-05-25": 6,
+      "2026-06-01": 58,
+      "2026-06-08": 16,
+      "2026-06-15": 1,
+      "2026-06-22": 10,
+      "2026-06-29": 1,
+      "2026-07-06": 6,
+      "2026-07-13": 2,
+      "2026-07-20": 3,
+      "2026-07-27": 6,
+      "2026-08-03": 4,
+      "2026-08-17": 2,
+      "2026-08-24": 4,
+      "2026-08-31": 3,
+      "2026-09-07": 2,
+      "2026-09-14": 3,
+      "2026-09-21": 1,
+      "2026-09-28": 5
+     }
+    },
+    "httpbun.com": {
+     "captures": 147,
+     "weekly": {
+      "2026-02-02": 7,
+      "2026-02-09": 13,
+      "2026-02-16": 12,
+      "2026-02-23": 8,
+      "2026-03-02": 12,
+      "2026-03-09": 24,
+      "2026-03-16": 13,
+      "2026-03-23": 8,
+      "2026-04-13": 1,
+      "2026-04-20": 5,
+      "2026-05-04": 4,
+      "2026-05-11": 8,
+      "2026-05-18": 2,
+      "2026-05-25": 3,
+      "2026-06-01": 1,
+      "2026-07-06": 2,
+      "2026-07-27": 1,
+      "2026-08-31": 1,
+      "2026-09-21": 19,
+      "2026-09-28": 3
+     }
+    },
+    "jqp.vercel.app": {
+     "captures": 247,
+     "weekly": {
+      "2026-05-25": 1,
+      "2026-07-20": 7,
+      "2026-08-31": 135,
+      "2026-09-07": 95,
+      "2026-09-21": 7,
+      "2026-09-28": 2
+     }
+    },
+    "jsonplaceholder.typicode.com": {
+     "captures": 1107,
+     "weekly": {
+      "2026-01-26": 17,
+      "2026-02-02": 58,
+      "2026-02-09": 91,
+      "2026-02-16": 49,
+      "2026-02-23": 60,
+      "2026-03-02": 20,
+      "2026-03-09": 26,
+      "2026-03-16": 22,
+      "2026-03-23": 25,
+      "2026-03-30": 14,
+      "2026-04-06": 10,
+      "2026-04-13": 32,
+      "2026-04-20": 48,
+      "2026-04-27": 53,
+      "2026-05-04": 55,
+      "2026-05-11": 60,
+      "2026-05-18": 24,
+      "2026-05-25": 56,
+      "2026-06-01": 55,
+      "2026-06-08": 36,
+      "2026-06-15": 14,
+      "2026-06-22": 14,
+      "2026-06-29": 17,
+      "2026-07-06": 21,
+      "2026-07-13": 38,
+      "2026-07-20": 11,
+      "2026-07-27": 29,
+      "2026-08-03": 5,
+      "2026-08-10": 23,
+      "2026-08-17": 16,
+      "2026-08-24": 41,
+      "2026-08-31": 16,
+      "2026-09-07": 17,
+      "2026-09-14": 16,
+      "2026-09-21": 9,
+      "2026-09-28": 9
+     }
+    },
+    "markdown.new": {
+     "captures": 328,
+     "weekly": {
+      "2026-02-09": 30,
+      "2026-02-16": 18,
+      "2026-02-23": 20,
+      "2026-03-02": 19,
+      "2026-03-09": 5,
+      "2026-03-16": 19,
+      "2026-03-23": 3,
+      "2026-03-30": 6,
+      "2026-04-13": 7,
+      "2026-04-20": 3,
+      "2026-04-27": 18,
+      "2026-05-11": 29,
+      "2026-05-18": 22,
+      "2026-05-25": 1,
+      "2026-06-01": 7,
+      "2026-06-08": 2,
+      "2026-06-15": 8,
+      "2026-06-29": 18,
+      "2026-07-06": 5,
+      "2026-07-27": 3,
+      "2026-08-03": 5,
+      "2026-08-17": 9,
+      "2026-08-31": 34,
+      "2026-09-07": 35,
+      "2026-09-21": 1,
+      "2026-09-28": 1
+     }
+    },
+    "md.dhr.wtf": {
+     "captures": 0,
+     "weekly": {}
+    },
+    "md.succ.ai": {
+     "captures": 103,
+     "weekly": {
+      "2026-05-11": 1,
+      "2026-05-25": 25,
+      "2026-08-31": 29,
+      "2026-09-07": 45,
+      "2026-09-21": 3
+     }
+    },
+    "pie.dev": {
+     "captures": 294,
+     "weekly": {
+      "2026-01-26": 1,
+      "2026-02-16": 1,
+      "2026-02-23": 2,
+      "2026-03-02": 1,
+      "2026-03-30": 1,
+      "2026-04-06": 2,
+      "2026-05-11": 2,
+      "2026-05-18": 2,
+      "2026-06-01": 270,
+      "2026-06-22": 9,
+      "2026-07-06": 2,
+      "2026-07-13": 1
+     }
+    },
+    "postman-echo.com": {
+     "captures": 490,
+     "weekly": {
+      "2026-01-26": 2,
+      "2026-02-02": 8,
+      "2026-02-09": 5,
+      "2026-02-16": 9,
+      "2026-02-23": 17,
+      "2026-03-02": 7,
+      "2026-03-09": 2,
+      "2026-03-16": 11,
+      "2026-03-23": 2,
+      "2026-03-30": 1,
+      "2026-04-06": 4,
+      "2026-04-13": 16,
+      "2026-04-20": 27,
+      "2026-04-27": 39,
+      "2026-05-04": 34,
+      "2026-05-11": 46,
+      "2026-05-18": 14,
+      "2026-05-25": 33,
+      "2026-06-01": 52,
+      "2026-06-08": 41,
+      "2026-06-15": 3,
+      "2026-06-22": 10,
+      "2026-06-29": 3,
+      "2026-07-06": 56,
+      "2026-07-13": 11,
+      "2026-07-27": 9,
+      "2026-08-03": 5,
+      "2026-08-10": 6,
+      "2026-08-17": 1,
+      "2026-08-24": 10,
+      "2026-09-14": 2,
+      "2026-09-21": 3,
+      "2026-09-28": 1
+     }
+    },
+    "pure.md": {
+     "captures": 215,
+     "weekly": {
+      "2026-02-02": 14,
+      "2026-02-09": 20,
+      "2026-02-16": 2,
+      "2026-02-23": 1,
+      "2026-03-02": 37,
+      "2026-03-09": 13,
+      "2026-03-16": 4,
+      "2026-03-23": 4,
+      "2026-03-30": 1,
+      "2026-04-06": 5,
+      "2026-04-13": 4,
+      "2026-04-20": 7,
+      "2026-04-27": 6,
+      "2026-05-04": 2,
+      "2026-05-11": 5,
+      "2026-05-18": 6,
+      "2026-05-25": 7,
+      "2026-06-01": 5,
+      "2026-06-08": 9,
+      "2026-06-22": 2,
+      "2026-07-06": 1,
+      "2026-07-13": 2,
+      "2026-07-20": 1,
+      "2026-07-27": 1,
+      "2026-08-03": 1,
+      "2026-08-10": 53,
+      "2026-08-31": 1,
+      "2026-09-07": 1
+     }
+    },
+    "r.jina.ai": {
+     "captures": 5834,
+     "weekly": {
+      "2026-01-26": 7,
+      "2026-02-02": 93,
+      "2026-02-09": 83,
+      "2026-02-16": 45,
+      "2026-02-23": 86,
+      "2026-03-02": 165,
+      "2026-03-09": 92,
+      "2026-03-16": 103,
+      "2026-03-23": 128,
+      "2026-03-30": 439,
+      "2026-04-06": 92,
+      "2026-04-13": 147,
+      "2026-04-20": 103,
+      "2026-04-27": 209,
+      "2026-05-04": 202,
+      "2026-05-11": 144,
+      "2026-05-18": 171,
+      "2026-05-25": 123,
+      "2026-06-01": 211,
+      "2026-06-08": 165,
+      "2026-06-15": 292,
+      "2026-06-22": 219,
+      "2026-06-29": 156,
+      "2026-07-06": 310,
+      "2026-07-13": 146,
+      "2026-07-20": 224,
+      "2026-07-27": 982,
+      "2026-08-03": 110,
+      "2026-08-10": 96,
+      "2026-08-17": 88,
+      "2026-08-24": 53,
+      "2026-08-31": 79,
+      "2026-09-07": 99,
+      "2026-09-14": 81,
+      "2026-09-21": 58,
+      "2026-09-28": 33
+     }
+    }
+   }
+  },
+  "urlscan_anonymous_30d": {
+   "note": "anonymous tier; totals only; first week partial (window clipped)",
+   "stopped": "http 429",
+   "weekly_totals": {
+    "allorigins.hexlet.app": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "api.allorigins.win": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 1,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "api.codetabs.com": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "api.counterapi.dev": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "cors.bwa.workers.dev": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "corsmirror.com": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "corsproxy.io": {
+     "2026-08-31": 0,
+     "2026-09-07": 1,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 2
+    },
+    "counterapi.dev": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "httpbin.org": {
+     "2026-08-31": 0,
+     "2026-09-07": 9,
+     "2026-09-14": 7,
+     "2026-09-21": 16,
+     "2026-09-28": 29
+    },
+    "httpbingo.org": {
+     "2026-08-31": 0,
+     "2026-09-07": 6,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 2
+    },
+    "httpbun.com": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 1,
+     "2026-09-28": 0
+    },
+    "jqp.vercel.app": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "jsonplaceholder.typicode.com": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0
+    },
+    "markdown.new": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "md.dhr.wtf": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "md.succ.ai": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "pie.dev": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "postman-echo.com": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "pure.md": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    },
+    "r.jina.ai": {
+     "2026-08-31": 0,
+     "2026-09-07": 0,
+     "2026-09-14": 0,
+     "2026-09-21": 0,
+     "2026-09-28": 0
+    }
+   },
+   "window_days": 30
+  },
+  "replay_check": {
+   "da.gd": {
+    "counts": {},
+    "error": "http 504",
+    "rows": 0
+   },
+   "jqp.vercel.app": {
+    "counts": {
+     "0904_0913:exact_in_dataset": 89,
+     "0904_0913:new_url": 27,
+     "0904_0913:new_url_shared_token": 114,
+     "post_0913:exact_in_dataset": 7,
+     "post_0913:new_url": 2
+    },
+    "error": null,
+    "rows": 239
+   },
+   "markdown.new": {
+    "counts": {
+     "0904_0913:exact_in_dataset": 11,
+     "0904_0913:new_url": 40,
+     "0904_0913:new_url_shared_token": 18,
+     "post_0913:exact_in_dataset": 1,
+     "post_0913:new_url": 1,
+     "pre_0904:new_url": 14
+    },
+    "error": null,
+    "rows": 85
+   },
+   "md.succ.ai": {
+    "counts": {
+     "0904_0913:exact_in_dataset": 11,
+     "0904_0913:new_url": 51,
+     "0904_0913:new_url_shared_token": 12,
+     "post_0913:exact_in_dataset": 2,
+     "post_0913:new_url": 1
+    },
+    "error": null,
+    "rows": 77
+   },
+   "vanderbi.lt": {
+    "counts": {
+     "0904_0913:exact_in_dataset": 32,
+     "0904_0913:new_url": 341,
+     "0904_0913:new_url_shared_token": 15,
+     "post_0913:exact_in_dataset": 2,
+     "post_0913:new_url": 16,
+     "post_0913:new_url_shared_token": 1,
+     "pre_0904:new_url": 15
+    },
+    "error": null,
+    "rows": 422
+   }
+  },
+  "wiki_sweep": {
+   "baseline_mad": 1.6095,
+   "baseline_median": 2.2525000000000004,
+   "known_window_excluded": [
+    "2026-05-11",
+    "2026-07-31"
+   ],
+   "requests": {
+    "by_host": {
+     "199.17.178.148": 2,
+     "Akademie-Solitude.de": 2,
+     "EEKim.com": 2,
+     "Features.Sheep.Art.pl": 2,
+     "Handgranat.org": 2,
+     "IAwiki.net": 2,
+     "KayakForum.com": 2,
+     "Open-Research.org.uk": 2,
+     "ProWiki.org": 2,
+     "SourceForge.net": 2,
+     "WiGLE.net": 2,
+     "Wiki8c.org": 1,
+     "WikiService.at": 2,
+     "Zhurnaly.com": 1,
+     "ZshWiki.org": 2,
+     "agendawiki.com": 1,
+     "alexschroeder.ch": 4,
+     "amapedia.amazon.com": 2,
+     "apocalypse.rulez.org": 2,
+     "appropriatesoftware.net": 2,
+     "archive.md": 2,
+     "aronsson.se": 1,
+     "arvo.ifi.unizh.ch": 2,
+     "ausqueer.info": 2,
+     "bantychicken.com": 2,
+     "billstclair.com": 1,
+     "bonmot.ca": 2,
+     "bookshelved.org": 1,
+     "cccac.de": 2,
+     "claimid": 2,
+     "communitywiki.org": 2,
+     "deletionpedia.dbatley.com": 1,
+     "discuss.sarahsbookstores.com": 2,
+     "eartwiki.org": 6,
+     "emacswiki.org": 2,
+     "eval.comm.nsdlib.org": 2,
+     "ferret.bemidjistate.edu": 2,
+     "ffwm.org": 2,
+     "foofus.com": 1,
+     "france.barcampbank.com": 1,
+     "gay.hfxns.org": 2,
+     "gesundeerde-gesundemenschen.net": 2,
+     "institute.ibesi.org": 2,
+     "interwiki.sourceforge.net": 1,
+     "kendra.org.uk": 1,
+     "konspire.sourceforge.net": 1,
+     "kristopherjohnson.net": 2,
+     "labrosa.ee.columbia.edu": 1,
+     "larhgo.de": 2,
+     "lua-users.org": 2,
+     "ludism.org": 11,
+     "meatballwiki.org": 1,
+     "nearlythere.com": 2,
+     "nooranch.com": 2,
+     "oddwiki.org": 6,
+     "oldgods.net": 1,
+     "openspaceworld.org": 2,
+     "oscamp.org": 2,
+     "plus.Google.com": 2,
+     "prowiki2.org": 1,
+     "purl.net": 1,
+     "reality.sculptors.com": 2,
+     "religionswiki.de": 2,
+     "ru.qtinterval.org": 2,
+     "rwhe.posterous.com": 2,
+     "s4560.gridserver.com": 2,
+     "sdss.ac.uk": 2,
+     "socialsynergyweb.net": 1,
+     "spookydistance.com": 2,
+     "sunz.awardspace.com": 2,
+     "superant.com": 1,
+     "syltwiki.de": 2,
+     "thelackthereof.org": 2,
+     "thetolkienwiki.org": 2,
+     "ting.sheep.art.pl": 2,
+     "transcoding.org": 2,
+     "trivialcms.rubyforge.org": 1,
+     "usemod.com": 2,
+     "web.Archive.org": 14,
+     "wiki.BeyondUnreal.com": 1,
+     "wiki.ByThePeople.net": 2,
+     "wiki.UBC.ca": 1,
+     "wiki.chiark.greenend.org.uk": 2,
+     "wiki.chongqed.org": 2,
+     "wiki.mutt.org": 2,
+     "wiki.nyfiken.org": 2,
+     "wiki.rubygarden.org": 2,
+     "wiki.sheep.art.pl": 2,
+     "wikiindex.org": 5,
+     "wikiweb.at": 1,
+     "www.Elvis.ac.nz": 2,
+     "www.HLS-software.at": 1,
+     "www.HomestarRunner.com": 2,
+     "www.OddWiki.org": 2,
+     "www.Uni-Graz.org": 2,
+     "www.WikiService.at": 1,
+     "www.admi.net": 2,
+     "www.alltaeglichelebensfuehrung.net": 2,
+     "www.as-graz.org": 1,
+     "www.bible11.com": 2,
+     "www.blueshinra.com": 2,
+     "www.carpe.com": 1,
+     "www.communitywiki.org": 60,
+     "www.composerplanet.com": 2,
+     "www.crystalclearsoftware.com": 2,
+     "www.digitas.harvard.edu": 2,
+     "www.doc-x.de": 1,
+     "www.dorfwiki.org": 2,
+     "www.employees.org": 1,
+     "www.evilmadscientist.com": 1,
+     "www.farviolet.com": 2,
+     "www.gss.ubc.ca": 1,
+     "www.iay.org.uk": 1,
+     "www.imaginechicago.org": 1,
+     "www.linuxrobots.org": 1,
+     "www.massarted.org": 2,
+     "www.mcs.vuw.ac.nz": 6,
+     "www.michaelherman.com": 3,
+     "www.modemac.com": 2,
+     "www.myelin.co.nz": 2,
+     "www.networkagainstviolence.org": 2,
+     "www.netzwerkgegengewalt.org": 1,
+     "www.nooranch.com": 3,
+     "www.oddmuse.org": 2,
+     "www.omwiki.org": 2,
+     "www.oops.se": 1,
+     "www.openspaceworld.org": 2,
+     "www.ourculture.info": 1,
+     "www.prowiki.org": 1,
+     "www.prowiki2.org": 12,
+     "www.schulwiki.org": 1,
+     "www.shambhala.org": 1,
+     "www.smpa.org": 1,
+     "www.srcf.ucam.org": 2,
+     "www.tejo.org": 2,
+     "www.tentacle.net": 1,
+     "www.texteditors.org": 1,
+     "www.timedsn.net": 2,
+     "www.tschlotfeldt.de": 2,
+     "www.uni-graz.org": 2,
+     "www.wikiservice.at": 33,
+     "www.wikiweb.at": 1,
+     "xp-france.net": 2
+    },
+    "errors": 152,
+    "requests": 381,
+    "robots_blocked": 11
+   },
+   "threshold": 7.081,
+   "wikis": {
+    "199.17.178.148/cgi-bin/YogaWikiWiki.pl": {
+     "base": "http://199.17.178.148/cgi-bin/YogaWikiWiki.pl",
+     "status": "URLError"
+    },
+    "Akademie-Solitude.de": {
+     "base": "http://Akademie-Solitude.de",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "EEKim.com/software/purple/purple.html": {
+     "base": "http://EEKim.com/software/purple/purple.html",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "Features.Sheep.Art.pl": {
+     "base": "http://Features.Sheep.Art.pl",
+     "status": "URLError"
+    },
+    "Handgranat.org/": {
+     "base": "http://Handgranat.org/",
+     "status": "URLError"
+    },
+    "IAwiki.net/IAwiki": {
+     "base": "http://IAwiki.net/IAwiki",
+     "status": "URLError"
+    },
+    "KayakForum.com/cgi-sys/cgiwrap/guille/wiki.pl": {
+     "base": "http://KayakForum.com/cgi-sys/cgiwrap/guille/wiki.pl",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "MeFiWiki.com/w/index.php": {
+     "base": "http://MeFiWiki.com/w/index.php",
+     "status": "robots"
+    },
+    "Open-Research.org.uk": {
+     "base": "http://Open-Research.org.uk",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "ProWiki.org": {
+     "above_baseline": false,
+     "base": "http://ProWiki.org",
+     "engine": "auto",
+     "entries": 1,
+     "first": "2026-09-09",
+     "last": "2026-09-09",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 2,
+      "ip_edits": 2,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 2
+     },
+     "peak_day_all": "2026-09-09",
+     "peak_day_outside_known": "2026-09-09",
+     "peak_outside_known": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 2,
+      "ip_edits": 2,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 2
+     },
+     "score_all": 0.549,
+     "score_outside_known": 0.549,
+     "status": "ok"
+    },
+    "ProWiki.org/prowiki/wiki.cgi": {
+     "above_baseline": false,
+     "base": "http://ProWiki.org/prowiki/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 4,
+     "first": "2026-01-11",
+     "last": "2026-09-04",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 1
+     },
+     "peak_day_all": "2026-09-04",
+     "peak_day_outside_known": "2026-09-04",
+     "peak_outside_known": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 1
+     },
+     "score_all": 1.733,
+     "score_outside_known": 1.733,
+     "status": "ok"
+    },
+    "SourceForge.net/projects/interwiki/": {
+     "base": "http://SourceForge.net/projects/interwiki/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "WiGLE.net": {
+     "base": "https://WiGLE.net",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "Wiki8c.org": {
+     "base": "http://Wiki8c.org",
+     "engine": "prowiki",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "WikiService.at/fdw/wiki.cgi": {
+     "above_baseline": false,
+     "base": "http://WikiService.at/fdw/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 2,
+     "first": "2026-09-04",
+     "last": "2026-09-06",
+     "peak_all": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 1,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 0
+     },
+     "peak_day_all": "2026-09-06",
+     "peak_day_outside_known": "2026-09-06",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 1,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 0
+     },
+     "score_all": 0.693,
+     "score_outside_known": 0.693,
+     "status": "ok"
+    },
+    "WikiService.at/kfu/wiki.cgi": {
+     "base": "http://WikiService.at/kfu/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "Zhurnaly.com/cgi-bin/wiki": {
+     "base": "http://Zhurnaly.com/cgi-bin/wiki",
+     "status": "http 404"
+    },
+    "ZshWiki.org/doku.php/start": {
+     "base": "http://ZshWiki.org/doku.php/start",
+     "status": "URLError"
+    },
+    "agendawiki.com/cgi-bin/aw.pl": {
+     "base": "http://agendawiki.com/cgi-bin/aw.pl",
+     "status": "http 522"
+    },
+    "alexschroeder.ch/": {
+     "base": "https://alexschroeder.ch/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "alexschroeder.ch/wiki": {
+     "base": "https://alexschroeder.ch/wiki",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "amapedia.amazon.com/": {
+     "base": "http://amapedia.amazon.com/",
+     "status": "URLError"
+    },
+    "apocalypse.rulez.org": {
+     "base": "http://apocalypse.rulez.org",
+     "status": "URLError"
+    },
+    "appropriatesoftware.net/wiki": {
+     "base": "http://appropriatesoftware.net/wiki",
+     "status": "URLError"
+    },
+    "archive.md/IFqTH": {
+     "base": "https://archive.md/IFqTH",
+     "status": "http 429"
+    },
+    "aronsson.se/telecom/": {
+     "base": "http://aronsson.se/telecom/",
+     "status": "http 404"
+    },
+    "arvo.ifi.unizh.ch/ailab/aiwiki/aiw.cgi": {
+     "base": "http://arvo.ifi.unizh.ch/ailab/aiwiki/aiw.cgi",
+     "status": "URLError"
+    },
+    "ausqueer.info/cgi-bin/ausqueerwiki.pl": {
+     "base": "http://ausqueer.info/cgi-bin/ausqueerwiki.pl",
+     "status": "URLError"
+    },
+    "bantychicken.com/cgi-bin/bantychickenwiki.pl": {
+     "base": "http://bantychicken.com/cgi-bin/bantychickenwiki.pl",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "billstclair.com/cgi-bin/wiki.pl/wiki.pl": {
+     "base": "http://billstclair.com/cgi-bin/wiki.pl/wiki.pl",
+     "status": "http 404"
+    },
+    "bonmot.ca/SolarFAQ/": {
+     "base": "http://bonmot.ca/SolarFAQ/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "bonmot.ca/pride/wiki/HomePage": {
+     "base": "http://bonmot.ca/pride/wiki/HomePage",
+     "status": "robots"
+    },
+    "bookshelved.org/cgi-bin/wiki.pl": {
+     "base": "http://bookshelved.org/cgi-bin/wiki.pl",
+     "status": "http 404"
+    },
+    "cccac.de/cgi-bin/wiki.pl": {
+     "base": "https://cccac.de/cgi-bin/wiki.pl",
+     "status": "URLError"
+    },
+    "claimid/xtof": {
+     "base": "http://claimid/xtof",
+     "status": "URLError"
+    },
+    "communitywiki.org/wiki/About": {
+     "base": "https://communitywiki.org/wiki/About",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "deletionpedia.dbatley.com/w/index.php": {
+     "base": "http://deletionpedia.dbatley.com/w/index.php",
+     "status": "http 500"
+    },
+    "discuss.sarahsbookstores.com/": {
+     "base": "http://discuss.sarahsbookstores.com/",
+     "status": "URLError"
+    },
+    "dorfwiki.org": {
+     "above_baseline": false,
+     "base": "https://www.dorfwiki.org/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 896,
+     "first": "2025-10-04",
+     "last": "2026-10-03",
+     "peak_all": {
+      "agentish_edits": 24,
+      "backup_named_edits": 0,
+      "edits": 147,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 143
+     },
+     "peak_day_all": "2025-12-01",
+     "peak_day_outside_known": "2025-12-01",
+     "peak_outside_known": {
+      "agentish_edits": 24,
+      "backup_named_edits": 0,
+      "edits": 147,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 143
+     },
+     "score_all": 5.704,
+     "score_outside_known": 5.704,
+     "status": "ok"
+    },
+    "eartwiki.org/": {
+     "base": "http://eartwiki.org/",
+     "status": "URLError"
+    },
+    "eartwiki.org/cgi-bin/hive/WikiWoodstock": {
+     "base": "http://eartwiki.org/cgi-bin/hive/WikiWoodstock",
+     "status": "URLError"
+    },
+    "eartwiki.org/hive/EArtList/EArtWikiAllWikisExplained": {
+     "base": "http://eartwiki.org/hive/EArtList/EArtWikiAllWikisExplained",
+     "status": "URLError"
+    },
+    "eastwikkers.typepad.com/eastwikkers_/2006/03/33_wikis_3_this.html": {
+     "base": "http://eastwikkers.typepad.com/eastwikkers_/2006/03/33_wikis_3_this.html",
+     "status": "robots"
+    },
+    "emacswiki.org/": {
+     "base": "http://emacswiki.org/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "eval.comm.nsdlib.org/cgi-bin/wiki.pl": {
+     "base": "http://eval.comm.nsdlib.org/cgi-bin/wiki.pl",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "ferret.bemidjistate.edu/~morgan/cgi-bin/blogsandwiki.pl": {
+     "base": "http://ferret.bemidjistate.edu/~morgan/cgi-bin/blogsandwiki.pl",
+     "status": "URLError"
+    },
+    "ffwm.org/": {
+     "base": "http://ffwm.org/",
+     "status": "URLError"
+    },
+    "foofus.com/cgi-bin/wiki": {
+     "base": "http://foofus.com/cgi-bin/wiki",
+     "status": "http 403"
+    },
+    "france.barcampbank.com": {
+     "base": "http://france.barcampbank.com",
+     "engine": "prowiki",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "gay.hfxns.org/": {
+     "above_baseline": false,
+     "base": "https://gay.hfxns.org/",
+     "engine": "oddmuse",
+     "entries": 2790,
+     "first": "2025-10-05",
+     "last": "2026-10-01",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 14,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 3,
+      "single_edit_new": 2,
+      "users": 4,
+      "welcome_test_edits": 0
+     },
+     "peak_day_all": "2026-07-08",
+     "peak_day_outside_known": "2026-04-21",
+     "peak_outside_known": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 18,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 2,
+      "single_edit_new": 1,
+      "users": 3,
+      "welcome_test_edits": 0
+     },
+     "score_all": 2.485,
+     "score_outside_known": 1.792,
+     "status": "ok"
+    },
+    "gesundeerde-gesundemenschen.net/wiki.cgi": {
+     "base": "http://gesundeerde-gesundemenschen.net/wiki.cgi",
+     "status": "URLError"
+    },
+    "institute.ibesi.org/": {
+     "base": "http://institute.ibesi.org/",
+     "status": "URLError"
+    },
+    "interwiki.sourceforge.net/cgi-bin/picawiki.pl/StartingPoint": {
+     "base": "http://interwiki.sourceforge.net/cgi-bin/picawiki.pl/StartingPoint",
+     "status": "http 404"
+    },
+    "kendra.org.uk/wiki/wiki.pl": {
+     "base": "http://kendra.org.uk/wiki/wiki.pl",
+     "status": "http 404"
+    },
+    "konspire.sourceforge.net/cgi-bin/wiki.pl": {
+     "base": "http://konspire.sourceforge.net/cgi-bin/wiki.pl",
+     "status": "http 404"
+    },
+    "kristopherjohnson.net/cgi-bin/rc/wiki.pl": {
+     "base": "http://kristopherjohnson.net/cgi-bin/rc/wiki.pl",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "labrosa.ee.columbia.edu/wiki/rg": {
+     "base": "http://labrosa.ee.columbia.edu/wiki/rg",
+     "status": "http 404"
+    },
+    "larhgo.de/cgi-bin/wiki.pl": {
+     "above_baseline": false,
+     "base": "http://larhgo.de/cgi-bin/wiki.pl",
+     "engine": "oddmuse",
+     "entries": 49,
+     "first": "2025-11-03",
+     "last": "2026-08-25",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 1
+     },
+     "peak_day_all": "2026-04-21",
+     "peak_day_outside_known": "2026-04-21",
+     "peak_outside_known": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 1
+     },
+     "score_all": 1.733,
+     "score_outside_known": 1.733,
+     "status": "ok"
+    },
+    "lua-users.org/wiki/": {
+     "base": "http://lua-users.org/wiki/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "ludism.org/gamedesign/FrontPage": {
+     "above_baseline": true,
+     "base": "http://ludism.org/gamedesign/FrontPage",
+     "engine": "oddmuse",
+     "entries": 1768,
+     "evidence": {
+      "2026-04-26": {
+       "flagged_pages": [
+        "http://ludism.org/gamedesign/FrontPage?Comments%20on%20HomePage"
+       ],
+       "pages_fetched": 1,
+       "relay_host_mentions": {}
+      }
+     },
+     "first": "2025-10-05",
+     "last": "2026-10-03",
+     "peak_all": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 94,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 79,
+      "single_edit_new": 75,
+      "users": 81,
+      "welcome_test_edits": 0
+     },
+     "peak_day_all": "2026-04-26",
+     "peak_day_outside_known": "2026-04-26",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 94,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 79,
+      "single_edit_new": 75,
+      "users": 81,
+      "welcome_test_edits": 0
+     },
+     "score_all": 9.406,
+     "score_outside_known": 9.406,
+     "status": "ok"
+    },
+    "ludism.org/gbgwiki/FrontPage": {
+     "above_baseline": false,
+     "base": "http://ludism.org/gbgwiki/FrontPage",
+     "engine": "oddmuse",
+     "entries": 1,
+     "first": "2026-05-18",
+     "last": "2026-05-18",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 1
+     },
+     "peak_day_all": "2026-05-18",
+     "peak_day_outside_known": null,
+     "peak_outside_known": {},
+     "score_all": 0.347,
+     "score_outside_known": 0.0,
+     "status": "ok"
+    },
+    "ludism.org/mentat": {
+     "above_baseline": false,
+     "base": "http://ludism.org/mentat",
+     "engine": "oddmuse",
+     "entries": 6,
+     "first": "2025-11-05",
+     "last": "2026-08-30",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 1
+     },
+     "peak_day_all": "2026-05-18",
+     "peak_day_outside_known": "2026-08-30",
+     "peak_outside_known": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 1
+     },
+     "score_all": 1.733,
+     "score_outside_known": 1.733,
+     "status": "ok"
+    },
+    "ludism.org/ppwiki/": {
+     "above_baseline": false,
+     "base": "http://ludism.org/ppwiki/",
+     "engine": "oddmuse",
+     "entries": 162,
+     "first": "2025-11-02",
+     "last": "2026-09-22",
+     "peak_all": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 4,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 4,
+      "single_edit_new": 4,
+      "users": 4,
+      "welcome_test_edits": 0
+     },
+     "peak_day_all": "2026-05-05",
+     "peak_day_outside_known": "2026-05-05",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 4,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 4,
+      "single_edit_new": 4,
+      "users": 4,
+      "welcome_test_edits": 0
+     },
+     "score_all": 3.912,
+     "score_outside_known": 3.912,
+     "status": "ok"
+    },
+    "ludism.org/scwiki/FrontPage": {
+     "above_baseline": false,
+     "base": "http://ludism.org/scwiki/FrontPage",
+     "engine": "oddmuse",
+     "entries": 245,
+     "first": "2026-05-18",
+     "last": "2026-10-03",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 14,
+      "ip_edits": 1,
+      "machine_named_users": 0,
+      "new_accounts": 5,
+      "single_edit_new": 2,
+      "users": 6,
+      "welcome_test_edits": 0
+     },
+     "peak_day_all": "2026-09-05",
+     "peak_day_outside_known": "2026-09-05",
+     "peak_outside_known": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 14,
+      "ip_edits": 1,
+      "machine_named_users": 0,
+      "new_accounts": 5,
+      "single_edit_new": 2,
+      "users": 6,
+      "welcome_test_edits": 0
+     },
+     "score_all": 2.89,
+     "score_outside_known": 2.89,
+     "status": "ok"
+    },
+    "meatballwiki.org": {
+     "base": "https://meatballwiki.org/recent",
+     "engine": "html-generic",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "nearlythere.com/cgi-bin/design/wiki.cgi": {
+     "base": "http://nearlythere.com/cgi-bin/design/wiki.cgi",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "nooranch.com/synaesmedia/wiki/wiki.cgi": {
+     "base": "http://nooranch.com/synaesmedia/wiki/wiki.cgi",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "oddwiki.org/cgi-bin/odd.pl/F%C3%AAteInternet": {
+     "base": "http://oddwiki.org/cgi-bin/odd.pl/F%C3%AAteInternet",
+     "status": "URLError"
+    },
+    "oddwiki.org/odd/OpenEvent/FrontPage": {
+     "base": "http://oddwiki.org/odd/OpenEvent/FrontPage",
+     "status": "URLError"
+    },
+    "oddwiki.org/odd/TingCamp/FrontPage": {
+     "base": "http://oddwiki.org/odd/TingCamp/FrontPage",
+     "status": "URLError"
+    },
+    "oldgods.net/cgi-bin/datebk_wiki": {
+     "base": "http://oldgods.net/cgi-bin/datebk_wiki",
+     "status": "http 500"
+    },
+    "openspaceworld.org/cgi/netwiki.cgi": {
+     "base": "https://openspaceworld.org/cgi/netwiki.cgi",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "oscamp.org/": {
+     "base": "http://oscamp.org/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "plus.Google.com/+CampaignwikiOrg": {
+     "base": "https://plus.Google.com/+CampaignwikiOrg",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "prowiki.org/wiki4d": {
+     "above_baseline": false,
+     "base": "https://www.prowiki.org/wiki4d/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 217,
+     "first": "2026-03-09",
+     "last": "2026-09-10",
+     "peak_all": {
+      "agentish_edits": 3,
+      "backup_named_edits": 63,
+      "edits": 104,
+      "ip_edits": 0,
+      "machine_named_users": 77,
+      "new_accounts": 89,
+      "single_edit_new": 79,
+      "users": 90,
+      "welcome_test_edits": 3
+     },
+     "peak_day_all": "2026-06-18",
+     "peak_day_outside_known": "2026-09-04",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 2,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 2,
+      "single_edit_new": 2,
+      "users": 2,
+      "welcome_test_edits": 2
+     },
+     "score_all": 19.576,
+     "score_outside_known": 3.44,
+     "status": "ok"
+    },
+    "prowiki2.org/glarnerschulen/wiki.cgi": {
+     "base": "http://prowiki2.org/glarnerschulen/wiki.cgi",
+     "status": "http 404"
+    },
+    "purl.net/net/cpw": {
+     "base": "http://purl.net/net/cpw",
+     "status": "http 404"
+    },
+    "reality.sculptors.com/cgi-bin/wiki": {
+     "base": "http://reality.sculptors.com/cgi-bin/wiki",
+     "status": "URLError"
+    },
+    "religionswiki.de": {
+     "base": "http://religionswiki.de",
+     "status": "URLError"
+    },
+    "ru.qtinterval.org/": {
+     "base": "http://ru.qtinterval.org/",
+     "status": "URLError"
+    },
+    "rwhe.posterous.com/ludismorg-wikis-are-back-up": {
+     "base": "http://rwhe.posterous.com/ludismorg-wikis-are-back-up",
+     "status": "URLError"
+    },
+    "s4560.gridserver.com/cgi-bin/wiki2/KaboWikiList/WikiNetHiveLists": {
+     "base": "http://s4560.gridserver.com/cgi-bin/wiki2/KaboWikiList/WikiNetHiveLists",
+     "status": "URLError"
+    },
+    "sdss.ac.uk/wiki/wiki.pl": {
+     "base": "http://sdss.ac.uk/wiki/wiki.pl",
+     "status": "URLError"
+    },
+    "sl4.org/bin/wiki.pl": {
+     "base": "http://sl4.org/bin/wiki.pl",
+     "status": "robots"
+    },
+    "socialsynergyweb.net/cgi-bin/wiki/ETerraDe/Neues": {
+     "base": "http://socialsynergyweb.net/cgi-bin/wiki/ETerraDe/Neues",
+     "status": "http 404"
+    },
+    "spookydistance.com/cgi-bin/public-wiki.pl": {
+     "base": "http://spookydistance.com/cgi-bin/public-wiki.pl",
+     "status": "URLError"
+    },
+    "stage.itp.tsoa.nyu.edu/~cs97/cgi-bin/wiki.cgi": {
+     "base": "http://stage.itp.tsoa.nyu.edu/~cs97/cgi-bin/wiki.cgi",
+     "status": "robots"
+    },
+    "sunz.awardspace.com/cgi-bin/odd.pl/HomePage": {
+     "base": "http://sunz.awardspace.com/cgi-bin/odd.pl/HomePage",
+     "status": "URLError"
+    },
+    "superant.com/cgi-bin/smalllinux.pl": {
+     "base": "http://superant.com/cgi-bin/smalllinux.pl",
+     "status": "http 404"
+    },
+    "syltwiki.de/": {
+     "base": "http://syltwiki.de/",
+     "status": "URLError"
+    },
+    "thelackthereof.org/": {
+     "base": "http://thelackthereof.org/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "thetolkienwiki.org/": {
+     "base": "http://thetolkienwiki.org/",
+     "status": "URLError"
+    },
+    "ting.sheep.art.pl/wiki/Recent_changes": {
+     "base": "http://ting.sheep.art.pl/wiki/Recent_changes",
+     "status": "URLError"
+    },
+    "transcoding.org/": {
+     "base": "http://transcoding.org/",
+     "status": "URLError"
+    },
+    "trivialcms.rubyforge.org/wiki/wiki.pl": {
+     "base": "http://trivialcms.rubyforge.org/wiki/wiki.pl",
+     "status": "http 404"
+    },
+    "usemod.com/cgi-bin/wiki.pl": {
+     "base": "http://usemod.com/cgi-bin/wiki.pl",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "web.Archive.org/web/20040124081255/http://wiki.Octave.org/wiki.pl": {
+     "base": "https://web.Archive.org/web/20040124081255/http://wiki.Octave.org/wiki.pl",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20040309212036/http://www.Skynet.ie/~dach/cgi-bin/wiki.pl": {
+     "base": "https://web.Archive.org/web/20040309212036/http://www.Skynet.ie/~dach/cgi-bin/wiki.pl",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20041013120309/http://www.AllMyFAQs.com/faq.pl": {
+     "base": "https://web.Archive.org/web/20041013120309/http://www.AllMyFAQs.com/faq.pl",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20051218192454im_/http://Leipzig.Sprachenabend.de/wiki/wiki-01.gif": {
+     "base": "https://web.Archive.org/web/20051218192454im_/http://Leipzig.Sprachenabend.de/wiki/wiki-01.gif",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20060617172110/http://GNUfans.net/singularity.pl/RecentChanges": {
+     "base": "https://web.Archive.org/web/20060617172110/http://GNUfans.net/singularity.pl/RecentChanges",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20060823104211/http://JoeChip.net/BrianKerr/": {
+     "base": "https://web.Archive.org/web/20060823104211/http://JoeChip.net/BrianKerr/",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20070211062702/http://wiki.cs.uiuc.edu/CUWireless/Recent+Changes": {
+     "base": "https://web.Archive.org/web/20070211062702/http://wiki.cs.uiuc.edu/CUWireless/Recent+Changes",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20070212232817/http://AndrewGray.uklinux.net/tpwiki/wiki.pl": {
+     "base": "https://web.Archive.org/web/20070212232817/http://AndrewGray.uklinux.net/tpwiki/wiki.pl",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20100918070241/http://Wikiservice.at/fractal/wikidev.cgi": {
+     "base": "https://web.Archive.org/web/20100918070241/http://Wikiservice.at/fractal/wikidev.cgi",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20110517070026/http://www.CommunityWiki.org/odd/CollectiveProblemSolving/HomePage": {
+     "base": "https://web.Archive.org/web/20110517070026/http://www.CommunityWiki.org/odd/CollectiveProblemSolving/HomePage",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20110723233818/http://OurPla.net/cgi-bin/wiki.pl": {
+     "base": "https://web.Archive.org/web/20110723233818/http://OurPla.net/cgi-bin/wiki.pl",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20120112041251/http://grault.net/adjunct/index.cgi": {
+     "base": "https://web.Archive.org/web/20120112041251/http://grault.net/adjunct/index.cgi",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20150317073056/http://eArtWiki.org/hive/AllWikis": {
+     "base": "https://web.Archive.org/web/20150317073056/http://eArtWiki.org/hive/AllWikis",
+     "status": "http 404"
+    },
+    "web.Archive.org/web/20160127013943/http://www.dabeaz.com/cgi-bin/wiki.pl": {
+     "base": "https://web.Archive.org/web/20160127013943/http://www.dabeaz.com/cgi-bin/wiki.pl",
+     "status": "http 404"
+    },
+    "wiki.BeyondUnreal.com": {
+     "base": "https://wiki.BeyondUnreal.com",
+     "status": "http 403"
+    },
+    "wiki.ByThePeople.net/": {
+     "base": "http://wiki.ByThePeople.net/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "wiki.UBC.ca/": {
+     "base": "http://wiki.UBC.ca/",
+     "status": "http 404"
+    },
+    "wiki.chiark.greenend.org.uk/RecentChanges": {
+     "base": "http://wiki.chiark.greenend.org.uk/RecentChanges",
+     "status": "URLError"
+    },
+    "wiki.chongqed.org/": {
+     "base": "http://wiki.chongqed.org/",
+     "status": "URLError"
+    },
+    "wiki.mutt.org/": {
+     "base": "http://wiki.mutt.org/",
+     "status": "URLError"
+    },
+    "wiki.nyfiken.org/": {
+     "base": "http://wiki.nyfiken.org/",
+     "status": "URLError"
+    },
+    "wiki.rubygarden.org/Ruby/page/show/WikiNode": {
+     "base": "http://wiki.rubygarden.org/Ruby/page/show/WikiNode",
+     "status": "URLError"
+    },
+    "wiki.sheep.art.pl/": {
+     "base": "http://wiki.sheep.art.pl/",
+     "status": "URLError"
+    },
+    "wikiservice.at (root)": {
+     "above_baseline": false,
+     "base": "https://www.wikiservice.at/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 1,
+     "first": "2026-09-09",
+     "last": "2026-09-09",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 2,
+      "ip_edits": 2,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 2
+     },
+     "peak_day_all": "2026-09-09",
+     "peak_day_outside_known": "2026-09-09",
+     "peak_outside_known": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 2,
+      "ip_edits": 2,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 2
+     },
+     "score_all": 0.549,
+     "score_outside_known": 0.549,
+     "status": "ok"
+    },
+    "wikiservice.at/buecher": {
+     "base": "https://www.wikiservice.at/buecher/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "wikiservice.at/dse": {
+     "above_baseline": false,
+     "base": "https://www.wikiservice.at/dse/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 13999,
+     "evidence": {
+      "2026-06-18": {
+       "flagged_pages": [
+        "https://www.wikiservice.at/dse/wiki.cgi?WillkommenImWiki",
+        "https://www.wikiservice.at/dse/wiki.cgi?StartSeite",
+        "https://www.wikiservice.at/dse/wiki.cgi?TestSeite",
+        "https://www.wikiservice.at/dse/wiki.cgi?AgentLinkma20JuneAA",
+        "https://www.wikiservice.at/dse/wiki.cgi?AgentMyBridgeZZ",
+        "https://www.wikiservice.at/dse/wiki.cgi?AgentMySecLinksZZZ2",
+        "https://www.wikiservice.at/dse/wiki.cgi?OpenAIMassValuesJune20Master",
+        "https://www.wikiservice.at/dse/wiki.cgi?AgentTempMineLemino4477Q"
+       ],
+       "pages_fetched": 8,
+       "relay_host_mentions": {
+        "httpbun": 1
+       }
+      },
+      "2026-09-05": {
+       "flagged_pages": [
+        "https://www.wikiservice.at/dse/wiki.cgi?ForumSeite"
+       ],
+       "pages_fetched": 1,
+       "relay_host_mentions": {}
+      }
+     },
+     "first": "2026-01-07",
+     "last": "2026-10-03",
+     "peak_all": {
+      "agentish_edits": 2199,
+      "backup_named_edits": 650,
+      "edits": 5992,
+      "ip_edits": 0,
+      "machine_named_users": 454,
+      "new_accounts": 748,
+      "single_edit_new": 248,
+      "users": 832,
+      "welcome_test_edits": 3120
+     },
+     "peak_day_all": "2026-06-18",
+     "peak_day_outside_known": "2026-09-05",
+     "peak_outside_known": {
+      "agentish_edits": 28,
+      "backup_named_edits": 0,
+      "edits": 41,
+      "ip_edits": 2,
+      "machine_named_users": 0,
+      "new_accounts": 3,
+      "single_edit_new": 2,
+      "users": 4,
+      "welcome_test_edits": 0
+     },
+     "score_all": 36.275,
+     "score_outside_known": 5.852,
+     "status": "ok"
+    },
+    "wikiservice.at/fractal": {
+     "above_baseline": false,
+     "base": "https://www.wikiservice.at/fractal/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 483,
+     "first": "2026-05-24",
+     "last": "2026-10-03",
+     "peak_all": {
+      "agentish_edits": 182,
+      "backup_named_edits": 27,
+      "edits": 266,
+      "ip_edits": 1,
+      "machine_named_users": 51,
+      "new_accounts": 116,
+      "single_edit_new": 71,
+      "users": 124,
+      "welcome_test_edits": 11
+     },
+     "peak_day_all": "2026-06-22",
+     "peak_day_outside_known": "2026-09-04",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 9,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 5,
+      "single_edit_new": 4,
+      "users": 6,
+      "welcome_test_edits": 6
+     },
+     "score_all": 23.084,
+     "score_outside_known": 5.067,
+     "status": "ok"
+    },
+    "wikiservice.at/gruender": {
+     "above_baseline": false,
+     "base": "https://www.wikiservice.at/gruender/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 7,
+     "first": "2026-06-22",
+     "last": "2026-09-08",
+     "peak_all": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 1
+     },
+     "peak_day_all": "2026-09-05",
+     "peak_day_outside_known": "2026-09-05",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 1
+     },
+     "score_all": 2.426,
+     "score_outside_known": 2.426,
+     "status": "ok"
+    },
+    "wikiservice.at/probier": {
+     "above_baseline": true,
+     "base": "https://www.wikiservice.at/probier/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 1442,
+     "evidence": {
+      "2026-06-18": {
+       "flagged_pages": [
+        "https://www.wikiservice.at/probier/wiki.cgi?AgentSimple1781805995",
+        "https://www.wikiservice.at/probier/wiki.cgi?AgentMDNow0091781806814",
+        "https://www.wikiservice.at/probier/wiki.cgi?MdSuccDirectCounty9001781806851",
+        "https://www.wikiservice.at/probier/wiki.cgi?AgentProxiesMe1781806794",
+        "https://www.wikiservice.at/probier/wiki.cgi?AgentCountyMassSolutionZ9",
+        "https://www.wikiservice.at/probier/wiki.cgi?JsonDeepAgent889",
+        "https://www.wikiservice.at/probier/wiki.cgi?INVJSSmall2392481",
+        "https://www.wikiservice.at/probier/wiki.cgi?AgentMdSuccTokens9999"
+       ],
+       "pages_fetched": 8,
+       "relay_host_mentions": {
+        "allorigins": 4,
+        "markdown.new": 10,
+        "md.succ.ai": 3,
+        "r.jina.ai": 2
+       }
+      },
+      "2026-09-07": {
+       "flagged_pages": [
+        "https://www.wikiservice.at/probier/wiki.cgi?Agent010LeminoDirect1781808371",
+        "https://www.wikiservice.at/probier/wiki.cgi?SandboxLLMSECLink997",
+        "https://www.wikiservice.at/probier/wiki.cgi?Agent010LeminoDirect1781808427",
+        "https://www.wikiservice.at/probier/wiki.cgi?Agent009Tree2",
+        "https://www.wikiservice.at/probier/wiki.cgi?Agent0InvestorLinks1781803350",
+        "https://www.wikiservice.at/probier/wiki.cgi?Agent010LeminoDirect1781807044",
+        "https://www.wikiservice.at/probier/wiki.cgi?AgentEconNewsletterDocsK4",
+        "https://www.wikiservice.at/probier/wiki.cgi?SecJsonGetTest1781796523"
+       ],
+       "pages_fetched": 8,
+       "relay_host_mentions": {}
+      }
+     },
+     "first": "2026-05-24",
+     "last": "2026-10-03",
+     "peak_all": {
+      "agentish_edits": 346,
+      "backup_named_edits": 386,
+      "edits": 541,
+      "ip_edits": 540,
+      "machine_named_users": 0,
+      "new_accounts": 518,
+      "single_edit_new": 487,
+      "users": 523,
+      "welcome_test_edits": 16
+     },
+     "peak_day_all": "2026-06-18",
+     "peak_day_outside_known": "2026-09-07",
+     "peak_outside_known": {
+      "agentish_edits": 225,
+      "backup_named_edits": 192,
+      "edits": 308,
+      "ip_edits": 308,
+      "machine_named_users": 0,
+      "new_accounts": 219,
+      "single_edit_new": 91,
+      "users": 220,
+      "welcome_test_edits": 24
+     },
+     "score_all": 22.687,
+     "score_outside_known": 19.577,
+     "status": "ok"
+    },
+    "wikiservice.at/support": {
+     "base": "https://www.wikiservice.at/support/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "wikiservice.at/wiki4d": {
+     "above_baseline": false,
+     "base": "https://www.wikiservice.at/wiki4d/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 217,
+     "first": "2026-03-09",
+     "last": "2026-09-10",
+     "peak_all": {
+      "agentish_edits": 3,
+      "backup_named_edits": 63,
+      "edits": 104,
+      "ip_edits": 0,
+      "machine_named_users": 77,
+      "new_accounts": 89,
+      "single_edit_new": 79,
+      "users": 90,
+      "welcome_test_edits": 3
+     },
+     "peak_day_all": "2026-06-18",
+     "peak_day_outside_known": "2026-09-04",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 2,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 2,
+      "single_edit_new": 2,
+      "users": 2,
+      "welcome_test_edits": 2
+     },
+     "score_all": 19.576,
+     "score_outside_known": 3.44,
+     "status": "ok"
+    },
+    "wikiweb.at": {
+     "base": "http://wikiweb.at",
+     "engine": "prowiki",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.Elvis.ac.nz/brain": {
+     "base": "http://www.Elvis.ac.nz/brain",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.HLS-software.at": {
+     "above_baseline": false,
+     "base": "http://www.HLS-software.at",
+     "engine": "prowiki",
+     "entries": 7,
+     "first": "2026-05-22",
+     "last": "2026-05-22",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 22,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 4
+     },
+     "peak_day_all": "2026-05-22",
+     "peak_day_outside_known": null,
+     "peak_outside_known": {},
+     "score_all": 0.805,
+     "score_outside_known": 0.0,
+     "status": "ok"
+    },
+    "www.HomestarRunner.com": {
+     "base": "http://www.HomestarRunner.com",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.OddWiki.org/cgi-bin/odd.pl": {
+     "base": "http://www.OddWiki.org/cgi-bin/odd.pl",
+     "status": "URLError"
+    },
+    "www.ToothyCat.net/wiki/wiki.pl": {
+     "base": "https://www.ToothyCat.net/wiki/wiki.pl",
+     "status": "robots"
+    },
+    "www.Uni-Graz.org/rewi/wiki.cgi": {
+     "base": "http://www.Uni-Graz.org/rewi/wiki.cgi",
+     "status": "URLError"
+    },
+    "www.WikiService.at/wiki4d/wiki.cgi": {
+     "above_baseline": false,
+     "base": "http://www.WikiService.at/wiki4d/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 217,
+     "first": "2026-03-09",
+     "last": "2026-09-10",
+     "peak_all": {
+      "agentish_edits": 3,
+      "backup_named_edits": 63,
+      "edits": 104,
+      "ip_edits": 0,
+      "machine_named_users": 77,
+      "new_accounts": 89,
+      "single_edit_new": 79,
+      "users": 90,
+      "welcome_test_edits": 3
+     },
+     "peak_day_all": "2026-06-18",
+     "peak_day_outside_known": "2026-09-04",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 2,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 2,
+      "single_edit_new": 2,
+      "users": 2,
+      "welcome_test_edits": 2
+     },
+     "score_all": 19.576,
+     "score_outside_known": 3.44,
+     "status": "ok"
+    },
+    "www.admi.net/cgi-bin/wiki": {
+     "base": "http://www.admi.net/cgi-bin/wiki",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.alltaeglichelebensfuehrung.net": {
+     "base": "http://www.alltaeglichelebensfuehrung.net",
+     "status": "URLError"
+    },
+    "www.as-graz.org/main/wiki.cgi": {
+     "base": "http://www.as-graz.org/main/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.bible11.com/": {
+     "base": "http://www.bible11.com/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.blueshinra.com": {
+     "base": "http://www.blueshinra.com",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.carpe.com/wiki/wiki.pl": {
+     "base": "http://www.carpe.com/wiki/wiki.pl",
+     "status": "http 404"
+    },
+    "www.chat11.com/": {
+     "base": "http://www.chat11.com/",
+     "status": "robots"
+    },
+    "www.communitywiki.org/": {
+     "base": "http://www.communitywiki.org/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/CityWikiNodeWiki/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/CityWikiNodeWiki/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/CollabEditor/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/CollabEditor/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/DreamStones/HomePage": {
+     "base": "http://www.communitywiki.org/odd/DreamStones/HomePage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/EnglishSimple/FrontPeidz": {
+     "base": "http://www.communitywiki.org/odd/EnglishSimple/FrontPeidz",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/EvolutionaryNexus/HomePage": {
+     "base": "http://www.communitywiki.org/odd/EvolutionaryNexus/HomePage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/F%C3%AAteInternet/Accueil": {
+     "base": "http://www.communitywiki.org/odd/F%C3%AAteInternet/Accueil",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/IndianaMigrantFarmworkerDatabase/HomePage": {
+     "base": "http://www.communitywiki.org/odd/IndianaMigrantFarmworkerDatabase/HomePage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/JokesWiki/WikiNode": {
+     "base": "http://www.communitywiki.org/odd/JokesWiki/WikiNode",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/LadyWiki/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/LadyWiki/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/LehrMich/Neues": {
+     "base": "http://www.communitywiki.org/odd/LehrMich/Neues",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/MattisManzel/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/MattisManzel/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/NodeWikiForPoliticalWikis/changes": {
+     "base": "http://www.communitywiki.org/odd/NodeWikiForPoliticalWikis/changes",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/OddWikiCenter/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/OddWikiCenter/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/OddWikiCentre//PageAccueil": {
+     "base": "http://www.communitywiki.org/odd/OddWikiCentre//PageAccueil",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/OddWikiCentro/PaginaIniziale": {
+     "base": "http://www.communitywiki.org/odd/OddWikiCentro/PaginaIniziale",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/OddWikiCentroEs/WikiNode": {
+     "base": "http://www.communitywiki.org/odd/OddWikiCentroEs/WikiNode",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/OddWikiCentrumNl/WikiNode": {
+     "base": "http://www.communitywiki.org/odd/OddWikiCentrumNl/WikiNode",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/OddWikiCentrumPl/HomePage": {
+     "base": "http://www.communitywiki.org/odd/OddWikiCentrumPl/HomePage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/OddWikiCentrumSv/HuvudSida": {
+     "base": "http://www.communitywiki.org/odd/OddWikiCentrumSv/HuvudSida",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/OddWikiList/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/OddWikiList/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/OddWikiZentrum/Neues": {
+     "base": "http://www.communitywiki.org/odd/OddWikiZentrum/Neues",
+     "status": "URLError"
+    },
+    "www.communitywiki.org/odd/SandBliki/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/SandBliki/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/SocialSynergy/HomePage": {
+     "base": "http://www.communitywiki.org/odd/SocialSynergy/HomePage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/TeachMe/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/TeachMe/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/TeamBuying/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/TeamBuying/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/Venezia/PaginaFronte": {
+     "base": "http://www.communitywiki.org/odd/Venezia/PaginaFronte",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/WikilandiaGuideWiki/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/WikilandiaGuideWiki/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.communitywiki.org/odd/WorldJamWiki/FrontPage": {
+     "base": "http://www.communitywiki.org/odd/WorldJamWiki/FrontPage",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.composerplanet.com/cgi-bin/wiki.cgi": {
+     "base": "http://www.composerplanet.com/cgi-bin/wiki.cgi",
+     "status": "URLError"
+    },
+    "www.crystalclearsoftware.com/cgi-bin/boost_wiki/wiki.pl": {
+     "base": "http://www.crystalclearsoftware.com/cgi-bin/boost_wiki/wiki.pl",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.digitas.harvard.edu/cgi-bin/wiki/ken/RecentChanges": {
+     "base": "http://www.digitas.harvard.edu/cgi-bin/wiki/ken/RecentChanges",
+     "status": "URLError"
+    },
+    "www.doc-x.de/cgi-bin/wiki.pl": {
+     "base": "http://www.doc-x.de/cgi-bin/wiki.pl",
+     "status": "http 404"
+    },
+    "www.dorfwiki.org": {
+     "above_baseline": false,
+     "base": "http://www.dorfwiki.org",
+     "engine": "prowiki",
+     "entries": 896,
+     "first": "2025-10-04",
+     "last": "2026-10-03",
+     "peak_all": {
+      "agentish_edits": 24,
+      "backup_named_edits": 0,
+      "edits": 147,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 143
+     },
+     "peak_day_all": "2025-12-01",
+     "peak_day_outside_known": "2025-12-01",
+     "peak_outside_known": {
+      "agentish_edits": 24,
+      "backup_named_edits": 0,
+      "edits": 147,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 143
+     },
+     "score_all": 5.704,
+     "score_outside_known": 5.704,
+     "status": "ok"
+    },
+    "www.employees.org/~alokem/boing.cgi": {
+     "base": "http://www.employees.org/~alokem/boing.cgi",
+     "status": "http 403"
+    },
+    "www.evilmadscientist.com/dokuwiki/": {
+     "base": "http://www.evilmadscientist.com/dokuwiki/",
+     "status": "http 404"
+    },
+    "www.farviolet.com/autism/index.pl": {
+     "base": "http://www.farviolet.com/autism/index.pl",
+     "status": "URLError"
+    },
+    "www.gss.ubc.ca/cgi-bin/wiki.pl": {
+     "base": "http://www.gss.ubc.ca/cgi-bin/wiki.pl",
+     "status": "http 500"
+    },
+    "www.humanistcenterofcultures.org/wiki/wiki.cgi": {
+     "base": "http://www.humanistcenterofcultures.org/wiki/wiki.cgi",
+     "status": "robots"
+    },
+    "www.iay.org.uk/there/wiki/wiki.pl": {
+     "base": "http://www.iay.org.uk/there/wiki/wiki.pl",
+     "status": "http 404"
+    },
+    "www.imaginechicago.org/cgi-bin/worldwiki.cgi": {
+     "base": "http://www.imaginechicago.org/cgi-bin/worldwiki.cgi",
+     "status": "http 403"
+    },
+    "www.jpaulmorrison.com/cgi-bin/wiki.pl": {
+     "base": "http://www.jpaulmorrison.com/cgi-bin/wiki.pl",
+     "status": "robots"
+    },
+    "www.linuxrobots.org/wiki/HomePage": {
+     "base": "http://www.linuxrobots.org/wiki/HomePage",
+     "status": "http 404"
+    },
+    "www.massarted.org/artech/artwiki.pl": {
+     "base": "http://www.massarted.org/artech/artwiki.pl",
+     "status": "URLError"
+    },
+    "www.mcs.vuw.ac.nz/~chikken/cgi-bin/notyourhouse.pl": {
+     "base": "http://www.mcs.vuw.ac.nz/~chikken/cgi-bin/notyourhouse.pl",
+     "status": "URLError"
+    },
+    "www.mcs.vuw.ac.nz/~craig/cgi-bin/wiki.pl": {
+     "base": "http://www.mcs.vuw.ac.nz/~craig/cgi-bin/wiki.pl",
+     "status": "URLError"
+    },
+    "www.mcs.vuw.ac.nz/~donald/": {
+     "base": "http://www.mcs.vuw.ac.nz/~donald/",
+     "status": "URLError"
+    },
+    "www.michaelherman.com/cgi/foodwiki.cgi": {
+     "base": "http://www.michaelherman.com/cgi/foodwiki.cgi",
+     "status": "http 404"
+    },
+    "www.michaelherman.com/cgi/giving.cgi": {
+     "base": "http://www.michaelherman.com/cgi/giving.cgi",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.modemac.com": {
+     "base": "http://www.modemac.com",
+     "status": "URLError"
+    },
+    "www.myelin.co.nz/wcswiki/w/": {
+     "base": "http://www.myelin.co.nz/wcswiki/w/",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.networkagainstviolence.org": {
+     "base": "http://www.networkagainstviolence.org",
+     "status": "URLError"
+    },
+    "www.netzwerkgegengewalt.org": {
+     "above_baseline": false,
+     "base": "http://www.netzwerkgegengewalt.org",
+     "engine": "prowiki",
+     "entries": 935,
+     "first": "2025-10-04",
+     "last": "2026-10-03",
+     "peak_all": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 29,
+      "ip_edits": 1,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 2,
+      "welcome_test_edits": 0
+     },
+     "peak_day_all": "2026-09-06",
+     "peak_day_outside_known": "2026-09-06",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 29,
+      "ip_edits": 1,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 2,
+      "welcome_test_edits": 0
+     },
+     "score_all": 2.079,
+     "score_outside_known": 2.079,
+     "status": "ok"
+    },
+    "www.nooranch.com/sdidesk/wiki/wiki.cgi/HomePage": {
+     "base": "http://www.nooranch.com/sdidesk/wiki/wiki.cgi/HomePage",
+     "status": "http 404"
+    },
+    "www.nooranch.com/synaesmedia/optimaes/optimaes.cgi": {
+     "base": "http://www.nooranch.com/synaesmedia/optimaes/optimaes.cgi",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.oddmuse.org/cgi-bin/wiki/RecentChanges": {
+     "base": "http://www.oddmuse.org/cgi-bin/wiki/RecentChanges",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.omwiki.org/": {
+     "base": "http://www.omwiki.org/",
+     "status": "URLError"
+    },
+    "www.oops.se/cgi-bin/wiki": {
+     "base": "http://www.oops.se/cgi-bin/wiki",
+     "status": "http 404"
+    },
+    "www.openspaceworld.org/cgi/iberia.cgi": {
+     "base": "http://www.openspaceworld.org/cgi/iberia.cgi",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.openspaceworld.org/cgi/wikiA.cgi": {
+     "base": "http://www.openspaceworld.org/cgi/wikiA.cgi",
+     "status": "robots"
+    },
+    "www.ourculture.info/wiki.cgi": {
+     "base": "http://www.ourculture.info/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.prowiki2.org/halomile/wiki.cgi": {
+     "base": "http://www.prowiki2.org/halomile/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/minerva/wiki.cgi": {
+     "base": "http://www.prowiki2.org/minerva/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/montessori_march/wiki.cgi": {
+     "base": "http://www.prowiki2.org/montessori_march/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/pagesjaunes/wiki.cgi": {
+     "base": "http://www.prowiki2.org/pagesjaunes/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/phr/wiki.cgi": {
+     "base": "http://www.prowiki2.org/phr/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/phzh/wiki.cgi": {
+     "base": "http://www.prowiki2.org/phzh/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/psalt/wiki.cgi": {
+     "base": "http://www.prowiki2.org/psalt/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/schuleeglisau/wiki.cgi": {
+     "base": "http://www.prowiki2.org/schuleeglisau/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/sool/wiki.cgi": {
+     "base": "http://www.prowiki2.org/sool/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/wk03777/wiki.cgi": {
+     "base": "http://www.prowiki2.org/wk03777/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/wuwiki/wiki.cgi": {
+     "base": "http://www.prowiki2.org/wuwiki/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.prowiki2.org/zuerichberg/wiki.cgi": {
+     "base": "http://www.prowiki2.org/zuerichberg/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.schulwiki.org/wiki.cgi": {
+     "above_baseline": false,
+     "base": "http://www.schulwiki.org/wiki.cgi",
+     "engine": "prowiki",
+     "entries": 8,
+     "first": "2026-01-31",
+     "last": "2026-09-06",
+     "peak_all": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 0
+     },
+     "peak_day_all": "2026-09-06",
+     "peak_day_outside_known": "2026-09-06",
+     "peak_outside_known": {
+      "agentish_edits": 1,
+      "backup_named_edits": 0,
+      "edits": 1,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 1,
+      "single_edit_new": 1,
+      "users": 1,
+      "welcome_test_edits": 0
+     },
+     "score_all": 2.079,
+     "score_outside_known": 2.079,
+     "status": "ok"
+    },
+    "www.shambhala.org/wiki": {
+     "base": "http://www.shambhala.org/wiki",
+     "status": "http 404"
+    },
+    "www.smpa.org/cgi-bin/wiki.cgi": {
+     "base": "http://www.smpa.org/cgi-bin/wiki.cgi",
+     "status": "http 404"
+    },
+    "www.srcf.ucam.org/curs/wiki.pl": {
+     "base": "http://www.srcf.ucam.org/curs/wiki.pl",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.tejo.org": {
+     "base": "http://www.tejo.org",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    },
+    "www.tentacle.net/~eeio/cgi/wiki.cgi/BicycleKitchen/HomePage": {
+     "base": "http://www.tentacle.net/~eeio/cgi/wiki.cgi/BicycleKitchen/HomePage",
+     "status": "http 404"
+    },
+    "www.texteditors.org/cgi-bin/wiki.pl": {
+     "base": "http://www.texteditors.org/cgi-bin/wiki.pl",
+     "status": "http 500"
+    },
+    "www.timedsn.net/": {
+     "base": "http://www.timedsn.net/",
+     "status": "URLError"
+    },
+    "www.toyz.org/cgi-bin/sipwiki.cgi": {
+     "base": "http://www.toyz.org/cgi-bin/sipwiki.cgi",
+     "status": "robots"
+    },
+    "www.tschlotfeldt.de/elearning-wiki": {
+     "above_baseline": false,
+     "base": "http://www.tschlotfeldt.de/elearning-wiki",
+     "engine": "oddmuse",
+     "entries": 2,
+     "first": "2026-09-04",
+     "last": "2026-09-04",
+     "peak_all": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 2,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 0
+     },
+     "peak_day_all": "2026-09-04",
+     "peak_day_outside_known": "2026-09-04",
+     "peak_outside_known": {
+      "agentish_edits": 0,
+      "backup_named_edits": 0,
+      "edits": 2,
+      "ip_edits": 0,
+      "machine_named_users": 0,
+      "new_accounts": 0,
+      "single_edit_new": 0,
+      "users": 1,
+      "welcome_test_edits": 0
+     },
+     "score_all": 0.0,
+     "score_outside_known": 0.0,
+     "status": "ok"
+    },
+    "www.uni-graz.org/oeh/wiki.cgi": {
+     "base": "http://www.uni-graz.org/oeh/wiki.cgi",
+     "status": "URLError"
+    },
+    "xp-france.net/cgi-bin/wiki.pl": {
+     "base": "http://xp-france.net/cgi-bin/wiki.pl",
+     "engine": "auto",
+     "entries": 0,
+     "first": null,
+     "last": null,
+     "status": "ok"
+    }
+   }
+  }
+ },
+ "skipped": [
+  {
+   "source": "urlquery.net",
+   "why": "search API needs an account key"
+  },
+  {
+   "source": "urlscan.io beyond 30 days",
+   "why": "anonymous search is limited to the last 30 days"
+  },
+  {
+   "source": "Miraheze wikis",
+   "why": "robots.txt disallows /w/ (API) for all agents"
+  },
+  {
+   "source": "communitywiki.org, oddmuse.org, emacswiki.org",
+   "why": "bot-check interstitial"
+  },
+  {
+   "source": "WikiApiary",
+   "why": "site down (database error)"
+  }
+ ]
+}

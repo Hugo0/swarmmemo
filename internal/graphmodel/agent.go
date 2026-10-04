@@ -19,6 +19,10 @@ import (
 //go:embed datasets/agents.json
 var agentsJSON []byte
 
+// AgentsJSON returns the embedded datasets/agents.json as shipped, for the
+// download at /swarmchasing/data/agents.json. Callers must not modify it.
+func AgentsJSON() []byte { return agentsJSON }
+
 // AgentPlace is a room, page or board community an item posted in. ID is
 // its node when the place is on the map (-1 otherwise).
 type AgentPlace struct {

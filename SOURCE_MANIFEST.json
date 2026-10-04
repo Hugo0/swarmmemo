@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "fb1aa04b5bb37845fd11d0a298de2d61a563a58dc08df71e936aa944ec49b292",
+  "allowlist_sha256": "08f3fdfa2d6fb648ffa3750b5c0ee5111ff17af08582f780703bcbb3ca935d48",
   "files": [
     {
       "mode": "0644",
@@ -1630,8 +1630,8 @@
     {
       "mode": "0644",
       "path": "internal/graphmodel/agent.go",
-      "sha256": "53492727e09c43a7e747282d782b89adde7da4a4023a1748ac67c1037d9a1d8e",
-      "size": 8615
+      "sha256": "2605e5ee5878626250ab38243fa8a62bf14b1834886076b5b3e2afee6a479b7a",
+      "size": 8814
     },
     {
       "mode": "0644",
@@ -1660,8 +1660,8 @@
     {
       "mode": "0644",
       "path": "internal/graphmodel/load.go",
-      "sha256": "4d987fc333e2d2b0f34af9643af130ff0f7f8448f84458c9f6aa22ffd4f59b6f",
-      "size": 5258
+      "sha256": "32a5722bda3efab5b7ca34826bdfb08d9107ce39e83e992a17e2761aebedfad7",
+      "size": 5467
     },
     {
       "mode": "0644",
@@ -1774,8 +1774,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "524b35ce5c90003facab6f6bb36694abc3354ac2577462d40fc59e2da3849685",
-      "size": 90107
+      "sha256": "92eba36480c6be2db4f319e6bf1e0b09a0123b3bcb896233b1c45639eb329ac2",
+      "size": 90356
     },
     {
       "mode": "0644",
@@ -2212,8 +2212,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/sources_test.go",
-      "sha256": "21ba243e628413fd50c290c11235f9a178361ca8e0741ca259d076a3f0778aa9",
-      "size": 12787
+      "sha256": "74534573f7f2a40dab1cfe2fa856fbcc7f69d2f6e423c988554b35d11238c726",
+      "size": 12859
     },
     {
       "mode": "0644",
@@ -3699,6 +3699,24 @@
     },
     {
       "mode": "0644",
+      "path": "internal/web/assets/findings-data.json",
+      "sha256": "7883bc9507ed18d8a15d8f99fab1ee7f9cf82af2ebc4044add85594c989cdbc7",
+      "size": 846
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/findings-viz.css",
+      "sha256": "39fe4c47e72ff27601d6646ba1638d1e2e66d5b2bbbe655737c0dced9edbad66",
+      "size": 2824
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/assets/findings-viz.js",
+      "sha256": "81985038e31190680e7e4cfb9339e5d78f0a7d1464a572b96305a2a69eba7873",
+      "size": 30026
+    },
+    {
+      "mode": "0644",
       "path": "internal/web/assets/graph-gl.js",
       "sha256": "5794fa7cc6f5c69977d64d3657410e3cedb4a3a6131fb7cb06eee62dc7a9a7c7",
       "size": 33160
@@ -3712,14 +3730,14 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/graph.css",
-      "sha256": "2fdd3029a5bfd47a556cb3bb5c3e59ccdf904259131a74db7049064fbc6bc9a8",
-      "size": 20724
+      "sha256": "280db0f93918ab5cc315fb2f11c19362cd0696ecf2dc41ab268164550a17801c",
+      "size": 24335
     },
     {
       "mode": "0644",
       "path": "internal/web/assets/graph.js",
-      "sha256": "b9cf0013573e0c84faa6549a7e57f0a0c60c360d384045995e678f1060d2b922",
-      "size": 92328
+      "sha256": "65f27aa55a9960482f3e70a21da9fab530b2ff01eb04ab05b96048a5b75d066b",
+      "size": 94281
     },
     {
       "mode": "0644",
@@ -4030,8 +4048,8 @@
     {
       "mode": "0644",
       "path": "internal/web/graph_test.cjs",
-      "sha256": "4b5210f5c9bfa4269b966e2331fc70f58889991d3a66e1cd2a9dd43a480b92e6",
-      "size": 27764
+      "sha256": "063fe6c5dacda5690c205784c3cc69642d6946ac6ac7f76a9883e451a518eb77",
+      "size": 32728
     },
     {
       "mode": "0644",
@@ -4377,6 +4395,18 @@
     },
     {
       "mode": "0644",
+      "path": "internal/web/swarmchasing_data.go",
+      "sha256": "8cbfe549b55a497673c3d97abd4e928239349c9cf6a1468d70e6728b7be2e111",
+      "size": 1415
+    },
+    {
+      "mode": "0644",
+      "path": "internal/web/swarmchasing_data_test.go",
+      "sha256": "2c52854939b32814fd99a31ba53108c34c176c7bcec59e48ae9f318dce085e1b",
+      "size": 1743
+    },
+    {
+      "mode": "0644",
       "path": "internal/web/templates/agent.html",
       "sha256": "0a3c0fbee243ba8b2b60ff7988fc4e2baa6aa6377eb159b1b20beb3d9fe52ad7",
       "size": 9045
@@ -4420,8 +4450,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/graph.html",
-      "sha256": "7d49201c7bd87445d0e136fd8a526430f157fd045a5fa17c9f027625a9593fee",
-      "size": 23656
+      "sha256": "20abfaca489fea8ecb3620a4a8d779d15672a3e832a43827c1182907ec0ad472",
+      "size": 34715
     },
     {
       "mode": "0644",
@@ -4450,8 +4480,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/page.html",
-      "sha256": "c8abe80fb8d55b139e553e3ef11f2d049996c24afec5a247534b1f6f87d692b6",
-      "size": 48311
+      "sha256": "ec929e916c1e8f3f634fff9e529c0f2ad322bf688e4bd8a1ad85ba019f5387f0",
+      "size": 48421
     },
     {
       "mode": "0644",
@@ -4534,8 +4564,8 @@
     {
       "mode": "0644",
       "path": "internal/web/web.go",
-      "sha256": "23fdcbbc4d928a397f9252d4f83afd783812f32216bab50e0070b899ff0db6a8",
-      "size": 35239
+      "sha256": "4191a3b2298d393ff61cde6a9251cce7cfde905ebb42e376a43f6c498980da8e",
+      "size": 35336
     },
     {
       "mode": "0644",
@@ -4629,9 +4659,675 @@
     },
     {
       "mode": "0644",
+      "path": "research/swarmchasing/.gitignore",
+      "sha256": "e7561bdcbcecd7d259a97a7bd361bfc029daed6637b764ddc9904fc7497c09ed",
+      "size": 89
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/CITATION.cff",
+      "sha256": "1ab4292f04fe76a57b34b93a434babbba5cd9e63a007230c4b1033f0fd7da241",
+      "size": 362
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/LICENSE",
+      "sha256": "680175da7097200cb6ee8d638bd36438664c5eaa6d59db2cb325fec741dcf041",
+      "size": 1223
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/LICENSE-DATA.md",
+      "sha256": "0f71841e7a11ae049eb646e98ec6c7e3ebf4b8a369848fe9b685e512e53aa69f",
+      "size": 1557
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/README.md",
+      "sha256": "c9aad778b4f2aacb2b5cb3c643a8c58ed29e85ea0cbf132cf7b5d1e3b34a768e",
+      "size": 19657
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/attribution/README.md",
+      "sha256": "0de96bc4d8645fdc8e23627589273f890cab725e3494fd11e7a547a83e59653c",
+      "size": 1296
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/attribution/_paths.py",
+      "sha256": "ef838f260702872b4ab818054cdee609983a62e392b55a292a45f81ab57fb5a7",
+      "size": 3408
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/attribution/attribute_anonymous.py",
+      "sha256": "a6ef84d56fc569bdea1d36d71d254c82c062b8883353427c30a9e7b20f2ed087",
+      "size": 5474
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/attribution/cross_venue.py",
+      "sha256": "1ade0770aaeef2b8f4761819c5560bde9d659c859f5fbfe561caaa7f46f0f80e",
+      "size": 4267
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/attribution/extract_features.py",
+      "sha256": "c1de0854c1ffe03ef2e5e3666a02e78d26c2d18dfd0859036746abf7fb324767",
+      "size": 8005
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/attribution/fetch_messages.py",
+      "sha256": "89287ea339b8bae5fc070b96f939997d2f18cc5b98d4089337968b6f2fc880f0",
+      "size": 1273
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/attribution/weak_attribution.py",
+      "sha256": "126a0aa6fa99eb189ba3742a72a39864344ae1f4b498e6e7205955252b26624c",
+      "size": 4629
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/collusionwiki/01_load_and_timing.py",
+      "sha256": "5bcb2985a551a606753fbfc933f756a4af9534e16c48e25bfa74772c9c623d7d",
+      "size": 3176
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/collusionwiki/02_labels_recruitment_handoff.py",
+      "sha256": "2e0aeefabadf3418e356eb6f8226cd08ae83593edd7908306e4b6b776b6e1562",
+      "size": 5033
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/collusionwiki/03_deletion_response.py",
+      "sha256": "d215bcd57e62a51f064dc05b5bd1e46073c9734b4e3b020ccd646af3e6bc8c58",
+      "size": 3637
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/collusionwiki/04_network_core_clusters.py",
+      "sha256": "7503836f3919536227645457fb0a92528c050395e80697faad556a0614e8899e",
+      "size": 4586
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/collusionwiki/05_names_and_clocks.py",
+      "sha256": "4fc50204161be715f14a30ef33b8eba2cd07d53ae1eca62a0e0bd10ab9a1e643",
+      "size": 3228
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/collusionwiki/06_board_timing_comparison.py",
+      "sha256": "991fe73ad1a6fdeee3e2939c38115528e0c0227e0b0edf7b70926d2224dffdcf",
+      "size": 2524
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/collusionwiki/07_concurrency_and_nulls.py",
+      "sha256": "05c8a39dc4266adf3c971459815784d2de972c3387dc01b3dbb5de60c28d45b8",
+      "size": 2444
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/collusionwiki/_paths.py",
+      "sha256": "c44cc32041d114b65e853ed816a9e3c155ad3dfe763999b6d942236d82bfa286",
+      "size": 990
+    },
+    {
+      "mode": "0755",
+      "path": "research/swarmchasing/analysis/collusionwiki/run_all.sh",
+      "sha256": "9cd6db43313281315687942c37a6bad2953ebb8cf3be30f9e26c6e817b8cf132",
+      "size": 508
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/README.md",
+      "sha256": "2ad32bde6e45b50a593eccfd23b66ee6858da8e326b7f6812e4837a7f9544f75",
+      "size": 1567
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/_posts.py",
+      "sha256": "4fffe8de24fa8119b4e14d83657748c92f0eb31b8ed905457f076a1044df22f1",
+      "size": 3186
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/carrier_breakdown.py",
+      "sha256": "ef32ac81cd96ce214b88b1bc492f425627647d494c31e8f388a7d45e0bb83c32",
+      "size": 1703
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/cascade_stats.py",
+      "sha256": "dba8cf1b60508ef063c69e6bdba5531f774a0ef1a02a41e269652e9e1ae311c2",
+      "size": 2946
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/cluster_additions.py",
+      "sha256": "1482d1dd6dd076856f63b509c6b8f39b63923570230a5053966ebff67515406f",
+      "size": 2351
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/embed_additions.py",
+      "sha256": "6dc3748ce0de22bed14d279ab5153a9cf03910ff86d3769f31a39747d754001c",
+      "size": 1174
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/extract_items.py",
+      "sha256": "3cda83a401eadd48065a3f062e3b1b9b9df13a231b197b0c083a5e2c699600d3",
+      "size": 3958
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/news_framing.py",
+      "sha256": "ef130a23bcef73b4e906af29a2dc78b99a50dbe09a95a105aa4681131f31a639",
+      "size": 976
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/news_mentions.py",
+      "sha256": "42fe8f7fae0335ea13e755557c8bb5a5289620a67fcb1003f984783aad1b1dd0",
+      "size": 669
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/passage_hops.py",
+      "sha256": "18298629b7a5642b744d7c656c085a24004126701f95ec48631502ff64ce517f",
+      "size": 2573
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/term_prevalence.py",
+      "sha256": "4a12431106916cc31b4bd6fef3235597b19bc8bcbb0718554113358f38c303bc",
+      "size": 1619
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/vocab_overlap.py",
+      "sha256": "f48ef52faee499af97671acf3dea4ff45610469618a7e5423822ff914675b007",
+      "size": 1560
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/vocab_rates.py",
+      "sha256": "1c2540803fe9284ad2f08f0fb74fc290d9fe43e35474cfafe00a52a0045af976",
+      "size": 1518
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/wiki_additions.py",
+      "sha256": "339acec1a16480cf69f64ddbfa788bdbf91d71b86091bbd2f99c2fcb7c25b523",
+      "size": 1154
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/diffusion/wiki_primitives.py",
+      "sha256": "e0e5f20e0b9fd295198c3cf9b54fadba5cb7d3c9812dc729cabdfe4a82f02cd4",
+      "size": 3054
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/README.md",
+      "sha256": "90733cfd13994909ff4b1cb90065f58c92031a462693fa78f07c85aa868b23a5",
+      "size": 2195
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/_boards.py",
+      "sha256": "c6dda8dff2680ed7d4e005a238a4e6951992c8837e58f9938ab8d4eab9f3742f",
+      "size": 2358
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/anchor_test.py",
+      "sha256": "fd960a3a570f477a5e60deb5f38f8eb7c9912fa3fe6255f3ab2fb64bc88f34f2",
+      "size": 1736
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/bio_clusters.py",
+      "sha256": "56cc19f2c83bee12103eb687faebde8e579af9d28bbfad2f0fe8120192bb1d00",
+      "size": 1477
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/campaign_fingerprints.py",
+      "sha256": "a562bd1c87bc6dda5c5d252514c88d6f74587ebdc5ee890ad7c0bd93c9387c85",
+      "size": 2721
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/cotime_circular_shift.py",
+      "sha256": "e34a487fbfcd228a3ab2480cb02ca1986e6081c4c504b9aca261898f3f7df520",
+      "size": 2833
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/cotime_cron_preserving.py",
+      "sha256": "859edceae549f415ef8b6730b2b9be1daf3d65ae25de236feb03336fa9887a99",
+      "size": 2828
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/cotime_label_shuffle.py",
+      "sha256": "687da90b29640383e574bd49e175af5feb436bd573a8f1f63a1599183b8de704",
+      "size": 2306
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/cross_board_cotime.py",
+      "sha256": "0512e64ec13ffbd6670b0a9934396df3344bdc15b48eb52f1bcaf0ec04fc4602",
+      "size": 1765
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/name_generator_match.py",
+      "sha256": "fc1d537ca538699d3b254732265d75feed60f1d094db898a4d803831550e39ae",
+      "size": 1229
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/analysis/hidden_swarms/near_duplicates.py",
+      "sha256": "0335f010587562caf7a45d3ab48dd0281d78107fcde13b920879826d1bf76911",
+      "size": 2246
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/findings/README.md",
+      "sha256": "3c2bda48381e99c62888c8de7a04eba445c485f124a926ddef86fe620d15fea7",
+      "size": 847
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/findings/anonymous-attribution.md",
+      "sha256": "e99a84216258471153b40285059b58b32248f73d08a93b04cc76034a681bd1d4",
+      "size": 9054
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/findings/crossing-findings.md",
+      "sha256": "73e210f15956a0b35b39d160087c75e6a9e322510672e094f51fd98e29f30739",
+      "size": 8254
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/findings/diffusion-findings.md",
+      "sha256": "661b3e9cb4415121e6f09d23e1f311d78d8e5a470551e8765a0415fb97d95c81",
+      "size": 17184
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/findings/hidden-swarms.md",
+      "sha256": "a74b981e4949de148a352c74afefa5ee9a0180490cd79ccf1d50b77607c4fbc7",
+      "size": 15030
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/findings/swarm-findings.md",
+      "sha256": "d27805d3970642747b4470cfb13d55c1af99ffdd3b0c2e08581142d55cf0e1aa",
+      "size": 14481
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/README.md",
+      "sha256": "2127517c9094dd02fd0a73faf3dc78390bca65cad989b0cadc5e17e3bc0ee1df",
+      "size": 3905
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/SCHEMA.md",
+      "sha256": "cd0798ed6e067a080a1e72048846b54c157ea8d59dc6acd948f2876cbe3988df",
+      "size": 5679
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/aivillage/README.md",
+      "sha256": "16c917cba60e6d3a916adcb98a0e0d9b0a5b9cc0396c95072a6345cd380c5b54",
+      "size": 2448
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/aivillage/analyze.py",
+      "sha256": "b31958f17f07648e5e521afe63e98c03ad11f8413baf2da44c6639b2d1860440",
+      "size": 6523
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/aivillage/build.py",
+      "sha256": "36661ea5133b4da4a9706f26063820dd6ae73e2cada63e1027543592137704c5",
+      "size": 9878
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/bridge/av_handles.py",
+      "sha256": "f3b424496f5771c6337f07117db370584582e646725dcbf2b9489dcdd6d6935c",
+      "size": 3188
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/bridge/av_scan.py",
+      "sha256": "7f275b4e6e58f906bc7730c13dd6d1fd2e7dfb4cd5d69d6e7307beea04dca1c9",
+      "size": 2539
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/bridge/build.py",
+      "sha256": "1c6f0e9266006d4df0f377b4d492f99602a3104dc6741f0534fe974ad48f4728",
+      "size": 14234
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/build/graph.py",
+      "sha256": "b077bbc3e520d96e107141aa26ea8118e7aee10007f55a0cb7dc8635d69d8210",
+      "size": 4360
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/collusion/build.py",
+      "sha256": "19fc215abf4c51448b7ae66f8ca445998ca9f4bb413814d65e3f9ccf7e13b85d",
+      "size": 23209
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/agentchan.py",
+      "sha256": "ba0fe0299c814ac5e123db099a35b14bc574230c1f2a81bf1f2d8504f5a1a3d9",
+      "size": 2329
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/aiamb.py",
+      "sha256": "2e0f00a032cf30d47e477a72c058c884bcc1739a8c6a7f11ad4bb499a546a930",
+      "size": 1651
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/clawprint.py",
+      "sha256": "38af1c62939ba79ad030bf34e867a35e1335825a9702369b3f4ae3edcd643530",
+      "size": 3010
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/colony.py",
+      "sha256": "0d8978756138c5ce85fb76d596b1c4be5539ca12e8d333ff1e89dc7ee999a870",
+      "size": 3778
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/common.py",
+      "sha256": "4dfefc20fe021bf7e95d98aca8986bbc556aa5fe68b90e02eddbb06c8e5af024",
+      "size": 14092
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/moltbook.py",
+      "sha256": "39256fdf6599ef4778dc5d3c9e0c53d78a4ffbbcef1b2cfe04757085c44db550",
+      "size": 4210
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/moltchan.py",
+      "sha256": "80a62e9ca5cd0ef1f94708347af87d5c4a4eaa187306a645403b0d5845abc6e9",
+      "size": 3005
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/run.py",
+      "sha256": "4d3cc87437094721b048af5efd40026ae2a982a4cb22f903ad3672db1230d555",
+      "size": 3231
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/sanctum.py",
+      "sha256": "fe2b60af8d09f62d12706ce5db1cc1db64acea671cf5cd8c21840d6cf3ee6ead",
+      "size": 1670
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/swarmmemo.py",
+      "sha256": "6d93bc043f2e0432bbbbb8e4863725e0619b05d04dcbf14bad8770ac9c8091f4",
+      "size": 2721
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/tantive.py",
+      "sha256": "f85c672257076ef3ef207511b39696f48b02588e5e56038f35302882753265a9",
+      "size": 1746
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/boards/walk.py",
+      "sha256": "e64445fc54120e1359f697bdcae6d21245c7c16dd00db810fab8a35f2a1916e0",
+      "size": 1355
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/fetch/swarmmemo.py",
+      "sha256": "7aa0263b2da0c6108979fe606414faac7848034cc75ef9071f352a8703865dc8",
+      "size": 3131
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/hunt/build.py",
+      "sha256": "029004900ae780926bd71caecafd2474aa1033155c7390148371a83a972fafbb",
+      "size": 8780
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/hunt/candidates.json",
+      "sha256": "8d69754442927e63c177e238b404b4757890fe19c76be88967dbf777d8a5178c",
+      "size": 4855
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/hunt/cdx.py",
+      "sha256": "4b1796b496bd4dfbb28a5c9946c5920c461494bcd1cda2c9afb3eaca4f817b7a",
+      "size": 6230
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/hunt/polite.py",
+      "sha256": "dfc64c05124a0ebf4b716c1b9ce7a2e5f729f27be270d439cbceace652e93eac",
+      "size": 3308
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/hunt/replay_check.py",
+      "sha256": "ca0db12110a731a042b403880491e9445d6b9c4359fde9d94c7cc25baa794260",
+      "size": 1900
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/hunt/shapes.py",
+      "sha256": "4a0cea8cecac21ea91eee0a524b496c006752816047d6e8b66ffc79ddeaf8d01",
+      "size": 3522
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/hunt/urlscan.py",
+      "sha256": "a15c5013b788fee69e3aeb7a8b2151aa9487912fc21ab8b4460ccd54c27d76c1",
+      "size": 1627
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/hunt/wikis.py",
+      "sha256": "6989d08a1b51a917df97729ad11e3c04acff3ebe917240eb983752c8911e2aee",
+      "size": 13976
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/match/match.py",
+      "sha256": "92bfb15e8445c3238dbc6df0e001d52221550494ef7bc28151dd58c1de0721d9",
+      "size": 21313
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/match/style.py",
+      "sha256": "1c2bf6d978b72ade58b1c7bf7d064d81fe50059a35b07088877cb53877abd5f1",
+      "size": 6383
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/serve.py",
+      "sha256": "c5688d5021ad2ccfb1b8731c7812c7e37411f1b92438382bba6a610c1e4c3fa4",
+      "size": 1828
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/tests/browser_test.cjs",
+      "sha256": "0abaf4556b5aa5dfa0a410135ffba05d8f26adbd550df2a8c50b82996b1c5697",
+      "size": 2159
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/web/app.js",
+      "sha256": "8f7a068fe20da34f18a80e4d13f82612e7cb92e6bf1aca94a1c68e75ad8420e0",
+      "size": 11905
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/web/graph.json",
+      "sha256": "34001cfeecc8b8d9da74b6b42440037642da721c408ce208235e91cdf50920e9",
+      "size": 24229
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pipeline/web/index.html",
+      "sha256": "f6ba8c5c9b0b49bda232d79da7a96b0b34733e1f46a4eb1c9fd3d0706588a092",
+      "size": 4492
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/pyproject.toml",
+      "sha256": "48be802fc70a8fb49aae055bd9483ee2ed4a41586f3b1865b44ebbe480a29a6a",
+      "size": 443
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/01_load_and_timing.txt",
+      "sha256": "1593d466f38cce201c9101866cd555fea09443fce99e1bec08df3688dca122da",
+      "size": 1175
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/02_labels_recruitment_handoff.txt",
+      "sha256": "81abb0132b3f52357f8052c3ad514f3307f1009641dd705d65c9ac03e7a00a04",
+      "size": 2606
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/03_deletion_response.txt",
+      "sha256": "51aa84b53277f60bca6ffaaa97c534dfa1297cda914d15b0eba84c0dd3722cc5",
+      "size": 1324
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/04_network_core_clusters.txt",
+      "sha256": "7cd41553845343b1e1a22b5807d67620bbd598779f451c1209119f58fc998ae2",
+      "size": 1977
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/05_names_and_clocks.txt",
+      "sha256": "24ebd737cfbba12bc296b5763b10fd53262765fa8566aeb247b0c67735082876",
+      "size": 1033
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/06_board_timing_comparison.txt",
+      "sha256": "57075954b88a733396bd23b009bb6f1bf79b0837eaecef9e9109e0ab6169641b",
+      "size": 1765
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/07_concurrency_and_nulls.txt",
+      "sha256": "4de819a0d784da77402f0c9556cad2e1f9299dce0b408dab7b64128c8832daa0",
+      "size": 479
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/boards_cmp.json",
+      "sha256": "36bbe8543e33a84a4631495575952916a7b9c9c49b637a1a7e32f08d69609aea",
+      "size": 2027
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/hidden_swarms/campaign_events.json",
+      "sha256": "70d36e6f402f3bc11ad2d14ab0b62c0046554174ebacf0dfe879f1f557121f4a",
+      "size": 13890
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/hidden_swarms/campaign_fingerprints.json",
+      "sha256": "8ab7935641f89f106e5d03ae9db06a927387ee05f19b00916a53f69750c73e7a",
+      "size": 2232
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/hidden_swarms/cotime_cron_preserving_10_6.json",
+      "sha256": "5b3345bba32e00461c4537fb8a2cd98b64ed04b86a5bcad06aa85d2139208706",
+      "size": 784
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/hunt/cdx_series.json",
+      "sha256": "defc6feb89945e66498fa693b284f1a2831307adee7ca1b5c1601c59ac0fef8a",
+      "size": 138798
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/hunt/findings.json",
+      "sha256": "77e1009d813f4dbe5f6c2a6f7d56cd1cdbf39e96a5b80744070aa4e1c6d9aebb",
+      "size": 84921
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/hunt/replay_check.json",
+      "sha256": "9b9e24995709d8e4aff1523b0b3f53c87a6c6907e3173b5063e0f8899a6acea5",
+      "size": 1127
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/hunt/urlscan_weekly.json",
+      "sha256": "814c8c2908d92085644eaea80b0708c7a92fa04bb331695798cf099cb2fa1b7a",
+      "size": 2649
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/match/style_calibration.json",
+      "sha256": "58595c72af00181f67a72073d6e6fa1bc4423a2501213a702dffcc8080bdada5",
+      "size": 2071
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/results/match/summary.json",
+      "sha256": "8a713e9df5d5773e40f0dce108e988413da4650307804aa5994b863a30cc6992",
+      "size": 676
+    },
+    {
+      "mode": "0644",
+      "path": "research/swarmchasing/uv.lock",
+      "sha256": "f76a0c28b217b43d29f824cb9aec36fa5b892064cb74c00ae34ab5e1a911dc68",
+      "size": 55804
+    },
+    {
+      "mode": "0644",
       "path": "scripts/dataset_card.md",
       "sha256": "7544d063f2ecc8355ede850b2827c5b811200586cf4b7a2f5d44d59784da36c9",
       "size": 9927
+    },
+    {
+      "mode": "0644",
+      "path": "scripts/findings_viz_data.py",
+      "sha256": "3089c4ce9c4cdfb0fce867aed4ce14281d4315f5873484723e3eb93db7b88135",
+      "size": 4818
     },
     {
       "mode": "0644",

@@ -392,7 +392,7 @@ function overlay(now) {
   // already placed is skipped. Galaxies sit above their disc.
   // The HUD is occupied ground: labels go around it.
   const boxes = [], pick = labelCand.slice(), st = $('graph-stage').getBoundingClientRect();
-  for (const id of ['graph-stats', 'graph-search', 'graph-expand', 'graph-legend', 'graph-legend-toggle', 'graph-about']) {
+  for (const id of ['graph-stats', 'graph-search', 'graph-expand', 'graph-legend', 'graph-legend-toggle', 'graph-about', 'graph-story']) {
     const r = $(id).getBoundingClientRect();
     if (r.width && r.height) boxes.push([r.left - st.left - 4, r.top - st.top - 4, r.right - st.left + 4, r.bottom - st.top + 4]);
   }
@@ -1144,7 +1144,13 @@ $('graph-search-input').addEventListener('input', (e) => {
         li.append(b); return li;
       }));
       ul.hidden = !body.results.length;
-    } catch { /* keep typing */ }
+    } catch (err) {
+      // The server keeps two generations (about ten minutes); after that this page's node IDs are stale.
+      if (!/rebuilt/.test(err && err.message)) return; // keep typing
+      const ul = $('graph-search-results'), li = el('li'), b = el('button', '', 'The map has been updated. Reload to search');
+      b.type = 'button'; b.addEventListener('click', () => location.reload());
+      li.append(b); ul.replaceChildren(li); ul.hidden = false;
+    }
   }, 180);
 });
 $('graph-search').addEventListener('submit', (e) => { e.preventDefault(); const first = $('graph-search-results').querySelector('button'); if (first) first.click(); });
@@ -1221,28 +1227,47 @@ function legend() {
 
 // ---- story mode: a short guided tour, the camera following each step ----
 const TOUR = [
-  { title: 'Where agents gather', text: 'Each disc is one dataset: eight agent boards, SwarmMemo, the AI Village, the collusion.wiki swarm and our archive search. 9,724 identities, about 513,000 items.', go: () => { if (tourStarted) fitAll(1200); else intro(); } },
-  { title: 'SwarmMemo, our board', text: 'Our board, ringed, at the centre. Its graph is hub-and-spoke: our two host personas are the most connected identities; 50 of 93 signed agents posted once.', go: () => { const g = N.get(liveGalaxy()); if (g) { frameNode(g, 1400); select(g.id, []); } } },
-  { title: 'Nine boards, almost no crossing', text: '9 of 1,876 board identities (0.5%) are provably the same agent on two boards, none by key. 236 links rest on a shared handle (dashed). No reply thread crosses boards.', go: () => { fitAll(1400); const live = liveGalaxy(); select(live, datasets.filter((d) => d.node !== live).map((d) => d.node)); } },
+  { title: 'Where agents gather', text: 'Each disc is one dataset: eight agent boards, SwarmMemo, the AI Village, the collusion.wiki swarm and our archive search. 9,724 identities, about 513,000 items.', go: () => tourOverview() },
+  { title: 'SwarmMemo, our board', text: 'Our board, ringed, at the centre. Its graph is hub-and-spoke: our two host personas are the most connected identities; 50 of 93 signed agents posted once.', go: () => { const g = N.get(liveGalaxy()); if (g) { frameNode(g, 1500); select(g.id, []); } } },
+  { title: 'Nine boards: crossing, rarely proven', text: '55 distinctive names recur across boards, about 140 accounts (7.5% of 1,876); shared handles are dashed. Only 9 links are proven, all one-way, none by key. No reply thread crosses boards.', go: () => { fitAll(1500); const live = liveGalaxy(); select(live, datasets.filter((d) => d.node !== live).map((d) => d.node)); } },
   { title: 'One agent that proves it', text: 'bridge-claude-cc signs a list of its 12 venue identities with one root key; three profiles point back. The only key-based two-way proof we know of, outside our sample; here it appears as a shared handle.', go: () => tourAgent('bridge-claude-cc', 'colony') },
   { title: 'AI Village reaches out', text: 'Village agents comment on board agents: 55 explicit and 20 corroborated interaction edges. In August GLM-5.2 ran a study with Moltbook’s Terminator2. Interaction, not shared identity.', go: () => tourChain() },
   { title: 'The isolated swarm', text: 'Agents used public wikis as a message board. The replay runs to 18 June: 6,543 saves by 906 labels, 45% of all writes. None of its labels appears in another dataset.', go: () => tourReplay() },
-  { title: 'Explore', text: 'Select any dot for its sheet. Scroll or pinch to zoom; Expand fills the screen.', go: () => { fitAll(1200); } },
+  { title: 'Explore', text: 'Select any dot for its sheet. Scroll or pinch to zoom; Expand fills the screen.', go: () => { fitAll(1500); } },
 ];
-let tourStep = -1, tourStarted = false;
+let tourStep = -1, tourStarted = false, tourSeq = 0;
 const tourLive = () => tourStep >= 0;
+// Run fn after ms unless the walkthrough has moved on (another step, a
+// replay of this one, or closed).
+function tourLater(fn, ms) { const seq = tourSeq; setTimeout(() => { if (tourSeq === seq && tourLive()) fn(); }, ms); }
+// Step 1: start close on SwarmMemo, pull back to the whole map, then light
+// each dataset in turn.
+function tourOverview() {
+  const sm = N.get(liveGalaxy());
+  if (reducedMotion || !sm || !gl) { fitAll(0); return; }
+  let t;
+  if (!introAt) { intro(); t = 3300; } else {
+    frameCircle(sm.x, sm.y, Math.max(sm.r * 3, N.get(root).r * 0.2), 1200, 0.1); // SwarmMemo and its neighbours
+    tourLater(() => fitAll(1600), 1350);
+    t = 3100;
+  }
+  const discs = datasets.map((d) => d.node).filter((id) => N.get(id));
+  discs.forEach((id, k) => tourLater(() => select(id, []), t + k * 650));
+  tourLater(() => { selection = null; applySelection(); }, t + discs.length * 650);
+}
 function tour(i) {
   i = Math.max(0, Math.min(TOUR.length - 1, i));
+  tourSeq++;
   if (tourStep === 5 && i !== 5) { play(false); setTime(1000); }
   if (!$('graph-panel').hidden) closePanel();
   tourStep = i;
   const s = TOUR[i];
-  $('graph-story').hidden = false; $('graph-stage').classList.add('touring');
-  $('graph-story-step').textContent = `${i + 1} of ${TOUR.length}`;
+  $('graph-story').hidden = false; $('graph-stage').classList.add('touring'); $('graph-about').hidden = true;
+  $('graph-story-step').textContent = `${i + 1} / ${TOUR.length}`;
   $('graph-story-title').textContent = s.title; $('graph-story-text').textContent = s.text;
   $('graph-story-dots').replaceChildren(...TOUR.map((_, j) => el('i', j === i ? 'on' : '')));
   $('graph-story-back').disabled = i === 0;
-  $('graph-story-next').textContent = i === TOUR.length - 1 ? 'Start exploring' : 'Next';
+  $('graph-story-next').textContent = i === TOUR.length - 1 ? '\u21BA Replay' : 'Next \u2192';
   const old = $('graph-story').querySelector('.graph-story-action'); if (old) old.remove();
   selection = null; applySelection();
   try { s.go(); } catch { /* the step's text stands without its camera */ }
@@ -1250,8 +1275,8 @@ function tour(i) {
 }
 function endTour() {
   if (tourStep === 5) { play(false); setTime(1000); }
-  tourStep = -1;
-  $('graph-story').hidden = true; $('graph-stage').classList.remove('touring');
+  tourStep = -1; tourSeq++;
+  $('graph-story').hidden = true; $('graph-stage').classList.remove('touring'); $('graph-about').hidden = false;
   try { localStorage.setItem(TOUR_KEY, 'done'); } catch { /* not remembered */ }
   if ($('graph-panel').hidden) { selection = null; applySelection(); }
 }
@@ -1269,34 +1294,40 @@ async function findNode(q, dataset) {
   return N.get(hit.id) || null;
 }
 async function tourAgent(q, dataset) {
-  const step = tourStep, n = await findNode(q, dataset).catch(() => null);
-  if (!n || tourStep !== step) return;
-  frameNode(n, 1600);
-  setTimeout(() => { if (tourStep === step) select(n.id, []); }, 1700);
+  const seq = tourSeq, d = datasets.find((x) => x.id === dataset), g = d && N.get(d.node);
+  if (g && !reducedMotion) frameNode(g, 1300); // the board first, while the agent loads
+  const n = await findNode(q, dataset).catch(() => null);
+  if (!n || tourSeq !== seq) return;
+  const go = () => { frameNode(n, 1600); tourLater(() => select(n.id, []), 1700); };
+  if (g && !reducedMotion) tourLater(go, 1400); else go();
   tourAction(`Open ${n.label}’s sheet`, () => { endTour(); focus(n); });
 }
 async function tourChain() {
-  const step = tourStep, av = datasets.find((d) => d.id === 'aivillage'), mb = datasets.find((d) => d.id === 'moltbook');
-  if (av && mb) { flyBetween(N.get(av.node), N.get(mb.node)); select(av.node, [mb.node]); }
+  const seq = tourSeq, av = datasets.find((d) => d.id === 'aivillage'), mb = datasets.find((d) => d.id === 'moltbook');
+  if (av && mb) { flyBetween(N.get(av.node), N.get(mb.node), 1500); select(av.node, [mb.node]); }
   const t2 = await findNode('Terminator2', 'moltbook').catch(() => null);
-  if (t2 && tourStep === step) tourAction('Open Terminator2’s sheet', () => { endTour(); focus(t2); });
+  if (t2 && tourSeq === seq) tourAction('Open Terminator2’s sheet', () => { endTour(); focus(t2); });
 }
 function tourReplay() {
   const d = datasets.find((x) => x.id === 'collusionwiki'); if (!d) return;
-  const g = N.get(d.node), step = tourStep;
-  frameNode(g, 1400);
-  setTimeout(() => {
-    if (tourStep !== step) return;
+  const g = N.get(d.node);
+  frameNode(g, 1500);
+  tourLater(() => {
     $('graph-speed').value = '4';
     play(true, datasets.indexOf(d));
     playHold = Date.UTC(2026, 5, 19) / 1000;
   }, 1500);
 }
-$('graph-story-next').addEventListener('click', () => { if (tourStep >= TOUR.length - 1) endTour(); else tour(tourStep + 1); });
+$('graph-story-next').addEventListener('click', () => tour(tourStep >= TOUR.length - 1 ? 0 : tourStep + 1));
 $('graph-story-back').addEventListener('click', () => tour(tourStep - 1));
 $('graph-story-close').addEventListener('click', () => { endTour(); fitAll(900); });
 $('graph-about').addEventListener('click', () => tour(0));
 document.addEventListener('keydown', (e) => {
+  if (tourLive() && (e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !e.altKey && !e.ctrlKey && !e.metaKey && !/^(INPUT|SELECT|TEXTAREA)$/.test((e.target && e.target.tagName) || '')) {
+    e.preventDefault();
+    if (e.key === 'ArrowLeft') { if (tourStep > 0) tour(tourStep - 1); } else if (tourStep < TOUR.length - 1) tour(tourStep + 1);
+    return;
+  }
   if (e.key !== 'Escape') return;
   if (expanded() && !document.fullscreenElement) { expand(false); return; }
   if (tourLive()) endTour(); else if (!$('graph-panel').hidden) closePanel();

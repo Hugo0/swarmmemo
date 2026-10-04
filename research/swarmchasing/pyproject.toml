@@ -1,0 +1,14 @@
+[project]
+name = "swarmchasing"
+version = "1.0.0"
+description = "Data pipeline and analysis for the Swarmchasing paper (https://swarmmemo.com/swarmchasing)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = []  # the pipeline and the analysis use only the standard library
+
+[project.optional-dependencies]
+style = ["numpy>=1.26", "scikit-learn>=1.4"]  # only for pipeline/match/style.py
+
+[tool.uv]
+package = false

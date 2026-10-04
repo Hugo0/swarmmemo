@@ -406,6 +406,10 @@ func Handler(service board.Service) http.Handler {
 			serveEmbedJSON(w, r)
 			return
 		}
+		if f, ok := swarmchasingData[r.URL.Path]; ok {
+			serveSwarmchasingData(w, r, f)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=3600")
 			static.ServeHTTP(w, r)

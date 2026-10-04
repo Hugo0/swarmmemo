@@ -91,6 +91,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.ok(await page.locator('#graph-story').isVisible(), 'the tour opens a first visit');
     assert.equal(await page.locator('#graph-story-title').textContent(), 'Where agents gather');
     assert.match(await page.locator('#graph-story').textContent(), /not who built what/);
+    assert.equal(await page.locator('#graph-about').isVisible(), false, 'the walkthrough button hides while touring');
+    assert.equal(await page.locator('#graph-story-step').textContent(), '1 / 7');
     await page.locator('#graph-story-next').click();
     assert.equal(await page.locator('#graph-story-title').textContent(), 'SwarmMemo, our board');
     await page.locator('#graph-story-back').click();
@@ -128,11 +130,56 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.ok(sheet.goals.length > 0 && sheet.excerpts.length === 0 && sheet.peers.length > 0, 'AI Village: goals and counterparts, never text');
     assert.match(await page.locator('#graph-sheet').textContent(), /Goals it worked on[\s\S]*Who it talked to[\s\S]*terms do not allow/);
     await page.locator('#graph-panel-close').click();
-    // About this map reopens the tour; skipping it is remembered.
-    await page.locator('#graph-about').click();
+    // The walkthrough button on the map reopens the tour: its caption sits
+    // inside the stage, every step moves the camera, the last step replays,
+    // and Esc closes it and brings the button back.
+    const cta = page.locator('#graph-about');
+    assert.ok(await cta.isVisible(), 'the walkthrough button is on the map');
+    assert.match(await cta.textContent(), /Walk through the findings \(7 steps\)/);
+    const inStage = async (p) => {
+      const [c, st] = await Promise.all([p.locator('#graph-story').boundingBox(), p.locator('#graph-stage').boundingBox()]);
+      return c && st && c.y >= st.y - 1 && c.y + c.height <= st.y + st.height + 1 && c.x >= st.x - 1 && c.x + c.width <= st.x + st.width + 1;
+    };
+    const ctaBox = await cta.boundingBox(), stageBox0 = await page.locator('#graph-stage').boundingBox();
+    assert.ok(ctaBox.height >= 44 && ctaBox.y + ctaBox.height <= stageBox0.y + stageBox0.height && ctaBox.y > stageBox0.y + stageBox0.height / 2, 'a large button at the bottom of the map: ' + JSON.stringify(ctaBox));
+    await page.locator('#graph-fit').click();
+    await wait(1300);
+    // Under load the fit can still be easing; wait for the camera to settle.
+    for (let i = 0; i < 40 && (await page.evaluate(() => window.__swarmgraph.camera())).moving; i++) await wait(250);
+    const cam0 = await page.evaluate(() => window.__swarmgraph.camera());
+    await cta.click();
     assert.equal(await page.locator('#graph-story-title').textContent(), 'Where agents gather');
-    await page.locator('#graph-story-close').click();
+    assert.ok(await page.locator('#graph-story').isVisible() && await inStage(page), 'the caption overlays the stage');
+    assert.equal(await cta.isVisible(), false);
+    // Under load frames are slow: wait for the zoom-in instead of a fixed delay.
+    let cam1 = await page.evaluate(() => window.__swarmgraph.camera());
+    for (let i = 0; i < 40 && !(cam1.z > cam0.z * 1.3); i++) { await wait(100); cam1 = await page.evaluate(() => window.__swarmgraph.camera()); }
+    assert.ok(cam1.z > cam0.z * 1.3, 'step 1 starts close on SwarmMemo: ' + JSON.stringify([cam0, cam1]));
+    await wait(2200);
+    const cam2 = await page.evaluate(() => window.__swarmgraph.camera());
+    assert.ok(cam2.z < cam1.z * 0.8, 'then pulls back to every dataset: ' + JSON.stringify([cam1, cam2]));
+    await page.locator('#graph-story-next').click();
+    assert.equal(await page.locator('#graph-story-step').textContent(), '2 / 7');
+    await wait(1700);
+    const cam3 = await page.evaluate(() => window.__swarmgraph.camera());
+    assert.ok(Math.abs(Math.log(cam3.z / cam2.z)) > 0.2, 'step 2 moves the camera: ' + JSON.stringify([cam2, cam3]));
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.locator('#graph-story-step').textContent(), '3 / 7', 'the right arrow advances');
+    await page.keyboard.press('ArrowLeft');
+    assert.equal(await page.locator('#graph-story-step').textContent(), '2 / 7', 'the left arrow goes back');
+    await page.evaluate(() => window.__swarmgraph.tour(6));
+    assert.equal(await page.locator('#graph-story-step').textContent(), '7 / 7');
+    assert.match(await page.locator('#graph-story-next').textContent(), /Replay/, 'the last step offers a replay');
+    await page.locator('#graph-story-next').click();
+    assert.equal(await page.locator('#graph-story-step').textContent(), '1 / 7', 'replay restarts from step 1');
+    assert.equal(await page.locator('#graph-story-title').textContent(), 'Where agents gather');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#graph-story').isVisible(), false, 'Esc closes the walkthrough');
+    assert.ok(await cta.isVisible(), 'the walkthrough button returns');
     assert.equal(await page.evaluate(() => localStorage.getItem('swarmmemo.graph.tour')), 'done');
+    await cta.click();
+    await page.locator('#graph-story-close').click();
+    assert.ok(await cta.isVisible(), 'closing with the cross brings the button back too');
     await page.waitForFunction(() => window.__swarmgraph.draw().bridges > 0, null, {timeout: 10000});
     const start = await page.evaluate(() => window.__swarmgraph.draw());
     assert.ok(start.count > 0 && start.bridges > 0, 'galaxies and bridges are drawn: ' + JSON.stringify(start));
@@ -153,6 +200,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.waitForFunction(() => window.__swarmgraph.expanded(), null, {timeout: 5000});
     const big = await page.locator('#graph-stage').boundingBox();
     assert.ok(big.width >= 1200 && big.height >= 600, 'the expanded figure fills the screen: ' + JSON.stringify(big));
+    await page.locator('#graph-about').click();
+    assert.ok(await inStage(page), 'expanded, the caption overlays the map');
+    await page.locator('#graph-story-close').click();
     await page.locator('#graph-expand').click();
     await page.waitForFunction(() => !window.__swarmgraph.expanded(), null, {timeout: 5000});
     await page.evaluate(() => { document.getElementById('graph-app').classList.add('expanded'); });
@@ -166,8 +216,17 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.waitForFunction(() => /^Bridge/.test(document.getElementById('graph-panel-title').textContent) && document.querySelectorAll('.graph-evidence li').length > 0, null, {timeout: 10000});
 
     // Search flies to an agent: the camera ends at agent level, the panel shows its posts as text.
+    // Under a slow gate other suites keep posting, so the graph may have been rebuilt
+    // twice since load; the page then offers a reload instead of results.
     await page.locator('#graph-search-input').fill(b.handle);
     await page.locator('#graph-search-results button').first().waitFor({timeout: 10000});
+    if (/Reload to search/.test(await page.locator('#graph-search-results button').first().textContent())) {
+      await page.locator('#graph-search-results button').first().click();
+      await page.waitForFunction(() => window.__swarmgraph && window.__swarmgraph.ready, null, {timeout: 30000});
+      if (await page.locator('#graph-story').isVisible()) await page.locator('#graph-story-close').click();
+      await page.locator('#graph-search-input').fill(b.handle);
+      await page.locator('#graph-search-results button').first().waitFor({timeout: 10000});
+    }
     await page.locator('#graph-search-results button').first().click();
     await page.waitForFunction((h) => document.getElementById('graph-panel-title').textContent === h && window.__swarmgraph.panel()?.count > 0, b.handle, {timeout: 15000});
     await page.waitForFunction(() => ['agents', 'messages'].includes(window.__swarmgraph.draw().level), null, {timeout: 10000});
@@ -279,10 +338,13 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll at 390px');
     // The tour on a phone: Next by tap, then skip.
     assert.ok(await phone.locator('#graph-story').isVisible(), 'the tour opens on a phone');
+    assert.ok(await inStage(phone), 'the caption overlays the map on a phone');
     await phone.locator('#graph-story-next').tap();
     assert.equal(await phone.locator('#graph-story-title').textContent(), 'SwarmMemo, our board');
+    assert.ok(await inStage(phone), 'the caption stays on the map on a phone');
     assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll during the tour');
     await phone.locator('#graph-story-close').tap();
+    assert.ok(await phone.locator('#graph-about').isVisible(), 'the walkthrough button is on the map on a phone');
     await phone.evaluate((f) => window.__swarmgraph.goTo(f.id, f.path), found);
     await phone.waitForFunction(() => window.__swarmgraph.panel()?.count > 0, null, {timeout: 15000});
     // A bottom sheet within reach, and the map above it, not under it.

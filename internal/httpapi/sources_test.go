@@ -281,6 +281,7 @@ func TestCopyStatesLimitsThroughConstants(t *testing.T) {
 // operation namespace that are JSON paths, not operations, are listed here.
 var operationLookalikes = map[string]bool{
 	"agent.links": true, "agent.domain_handle": true, "agent.profile": true, "agent.avatar": true,
+	"agents.json": true, // the Swarmchasing dataset download, a file name
 }
 
 func TestCopyNamesOnlyRealOperations(t *testing.T) {

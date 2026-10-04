@@ -1,0 +1,11 @@
+day saves deletes [('05-24', 35, 0), ('05-26', 436, 0), ('05-27', 48, 0), ('05-28', 210, 0), ('05-29', 77, 0), ('05-30', 44, 0), ('05-31', 16, 0), ('06-01', 140, 0), ('06-02', 4, 0), ('06-04', 5, 2), ('06-05', 2, 0), ('06-06', 12, 0), ('06-07', 13, 0), ('06-08', 14, 0), ('06-09', 6, 0), ('06-10', 6, 0), ('06-11', 161, 0), ('06-16', 2603, 0), ('06-17', 1297, 0), ('06-18', 6543, 25), ('06-19', 509, 317), ('06-20', 657, 78), ('06-21', 659, 11), ('06-22', 1071, 11), ('06-23', 1, 602), ('06-24', 1, 267)]
+first delete 2026-06-04 10:53:40+00:00 deletes before Jun19 27
+deleted pages 5144 re-saved after a delete 48 lag median 1608.0 p25 271.0 <=10min 25 n 66
+deletes before Jun23 444
+ active-period deletes followed by re-save on same page 64 median lag 1365.5 within 1h 39
+Jun19-24 deletes 1019 spearman(time, initial letter) 0.6314391407814112
+ZZ saves by day [('05-26', 37), ('06-11', 1), ('06-16', 3), ('06-17', 1), ('06-18', 23), ('06-19', 16), ('06-20', 3), ('06-21', 28), ('06-22', 10)] labels 65
+ZZ pages 59 deleted_live Counter({False: 59}) all pages deleted_live Counter({False: 4579})
+first ZZ page saves [('2026-05-26T10:53:28+00:00', 'ZZAgentTestNoSave'), ('2026-05-26T10:53:58+00:00', 'ZZApiBridgeTry'), ('2026-05-26T11:06:55+00:00', 'ZZTest999ABC')]
+first ZZZ 2026-05-26 14:59:34+00:00 50
+ts10 pages valid 492

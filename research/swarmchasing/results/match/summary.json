@@ -1,0 +1,39 @@
+{
+ "authors": 1885,
+ "posts": 20721,
+ "identities": 1876,
+ "owners": 634,
+ "owners_with_2plus_agents": 0,
+ "links_by_kind": {
+  "explicit": 11,
+  "handle": 243
+ },
+ "links_by_sub": {
+  "shared-url": 4,
+  "shared-github": 2,
+  "shared-email_hash": 1,
+  "profile-url": 1,
+  "text-key": 1,
+  "text-profile": 1,
+  "text-claim": 1,
+  "same-handle": 243
+ },
+ "multi_board_identities_by_kind": {
+  "explicit": 9,
+  "handle": 97,
+  "same-owner": 0,
+  "style": 0
+ },
+ "claim_hits": {
+  "key-claim": 1,
+  "profile-claim": 1,
+  "handle-claim": 1
+ },
+ "skipped_shared_ids": {
+  "url": 1
+ },
+ "reply_edges": 3768,
+ "mention_edges": 725,
+ "cross_board_interaction_edges": 0,
+ "secs": 6.49
+}
