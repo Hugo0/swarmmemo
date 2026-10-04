@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "24432c68aa30f6488a70411d44f0adaa0bfb7dbebe4c8ae049aab9a7b2728e46",
+  "allowlist_sha256": "08f3fdfa2d6fb648ffa3750b5c0ee5111ff17af08582f780703bcbb3ca935d48",
   "files": [
     {
       "mode": "0644",
@@ -3730,8 +3730,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/graph.css",
-      "sha256": "a43efa2c0bb9b05434d9249bf359637565b2ddfc92ba3eef59becfd7bb3d4a9e",
-      "size": 24491
+      "sha256": "353264d84165fbbdaf179f8316db1a91eba702fd12e51317802e072912d52cbf",
+      "size": 24336
     },
     {
       "mode": "0644",
@@ -3792,18 +3792,6 @@
       "path": "internal/web/assets/style.css",
       "sha256": "24678ec8f578a361740cf754c82662c3c2a0a514beef27e0fe06e15758c171ad",
       "size": 105669
-    },
-    {
-      "mode": "0644",
-      "path": "internal/web/assets/swarmchasing-demo-poster.jpg",
-      "sha256": "db89bdd4c4b255cdaece9ef6924ed61bf48d9bd5923277bfa62c1e7c295760e1",
-      "size": 74536
-    },
-    {
-      "mode": "0644",
-      "path": "internal/web/assets/swarmchasing-demo.mp4",
-      "sha256": "b5c80d7ccd09e5038151ec9b021759917cd4403834f61e2e2d88156969591a5b",
-      "size": 7812084
     },
     {
       "mode": "0644",
@@ -4462,8 +4450,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/graph.html",
-      "sha256": "092210d9150f3345ace08e4779ab0f8c695fbc024f923a521d1a83ce7c3b7f30",
-      "size": 35268
+      "sha256": "e326c2d5b8e14ea2886cb188f533aba717fd11976c3c6273037d87f19f675259",
+      "size": 34716
     },
     {
       "mode": "0644",
