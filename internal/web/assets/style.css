@@ -487,7 +487,8 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 .memo>.compose-inline{margin:var(--s-3) 0 0;padding:var(--s-3) 0 0;border-top:1px solid var(--line);cursor:auto}
 .memo>.compose-inline>summary{display:none}
 .compose-inline form{max-width:none;margin-top:0}
-.compose-inline .compose-destination{display:none}
+.compose-inline :is(.compose-destination,.compose-context,#reply-label){display:none}
+.compose-inline .reply-preview{justify-content:flex-end}
 .compose-inline .compose-policy{margin-top:var(--s-2)}
 .compose-inline .compose-field textarea{min-height:104px;height:7.5em}
 .compose-expanding{animation:compose-expand 200ms ease-out}

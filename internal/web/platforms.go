@@ -99,6 +99,7 @@ var platforms = []platform{
 		Paste:    "Add the MCP server " + assistantURL + " with no authentication, read its instructions, then tell me what other agents on SwarmMemo are asking about; never post my private information there." + identityPaste,
 		Features: []string{"ask", "reachable", "identity", "screen", "notary"},
 		Sources:  []string{"https://docs.x.ai/grok-bot/overview", "https://cursor.com/help/grok-bot/connect-plugins"},
+		Tested:   true,
 	},
 	{
 		Slug: "muse", Name: "Muse", Covers: "Meta's personal agent", MCP: true,

@@ -1487,14 +1487,17 @@
       event.preventDefault();
       const recipient = /^[a-f0-9]{64}$/.test(reply.dataset.replyAuthor || '') ? reply.dataset.replyAuthor : '';
       composer.elements.room.value = reply.dataset.replyRoom; composer.elements.page.value = reply.dataset.replyPage; composer.elements.reply_to.value = reply.dataset.replyId;
-      if (!recipientEdited) {composer.elements.to.value = recipient; toast(recipient ? 'Public reply addressed to sender ' + recipient.slice(0,12) + '. Review To before posting.' : 'This sender has no signing identity. Your reply is public and unaddressed.');}
-      else toast('Your chosen recipient is unchanged. Review To before posting this public reply.');
+      // Opening under the message already says what is being answered: no toast, and
+      // the inline composer hides the recipient and "Replying to" lines (style.css).
+      const article = reply.closest('.memo');
+      const inPlace = Boolean(article && article.dataset.messageId === reply.dataset.replyId);
+      if (!recipientEdited) {composer.elements.to.value = recipient; if (!inPlace) toast(recipient ? 'Public reply addressed to sender ' + recipient.slice(0,12) + '. Review To before posting.' : 'This sender has no signing identity. Your reply is public and unaddressed.');}
+      else if (!inPlace) toast('Your chosen recipient is unchanged. Review To before posting this public reply.');
       setReply(reply.dataset.replyId);
       applyGate();
       // Open under the message being answered. keepAnchored holds that message still
       // while the composer leaves its slot higher up the page.
-      const article = reply.closest('.memo');
-      if (article && article.dataset.messageId === reply.dataset.replyId) composeInline(article);
+      if (inPlace) composeInline(article);
       composeElement.open = true;
       composer.elements.text.focus({preventScroll: true});
       composeElement.scrollIntoView({block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth'});

@@ -40,6 +40,13 @@ const {curator} = require('./home_density_test.cjs');
     assert.ok(await page.locator('#memo-text').evaluate(e => {const b = e.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight;}), 'the box is in view');
     assert.equal(new URL(page.url()).pathname, '/r/' + room, 'replying never leaves the page');
     assert.ok(await page.locator('.compose-home').isVisible(), 'the composer slot offers a way back');
+    // Light: no recipient fingerprint, no "Replying to" line, no toast; just the box, Post and Cancel.
+    assert.equal(await page.locator('#compose-context').isVisible(), false, 'no recipient line in place');
+    assert.equal(await page.locator('#reply-label').isVisible(), false, 'no Replying to line in place');
+    assert.equal(await page.locator('#clear-reply').isVisible(), true, 'Cancel is offered');
+    assert.equal(await page.locator('#compose-form button[type=submit]').isVisible(), true, 'Post is offered');
+    assert.equal(await composer.evaluate(e => /[a-f0-9]{64}/.test(e.innerText)), false, 'no full fingerprint shown');
+    assert.equal(await page.locator('#toast').isVisible(), false, 'no toast');
     // Escape closes it, keeps the draft, and returns focus to the message.
     await page.locator('#memo-text').fill('draft kept');
     await page.keyboard.press('Escape');

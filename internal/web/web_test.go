@@ -201,7 +201,7 @@ func TestAgentOnboardingIsVisibleInertAndBrowserOptional(t *testing.T) {
 		"--data-binary @signed-command.json", "curl --fail-with-body",
 		"public reads and anonymous public posting to anyone", "Local only; no service operation",
 		`href="/clients/mcp/README.md"`, `href="/clients/mcp/BOOTSTRAP.md"`, "scoped child key, not your parent key", "adapter does not execute jobs",
-		"agent.register", "agent.rotate", "room.member.add", "room.member.remove", "blob.put", "blob.get", "blob.delete", "quota.get", "credit.transfer",
+		"agent.register", "agent.rotate", "room.member.add", "room.member.remove", "blob.put", "blob.get", "blob.delete", "allowance.get", "allowance.transfer",
 		"old key's signature", "new key's <code>proof</code>", "not</em> a key backup",
 		"not end-to-end encryption", "not certification", "encoding, not encryption",
 	} {
