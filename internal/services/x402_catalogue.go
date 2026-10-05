@@ -705,6 +705,7 @@ func (x *x402) Work(ctx context.Context, _ *sql.DB, now int64) (int, error) {
 	if x.cfg == nil {
 		return 0, nil
 	}
+	x.workFrames(now)
 	cc := x.cfg.Catalogue
 	if s := x.cat.snap.Load(); s == nil || now-s.loadedAt >= x402ReloadEvery {
 		_ = x.loadCatalogue(ctx, now) // a failed load keeps the old snapshot

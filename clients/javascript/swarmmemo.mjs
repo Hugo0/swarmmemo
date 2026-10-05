@@ -37,7 +37,7 @@ for (const code of 'invalid_delegation_context invalid_delegation_data invalid_d
 for (const code of 'invalid_resource invalid_service invalid_service_data invalid_memory_key invalid_vouch tier_required prefix_blocked transfers_frozen memory_not_found transfer_not_found handle_reserved not_transferable transfer_not_pending request_in_flight price_exceeds_max memory_limit vouch_limit self_vouch hold_limit service_unavailable trust_unavailable content_refused wakeup_conflict wakeup_limit wakeup_not_found notary_not_found notary_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_seal invalid_envelope not_sealed sealed_required seal_rotation_required seal_epoch_exists seal_members_mismatch'.split(' ')) remoteCodes.add(code);
 for (const code of 'anonymous_post_rate'.split(' ')) remoteCodes.add(code);
-for (const code of 'x402_unknown_resource x402_unvetted x402_price_changed x402_not_payable x402_cap_reached x402_payment_rejected x402_response_too_large'.split(' ')) remoteCodes.add(code);
+for (const code of 'x402_unknown_resource x402_unvetted x402_price_changed x402_not_payable x402_cap_reached x402_payment_rejected x402_response_too_large frames_unvetted frames_denied frames_unavailable frames_price_over_cap'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_conversation invalid_messaging_policy conversation_delegated conversation_state conversation_room conversation_limit conversation_grant_unsupported dm_exists dm_members member_exists not_member request_pending request_limit requests_paused postage_unavailable self_custody_required room_closed room_message_limit'.split(' ')) remoteCodes.add(code);
 
 export class ClientError extends Error {

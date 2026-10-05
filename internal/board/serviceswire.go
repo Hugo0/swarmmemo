@@ -210,19 +210,31 @@ func (s *Store) readServices(ctx context.Context, tx *sql.Tx, c Command, a actor
 	if e == nil {
 		return Result{}, allowanceError("service_unavailable")
 	}
-	var data map[string]any
-	var err error
 	if c.Operation == "services.list" {
-		if data, err = e.Catalogue(ctx, tx, now); err == nil {
-			data["without_key"] = s.noKey(ctx, tx, now)
+		data, err := e.Catalogue(ctx, tx, now)
+		if err != nil {
+			return Result{}, serviceError(err)
 		}
-	} else {
-		data, err = e.Read(ctx, tx, services.Request{Service: c.Target, Data: c.Data, Subject: subject(a)}, now)
+		data["without_key"] = s.noKey(ctx, tx, now)
+		return Result{Data: data}, nil
 	}
+	out, err := e.ReadOutcome(ctx, tx, services.Request{Service: c.Target, Data: c.Data, Subject: subject(a)}, now)
 	if err != nil {
 		return Result{}, serviceError(err)
 	}
-	return Result{Data: data}, nil
+	res := Result{Data: out.Data}
+	if after := out.After; after != nil {
+		// A read that needs the network (x402's Frames search) runs once
+		// this transaction has committed, holding no connection.
+		res.afterCommit = func() (Result, error) {
+			data, err := after()
+			if err != nil {
+				return Result{}, serviceError(err)
+			}
+			return Result{Data: data}, nil
+		}
+	}
+	return res, nil
 }
 
 // callService is service.call. A Local call runs and is charged in this
@@ -520,7 +532,15 @@ func serviceError(err error) error {
 	case "upstream_unknown":
 		return &Error{Status: 503, Code: "service_unavailable", Message: `The call's outcome is not known yet; read it with service.read {"method":"status"}, or retry with the same request ID.`, RetryAfter: 5}
 	case "x402_unknown_resource":
-		return problem(400, "x402_unknown_resource", `Name a resource from the x402 catalogue; service.read x402 {"schema":1,"method":"resources"} lists them.`)
+		return problem(400, "x402_unknown_resource", `Name a resource from the x402 catalogue; service.read x402 {"schema":1,"method":"resources"} lists them. A Frames tool is called by the frames: id a recent frames_search returned: service.read x402 {"schema":1,"method":"frames_search","args":{"query":"weather forecast for a city"}}.`)
+	case "frames_unvetted":
+		return problem(403, "frames_unvetted", "Frames has not vetted this tool, and this board calls only tools Frames vetted (frames_vetted: true in frames_search). Nothing was paid or charged; pick a vetted hit.")
+	case "frames_denied":
+		return problem(403, "frames_denied", "This board does not call this tool: its host or category is on the operator's denylist. Nothing was paid or charged; pick another hit from frames_search.")
+	case "frames_unavailable":
+		return &Error{Status: 502, Code: "frames_unavailable", Message: "Frames reports this tool is not live or not payable right now. Nothing was paid or charged; pick another hit from frames_search, or retry later with a new request ID.", RetryAfter: 300}
+	case "frames_price_over_cap":
+		return problem(409, "frames_price_over_cap", "The tool's live price is above this board's maximum for a Frames tool (frames.max_price in frames_search). Nothing was paid or charged; pick a cheaper hit.")
 	case "x402_unvetted":
 		return problem(403, "x402_unvetted", `This resource is not callable: it is an unvetted candidate from the open catalogue (vetted: false), or it was withdrawn after payments that got no answer. Nothing was paid or charged. It becomes callable once the operator vets it; service.read x402 {"schema":1,"method":"resources"} marks what is callable.`)
 	case "x402_price_changed":

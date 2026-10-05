@@ -10,6 +10,9 @@ package services
 // maximum when it reports nothing; our account's billing block is removed
 // from the answer. The key is read once from key_file and never printed;
 // without it the bundler is not ready and its resources are unavailable.
+//
+// With "open": true the whole Frames catalogue is callable as well, without
+// allowlist entries: frames_open.go.
 
 import (
 	"bytes"
@@ -33,10 +36,20 @@ const FramesBaseURL = "https://api.frames.ag/v1"
 const framesCreditMicroUSD = 1000
 
 type x402BundlersFile struct {
-	Frames *struct {
-		KeyFile string `json:"key_file"`
-		BaseURL string `json:"base_url"`
-	} `json:"frames"`
+	Frames *x402FramesFile `json:"frames"`
+}
+
+type x402FramesFile struct {
+	KeyFile string `json:"key_file"`
+	BaseURL string `json:"base_url"`
+	// The open Frames catalogue (frames_open.go); absent or false keeps
+	// Frames to the allowlist's entries.
+	Open          bool   `json:"open"`
+	MaxPrice      string `json:"max_price"`
+	AllowUnvetted bool   `json:"allow_unvetted"`
+	OpenDaily     string `json:"open_daily"`
+	ToolDaily     string `json:"tool_daily"`
+	Anonymous     bool   `json:"anonymous"`
 }
 
 // parseBundlers builds the key-based bundlers the config names; readKey
@@ -56,7 +69,12 @@ func (c *X402Config) parseBundlers(f *x402BundlersFile, readKey func(string) ([]
 	if f.Frames.KeyFile == "" {
 		return fmt.Errorf("x402: config field bundlers.frames.key_file is required")
 	}
-	b := &frames{endpoint: base + "/tools/invoke"}
+	b := &frames{base: base, endpoint: base + "/tools/invoke"}
+	open, err := c.parseFramesOpen(f.Frames)
+	if err != nil {
+		return err
+	}
+	b.open = open
 	raw, err := readKey(f.Frames.KeyFile)
 	switch {
 	case errors.Is(err, errKeyMode):
@@ -85,8 +103,10 @@ func parseBearerKey(raw []byte) string {
 }
 
 type frames struct {
+	base     string // the API's base URL, ".../v1"
 	endpoint string
-	key      string // never printed: String hides it
+	key      string      // never printed: String hides it
+	open     *FramesOpen // nil: only allowlisted Frames tools
 }
 
 func (f *frames) Name() string     { return "frames" }
@@ -115,11 +135,15 @@ func (f *frames) Exchange(ctx context.Context, p x402Plan, pay *payment) (x402Re
 	if len(args) == 0 {
 		args = json.RawMessage("{}")
 	}
-	body, err := json.Marshal(map[string]any{
+	invoke := map[string]any{
 		"calls":           []any{map[string]any{"id": p.res.Tool, "args": args}},
 		"max_usd":         json.Number(formatUnits(p.max, 6)),
 		"idempotency_key": idem,
-	})
+	}
+	if p.res.framesSearch != "" {
+		invoke["search_ids"] = []string{p.res.framesSearch}
+	}
+	body, err := json.Marshal(invoke)
 	if err != nil {
 		return x402Response{}, nil, refusal("upstream_failed")
 	}

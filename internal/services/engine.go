@@ -264,7 +264,7 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 	if err != nil {
 		return Outcome{}, err
 	}
-	c := Call{Service: desc.ID, Method: m.Name, Args: d.Args, Subject: req.Subject, RequestKey: req.RequestKey, Now: now, PricesVersion: version, Price: prices.of(desc.ID, m), Prices: prices}
+	c := Call{Service: desc.ID, Method: m.Name, Args: d.Args, Subject: req.Subject, RequestKey: req.RequestKey, Now: now, PricesVersion: version, Price: prices.of(desc.ID, m), Prices: prices, MaxCost: d.MaxCost}
 	quote, err := p.Quote(c)
 	if err != nil {
 		return Outcome{}, err
@@ -625,7 +625,8 @@ func failureCode(code string) string {
 	switch code {
 	case "upstream_busy", "upstream_unavailable", "content_refused", "invalid_service_data", "memory_not_found", "memory_limit", "invalid_memory_key",
 		"service_unavailable", "x402_unknown_resource", "x402_price_changed", "x402_not_payable", "x402_cap_reached",
-		"x402_payment_rejected", "x402_response_too_large", "x402_unvetted", "anonymous_unscreened":
+		"x402_payment_rejected", "x402_response_too_large", "x402_unvetted", "anonymous_unscreened",
+		"price_exceeds_max", "frames_unvetted", "frames_denied", "frames_unavailable", "frames_price_over_cap":
 		return code
 	}
 	return "upstream_failed"
@@ -662,42 +663,77 @@ func (e *Engine) Retry(ctx context.Context, q allowance.Querier, account string,
 
 var callIDRE = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-// Read is service.read, in the command's transaction: a provider's free read
-// method, or the generic "status" of one of the caller's own calls.
+// Read is service.read for a caller that holds no transaction the read
+// could block (tests, tools): ReadOutcome, with its after-commit part run at
+// once. The board uses ReadOutcome.
 func (e *Engine) Read(ctx context.Context, q allowance.Querier, req Request, now int64) (map[string]any, error) {
+	out, err := e.ReadOutcome(ctx, q, req, now)
+	if err != nil || out.After == nil {
+		return out.Data, err
+	}
+	return out.After()
+}
+
+// remoteReadTimeout bounds a read's after-commit part (RemoteReader).
+const remoteReadTimeout = 30 * time.Second
+
+// ReadOutcome is service.read, in the command's transaction: a provider's
+// free read method, or the generic "status" of one of the caller's own
+// calls. A read that needs the network (RemoteReader) answers with After,
+// which the board runs once the transaction has committed.
+func (e *Engine) ReadOutcome(ctx context.Context, q allowance.Querier, req Request, now int64) (Outcome, error) {
 	d, err := ParseData(req.Data, false)
 	if err != nil {
-		return nil, err
+		return Outcome{}, err
 	}
 	if d.Method == "status" {
 		if _, err = e.cfg.Registry.Lookup(req.Service); err != nil {
-			return nil, err
+			return Outcome{}, err
 		}
 		if err = e.allowRead(req.Subject.ID, now); err != nil {
-			return nil, err
+			return Outcome{}, err
 		}
-		return e.status(ctx, q, req, d, now)
+		data, err := e.status(ctx, q, req, d, now)
+		return Outcome{Data: data}, err
 	}
 	p, desc, m, err := e.resolve(req, d, false)
 	if err != nil {
-		return nil, err
+		return Outcome{}, err
 	}
 	reader, ok := p.(Reader)
 	if !ok {
-		return nil, refusal("invalid_service_data")
+		return Outcome{}, refusal("invalid_service_data")
 	}
 	if err = e.allowRead(req.Subject.ID, now); err != nil {
-		return nil, err
+		return Outcome{}, err
 	}
 	version, prices, err := e.prices(ctx, q, now)
 	if err != nil {
-		return nil, err
+		return Outcome{}, err
 	}
-	body, err := reader.Read(ctx, q, Call{Service: desc.ID, Method: m.Name, Args: d.Args, Subject: req.Subject, Now: now, PricesVersion: version, Prices: prices})
+	c := Call{Service: desc.ID, Method: m.Name, Args: d.Args, Subject: req.Subject, Now: now, PricesVersion: version, Prices: prices}
+	if rr, ok := p.(RemoteReader); ok {
+		after, err := rr.ReadRemote(ctx, q, c)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if after != nil {
+			return Outcome{After: func() (map[string]any, error) {
+				ctx, cancel := context.WithTimeout(e.base, remoteReadTimeout)
+				defer cancel()
+				body, err := after(ctx)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"service": desc.ID, "method": m.Name, "result": body}, nil
+			}}, nil
+		}
+	}
+	body, err := reader.Read(ctx, q, c)
 	if err != nil {
-		return nil, err
+		return Outcome{}, err
 	}
-	return map[string]any{"service": desc.ID, "method": m.Name, "result": body}, nil
+	return Outcome{Data: map[string]any{"service": desc.ID, "method": m.Name, "result": body}}, nil
 }
 
 func (e *Engine) status(ctx context.Context, q allowance.Querier, req Request, d Data, now int64) (map[string]any, error) {

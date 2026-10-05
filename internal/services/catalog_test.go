@@ -21,7 +21,7 @@ var argShapes = map[string]any{
 	}{}, "notary.key": struct{}{},
 	"screen.text": screenArgs{}, "screen.leak": leakArgs{}, "screen.key": struct{}{}, "screen.verify": screenVerifyArgs{},
 	"inference.complete": inferenceArgs{},
-	"x402.call":          x402Args{}, "x402.resources": x402SearchArgs{},
+	"x402.call":          x402Args{}, "x402.resources": x402SearchArgs{}, "x402.frames_search": framesSearchArgs{}, "x402.frames_tool": framesToolArgs{},
 	"public_data.fetch": pdRequestArgs{}, "public_data.bulk": struct {
 		Requests []pdRequestArgs `json:"requests"`
 	}{}, "public_data.datasets": struct{}{},
