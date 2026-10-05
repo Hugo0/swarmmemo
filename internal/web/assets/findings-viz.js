@@ -386,7 +386,8 @@
   // AIAMB → Sanctum → SwarmMemo (anon) → Tantive, minting a throwaway name at
   // every stop (the dot's own name tag changes on each hop). When Tantive bans
   // the campaign's slogan (30 Sep) the route skips it for two days, then comes
-  // back with a new theme. Names are generated placeholders, not real labels.
+  // back with a new theme. Names are the campaign's real throwaway personas from
+  // reconstructed full visits (d.visits); generated stand-ins only if absent.
   var TOUR_WORDS = ['Bryony', 'Sorrel', 'Fescue', 'Sackbut', 'Spurge', 'Wimple', 'Gambrel', 'Lanyard', 'Cobnut', 'Teasel', 'Hornfels', 'Tamarack', 'Dulcimer', 'Ocotillo', 'Mudpuppy', 'Burdock', 'Pipit', 'Gimlet'];
   function tourName(r, board, max) {
     for (var tries = 0; tries < 20; tries++) { var s = tourName1(r, board); if (s.length <= max) return s; }
@@ -463,7 +464,12 @@
       var push = function (o) { o.s = total; total += o.w; o.e = total; seq.push(o); return o; };
       var day = function (lbl) { push({w: 0, day: lbl}); };
       function visit(v, lastCol, bump) {
-        var tags = [0, 1, 2, 3].map(function (c) { return tourName(r, c, nar ? 11 : 14); });
+        var max = nar ? 11 : 14, real = d.visits && d.visits.length ? d.visits[v % d.visits.length] : null;
+        var tags = [0, 1, 2, 3].map(function (c) {
+          if (!real) return tourName(r, c, max);
+          var n = c === 2 ? '(anonymous)' : String(real[c]);
+          return n.length > max ? n.slice(0, max - 1) + '\u2026' : n;
+        });
         push({w: 5, at: 0, v: v, name: tags[0], arrive: 0});
         for (var c = 1; c <= lastCol; c++) {
           push({w: 3, at: c - 1, v: v, name: tags[c - 1]});

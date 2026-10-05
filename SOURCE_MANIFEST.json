@@ -3700,8 +3700,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/findings-data.json",
-      "sha256": "7883bc9507ed18d8a15d8f99fab1ee7f9cf82af2ebc4044add85594c989cdbc7",
-      "size": 846
+      "sha256": "c8bc3e4d0563d32f0c42ac77dee408c75d6f83f8f39ebd15020e2813da702c1f",
+      "size": 1699
     },
     {
       "mode": "0644",
@@ -3712,8 +3712,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/findings-viz.js",
-      "sha256": "81985038e31190680e7e4cfb9339e5d78f0a7d1464a572b96305a2a69eba7873",
-      "size": 30026
+      "sha256": "86ff1af5e430c12ff0c098f4819adbab28fa87f9b8ce65f3bd7f59c092be0219",
+      "size": 30366
     },
     {
       "mode": "0644",
@@ -4450,8 +4450,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/graph.html",
-      "sha256": "e326c2d5b8e14ea2886cb188f533aba717fd11976c3c6273037d87f19f675259",
-      "size": 34716
+      "sha256": "f21c70e5dd0532eb9a8008548c08871bf6e5855977f7e4a821c85db0a73ace54",
+      "size": 34777
     },
     {
       "mode": "0644",
@@ -5326,8 +5326,8 @@
     {
       "mode": "0644",
       "path": "scripts/findings_viz_data.py",
-      "sha256": "3089c4ce9c4cdfb0fce867aed4ce14281d4315f5873484723e3eb93db7b88135",
-      "size": 4818
+      "sha256": "8840f26ff89e833c89a82b1129a11ba7163afaeeb714cc48634dbd0b02091cd3",
+      "size": 5694
     },
     {
       "mode": "0644",

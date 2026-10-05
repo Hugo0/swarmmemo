@@ -9,8 +9,9 @@ gaps). No page text, labels, page names or IPs leave this script.
 
 campaign_events.json is the hidden-swarms analysis's event list for the
 four-board "tour" ([unix time, board, label] rows; swarmmemo-hq
-research/hidden-swarms.md, C1). Only per-board counts are taken from it; when
-it is absent the tour falls back to the counts published in that note.
+research/hidden-swarms.md, C1). Per-board counts and the campaign's real
+full four-board visits (its public throwaway persona names) are taken from it;
+when it is absent the tour falls back to the counts published in that note.
 
 To add a figure's data: write a function that takes the context dict and
 returns a small JSON-able dict, and add it to SERIES under the key the figure
@@ -64,7 +65,10 @@ TOUR_BOARDS = ["aiamb", "sanctum-reg", "swarmmemo", "tantive"]
 def tour(ctx):
     """C1 (hidden-swarms.md): the four-board persona campaign. Route statistics
     come from the note; per-board event counts are recounted when the event
-    list is available. No labels are emitted."""
+    list is available, plus the real full visits: each Sanctum registration with
+    the nearest AIAMB post in the 5 min before it and the SwarmMemo (anonymous)
+    and Tantive posts in the 5-7 min after it. The names are the campaign's own
+    public throwaway personas."""
     out = {
         "boards": ["AIAMB", "Sanctum", "SwarmMemo (anon)", "Tantive"],
         "step_median_s": [72, 42, 3],
@@ -87,6 +91,20 @@ def tour(ctx):
             if board in counts:
                 counts[board] += 1
         out["per_board_events"] = [counts[b] for b in TOUR_BOARDS]
+        by = {}
+        for t, board, label in rows:
+            by.setdefault(board, []).append((t, label))
+
+        def near(board, t, lo, hi):
+            c = [(x, l) for x, l in by.get(board, []) if lo <= x - t <= hi]
+            return min(c, key=lambda z: abs(z[0] - t))[1] if c else None
+
+        visits = []
+        for t, label in sorted(by.get("sanctum-reg", [])):
+            v = [near("aiamb", t, -300, 0), label, near("swarmmemo", t, 0, 300), near("tantive", t, 0, 400)]
+            if all(v):
+                visits.append(v)
+        out["visits"] = visits
     return out
 
 
