@@ -902,10 +902,14 @@ func (x *x402) importCatalogue(ctx context.Context, now int64) (int, error) {
 	conflict := map[string]bool{}
 	full := false
 	var firstErr error
+	// Each discovery gets an equal share of the candidates, so a large
+	// first source cannot crowd out the others before they are read.
+	share := max(1, 2*cc.MaxResources/len(cc.DiscoveryURLs))
 	for _, base := range cc.DiscoveryURLs {
 		if full {
 			break
 		}
+		added, sourceFull := 0, false
 		host := base
 		if u, err := url.Parse(base); err == nil {
 			host = u.Hostname()
@@ -915,7 +919,7 @@ func (x *x402) importCatalogue(ctx context.Context, now int64) (int, error) {
 		// the aggregator, M2).
 		trusted := base == cc.trusted
 		offset := 0
-		for page := 0; page < cc.MaxPages && !full; page++ {
+		for page := 0; page < cc.MaxPages && !full && !sourceFull; page++ {
 			if page > 0 {
 				select {
 				case <-ctx.Done():
@@ -949,6 +953,11 @@ func (x *x402) importCatalogue(ctx context.Context, now int64) (int, error) {
 						full = true
 						break
 					}
+					if added >= share {
+						sourceFull = true
+						break
+					}
+					added++
 					byID[r.ID] = &found{r, sig, "bazaar " + host}
 					continue
 				}

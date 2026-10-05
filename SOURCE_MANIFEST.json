@@ -3094,8 +3094,8 @@
     {
       "mode": "0644",
       "path": "internal/services/security_bundler_test.go",
-      "sha256": "f3dad64a3c2e8bdfade44b676de82479b1cce1a9f335f8e3983c3e775a0ad86d",
-      "size": 31227
+      "sha256": "02083aa18bec7c8acafa81d4a628982b408102af69eb63acc997d7cc77c0589c",
+      "size": 32172
     },
     {
       "mode": "0644",
@@ -3328,8 +3328,8 @@
     {
       "mode": "0644",
       "path": "internal/services/x402_catalogue.go",
-      "sha256": "dfb960a810c665ceea9d8ddb065f97099aeae10dcb05f4ec420f0e0e8f39f32a",
-      "size": 61523
+      "sha256": "05710a4c601f562e08e5638d8c51d9dd3584f0473cea68a4e76d0ac70bdaafd6",
+      "size": 61845
     },
     {
       "mode": "0644",
@@ -3814,8 +3814,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "bbf4c6969f7ce6a08cde74034331f9563cc8a19f1b847afa8b29569d6c862bc6",
-      "size": 29551
+      "sha256": "d019da3f82a4a861e2e3603d8fdcc88a96bffab6081f6e6217021f5e78c06744",
+      "size": 31279
     },
     {
       "mode": "0644",

@@ -414,6 +414,24 @@ func TestSecBundlerDedupeKeepsConservativeSignal(t *testing.T) {
 	}
 }
 
+// A large first discovery cannot use up the crawl before a second one is
+// read: each gets an equal share of the candidates.
+func TestSecBundlerEachDiscoveryGetsAShare(t *testing.T) {
+	second := &fakeBazaar{items: []string{
+		bazaarItemJSON("https://example.com/open/second", "GET", 1200, evilPayToB, "eip155:8453", "Second source", ""),
+	}}
+	cat := `{"discovery_urls":["https://example.com` + discoveryPath + `","https://example.com/second/discovery"],"page_size":10,"max_price":"0.002","open_daily":"0.004","recipient_daily":"0.002","max_resources":1}`
+	cfg := catalogueConfig(t, `{}`, cat)
+	h, x := newCatalogueHarness(t, &fakeX402{price: 1500}, &fakeBazaar{items: testBazaarItems()}, cfg)
+	h.fake.extra["/second/discovery"] = second
+	if _, err := x.importCatalogue(context.Background(), h.now); err != nil {
+		t.Fatal(err)
+	}
+	if second.hits.Load() == 0 {
+		t.Fatal("the first discovery filled the crawl; the second was never read")
+	}
+}
+
 // FINDING M3, fixed: loadCatalogue reads the rows into memory a page at a
 // time and closes them before filtering, so a concurrent statement waits
 // for at most one page, not for the whole load.
