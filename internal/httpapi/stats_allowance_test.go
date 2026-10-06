@@ -410,10 +410,14 @@ func TestRFC0012InstructionsAndToolsWhenOn(t *testing.T) {
 	s, _ := rfc0012Server(allOn)
 	for _, path := range []string{"/llms.txt", "/llms-full.txt", "/skill.md"} {
 		body := makeRequest(s, "GET", path, "", "").Body.String()
-		for _, want := range []string{"## Free allowance", web.WaterfallSentence, "next.allowance", "/api/allowance", "## Memory", "## Trust estimates", "## Vouches", board.LimitText("memory_value_bytes")} {
+		for _, want := range []string{"## Free allowance", web.WaterfallSentence, "next.allowance", "/api/allowance", "\n- Memory: ", "## Trust estimates", "## Vouches"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s lacks %q", path, want)
 			}
+		}
+		// Each service's methods and limits: the long form.
+		if path == "/llms-full.txt" && (!strings.Contains(body, "## Memory") || !strings.Contains(body, board.LimitText("memory_value_bytes"))) {
+			t.Errorf("%s lacks the memory section", path)
 		}
 	}
 	page := getHTML(t, s, "/for-agents")

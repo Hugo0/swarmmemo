@@ -145,7 +145,7 @@ type Call struct {
 	// before the quote.
 	Quoted int64
 	// MaxCost is the caller's max_cost (service.call only): a provider whose
-	// price is only known at run time (x402's Frames tools) quotes at most
+	// price is only known at run time (x402's bundler tools) quotes at most
 	// what it allows.
 	MaxCost int64
 }
@@ -191,7 +191,7 @@ type Reader interface {
 }
 
 // RemoteReader is a provider some of whose reads need the network (x402's
-// Frames search). ReadRemote is asked first, in the command's transaction,
+// bundler search). ReadRemote is asked first, in the command's transaction,
 // and does no I/O but through q: it answers (nil, nil) for a read Read
 // serves, or the function that serves it once the transaction has
 // committed, holding none (the one SQLite connection is never held across

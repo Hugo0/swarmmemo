@@ -16,8 +16,11 @@ import (
 // identity link: "I, key B, checked A's link (kind, value) with my nonce N,
 // and it verified (or failed)". The witness's own identity.witness command is
 // the record, kept verbatim so any reader can verify it offline against B's
-// public key. Only a link that carries proof (proof_attached, or a verified
-// domain) can be witnessed, never by A itself or a key A lists as its own.
+// public key. A link that carries proof (proof_attached, or a verified
+// domain) can be witnessed, and so can a same-key anchor: a claimed url or
+// board link, where B's verified says "I fetched VALUE and found an anchor
+// signed by A's key". That is B's claim only, and the link stays claimed.
+// Never by A itself or a key A lists as its own.
 //
 // One current witness per (witness key, agent, kind, value): a newer one
 // replaces it as current, and the older stays on record with superseded_at
@@ -45,6 +48,21 @@ const (
 	IdentityLinkWitnessesShown = 20
 )
 
+// linkWitnessable reports whether a link of kind in state can be witnessed:
+// one that carries proof (proof_attached, or a verified domain), or a
+// same-key anchor (a claimed url or board link: the witness says it fetched
+// the value and found an anchor signed by the agent's key).
+func linkWitnessable(kind, state string) bool {
+	return state == "proof_attached" || state == "verified" || (state == "claimed" && sameKeyAnchorKind(kind))
+}
+
+// sameKeyAnchorKind is a link kind whose claimed value is a place the agent
+// can post an anchor signed by its own key.
+func sameKeyAnchorKind(kind string) bool { return kind == "url" || kind == "board" }
+
+// witnessableLinkSQL is linkWitnessable over identity_links aliased l.
+const witnessableLinkSQL = "(l.state IN ('proof_attached','verified') OR (l.state='claimed' AND l.kind IN ('url','board')))"
+
 // LinkWitness is one current witness of a link, as published: the witness's
 // own signed identity.witness command (signed_payload, the canonical command
 // bytes, and signature, unpadded base64url Ed25519 by public_key).
@@ -64,7 +82,7 @@ func witnessError(code string) error {
 	case "link_not_found":
 		return problem(404, "link_not_found", "That agent has no link of that kind and value to witness.")
 	case "link_not_witnessable":
-		return problem(409, "link_not_witnessable", "Only a link in state proof_attached or verified can be witnessed; this one is claimed or lapsed.")
+		return problem(409, "link_not_witnessable", "Only a link in state proof_attached or verified, or a claimed url or board link (a same-key anchor), can be witnessed; this one is not.")
 	case "self_witness":
 		return problem(403, "self_witness", "A key cannot witness its own agent's links, nor a link of an agent that lists it (or that it lists) as an ed25519 key.")
 	case "witness_limit":
@@ -193,7 +211,7 @@ func (s *Store) witnessIdentityLink(ctx context.Context, tx *sql.Tx, c Command, 
 	if err != nil {
 		return Result{}, err
 	}
-	if state != "proof_attached" && state != "verified" {
+	if !linkWitnessable(d.Kind, state) {
 		return Result{}, witnessError("link_not_witnessable")
 	}
 	var today int
@@ -225,7 +243,8 @@ func (s *Store) witnessIdentityLink(ctx context.Context, tx *sql.Tx, c Command, 
 }
 
 // witnessedCounts is, per agent and link, the number of distinct other
-// accounts with a current verified witness: the links[].witnessed count. A
+// accounts with a current verified witness: the links[].witnessed count,
+// same-key anchor witnesses of claimed url and board links included. A
 // link that has since lapsed keeps its witnesses but counts none. One query for any number of agents.
 func witnessedCounts(ctx context.Context, tx *sql.Tx, agents []string) (map[[3]string]int, error) {
 	counts := map[[3]string]int{}
@@ -239,7 +258,7 @@ func witnessedCounts(ctx context.Context, tx *sql.Tx, agents []string) (map[[3]s
 	rows, err := tx.QueryContext(ctx, `SELECT w.agent,w.kind,w.value,count(DISTINCT wi.account) FROM link_witnesses w
  JOIN identity_links l ON l.agent=w.agent AND l.kind=w.kind AND l.value=w.value
  JOIN identities wi ON wi.id=w.witness JOIN identities ai ON ai.id=w.agent
- WHERE w.agent IN (?`+strings.Repeat(",?", len(agents)-1)+`) AND w.superseded_at=0 AND w.verdict='verified' AND wi.account<>ai.account AND l.state IN ('proof_attached','verified')
+ WHERE w.agent IN (?`+strings.Repeat(",?", len(agents)-1)+`) AND w.superseded_at=0 AND w.verdict='verified' AND wi.account<>ai.account AND `+witnessableLinkSQL+`
  GROUP BY w.agent,w.kind,w.value`, args...)
 	if err != nil {
 		return nil, err

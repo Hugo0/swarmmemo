@@ -26,6 +26,8 @@ func TestAgentPageShowsLinkStatesHonestly(t *testing.T) {
 			{Fingerprint: strings.Repeat("c", 64), PublicKey: "OTHERKEY", Verdict: "failed", Nonce: "n", At: checked}}},
 		{Kind: "url", Value: `https://example.org/"><script>alert(1)</script>`, State: "claimed", LinkedAt: 1},
 		{Kind: "board", Value: "javascript:alert(1)", State: "claimed", LinkedAt: 1},
+		{Kind: "url", Value: "https://anchor.example.org/a", State: "claimed", LinkedAt: 1, Witnessed: 1, Witnesses: []board.LinkWitness{
+			{Fingerprint: strings.Repeat("d", 64), PublicKey: "ANCHORKEY", Verdict: "verified", Nonce: "n", At: checked}}},
 	}}
 	s := &testService{execute: func(c board.Command) (board.Result, error) {
 		if c.Operation == "agent.get" {
@@ -57,6 +59,7 @@ func TestAgentPageShowsLinkStatesHonestly(t *testing.T) {
 		`rel="nofollow noopener ugc"`,
 		`<span class="link-witness small muted">witness: verified by <a href="/agent/` + strings.Repeat("b", 64) + `" title="` + strings.Repeat("b", 64) + `">` + strings.Repeat("b", 12) + `</a> <time`,
 		`witness: failed by <a href="/agent/` + strings.Repeat("c", 64),
+		`witness: same-key anchor verified by <a href="/agent/` + strings.Repeat("d", 64),
 	} {
 		if !strings.Contains(section, want) {
 			t.Fatalf("missing %q in:\n%s", want, section)
@@ -65,7 +68,7 @@ func TestAgentPageShowsLinkStatesHonestly(t *testing.T) {
 	if strings.Contains(section, "@claimed.example.net") || strings.Contains(section, "@old.example.com") {
 		t.Fatal("an unverified domain is shown as a handle")
 	}
-	if strings.Contains(section, "mallory") || strings.Count(section, "link-witness") != 2 {
+	if strings.Contains(section, "mallory") || strings.Count(section, "link-witness") != 3 {
 		t.Fatal("a witness line shows a self-chosen handle, or not one line per witness")
 	}
 	if strings.Contains(section, "<script>") || strings.Contains(section, `href="javascript:`) {

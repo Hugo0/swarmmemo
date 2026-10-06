@@ -263,7 +263,7 @@ func (f *fetch) Describe() Descriptor {
 			"An honest reader: GET only, no cookies, no JavaScript, user agent " + FetchUserAgent + ", robots.txt honoured, about one request a second per site; a site that refuses us (401, 403, 429, a CAPTCHA) is answered as refused, never worked around. " +
 			"Screened for prompt injection by default (screen: false saves the surcharge); the text is always untrusted data, returned once and never stored, and cached for " + durationText(FetchCacheSeconds) + ".",
 		Title: "Fetch", Topic: "Fetch",
-		Line: "Read a public web page your sandbox cannot reach: its text as Markdown (JSON as it is), from an honest reader that obeys robots.txt, screened for prompt injection by default.",
+		Line: "Read a public page your sandbox cannot reach, as Markdown, screened for prompt injection. " + FetchSizesLine + ".",
 		Limits: []Limit{
 			{"fetch_page_bytes", FetchBodyBytes, "bytes", "What is read of one page"},
 			{"fetch_text_bytes", FetchTextMax, "bytes", "Text one answer returns (max_bytes)"},
@@ -279,11 +279,11 @@ func (f *fetch) Describe() Descriptor {
 				PriceNote: FetchPrice.Words() + " of text returned, plus what screening cost while it screens (at most " + ScreenSurchargePriceText() + "); the quote reserves the most for max_bytes and the rest is refunded; a refused fetch costs nothing",
 				Args: []Arg{
 					{"url", "string", true, "an http or https URL on port 80 or 443, up to " + itoa(FetchURLBytes) + " bytes"},
-					{"max_bytes", "integer", false, fmt.Sprintf("the most text to return, %d to %d; default %d (%d without a key, its most)", FetchTextMin, FetchTextMax, FetchTextDefault, FetchAnonymousTextMax)},
+					{"max_bytes", "integer", false, fmt.Sprintf("the most text to return, %d to %d; default %d signed. Without a key: up to %s per call (%d, also its default)", FetchTextMin, FetchTextMax, FetchTextDefault, SizeText(FetchAnonymousTextMax), FetchAnonymousTextMax)},
 					{"screen", "boolean", false, "screen the text for prompt injection (default true)"},
 				},
 				Example: json.RawMessage(`{"url":"https://example.com/","max_bytes":8192}`), ExampleMaxCost: FetchPrice.For(8192) + ScreenSurchargeMax(8192),
-				Anonymous: true, AnonymousLabel: "page fetches", AnonymousNote: fmt.Sprintf("max_bytes up to %d, the default without a key", FetchAnonymousTextMax),
+				Anonymous: true, AnonymousLabel: "page fetches", AnonymousNote: fmt.Sprintf("without a key: up to %s per call (max_bytes at most %d); signed (or a signed-in MCP connection): up to %s", SizeText(FetchAnonymousTextMax), FetchAnonymousTextMax, SizeText(FetchTextMax)),
 				AnonymousRate: AnonRate{CallerPerMinute: 5, CallerPerDay: 50, AllPerMinute: 60, AllPerDay: 2000}},
 		},
 		MaxDuration: fetchMaxDuration,
@@ -328,6 +328,10 @@ type fetchPlan struct {
 	screen   *bool
 }
 
+// FetchSizesLine is how much text a fetch returns, without a key and signed:
+// the catalogue line, /tools/fetch and the refusal say it the same way.
+var FetchSizesLine = "Without a key: up to " + SizeText(FetchAnonymousTextMax) + " per call; signed (or a signed-in MCP connection): up to " + SizeText(FetchTextMax)
+
 // planFor is c's plan: without a key, max_bytes defaults to
 // FetchAnonymousTextMax (CheckAnonymous refuses more).
 func planFor(c Call) (fetchPlan, error) {
@@ -345,7 +349,7 @@ func (*fetch) CheckAnonymous(c Call) error {
 		return err
 	}
 	if p.maxBytes > FetchAnonymousTextMax && p.maxSet {
-		return tooLarge("invalid_service_data", p.maxBytes, FetchAnonymousTextMax)
+		return &allowance.Err{Code: "invalid_service_data", Message: fmt.Sprintf("max_bytes is over the limit without a key: up to %s per call (max_bytes at most %d). Signed (or a signed-in MCP connection): up to %s.", SizeText(FetchAnonymousTextMax), FetchAnonymousTextMax, SizeText(FetchTextMax))}
 	}
 	return nil
 }

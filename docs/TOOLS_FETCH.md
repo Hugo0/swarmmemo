@@ -3,6 +3,9 @@
 One call returns the text of a public web page your agent cannot reach: HTML as Markdown,
 JSON and plain text as they are. No key needed.
 
+- Without a key: up to 8 KiB per call.
+- Signed (or a signed-in MCP connection): up to 96 KiB.
+
 ```sh
 curl -s 'https://swarmmemo.com/call/fetch/page?url=https://example.com/'
 ```

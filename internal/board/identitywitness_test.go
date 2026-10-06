@@ -164,8 +164,9 @@ func TestWitnessRefusals(t *testing.T) {
 	fails(t, s, witnessCommand(b, keyID(a), "ed25519", pubKey(keyFor(169)), nonce, "verified"), "link_not_found")
 	fails(t, s, witnessCommand(b, strings.Repeat("ab", 32), "ed25519", value, nonce, "verified"), "link_not_found")
 	fails(t, s, witnessCommand(b, keyID(a), "ed25519", pubKey(claimedKey), nonce, "verified"), "link_not_witnessable")
-	run(t, s, linkCommand(a, "identity.link", "url", "https://example.org/a"))
-	fails(t, s, witnessCommand(b, keyID(a), "url", "https://example.org/a", nonce, "verified"), "link_not_witnessable")
+	nostr := strings.Repeat("b", 64)
+	run(t, s, linkCommand(a, "identity.link", "nostr", nostr))
+	fails(t, s, witnessCommand(b, keyID(a), "nostr", nostr, nonce, "verified"), "link_not_witnessable")
 	run(t, s, linkCommand(a, "identity.link", "domain", "example.org"))
 	fails(t, s, witnessCommand(b, keyID(a), "domain", "example.org", nonce, "verified"), "link_not_witnessable")
 	// A verified domain can be witnessed, by its canonical or raw value.
@@ -258,5 +259,77 @@ func TestWitnessesShownAreCapped(t *testing.T) {
 	l := linkOf(t, s, a, "ed25519")
 	if len(l.Witnesses) != IdentityLinkWitnessesShown || l.Witnessed != IdentityLinkWitnessesShown+2 || l.Witnesses[0].Fingerprint != keyID(keyFor(byte(180+IdentityLinkWitnessesShown+1))) {
 		t.Fatalf("capped: %d shown, witnessed %d", len(l.Witnesses), l.Witnessed)
+	}
+}
+
+// TestWitnessSameKeyAnchor: a claimed url or board link (a same-key anchor)
+// can be witnessed; the witness counts, the link stays claimed, and the
+// self-witness rules hold.
+func TestWitnessSameKeyAnchor(t *testing.T) {
+	s, _ := linkTest(t)
+	a, b, c := keyFor(140), keyFor(141), keyFor(142)
+	registerAll(t, s, a, b, c)
+	const page, boardURL = "https://other.example.org/agents/a", "https://board.example.net/u/a"
+	run(t, s, linkCommand(a, "identity.link", "url", page))
+	run(t, s, linkCommand(a, "identity.link", "board", boardURL))
+	nonce := "anchor-nonce-0123456789"
+
+	// Self-witness, and a key A lists as its own, are still refused.
+	fails(t, s, witnessCommand(a, keyID(a), "url", page, nonce, "verified"), "self_witness")
+	run(t, s, linkCommand(a, "identity.link", "ed25519", pubKey(c)))
+	fails(t, s, witnessCommand(c, keyID(a), "url", page, nonce, "verified"), "self_witness")
+
+	res := run(t, s, witnessCommand(b, keyID(a), "url", page, nonce, "verified"))
+	if res.Data["link_state"] != "claimed" || res.Data["verdict"] != "verified" {
+		t.Fatalf("anchor witness result: %v", res.Data)
+	}
+	run(t, s, witnessCommand(b, keyID(a), "board", boardURL, nonce, "failed"))
+	l := linkOf(t, s, a, "url")
+	if l.State != "claimed" || l.Method != "" || l.Proof != "" || l.Witnessed != 1 || len(l.Witnesses) != 1 || !verifyWitness(l.Witnesses[0], keyID(a), "url", page) {
+		t.Fatalf("witnessed anchor: %+v", l)
+	}
+	if l := linkOf(t, s, a, "board"); l.State != "claimed" || l.Witnessed != 0 || len(l.Witnesses) != 1 || l.Witnesses[0].Verdict != "failed" {
+		t.Fatalf("failed anchor witness: %+v", l)
+	}
+	// The count and the JSON: present on both anchors, 0 included.
+	raw, _ := json.Marshal(agentLinks(t, s, a).Links)
+	if !strings.Contains(string(raw), `"kind":"url","value":"`+page+`","state":"claimed"`) || strings.Count(string(raw), `"witnessed":`) != 2 {
+		t.Fatalf("anchor links JSON: %s", raw)
+	}
+}
+
+// TestWitnessedAlwaysPresent: links[].witnessed is in the JSON of every link
+// that can be witnessed, 0 included, and absent on any other.
+func TestWitnessedAlwaysPresent(t *testing.T) {
+	s, _ := linkTest(t)
+	a, other := keyFor(150), keyFor(151)
+	register(t, s, a)
+	provenLink(t, s, a, other, "")
+	run(t, s, linkCommand(a, "identity.link", "nostr", strings.Repeat("b", 64)))
+	raw, err := json.Marshal(agentLinks(t, s, a).Links)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var links []map[string]any
+	if err = json.Unmarshal(raw, &links); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, l := range links {
+		n, has := l["witnessed"]
+		seen[l["kind"].(string)] = true
+		switch l["kind"] {
+		case "ed25519":
+			if !has || n != float64(0) {
+				t.Fatalf("a proof_attached link without witnesses must say witnessed 0: %s", raw)
+			}
+		case "nostr":
+			if has {
+				t.Fatalf("a claimed nostr link cannot be witnessed and carries no count: %s", raw)
+			}
+		}
+	}
+	if !seen["ed25519"] || !seen["nostr"] {
+		t.Fatalf("links: %s", raw)
 	}
 }

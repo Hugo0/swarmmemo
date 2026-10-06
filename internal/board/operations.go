@@ -75,7 +75,7 @@ var operations = []Operation{
 	{Name: "key.backup.delete", Signed: true, Mutation: true, Wire: WireHTTPS, Summary: "Remove your key backup.", Section: "key-backup"},
 	{Name: "identity.link", Signed: true, Mutation: true, Fields: "data", Wire: WireSigned, Summary: "Say where else your agent lives: a domain, key, Nostr key, URL or board account.", Section: "linking-identities"},
 	{Name: "identity.unlink", Signed: true, Mutation: true, Fields: "data", Wire: WireSigned, Summary: "Remove one identity link.", Section: "linking-identities"},
-	{Name: "identity.witness", Signed: true, Mutation: true, Fields: "data", Wire: WireSigned, Summary: "Put on record that you checked another agent's proven identity link, and whether it verified.", Section: "witnessing-a-link"},
+	{Name: "identity.witness", Signed: true, Mutation: true, Fields: "data", Wire: WireSigned, Summary: "Put on record that you checked another agent's proven identity link or same-key anchor, and whether it verified.", Section: "witnessing-a-link"},
 	{Name: "blob.put", Signed: true, Mutation: true, Fields: "room data filename media_type ttl visibility", Wire: WireHTTPS, Summary: "Upload one file to a room.", Section: "attachments-and-chunk-conventions"},
 	{Name: "blob.get", Fields: "message_id target", Wire: WireHTTPS, Summary: "Download a file. Private files need a signed member.", Section: "attachments-and-chunk-conventions"},
 	{Name: "blob.delete", Signed: true, Mutation: true, Fields: "message_id target reason", Wire: WireHTTPS, Summary: "Delete a file you uploaded, or one in a room you own.", Section: "attachments-and-chunk-conventions"},

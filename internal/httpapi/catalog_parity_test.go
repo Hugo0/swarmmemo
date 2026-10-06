@@ -76,7 +76,7 @@ func ids(catalog []services.Entry) []string {
 // the live prices; the web page shows what the API publishes.
 func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 	f := board.Features{Services: services.Known(), Trust: board.TrustShadow}
-	s, _ := catalogServer(f)
+	s, svc := catalogServer(f)
 	catalog := services.Catalog(f.Services)
 	want := ids(catalog)
 
@@ -111,20 +111,31 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 		capGives = append(capGives, g.(map[string]any)["topic"].(string))
 	}
 
-	// /llms.txt and /llms-full.txt: a section per service in catalogue order,
-	// the live price, and the same gives.
+	// /llms-full.txt: a section per service in catalogue order and the live
+	// price; /llms.txt: the example call at the live quote. Both: the same
+	// gives, one line per tool.
+	live, err := svc.Execute(t.Context(), board.Command{Operation: "services.list"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, path := range []string{"/llms.txt", "/llms-full.txt"} {
 		text := makeRequest(s, "GET", path, "", "").Body.String()
-		last := -1
-		for _, e := range catalog {
-			at := strings.Index(text, "### "+e.Title+" ("+e.ID+")")
-			if at < 0 || at < last {
-				t.Errorf("%s: %s is missing or out of order", path, e.ID)
+		if path == "/llms.txt" {
+			if !strings.Contains(text, web.CallText(s.cfg.PublicURL, live.Data["services"].([]services.Entry))) || !strings.Contains(text, `\"method\":\"put\"`) {
+				t.Errorf("%s does not show the example call at the live price", path)
 			}
-			last = at
-		}
-		if !strings.Contains(text, "put (service.call, signed, 777 + 1 per byte memory_bytes)") {
-			t.Errorf("%s does not show the live price", path)
+		} else {
+			last := -1
+			for _, e := range catalog {
+				at := strings.Index(text, "### "+e.Title+" ("+e.ID+")")
+				if at < 0 || at < last {
+					t.Errorf("%s: %s is missing or out of order", path, e.ID)
+				}
+				last = at
+			}
+			if !strings.Contains(text, "put (service.call, signed, 777 + 1 per byte memory_bytes)") {
+				t.Errorf("%s does not show the live price", path)
+			}
 		}
 		for _, topic := range capGives {
 			if !strings.Contains(text, "\n- "+topic+": ") {

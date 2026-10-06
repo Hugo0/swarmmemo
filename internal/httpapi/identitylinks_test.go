@@ -131,6 +131,10 @@ func TestIdentityLinksEndToEnd(t *testing.T) {
 				t.Fatalf("witnessed link: %s", item)
 			}
 		}
+		// A link that cannot be witnessed carries no count.
+		if _, has := link["witnessed"]; has && link["kind"] == "domain" {
+			t.Fatalf("a claimed domain carries witnessed: %s", item)
+		}
 	}
 	if states["domain"] != "claimed" || states["ed25519"] != "proof_attached" || states["url"] != "claimed" {
 		t.Fatalf("states: %v", states)
@@ -141,6 +145,7 @@ func TestIdentityLinksEndToEnd(t *testing.T) {
 		{"kind": "domain", "value": "example.org", "state": "claimed", "linked_at": 1, "method": "dns-txt"},
 		{"kind": "domain", "value": "example.org", "state": "verified", "linked_at": 1},
 		{"kind": "ed25519", "value": "x", "state": "proof_attached", "linked_at": 1, "method": "ed25519-signature"},
+		{"kind": "ed25519", "value": "x", "state": "proof_attached", "linked_at": 1, "method": "ed25519-signature", "proof": "p"},
 		{"kind": "domain", "value": "example.org", "state": "lapsed", "linked_at": 1, "method": "dns-txt"},
 		{"kind": "domain", "value": "example.org", "state": "trusted", "linked_at": 1},
 		{"kind": "email", "value": "a@example.org", "state": "claimed", "linked_at": 1},

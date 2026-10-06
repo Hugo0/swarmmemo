@@ -416,6 +416,30 @@ class ArgumentOrderTests(unittest.TestCase):
             memo.build_parser().parse_args(["chat", "dm", "AGENT", "--sealed", "a", "b"])
 
 
+class IdentityCommandTests(unittest.TestCase):
+    """link and witness build identity.link and identity.witness data; options left out stay out."""
+
+    def sent(self, *argv):
+        sent = []
+        with patch.object(memo, "load_key", return_value=None), \
+             patch.object(memo.Client, "command", lambda self, op, **f: sent.append((op, json.loads(f["data"]))) or {"ok": True}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(memo.main(["--key", "KEY.json", *argv]), 0)
+        return sent[0]
+
+    def test_link_and_witness_data(self):
+        self.assertEqual(self.sent("link", "domain", "example.org"), ("identity.link", {"schema": 1, "kind": "domain", "value": "example.org"}))
+        self.assertEqual(self.sent("link", "url", "https://example.org/a", "--nonce", "N" * 16, "--observed-at", "BLOCK"),
+                         ("identity.link", {"schema": 1, "kind": "url", "value": "https://example.org/a", "nonce": "N" * 16, "observed_at": "BLOCK"}))
+        self.assertEqual(self.sent("link", "ed25519", "KEY", "--proof", "SIG")[1]["proof"], "SIG")
+        self.assertEqual(self.sent("witness", "FP", "url", "https://example.org/a", "--verdict", "failed", "--nonce", "M" * 16),
+                         ("identity.witness", {"schema": 1, "agent": "FP", "kind": "url", "value": "https://example.org/a", "nonce": "M" * 16, "verdict": "failed"}))
+        for argv in (["witness", "FP", "url", "V", "--verdict", "verified"], ["witness", "FP", "url", "V", "--nonce", "M" * 16],
+                     ["witness", "FP", "url", "V", "--nonce", "M" * 16, "--verdict", "maybe"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                memo.build_parser().parse_args(argv)
+
+
 class FreeCallTests(unittest.TestCase):
     """A service call needs no --max-cost: left out, it costs the quote for its arguments (T57 I4)."""
     parse = ArgumentOrderTests.parse
@@ -688,6 +712,33 @@ class LiveChatTests(unittest.TestCase):
         out = self.ok("alice", "wait", "--all", "--timeout", "20", "--inbound-mode", "off")
         self.assertIn("and another", out)
         self.assertEqual(self.cli("alice", "wait", "--all", "--timeout", "1")[0], 2)
+
+    def test_readme_identity_commands_run(self):
+        """The README's link and witness lines run as written: alice links, bob witnesses."""
+        readme = (Path(__file__).resolve().parent / "README.md").read_text()
+        section = readme.split("## Link identities and witness links", 1)[1].split("\n## ", 1)[0]
+        lines = re.findall(r"^python3 clients/python/swarmmemo\.py (.*)$", section, re.M)
+        self.assertEqual([shlex.split(line)[2] for line in lines], ["link", "link", "link", "witness"])
+        other = memo.crypto()[0].from_private_bytes(bytes(range(32)))
+        their_key = memo.b64(memo.public_bytes(other))
+        statement = f"swarmmemo-identity-link:1:{memo.SERVICE}:{self.fp('alice')}:{their_key}"
+        fill = {"THEIR_PUBLIC_KEY": their_key, "THEIR_SIGNATURE": memo.b64(other.sign(statement.encode())),
+                "AGENT_FINGERPRINT": self.fp("alice"), "THEIR_NONCE_0123456": "bob-nonce-0123456789", "RECENT_BLOCK_HASH": "00000000000000000001a2b3"}
+        for line in lines:
+            argv = shlex.split(line)
+            who = "bob" if argv[2] == "witness" else "alice"
+            argv = [{**fill, "/secure/agent.json": str(self.keys[who])}.get(a, a) for a in argv]
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = memo.main(["--url", self.origin, *argv])
+            self.assertEqual(code, 0, f"{line}: {out.getvalue()}{err.getvalue()}")
+            self.assertTrue(json.loads(out.getvalue())["ok"], out.getvalue())
+        links = {l["kind"]: l for l in self.api("bob").command("agent.get", target=self.fp("alice"))["agent"]["links"]}
+        self.assertEqual({k: l["state"] for k, l in links.items()}, {"domain": "claimed", "url": "claimed", "ed25519": "proof_attached"})
+        url = links["url"]
+        self.assertEqual((url["challenge"]["nonce"], url["challenge"]["observed_at"]), ("bob-nonce-0123456789", "00000000000000000001a2b3"))
+        self.assertEqual((url["witnessed"], url["witnesses"][0]["fingerprint"], url["witnesses"][0]["verdict"]), (1, self.fp("bob"), "verified"))
+        self.assertEqual(links["ed25519"]["witnessed"], 0)
 
     def test_sealed_rotation_and_downgrade(self):
         for who in ("alice", "bob", "carol"):

@@ -21,6 +21,7 @@ import (
 
 	publicdocs "swarmmemo/docs"
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
 )
 
@@ -39,7 +40,7 @@ func TestConversationFirstInstructionsAreOrderedAndInert(t *testing.T) {
 		}
 		original = body
 		previous := -1
-		for _, step := range []string{"## Start here", "### 1. Read", "### 2. Post", "### 3. Check the receipt", "### 4. Reply", "To follow a thread", "### 5. Come back", "### 6. Optional", "## Optional tools and advanced workflows", "## Agents and permissions", "## Coordinate work"} {
+		for _, step := range []string{"## Start here", "### 1. Read", "### 2. Post", "### 3. Check the receipt", "### 4. Reply", "To follow a thread", "### 5. Come back", "### 6. Optional", "## Your key, handle and identity links", "## Optional tools and advanced workflows", "## Coordinate work"} {
 			position := strings.Index(body, step)
 			if position <= previous {
 				t.Fatalf("missing or out-of-order first-use instruction: %s", step)
@@ -68,6 +69,51 @@ func TestConversationFirstInstructionsAreOrderedAndInert(t *testing.T) {
 	}
 	if len(f.commands) != 0 {
 		t.Fatal("reading instructions dispatched commands")
+	}
+}
+
+// llmsLeanBytes bounds /llms.txt with every service and flag on as this test
+// serves it; production adds the free credit offer, OAuth sign-in and the
+// calls without a key (about 2.5 KB), and must stay under 40 KB.
+const llmsLeanBytes = 37_000
+
+// /llms.txt leads with what agents use first (posting and replying, their
+// key and identity links, fetch, the paid tools), then one line per tool and
+// which to use for what; the detail is on each tool's page and in
+// /llms-full.txt, which keeps everything.
+func TestLLMSTxtLeadsWithFirstCallsAndStaysLean(t *testing.T) {
+	f := board.Features{Services: services.Known(), Ledger: board.LedgerOn, Trust: board.TrustAllocation, VoteRecords: true}
+	s, _ := catalogServer(f)
+	llms := makeRequest(s, "GET", "/llms.txt", "", "").Body.String()
+	full := makeRequest(s, "GET", "/llms-full.txt", "", "").Body.String()
+	if len(llms) > llmsLeanBytes {
+		t.Errorf("/llms.txt is %d bytes, over its %d budget: move detail to the tool pages", len(llms), llmsLeanBytes)
+	}
+	previous := -1
+	for _, step := range []string{"### 2. Post", "### 4. Reply", "## Your key, handle and identity links", "identity.link", "identity.witness",
+		"## Fetch a web page", "## Paid tools on the free allowance", "## What SwarmMemo gives agents", "- memory: ", "- paste: ", "- shared docs: ",
+		"- #bounties: posts paid by their poster", "- work items: claim and submit", "## Read", "## Coordinate work"} {
+		at := strings.Index(llms, step)
+		if at <= previous {
+			t.Fatalf("/llms.txt: %q is missing or out of order", step)
+		}
+		previous = at
+	}
+	// One line per tool, each linking its page; the per-method detail is in
+	// the long form only.
+	for _, page := range []string{"/tools/memory", "/tools/fetch", "/tools/paste", "/tools/docs", "/tools/paid-apis"} {
+		if !strings.Contains(llms, page) {
+			t.Errorf("/llms.txt does not link %s", page)
+		}
+	}
+	for _, e := range services.Catalog(f.Services) {
+		heading := "### " + e.Title + " (" + e.ID + ")"
+		if strings.Contains(llms, heading) || !strings.Contains(full, heading) {
+			t.Errorf("%s: per-method detail belongs in /llms-full.txt only", e.ID)
+		}
+	}
+	if !strings.HasPrefix(full, llms[:strings.Index(llms, "## What SwarmMemo gives agents")]) {
+		t.Error("/llms-full.txt does not start with everything /llms.txt says first")
 	}
 }
 

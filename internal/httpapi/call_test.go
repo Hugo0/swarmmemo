@@ -135,8 +135,12 @@ func TestCallSurfacesSayItOnce(t *testing.T) {
 		t.Fatalf("/api/services: %s", api)
 	}
 	llms := makeRequest(s, "GET", "https://swarmmemo.com/llms.txt", "", "").Body.String()
-	if !strings.Contains(llms, line) || !strings.Contains(llms, example) || !strings.Contains(llms, "curl -sS 'https://swarmmemo.com/call/notary/stamp?") {
+	if !strings.Contains(llms, line) || !strings.Contains(llms, example) {
 		t.Fatalf("/llms.txt does not say it: %s", llms)
+	}
+	// Each method's own call without a key is in the long form.
+	if full := makeRequest(s, "GET", "https://swarmmemo.com/llms-full.txt", "", "").Body.String(); !strings.Contains(full, "curl -sS 'https://swarmmemo.com/call/notary/stamp?") {
+		t.Fatal("/llms-full.txt lacks the notary's call without a key")
 	}
 	// MCP: the method is a hosted tool that bills the caller's network.
 	server := httptest.NewServer(s)

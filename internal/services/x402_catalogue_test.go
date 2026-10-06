@@ -2,7 +2,7 @@ package services
 
 // The aggregator: the open catalogue imported from a fake Bazaar, its
 // guardrails, search, sub-caps and kill switch; the bundler interface with a
-// fake bundler; and the frames adapter against a fake Frames API. Every
+// fake bundler; and the key-based bundler adapter against a fake bundler API. Every
 // upstream is a fake behind the harness's dialer: no test reaches the
 // network.
 
@@ -597,8 +597,8 @@ func TestBundlerInterface(t *testing.T) {
 	}
 }
 
-// fakeFrames is the Frames API's invoke endpoint.
-type fakeFrames struct {
+// fakeKeyBundler is the bundler API's invoke endpoint.
+type fakeKeyBundler struct {
 	mu      sync.Mutex
 	status  int
 	charged string
@@ -606,7 +606,7 @@ type fakeFrames struct {
 	auth    string
 }
 
-func (f *fakeFrames) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (f *fakeKeyBundler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.auth = r.Header.Get("Authorization")
@@ -622,9 +622,9 @@ func (f *fakeFrames) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"results":[{"id":"apollo.people_search","delivered":true,"response":{"people":[]}}],"billing":{"charged_credits":%s,"budget_credits":10,"balance_credits":2997,"percent_remaining":99}}`, f.charged)
 }
 
-const framesKey = "fk_test_0123456789abcdef"
+const bundlerKey = "fk_test_0123456789abcdef"
 
-func framesConfig(t *testing.T, withKey bool) *X402Config {
+func bundlerConfig(t *testing.T, withKey bool) *X402Config {
 	t.Helper()
 	key, _ := hex.DecodeString(x402TestKey)
 	signer, _ := signerFromKeyBytes(key)
@@ -638,7 +638,7 @@ func framesConfig(t *testing.T, withKey bool) *X402Config {
 	absent := func(string) ([]byte, error) { return nil, fs.ErrNotExist }
 	cfg, err := parseX402Config(f, []byte(allowlist), signer, absent, func(path string) ([]byte, error) {
 		if withKey && path == "/etc/frames.key" {
-			return []byte(framesKey + "\n"), nil
+			return []byte(bundlerKey + "\n"), nil
 		}
 		return nil, fs.ErrNotExist
 	})
@@ -648,18 +648,18 @@ func framesConfig(t *testing.T, withKey bool) *X402Config {
 	return cfg
 }
 
-func TestFramesBundler(t *testing.T) {
-	ff := &fakeFrames{charged: "3"}
-	cfg := framesConfig(t, true)
+func TestBundlerBundler(t *testing.T) {
+	ff := &fakeKeyBundler{charged: "3"}
+	cfg := bundlerConfig(t, true)
 	h := newX402HarnessCfg(t, &fakeX402{extra: map[string]http.Handler{"/v1/tools/invoke": ff}}, cfg)
-	if s := fmt.Sprintf("%v %+v %#v", cfg, cfg, cfg.Bundlers); strings.Contains(s, framesKey) {
+	if s := fmt.Sprintf("%v %+v %#v", cfg, cfg, cfg.Bundlers); strings.Contains(s, bundlerKey) {
 		t.Fatalf("the Frames key leaks when the config is formatted: %s", s)
 	}
 	out, err := h.call(testSubject, `{"resource":"people","body":{"title":"CTO"}}`, creditsFor(10000))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ff.auth != "Bearer "+framesKey {
+	if ff.auth != "Bearer "+bundlerKey {
 		t.Fatalf("auth header %q", ff.auth)
 	}
 	calls, _ := ff.last["calls"].([]any)
@@ -682,7 +682,7 @@ func TestFramesBundler(t *testing.T) {
 	if amount != 3000 || network != "frames" {
 		t.Fatalf("payment %d %s", amount, network)
 	}
-	// Frames refusing the budget: nothing charged.
+	// The bundler refusing the budget: nothing charged.
 	ff.status = http.StatusPaymentRequired
 	before := h.charged()
 	if _, err := h.call(testSubject, `{"resource":"people"}`, creditsFor(10000)); errCode(err) != "x402_payment_rejected" || h.charged() != before {
@@ -690,9 +690,9 @@ func TestFramesBundler(t *testing.T) {
 	}
 }
 
-func TestFramesWithoutKeyIsUnavailable(t *testing.T) {
-	ff := &fakeFrames{charged: "1"}
-	h := newX402HarnessCfg(t, &fakeX402{extra: map[string]http.Handler{"/v1/tools/invoke": ff}}, framesConfig(t, false))
+func TestBundlerWithoutKeyIsUnavailable(t *testing.T) {
+	ff := &fakeKeyBundler{charged: "1"}
+	h := newX402HarnessCfg(t, &fakeX402{extra: map[string]http.Handler{"/v1/tools/invoke": ff}}, bundlerConfig(t, false))
 	if _, err := h.call(testSubject, `{"resource":"people"}`, creditsFor(10000)); errCode(err) != "service_unavailable" {
 		t.Fatalf("no key: %v", err)
 	}

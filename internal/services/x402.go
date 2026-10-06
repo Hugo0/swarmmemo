@@ -166,10 +166,10 @@ type X402Resource struct {
 	// vet) or the catalogue's auto-vet rule did (autoVetted): only those are
 	// callable. Pinned resources are vetted by pinning.
 	Vetted, autoVetted bool
-	// dynamic marks a tool of the open Frames catalogue (frames_open.go),
-	// built for one call; framesSearch is the Frames search that found it.
-	dynamic      bool
-	framesSearch string
+	// dynamic marks a tool of the open bundler catalogue (keybundler_open.go),
+	// built for one call; bundlerSearch is the bundler search that found it.
+	dynamic       bool
+	bundlerSearch string
 	// Derived once by indexResource: the canonical URL, the host, its
 	// registrable domain and the lower-cased search text.
 	canon, host, domain, text string
@@ -189,8 +189,8 @@ type x402 struct {
 	// screener is screen's classifier, which screens candidates' summaries
 	// in the background; nil leaves every candidate's summary withheld.
 	screener TextScreener
-	// fr is the open Frames catalogue (frames_open.go); nil while off.
-	fr *framesState
+	// fr is the open bundler catalogue (keybundler_open.go); nil while off.
+	fr *bundlerState
 }
 
 func newX402(d Deps) Provider {
@@ -208,8 +208,8 @@ func newX402(d Deps) Provider {
 	for _, b := range x.cfg.Bundlers {
 		x.bundlers[b.Name()] = b
 	}
-	if b := x.cfg.framesBundler(); b != nil && b.open != nil {
-		x.fr = newFramesState(x.cfg, b)
+	if b := x.cfg.keyedBundler(); b != nil && b.open != nil {
+		x.fr = newBundlerState(x.cfg, b)
 	}
 	dial := d.Dial
 	if x.cfg.testDial != nil {
@@ -233,7 +233,7 @@ func newX402(d Deps) Provider {
 }
 
 func (*x402) Schema() string {
-	return framesSchema + `
+	return bundlerSchema + `
 CREATE TABLE IF NOT EXISTS x402_payments (
  id TEXT PRIMARY KEY, account TEXT NOT NULL, request_key TEXT NOT NULL, resource TEXT NOT NULL,
  day INTEGER NOT NULL, amount INTEGER NOT NULL CHECK(amount > 0), network TEXT NOT NULL, asset TEXT NOT NULL,
@@ -274,14 +274,14 @@ func (x *x402) Describe() Descriptor {
 		},
 		Example: json.RawMessage(`{"resource":"RESOURCE_ID","query":{"q":"agent message boards"}}`)}
 	if x.fr != nil && x.fr.cfg.Anonymous {
-		// Without a key: Frames tools only (CheckAnonymous).
+		// Without a key: bundler tools only (CheckAnonymous).
 		call.Anonymous, call.AnonymousLabel = true, "SwarmMemo tools"
 		call.AnonymousNote = "tool: resources only, at most " + formatUnits(x.fr.cfg.MaxPrice, 6) + " USD a call"
 		call.AnonymousRate = AnonRate{CallerPerMinute: 2, CallerPerDay: 20, AllPerMinute: 10, AllPerDay: 500}
 	}
 	return Descriptor{
 		ID:      "x402",
-		Summary: `Pay-per-call APIs without a wallet or an account: SwarmMemo pays the API and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. ` + X402VettingLine + ` ` + FramesNote,
+		Summary: `Pay-per-call APIs without a wallet or an account: SwarmMemo pays the API and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. ` + X402VettingLine + ` ` + BundlerNote,
 		Title:   "x402 relay", Topic: "Tools across the internet",
 		Line: X402Line,
 		Limits: []Limit{
@@ -289,7 +289,7 @@ func (x *x402) Describe() Descriptor {
 			{"x402_query_value_bytes", X402QueryValueBytes, "bytes", "One query value"},
 			{"x402_response_bytes", X402ResponseBytesMax, "bytes", "Response body returned"},
 			{"x402_resources_page", X402PageMax, "", "Resources in one resources read"},
-			{"tools_search_hits", framesHitsMax, "", "Hits in one tools_search read"},
+			{"tools_search_hits", bundlerHitsMax, "", "Hits in one tools_search read"},
 		},
 		Mode: Remote,
 		Methods: []Method{
@@ -344,8 +344,8 @@ func (x *x402) plan(c Call) (x402Plan, error) {
 	if err := StrictObject(c.Args, &a); err != nil {
 		return x402Plan{}, err
 	}
-	if tool, ok := framesResource(a.Resource); ok && x.fr != nil {
-		return x.framesPlan(c, tool, a)
+	if tool, ok := bundlerResource(a.Resource); ok && x.fr != nil {
+		return x.bundlerPlan(c, tool, a)
 	}
 	res, ok := x.lookup(a.Resource)
 	if !ok {
@@ -487,10 +487,10 @@ func (x *x402) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	if !x.stillCallable(ctx, p.res) {
 		return Result{}, refusal("x402_unvetted")
 	}
-	// A Frames tool: vetted, not denied, live and priced within the caps,
+	// A bundler tool: vetted, not denied, live and priced within the caps,
 	// asked now, before any money moves; its maximum becomes its quote.
 	if p.res.dynamic {
-		if err = x.framesGate(ctx, c, &p); err != nil {
+		if err = x.bundlerGate(ctx, c, &p); err != nil {
 			return Result{}, err
 		}
 	}
@@ -632,14 +632,14 @@ func (x *x402) reserve(ctx context.Context, c Call, p x402Plan, r reservation) e
 			openDaily, recipientDaily = cc.OpenDaily, cc.RecipientDaily
 		}
 	}
-	// An open Frames tool's row carries allowlist_version -1 and counts
-	// against the Frames sub-caps: all of them a day, and each tool a day.
-	frames, framesDaily, toolDaily := 0, int64(0), int64(0)
+	// An open bundler tool's row carries allowlist_version -1 and counts
+	// against the bundler sub-caps: all of them a day, and each tool a day.
+	openTool, bundlerDaily, toolDaily := 0, int64(0), int64(0)
 	if p.res.dynamic {
 		if x.fr == nil {
 			return refusal("service_unavailable")
 		}
-		version, frames, framesDaily, toolDaily = -1, 1, x.fr.cfg.OpenDaily, x.fr.cfg.ToolDaily
+		version, openTool, bundlerDaily, toolDaily = -1, 1, x.fr.cfg.OpenDaily, x.fr.cfg.ToolDaily
 	}
 	res, err := x.db.ExecContext(ctx, `INSERT INTO x402_payments(id,account,request_key,resource,day,amount,network,asset,pay_to,nonce,valid_before,state,allowlist_version,created_at)
 SELECT ?,?,?,?,?,?,?,?,?,?,?,'signed',?,?
@@ -653,7 +653,7 @@ WHERE (SELECT COALESCE(SUM(amount),0) FROM x402_payments WHERE day=? AND state<>
 		r.id, c.Subject.ID, c.RequestKey, p.res.ID, day, r.amount, r.network, r.asset, r.payTo, r.nonce, r.validBefore, version, c.Now,
 		day, r.amount, x.cfg.GlobalDaily, day, c.Subject.ID, r.amount, x.cfg.AgentDaily,
 		open, day, r.amount, openDaily, open, day, r.payTo, r.amount, recipientDaily,
-		frames, day, r.amount, framesDaily, frames, day, p.res.ID, r.amount, toolDaily,
+		openTool, day, r.amount, bundlerDaily, openTool, day, p.res.ID, r.amount, toolDaily,
 		c.Subject.ID, c.RequestKey)
 	if err != nil {
 		return refusal("upstream_failed") // fail closed: no row, no signature
@@ -849,8 +849,8 @@ func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 		price = c.Prices["x402.call"]
 	}
 	day := c.Now / 86400
-	var globalSpent, yours, openSpent, framesSpent int64
-	if err := q.QueryRowContext(ctx, "SELECT COALESCE(SUM(amount),0), COALESCE(SUM(CASE WHEN account=? THEN amount ELSE 0 END),0), COALESCE(SUM(CASE WHEN allowlist_version=0 THEN amount ELSE 0 END),0), COALESCE(SUM(CASE WHEN allowlist_version=-1 THEN amount ELSE 0 END),0) FROM x402_payments WHERE day=? AND state<>'failed'", c.Subject.ID, day).Scan(&globalSpent, &yours, &openSpent, &framesSpent); err != nil {
+	var globalSpent, yours, openSpent, bundlerSpent int64
+	if err := q.QueryRowContext(ctx, "SELECT COALESCE(SUM(amount),0), COALESCE(SUM(CASE WHEN account=? THEN amount ELSE 0 END),0), COALESCE(SUM(CASE WHEN allowlist_version=0 THEN amount ELSE 0 END),0), COALESCE(SUM(CASE WHEN allowlist_version=-1 THEN amount ELSE 0 END),0) FROM x402_payments WHERE day=? AND state<>'failed'", c.Subject.ID, day).Scan(&globalSpent, &yours, &openSpent, &bundlerSpent); err != nil {
 		return nil, err
 	}
 	page := x.search(s)
@@ -888,16 +888,16 @@ func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 		}
 		today["open_spent"], today["open_remaining"] = cu(openSpent), cu(max(0, cc.OpenDaily-openSpent))
 	}
-	frames := map[string]any{"enabled": false}
+	tools := map[string]any{"enabled": false}
 	if x.fr != nil {
-		frames = x.framesSummary(price)
+		tools = x.bundlerSummary(price)
 		caps["tools_daily"], caps["tools_per_tool_daily"], caps["tools_max_price"] = cu(x.fr.cfg.OpenDaily), cu(x.fr.cfg.ToolDaily), cu(x.fr.cfg.MaxPrice)
-		today["tools_spent"], today["tools_remaining"] = cu(framesSpent), cu(max(0, x.fr.cfg.OpenDaily-framesSpent))
+		today["tools_spent"], today["tools_remaining"] = cu(bundlerSpent), cu(max(0, x.fr.cfg.OpenDaily-bundlerSpent))
 	}
 	body := map[string]any{
 		"allowlist_version": x.cfg.AllowlistVersion, "network": x.cfg.Network, "asset": x.cfg.Asset.String(), "asset_name": x.cfg.AssetName,
 		"paused": x.paused(), "price": price, "resources": resources, "matched": page.matched, "categories": page.categories,
-		"bundlers": x.readyBundlers(), "catalogue": catalogue, "tools": frames, "today": today, "caps": caps,
+		"bundlers": x.readyBundlers(), "catalogue": catalogue, "tools": tools, "today": today, "caps": caps,
 		"vetting": X402VettingNote,
 		// Open resources' summaries are upstream text (each is marked too).
 		"text_is_untrusted": true,
@@ -989,7 +989,7 @@ type x402ConfigFile struct {
 	AllowlistFile string `json:"allowlist_file"`
 	// Catalogue enables the open catalogue (x402_catalogue.go).
 	Catalogue *x402CatalogueFile `json:"catalogue"`
-	// Bundlers configures the key-based bundlers (frames.go).
+	// Bundlers configures the key-based bundlers (keybundler.go).
 	Bundlers *x402BundlersFile `json:"bundlers"`
 }
 

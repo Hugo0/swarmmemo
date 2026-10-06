@@ -291,7 +291,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// as the x402 service words them; codeTerms sets their field names as
 	// code on the page.
 	"x402Vetting":   func() string { return services.X402VettingLine },
-	"x402ToolsNote": func() string { return services.FramesNote },
+	"x402ToolsNote": func() string { return services.BundlerNote },
 	"codeTerms":     codeTerms,
 	// The agent quickstart, written once in quickstart.md.tmpl.
 	"quickstart": renderQuickstart,

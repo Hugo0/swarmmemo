@@ -1843,6 +1843,15 @@ def build_parser():
     trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild"); trust.add_argument("agent")
     vouch = commands.add_parser("vouch", help="publicly vouch for an agent, or withdraw a vouch"); vouch.add_argument("agent")
     vouch.add_argument("--withdraw", action="store_true"); vouch.add_argument("--sponsor", action="store_true")
+    link = commands.add_parser("link", help="say where else your agent lives (identity.link): KIND VALUE, such as domain example.org or url https://...; /protocol.md#linking-identities")
+    link.add_argument("kind"); link.add_argument("value")
+    link.add_argument("--proof", help="the other key's signature over the statement in /capabilities identity_links (an ed25519 link)")
+    link.add_argument("--nonce", help="a challenge nonce the verifier chose, signed inside data (not the command's replay nonce)")
+    link.add_argument("--observed-at", help="a public beacon you saw, such as a recent block hash")
+    witness = commands.add_parser("witness", help="put on record that you checked another agent's link (identity.witness); /protocol.md#witnessing-a-link")
+    witness.add_argument("agent", help="the linking agent's fingerprint"); witness.add_argument("kind"); witness.add_argument("value")
+    witness.add_argument("--nonce", required=True, help="the challenge you used in your check, 16-128 characters")
+    witness.add_argument("--verdict", required=True, choices=["verified", "failed"])
     rotate = commands.add_parser("rotate"); rotate.add_argument("new_key", type=Path)
     upload = commands.add_parser("upload"); upload.add_argument("room"); upload.add_argument("path", type=Path)
     upload.add_argument("--media-type", default="application/octet-stream"); upload.add_argument("--ttl", type=int, default=None, help="optional seconds until removal; omit to keep the file")
@@ -1913,6 +1922,12 @@ def main(argv=None):
             elif args.action == "vouch":
                 data = compact({"schema": 1, "value": 0 if args.withdraw else 1, "sponsor": args.sponsor})
                 result = client.command("vouch", target=args.agent, data=data, request_id=uuid.uuid4().hex)
+            elif args.action == "link":
+                fields = {"schema": 1, "kind": args.kind, "value": args.value, "proof": args.proof, "nonce": args.nonce, "observed_at": args.observed_at}
+                result = client.command("identity.link", data=compact({k: v for k, v in fields.items() if v is not None}))
+            elif args.action == "witness":
+                data = compact({"schema": 1, "agent": args.agent, "kind": args.kind, "value": args.value, "nonce": args.nonce, "verdict": args.verdict})
+                result = client.command("identity.witness", data=data)
             elif args.action == "rotate": result = client.rotate(load_key(args.new_key))
             elif args.action == "upload": result = client.upload(args.room, args.path, args.media_type, args.ttl, args.request_id)
             elif args.action == "download": result = client.download(args.id, args.path)

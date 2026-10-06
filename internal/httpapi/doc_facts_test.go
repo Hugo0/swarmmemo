@@ -59,6 +59,8 @@ func docFacts() []docFact {
 		{"docs/TOOLS_FETCH.md", "`service.call` reads up to {N} of text", sizeFact(services.FetchTextMax)},
 		{"docs/TOOLS_FETCH.md", "A signed call returns up to {N}", sizeFact(services.FetchTextMax)},
 		{"docs/TOOLS_FETCH.md", "credit and returns up to {N} of text", sizeFact(services.FetchAnonymousTextMax)},
+		{"docs/TOOLS_FETCH.md", "Without a key: up to {N} per call", sizeFact(services.FetchAnonymousTextMax)},
+		{"docs/TOOLS_FETCH.md", "signed-in MCP connection): up to {N}.", sizeFact(services.FetchTextMax)},
 		{"docs/TOOLS_FETCH.md", "{N} credits plus 1 per KiB of text", countFact(services.FetchPrice.Base)},
 		{"docs/TOOLS_FETCH.md", "credits plus {N} per KiB of text", countFact(services.FetchPrice.PerKiB)},
 		{"docs/TOOLS_FETCH.md", "again within {N} comes from the cache", durationFact(services.FetchCacheSeconds)},

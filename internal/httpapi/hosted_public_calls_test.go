@@ -83,7 +83,7 @@ func TestPublicFetchSignsWithHostedIdentity(t *testing.T) {
 	me := newIdentity(t, s, "")
 	url, agent := "/mcp/t/"+me["token"].(string), me["agent"].(string)
 
-	if _, failure := callTool(t, s, "/mcp", "", "fetch_page", map[string]any{"url": "http://site.example/page", "max_bytes": 32768}); !strings.Contains(failure, "32768/8192") {
+	if _, failure := callTool(t, s, "/mcp", "", "fetch_page", map[string]any{"url": "http://site.example/page", "max_bytes": 32768}); !strings.Contains(failure, "without a key: up to 8 KiB per call") || !strings.Contains(failure, "signed-in MCP connection): up to 96 KiB") {
 		t.Fatalf("32 KiB without an identity: %q, want the anonymous cap's refusal", failure)
 	}
 	if used := creditsUsed(t, s, ""); used != 0 {

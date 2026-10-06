@@ -43,12 +43,12 @@ type hostedShape struct {
 var hostedShapes = map[string]hostedShape{
 	"x402.call": {
 		name: "x402_tools_call",
-		line: "Call a SwarmMemo tool by its " + services.FramesPrefix + " id (x402_tools_search finds one, x402_tools_get reads its live price and input schema), with the tool's arguments as body. Only vetted tools are callable; an unvetted one is refused and nothing is charged. data.call is the receipt: cost is what was charged, and data.result.payment what SwarmMemo paid.",
+		line: "Call a SwarmMemo tool by its " + services.BundlerPrefix + " id (x402_tools_search finds one, x402_tools_get reads its live price and input schema), with the tool's arguments as body. Only vetted tools are callable; an unvetted one is refused and nothing is charged. data.call is the receipt: cost is what was charged, and data.result.payment what SwarmMemo paid.",
 		args: []services.Arg{
-			{Name: "resource", Type: "string", Required: true, Note: services.FramesPrefix + "TOOL_ID from x402_tools_search"},
+			{Name: "resource", Type: "string", Required: true, Note: services.BundlerPrefix + "TOOL_ID from x402_tools_search"},
 			{Name: "body", Type: "object", Note: "the tool's arguments, as its input schema states"},
 		},
-		prefix: services.FramesPrefix, maxCostRequired: true,
+		prefix: services.BundlerPrefix, maxCostRequired: true,
 	},
 }
 

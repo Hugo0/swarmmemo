@@ -252,7 +252,7 @@ func (s *Store) readServices(ctx context.Context, tx *sql.Tx, c Command, a actor
 	}
 	res := Result{Data: out.Data}
 	if after := out.After; after != nil {
-		// A read that needs the network (x402's Frames search) runs once
+		// A read that needs the network (x402's bundler search) runs once
 		// this transaction has committed, holding no connection.
 		res.afterCommit = func() (Result, error) {
 			data, err := after()

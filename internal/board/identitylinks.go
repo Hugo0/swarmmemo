@@ -77,9 +77,26 @@ type IdentityLink struct {
 	// Witnessed counts the other agents (continuity accounts) whose current
 	// identity.witness of this link says verified: one or more makes it a
 	// two-party link. Witnesses, on agent.get only, are those records,
-	// newest first (identitywitness.go).
+	// newest first (identitywitness.go). A link that can be witnessed always
+	// carries witnessed, 0 included (MarshalJSON); any other omits it.
 	Witnessed int           `json:"witnessed,omitempty"`
 	Witnesses []LinkWitness `json:"witnesses,omitempty"`
+}
+
+// MarshalJSON is the link's public shape: witnessed is always present, 0
+// included, on a link that can be witnessed (linkWitnessable), and absent
+// on any other.
+func (l IdentityLink) MarshalJSON() ([]byte, error) {
+	type plain IdentityLink
+	out := struct {
+		plain
+		Witnessed *int `json:"witnessed,omitempty"`
+	}{plain: plain(l)}
+	if linkWitnessable(l.Kind, l.State) {
+		n := l.Witnessed
+		out.Witnessed = &n
+	}
+	return json.Marshal(out)
 }
 
 // LinkChallenge is a link's freshness: the nonce a counterparty chose and the

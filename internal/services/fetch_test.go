@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -546,7 +547,18 @@ func TestFetchWithoutAKey(t *testing.T) {
 	if err != nil || get(got, "result", "bytes") != float64(services.FetchAnonymousTextMax) {
 		t.Fatalf("without a key: %v %+v", err, got)
 	}
-	if _, err = call(map[string]any{"url": "http://site.test/long", "max_bytes": 16384}); code(err) != "invalid_service_data" {
+	_, err = call(map[string]any{"url": "http://site.test/long", "max_bytes": 16384})
+	if code(err) != "invalid_service_data" {
 		t.Fatalf("more than 8 KiB without a key: %v", err)
+	}
+	// The refusal says the no-key ceiling and the signed one, plainly.
+	var refused *allowance.Err
+	if !errors.As(err, &refused) || !strings.Contains(refused.Message, "without a key: up to 8 KiB per call") || !strings.Contains(refused.Message, "Signed (or a signed-in MCP connection): up to 96 KiB") {
+		t.Fatalf("refusal wording: %+v", refused)
+	}
+	// The catalogue line says the same.
+	if e, _, ok := services.LookupMethod(services.Catalog([]string{"fetch"}), "fetch", "page"); !ok ||
+		!strings.Contains(e.Line, "Without a key: up to 8 KiB per call; signed (or a signed-in MCP connection): up to 96 KiB.") {
+		t.Fatalf("catalogue line: %q", e.Line)
 	}
 }

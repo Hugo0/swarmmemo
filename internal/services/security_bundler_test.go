@@ -235,23 +235,23 @@ func TestSecBundlerVettingFlow(t *testing.T) {
 	}
 }
 
-// framesCapsConfig is framesConfig with caps of the test's choosing.
-func framesCapsConfig(t *testing.T, caps string) *X402Config {
+// bundlerCapsConfig is bundlerConfig with caps of the test's choosing.
+func bundlerCapsConfig(t *testing.T, caps string) *X402Config {
 	t.Helper()
-	cfg := framesConfig(t, true)
+	cfg := bundlerConfig(t, true)
 	c2 := testX402Config(t, caps, `[]`)
 	cfg.GlobalDaily, cfg.AgentDaily, cfg.PerCall = c2.GlobalDaily, c2.AgentDaily, c2.PerCall
 	return cfg
 }
 
-// FINDING M1, fixed: a Frames call that Frames refuses (4xx, never charged)
+// FINDING M1, fixed: a bundler call that the bundler refuses (4xx, never charged)
 // or reports charged_credits 0 is recorded "failed" and counts against no
 // cap, so sybils sending failing calls burn nothing; a server error, which
 // may have been billed, still counts.
-func TestSecBundlerFramesFailuresBurnGlobalCapForFree(t *testing.T) {
-	ff := &fakeFrames{charged: "3", status: http.StatusBadRequest}
+func TestSecBundlerFailuresBurnGlobalCapForFree(t *testing.T) {
+	ff := &fakeKeyBundler{charged: "3", status: http.StatusBadRequest}
 	h := newX402HarnessCfg(t, &fakeX402{extra: map[string]http.Handler{"/v1/tools/invoke": ff}},
-		framesCapsConfig(t, `{"global_daily":"0.02","agent_daily":"0.01","per_call":"0.01"}`))
+		bundlerCapsConfig(t, `{"global_daily":"0.02","agent_daily":"0.01","per_call":"0.01"}`))
 	for i := range 4 {
 		sybil := allowance.Subject{ID: fmt.Sprint("acct-sybil-", i), Signed: true}
 		if _, err := h.call(sybil, `{"resource":"people","body":{"bad":true}}`, creditsFor(10000)); errCode(err) != "upstream_failed" {
@@ -275,7 +275,7 @@ func TestSecBundlerFramesFailuresBurnGlobalCapForFree(t *testing.T) {
 	if spent := h.resources(`{}`)["today"].(map[string]any)["global_spent"]; spent != "0" {
 		t.Fatalf("failed rows counted in today's spend: %v", spent)
 	}
-	ff.charged = "3" // Frames healthy again
+	ff.charged = "3" // the bundler healthy again
 	honest := allowance.Subject{ID: "acct-honest", Signed: true}
 	if _, err := h.call(honest, `{"resource":"people","body":{"title":"CTO"}}`, creditsFor(10000)); err != nil {
 		t.Fatalf("honest call after the failures: %v", err)
@@ -298,12 +298,12 @@ func TestSecBundlerFramesFailuresBurnGlobalCapForFree(t *testing.T) {
 	}
 }
 
-// FINDING L1, fixed: Frames' charged_credits is clamped before any integer
+// FINDING L1, fixed: the bundler's charged_credits is clamped before any integer
 // conversion: a huge, negative or non-finite value charges the maximum.
-func TestSecBundlerFramesChargedOverflowIsFree(t *testing.T) {
+func TestSecBundlerChargedOverflowIsFree(t *testing.T) {
 	for _, charged := range []string{"1e300", "-1", "10.0000001"} {
-		ff := &fakeFrames{charged: charged}
-		h := newX402HarnessCfg(t, &fakeX402{extra: map[string]http.Handler{"/v1/tools/invoke": ff}}, framesConfig(t, true))
+		ff := &fakeKeyBundler{charged: charged}
+		h := newX402HarnessCfg(t, &fakeX402{extra: map[string]http.Handler{"/v1/tools/invoke": ff}}, bundlerConfig(t, true))
 		out, err := h.call(testSubject, `{"resource":"people","body":{"title":"CTO"}}`, creditsFor(10000))
 		if err != nil {
 			t.Fatal(err)
@@ -319,7 +319,7 @@ func TestSecBundlerFramesChargedOverflowIsFree(t *testing.T) {
 		credits float64
 		want    int64
 	}{{math.NaN(), 10000}, {math.Inf(1), 10000}, {math.Inf(-1), 10000}, {1e19, 10000}, {-0.5, 10000}, {10, 10000}, {3, 3000}, {0.0004, 0}, {0, 0}} {
-		if got := framesCharged(c.credits, 10000); got != c.want {
+		if got := bundlerCharged(c.credits, 10000); got != c.want {
 			t.Errorf("framesCharged(%v) = %d, want %d", c.credits, got, c.want)
 		}
 	}
@@ -648,10 +648,10 @@ func TestSecBundlerResourceDaysPruned(t *testing.T) {
 	}
 }
 
-// FINDING L6, fixed: a Frames key file that group or others can read
-// refuses the config, like the wallet key; a missing one leaves Frames not
+// FINDING L6, fixed: a bundler key file that group or others can read
+// refuses the config, like the wallet key; a missing one leaves the bundler not
 // ready.
-func TestSecBundlerFramesKeyMode(t *testing.T) {
+func TestSecBundlerKeyMode(t *testing.T) {
 	dir := t.TempDir()
 	key := filepath.Join(dir, "frames.key")
 	parse := func() (*X402Config, error) {
@@ -667,10 +667,10 @@ func TestSecBundlerFramesKeyMode(t *testing.T) {
 	if cfg, err := parse(); err != nil || cfg.Bundlers[0].Ready() {
 		t.Fatalf("missing key: %v", err)
 	}
-	if err := os.WriteFile(key, []byte(framesKey), 0o640); err != nil {
+	if err := os.WriteFile(key, []byte(bundlerKey), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parse(); err == nil || strings.Contains(err.Error(), framesKey) {
+	if _, err := parse(); err == nil || strings.Contains(err.Error(), bundlerKey) {
 		t.Fatalf("a group-readable key was accepted (or printed): %v", err)
 	}
 	if err := os.Chmod(key, 0o600); err != nil {
