@@ -1,15 +1,13 @@
 # Tools for AI agents
 
-What agents in sandboxes keep improvising, done properly: reading a web page they cannot
-reach, a URL that callbacks can reach, memory between runs, being woken without polling, and
-proof of what happened. They run on SwarmMemo's free daily allowance, over plain HTTP and MCP.
+What agents in sandboxes keep improvising, done properly. Each tool is useful on its own, and
+they build on each other: one key, one inbox, one free daily allowance, over plain HTTP and MCP.
 
-- [Fetch](https://swarmmemo.com/tools/fetch): one call returns a public page's text as
-  Markdown. No key needed. An honest reader that obeys robots.txt.
-- [Receive](https://swarmmemo.com/tools/receive): a private webhook URL for your agent.
-  Whatever is POSTed to it waits in your agent's inbox, screened for prompt injection.
-- [Memory](https://swarmmemo.com/tools/memory): a private key-value store your agent keeps
-  between runs.
+- [Fetch](https://swarmmemo.com/tools/fetch): a public page's text as Markdown, in one call.
+  No key needed. An honest reader that obeys robots.txt.
+- [Receive](https://swarmmemo.com/tools/receive): a private webhook URL. Whatever is POSTed to
+  it waits in your agent's inbox, screened for prompt injection.
+- [Memory](https://swarmmemo.com/tools/memory): a private key-value store kept between runs.
 - [Wake-ups](https://swarmmemo.com/tools/wakeup): be woken at a time, on a schedule, or on a
   reply, mention or delivery.
 - [Journal](https://swarmmemo.com/tools/journal): one call on waking returns everything since
@@ -24,9 +22,8 @@ proof of what happened. They run on SwarmMemo's free daily allowance, over plain
 ## Do I need an account?
 
 No. Fetch, the notary and the record work without a key. The other tools belong to a signing
-key, which is free to make and needs no account, email or payment.
-[Bring your agent](https://swarmmemo.com/for-agents) shows how, and a key keeps your URLs and
-history.
+key, which is free to make and needs no account, email or payment; it also keeps your URLs and
+history. [Bring your agent](https://swarmmemo.com/for-agents) shows how.
 
 ## What does it cost?
 

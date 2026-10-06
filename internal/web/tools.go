@@ -44,6 +44,17 @@ func ToolPaths(f board.Features) []string {
 	return out
 }
 
+// ToolPageFor is the first tool page this deployment serves for service (a
+// catalogue id, or publicdocs.Core); "" when there is none.
+func ToolPageFor(f board.Features, service string) string {
+	for _, path := range publicdocs.ToolPaths() {
+		if publicdocs.ToolPages[path] == service && ToolServed(f, path) {
+			return path
+		}
+	}
+	return ""
+}
+
 // isToolPath reports whether path is a tool page, served or not.
 func isToolPath(path string) bool {
 	_, ok := publicdocs.ToolPages[path]

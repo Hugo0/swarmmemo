@@ -556,8 +556,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS.md",
-      "sha256": "5fa7a82d300447c17b9d47018d8b03809e75ba706c787dc2f56160af81ee696f",
-      "size": 1814
+      "sha256": "07cd190f985631b2e75251c0ecb3463352c5281ad27e06f810b4f235c904fad0",
+      "size": 1693
     },
     {
       "mode": "0644",
@@ -1936,8 +1936,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "6b2764a64a4994f0e87bdb2c70ed687def757b747cd71d66624f9dd5ac30de93",
-      "size": 93394
+      "sha256": "c6ad46e0c01a94b417d20821e5537da67f271edd2dfb41e1864580124bd31ada",
+      "size": 91106
     },
     {
       "mode": "0644",
@@ -4228,8 +4228,8 @@
     {
       "mode": "0644",
       "path": "internal/web/catalog.go",
-      "sha256": "94f02c152d7450ae631364b96ff4d552418794c29499945f2b100cddcbfa4470",
-      "size": 16347
+      "sha256": "e7ad51e8d53706b5770e7c8b3ee595d176e3196ffefe407a2001a64fca3fbbee",
+      "size": 18578
     },
     {
       "mode": "0644",
@@ -4648,14 +4648,14 @@
     {
       "mode": "0644",
       "path": "internal/web/quickstart.go",
-      "sha256": "6481be68b47e26f856ffa74e0bc1243b02a0f27293a8389d6a4131d2214938a0",
-      "size": 4195
+      "sha256": "5dc08f97bfefb7526e4ebddae1a794c09935dcc620a42a77d0057a84be1dd9fe",
+      "size": 4161
     },
     {
       "mode": "0644",
       "path": "internal/web/quickstart.md.tmpl",
-      "sha256": "97c2ec914e3b4c4090caddbbad9b3397d0ee298beaf3f31ee43eff2149b37108",
-      "size": 5720
+      "sha256": "6dd24a4729d1ba095b9d6f1509362cc0b0b923809b22ac51113ed39bd96ee250",
+      "size": 5445
     },
     {
       "mode": "0644",
@@ -4810,8 +4810,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/for-agents.html",
-      "sha256": "77a63a77df9c0fe491245deca73169e370e48d879e6e9b1f08d281d401f85db3",
-      "size": 16835
+      "sha256": "5090dfabf2352ae3260a3ebe2bceb72a4e366e5f96984e4fa34912732491c98e",
+      "size": 16556
     },
     {
       "mode": "0644",
@@ -4846,8 +4846,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/page.html",
-      "sha256": "048788237ebc7488d9ceef6b2acc016ead6ac9bbe5c411d24a3f18b3f7687c96",
-      "size": 48571
+      "sha256": "9d96a23dd2bd04ccffefa6cf5546780b4fcfd1e1c9ad9b6b7a3ee0517e08e0a4",
+      "size": 48579
     },
     {
       "mode": "0644",
@@ -4900,8 +4900,8 @@
     {
       "mode": "0644",
       "path": "internal/web/tools.go",
-      "sha256": "79ff7628c13a480ef5a326ceb59f751e7f2f08b396ce90f2bddb240cef2f84e5",
-      "size": 1448
+      "sha256": "0edd5aa9a9e7cdec555873f2be1b408c7a21b2237c988582faf7e261be9708ce",
+      "size": 1796
     },
     {
       "mode": "0644",
