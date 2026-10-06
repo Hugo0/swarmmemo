@@ -93,6 +93,15 @@ func TestIdentityLinksEndToEnd(t *testing.T) {
 	if w := makeRequest(s, "POST", "/v1/command", signedLinkCommand(ours, "identity.link", `{"schema":1,"kind":"domain","value":"example.net"}`, 9), "application/json"); w.Code != 400 || !strings.Contains(w.Body.String(), "https_required") {
 		t.Fatalf("plaintext link: %d %s", w.Code, w.Body.String())
 	}
+	// Another agent witnesses the proven link over the same endpoint.
+	seed[0] = 9
+	witness := ed25519.NewKeyFromSeed(seed)
+	if w := tlsCommand(s, signedLinkCommand(witness, "agent.register", "", 11)); w.Code != 200 {
+		t.Fatalf("register witness: %d %s", w.Code, w.Body.String())
+	}
+	if w := tlsCommand(s, signedLinkCommand(witness, "identity.witness", `{"schema":1,"agent":"`+fingerprint+`","kind":"ed25519","value":"`+theirKey+`","nonce":"witness-nonce-0123456789","verdict":"verified"}`, 12)); w.Code != 200 || !strings.Contains(w.Body.String(), `"verdict":"verified"`) {
+		t.Fatalf("identity.witness: %d %s", w.Code, w.Body.String())
+	}
 	w := makeRequest(s, "GET", "/api/agent/"+fingerprint, "", "")
 	var raw struct {
 		Agent struct {
@@ -116,6 +125,12 @@ func TestIdentityLinksEndToEnd(t *testing.T) {
 			t.Fatalf("link drifted from its published schema: %v\n%s", err, item)
 		}
 		states[link["kind"].(string)] = link["state"].(string)
+		if link["kind"] == "ed25519" {
+			witnesses, _ := link["witnesses"].([]any)
+			if link["witnessed"] != float64(1) || len(witnesses) != 1 || witnesses[0].(map[string]any)["verdict"] != "verified" {
+				t.Fatalf("witnessed link: %s", item)
+			}
+		}
 	}
 	if states["domain"] != "claimed" || states["ed25519"] != "proof_attached" || states["url"] != "claimed" {
 		t.Fatalf("states: %v", states)
@@ -153,7 +168,7 @@ func TestIdentityLinkDiscovery(t *testing.T) {
 	for _, op := range capabilities.Operations {
 		listed[op] = true
 	}
-	for _, op := range []string{"identity.link", "identity.unlink"} {
+	for _, op := range []string{"identity.link", "identity.unlink", "identity.witness"} {
 		if !listed[op] || !knownOperation(op) {
 			t.Fatalf("%s is not both advertised and reachable", op)
 		}
@@ -169,8 +184,11 @@ func TestIdentityLinkDiscovery(t *testing.T) {
 	if !strings.Contains(makeRequest(New(&fakeService{}, nil, Config{IdentityChecks: true}), "GET", "/capabilities", "", "").Body.String(), `"checks_enabled":true`) {
 		t.Fatal("started rechecks are not reported")
 	}
-	if !strings.Contains(makeRequest(s, "GET", "/llms.txt", "", "").Body.String(), "identity.link") {
-		t.Fatal("llms.txt does not mention identity links")
+	if llms := makeRequest(s, "GET", "/llms.txt", "", "").Body.String(); !strings.Contains(llms, "identity.link") || !strings.Contains(llms, "identity.witness") {
+		t.Fatal("llms.txt does not mention identity links and witnesses")
+	}
+	if witness, _ := capabilities.Links["witness"].(map[string]any); witness == nil || witness["per_key_per_day"] != float64(board.IdentityWitnessesPerDay) || witness["shown_per_link"] != float64(board.IdentityLinkWitnessesShown) {
+		t.Fatalf("identity_links.witness: %v", capabilities.Links["witness"])
 	}
 	for _, path := range []string{"/api/identity/link", "/api/links", "/w/identity.link"} {
 		if w := makeRequest(s, "GET", path+"?operation=identity.link", "", ""); w.Code < 400 {

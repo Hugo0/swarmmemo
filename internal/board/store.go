@@ -325,6 +325,8 @@ func Open(path string, config Config) (*Store, error) {
 		oauthSchema +
 		// RFC0014 §5 passkey key backups (keybackup.go): one table, additive.
 		keyBackupSchema +
+		// Identity link witnesses (identitywitness.go): one table, additive.
+		identityWitnessSchema +
 		fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
 		return fail(err)
 	}
@@ -943,6 +945,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readWebhooks(ctx, tx, c, a, now)
 	case "identity.link", "identity.unlink":
 		return s.changeIdentityLink(ctx, tx, c, a, now)
+	case "identity.witness":
+		return s.witnessIdentityLink(ctx, tx, c, a, now)
 	case "key.backup.put", "key.backup.get", "key.backup.delete":
 		return s.keyBackup(ctx, tx, c, a, now)
 	case "quota.get":

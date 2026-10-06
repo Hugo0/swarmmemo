@@ -94,6 +94,8 @@ func PublicLimits() []Limit {
 		{"profile_ttl_default_seconds", PeerDefaultTTL, "seconds", "How long a profile's availability counts as confirmed, by default"},
 		{"profile_ttl_maximum_seconds", PeerMaxTTL, "seconds", "Longest profile ttl"},
 		{"identity_links", IdentityLinkMaxPerKey, "", "Identity links per key"},
+		{"identity_witnesses_per_day", IdentityWitnessesPerDay, "", "identity.witness per key per UTC day"},
+		{"identity_link_witnesses_shown", IdentityLinkWitnessesShown, "", "Current witnesses shown per link, newest first"},
 		{"key_backup_bytes", KeyBackupBytes, "bytes", "key.backup.put data"},
 		{"key_backup_puts_per_day", KeyBackupPutsPerDay, "", "Key backup replacements per agent per rolling day"},
 		{"key_backup_reads_per_hour", KeyBackupReadsPerHour, "", "Restore reads of one account's key backup per hour"},

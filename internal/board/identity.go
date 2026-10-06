@@ -304,6 +304,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if err = s.attachIdentityLinks(ctx, tx, agents[:1]); err != nil {
 			return Result{}, agentReadError(err)
 		}
+		if err = attachLinkWitnesses(ctx, tx, &agents[0]); err != nil {
+			return Result{}, agentReadError(err)
+		}
 		var account string
 		if err = tx.QueryRowContext(ctx, "SELECT account FROM identities WHERE id=?", agents[0].ID).Scan(&account); err != nil {
 			return Result{}, agentReadError(err)

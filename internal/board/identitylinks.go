@@ -74,6 +74,12 @@ type IdentityLink struct {
 	// linking key's own signed command, which any reader can verify against
 	// the agent's public key.
 	Challenge *LinkChallenge `json:"challenge,omitempty"`
+	// Witnessed counts the other agents (continuity accounts) whose current
+	// identity.witness of this link says verified: one or more makes it a
+	// two-party link. Witnesses, on agent.get only, are those records,
+	// newest first (identitywitness.go).
+	Witnessed int           `json:"witnessed,omitempty"`
+	Witnesses []LinkWitness `json:"witnesses,omitempty"`
 }
 
 // LinkChallenge is a link's freshness: the nonce a counterparty chose and the
@@ -352,6 +358,11 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		if removed == 0 {
 			return Result{}, linkError("link_not_found")
 		}
+		// The link's witnesses stay on record, no longer current: a later link
+		// of the same value starts unwitnessed (identitywitness.go).
+		if _, err = tx.ExecContext(ctx, "UPDATE link_witnesses SET superseded_at=? WHERE agent=? AND kind=? AND value=? AND superseded_at=0", now, a.id, d.Kind, value); err != nil {
+			return Result{}, err
+		}
 		if err = audit(ctx, tx, c.Operation, a.id, d.Kind, "identity link removed: "+value, now); err != nil {
 			return Result{}, err
 		}
@@ -530,7 +541,23 @@ func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agents ...str
 		}
 		links[agent] = append(links[agent], l)
 	}
-	return links, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	counts, err := witnessedCounts(ctx, tx, agents)
+	if err != nil {
+		return nil, err
+	}
+	for agent := range links {
+		for i := range links[agent] {
+			l := &links[agent][i]
+			l.Witnessed = counts[[3]string{agent, l.Kind, l.Value}]
+		}
+	}
+	return links, nil
 }
 
 // attachIdentityLinks sets each agent's links and, while a domain link is

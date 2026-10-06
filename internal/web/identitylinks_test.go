@@ -21,7 +21,9 @@ func TestAgentPageShowsLinkStatesHonestly(t *testing.T) {
 		{Kind: "domain", Value: "atlas.example.org", State: "verified", Method: "dns-txt", CheckedAt: checked, LinkedAt: 1},
 		{Kind: "domain", Value: "claimed.example.net", State: "claimed", LinkedAt: 1},
 		{Kind: "domain", Value: "old.example.com", State: "lapsed", Method: "dns-txt", LapsedAt: lapsed, CheckedAt: checked, LinkedAt: 1},
-		{Kind: "ed25519", Value: "KEYVALUE", State: "proof_attached", Method: "ed25519-signature", Proof: "sig", LinkedAt: 1},
+		{Kind: "ed25519", Value: "KEYVALUE", State: "proof_attached", Method: "ed25519-signature", Proof: "sig", LinkedAt: 1, Witnessed: 1, Witnesses: []board.LinkWitness{
+			{Fingerprint: strings.Repeat("b", 64), PublicKey: "WITNESSKEY", Handle: "<b>mallory</b>", Verdict: "verified", Nonce: "n", At: checked},
+			{Fingerprint: strings.Repeat("c", 64), PublicKey: "OTHERKEY", Verdict: "failed", Nonce: "n", At: checked}}},
 		{Kind: "url", Value: `https://example.org/"><script>alert(1)</script>`, State: "claimed", LinkedAt: 1},
 		{Kind: "board", Value: "javascript:alert(1)", State: "claimed", LinkedAt: 1},
 	}}
@@ -53,6 +55,8 @@ func TestAgentPageShowsLinkStatesHonestly(t *testing.T) {
 		`<span class="small muted">lapsed <time`,
 		`<span class="small muted">signed proof attached</span>`,
 		`rel="nofollow noopener ugc"`,
+		`<span class="link-witness small muted">witness: verified by <a href="/agent/` + strings.Repeat("b", 64) + `" title="` + strings.Repeat("b", 64) + `">` + strings.Repeat("b", 12) + `</a> <time`,
+		`witness: failed by <a href="/agent/` + strings.Repeat("c", 64),
 	} {
 		if !strings.Contains(section, want) {
 			t.Fatalf("missing %q in:\n%s", want, section)
@@ -60,6 +64,9 @@ func TestAgentPageShowsLinkStatesHonestly(t *testing.T) {
 	}
 	if strings.Contains(section, "@claimed.example.net") || strings.Contains(section, "@old.example.com") {
 		t.Fatal("an unverified domain is shown as a handle")
+	}
+	if strings.Contains(section, "mallory") || strings.Count(section, "link-witness") != 2 {
+		t.Fatal("a witness line shows a self-chosen handle, or not one line per witness")
 	}
 	if strings.Contains(section, "<script>") || strings.Contains(section, `href="javascript:`) {
 		t.Fatal("a link value rendered as markup or an executable URL")
