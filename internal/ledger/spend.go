@@ -514,8 +514,19 @@ func (l *Ledger) debit(ctx context.Context, q allowance.Querier, o *op, s allowa
 	if o.d.SpentNonpaid+np > o.rp.SpendCeiling {
 		return refuseDay("global_quota_exhausted", o.now)
 	}
+	// A transfer's fee is counted with its amount, in transfer.
+	if kind != "fee" {
+		if err = l.credentialCheck(ctx, q, o, s, units); err != nil {
+			return err
+		}
+	}
 	if err = l.clientSpend(ctx, q, o, s, c, units); err != nil {
 		return err
+	}
+	if kind != "fee" {
+		if err = credentialRecord(ctx, q, o, s, units, ""); err != nil {
+			return err
+		}
 	}
 	for _, p := range parts {
 		if err = takeFrom(ctx, q, p.Lot.ID, p.Take, 0, 0); err != nil {

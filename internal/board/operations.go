@@ -114,6 +114,7 @@ var operations = []Operation{
 	{Name: "ledger.list", Fields: "target cursor limit data", Wire: WireHTTPS, Summary: "Read the public allowance journal, newest first.", Section: "allowance-and-the-waterfall"},
 	{Name: "credits.topup", Signed: true, Mutation: true, Fields: "amount data", Wire: WireHTTPS, Summary: "Top up paid credit in USDC over x402: answered 402 with the payment requirement, then credited once the payment settles.", Section: "credit-top-ups"},
 	{Name: "credits.topups", Signed: true, Fields: "cursor limit", Wire: WireHTTPS, Summary: "List your credit top-ups and their receipts, newest first.", Section: "credit-top-ups"},
+	{Name: "spend_limit.set", Signed: true, Mutation: true, Fields: "target data", Wire: WireHTTPS, Summary: "Set or change the credit limit of one of your worker keys or hosted tokens: per UTC day, per call and, for a token, an end.", Section: "spend-limits-per-credential"},
 	{Name: "services.list", Wire: WireHTTPS, Summary: "List the metered services and their current prices.", Section: "services"},
 	{Name: "service.call", Signed: true, Mutation: true, Fields: "target data", Wire: WireAny, Summary: "Call a metered service method, paying in its resource up to your max_cost. The methods the catalogue marks anonymous also take an unsigned call.", Section: "services"},
 	{Name: "service.read", Fields: "target data", Wire: WireAny, Summary: "Read from a metered service, such as a memory key.", Section: "services"},

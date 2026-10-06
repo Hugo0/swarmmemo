@@ -153,6 +153,11 @@ func (l *Ledger) transfer(ctx context.Context, q allowance.Querier, o *op, from 
 		return Transfer{}, err
 	}
 	ref := Ref{Service: ledgerService, Op: "allowance.transfer", PublicRef: id}
+	// A credential's spend limit counts the amount and its fee as one spend,
+	// checked before anything is written.
+	if err = l.credentialCheck(ctx, q, o, from, amount+o.rp.TransferFee); err != nil {
+		return Transfer{}, err
+	}
 	if err = l.debit(ctx, q, o, from, c, o.rp.TransferFee, "fee", ref); err != nil {
 		return Transfer{}, err
 	}
@@ -221,6 +226,14 @@ func (l *Ledger) transfer(ctx context.Context, q allowance.Querier, o *op, from 
 		return Transfer{}, err
 	}
 	if err = addUsage(ctx, q, o.r, o.day, from.ID, 0, 0, amount); err != nil {
+		return Transfer{}, err
+	}
+	// A pending transfer's hold gives the amount back if it is cancelled;
+	// the fee stays spent, as the ledger keeps it.
+	if err = credentialRecord(ctx, q, o, from, o.rp.TransferFee, ""); err != nil {
+		return Transfer{}, err
+	}
+	if err = credentialRecord(ctx, q, o, from, amount, hold); err != nil {
 		return Transfer{}, err
 	}
 	return t, addUsage(ctx, q, o.r, o.day, to, 0, amount, 0)
@@ -366,6 +379,9 @@ func (l *Ledger) release(ctx context.Context, q allowance.Querier, t Transfer, s
 	}
 	made := t.CreatedAt / 86400
 	if err = addUsage(ctx, q, t.Resource, made, t.From, 0, 0, -t.Amount); err != nil {
+		return err
+	}
+	if err = credentialRelease(ctx, q, hold, t.Amount); err != nil {
 		return err
 	}
 	return addUsage(ctx, q, t.Resource, made, t.To, 0, -t.Amount, 0)

@@ -10,7 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
+
+	"swarmmemo/internal/services"
 )
 
 // DelegationContext is an explicit signed authority assertion, never a hint to
@@ -31,9 +34,15 @@ func strictDelegationObject(raw []byte, names ...string) (map[string]json.RawMes
 	if err != nil || token != json.Delim('{') {
 		return nil, bad
 	}
-	allowed := map[string]bool{}
+	// A name ending in "?" is optional.
+	allowed, required := map[string]bool{}, 0
 	for _, name := range names {
-		allowed[name] = true
+		if trimmed, optional := strings.CutSuffix(name, "?"); optional {
+			allowed[trimmed] = true
+		} else {
+			allowed[name] = true
+			required++
+		}
 	}
 	values := map[string]json.RawMessage{}
 	for dec.More() {
@@ -51,7 +60,13 @@ func strictDelegationObject(raw []byte, names ...string) (map[string]json.RawMes
 	if _, err = dec.Token(); err != nil {
 		return nil, bad
 	}
-	if _, err = dec.Token(); err != io.EOF || len(values) != len(names) {
+	present := 0
+	for _, name := range names {
+		if values[name] != nil {
+			present++
+		}
+	}
+	if _, err = dec.Token(); err != io.EOF || present != required {
 		return nil, bad
 	}
 	return values, nil
@@ -110,6 +125,8 @@ type DelegationAck struct {
 	AcceptedAt   int64  `json:"accepted_at"`
 	ExpiresAt    int64  `json:"expires_at"`
 	CeilingBytes int64  `json:"ceiling_bytes"`
+	// SpendLimit is the grant's credit limit, when delegation.create set one.
+	SpendLimit *SpendLimitView `json:"spend_limit,omitempty"`
 }
 type DelegationStatus struct {
 	GrantID        string `json:"grant_id"`
@@ -121,6 +138,10 @@ type DelegationStatus struct {
 	CeilingBytes   int64  `json:"ceiling_bytes"`
 	UsedBytes      int64  `json:"used_bytes"`
 	RemainingBytes int64  `json:"remaining_bytes"`
+	// SpendLimit is the grant's credit limit and today's spend through it,
+	// shown to the account's owner (delegations.list) and to the worker key
+	// itself (delegation.get), never publicly.
+	SpendLimit *SpendLimitView `json:"spend_limit,omitempty"`
 }
 type DelegationRecord struct {
 	DelegationStatus
@@ -200,6 +221,7 @@ func (s *Store) resolveDelegation(ctx context.Context, tx *sql.Tx, c Command, a 
 	}
 	a.grant = &g
 	a.account = g.Parent
+	a.credential = credentialKeyPrefix + g.ID
 	a.requestNamespace = "delegate:" + g.ID
 	return nil
 }
@@ -287,37 +309,44 @@ func (s *Store) authorizeDelegation(ctx context.Context, tx *sql.Tx, c Command, 
 	return nil
 }
 
-func parseDelegationData(raw string, create bool) (string, []string, error) {
+func parseDelegationData(raw string, create bool) (string, []string, *spendLimitData, error) {
 	fields := []string{"schema", "generation"}
 	if create {
-		fields = append(fields, "operations", "disclosure")
+		fields = append(fields, "operations", "disclosure", "spend_limit?")
 	} else if len(raw) > 512 {
-		return "", nil, delegationError("invalid_delegation_data")
+		return "", nil, nil, delegationError("invalid_delegation_data")
 	}
 	values, err := strictDelegationObject([]byte(raw), fields...)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
+	}
+	var limit *spendLimitData
+	if v := values["spend_limit"]; v != nil {
+		limit = &spendLimitData{}
+		if services.StrictObject(v, limit) != nil {
+			return "", nil, nil, invalidSpendLimit("data.spend_limit is not one")
+		}
 	}
 	var schema int
 	var generation string
 	if json.Unmarshal(values["schema"], &schema) != nil || schema != 1 || json.Unmarshal(values["generation"], &generation) != nil || !workIDRE.MatchString(generation) {
-		return "", nil, delegationError("invalid_delegation_data")
+		return "", nil, nil, delegationError("invalid_delegation_data")
 	}
 	operations := []string{}
 	if create {
 		var disclosure string
 		if json.Unmarshal(values["disclosure"], &disclosure) != nil || disclosure != "public" || json.Unmarshal(values["operations"], &operations) != nil || len(operations) < 1 || len(operations) > 16 {
-			return "", nil, delegationError("invalid_delegation_data")
+			return "", nil, nil, delegationError("invalid_delegation_data")
 		}
 		seen := map[string]bool{}
 		for _, op := range operations {
 			if !delegable(op) || seen[op] {
-				return "", nil, delegationError("invalid_delegation_data")
+				return "", nil, nil, delegationError("invalid_delegation_data")
 			}
 			seen[op] = true
 		}
 	}
-	return generation, operations, nil
+	return generation, operations, limit, nil
 }
 
 func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
@@ -327,9 +356,23 @@ func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a a
 	if a.grant != nil {
 		return Result{}, delegationError("delegation_forbidden")
 	}
-	generation, operations, err := parseDelegationData(c.Data, c.Operation == "delegation.create")
+	if limited, err := s.credentialLimited(ctx, tx, a); err != nil || limited {
+		if err == nil {
+			err = credentialLimitedError()
+		}
+		return Result{}, err
+	}
+	generation, operations, limit, err := parseDelegationData(c.Data, c.Operation == "delegation.create")
 	if err != nil {
 		return Result{}, err
+	}
+	if limit != nil {
+		if err = validSpendLimit(*limit, false, now); err != nil {
+			return Result{}, err
+		}
+		if !s.spendLimitsOn() {
+			return Result{}, allowanceError("service_unavailable")
+		}
 	}
 	var current string
 	if err = tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='generation'").Scan(&current); err != nil {
@@ -339,6 +382,7 @@ func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a a
 		return Result{}, delegationError("delegation_generation_mismatch")
 	}
 	var g delegationRow
+	var ackLimit *SpendLimitView
 	if c.Operation == "delegation.create" {
 		if c.TTL < 60 || c.TTL > DelegationMaxTTL {
 			return Result{}, problem(400, "invalid_ttl", fmt.Sprintf("Grant ttl must be 60 seconds to %s.", LimitText("delegation_ttl_maximum_seconds")))
@@ -375,6 +419,9 @@ func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a a
 		encoded, _ := json.Marshal(operations)
 		g = delegationRow{ID: id, PublicKey: c.Target, Parent: a.account, IssuerID: a.id, IssuerKey: a.publicKey, Room: c.Room, Operations: string(encoded), Generation: current, Created: now, Expires: now + c.TTL, Ceiling: c.Amount, Payload: string(a.canonical), Signature: c.Signature, Proof: c.Proof}
 		_, err = tx.ExecContext(ctx, "INSERT INTO delegations(child_id,public_key,parent_account,issuer_id,issuer_key,room,operations,generation,created_at,expires_at,ceiling_bytes,payload,signature,proof) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", g.ID, g.PublicKey, g.Parent, g.IssuerID, g.IssuerKey, g.Room, g.Operations, g.Generation, g.Created, g.Expires, g.Ceiling, g.Payload, g.Signature, g.Proof)
+		if err == nil && limit != nil {
+			ackLimit, err = s.setSpendLimit(ctx, tx, a, credentialKeyPrefix+g.ID, *limit, now)
+		}
 	} else {
 		if !fingerprintRE.MatchString(c.Target) {
 			return Result{}, delegationError("delegation_not_found")
@@ -399,7 +446,7 @@ func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a a
 	if c.Operation == "delegation.revoke" {
 		state = "revoked"
 	}
-	return Result{Data: map[string]any{"ack": DelegationAck{GrantID: g.ID, ChildID: g.ID, Generation: current, ServiceID: s.config.ServiceID, State: state, AcceptedAt: now, ExpiresAt: g.Expires, CeilingBytes: g.Ceiling}}}, nil
+	return Result{Data: map[string]any{"ack": DelegationAck{GrantID: g.ID, ChildID: g.ID, Generation: current, ServiceID: s.config.ServiceID, State: state, AcceptedAt: now, ExpiresAt: g.Expires, CeilingBytes: g.Ceiling, SpendLimit: ackLimit}}}, nil
 }
 
 func (s *Store) delegationStatus(ctx context.Context, tx *sql.Tx, g delegationRow, now int64) (DelegationStatus, error) {
@@ -425,7 +472,17 @@ func (s *Store) readDelegation(ctx context.Context, tx *sql.Tx, c Command, a act
 			return Result{}, err
 		}
 		if a.grant != nil {
+			if a.grant.ID == g.ID {
+				if status.SpendLimit, err = s.spendLimitView(ctx, tx, g.Parent, credentialKeyPrefix+g.ID, now); err != nil {
+					return Result{}, err
+				}
+			}
 			return Result{Data: map[string]any{"delegation": status}}, nil
+		}
+		if a.signed && a.account == g.Parent {
+			if status.SpendLimit, err = s.spendLimitView(ctx, tx, g.Parent, credentialKeyPrefix+g.ID, now); err != nil {
+				return Result{}, err
+			}
 		}
 		operations := []string{}
 		if err = json.Unmarshal([]byte(g.Operations), &operations); err != nil {
@@ -477,6 +534,9 @@ func (s *Store) readDelegation(ctx context.Context, tx *sql.Tx, c Command, a act
 	for _, g := range stored {
 		status, e := s.delegationStatus(ctx, tx, g, now)
 		if e != nil {
+			return Result{}, e
+		}
+		if status.SpendLimit, e = s.spendLimitView(ctx, tx, a.account, credentialKeyPrefix+g.ID, now); e != nil {
 			return Result{}, e
 		}
 		statuses = append(statuses, status)

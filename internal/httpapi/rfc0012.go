@@ -49,12 +49,13 @@ func (s *Server) rfc0012Route(w http.ResponseWriter, r *http.Request) bool {
 // is omitted.
 func (s *Server) rfc0012Capabilities(caps map[string]any, catalog []services.Entry) {
 	for key, fragment := range map[string]map[string]any{
-		"allowance": s.allowanceCapabilities(),
-		"design0":   board.Design0Capabilities(s.cfg.Features),
-		"services":  s.servicesCapabilities(catalog),
-		"trust":     s.trustCapabilities(),
-		"levers":    s.leverCapabilities(),
-		"topup":     s.topupCapabilities(),
+		"allowance":    s.allowanceCapabilities(),
+		"design0":      board.Design0Capabilities(s.cfg.Features),
+		"services":     s.servicesCapabilities(catalog),
+		"trust":        s.trustCapabilities(),
+		"levers":       s.leverCapabilities(),
+		"topup":        s.topupCapabilities(),
+		"spend_limits": s.spendLimitCapabilities(),
 	} {
 		if fragment != nil {
 			caps[key] = fragment

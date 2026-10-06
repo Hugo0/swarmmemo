@@ -71,6 +71,8 @@ func allowanceError(code string) error {
 		return problem(429, "quota_exhausted", "Your free allowance replenishes at 00:00 UTC. Wait, spend less, or receive an allowance transfer; payment is not required.")
 	case "global_quota_exhausted":
 		return problem(429, "global_quota_exhausted", "The board's shared daily allowance is exhausted; it replenishes at 00:00 UTC.")
+	case "spend_limit":
+		return problem(429, "spend_limit", "This credential's spend limit does not allow this spend; nothing was charged. The account's owner sets it with spend_limit.set.")
 	case "trust_unavailable":
 		return problem(503, "trust_unavailable", "The trust estimate cannot be read right now; retry later.")
 	}
@@ -88,6 +90,9 @@ func fromAllowance(err error) error {
 	if !errors.As(err, &e) {
 		return err
 	}
+	if e.Code == "spend_limit" {
+		return spendLimitError(e)
+	}
 	mapped := allowanceError(e.Code)
 	var out *Error
 	if errors.As(mapped, &out) && e.RetryAfter > 0 {
@@ -99,7 +104,7 @@ func fromAllowance(err error) error {
 // subject is the ledger's view of the caller: the continuity account (a worker
 // key spends its parent's) or the anonymous pseudonym.
 func subject(a actor) allowance.Subject {
-	s := allowance.Subject{ID: a.account, Signed: a.signed, Client: a.client, Hosted: a.hosted}
+	s := allowance.Subject{ID: a.account, Signed: a.signed, Client: a.client, Hosted: a.hosted, Credential: a.credential}
 	if a.signed {
 		s.KeyID = a.id
 	}

@@ -7,7 +7,8 @@ package ledger
 // Beyond the §7 listing it adds allowance_usage (per-subject daily totals:
 // spent, incoming, outgoing; the anonymous public view and quota.get read it),
 // an index on claims by subject (the dormant-account breaker) and indexes on
-// transfers by recipient and by time (stats).
+// transfers by recipient and by time (stats), and the spend limits per
+// credential (limits.go).
 const Schema = `
 CREATE TABLE IF NOT EXISTS params (
  namespace TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL, sha256 TEXT NOT NULL,
@@ -83,4 +84,4 @@ CREATE TABLE IF NOT EXISTS account_breakers (
  cancel_key TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL,
  transfer_until INTEGER NOT NULL, trust_until INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS account_breakers_account ON account_breakers(account,trust_until);
-`
+` + SpendLimitSchema

@@ -334,13 +334,15 @@ func (s *Store) hostedToken(ctx context.Context, token string, now int64) (hoste
 	var state string
 	var lastUsed int64
 	var resource sql.NullString
-	var expires, ended sql.NullInt64
+	var expires, ended, limitEnds sql.NullInt64
 	// An OAuth access token (oauth.go) is also bound to its resource, which
 	// only a header carries, and expires; any other token is neither.
-	err := s.db.QueryRowContext(ctx, `SELECT k.account,k.public_key,k.sealed_private_key,k.kek_id,k.state,t.last_used_at,f.resource,f.access_expires_at,f.revoked_at
- FROM hosted_tokens t JOIN hosted_keys k ON k.account=t.account LEFT JOIN oauth_families f ON f.access_sha256=t.token_sha256 WHERE t.token_sha256=? AND t.revoked_at=0`, hash).
-		Scan(&t.account, &t.publicKey, &t.sealed, &t.kekID, &state, &lastUsed, &resource, &expires, &ended)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && (state != "active" ||
+	// A token whose spend limit set expires_at (spendlimits.go) ends then.
+	err := s.db.QueryRowContext(ctx, `SELECT k.account,k.public_key,k.sealed_private_key,k.kek_id,k.state,t.last_used_at,f.resource,f.access_expires_at,f.revoked_at,l.expires_at
+ FROM hosted_tokens t JOIN hosted_keys k ON k.account=t.account LEFT JOIN oauth_families f ON f.access_sha256=t.token_sha256
+ LEFT JOIN spend_limits l ON l.credential='token:'||t.token_id AND l.account=t.account WHERE t.token_sha256=? AND t.revoked_at=0`, hash).
+		Scan(&t.account, &t.publicKey, &t.sealed, &t.kekID, &state, &lastUsed, &resource, &expires, &ended, &limitEnds)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (state != "active" || limitEnds.Int64 > 0 && limitEnds.Int64 <= now ||
 		resource.Valid && (resource.String != tokenAudience(ctx) || expires.Int64 <= now || ended.Int64 != 0)) {
 		return hostedTokenRow{}, hostedTokenInvalid()
 	}
@@ -481,6 +483,8 @@ type hostedData struct {
 	Label        string `json:"label,omitempty"`
 	NewPublicKey string `json:"new_public_key,omitempty"`
 	Proof        string `json:"proof,omitempty"`
+	// SpendLimit is hosted.token create's optional limit on the new token.
+	SpendLimit *spendLimitData `json:"spend_limit,omitempty"`
 }
 
 func invalidHostedData(what string) error {
@@ -522,7 +526,7 @@ func (s *Store) changeHosted(ctx context.Context, tx *sql.Tx, c Command, a actor
 	var d hostedData
 	if c.Operation == "hosted.token" {
 		if services.StrictObject([]byte(c.Data), &d) != nil || d.Schema != 1 {
-			return Result{}, invalidHostedData(`{"schema":1,"action":"create"|"revoke"|"list","target"?,"label"?}`)
+			return Result{}, invalidHostedData(`{"schema":1,"action":"create"|"revoke"|"list","target"?,"label"?,"spend_limit"?}`)
 		}
 		return s.hostedTokens(ctx, tx, a, d, now)
 	}
@@ -693,6 +697,11 @@ type HostedToken struct {
 	Label      string `json:"label"`
 	CreatedAt  int64  `json:"created_at"`
 	LastUsedAt int64  `json:"last_used_at"`
+	// Current marks the token this command came through.
+	Current bool `json:"current,omitempty"`
+	// SpendLimit is the token's credit limit (null limits: none) and today's
+	// credit spent through it; omitted while the ledger is off.
+	SpendLimit *SpendLimitView `json:"spend_limit,omitempty"`
 }
 
 // hostedTokens is hosted.token: create (at most HostedTokensMax live),
@@ -700,6 +709,19 @@ type HostedToken struct {
 func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedData, now int64) (Result, error) {
 	if len(d.Label) > HostedTokenLabelBytes || strings.IndexFunc(d.Label, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
 		return Result{}, invalidHostedData(fmt.Sprintf("a label of at most %d bytes without control characters", HostedTokenLabelBytes))
+	}
+	if d.Action != "list" {
+		// A limited token only reads: it cannot mint an unlimited token,
+		// revoke the owner's, or change limits.
+		if limited, err := s.credentialLimited(ctx, tx, a); err != nil || limited {
+			if err == nil {
+				err = credentialLimitedError()
+			}
+			return Result{}, err
+		}
+	}
+	if d.SpendLimit != nil && d.Action != "create" {
+		return Result{}, invalidHostedData(`spend_limit only with action "create"; spend_limit.set changes a token's limit`)
 	}
 	switch d.Action {
 	case "list":
@@ -714,10 +736,17 @@ func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedD
 			if err = rows.Scan(&t.TokenID, &t.Label, &t.CreatedAt, &t.LastUsedAt); err != nil {
 				return Result{}, err
 			}
+			t.Current = a.credential == credentialTokenPrefix+t.TokenID
 			tokens = append(tokens, t)
 		}
 		if err = rows.Err(); err != nil {
 			return Result{}, err
+		}
+		rows.Close()
+		for i := range tokens {
+			if tokens[i].SpendLimit, err = s.spendLimitView(ctx, tx, a.account, credentialTokenPrefix+tokens[i].TokenID, now); err != nil {
+				return Result{}, err
+			}
 		}
 		return Result{Data: map[string]any{"tokens": tokens, "max": HostedTokensMax, "oauth_max": OAuthConnectionsMax}}, nil
 	case "create":
@@ -728,6 +757,11 @@ func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedD
 		if live >= HostedTokensMax {
 			return Result{}, problem(409, "token_limit", fmt.Sprintf("A hosted identity holds up to %d live tokens; revoke one first.", HostedTokensMax))
 		}
+		if d.SpendLimit != nil {
+			if err := validSpendLimit(*d.SpendLimit, true, now); err != nil {
+				return Result{}, err
+			}
+		}
 		token, hash, err := hostedSecret(HostedTokenPrefix)
 		if err != nil {
 			return Result{}, err
@@ -735,10 +769,19 @@ func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedD
 		if _, err = tx.ExecContext(ctx, "INSERT INTO hosted_tokens(token_sha256,token_id,account,label,created_at) VALUES(?,?,?,?,?)", hash, hostedTokenID(hash), a.account, d.Label, now); err != nil {
 			return Result{}, err
 		}
+		var limit *SpendLimitView
+		if d.SpendLimit != nil {
+			if limit, err = s.setSpendLimit(ctx, tx, a, credentialTokenPrefix+hostedTokenID(hash), *d.SpendLimit, now); err != nil {
+				return Result{}, err
+			}
+		}
 		if err = audit(ctx, tx, "hosted.token", a.id, a.account, "create "+hostedTokenID(hash), now); err != nil {
 			return Result{}, err
 		}
 		data := map[string]any{"token_id": hostedTokenID(hash), "label": d.Label, "notice": "The token is shown once, in this answer: only its hash is stored."}
+		if limit != nil {
+			data["spend_limit"] = limit
+		}
 		return Result{Data: data, afterCommit: hostedShown(data, token, "")}, nil
 	case "revoke":
 		// An OAuth connection whose token this is ends with it, so its

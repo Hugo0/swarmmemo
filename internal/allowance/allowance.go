@@ -41,6 +41,11 @@ type Subject struct {
 	// Hosted is a signed account whose key SwarmMemo holds (RFC0013 §2.4):
 	// it shares the anonymous tier until it is claimed.
 	Hosted bool
+	// Credential names the delegated credential the command came through
+	// ("key:" + a worker key's fingerprint, "token:" + a hosted token's
+	// token_id); "" for the account's own key. A credential may carry a
+	// spend limit (ledger spend_limits).
+	Credential string
 }
 
 type Standing struct {
@@ -93,6 +98,10 @@ type Err struct {
 	// Sent and Limit are a size refusal's value sent and its limit, in
 	// bytes (Limit 0: not a size refusal); the board's message states them.
 	Sent, Limit int
+	// SpendLimit is a spend_limit refusal's limit: which one ("per_day",
+	// "per_call" or "expired") and its value in credits.
+	SpendLimit      string
+	SpendLimitValue int64
 }
 
 func (e *Err) Error() string { return "allowance: " + e.Code }

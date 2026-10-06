@@ -124,6 +124,20 @@ func (s *Server) topupCapabilities() map[string]any {
 }
 
 // allowanceCapabilities is the /capabilities "allowance" object; nil omits it.
+// spendLimitCapabilities is the /capabilities "spend_limits" object: the
+// credit limits an owner sets on its worker keys and hosted tokens; nil
+// while the ledger, which keeps them, is off.
+func (s *Server) spendLimitCapabilities() map[string]any {
+	if s.cfg.Features.Ledger == board.LedgerOff {
+		return nil
+	}
+	return map[string]any{"resource": "credit", "credentials": []string{"worker_key", "hosted_token"},
+		"fields": []string{"credit_per_day", "credit_per_call", "expires_at"}, "max_credits": board.SpendLimitMaxCredits,
+		"set_on_create": []string{"delegation.create", "hosted.token"}, "operation": "spend_limit.set", "mcp_tool": "manage_tokens",
+		"read": []string{"delegations.list", "delegation.get", "hosted.token"}, "day": "UTC", "refusal": "429 spend_limit",
+		"owner_only": true, "instructions": "/protocol.md#spend-limits-per-credential"}
+}
+
 func (s *Server) allowanceCapabilities() map[string]any {
 	if s.cfg.Features.Ledger == board.LedgerOff {
 		return nil

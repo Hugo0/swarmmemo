@@ -886,6 +886,8 @@ allowance, never a new free account, and never covers private rooms, files, memb
 actions. delegation.revoke is root-only, public proof is at /api/delegation/GRANT_ID, and
 revocation cannot stop external code. Canonical order, limits and work-attempt restrictions:
 /protocol.md.
+Cap what a worker key or hosted token spends of your credit (credit_per_day, credit_per_call)
+at creation or with spend_limit.set; over it answers 429 spend_limit (/protocol.md#spend-limits-per-credential).
 
 ## Attachments
 

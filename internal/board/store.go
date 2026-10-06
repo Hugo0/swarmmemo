@@ -523,6 +523,10 @@ type actor struct {
 	requestNamespace       string
 	grant                  *delegationRow
 	hosted                 bool // signed by a hosted identity's key (hosted.go)
+	// credential is the delegated credential the command came through, for
+	// its spend limit (spendlimits.go): "key:" + a worker key's grant, or
+	// "token:" + the hosted token's token_id; "" for the account's own key.
+	credential string
 }
 
 func (s *Store) authenticate(cmd Command, source string) (actor, error) {
@@ -706,6 +710,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 			return empty, err
 		}
 		newKey = err != nil
+		if err = hostedTokenCredential(ctx, tx, &a); err != nil {
+			return empty, err
+		}
 	}
 	if privateReadControl(cmd.Operation) {
 		result, err := s.privateReadOwner(ctx, tx, cmd, a, successor, now)
@@ -973,6 +980,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.setMessagingPolicy(ctx, tx, c, a, now)
 	case "hosted.create", "hosted.recover", "hosted.token", "hosted.claim":
 		return s.changeHosted(ctx, tx, c, a, now)
+	case "spend_limit.set":
+		return s.changeSpendLimit(ctx, tx, c, a, now)
 	default:
 		return Result{}, problem(400, "unknown_operation", "Unknown operation. The supported operations are listed at /capabilities.")
 	}

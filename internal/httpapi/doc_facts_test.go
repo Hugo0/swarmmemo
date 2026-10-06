@@ -126,6 +126,7 @@ func docFacts() []docFact {
 		{"docs/PROTOCOL.md", "**Price.** {N} + 1 per KiB of text returned", countFact(services.FetchPrice.Base)},
 		{"docs/PROTOCOL.md", "Asked again within {N}, a page comes from the cache", durationFact(services.FetchCacheSeconds)},
 		{"docs/PROTOCOL.md", "searches about {N} paid APIs", services.X402ToolsApprox},
+		{"docs/PROTOCOL.md", "Values are whole credits from 0 to {N}; an omitted", countFact(board.SpendLimitMaxCredits)},
 		// The MCP adapter's README.
 		{"clients/mcp/README.md", "Posts are at most {N};", board.LimitText("text_bytes")},
 	}

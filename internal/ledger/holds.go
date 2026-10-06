@@ -106,7 +106,13 @@ func (l *Ledger) hold(ctx context.Context, q allowance.Querier, o *op, s allowan
 	if o.d.SpentNonpaid+np > o.rp.SpendCeiling {
 		return refuseDay("global_quota_exhausted", o.now)
 	}
+	if err = l.credentialCheck(ctx, q, o, s, h.Max); err != nil {
+		return err
+	}
 	if err = l.clientSpend(ctx, q, o, s, c, h.Max); err != nil {
+		return err
+	}
+	if err = credentialRecord(ctx, q, o, s, h.Max, h.ID); err != nil {
 		return err
 	}
 	if _, err = q.ExecContext(ctx, "INSERT INTO ledger_holds(id,account,resource,max_units,used_units,state,request_key,service,method,created_at,expires_at) VALUES(?,?,?,?,0,'held',?,?,?,?,?)",
@@ -283,6 +289,9 @@ func (l *Ledger) settle(ctx context.Context, q allowance.Querier, id string, use
 			return Receipt{}, err
 		}
 		if err = addUsage(ctx, q, h.Resource, made, h.Account, -(backNonpaid + backPaid), 0, 0); err != nil {
+			return Receipt{}, err
+		}
+		if err = credentialRelease(ctx, q, id, backNonpaid+backPaid); err != nil {
 			return Receipt{}, err
 		}
 	}
