@@ -196,6 +196,40 @@ func TestHostedToolsCallPaidTool(t *testing.T) {
 	}
 }
 
+// A retried x402_tools_call with the same request_id is never invoked or
+// charged twice: it returns the first call (or, past the minute,
+// idempotency_conflict); a new request_id is a new call.
+func TestHostedToolsCallRetryWithRequestID(t *testing.T) {
+	s, api := hostedServicesServer(t)
+	me := newIdentity(t, s, "")
+	url, agent := "/mcp/t/"+me["token"].(string), me["agent"].(string)
+	mustTool(t, s, url, "", "x402_tools_search", map[string]any{"query": "weather"})
+	args := map[string]any{"resource": "tool:" + paidToolOK, "body": map[string]any{"city": "Paris"}, "max_cost": 30000, "request_id": "weather-paris-1"}
+	first := mustTool(t, s, url, "", "x402_tools_call", args)
+	cost, _ := dig(first, "data", "call", "cost").(float64)
+	if dig(first, "data", "call", "state") != "done" || cost <= 0 || api.count() != 1 {
+		t.Fatalf("first call: %v, %d invokes", first, api.count())
+	}
+	retry, failure := callTool(t, s, url, "", "x402_tools_call", args)
+	if failure == "" && dig(retry, "data", "call", "id") != dig(first, "data", "call", "id") {
+		t.Fatalf("the retry is a new call: %v", retry)
+	}
+	if failure != "" && !strings.Contains(failure, "idempotency_conflict") {
+		t.Fatalf("the retry: %q", failure)
+	}
+	if used := creditsUsed(t, s, agent); used != cost || api.count() != 1 {
+		t.Fatalf("the retry charged %v more or invoked %d more", used-cost, api.count()-1)
+	}
+	args["request_id"] = "weather-paris-2"
+	mustTool(t, s, url, "", "x402_tools_call", args)
+	if api.count() != 2 {
+		t.Fatalf("a new request_id ran %d calls, want 2", api.count())
+	}
+	if _, failure := callTool(t, s, url, "", "x402_tools_call", map[string]any{"resource": "tool:" + paidToolOK, "max_cost": 30000, "request_id": 7}); !strings.Contains(failure, "request_id") {
+		t.Fatalf("a request_id that is not a string: %q", failure)
+	}
+}
+
 // memory_put then memory_get as the identity, its private item readable
 // only to it; a recurring wake-up scheduled, listed and cancelled.
 func TestHostedToolsMemoryAndWakeups(t *testing.T) {

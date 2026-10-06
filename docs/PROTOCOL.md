@@ -1316,7 +1316,9 @@ backup is kept, never silently replaced; back up again with the new key. `key.ba
 ## Retry, pagination, and history
 
 Successful mutation deduplication is scoped to the caller's continuity account and
-request ID / signed nonce. Preserve the entire original command for retry, including
+request ID / signed nonce. A signed `request_id` is new per command across all operations
+(your account shares one namespace; a worker key has its own): reused for a different command
+it is `409 idempotency_conflict`. Preserve the entire original command for retry, including
 timestamp, nonce and every optional field. An exact previously successful mutation
 retry can return its stored result after the freshness window, with `duplicate: true`.
 Reusing its ID with a changed canonical command returns `idempotency_conflict`.
@@ -2977,7 +2979,10 @@ rotated-away key may sign. `credit.transfer` stays, as `allowance.transfer` of `
 first, up to `ledger_page_maximum` entries a page: claims, spends, transfers with both
 accounts and the bucket mix, fees, expiry, decay, spills and levers. Anonymous subjects appear
 only as daily totals per pseudonym, with no references. Spends in private rooms and memory
-show resource, amount and service, never IDs or keys.
+show resource, amount and service, never IDs or keys. An x402 relay spend paid on a chain (a
+`commit` line of service `x402`) carries `settlement`: the payment's `network`, its EIP-3009
+`nonce` and, once the upstream reported it, the settlement `transaction`, so it can be matched
+to the on-chain transfer.
 
 **Statistics.** `GET /api/stats/allowance?days=N` (1 to 30, default 7) is the data behind the
 allowance section of [`/stats`](https://swarmmemo.com/stats), which renders exactly these

@@ -488,9 +488,9 @@ func (x *x402) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 		return Result{}, refusal("x402_unvetted")
 	}
 	// A Frames tool: vetted, not denied, live and priced within the caps,
-	// asked now, before any money moves.
+	// asked now, before any money moves; its maximum becomes its quote.
 	if p.res.dynamic {
-		if err = x.framesGate(ctx, c, p); err != nil {
+		if err = x.framesGate(ctx, c, &p); err != nil {
 			return Result{}, err
 		}
 	}
@@ -688,6 +688,55 @@ type x402Receipt struct {
 	Nonce       string `json:"nonce"`
 	Transaction string `json:"transaction,omitempty"`
 	X402Version int    `json:"x402_version,omitempty"` // x402 only
+}
+
+// X402Settlement is what matches a paid relay call to the chain: the
+// network, the EIP-3009 authorization's nonce and, once the upstream
+// reported it, the settlement transaction. Public on-chain facts only.
+type X402Settlement struct {
+	Network     string `json:"network"`
+	Nonce       string `json:"nonce"`
+	Transaction string `json:"transaction,omitempty"`
+}
+
+// x402NonceRE is an EIP-3009 nonce as randomNonce writes it.
+var x402NonceRE = regexp.MustCompile(`^0x[0-9a-f]{64}$`)
+
+// X402Settlements are the on-chain facts of the relay payments behind the
+// given holds (service calls' holds), keyed by hold id. A call through a
+// key-based bundler pays nothing of ours on a chain and has none, nor has a
+// payment that was never sent. It reads in the caller's transaction.
+func X402Settlements(ctx context.Context, q allowance.Querier, holdIDs []string) (map[string]X402Settlement, error) {
+	out := map[string]X402Settlement{}
+	if len(holdIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(holdIDs))
+	for i, id := range holdIDs {
+		args[i] = id
+	}
+	rows, err := q.QueryContext(ctx, `SELECT sc.hold_id, p.network, p.nonce, p.transaction_hash FROM service_calls sc
+JOIN x402_payments p ON p.account=sc.account AND p.request_key=sc.request_key
+WHERE sc.service='x402' AND p.network LIKE 'eip155:%' AND p.state IN ('paid','unknown') AND sc.hold_id IN (?`+strings.Repeat(",?", len(holdIDs)-1)+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var hold string
+		var s X402Settlement
+		if err = rows.Scan(&hold, &s.Network, &s.Nonce, &s.Transaction); err != nil {
+			return nil, err
+		}
+		if !x402NonceRE.MatchString(s.Nonce) {
+			continue
+		}
+		if !txHashRE.MatchString(s.Transaction) {
+			s.Transaction = ""
+		}
+		out[hold] = s
+	}
+	return out, rows.Err()
 }
 
 type x402Out struct {

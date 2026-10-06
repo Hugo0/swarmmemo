@@ -720,11 +720,30 @@ func (s *Store) readLedger(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err != nil {
 		return Result{}, err
 	}
+	// An x402 spend carries the relay payment's on-chain facts (network,
+	// EIP-3009 nonce, settlement transaction), so it can be matched to the
+	// chain; the hold that links them is never shown.
+	var holds []string
+	for _, e := range entries {
+		if e.Service == "x402" && e.Kind == "commit" && e.HoldID != "" {
+			holds = append(holds, e.HoldID)
+		}
+	}
+	settlements := map[string]services.X402Settlement{}
+	if len(holds) > 0 && s.services.engine != nil {
+		if settlements, err = services.X402Settlements(ctx, tx, holds); err != nil {
+			return Result{}, err
+		}
+	}
 	out := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, map[string]any{"seq": e.Seq, "day": e.Day, "created_at": e.CreatedAt, "kind": e.Kind, "account": e.Account, "counterparty": e.Counterparty,
+		line := map[string]any{"seq": e.Seq, "day": e.Day, "created_at": e.CreatedAt, "kind": e.Kind, "account": e.Account, "counterparty": e.Counterparty,
 			"resource": string(e.Resource), "bucket": string(e.Bucket), "amount": e.Amount, "service": e.Service, "op": e.Op, "ref": e.PublicRef,
-			"params_version": e.ParamsVersion, "detail": e.Detail})
+			"params_version": e.ParamsVersion, "detail": e.Detail}
+		if st, ok := settlements[e.HoldID]; ok && e.Service == "x402" && e.Kind == "commit" {
+			line["settlement"] = st
+		}
+		out = append(out, line)
 	}
 	data := map[string]any{"schema": 1, "entries": out, "anonymous": "Anonymous subjects appear only as daily totals, never as journal lines."}
 	if next > 0 {

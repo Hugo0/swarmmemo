@@ -83,7 +83,15 @@ func TestReceiveRouteEndToEnd(t *testing.T) {
 	if w := makeRequest(h, "GET", url, "", ""); w.Code != 405 || !strings.Contains(w.Body.String(), "POST only") {
 		t.Fatalf("GET a receive URL: %d %s", w.Code, w.Body.String())
 	}
-	w := postTo(h, url, `{"status":"done","note":"<script>alert(1)</script>"}`, "application/json")
+	// A provider's event id is kept for deduping; its credentials never are.
+	req := httptest.NewRequest("POST", url, strings.NewReader(`{"status":"done","note":"<script>alert(1)</script>"}`))
+	req.RemoteAddr = "198.51.100.8:12345"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Colony-Event-Id", "evt_42")
+	req.Header.Set("Authorization", "Bearer nope")
+	req.Header.Set("Cookie", "session=nope")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
 	if w.Code != 202 || !strings.Contains(w.Body.String(), `"item":`) || strings.Contains(w.Body.String(), agent) {
 		t.Fatalf("deliver: %d %s", w.Code, w.Body.String())
 	}
@@ -93,7 +101,12 @@ func TestReceiveRouteEndToEnd(t *testing.T) {
 	if w = postTo(h, url, "\x89PNG", "image/png"); w.Code != 415 {
 		t.Fatalf("binary: %d %s", w.Code, w.Body.String())
 	}
-	if w = postTo(h, url[:len(url)-1]+"A", `{}`, "application/json"); w.Code != 404 || !strings.Contains(w.Body.String(), "receiver_not_found") {
+	// Another valid last character (one in 16 secrets already ends in A).
+	wrong := url[:len(url)-1] + "A"
+	if strings.HasSuffix(url, "A") {
+		wrong = url[:len(url)-1] + "E"
+	}
+	if w = postTo(h, wrong, `{}`, "application/json"); w.Code != 404 || !strings.Contains(w.Body.String(), "receiver_not_found") {
 		t.Fatalf("a wrong secret: %d %s", w.Code, w.Body.String())
 	}
 	if w = postTo(h, "https://swarmmemo.com/in/nothing", `{}`, "application/json"); w.Code != 404 {
@@ -115,6 +128,9 @@ func TestReceiveRouteEndToEnd(t *testing.T) {
 	list, _ := dig(read, "data", "result", "items").([]any)
 	if len(list) != 1 || dig(list[0], "body") != `{"status":"done","note":"<script>alert(1)</script>"}` || dig(list[0], "untrusted") != true {
 		t.Fatalf("items: %+v", read)
+	}
+	if kept, _ := dig(list[0], "headers").(map[string]any); kept["x-colony-event-id"] != "evt_42" || kept["authorization"] != nil || kept["cookie"] != nil {
+		t.Fatalf("kept headers: %+v", kept)
 	}
 	// An unsigned read of the items is refused.
 	if w = makeRequest(h, "GET", "https://swarmmemo.com/c64/"+base64.RawURLEncoding.EncodeToString([]byte(`{"operation":"service.read","target":"receiver","data":"{\"schema\":1,\"method\":\"items\"}"}`)), "", ""); w.Code != 401 {

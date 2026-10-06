@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -31,7 +32,8 @@ var hostedServices = []string{services.ReceiverID, services.FetchID, "memory", "
 type hostedShape struct {
 	name, line string
 	args       []services.Arg
-	// prefix is what the resource argument must start with.
+	// prefix is the id form the resource argument must take: a tool id
+	// (services.IsToolID, which also takes the legacy prefix).
 	prefix string
 	// maxCostRequired makes max_cost a required argument.
 	maxCostRequired bool
@@ -92,6 +94,7 @@ func hostedServiceTool(e services.Entry, m services.MethodEntry) (serviceTool, h
 		} else {
 			desc += "max_cost is optional, your ceiling."
 		}
+		desc += " request_id (optional) makes a retry safe: never run or charged twice."
 	}
 	desc += " " + services.UntrustedNote + tokenNote
 	return serviceTool{spec: mcpToolSpec{shape.name, !m.Write(), desc}, entry: e, method: m}, shape, true
@@ -154,13 +157,20 @@ func hostedCallSchema(m services.MethodEntry, shape hostedShape) map[string]any 
 		required, _ := schema["required"].([]string)
 		schema["required"] = append(required, services.CallFieldMaxCost)
 	}
-	schema["properties"].(map[string]any)[services.CallFieldMaxCost] = map[string]any{"type": "integer", "minimum": 0, "description": note}
+	props := schema["properties"].(map[string]any)
+	props[services.CallFieldMaxCost] = map[string]any{"type": "integer", "minimum": 0, "description": note}
+	props[services.CallFieldRequestID] = map[string]any{"type": "string", "minLength": 1, "maxLength": board.RequestIDBytes, "description": hostedRequestIDNote}
 	return schema
 }
 
+// hostedRequestIDNote is what a hosted write's request_id does.
+const hostedRequestIDNote = "optional: your retry key for this exact call, unique among your identity's commands. A retry with the same request_id and arguments is never run or charged twice: within the minute it returns the first answer, later it is 409 idempotency_conflict"
+
 // hostedCallData is the data of the service.call or service.read a hosted
-// tool signs: its input less max_cost is the args object.
-func hostedCallData(m services.MethodEntry, shape hostedShape, in map[string]any) (string, error) {
+// tool signs: its input less max_cost and request_id is the args object. A
+// write's request_id is returned apart: it is the command's, the call's
+// idempotency key.
+func hostedCallData(m services.MethodEntry, shape hostedShape, in map[string]any) (data, requestID string, err error) {
 	args := map[string]any{}
 	// Left out, the quote for the arguments is the ceiling, as on the
 	// keyless call tools: a recurring wake-up costs one credit a firing.
@@ -173,20 +183,28 @@ func hostedCallData(m services.MethodEntry, shape hostedShape, in map[string]any
 			maxCost = v
 			continue
 		}
+		if k == services.CallFieldRequestID && m.Write() {
+			id, ok := v.(string)
+			if !ok || id == "" || len(id) > board.RequestIDBytes {
+				return "", "", bad(fmt.Sprintf("request_id must be a string of 1 to %d bytes.", board.RequestIDBytes))
+			}
+			requestID = id
+			continue
+		}
 		args[k] = v
 	}
-	if r, _ := args["resource"].(string); shape.prefix != "" && !strings.HasPrefix(r, shape.prefix) {
-		return "", bad("resource must be a " + shape.prefix + " id from x402_tools_search.")
+	if r, _ := args["resource"].(string); shape.prefix != "" && !services.IsToolID(r) {
+		return "", "", bad("resource must be a " + shape.prefix + " id from x402_tools_search.")
 	}
-	data := map[string]any{"schema": 1, "method": m.Name, "args": args}
+	call := map[string]any{"schema": 1, "method": m.Name, "args": args}
 	if m.Write() {
 		if maxCost == nil {
-			return "", bad("max_cost is required: the most this call may cost, in " + m.Resource + ".")
+			return "", "", bad("max_cost is required: the most this call may cost, in " + m.Resource + ".")
 		}
-		data["max_cost"] = maxCost
+		call["max_cost"] = maxCost
 	}
-	raw, err := json.Marshal(data)
-	return string(raw), err
+	raw, err := json.Marshal(call)
+	return string(raw), requestID, err
 }
 
 // addHostedServiceTools registers hostedServiceTools: each signs a
@@ -213,7 +231,7 @@ func (s *Server) addHostedServiceTools(server *mcp.Server, tool func(string) *mc
 				if err != nil {
 					return nil, board.Result{}, toolError(err)
 				}
-				data, err := hostedCallData(m, shape, in)
+				data, requestID, err := hostedCallData(m, shape, in)
 				if err != nil {
 					return nil, board.Result{}, toolError(err)
 				}
@@ -221,7 +239,7 @@ func (s *Server) addHostedServiceTools(server *mcp.Server, tool func(string) *mc
 				if m.Write() {
 					op = "service.call"
 				}
-				return hostedRun(hc, board.Command{Operation: op, Target: target, Data: data})
+				return hostedRun(hc, board.Command{Operation: op, Target: target, Data: data, RequestID: requestID})
 			})
 		}
 	}

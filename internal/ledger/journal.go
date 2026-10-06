@@ -13,7 +13,7 @@ import (
 	"swarmmemo/internal/allowance"
 )
 
-const entryCols = "seq,day,created_at,kind,account,counterparty,resource,bucket,amount,service,op,public_ref,params_version,detail"
+const entryCols = "seq,day,created_at,kind,account,counterparty,resource,bucket,amount,service,op,public_ref,params_version,detail,hold_id"
 
 // Journal reads the public journal, newest first. next is the cursor for the
 // following page (0 when there is none). Without an account the scan covers
@@ -48,7 +48,7 @@ func (l *Ledger) Journal(ctx context.Context, q allowance.Querier, query Journal
 	for rows.Next() {
 		var e Entry
 		var r, b string
-		if err = rows.Scan(&e.Seq, &e.Day, &e.CreatedAt, &e.Kind, &e.Account, &e.Counterparty, &r, &b, &e.Amount, &e.Service, &e.Op, &e.PublicRef, &e.ParamsVersion, &e.Detail); err != nil {
+		if err = rows.Scan(&e.Seq, &e.Day, &e.CreatedAt, &e.Kind, &e.Account, &e.Counterparty, &r, &b, &e.Amount, &e.Service, &e.Op, &e.PublicRef, &e.ParamsVersion, &e.Detail, &e.HoldID); err != nil {
 			return nil, 0, err
 		}
 		e.Resource, e.Bucket = allowance.Resource(r), allowance.Bucket(b)

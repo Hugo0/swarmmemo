@@ -94,6 +94,9 @@ type Entry struct {
 	PublicRef     string
 	ParamsVersion int64
 	Detail        string
+	// HoldID is the hold a commit or refund settles: never shown, only
+	// joined to the public facts of what it paid for.
+	HoldID string
 }
 
 // JournalQuery selects a page of the public journal, newest first.

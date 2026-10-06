@@ -188,7 +188,10 @@ func TestReceiverLifecycleAndDelivery(t *testing.T) {
 		t.Fatalf("the call record must not carry the secret: %q %v", calls, err)
 	}
 
-	receipt, err := r.deliver(id, token, delivery{body: `{"job":"build","status":"done"}`, headers: map[string]string{"x-github-event": "push", "authorization": "Bearer nope"}})
+	sent := map[string]string{"x-github-event": "push", "authorization": "Bearer nope", "x-colony-event-id": "evt_1", "x-hook-delivery-id": "d-7",
+		"cookie": "a=b", "x-hub-signature-256": "sha256=00", "x-webhook-secret-event-id": "s", "x-auth-token-request-id": "t",
+		"x-echo-request-id": "url " + token, "x-long-delivery-id": strings.Repeat("a", services.ReceiverHeaderBytes+1), "-event-id": "bare"}
+	receipt, err := r.deliver(id, token, delivery{body: `{"job":"build","status":"done"}`, headers: sent})
 	if err != nil || len(receipt.Item) != 32 || receipt.Bytes != 31 {
 		t.Fatalf("deliver: %+v %v", receipt, err)
 	}
@@ -199,8 +202,21 @@ func TestReceiverLifecycleAndDelivery(t *testing.T) {
 	if len(got) != 1 || got[0]["body"] != `{"job":"build","status":"done"}` || got[0]["screened"] != false || got[0]["screen"] != "off" || got[0]["untrusted"] != true {
 		t.Fatalf("items: %+v", got)
 	}
-	if h, _ := got[0]["headers"].(map[string]any); h["x-github-event"] != "push" || h["authorization"] != nil {
-		t.Fatalf("only the listed headers are kept: %+v", got[0]["headers"])
+	// The listed headers and providers' event, delivery and request ids are
+	// kept; credentials, cookies, signatures, secrets, the receive URL's
+	// secret and oversized values never are.
+	if h, _ := got[0]["headers"].(map[string]any); len(h) != 3 || h["x-github-event"] != "push" || h["x-colony-event-id"] != "evt_1" || h["x-hook-delivery-id"] != "d-7" {
+		t.Fatalf("kept headers: %+v", got[0]["headers"])
+	}
+	for _, name := range []string{"Authorization", "Cookie", "X-Hub-Signature-256", "X-Signature-Event-Id", "X-Client-Secret-Request-Id", "Set-Cookie"} {
+		if services.ReceiverKeepsHeader(name) {
+			t.Errorf("%s is kept", name)
+		}
+	}
+	for _, name := range []string{"X-Colony-Event-Id", "X-Request-Id", "Webhook-Delivery-Id", "User-Agent"} {
+		if !services.ReceiverKeepsHeader(name) {
+			t.Errorf("%s is not kept", name)
+		}
 	}
 	// Owner only: another agent's read and updates see nothing.
 	if other := items(t, r.read("bob", "items", map[string]any{})); len(other) != 0 {
@@ -249,6 +265,24 @@ func TestReceiverLifecycleAndDelivery(t *testing.T) {
 	r.now += services.ReceiverRetention
 	if got = items(t, r.read("alice", "items", map[string]any{})); len(got) != 2 || got[0]["stale"] != true {
 		t.Fatalf("stale, kept: %+v", got)
+	}
+}
+
+// An item keeps at most ReceiverHeadersMax headers, the listed ones first.
+func TestReceiverHeaderCap(t *testing.T) {
+	r := newRecvRig(t, 1<<30, services.ScreenDefaultOn)
+	id, token := r.create("alice", map[string]any{"screen": false})
+	many := map[string]string{"x-github-event": "push"}
+	for i := range services.ReceiverHeadersMax + 4 {
+		many[fmt.Sprintf("x-p%02d-event-id", i)] = "e"
+	}
+	if _, err := r.deliver(id, token, delivery{body: `{}`, headers: many}); err != nil {
+		t.Fatal(err)
+	}
+	got := items(t, r.read("alice", "items", map[string]any{}))
+	kept, _ := got[0]["headers"].(map[string]any)
+	if len(got) != 1 || len(kept) != services.ReceiverHeadersMax || kept["x-github-event"] != "push" || kept["x-p00-event-id"] != "e" {
+		t.Fatalf("the header cap: %d kept %v", len(kept), kept)
 	}
 }
 

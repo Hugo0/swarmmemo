@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/ledger"
+	"swarmmemo/internal/services"
 )
 
 // These tests pin the ledger modes themselves, so they skip when the whole
@@ -274,5 +275,65 @@ func TestAllowanceLineNamesTheCatalogue(t *testing.T) {
 	note := run(t, s, signed(alice, Command{Operation: "post", Text: "hello"})).Allowance
 	if note == nil || !strings.HasSuffix(note.Line, " Services: "+ServicesCatalogueURL+".") || note.Services != ServicesCatalogueURL || len(note.Line) > 255 {
 		t.Fatalf("allowance note %+v", note)
+	}
+}
+
+// An x402 spend's journal line carries its relay payment's on-chain facts
+// (network, EIP-3009 nonce, settlement transaction) so outsiders can match
+// it to the chain; a payment with no chain (a key-based bundler) carries
+// none, and the hold that links them is never shown.
+func TestLedgerX402LinesCarryTheSettlement(t *testing.T) {
+	if _, _, ok := ledgerTestOverride(); ok {
+		t.Skip("the ledger mode is overridden for the whole suite")
+	}
+	s := openTest(t, Config{Features: Features{Ledger: LedgerOn, Services: []string{"echo"}}})
+	setCreditCap(t, s, 100_000)
+	alice := keyFor(70)
+	register(t, s, alice)
+	for _, id := range []string{"chain-1", "chain-2"} {
+		run(t, s, svcCall(alice, "echo", "echo", map[string]any{"text": "x", "simulate": map[string]any{"mode": "remote"}}, 10, id))
+	}
+	// The two calls become x402 calls: one paid on a chain, one through a
+	// key-based bundler.
+	nonce, txHash := "0x"+strings.Repeat("12", 32), "0x"+strings.Repeat("ab", 32)
+	var holds []string
+	for i, network := range []string{"eip155:8453", "tools"} {
+		var hold, account, key string
+		if err := s.db.QueryRow("SELECT hold_id, account, request_key FROM service_calls WHERE request_key=?", "id:chain-"+string(rune('1'+i))).Scan(&hold, &account, &key); err != nil {
+			t.Fatal(err)
+		}
+		holds = append(holds, hold)
+		n := map[bool]string{true: nonce, false: "swarmmemo-0123"}[i == 0]
+		if _, err := s.db.Exec(`INSERT INTO x402_payments(id,account,request_key,resource,day,amount,network,asset,pay_to,nonce,valid_before,state,transaction_hash,allowlist_version,created_at)
+VALUES(?,?,?,'price',0,1500,?,'USDC','0x01',?,0,'paid',?,1,0)`, hold+"-pay", account, key, network, n, txHash); err != nil {
+			t.Fatal(err)
+		}
+		for _, table := range []string{"service_calls", "ledger_entries"} {
+			if _, err := s.db.Exec("UPDATE "+table+" SET service='x402' WHERE hold_id=?", hold); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	commits := map[int]map[string]any{}
+	for _, e := range run(t, s, Command{Operation: "ledger.list", Target: keyID(alice)}).Data["entries"].([]map[string]any) {
+		for _, v := range e {
+			if s, _ := v.(string); s == holds[0] || s == holds[1] {
+				t.Fatalf("a journal line shows its hold: %v", e)
+			}
+		}
+		if e["service"] == "x402" && e["kind"] == "commit" {
+			commits[len(commits)] = e
+		}
+	}
+	if len(commits) != 2 {
+		t.Fatalf("x402 commit lines %v", commits)
+	}
+	// Newest first: the bundler's call, then the chain's.
+	if _, ok := commits[0]["settlement"]; ok {
+		t.Fatalf("a payment with no chain has a settlement: %v", commits[0])
+	}
+	st, ok := commits[1]["settlement"].(services.X402Settlement)
+	if !ok || st.Network != "eip155:8453" || st.Nonce != nonce || st.Transaction != txHash {
+		t.Fatalf("settlement %v", commits[1])
 	}
 }

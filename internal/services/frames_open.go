@@ -58,6 +58,36 @@ const FramesPrefix = "tool:"
 // framesLegacyPrefix is the prefix 1.29.6 served; ids that carry it still resolve.
 const framesLegacyPrefix = "frames:"
 
+// framesVendorPrefix is the upstream's namespace on its own tools
+// ("frames.coingecko.post.api-price"). Public ids leave it out
+// ("tool:coingecko.post.api-price"): the catalogue is SwarmMemo tools, and
+// the upstream never appears in an answer. Ids that carry it still resolve.
+const framesVendorPrefix = "frames."
+
+// framesPublicTool is a tool's public name: its upstream id without the
+// upstream's namespace.
+func framesPublicTool(tool string) string { return strings.TrimPrefix(tool, framesVendorPrefix) }
+
+// framesToolID is a tool's public resource id, "tool:NAME".
+func framesToolID(tool string) string { return FramesPrefix + framesPublicTool(tool) }
+
+// framesLookup finds the upstream tool a public name stands for: the name
+// as given, else with the upstream's namespace put back, whichever a recent
+// search recorded; the name as given when neither is known.
+func framesLookup(ctx context.Context, q allowance.Querier, name string, now int64) (string, framesTool, bool, error) {
+	candidates := []string{name}
+	if !strings.HasPrefix(name, framesVendorPrefix) {
+		candidates = append(candidates, framesVendorPrefix+name)
+	}
+	for _, tool := range candidates {
+		row, known, err := framesToolRow(ctx, q, tool, now)
+		if err != nil || known {
+			return tool, row, known, err
+		}
+	}
+	return name, framesTool{}, false, nil
+}
+
 // Open Frames bounds.
 const (
 	framesSearchTTL     = 10 * time.Minute
@@ -489,7 +519,7 @@ func parseFramesSearchPage(raw []byte) (framesSearchPage, error) {
 			break
 		}
 		var h framesHitWire
-		if json.Unmarshal(rawHit, &h) != nil || !framesToolRE.MatchString(h.ID) || seen[h.ID] {
+		if json.Unmarshal(rawHit, &h) != nil || !framesToolRE.MatchString(h.ID) || !framesToolRE.MatchString(framesPublicTool(h.ID)) || seen[h.ID] {
 			continue
 		}
 		seen[h.ID] = true
@@ -555,14 +585,15 @@ func framesToolRow(ctx context.Context, q allowance.Querier, tool string, now in
 }
 
 // whyNot says why a tool is not callable now ("" when it is): Frames has not
-// vetted it, its category or host is denied, or its price is over the cap.
+// vetted it, its category or host is denied, or what a call of it costs
+// (framesCost of its price) is over the cap.
 func (f *framesState) whyNot(vetted bool, category, host string, price int64, priced bool) string {
 	switch {
 	case !vetted && !f.cfg.AllowUnvetted:
 		return "tool_unvetted"
 	case f.denied(category, host):
 		return "tool_denied"
-	case priced && price > f.cfg.MaxPrice:
+	case priced && framesCost(price) > f.cfg.MaxPrice:
 		return "tool_price_over_cap"
 	}
 	return ""
@@ -616,7 +647,7 @@ const framesCallNote = `service.call x402 {"schema":1,"method":"call","args":{"r
 
 // FramesNote says what the open Frames catalogue is, for the resources read
 // and /capabilities, the x402 summary and /for-agents.
-const FramesNote = `SwarmMemo tools: service.read x402 tools_search finds about ` + X402ToolsApprox + ` paid APIs for free, and tools_get reads one tool's live price and input schema; call a hit by its id ("tool:TOOL_ID") with service.call x402 call, its arguments as body. Callable are vetted tools (vetted: true), priced at most tools.max_price, not on the operator's denylist; a call is refused before any payment when the tool is not live or asks more, and charged what the tool bills.`
+const FramesNote = `SwarmMemo tools: service.read x402 tools_search finds about ` + X402ToolsApprox + ` paid APIs for free, and tools_get reads one tool's live price and input schema; call a hit by its id ("tool:TOOL_ID") with service.call x402 call, its arguments as body. Callable are vetted tools (vetted: true), priced at most tools.max_price, not on the operator's denylist; a call is refused before any payment when the tool is not live or asks more, and charged what the tool bills, never more than its cost (the quote, fees included).`
 
 // ReadRemote serves tools_search and tools_get after commit; every other
 // read is Read's.
@@ -632,11 +663,11 @@ func (x *x402) ReadRemote(ctx context.Context, q allowance.Querier, c Call) (fun
 		price = c.Prices["x402.call"]
 	}
 	if c.Method == "tools_get" {
-		tool, err := framesToolArg(c.Args)
+		name, err := framesToolArg(c.Args)
 		if err != nil {
 			return nil, err
 		}
-		row, known, err := framesToolRow(ctx, q, tool, c.Now)
+		tool, row, known, err := framesLookup(ctx, q, name, c.Now)
 		if err != nil {
 			return nil, err
 		}
@@ -686,13 +717,13 @@ func (x *x402) framesSearchRead(ctx context.Context, s framesSearch, price Price
 		if why == "" && h.Live != nil && !*h.Live {
 			why = "tool_unavailable"
 		}
-		e := map[string]any{"id": FramesPrefix + h.ID, "title": h.Title, "description": desc, "description_truncated": h.Truncated, "summary_status": status,
+		e := map[string]any{"id": framesToolID(h.ID), "title": h.Title, "description": desc, "description_truncated": h.Truncated, "summary_status": status,
 			"capabilities": h.Capabilities, "category": h.Category, "vetted": h.Vetted, "callable": why == "", "max_cost": price.For(f.cfg.MaxPrice)}
 		if why != "" {
 			e["why_not"] = why
 		}
 		if h.Priced {
-			e["price_usd"], e["cost"] = formatUnits(h.Price, 6), price.For(h.Price)
+			e["price_usd"], e["cost"] = formatUnits(h.Price, 6), price.For(framesCost(h.Price))
 			e["price_source"] = map[bool]string{true: "probe", false: "listing"}[h.Probed]
 		}
 		if h.Live != nil {
@@ -752,7 +783,8 @@ type framesToolArgs struct {
 	ID string `json:"id"`
 }
 
-// framesToolArg is tools_get's tool id, with or without "frames:".
+// framesToolArg is tools_get's tool name: its id with or without "tool:" (or
+// the legacy "frames:").
 func framesToolArg(raw json.RawMessage) (string, error) {
 	var a framesToolArgs
 	if err := StrictObject(raw, &a); err != nil {
@@ -895,7 +927,7 @@ func (x *x402) framesToolRead(ctx context.Context, tool string, row framesTool, 
 	if status == summaryWithheld {
 		desc = ""
 	}
-	out := map[string]any{"id": FramesPrefix + tool, "title": d.title, "description": desc, "summary_status": status, "capabilities": d.capabilities,
+	out := map[string]any{"id": framesToolID(tool), "title": d.title, "description": desc, "summary_status": status, "capabilities": d.capabilities,
 		"category": d.category, "host": d.host, "live": p.live, "payable": p.payable, "max_cost": price.For(x.fr.cfg.MaxPrice),
 		"tools": x.framesSummary(price), "call": framesCallNote, "text_is_untrusted": true}
 	priceNow, priced := p.price, p.priced
@@ -903,7 +935,7 @@ func (x *x402) framesToolRead(ctx context.Context, tool string, row framesTool, 
 		priceNow, priced = d.price, d.priced
 	}
 	if priced {
-		out["price_usd"], out["cost"] = formatUnits(priceNow, 6), price.For(priceNow)
+		out["price_usd"], out["cost"] = formatUnits(priceNow, 6), price.For(framesCost(priceNow))
 	}
 	switch {
 	case p.schema != nil:
@@ -946,7 +978,9 @@ func (x *x402) framesPlan(c Call, tool string, a x402Args) (x402Plan, error) {
 	if limit <= 0 {
 		return x402Plan{}, refusal("price_exceeds_max")
 	}
-	res := &X402Resource{ID: FramesPrefix + tool, URL: x.fr.b.endpoint, Method: http.MethodPost, Body: true, MaxAmount: limit,
+	// Tool is the name as given until framesGate resolves it to the
+	// upstream's id; ID is the public id either way.
+	res := &X402Resource{ID: framesToolID(tool), URL: x.fr.b.endpoint, Method: http.MethodPost, Body: true, MaxAmount: limit,
 		MaxResponseBytes: X402ResponseBytesMax, Timeout: X402TimeoutMax, Bundler: x.fr.b.Name(), Tool: tool, Category: "other", dynamic: true}
 	p := x402Plan{res: res, url: res.URL, max: limit, body: []byte("{}")}
 	if len(a.Body) > 0 {
@@ -983,8 +1017,8 @@ func affordable(price Price, maxCost, limit int64) int64 {
 // framesAdmit refuses, in the command's transaction, a call to a tool no
 // recent search returned, one Frames has not vetted (unless the config allows
 // it) and one whose category or known host is denied.
-func (x *x402) framesAdmit(ctx context.Context, q allowance.Querier, tool string, now int64) error {
-	row, known, err := framesToolRow(ctx, q, tool, now)
+func (x *x402) framesAdmit(ctx context.Context, q allowance.Querier, name string, now int64) error {
+	_, row, known, err := framesLookup(ctx, q, name, now)
 	if err != nil {
 		return err
 	}
@@ -1000,16 +1034,18 @@ func (x *x402) framesAdmit(ctx context.Context, q allowance.Querier, tool string
 // framesGate decides, after commit and before any money moves, whether the
 // call may go on: the admission check again, the tool's host against the
 // denylist, and a live probe: live and payable, priced at most max_price and
-// at most what the caller's ceiling covers.
-func (x *x402) framesGate(ctx context.Context, c Call, p x402Plan) error {
-	tool := p.res.Tool
-	row, known, err := framesToolRow(ctx, x.db, tool, c.Now)
+// at most what the caller's ceiling covers. It resolves the plan's tool name
+// to the upstream's id and lowers the plan's maximum to the tool's cost
+// (framesCost), the quote tools_get showed.
+func (x *x402) framesGate(ctx context.Context, c Call, p *x402Plan) error {
+	tool, row, known, err := framesLookup(ctx, x.db, p.res.Tool, c.Now)
 	if err != nil {
 		return refusal("upstream_failed")
 	}
 	if !known {
 		return refusal("x402_unknown_resource")
 	}
+	p.res.Tool = tool
 	d, err := x.framesDescriptorOf(ctx, tool)
 	if err != nil {
 		return err
@@ -1024,13 +1060,23 @@ func (x *x402) framesGate(ctx context.Context, c Call, p x402Plan) error {
 	if err != nil {
 		return err
 	}
+	// The price tools_get quotes: the probe's, else the descriptor's.
+	priceNow, priced := pr.price, pr.priced
+	if !priced {
+		priceNow, priced = d.price, d.priced
+	}
+	cost := framesCost(priceNow)
 	switch {
 	case !pr.live || !pr.payable:
 		return refusal("tool_unavailable")
-	case pr.priced && pr.price > x.fr.cfg.MaxPrice:
+	case priced && cost > x.fr.cfg.MaxPrice:
 		return refusal("tool_price_over_cap")
-	case pr.priced && pr.price > p.max:
+	case priced && cost > p.max:
 		return refusal("price_exceeds_max")
+	}
+	// Never more than the quote: Frames may bill at most the tool's cost.
+	if priced {
+		p.max = cost
 	}
 	p.res.framesSearch = row.searchID
 	return nil
@@ -1064,6 +1110,13 @@ func (x *x402) CheckAnonymous(c Call) error {
 		return refusal("anonymous_not_allowed")
 	}
 	return nil
+}
+
+// IsToolID reports whether a resource id names a SwarmMemo tool: "tool:NAME",
+// or the legacy prefix 1.29.6 served.
+func IsToolID(id string) bool {
+	_, ok := framesResource(id)
+	return ok
 }
 
 // framesResource reports whether a resource id names an open Frames tool,

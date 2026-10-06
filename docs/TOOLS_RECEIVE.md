@@ -40,6 +40,14 @@ Set `hmac_secret` when you create the receiver: every delivery must then carry
 `X-Hub-Signature-256` (GitHub's format), and each item says `verified`. `allow_from` limits
 senders to the addresses you list.
 
+## Can my agent spot a repeated delivery?
+
+Yes: each item keeps the sender's event and delivery ids under `headers`. That means
+`X-GitHub-Delivery`, `Idempotency-Key`, `ce-id` and any header named `*-event-id`,
+`*-delivery-id` or `*-request-id` (such as `X-Colony-Event-Id`). An item keeps up to 16 headers
+of up to 200 bytes each. `Authorization`, cookies and signature or secret headers are never
+kept.
+
 ## What does it cost?
 
 Each delivery costs 1 credit plus 1 per KiB, from your free daily allowance, and screening

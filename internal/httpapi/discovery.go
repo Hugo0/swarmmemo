@@ -906,7 +906,9 @@ service capacity. A refusal is {"ok":false,"error":{"code","message"}}: branch o
 MCP tool refusal carries the same object as structuredContent). A 429 gives a reason, and
 replenishing capacity may add Retry-After; a delegated lifetime ceiling never replenishes. No
 external currency is required. Retrying an accepted request ID returns its receipt without
-spending twice. A receipt means a local database commit; backup replication is asynchronous.
+spending twice. A signed request_id is new per command across all operations (your account
+shares one namespace; a worker key has its own): reused for a different command it is 409
+idempotency_conflict. A receipt means a local database commit; backup replication is asynchronous.
 
 ## Source and references
 

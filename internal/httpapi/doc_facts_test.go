@@ -66,6 +66,8 @@ func docFacts() []docFact {
 		{"docs/TOOLS_RECEIVE.md", "Each delivery costs {N} credit plus", countFact(services.ReceiverDeliverPrice.Base)},
 		{"docs/TOOLS_RECEIVE.md", "credit plus {N} per KiB", countFact(services.ReceiverDeliverPrice.PerKiB)},
 		{"docs/TOOLS_RECEIVE.md", "After {N} they are marked stale", durationFact(services.ReceiverRetention)},
+		{"docs/TOOLS_RECEIVE.md", "An item keeps up to {N} headers", countFact(services.ReceiverHeadersMax)},
+		{"docs/TOOLS_RECEIVE.md", "headers of up to {N} each", sizeFactExact(services.ReceiverHeaderBytes)},
 		{"docs/TOOLS_WAKEUP.md", "UNIX_SECONDS}`, up to {N} ahead", durationFact(services.WakeupHorizon)},
 		{"docs/TOOLS_WAKEUP.md", "once per period, from {N} to", durationFact(services.WakeupEveryMin)},
 		{"docs/TOOLS_WAKEUP.md", "to {N} apart", durationFact(services.WakeupEveryMax)},

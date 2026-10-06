@@ -43,10 +43,11 @@ func (s *Server) receive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, bad("The request body could not be read."))
 		return
 	}
+	// The headers an item may keep (the service caps their count and size).
 	headers := map[string]string{}
-	for _, name := range services.ReceiverHeaders() {
-		if v := r.Header.Get(name); v != "" {
-			headers[name] = v
+	for name, values := range r.Header {
+		if len(values) > 0 && values[0] != "" && services.ReceiverKeepsHeader(name) {
+			headers[strings.ToLower(name)] = values[0]
 		}
 	}
 	receipt, err := svc.Receive(r.Context(), services.Delivery{ID: id, Token: token, ContentType: r.Header.Get("Content-Type"), Body: body,

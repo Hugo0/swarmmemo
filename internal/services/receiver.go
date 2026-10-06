@@ -71,9 +71,12 @@ const (
 	ReceiverHMACMin    = 16
 	ReceiverHMACMax    = 256
 	ReceiverAllowMax   = 8
-	// receiverHeaderBytes bounds one kept header value.
-	receiverHeaderBytes = 200
-	receiverArgsMax     = 2048
+	// ReceiverHeaderBytes bounds one kept header value, ReceiverHeadersMax
+	// the headers an item keeps, and receiverHeaderNameBytes a kept name.
+	ReceiverHeaderBytes     = 200
+	ReceiverHeadersMax      = 16
+	receiverHeaderNameBytes = 64
+	receiverArgsMax         = 2048
 	// receiverScreenWorkers screen delivered items after commit;
 	// receiverScreenQueue bounds the queue, past which an item waits for
 	// the worker's pass. receiverScreenRetry is how long a pending item
@@ -106,8 +109,68 @@ var (
 // names and delivery ids, never credentials or cookies.
 var receiverHeaders = []string{"user-agent", "x-github-event", "x-github-delivery", "x-github-hook-id", "x-gitlab-event", "x-event-type", "x-request-id", "idempotency-key", "ce-type", "ce-id", "ce-source"}
 
-// ReceiverHeaders are the header names an item keeps.
+// ReceiverHeaders are the header names an item keeps by name.
 func ReceiverHeaders() []string { return append([]string(nil), receiverHeaders...) }
+
+// ReceiverHeaderPatterns are the other headers an item keeps, so a receiver
+// can dedupe a provider's deliveries (x-colony-event-id): any name with one
+// of these endings.
+var ReceiverHeaderPatterns = []string{"*-event-id", "*-delivery-id", "*-request-id"}
+
+var (
+	receiverHeaderNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	// receiverHeaderSecretRE are names never kept, whatever their ending:
+	// credentials, cookies, signatures and secrets.
+	receiverHeaderSecretRE = regexp.MustCompile(`authorization|auth|cookie|signature|secret|token|password|credential|api-key|apikey`)
+)
+
+// ReceiverKeepsHeader reports whether an item keeps a header by its name
+// (any case): one of ReceiverHeaders, or a name matching
+// ReceiverHeaderPatterns that names no credential, cookie, signature or
+// secret.
+func ReceiverKeepsHeader(name string) bool {
+	name = strings.ToLower(name)
+	if slices.Contains(receiverHeaders, name) {
+		return true
+	}
+	if len(name) > receiverHeaderNameBytes || !receiverHeaderNameRE.MatchString(name) || receiverHeaderSecretRE.MatchString(name) {
+		return false
+	}
+	for _, p := range ReceiverHeaderPatterns {
+		if suffix := strings.TrimPrefix(p, "*"); strings.HasSuffix(name, suffix) && len(name) > len(suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// keptHeaders are the headers of a delivery an item keeps: names
+// ReceiverKeepsHeader keeps, printable values up to ReceiverHeaderBytes that
+// never carry the receive URL's secret, at most ReceiverHeadersMax of them
+// (the named ones first, then by name).
+func keptHeaders(in map[string]string, token string) map[string]string {
+	names := make([]string, 0, len(in))
+	for k, v := range in {
+		if ReceiverKeepsHeader(k) && k == strings.ToLower(k) && len(v) <= ReceiverHeaderBytes && headerValueRE.MatchString(v) && (token == "" || !strings.Contains(v, token)) {
+			names = append(names, k)
+		}
+	}
+	slices.SortFunc(names, func(a, b string) int {
+		an, bn := slices.Contains(receiverHeaders, a), slices.Contains(receiverHeaders, b)
+		switch {
+		case an && !bn:
+			return -1
+		case bn && !an:
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
+	out := map[string]string{}
+	for _, k := range names[:min(len(names), ReceiverHeadersMax)] {
+		out[k] = in[k]
+	}
+	return out
+}
 
 type receiver struct {
 	board    BoardView
@@ -219,7 +282,8 @@ func (r *receiver) CatalogueExtra() map[string]any {
 	screening["surcharge"] = "what the classifier cost, at most " + ScreenSurchargePriceText()
 	return map[string]any{
 		"deliver": map[string]any{"method": "POST", "url": r.origin + ReceiverPathPrefix + "RECEIVER_ID/SECRET", "price": ReceiverDeliverPrice,
-			"content_types": []string{"application/json", "application/x-www-form-urlencoded", "text/*"}, "signature_header": "X-Hub-Signature-256", "kept_headers": receiverHeaders},
+			"content_types": []string{"application/json", "application/x-www-form-urlencoded", "text/*"}, "signature_header": "X-Hub-Signature-256", "kept_headers": receiverHeaders,
+			"kept_header_patterns": ReceiverHeaderPatterns, "kept_headers_max": ReceiverHeadersMax, "kept_header_bytes": ReceiverHeaderBytes},
 		"screening": screening,
 		"outbound":  false, "public": false, "tool_page": "/tools/receive",
 	}
@@ -637,7 +701,7 @@ type Delivery struct {
 	Body        []byte // at most ReceiverBodyBytes+1 bytes: one more means too large
 	Signature   string // X-Hub-Signature-256
 	Source      net.IP
-	Headers     map[string]string // lowercase name: value, for receiverHeaders
+	Headers     map[string]string // lowercase name: value, for the names ReceiverKeepsHeader keeps
 }
 
 // DeliveryReceipt is what the sender is told.
@@ -799,12 +863,7 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 			screen = "unavailable"
 		}
 	}
-	headers := map[string]string{}
-	for k, v := range d.Headers {
-		if len(v) <= receiverHeaderBytes && headerValueRE.MatchString(v) && slices.Contains(receiverHeaders, k) {
-			headers[k] = v
-		}
-	}
+	headers := keptHeaders(d.Headers, d.Token)
 	var latest int64
 	if r.board != nil {
 		if latest, err = r.board.LatestSeq(ctx, tx); err != nil {

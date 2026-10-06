@@ -372,6 +372,26 @@ func errCode(err error) string {
 // micro-USDC (version 0 of the "x402.call" parameter).
 func creditsFor(micro int64) int64 { return 100 + micro + 100*((micro+1023)/1024) }
 
+// X402Settlements finds a paid call's on-chain facts by its hold: the
+// network, the authorization's nonce and the settlement transaction.
+func TestX402SettlementsMatchTheChain(t *testing.T) {
+	h := newX402Harness(t, &fakeX402{price: 1500, version: 2}, `{}`)
+	if _, err := h.call(testSubject, `{"resource":"price","query":{"ids":"bitcoin","vs":"usd"}}`, creditsFor(10000)); err != nil {
+		t.Fatal(err)
+	}
+	var hold, nonce string
+	if err := h.db.QueryRow("SELECT sc.hold_id, p.nonce FROM service_calls sc JOIN x402_payments p ON p.request_key=sc.request_key").Scan(&hold, &nonce); err != nil {
+		t.Fatal(err)
+	}
+	got, err := X402Settlements(context.Background(), h.db, []string{hold, "no-such-hold"})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("settlements %v %v", got, err)
+	}
+	if s := got[hold]; s.Network != "eip155:8453" || s.Nonce != nonce || s.Transaction != "0x"+strings.Repeat("ab", 32) {
+		t.Fatalf("settlement %+v", s)
+	}
+}
+
 func TestX402PaysAndReturns(t *testing.T) {
 	for _, version := range []int{2, 1} {
 		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {

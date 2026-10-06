@@ -117,6 +117,22 @@ func (f *frames) Endpoint() string { return f.endpoint }
 func (f *frames) String() string   { return "frames(" + f.endpoint + ")" }
 func (f *frames) GoString() string { return f.String() }
 
+// framesFeePercent is what Frames adds to a tool's price on every call
+// ("data that arrived + 15%").
+const framesFeePercent = 15
+
+// framesCost is the most Frames bills for one call of a tool priced price
+// (micro-USD): the price plus framesFeePercent, rounded up to whole credits.
+// It is the one figure behind a tool's quote (tools_search and tools_get
+// cost) and the most a call of it pays (framesGate caps max_usd at it).
+func framesCost(price int64) int64 {
+	if price <= 0 {
+		return 0
+	}
+	withFee := price + (price*framesFeePercent+99)/100
+	return (withFee + framesCreditMicroUSD - 1) / framesCreditMicroUSD * framesCreditMicroUSD
+}
+
 // framesCharged is what Frames reports it charged, in micro-USD, capped at
 // max: a value at or over the cap, negative or not a number is the cap, so
 // no float conversion can overflow into a free call (security review of the
@@ -149,7 +165,7 @@ func (f *frames) Exchange(ctx context.Context, p x402Plan, pay *payment) (x402Re
 	}
 	req := p
 	req.body = body
-	if err = pay.reserve(ctx, p, reservation{amount: p.max, network: f.Name(), asset: "USD", payTo: "frames:" + p.res.Tool, nonce: idem, validBefore: time.Now().Unix() + int64(p.res.Timeout/time.Second)}); err != nil {
+	if err = pay.reserve(ctx, p, reservation{amount: p.max, network: f.Name(), asset: "USD", payTo: framesToolID(p.res.Tool), nonce: idem, validBefore: time.Now().Unix() + int64(p.res.Timeout/time.Second)}); err != nil {
 		return x402Response{}, nil, err
 	}
 	resp, err := pay.fetch(ctx, req, http.Header{"Authorization": {"Bearer " + f.key}}, p.res.MaxResponseBytes)
@@ -186,6 +202,11 @@ func (f *frames) Exchange(ctx context.Context, p x402Plan, pay *payment) (x402Re
 			}
 			delete(out, "billing") // our account's balance is not the agent's business
 			if b := canonicalJSON(out); b != nil {
+				// The rows name the tool by its public name, never the
+				// upstream's id.
+				if name := framesPublicTool(p.res.Tool); name != p.res.Tool {
+					b = bytes.ReplaceAll(b, []byte(strconv.Quote(p.res.Tool)), []byte(strconv.Quote(name)))
+				}
 				resp.body = b
 			}
 		}
@@ -196,5 +217,5 @@ func (f *frames) Exchange(ctx context.Context, p x402Plan, pay *payment) (x402Re
 	}
 	pay.settle(charged)
 	return resp, &x402Receipt{Amount: strconv.FormatInt(charged, 10), Price: formatUnits(charged, 6), Asset: "USD", Network: publicBundler(f.Name()),
-		PayTo: FramesPrefix + p.res.Tool, Payer: "swarmmemo", Nonce: idem}, nil
+		PayTo: framesToolID(p.res.Tool), Payer: "swarmmemo", Nonce: idem}, nil
 }
