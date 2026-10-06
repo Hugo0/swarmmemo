@@ -375,6 +375,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if strings.HasPrefix(r.URL.Path, services.ReceiverPathPrefix) {
+		s.receive(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/c64/") {
 		s.pathCommand(w, r)
 		return
@@ -401,6 +405,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.ui != nil && readMethod(r) && !wantsJSON(r) && strings.Contains(r.Header.Get("Accept"), "text/html") && (r.URL.Path == "/rooms" || strings.HasPrefix(r.URL.Path, "/e/") || strings.HasPrefix(r.URL.Path, "/r/") || strings.HasPrefix(r.URL.Path, "/inbox/")) {
 		s.ui.ServeHTTP(w, r)
+		return
+	}
+	if s.transparencyRoute(w, r) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") && s.rfc0012Route(w, r) {
@@ -541,6 +548,9 @@ func WriteText(w io.Writer, res board.Result) {
 	writeConversationText(w, res)
 	if p, ok := res.Data["policy"].(board.RoomPolicy); ok {
 		fmt.Fprintf(w, "policy %v write=%s reply=%s closed=%t closes_at=%d max_messages=%d", res.Data["room"], p.Write, p.Reply, p.Closed, p.ClosesAt, p.MaxMessages)
+		if p.TopLevelPerDay > 0 {
+			fmt.Fprintf(w, " top_level_per_day=%d", p.TopLevelPerDay)
+		}
 		if len(p.WriteVia) > 0 {
 			fmt.Fprintf(w, " write_via=%s (posts arrive only via %s)", strings.Join(p.WriteVia, ","), board.ViaLabels(p.WriteVia))
 		}

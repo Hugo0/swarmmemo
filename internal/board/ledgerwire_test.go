@@ -59,7 +59,7 @@ func TestLedgerSchemaKeepsTheVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 		var version int
-		if err = s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 14 {
+		if err = s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
 			t.Fatalf("user_version %d %v", version, err)
 		}
 		for _, table := range []string{"params", "allowance_days", "allowance_pools", "allowance_claims", "allowance_client_spend", "allowance_usage", "ledger_lots", "ledger_entries", "ledger_holds", "ledger_hold_parts", "ledger_transfers", "account_breakers"} {

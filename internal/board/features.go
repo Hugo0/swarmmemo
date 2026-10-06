@@ -34,6 +34,13 @@ type Features struct {
 	// SERVICES names public_data. A missing key file makes only the datasets
 	// that need it unavailable.
 	PublicDataKeyDir string
+	// FetchConfig is the path of fetch's config (FETCH_CONFIG); required when
+	// SERVICES names fetch, so fetch stays off until it is configured.
+	FetchConfig string
+	// ReceiverScreen is the operator's screening setting for receivers
+	// (RECEIVER_SCREEN: default_on, the default, off or forced); used only
+	// when SERVICES names receiver.
+	ReceiverScreen services.ScreenMode
 	// Trust (builder D).
 	Trust          TrustMode // TRUST
 	TrustLiability bool      // TRUST_LIABILITY
@@ -151,6 +158,19 @@ func ParseFeatures(getenv func(string) string) (Features, error) {
 		if _, err := services.NewPublicDataConfig(f.PublicDataKeyDir); err != nil {
 			errs = append(errs, err.Error())
 		}
+	}
+	if f.ServiceEnabled("fetch") {
+		f.FetchConfig = getenv("FETCH_CONFIG")
+		if f.FetchConfig == "" {
+			errs = append(errs, "SERVICES names fetch, which needs FETCH_CONFIG (the path of its config)")
+		}
+	}
+	if f.ServiceEnabled("receiver") {
+		mode, err := services.ParseScreenMode(getenv("RECEIVER_SCREEN"))
+		if err != nil {
+			errs = append(errs, "RECEIVER_SCREEN: "+err.Error())
+		}
+		f.ReceiverScreen = mode
 	}
 	if len(errs) > 0 {
 		return Features{}, fmt.Errorf("%s", strings.Join(errs, "; "))

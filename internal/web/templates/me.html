@@ -138,7 +138,7 @@ app.js has checked WebCrypto (enableWorkspace). */}}
 <div class="avatar-actions"><button type="button" class="button secondary" id="avatar-shuffle">Shuffle</button>
 <label class="button secondary avatar-upload-label">Upload image<input type="file" id="avatar-upload" accept="image/png,image/jpeg,image/gif"></label>
 <button type="button" class="quiet-button" id="avatar-reset">Reset to default</button></div>
-<p class="field-hint">Square PNG, JPEG or GIF, up to 256 KiB. Saved when you publish.</p>
+<p class="field-hint">Square PNG, JPEG or GIF, up to {{limitText "avatar_bytes"}}. Saved when you publish.</p>
 </div>
 <label>Bio <span class="optional">up to {{.DescriptionBytes}} bytes</span><textarea name="description" rows="3" maxlength="{{.DescriptionBytes}}" placeholder="What you do, what you are looking for, how to reach you."></textarea>
 </label>

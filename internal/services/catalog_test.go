@@ -28,7 +28,9 @@ var argShapes = map[string]any{
 	"runs.run": runsArgs{}, "runs.log": struct {
 		Run string `json:"run"`
 	}{},
-	"echo.echo": echoArgs{},
+	"echo.echo":       echoArgs{},
+	"receiver.create": receiverCreateArgs{}, "receiver.rotate": receiverRef{}, "receiver.delete": receiverRef{}, "receiver.list": struct{}{}, "receiver.items": receiverItemsArgs{},
+	"fetch.page": fetchArgs{},
 }
 
 func jsonFields(t reflect.Type) map[string]bool {

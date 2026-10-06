@@ -154,7 +154,7 @@ func (h catalogHelp) dnsHelp(zone string) []string {
 		}
 	}
 	if len(h.catalog) > 0 {
-		out = append(out, oneLine("Services: "+strings.Join(h.ids(), ", ")+". One line each: TXT services."+zone+"; one in full: TXT ID.services."+zone+"; catalogue, prices and examples: "+h.origin+board.ServicesCatalogueURL, 255))
+		out = append(out, oneLine("Services: "+strings.Join(h.ids(), ", ")+". One line each: TXT services."+zone+"; one in full: TXT ID.services."+zone+"; catalogue and prices: "+h.origin+board.ServicesCatalogueURL, 255))
 	}
 	if n := h.noKey(); n.Available {
 		// DNS names the URL but does not carry the call: a query comes from a

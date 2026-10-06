@@ -258,7 +258,7 @@ func TestTrustLiftOnlyLifts(t *testing.T) {
 }
 
 // Fragment D only creates tables and indexes: a schema-14 database without
-// them migrates in place, keeps user_version 14 and passes integrity.
+// them migrates in place, keeps user_version and passes integrity.
 func TestTrustSchemaFragmentMigrates(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema14.sqlite")
 	s, err := Open(path, Config{})
@@ -277,7 +277,7 @@ func TestTrustSchemaFragmentMigrates(t *testing.T) {
 		if s, err = Open(path, Config{}); err != nil {
 			t.Fatal(err)
 		}
-		if got := sqlCount(t, s, "PRAGMA user_version"); got != int64(SchemaVersion) || SchemaVersion != 14 {
+		if got := sqlCount(t, s, "PRAGMA user_version"); got != int64(SchemaVersion) || SchemaVersion != 15 {
 			t.Fatalf("user_version %d", got)
 		}
 		if n := sqlCount(t, s, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE 'trust_%'"); n != 8 {

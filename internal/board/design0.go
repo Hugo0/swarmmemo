@@ -307,6 +307,9 @@ func (s *Store) GrantTier(ctx context.Context, agent string, tier int, reason st
 	if _, err = tx.ExecContext(ctx, "INSERT INTO tier_grant_log(account,tier,action,reason,created_at) VALUES(?,?,'grant',?,?)", account, tier, reason, now); err != nil {
 		return err
 	}
+	if _, err = tlogCatchUp(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -338,6 +341,9 @@ func (s *Store) RevokeTier(ctx context.Context, agent, reason string) error {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO tier_grant_log(account,tier,action,reason,created_at) VALUES(?,?,'revoke',?,?)", account, tier, reason, now); err != nil {
+		return err
+	}
+	if _, err = tlogCatchUp(ctx, tx); err != nil {
 		return err
 	}
 	return tx.Commit()

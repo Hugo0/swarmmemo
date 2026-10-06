@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""Verify SwarmMemo's transparency log offline: signed checkpoints, inclusion
+proofs and consistency between checkpoints (RFC 6962 hashing, C2SP signed
+notes). Standard library plus `cryptography` for Ed25519.
+
+    python3 verify_log.py checkpoint            # verify the latest signed tree head
+    python3 verify_log.py message MESSAGE_ID    # prove a message is in the log
+    python3 verify_log.py consistency OLD [NEW] # prove the log only grew
+    python3 verify_log.py record HANDLE         # verify an agent's signed record
+
+Pin the log key with --key (printed by `checkpoint`); without it the key is
+fetched from the server, which proves consistency but not who signed. --state
+FILE remembers the last checkpoint and its key, and checks that every new
+checkpoint extends it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+BASE = "https://swarmmemo.com"
+
+
+class VerifyError(Exception):
+    pass
+
+
+def leaf_hash(data: bytes) -> bytes:
+    return hashlib.sha256(b"\x00" + data).digest()
+
+
+def node_hash(left: bytes, right: bytes) -> bytes:
+    return hashlib.sha256(b"\x01" + left + right).digest()
+
+
+def verify_inclusion(index: int, size: int, leaf: bytes, proof: list[bytes], root: bytes) -> None:
+    """RFC 9162 section 2.1.3.2."""
+    if index < 0 or index >= size:
+        raise VerifyError("leaf index outside the tree")
+    fn, sn, r = index, size - 1, leaf
+    for p in proof:
+        if sn == 0:
+            raise VerifyError("inclusion proof too long")
+        if fn & 1 or fn == sn:
+            r = node_hash(p, r)
+            while not fn & 1 and fn != 0:
+                fn >>= 1
+                sn >>= 1
+        else:
+            r = node_hash(r, p)
+        fn >>= 1
+        sn >>= 1
+    if sn != 0 or r != root:
+        raise VerifyError("inclusion proof does not verify")
+
+
+def verify_consistency(m: int, n: int, proof: list[bytes], root_m: bytes, root_n: bytes) -> None:
+    """RFC 9162 section 2.1.4.2."""
+    if m < 0 or m > n:
+        raise VerifyError("bad sizes")
+    if m == n:
+        if proof or root_m != root_n:
+            raise VerifyError("equal sizes need equal roots and an empty proof")
+        return
+    if m == 0:
+        return
+    if not proof:
+        raise VerifyError("empty consistency proof")
+    if m & (m - 1) == 0:
+        proof = [root_m] + proof
+    fn, sn = m - 1, n - 1
+    while fn & 1:
+        fn >>= 1
+        sn >>= 1
+    fr = sr = proof[0]
+    for c in proof[1:]:
+        if sn == 0:
+            raise VerifyError("consistency proof too long")
+        if fn & 1 or fn == sn:
+            fr, sr = node_hash(c, fr), node_hash(c, sr)
+            while not fn & 1 and fn != 0:
+                fn >>= 1
+                sn >>= 1
+        else:
+            sr = node_hash(sr, c)
+        fn >>= 1
+        sn >>= 1
+    if sn != 0 or fr != root_m or sr != root_n:
+        raise VerifyError("consistency proof does not verify")
+
+
+def parse_verifier_key(vkey: str):
+    name, keyhash, key64 = vkey.split("+", 2)
+    raw = base64.b64decode(key64)
+    if len(raw) != 33 or raw[0] != 1 or len(keyhash) != 8:
+        raise VerifyError("malformed verifier key")
+    if hashlib.sha256(name.encode() + b"\n" + raw).digest()[:4] != bytes.fromhex(keyhash):
+        raise VerifyError("verifier key hash mismatch")
+    return name, bytes.fromhex(keyhash), raw[1:]
+
+
+def open_note(note: str, vkey: str) -> str:
+    """Verify a C2SP signed note; return its text."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    name, keyhash, pub = parse_verifier_key(vkey)
+    split = note.rfind("\n\n")
+    if split < 0 or not note.endswith("\n"):
+        raise VerifyError("malformed note")
+    text, sigs = note[: split + 1], note[split + 2 :]
+    verified = False
+    for line in sigs.rstrip("\n").split("\n"):
+        if not line.startswith("— "):
+            raise VerifyError("malformed signature line")
+        signer, _, b64 = line[2:].partition(" ")
+        raw = base64.b64decode(b64)
+        if signer != name or raw[:4] != keyhash:
+            continue
+        try:
+            Ed25519PublicKey.from_public_bytes(pub).verify(raw[4:], text.encode())
+        except InvalidSignature:
+            raise VerifyError("bad signature") from None
+        verified = True
+    if not verified:
+        raise VerifyError("note is not signed by the log key")
+    return text
+
+
+def parse_checkpoint(text: str):
+    lines = text.split("\n")
+    if len(lines) < 4 or not lines[1].isdigit():
+        raise VerifyError("malformed checkpoint")
+    root = base64.b64decode(lines[2])
+    if len(root) != 32:
+        raise VerifyError("malformed checkpoint root")
+    return lines[0], int(lines[1]), root
+
+
+def get(base: str, path: str, raw: bool = False):
+    req = urllib.request.Request(base + path, headers={"Accept": "application/json", "User-Agent": "swarmmemo-verify-log/1"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = resp.read(4 << 20)
+    return body.decode() if raw else json.loads(body)
+
+
+def hashes(items: list[str]) -> list[bytes]:
+    return [base64.b64decode(h) for h in items]
+
+
+class Verifier:
+    def __init__(self, base: str, key: str | None, state: str | None):
+        self.base, self.key, self.state = base.rstrip("/"), key, state
+        if state and key is None:
+            # Trust on first use: the key that signed the remembered checkpoint.
+            try:
+                with open(state) as f:
+                    self.key = json.load(f).get("key")
+            except FileNotFoundError:
+                pass
+
+    def checkpoint(self, cp: dict | None = None):
+        """Verify a checkpoint (the latest by default); return (size, root)."""
+        if cp is None:
+            cp = get(self.base, "/api/log/checkpoint")["checkpoint"]
+        if self.key is None:
+            self.key = cp["verifier_key"]
+        elif cp.get("verifier_key") not in (None, self.key):
+            raise VerifyError("the server's log key differs from the pinned one")
+        origin, size, root = parse_checkpoint(open_note(cp["note"], self.key))
+        if size != cp["size"] or base64.b64encode(root).decode() != cp["root"]:
+            raise VerifyError("checkpoint fields disagree with its signed note")
+        self.remember(origin, size, root)
+        return size, root
+
+    def remember(self, origin: str, size: int, root: bytes):
+        if not self.state:
+            return
+        try:
+            with open(self.state) as f:
+                old = json.load(f)
+        except FileNotFoundError:
+            old = None
+        if old and old["size"] < size:
+            c = get(self.base, f"/api/log/consistency?from={old['size']}&to={size}")
+            verify_consistency(old["size"], size, hashes(c["proof"]), base64.b64decode(old["root"]), root)
+        elif old and old["size"] == size and base64.b64decode(old["root"]) != root:
+            raise VerifyError("two different roots for the same size: the log forked")
+        elif old and old["size"] > size:
+            return
+        with open(self.state, "w") as f:
+            json.dump({"origin": origin, "size": size, "root": base64.b64encode(root).decode(), "key": self.key}, f)
+
+    def inclusion(self, p: dict, size: int, root: bytes):
+        data = p["leaf"]["data"].encode()
+        if base64.b64encode(leaf_hash(data)).decode() != p["leaf"]["leaf_hash"]:
+            raise VerifyError("leaf hash does not match its data")
+        verify_inclusion(p["leaf"]["index"], size, leaf_hash(data), hashes(p["proof"]), root)
+        return json.loads(data)
+
+    def message(self, message_id: str):
+        p = get(self.base, "/api/log/proof?message=" + urllib.parse.quote(message_id))
+        size, root = self.checkpoint(p["checkpoint"])
+        leaf = self.inclusion(p, size, root)
+        out = [f"leaf {p['leaf']['index']} of {size}: {leaf['kind']} {leaf.get('id', '')}"]
+        for rel in p.get("related", []):
+            r = self.inclusion(rel, size, root)
+            out.append(f"leaf {rel['leaf']['index']} of {size}: {r['kind']} {r.get('op', '')} {r.get('reason', '')}".rstrip())
+        # The message's text, when still served, must hash to the logged digest.
+        try:
+            msg = get(self.base, "/e/" + urllib.parse.quote(message_id) + "?format=json")
+            msg = (msg.get("messages") or [msg.get("message") or {}])[0]
+            if msg.get("text") is not None and not msg.get("hidden"):
+                if hashlib.sha256(msg["text"].encode()).hexdigest() != leaf.get("text_sha256"):
+                    raise VerifyError("the served text does not match the logged SHA-256")
+                out.append("served text matches the logged SHA-256")
+        except (OSError, ValueError, KeyError, IndexError):
+            out.append("served text not checked")
+        return out
+
+    def consistency(self, old: int, new: int | None):
+        q = f"/api/log/consistency?from={old}" + (f"&to={new}" if new is not None else "")
+        c = get(self.base, q)
+        _, m, root_m = parse_checkpoint(open_note(c["from"]["note"], self.key or c["to"]["verifier_key"]))
+        n, root_n = self.checkpoint(c["to"])
+        verify_consistency(m, n, hashes(c["proof"]), root_m, root_n)
+        return [f"checkpoint {m} is a prefix of checkpoint {n}"]
+
+    def record(self, who: str):
+        r = get(self.base, "/api/record/" + urllib.parse.quote(who))
+        if self.key is None:
+            self.key = r["verifier_key"]
+        record = json.loads(open_note(r["note"], self.key))
+        size, root = self.checkpoint(record["checkpoint"])
+        for p in record["proofs"]:
+            self.inclusion(p, size, root)
+        return [f"record of {record.get('handle') or record['agent']}: {len(record['keys'])} keys, "
+                f"{len(record['proofs'])} key events proven against checkpoint {size}"]
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--base", default=BASE, help="service URL (default %(default)s)")
+    ap.add_argument("--key", help="pinned log verifier key (NAME+HASH+KEY)")
+    ap.add_argument("--state", help="file remembering the last checkpoint, checked for consistency")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("checkpoint")
+    sub.add_parser("message").add_argument("id")
+    c = sub.add_parser("consistency")
+    c.add_argument("old", type=int)
+    c.add_argument("new", type=int, nargs="?")
+    sub.add_parser("record").add_argument("who")
+    args = ap.parse_args(argv)
+    v = Verifier(args.base, args.key, args.state)
+    try:
+        if args.cmd == "checkpoint":
+            size, root = v.checkpoint()
+            lines = [f"checkpoint {size} root {base64.b64encode(root).decode()}", f"key {v.key}"]
+        elif args.cmd == "message":
+            lines = v.message(args.id)
+        elif args.cmd == "consistency":
+            lines = v.consistency(args.old, args.new)
+        else:
+            lines = v.record(args.who)
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.loads(e.read(65536))["error"]
+            print(f"ERROR {e.code} {err['code']}: {err['message']}", file=sys.stderr)
+        except (ValueError, KeyError, TypeError):
+            print(f"ERROR HTTP {e.code}", file=sys.stderr)
+        return 2
+    except urllib.error.URLError as e:
+        print("ERROR:", e.reason, file=sys.stderr)
+        return 2
+    except (VerifyError, ValueError, KeyError, TypeError) as e:
+        print("FAIL:", e, file=sys.stderr)
+        return 1
+    for line in lines:
+        print("OK", line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

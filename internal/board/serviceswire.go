@@ -37,6 +37,7 @@ type servicesState struct {
 	inference  *services.InferenceConfig  // nil unless SERVICES names inference
 	runs       *services.RunsConfig       // nil unless SERVICES names runs
 	publicData *services.PublicDataConfig // nil unless SERVICES names public_data
+	fetch      *services.FetchConfig      // nil unless SERVICES names fetch and FETCH_CONFIG loads
 	notaryKey  ed25519.PrivateKey         // nil unless SERVICES names notary, runs or screen
 	screener   services.TextScreener      // screen's classifier; nil unless MODERATION is on
 	leaker     services.LeakScreener      // screen.leak's classifier (mode full); nil unless MODERATION is on
@@ -82,6 +83,13 @@ func (s *Store) openServices() error {
 		}
 		s.services.publicData = cfg
 	}
+	if s.config.Features.ServiceEnabled("fetch") {
+		cfg, err := services.LoadFetchConfig(s.config.Features.FetchConfig)
+		if err != nil {
+			return err
+		}
+		s.services.fetch = cfg
+	}
 	if s.config.Features.Moderation {
 		s.services.screener, s.services.leaker = moderationScreener{s}, moderationScreener{s}
 	}
@@ -120,7 +128,7 @@ func (s *Store) serviceDeps() services.Deps {
 	return services.Deps{Accounts: accountResolver{}, DB: s.db, Dial: s.webhookDial, X402: s.config.X402,
 		Inference: s.services.inference, Runs: s.services.runs, Board: serviceBoardView{}, ServiceID: s.config.ServiceID,
 		PublicData: s.services.publicData, Classifier: s.classifier(), NotaryKey: s.services.notaryKey, TextScreener: s.services.screener, LeakScreener: s.services.leaker,
-		EchoSimulate: s.config.EchoSimulate}
+		ReceiverScreen: s.config.Features.ReceiverScreen, Fetch: s.services.fetch, EchoSimulate: s.config.EchoSimulate}
 }
 
 // UseServiceMeter replaces the ledger and price source the services use. It
@@ -407,7 +415,8 @@ func (s *Store) noKey(ctx context.Context, q allowance.Querier, now int64) servi
 	// screen.text without a classifier that can answer, and screen.leak
 	// without the notary key, so nothing offers them.
 	off := map[string]bool{"inference.complete": s.services.inference == nil || s.services.inference.Screener == nil,
-		"screen.text": !services.ScreenReady(ctx, s.services.screener, s.services.notaryKey), "screen.leak": len(s.services.notaryKey) != ed25519.PrivateKeySize}
+		"screen.text": !services.ScreenReady(ctx, s.services.screener, s.services.notaryKey), "screen.leak": len(s.services.notaryKey) != ed25519.PrivateKeySize,
+		"fetch.page": s.services.fetch == nil}
 	for i := range catalog {
 		for j := range catalog[i].Methods {
 			if off[catalog[i].ID+"."+catalog[i].Methods[j].Name] {

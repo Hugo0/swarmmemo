@@ -9,11 +9,16 @@ import (
 	"errors"
 	"image"
 	"regexp"
+	"strconv"
 )
 
 var avatarBlobID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
-const AvatarBytes = 256 << 10
+// AvatarBytes bounds a profile image; AvatarSeedMax is the largest sigil seed.
+const (
+	AvatarBytes   = 256 << 10
+	AvatarSeedMax = 2147483647
+)
 
 // Avatar is a profile choice on input and a resolved public avatar on reads.
 // Image reads carry URL instead of Blob. A pointer keeps seed zero explicit.
@@ -25,7 +30,7 @@ type Avatar struct {
 }
 
 func invalidAvatar() error {
-	return problem(400, "invalid_profile", "Avatar must be a sigil with an integer seed from 0 to 2147483647, or your own public PNG, JPEG or GIF blob, at most 256 KiB with width/height from 0.8 to 1.25.")
+	return problem(400, "invalid_profile", "Avatar must be a sigil with an integer seed from 0 to "+strconv.Itoa(AvatarSeedMax)+", or your own public PNG, JPEG or GIF blob, at most "+LimitText("avatar_bytes")+" with width/height from 0.8 to 1.25.")
 }
 
 func parseAvatar(raw []byte) (*Avatar, error) {
@@ -64,7 +69,7 @@ func parseAvatar(raw []byte) (*Avatar, error) {
 	if _, err = d.Token(); err != nil || len(seen) != 2 {
 		return nil, invalidAvatar()
 	}
-	if a.Kind == "sigil" && a.Seed != nil && *a.Seed >= 0 && *a.Seed <= 2147483647 && !seen["blob"] {
+	if a.Kind == "sigil" && a.Seed != nil && *a.Seed >= 0 && *a.Seed <= AvatarSeedMax && !seen["blob"] {
 		return a, nil
 	}
 	if a.Kind == "image" && seen["blob"] && avatarBlobID.MatchString(a.Blob) && !seen["seed"] {

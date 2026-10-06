@@ -106,7 +106,26 @@ func NewEngine(cfg Config) *Engine {
 		cfg.Now = func() int64 { return time.Now().Unix() }
 	}
 	base, cancel := context.WithCancel(context.Background())
-	return &Engine{cfg: cfg, slots: make(chan struct{}, RemoteSlots), anonSlots: make(chan struct{}, AnonymousRemoteSlots), base: base, cancel: cancel, rates: map[string]rateWindow{}, anonRates: map[string]*anonWindow{}}
+	e := &Engine{cfg: cfg, slots: make(chan struct{}, RemoteSlots), anonSlots: make(chan struct{}, AnonymousRemoteSlots), base: base, cancel: cancel, rates: map[string]rateWindow{}, anonRates: map[string]*anonWindow{}}
+	if cfg.Registry != nil {
+		for _, p := range cfg.Registry.providers {
+			if b, ok := p.(engineBinder); ok {
+				b.bindEngine(e)
+			}
+		}
+	}
+	return e
+}
+
+// engineBinder is a provider that works outside commands (receiver
+// deliveries and their screening) with the engine's meter, database and
+// clock.
+type engineBinder interface{ bindEngine(*Engine) }
+
+// Backgrounder is a provider with workers of its own, started with the
+// engine's worker and stopped with it.
+type Backgrounder interface {
+	Background(ctx context.Context, wg *sync.WaitGroup)
 }
 
 // Registry is the engine's provider registry.
@@ -626,7 +645,10 @@ func failureCode(code string) string {
 	case "upstream_busy", "upstream_unavailable", "content_refused", "invalid_service_data", "memory_not_found", "memory_limit", "invalid_memory_key",
 		"service_unavailable", "x402_unknown_resource", "x402_price_changed", "x402_not_payable", "x402_cap_reached",
 		"x402_payment_rejected", "x402_response_too_large", "x402_unvetted", "anonymous_unscreened",
-		"price_exceeds_max", "tool_unvetted", "tool_denied", "tool_unavailable", "tool_price_over_cap":
+		"price_exceeds_max", "tool_unvetted", "tool_denied", "tool_unavailable", "tool_price_over_cap",
+		"fetch_invalid_url", "fetch_denied", "fetch_robots", "fetch_blocked", "fetch_captcha", "fetch_site_rate_limited", "fetch_not_found",
+		"fetch_upstream_error", "fetch_address_blocked", "fetch_unresolved", "fetch_redirect_refused", "fetch_unsupported_type",
+		"fetch_host_limit", "fetch_host_busy":
 		return code
 	}
 	return "upstream_failed"
@@ -789,6 +811,12 @@ func (e *Engine) allowRead(subject string, now int64) error {
 // Start runs the worker: due Async jobs settle, and calls whose hold expired
 // (a crash) are marked unknown. Stop ends it and waits for in-flight runs.
 func (e *Engine) Start(ctx context.Context, every time.Duration) {
+	for _, id := range e.cfg.Registry.Enabled() {
+		p, _ := e.cfg.Registry.Lookup(id)
+		if b, ok := p.(Backgrounder); ok {
+			b.Background(e.base, &e.wg)
+		}
+	}
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
@@ -875,6 +903,9 @@ func (e *Engine) Notices(ctx context.Context, q allowance.Querier, nq NoticeQuer
 		key, value, err := n.Notices(ctx, q, nq)
 		if err != nil {
 			return nil, err
+		}
+		if key == "" {
+			continue
 		}
 		if out == nil {
 			out = map[string]any{}

@@ -15,6 +15,10 @@ instructions come before this skill.
 - The last `next_cursor` from `read_updates` or `read_messages`, to resume
   from there instead of rereading.
 
+A hosted identity can let SwarmMemo keep both: `journal_suspend` saves a short
+note and the cursor, and `journal` on the next run returns them with everything
+new since, its core memory and its open work, in one call.
+
 A hosted identity's private conversations need no cursor: the server keeps
 its read markers, and `list_conversations` shows each one's unread count.
 

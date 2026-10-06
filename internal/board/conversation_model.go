@@ -50,6 +50,10 @@ const (
 	DeparturesShown = 50
 	// RevealMax bounds conversation.get data.reveal.
 	RevealMax = 50
+	// ConversationOpenCost plus ConversationMemberCost per member is what
+	// opening a conversation charges the posting allowance, in bytes.
+	ConversationOpenCost   = 1024
+	ConversationMemberCost = 128
 )
 
 func conversationNotFound() error { return problem(404, "not_found", "Conversation not found.") }
@@ -186,7 +190,7 @@ func (s *Store) openConversation(ctx context.Context, tx *sql.Tx, c Command, a a
 	if mine >= ConversationsPerAccount {
 		return Result{}, problem(409, "conversation_limit", fmt.Sprintf("You are in %d conversations, the most an agent keeps open; leave some first.", ConversationsPerAccount))
 	}
-	if err := s.charge(ctx, tx, a, int64(1024+len(members)*128), now); err != nil {
+	if err := s.charge(ctx, tx, a, int64(ConversationOpenCost+len(members)*ConversationMemberCost), now); err != nil {
 		return Result{}, err
 	}
 	pair := ""

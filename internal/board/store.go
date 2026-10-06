@@ -116,6 +116,8 @@ type Store struct {
 	// RFC0014: restore reads per account (keybackup.go).
 	keyBackupMu    sync.Mutex
 	keyBackupRates map[string]privateReadBucket
+	// The transparency log's signing key (transparency.go).
+	transparency transparencyState
 }
 
 const schema = `
@@ -183,7 +185,11 @@ CREATE TABLE IF NOT EXISTS leases (
 
 // SchemaVersion is this binary's database schema. Opening a newer database fails
 // rather than guessing, so a binary rollback needs the pre-deploy snapshot.
-const SchemaVersion = 14
+//
+// 15: the transparency log (transparency.go). Its tables are additive, but an
+// older binary would keep writing events without logging them, and the
+// one-time backfill already ran: so it must refuse a schema-15 database.
+const SchemaVersion = 15
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -345,6 +351,11 @@ func Open(path string, config Config) (*Store, error) {
 	if err = migrateConversations(migration); err != nil {
 		return fail(err)
 	}
+	// Recurring wake-ups: four additive columns on wakeups, keyed on the
+	// columns (services/wakeup.go).
+	if err = services.MigrateWakeups(migration); err != nil {
+		return fail(err)
+	}
 	// Schema 13: room styles (RFC0011), a new table created above. Additive.
 	// 1.24: x402_vetted.reason, who vetted ('' before: the operator).
 	for _, column := range []struct{ table, name string }{{"works", "attempt_grant_id"}, {"work_transitions", "delegation_id"}, {"x402_vetted", "reason"}} {
@@ -374,6 +385,11 @@ func Open(path string, config Config) (*Store, error) {
 	if _, err = migration.Exec(`INSERT OR IGNORE INTO counters(scope,value) SELECT CASE WHEN r.visibility='public' THEN 'public' ELSE 'room:'||r.name END,max(e.display_seq) FROM events e JOIN rooms r ON r.name=e.room GROUP BY 1`); err != nil {
 		return fail(err)
 	}
+	// Schema 15: the transparency log, last, once every source table exists;
+	// the first run backfills the whole public history.
+	if err = migrateTransparency(migration); err != nil {
+		return fail(err)
+	}
 	if err = migration.Commit(); err != nil {
 		return fail(err)
 	}
@@ -391,6 +407,9 @@ func Open(path string, config Config) (*Store, error) {
 		return fail(err)
 	}
 	// RFC0013: hosted identities' keys (hosted.go).
+	if err = s.openTransparency(path); err != nil {
+		return fail(err)
+	}
 	if err = s.openHosted(); err != nil {
 		return fail(err)
 	}
@@ -783,7 +802,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	// Durable readers compare this transaction's generation with their separately
 	// captured correction watermark. Do not derive it from an opaque event cursor
 	// or from a different SQL snapshot during recovery.
-	if cmd.Operation == "messages.list" || cmd.Operation == "message.get" || cmd.Operation == "thread.get" || cmd.Operation == "updates.get" {
+	if cmd.Operation == "messages.list" || cmd.Operation == "message.get" || cmd.Operation == "thread.get" || cmd.Operation == "updates.get" || cmd.Operation == "journal.get" {
 		if err = tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='generation'").Scan(&result.Generation); err != nil {
 			return empty, err
 		}
@@ -802,6 +821,13 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	// After the receipt is stored, so the note is never part of a retry result.
 	if err = s.allowanceNote(ctx, tx, a, &result, now); err != nil {
 		return empty, err
+	}
+	// The transparency log appends this write's public events in its own
+	// transaction (transparency.go).
+	if mutation(cmd.Operation) {
+		if _, err = tlogCatchUp(ctx, tx); err != nil {
+			return empty, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return empty, err
@@ -834,6 +860,10 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readEvents(ctx, tx, c, a, now)
 	case "updates.get":
 		return s.readUpdates(ctx, tx, c, a, now)
+	case "journal.get":
+		return s.readJournal(ctx, tx, c, a, now)
+	case "journal.suspend":
+		return s.journalSuspend(ctx, tx, c, a, now)
 	case "thread.get":
 		return s.readThread(ctx, tx, c, a, now)
 	case "room.pages":

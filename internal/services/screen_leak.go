@@ -66,18 +66,18 @@ var (
 )
 
 // leakMethod is screen's "leak" method in the catalogue.
-var leakMethod = Method{Name: "leak", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: leakArgsMax, Price: Price{Base: screenBase, PerKiB: screenPerKiB},
+var leakMethod = Method{Name: "leak", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: leakArgsMax, Price: ScreenPrice,
 	Line:      "Check text you are about to send for secrets, personal data and private infrastructure: findings with byte offsets, a redacted copy and a signed receipt.",
 	PriceNote: "mode patterns: " + LeakPatternsPriceText() + "; mode full: as text, " + strconv.Itoa(screenFee) + " + the classifier's token cost, at most " + strconv.Itoa(screenBase) + " + " + strconv.Itoa(screenPerKiB) + " per KiB of text, the rest refunded",
 	Args: []Arg{
-		{"text", "string", true, "the text you are about to send, up to 16 KiB (2 KiB without a key); hashed, never stored"},
+		{"text", "string", true, "the text you are about to send, up to " + SizeText(ScreenTextBytes) + " (" + SizeText(ScreenAnonymousTextBytes) + " without a key); hashed, never stored"},
 		{"audience", "string", false, "who will read it: public (the default), conversation or sealed"},
 		{"mode", "string", false, "patterns (the default: the published patterns only) or full (patterns and the classifier)"},
 		{"threshold", "number", false, "0 to 1: a classifier category at or above it counts in the answer's verdict; default 0.6, which the receipt always uses"},
 	},
 	Example:        json.RawMessage(`{"text":"Deploy with DB_PASSWORD=hunter2hunter to db.prod.internal.","audience":"conversation"}`),
 	ExampleMaxCost: leakPatternsPrice,
-	Anonymous:      true, AnonymousLabel: "leak checks", AnonymousNote: "text up to " + strconv.Itoa(ScreenAnonymousTextBytes/1024) + " KiB",
+	Anonymous:      true, AnonymousLabel: "leak checks", AnonymousNote: "text up to " + SizeText(ScreenAnonymousTextBytes),
 	AnonymousRate: AnonRate{CallerPerMinute: 10, CallerPerDay: 100, AllPerMinute: 60, AllPerDay: 3000}}
 
 type leakArgs struct {

@@ -21,6 +21,8 @@ import (
 const (
 	WakeupsPerAccount   = services.WakeupsPerAccount
 	WakeupHorizonDays   = services.WakeupHorizon / 86400
+	WakeupEveryMin      = services.WakeupEveryMin
+	WakeupEveryMax      = services.WakeupEveryMax
 	NotaryTextBytes     = services.NotaryTextBytes
 	NotaryPerAccountDay = services.NotaryPerAccountDay
 )
@@ -176,6 +178,12 @@ func screenTextLimit(sent string) error {
 
 // providerError maps the wakeup and notary refusals; nil for any other code.
 func providerError(code string) error {
+	if err := receiverCallError(code); err != nil {
+		return err
+	}
+	if err := fetchError(code); err != nil {
+		return err
+	}
 	switch code {
 	case "wakeup_conflict":
 		return problem(409, "wakeup_conflict", "An active wake-up already uses this key with other settings; cancel it first, or use another key.")
@@ -215,7 +223,10 @@ func (s *Store) serviceNotices(ctx context.Context, tx *sql.Tx, data map[string]
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	added, err := e.Notices(ctx, tx, services.NoticeQuery{Account: account, Caller: a.account, Since: since, Now: now})
+	// Own: the agent's own signed read, not a grant's; only then may a
+	// service add what is private to it (data.received).
+	own := a.signed && a.grant == nil && account != "" && account == a.account
+	added, err := e.Notices(ctx, tx, services.NoticeQuery{Account: account, Caller: a.account, Since: since, Now: now, Own: own})
 	if err != nil {
 		return err
 	}

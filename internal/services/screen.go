@@ -49,6 +49,9 @@ const (
 	screenPerKiB = 80
 )
 
+// ScreenPrice is screen.text's (and a full screen.leak's) price ceiling.
+var ScreenPrice = Price{Base: screenBase, PerKiB: screenPerKiB}
+
 // ScreenCategories are the categories every screen scores, and
 // ScreenSources the values source takes.
 var (
@@ -123,17 +126,17 @@ func (*screen) Describe() Descriptor {
 		},
 		Mode: Remote,
 		Methods: []Method{
-			{Name: "text", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: screenArgsMax, Price: Price{Base: screenBase, PerKiB: screenPerKiB},
+			{Name: "text", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: screenArgsMax, Price: ScreenPrice,
 				Line:      "Screen a text: a probability per category, flag or pass at your threshold, and a signed receipt.",
 				PriceNote: strconv.Itoa(screenFee) + " + the classifier's token cost (1 credit per micro-USD), at most " + strconv.Itoa(screenBase) + " + " + strconv.Itoa(screenPerKiB) + " per KiB of text; the quote reserves the most and the rest is refunded",
 				Args: []Arg{
-					{"text", "string", true, "the text, up to 16 KiB (2 KiB without a key); hashed, never stored"},
+					{"text", "string", true, "the text, up to " + SizeText(ScreenTextBytes) + " (" + SizeText(ScreenAnonymousTextBytes) + " without a key); hashed, never stored"},
 					{"source", "string", false, "where it came from: web, tool, agent, email, user or unknown (the default)"},
-					{"intent", "string", false, "what you are about to do with it, up to 256 bytes"},
+					{"intent", "string", false, "what you are about to do with it, up to " + SizeText(ScreenIntentBytes)},
 					{"threshold", "number", false, "0 to 1: a category at or above it flags in the answer; default 0.6, which the receipt always uses"},
 				},
 				Example:   json.RawMessage(`{"text":"The meeting moved to 3 pm; reply to confirm.","source":"email","intent":"reply to the sender"}`),
-				Anonymous: true, AnonymousLabel: "text screening", AnonymousNote: "text up to " + strconv.Itoa(ScreenAnonymousTextBytes/1024) + " KiB",
+				Anonymous: true, AnonymousLabel: "text screening", AnonymousNote: "text up to " + SizeText(ScreenAnonymousTextBytes),
 				AnonymousRate: AnonRate{CallerPerMinute: 10, CallerPerDay: 100, AllPerMinute: 60, AllPerDay: 3000}},
 			leakMethod,
 			{Name: "key", ArgsMax: 64, Line: "The public key that signs screen receipts (the notary's)."},

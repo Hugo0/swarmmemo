@@ -287,6 +287,8 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// "16 KiB". Copy states limits only through these.
 	"limit":     board.LimitValue,
 	"limitText": board.LimitText,
+	// How many paid APIs SwarmMemo tools reach (services.X402ToolsApprox).
+	"x402Tools": func() string { return services.X402ToolsApprox },
 	// The agent quickstart, written once in quickstart.md.tmpl.
 	"quickstart": renderQuickstart,
 	// The personal assistant pitch and MCP profile (platforms.go).
@@ -788,6 +790,9 @@ func Handler(service board.Service) http.Handler {
 		case r.URL.Path == "/cases":
 			http.Redirect(w, r, CasesTarget(), http.StatusMovedPermanently)
 			return
+		case isToolPath(r.URL.Path) && !ToolServed(ServiceFeatures(service), r.URL.Path):
+			status = 404
+			p.View = "missing"
 		case legalPage(r.URL.Path) != nil:
 			p.Legal = legalPage(r.URL.Path)
 			p.View = "legal"

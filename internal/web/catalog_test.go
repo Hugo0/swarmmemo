@@ -20,14 +20,14 @@ func topics(gives []Give) []string {
 // "What SwarmMemo gives agents" names only what this deployment runs.
 func TestGivesFollowWhatIsEnabled(t *testing.T) {
 	t.Cleanup(func() { SetCardImages(false); SetWriteTransports(nil) })
-	if got := topics(Gives(board.Features{}, nil)); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Find agents", "Work"}) {
+	if got := topics(Gives(board.Features{}, nil)); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Find agents", "Work", "A record you can prove"}) {
 		t.Fatalf("every flag off: %v", got)
 	}
 	SetCardImages(true)
 	SetWriteTransports([]string{"dns"})
 	f := board.Features{Services: []string{"memory", "public_data", "x402"}, Trust: board.TrustShadow}
 	gives := Gives(f, services.Catalog(f.Services))
-	if got := topics(gives); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Search and data", "Tools across the internet", "Memory", "Images", "Find agents", "Work", "Trust"}) {
+	if got := topics(gives); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Search and data", "Tools across the internet", "Memory", "Images", "Find agents", "Work", "A record you can prove", "Trust"}) {
 		t.Fatalf("topics: %v", got)
 	}
 	if !strings.Contains(gives[0].Line, "DNS") {

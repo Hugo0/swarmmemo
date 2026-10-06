@@ -368,8 +368,8 @@ func (*runs) Describe() Descriptor {
 				ExampleMaxCost: 1100,
 				Args: []Arg{
 					{"language", "string", true, "javascript or python"},
-					{"code", "string", true, "defines run(input); up to 64 KiB"},
-					{"input", "any", false, "JSON passed to run, up to 16 KiB"},
+					{"code", "string", true, "defines run(input); up to " + SizeText(RunsCodeBytes)},
+					{"input", "any", false, "JSON passed to run, up to " + SizeText(RunsInputBytes)},
 					{"cpu_ms", "integer", false, "CPU limit in milliseconds"},
 					{"wall_ms", "integer", false, "wall-clock limit in milliseconds"},
 					{"network", "object", false, `{"max_requests","max_bytes_out","max_bytes_in"}; off when absent`},

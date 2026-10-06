@@ -35,9 +35,15 @@ const (
 	// OAuthScope is the one scope: act as your hosted identity, with exactly
 	// what a hosted token may do.
 	OAuthScope = "hosted"
-	// OAuthCodeSeconds is how long an authorization code may be redeemed
-	// (OAuth 2.1 recommends at most 10 minutes).
-	OAuthCodeSeconds = 600
+	// OAuthCodeSeconds is how long an authorization code may be redeemed.
+	// The code is made only when the person leaves the sign-in page for the
+	// app, so the client redeems it within seconds.
+	OAuthCodeSeconds = 60
+	// OAuthReturningSeconds is how long a browser remembers which identity
+	// it connected to an app (the returning grant), renewed on each use.
+	OAuthReturningSeconds = 30 * 86400
+	// OAuthReturningMax bounds the apps one browser remembers.
+	OAuthReturningMax = 16
 	// OAuthAccessSeconds is an access token's lifetime.
 	OAuthAccessSeconds = 3600
 	// OAuthRefreshSeconds is how long a refresh token stays usable; each use
@@ -45,6 +51,8 @@ const (
 	OAuthRefreshSeconds = 30 * 86400
 	// OAuthRefreshPrefix marks refresh tokens for secret scanners.
 	OAuthRefreshPrefix = "smo1_"
+	// OAuthBrowserPrefix marks the secret of a browser's grant cookie.
+	OAuthBrowserPrefix = "smb1_"
 	// OAuthClientPrefix starts a dynamically registered client_id.
 	OAuthClientPrefix = "smcl_"
 	// OAuthConnectionsMax bounds an identity's live OAuth connections (token
@@ -81,6 +89,10 @@ CREATE TABLE IF NOT EXISTS oauth_families (
  rotated_at INTEGER NOT NULL DEFAULT 0, revoked_at INTEGER NOT NULL DEFAULT 0, revoked_reason TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS oauth_families_account ON oauth_families(account,revoked_at);
 CREATE TABLE IF NOT EXISTS oauth_refresh_used (refresh_sha256 TEXT PRIMARY KEY, family_id TEXT NOT NULL, used_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_returning (
+ browser_sha256 TEXT NOT NULL, redirect_uri TEXT NOT NULL, account TEXT NOT NULL,
+ created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(browser_sha256,redirect_uri));
+CREATE INDEX IF NOT EXISTS oauth_returning_account ON oauth_returning(account);
 `
 
 // OAuthError is an OAuth error answer (RFC 6749 §5.2): Code is its error
@@ -632,9 +644,71 @@ func revokeOAuthConnections(ctx context.Context, tx *sql.Tx, account, tokenID, r
 		return err
 	}
 	// Signing every connection out also spends the codes not yet
-	// exchanged, so none starts a connection afterwards.
-	_, err := tx.ExecContext(ctx, "UPDATE oauth_codes SET used_at=? WHERE account=? AND used_at=0", now, account)
+	// exchanged, so none starts a connection afterwards, and makes every
+	// browser forget the identity, so none reconnects it in one click.
+	if _, err := tx.ExecContext(ctx, "UPDATE oauth_codes SET used_at=? WHERE account=? AND used_at=0", now, account); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, "DELETE FROM oauth_returning WHERE account=?", account)
 	return err
+}
+
+// OAuthDiscardToken revokes the token hosted.create made for an identity
+// that signing in created: nobody was shown it, and the app gets its own.
+func (s *Store) OAuthDiscardToken(ctx context.Context, account, tokenID string, now int64) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE hosted_tokens SET revoked_at=? WHERE account=? AND token_id=? AND revoked_at=0", now, account, tokenID)
+	return err
+}
+
+// NewOAuthBrowserSecret is a fresh grant cookie secret (256 random bits).
+func NewOAuthBrowserSecret() (string, error) {
+	secret, _, err := hostedSecret(OAuthBrowserPrefix)
+	return secret, err
+}
+
+// OAuthReturning is the identity a browser connected to the app at this
+// exact redirect URI before (the returning grant): browser is the secret of
+// the browser's grant cookie. ok is false when there is none, it expired,
+// or the identity was claimed, recovered with every app signed out, or
+// closed. One short read, outside any transaction.
+func (s *Store) OAuthReturning(ctx context.Context, browser, redirectURI string, now int64) (account, handle string, ok bool, err error) {
+	if !hostedTokenShape(browser) {
+		return "", "", false, nil
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT r.account,i.handle FROM oauth_returning r JOIN hosted_keys k ON k.account=r.account JOIN identities i ON i.id=r.account
+ WHERE r.browser_sha256=? AND r.redirect_uri=? AND r.expires_at>? AND k.state='active'`, hostedHash(browser), redirectURI, now).Scan(&account, &handle)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	return account, handle, err == nil, err
+}
+
+// OAuthRemember records that this browser connected account to the app at
+// redirectURI, for OAuthReturningSeconds; a browser remembers at most
+// OAuthReturningMax apps, the oldest forgotten first.
+func (s *Store) OAuthRemember(ctx context.Context, browser, redirectURI, account string, now int64) error {
+	if !hostedTokenShape(browser) {
+		return errors.New("oauth: malformed browser secret")
+	}
+	hash := hostedHash(browser)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "DELETE FROM oauth_returning WHERE expires_at<=?", now); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO oauth_returning(browser_sha256,redirect_uri,account,created_at,expires_at) VALUES(?,?,?,?,?)
+ ON CONFLICT(browser_sha256,redirect_uri) DO UPDATE SET account=excluded.account,created_at=excluded.created_at,expires_at=excluded.expires_at`,
+		hash, redirectURI, account, now, now+OAuthReturningSeconds); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM oauth_returning WHERE browser_sha256=? AND redirect_uri NOT IN
+ (SELECT redirect_uri FROM oauth_returning WHERE browser_sha256=? ORDER BY created_at DESC,redirect_uri LIMIT ?)`, hash, hash, OAuthReturningMax); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // oauthLiveFilter is the hosted_tokens condition (alias t) that leaves out

@@ -66,7 +66,7 @@ func (v *anonEnv) call(t *testing.T, s allowance.Subject, service, method, args 
 func TestAnonymousAllowlistIsTheCatalogue(t *testing.T) {
 	all := services.Catalog(services.Known())
 	got := services.AnonymousMethods(all)
-	want := []string{"screen.text", "screen.leak", "inference.complete", "public_data.fetch", "public_data.bulk", "notary.stamp"}
+	want := []string{"screen.text", "screen.leak", "inference.complete", "public_data.fetch", "public_data.bulk", "notary.stamp", "fetch.page"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("methods without a key: %v, want %v", got, want)
 	}
@@ -80,7 +80,7 @@ func TestAnonymousAllowlistIsTheCatalogue(t *testing.T) {
 			}
 		}
 	}
-	if line := services.NoKeyLine(all, 2000); line != "No key needed for text screening, leak checks, small-model inference, public data and the notary: 2,000 credits a day per network." {
+	if line := services.NoKeyLine(all, 2000); line != "No key needed for text screening, leak checks, small-model inference, public data, the notary and page fetches: 2,000 credits a day per network." {
 		t.Fatalf("line: %q", line)
 	}
 	if ex := services.NoKeyExample("https://swarmmemo.com", all); ex != "https://swarmmemo.com/call/public_data/fetch?dataset=sea_ice_extent" {

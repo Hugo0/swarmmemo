@@ -25,6 +25,7 @@ import (
 	"swarmmemo/internal/cards"
 	"swarmmemo/internal/httpapi"
 	"swarmmemo/internal/nostr"
+	"swarmmemo/internal/ots"
 	"swarmmemo/internal/transport"
 	"swarmmemo/internal/web"
 )
@@ -97,10 +98,12 @@ func run() error {
 		return x402Command(os.Args[2:], os.Stdout)
 	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance", "stats",
 		"tier", "params", "allowance", "lever", "trust", // RFC0012, rfc0012.go
-		"moderation": // moderation.go
+		"moderation", // moderation.go
+		"receiver",   // receiver.go
+		"fetch":      // fetch.go
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|moderation]")
+		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|moderation|receiver revoke ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist]")
 	}
 }
 
@@ -113,7 +116,7 @@ func operator(command string) error {
 	if err != nil {
 		return err
 	}
-	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), Features: features, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE")})
+	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), Features: features, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")})
 	if err != nil {
 		return err
 	}
@@ -127,6 +130,10 @@ func operator(command string) error {
 		return operatorModeration(ctx, store, os.Args[2:], os.Stdout)
 	case "x402":
 		return operatorX402(ctx, store, os.Args[2:], os.Stdout)
+	case "receiver":
+		return operatorReceiver(ctx, store, os.Args[2:], os.Stdout)
+	case "fetch":
+		return operatorFetch(ctx, store, os.Args[2:], os.Stdout)
 	case "maintenance":
 		n, err := store.PruneExpiredBlobs(ctx)
 		if err != nil {
@@ -299,7 +306,7 @@ func serve() error {
 	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
 		reserved = append(reserved, parsed.Hostname())
 	}
-	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE")})
+	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")})
 	if e != nil {
 		return e
 	}
@@ -425,6 +432,15 @@ func serve() error {
 		slog.Info("Identity link rechecks enabled")
 		store.StartIdentityChecks(ctx)
 	}
+	// The transparency log: a signed checkpoint every LOG_CHECKPOINT_INTERVAL
+	// (default 15m) when the log grew, each anchored to OpenTimestamps
+	// calendars (OTS_CALENDARS: space-separated URLs, default the public
+	// ones; "off" anchors nothing).
+	transparency, e := transparencyConfig()
+	if e != nil {
+		return e
+	}
+	store.StartTransparency(ctx, transparency)
 	// RFC0012 background work (sweeper, job worker, trust run) for the
 	// enabled flags; with every flag off it starts nothing.
 	store.StartRFC0012(ctx)
@@ -541,4 +557,29 @@ func indexNowKey(k string) string {
 		}
 	}
 	return k
+}
+
+// transparencyConfig reads LOG_CHECKPOINT_INTERVAL and OTS_CALENDARS.
+func transparencyConfig() (board.TransparencyConfig, error) {
+	cfg := board.TransparencyConfig{CheckpointEvery: 15 * time.Minute, Calendars: ots.DefaultCalendars}
+	if v := os.Getenv("LOG_CHECKPOINT_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < time.Second || d > 24*time.Hour {
+			return cfg, errors.New("LOG_CHECKPOINT_INTERVAL must be a duration from 1s to 24h, such as 15m")
+		}
+		cfg.CheckpointEvery = d
+	}
+	switch v := strings.TrimSpace(os.Getenv("OTS_CALENDARS")); v {
+	case "":
+	case "off":
+		cfg.Calendars = nil
+	default:
+		cfg.Calendars = strings.Fields(v)
+		for _, c := range cfg.Calendars {
+			if u, err := url.Parse(c); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+				return cfg, fmt.Errorf("OTS_CALENDARS: %q is not an http(s) URL", c)
+			}
+		}
+	}
+	return cfg, nil
 }

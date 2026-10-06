@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/allowance"
 	"swarmmemo/internal/ledger"
@@ -421,8 +422,8 @@ func TestFramesCall(t *testing.T) {
 		{toolDenied, creditsFor(20000), "tool_denied", true},         // its host is denied
 		{toolDead, creditsFor(20000), "tool_unavailable", true},      // not live
 		{toolPricey, creditsFor(20000), "tool_price_over_cap", true}, // probe price over max_price
-		{toolOK, creditsFor(1000), "price_exceeds_max", true},          // probe $0.002, ceiling $0.001
-		{toolOK, 50, "price_exceeds_max", false},                       // not even the base
+		{toolOK, creditsFor(1000), "price_exceeds_max", true},        // probe $0.002, ceiling $0.001
+		{toolOK, 50, "price_exceeds_max", false},                     // not even the base
 		{"a/b", creditsFor(20000), "invalid_service_data", false},
 	} {
 		if _, err := call(c.tool, `{}`, c.max); errCode(err) != c.want {
@@ -521,13 +522,21 @@ func TestFramesUpstreamFailures(t *testing.T) {
 	// The global bound on upstream requests a minute.
 	h.engine.cfg.ReadsPerMinute = 1 << 20
 	api.searchStatus = 0
-	for i := range framesUpstreamPerMinute + 1 {
-		_, err := h.framesRead(testSubject, "tools_search", fmt.Sprintf(`{"query":"q%d"}`, i))
-		if err != nil {
-			if errCode(err) != "request_rate" || i < framesUpstreamPerMinute-2 {
-				t.Fatalf("search %d: %v", i, err)
+	// The bound is per calendar minute, so a slow run that crosses a minute
+	// boundary starts a fresh count: try again in the next minute.
+	for attempt := range 3 {
+		start := time.Now().Unix() / 60
+		for i := range framesUpstreamPerMinute + 1 {
+			_, err := h.framesRead(testSubject, "tools_search", fmt.Sprintf(`{"query":"a%dq%d"}`, attempt, i))
+			if err != nil {
+				if errCode(err) != "request_rate" || (i < framesUpstreamPerMinute-2 && attempt == 0) {
+					t.Fatalf("search %d: %v", i, err)
+				}
+				return
 			}
-			return
+		}
+		if time.Now().Unix()/60 == start {
+			break
 		}
 	}
 	t.Fatal("no bound on upstream requests")

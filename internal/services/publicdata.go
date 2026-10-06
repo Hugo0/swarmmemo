@@ -227,7 +227,7 @@ func (*publicData) Describe() Descriptor {
 	return Descriptor{
 		ID: "public_data",
 		Summary: "Public datasets from fixed upstreams (NOAA, NSIDC, FSIS, openFDA, Congress.gov, FEC, CoinGecko, FRED, BIS, BCB, Federal Reserve nowcasts), normalised, versioned and cached. " +
-			"service.read method datasets lists the catalogue; fetch args: {\"dataset\":ID,\"params\":{...}}; bulk args: {\"requests\":[{\"dataset\":ID,\"params\":{...}},...]} (at most 10).",
+			"service.read method datasets lists the catalogue; fetch args: {\"dataset\":ID,\"params\":{...}}; bulk args: {\"requests\":[{\"dataset\":ID,\"params\":{...}},...]} (at most " + itoa(PublicDataBulkMax) + ").",
 		Title: "Public data", Topic: "Search and data",
 		Line: "Fetch public datasets (weather, sea ice, food recalls, bills, election finance, prices, policy rates, nowcasts) from their official sources, normalised and cached.",
 		Limits: []Limit{
@@ -244,7 +244,7 @@ func (*publicData) Describe() Descriptor {
 				AnonymousRate: AnonRate{AllPerMinute: 60, AllPerDay: 5000}},
 			{Name: "bulk", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: PublicDataArgsMax,
 				Line: "Up to 10 dataset requests, answered in order.", PriceNote: "each request's dataset price (1 credit by default)", ExampleMaxCost: 20,
-				Args:      []Arg{{"requests", "array", true, `up to 10 {"dataset","params"}`}},
+				Args:      []Arg{{"requests", "array", true, "up to " + itoa(PublicDataBulkMax) + ` {"dataset","params"}`}},
 				Example:   json.RawMessage(`{"requests":[{"dataset":"sea_ice_extent","params":{}},{"dataset":"us_nowcasts","params":{"measure":"gdp"}}]}`),
 				Anonymous: true, AnonymousLabel: "public data", AnonymousNote: publicDataAnonymousNote(true),
 				AnonymousRate: AnonRate{AllPerMinute: 15, AllPerDay: 500}},

@@ -6,12 +6,13 @@ import "encoding/json"
 type WakeupSpecForTest struct {
 	Key, Kind, Room string
 	DueAt, Until    int64
+	Every, Count    int64
 }
 
 // ParseWakeupForTest runs the schedule parser.
 func ParseWakeupForTest(raw json.RawMessage, now int64) (WakeupSpecForTest, error) {
 	s, err := parseWakeup(raw, now)
-	return WakeupSpecForTest{Key: s.key, Kind: s.kind, Room: s.room, DueAt: s.dueAt, Until: s.until}, err
+	return WakeupSpecForTest{Key: s.key, Kind: s.kind, Room: s.room, DueAt: s.dueAt, Until: s.until, Every: s.every, Count: s.count}, err
 }
 
 // ParseWakeupRefForTest runs the cancel parser.

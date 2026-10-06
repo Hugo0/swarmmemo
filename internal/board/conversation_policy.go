@@ -573,6 +573,10 @@ func policyRules(p InboundPolicy) ([]PolicyRule, string) {
 	return append(slices.Clone(p.Rules), base...), fallback
 }
 
+// KnownPresetKeyAgeDays is how old a key with a profile must be for the
+// known preset to let its request through.
+const KnownPresetKeyAgeDays = 7
+
 // presetRules is a preset's expansion and default.
 func presetRules(p InboundPolicy) ([]PolicyRule, string) {
 	yes := true
@@ -581,7 +585,7 @@ func presetRules(p InboundPolicy) ([]PolicyRule, string) {
 	}}, Then: outcomeDeliver}
 	switch p.Preset {
 	case presetKnown:
-		week := 7
+		week := KnownPresetKeyAgeDays
 		known := []PolicyCondition{{TrustAtLeast: &TrustBar{Low: true}}, {All: []PolicyCondition{{KeyAgeAtLeast: &week}, {HasProfile: &yes}}}}
 		if amount := p.Postage.Amount; amount > 0 {
 			known = append(known, PolicyCondition{PostageAtLeast: &amount})

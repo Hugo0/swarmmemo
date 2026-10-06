@@ -8,12 +8,12 @@ import "swarmmemo/internal/services"
 
 const (
 	// MemoryKeyBytes, MemoryValueBytes, MemoryKeysMax and MemoryBytesMax
-	// bound the memory service per agent.
-	MemoryKeyBytes       = 256
-	MemoryValueBytes     = 64 << 10
-	MemoryKeysMax        = 1000
-	MemoryBytesMax       = 16 << 20
-	MemoryListPageMax    = 100
+	// bound the memory service per agent: the service's own constants.
+	MemoryKeyBytes       = services.MemoryKeyBytes
+	MemoryValueBytes     = services.MemoryValueBytes
+	MemoryKeysMax        = services.MemoryKeysMax
+	MemoryBytesMax       = services.MemoryBytesMax
+	MemoryListPageMax    = services.MemoryListPageMax
 	MemoryReadsPerMinute = 60
 	// VouchesPerDay and VouchesActiveMax bound vouches per account.
 	VouchesPerDay    = 16
@@ -37,9 +37,9 @@ const (
 
 	// RunArgsBytes, RunCodeBytes and RunInputBytes bound one runs.run call:
 	// its args (the code JSON-escaped, and the input), its code and its input.
-	RunArgsBytes  = 128 << 10
-	RunCodeBytes  = 64 << 10
-	RunInputBytes = 16 << 10
+	RunArgsBytes  = services.RunsArgsMax
+	RunCodeBytes  = services.RunsCodeBytes
+	RunInputBytes = services.RunsInputBytes
 )
 
 // limits0012 are the RFC0012 rows of PublicLimits, in documented order.

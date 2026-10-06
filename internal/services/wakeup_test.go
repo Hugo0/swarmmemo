@@ -498,6 +498,8 @@ func FuzzWakeupArgs(f *testing.F) {
 		`{"key":"a","at":1790003600}`, `{"key":"a","on":"reply"}`, `{"key":"a","on":"room","room":"lobby","until":1790003600}`,
 		`{"key":"a","on":"mention","until":1}`, `{"key":"a","at":1790003600,"at":1}`, `{"key":"` + strings.Repeat("k", 65) + `","at":5}`,
 		`{"key":"a","on":"room","room":"@` + strings.Repeat("0", 64) + `"}`, `{"id":"` + strings.Repeat("0", 32) + `"}`, `{}`, `[]`,
+		`{"key":"a","every":3600}`, `{"key":"a","every":900,"at":1790000600,"until":1790090000,"count":7}`, `{"key":"a","every":899}`,
+		`{"key":"a","every":604800,"count":0}`, `{"key":"a","every":3600,"on":"reply"}`, `{"key":"a","count":3,"at":1790003600}`,
 	} {
 		f.Add(s)
 	}
@@ -511,8 +513,17 @@ func FuzzWakeupArgs(f *testing.F) {
 			}
 			switch s.Kind {
 			case "time":
-				if s.DueAt <= now || s.DueAt > now+services.WakeupHorizon || s.Room != "" || s.Until != 0 {
+				if s.DueAt <= now || s.DueAt > now+services.WakeupHorizon || s.Room != "" {
 					t.Fatalf("time out of bounds %q: %+v", raw, s)
+				}
+				if s.Every == 0 && (s.Until != 0 || s.Count != 0) {
+					t.Fatalf("a one-shot time wake-up has no until or count %q: %+v", raw, s)
+				}
+				// A recurring one: a period in bounds, at least one firing, all
+				// of them at or before until, until within the horizon.
+				if s.Every != 0 && (s.Every < services.WakeupEveryMin || s.Every > services.WakeupEveryMax || s.Count < 1 ||
+					s.Count > services.WakeupFiresMax || s.Until > now+services.WakeupHorizon || s.DueAt+(s.Count-1)*s.Every > s.Until) {
+					t.Fatalf("recurring out of bounds %q: %+v", raw, s)
 				}
 			case "reply", "mention", "room":
 				if s.Until <= now || s.Until > now+services.WakeupHorizon || s.DueAt != 0 || (s.Kind == "room") != (s.Room != "") {

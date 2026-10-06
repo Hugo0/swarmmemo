@@ -63,7 +63,7 @@ CREATE INDEX IF NOT EXISTS notary_receipts_account ON notary_receipts(account,ti
 func (*notary) Describe() Descriptor {
 	return Descriptor{
 		ID:      "notary",
-		Summary: "Signed timestamps: submit a SHA-256 hash, or up to 16 KiB of text to hash, and get a receipt signed with the notary key that anyone can verify offline and read back by hash. The first receipt for a hash stands, and stamping it again returns it for 1 credit; the text is never stored.",
+		Summary: "Signed timestamps: submit a SHA-256 hash, or up to " + SizeText(NotaryTextBytes) + " of text to hash, and get a receipt signed with the notary key that anyone can verify offline and read back by hash. The first receipt for a hash stands, and stamping it again returns it for 1 credit; the text is never stored.",
 		Title:   "Notary", Topic: "Notary",
 		Line: "Prove a text or a hash existed at a time: a timestamp signed with the notary key that anyone can verify offline.",
 		Limits: []Limit{
@@ -75,7 +75,7 @@ func (*notary) Describe() Descriptor {
 		Methods: []Method{
 			{Name: "stamp", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: notaryArgsMax, Price: Price{Base: 1},
 				Line:      "Get a signed receipt for a hash or a text; the first receipt for a hash stands, and a repeat returns it for 1 credit.",
-				Args:      []Arg{{"hash", "string", false, "a lowercase SHA-256 hex digest"}, {"text", "string", false, "or up to 16 KiB of text, hashed and never stored"}},
+				Args:      []Arg{{"hash", "string", false, "a lowercase SHA-256 hex digest"}, {"text", "string", false, "or up to " + SizeText(NotaryTextBytes) + " of text, hashed and never stored"}},
 				Example:   json.RawMessage(`{"text":"Plan for 2026-09-29: ship the catalogue."}`),
 				Anonymous: true, AnonymousLabel: "the notary", AnonymousNote: "at most " + strconv.Itoa(NotaryPerAnonymousDay) + " new receipts a day per network",
 				// Per network as well as for every network together, so one
@@ -185,6 +185,52 @@ func VerifyNotaryReceipt(publicKey string, r NotaryReceipt) bool {
 	id, ok := verifyPayload(publicKey, r.Payload, r.Signature, &p)
 	return ok && p.Schema == NotarySchema && p.Schema == r.Schema && p.Hash == r.Hash && p.Time == r.Time && p.Seq == r.Seq &&
 		p.ServiceID == r.ServiceID && p.KeyID == r.KeyID && p.KeyID == id
+}
+
+// JournalSealSchema names the journal seal signature's payload; a breaking
+// change is a new name.
+const JournalSealSchema = "swarmmemo-journal-seal/1"
+
+// JournalSealPayload is what the notary key signs for a journal.get seal:
+// this struct's JSON, fields in this order, no spaces. Unlike a notary
+// receipt it is not stored: a seal is a statement about one answer, made
+// as it is given, and verified offline against the notary key.
+type JournalSealPayload struct {
+	Schema    string `json:"schema"`
+	ServiceID string `json:"service_id"`
+	KeyID     string `json:"key_id"`
+	Agent     string `json:"agent"`
+	Time      int64  `json:"time"`
+	Hash      string `json:"hash"`
+}
+
+// JournalSealSignature is the notary's signature over a journal seal.
+type JournalSealSignature struct {
+	Schema    string `json:"schema"`
+	KeyID     string `json:"key_id"`
+	PublicKey string `json:"public_key"`
+	Payload   string `json:"payload"`
+	Signature string `json:"signature"`
+}
+
+// SignJournalSeal signs a briefing's hash for agent with the notary key;
+// ok is false without a key.
+func SignJournalSeal(key ed25519.PrivateKey, serviceID, agent, hash string, now int64) (JournalSealSignature, bool) {
+	if len(key) != ed25519.PrivateKeySize {
+		return JournalSealSignature{}, false
+	}
+	pub := key.Public().(ed25519.PublicKey)
+	p := JournalSealPayload{Schema: JournalSealSchema, ServiceID: serviceID, KeyID: keyID(pub), Agent: agent, Time: now, Hash: hash}
+	payload, signature := signPayload(key, p)
+	return JournalSealSignature{Schema: JournalSealSchema, KeyID: p.KeyID, PublicKey: base64.RawURLEncoding.EncodeToString(pub), Payload: payload, Signature: signature}, true
+}
+
+// VerifyJournalSeal checks a seal signature offline against the notary's
+// published public key, and that it signs hash for agent.
+func VerifyJournalSeal(publicKey string, s JournalSealSignature, agent, hash string) bool {
+	var p JournalSealPayload
+	id, ok := verifyPayload(publicKey, s.Payload, s.Signature, &p)
+	return ok && p.Schema == JournalSealSchema && s.Schema == p.Schema && p.KeyID == id && s.KeyID == id && p.Agent == agent && p.Hash == hash
 }
 
 func keyID(public []byte) string {

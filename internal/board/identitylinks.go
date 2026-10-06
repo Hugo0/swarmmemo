@@ -276,7 +276,7 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		if removed == 0 {
 			return Result{}, linkError("link_not_found")
 		}
-		if err = audit(ctx, tx, c.Operation, a.id, d.Kind, "identity link removed", now); err != nil {
+		if err = audit(ctx, tx, c.Operation, a.id, d.Kind, "identity link removed: "+value, now); err != nil {
 			return Result{}, err
 		}
 		if err = s.onAccountChange(ctx, tx, accountChange{Account: a.account, Reason: c.Operation, Kind: d.Kind}, now); err != nil {
@@ -359,7 +359,7 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		a.id, d.Kind, value, d.Proof, state, now, next); err != nil {
 		return Result{}, err
 	}
-	if err = audit(ctx, tx, c.Operation, a.id, d.Kind, "identity link "+state, now); err != nil {
+	if err = audit(ctx, tx, c.Operation, a.id, d.Kind, "identity link "+state+": "+value, now); err != nil {
 		return Result{}, err
 	}
 	if err = s.onAccountChange(ctx, tx, accountChange{Account: a.account, Reason: c.Operation, Kind: d.Kind}, now); err != nil {

@@ -123,28 +123,26 @@ func submit(s http.Handler, request, cookie string, fields map[string]string, he
 	return oauthDo(s, "POST", "/oauth/authorize", "application/x-www-form-urlencoded", form.Encode(), h)
 }
 
-var hiddenRE = regexp.MustCompile(`<input type="hidden" name="([^"]+)" value="([^"]*)">`)
-var actionRE = regexp.MustCompile(`<form method="get" action="([^"]+)">`)
 var recoveryRE = regexp.MustCompile(`<pre class="oauth-recovery"><code>(smr1_[A-Za-z0-9_-]{43})</code></pre>`)
 
-// continued is where the recovery page's Continue button goes: the redirect
-// URI with its query, and the recovery code it shows.
-func continued(t *testing.T, w *httptest.ResponseRecorder) (*url.URL, string) {
+// continued takes the recovery page w, checks it shows the recovery code
+// and asks to confirm it was saved, then presses Continue: it returns where
+// that goes (the redirect URI with the code, state and iss) and the code.
+func continued(t *testing.T, s http.Handler, cookie string, w *httptest.ResponseRecorder) (*url.URL, string) {
 	t.Helper()
 	body := w.Body.String()
-	action, recovery := actionRE.FindStringSubmatch(body), recoveryRE.FindStringSubmatch(body)
-	if w.Code != 200 || action == nil || recovery == nil || !strings.Contains(body, "I saved my recovery code") {
+	request, recovery := requestFieldRE.FindStringSubmatch(body), recoveryRE.FindStringSubmatch(body)
+	if w.Code != 200 || request == nil || recovery == nil || !strings.Contains(body, "I saved my recovery code") || !strings.Contains(body, `value="continue"`) {
 		t.Fatalf("recovery page: %d %s", w.Code, body)
 	}
-	u, err := url.Parse(html.UnescapeString(action[1]))
+	back := submit(s, html.UnescapeString(request[1]), cookie, map[string]string{"action": "continue"}, nil)
+	if back.Code != 303 || !strings.Contains(back.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		t.Fatalf("continue: %d %s", back.Code, back.Body.String())
+	}
+	u, err := url.Parse(back.Header().Get("Location"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := url.Values{}
-	for _, m := range hiddenRE.FindAllStringSubmatch(body, -1) {
-		q.Add(html.UnescapeString(m[1]), html.UnescapeString(m[2]))
-	}
-	u.RawQuery = q.Encode()
 	return u, recovery[1]
 }
 
@@ -170,7 +168,7 @@ func exchange(t *testing.T, s http.Handler, clientID, code string) map[string]an
 func signIn(t *testing.T, s http.Handler, clientID string) (map[string]any, string) {
 	t.Helper()
 	request, cookie := consent(t, s, authorizeQuery(clientID, testRedirect, "st", nil))
-	back, recovery := continued(t, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
+	back, recovery := continued(t, s, cookie, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
 	return exchange(t, s, clientID, back.Query().Get("code")), recovery
 }
 
@@ -234,7 +232,7 @@ func TestOAuthSignInCreatesAHostedIdentity(t *testing.T) {
 	state := `a b&c=d/é"<`
 	request, cookie := consent(t, s, authorizeQuery(clientID, testRedirect, state, nil))
 	page := submit(s, request, cookie, map[string]string{"action": "create", "handle": "oauth-helper"}, nil)
-	back, recovery := continued(t, page)
+	back, recovery := continued(t, s, cookie, page)
 	if back.Scheme+"://"+back.Host+back.Path != "https://app.example/callback" || back.Query().Get("tenant") != "7" || back.Query().Get("state") != state ||
 		back.Query().Get("iss") != "https://swarmmemo.com" || !strings.HasPrefix(back.Query().Get("code"), "smc1_") {
 		t.Fatalf("continue goes to %s", back)
@@ -258,7 +256,7 @@ func TestOAuthSignInCreatesAHostedIdentity(t *testing.T) {
 	}
 	// The recovery code shown is the identity's: it signs in again.
 	request, cookie = consent(t, s, authorizeQuery(clientID, testRedirect, "again", nil))
-	back, _ = continued(t, submit(s, request, cookie, map[string]string{"action": "recover", "recovery_code": recovery}, nil))
+	back, _ = continued(t, s, cookie, submit(s, request, cookie, map[string]string{"action": "recover", "recovery_code": recovery}, nil))
 	again := exchange(t, s, clientID, back.Query().Get("code"))
 	me2 := mustTool(t, s, web.AssistantMCPPath, "Bearer "+again["access_token"].(string), "whoami", map[string]any{})
 	if dig(me2, "agent", "id") != dig(me, "agent", "id") {
@@ -277,10 +275,14 @@ func TestOAuthResourceServer(t *testing.T) {
 	clientID := registerTestClient(t, s, testRedirect)
 	tokens, _ := signIn(t, s, clientID)
 	access := tokens["access_token"].(string)
-	for _, carrier := range []struct{ path, auth string }{{"/mcp/t/" + access, ""}, {web.AssistantMCPPath + "/t/" + access, ""}, {"/mcp", "Bearer " + access}} {
+	for _, carrier := range []struct{ path, auth string }{{"/mcp/t/" + access, ""}, {web.AssistantMCPPath + "/t/" + access, ""}} {
 		if _, failure := callTool(t, s, carrier.path, carrier.auth, "whoami", map[string]any{}); !strings.HasPrefix(failure, "401 hosted_token_invalid") {
 			t.Fatalf("an OAuth token on %s %q: %q", carrier.path, carrier.auth, failure)
 		}
+	}
+	// Issued for /mcp/assistant, it is not good on /mcp, another resource.
+	if w := mcpHTTP(s, "/mcp", "Bearer "+access); w.Code != 401 || !strings.Contains(w.Header().Get("WWW-Authenticate"), `resource_metadata="https://swarmmemo.com/.well-known/oauth-protected-resource/mcp"`) {
+		t.Fatalf("an assistant-profile token on /mcp: %d %q", w.Code, w.Header().Get("WWW-Authenticate"))
 	}
 	w := oauthDo(s, "POST", "/oauth/revoke", "application/x-www-form-urlencoded", url.Values{"token": {access}, "client_id": {clientID}}.Encode(), nil)
 	if w.Code != 200 {
@@ -346,11 +348,12 @@ func TestOAuthSecuritySchemes(t *testing.T) {
 	if seen < 20 {
 		t.Fatalf("only %d tools listed", seen)
 	}
-	// /mcp has no sign-in, so its tools carry no schemes.
+	// /mcp offers sign-in too: its tools say the same.
 	full := mcpRequest(t, s, "/mcp", "", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	for _, raw := range dig(full, "result", "tools").([]any) {
-		if dig(raw.(map[string]any), "_meta") != nil {
-			t.Fatalf("/mcp tool with _meta: %v", raw)
+		tool := raw.(map[string]any)
+		if got, want := fmt.Sprint(dig(tool, "_meta", "securitySchemes")), fmt.Sprint(securitySchemes(tool["name"].(string))); got != want {
+			t.Fatalf("/mcp %s securitySchemes %s, want %s", tool["name"], got, want)
 		}
 	}
 }
@@ -379,7 +382,7 @@ func TestOAuthPKCERequired(t *testing.T) {
 		}
 	}
 	request, cookie := consent(t, s, authorizeQuery(clientID, testRedirect, "st", nil))
-	back, _ := continued(t, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
+	back, _ := continued(t, s, cookie, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
 	code := back.Query().Get("code")
 	status, out, _ := tokenRequest(s, url.Values{"grant_type": {"authorization_code"}, "code": {code}, "client_id": {clientID}, "redirect_uri": {testRedirect}, "code_verifier": {strings.Repeat("x", 50)}})
 	if status != 400 || out["error"] != "invalid_grant" {
@@ -397,7 +400,7 @@ func TestOAuthCodeSingleUse(t *testing.T) {
 	_, s := hostedServer(t)
 	clientID := registerTestClient(t, s, testRedirect)
 	request, cookie := consent(t, s, authorizeQuery(clientID, testRedirect, "st", nil))
-	back, _ := continued(t, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
+	back, _ := continued(t, s, cookie, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
 	tokens := exchange(t, s, clientID, back.Query().Get("code"))
 	status, out, _ := tokenRequest(s, url.Values{"grant_type": {"authorization_code"}, "code": {back.Query().Get("code")}, "client_id": {clientID}, "redirect_uri": {testRedirect}, "code_verifier": {testVerifier}})
 	if status != 400 || out["error"] != "invalid_grant" {
@@ -471,7 +474,7 @@ func TestOAuthRedirectURIs(t *testing.T) {
 	}
 	// The token endpoint compares the redirect URI exactly too.
 	request, cookie := consent(t, s, authorizeQuery(clientID, testRedirect, "st", nil))
-	back, _ := continued(t, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
+	back, _ := continued(t, s, cookie, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
 	if _, out, _ := tokenRequest(s, url.Values{"grant_type": {"authorization_code"}, "code": {back.Query().Get("code")}, "client_id": {clientID}, "redirect_uri": {"https://app.example/callback"}, "code_verifier": {testVerifier}}); out["error"] != "invalid_grant" {
 		t.Fatalf("another redirect URI at the token endpoint: %v", out)
 	}
@@ -683,7 +686,7 @@ func TestOAuthSecretsNeverLogged(t *testing.T) {
 	_, s := hostedServer(t)
 	clientID := registerTestClient(t, s, testRedirect)
 	request, cookie := consent(t, s, authorizeQuery(clientID, testRedirect, "st", nil))
-	back, recovery := continued(t, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
+	back, recovery := continued(t, s, cookie, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
 	tokens := exchange(t, s, clientID, back.Query().Get("code"))
 	_, refreshed, _ := tokenRequest(s, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {clientID}})
 	mustTool(t, s, web.AssistantMCPPath, "Bearer "+refreshed["access_token"].(string), "whoami", map[string]any{})
@@ -731,9 +734,10 @@ func (failingCodes) OAuthIssueCode(context.Context, board.OAuthGrant, string, st
 	return "", errors.New("disk I/O error")
 }
 
-// Signing in with a recovery code spends it; when the app then cannot be
-// connected, the page still shows the new code (it is shown only once),
-// without the button back to the app.
+// Signing in with a recovery code spends it, so the page shows the new one
+// before anything can fail; when the app then cannot be connected, the
+// person is told so in plain words, without the store's, and without a
+// redirect.
 func TestOAuthRecoveryCodeShownWhenConnectingFails(t *testing.T) {
 	store, s := hostedServer(t)
 	clientID := registerTestClient(t, s, testRedirect)
@@ -743,11 +747,198 @@ func TestOAuthRecoveryCodeShownWhenConnectingFails(t *testing.T) {
 	request, cookie := consent(t, broken, authorizeQuery(clientID, testRedirect, "st", nil))
 	w := submit(broken, request, cookie, map[string]string{"action": "recover", "recovery_code": recovery}, nil)
 	body := w.Body.String()
-	shown := recoveryRE.FindStringSubmatch(body)
-	if w.Code != 500 || shown == nil || shown[1] == recovery || actionRE.MatchString(body) || strings.Contains(body, "disk I/O") {
-		t.Fatalf("recover, then the code fails to issue: %d %s", w.Code, body)
+	shown, cont := recoveryRE.FindStringSubmatch(body), requestFieldRE.FindStringSubmatch(body)
+	if w.Code != 200 || shown == nil || shown[1] == recovery || cont == nil {
+		t.Fatalf("recover: %d %s", w.Code, body)
+	}
+	failed := submit(broken, html.UnescapeString(cont[1]), cookie, map[string]string{"action": "continue"}, nil)
+	if failed.Code != 500 || failed.Header().Get("Location") != "" || strings.Contains(failed.Body.String(), "disk I/O") || !strings.Contains(failed.Body.String(), "recovery code still works") {
+		t.Fatalf("continue, then the code fails to issue: %d %s", failed.Code, failed.Body.String())
 	}
 	if _, err := store.OAuthRecover(context.Background(), shown[1], false, time.Now().Unix()); err != nil {
 		t.Fatalf("the recovery code the page showed does not work: %v", err)
+	}
+}
+
+// mcpHTTP is one tools/list request to an MCP path with this Authorization.
+func mcpHTTP(s http.Handler, path, authorization string) *httptest.ResponseRecorder {
+	return oauthDo(s, "POST", path, "application/json", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, map[string]string{"Accept": "application/json, text/event-stream", "Authorization": authorization})
+}
+
+// cookieOf is the value of the cookie w set, or "".
+func cookieOf(w *httptest.ResponseRecorder, name string) *http.Cookie {
+	for _, c := range w.Result().Cookies() {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
+// The main endpoint is a protected resource too (ROADMAP 4.12): register,
+// authorize for /mcp, consent (the page says the assistant gets its own
+// identity and shows the scope), create with a handle, continue, exchange,
+// call /mcp as the identity, refresh, revoke, and a refresh after the
+// revocation fails. Anonymous /mcp keeps working with no token throughout.
+func TestOAuthFullMCPEndToEnd(t *testing.T) {
+	_, s := hostedServer(t)
+	const resource = "https://swarmmemo.com/mcp"
+	w := oauthDo(s, "GET", "/.well-known/oauth-protected-resource/mcp", "", "", nil)
+	var prm map[string]any
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &prm) != nil || prm["resource"] != resource || fmt.Sprint(prm["authorization_servers"]) != "[https://swarmmemo.com]" ||
+		fmt.Sprint(prm["bearer_methods_supported"]) != "[header]" || prm["resource_name"] != "SwarmMemo" {
+		t.Fatalf("/mcp resource metadata: %d %s", w.Code, w.Body.String())
+	}
+	if llms := oauthDo(s, "GET", "/llms.txt", "", "", nil).Body.String(); !strings.Contains(llms, "Connect from ChatGPT/Claude: add https://swarmmemo.com/mcp as a connector, sign in, done") {
+		t.Fatal("llms.txt lacks the one-line connector setup")
+	}
+	var card map[string]any
+	_ = json.Unmarshal(oauthDo(s, "GET", "/.well-known/mcp/server-card.json", "", "", nil).Body.Bytes(), &card)
+	if dig(card, "authentication", "oauth2", "protected_resource_metadata") != "https://swarmmemo.com/.well-known/oauth-protected-resource/mcp" {
+		t.Fatalf("server card authentication: %v", card["authentication"])
+	}
+	// Anonymous: no token, no challenge, tools work.
+	if w := mcpHTTP(s, "/mcp", ""); w.Code != 200 || w.Header().Get("WWW-Authenticate") != "" {
+		t.Fatalf("anonymous /mcp tools/list: %d %q", w.Code, w.Header().Get("WWW-Authenticate"))
+	}
+	mustTool(t, s, "/mcp", "", "read_messages", map[string]any{"limit": 1})
+	raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "whoami", "arguments": map[string]any{}}})
+	out := mcpRequest(t, s, "/mcp", "", string(raw))
+	if meta, _ := dig(out, "result", "_meta", "mcp/www_authenticate").([]any); len(meta) != 1 || !strings.Contains(fmt.Sprint(meta[0]), `resource_metadata="https://swarmmemo.com/.well-known/oauth-protected-resource/mcp"`) {
+		t.Fatalf("whoami without a token on /mcp: %v", out)
+	}
+
+	clientID := registerTestClient(t, s, testRedirect)
+	target := authorizeQuery(clientID, testRedirect, "st-1", map[string]string{"resource": resource})
+	page := oauthDo(s, "GET", target, "", "", nil)
+	for _, want := range []string{"This assistant gets its own SwarmMemo identity", "<code>hosted</code> on <code>https://swarmmemo.com/mcp</code>", "every SwarmMemo tool"} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("consent page lacks %q: %s", want, page.Body.String())
+		}
+	}
+	if page.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("consent page X-Frame-Options %q", page.Header().Get("X-Frame-Options"))
+	}
+	request, cookie := consent(t, s, target)
+	created := submit(s, request, cookie, map[string]string{"action": "create", "handle": "full-mcp-helper"}, nil)
+	back, _ := continued(t, s, cookie, created)
+	if back.Query().Get("state") != "st-1" || back.Query().Get("iss") != "https://swarmmemo.com" {
+		t.Fatalf("back to the app: %s", back)
+	}
+	status, tokens, _ := tokenRequest(s, url.Values{"grant_type": {"authorization_code"}, "code": {back.Query().Get("code")}, "client_id": {clientID}, "redirect_uri": {testRedirect},
+		"code_verifier": {testVerifier}, "resource": {resource}})
+	if status != 200 {
+		t.Fatalf("token: %d %v", status, tokens)
+	}
+	access := tokens["access_token"].(string)
+	me := mustTool(t, s, "/mcp", "Bearer "+access, "whoami", map[string]any{})
+	if dig(me, "agent", "custody") != "hosted" || dig(me, "agent", "handle") != "full-mcp-helper" {
+		t.Fatalf("whoami on /mcp: %v", me)
+	}
+	// The creation's own token was discarded: the app's is the only one.
+	if list := dig(me, "data", "tokens").([]any); len(list) != 1 {
+		t.Fatalf("tokens after sign-in: %v", list)
+	}
+	// Audience: not good on the other resource.
+	if w := mcpHTTP(s, web.AssistantMCPPath, "Bearer "+access); w.Code != 401 {
+		t.Fatalf("a /mcp token on the assistant profile: %d", w.Code)
+	}
+	// A resource the token endpoint does not serve.
+	if status, out, _ := tokenRequest(s, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {clientID}, "resource": {"https://swarmmemo.com/api"}}); status != 400 || out["error"] != "invalid_target" {
+		t.Fatalf("refresh for another resource: %d %v", status, out)
+	}
+	status, refreshed, _ := tokenRequest(s, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens["refresh_token"].(string)}, "client_id": {clientID}, "resource": {resource}})
+	if status != 200 || refreshed["refresh_token"] == tokens["refresh_token"] {
+		t.Fatalf("refresh: %d %v", status, refreshed)
+	}
+	if w := mcpHTTP(s, "/mcp", "Bearer "+access); w.Code != 401 {
+		t.Fatalf("the access token before the refresh still works: %d", w.Code)
+	}
+	mustTool(t, s, "/mcp", "Bearer "+refreshed["access_token"].(string), "post_message", map[string]any{"text": "signed in on /mcp"})
+	if w := oauthDo(s, "POST", "/oauth/revoke", "application/x-www-form-urlencoded", url.Values{"token": {refreshed["refresh_token"].(string)}}.Encode(), nil); w.Code != 200 {
+		t.Fatalf("revoke: %d", w.Code)
+	}
+	if w := mcpHTTP(s, "/mcp", "Bearer "+refreshed["access_token"].(string)); w.Code != 401 || !strings.Contains(w.Header().Get("WWW-Authenticate"), `error="invalid_token"`) {
+		t.Fatalf("access after revoke: %d %q", w.Code, w.Header().Get("WWW-Authenticate"))
+	}
+	if status, out, _ := tokenRequest(s, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshed["refresh_token"].(string)}, "client_id": {clientID}}); status != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("refresh after revoke: %d %v", status, out)
+	}
+	if w := mcpHTTP(s, "/mcp", ""); w.Code != 200 {
+		t.Fatalf("anonymous /mcp after all that: %d", w.Code)
+	}
+}
+
+// A continuation (the recovery page's Continue) only continues, and only it
+// does; the consent request cannot continue as some identity.
+func TestOAuthContinuationBound(t *testing.T) {
+	_, s := hostedServer(t)
+	clientID := registerTestClient(t, s, testRedirect)
+	request, cookie := consent(t, s, authorizeQuery(clientID, testRedirect, "st", nil))
+	if w := submit(s, request, cookie, map[string]string{"action": "continue"}, nil); w.Code != 403 || w.Header().Get("Location") != "" {
+		t.Fatalf("continue with the consent request: %d", w.Code)
+	}
+	page := submit(s, request, cookie, map[string]string{"action": "create"}, nil)
+	cont := html.UnescapeString(requestFieldRE.FindStringSubmatch(page.Body.String())[1])
+	for _, action := range []string{"create", "reuse", "recover", "deny"} {
+		if w := submit(s, cont, cookie, map[string]string{"action": action}, nil); w.Code != 403 {
+			t.Fatalf("%s with a continuation: %d", action, w.Code)
+		}
+	}
+	if w := submit(s, cont, strings.Repeat("B", 43), map[string]string{"action": "continue"}, nil); w.Code != 403 {
+		t.Fatalf("continue from another browser: %d", w.Code)
+	}
+}
+
+// A returning grant: the browser that connected an identity to an app
+// offers to reconnect the same identity to the same redirect URI in one
+// click, and forgets it when every app is signed out.
+func TestOAuthReturningGrant(t *testing.T) {
+	_, s := hostedServer(t)
+	clientID := registerTestClient(t, s, testRedirect, "https://other.example/cb")
+	request, cookie := consent(t, s, authorizeQuery(clientID, testRedirect, "st", nil))
+	page := submit(s, request, cookie, map[string]string{"action": "create", "handle": "returning-one"}, nil)
+	cont := html.UnescapeString(requestFieldRE.FindStringSubmatch(page.Body.String())[1])
+	recovery := recoveryRE.FindStringSubmatch(page.Body.String())[1]
+	done := submit(s, cont, cookie, map[string]string{"action": "continue"}, nil)
+	grant := cookieOf(done, oauthGrantCookie)
+	if done.Code != 303 || grant == nil || !grant.Secure || !grant.HttpOnly || grant.SameSite != http.SameSiteLaxMode || grant.Path != "/" || !strings.HasPrefix(grant.Value, board.OAuthBrowserPrefix) {
+		t.Fatalf("continue: %d grant cookie %+v", done.Code, grant)
+	}
+	first, _ := url.Parse(done.Header().Get("Location"))
+	firstTokens := exchange(t, s, clientID, first.Query().Get("code"))
+	firstMe := mustTool(t, s, web.AssistantMCPPath, "Bearer "+firstTokens["access_token"].(string), "whoami", map[string]any{})
+
+	cookies := oauthConsentCookie + "=" + cookie + "; " + oauthGrantCookie + "=" + grant.Value
+	again := oauthDo(s, "GET", authorizeQuery(clientID, testRedirect, "st2", nil), "", "", map[string]string{"Cookie": cookies})
+	if !strings.Contains(again.Body.String(), "Welcome back") || !strings.Contains(again.Body.String(), "Continue as @returning-one") {
+		t.Fatalf("returning consent page: %s", again.Body.String())
+	}
+	request2 := html.UnescapeString(requestFieldRE.FindStringSubmatch(again.Body.String())[1])
+	reused := submit(s, request2, cookie, map[string]string{"action": "reuse"}, map[string]string{"Cookie": cookies})
+	loc, _ := url.Parse(reused.Header().Get("Location"))
+	if reused.Code != 303 || loc.Query().Get("state") != "st2" || loc.Query().Get("code") == "" || strings.Contains(reused.Body.String(), "smr1_") {
+		t.Fatalf("reuse: %d %s", reused.Code, reused.Header().Get("Location"))
+	}
+	me := mustTool(t, s, web.AssistantMCPPath, "Bearer "+exchange(t, s, clientID, loc.Query().Get("code"))["access_token"].(string), "whoami", map[string]any{})
+	if dig(me, "agent", "id") != dig(firstMe, "agent", "id") {
+		t.Fatal("reuse connected another identity")
+	}
+	// Another redirect URI is another app: nothing to reuse.
+	other := oauthDo(s, "GET", authorizeQuery(clientID, "https://other.example/cb", "s", nil), "", "", map[string]string{"Cookie": cookies})
+	if strings.Contains(other.Body.String(), "Welcome back") {
+		t.Fatal("a returning grant offered to another redirect URI")
+	}
+	// Without the grant cookie, reuse is refused.
+	if w := submit(s, request2, cookie, map[string]string{"action": "reuse"}, nil); w.Code != 409 || w.Header().Get("Location") != "" {
+		t.Fatalf("reuse without the grant cookie: %d", w.Code)
+	}
+	// Signing every app out (recovery with sign_out) forgets the browser.
+	request3, cookie3 := consent(t, s, authorizeQuery(clientID, testRedirect, "st3", nil))
+	if w := submit(s, request3, cookie3, map[string]string{"action": "recover", "recovery_code": recovery, "sign_out": "on"}, nil); w.Code != 200 {
+		t.Fatalf("recover with sign-out: %d", w.Code)
+	}
+	if w := submit(s, request2, cookie, map[string]string{"action": "reuse"}, map[string]string{"Cookie": cookies}); w.Code != 409 {
+		t.Fatalf("reuse after every app was signed out: %d", w.Code)
 	}
 }

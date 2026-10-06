@@ -32,20 +32,40 @@ type Limit struct {
 	Note  string `json:"note"`
 }
 
+// SizeText and durationText state a constant as Limit.Text does, so copy
+// built from a constant reads like the published limit and cannot drift.
+func SizeText(n int64) string { return Limit{Value: n, Unit: "bytes"}.Text() }
+
+func durationText(seconds int64) string { return Limit{Value: seconds, Unit: "seconds"}.Text() }
+
 // Text is the limit as a reader should see it: "64 KiB", "30 days", "16".
 func (l Limit) Text() string {
 	v := l.Value
-	switch {
-	case l.Unit == "bytes" && v >= 1<<20 && v%(1<<20) == 0:
-		return fmt.Sprintf("%d MiB", v>>20)
-	case l.Unit == "bytes" && v >= 1<<10 && v%(1<<10) == 0:
-		return fmt.Sprintf("%d KiB", v>>10)
-	case l.Unit == "bytes":
-		return fmt.Sprintf("%d bytes", v)
-	case l.Unit == "seconds" && v >= 86400 && v%86400 == 0:
-		return fmt.Sprintf("%d days", v/86400)
-	case l.Unit == "seconds":
-		return fmt.Sprintf("%d seconds", v)
+	plural := func(n int64, unit string) string {
+		if n == 1 {
+			return "1 " + unit
+		}
+		return fmt.Sprintf("%d %ss", n, unit)
+	}
+	switch l.Unit {
+	case "bytes":
+		switch {
+		case v >= 1<<20 && v%(1<<20) == 0:
+			return fmt.Sprintf("%d MiB", v>>20)
+		case v >= 1<<10 && v%(1<<10) == 0:
+			return fmt.Sprintf("%d KiB", v>>10)
+		}
+		return plural(v, "byte")
+	case "seconds":
+		switch {
+		case v >= 86400 && v%86400 == 0:
+			return plural(v/86400, "day")
+		case v >= 3600 && v%3600 == 0:
+			return plural(v/3600, "hour")
+		case v >= 60 && v%60 == 0:
+			return plural(v/60, "minute")
+		}
+		return plural(v, "second")
 	}
 	return fmt.Sprintf("%d", v)
 }
@@ -167,6 +187,11 @@ func (m MethodEntry) PriceText() string {
 	if p == (Price{}) {
 		return "free"
 	}
+	return p.Words() + " " + m.Resource
+}
+
+// Words is a price without its resource: "5", "1 + 1 per KiB".
+func (p Price) Words() string {
 	parts := []string{}
 	if p.Base > 0 || (p.PerByte == 0 && p.PerKiB == 0) {
 		parts = append(parts, fmt.Sprintf("%d", p.Base))
@@ -177,7 +202,7 @@ func (m MethodEntry) PriceText() string {
 	if p.PerKiB > 0 {
 		parts = append(parts, fmt.Sprintf("%d per KiB", p.PerKiB))
 	}
-	return strings.Join(parts, " + ") + " " + m.Resource
+	return strings.Join(parts, " + ")
 }
 
 // MaxCost is the max_cost the examples send: enough for the example at the
@@ -268,6 +293,7 @@ var Placeholders = map[string]string{
 	"RUN_ID":            strings.Repeat("0f", 16),
 	"MODEL_ALIAS":       "small",
 	"RESOURCE_ID":       "search",
+	"RECEIVER_ID":       strings.Repeat("0e", 16),
 }
 
 // FillPlaceholders replaces every placeholder in s with its stand-in.

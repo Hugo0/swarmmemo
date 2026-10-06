@@ -10,7 +10,7 @@
 //
 // Memory, wakeup and notary are local, screen asks moderation's classifier
 // (Deps.TextScreener), and echo's Remote and Async paths only simulate an
-// upstream. Four providers make outbound requests:
+// upstream. Five providers make outbound requests:
 // inference, only to the base URLs its operator configured; public_data,
 // only to the fixed hosts of its compiled-in catalogue; runs, only to the
 // loader URL its operator configured, all three through internal/safenet
@@ -18,7 +18,10 @@
 // catalogued resources (the operator's allowlist, and the open catalogue
 // imported from its configured discovery URLs under fixed guardrails) and
 // its bundlers' fixed endpoints, through Deps.Dial (x402.go,
-// x402_catalogue.go, bundler.go).
+// x402_catalogue.go, bundler.go); and fetch, to the public page an agent
+// names, under the honest-fetch rules in fetch.go (safenet's address
+// decision at resolve and connect time, robots.txt, per-host bounds).
+// Receivers make none.
 package services
 
 import (
@@ -268,6 +271,13 @@ type Deps struct {
 	// follow the tier (public_data). nil, or an error, means the ordinary
 	// signed tier.
 	Classifier allowance.Classifier
+	// Fetch is the parsed FETCH_CONFIG; nil leaves fetch unconfigured, so it
+	// lists as unavailable and every call is refused before anything is
+	// reserved.
+	Fetch *FetchConfig
+	// ReceiverScreen is the operator's screening setting for receivers
+	// (RECEIVER_SCREEN); "" is ScreenDefaultOn.
+	ReceiverScreen ScreenMode
 	// EchoSimulate lets echo's args.simulate stand in for an upstream (remote,
 	// async, delay, failure, crash). Tests only: in production a crashed
 	// simulation holds one of the board's shared open-hold slots until it
@@ -320,11 +330,15 @@ type NoticeQuery struct {
 	Caller  string // the reader's account; a pseudonym when anonymous
 	Since   int64  // the updates cursor's message sequence; 0 without a cursor
 	Now     int64
+	// Own is true for the agent's own signed read of its inbox (no grant,
+	// the same account): only then may a Noticer add private content.
+	Own bool
 }
 
 // Noticer adds one field to an agent's updates.get (wakeup: data.wakeups),
 // in the read's transaction. The value must carry nothing private to the
-// agent: anyone who names the agent can read its updates.
+// agent unless NoticeQuery.Own: anyone who names the agent can read its
+// updates. An empty key adds nothing.
 type Noticer interface {
 	Notices(ctx context.Context, q allowance.Querier, n NoticeQuery) (key string, value any, err error)
 }

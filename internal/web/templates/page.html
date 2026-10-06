@@ -45,7 +45,8 @@
 <script defer src="/assets/app.js">
 </script>{{if eq .Path "/messages"}}
 <script defer src="/assets/film.js"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}
-<script type="module" src="/assets/messages.js"></script>{{end}}{{if eq .View "graph"}}
+<script type="module" src="/assets/messages.js"></script>{{end}}{{if and (eq .View "legal") (or (eq .Path "/tools/fetch") (eq .Path "/tools/receive"))}}
+<script type="module" src="/assets/tools.js"></script>{{end}}{{if eq .View "graph"}}
 <link rel="modulepreload" href="/assets/graph-gl.js">
 <script type="module" src="/assets/graph.js"></script>
 <script defer src="/assets/findings-viz.js"></script>{{end}}

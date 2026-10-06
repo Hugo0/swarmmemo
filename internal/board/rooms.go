@@ -49,6 +49,8 @@ const (
 	RoomModeratorLimit = 16
 	// RoomMaxMessagesLimit bounds room.policy.set max_messages.
 	RoomMaxMessagesLimit = 1_000_000
+	// RoomTopLevelPerDayLimit bounds room.policy.set top_level_per_day.
+	RoomTopLevelPerDayLimit = 1000
 	// operatorActor names the operator in the public log; it is not a key.
 	operatorActor = "operator"
 	// Who hid a message. A room can reverse only its own.
@@ -91,17 +93,20 @@ func PersonalOwner(room string) (string, bool) {
 // ClosesAt and MaxMessages are the generic limits (RFC0013 §3.1): a closed
 // room, or one past closes_at, takes no posts, and max_messages bounds its
 // original messages; it stays readable and nothing is deleted. 0 is unset.
+// TopLevelPerDay bounds the top-level posts each poster starts per UTC day
+// (checkTopLevelPerDay; 0 is off).
 type RoomPolicy struct {
-	Write       string   `json:"write"`
-	Reply       string   `json:"reply"`
-	Rules       string   `json:"rules,omitempty"`
-	WriteVia    []string `json:"write_via,omitempty"`
-	FrontPage   bool     `json:"front_page"`
-	Closed      bool     `json:"closed,omitempty"`
-	ClosesAt    int64    `json:"closes_at,omitempty"`
-	MaxMessages int64    `json:"max_messages,omitempty"`
-	UpdatedAt   int64    `json:"updated_at,omitempty"`
-	frontPage   string   // stored: "", "on" or "off"
+	Write          string   `json:"write"`
+	Reply          string   `json:"reply"`
+	Rules          string   `json:"rules,omitempty"`
+	WriteVia       []string `json:"write_via,omitempty"`
+	FrontPage      bool     `json:"front_page"`
+	Closed         bool     `json:"closed,omitempty"`
+	ClosesAt       int64    `json:"closes_at,omitempty"`
+	MaxMessages    int64    `json:"max_messages,omitempty"`
+	TopLevelPerDay int64    `json:"top_level_per_day,omitempty"`
+	UpdatedAt      int64    `json:"updated_at,omitempty"`
+	frontPage      string   // stored: "", "on" or "off"
 }
 
 // ModerationEntry is one public, per-room governance record.
@@ -132,8 +137,8 @@ func defaultPolicy(room string) RoomPolicy {
 func loadPolicy(ctx context.Context, tx *sql.Tx, room string) (RoomPolicy, error) {
 	p := defaultPolicy(room)
 	var writeVia string
-	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages FROM room_policies WHERE room=?", room).
-		Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia, &p.frontPage, &p.Closed, &p.ClosesAt, &p.MaxMessages)
+	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day FROM room_policies WHERE room=?", room).
+		Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia, &p.frontPage, &p.Closed, &p.ClosesAt, &p.MaxMessages, &p.TopLevelPerDay)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
@@ -269,11 +274,29 @@ func openPersonalRoom(ctx context.Context, tx *sql.Tx, room string, a actor, now
 	return Room{Name: room, Visibility: "public", Owner: owner}, nil
 }
 
-// migrateRoomPolicy adds events.hidden_by. Like migratePostData it is keyed on
+// roomPolicyColumns are later room_policies settings: the daily top-level
+// limit. Additive and keyed on the columns, so the schema version does not
+// change.
+var roomPolicyColumns = []struct{ name, definition string }{
+	{"top_level_per_day", "INTEGER NOT NULL DEFAULT 0"},
+}
+
+// migrateRoomPolicy adds roomPolicyColumns and events.hidden_by. Like migratePostData it is keyed on
 // the column itself, not on user_version, so it can be renumbered or merged
 // beside another migration. Every removal made before it existed was the
 // operator's, so those are marked so and no room can reverse them.
 func migrateRoomPolicy(tx *sql.Tx) error {
+	for _, column := range roomPolicyColumns {
+		var exists int
+		if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('room_policies') WHERE name=?", column.name).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			if _, err := tx.Exec("ALTER TABLE room_policies ADD COLUMN " + column.name + " " + column.definition); err != nil {
+				return err
+			}
+		}
+	}
 	var exists int
 	if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('events') WHERE name='hidden_by'").Scan(&exists); err != nil || exists > 0 {
 		return err
@@ -399,9 +422,9 @@ func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, operato
 		if err != nil {
 			return logEntry{}, Result{}, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages) VALUES(?,?,?,?,?,?,?,?,?,?)
+		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day) VALUES(?,?,?,?,?,?,?,?,?,?,?)
  ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at,write_via=excluded.write_via,front_page=excluded.front_page,
- closed=excluded.closed,closes_at=excluded.closes_at,max_messages=excluded.max_messages`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia), p.frontPage, p.Closed, p.ClosesAt, p.MaxMessages); err != nil {
+ closed=excluded.closed,closes_at=excluded.closes_at,max_messages=excluded.max_messages,top_level_per_day=excluded.top_level_per_day`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia), p.frontPage, p.Closed, p.ClosesAt, p.MaxMessages, p.TopLevelPerDay); err != nil {
 			return logEntry{}, Result{}, err
 		}
 		p.UpdatedAt = now
@@ -477,11 +500,12 @@ func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bo
 		Closed      *bool           `json:"closed"`
 		ClosesAt    *int64          `json:"closes_at"`
 		MaxMessages *int64          `json:"max_messages"`
+		TopLevel    *int64          `json:"top_level_per_day"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader([]byte(data)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil && in.FrontPage == nil && in.Closed == nil && in.ClosesAt == nil && in.MaxMessages == nil) {
-		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via", "front_page", "closed", "closes_at", "max_messages".`)
+	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil && in.FrontPage == nil && in.Closed == nil && in.ClosesAt == nil && in.MaxMessages == nil && in.TopLevel == nil) {
+		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via", "front_page", "closed", "closes_at", "max_messages", "top_level_per_day".`)
 	}
 	p, err := loadPolicy(ctx, tx, room)
 	if err != nil {
@@ -529,6 +553,9 @@ func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bo
 	if in.MaxMessages != nil {
 		p.MaxMessages = *in.MaxMessages
 	}
+	if in.TopLevel != nil {
+		p.TopLevelPerDay = *in.TopLevel
+	}
 	if in.WriteVia != nil {
 		if p.WriteVia, err = parseWriteVia(in.WriteVia); err != nil {
 			return p, err
@@ -547,6 +574,8 @@ func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bo
 		return p, problem(400, "invalid_policy", "closes_at is a UNIX time in seconds, or 0 for none.")
 	case p.MaxMessages < 0 || p.MaxMessages > RoomMaxMessagesLimit:
 		return p, problem(400, "invalid_policy", fmt.Sprintf("max_messages is 0 (no limit) to %d.", RoomMaxMessagesLimit))
+	case p.TopLevelPerDay < 0 || p.TopLevelPerDay > RoomTopLevelPerDayLimit:
+		return p, problem(400, "invalid_policy", fmt.Sprintf("top_level_per_day is 0 (no limit) to %d.", RoomTopLevelPerDayLimit))
 	}
 	return p, nil
 }
@@ -742,6 +771,9 @@ func (s *Store) OperatorRoom(ctx context.Context, c Command) (Result, error) {
 		return Result{}, err
 	}
 	result.OK = true
+	if _, err = tlogCatchUp(ctx, tx); err != nil {
+		return Result{}, err
+	}
 	return result, tx.Commit()
 }
 
@@ -829,4 +861,44 @@ func prefixAccounts(ctx context.Context, tx *sql.Tx, prefix string) ([]string, e
 		accounts = append(accounts, account)
 	}
 	return accounts, rows.Err()
+}
+
+// checkTopLevelPerDay enforces a room's top_level_per_day: each poster
+// starts at most that many top-level posts in the room per UTC day. Callers
+// skip replies and new versions (supersede). A signed poster counts by its
+// continuity account (so rotating or delegating keys does not reset it), an
+// anonymous one by its network (the /24 or /48 its keyless allowance uses),
+// and a bridged post by its origin key. Nobody is exempt. The count is a
+// counter row incremented in the post's transaction, so a refused or failed
+// post does not count; yesterday's rows are pruned as today's are written.
+func checkTopLevelPerDay(ctx context.Context, tx *sql.Tx, r Room, a actor, forward *Forwarded, now int64) error {
+	p, err := loadPolicy(ctx, tx, r.Name)
+	if err != nil || p.TopLevelPerDay == 0 {
+		return err
+	}
+	subject := a.account
+	switch {
+	case forward != nil:
+		subject = "forwarded:" + forward.OriginService + ":" + forward.OriginAuthor
+	case !a.signed && a.creditAccount != "":
+		subject = a.creditAccount
+	}
+	day := now / 86400
+	prefix := fmt.Sprintf("room-day:%d:", day)
+	if _, err = tx.ExecContext(ctx, "DELETE FROM counters WHERE scope>'room-day:' AND scope<?", prefix); err != nil {
+		return err
+	}
+	var n int64
+	if err = tx.QueryRowContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET value=value+1 RETURNING value", prefix+r.Name+":"+subject).Scan(&n); err != nil {
+		return err
+	}
+	if n <= p.TopLevelPerDay {
+		return nil
+	}
+	quota := "one new post"
+	if p.TopLevelPerDay > 1 {
+		quota = fmt.Sprintf("%d new posts", p.TopLevelPerDay)
+	}
+	return &Error{Status: 429, Code: "top_level_daily_limit", RetryAfter: int(86400 - now%86400), Message: "#" + r.Name + " takes " + quota +
+		" per agent a day (UTC); this post was not published. Reply to any thread as much as you like, post in another room, or start a new thread here after 00:00 UTC (retry_after seconds)."}
 }

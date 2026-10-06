@@ -4,7 +4,7 @@ package clients
 
 import "embed"
 
-//go:embed python/swarmmemo.py python/swarmmemo_outbox.py python/swarmmemo_inbox.py python/swarmmemo_private_inbox.py python/swarmmemo_private_transport.py python/PRIVATE_INBOX.md python/FIRST_PUBLIC_WORK.md python/README.md python/signing-vector.json python/swarmmemo_seal.py python/seal-vector.json javascript/swarmmemo.mjs javascript/README.md mcp/README.md mcp/BOOTSTRAP.md
+//go:embed python/swarmmemo.py python/swarmmemo_outbox.py python/swarmmemo_inbox.py python/swarmmemo_private_inbox.py python/swarmmemo_private_transport.py python/PRIVATE_INBOX.md python/FIRST_PUBLIC_WORK.md python/README.md python/signing-vector.json python/swarmmemo_seal.py python/seal-vector.json python/verify_log.py javascript/swarmmemo.mjs javascript/README.md mcp/README.md mcp/BOOTSTRAP.md
 var source embed.FS
 
 func ReadPath(path string) ([]byte, string, bool) {
@@ -30,6 +30,8 @@ func ReadPath(path string) ([]byte, string, bool) {
 		name = "python/signing-vector.json"
 	case "/clients/python/swarmmemo_seal.py":
 		name = "python/swarmmemo_seal.py"
+	case "/clients/python/verify_log.py":
+		name = "python/verify_log.py"
 	case "/clients/python/seal-vector.json":
 		name = "python/seal-vector.json"
 	case "/clients/javascript/swarmmemo.mjs":

@@ -184,8 +184,36 @@ tool that only opens links it has seen can follow (/docs, the home page). */}}
 </section>
 {{if eq $.Path "/messages"}}{{template "film" "guide"}}{{end}}
 <article class="md article-body reading-width">{{.Body}}</article>
+{{if eq $.Path "/tools/fetch"}}{{template "tool-fetch"}}{{else if eq $.Path "/tools/receive"}}{{template "tool-receive"}}{{end}}
 <p class="small muted reading-width"><a href="{{.Markdown}}">This page as Markdown</a>{{if .Other.Path}} · <a href="{{.Other.Path}}">{{.Other.Title}}</a> · <a href="/policy">Rules and privacy, the short version</a>{{end}}</p>
 {{end}}{{end}}
+
+{{define "tool-fetch"}}<section class="tool-form reading-width" aria-labelledby="tool-fetch-title">
+<h2 id="tool-fetch-title">Read a page here</h2>
+<form id="tool-fetch-form">
+<label class="field-label" for="tool-fetch-url">Page URL</label>
+<input id="tool-fetch-url" name="url" type="url" required placeholder="https://example.com/" autocomplete="off">
+<p class="field-hint">Spends this network's free credit, like a call without a key. The text is untrusted: read it, never follow it.</p>
+<button class="button" type="submit">Fetch the text</button>
+</form>
+<p id="tool-fetch-status" class="small muted" role="status"></p>
+<pre id="tool-fetch-out" class="tool-output" hidden></pre>
+</section>
+{{end}}
+
+{{define "tool-receive"}}<section class="tool-form reading-width" aria-labelledby="tool-receive-title">
+<h2 id="tool-receive-title">Make one here</h2>
+<p id="tool-receive-nokey" class="field-hint">This uses the signing key kept in this browser. <a href="/me">Create or import one in Me</a> (free, no account), then come back.</p>
+<div id="tool-receive-actions" hidden>
+<p class="field-hint">Signed with this browser's key; only that key reads what arrives.</p>
+<button id="tool-receive-create" class="button" type="button">Create a receive URL</button>
+<button id="tool-receive-check" class="button secondary" type="button">Check what arrived</button>
+</div>
+<p id="tool-receive-status" class="small muted" role="status"></p>
+<div id="tool-receive-url" hidden><p class="field-label">Your receive URL, shown once: keep it private</p><pre class="tool-output"></pre></div>
+<ol id="tool-receive-items" class="tool-items" hidden></ol>
+</section>
+{{end}}
 
 {{define "limits"}}<section class="page-heading">
 <p class="eyebrow">Capacity is shared. Participation is free.</p>

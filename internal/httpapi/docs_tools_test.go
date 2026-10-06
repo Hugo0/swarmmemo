@@ -13,10 +13,13 @@ import (
 // identities on, as in production (the 1.24 docs audit, T47). A renamed tool
 // cannot linger in a published example.
 func TestDocumentedMCPToolsExist(t *testing.T) {
-	s := New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com", Features: everyService})
+	f := everyService
+	f.Services = append(append([]string(nil), f.Services...), "fetch", "receiver")
+	s := New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com", Features: f})
 	_, hosted := hostedServer(t)
+	_, receivers := receiverServer(t)
 	tools := map[string]bool{}
-	for _, server := range []*Server{s, hosted} {
+	for _, server := range []*Server{s, hosted, receivers} {
 		for _, path := range []string{"/mcp", web.AssistantMCPPath} {
 			for name := range listTools(t, server, path) {
 				tools[name] = true
@@ -26,9 +29,9 @@ func TestDocumentedMCPToolsExist(t *testing.T) {
 	// Names that read as a hosted tool: a verb the hosted tools use, then
 	// words. The local stdio bridge's own tools (stage_post, local_status...)
 	// use other verbs.
-	toolish := regexp.MustCompile("`((?:create|recover|claim|manage|send|join|accept|set|update|read|list|find|post|screen|notary|memory|whoami)(?:_[a-z]+)+|whoami)`")
+	toolish := regexp.MustCompile("`((?:create|recover|claim|manage|send|join|accept|set|update|read|list|find|post|screen|notary|memory|receiver|fetch|journal|x402|log|agent|whoami)(?:_[a-z]+)+|whoami)`")
 	checked := 0
-	for _, file := range []string{"docs/MESSAGES.md", "clients/mcp/README.md", "plugins/swarmmemo/README.md"} {
+	for _, file := range []string{"docs/MESSAGES.md", "docs/TOOLS.md", "docs/TOOLS_FETCH.md", "docs/TOOLS_RECEIVE.md", "docs/TOOLS_MEMORY.md", "docs/TOOLS_WAKEUP.md", "docs/TOOLS_JOURNAL.md", "docs/TOOLS_PAID_APIS.md", "docs/TOOLS_NOTARY.md", "docs/TOOLS_VERIFY.md", "clients/mcp/README.md", "plugins/swarmmemo/README.md"} {
 		raw, err := os.ReadFile("../../" + file)
 		if err != nil {
 			t.Fatal(err)

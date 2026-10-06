@@ -115,6 +115,9 @@ func TestWakeupOverEveryWire(t *testing.T) {
 	if dig(caps, "services", "wakeup", "active_per_agent") != float64(board.WakeupsPerAccount) || dig(caps, "services", "notary", "public_key") != "/api/notary/key" {
 		t.Fatalf("capabilities: %+v", caps["services"])
 	}
+	if every, _ := dig(caps, "services", "wakeup", "every_seconds").([]any); len(every) != 2 || every[0] != float64(board.WakeupEveryMin) || every[1] != float64(board.WakeupEveryMax) {
+		t.Fatalf("capabilities: recurring wake-ups: %+v", caps["services"])
+	}
 }
 
 // TestNotaryOverEveryWire stamps over /v1/command and /c64, reads receipts

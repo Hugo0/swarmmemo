@@ -616,7 +616,7 @@ const framesCallNote = `service.call x402 {"schema":1,"method":"call","args":{"r
 
 // FramesNote says what the open Frames catalogue is, for the resources read
 // and /capabilities.
-const FramesNote = `SwarmMemo tools: service.read x402 tools_search finds about 37,000 paid APIs for free; call a hit by its id ("tool:TOOL_ID") with service.call x402 call, its arguments as body. Callable are vetted tools (vetted: true), priced at most tools.max_price, not on the operator's denylist; a call is refused before any payment when the tool is not live or asks more, and charged what the tool bills.`
+const FramesNote = `SwarmMemo tools: service.read x402 tools_search finds about ` + X402ToolsApprox + ` paid APIs for free; call a hit by its id ("tool:TOOL_ID") with service.call x402 call, its arguments as body. Callable are vetted tools (vetted: true), priced at most tools.max_price, not on the operator's denylist; a call is refused before any payment when the tool is not live or asks more, and charged what the tool bills.`
 
 // ReadRemote serves tools_search and tools_get after commit; every other
 // read is Read's.

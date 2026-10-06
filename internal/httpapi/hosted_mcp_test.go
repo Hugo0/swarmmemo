@@ -27,7 +27,7 @@ import (
 )
 
 // hostedServer is a real store holding a KEK, served by New.
-func hostedServer(t *testing.T) (*board.Store, *Server) {
+func hostedServer(t testing.TB) (*board.Store, *Server) {
 	t.Helper()
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
@@ -204,14 +204,12 @@ func TestHostedMCPUniformErrors(t *testing.T) {
 	unknown := board.HostedTokenPrefix + strings.Repeat("A", 43)
 	var first string
 	for name, carrier := range map[string]struct{ path, auth string }{
-		"revoked":          {"/mcp/t/" + token, ""},
-		"unknown":          {"/mcp/t/" + unknown, ""},
-		"malformed":        {"/mcp/t/not-a-token", ""},
-		"recovery as auth": {"/mcp", "Bearer " + data["recovery_code"].(string)},
-		"bearer unknown":   {"/mcp", "Bearer " + unknown},
-		// On the assistant profile, a protected resource with sign-in (OAuth),
-		// a bad bearer token is an HTTP 401 with a challenge instead:
-		// TestOAuthResourceServer.
+		"revoked":   {"/mcp/t/" + token, ""},
+		"unknown":   {"/mcp/t/" + unknown, ""},
+		"malformed": {"/mcp/t/not-a-token", ""},
+		// A bad bearer token on /mcp or /mcp/assistant, protected resources
+		// with sign-in (OAuth), is an HTTP 401 with a challenge instead
+		// (below and TestOAuthResourceServer).
 	} {
 		for _, tool := range []string{"whoami", "post_message"} {
 			_, failure := callTool(t, s, carrier.path, carrier.auth, tool, toolArgs[tool])
@@ -223,6 +221,12 @@ func TestHostedMCPUniformErrors(t *testing.T) {
 			} else if failure != first {
 				t.Errorf("%s token answers differently:\n%s\n%s", name, failure, first)
 			}
+		}
+	}
+	for name, bearer := range map[string]string{"recovery as auth": data["recovery_code"].(string), "bearer unknown": unknown} {
+		w := oauthDo(s, "POST", "/mcp", "application/json", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, map[string]string{"Accept": "application/json, text/event-stream", "Authorization": "Bearer " + bearer})
+		if w.Code != 401 || !strings.Contains(w.Body.String(), "hosted_token_invalid") || !strings.Contains(w.Header().Get("WWW-Authenticate"), "/.well-known/oauth-protected-resource/mcp\"") {
+			t.Errorf("%s on /mcp: %d %s %q", name, w.Code, w.Body.String(), w.Header().Get("WWW-Authenticate"))
 		}
 	}
 	for tool, args := range toolArgs {
@@ -550,12 +554,14 @@ func TestHostedToolsSignOnlyHostedOperations(t *testing.T) {
 		{"claim_identity", map[string]any{"recovery_code": "x", "new_public_key": "x", "proof": "y"}},
 		{"post_message", map[string]any{"text": "public"}},
 		{"read_updates", map[string]any{}},
+		{"journal", map[string]any{}},
+		{"journal_suspend", map[string]any{"text": "next: reply"}},
 	} {
 		callTool(t, s, url, "", call.tool, call.args)
 	}
 	allowed := map[string]bool{"agent.get": true, "hosted.token": true, "hosted.claim": true, "conversations.list": true, "conversation.get": true,
 		"conversation.open": true, "conversation.respond": true, "post": true, "room.invite.create": true, "room.invite.accept": true,
-		"messaging.policy.set": true, "room.policy.set": true, "updates.get": true, "service.call": true}
+		"messaging.policy.set": true, "room.policy.set": true, "updates.get": true, "service.call": true, "journal.get": true, "journal.suspend": true}
 	if len(rec.ops) < 10 {
 		t.Fatalf("only %v were signed; the tools above did not run", rec.ops)
 	}
@@ -563,5 +569,23 @@ func TestHostedToolsSignOnlyHostedOperations(t *testing.T) {
 		if !allowed[op] {
 			t.Errorf("a hosted tool signed %s", op)
 		}
+	}
+}
+
+// journal is the wake read as the hosted identity: one briefing of its own,
+// sealed; journal_suspend needs the memory service.
+func TestHostedMCPJournal(t *testing.T) {
+	_, s := hostedServer(t)
+	me := newIdentity(t, s, "sleepy")
+	url := "/mcp/t/" + me["token"].(string)
+	got := mustTool(t, s, url, "", "journal", map[string]any{"limit": 5})
+	if dig(got, "data", "briefing", "agent") != me["agent"] || dig(got, "data", "seal", "hash") == nil || got["next_cursor"] == nil {
+		t.Fatalf("hosted journal: %v", got)
+	}
+	if _, failure := callTool(t, s, url, "", "journal_suspend", map[string]any{"text": "where I was"}); !strings.Contains(failure, "memory") {
+		t.Fatalf("journal_suspend without memory: %q", failure)
+	}
+	if _, failure := callTool(t, s, "/mcp", "", "journal", map[string]any{}); failure == "" {
+		t.Fatal("journal without a hosted identity must be refused")
 	}
 }

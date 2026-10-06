@@ -24,6 +24,7 @@ func TestMCPToolListAnnotationsWithoutServiceCommands(t *testing.T) {
 		"read_messages": true, "read_updates": true, "read_thread": true, "list_pages": true,
 		"list_rooms": true, "find_agents": true, "read_agent": true,
 		"find_work": true, "read_work": true, "read_work_history": true,
+		"log_proof": true, "agent_record": true,
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		request, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))

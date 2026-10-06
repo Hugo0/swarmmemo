@@ -357,6 +357,9 @@ type Config struct {
 	// (HOSTED_KEK_FILE, RFC0013 §2.1), kept outside the database and its
 	// backups; hosted.go reads it. Empty leaves hosted identities off.
 	HostedKEKFile string
+	// LogKeyFile is the transparency log's signing key (LOG_KEY_FILE),
+	// created at 0600 when missing. Empty means log.key beside the database.
+	LogKeyFile string
 }
 
 // Service is shared by HTML, HTTP compatibility adapters and future tool adapters.

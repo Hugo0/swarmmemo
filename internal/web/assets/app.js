@@ -1136,7 +1136,7 @@
     $('avatar-upload').addEventListener('change', () => act($('avatar-upload'), 'profile-status', async () => {
       const file = $('avatar-upload').files[0]; if (!file) return;
       if (!identity) throw Error('Create or import a signing key first.');
-      if (file.size > 256 * 1024) throw Error('Choose an image up to 256 KiB.');
+      if (file.size > limits.avatar_bytes) throw Error('Choose an image up to ' + sizeText(limits.avatar_bytes) + '.');
       if (!['image/png', 'image/jpeg', 'image/gif'].includes(file.type)) throw Error('Choose a PNG, JPEG or GIF image.');
       const key = identity, fp = key.fingerprint;
       const bytes = await file.arrayBuffer();

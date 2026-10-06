@@ -1,13 +1,16 @@
 package httpapi
 
-// OAuth 2.1 for the hosted MCP assistant profile (T56), per the MCP
-// authorization spec (2025-06-18 and 2025-11-25): /mcp/assistant is a
-// protected resource whose authorization server is this origin.
+// OAuth 2.1 for the hosted MCP endpoints (T56, ROADMAP §4.12), per the MCP
+// authorization spec (2025-06-18 and 2025-11-25): /mcp and its assistant
+// profile /mcp/assistant are protected resources whose authorization server
+// is this origin. A token is bound to the one it was issued for.
 //
-//	GET  /.well-known/oauth-protected-resource[/mcp/assistant]  RFC 9728
+//	GET  /.well-known/oauth-protected-resource[/mcp|/mcp/assistant]  RFC 9728
 //	GET  /.well-known/oauth-authorization-server                RFC 8414
 //	GET  /oauth/authorize   the sign-in and consent page
-//	POST /oauth/authorize   create an identity, sign in with a recovery code, or cancel
+//	POST /oauth/authorize   create an identity, sign in with a recovery code,
+//	                        reconnect the identity this browser connected
+//	                        before, continue to the app, or cancel
 //	POST /oauth/token       authorization_code (PKCE S256) and refresh_token grants
 //	POST /oauth/register    dynamic client registration (RFC 7591), public clients
 //	POST /oauth/revoke      token revocation (RFC 7009)
@@ -17,7 +20,7 @@ package httpapi
 // none) and identify themselves by a client ID metadata document (an HTTPS
 // client_id, fetched through safenet) or by dynamic registration. Anonymous
 // MCP calls and the /mcp/t/TOKEN path work exactly as before; an OAuth token
-// is accepted only in a header, on /mcp/assistant.
+// is accepted only in a header, on the resource it was issued for.
 
 import (
 	"bytes"
@@ -31,6 +34,7 @@ import (
 	"errors"
 	"html/template"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -57,6 +61,10 @@ const (
 	// oauthConsentCookie carries the nonce the consent form's signed request
 	// is bound to (double submit), so another site cannot post the form.
 	oauthConsentCookie = "__Host-swarmmemo-oauth"
+	// oauthGrantCookie remembers, per browser, which identity it connected to
+	// which app (board.OAuthReturning), so a returning grant reconnects the
+	// same identity in one click. Lax: the app opens the page cross-site.
+	oauthGrantCookie = "__Host-swarmmemo-grant"
 	// oauthConsentSeconds is how long a consent page may be submitted.
 	oauthConsentSeconds = 900
 	oauthFormBytes      = 16 << 10
@@ -80,6 +88,9 @@ type oauthStore interface {
 	OAuthRefresh(ctx context.Context, refresh, clientID, resource, scope string, now int64) (board.OAuthTokens, error)
 	OAuthRevoke(ctx context.Context, token, clientID string, now int64) error
 	OAuthAccessToken(ctx context.Context, token string) (bool, error)
+	OAuthDiscardToken(ctx context.Context, account, tokenID string, now int64) error
+	OAuthReturning(ctx context.Context, browser, redirectURI string, now int64) (account, handle string, ok bool, err error)
+	OAuthRemember(ctx context.Context, browser, redirectURI, account string, now int64) error
 }
 
 // oauthStore is the board's OAuth, or nil while hosted identities are off:
@@ -123,15 +134,23 @@ func newOAuthState() oauthState {
 		cimd: map[string]cimdEntry{}, cimdSlots: make(chan struct{}, cimdConcurrent), fetch: fetchCIMD}
 }
 
-// oauthResource is the protected resource: the assistant profile's URL.
-func (s *Server) oauthResource() string { return s.cfg.PublicURL + web.AssistantMCPPath }
+// oauthProfiles are the protected resources' paths: the full MCP endpoint
+// and its assistant profile. oauthDefaultProfile is the one a request that
+// names no resource gets (the first to offer sign-in, kept for its clients).
+var oauthProfiles = []string{"/mcp", web.AssistantMCPPath}
 
-// oauthPRMURL is the resource's metadata, at the path-inserted well-known URI.
-func (s *Server) oauthPRMURL() string { return s.cfg.PublicURL + oauthPRMPath + web.AssistantMCPPath }
+const oauthDefaultProfile = web.AssistantMCPPath
 
-// oauthChallenge is the WWW-Authenticate value of a 401 on the resource.
-func (s *Server) oauthChallenge(errorCode, description string) string {
-	v := `Bearer resource_metadata="` + s.oauthPRMURL() + `", scope="` + board.OAuthScope + `"`
+// oauthResource is the protected resource at profile: its URL.
+func (s *Server) oauthResource(profile string) string { return s.cfg.PublicURL + profile }
+
+// oauthPRMURL is profile's resource metadata, at the path-inserted
+// well-known URI.
+func (s *Server) oauthPRMURL(profile string) string { return s.cfg.PublicURL + oauthPRMPath + profile }
+
+// oauthChallenge is the WWW-Authenticate value of a 401 on profile.
+func (s *Server) oauthChallenge(profile, errorCode, description string) string {
+	v := `Bearer resource_metadata="` + s.oauthPRMURL(profile) + `", scope="` + board.OAuthScope + `"`
 	if errorCode != "" {
 		v += `, error="` + errorCode + `", error_description="` + description + `"`
 	}
@@ -152,7 +171,7 @@ func (s *Server) oauthRoute(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	switch path {
-	case oauthPRMPath, oauthPRMPath + web.AssistantMCPPath, oauthASMPath, oauthAuthorizePath, oauthTokenPath, oauthRegisterPath, oauthRevokePath:
+	case oauthPRMPath, oauthPRMPath + "/mcp", oauthPRMPath + web.AssistantMCPPath, oauthASMPath, oauthAuthorizePath, oauthTokenPath, oauthRegisterPath, oauthRevokePath:
 	default:
 		return false
 	}
@@ -162,13 +181,18 @@ func (s *Server) oauthRoute(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	switch path {
-	case oauthPRMPath, oauthPRMPath + web.AssistantMCPPath:
+	case oauthPRMPath, oauthPRMPath + "/mcp", oauthPRMPath + web.AssistantMCPPath:
 		if !readMethod(r) {
 			methodError(w)
 			return true
 		}
+		// The root document describes the default resource, as it always has.
+		profile := strings.TrimPrefix(path, oauthPRMPath)
+		if profile == "" {
+			profile = oauthDefaultProfile
+		}
 		w.Header().Set("Cache-Control", "public, max-age=3600")
-		jsonResponse(w, 200, s.protectedResourceMetadata())
+		jsonResponse(w, 200, s.protectedResourceMetadata(profile))
 	case oauthASMPath:
 		if !readMethod(r) {
 			methodError(w)
@@ -211,13 +235,17 @@ func ValidAppsChallenge(path, token string) bool {
 	return (path == "" || appsChallengePathRE.MatchString(path)) && appsChallengeTokenRE.MatchString(token)
 }
 
-func (s *Server) protectedResourceMetadata() map[string]any {
+func (s *Server) protectedResourceMetadata(profile string) map[string]any {
+	name := "SwarmMemo"
+	if profile == web.AssistantMCPPath {
+		name = "SwarmMemo for assistants"
+	}
 	return map[string]any{
-		"resource":                 s.oauthResource(),
+		"resource":                 s.oauthResource(profile),
 		"authorization_servers":    []string{s.cfg.PublicURL},
 		"scopes_supported":         []string{board.OAuthScope},
 		"bearer_methods_supported": []string{"header"},
-		"resource_name":            "SwarmMemo for assistants",
+		"resource_name":            name,
 		"resource_documentation":   s.cfg.PublicURL + "/protocol.md#signing-in-with-oauth",
 		"resource_policy_uri":      s.cfg.PublicURL + "/privacy",
 		"resource_tos_uri":         s.cfg.PublicURL + "/terms",
@@ -322,12 +350,13 @@ func (s *Server) tokenEndpoint(w http.ResponseWriter, r *http.Request, o oauthSt
 	}
 	now := time.Now().Unix()
 	resource := form.Get("resource")
-	if resource != "" && !s.ourResource(resource) {
-		oauthJSONError(w, oauthBad("invalid_target", "The only resource is "+s.oauthResource()+"."))
-		return
-	}
 	if resource != "" {
-		resource = s.oauthResource()
+		profile, ok := s.resourceProfile(resource)
+		if !ok {
+			oauthJSONError(w, oauthBad("invalid_target", s.resourcesLine()))
+			return
+		}
+		resource = s.oauthResource(profile)
 	}
 	var tokens board.OAuthTokens
 	switch form.Get("grant_type") {
@@ -381,6 +410,29 @@ func (s *Server) registerEndpoint(w http.ResponseWriter, r *http.Request, o oaut
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, oauthFormBytes))
+	if err != nil {
+		oauthJSONError(w, oauthBad("invalid_client_metadata", "Send a JSON object with redirect_uris, at most 16 KiB."))
+		return
+	}
+	name, redirects, err := parseRegistration(body)
+	if err != nil {
+		oauthJSONError(w, err)
+		return
+	}
+	client, err := o.OAuthRegisterClient(r.Context(), name, redirects, s.peer(r), time.Now().Unix())
+	if err != nil {
+		oauthJSONError(w, err)
+		return
+	}
+	oauthJSON(w, 201, map[string]any{"client_id": client.ID, "client_id_issued_at": time.Now().Unix(), "client_name": client.Name, "redirect_uris": client.RedirectURIs,
+		"token_endpoint_auth_method": "none", "grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"}})
+}
+
+// parseRegistration checks a dynamic client registration request (RFC
+// 7591): a public client (token_endpoint_auth_method none) using only the
+// code flow and refresh tokens, with 1 to 8 valid redirect URIs. It returns
+// the display name and the redirect URIs.
+func parseRegistration(body []byte) (string, []string, error) {
 	var in struct {
 		RedirectURIs []string `json:"redirect_uris"`
 		ClientName   string   `json:"client_name"`
@@ -388,43 +440,31 @@ func (s *Server) registerEndpoint(w http.ResponseWriter, r *http.Request, o oaut
 		GrantTypes   []string `json:"grant_types"`
 		Responses    []string `json:"response_types"`
 	}
-	if err != nil || json.Unmarshal(body, &in) != nil {
-		oauthJSONError(w, oauthBad("invalid_client_metadata", "Send a JSON object with redirect_uris."))
-		return
+	if len(body) > oauthFormBytes || json.Unmarshal(body, &in) != nil {
+		return "", nil, oauthBad("invalid_client_metadata", "Send a JSON object with redirect_uris.")
 	}
 	if in.AuthMethod != "" && in.AuthMethod != "none" {
-		oauthJSONError(w, oauthBad("invalid_client_metadata", "Clients here are public: token_endpoint_auth_method must be none."))
-		return
+		return "", nil, oauthBad("invalid_client_metadata", "Clients here are public: token_endpoint_auth_method must be none.")
 	}
 	for _, g := range in.GrantTypes {
 		if g != "authorization_code" && g != "refresh_token" {
-			oauthJSONError(w, oauthBad("invalid_client_metadata", "grant_types may be authorization_code and refresh_token."))
-			return
+			return "", nil, oauthBad("invalid_client_metadata", "grant_types may be authorization_code and refresh_token.")
 		}
 	}
 	for _, t := range in.Responses {
 		if t != "code" {
-			oauthJSONError(w, oauthBad("invalid_client_metadata", "response_types may only be code."))
-			return
+			return "", nil, oauthBad("invalid_client_metadata", "response_types may only be code.")
 		}
 	}
 	if len(in.RedirectURIs) == 0 || len(in.RedirectURIs) > board.OAuthRedirectURIsMax {
-		oauthJSONError(w, oauthBad("invalid_redirect_uri", "Give 1 to 8 redirect_uris."))
-		return
+		return "", nil, oauthBad("invalid_redirect_uri", "Give 1 to 8 redirect_uris.")
 	}
 	for _, u := range in.RedirectURIs {
 		if !validRedirectURI(u) {
-			oauthJSONError(w, oauthBad("invalid_redirect_uri", "Each redirect URI must be https, or http on localhost, 127.0.0.1 or [::1], with no fragment or credentials, up to 512 bytes."))
-			return
+			return "", nil, oauthBad("invalid_redirect_uri", "Each redirect URI must be https, or http on localhost, 127.0.0.1 or [::1], with no fragment or credentials, up to 512 bytes.")
 		}
 	}
-	client, err := o.OAuthRegisterClient(r.Context(), clientName(in.ClientName, ""), in.RedirectURIs, s.peer(r), time.Now().Unix())
-	if err != nil {
-		oauthJSONError(w, err)
-		return
-	}
-	oauthJSON(w, 201, map[string]any{"client_id": client.ID, "client_id_issued_at": time.Now().Unix(), "client_name": client.Name, "redirect_uris": client.RedirectURIs,
-		"token_endpoint_auth_method": "none", "grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"}})
+	return clientName(in.ClientName, ""), in.RedirectURIs, nil
 }
 
 // clientName is a client's display name: printable, at most
@@ -475,15 +515,27 @@ func loopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// ourResource reports a resource indicator naming the assistant profile,
+// resourceProfile is the profile a resource indicator names (RFC 8707),
 // ignoring the case of scheme and host and a trailing slash.
-func (s *Server) ourResource(raw string) bool {
+func (s *Server) resourceProfile(raw string) (string, bool) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Fragment != "" || u.RawQuery != "" || u.User != nil {
-		return false
+		return "", false
 	}
-	want, _ := url.Parse(s.oauthResource())
-	return strings.EqualFold(u.Scheme, want.Scheme) && strings.EqualFold(u.Host, want.Host) && strings.TrimSuffix(u.Path, "/") == want.Path
+	origin, _ := url.Parse(s.cfg.PublicURL)
+	if !strings.EqualFold(u.Scheme, origin.Scheme) || !strings.EqualFold(u.Host, origin.Host) {
+		return "", false
+	}
+	path := strings.TrimSuffix(u.Path, "/")
+	if slices.Contains(oauthProfiles, path) {
+		return path, true
+	}
+	return "", false
+}
+
+// resourcesLine is the invalid_target description.
+func (s *Server) resourcesLine() string {
+	return "The resources are " + s.oauthResource("/mcp") + " and " + s.oauthResource(web.AssistantMCPPath) + "."
 }
 
 // oauthClient resolves a client_id: an HTTPS URL is a client ID metadata
@@ -644,6 +696,9 @@ type authRequest struct {
 	Scope       string `json:"o"`
 	Nonce       string `json:"x"`
 	Expires     int64  `json:"e"`
+	// Account is set only on a continuation: the identity the person
+	// created or signed in to, connected when they continue to the app.
+	Account string `json:"u,omitempty"`
 }
 
 var pkceChallengeRE = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
@@ -703,11 +758,17 @@ func (s *Server) authorizeStart(w http.ResponseWriter, r *http.Request, o oauthS
 		back("invalid_request", "PKCE is required: code_challenge (43 base64url characters) with code_challenge_method S256")
 	case q.Get("scope") != "" && q.Get("scope") != board.OAuthScope:
 		back("invalid_scope", "the only scope is "+board.OAuthScope)
-	case q.Get("resource") != "" && !s.ourResource(q.Get("resource")):
-		back("invalid_target", "the only resource is "+s.oauthResource())
 	default:
+		profile, ok := oauthDefaultProfile, true
+		if raw := q.Get("resource"); raw != "" {
+			profile, ok = s.resourceProfile(raw)
+		}
+		if !ok {
+			back("invalid_target", s.resourcesLine())
+			return
+		}
 		req := authRequest{ClientID: client.ID, ClientName: client.Name, RedirectURI: redirect, State: state, Challenge: q.Get("code_challenge"),
-			Resource: s.oauthResource(), Scope: board.OAuthScope}
+			Resource: s.oauthResource(profile), Scope: board.OAuthScope}
 		s.consentPage(w, r, 200, req, "")
 	}
 }
@@ -782,7 +843,12 @@ func (s *Server) sameOriginForm(r *http.Request) bool {
 	return site == "" || site == "same-origin"
 }
 
-// authorizeSubmit is the sign-in form: create, recover or cancel.
+// authorizeSubmit is the sign-in form: create an identity, sign in with a
+// recovery code, reconnect the identity this browser connected to this app
+// before (reuse), continue to the app once the recovery code is saved, or
+// cancel. The authorization code is made only on the way back to the app
+// (continue and reuse), so it lives board.OAuthCodeSeconds however long the
+// person takes to save the recovery code.
 func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request, o oauthStore) {
 	r.Body = http.MaxBytesReader(w, r.Body, oauthFormBytes)
 	forged := pageView{Title: "This sign-in form expired", Error: "This form expired or did not come from this page. Go back to the app and start signing in again."}
@@ -791,18 +857,20 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request, o oauth
 		return
 	}
 	req, ok := s.openRequest(r, r.PostForm.Get("request"))
-	if !ok {
+	action := r.PostForm.Get("action")
+	// A continuation (it names the identity) only continues, and only a
+	// continuation does.
+	if !ok || (action == "continue") != (req.Account != "") {
 		s.oauthPage(w, 403, "", forged)
 		return
 	}
 	now := time.Now().Unix()
-	grant := board.OAuthGrant{ClientID: req.ClientID, ClientName: req.ClientName, RedirectURI: req.RedirectURI, Challenge: req.Challenge, Resource: req.Resource, Scope: req.Scope}
-	switch r.PostForm.Get("action") {
+	switch action {
 	case "deny":
+		s.oauthHeaders(w, req.RedirectURI)
 		http.Redirect(w, r, s.redirectWith(req.RedirectURI, map[string]string{"error": "access_denied", "error_description": "the person cancelled sign-in", "state": req.State}), http.StatusSeeOther)
 	case "create":
-		peer := s.peer(r)
-		res, err := s.service.Execute(mcpVia(r.Context()), board.Command{Operation: "hosted.create", Handle: strings.TrimSpace(r.PostForm.Get("handle"))}, peer)
+		res, err := s.service.Execute(mcpVia(r.Context()), board.Command{Operation: "hosted.create", Handle: strings.TrimSpace(r.PostForm.Get("handle"))}, s.peer(r))
 		if err != nil {
 			s.consentPage(w, r, apiError(err).Status, req, apiError(err).Message)
 			return
@@ -811,18 +879,17 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request, o oauth
 		recovery, _ := res.Data["recovery_code"].(string)
 		tokenID, _ := res.Data["token_id"].(string)
 		handle, _ := res.Data["handle"].(string)
-		// hosted.create's own token was shown to nobody: OAuth issues the
-		// one the app gets, so it is revoked with the code's issue.
 		if recovery == "" {
 			s.consentPage(w, r, 500, req, "Your identity could not be connected; try again.")
 			return
 		}
-		code, err := o.OAuthIssueCode(r.Context(), grant, account, tokenID, now)
-		if err != nil {
-			s.unconnectedPage(w, req, account, handle, recovery, true)
-			return
+		// hosted.create's own token was shown to nobody: the app gets its own.
+		if tokenID != "" {
+			if err := o.OAuthDiscardToken(r.Context(), account, tokenID, now); err != nil {
+				slog.Warn("oauth: discarding the creation token failed", "err", err)
+			}
 		}
-		s.recoveryPage(w, req, account, handle, recovery, code, true)
+		s.recoveryPage(w, r, req, account, handle, recovery, true)
 	case "recover":
 		if !s.oauth.recovery.Admit(s.peer(r)) {
 			w.Header().Set("Retry-After", "120")
@@ -835,16 +902,56 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request, o oauth
 			s.consentPage(w, r, e.Status, req, e.Message)
 			return
 		}
-		code, err := o.OAuthIssueCode(r.Context(), grant, got.Account, "", now)
-		if err != nil {
-			// The code used is spent: the new one must still be shown.
-			s.unconnectedPage(w, req, got.Account, got.Handle, got.RecoveryCode, false)
+		s.recoveryPage(w, r, req, got.Account, got.Handle, got.RecoveryCode, false)
+	case "reuse":
+		account, _, found := s.returningGrant(r, o, req.RedirectURI, now)
+		if !found {
+			s.consentPage(w, r, 409, req, "This browser no longer remembers an identity for this app. Create one, or sign in with your recovery code.")
 			return
 		}
-		s.recoveryPage(w, req, got.Account, got.Handle, got.RecoveryCode, code, false)
+		s.connect(w, r, o, req, account, now)
+	case "continue":
+		s.connect(w, r, o, req, req.Account, now)
 	default:
 		s.consentPage(w, r, 400, req, "Choose one of the options below.")
 	}
+}
+
+// connect issues the authorization code for account, makes this browser
+// remember the identity for this app, and sends the person back to the app
+// with the code, the state and iss.
+func (s *Server) connect(w http.ResponseWriter, r *http.Request, o oauthStore, req authRequest, account string, now int64) {
+	grant := board.OAuthGrant{ClientID: req.ClientID, ClientName: req.ClientName, RedirectURI: req.RedirectURI, Challenge: req.Challenge, Resource: req.Resource, Scope: req.Scope}
+	code, err := o.OAuthIssueCode(r.Context(), grant, account, "", now)
+	if err != nil {
+		// The page shows this error: never the store's own words.
+		s.oauthPage(w, 500, "", pageView{Title: "The app could not be connected", Error: "Your identity is safe, but " + req.ClientName + " could not be connected just now. Go back to the app and sign in again; your recovery code still works."})
+		return
+	}
+	browser := ""
+	if c, err := r.Cookie(oauthGrantCookie); err == nil && strings.HasPrefix(c.Value, board.OAuthBrowserPrefix) && len(c.Value) == len(board.OAuthBrowserPrefix)+43 {
+		browser = c.Value
+	} else if browser, err = board.NewOAuthBrowserSecret(); err != nil {
+		browser = ""
+	}
+	if browser != "" {
+		if err := o.OAuthRemember(r.Context(), browser, req.RedirectURI, account, now); err == nil {
+			http.SetCookie(w, &http.Cookie{Name: oauthGrantCookie, Value: browser, Path: "/", MaxAge: board.OAuthReturningSeconds, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		}
+	}
+	s.oauthHeaders(w, req.RedirectURI)
+	http.Redirect(w, r, s.redirectWith(req.RedirectURI, map[string]string{"code": code, "state": req.State}), http.StatusSeeOther)
+}
+
+// returningGrant is the identity this browser connected to the app at
+// redirectURI before, if it still may be reconnected.
+func (s *Server) returningGrant(r *http.Request, o oauthStore, redirectURI string, now int64) (account, handle string, ok bool) {
+	c, err := r.Cookie(oauthGrantCookie)
+	if err != nil {
+		return "", "", false
+	}
+	account, handle, ok, err = o.OAuthReturning(r.Context(), c.Value, redirectURI, now)
+	return account, handle, ok && err == nil
 }
 
 // pageView is what an OAuth page shows.
@@ -855,11 +962,14 @@ type pageView struct {
 	Host         string
 	Loopback     bool
 	Request      string
+	Scope        string
+	Resource     string
+	Full         bool
+	// The returning grant: the identity this browser connected before.
+	ReturningAgent, ReturningHandle string
 	// The recovery page.
 	Recovery, Agent, Handle string
 	Created                 bool
-	Action                  string
-	Fields                  [][2]string
 }
 
 // consentPage is the sign-in and consent page for req, with a fresh signed
@@ -867,6 +977,7 @@ type pageView struct {
 func (s *Server) consentPage(w http.ResponseWriter, r *http.Request, status int, req authRequest, problem string) {
 	req.Nonce = s.consentNonce(w, r)
 	req.Expires = time.Now().Unix() + oauthConsentSeconds
+	req.Account = ""
 	u, _ := url.Parse(req.RedirectURI)
 	// Who vouches for the name: a metadata document's host, or nobody (a
 	// registered client names itself).
@@ -874,53 +985,49 @@ func (s *Server) consentPage(w http.ResponseWriter, r *http.Request, status int,
 	if id, err := url.Parse(req.ClientID); err == nil && id.Scheme == "https" {
 		note = "Identified by " + id.Host + "."
 	}
-	s.oauthPage(w, status, req.RedirectURI, pageView{Title: "Connect " + req.ClientName + " to SwarmMemo", Error: problem, Client: req.ClientName, ClientNote: note, Host: u.Host,
-		Loopback: loopbackHost(u.Hostname()), Request: s.signRequest(req)})
+	v := pageView{Title: "Connect " + req.ClientName + " to SwarmMemo", Error: problem, Client: req.ClientName, ClientNote: note, Host: u.Host,
+		Loopback: loopbackHost(u.Hostname()), Request: s.signRequest(req), Scope: req.Scope, Resource: req.Resource, Full: req.Resource == s.oauthResource("/mcp")}
+	if o := s.oauthStore(); o != nil {
+		v.ReturningAgent, v.ReturningHandle, _ = s.returningGrant(r, o, req.RedirectURI, time.Now().Unix())
+	}
+	s.oauthPage(w, status, req.RedirectURI, v)
 }
 
 // recoveryPage shows the recovery code once and the button back to the
-// app. The button is a GET form to the redirect URI carrying the code, the
-// state and iss, beside the redirect URI's own query; it asks the person to
-// confirm they saved the code first.
-func (s *Server) recoveryPage(w http.ResponseWriter, req authRequest, account, handle, recovery, code string, created bool) {
-	u, _ := url.Parse(s.redirectWith(req.RedirectURI, map[string]string{"code": code, "state": req.State}))
-	fields := [][2]string{}
-	for k, vs := range u.Query() {
-		for _, v := range vs {
-			fields = append(fields, [2]string{k, v})
-		}
-	}
-	slices.SortFunc(fields, func(a, b [2]string) int { return strings.Compare(a[0], b[0]) })
-	u.RawQuery = ""
+// app, which posts a continuation (the request, now naming the identity)
+// and asks the person to confirm they saved the code first.
+func (s *Server) recoveryPage(w http.ResponseWriter, r *http.Request, req authRequest, account, handle, recovery string, created bool) {
+	req.Nonce = s.consentNonce(w, r)
+	req.Expires = time.Now().Unix() + oauthConsentSeconds
+	req.Account = account
+	u, _ := url.Parse(req.RedirectURI)
 	s.oauthPage(w, 200, req.RedirectURI, pageView{Title: "Save your recovery code", Client: req.ClientName, Host: u.Host, Recovery: recovery, Agent: account, Handle: handle,
-		Created: created, Action: u.String(), Fields: fields})
+		Created: created, Request: s.signRequest(req)})
 }
 
-// unconnectedPage shows a recovery code that was made (a new identity's, or
-// the one signing in replaced the used one with) when the app could not be
-// connected after all: it is shown only once, so it is shown here, without
-// the button back to the app.
-func (s *Server) unconnectedPage(w http.ResponseWriter, req authRequest, account, handle, recovery string, created bool) {
-	s.oauthPage(w, 500, "", pageView{Title: "Save your recovery code", Error: "Your identity could not be connected to " + req.ClientName + ". Save this recovery code, then go back to the app and sign in again with it.",
-		Client: req.ClientName, Recovery: recovery, Agent: account, Handle: handle, Created: created})
-}
-
-// oauthPage writes an OAuth page: no caching, no framing, scripts off, and
-// forms allowed to post here and to the client's redirect URI only.
-func (s *Server) oauthPage(w http.ResponseWriter, status int, redirect string, v pageView) {
+// oauthHeaders are an OAuth page's headers: no caching, no framing, scripts
+// off, and forms allowed to post here and to go on to the client's redirect
+// URI only (browsers apply form-action to the redirect after a post too).
+func (s *Server) oauthHeaders(w http.ResponseWriter, redirect string) {
 	formAction := "'self'"
 	if u, err := url.Parse(redirect); err == nil && redirect != "" {
 		formAction += " " + u.Scheme + "://" + u.Host
 	}
 	h := w.Header()
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; form-action "+formAction+"; frame-ancestors 'none'; base-uri 'none'")
-	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("X-Frame-Options", "DENY")
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Robots-Tag", "noindex")
 	// same-origin, not the site's no-referrer: under no-referrer a browser
 	// sends "Origin: null" with the form, which sameOriginForm refuses. The
 	// redirect to the app is cross-origin, so it still carries no Referer.
 	h.Set("Referrer-Policy", "same-origin")
+}
+
+// oauthPage writes an OAuth page with oauthHeaders.
+func (s *Server) oauthPage(w http.ResponseWriter, status int, redirect string, v pageView) {
+	s.oauthHeaders(w, redirect)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	var b bytes.Buffer
 	if err := oauthTemplate.Execute(&b, v); err != nil {
 		writeError(w, &board.Error{Status: 500, Code: "internal", Message: "The page could not be shown."})
@@ -938,39 +1045,45 @@ var oauthTemplate = template.Must(template.New("oauth").Parse(`<!doctype html>
 {{if .Error}}<p class="oauth-error" role="alert">{{.Error}}</p>{{end}}
 {{if .Recovery}}
 <p>{{if .Created}}Your new SwarmMemo identity is ready{{else}}You are signed in{{end}}: <code>{{.Agent}}</code>{{if .Handle}} (@{{.Handle}}){{end}}.</p>
-<p><strong>This recovery code is shown only now.</strong> Keep it somewhere you control, such as a password manager. You need it to sign in again from another app, to replace a leaked connection, and to claim this identity with a key of your own. SwarmMemo cannot show it again.{{if not .Created}} The code you used no longer works.{{end}}</p>
+<p><strong>This recovery code is shown only now.</strong> Keep it somewhere you control, such as a password manager. You need it to sign in again from another app or browser, to replace a leaked connection, and to claim this identity with a key of your own. SwarmMemo cannot show it again.{{if not .Created}} The code you used no longer works.{{end}}</p>
 <pre class="oauth-recovery"><code>{{.Recovery}}</code></pre>
-{{if .Action}}<form method="get" action="{{.Action}}">{{range .Fields}}<input type="hidden" name="{{index . 0}}" value="{{index . 1}}">{{end}}
+{{if .Request}}<form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
 <p><label><input type="checkbox" required> I saved my recovery code</label></p>
-<p><button class="button primary" type="submit">Continue to {{.Client}}</button></p>
+<p><button class="button primary" type="submit" name="action" value="continue">Continue to {{.Client}}</button></p>
 <p class="oauth-note">You will return to <strong>{{.Host}}</strong>.</p>
 </form>{{end}}
 {{else if .Request}}
-<p><strong>{{.Client}}</strong> asks to act as your SwarmMemo identity: post and read as you, and read and send your private messages. It cannot see your recovery code, claim the identity or move its credit. You will return to <strong>{{.Host}}</strong>.</p>
+<p><strong>This assistant gets its own SwarmMemo identity.</strong> {{.Client}} will post and read as that identity, and read and send its private messages, with a hosted identity's free allowance and limits. It cannot see the recovery code, claim the identity or move its credit. You will return to <strong>{{.Host}}</strong>.</p>
+<p class="oauth-scope">Access requested: <code>{{.Scope}}</code> on <code>{{.Resource}}</code> ({{if .Full}}every SwarmMemo tool{{else}}the assistant tools{{end}}).</p>
 <p class="oauth-note">{{.ClientNote}}</p>
 {{if .Loopback}}<p class="oauth-error">This app runs on your own computer ({{.Host}}). Continue only if you started it yourself.</p>{{end}}
-<section><h2>New here</h2>
+{{if .ReturningAgent}}<section><h2>Welcome back</h2>
+<form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
+<p>This browser connected <code>{{.ReturningAgent}}</code>{{if .ReturningHandle}} (@{{.ReturningHandle}}){{end}} to this app before.</p>
+<p><button class="button primary" type="submit" name="action" value="reuse">Continue as {{if .ReturningHandle}}@{{.ReturningHandle}}{{else}}this identity{{end}}</button></p></form></section>{{end}}
+<section><h2>{{if .ReturningAgent}}A new identity{{else}}New here{{end}}</h2>
 <form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
 <p><label>Handle (optional) <input name="handle" maxlength="32" autocomplete="off" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,31}"></label></p>
-<p><button class="button primary" type="submit" name="action" value="create">Create an identity and connect</button></p></form></section>
+<p><button class="button{{if not .ReturningAgent}} primary{{end}}" type="submit" name="action" value="create">Create an identity and connect</button></p></form></section>
 <section><h2>I have a recovery code</h2>
 <form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
 <p><label>Recovery code <input name="recovery_code" required autocomplete="off" spellcheck="false" placeholder="smr1_…"></label></p>
 <p><label><input type="checkbox" name="sign_out"> Also sign out every other app using this identity (if a connection leaked)</label></p>
 <p><button class="button" type="submit" name="action" value="recover">Sign in</button></p></form></section>
 <form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}"><p><button class="quiet-button" type="submit" name="action" value="deny">Cancel</button></p></form>
-<p class="oauth-note">No email and no password: your identity is a key SwarmMemo holds for you until you claim it with your own. Public posts are public. <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/protocol.md#signing-in-with-oauth">How sign-in works</a></p>
+<p class="oauth-note">No email and no password: the identity is a key SwarmMemo holds for you until you claim it with your own. Public posts are public. <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/protocol.md#signing-in-with-oauth">How sign-in works</a></p>
 {{else}}
 <p>Go back to the app and start signing in again. <a href="/for-agents#assistants">Connecting an assistant</a></p>
 {{end}}
 </main></body></html>
 `))
 
-// oauthMCPGate answers a request to the assistant profile whose bearer
-// token does not resolve with 401 and a WWW-Authenticate challenge, so an
-// OAuth client refreshes or signs in again (MCP authorization: invalid or
-// expired tokens receive HTTP 401). It reports whether it answered.
-func (s *Server) oauthMCPGate(w http.ResponseWriter, ctx context.Context, token string) bool {
+// oauthMCPGate answers a request to an MCP profile whose bearer token does
+// not resolve with 401 and a WWW-Authenticate challenge, so an OAuth client
+// refreshes or signs in again (MCP authorization: invalid or expired tokens
+// receive HTTP 401). A request with no token is never answered here: it
+// goes on anonymously. It reports whether it answered.
+func (s *Server) oauthMCPGate(w http.ResponseWriter, ctx context.Context, profile, token string) bool {
 	h := s.hostedStore()
 	if h == nil || s.oauthStore() == nil {
 		return false
@@ -980,15 +1093,22 @@ func (s *Server) oauthMCPGate(w http.ResponseWriter, ctx context.Context, token 
 	if !errors.As(err, &be) || be.Code != "hosted_token_invalid" {
 		return false
 	}
-	w.Header().Set("WWW-Authenticate", s.oauthChallenge("invalid_token", "The access token is invalid or expired"))
+	w.Header().Set("WWW-Authenticate", s.oauthChallenge(profile, "invalid_token", "The access token is invalid or expired"))
 	writeError(w, be)
 	return true
 }
 
-// oauthToolMeta marks a refused hosted tool call on the assistant profile
-// with the challenge ChatGPT reads to start sign-in
-// (_meta["mcp/www_authenticate"]).
-func (s *Server) oauthToolMeta(next mcp.MethodHandler) mcp.MethodHandler {
+// oauthToolMeta marks a refused hosted tool call on profile with the
+// challenge ChatGPT reads to start sign-in (_meta["mcp/www_authenticate"]):
+// a tool call that needs the identity is the request that needs auth, and
+// the HTTP response of a stream that already began cannot be a 401.
+func (s *Server) oauthToolMeta(profile string) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return s.oauthToolMetaFor(profile, next)
+	}
+}
+
+func (s *Server) oauthToolMetaFor(profile string, next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		res, err := next(ctx, method, req)
 		r, ok := res.(*mcp.CallToolResult)
@@ -1004,13 +1124,13 @@ func (s *Server) oauthToolMeta(next mcp.MethodHandler) mcp.MethodHandler {
 			if be.Code == "hosted_auth_required" {
 				code = "insufficient_scope"
 			}
-			r.Meta["mcp/www_authenticate"] = []string{s.oauthChallenge(code, "Sign in to SwarmMemo to use your identity")}
+			r.Meta["mcp/www_authenticate"] = []string{s.oauthChallenge(profile, code, "Sign in to SwarmMemo to use your identity")}
 		}
 		return res, err
 	}
 }
 
-// securitySchemes is a tool's auth on the assistant profile while sign-in
+// securitySchemes is a tool's auth on an MCP profile while sign-in
 // is on: a tool that needs the identity takes OAuth only; post_message and
 // read_updates work either way (as the identity when signed in); every
 // other tool needs none.
@@ -1023,7 +1143,7 @@ func securitySchemes(name string) []map[string]any {
 	case "create_identity", "recover_identity":
 		return []map[string]any{noauth}
 	}
-	if _, _, hosted := hostedToolHints(name); hosted {
+	if _, _, hosted := hostedToolHints(name); hosted || isHostedServiceTool(name) {
 		return []map[string]any{oauth}
 	}
 	return []map[string]any{noauth}
@@ -1035,11 +1155,17 @@ func (s *Server) oauthCapabilities() map[string]any {
 		return map[string]any{"available": false}
 	}
 	return map[string]any{
-		"available": true, "resource": s.oauthResource(), "protected_resource_metadata": s.oauthPRMURL(),
+		"available": true, "resource": s.oauthResource(oauthDefaultProfile), "protected_resource_metadata": s.oauthPRMURL(oauthDefaultProfile),
+		"resources": []map[string]any{
+			{"resource": s.oauthResource("/mcp"), "protected_resource_metadata": s.oauthPRMURL("/mcp"), "tools": "every tool"},
+			{"resource": s.oauthResource(web.AssistantMCPPath), "protected_resource_metadata": s.oauthPRMURL(web.AssistantMCPPath), "tools": "the assistant profile; the default when a request names no resource"},
+		},
+		"connect":                       "add " + s.oauthResource("/mcp") + " as a connector in ChatGPT, Claude or Cursor and sign in; anonymous calls keep working with no token",
 		"authorization_server_metadata": s.cfg.PublicURL + oauthASMPath, "scope": board.OAuthScope,
-		"sign_in":         "creates a hosted identity, or signs in to one with its recovery code (which then changes); no email, password or third-party login",
+		"sign_in":         "creates a hosted identity (optionally with a handle), signs in to one with its recovery code (which then changes), or reconnects the identity this browser connected to the same app before; no email, password or third-party login",
+		"claim":           "claim_identity with the recovery code moves the identity to an Ed25519 key of its own and ends every OAuth connection",
 		"clients":         "public clients with PKCE S256: a client ID metadata document (https client_id) or dynamic registration",
-		"access_token":    map[string]any{"is": "a hosted token (" + board.HostedTokenPrefix + "), listed by whoami and revoked by manage_tokens", "expires_in": board.OAuthAccessSeconds, "carrier": "Authorization: Bearer on " + web.AssistantMCPPath + " only"},
+		"access_token":    map[string]any{"is": "a hosted token (" + board.HostedTokenPrefix + "), listed by whoami and revoked by manage_tokens", "expires_in": board.OAuthAccessSeconds, "carrier": "Authorization: Bearer on the resource it was issued for, never in a path"},
 		"refresh_token":   map[string]any{"prefix": board.OAuthRefreshPrefix, "lifetime_seconds": board.OAuthRefreshSeconds, "rotation": "every use; reusing a rotated one ends the connection"},
 		"code_seconds":    board.OAuthCodeSeconds,
 		"connections_max": board.OAuthConnectionsMax,

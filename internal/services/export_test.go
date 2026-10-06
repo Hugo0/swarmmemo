@@ -2,11 +2,61 @@ package services
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net"
+	"net/url"
 	"time"
 )
+
+// FetchConfigForTest is a FETCH_CONFIG whose resolver answers from hosts
+// (a name to its addresses), whose address decision is public (nil: the
+// production one), and whose dial goes to target instead of the checked
+// address and its port (an httptest server), with roots for its TLS.
+func FetchConfigForTest(body []byte, hosts map[string][]net.IP, public func(net.IP) error, target string, roots *tls.Config) (*FetchConfig, error) {
+	cfg, err := ParseFetchConfig(body)
+	if err != nil {
+		return nil, err
+	}
+	cfg.lookup = func(_ context.Context, host string) ([]net.IP, error) {
+		ips, ok := hosts[host]
+		if !ok {
+			return nil, errors.New("no such host")
+		}
+		return ips, nil
+	}
+	cfg.public = public
+	if target != "" {
+		cfg.dialAddr = func(net.IP, string) string { return target }
+	}
+	cfg.tls = roots
+	return cfg, nil
+}
+
+// SetFetchLookupForTest replaces cfg's resolver.
+func SetFetchLookupForTest(cfg *FetchConfig, lookup func(context.Context, string) ([]net.IP, error)) {
+	cfg.lookup = lookup
+}
+
+// SetFetchIntervalForTest shortens cfg's per-host spacing, which
+// FETCH_CONFIG keeps at a second or more.
+func SetFetchIntervalForTest(cfg *FetchConfig, d time.Duration) { cfg.interval = d }
+
+// HTMLToTextForTest converts an HTML page, for the fuzz target and the
+// converter's tests.
+func HTMLToTextForTest(doc, base string) (title, text string) {
+	u, _ := url.Parse(base)
+	p := htmlToText(doc, u)
+	return p.Title, p.Text
+}
+
+// RobotsAllowedForTest parses a robots.txt for SwarmMemoFetch and asks
+// whether path is allowed.
+func RobotsAllowedForTest(body, path string) bool {
+	return parseRobots(body, FetchRobotsToken).allowed(path)
+}
 
 // QuoteForTest runs a built-in provider's argument parser and quote (memory
 // put and delete, echo) on args, for the data fuzz target.

@@ -161,6 +161,15 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		if err = authorizeRoomPost(ctx, tx, r, a, c.ReplyTo != "", via); err != nil {
 			return Result{}, err
 		}
+		if c.ReplyTo == "" {
+			var origin *Forwarded
+			if forwarded {
+				origin = &forward
+			}
+			if err = checkTopLevelPerDay(ctx, tx, r, a, origin, now); err != nil {
+				return Result{}, err
+			}
+		}
 	}
 	origin := ""
 	if data.Supersedes != "" {
@@ -740,6 +749,9 @@ func (s *Store) Moderate(ctx context.Context, eventID, reason string, hide bool)
 		action = "hide"
 	}
 	if err = writeLog(ctx, tx, logEntry{room: room, action: action, actor: operatorActor, target: eventID, reason: reason}, now); err != nil {
+		return err
+	}
+	if _, err = tlogCatchUp(ctx, tx); err != nil {
 		return err
 	}
 	return tx.Commit()

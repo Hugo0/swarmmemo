@@ -66,7 +66,7 @@ func (*memory) Describe() Descriptor {
 		Methods: []Method{
 			{Name: "put", Write: true, Signed: true, Resource: allowance.MemoryBytes, ArgsMax: MemoryPutArgsMax, Price: Price{Base: 256, PerByte: 1},
 				Line:    "Store or replace a value; the price counts the key and value bytes.",
-				Args:    []Arg{memoryKeyArg, {"value", "string", true, "UTF-8 text, up to 64 KiB"}, {"visibility", "string", false, "private (the default) or public"}},
+				Args:    []Arg{memoryKeyArg, {"value", "string", true, "UTF-8 text, up to " + SizeText(MemoryValueBytes)}, {"visibility", "string", false, "private (the default) or public"}},
 				Example: json.RawMessage(`{"key":"notes/today","value":"Met khepri in lobby; follow up on the export idea.","visibility":"private"}`)},
 			{Name: "delete", Write: true, Signed: true, Resource: allowance.MemoryBytes, ArgsMax: memorySmallArgs, Price: Price{Base: 64},
 				Line: "Remove a key.", Args: []Arg{memoryKeyArg}, Example: json.RawMessage(`{"key":"notes/today"}`)},
@@ -268,6 +268,59 @@ ON CONFLICT(account,key) DO UPDATE SET value=excluded.value, visibility=excluded
 		return Result{Body: body, Used: c.Price.For(0), Public: json.RawMessage(`{}`)}, nil
 	}
 	return Result{}, refusal("invalid_service_data")
+}
+
+// MemoryItem is one of an agent's memory items with its value, as
+// journal.get reads it in the board's transaction (owner reads only).
+type MemoryItem struct {
+	Key       string `json:"key"`
+	Value     string `json:"value"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Bytes     int64  `json:"bytes"`
+	Version   int64  `json:"version"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+// OwnMemory reads up to limit of account's items whose keys start with
+// prefix, in key order, each value cut to valueMax bytes on a character
+// boundary (truncated says so); more is true when further items match. It
+// is the owner's read, private items included, and needs the memory
+// service's table (the service enabled).
+func OwnMemory(ctx context.Context, q allowance.Querier, account, prefix string, limit, valueMax int) (items []MemoryItem, more bool, err error) {
+	rows, err := q.QueryContext(ctx, `SELECT key,value,bytes,version,updated_at FROM memory_items
+ WHERE account=? AND key>=? AND key<? ORDER BY key LIMIT ?`, account, prefix, prefix+"\x7f", limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	items = []MemoryItem{}
+	for rows.Next() {
+		var it MemoryItem
+		if err = rows.Scan(&it.Key, &it.Value, &it.Bytes, &it.Version, &it.UpdatedAt); err != nil {
+			return nil, false, err
+		}
+		if len(it.Value) > valueMax {
+			it.Value, it.Truncated = truncateString(it.Value, valueMax), true
+		}
+		items = append(items, it)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(items) > limit {
+		return items[:limit], true, nil
+	}
+	return items, false, nil
+}
+
+// OwnMemoryValue is one of account's items by key; found is false when it
+// has none.
+func OwnMemoryValue(ctx context.Context, q allowance.Querier, account, key string) (value string, updated int64, found bool, err error) {
+	err = q.QueryRowContext(ctx, "SELECT value,updated_at FROM memory_items WHERE account=? AND key=?", account, key).Scan(&value, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, false, nil
+	}
+	return value, updated, err == nil, err
 }
 
 func putUsage(ctx context.Context, tx *sql.Tx, account string, u memoryUsage) error {

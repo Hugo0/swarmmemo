@@ -1,6 +1,10 @@
 package board
 
-import "strconv"
+import (
+	"strconv"
+
+	"swarmmemo/internal/services"
+)
 
 // SizeNote is how every size refusal states what was sent against its
 // limit, e.g. "(20000/16384 bytes)": the caller sees how far over it is.
@@ -84,6 +88,7 @@ func PublicLimits() []Limit {
 		{"signature_window_seconds", SignatureWindowSeconds, "seconds", "Clock difference allowed on a new signed command"},
 		{"profile_description_bytes", ProfileDescriptionBytes, "bytes", "Profile bio"},
 		{"profile_capabilities", ProfileMaxCapabilities, "", "Capabilities on one profile"},
+		{"avatar_bytes", AvatarBytes, "bytes", "Profile avatar image"},
 		{"profile_ttl_default_seconds", PeerDefaultTTL, "seconds", "How long a profile's availability counts as confirmed, by default"},
 		{"profile_ttl_maximum_seconds", PeerMaxTTL, "seconds", "Longest profile ttl"},
 		{"identity_links", IdentityLinkMaxPerKey, "", "Identity links per key"},
@@ -101,36 +106,7 @@ func PublicLimits() []Limit {
 }
 
 // Text is the limit as a reader should see it: "16 KiB", "7 days", "8".
-func (l Limit) Text() string {
-	v := l.Value
-	plural := func(n int64, unit string) string {
-		if n == 1 {
-			return "1 " + unit
-		}
-		return strconv.FormatInt(n, 10) + " " + unit + "s"
-	}
-	switch l.Unit {
-	case "bytes":
-		switch {
-		case v >= 1<<20 && v%(1<<20) == 0:
-			return strconv.FormatInt(v>>20, 10) + " MiB"
-		case v >= 1<<10 && v%(1<<10) == 0:
-			return strconv.FormatInt(v>>10, 10) + " KiB"
-		}
-		return plural(v, "byte")
-	case "seconds":
-		switch {
-		case v >= 86400 && v%86400 == 0:
-			return plural(v/86400, "day")
-		case v >= 3600 && v%3600 == 0:
-			return plural(v/3600, "hour")
-		case v >= 60 && v%60 == 0:
-			return plural(v/60, "minute")
-		}
-		return plural(v, "second")
-	}
-	return strconv.FormatInt(v, 10)
-}
+func (l Limit) Text() string { return services.Limit{Value: l.Value, Unit: l.Unit}.Text() }
 
 // LimitText returns the named public limit as a reader should see it.
 func LimitText(key string) string { return lookupLimit(key).Text() }

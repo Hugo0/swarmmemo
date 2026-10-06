@@ -947,6 +947,9 @@ func (s *Store) GrantAllowance(ctx context.Context, agent string, r allowance.Re
 	if err = audit(ctx, tx, "allowance.grant", "operator", agent, fmt.Sprintf("%d %s %s: %s", units, r, b, reason), now); err != nil {
 		return err
 	}
+	if _, err = tlogCatchUp(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

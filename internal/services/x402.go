@@ -236,8 +236,12 @@ CREATE INDEX IF NOT EXISTS x402_payments_day ON x402_payments(day,account);
 // X402VettingNote is how the resources read explains callable resources.
 const X402VettingNote = "Only vetted resources are callable (callable: true): pinned ones, and open ones the operator vetted, by hand or by its auto-vet rule when one is set (the resources read states it as catalogue.auto_vet, e.g. CDP-curated or at least 5 payers in 30 days, at most 0.02 USDC, not adult or gambling; a resource the rule vetted keeps its summary screened like a candidate's). Candidates (vetted: false) are Bazaar listings whose summary is shown only once it passed SwarmMemo's text screen (summary_status screened; pending or withheld leaves it empty); calling one is refused with x402_unvetted, and nothing is paid or charged. On a vetted open resource, a call whose payment was sent but that got no answer is charged (answer encoding \"unanswered\")."
 
+// X402ToolsApprox is how many paid APIs SwarmMemo tools reach, rounded: every
+// page and description that states the number reads it from here.
+const X402ToolsApprox = "37,000"
+
 // X402Line is the aggregator in one line, on every discovery surface.
-const X402Line = "About 37,000 pay-per-call APIs (search, scraping, crypto and market data, and more), billed to your credit; no wallet, no account. Vetted tools can be called; other listings are searchable candidates."
+const X402Line = "About " + X402ToolsApprox + " pay-per-call APIs (search, scraping, crypto and market data, and more), billed to your credit; no wallet, no account. Vetted tools can be called; other listings are searchable candidates."
 
 func (x *x402) Describe() Descriptor {
 	call := Method{Name: "call", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: X402ArgsMax, Price: Price{Base: 100, PerByte: 1, PerKiB: 100},
@@ -258,7 +262,7 @@ func (x *x402) Describe() Descriptor {
 	}
 	return Descriptor{
 		ID:      "x402",
-		Summary: `Pay-per-call APIs without a wallet or an account: SwarmMemo pays the API and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. Only vetted resources are callable: pinned ones and open ones the operator vetted. Other Bazaar listings are candidates (vetted: false), listed with their summaries only once those passed SwarmMemo's text screen (summary_status), still untrusted upstream text, and refused with x402_unvetted until the operator vets them. Method "tools_search" searches SwarmMemo tools (about 37,000 paid APIs) and "tools_get" reads one tool's live price and input schema; call a hit with resource "tool:TOOL_ID" and the tool's arguments as body. Vetted tools (vetted: true), priced at most tools.max_price, are callable.`,
+		Summary: `Pay-per-call APIs without a wallet or an account: SwarmMemo pays the API and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. Only vetted resources are callable: pinned ones and open ones the operator vetted. Other Bazaar listings are candidates (vetted: false), listed with their summaries only once those passed SwarmMemo's text screen (summary_status), still untrusted upstream text, and refused with x402_unvetted until the operator vets them. Method "tools_search" searches SwarmMemo tools (about ` + X402ToolsApprox + ` paid APIs) and "tools_get" reads one tool's live price and input schema; call a hit with resource "tool:TOOL_ID" and the tool's arguments as body. Vetted tools (vetted: true), priced at most tools.max_price, are callable.`,
 		Title:   "x402 relay", Topic: "Tools across the internet",
 		Line: X402Line,
 		Limits: []Limit{
@@ -280,7 +284,7 @@ func (x *x402) Describe() Descriptor {
 					{"cursor", "string", false, "next_cursor from the previous page"},
 				},
 				Example: json.RawMessage(`{"query":"web search","max_price":"0.01"}`)},
-			{Name: "tools_search", ArgsMax: 1024, Line: "Search SwarmMemo tools (about 37,000 paid APIs) by intent: each hit with its tool: id, description, price, input schema, whether it is vetted and whether it is callable.",
+			{Name: "tools_search", ArgsMax: 1024, Line: "Search SwarmMemo tools (about " + X402ToolsApprox + " paid APIs) by intent: each hit with its tool: id, description, price, input schema, whether it is vetted and whether it is callable.",
 				Args: []Arg{
 					{"query", "string", false, "what the tool should do, up to 200 bytes; or queries"},
 					{"queries", "array", false, "2 to 4 phrasings of the same need, searched together"},

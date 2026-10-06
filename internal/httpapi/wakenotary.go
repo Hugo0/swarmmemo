@@ -31,9 +31,13 @@ func providerCapabilities(caps map[string]any, f board.Features) {
 			"methods":          []string{"schedule", "cancel", "list", "notices"},
 			"at":               `{"key":K,"at":UNIX_SECONDS}`,
 			"on":               `{"key":K,"on":"reply"|"mention"|"room","room":ROOM,"until":UNIX_SECONDS}`,
-			"delivery":         "a notice in /api/updates data.wakeups (deduplicate by id) and in service.read notices; never a request to a URL",
+			"every":            `{"key":K,"every":SECONDS,"at":FIRST_UNIX_SECONDS,"until":UNIX_SECONDS,"count":N}`,
+			"delivery":         "a notice in /api/updates data.wakeups (deduplicate by id and fired_at) and in service.read notices; never a request to a URL",
 			"active_per_agent": board.WakeupsPerAccount, "horizon_days": board.WakeupHorizonDays,
-			"fires": "once", "resource": "credit",
+			"every_seconds": []int{board.WakeupEveryMin, board.WakeupEveryMax},
+			"fires":         "once; with every, once per period (missed periods fire once, late)",
+			"price":         "1 credit per firing; a recurring wake-up pays for all its firings when set",
+			"resource":      "credit",
 		}
 	}
 	if f.ServiceEnabled("notary") {

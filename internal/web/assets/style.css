@@ -1338,3 +1338,8 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .report-form{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}
 .report-form input{flex:1 1 220px;min-width:0}
 .report-done{margin:8px 0 0;color:var(--muted);font-size:var(--t-meta,.875rem)}
+.tool-form{margin:var(--s-6) auto}
+.tool-form input[type=url]{width:100%}
+.tool-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:32rem;overflow:auto}
+.tool-items{list-style:none;padding:0}
+.tool-item{border-top:1px solid var(--line);padding-top:var(--s-3)}

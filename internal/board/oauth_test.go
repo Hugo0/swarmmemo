@@ -105,8 +105,8 @@ func TestOAuthCodeBindings(t *testing.T) {
 	if _, err = s.OAuthRefresh(testContext, tokens.RefreshToken, "smcl_test", "", "", testTime); !isGrantError(err, "invalid_grant") {
 		t.Fatalf("a replayed code left its refresh token working: %v", err)
 	}
-	if OAuthCodeSeconds > 600 {
-		t.Fatalf("codes live %d s; at most 10 minutes", OAuthCodeSeconds)
+	if OAuthCodeSeconds > 60 {
+		t.Fatalf("codes live %d s; at most 60", OAuthCodeSeconds)
 	}
 	// Only an active hosted identity gets a code.
 	if _, err = s.OAuthIssueCode(testContext, oauthTestGrant(), keyID(keyFor(7)), "", testTime); !isCode(err, "hosted_token_invalid") {
@@ -372,5 +372,64 @@ func TestOAuthSignOutSpendsPendingCodes(t *testing.T) {
 	}
 	if _, err = s.OAuthExchangeCode(testContext, code, "smcl_test", "https://app.example/cb", oauthTestVerifier, "", testTime+2); err == nil || err.Error() != invalidGrant().Error() {
 		t.Fatalf("a code issued before sign-out still connects: %v", err)
+	}
+}
+
+// A browser remembers which identity it connected to which redirect URI:
+// for OAuthReturningSeconds, at most OAuthReturningMax apps, only while the
+// identity is active and not signed out everywhere; only a hash is stored.
+func TestOAuthReturningGrant(t *testing.T) {
+	s := openHostedTest(t)
+	created := createHosted(t, s, "test-origin", "comeback")
+	account := created["agent"].(string)
+	browser, err := NewOAuthBrowserSecret()
+	if err != nil || !strings.HasPrefix(browser, OAuthBrowserPrefix) {
+		t.Fatal(browser, err)
+	}
+	if err = s.OAuthRemember(testContext, browser, "https://app.example/cb", account, testTime); err != nil {
+		t.Fatal(err)
+	}
+	got, handle, ok, err := s.OAuthReturning(testContext, browser, "https://app.example/cb", testTime+1)
+	if err != nil || !ok || got != account || handle != "comeback" {
+		t.Fatalf("returning: %q %q %v %v", got, handle, ok, err)
+	}
+	for name, try := range map[string]func() (string, string, bool, error){
+		"other redirect": func() (string, string, bool, error) {
+			return s.OAuthReturning(testContext, browser, "https://app.example/cb2", testTime)
+		},
+		"other browser": func() (string, string, bool, error) {
+			other, _ := NewOAuthBrowserSecret()
+			return s.OAuthReturning(testContext, other, "https://app.example/cb", testTime)
+		},
+		"malformed": func() (string, string, bool, error) {
+			return s.OAuthReturning(testContext, "nonsense", "https://app.example/cb", testTime)
+		},
+		"expired": func() (string, string, bool, error) {
+			return s.OAuthReturning(testContext, browser, "https://app.example/cb", testTime+OAuthReturningSeconds)
+		},
+	} {
+		if _, _, ok, err := try(); ok || err != nil {
+			t.Fatalf("%s: %v %v", name, ok, err)
+		}
+	}
+	var clear int
+	if err = s.db.QueryRow("SELECT count(*) FROM oauth_returning WHERE instr(CAST(("+columnsConcat(t, s, "oauth_returning")+") AS TEXT),?)>0", browser).Scan(&clear); err != nil || clear != 0 {
+		t.Fatalf("the browser secret is stored in the clear (%d rows): %v", clear, err)
+	}
+	for i := 0; i < OAuthReturningMax+3; i++ {
+		if err = s.OAuthRemember(testContext, browser, "https://app.example/n"+strings.Repeat("x", i), account, testTime+int64(i)+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int
+	if err = s.db.QueryRow("SELECT count(*) FROM oauth_returning WHERE browser_sha256=?", hostedHash(browser)).Scan(&n); err != nil || n != OAuthReturningMax {
+		t.Fatalf("a browser remembers %d apps: %v", n, err)
+	}
+	// Signing every app out forgets the identity in every browser.
+	if _, err = s.OAuthRecover(testContext, created["recovery_code"].(string), true, testTime+100); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.db.QueryRow("SELECT count(*) FROM oauth_returning WHERE account=?", account).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("after signing out everywhere %d rows remain: %v", n, err)
 	}
 }

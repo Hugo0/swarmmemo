@@ -18,6 +18,8 @@ var builtins = []func(Deps) Provider{
 	newNotary,
 	newMemory,
 	newWakeup,
+	newReceiver,
+	newFetch,
 	newRuns,
 	newEcho,
 }
