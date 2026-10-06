@@ -278,6 +278,13 @@ type Deps struct {
 	// ReceiverScreen is the operator's screening setting for receivers
 	// (RECEIVER_SCREEN); "" is ScreenDefaultOn.
 	ReceiverScreen ScreenMode
+	// ContentScreen is the operator's screening setting for pastes and docs
+	// read by others (CONTENT_SCREEN); "" is ScreenDefaultOn.
+	ContentScreen ScreenMode
+	// ContentURL is the base URL of the separate content domain that serves
+	// public pastes (CONTENT_URL, no trailing slash); "" leaves public
+	// links off.
+	ContentURL string
 	// EchoSimulate lets echo's args.simulate stand in for an upstream (remote,
 	// async, delay, failure, crash). Tests only: in production a crashed
 	// simulation holds one of the board's shared open-hold slots until it
@@ -316,6 +323,9 @@ type BoardView interface {
 	// CanRead reports whether account may read room now: a public room, or a
 	// private one it is a member of. An unknown room is false.
 	CanRead(ctx context.Context, q allowance.Querier, account, room string) (bool, error)
+	// Member reports whether account is an active member of room, a private
+	// room or a conversation: a group. A public or unknown room is false.
+	Member(ctx context.Context, q allowance.Querier, account, room string) (bool, error)
 }
 
 // Worker is a provider with bounded background work of its own (wakeup's

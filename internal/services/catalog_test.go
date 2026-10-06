@@ -30,7 +30,13 @@ var argShapes = map[string]any{
 	}{},
 	"echo.echo":       echoArgs{},
 	"receiver.create": receiverCreateArgs{}, "receiver.rotate": receiverRef{}, "receiver.delete": receiverRef{}, "receiver.list": struct{}{}, "receiver.items": receiverItemsArgs{},
-	"fetch.page": fetchArgs{},
+	"fetch.page":   fetchArgs{},
+	"paste.create": pasteCreateArgs{}, "paste.delete": struct {
+		ID string `json:"id"`
+	}{}, "paste.open": pasteOpenArgs{}, "paste.get": pasteGetArgs{}, "paste.list": pasteListArgs{},
+	"docs.create": docCreateArgs{}, "docs.write": docWriteArgs{}, "docs.read": docReadArgs{}, "docs.history": docHistoryArgs{}, "docs.list": struct {
+		Group string `json:"group"`
+	}{},
 }
 
 func jsonFields(t reflect.Type) map[string]bool {

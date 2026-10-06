@@ -66,6 +66,12 @@ func (b *fakeBoard) CanRead(_ context.Context, _ allowance.Querier, account, roo
 	return b.rooms[room], nil
 }
 
+func (b *fakeBoard) Member(_ context.Context, _ allowance.Querier, account, room string) (bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.private[room][account], nil
+}
+
 type wakeRig struct {
 	t     *testing.T
 	db    *sql.DB

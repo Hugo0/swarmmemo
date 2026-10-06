@@ -25,3 +25,20 @@ func operatorReceiver(ctx context.Context, store *board.Store, args []string, ou
 	fmt.Fprintf(out, "receiver %s is %s (%d deliveries); its items stay readable by its owner\n", v.ID, v.State, v.Deliveries)
 	return nil
 }
+
+const pasteUsage = "usage: swarmmemo paste hide PASTE_ID REASON"
+
+// operatorPaste is swarmmemo paste hide ID REASON: the operator's hide of an
+// abused paste. It stops opening at once, its owner sees the reason, and its
+// text stays (moderation hides, never deletes). It prints no text.
+func operatorPaste(ctx context.Context, store *board.Store, args []string, out io.Writer) error {
+	if len(args) != 3 || args[0] != "hide" {
+		return errors.New(pasteUsage)
+	}
+	v, err := store.PasteHide(ctx, args[1], args[2])
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "paste %s is %s (%d bytes, sha256 %s); its owner still reads it\n", v.ID, v.State, v.Bytes, v.Hash)
+	return nil
+}

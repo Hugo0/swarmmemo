@@ -294,6 +294,8 @@ var Placeholders = map[string]string{
 	"MODEL_ALIAS":       "small",
 	"RESOURCE_ID":       "search",
 	"RECEIVER_ID":       strings.Repeat("0e", 16),
+	"PASTE_ID":          strings.Repeat("0d", 16),
+	"DOC_ID":            strings.Repeat("0c", 16),
 }
 
 // FillPlaceholders replaces every placeholder in s with its stand-in.

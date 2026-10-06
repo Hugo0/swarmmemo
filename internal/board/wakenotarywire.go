@@ -170,6 +170,14 @@ func (serviceBoardView) CanRead(ctx context.Context, q allowance.Querier, accoun
 	return member > 0, err
 }
 
+// Member is an active membership of a private room or conversation: the
+// members table holds exactly those (conversation_members.go).
+func (serviceBoardView) Member(ctx context.Context, q allowance.Querier, account, room string) (bool, error) {
+	var member bool
+	err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM rooms r JOIN members m ON m.room=r.name WHERE r.name=? AND r.visibility='private' AND m.account=?)", room, account).Scan(&member)
+	return member, err
+}
+
 // screenTextLimit refuses an unsigned screen call's text over its limit;
 // sent states the size sent (" (5000/4096 bytes)", or "").
 func screenTextLimit(sent string) error {
@@ -182,6 +190,9 @@ func providerError(code string) error {
 		return err
 	}
 	if err := fetchError(code); err != nil {
+		return err
+	}
+	if err := contentError(code); err != nil {
 		return err
 	}
 	switch code {

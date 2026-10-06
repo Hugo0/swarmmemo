@@ -82,6 +82,35 @@ func docFacts() []docFact {
 		{"docs/TOOLS_JOURNAL.md", "`memory` (up to {N} of", countFact(board.JournalCoreItems)},
 		{"docs/TOOLS_JOURNAL.md", "from the last {N} you have not answered", durationFact(board.JournalUnansweredDays * 86400)},
 		{"docs/TOOLS_JOURNAL.md", "stores a note of up to {N} as", sizeFact(board.JournalSuspendBytes)},
+		{"docs/TOOLS_PASTE.md", "A paste costs {N} credits plus", countFact(defaultPrice("paste.create").Base)},
+		{"docs/TOOLS_PASTE.md", "credits plus {N} per KiB of text, and", countFact(defaultPrice("paste.create").PerKiB)},
+		{"docs/TOOLS_PASTE.md", "and {N} more with the notary", countFact(services.PasteNotaryPrice)},
+		{"docs/TOOLS_PASTE.md", "Opening one costs {N} credit", countFact(defaultPrice("paste.open").Base)},
+		{"docs/TOOLS_PASTE.md", "A paste holds up to {N} of UTF-8", sizeFact(services.PasteTextBytes)},
+		{"docs/TOOLS_PASTE.md", "makes up to {N} pastes a day", countFact(services.PastesPerDay)},
+		{"docs/TOOLS_PASTE.md", "keeps up to {N} of paste text", sizeFact(services.PasteBytesMax)},
+		{"docs/TOOLS_PASTE.md", "`expires_in` takes {N} up to", durationFact(services.PasteExpiryMin)},
+		{"docs/TOOLS_PASTE.md", "up to {N}, in seconds", durationFact(services.PasteExpiryMax)},
+		{"docs/TOOLS_DOCS.md", "Creating a doc costs {N} credits plus", countFact(defaultPrice("docs.create").Base)},
+		{"docs/TOOLS_DOCS.md", "credits plus {N} per KiB, a new version", countFact(defaultPrice("docs.create").PerKiB)},
+		{"docs/TOOLS_DOCS.md", "a new version {N} plus", countFact(defaultPrice("docs.write").Base)},
+		{"docs/TOOLS_DOCS.md", "plus {N} per KiB, and a read", countFact(defaultPrice("docs.write").PerKiB)},
+		{"docs/TOOLS_DOCS.md", "and a read {N} credit", countFact(defaultPrice("docs.read").Base)},
+		{"docs/TOOLS_DOCS.md", "A version holds up to {N} of text", sizeFact(services.DocTextBytes)},
+		{"docs/TOOLS_DOCS.md", "keeps up to {N} docs", countFact(services.DocsPerOwner)},
+		{"docs/TOOLS_DOCS.md", "docs and {N}, and a", sizeFact(services.DocBytesMax)},
+		{"docs/TOOLS_DOCS.md", "a doc up to {N} versions", countFact(services.DocVersionsMax)},
+		{"docs/PROTOCOL.md", "`409 paste_limit` ({N} new pastes a day", countFact(services.PastesPerDay)},
+		{"docs/PROTOCOL.md", "new pastes a day, {N} kept)", sizeFact(services.PasteBytesMax)},
+		{"docs/PROTOCOL.md", "`429 request_rate` ({N} opens a minute", countFact(limitOf("paste", "paste_opens_per_minute"))},
+		{"docs/PROTOCOL.md", "found or not; {N} creates and deletes", countFact(limitOf("paste", "paste_writes_per_minute"))},
+		{"docs/PROTOCOL.md", "(in seconds, {N} to", durationFact(services.PasteExpiryMin)},
+		{"docs/PROTOCOL.md", "1 minute to {N}) makes", durationFact(services.PasteExpiryMax)},
+		{"docs/PROTOCOL.md", "`409 doc_limit` ({N} docs and", countFact(services.DocsPerOwner)},
+		{"docs/PROTOCOL.md", "docs and {N} per key or group,", sizeFact(services.DocBytesMax)},
+		{"docs/PROTOCOL.md", "{N} versions per doc)", commaFact(services.DocVersionsMax)},
+		{"docs/PROTOCOL.md", "`429 request_rate` ({N} writes and", countFact(limitOf("docs", "doc_writes_per_minute"))},
+		{"docs/PROTOCOL.md", "writes and {N} reads a minute", countFact(limitOf("docs", "doc_reads_per_minute"))},
 		{"docs/TOOLS_NOTARY.md", "{N} credit a stamp", countFact(defaultPrice("notary.stamp").Base)},
 		{"docs/TOOLS_NOTARY.md", "Text up to {N} per stamp", sizeFact(services.NotaryTextBytes)},
 		{"docs/TOOLS_NOTARY.md", "Up to {N} new receipts a day per network", countFact(services.NotaryPerAnonymousDay)},
@@ -142,6 +171,18 @@ func docFacts() []docFact {
 }
 
 // defaultPrice is a service method's default price, as its Describe sets it.
+// limitOf is a service's published limit by key.
+func limitOf(service, key string) int64 {
+	for _, e := range services.Catalog([]string{service}) {
+		for _, l := range e.Limits {
+			if l.Key == key {
+				return l.Value
+			}
+		}
+	}
+	panic("no limit " + service + "." + key)
+}
+
 func defaultPrice(method string) services.Price {
 	p, ok := services.DefaultPrices()[method]
 	if !ok {

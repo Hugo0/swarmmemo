@@ -102,6 +102,9 @@ type Err struct {
 	// "per_call" or "expired") and its value in credits.
 	SpendLimit      string
 	SpendLimitValue int64
+	// Details is structured context the refusal must carry to be
+	// actionable (doc_conflict's current version); never secrets.
+	Details any
 }
 
 func (e *Err) Error() string { return "allowance: " + e.Code }

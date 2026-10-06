@@ -521,6 +521,9 @@ func TestServiceLimitsMatchBoard(t *testing.T) {
 	}
 	for _, d := range services.NewBuiltinRegistry(services.Known(), services.Deps{}).List() {
 		for _, m := range d.Methods {
+			if m.ArgsMax+256 > ServiceDataBytes {
+				t.Errorf("%s.%s args bound %d must fit a service.call's data (%d)", d.ID, m.Name, m.ArgsMax, ServiceDataBytes)
+			}
 			if d.ID == "runs" && m.Name == "run" {
 				if m.ArgsMax != RunArgsBytes || m.ArgsMax+256 > ServiceDataBytes {
 					t.Errorf("runs.run args bound %d must be the published %d and fit a service.call", m.ArgsMax, RunArgsBytes)
@@ -531,8 +534,9 @@ func TestServiceLimitsMatchBoard(t *testing.T) {
 			if d.ID == "inference" {
 				published = InferenceArgsBytes
 			}
-			// memory values, notary and screen texts are bounded by their own published limits.
-			if d.ID != "memory" && d.ID != "notary" && d.ID != "screen" && m.ArgsMax > published {
+			// memory values, notary and screen texts, pastes and doc versions
+			// are bounded by their own published limits.
+			if d.ID != "memory" && d.ID != "notary" && d.ID != "screen" && d.ID != services.PasteID && d.ID != services.DocsID && m.ArgsMax > published {
 				t.Errorf("%s.%s args bound %d exceeds the published %d", d.ID, m.Name, m.ArgsMax, published)
 			}
 		}

@@ -2,6 +2,7 @@ package board
 
 import (
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -41,6 +42,15 @@ type Features struct {
 	// (RECEIVER_SCREEN: default_on, the default, off or forced); used only
 	// when SERVICES names receiver.
 	ReceiverScreen services.ScreenMode
+	// ContentScreen is the operator's screening setting for pastes and docs
+	// read by others (CONTENT_SCREEN: default_on, the default, off or
+	// forced); used only when SERVICES names paste or docs.
+	ContentScreen services.ScreenMode
+	// ContentURL is the base URL of the separate content domain that will
+	// serve public pastes (CONTENT_URL, https://HOST without a path); empty,
+	// the default, leaves public links off. Used only when SERVICES names
+	// paste.
+	ContentURL string
 	// Trust (builder D).
 	Trust          TrustMode // TRUST
 	TrustLiability bool      // TRUST_LIABILITY
@@ -177,8 +187,41 @@ func ParseFeatures(getenv func(string) string) (Features, error) {
 		}
 		f.ReceiverScreen = mode
 	}
+	if f.ServiceEnabled("paste") || f.ServiceEnabled("docs") {
+		mode, err := services.ParseScreenMode(getenv("CONTENT_SCREEN"))
+		if err != nil {
+			errs = append(errs, "CONTENT_SCREEN: "+err.Error())
+		}
+		f.ContentScreen = mode
+	}
+	if f.ServiceEnabled("paste") {
+		if v := getenv("CONTENT_URL"); v != "" {
+			own := getenv("SERVICE_ID")
+			if own == "" {
+				own = "swarmmemo.com"
+			}
+			if !ValidContentURL(v, own) {
+				errs = append(errs, "CONTENT_URL must be https://HOST, a domain apart from this board's, without a path, query or trailing slash")
+			} else {
+				f.ContentURL = v
+			}
+		}
+	}
 	if len(errs) > 0 {
 		return Features{}, fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return f, nil
+}
+
+// ValidContentURL reports whether v is a content domain's base URL:
+// https://HOST (a port allowed), nothing after it, on a domain apart from
+// own (the board's SERVICE_ID): user content never lives on the board's
+// domain or under it.
+func ValidContentURL(v, own string) bool {
+	u, err := url.Parse(v)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.HasSuffix(v, "/") || u.ForceQuery {
+		return false
+	}
+	host, own := strings.ToLower(u.Hostname()), strings.ToLower(own)
+	return host != "" && host != own && !strings.HasSuffix(host, "."+own)
 }

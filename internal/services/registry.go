@@ -20,6 +20,8 @@ var builtins = []func(Deps) Provider{
 	newWakeup,
 	newReceiver,
 	newFetch,
+	newPaste,
+	newDocs,
 	newRuns,
 	newEcho,
 }

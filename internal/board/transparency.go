@@ -10,7 +10,9 @@ package board
 // outbox: events in public rooms (messages, edits as superseding versions),
 // room_moderation_log in public rooms (hides, restores, room governance),
 // audit rows of the identity operations of public accounts and of operator
-// allowance grants, and tier_grant_log. tlog_cursors keeps, per source, the
+// allowance grants, tier_grant_log, and doc_versions (shared docs' versions,
+// private docs too: a leaf holds only ids, the version number and the
+// SHA-256, so a member can prove a doc's history). tlog_cursors keeps, per source, the
 // last row turned into a leaf. tlogCatchUp appends every newer row, merged by
 // (created_at, source rank, seq), inside the caller's transaction: every
 // write path calls it before committing, and the background job catches up
@@ -191,6 +193,19 @@ var logSources = []logSource{
 				return p, err
 			}
 			p.leaf, p.subject = l, l.Target
+			return p, nil
+		}},
+	{"docs", "doc_versions", 4, `SELECT seq,id,doc,version,hash,created_at FROM doc_versions WHERE seq>? ORDER BY seq LIMIT ?`,
+		func(rows *sql.Rows) (pendingLeaf, error) {
+			// A shared doc's version: its id (the proof's ref), the doc, the
+			// version number and the SHA-256 of its text; never the text, the
+			// author or the group.
+			var p pendingLeaf
+			l := logLeaf{Kind: "doc"}
+			if err := rows.Scan(&p.seq, &l.ID, &l.Target, &l.Seq, &l.TextSHA256, &p.at); err != nil {
+				return p, err
+			}
+			p.leaf, p.ref = l, l.ID
 			return p, nil
 		}},
 }

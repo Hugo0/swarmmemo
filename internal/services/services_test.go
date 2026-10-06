@@ -270,7 +270,7 @@ func TestNewProviderPlugsIn(t *testing.T) {
 }
 
 func TestBuiltinsListedAndKnown(t *testing.T) {
-	if got := strings.Join(services.Known(), ","); got != "echo,fetch,inference,memory,notary,public_data,receiver,runs,screen,wakeup,x402" {
+	if got := strings.Join(services.Known(), ","); got != "docs,echo,fetch,inference,memory,notary,paste,public_data,receiver,runs,screen,wakeup,x402" {
 		t.Fatalf("Known = %s", got)
 	}
 	reg := services.NewBuiltinRegistry([]string{"memory"}, services.Deps{})

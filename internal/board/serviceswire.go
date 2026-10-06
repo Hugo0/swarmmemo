@@ -38,7 +38,7 @@ type servicesState struct {
 	runs       *services.RunsConfig       // nil unless SERVICES names runs
 	publicData *services.PublicDataConfig // nil unless SERVICES names public_data
 	fetch      *services.FetchConfig      // nil unless SERVICES names fetch and FETCH_CONFIG loads
-	notaryKey  ed25519.PrivateKey         // nil unless SERVICES names notary, runs or screen
+	notaryKey  ed25519.PrivateKey         // nil unless SERVICES names notary, runs, screen or paste
 	screener   services.TextScreener      // screen's classifier; nil unless MODERATION is on
 	leaker     services.LeakScreener      // screen.leak's classifier (mode full); nil unless MODERATION is on
 }
@@ -93,7 +93,7 @@ func (s *Store) openServices() error {
 	if s.config.Features.Moderation {
 		s.services.screener, s.services.leaker = moderationScreener{s}, moderationScreener{s}
 	}
-	if s.config.Features.ServiceEnabled("notary") || s.config.Features.ServiceEnabled("runs") || s.config.Features.ServiceEnabled("screen") {
+	if s.config.Features.ServiceEnabled("notary") || s.config.Features.ServiceEnabled("runs") || s.config.Features.ServiceEnabled("screen") || s.config.Features.ServiceEnabled("paste") {
 		key, err := services.LoadOrCreateNotaryKey(s.config.NotaryKeyFile)
 		if err != nil {
 			return err
@@ -128,7 +128,8 @@ func (s *Store) serviceDeps() services.Deps {
 	return services.Deps{Accounts: accountResolver{}, DB: s.db, Dial: s.webhookDial, X402: s.config.X402,
 		Inference: s.services.inference, Runs: s.services.runs, Board: serviceBoardView{}, ServiceID: s.config.ServiceID,
 		PublicData: s.services.publicData, Classifier: s.classifier(), NotaryKey: s.services.notaryKey, TextScreener: s.services.screener, LeakScreener: s.services.leaker,
-		ReceiverScreen: s.config.Features.ReceiverScreen, Fetch: s.services.fetch, EchoSimulate: s.config.EchoSimulate}
+		ReceiverScreen: s.config.Features.ReceiverScreen, ContentScreen: s.config.Features.ContentScreen, ContentURL: s.config.Features.ContentURL,
+		Fetch: s.services.fetch, EchoSimulate: s.config.EchoSimulate}
 }
 
 // UseServiceMeter replaces the ledger and price source the services use. It
@@ -562,6 +563,9 @@ func serviceError(err error) error {
 		return problem(502, "x402_payment_rejected", "The resource's facilitator rejected the payment and you were not charged. Retry later with a new request ID.")
 	case "x402_response_too_large":
 		return problem(502, "x402_response_too_large", "Nothing was paid or charged: the free response was larger than this resource's limit, or two of your paid responses today were, and further calls wait until 00:00 UTC. Ask for less (fewer results, shorter text).")
+	}
+	if e.Code == "doc_conflict" {
+		return &Error{Status: 409, Code: "doc_conflict", Message: "Someone wrote this doc since your base_version. details.current is the doc as it stands: read it with docs.read, merge, and write again with its version as base_version. Nothing was stored or charged.", Details: e.Details}
 	}
 	if mapped := providerError(e.Code); mapped != nil {
 		return mapped
