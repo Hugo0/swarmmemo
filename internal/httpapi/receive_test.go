@@ -10,8 +10,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/allowance"
 	"swarmmemo/internal/board"
@@ -240,5 +242,78 @@ func TestFetchCallRoute(t *testing.T) {
 	tools := listTools(t, h, "/mcp")
 	if tools["fetch_page"].Name == "" {
 		t.Fatal("fetch_page is not an MCP tool")
+	}
+}
+
+// /api/stats/daily counts receivers, stored deliveries and wake-ups by kind,
+// today included: counts only, never an id, a key, a label, a URL or a body.
+func TestDailyStatsCountReceiversAndWakeups(t *testing.T) {
+	_, h := receiverServer(t)
+	key := ed25519.NewKeyFromSeed(make([]byte, 32))
+	n := 0
+	call := func(service, method string, args map[string]any) map[string]any {
+		t.Helper()
+		n++
+		data, _ := json.Marshal(map[string]any{"schema": 1, "method": method, "args": args, "max_cost": 1000})
+		body, _ := json.Marshal(signService(key, board.Command{Operation: "service.call", Target: service, Data: string(data), RequestID: "wake-stats-" + strconv.Itoa(n)}))
+		w := makeRequest(h, "POST", "https://swarmmemo.com/v1/command", string(body), "application/json")
+		if w.Code != 200 {
+			t.Fatalf("%s.%s: %d %s", service, method, w.Code, w.Body.String())
+		}
+		return decodeResult(t, w.Body.Bytes())
+	}
+	created := call("receiver", "create", map[string]any{"label": "secret-label", "screen": false})
+	url, _ := dig(created, "data", "result", "url").(string)
+	rid, _ := dig(created, "data", "result", "receiver", "id").(string)
+	call("receiver", "create", map[string]any{"label": "second"})
+	call("wakeup", "schedule", map[string]any{"key": "secret-once", "at": time.Now().Unix() + 3600})
+	call("wakeup", "schedule", map[string]any{"key": "hourly", "every": 3600})
+	call("wakeup", "schedule", map[string]any{"key": "replies", "on": "reply"})
+	call("wakeup", "schedule", map[string]any{"key": "inbox", "on": "received"})
+	// One stored delivery fires the received wake-up; a refused one counts
+	// nothing.
+	if w := postTo(h, url, `{"status":"secret body"}`, "application/json"); w.Code != 202 {
+		t.Fatalf("deliver: %d %s", w.Code, w.Body.String())
+	}
+	if w := postTo(h, url, "\x89PNG", "image/png"); w.Code != 415 {
+		t.Fatalf("binary: %d %s", w.Code, w.Body.String())
+	}
+
+	w := makeRequest(h, "GET", "/api/stats/daily?days=2", "", "")
+	body := w.Body.String()
+	if w.Code != 200 {
+		t.Fatalf("daily: %d %s", w.Code, body)
+	}
+	for _, leak := range []string{rid, url[strings.LastIndex(url, "/")+1:], "secret", "hourly", "inbox"} {
+		if leak == "" || strings.Contains(body, leak) {
+			t.Fatalf("daily stats carry %q: %s", leak, body)
+		}
+	}
+	type wakeups struct {
+		Scheduled map[string]int64 `json:"scheduled"`
+		Fired     int64            `json:"fired"`
+	}
+	type receivers struct {
+		Created    int64 `json:"created"`
+		Deliveries int64 `json:"deliveries"`
+	}
+	var got struct {
+		Daily []struct {
+			Receivers *receivers `json:"receivers"`
+			Wakeups   *wakeups   `json:"wakeups"`
+		} `json:"daily"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got.Daily) != 2 || got.Daily[0].Receivers == nil || got.Daily[1].Wakeups == nil {
+		t.Fatalf("daily: %v %s", err, body)
+	}
+	today, before := got.Daily[1], got.Daily[0]
+	if *today.Receivers != (receivers{Created: 2, Deliveries: 1}) {
+		t.Fatalf("today's receivers: %+v", *today.Receivers)
+	}
+	if s := today.Wakeups.Scheduled; s["one_shot"] != 1 || s["event"] != 2 || s["recurring"] != 1 || today.Wakeups.Fired != 1 {
+		t.Fatalf("today's wake-ups: %+v", *today.Wakeups)
+	}
+	if *before.Receivers != (receivers{}) || before.Wakeups == nil || before.Wakeups.Fired != 0 || len(before.Wakeups.Scheduled) != 3 {
+		t.Fatalf("yesterday: %s", body)
 	}
 }

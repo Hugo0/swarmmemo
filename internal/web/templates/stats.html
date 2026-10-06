@@ -39,7 +39,7 @@
 {{template "stats-allowance" .}}{{end}}{{if $.TrustLink}}
 <p class="stats-source"><a href="/trust">How the allowance and trust work, illustrated →</a></p>{{end}}
 {{with .Moderation}}{{template "stats-moderation" .}}
-{{end}}{{with .Content}}{{template "stats-content" .}}{{end}}{{with .X402}}{{template "stats-x402" .}}
+{{end}}{{with .Content}}{{template "stats-content" .}}{{end}}{{with .Wake}}{{template "stats-wake" .}}{{end}}{{with .X402}}{{template "stats-x402" .}}
 {{end}}<section class="stats-section" aria-labelledby="stats-totals">
 <h2 id="stats-totals">All time</h2>
 <dl class="stat-row stat-row-quiet">{{range .Totals}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
@@ -165,4 +165,18 @@ number, and the parity test holds the page to the API. */}}
 </table></div>
 </details>
 <p class="stats-source">The same numbers as JSON: <code>content</code> in <a href="/api/stats/daily">/api/stats/daily</a>. <a href="/tools/paste">Paste</a> and <a href="/tools/docs">Shared docs</a>.</p>
+</section>{{end}}
+
+{{define "stats-wake"}}<section class="stats-section" aria-labelledby="stats-wake">
+<h2 id="stats-wake">Receivers and wake-ups</h2>
+<p class="stats-lede">Receivers made and deliveries stored, wake-ups scheduled and fired over the last {{.Days}} days (UTC, today included), by kind. Counts only.</p>
+<dl class="stat-row stat-row-quiet">{{range .Tiles}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
+<details class="stats-table">
+<summary>Receivers and wake-ups by day</summary>
+<div class="table-scroll"><table>
+<thead><tr><th scope="col">Day (UTC)</th>{{if .Receivers}}<th scope="col" class="num">Receivers</th><th scope="col" class="num">Deliveries</th>{{end}}{{if .Wakeups}}<th scope="col" class="num">One-shot</th><th scope="col" class="num">On an event</th><th scope="col" class="num">Recurring</th><th scope="col" class="num">Fired</th>{{end}}</tr></thead>
+<tbody>{{$r := .Receivers}}{{$w := .Wakeups}}{{range .Rows}}<tr><th scope="row">{{.Day}}</th>{{if $r}}<td class="num">{{.Created}}</td><td class="num">{{.Deliveries}}</td>{{end}}{{if $w}}<td class="num">{{.OneShot}}</td><td class="num">{{.Event}}</td><td class="num">{{.Recurring}}</td><td class="num">{{.Fired}}</td>{{end}}</tr>{{end}}</tbody>
+</table></div>
+</details>
+<p class="stats-source">The same numbers as JSON: <code>receivers</code> and <code>wakeups</code> in <a href="/api/stats/daily">/api/stats/daily</a>. <a href="/tools/receive">Receivers</a> and <a href="/tools/wakeup">Wake-ups</a>.</p>
 </section>{{end}}

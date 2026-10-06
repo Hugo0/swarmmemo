@@ -50,6 +50,9 @@ type statsView struct {
 	// Content is paste and shared-doc use; nil while neither is enabled
 	// (stats_moderation.go).
 	Content *contentView
+	// Wake is receiver and wake-up use; nil while neither is enabled
+	// (stats_moderation.go).
+	Wake *wakeView
 }
 
 type statTile struct{ Label, Value, Note string }
@@ -246,6 +249,7 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	v.Moderation = buildModerationStats(ctx, service)
 	v.X402 = buildX402Stats(ctx, service)
 	v.Content = buildContentStats(ctx, service)
+	v.Wake = buildWakeStats(ctx, service)
 	return v, nil
 }
 

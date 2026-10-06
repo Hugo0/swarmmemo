@@ -49,6 +49,7 @@ const (
 var pasteIDArg = Arg{"id", "string", true, "the paste's id"}
 
 type paste struct {
+	accounts  AccountResolver // names a shown author's handle, when it is a HandleResolver
 	notaryKey ed25519.PrivateKey
 	serviceID string
 	content   string // CONTENT_URL, "" while public links are off
@@ -63,7 +64,7 @@ func newPaste(d Deps) Provider {
 	if id == "" {
 		id = "swarmmemo.com"
 	}
-	return &paste{notaryKey: d.NotaryKey, serviceID: id, content: d.ContentURL, screen: newSharedScreen(d.TextScreener, d.ContentScreen)}
+	return &paste{accounts: d.Accounts, notaryKey: d.NotaryKey, serviceID: id, content: d.ContentURL, screen: newSharedScreen(d.TextScreener, d.ContentScreen)}
 }
 
 func (p *paste) bindEngine(e *Engine) { p.engine = e }
@@ -77,10 +78,38 @@ CREATE TABLE IF NOT EXISTS pastes (
  reason TEXT NOT NULL DEFAULT '',
  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER NOT NULL DEFAULT 0,
  notary_seq INTEGER NOT NULL DEFAULT 0, verdict TEXT NOT NULL DEFAULT '', screen_cost INTEGER NOT NULL DEFAULT 0,
- screened_at INTEGER NOT NULL DEFAULT 0);
+ screened_at INTEGER NOT NULL DEFAULT 0, show_author INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS pastes_account ON pastes(account,seq);
 CREATE INDEX IF NOT EXISTS pastes_hash ON pastes(account,hash);
 `
+}
+
+// pasteAdded are the pastes columns added after the table: show_author.
+// A binary that does not know it never shows an author.
+var pasteAdded = []string{"show_author"}
+
+// MigratePastes adds pasteAdded to an existing pastes table, in the board's
+// migration transaction, like MigrateWakeups: additive and keyed on the
+// columns, so running it again changes nothing.
+func MigratePastes(tx *sql.Tx) error {
+	for _, name := range pasteAdded {
+		var tables, exists int
+		if err := tx.QueryRow("SELECT (SELECT count(*) FROM sqlite_master WHERE type='table' AND name='pastes'), (SELECT count(*) FROM pragma_table_info('pastes') WHERE name=?)", name).Scan(&tables, &exists); err != nil {
+			return err
+		}
+		if tables == 1 && exists == 0 {
+			if _, err := tx.Exec("ALTER TABLE pastes ADD COLUMN " + name + " INTEGER NOT NULL DEFAULT 0"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// HandleResolver is an AccountResolver that also names an agent key's
+// handle ("" for none); paste.open uses it for a shown author.
+type HandleResolver interface {
+	Handle(ctx context.Context, q allowance.Querier, agent string) (string, error)
 }
 
 func (p *paste) Describe() Descriptor {
@@ -110,6 +139,7 @@ func (p *paste) Describe() Descriptor {
 					{"visibility", "string", false, "private (the default: only you) or unlisted (anyone with the id)"},
 					{"expires_in", "integer", false, "seconds, " + itoa(PasteExpiryMin) + " to " + itoa(PasteExpiryMax) + "; after it only you read it; default never"},
 					{"notary", "boolean", false, "stamp the text's SHA-256 with the notary (adds " + itoa(PasteNotaryPrice) + ")"},
+					{"show_author", "boolean", false, "show your key's fingerprint and handle to whoever opens it (default false)"},
 				},
 				PriceNote:      "2 + 1 per KiB of text; notary: true adds " + itoa(PasteNotaryPrice),
 				ExampleMaxCost: 4,
@@ -149,12 +179,13 @@ type pasteCreateArgs struct {
 	Visibility string          `json:"visibility"`
 	ExpiresIn  json.RawMessage `json:"expires_in"`
 	Notary     bool            `json:"notary"`
+	ShowAuthor bool            `json:"show_author"`
 }
 
 type pasteSpec struct {
 	text, title, visibility string
 	expiresIn               int64
-	notary                  bool
+	notary, showAuthor      bool
 }
 
 func parsePasteCreate(raw json.RawMessage) (pasteSpec, error) {
@@ -165,7 +196,7 @@ func parsePasteCreate(raw json.RawMessage) (pasteSpec, error) {
 	if a.Text == nil {
 		return pasteSpec{}, badArg("text is required: a string.")
 	}
-	s := pasteSpec{text: *a.Text, title: a.Title, visibility: a.Visibility, notary: a.Notary}
+	s := pasteSpec{text: *a.Text, title: a.Title, visibility: a.Visibility, notary: a.Notary, showAuthor: a.ShowAuthor}
 	if len(s.text) > PasteTextBytes {
 		return s, tooLarge("invalid_service_data", len(s.text), PasteTextBytes)
 	}
@@ -298,6 +329,8 @@ type PasteView struct {
 	Expired    bool   `json:"expired,omitempty"`
 	DeletedAt  int64  `json:"deleted_at,omitempty"`
 	NotarySeq  int64  `json:"notary_seq,omitempty"`
+	// ShowAuthor is true when paste.open shows the author's key.
+	ShowAuthor bool `json:"show_author,omitempty"`
 	// PublicURL is where the content domain serves an unlisted paste, while
 	// CONTENT_URL is set.
 	PublicURL string `json:"public_url,omitempty"`
@@ -310,11 +343,11 @@ type pasteRow struct {
 	hosted                        bool
 }
 
-const pasteColumns = "seq,id,title,hash,bytes,visibility,state,reason,created_at,expires_at,deleted_at,notary_seq,account,key_id,hosted,text,verdict"
+const pasteColumns = "seq,id,title,hash,bytes,visibility,state,reason,created_at,expires_at,deleted_at,notary_seq,show_author,account,key_id,hosted,text,verdict"
 
 func scanPaste(row interface{ Scan(...any) error }, now int64) (pasteRow, error) {
 	var r pasteRow
-	err := row.Scan(&r.Seq, &r.ID, &r.Title, &r.Hash, &r.Bytes, &r.Visibility, &r.State, &r.Reason, &r.CreatedAt, &r.ExpiresAt, &r.DeletedAt, &r.NotarySeq, &r.account, &r.keyID, &r.hosted, &r.text, &r.verdict)
+	err := row.Scan(&r.Seq, &r.ID, &r.Title, &r.Hash, &r.Bytes, &r.Visibility, &r.State, &r.Reason, &r.CreatedAt, &r.ExpiresAt, &r.DeletedAt, &r.NotarySeq, &r.ShowAuthor, &r.account, &r.keyID, &r.hosted, &r.text, &r.verdict)
 	r.Expired = r.ExpiresAt > 0 && now >= r.ExpiresAt
 	return r, err
 }
@@ -400,8 +433,8 @@ func (p *paste) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 			out["receipt"] = receipt
 		}
 		id := newCallID()
-		if _, err = tx.ExecContext(ctx, "INSERT INTO pastes(id,account,key_id,hosted,title,text,bytes,hash,visibility,state,created_at,expires_at,notary_seq) VALUES(?,?,?,?,?,?,?,?,?,'active',?,?,?)",
-			id, account, c.Subject.KeyID, c.Subject.Hosted, s.title, s.text, len(s.text), hash, s.visibility, c.Now, expires, notarySeq); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO pastes(id,account,key_id,hosted,title,text,bytes,hash,visibility,state,created_at,expires_at,notary_seq,show_author) VALUES(?,?,?,?,?,?,?,?,?,'active',?,?,?,?)",
+			id, account, c.Subject.KeyID, c.Subject.Hosted, s.title, s.text, len(s.text), hash, s.visibility, c.Now, expires, notarySeq, s.showAuthor && c.Subject.KeyID != ""); err != nil {
 			return Result{}, err
 		}
 		r, err := loadPaste(ctx, tx, id, c.Now)
@@ -472,6 +505,19 @@ func (p *paste) open(ctx context.Context, q allowance.Querier, c Call, remote bo
 	shown := map[string]any{"id": view.ID, "title": view.Title, "hash": view.Hash, "bytes": view.Bytes, "created_at": view.CreatedAt}
 	if view.ExpiresAt > 0 {
 		shown["expires_at"] = view.ExpiresAt
+	}
+	if r.ShowAuthor && r.keyID != "" {
+		author := map[string]string{"fingerprint": r.keyID}
+		if h, ok := p.accounts.(HandleResolver); ok {
+			handle, err := h.Handle(ctx, q, r.keyID)
+			if err != nil {
+				return Result{}, err
+			}
+			if handle != "" {
+				author["handle"] = handle
+			}
+		}
+		shown["author"] = author
 	}
 	out := map[string]any{"paste": shown, "own": own, "screened": sc.Screened, "screen": sc.Screen, "untrusted": !own, "rendered": false}
 	if sc.Verdict != nil {

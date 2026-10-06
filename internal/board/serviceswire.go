@@ -43,6 +43,8 @@ type servicesState struct {
 	leaker     services.LeakScreener      // screen.leak's classifier (mode full); nil unless MODERATION is on
 	// content caches ContentStats (contentwire.go) for contentStatsTTL.
 	content contentStatsCache
+	// wake caches WakeStats (wakenotarywire.go) for contentStatsTTL.
+	wake wakeStatsCache
 }
 
 func (s *Store) openServices() error {
@@ -213,6 +215,17 @@ func (accountResolver) Account(ctx context.Context, q allowance.Querier, agent s
 		return "", false, nil
 	}
 	return account, err == nil, err
+}
+
+// Handle is the handle of the agent key fingerprint agent, "" for none or an
+// unknown agent (services.HandleResolver).
+func (accountResolver) Handle(ctx context.Context, q allowance.Querier, agent string) (string, error) {
+	var handle string
+	err := q.QueryRowContext(ctx, "SELECT handle FROM identities WHERE id=?", agent).Scan(&handle)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return handle, err
 }
 
 // readServices is services.list and service.read.

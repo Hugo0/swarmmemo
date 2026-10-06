@@ -319,6 +319,8 @@ func Open(path string, config Config) (*Store, error) {
 		design0Schema + ledger.Schema + services.Schema + trust.Schema + endorsementSchema +
 		// RFC0013 (conversation_schema.go): tables and indexes only.
 		conversationSchema +
+		// Cross-network anonymous retries (anonretry.go): an index only.
+		anonRetrySchema +
 		// T56 OAuth for the hosted MCP assistant profile (oauth.go): tables only.
 		oauthSchema +
 		// RFC0014 §5 passkey key backups (keybackup.go): one table, additive.
@@ -355,6 +357,11 @@ func Open(path string, config Config) (*Store, error) {
 	// Recurring wake-ups: four additive columns on wakeups, keyed on the
 	// columns (services/wakeup.go).
 	if err = services.MigrateWakeups(migration); err != nil {
+		return fail(err)
+	}
+	// Paste show_author: one additive column on pastes, keyed on the column
+	// (services/paste.go).
+	if err = services.MigratePastes(migration); err != nil {
 		return fail(err)
 	}
 	// Schema 13: room styles (RFC0011), a new table created above. Additive.
@@ -788,6 +795,17 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
 				return empty, err
+			}
+		}
+		// An anonymous public post's exact retry from another network
+		// (anonretry.go): the original receipt, nothing published or charged.
+		if cmd.RequestID != "" {
+			retry, found, err := s.anonymousCrossNetworkRetry(ctx, tx, cmd, a, "id:"+cmd.RequestID, digest, now)
+			if err != nil {
+				return empty, err
+			}
+			if found {
+				return retry, nil
 			}
 		}
 	}

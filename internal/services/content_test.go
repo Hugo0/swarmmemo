@@ -185,6 +185,72 @@ func TestPasteUnlistedOpensByIDScreenedOnce(t *testing.T) {
 	}
 }
 
+// A paste names no author by default; show_author: true shows its key's
+// fingerprint to whoever opens it.
+func TestPasteShowsItsAuthorOnlyWhenAsked(t *testing.T) {
+	r := newContentRig(t, services.ScreenOff)
+	hidden := r.paste("alice", map[string]any{"text": "anonymous notes", "visibility": "unlisted"})
+	shown := r.paste("alice", map[string]any{"text": "signed notes", "visibility": "unlisted", "show_author": true})
+	for _, s := range []allowance.Subject{anon("net1"), subjectOf("bob"), subjectOf("alice")} {
+		out, _, err := r.callAs(s, "paste", "open", map[string]any{"id": hidden})
+		if err != nil || get(out, "result", "paste", "author") != nil || strings.Contains(fmt.Sprint(out), "alice") {
+			t.Fatalf("%s opened a paste without show_author and saw its author: %+v %v", s.ID, out, err)
+		}
+		out, _, err = r.callAs(s, "paste", "open", map[string]any{"id": shown})
+		if err != nil || get(out, "result", "paste", "author", "fingerprint") != "alice" || get(out, "result", "paste", "author", "handle") != nil {
+			t.Fatalf("%s opened a show_author paste: %+v %v", s.ID, out, err)
+		}
+	}
+	if got, err := r.read("alice", "paste", "get", map[string]any{"id": shown}); err != nil || get(got, "result", "paste", "show_author") != true {
+		t.Fatalf("the owner's get shows the setting: %+v %v", got, err)
+	}
+	if _, err := r.call("alice", "paste", "create", map[string]any{"text": "x", "show_author": "yes"}); code(err) != "invalid_service_data" {
+		t.Fatalf("show_author must be a boolean: %v", err)
+	}
+}
+
+// TestPasteMigrationAddsShowAuthor: a pastes table from before show_author
+// gains the column, its pastes show no author, and the migration runs twice
+// without change.
+func TestPasteMigrationAddsShowAuthor(t *testing.T) {
+	db := openDB(t)
+	if _, err := db.Exec(`DROP TABLE pastes; CREATE TABLE pastes (
+ seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, account TEXT NOT NULL, key_id TEXT NOT NULL DEFAULT '',
+ hosted INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, bytes INTEGER NOT NULL, hash TEXT NOT NULL,
+ visibility TEXT NOT NULL CHECK(visibility IN ('private','unlisted')), state TEXT NOT NULL CHECK(state IN ('active','deleted','hidden')),
+ reason TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER NOT NULL DEFAULT 0,
+ notary_seq INTEGER NOT NULL DEFAULT 0, verdict TEXT NOT NULL DEFAULT '', screen_cost INTEGER NOT NULL DEFAULT 0,
+ screened_at INTEGER NOT NULL DEFAULT 0);
+INSERT INTO pastes(id,account,key_id,text,bytes,hash,visibility,state,created_at) VALUES('` + strings.Repeat("a", 32) + `','alice','alice','old',3,'` + sha256Hex("old") + `','unlisted','active',1);`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = services.MigratePastes(tx); err != nil {
+			t.Fatal(err)
+		}
+		if err = tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var columns int
+	if err := db.QueryRow("SELECT count(*) FROM pragma_table_info('pastes') WHERE name='show_author'").Scan(&columns); err != nil || columns != 1 {
+		t.Fatalf("columns: %d %v", columns, err)
+	}
+	r := &contentRig{t: t, db: db, meter: servicestest.NewMeter(1 << 30), board: newFakeBoard(), jev: &fakeScreener{}, now: wakeT0}
+	reg := services.NewBuiltinRegistry([]string{"paste"}, services.Deps{DB: db, Board: r.board, ServiceID: "swarmmemo.com", ContentScreen: services.ScreenOff})
+	r.e = services.NewEngine(services.Config{DB: db, Registry: reg, Meter: r.meter, Now: func() int64 { return r.now }})
+	t.Cleanup(r.e.Stop)
+	out, _, err := r.callAs(anon("net1"), "paste", "open", map[string]any{"id": strings.Repeat("a", 32)})
+	if err != nil || get(out, "result", "text") != "old" || get(out, "result", "paste", "author") != nil {
+		t.Fatalf("an old paste: %+v %v", out, err)
+	}
+}
+
 func TestPasteFlaggedIsWithheldUnlessScreenOff(t *testing.T) {
 	r := newContentRig(t, "")
 	r.jev.scores = map[string]float64{"injection": 0.97}

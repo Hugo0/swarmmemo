@@ -159,3 +159,52 @@ func buildContentStats(ctx context.Context, service board.Service) *contentView 
 	}
 	return v
 }
+
+// The /stats receivers and wake-ups section draws board.WakeStats, the counts
+// /api/stats/daily serves under receivers and wakeups.
+
+type wakeStatsReader interface {
+	WakeStats(ctx context.Context, days int) (services.WakeStats, error)
+}
+
+type wakeView struct {
+	Days               int
+	Receivers, Wakeups bool
+	Tiles              []statTile
+	Rows               []wakeRow // one per day, newest first
+}
+
+type wakeRow struct {
+	Day, Created, Deliveries, OneShot, Event, Recurring, Fired string
+}
+
+func buildWakeStats(ctx context.Context, service board.Service) *wakeView {
+	reader, ok := service.(wakeStatsReader)
+	if !ok {
+		return nil
+	}
+	st, err := reader.WakeStats(ctx, ContentStatsDays)
+	if err != nil || len(st.Days) == 0 {
+		return nil
+	}
+	v := &wakeView{Days: len(st.Days), Receivers: st.Receivers, Wakeups: st.Wakeups}
+	var t services.WakeDay
+	for i := len(st.Days) - 1; i >= 0; i-- {
+		d := st.Days[i]
+		t.ReceiversCreated, t.ReceiverDeliveries = t.ReceiversCreated+d.ReceiversCreated, t.ReceiverDeliveries+d.ReceiverDeliveries
+		t.WakeupsOneShot, t.WakeupsEvent, t.WakeupsRecurring = t.WakeupsOneShot+d.WakeupsOneShot, t.WakeupsEvent+d.WakeupsEvent, t.WakeupsRecurring+d.WakeupsRecurring
+		t.WakeupsFired += d.WakeupsFired
+		v.Rows = append(v.Rows, wakeRow{d.Day, count(d.ReceiversCreated), count(d.ReceiverDeliveries), count(d.WakeupsOneShot), count(d.WakeupsEvent), count(d.WakeupsRecurring), count(d.WakeupsFired)})
+	}
+	if st.Receivers {
+		v.Tiles = append(v.Tiles,
+			statTile{"Receivers created", count(t.ReceiversCreated), "private drop boxes for callbacks"},
+			statTile{"Deliveries", count(t.ReceiverDeliveries), "stored in a receiver"})
+	}
+	if st.Wakeups {
+		v.Tiles = append(v.Tiles,
+			statTile{"Wake-ups scheduled", count(t.WakeupsOneShot + t.WakeupsEvent + t.WakeupsRecurring), count(t.WakeupsOneShot) + " one-shot, " + count(t.WakeupsEvent) + " on an event, " + count(t.WakeupsRecurring) + " recurring"},
+			statTile{"Wake-ups fired", count(t.WakeupsFired), "each period of a recurring one counted"})
+	}
+	return v
+}

@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"swarmmemo/internal/allowance"
 	"swarmmemo/internal/services"
@@ -245,4 +247,38 @@ func (s *Store) serviceNotices(ctx context.Context, tx *sql.Tx, data map[string]
 		data[k] = v
 	}
 	return nil
+}
+
+type wakeStatsCache struct {
+	mu    sync.Mutex
+	at    time.Time
+	today int64
+	stats services.WakeStats
+}
+
+// WakeStats is receiver and wake-up use per UTC day for /stats and
+// /api/stats/daily: the last days days ending today, oldest first, counts
+// only; Days is nil while neither service is enabled. Like ContentStats it
+// keeps ContentStatsDays for contentStatsTTL, reads through the pool and
+// holds no transaction.
+func (s *Store) WakeStats(ctx context.Context, days int) (services.WakeStats, error) {
+	e := s.services.engine
+	if e == nil || days < 1 {
+		return services.WakeStats{}, nil
+	}
+	days = min(days, ContentStatsDays)
+	c := &s.services.wake
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := s.now()
+	if c.stats.Days == nil || now.Sub(c.at) >= contentStatsTTL || now.Before(c.at) || now.Unix()/86400 != c.today {
+		all, err := e.Registry().ReadWakeStats(ctx, s.db, now.Unix(), ContentStatsDays)
+		if err != nil || all.Days == nil {
+			return services.WakeStats{}, err
+		}
+		c.at, c.today, c.stats = now, now.Unix()/86400, all
+	}
+	out := c.stats
+	out.Days = out.Days[len(out.Days)-days:]
+	return out, nil
 }

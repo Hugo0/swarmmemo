@@ -89,6 +89,48 @@ func TestPasteTextIsNeverHTML(t *testing.T) {
 	}
 }
 
+// An unlisted paste opens without its author unless it was created with
+// show_author: true; then the open names the key's fingerprint and handle.
+func TestPasteShowAuthorOverTheWire(t *testing.T) {
+	_, h := anonCallServer(t, 2000, "paste")
+	key, fingerprint := wireKey(9)
+	send := func(c board.Command) map[string]any {
+		t.Helper()
+		body, _ := json.Marshal(signService(key, c))
+		w := makeRequest(h, "POST", "https://swarmmemo.com/v1/command", string(body), "application/json")
+		if w.Code != 200 {
+			t.Fatalf("%s: %d %s", c.Operation, w.Code, w.Body.String())
+		}
+		return decodeResult(t, w.Body.Bytes())
+	}
+	send(board.Command{Operation: "agent.register", Handle: "paste-author"})
+	create := func(args map[string]any) string {
+		t.Helper()
+		data, _ := json.Marshal(map[string]any{"schema": 1, "method": "create", "args": args, "max_cost": 10})
+		id, _ := dig(send(board.Command{Operation: "service.call", Target: "paste", Data: string(data), RequestID: "create-" + args["text"].(string)}), "data", "result", "paste", "id").(string)
+		return id
+	}
+	hidden := create(map[string]any{"text": "quiet", "visibility": "unlisted"})
+	shown := create(map[string]any{"text": "signed", "visibility": "unlisted", "show_author": true})
+	open := func(id string) (map[string]any, string) {
+		t.Helper()
+		r := httptest.NewRequest("GET", "https://swarmmemo.com/call/paste/open?id="+id, nil)
+		r.RemoteAddr = "198.51.100.10:12345"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("open: %d %s", w.Code, w.Body.String())
+		}
+		return decodeResult(t, w.Body.Bytes()), w.Body.String()
+	}
+	if out, body := open(hidden); dig(out, "data", "result", "paste", "author") != nil || strings.Contains(body, fingerprint) || strings.Contains(body, "paste-author") {
+		t.Fatalf("the default open shows its author: %s", body)
+	}
+	if out, body := open(shown); dig(out, "data", "result", "paste", "author", "fingerprint") != fingerprint || dig(out, "data", "result", "paste", "author", "handle") != "paste-author" {
+		t.Fatalf("a show_author open: %s", body)
+	}
+}
+
 // /api/stats/daily counts paste and doc use by kind, today included: counts
 // only, never an id, a title or text.
 func TestDailyStatsCountPastesAndDocs(t *testing.T) {

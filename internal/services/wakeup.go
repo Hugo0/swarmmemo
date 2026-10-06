@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"swarmmemo/internal/allowance"
 )
@@ -1027,4 +1028,75 @@ func (w *wakeup) scan(ctx context.Context, p *wakePass, after int64) (int64, err
 		after = ev.Seq
 	}
 	return after, nil
+}
+
+// WakeDay is one UTC day of receiver and wake-up use for /stats: counts
+// only, split by kind, never an id, a key, a label or a body.
+type WakeDay struct {
+	Day string // YYYY-MM-DD
+	// ReceiversCreated counts receivers created, ReceiverDeliveries the
+	// deliveries stored.
+	ReceiversCreated, ReceiverDeliveries int64
+	// WakeupsOneShot, WakeupsEvent and WakeupsRecurring count wake-ups
+	// scheduled: once at a time, on an event, or every period.
+	WakeupsOneShot, WakeupsEvent, WakeupsRecurring int64
+	// WakeupsFired counts firings, each period of a recurring one included.
+	WakeupsFired int64
+}
+
+// WakeStats is WakeDay over a range of days, with which of the two
+// services is enabled; Days is nil while neither is.
+type WakeStats struct {
+	Receivers, Wakeups bool
+	Days               []WakeDay
+}
+
+// ReadWakeStats counts receiver and wake-up use over the days UTC days
+// ending with the one holding now, oldest first. Counts come from the tables
+// at read time; nothing is stored.
+func (r *Registry) ReadWakeStats(ctx context.Context, q allowance.Querier, now int64, days int) (WakeStats, error) {
+	_, recvErr := r.Lookup(ReceiverID)
+	_, wakeErr := r.Lookup("wakeup")
+	st := WakeStats{Receivers: recvErr == nil, Wakeups: wakeErr == nil}
+	if !st.Receivers && !st.Wakeups || days < 1 {
+		return WakeStats{}, nil
+	}
+	first := now/86400 - int64(days) + 1
+	out := make([]WakeDay, days)
+	for i := range out {
+		out[i].Day = time.Unix((first+int64(i))*86400, 0).UTC().Format("2006-01-02")
+	}
+	type count struct {
+		query string
+		arg   int64
+		add   func(d *WakeDay, kind, n int64)
+	}
+	var queries []count
+	if st.Receivers {
+		queries = append(queries,
+			count{"SELECT created_at/86400, 0, count(*) FROM receivers WHERE created_at>=? GROUP BY 1", first * 86400, func(d *WakeDay, _, n int64) { d.ReceiversCreated += n }},
+			// receiver_days counts each stored delivery in its transaction.
+			count{"SELECT day, 0, sum(count) FROM receiver_days WHERE day>=? GROUP BY 1", first, func(d *WakeDay, _, n int64) { d.ReceiverDeliveries += n }})
+	}
+	if st.Wakeups {
+		queries = append(queries,
+			count{"SELECT created_at/86400, CASE WHEN kind<>'time' THEN 1 WHEN every>0 THEN 2 ELSE 0 END, count(*) FROM wakeups WHERE created_at>=? GROUP BY 1,2", first * 86400, func(d *WakeDay, kind, n int64) {
+				switch kind {
+				case 1:
+					d.WakeupsEvent += n
+				case 2:
+					d.WakeupsRecurring += n
+				default:
+					d.WakeupsOneShot += n
+				}
+			}},
+			count{"SELECT fired_at/86400, 0, count(*) FROM wakeup_notices WHERE fired_at>=? GROUP BY 1", first * 86400, func(d *WakeDay, _, n int64) { d.WakeupsFired += n }})
+	}
+	for _, c := range queries {
+		if err := countDays(ctx, q, c.query, c.arg, first, days, func(i int, kind, n int64) { c.add(&out[i], kind, n) }); err != nil {
+			return WakeStats{}, err
+		}
+	}
+	st.Days = out
+	return st, nil
 }

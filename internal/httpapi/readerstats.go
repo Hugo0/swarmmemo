@@ -263,6 +263,19 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Receiver and wake-up use, by day; each part absent while its service is off.
+	var wake services.WakeStats
+	wakeDays := map[string]services.WakeDay{}
+	if ws, ok := s.service.(wakeStatsStore); ok {
+		var err error
+		if wake, err = ws.WakeStats(r.Context(), board.ContentStatsDays); err != nil {
+			writeError(w, &board.Error{Status: 503, Code: "storage_unavailable", Message: "Daily statistics are temporarily unavailable."})
+			return
+		}
+		for _, d := range wake.Days {
+			wakeDays[d.Day] = d
+		}
+	}
 	out := make([]map[string]any, 0, len(stats))
 	for _, day := range stats {
 		reads := map[string]any{}
@@ -283,6 +296,18 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 		if content != nil {
 			entry["content"] = contentJSON(content[day.Day])
 		}
+		if wake.Days != nil {
+			d := wakeDays[day.Day]
+			if wake.Receivers {
+				entry["receivers"] = map[string]int64{"created": d.ReceiversCreated, "deliveries": d.ReceiverDeliveries}
+			}
+			if wake.Wakeups {
+				entry["wakeups"] = map[string]any{
+					"scheduled": map[string]int64{"one_shot": d.WakeupsOneShot, "event": d.WakeupsEvent, "recurring": d.WakeupsRecurring},
+					"fired":     d.WakeupsFired,
+				}
+			}
+		}
 		out = append(out, entry)
 	}
 	jsonResponse(w, 200, map[string]any{
@@ -294,6 +319,10 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 
 type contentStatsStore interface {
 	ContentStats(context.Context, int) ([]services.ContentDay, error)
+}
+
+type wakeStatsStore interface {
+	WakeStats(context.Context, int) (services.WakeStats, error)
 }
 
 // contentJSON is one day's paste and doc use, split by kind: counts only.
@@ -316,6 +345,7 @@ var dailyStatsNotes = []string{
 	"Post metrics (first_post_keys, returning_keys) are derived at read time from visible signed public posts, excluding kind=simulation and kind=imported; they do not know which keys the operator runs, and a rotated key counts as a new key.",
 	"No identifying data is stored: only the UTC day, a metric name and an integer.",
 	"content counts paste and shared-doc use on every day, today so far: pastes created (private or unlisted), answered paste opens (signed or anonymous), docs created (owned by a key or by a group) and doc versions written, a doc's first included. Counts only.",
+	"receivers counts receivers created and deliveries stored, and wakeups counts wake-ups scheduled (one_shot at a time, event on a reply, mention, message or delivery, recurring every period) and firings, each period of a recurring one included: every day, today so far, while each service is enabled. Counts only.",
 	"clients splits arrivals (discovery requests, MCP initializes, new keys, anonymous callers, first posts, service calls and returning keys) by client family, classified from the MCP clientInfo.name and the User-Agent, which are then discarded. Only written counts are served. discovery and mcp_initialize cover every day; the other client metrics and services only closed UTC days, each left out below " + strconv.Itoa(board.ClientCountMinimum) + ". " + unknownMCPClientsNote,
 }
 

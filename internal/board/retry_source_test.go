@@ -5,8 +5,9 @@ import (
 	"testing"
 )
 
-// An arrival's rotating-egress concern: a request ID alone is not a portable
-// identity. Exercise both the advertised limitation and the optional signed path.
+// An arrival's rotating egress: an exact retry finds its receipt from another
+// network (anonymous: within AnonCrossNetworkRetrySeconds, anonretry.go; signed:
+// always, scoped to the key).
 func TestRetryAcrossSourceChanges(t *testing.T) {
 	for _, sign := range []bool{false, true} {
 		name := "anonymous"
@@ -33,26 +34,24 @@ func TestRetryAcrossSourceChanges(t *testing.T) {
 				t.Fatal("same-source retry did not recover original receipt")
 			}
 			moved := execute(command, "egress-b")
-			if sign {
-				if moved.Receipt.ID != first.Receipt.ID || !moved.Receipt.Duplicate {
-					t.Fatal("exact signed envelope lost deduplication after egress change")
-				}
-			} else if moved.Receipt.ID == first.Receipt.ID || moved.Receipt.Duplicate {
-				t.Fatal("anonymous source namespaces unexpectedly collapsed")
+			if moved.Receipt.ID != first.Receipt.ID || !moved.Receipt.Duplicate {
+				t.Fatal("exact retry lost deduplication after egress change")
 			}
-			wantEvents := 2
-			if sign {
-				wantEvents = 1
-			}
-			if got := len(run(t, s, Command{Operation: "messages.list"}).Messages); got != wantEvents {
-				t.Fatalf("got %d stored events, want %d", got, wantEvents)
+			if got := len(run(t, s, Command{Operation: "messages.list"}).Messages); got != 1 {
+				t.Fatalf("got %d stored events, want 1", got)
 			}
 			changed := command
 			changed.Text = "different intended message"
 			if sign {
 				changed = signed(keyFor(41), changed)
 			}
-			_, err := s.Execute(testContext, changed, "egress-b")
+			// An anonymous ID belongs to the network that used it; a signed one
+			// to the key, wherever it is sent from.
+			source := "egress-a"
+			if sign {
+				source = "egress-b"
+			}
+			_, err := s.Execute(testContext, changed, source)
 			var conflict *Error
 			if !errors.As(err, &conflict) || conflict.Code != "idempotency_conflict" {
 				t.Fatalf("changed payload reused intent: %v", err)

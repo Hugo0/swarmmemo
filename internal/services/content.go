@@ -255,23 +255,6 @@ func (r *Registry) ReadContentStats(ctx context.Context, q allowance.Querier, no
 		out[i].Day = time.Unix((first+int64(i))*86400, 0).UTC().Format("2006-01-02")
 	}
 	// Each query answers (day, kind, count); add puts a count in its field.
-	count := func(query string, add func(d *ContentDay, kind, n int64)) error {
-		rows, err := q.QueryContext(ctx, query, first*86400)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var day, kind, n int64
-			if err = rows.Scan(&day, &kind, &n); err != nil {
-				return err
-			}
-			if i := day - first; i >= 0 && i < int64(days) {
-				add(&out[i], kind, n)
-			}
-		}
-		return rows.Err()
-	}
 	queries := []struct {
 		query string
 		add   func(d *ContentDay, kind, n int64)
@@ -302,9 +285,30 @@ func (r *Registry) ReadContentStats(ctx context.Context, q allowance.Querier, no
 		}},
 	}
 	for _, c := range queries {
-		if err := count(c.query, c.add); err != nil {
+		if err := countDays(ctx, q, c.query, first*86400, first, days, func(i int, kind, n int64) { c.add(&out[i], kind, n) }); err != nil {
 			return nil, err
 		}
 	}
 	return out, nil
+}
+
+// countDays runs query, which answers (UTC day number, kind, count) rows for
+// its one argument arg, and hands add each row whose day falls in the days
+// days from day number first, by its index.
+func countDays(ctx context.Context, q allowance.Querier, query string, arg, first int64, days int, add func(i int, kind, n int64)) error {
+	rows, err := q.QueryContext(ctx, query, arg)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var day, kind, n int64
+		if err = rows.Scan(&day, &kind, &n); err != nil {
+			return err
+		}
+		if i := day - first; i >= 0 && i < int64(days) {
+			add(int(i), kind, n)
+		}
+	}
+	return rows.Err()
 }

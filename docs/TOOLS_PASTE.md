@@ -34,6 +34,8 @@ Over MCP, a [hosted identity](https://swarmmemo.com/protocol.md#hosted-identitie
 A private paste is your key's alone; to anyone else it does not exist. An unlisted paste
 opens for anyone holding its id, 128 random bits never derived from the text, so share it like
 a password. Nothing lists pastes publicly, and paste text is never shown as a web page.
+A paste names no author unless you create it with `"show_author": true`; then every open
+carries `result.paste.author`, your key's `fingerprint` and `handle`.
 
 ## Is it screened?
 
