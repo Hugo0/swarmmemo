@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,10 +36,15 @@ type recvRig struct {
 func newRecvRig(t *testing.T, budget int64, mode services.ScreenMode) *recvRig {
 	t.Helper()
 	r := &recvRig{t: t, db: openDB(t), meter: servicestest.NewMeter(budget), board: newFakeBoard(), jev: &fakeScreener{cost: 40}, now: wakeT0}
+	r.start(mode)
+	return r
+}
+
+// start builds the engine on r.db, as a board start does.
+func (r *recvRig) start(mode services.ScreenMode) {
 	reg := services.NewBuiltinRegistry([]string{"receiver", "wakeup"}, services.Deps{DB: r.db, Board: r.board, ServiceID: "swarmmemo.com", TextScreener: r.jev, ReceiverScreen: mode})
 	r.e = services.NewEngine(services.Config{DB: r.db, Registry: reg, Meter: r.meter, Now: func() int64 { return r.now }})
-	t.Cleanup(r.e.Stop)
-	return r
+	r.t.Cleanup(r.e.Stop)
 }
 
 // call is a signed service.call and its first answer (the once part
@@ -360,6 +366,92 @@ func TestReceiverRateLimitsAndAllowance(t *testing.T) {
 	}
 	if got := items(t, poor.read("carol", "items", map[string]any{})); len(got) != 1 {
 		t.Fatalf("a refused delivery stores nothing: %+v", got)
+	}
+}
+
+// fillDay makes ReceiverPerDay deliveries to the receiver, a minute's
+// worth at a time, from networks under their own bound.
+func (r *recvRig) fillDay(id, token string) {
+	r.t.Helper()
+	for i := range services.ReceiverPerDay {
+		if i > 0 && i%services.ReceiverPerMinute == 0 {
+			r.now += 60
+		}
+		if _, err := r.deliver(id, token, delivery{body: `{}`, source: fmt.Sprintf("198.51.100.%d", i%50+1)}); err != nil {
+			r.t.Fatalf("delivery %d: %v", i+1, err)
+		}
+	}
+	r.now += 60
+}
+
+// refusedForTheDay checks that one more delivery is request_rate until the
+// next UTC day, not until the next minute.
+func (r *recvRig) refusedForTheDay(id, token string) {
+	r.t.Helper()
+	_, err := r.deliver(id, token, delivery{body: `{}`, source: "192.0.2.9"})
+	var ae *allowance.Err
+	if code(err) != "request_rate" || !asErr(err, &ae) || ae.RetryAfter != int(86400-r.now%86400) {
+		r.t.Fatalf("delivery %d: %v", services.ReceiverPerDay+1, err)
+	}
+}
+
+// The daily cap is counted in the database: a minute table full of other
+// receivers drops this receiver's window, and the cap still holds.
+func TestReceiverDailyCapSurvivesTablePressure(t *testing.T) {
+	r := newRecvRig(t, 1<<30, services.ScreenOff)
+	id, token := r.create("alice", map[string]any{})
+	r.fillDay(id, token)
+	// RateEntriesMax other receivers in a later minute: the last one fills
+	// the table past its bound and drops alice's window of a past minute.
+	if err := services.FillReceiverWindowsForTest(r.e, services.RateEntriesMax, r.now); err != nil {
+		t.Fatal(err)
+	}
+	r.now += 60 // their windows are stale too, so alice gets a fresh one
+	r.refusedForTheDay(id, token)
+	if got := items(t, r.read("alice", "items", map[string]any{"limit": 1})); len(got) != 1 {
+		t.Fatalf("items: %+v", got)
+	}
+	r.now += 86400 - r.now%86400
+	if _, err := r.deliver(id, token, delivery{body: `{}`}); err != nil {
+		t.Fatalf("the next day: %v", err)
+	}
+}
+
+// The daily cap survives a restart: a new engine on the reopened database
+// still refuses, and past days' counts stay.
+func TestReceiverDailyCapSurvivesRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.db")
+	open := func() *sql.DB {
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db.SetMaxOpenConns(1)
+		t.Cleanup(func() { db.Close() })
+		if _, err = db.Exec(services.Schema); err != nil {
+			t.Fatal(err)
+		}
+		return db
+	}
+	r := &recvRig{t: t, db: open(), meter: servicestest.NewMeter(1 << 30), board: newFakeBoard(), jev: &fakeScreener{cost: 40}, now: wakeT0}
+	r.start(services.ScreenOff)
+	id, token := r.create("alice", map[string]any{})
+	r.fillDay(id, token)
+	r.e.Stop()
+	if err := r.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r.db = open()
+	r.start(services.ScreenOff)
+	r.refusedForTheDay(id, token)
+	day := r.now / 86400
+	r.now += 86400 - r.now%86400
+	if _, err := r.deliver(id, token, delivery{body: `{}`}); err != nil {
+		t.Fatalf("the next day: %v", err)
+	}
+	var past int
+	if err := r.db.QueryRow("SELECT count FROM receiver_days WHERE receiver=? AND day=?", id, day).Scan(&past); err != nil || past != services.ReceiverPerDay {
+		t.Fatalf("past day: %d %v", past, err)
 	}
 }
 

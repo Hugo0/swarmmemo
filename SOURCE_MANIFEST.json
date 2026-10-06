@@ -3130,8 +3130,8 @@
     {
       "mode": "0644",
       "path": "internal/services/export_test.go",
-      "sha256": "a333e44df31af64ba18d5b0fb6bf923ba68db2caafe8a2d655225f1d08c02b5c",
-      "size": 5562
+      "sha256": "e23ceb05a11ed9a36df7ae7b8722cc2413f35897fc19933fd2de94d5be71397b",
+      "size": 6090
     },
     {
       "mode": "0644",
@@ -3274,14 +3274,14 @@
     {
       "mode": "0644",
       "path": "internal/services/receiver.go",
-      "sha256": "3af1994cb985cded83e7d9c3d79369a70a9438ff75ad849399b88b24e55f5b50",
-      "size": 39510
+      "sha256": "6df46a9c2c2201afd3db08ec2742be7e0680aa745b63a422a0d3bc5e7cd66bc2",
+      "size": 40596
     },
     {
       "mode": "0644",
       "path": "internal/services/receiver_test.go",
-      "sha256": "8f60d0b1041cff90094e80fe9d43be8861b2874dc0c6ae39398c287671040940",
-      "size": 21007
+      "sha256": "e0b9527bd3b49ce98d6804aefdefdb0f40891679d65bb320b38b1b01059a0db1",
+      "size": 24279
     },
     {
       "mode": "0644",

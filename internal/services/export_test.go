@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"time"
@@ -161,3 +162,21 @@ func PublicDataDatasetsForTest(cfg *PublicDataConfig) map[string]any {
 func InferenceQuoteForTest(cfg *InferenceConfig, args json.RawMessage) (Quote, error) {
 	return newInference(Deps{Inference: cfg}).Quote(Call{Method: "complete", Args: args})
 }
+
+// FillReceiverWindowsForTest counts one delivery for each of n other
+// receiver keys in the receiver's minute table, as table pressure would.
+func FillReceiverWindowsForTest(e *Engine, n int, now int64) error {
+	r, err := e.receiverProvider()
+	if err != nil {
+		return err
+	}
+	for i := range n {
+		if err := r.admit(r.perRecv, fmt.Sprintf("pressure-%d", i), ReceiverPerMinute, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RateEntriesMax is the bound of a rate table.
+const RateEntriesMax = rateEntriesMax

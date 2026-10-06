@@ -159,6 +159,7 @@ CREATE TABLE IF NOT EXISTS receiver_items (
 CREATE INDEX IF NOT EXISTS receiver_items_account ON receiver_items(account,seq);
 CREATE INDEX IF NOT EXISTS receiver_items_receiver ON receiver_items(receiver,seq);
 CREATE INDEX IF NOT EXISTS receiver_items_pending ON receiver_items(received_at) WHERE screen='pending';
+CREATE TABLE IF NOT EXISTS receiver_days (receiver TEXT NOT NULL, day INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(receiver,day));
 `
 }
 
@@ -656,21 +657,38 @@ func sourceKey(ip net.IP) string {
 	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
-// admit counts one event in key's window of table and refuses past the
-// bounds; the table is bounded (windowIn) and fails closed when full of
-// live keys.
-func (r *receiver) admit(table map[string]*anonWindow, key string, perMinute, perDay, now int64) error {
+// admit counts one event in key's minute window of table and refuses past
+// perMinute; the table is bounded (windowIn), drops windows of past minutes
+// when full, and fails closed when full of live keys. It holds no daily
+// count: that would be lost with the window (countDay keeps it).
+func (r *receiver) admit(table map[string]*anonWindow, key string, perMinute, now int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	w := windowIn(table, key, func(w *anonWindow) bool { return w.minute != now/60 })
 	if w == nil {
 		return &allowance.Err{Code: "request_rate", RetryAfter: 60}
 	}
-	if ok, retry := w.room(perMinute, perDay, now); !ok {
+	if ok, retry := w.room(perMinute, 0, now); !ok {
 		return &allowance.Err{Code: "request_rate", RetryAfter: retry}
 	}
 	w.mcount++
-	w.dcount++
+	return nil
+}
+
+// countDay counts one delivery against the receiver's ReceiverPerDay in the
+// UTC day, in receiver_days and in the delivery's transaction, so neither a
+// full rate table nor a restart resets it and a refused delivery (rolled
+// back) does not count. Past days stay.
+func countDay(ctx context.Context, tx *sql.Tx, receiver string, now int64) error {
+	res, err := tx.ExecContext(ctx, "INSERT INTO receiver_days(receiver,day,count) VALUES(?,?,1) ON CONFLICT(receiver,day) DO UPDATE SET count=count+1 WHERE count<?", receiver, now/86400, ReceiverPerDay)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return &allowance.Err{Code: "request_rate", RetryAfter: int(86400 - now%86400)}
+	}
 	return nil
 }
 
@@ -678,7 +696,7 @@ func (r *receiver) admit(table map[string]*anonWindow, key string, perMinute, pe
 // read: every attempt counts, found or not, so the URL space cannot be
 // scanned fast.
 func (r *receiver) AdmitSource(source net.IP, now int64) error {
-	return r.admit(r.perSource, sourceKey(source), ReceiverSourcePerMinute, 0, now)
+	return r.admit(r.perSource, sourceKey(source), ReceiverSourcePerMinute, now)
 }
 
 // mediaType is the delivery's media type when the receiver takes it.
@@ -739,7 +757,10 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 			return DeliveryReceipt{}, "", refusal("receiver_source_refused")
 		}
 	}
-	if err = r.admit(r.perRecv, d.ID, ReceiverPerMinute, ReceiverPerDay, now); err != nil {
+	if err = countDay(ctx, tx, d.ID, now); err != nil {
+		return DeliveryReceipt{}, "", err
+	}
+	if err = r.admit(r.perRecv, d.ID, ReceiverPerMinute, now); err != nil {
 		return DeliveryReceipt{}, "", err
 	}
 	if len(d.Body) > ReceiverBodyBytes {
