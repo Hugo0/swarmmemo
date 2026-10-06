@@ -626,7 +626,7 @@ func failureCode(code string) string {
 	case "upstream_busy", "upstream_unavailable", "content_refused", "invalid_service_data", "memory_not_found", "memory_limit", "invalid_memory_key",
 		"service_unavailable", "x402_unknown_resource", "x402_price_changed", "x402_not_payable", "x402_cap_reached",
 		"x402_payment_rejected", "x402_response_too_large", "x402_unvetted", "anonymous_unscreened",
-		"price_exceeds_max", "frames_unvetted", "frames_denied", "frames_unavailable", "frames_price_over_cap":
+		"price_exceeds_max", "tool_unvetted", "tool_denied", "tool_unavailable", "tool_price_over_cap":
 		return code
 	}
 	return "upstream_failed"

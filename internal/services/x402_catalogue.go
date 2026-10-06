@@ -493,7 +493,15 @@ func normalizeEscapes(s string) string {
 // x402Suffixes are the multi-label public suffixes trust folds domains
 // under ("co.uk"): a registrable domain is one label under them, else the
 // last two labels.
-var x402Suffixes = trust.DefaultParams().DomainSuffixes
+var x402Suffixes = append(slices.Clone(trust.DefaultParams().DomainSuffixes), x402HostingSuffixes...)
+
+// x402HostingSuffixes are shared hosting platforms where each subdomain is a
+// different seller: without them every Supabase or Workers seller would share
+// one registrable domain and its per-domain cap.
+var x402HostingSuffixes = []string{
+	"azurewebsites.net", "deno.dev", "fly.dev", "herokuapp.com", "lambda-url.us-east-1.on.aws", "netlify.app",
+	"onrender.com", "railway.app", "replit.app", "run.app", "supabase.co", "vercel.app", "workers.dev",
+}
 
 // indexResource fills r's derived fields once, so neither a search nor a
 // deny check parses its URL again: the canonical URL, the host, its

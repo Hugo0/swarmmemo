@@ -21,8 +21,13 @@ import (
 // is served. Node IDs belong to a generation; the client names the one it
 // holds, and the previous generation is kept so a rebuild never breaks a
 // session mid-zoom.
+// GraphUniverseTTL is how old the universe may get before a rebuild:
+// GraphUniverseTTLDefault, or GRAPH_UNIVERSE_TTL on the host (test fixtures
+// set it short so agents they just created become searchable).
+var GraphUniverseTTL = GraphUniverseTTLDefault
+
 const (
-	GraphUniverseTTL = 5 * time.Minute
+	GraphUniverseTTLDefault = 5 * time.Minute
 	// GraphViewBudget bounds the nodes one children read returns: what a
 	// client can draw at once.
 	GraphViewBudget = 60_000

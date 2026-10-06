@@ -251,11 +251,11 @@ func TestFramesOpenConfig(t *testing.T) {
 		t.Fatalf("open off: %v", err)
 	}
 	h := newX402HarnessCfg(t, &fakeX402{}, cfg)
-	if _, err := h.call(testSubject, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000)); errCode(err) != "x402_unknown_resource" {
-		t.Fatalf("frames: id with open off: %v", err)
+	if _, err := h.call(testSubject, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000)); errCode(err) != "x402_unknown_resource" {
+		t.Fatalf("tool: id with open off: %v", err)
 	}
-	if _, err := h.framesReadErr("frames_search", `{"query":"weather"}`); errCode(err) != "service_unavailable" {
-		t.Fatalf("frames_search with open off: %v", err)
+	if _, err := h.framesReadErr("tools_search", `{"query":"weather"}`); errCode(err) != "service_unavailable" {
+		t.Fatalf("tools_search with open off: %v", err)
 	}
 	if s := fmt.Sprintf("%v %+v %#v", cfg, cfg, cfg.Bundlers); strings.Contains(s, framesKey) {
 		t.Fatal("the key leaks when the config is formatted")
@@ -280,15 +280,15 @@ func TestFramesSearch(t *testing.T) {
 	// Nothing upstream inside the transaction: the read's first part only
 	// validates.
 	tx, _ := h.db.Begin()
-	out, err := h.engine.ReadOutcome(context.Background(), tx, Request{Service: "x402", Data: `{"schema":1,"method":"frames_search","args":{"query":"  Weather   FORECAST "}}`, Subject: testSubject}, h.now)
+	out, err := h.engine.ReadOutcome(context.Background(), tx, Request{Service: "x402", Data: `{"schema":1,"method":"tools_search","args":{"query":"  Weather   FORECAST "}}`, Subject: testSubject}, h.now)
 	tx.Rollback()
 	if err != nil || out.After == nil || out.Data != nil {
 		t.Fatalf("outcome %+v %v", out, err)
 	}
 	if s, _, _, _ := api.count(); s != 0 || h.dials.Load() != 0 {
-		t.Fatal("frames_search reached Frames inside the transaction")
+		t.Fatal("tools_search reached Frames inside the transaction")
 	}
-	page, err := h.framesRead(testSubject, "frames_search", `{"query":"  Weather   FORECAST "}`)
+	page, err := h.framesRead(testSubject, "tools_search", `{"query":"  Weather   FORECAST "}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,24 +296,24 @@ func TestFramesSearch(t *testing.T) {
 		t.Fatalf("upstream search body %v", api.lastSearch)
 	}
 	hits := hitsByID(page)
-	if len(hits) != 5 || hits["frames:../runs/x"] != nil || page["text_is_untrusted"] != true || page["cached"] != false {
+	if len(hits) != 5 || hits["tool:../runs/x"] != nil || page["text_is_untrusted"] != true || page["cached"] != false {
 		t.Fatalf("hits %v", page)
 	}
-	ok := hits["frames:"+toolOK]
+	ok := hits["tool:"+toolOK]
 	desc := ok["description"].(string)
-	if ok["callable"] != true || ok["frames_vetted"] != true || ok["price_usd"] != "0.002" || ok["cost"] != float64(creditsFor(2000)) ||
+	if ok["callable"] != true || ok["vetted"] != true || ok["price_usd"] != "0.002" || ok["cost"] != float64(creditsFor(2000)) ||
 		ok["max_cost"] != float64(creditsFor(20000)) || ok["summary_status"] != "unscreened" || strings.ContainsAny(desc, "‮\u0007") ||
 		fmt.Sprint(ok["capabilities"]) != "[weather forecast badcap]" || fmt.Sprint(ok["input_schema"]) == "" {
 		t.Fatalf("vetted hit %v", ok)
 	}
-	if u := hits["frames:"+toolUnvet]; u["callable"] != false || u["why_not"] != "frames_unvetted" || u["description_truncated"] != true ||
+	if u := hits["tool:"+toolUnvet]; u["callable"] != false || u["why_not"] != "tool_unvetted" || u["description_truncated"] != true ||
 		len([]rune(u["description"].(string))) > framesDescriptionRunes {
 		t.Fatalf("unvetted hit %v", u)
 	}
-	if p := hits["frames:"+toolPricey]; p["callable"] != false || p["why_not"] != "frames_price_over_cap" {
+	if p := hits["tool:"+toolPricey]; p["callable"] != false || p["why_not"] != "tool_price_over_cap" {
 		t.Fatalf("pricey hit %v", p)
 	}
-	frames := page["frames"].(map[string]any)
+	frames := page["tools"].(map[string]any)
 	if frames["max_price"] != "0.02" || frames["allow_unvetted"] != false {
 		t.Fatalf("frames block %v", frames)
 	}
@@ -324,21 +324,21 @@ func TestFramesSearch(t *testing.T) {
 		t.Fatalf("frames_tools: %d %q %v", vetted, search, err)
 	}
 	// The same search, normalized, is served from the cache.
-	page, err = h.framesRead(testSubject, "frames_search", `{"query":"weather forecast"}`)
+	page, err = h.framesRead(testSubject, "tools_search", `{"query":"weather forecast"}`)
 	if s, _, _, _ := api.count(); err != nil || s != 1 || page["cached"] != true {
 		t.Fatalf("cache: %d searches, %v", s, err)
 	}
 	// A flagged description is withheld.
 	_, _ = h.db.Exec("INSERT INTO x402_summary_screens(hash,verdict,screened_at) VALUES(?,?,?)", sha256Of([]byte(cleanText("Forecast by city. "+injectedTxt, framesDescriptionRunes))), "flag", h.now)
-	page, _ = h.framesRead(testSubject, "frames_search", `{"query":"weather forecast"}`)
-	if ok := hitsByID(page)["frames:"+toolOK]; ok["description"] != "" || ok["summary_status"] != "withheld" {
+	page, _ = h.framesRead(testSubject, "tools_search", `{"query":"weather forecast"}`)
+	if ok := hitsByID(page)["tool:"+toolOK]; ok["description"] != "" || ok["summary_status"] != "withheld" {
 		t.Fatalf("flagged description served: %v", ok)
 	}
 	// Bad arguments never reach Frames.
 	for _, args := range []string{`{}`, `{"query":""}`, `{"query":"a","queries":["b","c"]}`, `{"queries":["one"]}`, `{"queries":["a","b","c","d","e"]}`,
 		`{"queries":["a","A"]}`, `{"query":"` + strings.Repeat("x", 201) + `"}`, `{"query":"a\u0000b"}`, `{"query":"a","capability":"Bad!"}`,
 		`{"query":"a","max_price":"-1"}`, `{"query":"a","surprise":1}`} {
-		if _, err := h.framesReadErr("frames_search", args); errCode(err) != "invalid_service_data" {
+		if _, err := h.framesReadErr("tools_search", args); errCode(err) != "invalid_service_data" {
 			t.Errorf("%s: %v", args, err)
 		}
 	}
@@ -346,22 +346,22 @@ func TestFramesSearch(t *testing.T) {
 		t.Fatalf("bad arguments reached Frames: %d searches", s)
 	}
 	// One tool: its live probe, host and schema.
-	tool, err := h.framesRead(testSubject, "frames_tool", `{"id":"frames:`+toolOK+`"}`)
-	if err != nil || tool["live"] != true || tool["host"] != "weather.example.com" || tool["callable"] != true || tool["price_usd"] != "0.002" || tool["frames_vetted"] != true {
-		t.Fatalf("frames_tool %v %v", tool, err)
+	tool, err := h.framesRead(testSubject, "tools_get", `{"id":"tool:`+toolOK+`"}`)
+	if err != nil || tool["live"] != true || tool["host"] != "weather.example.com" || tool["callable"] != true || tool["price_usd"] != "0.002" || tool["vetted"] != true {
+		t.Fatalf("tools_get %v %v", tool, err)
 	}
-	if tool, _ := h.framesRead(testSubject, "frames_tool", `{"id":"`+toolDead+`"}`); tool["callable"] != false || tool["why_not"] != "frames_unavailable" {
+	if tool, _ := h.framesRead(testSubject, "tools_get", `{"id":"`+toolDead+`"}`); tool["callable"] != false || tool["why_not"] != "tool_unavailable" {
 		t.Fatalf("dead tool %v", tool)
 	}
-	if tool, _ := h.framesRead(testSubject, "frames_tool", `{"id":"`+toolDenied+`"}`); tool["callable"] != false || tool["why_not"] != "frames_denied" {
+	if tool, _ := h.framesRead(testSubject, "tools_get", `{"id":"`+toolDenied+`"}`); tool["callable"] != false || tool["why_not"] != "tool_denied" {
 		t.Fatalf("denied tool %v", tool)
 	}
-	for _, id := range []string{`"../tools/usage"`, `"frames:a/b"`, `"frames:"`, `""`} {
-		if _, err := h.framesReadErr("frames_tool", `{"id":`+id+`}`); errCode(err) != "invalid_service_data" {
-			t.Errorf("frames_tool %s: %v", id, err)
+	for _, id := range []string{`"../tools/usage"`, `"tool:a/b"`, `"tool:"`, `""`} {
+		if _, err := h.framesReadErr("tools_get", `{"id":`+id+`}`); errCode(err) != "invalid_service_data" {
+			t.Errorf("tools_get %s: %v", id, err)
 		}
 	}
-	if _, err := h.framesRead(testSubject, "frames_tool", `{"id":"mpp.unknown.tool"}`); errCode(err) != "x402_unknown_resource" {
+	if _, err := h.framesRead(testSubject, "tools_get", `{"id":"mpp.unknown.tool"}`); errCode(err) != "x402_unknown_resource" {
 		t.Fatalf("unknown tool: %v", err)
 	}
 	if api.badAuth != 0 {
@@ -372,13 +372,13 @@ func TestFramesSearch(t *testing.T) {
 func TestFramesCall(t *testing.T) {
 	h, api := newFramesHarness(t, "", `{"domains":["evil.example.net"]}`)
 	call := func(tool, body string, maxCost int64) (map[string]any, error) {
-		return h.call(testSubject, `{"resource":"frames:`+tool+`","body":`+body+`}`, maxCost)
+		return h.call(testSubject, `{"resource":"tool:`+tool+`","body":`+body+`}`, maxCost)
 	}
 	// No search has returned it yet: unknown, and nothing reserved.
 	if _, err := call(toolOK, `{"city":"Paris"}`, creditsFor(20000)); errCode(err) != "x402_unknown_resource" {
 		t.Fatalf("before a search: %v", err)
 	}
-	if _, err := h.framesRead(testSubject, "frames_search", `{"query":"weather"}`); err != nil {
+	if _, err := h.framesRead(testSubject, "tools_search", `{"query":"weather"}`); err != nil {
 		t.Fatal(err)
 	}
 	out, err := call(toolOK, `{"city":"Paris"}`, creditsFor(20000))
@@ -387,7 +387,7 @@ func TestFramesCall(t *testing.T) {
 	}
 	r := resultOf(out)
 	raw, _ := json.Marshal(r)
-	if r["resource"] != "frames:"+toolOK || r["bundler"] != "frames" || !strings.Contains(string(raw), `"temp_c":14`) || strings.Contains(string(raw), "balance_credits") || strings.Contains(string(raw), framesKey) {
+	if r["resource"] != "tool:"+toolOK || r["bundler"] != "tools" || !strings.Contains(string(raw), `"temp_c":14`) || strings.Contains(string(raw), "balance_credits") || strings.Contains(string(raw), framesKey) {
 		t.Fatalf("result %s", raw)
 	}
 	calls := api.lastInvoke["calls"].([]any)
@@ -402,7 +402,7 @@ func TestFramesCall(t *testing.T) {
 	var amount, version int64
 	var resource string
 	_ = h.db.QueryRow("SELECT amount, allowlist_version, resource FROM x402_payments").Scan(&amount, &version, &resource)
-	if amount != 2000 || version != -1 || resource != "frames:"+toolOK {
+	if amount != 2000 || version != -1 || resource != "tool:"+toolOK {
 		t.Fatalf("payment %d %d %s", amount, version, resource)
 	}
 	// The caller's max_cost bounds what Frames may be paid.
@@ -417,10 +417,10 @@ func TestFramesCall(t *testing.T) {
 		want  string
 		probe bool
 	}{
-		{toolUnvet, creditsFor(20000), "frames_unvetted", false},       // refused in the transaction
-		{toolDenied, creditsFor(20000), "frames_denied", true},         // its host is denied
-		{toolDead, creditsFor(20000), "frames_unavailable", true},      // not live
-		{toolPricey, creditsFor(20000), "frames_price_over_cap", true}, // probe price over max_price
+		{toolUnvet, creditsFor(20000), "tool_unvetted", false},       // refused in the transaction
+		{toolDenied, creditsFor(20000), "tool_denied", true},         // its host is denied
+		{toolDead, creditsFor(20000), "tool_unavailable", true},      // not live
+		{toolPricey, creditsFor(20000), "tool_price_over_cap", true}, // probe price over max_price
 		{toolOK, creditsFor(1000), "price_exceeds_max", true},          // probe $0.002, ceiling $0.001
 		{toolOK, 50, "price_exceeds_max", false},                       // not even the base
 		{"a/b", creditsFor(20000), "invalid_service_data", false},
@@ -444,12 +444,12 @@ func TestFramesCall(t *testing.T) {
 	}
 	api.invokeStatus = 0
 	// A retry with the same request key is never paid or charged twice.
-	if _, err := h.callKey(testSubject, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000), "id:retry-1"); err != nil {
+	if _, err := h.callKey(testSubject, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000), "id:retry-1"); err != nil {
 		t.Fatal(err)
 	}
 	charged := h.charged()
 	_, _, _, n := api.count()
-	if _, err := h.callKey(testSubject, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000), "id:retry-1"); err == nil {
+	if _, err := h.callKey(testSubject, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000), "id:retry-1"); err == nil {
 		t.Fatal("a second call with the same request key ran")
 	}
 	if _, _, _, n2 := api.count(); n2 != n || h.charged() != charged {
@@ -468,42 +468,42 @@ func TestFramesCallAllowUnvettedAndCaps(t *testing.T) {
 	// tool_daily 0.02: one tool reserves 0.02 (its max_price) a call, so the
 	// second call of the day finds the tool's budget spent.
 	h, api := newFramesHarness(t, `,"allow_unvetted":true,"max_price":"0.02","open_daily":"0.05","tool_daily":"0.02"`, "")
-	if _, err := h.framesRead(testSubject, "frames_search", `{"queries":["weather","forecast"]}`); err != nil {
+	if _, err := h.framesRead(testSubject, "tools_search", `{"queries":["weather","forecast"]}`); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(api.lastSearch["queries"]) != "[weather forecast]" {
 		t.Fatalf("queries %v", api.lastSearch)
 	}
 	api.charged = "20" // Frames bills the whole budget: nothing is settled lower
-	if _, err := h.call(testSubject, `{"resource":"frames:`+toolUnvet+`"}`, creditsFor(20000)); err != nil {
+	if _, err := h.call(testSubject, `{"resource":"tool:`+toolUnvet+`"}`, creditsFor(20000)); err != nil {
 		t.Fatalf("allow_unvetted: %v", err)
 	}
-	if _, err := h.call(testSubject, `{"resource":"frames:`+toolUnvet+`"}`, creditsFor(20000)); errCode(err) != "x402_cap_reached" {
+	if _, err := h.call(testSubject, `{"resource":"tool:`+toolUnvet+`"}`, creditsFor(20000)); errCode(err) != "x402_cap_reached" {
 		t.Fatalf("tool_daily: %v", err)
 	}
-	if _, err := h.call(testSubject, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000)); err != nil {
+	if _, err := h.call(testSubject, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000)); err != nil {
 		t.Fatal(err)
 	}
 	// open_daily 0.05: 0.04 spent, a third tool's 0.02 would pass it.
 	api.probes[toolDenied] = `{"id":"` + toolDenied + `","live":true,"price_usd":0.001,"payable":true}`
-	if _, err := h.call(testSubject, `{"resource":"frames:`+toolDenied+`"}`, creditsFor(20000)); errCode(err) != "x402_cap_reached" {
+	if _, err := h.call(testSubject, `{"resource":"tool:`+toolDenied+`"}`, creditsFor(20000)); errCode(err) != "x402_cap_reached" {
 		t.Fatalf("open_daily: %v", err)
 	}
 	page := h.resources(`{}`)
-	if today := page["today"].(map[string]any); today["frames_spent"] != "0.04" || today["frames_remaining"] != "0.01" {
+	if today := page["today"].(map[string]any); today["tools_spent"] != "0.04" || today["tools_remaining"] != "0.01" {
 		t.Fatalf("today %v", today)
 	}
-	if caps := page["caps"].(map[string]any); caps["frames_tool_daily"] != "0.02" {
+	if caps := page["caps"].(map[string]any); caps["tools_per_tool_daily"] != "0.02" {
 		t.Fatalf("caps %v", caps)
 	}
 }
 
 func TestFramesDenyCategory(t *testing.T) {
 	h, _ := newFramesHarness(t, "", `{"categories":["weather"]}`)
-	if _, err := h.framesRead(testSubject, "frames_search", `{"query":"weather"}`); err != nil {
+	if _, err := h.framesRead(testSubject, "tools_search", `{"query":"weather"}`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.call(testSubject, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000)); errCode(err) != "frames_denied" {
+	if _, err := h.call(testSubject, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000)); errCode(err) != "tool_denied" {
 		t.Fatalf("denied category: %v", err)
 	}
 }
@@ -511,18 +511,18 @@ func TestFramesDenyCategory(t *testing.T) {
 func TestFramesUpstreamFailures(t *testing.T) {
 	h, api := newFramesHarness(t, "", "")
 	api.searchStatus = http.StatusInternalServerError
-	if _, err := h.framesRead(testSubject, "frames_search", `{"query":"weather"}`); errCode(err) != "upstream_failed" {
+	if _, err := h.framesRead(testSubject, "tools_search", `{"query":"weather"}`); errCode(err) != "upstream_failed" {
 		t.Fatalf("search 500: %v", err)
 	}
 	api.searchStatus = http.StatusTooManyRequests
-	if _, err := h.framesRead(testSubject, "frames_search", `{"query":"weather"}`); errCode(err) != "upstream_busy" {
+	if _, err := h.framesRead(testSubject, "tools_search", `{"query":"weather"}`); errCode(err) != "upstream_busy" {
 		t.Fatalf("search 429: %v", err)
 	}
 	// The global bound on upstream requests a minute.
 	h.engine.cfg.ReadsPerMinute = 1 << 20
 	api.searchStatus = 0
 	for i := range framesUpstreamPerMinute + 1 {
-		_, err := h.framesRead(testSubject, "frames_search", fmt.Sprintf(`{"query":"q%d"}`, i))
+		_, err := h.framesRead(testSubject, "tools_search", fmt.Sprintf(`{"query":"q%d"}`, i))
 		if err != nil {
 			if errCode(err) != "request_rate" || i < framesUpstreamPerMinute-2 {
 				t.Fatalf("search %d: %v", i, err)
@@ -536,17 +536,17 @@ func TestFramesUpstreamFailures(t *testing.T) {
 func TestFramesAnonymous(t *testing.T) {
 	anon := allowance.Subject{ID: "anon:net-1"}
 	h, _ := newFramesHarness(t, "", "")
-	if _, err := h.framesRead(testSubject, "frames_search", `{"query":"weather"}`); err != nil {
+	if _, err := h.framesRead(testSubject, "tools_search", `{"query":"weather"}`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.callKey(anon, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000), "id:anon-call-000001"); errCode(err) != "anonymous_not_allowed" {
+	if _, err := h.callKey(anon, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000), "id:anon-call-000001"); errCode(err) != "anonymous_not_allowed" {
 		t.Fatalf("unsigned with anonymous off: %v", err)
 	}
 	h, _ = newFramesHarness(t, `,"anonymous":true`, "")
-	if _, err := h.framesRead(anon, "frames_search", `{"query":"weather"}`); err != nil {
+	if _, err := h.framesRead(anon, "tools_search", `{"query":"weather"}`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.callKey(anon, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000), "id:anon-call-000002"); err != nil {
+	if _, err := h.callKey(anon, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000), "id:anon-call-000002"); err != nil {
 		t.Fatalf("unsigned frames call: %v", err)
 	}
 	if _, err := h.callKey(anon, `{"resource":"price"}`, creditsFor(20000), "id:anon-call-000003"); errCode(err) != "anonymous_not_allowed" {
@@ -554,7 +554,7 @@ func TestFramesAnonymous(t *testing.T) {
 	}
 	m, _ := h.engine.Registry().Lookup("x402")
 	call, _ := m.Describe().method("call")
-	if !call.Anonymous || !strings.Contains(call.AnonymousNote, "frames:") {
+	if !call.Anonymous || !strings.Contains(call.AnonymousNote, "tool:") {
 		t.Fatalf("call method %+v", call)
 	}
 	if staticCall, _ := (&x402{}).Describe().method("call"); staticCall.Anonymous {
@@ -593,7 +593,7 @@ func TestFramesCallDrawsTheAllowance(t *testing.T) {
 		}
 		return b
 	}
-	if _, err := h.framesRead(testSubject, "frames_search", `{"query":"weather"}`); err != nil {
+	if _, err := h.framesRead(testSubject, "tools_search", `{"query":"weather"}`); err != nil {
 		t.Fatal(err)
 	}
 	signed, anon := testSubject, allowance.Subject{ID: "anon:net-2"}
@@ -603,12 +603,12 @@ func TestFramesCallDrawsTheAllowance(t *testing.T) {
 			t.Fatalf("%s starts with %+v", s.ID, before)
 		}
 		// Refused before any payment (Frames has not vetted it): nothing spent.
-		if _, err := h.callKey(s, `{"resource":"frames:`+toolUnvet+`"}`, creditsFor(20000), "id:"+s.ID+"-refused-0001"); errCode(err) != "frames_unvetted" {
+		if _, err := h.callKey(s, `{"resource":"tool:`+toolUnvet+`"}`, creditsFor(20000), "id:"+s.ID+"-refused-0001"); errCode(err) != "tool_unvetted" {
 			t.Fatalf("%s unvetted: %v", s.ID, err)
 		}
 		// Frames refuses the call (4xx): refunded.
 		api.invokeStatus = http.StatusBadRequest
-		if _, err := h.callKey(s, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000), "id:"+s.ID+"-4xx-000001"); errCode(err) != "upstream_failed" {
+		if _, err := h.callKey(s, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000), "id:"+s.ID+"-4xx-000001"); errCode(err) != "upstream_failed" {
 			t.Fatalf("%s 4xx: %v", s.ID, err)
 		}
 		api.invokeStatus = 0
@@ -616,14 +616,14 @@ func TestFramesCallDrawsTheAllowance(t *testing.T) {
 			t.Fatalf("%s: a refused call spent the allowance: %+v -> %+v", s.ID, before, b)
 		}
 		key := "id:" + s.ID + "-paid-00001"
-		if _, err := h.callKey(s, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000), key); err != nil {
+		if _, err := h.callKey(s, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000), key); err != nil {
 			t.Fatalf("%s: %v", s.ID, err)
 		}
 		after := balance(s)
 		if after.Used-before.Used != creditsFor(2000) || before.Remaining-after.Remaining != creditsFor(2000) {
 			t.Fatalf("%s: spent %d of the allowance, want %d", s.ID, after.Used-before.Used, creditsFor(2000))
 		}
-		if _, err := h.callKey(s, `{"resource":"frames:`+toolOK+`"}`, creditsFor(20000), key); err == nil {
+		if _, err := h.callKey(s, `{"resource":"tool:`+toolOK+`"}`, creditsFor(20000), key); err == nil {
 			t.Fatalf("%s: the retry ran again", s.ID)
 		}
 		if b := balance(s); b.Used != after.Used {

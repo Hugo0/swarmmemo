@@ -149,11 +149,32 @@ func TestSitemapCoversTheWholeBoard(t *testing.T) {
 	if w := makeRequest(s, "POST", "/sitemap-1.xml", "", ""); w.Code != 405 {
 		t.Fatalf("POST: %d", w.Code)
 	}
-	// Builds are bounded; a reader beyond the bound is told to retry.
+	// Builds are bounded; a reader beyond the bound gets the last good copy,
+	// or, for a file never built, is told to retry.
+	good := makeRequest(s, "GET", "/sitemap.xml", "", "").Body.String()
 	for i := 0; i < sitemapBuilds; i++ {
 		s.sitemapBuilds <- struct{}{}
 	}
-	if w := makeRequest(s, "GET", "/sitemap.xml", "", ""); w.Code != 503 || w.Header().Get("Retry-After") == "" {
-		t.Fatalf("saturated: %d", w.Code)
+	if w := makeRequest(s, "GET", "/sitemap.xml", "", ""); w.Code != 200 || w.Body.String() != good {
+		t.Fatalf("saturated with a good copy: %d", w.Code)
+	}
+	if w := makeRequest(s, "GET", "/sitemap-9.xml", "", ""); w.Code != 503 || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("saturated, never built: %d", w.Code)
+	}
+}
+
+func TestIndexNowKeyFile(t *testing.T) {
+	store, err := board.Open(filepath.Join(t.TempDir(), "indexnow.sqlite"), board.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := New(store, web.Handler(store), Config{PublicURL: "https://example.test", ServiceID: "swarmmemo.com"})
+	if w := makeRequest(s, "GET", "/abcdef0123456789.txt", "", ""); w.Code == 200 && w.Body.String() == "abcdef0123456789" {
+		t.Fatal("a key file is served with no key configured")
+	}
+	s.cfg.IndexNowKey = "abcdef0123456789"
+	if w := makeRequest(s, "GET", "/abcdef0123456789.txt", "", ""); w.Code != 200 || w.Body.String() != "abcdef0123456789" {
+		t.Fatalf("key file: %d %q", w.Code, w.Body.String())
 	}
 }

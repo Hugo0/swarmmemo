@@ -237,28 +237,28 @@ CREATE INDEX IF NOT EXISTS x402_payments_day ON x402_payments(day,account);
 const X402VettingNote = "Only vetted resources are callable (callable: true): pinned ones, and open ones the operator vetted, by hand or by its auto-vet rule when one is set (the resources read states it as catalogue.auto_vet, e.g. CDP-curated or at least 5 payers in 30 days, at most 0.02 USDC, not adult or gambling; a resource the rule vetted keeps its summary screened like a candidate's). Candidates (vetted: false) are Bazaar listings whose summary is shown only once it passed SwarmMemo's text screen (summary_status screened; pending or withheld leaves it empty); calling one is refused with x402_unvetted, and nothing is paid or charged. On a vetted open resource, a call whose payment was sent but that got no answer is charged (answer encoding \"unanswered\")."
 
 // X402Line is the aggregator in one line, on every discovery surface.
-const X402Line = "Pay-per-call APIs from the x402 Bazaar and the Frames catalogue of about 37,000 paid tools (search, scraping, crypto and market data, and more), billed to your credit; no wallet. Pinned, operator-vetted and Frames-vetted tools can be called; other Bazaar listings are searchable candidates."
+const X402Line = "About 37,000 pay-per-call APIs (search, scraping, crypto and market data, and more), billed to your credit; no wallet, no account. Vetted tools can be called; other listings are searchable candidates."
 
 func (x *x402) Describe() Descriptor {
 	call := Method{Name: "call", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: X402ArgsMax, Price: Price{Base: 100, PerByte: 1, PerKiB: 100},
-		Line:           "Call one vetted resource (callable: true in the resources read) or a Frames tool by its frames: id; charged when the paid response arrives, even one too large to keep.",
-		PriceNote:      "base + per_byte × the API's price in micro-USD + per_kib per 1,024 of it, in credit; the resources and frames_search reads list each one's max_cost",
+		Line:           "Call one vetted resource (callable: true in the resources read) or a tool by its tool: id; charged when the paid response arrives, even one too large to keep.",
+		PriceNote:      "base + per_byte × the API's price in micro-USD + per_kib per 1,024 of it, in credit; the resources and tools_search reads list each one's max_cost",
 		ExampleMaxCost: 5000,
 		Args: []Arg{
-			{"resource", "string", true, "an id from the resources read with callable: true, or frames:TOOL_ID from frames_search"},
+			{"resource", "string", true, "an id from the resources read with callable: true, or tool:TOOL_ID from tools_search"},
 			{"query", "object", false, "string values for the resource's query names"},
-			{"body", "object", false, "a JSON body, for resources that take one; a Frames tool's arguments"},
+			{"body", "object", false, "a JSON body, for resources that take one; a tool's arguments"},
 		},
 		Example: json.RawMessage(`{"resource":"RESOURCE_ID","query":{"q":"agent message boards"}}`)}
 	if x.fr != nil && x.fr.cfg.Anonymous {
 		// Without a key: Frames tools only (CheckAnonymous).
-		call.Anonymous, call.AnonymousLabel = true, "Frames tools"
-		call.AnonymousNote = "frames: resources only, at most " + formatUnits(x.fr.cfg.MaxPrice, 6) + " USD a call"
+		call.Anonymous, call.AnonymousLabel = true, "SwarmMemo tools"
+		call.AnonymousNote = "tool: resources only, at most " + formatUnits(x.fr.cfg.MaxPrice, 6) + " USD a call"
 		call.AnonymousRate = AnonRate{CallerPerMinute: 2, CallerPerDay: 20, AllPerMinute: 10, AllPerDay: 500}
 	}
 	return Descriptor{
 		ID:      "x402",
-		Summary: `Pay-per-call APIs from the x402 Bazaar and the Frames catalogue without a wallet or an account: SwarmMemo pays the API (in USDC for x402, from its Frames account for Frames tools) and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. Only vetted resources are callable: pinned ones and open ones the operator vetted. Other Bazaar listings are candidates (vetted: false), listed with their summaries only once those passed SwarmMemo's text screen (summary_status), still untrusted upstream text, and refused with x402_unvetted until the operator vets them. Method "frames_search" searches the Frames catalogue (about 37,000 paid tools) and "frames_tool" reads one tool's live price and input schema; call a hit with resource "frames:TOOL_ID" and the tool's arguments as body. Tools Frames vetted (frames_vetted: true), priced at most frames.max_price, are callable.`,
+		Summary: `Pay-per-call APIs without a wallet or an account: SwarmMemo pays the API and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. Only vetted resources are callable: pinned ones and open ones the operator vetted. Other Bazaar listings are candidates (vetted: false), listed with their summaries only once those passed SwarmMemo's text screen (summary_status), still untrusted upstream text, and refused with x402_unvetted until the operator vets them. Method "tools_search" searches SwarmMemo tools (about 37,000 paid APIs) and "tools_get" reads one tool's live price and input schema; call a hit with resource "tool:TOOL_ID" and the tool's arguments as body. Vetted tools (vetted: true), priced at most tools.max_price, are callable.`,
 		Title:   "x402 relay", Topic: "Tools across the internet",
 		Line: X402Line,
 		Limits: []Limit{
@@ -266,7 +266,7 @@ func (x *x402) Describe() Descriptor {
 			{"x402_query_value_bytes", X402QueryValueBytes, "bytes", "One query value"},
 			{"x402_response_bytes", X402ResponseBytesMax, "bytes", "Response body returned"},
 			{"x402_resources_page", X402PageMax, "", "Resources in one resources read"},
-			{"frames_search_hits", framesHitsMax, "", "Hits in one frames_search read"},
+			{"tools_search_hits", framesHitsMax, "", "Hits in one tools_search read"},
 		},
 		Mode: Remote,
 		Methods: []Method{
@@ -280,7 +280,7 @@ func (x *x402) Describe() Descriptor {
 					{"cursor", "string", false, "next_cursor from the previous page"},
 				},
 				Example: json.RawMessage(`{"query":"web search","max_price":"0.01"}`)},
-			{Name: "frames_search", ArgsMax: 1024, Line: "Search the Frames catalogue (about 37,000 paid tools) by intent: each hit with its frames: id, description, price, input schema, whether Frames vetted it and whether it is callable.",
+			{Name: "tools_search", ArgsMax: 1024, Line: "Search SwarmMemo tools (about 37,000 paid APIs) by intent: each hit with its tool: id, description, price, input schema, whether it is vetted and whether it is callable.",
 				Args: []Arg{
 					{"query", "string", false, "what the tool should do, up to 200 bytes; or queries"},
 					{"queries", "array", false, "2 to 4 phrasings of the same need, searched together"},
@@ -288,11 +288,11 @@ func (x *x402) Describe() Descriptor {
 					{"max_price", "string", false, `the most one call may cost, in USD, e.g. "0.01"`},
 				},
 				Example: json.RawMessage(`{"query":"weather forecast for a city"}`)},
-			{Name: "frames_tool", ArgsMax: 512, Line: "Read one Frames tool: its live price, input schema, host and whether it is callable now.",
+			{Name: "tools_get", ArgsMax: 512, Line: "Read one tool: its live price, input schema, host and whether it is callable now.",
 				Args: []Arg{
-					{"id", "string", true, "a frames: id from frames_search"},
+					{"id", "string", true, "a tool: id from tools_search"},
 				},
-				Example: json.RawMessage(`{"id":"frames:TOOL_ID"}`)},
+				Example: json.RawMessage(`{"id":"tool:TOOL_ID"}`)},
 		},
 		MaxDuration:   x402MaxDuration,
 		StoredBodyMax: X402StoredBodyBytes,
@@ -693,7 +693,7 @@ func (x *x402) out(p x402Plan, status int, receipt *x402Receipt) x402Out {
 	if p.res.Open || p.res.dynamic {
 		version = 0
 	}
-	return x402Out{Resource: p.res.ID, Bundler: p.res.Bundler, AllowlistVersion: version, Status: status, Payment: receipt, TextIsUntrusted: true}
+	return x402Out{Resource: p.res.ID, Bundler: publicBundler(p.res.Bundler), AllowlistVersion: version, Status: status, Payment: receipt, TextIsUntrusted: true}
 }
 
 var mimeTypeRE = regexp.MustCompile(`^[a-z0-9!#$&^_.+-]{1,64}/[a-z0-9!#$&^_.+-]{1,64}$`)
@@ -777,7 +777,7 @@ func (x *x402) unanswered(c Call, p x402Plan, pay *payment, code string) Result 
 // caps; and what is left of today's budget.
 func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawMessage, error) {
 	if x.cfg == nil || c.Method != "resources" {
-		return nil, refusal("service_unavailable") // frames_search and frames_tool are ReadRemote's
+		return nil, refusal("service_unavailable") // tools_search and tools_get are ReadRemote's
 	}
 	s, err := parseX402Search(c.Args, x.cfg.Decimals)
 	if err != nil {
@@ -801,7 +801,7 @@ func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 			query = []string{}
 		}
 		entry := map[string]any{
-			"id": r.ID, "bundler": r.Bundler, "category": r.Category, "summary": r.servedSummary(), "method": r.Method, "query": query, "body": r.Body,
+			"id": r.ID, "bundler": publicBundler(r.Bundler), "category": r.Category, "summary": r.servedSummary(), "method": r.Method, "query": query, "body": r.Body,
 			"max_price": formatUnits(m, x.cfg.Decimals), "max_cost": price.For(m), "max_response_bytes": r.MaxResponseBytes, "pinned": !r.Open,
 			"vetted": !r.Open || r.Vetted, "callable": x.callable(r),
 		}
@@ -830,13 +830,13 @@ func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 	frames := map[string]any{"enabled": false}
 	if x.fr != nil {
 		frames = x.framesSummary(price)
-		caps["frames_daily"], caps["frames_tool_daily"], caps["frames_max_price"] = cu(x.fr.cfg.OpenDaily), cu(x.fr.cfg.ToolDaily), cu(x.fr.cfg.MaxPrice)
-		today["frames_spent"], today["frames_remaining"] = cu(framesSpent), cu(max(0, x.fr.cfg.OpenDaily-framesSpent))
+		caps["tools_daily"], caps["tools_per_tool_daily"], caps["tools_max_price"] = cu(x.fr.cfg.OpenDaily), cu(x.fr.cfg.ToolDaily), cu(x.fr.cfg.MaxPrice)
+		today["tools_spent"], today["tools_remaining"] = cu(framesSpent), cu(max(0, x.fr.cfg.OpenDaily-framesSpent))
 	}
 	body := map[string]any{
 		"allowlist_version": x.cfg.AllowlistVersion, "network": x.cfg.Network, "asset": x.cfg.Asset.String(), "asset_name": x.cfg.AssetName,
 		"paused": x.paused(), "price": price, "resources": resources, "matched": page.matched, "categories": page.categories,
-		"bundlers": x.readyBundlers(), "catalogue": catalogue, "frames": frames, "today": today, "caps": caps,
+		"bundlers": x.readyBundlers(), "catalogue": catalogue, "tools": frames, "today": today, "caps": caps,
 		"vetting": X402VettingNote,
 		// Open resources' summaries are upstream text (each is marked too).
 		"text_is_untrusted": true,
@@ -852,11 +852,20 @@ func (x *x402) readyBundlers() []string {
 	out := []string{}
 	for name, b := range x.bundlers {
 		if b.Ready() {
-			out = append(out, name)
+			out = append(out, publicBundler(name))
 		}
 	}
 	slices.Sort(out)
 	return out
+}
+
+// publicBundler is the name agents see for a bundler: a key-based vendor is
+// "tools", whoever provides it.
+func publicBundler(name string) string {
+	if name == X402Bundler {
+		return name
+	}
+	return "tools"
 }
 
 // FormatUnits is formatUnits, for pages that show relay amounts.

@@ -316,7 +316,7 @@ func serve() error {
 		}
 	}
 	identityChecks := os.Getenv("IDENTITY_CHECKS") == "true"
-	config := httpapi.Config{PublicURL: publicURL, IdentityChecks: identityChecks, ServiceID: env("SERVICE_ID", "swarmmemo.com"), AdminToken: admin, TrustLoopbackProxy: os.Getenv("TRUST_LOOPBACK_PROXY") == "true", AllowInsecureLocal: os.Getenv("ALLOW_INSECURE_LOCAL") == "true", PushDelivery: os.Getenv("WEBHOOK_DELIVERY") == "true", ArchiveDelaySeconds: archiveDelay, Version: version, Features: features}
+	config := httpapi.Config{PublicURL: publicURL, IdentityChecks: identityChecks, ServiceID: env("SERVICE_ID", "swarmmemo.com"), AdminToken: admin, TrustLoopbackProxy: os.Getenv("TRUST_LOOPBACK_PROXY") == "true", AllowInsecureLocal: os.Getenv("ALLOW_INSECURE_LOCAL") == "true", PushDelivery: os.Getenv("WEBHOOK_DELIVERY") == "true", ArchiveDelaySeconds: archiveDelay, Version: version, Features: features, IndexNowKey: indexNowKey(os.Getenv("INDEXNOW_KEY"))}
 	if referenceReader != nil {
 		config.References = referenceReader
 	}
@@ -360,6 +360,11 @@ func serve() error {
 		return e
 	}
 	// The operator's footer backlink, if any: deployment config, never in source.
+	if v := os.Getenv("GRAPH_UNIVERSE_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 5*time.Second && d <= time.Hour {
+			httpapi.GraphUniverseTTL = d
+		}
+	}
 	if e := web.SetFooterCredit(os.Getenv("FOOTER_CREDIT_URL")); e != nil {
 		return e
 	}
@@ -522,4 +527,18 @@ func number(key string, fallback int64) (int64, error) {
 		return 0, fmt.Errorf("%s must be a nonnegative integer", key)
 	}
 	return n, nil
+}
+
+// indexNowKey is INDEXNOW_KEY when it has IndexNow's shape (8 to 128 of
+// a-z, A-Z, 0-9 and -), otherwise "" (off).
+func indexNowKey(k string) string {
+	if len(k) < 8 || len(k) > 128 {
+		return ""
+	}
+	for _, c := range k {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+			return ""
+		}
+	}
+	return k
 }

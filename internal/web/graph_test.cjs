@@ -29,6 +29,15 @@ async function send(id, command) {
 const post = async (id, fields) => (await send(id, {operation: 'post', page: 'main', ...fields})).receipt.id;
 const json = async (path) => { const r = await fetch(origin + path, {headers: {Accept: 'application/json'}}); return [r, await r.json()]; };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// Node IDs are per universe generation and a page may have loaded a newer one
+// than the test searched: look the agent up in the page's own generation.
+async function locateIn(page, handle, key) {
+  const gen = await page.evaluate(() => window.__swarmgraph.gen());
+  const [, r] = await json(`/api/graph/search?q=${handle}&gen=${gen}`);
+  const hit = r.results && r.results.find((x) => x.key === key);
+  assert.ok(hit, 'the page\'s universe has ' + handle);
+  return hit;
+}
 
 (async () => {
   const stamp = Date.now().toString(36), since = Math.floor(Date.now() / 1000) - 2;
@@ -52,12 +61,15 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   for (const id of [a, b, c]) assert.ok(g.nodes.key.includes(id.fingerprint));
   // The universe is rebuilt at most every few minutes; search finds the new agents once it has them.
   let u, found;
-  for (let i = 0; i < 3 && !found; i++) {
+  // Under a full gate an earlier suite may have built it before these agents
+  // existed; the fixture runs with a short GRAPH_UNIVERSE_TTL, so poll.
+  for (let i = 0; i < 150 && !found; i++) {
     [, u] = await json('/api/graph/universe');
     [, found] = await json(`/api/graph/search?q=${b.handle}&gen=${u.generation}`);
     found = found.results && found.results.find((r) => r.key === b.fingerprint);
-    if (!found) await wait(500);
+    if (!found) await wait(1000);
   }
+  assert.ok(found, 'the universe never picked up the new agent');
   const universeText = JSON.stringify(u);
   for (const s of banned) assert.ok(!universeText.includes(s), '/api/graph/universe must not contain ' + s);
   assert.ok(u.datasets.some((d) => d.id === 'swarmmemo' && d.live), 'SwarmMemo is a live galaxy');
@@ -152,12 +164,22 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.ok(await page.locator('#graph-story').isVisible() && await inStage(page), 'the caption overlays the stage');
     assert.equal(await cta.isVisible(), false);
     // Under load frames are slow: wait for the zoom-in instead of a fixed delay.
-    let cam1 = await page.evaluate(() => window.__swarmgraph.camera());
-    for (let i = 0; i < 40 && !(cam1.z > cam0.z * 1.3); i++) { await wait(100); cam1 = await page.evaluate(() => window.__swarmgraph.camera()); }
-    assert.ok(cam1.z > cam0.z * 1.3, 'step 1 starts close on SwarmMemo: ' + JSON.stringify([cam0, cam1]));
-    await wait(2200);
-    const cam2 = await page.evaluate(() => window.__swarmgraph.camera());
-    assert.ok(cam2.z < cam1.z * 0.8, 'then pulls back to every dataset: ' + JSON.stringify([cam1, cam2]));
+    // How far step 1 zooms depends on how big SwarmMemo's galaxy is next to the
+    // fit view (a busy fixture makes it larger), so check the camera moved to a
+    // new view rather than a fixed zoom ratio.
+    const camMoved = (a, b) => Math.abs(Math.log(b.z / a.z)) > Math.log(1.2) || Math.hypot(b.x - a.x, b.y - a.y) * a.z > 80;
+    // Sample the camera through the whole fly-in and pull-back: under load both
+    // can finish between two fixed-delay reads.
+    const path = [];
+    for (let i = 0; i < 80; i++) {
+      path.push(await page.evaluate(() => window.__swarmgraph.camera()));
+      if (i >= 30 && !path[i].moving && path.some((c) => camMoved(cam0, c))) break;
+      await wait(100);
+    }
+    const cam1 = path.reduce((a, c) => (c.z > a.z ? c : a), path[0]);
+    const cam2 = path[path.length - 1];
+    assert.ok(path.some((c) => camMoved(cam0, c)), 'step 1 flies to SwarmMemo: ' + JSON.stringify([cam0, cam1]));
+    assert.ok(camMoved(cam1, cam2), 'then pulls back to every dataset: ' + JSON.stringify([cam1, cam2]));
     await page.locator('#graph-story-next').click();
     assert.equal(await page.locator('#graph-story-step').textContent(), '2 / 7');
     await wait(1700);
@@ -219,13 +241,13 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     // Under a slow gate other suites keep posting, so the graph may have been rebuilt
     // twice since load; the page then offers a reload instead of results.
     await page.locator('#graph-search-input').fill(b.handle);
-    await page.locator('#graph-search-results button').first().waitFor({timeout: 10000});
+    await page.locator('#graph-search-results button').first().waitFor({timeout: 45000});
     if (/Reload to search/.test(await page.locator('#graph-search-results button').first().textContent())) {
       await page.locator('#graph-search-results button').first().click();
       await page.waitForFunction(() => window.__swarmgraph && window.__swarmgraph.ready, null, {timeout: 30000});
       if (await page.locator('#graph-story').isVisible()) await page.locator('#graph-story-close').click();
       await page.locator('#graph-search-input').fill(b.handle);
-      await page.locator('#graph-search-results button').first().waitFor({timeout: 10000});
+      await page.locator('#graph-search-results button').first().waitFor({timeout: 45000});
     }
     await page.locator('#graph-search-results button').first().click();
     await page.waitForFunction((h) => document.getElementById('graph-panel-title').textContent === h && window.__swarmgraph.panel()?.count > 0, b.handle, {timeout: 15000});
@@ -345,7 +367,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll during the tour');
     await phone.locator('#graph-story-close').tap();
     assert.ok(await phone.locator('#graph-about').isVisible(), 'the walkthrough button is on the map on a phone');
-    await phone.evaluate((f) => window.__swarmgraph.goTo(f.id, f.path), found);
+    await phone.evaluate((f) => window.__swarmgraph.goTo(f.id, f.path), await locateIn(phone, b.handle, b.fingerprint));
     await phone.waitForFunction(() => window.__swarmgraph.panel()?.count > 0, null, {timeout: 15000});
     // A bottom sheet within reach, and the map above it, not under it.
     const [panelBox, stageBox] = await Promise.all([phone.locator('#graph-panel').boundingBox(), phone.locator('#graph-stage').boundingBox()]);
@@ -360,11 +382,24 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     await phone.touchscreen.tap(canvasBox.x + empty[0], canvasBox.y + empty[1]);
     await phone.waitForFunction(() => document.getElementById('graph-panel').hidden, null, {timeout: 5000});
     await wait(800);
-    canvasBox = await phone.locator('#graph-canvas canvas').boundingBox();
-    const at = await phone.evaluate((id) => window.__swarmgraph.screen([id])[0], target.id);
-    assert.equal(await phone.evaluate(([x, y]) => window.__swarmgraph.pick(x, y), [at[0] + 9, at[1] + 4]), target.id, 'a tap 9px off still picks the agent');
-    await phone.touchscreen.tap(canvasBox.x + at[0] + 9, canvasBox.y + at[1] + 4);
-    await phone.waitForFunction((h) => document.getElementById('graph-panel-title').textContent === h && window.__swarmgraph.panel()?.count > 0, b.handle, {timeout: 15000});
+    // Under load the map can still settle (or a universe refresh can land)
+    // between reading the agent's position and the tap: re-read and retap.
+    let opened = false, seen = '';
+    for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+      canvasBox = await phone.locator('#graph-canvas canvas').boundingBox();
+      // A busy fixture can put a neighbour on one side; tap whichever side
+      // a few pixels off still belongs to the agent.
+      const off = await phone.evaluate(([fp]) => {
+        const s = window.__swarmgraph, id = s.find((n) => n.key === fp)[0], [x, y] = s.screen([id])[0];
+        for (const [dx, dy] of [[9, 4], [-9, 4], [4, 9], [-4, -9], [9, -4], [-9, -4], [6, 6]]) if (s.pick(x + dx, y + dy) === id) return [x + dx, y + dy];
+        return {miss: true, id, at: [x, y], centre: s.pick(x, y), cam: s.camera()};
+      }, [b.fingerprint]);
+      assert.ok(off && !off.miss, 'a tap 9px off still picks the agent: ' + JSON.stringify(off));
+      await phone.touchscreen.tap(canvasBox.x + off[0], canvasBox.y + off[1]);
+      opened = await phone.waitForFunction((h) => document.getElementById('graph-panel-title').textContent === h && window.__swarmgraph.panel()?.count > 0, b.handle, {timeout: 10000}).then(() => true, () => false);
+      if (!opened) seen = await phone.evaluate(() => JSON.stringify({title: document.getElementById('graph-panel-title').textContent, hidden: document.getElementById('graph-panel').hidden, count: window.__swarmgraph.panel()?.count}));
+    }
+    assert.ok(opened, 'a tap a few pixels off opens the agent: ' + seen);
     assert.match(await phone.locator('#graph-sheet').textContent(), /Rooms it posted in[\s\S]*Who it talked to/);
     assert.ok(await noHorizontalScroll(phone), 'no horizontal scroll with the sheet open');
     // A pinch zooms; it selects nothing, and the finger left behind does not make the map jump.
@@ -385,7 +420,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.ok(Math.hypot(after1.x - mid.x, after1.y - mid.y) * after1.z < 6, 'the remaining finger pans on from where the pinch ended');
     await wait(300);
     assert.ok(await phone.locator('#graph-panel').isHidden(), 'a pinch never opens a sheet');
-    await phone.evaluate((f) => window.__swarmgraph.goTo(f.id, f.path), found);
+    await phone.evaluate((f) => window.__swarmgraph.goTo(f.id, f.path), await locateIn(phone, b.handle, b.fingerprint));
     await phone.waitForFunction(() => window.__swarmgraph.panel()?.count > 0, null, {timeout: 15000});
     await phone.locator('#graph-summarize').click();
     await phone.waitForFunction(() => /They met/.test(document.getElementById('graph-summary-text').textContent));

@@ -138,6 +138,17 @@ func canonicalFieldOrder() string {
 
 func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 	p := r.URL.Path
+	// IndexNow (Bing, Yandex and others) checks that a submitter owns the
+	// site by fetching /KEY.txt; the key is public by design.
+	if k := s.cfg.IndexNowKey; k != "" && p == "/"+k+".txt" {
+		if !readMethod(r) {
+			methodError(w)
+			return true
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprint(w, k)
+		return true
+	}
 	if content, name, ok := publicclients.ReadPath(p); ok {
 		if !readMethod(r) {
 			methodError(w)

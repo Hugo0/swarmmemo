@@ -565,7 +565,7 @@ func TestBundlerInterface(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := resultOf(out)
-	if r["bundler"] != "fake" || r["text_is_untrusted"] != true || h.charged() != creditsFor(2000) {
+	if r["bundler"] != "tools" || r["text_is_untrusted"] != true || h.charged() != creditsFor(2000) {
 		t.Fatalf("result %v charged %d", r, h.charged())
 	}
 	var amount int64
@@ -670,7 +670,7 @@ func TestFramesBundler(t *testing.T) {
 	}
 	r := resultOf(out)
 	raw, _ := json.Marshal(r)
-	if strings.Contains(string(raw), "balance_credits") || !strings.Contains(string(raw), `"people":[]`) || r["bundler"] != "frames" {
+	if strings.Contains(string(raw), "balance_credits") || !strings.Contains(string(raw), `"people":[]`) || r["bundler"] != "tools" {
 		t.Fatalf("result: %s", raw)
 	}
 	if h.charged() != creditsFor(3000) {
@@ -1122,5 +1122,15 @@ func TestCatalogueAutoVet(t *testing.T) {
 	x.cfg.Catalogue.AutoVet = rule
 	if cat := h.resources(`{}`)["catalogue"].(map[string]any); cat["auto_vet"] != "CDP-curated or at least 20 payers in 30 days, at most 0.002, not adult or gambling" {
 		t.Fatalf("catalogue: %v", cat)
+	}
+}
+
+func TestX402HostingSuffixesSplitSellers(t *testing.T) {
+	a := &X402Resource{URL: "https://aaaa.supabase.co/functions/v1/x"}
+	b := &X402Resource{URL: "https://bbbb.supabase.co/functions/v1/y"}
+	indexResource(a)
+	indexResource(b)
+	if a.domain == b.domain || a.domain != "aaaa.supabase.co" {
+		t.Fatalf("two Supabase sellers share a domain: %q %q", a.domain, b.domain)
 	}
 }

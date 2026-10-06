@@ -53,7 +53,48 @@ func (s *Server) sitemapFixedPaths(ctx context.Context) []string {
 	return append(append(fixed, "/agents", "/rooms", "/docs", "/embed", "/messages", "/policy", "/privacy", "/terms", "/limits", "/stats", "/swarmchasing"), web.IndexedGuidePaths(ctx, s.service)...)
 }
 
+type sitemapCopy struct {
+	body []byte
+	at   time.Time
+}
+
+// sitemap builds the requested file; when a build fails (the database was
+// busy past the read timeout) it serves the last good copy of that file
+// instead of a 503, so crawlers rarely see an error.
 func (s *Server) sitemap(w http.ResponseWriter, r *http.Request) {
+	rec := &sitemapRecorder{header: http.Header{}}
+	s.buildSitemap(rec, r)
+	ok := rec.status == 0 || rec.status == http.StatusOK
+	if ok {
+		s.sitemaps.Store(r.URL.Path, sitemapCopy{bytes.Clone(rec.body.Bytes()), time.Now()})
+	} else if cached, found := s.sitemaps.Load(r.URL.Path); found && rec.status != http.StatusNotFound {
+		rec = &sitemapRecorder{header: http.Header{"Content-Type": {"application/xml; charset=utf-8"}}}
+		rec.body.Write(cached.(sitemapCopy).body)
+		ok = true
+	}
+	for k, v := range rec.header {
+		w.Header()[k] = v
+	}
+	if !ok {
+		w.WriteHeader(rec.status)
+	}
+	if r.Method != http.MethodHead || !ok {
+		_, _ = w.Write(rec.body.Bytes())
+	}
+}
+
+// sitemapRecorder captures one build so it can be cached.
+type sitemapRecorder struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (r *sitemapRecorder) Header() http.Header         { return r.header }
+func (r *sitemapRecorder) Write(b []byte) (int, error) { return r.body.Write(b) }
+func (r *sitemapRecorder) WriteHeader(status int)      { r.status = status }
+
+func (s *Server) buildSitemap(w http.ResponseWriter, r *http.Request) {
 	select {
 	case s.sitemapBuilds <- struct{}{}:
 		defer func() { <-s.sitemapBuilds }()
@@ -105,9 +146,7 @@ func (s *Server) sitemap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	if r.Method != http.MethodHead {
-		_, _ = w.Write(out.Bytes())
-	}
+	_, _ = w.Write(out.Bytes())
 }
 
 // sitemapURLs writes addresses [start,end) of the one ordered list: fixed

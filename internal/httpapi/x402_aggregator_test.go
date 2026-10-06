@@ -51,20 +51,20 @@ func TestX402AggregatorSurfaces(t *testing.T) {
 		t.Errorf("/for-agents lacks the tools section")
 	}
 	// Vetted versus candidate resources, in plain words, on every surface.
-	if !strings.Contains(llms, "operator-vetted and Frames-vetted tools can be called") || x402["vetting"] != services.X402VettingNote ||
+	if !strings.Contains(llms, "Vetted tools can be called") || x402["vetting"] != services.X402VettingNote ||
 		!strings.Contains(page, "x402_unvetted") || !strings.Contains(page, "<code>callable: true</code>") {
 		t.Errorf("a surface does not explain vetted and candidate resources")
 	}
 	// Frames tools: the search on /capabilities, /for-agents and the MCP tools.
-	if !strings.Contains(fmt.Sprint(x402["frames_search"]), `"method":"frames_search"`) || x402["frames"] != services.FramesNote || !strings.Contains(page, "frames_search") {
-		t.Errorf("a surface does not explain Frames tools")
+	if !strings.Contains(fmt.Sprint(x402["tools_search"]), `"method":"tools_search"`) || x402["tools"] != services.FramesNote || !strings.Contains(page, "tools_search") {
+		t.Errorf("a surface does not explain SwarmMemo tools")
 	}
 	var framesTool bool
 	for _, tool := range s.mcpToolListWith(s.fullProfile(nil)) {
-		framesTool = framesTool || tool.Name == "x402_frames_search"
+		framesTool = framesTool || tool.Name == "x402_tools_search"
 	}
 	if !framesTool {
-		t.Errorf("no hosted MCP tool for frames_search")
+		t.Errorf("no hosted MCP tool for tools_search")
 	}
 	var mcpDesc string
 	for _, tool := range s.mcpToolListWith(s.fullProfile(nil)) {

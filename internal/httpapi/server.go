@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"sync"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -27,6 +28,8 @@ import (
 
 type Config struct {
 	PublicURL           string
+	// IndexNowKey, when set, is served at /KEY.txt for IndexNow submissions.
+	IndexNowKey string
 	ServiceID           string
 	AdminToken          string
 	TrustLoopbackProxy  bool
@@ -85,6 +88,7 @@ type Server struct {
 	referenceInflight chan struct{}
 	readers           *readerCounter
 	sitemapBuilds     chan struct{}
+	sitemaps          sync.Map // path → sitemapCopy
 	referrers         *referrerCounter
 
 	// mcpAssistantHandler serves web.AssistantMCPPath, the profile without

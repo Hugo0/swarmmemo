@@ -42,8 +42,8 @@ func TestX402UnconfiguredIsUnavailable(t *testing.T) {
 	}
 	fails(t, s, svcCall(keyFor(1), "x402", "call", map[string]any{"resource": "anything"}, 1<<20, "x1"), "service_unavailable")
 	fails(t, s, svcRead(keyFor(1), "x402", "resources", map[string]any{}), "service_unavailable")
-	fails(t, s, svcRead(nil, "x402", "frames_search", map[string]any{"query": "weather"}), "service_unavailable")
-	fails(t, s, svcCall(keyFor(1), "x402", "call", map[string]any{"resource": "frames:mpp.weather"}, 1<<20, "x2"), "service_unavailable")
+	fails(t, s, svcRead(nil, "x402", "tools_search", map[string]any{"query": "weather"}), "service_unavailable")
+	fails(t, s, svcCall(keyFor(1), "x402", "call", map[string]any{"resource": "tool:mpp.weather"}, 1<<20, "x2"), "service_unavailable")
 	if len(svcSpends(t, s, meter)) != 0 {
 		t.Fatal("nothing may be charged")
 	}

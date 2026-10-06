@@ -2,10 +2,10 @@ package services
 
 // The open Frames catalogue: with bundlers.frames.open, every tool of the
 // Frames API (~37k paid tools behind one account) is callable through x402
-// without an allowlist entry, as resource "frames:TOOL_ID".
+// without an allowlist entry, as resource "tool:TOOL_ID".
 //
-// Finding a tool. service.read x402 frames_search passes the agent's query
-// to Frames' free search and answers a trimmed hit list; frames_tool reads
+// Finding a tool. service.read x402 tools_search passes the agent's query
+// to Frames' free search and answers a trimmed hit list; tools_get reads
 // one tool (Frames' free descriptor and probe). Both need the network, so
 // they run after the command's transaction has committed (RemoteReader),
 // under the engine's per-caller read limit, a cache (searches 10 minutes,
@@ -53,7 +53,10 @@ import (
 )
 
 // FramesPrefix starts the resource id of an open Frames tool.
-const FramesPrefix = "frames:"
+const FramesPrefix = "tool:"
+
+// framesLegacyPrefix is the prefix 1.29.6 served; ids that carry it still resolve.
+const framesLegacyPrefix = "frames:"
 
 // Open Frames bounds.
 const (
@@ -556,11 +559,11 @@ func framesToolRow(ctx context.Context, q allowance.Querier, tool string, now in
 func (f *framesState) whyNot(vetted bool, category, host string, price int64, priced bool) string {
 	switch {
 	case !vetted && !f.cfg.AllowUnvetted:
-		return "frames_unvetted"
+		return "tool_unvetted"
 	case f.denied(category, host):
-		return "frames_denied"
+		return "tool_denied"
 	case priced && price > f.cfg.MaxPrice:
-		return "frames_price_over_cap"
+		return "tool_price_over_cap"
 	}
 	return ""
 }
@@ -609,16 +612,16 @@ func (x *x402) verdictsFor(ctx context.Context, texts []string) map[string]strin
 }
 
 // framesCallNote is how a hit is called.
-const framesCallNote = `service.call x402 {"schema":1,"method":"call","args":{"resource":ID,"body":THE_TOOL_ARGUMENTS},"max_cost":MAX_COST}; body follows input_schema (frames_tool reads a tool's live schema and price).`
+const framesCallNote = `service.call x402 {"schema":1,"method":"call","args":{"resource":ID,"body":THE_TOOL_ARGUMENTS},"max_cost":MAX_COST}; body follows input_schema (tools_get reads a tool's live schema and price).`
 
 // FramesNote says what the open Frames catalogue is, for the resources read
 // and /capabilities.
-const FramesNote = `Frames tools: service.read x402 frames_search finds tools across the Frames catalogue (about 37,000 paid APIs) for free; call a hit by its id ("frames:TOOL_ID") with service.call x402 call, its arguments as body. Callable are tools Frames vetted (frames_vetted: true), priced at most frames.max_price, not on the operator's denylist; a call is refused before any payment when the tool is not live or asks more, and charged what Frames bills.`
+const FramesNote = `SwarmMemo tools: service.read x402 tools_search finds about 37,000 paid APIs for free; call a hit by its id ("tool:TOOL_ID") with service.call x402 call, its arguments as body. Callable are vetted tools (vetted: true), priced at most tools.max_price, not on the operator's denylist; a call is refused before any payment when the tool is not live or asks more, and charged what the tool bills.`
 
-// ReadRemote serves frames_search and frames_tool after commit; every other
+// ReadRemote serves tools_search and tools_get after commit; every other
 // read is Read's.
 func (x *x402) ReadRemote(ctx context.Context, q allowance.Querier, c Call) (func(context.Context) (json.RawMessage, error), error) {
-	if c.Method != "frames_search" && c.Method != "frames_tool" {
+	if c.Method != "tools_search" && c.Method != "tools_get" {
 		return nil, nil
 	}
 	if x.cfg == nil || x.fr == nil || !x.fr.b.Ready() {
@@ -628,7 +631,7 @@ func (x *x402) ReadRemote(ctx context.Context, q allowance.Querier, c Call) (fun
 	if c.Prices != nil {
 		price = c.Prices["x402.call"]
 	}
-	if c.Method == "frames_tool" {
+	if c.Method == "tools_get" {
 		tool, err := framesToolArg(c.Args)
 		if err != nil {
 			return nil, err
@@ -681,10 +684,10 @@ func (x *x402) framesSearchRead(ctx context.Context, s framesSearch, price Price
 		}
 		why := f.whyNot(h.Vetted, h.Category, hosts[h.ID], h.Price, h.Priced)
 		if why == "" && h.Live != nil && !*h.Live {
-			why = "frames_unavailable"
+			why = "tool_unavailable"
 		}
 		e := map[string]any{"id": FramesPrefix + h.ID, "title": h.Title, "description": desc, "description_truncated": h.Truncated, "summary_status": status,
-			"capabilities": h.Capabilities, "category": h.Category, "frames_vetted": h.Vetted, "callable": why == "", "max_cost": price.For(f.cfg.MaxPrice)}
+			"capabilities": h.Capabilities, "category": h.Category, "vetted": h.Vetted, "callable": why == "", "max_cost": price.For(f.cfg.MaxPrice)}
 		if why != "" {
 			e["why_not"] = why
 		}
@@ -704,7 +707,7 @@ func (x *x402) framesSearchRead(ctx context.Context, s framesSearch, price Price
 	}
 	return marshalNoEscape(map[string]any{
 		"hits": hits, "matched": len(hits), "partial": page.partial, "cached": cached,
-		"frames": x.framesSummary(price), "call": framesCallNote,
+		"tools": x.framesSummary(price), "call": framesCallNote,
 		// Titles, descriptions and schemas are Frames' listings' text.
 		"text_is_untrusted": true,
 	}), nil
@@ -749,13 +752,13 @@ type framesToolArgs struct {
 	ID string `json:"id"`
 }
 
-// framesToolArg is frames_tool's tool id, with or without "frames:".
+// framesToolArg is tools_get's tool id, with or without "frames:".
 func framesToolArg(raw json.RawMessage) (string, error) {
 	var a framesToolArgs
 	if err := StrictObject(raw, &a); err != nil {
 		return "", err
 	}
-	tool := strings.TrimPrefix(a.ID, FramesPrefix)
+	tool := strings.TrimPrefix(strings.TrimPrefix(a.ID, FramesPrefix), framesLegacyPrefix)
 	if !framesToolRE.MatchString(tool) {
 		return "", refusal("invalid_service_data")
 	}
@@ -894,7 +897,7 @@ func (x *x402) framesToolRead(ctx context.Context, tool string, row framesTool, 
 	}
 	out := map[string]any{"id": FramesPrefix + tool, "title": d.title, "description": desc, "summary_status": status, "capabilities": d.capabilities,
 		"category": d.category, "host": d.host, "live": p.live, "payable": p.payable, "max_cost": price.For(x.fr.cfg.MaxPrice),
-		"frames": x.framesSummary(price), "call": framesCallNote, "text_is_untrusted": true}
+		"tools": x.framesSummary(price), "call": framesCallNote, "text_is_untrusted": true}
 	priceNow, priced := p.price, p.priced
 	if !priced {
 		priceNow, priced = d.price, d.priced
@@ -910,16 +913,16 @@ func (x *x402) framesToolRead(ctx context.Context, tool string, row framesTool, 
 	}
 	var why string
 	if known {
-		out["frames_vetted"] = row.vetted
+		out["vetted"] = row.vetted
 		why = x.fr.whyNot(row.vetted, d.category, d.host, priceNow, priced)
 	} else {
 		// Frames' vetting flag comes with search hits: a tool no recent
 		// search returned cannot be called until one does.
-		out["frames_vetted"] = nil
-		why = "frames_search_first"
+		out["vetted"] = nil
+		why = "tools_search_first"
 	}
 	if why == "" && (!p.live || !p.payable) {
-		why = "frames_unavailable"
+		why = "tool_unavailable"
 	}
 	out["callable"] = why == ""
 	if why != "" {
@@ -1015,7 +1018,7 @@ func (x *x402) framesGate(ctx context.Context, c Call, p x402Plan) error {
 		return refusal(why)
 	}
 	if x.fr.denied(d.category, "") {
-		return refusal("frames_denied")
+		return refusal("tool_denied")
 	}
 	pr, err := x.framesProbeOf(ctx, tool)
 	if err != nil {
@@ -1023,9 +1026,9 @@ func (x *x402) framesGate(ctx context.Context, c Call, p x402Plan) error {
 	}
 	switch {
 	case !pr.live || !pr.payable:
-		return refusal("frames_unavailable")
+		return refusal("tool_unavailable")
 	case pr.priced && pr.price > x.fr.cfg.MaxPrice:
-		return refusal("frames_price_over_cap")
+		return refusal("tool_price_over_cap")
 	case pr.priced && pr.price > p.max:
 		return refusal("price_exceeds_max")
 	}
@@ -1066,7 +1069,10 @@ func (x *x402) CheckAnonymous(c Call) error {
 // framesResource reports whether a resource id names an open Frames tool,
 // and the tool.
 func framesResource(id string) (string, bool) {
-	return strings.CutPrefix(id, FramesPrefix)
+	if tool, ok := strings.CutPrefix(id, FramesPrefix); ok {
+		return tool, true
+	}
+	return strings.CutPrefix(id, framesLegacyPrefix)
 }
 
 // Background screening.

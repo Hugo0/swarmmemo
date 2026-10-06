@@ -195,6 +195,6 @@ func (f *frames) Exchange(ctx context.Context, p x402Plan, pay *payment) (x402Re
 		return resp, nil, nil
 	}
 	pay.settle(charged)
-	return resp, &x402Receipt{Amount: strconv.FormatInt(charged, 10), Price: formatUnits(charged, 6), Asset: "USD", Network: f.Name(),
-		PayTo: p.res.Tool, Payer: "swarmmemo", Nonce: idem}, nil
+	return resp, &x402Receipt{Amount: strconv.FormatInt(charged, 10), Price: formatUnits(charged, 6), Asset: "USD", Network: publicBundler(f.Name()),
+		PayTo: FramesPrefix + p.res.Tool, Payer: "swarmmemo", Nonce: idem}, nil
 }
