@@ -62,6 +62,10 @@ type Work struct {
 	ResultAvailable   bool        `json:"result_available"`
 	AttemptGrantID    string      `json:"attempt_grant_id,omitempty"`
 	Reward            *WorkReward `json:"reward,omitempty"`
+	// Reviewer, when set at create, renders the verdict (accept or reject)
+	// instead of the requester; ReviewerFee is the credit held for it.
+	Reviewer    *AgentRef   `json:"reviewer,omitempty"`
+	ReviewerFee *WorkReward `json:"reviewer_fee,omitempty"`
 }
 
 type WorkAck struct {
@@ -94,12 +98,14 @@ type workData struct {
 	Generation, Title string
 	Capabilities      []string
 	Reward            int64
+	Reviewer          string
+	ReviewerFee       int64
 }
 
 func parseWorkData(raw string, create bool) (workData, error) {
 	var d workData
 	invalid := func() (workData, error) {
-		return workData{}, problem(400, "invalid_work_data", "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits.")
+		return workData{}, problem(400, "invalid_work_data", "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits and a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee.")
 	}
 	if len(raw) > 8192 || !utf8.ValidString(raw) {
 		return invalid()
@@ -141,6 +147,16 @@ func parseWorkData(raw string, create bool) (workData, error) {
 				return invalid()
 			}
 			err = json.Unmarshal(value, &d.Reward)
+		case "reviewer":
+			if !create {
+				return invalid()
+			}
+			err = json.Unmarshal(value, &d.Reviewer)
+		case "reviewer_fee":
+			if !create {
+				return invalid()
+			}
+			err = json.Unmarshal(value, &d.ReviewerFee)
 		default:
 			return invalid()
 		}
@@ -157,11 +173,16 @@ func parseWorkData(raw string, create bool) (workData, error) {
 	want := 2
 	if create {
 		want = 4
-		if seen["reward"] {
-			want = 5
+		for _, optional := range []string{"reward", "reviewer", "reviewer_fee"} {
+			if seen[optional] {
+				want++
+			}
 		}
 	}
 	if len(seen) != want || d.Schema != 1 || !workIDRE.MatchString(d.Generation) {
+		return invalid()
+	}
+	if seen["reviewer"] && !fingerprintRE.MatchString(d.Reviewer) {
 		return invalid()
 	}
 	if create {
@@ -170,6 +191,9 @@ func parseWorkData(raw string, create bool) (workData, error) {
 		}
 		if seen["reward"] && (d.Reward < 1 || d.Reward > WorkRewardMax) {
 			return workData{}, invalidWorkReward()
+		}
+		if seen["reviewer_fee"] && (!seen["reviewer"] || d.ReviewerFee < 1 || d.ReviewerFee > WorkRewardMax) {
+			return workData{}, invalidReviewerFee()
 		}
 		caps := map[string]bool{}
 		for _, cap := range d.Capabilities {
@@ -190,18 +214,25 @@ type workRow struct {
 	Result                                        string
 	Sequence                                      int64
 	AttemptGrantID                                string
+	Reviewer                                      string // the reviewer's account, or ''
 }
 
-const workColumns = `w.id,w.requester,w.title,w.capabilities,w.state,w.generation,w.created_at,w.updated_at,w.deadline,w.fence,w.worker,w.claim_expires_at,w.result_id,w.history_seq,w.attempt_grant_id`
+const workColumns = `w.id,w.requester,w.title,w.capabilities,w.state,w.generation,w.created_at,w.updated_at,w.deadline,w.fence,w.worker,w.claim_expires_at,w.result_id,w.history_seq,w.attempt_grant_id,w.reviewer`
+
+func (w *workRow) fields() []any {
+	return []any{&w.ID, &w.Requester, &w.Title, &w.Caps, &w.State, &w.Generation, &w.Created, &w.Updated, &w.Deadline, &w.Fence, &w.Worker, &w.ClaimExpires, &w.Result, &w.Sequence, &w.AttemptGrantID, &w.Reviewer}
+}
 
 func scanWork(scan interface{ Scan(...any) error }) (workRow, error) {
 	var w workRow
-	err := scan.Scan(&w.ID, &w.Requester, &w.Title, &w.Caps, &w.State, &w.Generation, &w.Created, &w.Updated, &w.Deadline, &w.Fence, &w.Worker, &w.ClaimExpires, &w.Result, &w.Sequence, &w.AttemptGrantID)
+	err := scan.Scan(w.fields()...)
 	return w, err
 }
 
 // The same expression is evaluated by transitions, projections and directory filters.
-const workEffectiveSQL = `CASE WHEN w.state IN ('accepted','cancelled') THEN w.state WHEN w.deadline<=? THEN 'expired' WHEN w.generation<>? THEN 'recovery_required' WHEN w.state='claimed' AND w.claim_expires_at<=? THEN 'open' ELSE w.state END`
+// A submitted result its named reviewer let reach the deadline is review_lapsed,
+// otherwise the same as expired.
+const workEffectiveSQL = `CASE WHEN w.state IN ('accepted','cancelled') THEN w.state WHEN w.deadline<=? THEN (CASE WHEN w.state='submitted' AND w.reviewer<>'' THEN 'review_lapsed' ELSE 'expired' END) WHEN w.generation<>? THEN 'recovery_required' WHEN w.state='claimed' AND w.claim_expires_at<=? THEN 'open' ELSE w.state END`
 
 func effectiveWork(ctx context.Context, tx *sql.Tx, id, generation string, now int64) (string, error) {
 	var state string
@@ -269,6 +300,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 	}
 	w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, c.MessageID))
+	verdict := false // a reviewer's accept or reject of a submitted result
 	if c.Operation == "work.create" {
 		if err == nil {
 			return Result{}, problem(409, "work_exists", "This message already has a work lifecycle.")
@@ -285,6 +317,9 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if d.Reward != 0 && root.Kind != "request" {
 			return Result{}, invalidWorkReward()
 		}
+		if d.ReviewerFee != 0 && root.Kind != "request" {
+			return Result{}, invalidReviewerFee()
+		}
 		ttl := c.TTL
 		if ttl == 0 {
 			ttl = WorkDefaultTTL
@@ -294,6 +329,11 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		caps, _ := json.Marshal(d.Capabilities)
 		w = workRow{ID: c.MessageID, Requester: a.account, Title: d.Title, Caps: string(caps), State: "open", Generation: generation, Created: now, Updated: now, Deadline: now + ttl}
+		if d.Reviewer != "" {
+			if w.Reviewer, err = workReviewer(ctx, tx, a, root.Room, d.Reviewer); err != nil {
+				return Result{}, err
+			}
+		}
 	} else {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Result{}, workNotFound()
@@ -321,10 +361,19 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if !allowed {
 			return Result{}, problem(409, "work_state_conflict", "This transition is not allowed in the current effective state.")
 		}
+		verdict = w.Reviewer != "" && state == "submitted" && (c.Operation == "work.accept" || c.Operation == "work.reject")
+		// With a named reviewer the requester gives up the verdict: it can
+		// cancel only while the work is open, before a worker relies on it.
+		if c.Operation == "work.cancel" && w.Reviewer != "" && state != "open" {
+			return Result{}, problem(409, "work_state_conflict", "Work with a reviewer can be cancelled only while it is open, before a claim.")
+		}
 		switch c.Operation {
 		case "work.claim":
 			if a.account == w.Requester {
 				return Result{}, problem(403, "work_forbidden", "The requester cannot claim their own work.")
+			}
+			if a.account == w.Reviewer {
+				return Result{}, problem(403, "work_forbidden", "The reviewer cannot claim work it reviews.")
 			}
 		case "work.renew", "work.submit":
 			if a.account != w.Worker {
@@ -332,6 +381,13 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 			if a.grant != nil && w.AttemptGrantID != a.grant.ID {
 				return Result{}, delegationError("delegation_forbidden")
+			}
+		case "work.accept", "work.reject":
+			if w.Reviewer != "" && a.account != w.Reviewer {
+				return Result{}, reviewerError("not_the_reviewer")
+			}
+			if w.Reviewer == "" && a.account != w.Requester {
+				return Result{}, problem(403, "work_forbidden", "Only the requester's continuous account may perform this transition.")
 			}
 		default:
 			if a.account != w.Requester {
@@ -407,7 +463,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, err
 	}
 	w.Sequence++
-	_, err = tx.ExecContext(ctx, `INSERT INTO works(id,requester,title,capabilities,state,generation,created_at,updated_at,deadline,fence,worker,claim_expires_at,result_id,history_seq) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,generation=excluded.generation,updated_at=excluded.updated_at,fence=excluded.fence,worker=excluded.worker,claim_expires_at=excluded.claim_expires_at,result_id=excluded.result_id,history_seq=excluded.history_seq`, w.ID, w.Requester, w.Title, w.Caps, w.State, w.Generation, w.Created, w.Updated, w.Deadline, w.Fence, w.Worker, w.ClaimExpires, w.Result, w.Sequence)
+	_, err = tx.ExecContext(ctx, `INSERT INTO works(id,requester,title,capabilities,state,generation,created_at,updated_at,deadline,fence,worker,claim_expires_at,result_id,history_seq,reviewer) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,generation=excluded.generation,updated_at=excluded.updated_at,fence=excluded.fence,worker=excluded.worker,claim_expires_at=excluded.claim_expires_at,result_id=excluded.result_id,history_seq=excluded.history_seq`, w.ID, w.Requester, w.Title, w.Caps, w.State, w.Generation, w.Created, w.Updated, w.Deadline, w.Fence, w.Worker, w.ClaimExpires, w.Result, w.Sequence, w.Reviewer)
 	if err != nil {
 		return Result{}, err
 	}
@@ -416,21 +472,36 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	// The reward moves with the transition, in its transaction: held on
 	// create, paid on accept, released on cancel. Reject reopens the work
-	// and keeps it held.
+	// and keeps it held. A reviewer fee is held on create too, paid to the
+	// reviewer on its first verdict (accept or reject), released on cancel.
 	switch c.Operation {
 	case "work.create":
-		if d.Reward != 0 {
-			err = s.holdWorkReward(ctx, tx, a, w, d.Reward, now)
-		}
-	case "work.accept", "work.cancel":
-		r, e := loadWorkReward(ctx, tx, w.ID)
+		err = s.holdWorkEscrows(ctx, tx, a, w, d.Reward, d.ReviewerFee, now)
+	case "work.accept", "work.reject", "work.cancel":
+		r, e := loadWorkReward(ctx, tx, workRewardsTable, w.ID)
 		if e != nil {
 			return Result{}, e
 		}
-		if c.Operation == "work.accept" {
-			err = s.payWorkReward(ctx, tx, r, w, now)
-		} else {
-			err = s.releaseWorkReward(ctx, tx, r, "cancelled", now)
+		f, e := loadWorkReward(ctx, tx, workReviewFeesTable, w.ID)
+		if e != nil {
+			return Result{}, e
+		}
+		switch c.Operation {
+		case "work.accept":
+			if r != nil && verdict {
+				r.Reviewer = a.id
+			}
+			if err = s.payWorkReward(ctx, tx, r, w.Worker, w.Result, now); err == nil && verdict {
+				err = s.payWorkReward(ctx, tx, f, w.Reviewer, "", now)
+			}
+		case "work.reject":
+			if verdict {
+				err = s.payWorkReward(ctx, tx, f, w.Reviewer, "", now)
+			}
+		default:
+			if err = s.releaseWorkReward(ctx, tx, r, "cancelled", now); err == nil {
+				err = s.releaseWorkReward(ctx, tx, f, "cancelled", now)
+			}
 		}
 	}
 	if err != nil {
@@ -473,7 +544,17 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 		}
 		p.Worker = &identity
 	}
-	if p.Reward, err = s.projectWorkReward(ctx, tx, w.ID); err != nil {
+	if w.Reviewer != "" {
+		identity, e := currentWorkIdentity(ctx, tx, w.Reviewer)
+		if e != nil {
+			return Work{}, e
+		}
+		p.Reviewer = &identity
+		if p.ReviewerFee, err = s.projectWorkReward(ctx, tx, workReviewFeesTable, w.ID); err != nil {
+			return Work{}, err
+		}
+	}
+	if p.Reward, err = s.projectWorkReward(ctx, tx, workRewardsTable, w.ID); err != nil {
 		return Work{}, err
 	}
 	if w.Result != "" {
@@ -522,7 +603,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if !utf8.ValidString(c.Query) || strings.ContainsRune(c.Query, 0) {
 		return Result{}, problem(400, "invalid_query", "Query must be valid UTF-8 without NUL.")
 	}
-	if c.Kind != "" && c.Kind != "open" && c.Kind != "claimed" && c.Kind != "submitted" && c.Kind != "accepted" && c.Kind != "cancelled" && c.Kind != "expired" && c.Kind != "recovery_required" {
+	if c.Kind != "" && c.Kind != "open" && c.Kind != "claimed" && c.Kind != "submitted" && c.Kind != "accepted" && c.Kind != "cancelled" && c.Kind != "expired" && c.Kind != "review_lapsed" && c.Kind != "recovery_required" {
 		return Result{}, problem(400, "invalid_work_state", "Unknown work state filter.")
 	}
 	// An agent's own page asks the same listing for the work it is part of, so the
@@ -564,9 +645,9 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		args = append(args, c.Query, c.Query)
 	}
 	if agentAccount != "" {
-		// Requested or worked: both are this agent's involvement in the work.
-		where += ` AND (w.requester=? OR w.worker=?)`
-		args = append(args, agentAccount, agentAccount)
+		// Requested, worked or reviewed: each is this agent's involvement in the work.
+		where += ` AND (w.requester=? OR w.worker=? OR w.reviewer=?)`
+		args = append(args, agentAccount, agentAccount, agentAccount)
 	}
 	args = append(args, limit+1)
 	rows, err := tx.QueryContext(ctx, `SELECT `+workColumns+` FROM works w JOIN events e ON e.id=w.id JOIN rooms r ON r.name=e.room WHERE `+where+` ORDER BY w.id LIMIT ?`, args...)
@@ -636,12 +717,19 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 		transitions = transitions[:limit]
 	}
 	r := Result{Data: map[string]any{"work_id": w.ID, "simulated": root.Kind == "simulation", "service_generation": generation, "transitions": transitions, "has_more": hasMore}}
-	reward, err := s.projectWorkReward(ctx, tx, w.ID)
+	reward, err := s.projectWorkReward(ctx, tx, workRewardsTable, w.ID)
 	if err != nil {
 		return Result{}, workReadError(err)
 	}
 	if reward != nil {
 		r.Data["reward"] = reward
+	}
+	fee, err := s.projectWorkReward(ctx, tx, workReviewFeesTable, w.ID)
+	if err != nil {
+		return Result{}, workReadError(err)
+	}
+	if fee != nil {
+		r.Data["reviewer_fee"] = fee
 	}
 	if hasMore {
 		r.NextCursor = s.encodeConversationCursor(conversationCursor{Domain: "work.history", Scope: w.ID, After: transitions[len(transitions)-1].Sequence})

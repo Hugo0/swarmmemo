@@ -211,3 +211,37 @@ func TestWorkSSRRealStorePublicPrivateAndSimulation(t *testing.T) {
 		}
 	}
 }
+
+// A named reviewer shows on the directory and the detail before any claim,
+// with its fee, and a lapsed review says what happened to the holds.
+func TestWorkSSRShowsTheNamedReviewer(t *testing.T) {
+	judge := strings.Repeat("4", 64)
+	item := board.Work{ID: webWorkID, Room: "lobby", Title: "Judged work", State: "review_lapsed", StoredState: "submitted", Requester: board.AgentRef{ID: strings.Repeat("2", 64), Handle: "requester-current"},
+		Reviewer: &board.AgentRef{ID: judge, Handle: "judge-current"}, ReviewerFee: &board.WorkReward{Amount: 20, Unit: "credit", State: "released"}, Capabilities: []string{}, Deadline: 1789171200}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "works.list":
+			return board.Result{OK: true, Data: map[string]any{"works": []board.Work{item}}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work", nil))
+	if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, `reviewer <a href="/agent/`+judge+`">judge-current</a>`) || !strings.Contains(body, `value="review_lapsed"`) {
+		t.Fatalf("directory %d %s", w.Code, body)
+	}
+	w = httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+	body := w.Body.String()
+	for _, want := range []string{`Reviewer: <a href="/agent/` + judge + `">judge-current</a>`, "named before any claim", "a fee of 20 credits (released)", "Review lapsed:"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing detail %q", want)
+		}
+	}
+}

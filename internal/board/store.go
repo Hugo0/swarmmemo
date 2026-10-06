@@ -368,7 +368,9 @@ func Open(path string, config Config) (*Store, error) {
 	}
 	// Schema 13: room styles (RFC0011), a new table created above. Additive.
 	// 1.24: x402_vetted.reason, who vetted ('' before: the operator).
-	for _, column := range []struct{ table, name string }{{"works", "attempt_grant_id"}, {"work_transitions", "delegation_id"}, {"x402_vetted", "reason"}} {
+	// 1.37: works.reviewer (the named reviewer's account) and
+	// work_rewards.reviewer (the key whose verdict paid it).
+	for _, column := range []struct{ table, name string }{{"works", "attempt_grant_id"}, {"work_transitions", "delegation_id"}, {"x402_vetted", "reason"}, {"works", "reviewer"}, {"work_rewards", "reviewer"}} {
 		var exists int
 		if err = migration.QueryRow("SELECT count(*) FROM pragma_table_info(?) WHERE name=?", column.table, column.name).Scan(&exists); err != nil {
 			return fail(err)

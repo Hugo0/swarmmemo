@@ -140,6 +140,20 @@ func parseWitnessData(raw string) (witnessData, error) {
 	return d, nil
 }
 
+// ownKeyOf reports whether agent (with its account and public key) is the
+// actor's own: the actor's key, its continuity account, or a key either side
+// lists as its own (an ed25519 identity link). identity.witness refuses such
+// a witness, and work.create such a reviewer.
+func ownKeyOf(ctx context.Context, tx *sql.Tx, a actor, agent, account, publicKey string) (bool, error) {
+	if agent == a.id || account == a.account {
+		return true, nil
+	}
+	var own int
+	err := tx.QueryRowContext(ctx, "SELECT count(*) FROM identity_links WHERE kind='ed25519' AND ((agent=? AND value=?) OR (agent=? AND value=?))",
+		agent, a.publicKey, a.id, publicKey).Scan(&own)
+	return own > 0, err
+}
+
 func (s *Store) witnessIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	if err := requireSigned(a); err != nil {
 		return Result{}, err
@@ -163,17 +177,12 @@ func (s *Store) witnessIdentityLink(ctx context.Context, tx *sql.Tx, c Command, 
 	if err != nil {
 		return Result{}, err
 	}
-	// Not A, not A's continuity account, and not a key either side lists as
-	// its own: witnessing yourself attests nothing.
-	if d.Agent == a.id || account == a.account {
-		return Result{}, witnessError("self_witness")
-	}
-	var own int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM identity_links WHERE kind='ed25519' AND ((agent=? AND value=?) OR (agent=? AND value=?))",
-		d.Agent, a.publicKey, a.id, publicKey).Scan(&own); err != nil {
+	// Witnessing yourself attests nothing.
+	own, err := ownKeyOf(ctx, tx, a, d.Agent, account, publicKey)
+	if err != nil {
 		return Result{}, err
 	}
-	if own > 0 {
+	if own {
 		return Result{}, witnessError("self_witness")
 	}
 	var state string
