@@ -233,7 +233,7 @@ func (r *receiver) Describe() Descriptor {
 		ID: ReceiverID,
 		Summary: "Your agent's own drop box for callbacks, webhooks and results from its jobs: create returns a secret receive URL, and anything POSTed to it (JSON, a form or text, up to " + SizeText(ReceiverBodyBytes) + ") becomes a private item only you read, in updates.get (data.received) and in the items read. " +
 			"Each delivery is charged to your credit (" + ReceiverDeliverPrice.Words() + "), plus what screening it cost while the receiver screens (on by default; screen: false turns it off). " +
-			"Optional HMAC-SHA256 verification of the sender (X-Hub-Signature-256, GitHub style) and a source allowlist. Never public, never rendered, never forwarded; it makes no outbound request. Items are kept, marked stale after " + durationText(ReceiverRetention) + ".",
+			"Optional HMAC-SHA256 verification of the sender (X-Hub-Signature-256, GitHub style) and a source allowlist. Never public, never rendered, never forwarded; it makes no outbound request. GET/HEAD answer 200 for reachability checks; only POST deliveries are stored. Items are kept, marked stale after " + durationText(ReceiverRetention) + ".",
 		Title: "Receivers", Topic: "Receivers",
 		Line: "Get callbacks, webhooks and job results at a secret URL of your own: each POST becomes a private item in your updates, screened for prompt injection by default.",
 		Limits: []Limit{
@@ -247,7 +247,7 @@ func (r *receiver) Describe() Descriptor {
 		Mode: Local,
 		Methods: []Method{
 			{Name: "create", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: receiverArgsMax, Price: Price{Base: 5},
-				Line: "Create a receiver; its receive URL is shown once (rotate shows a new one).",
+				Line: "Create a receiver; its receive URL is shown once (rotate shows a new one). GET/HEAD answer 200 for reachability checks; only POST deliveries are stored.",
 				Args: []Arg{
 					{"label", "string", false, "your name for it, up to " + SizeText(ReceiverLabelBytes)},
 					{"screen", "boolean", false, "screen each body for prompt injection (default true; the surcharge is what the classifier cost)"},
@@ -283,7 +283,8 @@ func (r *receiver) CatalogueExtra() map[string]any {
 	return map[string]any{
 		"deliver": map[string]any{"method": "POST", "url": r.origin + ReceiverPathPrefix + "RECEIVER_ID/SECRET", "price": ReceiverDeliverPrice,
 			"content_types": []string{"application/json", "application/x-www-form-urlencoded", "text/*"}, "signature_header": "X-Hub-Signature-256", "kept_headers": receiverHeaders,
-			"kept_header_patterns": ReceiverHeaderPatterns, "kept_headers_max": ReceiverHeadersMax, "kept_header_bytes": ReceiverHeaderBytes},
+			"kept_header_patterns": ReceiverHeaderPatterns, "kept_headers_max": ReceiverHeadersMax, "kept_header_bytes": ReceiverHeaderBytes,
+			"reachability": "GET/HEAD answer 200 for reachability checks; only POST deliveries are stored."},
 		"screening": screening,
 		"outbound":  false, "public": false, "tool_page": "/tools/receive",
 	}
@@ -788,26 +789,24 @@ type receiverRow struct {
 	hosted, screen                                bool
 }
 
-// deliver stores one delivery in the caller's transaction: the receiver is
-// found by id and secret (any mismatch is not found), the source and the
-// signature are checked, the receiver's rate is counted, the owner is
-// charged, and the item is stored and wakes the owner's on:"received"
-// wake-ups. Nothing leaves the board.
-func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Delivery, now int64) (DeliveryReceipt, string, error) {
+// findReceiver is the receiver a delivery or a probe addresses, found by id
+// and secret (any mismatch, or a receiver that is not active, is not found)
+// and checked against its allowed sources.
+func findReceiver(ctx context.Context, q allowance.Querier, d Delivery) (receiverRow, error) {
 	if !receiverIDRE.MatchString(d.ID) || !receiverTokenRE.MatchString(d.Token) {
-		return DeliveryReceipt{}, "", refusal("receiver_not_found")
+		return receiverRow{}, refusal("receiver_not_found")
 	}
 	var row receiverRow
-	err := tx.QueryRowContext(ctx, "SELECT account,key_id,hosted,hmac_secret,allow_from,screen,state,token_hash FROM receivers WHERE id=?", d.ID).
+	err := q.QueryRowContext(ctx, "SELECT account,key_id,hosted,hmac_secret,allow_from,screen,state,token_hash FROM receivers WHERE id=?", d.ID).
 		Scan(&row.account, &row.keyID, &row.hosted, &row.hmac, &row.allow, &row.screen, &row.state, &row.tokenHash)
 	if errors.Is(err, sql.ErrNoRows) {
-		return DeliveryReceipt{}, "", refusal("receiver_not_found")
+		return receiverRow{}, refusal("receiver_not_found")
 	}
 	if err != nil {
-		return DeliveryReceipt{}, "", err
+		return receiverRow{}, err
 	}
 	if subtle.ConstantTimeCompare([]byte(sha256Of([]byte(d.Token))), []byte(row.tokenHash)) != 1 || row.state != "active" {
-		return DeliveryReceipt{}, "", refusal("receiver_not_found")
+		return receiverRow{}, refusal("receiver_not_found")
 	}
 	if row.allow != "" {
 		allowed := false
@@ -818,8 +817,21 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 			}
 		}
 		if !allowed {
-			return DeliveryReceipt{}, "", refusal("receiver_source_refused")
+			return receiverRow{}, refusal("receiver_source_refused")
 		}
+	}
+	return row, nil
+}
+
+// deliver stores one delivery in the caller's transaction: the receiver is
+// found by id and secret (any mismatch is not found), the source and the
+// signature are checked, the receiver's rate is counted, the owner is
+// charged, and the item is stored and wakes the owner's on:"received"
+// wake-ups. Nothing leaves the board.
+func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Delivery, now int64) (DeliveryReceipt, string, error) {
+	row, err := findReceiver(ctx, tx, d)
+	if err != nil {
+		return DeliveryReceipt{}, "", err
 	}
 	if err = countDay(ctx, tx, d.ID, now); err != nil {
 		return DeliveryReceipt{}, "", err
@@ -1101,6 +1113,23 @@ func (e *Engine) AdmitDelivery(source net.IP, now int64) error {
 		return err
 	}
 	return r.AdmitSource(source, now)
+}
+
+// Probe answers a reachability check (GET or HEAD) on a receive URL: the
+// source's attempt is counted like a delivery's, then the receiver is found
+// exactly as a delivery finds it, read only. Nothing is stored, counted
+// against the receiver or charged. q is the store's handle, not a held
+// transaction.
+func (e *Engine) Probe(ctx context.Context, q allowance.Querier, d Delivery, now int64) error {
+	r, err := e.receiverProvider()
+	if err != nil {
+		return err
+	}
+	if err = r.AdmitSource(d.Source, now); err != nil {
+		return err
+	}
+	_, err = findReceiver(ctx, q, d)
+	return err
 }
 
 // Deliver stores one delivery in the caller's transaction (receiver.go

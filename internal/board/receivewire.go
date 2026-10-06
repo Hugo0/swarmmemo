@@ -44,6 +44,21 @@ func (s *Store) Receive(ctx context.Context, d services.Delivery) (services.Deli
 	return receipt, nil
 }
 
+// ReceiveProbe answers a reachability check (GET or HEAD) on a receive URL:
+// nil when a POST there would reach an active receiver, else the same
+// refusal a POST gets. Nothing is stored or charged; the source's attempt
+// counts against its rate like a delivery's.
+func (s *Store) ReceiveProbe(ctx context.Context, d services.Delivery) error {
+	e := s.services.engine
+	if e == nil {
+		return receiverError(&allowance.Err{Code: "receiver_not_found"})
+	}
+	if err := e.Probe(ctx, s.db, d, s.now().Unix()); err != nil {
+		return receiverError(err)
+	}
+	return nil
+}
+
 // ReceiverRevoke is the operator's revocation of a receiver (swarmmemo
 // receiver revoke ID REASON): its URL stops at once, its owner sees the
 // reason, and its items stay.

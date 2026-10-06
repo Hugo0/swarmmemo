@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"regexp"
 	"slices"
@@ -400,23 +399,10 @@ func normalizeX25519Key(raw string) (string, bool) {
 	return raw, true
 }
 
-// sealLinkProof is what an x25519 link stores as its proof: the agent's own
-// signed identity.link, so anyone can check the key without trusting this
-// service. The command is the proof; the link takes no separate one.
-type sealLinkProof struct {
-	Signature     string `json:"signature"`
-	SignedPayload string `json:"signed_payload"`
-}
-
-func encodeSealLinkProof(signature string, canonical []byte) string {
-	raw, _ := json.Marshal(sealLinkProof{Signature: signature, SignedPayload: string(canonical)})
-	return string(raw)
-}
-
-func decodeSealLinkProof(proof string) (sealLinkProof, bool) {
-	var p sealLinkProof
-	return p, json.Unmarshal([]byte(proof), &p) == nil && p.Signature != "" && p.SignedPayload != ""
-}
+// An x25519 link stores as its proof a linkRecord (identitylinks.go): the
+// agent's own signed identity.link, so anyone can check the key without
+// trusting this service. The command is the proof; the link takes no
+// separate one.
 
 // attachSealKey sets SealKey on an agent from its x25519 link, while the key
 // is current (a rotated-away key's sealing key seals nothing new).

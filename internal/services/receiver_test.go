@@ -621,3 +621,56 @@ func TestReceiverSecretsNeverLogged(t *testing.T) {
 		}
 	}
 }
+
+// A GET or HEAD reachability check finds the receiver exactly as a delivery
+// does, but stores, counts and charges nothing; it does count against the
+// source network's rate.
+func TestReceiverProbe(t *testing.T) {
+	r := newRecvRig(t, 1<<30, services.ScreenOff)
+	id, token := r.create("alice", map[string]any{})
+	limited, ltoken := r.create("alice", map[string]any{"allow_from": []string{"198.51.100.0/24"}})
+	probe := func(id, token, source string) error {
+		return r.e.Probe(context.Background(), r.db, services.Delivery{ID: id, Token: token, Source: net.ParseIP(source)}, r.now)
+	}
+	if err := probe(id, token, "198.51.100.7"); err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	for _, c := range []struct{ name, id, tok, source, code string }{
+		{"unknown id", strings.Repeat("0", 32), token, "198.51.100.7", "receiver_not_found"},
+		{"bad secret", id, strings.Repeat("A", 43), "198.51.100.7", "receiver_not_found"},
+		{"malformed", id, "short", "198.51.100.7", "receiver_not_found"},
+		{"other network", limited, ltoken, "203.0.113.9", "receiver_source_refused"},
+	} {
+		if err := probe(c.id, c.tok, c.source); code(err) != c.code {
+			t.Errorf("%s: %v, want %s", c.name, err, c.code)
+		}
+		if _, err := r.deliver(c.id, c.tok, delivery{body: `{}`, source: c.source}); code(err) != c.code {
+			t.Errorf("%s by POST: %v, want %s", c.name, err, c.code)
+		}
+	}
+	if n, _ := r.spent("deliver"); n != 0 {
+		t.Fatalf("a probe charges nothing: %d", n)
+	}
+	if got := items(t, r.read("alice", "items", map[string]any{})); len(got) != 0 {
+		t.Fatalf("a probe stores nothing: %+v", got)
+	}
+	var days int
+	if err := r.db.QueryRow("SELECT count(*) FROM receiver_days").Scan(&days); err != nil || days != 0 {
+		t.Fatalf("a probe is not a delivery for the day: %d %v", days, err)
+	}
+	r.mustCall("alice", "delete", map[string]any{"id": id}, 1)
+	if err := probe(id, token, "198.51.100.7"); code(err) != "receiver_not_found" {
+		t.Fatalf("deleted: %v", err)
+	}
+	// Probes share the source network's per-minute bound.
+	r.now += 60
+	for i := 0; i < services.ReceiverSourcePerMinute; i++ {
+		_ = probe(limited, ltoken, "198.51.100.9")
+	}
+	if err := probe(limited, ltoken, "198.51.100.9"); code(err) != "request_rate" {
+		t.Fatalf("probe rate: %v", err)
+	}
+	if _, err := r.deliver(limited, ltoken, delivery{body: `{}`, source: "198.51.100.9"}); code(err) != "request_rate" {
+		t.Fatalf("probes and deliveries share the bound: %v", err)
+	}
+}

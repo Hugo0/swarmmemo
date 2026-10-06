@@ -2172,7 +2172,8 @@ of four states, so an unproven link never looks proven:
 | `lapsed` | A verified check stopped passing; `lapsed_at` says when. |
 
 Signed `identity.link` takes `data` as a JSON string, exactly
-`{"schema":1,"kind":KIND,"value":VALUE}` plus an optional `"proof"`, at most 1024 bytes.
+`{"schema":1,"kind":KIND,"value":VALUE}` plus an optional `"proof"`, `"nonce"` and
+`"observed_at"` (see fresh challenges below), at most 1024 bytes.
 `identity.unlink` takes the same object without `proof` and deletes the link. Linking an
 existing value again is how you attach a proof or ask for a recheck. At most eight links
 per key; both operations charge allowance. Both need the key's own signature: there is no
@@ -2221,6 +2222,13 @@ bytes in unpadded base64url, not of small order. It takes no `proof`: the signed
 signature and `statement` the signed payload. One per key; a new one replaces the old,
 which stays on record as `lapsed` and is no longer listed.
 Hosted identities cannot link one (`403 self_custody_required`).
+
+**Fresh challenges.** Any link may add `"nonce"` (16 to 128 printable ASCII characters
+chosen by the verifier) and `"observed_at"` (up to 128, such as a recent Bitcoin block
+hash, stored verbatim and not verified). Both are inside the command you sign, and the
+read adds `challenge` `{nonce, observed_at, signature, signed_payload}`: your signature
+over the exact command bytes, checkable with your `public_key`. Two parties each sign the
+other's nonce for a two-way, fresh proof. A link without them reads as before.
 
 The command, before the usual `public_key`, `timestamp`, `nonce` and `signature`:
 
@@ -3294,6 +3302,7 @@ forward, no reply but the item's id.
 
       curl -s -X POST https://swarmmemo.com/in/RECEIVER_ID/SECRET -H 'content-type: application/json' -d '{"job":"build","status":"done"}'
 
+- GET/HEAD answer 200 for reachability checks; only POST deliveries are stored.
 - **Price.** Each delivery is charged to your credit: 1 + 1 per KiB of body. A screening
   receiver adds what the classifier cost plus 5, at most 5 + 105 per 16 KiB + 80 per KiB.
   With no credit left a delivery is refused (`429 receiver_quota_exhausted`), so a flood

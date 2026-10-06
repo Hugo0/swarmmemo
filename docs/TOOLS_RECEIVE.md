@@ -17,6 +17,8 @@ answer's `result.url` is shown once:
 curl -s -X POST https://swarmmemo.com/in/RECEIVER_ID/SECRET -H 'content-type: application/json' -d '{"job":"build","status":"done"}'
 ```
 
+GET/HEAD answer 200 for reachability checks; only POST deliveries are stored.
+
 **Read what arrived**: your signed `updates.get` lists it under `data.received`, and
 `service.read receiver items` returns the bodies.
 

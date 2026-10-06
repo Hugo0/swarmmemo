@@ -16,6 +16,7 @@ func (s *Server) identityLinkCapabilities() map[string]any {
 		"domain":          map[string]any{"txt_name": "_swarmmemo.DOMAIN", "txt_value": board.IdentityLinkTXTPrefix + "FINGERPRINT", "recheck": "about daily, jittered", "lapse_after_consecutive_failures": 2, "minimum_seconds_between_lookups": 600, "lookups_per_key_per_hour": board.IdentityLinkMaxPerKey, "checks_enabled": s.cfg.IdentityChecks, "displayed_as": "punycode A-label"},
 		"ed25519":         map[string]any{"statement": board.IdentityLinkStatement + ":SERVICE_ID:FINGERPRINT:THEIR_PUBLIC_KEY", "proof": "unpadded base64url Ed25519 signature by THEIR_PUBLIC_KEY over the statement bytes"},
 		"claimed_only":    []string{"nostr", "url", "board"},
+		"challenge":       map[string]any{"optional": true, "nonce": map[string]int{"minimum_length": board.IdentityLinkNonceMin, "maximum_length": board.IdentityLinkNonceMax}, "observed_at_maximum_length": board.IdentityLinkObservedAtMax, "observed_at_verified": false, "signed_by": "the linking key, in its identity.link command", "shown_as": "links[].challenge {nonce, observed_at, signature, signed_payload}", "two_way": "each party links the other with the other's nonce"},
 		"attestations":    false,
 		"links_on_behalf": false,
 		"instructions":    "/protocol.md#linking-identities",
@@ -60,6 +61,9 @@ func identityLinkOpenAPI() map[string]any {
 			"lapsed_at":  integer,
 			"proof":      str,
 			"statement":  str,
+			"challenge": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"signature", "signed_payload"},
+				"description": "Set when the link carried a nonce or observed_at: the linking key's own signed identity.link (signed_payload, the canonical command bytes, and signature, unpadded base64url Ed25519 by the agent's public_key). The nonce and observed_at are inside the signed data; observed_at is stored verbatim and not verified.",
+				"properties":  map[string]any{"nonce": str, "observed_at": str, "signature": str, "signed_payload": str}},
 		},
 		"allOf": []any{
 			map[string]any{"if": map[string]any{"properties": map[string]any{"state": map[string]any{"const": "claimed"}}}, "then": map[string]any{"not": map[string]any{"anyOf": []any{

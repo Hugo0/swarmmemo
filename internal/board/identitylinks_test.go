@@ -784,3 +784,147 @@ func TestRecheckerSurvivesAPanickingLookup(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// challengeLink is an identity.link carrying a counterparty's nonce and an
+// observed beacon.
+func challengeLink(key ed25519.PrivateKey, kind, value, nonce, observed string, proof ...string) Command {
+	fields := map[string]any{"schema": 1, "kind": kind, "value": value}
+	if nonce != "" {
+		fields["nonce"] = nonce
+	}
+	if observed != "" {
+		fields["observed_at"] = observed
+	}
+	if len(proof) > 0 {
+		fields["proof"] = proof[0]
+	}
+	raw, _ := json.Marshal(fields)
+	return signed(key, Command{Operation: "identity.link", Data: string(raw)})
+}
+
+// verifyChallenge checks a published challenge as any reader would: the
+// linking key's signature over signed_payload, and the nonce and beacon
+// inside the signed command's data.
+func verifyChallenge(c *LinkChallenge, publicKey string) bool {
+	public, _ := base64.RawURLEncoding.DecodeString(publicKey)
+	sig, err := base64.RawURLEncoding.DecodeString(c.Signature)
+	if err != nil || len(public) != ed25519.PublicKeySize || !ed25519.Verify(public, []byte(c.SignedPayload), sig) {
+		return false
+	}
+	var envelope struct {
+		Command struct {
+			Operation string `json:"operation"`
+			Data      string `json:"data"`
+		} `json:"command"`
+	}
+	var data struct {
+		Nonce      string `json:"nonce"`
+		ObservedAt string `json:"observed_at"`
+	}
+	return json.Unmarshal([]byte(c.SignedPayload), &envelope) == nil && envelope.Command.Operation == "identity.link" &&
+		json.Unmarshal([]byte(envelope.Command.Data), &data) == nil && data.Nonce == c.Nonce && data.ObservedAt == c.ObservedAt
+}
+
+func TestLinkChallenge(t *testing.T) {
+	s, _ := linkTest(t)
+	ours, theirs := keyFor(91), keyFor(92)
+	register(t, s, ours)
+	nonce := "verifier-nonce-0123456789"
+	block := "00000000000000000001a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7"
+
+	// Bounds: 16 to 128 printable characters, a beacon up to 128; neither
+	// on unlink.
+	for _, bad := range []Command{
+		challengeLink(ours, "url", "https://example.org/a", strings.Repeat("n", IdentityLinkNonceMin-1), ""),
+		challengeLink(ours, "url", "https://example.org/a", strings.Repeat("n", IdentityLinkNonceMax+1), ""),
+		challengeLink(ours, "url", "https://example.org/a", "has a space in it ok", ""),
+		challengeLink(ours, "url", "https://example.org/a", "nonce-with-\x01-control", ""),
+		challengeLink(ours, "url", "https://example.org/a", "nonce-non-ascii-é-0123", ""),
+		challengeLink(ours, "url", "https://example.org/a", "", strings.Repeat("b", IdentityLinkObservedAtMax+1)),
+		signed(ours, Command{Operation: "identity.link", Data: `{"schema":1,"kind":"url","value":"https://example.org/a","nonce":""}`}),
+		signed(ours, Command{Operation: "identity.link", Data: `{"schema":1,"kind":"url","value":"https://example.org/a","observed_at":null}`}),
+		signed(ours, Command{Operation: "identity.unlink", Data: `{"schema":1,"kind":"url","value":"https://example.org/a","nonce":"` + nonce + `"}`}),
+	} {
+		fails(t, s, bad, "invalid_link")
+	}
+	// The nonce is in the signed bytes: changing it after signing breaks the
+	// command's signature.
+	tampered := challengeLink(ours, "url", "https://example.org/a", nonce, block)
+	tampered.Data = strings.Replace(tampered.Data, nonce, "attacker-nonce-0123456789", 1)
+	fails(t, s, tampered, "invalid_signature")
+
+	// A claim with a challenge: still claimed, and the public read carries
+	// the signed command any reader can check against the agent's key.
+	res := run(t, s, challengeLink(ours, "url", "https://example.org/a", nonce, block))
+	if res.Data["state"] != "claimed" || res.Data["nonce"] != nonce || res.Data["observed_at"] != block {
+		t.Fatalf("challenged claim: %v", res.Data)
+	}
+	agent := agentLinks(t, s, ours)
+	l := agent.Links[0]
+	if l.State != "claimed" || l.Proof != "" || l.Challenge == nil || l.Challenge.Nonce != nonce || l.Challenge.ObservedAt != block || !verifyChallenge(l.Challenge, agent.PublicKey) {
+		t.Fatalf("challenged claim read: %+v %+v", l, l.Challenge)
+	}
+	// Tampering with what is shown is detectable by the reader.
+	for name, c := range map[string]LinkChallenge{
+		"other nonce":  {Nonce: "other-nonce-0123456789", ObservedAt: block, Signature: l.Challenge.Signature, SignedPayload: l.Challenge.SignedPayload},
+		"other beacon": {Nonce: nonce, ObservedAt: "0000", Signature: l.Challenge.Signature, SignedPayload: l.Challenge.SignedPayload},
+		"edited bytes": {Nonce: nonce, ObservedAt: block, Signature: l.Challenge.Signature, SignedPayload: strings.Replace(l.Challenge.SignedPayload, nonce, "verifier-nonce-0123456780", 1)},
+		"flipped sig":  {Nonce: nonce, ObservedAt: block, Signature: flipLast(l.Challenge.Signature), SignedPayload: l.Challenge.SignedPayload},
+		"other signer": {Nonce: nonce, ObservedAt: block, Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(theirs, []byte(l.Challenge.SignedPayload))), SignedPayload: l.Challenge.SignedPayload},
+	} {
+		if verifyChallenge(&c, agent.PublicKey) {
+			t.Errorf("%s verified", name)
+		}
+	}
+
+	// An ed25519 link with an attached proof keeps its statement unchanged
+	// and gains the challenge; a fresh nonce without a new proof replaces
+	// the challenge and keeps the attached proof.
+	value := pubKey(theirs)
+	statement := LinkStatement("swarmmemo.com", keyID(ours), value)
+	proof := base64.RawURLEncoding.EncodeToString(ed25519.Sign(theirs, []byte(statement)))
+	run(t, s, challengeLink(ours, "ed25519", value, nonce, "", proof))
+	fresh := "second-nonce-from-verifier"
+	run(t, s, challengeLink(ours, "ed25519", value, fresh, ""))
+	agent = agentLinks(t, s, ours)
+	for _, link := range agent.Links {
+		if link.Kind == "ed25519" {
+			l = link
+		}
+	}
+	sig, _ := base64.RawURLEncoding.DecodeString(l.Proof)
+	key, _ := base64.RawURLEncoding.DecodeString(l.Value)
+	if l.State != "proof_attached" || l.Proof != proof || l.Statement != statement || !ed25519.Verify(key, []byte(l.Statement), sig) ||
+		l.Challenge == nil || l.Challenge.Nonce != fresh || l.Challenge.ObservedAt != "" || !verifyChallenge(l.Challenge, agent.PublicKey) {
+		t.Fatalf("challenged ed25519 link: %+v %+v", l, l.Challenge)
+	}
+
+	// A link made without a challenge reads exactly as before.
+	plain := keyFor(93)
+	register(t, s, plain)
+	run(t, s, linkCommand(plain, "identity.link", "ed25519", value, base64.RawURLEncoding.EncodeToString(ed25519.Sign(theirs, []byte(LinkStatement("swarmmemo.com", keyID(plain), value))))))
+	run(t, s, linkCommand(plain, "identity.link", "url", "https://example.org/b"))
+	for _, l := range agentLinks(t, s, plain).Links {
+		if l.Challenge != nil {
+			t.Fatalf("an unchallenged link shows a challenge: %+v", l)
+		}
+		if l.Kind == "ed25519" {
+			sig, _ := base64.RawURLEncoding.DecodeString(l.Proof)
+			if l.State != "proof_attached" || !ed25519.Verify(key, []byte(l.Statement), sig) {
+				t.Fatalf("an old-style proof no longer verifies: %+v", l)
+			}
+		}
+	}
+	if stored := sqlString(t, s, "SELECT proof FROM identity_links WHERE agent=? AND kind='ed25519'", keyID(plain)); strings.HasPrefix(stored, "{") {
+		t.Fatalf("an unchallenged proof is stored as before, a bare signature: %s", stored)
+	}
+
+	// A sealing key with a challenge still publishes its seal key.
+	m := sealMember(t, s, 94)
+	x := m.x()
+	run(t, s, challengeLink(m.sign, "x25519", x, nonce, block))
+	sealed := run(t, s, Command{Operation: "agent.get", Target: m.id()}).Agent
+	if sealed.SealKey == nil || sealed.SealKey.X25519 != x || len(sealed.Links) != 1 || sealed.Links[0].Challenge == nil || !verifyChallenge(sealed.Links[0].Challenge, sealed.PublicKey) {
+		t.Fatalf("challenged sealing key: %+v %+v", sealed.SealKey, sealed.Links)
+	}
+}

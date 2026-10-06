@@ -14,13 +14,17 @@ import (
 // receiverService is the board's delivery entry point (board.Store.Receive).
 type receiverService interface {
 	Receive(ctx context.Context, d services.Delivery) (services.DeliveryReceipt, error)
+	ReceiveProbe(ctx context.Context, d services.Delivery) error
 }
 
 // receive is POST /in/ID/SECRET: one delivery to an agent's receiver
 // (services/receiver.go). The body is read up to one byte past the limit and
 // handed over as data; nothing here logs the URL, a header or the body, and
-// the answer names only the stored item. Any other method is refused
-// without looking the receiver up.
+// the answer names only the stored item. GET and HEAD are a provider's
+// reachability check: 200 "ok" when a POST would reach an active receiver,
+// else the refusal a POST gets; nothing is stored or charged and no request
+// content is echoed. Any other method is refused without looking the
+// receiver up.
 func (s *Server) receive(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, services.ReceiverPathPrefix)
 	id, token, ok := strings.Cut(rest, "/")
@@ -28,14 +32,31 @@ func (s *Server) receive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 404, Code: "receiver_not_found", Message: "A receive URL is /in/ID/SECRET, as receiver create or rotate showed it."})
 		return
 	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		writeError(w, &board.Error{Status: 405, Code: "method_not_allowed", Message: "A receive URL takes POST only: send the body (JSON, a form or text) as the request body."})
+	probe := r.Method == http.MethodGet || r.Method == http.MethodHead
+	if r.Method != http.MethodPost && !probe {
+		w.Header().Set("Allow", "POST, GET, HEAD")
+		writeError(w, &board.Error{Status: 405, Code: "method_not_allowed", Message: "A receive URL stores POST deliveries: send the body (JSON, a form or text) as the request body. GET and HEAD answer reachability checks."})
 		return
 	}
 	svc, ok := s.service.(receiverService)
 	if !ok {
 		writeError(w, &board.Error{Status: 404, Code: "receiver_not_found", Message: "No receiver answers at this URL."})
+		return
+	}
+	if probe {
+		if err := svc.ReceiveProbe(r.Context(), services.Delivery{ID: id, Token: token, Source: net.ParseIP(s.peer(r))}); err != nil {
+			writeError(w, err)
+			return
+		}
+		h := w.Header()
+		h.Set("Content-Type", "text/plain; charset=utf-8")
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Robots-Tag", "noindex")
+		h.Set("Content-Length", "2")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, "ok")
+		}
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, services.ReceiverBodyBytes+1))

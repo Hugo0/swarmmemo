@@ -49,6 +49,11 @@ const (
 	// IdentityLinkTXTPrefix is the TXT record value a domain publishes at
 	// _swarmmemo.DOMAIN, followed by the key's sha256 fingerprint.
 	IdentityLinkTXTPrefix = "swarmmemo-fingerprint="
+	// A challenge's nonce, chosen by the counterparty, and its observed_at, a
+	// public beacon (a recent block hash) stored verbatim and not verified.
+	IdentityLinkNonceMin      = 16
+	IdentityLinkNonceMax      = 128
+	IdentityLinkObservedAtMax = 128
 )
 
 // IdentityLink is the public shape of one link. Only the fields its state
@@ -65,6 +70,68 @@ type IdentityLink struct {
 	LapsedAt  int64  `json:"lapsed_at,omitempty"`
 	Proof     string `json:"proof,omitempty"`
 	Statement string `json:"statement,omitempty"`
+	// Challenge is set when the link carried a nonce or observed_at: the
+	// linking key's own signed command, which any reader can verify against
+	// the agent's public key.
+	Challenge *LinkChallenge `json:"challenge,omitempty"`
+}
+
+// LinkChallenge is a link's freshness: the nonce a counterparty chose and the
+// beacon the key saw, inside the signed command (signed_payload) whose
+// signature is by the linking key.
+type LinkChallenge struct {
+	Nonce         string `json:"nonce,omitempty"`
+	ObservedAt    string `json:"observed_at,omitempty"`
+	Signature     string `json:"signature"`
+	SignedPayload string `json:"signed_payload"`
+}
+
+// linkRecord is a link's stored proof when the link's own signed command is
+// kept with it: a sealing key's (seal.go) or a challenged link's. Proof is
+// the other key's signature of an ed25519 link, when attached. Its first two
+// fields are the seal record's, so either decodes the other.
+type linkRecord struct {
+	Signature     string `json:"signature"`
+	SignedPayload string `json:"signed_payload"`
+	Nonce         string `json:"nonce,omitempty"`
+	ObservedAt    string `json:"observed_at,omitempty"`
+	Proof         string `json:"proof,omitempty"`
+}
+
+func encodeLinkRecord(r linkRecord) string {
+	raw, _ := json.Marshal(r)
+	return string(raw)
+}
+
+// decodeLinkRecord reads a stored proof that is a linkRecord; a bare
+// signature (an ed25519 link's proof without a challenge) is not one.
+func decodeLinkRecord(proof string) (linkRecord, bool) {
+	var r linkRecord
+	if !strings.HasPrefix(proof, "{") || json.Unmarshal([]byte(proof), &r) != nil || r.Signature == "" || r.SignedPayload == "" {
+		return linkRecord{}, false
+	}
+	return r, true
+}
+
+// theirProof is the other key's signature inside a stored proof.
+func theirProof(stored string) string {
+	if r, ok := decodeLinkRecord(stored); ok {
+		return r.Proof
+	}
+	return stored
+}
+
+// challengeText reports whether v is printable ASCII of min to max bytes.
+func challengeText(v string, lo, hi int, space bool) bool {
+	if len(v) < lo || len(v) > hi {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; c > '~' || c < '!' && !(space && c == ' ') {
+			return false
+		}
+	}
+	return true
 }
 
 // linkKind is the extension point. normalize returns the one canonical value;
@@ -117,7 +184,7 @@ func linkError(code string) error {
 	case "link_reserved":
 		return problem(400, "link_reserved", "This service's own domains cannot be linked by an agent.")
 	}
-	return problem(400, "invalid_link", `Data must be a strict JSON object {"schema":1,"kind":KIND,"value":VALUE} with an optional "proof", at most 1024 bytes; kind is domain, ed25519, nostr, url, board or x25519.`)
+	return problem(400, "invalid_link", fmt.Sprintf(`Data must be a strict JSON object {"schema":1,"kind":KIND,"value":VALUE} with an optional "proof", "nonce" (%d to %d printable ASCII characters) and "observed_at" (up to %d), at most 1024 bytes; kind is domain, ed25519, nostr, url, board or x25519.`, IdentityLinkNonceMin, IdentityLinkNonceMax, IdentityLinkObservedAtMax))
 }
 
 func claimOnly(_ *Store, _, _, proof string) (string, error) {
@@ -187,6 +254,7 @@ func (s *Store) reservedLinkDomain(name string) bool {
 
 type linkData struct {
 	Kind, Value, Proof string
+	Nonce, ObservedAt  string
 }
 
 // parseLinkData accepts only the documented object; an unknown, repeated or
@@ -223,6 +291,10 @@ func parseLinkData(raw string, withProof bool) (linkData, error) {
 			err = json.Unmarshal(value, &d.Value)
 		case name == "proof" && withProof:
 			err = json.Unmarshal(value, &d.Proof)
+		case name == "nonce" && withProof:
+			err = json.Unmarshal(value, &d.Nonce)
+		case name == "observed_at" && withProof:
+			err = json.Unmarshal(value, &d.ObservedAt)
 		default:
 			return d, linkError("invalid_link")
 		}
@@ -237,6 +309,10 @@ func parseLinkData(raw string, withProof bool) (linkData, error) {
 		return d, linkError("invalid_link")
 	}
 	if schema != 1 || !seen["kind"] || !seen["value"] || (seen["proof"] && d.Proof == "") {
+		return d, linkError("invalid_link")
+	}
+	if seen["nonce"] && !challengeText(d.Nonce, IdentityLinkNonceMin, IdentityLinkNonceMax, false) ||
+		seen["observed_at"] && !challengeText(d.ObservedAt, 1, IdentityLinkObservedAtMax, true) {
 		return d, linkError("invalid_link")
 	}
 	if _, ok := linkKinds[d.Kind]; !ok {
@@ -294,6 +370,7 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 	if err != nil {
 		return Result{}, err
 	}
+	challenged := d.Nonce != "" || d.ObservedAt != ""
 	if d.Kind == "x25519" {
 		// A sealing key is only as private as the key that publishes it; a
 		// key SwarmMemo holds cannot make "only members can read" true.
@@ -305,14 +382,14 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		// time it was replaced (nothing is deleted), so the key behind an
 		// old epoch's wraps is still on record. The signed command is the
 		// proof.
-		d.Proof = encodeSealLinkProof(c.Signature, a.canonical)
+		d.Proof = encodeLinkRecord(linkRecord{Signature: c.Signature, SignedPayload: string(a.canonical), Nonce: d.Nonce, ObservedAt: d.ObservedAt})
 		if _, err = tx.ExecContext(ctx, "UPDATE identity_links SET state='lapsed',lapsed_at=? WHERE agent=? AND kind='x25519' AND value<>? AND state<>'lapsed'", now, a.id, value); err != nil {
 			return Result{}, err
 		}
 	}
-	var existing string
+	var existing, existingProof string
 	var attempted int64
-	err = tx.QueryRowContext(ctx, "SELECT state,attempted_at FROM identity_links WHERE agent=? AND kind=? AND value=?", a.id, d.Kind, value).Scan(&existing, &attempted)
+	err = tx.QueryRowContext(ctx, "SELECT state,attempted_at,proof FROM identity_links WHERE agent=? AND kind=? AND value=?", a.id, d.Kind, value).Scan(&existing, &attempted, &existingProof)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Result{}, err
 	}
@@ -346,6 +423,14 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 			state = existing
 			proof = ""
 		}
+		// A challenge replaces the stored record and keeps the other key's
+		// attached signature.
+		if challenged && d.Kind != "x25519" {
+			if proof == "" && state == "proof_attached" {
+				proof = theirProof(existingProof)
+			}
+			proof = encodeLinkRecord(linkRecord{Signature: c.Signature, SignedPayload: string(a.canonical), Nonce: d.Nonce, ObservedAt: d.ObservedAt, Proof: proof})
+		}
 		query := "UPDATE identity_links SET state=?,next_check_at=? WHERE agent=? AND kind=? AND value=?"
 		args := []any{state, next, a.id, d.Kind, value}
 		if proof != "" {
@@ -355,9 +440,15 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		if _, err = tx.ExecContext(ctx, query, args...); err != nil {
 			return Result{}, err
 		}
-	} else if _, err = tx.ExecContext(ctx, "INSERT INTO identity_links(agent,kind,value,proof,state,created_at,next_check_at) VALUES(?,?,?,?,?,?,?)",
-		a.id, d.Kind, value, d.Proof, state, now, next); err != nil {
-		return Result{}, err
+	} else {
+		proof := d.Proof
+		if challenged && d.Kind != "x25519" {
+			proof = encodeLinkRecord(linkRecord{Signature: c.Signature, SignedPayload: string(a.canonical), Nonce: d.Nonce, ObservedAt: d.ObservedAt, Proof: d.Proof})
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO identity_links(agent,kind,value,proof,state,created_at,next_check_at) VALUES(?,?,?,?,?,?,?)",
+			a.id, d.Kind, value, proof, state, now, next); err != nil {
+			return Result{}, err
+		}
 	}
 	if err = audit(ctx, tx, c.Operation, a.id, d.Kind, "identity link "+state+": "+value, now); err != nil {
 		return Result{}, err
@@ -366,6 +457,12 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		return Result{}, err
 	}
 	data := map[string]any{"kind": d.Kind, "value": value, "state": state}
+	if d.Nonce != "" {
+		data["nonce"] = d.Nonce
+	}
+	if d.ObservedAt != "" {
+		data["observed_at"] = d.ObservedAt
+	}
 	switch d.Kind {
 	case "domain":
 		data["txt_name"] = "_swarmmemo." + value
@@ -420,13 +517,16 @@ func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agents ...str
 				l.CheckedAt = checked
 			}
 		case "proof_attached":
-			l.Method, l.Proof = linkKinds[l.Kind].method, proof
+			l.Method, l.Proof = linkKinds[l.Kind].method, theirProof(proof)
 			if l.Kind == "ed25519" {
 				l.Statement = LinkStatement(s.config.ServiceID, agent, l.Value)
 			}
-			if p, ok := decodeSealLinkProof(proof); ok && l.Kind == "x25519" {
+			if p, ok := decodeLinkRecord(proof); ok && l.Kind == "x25519" {
 				l.Proof, l.Statement = p.Signature, p.SignedPayload
 			}
+		}
+		if r, ok := decodeLinkRecord(proof); ok && (r.Nonce != "" || r.ObservedAt != "") {
+			l.Challenge = &LinkChallenge{Nonce: r.Nonce, ObservedAt: r.ObservedAt, Signature: r.Signature, SignedPayload: r.SignedPayload}
 		}
 		links[agent] = append(links[agent], l)
 	}

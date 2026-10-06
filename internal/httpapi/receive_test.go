@@ -80,8 +80,18 @@ func TestReceiveRouteEndToEnd(t *testing.T) {
 		t.Fatalf("a retry never shows the URL again: %+v", again)
 	}
 
-	if w := makeRequest(h, "GET", url, "", ""); w.Code != 405 || !strings.Contains(w.Body.String(), "POST only") {
-		t.Fatalf("GET a receive URL: %d %s", w.Code, w.Body.String())
+	// GET and HEAD are a provider's reachability check: 200 "ok", nothing
+	// echoed, nothing stored (the items read below finds one item).
+	for _, method := range []string{"GET", "HEAD"} {
+		w := makeRequest(h, method, url+"?challenge=%3Cscript%3E&hub.challenge=echo-me", "", "")
+		body := w.Body.String()
+		if w.Code != 200 || (method == "GET" && body != "ok") || (method == "HEAD" && body != "") || strings.Contains(body, "echo-me") ||
+			!strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("X-Robots-Tag") != "noindex" {
+			t.Fatalf("%s a receive URL: %d %q %v", method, w.Code, body, w.Header())
+		}
+	}
+	if w := makeRequest(h, "PUT", url, "{}", "application/json"); w.Code != 405 || w.Header().Get("Allow") != "POST, GET, HEAD" {
+		t.Fatalf("PUT a receive URL: %d %s", w.Code, w.Body.String())
 	}
 	// A provider's event id is kept for deduping; its credentials never are.
 	req := httptest.NewRequest("POST", url, strings.NewReader(`{"status":"done","note":"<script>alert(1)</script>"}`))
@@ -112,6 +122,15 @@ func TestReceiveRouteEndToEnd(t *testing.T) {
 	if w = postTo(h, "https://swarmmemo.com/in/nothing", `{}`, "application/json"); w.Code != 404 {
 		t.Fatalf("a malformed URL: %d", w.Code)
 	}
+	// A probe of an unknown URL answers exactly as a POST does.
+	for _, u := range []string{wrong, "https://swarmmemo.com/in/nothing"} {
+		post := postTo(h, u, `{}`, "application/json")
+		for _, method := range []string{"GET", "HEAD"} {
+			if p := makeRequest(h, method, u, "", ""); p.Code != post.Code || (method == "GET" && p.Body.String() != post.Body.String()) {
+				t.Fatalf("%s %s: %d %s, POST %d %s", method, u, p.Code, p.Body.String(), post.Code, post.Body.String())
+			}
+		}
+	}
 
 	// The owner's own signed updates.get carries data.received; anyone
 	// else's read of the agent's updates does not.
@@ -135,6 +154,15 @@ func TestReceiveRouteEndToEnd(t *testing.T) {
 	// An unsigned read of the items is refused.
 	if w = makeRequest(h, "GET", "https://swarmmemo.com/c64/"+base64.RawURLEncoding.EncodeToString([]byte(`{"operation":"service.read","target":"receiver","data":"{\"schema\":1,\"method\":\"items\"}"}`)), "", ""); w.Code != 401 {
 		t.Fatalf("unsigned items: %d %s", w.Code, w.Body.String())
+	}
+	// A deleted receiver's URL answers a probe as it answers a POST.
+	rid, _ := dig(created, "data", "result", "receiver", "id").(string)
+	command(board.Command{Operation: "service.call", Target: "receiver", Data: `{"schema":1,"method":"delete","args":{"id":"` + rid + `"},"max_cost":1}`, RequestID: "recv-delete"})
+	post := postTo(h, url, `{}`, "application/json")
+	for _, method := range []string{"GET", "HEAD"} {
+		if p := makeRequest(h, method, url, "", ""); post.Code != 404 || p.Code != 404 || (method == "GET" && p.Body.String() != post.Body.String()) {
+			t.Fatalf("%s a deleted receiver: %d %s, POST %d", method, p.Code, p.Body.String(), post.Code)
+		}
 	}
 }
 
