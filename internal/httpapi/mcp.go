@@ -316,6 +316,9 @@ func (s *Server) mcpToolListWith(p mcpProfile) []mcpToolSpec {
 			if hosted && hostedSignedReads[t.entry.ID+"."+t.method.Name] {
 				t.spec.Desc += hostedOwnReadNote
 			}
+			if hosted && hostedSignsPublicCall(t.entry, t.method) {
+				t.spec.Desc += hostedSignedCallNote
+			}
 			list = append(list, t.spec)
 		}
 	}
@@ -673,10 +676,17 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 		if st.method.Write() {
 			t.InputSchema = callSchema(st.method)
 			m := st.method
+			signed := s.hostedStore() != nil && hostedSignsPublicCall(st.entry, m)
 			mcp.AddTool(server, t, func(ctx context.Context, _ *mcp.CallToolRequest, in map[string]any) (*mcp.CallToolResult, board.Result, error) {
 				c, err := anonymousCallCommand(target, m, in)
 				if err != nil {
 					return nil, board.Result{}, err
+				}
+				// With a hosted identity the same call is signed as it: its
+				// allowance, caps, receipts and refusals, never a fallback to
+				// the network's share.
+				if signed && hostedRequest(ctx) {
+					return s.hostedSigned(ctx, c)
 				}
 				return run(ctx, c)
 			})
@@ -694,7 +704,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 			}
 			c := board.Command{Operation: "service.read", Target: target, Data: string(data)}
 			if signed && hostedRequest(ctx) {
-				return s.hostedSignedRead(ctx, c)
+				return s.hostedSigned(ctx, c)
 			}
 			return run(ctx, c)
 		})

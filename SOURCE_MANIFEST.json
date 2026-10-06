@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "c5d7c8e9b0870286b576b783fafbfb7de80cab53b4d9e25b774d1894113908e5",
+  "allowlist_sha256": "c97ef3d326ff4d4198598edc2ea2b4de8b945a91a6ccc6295e5d4ec960267e3d",
   "files": [
     {
       "mode": "0644",
@@ -88,8 +88,8 @@
     {
       "mode": "0644",
       "path": "clients/mcp/README.md",
-      "sha256": "7f2fcca49f3ba02dc7f3599e77888dd62f7fd7e5a1d2b9787c5f236490f2e766",
-      "size": 17434
+      "sha256": "44acb89a494cebd9f1634dcd438a138ba565c36afa2ce1d87853a13e502067d3",
+      "size": 17533
     },
     {
       "mode": "0644",
@@ -544,8 +544,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "0b930f253f168a48150d0638e4a85d308a1c2722de5f6c66d10089659ba195e3",
-      "size": 290763
+      "sha256": "aa81da3c0cb8e8049aaa84d7e1d65152c38e66d75a6734da0ee4c47bcd99eb1d",
+      "size": 291058
     },
     {
       "mode": "0644",
@@ -568,8 +568,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_FETCH.md",
-      "sha256": "79e7e9b8c769a70fd97d1cc64339638fb9a2d86474110aebdd7b0aaae66b7cb6",
-      "size": 2289
+      "sha256": "71efedafb0d561d77131aea4506731a65fcad44f1860379eb2b1125b26416ca9",
+      "size": 2418
     },
     {
       "mode": "0644",
@@ -808,8 +808,8 @@
     {
       "mode": "0644",
       "path": "internal/board/contracts.go",
-      "sha256": "2c9023f6be3204afa74fd7e81f7b5f1368275cf4767990512739fa5d3a212f28",
-      "size": 17864
+      "sha256": "6160ca4b29fe22568b9e56d76d34a15a7ef45b29d4282f74bb8083d1394e9453",
+      "size": 18051
     },
     {
       "mode": "0644",
@@ -1534,8 +1534,8 @@
     {
       "mode": "0644",
       "path": "internal/board/serviceswire.go",
-      "sha256": "7160a74088fe9397f3726c097e2de180d535fcab0aea326366a932984c0ea4d2",
-      "size": 27254
+      "sha256": "ce78c6b72a528edbf99e3c053bcd3f2afc5eecdace840dce39b23131e4019ab3",
+      "size": 27323
     },
     {
       "mode": "0644",
@@ -2133,6 +2133,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/httpapi/hosted_public_calls_test.go",
+      "sha256": "3207fee5b3d0261bfbbc29c035aa042dc53711da8d1a5e8df5f1dc33838c18d2",
+      "size": 7397
+    },
+    {
+      "mode": "0644",
       "path": "internal/httpapi/hosted_services_mcp_test.go",
       "sha256": "bb0f909d652d94f4b63a6a473278c986db6f8351ebd95fb76f4d1e87f9e5bc98",
       "size": 15759
@@ -2212,8 +2218,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp.go",
-      "sha256": "223d090b9fa77a6bc131b9fa547106389a14254e6d8b77b0cf3fb6707ddd312a",
-      "size": 40710
+      "sha256": "b7129ccd59cad9a13f875d3b083e9fbfbdd3cee4af022b88de3af84ee60bd85d",
+      "size": 41123
     },
     {
       "mode": "0644",
@@ -2230,8 +2236,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_hosted_services.go",
-      "sha256": "4fcbbc0cecb14cd40795be4c3193ceaec0c41381770e3b92170d71fd776e50d5",
-      "size": 12316
+      "sha256": "046bf781d3c6337c4a905054e525489511e49bfa120086fd5879f525035b286d",
+      "size": 13566
     },
     {
       "mode": "0644",
@@ -2254,8 +2260,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/oauth.go",
-      "sha256": "0433f58828991de3882d12b02348669060ca3b803f8544f8bbea8cf716f218e6",
-      "size": 52348
+      "sha256": "744fe61e9ff9d993390f5e0db760065f1e23cb37eff2ac8cb361cd7df0a8dc75",
+      "size": 52426
     },
     {
       "mode": "0644",
@@ -2266,8 +2272,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/oauth_test.go",
-      "sha256": "c0e89e624a9297964598959b05c3a879238cab46f484e121aa9d5338678e6a20",
-      "size": 52727
+      "sha256": "703294917ea65084ac9eaf6008695eaf522f4577724d69dd3b8452cb5cc07390",
+      "size": 52753
     },
     {
       "mode": "0644",
@@ -3304,8 +3310,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch.go",
-      "sha256": "d590340139cf6029ed0db3ecd460281c53dea26c0ade822c64de672755fe4604",
-      "size": 36785
+      "sha256": "4df2531c86b357ccbb81830b8b11caf591ab031dffeae4c9f591976ae8ba50ba",
+      "size": 37409
     },
     {
       "mode": "0644",

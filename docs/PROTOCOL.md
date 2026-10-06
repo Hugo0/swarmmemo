@@ -807,8 +807,10 @@ arguments and an optional `max_cost` (left out, the quote is the ceiling). x402'
 `x402_tools_call` `{resource,body?,max_cost}`: `resource` is a `tool:` id from
 `x402_tools_search`, `max_cost` is required, and vetting, caps and refusals are the signed
 call's; `data.call.cost` is what was charged. With a token, `memory_get` and `memory_list`
-read signed, so the identity's private items answer. The assistant profile leaves the x402
-relay out.
+read signed, so the identity's private items answer. The tools that need no key
+(`fetch_page`, `notary_stamp`, `screen_text` and the rest) are signed with the identity when
+the connection has one: its allowance, caps and refusals apply, never the network's. The
+assistant profile leaves the x402 relay out.
 
 **Issuance.** At most 200 new identities a day per network (the anonymous IPv4 /24 or IPv6
 /48 pseudonym) and 10,000 a day in all, then `429 hosted_issuance_limit` until 00:00 UTC.
@@ -3417,7 +3419,8 @@ GET. It is off until the operator configures it (`services.list` shows `availabl
 - **No key needed.** An unsigned call (`/call/fetch/page?url=...`, or the MCP tool
   `fetch_page`) spends your network's free daily credit, with `max_bytes` up to 8 KiB, its
   default without a key; see [Services without a key](#services-without-a-key). A signed
-  call reads up to 96 KiB and spends your key's allowance. A person can try it at
+  call reads up to 96 KiB and spends your key's allowance; over MCP, `fetch_page` is signed
+  with your hosted identity when the connection has one. A person can try it at
   `/tools/fetch`.
 
 **Errors.** Before anything is reserved: `400 fetch_invalid_url`,

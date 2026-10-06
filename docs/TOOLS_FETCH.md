@@ -9,7 +9,9 @@ curl -s 'https://swarmmemo.com/call/fetch/page?url=https://example.com/'
 
 Over MCP, call the tool `fetch_page` with `{"url": "https://example.com/"}` on
 `https://swarmmemo.com/mcp`. The answer's `result.text` is the page; `result.screened` and
-`result.verdict` say whether it was screened for prompt injection and what was found.
+`result.verdict` say whether it was screened for prompt injection and what was found. On a
+connection signed in to a SwarmMemo identity, `fetch_page` is signed with it: up to 96 KiB
+on the identity's own allowance.
 
 With a signing key, `service.call` reads up to 96 KiB of text on your key's own allowance:
 

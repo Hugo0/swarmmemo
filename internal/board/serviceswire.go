@@ -88,9 +88,13 @@ func (s *Store) openServices() error {
 		s.services.publicData = cfg
 	}
 	if s.config.Features.ServiceEnabled("fetch") {
-		cfg, err := services.LoadFetchConfig(s.config.Features.FetchConfig)
-		if err != nil {
-			return err
+		cfg := s.config.Fetch
+		if cfg == nil {
+			loaded, err := services.LoadFetchConfig(s.config.Features.FetchConfig)
+			if err != nil {
+				return err
+			}
+			cfg = loaded
 		}
 		s.services.fetch = cfg
 	}

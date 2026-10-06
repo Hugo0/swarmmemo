@@ -328,7 +328,7 @@ func TestOAuthSecuritySchemes(t *testing.T) {
 		want := "[map[type:noauth]]"
 		_, _, hosted := hostedToolHints(name)
 		switch {
-		case name == "post_message", name == "read_updates":
+		case name == "post_message", name == "read_updates", isHostedSignedCall(name):
 			want = "[map[type:noauth] map[scopes:[hosted] type:oauth2]]"
 		case name == "create_identity", name == "recover_identity":
 		case hosted:

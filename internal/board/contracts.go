@@ -344,6 +344,10 @@ type Config struct {
 	// X402 is the x402 relay's loaded configuration (services.LoadX402Config);
 	// nil leaves x402 unconfigured even when SERVICES names it.
 	X402 *services.X402Config
+	// Fetch is fetch's loaded configuration; nil loads Features.FetchConfig.
+	// Tests only (FetchConfig.UseTestUpstream); no environment variable sets
+	// it.
+	Fetch *services.FetchConfig
 	// Topup is the credit top-up configuration (services.LoadTopupConfig,
 	// TOPUP_CONFIG); nil leaves top-ups off. They also need the ledger on.
 	Topup *services.TopupConfig

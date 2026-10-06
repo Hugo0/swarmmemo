@@ -20,8 +20,8 @@ import (
 // for itself, such as a drop box for its callbacks, notes that outlive the
 // conversation, a wake-up or a paid tool on its own allowance (fetch_page
 // needs no key, so it is a public tool like every method that takes an
-// unsigned call). Each tool signs the same service.call or service.read a
-// local key would, so the engine's vetting, caps, prices and receipts are
+// unsigned call; hostedSignsPublicCall signs those as the identity). Each
+// tool signs the same service.call or service.read a local key would, so the engine's vetting, caps, prices and receipts are
 // the signed path's. It needs a hosted identity like the conversation
 // tools.
 var hostedServices = []string{services.ReceiverID, services.FetchID, "memory", "wakeup", "x402", services.PasteID, services.DocsID}
@@ -245,9 +245,37 @@ func (s *Server) addHostedServiceTools(server *mcp.Server, tool func(string) *mc
 	}
 }
 
-// hostedSignedRead is a hostedSignedReads tool called with a hosted token:
-// the same service.read, signed as the identity.
-func (s *Server) hostedSignedRead(ctx context.Context, c board.Command) (*mcp.CallToolResult, board.Result, error) {
+// hostedSignsPublicCall reports whether m's public call tool (one that needs
+// no key) signs as the caller's hosted identity when the connection has
+// one. Every such method takes a signed call; a shaped one (x402's call)
+// stays anonymous, since the identity calls it through its own tool, with
+// that tool's narrower arguments.
+func hostedSignsPublicCall(e services.Entry, m services.MethodEntry) bool {
+	_, shaped := hostedShapes[e.ID+"."+m.Name]
+	return m.Write() && m.Anonymous && !shaped
+}
+
+// hostedSignedCallNote is what a hostedSignsPublicCall tool adds while
+// hosted identities are on.
+const hostedSignedCallNote = " Signed with your SwarmMemo identity when this connection has one: its allowance, caps and receipts apply instead of your network's."
+
+// isHostedSignedCall reports whether name is a public call tool that signs
+// as a hosted caller (hostedSignsPublicCall), so it takes sign-in or none.
+func isHostedSignedCall(name string) bool {
+	for _, e := range services.Catalog(services.Known()) {
+		for _, m := range e.Methods {
+			if hostedSignsPublicCall(e, m) && web.MCPToolName(e, m) == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hostedSigned is a public tool that signs (hostedSignedReads,
+// hostedSignsPublicCall) called with a hosted token: the same command,
+// signed as the identity.
+func (s *Server) hostedSigned(ctx context.Context, c board.Command) (*mcp.CallToolResult, board.Result, error) {
 	hc, err := s.hostedCaller(ctx)
 	if err != nil {
 		return nil, board.Result{}, toolError(err)

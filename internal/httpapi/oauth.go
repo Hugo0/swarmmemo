@@ -1134,8 +1134,9 @@ func (s *Server) oauthToolMetaFor(profile string, next mcp.MethodHandler) mcp.Me
 
 // securitySchemes is a tool's auth on an MCP profile while sign-in
 // is on: a tool that needs the identity takes OAuth only; post_message,
-// read_updates and the hostedSignedReads tools work either way (as the
-// identity when signed in); every other tool needs none.
+// read_updates, the hostedSignedReads tools and the public call tools
+// (hostedSignsPublicCall) work either way (as the identity when signed in);
+// every other tool needs none.
 func securitySchemes(name string) []map[string]any {
 	oauth := map[string]any{"type": "oauth2", "scopes": []string{board.OAuthScope}}
 	noauth := map[string]any{"type": "noauth"}
@@ -1145,7 +1146,7 @@ func securitySchemes(name string) []map[string]any {
 	case "create_identity", "recover_identity":
 		return []map[string]any{noauth}
 	}
-	if isHostedSignedRead(name) {
+	if isHostedSignedRead(name) || isHostedSignedCall(name) {
 		return []map[string]any{noauth, oauth}
 	}
 	if _, _, hosted := hostedToolHints(name); hosted || isHostedServiceTool(name) || name == creditsTopupTool.Name {

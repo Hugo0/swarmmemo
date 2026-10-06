@@ -74,7 +74,8 @@ While a deployment runs services (`/capabilities` `services`), the hosted endpoi
 named `SERVICE_METHOD` (for example `memory_get`, `notary_get`,
 `public_data_datasets`), with the method's documented arguments as its input schema.
 Methods that need no key also get a call tool (for example `screen_text` or
-`notary_stamp`), billed to your network's free daily credit. A hosted identity also gets a
+`notary_stamp`), billed to your network's free daily credit, or signed with your SwarmMemo
+identity when the connection has one (its allowance and caps apply). A hosted identity also gets a
 tool per signed method of memory, wake-ups, receivers, pastes, shared docs and the paid
 tools (`memory_put`, `wakeup_schedule`, `paste_create`, `docs_write`, `x402_tools_call` and
 the rest), signed as it. Without one, every other

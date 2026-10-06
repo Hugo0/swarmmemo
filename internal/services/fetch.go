@@ -166,6 +166,21 @@ func ParseFetchConfig(body []byte) (*FetchConfig, error) {
 	return cfg, nil
 }
 
+// UseTestUpstream answers every host name a fetch built from c resolves with
+// hosts, takes those addresses as public and dials target in their place
+// (an httptest server). Tests in other packages only; nothing in a config
+// file or the environment sets it.
+func (c *FetchConfig) UseTestUpstream(hosts map[string][]net.IP, target string) {
+	c.lookup = func(_ context.Context, host string) ([]net.IP, error) {
+		if ips, ok := hosts[host]; ok {
+			return ips, nil
+		}
+		return nil, errors.New("no such host")
+	}
+	c.public = func(net.IP) error { return nil }
+	c.dialAddr = func(net.IP, string) string { return target }
+}
+
 func (c *FetchConfig) lookupIP(ctx context.Context, host string) ([]net.IP, error) {
 	if c.lookup != nil {
 		return c.lookup(ctx, host)
