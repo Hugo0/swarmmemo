@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -85,5 +86,70 @@ func TestPasteTextIsNeverHTML(t *testing.T) {
 	notHTML(w, "a get")
 	if w.Code != 200 || dig(decodeResult(t, w.Body.Bytes()), "data", "result", "text") != text {
 		t.Fatalf("owner get: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// /api/stats/daily counts paste and doc use by kind, today included: counts
+// only, never an id, a title or text.
+func TestDailyStatsCountPastesAndDocs(t *testing.T) {
+	_, h := anonCallServer(t, 2000, "paste", "docs")
+	owner, reader := ed25519.NewKeyFromSeed(make([]byte, 32)), ed25519.NewKeyFromSeed(append(make([]byte, 31), 7))
+	n := 0
+	call := func(key ed25519.PrivateKey, service, method string, args map[string]any) map[string]any {
+		t.Helper()
+		n++
+		data, _ := json.Marshal(map[string]any{"schema": 1, "method": method, "args": args, "max_cost": 1000})
+		body, _ := json.Marshal(signService(key, board.Command{Operation: "service.call", Target: service, Data: string(data), RequestID: "stats-" + strconv.Itoa(n)}))
+		w := makeRequest(h, "POST", "https://swarmmemo.com/v1/command", string(body), "application/json")
+		if w.Code != 200 {
+			t.Fatalf("%s.%s: %d %s", service, method, w.Code, w.Body.String())
+		}
+		return decodeResult(t, w.Body.Bytes())
+	}
+	unlisted, _ := dig(call(owner, "paste", "create", map[string]any{"text": "secret paste text", "visibility": "unlisted"}), "data", "result", "paste", "id").(string)
+	call(owner, "paste", "create", map[string]any{"text": "private one"})
+	call(owner, "paste", "create", map[string]any{"text": "private two", "title": "secret title"})
+	call(reader, "paste", "open", map[string]any{"id": unlisted})
+	r := httptest.NewRequest("GET", "https://swarmmemo.com/call/paste/open?id="+unlisted, nil)
+	r.RemoteAddr = "198.51.100.9:12345"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("anonymous open: %d %s", w.Code, w.Body.String())
+	}
+	doc, _ := dig(call(owner, "docs", "create", map[string]any{"title": "Plan", "text": "v1"}), "data", "result", "doc", "id").(string)
+	call(owner, "docs", "write", map[string]any{"id": doc, "base_version": 1, "text": "v2"})
+
+	w = makeRequest(h, "GET", "/api/stats/daily?days=2", "", "")
+	body := w.Body.String()
+	if w.Code != 200 {
+		t.Fatalf("daily: %d %s", w.Code, body)
+	}
+	for _, leak := range []string{unlisted, doc, "secret", "Plan"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("daily stats carry %q: %s", leak, body)
+		}
+	}
+	var got struct {
+		Daily []struct {
+			Day     string `json:"day"`
+			Content struct {
+				Pastes   map[string]int64 `json:"pastes_created"`
+				Opens    map[string]int64 `json:"paste_opens"`
+				Docs     map[string]int64 `json:"docs_created"`
+				Versions int64            `json:"doc_versions"`
+			} `json:"content"`
+		} `json:"daily"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got.Daily) != 2 {
+		t.Fatalf("daily: %v %s", err, body)
+	}
+	today, before := got.Daily[1].Content, got.Daily[0].Content
+	if today.Pastes["private"] != 2 || today.Pastes["unlisted"] != 1 || today.Opens["signed"] != 1 || today.Opens["anonymous"] != 1 ||
+		today.Docs["own"] != 1 || today.Docs["group"] != 0 || today.Versions != 2 {
+		t.Fatalf("today's content counts: %+v", today)
+	}
+	if before.Pastes["private"] != 0 || before.Versions != 0 || before.Opens == nil {
+		t.Fatalf("yesterday's content counts: %+v", before)
 	}
 }

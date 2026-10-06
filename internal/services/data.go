@@ -8,10 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"swarmmemo/internal/allowance"
 )
 
 // Data is a parsed service.call or service.read data field:
@@ -50,6 +53,81 @@ func Integer(raw json.RawMessage, max int64) (int64, bool) {
 	return n, err == nil && n <= max
 }
 
+// badArg is an argument-level invalid_service_data refusal. msg names the
+// argument and what it takes; it never repeats the value sent.
+func badArg(msg string) error {
+	return &allowance.Err{Code: "invalid_service_data", Message: msg}
+}
+
+// intArg reads integer argument name strictly (see Integer), within
+// [min, max]; a refusal names the argument, its unit and its range. unit is
+// what the integer counts ("seconds"), or "".
+func intArg(raw json.RawMessage, name, unit string, min, max int64) (int64, error) {
+	n, ok := Integer(raw, max)
+	if !ok || n < min {
+		return 0, badArg(intRule(name, unit, min, max))
+	}
+	return n, nil
+}
+
+// intRule is "NAME must be an integer[ number of UNIT] (MIN to MAX)."
+func intRule(name, unit string, min, max int64) string {
+	what := "an integer"
+	if unit != "" {
+		what += " number of " + unit
+	}
+	return name + " must be " + what + " (" + itoa(min) + " to " + itoa(max) + ")."
+}
+
+// argNameRE is what a field path from this package's own struct tags looks
+// like; anything else is not echoed.
+var argNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}(\.[a-z][a-z0-9_]{0,31}){0,3}$`)
+
+// typeError turns a decoder's type mismatch into "ARG must be TYPE.", naming
+// the argument by the destination's struct tag and the type it takes, never
+// the value sent; nil when err is not one it can name.
+func typeError(err error) error {
+	var te *json.UnmarshalTypeError
+	if !errors.As(err, &te) || te.Type == nil || !argNameRE.MatchString(te.Field) {
+		return nil
+	}
+	what := jsonTypeName(te.Type)
+	if what == "" {
+		return nil
+	}
+	return badArg(te.Field + " must be " + what + ".")
+}
+
+// jsonTypeName is how a Go destination type reads in JSON terms; "" when
+// there is no short name for it.
+func jsonTypeName(t reflect.Type) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "a string"
+	case reflect.Bool:
+		return "true or false"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "an integer"
+	case reflect.Float32, reflect.Float64:
+		return "a number"
+	case reflect.Slice, reflect.Array:
+		switch jsonTypeName(t.Elem()) {
+		case "a string":
+			return "an array of strings"
+		case "an object":
+			return "an array of objects"
+		}
+		return "an array"
+	case reflect.Map, reflect.Struct:
+		return "an object"
+	}
+	return ""
+}
+
 // ParseData parses the data of service.call (call true) or service.read.
 func ParseData(raw string, call bool) (Data, error) {
 	var d Data
@@ -59,8 +137,8 @@ func ParseData(raw string, call bool) (Data, error) {
 		Args    json.RawMessage `json:"args"`
 		MaxCost json.RawMessage `json:"max_cost"`
 	}
-	if err := StrictObject([]byte(raw), &envelope); err != nil {
-		return d, err
+	if StrictObject([]byte(raw), &envelope) != nil {
+		return d, refusal("invalid_service_data") // the envelope's own message
 	}
 	if string(envelope.Schema) != "1" || envelope.Method == nil || !methodRE.MatchString(*envelope.Method) {
 		return d, refusal("invalid_service_data")
@@ -89,7 +167,8 @@ func ParseData(raw string, call bool) (Data, error) {
 // StrictObject decodes one JSON object into dst (a pointer to a struct) and
 // refuses anything a lenient decoder would accept silently: invalid UTF-8,
 // unknown fields, duplicate keys, nesting beyond JSONDepthMax, a value that is
-// not an object, and trailing data. Every refusal is invalid_service_data.
+// not an object, and trailing data. Every refusal is invalid_service_data; a
+// value of the wrong type names its field and the type it takes (typeError).
 func StrictObject(raw []byte, dst any) error {
 	if len(raw) == 0 || !utf8.Valid(raw) {
 		return refusal("invalid_service_data")
@@ -101,6 +180,9 @@ func StrictObject(raw []byte, dst any) error {
 	dec.DisallowUnknownFields()
 	dec.UseNumber()
 	if err := dec.Decode(dst); err != nil {
+		if named := typeError(err); named != nil {
+			return named
+		}
 		return refusal("invalid_service_data")
 	}
 	return nil

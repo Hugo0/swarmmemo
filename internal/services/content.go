@@ -47,6 +47,9 @@ const (
 // derived from the text.
 var contentIDRE = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
+// contentIDRule is the refusal of a paste's or a doc's id argument.
+const contentIDRule = "id must be the 32 lowercase hex digits create returned."
+
 // validContentText reports whether s is text a paste or a doc keeps: UTF-8
 // without NUL.
 func validContentText(s string) bool {
@@ -220,4 +223,88 @@ func screenFor(own, wants bool, kept string, state string, fresh *TextVerdict) s
 		return screening{Screened: true, Screen: "done", Verdict: v, Withheld: v.Verdict == "flag"}
 	}
 	return screening{Screen: state, Withheld: state == "pending"}
+}
+
+// ContentDay is one UTC day of paste and doc use for /stats: counts only,
+// split by kind, never an id, a title or text.
+type ContentDay struct {
+	Day string // YYYY-MM-DD
+	// PastesPrivate and PastesUnlisted count pastes created, by visibility.
+	PastesPrivate, PastesUnlisted int64
+	// PasteOpensSigned and PasteOpensAnonymous count answered paste.open
+	// calls, with a key and without one.
+	PasteOpensSigned, PasteOpensAnonymous int64
+	// DocsOwn and DocsGroup count docs created, owned by a key or by a group.
+	DocsOwn, DocsGroup int64
+	// DocVersions counts doc versions written, a doc's first included.
+	DocVersions int64
+}
+
+// ReadContentStats counts paste and doc use over the days UTC days ending
+// with the one holding now, oldest first; nil while neither paste nor docs
+// is enabled. Counts come from the tables at read time; nothing is stored.
+func (r *Registry) ReadContentStats(ctx context.Context, q allowance.Querier, now int64, days int) ([]ContentDay, error) {
+	_, pasteErr := r.Lookup(PasteID)
+	_, docsErr := r.Lookup(DocsID)
+	if pasteErr != nil && docsErr != nil || days < 1 {
+		return nil, nil
+	}
+	first := now/86400 - int64(days) + 1
+	out := make([]ContentDay, days)
+	for i := range out {
+		out[i].Day = time.Unix((first+int64(i))*86400, 0).UTC().Format("2006-01-02")
+	}
+	// Each query answers (day, kind, count); add puts a count in its field.
+	count := func(query string, add func(d *ContentDay, kind, n int64)) error {
+		rows, err := q.QueryContext(ctx, query, first*86400)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var day, kind, n int64
+			if err = rows.Scan(&day, &kind, &n); err != nil {
+				return err
+			}
+			if i := day - first; i >= 0 && i < int64(days) {
+				add(&out[i], kind, n)
+			}
+		}
+		return rows.Err()
+	}
+	queries := []struct {
+		query string
+		add   func(d *ContentDay, kind, n int64)
+	}{
+		{"SELECT created_at/86400, visibility='unlisted', count(*) FROM pastes WHERE created_at>=? GROUP BY 1,2", func(d *ContentDay, unlisted, n int64) {
+			if unlisted == 1 {
+				d.PastesUnlisted += n
+			} else {
+				d.PastesPrivate += n
+			}
+		}},
+		{"SELECT created_at/86400, account LIKE 'anon:%', count(*) FROM service_calls WHERE created_at>=? AND service='" + PasteID + "' AND method='open' AND state='done' GROUP BY 1,2", func(d *ContentDay, anonymous, n int64) {
+			if anonymous == 1 {
+				d.PasteOpensAnonymous += n
+			} else {
+				d.PasteOpensSigned += n
+			}
+		}},
+		{"SELECT created_at/86400, room<>'', count(*) FROM docs WHERE created_at>=? GROUP BY 1,2", func(d *ContentDay, group, n int64) {
+			if group == 1 {
+				d.DocsGroup += n
+			} else {
+				d.DocsOwn += n
+			}
+		}},
+		{"SELECT created_at/86400, 0, count(*) FROM doc_versions WHERE created_at>=? GROUP BY 1", func(d *ContentDay, _, n int64) {
+			d.DocVersions += n
+		}},
+	}
+	for _, c := range queries {
+		if err := count(c.query, c.add); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

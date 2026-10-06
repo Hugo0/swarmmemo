@@ -159,8 +159,11 @@ type docReadArgs struct {
 
 // docText checks a version's text and title.
 func docText(text, title *string, titleRequired bool) error {
-	if text == nil || titleRequired && (title == nil || *title == "") {
-		return refusal("invalid_service_data")
+	if text == nil {
+		return badArg("text is required: a string.")
+	}
+	if titleRequired && (title == nil || *title == "") {
+		return badArg("title is required: a non-empty string.")
 	}
 	if len(*text) > DocTextBytes {
 		return tooLarge("invalid_service_data", len(*text), DocTextBytes)
@@ -168,8 +171,11 @@ func docText(text, title *string, titleRequired bool) error {
 	if title != nil && len(*title) > contentTitleBytes {
 		return tooLarge("invalid_service_data", len(*title), contentTitleBytes)
 	}
-	if !validContentText(*text) || title != nil && (*title == "" || !validTitle(*title)) {
-		return refusal("invalid_service_data")
+	if !validContentText(*text) {
+		return badArg("text must be UTF-8 without NUL.")
+	}
+	if title != nil && (*title == "" || !validTitle(*title)) {
+		return badArg("title must be one non-empty line of UTF-8 without control characters.")
 	}
 	return nil
 }
@@ -193,12 +199,15 @@ func parseDocWrite(raw json.RawMessage) (docWriteArgs, int64, error) {
 	if err := StrictObject(raw, &a); err != nil {
 		return a, 0, err
 	}
-	if !contentIDRE.MatchString(a.ID) || a.BaseVersion == nil {
-		return a, 0, refusal("invalid_service_data")
+	if !contentIDRE.MatchString(a.ID) {
+		return a, 0, badArg(contentIDRule)
 	}
-	base, ok := Integer(a.BaseVersion, DocVersionsMax)
-	if !ok || base < 1 {
-		return a, 0, refusal("invalid_service_data")
+	if a.BaseVersion == nil {
+		return a, 0, badArg("base_version is required: the version you read, an integer (1 to " + itoa(DocVersionsMax) + ").")
+	}
+	base, err := intArg(a.BaseVersion, "base_version", "", 1, DocVersionsMax)
+	if err != nil {
+		return a, 0, err
 	}
 	return a, base, docText(a.Text, a.Title, false)
 }
@@ -209,13 +218,13 @@ func parseDocRead(raw json.RawMessage) (docReadArgs, int64, error) {
 		return a, 0, err
 	}
 	if !contentIDRE.MatchString(a.ID) {
-		return a, 0, refusal("invalid_service_data")
+		return a, 0, badArg(contentIDRule)
 	}
 	var version int64
 	if a.Version != nil {
-		n, ok := Integer(a.Version, DocVersionsMax)
-		if !ok || n < 1 {
-			return a, 0, refusal("invalid_service_data")
+		n, err := intArg(a.Version, "version", "", 1, DocVersionsMax)
+		if err != nil {
+			return a, 0, err
 		}
 		version = n
 	}
@@ -558,20 +567,20 @@ func (d *docs) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 			return nil, err
 		}
 		if !contentIDRE.MatchString(a.ID) {
-			return nil, refusal("invalid_service_data")
+			return nil, badArg(contentIDRule)
 		}
 		before, limit := int64(DocVersionsMax+1), int64(20)
 		if a.Before != nil {
-			n, ok := Integer(a.Before, DocVersionsMax+1)
-			if !ok {
-				return nil, refusal("invalid_service_data")
+			n, err := intArg(a.Before, "before", "", 0, DocVersionsMax+1)
+			if err != nil {
+				return nil, err
 			}
 			before = n
 		}
 		if a.Limit != nil {
-			n, ok := Integer(a.Limit, DocHistoryPageMax)
-			if !ok || n < 1 {
-				return nil, refusal("invalid_service_data")
+			n, err := intArg(a.Limit, "limit", "", 1, DocHistoryPageMax)
+			if err != nil {
+				return nil, err
 			}
 			limit = n
 		}

@@ -105,6 +105,10 @@ type Err struct {
 	// Details is structured context the refusal must carry to be
 	// actionable (doc_conflict's current version); never secrets.
 	Details any
+	// Message is an argument-level invalid_service_data refusal's own
+	// sentence: it names the argument and what it takes, never the value
+	// sent. Empty for any other refusal.
+	Message string
 }
 
 func (e *Err) Error() string { return "allowance: " + e.Code }

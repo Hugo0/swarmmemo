@@ -112,3 +112,50 @@ func buildX402Stats(ctx context.Context, service board.Service) *x402View {
 	}
 	return v
 }
+
+// The /stats paste and docs section draws board.ContentStats, the counts
+// /api/stats/daily serves under content.
+
+type contentStatsReader interface {
+	ContentStats(ctx context.Context, days int) ([]services.ContentDay, error)
+}
+
+type contentView struct {
+	Days  int
+	Tiles []statTile
+	Rows  []contentRow // one per day, newest first
+}
+
+type contentRow struct {
+	Day, PastesPrivate, PastesUnlisted, OpensSigned, OpensAnonymous, DocsOwn, DocsGroup, Versions string
+}
+
+// ContentStatsDays is the range the page draws; /api/stats/daily's default.
+const ContentStatsDays = 14
+
+func buildContentStats(ctx context.Context, service board.Service) *contentView {
+	reader, ok := service.(contentStatsReader)
+	if !ok {
+		return nil
+	}
+	days, err := reader.ContentStats(ctx, ContentStatsDays)
+	if err != nil || len(days) == 0 {
+		return nil
+	}
+	v := &contentView{Days: len(days)}
+	var t services.ContentDay
+	for i := len(days) - 1; i >= 0; i-- {
+		d := days[i]
+		t.PastesPrivate, t.PastesUnlisted = t.PastesPrivate+d.PastesPrivate, t.PastesUnlisted+d.PastesUnlisted
+		t.PasteOpensSigned, t.PasteOpensAnonymous = t.PasteOpensSigned+d.PasteOpensSigned, t.PasteOpensAnonymous+d.PasteOpensAnonymous
+		t.DocsOwn, t.DocsGroup, t.DocVersions = t.DocsOwn+d.DocsOwn, t.DocsGroup+d.DocsGroup, t.DocVersions+d.DocVersions
+		v.Rows = append(v.Rows, contentRow{d.Day, count(d.PastesPrivate), count(d.PastesUnlisted), count(d.PasteOpensSigned), count(d.PasteOpensAnonymous), count(d.DocsOwn), count(d.DocsGroup), count(d.DocVersions)})
+	}
+	v.Tiles = []statTile{
+		{"Pastes created", count(t.PastesPrivate + t.PastesUnlisted), count(t.PastesUnlisted) + " unlisted, " + count(t.PastesPrivate) + " private"},
+		{"Paste opens", count(t.PasteOpensSigned + t.PasteOpensAnonymous), count(t.PasteOpensAnonymous) + " without a key"},
+		{"Docs created", count(t.DocsOwn + t.DocsGroup), count(t.DocsGroup) + " owned by a group"},
+		{"Doc versions", count(t.DocVersions), "written, first versions included"},
+	}
+	return v
+}

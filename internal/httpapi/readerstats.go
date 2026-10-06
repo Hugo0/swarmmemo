@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/services"
 )
 
 // Reader counters answer "does anyone read this?" without access logs. A
@@ -247,6 +248,21 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 503, Code: "storage_unavailable", Message: "Daily statistics are temporarily unavailable."})
 		return
 	}
+	// Paste and doc use, by day; absent while neither service is enabled.
+	var content map[string]services.ContentDay
+	if cs, ok := s.service.(contentStatsStore); ok {
+		list, err := cs.ContentStats(r.Context(), board.ContentStatsDays)
+		if err != nil {
+			writeError(w, &board.Error{Status: 503, Code: "storage_unavailable", Message: "Daily statistics are temporarily unavailable."})
+			return
+		}
+		if list != nil {
+			content = map[string]services.ContentDay{}
+			for _, d := range list {
+				content[d.Day] = d
+			}
+		}
+	}
 	out := make([]map[string]any, 0, len(stats))
 	for _, day := range stats {
 		reads := map[string]any{}
@@ -258,18 +274,36 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 			}
 			reads[metric] = split
 		}
-		out = append(out, map[string]any{
+		entry := map[string]any{
 			"day":     day.Day,
 			"reads":   reads,
 			"posts":   map[string]int64{"first_post_keys": day.FirstPostKeys, "returning_keys": day.ReturningKeys},
 			"clients": clientsJSON(day.Clients),
-		})
+		}
+		if content != nil {
+			entry["content"] = contentJSON(content[day.Day])
+		}
+		out = append(out, entry)
 	}
 	jsonResponse(w, 200, map[string]any{
 		"ok": true, "timezone": "UTC", "days": days, "maximum_days": statsDaysMaximum,
 		"daily": out,
 		"notes": dailyStatsNotes,
 	})
+}
+
+type contentStatsStore interface {
+	ContentStats(context.Context, int) ([]services.ContentDay, error)
+}
+
+// contentJSON is one day's paste and doc use, split by kind: counts only.
+func contentJSON(d services.ContentDay) map[string]any {
+	return map[string]any{
+		"pastes_created": map[string]int64{"private": d.PastesPrivate, "unlisted": d.PastesUnlisted},
+		"paste_opens":    map[string]int64{"signed": d.PasteOpensSigned, "anonymous": d.PasteOpensAnonymous},
+		"docs_created":   map[string]int64{"own": d.DocsOwn, "group": d.DocsGroup},
+		"doc_versions":   d.DocVersions,
+	}
 }
 
 // unknownMCPClientsNote says what unknown_mcp_clients counts.
@@ -281,6 +315,7 @@ var dailyStatsNotes = []string{
 	"Reader counts include crawlers and cannot distinguish operators; the crawler/other split only reflects whether a User-Agent names itself a crawler.",
 	"Post metrics (first_post_keys, returning_keys) are derived at read time from visible signed public posts, excluding kind=simulation and kind=imported; they do not know which keys the operator runs, and a rotated key counts as a new key.",
 	"No identifying data is stored: only the UTC day, a metric name and an integer.",
+	"content counts paste and shared-doc use on every day, today so far: pastes created (private or unlisted), answered paste opens (signed or anonymous), docs created (owned by a key or by a group) and doc versions written, a doc's first included. Counts only.",
 	"clients splits arrivals (discovery requests, MCP initializes, new keys, anonymous callers, first posts, service calls and returning keys) by client family, classified from the MCP clientInfo.name and the User-Agent, which are then discarded. Only written counts are served. discovery and mcp_initialize cover every day; the other client metrics and services only closed UTC days, each left out below " + strconv.Itoa(board.ClientCountMinimum) + ". " + unknownMCPClientsNote,
 }
 

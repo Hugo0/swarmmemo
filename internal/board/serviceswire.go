@@ -41,6 +41,8 @@ type servicesState struct {
 	notaryKey  ed25519.PrivateKey         // nil unless SERVICES names notary, runs, screen or paste
 	screener   services.TextScreener      // screen's classifier; nil unless MODERATION is on
 	leaker     services.LeakScreener      // screen.leak's classifier (mode full); nil unless MODERATION is on
+	// content caches ContentStats (contentwire.go) for contentStatsTTL.
+	content contentStatsCache
 }
 
 func (s *Store) openServices() error {
@@ -515,6 +517,10 @@ func serviceError(err error) error {
 		case "screen_text_limit":
 			return screenTextLimit(sent)
 		}
+	}
+	// An argument-level refusal names the argument and what it takes.
+	if e.Code == "invalid_service_data" && e.Message != "" {
+		return problem(400, e.Code, e.Message+" Each method's args are in services.list.")
 	}
 	switch e.Code {
 	case "signature_required":

@@ -84,6 +84,8 @@ func (*memory) Describe() Descriptor {
 var (
 	memoryKeyRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 	agentRE     = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// agentRule is the refusal of an agent argument.
+	agentRule = "agent must be an agent's key fingerprint: 64 lowercase hex digits."
 )
 
 // ValidMemoryKey reports whether k is a memory key: 1–256 bytes of letters,
@@ -142,15 +144,18 @@ func parsePut(raw json.RawMessage) (memoryPut, error) {
 	if a.Value != nil && len(*a.Value) > MemoryValueBytes {
 		return a, tooLarge("invalid_service_data", len(*a.Value), MemoryValueBytes)
 	}
-	if a.Value == nil || strings.ContainsRune(*a.Value, 0) {
-		return a, refusal("invalid_service_data")
+	if a.Value == nil {
+		return a, badArg("value is required: a string.")
+	}
+	if strings.ContainsRune(*a.Value, 0) {
+		return a, badArg("value must be a string without NUL.")
 	}
 	switch a.Visibility {
 	case "":
 		a.Visibility = "private" // an overwrite without visibility is private again
 	case "private", "public":
 	default:
-		return a, refusal("invalid_service_data")
+		return a, badArg(`visibility must be "private" or "public".`)
 	}
 	return a, nil
 }
@@ -163,8 +168,11 @@ func parseKeyArgs(raw json.RawMessage, agentAllowed bool) (memoryKeyArgs, error)
 	if err := memoryKeyError(a.Key); err != nil {
 		return a, err
 	}
-	if a.Agent != "" && (!agentAllowed || !agentRE.MatchString(a.Agent)) {
-		return a, refusal("invalid_service_data")
+	if a.Agent != "" && !agentAllowed {
+		return a, badArg("agent is not an argument of this method: it acts on your own memory.")
+	}
+	if a.Agent != "" && !agentRE.MatchString(a.Agent) {
+		return a, badArg(agentRule)
 	}
 	return a, nil
 }
@@ -340,7 +348,7 @@ func (m *memory) owner(ctx context.Context, q allowance.Querier, s allowance.Sub
 		return s.ID, true, nil
 	}
 	if !agentRE.MatchString(agent) {
-		return "", false, refusal("invalid_service_data")
+		return "", false, badArg(agentRule)
 	}
 	if m.accounts == nil {
 		return "", false, refusal("service_unavailable")
@@ -383,9 +391,9 @@ func (m *memory) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 		}
 		limit := int64(MemoryListPageMax)
 		if a.Limit != nil {
-			n, ok := Integer(a.Limit, MemoryListPageMax)
-			if !ok || n < 1 {
-				return nil, refusal("invalid_service_data")
+			n, err := intArg(a.Limit, "limit", "", 1, MemoryListPageMax)
+			if err != nil {
+				return nil, err
 			}
 			limit = n
 		}

@@ -425,10 +425,33 @@ class FreeCallTests(unittest.TestCase):
         self.assertEqual(self.parse("call", "screen", "leak", "{}", "--max-cost", "7").max_cost, 7)
         sent = []
         with patch.object(memo, "load_key", return_value=None), \
+             patch.object(memo.Client, "method_operation", lambda self, *a: "service.call"), \
              patch.object(memo.Client, "service_call", lambda self, *a: sent.append(a) or {"ok": True}), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(memo.main(["--key", "KEY.json", "call", "screen", "leak", '{"text":"hello"}']), 0)
         self.assertEqual(sent, [("screen", "leak", {"text": "hello"}, 0, None)])
+
+    def test_call_sends_a_read_as_service_read(self):
+        """call picks service.read for a method the catalogue marks as a read, signed with --key."""
+        catalogue = {"ok": True, "data": {"services": [{"id": "paste", "methods": [
+            {"name": "create", "operation": "service.call"}, {"name": "list", "operation": "service.read"}]}]}}
+        key, sent = memo.crypto()[0].from_private_bytes(bytes(32)), []
+
+        def fake(self, path, body=None):
+            if path == "/api/services" and body is None:
+                return catalogue
+            sent.append(body)
+            return {"ok": True}
+        with patch.object(memo, "load_key", return_value=key), patch.object(memo.Client, "_request", fake), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(memo.main(["--key", "KEY.json", "call", "paste", "list", '{"limit":20}']), 0)
+            self.assertEqual(memo.main(["--key", "KEY.json", "call", "paste", "create", '{"text":"x"}', "--max-cost", "4"]), 0)
+            self.assertEqual(memo.main(["--key", "KEY.json", "call", "paste", "unlisted", "{}"]), 0)
+        read, call, unknown = sent
+        self.assertEqual((read["operation"], json.loads(read["data"])), ("service.read", {"schema": 1, "method": "list", "args": {"limit": 20}}))
+        self.assertTrue(read.get("signature") and "request_id" not in read)
+        self.assertEqual((call["operation"], json.loads(call["data"])["max_cost"]), ("service.call", 4))
+        self.assertEqual(unknown["operation"], "service.call")  # the server names what is wrong
 
 
 @unittest.skipUnless(os.environ.get("SWARMMEMO_TEST_BINARY"), "set SWARMMEMO_TEST_BINARY for a real board")

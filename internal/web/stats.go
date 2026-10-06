@@ -47,6 +47,9 @@ type statsView struct {
 	// X402 is the pay-per-call relay's spend; nil while x402 is off or
 	// unconfigured (stats_moderation.go).
 	X402 *x402View
+	// Content is paste and shared-doc use; nil while neither is enabled
+	// (stats_moderation.go).
+	Content *contentView
 }
 
 type statTile struct{ Label, Value, Note string }
@@ -242,6 +245,7 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	v.Allowance = buildAllowanceSection(ctx, service, a.Generated)
 	v.Moderation = buildModerationStats(ctx, service)
 	v.X402 = buildX402Stats(ctx, service)
+	v.Content = buildContentStats(ctx, service)
 	return v, nil
 }
 

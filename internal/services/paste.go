@@ -163,7 +163,7 @@ func parsePasteCreate(raw json.RawMessage) (pasteSpec, error) {
 		return pasteSpec{}, err
 	}
 	if a.Text == nil {
-		return pasteSpec{}, refusal("invalid_service_data")
+		return pasteSpec{}, badArg("text is required: a string.")
 	}
 	s := pasteSpec{text: *a.Text, title: a.Title, visibility: a.Visibility, notary: a.Notary}
 	if len(s.text) > PasteTextBytes {
@@ -172,20 +172,23 @@ func parsePasteCreate(raw json.RawMessage) (pasteSpec, error) {
 	if len(s.title) > contentTitleBytes {
 		return s, tooLarge("invalid_service_data", len(s.title), contentTitleBytes)
 	}
-	if !validContentText(s.text) || !validTitle(s.title) {
-		return s, refusal("invalid_service_data")
+	if !validContentText(s.text) {
+		return s, badArg("text must be UTF-8 without NUL.")
+	}
+	if !validTitle(s.title) {
+		return s, badArg("title must be one line of UTF-8 without control characters.")
 	}
 	switch s.visibility {
 	case "":
 		s.visibility = "private"
 	case "private", "unlisted":
 	default:
-		return s, refusal("invalid_service_data")
+		return s, badArg(`visibility must be "private" or "unlisted".`)
 	}
 	if a.ExpiresIn != nil {
-		n, ok := Integer(a.ExpiresIn, PasteExpiryMax)
-		if !ok || n < PasteExpiryMin {
-			return s, refusal("invalid_service_data")
+		n, err := intArg(a.ExpiresIn, "expires_in", "seconds", PasteExpiryMin, PasteExpiryMax)
+		if err != nil {
+			return s, err
 		}
 		s.expiresIn = n
 	}
@@ -203,7 +206,7 @@ func parsePasteOpen(raw json.RawMessage) (pasteOpenArgs, error) {
 		return a, err
 	}
 	if !contentIDRE.MatchString(a.ID) {
-		return a, refusal("invalid_service_data")
+		return a, badArg(contentIDRule)
 	}
 	return a, nil
 }
@@ -216,7 +219,7 @@ func parsePasteRef(raw json.RawMessage) (string, error) {
 		return "", err
 	}
 	if !contentIDRE.MatchString(a.ID) {
-		return "", refusal("invalid_service_data")
+		return "", badArg(contentIDRule)
 	}
 	return a.ID, nil
 }
@@ -534,16 +537,16 @@ func (p *paste) Read(ctx context.Context, q allowance.Querier, c Call) (json.Raw
 		}
 		before, limit := int64(1<<62), int64(20)
 		if a.Before != nil {
-			n, ok := Integer(a.Before, 1<<53)
-			if !ok {
-				return nil, refusal("invalid_service_data")
+			n, err := intArg(a.Before, "before", "", 0, 1<<53)
+			if err != nil {
+				return nil, err
 			}
 			before = n
 		}
 		if a.Limit != nil {
-			n, ok := Integer(a.Limit, PasteListPageMax)
-			if !ok || n < 1 {
-				return nil, refusal("invalid_service_data")
+			n, err := intArg(a.Limit, "limit", "", 1, PasteListPageMax)
+			if err != nil {
+				return nil, err
 			}
 			limit = n
 		}

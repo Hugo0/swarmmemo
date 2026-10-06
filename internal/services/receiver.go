@@ -314,18 +314,18 @@ func parseReceiverCreate(raw json.RawMessage) (receiverSpec, error) {
 		return s, tooLarge("invalid_service_data", len(a.Label), ReceiverLabelBytes)
 	}
 	if !utf8.ValidString(a.Label) || strings.ContainsAny(a.Label, "\x00\r\n") {
-		return s, refusal("invalid_service_data")
+		return s, badArg("label must be one line of UTF-8.")
 	}
 	if a.HMACSecret != "" && (len(a.HMACSecret) < ReceiverHMACMin || len(a.HMACSecret) > ReceiverHMACMax || !receiverHMACRE.MatchString(a.HMACSecret)) {
-		return s, refusal("invalid_service_data")
+		return s, badArg("hmac_secret must be " + itoa(ReceiverHMACMin) + " to " + itoa(ReceiverHMACMax) + " printable ASCII characters without spaces.")
 	}
 	if len(a.AllowFrom) > ReceiverAllowMax {
-		return s, refusal("invalid_service_data")
+		return s, badArg("allow_from must list at most " + itoa(ReceiverAllowMax) + " addresses or CIDR ranges.")
 	}
 	for _, v := range a.AllowFrom {
 		n, err := parseAllow(v)
 		if err != nil {
-			return s, refusal("invalid_service_data")
+			return s, badArg("allow_from must list IP addresses or CIDR ranges.")
 		}
 		s.allow = append(s.allow, n)
 		s.allowText = append(s.allowText, n.String())
@@ -360,7 +360,7 @@ func parseReceiverRef(raw json.RawMessage) (string, error) {
 		return "", err
 	}
 	if !receiverIDRE.MatchString(a.ID) {
-		return "", refusal("invalid_service_data")
+		return "", badArg("id must be a receiver ID: 32 lowercase hex digits.")
 	}
 	return a.ID, nil
 }
@@ -581,21 +581,21 @@ func (r *receiver) Read(ctx context.Context, q allowance.Querier, c Call) (json.
 		var after int64
 		limit := int64(10)
 		if a.After != nil {
-			n, ok := Integer(a.After, 1<<53)
-			if !ok {
-				return nil, refusal("invalid_service_data")
+			n, err := intArg(a.After, "after", "", 0, 1<<53)
+			if err != nil {
+				return nil, err
 			}
 			after = n
 		}
 		if a.Limit != nil {
-			n, ok := Integer(a.Limit, ReceiverItemsPageMax)
-			if !ok || n < 1 {
-				return nil, refusal("invalid_service_data")
+			n, err := intArg(a.Limit, "limit", "", 1, ReceiverItemsPageMax)
+			if err != nil {
+				return nil, err
 			}
 			limit = n
 		}
 		if a.Receiver != "" && !receiverIDRE.MatchString(a.Receiver) {
-			return nil, refusal("invalid_service_data")
+			return nil, badArg("receiver must be a receiver ID: 32 lowercase hex digits.")
 		}
 		query := "SELECT " + itemColumns + ",body FROM receiver_items WHERE account=? AND seq>?"
 		args := []any{account, after}

@@ -212,19 +212,22 @@ func parseWakeup(raw json.RawMessage, now int64) (wakeupSpec, error) {
 	}
 	s := wakeupSpec{key: a.Key}
 	if !wakeupKeyRE.MatchString(a.Key) {
-		return s, refusal("invalid_service_data")
+		return s, badArg(wakeupKeyRule)
 	}
 	horizon := now + WakeupHorizon
 	if a.Every != nil {
 		return parseRecurring(s, a, now)
 	}
 	if a.Count != nil {
-		return s, refusal("invalid_service_data")
+		return s, badArg("count goes with every, for a recurring wake-up.")
 	}
 	if a.At != nil {
+		if a.On != "" || a.Room != "" || a.Until != nil {
+			return s, badArg("at takes no on, room or until; send one or the other.")
+		}
 		at, ok := Integer(a.At, horizon)
-		if !ok || at <= now || a.On != "" || a.Room != "" || a.Until != nil {
-			return s, refusal("invalid_service_data")
+		if !ok || at <= now {
+			return s, badArg(wakeupTimeRule("at"))
 		}
 		s.kind, s.dueAt = "time", at
 		return s, nil
@@ -232,24 +235,32 @@ func parseWakeup(raw json.RawMessage, now int64) (wakeupSpec, error) {
 	switch a.On {
 	case "reply", "mention", "message", "received":
 		if a.Room != "" {
-			return s, refusal("invalid_service_data")
+			return s, badArg(`room goes only with on "room".`)
 		}
 	case "room":
 		if !wakeupRoomRE.MatchString(a.Room) {
-			return s, refusal("invalid_service_data")
+			return s, badArg("room must be a room name or @ and an agent's 64-hex fingerprint.")
 		}
 	default:
-		return s, refusal("invalid_service_data")
+		return s, badArg(`Send at (a time), every (a period) or on: "reply", "mention", "message", "received" or "room".`)
 	}
 	s.kind, s.room, s.until = a.On, a.Room, horizon
 	if a.Until != nil {
 		until, ok := Integer(a.Until, horizon)
 		if !ok || until <= now {
-			return s, refusal("invalid_service_data")
+			return s, badArg(wakeupTimeRule("until"))
 		}
 		s.until, s.untilSet = until, true
 	}
 	return s, nil
+}
+
+// wakeupKeyRule is the refusal of a wake-up key.
+const wakeupKeyRule = `key must be 1 to 64 letters, digits, ".", "_" or "-".`
+
+// wakeupTimeRule is the refusal of a wake-up time argument.
+func wakeupTimeRule(name string) string {
+	return name + " must be an integer Unix time in seconds, after now and at most " + itoa(WakeupHorizon/86400) + " days ahead."
 }
 
 // parseRecurring parses {"every","at"?,"until"?,"count"?}: the first firing
@@ -257,33 +268,36 @@ func parseWakeup(raw json.RawMessage, now int64) (wakeupSpec, error) {
 // the horizon), at most count of them.
 func parseRecurring(s wakeupSpec, a wakeupScheduleArgs, now int64) (wakeupSpec, error) {
 	horizon := now + WakeupHorizon
-	every, ok := Integer(a.Every, WakeupEveryMax)
-	if !ok || every < WakeupEveryMin || a.On != "" || a.Room != "" {
-		return s, refusal("invalid_service_data")
+	if a.On != "" || a.Room != "" {
+		return s, badArg("every takes no on or room; send one or the other.")
+	}
+	every, err := intArg(a.Every, "every", "seconds", WakeupEveryMin, WakeupEveryMax)
+	if err != nil {
+		return s, err
 	}
 	s.kind, s.every, s.dueAt, s.until = "time", every, now+every, horizon
 	if a.At != nil {
 		at, ok := Integer(a.At, horizon)
 		if !ok || at <= now {
-			return s, refusal("invalid_service_data")
+			return s, badArg(wakeupTimeRule("at"))
 		}
 		s.dueAt, s.atSet = at, true
 	}
 	if a.Until != nil {
 		until, ok := Integer(a.Until, horizon)
 		if !ok {
-			return s, refusal("invalid_service_data")
+			return s, badArg(wakeupTimeRule("until"))
 		}
 		s.until, s.untilSet = until, true
 	}
 	if s.dueAt > s.until {
-		return s, refusal("invalid_service_data")
+		return s, badArg("until must not be before the first firing (at, else now plus every).")
 	}
 	s.count = (s.until-s.dueAt)/every + 1
 	if a.Count != nil {
-		count, ok := Integer(a.Count, WakeupFiresMax)
-		if !ok || count < 1 {
-			return s, refusal("invalid_service_data")
+		count, err := intArg(a.Count, "count", "", 1, WakeupFiresMax)
+		if err != nil {
+			return s, err
 		}
 		s.count, s.countSet = min(s.count, count), true
 	}
@@ -537,16 +551,16 @@ func (w *wakeup) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 		var after int64
 		limit := int64(WakeupPageMax)
 		if a.After != nil {
-			n, ok := Integer(a.After, 1<<53)
-			if !ok {
-				return nil, refusal("invalid_service_data")
+			n, err := intArg(a.After, "after", "", 0, 1<<53)
+			if err != nil {
+				return nil, err
 			}
 			after = n
 		}
 		if a.Limit != nil {
-			n, ok := Integer(a.Limit, WakeupPageMax)
-			if !ok || n < 1 {
-				return nil, refusal("invalid_service_data")
+			n, err := intArg(a.Limit, "limit", "", 1, WakeupPageMax)
+			if err != nil {
+				return nil, err
 			}
 			limit = n
 		}

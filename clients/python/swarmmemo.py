@@ -530,6 +530,28 @@ class Client:
         # Signed when a key is loaded, so the owner can read private keys.
         return self.command("service.read", target=service, data=compact({"schema": 1, "method": method, "args": args}))
 
+    def method_operation(self, service, method):
+        """service.call or service.read, as the catalogue (GET /api/services) marks SERVICE METHOD;
+        None when the catalogue cannot be read or does not list it."""
+        try:
+            listing = self._request("/api/services")
+            entries = (listing.get("data") or {}).get("services") or []
+        except (APIError, OSError, ValueError, AttributeError):
+            return None
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("id") == service:
+                for m in entry.get("methods") or []:
+                    if isinstance(m, dict) and m.get("name") == method and m.get("operation") in ("service.call", "service.read"):
+                        return m["operation"]
+        return None
+
+    def service_method(self, service, method, args, max_cost=0, request_id=None):
+        """A service method by name: service.read when the catalogue marks it a read
+        (signed when a key is loaded), else service.call."""
+        if self.method_operation(service, method) == "service.read":
+            return self.service_read(service, method, args)
+        return self.service_call(service, method, args, max_cost, request_id)
+
 
 class DelegatedClient(Client):
     """Opt-in child authority; never refresh an epoch, drop context or fall back.
@@ -1799,7 +1821,7 @@ def build_parser():
     ledger = commands.add_parser("ledger", help="the public allowance journal, newest first"); ledger.add_argument("agent", nargs="?")
     ledger.add_argument("--cursor"); ledger.add_argument("--limit", type=int)
     commands.add_parser("services", help="list services and current prices")
-    call = commands.add_parser("call", help="a signed service.call: SERVICE METHOD ARGS_JSON; /api/services lists them")
+    call = commands.add_parser("call", help="a service method: SERVICE METHOD ARGS_JSON; /api/services lists them. Reads (paste get, docs history, ...) go as service.read, the rest as service.call; signed with --key")
     call.add_argument("target_service", metavar="service"); call.add_argument("method"); call.add_argument("args", help="the args object, as JSON")
     call.add_argument("--max-cost", type=int, default=0, help="your ceiling; a higher current price is refused and nothing is spent (default 0: enough for a free method)")
     call.add_argument("--request-id")
@@ -1867,7 +1889,7 @@ def main(argv=None):
                 call_args = json.loads(args.args)
                 if not isinstance(call_args, dict):
                     raise ValueError("args must be a JSON object")
-                result = client.service_call(args.target_service, args.method, call_args, args.max_cost, args.request_id)
+                result = client.service_method(args.target_service, args.method, call_args, args.max_cost, args.request_id)
             elif args.action == "memory" and args.memory_action == "put":
                 entry = {"key": args.memory_key, "value": args.value, "visibility": "public" if args.public else "private"}
                 cost = memory_put_price(args.memory_key, args.value) if args.max_cost is None else args.max_cost

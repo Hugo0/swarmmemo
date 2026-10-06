@@ -7,6 +7,8 @@ package board
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	"swarmmemo/internal/services"
 )
@@ -14,6 +16,44 @@ import (
 // PasteHide is the operator's hide of an abused paste (services.HidePaste).
 func (s *Store) PasteHide(ctx context.Context, id, reason string) (services.PasteView, error) {
 	return services.HidePaste(ctx, s.db, id, reason, s.now().Unix())
+}
+
+// ContentStatsDays is how many UTC days ContentStats keeps; contentStatsTTL
+// how long one computation serves, since each scans the tables.
+const (
+	ContentStatsDays = 90
+	contentStatsTTL  = time.Minute
+)
+
+type contentStatsCache struct {
+	mu    sync.Mutex
+	at    time.Time
+	today int64
+	days  []services.ContentDay
+}
+
+// ContentStats is paste and doc use per UTC day for /stats and
+// /api/stats/daily: the last days days ending today, oldest first, counts
+// only; nil while neither paste nor docs is enabled. It reads through the
+// pool and holds no transaction.
+func (s *Store) ContentStats(ctx context.Context, days int) ([]services.ContentDay, error) {
+	e := s.services.engine
+	if e == nil || days < 1 {
+		return nil, nil
+	}
+	days = min(days, ContentStatsDays)
+	c := &s.services.content
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := s.now()
+	if c.days == nil || now.Sub(c.at) >= contentStatsTTL || now.Before(c.at) || now.Unix()/86400 != c.today {
+		all, err := e.Registry().ReadContentStats(ctx, s.db, now.Unix(), ContentStatsDays)
+		if err != nil || all == nil {
+			return nil, err
+		}
+		c.at, c.today, c.days = now, now.Unix()/86400, all
+	}
+	return c.days[len(c.days)-days:], nil
 }
 
 // contentError maps the paste and docs refusals; nil for any other code.

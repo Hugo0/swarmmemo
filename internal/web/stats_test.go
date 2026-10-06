@@ -1,12 +1,14 @@
 package web
 
 import (
+	"context"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/services"
 )
 
 func TestStatsPageRendersChartsWithoutInlineStyle(t *testing.T) {
@@ -41,6 +43,53 @@ func TestStatsPageRendersChartsWithoutInlineStyle(t *testing.T) {
 	Handler(f.store).ServeHTTP(home, httptest.NewRequest("GET", "/docs", nil))
 	if !strings.Contains(home.Body.String(), `href="/stats"`) {
 		t.Error("footer does not link /stats")
+	}
+}
+
+// contentStatsService answers ContentStats with fixed days over a real store.
+type contentStatsService struct {
+	*board.Store
+	days []services.ContentDay
+}
+
+func (c contentStatsService) ContentStats(_ context.Context, days int) ([]services.ContentDay, error) {
+	return c.days[len(c.days)-min(days, len(c.days)):], nil
+}
+
+// Paste and doc use is on /stats by kind, counts only; the section is absent
+// while neither service is enabled.
+func TestStatsPageShowsPastesAndDocs(t *testing.T) {
+	f := newArticleFixture(t)
+	f.post(board.Command{Room: "lobby", Page: "main", Text: "hello stats"})
+	if body := f.get("/stats").Body.String(); strings.Contains(body, "stats-content") {
+		t.Fatal("/stats draws pastes and docs while neither is enabled")
+	}
+	days := []services.ContentDay{
+		{Day: "2026-10-05", PastesPrivate: 1, DocVersions: 1, DocsOwn: 1},
+		{Day: "2026-10-06", PastesPrivate: 2, PastesUnlisted: 1230, PasteOpensSigned: 4, PasteOpensAnonymous: 5, DocsOwn: 6, DocsGroup: 7, DocVersions: 8},
+	}
+	w := httptest.NewRecorder()
+	Handler(contentStatsService{f.store, days}).ServeHTTP(w, httptest.NewRequest("GET", "/stats", nil))
+	body := w.Body.String()
+	if w.Code != 200 {
+		t.Fatalf("/stats: %d", w.Code)
+	}
+	for _, want := range []string{
+		`<h2 id="stats-content">Pastes and shared docs</h2>`, "last 2 days",
+		"<dt>Pastes created</dt><dd class=\"stat-value\">1,233</dd><dd class=\"stat-note\">1,230 unlisted, 3 private</dd>",
+		"<dt>Paste opens</dt><dd class=\"stat-value\">9</dd><dd class=\"stat-note\">5 without a key</dd>",
+		"<dt>Docs created</dt><dd class=\"stat-value\">14</dd><dd class=\"stat-note\">7 owned by a group</dd>",
+		"<dt>Doc versions</dt><dd class=\"stat-value\">9</dd>",
+		`<tr><th scope="row">2026-10-06</th><td class="num">2</td><td class="num">1,230</td><td class="num">4</td><td class="num">5</td><td class="num">6</td><td class="num">7</td><td class="num">8</td></tr>`,
+		`href="/api/stats/daily"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/stats lacks %q", want)
+		}
+	}
+	// Newest day first.
+	if strings.Index(body, `<th scope="row">2026-10-06</th>`) > strings.Index(body, `<th scope="row">2026-10-05</th>`) {
+		t.Error("the content table is not newest first")
 	}
 }
 

@@ -39,7 +39,7 @@
 {{template "stats-allowance" .}}{{end}}{{if $.TrustLink}}
 <p class="stats-source"><a href="/trust">How the allowance and trust work, illustrated →</a></p>{{end}}
 {{with .Moderation}}{{template "stats-moderation" .}}
-{{end}}{{with .X402}}{{template "stats-x402" .}}
+{{end}}{{with .Content}}{{template "stats-content" .}}{{end}}{{with .X402}}{{template "stats-x402" .}}
 {{end}}<section class="stats-section" aria-labelledby="stats-totals">
 <h2 id="stats-totals">All time</h2>
 <dl class="stat-row stat-row-quiet">{{range .Totals}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
@@ -151,4 +151,18 @@ number, and the parity test holds the page to the API. */}}
 </table></div>
 </details>
 <p class="stats-source">The same numbers as JSON: <a href="/api/stats/x402">/api/stats/x402</a>. <a href="/protocol.md#x402-relay">How the relay works</a></p>
+</section>{{end}}
+
+{{define "stats-content"}}<section class="stats-section" aria-labelledby="stats-content">
+<h2 id="stats-content">Pastes and shared docs</h2>
+<p class="stats-lede">Pastes and docs written over the last {{.Days}} days (UTC, today included), by kind. A paste open is an answered paste.open, with a key or without one. Counts only.</p>
+<dl class="stat-row stat-row-quiet">{{range .Tiles}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
+<details class="stats-table">
+<summary>Pastes and docs by day</summary>
+<div class="table-scroll"><table>
+<thead><tr><th scope="col">Day (UTC)</th><th scope="col" class="num">Private pastes</th><th scope="col" class="num">Unlisted pastes</th><th scope="col" class="num">Opens, signed</th><th scope="col" class="num">Opens, anonymous</th><th scope="col" class="num">Own docs</th><th scope="col" class="num">Group docs</th><th scope="col" class="num">Doc versions</th></tr></thead>
+<tbody>{{range .Rows}}<tr><th scope="row">{{.Day}}</th><td class="num">{{.PastesPrivate}}</td><td class="num">{{.PastesUnlisted}}</td><td class="num">{{.OpensSigned}}</td><td class="num">{{.OpensAnonymous}}</td><td class="num">{{.DocsOwn}}</td><td class="num">{{.DocsGroup}}</td><td class="num">{{.Versions}}</td></tr>{{end}}</tbody>
+</table></div>
+</details>
+<p class="stats-source">The same numbers as JSON: <code>content</code> in <a href="/api/stats/daily">/api/stats/daily</a>. <a href="/tools/paste">Paste</a> and <a href="/tools/docs">Shared docs</a>.</p>
 </section>{{end}}
