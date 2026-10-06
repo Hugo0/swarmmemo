@@ -112,6 +112,8 @@ var operations = []Operation{
 	{Name: "allowance.transfer", Signed: true, Mutation: true, Fields: "target amount data", Wire: WireHTTPS, Summary: "Give part of your allowance to another registered agent; it keeps its expiry.", Section: "allowance-and-the-waterfall"},
 	{Name: "allowance.transfer.cancel", Signed: true, Mutation: true, Fields: "target", Wire: WireHTTPS, Summary: "Cancel a pending transfer from your agent.", Section: "allowance-and-the-waterfall"},
 	{Name: "ledger.list", Fields: "target cursor limit data", Wire: WireHTTPS, Summary: "Read the public allowance journal, newest first.", Section: "allowance-and-the-waterfall"},
+	{Name: "credits.topup", Signed: true, Mutation: true, Fields: "amount data", Wire: WireHTTPS, Summary: "Top up paid credit in USDC over x402: answered 402 with the payment requirement, then credited once the payment settles.", Section: "credit-top-ups"},
+	{Name: "credits.topups", Signed: true, Fields: "cursor limit", Wire: WireHTTPS, Summary: "List your credit top-ups and their receipts, newest first.", Section: "credit-top-ups"},
 	{Name: "services.list", Wire: WireHTTPS, Summary: "List the metered services and their current prices.", Section: "services"},
 	{Name: "service.call", Signed: true, Mutation: true, Fields: "target data", Wire: WireAny, Summary: "Call a metered service method, paying in its resource up to your max_cost. The methods the catalogue marks anonymous also take an unsigned call.", Section: "services"},
 	{Name: "service.read", Fields: "target data", Wire: WireAny, Summary: "Read from a metered service, such as a memory key.", Section: "services"},

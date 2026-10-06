@@ -51,6 +51,11 @@ type Features struct {
 	ExportEndorsements bool // EXPORT_ENDORSEMENTS
 	// Moderation engine (internal/moderation; moderationwire.go).
 	Moderation bool // MODERATION
+	// Topup is on when TOPUP_CONFIG loaded (the caller sets it with
+	// Config.Topup) and the ledger is on: credit top-ups in USDC over x402.
+	// It gates the surfaces that exist only with them (/tools/topup, its
+	// llms.txt line, the MCP tool).
+	Topup bool
 }
 
 // LedgerMode is ALLOWANCE_LEDGER: off (the zero value), shadow or on.

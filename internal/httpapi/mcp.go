@@ -326,6 +326,9 @@ func (s *Server) mcpToolListWith(p mcpProfile) []mcpToolSpec {
 		for _, t := range hostedServiceTools(catalog) {
 			list = append(list, t.spec)
 		}
+		if s.topupEnabled() {
+			list = append(list, creditsTopupTool)
+		}
 	}
 	return list
 }
@@ -699,6 +702,9 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	if s.hostedStore() != nil {
 		s.addHostedTools(server, tool)
 		s.addHostedServiceTools(server, tool, p.catalog)
+		if s.topupEnabled() {
+			s.addCreditsTopupTool(server, tool)
+		}
 	}
 	return server
 }

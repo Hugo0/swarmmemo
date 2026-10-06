@@ -674,15 +674,29 @@ func (l *Ledger) Balance(ctx context.Context, q allowance.Querier, s allowance.S
 // drawn from the day's tier-0 pool, so issuance stays within the budget;
 // paid units come from a funding adapter and never decay. Reason is public.
 func (l *Ledger) Mint(ctx context.Context, q allowance.Querier, account string, r allowance.Resource, b allowance.Bucket, units int64, reason string, now int64) error {
+	_, err := l.mint(ctx, q, account, r, b, units, reason, Ref{}, false, now)
+	return err
+}
+
+// TopUp credits units of paid credit bought with money (a settled x402
+// payment): a paid lot that never decays, journalled as kind topup with ref
+// (its public id). The money has already moved, so the account's lot count
+// never refuses it: past LotsPerAccount it opens a lot of its own. It
+// returns the lot's id.
+func (l *Ledger) TopUp(ctx context.Context, q allowance.Querier, account string, r allowance.Resource, units int64, reason string, ref Ref, now int64) (int64, error) {
+	return l.mint(ctx, q, account, r, allowance.Paid, units, reason, ref, true, now)
+}
+
+func (l *Ledger) mint(ctx context.Context, q allowance.Querier, account string, r allowance.Resource, b allowance.Bucket, units int64, reason string, ref Ref, force bool, now int64) (int64, error) {
 	if units <= 0 || units > maxUnits || !slices.Contains([]allowance.Bucket{allowance.Granted, allowance.Earned, allowance.Paid}, b) {
-		return refuse("invalid_amount")
+		return 0, refuse("invalid_amount")
 	}
 	if account == "" || reason == "" || len(reason) > 512 {
-		return errors.New("ledger: mint needs an account and a public reason of 1–512 bytes")
+		return 0, errors.New("ledger: mint needs an account and a public reason of 1–512 bytes")
 	}
 	o, err := l.open(ctx, q, r, now)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	x := lot{Account: account, Bucket: b, OriginTier: 0, OriginAccount: account, IssuedDay: o.day, DecayedDay: o.day, Initial: units, Remaining: units}
 	kind := "topup"
@@ -690,9 +704,9 @@ func (l *Ledger) Mint(ctx context.Context, q allowance.Querier, account string, 
 	case allowance.Granted, allowance.Earned:
 		if o.d.Pools[0].avail() < units {
 			if err = o.save(ctx, q); err != nil {
-				return err
+				return 0, err
 			}
-			return refuse("global_quota_exhausted")
+			return 0, refuse("global_quota_exhausted")
 		}
 		o.d.Pools[0].Claimed += units
 		x.HalfLife, kind = o.p.GrantedHalfLifeDays, "grant"
@@ -701,13 +715,16 @@ func (l *Ledger) Mint(ctx context.Context, q allowance.Querier, account string, 
 		}
 	}
 	id, err := creditLot(ctx, q, r, x, now)
+	if e := (*allowance.Err)(nil); err != nil && force && errors.As(err, &e) && e.Code == "recipient_limit" {
+		id, err = insertLot(ctx, q, r, x, now)
+	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	e := o.entry(kind, account, units)
-	e.Bucket, e.LotID, e.Detail = b, id, reason
+	e.Bucket, e.LotID, e.Detail, e.Ref = b, id, reason, ref
 	if err = journal(ctx, q, e); err != nil {
-		return err
+		return 0, err
 	}
-	return o.save(ctx, q)
+	return id, o.save(ctx, q)
 }

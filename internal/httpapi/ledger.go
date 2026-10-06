@@ -102,6 +102,27 @@ func (s *Server) paramsRoute(w http.ResponseWriter, r *http.Request, rest string
 	jsonResponse(w, 200, map[string]any{"ok": true, "data": map[string]any{"namespace": namespace, "current": current, "versions": versions}})
 }
 
+// topupStore is the board's credit top-ups (board.Store).
+type topupStore interface {
+	TopupEnabled() bool
+	TopupCapabilities() map[string]any
+}
+
+// topupEnabled reports whether credit top-ups are on: the feature flag the
+// operator's TOPUP_CONFIG set, and the board agreeing.
+func (s *Server) topupEnabled() bool {
+	store, ok := s.service.(topupStore)
+	return ok && s.cfg.Features.Topup && store.TopupEnabled()
+}
+
+// topupCapabilities is the /capabilities "topup" object; nil omits it.
+func (s *Server) topupCapabilities() map[string]any {
+	if !s.topupEnabled() {
+		return nil
+	}
+	return s.service.(topupStore).TopupCapabilities()
+}
+
 // allowanceCapabilities is the /capabilities "allowance" object; nil omits it.
 func (s *Server) allowanceCapabilities() map[string]any {
 	if s.cfg.Features.Ledger == board.LedgerOff {

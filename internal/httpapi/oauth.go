@@ -1148,7 +1148,7 @@ func securitySchemes(name string) []map[string]any {
 	if isHostedSignedRead(name) {
 		return []map[string]any{noauth, oauth}
 	}
-	if _, _, hosted := hostedToolHints(name); hosted || isHostedServiceTool(name) {
+	if _, _, hosted := hostedToolHints(name); hosted || isHostedServiceTool(name) || name == creditsTopupTool.Name {
 		return []map[string]any{oauth}
 	}
 	return []map[string]any{noauth}

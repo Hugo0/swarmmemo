@@ -5,6 +5,7 @@ import (
 	"html"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,7 +24,8 @@ func (s *featuredService) Features() board.Features { return s.features }
 func toolPage(t *testing.T, services []string, path string) (int, string) {
 	t.Helper()
 	w := httptest.NewRecorder()
-	Handler(&featuredService{features: board.Features{Services: services}}).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+	// "topup" stands for the top-up flag (board.Features.Topup), not a service.
+	Handler(&featuredService{features: board.Features{Services: services, Topup: slices.Contains(services, "topup")}}).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 	return w.Code, w.Body.String()
 }
 
@@ -32,8 +34,8 @@ func toolPage(t *testing.T, services []string, path string) (int, string) {
 // title and description for the searches that find it, and keeps write and
 // receive URLs inside code blocks, never as links.
 func TestToolPages(t *testing.T) {
-	all := []string{"fetch", "receiver", "memory", "wakeup", "x402", "notary"}
-	for _, path := range []string{"/tools", "/tools/fetch", "/tools/receive", "/tools/memory", "/tools/wakeup", "/tools/journal", "/tools/paid-apis", "/tools/notary"} {
+	all := []string{"fetch", "receiver", "memory", "wakeup", "x402", "notary", "topup"}
+	for _, path := range []string{"/tools", "/tools/topup", "/tools/fetch", "/tools/receive", "/tools/memory", "/tools/wakeup", "/tools/journal", "/tools/paid-apis", "/tools/notary"} {
 		if code, _ := toolPage(t, nil, path); code != 404 {
 			t.Errorf("%s while its service is off: %d", path, code)
 		}
@@ -53,6 +55,7 @@ func TestToolPages(t *testing.T) {
 		"/tools/journal":   {"resume an AI agent session", "python3 swarmmemo.py --key agent.json command", ""},
 		"/tools/paid-apis": {"Paid APIs for AI agents", "curl -s https://swarmmemo.com/v1/command", ""},
 		"/tools/notary":    {"timestamp notary", "curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode", ""},
+		"/tools/topup":     {"Top up AI agent credit", "{&#34;operation&#34;:&#34;credits.topup&#34;", ""},
 		"/tools/verify":    {"transparency log", "curl -s &#39;https://swarmmemo.com/api/log/proof?message=MESSAGE_ID&#39;", ""},
 	}
 	for path, w := range want {
@@ -116,7 +119,7 @@ func TestToolPages(t *testing.T) {
 	if paths := ToolPaths(board.Features{}); strings.Join(paths, " ") != "/tools/verify" {
 		t.Errorf("tool paths without services: %v", paths)
 	}
-	if paths := ToolPaths(board.Features{Services: all}); len(paths) != len(publicdocs.ToolPaths()) || len(paths) != len(want) {
+	if paths := ToolPaths(board.Features{Services: all, Topup: true}); len(paths) != len(publicdocs.ToolPaths()) || len(paths) != len(want) {
 		t.Errorf("tool paths with every service: %v; the test checks %d pages", paths, len(want))
 	}
 }

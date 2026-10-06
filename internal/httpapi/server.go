@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"sync"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -17,6 +16,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -27,9 +27,9 @@ import (
 )
 
 type Config struct {
-	PublicURL           string
+	PublicURL string
 	// IndexNowKey, when set, is served at /KEY.txt for IndexNow submissions.
-	IndexNowKey string
+	IndexNowKey         string
 	ServiceID           string
 	AdminToken          string
 	TrustLoopbackProxy  bool
@@ -216,7 +216,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _, isMCP := mcpPath(r.URL.Path)
 	if !isMCP && !strings.HasPrefix(r.URL.Path, "/admin/") && !strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Expose-Headers", "X-Next-Cursor, Retry-After, Link")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Next-Cursor, Retry-After, Link, PAYMENT-REQUIRED, PAYMENT-RESPONSE")
 	}
 	defer func() {
 		if recover() != nil {
@@ -498,6 +498,9 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command
 		}
 	}
 	res, err := s.service.Execute(r.Context(), c, s.peer(r))
+	if c.Operation == "credits.topup" {
+		x402Headers(w, res, err)
+	}
 	if err != nil {
 		s.errors.Add(1)
 		writeError(w, err)
@@ -656,7 +659,51 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	// A credit top-up's x402 payment (board/topup.go) travels in a header,
+	// as x402 clients send it; only credits.topup reads it.
+	if payment, err := paymentHeader(r); err != nil {
+		writeError(w, err)
+		return
+	} else if payment != "" {
+		r = r.WithContext(board.WithPayment(r.Context(), payment))
+	}
 	s.execute(w, withVia(r, via), cmd)
+}
+
+// paymentHeader is the x402 payment a request carries: PAYMENT-SIGNATURE
+// (x402 v2) or X-PAYMENT (the v1 name, still sent by many clients), one
+// value, bounded.
+func paymentHeader(r *http.Request) (string, error) {
+	var values []string
+	for _, name := range []string{"PAYMENT-SIGNATURE", "X-PAYMENT"} {
+		values = append(values, r.Header.Values(name)...)
+	}
+	switch {
+	case len(values) == 0:
+		return "", nil
+	case len(values) > 1 || len(values[0]) > services.TopupPaymentBytes:
+		return "", &board.Error{Status: 400, Code: "payment_invalid", Message: fmt.Sprintf("Send one payment, in PAYMENT-SIGNATURE or X-PAYMENT, of at most %d bytes.", services.TopupPaymentBytes)}
+	}
+	return values[0], nil
+}
+
+// x402Headers sets the x402 response headers of a credit top-up: the
+// payment requirement on its 402, the settlement on its success.
+func x402Headers(w http.ResponseWriter, res board.Result, err error) {
+	if err != nil {
+		var be *board.Error
+		if errors.As(err, &be) && be.Code == "payment_required" {
+			if d, ok := be.Details.(map[string]any); ok {
+				if h, ok := d["payment_required"].(string); ok {
+					w.Header().Set("PAYMENT-REQUIRED", h)
+				}
+			}
+		}
+		return
+	}
+	if h, ok := res.Data["payment_response"].(string); ok {
+		w.Header().Set("PAYMENT-RESPONSE", h)
+	}
 }
 
 // knownOperation gates /v1/command on the operation table (board.Operations).

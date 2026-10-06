@@ -65,6 +65,7 @@ type Store struct {
 	config             Config
 	generation         string
 	cursorCipher       cipher.AEAD
+	topupKey           []byte // credit top-up quotes' HMAC key (topup.go)
 	cursorMu           sync.RWMutex
 	now                func() time.Time
 	privateSlots       chan struct{}
@@ -399,6 +400,8 @@ func Open(path string, config Config) (*Store, error) {
 	if config.NotaryKeyFile == "" && path != ":memory:" {
 		config.NotaryKeyFile = filepath.Join(filepath.Dir(path), services.NotaryKeyFileName)
 	}
+	// Credit top-ups are on exactly when configured with the ledger on.
+	config.Features.Topup = config.Topup != nil && config.Features.Ledger == LedgerOn
 	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), activityGate: make(chan struct{}, 1), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}}
 	if err = db.QueryRow("SELECT value FROM meta WHERE key='generation'").Scan(&s.generation); err != nil {
 		return fail(err)
@@ -411,6 +414,9 @@ func Open(path string, config Config) (*Store, error) {
 		return fail(err)
 	}
 	if err = s.openHosted(); err != nil {
+		return fail(err)
+	}
+	if err = s.openTopup(); err != nil {
 		return fail(err)
 	}
 	secret := make([]byte, 32)
@@ -768,6 +774,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 					}
 					return s.serviceRetry(ctx, tx, caller, result, now)
 				}
+				if cmd.Operation == "credits.topup" {
+					return s.topupRetry(ctx, tx, a, result)
+				}
 				return result, nil
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
@@ -943,6 +952,10 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readServices(ctx, tx, c, a, now)
 	case "service.call":
 		return s.callService(ctx, tx, c, a, now)
+	case "credits.topup":
+		return s.creditsTopup(ctx, tx, c, a, now)
+	case "credits.topups":
+		return s.readTopups(ctx, tx, c, a)
 	case "trust.get":
 		return s.readTrust(ctx, tx, c, a, now)
 	case "vouch":

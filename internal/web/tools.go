@@ -9,7 +9,8 @@ import (
 // the guides with their FAQ as JSON-LD; /tools/fetch and /tools/receive add a
 // small form a person can use (assets/tools.js). Each is served, listed in
 // the sitemap and linked from /llms.txt only while its service is enabled
-// (a Core page always); the index, while any service's page is.
+// (a Core page always, the top-up page while top-ups are on); the index,
+// while any service's page is.
 
 // ToolServed reports whether path is a tool page this deployment serves.
 func ToolServed(f board.Features, path string) bool {
@@ -19,11 +20,13 @@ func ToolServed(f board.Features, path string) bool {
 		return false
 	case service == publicdocs.Core:
 		return true
+	case service == publicdocs.Topup:
+		return f.Topup
 	case service != "":
 		return f.ServiceEnabled(service)
 	}
 	for _, s := range publicdocs.ToolPages {
-		if s != "" && s != publicdocs.Core && f.ServiceEnabled(s) {
+		if s != "" && s != publicdocs.Core && (f.ServiceEnabled(s) || s == publicdocs.Topup && f.Topup) {
 			return true
 		}
 	}

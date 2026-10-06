@@ -344,6 +344,9 @@ type Config struct {
 	// X402 is the x402 relay's loaded configuration (services.LoadX402Config);
 	// nil leaves x402 unconfigured even when SERVICES names it.
 	X402 *services.X402Config
+	// Topup is the credit top-up configuration (services.LoadTopupConfig,
+	// TOPUP_CONFIG); nil leaves top-ups off. They also need the ledger on.
+	Topup *services.TopupConfig
 	// Moderation configures the engine when Features.Moderation is on.
 	Moderation ModerationConfig
 	// NotaryKeyFile is the notary key file (NOTARY_KEY_FILE), which signs

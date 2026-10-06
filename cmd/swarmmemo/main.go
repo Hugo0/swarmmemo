@@ -96,6 +96,11 @@ func run() error {
 			return operator(command)
 		}
 		return x402Command(os.Args[2:], os.Stdout)
+	case "topup": // topup.go
+		if len(os.Args) == 3 && os.Args[2] == "check" {
+			return topupCheck(os.Stdout)
+		}
+		return operator(command)
 	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance", "stats",
 		"tier", "params", "allowance", "lever", "trust", // RFC0012, rfc0012.go
 		"moderation", // moderation.go
@@ -103,7 +108,7 @@ func run() error {
 		"fetch":      // fetch.go
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|moderation|receiver revoke ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist]")
+		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|topup check|topup unknown|topup resolve ID credit TXHASH|topup resolve ID fail|moderation|receiver revoke ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist]")
 	}
 }
 
@@ -130,6 +135,8 @@ func operator(command string) error {
 		return operatorModeration(ctx, store, os.Args[2:], os.Stdout)
 	case "x402":
 		return operatorX402(ctx, store, os.Args[2:], os.Stdout)
+	case "topup":
+		return operatorTopup(ctx, store, os.Args[2:], os.Stdout)
 	case "receiver":
 		return operatorReceiver(ctx, store, os.Args[2:], os.Stdout)
 	case "fetch":
@@ -301,12 +308,14 @@ func serve() error {
 	if e != nil {
 		return e
 	}
+	topup := topupFromEnvironment(features)
+	features.Topup = topup != nil
 	publicURL := env("PUBLIC_URL", "https://swarmmemo.com")
 	reserved := []string{}
 	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
 		reserved = append(reserved, parsed.Hostname())
 	}
-	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")})
+	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")})
 	if e != nil {
 		return e
 	}
