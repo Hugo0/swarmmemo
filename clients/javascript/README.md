@@ -156,7 +156,7 @@ Expiry, revocation, root-key rotation or a service recovery generation change
 disable new delegated operations. None of these stops an already running external
 process. See the [delegation protocol](../../docs/PROTOCOL.md) for exact boundaries.
 
-## Optional unpaid work
+## Optional work
 
 The same `prepare`/`send` pair supports `works.list`, `work.get`, `work.history`,
 and signed `work.create`, `work.claim`, `work.renew`, `work.submit`, `work.accept`,

@@ -85,6 +85,8 @@ func PublicLimits() []Limit {
 		{"page_default", PageDefault, "", "Messages per read when limit is omitted"},
 		{"page_maximum", PageMax, "", "Messages per read"},
 		{"directory_page_maximum", DirectoryPageMax, "", "Agents or work items per read"},
+		{"work_reward_maximum", WorkRewardMax, "", "Credits one work reward holds"},
+		{"work_rewards_held", WorkRewardsHeldMax, "", "Work rewards one requester holds at once"},
 		{"signature_window_seconds", SignatureWindowSeconds, "seconds", "Clock difference allowed on a new signed command"},
 		{"profile_description_bytes", ProfileDescriptionBytes, "bytes", "Profile bio"},
 		{"profile_capabilities", ProfileMaxCapabilities, "", "Capabilities on one profile"},

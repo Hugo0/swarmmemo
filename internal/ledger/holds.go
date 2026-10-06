@@ -18,8 +18,9 @@ import (
 	"swarmmemo/internal/allowance"
 )
 
-// ledgerService marks the holds that back pending transfers; they are
-// settled by the transfer, never by Commit, Refund or hold expiry.
+// ledgerService marks the holds that back pending transfers and escrows
+// (escrow.go); they are settled by the transfer or the escrow, never by
+// Commit, Refund or hold expiry.
 const ledgerService = "ledger"
 
 // Reserve holds up to max units for a remote or async call; ttl is in seconds.

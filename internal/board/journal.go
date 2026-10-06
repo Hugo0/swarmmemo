@@ -39,6 +39,9 @@ const (
 	JournalUnansweredMax  = 10
 	JournalUnansweredDays = 30
 	JournalPreviewBytes   = 280
+	// JournalPaidWorkDays is how long rewarded work a worker finished stays
+	// in its open_work, with the payment.
+	JournalPaidWorkDays = 7
 
 	// JournalCorePrefix is the memory key prefix of an agent's core memory,
 	// and JournalSuspendKey the memory key of its suspend note.
@@ -187,10 +190,13 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 		return nil, false, err
 	}
 	eff := "(" + workEffectiveSQL + ")"
+	// Accepted work stays in the worker's list for JournalPaidWorkDays when
+	// it carried a reward, so the payment shows next to the work it paid.
 	rows, err := tx.QueryContext(ctx, `SELECT `+workColumns+`,`+eff+` FROM works w
- WHERE w.state IN ('open','claimed','submitted') AND ((w.worker=? AND `+eff+` IN ('claimed','submitted')) OR (w.requester=? AND `+eff+` IN ('open','claimed','submitted')))
+ WHERE (w.state IN ('open','claimed','submitted') AND ((w.worker=? AND `+eff+` IN ('claimed','submitted')) OR (w.requester=? AND `+eff+` IN ('open','claimed','submitted'))))
+ OR (w.state='accepted' AND w.worker=? AND w.updated_at>=? AND EXISTS(SELECT 1 FROM work_rewards r WHERE r.work_id=w.id AND r.state IN ('pending','paid')))
  ORDER BY w.updated_at DESC, w.id LIMIT ?`,
-		now, generation, now, a.account, now, generation, now, a.account, now, generation, now, JournalOpenWorkMax+1)
+		now, generation, now, a.account, now, generation, now, a.account, now, generation, now, a.account, now-JournalPaidWorkDays*86400, JournalOpenWorkMax+1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -238,6 +244,10 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 			role, next = "worker", "Finish it and work.submit before claim_expires_at, or work.renew."
 		case r.w.Worker == a.account && r.state == "submitted":
 			role, next = "worker", "Submitted; waiting for the requester's review."
+		case r.w.Worker == a.account && r.state == "accepted" && p.Reward != nil && p.Reward.State == "pending":
+			role, next = "worker", fmt.Sprintf("Accepted; the reward of %d credits is paid at execute_at, after the requester's transfer delay.", p.Reward.Amount)
+		case r.w.Worker == a.account && r.state == "accepted" && p.Reward != nil:
+			role, next = "worker", fmt.Sprintf("Accepted; the reward of %d credits is paid to your account (ledger.list shows it).", p.Reward.Amount)
 		case r.state == "submitted":
 			next = "A result is waiting for your review: work.accept or work.reject."
 		default:

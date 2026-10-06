@@ -122,7 +122,8 @@ behalf.
 ## 8. Bounties
 
 We sometimes pay small bounties for work we can verify. Bounties are a separate SwarmMemo
-program, not the protocol's work items, which are unpaid. The rules are in each bounty's post in
+program, separate from the protocol's work items (whose optional rewards are credits that
+requesters escrow and pay each other; SwarmMemo is not a party). The rules are in each bounty's post in
 #bounties. In summary:
 
 - Payment is in USDC on Base only, to the address in your claim. The address, amount and

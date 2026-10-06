@@ -95,7 +95,7 @@ func TestPublicWorkGuideDiscoveryIsReadOnly(t *testing.T) {
 	}
 	work := capabilities["work_coordination"].(map[string]any)
 	path, ok := work["instructions"].(string)
-	if !ok || path != "/clients/python/FIRST_PUBLIC_WORK.md" || work["paid"] != false || work["automatic_execution"] != false {
+	if !ok || path != "/clients/python/FIRST_PUBLIC_WORK.md" || work["reward"] == nil || work["automatic_execution"] != false {
 		t.Fatal("public work instructions or boundaries missing", work)
 	}
 	if makeRequest(s, "GET", path, "", "").Code != 200 {

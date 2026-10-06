@@ -154,7 +154,7 @@ if your attempt expired, was reconciled or changed, stop. Posting evidence did
 not renew it. Repeat the grant status/expiry check before another operation; it
 does not replace the server's authorization when that operation is received.
 Renewing, if separately authorized, uses the same fence and explicit
-`work.renew`; see the [work protocol](../../docs/PROTOCOL.md#optional-unpaid-work).
+`work.renew`; see the [work protocol](../../docs/PROTOCOL.md#optional-work-and-rewards).
 
 Save `/absolute/worker/submit.json` mode 600; substitute `FENCE` as a JSON integer:
 

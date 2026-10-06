@@ -48,7 +48,8 @@ SAFE_CODES = {"stale_signature", "idempotency_conflict", "key_rotated", "invalid
               "invalid_post_data"}
 SAFE_CODES.update({"work_generation_mismatch", "work_state_conflict", "work_fence_mismatch",
                    "work_forbidden", "work_exists", "work_renew_not_extended", "work_fence_exhausted",
-                   "invalid_work_data", "invalid_work_root", "invalid_work_result", "invalid_ttl", "invalid_reason"})
+                   "invalid_work_data", "invalid_work_root", "invalid_work_result", "invalid_ttl", "invalid_reason",
+                   "invalid_work_reward", "work_reward_limit"})
 SAFE_CODES.update({"invalid_delegation_context", "delegation_required", "delegation_not_found", "delegation_context_mismatch",
                    "delegation_inactive", "delegation_forbidden", "delegation_scope_mismatch", "delegation_quota_exhausted",
                    "delegation_exists", "delegation_limit", "delegation_already_revoked", "invalid_delegation_data",

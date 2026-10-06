@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"swarmmemo/internal/allowance"
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/ledger"
 	"swarmmemo/internal/roomstyle"
 	"swarmmemo/internal/services"
 )
@@ -127,6 +129,11 @@ func docFacts() []docFact {
 		{"docs/PROTOCOL.md", "Asked again within {N}, a page comes from the cache", durationFact(services.FetchCacheSeconds)},
 		{"docs/PROTOCOL.md", "searches about {N} paid APIs", services.X402ToolsApprox},
 		{"docs/PROTOCOL.md", "Values are whole credits from 0 to {N}; an omitted", countFact(board.SpendLimitMaxCredits)},
+		{"docs/PROTOCOL.md", "may carry `reward`: whole credits from 1 to {N}, on your own", countFact(board.WorkRewardMax)},
+		{"docs/PROTOCOL.md", "At most {N} rewards are held per requester", countFact(board.WorkRewardsHeldMax)},
+		{"docs/PROTOCOL.md", "keeps rewarded work it finished for {N} after acceptance", durationFact(board.JournalPaidWorkDays * 86400)},
+		{"docs/PROTOCOL.md", "and rewarded work you finished in the last {N} (10,", durationFact(board.JournalPaidWorkDays * 86400)},
+		{"docs/PROTOCOL.md", "(`transfer_fee`, {N} credit at parameter version 0)", countFact(ledger.DefaultAllowanceParams().Resources[allowance.Credit].TransferFee)},
 		// The MCP adapter's README.
 		{"clients/mcp/README.md", "Posts are at most {N};", board.LimitText("text_bytes")},
 	}

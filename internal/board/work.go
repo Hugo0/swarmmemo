@@ -29,37 +29,39 @@ CREATE TABLE IF NOT EXISTS work_transitions (
  signature TEXT NOT NULL, payload TEXT NOT NULL, accepted_at INTEGER NOT NULL,
  fence INTEGER NOT NULL, generation TEXT NOT NULL, state TEXT NOT NULL,
  PRIMARY KEY(work_id,sequence));
-`
+` + workRewardSchema
 
 const WorkDefaultTTL int64 = 7 * 86400
 const WorkMaxTTL int64 = 30 * 86400
 
 var workIDRE = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
-// Work is a scoped projection, not a verified skill, job payment or execution claim.
+// Work is a scoped projection, not a verified skill or execution claim; Reward is
+// the credit held for it, if any.
 // Generation belongs to the stored fence; ServiceGeneration is the current epoch.
 type Work struct {
-	ID                string    `json:"id"`
-	Room              string    `json:"room"`
-	Title             string    `json:"title"`
-	Capabilities      []string  `json:"capabilities"`
-	Simulated         bool      `json:"simulated"`
-	State             string    `json:"state"`
-	StoredState       string    `json:"stored_state"`
-	Generation        string    `json:"generation"`
-	ServiceGeneration string    `json:"service_generation"`
-	ServiceID         string    `json:"service_id"`
-	CreatedAt         int64     `json:"created_at"`
-	UpdatedAt         int64     `json:"updated_at"`
-	Deadline          int64     `json:"deadline"`
-	Fence             int64     `json:"fence"`
-	ClaimExpiresAt    int64     `json:"claim_expires_at"`
-	RequesterAuthor   string    `json:"requester_author"`
-	Requester         AgentRef  `json:"requester"`
-	Worker            *AgentRef `json:"worker,omitempty"`
-	ResultID          string    `json:"result_id,omitempty"`
-	ResultAvailable   bool      `json:"result_available"`
-	AttemptGrantID    string    `json:"attempt_grant_id,omitempty"`
+	ID                string      `json:"id"`
+	Room              string      `json:"room"`
+	Title             string      `json:"title"`
+	Capabilities      []string    `json:"capabilities"`
+	Simulated         bool        `json:"simulated"`
+	State             string      `json:"state"`
+	StoredState       string      `json:"stored_state"`
+	Generation        string      `json:"generation"`
+	ServiceGeneration string      `json:"service_generation"`
+	ServiceID         string      `json:"service_id"`
+	CreatedAt         int64       `json:"created_at"`
+	UpdatedAt         int64       `json:"updated_at"`
+	Deadline          int64       `json:"deadline"`
+	Fence             int64       `json:"fence"`
+	ClaimExpiresAt    int64       `json:"claim_expires_at"`
+	RequesterAuthor   string      `json:"requester_author"`
+	Requester         AgentRef    `json:"requester"`
+	Worker            *AgentRef   `json:"worker,omitempty"`
+	ResultID          string      `json:"result_id,omitempty"`
+	ResultAvailable   bool        `json:"result_available"`
+	AttemptGrantID    string      `json:"attempt_grant_id,omitempty"`
+	Reward            *WorkReward `json:"reward,omitempty"`
 }
 
 type WorkAck struct {
@@ -91,12 +93,13 @@ type workData struct {
 	Schema            int
 	Generation, Title string
 	Capabilities      []string
+	Reward            int64
 }
 
 func parseWorkData(raw string, create bool) (workData, error) {
 	var d workData
 	invalid := func() (workData, error) {
-		return workData{}, problem(400, "invalid_work_data", "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs.")
+		return workData{}, problem(400, "invalid_work_data", "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits.")
 	}
 	if len(raw) > 8192 || !utf8.ValidString(raw) {
 		return invalid()
@@ -133,6 +136,11 @@ func parseWorkData(raw string, create bool) (workData, error) {
 				return invalid()
 			}
 			err = json.Unmarshal(value, &d.Capabilities)
+		case "reward":
+			if !create {
+				return invalid()
+			}
+			err = json.Unmarshal(value, &d.Reward)
 		default:
 			return invalid()
 		}
@@ -149,6 +157,9 @@ func parseWorkData(raw string, create bool) (workData, error) {
 	want := 2
 	if create {
 		want = 4
+		if seen["reward"] {
+			want = 5
+		}
 	}
 	if len(seen) != want || d.Schema != 1 || !workIDRE.MatchString(d.Generation) {
 		return invalid()
@@ -156,6 +167,9 @@ func parseWorkData(raw string, create bool) (workData, error) {
 	if create {
 		if strings.TrimSpace(d.Title) == "" || len(d.Title) > 160 || strings.ContainsRune(d.Title, 0) || d.Capabilities == nil || len(d.Capabilities) > 16 {
 			return invalid()
+		}
+		if seen["reward"] && (d.Reward < 1 || d.Reward > WorkRewardMax) {
+			return workData{}, invalidWorkReward()
 		}
 		caps := map[string]bool{}
 		for _, cap := range d.Capabilities {
@@ -267,6 +281,9 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		if (root.Kind != "request" && root.Kind != "simulation") || root.Parent != "" || root.PublicKey == "" || root.Signature == "" {
 			return Result{}, problem(400, "invalid_work_root", "Work requires your own signed root request, or a message labeled kind=simulation.")
+		}
+		if d.Reward != 0 && root.Kind != "request" {
+			return Result{}, invalidWorkReward()
 		}
 		ttl := c.TTL
 		if ttl == 0 {
@@ -397,6 +414,28 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if _, err = tx.ExecContext(ctx, "UPDATE works SET attempt_grant_id=? WHERE id=?", w.AttemptGrantID, w.ID); err != nil {
 		return Result{}, err
 	}
+	// The reward moves with the transition, in its transaction: held on
+	// create, paid on accept, released on cancel. Reject reopens the work
+	// and keeps it held.
+	switch c.Operation {
+	case "work.create":
+		if d.Reward != 0 {
+			err = s.holdWorkReward(ctx, tx, a, w, d.Reward, now)
+		}
+	case "work.accept", "work.cancel":
+		r, e := loadWorkReward(ctx, tx, w.ID)
+		if e != nil {
+			return Result{}, e
+		}
+		if c.Operation == "work.accept" {
+			err = s.payWorkReward(ctx, tx, r, w, now)
+		} else {
+			err = s.releaseWorkReward(ctx, tx, r, "cancelled", now)
+		}
+	}
+	if err != nil {
+		return Result{}, err
+	}
 	grantID := ""
 	if a.grant != nil {
 		grantID = a.grant.ID
@@ -433,6 +472,9 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 			return Work{}, e
 		}
 		p.Worker = &identity
+	}
+	if p.Reward, err = s.projectWorkReward(ctx, tx, w.ID); err != nil {
+		return Work{}, err
 	}
 	if w.Result != "" {
 		if p.ResultAvailable, err = eligibleWorkResult(ctx, tx, w.Result, w, root); err != nil {
@@ -594,6 +636,13 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 		transitions = transitions[:limit]
 	}
 	r := Result{Data: map[string]any{"work_id": w.ID, "simulated": root.Kind == "simulation", "service_generation": generation, "transitions": transitions, "has_more": hasMore}}
+	reward, err := s.projectWorkReward(ctx, tx, w.ID)
+	if err != nil {
+		return Result{}, workReadError(err)
+	}
+	if reward != nil {
+		r.Data["reward"] = reward
+	}
 	if hasMore {
 		r.NextCursor = s.encodeConversationCursor(conversationCursor{Domain: "work.history", Scope: w.ID, After: transitions[len(transitions)-1].Sequence})
 	}

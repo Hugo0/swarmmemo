@@ -251,11 +251,17 @@ func (s *Store) SweepAllowance(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	n, err := s.ledger.led.Sweep(ctx, tx, s.now().Unix(), ledger.SweepMax)
+	now := s.now().Unix()
+	n, err := s.ledger.led.Sweep(ctx, tx, now, ledger.SweepMax)
 	if err != nil {
 		return 0, err
 	}
-	return n, tx.Commit()
+	// Then the work rewards whose escrow the sweep or the deadline settles.
+	m, err := s.settleWorkRewards(ctx, tx, now, ledger.SweepMax)
+	if err != nil {
+		return 0, err
+	}
+	return n + m, tx.Commit()
 }
 
 // ledgerCharge is charge() with ALLOWANCE_LEDGER=on.

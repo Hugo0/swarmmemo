@@ -10,7 +10,6 @@ package ledger
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 
 	"swarmmemo/internal/allowance"
@@ -214,7 +213,7 @@ func (l *Ledger) transfer(ctx context.Context, q allowance.Querier, o *op, from 
 		if err = holdParts(ctx, q, o, from.ID, hold, parts, ref); err != nil {
 			return Transfer{}, err
 		}
-	} else if _, _, err = moveParts(ctx, q, o.r, o.version, from.ID, to, id, parts, false, o.now); err != nil {
+	} else if _, _, err = moveParts(ctx, q, o.r, o.version, from.ID, to, id, parts, false, "allowance.transfer", o.now); err != nil {
 		return Transfer{}, err
 	}
 	doneAt := int64(0)
@@ -242,10 +241,12 @@ func (l *Ledger) transfer(ctx context.Context, q allowance.Querier, o *op, from 
 // moveParts moves units from the sender's lots to recipient lots with the
 // same bucket, expiry, decay clock and origin, hops + 1. Units of a lot that
 // expired meanwhile (a pending transfer's held free units) expire instead.
-func moveParts(ctx context.Context, q allowance.Querier, r allowance.Resource, version int64, from, to, id string, parts []part, held bool, now int64) (moved int64, byBucket map[allowance.Bucket]int64, err error) {
+// op names the journal lines: allowance.transfer, or work_reward for an
+// escrow's payment.
+func moveParts(ctx context.Context, q allowance.Querier, r allowance.Resource, version int64, from, to, id string, parts []part, held bool, op string, now int64) (moved int64, byBucket map[allowance.Bucket]int64, err error) {
 	byBucket = map[allowance.Bucket]int64{}
 	day := now / 86400
-	ref := Ref{Service: ledgerService, Op: "allowance.transfer", PublicRef: id}
+	ref := Ref{Service: ledgerService, Op: op, PublicRef: id}
 	for _, p := range parts {
 		released := int64(0)
 		if held {
@@ -402,25 +403,19 @@ func (l *Ledger) execute(ctx context.Context, q allowance.Querier, t Transfer, n
 	if err != nil {
 		return err
 	}
-	var parts []part
-	for _, p := range hp {
-		rows, err := q.QueryContext(ctx, "SELECT "+lotCols+" FROM ledger_lots WHERE id=?", p.LotID)
-		if err != nil {
-			return err
-		}
-		var x lot
-		found := false
-		for rows.Next() {
-			x, err = scanLot(rows.Scan)
-			found = err == nil
-		}
-		rows.Close()
-		if err != nil || !found {
-			return fmt.Errorf("ledger: lot %d of transfer %s: %v", p.LotID, t.ID, err)
-		}
-		parts = append(parts, part{Lot: x, Take: p.Units})
+	parts, err := heldParts(ctx, q, t.ID, hp)
+	if err != nil {
+		return err
 	}
-	moved, _, err := moveParts(ctx, q, t.Resource, version, t.From, t.To, t.ID, parts, true, now)
+	op := "allowance.transfer"
+	var method string
+	if err = q.QueryRowContext(ctx, "SELECT method FROM ledger_holds WHERE id=?", hold).Scan(&method); err != nil {
+		return err
+	}
+	if method == escrowMethod {
+		op = "work_reward"
+	}
+	moved, _, err := moveParts(ctx, q, t.Resource, version, t.From, t.To, t.ID, parts, true, op, now)
 	if err != nil {
 		return err
 	}

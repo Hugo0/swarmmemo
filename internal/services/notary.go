@@ -278,20 +278,47 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	if today >= NotaryPerAccountDay || !c.Subject.Signed && today >= NotaryPerAnonymousDay {
 		return Result{}, refusal("notary_limit")
 	}
-	pub := key.Public().(ed25519.PublicKey)
-	var seq int64
-	if err = tx.QueryRowContext(ctx, "INSERT INTO notary_receipts(hash,time,account) VALUES(?,?,?) RETURNING seq", hash, c.Now, c.Subject.ID).Scan(&seq); err != nil {
+	r, err := insertReceipt(ctx, tx, key, n.serviceID, c.Subject.ID, hash, c.Now)
+	if err != nil {
 		return Result{}, err
 	}
-	p := NotaryPayload{Schema: NotarySchema, ServiceID: n.serviceID, KeyID: keyID(pub), Seq: seq, Time: c.Now, Hash: hash}
-	payload, signature := signPayload(key, p)
-	if _, err = tx.ExecContext(ctx, "UPDATE notary_receipts SET key_id=?, payload=?, signature=? WHERE seq=?", p.KeyID, payload, signature, seq); err != nil {
-		return Result{}, err
-	}
-	r := NotaryReceipt{Schema: NotarySchema, Hash: hash, Time: c.Now, Seq: seq, ServiceID: n.serviceID, KeyID: p.KeyID,
-		PublicKey: base64.RawURLEncoding.EncodeToString(pub), Payload: payload, Signature: signature}
 	body, _ := json.Marshal(map[string]any{"receipt": r, "duplicate": false})
 	return Result{Body: body, Used: c.Price.For(0), Public: public}, nil
+}
+
+// insertReceipt stores and signs a new receipt for hash.
+func insertReceipt(ctx context.Context, tx *sql.Tx, key ed25519.PrivateKey, serviceID, account, hash string, now int64) (NotaryReceipt, error) {
+	pub := key.Public().(ed25519.PublicKey)
+	var seq int64
+	if err := tx.QueryRowContext(ctx, "INSERT INTO notary_receipts(hash,time,account) VALUES(?,?,?) RETURNING seq", hash, now, account).Scan(&seq); err != nil {
+		return NotaryReceipt{}, err
+	}
+	p := NotaryPayload{Schema: NotarySchema, ServiceID: serviceID, KeyID: keyID(pub), Seq: seq, Time: now, Hash: hash}
+	payload, signature := signPayload(key, p)
+	if _, err := tx.ExecContext(ctx, "UPDATE notary_receipts SET key_id=?, payload=?, signature=? WHERE seq=?", p.KeyID, payload, signature, seq); err != nil {
+		return NotaryReceipt{}, err
+	}
+	return NotaryReceipt{Schema: NotarySchema, Hash: hash, Time: now, Seq: seq, ServiceID: serviceID, KeyID: p.KeyID,
+		PublicKey: base64.RawURLEncoding.EncodeToString(pub), Payload: payload, Signature: signature}, nil
+}
+
+// StampHash is the notary's stamp for a record the board makes itself (a
+// paid work reward), in the command's transaction: the same receipt a stamp
+// gives, read back the same way, without a charge or the per-agent count
+// (account names the board's record kind, not an agent). The first receipt
+// for a hash stands and is returned again.
+func StampHash(ctx context.Context, tx *sql.Tx, key ed25519.PrivateKey, serviceID, account, hash string, now int64) (NotaryReceipt, error) {
+	if len(key) != ed25519.PrivateKeySize || !notaryHashRE.MatchString(hash) {
+		return NotaryReceipt{}, refusal("service_unavailable")
+	}
+	if serviceID == "" {
+		serviceID = "swarmmemo.com"
+	}
+	existing, err := readReceipt(ctx, tx, hash, key)
+	if !errors.Is(err, errNoReceipt) {
+		return existing, err
+	}
+	return insertReceipt(ctx, tx, key, serviceID, account, hash, now)
 }
 
 var errNoReceipt = errors.New("notary: no receipt")
