@@ -33,9 +33,11 @@ type conversationRow struct {
 type MessageScreen struct {
 	State      string             `json:"state"`
 	Categories map[string]float64 `json:"categories,omitempty"`
-	Model      string             `json:"model,omitempty"`
-	Withheld   bool               `json:"withheld"`
-	Reason     string             `json:"reason,omitempty"`
+	// ClassifierVersion is services.ClassifierVersion once screened; the
+	// classifier's own model id stays in message_screens, operator-only.
+	ClassifierVersion string `json:"classifier_version,omitempty"`
+	Withheld          bool   `json:"withheld"`
+	Reason            string `json:"reason,omitempty"`
 }
 
 // Protection is one account's server-held messaging settings (§5.1),

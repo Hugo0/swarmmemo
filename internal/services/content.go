@@ -177,7 +177,7 @@ func (s *sharedScreen) run(ctx context.Context, e *Engine, key string, payer all
 		}
 		return nil, "unpaid", nil
 	}
-	kept, err := store(ctx, tx, string(canonicalJSON(verdict)), used, now)
+	kept, err := store(ctx, tx, verdict.StoredJSON(), used, now)
 	if err != nil {
 		return nil, "", err
 	}

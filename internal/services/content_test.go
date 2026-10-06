@@ -158,6 +158,10 @@ func TestPasteUnlistedOpensByIDScreenedOnce(t *testing.T) {
 	if get(stored, "result", "text") != nil {
 		t.Fatalf("the stored answer keeps the text: %+v", stored)
 	}
+	// The verdict names our classifier version, never the classifier's model.
+	if get(first, "result", "verdict", "classifier_version") != services.ClassifierVersion || strings.Contains(fmt.Sprint(first, stored), "jev-") {
+		t.Fatalf("a paste verdict names the classifier model: %+v", first)
+	}
 	// The owner paid the screen, once; a second open reuses the verdict.
 	if _, _, err = r.callAs(subjectOf("carol"), "paste", "open", map[string]any{"id": id}); err != nil {
 		t.Fatal(err)

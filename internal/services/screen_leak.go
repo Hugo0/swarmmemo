@@ -141,7 +141,9 @@ type LeakPayload struct {
 	Categories      map[string]float64 `json:"categories"`
 	Verdict         string             `json:"verdict"`
 	Threshold       float64            `json:"threshold"`
-	Model           string             `json:"model"`
+	// Model is ClassifierVersion in new receipts (empty in
+	// mode patterns); earlier receipts carry the classifier's model id.
+	Model string `json:"model"`
 }
 
 // VerifyLeakReceipt checks a leak receipt offline against the public key
@@ -192,7 +194,7 @@ func (s *screen) runLeak(ctx context.Context, c Call) (Result, error) {
 		if categories, ok = leakCategories(res); !ok || !screenModelRE.MatchString(res.Model) || res.CostMicroUSD <= 0 {
 			return Result{}, refusal("upstream_failed")
 		}
-		model, used = res.Model, min(c.Price.For(int64(len(p.text))), screenFee+res.CostMicroUSD)
+		model, used = ClassifierVersion, min(c.Price.For(int64(len(p.text))), screenFee+res.CostMicroUSD)
 	}
 	salt := make([]byte, screenSaltBytes)
 	if _, err = rand.Read(salt); err != nil {
@@ -209,7 +211,7 @@ func (s *screen) runLeak(ctx context.Context, c Call) (Result, error) {
 	}
 	body := canonicalJSON(map[string]any{
 		"verdict": leakscan.Verdict(findings, categories, p.threshold, nil), "threshold": p.threshold, "mode": p.mode, "audience": p.audience,
-		"findings": findings, "categories": categories, "model": model, "patterns_version": leakscan.Version,
+		"findings": findings, "categories": categories, "classifier_version": model, "patterns_version": leakscan.Version,
 		"text_sha256": payload.TextSHA256, "text_bytes": payload.TextBytes, "receipt": receipt,
 		"note": "Findings are byte offsets into your text; redacted replaces each with «REDACTED:rule» and is in this answer only. A signal, not a guarantee: hold means a finding's category holds, warn that every finding only warns (the pattern list's actions), pass that nothing was found. Patterns: /api/screen/leak-patterns",
 	})

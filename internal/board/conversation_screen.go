@@ -506,7 +506,10 @@ func (s *Store) screenForDelivery(ctx context.Context, tx *sql.Tx, reader actor,
 		if !ok || m.Sealed || row.account == reader.account {
 			continue
 		}
-		screen := &MessageScreen{State: row.state, Categories: row.scores, Model: row.model}
+		screen := &MessageScreen{State: row.state, Categories: row.scores}
+		if row.model != "" {
+			screen.ClassifierVersion = services.ClassifierVersion
+		}
 		switch row.state {
 		case "":
 			screen.State, screen.Reason = "pending", "not screened yet"

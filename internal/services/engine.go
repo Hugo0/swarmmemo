@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"regexp"
 	"strings"
@@ -229,6 +230,28 @@ func (e *Engine) Anonymous(service, data string) bool {
 	return ok && m.Write && m.Anonymous
 }
 
+// methodError is the refusal of a method desc lacks (known false), or of one
+// sent as the wrong operation: it names the service's methods. The name is
+// echoed only as ParseData's methodRE admits it (lowercase ASCII, at most 32
+// characters); anything else is left out.
+func methodError(desc Descriptor, method string, known, write bool) error {
+	quoted := ""
+	if methodRE.MatchString(method) {
+		quoted = ` "` + method + `"`
+	}
+	if known && write {
+		return badArg(fmt.Sprintf(`%s method%s is a read; send it as service.read.`, desc.ID, quoted))
+	}
+	if known {
+		return badArg(fmt.Sprintf(`%s method%s is a write; send it as service.call.`, desc.ID, quoted))
+	}
+	names := make([]string, 0, len(desc.Methods))
+	for _, m := range desc.Methods {
+		names = append(names, m.Name)
+	}
+	return badArg(fmt.Sprintf(`%s has no method%s; its methods are %s.`, desc.ID, quoted, strings.Join(names, ", ")))
+}
+
 // resolve finds the provider and method a request names.
 func (e *Engine) resolve(req Request, d Data, write bool) (Provider, Descriptor, Method, error) {
 	p, err := e.cfg.Registry.Lookup(req.Service)
@@ -238,7 +261,7 @@ func (e *Engine) resolve(req Request, d Data, write bool) (Provider, Descriptor,
 	desc := p.Describe()
 	m, ok := desc.method(d.Method)
 	if !ok || m.Write != write {
-		return nil, Descriptor{}, Method{}, refusal("invalid_service_data")
+		return nil, Descriptor{}, Method{}, methodError(desc, d.Method, ok, write)
 	}
 	if len(d.Args) > m.ArgsMax {
 		return nil, Descriptor{}, Method{}, tooLarge("invalid_service_data", len(d.Args), m.ArgsMax)

@@ -64,10 +64,12 @@ CREATE INDEX IF NOT EXISTS event_flags_root ON event_flags(root);
 `
 
 // Quality is a post's usefulness to other agents, as the moderation screen's
-// model judged it: a probability from 0 to 1 and the model that gave it.
+// classifier judged it: a probability from 0 to 1 and what gave it
+// (moderation.PublicModel: services.ClassifierVersion for the classifier);
+// the model id stays in event_quality, operator-only.
 type Quality struct {
-	Score float64 `json:"score"`
-	Model string  `json:"model"`
+	Score             float64 `json:"score"`
+	ClassifierVersion string  `json:"classifier_version"`
 }
 
 // RankParams are the ranking's weights. One vote is worth 1.
@@ -380,12 +382,13 @@ func attachQuality(ctx context.Context, tx *sql.Tx, events []Message) error {
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		var q Quality
-		if err = rows.Scan(&id, &q.Score, &q.Model); err != nil {
+		var score float64
+		var model string
+		if err = rows.Scan(&id, &score, &model); err != nil {
 			return err
 		}
 		for _, i := range at[id] {
-			events[i].Quality = &Quality{Score: q.Score, Model: q.Model}
+			events[i].Quality = &Quality{Score: score, ClassifierVersion: moderation.PublicModel(model)}
 		}
 	}
 	return rows.Err()

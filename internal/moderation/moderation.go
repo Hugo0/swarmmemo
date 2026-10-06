@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/allowance"
+	"swarmmemo/internal/services"
 )
 
 // Surface names what is being screened. The five built in are below;
@@ -483,6 +484,34 @@ func bound(s string, n int) string {
 	return s
 }
 
+// PublicModel is a decision's model as the public sees it: our own
+// classifiers by name (rules, egress, moderation) and the screening
+// classifier as services.ClassifierVersion, never its model id, which stays
+// in the operator's records; "" stays "".
+func PublicModel(model string) string {
+	if model == "" {
+		return ""
+	}
+	parts := strings.Split(model, "+")
+	for i, p := range parts {
+		switch p {
+		case "rules", "egress", "moderation":
+		default:
+			parts[i] = services.ClassifierVersion
+		}
+	}
+	return strings.Join(parts, "+")
+}
+
+// publicModel is PublicModel in a public reason: "none" when no classifier
+// decided.
+func publicModel(model string) string {
+	if model == "" {
+		return "none"
+	}
+	return PublicModel(model)
+}
+
 // publicReason is the reason the public sees, in the operator's existing
 // format: "auto-screen: LABEL (p=0.93, model=MODEL, policy=vN); policy: hide
 // only clearly malicious". Only fixed labels and numbers reach it, never
@@ -495,10 +524,7 @@ func publicReason(d Decision, sp *SurfacePolicy, pol *Policy) string {
 	if d.Category != "" {
 		label = sp.label(d.Category)
 	}
-	model := d.Model
-	if model == "" {
-		model = "none"
-	}
+	model := publicModel(d.Model)
 	prefix := "auto-screen: "
 	switch {
 	case d.Burst:
@@ -506,7 +532,7 @@ func publicReason(d Decision, sp *SurfacePolicy, pol *Policy) string {
 	case d.Action == Hold:
 		prefix = "auto-screen: held for review: "
 	case d.Degraded != "" && d.Action != d.Proposed:
-		prefix = "auto-screen: screen unavailable (" + d.Degraded + "): "
+		prefix = "auto-screen: screen unavailable (" + strings.Replace(d.Degraded, "jev_", "classifier_", 1) + "): "
 	}
 	r := fmt.Sprintf("%s%s (p=%.2f, model=%s, policy=v%d); policy: hide only clearly malicious", prefix, label, math.Min(math.Max(d.P, 0), 1), model, pol.Version)
 	if !reasonRE.MatchString(r) {

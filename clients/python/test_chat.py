@@ -417,11 +417,11 @@ class ArgumentOrderTests(unittest.TestCase):
 
 
 class FreeCallTests(unittest.TestCase):
-    """A free service call needs no --max-cost (T57 I4)."""
+    """A service call needs no --max-cost: left out, it costs the quote for its arguments (T57 I4)."""
     parse = ArgumentOrderTests.parse
 
-    def test_call_needs_no_max_cost_for_a_free_method(self):
-        self.assertEqual(self.parse("call", "screen", "leak", '{"text":"hello"}').max_cost, 0)
+    def test_call_needs_no_max_cost(self):
+        self.assertIsNone(self.parse("call", "screen", "leak", '{"text":"hello"}').max_cost)
         self.assertEqual(self.parse("call", "screen", "leak", "{}", "--max-cost", "7").max_cost, 7)
         sent = []
         with patch.object(memo, "load_key", return_value=None), \
@@ -429,7 +429,27 @@ class FreeCallTests(unittest.TestCase):
              patch.object(memo.Client, "service_call", lambda self, *a: sent.append(a) or {"ok": True}), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(memo.main(["--key", "KEY.json", "call", "screen", "leak", '{"text":"hello"}']), 0)
-        self.assertEqual(sent, [("screen", "leak", {"text": "hello"}, 0, None)])
+        self.assertEqual(sent, [("screen", "leak", {"text": "hello"}, None, None)])
+
+    def test_paid_call_without_max_cost_sends_the_quote_ceiling(self):
+        """A paid method works without --max-cost: max_cost is the server's no-ceiling
+        default (2^40, as a no-key call that leaves it out), so the quote is what it
+        costs; --max-cost still sets your own ceiling."""
+        key, sent = memo.crypto()[0].from_private_bytes(bytes(32)), []
+        catalogue = {"ok": True, "data": {"services": [{"id": "paste", "methods": [{"name": "create", "operation": "service.call"}]}]}}
+
+        def fake(self, path, body=None):
+            if path == "/api/services" and body is None:
+                return catalogue
+            sent.append(body)
+            return {"ok": True}
+        with patch.object(memo, "load_key", return_value=key), patch.object(memo.Client, "_request", fake), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(memo.main(["--key", "KEY.json", "call", "paste", "create", '{"text":"x"}']), 0)
+            self.assertEqual(memo.main(["--key", "KEY.json", "call", "paste", "create", '{"text":"x"}', "--max-cost", "3"]), 0)
+            self.assertEqual(memo.main(["--key", "KEY.json", "call", "paste", "create", '{"text":"x"}', "--max-cost", "0"]), 0)
+        self.assertEqual([json.loads(b["data"])["max_cost"] for b in sent], [1 << 40, 3, 0])
+        self.assertEqual(memo.QUOTE_CEILING, 1 << 40)  # services.MaxCostMax, the largest max_cost the server takes
 
     def test_call_sends_a_read_as_service_read(self):
         """call picks service.read for a method the catalogue marks as a read, signed with --key."""

@@ -270,6 +270,12 @@ def compact(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+# QUOTE_CEILING is the max_cost a call sends without --max-cost: no ceiling of
+# its own, so it costs the quote for its arguments (the server reserves and
+# charges the quote, never max_cost), as a no-key call that leaves it out.
+QUOTE_CEILING = 1 << 40
+
+
 def memory_put_price(key, value):
     """A memory put costs 256 + key + value UTF-8 bytes of memory_bytes."""
     return 256 + len(key.encode("utf-8")) + len(value.encode("utf-8"))
@@ -522,8 +528,10 @@ class Client:
             stream.write(body); stream.flush(); os.fsync(stream.fileno())
         return {"ok": True, "blob": metadata}
 
-    def service_call(self, service, method, args, max_cost, request_id=None):
-        data = compact({"schema": 1, "method": method, "args": args, "max_cost": max_cost})
+    def service_call(self, service, method, args, max_cost=None, request_id=None):
+        """max_cost is your ceiling; None costs the quote for the arguments."""
+        ceiling = QUOTE_CEILING if max_cost is None else max_cost
+        data = compact({"schema": 1, "method": method, "args": args, "max_cost": ceiling})
         return self.command("service.call", target=service, data=data, request_id=request_id or uuid.uuid4().hex)
 
     def service_read(self, service, method, args):
@@ -545,7 +553,7 @@ class Client:
                         return m["operation"]
         return None
 
-    def service_method(self, service, method, args, max_cost=0, request_id=None):
+    def service_method(self, service, method, args, max_cost=None, request_id=None):
         """A service method by name: service.read when the catalogue marks it a read
         (signed when a key is loaded), else service.call."""
         if self.method_operation(service, method) == "service.read":
@@ -1823,7 +1831,7 @@ def build_parser():
     commands.add_parser("services", help="list services and current prices")
     call = commands.add_parser("call", help="a service method: SERVICE METHOD ARGS_JSON; /api/services lists them. Reads (paste get, docs history, ...) go as service.read, the rest as service.call; signed with --key")
     call.add_argument("target_service", metavar="service"); call.add_argument("method"); call.add_argument("args", help="the args object, as JSON")
-    call.add_argument("--max-cost", type=int, default=0, help="your ceiling; a higher current price is refused and nothing is spent (default 0: enough for a free method)")
+    call.add_argument("--max-cost", type=int, help="your ceiling; a higher current price is refused and nothing is spent (default: the quote for the arguments)")
     call.add_argument("--request-id")
     memory = commands.add_parser("memory", help="key-value memory; server-readable, not end-to-end encrypted")
     memory_actions = memory.add_subparsers(dest="memory_action", required=True)

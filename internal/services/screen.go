@@ -286,7 +286,9 @@ type ScreenPayload struct {
 	Categories   map[string]float64 `json:"categories"`
 	Verdict      string             `json:"verdict"`
 	Threshold    float64            `json:"threshold"`
-	Model        string             `json:"model"`
+	// Model is ClassifierVersion in new receipts; earlier
+	// receipts carry the classifier's model id and still verify.
+	Model string `json:"model"`
 }
 
 // ScreenReceipt is a signed screen result; the payload is what is signed.
@@ -379,18 +381,18 @@ func (s *screen) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	}
 	pub := s.key.Public().(ed25519.PublicKey)
 	payload := ScreenPayload{Schema: ScreenSchema, ServiceID: s.serviceID, KeyID: keyID(pub), Time: c.Now, Salt: hex.EncodeToString(salt), TextSHA256: saltedSHA256(salt, p.text),
-		TextBytes: len(p.text), Source: p.source, Categories: categories, Verdict: screenVerdict(categories, ScreenThreshold), Threshold: ScreenThreshold, Model: res.Model}
+		TextBytes: len(p.text), Source: p.source, Categories: categories, Verdict: screenVerdict(categories, ScreenThreshold), Threshold: ScreenThreshold, Model: ClassifierVersion}
 	if p.intent != "" {
 		payload.IntentSHA256 = saltedSHA256(salt, p.intent)
 	}
 	signed, signature := signPayload(s.key, payload)
 	receipt := ScreenReceipt{Schema: ScreenSchema, KeyID: payload.KeyID, PublicKey: base64.RawURLEncoding.EncodeToString(pub), Payload: signed, Signature: signature}
 	body := canonicalJSON(map[string]any{
-		"verdict": screenVerdict(categories, p.threshold), "threshold": p.threshold, "categories": categories, "model": res.Model, "source": p.source,
+		"verdict": screenVerdict(categories, p.threshold), "threshold": p.threshold, "categories": categories, "classifier_version": ClassifierVersion, "source": p.source,
 		"text_sha256": payload.TextSHA256, "text_bytes": payload.TextBytes, "receipt": receipt,
 		"note": "A signal with a known error rate, not a guarantee; the text was not stored. verdict is at your threshold; the receipt's is at " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + ". Calibration: /protocol.md#screening-calibration",
 	})
-	public := canonicalJSON(map[string]any{"verdict": payload.Verdict, "model": res.Model, "source": p.source, "text_bytes": payload.TextBytes})
+	public := canonicalJSON(map[string]any{"verdict": payload.Verdict, "classifier_version": ClassifierVersion, "source": p.source, "text_bytes": payload.TextBytes})
 	used := min(c.Price.For(int64(len(p.text))), screenFee+res.CostMicroUSD)
 	return Result{Body: body, Public: public, Used: used}, nil
 }

@@ -520,6 +520,15 @@ func TestReceiverScreeningIsOptionalAndPriced(t *testing.T) {
 	if got[0]["screened"] != true || get(got[0], "verdict", "verdict") != "flag" || got[0]["withheld"] != true || got[0]["body"] != nil {
 		t.Fatalf("a flagged body is withheld by default: %+v", got[0])
 	}
+	// The verdict names our classifier version, never the classifier's model
+	// id, which only the stored row keeps (operator-side).
+	var kept string
+	if err := r.db.QueryRow("SELECT verdict FROM receiver_items WHERE id=?", get(got[0], "id")).Scan(&kept); err != nil || !strings.Contains(kept, `"model":"jev-1.13.0"`) {
+		t.Fatalf("stored verdict %q: %v", kept, err)
+	}
+	if get(got[0], "verdict", "classifier_version") != services.ClassifierVersion || strings.Contains(fmt.Sprint(got), "jev-") {
+		t.Fatalf("an item's verdict names the classifier model: %+v", got[0])
+	}
 	if n, units := r.spent("screen"); n != 1 || units != 5+40 {
 		t.Fatalf("the screen is charged what it cost plus the fee: %d %d", n, units)
 	}

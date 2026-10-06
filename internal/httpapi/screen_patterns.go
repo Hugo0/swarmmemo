@@ -98,14 +98,14 @@ func addLeakOpenAPI(paths, schemas map[string]any) {
 		"start": map[string]any{"type": "integer", "description": "byte offset of the finding in the text"}, "end": map[string]any{"type": "integer", "description": "byte offset just past it"},
 	}}
 	schemas["LeakResult"] = map[string]any{"type": "object", "description": "service.call screen.leak's result.", "required": []string{"verdict", "findings", "categories", "text_sha256", "text_bytes", "receipt"}, "properties": map[string]any{
-		"verdict":    map[string]any{"type": "string", "enum": []string{"pass", leakscan.Warn, leakscan.Hold}, "description": "hold when a finding, or a category at or above threshold, holds by the pattern list's actions; warn when all only warn; pass when there are none"},
-		"threshold":  map[string]string{"type": "number"},
-		"mode":       map[string]any{"type": "string", "enum": services.LeakModes},
-		"audience":   map[string]any{"type": "string", "enum": services.LeakAudiences},
-		"findings":   map[string]any{"type": "array", "items": finding},
-		"categories": map[string]any{"type": "object", "description": "mode full: " + services.LeakCategories[0] + ", " + services.LeakCategories[1] + ", " + services.LeakCategories[2] + " and " + services.LeakCategories[3] + ", each a probability; empty in mode patterns", "additionalProperties": map[string]string{"type": "number"}},
-		"redacted":   map[string]any{"type": "string", "description": "the text with each finding replaced by «REDACTED:rule»; in the first answer only, never stored"},
-		"model":      map[string]string{"type": "string"}, "patterns_version": map[string]string{"type": "integer"},
+		"verdict":            map[string]any{"type": "string", "enum": []string{"pass", leakscan.Warn, leakscan.Hold}, "description": "hold when a finding, or a category at or above threshold, holds by the pattern list's actions; warn when all only warn; pass when there are none"},
+		"threshold":          map[string]string{"type": "number"},
+		"mode":               map[string]any{"type": "string", "enum": services.LeakModes},
+		"audience":           map[string]any{"type": "string", "enum": services.LeakAudiences},
+		"findings":           map[string]any{"type": "array", "items": finding},
+		"categories":         map[string]any{"type": "object", "description": "mode full: " + services.LeakCategories[0] + ", " + services.LeakCategories[1] + ", " + services.LeakCategories[2] + " and " + services.LeakCategories[3] + ", each a probability; empty in mode patterns", "additionalProperties": map[string]string{"type": "number"}},
+		"redacted":           map[string]any{"type": "string", "description": "the text with each finding replaced by «REDACTED:rule»; in the first answer only, never stored"},
+		"classifier_version": map[string]any{"type": "string", "description": "the screening classifier's version; empty in mode patterns"}, "patterns_version": map[string]string{"type": "integer"},
 		"text_sha256": map[string]string{"type": "string"}, "text_bytes": map[string]string{"type": "integer"},
 		"receipt": map[string]any{"type": "object", "description": "schema swarmmemo-leak/1, signed with the notary key; screen.verify checks it"},
 	}}

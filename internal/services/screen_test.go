@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -145,7 +146,7 @@ func TestScreenScoresChargesAndSigns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if get(out, "result", "verdict") != "flag" || get(out, "result", "categories", "injection") != 0.9712 || get(out, "result", "model") != "jev-1.13.0" ||
+	if get(out, "result", "verdict") != "flag" || get(out, "result", "categories", "injection") != 0.9712 || get(out, "result", "classifier_version") != services.ClassifierVersion || strings.Contains(fmt.Sprint(out), "jev-") ||
 		get(out, "call", "cost") != float64(47) || get(out, "call", "max_cost") != float64(190) || jev.last != [3]string{text, "web", "summarise"} {
 		t.Fatalf("screen: %+v", out)
 	}
@@ -155,7 +156,7 @@ func TestScreenScoresChargesAndSigns(t *testing.T) {
 	rec := receiptFrom(t, get(out, "result", "receipt"))
 	public := get(r.read(t, "key", map[string]any{}), "result", "public_key").(string)
 	p, ok := services.VerifyScreenReceipt(public, rec)
-	if !ok || p.Verdict != "flag" || p.Threshold != 0.6 || p.Source != "web" || p.TextBytes != len(text) || p.Model != "jev-1.13.0" || len(p.IntentSHA256) != 64 || p.Time != r.now || len(p.Categories) != 5 {
+	if !ok || p.Verdict != "flag" || p.Threshold != 0.6 || p.Source != "web" || p.TextBytes != len(text) || p.Model != services.ClassifierVersion || len(p.IntentSHA256) != 64 || p.Time != r.now || len(p.Categories) != 5 {
 		t.Fatalf("receipt: %+v %v", p, ok)
 	}
 	// Salted: the hash is not the text's plain SHA-256, and only the text
@@ -350,5 +351,31 @@ func TestScreenRetryIsIdempotent(t *testing.T) {
 	// The same request key again is refused by the ledger, never run twice.
 	if _, err = r.screen(t, subjectOf("alice"), map[string]any{"text": "hello"}, 190, "id:same"); err == nil {
 		t.Fatal("a second call under one request key ran")
+	}
+}
+
+// A verdict's answer names services.ClassifierVersion, never the classifier's
+// model id: that stays in the stored row (StoredJSON), operator-side, and a
+// row stored before the change answers the same way.
+func TestVerdictAnswersTheClassifierVersion(t *testing.T) {
+	v := services.TextVerdict{Verdict: "flag", Threshold: 0.6, Categories: map[string]float64{"injection": 0.97}, Model: "jev-1.13.0"}
+	public, err := json.Marshal(map[string]any{"verdict": v, "ptr": &v})
+	if err != nil || strings.Contains(string(public), "jev") || strings.Contains(string(public), `"model"`) ||
+		strings.Count(string(public), `"classifier_version":"`+services.ClassifierVersion+`"`) != 2 {
+		t.Fatalf("public verdict %s: %v", public, err)
+	}
+	stored := v.StoredJSON()
+	if !strings.Contains(stored, `"model":"jev-1.13.0"`) || strings.Contains(stored, "classifier_version") {
+		t.Fatalf("stored verdict %s", stored)
+	}
+	for _, row := range []string{stored, `{"verdict":"pass","threshold":0.6,"categories":{"injection":0.01},"model":"jev-1.12.0"}`} {
+		var back services.TextVerdict
+		if err := json.Unmarshal([]byte(row), &back); err != nil || back.Model == "" {
+			t.Fatalf("read back %s: %+v %v", row, back, err)
+		}
+		again, _ := json.Marshal(back)
+		if strings.Contains(string(again), "jev") || !strings.Contains(string(again), services.ClassifierVersion) {
+			t.Fatalf("a stored row answers %s", again)
+		}
 	}
 }

@@ -140,8 +140,11 @@ func ParseData(raw string, call bool) (Data, error) {
 	if StrictObject([]byte(raw), &envelope) != nil {
 		return d, refusal("invalid_service_data") // the envelope's own message
 	}
-	if string(envelope.Schema) != "1" || envelope.Method == nil || !methodRE.MatchString(*envelope.Method) {
+	if string(envelope.Schema) != "1" || envelope.Method == nil {
 		return d, refusal("invalid_service_data")
+	}
+	if !methodRE.MatchString(*envelope.Method) {
+		return d, badArg("method takes a method name: a lowercase letter, then lowercase letters, digits or _, at most 32 characters.")
 	}
 	d.Method = *envelope.Method
 	d.Args = envelope.Args

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -212,7 +213,7 @@ func TestLeakFullAsksTheClassifier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if get(out, "result", "verdict") != "hold" || get(out, "result", "categories", "excess_code") != 0.8123 || get(out, "result", "model") != "jev-1.13.0" ||
+	if get(out, "result", "verdict") != "hold" || get(out, "result", "categories", "excess_code") != 0.8123 || get(out, "result", "classifier_version") != services.ClassifierVersion || strings.Contains(fmt.Sprint(out), "jev-") ||
 		get(out, "call", "cost") != float64(47) || get(out, "call", "max_cost") != float64(190) || jev.last != [2]string{"func main() {}", "public"} {
 		t.Fatalf("full: %+v", out)
 	}
@@ -221,7 +222,7 @@ func TestLeakFullAsksTheClassifier(t *testing.T) {
 		t.Fatalf("threshold 0.9: %+v %v", out, err)
 	}
 	public := get(r.read(t, "key", map[string]any{}), "result", "public_key").(string)
-	if p, ok := services.VerifyLeakReceipt(public, receiptFrom(t, get(out, "result", "receipt"))); !ok || p.Verdict != "hold" || p.Threshold != 0.6 || len(p.Categories) != 4 || p.Model != "jev-1.13.0" {
+	if p, ok := services.VerifyLeakReceipt(public, receiptFrom(t, get(out, "result", "receipt"))); !ok || p.Verdict != "hold" || p.Threshold != 0.6 || len(p.Categories) != 4 || p.Model != services.ClassifierVersion {
 		t.Fatalf("receipt at threshold 0.9: %+v %v", p, ok)
 	}
 }

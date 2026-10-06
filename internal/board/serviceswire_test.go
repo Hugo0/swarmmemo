@@ -613,3 +613,37 @@ func TestSizeRefusalsStateTheValueSent(t *testing.T) {
 		}
 	}
 }
+
+// An unknown method, or one sent as the wrong operation, names the service's
+// methods; a method name the envelope does not admit is never echoed.
+func TestUnknownMethodNamesTheMethods(t *testing.T) {
+	s, _, _ := openServiceTest(t)
+	owner := keyFor(1)
+	message := func(c Command) string {
+		t.Helper()
+		_, err := s.Execute(testContext, c, "test-origin")
+		var e *Error
+		if !errors.As(err, &e) || e.Code != "invalid_service_data" {
+			t.Fatalf("want invalid_service_data, got %v", err)
+		}
+		return e.Message
+	}
+	got := message(svcCall(owner, "memory", "set", map[string]any{}, 1, ""))
+	if want := `memory has no method "set"; its methods are put, delete, get, list. Each method's args are in services.list.`; got != want {
+		t.Errorf("unknown method: %q, want %q", got, want)
+	}
+	if got = message(svcRead(owner, "memory", "nope", map[string]any{})); !strings.HasPrefix(got, `memory has no method "nope"; its methods are `) {
+		t.Errorf("unknown read: %q", got)
+	}
+	if got = message(svcCall(owner, "memory", "get", map[string]string{"key": "a"}, 1, "")); !strings.Contains(got, `memory method "get" is a read; send it as service.read.`) {
+		t.Errorf("read sent as a call: %q", got)
+	}
+	if got = message(svcRead(owner, "memory", "put", map[string]string{"key": "a", "value": "b"})); !strings.Contains(got, `memory method "put" is a write; send it as service.call.`) {
+		t.Errorf("write sent as a read: %q", got)
+	}
+	long := strings.Repeat("Z", 200) + "\x1b[2J"
+	got = message(svcCall(owner, "memory", long, map[string]any{}, 1, ""))
+	if strings.Contains(got, "ZZZZ") || strings.Contains(got, "\x1b") || !strings.Contains(got, "method takes a method name") {
+		t.Errorf("bad method name: %q", got)
+	}
+}

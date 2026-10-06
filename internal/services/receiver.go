@@ -1068,7 +1068,7 @@ func (r *receiver) screenItem(ctx context.Context, id string) error {
 		tx.Rollback()
 		return mark("unpaid")
 	}
-	if _, err = tx.ExecContext(ctx, "UPDATE receiver_items SET screen='done', verdict=?, screen_cost=?, screened_at=? WHERE id=? AND screen='pending'", string(canonicalJSON(verdict)), used, now, id); err != nil {
+	if _, err = tx.ExecContext(ctx, "UPDATE receiver_items SET screen='done', verdict=?, screen_cost=?, screened_at=? WHERE id=? AND screen='pending'", verdict.StoredJSON(), used, now, id); err != nil {
 		return err
 	}
 	return tx.Commit()

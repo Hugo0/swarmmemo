@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/allowance"
+	"swarmmemo/internal/services"
 )
 
 // The defaults follow the moderation standard: the five severe categories
@@ -22,7 +23,7 @@ func TestPostDefaultsFollowTheStandard(t *testing.T) {
 		if d.Action != Hide || d.Category != cat || d.Queued {
 			t.Fatalf("%s at 0.95: %+v", cat, d)
 		}
-		want := fmt.Sprintf("auto-screen: %s (p=0.95, model=jev-1.13.0, policy=v0); policy: hide only clearly malicious", DefaultPolicy().surface(SurfacePost).label(cat))
+		want := fmt.Sprintf("auto-screen: %s (p=0.95, model=screen-1, policy=v0); policy: hide only clearly malicious", DefaultPolicy().surface(SurfacePost).label(cat))
 		if d.Reason != want {
 			t.Fatalf("reason %q, want %q", d.Reason, want)
 		}
@@ -566,5 +567,19 @@ func TestRegisterSurface(t *testing.T) {
 	v := newEnv(t, body)
 	if d := v.screen(t, "wake.note", "w", "BUY NOW"); d.Action != Block {
 		t.Fatalf("%+v", d)
+	}
+}
+
+// A public reason or quality names our classifiers by name and the
+// screening classifier by its version, never by its model id.
+func TestPublicModelHidesTheClassifierModel(t *testing.T) {
+	for in, want := range map[string]string{"": "", "rules": "rules", "jev-1.13.0": services.ClassifierVersion,
+		"rules+jev-1.13.0": "rules+" + services.ClassifierVersion, "moderation": "moderation", "egress+rules": "egress+rules"} {
+		if got := PublicModel(in); got != want {
+			t.Errorf("PublicModel(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := publicModel(""); got != "none" {
+		t.Errorf("publicModel(\"\") = %q", got)
 	}
 }

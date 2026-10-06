@@ -2,13 +2,14 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"unicode/utf8"
 )
 
 // Optional screening: a service that hands an agent text it did not write
-// (a received body, a fetched page) screens it with the Jev classifier by
+// (a received body, a fetched page) screens it with the classifier by
 // default, the agent may turn that off per call or per receiver, and the
 // operator may turn it off or force it for every caller. Screening is priced
 // as a surcharge on top of the service's own price, at what the classifier
@@ -87,13 +88,53 @@ func screenSurcharge(n int, costMicroUSD int64) int64 {
 	return min(ScreenSurchargeMax(n), screenFee+costMicroUSD)
 }
 
-// TextVerdict is an optional screen's outcome as an answer shows it.
+// ClassifierVersion is the screening classifier as every public answer,
+// receipt and moderation reason names it: our own stable label, never the
+// classifier's model id, which stays operator-side. A new label when the
+// classifier or its calibration changes.
+const ClassifierVersion = "screen-1"
+
+// TextVerdict is an optional screen's outcome. Its JSON is the answer's:
+// verdict, threshold, categories and ClassifierVersion. Model, the
+// classifier's own model id, is kept only with the stored verdict
+// (StoredJSON, read back by UnmarshalJSON) and never answered.
 type TextVerdict struct {
-	Verdict    string             `json:"verdict"` // pass or flag, at ScreenThreshold
+	Verdict    string // pass or flag, at ScreenThreshold
+	Threshold  float64
+	Categories map[string]float64
+	Model      string // operator-only
+}
+
+// storedVerdict is a TextVerdict as kept in a row: with the model id.
+type storedVerdict struct {
+	Verdict    string             `json:"verdict"`
 	Threshold  float64            `json:"threshold"`
 	Categories map[string]float64 `json:"categories"`
 	Model      string             `json:"model"`
 }
+
+// MarshalJSON is the verdict as an answer shows it.
+func (v TextVerdict) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Verdict           string             `json:"verdict"`
+		Threshold         float64            `json:"threshold"`
+		Categories        map[string]float64 `json:"categories"`
+		ClassifierVersion string             `json:"classifier_version"`
+	}{v.Verdict, v.Threshold, v.Categories, ClassifierVersion})
+}
+
+// UnmarshalJSON reads a stored verdict (StoredJSON).
+func (v *TextVerdict) UnmarshalJSON(b []byte) error {
+	var s storedVerdict
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*v = TextVerdict(s)
+	return nil
+}
+
+// StoredJSON is the verdict as a row keeps it, model id included.
+func (v TextVerdict) StoredJSON() string { return string(canonicalJSON(storedVerdict(v))) }
 
 var errScreenTooLong = errors.New("services: text too long to screen")
 

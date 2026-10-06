@@ -222,6 +222,10 @@ func TestConversationScreenOnceSharedByReaders(t *testing.T) {
 	if m.Screen == nil || m.Screen.State != "flag" || !m.Screen.Withheld || m.Text != "" || m.SignedPayload != "" || m.Screen.Categories["injection"] != 0.9123 || m.Screen.Reason != "flagged: injection, phishing" {
 		t.Fatalf("bob (server, 0.5): %+v %+v", m, m.Screen)
 	}
+	// The screen names our classifier version; the model id stays in the row.
+	if raw, _ := json.Marshal(m.Screen); m.Screen.ClassifierVersion != services.ClassifierVersion || strings.Contains(string(raw), "jev") {
+		t.Fatalf("the screen names the classifier model: %s", raw)
+	}
 	m = deliver(t, s, carol, room)[id]
 	if m.Screen == nil || m.Screen.State != "pass" || m.Screen.Withheld || m.Text != canary || m.SignedPayload == "" {
 		t.Fatalf("carol (server, 0.95): %+v %+v", m, m.Screen)

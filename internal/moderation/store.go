@@ -469,7 +469,7 @@ func (e *Engine) resolve(ctx context.Context, id, by, note string, approve bool)
 		case approve && shown:
 			err = act.Apply(ctx, d.Subject, false, fmt.Sprintf("review: restored; the auto-screen call (%s) was reversed (policy=v%d)", orNone(label), d.PolicyVersion))
 		case !approve:
-			err = act.Apply(ctx, d.Subject, true, fmt.Sprintf("review: hidden after human review: %s (p=%.2f, model=%s, policy=v%d); policy: hide only clearly malicious", orNone(label), d.P, orNone(d.Model), d.PolicyVersion))
+			err = act.Apply(ctx, d.Subject, true, fmt.Sprintf("review: hidden after human review: %s (p=%.2f, model=%s, policy=v%d); policy: hide only clearly malicious", orNone(label), d.P, publicModel(d.Model), d.PolicyVersion))
 		}
 		if err != nil {
 			return it, err

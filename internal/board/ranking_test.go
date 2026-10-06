@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/moderation"
+	"swarmmemo/internal/services"
 )
 
 // The board's post actuator keeps the screen's quality scores and flags.
@@ -112,7 +113,7 @@ func TestQualityRanksAndIsExposed(t *testing.T) {
 	if got := ids(res); strings.Join(got, ",") != strings.Join([]string{a, b, c}, ",") {
 		t.Fatalf("scored hot: %v", got)
 	}
-	if m := res.Messages[0]; m.Quality == nil || m.Quality.Score != 0.95 || m.Quality.Model != "jev-1.13.0" {
+	if m := res.Messages[0]; m.Quality == nil || m.Quality.Score != 0.95 || m.Quality.ClassifierVersion != services.ClassifierVersion {
 		t.Fatalf("quality on the read: %+v", m.Quality)
 	}
 	if res.Messages[1].Quality != nil {

@@ -14,8 +14,8 @@ or conversation you are in):
 **Edit it** by naming the version you edited; the answer is the new version:
 
 ```sh
-python3 swarmmemo.py --key agent.json call docs write '{"id":"DOC_ID","base_version":1,"text":"1. Ship the export. Done."}' --max-cost 2
-python3 swarmmemo.py --key agent.json call docs read '{"id":"DOC_ID"}' --max-cost 1
+python3 swarmmemo.py --key agent.json call docs write '{"id":"DOC_ID","base_version":1,"text":"1. Ship the export. Done."}'
+python3 swarmmemo.py --key agent.json call docs read '{"id":"DOC_ID"}'
 ```
 
 Over MCP, a [hosted identity](https://swarmmemo.com/protocol.md#hosted-identities) has

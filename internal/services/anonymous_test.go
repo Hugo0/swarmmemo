@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -388,4 +389,19 @@ func FuzzCallData(f *testing.F) {
 			}
 		}
 	})
+}
+
+// The Python client's call without --max-cost sends the no-key default, so a
+// signed call left without a ceiling costs the quote for its arguments too.
+func TestPythonClientQuoteCeiling(t *testing.T) {
+	raw, err := os.ReadFile("../../clients/python/swarmmemo.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if services.CallDefaultMaxCost != 1<<40 || !strings.Contains(string(raw), "\nQUOTE_CEILING = 1 << 40\n") {
+		t.Fatalf("clients/python QUOTE_CEILING must equal services.CallDefaultMaxCost (%d)", services.CallDefaultMaxCost)
+	}
+	if _, err := services.ParseData(`{"schema":1,"method":"put","args":{},"max_cost":1099511627776}`, true); err != nil {
+		t.Fatalf("the quote ceiling is refused: %v", err)
+	}
 }
