@@ -201,6 +201,7 @@ func (f *frames) Exchange(ctx context.Context, p x402Plan, pay *payment) (x402Re
 				}
 			}
 			delete(out, "billing") // our account's balance is not the agent's business
+			framesLabelUpstreamReceipts(out)
 			if b := canonicalJSON(out); b != nil {
 				// The rows name the tool by its public name, never the
 				// upstream's id.
@@ -218,4 +219,62 @@ func (f *frames) Exchange(ctx context.Context, p x402Plan, pay *payment) (x402Re
 	pay.settle(charged)
 	return resp, &x402Receipt{Amount: strconv.FormatInt(charged, 10), Price: formatUnits(charged, 6), Asset: "USD", Network: publicBundler(f.Name()),
 		PayTo: framesToolID(p.res.Tool), Payer: "swarmmemo", Nonce: idem}, nil
+}
+
+// FramesUpstreamNote labels the chain facts a bundler reports in its own
+// per-call receipts: they are its own, not a payment by or to SwarmMemo.
+const FramesUpstreamNote = "reported by the upstream bundler; not a payment by or to SwarmMemo"
+
+// framesUpstreamKeys are the receipt fields a bundler may report its own
+// chain facts under, and the name each gets under receipt.upstream.
+var framesUpstreamKeys = []struct{ from, to string }{
+	{"network", "network"}, {"tx_hash", "transaction"}, {"transaction_hash", "transaction"}, {"transaction", "transaction"}, {"tx", "transaction"},
+}
+
+// framesLabelUpstreamReceipts moves the network and transaction of each
+// results[].receipt under receipt.upstream, with FramesUpstreamNote: the
+// bundler pays from its prepaid account, so a transaction it reports is its
+// own, never the settlement of the agent's call (which has none: see
+// X402Settlements).
+func framesLabelUpstreamReceipts(out map[string]json.RawMessage) {
+	var results []json.RawMessage
+	if json.Unmarshal(out["results"], &results) != nil {
+		return
+	}
+	changed := false
+	for i, raw := range results {
+		var row map[string]json.RawMessage
+		if json.Unmarshal(raw, &row) != nil || row == nil {
+			continue
+		}
+		var receipt map[string]json.RawMessage
+		if json.Unmarshal(row["receipt"], &receipt) != nil || receipt == nil {
+			continue
+		}
+		upstream, moved := map[string]json.RawMessage{}, false
+		for _, k := range framesUpstreamKeys {
+			v, ok := receipt[k.from]
+			if !ok {
+				continue
+			}
+			delete(receipt, k.from)
+			moved = true
+			if _, set := upstream[k.to]; !set && !bytes.Equal(v, []byte("null")) && !bytes.Equal(v, []byte(`""`)) {
+				upstream[k.to] = v
+			}
+		}
+		if !moved {
+			continue
+		}
+		upstream["note"] = canonicalJSON(FramesUpstreamNote)
+		receipt["upstream"] = canonicalJSON(upstream)
+		row["receipt"] = canonicalJSON(receipt)
+		results[i] = canonicalJSON(row)
+		changed = true
+	}
+	if changed {
+		if b := canonicalJSON(results); b != nil {
+			out["results"] = b
+		}
+	}
 }

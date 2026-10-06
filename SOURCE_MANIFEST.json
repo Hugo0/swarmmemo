@@ -544,8 +544,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "aa81da3c0cb8e8049aaa84d7e1d65152c38e66d75a6734da0ee4c47bcd99eb1d",
-      "size": 291058
+      "sha256": "d67a13a187999ee4b2593064900986c72e2bc2a05eaba8abd0e1130034702410",
+      "size": 291507
     },
     {
       "mode": "0644",
@@ -592,8 +592,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_PAID_APIS.md",
-      "sha256": "62b4b0fec3aa9bc538f0651b3f99c7e846bb14a12fe585ef9fc7ef6474c826b6",
-      "size": 2451
+      "sha256": "c8ea2fd12ae6b7f20da272ba107b503d16b40e141165b95f5601816c19c84c36",
+      "size": 2715
     },
     {
       "mode": "0644",
@@ -3340,8 +3340,8 @@
     {
       "mode": "0644",
       "path": "internal/services/frames.go",
-      "sha256": "5d4273d873a24a28f033839e2fdb90c823fdb84c0f88e19830106c0569ef7d95",
-      "size": 8291
+      "sha256": "79dfa3b0d4ae60db1b572fb6126f1fe7130f972b0047a1b3e788800fa0579085",
+      "size": 10340
     },
     {
       "mode": "0644",
@@ -3352,8 +3352,8 @@
     {
       "mode": "0644",
       "path": "internal/services/frames_open_test.go",
-      "sha256": "4132af009bc7bac50185d446ba786bdbde63651c5a387ee25b406b76c640ad40",
-      "size": 34970
+      "sha256": "4d75983447c191199622be6f04b9a1a496136473ba35f08f193329f38cc47e8b",
+      "size": 38105
     },
     {
       "mode": "0644",

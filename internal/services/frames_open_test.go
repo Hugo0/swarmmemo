@@ -25,6 +25,7 @@ type fakeFramesAPI struct {
 	probes                         map[string]string // id → its probe result object; default live, payable, $0.002
 	tools                          map[string]string // id → its descriptor
 	charged                        string            // billing.charged_credits of an invoke
+	receiptExtra                   string            // more fields of an invoke row's receipt, each with a leading comma
 	invokeStatus                   int
 	nSearch, nProbe, nGet, nInvoke int
 	lastInvoke                     map[string]any
@@ -80,7 +81,7 @@ func (f *fakeFramesAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			c0, _ := calls[0].(map[string]any)
 			tool, _ = c0["id"].(string)
 		}
-		fmt.Fprintf(w, `{"results":[{"id":%q,"delivered":true,"response":{"temp_c":14},"receipt":{"tool":%q,"delivered":true}}],"billing":{"charged_credits":%s,"balance_credits":2997}}`, tool, tool, f.charged)
+		fmt.Fprintf(w, `{"results":[{"id":%q,"delivered":true,"response":{"temp_c":14},"receipt":{"tool":%q,"delivered":true%s}}],"billing":{"charged_credits":%s,"balance_credits":2997}}`, tool, tool, f.receiptExtra, f.charged)
 	default:
 		f.nGet++
 		id := strings.TrimPrefix(r.URL.Path, "/v1/tools/")
@@ -559,6 +560,74 @@ func TestFramesCall(t *testing.T) {
 	if api.badAuth != 0 {
 		t.Fatal("a request went out without the key")
 	}
+}
+
+// TestBundlerTxIsLabelledUpstream: a transaction the bundler reports in its
+// own receipt is its prepaid account's, never the call's settlement. It
+// shows only under receipt.upstream with the note; our payment receipt has
+// no transaction and the ledger has no settlement. A direct x402 relay call
+// keeps its real settlement.
+func TestBundlerTxIsLabelledUpstream(t *testing.T) {
+	upstreamTx := "0x" + strings.Repeat("46", 32)
+	t.Run("bundler", func(t *testing.T) {
+		h, api := newFramesHarness(t, "", "")
+		api.receiptExtra = `,"amount":"0.002","currency":"USDC","network":"base","tx_hash":"` + upstreamTx + `"`
+		if _, err := h.framesRead(testSubject, "tools_search", `{"query":"weather"}`); err != nil {
+			t.Fatal(err)
+		}
+		out, err := h.call(testSubject, `{"resource":"tool:`+toolOK+`","body":{"city":"Paris"}}`, creditsFor(20000))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(out)
+		if strings.Count(string(raw), upstreamTx) != 1 || strings.Contains(string(raw), "tx_hash") {
+			t.Fatalf("the upstream tx shows outside receipt.upstream: %s", raw)
+		}
+		r := resultOf(out)
+		var body struct {
+			Results []struct {
+				Receipt map[string]any `json:"receipt"`
+			} `json:"results"`
+		}
+		b, _ := json.Marshal(r["body"])
+		if err := json.Unmarshal(b, &body); err != nil || len(body.Results) != 1 {
+			t.Fatalf("body %s: %v", b, err)
+		}
+		rc := body.Results[0].Receipt
+		up, _ := rc["upstream"].(map[string]any)
+		if up["transaction"] != upstreamTx || up["network"] != "base" || up["note"] != FramesUpstreamNote || rc["network"] != nil || rc["amount"] != "0.002" {
+			t.Fatalf("receipt %v", rc)
+		}
+		if p, _ := r["payment"].(map[string]any); p == nil || p["transaction"] != nil || p["network"] != "tools" {
+			t.Fatalf("payment %v", r["payment"])
+		}
+		var hold string
+		if err := h.db.QueryRow("SELECT hold_id FROM service_calls WHERE service='x402'").Scan(&hold); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := X402Settlements(context.Background(), h.db, []string{hold}); err != nil || len(got) != 0 {
+			t.Fatalf("a bundler call has a settlement: %v %v", got, err)
+		}
+	})
+	t.Run("relay", func(t *testing.T) {
+		h := newX402Harness(t, &fakeX402{price: 1500, version: 2}, `{}`)
+		out, err := h.call(testSubject, `{"resource":"price","query":{"ids":"bitcoin","vs":"usd"}}`, creditsFor(10000))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(out)
+		r := resultOf(out)
+		if p, _ := r["payment"].(map[string]any); p == nil || p["transaction"] != "0x"+strings.Repeat("ab", 32) || p["network"] != "eip155:8453" || strings.Contains(string(raw), "upstream") {
+			t.Fatalf("relay receipt %s", raw)
+		}
+		var hold string
+		if err := h.db.QueryRow("SELECT hold_id FROM service_calls WHERE service='x402'").Scan(&hold); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := X402Settlements(context.Background(), h.db, []string{hold}); err != nil || got[hold].Transaction != "0x"+strings.Repeat("ab", 32) {
+			t.Fatalf("relay settlement %v %v", got, err)
+		}
+	})
 }
 
 func TestFramesCallAllowUnvettedAndCaps(t *testing.T) {
