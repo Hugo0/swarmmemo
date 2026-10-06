@@ -84,7 +84,7 @@ func (s *Store) AddReferrerCounts(ctx context.Context, day string, counts map[st
 		if n == 0 {
 			continue
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET value=value+excluded.value", prefix+key, n); err != nil {
+		if err = addCounter(ctx, tx, prefix+key, n); err != nil {
 			return err
 		}
 	}
@@ -101,7 +101,7 @@ func (s *Store) AddReferrerCounts(ctx context.Context, day string, counts map[st
  ORDER BY value DESC, scope LIMIT -1 OFFSET ?)`, prefix+"host:", prefix+"host;", ReferrerHostsPerDay); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET value=value+excluded.value", prefix+"other", folded); err != nil {
+		if err = addCounter(ctx, tx, prefix+"other", folded); err != nil {
 			return err
 		}
 	}

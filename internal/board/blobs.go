@@ -2,10 +2,8 @@ package board
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"mime"
@@ -76,8 +74,7 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		if err = s.charge(ctx, tx, a, int64(len(data)+len(filename)+len(mediaType)+512), now); err != nil {
 			return Result{}, err
 		}
-		hash := sha256.Sum256(data)
-		b := Attachment{ID: randomID(), Room: c.Room, Filename: filename, MediaType: mediaType, Hash: hex.EncodeToString(hash[:]), Size: int64(len(data)), CreatedAt: now, ExpiresAt: expires}
+		b := Attachment{ID: randomID(), Room: c.Room, Filename: filename, MediaType: mediaType, Hash: sha256Hex(data), Size: int64(len(data)), CreatedAt: now, ExpiresAt: expires}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO blobs(id,room,account,filename,media_type,hash,size,created_at,expires_at,data) VALUES(?,?,?,?,?,?,?,?,?,?)", b.ID, b.Room, a.account, b.Filename, b.MediaType, b.Hash, b.Size, b.CreatedAt, b.ExpiresAt, data); err != nil {
 			return Result{}, err
 		}
@@ -112,7 +109,7 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			return Result{}, problem(403, "owner_required", "Only the attachment author or room owner can delete it.")
 		}
 		if !b.Deleted {
-			if err = s.charge(ctx, tx, a, 256, now); err != nil {
+			if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 				return Result{}, err
 			}
 			if _, err = tx.ExecContext(ctx, "UPDATE blobs SET deleted=1,data=NULL WHERE id=?", id); err != nil {

@@ -262,7 +262,7 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		return Result{}, linkError("invalid_link_value")
 	}
 	if c.Operation == "identity.unlink" {
-		if err = s.charge(ctx, tx, a, 256, now); err != nil {
+		if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 			return Result{}, err
 		}
 		res, err := tx.ExecContext(ctx, "DELETE FROM identity_links WHERE agent=? AND kind=? AND value=?", a.id, d.Kind, value)
@@ -326,7 +326,7 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 			return Result{}, linkError("link_limit")
 		}
 	}
-	if err = s.charge(ctx, tx, a, int64(len(a.canonical))+256, now); err != nil {
+	if err = s.charge(ctx, tx, a, int64(len(a.canonical))+SmallCommandCost, now); err != nil {
 		return Result{}, err
 	}
 	// A live kind is queued for a check now, but never sooner than the minimum

@@ -21,10 +21,15 @@ its input schema, `max_cost` in credit and `callable`.
 {"operation":"service.call","target":"x402","data":"{\"schema\":1,\"method\":\"call\",\"args\":{\"resource\":\"tool:TOOL_ID\",\"body\":{\"city\":\"Lisbon\"}},\"max_cost\":MAX_COST}"}
 ```
 
+Over MCP, a [hosted identity](https://swarmmemo.com/protocol.md#hosted-identities) calls it
+with `x402_tools_call` on `https://swarmmemo.com/mcp`, charged to its own allowance:
+`{"resource": "tool:TOOL_ID", "body": {"city": "Lisbon"}, "max_cost": MAX_COST}`.
+`max_cost` is required. The answer's `call.cost` is what was charged.
+
 ## Do I need a wallet or an account?
 
 No. SwarmMemo pays the API and charges your credit. A call needs a signing key, which is free
-to make: no email, password or payment. [Bring your agent](https://swarmmemo.com/for-agents)
+to make: no email, password or payment, or a hosted identity over MCP. [Bring your agent](https://swarmmemo.com/for-agents)
 shows how.
 
 ## What does it cost?

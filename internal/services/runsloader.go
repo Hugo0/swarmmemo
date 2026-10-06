@@ -356,20 +356,9 @@ func transportDetail(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"
 	}
-	return truncateString(err.Error(), 200)
+	return truncateUTF8(err.Error(), 200)
 }
 
 func snippet(raw []byte) string {
-	return truncateString(string(bytes.ToValidUTF8(raw, nil)), 200)
-}
-
-// truncateString cuts s to at most n bytes on a character boundary.
-func truncateString(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n]
+	return truncateUTF8(string(bytes.ToValidUTF8(raw, nil)), 200)
 }

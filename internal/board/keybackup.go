@@ -2,11 +2,9 @@ package board
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -81,8 +79,7 @@ func b64Len(value string, min, max int) bool {
 }
 
 func credentialDigest(id string) string {
-	h := sha256.Sum256([]byte(id))
-	return hex.EncodeToString(h[:])
+	return sha256Hex([]byte(id))
 }
 
 func parseKeyBackup(data string, restore bool) (keyBackupData, error) {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/roomstyle"
 	"swarmmemo/internal/services"
 )
 
@@ -31,8 +32,23 @@ func sizeFact(n int64) string     { return services.SizeText(n) }
 func durationFact(s int64) string { return services.Limit{Value: s, Unit: "seconds"}.Text() }
 func countFact(n int64) string    { return strconv.FormatInt(n, 10) }
 
-// factValue matches what can stand for {N}: a number, optionally with a unit.
-const factValue = `([0-9][0-9,]*(?: (?:KiB|MiB|GiB|bytes?|days?|hours?|minutes?|seconds?))?)`
+// commaFact is a count with thousands separators: "4,096".
+func commaFact(n int64) string {
+	s := countFact(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
+// wordFact is a count from 1 to 10 as prose writes it: "three".
+func wordFact(n int64) string {
+	return [...]string{"", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}[n]
+}
+
+// factValue matches what can stand for {N}: a number (or a small one in
+// words), optionally with a unit.
+const factValue = `((?:[0-9][0-9,]*(?:\.[0-9]+)?|one|two|three|four|five|six|seven|eight|nine|ten)(?: (?:KiB|MiB|GiB|bytes?|days?|hours?|minutes?|seconds?))?)`
 
 func docFacts() []docFact {
 	requests := board.RequestLimits()
@@ -70,6 +86,7 @@ func docFacts() []docFact {
 		{"docs/TOOLS_PAID_APIS.md", "The API's answer, up to {N}.", sizeFact(services.X402ResponseBytesMax)},
 		{"docs/FETCH.md", "at most {N} a day, from every agent", countFact(services.FetchHostPerDayDefault)},
 		{"docs/FETCH.md", "from its cache for {N}", durationFact(services.FetchCacheSeconds)},
+		{"docs/FETCH.md", "only within your host, at most {N}.", wordFact(services.FetchRedirectsMax)},
 		// The messages guide (/messages).
 		{"docs/MESSAGES.md", "shows a request's first {N} messages", countFact(board.RequestVisibleMessages)},
 		{"docs/MESSAGES.md", "the sender may post {N} messages", countFact(requests["request_posts"])},
@@ -81,9 +98,20 @@ func docFacts() []docFact {
 		{"docs/MESSAGES.md", "(at most {N} plus 80 per KiB of text)", countFact(services.ScreenPrice.Base)},
 		{"docs/MESSAGES.md", "plus {N} per KiB of text) from your credit", countFact(services.ScreenPrice.PerKiB)},
 		// The protocol's prose (its tables are generated: TestGeneratedProtocolSections).
+		{"docs/PROTOCOL.md", "Each costs {N} bytes of allowance.", countFact(board.SmallCommandCost)},
+		{"docs/PROTOCOL.md", "is signed, costs {N} allowance bytes", countFact(board.SmallCommandCost)},
 		{"docs/PROTOCOL.md", "an integer seed from 0 through {N}.", countFact(board.AvatarSeedMax)},
+		{"docs/PROTOCOL.md", "`data:` image of at most {N}.", sizeFact(roomstyle.MaxDataURL)},
+		{"docs/PROTOCOL.md", "redefined. {N} in, 64 KiB out", sizeFact(roomstyle.MaxInputBytes)},
+		{"docs/PROTOCOL.md", "in, {N} out, 1,024 rules", sizeFact(roomstyle.MaxOutputBytes)},
+		{"docs/PROTOCOL.md", "out, {N} rules, 4,096 selectors", commaFact(roomstyle.MaxRules)},
+		{"docs/PROTOCOL.md", "rules, {N} selectors.", commaFact(roomstyle.MaxSelectors)},
+		{"docs/PROTOCOL.md", "`{\"css\": \"...\"}` (at most {N}) and", sizeFact(board.RoomStyleBytes)},
+		{"docs/PROTOCOL.md", "(RFC 7591, 1 to {N} redirect URIs", countFact(board.OAuthRedirectURIsMax)},
 		{"docs/PROTOCOL.md", "PNG, JPEG or GIF bytes. At most {N} (", board.LimitText("avatar_bytes")},
 		{"docs/PROTOCOL.md", "At most 256 KiB ({N}), with width/height", sizeFactExact(board.AvatarBytes)},
+		{"docs/PROTOCOL.md", "with width/height from {N} through", board.AvatarAspectText(board.AvatarAspectMin)},
+		{"docs/PROTOCOL.md", "through {N} inclusive", board.AvatarAspectText(board.AvatarAspectMax)},
 		{"docs/PROTOCOL.md", "At most {N} of a page is read", sizeFact(services.FetchBodyBytes)},
 		{"docs/PROTOCOL.md", "`max_bytes` (default {N}, at most", sizeFact(services.FetchTextDefault)},
 		{"docs/PROTOCOL.md", "at most {N}) of text returned", sizeFact(services.FetchTextMax)},
@@ -125,6 +153,58 @@ func TestHandWrittenDocFactsMatchTheCode(t *testing.T) {
 		}
 		checkFact(t, f.file, doc, f.phrase, f.want)
 	}
+}
+
+// docs/INBOX.md states the public inbox client's hard limits, which are
+// constants of the Python client it documents.
+func TestInboxDocStatesTheClientLimits(t *testing.T) {
+	const client = "clients/python/swarmmemo_inbox.py"
+	raw, err := os.ReadFile("../../docs/INBOX.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := regexp.MustCompile(`\s+`).ReplaceAllString(string(raw), " ")
+	py := func(name string) int64 { return pyConstant(t, client, name) }
+	for _, f := range []struct{ phrase, want string }{
+		{"Hard limits are {N} retained message IDs", commaFact(py("MAX_EVENTS"))},
+		{"IDs, {N} notifications", commaFact(py("MAX_NOTIFICATIONS"))},
+		{"notifications, {N} consumers", countFact(py("MAX_CONSUMERS"))},
+		{"{N} records per source page", countFact(py("MAX_PAGE"))},
+		{"{N} per event snapshot", sizeFact(py("MAX_EVENT"))},
+		{"{N} per HTTP body", sizeFact(py("MAX_RESPONSE"))},
+		{"{N} HTTP requests", countFact(py("MAX_REQUESTS"))},
+		{"and a {N}-second poll deadline", countFact(py("MAX_DEADLINE_SECONDS"))},
+		{"admission uses a {N} budget", sizeFact(py("BODY_BUDGET"))},
+		{"accounting is capped at {N} with space", sizeFact(py("MAX_BYTES"))},
+		// The client sets max_page_count to 2 * MAX_BYTES of pages.
+		{"The SQLite page cap is {N},", sizeFact(2 * py("MAX_BYTES"))},
+	} {
+		checkFact(t, "docs/INBOX.md", doc, f.phrase, f.want)
+	}
+}
+
+// pyConstant is a Python client's module-level NAME = EXPR, where EXPR
+// multiplies integers and other such constants.
+func pyConstant(t *testing.T, file, name string) int64 {
+	t.Helper()
+	raw, err := os.ReadFile("../../" + file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(name) + ` = ([A-Z0-9_ *]+)$`).FindSubmatch(raw)
+	if m == nil {
+		t.Fatalf("%s has no constant %s", file, name)
+	}
+	v := int64(1)
+	for _, factor := range strings.Split(string(m[1]), "*") {
+		factor = strings.TrimSpace(factor)
+		n, err := strconv.ParseInt(factor, 10, 64)
+		if err != nil {
+			n = pyConstant(t, file, factor)
+		}
+		v *= n
+	}
+	return v
 }
 
 // The hosted MCP tools' argument descriptions are struct tags, which cannot

@@ -20,6 +20,11 @@ python3 swarmmemo.py --key agent.json memory get notes/today
 items are readable by anyone at `GET https://swarmmemo.com/api/memory/AGENT_FINGERPRINT/KEY`,
 and over MCP with `memory_get` and `memory_list` on `https://swarmmemo.com/mcp`.
 
+**Over MCP**, a [hosted identity](https://swarmmemo.com/protocol.md#hosted-identities) stores
+a note with `memory_put` (`{"key": "notes/today", "value": "Follow up on the export idea."}`)
+and removes one with `memory_delete`; `memory_get` and `memory_list` then read its own
+private items too.
+
 ## Who can read my agent's memory?
 
 Only your key reads a private item; to anyone else it does not exist. An item put with
@@ -28,7 +33,8 @@ encrypted, so keep secrets out of it.
 
 ## Do I need an account?
 
-No. Memory belongs to a signing key, which is free to make: no email, password or payment.
+No. Memory belongs to a signing key, which is free to make: no email, password or payment;
+or to a hosted identity over MCP.
 
 ## What does it cost?
 

@@ -501,11 +501,6 @@ func runIDFor(account, requestKey string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-func sha256Of(b []byte) string {
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
-}
-
 // ---------------------------------------------------------------- screening
 
 // runsCodeContent is what the code screen sees: the code and the run's
@@ -571,7 +566,7 @@ func (r *runs) screen(ctx context.Context, surface, subject string, content any)
 	if d.Action != "allow" && d.Action != "block" {
 		d.Action = "hold"
 	}
-	d.Reason = truncateString(d.Reason, 200)
+	d.Reason = truncateUTF8(d.Reason, 200)
 	return d
 }
 
@@ -790,14 +785,6 @@ type runOutput struct {
 	Truncated  RunTruncated `json:"truncated"`
 }
 
-func canonicalJSON(v any) []byte {
-	var b bytes.Buffer
-	e := json.NewEncoder(&b)
-	e.SetEscapeHTML(false)
-	_ = e.Encode(v)
-	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'})
-}
-
 func (r *runs) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	if r.cfg == nil || r.db == nil || r.client == nil || len(r.key) != ed25519.PrivateKeySize {
 		return Result{}, refusal("service_unavailable")
@@ -874,7 +861,7 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,'screening')`, runID, account, c.RequestKey, now, p
 		// against today's caps at its full CPU limit: a failure must never
 		// become a way around the caps.
 		_, _ = r.db.ExecContext(ctx, "UPDATE runs_log SET status='loader_error', error=?, network=?, network_note=?, code_decision=?, finished_at=? WHERE run_id=?",
-			truncateString(detail, 500), rec.Network, rec.Note, decisionText(rec.CodeDecision), r.cfg.clock().Unix(), runID)
+			truncateUTF8(detail, 500), rec.Network, rec.Note, decisionText(rec.CodeDecision), r.cfg.clock().Unix(), runID)
 		return Result{}, refusal("upstream_failed")
 	}
 
@@ -972,11 +959,11 @@ func (r *runs) finishLost(ctx context.Context, c Call, p runPlan, rec runRecord,
 	receiptJSON, _ := json.Marshal(receipt)
 	if _, err = r.db.ExecContext(ctx, `UPDATE runs_log SET status=?, error=?, output=?, output_sha256=?, egress=?, egress_sha256=?, cpu_ms=?, cpu_source='limit', wall_ms=?,
  egress_bytes=?, cost=?, network=?, network_note=?, code_decision=?, egress_decision=?, flagged=?, receipt=?, finished_at=? WHERE run_id=?`,
-		rec.Status, truncateString(detail, 500), string(outBytes), rec.OutputSHA256, string(egressBytes), rec.EgressSHA256, cpu, p.wallMs,
+		rec.Status, truncateUTF8(detail, 500), string(outBytes), rec.OutputSHA256, string(egressBytes), rec.EgressSHA256, cpu, p.wallMs,
 		egress, used, rec.Network, rec.Note, decisionText(rec.CodeDecision), decisionText(rec.EgressDecision), boolInt(rec.Flagged), string(receiptJSON), r.cfg.clock().Unix(), rec.RunID); err != nil {
 		return Result{}, err
 	}
-	slog.Warn("runs: loader answer lost, charged at the limits", "run", rec.RunID, "account", account, "network", network, "detail", truncateString(detail, 200))
+	slog.Warn("runs: loader answer lost, charged at the limits", "run", rec.RunID, "account", account, "network", network, "detail", truncateUTF8(detail, 200))
 	return Result{Body: rec.body(out), Used: used, Public: rec.public()}, nil
 }
 
@@ -984,7 +971,7 @@ func (r *runs) finishLost(ctx context.Context, c Call, p runPlan, rec runRecord,
 // charged, and the call records why.
 func (r *runs) finishWithout(ctx context.Context, rec runRecord, why string) (Result, error) {
 	if _, err := r.db.ExecContext(ctx, "UPDATE runs_log SET status=?, error=?, network_note=?, code_decision=?, finished_at=? WHERE run_id=?",
-		rec.Status, truncateString(why, 500), rec.Note, decisionText(rec.CodeDecision), r.cfg.clock().Unix(), rec.RunID); err != nil {
+		rec.Status, truncateUTF8(why, 500), rec.Note, decisionText(rec.CodeDecision), r.cfg.clock().Unix(), rec.RunID); err != nil {
 		return Result{}, err
 	}
 	return Result{Body: rec.body(runOutput{Status: rec.Status}), Used: 0, Public: rec.public()}, nil
@@ -1001,7 +988,7 @@ func decisionText(d RunScreenDecision) string {
 	if d.Action == "" {
 		return ""
 	}
-	return truncateString(d.Action+": "+d.Reason, 300)
+	return truncateUTF8(d.Action+": "+d.Reason, 300)
 }
 
 // runRecord is what the caller and the public record are told.
@@ -1033,7 +1020,7 @@ func (rec runRecord) body(out runOutput) json.RawMessage {
 	cut := out.Truncated
 	limit := func(s *string, n int, flag *bool) {
 		if len(*s) > n {
-			*s = truncateString(*s, n)
+			*s = truncateUTF8(*s, n)
 			if flag != nil {
 				*flag = true
 			}

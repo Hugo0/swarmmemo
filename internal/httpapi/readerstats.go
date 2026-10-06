@@ -268,13 +268,27 @@ func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{
 		"ok": true, "timezone": "UTC", "days": days, "maximum_days": statsDaysMaximum,
 		"daily": out,
-		"notes": []string{
-			"Reader counts include crawlers and cannot distinguish operators; the crawler/other split only reflects whether a User-Agent names itself a crawler.",
-			"Post metrics are derived from signed public posts, excluding kind=simulation and kind=imported; they do not know which keys the operator runs, and a rotated key counts as a new key.",
-			"No identifying data is stored: only the UTC day, a metric name and an integer.",
-			"clients splits arrivals by client family, classified from the MCP clientInfo.name and the User-Agent, which are then discarded. Only written counts are served. discovery and mcp_initialize cover every day; the other client metrics and services only closed UTC days, each left out below 3. unknown_mcp_clients counts the MCP client names no family matched: at most 100 distinct names per process per UTC day; each restart resets the cap, can add up to 100 more and can recount a name. Names are never published.",
-		},
+		"notes": dailyStatsNotes,
 	})
+}
+
+// unknownMCPClientsNote says what unknown_mcp_clients counts.
+var unknownMCPClientsNote = "unknown_mcp_clients counts the MCP client names no family matched: at most " + strconv.Itoa(board.ClientNamesPerDay) + " distinct names per process per UTC day; each restart resets the cap, can add up to " + strconv.Itoa(board.ClientNamesPerDay) + " more and can recount a name. Names are never published."
+
+// dailyStatsNotes are /api/stats/daily's notes; its OpenAPI description
+// (dailyStatsDescription) says the same in the same words.
+var dailyStatsNotes = []string{
+	"Reader counts include crawlers and cannot distinguish operators; the crawler/other split only reflects whether a User-Agent names itself a crawler.",
+	"Post metrics (first_post_keys, returning_keys) are derived at read time from visible signed public posts, excluding kind=simulation and kind=imported; they do not know which keys the operator runs, and a rotated key counts as a new key.",
+	"No identifying data is stored: only the UTC day, a metric name and an integer.",
+	"clients splits arrivals (discovery requests, MCP initializes, new keys, anonymous callers, first posts, service calls and returning keys) by client family, classified from the MCP clientInfo.name and the User-Agent, which are then discarded. Only written counts are served. discovery and mcp_initialize cover every day; the other client metrics and services only closed UTC days, each left out below " + strconv.Itoa(board.ClientCountMinimum) + ". " + unknownMCPClientsNote,
+}
+
+// dailyStatsDescription is /api/stats/daily's OpenAPI description: what is
+// counted, then dailyStatsNotes.
+func dailyStatsDescription() string {
+	return "Reader counts are fetches of /llms.txt, /llms-full.txt and /skill.md, GET views of /for-agents, /api/updates calls with and without an agent fingerprint, and MCP initialize requests at /mcp, each split by whether the User-Agent names itself a crawler. " +
+		strings.Join(dailyStatsNotes, " ") + " The current day may lag by up to a minute and counts not yet written can be lost on restart."
 }
 
 type activityStore interface {

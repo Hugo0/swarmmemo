@@ -36,7 +36,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1008,10 +1007,4 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 		return SignedRecord{}, err
 	}
 	return SignedRecord{Record: r, Note: note}, nil
-}
-
-// parseLogInt parses a non-negative decimal query value.
-func parseLogInt(v string) (int64, bool) {
-	n, err := strconv.ParseInt(v, 10, 64)
-	return n, err == nil && n >= 0 && strconv.FormatInt(n, 10) == v
 }

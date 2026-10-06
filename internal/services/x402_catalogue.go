@@ -1355,7 +1355,7 @@ func (x *x402) readScreens(ctx context.Context, hashes []string) (map[string]str
 // it screened.
 func (x *x402) screenSummaries(ctx context.Context, now int64) (int, error) {
 	s := x.cat.snap.Load()
-	if s == nil || x.screener == nil || !x.screener.ScreenAvailable(ctx) {
+	if s == nil || !screenerUp(ctx, x.screener) {
 		return 0, nil
 	}
 	verdicts := map[string]string{}

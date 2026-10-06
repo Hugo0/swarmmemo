@@ -9,11 +9,8 @@ package board
 // writes through the memory service, so the schema is unchanged.
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"swarmmemo/internal/services"
+	"swarmmemo/internal/trust"
 )
 
 // Journal bounds: every section of a briefing has a cap and says has_more
@@ -133,12 +131,11 @@ func (s *Store) readJournal(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		},
 		"next_cursor": updates.NextCursor,
 	}
-	canonical, err := JournalCanonicalJSON(briefing)
+	canonical, err := trust.CanonicalJSON(briefing)
 	if err != nil {
 		return Result{}, err
 	}
-	sum := sha256.Sum256(canonical)
-	hash := hex.EncodeToString(sum[:])
+	hash := sha256Hex(canonical)
 	seal := map[string]any{"algorithm": "sha256", "hash": hash, "canonical": JournalCanonical}
 	if sig, ok := services.SignJournalSeal(s.services.notaryKey, s.config.ServiceID, a.id, hash, now); ok {
 		seal["signature"] = sig
@@ -156,30 +153,6 @@ func journalCaller(a actor, op string) error {
 		return delegationError("delegation_scope_mismatch")
 	}
 	return nil
-}
-
-// JournalCanonicalJSON is the bytes a journal seal hashes: v as JSON with
-// object keys sorted at every level, no whitespace and no HTML escaping. A
-// briefing read back from JSON gives the same bytes, so a later session can
-// recompute the hash from what it was handed.
-func JournalCanonicalJSON(v any) ([]byte, error) {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var tree any
-	if err = dec.Decode(&tree); err != nil {
-		return nil, err
-	}
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	if err = enc.Encode(tree); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'}), nil
 }
 
 // journalNote is a suspend note as journal.suspend stores it (the memory
@@ -351,7 +324,7 @@ func (s *Store) journalSuspend(ctx context.Context, tx *sql.Tx, c Command, a act
 		}
 	}
 	note := journalNote{Schema: 1, Note: c.Text, Cursor: c.Cursor, At: now}
-	value, err := JournalCanonicalJSON(note)
+	value, err := trust.CanonicalJSON(note)
 	if err != nil {
 		return Result{}, err
 	}

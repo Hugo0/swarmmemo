@@ -53,7 +53,7 @@ const (
 	// ClientCountMinimum is the smallest command count published for a
 	// family on a day; a smaller one is left out.
 	ClientCountMinimum    = 3
-	clientNamesPerDay     = 100    // unknown MCP client names told apart per process per UTC day; resets on restart
+	ClientNamesPerDay     = 100    // unknown MCP client names told apart per process per UTC day; resets on restart
 	clientNamesLogged     = 20     // of which the most frequent are logged at the day's end
 	clientServicesPending = 64     // family:service keys held in memory per day
 	clientSubjectsPerDay  = 100000 // subjects told apart in memory per day (about 4 MB)
@@ -294,7 +294,7 @@ func subjectOf(source string) string {
 // CountClient counts one request that is not a command: metric is
 // "discovery" or "mcp_initialize". For an MCP initialize whose clientInfo.name
 // no family matched, name is that name: the first time it is seen in a day
-// (among the first clientNamesPerDay) it adds one to unknown_mcp_clients,
+// (among the first ClientNamesPerDay) it adds one to unknown_mcp_clients,
 // and the name itself stays in memory. Unknown families or metrics are
 // ignored.
 func (s *Store) CountClient(family, metric, name string) {
@@ -309,7 +309,7 @@ func (s *Store) CountClient(family, metric, name string) {
 		c := &s.clients
 		c.mu.Lock()
 		if c.resetLocked(day) {
-			if _, held := c.names[name]; held || len(c.names) < clientNamesPerDay {
+			if _, held := c.names[name]; held || len(c.names) < ClientNamesPerDay {
 				if !held {
 					counts["unknown_mcp_clients"] = 1
 				}
@@ -444,7 +444,7 @@ func (s *Store) AddClientCounts(ctx context.Context, day string, counts map[stri
 		if n == 0 {
 			continue
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET value=value+excluded.value", prefix+key, n); err != nil {
+		if err = addCounter(ctx, tx, prefix+key, n); err != nil {
 			return err
 		}
 	}

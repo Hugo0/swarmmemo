@@ -1,6 +1,7 @@
 // Package safenet is the outbound-request boundary shared by every feature
 // that connects to a host it did not choose at build time: webhook delivery
-// (internal/board) and the inference upstreams (internal/services). It decides
+// (internal/board), the inference, fetch and other service upstreams
+// (internal/services) and OAuth client metadata (internal/httpapi). It decides
 // which addresses are public and dials only those, after resolution, so a
 // hostname that rebinds to a private address between a check and the connect
 // is refused at the connect.
@@ -10,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"syscall"
 	"time"
 )
 
@@ -73,23 +75,62 @@ func PublicIP(ip net.IP) error {
 // returns a public and a private address together is exactly the rebinding
 // shape. The returned error is ErrBlocked, ErrUnresolved or the dial error.
 func Dial(ctx context.Context, network, addr string, timeout time.Duration) (net.Conn, error) {
+	return Dialer{Timeout: timeout}.DialContext(ctx, network, addr)
+}
+
+// Dialer is Dial with its parts replaceable, so a feature's tests can point
+// it at a local server: the resolver, the address decision and the address
+// actually dialled. Nil parts are Dial's own.
+type Dialer struct {
+	Timeout time.Duration                                            // per connection attempt
+	Lookup  func(ctx context.Context, host string) ([]net.IP, error) // nil: the system resolver
+	Public  func(net.IP) error                                       // nil: PublicIP
+	Target  func(ip net.IP, port string) string                      // nil: ip:port
+}
+
+// DialContext is Dial through d. Every address the host resolves to (an
+// address literal is itself) must be public, and the address actually
+// connected to is checked again at connect time.
+func (d Dialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
-	dialer := &net.Dialer{Timeout: timeout}
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+	public := d.Public
+	if public == nil {
+		public = PublicIP
+	}
+	var ips []net.IP
+	switch {
+	case net.ParseIP(host) != nil:
+		ips = []net.IP{net.ParseIP(host)}
+	case d.Lookup != nil:
+		ips, err = d.Lookup(ctx, host)
+	default:
+		ips, err = net.DefaultResolver.LookupIP(ctx, "ip", host)
+	}
 	if err != nil || len(ips) == 0 {
 		return nil, ErrUnresolved
 	}
 	for _, ip := range ips {
-		if err = PublicIP(ip); err != nil {
+		if err = public(ip); err != nil {
 			return nil, err
 		}
 	}
+	dialer := &net.Dialer{Timeout: d.Timeout, Control: func(_, address string, _ syscall.RawConn) error {
+		h, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return ErrBlocked
+		}
+		return public(net.ParseIP(h))
+	}}
 	var last error = ErrUnresolved
 	for _, ip := range ips {
-		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		target := net.JoinHostPort(ip.String(), port)
+		if d.Target != nil {
+			target = d.Target(ip, port)
+		}
+		conn, err := dialer.DialContext(ctx, network, target)
 		if err == nil {
 			return conn, nil
 		}

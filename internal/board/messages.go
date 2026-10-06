@@ -2,9 +2,7 @@ package board
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -204,8 +202,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if reservedKind(c.Kind) && (a.grant != nil || (!curatorPost(c.Kind, handle, c.PublicKey) && !s.allowedImporter(ctx, tx, a, now))) {
 		return Result{}, problem(403, "reserved_kind", "The imported kind is reserved for the curator account and operator-approved importer accounts; this request has not been published.")
 	}
-	hash := sha256.Sum256([]byte(c.Text))
-	hashString := hex.EncodeToString(hash[:])
+	hashString := sha256Hex([]byte(c.Text))
 	id := randomID()
 	payload, signature, key := "", "", ""
 	if a.signed {
@@ -218,7 +215,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		scope = "room:" + r.Name
 	}
 	var displaySeq int64
-	if err = tx.QueryRowContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET value=value+1 RETURNING value", scope).Scan(&displaySeq); err != nil {
+	if displaySeq, err = bumpCounter(ctx, tx, scope); err != nil {
 		return Result{}, err
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO events(display_seq,id,room,page,text,kind,author,account,handle,public_key,signature,payload,created_at,hash,reply_to,recipient,format,supersedes,origin,via) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, displaySeq, id, c.Room, c.Page, c.Text, c.Kind, a.id, a.account, handle, key, signature, payload, now, hashString, c.ReplyTo, c.To, data.Format, data.Supersedes, origin, storedVia)

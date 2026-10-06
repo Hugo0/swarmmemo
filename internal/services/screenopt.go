@@ -65,6 +65,22 @@ func ScreenSurchargeMax(n int) int64 {
 	return screenFee + chunks*(screenBase-screenFee) + screenPerKiB*int64((n+1023)/1024)
 }
 
+// ScreenSurchargePriceText is ScreenSurchargeMax in words.
+func ScreenSurchargePriceText() string {
+	return itoa(screenFee) + " + " + itoa(screenBase-screenFee) + " per " + SizeText(ScreenTextBytes) + " + " + itoa(screenPerKiB) + " per KiB of text"
+}
+
+// screenerUp is whether the classifier can screen now.
+func screenerUp(ctx context.Context, ts TextScreener) bool {
+	return ts != nil && ts.ScreenAvailable(ctx)
+}
+
+// screeningExtra is how a service's catalogue entry states its optional
+// screening: the operator's mode, and whether the classifier is up now.
+func screeningExtra(mode ScreenMode, ts TextScreener) map[string]any {
+	return map[string]any{"mode": string(mode), "available": screenerUp(context.Background(), ts)}
+}
+
 // screenSurcharge is what a finished screen of n bytes is charged: its
 // classifier cost plus screenFee, never above ScreenSurchargeMax(n).
 func screenSurcharge(n int, costMicroUSD int64) int64 {
@@ -86,7 +102,7 @@ var errScreenTooLong = errors.New("services: text too long to screen")
 // returns the verdict and the classifier's cost in micro-USD. It holds no
 // transaction: callers run it after commit.
 func screenOptional(ctx context.Context, ts TextScreener, text, source string) (TextVerdict, int64, error) {
-	if ts == nil || !ts.ScreenAvailable(ctx) {
+	if !screenerUp(ctx, ts) {
 		return TextVerdict{}, 0, refusal("upstream_unavailable")
 	}
 	chunks := splitUTF8(text, ScreenTextBytes)

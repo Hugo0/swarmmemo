@@ -266,8 +266,7 @@ func hostedSecret(prefix string) (secret, hash string, err error) {
 }
 
 func hostedHash(secret string) string {
-	sum := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(sum[:])
+	return sha256Hex([]byte(secret))
 }
 
 // hostedTokenID names a token in answers without its secret.
@@ -367,9 +366,8 @@ func (s *Store) hostedToken(ctx context.Context, token string, now int64) (hoste
 // text's SHA-256 and the expiry, "EXPIRES.MAC". Only this server can make
 // one, and it confirms exactly that text to exactly that place.
 func (s *Store) HostedHold(account, where, text string, expires int64) string {
-	sum := sha256.Sum256([]byte(text))
 	mac := hmac.New(sha256.New, s.hosted.holdKey)
-	mac.Write([]byte("swarmmemo-hold/1\x00" + account + "\x00" + where + "\x00" + hex.EncodeToString(sum[:]) + "\x00" + strconv.FormatInt(expires, 10)))
+	mac.Write([]byte("swarmmemo-hold/1\x00" + account + "\x00" + where + "\x00" + sha256Hex([]byte(text)) + "\x00" + strconv.FormatInt(expires, 10)))
 	return strconv.FormatInt(expires, 10) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
@@ -652,7 +650,7 @@ func (s *Store) recoverHosted(ctx context.Context, tx *sql.Tx, c Command, a acto
 	if err != nil {
 		return Result{}, err
 	}
-	if err = s.charge(ctx, tx, a, 256, now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 		return Result{}, err
 	}
 	token, tokenHash, err := hostedSecret(HostedTokenPrefix)

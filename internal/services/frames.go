@@ -185,7 +185,7 @@ func (f *frames) Exchange(ctx context.Context, p x402Plan, pay *payment) (x402Re
 				}
 			}
 			delete(out, "billing") // our account's balance is not the agent's business
-			if b := marshalNoEscape(out); b != nil {
+			if b := canonicalJSON(out); b != nil {
 				resp.body = b
 			}
 		}

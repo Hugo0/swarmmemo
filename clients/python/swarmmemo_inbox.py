@@ -58,6 +58,9 @@ BODY_BUDGET = 56 * 1024 * 1024
 MAX_EVENTS = 10000
 MAX_NOTIFICATIONS = 50000
 MAX_CONSUMERS = 16
+MAX_PAGE = 100
+MAX_REQUESTS = 20
+MAX_DEADLINE_SECONDS = 30
 MAX_SENDER_RULES_PER_CONSUMER = 128
 MAX_SENDER_RULES = 2048
 SENDER_RULE_BYTES = 256
@@ -522,7 +525,7 @@ class Inbox:
             return result
 
     def pending(self, consumer, limit=20, *, include_muted=False):
-        if type(limit) is not int or not 1 <= limit <= 100: raise InboxError("invalid_limit")
+        if type(limit) is not int or not 1 <= limit <= MAX_PAGE: raise InboxError("invalid_limit")
         if type(include_muted) is not bool: raise InboxError("invalid_include_muted")
         with self.database() as db:
             self.require(db); self.consumer_known(db, consumer)
@@ -727,16 +730,16 @@ class Inbox:
         # Never call client callbacks/openers: all network reads use our fixed,
         # keyless worker, even when a same-binding Client was supplied.
 
-    def poll(self, client=None, max_requests=10, deadline_seconds=30):
+    def poll(self, client=None, max_requests=10, deadline_seconds=MAX_DEADLINE_SECONDS):
         return self._poll(client, max_requests, deadline_seconds, resync=False)
 
-    def resync(self, client=None, max_requests=10, deadline_seconds=30):
+    def resync(self, client=None, max_requests=10, deadline_seconds=MAX_DEADLINE_SECONDS):
         return self._poll(client, max_requests, deadline_seconds, resync=True)
 
     def _poll(self, client, max_requests, deadline_seconds, resync):
         _require_worker_platform()
         self.check_client(client)
-        if type(max_requests) is not int or not 1 <= max_requests <= 20 or type(deadline_seconds) not in (int, float) or not 0 < deadline_seconds <= 30:
+        if type(max_requests) is not int or not 1 <= max_requests <= MAX_REQUESTS or type(deadline_seconds) not in (int, float) or not 0 < deadline_seconds <= MAX_DEADLINE_SECONDS:
             raise InboxError("poll_budget_limit")
         deadline, requests = time.monotonic() + deadline_seconds, 0
         def budget():
@@ -762,7 +765,7 @@ class Inbox:
             if generation and result["generation"] != generation: raise InboxError("cursor_reset")
             records = result["messages"]
             if records is None: records = []
-            if not isinstance(records, list) or len(records) > 100: raise InboxError("event_page_limit")
+            if not isinstance(records, list) or len(records) > MAX_PAGE: raise InboxError("event_page_limit")
             for record in records: validate_event(record, self.binding, scoped=False)
             if after == -1:
                 if records: raise InboxError("invalid_bootstrap")
@@ -782,7 +785,7 @@ class Inbox:
                                               or type(result["data"]["has_more"]) is not bool))): raise InboxError("invalid_event_response")
             if result["generation"] != generation: raise InboxError("cursor_reset")
             records = result.get("messages", [])
-            if not isinstance(records, list) or len(records) > (1 if single else 100): raise InboxError("event_page_limit")
+            if not isinstance(records, list) or len(records) > (1 if single else MAX_PAGE): raise InboxError("event_page_limit")
             if single and len(records) != 1: raise InboxError("invalid_event_response")
             ids = set()
             for record in records:
@@ -817,7 +820,7 @@ class Inbox:
                 while True:
                     state = db.execute("SELECT * FROM checkpoint").fetchone()
                     if state["phase"] in ("events", "ready"):
-                        query = {"to": self.binding["recipient"], "limit": 100}
+                        query = {"to": self.binding["recipient"], "limit": MAX_PAGE}
                         if self.binding["room"]: query["room"] = self.binding["room"]
                         if state["cursor"]: query["cursor"] = state["cursor"]
                         records, cursor = event_page("/api/messages?" + urllib.parse.urlencode(query), state["generation"])
@@ -905,7 +908,7 @@ def main(argv=None):
         if name != "sender-mutes": action.add_argument("--signer", required=True)
     consumer = sub.add_parser("consumer-add"); consumer.add_argument("consumer")
     for name in ("poll", "resync"):
-        action = sub.add_parser(name); action.add_argument("--max-requests", type=int, default=10); action.add_argument("--deadline", type=float, default=30)
+        action = sub.add_parser(name); action.add_argument("--max-requests", type=int, default=10); action.add_argument("--deadline", type=float, default=MAX_DEADLINE_SECONDS)
     pending = sub.add_parser("pending"); pending.add_argument("consumer"); pending.add_argument("--limit", type=int, default=20); pending.add_argument("--include-muted", action="store_true")
     inspect = sub.add_parser("inspect"); inspect.add_argument("consumer"); inspect.add_argument("notification", type=int); inspect.add_argument("--sensitive", action="store_true")
     ack = sub.add_parser("ack"); ack.add_argument("consumer"); ack.add_argument("notification", type=int); ack.add_argument("digest")

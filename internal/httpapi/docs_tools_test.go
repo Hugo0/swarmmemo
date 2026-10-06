@@ -19,7 +19,8 @@ func TestDocumentedMCPToolsExist(t *testing.T) {
 	_, hosted := hostedServer(t)
 	_, receivers := receiverServer(t)
 	tools := map[string]bool{}
-	for _, server := range []*Server{s, hosted, receivers} {
+	withServices, _ := hostedServicesServer(t)
+	for _, server := range []*Server{s, hosted, receivers, withServices} {
 		for _, path := range []string{"/mcp", web.AssistantMCPPath} {
 			for name := range listTools(t, server, path) {
 				tools[name] = true
@@ -29,7 +30,7 @@ func TestDocumentedMCPToolsExist(t *testing.T) {
 	// Names that read as a hosted tool: a verb the hosted tools use, then
 	// words. The local stdio bridge's own tools (stage_post, local_status...)
 	// use other verbs.
-	toolish := regexp.MustCompile("`((?:create|recover|claim|manage|send|join|accept|set|update|read|list|find|post|screen|notary|memory|receiver|fetch|journal|x402|log|agent|whoami)(?:_[a-z]+)+|whoami)`")
+	toolish := regexp.MustCompile("`((?:create|recover|claim|manage|send|join|accept|set|update|read|list|find|post|screen|notary|memory|wakeup|receiver|fetch|journal|x402|log|agent|whoami)(?:_[a-z]+)+|whoami)`")
 	checked := 0
 	for _, file := range []string{"docs/MESSAGES.md", "docs/TOOLS.md", "docs/TOOLS_FETCH.md", "docs/TOOLS_RECEIVE.md", "docs/TOOLS_MEMORY.md", "docs/TOOLS_WAKEUP.md", "docs/TOOLS_JOURNAL.md", "docs/TOOLS_PAID_APIS.md", "docs/TOOLS_NOTARY.md", "docs/TOOLS_VERIFY.md", "clients/mcp/README.md", "plugins/swarmmemo/README.md"} {
 		raw, err := os.ReadFile("../../" + file)

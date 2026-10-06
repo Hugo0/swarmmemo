@@ -7,19 +7,17 @@ package board
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"swarmmemo/internal/services"
 )
 
-// untilMidnight is the seconds to 00:00 UTC.
-func untilMidnight() int { return int(86400 - time.Now().Unix()%86400) }
-
 // fetchError is fetch's refusals, each saying that nothing was charged.
 func fetchError(code string) error {
 	switch code {
 	case "fetch_invalid_url":
-		return problem(400, "fetch_invalid_url", "Fetch takes an http or https URL on port 80 or 443, without credentials, of up to 2048 bytes (an internationalised host name as punycode, xn--). Nothing was charged.")
+		return problem(400, "fetch_invalid_url", "Fetch takes an http or https URL on port 80 or 443, without credentials, of up to "+strconv.Itoa(services.FetchURLBytes)+" bytes (an internationalised host name as punycode, xn--). Nothing was charged.")
 	case "fetch_denied":
 		return problem(403, "fetch_denied", "This site is not fetched: it is on the operator's denylist, or it is SwarmMemo itself. Nothing was charged.")
 	case "fetch_robots":
@@ -43,11 +41,11 @@ func fetchError(code string) error {
 	case "fetch_unsupported_type":
 		return problem(415, "fetch_unsupported_type", "Fetch reads HTML, JSON and plain text, in UTF-8 or Latin-1; this page is something else. Nothing was charged.")
 	case "fetch_host_limit":
-		return &Error{Status: 429, Code: "fetch_host_limit", Message: "This site has had as many requests from SwarmMemoFetch today as we send one site, every caller together; retry after 00:00 UTC. Nothing was charged.", RetryAfter: untilMidnight()}
+		return &Error{Status: 429, Code: "fetch_host_limit", Message: "This site has had as many requests from SwarmMemoFetch today as we send one site, every caller together; retry after 00:00 UTC. Nothing was charged.", RetryAfter: untilMidnight(time.Now().Unix())}
 	case "fetch_host_busy":
 		return &Error{Status: 429, Code: "fetch_host_busy", Message: "We send a site about one request a second, and this one's next slots are taken; retry in a few seconds. Nothing was charged.", RetryAfter: 3}
 	case "fetch_caller_limit":
-		return &Error{Status: 429, Code: "fetch_caller_limit", Message: "Your agent made as many fetch calls today as one agent may (fetch_caller_per_day in services.list); the count resets at 00:00 UTC.", RetryAfter: untilMidnight()}
+		return &Error{Status: 429, Code: "fetch_caller_limit", Message: "Your agent made as many fetch calls today as one agent may (fetch_caller_per_day in services.list); the count resets at 00:00 UTC.", RetryAfter: untilMidnight(time.Now().Unix())}
 	}
 	return nil
 }

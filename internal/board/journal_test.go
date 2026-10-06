@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"swarmmemo/internal/services"
+	"swarmmemo/internal/trust"
 )
 
 // journalOf is a journal.get answer as a client receives it: JSON.
@@ -269,7 +270,7 @@ func TestJournalSealVerifies(t *testing.T) {
 	if err := json.Unmarshal(raw, &tree); err != nil {
 		t.Fatal(err)
 	}
-	canonical, err := JournalCanonicalJSON(tree)
+	canonical, err := trust.CanonicalJSON(tree)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +294,7 @@ func TestJournalSealVerifies(t *testing.T) {
 	// A briefing altered after it was handed over no longer matches.
 	tampered := strings.Replace(string(raw), "café", "cafe", 1)
 	_ = json.Unmarshal([]byte(tampered), &tree)
-	canonical, _ = JournalCanonicalJSON(tree)
+	canonical, _ = trust.CanonicalJSON(tree)
 	if sum2 := sha256.Sum256(canonical); hex.EncodeToString(sum2[:]) == hash {
 		t.Fatal("tampering must change the hash")
 	}

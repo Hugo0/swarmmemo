@@ -32,8 +32,3 @@ func rfc0012Operator(ctx context.Context, store *board.Store, command string, ar
 	}
 	return fmt.Errorf("unknown command %q", command)
 }
-
-// notBuilt is every stub's answer until its builder replaces it.
-func notBuilt(command string) error {
-	return fmt.Errorf("swarmmemo %s is not available in this build (RFC0012)", command)
-}

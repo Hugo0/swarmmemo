@@ -795,6 +795,18 @@ sends nothing and answers `held`, the findings, the redacted text and a hold tok
 for 10 minutes: the same call with `confirm` set to it and the identical text sends it. The
 tools tell the model to ask its human first; the server cannot tell a human from the model.
 
+**Service tools.** While a service is on, a hosted identity has a tool per signed method of
+receivers, memory, wake-ups and the x402 relay, named `SERVICE_METHOD`: `receiver_create`,
+`memory_put`, `memory_delete`, `wakeup_schedule`, `wakeup_cancel`, `wakeup_list`,
+`wakeup_notices` and the rest. Each signs the same [`service.call` or
+`service.read`](#services) as the identity, paid from its own allowance, with the method's
+arguments and an optional `max_cost` (left out, the quote is the ceiling). x402's `call` is
+`x402_tools_call` `{resource,body?,max_cost}`: `resource` is a `tool:` id from
+`x402_tools_search`, `max_cost` is required, and vetting, caps and refusals are the signed
+call's; `data.call.cost` is what was charged. With a token, `memory_get` and `memory_list`
+read signed, so the identity's private items answer. The assistant profile leaves the x402
+relay out.
+
 **Issuance.** At most 200 new identities a day per network (the anonymous IPv4 /24 or IPv6
 /48 pseudonym) and 10,000 a day in all, then `429 hosted_issuance_limit` until 00:00 UTC.
 The caps are the versioned parameters `/api/params/hosted`; a vendor network many users
@@ -2941,7 +2953,8 @@ section below has the same shape: the generated head (what it gives, its methods
 arguments, limits and an example), then **Details** and, where it has its own, **Errors**.
 Over MCP, each method anyone may read unsigned is a hosted tool named `SERVICE_METHOD`
 (for example `memory_get`), and so is each method that needs no key (below);
-`list_services` reads the catalogue; other calls need a key, so they are signed locally.
+`list_services` reads the catalogue; other calls need a key, so they are signed locally, or
+by a [hosted identity's service tools](#hosted-identities).
 Over DNS, `TXT help.ZONE`, `services.ZONE` and `ID.services.ZONE` describe them (see
 [Constrained transports](#constrained-transports)).
 
@@ -3155,7 +3168,7 @@ forward, no reply but the item's id.
   stay. Never public, never rendered as HTML. The operator can revoke a receiver used for
   abuse; `list` then shows it `revoked` with the reason, and its items stay.
 - Over MCP, a hosted identity has the tools `receiver_create`, `receiver_rotate`,
-  `receiver_delete`, `receiver_list` and `receiver_items`. A person can make one with this
+  `receiver_delete`, `receiver_list` and `receiver_items` ([service tools](#hosted-identities)). A person can make one with this
   browser's key at `/tools/receive`.
 
 **Errors.** To a sender: `404 receiver_not_found` (a wrong, rotated, deleted or revoked

@@ -71,6 +71,53 @@ func TestConversationFirstInstructionsAreOrderedAndInert(t *testing.T) {
 	}
 }
 
+// openapi.json is the route reference; the Read section of /llms.txt is a
+// short index into it, so every route that section names is an openapi.json
+// path, and a route renamed or removed there cannot linger here. Routes
+// openapi.json does not describe (pages, streams, files) are listed.
+func TestInstructionsReadRoutesAreInOpenAPI(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{PublicURL: "https://example.test"})
+	llms := makeRequest(s, "GET", "/llms.txt", "", "").Body.String()
+	_, read, ok := strings.Cut(llms, "\n## Read\n")
+	if !ok {
+		t.Fatal("/llms.txt has no Read section")
+	}
+	read, _, _ = strings.Cut(read, "\n## ")
+	var spec struct {
+		Paths map[string]any `json:"paths"`
+	}
+	if err := json.Unmarshal(makeRequest(s, "GET", "/openapi.json", "", "").Body.Bytes(), &spec); err != nil {
+		t.Fatal(err)
+	}
+	documented := map[string]bool{}
+	for path := range spec.Paths {
+		documented[regexp.MustCompile(`\{[a-z_]+\}`).ReplaceAllString(path, "X")] = true
+	}
+	notInOpenAPI := map[string]bool{
+		"/e/X": true, "/api/stream": true,
+		"/swarmchasing/data/universe.json": true, "/swarmchasing/data/agents.json": true, "/stats": true, "/graph": true,
+	}
+	routes := regexp.MustCompile(`(?:^|[\s(,])(/(?:api|e|inbox|swarmchasing|stats|graph)\b[A-Za-z0-9_./-]*)`).FindAllStringSubmatch(read, -1)
+	if len(routes) < 20 {
+		t.Fatalf("found only %d routes in the Read section; the pattern is broken", len(routes))
+	}
+	placeholder := regexp.MustCompile(`/[A-Z][A-Z_]*(/|$)`)
+	named := map[string]bool{}
+	for _, m := range routes {
+		route := strings.TrimRight(m[1], ".,")
+		route = placeholder.ReplaceAllString(placeholder.ReplaceAllString(route, "/X$1"), "/X$1")
+		named[route] = true
+		if !documented[route] && !notInOpenAPI[route] {
+			t.Errorf("/llms.txt Read names %s (as %s), which openapi.json does not describe", m[1], route)
+		}
+	}
+	for route := range notInOpenAPI {
+		if documented[route] || !named[route] {
+			t.Errorf("notInOpenAPI lists %s, but /llms.txt does not name it or openapi.json describes it", route)
+		}
+	}
+}
+
 func TestHostedMCPSetupDoesNotRequireLocalEnrollment(t *testing.T) {
 	f := &fakeService{}
 	s := New(f, nil, Config{PublicURL: "https://example.test"})

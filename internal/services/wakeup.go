@@ -657,6 +657,15 @@ func (w *wakeup) Notices(ctx context.Context, q allowance.Querier, n NoticeQuery
 	return "wakeups", out, nil
 }
 
+// addWakeNotice stores the notice a firing leaves in the account's inbox,
+// in the firing's transaction: every kind of firing (time, recurring, event,
+// received) writes it here. seq is the newest message's sequence when it
+// fired: an updates.get cursor at or before it has not yet shown the notice.
+func addWakeNotice(ctx context.Context, tx *sql.Tx, id, account, kind, event, room string, dueAt, firedAt, seq int64, late bool) error {
+	_, err := tx.ExecContext(ctx, "INSERT INTO wakeup_notices(wakeup,account,kind,event,room,due_at,fired_at,event_seq,late) VALUES(?,?,?,?,?,?,?,?,?)", id, account, kind, event, room, dueAt, firedAt, seq, late)
+	return err
+}
+
 // fireReceived fires the account's active on:"received" wake-ups (at most
 // WakeupsPerAccount), in a delivery's transaction: latest is the newest
 // message's sequence, so an updates.get cursor at or before it has not yet
@@ -687,7 +696,7 @@ func fireReceived(ctx context.Context, tx *sql.Tx, account string, latest, now i
 		if n, _ := res.RowsAffected(); n != 1 {
 			continue
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO wakeup_notices(wakeup,account,kind,event,room,due_at,fired_at,event_seq,late) VALUES(?,?,'received','','',0,?,?,0)", id, account, now, latest); err != nil {
+		if err = addWakeNotice(ctx, tx, id, account, "received", "", "", 0, now, latest, false); err != nil {
 			return err
 		}
 	}
@@ -723,7 +732,7 @@ func (p *wakePass) fire(ctx context.Context, id, account, kind, event, room stri
 	late := kind == "time" && p.now-dueAt > WakeupLateAfter
 	// event_seq is the newest message when it fired: an updates.get cursor
 	// at or before it has not yet been shown this notice.
-	if _, err = p.tx.ExecContext(ctx, "INSERT INTO wakeup_notices(wakeup,account,kind,event,room,due_at,fired_at,event_seq,late) VALUES(?,?,?,?,?,?,?,?,?)", id, account, kind, event, room, dueAt, p.now, p.latest, late); err != nil {
+	if err = addWakeNotice(ctx, p.tx, id, account, kind, event, room, dueAt, p.now, p.latest, late); err != nil {
 		return err
 	}
 	p.fired++
@@ -761,7 +770,7 @@ func (p *wakePass) fireRecurring(ctx context.Context, d dueWakeup) error {
 		return nil
 	}
 	late := p.now-d.at > WakeupLateAfter
-	if _, err = p.tx.ExecContext(ctx, "INSERT INTO wakeup_notices(wakeup,account,kind,event,room,due_at,fired_at,event_seq,late) VALUES(?,?,'time','','',?,?,?,?)", d.id, d.account, d.at, p.now, p.latest, late); err != nil {
+	if err = addWakeNotice(ctx, p.tx, d.id, d.account, "time", "", "", d.at, p.now, p.latest, late); err != nil {
 		return err
 	}
 	p.fired++

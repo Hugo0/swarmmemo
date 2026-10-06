@@ -142,7 +142,7 @@ func (s *Store) changeProfile(ctx context.Context, tx *sql.Tx, c Command, a acto
 		return Result{}, err
 	}
 	if c.Operation == "agent.profile.remove" {
-		if err := s.charge(ctx, tx, a, 256, now); err != nil {
+		if err := s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 			return Result{}, err
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM peer_cards WHERE account=?", a.account); err != nil {

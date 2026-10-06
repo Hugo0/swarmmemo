@@ -10,8 +10,6 @@ package services
 // protocol) is generated from the Method fields and the helpers here.
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -375,11 +373,7 @@ func Thousands(n int64) string {
 
 // NewRequestID is a random request_id for an unsigned call that gives none:
 // 32 hex digits, which no neighbour on the network can guess or take first.
-func NewRequestID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}
+func NewRequestID() string { return newCallID() }
 
 // placeholderRequestIDRE is the shape of a placeholder: capitals, digits
 // and underscores, perhaps in <>, {} or [] (RANDOM_16_CHARS, YOUR_ID,

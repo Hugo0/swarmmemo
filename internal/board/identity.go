@@ -451,7 +451,7 @@ func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if c.Operation == "room.member.remove" && target == r.Owner {
 		return Result{}, problem(409, "owner_membership", "The room owner cannot be removed.")
 	}
-	if err = s.charge(ctx, tx, a, 256, now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 		return Result{}, err
 	}
 	if c.Operation == "room.member.add" {

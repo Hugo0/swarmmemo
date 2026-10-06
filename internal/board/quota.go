@@ -22,9 +22,36 @@ func quotaRow(ctx context.Context, tx *sql.Tx, actor string, day int64) (used, i
 	}
 	return
 }
+
+// untilMidnight is the seconds from now to 00:00 UTC: a daily cap's
+// retry_after.
+func untilMidnight(now int64) int { return int(86400 - now%86400) }
+
 func rateError(now int64, code, message string) error {
-	return &Error{Status: 429, Code: code, Message: message, RetryAfter: int(86400 - now%86400)}
+	return &Error{Status: 429, Code: code, Message: message, RetryAfter: untilMidnight(now)}
 }
+
+// bumpCounter adds one to the counter at scope in tx and returns its new
+// value: the count a daily or hourly cap compares.
+func bumpCounter(ctx context.Context, tx *sql.Tx, scope string) (int64, error) {
+	var n int64
+	err := tx.QueryRowContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET value=value+1 RETURNING value", scope).Scan(&n)
+	return n, err
+}
+
+// addCounter adds n to the counter at scope, through a transaction or the
+// database.
+func addCounter(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, scope string, n int64) error {
+	_, err := q.ExecContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET value=value+excluded.value", scope, n)
+	return err
+}
+
+// SmallCommandCost is the allowance a small signed command (an invite, a
+// revoke, a membership or profile change) charges, and the base of one that
+// adds its data's length.
+const SmallCommandCost = 256
 
 // charge spends cost posting bytes for a in the command's transaction. The
 // delegation ceiling is checked first whatever the path; ALLOWANCE_LEDGER
@@ -136,7 +163,7 @@ func (s *Store) legacyTransfer(ctx context.Context, tx *sql.Tx, c Command, a act
 	}
 	// The fixed transaction fee bounds ledger growth; the transferred balance is
 	// conserved and consumes global budget only when the recipient stores data.
-	if err = s.charge(ctx, tx, a, 256, now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 		return Result{}, err
 	}
 	day := now / 86400
@@ -149,7 +176,7 @@ func (s *Store) legacyTransfer(ctx context.Context, tx *sql.Tx, c Command, a act
 		return Result{}, err
 	}
 	if c.Amount > limit+incoming-used {
-		return Result{}, rateError(now, "quota_exhausted", "Insufficient remaining allowance for this transfer and its 256-byte transaction fee.")
+		return Result{}, rateError(now, "quota_exhausted", fmt.Sprintf("Insufficient remaining allowance for this transfer and its %d-byte transaction fee.", SmallCommandCost))
 	}
 	_, targetIncoming, err := quotaRow(ctx, tx, target, day)
 	if err != nil {
@@ -193,7 +220,7 @@ func (s *Store) lease(ctx context.Context, tx *sql.Tx, c Command, a actor, now i
 		if c.Amount != fence {
 			return Result{}, problem(409, "stale_fence", "Release requires amount equal to the active fencing token.")
 		}
-		if err = s.charge(ctx, tx, a, 256, now); err != nil {
+		if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 			return Result{}, err
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE leases SET expires_at=0 WHERE room=? AND name=?", c.Room, c.Target); err != nil {

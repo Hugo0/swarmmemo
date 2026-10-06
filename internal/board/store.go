@@ -452,7 +452,15 @@ func randomID() string {
 	}
 	return hex.EncodeToString(b[:])
 }
-func fingerprint(key []byte) string { h := sha256.Sum256(key); return hex.EncodeToString(h[:]) }
+
+// sha256Hex is the lowercase hex SHA-256 of b: a key's fingerprint, a
+// stored secret's hash, a body's digest.
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func fingerprint(key []byte) string { return sha256Hex(key) }
 func problem(status int, code, message string) error {
 	return &Error{Status: status, Code: code, Message: message}
 }
@@ -711,8 +719,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 			return empty, err
 		}
 	}
-	h := sha256.Sum256(a.canonical)
-	digest := hex.EncodeToString(h[:])
+	digest := sha256Hex(a.canonical)
 	keys := []string{}
 	if mutation(cmd.Operation) {
 		if cmd.RequestID != "" {

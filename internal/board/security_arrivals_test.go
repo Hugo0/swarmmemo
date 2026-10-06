@@ -102,14 +102,14 @@ func TestSecArrivalsMidnightFlapKeepsDay(t *testing.T) {
 func TestSecArrivalsNameFloodOnlyCounts(t *testing.T) {
 	s := openTest(t, Config{})
 	s.CountClient("other-mcp", "mcp_initialize", "real-client")
-	for i := 0; i < clientNamesPerDay+50; i++ {
+	for i := 0; i < ClientNamesPerDay+50; i++ {
 		for j := 0; j < 3; j++ {
 			s.CountClient("other-mcp", "mcp_initialize", fmt.Sprintf("junk-%03d", i))
 		}
 	}
 	s.FlushClientCounts()
 	raw := rawClientDay(t, s, testTime)
-	if raw["unknown_mcp_clients"] != clientNamesPerDay || raw["family:other-mcp:mcp_initialize"] != 1+3*(clientNamesPerDay+50) {
+	if raw["unknown_mcp_clients"] != ClientNamesPerDay || raw["family:other-mcp:mcp_initialize"] != 1+3*(ClientNamesPerDay+50) {
 		t.Fatalf("counts: %v", raw)
 	}
 	for key := range raw {
@@ -120,8 +120,8 @@ func TestSecArrivalsNameFloodOnlyCounts(t *testing.T) {
 	s.clients.mu.Lock()
 	held := len(s.clients.names)
 	s.clients.mu.Unlock()
-	if held != clientNamesPerDay {
-		t.Fatalf("held %d names in memory, want %d", held, clientNamesPerDay)
+	if held != ClientNamesPerDay {
+		t.Fatalf("held %d names in memory, want %d", held, ClientNamesPerDay)
 	}
 }
 

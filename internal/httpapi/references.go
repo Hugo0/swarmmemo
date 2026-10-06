@@ -28,6 +28,14 @@ type ReferenceReader interface {
 
 const referenceResponseLimit = 1 << 20
 
+// A reference search: q up to referenceQueryBytes, pages of
+// referencePageDefault items, at most referencePageMax.
+const (
+	referenceQueryBytes  = 256
+	referencePageDefault = 20
+	referencePageMax     = 50
+)
+
 // Full per-request validation is intentionally uncached. Reserve room for native
 // traffic even when an operator publishes a near-8MiB projection.
 const referenceReadConcurrency = 2
@@ -55,7 +63,7 @@ type referenceQuery struct {
 }
 
 func parseReferenceQuery(values url.Values, detail bool) (referenceQuery, error) {
-	q := referenceQuery{limit: 20}
+	q := referenceQuery{limit: referencePageDefault}
 	for key, entries := range values {
 		if detail || len(entries) != 1 {
 			return q, errors.New("invalid reference query")
@@ -63,7 +71,7 @@ func parseReferenceQuery(values url.Values, detail bool) (referenceQuery, error)
 		switch key {
 		case "q":
 			q.query = entries[0]
-			if !utf8.ValidString(q.query) || len(q.query) > 256 || strings.ContainsRune(q.query, 0) {
+			if !utf8.ValidString(q.query) || len(q.query) > referenceQueryBytes || strings.ContainsRune(q.query, 0) {
 				return q, errors.New("invalid reference query")
 			}
 		case "source":
@@ -78,7 +86,7 @@ func parseReferenceQuery(values url.Values, detail bool) (referenceQuery, error)
 			}
 		case "limit":
 			limit, err := strconv.Atoi(entries[0])
-			if err != nil || limit < 1 || limit > 50 || strconv.Itoa(limit) != entries[0] {
+			if err != nil || limit < 1 || limit > referencePageMax || strconv.Itoa(limit) != entries[0] {
 				return q, errors.New("invalid reference limit")
 			}
 			q.limit = limit
@@ -143,7 +151,7 @@ func referenceURL(base string, q referenceQuery, cursor string) string {
 	if q.source != "" {
 		values.Set("source", q.source)
 	}
-	if q.limit != 20 {
+	if q.limit != referencePageDefault {
 		values.Set("limit", strconv.Itoa(q.limit))
 	}
 	if cursor != "" {
@@ -365,9 +373,9 @@ func addReferenceOpenAPI(paths map[string]any) {
 		response[code] = map[string]any{"description": description}
 	}
 	query := []map[string]any{
-		{"name": "q", "in": "query", "description": "Literal ASCII-case-insensitive title or available-excerpt substring, at most 256 UTF-8 bytes", "schema": map[string]any{"type": "string", "maxLength": 256}},
+		{"name": "q", "in": "query", "description": "Literal ASCII-case-insensitive title or available-excerpt substring, at most " + strconv.Itoa(referenceQueryBytes) + " UTF-8 bytes", "schema": map[string]any{"type": "string", "maxLength": referenceQueryBytes}},
 		{"name": "source", "in": "query", "description": "Exact registered source ID", "schema": map[string]any{"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"}},
-		{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 20}},
+		{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": referencePageMax, "default": referencePageDefault}},
 		{"name": "cursor", "in": "query", "description": "Opaque snapshot/query-bound next_cursor; retain q and source", "schema": map[string]any{"type": "string", "maxLength": 4096}},
 	}
 	id := []map[string]any{{"name": "reference_id", "in": "path", "required": true, "schema": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}}}

@@ -2,9 +2,7 @@ package board
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -64,8 +62,7 @@ func dmPair(a, b string) string {
 	if b < a {
 		a, b = b, a
 	}
-	sum := sha256.Sum256([]byte("dm/1:" + a + ":" + b))
-	return hex.EncodeToString(sum[:])
+	return sha256Hex([]byte("dm/1:" + a + ":" + b))
 }
 
 const conversationRowColumns = "room,kind,pair,sealed,member_epoch,seal_epoch,last_seq,message_count,created_by,created_at,created_key,created_signature,created_payload"
@@ -261,7 +258,7 @@ func (s *Store) rejoinDM(ctx context.Context, tx *sql.Tx, conv conversationRow, 
 		return Result{}, conversationNotFound()
 	}
 	if m.State != memberActive {
-		if err = s.charge(ctx, tx, a, 256, now); err != nil {
+		if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 			return Result{}, err
 		}
 		if m, err = setMemberState(ctx, tx, memberChange{Room: conv.Room, Account: a.account, State: memberActive, Acknowledge: true}, now); err != nil {
@@ -306,7 +303,7 @@ func (s *Store) respondConversation(ctx context.Context, tx *sql.Tx, c Command, 
 	if err != nil {
 		return Result{}, err
 	}
-	if err = s.charge(ctx, tx, a, 256, now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 		return Result{}, err
 	}
 	switch {

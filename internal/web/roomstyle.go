@@ -53,7 +53,7 @@ func loadRoomStyle(ctx context.Context, service board.Service, room string) (*Ro
 	return style, sheet
 }
 
-// Sanitizing a 32 KiB stylesheet costs tens of milliseconds and a database
+// Sanitizing a stylesheet of board.RoomStyleBytes costs tens of milliseconds and a database
 // read per url(), and every view of a styled room and every stylesheet fetch
 // needs the result, so an anonymous reader could make each cheap GET expensive.
 // Results (including refusals) are kept per room for as long as the stored

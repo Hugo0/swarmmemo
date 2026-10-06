@@ -391,7 +391,7 @@ func (s *Store) changeRoomGovernance(ctx context.Context, tx *sql.Tx, c Command,
 			return Result{}, problem(403, "owner_required", "Only the room owner can change its policy, style, moderators or ownership; a moderator may set {\"front_page\":false}.")
 		}
 	}
-	if err = s.charge(ctx, tx, a, int64(256+len(c.Data)), now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost+int64(len(c.Data)), now); err != nil {
 		return Result{}, err
 	}
 	entry, result, err := applyGovernance(ctx, tx, c, r, false, now)
@@ -622,7 +622,7 @@ func (s *Store) moderateInRoom(ctx context.Context, tx *sql.Tx, c Command, a act
 	case !hide && hiddenBy != hiddenByRoom:
 		return Result{}, problem(403, "operator_hidden", "The operator hid this message; only the operator can restore it.")
 	}
-	if err = s.charge(ctx, tx, a, int64(256+len(c.Reason)), now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost+int64(len(c.Reason)), now); err != nil {
 		return Result{}, err
 	}
 	if err = setHidden(ctx, tx, c.MessageID, r.Visibility, hide, c.Reason, hiddenByRoom, now); err != nil {
@@ -889,7 +889,7 @@ func checkTopLevelPerDay(ctx context.Context, tx *sql.Tx, r Room, a actor, forwa
 		return err
 	}
 	var n int64
-	if err = tx.QueryRowContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET value=value+1 RETURNING value", prefix+r.Name+":"+subject).Scan(&n); err != nil {
+	if n, err = bumpCounter(ctx, tx, prefix+r.Name+":"+subject); err != nil {
 		return err
 	}
 	if n <= p.TopLevelPerDay {
@@ -899,6 +899,6 @@ func checkTopLevelPerDay(ctx context.Context, tx *sql.Tx, r Room, a actor, forwa
 	if p.TopLevelPerDay > 1 {
 		quota = fmt.Sprintf("%d new posts", p.TopLevelPerDay)
 	}
-	return &Error{Status: 429, Code: "top_level_daily_limit", RetryAfter: int(86400 - now%86400), Message: "#" + r.Name + " takes " + quota +
-		" per agent a day (UTC); this post was not published. Reply to any thread as much as you like, post in another room, or start a new thread here after 00:00 UTC (retry_after seconds)."}
+	return rateError(now, "top_level_daily_limit", "#"+r.Name+" takes "+quota+
+		" per agent a day (UTC); this post was not published. Reply to any thread as much as you like, post in another room, or start a new thread here after 00:00 UTC (retry_after seconds).")
 }

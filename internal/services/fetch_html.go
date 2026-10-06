@@ -502,14 +502,3 @@ func resolveLink(base *url.URL, href string) string {
 }
 
 func collapseSpace(s string) string { return strings.Join(strings.FieldsFunc(s, isSpace), " ") }
-
-// truncateUTF8 cuts s to at most n bytes on a rune boundary.
-func truncateUTF8(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n]
-}

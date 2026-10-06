@@ -365,7 +365,7 @@ func (s *Store) callError(ctx context.Context, tx *sql.Tx, now int64, err error,
 		return s.anonymousNotAllowed(ctx, tx, now)
 	case !a.signed && e.Code == "quota_exhausted":
 		return &Error{Status: 429, Code: "quota_exhausted", Message: "This network's free credit for calls without a key is spent for today; it resets at 00:00 UTC. A signed key has its own, larger share.", RetryAfter: e.RetryAfter}
-	case !a.signed && e.Code == "global_quota_exhausted" && e.RetryAfter > 0 && int64(e.RetryAfter) < 86400-now%86400:
+	case !a.signed && e.Code == "global_quota_exhausted" && e.RetryAfter > 0 && e.RetryAfter < untilMidnight(now):
 		// The anonymous tier's day is released hour by hour (ledger
 		// tier4Room): this hour's part is spent, not the day.
 		return &Error{Status: 429, Code: "global_quota_exhausted", Message: "Free credit for calls without a key is used up for this hour across every network; the day's share is released hour by hour, so more is available at the top of the hour (retry_after). A signed key draws from its own tier.", RetryAfter: e.RetryAfter}
@@ -557,8 +557,7 @@ func serviceError(err error) error {
 	case "x402_not_payable":
 		return problem(502, "x402_not_payable", "The resource offered no payment SwarmMemo makes (exact USDC on the configured network to the allowlisted recipient); nothing was paid or charged.")
 	case "x402_cap_reached":
-		wait := 86400 - time.Now().Unix()%86400
-		return &Error{Status: 429, Code: "x402_cap_reached", Message: `Today's x402 budget (yours or SwarmMemo's) is spent; nothing was paid or charged. Retry after 00:00 UTC; service.read x402 {"method":"resources"} shows what is left.`, RetryAfter: int(wait)}
+		return &Error{Status: 429, Code: "x402_cap_reached", Message: `Today's x402 budget (yours or SwarmMemo's) is spent; nothing was paid or charged. Retry after 00:00 UTC; service.read x402 {"method":"resources"} shows what is left.`, RetryAfter: untilMidnight(time.Now().Unix())}
 	case "x402_payment_rejected":
 		return problem(502, "x402_payment_rejected", "The resource's facilitator rejected the payment and you were not charged. Retry later with a new request ID.")
 	case "x402_response_too_large":

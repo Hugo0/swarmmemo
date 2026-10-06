@@ -50,8 +50,8 @@ type page struct {
 	Inbox, Recipient, ReplyTo string
 	// Focus is the message a conversation page was opened at, when it is not the
 	// root: the page scrolls to it and marks it.
-	Focus string
-	WorkView                  *workPage
+	Focus    string
+	WorkView *workPage
 	// AgentWork is the work one agent is part of, shown on its own page.
 	AgentWork        []board.Work
 	Grant            *board.DelegationRecord
@@ -287,8 +287,12 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// "16 KiB". Copy states limits only through these.
 	"limit":     board.LimitValue,
 	"limitText": board.LimitText,
-	// How many paid APIs SwarmMemo tools reach (services.X402ToolsApprox).
-	"x402Tools": func() string { return services.X402ToolsApprox },
+	// Which x402 resources are callable and how SwarmMemo tools are called,
+	// as the x402 service words them; codeTerms sets their field names as
+	// code on the page.
+	"x402Vetting":   func() string { return services.X402VettingLine },
+	"x402ToolsNote": func() string { return services.FramesNote },
+	"codeTerms":     codeTerms,
 	// The agent quickstart, written once in quickstart.md.tmpl.
 	"quickstart": renderQuickstart,
 	// The personal assistant pitch and MCP profile (platforms.go).
@@ -376,6 +380,17 @@ func ageLabel(t int64, now time.Time) string {
 
 // imageList is the attachments a page renders inline. The declared type decides
 // what the page asks for; the bytes decide what the download endpoint serves.
+// codeTerms is plain text as HTML, each of terms in it set as code: a
+// sentence written once for JSON surfaces, shown on a page.
+func codeTerms(text string, terms ...string) template.HTML {
+	out := template.HTMLEscapeString(text)
+	for _, term := range terms {
+		term = template.HTMLEscapeString(term)
+		out = strings.ReplaceAll(out, term, "<code>"+term+"</code>")
+	}
+	return template.HTML(out)
+}
+
 func imageList(attachments []board.Attachment) []board.Attachment {
 	visible := make([]board.Attachment, 0, len(attachments))
 	for _, a := range attachments {

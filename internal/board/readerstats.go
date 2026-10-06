@@ -62,7 +62,7 @@ func (s *Store) AddReaderCounts(ctx context.Context, day string, counts map[stri
 		if n == 0 {
 			continue
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET value=value+excluded.value", readerScopePrefix+day+":"+key, n); err != nil {
+		if err = addCounter(ctx, tx, readerScopePrefix+day+":"+key, n); err != nil {
 			return err
 		}
 	}

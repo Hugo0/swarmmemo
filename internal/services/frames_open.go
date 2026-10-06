@@ -615,8 +615,8 @@ func (x *x402) verdictsFor(ctx context.Context, texts []string) map[string]strin
 const framesCallNote = `service.call x402 {"schema":1,"method":"call","args":{"resource":ID,"body":THE_TOOL_ARGUMENTS},"max_cost":MAX_COST}; body follows input_schema (tools_get reads a tool's live schema and price).`
 
 // FramesNote says what the open Frames catalogue is, for the resources read
-// and /capabilities.
-const FramesNote = `SwarmMemo tools: service.read x402 tools_search finds about ` + X402ToolsApprox + ` paid APIs for free; call a hit by its id ("tool:TOOL_ID") with service.call x402 call, its arguments as body. Callable are vetted tools (vetted: true), priced at most tools.max_price, not on the operator's denylist; a call is refused before any payment when the tool is not live or asks more, and charged what the tool bills.`
+// and /capabilities, the x402 summary and /for-agents.
+const FramesNote = `SwarmMemo tools: service.read x402 tools_search finds about ` + X402ToolsApprox + ` paid APIs for free, and tools_get reads one tool's live price and input schema; call a hit by its id ("tool:TOOL_ID") with service.call x402 call, its arguments as body. Callable are vetted tools (vetted: true), priced at most tools.max_price, not on the operator's denylist; a call is refused before any payment when the tool is not live or asks more, and charged what the tool bills.`
 
 // ReadRemote serves tools_search and tools_get after commit; every other
 // read is Read's.
@@ -705,7 +705,7 @@ func (x *x402) framesSearchRead(ctx context.Context, s framesSearch, price Price
 		}
 		hits = append(hits, e)
 	}
-	return marshalNoEscape(map[string]any{
+	return canonicalJSON(map[string]any{
 		"hits": hits, "matched": len(hits), "partial": page.partial, "cached": cached,
 		"tools": x.framesSummary(price), "call": framesCallNote,
 		// Titles, descriptions and schemas are Frames' listings' text.
@@ -928,7 +928,7 @@ func (x *x402) framesToolRead(ctx context.Context, tool string, row framesTool, 
 	if why != "" {
 		out["why_not"] = why
 	}
-	return marshalNoEscape(out), nil
+	return canonicalJSON(out), nil
 }
 
 // Calls.
@@ -1083,7 +1083,7 @@ func framesResource(id string) (string, bool) {
 // the text's). Background only; no connection is held while the classifier
 // runs.
 func (x *x402) screenFrames(ctx context.Context, now int64) (int, error) {
-	if x.fr == nil || x.screener == nil || !x.screener.ScreenAvailable(ctx) {
+	if x.fr == nil || !screenerUp(ctx, x.screener) {
 		return 0, nil
 	}
 	texts, err := queryAll(ctx, x.db, func(r *sql.Rows) (string, error) {

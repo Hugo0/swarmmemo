@@ -81,7 +81,7 @@ type TextScreener interface {
 // what callers without a key are offered all ask it (security review
 // screen, L7).
 func ScreenReady(ctx context.Context, ts TextScreener, key ed25519.PrivateKey) bool {
-	return ts != nil && len(key) == ed25519.PrivateKeySize && ts.ScreenAvailable(ctx)
+	return len(key) == ed25519.PrivateKeySize && screenerUp(ctx, ts)
 }
 
 type TextScreen struct {

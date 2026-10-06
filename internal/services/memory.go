@@ -300,7 +300,7 @@ func OwnMemory(ctx context.Context, q allowance.Querier, account, prefix string,
 			return nil, false, err
 		}
 		if len(it.Value) > valueMax {
-			it.Value, it.Truncated = truncateString(it.Value, valueMax), true
+			it.Value, it.Truncated = truncateUTF8(it.Value, valueMax), true
 		}
 		items = append(items, it)
 	}

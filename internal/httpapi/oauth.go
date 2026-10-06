@@ -40,6 +40,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/safenet"
+	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
 )
 
@@ -411,7 +413,7 @@ func (s *Server) registerEndpoint(w http.ResponseWriter, r *http.Request, o oaut
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, oauthFormBytes))
 	if err != nil {
-		oauthJSONError(w, oauthBad("invalid_client_metadata", "Send a JSON object with redirect_uris, at most 16 KiB."))
+		oauthJSONError(w, oauthBad("invalid_client_metadata", "Send a JSON object with redirect_uris, at most "+services.SizeText(oauthFormBytes)+"."))
 		return
 	}
 	name, redirects, err := parseRegistration(body)
@@ -457,11 +459,11 @@ func parseRegistration(body []byte) (string, []string, error) {
 		}
 	}
 	if len(in.RedirectURIs) == 0 || len(in.RedirectURIs) > board.OAuthRedirectURIsMax {
-		return "", nil, oauthBad("invalid_redirect_uri", "Give 1 to 8 redirect_uris.")
+		return "", nil, oauthBad("invalid_redirect_uri", "Give 1 to "+strconv.Itoa(board.OAuthRedirectURIsMax)+" redirect_uris.")
 	}
 	for _, u := range in.RedirectURIs {
 		if !validRedirectURI(u) {
-			return "", nil, oauthBad("invalid_redirect_uri", "Each redirect URI must be https, or http on localhost, 127.0.0.1 or [::1], with no fragment or credentials, up to 512 bytes.")
+			return "", nil, oauthBad("invalid_redirect_uri", "Each redirect URI must be https, or http on localhost, 127.0.0.1 or [::1], with no fragment or credentials, up to "+strconv.Itoa(board.OAuthRedirectURIBytes)+" bytes.")
 		}
 	}
 	return clientName(in.ClientName, ""), in.RedirectURIs, nil
@@ -745,7 +747,7 @@ func (s *Server) authorizeStart(w http.ResponseWriter, r *http.Request, o oauthS
 	}
 	state := q.Get("state")
 	if len(state) > oauthStateBytes {
-		s.oauthPage(w, 400, "", pageView{Title: "Sign-in request is not valid", Error: "The state parameter is longer than 1024 bytes."})
+		s.oauthPage(w, 400, "", pageView{Title: "Sign-in request is not valid", Error: "The state parameter is longer than " + strconv.Itoa(oauthStateBytes) + " bytes."})
 		return
 	}
 	back := func(code, description string) {
@@ -1131,9 +1133,9 @@ func (s *Server) oauthToolMetaFor(profile string, next mcp.MethodHandler) mcp.Me
 }
 
 // securitySchemes is a tool's auth on an MCP profile while sign-in
-// is on: a tool that needs the identity takes OAuth only; post_message and
-// read_updates work either way (as the identity when signed in); every
-// other tool needs none.
+// is on: a tool that needs the identity takes OAuth only; post_message,
+// read_updates and the hostedSignedReads tools work either way (as the
+// identity when signed in); every other tool needs none.
 func securitySchemes(name string) []map[string]any {
 	oauth := map[string]any{"type": "oauth2", "scopes": []string{board.OAuthScope}}
 	noauth := map[string]any{"type": "noauth"}
@@ -1142,6 +1144,9 @@ func securitySchemes(name string) []map[string]any {
 		return []map[string]any{noauth, oauth}
 	case "create_identity", "recover_identity":
 		return []map[string]any{noauth}
+	}
+	if isHostedSignedRead(name) {
+		return []map[string]any{noauth, oauth}
 	}
 	if _, _, hosted := hostedToolHints(name); hosted || isHostedServiceTool(name) {
 		return []map[string]any{oauth}

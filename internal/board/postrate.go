@@ -81,7 +81,7 @@ func (s *Store) countAnonymousThread(ctx context.Context, tx *sql.Tx, a actor, n
 	}
 	var n int64
 	scope := fmt.Sprintf("anonymous-threads:%d:%s", now/3600, a.account)
-	if err = tx.QueryRowContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET value=value+1 RETURNING value", scope).Scan(&n); err != nil {
+	if n, err = bumpCounter(ctx, tx, scope); err != nil {
 		return err
 	}
 	if n > p.AnonymousTopLevelPerHour {

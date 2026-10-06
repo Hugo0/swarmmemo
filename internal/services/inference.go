@@ -640,7 +640,7 @@ func (p *inference) parseInference(raw json.RawMessage) (inferencePlan, error) {
 		plan.temperature = &t
 	}
 	plan.maxIn = int64(plan.promptBytes) + inferenceMessageTokens*int64(len(a.Messages)) + inferenceRequestTokens
-	plan.prompt = compactJSON(a.Messages)
+	plan.prompt = canonicalJSON(a.Messages)
 	if len(plan.prompt) > InferenceArgsMax {
 		return plan, tooLarge("invalid_service_data", len(plan.prompt), InferenceArgsMax)
 	}
@@ -674,16 +674,6 @@ func (p *inference) CheckAnonymous(c Call) error {
 		return refusal("anonymous_unscreened")
 	}
 	return nil
-}
-
-// compactJSON encodes v without HTML escaping, so the record keeps the text
-// as sent.
-func compactJSON(v any) []byte {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(v)
-	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 }
 
 // stepMax is the most one route step can cost: every input token the byte
@@ -841,7 +831,7 @@ func (p *inference) billedFailure(plan inferencePlan, attempts []attempt, failur
 		"model": plan.alias, "error": failure, "prompt_bytes": len(plan.prompt),
 		"prompt_sha256": hex.EncodeToString(promptHash[:]), "attempts": len(attempts),
 	}
-	return Result{Body: compactJSON(body), Public: compactJSON(public), Used: used}
+	return Result{Body: canonicalJSON(body), Public: canonicalJSON(public), Used: used}
 }
 
 // result builds the call record: the body keeps the prompt, the output and
@@ -886,7 +876,7 @@ func (p *inference) result(ctx context.Context, plan inferencePlan, up *Inferenc
 		"prompt_sha256": hex.EncodeToString(promptHash[:]), "output_sha256": hex.EncodeToString(outHash[:]),
 		"hidden": hidden != "", "attempts": len(attempts) + 1,
 	}
-	res := Result{Body: compactJSON(body), Public: compactJSON(public), Used: used}
+	res := Result{Body: canonicalJSON(body), Public: canonicalJSON(public), Used: used}
 	// An output that escapes badly can overflow the record: cut it (on a
 	// rune boundary) until the record fits, and say so. The upstream answered
 	// and was paid, so the call is charged either way.
@@ -896,7 +886,7 @@ func (p *inference) result(ctx context.Context, plan inferencePlan, up *Inferenc
 			cut--
 		}
 		body["output"], body["output_truncated"], body["output_bytes"] = output[:cut], true, len(reply.Output)
-		res.Body = compactJSON(body)
+		res.Body = canonicalJSON(body)
 	}
 	if len(res.Body) > InferenceStoredBodyBytes || len(res.Public) > PublicBytes {
 		// Unreachable by the bounds above (the prompt is within its args
@@ -1038,7 +1028,7 @@ func (p *inference) request(up *InferenceUpstream, model string, plan inferenceP
 	} else {
 		fields["model"] = model
 	}
-	return compactJSON(fields), target
+	return canonicalJSON(fields), target
 }
 
 // inferenceReply is one parsed upstream answer.

@@ -326,7 +326,7 @@ func (p *publicData) Read(_ context.Context, _ allowance.Querier, c Call) (json.
 	if err := StrictObject(c.Args, &none); err != nil {
 		return nil, err
 	}
-	return compactJSON(p.Datasets()), nil
+	return canonicalJSON(p.Datasets()), nil
 }
 
 // pdRequest is one parsed dataset request.
@@ -539,7 +539,7 @@ func (p *publicData) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error)
 		}
 	}
 	public["datasets"] = ids
-	return Result{Body: body, Public: compactJSON(public), Used: used}, nil
+	return Result{Body: body, Public: canonicalJSON(public), Used: used}, nil
 }
 
 // bulkBody lists every item, replacing items from the end with a
@@ -551,14 +551,14 @@ func (p *publicData) bulkBody(items []*pdItem) []byte {
 		for i, it := range items {
 			results[i] = it.raw
 		}
-		return compactJSON(map[string]any{"envelope_version": PublicDataSchemaVersion, "results": results})
+		return canonicalJSON(map[string]any{"envelope_version": PublicDataSchemaVersion, "results": results})
 	}
 	body := build()
 	for i := len(items) - 1; i >= 0 && len(body) > StoredBodyMaxBytes; i-- {
 		it := items[i]
 		*it = pdItem{EnvelopeVersion: PublicDataSchemaVersion, Dataset: it.Dataset, SchemaVersion: it.SchemaVersion, Params: it.Params, Sources: []pdSourceRec{}, Cache: "none",
 			Error: pdFail("upstream_failed", "response_too_large: request fewer rows or a narrower range")}
-		it.raw = compactJSON(it)
+		it.raw = canonicalJSON(it)
 		body = build()
 	}
 	return body
@@ -575,7 +575,7 @@ func (p *publicData) runOne(ctx context.Context, req pdRequest, now int64) (item
 			*item = pdItem{EnvelopeVersion: PublicDataSchemaVersion, Dataset: ds.ID, SchemaVersion: ds.SchemaVersion, Params: req.params.echo(), Sources: []pdSourceRec{},
 				Cache: "none", Error: pdFail("upstream_failed", "internal")}
 		}
-		item.raw = compactJSON(item)
+		item.raw = canonicalJSON(item)
 	}()
 	if !p.available(ds) {
 		item.Cache, item.Error = "none", pdFail("upstream_unavailable", "key_missing")
@@ -911,7 +911,7 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (json.Ra
 		if err != nil {
 			return nil, pdFail("upstream_failed", "malformed")
 		}
-		return compactJSON(v), nil
+		return canonicalJSON(v), nil
 	case s >= 300 && s < 400:
 		return nil, pdFail("upstream_failed", "redirect_refused")
 	case s == 429:
@@ -943,7 +943,7 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (json.Ra
 	case err != nil:
 		return nil, pdFail("upstream_failed", "malformed")
 	}
-	out := compactJSON(v)
+	out := canonicalJSON(v)
 	if len(out) > publicDataCacheEntryMax {
 		return nil, pdFail("upstream_failed", "oversized")
 	}

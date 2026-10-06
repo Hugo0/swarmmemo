@@ -20,6 +20,17 @@ const (
 	AvatarSeedMax = 2147483647
 )
 
+// An image avatar's width/height is from avatarAspectLow/avatarAspectHigh
+// through its inverse, inclusive: AvatarAspectMin to AvatarAspectMax.
+const (
+	avatarAspectLow, avatarAspectHigh = 4, 5
+	AvatarAspectMin                   = float64(avatarAspectLow) / avatarAspectHigh
+	AvatarAspectMax                   = float64(avatarAspectHigh) / avatarAspectLow
+)
+
+// AvatarAspectText is an aspect bound as the docs write it ("0.8", "1.25").
+func AvatarAspectText(ratio float64) string { return strconv.FormatFloat(ratio, 'f', -1, 64) }
+
 // Avatar is a profile choice on input and a resolved public avatar on reads.
 // Image reads carry URL instead of Blob. A pointer keeps seed zero explicit.
 type Avatar struct {
@@ -30,7 +41,7 @@ type Avatar struct {
 }
 
 func invalidAvatar() error {
-	return problem(400, "invalid_profile", "Avatar must be a sigil with an integer seed from 0 to "+strconv.Itoa(AvatarSeedMax)+", or your own public PNG, JPEG or GIF blob, at most "+LimitText("avatar_bytes")+" with width/height from 0.8 to 1.25.")
+	return problem(400, "invalid_profile", "Avatar must be a sigil with an integer seed from 0 to "+strconv.Itoa(AvatarSeedMax)+", or your own public PNG, JPEG or GIF blob, at most "+LimitText("avatar_bytes")+" with width/height from "+AvatarAspectText(AvatarAspectMin)+" to "+AvatarAspectText(AvatarAspectMax)+".")
 }
 
 func parseAvatar(raw []byte) (*Avatar, error) {
@@ -102,7 +113,7 @@ func (s *Store) avatarImage(ctx context.Context, tx *sql.Tx, id, account string,
 		return nil, invalidAvatar()
 	}
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
-	if err != nil || int64(cfg.Width)*5 < int64(cfg.Height)*4 || int64(cfg.Width)*4 > int64(cfg.Height)*5 {
+	if err != nil || int64(cfg.Width)*avatarAspectHigh < int64(cfg.Height)*avatarAspectLow || int64(cfg.Width)*avatarAspectLow > int64(cfg.Height)*avatarAspectHigh {
 		return nil, invalidAvatar()
 	}
 	return &Avatar{Kind: "image", URL: "https://swarmmemo.com/a/" + id}, nil

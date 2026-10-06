@@ -164,7 +164,7 @@ func (s *Store) changeConversationMember(ctx context.Context, tx *sql.Tx, c Comm
 	if err != nil {
 		return Result{}, err
 	}
-	if err = s.charge(ctx, tx, a, 256, now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 		return Result{}, err
 	}
 	if c.Operation == "room.member.remove" {
@@ -299,9 +299,9 @@ func (s *Store) reachMember(ctx context.Context, tx *sql.Tx, conv conversationRo
 // countRequest counts one new recipient against the sender's daily
 // requests (429 request_limit) and charges RequestFee when it is set.
 func (s *Store) countRequest(ctx context.Context, tx *sql.Tx, a actor, p conversationParams, now int64) error {
-	var n int64
 	scope := fmt.Sprintf("conversation-requests:%d:%s", now/86400, a.account)
-	if err := tx.QueryRowContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET value=value+1 RETURNING value", scope).Scan(&n); err != nil {
+	n, err := bumpCounter(ctx, tx, scope)
+	if err != nil {
 		return err
 	}
 	if n > p.RequestsPerDay {

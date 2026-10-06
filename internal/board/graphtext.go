@@ -134,8 +134,7 @@ func (s *Store) GraphSummarySpend(ctx context.Context, day string) (int64, error
 
 // AddGraphSummarySpend adds micro-USD to day's summary spend.
 func (s *Store) AddGraphSummarySpend(ctx context.Context, day string, micro int64) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO counters(scope,value) VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET value=value+excluded.value", graphSummaryScope+day, micro)
-	return err
+	return addCounter(ctx, s.db, graphSummaryScope+day, micro)
 }
 
 // graphExchanged keeps the replies whose parent is also in msgs (so both

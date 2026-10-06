@@ -122,8 +122,18 @@ type X402Config struct {
 	// itself (bundler.go).
 	Bundlers []Bundler
 	Signer   X402Signer
-	// rootCAs replaces the system roots (tests only).
-	rootCAs *x509.CertPool
+	// rootCAs replaces the system roots, and testDial the board's dialer
+	// (tests only: UseTestUpstream).
+	rootCAs  *x509.CertPool
+	testDial func(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
+// UseTestUpstream sends every upstream request of the relay built from c to
+// dial, trusting roots for its TLS: an httptest TLS server stands in for
+// every upstream host. Tests in other packages only; nothing in a config
+// file or the environment sets it.
+func (c *X402Config) UseTestUpstream(roots *x509.CertPool, dial func(ctx context.Context, network, addr string) (net.Conn, error)) {
+	c.rootCAs, c.testDial = roots, dial
 }
 
 // X402Resource is one callable pay-per-call endpoint: pinned in the
@@ -201,12 +211,16 @@ func newX402(d Deps) Provider {
 	if b := x.cfg.framesBundler(); b != nil && b.open != nil {
 		x.fr = newFramesState(x.cfg, b)
 	}
+	dial := d.Dial
+	if x.cfg.testDial != nil {
+		dial = x.cfg.testDial
+	}
 	x.client = &http.Client{
 		// A redirect is a second address nobody allowlisted: never followed.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		Transport: &http.Transport{
 			Proxy:                  nil, // no proxy environment can become a bypass
-			DialContext:            d.Dial,
+			DialContext:            dial,
 			TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: x.cfg.rootCAs},
 			TLSHandshakeTimeout:    5 * time.Second,
 			ResponseHeaderTimeout:  X402TimeoutMax,
@@ -233,8 +247,13 @@ CREATE INDEX IF NOT EXISTS x402_payments_day ON x402_payments(day,account);
 ` + x402CatalogueSchema
 }
 
-// X402VettingNote is how the resources read explains callable resources.
-const X402VettingNote = "Only vetted resources are callable (callable: true): pinned ones, and open ones the operator vetted, by hand or by its auto-vet rule when one is set (the resources read states it as catalogue.auto_vet, e.g. CDP-curated or at least 5 payers in 30 days, at most 0.02 USDC, not adult or gambling; a resource the rule vetted keeps its summary screened like a candidate's). Candidates (vetted: false) are Bazaar listings whose summary is shown only once it passed SwarmMemo's text screen (summary_status screened; pending or withheld leaves it empty); calling one is refused with x402_unvetted, and nothing is paid or charged. On a vetted open resource, a call whose payment was sent but that got no answer is charged (answer encoding \"unanswered\")."
+// X402VettingLine says which resources are callable, in the service's
+// summary and on /for-agents; X402VettingNote adds the detail.
+const X402VettingLine = "Only vetted resources are callable (callable: true): pinned ones and open ones the operator vetted. Other Bazaar listings are candidates (vetted: false), listed with their summaries only once those passed SwarmMemo's text screen (summary_status), still untrusted upstream text, and refused with x402_unvetted, with nothing paid or charged."
+
+// X402VettingNote is how the resources read and /capabilities explain
+// callable resources.
+const X402VettingNote = X402VettingLine + " The operator vets by hand or by its auto-vet rule when one is set (the resources read states it as catalogue.auto_vet, e.g. CDP-curated or at least 5 payers in 30 days, at most 0.02 USDC, not adult or gambling; a resource the rule vetted keeps its summary screened like a candidate's); a pending or withheld summary is empty. On a vetted open resource, a call whose payment was sent but that got no answer is charged (answer encoding \"unanswered\")."
 
 // X402ToolsApprox is how many paid APIs SwarmMemo tools reach, rounded: every
 // page and description that states the number reads it from here.
@@ -262,7 +281,7 @@ func (x *x402) Describe() Descriptor {
 	}
 	return Descriptor{
 		ID:      "x402",
-		Summary: `Pay-per-call APIs without a wallet or an account: SwarmMemo pays the API and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. Only vetted resources are callable: pinned ones and open ones the operator vetted. Other Bazaar listings are candidates (vetted: false), listed with their summaries only once those passed SwarmMemo's text screen (summary_status), still untrusted upstream text, and refused with x402_unvetted until the operator vets them. Method "tools_search" searches SwarmMemo tools (about ` + X402ToolsApprox + ` paid APIs) and "tools_get" reads one tool's live price and input schema; call a hit with resource "tool:TOOL_ID" and the tool's arguments as body. Vetted tools (vetted: true), priced at most tools.max_price, are callable.`,
+		Summary: `Pay-per-call APIs without a wallet or an account: SwarmMemo pays the API and charges you credit, the API's price in micro-USD plus a margin. service.read method "resources" searches the catalogue (query, category, max_price) and lists each resource's query names, maximum price and cost, whether it is callable, and today's budget; call one by its id. ` + X402VettingLine + ` ` + FramesNote,
 		Title:   "x402 relay", Topic: "Tools across the internet",
 		Line: X402Line,
 		Limits: []Limit{
@@ -721,14 +740,14 @@ func (x *x402) result(c Call, p x402Plan, r x402Response, receipt *x402Receipt) 
 	case len(bytes.TrimSpace(r.body)) > 0 && json.Valid(r.body) && utf8.Valid(r.body) && json.Compact(&compact, r.body) == nil:
 		out.Encoding, out.Body = "json", compact.Bytes()
 	case utf8.Valid(r.body) && (strings.HasPrefix(mt, "text/") || mt == ""):
-		out.Encoding, out.Body = "text", marshalNoEscape(string(r.body))
+		out.Encoding, out.Body = "text", canonicalJSON(string(r.body))
 		if len(out.Body) > base64.StdEncoding.EncodedLen(len(r.body))+2 {
-			out.Encoding, out.Body = "base64", marshalNoEscape(base64.StdEncoding.EncodeToString(r.body))
+			out.Encoding, out.Body = "base64", canonicalJSON(base64.StdEncoding.EncodeToString(r.body))
 		}
 	default:
-		out.Encoding, out.Body = "base64", marshalNoEscape(base64.StdEncoding.EncodeToString(r.body))
+		out.Encoding, out.Body = "base64", canonicalJSON(base64.StdEncoding.EncodeToString(r.body))
 	}
-	body := marshalNoEscape(out)
+	body := canonicalJSON(out)
 	if body == nil || len(body) > X402StoredBodyBytes {
 		return Result{}, refusal("x402_response_too_large")
 	}
@@ -742,17 +761,6 @@ func (x *x402) result(c Call, p x402Plan, r x402Response, receipt *x402Receipt) 
 	return Result{Body: body, Used: c.Price.For(amount), Public: pub}, nil
 }
 
-// marshalNoEscape is json.Marshal without HTML escaping; nil on error.
-func marshalNoEscape(v any) []byte {
-	var b bytes.Buffer
-	e := json.NewEncoder(&b)
-	e.SetEscapeHTML(false)
-	if err := e.Encode(v); err != nil {
-		return nil
-	}
-	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'})
-}
-
 // discarded is the answer to a paid call whose response went over the
 // resource's limit: no body, the payment receipt, and the call's price.
 func (x *x402) discarded(c Call, p x402Plan, status, n int, receipt *x402Receipt) Result {
@@ -760,7 +768,7 @@ func (x *x402) discarded(c Call, p x402Plan, status, n int, receipt *x402Receipt
 	out.Encoding, out.Body, out.Bytes = "discarded", json.RawMessage("null"), n
 	amount, _ := strconv.ParseInt(receipt.Amount, 10, 64)
 	pub, _ := json.Marshal(map[string]any{"resource": p.res.ID, "http_status": status, "response_bytes": n, "amount": receipt.Amount, "discarded": true})
-	return Result{Body: marshalNoEscape(out), Used: c.Price.For(amount), Public: pub}
+	return Result{Body: canonicalJSON(out), Used: c.Price.For(amount), Public: pub}
 }
 
 // unanswered is the answer to a call on a vetted open resource whose
@@ -773,7 +781,7 @@ func (x *x402) unanswered(c Call, p x402Plan, pay *payment, code string) Result 
 		Network: r.network, PayTo: r.payTo, Payer: x.cfg.Signer.Address().String(), Nonce: r.nonce})
 	out.Encoding, out.Body, out.Failure = "unanswered", json.RawMessage("null"), code
 	pub, _ := json.Marshal(map[string]any{"resource": p.res.ID, "http_status": pay.status, "amount": strconv.FormatInt(r.amount, 10), "unanswered": true})
-	return Result{Body: marshalNoEscape(out), Used: c.Price.For(r.amount), Public: pub}
+	return Result{Body: canonicalJSON(out), Used: c.Price.For(r.amount), Public: pub}
 }
 
 // Read serves "resources": a page of the catalogue that matches the search,
@@ -848,7 +856,7 @@ func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 	if page.next != "" {
 		body["next_cursor"] = page.next
 	}
-	return marshalNoEscape(body), nil
+	return canonicalJSON(body), nil
 }
 
 // readyBundlers are the names of the bundlers that can take a call now.

@@ -2,9 +2,7 @@ package services
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -1005,14 +1003,31 @@ func (e *Engine) reconcile(ctx context.Context, now int64) (int, error) {
 	return len(ids), tx.Commit()
 }
 
-func newCallID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
 // anonWindow counts unsigned calls in the current minute and UTC day.
 type anonWindow struct{ minute, mcount, day, dcount int64 }
+
+// windowIn is key's window in table, added when new. A table of
+// rateEntriesMax windows first drops the ones stale says are done with, and
+// when it is still full of live keys answers nil: the caller fails closed.
+// The caller holds the table's lock.
+func windowIn(table map[string]*anonWindow, key string, stale func(*anonWindow) bool) *anonWindow {
+	if w := table[key]; w != nil {
+		return w
+	}
+	if len(table) >= rateEntriesMax {
+		for k, w := range table {
+			if stale(w) {
+				delete(table, k)
+			}
+		}
+		if len(table) >= rateEntriesMax {
+			return nil
+		}
+	}
+	w := &anonWindow{}
+	table[key] = w
+	return w
+}
 
 // roll starts new windows when the minute or the day changed.
 func (w *anonWindow) roll(now int64) {
@@ -1058,21 +1073,10 @@ func (e *Engine) admitAnonymous(service string, m Method, subject string, now in
 	e.anonMu.Lock()
 	defer e.anonMu.Unlock()
 	window := func(k string) (*anonWindow, error) {
-		if w := e.anonRates[k]; w != nil {
-			return w, nil
+		w := windowIn(e.anonRates, k, func(w *anonWindow) bool { return w.day != now/86400 })
+		if w == nil {
+			return nil, &allowance.Err{Code: RefusalAnonymousRateAll, RetryAfter: 60}
 		}
-		if len(e.anonRates) >= rateEntriesMax {
-			for k, w := range e.anonRates {
-				if w.day != now/86400 {
-					delete(e.anonRates, k)
-				}
-			}
-			if len(e.anonRates) >= rateEntriesMax {
-				return nil, &allowance.Err{Code: RefusalAnonymousRateAll, RetryAfter: 60}
-			}
-		}
-		w := &anonWindow{}
-		e.anonRates[k] = w
 		return w, nil
 	}
 	var counted []*anonWindow

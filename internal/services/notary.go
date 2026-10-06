@@ -233,10 +233,9 @@ func VerifyJournalSeal(publicKey string, s JournalSealSignature, agent, hash str
 	return ok && p.Schema == JournalSealSchema && s.Schema == p.Schema && p.KeyID == id && s.KeyID == id && p.Agent == agent && p.Hash == hash
 }
 
-func keyID(public []byte) string {
-	sum := sha256.Sum256(public)
-	return hex.EncodeToString(sum[:])
-}
+// keyID names a signing key by its public key's SHA-256: the same hex
+// fingerprint the board gives an agent's key.
+func keyID(public []byte) string { return sha256Of(public) }
 
 // signingKey is the notary key (NOTARY_KEY_FILE, loaded when the store
 // opens); without it the notary is unavailable.

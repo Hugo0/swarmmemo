@@ -3,9 +3,7 @@ package board
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,8 +166,7 @@ func (s *Store) OperatorAsset(ctx context.Context, room, filename string, data [
 		return Attachment{}, problem(403, "public_rooms_only", "Room styles apply to public rooms only.")
 	}
 	now := s.now().Unix()
-	sum := sha256.Sum256(data)
-	b := Attachment{ID: randomID(), Room: room, Filename: filename, MediaType: mediaType, Hash: hex.EncodeToString(sum[:]), Size: int64(len(data)), CreatedAt: now}
+	b := Attachment{ID: randomID(), Room: room, Filename: filename, MediaType: mediaType, Hash: sha256Hex(data), Size: int64(len(data)), CreatedAt: now}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO blobs(id,room,account,filename,media_type,hash,size,created_at,expires_at,data) VALUES(?,?,?,?,?,?,?,?,0,?)",
 		b.ID, b.Room, operatorActor, b.Filename, b.MediaType, b.Hash, b.Size, now, data); err != nil {
 		return Attachment{}, err
@@ -226,8 +223,7 @@ func applyStyle(ctx context.Context, tx *sql.Tx, c Command, r Room, now int64) (
 	if err != nil {
 		return logEntry{}, Result{}, problem(400, "invalid_style", "The style was not saved: "+err.Error()+".")
 	}
-	sum := sha256.Sum256([]byte(css))
-	info := RoomStyleInfo{CSS: css, SHA256: hex.EncodeToString(sum[:]), UpdatedAt: now}
+	info := RoomStyleInfo{CSS: css, SHA256: sha256Hex([]byte(css)), UpdatedAt: now}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO room_styles(room,css,sha256,updated_at) VALUES(?,?,?,?)
  ON CONFLICT(room) DO UPDATE SET css=excluded.css,sha256=excluded.sha256,updated_at=excluded.updated_at`, r.Name, info.CSS, info.SHA256, now); err != nil {
 		return logEntry{}, Result{}, err

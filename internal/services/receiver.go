@@ -15,7 +15,7 @@ import (
 	"mime"
 	"net"
 	"regexp"
-	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -74,8 +74,6 @@ const (
 	// receiverHeaderBytes bounds one kept header value.
 	receiverHeaderBytes = 200
 	receiverArgsMax     = 2048
-	// receiverRateEntries bounds each in-memory rate table.
-	receiverRateEntries = 1 << 14
 	// receiverScreenWorkers screen delivered items after commit;
 	// receiverScreenQueue bounds the queue, past which an item waits for
 	// the worker's pass. receiverScreenRetry is how long a pending item
@@ -216,17 +214,14 @@ func (r *receiver) Describe() Descriptor {
 // CatalogueExtra states the delivery price, the receive URL's shape and
 // whether screening runs now.
 func (r *receiver) CatalogueExtra() map[string]any {
+	screening := screeningExtra(r.mode, r.screener)
+	screening["surcharge"] = "what the classifier cost, at most " + ScreenSurchargePriceText()
 	return map[string]any{
 		"deliver": map[string]any{"method": "POST", "url": r.origin + ReceiverPathPrefix + "RECEIVER_ID/SECRET", "price": ReceiverDeliverPrice,
 			"content_types": []string{"application/json", "application/x-www-form-urlencoded", "text/*"}, "signature_header": "X-Hub-Signature-256", "kept_headers": receiverHeaders},
-		"screening": map[string]any{"mode": string(r.mode), "available": r.screener != nil && r.screener.ScreenAvailable(context.Background()), "surcharge": "what the classifier cost, at most " + ScreenSurchargePriceText()},
+		"screening": screening,
 		"outbound":  false, "public": false, "tool_page": "/tools/receive",
 	}
-}
-
-// ScreenSurchargePriceText is the screening surcharge's ceiling in words.
-func ScreenSurchargePriceText() string {
-	return itoa(screenFee) + " + " + itoa(screenBase-screenFee) + " per " + SizeText(ScreenTextBytes) + " + " + itoa(screenPerKiB) + " per KiB of text"
 }
 
 type receiverCreateArgs struct {
@@ -353,12 +348,7 @@ func newReceiverToken() (string, string) {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	token := base64.RawURLEncoding.EncodeToString(b)
-	return token, tokenHash(token)
-}
-
-func tokenHash(token string) string {
-	h := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(h[:])
+	return token, sha256Of([]byte(token))
 }
 
 func (r *receiver) url(id, token string) string {
@@ -667,24 +657,14 @@ func sourceKey(ip net.IP) string {
 }
 
 // admit counts one event in key's window of table and refuses past the
-// bounds; the table is bounded and fails closed when full of live keys.
+// bounds; the table is bounded (windowIn) and fails closed when full of
+// live keys.
 func (r *receiver) admit(table map[string]*anonWindow, key string, perMinute, perDay, now int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	w := table[key]
+	w := windowIn(table, key, func(w *anonWindow) bool { return w.minute != now/60 })
 	if w == nil {
-		if len(table) >= receiverRateEntries {
-			for k, v := range table {
-				if v.minute != now/60 {
-					delete(table, k)
-				}
-			}
-			if len(table) >= receiverRateEntries {
-				return &allowance.Err{Code: "request_rate", RetryAfter: 60}
-			}
-		}
-		w = &anonWindow{}
-		table[key] = w
+		return &allowance.Err{Code: "request_rate", RetryAfter: 60}
 	}
 	if ok, retry := w.room(perMinute, perDay, now); !ok {
 		return &allowance.Err{Code: "request_rate", RetryAfter: retry}
@@ -744,7 +724,7 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 	if err != nil {
 		return DeliveryReceipt{}, "", err
 	}
-	if subtle.ConstantTimeCompare([]byte(tokenHash(d.Token)), []byte(row.tokenHash)) != 1 || row.state != "active" {
+	if subtle.ConstantTimeCompare([]byte(sha256Of([]byte(d.Token))), []byte(row.tokenHash)) != 1 || row.state != "active" {
 		return DeliveryReceipt{}, "", refusal("receiver_not_found")
 	}
 	if row.allow != "" {
@@ -794,13 +774,13 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 	screen := "off"
 	if r.mode.Wants(&row.screen) {
 		screen = "pending"
-		if r.screener == nil || !r.screener.ScreenAvailable(ctx) {
+		if !screenerUp(ctx, r.screener) {
 			screen = "unavailable"
 		}
 	}
 	headers := map[string]string{}
 	for k, v := range d.Headers {
-		if len(v) <= receiverHeaderBytes && headerValueRE.MatchString(v) && containsString(receiverHeaders, k) {
+		if len(v) <= receiverHeaderBytes && headerValueRE.MatchString(v) && slices.Contains(receiverHeaders, k) {
 			headers[k] = v
 		}
 	}
@@ -822,15 +802,6 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 		return DeliveryReceipt{}, "", err
 	}
 	return DeliveryReceipt{Item: id, Bytes: len(d.Body)}, screen, nil
-}
-
-func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // Background starts the screening workers; they stop with ctx.
@@ -1027,8 +998,6 @@ func RevokeReceiver(ctx context.Context, db *sql.DB, id, reason string, now int6
 	}
 	return v, err
 }
-
-func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 // receiverProvider is the enabled receiver service, or receiver_not_found.
 func (e *Engine) receiverProvider() (*receiver, error) {

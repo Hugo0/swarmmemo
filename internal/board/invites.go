@@ -3,10 +3,8 @@ package board
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -101,7 +99,7 @@ func (s *Store) roomInvite(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if open >= InviteOpenMax {
 		return Result{}, problem(409, "invite_limit", fmt.Sprintf("A room holds up to %d open invites; wait for one to be used or to expire.", InviteOpenMax))
 	}
-	if err = s.charge(ctx, tx, a, 256, now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 		return Result{}, err
 	}
 	raw := make([]byte, InviteSecretBytes)
@@ -200,7 +198,7 @@ func (s *Store) acceptInvite(ctx context.Context, tx *sql.Tx, c Command, a actor
 			return Result{}, problem(409, "dm_members", "A DM has exactly its two members, and this one has both; the invite is still unused.")
 		}
 	}
-	if err = s.charge(ctx, tx, a, 256, now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 		return Result{}, err
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE room_invites SET used_by=?,used_at=? WHERE secret_sha256=?", a.id, now, hash); err != nil {
@@ -226,8 +224,7 @@ func (s *Store) acceptInvite(ctx context.Context, tx *sql.Tx, c Command, a actor
 
 // inviteHash is what the board keeps of a secret: the SHA-256 of its bytes.
 func inviteHash(secret []byte) string {
-	sum := sha256.Sum256(secret)
-	return hex.EncodeToString(sum[:])
+	return sha256Hex(secret)
 }
 
 // inviteID names an invite in answers and the audit log without its secret.

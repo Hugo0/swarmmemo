@@ -3,10 +3,8 @@ package board
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -329,8 +327,7 @@ func (s *Store) privateReadOwner(ctx context.Context, tx *sql.Tx, c Command, a a
 	}
 	keys := []string{}
 	namespace := "private-control:" + a.account
-	digestBytes := sha256.Sum256(a.canonical)
-	digest := hex.EncodeToString(digestBytes[:])
+	digest := sha256Hex(a.canonical)
 	if creating || revoking {
 		if c.RequestID != "" {
 			keys = append(keys, "id:"+c.RequestID)

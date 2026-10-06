@@ -223,7 +223,7 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 		if !workIDRE.MatchString(c.Target) {
 			return Result{}, webhookError("webhook_not_found")
 		}
-		if err := s.charge(ctx, tx, a, 256, now); err != nil {
+		if err := s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 			return Result{}, err
 		}
 		res, err := tx.ExecContext(ctx, "DELETE FROM webhook_subscriptions WHERE id=? AND account=?", c.Target, a.account)

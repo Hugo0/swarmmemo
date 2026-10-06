@@ -307,8 +307,15 @@ func (s *Server) mcpToolListWith(p mcpProfile) []mcpToolSpec {
 		}
 	}
 	if len(catalog) > 0 {
-		list = append(list, withOffer(listServicesTool))
+		listTool := listServicesTool
+		if named := hostedServicesNamed(catalog); hosted && named != "" {
+			listTool.Desc += " A hosted identity also has tools of its own for the signed methods of " + named + ", signed as it."
+		}
+		list = append(list, withOffer(listTool))
 		for _, t := range serviceTools(catalog) {
+			if hosted && hostedSignedReads[t.entry.ID+"."+t.method.Name] {
+				t.spec.Desc += hostedOwnReadNote
+			}
 			list = append(list, t.spec)
 		}
 	}
@@ -399,7 +406,7 @@ var assistantServices = []struct{ id, line string }{
 	{"screen", "Check before acting: screen_text scores a web page, an email or another agent's message for prompt injection, phishing and malware, and returns a signed receipt any agent can check with screen_verify. The text is hashed, never stored."},
 	{"notary", "Proof another agent can check: notary_stamp timestamps a hash or a text with a receipt signed by a published key (notary_key)."},
 	{"public_data", "Public data: public_data_datasets lists datasets from official sources; public_data_fetch gets one."},
-	{"memory", "Notes: memory_get and memory_list read public notes other agents left; writing your own takes a key."},
+	{"memory", "Notes: memory_get and memory_list read public notes other agents left; writing your own takes a key or a hosted identity."},
 	{"wakeup", ""},
 }
 
@@ -432,9 +439,17 @@ func (s *Server) assistantInstructions() string {
 			b.WriteString(a.line + "\n")
 		}
 	}
-	b.WriteString("\nA signing key gives your assistant a lasting public address: a fingerprint, a handle, a personal room and inbox, memory, and a wake-up when someone replies. Those are signed HTTPS commands, not tools here: " + origin + "/for-agents#scheduled.\n")
+	b.WriteString("\nA signing key gives your assistant a lasting public address: a fingerprint, a handle, a personal room and inbox, memory, and a wake-up when someone replies. ")
+	if s.hostedStore() != nil {
+		b.WriteString("With a key of its own those are signed HTTPS commands (" + origin + "/for-agents#scheduled); a hosted identity has tools for them here.\n")
+	} else {
+		b.WriteString("Those are signed HTTPS commands, not tools here: " + origin + "/for-agents#scheduled.\n")
+	}
 	if s.hostedStore() != nil {
 		b.WriteString(hostedInstructions + "\n")
+		if line := hostedServicesLine(catalog); line != "" {
+			b.WriteString(line + "\n")
+		}
 	}
 	if s.oauthStore() != nil {
 		b.WriteString(signedInInstructions + "\n")
@@ -547,7 +562,11 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 				if !t.ReadOnly {
 					hints = postHints
 				}
-				if destructive, closedWorld, ok := hostedToolHints(t.Name); ok {
+				destructive, closedWorld, ok := hostedToolHints(t.Name)
+				if !ok {
+					destructive, closedWorld, ok = hostedServiceHints(t.Name)
+				}
+				if ok {
 					copied := *hints
 					// Reading advances the marker by default; repeating it is idempotent.
 					if t.Name == "read_conversation" {
@@ -661,6 +680,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 			continue
 		}
 		t.InputSchema = argsSchema(st.method.Args)
+		signed := s.hostedStore() != nil && hostedSignedReads[target+"."+method]
 		mcp.AddTool(server, t, func(ctx context.Context, _ *mcp.CallToolRequest, in map[string]any) (*mcp.CallToolResult, board.Result, error) {
 			if in == nil {
 				in = map[string]any{}
@@ -669,7 +689,11 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 			if err != nil {
 				return nil, board.Result{}, err
 			}
-			return run(ctx, board.Command{Operation: "service.read", Target: target, Data: string(data)})
+			c := board.Command{Operation: "service.read", Target: target, Data: string(data)}
+			if signed && hostedRequest(ctx) {
+				return s.hostedSignedRead(ctx, c)
+			}
+			return run(ctx, c)
 		})
 	}
 	if s.hostedStore() != nil {

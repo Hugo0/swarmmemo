@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -297,7 +296,7 @@ func (f *fetch) CatalogueExtra() map[string]any {
 		mode = f.cfg.screen
 	}
 	return map[string]any{"available": f.cfg != nil, "user_agent": FetchUserAgent, "robots_token": "SwarmMemoFetch", "about": "/fetch", "tool_page": "/tools/fetch",
-		"screening": map[string]any{"mode": string(mode), "available": f.screener != nil && f.screener.ScreenAvailable(context.Background())},
+		"screening": screeningExtra(mode, f.screener),
 		"formats":   []string{"markdown (text/html)", "json (application/json)", "text (text/plain, text/markdown)"}, "javascript": false, "cookies": false, "stores_text": false}
 }
 
@@ -409,7 +408,7 @@ func parseFetchURL(raw string) (*url.URL, error) {
 // wants is whether this call screens, given the operator's mode and the
 // classifier now.
 func (f *fetch) wants(p fetchPlan) bool {
-	return f.cfg != nil && f.cfg.screen.Wants(p.screen) && f.screener != nil && f.screener.ScreenAvailable(context.Background())
+	return f.cfg != nil && f.cfg.screen.Wants(p.screen) && screenerUp(context.Background(), f.screener)
 }
 
 // Quote reserves the price for max_bytes of text, plus the most screening
@@ -577,7 +576,7 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 		once["title"] = page.Title
 	}
 	public, _ := json.Marshal(map[string]any{"bytes": len(text), "status": page.Status, "cached": cached, "screened": verdict != nil})
-	return Result{Body: canonicalJSON(body), Used: used, Public: public, Once: marshalNoEscape(once)}, nil
+	return Result{Body: canonicalJSON(body), Used: used, Public: public, Once: canonicalJSON(once)}, nil
 }
 
 // cacheableRefusal is a refusal about the page, not about this call: kept
@@ -1020,51 +1019,26 @@ var cp1252 = [32]rune{'€', '\u0081', '‚', 'ƒ', '„', '…', '†', '‡', 
 // dial connects to a public address of addr's host on port 80 or 443: every
 // address the host resolves to must be public (one that is not is the
 // rebinding shape, and refuses the host), and the address actually
-// connected to is checked again at connect time (safenet.Control).
+// connected to is checked again at connect time (safenet.Dialer, with the
+// config's test hooks).
 func (f *fetch) dial(ctx context.Context, network, addr string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(addr)
+	_, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
 	if port != "80" && port != "443" {
 		return nil, safenet.ErrBlocked
 	}
-	var ips []net.IP
-	if ip := net.ParseIP(host); ip != nil {
-		ips = []net.IP{ip}
-	} else {
-		lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		ips, err = f.cfg.lookupIP(lctx, host)
-		cancel()
-		if err != nil || len(ips) == 0 {
-			return nil, safenet.ErrUnresolved
-		}
-	}
-	for _, ip := range ips {
-		if err := f.cfg.publicIP(ip); err != nil {
-			return nil, err
-		}
-	}
-	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: func(network, address string, c syscall.RawConn) error {
-		h, _, err := net.SplitHostPort(address)
-		if err != nil {
-			return safenet.ErrBlocked
-		}
-		return f.cfg.publicIP(net.ParseIP(h))
-	}}
-	var last error = safenet.ErrUnresolved
-	for _, ip := range ips {
-		target := net.JoinHostPort(ip.String(), port)
-		if f.cfg.dialAddr != nil {
-			target = f.cfg.dialAddr(ip, port)
-		}
-		conn, err := dialer.DialContext(ctx, network, target)
-		if err == nil {
-			return conn, nil
-		}
-		last = err
-	}
-	return nil, last
+	return safenet.Dialer{
+		Timeout: 10 * time.Second,
+		Lookup: func(ctx context.Context, host string) ([]net.IP, error) {
+			lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			return f.cfg.lookupIP(lctx, host)
+		},
+		Public: f.cfg.publicIP,
+		Target: f.cfg.dialAddr,
+	}.DialContext(ctx, network, addr)
 }
 
 // FetchDeny adds host to the operator's denylist (swarmmemo fetch deny);

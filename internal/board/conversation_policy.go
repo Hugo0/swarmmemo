@@ -261,7 +261,7 @@ func (s *Store) setMessagingPolicy(ctx context.Context, tx *sql.Tx, c Command, a
 	if err = checkProtection(p); err != nil {
 		return Result{}, err
 	}
-	if err = s.charge(ctx, tx, a, int64(256+len(c.Data)), now); err != nil {
+	if err = s.charge(ctx, tx, a, SmallCommandCost+int64(len(c.Data)), now); err != nil {
 		return Result{}, err
 	}
 	stored, _ := json.Marshal(p)

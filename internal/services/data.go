@@ -2,6 +2,9 @@ package services
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -193,4 +196,47 @@ func (f *frame) valueDone() {
 	if f.object {
 		f.key = true
 	}
+}
+
+// Encodings every provider shares: one implementation each.
+
+// canonicalJSON is v as compact JSON without HTML escaping and without the
+// encoder's trailing newline, so a record or an answer keeps text as sent;
+// nil when v cannot be encoded.
+func canonicalJSON(v any) []byte {
+	var b bytes.Buffer
+	e := json.NewEncoder(&b)
+	e.SetEscapeHTML(false)
+	if err := e.Encode(v); err != nil {
+		return nil
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'})
+}
+
+// sha256Of is the lowercase hex SHA-256 of b.
+func sha256Of(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// newCallID is a random 32-hex-digit id: a call's, a stored item's, or an
+// unsigned call's request_id (NewRequestID).
+func newCallID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// itoa is n in decimal, for copy that states a limit.
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// truncateUTF8 cuts s to at most n bytes on a rune boundary.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
