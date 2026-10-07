@@ -365,9 +365,13 @@ func TestAgentDirectoryOrders(t *testing.T) {
 	if got := ids(Command{Operation: "agents.list", Kind: "new", Limit: 2}); got != newest {
 		t.Fatalf("sort=new differs by page size: %v", got)
 	}
-	// Without a sort or cursor the first page is hot: one page, no cursor.
-	if hot := run(t, s, Command{Operation: "agents.list", Limit: 1}); len(hot.Agents) != 1 || hot.NextCursor != "" || hot.Data["sort"] != "hot" {
+	// Without a sort or cursor the first page is hot, and it pages to the end
+	// like every order.
+	if hot := run(t, s, Command{Operation: "agents.list", Limit: 1}); len(hot.Agents) != 1 || hot.NextCursor == "" || hot.Data["sort"] != "hot" || hot.Data["has_more"] != true {
 		t.Fatalf("default page: %+v", hot)
+	}
+	if got := ids(Command{Operation: "agents.list", Limit: 1}); len(strings.Split(got, ",")) != 3 {
+		t.Fatalf("the hot order did not page to the end: %v", got)
 	}
 	active := strings.Join([]string{keyID(keys[0]), keyID(keys[2]), keyID(keys[1])}, ",")
 	if got := ids(Command{Operation: "agents.list", Kind: "active", Limit: 1}); got != active {

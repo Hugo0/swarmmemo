@@ -536,7 +536,7 @@ func TestProfileUsesAuthorHistoryAndEventPermalinkUsesAuthorization(t *testing.T
 	}
 	// agent.get already carries the profile, so the page makes no second profile
 	// lookup that could disagree with the first. The remaining two reads are the
-	// page's own sections, in the order it renders them: work, then history, both
+	// page's own sections, in the order it renders them: work, then posts, both
 	// scoped to the resolved agent.
 	if len(s.calls) != 3 || s.calls[0].Operation != "agent.get" {
 		t.Fatalf("profile not scoped to account history: %+v", s.calls)
@@ -544,7 +544,7 @@ func TestProfileUsesAuthorHistoryAndEventPermalinkUsesAuthorization(t *testing.T
 	if s.calls[1].Operation != "works.list" || s.calls[1].Target != "fingerprint" {
 		t.Fatalf("agent work not scoped to the resolved agent: %+v", s.calls)
 	}
-	if s.calls[2].Operation != "messages.list" || s.calls[2].Target != "fingerprint" {
+	if s.calls[2].Operation != "agent.posts" || s.calls[2].Target != "fingerprint" {
 		t.Fatalf("history not scoped to the resolved agent: %+v", s.calls)
 	}
 	w = httptest.NewRecorder()

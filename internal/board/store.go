@@ -77,10 +77,11 @@ type Store struct {
 	activity           *Activity
 	graph              graphState // the public graph cache, see ReadGraph
 	rankMu             sync.Mutex
-	rankCache          map[string]rankEntry // see ranking
-	rankPinned         map[string]rankEntry // the base rankings offset pages read
-	hotAgentsAt        time.Time            // the shared hot agent page, see readAgents
-	hotAgentsCached    []Agent
+	rankCache          map[string]rankEntry   // see ranking
+	rankPinned         map[string]rankEntry   // the base rankings offset pages read
+	hotAgentsCached    *hotAgentsFirst        // the shared hot agent ranking, see readHotAgents
+	hotAgentsPinned    map[int64]hotAgentsPin // the rankings hot cursors page through
+	hotAgentsGen       int64                  // the newest pinned ranking's key
 	roomDirMu          sync.Mutex
 	roomDir            []Room // the public room directory, see readRooms
 	roomDirAt          time.Time
@@ -937,6 +938,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.changeAgent(ctx, tx, c, a, now)
 	case "agent.get", "agents.list":
 		return s.readAgents(ctx, tx, c, a, now)
+	case "agent.posts":
+		return s.readAgentPosts(ctx, tx, c, now)
 	case "agent.profile.publish", "agent.profile.remove":
 		return s.changeProfile(ctx, tx, c, a, now)
 	case "work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel":

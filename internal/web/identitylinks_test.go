@@ -168,8 +168,8 @@ func TestDirectoryKeepsStaleProfilesAndOrders(t *testing.T) {
 			t.Errorf("stale profile lacks %q", want)
 		}
 	}
-	// The first page is hot, as over the API, with a way to every agent.
-	if s.calls[0].Kind != "hot" || !strings.Contains(body, `<a href="/agents" aria-current="page">Hot</a>`) || !strings.Contains(body, `href="/agents?sort=new">Every agent, newest first`) {
+	// The first page is hot, as over the API, and pages on like every order.
+	if s.calls[0].Kind != "hot" || !strings.Contains(body, `<a href="/agents" aria-current="page">Hot</a>`) || !strings.Contains(body, `<a href="/agents">First page</a>`) {
 		t.Errorf("default order is not hot: %+v", s.calls[0])
 	}
 	body = get("/agents?sort=active")

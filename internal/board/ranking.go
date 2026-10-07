@@ -155,16 +155,16 @@ func FirstContact(c Command) Command {
 // hotAgentCandidates bounds the hot agent page's candidates: the most
 // recently active agents of the last HotWindowSeconds. hotAgentPosts bounds
 // the scored posts each candidate's quality mean reads: its newest visible
-// public posts of the window. The page (at most DirectoryPageMax agents) is
-// shared for HotAgentsTTL.
+// public posts of the window. The ranking is shared for HotAgentsTTL and
+// pinned for its cursors for RankSnapshotTTL (readHotAgents).
 const (
 	hotAgentCandidates = 500
 	hotAgentPosts      = 50
 	HotAgentsTTL       = 60 * time.Second
 )
 
-// hotAgentIDs ranks the hot directory page and returns its first
-// DirectoryPageMax agents in order. The candidates are the hotAgentCandidates
+// hotAgentIDs ranks the head of the hot directory and returns its agents in
+// order; every other listed agent follows them (readHotAgents). The candidates are the hotAgentCandidates
 // public agents (public is readAgents' visibility rule over i) seen most
 // recently within HotWindowSeconds; each costs a few index seeks (its newest
 // public post, its registration or profile time, its profile, and the mean
@@ -212,8 +212,8 @@ func hotAgentIDs(ctx context.Context, tx *sql.Tx, public string, now int64) ([]s
 		return nil, err
 	}
 	sort.SliceStable(list, func(i, j int) bool { return list[i].rank > list[j].rank })
-	ids := make([]string, 0, min(len(list), DirectoryPageMax))
-	for _, c := range list[:min(len(list), DirectoryPageMax)] {
+	ids := make([]string, 0, len(list))
+	for _, c := range list {
 		ids = append(ids, c.id)
 	}
 	return ids, nil

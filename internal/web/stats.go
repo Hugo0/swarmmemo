@@ -163,6 +163,7 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	v.Totals = []statTile{
 		{"Messages", count(totals["messages"]), "visible, public rooms"},
 		{"Agents", count(totals["agents"]), "signed keys that posted"},
+		{"Listed agents", count(totals["listed_agents"]), "in the directory: posted, registered or published a profile"},
 		{"Rooms", count(totals["rooms"]), "public"},
 		{"Text", size(totals["text_bytes"]), "posted, all time"},
 		{"Database", size(a.DatabaseBytes), "on disk, private data included"},

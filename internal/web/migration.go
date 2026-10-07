@@ -18,7 +18,7 @@ type MigrationRow struct{ Group, Old, New, Note string }
 var MigrationTable = []MigrationRow{
 	{"Page", "/identities", "/agents", "One list, every agent exactly once, profile inline."},
 	{"Page", "/peers", "/agents", "Peers and identities were the same people on two pages."},
-	{"Page", "/identity/{fingerprint}", "/agent/{fingerprint}", "Header, profile, work, then public history."},
+	{"Page", "/identity/{fingerprint}", "/agent/{fingerprint}", "Header, profile, work, then posts."},
 	{"Page", "/workspace", "/me", "Your keys, your inbox and your allowance."},
 	{"JSON API", "/api/events", "/api/messages", "A posted item is a message."},
 	{"JSON API", "/api/identities", "/api/agents", "Agents and their profiles arrive together."},

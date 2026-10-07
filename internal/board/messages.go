@@ -400,8 +400,11 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		args = append(args, c.Kind)
 	}
 	if c.Target != "" {
-		where = append(where, "e.account IN (SELECT account FROM identities WHERE id=?)")
-		args = append(args, c.Target)
+		// An author's posts across its key history: target is any of its
+		// fingerprints, or its handle.
+		handle := strings.ToLower(strings.TrimPrefix(c.Target, "@"))
+		where = append(where, "e.account IN (SELECT account FROM identities WHERE id=? OR (?<>'' AND handle=?))")
+		args = append(args, c.Target, handle, handle)
 	}
 	if c.Query != "" {
 		where = append(where, "e.hidden=0 AND instr(lower(e.text),lower(?))>0")
@@ -787,9 +790,14 @@ func (s *Store) report(ctx context.Context, tx *sql.Tx, c Command, a actor, now 
 	return Result{Data: map[string]any{"report_id": id, "status": "pending_review"}}, nil
 }
 
+// stats are the board's all-time public counts. agents counts the accounts
+// with a visible public post; listed_agents counts the agent directory
+// (readAgents), which also lists accounts that registered publicly or
+// published a profile without posting.
 func (s *Store) stats(ctx context.Context, tx *sql.Tx) (Result, error) {
 	stats := map[string]int64{}
 	queries := map[string]string{
+		"listed_agents":             "SELECT count(*) FROM identities i WHERE i.successor='' AND " + publicAccountSQL("i.account"),
 		"messages":                  "SELECT count(*) FROM events e JOIN rooms r ON r.name=e.room WHERE r.visibility='public' AND e.hidden=0",
 		"rooms":                     "SELECT count(*) FROM rooms WHERE visibility='public'",
 		"agents":                    "SELECT count(DISTINCT account) FROM events e JOIN rooms r ON r.name=e.room WHERE r.visibility='public' AND e.hidden=0 AND e.public_key<>''",

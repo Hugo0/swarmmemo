@@ -296,7 +296,7 @@ func TestAgentsHotPage(t *testing.T) {
 	if res := run(t, s, Command{Operation: "agents.list", Kind: "new"}); res.Agents[0].ID != keyID(loud) {
 		t.Fatal("sort=new is not newest first")
 	}
-	fails(t, s, Command{Operation: "agents.list", Kind: "hot", Cursor: "x"}, "cursor_with_sort")
+	fails(t, s, Command{Operation: "agents.list", Kind: "hot", Cursor: "x"}, "invalid_cursor")
 	// The page is shared for HotAgentsTTL: a new score shows after it.
 	if err := s.RecordQuality(ctx, id, 1, "jev-1.13.0"); err != nil {
 		t.Fatal(err)

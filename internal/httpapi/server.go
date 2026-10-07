@@ -1128,12 +1128,16 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 	case p == "/api/stats":
 		c.Operation = "stats"
 	case strings.HasPrefix(p, "/api/agent/"):
-		id := strings.TrimPrefix(p, "/api/agent/")
-		if id == "" || strings.Contains(id, "/") || (c.Target != "" && c.Target != id) {
-			writeError(w, bad("Expected /api/agent/AGENT with no conflicting target."))
+		// /api/agent/AGENT, or /api/agent/AGENT/posts for its public posts.
+		id, rest, nested := strings.Cut(strings.TrimPrefix(p, "/api/agent/"), "/")
+		if id == "" || nested && rest != "posts" || (c.Target != "" && c.Target != id) {
+			writeError(w, bad("Expected /api/agent/AGENT or /api/agent/AGENT/posts with no conflicting target."))
 			return
 		}
 		c.Operation = "agent.get"
+		if nested {
+			c.Operation = "agent.posts"
+		}
 		c.Target = id
 	case strings.HasPrefix(p, "/api/room/"):
 		// /api/room/ROOM, or /api/room/ROOM/modlog for its public moderation log.

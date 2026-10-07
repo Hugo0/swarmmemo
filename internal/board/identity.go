@@ -132,6 +132,11 @@ func publicAccountSQL(account string) string {
 // the record, and the profile it published for itself -- if any, and if it has
 // not expired -- rides along on the same row. Two separate listings stitched
 // together in a template rendered the same agent twice; a LEFT JOIN cannot.
+//
+// The directory lists every public agent (publicAccountSQL: a visible public
+// post, a public registration or a published profile), one row per account.
+// The stats operation's agents counts fewer: accounts with a visible public
+// post; its listed_agents is this directory's size.
 func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -145,42 +150,31 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	where := public
 	args := []any{}
 	// The directory's first page, unless searched, is hot by default
-	// (hotAgents, one page); sort=new lists newest first and sort=active most
-	// recently active first. The order is part of the cursor's scope, so a
-	// cursor from one order (or from the old by-fingerprint order) is refused
-	// as invalid_cursor, never misread; a cursor without a sort is the
-	// newest-first directory's, as it always was.
+	// (readHotAgents); sort=new lists newest first and sort=active most
+	// recently active first. Every order pages to the end with a cursor. The
+	// order is part of the cursor's scope, so a cursor from one order (or from
+	// the old by-fingerprint order) is refused as invalid_cursor, never
+	// misread; a cursor read without a sort follows the order it came from.
 	sortKey, hot := "created", false
 	switch c.Kind {
 	case "":
-		hot = c.Operation == "agents.list" && c.Cursor == "" && c.Query == ""
+		if c.Operation == "agents.list" {
+			hot = c.Cursor == "" && c.Query == ""
+			if c.Cursor != "" {
+				if _, err := s.decodeConversationCursor(c.Cursor, "agents.list", hotAgentsScope(c.Query)); err == nil {
+					hot = true
+				}
+			}
+		}
 	case "new":
 	case "hot":
-		if c.Cursor != "" {
-			return Result{}, problem(400, "cursor_with_sort", "The hot agent list is one page; sort=new or sort=active pages the directory with a cursor.")
-		}
 		hot = true
 	case "active":
 		sortKey = "seen"
 	default:
 		return Result{}, problem(400, "invalid_query", "Agent sort must be hot, new or active.")
 	}
-	if hot {
-		sortKey = "seen"
-	}
-	cursor := conversationCursor{Version: 1, Domain: "agents.list", Scope: sortKey + "\n" + c.Query}
 	limit := limitValue(c.Limit)
-	if hot {
-		// The hot page is the same for every reader; it is shared for
-		// HotAgentsTTL (a change to an agent's registration, profile or links
-		// drops it), so a stream of reads costs one ranking a minute.
-		s.rankMu.Lock()
-		cached, at := s.hotAgentsCached, s.hotAgentsAt
-		s.rankMu.Unlock()
-		if age := s.now().Sub(at); cached != nil && age >= 0 && age < HotAgentsTTL {
-			return s.hotAgentPage(ctx, tx, cached, limit)
-		}
-	}
 	if c.Operation == "agent.get" {
 		target := c.Target
 		if target == "" {
@@ -191,110 +185,13 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		// and check it against its own signature, pending members included.
 		where = "(" + public + " OR i.account=? OR EXISTS(SELECT 1 FROM conversation_members cm JOIN conversation_members mine ON mine.room=cm.room WHERE cm.account=i.account AND mine.account=?)) AND (i.id=? OR i.handle=?)"
 		args = append(args, a.account, a.account, target, strings.ToLower(target))
-	} else {
-		var err error
-		if cursor, err = s.decodeConversationCursor(c.Cursor, "agents.list", cursor.Scope); err != nil {
+		agents, err := s.agentRows(ctx, tx, agentSelectSQL(where)+" ORDER BY i.id LIMIT 1", args, now)
+		if err != nil {
 			return Result{}, err
 		}
-		if cursor.Page != "" && (!fingerprintRE.MatchString(cursor.Page) || cursor.After <= 0) {
-			return Result{}, problem(400, "invalid_cursor", "Invalid agent directory cursor.")
+		if err = s.attachAvatars(ctx, tx, agents, now); err != nil {
+			return Result{}, err
 		}
-		// One row per participant. A key that has rotated away is still reachable at
-		// its own address and is still linked from the profile it originally signed,
-		// but listing it beside its successor is the same agent twice again.
-		where += " AND i.successor=''"
-	}
-	var hotOrder map[string]int
-	if hot {
-		// The hot page ranks cheaply first (hotAgentIDs), then reads full rows
-		// (first post, post count) for the agents it shows only.
-		ids, err := hotAgentIDs(ctx, tx, public, now)
-		if err != nil {
-			return Result{}, agentReadError(err)
-		}
-		hotOrder = make(map[string]int, len(ids))
-		for i, id := range ids {
-			hotOrder[id] = i
-			args = append(args, id)
-		}
-		where += " AND i.id IN (''" + strings.Repeat(",?", len(ids)) + ")"
-	}
-	if c.Query != "" {
-		// One search box over one list: an agent matches on its handle or on
-		// anything in the profile it published for itself.
-		where += " AND (instr(lower(i.handle),lower(?))>0 OR instr(lower(coalesce(p.description,'')),lower(?))>0" +
-			" OR EXISTS(SELECT 1 FROM peer_capabilities pc WHERE pc.account=i.account AND pc.capability=lower(?)))"
-		args = append(args, c.Query, c.Query, c.Query)
-	}
-	// Public timestamps derive solely from public messages or explicit opt-ins. A
-	// private write cannot update a public agent's last_seen or post count. A
-	// profile is never hidden for age: past fresh_until only its availability is
-	// unconfirmed, so the join carries every current profile.
-	query := `SELECT i.id,i.public_key,i.handle,
- coalesce((SELECT min(t) FROM (SELECT min(e.created_at) AS t FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT min(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS created,
- coalesce((SELECT max(t) FROM (SELECT max(e.created_at) AS t FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT max(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS seen,
- (SELECT count(*) FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0),i.successor,i.custody,
- p.description,p.capabilities,p.availability,p.author,p.public_key,p.signature,p.payload,p.published_at,p.expires_at
- FROM identities i LEFT JOIN peer_cards p ON p.account=i.account AND i.successor=''
- WHERE ` + where
-	if c.Operation == "agent.get" {
-		query += " ORDER BY i.id LIMIT ?"
-	} else if hot {
-		query += " ORDER BY i.id LIMIT ?"
-	} else {
-		// Keyset over the public timestamp, newest first, fingerprint as the
-		// tiebreak, so a page boundary is stable while agents keep arriving.
-		query = "SELECT * FROM (" + query + ") WHERE (?='' OR " + sortKey + "<? OR (" + sortKey + "=? AND id<?)) ORDER BY " + sortKey + " DESC, id DESC LIMIT ?"
-		args = append(args, cursor.Page, cursor.After, cursor.After, cursor.Page)
-	}
-	if hot {
-		args = append(args, len(hotOrder))
-	} else {
-		args = append(args, limit+1)
-	}
-	rows, err := tx.QueryContext(ctx, query, args...)
-	if err != nil {
-		return Result{}, agentReadError(err)
-	}
-	defer rows.Close()
-	agents := []Agent{}
-	for rows.Next() {
-		var agent Agent
-		var description, capabilities, availability, author, profileKey, signature, payload sql.NullString
-		var publishedAt, expiresAt sql.NullInt64
-		if err = rows.Scan(&agent.ID, &agent.PublicKey, &agent.Handle, &agent.CreatedAt, &agent.LastSeen, &agent.Posts, &agent.Successor, &agent.Custody,
-			&description, &capabilities, &availability, &author, &profileKey, &signature, &payload, &publishedAt, &expiresAt); err != nil {
-			return Result{}, agentReadError(err)
-		}
-		if agent.Custody == "hosted" && agent.Successor != "" {
-			// A claimed hosted identity: SwarmMemo no longer holds this key
-			// (its copy was wiped), and the agent signs with its successor.
-			agent.Custody = "claimed"
-		}
-		if description.Valid {
-			// The original signing key and exact canonical payload survive key
-			// rotation; CurrentAgent is the account-continuity reference.
-			profile := Profile{
-				Schema: 1, SelfDescribed: true, Description: description.String, Availability: availability.String,
-				Author: author.String, PublicKey: profileKey.String, Signature: signature.String, SignedPayload: payload.String,
-				PublishedAt: publishedAt.Int64, ExpiresAt: expiresAt.Int64,
-				RenewedAt: publishedAt.Int64, FreshUntil: expiresAt.Int64, Fresh: now < expiresAt.Int64,
-				CurrentAgent: AgentRef{ID: agent.ID, PublicKey: agent.PublicKey, Handle: agent.Handle},
-			}
-			if err = json.Unmarshal([]byte(capabilities.String), &profile.Capabilities); err != nil {
-				return Result{}, err
-			}
-			agent.Profile = &profile
-		}
-		agents = append(agents, agent)
-	}
-	if err = rows.Err(); err != nil {
-		return Result{}, agentReadError(err)
-	}
-	if err = s.attachAvatars(ctx, tx, agents, now); err != nil {
-		return Result{}, err
-	}
-	if c.Operation == "agent.get" {
 		if len(agents) == 0 {
 			return Result{}, problem(404, "not_found", "Agent not found.")
 		}
@@ -320,12 +217,36 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		return Result{Agent: &agents[0]}, nil
 	}
+	// One row per participant. A key that has rotated away is still reachable at
+	// its own address and is still linked from the profile it originally signed,
+	// but listing it beside its successor is the same agent twice again.
+	where += " AND i.successor=''"
+	if c.Query != "" {
+		// One search box over one list: an agent matches on its handle (with
+		// or without a leading @) or on anything in the profile it published
+		// for itself. Agents without a profile match on their handle.
+		where += " AND (instr(lower(i.handle),lower(?))>0 OR instr(lower(coalesce(p.description,'')),lower(?))>0" +
+			" OR EXISTS(SELECT 1 FROM peer_capabilities pc WHERE pc.account=i.account AND pc.capability=lower(?)))"
+		args = append(args, strings.TrimPrefix(c.Query, "@"), c.Query, c.Query)
+	}
 	if hot {
-		sort.SliceStable(agents, func(i, j int) bool { return hotOrder[agents[i].ID] < hotOrder[agents[j].ID] })
-		s.rankMu.Lock()
-		s.hotAgentsCached, s.hotAgentsAt = agents, s.now()
-		s.rankMu.Unlock()
-		return s.hotAgentPage(ctx, tx, agents, limit)
+		return s.readHotAgents(ctx, tx, c, public, where, args, limit, now)
+	}
+	cursor := conversationCursor{Version: 1, Domain: "agents.list", Scope: sortKey + "\n" + c.Query}
+	var err error
+	if cursor, err = s.decodeConversationCursor(c.Cursor, "agents.list", cursor.Scope); err != nil {
+		return Result{}, err
+	}
+	if cursor.Page != "" && (!fingerprintRE.MatchString(cursor.Page) || cursor.After <= 0) {
+		return Result{}, problem(400, "invalid_cursor", "Invalid agent directory cursor.")
+	}
+	// Keyset over the public timestamp, newest first, fingerprint as the
+	// tiebreak, so a page boundary is stable while agents keep arriving.
+	query := "SELECT * FROM (" + agentSelectSQL(where) + ") WHERE (?='' OR " + sortKey + "<? OR (" + sortKey + "=? AND id<?)) ORDER BY " + sortKey + " DESC, id DESC LIMIT ?"
+	args = append(args, cursor.Page, cursor.After, cursor.After, cursor.Page, limit+1)
+	agents, err := s.agentRows(ctx, tx, query, args, now)
+	if err != nil {
+		return Result{}, err
 	}
 	result := Result{Agents: agents, Data: map[string]any{"has_more": len(agents) > limit}}
 	if len(agents) > limit {
@@ -337,33 +258,316 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		result.NextCursor = s.encodeConversationCursor(cursor)
 	}
-	// The directory shows links too; one query covers the whole page.
-	if err = attachHonors(ctx, tx, result.Agents); err != nil {
+	if err = s.decorateAgents(ctx, tx, result.Agents, now); err != nil {
 		return Result{}, err
-	}
-	if err = s.attachIdentityLinks(ctx, tx, result.Agents); err != nil {
-		return Result{}, agentReadError(err)
 	}
 	return result, nil
 }
 
-// hotAgentPage is the first limit agents of a hot ranking (never modified:
-// the page gets copies), with honors and links. It is one page: no cursor.
-func (s *Store) hotAgentPage(ctx context.Context, tx *sql.Tx, ranked []Agent, limit int) (Result, error) {
-	page := append([]Agent(nil), ranked[:min(len(ranked), limit)]...)
-	if err := s.attachAvatars(ctx, tx, page, s.now().Unix()); err != nil {
-		return Result{}, err
-	}
-	if err := attachHonors(ctx, tx, page); err != nil {
-		return Result{}, err
-	}
-	if err := s.attachIdentityLinks(ctx, tx, page); err != nil {
-		return Result{}, agentReadError(err)
-	}
-	return Result{Agents: page, Data: map[string]any{"has_more": false, "sort": "hot"}}, nil
+// agentSelectSQL reads agent rows (agentRows) matching where, which may name
+// i (identities) and p (the account's current profile). It binds no
+// parameters of its own.
+//
+// Public timestamps derive solely from public messages or explicit opt-ins. A
+// private write cannot update a public agent's last_seen or post count. A
+// profile is never hidden for age: past fresh_until only its availability is
+// unconfirmed, so the join carries every current profile.
+func agentSelectSQL(where string) string {
+	return `SELECT i.id,i.public_key,i.handle,
+ coalesce((SELECT min(t) FROM (SELECT min(e.created_at) AS t FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT min(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS created,
+ coalesce((SELECT max(t) FROM (SELECT max(e.created_at) AS t FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0 UNION ALL SELECT max(au.created_at) FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=i.account AND au.operation IN ('agent.register','agent.profile.publish'))),0) AS seen,
+ (SELECT count(*) FROM events e CROSS JOIN rooms r ON r.name=e.room WHERE e.account=i.account AND r.visibility='public' AND e.hidden=0),i.successor,i.custody,
+ p.description,p.capabilities,p.availability,p.author,p.public_key,p.signature,p.payload,p.published_at,p.expires_at
+ FROM identities i LEFT JOIN peer_cards p ON p.account=i.account AND i.successor=''
+ WHERE ` + where
 }
 
-// dropHotAgents forgets the shared hot agent page.
+// agentRows runs an agentSelectSQL query and scans its rows.
+func (s *Store) agentRows(ctx context.Context, tx *sql.Tx, query string, args []any, now int64) ([]Agent, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, agentReadError(err)
+	}
+	defer rows.Close()
+	agents := []Agent{}
+	for rows.Next() {
+		var agent Agent
+		var description, capabilities, availability, author, profileKey, signature, payload sql.NullString
+		var publishedAt, expiresAt sql.NullInt64
+		if err = rows.Scan(&agent.ID, &agent.PublicKey, &agent.Handle, &agent.CreatedAt, &agent.LastSeen, &agent.Posts, &agent.Successor, &agent.Custody,
+			&description, &capabilities, &availability, &author, &profileKey, &signature, &payload, &publishedAt, &expiresAt); err != nil {
+			return nil, agentReadError(err)
+		}
+		if agent.Custody == "hosted" && agent.Successor != "" {
+			// A claimed hosted identity: SwarmMemo no longer holds this key
+			// (its copy was wiped), and the agent signs with its successor.
+			agent.Custody = "claimed"
+		}
+		if description.Valid {
+			// The original signing key and exact canonical payload survive key
+			// rotation; CurrentAgent is the account-continuity reference.
+			profile := Profile{
+				Schema: 1, SelfDescribed: true, Description: description.String, Availability: availability.String,
+				Author: author.String, PublicKey: profileKey.String, Signature: signature.String, SignedPayload: payload.String,
+				PublishedAt: publishedAt.Int64, ExpiresAt: expiresAt.Int64,
+				RenewedAt: publishedAt.Int64, FreshUntil: expiresAt.Int64, Fresh: now < expiresAt.Int64,
+				CurrentAgent: AgentRef{ID: agent.ID, PublicKey: agent.PublicKey, Handle: agent.Handle},
+			}
+			if err = json.Unmarshal([]byte(capabilities.String), &profile.Capabilities); err != nil {
+				return nil, err
+			}
+			agent.Profile = &profile
+		}
+		agents = append(agents, agent)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, agentReadError(err)
+	}
+	return agents, nil
+}
+
+// decorateAgents adds what a directory page shows beside each row: avatars,
+// honors and identity links, one query each for the whole page.
+func (s *Store) decorateAgents(ctx context.Context, tx *sql.Tx, page []Agent, now int64) error {
+	if err := s.attachAvatars(ctx, tx, page, now); err != nil {
+		return err
+	}
+	if err := attachHonors(ctx, tx, page); err != nil {
+		return err
+	}
+	if err := s.attachIdentityLinks(ctx, tx, page); err != nil {
+		return agentReadError(err)
+	}
+	return nil
+}
+
+// The hot directory. hotAgentsPinMax bounds the pinned rankings kept for
+// cursors; each is at most hotAgentCandidates fingerprints and lives for
+// RankSnapshotTTL, as a ranked message view's base does.
+const hotAgentsPinMax = 16
+
+// hotAgentsScope is the cursor scope of the hot order over query.
+func hotAgentsScope(query string) string { return "hot\n" + query }
+
+// hotRow is one agent of the hot order with its place in it: rank is its
+// index in the pinned ranking, or -1 in the tail (every other listed agent,
+// most recently active first).
+type hotRow struct {
+	agent Agent
+	rank  int
+}
+
+// hotAgentsFirst is the shared hot ranking: built at most once per
+// HotAgentsTTL (a change to an agent's registration, profile or links drops
+// it), pinned as gen for the cursors of its pages, with the rows of its
+// unsearched first page once read. It is never modified once shared.
+type hotAgentsFirst struct {
+	gen  int64
+	at   time.Time
+	ids  []string
+	rows []hotRow
+}
+
+// hotAgentsPin is a ranking a hot cursor pages through.
+type hotAgentsPin struct {
+	at  time.Time
+	ids []string
+}
+
+// readHotAgents is the hot order of the directory: the ranked agents
+// (hotAgentIDs) first, then every other listed agent most recently active
+// first, so a reader pages to the end of the directory with next_cursor. The
+// ranking a first page was cut from is pinned for RankSnapshotTTL: its pages
+// neither repeat nor skip as the ranking moves, and a cursor older than that
+// is refused as cursor_expired. Rows are read fresh on every page, so an
+// agent that stops being public drops out. where and args select listed
+// agents (and the search, if any).
+func (s *Store) readHotAgents(ctx context.Context, tx *sql.Tx, c Command, public, where string, args []any, limit int, now int64) (Result, error) {
+	scope := hotAgentsScope(c.Query)
+	var ids []string
+	var gen int64
+	offset, tailID, tailSeen := 0, "", int64(0)
+	need := limit + 1
+	if c.Cursor == "" {
+		first, err := s.hotAgentsRanking(ctx, tx, public, now)
+		if err != nil {
+			return Result{}, err
+		}
+		if c.Query == "" && first.rows != nil {
+			return s.hotAgentPage(ctx, tx, scope, first.gen, first.rows, limit, now)
+		}
+		ids, gen = first.ids, first.gen
+		if c.Query == "" {
+			// The unsearched first page is read once for every page size.
+			need = DirectoryPageMax + 1
+		}
+	} else {
+		cursor, err := s.decodeConversationCursor(c.Cursor, "agents.list", scope)
+		if err != nil {
+			return Result{}, err
+		}
+		s.rankMu.Lock()
+		pin, ok := s.hotAgentsPinned[cursor.Snapshot]
+		s.rankMu.Unlock()
+		if age := s.now().Sub(pin.at); !ok || age < 0 || age >= RankSnapshotTTL {
+			return Result{}, problem(409, "cursor_expired", fmt.Sprintf("This hot list cursor is older than %d minutes; start again from the first page. sort=new and sort=active cursors do not expire.", int(RankSnapshotTTL/time.Minute)))
+		}
+		ids, gen = pin.ids, cursor.Snapshot
+		if cursor.Page == "" {
+			offset = int(cursor.After)
+			if offset <= 0 || offset > len(ids) {
+				return Result{}, problem(400, "invalid_cursor", "Invalid agent directory cursor.")
+			}
+		} else {
+			if !fingerprintRE.MatchString(cursor.Page) {
+				return Result{}, problem(400, "invalid_cursor", "Invalid agent directory cursor.")
+			}
+			tailID, tailSeen = cursor.Page, cursor.After
+		}
+	}
+	rows, err := s.hotRows(ctx, tx, where, args, ids, offset, tailID, tailSeen, need, c.Query != "", now)
+	if err != nil {
+		return Result{}, err
+	}
+	if c.Cursor == "" && c.Query == "" {
+		s.rankMu.Lock()
+		if cur := s.hotAgentsCached; cur != nil && cur.gen == gen && cur.rows == nil {
+			s.hotAgentsCached = &hotAgentsFirst{gen: cur.gen, at: cur.at, ids: cur.ids, rows: rows}
+		}
+		s.rankMu.Unlock()
+	}
+	return s.hotAgentPage(ctx, tx, scope, gen, rows, limit, now)
+}
+
+// hotAgentsRanking is the shared hot ranking, rebuilt and pinned when stale.
+func (s *Store) hotAgentsRanking(ctx context.Context, tx *sql.Tx, public string, now int64) (*hotAgentsFirst, error) {
+	s.rankMu.Lock()
+	cached := s.hotAgentsCached
+	s.rankMu.Unlock()
+	if cached != nil {
+		if age := s.now().Sub(cached.at); age >= 0 && age < HotAgentsTTL {
+			return cached, nil
+		}
+	}
+	ids, err := hotAgentIDs(ctx, tx, public, now)
+	if err != nil {
+		return nil, agentReadError(err)
+	}
+	clock := s.now()
+	s.rankMu.Lock()
+	defer s.rankMu.Unlock()
+	gen := clock.UnixNano()
+	if gen <= s.hotAgentsGen {
+		gen = s.hotAgentsGen + 1
+	}
+	s.hotAgentsGen = gen
+	if s.hotAgentsPinned == nil {
+		s.hotAgentsPinned = map[int64]hotAgentsPin{}
+	}
+	for k, pin := range s.hotAgentsPinned {
+		if age := clock.Sub(pin.at); age < 0 || age >= RankSnapshotTTL {
+			delete(s.hotAgentsPinned, k)
+		}
+	}
+	for len(s.hotAgentsPinned) >= hotAgentsPinMax {
+		oldest := int64(0)
+		for k := range s.hotAgentsPinned {
+			if oldest == 0 || k < oldest {
+				oldest = k
+			}
+		}
+		delete(s.hotAgentsPinned, oldest)
+	}
+	s.hotAgentsPinned[gen] = hotAgentsPin{at: clock, ids: ids}
+	first := &hotAgentsFirst{gen: gen, at: clock, ids: ids}
+	s.hotAgentsCached = first
+	return first, nil
+}
+
+// hotRows reads up to need rows of the hot order from a position: the ranked
+// agents from offset (unless the position is already in the tail), then the
+// tail after (tailSeen, tailID), most recently active first. A searched read
+// takes the ranking a page of fingerprints at a time; an unsearched one reads
+// exactly what it needs unless an agent dropped out.
+func (s *Store) hotRows(ctx context.Context, tx *sql.Tx, where string, args []any, ids []string, offset int, tailID string, tailSeen int64, need int, searched bool, now int64) ([]hotRow, error) {
+	var out []hotRow
+	if tailID == "" {
+		for start := offset; start < len(ids) && len(out) < need; {
+			size := need - len(out)
+			if searched {
+				size = DirectoryPageMax
+			}
+			end := min(len(ids), start+size)
+			chunk := ids[start:end]
+			chunkArgs := append(append([]any{}, args...), anySlice(chunk)...)
+			agents, err := s.agentRows(ctx, tx, agentSelectSQL(where+" AND i.id IN (''"+strings.Repeat(",?", len(chunk))+")"), chunkArgs, now)
+			if err != nil {
+				return nil, err
+			}
+			pos := make(map[string]int, len(chunk))
+			for i, id := range chunk {
+				pos[id] = start + i
+			}
+			sort.Slice(agents, func(i, j int) bool { return pos[agents[i].ID] < pos[agents[j].ID] })
+			for _, agent := range agents {
+				if len(out) < need {
+					out = append(out, hotRow{agent: agent, rank: pos[agent.ID]})
+				}
+			}
+			start = end
+		}
+	}
+	if len(out) < need {
+		tailArgs := append(append([]any{}, args...), anySlice(ids)...)
+		tailArgs = append(tailArgs, tailID, tailSeen, tailSeen, tailID, need-len(out))
+		agents, err := s.agentRows(ctx, tx, "SELECT * FROM ("+agentSelectSQL(where+" AND i.id NOT IN (''"+strings.Repeat(",?", len(ids))+")")+
+			") WHERE (?='' OR seen<? OR (seen=? AND id<?)) ORDER BY seen DESC, id DESC LIMIT ?", tailArgs, now)
+		if err != nil {
+			return nil, err
+		}
+		for _, agent := range agents {
+			out = append(out, hotRow{agent: agent, rank: -1})
+		}
+	}
+	return out, nil
+}
+
+func anySlice(ids []string) []any {
+	out := make([]any, len(ids))
+	for i, id := range ids {
+		out[i] = id
+	}
+	return out
+}
+
+// hotAgentPage is the first limit rows of a hot read (never modified: the
+// page gets copies), with avatars, honors and links, and the cursor of the
+// row after them when there is one.
+func (s *Store) hotAgentPage(ctx context.Context, tx *sql.Tx, scope string, gen int64, rows []hotRow, limit int, now int64) (Result, error) {
+	n := min(len(rows), limit)
+	page := make([]Agent, n)
+	for i := range n {
+		page[i] = rows[i].agent
+	}
+	if err := s.decorateAgents(ctx, tx, page, now); err != nil {
+		return Result{}, err
+	}
+	res := Result{Agents: page, Data: map[string]any{"has_more": len(rows) > limit, "sort": "hot"}}
+	if len(rows) > limit {
+		last := rows[limit-1]
+		cursor := conversationCursor{Version: 1, Domain: "agents.list", Scope: scope, Snapshot: gen}
+		if last.rank >= 0 {
+			cursor.After = int64(last.rank + 1)
+		} else {
+			cursor.Page, cursor.After = last.agent.ID, last.agent.LastSeen
+		}
+		res.NextCursor = s.encodeConversationCursor(cursor)
+	}
+	return res, nil
+}
+
+// dropHotAgents forgets the shared hot ranking; the pinned ones stay for
+// their cursors.
 func (s *Store) dropHotAgents() {
 	s.rankMu.Lock()
 	s.hotAgentsCached = nil

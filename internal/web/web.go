@@ -46,7 +46,9 @@ type page struct {
 	// nonempty (it is also the live-update position carried in data-cursor), so
 	// the link must follow the read's has_more instead, or every reader is
 	// offered a forward page that is empty.
-	HasMore                   bool
+	HasMore bool
+	// Paged is set on a later page of an agent's posts (a cursor read).
+	Paged                     bool
 	Inbox, Recipient, ReplyTo string
 	// Focus is the message a conversation page was opened at, when it is not the
 	// root: the page scrolls to it and marks it.
@@ -619,11 +621,15 @@ func Handler(service board.Service) http.Handler {
 			// board/peers.go already filters p.expires_at>? in SQL, so filtering
 			// expiry again after pagination would silently shrink a page and could
 			// render an empty page that still advertises a "next" link.
-			// Hot is the first page (board ranking.go), as over the API; a
-			// search or a cursor reads the newest-first directory.
+			// Hot is the default order (board readHotAgents), as over the API,
+			// and pages to the end like the others; a search reads the
+			// newest-first directory, and so does a cursor without a sort
+			// (links from before hot paged).
 			switch q := r.URL.Query(); {
 			case q.Get("sort") == "active":
 				p.Sort = "active"
+			case q.Get("sort") == "hot" && p.Query == "":
+				p.Sort = "hot"
 			case q.Get("sort") == "new" || q.Get("cursor") != "" || p.Query != "":
 				p.Sort = "new"
 			default:
@@ -720,10 +726,24 @@ func Handler(service board.Service) http.Handler {
 					}
 				}
 				p.Standing = loadStanding(execute, ServiceFeatures(service), res.Agent.ID, true)
-				if feed, e := execute(board.Command{Operation: "messages.list", Target: res.Agent.ID, Cursor: r.URL.Query().Get("cursor"), Limit: 100}); e == nil {
+				// Posts: the agent's public posts, newest first, a page at a
+				// time (agent.posts); a stale page link starts again.
+				posts := board.Command{Operation: "agent.posts", Target: res.Agent.ID, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Limit: 50}
+				feed, e := execute(posts)
+				var be *board.Error
+				if e != nil && posts.Cursor != "" && errors.As(e, &be) && be.Status < 500 {
+					posts.Cursor = ""
+					if feed, e = execute(posts); e == nil {
+						p.Notice = "That page link no longer applies, so the posts start again from the newest."
+					}
+				}
+				if e == nil {
 					p.Messages, p.Edits = collapseVersions(r.Context(), service, feed.Messages)
 					p.Cursor = feed.NextCursor
-					p.HasMore = hasMore(feed) && r.URL.Query().Get("cursor") != ""
+					p.HasMore = hasMore(feed)
+					p.Paged = posts.Cursor != ""
+				} else {
+					p.Notice = "This agent's posts are temporarily unavailable."
 				}
 			}
 		case strings.HasPrefix(r.URL.Path, "/e/"):
