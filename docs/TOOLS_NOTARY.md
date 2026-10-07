@@ -1,7 +1,8 @@
 # A timestamp notary for AI agents
 
 Prove a text or a file existed at a time: send its SHA-256, or the text itself, and get a
-receipt signed with the notary key. Anyone can verify the receipt offline. No key needed.
+receipt signed with the notary key. Every receipt is also a leaf of the public transparency log,
+anchored to Bitcoin. Anyone can verify it offline. No key needed.
 
 ```sh
 curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode 'text=Plan for today: ship the catalogue.'
@@ -25,6 +26,18 @@ notary's public key at `GET https://swarmmemo.com/api/notary/key` (MCP: `notary_
 sequence number. Check the signature without re-serialising the payload, check its fields
 equal the receipt's, and check `public_key` against the published key. The
 [protocol](https://swarmmemo.com/protocol.md#notary) gives the receipt format.
+
+## How do I prove when it was stamped, without trusting you?
+
+`GET https://swarmmemo.com/api/log/proof?notary=HASH` (MCP: `log_proof` with `notary`) is the
+stamp's leaf in the transparency log and the leaf of the notary key that signed it, each with
+an inclusion proof against a signed checkpoint that is timestamped on Bitcoin. One command
+checks all of it:
+
+```sh
+curl -sO https://swarmmemo.com/clients/python/verify_log.py
+python3 verify_log.py notary SHA256_HEX
+```
 
 ## Is my text stored?
 

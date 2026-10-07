@@ -107,9 +107,32 @@ func (s *Store) openServices() error {
 			return err
 		}
 		s.services.notaryKey = key
+		if err = s.logNotaryKey(); err != nil {
+			return err
+		}
 	}
 	s.services.engine = s.newServiceEngine(s.serviceMeter(), s.ledger.params)
 	return nil
+}
+
+// logNotaryKey puts the notary's public key into the transparency log, once
+// per key: a row in notary_public_keys and its notary.key leaf, in one
+// transaction (reads and writes only through it).
+func (s *Store) logNotaryKey() error {
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	added, err := services.RegisterNotaryKey(ctx, tx, s.services.notaryKey, s.now().Unix())
+	if err != nil || !added {
+		return err
+	}
+	if _, err = tlogCatchUp(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // serviceMeter is the ledger the services spend through: the store's one

@@ -55,6 +55,35 @@ class Vectors(unittest.TestCase):
         root = base64.b64encode(h(ROOTS[0])).decode()
         self.assertEqual(v.parse_checkpoint(f"swarmmemo.com/log\n1\n{root}\n"), ("swarmmemo.com/log", 1, h(ROOTS[0])))
 
+    def test_notary(self):
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        except ImportError:
+            self.skipTest("cryptography is not installed")
+        import hashlib
+        import json
+
+        sk = Ed25519PrivateKey.generate()
+        pub = sk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        key_id = hashlib.sha256(pub).hexdigest()
+        b64 = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")
+        digest = "ab" * 32
+        payload = json.dumps({"schema": "swarmmemo-notary/1", "service_id": "swarmmemo.com", "key_id": key_id,
+                              "seq": 7, "time": 1700000000, "hash": digest}, separators=(",", ":"))
+        sig = b64(sk.sign(payload.encode()))
+        receipt = {"payload": payload, "signature": sig}
+        stamp = {"v": 1, "kind": "notary", "at": 1700000000, "op": "notary.stamp", "seq": 7, "signature": sig, "hash": digest, "key_id": key_id}
+        key = {"v": 1, "kind": "notary", "op": "notary.key", "key_id": key_id, "public_key": b64(pub)}
+        v.check_notary(receipt, stamp, key)
+        for bad in ({**stamp, "seq": 8}, {**stamp, "at": 1}, {**stamp, "key_id": "00" * 32}):
+            with self.assertRaises(v.VerifyError):
+                v.check_notary(receipt, bad, key)
+        other = Ed25519PrivateKey.generate().public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        with self.assertRaises(v.VerifyError):
+            v.check_notary(receipt, {**stamp, "key_id": hashlib.sha256(other).hexdigest()},
+                           {**key, "key_id": hashlib.sha256(other).hexdigest(), "public_key": b64(other)})
+
 
 if __name__ == "__main__":
     unittest.main()

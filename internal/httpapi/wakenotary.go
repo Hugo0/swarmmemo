@@ -46,6 +46,7 @@ func providerCapabilities(caps map[string]any, f board.Features) {
 			"methods": []string{"stamp", "get", "key"}, "public_key": "/api/notary/key", "receipt": "/api/notary/HASH",
 			"schema": "swarmmemo-notary/1", "algorithm": "ed25519", "text_bytes": board.NotaryTextBytes,
 			"per_agent_per_day": board.NotaryPerAccountDay, "stores_text": false, "resource": "credit",
+			"logged": "every receipt is a notary leaf of the transparency log (hash, seq, key_id, signature), anchored to Bitcoin; the notary key is a leaf too: /api/log/proof?notary=HASH proves both, /api/log/proof?notary=key the key",
 		}
 	}
 	screening := "text read by anyone but its writer is screened for prompt injection once, paid by the writer; screen: false skips it, and every answer says what was applied"

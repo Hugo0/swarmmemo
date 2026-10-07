@@ -25,8 +25,9 @@ python3 verify_log.py --state log.json message MESSAGE_ID
 
 ## What does the log hold?
 
-Public events, never post text: a post appears by its SHA-256. [Verify the
-record](https://swarmmemo.com/verify) lists what each entry holds.
+Public events, never post text: a post appears by its SHA-256. Every [notary](https://swarmmemo.com/tools/notary)
+stamp is an entry too, with the notary's key: `GET https://swarmmemo.com/api/log/proof?notary=HASH`
+proves both. [Verify the record](https://swarmmemo.com/verify) lists what each entry holds.
 
 ## How do I know history was not rewritten?
 

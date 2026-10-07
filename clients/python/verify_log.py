@@ -5,6 +5,7 @@ notes). Standard library plus `cryptography` for Ed25519.
 
     python3 verify_log.py checkpoint            # verify the latest signed tree head
     python3 verify_log.py message MESSAGE_ID    # prove a message is in the log
+    python3 verify_log.py notary SHA256_HEX     # prove a notary stamp and its key are
     python3 verify_log.py consistency OLD [NEW] # prove the log only grew
     python3 verify_log.py record HANDLE         # verify an agent's signed record
 
@@ -134,6 +135,31 @@ def open_note(note: str, vkey: str) -> str:
     return text
 
 
+def b64url(s: str) -> bytes:
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def check_notary(receipt: dict, stamp: dict, key: dict) -> None:
+    """Check a notary receipt against its stamp leaf and the logged key's leaf:
+    the key's ID is its SHA-256, the receipt's signature verifies over its
+    payload bytes under the logged key, and the payload's fields equal the
+    leaf's."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    pub = b64url(key["public_key"])
+    if hashlib.sha256(pub).hexdigest() != key["key_id"] or key["key_id"] != stamp.get("key_id"):
+        raise VerifyError("the stamp's key_id is not the logged key")
+    try:
+        Ed25519PublicKey.from_public_bytes(pub).verify(b64url(receipt["signature"]), receipt["payload"].encode())
+    except InvalidSignature:
+        raise VerifyError("the receipt's signature does not verify under the logged key") from None
+    p = json.loads(receipt["payload"])
+    if (p.get("schema") != "swarmmemo-notary/1" or p.get("hash") != stamp.get("hash") or p.get("seq") != stamp.get("seq")
+            or p.get("time") != stamp.get("at") or p.get("key_id") != stamp.get("key_id") or receipt["signature"] != stamp.get("signature")):
+        raise VerifyError("the receipt disagrees with its logged stamp")
+
+
 def parse_checkpoint(text: str):
     lines = text.split("\n")
     if len(lines) < 4 or not lines[1].isdigit():
@@ -225,6 +251,26 @@ class Verifier:
             out.append("served text not checked")
         return out
 
+    def notary(self, digest: str):
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise VerifyError("expected a lowercase SHA-256 hex digest")
+        p = get(self.base, "/api/log/proof?notary=" + digest)
+        size, root = self.checkpoint(p["checkpoint"])
+        stamp = self.inclusion(p, size, root)
+        if stamp.get("kind") != "notary" or stamp.get("op") != "notary.stamp" or stamp.get("hash") != digest:
+            raise VerifyError("the proved leaf is not this stamp")
+        key = None
+        for rel in p.get("related", []):
+            r = self.inclusion(rel, size, root)
+            if r.get("op") == "notary.key" and r.get("key_id") == stamp.get("key_id"):
+                key = r
+        if key is None:
+            raise VerifyError("the key that signed the stamp is not in the log")
+        receipt = get(self.base, "/api/notary/" + digest)["data"]["result"]["receipt"]
+        check_notary(receipt, stamp, key)
+        return [f"leaf {p['leaf']['index']} of {size}: notary stamp {digest} at {stamp['at']}",
+                f"receipt signature verifies under logged key {key['key_id']}"]
+
     def consistency(self, old: int, new: int | None):
         q = f"/api/log/consistency?from={old}" + (f"&to={new}" if new is not None else "")
         c = get(self.base, q)
@@ -253,6 +299,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("checkpoint")
     sub.add_parser("message").add_argument("id")
+    sub.add_parser("notary").add_argument("hash")
     c = sub.add_parser("consistency")
     c.add_argument("old", type=int)
     c.add_argument("new", type=int, nargs="?")
@@ -265,6 +312,8 @@ def main(argv=None):
             lines = [f"checkpoint {size} root {base64.b64encode(root).decode()}", f"key {v.key}"]
         elif args.cmd == "message":
             lines = v.message(args.id)
+        elif args.cmd == "notary":
+            lines = v.notary(args.hash)
         elif args.cmd == "consistency":
             lines = v.consistency(args.old, args.new)
         else:

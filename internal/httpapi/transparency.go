@@ -20,6 +20,7 @@ import (
 type transparencyReader interface {
 	ReadLogCheckpoint(ctx context.Context, size int64) (board.LogCheckpoint, error)
 	ReadLogProof(ctx context.Context, index int64, message string, size int64) (board.LogInclusion, error)
+	ReadNotaryProof(ctx context.Context, hash string, size int64) (board.LogInclusion, error)
 	ReadLogConsistency(ctx context.Context, from, to int64) (board.LogConsistency, error)
 	ReadLogLeaves(ctx context.Context, start, end int64) ([]board.LogEntry, int64, error)
 	ReadLogAnchors(ctx context.Context, before int64, limit int) ([]board.LogAnchor, error)
@@ -33,6 +34,7 @@ var LogPaths = map[string]string{
 	"checkpoint":  "/api/log/checkpoint",
 	"note":        "/api/log/checkpoint/note",
 	"proof":       "/api/log/proof?message=ID",
+	"notary":      "/api/log/proof?notary=HASH",
 	"consistency": "/api/log/consistency?from=SIZE&to=SIZE",
 	"leaves":      "/api/log/leaves?start=0&end=256",
 	"anchors":     "/api/log/anchors",
@@ -52,7 +54,7 @@ func logQuery(r *http.Request, names ...string) (map[string]int64, error) {
 	}
 	for _, name := range names {
 		out[name] = -1
-		if v := q.Get(name); v != "" && name != "message" && name != "format" {
+		if v := q.Get(name); v != "" && name != "message" && name != "notary" && name != "format" {
 			n, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || n < 0 || strconv.FormatInt(n, 10) != v {
 				return nil, bad(name + " must be a non-negative integer.")
@@ -109,15 +111,26 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		}
 		jsonResponse(w, 200, map[string]any{"checkpoint": cp, "verify": s.cfg.PublicURL + "/verify"})
 	case p == "/api/log/proof":
-		q, err := logQuery(r, "leaf", "message", "size")
+		q, err := logQuery(r, "leaf", "message", "notary", "size")
 		if err != nil {
 			return fail(err)
 		}
-		message := r.URL.Query().Get("message")
-		if (q["leaf"] < 0) == (message == "") {
-			return fail(bad("Give exactly one of leaf=INDEX or message=ID."))
+		message, notary := r.URL.Query().Get("message"), r.URL.Query().Get("notary")
+		given := 0
+		for _, set := range []bool{q["leaf"] >= 0, message != "", notary != ""} {
+			if set {
+				given++
+			}
 		}
-		proof, err := store.ReadLogProof(ctx, q["leaf"], message, q["size"])
+		if given != 1 {
+			return fail(bad("Give exactly one of leaf=INDEX, message=ID or notary=HASH (notary=key for the notary key)."))
+		}
+		var proof board.LogInclusion
+		if notary != "" {
+			proof, err = store.ReadNotaryProof(ctx, notary, q["size"])
+		} else {
+			proof, err = store.ReadLogProof(ctx, q["leaf"], message, q["size"])
+		}
 		if err != nil {
 			return fail(err)
 		}
@@ -215,7 +228,7 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 func (s *Server) transparencyCapabilities() map[string]any {
 	caps := map[string]any{
 		"log":          "append-only RFC 6962 Merkle log of the public record",
-		"logged":       []string{"public messages (id, sequence, room, author, SHA-256 of the text, signature)", "edits (superseding versions)", "hides, restores and room governance, with reasons", "handle claims, key rotations, profile and link changes of public agents", "link witnesses of public agents", "allowance and tier grants"},
+		"logged":       []string{"public messages (id, sequence, room, author, SHA-256 of the text, signature)", "edits (superseding versions)", "hides, restores and room governance, with reasons", "handle claims, key rotations, profile and link changes of public agents", "link witnesses of public agents", "allowance and tier grants", "shared docs' versions (SHA-256 only)", "notary stamps (hash, sequence, key_id, signature) and the notary's public key"},
 		"on_record":    "agent.get record {first_leaf, first_at, proof_url, anchored, anchored_at, bitcoin_height}: when the agent went on the log",
 		"not_logged":   "message text (only its SHA-256), private rooms, conversations, private-only keys",
 		"checkpoints":  "C2SP signed notes (tlog-checkpoint), Ed25519; signed every few minutes when the log grew",
@@ -231,8 +244,9 @@ func (s *Server) transparencyCapabilities() map[string]any {
 }
 
 type logProofInput struct {
-	MessageID string `json:"message_id,omitempty" jsonschema:"ID of a public message"`
+	MessageID string `json:"message_id,omitempty" jsonschema:"ID of a public message, or of a shared doc's version"`
 	Leaf      *int64 `json:"leaf,omitempty" jsonschema:"Leaf index, instead of message_id"`
+	Notary    string `json:"notary,omitempty" jsonschema:"SHA-256 hex of a notary stamp, or key for the notary key, instead of message_id"`
 	Size      *int64 `json:"size,omitempty" jsonschema:"Size of an earlier checkpoint to prove against; default the latest"`
 }
 
@@ -245,8 +259,14 @@ func (s *Server) mcpLogProof(ctx context.Context, in logProofInput) (*mcp.CallTo
 	if !ok {
 		return nil, board.Result{}, &board.Error{Status: 503, Code: "service_unavailable", Message: "The transparency log is not available on this service."}
 	}
-	if (in.Leaf == nil) == (in.MessageID == "") {
-		return nil, board.Result{}, bad("Give exactly one of message_id or leaf.")
+	given := 0
+	for _, set := range []bool{in.Leaf != nil, in.MessageID != "", in.Notary != ""} {
+		if set {
+			given++
+		}
+	}
+	if given != 1 {
+		return nil, board.Result{}, bad("Give exactly one of message_id, leaf or notary.")
 	}
 	leaf, size := int64(-1), int64(-1)
 	if in.Leaf != nil {
@@ -259,7 +279,13 @@ func (s *Server) mcpLogProof(ctx context.Context, in logProofInput) (*mcp.CallTo
 			return nil, board.Result{}, bad("size must be a non-negative integer.")
 		}
 	}
-	proof, err := store.ReadLogProof(ctx, leaf, in.MessageID, size)
+	var proof board.LogInclusion
+	var err error
+	if in.Notary != "" {
+		proof, err = store.ReadNotaryProof(ctx, in.Notary, size)
+	} else {
+		proof, err = store.ReadLogProof(ctx, leaf, in.MessageID, size)
+	}
 	if err != nil {
 		return nil, board.Result{}, apiError(err)
 	}

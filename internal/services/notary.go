@@ -37,7 +37,11 @@ var notaryHashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // verify a receipt offline with the published public key, and read it back by
 // hash. The first receipt for a hash is the only one: a later stamp of the
 // same hash returns it for the minimum write charge (1 unit). The text itself
-// is never stored, and a receipt does not say who asked for it.
+// is never stored, and a receipt does not say who asked for it. Every receipt
+// is also a notary leaf of the board's transparency log (hash, seq, key_id,
+// signature), and the notary's public key is a leaf too (notary_public_keys,
+// RegisterNotaryKey), so one inclusion proof and its Bitcoin anchor cover a
+// stamp and the key that signed it.
 type notary struct {
 	serviceID string
 	key       ed25519.PrivateKey // Deps.NotaryKey, from the key file; nil refuses every call
@@ -57,13 +61,15 @@ CREATE TABLE IF NOT EXISTS notary_receipts (
  seq INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, time INTEGER NOT NULL, account TEXT NOT NULL,
  key_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL DEFAULT '', signature TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS notary_receipts_account ON notary_receipts(account,time);
+CREATE TABLE IF NOT EXISTS notary_public_keys (
+ seq INTEGER PRIMARY KEY AUTOINCREMENT, key_id TEXT NOT NULL UNIQUE, public_key TEXT NOT NULL, created_at INTEGER NOT NULL);
 `
 }
 
 func (*notary) Describe() Descriptor {
 	return Descriptor{
 		ID:      "notary",
-		Summary: "Signed timestamps: submit a SHA-256 hash, or up to " + SizeText(NotaryTextBytes) + " of text to hash, and get a receipt signed with the notary key that anyone can verify offline and read back by hash. The first receipt for a hash stands, and stamping it again returns it for 1 credit; the text is never stored.",
+		Summary: "Signed timestamps: submit a SHA-256 hash, or up to " + SizeText(NotaryTextBytes) + " of text to hash, and get a receipt signed with the notary key that anyone can verify offline and read back by hash. Every receipt is a leaf of the transparency log, anchored to Bitcoin, with the notary key logged beside it. The first receipt for a hash stands, and stamping it again returns it for 1 credit; the text is never stored.",
 		Title:   "Notary", Topic: "Notary",
 		Line: "Prove a text or a hash existed at a time: a timestamp signed with the notary key that anyone can verify offline.",
 		Limits: []Limit{
@@ -81,9 +87,9 @@ func (*notary) Describe() Descriptor {
 				// Per network as well as for every network together, so one
 				// network cannot hold the shared windows (security review 1.21, M2).
 				AnonymousRate: AnonRate{CallerPerMinute: 10, CallerPerDay: 200, AllPerMinute: 120, AllPerDay: 20000}},
-			{Name: "get", ArgsMax: 256, Line: "Read the receipt for a hash; also GET /api/notary/HASH.",
+			{Name: "get", ArgsMax: 256, Line: "Read the receipt for a hash; also GET /api/notary/HASH. Its log proof: GET /api/log/proof?notary=HASH.",
 				Args: []Arg{{"hash", "string", true, "a lowercase SHA-256 hex digest"}}, Example: json.RawMessage(`{"hash":"SHA256_HEX"}`)},
-			{Name: "key", ArgsMax: 64, Line: "The notary's public key; also GET /api/notary/key."},
+			{Name: "key", ArgsMax: 64, Line: "The notary's public key; also GET /api/notary/key. Its log proof: GET /api/log/proof?notary=key."},
 		},
 	}
 }
@@ -265,7 +271,7 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	existing, err := readReceipt(ctx, tx, hash, key)
 	switch {
 	case err == nil:
-		body, _ := json.Marshal(map[string]any{"receipt": existing, "duplicate": true})
+		body, _ := json.Marshal(map[string]any{"receipt": existing, "duplicate": true, "log": notaryLog(hash)})
 		return Result{Body: body, Used: 0, Public: public}, nil
 	case !errors.Is(err, errNoReceipt):
 		return Result{}, err
@@ -282,7 +288,7 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	body, _ := json.Marshal(map[string]any{"receipt": r, "duplicate": false})
+	body, _ := json.Marshal(map[string]any{"receipt": r, "duplicate": false, "log": notaryLog(hash)})
 	return Result{Body: body, Used: c.Price.For(0), Public: public}, nil
 }
 
@@ -322,6 +328,43 @@ func StampHash(ctx context.Context, tx *sql.Tx, key ed25519.PrivateKey, serviceI
 }
 
 var errNoReceipt = errors.New("notary: no receipt")
+
+// NotaryKeyLogProof is the log proof of the notary key's leaf.
+const NotaryKeyLogProof = "/api/log/proof?notary=key"
+
+// notaryLog is where a receipt's transparency-log proof is: its notary leaf,
+// appended when the log next catches up and provable once a checkpoint
+// (signed every few minutes) covers it, with the key's leaf as related.
+func notaryLog(hash string) map[string]string {
+	return map[string]string{"proof": "/api/log/proof?notary=" + hash, "anchors": "/api/log/anchors"}
+}
+
+// RegisterNotaryKey records the notary's public key (never the seed) in
+// notary_public_keys, once per key, within tx: the transparency log's
+// outbox turns the row into a notary.key leaf, so a verifier checks a
+// receipt's key_id against a logged key. It reports whether the key is new.
+func RegisterNotaryKey(ctx context.Context, tx *sql.Tx, key ed25519.PrivateKey, now int64) (bool, error) {
+	if len(key) != ed25519.PrivateKeySize {
+		return false, errors.New("notary: no key to register")
+	}
+	pub := key.Public().(ed25519.PublicKey)
+	res, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO notary_public_keys(key_id,public_key,created_at) VALUES(?,?,?)",
+		keyID(pub), base64.RawURLEncoding.EncodeToString(pub), now)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// NotaryKeyID is the key ID of the notary key: the SHA-256 of its public
+// key; empty without a key.
+func NotaryKeyID(key ed25519.PrivateKey) string {
+	if len(key) != ed25519.PrivateKeySize {
+		return ""
+	}
+	return keyID(key.Public().(ed25519.PublicKey))
+}
 
 // readReceipt is the stored receipt for hash. The public key is the one the
 // key ID names: the notary's (there is one key per board).
@@ -367,9 +410,18 @@ func (n *notary) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(map[string]any{"receipt": r})
+		return json.Marshal(map[string]any{"receipt": r, "log": notaryLog(a.Hash)})
 	case "key":
-		return keyRead(c.Args, n.key, NotarySchema, n.serviceID)
+		raw, err := keyRead(c.Args, n.key, NotarySchema, n.serviceID)
+		if err != nil {
+			return nil, err
+		}
+		var out map[string]any
+		if err = json.Unmarshal(raw, &out); err != nil {
+			return nil, err
+		}
+		out["log"] = map[string]string{"proof": NotaryKeyLogProof}
+		return json.Marshal(out)
 	}
 	return nil, refusal("invalid_service_data")
 }

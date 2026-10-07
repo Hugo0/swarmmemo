@@ -12,7 +12,10 @@ package board
 // audit rows of the identity operations of public accounts and of operator
 // allowance grants, tier_grant_log, and doc_versions (shared docs' versions,
 // private docs too: a leaf holds only ids, the version number and the
-// SHA-256, so a member can prove a doc's history; never a paste's). tlog_cursors keeps, per source, the
+// SHA-256, so a member can prove a doc's history; never a paste's),
+// notary_public_keys (the notary's public key) and notary_receipts (every
+// notary stamp: its hash, sequence, key ID and signature, never who asked),
+// so a stamp's proof is the log's. tlog_cursors keeps, per source, the
 // last row turned into a leaf. tlogCatchUp appends every newer row, merged by
 // (created_at, source rank, seq), inside the caller's transaction: every
 // write path calls it before committing, and the background job catches up
@@ -43,6 +46,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/ots"
+	"swarmmemo/internal/services"
 	"swarmmemo/internal/tlog"
 )
 
@@ -103,7 +107,21 @@ type logLeaf struct {
 	Nonce     string `json:"nonce,omitempty"`
 	Verdict   string `json:"verdict,omitempty"`
 	Signature string `json:"signature,omitempty"`
+	// A notary leaf: notary.stamp is the stamped hash, the receipt's key ID
+	// and signature (seq is the receipt's); notary.key is the notary's key
+	// ID and public key (base64url). Last, so earlier leaves keep their
+	// bytes.
+	Hash      string `json:"hash,omitempty"`
+	KeyID     string `json:"key_id,omitempty"`
+	PublicKey string `json:"public_key,omitempty"`
 }
+
+// Notary leaves' refs: a stamp by its hash, the key by its key ID (both are
+// 64 hex digits, so each has its own prefix).
+const (
+	notaryStampRef = "notary:"
+	notaryKeyRef   = "notary-key:"
+)
 
 func (l logLeaf) bytes() []byte {
 	var b bytes.Buffer
@@ -233,6 +251,33 @@ var logSources = []logSource{
 				return p, err
 			}
 			p.leaf, p.subject, p.ref, p.byTime = l, l.Agent, account, true
+			return p, nil
+		}},
+	{"notary_keys", "notary_public_keys", 6, `SELECT seq,key_id,public_key,created_at FROM notary_public_keys WHERE seq>? ORDER BY seq LIMIT ?`,
+		func(rows *sql.Rows) (pendingLeaf, error) {
+			// The notary's public key, so a receipt's key_id can be checked
+			// against a logged key. It ranks before the stamps of its second.
+			var p pendingLeaf
+			l := logLeaf{Kind: "notary", Op: "notary.key"}
+			if err := rows.Scan(&p.seq, &l.KeyID, &l.PublicKey, &p.at); err != nil {
+				return p, err
+			}
+			p.leaf, p.ref = l, notaryKeyRef+l.KeyID
+			return p, nil
+		}},
+	{"notary", "notary_receipts", 7, `SELECT seq,hash,time,key_id,signature FROM notary_receipts WHERE seq>? ORDER BY seq LIMIT ?`,
+		func(rows *sql.Rows) (pendingLeaf, error) {
+			// A notary stamp: the hash, the receipt's sequence, key ID and
+			// signature; never the account that asked. A new source starts at
+			// cursor zero, so its first run appends every earlier receipt
+			// (the one-time backfill), each with its original time.
+			var p pendingLeaf
+			l := logLeaf{Kind: "notary", Op: "notary.stamp"}
+			if err := rows.Scan(&p.seq, &l.Hash, &p.at, &l.KeyID, &l.Signature); err != nil {
+				return p, err
+			}
+			l.Seq = p.seq
+			p.leaf, p.ref = l, notaryStampRef+l.Hash
 			return p, nil
 		}},
 }
@@ -558,32 +603,75 @@ func (s *Store) ReadLogProof(ctx context.Context, index int64, message string, s
 	if err != nil {
 		return LogInclusion{}, err
 	}
-	var related []int64
-	if message != "" {
-		rows, err := s.db.QueryContext(ctx, "SELECT idx FROM tlog_leaves WHERE ref=? AND ref<>'' AND idx<? ORDER BY idx LIMIT 16", message, cp.Size)
-		if err != nil {
-			return LogInclusion{}, err
-		}
-		var found []int64
-		for rows.Next() {
-			var i int64
-			if err = rows.Scan(&i); err != nil {
-				rows.Close()
-				return LogInclusion{}, err
-			}
-			found = append(found, i)
-		}
-		if err = rows.Close(); err != nil {
-			return LogInclusion{}, err
-		}
-		if len(found) == 0 {
-			return LogInclusion{}, problem(404, "not_logged", "That message is not in the latest checkpoint: it is private, unknown, or newer than the checkpoint (signed every few minutes).")
-		}
-		index, related = found[0], found[1:]
+	if message == "" {
+		return s.inclusion(ctx, index, cp)
 	}
-	out, err := s.inclusion(ctx, index, cp)
+	return s.refProof(ctx, message, cp, nil, problem(404, "not_logged", "That message is not in the latest checkpoint: it is private, unknown, or newer than the checkpoint (signed every few minutes)."))
+}
+
+// notaryProofRE is a stamped hash, or "key" for the notary key.
+var notaryProofRE = regexp.MustCompile(`^(?:[0-9a-f]{64}|key)$`)
+
+// ReadNotaryProof is the inclusion proof of a notary stamp's leaf (by its
+// hash), with the leaf of the key that signed it as related; or, when hash
+// is "key", of the notary key's leaf. Against the checkpoint of size
+// (latest when < 0).
+func (s *Store) ReadNotaryProof(ctx context.Context, hash string, size int64) (LogInclusion, error) {
+	if !notaryProofRE.MatchString(hash) {
+		return LogInclusion{}, problem(400, "invalid_request", "notary must be a lowercase SHA-256 hex digest, or key.")
+	}
+	cp, err := s.checkpointFor(ctx, size)
+	if err != nil {
+		return LogInclusion{}, err
+	}
+	if hash == "key" {
+		// The running notary's key; without one, the last key logged.
+		ref := ""
+		if id := services.NotaryKeyID(s.services.notaryKey); id != "" {
+			ref = notaryKeyRef + id
+		} else if err = s.db.QueryRowContext(ctx, "SELECT ref FROM tlog_leaves WHERE kind='notary' AND substr(ref,1,?)=? AND idx<? ORDER BY idx DESC LIMIT 1",
+			len(notaryKeyRef), notaryKeyRef, cp.Size).Scan(&ref); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return LogInclusion{}, err
+		}
+		return s.refProof(ctx, ref, cp, nil, problem(404, "not_logged", "The notary key is not in the latest checkpoint: the notary is off here, or its key is newer than the checkpoint (signed every few minutes)."))
+	}
+	keyLeaf := func(data string) string {
+		var l logLeaf
+		if json.Unmarshal([]byte(data), &l) != nil || l.KeyID == "" {
+			return ""
+		}
+		return notaryKeyRef + l.KeyID
+	}
+	return s.refProof(ctx, notaryStampRef+hash, cp, keyLeaf, problem(404, "not_logged", "No notary receipt for that hash is in the latest checkpoint: it is unknown, or newer than the checkpoint (signed every few minutes)."))
+}
+
+// refProof proves the first leaf with ref against cp, with the later leaves
+// of the same ref as related, then the leaves of also(first leaf's data)'s
+// ref when also is set.
+func (s *Store) refProof(ctx context.Context, ref string, cp LogCheckpoint, also func(string) string, notFound error) (LogInclusion, error) {
+	if ref == "" {
+		return LogInclusion{}, notFound
+	}
+	found, err := s.refLeaves(ctx, ref, cp.Size)
+	if err != nil {
+		return LogInclusion{}, err
+	}
+	if len(found) == 0 {
+		return LogInclusion{}, notFound
+	}
+	out, err := s.inclusion(ctx, found[0], cp)
 	if err != nil {
 		return out, err
+	}
+	related := found[1:]
+	if also != nil {
+		if other := also(out.Leaf.Data); other != "" {
+			more, err := s.refLeaves(ctx, other, cp.Size)
+			if err != nil {
+				return out, err
+			}
+			related = append(related, more...)
+		}
 	}
 	for _, i := range related {
 		r, err := s.inclusion(ctx, i, cp)
@@ -594,6 +682,25 @@ func (s *Store) ReadLogProof(ctx context.Context, index int64, message string, s
 		out.Related = append(out.Related, r)
 	}
 	return out, nil
+}
+
+// refLeaves are the indexes of up to 16 leaves with ref below size, oldest
+// first.
+func (s *Store) refLeaves(ctx context.Context, ref string, size int64) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT idx FROM tlog_leaves WHERE ref=? AND ref<>'' AND idx<? ORDER BY idx LIMIT 16", ref, size)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var found []int64
+	for rows.Next() {
+		var i int64
+		if err = rows.Scan(&i); err != nil {
+			return nil, err
+		}
+		found = append(found, i)
+	}
+	return found, rows.Err()
 }
 
 func (s *Store) inclusion(ctx context.Context, index int64, cp LogCheckpoint) (LogInclusion, error) {
