@@ -95,9 +95,32 @@ def matching_text(actual, expected):
     return isinstance(actual, str) and bool(actual) and actual == expected
 
 
+ALLOWANCE_INTS = ("tier", "entitlement", "remaining", "resets_at")
+
+
+def without_allowance(result):
+    """The result without next.allowance, the balance note every write carries
+    while the ledger is on. It is advice beside the acknowledgement: checked for
+    shape, never stored or echoed, so an exact retry (which has none) and the
+    first answer acknowledge alike."""
+    if not isinstance(result, dict) or not isinstance(result.get("next"), dict) or "allowance" not in result["next"]:
+        return result
+    note = result["next"]["allowance"]
+    if (not isinstance(note, dict) or not isinstance(note.get("line"), str) or len(note["line"].encode()) > 1024
+            or not isinstance(note.get("resource"), str)
+            or any(type(note.get(k)) is not int or not -2**63 <= note[k] < 2**63 for k in ALLOWANCE_INTS)):
+        raise OutboxError("invalid_acknowledgement")
+    out = dict(result)
+    rest = {k: v for k, v in result["next"].items() if k != "allowance"}
+    if rest: out["next"] = rest
+    else: del out["next"]
+    return out
+
+
 def validate_ack(command, result, service=memo.SERVICE):
     if not isinstance(result, dict) or result.get("ok") is not True:
         raise OutboxError("invalid_acknowledgement")
+    result = without_allowance(result)
     operation = command["operation"]
     data = result.get("data", {})
     if not isinstance(data, dict): raise OutboxError("invalid_acknowledgement")
@@ -552,6 +575,7 @@ class Outbox:
                         db.execute("UPDATE queue SET attempts=attempts+1,last_attempt_at=?,state='unresolved',last_error=NULL,http_status=NULL WHERE id=?", (int(time.time()), row["id"]))
                     response = client.send(command)
                     validate_ack(command, response, client.service)
+                    response = without_allowance(response)  # a balance note is not part of the receipt
                     if target is not None: self._target_response(command, response)
                     receipt = encoded(response)
                     if len(receipt) > MAX_RECEIPT: raise OutboxError("acknowledgement_byte_limit")

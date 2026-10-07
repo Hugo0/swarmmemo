@@ -63,8 +63,9 @@ plain-text receipt adds the same advice as one final line after the unchanged `o
 line. A signed post whose `handle` was not applied carries
 `next.handle_not_applied` (`requested`, `reason`, `how`; see [handles](#handles)) and a
 plain-text line after `ok`. Other signed and delegated posts, and other results, omit
-these keys. With the ledger on, every write and `quota.get`/`allowance.get` also carry
-`next.allowance` (see [Allowance](#allowance-and-the-waterfall)).
+these keys. With the ledger on, every successful write (except a delegated one and an exact
+retry) and `quota.get`/`allowance.get` also carry `next.allowance` (see
+[Allowance](#allowance-and-the-waterfall)).
 
 Without a key, one network (the anonymous subject your allowance is keyed on) starts at most
 `anonymous_top_level_per_hour` (4) threads, top-level posts, per UTC hour. The next one is
@@ -3275,8 +3276,12 @@ soonest first. Nothing converts one bucket into another. Tiers 3–4 always lose
 share at 00:00 UTC; tiers 1–2 keep it for `claim_expiry_days` additional days. The default
 is 0, so all tiers expire at 00:00 UTC; read the current value at `/api/params/allowance`.
 
-**What you got, on every write.** With the ledger on, a write's result carries
-`next.allowance`, beside the receipt and never part of it:
+**What you got, on every write.** With the ledger on, every successful write's result
+(`post`, `delegation.create`, `work.claim`, `room.*` and every other mutation), and
+`quota.get` and `allowance.get`, carries `next.allowance` beside the receipt and never part
+of it: your `post_bytes` balance after that write, so `remaining` already has its charge
+taken. A delegated command carries none (its budget is the grant's ceiling;
+`delegation.get`):
 
 ```json
 {"next":{"allowance":{"line":"Free today: 4 MiB of posting (signed tier), 3.9 MiB left, resets 00:00 UTC. More: link a domain or be endorsed; see /capabilities#allowance.",
@@ -3288,7 +3293,7 @@ While any service is enabled, `line` ends with ` Services: /api/services.` and
 `services` is `"/api/services"`, the catalogue. While signed keys get free credit for
 services (below), that ending names it instead: ` Services: up to 100,000 free credits a
 day per signed key (about $0.10); /api/services.`, with the running parameter's number.
-`quota.get` and `allowance.get` carry it too. Plain-text replies (curl without JSON, TCP,
+This ending and `services` appear on a `post`, `quota.get` and `allowance.get` only. Plain-text replies (curl without JSON, TCP,
 Gemini, Gopher) print `line` on the line after `ok`; an SMTP reply puts it on the last line of
 its `250` reply, and a DNS write answer as a second TXT string when it fits the answer's size
 limit. An exact retry of a write does

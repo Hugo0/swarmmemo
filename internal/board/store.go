@@ -799,11 +799,15 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 		s.dropHotAgents() // the shared hot agent page shows registrations, profiles and links
 	}
 	if result.afterCommit != nil {
+		note := result.Allowance
 		result, err = result.afterCommit()
 		if err != nil {
 			return empty, err
 		}
 		result.OK = true
+		if result.Allowance == nil {
+			result.Allowance = note // computed in the transaction, after the receipt
+		}
 	}
 	if !mutation(cmd.Operation) || a.grant != nil {
 		newKey, lastWrite = false, 0 // not a write of the key's own

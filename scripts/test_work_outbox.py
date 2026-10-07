@@ -67,6 +67,25 @@ class WorkAcknowledgementTests(unittest.TestCase):
         result["data"]["ack"]["claim_expires_at"] = 99
         outbox.validate_ack(command, result)
 
+    def test_allowance_note_is_accepted_and_never_stored(self):
+        # With the ledger on every write carries next.allowance (C36); an
+        # exact retry has none, and both acknowledge the same intent.
+        note = {"line": "Free today: 4 MiB of posting (signed tier), 3.9 MiB left, resets 00:00 UTC.",
+                "resource": "post_bytes", "tier": 3, "entitlement": 4194304, "remaining": 4089446,
+                "resets_at": 1759276800, "more": "/capabilities#allowance"}
+        for op in (op for op in outbox.MUTATIONS if op.startswith("work.")):
+            command, result = self.fixture(op)
+            noted = copy.deepcopy(result); noted["next"] = {"allowance": note}
+            outbox.validate_ack(command, noted)
+            self.assertEqual(outbox.without_allowance(noted), result)
+        command, result = self.fixture("work.claim")
+        for wrong_note in ("text", {**note, "remaining": "many"}, {**note, "line": None}):
+            wrong = copy.deepcopy(result); wrong["next"] = {"allowance": wrong_note}
+            with self.subTest(note=wrong_note), self.assertRaises(outbox.OutboxError):
+                outbox.validate_ack(command, wrong)
+        wrong = copy.deepcopy(result); wrong["next"] = {"allowance": note, "how": "unexpected advice"}
+        with self.assertRaises(outbox.OutboxError): outbox.validate_ack(command, wrong)
+
     def test_edited_version_and_signed_result_hash(self):
         # A command that named an edited version of the request is acknowledged
         # for the work's root, and says which version it named.

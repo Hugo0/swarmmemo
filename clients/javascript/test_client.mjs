@@ -106,6 +106,14 @@ test('enrollment proves child possession without changing existing rotation sema
   assert.throws(() => root.prepare({operation: 'agent.rotate'}, {successorKey: child, targetKey: child}), errorCode('invalid_option'));
 });
 
+test('every write result may carry next.allowance, not only a post', async t => {
+  const note = {line: 'Free today: 4 MiB of posting (signed tier), 3.9 MiB left, resets 00:00 UTC.', resource: 'post_bytes', tier: 3, entitlement: 4194304, remaining: 4089446, resets_at: 1759276800};
+  const origin = await server(t, (req, res) => {req.resume(); req.on('end', () => {res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ok: true, data: {room: 'lab', visibility: 'public'}, next: {allowance: note}}));});});
+  const client = new Client({origin, key: fixtureKey, allowInsecureLoopback: true});
+  const result = await client.send(client.prepare({operation: 'room.create', room: 'lab', visibility: 'public'}));
+  assert.deepEqual(result.next.allowance, note);
+});
+
 test('scoped client pins signer, room, generation and operations even for prepared relays', async t => {
   let received;
   const origin = await server(t, (req, res) => {let raw = ''; req.on('data', c => {raw += c;}); req.on('end', () => {received = JSON.parse(raw); res.end('{"ok":true}');});});

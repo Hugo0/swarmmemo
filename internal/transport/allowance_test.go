@@ -28,6 +28,11 @@ func TestTextWiresPrintTheAllowanceLineAfterOk(t *testing.T) {
 	if out := string((lineProtocol{}).Render(Request{Budget: 4096}, res, nil)); !strings.Contains(out, "ok memo1") || !strings.Contains(out, testNote.Line) {
 		t.Fatalf("tcp: %q", out)
 	}
+	// Every write carries the note, not only a post (C36).
+	write := board.Result{OK: true, Data: map[string]any{"room": "notes"}, Allowance: testNote}
+	if out := string((lineProtocol{}).Render(Request{Budget: 4096}, write, nil)); !strings.Contains(out, testNote.Line) {
+		t.Fatalf("tcp write without a receipt: %q", out)
+	}
 }
 
 func TestSMTPReplyCarriesTheAllowanceLine(t *testing.T) {

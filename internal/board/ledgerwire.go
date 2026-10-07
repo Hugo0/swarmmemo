@@ -781,9 +781,15 @@ func (s *Store) onAccountChange(ctx context.Context, tx *sql.Tx, change accountC
 
 // allowanceNote sets res.Allowance, the one-line "free today" note (§11),
 // after the command's receipt is stored, so an exact retry never carries it.
-// It is set with the ledger on, for posts, quota.get and allowance.get.
+// It is set with the ledger on, for every successful mutation and for
+// quota.get and allowance.get: one Balance read in the command's own
+// transaction. A delegated command gets none: its budget is the grant's
+// ceiling (delegation.get), and the issuer's balance is not the worker's
+// to read.
 func (s *Store) allowanceNote(ctx context.Context, tx *sql.Tx, a actor, res *Result, now int64) error {
-	if s.config.Features.Ledger != LedgerOn || (a.operation != "post" && a.operation != "quota.get" && a.operation != "allowance.get") {
+	op := a.operation
+	read := op == "quota.get" || op == "allowance.get"
+	if s.config.Features.Ledger != LedgerOn || a.grant != nil || (!read && !mutation(op)) {
 		return nil
 	}
 	b, err := s.ledger.led.Balance(ctx, tx, subject(a), allowance.PostBytes, now)
@@ -798,8 +804,10 @@ func (s *Store) allowanceNote(ctx context.Context, tx *sql.Tx, a actor, res *Res
 	}
 	// The first-call line also names the service catalogue while any service
 	// runs, so every wire that prints the line points at it, and with it the
-	// free credit a signed key gets (FreeCredit).
-	if len(s.config.Features.Services) > 0 {
+	// free credit a signed key gets (FreeCredit). Only on a post and the two
+	// allowance reads, where a newcomer first looks: on every other write it
+	// would repeat the same pointer and cost a credit read each time.
+	if len(s.config.Features.Services) > 0 && (op == "post" || read) {
 		if offer := s.freeCredit(ctx, tx, now); offer != nil {
 			res.Allowance.Line += " " + offer.note()
 		} else {

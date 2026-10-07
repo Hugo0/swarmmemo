@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "bf3564907e52bb4570d9a1484c2387bb00ccf4730de316210ccd12111d2b0b7a",
+  "allowlist_sha256": "3cbe81feb5067d76437250efb429ad816f9a4404eb368fd41d67c9de3ddea8d5",
   "files": [
     {
       "mode": "0644",
@@ -76,8 +76,8 @@
     {
       "mode": "0644",
       "path": "clients/javascript/test_client.mjs",
-      "sha256": "89089c1f39131397c6e73c9113fa904b0081878313ef0943880d66c6d5634506",
-      "size": 38734
+      "sha256": "bd0a44c62d332a8c6191965d3b5236fb0d1c202743b62396a8149f43a87c4a9f",
+      "size": 39515
     },
     {
       "mode": "0644",
@@ -208,8 +208,8 @@
     {
       "mode": "0644",
       "path": "clients/python/swarmmemo_outbox.py",
-      "sha256": "88c5e9b2628462db0053eef0765e4f7bc84a24ab9d2073a334287168149a348d",
-      "size": 42976
+      "sha256": "df983046e69c1c669f88d01fdb9205418e4b25faf47365c7c6fe8293bf3c77b4",
+      "size": 44177
     },
     {
       "mode": "0644",
@@ -544,8 +544,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "5459ea7da2d4a19ec823b8b57f9a967cbcacc5b9a66156dfb40ff04b598bfffc",
-      "size": 324342
+      "sha256": "8027951de0eef3b2906a1da2831c789234ea1a823b2d30b2b2ca5d930a3013f0",
+      "size": 324744
     },
     {
       "mode": "0644",
@@ -738,6 +738,12 @@
       "path": "internal/board/agentposts.go",
       "sha256": "a857b42844f368b86ccbb5bd6b5026fd76c47c3e65b19b07bca7347f9e42520a",
       "size": 4624
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/allowancenote_test.go",
+      "sha256": "3f206e06830c66e991948d90829a0d391d097d3667b4f47e82a8eaffc99e526b",
+      "size": 3595
     },
     {
       "mode": "0644",
@@ -1210,8 +1216,8 @@
     {
       "mode": "0644",
       "path": "internal/board/ledgerwire.go",
-      "sha256": "d47bdc1c013c1974251fed5f187a803630bf0cc24e461bd593c4f2f25bdf5d2e",
-      "size": 41320
+      "sha256": "1263ad897caec12687cf56b12a55caf36d2a8143ffaa336afe065cca240bc431",
+      "size": 41769
     },
     {
       "mode": "0644",
@@ -1666,8 +1672,8 @@
     {
       "mode": "0644",
       "path": "internal/board/store.go",
-      "sha256": "a859fa46fc692ee5c90796bb10fe984734a7bf40c6096d6692d63b9b1c84513e",
-      "size": 37443
+      "sha256": "cb6a57080fca57f5fa12aa69aec3f96626e8c70935794a02c905beed5baa9ae1",
+      "size": 37582
     },
     {
       "mode": "0644",
@@ -2164,8 +2170,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "19d18c602be19255ad9f3d895b36d95c7f45b7779982f28c0d1aa3585367711d",
-      "size": 104850
+      "sha256": "b559b1c99c501f1c3ff49ebb18ee4797c18bc9ea7b0dc00cacc6aee2a8b1fe03",
+      "size": 104930
     },
     {
       "mode": "0644",
@@ -2392,8 +2398,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_conversations.go",
-      "sha256": "a1d72fbe0e6ee10aa7d04ca605a70a306d58a549d4bf0e115842d24af651e8a3",
-      "size": 42560
+      "sha256": "3e75b0a26635c8f8cf0ce0e08ed2ad1d5387832773b22eb4fa701ae904959b88",
+      "size": 42706
     },
     {
       "mode": "0644",
@@ -2698,8 +2704,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/stats_allowance_test.go",
-      "sha256": "bd9ba0bc276858cf06dcfdd44fbded2976ef6f0e50dbd0272955b076bbe9350a",
-      "size": 20683
+      "sha256": "75e3a2cb0e6138e99c7d2ca2ed65c5d1054a568be606c121ef13e78f136e925c",
+      "size": 22022
     },
     {
       "mode": "0644",
@@ -4090,8 +4096,8 @@
     {
       "mode": "0644",
       "path": "internal/transport/allowance_test.go",
-      "sha256": "aa6716e8b466446b02c7545564203cb9563ffb3cdeff0f8e940dcaa728990976",
-      "size": 3253
+      "sha256": "641213370c8e88d6271cb80794b4c2cb7f5632bf5bc85013d248af9c09e8d116",
+      "size": 3576
     },
     {
       "mode": "0644",
@@ -6256,8 +6262,8 @@
     {
       "mode": "0644",
       "path": "scripts/test_work_outbox.py",
-      "sha256": "bd00835b40c15208c9fa2612620183ebdc71b22bf93656891307b8682dda33b4",
-      "size": 5522
+      "sha256": "23179d94d5a46a08aa2fb7589306e982f3012675c183ff5eabbf3b68fef59e7a",
+      "size": 6889
     },
     {
       "mode": "0644",

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,9 @@ func (s *rfc0012Service) Execute(ctx context.Context, c board.Command, peer stri
 		res, err := s.fakeService.Execute(ctx, c, peer)
 		res.Allowance = s.note
 		return res, err
+	case "room.create", "work.claim":
+		// Every write carries the note with the ledger on (C36).
+		return board.Result{OK: true, Data: map[string]any{"room": c.Room}, Allowance: s.note}, nil
 	}
 	return s.fakeService.Execute(ctx, c, peer)
 }
@@ -359,6 +363,27 @@ func TestFirstWriteCarriesAllowanceLine(t *testing.T) {
 	read := getJSON(t, s, "POST", "/v1/command", `{"operation":"allowance.get"}`)
 	if n, _ := read["next"].(map[string]any); n == nil || n["allowance"] == nil {
 		t.Fatal("allowance.get lacks next.allowance")
+	}
+	// A write other than a post: JSON on /v1/command and /c64/, the line on
+	// the text rendering.
+	write := getJSON(t, s, "POST", "/v1/command", `{"operation":"room.create","room":"notes"}`)
+	if n, _ := write["next"].(map[string]any); n == nil || n["allowance"].(map[string]any)["line"] != svc.note.Line {
+		t.Fatalf("room.create lacks next.allowance: %v", write)
+	}
+	c64 := "https://swarmmemo.com/c64/" + base64.RawURLEncoding.EncodeToString([]byte(`{"operation":"room.create","room":"notes"}`))
+	r := httptest.NewRequest("GET", c64, nil)
+	r.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	var viaC64 map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &viaC64)
+	if n, _ := viaC64["next"].(map[string]any); n == nil || n["allowance"] == nil {
+		t.Fatalf("c64 room.create lacks next.allowance: %d %s", w.Code, w.Body.String())
+	}
+	var plain strings.Builder
+	WriteText(&plain, board.Result{OK: true, Data: map[string]any{"room": "notes"}, Allowance: svc.note})
+	if !strings.Contains(plain.String(), svc.note.Line+"\n") {
+		t.Fatalf("text room.create lacks the line:\n%s", plain.String())
 	}
 	// Without a note (flags off, or an exact retry) nothing is added.
 	svc.note = nil

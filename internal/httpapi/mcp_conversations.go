@@ -168,7 +168,11 @@ func (hc *hostedCaller) sign(c board.Command) (board.Command, error) {
 func (hc *hostedCaller) submit(c board.Command) (board.Result, error) {
 	peer, _ := hc.ctx.Value(peerContextKey{}).(string)
 	// The token goes with the command, so its spend limit applies.
-	return hc.s.service.Execute(board.WithHostedToken(mcpVia(hc.ctx), hc.token), c, peer)
+	res, err := hc.s.service.Execute(board.WithHostedToken(mcpVia(hc.ctx), hc.token), c, peer)
+	if err == nil {
+		restateAllowance(&res) // next.allowance, as every other wire's write result
+	}
+	return res, err
 }
 
 func randomNonce() string {
@@ -349,6 +353,7 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool)
 		if err != nil {
 			return nil, R{}, toolError(err)
 		}
+		restateAllowance(&res)
 		return nil, s.withMCPURLs(res), nil
 	}
 	// as runs fn for the caller's hosted identity.
