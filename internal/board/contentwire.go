@@ -18,6 +18,12 @@ func (s *Store) PasteHide(ctx context.Context, id, reason string) (services.Past
 	return services.HidePaste(ctx, s.db, id, reason, s.now().Unix())
 }
 
+// DocHide is the operator's hide of an abused doc or paste
+// (services.HideDoc).
+func (s *Store) DocHide(ctx context.Context, id, reason string) (services.DocView, error) {
+	return services.HideDoc(ctx, s.db, id, reason, s.now().Unix())
+}
+
 // ContentStatsDays is how many UTC days ContentStats keeps; contentStatsTTL
 // how long one computation serves, since each scans the tables.
 const (
@@ -60,17 +66,19 @@ func (s *Store) ContentStats(ctx context.Context, days int) ([]services.ContentD
 func contentError(code string) error {
 	switch code {
 	case "paste_not_found":
-		return problem(404, "paste_not_found", "No paste with that id is open to you: it is private, expired, deleted, or the id is wrong. Its owner reads it with service.read paste get.")
+		return problem(404, "paste_not_found", "No paste with that id is open to you: it is private, expired, deleted, or the id is wrong. Its owner reads it with docs.read.")
 	case "paste_limit":
 		return problem(409, "paste_limit", fmt.Sprintf("You made %d pastes today, or keep %s of paste text, the most allowed; delete one, or wait for 00:00 UTC.", services.PastesPerDay, services.SizeText(services.PasteBytesMax)))
 	case "doc_not_found":
-		return problem(404, "doc_not_found", "No doc with that id is yours or your group's; docs.list shows yours, and docs.list with group shows a group's.")
+		return problem(404, "doc_not_found", "No doc with that id is open to you: it is private, expired, deleted, not your group's, or the id is wrong. docs.list shows yours, docs.list with group a group's, and docs.list with kind paste your pastes.")
 	case "doc_version_not_found":
 		return problem(404, "doc_version_not_found", "That doc has no such version; docs.history lists its versions.")
 	case "doc_group_not_found":
 		return problem(404, "doc_group_not_found", "No private room or conversation by that name has you as an active member; a doc's group is one you are in.")
+	case "doc_read_only":
+		return problem(409, "doc_read_only", "That id is a paste, and a paste's text never changes: create a doc to keep versions. Nothing was stored or charged.")
 	case "doc_limit":
-		return problem(409, "doc_limit", fmt.Sprintf("Past a docs limit: %d docs per key or group, %d versions per doc, %s of text per key or group in all versions. Versions are kept, so start a new doc or ask the operator.", services.DocsPerOwner, services.DocVersionsMax, services.SizeText(services.DocBytesMax)))
+		return problem(409, "doc_limit", fmt.Sprintf("Past a docs limit: %d docs per key or group, %d versions per doc, %s of text per key or group in all versions. Versions are kept; delete a doc you no longer need, or start a new one.", services.DocsPerOwner, services.DocVersionsMax, services.SizeText(services.DocBytesMax)))
 	}
 	return nil
 }

@@ -383,7 +383,7 @@ func (s *Server) openapi() map[string]any {
 					}},
 					"content": map[string]any{"type": "object", "description": "Paste and shared-doc use that day, today included; present while paste or docs is enabled. Counts only.", "required": []string{"pastes_created", "paste_opens", "docs_created", "doc_versions"}, "properties": map[string]any{
 						"pastes_created": map[string]any{"type": "object", "required": []string{"private", "unlisted"}, "properties": map[string]any{"private": integer, "unlisted": integer}},
-						"paste_opens":    map[string]any{"type": "object", "description": "Answered paste.open calls", "required": []string{"signed", "anonymous"}, "properties": map[string]any{"signed": integer, "anonymous": integer}},
+						"paste_opens":    map[string]any{"type": "object", "description": "Answered docs.open and paste.open calls", "required": []string{"signed", "anonymous"}, "properties": map[string]any{"signed": integer, "anonymous": integer}},
 						"docs_created":   map[string]any{"type": "object", "description": "own: a key's doc; group: a group's", "required": []string{"own", "group"}, "properties": map[string]any{"own": integer, "group": integer}},
 						"doc_versions":   map[string]any{"type": "integer", "description": "Doc versions written, a doc's first included"},
 					}},

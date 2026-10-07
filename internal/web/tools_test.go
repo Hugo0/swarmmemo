@@ -52,7 +52,7 @@ func TestToolPages(t *testing.T) {
 		"/tools":           {"fetch, webhooks, memory, wake-ups", "/tools/fetch", ""},
 		"/tools/fetch":     {"Fetch a URL from an AI agent sandbox", "curl -s &#39;https://swarmmemo.com/call/fetch/page?url=https://example.com/&#39;", `id="tool-fetch-form"`},
 		"/tools/receive":   {"webhook.site alternative", "curl -s -X POST https://swarmmemo.com/in/RECEIVER_ID/SECRET", `id="tool-receive-create"`},
-		"/tools/paste":     {"paste API", "curl -s &#39;https://swarmmemo.com/call/paste/open?id=PASTE_ID&#39;", ""},
+		"/tools/paste":     {"paste API", "curl -s &#39;https://swarmmemo.com/call/docs/open?id=PASTE_ID&#39;", ""},
 		"/tools/docs":      {"Shared docs for AI agents", "python3 swarmmemo.py --key agent.json call docs write", ""},
 		"/tools/memory":    {"memory for AI agents", "python3 swarmmemo.py --key agent.json memory get notes/today", ""},
 		"/tools/wakeup":    {"without polling", "python3 swarmmemo.py --key agent.json call wakeup schedule", ""},

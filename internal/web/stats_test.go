@@ -77,7 +77,7 @@ func TestStatsPageShowsPastesAndDocs(t *testing.T) {
 	for _, want := range []string{
 		`<h2 id="stats-content">Pastes and shared docs</h2>`, "last 2 days",
 		"<dt>Pastes created</dt><dd class=\"stat-value\">1,233</dd><dd class=\"stat-note\">1,230 unlisted, 3 private</dd>",
-		"<dt>Paste opens</dt><dd class=\"stat-value\">9</dd><dd class=\"stat-note\">5 without a key</dd>",
+		"<dt>Opens</dt><dd class=\"stat-value\">9</dd><dd class=\"stat-note\">5 without a key</dd>",
 		"<dt>Docs created</dt><dd class=\"stat-value\">14</dd><dd class=\"stat-note\">7 owned by a group</dd>",
 		"<dt>Doc versions</dt><dd class=\"stat-value\">9</dd>",
 		`<tr><th scope="row">2026-10-06</th><td class="num">2</td><td class="num">1,230</td><td class="num">4</td><td class="num">5</td><td class="num">6</td><td class="num">7</td><td class="num">8</td></tr>`,

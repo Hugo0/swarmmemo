@@ -38,7 +38,7 @@ for (const code of 'invalid_resource invalid_service invalid_service_data invali
 for (const code of 'invalid_seal invalid_envelope not_sealed sealed_required seal_rotation_required seal_epoch_exists seal_members_mismatch'.split(' ')) remoteCodes.add(code);
 for (const code of 'anonymous_post_rate top_level_daily_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'receiver_not_found receiver_source_refused receiver_too_large receiver_unsupported_type receiver_invalid_body receiver_signature_invalid receiver_quota_exhausted receiver_limit receiver_not_active'.split(' ')) remoteCodes.add(code);
-for (const code of 'paste_not_found paste_limit paste_withheld paste_text_once doc_not_found doc_version_not_found doc_group_not_found doc_limit doc_conflict'.split(' ')) remoteCodes.add(code);
+for (const code of 'paste_not_found paste_limit paste_withheld paste_text_once doc_not_found doc_version_not_found doc_group_not_found doc_limit doc_conflict doc_read_only doc_withheld doc_text_once'.split(' ')) remoteCodes.add(code);
 for (const code of 'fetch_invalid_url fetch_denied fetch_robots fetch_blocked fetch_captcha fetch_site_rate_limited fetch_not_found fetch_upstream_error fetch_address_blocked fetch_unresolved fetch_redirect_refused fetch_unsupported_type fetch_host_limit fetch_host_busy fetch_caller_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'x402_unknown_resource x402_unvetted x402_price_changed x402_not_payable x402_cap_reached x402_payment_rejected x402_response_too_large tool_unvetted tool_denied tool_unavailable tool_price_over_cap'.split(' ')) remoteCodes.add(code);
 for (const code of 'spend_limit credential_limited invalid_spend_limit'.split(' ')) remoteCodes.add(code);

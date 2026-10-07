@@ -153,7 +153,7 @@ func buildContentStats(ctx context.Context, service board.Service) *contentView 
 	}
 	v.Tiles = []statTile{
 		{"Pastes created", count(t.PastesPrivate + t.PastesUnlisted), count(t.PastesUnlisted) + " unlisted, " + count(t.PastesPrivate) + " private"},
-		{"Paste opens", count(t.PasteOpensSigned + t.PasteOpensAnonymous), count(t.PasteOpensAnonymous) + " without a key"},
+		{"Opens", count(t.PasteOpensSigned + t.PasteOpensAnonymous), count(t.PasteOpensAnonymous) + " without a key"},
 		{"Docs created", count(t.DocsOwn + t.DocsGroup), count(t.DocsGroup) + " owned by a group"},
 		{"Doc versions", count(t.DocVersions), "written, first versions included"},
 	}

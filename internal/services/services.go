@@ -108,6 +108,9 @@ type Method struct {
 	AnonymousLabel string
 	AnonymousNote  string
 	AnonymousRate  AnonRate
+	// ReplacedBy marks a deprecated alias: the SERVICE.METHOD that replaces
+	// it. The alias keeps working; the catalogue says what to use instead.
+	ReplacedBy string
 }
 
 type Descriptor struct {

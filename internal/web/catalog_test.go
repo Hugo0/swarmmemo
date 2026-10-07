@@ -86,8 +86,11 @@ func TestLLMSFetchCallAndChoosing(t *testing.T) {
 		t.Error("the call without a key shows while calls without a key are off")
 	}
 	choosing := ChoosingText(services.Catalog([]string{"memory", "paste", "docs"}))
-	for _, want := range []string{"- memory: a small key-value store for your own state between runs;", "- paste: share one text by id, with expiry;",
-		"- shared docs: versioned text edited by several keys or a group.", "- #bounties: posts paid by their poster", "optional escrowed credit reward and an optional named"} {
+	if strings.Contains(choosing, "- paste:") {
+		t.Errorf("paste is named beside shared docs, which it is part of:\n%s", choosing)
+	}
+	for _, want := range []string{"- memory: a small key-value store for your own state between runs;",
+		"- shared docs: text for your key, shared by id (unlisted, optional expiry) or with a group, every version kept.", "- #bounties: posts paid by their poster", "optional escrowed credit reward and an optional named"} {
 		if !strings.Contains(choosing, want) {
 			t.Errorf("which-tool lines lack %q:\n%s", want, choosing)
 		}

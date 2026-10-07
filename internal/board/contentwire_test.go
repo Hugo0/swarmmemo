@@ -2,6 +2,8 @@ package board
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -54,6 +56,17 @@ func TestDocsGroupsAndLogLeaves(t *testing.T) {
 		t.Fatalf("conflict details carry the version, never the text: %s", details)
 	}
 
+	// A paste is a doc of kind paste, and is not logged, through either name.
+	run(t, s, svcCall(owner, "paste", "create", map[string]any{"text": "a paste", "visibility": "unlisted"}, 10, "o3"))
+	pasted := run(t, s, svcCall(owner, "docs", "create", map[string]any{"title": "Doc", "text": "an unlisted doc", "visibility": "unlisted"}, 10, "o4"))
+	docID, _ := svcField(t, pasted.Data, "result", "doc", "id").(string)
+	opened := run(t, s, svcCall(stranger, "docs", "open", map[string]any{"id": docID}, 10, "s3"))
+	if svcField(t, opened.Data, "result", "text") != "an unlisted doc" {
+		t.Fatalf("docs.open over the board: %+v", opened.Data)
+	}
+	fixed := run(t, s, svcCall(owner, "paste", "create", map[string]any{"text": "fixed"}, 10, "o5"))
+	fails(t, s, svcCall(owner, "docs", "write", map[string]any{"id": svcField(t, fixed.Data, "result", "paste", "id"), "base_version": 1, "text": "x"}, 10, "o6"), "doc_read_only")
+
 	// Each version is a doc leaf: its id, the doc, the version and the hash.
 	rows, err := s.db.Query("SELECT data FROM tlog_leaves WHERE kind='doc' ORDER BY idx")
 	if err != nil {
@@ -68,11 +81,11 @@ func TestDocsGroupsAndLogLeaves(t *testing.T) {
 		}
 		leaves = append(leaves, data)
 	}
-	if len(leaves) != 2 || !strings.Contains(leaves[0], `"id":"`+versionID+`"`) || !strings.Contains(leaves[0], `"target":"`+id+`"`) || !strings.Contains(leaves[1], `"seq":2`) {
+	if len(leaves) != 3 || !strings.Contains(leaves[0], `"id":"`+versionID+`"`) || !strings.Contains(leaves[0], `"target":"`+id+`"`) || !strings.Contains(leaves[1], `"seq":2`) {
 		t.Fatalf("doc leaves: %v", leaves)
 	}
 	for _, leaf := range leaves {
-		if strings.Contains(leaf, "first") || strings.Contains(leaf, "second") || strings.Contains(leaf, "circle") || strings.Contains(leaf, keyID(owner)) || strings.Contains(leaf, keyID(member)) {
+		if strings.Contains(leaf, "first") || strings.Contains(leaf, "second") || strings.Contains(leaf, textSHA256("a paste")) || strings.Contains(leaf, textSHA256("fixed")) || strings.Contains(leaf, "circle") || strings.Contains(leaf, keyID(owner)) || strings.Contains(leaf, keyID(member)) {
 			t.Fatalf("a doc leaf carries text, the group or an author: %s", leaf)
 		}
 	}
@@ -80,6 +93,11 @@ func TestDocsGroupsAndLogLeaves(t *testing.T) {
 	if err = s.db.QueryRow("SELECT ref FROM tlog_leaves WHERE kind='doc' ORDER BY idx LIMIT 1").Scan(&ref); err != nil || ref != versionID {
 		t.Fatalf("a doc leaf's proof ref is its version id: %q %v", ref, err)
 	}
+}
+
+func textSHA256(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 func asError(err error, target **Error) bool {

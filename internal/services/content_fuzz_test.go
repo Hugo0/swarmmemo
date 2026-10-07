@@ -16,7 +16,7 @@ func FuzzContentArgs(f *testing.F) {
 		`{"text":"x","title":"t","notary":true}`, `{"id":"0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d","screen":false}`,
 		`{"title":"Plan","text":"1.","group":"team"}`, `{"id":"0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c","base_version":1,"text":"v2","title":"T"}`,
 		`{"id":"0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c","version":2}`, `{"text":"a\u0000b"}`, `{"text":"x","expires_in":1e9}`,
-		`{"text":"x","text":"y"}`, `{"title":"‮","text":""}`, `[]`, `{"base_version":-1}`, `{"group":"~abcdefghijklmnopqrstuvwxyz"}`,
+		`{"text":"x","text":"y"}`, `{"title":"t","text":"x","visibility":"unlisted","expires_in":60,"show_author":true}`, `{"hash":"` + strings.Repeat("ab", 32) + `"}`, `{"title":"‮","text":""}`, `[]`, `{"base_version":-1}`, `{"group":"~abcdefghijklmnopqrstuvwxyz"}`,
 	} {
 		f.Add([]byte(seed))
 	}
@@ -30,14 +30,18 @@ func FuzzContentArgs(f *testing.F) {
 				t.Fatalf("paste.create accepted %q", raw)
 			}
 		}
-		if a, err := parsePasteOpen(args); err == nil && !contentIDRE.MatchString(a.ID) {
-			t.Fatalf("paste.open accepted %q", raw)
+		if a, err := parseDocOpen(args); err == nil && !contentIDRE.MatchString(a.ID) {
+			t.Fatalf("docs.open and paste.open accepted %q", raw)
 		}
-		if id, err := parsePasteRef(args); err == nil && !contentIDRE.MatchString(id) {
-			t.Fatalf("paste.delete accepted %q", raw)
+		if id, err := parseDocRef(args); err == nil && !contentIDRE.MatchString(id) {
+			t.Fatalf("docs.delete and paste.delete accepted %q", raw)
 		}
-		if a, err := parseDocCreate(args); err == nil {
-			if len(*a.Text) > DocTextBytes || *a.Title == "" || len(*a.Title) > contentTitleBytes || !validContentText(*a.Text) || a.Group != "" && !docGroupRE.MatchString(a.Group) {
+		if s, err := parseDocCreate(args); err == nil {
+			if len(s.text) > DocTextBytes || s.title == "" || len(s.title) > contentTitleBytes || !validContentText(s.text) || s.group != "" && !docGroupRE.MatchString(s.group) {
+				t.Fatalf("docs.create accepted %q", raw)
+			}
+			if s.visibility != "private" && s.visibility != "unlisted" || s.expiresIn != 0 && (s.expiresIn < PasteExpiryMin || s.expiresIn > PasteExpiryMax) ||
+				s.group != "" && (s.visibility != "private" || s.expiresIn != 0 || s.showAuthor) {
 				t.Fatalf("docs.create accepted %q", raw)
 			}
 		}
@@ -46,7 +50,7 @@ func FuzzContentArgs(f *testing.F) {
 				t.Fatalf("docs.write accepted %q", raw)
 			}
 		}
-		if a, version, err := parseDocRead(args); err == nil && (!contentIDRE.MatchString(a.ID) || version < 0 || version > DocVersionsMax) {
+		if a, version, err := parseDocRead(args); err == nil && (!contentIDRE.MatchString(a.ID) && !(a.ID == "" && notaryHashRE.MatchString(a.Hash)) || version < 0 || version > DocVersionsMax) {
 			t.Fatalf("docs.read accepted %q", raw)
 		}
 		// The quotes take the same args and never price below the method's base.
@@ -55,7 +59,7 @@ func FuzzContentArgs(f *testing.F) {
 				t.Fatalf("paste.%s quoted %d for %q", m, q.Max, raw)
 			}
 		}
-		for _, m := range []string{"create", "write", "read"} {
+		for _, m := range []string{"create", "write", "read", "open", "delete"} {
 			if q, err := (&docs{}).Quote(Call{Method: m, Args: args, Price: Price{Base: 1, PerKiB: 1}}); err == nil && q.Max < 1 {
 				t.Fatalf("docs.%s quoted %d for %q", m, q.Max, raw)
 			}

@@ -12,7 +12,7 @@ package board
 // audit rows of the identity operations of public accounts and of operator
 // allowance grants, tier_grant_log, and doc_versions (shared docs' versions,
 // private docs too: a leaf holds only ids, the version number and the
-// SHA-256, so a member can prove a doc's history). tlog_cursors keeps, per source, the
+// SHA-256, so a member can prove a doc's history; never a paste's). tlog_cursors keeps, per source, the
 // last row turned into a leaf. tlogCatchUp appends every newer row, merged by
 // (created_at, source rank, seq), inside the caller's transaction: every
 // write path calls it before committing, and the background job catches up
@@ -202,17 +202,19 @@ var logSources = []logSource{
 			p.leaf, p.subject = l, l.Target
 			return p, nil
 		}},
-	{"docs", "doc_versions", 4, `SELECT seq,id,doc,version,hash,created_at FROM doc_versions WHERE seq>? ORDER BY seq LIMIT ?`,
+	{"docs", "doc_versions", 4, `SELECT v.seq,v.id,v.doc,v.version,v.hash,v.created_at,coalesce(d.kind,'doc') FROM doc_versions v LEFT JOIN docs d ON d.id=v.doc WHERE v.seq>? ORDER BY v.seq LIMIT ?`,
 		func(rows *sql.Rows) (pendingLeaf, error) {
 			// A shared doc's version: its id (the proof's ref), the doc, the
 			// version number and the SHA-256 of its text; never the text, the
-			// author or the group.
+			// author or the group. A paste's (a doc of kind paste) is not
+			// logged, as pastes never were.
 			var p pendingLeaf
+			var kind string
 			l := logLeaf{Kind: "doc"}
-			if err := rows.Scan(&p.seq, &l.ID, &l.Target, &l.Seq, &l.TextSHA256, &p.at); err != nil {
+			if err := rows.Scan(&p.seq, &l.ID, &l.Target, &l.Seq, &l.TextSHA256, &p.at, &kind); err != nil {
 				return p, err
 			}
-			p.leaf, p.ref = l, l.ID
+			p.leaf, p.ref, p.skip = l, l.ID, kind == "paste"
 			return p, nil
 		}},
 	{"witness", "link_witnesses", 5, `SELECT w.seq,w.witness,w.agent,w.kind,w.value,w.nonce,w.verdict,w.signature,w.created_at,coalesce(i.account,'') FROM link_witnesses w LEFT JOIN identities i ON i.id=w.agent

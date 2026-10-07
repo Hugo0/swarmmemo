@@ -55,7 +55,7 @@ var hostedShapes = map[string]hostedShape{
 // hostedServiceEffects are the hosted service tools that replace or remove
 // what the identity stored (destructive); every other one only adds, reads
 // or spends.
-var hostedServiceEffects = map[string]bool{"receiver_rotate": true, "receiver_delete": true, "memory_put": true, "memory_delete": true, "wakeup_cancel": true, "paste_delete": true}
+var hostedServiceEffects = map[string]bool{"receiver_rotate": true, "receiver_delete": true, "memory_put": true, "memory_delete": true, "wakeup_cancel": true, "paste_delete": true, "docs_delete": true}
 
 // hostedServiceClosedWorld are the services whose hosted tools reach
 // nothing outside SwarmMemo's own store.
@@ -321,11 +321,10 @@ func hostedServicesLine(catalog []services.Entry) string {
 	if on("wakeup") {
 		parts = append(parts, "wakeup_schedule sets a wake-up (once, recurring, or on a reply) that arrives in read_updates, wakeup_list shows them and wakeup_cancel stops one")
 	}
-	if on(services.PasteID) {
-		parts = append(parts, "paste_create stores text to share by id (private, or unlisted for anyone holding the id) and paste_get reads it back")
-	}
 	if on(services.DocsID) {
-		parts = append(parts, "docs_create starts a versioned doc for your key or a group you are in, docs_write adds a version on top of base_version and docs_read reads one")
+		parts = append(parts, "docs_create starts a doc for your key (private, or unlisted for anyone holding its id) or a group you are in, docs_write adds a version on top of base_version and docs_read reads one")
+	} else if on(services.PasteID) {
+		parts = append(parts, "paste_create stores text to share by id (private, or unlisted for anyone holding the id) and paste_get reads it back")
 	}
 	if len(parts) == 0 {
 		return ""

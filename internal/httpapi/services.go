@@ -159,8 +159,8 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	download := false
 	if f := fields["format"]; len(f) > 1 || len(f) == 1 && f[0] != "json" {
-		if len(f) != 1 || f[0] != "text" || e.ID != services.PasteID || m.Name != "open" {
-			writeError(w, bad("The answer is JSON; format may only be json (or text, for paste.open: the paste as a text/plain download)."))
+		if len(f) != 1 || f[0] != "text" || e.ID != services.PasteID && e.ID != services.DocsID || m.Name != "open" {
+			writeError(w, bad("The answer is JSON; format may only be json (or text, for docs.open and paste.open: the text as a text/plain download)."))
 			return
 		}
 		download = true
@@ -181,17 +181,19 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 	// Never index a call's answer, and always answer in JSON.
 	r.Header.Set("Accept", "application/json")
 	if download {
-		s.pasteDownload(w, withVia(r, strings.ToLower(r.Method)), c)
+		s.textDownload(w, withVia(r, strings.ToLower(r.Method)), c, e.ID)
 		return
 	}
 	s.execute(w, withVia(r, strings.ToLower(r.Method)), c)
 }
 
-// pasteDownload answers paste.open with format=text: the paste's text alone,
-// as a text/plain attachment a browser neither renders nor sniffs, sandboxed
-// and never indexed. Paste text is never served as HTML or inside a page of
-// this site; every other answer, a refusal included, is JSON.
-func (s *Server) pasteDownload(w http.ResponseWriter, r *http.Request, c board.Command) {
+// textDownload answers docs.open or paste.open (service) with format=text:
+// the current text alone, as a text/plain attachment a browser neither
+// renders nor sniffs, sandboxed and never indexed. Doc and paste text is
+// never served as HTML or inside a page of this site; every other answer, a
+// refusal included, is JSON. A paste keeps its paste_* codes and X-Paste-*
+// headers; a doc's are doc_* and X-Doc-*.
+func (s *Server) textDownload(w http.ResponseWriter, r *http.Request, c board.Command, service string) {
 	w.Header().Del("Access-Control-Allow-Origin")
 	w.Header().Del("Access-Control-Expose-Headers")
 	r = withClient(r)
@@ -205,10 +207,23 @@ func (s *Server) pasteDownload(w http.ResponseWriter, r *http.Request, c board.C
 		writeError(w, err)
 		return
 	}
+	withheldNote := "Screening flagged this text, or is still screening it, so it was not sent; nothing more than the open was charged. Open it again shortly, or add screen=false to download it unscreened."
+	onceNote := "This request_id was answered before, and the text is in the first answer only; open it again with a new request_id."
+	kind, header := "doc", "X-Doc-"
+	withheld := &board.Error{Status: 422, Code: "doc_withheld", Message: withheldNote, Details: res.Data}
+	once := &board.Error{Status: 409, Code: "doc_text_once", Message: onceNote}
+	if service == services.PasteID {
+		kind, header = "paste", "X-Paste-"
+		withheld = &board.Error{Status: 422, Code: "paste_withheld", Message: withheldNote, Details: res.Data}
+		once = &board.Error{Status: 409, Code: "paste_text_once", Message: onceNote}
+	}
 	var out struct {
-		Paste struct {
+		Paste *struct {
 			ID string `json:"id"`
 		} `json:"paste"`
+		Doc *struct {
+			ID string `json:"id"`
+		} `json:"doc"`
 		Text     *string `json:"text"`
 		Screen   string  `json:"screen"`
 		Withheld bool    `json:"withheld"`
@@ -217,28 +232,34 @@ func (s *Server) pasteDownload(w http.ResponseWriter, r *http.Request, c board.C
 		} `json:"verdict"`
 	}
 	raw, _ := json.Marshal(res.Data["result"])
-	if json.Unmarshal(raw, &out) != nil {
+	if json.Unmarshal(raw, &out) != nil || out.Paste == nil && out.Doc == nil {
 		writeError(w, &board.Error{Status: 500, Code: "internal", Message: "The request could not be completed."})
 		return
 	}
+	id := ""
+	if out.Paste != nil {
+		id = out.Paste.ID
+	} else {
+		id = out.Doc.ID
+	}
 	switch {
 	case out.Withheld:
-		writeError(w, &board.Error{Status: 422, Code: "paste_withheld", Message: "Screening flagged this paste's text, or is still screening it, so it was not sent; nothing more than the open was charged. Open it again shortly, or add screen=false to download it unscreened.", Details: res.Data})
+		writeError(w, withheld)
 		return
 	case out.Text == nil:
-		writeError(w, &board.Error{Status: 409, Code: "paste_text_once", Message: "This request_id was answered before, and a paste's text is in the first answer only; open it again with a new request_id."})
+		writeError(w, once)
 		return
 	}
 	h := w.Header()
 	h.Set("Content-Type", "text/plain; charset=utf-8")
-	h.Set("Content-Disposition", `attachment; filename="paste-`+out.Paste.ID+`.txt"`)
+	h.Set("Content-Disposition", `attachment; filename="`+kind+`-`+id+`.txt"`)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "sandbox")
 	h.Set("X-Robots-Tag", "noindex, nofollow")
 	h.Set("Cache-Control", "no-store")
-	h.Set("X-Paste-Screen", out.Screen)
+	h.Set(header+"Screen", out.Screen)
 	if out.Verdict != nil {
-		h.Set("X-Paste-Verdict", out.Verdict.Verdict)
+		h.Set(header+"Verdict", out.Verdict.Verdict)
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, *out.Text)

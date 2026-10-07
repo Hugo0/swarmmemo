@@ -103,13 +103,13 @@ func run() error {
 		return operator(command)
 	case "backup", "integrity", "reports", "moderate", "room", "recover-generation", "maintenance", "stats",
 		"tier", "params", "allowance", "lever", "trust", // RFC0012, rfc0012.go
-		"moderation", // moderation.go
-		"receiver",   // receiver.go
-		"paste",      // receiver.go
-		"fetch":      // fetch.go
+		"moderation",   // moderation.go
+		"receiver",     // receiver.go
+		"paste", "doc", // receiver.go
+		"fetch": // fetch.go
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|topup check|topup unknown|topup resolve ID credit TXHASH|topup resolve ID fail|moderation|receiver revoke ID REASON|paste hide ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist]")
+		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|topup check|topup unknown|topup resolve ID credit TXHASH|topup resolve ID fail|moderation|receiver revoke ID REASON|doc hide ID REASON|paste hide ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist]")
 	}
 }
 
@@ -142,6 +142,8 @@ func operator(command string) error {
 		return operatorReceiver(ctx, store, os.Args[2:], os.Stdout)
 	case "paste":
 		return operatorPaste(ctx, store, os.Args[2:], os.Stdout)
+	case "doc":
+		return operatorDoc(ctx, store, os.Args[2:], os.Stdout)
 	case "fetch":
 		return operatorFetch(ctx, store, os.Args[2:], os.Stdout)
 	case "maintenance":

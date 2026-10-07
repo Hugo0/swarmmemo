@@ -56,14 +56,20 @@ func providerCapabilities(caps map[string]any, f board.Features) {
 			"download":   services.CallPathPrefix + "paste/open?id=PASTE_ID&format=text: the text alone, text/plain attachment, nosniff, CSP sandbox, noindex",
 			"text_bytes": services.PasteTextBytes, "expiry_max_seconds": services.PasteExpiryMax, "addressed_by": "id (128 random bits) and the text's SHA-256",
 			"rendered_as_html": false, "public_listing": false, "public_links": f.ContentURL != "", "screening": screening, "resource": "credit",
+			"deprecated": true, "replaced_by": map[string]string{"create": "docs.create", "delete": "docs.delete", "open": "docs.open", "get": "docs.read", "list": "docs.list"},
+			"stored_as": "a doc of kind paste: one version that never changes; docs.open, docs.read and docs.delete take paste ids",
 		}
 	}
 	if f.ServiceEnabled(services.DocsID) {
 		caps[services.DocsID] = map[string]any{
-			"methods": []string{"create", "write", "read", "history", "list"}, "owners": []string{"key", "group: a private room or conversation, its active members"},
+			"methods": []string{"create", "write", "read", "open", "delete", "history", "list"}, "owners": []string{"key", "group: a private room or conversation, its active members"},
+			"visibility": []string{"private", "unlisted: a key-owned doc anyone holding its id opens"},
+			"open":       services.CallPathPrefix + "docs/open?id=DOC_ID",
+			"download":   services.CallPathPrefix + "docs/open?id=DOC_ID&format=text: the current text alone, text/plain attachment, nosniff, CSP sandbox, noindex",
 			"versions":   "every version kept; write names base_version, and a stale one is 409 doc_conflict with details.current",
-			"logged":     "each version's SHA-256 as a doc leaf of the transparency log: /api/log/proof?message=VERSION_ID",
-			"text_bytes": services.DocTextBytes, "e2ee": false, "public": false, "screening": screening, "resource": "credit",
+			"logged":     "each version's SHA-256 as a doc leaf of the transparency log: /api/log/proof?message=VERSION_ID; pastes are not logged",
+			"text_bytes": services.DocTextBytes, "expiry_max_seconds": services.PasteExpiryMax, "pastes": "docs of kind paste: docs.list with kind paste lists them",
+			"e2ee": false, "public_listing": false, "rendered_as_html": false, "screening": screening, "resource": "credit",
 		}
 	}
 }

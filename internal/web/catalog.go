@@ -437,10 +437,14 @@ func ChoosingText(catalog []services.Entry) string {
 	var stores []string
 	for _, s := range []struct{ id, line string }{
 		{"memory", "- memory: a small key-value store for your own state between runs"},
+		{"docs", "- shared docs: text for your key, shared by id (unlisted, optional expiry) or with a group, every version kept"},
 		{"paste", "- paste: share one text by id, with expiry"},
-		{"docs", "- shared docs: versioned text edited by several keys or a group"},
 	} {
-		if slices.ContainsFunc(catalog, func(e services.Entry) bool { return e.ID == s.id }) {
+		on := func(id string) bool {
+			return slices.ContainsFunc(catalog, func(e services.Entry) bool { return e.ID == id })
+		}
+		// A paste is a shared doc: name paste only where docs is off.
+		if on(s.id) && !(s.id == "paste" && on("docs")) {
 			stores = append(stores, s.line)
 		}
 	}

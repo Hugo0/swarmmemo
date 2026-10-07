@@ -231,8 +231,8 @@ type ContentDay struct {
 	Day string // YYYY-MM-DD
 	// PastesPrivate and PastesUnlisted count pastes created, by visibility.
 	PastesPrivate, PastesUnlisted int64
-	// PasteOpensSigned and PasteOpensAnonymous count answered paste.open
-	// calls, with a key and without one.
+	// PasteOpensSigned and PasteOpensAnonymous count answered opens
+	// (docs.open and paste.open), with a key and without one.
 	PasteOpensSigned, PasteOpensAnonymous int64
 	// DocsOwn and DocsGroup count docs created, owned by a key or by a group.
 	DocsOwn, DocsGroup int64
@@ -259,28 +259,28 @@ func (r *Registry) ReadContentStats(ctx context.Context, q allowance.Querier, no
 		query string
 		add   func(d *ContentDay, kind, n int64)
 	}{
-		{"SELECT created_at/86400, visibility='unlisted', count(*) FROM pastes WHERE created_at>=? GROUP BY 1,2", func(d *ContentDay, unlisted, n int64) {
+		{"SELECT created_at/86400, visibility='unlisted', count(*) FROM docs WHERE kind='paste' AND created_at>=? GROUP BY 1,2", func(d *ContentDay, unlisted, n int64) {
 			if unlisted == 1 {
 				d.PastesUnlisted += n
 			} else {
 				d.PastesPrivate += n
 			}
 		}},
-		{"SELECT created_at/86400, account LIKE 'anon:%', count(*) FROM service_calls WHERE created_at>=? AND service='" + PasteID + "' AND method='open' AND state='done' GROUP BY 1,2", func(d *ContentDay, anonymous, n int64) {
+		{"SELECT created_at/86400, account LIKE 'anon:%', count(*) FROM service_calls WHERE created_at>=? AND service IN ('" + PasteID + "','" + DocsID + "') AND method='open' AND state='done' GROUP BY 1,2", func(d *ContentDay, anonymous, n int64) {
 			if anonymous == 1 {
 				d.PasteOpensAnonymous += n
 			} else {
 				d.PasteOpensSigned += n
 			}
 		}},
-		{"SELECT created_at/86400, room<>'', count(*) FROM docs WHERE created_at>=? GROUP BY 1,2", func(d *ContentDay, group, n int64) {
+		{"SELECT created_at/86400, room<>'', count(*) FROM docs WHERE kind='doc' AND created_at>=? GROUP BY 1,2", func(d *ContentDay, group, n int64) {
 			if group == 1 {
 				d.DocsGroup += n
 			} else {
 				d.DocsOwn += n
 			}
 		}},
-		{"SELECT created_at/86400, 0, count(*) FROM doc_versions WHERE created_at>=? GROUP BY 1", func(d *ContentDay, _, n int64) {
+		{"SELECT v.created_at/86400, 0, count(*) FROM doc_versions v JOIN docs d ON d.id=v.doc AND d.kind='doc' WHERE v.created_at>=? GROUP BY 1", func(d *ContentDay, _, n int64) {
 			d.DocVersions += n
 		}},
 	}

@@ -62,6 +62,23 @@ func TestPasteTextIsNeverHTML(t *testing.T) {
 		hd.Get("Access-Control-Allow-Origin") != "" || hd.Get("X-Paste-Screen") == "" {
 		t.Fatalf("download: %d %v %q", w.Code, hd, w.Body.String())
 	}
+	// docs.open downloads a paste by its old id, and an unlisted doc, the same way.
+	data, _ := json.Marshal(map[string]any{"schema": 1, "method": "create", "args": map[string]any{"title": "Page", "text": text, "visibility": "unlisted"}, "max_cost": 10})
+	body, _ := json.Marshal(signService(key, board.Command{Operation: "service.call", Target: "docs", Data: string(data), RequestID: "create-doc"}))
+	w = makeRequest(h, "POST", "https://swarmmemo.com/v1/command", string(body), "application/json")
+	doc, _ := dig(decodeResult(t, w.Body.Bytes()), "data", "result", "doc", "id").(string)
+	for id, kind := range map[string]string{unlisted: "doc", doc: "doc"} {
+		w := get("/call/docs/open?id="+id+"&format=text", map[string]string{"Accept": "text/html"})
+		notHTML(w, "a doc download")
+		hd := w.Header()
+		if w.Code != 200 || w.Body.String() != text || hd.Get("Content-Disposition") != `attachment; filename="`+kind+`-`+id+`.txt"` ||
+			hd.Get("X-Content-Type-Options") != "nosniff" || hd.Get("Content-Security-Policy") != "sandbox" || hd.Get("X-Doc-Screen") == "" {
+			t.Fatalf("docs download of %s: %d %v %q", id, w.Code, hd, w.Body.String())
+		}
+	}
+	if w := get("/call/docs/open?id="+private+"&format=text", nil); dig(decodeResult(t, w.Body.Bytes()), "error", "code") != "doc_not_found" {
+		t.Fatalf("a private paste downloaded through docs: %d %s", w.Code, w.Body.String())
+	}
 	// Refusals are JSON: a private paste, an unknown id, another format or method.
 	for path, code := range map[string]string{
 		"/call/paste/open?id=" + private + "&format=text":              "paste_not_found",
@@ -80,8 +97,8 @@ func TestPasteTextIsNeverHTML(t *testing.T) {
 		t.Fatalf("cross-site download: %d %s", w.Code, w.Body.String())
 	}
 	// The owner's signed read is JSON too.
-	data, _ := json.Marshal(map[string]any{"schema": 1, "method": "get", "args": map[string]any{"id": private}})
-	body, _ := json.Marshal(signService(key, board.Command{Operation: "service.read", Target: "paste", Data: string(data)}))
+	data, _ = json.Marshal(map[string]any{"schema": 1, "method": "get", "args": map[string]any{"id": private}})
+	body, _ = json.Marshal(signService(key, board.Command{Operation: "service.read", Target: "paste", Data: string(data)}))
 	w = makeRequest(h, "POST", "https://swarmmemo.com/v1/command", string(body), "application/json")
 	notHTML(w, "a get")
 	if w.Code != 200 || dig(decodeResult(t, w.Body.Bytes()), "data", "result", "text") != text {

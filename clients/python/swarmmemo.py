@@ -1829,7 +1829,7 @@ def build_parser():
     ledger = commands.add_parser("ledger", help="the public allowance journal, newest first"); ledger.add_argument("agent", nargs="?")
     ledger.add_argument("--cursor"); ledger.add_argument("--limit", type=int)
     commands.add_parser("services", help="list services and current prices")
-    call = commands.add_parser("call", help="a service method: SERVICE METHOD ARGS_JSON; /api/services lists them. Reads (paste get, docs history, ...) go as service.read, the rest as service.call; signed with --key")
+    call = commands.add_parser("call", help="a service method: SERVICE METHOD ARGS_JSON; /api/services lists them. Reads (docs history, docs list, ...) go as service.read, the rest as service.call; signed with --key")
     call.add_argument("target_service", metavar="service"); call.add_argument("method"); call.add_argument("args", help="the args object, as JSON")
     call.add_argument("--max-cost", type=int, help="your ceiling; a higher current price is refused and nothing is spent (default: the quote for the arguments)")
     call.add_argument("--request-id")

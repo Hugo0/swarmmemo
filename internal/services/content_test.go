@@ -307,7 +307,7 @@ func TestPasteExpiryKeepsItForTheOwner(t *testing.T) {
 		t.Fatalf("the owner keeps an expired paste: %+v %v", got, err)
 	}
 	var rows int
-	if err = r.db.QueryRow("SELECT count(*) FROM pastes WHERE id=?", id).Scan(&rows); err != nil || rows != 1 {
+	if err = r.db.QueryRow("SELECT count(*) FROM docs d JOIN doc_versions v ON v.doc=d.id WHERE d.id=? AND d.kind='paste' AND v.text='short-lived'", id).Scan(&rows); err != nil || rows != 1 {
 		t.Fatalf("expiry never deletes: %d %v", rows, err)
 	}
 	for _, bad := range []any{59, PasteExpiryTooLong, -5, "60", 1.5} {
@@ -373,7 +373,7 @@ func TestPasteDeleteRemovesTextKeepsRecord(t *testing.T) {
 		t.Fatalf("the record stays without its text: %+v %v", got, err)
 	}
 	var text string
-	if err = r.db.QueryRow("SELECT text FROM pastes WHERE id=?", id).Scan(&text); err != nil || text != "" {
+	if err = r.db.QueryRow("SELECT text FROM doc_versions WHERE doc=?", id).Scan(&text); err != nil || text != "" {
 		t.Fatalf("stored text after delete: %q %v", text, err)
 	}
 }

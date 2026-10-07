@@ -155,7 +155,7 @@ number, and the parity test holds the page to the API. */}}
 
 {{define "stats-content"}}<section class="stats-section" aria-labelledby="stats-content">
 <h2 id="stats-content">Pastes and shared docs</h2>
-<p class="stats-lede">Pastes and docs written over the last {{.Days}} days (UTC, today included), by kind. A paste open is an answered paste.open, with a key or without one. Counts only.</p>
+<p class="stats-lede">Pastes and docs written over the last {{.Days}} days (UTC, today included), by kind. An open is an answered docs.open or paste.open, with a key or without one. Counts only.</p>
 <dl class="stat-row stat-row-quiet">{{range .Tiles}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
 <details class="stats-table">
 <summary>Pastes and docs by day</summary>

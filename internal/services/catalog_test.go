@@ -33,10 +33,10 @@ var argShapes = map[string]any{
 	"fetch.page":   fetchArgs{},
 	"paste.create": pasteCreateArgs{}, "paste.delete": struct {
 		ID string `json:"id"`
-	}{}, "paste.open": pasteOpenArgs{}, "paste.get": pasteGetArgs{}, "paste.list": pasteListArgs{},
-	"docs.create": docCreateArgs{}, "docs.write": docWriteArgs{}, "docs.read": docReadArgs{}, "docs.history": docHistoryArgs{}, "docs.list": struct {
-		Group string `json:"group"`
-	}{},
+	}{}, "paste.open": docOpenArgs{}, "paste.get": pasteGetArgs{}, "paste.list": pasteListArgs{},
+	"docs.create": docCreateArgs{}, "docs.write": docWriteArgs{}, "docs.read": docReadArgs{}, "docs.open": docOpenArgs{}, "docs.delete": struct {
+		ID string `json:"id"`
+	}{}, "docs.history": docHistoryArgs{}, "docs.list": docListArgs{},
 	"tools.call": struct {
 		ID   string          `json:"id"`
 		Args json.RawMessage `json:"args"`
