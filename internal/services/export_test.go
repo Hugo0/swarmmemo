@@ -163,6 +163,13 @@ func InferenceQuoteForTest(cfg *InferenceConfig, args json.RawMessage) (Quote, e
 	return newInference(Deps{Inference: cfg}).Quote(Call{Method: "complete", Args: args})
 }
 
+// ReceiverDedupeHeaderForTest is the dedupe_header create stores for raw
+// create arguments, or the refusal.
+func ReceiverDedupeHeaderForTest(raw json.RawMessage) (string, error) {
+	s, err := parseReceiverCreate(raw)
+	return s.dedupe, err
+}
+
 // FillReceiverWindowsForTest counts one delivery for each of n other
 // receiver keys in the receiver's minute table, as table pressure would.
 func FillReceiverWindowsForTest(e *Engine, n int, now int64) error {

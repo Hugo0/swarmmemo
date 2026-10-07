@@ -6,10 +6,13 @@ import (
 	"crypto/ed25519"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -54,6 +57,21 @@ const (
 	IdentityLinkNonceMin      = 16
 	IdentityLinkNonceMax      = 128
 	IdentityLinkObservedAtMax = 128
+	// A challenge may name what its nonce commits to (nonce_log, the log's
+	// checkpoint origin, at nonce_log_size leaves) and the observed block
+	// (observed_height, observed_time), all declared and signed by the
+	// linker. IdentityLinkLogNoncePrefix is this service's own log-root nonce
+	// form, swarmmemo-cpSIZE-HEX: HEX the first 16 bytes of the root of this
+	// log's checkpoint at SIZE, checked on every read.
+	IdentityLinkLogNameMax     = 128
+	IdentityLinkLogSizeMax     = 1 << 53
+	IdentityLinkBlockHeightMax = 10_000_000
+	IdentityLinkLogNoncePrefix = "swarmmemo-cp"
+	// bitcoinGenesisTime is the earliest block time a link may declare, and
+	// blockTimeFutureSlack how far past its own signed timestamp (Bitcoin
+	// accepts block times up to two hours ahead).
+	bitcoinGenesisTime   = 1231006505
+	blockTimeFutureSlack = 7200
 )
 
 // IdentityLink is the public shape of one link. Only the fields its state
@@ -103,10 +121,36 @@ func (l IdentityLink) MarshalJSON() ([]byte, error) {
 // beacon the key saw, inside the signed command (signed_payload) whose
 // signature is by the linking key.
 type LinkChallenge struct {
-	Nonce         string `json:"nonce,omitempty"`
-	ObservedAt    string `json:"observed_at,omitempty"`
-	Signature     string `json:"signature"`
-	SignedPayload string `json:"signed_payload"`
+	Nonce          string `json:"nonce,omitempty"`
+	ObservedAt     string `json:"observed_at,omitempty"`
+	ObservedHeight int64  `json:"observed_height,omitempty"`
+	ObservedTime   int64  `json:"observed_time,omitempty"`
+	// SignedAt is the timestamp inside signed_payload: when the linking key
+	// signed this challenge. A link challenged again keeps its linked_at and
+	// gets a new signed_at, so freshness is measured from this, never from
+	// linked_at.
+	SignedAt int64 `json:"signed_at,omitempty"`
+	// NonceKind, set with a nonce, is log_root when the nonce commits to a
+	// log's Merkle root (NonceLog, declared or verified), else random: it
+	// shows only that the link was made after the nonce was chosen.
+	NonceKind string    `json:"nonce_kind,omitempty"`
+	NonceLog  *NonceLog `json:"nonce_log,omitempty"`
+	// TightnessSeconds is signed_at minus the declared observed_time: how
+	// soon after the observed block the key signed. Only when both are known.
+	TightnessSeconds *int64 `json:"tightness_seconds,omitempty"`
+	Signature        string `json:"signature"`
+	SignedPayload    string `json:"signed_payload"`
+}
+
+// NonceLog is the log a challenge nonce commits to: its checkpoint origin and
+// size. Binding is verified when the log is this service's own and the nonce
+// ends with the first 16 bytes (32 lowercase hex) of the root of its
+// checkpoint at that size; failed when it is ours and does not; declared for
+// any other log, which this service does not check.
+type NonceLog struct {
+	Log     string `json:"log"`
+	Size    int64  `json:"size"`
+	Binding string `json:"binding"`
 }
 
 // linkRecord is a link's stored proof when the link's own signed command is
@@ -114,11 +158,15 @@ type LinkChallenge struct {
 // the other key's signature of an ed25519 link, when attached. Its first two
 // fields are the seal record's, so either decodes the other.
 type linkRecord struct {
-	Signature     string `json:"signature"`
-	SignedPayload string `json:"signed_payload"`
-	Nonce         string `json:"nonce,omitempty"`
-	ObservedAt    string `json:"observed_at,omitempty"`
-	Proof         string `json:"proof,omitempty"`
+	Signature      string `json:"signature"`
+	SignedPayload  string `json:"signed_payload"`
+	Nonce          string `json:"nonce,omitempty"`
+	ObservedAt     string `json:"observed_at,omitempty"`
+	NonceLog       string `json:"nonce_log,omitempty"`
+	NonceLogSize   int64  `json:"nonce_log_size,omitempty"`
+	ObservedHeight int64  `json:"observed_height,omitempty"`
+	ObservedTime   int64  `json:"observed_time,omitempty"`
+	Proof          string `json:"proof,omitempty"`
 }
 
 func encodeLinkRecord(r linkRecord) string {
@@ -207,7 +255,7 @@ func linkError(code string) error {
 	case "link_reserved":
 		return problem(400, "link_reserved", "This service's own domains cannot be linked by an agent.")
 	}
-	return problem(400, "invalid_link", fmt.Sprintf(`Data must be a strict JSON object {"schema":1,"kind":KIND,"value":VALUE} with an optional "proof", "nonce" (%d to %d printable ASCII characters) and "observed_at" (up to %d), at most 1024 bytes; kind is domain, ed25519, nostr, url, board or x25519.`, IdentityLinkNonceMin, IdentityLinkNonceMax, IdentityLinkObservedAtMax))
+	return problem(400, "invalid_link", fmt.Sprintf(`Data must be a strict JSON object {"schema":1,"kind":KIND,"value":VALUE} with an optional "proof", "nonce" (%d to %d printable ASCII characters) and "observed_at" (up to %d), with an optional "nonce_log" and "nonce_log_size" (the log and size the nonce commits to, both or neither) and "observed_height" and "observed_time" (the observed block's, no later than the command's timestamp plus two hours), at most 1024 bytes; kind is domain, ed25519, nostr, url, board or x25519.`, IdentityLinkNonceMin, IdentityLinkNonceMax, IdentityLinkObservedAtMax))
 }
 
 func claimOnly(_ *Store, _, _, proof string) (string, error) {
@@ -278,6 +326,17 @@ func (s *Store) reservedLinkDomain(name string) bool {
 type linkData struct {
 	Kind, Value, Proof string
 	Nonce, ObservedAt  string
+	NonceLog           string
+	NonceLogSize       int64
+	ObservedHeight     int64
+	ObservedTime       int64
+}
+
+// record is the stored challenge of a link made with d by command c, with
+// the other key's proof when one is attached.
+func (d linkData) record(c Command, canonical []byte, proof string) linkRecord {
+	return linkRecord{Signature: c.Signature, SignedPayload: string(canonical), Nonce: d.Nonce, ObservedAt: d.ObservedAt,
+		NonceLog: d.NonceLog, NonceLogSize: d.NonceLogSize, ObservedHeight: d.ObservedHeight, ObservedTime: d.ObservedTime, Proof: proof}
 }
 
 // parseLinkData accepts only the documented object; an unknown, repeated or
@@ -318,6 +377,14 @@ func parseLinkData(raw string, withProof bool) (linkData, error) {
 			err = json.Unmarshal(value, &d.Nonce)
 		case name == "observed_at" && withProof:
 			err = json.Unmarshal(value, &d.ObservedAt)
+		case name == "nonce_log" && withProof:
+			err = json.Unmarshal(value, &d.NonceLog)
+		case name == "nonce_log_size" && withProof:
+			err = json.Unmarshal(value, &d.NonceLogSize)
+		case name == "observed_height" && withProof:
+			err = json.Unmarshal(value, &d.ObservedHeight)
+		case name == "observed_time" && withProof:
+			err = json.Unmarshal(value, &d.ObservedTime)
 		default:
 			return d, linkError("invalid_link")
 		}
@@ -336,6 +403,15 @@ func parseLinkData(raw string, withProof bool) (linkData, error) {
 	}
 	if seen["nonce"] && !challengeText(d.Nonce, IdentityLinkNonceMin, IdentityLinkNonceMax, false) ||
 		seen["observed_at"] && !challengeText(d.ObservedAt, 1, IdentityLinkObservedAtMax, true) {
+		return d, linkError("invalid_link")
+	}
+	// A log binding names both the log and its size, and needs a nonce; a
+	// block's height or time needs the observed_at they describe.
+	if seen["nonce_log"] != seen["nonce_log_size"] || seen["nonce_log"] && (!seen["nonce"] ||
+		!challengeText(d.NonceLog, 1, IdentityLinkLogNameMax, false) || d.NonceLogSize < 1 || d.NonceLogSize > IdentityLinkLogSizeMax) ||
+		(seen["observed_height"] || seen["observed_time"]) && !seen["observed_at"] ||
+		seen["observed_height"] && (d.ObservedHeight < 1 || d.ObservedHeight > IdentityLinkBlockHeightMax) ||
+		seen["observed_time"] && d.ObservedTime < bitcoinGenesisTime {
 		return d, linkError("invalid_link")
 	}
 	if _, ok := linkKinds[d.Kind]; !ok {
@@ -398,6 +474,9 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 	if err != nil {
 		return Result{}, err
 	}
+	if d.ObservedTime > c.Timestamp+blockTimeFutureSlack {
+		return Result{}, linkError("invalid_link")
+	}
 	challenged := d.Nonce != "" || d.ObservedAt != ""
 	if d.Kind == "x25519" {
 		// A sealing key is only as private as the key that publishes it; a
@@ -410,7 +489,7 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		// time it was replaced (nothing is deleted), so the key behind an
 		// old epoch's wraps is still on record. The signed command is the
 		// proof.
-		d.Proof = encodeLinkRecord(linkRecord{Signature: c.Signature, SignedPayload: string(a.canonical), Nonce: d.Nonce, ObservedAt: d.ObservedAt})
+		d.Proof = encodeLinkRecord(d.record(c, a.canonical, ""))
 		if _, err = tx.ExecContext(ctx, "UPDATE identity_links SET state='lapsed',lapsed_at=? WHERE agent=? AND kind='x25519' AND value<>? AND state<>'lapsed'", now, a.id, value); err != nil {
 			return Result{}, err
 		}
@@ -457,7 +536,7 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 			if proof == "" && state == "proof_attached" {
 				proof = theirProof(existingProof)
 			}
-			proof = encodeLinkRecord(linkRecord{Signature: c.Signature, SignedPayload: string(a.canonical), Nonce: d.Nonce, ObservedAt: d.ObservedAt, Proof: proof})
+			proof = encodeLinkRecord(d.record(c, a.canonical, proof))
 		}
 		query := "UPDATE identity_links SET state=?,next_check_at=? WHERE agent=? AND kind=? AND value=?"
 		args := []any{state, next, a.id, d.Kind, value}
@@ -471,7 +550,7 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 	} else {
 		proof := d.Proof
 		if challenged && d.Kind != "x25519" {
-			proof = encodeLinkRecord(linkRecord{Signature: c.Signature, SignedPayload: string(a.canonical), Nonce: d.Nonce, ObservedAt: d.ObservedAt, Proof: d.Proof})
+			proof = encodeLinkRecord(d.record(c, a.canonical, d.Proof))
 		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO identity_links(agent,kind,value,proof,state,created_at,next_check_at) VALUES(?,?,?,?,?,?,?)",
 			a.id, d.Kind, value, proof, state, now, next); err != nil {
@@ -490,6 +569,13 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 	}
 	if d.ObservedAt != "" {
 		data["observed_at"] = d.ObservedAt
+	}
+	if challenged {
+		ch := s.challengeOf(d.record(c, a.canonical, ""))
+		if err = s.settleChallenges(ctx, tx, []*LinkChallenge{ch}); err != nil {
+			return Result{}, err
+		}
+		addFreshness(data, ch)
 	}
 	switch d.Kind {
 	case "domain":
@@ -554,7 +640,7 @@ func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agents ...str
 			}
 		}
 		if r, ok := decodeLinkRecord(proof); ok && (r.Nonce != "" || r.ObservedAt != "") {
-			l.Challenge = &LinkChallenge{Nonce: r.Nonce, ObservedAt: r.ObservedAt, Signature: r.Signature, SignedPayload: r.SignedPayload}
+			l.Challenge = s.challengeOf(r)
 		}
 		links[agent] = append(links[agent], l)
 	}
@@ -562,6 +648,17 @@ func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agents ...str
 		return nil, err
 	}
 	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	var challenges []*LinkChallenge
+	for agent := range links {
+		for i := range links[agent] {
+			if c := links[agent][i].Challenge; c != nil {
+				challenges = append(challenges, c)
+			}
+		}
+	}
+	if err = s.settleChallenges(ctx, tx, challenges); err != nil {
 		return nil, err
 	}
 	counts, err := witnessedCounts(ctx, tx, agents)
@@ -600,4 +697,109 @@ func (s *Store) attachIdentityLinks(ctx context.Context, tx *sql.Tx, agents []Ag
 		}
 	}
 	return nil
+}
+
+// ownLogNonce is this service's own log-root nonce: swarmmemo-cpSIZE-HEX.
+var ownLogNonce = regexp.MustCompile(`^` + IdentityLinkLogNoncePrefix + `([1-9][0-9]{0,15})-[0-9a-f]{32}$`)
+
+// challengeOf is a link's public challenge from its stored record: what the
+// linker signed, signed_at from the signed command itself, and the log its
+// nonce names, declared until settleChallenges checks it.
+func (s *Store) challengeOf(r linkRecord) *LinkChallenge {
+	c := &LinkChallenge{Nonce: r.Nonce, ObservedAt: r.ObservedAt, ObservedHeight: r.ObservedHeight, ObservedTime: r.ObservedTime,
+		Signature: r.Signature, SignedPayload: r.SignedPayload}
+	var envelope struct {
+		Command struct {
+			Timestamp int64 `json:"timestamp"`
+		} `json:"command"`
+	}
+	if json.Unmarshal([]byte(r.SignedPayload), &envelope) == nil && envelope.Command.Timestamp > 0 {
+		c.SignedAt = envelope.Command.Timestamp
+	}
+	switch {
+	case r.Nonce == "":
+	case r.NonceLog != "":
+		c.NonceLog = &NonceLog{Log: r.NonceLog, Size: r.NonceLogSize, Binding: "declared"}
+	case s.transparency.origin != "":
+		if m := ownLogNonce.FindStringSubmatch(r.Nonce); m != nil {
+			if size, err := strconv.ParseInt(m[1], 10, 64); err == nil && size <= IdentityLinkLogSizeMax {
+				c.NonceLog = &NonceLog{Log: s.transparency.origin, Size: size, Binding: "declared"}
+			}
+		}
+	}
+	if c.SignedAt > 0 && c.ObservedTime > 0 {
+		t := c.SignedAt - c.ObservedTime
+		c.TightnessSeconds = &t
+	}
+	return c
+}
+
+// settleChallenges checks every nonce that names this service's own log
+// against its checkpoint of that size, in one query per 256 sizes inside the
+// caller's transaction, then sets each nonce_kind. A binding to any other log
+// stays declared; one to ours that does not match is failed, and its nonce
+// counts as random.
+func (s *Store) settleChallenges(ctx context.Context, tx *sql.Tx, challenges []*LinkChallenge) error {
+	own := func(c *LinkChallenge) bool {
+		return c.NonceLog != nil && s.transparency.origin != "" && c.NonceLog.Log == s.transparency.origin
+	}
+	roots := map[int64][]byte{}
+	var sizes []any
+	for _, c := range challenges {
+		if own(c) {
+			if _, ok := roots[c.NonceLog.Size]; !ok {
+				roots[c.NonceLog.Size] = nil
+				sizes = append(sizes, c.NonceLog.Size)
+			}
+		}
+	}
+	for len(sizes) > 0 {
+		batch := sizes[:min(len(sizes), 256)]
+		sizes = sizes[len(batch):]
+		rows, err := tx.QueryContext(ctx, "SELECT size,root FROM tlog_checkpoints WHERE size IN (?"+strings.Repeat(",?", len(batch)-1)+")", batch...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var size int64
+			var root []byte
+			if err = rows.Scan(&size, &root); err != nil {
+				rows.Close()
+				return err
+			}
+			roots[size] = root
+		}
+		if err = rows.Close(); err != nil {
+			return err
+		}
+	}
+	for _, c := range challenges {
+		if c.Nonce == "" {
+			continue
+		}
+		if own(c) {
+			c.NonceLog.Binding = "failed"
+			if root := roots[c.NonceLog.Size]; len(root) >= 16 && strings.HasSuffix(c.Nonce, hex.EncodeToString(root[:16])) {
+				c.NonceLog.Binding = "verified"
+			}
+		}
+		c.NonceKind = "random"
+		if c.NonceLog != nil && c.NonceLog.Binding != "failed" {
+			c.NonceKind = "log_root"
+		}
+	}
+	return nil
+}
+
+// addFreshness puts a challenge's derived cells into a command's answer.
+func addFreshness(data map[string]any, c *LinkChallenge) {
+	if c.NonceKind != "" {
+		data["nonce_kind"] = c.NonceKind
+	}
+	if c.NonceLog != nil {
+		data["nonce_log"] = *c.NonceLog
+	}
+	if c.TightnessSeconds != nil {
+		data["tightness_seconds"] = *c.TightnessSeconds
+	}
 }

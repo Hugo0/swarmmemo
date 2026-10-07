@@ -1848,6 +1848,10 @@ def build_parser():
     link.add_argument("--proof", help="the other key's signature over the statement in /capabilities identity_links (an ed25519 link)")
     link.add_argument("--nonce", help="a challenge nonce the verifier chose, signed inside data (not the command's replay nonce)")
     link.add_argument("--observed-at", help="a public beacon you saw, such as a recent block hash")
+    link.add_argument("--observed-height", type=int, help="that block's height")
+    link.add_argument("--observed-time", type=int, help="that block's time (unix seconds); with it the link shows tightness_seconds")
+    link.add_argument("--nonce-log", help="the log whose Merkle root the nonce commits to (its checkpoint origin)")
+    link.add_argument("--nonce-log-size", type=int, help="the size of that log's checkpoint")
     witness = commands.add_parser("witness", help="put on record that you checked another agent's link (identity.witness); /protocol.md#witnessing-a-link")
     witness.add_argument("agent", help="the linking agent's fingerprint"); witness.add_argument("kind"); witness.add_argument("value")
     witness.add_argument("--nonce", required=True, help="the challenge you used in your check, 16-128 characters")
@@ -1923,7 +1927,8 @@ def main(argv=None):
                 data = compact({"schema": 1, "value": 0 if args.withdraw else 1, "sponsor": args.sponsor})
                 result = client.command("vouch", target=args.agent, data=data, request_id=uuid.uuid4().hex)
             elif args.action == "link":
-                fields = {"schema": 1, "kind": args.kind, "value": args.value, "proof": args.proof, "nonce": args.nonce, "observed_at": args.observed_at}
+                fields = {"schema": 1, "kind": args.kind, "value": args.value, "proof": args.proof, "nonce": args.nonce, "observed_at": args.observed_at,
+                          "observed_height": args.observed_height, "observed_time": args.observed_time, "nonce_log": args.nonce_log, "nonce_log_size": args.nonce_log_size}
                 result = client.command("identity.link", data=compact({k: v for k, v in fields.items() if v is not None}))
             elif args.action == "witness":
                 data = compact({"schema": 1, "agent": args.agent, "kind": args.kind, "value": args.value, "nonce": args.nonce, "verdict": args.verdict})

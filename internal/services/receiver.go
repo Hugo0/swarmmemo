@@ -39,6 +39,12 @@ import (
 // the operator turned screening off, with the verdict attached; an
 // unscreened body is marked so. Items are kept: after ReceiverRetention they
 // are marked stale, never deleted early.
+//
+// Deliveries are not deduplicated by default: each POST is its own item. A
+// receiver created with dedupe_header answers a delivery whose value of that
+// header matches an item stored in the last ReceiverDedupeWindow with the
+// first item's id and duplicate: true; it is not stored, charged or woken on
+// again. Only a hash of the value is kept, on the item.
 
 // Receiver bounds.
 const (
@@ -77,6 +83,9 @@ const (
 	ReceiverHeadersMax      = 16
 	receiverHeaderNameBytes = 64
 	receiverArgsMax         = 2048
+	// ReceiverDedupeWindow is how far back a dedupe_header value matches:
+	// a repeat after it is stored as a new item.
+	ReceiverDedupeWindow = 86400
 	// receiverScreenWorkers screen delivered items after commit;
 	// receiverScreenQueue bounds the queue, past which an item waits for
 	// the worker's pass. receiverScreenRetry is how long a pending item
@@ -103,6 +112,8 @@ var (
 	receiverTokenRE = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 	receiverHMACRE  = regexp.MustCompile(`^[\x21-\x7e]+$`)
 	headerValueRE   = regexp.MustCompile(`^[\x20-\x7e]*$`)
+	// headerTokenRE is an HTTP header name (RFC 9110 token).
+	headerTokenRE = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 )
 
 // receiverHeaders are the sender headers an item keeps (lowercase): event
@@ -210,7 +221,8 @@ CREATE TABLE IF NOT EXISTS receivers (
  allow_from TEXT NOT NULL DEFAULT '', screen INTEGER NOT NULL DEFAULT 1,
  state TEXT NOT NULL CHECK(state IN ('active','deleted','revoked')), reason TEXT NOT NULL DEFAULT '',
  created_at INTEGER NOT NULL, rotated_at INTEGER NOT NULL DEFAULT 0, finished_at INTEGER NOT NULL DEFAULT 0,
- deliveries INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0);
+ deliveries INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0,
+ dedupe_header TEXT NOT NULL DEFAULT '', duplicates INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS receivers_account ON receivers(account,state,created_at);
 CREATE TABLE IF NOT EXISTS receiver_items (
  seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, receiver TEXT NOT NULL, account TEXT NOT NULL,
@@ -218,12 +230,44 @@ CREATE TABLE IF NOT EXISTS receiver_items (
  verified INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, received_at INTEGER NOT NULL,
  event_seq INTEGER NOT NULL DEFAULT 0,
  screen TEXT NOT NULL CHECK(screen IN ('off','pending','done','failed','unpaid','unavailable')),
- verdict TEXT NOT NULL DEFAULT '', screen_cost INTEGER NOT NULL DEFAULT 0, screened_at INTEGER NOT NULL DEFAULT 0);
+ verdict TEXT NOT NULL DEFAULT '', screen_cost INTEGER NOT NULL DEFAULT 0, screened_at INTEGER NOT NULL DEFAULT 0,
+ dedupe_key TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS receiver_items_account ON receiver_items(account,seq);
 CREATE INDEX IF NOT EXISTS receiver_items_receiver ON receiver_items(receiver,seq);
 CREATE INDEX IF NOT EXISTS receiver_items_pending ON receiver_items(received_at) WHERE screen='pending';
 CREATE TABLE IF NOT EXISTS receiver_days (receiver TEXT NOT NULL, day INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(receiver,day));
 `
+}
+
+// receiverAdded are the dedupe columns (table, name, declaration), added to
+// tables created before them; MigrateReceivers then indexes dedupe_key.
+var receiverAdded = [][3]string{
+	{"receivers", "dedupe_header", "TEXT NOT NULL DEFAULT ''"},
+	{"receivers", "duplicates", "INTEGER NOT NULL DEFAULT 0"},
+	{"receiver_items", "dedupe_key", "TEXT NOT NULL DEFAULT ''"},
+}
+
+// MigrateReceivers adds receiverAdded to existing receiver tables and creates
+// the dedupe index, in the board's migration transaction. Keyed on the
+// columns, so running it again changes nothing; no row is changed.
+func MigrateReceivers(tx *sql.Tx) error {
+	for _, c := range receiverAdded {
+		var tables, exists int
+		if err := tx.QueryRow("SELECT (SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?), (SELECT count(*) FROM pragma_table_info(?) WHERE name=?)", c[0], c[0], c[1]).Scan(&tables, &exists); err != nil {
+			return err
+		}
+		if tables == 1 && exists == 0 {
+			if _, err := tx.Exec("ALTER TABLE " + c[0] + " ADD COLUMN " + c[1] + " " + c[2]); err != nil {
+				return err
+			}
+		}
+	}
+	var tables int
+	if err := tx.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='receiver_items'").Scan(&tables); err != nil || tables == 0 {
+		return err
+	}
+	_, err := tx.Exec("CREATE INDEX IF NOT EXISTS receiver_items_dedupe ON receiver_items(receiver,dedupe_key,received_at) WHERE dedupe_key<>''")
+	return err
 }
 
 var receiverIDArg = Arg{"id", "string", true, "the receiver's id"}
@@ -233,7 +277,8 @@ func (r *receiver) Describe() Descriptor {
 		ID: ReceiverID,
 		Summary: "Your agent's own drop box for callbacks, webhooks and results from its jobs: create returns a secret receive URL, and anything POSTed to it (JSON, a form or text, up to " + SizeText(ReceiverBodyBytes) + ") becomes a private item only you read, in updates.get (data.received) and in the items read. " +
 			"Each delivery is charged to your credit (" + ReceiverDeliverPrice.Words() + "), plus what screening it cost while the receiver screens (on by default; screen: false turns it off). " +
-			"Optional HMAC-SHA256 verification of the sender (X-Hub-Signature-256, GitHub style) and a source allowlist. Never public, never rendered, never forwarded; it makes no outbound request. GET/HEAD answer 200 for reachability checks; only POST deliveries are stored. Items are kept, marked stale after " + durationText(ReceiverRetention) + ".",
+			"Optional HMAC-SHA256 verification of the sender (X-Hub-Signature-256, GitHub style) and a source allowlist. " +
+			"Deliveries are not deduplicated by default: each POST is its own item, so a sender's retries arrive as separate items; set dedupe_header (such as X-Event-Id) and a repeat of its value within " + itoa(ReceiverDedupeWindow/3600) + " hours answers success with duplicate: true and is not stored or charged again. Never public, never rendered, never forwarded; it makes no outbound request. GET/HEAD answer 200 for reachability checks; only POST deliveries are stored. Items are kept, marked stale after " + durationText(ReceiverRetention) + ".",
 		Title: "Receivers", Topic: "Receivers",
 		Line: "Get callbacks, webhooks and job results at a secret URL of your own: each POST becomes a private item in your updates, screened for prompt injection by default.",
 		Limits: []Limit{
@@ -243,6 +288,7 @@ func (r *receiver) Describe() Descriptor {
 			{"receiver_deliveries_per_day", ReceiverPerDay, "", "Deliveries to one receiver a day"},
 			{"receiver_source_per_minute", ReceiverSourcePerMinute, "", "Delivery attempts from one network a minute"},
 			{"receiver_retention_seconds", ReceiverRetention, "seconds", "Items stay fresh, then are marked stale and kept"},
+			{"receiver_dedupe_window_seconds", ReceiverDedupeWindow, "seconds", "How far back a dedupe_header value matches an earlier item"},
 		},
 		Mode: Local,
 		Methods: []Method{
@@ -253,6 +299,7 @@ func (r *receiver) Describe() Descriptor {
 					{"screen", "boolean", false, "screen each body for prompt injection (default true; the surcharge is what the classifier cost)"},
 					{"hmac_secret", "string", false, itoa(ReceiverHMACMin) + " to " + itoa(ReceiverHMACMax) + " printable characters: deliveries must carry X-Hub-Signature-256: sha256=HMAC-SHA256(secret, body)"},
 					{"allow_from", "array", false, "up to " + itoa(ReceiverAllowMax) + " source addresses or CIDR ranges; other senders are refused"},
+					{"dedupe_header", "string", false, "a header name up to " + itoa(receiverHeaderNameBytes) + " bytes, any case, such as X-Event-Id: a delivery repeating its value (up to " + itoa(ReceiverHeaderBytes) + " bytes) within " + itoa(ReceiverDedupeWindow/3600) + " hours is answered as a duplicate and not stored or charged again. Without it nothing is deduplicated"},
 				},
 				Example: json.RawMessage(`{"label":"ci-results","screen":true}`)},
 			{Name: "rotate", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: receiverArgsMax, Price: Price{Base: 1},
@@ -284,21 +331,25 @@ func (r *receiver) CatalogueExtra() map[string]any {
 		"deliver": map[string]any{"method": "POST", "url": r.origin + ReceiverPathPrefix + "RECEIVER_ID/SECRET", "price": ReceiverDeliverPrice,
 			"content_types": []string{"application/json", "application/x-www-form-urlencoded", "text/*"}, "signature_header": "X-Hub-Signature-256", "kept_headers": receiverHeaders,
 			"kept_header_patterns": ReceiverHeaderPatterns, "kept_headers_max": ReceiverHeadersMax, "kept_header_bytes": ReceiverHeaderBytes,
-			"reachability": "GET/HEAD answer 200 for reachability checks; only POST deliveries are stored."},
+			"reachability":          "GET/HEAD answer 200 for reachability checks; only POST deliveries are stored.",
+			"deduplicated":          "Not by default: each POST is its own item. With dedupe_header set at create, a repeat of that header's value within the window answers 202 with duplicate: true and the first item's id, and is not stored, charged or woken on again.",
+			"dedupe_window_seconds": ReceiverDedupeWindow, "dedupe_value_bytes": ReceiverHeaderBytes},
 		"screening": screening,
 		"outbound":  false, "public": false, "tool_page": "/tools/receive",
 	}
 }
 
 type receiverCreateArgs struct {
-	Label      string   `json:"label"`
-	Screen     *bool    `json:"screen"`
-	HMACSecret string   `json:"hmac_secret"`
-	AllowFrom  []string `json:"allow_from"`
+	Label        string   `json:"label"`
+	Screen       *bool    `json:"screen"`
+	HMACSecret   string   `json:"hmac_secret"`
+	AllowFrom    []string `json:"allow_from"`
+	DedupeHeader string   `json:"dedupe_header"`
 }
 
 type receiverSpec struct {
 	label, hmac string
+	dedupe      string // lowercase header name, or ''
 	screen      *bool
 	allow       []*net.IPNet
 	allowText   []string
@@ -321,6 +372,15 @@ func parseReceiverCreate(raw json.RawMessage) (receiverSpec, error) {
 	}
 	if len(a.AllowFrom) > ReceiverAllowMax {
 		return s, badArg("allow_from must list at most " + itoa(ReceiverAllowMax) + " addresses or CIDR ranges.")
+	}
+	if a.DedupeHeader != "" {
+		name := strings.ToLower(a.DedupeHeader)
+		// The token check is on the name as sent: lowercasing could turn a
+		// non-ASCII letter (the Kelvin sign) into an ASCII one.
+		if len(a.DedupeHeader) > receiverHeaderNameBytes || !headerTokenRE.MatchString(a.DedupeHeader) || receiverHeaderSecretRE.MatchString(name) {
+			return s, badArg("dedupe_header must be one header name of up to " + itoa(receiverHeaderNameBytes) + " letters, digits and - (such as X-Event-Id), and not a credential, cookie, signature or secret header.")
+		}
+		s.dedupe = name
 	}
 	for _, v := range a.AllowFrom {
 		n, err := parseAllow(v)
@@ -383,26 +443,31 @@ func (r *receiver) Quote(c Call) (Quote, error) {
 
 // ReceiverView is a receiver as its owner reads it: never its URL or secrets.
 type ReceiverView struct {
-	ID         string   `json:"id"`
-	Label      string   `json:"label,omitempty"`
-	Screen     bool     `json:"screen"`
-	HMAC       bool     `json:"hmac"`
-	AllowFrom  []string `json:"allow_from,omitempty"`
-	State      string   `json:"state"` // active, deleted or revoked
-	Reason     string   `json:"reason,omitempty"`
-	CreatedAt  int64    `json:"created_at"`
-	RotatedAt  int64    `json:"rotated_at,omitempty"`
-	FinishedAt int64    `json:"finished_at,omitempty"`
-	Deliveries int64    `json:"deliveries"`
-	LastAt     int64    `json:"last_at,omitempty"`
+	ID        string   `json:"id"`
+	Label     string   `json:"label,omitempty"`
+	Screen    bool     `json:"screen"`
+	HMAC      bool     `json:"hmac"`
+	AllowFrom []string `json:"allow_from,omitempty"`
+	// DedupeHeader is the header whose repeated value marks a duplicate
+	// ('' when deliveries are not deduplicated); Duplicates counts the
+	// deliveries answered as duplicates.
+	DedupeHeader string `json:"dedupe_header"`
+	Duplicates   int64  `json:"duplicates"`
+	State        string `json:"state"` // active, deleted or revoked
+	Reason       string `json:"reason,omitempty"`
+	CreatedAt    int64  `json:"created_at"`
+	RotatedAt    int64  `json:"rotated_at,omitempty"`
+	FinishedAt   int64  `json:"finished_at,omitempty"`
+	Deliveries   int64  `json:"deliveries"`
+	LastAt       int64  `json:"last_at,omitempty"`
 }
 
-const receiverColumns = "id,label,screen,hmac_secret<>'',allow_from,state,reason,created_at,rotated_at,finished_at,deliveries,last_at"
+const receiverColumns = "id,label,screen,hmac_secret<>'',allow_from,dedupe_header,duplicates,state,reason,created_at,rotated_at,finished_at,deliveries,last_at"
 
 func scanReceiver(row interface{ Scan(...any) error }) (ReceiverView, error) {
 	var v ReceiverView
 	var allow string
-	err := row.Scan(&v.ID, &v.Label, &v.Screen, &v.HMAC, &allow, &v.State, &v.Reason, &v.CreatedAt, &v.RotatedAt, &v.FinishedAt, &v.Deliveries, &v.LastAt)
+	err := row.Scan(&v.ID, &v.Label, &v.Screen, &v.HMAC, &allow, &v.DedupeHeader, &v.Duplicates, &v.State, &v.Reason, &v.CreatedAt, &v.RotatedAt, &v.FinishedAt, &v.Deliveries, &v.LastAt)
 	if allow != "" {
 		v.AllowFrom = strings.Split(allow, ",")
 	}
@@ -448,8 +513,8 @@ func (r *receiver) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) 
 		id := newCallID()
 		token, hash := newReceiverToken()
 		screen := s.screen == nil || *s.screen
-		if _, err = tx.ExecContext(ctx, "INSERT INTO receivers(id,account,key_id,hosted,label,token_hash,hmac_secret,allow_from,screen,state,created_at) VALUES(?,?,?,?,?,?,?,?,?,'active',?)",
-			id, account, c.Subject.KeyID, c.Subject.Hosted, s.label, hash, s.hmac, strings.Join(s.allowText, ","), screen, c.Now); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO receivers(id,account,key_id,hosted,label,token_hash,hmac_secret,allow_from,dedupe_header,screen,state,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'active',?)",
+			id, account, c.Subject.KeyID, c.Subject.Hosted, s.label, hash, s.hmac, strings.Join(s.allowText, ","), s.dedupe, screen, c.Now); err != nil {
 			return Result{}, err
 		}
 		v, err := scanReceiver(tx.QueryRowContext(ctx, "SELECT "+receiverColumns+" FROM receivers WHERE id=?", id))
@@ -703,12 +768,27 @@ type Delivery struct {
 	Signature   string // X-Hub-Signature-256
 	Source      net.IP
 	Headers     map[string]string // lowercase name: value, for the names ReceiverKeepsHeader keeps
+	// HeaderValue is the request's first value of a header (any case), read
+	// for the receiver's dedupe_header; nil falls back to Headers.
+	HeaderValue func(name string) string
+}
+
+// header is the delivery's value of a header named in lowercase.
+func (d Delivery) header(name string) string {
+	if d.HeaderValue != nil {
+		return d.HeaderValue(name)
+	}
+	return d.Headers[name]
 }
 
 // DeliveryReceipt is what the sender is told.
 type DeliveryReceipt struct {
 	Item  string `json:"item"`
 	Bytes int    `json:"bytes"`
+	// Duplicate is true when the receiver's dedupe_header value matched an
+	// item stored within ReceiverDedupeWindow: Item is that item, and
+	// nothing was stored or charged.
+	Duplicate bool `json:"duplicate,omitempty"`
 }
 
 // sourceKey is a source's rate-limit key: an IPv4 address, or an IPv6 /64.
@@ -785,8 +865,8 @@ func mediaType(header string) (string, bool) {
 }
 
 type receiverRow struct {
-	account, keyID, hmac, allow, state, tokenHash string
-	hosted, screen                                bool
+	account, keyID, hmac, allow, dedupe, state, tokenHash string
+	hosted, screen                                        bool
 }
 
 // findReceiver is the receiver a delivery or a probe addresses, found by id
@@ -797,8 +877,8 @@ func findReceiver(ctx context.Context, q allowance.Querier, d Delivery) (receive
 		return receiverRow{}, refusal("receiver_not_found")
 	}
 	var row receiverRow
-	err := q.QueryRowContext(ctx, "SELECT account,key_id,hosted,hmac_secret,allow_from,screen,state,token_hash FROM receivers WHERE id=?", d.ID).
-		Scan(&row.account, &row.keyID, &row.hosted, &row.hmac, &row.allow, &row.screen, &row.state, &row.tokenHash)
+	err := q.QueryRowContext(ctx, "SELECT account,key_id,hosted,hmac_secret,allow_from,dedupe_header,screen,state,token_hash FROM receivers WHERE id=?", d.ID).
+		Scan(&row.account, &row.keyID, &row.hosted, &row.hmac, &row.allow, &row.dedupe, &row.screen, &row.state, &row.tokenHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return receiverRow{}, refusal("receiver_not_found")
 	}
@@ -859,6 +939,27 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 		}
 		verified = true
 	}
+	// A repeat of the dedupe_header value within the window is answered with
+	// the first item, after the sender checks and inside the rate limits, and
+	// is neither stored nor charged. An empty, oversized or unprintable value
+	// is not deduplicated.
+	dedupeKey := ""
+	if row.dedupe != "" {
+		if v := d.header(row.dedupe); v != "" && len(v) <= ReceiverHeaderBytes && headerValueRE.MatchString(v) {
+			dedupeKey = sha256Of([]byte(v))
+			var first string
+			err = tx.QueryRowContext(ctx, "SELECT id FROM receiver_items WHERE receiver=? AND dedupe_key=? AND dedupe_key<>'' AND received_at>? ORDER BY received_at DESC LIMIT 1", d.ID, dedupeKey, now-ReceiverDedupeWindow).Scan(&first)
+			if err == nil {
+				if _, err = tx.ExecContext(ctx, "UPDATE receivers SET duplicates=duplicates+1 WHERE id=?", d.ID); err != nil {
+					return DeliveryReceipt{}, "", err
+				}
+				return DeliveryReceipt{Item: first, Bytes: len(d.Body), Duplicate: true}, "", nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return DeliveryReceipt{}, "", err
+			}
+		}
+	}
 	cost := ReceiverDeliverPrice.For(int64(len(d.Body)))
 	subject := allowance.Subject{ID: row.account, KeyID: row.keyID, Signed: true, Hosted: row.hosted}
 	if _, err = meter.Spend(ctx, tx, subject, allowance.Credit, cost, ledger.Ref{Service: ReceiverID, Op: "receive", Method: "deliver"}, now); err != nil {
@@ -883,8 +984,8 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 		}
 	}
 	id := newCallID()
-	if _, err = tx.ExecContext(ctx, "INSERT INTO receiver_items(id,receiver,account,content_type,body,bytes,headers,verified,cost,received_at,event_seq,screen) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-		id, d.ID, row.account, mt, string(d.Body), len(d.Body), string(canonicalJSON(headers)), verified, cost, now, latest, screen); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO receiver_items(id,receiver,account,content_type,body,bytes,headers,verified,cost,received_at,event_seq,screen,dedupe_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+		id, d.ID, row.account, mt, string(d.Body), len(d.Body), string(canonicalJSON(headers)), verified, cost, now, latest, screen, dedupeKey); err != nil {
 		return DeliveryReceipt{}, "", err
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE receivers SET deliveries=deliveries+1, last_at=? WHERE id=?", now, d.ID); err != nil {

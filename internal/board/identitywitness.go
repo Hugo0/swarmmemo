@@ -203,8 +203,8 @@ func (s *Store) witnessIdentityLink(ctx context.Context, tx *sql.Tx, c Command, 
 	if own {
 		return Result{}, witnessError("self_witness")
 	}
-	var state string
-	err = tx.QueryRowContext(ctx, "SELECT state FROM identity_links WHERE agent=? AND kind=? AND value=? AND NOT "+retiredSealKey, d.Agent, d.Kind, value).Scan(&state)
+	var state, proof string
+	err = tx.QueryRowContext(ctx, "SELECT state,proof FROM identity_links WHERE agent=? AND kind=? AND value=? AND NOT "+retiredSealKey, d.Agent, d.Kind, value).Scan(&state, &proof)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Result{}, witnessError("link_not_found")
 	}
@@ -239,7 +239,22 @@ func (s *Store) witnessIdentityLink(ctx context.Context, tx *sql.Tx, c Command, 
 	if err = audit(ctx, tx, c.Operation, a.id, d.Agent, "identity link witnessed "+d.Verdict+": "+d.Kind+" "+value, now); err != nil {
 		return Result{}, err
 	}
-	return Result{Data: map[string]any{"agent": d.Agent, "kind": d.Kind, "value": value, "link_state": state, "verdict": d.Verdict, "nonce": d.Nonce, "at": now, "replaced": replaced > 0}}, nil
+	data := map[string]any{"agent": d.Agent, "kind": d.Kind, "value": value, "link_state": state, "verdict": d.Verdict, "nonce": d.Nonce, "at": now, "replaced": replaced > 0, "fresh_for_nonce": false}
+	// fresh_for_nonce says the link's own signed challenge carries this
+	// witness's nonce; link_freshness holds that challenge's derived cells.
+	if r, ok := decodeLinkRecord(proof); ok && (r.Nonce != "" || r.ObservedAt != "") {
+		ch := s.challengeOf(r)
+		if err = s.settleChallenges(ctx, tx, []*LinkChallenge{ch}); err != nil {
+			return Result{}, err
+		}
+		data["fresh_for_nonce"] = ch.Nonce == d.Nonce
+		cells := map[string]any{}
+		addFreshness(cells, ch)
+		if len(cells) > 0 {
+			data["link_freshness"] = cells
+		}
+	}
+	return Result{Data: data}, nil
 }
 
 // witnessedCounts is, per agent and link, the number of distinct other

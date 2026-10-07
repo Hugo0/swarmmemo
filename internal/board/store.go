@@ -366,6 +366,11 @@ func Open(path string, config Config) (*Store, error) {
 	if err = services.MigratePastes(migration); err != nil {
 		return fail(err)
 	}
+	// Receiver dedupe (dedupe_header, duplicates, items' dedupe_key) and its
+	// index: additive, keyed on the columns (services/receiver.go).
+	if err = services.MigrateReceivers(migration); err != nil {
+		return fail(err)
+	}
 	// Schema 13: room styles (RFC0011), a new table created above. Additive.
 	// 1.24: x402_vetted.reason, who vetted ('' before: the operator).
 	// 1.37: works.reviewer (the named reviewer's account) and

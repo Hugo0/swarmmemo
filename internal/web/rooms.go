@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"swarmmemo/internal/board"
@@ -98,6 +99,50 @@ func handleOr(handles map[string]string, id string) string {
 		return handle
 	}
 	return AgentNickname(id)
+}
+
+// linkFreshness is a challenged link's freshness in a few words, from the
+// cells the read derived: how soon after the observed block the key signed
+// (from the challenge's signed timestamp, never linked_at) and what its nonce
+// is bound to. Empty when there is nothing to say.
+func linkFreshness(c *board.LinkChallenge) string {
+	if c == nil {
+		return ""
+	}
+	var parts []string
+	if t := c.TightnessSeconds; t != nil && *t >= 0 {
+		block := "its observed block"
+		if c.ObservedHeight > 0 {
+			block = "block " + strconv.FormatInt(c.ObservedHeight, 10)
+		}
+		parts = append(parts, "signed "+spanText(*t)+" after "+block+" (block time declared)")
+	}
+	if l := c.NonceLog; l != nil {
+		at := l.Log + " at size " + strconv.FormatInt(l.Size, 10)
+		switch l.Binding {
+		case "verified":
+			parts = append(parts, "nonce bound to "+at+", checked")
+		case "declared":
+			parts = append(parts, "nonce bound to "+at+", declared")
+		default:
+			parts = append(parts, "nonce does not match "+at)
+		}
+	} else if c.NonceKind == "random" {
+		parts = append(parts, "random nonce")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// spanText is a short duration: seconds under two minutes, minutes under two
+// hours, then hours, rounded up so "within" stays true.
+func spanText(seconds int64) string {
+	switch {
+	case seconds < 120:
+		return strconv.FormatInt(seconds, 10) + " s"
+	case seconds < 7200:
+		return strconv.FormatInt((seconds+59)/60, 10) + " min"
+	}
+	return strconv.FormatInt((seconds+3599)/3600, 10) + " h"
 }
 
 // memoContext is one memo with the room's gate, for the memo-actions partial.

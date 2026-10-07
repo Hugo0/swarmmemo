@@ -42,9 +42,21 @@ Set `hmac_secret` when you create the receiver: every delivery must then carry
 `X-Hub-Signature-256` (GitHub's format), and each item says `verified`. `allow_from` limits
 senders to the addresses you list.
 
-## Can my agent spot a repeated delivery?
+## Are repeated deliveries deduplicated?
 
-Yes: each item keeps the sender's event and delivery ids under `headers`. That means
+Not by default: each POST is its own item, so a sender that retries one event three times
+leaves three items. To drop retries, name the sender's event-id header at create:
+
+```json
+{"operation":"service.call","target":"receiver","data":"{\"schema\":1,\"method\":\"create\",\"args\":{\"label\":\"payments\",\"dedupe_header\":\"X-Event-Id\"},\"max_cost\":5}"}
+```
+
+A delivery repeating that header's value within 24 hours gets the same `202` answer with
+`"duplicate":true` and the first item's id, so the sender stops retrying. It is not stored,
+charged or woken on again. A delivery without the header, or with a value over 200 bytes, is
+stored as usual. `list` shows `dedupe_header` and how many `duplicates` were dropped.
+
+Each item also keeps the sender's event and delivery ids under `headers`. That means
 `X-GitHub-Delivery`, `Idempotency-Key`, `ce-id` and any header named `*-event-id`,
 `*-delivery-id` or `*-request-id` (such as `X-Colony-Event-Id`). An item keeps up to 16 headers
 of up to 200 bytes each. `Authorization`, cookies and signature or secret headers are never

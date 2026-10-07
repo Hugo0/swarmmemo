@@ -928,3 +928,138 @@ func TestLinkChallenge(t *testing.T) {
 		t.Fatalf("challenged sealing key: %+v %+v", sealed.SealKey, sealed.Links)
 	}
 }
+
+// freshLink is an identity.link of a url with data fields beyond kind and
+// value, signed at timestamp at.
+func freshLink(key ed25519.PrivateKey, value string, at int64, fields map[string]any) Command {
+	data := map[string]any{"schema": 1, "kind": "url", "value": value}
+	for k, v := range fields {
+		data[k] = v
+	}
+	raw, _ := json.Marshal(data)
+	return signed(key, Command{Operation: "identity.link", Data: string(raw), Timestamp: at})
+}
+
+// TestLinkFreshness covers the two derived cells of a challenge on the real
+// engine: nonce_kind (random, log_root declared, verified against this log's
+// own checkpoint, failed) and tightness_seconds (signed_at minus the declared
+// block time, only when both are known, and from the challenge's own signed
+// timestamp when a link is challenged again).
+func TestLinkFreshness(t *testing.T) {
+	s, _ := linkTest(t)
+	ours, theirs := keyFor(95), keyFor(96)
+	register(t, s, ours)
+	register(t, s, theirs)
+	if _, err := s.SignCheckpoint(testContext); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := s.ReadLogCheckpoint(testContext, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := "00000000000000000001a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7"
+	random := "verifier-nonce-0123456789"
+	blockTime := testTime - 720
+
+	for name, fields := range map[string]map[string]any{
+		"log without size":    {"nonce": random, "nonce_log": "sigil.example/log"},
+		"size without log":    {"nonce": random, "nonce_log_size": 74},
+		"log without nonce":   {"observed_at": block, "nonce_log": "sigil.example/log", "nonce_log_size": 74},
+		"zero size":           {"nonce": random, "nonce_log": "sigil.example/log", "nonce_log_size": 0},
+		"huge size":           {"nonce": random, "nonce_log": "sigil.example/log", "nonce_log_size": int64(IdentityLinkLogSizeMax) + 1},
+		"fractional size":     {"nonce": random, "nonce_log": "sigil.example/log", "nonce_log_size": 7.5},
+		"log with space":      {"nonce": random, "nonce_log": "sigil log", "nonce_log_size": 74},
+		"long log":            {"nonce": random, "nonce_log": strings.Repeat("l", IdentityLinkLogNameMax+1), "nonce_log_size": 74},
+		"time without block":  {"nonce": random, "observed_time": blockTime},
+		"height without blk":  {"nonce": random, "observed_height": 970254},
+		"zero height":         {"observed_at": block, "observed_height": 0},
+		"huge height":         {"observed_at": block, "observed_height": IdentityLinkBlockHeightMax + 1},
+		"before genesis":      {"observed_at": block, "observed_time": bitcoinGenesisTime - 1},
+		"block after signing": {"observed_at": block, "observed_time": testTime + blockTimeFutureSlack + 1},
+		"string time":         {"observed_at": block, "observed_time": "1788565680"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fails(t, s, freshLink(ours, "https://example.org/bad", testTime, fields), "invalid_link")
+		})
+	}
+
+	ownNonce := fmt.Sprintf("%s%d-%s", IdentityLinkLogNoncePrefix, cp.Size, cp.RootHex[:32])
+	wrongRoot := fmt.Sprintf("%s%d-%s", IdentityLinkLogNoncePrefix, cp.Size, strings.Repeat("0", 32))
+	res := run(t, s, freshLink(ours, "https://example.org/random", testTime, map[string]any{"nonce": random, "observed_at": block, "observed_height": 970254, "observed_time": blockTime}))
+	if res.Data["nonce_kind"] != "random" || res.Data["tightness_seconds"] != int64(720) || res.Data["nonce_log"] != nil {
+		t.Fatalf("random answer: %v", res.Data)
+	}
+	run(t, s, freshLink(ours, "https://example.org/own", testTime, map[string]any{"nonce": ownNonce}))
+	run(t, s, freshLink(ours, "https://example.org/wrong", testTime, map[string]any{"nonce": wrongRoot}))
+	res = run(t, s, freshLink(ours, "https://example.org/sigil", testTime, map[string]any{"nonce": "sigil-cp74-" + strings.Repeat("ab", 16), "nonce_log": "sigil.example/log", "nonce_log_size": 74}))
+	if res.Data["nonce_kind"] != "log_root" || res.Data["nonce_log"] != (NonceLog{Log: "sigil.example/log", Size: 74, Binding: "declared"}) {
+		t.Fatalf("declared answer: %v", res.Data)
+	}
+	run(t, s, freshLink(ours, "https://example.org/declared-own", testTime, map[string]any{"nonce": "mine-" + cp.RootHex[:32], "nonce_log": "swarmmemo.com/log", "nonce_log_size": cp.Size}))
+	run(t, s, freshLink(ours, "https://example.org/no-time", testTime, map[string]any{"observed_at": block, "observed_height": 970254}))
+
+	byValue := func() map[string]IdentityLink {
+		out := map[string]IdentityLink{}
+		for _, l := range agentLinks(t, s, ours).Links {
+			out[l.Value] = l
+		}
+		return out
+	}
+	links := byValue()
+	for value, want := range map[string]struct {
+		kind    string
+		log     *NonceLog
+		tight   int64
+		hasTime bool
+	}{
+		"https://example.org/random":       {kind: "random", tight: 720, hasTime: true},
+		"https://example.org/own":          {kind: "log_root", log: &NonceLog{Log: "swarmmemo.com/log", Size: cp.Size, Binding: "verified"}},
+		"https://example.org/wrong":        {kind: "random", log: &NonceLog{Log: "swarmmemo.com/log", Size: cp.Size, Binding: "failed"}},
+		"https://example.org/sigil":        {kind: "log_root", log: &NonceLog{Log: "sigil.example/log", Size: 74, Binding: "declared"}},
+		"https://example.org/declared-own": {kind: "log_root", log: &NonceLog{Log: "swarmmemo.com/log", Size: cp.Size, Binding: "verified"}},
+		"https://example.org/no-time":      {},
+	} {
+		c := links[value].Challenge
+		if c == nil || c.NonceKind != want.kind || c.SignedAt != testTime || (c.NonceLog == nil) != (want.log == nil) ||
+			want.log != nil && *c.NonceLog != *want.log || (c.TightnessSeconds != nil) != want.hasTime || want.hasTime && *c.TightnessSeconds != want.tight {
+			t.Errorf("%s: %+v", value, c)
+		}
+	}
+	if c := links["https://example.org/no-time"].Challenge; c.ObservedHeight != 970254 || c.ObservedTime != 0 {
+		t.Errorf("a declared height without a time: %+v", c)
+	}
+
+	// A size with no checkpoint fails rather than reading as bound.
+	run(t, s, freshLink(ours, "https://example.org/own", testTime, map[string]any{"nonce": fmt.Sprintf("%s%d-%s", IdentityLinkLogNoncePrefix, cp.Size+1000, cp.RootHex[:32])}))
+	if l := byValue()["https://example.org/own"].Challenge; l.NonceKind != "random" || l.NonceLog == nil || l.NonceLog.Binding != "failed" {
+		t.Fatalf("a nonce naming an unsigned size: %+v", l)
+	}
+
+	// Challenged again later: linked_at stays, signed_at and the tightness
+	// move with the new signed command.
+	before := links["https://example.org/random"]
+	run(t, s, freshLink(ours, "https://example.org/random", testTime+120, map[string]any{"nonce": "second-verifier-nonce-01", "observed_at": block, "observed_height": 970254, "observed_time": blockTime}))
+	after := byValue()["https://example.org/random"]
+	if after.LinkedAt != before.LinkedAt || after.Challenge.SignedAt != testTime+120 || after.Challenge.TightnessSeconds == nil ||
+		*after.Challenge.TightnessSeconds != 840 || !verifyChallenge(after.Challenge, pubKey(ours)) {
+		t.Fatalf("re-challenged link: before %+v after %+v", before, after.Challenge)
+	}
+
+	// The witness answer says whether the link signed the witness's nonce,
+	// with that challenge's cells.
+	w := run(t, s, witnessCommand(theirs, keyID(ours), "url", "https://example.org/random", "second-verifier-nonce-01", "verified"))
+	cells, _ := w.Data["link_freshness"].(map[string]any)
+	if w.Data["fresh_for_nonce"] != true || cells["nonce_kind"] != "random" || cells["tightness_seconds"] != int64(840) {
+		t.Fatalf("witness answer: %v", w.Data)
+	}
+	w = run(t, s, witnessCommand(theirs, keyID(ours), "url", "https://example.org/sigil", "some-other-nonce-0123", "verified"))
+	if w.Data["fresh_for_nonce"] != false {
+		t.Fatalf("witness with another nonce: %v", w.Data)
+	}
+
+	// Over the wire the cells sit inside the challenge.
+	raw, _ := json.Marshal(byValue()["https://example.org/own"])
+	if !strings.Contains(string(raw), `"signed_at":1788566400,"nonce_kind":"random","nonce_log":{"log":"swarmmemo.com/log","size":`) {
+		t.Fatalf("wire shape: %s", raw)
+	}
+}

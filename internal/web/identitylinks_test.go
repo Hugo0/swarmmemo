@@ -233,3 +233,46 @@ func TestMeFormsStateServiceLimits(t *testing.T) {
 		t.Error("the command map must stay one table")
 	}
 }
+
+// A challenged link shows its freshness in one compact line, from the cells
+// the read derived; a link without a challenge, or with nothing to say,
+// shows none.
+func TestAgentPageShowsLinkFreshness(t *testing.T) {
+	tight, quick, early := int64(720), int64(45), int64(-30)
+	agent := &board.Agent{ID: strings.Repeat("a", 64), Links: []board.IdentityLink{
+		{Kind: "url", Value: "https://example.org/a", State: "claimed", LinkedAt: 1, Challenge: &board.LinkChallenge{
+			Nonce: "n", NonceKind: "random", ObservedHeight: 970254, ObservedTime: 100, SignedAt: 820, TightnessSeconds: &tight}},
+		{Kind: "url", Value: "https://example.org/b", State: "claimed", LinkedAt: 1, Challenge: &board.LinkChallenge{
+			Nonce: "n", NonceKind: "log_root", NonceLog: &board.NonceLog{Log: "swarmmemo.com/log", Size: 42, Binding: "verified"}, TightnessSeconds: &quick}},
+		{Kind: "url", Value: "https://example.org/c", State: "claimed", LinkedAt: 1, Challenge: &board.LinkChallenge{
+			Nonce: "n", NonceKind: "log_root", NonceLog: &board.NonceLog{Log: "<b>sigil</b>/log", Size: 74, Binding: "declared"}}},
+		{Kind: "url", Value: "https://example.org/d", State: "claimed", LinkedAt: 1, Challenge: &board.LinkChallenge{
+			Nonce: "n", NonceKind: "random", NonceLog: &board.NonceLog{Log: "swarmmemo.com/log", Size: 9, Binding: "failed"}, TightnessSeconds: &early}},
+		{Kind: "url", Value: "https://example.org/e", State: "claimed", LinkedAt: 1, Challenge: &board.LinkChallenge{ObservedAt: "block"}},
+		{Kind: "url", Value: "https://example.org/f", State: "claimed", LinkedAt: 1},
+	}}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		if c.Operation == "agent.get" {
+			return board.Result{OK: true, Agent: agent}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/agent/"+agent.ID, nil))
+	section := w.Body.String()
+	section = section[strings.Index(section, `id="elsewhere"`):]
+	section = section[:strings.Index(section, "</section>")]
+	for _, want := range []string{
+		`<span class="link-fresh small muted">signed 12 min after block 970254 (block time declared) · random nonce</span>`,
+		`<span class="link-fresh small muted">signed 45 s after its observed block (block time declared) · nonce bound to swarmmemo.com/log at size 42, checked</span>`,
+		`<span class="link-fresh small muted">nonce bound to &lt;b&gt;sigil&lt;/b&gt;/log at size 74, declared</span>`,
+		`<span class="link-fresh small muted">nonce does not match swarmmemo.com/log at size 9</span>`,
+	} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("missing %q in:\n%s", want, section)
+		}
+	}
+	if n := strings.Count(section, "link-fresh"); n != 4 {
+		t.Fatalf("%d freshness lines, want 4", n)
+	}
+}

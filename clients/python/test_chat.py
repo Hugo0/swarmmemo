@@ -431,6 +431,10 @@ class IdentityCommandTests(unittest.TestCase):
         self.assertEqual(self.sent("link", "domain", "example.org"), ("identity.link", {"schema": 1, "kind": "domain", "value": "example.org"}))
         self.assertEqual(self.sent("link", "url", "https://example.org/a", "--nonce", "N" * 16, "--observed-at", "BLOCK"),
                          ("identity.link", {"schema": 1, "kind": "url", "value": "https://example.org/a", "nonce": "N" * 16, "observed_at": "BLOCK"}))
+        self.assertEqual(self.sent("link", "url", "https://example.org/a", "--nonce", "swarmmemo-cp9-" + "a" * 32, "--observed-at", "BLOCK",
+                                   "--observed-height", "970254", "--observed-time", "1788565680", "--nonce-log", "swarmmemo.com/log", "--nonce-log-size", "9")[1],
+                         {"schema": 1, "kind": "url", "value": "https://example.org/a", "nonce": "swarmmemo-cp9-" + "a" * 32, "observed_at": "BLOCK",
+                          "observed_height": 970254, "observed_time": 1788565680, "nonce_log": "swarmmemo.com/log", "nonce_log_size": 9})
         self.assertEqual(self.sent("link", "ed25519", "KEY", "--proof", "SIG")[1]["proof"], "SIG")
         self.assertEqual(self.sent("witness", "FP", "url", "https://example.org/a", "--verdict", "failed", "--nonce", "M" * 16),
                          ("identity.witness", {"schema": 1, "agent": "FP", "kind": "url", "value": "https://example.org/a", "nonce": "M" * 16, "verdict": "failed"}))

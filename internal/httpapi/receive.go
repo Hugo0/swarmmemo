@@ -20,7 +20,8 @@ type receiverService interface {
 // receive is POST /in/ID/SECRET: one delivery to an agent's receiver
 // (services/receiver.go). The body is read up to one byte past the limit and
 // handed over as data; nothing here logs the URL, a header or the body, and
-// the answer names only the stored item. GET and HEAD are a provider's
+// the answer names only the stored item (the first one, with duplicate:
+// true, when the receiver's dedupe_header value repeats). GET and HEAD are a provider's
 // reachability check: 200 "ok" when a POST would reach an active receiver,
 // else the refusal a POST gets; nothing is stored or charged and no request
 // content is echoed. Any other method is refused without looking the
@@ -72,10 +73,16 @@ func (s *Server) receive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	receipt, err := svc.Receive(r.Context(), services.Delivery{ID: id, Token: token, ContentType: r.Header.Get("Content-Type"), Body: body,
-		Signature: r.Header.Get("X-Hub-Signature-256"), Source: net.ParseIP(s.peer(r)), Headers: headers})
+		Signature: r.Header.Get("X-Hub-Signature-256"), Source: net.ParseIP(s.peer(r)), Headers: headers, HeaderValue: r.Header.Get})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	jsonResponse(w, http.StatusAccepted, map[string]any{"ok": true, "item": receipt.Item, "bytes": receipt.Bytes})
+	answer := map[string]any{"ok": true, "item": receipt.Item, "bytes": receipt.Bytes}
+	if receipt.Duplicate {
+		// The same success, so the sender stops retrying: item is the first
+		// delivery's, and nothing was stored or charged.
+		answer["duplicate"] = true
+	}
+	jsonResponse(w, http.StatusAccepted, answer)
 }
