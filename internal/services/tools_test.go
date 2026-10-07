@@ -171,6 +171,21 @@ func TestToolsCallRoutesAndRefuses(t *testing.T) {
 	if !e.Anonymous(services.ToolsID, toolsData("swarmmemo:notary.stamp", stamp, -1)) || e.Anonymous(services.ToolsID, toolsData("swarmmemo:memory.put", map[string]any{}, -1)) {
 		t.Fatal("Engine.Anonymous does not follow the routed method")
 	}
+	// Malformed data is refused for what it is, not with a request to sign:
+	// a repeated key inside args, unsigned, is invalid_service_data, uncharged,
+	// even for a method that needs a key.
+	for _, service := range []string{"notary", "memory"} {
+		dup := `{"schema":1,"method":"put","args":{"key":"k","key":"k"}}`
+		if service == "notary" {
+			dup = `{"schema":1,"method":"stamp","args":{"text":"a","text":"b"}}`
+		}
+		if !e.Anonymous(service, dup) {
+			t.Fatalf("%s: malformed data is sent to sign", service)
+		}
+		if _, err = runCall(t, e, db, network, service, dup, "id:dup-anon-"+service+"-0001", now); code(err) != "invalid_service_data" {
+			t.Fatalf("%s repeated key without a key: %v", service, err)
+		}
+	}
 	// A key-needing tool, signed, is the method's own call and record.
 	got, err = runCall(t, e, db, alice, services.ToolsID, toolsData("swarmmemo:memory.put", map[string]any{"key": "notes/today", "value": "routed"}, -1), "id:r5", now)
 	if err != nil || get(got, "service") != "memory" || get(got, "call", "resource") != "memory_bytes" {

@@ -146,3 +146,25 @@ func TestAnonCrossNetworkRetryUsesIndex(t *testing.T) {
 		t.Fatalf("plan: %s", joined)
 	}
 }
+
+// The taken-request_id check of an unsigned call (C26) uses the same index.
+func TestAnonCallKeyTakenUsesIndex(t *testing.T) {
+	s := openTest(t, Config{})
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+anonCallKeyQuery, "id:x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err = rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if joined := strings.Join(plan, "; "); !strings.Contains(joined, "requests_anon_key") || strings.Contains(joined, "SCAN") {
+		t.Fatalf("plan: %s", joined)
+	}
+}

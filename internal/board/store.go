@@ -118,6 +118,10 @@ type Store struct {
 	keyBackupRates map[string]privateReadBucket
 	// The transparency log's signing key (transparency.go).
 	transparency transparencyState
+	// Waiting reads (waiting.go): the signal each committed write closes and
+	// the slots updates.get waits take.
+	changes       changeSignal
+	updateWaiters *WaitSlots
 }
 
 const schema = `
@@ -309,7 +313,7 @@ func Open(path string, config Config) (*Store, error) {
 	}
 	// Credit top-ups are on exactly when configured with the ledger on.
 	config.Features.Topup = config.Topup != nil && config.Features.Ledger == LedgerOn
-	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), activityGate: make(chan struct{}, 1), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}}
+	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), activityGate: make(chan struct{}, 1), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}, updateWaiters: NewWaitSlots(UpdatesWaitersPerSource, UpdatesWaitersMax)}
 	if err = db.QueryRow("SELECT value FROM meta WHERE key='generation'").Scan(&s.generation); err != nil {
 		return fail(err)
 	}
@@ -500,6 +504,11 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 	generated := false
 	if unsignedCall && (cmd.RequestID == "" || services.PlaceholderRequestID(cmd.RequestID)) {
 		cmd.RequestID, generated = services.NewRequestID(), true
+	}
+	if cmd.Operation == "updates.get" {
+		if opts, err := parseUpdatesOptions(cmd.Data); err == nil && opts.Wait > 0 {
+			return s.waitUpdates(ctx, cmd, source, opts.Wait)
+		}
 	}
 	res, err := s.executeCommand(ctx, cmd, source)
 	if err == nil && unsignedCall {
@@ -697,6 +706,13 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 				return empty, err
 			}
 		}
+		// An unsigned call's request_id another network used (anonretry.go):
+		// 409, nothing run, charged or revealed.
+		if cmd.RequestID != "" {
+			if err = anonCallKeyTaken(ctx, tx, cmd, a, "id:"+cmd.RequestID); err != nil {
+				return empty, err
+			}
+		}
 		// An anonymous public post's exact retry from another network
 		// (anonretry.go): the original receipt, nothing published or charged.
 		if cmd.RequestID != "" {
@@ -772,6 +788,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	}
 	if err = tx.Commit(); err != nil {
 		return empty, err
+	}
+	if mutation(cmd.Operation) {
+		s.signalChange() // wakes waiting reads (waiting.go)
 	}
 	s.screenPost(ctx, cmd, a, result) // MODERATION: queue a fresh public post; nothing when off
 	// RFC0013 §5.2: a post into a conversation, for its protected readers.

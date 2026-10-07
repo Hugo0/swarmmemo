@@ -206,7 +206,12 @@ func TestUpdatesCountsOnlyReturnsIdsWithoutMessages(t *testing.T) {
 	if _, ok := counts.Data["unread"]; !ok {
 		t.Fatal("read for yourself, counts only keeps the inbox counts")
 	}
-	for _, bad := range []string{`{"schema":1,"counts":true,"text":true}`, `not json`, `{"schema":2}`} {
+	for _, plain := range []string{`{"schema":1}`, `{"schema":1,"counts":false}`} {
+		if res := run(t, s, signed(mine, Command{Operation: "updates.get", Target: me, Cursor: saved, Data: plain})); len(res.Messages) != 2 || res.Data["counts_only"] != nil {
+			t.Errorf("data %s is not the ordinary read: %d messages, %v", plain, len(res.Messages), res.Data)
+		}
+	}
+	for _, bad := range []string{`{"schema":1,"counts":true,"text":true}`, `not json`, `{"schema":2}`, `{}`, `{"counts":true}`, `{"schema":0,"counts":true}`, `null`} {
 		if _, err := s.Execute(testContext, signed(mine, Command{Operation: "updates.get", Target: me, Data: bad}), "test-origin"); err == nil || !strings.Contains(err.Error(), "counts") {
 			t.Errorf("data %s was not refused: %v", bad, err)
 		}

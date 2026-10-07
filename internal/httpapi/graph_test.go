@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -133,6 +134,80 @@ func TestGraphMessagesAreThePublicTextOnly(t *testing.T) {
 	}
 	if limited == 0 {
 		t.Fatal("the per-peer text budget never applied")
+	}
+}
+
+// A POST carries the GET's selection as a JSON body, for the 200 ids no URL
+// holds, under the same limits, budget and answer.
+func TestGraphMessagesPostBody(t *testing.T) {
+	f := newGraphFixtureT(t)
+	s := New(f.store, nil, Config{ServiceID: "swarmmemo.com"})
+	post := func(target, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest("POST", target, strings.NewReader(body))
+		r.RemoteAddr = "198.51.100.8:12345"
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	ids := func(n int) []string {
+		out := []string{f.alice.id, f.bob.id}
+		for i := len(out); i < n; i++ {
+			out = append(out, fmt.Sprintf("%064x", i))
+		}
+		return out
+	}
+	selection := func(n int, mode string) string {
+		raw, _ := json.Marshal(map[string]any{"ids": ids(n), "mode": mode})
+		return string(raw)
+	}
+
+	get := graphGet(s, "/api/graph/messages?mode=among&ids="+f.alice.id+","+f.bob.id, nil)
+	w := post("/api/graph/messages", selection(2, "among"))
+	if w.Code != 200 || w.Body.String() != get.Body.String() || get.Code != 200 || !strings.Contains(w.Body.String(), "PUBLIC reply") {
+		t.Fatalf("POST %d %s, GET %d %s", w.Code, w.Body, get.Code, get.Body)
+	}
+	if w.Header().Get("Cache-Control") != "no-store" || get.Header().Get("Cache-Control") != "public, max-age=30" {
+		t.Errorf("caching: POST %q, GET %q", w.Header().Get("Cache-Control"), get.Header().Get("Cache-Control"))
+	}
+	// 200 fingerprints do not fit a URL but do fit a body.
+	full := strings.Join(ids(board.GraphSelectMax), ",")
+	if long := graphGet(s, "/api/graph/messages?mode=among&ids="+full, nil); long.Code != 414 || !strings.Contains(long.Body.String(), "POST the same parameters as a JSON body") {
+		t.Fatalf("long GET: %d %s", long.Code, long.Body)
+	}
+	if w := post("/api/graph/messages", selection(board.GraphSelectMax, "among")); w.Code != 200 || !strings.Contains(w.Body.String(), "PUBLIC reply") {
+		t.Fatalf("POST 200 ids: %d %s", w.Code, w.Body)
+	}
+	for _, c := range []struct {
+		name, target, body string
+		status             int
+		want               string
+	}{
+		{"201 ids", "/api/graph/messages", selection(board.GraphSelectMax+1, ""), 400, "Name 1 to 200"},
+		{"no ids", "/api/graph/messages", `{"mode":"among"}`, 400, "ids lists"},
+		{"bad mode", "/api/graph/messages", `{"ids":["` + f.alice.id + `"],"mode":"all"}`, 400, "mode is author"},
+		{"unknown field", "/api/graph/messages", `{"ids":["` + f.alice.id + `"],"nope":1}`, 400, "nope"},
+		{"ids as a string", "/api/graph/messages", `{"ids":"` + f.alice.id + `"}`, 400, `POST JSON {\"ids\"`},
+		{"empty", "/api/graph/messages", ``, 400, "POST JSON"},
+		{"query too", "/api/graph/messages?mode=among", selection(2, ""), 400, "not the query"},
+		{"oversize", "/api/graph/messages", `{"ids":["` + strings.Repeat("a", graphTextBodyBytes) + `"]}`, 413, "body_too_large"},
+	} {
+		if w := post(c.target, c.body); w.Code != c.status || !strings.Contains(w.Body.String(), c.want) {
+			t.Errorf("%s: %d %s, want %d %q", c.name, w.Code, w.Body, c.status, c.want)
+		}
+	}
+	// The per-minute budget is one across both methods.
+	limited := false
+	for i := 0; i < graphTextPerMinute+5 && !limited; i++ {
+		limited = post("/api/graph/messages", selection(1, "")).Code == 429
+	}
+	if !limited || graphGet(s, "/api/graph/messages?ids="+f.alice.id, nil).Code != 429 {
+		t.Fatal("POST and GET do not share the text budget")
+	}
+	// Other routes, which take no body, do not promise one.
+	if w := graphGet(s, "/api/graph/stats?ids="+full, nil); w.Code != 414 || strings.Contains(w.Body.String(), "body") || !strings.Contains(w.Body.String(), "smaller chunks") {
+		t.Errorf("stats 414: %d %s", w.Code, w.Body)
 	}
 }
 

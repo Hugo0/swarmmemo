@@ -21,6 +21,10 @@ package board
 // write path calls it before committing, and the background job catches up
 // whatever a path without the call wrote. The one-time backfill is the same
 // function from cursor zero, so history and new events get identical leaves.
+// An identity row is logged once its account is public; the rows from
+// before (a hosted identity's handle, claimed at hosted.create) go in just
+// before the account's first leaf, and tlogBackfillIdentity appended those
+// that earlier versions passed over.
 // Text is never in a leaf: a message is its id, sequence, room, author, the
 // SHA-256 of its text and its signature. Moderation appends a leaf; nothing
 // in the log is ever rewritten (triggers refuse UPDATE and DELETE).
@@ -142,8 +146,9 @@ type pendingLeaf struct {
 	leaf    logLeaf
 	subject string
 	ref     string
-	skip    bool // advances the cursor without a leaf
-	byTime  bool // an identity leaf judged public as of its second, not of an audit row
+	skip    bool   // advances the cursor without a leaf
+	byTime  bool   // an identity leaf judged public as of its second, not of an audit row
+	account string // an audit identity row's or a message's account, for deferred identity leaves
 }
 
 func (p pendingLeaf) key() [3]int64 { return [3]int64{p.at, int64(p.rank), p.seq} }
@@ -166,9 +171,12 @@ var eventIDRE = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // logSources are the outbox, in source rank: in one transaction an audit row
 // (a handle claimed on a post) precedes the message, which precedes room
 // governance and tier changes.
+// identityLogOps are the audit operations logged as identity leaves.
+const identityLogOps = `'agent.register','handle.claim','agent.rotate','hosted.claim','identity.link','identity.unlink','agent.profile.publish','agent.profile.remove'`
+
 var logSources = []logSource{
 	{"audit", "audit", 0, `SELECT au.seq,au.operation,au.actor,au.target,au.detail,au.created_at,coalesce(i.account,'') FROM audit au LEFT JOIN identities i ON i.id=au.actor
- WHERE au.seq>? AND au.operation IN ('agent.register','handle.claim','agent.rotate','hosted.claim','identity.link','identity.unlink','agent.profile.publish','agent.profile.remove','allowance.grant') ORDER BY au.seq LIMIT ?`,
+ WHERE au.seq>? AND au.operation IN (` + identityLogOps + `,'allowance.grant') ORDER BY au.seq LIMIT ?`,
 		func(rows *sql.Rows) (pendingLeaf, error) {
 			var p pendingLeaf
 			var op, actor, target, detail, account string
@@ -184,15 +192,15 @@ var logSources = []logSource{
 				return p, nil
 			}
 			p.leaf = logLeaf{Kind: "identity", Op: op, Agent: actor, Target: target, Detail: detail}
-			p.subject, p.ref = actor, account // ref: the account, checked for publicness below
+			p.subject, p.ref, p.account = actor, account, account // ref: the account, checked for publicness below
 			return p, nil
 		}},
-	{"events", "events", 1, `SELECT e.seq,e.id,e.display_seq,e.room,e.author,e.hash,e.signature,e.supersedes,e.reply_to,e.created_at FROM events e JOIN rooms r ON r.name=e.room
+	{"events", "events", 1, `SELECT e.seq,e.id,e.display_seq,e.room,e.author,e.hash,e.signature,e.supersedes,e.reply_to,e.created_at,e.account FROM events e JOIN rooms r ON r.name=e.room
  WHERE e.seq>? AND r.visibility='public' ORDER BY e.seq LIMIT ?`,
 		func(rows *sql.Rows) (pendingLeaf, error) {
 			var p pendingLeaf
 			l := logLeaf{Kind: "message"}
-			if err := rows.Scan(&p.seq, &l.ID, &l.Seq, &l.Room, &l.Agent, &l.TextSHA256, &l.Signature, &l.Supersedes, &l.ReplyTo, &p.at); err != nil {
+			if err := rows.Scan(&p.seq, &l.ID, &l.Seq, &l.Room, &l.Agent, &l.TextSHA256, &l.Signature, &l.Supersedes, &l.ReplyTo, &p.at, &p.account); err != nil {
 				return p, err
 			}
 			p.leaf, p.subject, p.ref = l, l.Agent, l.ID
@@ -331,6 +339,7 @@ func tlogCatchUp(ctx context.Context, tx *sql.Tx) (int, error) {
 	}
 	read := txHashReader(ctx, tx)
 	consumed := 0
+	checked := map[string]bool{} // accounts whose earlier identity rows are known logged
 	// Merge by (created_at, rank, seq), keeping each source in seq order, and
 	// stop when a truncated source runs out: its next rows are unknown.
 	for {
@@ -367,20 +376,29 @@ func tlogCatchUp(ctx context.Context, tx *sql.Tx) (int, error) {
 			}
 			p.ref = ""
 		}
-		data := p.leaf.bytes()
-		stored, err := tlog.AppendHashes(size, tlog.LeafHash(data), read)
-		if err != nil {
-			return 0, err
-		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO tlog_leaves(idx,kind,subject,ref,data,created_at) VALUES(?,?,?,?,?,?)", size, p.leaf.Kind, p.subject, p.ref, string(data), p.at); err != nil {
-			return 0, err
-		}
-		for _, h := range stored {
-			if _, err = tx.ExecContext(ctx, "INSERT INTO tlog_hashes(level,idx,hash) VALUES(?,?,?)", h.Level, h.Index, h.Hash[:]); err != nil {
+		if p.account != "" && !checked[p.account] {
+			// The account's first leaf: its identity rows from before it
+			// was public (a hosted identity's handle, a handle claimed on a
+			// private post) go first, each with its original time. Audit
+			// rows up to the cursor are consumed; this row is not one of them.
+			checked[p.account] = true
+			first, err := accountFirstOnRecord(ctx, tx, p.account)
+			if err != nil {
 				return 0, err
 			}
+			if first {
+				bound := cursors[0]
+				if best == 0 {
+					bound = p.seq - 1
+				}
+				if _, err = logEarlierIdentity(ctx, tx, p.account, bound, &size, read); err != nil {
+					return 0, err
+				}
+			}
 		}
-		size++
+		if err := appendLeaf(ctx, tx, &size, read, p.leaf, p.subject, p.ref, p.at); err != nil {
+			return 0, err
+		}
 	}
 	complete := !slices.Contains(truncated, true)
 	for i, src := range logSources {
@@ -393,6 +411,154 @@ func tlogCatchUp(ctx context.Context, tx *sql.Tx) (int, error) {
 		}
 	}
 	return consumed, nil
+}
+
+// appendLeaf appends one leaf at index *size through tx and advances it.
+func appendLeaf(ctx context.Context, tx *sql.Tx, size *int64, read tlog.HashReader, leaf logLeaf, subject, ref string, at int64) error {
+	data := leaf.bytes()
+	stored, err := tlog.AppendHashes(*size, tlog.LeafHash(data), read)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO tlog_leaves(idx,kind,subject,ref,data,created_at) VALUES(?,?,?,?,?,?)", *size, leaf.Kind, subject, ref, string(data), at); err != nil {
+		return err
+	}
+	for _, h := range stored {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO tlog_hashes(level,idx,hash) VALUES(?,?,?)", h.Level, h.Index, h.Hash[:]); err != nil {
+			return err
+		}
+	}
+	*size++
+	return nil
+}
+
+// onRecordSQL is true when the account ? has a message leaf or an identity
+// leaf of its own (a witness leaf is the witness key's, logged because the
+// witnessed agent is public, so it does not count).
+const onRecordSQL = `EXISTS(SELECT 1 FROM identities k JOIN tlog_leaves l ON l.subject=k.id WHERE k.account=? AND l.subject<>''
+ AND (l.kind='message' OR l.kind='identity' AND l.data NOT LIKE '%"op":"identity.witness"%'))`
+
+// accountFirstOnRecord reports whether a keyed account has no leaf of its
+// own yet, so the leaf about to be appended puts it on the record.
+func accountFirstOnRecord(ctx context.Context, tx *sql.Tx, account string) (bool, error) {
+	var first bool
+	err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM identities WHERE account=?) AND NOT "+onRecordSQL, account, account).Scan(&first)
+	return first, err
+}
+
+// identityRow is an audit row logged as an identity leaf.
+type identityRow struct {
+	seq, at                         int64
+	op, actor, target, detail, acct string
+}
+
+func (r identityRow) leaf() logLeaf {
+	return logLeaf{V: 1, Kind: "identity", At: r.at, Op: r.op, Agent: r.actor, Target: r.target, Detail: r.detail}
+}
+
+// logEarlierIdentity appends a leaf for each of the account's identity audit
+// rows up to seq bound that has none, oldest first, each with its original
+// time; it returns how many. An identity row is logged only once its account
+// is public (accountPublicAsOf), so the rows from before are logged when it
+// becomes public. A row's leaf is found by its exact bytes, so a second call
+// appends nothing.
+func logEarlierIdentity(ctx context.Context, tx *sql.Tx, account string, bound int64, size *int64, read tlog.HashReader) (int, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT au.seq,au.operation,au.actor,au.target,au.detail,au.created_at FROM identities i JOIN audit au ON au.actor=i.id
+ WHERE i.account=? AND au.seq<=? AND au.operation IN (`+identityLogOps+`) ORDER BY au.created_at,au.seq`, account, bound)
+	if err != nil {
+		return 0, err
+	}
+	var list []identityRow
+	for rows.Next() {
+		r := identityRow{acct: account}
+		if err = rows.Scan(&r.seq, &r.op, &r.actor, &r.target, &r.detail, &r.at); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		list = append(list, r)
+	}
+	if err = rows.Close(); err != nil {
+		return 0, err
+	}
+	return appendIdentityRows(ctx, tx, list, size, read)
+}
+
+func appendIdentityRows(ctx context.Context, tx *sql.Tx, list []identityRow, size *int64, read tlog.HashReader) (int, error) {
+	n := 0
+	for _, r := range list {
+		l := r.leaf()
+		var logged bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM tlog_leaves WHERE subject=? AND kind='identity' AND data=?)", r.actor, string(l.bytes())).Scan(&logged); err != nil {
+			return n, err
+		}
+		if logged {
+			continue
+		}
+		if err := appendLeaf(ctx, tx, size, read, l, r.actor, "", r.at); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// tlogBackfillIdentity is the one-time backfill (C29) of the identity
+// rows that accounts on the record wrote before they were public: before the
+// first-leaf check in tlogCatchUp they were never logged (a hosted identity's
+// handle, claimed at creation, most of all). It appends them now, after the
+// catch-up, each with its original time; the log is never rewritten. It runs
+// in upkeepData at every start, once (recorded in meta), and finds existing
+// leaves by their bytes, so it never appends a row twice.
+func tlogBackfillIdentity(ctx context.Context, tx *sql.Tx) (int, error) {
+	var done int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM meta WHERE key='tlog_identity_backfill'").Scan(&done); err != nil || done > 0 {
+		return 0, err
+	}
+	var cursor int64
+	if err := tx.QueryRowContext(ctx, "SELECT seq FROM tlog_cursors WHERE source='audit'").Scan(&cursor); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT au.seq,au.operation,au.actor,au.target,au.detail,au.created_at,i.account FROM audit au JOIN identities i ON i.id=au.actor
+ WHERE au.seq<=? AND au.operation IN (`+identityLogOps+`) ORDER BY au.created_at,au.seq`, cursor)
+	if err != nil {
+		return 0, err
+	}
+	var all []identityRow
+	for rows.Next() {
+		var r identityRow
+		if err = rows.Scan(&r.seq, &r.op, &r.actor, &r.target, &r.detail, &r.at, &r.acct); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		all = append(all, r)
+	}
+	if err = rows.Close(); err != nil {
+		return 0, err
+	}
+	onRecord := map[string]bool{}
+	var list []identityRow
+	for _, r := range all {
+		on, ok := onRecord[r.acct]
+		if !ok {
+			if err = tx.QueryRowContext(ctx, "SELECT "+onRecordSQL, r.acct).Scan(&on); err != nil {
+				return 0, err
+			}
+			onRecord[r.acct] = on
+		}
+		if on {
+			list = append(list, r)
+		}
+	}
+	var size int64
+	if err = tx.QueryRowContext(ctx, "SELECT coalesce(max(idx)+1,0) FROM tlog_leaves").Scan(&size); err != nil {
+		return 0, err
+	}
+	n, err := appendIdentityRows(ctx, tx, list, &size, txHashReader(ctx, tx))
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO meta(key,value) VALUES('tlog_identity_backfill',?)", strconv.Itoa(n))
+	return n, err
 }
 
 // accountPublicAsOf is publicAccountSQL as of an audit row: the account had
@@ -718,7 +884,8 @@ func (s *Store) refProof(ctx context.Context, ref string, cp LogCheckpoint, also
 		if err != nil {
 			return out, err
 		}
-		r.Checkpoint = LogCheckpoint{}
+		// Each related proof carries the checkpoint it was proven against, so
+		// it verifies on its own terms (an emptied one still serialized).
 		out.Related = append(out.Related, r)
 	}
 	return out, nil

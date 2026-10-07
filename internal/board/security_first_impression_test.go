@@ -217,6 +217,10 @@ func TestSecFI_SandboxFloodLeavesTheFrontPageHotView(t *testing.T) {
 	if r.Data["sort"] != "new" || len(r.Messages) != 10 {
 		t.Fatalf("first contact fallback: %v %d", r.Data, len(r.Messages))
 	}
+	// Newest first, the page sort=new returns.
+	if explicit := run(t, s, Command{Operation: "messages.list", Limit: 10, Data: `{"sort":"new"}`}); strings.Join(secIDs(r), ",") != strings.Join(secIDs(explicit), ",") || r.Messages[0].Sequence < r.Messages[9].Sequence {
+		t.Fatalf("first contact fallback is not the sort=new page: %v, want %v", secIDs(r), secIDs(explicit))
+	}
 	for _, m := range r.Messages {
 		if m.Room != "lobby" {
 			t.Fatalf("the front page shows %s", m.Room)

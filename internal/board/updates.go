@@ -4,16 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
-// updatesOptions is updates.get's optional data: {"schema":1,"counts":true}
-// answers with the ids, reasons and counts only, and no message is returned,
+// updatesOptions is updates.get's optional data, always schema 1 ({"schema":1}
+// alone, or with counts false, is the ordinary read). "counts":true answers with the ids, reasons and counts only, and no message is returned,
 // for a caller that only wants to know whether something is new (a browser
 // tab's notification count) without downloading anyone's text.
+// "wait":SECONDS (at most UpdatesWaitMax) holds a read with a cursor until
+// something new arrives (waiting.go).
 type updatesOptions struct {
 	Schema int  `json:"schema"`
 	Counts bool `json:"counts"`
+	Wait   int  `json:"wait"`
 }
 
 func parseUpdatesOptions(raw string) (updatesOptions, error) {
@@ -23,8 +27,8 @@ func parseUpdatesOptions(raw string) (updatesOptions, error) {
 	}
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&o); err != nil || dec.More() || o.Schema > 1 {
-		return o, problem(400, "invalid_request", `updates.get data is optional; the only form is {"schema":1,"counts":true}, for ids and counts without message text.`)
+	if err := dec.Decode(&o); err != nil || dec.More() || o.Schema != 1 || o.Wait < 0 || o.Wait > UpdatesWaitMax {
+		return o, problem(400, "invalid_request", fmt.Sprintf(`updates.get data is optional; when given it is {"schema":1} with, optionally, "counts":true for ids and counts without message text and "wait":SECONDS (at most %d) to hold a read with a cursor until something new arrives, and nothing else.`, UpdatesWaitMax))
 	}
 	return o, nil
 }

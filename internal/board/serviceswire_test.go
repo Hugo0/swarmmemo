@@ -497,7 +497,9 @@ func TestServiceRefusals(t *testing.T) {
 	fails(t, s, svcRead(owner, "echo", "status", map[string]string{"call": "nope"}), "invalid_service_data")
 	fails(t, s, svcRead(nil, "echo", "status", map[string]string{"call": strings.Repeat("a", 32)}), "signature_required")
 	fails(t, s, svcRead(owner, "echo", "status", map[string]string{"call": strings.Repeat("a", 32)}), "not_found")
-	fails(t, s, Command{Operation: "service.call", Target: "memory", Data: "{}"}, "signature_required")
+	// Malformed data without a key is not sent to sign (C25); here the
+	// keyless tier is off (no ledger), the refusal it meets first.
+	fails(t, s, Command{Operation: "service.call", Target: "memory", Data: "{}"}, "signed_only")
 	// Not delegable: a worker key is refused by the operation table.
 	if op, _ := LookupOperation("service.call"); op.Delegable {
 		t.Fatal("service.call must not be delegable in v1")

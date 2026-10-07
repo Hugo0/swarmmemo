@@ -187,7 +187,11 @@ func upkeepData(tx *sql.Tx) error {
 			return fmt.Errorf("transparency log backfill: %w", err)
 		}
 		if n == 0 {
-			return nil
+			break
 		}
 	}
+	if _, err := tlogBackfillIdentity(context.Background(), tx); err != nil {
+		return fmt.Errorf("transparency log identity backfill: %w", err)
+	}
+	return nil
 }

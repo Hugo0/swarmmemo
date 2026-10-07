@@ -229,7 +229,10 @@ func (e *Engine) Anonymous(service, data string) bool {
 	}
 	d, err := ParseData(data, true)
 	if err != nil {
-		return false
+		// Malformed data (a repeated key, say) goes on to Call, which
+		// refuses it as invalid_service_data before anything is charged,
+		// as it does a signed call; it is not a reason to ask for a key.
+		return true
 	}
 	p, err := e.cfg.Registry.Lookup(service)
 	if err != nil {

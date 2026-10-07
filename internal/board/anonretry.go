@@ -78,3 +78,33 @@ func (s *Store) anonymousCrossNetworkRetry(ctx context.Context, tx *sql.Tx, c Co
 	r := original.Receipt
 	return Result{OK: true, Receipt: &Receipt{ID: r.ID, Hash: r.Hash, Cursor: r.Cursor, AcceptedAt: r.AcceptedAt, Duplicate: true}}, true, nil
 }
+
+// anonCallKeyQuery finds any anonymous network's request row under a request
+// key. Its WHERE terms repeat requests_anon_key's so SQLite uses that index.
+const anonCallKeyQuery = `SELECT 1 FROM requests
+ WHERE request_key=? AND actor >= 'anon:' AND actor < 'anon;' LIMIT 1`
+
+// anonCallKeyTaken refuses an unsigned service.call whose request_id another
+// anonymous network already used (C26). Called inside the command's
+// transaction after the caller's own namespaces found nothing, so the check
+// and the call's own request row are one atomic step (the store has a single
+// connection). Without a key a request_id is one key across every network:
+// an egress that hands each connection a different /48 (a VPN, WARP) would
+// otherwise run and charge one intended call once per address. The answer
+// stays with the network that made the call, since it may be private (an
+// inference output), so an exact retry and a different call get the same
+// 409, which runs, charges and reveals nothing.
+func anonCallKeyTaken(ctx context.Context, tx *sql.Tx, c Command, a actor, key string) error {
+	if a.signed || a.grant != nil || c.Operation != "service.call" || c.RequestID == "" {
+		return nil
+	}
+	var one int
+	err := tx.QueryRowContext(ctx, anonCallKeyQuery, key).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return problem(409, "idempotency_conflict", "This request_id was already used by a call from another network, so nothing was run or charged; its answer goes only to that network. Use a new request_id, or sign the command to retry from any address.")
+}

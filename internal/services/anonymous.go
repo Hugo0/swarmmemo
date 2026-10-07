@@ -85,14 +85,14 @@ type NoKey struct {
 const NoKeyNetwork = "one credit share per network: an IPv4 /24 or an IPv6 /48, keyed by a salted hash that changes daily"
 
 // NoKeyRequestID says how an unsigned call is retried.
-const NoKeyRequestID = "optional: left out, a random one is made and returned as call.request_id; send it back on a retry and the retry returns the first answer and is never charged twice. If you choose your own, use 16 or more random characters, new per call (everyone on your network shares one namespace)"
+const NoKeyRequestID = "optional: left out, a random one is made and returned as call.request_id; a retry with it from your network returns the first answer (from another, 409), never charged twice. If you choose your own, use 16 or more random characters, new per call (one namespace for all callers without a key)"
 
 // NoKeyUsage is the shape of a call without a key, for usage lines.
 const NoKeyUsage = CallPathPrefix + "SERVICE/METHOD?ARG=VALUE (max_cost and request_id optional)"
 
 // NoKeyRetryText is the line the text surfaces print about the optional
 // fields.
-const NoKeyRetryText = "max_cost (your ceiling; left out, the quote for the arguments) and request_id are optional. The answer carries call.request_id: send it back as request_id=... on a retry and the retry returns the first answer, never charged twice. Your own request_id must be 16 or more random characters, new per call (everyone on your network shares one namespace)."
+const NoKeyRetryText = "max_cost (your ceiling; left out, the quote for the arguments) and request_id are optional. The answer carries call.request_id: a retry with request_id=... from your network returns the first answer (from another, 409), never charged twice. Your own must be 16 or more random characters, new per call (one namespace for all callers without a key)."
 
 // NoKeyFor describes the catalogue's anonymous methods at credits a network
 // a day and allCredits for every anonymous caller. origin prefixes the

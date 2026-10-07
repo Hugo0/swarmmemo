@@ -2,11 +2,15 @@ package httpapi
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/tlog"
@@ -76,6 +80,16 @@ func TestTransparencyRoutes(t *testing.T) {
 	if w = get(s, "/api/log/leaves?start=0", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"leaf_hash"`) || strings.Contains(w.Body.String(), "hello log") {
 		t.Fatalf("leaves: %d %s", w.Code, w.Body)
 	}
+	for path, want := range map[string]string{
+		"/api/log/leaves?start=0&end=1": `"next":null`,
+		"/api/log/leaves?start=0&end=2": `"next":null`,
+		"/api/log/leaves?start=1&end=600": `"next":null`,
+		"/api/log/leaves?start=0":       `"next":null`,
+	} {
+		if w = get(s, path, ""); w.Code != 200 || !strings.Contains(w.Body.String(), want) {
+			t.Errorf("%s: %d %s, want %s", path, w.Code, w.Body, want)
+		}
+	}
 	if w = get(s, "/api/log/anchors", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"anchors":[]`) {
 		t.Fatalf("anchors: %d %s", w.Code, w.Body)
 	}
@@ -117,6 +131,47 @@ func TestTransparencyRoutes(t *testing.T) {
 	}
 	if words := len(strings.Fields(get(s, "/verify.md", "").Body.String())); words > 150 {
 		t.Fatalf("/verify is %d words; keep it under 150", words)
+	}
+}
+
+// next keeps the asked-for end and stops there, not at the tree tip.
+func TestLogLeavesNextKeepsEnd(t *testing.T) {
+	s := realServer(t)
+	store := s.service.(*board.Store)
+	key := ed25519.NewKeyFromSeed(make([]byte, 32))
+	for i := 0; i < board.LogPageMax+20; i++ {
+		c := board.Command{Operation: "post", Room: "lobby", Text: "leaf " + strconv.Itoa(i)}
+		c.PublicKey = base64.RawURLEncoding.EncodeToString(key.Public().(ed25519.PublicKey))
+		c.Timestamp, c.Nonce = time.Now().Unix(), "n"+strconv.Itoa(i)
+		c.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, board.Canonical("swarmmemo.com", c)))
+		if _, err := store.Execute(context.Background(), c, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.SignCheckpoint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	page := func(path string) (n int, next any) {
+		var out struct {
+			Leaves []json.RawMessage
+			Next   any
+		}
+		if w := get(s, path, ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body)
+		}
+		return len(out.Leaves), out.Next
+	}
+	if n, next := page("/api/log/leaves?start=10&end=12"); n != 2 || next != nil {
+		t.Fatalf("start=10&end=12: %d leaves, next %v", n, next)
+	}
+	if n, next := page("/api/log/leaves?start=10&end=600"); n != board.LogPageMax || next != "/api/log/leaves?start=266&end=600" {
+		t.Fatalf("start=10&end=600: %d leaves, next %v", n, next)
+	}
+	if n, next := page("/api/log/leaves?start=266&end=600"); n == 0 || next != nil {
+		t.Fatalf("start=266&end=600: %d leaves, next %v", n, next)
+	}
+	if n, next := page("/api/log/leaves?start=0"); n != board.LogPageMax || next != "/api/log/leaves?start=256" {
+		t.Fatalf("start=0: %d leaves, next %v", n, next)
 	}
 }
 

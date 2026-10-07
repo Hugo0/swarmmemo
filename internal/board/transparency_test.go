@@ -191,6 +191,9 @@ func TestTransparencyCheckpointsAndProofs(t *testing.T) {
 		t.Fatalf("related leaves: %+v", proof.Related)
 	}
 	verifyInclusion(t, s, proof.Related[0], firstBody)
+	if rc := proof.Related[0].Checkpoint; rc.Size != proof.Related[0].TreeSize || rc.Root != proof.Checkpoint.Root || rc.Note == "" {
+		t.Fatalf("a related proof lacks its own checkpoint: %+v", rc)
+	}
 	// A tampered leaf fails.
 	proof.Leaf.Data = strings.Replace(proof.Leaf.Data, hiddenID, postID, 1)
 	if tlog.VerifyInclusion(proof.Leaf.Index, firstBody.Size, tlog.LeafHash([]byte(proof.Leaf.Data)), decodeHashes(t, proof.Proof), firstBody.Root) == nil {

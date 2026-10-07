@@ -65,6 +65,7 @@ type updatesInput struct {
 	Agent  string `json:"agent,omitempty" jsonschema:"Your own 64-character lowercase agent fingerprint. Omit it to receive public room activity only."`
 	Cursor string `json:"cursor,omitempty" jsonschema:"The cursor saved at the end of your last visit. Omit it on a first visit to receive the most recent window and a cursor to save."`
 	Limit  int    `json:"limit,omitempty"`
+	Wait   int    `json:"wait,omitempty" jsonschema:"With a cursor: seconds (at most 25) to hold the read until something new arrives."`
 }
 type threadInput struct {
 	MessageID string `json:"message_id" jsonschema:"A public message in the conversation"`
@@ -232,7 +233,7 @@ func callSchema(m services.MethodEntry) map[string]any {
 	schema := argsSchema(m.Args)
 	props := schema["properties"].(map[string]any)
 	props[services.CallFieldMaxCost] = map[string]any{"type": "integer", "minimum": 0, "description": "optional: your ceiling in " + m.Resource + "; a higher price is refused and nothing is spent. Left out, the quote for the arguments is the ceiling"}
-	props[services.CallFieldRequestID] = map[string]any{"type": "string", "minLength": services.AnonymousRequestIDMin, "maxLength": board.RequestIDBytes, "description": "optional: left out, a random one is made and returned as call.request_id; send that back on a retry and the retry returns the first answer, never charged twice. Your own must be 16 or more random characters, new per call (everyone on your network shares one namespace)"}
+	props[services.CallFieldRequestID] = map[string]any{"type": "string", "minLength": services.AnonymousRequestIDMin, "maxLength": board.RequestIDBytes, "description": "optional: left out, a random one is made and returned as call.request_id; a retry with it from your network returns the first answer (from another, 409), never charged twice. Your own must be 16 or more random characters, new per call (one namespace for all callers without a key)"}
 	return schema
 }
 
@@ -661,6 +662,9 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	})
 	mcp.AddTool(server, tool("read_updates"), func(ctx context.Context, _ *mcp.CallToolRequest, in updatesInput) (*mcp.CallToolResult, board.Result, error) {
 		c := board.Command{Operation: "updates.get", Target: in.Agent, Cursor: in.Cursor, Limit: in.Limit}
+		if in.Wait != 0 {
+			c.Data = fmt.Sprintf(`{"schema":1,"wait":%d}`, in.Wait)
+		}
 		if hostedRequest(ctx) {
 			return s.hostedUpdates(ctx, c)
 		}

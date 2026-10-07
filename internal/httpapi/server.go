@@ -105,6 +105,9 @@ type Server struct {
 	graphSummary   *graphSummaries
 	graphLevelRate *windowLimiter
 	graphUniverse  graphUniverse
+	// tails bounds the text tail per network address (tail.go); the total
+	// shares streams with /api/stream.
+	tails *board.WaitSlots
 }
 
 func New(service board.Service, ui http.Handler, cfg Config) *Server {
@@ -124,7 +127,7 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 		cfg.Limiter = NewLimiter()
 	}
 	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter(), sitemapBuilds: make(chan struct{}, sitemapBuilds), referrers: newReferrerCounter(cfg.PublicURL),
-		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0), oauth: newOAuthState(), graphText: newWindowLimiter(time.Minute, graphTextPerMinute), graphLevelRate: newWindowLimiter(time.Minute, 600)}
+		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0), oauth: newOAuthState(), graphText: newWindowLimiter(time.Minute, graphTextPerMinute), graphLevelRate: newWindowLimiter(time.Minute, 600), tails: board.NewWaitSlots(tailPerSource, 64)}
 	s.graphSummary = newGraphSummaries(cfg.GraphSummary)
 	s.initMCP()
 	return s
@@ -138,7 +141,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	sw := &statusWriter{ResponseWriter: w}
 	defer func() {
-		if d := time.Since(start); d > slowRequest && r.URL.Path != "/api/stream" {
+		if d := time.Since(start); d > slowRequest && !longLived(r) {
 			status := sw.status
 			if status == 0 {
 				status = 200
@@ -147,6 +150,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	s.serveHTTP(sw, r)
+}
+
+// longLived is a request that holds open by design: the live stream, the
+// text tail and a waiting /api/updates read.
+func longLived(r *http.Request) bool {
+	return r.URL.Path == "/api/stream" || strings.HasPrefix(r.URL.Path, "/tail/") || (r.URL.Path == "/api/updates" && r.URL.Query().Has("wait"))
 }
 
 // statusWriter records the response status for the slow-request log. Unwrap
@@ -225,7 +234,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	if len(r.RequestURI) > board.RequestTargetBytes {
-		writeError(w, &board.Error{Status: 414, Code: "url_too_large", Message: "Request URL is too long " + board.SizeNote(len(r.RequestURI), board.RequestTargetBytes, "bytes") + ". Use a body or smaller chunks."})
+		writeError(w, &board.Error{Status: 414, Code: "url_too_large", Message: "Request URL is too long " + board.SizeNote(len(r.RequestURI), board.RequestTargetBytes, "bytes") + ". " + urlTooLargeHint(r.URL.Path)})
 		return
 	}
 	if _, err := url.ParseQuery(r.URL.RawQuery); err != nil {
@@ -339,6 +348,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/stream" {
 		s.stream(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/tail/") {
+		s.tail(w, r)
 		return
 	}
 	if r.URL.Path == "/api/changes" {
@@ -1068,6 +1081,18 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		query.Set("data", string(encoded))
 		delete(query, "eligible_for")
 	}
+	// /api/updates?wait=SECONDS holds a read with a cursor until something new
+	// arrives (board.UpdatesWaitMax); it travels as updates.get data.
+	if r.URL.Path == "/api/updates" && query.Has("wait") {
+		wait, err := strconv.Atoi(query.Get("wait"))
+		if query.Has("data") || len(query["wait"]) != 1 || err != nil {
+			writeError(w, bad("Give wait once, as whole seconds, and not with data."))
+			return
+		}
+		encoded, _ := json.Marshal(map[string]any{"schema": 1, "wait": wait})
+		query.Set("data", string(encoded))
+		delete(query, "wait")
+	}
 	c, e := queryCommand(query)
 	if e != nil {
 		writeError(w, e)
@@ -1090,7 +1115,7 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		c.Operation = "messages.list"
 	case p == "/api/messages":
 		// A first read with no order, cursor or filter is the hot view
-		// (board.FirstContact); /recent stays newest first.
+		// (board.FirstContact); /recent stays chronological.
 		c.Operation = "messages.list"
 		c = board.FirstContact(c)
 	case p == "/recent":
@@ -1418,6 +1443,19 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		s.cfg.TransportMetrics(w)
 	}
 }
+
+// urlTooLargeHint says how to send less in the URL: a body only where the
+// route takes one.
+func urlTooLargeHint(path string) string {
+	switch {
+	case path == "/api/graph/messages":
+		return "POST the same parameters as a JSON body, ids as an array (" + graphTextBodyUsage + "), or ask in smaller chunks."
+	case strings.HasPrefix(path, services.CallPathPrefix):
+		return "POST the fields as a JSON object (Content-Type: application/json) or a form (application/x-www-form-urlencoded) body instead."
+	}
+	return "Ask in smaller chunks."
+}
+
 func readMethod(r *http.Request) bool { return r.Method == "GET" || r.Method == "HEAD" }
 func wantsJSON(r *http.Request) bool {
 	return r.URL.Query().Get("format") == "json" || strings.Contains(r.Header.Get("Accept"), "application/json")

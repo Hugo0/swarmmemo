@@ -165,9 +165,13 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		if err != nil {
 			return fail(err)
 		}
-		next := any(nil)
-		if n := start + int64(len(leaves)); n < size && len(leaves) > 0 {
-			next = "/api/log/leaves?start=" + strconv.FormatInt(n, 10)
+		// next keeps the asked-for end and is null once the range or the tree is read.
+		next, stop, keep := any(nil), size, ""
+		if q["end"] >= 0 {
+			stop, keep = min(q["end"], size), "&end="+strconv.FormatInt(q["end"], 10)
+		}
+		if n := start + int64(len(leaves)); n < stop && len(leaves) > 0 {
+			next = "/api/log/leaves?start=" + strconv.FormatInt(n, 10) + keep
 		}
 		cacheFor(w, q["end"] >= 0 && q["end"] <= size)
 		jsonResponse(w, 200, map[string]any{"start": start, "tree_size": size, "leaves": leaves, "next": next})

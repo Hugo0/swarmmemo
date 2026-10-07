@@ -458,10 +458,11 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		// The first-contact default is hot only when the view ranks at least
 		// a page of posts; a quiet room or board reads newest first instead,
 		// never empty. An explicit sort, or an offset page, is what it asks.
+		// The fallback is sort=new: the same page, order and cursors.
 		if err != nil || !c.firstContact || opts.Offset != 0 || ranked >= limit {
 			return res, err
 		}
-		opts = ListOptions{Scope: opts.Scope}
+		opts = ListOptions{Sort: "new", Scope: opts.Scope}
 	}
 	seq, err := s.parseCursor(c.Cursor)
 	if err != nil {

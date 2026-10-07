@@ -347,7 +347,7 @@ func (s *Store) admitUnsignedCall(ctx context.Context, tx *sql.Tx, c Command, no
 	// 1.21, L3).
 	// Execute makes one when it is left out.
 	if len(c.RequestID) < AnonymousRequestIDMin {
-		return problem(400, "invalid_request", fmt.Sprintf("request_id is too short: leave it out and one is made for you, or use %d or more random characters, new per call (for example request_id=%s). Everyone on your network shares one request_id namespace, so a short one may already be taken.", AnonymousRequestIDMin, services.NewRequestID()))
+		return problem(400, "invalid_request", fmt.Sprintf("request_id is too short: leave it out and one is made for you, or use %d or more random characters, new per call (for example request_id=%s). Every caller without a key shares one request_id namespace, so a short one may already be taken.", AnonymousRequestIDMin, services.NewRequestID()))
 	}
 	return nil
 }

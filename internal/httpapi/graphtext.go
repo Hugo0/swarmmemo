@@ -84,21 +84,62 @@ func graphSelection(get func(string) string) (board.GraphMessageQuery, *board.Er
 	return q, nil
 }
 
+// graphTextBodyBytes bounds a POSTed selection: 200 fingerprints are about
+// 14 KiB of JSON.
+const graphTextBodyBytes = 32 << 10
+
+const graphTextBodyUsage = `POST JSON {"ids":[FINGERPRINT or anon:ROOM, ...],"room":"optional","mode":"author"|"among"}`
+
 // graphMessages serves /api/graph/messages: the public text behind a graph
-// selection, for the /graph side panel and its exports.
+// selection, for the /graph side panel and its exports. A GET names it in the
+// query; a POST carries the same parameters as a JSON body, for selections
+// whose ids outgrow a URL.
 func (s *Server) graphMessages(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
+	var get func(string) string
+	switch {
+	case readMethod(r):
+		query := r.URL.Query()
+		for key, values := range query {
+			if len(values) != 1 || (key != "ids" && key != "room" && key != "mode" && key != "format") {
+				writeError(w, bad("Graph messages take ids, and optionally room and mode, each once."))
+				return
+			}
+		}
+		get = query.Get
+	case r.Method == http.MethodPost:
+		if r.URL.RawQuery != "" {
+			writeError(w, bad("A POST takes the selection in the JSON body, not the query. "+graphTextBodyUsage+"."))
+			return
+		}
+		var req struct {
+			IDs    []string `json:"ids"`
+			Room   string   `json:"room"`
+			Mode   string   `json:"mode"`
+			Format string   `json:"format"`
+		}
+		if err := decodeJSON(w, r, &req, graphTextBodyBytes); err != nil {
+			if be := apiError(err); be.Status == 400 {
+				err = bad(be.Message + " " + graphTextBodyUsage + ".")
+			}
+			writeError(w, err)
+			return
+		}
+		get = func(k string) string {
+			switch k {
+			case "ids":
+				return strings.Join(req.IDs, ",")
+			case "room":
+				return req.Room
+			case "mode":
+				return req.Mode
+			}
+			return ""
+		}
+	default:
 		methodError(w)
 		return
 	}
-	query := r.URL.Query()
-	for key, values := range query {
-		if len(values) != 1 || (key != "ids" && key != "room" && key != "mode" && key != "format") {
-			writeError(w, bad("Graph messages take ids, and optionally room and mode, each once."))
-			return
-		}
-	}
-	q, perr := graphSelection(query.Get)
+	q, perr := graphSelection(get)
 	if perr != nil {
 		writeError(w, perr)
 		return
@@ -117,7 +158,10 @@ func (s *Server) graphMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=30")
+	// A POST answer stays no-store: shared caches key on the URL alone.
+	if readMethod(r) {
+		w.Header().Set("Cache-Control", "public, max-age=30")
+	}
 	jsonResponse(w, 200, map[string]any{"ok": true, "messages": msgs, "count": len(msgs), "truncated": truncated, "maximum": board.GraphMessagesMax,
 		"note": "Visible messages in public rooms only, oldest first; text is each post's newest visible version. truncated means only the newest maximum were returned."})
 }

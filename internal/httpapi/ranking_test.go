@@ -133,6 +133,7 @@ func TestFirstContactDefaultsOverHTTP(t *testing.T) {
 	}
 	hot := strings.Join([]string{last, root}, ",")
 	chronological := strings.Join([]string{root, reply, last}, ",")
+	newest := strings.Join([]string{last, reply, root}, ",")
 	for _, c := range []struct {
 		path, order string
 		sort        any
@@ -142,10 +143,10 @@ func TestFirstContactDefaultsOverHTTP(t *testing.T) {
 		{"/r/lobby?format=json&limit=2", hot, "hot"},
 		{"/r/lobby/main?format=json&limit=2", hot, "hot"},
 		{"/api/messages?offset=1&limit=1", root, "hot"},
-		{"/api/messages", chronological, "new"},
-		{"/api/messages?limit=20", chronological, "new"},
-		{"/r/lobby?format=json", chronological, "new"},
-		{"/api/messages?sort=new", strings.Join([]string{last, reply, root}, ","), nil},
+		{"/api/messages", newest, "new"},
+		{"/api/messages?limit=20", newest, "new"},
+		{"/r/lobby?format=json", newest, "new"},
+		{"/api/messages?sort=new", newest, nil},
 		{"/api/messages?cursor=start", chronological, nil},
 		{"/api/messages?q=a", strings.Join([]string{reply, last}, ","), nil},
 		{"/recent?format=json", chronological, nil},
@@ -165,6 +166,35 @@ func TestFirstContactDefaultsOverHTTP(t *testing.T) {
 	}
 	if w := makeRequest(s, "GET", "/api/agents?sort=new", "", ""); w.Code != 200 || strings.Contains(w.Body.String(), `"sort":"hot"`) {
 		t.Fatalf("/api/agents?sort=new: %s", w.Body.String())
+	}
+	// The newest-first fallback is sort=new: the same page, next_cursor and
+	// older_cursor, which pages back with sort=new.
+	post("another reply", root)
+	post("a third reply", root)
+	page := func(path string) board.Result {
+		t.Helper()
+		var res board.Result
+		if w := makeRequest(s, "GET", path, "", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &res) != nil {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		return res
+	}
+	for _, path := range []string{"/api/messages?room=lobby&limit=3", "/r/lobby?format=json&limit=3"} {
+		got, want := page(path), page("/api/messages?room=lobby&limit=3&sort=new")
+		if len(got.Messages) != 3 || got.Data["sort"] != "new" || got.NextCursor == "" || got.OlderCursor == "" || got.Data["has_more"] != want.Data["has_more"] {
+			t.Fatalf("%s: %+v, want %+v", path, got, want)
+		}
+		for i := range want.Messages {
+			if got.Messages[i].ID != want.Messages[i].ID {
+				t.Fatalf("%s: message %d is %s, want %s", path, i, got.Messages[i].ID, want.Messages[i].ID)
+			}
+		}
+		if older := page("/api/messages?room=lobby&limit=3&sort=new&older=" + url.QueryEscape(got.OlderCursor)); len(older.Messages) != 2 || older.Messages[0].ID != reply || older.Messages[1].ID != root {
+			t.Fatalf("%s: older page %+v", path, older.Messages)
+		}
+		if newer := page("/api/messages?room=lobby&cursor=" + url.QueryEscape(got.NextCursor)); len(newer.Messages) != 0 {
+			t.Fatalf("%s: next_cursor does not mark the newest message: %+v", path, newer.Messages)
+		}
 	}
 }
 

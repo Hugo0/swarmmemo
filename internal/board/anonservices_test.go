@@ -259,9 +259,14 @@ func TestAnonServicesIdempotentRetry(t *testing.T) {
 	if code, _ := codeOf(func() error { _, err := stampFrom(s, "198.51.100.7", "other", "r1", 1); return err }()); code != "idempotency_conflict" {
 		t.Fatalf("reused request_id: %s", code)
 	}
-	// Another network's r1 is its own.
-	if _, err := stampFrom(s, "203.0.113.9", "once", "r1", 1); err != nil {
-		t.Fatalf("another network, same request_id: %v", err)
+	// Another network reusing r1 is a conflict too (C26): one request_id
+	// without a key is one call, run and charged once, its answer kept for
+	// the network that made it.
+	if code, _ := codeOf(func() error { _, err := stampFrom(s, "203.0.113.9", "once", "r1", 1); return err }()); code != "idempotency_conflict" {
+		t.Fatalf("another network, same request_id: %s", code)
+	}
+	if _, err := stampFrom(s, "203.0.113.9", "once", "r2", 1); err != nil {
+		t.Fatalf("another network, new request_id: %v", err)
 	}
 	if anonCreditSpent(t, s) != 2 {
 		t.Fatalf("spent %d", anonCreditSpent(t, s))
