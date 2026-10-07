@@ -22,6 +22,7 @@ type workPage struct {
 	Room, State, Query                       string
 	NextURL, StartURL, APIURL, HistoryAPIURL string
 	ClaimExample                             string
+	Redirect                                 string // set for an edited version: the work's root page
 }
 
 func validWorkID(id string) bool { return len(id) == 32 && strings.Trim(id, "0123456789abcdef") == "" }
@@ -138,6 +139,10 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 		return failure(err)
 	}
 	item, ok := result.Data["work"].(board.Work)
+	if ok && item.ID != id && item.ResolvedFrom == id && validWorkID(item.ID) && roomPublic(item.Room) {
+		v.Redirect = "/work/" + item.ID
+		return 301
+	}
 	if !ok || item.ID != id || !roomPublic(item.Room) {
 		return failure(&board.Error{Status: 404})
 	}

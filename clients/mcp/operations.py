@@ -159,7 +159,7 @@ def _cursor(value):
 
 
 def _work(profile, work, expected=None):
-    optional = {"worker", "result_id", "attempt_grant_id", "reward", "reviewer", "reviewer_fee", "eligibility", "request", "eligible", "eligible_reason", "eligible_agent", "eligible_preview"}
+    optional = {"worker", "result_id", "attempt_grant_id", "reward", "reviewer", "reviewer_fee", "eligibility", "request", "eligible", "eligible_reason", "eligible_agent", "eligible_preview", "resolved_from", "result_sha256", "result_changed_since_submit"}
     fields = set("id room title capabilities simulated state stored_state generation service_generation service_id created_at updated_at deadline fence claim_expires_at requester_author requester result_available".split()) | optional
     required = fields - optional
     if not isinstance(work, dict) or set(work) - fields or not required <= work.keys(): raise BridgeError("invalid_response")
@@ -176,8 +176,13 @@ def _work(profile, work, expected=None):
         if name in work and type(work[name]) is not bool: raise BridgeError("invalid_response")
     if "eligible_reason" in work and (not isinstance(work["eligible_reason"], str) or len(work["eligible_reason"].encode()) > 512): raise BridgeError("invalid_response")
     if "eligible_agent" in work and (not isinstance(work["eligible_agent"], str) or not re.fullmatch(HEX64, work["eligible_agent"])): raise BridgeError("invalid_response")
+    # resolved_from names the edited request version a read was given; id is
+    # always the work's root. result_sha256 is the submitted result text's.
+    if "resolved_from" in work and (not isinstance(work["resolved_from"], str) or not re.fullmatch(HEX32, work["resolved_from"]) or work["resolved_from"] == work.get("id")): raise BridgeError("invalid_response")
+    if "result_sha256" in work and (not isinstance(work["result_sha256"], str) or not re.fullmatch(HEX64, work["result_sha256"])): raise BridgeError("invalid_response")
+    if "result_changed_since_submit" in work and type(work["result_changed_since_submit"]) is not bool: raise BridgeError("invalid_response")
     if work["room"] != profile.room: raise BridgeError("scope_mismatch")
-    if expected and work["id"] != expected: raise BridgeError("invalid_response")
+    if expected and work["id"] != expected and work.get("resolved_from") != expected: raise BridgeError("invalid_response")
     for name in ("id", "generation", "service_generation"):
         if not isinstance(work[name], str) or not re.fullmatch(HEX32, work[name]): raise BridgeError("invalid_response")
     if work["service_id"] != profile.service_id or work["state"] not in STATES or work["stored_state"] not in STATES: raise BridgeError("invalid_response")
@@ -203,8 +208,9 @@ def _work(profile, work, expected=None):
 
 
 def _transition(profile, item, work_id):
-    fields = set("sequence operation author public_key signature signed_payload accepted_at fence generation state delegation_id".split())
-    if not isinstance(item, dict) or set(item) - fields or not fields - {"delegation_id"} <= item.keys(): raise BridgeError("invalid_response")
+    optional = {"delegation_id", "resolved_from", "result_sha256", "result_sha256_signed"}
+    fields = set("sequence operation author public_key signature signed_payload accepted_at fence generation state".split()) | optional
+    if not isinstance(item, dict) or set(item) - fields or not fields - optional <= item.keys(): raise BridgeError("invalid_response")
     for name in ("sequence", "accepted_at", "fence"):
         if type(item[name]) is not int or not 0 <= item[name] < 2**63: raise BridgeError("invalid_response")
     if item["state"] not in STATES or not isinstance(item["signed_payload"], str): raise BridgeError("invalid_response")
@@ -216,8 +222,14 @@ def _transition(profile, item, work_id):
         if (item["signed_payload"].encode() != memo.canonical(command, profile.service_id)
                 or envelope["version"] != (2 if "delegation" in command else 1)
                 or command.get("operation") != item["operation"] or item["operation"] not in allowed_operations
-                or command.get("message_id") != work_id or command.get("public_key") != item["public_key"]): raise ValueError()
+                or command.get("public_key") != item["public_key"]): raise ValueError()
+        # A command may name an edited version of the request; the service
+        # says so (resolved_from) and the work is still this one.
+        if "resolved_from" in item and (not isinstance(item["resolved_from"], str) or not re.fullmatch(HEX32, item["resolved_from"]) or item["resolved_from"] == work_id): raise ValueError()
+        if command.get("message_id") != work_id and command.get("message_id") != item.get("resolved_from"): raise ValueError()
         allowed_fields = {"operation", "public_key", "request_id", "timestamp", "nonce", "delegation"} | set(outbox.MUTATIONS[item["operation"]].split())
+        # A claim that names its result (target) submits it in the same step.
+        if item["operation"] == "work.claim": allowed_fields.add("target")
         if set(command) - allowed_fields: raise ValueError()
         for field, value in command.items():
             if field == "delegation": continue
@@ -225,12 +237,20 @@ def _transition(profile, item, work_id):
                 if type(value) is not int or not 0 <= value < 2**63: raise ValueError()
             elif not isinstance(value, str) or "\x00" in value: raise ValueError()
         expected_state = {"work.create": "open", "work.claim": "claimed", "work.renew": "claimed", "work.submit": "submitted", "work.accept": "accepted", "work.reject": "open", "work.cancel": "cancelled"}[item["operation"]]
+        if item["operation"] == "work.claim" and "target" in command: expected_state = "submitted"
         if item["state"] != expected_state or item["sequence"] < 1 or item["accepted_at"] < 1: raise ValueError()
         if item["operation"] == "work.create" and item["fence"] != 0: raise ValueError()
         if item["operation"] in ("work.claim", "work.renew", "work.submit", "work.accept") and item["fence"] < 1: raise ValueError()
         if item["operation"] in ("work.renew", "work.submit", "work.accept", "work.reject") and command.get("amount", 0) != item["fence"]: raise ValueError()
         data = memo.strict_json(command["data"])
         data_fields = {"schema", "generation"} | ({"title", "capabilities"} if item["operation"] == "work.create" else set())
+        # submit, accept and a claim with a result may sign the result text's SHA-256.
+        if isinstance(data, dict) and "result_sha256" in data and item["operation"] in ("work.submit", "work.accept", "work.claim"):
+            if not isinstance(data["result_sha256"], str) or not re.fullmatch(HEX64, data["result_sha256"]): raise ValueError()
+            if item.get("result_sha256") != data["result_sha256"] or item.get("result_sha256_signed") is not True: raise ValueError()
+            data_fields = data_fields | {"result_sha256"}
+        elif "result_sha256_signed" in item: raise ValueError()
+        if "result_sha256" in item and (not isinstance(item["result_sha256"], str) or not re.fullmatch(HEX64, item["result_sha256"])): raise ValueError()
         if (not isinstance(data, dict) or set(data) != data_fields or type(data.get("schema")) is not int or data["schema"] != 1
                 or not isinstance(data.get("generation"), str) or not re.fullmatch(HEX32, data["generation"])
                 or data["generation"] != item["generation"]): raise ValueError()
@@ -319,7 +339,7 @@ def _dispatch(profile, action, a):
             result = _request(profile, "/api/work/" + a["work_id"] + "/history?" + urllib.parse.urlencode(query))
             data = result.get("data", {})
             history = data.get("transitions")
-            if (data.get("work_id") != work["id"] or not isinstance(history, list) or len(history) > limit
+            if (data.get("work_id") != work["id"] or data.get("resolved_from") != work.get("resolved_from") or not isinstance(history, list) or len(history) > limit
                     or type(data.get("has_more")) is not bool or type(data.get("simulated")) is not bool
                     or not isinstance(data.get("service_generation"), str) or not re.fullmatch(HEX32, data["service_generation"])): raise BridgeError("invalid_response")
             output.update(history=[_transition(profile, item, work["id"]) for item in history], history_has_more=data["has_more"], next_cursor=_cursor(result.get("next_cursor", "")), history_signatures_verified=True, history_service_generation=data["service_generation"], history_simulated=data["simulated"])

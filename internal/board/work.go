@@ -79,6 +79,14 @@ type Work struct {
 	EligiblePreview bool   `json:"eligible_preview,omitempty"`
 	// Request is the task itself: the newest version of the root request.
 	Request *WorkRequest `json:"request,omitempty"`
+	// ResolvedFrom is the ID the read named when it was an edited version of
+	// the work's request: ID is always the work's root, its first version.
+	ResolvedFrom string `json:"resolved_from,omitempty"`
+	// ResultSHA256 is the SHA-256 of the submitted result's text, the exact
+	// version work.submit bound; ResultChangedSinceSubmit says whether the
+	// worker has edited the result since. Both appear with result_id.
+	ResultSHA256             string `json:"result_sha256,omitempty"`
+	ResultChangedSinceSubmit *bool  `json:"result_changed_since_submit,omitempty"`
 }
 
 // WorkRequest is the text of a work item's request at its newest version,
@@ -101,6 +109,11 @@ const (
 	WorkRequestExcerptMax = 280
 )
 
+// ResultEdited says whether the worker edited the submitted result since.
+func (w Work) ResultEdited() bool {
+	return w.ResultChangedSinceSubmit != nil && *w.ResultChangedSinceSubmit
+}
+
 type WorkAck struct {
 	WorkID         string `json:"work_id"`
 	State          string `json:"state"`
@@ -110,6 +123,11 @@ type WorkAck struct {
 	AcceptedAt     int64  `json:"accepted_at"`
 	Deadline       int64  `json:"deadline"`
 	ClaimExpiresAt int64  `json:"claim_expires_at"`
+	// ResolvedFrom is the edited request version the command named, when it
+	// named one; ResultSHA256 echoes a result hash the command signed. Both
+	// are absent otherwise, so an acknowledgement keeps its original shape.
+	ResolvedFrom string `json:"resolved_from,omitempty"`
+	ResultSHA256 string `json:"result_sha256,omitempty"`
 }
 
 type WorkTransition struct {
@@ -124,6 +142,13 @@ type WorkTransition struct {
 	Generation    string `json:"generation"`
 	State         string `json:"state"`
 	DelegationID  string `json:"delegation_id,omitempty"`
+	// ResolvedFrom is the edited request version the signed command named.
+	ResolvedFrom string `json:"resolved_from,omitempty"`
+	// ResultSHA256 is the result text's SHA-256 a submit (or a claim with a
+	// result) or an accept bound: signed in its data (ResultSHA256Signed), or
+	// as the board recorded it, for the current attempt.
+	ResultSHA256       string `json:"result_sha256,omitempty"`
+	ResultSHA256Signed bool   `json:"result_sha256_signed,omitempty"`
 }
 
 type workData struct {
@@ -134,12 +159,21 @@ type workData struct {
 	Reviewer          string
 	ReviewerFee       int64
 	Eligibility       string
+	ResultSHA256      string
 }
 
-func parseWorkData(raw string, create bool) (workData, error) {
+// workResultHashOp says whether an operation's data may carry result_sha256:
+// the result text the signer submits (a submit, or a claim with a result) or
+// judges (an accept).
+func workResultHashOp(operation string) bool {
+	return operation == "work.submit" || operation == "work.accept" || operation == "work.claim"
+}
+
+func parseWorkData(raw string, operation string) (workData, error) {
 	var d workData
+	create := operation == "work.create"
 	invalid := func() (workData, error) {
-		return workData{}, problem(400, "invalid_work_data", "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits and a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee.")
+		return workData{}, problem(400, "invalid_work_data", "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits and a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee; submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text.")
 	}
 	if len(raw) > 8192 || !utf8.ValidString(raw) {
 		return invalid()
@@ -196,6 +230,11 @@ func parseWorkData(raw string, create bool) (workData, error) {
 				return invalid()
 			}
 			err = json.Unmarshal(value, &d.Eligibility)
+		case "result_sha256":
+			if !workResultHashOp(operation) {
+				return invalid()
+			}
+			err = json.Unmarshal(value, &d.ResultSHA256)
 		default:
 			return invalid()
 		}
@@ -210,6 +249,9 @@ func parseWorkData(raw string, create bool) (workData, error) {
 		return invalid()
 	}
 	want := 2
+	if seen["result_sha256"] {
+		want++
+	}
 	if create {
 		want = 4
 		for _, optional := range []string{"reward", "reviewer", "reviewer_fee", "eligibility"} {
@@ -219,6 +261,9 @@ func parseWorkData(raw string, create bool) (workData, error) {
 		}
 	}
 	if len(seen) != want || d.Schema != 1 || !workIDRE.MatchString(d.Generation) {
+		return invalid()
+	}
+	if seen["result_sha256"] && !fingerprintRE.MatchString(d.ResultSHA256) {
 		return invalid()
 	}
 	if seen["reviewer"] && !fingerprintRE.MatchString(d.Reviewer) {
@@ -313,6 +358,69 @@ func visibleWorkRoot(ctx context.Context, tx *sql.Tx, id string, a actor) (workR
 
 func workNotFound() error { return problem(404, "not_found", "Work not found.") }
 
+// resolveWorkID names the work an ID addresses. Work is keyed by its request's
+// first version, and the board shows a request's newest version, so a visible
+// edited version (its origin is the root) resolves to the root: by the edit
+// rules (checkSupersession) only the root's own signing key publishes a
+// version, in place, and this re-checks that the version has the root's author
+// and room. Anything else is returned unchanged and is then read or refused
+// as itself: a hidden version, a message with work of its own, or one that is
+// no version at all. Two indexed point reads.
+func resolveWorkID(ctx context.Context, tx *sql.Tx, id string) (string, error) {
+	if !workIDRE.MatchString(id) {
+		return id, nil
+	}
+	var origin, author, room string
+	var hidden, own bool
+	err := tx.QueryRowContext(ctx, `SELECT e.origin,e.author,e.room,e.hidden,EXISTS(SELECT 1 FROM works w WHERE w.id=e.id) FROM events e WHERE e.id=?`, id).Scan(&origin, &author, &room, &hidden, &own)
+	if errors.Is(err, sql.ErrNoRows) {
+		return id, nil
+	}
+	if err != nil || own || hidden || origin == "" || origin == id {
+		return id, err
+	}
+	var rootAuthor, rootRoom string
+	err = tx.QueryRowContext(ctx, `SELECT author,room FROM events WHERE id=?`, origin).Scan(&rootAuthor, &rootRoom)
+	if errors.Is(err, sql.ErrNoRows) {
+		return id, nil
+	}
+	if err != nil || rootAuthor != author || rootRoom != room {
+		return id, err
+	}
+	return origin, nil
+}
+
+// resultVersion is the newest version of a result message's version chain,
+// and the SHA-256 of its text: what a submit binds.
+func resultVersion(ctx context.Context, tx *sql.Tx, id string) (string, string, error) {
+	var origin, hash string
+	if err := tx.QueryRowContext(ctx, `SELECT origin,hash FROM events WHERE id=?`, id).Scan(&origin, &hash); err != nil {
+		return "", "", err
+	}
+	if origin == "" {
+		origin = id
+	}
+	newest := id
+	err := tx.QueryRowContext(ctx, `SELECT id,hash FROM events WHERE origin=? AND origin<>'' ORDER BY seq DESC LIMIT 1`, origin).Scan(&newest, &hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return id, hash, nil
+	}
+	return newest, hash, err
+}
+
+// workResultChanged reports a result's SHA-256 and whether its author has
+// published a newer version of it since.
+func workResultChanged(ctx context.Context, tx *sql.Tx, id string) (string, bool, error) {
+	var hash string
+	var changed bool
+	err := tx.QueryRowContext(ctx, `SELECT hash,EXISTS(SELECT 1 FROM events s WHERE s.supersedes=e.id AND s.supersedes<>'') FROM events e WHERE id=?`, id).Scan(&hash, &changed)
+	return hash, changed, err
+}
+
+func workResultChangedError(version, hash string) error {
+	return problem(409, "work_result_changed", "result_sha256 is not the SHA-256 of the result this transition binds (message "+version+", result_sha256 "+hash+"); read that text and sign its hash, or reject.")
+}
+
 func eligibleWorkResult(ctx context.Context, tx *sql.Tx, id string, w workRow, root workRoot) (bool, error) {
 	if !workIDRE.MatchString(id) {
 		return false, nil
@@ -326,8 +434,17 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err := requireSigned(a); err != nil {
 		return Result{}, err
 	}
-	d, err := parseWorkData(c.Data, c.Operation == "work.create")
+	d, err := parseWorkData(c.Data, c.Operation)
 	if err != nil {
+		return Result{}, err
+	}
+	if c.Operation == "work.claim" && c.Target == "" && d.ResultSHA256 != "" {
+		return Result{}, problem(400, "invalid_work_data", "result_sha256 goes with a claim that names its result (target), a submit or an accept.")
+	}
+	// An edited version of the request addresses its work, which is keyed by
+	// the root; the signed command keeps the ID it named.
+	named := c.MessageID
+	if c.MessageID, err = resolveWorkID(ctx, tx, c.MessageID); err != nil {
 		return Result{}, err
 	}
 	root, err := visibleWorkRoot(ctx, tx, c.MessageID, a)
@@ -482,6 +599,28 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 			return nil
 		}
+		// bindResult admits a submitted result and binds its newest version,
+		// the text a reviewer then reads: an edit made before the submit is
+		// what is submitted; one made after shows as a change. A signed
+		// result_sha256 must be that text's.
+		bindResult := func(named string) (string, error) {
+			if e := checkResult(named, true); e != nil {
+				return "", e
+			}
+			version, hash, e := resultVersion(ctx, tx, named)
+			if e != nil {
+				return "", e
+			}
+			if version != named {
+				if e = checkResult(version, true); e != nil {
+					return "", e
+				}
+			}
+			if d.ResultSHA256 != "" && d.ResultSHA256 != hash {
+				return "", workResultChangedError(version, hash)
+			}
+			return version, nil
+		}
 		switch c.Operation {
 		case "work.claim":
 			if w.Fence == math.MaxInt64 {
@@ -499,27 +638,33 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			if claimAndSubmit {
 				// Claim and submit in one signed step: the result was posted
 				// first, so the claim needs no window to work in.
-				if err = checkResult(c.Target, true); err != nil {
+				if w.Result, err = bindResult(c.Target); err != nil {
 					return Result{}, err
 				}
 				w.State = "submitted"
-				w.Result = c.Target
 			}
 		case "work.renew":
 			w.ClaimExpires = now + c.TTL
-		case "work.submit", "work.accept":
-			result := w.Result
-			if c.Operation == "work.submit" {
-				result = c.Target
-			}
-			if err = checkResult(result, c.Operation == "work.submit"); err != nil {
+		case "work.submit":
+			if w.Result, err = bindResult(c.Target); err != nil {
 				return Result{}, err
 			}
-			w.State = "accepted"
-			if c.Operation == "work.submit" {
-				w.State = "submitted"
-				w.Result = result
+			w.State = "submitted"
+		case "work.accept":
+			// Accept binds the version the submit bound, never a later edit.
+			if err = checkResult(w.Result, false); err != nil {
+				return Result{}, err
 			}
+			if d.ResultSHA256 != "" {
+				hash, _, e := workResultChanged(ctx, tx, w.Result)
+				if e != nil {
+					return Result{}, e
+				}
+				if d.ResultSHA256 != hash {
+					return Result{}, workResultChangedError(w.Result, hash)
+				}
+			}
+			w.State = "accepted"
 		case "work.reject":
 			w.State = "open"
 			w.AttemptGrantID = ""
@@ -588,7 +733,11 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Data: map[string]any{"ack": WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ClaimExpiresAt: w.ClaimExpires}}}, nil
+	ack := WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ClaimExpiresAt: w.ClaimExpires, ResultSHA256: d.ResultSHA256}
+	if named != w.ID {
+		ack.ResolvedFrom = named
+	}
+	return Result{Data: map[string]any{"ack": ack}}, nil
 }
 
 func currentWorkIdentity(ctx context.Context, tx *sql.Tx, account string) (AgentRef, error) {
@@ -640,6 +789,11 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 		}
 		if p.ResultAvailable {
 			p.ResultID = w.Result
+			var changed bool
+			if p.ResultSHA256, changed, err = workResultChanged(ctx, tx, w.Result); err != nil {
+				return Work{}, err
+			}
+			p.ResultChangedSinceSubmit = &changed
 		}
 	}
 	if opt.requestBytes > 0 {
@@ -770,11 +924,16 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		return Result{}, workReadError(err)
 	}
 	if c.Operation != "works.list" {
-		root, err := visibleWorkRoot(ctx, tx, c.MessageID, a)
+		named := c.MessageID
+		id, err := resolveWorkID(ctx, tx, named)
 		if err != nil {
 			return Result{}, workReadError(err)
 		}
-		w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, c.MessageID))
+		root, err := visibleWorkRoot(ctx, tx, id, a)
+		if err != nil {
+			return Result{}, workReadError(err)
+		}
+		w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			return Result{}, workNotFound()
 		}
@@ -782,7 +941,11 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 			return Result{}, workReadError(err)
 		}
 		if c.Operation == "work.history" {
-			return s.workHistory(ctx, tx, c, w, root, generation, limit)
+			r, err := s.workHistory(ctx, tx, c, w, root, generation, limit)
+			if err == nil && named != id {
+				r.Data["resolved_from"] = named
+			}
+			return r, err
 		}
 		opt, err := workEligibilitySubject(ctx, tx, c.Target, a)
 		if err != nil {
@@ -790,6 +953,9 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		}
 		opt.requestBytes = WorkRequestTextMax
 		p, err := s.projectWork(ctx, tx, w, root, generation, now, opt)
+		if named != id {
+			p.ResolvedFrom = named
+		}
 		return Result{Data: map[string]any{"work": p}}, workReadError(err)
 	}
 	if !utf8.ValidString(c.Query) || strings.ContainsRune(c.Query, 0) {
@@ -922,9 +1088,21 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 	if err = rows.Err(); err != nil {
 		return Result{}, workReadError(err)
 	}
+	rows.Close()
 	hasMore := len(transitions) > limit
 	if hasMore {
 		transitions = transitions[:limit]
+	}
+	// The current attempt's result, as its submit bound it: the hash the
+	// board records for a transition that did not sign one.
+	current := ""
+	if w.Result != "" {
+		if current, _, err = workResultChanged(ctx, tx, w.Result); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Result{}, workReadError(err)
+		}
+	}
+	for i := range transitions {
+		annotateWorkTransition(&transitions[i], w, current)
 	}
 	r := Result{Data: map[string]any{"work_id": w.ID, "simulated": root.Kind == "simulation", "service_generation": generation, "transitions": transitions, "has_more": hasMore}}
 	reward, err := s.projectWorkReward(ctx, tx, workRewardsTable, w.ID)
@@ -945,6 +1123,40 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 		r.NextCursor = s.encodeConversationCursor(conversationCursor{Domain: "work.history", Scope: w.ID, After: transitions[len(transitions)-1].Sequence})
 	}
 	return r, nil
+}
+
+// annotateWorkTransition reads what a transition's signed command named: an
+// edited request version (resolved_from), and, on a submit, a claim that
+// submitted or an accept, the result hash it bound. A hash the command did
+// not sign is the board's record of the current attempt's result (current),
+// shown on that attempt's transitions only.
+func annotateWorkTransition(tr *WorkTransition, w workRow, current string) {
+	var envelope struct {
+		Command struct {
+			MessageID string `json:"message_id"`
+			Data      string `json:"data"`
+		} `json:"command"`
+	}
+	if json.Unmarshal([]byte(tr.SignedPayload), &envelope) != nil {
+		return
+	}
+	if id := envelope.Command.MessageID; id != w.ID && workIDRE.MatchString(id) {
+		tr.ResolvedFrom = id
+	}
+	binds := tr.Operation == "work.submit" || tr.Operation == "work.accept" || (tr.Operation == "work.claim" && tr.State == "submitted")
+	if !binds {
+		return
+	}
+	var data struct {
+		ResultSHA256 string `json:"result_sha256"`
+	}
+	if json.Unmarshal([]byte(envelope.Command.Data), &data) == nil && fingerprintRE.MatchString(data.ResultSHA256) {
+		tr.ResultSHA256, tr.ResultSHA256Signed = data.ResultSHA256, true
+		return
+	}
+	if current != "" && tr.Fence == w.Fence {
+		tr.ResultSHA256 = current
+	}
 }
 
 func workReadError(err error) error {

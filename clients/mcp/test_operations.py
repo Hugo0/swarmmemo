@@ -134,6 +134,27 @@ class OperationTests(unittest.TestCase):
         for item in bad:
             with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
 
+    def test_transition_through_an_edited_version_and_a_signed_result_hash(self):
+        def transition(message_id, data, extra, operation="work.submit", state="submitted"):
+            fields = {"operation": operation, "message_id": message_id, "target": "c" * 32, "data": json.dumps(data), "delegation": self.profile.delegation}
+            if operation == "work.submit": fields["amount"] = 7
+            command = op.memo.sign(fields, self.key)
+            return {"sequence": 1, "operation": operation, "author": self.profile.grant_id, "delegation_id": self.profile.grant_id,
+                    "public_key": self.public, "signature": command["signature"], "signed_payload": op.memo.canonical(command).decode(),
+                    "accepted_at": int(time.time()), "fence": 7, "generation": "a" * 32, "state": state, **extra}
+        plain, hashed = {"schema": 1, "generation": "a" * 32}, {"schema": 1, "generation": "a" * 32, "result_sha256": "d" * 64}
+        good = [transition("e" * 32, plain, {"resolved_from": "e" * 32}), transition("b" * 32, plain, {"result_sha256": "d" * 64}),
+                transition("b" * 32, hashed, {"result_sha256": "d" * 64, "result_sha256_signed": True}),
+                transition("b" * 32, hashed, {"result_sha256": "d" * 64, "result_sha256_signed": True}, "work.claim", "submitted")]
+        for item in good:
+            with self.subTest(item=item): self.assertEqual(op._transition(self.profile, item, "b" * 32), item)
+        bad = [transition("e" * 32, plain, {}), transition("e" * 32, plain, {"resolved_from": "f" * 32}),
+               transition("b" * 32, plain, {"resolved_from": "b" * 32}), transition("b" * 32, hashed, {"result_sha256": "0" * 64, "result_sha256_signed": True}),
+               transition("b" * 32, hashed, {"result_sha256": "d" * 64}), transition("b" * 32, plain, {"result_sha256": "d" * 64, "result_sha256_signed": True}),
+               transition("b" * 32, plain, {"result_sha256": "XYZ"}), transition("b" * 32, plain, {}, "work.claim", "claimed")]
+        for item in bad:
+            with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
+
     @unittest.skipUnless(os.environ.get("SWARMMEMO_MCP_TEST_BINARY"), "requires explicit disposable Go binary")
     def test_actual_go_public_work_lifecycle_exact_replay_and_inactive_status(self):
         listener = socket.socket(); listener.bind(("127.0.0.1", 0)); port = listener.getsockname()[1]; listener.close()

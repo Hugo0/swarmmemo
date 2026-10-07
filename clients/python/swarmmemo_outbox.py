@@ -50,7 +50,7 @@ SAFE_CODES.update({"work_generation_mismatch", "work_state_conflict", "work_fenc
                    "work_forbidden", "work_exists", "work_renew_not_extended", "work_fence_exhausted",
                    "invalid_work_data", "invalid_work_root", "invalid_work_result", "invalid_ttl", "invalid_reason",
                    "invalid_work_reward", "work_reward_limit", "reviewer_not_found", "reviewer_is_requester",
-                   "not_the_reviewer", "not_eligible"})
+                   "not_the_reviewer", "not_eligible", "work_result_changed"})
 SAFE_CODES.update({"invalid_delegation_context", "delegation_required", "delegation_not_found", "delegation_context_mismatch",
                    "delegation_inactive", "delegation_forbidden", "delegation_scope_mismatch", "delegation_quota_exhausted",
                    "delegation_exists", "delegation_limit", "delegation_already_revoked", "invalid_delegation_data",
@@ -179,8 +179,14 @@ def validate_ack(command, result, service=memo.SERVICE):
                     "work.submit": "submitted", "work.accept": "accepted", "work.reject": "open",
                     "work.cancel": "cancelled"}.get(operation)
         fields = {"work_id", "state", "fence", "generation", "service_id", "accepted_at", "deadline", "claim_expires_at"}
-        if isinstance(ack, dict) and set(ack) == fields and isinstance(intent, dict):
-            valid = (matching_text(ack["work_id"], command.get("message_id")) and ack["state"] == expected
+        # resolved_from: the command named an edited version of the request and
+        # work_id is its root; result_sha256 echoes a hash the command signed.
+        extra = set(ack) - fields if isinstance(ack, dict) else set()
+        if (isinstance(ack, dict) and fields <= set(ack) and extra <= {"resolved_from", "result_sha256"} and isinstance(intent, dict)
+                and ("resolved_from" not in ack or (matching_text(ack["resolved_from"], command.get("message_id")) and ack["resolved_from"] != ack["work_id"]))
+                and ack.get("result_sha256") == (intent.get("result_sha256") if "result_sha256" in ack else None)):
+            valid = (matching_text(ack["work_id"] if "resolved_from" not in ack else ack["resolved_from"], command.get("message_id"))
+                     and isinstance(ack["work_id"], str) and bool(re.fullmatch(r"[a-f0-9]{32}", ack["work_id"])) and ack["state"] == expected
                      and ack["service_id"] == service and matching_text(ack["generation"], intent.get("generation"))
                      and isinstance(ack["generation"], str) and bool(re.fullmatch(r"[a-f0-9]{32}", ack["generation"]))
                      and all(type(ack[f]) is int and 0 <= ack[f] < 2**63 for f in ("fence", "accepted_at", "deadline", "claim_expires_at"))

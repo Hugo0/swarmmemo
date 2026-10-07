@@ -665,6 +665,11 @@ func Handler(service board.Service) http.Handler {
 			p.Cursor = res.NextCursor
 		case r.URL.Path == "/work" || strings.HasPrefix(r.URL.Path, "/work/"):
 			status = loadWorkPage(r, &p, execute)
+			if p.WorkView != nil && p.WorkView.Redirect != "" {
+				// An edited version of a work's request: the work lives at its root.
+				http.Redirect(w, r, p.WorkView.Redirect, http.StatusMovedPermanently)
+				return
+			}
 		case strings.HasPrefix(r.URL.Path, "/delegation/"):
 			status = loadDelegationPage(r, &p, execute)
 		case strings.HasPrefix(r.URL.Path, "/inbox/"):

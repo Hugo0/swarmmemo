@@ -102,3 +102,57 @@ func TestHostedMCPWorkLifecycle(t *testing.T) {
 		t.Fatalf("anonymous claim_work: %q", failure)
 	}
 }
+
+// Over MCP, an edited request's version ID reaches its work, and accept_work
+// signs the hash of the submitted text it read, refusing any other.
+func TestHostedMCPWorkEditedVersionAndResultHash(t *testing.T) {
+	store, s := hostedServer(t)
+	requester := ed25519.NewKeyFromSeed(make([]byte, 32))
+	exec := func(c board.Command) board.Result {
+		t.Helper()
+		res, err := store.Execute(t.Context(), signService(requester, c), "mcp-work-test")
+		if err != nil {
+			t.Fatalf("%s: %v", c.Operation, err)
+		}
+		return res
+	}
+	worker := newIdentity(t, s, "work-editor")
+	judge := newIdentity(t, s, "work-hasher")
+	asWorker, asJudge := "Bearer "+worker["token"].(string), "Bearer "+judge["token"].(string)
+	feed, err := store.Execute(t.Context(), board.Command{Operation: "messages.list"}, "mcp-work-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := exec(board.Command{Operation: "post", Room: "gigs", Kind: "request", Text: "Summarize a page."}).Receipt.ID
+	data, _ := json.Marshal(map[string]any{"schema": 1, "generation": feed.Generation, "title": "Summarize", "capabilities": []string{"writing"}, "reviewer": judge["agent"]})
+	exec(board.Command{Operation: "work.create", MessageID: id, Data: string(data)})
+	edit := exec(board.Command{Operation: "post", Room: "gigs", Kind: "request", Text: "Summarize a page, in three lines. Claim this message with work.claim.", Data: `{"schema":1,"supersedes":"` + id + `"}`}).Receipt.ID
+
+	w := mustTool(t, s, "/mcp", asWorker, "read_work", map[string]any{"message_id": edit})["data"].(map[string]any)["work"].(map[string]any)
+	if w["id"] != id || w["resolved_from"] != edit || dig(w, "request", "version_id") != edit {
+		t.Fatalf("read_work by version: %v", w)
+	}
+	for _, path := range []string{"/api/work/" + edit, "/api/work/" + edit + "/history"} {
+		if r := makeRequest(s, "GET", path, "", ""); r.Code != 200 || !strings.Contains(r.Body.String(), `"resolved_from":"`+edit+`"`) || !strings.Contains(r.Body.String(), id) {
+			t.Fatalf("GET %s: %d %s", path, r.Code, r.Body.String())
+		}
+	}
+	result := mustTool(t, s, "/mcp", asWorker, "post_message", map[string]any{"reply_to": id, "text": "Three lines."})["receipt"].(map[string]any)["id"].(string)
+	claimed := mustTool(t, s, "/mcp", asWorker, "claim_work", map[string]any{"message_id": edit, "result_id": result})["data"].(map[string]any)["ack"].(map[string]any)
+	if claimed["work_id"] != id || claimed["resolved_from"] != edit || claimed["state"] != "submitted" {
+		t.Fatalf("claim_work by version: %v", claimed)
+	}
+	// The reviewer reads the submitted text's hash and accepts exactly that.
+	w = mustTool(t, s, "/mcp", asJudge, "read_work", map[string]any{"message_id": id})["data"].(map[string]any)["work"].(map[string]any)
+	submitted, _ := w["result_sha256"].(string)
+	if w["result_id"] != result || w["result_changed_since_submit"] != false || len(submitted) != 64 {
+		t.Fatalf("read_work of the submitted result: %v", w)
+	}
+	if _, failure := callTool(t, s, "/mcp", asJudge, "accept_work", map[string]any{"message_id": edit, "result_id": result, "result_sha256": strings.Repeat("0", 64)}); !strings.Contains(failure, "work_result_changed") {
+		t.Fatalf("accept_work with another hash: %q", failure)
+	}
+	accepted := mustTool(t, s, "/mcp", asJudge, "accept_work", map[string]any{"message_id": edit, "result_id": result})["data"].(map[string]any)["ack"].(map[string]any)
+	if accepted["state"] != "accepted" || accepted["result_sha256"] != submitted {
+		t.Fatalf("accept_work: %v", accepted)
+	}
+}

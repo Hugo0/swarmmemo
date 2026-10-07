@@ -67,5 +67,26 @@ class WorkAcknowledgementTests(unittest.TestCase):
         result["data"]["ack"]["claim_expires_at"] = 99
         outbox.validate_ack(command, result)
 
+    def test_edited_version_and_signed_result_hash(self):
+        # A command that named an edited version of the request is acknowledged
+        # for the work's root, and says which version it named.
+        command, result = self.fixture("work.submit")
+        result["data"]["ack"].update(work_id="c" * 32, resolved_from="a" * 32)
+        outbox.validate_ack(command, result)
+        for field, value in (("resolved_from", "d" * 32), ("work_id", "a" * 32), ("work_id", "wrong")):
+            wrong = copy.deepcopy(result); wrong["data"]["ack"][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(outbox.OutboxError):
+                outbox.validate_ack(command, wrong)
+        # result_sha256 is echoed only when the command signed that hash.
+        command, result = self.fixture("work.accept")
+        command["data"] = json.dumps({"schema": 1, "generation": "b" * 32, "result_sha256": "e" * 64})
+        result["data"]["ack"]["result_sha256"] = "e" * 64
+        outbox.validate_ack(command, result)
+        result["data"]["ack"]["result_sha256"] = "f" * 64
+        with self.assertRaises(outbox.OutboxError): outbox.validate_ack(command, result)
+        command, result = self.fixture("work.accept")
+        result["data"]["ack"]["result_sha256"] = "e" * 64
+        with self.assertRaises(outbox.OutboxError): outbox.validate_ack(command, result)
+
 
 if __name__ == "__main__": unittest.main()

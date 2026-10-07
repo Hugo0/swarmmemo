@@ -315,3 +315,75 @@ func TestWorkSSRRewardedFilter(t *testing.T) {
 		t.Errorf("rewarded detail: %d", w.Code)
 	}
 }
+
+// An edited request's newest version is the ID the board shows, so its work
+// page redirects to the work's root on the real store; a private work's
+// version never redirects. A result edited after its submit says so.
+func TestWorkSSREditedVersionRedirectsToRoot(t *testing.T) {
+	s, err := board.Open(filepath.Join(t.TempDir(), "web-work-version.sqlite"), board.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	nonce := 0
+	execute := func(key ed25519.PrivateKey, c board.Command) board.Result {
+		t.Helper()
+		nonce++
+		c.PublicKey = base64.RawURLEncoding.EncodeToString(key.Public().(ed25519.PublicKey))
+		c.Timestamp = time.Now().Unix()
+		c.Nonce = strings.Repeat("b", nonce)
+		c.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, board.Canonical("swarmmemo.com", c)))
+		res, err := s.Execute(t.Context(), c, "web-fixture")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	owner, worker := ed25519.NewKeyFromSeed(make([]byte, 32)), ed25519.NewKeyFromSeed(append(make([]byte, 31), 1))
+	feed, err := s.Execute(t.Context(), board.Command{Operation: "messages.list"}, "web-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := func(extra map[string]any) string {
+		d := map[string]any{"schema": 1, "generation": feed.Generation}
+		for k, v := range extra {
+			d[k] = v
+		}
+		raw, _ := json.Marshal(d)
+		return string(raw)
+	}
+	create := func(room string) (string, string) {
+		id := execute(owner, board.Command{Operation: "post", Room: room, Kind: "request", Text: "Edited brief"}).Receipt.ID
+		execute(owner, board.Command{Operation: "work.create", MessageID: id, Data: data(map[string]any{"title": "Edited fixture", "capabilities": []string{"review"}})})
+		edit := execute(owner, board.Command{Operation: "post", Room: room, Kind: "request", Text: "Edited brief, v2", Data: `{"schema":1,"supersedes":"` + id + `"}`}).Receipt.ID
+		return id, edit
+	}
+	id, edit := create("lobby")
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+edit, nil))
+	if w.Code != 301 || w.Header().Get("Location") != "/work/"+id {
+		t.Fatalf("version page: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	execute(owner, board.Command{Operation: "room.create", Room: "web-private-version", Visibility: "private"})
+	_, privateEdit := create("web-private-version")
+	w = httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+privateEdit, nil))
+	if w.Code != 404 || w.Header().Get("Location") != "" {
+		t.Fatalf("private version page: %d %q", w.Code, w.Header().Get("Location"))
+	}
+
+	// The worker submits by the version, then edits its result.
+	result := execute(worker, board.Command{Operation: "post", ReplyTo: id, Text: "Result"}).Receipt.ID
+	execute(worker, board.Command{Operation: "work.claim", MessageID: edit, Target: result, Data: data(nil)})
+	w = httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+id, nil))
+	if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, "unchanged since submit") || !strings.Contains(body, "Signed against the edited request version") || !strings.Contains(body, "recorded by the board") {
+		t.Fatalf("submitted page: %d", w.Code)
+	}
+	execute(worker, board.Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "Result, swapped", Data: `{"schema":1,"supersedes":"` + result + `"}`})
+	w = httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+id, nil))
+	if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, "edited this result after submitting it") {
+		t.Fatalf("edited result page: %d", w.Code)
+	}
+}
