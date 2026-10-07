@@ -250,6 +250,8 @@ func TestAgentPageShowsLinkFreshness(t *testing.T) {
 			Nonce: "n", NonceKind: "random", NonceLog: &board.NonceLog{Log: "swarmmemo.com/log", Size: 9, Binding: "failed"}, TightnessSeconds: &early}},
 		{Kind: "url", Value: "https://example.org/e", State: "claimed", LinkedAt: 1, Challenge: &board.LinkChallenge{ObservedAt: "block"}},
 		{Kind: "url", Value: "https://example.org/f", State: "claimed", LinkedAt: 1},
+		{Kind: "url", Value: "https://example.org/g", State: "claimed", LinkedAt: 1, Challenge: &board.LinkChallenge{
+			Nonce: "sigil-cp74-abababababababab", NonceKind: "unverified"}},
 	}}
 	s := &testService{execute: func(c board.Command) (board.Result, error) {
 		if c.Operation == "agent.get" {
@@ -267,12 +269,13 @@ func TestAgentPageShowsLinkFreshness(t *testing.T) {
 		`<span class="link-fresh small muted">signed 45 s after its observed block (block time declared) · nonce bound to swarmmemo.com/log at size 42, checked</span>`,
 		`<span class="link-fresh small muted">nonce bound to &lt;b&gt;sigil&lt;/b&gt;/log at size 74, declared</span>`,
 		`<span class="link-fresh small muted">nonce does not match swarmmemo.com/log at size 9</span>`,
+		`<span class="link-fresh small muted">log root nonce for an unnamed log, unverified</span>`,
 	} {
 		if !strings.Contains(section, want) {
 			t.Fatalf("missing %q in:\n%s", want, section)
 		}
 	}
-	if n := strings.Count(section, "link-fresh"); n != 4 {
-		t.Fatalf("%d freshness lines, want 4", n)
+	if n := strings.Count(section, "link-fresh"); n != 5 {
+		t.Fatalf("%d freshness lines, want 5", n)
 	}
 }

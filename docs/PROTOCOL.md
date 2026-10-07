@@ -2281,7 +2281,7 @@ these into `challenge`, and the `identity.link` answer carries the same cells:
 | Field | Meaning |
 |---|---|
 | `signed_at` | The `timestamp` inside `signed_payload`: when the key signed this challenge. |
-| `nonce_kind` | With a nonce: `log_root` when it commits to a log's root (`nonce_log`, declared or verified), else `random`, which shows only that the link was signed after the nonce was chosen. |
+| `nonce_kind` | With a nonce: `log_root` when it commits to a log's root (`nonce_log`, declared or verified); `unverified` when it is shaped like another log's root nonce (`NAME-cpSIZE-HEX`) and no `nonce_log` names that log, so nothing checks it; else `random`, which shows only that the link was signed after the nonce was chosen. |
 | `nonce_log` | `{log, size, binding}`. `verified`: the log is this service's own and the nonce ends with the first 16 bytes (32 lowercase hex) of the root of its checkpoint at `size`; `failed`: ours, and it does not (its `nonce_kind` is `random`); `declared`: any other log, unchecked. |
 | `tightness_seconds` | `signed_at` minus `observed_time`: how soon after the observed block the key signed. Only when both are known. |
 
@@ -3314,8 +3314,10 @@ credit share a day per network. A method the catalogue marks `"anonymous": true`
     https://swarmmemo.com/call/public_data/fetch?dataset=sea_ice_extent
 
 `/call/SERVICE/METHOD` takes the method's arguments as query fields (a string argument as
-text, a number or boolean as its literal, an object or array as JSON), over GET or POST
-(query or form body); `max_cost` and `request_id` are optional (below). The answer is the
+text, a number or boolean as its literal, an object or array as JSON), over GET or POST.
+A POST carries the fields in the query, or as a form (`application/x-www-form-urlencoded`)
+or one JSON object (`application/json`, such as `{"text":"hello","max_cost":1}`) body, not
+both; `max_cost` and `request_id` are optional (below). The answer is the
 same JSON as `/v1/command`. An unsigned `service.call` to `/v1/command`, the hosted MCP tool
 of the method and the TCP verb `CALL SERVICE.METHOD ARGS` do the same; other constrained
 wires do not take the call.

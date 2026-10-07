@@ -67,6 +67,11 @@ const (
 	IdentityLinkLogSizeMax     = 1 << 53
 	IdentityLinkBlockHeightMax = 10_000_000
 	IdentityLinkLogNoncePrefix = "swarmmemo-cp"
+	// A challenge's nonce_kind: log_root, unverified (shaped like a log root
+	// nonce, NAME-cpSIZE-HEX, with no nonce_log naming the log) or random.
+	NonceKindRandom     = "random"
+	NonceKindLogRoot    = "log_root"
+	NonceKindUnverified = "unverified"
 	// bitcoinGenesisTime is the earliest block time a link may declare, and
 	// blockTimeFutureSlack how far past its own signed timestamp (Bitcoin
 	// accepts block times up to two hours ahead).
@@ -131,8 +136,10 @@ type LinkChallenge struct {
 	// linked_at.
 	SignedAt int64 `json:"signed_at,omitempty"`
 	// NonceKind, set with a nonce, is log_root when the nonce commits to a
-	// log's Merkle root (NonceLog, declared or verified), else random: it
-	// shows only that the link was made after the nonce was chosen.
+	// log's Merkle root (NonceLog, declared or verified); unverified when it
+	// is shaped like another log's root nonce (NAME-cpSIZE-HEX) and no
+	// nonce_log names the log; else random: it shows only that the link was
+	// made after the nonce was chosen.
 	NonceKind string    `json:"nonce_kind,omitempty"`
 	NonceLog  *NonceLog `json:"nonce_log,omitempty"`
 	// TightnessSeconds is signed_at minus the declared observed_time: how
@@ -702,6 +709,11 @@ func (s *Store) attachIdentityLinks(ctx context.Context, tx *sql.Tx, agents []Ag
 // ownLogNonce is this service's own log-root nonce: swarmmemo-cpSIZE-HEX.
 var ownLogNonce = regexp.MustCompile(`^` + IdentityLinkLogNoncePrefix + `([1-9][0-9]{0,15})-[0-9a-f]{32}$`)
 
+// logShapedNonce is any log's root nonce by its shape, NAME-cpSIZE-HEX (such
+// as sigil-cp74-HEX): it reads unverified, not random, when no nonce_log
+// names its log.
+var logShapedNonce = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}-cp[0-9]{1,16}-[0-9A-Fa-f]{16,}$`)
+
 // challengeOf is a link's public challenge from its stored record: what the
 // linker signed, signed_at from the signed command itself, and the log its
 // nonce names, declared until settleChallenges checks it.
@@ -738,7 +750,8 @@ func (s *Store) challengeOf(r linkRecord) *LinkChallenge {
 // against its checkpoint of that size, in one query per 256 sizes inside the
 // caller's transaction, then sets each nonce_kind. A binding to any other log
 // stays declared; one to ours that does not match is failed, and its nonce
-// counts as random.
+// counts as random. A nonce shaped like a log root nonce that names no log
+// reads unverified.
 func (s *Store) settleChallenges(ctx context.Context, tx *sql.Tx, challenges []*LinkChallenge) error {
 	own := func(c *LinkChallenge) bool {
 		return c.NonceLog != nil && s.transparency.origin != "" && c.NonceLog.Log == s.transparency.origin
@@ -783,9 +796,13 @@ func (s *Store) settleChallenges(ctx context.Context, tx *sql.Tx, challenges []*
 				c.NonceLog.Binding = "verified"
 			}
 		}
-		c.NonceKind = "random"
-		if c.NonceLog != nil && c.NonceLog.Binding != "failed" {
-			c.NonceKind = "log_root"
+		switch {
+		case c.NonceLog != nil && c.NonceLog.Binding != "failed":
+			c.NonceKind = NonceKindLogRoot
+		case c.NonceLog == nil && logShapedNonce.MatchString(c.Nonce):
+			c.NonceKind = NonceKindUnverified
+		default:
+			c.NonceKind = NonceKindRandom
 		}
 	}
 	return nil

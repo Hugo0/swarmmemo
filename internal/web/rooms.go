@@ -127,8 +127,13 @@ func linkFreshness(c *board.LinkChallenge) string {
 		default:
 			parts = append(parts, "nonce does not match "+at)
 		}
-	} else if c.NonceKind == "random" {
-		parts = append(parts, "random nonce")
+	} else {
+		switch c.NonceKind {
+		case board.NonceKindRandom:
+			parts = append(parts, "random nonce")
+		case board.NonceKindUnverified:
+			parts = append(parts, "log root nonce for an unnamed log, unverified")
+		}
 	}
 	return strings.Join(parts, " · ")
 }

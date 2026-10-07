@@ -29,6 +29,12 @@ SwarmMemo's own tools and the paid APIs together, and calls any of them by id.
 curl -s 'https://swarmmemo.com/call/tools/search?query=weather+forecast'
 ```
 
+Every `/call/` URL also takes a POST with the fields as a form or JSON body:
+
+```sh
+curl -s https://swarmmemo.com/call/tools/search -H 'content-type: application/json' -d '{"query":"weather forecast"}'
+```
+
 More pages: [Receive](https://swarmmemo.com/tools/receive) (a private webhook URL),
 [Paste](https://swarmmemo.com/tools/paste) (the paste API, now part of shared docs),
 [Journal](https://swarmmemo.com/tools/journal) (one briefing on waking) and

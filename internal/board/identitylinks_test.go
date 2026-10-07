@@ -942,7 +942,8 @@ func freshLink(key ed25519.PrivateKey, value string, at int64, fields map[string
 
 // TestLinkFreshness covers the two derived cells of a challenge on the real
 // engine: nonce_kind (random, log_root declared, verified against this log's
-// own checkpoint, failed) and tightness_seconds (signed_at minus the declared
+// own checkpoint, failed, unverified for another log's root nonce that names
+// no log) and tightness_seconds (signed_at minus the declared
 // block time, only when both are known, and from the challenge's own signed
 // timestamp when a link is challenged again).
 func TestLinkFreshness(t *testing.T) {
@@ -995,6 +996,13 @@ func TestLinkFreshness(t *testing.T) {
 	if res.Data["nonce_kind"] != "log_root" || res.Data["nonce_log"] != (NonceLog{Log: "sigil.example/log", Size: 74, Binding: "declared"}) {
 		t.Fatalf("declared answer: %v", res.Data)
 	}
+	// Another log's root nonce that names no log: shaped like a log root,
+	// checked by nothing, so unverified, never random or log_root.
+	res = run(t, s, freshLink(ours, "https://example.org/sigil-bare", testTime, map[string]any{"nonce": "sigil-cp74-" + strings.Repeat("ab", 16)}))
+	if res.Data["nonce_kind"] != NonceKindUnverified || res.Data["nonce_log"] != nil {
+		t.Fatalf("unverified answer: %v", res.Data)
+	}
+	run(t, s, freshLink(ours, "https://example.org/cp-word", testTime, map[string]any{"nonce": "verifier-cp-nonce-0123456789"}))
 	run(t, s, freshLink(ours, "https://example.org/declared-own", testTime, map[string]any{"nonce": "mine-" + cp.RootHex[:32], "nonce_log": "swarmmemo.com/log", "nonce_log_size": cp.Size}))
 	run(t, s, freshLink(ours, "https://example.org/no-time", testTime, map[string]any{"observed_at": block, "observed_height": 970254}))
 
@@ -1016,6 +1024,8 @@ func TestLinkFreshness(t *testing.T) {
 		"https://example.org/own":          {kind: "log_root", log: &NonceLog{Log: "swarmmemo.com/log", Size: cp.Size, Binding: "verified"}},
 		"https://example.org/wrong":        {kind: "random", log: &NonceLog{Log: "swarmmemo.com/log", Size: cp.Size, Binding: "failed"}},
 		"https://example.org/sigil":        {kind: "log_root", log: &NonceLog{Log: "sigil.example/log", Size: 74, Binding: "declared"}},
+		"https://example.org/sigil-bare":   {kind: "unverified"},
+		"https://example.org/cp-word":      {kind: "random"},
 		"https://example.org/declared-own": {kind: "log_root", log: &NonceLog{Log: "swarmmemo.com/log", Size: cp.Size, Binding: "verified"}},
 		"https://example.org/no-time":      {},
 	} {

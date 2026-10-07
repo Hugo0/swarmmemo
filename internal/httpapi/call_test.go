@@ -89,7 +89,6 @@ func TestCallRouteWithoutAKey(t *testing.T) {
 		{"GET", "/call/notary/stamp?text=x&max_cost=1&request_id=z2&public_key=abc", "", "", 400, "invalid_request"},                   // signed fields
 		{"GET", "/call/notary/stamp?text=x&text=y&max_cost=1&request_id=z3", "", "", 400, "invalid_request"},                           // repeated
 		{"POST", "/call/notary/stamp?max_cost=1", "text=x&request_id=z4", "application/x-www-form-urlencoded", 400, "invalid_request"}, // query and body
-		{"POST", "/call/notary/stamp", `{"text":"x"}`, "application/json", 400, "invalid_request"},
 		{"GET", "/call/nope/x?max_cost=1&request_id=z5", "", "", 400, "invalid_service"},
 		{"GET", "/call/notary", "", "", 400, "invalid_request"},
 		{"PUT", "/call/notary/stamp", "", "", 405, "method_not_allowed"},
@@ -114,6 +113,69 @@ func TestCallRouteWithoutAKey(t *testing.T) {
 	}
 	if w := makeRequest(s, "GET", "https://swarmmemo.com/robots.txt", "", ""); !strings.Contains(w.Body.String(), "Disallow: /call/") {
 		t.Errorf("robots.txt: %s", w.Body.String())
+	}
+}
+
+// A POST to /call/ may carry its fields as one JSON object, typed and
+// checked like a form's; every refusal names the encodings a call takes.
+func TestCallRouteJSONBody(t *testing.T) {
+	_, s := anonCallServer(t, 2000)
+	post := func(path, body, ct string) *httptest.ResponseRecorder {
+		return makeRequest(s, "POST", "https://swarmmemo.com"+path, body, ct)
+	}
+	// A write (a billed service.call) and a public read.
+	w := post("/call/notary/stamp", `{"text":"json & body","max_cost":1,"request_id":"request-id-json-0001"}`, "application/json; charset=utf-8")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"done"`) {
+		t.Fatalf("POST JSON write: %d %s", w.Code, w.Body.String())
+	}
+	again := post("/call/notary/stamp", "text=json+%26+body&max_cost=1&request_id=request-id-json-0001", "application/x-www-form-urlencoded")
+	var first, second map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &first)
+	_ = json.Unmarshal(again.Body.Bytes(), &second)
+	if id := dig(first, "data", "call", "id"); id == nil || dig(second, "data", "call", "id") != id {
+		t.Fatalf("the same call as a form: %s vs %s", w.Body.String(), again.Body.String())
+	}
+	if w := post("/call/notary/key", `{}`, "application/json"); w.Code != 200 || !strings.Contains(w.Body.String(), "public_key") {
+		t.Fatalf("POST JSON read: %d %s", w.Code, w.Body.String())
+	}
+	encodings := "a JSON object (Content-Type: application/json) or a form (application/x-www-form-urlencoded)"
+	for _, c := range []struct {
+		name, path, body, ct string
+		status               int
+		want                 string
+	}{
+		{"query and body", "/call/notary/stamp?max_cost=1", `{"text":"x"}`, "application/json", 400, "both the query and the body. POST the fields as " + encodings},
+		{"malformed", "/call/notary/stamp", `{"text":`, "application/json", 400, "not valid JSON. POST the fields as " + encodings},
+		{"array", "/call/notary/stamp", `["text","x"]`, "application/json", 400, "one object of fields"},
+		{"string", "/call/notary/stamp", `"text=x"`, "application/json", 400, "one object of fields"},
+		{"two objects", "/call/notary/stamp", `{"text":"x"} {"text":"y"}`, "application/json", 400, "with nothing after it"},
+		{"repeated", "/call/notary/stamp", `{"text":"x","text":"y"}`, "application/json", 400, "text is given more than once"},
+		{"null", "/call/notary/stamp", `{"text":null}`, "application/json", 400, "text is null"},
+		{"unknown field", "/call/notary/stamp", `{"text":"x","nope":1}`, "application/json", 400, "nope is not an argument"},
+		{"bad max_cost", "/call/notary/stamp", `{"text":"x","max_cost":"lots"}`, "application/json", 400, "max_cost must be a whole number"},
+		{"signed fields", "/call/notary/stamp", `{"text":"x","public_key":"abc"}`, "application/json", 400, "Signed calls are JSON commands"},
+		{"needs a key", "/call/memory/put", `{"key":"k","value":"v","max_cost":300,"request_id":"request-id-json-0003"}`, "application/json", 401, "signature_required"},
+		{"plain text", "/call/notary/stamp", `text=x`, "text/plain", 400, "POST the fields as " + encodings},
+		{"oversize", "/call/notary/stamp", `{"text":"` + strings.Repeat("x", board.CommandBodyBytes) + `"}`, "application/json", 413, "body_too_large"},
+	} {
+		w := post(c.path, c.body, c.ct)
+		if w.Code != c.status || !strings.Contains(w.Body.String(), c.want) {
+			t.Errorf("%s: %d %s, want %d %q", c.name, w.Code, w.Body.String(), c.status, c.want)
+		}
+	}
+	// A GET with a body names where its fields go.
+	if w := makeRequest(s, "GET", "https://swarmmemo.com/call/notary/key", `{}`, "application/json"); w.Code != 400 || !strings.Contains(w.Body.String(), "A GET takes the fields in the query") {
+		t.Errorf("GET with a body: %d %s", w.Code, w.Body.String())
+	}
+	// Another site's page cannot send one either.
+	r := httptest.NewRequest("POST", "https://swarmmemo.com/call/notary/stamp", strings.NewReader(`{"text":"x","max_cost":1,"request_id":"request-id-json-0002"}`))
+	r.RemoteAddr = "198.51.100.8:12345"
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Origin", "https://evil.example")
+	cross := httptest.NewRecorder()
+	s.ServeHTTP(cross, r)
+	if cross.Code != 403 || !strings.Contains(cross.Body.String(), "invalid_origin") {
+		t.Errorf("cross-site JSON: %d %s", cross.Code, cross.Body.String())
 	}
 }
 

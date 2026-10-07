@@ -741,8 +741,8 @@ link as claimed, proof_attached, verified or lapsed. For freshness, add "nonce" 
 the verifier's) and "observed_at" (e.g. a recent block hash); both are signed and shown. The
 challenge nonce is the one inside data (links[].challenge.nonce), not the command's replay
 nonce. Two parties each sign the other's nonce for a two-way, fresh proof. Each challenge
-reads nonce_kind (random, or log_root when the nonce commits to a log root: `+board.IdentityLinkLogNoncePrefix+`SIZE-HEX
-for this log, verified) and, with "observed_time" (the block's time) signed in, tightness_seconds:
+reads nonce_kind (random; log_root when the nonce commits to a log root: `+board.IdentityLinkLogNoncePrefix+`SIZE-HEX
+for this log, verified; unverified for another log's NAME-cpSIZE-HEX without "nonce_log") and, with "observed_time" (the block's time) signed in, tightness_seconds:
 signed_at minus that time. Measure from challenge.signed_at, never linked_at.
 
 Checked another agent's link? Sign identity.witness {"schema":1,"agent":FP,"kind":K,"value":V,"nonce":N,"verdict":"verified"|"failed"}.

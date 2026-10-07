@@ -95,7 +95,9 @@ func (s *Server) servicesRoute(w http.ResponseWriter, r *http.Request) bool {
 // callRoute serves /call/SERVICE/METHOD: a service call without a key as
 // one plain URL, the GET post convention for services. The fields are the
 // method's arguments (typed by the catalogue), max_cost and request_id, in
-// the query of a GET or POST, or in a form body of a POST (not both). A
+// the query of a GET or POST, or in a form or JSON object body of a POST
+// (not both). A JSON body is never a simple cross-site request, and the
+// cross-site check below refuses either body from another site's page. A
 // method the catalogue marks anonymous becomes an unsigned service.call,
 // billed to the caller's network; a public read becomes a service.read.
 // Signed commands use POST /v1/command. The answer is always JSON.
@@ -137,8 +139,16 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := r.URL.Query()
 	if r.Body != nil && (r.ContentLength != 0 || len(r.TransferEncoding) > 0) {
-		if r.Method != http.MethodPost || strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])) != "application/x-www-form-urlencoded" || len(fields) > 0 {
-			writeError(w, bad("POST the fields as an application/x-www-form-urlencoded body, or in the query, not both."))
+		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
+		switch {
+		case r.Method != http.MethodPost:
+			writeError(w, bad("A GET takes the fields in the query. "+callBodyUsage+"."))
+			return
+		case mediaType != "application/x-www-form-urlencoded" && mediaType != "application/json":
+			writeError(w, bad("This body's Content-Type is not one a call takes. "+callBodyUsage+"."))
+			return
+		case len(fields) > 0:
+			writeError(w, bad("The fields came in both the query and the body. "+callBodyUsage+", not both."))
 			return
 		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, board.CommandBodyBytes))
@@ -146,8 +156,14 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 			writeError(w, bodyTooLarge(r, board.CommandBodyBytes))
 			return
 		}
-		if fields, err = url.ParseQuery(string(body)); err != nil {
-			writeError(w, bad("Invalid form encoding."))
+		if mediaType == "application/json" {
+			var berr *board.Error
+			if fields, berr = callJSONFields(body); berr != nil {
+				writeError(w, berr)
+				return
+			}
+		} else if fields, err = url.ParseQuery(string(body)); err != nil {
+			writeError(w, bad("The form body is not valid application/x-www-form-urlencoded. "+callBodyUsage+"."))
 			return
 		}
 	}
@@ -185,6 +201,65 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.execute(w, withVia(r, strings.ToLower(r.Method)), c)
+}
+
+// callBodyUsage names the encodings /call/SERVICE/METHOD takes its fields in.
+const callBodyUsage = "POST the fields as a JSON object (Content-Type: application/json) or a form (application/x-www-form-urlencoded), or give them in the query"
+
+// callJSONFields reads a /call/ JSON body, one object of fields, as the same
+// fields a query or form carries: a string as its text, a number or boolean
+// as its literal, an object or array as compact JSON. CallData then types
+// and checks them exactly as it does a form's. A field given twice, a null
+// and anything but one object are refused.
+func callJSONFields(body []byte) (url.Values, *board.Error) {
+	example := `, such as {"text":"hello"}`
+	notJSON := bad("The body is not valid JSON. " + callBodyUsage + example + ".")
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if tok, err := dec.Token(); err != nil {
+		return nil, notJSON
+	} else if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return nil, bad("The JSON body must be one object of fields" + example + ".")
+	}
+	fields := url.Values{}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, notJSON
+		}
+		key, _ := tok.(string)
+		var raw json.RawMessage
+		if err = dec.Decode(&raw); err != nil {
+			return nil, notJSON
+		}
+		if fields.Has(key) {
+			return nil, bad(key + " is given more than once.")
+		}
+		switch raw[0] {
+		case 'n':
+			return nil, bad(key + " is null; leave it out instead.")
+		case '"':
+			var v string
+			if err = json.Unmarshal(raw, &v); err != nil {
+				return nil, notJSON
+			}
+			fields.Set(key, v)
+		case '{', '[':
+			var b bytes.Buffer
+			if err = json.Compact(&b, raw); err != nil {
+				return nil, notJSON
+			}
+			fields.Set(key, b.String())
+		default: // a number, true or false: its literal
+			fields.Set(key, string(raw))
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, notJSON
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, bad("The JSON body must be one object of fields" + example + ", with nothing after it.")
+	}
+	return fields, nil
 }
 
 // textDownload answers docs.open or paste.open (service) with format=text:

@@ -91,6 +91,7 @@ Each challenge reads with two freshness cells:
   `swarmmemo-cpSIZE-HEX`, where HEX is the first 32 hex characters of `root_hex` from
   `/api/log/checkpoint?size=SIZE`, and `nonce_log.binding` reads `verified`. Name another
   log with `--nonce-log ORIGIN --nonce-log-size SIZE`; that binding reads `declared`.
+  Another log's root nonce (`NAME-cpSIZE-HEX`) without `--nonce-log` reads **unverified**.
 - **`tightness_seconds`**: with `--observed-height` and `--observed-time` (the block's
   height and time), how soon after that block you signed, shown as "signed 12 min after
   block 970254 (block time declared)". The block time is yours; readers check it against

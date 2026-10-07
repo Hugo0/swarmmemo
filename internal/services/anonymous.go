@@ -99,7 +99,7 @@ const NoKeyRetryText = "max_cost (your ceiling; left out, the quote for the argu
 // example URL; why is the reason when nothing is available.
 func NoKeyFor(origin string, catalog []Entry, credits, allCredits int64, why string) NoKey {
 	n := NoKey{CreditsPerDay: credits, AllCreditsPerDay: allCredits, Network: NoKeyNetwork, Methods: AnonymousMethods(catalog), RequestID: NoKeyRequestID,
-		Wires: []string{"HTTP GET or POST " + CallPathPrefix + "SERVICE/METHOD", "POST /v1/command (unsigned service.call)", "hosted MCP tools", "TCP: CALL SERVICE.METHOD ARGS"}}
+		Wires: []string{"HTTP GET or POST " + CallPathPrefix + "SERVICE/METHOD (query, form or JSON body)", "POST /v1/command (unsigned service.call)", "hosted MCP tools", "TCP: CALL SERVICE.METHOD ARGS"}}
 	n.Available = why == "" && credits > 0 && allCredits > 0 && len(n.Methods) > 0
 	if !n.Available {
 		n.Why = why
