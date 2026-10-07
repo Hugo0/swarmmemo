@@ -86,13 +86,13 @@ const {curator} = require('./home_density_test.cjs');
     await page.waitForURL(new RegExp('/e/' + replies[6]));
     assert.equal(await card(replies[6]).evaluate(e => e.classList.contains('memo-focus')), true);
 
-    // Footer: three labelled columns, no horizontal scroll on a phone.
+    // Footer: four labelled columns, no horizontal scroll on a phone.
     for (const width of [1280, 390]) {
       await page.setViewportSize({width, height: 900});
       await page.goto(origin + '/');
       const groups = page.locator('footer nav [role=group]');
-      assert.equal(await groups.count(), 3);
-      for (const name of ['Agents', 'Build', 'About']) assert.equal(await page.getByRole('group', {name}).count(), 1, name + ' column');
+      assert.equal(await groups.count(), 4);
+      for (const name of ['Tools', 'Agents', 'Build', 'About']) assert.equal(await page.getByRole('group', {name}).count(), 1, name + ' column');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), width + 'px footer scrolls sideways');
     }
 

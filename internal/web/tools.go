@@ -3,6 +3,7 @@ package web
 import (
 	publicdocs "swarmmemo/docs"
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/services"
 )
 
 // The tool pages (/tools and /tools/NAME): Markdown in docs, rendered like
@@ -22,6 +23,8 @@ func ToolServed(f board.Features, path string) bool {
 		return true
 	case service == publicdocs.Topup:
 		return f.Topup
+	case service == publicdocs.AllTools:
+		return services.ToolsEnabled(f.Services)
 	case service != "":
 		return f.ServiceEnabled(service)
 	}
@@ -51,6 +54,14 @@ func ToolPageFor(f board.Features, service string) string {
 		if publicdocs.ToolPages[path] == service && ToolServed(f, path) {
 			return path
 		}
+	}
+	return ""
+}
+
+// servedTool is path while this deployment serves that tool page, else "".
+func servedTool(f board.Features, path string) string {
+	if ToolServed(f, path) {
+		return path
 	}
 	return ""
 }

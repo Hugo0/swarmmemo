@@ -27,7 +27,7 @@ func TestGivesFollowWhatIsEnabled(t *testing.T) {
 	SetWriteTransports([]string{"dns"})
 	f := board.Features{Services: []string{"memory", "public_data", "x402"}, Trust: board.TrustShadow}
 	gives := Gives(f, services.Catalog(f.Services))
-	if got := topics(gives); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Search and data", "Tools across the internet", "Memory", "Images", "Find agents", "Work", "A record you can prove", "Trust"}) {
+	if got := topics(gives); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Tools", "Search and data", "Tools across the internet", "Memory", "Images", "Find agents", "Work", "A record you can prove", "Trust"}) {
 		t.Fatalf("topics: %v", got)
 	}
 	if !strings.Contains(gives[0].Line, "DNS") {
@@ -52,7 +52,7 @@ func TestGivesFollowWhatIsEnabled(t *testing.T) {
 // available, and both fetch ceilings in plain words.
 func TestLLMSFetchCallAndChoosing(t *testing.T) {
 	const origin = "https://x.test"
-	if FetchText(origin, board.Features{}, nil, services.NoKey{}) != "" || CallText(origin, nil) != "" {
+	if FetchText(origin, board.Features{}, nil, services.NoKey{}) != "" || ToolsText(origin, nil, services.NoKey{}) != "" {
 		t.Fatal("a fetch or call section with no service enabled")
 	}
 	f := board.Features{Services: []string{"fetch", "memory", "x402"}}
@@ -67,10 +67,23 @@ func TestLLMSFetchCallAndChoosing(t *testing.T) {
 	if strings.Contains(fetch, "max_bytes") || strings.Contains(FetchText(origin, f, catalog, services.NoKey{}), "curl") {
 		t.Errorf("the no-key example carries max_bytes, or shows while calls without a key are off:\n%s", fetch)
 	}
-	call := CallText(origin, catalog)
-	memory := services.Catalog([]string{"memory"})[0]
-	if ex := ServiceExamples(origin, memory); !strings.Contains(call, "    "+ex.POST+"\n    # "+ex.SignNote+"\n") || !strings.Contains(call, "x402_resources") {
-		t.Errorf("call section:\n%s", call)
+	// The tools section: the cost rule, a search and (while calls without a
+	// key run) a call, then only the featured tools and the paid-API search.
+	tools := ToolsText(origin, catalog, services.NoKey{Available: true, Methods: []string{"fetch.page"}})
+	for _, want := range []string{"## Tools: search, then call", services.ToolsCostLine, "    curl -sS 'https://x.test/call/tools/search?query=weather+forecast'\n",
+		"    curl -sS https://x.test/call/tools/call --data 'id=swarmmemo:fetch.page&args={\"url\":\"https://example.com/\"}'\n",
+		"- Fetch a page: ", "- Remember (key): ", "- Paid APIs: ", `tools_search {"query":"weather forecast for a city"}`, "Everything else is behind the search"} {
+		if !strings.Contains(tools, want) {
+			t.Errorf("tools section lacks %q:\n%s", want, tools)
+		}
+	}
+	for _, unwanted := range []string{"Screen text", "Ask a model", "x402", "frames", "bundler"} {
+		if strings.Contains(tools, unwanted) {
+			t.Errorf("tools section names %q, not featured here or a provider's name:\n%s", unwanted, tools)
+		}
+	}
+	if strings.Contains(ToolsText(origin, catalog, services.NoKey{}), "/call/") {
+		t.Error("the call without a key shows while calls without a key are off")
 	}
 	choosing := ChoosingText(services.Catalog([]string{"memory", "paste", "docs"}))
 	for _, want := range []string{"- memory: a small key-value store for your own state between runs;", "- paste: share one text by id, with expiry;",

@@ -410,7 +410,13 @@ func TestRFC0012InstructionsAndToolsWhenOn(t *testing.T) {
 	s, _ := rfc0012Server(allOn)
 	for _, path := range []string{"/llms.txt", "/llms-full.txt", "/skill.md"} {
 		body := makeRequest(s, "GET", path, "", "").Body.String()
-		for _, want := range []string{"## Free allowance", web.WaterfallSentence, "next.allowance", "/api/allowance", "\n- Memory: ", "## Trust estimates", "## Vouches"} {
+		// The short forms name the tools search and the featured memory
+		// tool; the long form keeps every service's line.
+		tool := "\n- Tools: "
+		if path == "/llms-full.txt" {
+			tool = "\n- Memory: "
+		}
+		for _, want := range []string{"## Free allowance", web.WaterfallSentence, "next.allowance", "/api/allowance", tool, "## Trust estimates", "## Vouches"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s lacks %q", path, want)
 			}

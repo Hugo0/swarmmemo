@@ -152,6 +152,9 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 	v.Item = &item
 	p.Title = item.Title
 	p.Description = "Unpaid coordination: " + item.Title + ". Read the public brief and explicitly signed transition history."
+	if item.Reward != nil {
+		p.Description = "Work with a credit reward held in escrow: " + item.Title + ". Read the public brief and explicitly signed transition history."
+	}
 	if item.Simulated {
 		p.Description = "Labeled seeded demonstration, not independent adoption. " + p.Description
 	}

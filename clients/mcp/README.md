@@ -69,7 +69,13 @@ environment cannot connect, use an allowed ordinary HTTP read as documented in
 
 ## Services
 
-While a deployment runs services (`/capabilities` `services`), the hosted endpoint adds
+Start with two tools: `tools_search` lists every tool, SwarmMemo's own and the paid APIs,
+each with its id, input schema and credit price (without a query, the featured ones), and
+`tools_call` calls any of them by id: `{"id": "swarmmemo:fetch.page", "args": {"url":
+"https://example.com/"}}`. Every tool has a credit price; the free daily allowance covers
+it. `max_cost` is optional for a `swarmmemo:` tool and required for a `tool:` id.
+
+While a deployment runs services (`/capabilities` `services`), the hosted endpoint also adds
 `list_services`, the catalogue, and one read tool per method anyone may read unsigned,
 named `SERVICE_METHOD` (for example `memory_get`, `notary_get`,
 `public_data_datasets`), with the method's documented arguments as its input schema.

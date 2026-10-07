@@ -121,8 +121,8 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 	for _, path := range []string{"/llms.txt", "/llms-full.txt"} {
 		text := makeRequest(s, "GET", path, "", "").Body.String()
 		if path == "/llms.txt" {
-			if !strings.Contains(text, web.CallText(s.cfg.PublicURL, live.Data["services"].([]services.Entry))) || !strings.Contains(text, `\"method\":\"put\"`) {
-				t.Errorf("%s does not show the example call at the live price", path)
+			if !strings.Contains(text, web.ToolsText(s.cfg.PublicURL, live.Data["services"].([]services.Entry), services.NoKey{})) {
+				t.Errorf("%s does not show the tools section", path)
 			}
 		} else {
 			last := -1
@@ -137,8 +137,16 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 				t.Errorf("%s does not show the live price", path)
 			}
 		}
+		// /llms.txt names no service but tools: the featured tools and the
+		// search stand for the rest.
+		serviceTopics := map[string]bool{}
+		for _, e := range catalog {
+			if e.ID != services.ToolsID && path == "/llms.txt" {
+				serviceTopics[e.Topic] = true
+			}
+		}
 		for _, topic := range capGives {
-			if !strings.Contains(text, "\n- "+topic+": ") {
+			if !serviceTopics[topic] && !strings.Contains(text, "\n- "+topic+": ") {
 				t.Errorf("%s lacks the gives line %q", path, topic)
 			}
 		}
@@ -174,9 +182,14 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 	}
 
 	// MCP: the server card and tools/list name list_services and one tool
-	// per public read and per method callable without a key, exactly.
+	// per public read and per method callable without a key, exactly, the
+	// tools search and call first.
 	wantTools := []string{"list_services"}
-	for _, e := range catalog {
+	ordered := slices.Clone(catalog)
+	toolsAt := slices.IndexFunc(ordered, func(e services.Entry) bool { return e.ID == services.ToolsID })
+	tools := ordered[toolsAt]
+	ordered = append([]services.Entry{tools}, slices.Delete(ordered, toolsAt, toolsAt+1)...)
+	for _, e := range ordered {
 		for _, m := range e.Methods {
 			if !m.Write() && !m.Signed || m.Write() && m.Anonymous {
 				wantTools = append(wantTools, web.MCPToolName(e, m))

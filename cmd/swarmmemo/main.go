@@ -313,6 +313,7 @@ func serve() error {
 	}
 	topup := topupFromEnvironment(features)
 	features.Topup = topup != nil
+	web.SetFooterTools(features)
 	publicURL := env("PUBLIC_URL", "https://swarmmemo.com")
 	reserved := []string{}
 	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {

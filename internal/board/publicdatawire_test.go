@@ -32,7 +32,8 @@ func TestPublicDataWiring(t *testing.T) {
 	t.Cleanup(s.stopServices)
 	list := run(t, s, Command{Operation: "services.list"})
 	svcs, _ := svcField(t, list.Data, "services").([]any)
-	if len(svcs) != 1 || svcField(t, svcs[0], "id") != "public_data" || svcField(t, svcs[0], "network") != true {
+	// The service, then tools, the one search and call over it.
+	if len(svcs) != 2 || svcField(t, svcs[0], "id") != "public_data" || svcField(t, svcs[1], "id") != services.ToolsID || svcField(t, svcs[0], "network") != true {
 		t.Fatalf("catalogue: %+v", list.Data)
 	}
 	read := run(t, s, svcRead(nil, "public_data", "datasets", map[string]any{}))

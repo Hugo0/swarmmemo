@@ -35,13 +35,15 @@ func toolPage(t *testing.T, services []string, path string) (int, string) {
 // receive URLs inside code blocks, never as links.
 func TestToolPages(t *testing.T) {
 	all := []string{"fetch", "receiver", "paste", "docs", "memory", "wakeup", "x402", "notary", "topup"}
-	for _, path := range []string{"/tools", "/tools/topup", "/tools/fetch", "/tools/receive", "/tools/paste", "/tools/docs", "/tools/memory", "/tools/wakeup", "/tools/journal", "/tools/paid-apis", "/tools/notary"} {
+	for _, path := range []string{"/tools", "/tools/all", "/tools/topup", "/tools/fetch", "/tools/receive", "/tools/paste", "/tools/docs", "/tools/memory", "/tools/wakeup", "/tools/journal", "/tools/paid-apis", "/tools/notary"} {
 		if code, _ := toolPage(t, nil, path); code != 404 {
 			t.Errorf("%s while its service is off: %d", path, code)
 		}
 	}
-	if code, _ := toolPage(t, nil, "/tools/verify"); code != 200 {
-		t.Errorf("/tools/verify, about the board itself, without services: %d", code)
+	for _, path := range []string{"/tools/verify", "/tools/identity", "/tools/work"} {
+		if code, _ := toolPage(t, nil, path); code != 200 {
+			t.Errorf("%s, about the board itself, without services: %d", path, code)
+		}
 	}
 	if code, _ := toolPage(t, []string{"receiver"}, "/tools/fetch"); code != 404 {
 		t.Errorf("/tools/fetch without fetch: %d", code)
@@ -55,10 +57,13 @@ func TestToolPages(t *testing.T) {
 		"/tools/memory":    {"memory for AI agents", "python3 swarmmemo.py --key agent.json memory get notes/today", ""},
 		"/tools/wakeup":    {"without polling", "python3 swarmmemo.py --key agent.json call wakeup schedule", ""},
 		"/tools/journal":   {"resume an AI agent session", "python3 swarmmemo.py --key agent.json command", ""},
-		"/tools/paid-apis": {"Paid APIs for AI agents", "curl -s https://swarmmemo.com/v1/command", ""},
+		"/tools/paid-apis": {"Paid APIs for AI agents", "curl -s &#39;https://swarmmemo.com/call/tools/search?query=weather+forecast+for+a+city&amp;kind=catalogue&#39;", ""},
+		"/tools/all":       {"All tools for AI agents", "curl -s &#39;https://swarmmemo.com/call/tools/search?query=weather+forecast&#39;", ""},
 		"/tools/notary":    {"timestamp notary", "curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode", ""},
 		"/tools/topup":     {"Top up AI agent credit", "{&#34;operation&#34;:&#34;credits.topup&#34;", ""},
 		"/tools/verify":    {"transparency log", "curl -s &#39;https://swarmmemo.com/api/log/proof?message=MESSAGE_ID&#39;", ""},
+		"/tools/identity":  {"Agent identity across boards", "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey", ""},
+		"/tools/work":      {"Pay another AI agent for a task", "python3 swarmmemo.py --key agent.json command &#39;{&#34;operation&#34;:&#34;work.create&#34;", ""},
 	}
 	for path, w := range want {
 		code, body := toolPage(t, all, path)
@@ -112,13 +117,13 @@ func TestToolPages(t *testing.T) {
 		_, body := toolPage(t, all, "/tools/receive")
 		t.Log(body[strings.Index(body, "<article"):strings.Index(body, "This page as Markdown")])
 	}
-	if paths := ToolPaths(board.Features{Services: []string{"fetch"}}); strings.Join(paths, " ") != "/tools /tools/fetch /tools/verify" {
+	if paths := ToolPaths(board.Features{Services: []string{"fetch"}}); strings.Join(paths, " ") != "/tools /tools/all /tools/fetch /tools/verify /tools/identity /tools/work" {
 		t.Errorf("tool paths with fetch alone: %v", paths)
 	}
-	if paths := ToolPaths(board.Features{Services: []string{"memory"}}); strings.Join(paths, " ") != "/tools /tools/memory /tools/journal /tools/verify" {
+	if paths := ToolPaths(board.Features{Services: []string{"memory"}}); strings.Join(paths, " ") != "/tools /tools/all /tools/memory /tools/journal /tools/verify /tools/identity /tools/work" {
 		t.Errorf("tool paths with memory alone: %v", paths)
 	}
-	if paths := ToolPaths(board.Features{}); strings.Join(paths, " ") != "/tools/verify" {
+	if paths := ToolPaths(board.Features{}); strings.Join(paths, " ") != "/tools/verify /tools/identity /tools/work" {
 		t.Errorf("tool paths without services: %v", paths)
 	}
 	if paths := ToolPaths(board.Features{Services: all, Topup: true}); len(paths) != len(publicdocs.ToolPaths()) || len(paths) != len(want) {

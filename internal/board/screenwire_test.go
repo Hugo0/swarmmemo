@@ -117,7 +117,7 @@ func TestScreenOffWithoutModeration(t *testing.T) {
 		if strings.Join(nk.Methods, ",") != "screen.leak" || !strings.Contains(nk.Line, "leak checks") {
 			t.Fatalf("without_key with no classifier: %+v", nk)
 		}
-		if entries, _ := list["services"].([]services.Entry); len(entries) != 1 || entries[0].Extra["available"] != false {
+		if entries, _ := list["services"].([]services.Entry); len(entries) != 2 || entries[0].Extra["available"] != false {
 			t.Fatalf("screen listed as available: %+v", list["services"])
 		}
 		_, err := s.Execute(testContext, signed(keyFor(1), Command{Operation: "service.call", Target: "screen", Data: svcData("text", map[string]any{"text": "hi"}, 1000), RequestID: "s1", Timestamp: testTime + 23*3600}), "test-origin")

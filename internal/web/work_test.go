@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -243,5 +244,43 @@ func TestWorkSSRShowsTheNamedReviewer(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing detail %q", want)
 		}
+	}
+}
+
+// The directory filters open work with a held reward (kind=rewarded), and a
+// rewarded item says what it pays instead of "Unpaid".
+func TestWorkSSRRewardedFilter(t *testing.T) {
+	item := board.Work{ID: webWorkID, Room: "lobby", Title: "Rewarded work", State: "open", StoredState: "open", Requester: board.AgentRef{ID: strings.Repeat("2", 64)},
+		Reward: &board.WorkReward{Amount: 500, Unit: "credit", State: "held"}, Capabilities: []string{}, Deadline: 1789171200}
+	var kinds []string
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "works.list":
+			kinds = append(kinds, c.Kind)
+			return board.Result{OK: true, Data: map[string]any{"works": []board.Work{item}}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work?kind=rewarded", nil))
+	body := w.Body.String()
+	if w.Code != 200 || !slices.Equal(kinds, []string{board.WorkKindRewarded}) {
+		t.Fatalf("rewarded directory: %d %v", w.Code, kinds)
+	}
+	for _, want := range []string{`<option value="rewarded" selected>`, "Reward 500 credits (held)", "kind=rewarded"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rewarded directory misses %q", want)
+		}
+	}
+	w = httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+	if body := w.Body.String(); !strings.Contains(body, "Reward 500 credits (held) · open") || !strings.Contains(body, "held in escrow until a result is accepted") {
+		t.Errorf("rewarded detail: %d", w.Code)
 	}
 }

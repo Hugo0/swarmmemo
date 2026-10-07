@@ -218,6 +218,15 @@ func (e *Engine) Catalogue(ctx context.Context, q allowance.Querier, now int64) 
 // unsigned service.call (Method.Anonymous). It parses leniently enough to
 // choose an error: anything it cannot read is not anonymous.
 func (e *Engine) Anonymous(service, data string) bool {
+	if service == ToolsID {
+		// A tools.call is the routed method's: anonymous where that method
+		// is. One that names no tool goes on to Call, which says why.
+		routed, rdata, err := e.RouteTool(data)
+		if err != nil {
+			return true
+		}
+		service, data = routed, rdata
+	}
 	d, err := ParseData(data, true)
 	if err != nil {
 		return false
@@ -279,6 +288,16 @@ func (e *Engine) resolve(req Request, d Data, write bool) (Provider, Descriptor,
 
 // Call is service.call, in the command's transaction (§3.1 call flow).
 func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (_ Outcome, err error) {
+	if req.Service == ToolsID {
+		// tools.call is a router (tools.go): the call becomes the one its id
+		// names, before anything is parsed, priced, reserved or recorded.
+		if _, err = e.cfg.Registry.Lookup(ToolsID); err != nil {
+			return Outcome{}, err
+		}
+		if req.Service, req.Data, err = e.RouteTool(req.Data); err != nil {
+			return Outcome{}, err
+		}
+	}
 	anonymous := !req.Subject.Signed
 	// An unsigned call is an anonymous subject's (one network prefix), with a
 	// request_id as its retry key: it has no nonce.

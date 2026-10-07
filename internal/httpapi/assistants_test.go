@@ -64,7 +64,7 @@ func TestMCPAssistantProfile(t *testing.T) {
 	s := New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com", Features: everyService})
 	full := listTools(t, s, "/mcp")
 	assistant := listTools(t, s, web.AssistantMCPPath)
-	leftOut := regexp.MustCompile(`x402|bount|transfer|pay|inference`)
+	leftOut := regexp.MustCompile(`x402|^tools_|bount|transfer|pay|inference`)
 	var excluded []string
 	for name, tool := range full {
 		if leftOut.MatchString(name) {

@@ -48,11 +48,15 @@ func (p Prices) of(service string, m Method) Price {
 }
 
 // DefaultPrices is parameter version 0: every built-in write method's
-// compiled-in price.
+// compiled-in price. tools.call has none of its own: it routes to a method
+// that does.
 func DefaultPrices() Prices {
 	out := Prices{}
 	for _, build := range builtins {
 		d := build(Deps{}).Describe()
+		if d.ID == ToolsID {
+			continue
+		}
 		for _, m := range d.Methods {
 			if m.Write {
 				out[d.ID+"."+m.Name] = m.Price

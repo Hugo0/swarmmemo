@@ -392,6 +392,22 @@ func (s *Server) servicesCapabilities(catalog []services.Entry) map[string]any {
 		"entries": s.catalogWithExamples(catalog),
 	}
 	noKey, _ := s.noKey()
+	if services.ToolsEnabled(f.Services) {
+		featured := make([]string, 0, len(services.Featured))
+		for _, t := range services.Featured {
+			featured = append(featured, t.ID)
+		}
+		caps["tools"] = map[string]any{
+			"line":        "One search over every tool, SwarmMemo's own and the paid APIs, and one call by id: " + services.ToolsCostLine,
+			"search":      `service.read tools {"schema":1,"method":"search","args":{"query":"weather forecast"}}; without a query, the featured tools`,
+			"call":        `service.call tools {"schema":1,"method":"call","args":{"id":ID,"args":{...}},"max_cost":N}; max_cost is optional for a swarmmemo: id (the quote is the ceiling) and required for a tool: id`,
+			"ids":         services.ToolIDPrefix + "SERVICE.METHOD (SwarmMemo's own) or " + services.BundlerPrefix + "NAME (a paid API)",
+			"routing":     "a call runs as the method its id names, with that method's price, caps, screening, receipts, retries and calls without a key",
+			"without_key": services.CallPathPrefix + "tools/search?query=weather+forecast, and " + services.CallPathPrefix + "tools/call with id and args (a form POST) for a tool whose needs_key is false",
+			"mcp":         []string{"tools_search", "tools_call"},
+			"featured":    featured, "docs": "/protocol.md#tools", "page": "/tools/all",
+		}
+	}
 	if f.ServiceEnabled("x402") {
 		caps["x402"] = map[string]any{
 			"line":         services.X402Line,
@@ -403,6 +419,7 @@ func (s *Server) servicesCapabilities(catalog []services.Entry) map[string]any {
 			"tools_call":   `service.call x402 {"schema":1,"method":"call","args":{"resource":"tool:TOOL_ID","body":{...}},"max_cost":N}`,
 			"tools":        services.BundlerNote,
 			"stats":        "/api/stats/x402", "without_key": false, "wallet_needed": false,
+			"same_as": "tools search and tools call (the tools object) cover these, with SwarmMemo's own tools in the same list",
 		}
 	}
 	if f.ServiceEnabled("public_data") {
@@ -465,8 +482,14 @@ func addServicesOpenAPI(paths, schemas, commandProps map[string]any, catalog []s
 			required := []string{"schema", "method"}
 			props := map[string]any{"schema": map[string]any{"const": 1}, "method": map[string]any{"const": m.Name}, "args": argsSchema(m.Args)}
 			if m.Write() {
-				required = append(required, "max_cost")
-				props["max_cost"] = map[string]any{"type": "integer", "minimum": 0, "description": "your ceiling; a higher current price is refused and nothing is spent"}
+				note := "your ceiling; a higher current price is refused and nothing is spent"
+				if e.ID == services.ToolsID {
+					// tools.call: left out, a swarmmemo: tool's quote is the ceiling.
+					note += "; optional for a " + services.ToolIDPrefix + " id, required for a " + services.BundlerPrefix + " id"
+				} else {
+					required = append(required, "max_cost")
+				}
+				props["max_cost"] = map[string]any{"type": "integer", "minimum": 0, "description": note}
 			}
 			variants = append(variants, map[string]any{"title": e.ID + "." + m.Name, "description": m.Access() + " target " + e.ID + ". " + m.Line + " Price: " + m.PriceText() + ".",
 				"type": "object", "required": required, "properties": props, "additionalProperties": false})

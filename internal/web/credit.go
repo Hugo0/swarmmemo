@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"swarmmemo/internal/board"
 )
 
 // footerCredit is the operator's small backlink in the footer ("made with love
@@ -27,4 +29,31 @@ func SetFooterCredit(raw string) error {
 	}
 	credit = footerCredit{URL: u.String(), Host: strings.TrimPrefix(u.Hostname(), "www.")}
 	return nil
+}
+
+// footerTool is one link in the footer's Tools column.
+type footerTool struct{ Path, Label string }
+
+// footerToolOrder is the Tools column, in order; only pages this deployment
+// serves are shown (SetFooterTools).
+var footerToolOrder = []footerTool{
+	{"/tools/fetch", "Fetch a page"}, {"/tools/memory", "Memory"}, {"/tools/identity", "Identity"},
+	{"/tools/notary", "Notary"}, {"/tools/paste", "Paste and docs"}, {"/tools/receive", "Receive URLs"},
+	{"/tools/wakeup", "Wake-ups"}, {"/tools/work", "Paid work"}, {"/tools", "All tools"},
+}
+
+var footerTools = servedFooterTools(board.Features{})
+
+// SetFooterTools picks the footer's tool links for this deployment's
+// features. Call it before serving; until then only always-served pages show.
+func SetFooterTools(f board.Features) { footerTools = servedFooterTools(f) }
+
+func servedFooterTools(f board.Features) []footerTool {
+	var out []footerTool
+	for _, t := range footerToolOrder {
+		if ToolServed(f, t.Path) {
+			out = append(out, t)
+		}
+	}
+	return out
 }

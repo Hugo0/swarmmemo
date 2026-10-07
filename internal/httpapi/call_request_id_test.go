@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
 )
 
@@ -137,6 +138,14 @@ func TestPublishedCallExamplesWorkVerbatim(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)
+		// A public read (tools search) answers with its result, not a call.
+		service, method, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, services.CallPathPrefix), "/")
+		if _, m, ok := services.LookupMethod(services.Catalog(services.Known()), service, method); ok && !m.Write() {
+			if w.Code != 200 || dig(decodeResult(t, w.Body.Bytes()), "data", "result") == nil {
+				t.Errorf("%s: %s %s: %d %s", ex.source, ex.method, ex.url, w.Code, w.Body.String())
+			}
+			continue
+		}
 		if w.Code != 200 || dig(decodeResult(t, w.Body.Bytes()), "data", "call", "request_id") == nil {
 			t.Errorf("%s: %s %s %s: %d %s", ex.source, ex.method, ex.url, ex.form, w.Code, w.Body.String())
 		}

@@ -232,6 +232,10 @@ func scanWork(scan interface{ Scan(...any) error }) (workRow, error) {
 // The same expression is evaluated by transitions, projections and directory filters.
 // A submitted result its named reviewer let reach the deadline is review_lapsed,
 // otherwise the same as expired.
+// WorkKindRewarded is the works.list filter for open work with a reward
+// held in escrow; the other kinds are effective states.
+const WorkKindRewarded = "rewarded"
+
 const workEffectiveSQL = `CASE WHEN w.state IN ('accepted','cancelled') THEN w.state WHEN w.deadline<=? THEN (CASE WHEN w.state='submitted' AND w.reviewer<>'' THEN 'review_lapsed' ELSE 'expired' END) WHEN w.generation<>? THEN 'recovery_required' WHEN w.state='claimed' AND w.claim_expires_at<=? THEN 'open' ELSE w.state END`
 
 func effectiveWork(ctx context.Context, tx *sql.Tx, id, generation string, now int64) (string, error) {
@@ -603,7 +607,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if !utf8.ValidString(c.Query) || strings.ContainsRune(c.Query, 0) {
 		return Result{}, problem(400, "invalid_query", "Query must be valid UTF-8 without NUL.")
 	}
-	if c.Kind != "" && c.Kind != "open" && c.Kind != "claimed" && c.Kind != "submitted" && c.Kind != "accepted" && c.Kind != "cancelled" && c.Kind != "expired" && c.Kind != "review_lapsed" && c.Kind != "recovery_required" {
+	if c.Kind != "" && c.Kind != "open" && c.Kind != "claimed" && c.Kind != "submitted" && c.Kind != "accepted" && c.Kind != "cancelled" && c.Kind != "expired" && c.Kind != "review_lapsed" && c.Kind != "recovery_required" && c.Kind != WorkKindRewarded {
 		return Result{}, problem(400, "invalid_work_state", "Unknown work state filter.")
 	}
 	// An agent's own page asks the same listing for the work it is part of, so the
@@ -636,7 +640,14 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	} else {
 		where += ` AND r.visibility='public' AND e.kind<>'simulation'`
 	}
-	if c.Kind != "" {
+	switch c.Kind {
+	case "":
+	case WorkKindRewarded:
+		// Open work whose reward is still held in escrow: what a worker can
+		// claim and be paid for.
+		where += ` AND (` + workEffectiveSQL + `)='open' AND EXISTS(SELECT 1 FROM work_rewards wr WHERE wr.work_id=w.id AND wr.state='held')`
+		args = append(args, now, generation, now)
+	default:
 		where += ` AND (` + workEffectiveSQL + `)=?`
 		args = append(args, now, generation, now, c.Kind)
 	}

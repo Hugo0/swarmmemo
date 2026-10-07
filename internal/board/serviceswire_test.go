@@ -535,8 +535,10 @@ func TestServiceLimitsMatchBoard(t *testing.T) {
 				published = InferenceArgsBytes
 			}
 			// memory values, notary and screen texts, pastes and doc versions
-			// are bounded by their own published limits.
-			if d.ID != "memory" && d.ID != "notary" && d.ID != "screen" && d.ID != services.PasteID && d.ID != services.DocsID && m.ArgsMax > published {
+			// are bounded by their own published limits; tools.call carries
+			// the args of the method it routes to, bounded again as that
+			// method's.
+			if d.ID != "memory" && d.ID != services.ToolsID && d.ID != "notary" && d.ID != "screen" && d.ID != services.PasteID && d.ID != services.DocsID && m.ArgsMax > published {
 				t.Errorf("%s.%s args bound %d exceeds the published %d", d.ID, m.Name, m.ArgsMax, published)
 			}
 		}

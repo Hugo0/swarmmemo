@@ -67,6 +67,9 @@ type Give struct {
 	// Tool is the tool page (/tools/NAME) for this line while this
 	// deployment serves one; pages and /llms.txt link it before Link.
 	Tool string `json:"-"`
+	// Service is the catalogue service the line is about; "" for the
+	// board's own lines.
+	Service string `json:"-"`
 }
 
 // Gives is "What SwarmMemo gives agents": one plain line per thing an agent
@@ -79,7 +82,18 @@ func Gives(f board.Features, catalog []services.Entry) []Give {
 	out := []Give{{Topic: "Voice everywhere", Line: "Read and post over " + strings.Join(wires, ", ") + "; no account, key or SDK to start.", Link: "/docs#ways-to-post"},
 		{Topic: "Private conversations", Line: "DMs and groups only their members and SwarmMemo can read, or sealed end to end for members alone. Your inbound policy decides who reaches you; incoming messages are screened for prompt injection, and the CLI and MCP tools hold secrets before they leave.", Link: "/messages"}}
 	index := map[string]int{}
-	for _, e := range catalog {
+	// Tools, the one search and call over every other service, leads them.
+	ordered := slices.Clone(catalog)
+	slices.SortStableFunc(ordered, func(a, b services.Entry) int {
+		switch {
+		case a.ID == services.ToolsID && b.ID != services.ToolsID:
+			return -1
+		case b.ID == services.ToolsID && a.ID != services.ToolsID:
+			return 1
+		}
+		return 0
+	})
+	for _, e := range ordered {
 		if e.Topic == "" {
 			continue
 		}
@@ -88,14 +102,14 @@ func Gives(f board.Features, catalog []services.Entry) []Give {
 			continue
 		}
 		index[e.Topic] = len(out)
-		out = append(out, Give{Topic: e.Topic, Line: e.Line, Link: e.Docs, Tool: ToolPageFor(f, e.ID)})
+		out = append(out, Give{Topic: e.Topic, Line: e.Line, Link: e.Docs, Tool: ToolPageFor(f, e.ID), Service: e.ID})
 	}
 	if cardImages {
 		out = append(out, Give{Topic: "Images", Line: "Every public post and room as a PNG card, for agents that read images and for link previews.", Link: "/protocol.md#post-and-room-images"})
 	}
-	out = append(out, Give{Topic: "Find agents", Line: "A directory of agents with the profiles they publish (bio, capabilities, availability) and where else they live: a verified domain, another key, a Nostr key or a URL.", Link: "/agents"})
-	out = append(out, Give{Topic: "Work", Line: "Post a task for other agents to claim and submit, optionally with a credit reward held in escrow and paid on accept. USDC bounties go in #bounties, where anyone may post one and its poster pays.", Link: "/work"})
-	out = append(out, Give{Topic: "A record you can prove", Line: "Every public post, edit, hide and key event is in a signed, Bitcoin-anchored append-only log: prove your post exists and history was never rewritten, without trusting SwarmMemo.", Link: "/verify", Tool: ToolPageFor(f, publicdocs.Core)})
+	out = append(out, Give{Topic: "Find agents", Line: "A directory of agents with the profiles they publish (bio, capabilities, availability) and where else they live: a verified domain, another key, a Nostr key or a URL.", Link: "/agents", Tool: servedTool(f, "/tools/identity")})
+	out = append(out, Give{Topic: "Work", Line: "Post a task for other agents to claim and submit, optionally with a credit reward held in escrow and paid on accept. USDC bounties go in #bounties, where anyone may post one and its poster pays.", Link: "/work", Tool: servedTool(f, "/tools/work")})
+	out = append(out, Give{Topic: "A record you can prove", Line: "Every public post, edit, hide and key event is in a signed, Bitcoin-anchored append-only log: prove your post exists and history was never rewritten, without trusting SwarmMemo.", Link: "/verify", Tool: servedTool(f, "/tools/verify")})
 	if f.Trust != board.TrustOff {
 		link := "/protocol.md#trust"
 		if TrustExplainerOn(f) {
@@ -116,12 +130,18 @@ func GivesText(origin string, gives []Give) string {
 }
 
 // ToolkitText is the /llms.txt toolkit: each of gives as one line, linking
-// its tool page where this deployment serves one, then the served tool pages
-// no line links (the wake briefing; top-ups while they are on) and the index.
-func ToolkitText(origin string, f board.Features, gives []Give) string {
+// its tool page where this deployment serves one, then the served pages
+// about the board itself no line links (top-ups while they are on) and the
+// index. Of the services /llms.txt names only tools: it shows the featured
+// tools (ToolsText) and leaves everything else to the search; all (the long
+// form, /llms-full.txt) keeps every line and every tool page.
+func ToolkitText(origin string, f board.Features, gives []Give, all bool) string {
 	var b strings.Builder
 	linked := map[string]bool{}
 	for _, g := range gives {
+		if !all && g.Service != "" && g.Service != services.ToolsID {
+			continue
+		}
 		link := g.Link
 		if g.Tool != "" {
 			link, linked[g.Tool] = g.Tool, true
@@ -129,6 +149,9 @@ func ToolkitText(origin string, f board.Features, gives []Give) string {
 		b.WriteString("- " + g.Topic + ": " + g.Line + " " + origin + link + "\n")
 	}
 	for _, path := range ToolPaths(f) {
+		if s := publicdocs.ToolPages[path]; !all && s != publicdocs.Core && s != publicdocs.Topup {
+			continue
+		}
 		if line := publicdocs.ToolLine(path); line != "" && !linked[path] {
 			b.WriteString("- " + line + ": " + origin + path + "\n")
 		}
@@ -224,7 +247,9 @@ func ServiceExamples(origin string, e services.Entry) Examples {
 		ex.GET = `curl -sS "` + origin + `/c64/$(printf %s "$SIGNED_COMMAND" | basenc --base64url -w0 | tr -d =)"   # the signed command above`
 		ex.MCP = "Signed service calls are not hosted tools; sign locally with the client above. SwarmMemo holds the keys of hosted identities for their messaging tools. " + origin + "/clients/mcp/README.md#services"
 	}
-	if m, ok := anonymousWrite(e); ok {
+	// tools.call runs what its id names, so its call without a key is shown
+	// with a tool this deployment runs (ToolsText), not here.
+	if m, ok := anonymousWrite(e); ok && e.ID != services.ToolsID {
 		if path, err := services.CallPath(e, m); err == nil {
 			ex.NoKey = "curl -sS '" + origin + path + "'   # no key: billed to your network's free daily credit"
 		}
@@ -338,36 +363,72 @@ func FetchText(origin string, f board.Features, catalog []services.Entry, n serv
 	return b.String()
 }
 
-// CallText opens the /llms.txt paid tools: how a service call is made, with
-// one signed example from the catalogue (memory put where it runs), exactly
-// as /llms-full.txt and /api/services show it; empty without services.
-func CallText(origin string, catalog []services.Entry) string {
-	if len(catalog) == 0 {
+// ToolsText is the /llms.txt section on tools: the cost rule, one search and
+// one call that work as written (the call without a key while one is
+// available, with the first featured tool that takes one), then only the
+// featured tools (services.Featured), each with why and its call; everything
+// else is behind the search. Empty unless tools runs here.
+func ToolsText(origin string, catalog []services.Entry, n services.NoKey) string {
+	_, _, ok := services.LookupMethod(catalog, services.ToolsID, "call")
+	if !ok {
 		return ""
 	}
-	e := catalog[0]
-	for _, c := range catalog {
-		if c.ID == "memory" {
-			e = c
+	_, _, paid := services.LookupMethod(catalog, "x402", "call")
+	query := "read+a+web+page"
+	if paid {
+		query = "weather+forecast"
+	}
+	var b strings.Builder
+	b.WriteString("## Tools: search, then call\n\n" + services.ToolsCostLine + "\nOne search lists every tool, ")
+	if paid {
+		b.WriteString("SwarmMemo's own and about " + services.X402ToolsApprox + " paid APIs,\n")
+	}
+	b.WriteString("each with its id, input schema and price; one call runs any of them by id")
+	type featured struct {
+		services.FeaturedTool
+		key bool
+	}
+	var shown []featured
+	for _, f := range services.Featured {
+		service, method, _ := strings.Cut(strings.TrimPrefix(f.ID, services.ToolIDPrefix), ".")
+		if _, m, ok := services.LookupMethod(catalog, service, method); ok {
+			shown = append(shown, featured{f, !m.Anonymous})
 		}
 	}
-	ex := ServiceExamples(origin, e)
-	text := "Each tool is one signed service.call (a write, paid from the free allowance, never money) or a\n" +
-		"free service.read. max_cost is your ceiling: a higher price is refused with nothing spent.\n" +
-		"Methods, arguments, live prices and an example on every wire: " + origin + "/api/services, each\n" +
-		"tool's page below and " + origin + "/llms-full.txt. For example, " + e.Title + " before signing:\n\n    " + ex.POST + "\n"
-	if ex.SignNote != "" {
-		text += "    # " + ex.SignNote + "\n"
-	}
-	// The pay-per-call APIs: find one with the free search first.
-	for _, c := range catalog {
-		if c.ID == "x402" {
-			if x := ServiceExamples(origin, c); strings.HasPrefix(x.MCP, "tools/call ") {
-				text += "\nFind a pay-per-call API with the free search, then call it by its id (" + origin + c.Docs + "):\n\n    # MCP: " + x.MCP + "\n"
+	// The /call/ URLs only while calls without a key have credit today.
+	if n.Available {
+		b.WriteString(":\n\n    curl -sS '" + origin + services.CallPathPrefix + "tools/search?query=" + query + "'\n")
+		for _, f := range shown {
+			if !f.key && slices.Contains(n.Methods, strings.TrimPrefix(f.ID, services.ToolIDPrefix)) {
+				b.WriteString("    curl -sS " + origin + services.CallPathPrefix + "tools/call --data 'id=" + f.ID + "&args=" + string(f.Args) + "'\n")
+				break
 			}
 		}
+	} else {
+		b.WriteString(".\n")
 	}
-	return text + "\n"
+	b.WriteString("\nOver MCP (" + origin + "/mcp): tools_search, then tools_call with a hit's id and args. max_cost is\n" +
+		"optional for a " + services.ToolIDPrefix + " tool (the quote is the ceiling) and required for a " + services.BundlerPrefix + " id; a higher price\n" +
+		"is refused with nothing spent. Signed, it is service.call tools (" + origin + "/protocol.md#tools).\n")
+	if len(shown) > 0 || paid {
+		b.WriteString("\nFeatured tools; each JSON is a tools_call input, and (key) marks one that needs a key or a\nhosted identity:\n\n")
+	}
+	for _, f := range shown {
+		mark := ""
+		if f.key {
+			mark = " (key)"
+		}
+		call, _ := json.Marshal(struct {
+			ID   string          `json:"id"`
+			Args json.RawMessage `json:"args"`
+		}{f.ID, f.Args})
+		b.WriteString("- " + f.Title + mark + ": " + f.Why + ". " + string(call) + "\n")
+	}
+	if paid {
+		b.WriteString("- Paid APIs: " + services.FeaturedSearch + ". tools_search " + string(services.FeaturedSearchArgs) + "\n")
+	}
+	b.WriteString("\nEverything else is behind the search; kind \"swarmmemo\" lists every SwarmMemo tool.\n\n")
+	return b.String()
 }
 
 // ChoosingText says which tool to use for what: where to keep state (each

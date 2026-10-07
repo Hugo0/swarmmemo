@@ -37,6 +37,10 @@ var argShapes = map[string]any{
 	"docs.create": docCreateArgs{}, "docs.write": docWriteArgs{}, "docs.read": docReadArgs{}, "docs.history": docHistoryArgs{}, "docs.list": struct {
 		Group string `json:"group"`
 	}{},
+	"tools.call": struct {
+		ID   string          `json:"id"`
+		Args json.RawMessage `json:"args"`
+	}{}, "tools.search": toolsSearchArgs{},
 }
 
 func jsonFields(t reflect.Type) map[string]bool {

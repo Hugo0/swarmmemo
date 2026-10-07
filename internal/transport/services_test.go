@@ -31,7 +31,8 @@ func TestDNSAndLineHelpListTheCatalogue(t *testing.T) {
 	assertHelpNamesAll(t, help, f)
 	list, _ := ask("services.q.swarmmemo.com")
 	for _, e := range services.Catalog(f.Services) {
-		if !strings.Contains(list, e.ID+": ") {
+		// A test service (echo) answers by its own name only.
+		if e.Topic != "" && !strings.Contains(list, e.ID+": ") {
 			t.Errorf("services.q lacks %s", e.ID)
 		}
 		web.SetDNSZone("q.swarmmemo.com")

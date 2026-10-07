@@ -166,10 +166,14 @@ func (h catalogHelp) dnsHelp(zone string) []string {
 	return out
 }
 
-// dnsServices is services.ZONE: one string per enabled service.
+// dnsServices is services.ZONE: one string per enabled service, test
+// services (no topic, echo) aside, so the list fits one TCP answer.
 func (h catalogHelp) dnsServices() []string {
 	out := []string{}
 	for _, e := range h.catalog {
+		if e.Topic == "" {
+			continue
+		}
 		out = append(out, oneLine(e.ID+": "+e.Line, 255))
 	}
 	return out

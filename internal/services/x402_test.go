@@ -253,6 +253,13 @@ func newX402HarnessWith(t *testing.T, fake *fakeX402, caps, resources string) *x
 // answer paths of it (fakeX402.extra).
 func newX402HarnessCfg(t *testing.T, fake *fakeX402, cfg *X402Config) *x402Harness {
 	t.Helper()
+	return newX402HarnessAlongside(t, fake, cfg, nil, Deps{})
+}
+
+// newX402HarnessAlongside is newX402HarnessCfg with more services enabled beside
+// x402, built with extra's NotaryKey and TextScreener.
+func newX402HarnessAlongside(t *testing.T, fake *fakeX402, cfg *X402Config, enabled []string, extra Deps) *x402Harness {
+	t.Helper()
 	if fake.nonces == nil {
 		fake.nonces = map[string]int{}
 	}
@@ -283,7 +290,7 @@ func newX402HarnessCfg(t *testing.T, fake *fakeX402, cfg *X402Config) *x402Harne
 		}
 		return (&net.Dialer{}).DialContext(ctx, network, target)
 	}
-	reg := NewBuiltinRegistry([]string{"x402"}, Deps{DB: db, Dial: dial, X402: h.cfg})
+	reg := NewBuiltinRegistry(append([]string{"x402"}, enabled...), Deps{DB: db, Dial: dial, X402: h.cfg, NotaryKey: extra.NotaryKey, TextScreener: extra.TextScreener})
 	h.meter = servicestest.NewMeter(1 << 40)
 	h.engine = NewEngine(Config{DB: db, Registry: reg, Meter: h.meter, Now: func() int64 { return h.now }})
 	t.Cleanup(h.engine.Stop)

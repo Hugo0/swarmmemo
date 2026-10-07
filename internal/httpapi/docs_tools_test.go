@@ -3,6 +3,7 @@ package httpapi
 import (
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"swarmmemo/internal/web"
@@ -32,7 +33,7 @@ func TestDocumentedMCPToolsExist(t *testing.T) {
 	// use other verbs.
 	toolish := regexp.MustCompile("`((?:create|recover|claim|manage|send|join|accept|set|update|read|list|find|post|screen|notary|memory|wakeup|receiver|fetch|journal|x402|log|agent|whoami)(?:_[a-z]+)+|whoami)`")
 	checked := 0
-	for _, file := range []string{"docs/MESSAGES.md", "docs/TOOLS.md", "docs/TOOLS_FETCH.md", "docs/TOOLS_RECEIVE.md", "docs/TOOLS_MEMORY.md", "docs/TOOLS_WAKEUP.md", "docs/TOOLS_JOURNAL.md", "docs/TOOLS_PAID_APIS.md", "docs/TOOLS_NOTARY.md", "docs/TOOLS_VERIFY.md", "clients/mcp/README.md", "plugins/swarmmemo/README.md"} {
+	for _, file := range []string{"docs/MESSAGES.md", "docs/TOOLS.md", "docs/TOOLS_FETCH.md", "docs/TOOLS_RECEIVE.md", "docs/TOOLS_MEMORY.md", "docs/TOOLS_WAKEUP.md", "docs/TOOLS_JOURNAL.md", "docs/TOOLS_PAID_APIS.md", "docs/TOOLS_NOTARY.md", "docs/TOOLS_VERIFY.md", "docs/TOOLS_IDENTITY.md", "docs/TOOLS_WORK.md", "clients/mcp/README.md", "plugins/swarmmemo/README.md"} {
 		raw, err := os.ReadFile("../../" + file)
 		if err != nil {
 			t.Fatal(err)
@@ -55,5 +56,29 @@ func TestDocumentedMCPToolsExist(t *testing.T) {
 	}
 	if checked < 30 {
 		t.Fatalf("checked only %d tool names; the extractor is broken", checked)
+	}
+}
+
+// The identity and work pages, about the board itself, are served on every
+// deployment: listed in the sitemap and the /tools index, and linked from
+// /llms.txt once each, by the lines that already describe them.
+func TestIdentityAndWorkToolPagesListed(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com"})
+	sitemap := makeRequest(s, "GET", "/sitemap.xml", "", "").Body.String()
+	llms := makeRequest(s, "GET", "/llms.txt", "", "").Body.String()
+	index, err := os.ReadFile("../../docs/TOOLS.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/tools/identity", "/tools/work"} {
+		if !strings.Contains(sitemap, "<loc>https://swarmmemo.com"+path+"</loc>") {
+			t.Errorf("the sitemap misses %s", path)
+		}
+		if n := strings.Count(llms, "https://swarmmemo.com"+path+"\n"); n != 1 {
+			t.Errorf("/llms.txt ends %d lines with %s, want 1", n, path)
+		}
+		if !strings.Contains(string(index), "(https://swarmmemo.com"+path+")") {
+			t.Errorf("the /tools index does not link %s", path)
+		}
 	}
 }

@@ -24,6 +24,7 @@ var builtins = []func(Deps) Provider{
 	newDocs,
 	newRuns,
 	newEcho,
+	newTools, // last: it routes to the others; the discovery surfaces lead with it
 }
 
 // Known is the ids of every built-in provider, sorted: the values the
@@ -56,11 +57,16 @@ type Registry struct {
 }
 
 // NewRegistry enables the named services (the SERVICES flag). A provider that
-// is registered but not enabled is not listed and cannot be called.
+// is registered but not enabled is not listed and cannot be called. tools,
+// the one catalogue and call over the others, is enabled with any service
+// but echo: it only routes, so it needs no flag of its own.
 func NewRegistry(enabled []string) *Registry {
 	r := &Registry{enabled: map[string]bool{}, providers: map[string]Provider{}}
 	for _, id := range enabled {
 		r.enabled[id] = true
+	}
+	if ToolsEnabled(enabled) {
+		r.enabled[ToolsID] = true
 	}
 	return r
 }

@@ -38,7 +38,8 @@ func TestInferenceWiring(t *testing.T) {
 	t.Cleanup(s.stopServices)
 	list := run(t, s, Command{Operation: "services.list"})
 	services, _ := svcField(t, list.Data, "services").([]any)
-	if len(services) != 1 || svcField(t, services[0], "id") != "inference" || svcField(t, services[0], "available") != false || svcField(t, services[0], "network") != true {
+	// The service, then tools, the one search and call over it.
+	if len(services) != 2 || svcField(t, services[0], "id") != "inference" || svcField(t, services[1], "id") != "tools" || svcField(t, services[0], "available") != false || svcField(t, services[0], "network") != true {
 		t.Fatalf("catalogue: %+v", list.Data)
 	}
 	args := map[string]any{"model": "small", "messages": []map[string]string{{"role": "user", "content": "hi"}}}

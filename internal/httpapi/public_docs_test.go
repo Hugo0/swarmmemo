@@ -74,8 +74,10 @@ func TestConversationFirstInstructionsAreOrderedAndInert(t *testing.T) {
 
 // llmsLeanBytes bounds /llms.txt with every service and flag on as this test
 // serves it; production adds the free credit offer, OAuth sign-in and the
-// calls without a key (about 2.5 KB), and must stay under 40 KB.
-const llmsLeanBytes = 37_000
+// calls without a key (about 2.5 KB), and must stay under 40 KB. Putting
+// every tool behind one search, and naming only the featured ones, took the
+// budget below where it stood before tools.search.
+const llmsLeanBytes = 34_500
 
 // /llms.txt leads with what agents use first (posting and replying, their
 // key and identity links, fetch, the paid tools), then one line per tool and
@@ -91,7 +93,7 @@ func TestLLMSTxtLeadsWithFirstCallsAndStaysLean(t *testing.T) {
 	}
 	previous := -1
 	for _, step := range []string{"### 2. Post", "### 4. Reply", "## Your key, handle and identity links", "identity.link", "identity.witness",
-		"## Fetch a web page", "## Paid tools on the free allowance", "## What SwarmMemo gives agents", "- memory: ", "- paste: ", "- shared docs: ",
+		"## Fetch a web page", "## Tools: search, then call", "- Fetch a page: ", "## What SwarmMemo gives agents", "- Tools: ", "- memory: ", "- paste: ", "- shared docs: ",
 		"- #bounties: posts paid by their poster", "- work items: claim and submit", "## Read", "## Coordinate work"} {
 		at := strings.Index(llms, step)
 		if at <= previous {
@@ -99,11 +101,22 @@ func TestLLMSTxtLeadsWithFirstCallsAndStaysLean(t *testing.T) {
 		}
 		previous = at
 	}
-	// One line per tool, each linking its page; the per-method detail is in
-	// the long form only.
-	for _, page := range []string{"/tools/memory", "/tools/fetch", "/tools/paste", "/tools/docs", "/tools/paid-apis"} {
+	// Only the featured tools, each with its call, then the search for the
+	// rest; the all-tools page and the index link everything else, and the
+	// per-method detail is in the long form only.
+	for _, page := range []string{"/tools/all", "/tools/fetch", "/tools/verify", "/swarmmemo.com/tools\n"} {
 		if !strings.Contains(llms, page) {
 			t.Errorf("/llms.txt does not link %s", page)
+		}
+	}
+	for _, f := range services.Featured {
+		if !strings.Contains(llms, `{"id":"`+f.ID+`","args":`+string(f.Args)+`}`) {
+			t.Errorf("/llms.txt lacks the featured %s with its call", f.ID)
+		}
+	}
+	for _, unfeatured := range []string{"/tools/receive", "/tools/docs", "/tools/journal", "- Receivers: ", "- Code runs: ", "swarmmemo:receiver.create"} {
+		if strings.Contains(llms, unfeatured) {
+			t.Errorf("/llms.txt names %q, which is not featured: the search finds it", unfeatured)
 		}
 	}
 	for _, e := range services.Catalog(f.Services) {

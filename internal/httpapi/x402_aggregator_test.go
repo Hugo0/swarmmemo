@@ -38,8 +38,15 @@ func TestX402AggregatorSurfaces(t *testing.T) {
 	s := New(svc, web.Handler(svc), Config{Features: f})
 
 	llms := makeRequest(s, "GET", "/llms.txt", "", "").Body.String()
-	if !strings.Contains(llms, "Tools across the internet: "+services.X402Line) || !strings.Contains(llms, "x402_resources") || !strings.Contains(llms, `web search`) {
-		t.Errorf("/llms.txt lacks the aggregator line or its search example")
+	// /llms.txt reaches the paid APIs through the one search: its featured
+	// line and example; the long form keeps the aggregator's own line.
+	_, toolsSection, _ := strings.Cut(llms, "## Tools: search, then call")
+	toolsSection, _, _ = strings.Cut(toolsSection, "\n## ")
+	if !strings.Contains(toolsSection, "- Paid APIs: ") || !strings.Contains(toolsSection, `tools_search {"query":"weather forecast for a city"}`) || strings.Contains(toolsSection, "x402") {
+		t.Errorf("/llms.txt lacks the paid-API search, or names the relay")
+	}
+	if full := makeRequest(s, "GET", "/llms-full.txt", "", "").Body.String(); !strings.Contains(full, "Tools across the internet: "+services.X402Line) || !strings.Contains(full, "Vetted tools can be called") {
+		t.Errorf("/llms-full.txt lacks the aggregator line")
 	}
 	caps := getJSON(t, s, "GET", "/capabilities", "")
 	x402, _ := caps["services"].(map[string]any)["x402"].(map[string]any)
@@ -51,7 +58,7 @@ func TestX402AggregatorSurfaces(t *testing.T) {
 		t.Errorf("/for-agents lacks the tools section")
 	}
 	// Vetted versus candidate resources, in plain words, on every surface.
-	if !strings.Contains(llms, "Vetted tools can be called") || x402["vetting"] != services.X402VettingNote ||
+	if x402["vetting"] != services.X402VettingNote ||
 		!strings.Contains(page, "x402_unvetted") || !strings.Contains(page, "<code>callable: true</code>") {
 		t.Errorf("a surface does not explain vetted and candidate resources")
 	}

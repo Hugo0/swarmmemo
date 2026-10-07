@@ -96,7 +96,7 @@ func hostedServiceTool(e services.Entry, m services.MethodEntry) (serviceTool, h
 		}
 		desc += " request_id (optional) makes a retry safe: never run or charged twice."
 	}
-	desc += " " + services.UntrustedNote + tokenNote
+	desc += mcpToolNotes[shape.name] + " " + services.UntrustedNote + tokenNote
 	return serviceTool{spec: mcpToolSpec{shape.name, !m.Write(), desc}, entry: e, method: m}, shape, true
 }
 

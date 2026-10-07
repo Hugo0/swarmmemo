@@ -114,12 +114,13 @@ func NoKeyFor(origin string, catalog []Entry, credits, allCredits int64, why str
 }
 
 // AnonymousMethods is "service.method" for every method callable without a
-// key, in catalogue order.
+// key, in catalogue order. tools.call is not one of its own: it takes a
+// call without a key exactly where the method it routes to does.
 func AnonymousMethods(catalog []Entry) []string {
 	out := []string{}
 	for _, e := range catalog {
 		for _, m := range e.Methods {
-			if m.Write() && m.Anonymous {
+			if m.Write() && m.Anonymous && e.ID != ToolsID {
 				out = append(out, e.ID+"."+m.Name)
 			}
 		}
@@ -167,7 +168,7 @@ func NoKeyExample(origin string, catalog []Entry) string {
 			if e.ID == "public_data" && m.Name == "fetch" {
 				return origin + path
 			}
-			if first == "" {
+			if first == "" && e.ID != ToolsID {
 				first = origin + path
 			}
 		}

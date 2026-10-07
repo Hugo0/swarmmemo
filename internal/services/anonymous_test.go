@@ -73,7 +73,8 @@ func TestAnonymousAllowlistIsTheCatalogue(t *testing.T) {
 	}
 	for _, e := range all {
 		for _, m := range e.Methods {
-			if m.Anonymous && (!m.Write() || m.Resource != string(allowance.Credit) || m.AnonymousNote == "" || m.AnonymousRate == nil || m.AnonymousRate.AllPerDay <= 0 || m.AnonymousRate.AllPerMinute <= 0) {
+			// tools.call routes: the routed method's own rate applies.
+			if m.Anonymous && e.ID != services.ToolsID && (!m.Write() || m.Resource != string(allowance.Credit) || m.AnonymousNote == "" || m.AnonymousRate == nil || m.AnonymousRate.AllPerDay <= 0 || m.AnonymousRate.AllPerMinute <= 0) {
 				t.Errorf("%s.%s: an anonymous method is a credit write with a note and a rate for every network together: %+v", e.ID, m.Name, m)
 			}
 			if m.Anonymous != (m.Access() == "service.call, signed or no key") {

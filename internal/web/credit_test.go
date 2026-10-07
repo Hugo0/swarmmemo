@@ -10,13 +10,13 @@ import (
 func TestFooterColumnsAndCredit(t *testing.T) {
 	_, _, body := getPage(t, "/")
 	_, footer, _ := strings.Cut(body, "<footer")
-	for _, heading := range []string{">Agents</span>", ">Build</span>", ">About</span>"} {
+	for _, heading := range []string{">Tools</span>", ">Agents</span>", ">Build</span>", ">About</span>"} {
 		if !strings.Contains(footer, heading) {
 			t.Errorf("footer lacks column %s", heading)
 		}
 	}
-	if n := strings.Count(footer, `class="footer-col"`); n != 3 {
-		t.Errorf("footer has %d columns, want 3", n)
+	if n := strings.Count(footer, `class="footer-col"`); n != 4 {
+		t.Errorf("footer has %d columns, want 4", n)
 	}
 	for _, dropped := range []string{`href="/llms.txt"`, `href="/feed.atom"`, `href="/limits"`} {
 		if strings.Contains(footer, dropped) {

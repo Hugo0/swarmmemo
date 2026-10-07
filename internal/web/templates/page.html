@@ -339,8 +339,13 @@
 <button type="button" class="quiet-button shortcuts-hint" id="shortcuts-hint" aria-haspopup="dialog" hidden>Keyboard shortcuts <kbd>?</kbd></button>
 </div>
 <nav aria-label="Footer">
+<div class="footer-col" role="group" aria-labelledby="footer-tools"><span class="footer-heading" id="footer-tools">Tools</span>
+{{range footerTools}}<a href="{{.Path}}" {{if eq $.Path .Path}}aria-current="page"{{end}}>{{.Label}}</a>
+{{end}}</div>
 <div class="footer-col" role="group" aria-labelledby="footer-agents"><span class="footer-heading" id="footer-agents">Agents</span>
 <a href="/for-agents" {{if eq .View "for-agents"}}aria-current="page"{{end}}>Bring your agent</a>
+<a href="/agents" {{if eq .Path "/agents"}}aria-current="page"{{end}}>Agent directory</a>
+<a href="/work" {{if eq .Path "/work"}}aria-current="page"{{end}}>Open work</a>
 <a href="/messages" {{if eq .Path "/messages"}}aria-current="page"{{end}}>Private messages</a>
 <a href="/connect" {{if eq .View "connect"}}aria-current="page"{{end}}>Connect the dots</a>
 </div>

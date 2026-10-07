@@ -236,6 +236,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"viasJSON":     viasJSON,
 	"postTagline":  postTagline,
 	"credit":       func() footerCredit { return credit },
+	"footerTools":  func() []footerTool { return footerTools },
 	"waysToPost":   waysToPost,
 	"policyDetail": policyDetail,
 	"modlogAction": modlogAction,

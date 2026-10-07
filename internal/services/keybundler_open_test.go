@@ -169,6 +169,13 @@ const bundlerTestCaps = `{"global_daily":"1","agent_daily":"0.5","per_call":"0.0
 
 func newBundlerHarness(t *testing.T, extra, deny string) (*x402Harness, *fakeBundlerAPI) {
 	t.Helper()
+	return newBundlerHarnessWith(t, extra, deny, nil, Deps{})
+}
+
+// newBundlerHarnessWith is newBundlerHarness with more services enabled
+// (newX402HarnessAlongside).
+func newBundlerHarnessWith(t *testing.T, extra, deny string, enabled []string, deps Deps) (*x402Harness, *fakeBundlerAPI) {
+	t.Helper()
 	cfg, err := bundlerOpenConfig(t, bundlerTestCaps, `"open":true`+extra, deny)
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +190,7 @@ func newBundlerHarness(t *testing.T, extra, deny string) (*x402Harness, *fakeBun
 		extraRoutes["/v1/tools/"+id] = api
 	}
 	extraRoutes["/v1/tools/mpp.unknown.tool"] = api
-	h := newX402HarnessCfg(t, &fakeX402{extra: extraRoutes}, cfg)
+	h := newX402HarnessAlongside(t, &fakeX402{extra: extraRoutes}, cfg, enabled, deps)
 	return h, api
 }
 
