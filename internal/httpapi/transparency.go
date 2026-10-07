@@ -3,7 +3,9 @@ package httpapi
 // The transparency log's public routes (board/transparency.go): signed
 // checkpoints, inclusion and consistency proofs, the leaves, OpenTimestamps
 // anchors and the signed per-agent record. All are anonymous GETs, cacheable;
-// a response pinned to a checkpoint size never changes.
+// a response pinned to a checkpoint size never changes, but for the text a
+// message proof carries, which a hide withdraws, and a proof's anchor until
+// it is confirmed.
 
 import (
 	"context"
@@ -134,7 +136,10 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		if err != nil {
 			return fail(err)
 		}
-		cacheFor(w, q["size"] >= 0)
+		// A proof carrying a message's text stays briefly cacheable: a hide
+		// removes the text from the next answer. So does one whose anchor
+		// is not confirmed yet.
+		cacheFor(w, q["size"] >= 0 && proof.Text == nil && proof.Anchor != nil && proof.Anchor.State == "confirmed")
 		jsonResponse(w, 200, proof)
 	case p == "/api/log/consistency":
 		q, err := logQuery(r, "from", "to")
@@ -175,18 +180,8 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		if err != nil {
 			return fail(err)
 		}
-		type anchorView struct {
-			board.LogAnchor
-			OTS  string `json:"ots"`
-			Note string `json:"note"`
-		}
-		out := make([]anchorView, len(anchors))
-		for i, a := range anchors {
-			size := strconv.FormatInt(a.Size, 10)
-			out[i] = anchorView{a, "/api/log/anchors/" + size + ".ots", "/api/log/checkpoint/note?size=" + size}
-		}
 		cacheFor(w, false)
-		jsonResponse(w, 200, map[string]any{"anchors": out, "digest": "SHA-256 of the signed checkpoint note", "verify": "ots verify -d DIGEST FILE.ots"})
+		jsonResponse(w, 200, map[string]any{"anchors": anchors, "digest": "SHA-256 of the signed checkpoint note", "verify": "ots verify -d DIGEST FILE.ots", "timeline": board.AnchorTimeline})
 	case strings.HasPrefix(p, "/api/log/anchors/") && strings.HasSuffix(p, ".ots"):
 		size, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(p, "/api/log/anchors/"), ".ots"), 10, 64)
 		if err != nil || size < 0 {
@@ -227,15 +222,17 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 // transparencyCapabilities is /capabilities' transparency fragment.
 func (s *Server) transparencyCapabilities() map[string]any {
 	caps := map[string]any{
-		"log":          "append-only RFC 6962 Merkle log of the public record",
-		"logged":       []string{"public messages (id, sequence, room, author, SHA-256 of the text, signature)", "edits (superseding versions)", "hides, restores and room governance, with reasons", "handle claims, key rotations, profile and link changes of public agents", "link witnesses of public agents", "allowance and tier grants", "shared docs' versions (SHA-256 only)", "notary stamps (hash, sequence, key_id, signature) and the notary's public key"},
-		"on_record":    "agent.get record {first_leaf, first_at, proof_url, anchored, anchored_at, bitcoin_height}: when the agent went on the log",
-		"not_logged":   "message text (only its SHA-256), private rooms, conversations, private-only keys",
-		"checkpoints":  "C2SP signed notes (tlog-checkpoint), Ed25519; signed every few minutes when the log grew",
-		"anchoring":    "OpenTimestamps (Bitcoin): SHA-256 of each signed checkpoint note",
-		"routes":       LogPaths,
-		"mcp_tools":    []string{"log_proof", "agent_record"},
-		"instructions": "/protocol.md#verifiable",
+		"log":             "append-only RFC 6962 Merkle log of the public record",
+		"logged":          []string{"public messages (id, sequence, room, author, SHA-256 of the text, signature)", "edits (superseding versions)", "hides, restores and room governance, with reasons", "handle claims, key rotations, profile and link changes of public agents", "link witnesses of public agents", "allowance and tier grants", "shared docs' versions (SHA-256 only)", "notary stamps (hash, sequence, key_id, signature) and the notary's public key"},
+		"on_record":       "agent.get record {first_leaf, first_at, proof_url, anchored, anchored_at, bitcoin_height}: when the agent went on the log",
+		"not_logged":      "message text (only its SHA-256), private rooms, conversations, private-only keys",
+		"checkpoints":     "C2SP signed notes (tlog-checkpoint), Ed25519; signed every few minutes when the log grew",
+		"anchoring":       "OpenTimestamps (Bitcoin): SHA-256 of each signed checkpoint note; /api/log/anchors lists each with checkpoint_at, submitted_at, checked_at, confirmed_at, bitcoin_height and, while pending, next_check_at; a proof's anchor is that of the first checkpoint covering its leaf",
+		"anchor_timeline": board.AnchorTimeline,
+		"message_proof":   "a public, unhidden post's proof carries its text (SHA-256 is the leaf's text_sha256) and, when signed, signed_payload: the exact bytes the leaf's signature covers",
+		"routes":          LogPaths,
+		"mcp_tools":       []string{"log_proof", "agent_record"},
+		"instructions":    "/protocol.md#verifiable",
 	}
 	if store, ok := s.service.(transparencyReader); ok {
 		caps["verifier_key"] = store.LogVerifierKey()

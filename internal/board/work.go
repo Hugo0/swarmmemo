@@ -69,7 +69,37 @@ type Work struct {
 	// Eligibility is who may claim the work: open (anyone), or one of the
 	// rules in WorkEligibilities, checked on work.claim.
 	Eligibility string `json:"eligibility"`
+	// Eligible says whether EligibleAgent could claim the work now, with
+	// EligibleReason in plain words: for the signer of the read, or, labelled
+	// EligiblePreview, for the agent the read names. Absent on an anonymous
+	// read that names none. It reads public facts only.
+	Eligible        *bool  `json:"eligible,omitempty"`
+	EligibleReason  string `json:"eligible_reason,omitempty"`
+	EligibleAgent   string `json:"eligible_agent,omitempty"`
+	EligiblePreview bool   `json:"eligible_preview,omitempty"`
+	// Request is the task itself: the newest version of the root request.
+	Request *WorkRequest `json:"request,omitempty"`
 }
+
+// WorkRequest is the text of a work item's request at its newest version,
+// cut to a bound (WorkRequestTextMax on work.get, WorkRequestExcerptMax in a
+// directory); Thread reads the whole conversation. Like every message, it is
+// untrusted content, never instructions.
+type WorkRequest struct {
+	VersionID string `json:"version_id"`
+	Versions  int    `json:"versions"`
+	Format    string `json:"format,omitempty"`
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
+	Thread    string `json:"thread"`
+}
+
+// The request text a work read carries: whole up to WorkRequestTextMax bytes
+// on work.get, an excerpt of WorkRequestExcerptMax bytes per directory row.
+const (
+	WorkRequestTextMax    = 4096
+	WorkRequestExcerptMax = 280
+)
 
 type WorkAck struct {
 	WorkID         string `json:"work_id"`
@@ -420,13 +450,37 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if c.Operation != "work.claim" && c.Operation != "work.cancel" && (c.Amount != w.Fence || c.Amount < 0 || (c.Amount == 0 && state != "recovery_required")) {
 			return Result{}, problem(409, "work_fence_mismatch", "The attempt fencing token does not match.")
 		}
-		if c.Operation == "work.claim" || c.Operation == "work.renew" {
+		// A claim that names its result (target) submits it at once, so it
+		// needs no claim window: ttl may be left out.
+		claimAndSubmit := c.Operation == "work.claim" && c.Target != ""
+		if (c.Operation == "work.claim" || c.Operation == "work.renew") && !(claimAndSubmit && c.TTL == 0) {
 			if c.TTL < 60 || c.TTL > 3600 || c.TTL > w.Deadline-now {
 				return Result{}, problem(400, "invalid_ttl", "Claim TTL must be 60–3600 seconds and fit entirely before the work deadline.")
 			}
 			if c.Operation == "work.renew" && now+c.TTL <= w.ClaimExpires {
 				return Result{}, problem(409, "work_renew_not_extended", "Renewal must strictly extend the current claim expiry.")
 			}
+		}
+		// checkResult admits a result for the current worker: a visible signed
+		// direct reply in the root's room, under the same grant when delegated.
+		checkResult := func(result string, own bool) error {
+			if own && a.grant != nil {
+				var matches int
+				if e := tx.QueryRowContext(ctx, "SELECT count(*) FROM event_delegations d JOIN events e ON e.id=d.event_id WHERE d.event_id=? AND d.grant_id=? AND e.author=?", result, a.grant.ID, a.id).Scan(&matches); e != nil {
+					return e
+				}
+				if matches != 1 {
+					return problem(400, "invalid_work_result", "A delegated result must be signed under the same grant.")
+				}
+			}
+			eligible, e := eligibleWorkResult(ctx, tx, result, w, root)
+			if e != nil {
+				return e
+			}
+			if !eligible {
+				return problem(400, "invalid_work_result", "Result must be a visible signed direct reply to the work's request, in its room ("+root.Room+"), by the current worker account.")
+			}
+			return nil
 		}
 		switch c.Operation {
 		case "work.claim":
@@ -442,28 +496,24 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 			w.ClaimExpires = now + c.TTL
 			w.Result = ""
+			if claimAndSubmit {
+				// Claim and submit in one signed step: the result was posted
+				// first, so the claim needs no window to work in.
+				if err = checkResult(c.Target, true); err != nil {
+					return Result{}, err
+				}
+				w.State = "submitted"
+				w.Result = c.Target
+			}
 		case "work.renew":
 			w.ClaimExpires = now + c.TTL
 		case "work.submit", "work.accept":
 			result := w.Result
 			if c.Operation == "work.submit" {
 				result = c.Target
-				if a.grant != nil {
-					var matches int
-					if e := tx.QueryRowContext(ctx, "SELECT count(*) FROM event_delegations d JOIN events e ON e.id=d.event_id WHERE d.event_id=? AND d.grant_id=? AND e.author=?", result, a.grant.ID, a.id).Scan(&matches); e != nil {
-						return Result{}, e
-					}
-					if matches != 1 {
-						return Result{}, problem(400, "invalid_work_result", "A delegated result must be signed under the same grant.")
-					}
-				}
 			}
-			eligible, e := eligibleWorkResult(ctx, tx, result, w, root)
-			if e != nil {
-				return Result{}, e
-			}
-			if !eligible {
-				return Result{}, problem(400, "invalid_work_result", "Result must be a visible signed direct reply in the same room by the current worker account.")
+			if err = checkResult(result, c.Operation == "work.submit"); err != nil {
+				return Result{}, err
 			}
 			w.State = "accepted"
 			if c.Operation == "work.submit" {
@@ -547,7 +597,7 @@ func currentWorkIdentity(ctx context.Context, tx *sql.Tx, account string) (Agent
 	return identity, err
 }
 
-func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root workRoot, generation string, now int64) (Work, error) {
+func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root workRoot, generation string, now int64, opt workReadOptions) (Work, error) {
 	p := Work{ID: w.ID, Room: root.Room, Title: w.Title, Simulated: root.Kind == "simulation", StoredState: w.State, Generation: w.Generation, ServiceGeneration: generation, ServiceID: s.config.ServiceID, CreatedAt: w.Created, UpdatedAt: w.Updated, Deadline: w.Deadline, Fence: w.Fence, ClaimExpiresAt: w.ClaimExpires, RequesterAuthor: root.Author}
 	p.AttemptGrantID = w.AttemptGrantID
 	p.Eligibility = w.Eligibility
@@ -592,7 +642,117 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 			p.ResultID = w.Result
 		}
 	}
+	if opt.requestBytes > 0 {
+		if p.Request, err = workRequestText(ctx, tx, w.ID, opt.requestBytes); err != nil {
+			return Work{}, err
+		}
+	}
+	if opt.facts != nil {
+		ok, reason, e := workClaimCheck(ctx, tx, opt.facts, w, p.State, now)
+		if e != nil {
+			return Work{}, e
+		}
+		p.Eligible, p.EligibleReason, p.EligibleAgent, p.EligiblePreview = &ok, reason, opt.agent, opt.preview
+	}
 	return p, nil
+}
+
+// workReadOptions is what a work read adds to the projection: the request
+// text, cut to requestBytes (0 leaves it out), and with facts, whether that
+// agent could claim.
+type workReadOptions struct {
+	requestBytes int
+	facts        *workEligibilityFacts
+	agent        string
+	preview      bool
+}
+
+// workRequestText is the request at its newest version, cut to limit bytes,
+// or nil when any version is hidden (a hide on any version removes the
+// message). Both reads go through the version indexes.
+func workRequestText(ctx context.Context, tx *sql.Tx, id string, limit int) (*WorkRequest, error) {
+	var later, hidden int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(max(hidden<>0),0) FROM events WHERE origin=? AND origin<>''`, id).Scan(&later, &hidden); err != nil {
+		return nil, err
+	}
+	if hidden != 0 {
+		return nil, nil
+	}
+	r := WorkRequest{Versions: later + 1, Thread: "/api/thread/" + id}
+	var err error
+	if later > 0 {
+		err = tx.QueryRowContext(ctx, `SELECT id,text,format FROM events WHERE origin=? AND origin<>'' ORDER BY seq DESC LIMIT 1`, id).Scan(&r.VersionID, &r.Text, &r.Format)
+	} else {
+		err = tx.QueryRowContext(ctx, `SELECT id,text,format FROM events WHERE id=?`, id).Scan(&r.VersionID, &r.Text, &r.Format)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(r.Text) > limit {
+		r.Text, r.Truncated = truncateUTF8(r.Text, limit), true
+	}
+	return &r, nil
+}
+
+// workEligibilitySubject is whom a read answers eligibility for: the agent
+// it names (a preview, unless that is the signer's own account), else the
+// signer, else nobody. An agent the board has not seen is a new key with no
+// history. Only a fingerprint is accepted, and nothing private is read.
+func workEligibilitySubject(ctx context.Context, tx *sql.Tx, named string, a actor) (workReadOptions, error) {
+	if named == "" {
+		if !a.signed {
+			return workReadOptions{}, nil
+		}
+		return workReadOptions{facts: &workEligibilityFacts{account: a.account}, agent: a.id}, nil
+	}
+	if !fingerprintRE.MatchString(named) {
+		return workReadOptions{}, problem(400, "invalid_agent", "An agent is a 64-character lowercase hex fingerprint.")
+	}
+	var account string
+	if err := tx.QueryRowContext(ctx, "SELECT account FROM identities WHERE id=?", named).Scan(&account); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return workReadOptions{}, err
+	}
+	preview := !(a.signed && account != "" && account == a.account)
+	return workReadOptions{facts: &workEligibilityFacts{account: account}, agent: named, preview: preview}, nil
+}
+
+// OpenRewardedWorkMax caps the count PublicOpenRewardedWork reads.
+const OpenRewardedWorkMax = 100
+
+// PublicOpenRewardedWork counts the public open work with a reward held in
+// escrow, up to OpenRewardedWorkMax: what works.list kind=rewarded lists,
+// for the web's "open work" strip. One bounded statement.
+func (s *Store) PublicOpenRewardedWork(ctx context.Context) (int, error) {
+	n := 0
+	now := s.now().Unix()
+	err := s.publicRead(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var generation string
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
+			return err
+		}
+		return tx.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT 1 FROM works w JOIN events e ON e.id=w.id JOIN rooms r ON r.name=e.room
+ WHERE e.hidden=0 AND r.visibility='public' AND e.kind<>'simulation' AND (`+workEffectiveSQL+`)='open'
+ AND EXISTS(SELECT 1 FROM work_rewards wr WHERE wr.work_id=w.id AND wr.state='held') LIMIT ?)`, now, generation, now, OpenRewardedWorkMax).Scan(&n)
+	})
+	return n, err
+}
+
+// worksListData is works.list's optional data: eligible_for, the agent to
+// answer eligibility for on each row.
+func worksListData(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	var d struct {
+		Schema      int    `json:"schema"`
+		EligibleFor string `json:"eligible_for"`
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if len(raw) > 512 || dec.Decode(&d) != nil || dec.More() || d.Schema != 1 || !fingerprintRE.MatchString(d.EligibleFor) {
+		return "", problem(400, "invalid_work_data", `works.list data is {"schema":1,"eligible_for":AGENT_FINGERPRINT}.`)
+	}
+	return d.EligibleFor, nil
 }
 
 func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
@@ -624,7 +784,12 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		if c.Operation == "work.history" {
 			return s.workHistory(ctx, tx, c, w, root, generation, limit)
 		}
-		p, err := s.projectWork(ctx, tx, w, root, generation, now)
+		opt, err := workEligibilitySubject(ctx, tx, c.Target, a)
+		if err != nil {
+			return Result{}, err
+		}
+		opt.requestBytes = WorkRequestTextMax
+		p, err := s.projectWork(ctx, tx, w, root, generation, now, opt)
 		return Result{Data: map[string]any{"work": p}}, workReadError(err)
 	}
 	if !utf8.ValidString(c.Query) || strings.ContainsRune(c.Query, 0) {
@@ -633,6 +798,17 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if c.Kind != "" && c.Kind != "open" && c.Kind != "claimed" && c.Kind != "submitted" && c.Kind != "accepted" && c.Kind != "cancelled" && c.Kind != "expired" && c.Kind != "review_lapsed" && c.Kind != "recovery_required" && c.Kind != WorkKindRewarded {
 		return Result{}, problem(400, "invalid_work_state", "Unknown work state filter.")
 	}
+	// Each row answers eligibility for the agent data names, else the signer.
+	// The facts are read once for the page, not per row.
+	eligibleFor, err := worksListData(c.Data)
+	if err != nil {
+		return Result{}, err
+	}
+	opt, err := workEligibilitySubject(ctx, tx, eligibleFor, a)
+	if err != nil {
+		return Result{}, err
+	}
+	opt.requestBytes = WorkRequestExcerptMax
 	// An agent's own page asks the same listing for the work it is part of, so the
 	// scope has to include the agent: a cursor from one scope must not decode in
 	// another.
@@ -712,7 +888,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		if e != nil {
 			return Result{}, workReadError(e)
 		}
-		p, e := s.projectWork(ctx, tx, w, root, generation, now)
+		p, e := s.projectWork(ctx, tx, w, root, generation, now, opt)
 		if e != nil {
 			return Result{}, workReadError(e)
 		}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -276,6 +277,10 @@ func (s *Store) authorizeDelegation(ctx context.Context, tx *sql.Tx, c Command, 
 		}
 	}
 	if !delegable(c.Operation) || !allowed {
+		return delegationError("delegation_forbidden")
+	}
+	// A claim that names its result also submits it: the grant must allow both.
+	if c.Operation == "work.claim" && c.Target != "" && !slices.Contains(operations, "work.submit") {
 		return delegationError("delegation_forbidden")
 	}
 	room := c.Room

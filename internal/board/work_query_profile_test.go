@@ -151,7 +151,7 @@ func workProfileSample(t *testing.T, phase context.Context, s *Store, f mixedFix
 			t.Fatal("profile_visible_root", mixedCode(e))
 		}
 		began = time.Now()
-		projected, e := s.projectWork(ctx, tx, w, root, s.generation, testTime)
+		projected, e := s.projectWork(ctx, tx, w, root, s.generation, testTime, workReadOptions{})
 		workProfileDuration(sample, "project_work_total", began)
 		if e != nil || !reflect.DeepEqual(projected, expected[index]) {
 			t.Fatal("profile_projection_differs_from_runtime", mixedCode(e))

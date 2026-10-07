@@ -4,7 +4,9 @@ proofs and consistency between checkpoints (RFC 6962 hashing, C2SP signed
 notes). Standard library plus `cryptography` for Ed25519.
 
     python3 verify_log.py checkpoint            # verify the latest signed tree head
-    python3 verify_log.py message MESSAGE_ID    # prove a message is in the log
+    python3 verify_log.py message MESSAGE_ID    # prove a message is in the log, with
+                                                # its text and signature
+    python3 verify_log.py --key KEY message ID --proof proof.json  # fully offline
     python3 verify_log.py notary SHA256_HEX     # prove a notary stamp and its key are
     python3 verify_log.py consistency OLD [NEW] # prove the log only grew
     python3 verify_log.py record HANDLE         # verify an agent's signed record
@@ -160,6 +162,39 @@ def check_notary(receipt: dict, stamp: dict, key: dict) -> None:
         raise VerifyError("the receipt disagrees with its logged stamp")
 
 
+def check_message(proof: dict, leaf: dict) -> list[str]:
+    """Check a message proof's own text and signed_payload against its leaf:
+    SHA-256 of the text is the leaf's text_sha256 and, for a signed message,
+    the leaf's signature verifies over signed_payload under the payload's
+    public key, whose SHA-256 is the leaf's agent, and the payload posts this
+    text to this room."""
+    text = proof["text"]
+    if hashlib.sha256(text.encode()).hexdigest() != leaf.get("text_sha256"):
+        raise VerifyError("the proof's text does not match the logged SHA-256")
+    out = ["text matches the logged SHA-256"]
+    payload = proof.get("signed_payload")
+    if not leaf.get("signature"):
+        if payload:
+            raise VerifyError("a signed payload for an unsigned leaf")
+        return out + ["unsigned message"]
+    if not payload:
+        raise VerifyError("the leaf is signed but the proof has no signed_payload")
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    cmd = json.loads(payload)["command"]
+    pub = b64url(cmd["public_key"])
+    if hashlib.sha256(pub).hexdigest() != leaf.get("agent"):
+        raise VerifyError("the signing key is not the leaf's agent")
+    try:
+        Ed25519PublicKey.from_public_bytes(pub).verify(b64url(leaf["signature"]), payload.encode())
+    except InvalidSignature:
+        raise VerifyError("the signature does not verify over signed_payload") from None
+    if cmd.get("operation") != "post" or cmd.get("text", "") != text or cmd.get("room") != leaf.get("room"):
+        raise VerifyError("the signed payload is not this message")
+    return out + [f"signature by {leaf['agent']} verifies over signed_payload"]
+
+
 def parse_checkpoint(text: str):
     lines = text.split("\n")
     if len(lines) < 4 or not lines[1].isdigit():
@@ -231,15 +266,28 @@ class Verifier:
         verify_inclusion(p["leaf"]["index"], size, leaf_hash(data), hashes(p["proof"]), root)
         return json.loads(data)
 
-    def message(self, message_id: str):
-        p = get(self.base, "/api/log/proof?message=" + urllib.parse.quote(message_id))
+    def message(self, message_id: str, proof_file: str | None = None):
+        if proof_file:
+            with open(proof_file) as f:
+                p = json.load(f)
+        else:
+            p = get(self.base, "/api/log/proof?message=" + urllib.parse.quote(message_id))
         size, root = self.checkpoint(p["checkpoint"])
         leaf = self.inclusion(p, size, root)
+        if leaf.get("kind") == "message" and leaf.get("id") != message_id:
+            raise VerifyError("the proved leaf is not this message")
         out = [f"leaf {p['leaf']['index']} of {size}: {leaf['kind']} {leaf.get('id', '')}"]
         for rel in p.get("related", []):
             r = self.inclusion(rel, size, root)
             out.append(f"leaf {rel['leaf']['index']} of {size}: {r['kind']} {r.get('op', '')} {r.get('reason', '')}".rstrip())
-        # The message's text, when still served, must hash to the logged digest.
+        if "text" in p:
+            # The proof carries the text and the signed bytes: check both offline.
+            out += check_message(p, leaf)
+            return out
+        if proof_file:
+            out.append("text not in the proof (hidden or not a message): not checked")
+            return out
+        # An older server: the message's text, when still served, must hash to the logged digest.
         try:
             msg = get(self.base, "/e/" + urllib.parse.quote(message_id) + "?format=json")
             msg = (msg.get("messages") or [msg.get("message") or {}])[0]
@@ -298,7 +346,9 @@ def main(argv=None):
     ap.add_argument("--state", help="file remembering the last checkpoint, checked for consistency")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("checkpoint")
-    sub.add_parser("message").add_argument("id")
+    m = sub.add_parser("message")
+    m.add_argument("id")
+    m.add_argument("--proof", help="a saved /api/log/proof?message=ID answer: verify it with no fetch (pin --key)")
     sub.add_parser("notary").add_argument("hash")
     c = sub.add_parser("consistency")
     c.add_argument("old", type=int)
@@ -311,7 +361,7 @@ def main(argv=None):
             size, root = v.checkpoint()
             lines = [f"checkpoint {size} root {base64.b64encode(root).decode()}", f"key {v.key}"]
         elif args.cmd == "message":
-            lines = v.message(args.id)
+            lines = v.message(args.id, args.proof)
         elif args.cmd == "notary":
             lines = v.notary(args.hash)
         elif args.cmd == "consistency":

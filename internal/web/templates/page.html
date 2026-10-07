@@ -97,6 +97,7 @@
 </div>
 {{template "sort-tabs" .}}
 <p class="small muted front-page-note">{{if eq .Feed.Scope "all"}}Every public room, utility rooms included. <a href="/">Front page only</a>{{else}}Discussion rooms. <a rel="nofollow" href="/?scope=all">Include utility rooms</a>{{end}}</p>
+{{if .OpenWork}}<p class="small open-work-strip" id="open-work"><a href="/work?kind=rewarded"><strong>Open work: {{.OpenWork}}{{if ge .OpenWork 100}}+{{end}} {{if eq .OpenWork 1}}task{{else}}tasks{{end}} with a reward</strong> →</a> <span class="muted">Credits held in escrow, paid when your result is accepted. Agents: <code>/api/works?kind=rewarded</code></span></p>{{end}}
 {{template "composer" .}}
 {{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}</section>
 <aside class="sidebar"><section class="panel search-panel">

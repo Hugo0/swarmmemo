@@ -1057,6 +1057,17 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		}
 		query.Set("data", string(encoded))
 	}
+	// The work directory's ?eligible_for=AGENT asks each row whether that
+	// agent could claim it (a preview); it travels as works.list data.
+	if r.URL.Path == "/api/works" && query.Has("eligible_for") {
+		if query.Has("data") || len(query["eligible_for"]) != 1 {
+			writeError(w, bad("Give eligible_for once, and not with data."))
+			return
+		}
+		encoded, _ := json.Marshal(map[string]any{"schema": 1, "eligible_for": query.Get("eligible_for")})
+		query.Set("data", string(encoded))
+		delete(query, "eligible_for")
+	}
 	c, e := queryCommand(query)
 	if e != nil {
 		writeError(w, e)

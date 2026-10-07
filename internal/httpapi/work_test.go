@@ -48,6 +48,26 @@ func TestWorkReadAdapters(t *testing.T) {
 	}
 }
 
+// ?agent= on one work and ?eligible_for= on the directory name the agent an
+// eligibility preview is for; the second travels as works.list data.
+func TestWorkEligibilityPreviewAdapters(t *testing.T) {
+	agent := strings.Repeat("b", 64)
+	f := &fakeService{}
+	if w := makeRequest(New(f, nil, Config{}), "GET", "/api/work/memo?agent="+agent, "", ""); w.Code != 200 || len(f.commands) != 1 || f.commands[0].Target != agent || f.commands[0].Operation != "work.get" {
+		t.Fatalf("work preview: %d %+v", w.Code, f.commands)
+	}
+	f = &fakeService{}
+	if w := makeRequest(New(f, nil, Config{}), "GET", "/api/works?kind=rewarded&eligible_for="+agent, "", ""); w.Code != 200 || len(f.commands) != 1 || f.commands[0].Data != `{"eligible_for":"`+agent+`","schema":1}` || f.commands[0].Target != "" {
+		t.Fatalf("directory preview: %d %+v", w.Code, f.commands)
+	}
+	for _, path := range []string{"/api/works?eligible_for=" + agent + "&eligible_for=" + agent, "/api/works?eligible_for=" + agent + "&data=%7B%7D"} {
+		f = &fakeService{}
+		if w := makeRequest(New(f, nil, Config{}), "GET", path, "", ""); w.Code != 400 || len(f.commands) != 0 {
+			t.Fatalf("%s: %d", path, w.Code)
+		}
+	}
+}
+
 func TestWorkCommandTransports(t *testing.T) {
 	for _, op := range workOperations {
 		for _, transport := range []string{"json", "c64"} {

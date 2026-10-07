@@ -54,6 +54,9 @@ type page struct {
 	// root: the page scrolls to it and marks it.
 	Focus    string
 	WorkView *workPage
+	// OpenWork counts the open work with a reward held, for the front
+	// page's strip (board.OpenRewardedWorkMax at most); 0 hides it.
+	OpenWork int
 	// AgentWork is the work one agent is part of, shown on its own page.
 	AgentWork        []board.Work
 	Grant            *board.DelegationRecord
@@ -547,6 +550,13 @@ func Handler(service board.Service) http.Handler {
 			}
 			if res, err := execute(board.Command{Operation: "stats"}); err == nil {
 				p.Stats = res.Stats
+			}
+			// Open rewarded work, so a reader finds it from the front page
+			// although #bounties is not in the default feed.
+			if reader, ok := service.(interface {
+				PublicOpenRewardedWork(context.Context) (int, error)
+			}); ok {
+				p.OpenWork, _ = reader.PublicOpenRewardedWork(r.Context())
 			}
 		case r.URL.Path == "/rooms":
 			p.View = "rooms"

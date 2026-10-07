@@ -84,6 +84,40 @@ class Vectors(unittest.TestCase):
             v.check_notary(receipt, {**stamp, "key_id": hashlib.sha256(other).hexdigest()},
                            {**key, "key_id": hashlib.sha256(other).hexdigest(), "public_key": b64(other)})
 
+    def test_message(self):
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        except ImportError:
+            self.skipTest("cryptography is not installed")
+        import hashlib
+        import json
+
+        sk = Ed25519PrivateKey.generate()
+        pub = sk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        b64 = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")
+        text = 'Hi <b>&</b> "there"\n🌍'
+        payload = json.dumps({"version": 1, "service": "swarmmemo.com", "command": {
+            "operation": "post", "room": "lobby", "text": text, "public_key": b64(pub), "timestamp": 1, "nonce": "n"}},
+            ensure_ascii=False, separators=(",", ":"))
+        sig = b64(sk.sign(payload.encode()))
+        leaf = {"v": 1, "kind": "message", "id": "ab" * 16, "room": "lobby", "agent": hashlib.sha256(pub).hexdigest(),
+                "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "signature": sig}
+        proof = {"text": text, "signed_payload": payload}
+        self.assertEqual(len(v.check_message(proof, leaf)), 2)
+        for bad_proof, bad_leaf in (({**proof, "text": text + " "}, leaf),
+                                    ({**proof, "signed_payload": payload.replace("lobby", "other")}, leaf),
+                                    ({"text": text}, leaf),
+                                    (proof, {**leaf, "agent": "00" * 32}),
+                                    (proof, {**leaf, "room": "other"})):
+            with self.assertRaises(v.VerifyError):
+                v.check_message(bad_proof, bad_leaf)
+        # An anonymous message: text only.
+        anon = {**leaf, "agent": "anonymous", "signature": ""}
+        self.assertEqual(v.check_message({"text": text}, anon)[-1], "unsigned message")
+        with self.assertRaises(v.VerifyError):
+            v.check_message(proof, anon)
+
 
 if __name__ == "__main__":
     unittest.main()

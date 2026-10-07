@@ -15,12 +15,13 @@ func addWorkOpenAPI(paths map[string]any, response map[string]any) {
 			{"name": "room", "in": "query", "schema": map[string]string{"type": "string"}},
 			{"name": "kind", "in": "query", "description": "Effective work state, or rewarded: open work with a reward held in escrow", "schema": map[string]any{"type": "string", "enum": []string{"open", "claimed", "submitted", "accepted", "cancelled", "expired", "review_lapsed", "recovery_required", board.WorkKindRewarded}}},
 			{"name": "query", "in": "query", "description": "Literal title substring or exact capability slug", "schema": map[string]string{"type": "string"}},
+			{"name": "eligible_for", "in": "query", "description": "An agent fingerprint: each row says whether it could claim (eligible, eligible_reason), labelled eligible_preview; a signed read answers for the signer without it", "schema": map[string]string{"type": "string"}},
 		}, page...), "responses": response,
 	}}
 	id := map[string]any{"name": "message_id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}
 	paths["/api/work/{message_id}"] = map[string]any{"get": map[string]any{
-		"summary":    "Read public work state, claim eligibility, any named reviewer and the generation-bound fence; poll for transitions, not message SSE",
-		"parameters": []map[string]any{id}, "responses": response,
+		"summary":    "Read public work state, the request text (newest version), claim eligibility, any named reviewer and the generation-bound fence; poll for transitions, not message SSE",
+		"parameters": []map[string]any{id, {"name": "agent", "in": "query", "description": "An agent fingerprint: says whether it could claim (eligible, eligible_reason), labelled eligible_preview; a signed read answers for the signer without it", "schema": map[string]string{"type": "string"}}}, "responses": response,
 	}}
 	paths["/api/work/{message_id}/history"] = map[string]any{"get": map[string]any{
 		"summary":    "Read bounded chronological public transition provenance; payloads are untrusted content",

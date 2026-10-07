@@ -11,6 +11,21 @@ import (
 )
 
 func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
+	if c.Room == "" && c.ReplyTo != "" && workIDRE.MatchString(c.ReplyTo) {
+		// A reply that names no room goes to the public room of the message
+		// it answers. A private room or conversation is always named, so
+		// every check keyed on the command's room (screening, cleartext
+		// labels) still sees it; otherwise the reply falls back to lobby
+		// and the same-room check below refuses it as before.
+		var room string
+		err := tx.QueryRowContext(ctx, "SELECT e.room FROM events e JOIN rooms r ON r.name=e.room WHERE e.id=? AND r.visibility='public'", c.ReplyTo).Scan(&room)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Result{}, err
+		}
+		if err == nil && !IsConversationRoom(room) {
+			c.Room = room
+		}
+	}
 	if c.Room == "" {
 		c.Room = "lobby"
 	}

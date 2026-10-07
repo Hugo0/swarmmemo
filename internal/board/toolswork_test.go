@@ -54,7 +54,7 @@ func TestToolsWorkPageCommandsRun(t *testing.T) {
 		}
 		byOp[probe.Operation] = append(byOp[probe.Operation], c)
 	}
-	for op, n := range map[string]int{"post": 2, "work.create": 2, "work.claim": 1, "work.submit": 1, "work.accept": 1, "work.reject": 1} {
+	for op, n := range map[string]int{"post": 2, "work.create": 2, "works.list": 1, "work.claim": 2, "work.submit": 1, "work.accept": 1, "work.reject": 1} {
 		if len(byOp[op]) != n {
 			t.Fatalf("the page shows %d %s commands, want %d", len(byOp[op]), op, n)
 		}
@@ -95,11 +95,24 @@ func TestToolsWorkPageCommandsRun(t *testing.T) {
 		}
 		return ids
 	}
-	attempt := func() {
+	// attempt runs the worker's page commands: the result posted first and
+	// claimed with it in one step, or (held) a claim with a window, the
+	// reply, then the submit. The reply names no room; it lands in the
+	// request's.
+	attempt := func(held bool) {
 		t.Helper()
-		values["FENCE"] = strconv.FormatInt(do(byOp["work.claim"][0], nil).Data["ack"].(WorkAck).Fence, 10)
+		if held {
+			values["FENCE"] = strconv.FormatInt(do(byOp["work.claim"][1], nil).Data["ack"].(WorkAck).Fence, 10)
+			values["RESULT_ID"] = do(byOp["post"][1], nil).Receipt.ID
+			do(byOp["work.submit"][0], nil)
+			return
+		}
 		values["RESULT_ID"] = do(byOp["post"][1], nil).Receipt.ID
-		do(byOp["work.submit"][0], nil)
+		ack := do(byOp["work.claim"][0], nil).Data["ack"].(WorkAck)
+		if ack.State != "submitted" {
+			t.Fatalf("claim with its result: state %s, want submitted", ack.State)
+		}
+		values["FENCE"] = strconv.FormatInt(ack.Fence, 10)
 	}
 
 	// Rewarded, decided by the requester: a reject keeps the hold, the
@@ -114,7 +127,12 @@ func TestToolsWorkPageCommandsRun(t *testing.T) {
 	if ids := rewarded(); len(ids) != 1 || ids[0] != first {
 		t.Fatalf("rewarded work %v, want only %s (not the unpaid %s)", ids, first, unpaid)
 	}
-	attempt()
+	// The worker's signed directory read says it may claim, with the task.
+	listed := do(byOp["works.list"][0], nil).Data["works"].([]Work)
+	if len(listed) != 1 || listed[0].Eligible == nil || !*listed[0].Eligible || listed[0].EligiblePreview || listed[0].Request == nil || listed[0].Request.Text == "" {
+		t.Fatalf("signed rewarded list: %+v", listed)
+	}
+	attempt(false)
 	if ids := rewarded(); len(ids) != 0 {
 		t.Fatalf("submitted work is still listed as rewarded: %v", ids)
 	}
@@ -122,7 +140,7 @@ func TestToolsWorkPageCommandsRun(t *testing.T) {
 	if w := getTestWork(t, s, first); w.State != "open" || w.Reward.State != "held" {
 		t.Fatalf("after reject: %s %+v", w.State, w.Reward)
 	}
-	attempt()
+	attempt(true)
 	do(byOp["work.accept"][0], nil)
 	w := getTestWork(t, s, first)
 	if w.State != "accepted" || w.Reward.State != "paid" || w.Reward.Receipt == nil || creditIn(t, s, keyID(worker), "remaining") != 500 {
@@ -136,10 +154,10 @@ func TestToolsWorkPageCommandsRun(t *testing.T) {
 	values["MESSAGE_ID"] = do(byOp["post"][0], nil).Receipt.ID
 	second := values["MESSAGE_ID"]
 	do(byOp["work.create"][1], nil)
-	attempt()
+	attempt(false)
 	fails(t, s, signed(requester, Command{Operation: "work.accept", MessageID: second, Amount: mustAtoi(t, values["FENCE"]), Data: `{"schema":1,"generation":"` + s.generation + `"}`, Timestamp: s.now().Unix()}), "not_the_reviewer")
 	do(byOp["work.reject"][0], judge)
-	attempt()
+	attempt(true)
 	do(byOp["work.accept"][0], judge)
 	w = getTestWork(t, s, second)
 	if w.State != "accepted" || w.Reward.State != "paid" || w.ReviewerFee == nil || w.ReviewerFee.State != "paid" || creditIn(t, s, keyID(judge), "remaining") != 50 {

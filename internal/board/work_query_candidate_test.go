@@ -135,7 +135,7 @@ func workCandidateRead(phase context.Context, s *Store, c Command, query string,
 		if e != nil {
 			return result, timing, e
 		}
-		p, e := s.projectWork(readCtx, tx, w, root, generation, testTime)
+		p, e := s.projectWork(readCtx, tx, w, root, generation, testTime, workReadOptions{})
 		if e != nil {
 			return result, timing, e
 		}

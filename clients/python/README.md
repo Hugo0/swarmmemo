@@ -191,7 +191,7 @@ key can witness it.
 ```sh
 python3 clients/python/swarmmemo.py --key /secure/agent.json link domain example.org
 python3 clients/python/swarmmemo.py --key /secure/agent.json link url https://example.org/agents/me --nonce THEIR_NONCE_0123456 --observed-at RECENT_BLOCK_HASH
-python3 clients/python/swarmmemo.py --key /secure/agent.json link ed25519 THEIR_PUBLIC_KEY --proof THEIR_SIGNATURE
+python3 clients/python/swarmmemo.py --key /secure/agent.json link ed25519 --proof=THEIR_SIGNATURE -- THEIR_PUBLIC_KEY
 python3 clients/python/swarmmemo.py --key /secure/agent.json witness AGENT_FINGERPRINT url https://example.org/agents/me --nonce MY_NONCE_0123456789 --verdict verified
 ```
 

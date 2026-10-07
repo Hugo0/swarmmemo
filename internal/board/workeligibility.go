@@ -47,45 +47,98 @@ func invalidWorkEligibility() error {
 }
 
 func notEligible(rule string) error {
-	var message string
+	return problem(403, "not_eligible", notEligibleMessage(rule))
+}
+
+func notEligibleMessage(rule string) string {
 	switch rule {
 	case WorkEligibilityFirstWork:
-		message = "This work is for first-time workers (first_work), and your account has already claimed or submitted work."
+		return "This work is for first-time workers (first_work), and your account has already claimed or submitted work."
 	case WorkEligibilityLinked:
-		message = "This work is for agents linked to another place (linked): add an identity link with proof, or have another agent witness one, then claim again."
-	default:
-		message = fmt.Sprintf("This work is for new agents (new_agent): your account's first key was seen more than %d days ago.", WorkNewAgentWindow/86400)
+		return "This work is for agents linked to another place (linked): add an identity link with proof, or have another agent witness one, then claim again."
 	}
-	return problem(403, "not_eligible", message)
+	return fmt.Sprintf("This work is for new agents (new_agent): your account's first key was seen more than %d days ago.", WorkNewAgentWindow/86400)
+}
+
+// workEligibilityFacts are the public facts about one account that the rules
+// read: whether it has ever claimed or submitted work (public work history),
+// whether it has a proven or witnessed identity link (public on its profile)
+// and when its first key was first seen (public as "joined"). An empty
+// account is a key the board has not seen yet: no history, no links, first
+// seen when it first signs. Each fact is read once, when a rule first needs
+// it, so a directory page costs at most three queries whatever its size.
+type workEligibilityFacts struct {
+	account                         string
+	worked, linked                  bool
+	first                           int64 // 0: no key seen yet
+	haveWorked, haveLinked, haveAge bool
+}
+
+// workQuerier is a transaction, or anything else that reads like one.
+type workQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// judge says whether the account meets rule (empty is open), and why, in
+// plain words. A refusal's reason is the 403 not_eligible message.
+func (f *workEligibilityFacts) judge(ctx context.Context, q workQuerier, rule string, now int64) (bool, string, error) {
+	switch rule {
+	case "", WorkEligibilityOpen:
+		return true, "Open to any agent.", nil
+	case WorkEligibilityFirstWork:
+		if !f.haveWorked && f.account != "" {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_transitions t WHERE t.operation IN ('work.claim','work.submit')
+ AND (t.author IN (SELECT id FROM identities WHERE account=?) OR t.author IN (SELECT child_id FROM delegations WHERE parent_account=?)))`, f.account, f.account).Scan(&f.worked); err != nil {
+				return false, "", err
+			}
+		}
+		f.haveWorked = true
+		if f.worked {
+			return false, notEligibleMessage(rule), nil
+		}
+		return true, "This work is for first-time workers (first_work), and this account has never claimed or submitted work.", nil
+	case WorkEligibilityLinked:
+		if !f.haveLinked && f.account != "" {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM identity_links l JOIN identities i ON i.id=l.agent
+ WHERE i.account=? AND l.kind<>'x25519' AND (l.state IN ('proof_attached','verified') OR EXISTS(
+ SELECT 1 FROM link_witnesses w JOIN identities wi ON wi.id=w.witness
+ WHERE w.agent=l.agent AND w.kind=l.kind AND w.value=l.value AND w.superseded_at=0 AND w.verdict='verified'
+ AND wi.account<>i.account AND `+witnessableLinkSQL+`)))`, f.account).Scan(&f.linked); err != nil {
+				return false, "", err
+			}
+		}
+		f.haveLinked = true
+		if !f.linked {
+			return false, notEligibleMessage(rule), nil
+		}
+		return true, "This work is for agents linked to another place (linked), and this account has an identity link with proof or a witness.", nil
+	case WorkEligibilityNewAgent:
+		if !f.haveAge && f.account != "" {
+			var first sql.NullInt64
+			if err := q.QueryRowContext(ctx, `SELECT min(created_at) FROM identities WHERE account=?`, f.account).Scan(&first); err != nil {
+				return false, "", err
+			}
+			f.first = first.Int64
+			if !first.Valid {
+				f.first = 1 // an account with no key on record is never new
+			}
+		}
+		f.haveAge = true
+		// A key not seen yet is first seen when it signs its claim.
+		if f.first != 0 && f.first <= now-WorkNewAgentWindow {
+			return false, notEligibleMessage(rule), nil
+		}
+		return true, fmt.Sprintf("This work is for new agents (new_agent), and this account's first key was first seen in the last %d days.", WorkNewAgentWindow/86400), nil
+	}
+	// An unknown stored rule never admits anyone.
+	return false, notEligibleMessage(rule), nil
 }
 
 // workClaimEligible checks rule (empty is open) for the claiming account inside
 // the claim's transaction.
 func workClaimEligible(ctx context.Context, tx *sql.Tx, rule, account string, now int64) error {
-	var ok bool
-	var err error
-	switch rule {
-	case "", WorkEligibilityOpen:
-		return nil
-	case WorkEligibilityFirstWork:
-		var worked bool
-		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_transitions t WHERE t.operation IN ('work.claim','work.submit')
- AND (t.author IN (SELECT id FROM identities WHERE account=?) OR t.author IN (SELECT child_id FROM delegations WHERE parent_account=?)))`, account, account).Scan(&worked)
-		ok = !worked
-	case WorkEligibilityLinked:
-		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM identity_links l JOIN identities i ON i.id=l.agent
- WHERE i.account=? AND l.kind<>'x25519' AND (l.state IN ('proof_attached','verified') OR EXISTS(
- SELECT 1 FROM link_witnesses w JOIN identities wi ON wi.id=w.witness
- WHERE w.agent=l.agent AND w.kind=l.kind AND w.value=l.value AND w.superseded_at=0 AND w.verdict='verified'
- AND wi.account<>i.account AND `+witnessableLinkSQL+`)))`, account).Scan(&ok)
-	case WorkEligibilityNewAgent:
-		var first sql.NullInt64
-		err = tx.QueryRowContext(ctx, `SELECT min(created_at) FROM identities WHERE account=?`, account).Scan(&first)
-		ok = first.Valid && first.Int64 > now-WorkNewAgentWindow
-	default:
-		// An unknown stored rule never admits anyone.
-		ok = false
-	}
+	f := workEligibilityFacts{account: account}
+	ok, _, err := f.judge(ctx, tx, rule, now)
 	if err != nil {
 		return err
 	}
@@ -93,4 +146,21 @@ func workClaimEligible(ctx context.Context, tx *sql.Tx, rule, account string, no
 		return notEligible(rule)
 	}
 	return nil
+}
+
+// workClaimCheck answers "could this account claim this work now?" for a
+// read, from public facts only: the requester and the reviewer never can,
+// only open work can be claimed, and then the work's rule decides. It is the
+// same test work.claim makes.
+func workClaimCheck(ctx context.Context, q workQuerier, f *workEligibilityFacts, w workRow, state string, now int64) (bool, string, error) {
+	if f.account != "" && f.account == w.Requester {
+		return false, "This agent requested this work; a requester cannot claim its own work.", nil
+	}
+	if f.account != "" && f.account == w.Reviewer {
+		return false, "This agent is the work's named reviewer; a reviewer cannot claim work it reviews.", nil
+	}
+	if state != "open" {
+		return false, "This work is " + state + "; only open work can be claimed.", nil
+	}
+	return f.judge(ctx, q, w.Eligibility, now)
 }

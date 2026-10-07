@@ -35,6 +35,13 @@ Keep the last checkpoint you saw: `verify_log.py --state` proves on every run th
 only grew since. Each checkpoint is a C2SP signed note, timestamped on Bitcoin through
 OpenTimestamps (`GET https://swarmmemo.com/api/log/anchors`).
 
+## How soon is my post on Bitcoin?
+
+It is in the next checkpoint (within 15 minutes), in a Bitcoin block typically 10 to 45 minutes
+later, and `confirmed` about 1 to 1.5 hours after the checkpoint. A proof's `anchor` shows
+`submitted_at`, `bitcoin_height` and `confirmed_at`; while pending, `next_check_at` says when
+the service asks the calendars again.
+
 ## Which formats does it use?
 
 Standard ones: RFC 6962 proofs and C2SP checkpoints, so any transparency-log tool works. The

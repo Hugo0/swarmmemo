@@ -38,9 +38,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	mrand "math/rand/v2"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -563,6 +565,27 @@ type LogInclusion struct {
 	// Related are the other leaves about the same message (hides, restores),
 	// each with its own proof.
 	Related []LogInclusion `json:"related,omitempty"`
+	// A message leaf's proof carries what the leaf only hashes, while the
+	// message is public and not hidden: its text (SHA-256 is the leaf's
+	// text_sha256) and, when signed, signed_payload, the exact canonical
+	// bytes the leaf's signature covers. Leaves themselves never change.
+	Text          *string `json:"text,omitempty"`
+	SignedPayload string  `json:"signed_payload,omitempty"`
+	// Anchor is the Bitcoin anchor of the first checkpoint covering the leaf
+	// (pending, then confirmed with its block), so the leaf's time bracket
+	// and its lag are visible; prove against it with size=anchor.size.
+	Anchor *LogAnchor `json:"anchor,omitempty"`
+}
+
+// withAnchor sets a proof's Anchor (top-level proofs only).
+func (s *Store) withAnchor(ctx context.Context) func(LogInclusion, error) (LogInclusion, error) {
+	return func(p LogInclusion, err error) (LogInclusion, error) {
+		if err != nil {
+			return p, err
+		}
+		p.Anchor, err = s.leafAnchor(ctx, p.Leaf.Index)
+		return p, err
+	}
 }
 
 func encodeHashes(hs []tlog.Hash) []string {
@@ -586,10 +609,44 @@ func (s *Store) ReadLogProof(ctx context.Context, index int64, message string, s
 	if err != nil {
 		return LogInclusion{}, err
 	}
+	var out LogInclusion
 	if message == "" {
-		return s.inclusion(ctx, index, cp)
+		out, err = s.inclusion(ctx, index, cp)
+	} else {
+		out, err = s.refProof(ctx, message, cp, nil, problem(404, "not_logged", "That message is not in the latest checkpoint: it is private, unknown, or newer than the checkpoint (signed every few minutes)."))
 	}
-	return s.refProof(ctx, message, cp, nil, problem(404, "not_logged", "That message is not in the latest checkpoint: it is private, unknown, or newer than the checkpoint (signed every few minutes)."))
+	if out, err = s.withAnchor(ctx)(out, err); err != nil || out.Leaf.Kind != "message" {
+		return out, err
+	}
+	return out, s.attachLoggedMessage(ctx, &out)
+}
+
+// attachLoggedMessage adds a message leaf's text and signed payload to its
+// proof, so the proof alone checks both the text against text_sha256 and the
+// signature offline. Only while the message is readable by anyone: in a
+// public room and not hidden; the text must still hash to the leaf's digest.
+func (s *Store) attachLoggedMessage(ctx context.Context, p *LogInclusion) error {
+	var l logLeaf
+	if json.Unmarshal([]byte(p.Leaf.Data), &l) != nil || !eventIDRE.MatchString(l.ID) {
+		return nil
+	}
+	var text, payload, signature, hash string
+	err := s.db.QueryRowContext(ctx, `SELECT e.text,e.payload,e.signature,e.hash FROM events e JOIN rooms r ON r.name=e.room
+ WHERE e.id=? AND e.hidden=0 AND r.visibility='public'`, l.ID).Scan(&text, &payload, &signature, &hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if hash != l.TextSHA256 || sha256Hex([]byte(text)) != l.TextSHA256 {
+		return nil
+	}
+	p.Text = &text
+	if payload != "" && signature == l.Signature {
+		p.SignedPayload = payload
+	}
+	return nil
 }
 
 // notaryProofRE is a stamped hash, or "key" for the notary key.
@@ -616,7 +673,7 @@ func (s *Store) ReadNotaryProof(ctx context.Context, hash string, size int64) (L
 			len(notaryKeyRef), notaryKeyRef, cp.Size).Scan(&ref); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return LogInclusion{}, err
 		}
-		return s.refProof(ctx, ref, cp, nil, problem(404, "not_logged", "The notary key is not in the latest checkpoint: the notary is off here, or its key is newer than the checkpoint (signed every few minutes)."))
+		return s.withAnchor(ctx)(s.refProof(ctx, ref, cp, nil, problem(404, "not_logged", "The notary key is not in the latest checkpoint: the notary is off here, or its key is newer than the checkpoint (signed every few minutes).")))
 	}
 	keyLeaf := func(data string) string {
 		var l logLeaf
@@ -625,7 +682,7 @@ func (s *Store) ReadNotaryProof(ctx context.Context, hash string, size int64) (L
 		}
 		return notaryKeyRef + l.KeyID
 	}
-	return s.refProof(ctx, notaryStampRef+hash, cp, keyLeaf, problem(404, "not_logged", "No notary receipt for that hash is in the latest checkpoint: it is unknown, or newer than the checkpoint (signed every few minutes)."))
+	return s.withAnchor(ctx)(s.refProof(ctx, notaryStampRef+hash, cp, keyLeaf, problem(404, "not_logged", "No notary receipt for that hash is in the latest checkpoint: it is unknown, or newer than the checkpoint (signed every few minutes).")))
 }
 
 // refProof proves the first leaf with ref against cp, with the later leaves
@@ -760,15 +817,46 @@ func (s *Store) ReadLogLeaves(ctx context.Context, start, end int64) ([]LogEntry
 	return out, size, rows.Err()
 }
 
-// LogAnchor is one checkpoint's OpenTimestamps proof.
+// LogAnchor is one checkpoint's OpenTimestamps proof and its timeline:
+// checkpoint_at (signed), submitted_at (sent to the calendars), checked_at
+// (last asked for the Bitcoin proof), confirmed_at (when this service first
+// saw the Bitcoin attestation of block bitcoin_height) and, while pending,
+// next_check_at.
 type LogAnchor struct {
 	Size          int64    `json:"size"`
 	Digest        string   `json:"digest"`
 	State         string   `json:"state"`
 	BitcoinHeight int64    `json:"bitcoin_height,omitempty"`
 	Calendars     []string `json:"calendars"`
+	CheckpointAt  int64    `json:"checkpoint_at,omitempty"`
 	SubmittedAt   int64    `json:"submitted_at"`
 	CheckedAt     int64    `json:"checked_at,omitempty"`
+	ConfirmedAt   int64    `json:"confirmed_at,omitempty"`
+	NextCheckAt   int64    `json:"next_check_at,omitempty"`
+	OTS           string   `json:"ots"`
+	Note          string   `json:"note"`
+}
+
+const anchorColumns = "a.size,a.digest,a.state,a.bitcoin_height,a.calendars,coalesce(c.created_at,0),a.submitted_at,a.checked_at FROM tlog_anchors a LEFT JOIN tlog_checkpoints c ON c.size=a.size"
+
+func scanAnchor(row interface{ Scan(...any) error }) (LogAnchor, error) {
+	var a LogAnchor
+	var cals string
+	if err := row.Scan(&a.Size, &a.Digest, &a.State, &a.BitcoinHeight, &cals, &a.CheckpointAt, &a.SubmittedAt, &a.CheckedAt); err != nil {
+		return a, err
+	}
+	a.Calendars = strings.Fields(cals)
+	switch a.State {
+	case "confirmed":
+		// Only a pending anchor is checked again, so the last check of a
+		// confirmed one is the one that saw its Bitcoin attestation.
+		a.ConfirmedAt = a.CheckedAt
+	case "pending":
+		a.NextCheckAt = anchorNextCheck(a.SubmittedAt, a.CheckedAt)
+	}
+	size := strconv.FormatInt(a.Size, 10)
+	a.OTS, a.Note = "/api/log/anchors/"+size+".ots", "/api/log/checkpoint/note?size="+size
+	return a, nil
 }
 
 // ReadLogAnchors lists anchors newest first, below size before (all when <= 0).
@@ -779,22 +867,34 @@ func (s *Store) ReadLogAnchors(ctx context.Context, before int64, limit int) ([]
 	if limit <= 0 || limit > LogPageMax {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT size,digest,state,bitcoin_height,calendars,submitted_at,checked_at FROM tlog_anchors WHERE size<? ORDER BY size DESC LIMIT ?", before, limit)
+	rows, err := s.db.QueryContext(ctx, "SELECT "+anchorColumns+" WHERE a.size<? ORDER BY a.size DESC LIMIT ?", before, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []LogAnchor{}
 	for rows.Next() {
-		var a LogAnchor
-		var cals string
-		if err = rows.Scan(&a.Size, &a.Digest, &a.State, &a.BitcoinHeight, &cals, &a.SubmittedAt, &a.CheckedAt); err != nil {
+		a, err := scanAnchor(rows)
+		if err != nil {
 			return nil, err
 		}
-		a.Calendars = strings.Fields(cals)
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// leafAnchor is the anchor of the first checkpoint that covers leaf index
+// (a stale one aside): the earliest Bitcoin time bracket of that leaf. Nil
+// before one exists.
+func (s *Store) leafAnchor(ctx context.Context, index int64) (*LogAnchor, error) {
+	a, err := scanAnchor(s.db.QueryRowContext(ctx, "SELECT "+anchorColumns+" WHERE a.size>? AND a.state<>'stale' ORDER BY a.size LIMIT 1", index))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
 }
 
 // ReadLogAnchorFile is the .ots proof of the checkpoint of size.
@@ -817,10 +917,19 @@ type TransparencyConfig struct {
 	OTS *ots.Client
 }
 
+// anchorPollEvery is how often pending anchors are looked at (with up to
+// anchorPollJitter added); anchorNextCheck decides which are due.
+const (
+	anchorPollEvery  = 5 * time.Minute
+	anchorPollJitter = 30 * time.Second
+)
+
 // StartTransparency runs the log's background job until ctx ends: catch up
-// and sign a checkpoint every CheckpointEvery when the tree grew, anchor new
-// checkpoints and upgrade pending anchors. Network I/O never runs inside a
-// transaction.
+// and sign a checkpoint every CheckpointEvery when the tree grew and submit
+// it to the calendars at once; every few minutes, retry a submission that
+// failed and ask the calendars for the Bitcoin proofs that are due
+// (anchorNextCheck). One goroutine does both, so they never overlap; network
+// I/O never runs inside a transaction.
 func (s *Store) StartTransparency(ctx context.Context, cfg TransparencyConfig) {
 	if cfg.CheckpointEvery <= 0 {
 		cfg.CheckpointEvery = 15 * time.Minute
@@ -831,15 +940,27 @@ func (s *Store) StartTransparency(ctx context.Context, cfg TransparencyConfig) {
 	go func() {
 		ticker := time.NewTicker(cfg.CheckpointEvery)
 		defer ticker.Stop()
+		poll := time.NewTimer(anchorPollDelay())
+		defer poll.Stop()
+		s.transparencyTick(ctx, cfg)
 		for {
-			s.transparencyTick(ctx, cfg)
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				s.transparencyTick(ctx, cfg)
+			case <-poll.C:
+				s.anchorTick(ctx, cfg, 1)
+				poll.Reset(anchorPollDelay())
 			}
 		}
 	}()
+}
+
+// anchorPollDelay is anchorPollEvery plus jitter, so polls do not line up
+// with other clients' on the minute.
+func anchorPollDelay() time.Duration {
+	return anchorPollEvery + mrand.N(anchorPollJitter)
 }
 
 func (s *Store) transparencyTick(ctx context.Context, cfg TransparencyConfig) {
@@ -849,15 +970,22 @@ func (s *Store) transparencyTick(ctx context.Context, cfg TransparencyConfig) {
 	if err != nil && ctx.Err() == nil {
 		slog.Warn("Transparency checkpoint failed", "error", err)
 	}
+	s.anchorTick(ctx, cfg, 3)
+}
+
+// anchorTick submits up to submit unanchored checkpoints, newest first, then
+// upgrades the pending anchors that are due, at most 12 (each one GET per
+// calendar still pending), all within two minutes.
+func (s *Store) anchorTick(ctx context.Context, cfg TransparencyConfig, submit int) {
 	if cfg.OTS == nil {
 		return
 	}
-	work, cancel = context.WithTimeout(ctx, 2*time.Minute)
+	work, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	if err = s.AnchorCheckpoints(work, cfg.OTS, 3); err != nil && ctx.Err() == nil {
+	if err := s.AnchorCheckpoints(work, cfg.OTS, submit); err != nil && ctx.Err() == nil {
 		slog.Warn("OpenTimestamps anchoring failed", "error", err)
 	}
-	if err = s.UpgradeAnchors(work, cfg.OTS, 12); err != nil && ctx.Err() == nil {
+	if err := s.UpgradeAnchors(work, cfg.OTS, 12); err != nil && ctx.Err() == nil {
 		slog.Info("OpenTimestamps upgrade incomplete", "error", err)
 	}
 }
@@ -910,20 +1038,56 @@ func (s *Store) AnchorCheckpoints(ctx context.Context, client *ots.Client, limit
 	return errors.Join(errs...)
 }
 
+// The upgrade schedule, in seconds from submission. A calendar aggregates
+// digests into one Bitcoin transaction every so often and serves the
+// Bitcoin attestation once that transaction has confirmations, so nothing
+// can come back for the first half hour; then one check per Bitcoin block
+// interval for the first three hours (when nearly every proof completes),
+// every half hour to a day, every two hours after.
 const (
-	anchorUpgradeAfter = 2 * 3600       // calendars commit to Bitcoin within hours
-	anchorCheckEvery   = 3600           // between upgrade attempts
-	anchorStaleAfter   = 14 * 24 * 3600 // a proof still pending then is marked stale, never deleted
+	anchorFirstCheck = 30 * 60
+	anchorFastUntil  = 3 * 3600
+	anchorFastEvery  = 10 * 60
+	anchorSlowUntil  = 24 * 3600
+	anchorSlowEvery  = 30 * 60
+	anchorIdleEvery  = 2 * 3600
+	anchorCheckEarly = 60             // a poll this much early still counts, so polls every anchorPollEvery keep the interval
+	anchorStaleAfter = 14 * 24 * 3600 // a proof still pending then is marked stale, never deleted
+	anchorPendingMax = 4096           // pending anchors one poll looks at
 )
 
+// AnchorTimeline is the expected path from a post to "confirmed", for
+// /api/log/anchors and /capabilities.
+const AnchorTimeline = "A post is in the next checkpoint (signed every 15 minutes by default when the log grew), submitted to the calendars at once (submitted_at). " +
+	"A calendar's Bitcoin transaction is typically mined 10 to 45 minutes later (bitcoin_height: that block's time bounds the post from above), and its proof is served once the transaction has confirmations. " +
+	"Pending anchors are checked every 10 minutes from 30 minutes to 3 hours after submission, then every 30 minutes, then every 2 hours (next_check_at); " +
+	"confirmed_at is when the proof was first seen, typically 1 to 1.5 hours after the checkpoint."
+
+// anchorNextCheck is when a pending anchor submitted at submitted and last
+// checked at checked (0: never) is next asked for its Bitcoin proof.
+func anchorNextCheck(submitted, checked int64) int64 {
+	next := submitted + anchorFirstCheck
+	if checked < submitted {
+		return next
+	}
+	every := int64(anchorIdleEvery)
+	switch age := checked - submitted; {
+	case age < anchorFastUntil:
+		every = anchorFastEvery
+	case age < anchorSlowUntil:
+		every = anchorSlowEvery
+	}
+	return max(next, checked+every)
+}
+
 // UpgradeAnchors asks the calendars for completed proofs of up to limit
-// pending anchors.
+// pending anchors that are due (anchorNextCheck), longest unchecked first.
 func (s *Store) UpgradeAnchors(ctx context.Context, client *ots.Client, limit int) error {
 	now := s.now().Unix()
 	if _, err := s.db.ExecContext(ctx, "UPDATE tlog_anchors SET state='stale' WHERE state='pending' AND submitted_at<?", now-anchorStaleAfter); err != nil {
 		return err
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT size,ots FROM tlog_anchors WHERE state='pending' AND submitted_at<=? AND checked_at<=? ORDER BY checked_at,size LIMIT ?", now-anchorUpgradeAfter, now-anchorCheckEvery, limit)
+	rows, err := s.db.QueryContext(ctx, "SELECT size,submitted_at,checked_at FROM tlog_anchors WHERE state='pending' AND submitted_at<=? ORDER BY checked_at,size LIMIT ?", now-anchorFirstCheck+anchorCheckEarly, anchorPendingMax)
 	if err != nil {
 		return err
 	}
@@ -934,17 +1098,23 @@ func (s *Store) UpgradeAnchors(ctx context.Context, client *ots.Client, limit in
 	var work []todo
 	for rows.Next() {
 		var t todo
-		if err = rows.Scan(&t.size, &t.raw); err != nil {
+		var submitted, checked int64
+		if err = rows.Scan(&t.size, &submitted, &checked); err != nil {
 			rows.Close()
 			return err
 		}
-		work = append(work, t)
+		if len(work) < limit && now >= anchorNextCheck(submitted, checked)-anchorCheckEarly {
+			work = append(work, t)
+		}
 	}
 	if err = rows.Close(); err != nil {
 		return err
 	}
 	var errs []error
 	for _, t := range work {
+		if err = s.db.QueryRowContext(ctx, "SELECT ots FROM tlog_anchors WHERE size=?", t.size).Scan(&t.raw); err != nil {
+			return err
+		}
 		file, err := ots.ParseFile(t.raw)
 		if err != nil {
 			errs = append(errs, err)

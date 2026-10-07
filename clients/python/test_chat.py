@@ -731,7 +731,10 @@ class LiveChatTests(unittest.TestCase):
         for line in lines:
             argv = shlex.split(line)
             who = "bob" if argv[2] == "witness" else "alice"
-            argv = [{**fill, "/secure/agent.json": str(self.keys[who])}.get(a, a) for a in argv]
+            # Placeholders fill whole arguments or the value of --flag=VALUE: a
+            # signature may start with "-", which only the = form carries.
+            values = {**fill, "/secure/agent.json": str(self.keys[who])}
+            argv = [a.split("=", 1)[0] + "=" + values.get(a.split("=", 1)[1], a.split("=", 1)[1]) if a.startswith("--") and "=" in a else values.get(a, a) for a in argv]
             out, err = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = memo.main(["--url", self.origin, *argv])

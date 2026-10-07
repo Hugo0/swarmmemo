@@ -235,7 +235,7 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 		if err != nil {
 			return nil, false, err
 		}
-		p, err := s.projectWork(ctx, tx, r.w, root, generation, now)
+		p, err := s.projectWork(ctx, tx, r.w, root, generation, now, workReadOptions{})
 		if err != nil {
 			return nil, false, err
 		}

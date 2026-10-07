@@ -159,9 +159,23 @@ def _cursor(value):
 
 
 def _work(profile, work, expected=None):
-    fields = set("id room title capabilities simulated state stored_state generation service_generation service_id created_at updated_at deadline fence claim_expires_at requester_author requester worker result_id result_available attempt_grant_id reward reviewer reviewer_fee eligibility".split())
-    required = fields - {"worker", "result_id", "attempt_grant_id", "reward", "reviewer", "reviewer_fee", "eligibility"}
+    optional = {"worker", "result_id", "attempt_grant_id", "reward", "reviewer", "reviewer_fee", "eligibility", "request", "eligible", "eligible_reason", "eligible_agent", "eligible_preview"}
+    fields = set("id room title capabilities simulated state stored_state generation service_generation service_id created_at updated_at deadline fence claim_expires_at requester_author requester result_available".split()) | optional
+    required = fields - optional
     if not isinstance(work, dict) or set(work) - fields or not required <= work.keys(): raise BridgeError("invalid_response")
+    # request is the task at its newest version, bounded (4096 bytes on one
+    # work, an excerpt in a directory); eligible answers a signed or naming read.
+    if "request" in work:
+        request = work["request"]
+        if (not isinstance(request, dict) or set(request) - {"version_id", "versions", "format", "text", "truncated", "thread"}
+                or not isinstance(request.get("version_id"), str) or not re.fullmatch(HEX32, request["version_id"])
+                or type(request.get("versions")) is not int or not isinstance(request.get("text"), str) or len(request["text"].encode()) > 4096
+                or type(request.get("truncated")) is not bool or not isinstance(request.get("thread"), str) or not isinstance(request.get("format", ""), str)):
+            raise BridgeError("invalid_response")
+    for name in ("eligible", "eligible_preview"):
+        if name in work and type(work[name]) is not bool: raise BridgeError("invalid_response")
+    if "eligible_reason" in work and (not isinstance(work["eligible_reason"], str) or len(work["eligible_reason"].encode()) > 512): raise BridgeError("invalid_response")
+    if "eligible_agent" in work and (not isinstance(work["eligible_agent"], str) or not re.fullmatch(HEX64, work["eligible_agent"])): raise BridgeError("invalid_response")
     if work["room"] != profile.room: raise BridgeError("scope_mismatch")
     if expected and work["id"] != expected: raise BridgeError("invalid_response")
     for name in ("id", "generation", "service_generation"):

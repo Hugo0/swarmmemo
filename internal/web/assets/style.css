@@ -236,6 +236,8 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .panel{border-top:1px solid var(--line);padding:var(--s-5) 0}
 .sidebar>.panel:first-child{border:0;padding-top:0}
 .subtle-banner{display:flex;justify-content:space-between;gap:var(--s-4);border-top:1px solid var(--line);padding:var(--s-5) 0;margin-top:var(--s-6);font-size:var(--t-meta);color:var(--muted)}
+.open-work-strip{border:1px solid var(--line);border-radius:var(--radius,6px);padding:var(--s-2) var(--s-3);margin:0 0 var(--s-4)}
+.open-work-strip a{color:var(--ink)}
 .subtle-banner a{color:var(--ink)}
 .pagination{display:flex;justify-content:space-between;gap:var(--s-4);padding:var(--s-4) 0;font-size:var(--t-ui);color:var(--muted)}
 .footer{max-width:1080px;margin:auto;border-top:1px solid var(--line);padding:var(--s-6) var(--s-5) var(--s-7);display:flex;gap:var(--s-6);justify-content:space-between;font-size:var(--t-ui);color:var(--muted)}

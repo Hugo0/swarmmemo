@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -231,6 +232,68 @@ func TestTransparencyCheckpointsAndProofs(t *testing.T) {
 	}
 }
 
+// A message's proof alone checks the text against the leaf's text_sha256 and
+// the leaf's signature over signed_payload; a hidden message's carries neither.
+func TestTransparencyProofCarriesSignedPayload(t *testing.T) {
+	s := openTest(t, Config{})
+	steppingClock(s)
+	author, postID, hiddenID := buildHistory(t, s)
+	anonID := run(t, s, Command{Operation: "post", Room: "lobby", Text: "anonymous <b>&</b>"}).Receipt.ID
+	if _, err := s.SignCheckpoint(testContext); err != nil {
+		t.Fatal(err)
+	}
+	proof, err := s.ReadLogProof(testContext, 0, postID, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leaf logLeaf
+	if err = json.Unmarshal([]byte(proof.Leaf.Data), &leaf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(proof.Leaf.Data, "first public post") || strings.Contains(proof.Leaf.Data, "signed_payload") {
+		t.Fatalf("the leaf itself changed: %s", proof.Leaf.Data)
+	}
+	if proof.Text == nil || *proof.Text != "first public post" || sha256Hex([]byte(*proof.Text)) != leaf.TextSHA256 {
+		t.Fatalf("proof text %v for leaf %s", proof.Text, proof.Leaf.Data)
+	}
+	var env struct {
+		Service string
+		Command Command
+	}
+	if err = json.Unmarshal([]byte(proof.SignedPayload), &env); err != nil {
+		t.Fatalf("signed_payload %q: %v", proof.SignedPayload, err)
+	}
+	pub, _ := base64.RawURLEncoding.DecodeString(env.Command.PublicKey)
+	sig, _ := base64.RawURLEncoding.DecodeString(leaf.Signature)
+	if !ed25519.Verify(pub, []byte(proof.SignedPayload), sig) || fingerprint(pub) != leaf.Agent || leaf.Agent != keyID(author) ||
+		env.Command.Text != *proof.Text || env.Command.Room != leaf.Room || env.Service != "swarmmemo.com" {
+		t.Fatalf("offline check fails: payload %s leaf %s", proof.SignedPayload, proof.Leaf.Data)
+	}
+	// By leaf index: the same.
+	byIndex, err := s.ReadLogProof(testContext, proof.Leaf.Index, "", -1)
+	if err != nil || byIndex.SignedPayload != proof.SignedPayload || byIndex.Text == nil {
+		t.Fatalf("by index: %+v %v", byIndex, err)
+	}
+	// Hidden: the leaf and its hide are proven, the text and payload withheld.
+	hidden, err := s.ReadLogProof(testContext, 0, hiddenID, -1)
+	if err != nil || hidden.Text != nil || hidden.SignedPayload != "" || len(hidden.Related) != 1 {
+		t.Fatalf("hidden message proof: %+v %v", hidden, err)
+	}
+	if raw, _ := json.Marshal(hidden); strings.Contains(string(raw), "spam link") {
+		t.Fatalf("hidden text leaked: %s", raw)
+	}
+	// Anonymous: text, no payload.
+	anon, err := s.ReadLogProof(testContext, 0, anonID, -1)
+	if err != nil || anon.Text == nil || *anon.Text != "anonymous <b>&</b>" || anon.SignedPayload != "" {
+		t.Fatalf("anonymous proof: %+v %v", anon, err)
+	}
+	// Other kinds of leaf carry neither.
+	first, err := s.ReadLogProof(testContext, 0, "", -1)
+	if err != nil || first.Leaf.Kind == "message" || first.Text != nil || first.SignedPayload != "" {
+		t.Fatalf("identity leaf proof: %+v %v", first, err)
+	}
+}
+
 // TestTransparencyBackfillEqualsIncremental opens a database the way
 // production has it before schema 15 (no log) and checks the one-time
 // backfill builds the very tree the live path built.
@@ -341,10 +404,13 @@ func TestTransparencyRecord(t *testing.T) {
 
 // fakeCalendar answers POST /digest with a pending attestation and, once
 // ready, GET /timestamp/... with a Bitcoin one.
-func fakeCalendar(t *testing.T, ready *atomic.Bool) *httptest.Server {
+func fakeCalendar(t *testing.T, ready *atomic.Bool, gets *atomic.Int64) *httptest.Server {
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var out bytes.Buffer
+		if r.Method == http.MethodGet && gets != nil {
+			gets.Add(1)
+		}
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/digest":
 			digest, _ := io.ReadAll(io.LimitReader(r.Body, 64))
@@ -376,7 +442,7 @@ func TestTransparencyAnchors(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ready atomic.Bool
-	cal := fakeCalendar(t, &ready)
+	cal := fakeCalendar(t, &ready, nil)
 	client := &ots.Client{Calendars: []string{cal.URL}}
 	if err := s.AnchorCheckpoints(testContext, client, 3); err != nil {
 		t.Fatal(err)
@@ -399,21 +465,46 @@ func TestTransparencyAnchors(t *testing.T) {
 	if err = s.AnchorCheckpoints(testContext, client, 3); err != nil {
 		t.Fatal(err)
 	}
-	// Too early to upgrade; then the calendar has committed.
+	// The timeline: signed, submitted, next check half an hour on.
+	submitted := anchors[0].SubmittedAt
+	if anchors[0].CheckpointAt != cp.CreatedAt || submitted < cp.CreatedAt || anchors[0].NextCheckAt != submitted+anchorFirstCheck || anchors[0].ConfirmedAt != 0 ||
+		anchors[0].OTS != fmt.Sprintf("/api/log/anchors/%d.ots", cp.Size) || anchors[0].Note != fmt.Sprintf("/api/log/checkpoint/note?size=%d", cp.Size) {
+		t.Fatalf("pending anchor timeline: %+v", anchors[0])
+	}
+	// A proof names the anchor of the first checkpoint covering its leaf.
+	proof, err := s.ReadLogProof(testContext, 0, "", -1)
+	if err != nil || proof.Anchor == nil || proof.Anchor.Size != cp.Size || proof.Anchor.State != "pending" {
+		t.Fatalf("proof anchor: %+v %v", proof.Anchor, err)
+	}
+	// Too early to upgrade, even though the calendar has committed: nothing
+	// is asked before the first check.
 	ready.Store(true)
+	at := func(sec int64) { s.now = func() time.Time { return time.Unix(submitted+sec, 0) } }
+	at(anchorFirstCheck - anchorCheckEarly - 1)
 	if err = s.UpgradeAnchors(testContext, client, 5); err != nil {
 		t.Fatal(err)
 	}
 	if a, _ := s.ReadLogAnchors(testContext, 0, 10); a[0].State != "pending" {
 		t.Fatal("upgraded before the wait")
 	}
-	s.now = func() time.Time { return time.Unix(testTime+3*3600, 0) }
+	at(anchorFirstCheck)
 	if err = s.UpgradeAnchors(testContext, client, 5); err != nil {
 		t.Fatal(err)
 	}
 	a, _ := s.ReadLogAnchors(testContext, 0, 10)
-	if a[0].State != "confirmed" || a[0].BitcoinHeight != 100 {
+	if a[0].State != "confirmed" || a[0].BitcoinHeight != 100 || a[0].ConfirmedAt != submitted+anchorFirstCheck || a[0].NextCheckAt != 0 {
 		t.Fatalf("after upgrade: %+v", a[0])
+	}
+	if proof, err = s.ReadLogProof(testContext, 0, "", -1); err != nil || proof.Anchor == nil || proof.Anchor.State != "confirmed" || proof.Anchor.BitcoinHeight != 100 || proof.Anchor.ConfirmedAt != a[0].ConfirmedAt {
+		t.Fatalf("proof anchor after upgrade: %+v %v", proof.Anchor, err)
+	}
+	// A confirmed anchor is never asked again.
+	at(anchorFirstCheck + 3600)
+	if err = s.UpgradeAnchors(testContext, client, 5); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := s.ReadLogAnchors(testContext, 0, 10); b[0].ConfirmedAt != a[0].ConfirmedAt {
+		t.Fatalf("a confirmed anchor was checked again: %+v", b[0])
 	}
 	raw, _ = s.ReadLogAnchorFile(testContext, a[0].Size)
 	if file, err = ots.ParseFile(raw); err != nil {
