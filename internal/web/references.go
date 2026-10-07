@@ -19,7 +19,10 @@ type ReferencePage struct {
 	References                           []references.Reference
 	Query, SourceFilter, NextURL, APIURL string
 	Detail, Unavailable, Missing         bool
-	Now                                  time.Time
+	// Unconfigured is the default-deny state: no source is enabled. It renders
+	// the empty directory (200, noindex), never the unavailable page.
+	Unconfigured bool
+	Now          time.Time
 }
 
 type referenceItemView struct {
@@ -33,6 +36,7 @@ type referenceView struct {
 	Sources                              []references.Source
 	Query, SourceFilter, NextURL, APIURL string
 	Detail, Unavailable, Missing         bool
+	Unconfigured                         bool
 }
 
 var errReferenceView = errors.New("invalid_reference_view")
@@ -95,6 +99,11 @@ func RenderReferences(w io.Writer, data ReferencePage) error {
 			p.Description = "This external reference is not available."
 		}
 		finishMetadata(&p, 404)
+		return templates.ExecuteTemplate(w, "page.html", p)
+	}
+	if data.Unconfigured {
+		p.NoIndex, v.Unconfigured, v.APIURL = true, true, "/api/references"
+		finishMetadata(&p, 200)
 		return templates.ExecuteTemplate(w, "page.html", p)
 	}
 	if data.Now.IsZero() || len(data.Sources) > 50 || len(data.References) > 50 ||

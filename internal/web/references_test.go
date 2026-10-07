@@ -199,3 +199,15 @@ func TestReferencesReturnsWriterFailure(t *testing.T) {
 		t.Fatal("writer failure not propagated")
 	}
 }
+
+func TestReferencesUnconfiguredIsAnEmptyDirectoryNotAnOutage(t *testing.T) {
+	data := referenceFixture()
+	data.Unconfigured = true
+	data.Query, data.Sources[0].Name, data.References[0].Title = "query-canary", "source-canary", "title-canary"
+	body := renderReferenceFixture(t, data)
+	if !strings.Contains(body, "No external references yet.") || strings.Contains(body, "temporarily unavailable") ||
+		!strings.Contains(body, `<meta name="robots" content="noindex">`) || strings.Contains(body, "canary") ||
+		strings.Contains(body, `id="reference-query"`) || !strings.Contains(body, "/api/references") {
+		t.Fatal("unconfigured references view is not the honest empty state")
+	}
+}

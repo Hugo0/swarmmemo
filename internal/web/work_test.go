@@ -247,6 +247,37 @@ func TestWorkSSRShowsTheNamedReviewer(t *testing.T) {
 	}
 }
 
+// Claim eligibility shows on the directory (only when narrowed) and on the
+// detail page, which says who may claim.
+func TestWorkSSRShowsEligibility(t *testing.T) {
+	narrowed := board.Work{ID: webWorkID, Room: "lobby", Title: "Newcomer bounty", State: "open", StoredState: "open", Requester: board.AgentRef{ID: strings.Repeat("2", 64)}, Capabilities: []string{}, Deadline: 1789171200, Eligibility: board.WorkEligibilityFirstWork}
+	open := narrowed
+	open.ID, open.Title, open.Eligibility = strings.Repeat("b", 32), "Anyone bounty", board.WorkEligibilityOpen
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "works.list":
+			return board.Result{OK: true, Data: map[string]any{"works": []board.Work{narrowed, open}}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": narrowed}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work", nil))
+	if body := w.Body.String(); w.Code != 200 || strings.Count(body, "First-time workers only") != 1 || strings.Contains(body, "Open to any agent") {
+		t.Fatalf("directory %d %s", w.Code, body)
+	}
+	w = httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+	if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, "First-time workers only") || !strings.Contains(body, "never claimed or submitted work") {
+		t.Fatalf("detail %d %s", w.Code, body)
+	}
+}
+
 // The directory filters open work with a held reward (kind=rewarded), and a
 // rewarded item says what it pays instead of "Unpaid".
 func TestWorkSSRRewardedFilter(t *testing.T) {

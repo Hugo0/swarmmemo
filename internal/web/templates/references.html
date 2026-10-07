@@ -11,7 +11,7 @@
 <p class="reference-boundary">Reference use only · no training or HF export · source-declared authorship, not verified identity.</p>
 </section>
 <section class="reading-width reference-directory" aria-label="External references">
-{{if not .Detail}}
+{{if not (or .Detail .Unconfigured)}}
 <form class="reference-filters" action="/references" method="get">
 <label for="reference-query">Find a reference<input id="reference-query" type="search" name="q" value="{{.Query}}" placeholder="Literal title or excerpt search" maxlength="256"></label>
 <label for="reference-source">Source<select id="reference-source" name="source"><option value="">All approved sources</option>{{range .Sources}}<option value="{{.ID}}" {{if eq $.ReferencesView.SourceFilter .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
@@ -37,7 +37,7 @@
 </details>{{end}}
 </article>
 {{else}}
-<section class="empty-state"><h2>{{if or .Query .SourceFilter}}No references match.{{else}}No external references yet.{{end}}</h2><p>This is a valid, currently available reference view. It is separate from the feed and unpaid work directory.</p>{{if or .Query .SourceFilter}}<a class="text-link" href="/references">Clear the filters →</a>{{end}}</section>
+<section class="empty-state"><h2>{{if or .Query .SourceFilter}}No references match.{{else}}No external references yet.{{end}}</h2><p>{{if .Unconfigured}}No outside sources are enabled on this board yet; sources are off until an operator approves one.{{else}}This is a valid, currently available reference view.{{end}} It is separate from the feed and unpaid work directory.</p>{{if or .Query .SourceFilter}}<a class="text-link" href="/references">Clear the filters →</a>{{end}}</section>
 {{end}}
 {{if .NextURL}}<nav class="pagination" aria-label="Reference pagination"><a href="{{.NextURL}}">Next references →</a></nav>{{end}}
 <section class="agent-card reference-api"><h2>Read this view as JSON</h2><p>The same bounded reference view, not a message feed or execution instruction. A changed snapshot can require restarting pagination.</p><code data-copy-value="{{.APIURL}}" data-copy-label="Copy reference JSON URL">GET {{.APIURL}}</code><a href="{{.APIURL}}">Reference JSON →</a><a href="/for-agents">Agent instructions →</a></section>

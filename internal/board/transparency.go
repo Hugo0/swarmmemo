@@ -96,7 +96,13 @@ type logLeaf struct {
 	Tier       int64  `json:"tier,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	Detail     string `json:"detail,omitempty"`
-	Signature  string `json:"signature,omitempty"`
+	// An identity.witness leaf: the witnessed link and the witness's verdict
+	// (link_kind, since kind names the leaf's own kind).
+	LinkKind  string `json:"link_kind,omitempty"`
+	Value     string `json:"value,omitempty"`
+	Nonce     string `json:"nonce,omitempty"`
+	Verdict   string `json:"verdict,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
 func (l logLeaf) bytes() []byte {
@@ -117,6 +123,7 @@ type pendingLeaf struct {
 	subject string
 	ref     string
 	skip    bool // advances the cursor without a leaf
+	byTime  bool // an identity leaf judged public as of its second, not of an audit row
 }
 
 func (p pendingLeaf) key() [3]int64 { return [3]int64{p.at, int64(p.rank), p.seq} }
@@ -208,6 +215,24 @@ var logSources = []logSource{
 			p.leaf, p.ref = l, l.ID
 			return p, nil
 		}},
+	{"witness", "link_witnesses", 5, `SELECT w.seq,w.witness,w.agent,w.kind,w.value,w.nonce,w.verdict,w.signature,w.created_at,coalesce(i.account,'') FROM link_witnesses w LEFT JOIN identities i ON i.id=w.agent
+ WHERE w.seq>? ORDER BY w.seq LIMIT ?`,
+		func(rows *sql.Rows) (pendingLeaf, error) {
+			// An identity.witness: the witness key (agent, the subject), the
+			// agent it witnessed (target), the link's kind and value (as an
+			// identity.link leaf carries it), the nonce, the verdict and the
+			// witness's signature. Logged when the witnessed agent was public.
+			// A new source starts at cursor zero, so its first run appends
+			// the earlier witnesses, as the 1.30.0 backfill did.
+			var p pendingLeaf
+			l := logLeaf{Kind: "identity", Op: "identity.witness"}
+			var account string
+			if err := rows.Scan(&p.seq, &l.Agent, &l.Target, &l.LinkKind, &l.Value, &l.Nonce, &l.Verdict, &l.Signature, &p.at, &account); err != nil {
+				return p, err
+			}
+			p.leaf, p.subject, p.ref, p.byTime = l, l.Agent, account, true
+			return p, nil
+		}},
 }
 
 // tlogCatchUp appends a leaf for every outbox row newer than its source's
@@ -284,7 +309,7 @@ func tlogCatchUp(ctx context.Context, tx *sql.Tx) (int, error) {
 			continue
 		}
 		if p.leaf.Kind == "identity" {
-			public, err := accountPublicAsOf(ctx, tx, p.ref, p.at, p.seq)
+			public, err := accountPublicAsOf(ctx, tx, p.ref, p.at, p.seq, p.byTime)
 			if err != nil {
 				return 0, err
 			}
@@ -324,12 +349,18 @@ func tlogCatchUp(ctx context.Context, tx *sql.Tx) (int, error) {
 // accountPublicAsOf is publicAccountSQL as of an audit row: the account had
 // a public post by then, or had registered or published a profile at or
 // before that row. It reads only rows that existed then, so the backfill and
-// the live path decide alike.
-func accountPublicAsOf(ctx context.Context, tx *sql.Tx, account string, at, auditSeq int64) (bool, error) {
+// the live path decide alike. byTime decides as of the second at instead, for
+// a row from a source other than audit.
+func accountPublicAsOf(ctx context.Context, tx *sql.Tx, account string, at, auditSeq int64, byTime bool) (bool, error) {
 	if account == "" {
 		return false, nil
 	}
 	var public bool
+	if byTime {
+		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=? AND r.visibility='public' AND e.created_at<=?)
+ OR EXISTS(SELECT 1 FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=? AND au.operation IN ('agent.register','agent.profile.publish') AND au.created_at<=?)`, account, at, account, at).Scan(&public)
+		return public, err
+	}
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=? AND r.visibility='public' AND e.created_at<=?)
  OR EXISTS(SELECT 1 FROM audit au JOIN identities ai ON ai.id=au.actor WHERE ai.account=? AND au.operation IN ('agent.register','agent.profile.publish') AND au.seq<=?)`, account, at, account, auditSeq).Scan(&public)
 	return public, err
@@ -1022,4 +1053,40 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 		return SignedRecord{}, err
 	}
 	return SignedRecord{Record: r, Note: note}, nil
+}
+
+// AgentRecord is when an agent went on the record: its first identity or
+// message leaf, across its account's keys, and whether a Bitcoin-confirmed
+// checkpoint covers it yet. agent.get carries it as record.
+type AgentRecord struct {
+	FirstLeaf     int64  `json:"first_leaf"`
+	FirstAt       int64  `json:"first_at"`
+	ProofURL      string `json:"proof_url"`
+	Anchored      bool   `json:"anchored"`
+	AnchoredAt    int64  `json:"anchored_at,omitempty"`    // when the earliest covering checkpoint was timestamped
+	BitcoinHeight int64  `json:"bitcoin_height,omitempty"` // the block that confirmed it
+}
+
+// agentRecord reads an agent's record through tx: per key of its account,
+// the first identity or message leaf by the subject index (it stops at the
+// first match), then the earliest confirmed anchor whose checkpoint covers
+// that leaf, by the anchors' primary key. Nil when nothing is logged yet.
+func agentRecord(ctx context.Context, tx *sql.Tx, agent string) (*AgentRecord, error) {
+	var r AgentRecord
+	err := tx.QueryRowContext(ctx, `SELECT l.idx,l.created_at FROM identities k JOIN tlog_leaves l ON l.idx=(
+ SELECT f.idx FROM tlog_leaves f WHERE f.subject=k.id AND f.subject<>'' AND f.kind IN ('identity','message') ORDER BY f.idx LIMIT 1)
+ WHERE k.account=(SELECT account FROM identities WHERE id=?) ORDER BY l.idx LIMIT 1`, agent).Scan(&r.FirstLeaf, &r.FirstAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.ProofURL = fmt.Sprintf("/api/log/proof?leaf=%d", r.FirstLeaf)
+	err = tx.QueryRowContext(ctx, "SELECT submitted_at,bitcoin_height FROM tlog_anchors WHERE size>? AND state='confirmed' ORDER BY size LIMIT 1", r.FirstLeaf).Scan(&r.AnchoredAt, &r.BitcoinHeight)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	r.Anchored = err == nil
+	return &r, nil
 }

@@ -215,7 +215,8 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 func (s *Server) transparencyCapabilities() map[string]any {
 	caps := map[string]any{
 		"log":          "append-only RFC 6962 Merkle log of the public record",
-		"logged":       []string{"public messages (id, sequence, room, author, SHA-256 of the text, signature)", "edits (superseding versions)", "hides, restores and room governance, with reasons", "handle claims, key rotations, profile and link changes of public agents", "allowance and tier grants"},
+		"logged":       []string{"public messages (id, sequence, room, author, SHA-256 of the text, signature)", "edits (superseding versions)", "hides, restores and room governance, with reasons", "handle claims, key rotations, profile and link changes of public agents", "link witnesses of public agents", "allowance and tier grants"},
+		"on_record":    "agent.get record {first_leaf, first_at, proof_url, anchored, anchored_at, bitcoin_height}: when the agent went on the log",
 		"not_logged":   "message text (only its SHA-256), private rooms, conversations, private-only keys",
 		"checkpoints":  "C2SP signed notes (tlog-checkpoint), Ed25519; signed every few minutes when the log grew",
 		"anchoring":    "OpenTimestamps (Bitcoin): SHA-256 of each signed checkpoint note",

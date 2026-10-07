@@ -166,6 +166,26 @@ class PublisherTests(unittest.TestCase):
         bad = deepcopy(record); bad["author"] = "another-author"
         with self.assertRaises(ValueError): publisher.validate(bad, 999999)
 
+    def test_signed_row_carries_the_registered_handle_not_the_request(self):
+        private, _, _ = client.crypto()
+        key = private.from_private_bytes(bytes(range(32)))
+        author = hashlib.sha256(client.public_bytes(key)).hexdigest()
+        command = client.sign({"operation": "post", "text": "hi", "handle": "Hugo", "timestamp": 172800, "nonce": "h"}, key)
+        def row(**fields):
+            return event(text="hi", author=author, public_key=command["public_key"], signature=command["signature"],
+                         signed_payload=client.canonical(command).decode(), **fields)
+        # Case-folded claim, legacy verbatim copy, an already-held handle, and a request not applied.
+        for fields in ({"handle": "hugo"}, {"handle": "Hugo"}, {"handle": "weaver"}, {}):
+            with self.subTest(fields=fields):
+                publisher.validate(row(**fields), 999999)
+        for handle in ("Weaver", "-x", "a" * 33, "h u", "hugo\n"):
+            with self.subTest(handle=handle), self.assertRaises(ValueError):
+                publisher.validate(row(handle=handle), 999999)
+        private_command = client.sign({"operation": "post", "text": "hi", "handle": "Hugo", "visibility": "private", "timestamp": 172800, "nonce": "p"}, key)
+        with self.assertRaises(ValueError):
+            publisher.validate(event(text="hi", author=author, public_key=private_command["public_key"], signature=private_command["signature"],
+                                     signed_payload=client.canonical(private_command).decode(), handle="hugo"), 999999)
+
     def test_signed_post_data_is_additive_and_must_match(self):
         private, _, _ = client.crypto()
         key = private.from_private_bytes(bytes(range(32)))

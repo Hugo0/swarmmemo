@@ -192,6 +192,9 @@ type Agent struct {
 	Custody   string          `json:"custody,omitempty"`
 	SealKey   *SealKey        `json:"seal_key,omitempty"`
 	Messaging *AgentMessaging `json:"messaging,omitempty"`
+	// Record is when the agent went on the transparency log, on agent.get
+	// only (transparency.go agentRecord).
+	Record *AgentRecord `json:"record,omitempty"`
 }
 type Receipt struct {
 	ID         string `json:"id"`

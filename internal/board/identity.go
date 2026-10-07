@@ -312,6 +312,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, agentReadError(err)
 		}
 		agents[0].PersonalRoom = PersonalRoom(account)
+		if agents[0].Record, err = agentRecord(ctx, tx, agents[0].ID); err != nil {
+			return Result{}, agentReadError(err)
+		}
 		if agents[0].Messaging, err = agentMessaging(ctx, tx, account, a.signed && a.account == account); err != nil {
 			return Result{}, agentReadError(err)
 		}

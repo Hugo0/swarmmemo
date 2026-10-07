@@ -66,6 +66,9 @@ type Work struct {
 	// instead of the requester; ReviewerFee is the credit held for it.
 	Reviewer    *AgentRef   `json:"reviewer,omitempty"`
 	ReviewerFee *WorkReward `json:"reviewer_fee,omitempty"`
+	// Eligibility is who may claim the work: open (anyone), or one of the
+	// rules in WorkEligibilities, checked on work.claim.
+	Eligibility string `json:"eligibility"`
 }
 
 type WorkAck struct {
@@ -100,6 +103,7 @@ type workData struct {
 	Reward            int64
 	Reviewer          string
 	ReviewerFee       int64
+	Eligibility       string
 }
 
 func parseWorkData(raw string, create bool) (workData, error) {
@@ -157,6 +161,11 @@ func parseWorkData(raw string, create bool) (workData, error) {
 				return invalid()
 			}
 			err = json.Unmarshal(value, &d.ReviewerFee)
+		case "eligibility":
+			if !create {
+				return invalid()
+			}
+			err = json.Unmarshal(value, &d.Eligibility)
 		default:
 			return invalid()
 		}
@@ -173,7 +182,7 @@ func parseWorkData(raw string, create bool) (workData, error) {
 	want := 2
 	if create {
 		want = 4
-		for _, optional := range []string{"reward", "reviewer", "reviewer_fee"} {
+		for _, optional := range []string{"reward", "reviewer", "reviewer_fee", "eligibility"} {
 			if seen[optional] {
 				want++
 			}
@@ -184,6 +193,9 @@ func parseWorkData(raw string, create bool) (workData, error) {
 	}
 	if seen["reviewer"] && !fingerprintRE.MatchString(d.Reviewer) {
 		return invalid()
+	}
+	if seen["eligibility"] && !validWorkEligibility(d.Eligibility) {
+		return workData{}, invalidWorkEligibility()
 	}
 	if create {
 		if strings.TrimSpace(d.Title) == "" || len(d.Title) > 160 || strings.ContainsRune(d.Title, 0) || d.Capabilities == nil || len(d.Capabilities) > 16 {
@@ -215,12 +227,13 @@ type workRow struct {
 	Sequence                                      int64
 	AttemptGrantID                                string
 	Reviewer                                      string // the reviewer's account, or ''
+	Eligibility                                   string // '' is open
 }
 
-const workColumns = `w.id,w.requester,w.title,w.capabilities,w.state,w.generation,w.created_at,w.updated_at,w.deadline,w.fence,w.worker,w.claim_expires_at,w.result_id,w.history_seq,w.attempt_grant_id,w.reviewer`
+const workColumns = `w.id,w.requester,w.title,w.capabilities,w.state,w.generation,w.created_at,w.updated_at,w.deadline,w.fence,w.worker,w.claim_expires_at,w.result_id,w.history_seq,w.attempt_grant_id,w.reviewer,w.eligibility`
 
 func (w *workRow) fields() []any {
-	return []any{&w.ID, &w.Requester, &w.Title, &w.Caps, &w.State, &w.Generation, &w.Created, &w.Updated, &w.Deadline, &w.Fence, &w.Worker, &w.ClaimExpires, &w.Result, &w.Sequence, &w.AttemptGrantID, &w.Reviewer}
+	return []any{&w.ID, &w.Requester, &w.Title, &w.Caps, &w.State, &w.Generation, &w.Created, &w.Updated, &w.Deadline, &w.Fence, &w.Worker, &w.ClaimExpires, &w.Result, &w.Sequence, &w.AttemptGrantID, &w.Reviewer, &w.Eligibility}
 }
 
 func scanWork(scan interface{ Scan(...any) error }) (workRow, error) {
@@ -333,6 +346,9 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		caps, _ := json.Marshal(d.Capabilities)
 		w = workRow{ID: c.MessageID, Requester: a.account, Title: d.Title, Caps: string(caps), State: "open", Generation: generation, Created: now, Updated: now, Deadline: now + ttl}
+		if d.Eligibility != WorkEligibilityOpen {
+			w.Eligibility = d.Eligibility
+		}
 		if d.Reviewer != "" {
 			if w.Reviewer, err = workReviewer(ctx, tx, a, root.Room, d.Reviewer); err != nil {
 				return Result{}, err
@@ -378,6 +394,9 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 			if a.account == w.Reviewer {
 				return Result{}, problem(403, "work_forbidden", "The reviewer cannot claim work it reviews.")
+			}
+			if err = workClaimEligible(ctx, tx, w.Eligibility, a.account, now); err != nil {
+				return Result{}, err
 			}
 		case "work.renew", "work.submit":
 			if a.account != w.Worker {
@@ -467,7 +486,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, err
 	}
 	w.Sequence++
-	_, err = tx.ExecContext(ctx, `INSERT INTO works(id,requester,title,capabilities,state,generation,created_at,updated_at,deadline,fence,worker,claim_expires_at,result_id,history_seq,reviewer) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,generation=excluded.generation,updated_at=excluded.updated_at,fence=excluded.fence,worker=excluded.worker,claim_expires_at=excluded.claim_expires_at,result_id=excluded.result_id,history_seq=excluded.history_seq`, w.ID, w.Requester, w.Title, w.Caps, w.State, w.Generation, w.Created, w.Updated, w.Deadline, w.Fence, w.Worker, w.ClaimExpires, w.Result, w.Sequence, w.Reviewer)
+	_, err = tx.ExecContext(ctx, `INSERT INTO works(id,requester,title,capabilities,state,generation,created_at,updated_at,deadline,fence,worker,claim_expires_at,result_id,history_seq,reviewer,eligibility) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,generation=excluded.generation,updated_at=excluded.updated_at,fence=excluded.fence,worker=excluded.worker,claim_expires_at=excluded.claim_expires_at,result_id=excluded.result_id,history_seq=excluded.history_seq`, w.ID, w.Requester, w.Title, w.Caps, w.State, w.Generation, w.Created, w.Updated, w.Deadline, w.Fence, w.Worker, w.ClaimExpires, w.Result, w.Sequence, w.Reviewer, w.Eligibility)
 	if err != nil {
 		return Result{}, err
 	}
@@ -531,6 +550,10 @@ func currentWorkIdentity(ctx context.Context, tx *sql.Tx, account string) (Agent
 func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root workRoot, generation string, now int64) (Work, error) {
 	p := Work{ID: w.ID, Room: root.Room, Title: w.Title, Simulated: root.Kind == "simulation", StoredState: w.State, Generation: w.Generation, ServiceGeneration: generation, ServiceID: s.config.ServiceID, CreatedAt: w.Created, UpdatedAt: w.Updated, Deadline: w.Deadline, Fence: w.Fence, ClaimExpiresAt: w.ClaimExpires, RequesterAuthor: root.Author}
 	p.AttemptGrantID = w.AttemptGrantID
+	p.Eligibility = w.Eligibility
+	if p.Eligibility == "" {
+		p.Eligibility = WorkEligibilityOpen
+	}
 	var err error
 	if err = json.Unmarshal([]byte(w.Caps), &p.Capabilities); err != nil {
 		return Work{}, err

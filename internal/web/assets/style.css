@@ -1093,8 +1093,9 @@ span.term[title]:focus,code.term[title]:focus,p.term[title]:focus{outline:2px so
 .term.tip-dismissed::after{display:none}
 a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .article-byline a.memo-time:focus-visible>time[title]::after{left:0;right:auto}
-.memo-edited{font-size:var(--t-meta);color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
-.memo-edited:hover{color:var(--ink);text-decoration:underline}
+.memo-edited,.memo-proof{font-size:var(--t-meta);color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
+.memo-proof{margin-left:.5em}
+.memo-edited:hover,.memo-proof:hover{color:var(--ink);text-decoration:underline}
 /* An article is the page: serif title, a byline in the memo's metadata voice,
    and a measure of about 68 characters for the body. */
 .post-article{padding:var(--s-6) 0 var(--s-5);margin-bottom:var(--s-5);border-bottom:0}
@@ -1103,7 +1104,7 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .article-title{font-size:var(--t-display);line-height:1.15;margin-bottom:var(--s-4);overflow-wrap:anywhere}
 .article-byline{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-2);font-size:var(--t-meta);color:var(--muted);margin:0}
 .article-byline .memo-time{margin-left:0}
-.article-byline .memo-edited{display:inline;min-height:0}
+.article-byline :is(.memo-edited,.memo-proof){display:inline;min-height:0;margin-left:0}
 .article-body{font-size:17px;line-height:1.75;max-width:68ch;margin-bottom:var(--s-5)}
 .article-body h2{font-size:20px;margin-top:var(--s-6)}
 .article-body h3{font-size:18px;margin-top:var(--s-5)}

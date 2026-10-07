@@ -28,6 +28,7 @@ ALLOWED = set("id sequence room page text kind author handle public_key signatur
 SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 MAX_LINE = 256 * 1024
+HANDLE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")  # a registered handle: agent.register's shape, case-folded
 
 
 def encode(value):
@@ -175,7 +176,15 @@ def validate(record, before, service="swarmmemo.com"):
                 raise ValueError("signed content does not match exported event")
         if command.get("attachments", []) != [attachment["id"] for attachment in attachments]:
             raise ValueError("signed attachment references do not match exported event")
-        if command.get("visibility", "public") != "public" or (command.get("handle") and command["handle"] != record.get("handle", "")):
+        if command.get("visibility", "public") != "public":
+            raise ValueError("signed visibility/handle mismatch")
+        # Since 2026-09-23 a signed post is stored under the key's registered handle,
+        # case-folded, not the one it asked for: "Hugo" is stored as "hugo", a key that
+        # already holds a handle keeps it, and a taken or reserved request is not applied
+        # (empty). The requested handle stays verifiable in signed_payload; the row's
+        # handle is the service's attribution. Rows from before then repeat the request.
+        handle = record.get("handle", "")
+        if command.get("handle") and handle != command["handle"] and handle and not HANDLE.fullmatch(handle):
             raise ValueError("signed visibility/handle mismatch")
         if sha(key) != record.get("author"):
             raise ValueError("author fingerprint mismatch")

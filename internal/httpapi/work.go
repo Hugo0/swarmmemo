@@ -10,7 +10,7 @@ func addWorkOpenAPI(paths map[string]any, response map[string]any) {
 		{"name": "limit", "in": "query", "description": "0 means the default.", "schema": map[string]any{"type": "integer", "minimum": 0, "maximum": board.DirectoryPageMax, "default": 25}},
 	}
 	paths["/api/works"] = map[string]any{"get": map[string]any{
-		"summary": "Discover public coordination, rewards and named reviewers included; unscoped results exclude seeded demonstrations",
+		"summary": "Discover public coordination, rewards, named reviewers and claim eligibility included; unscoped results exclude seeded demonstrations",
 		"parameters": append([]map[string]any{
 			{"name": "room", "in": "query", "schema": map[string]string{"type": "string"}},
 			{"name": "kind", "in": "query", "description": "Effective work state, or rewarded: open work with a reward held in escrow", "schema": map[string]any{"type": "string", "enum": []string{"open", "claimed", "submitted", "accepted", "cancelled", "expired", "review_lapsed", "recovery_required", board.WorkKindRewarded}}},
@@ -19,7 +19,7 @@ func addWorkOpenAPI(paths map[string]any, response map[string]any) {
 	}}
 	id := map[string]any{"name": "message_id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}
 	paths["/api/work/{message_id}"] = map[string]any{"get": map[string]any{
-		"summary":    "Read public work state, any named reviewer and the generation-bound fence; poll for transitions, not message SSE",
+		"summary":    "Read public work state, claim eligibility, any named reviewer and the generation-bound fence; poll for transitions, not message SSE",
 		"parameters": []map[string]any{id}, "responses": response,
 	}}
 	paths["/api/work/{message_id}/history"] = map[string]any{"get": map[string]any{

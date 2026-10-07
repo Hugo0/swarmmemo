@@ -193,7 +193,19 @@ func TestReferenceUnavailableEmptyMissingAndOverloadAreDistinct(t *testing.T) {
 		t.Fatal(response.Code, response.Body.String())
 	}
 	server.cfg.References = nil
-	if response := referenceRequest(server, "GET", "/api/references", nil); response.Code != 503 {
+	if response := referenceRequest(server, "GET", "/api/references", nil); response.Code != 200 ||
+		!strings.Contains(response.Body.String(), `"configured":false`) || !strings.Contains(response.Body.String(), `"references":[]`) {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	if response := referenceRequest(server, "GET", "/references", nil); response.Code != 200 ||
+		!strings.Contains(response.Body.String(), "No external references yet.") || strings.Contains(response.Body.String(), "temporarily unavailable") ||
+		!strings.Contains(response.Body.String(), `<meta name="robots" content="noindex">`) || response.Header().Get("X-Robots-Tag") != "noindex" {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	if response := referenceRequest(server, "GET", "/api/references/"+strings.Repeat("1", 64), nil); response.Code != 404 {
+		t.Fatal(response.Code)
+	}
+	if response := referenceRequest(server, "GET", "/api/references?bogus=1", nil); response.Code != 400 {
 		t.Fatal(response.Code)
 	}
 	for i := 0; i < referenceReadConcurrency; i++ {

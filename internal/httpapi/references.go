@@ -216,6 +216,29 @@ func referenceFailure(w http.ResponseWriter, r *http.Request, status int, code s
 	sendReferenceBytes(w, r, status, buffer.Bytes(), false)
 }
 
+// referenceUnconfigured answers when no reader is configured: sources are
+// default-deny, so this is a valid empty directory, not an outage.
+func (s *Server) referenceUnconfigured(w http.ResponseWriter, r *http.Request, html, detail bool) {
+	if detail {
+		referenceFailure(w, r, 404, "reference_not_found", html)
+		return
+	}
+	var buffer referenceBuffer
+	var err error
+	if html {
+		err = web.RenderReferences(&buffer, web.ReferencePage{Unconfigured: true, Now: time.Now()})
+		w.Header().Set("X-Robots-Tag", "noindex")
+	} else {
+		err = json.NewEncoder(&buffer).Encode(map[string]any{"ok": true, "configured": false,
+			"sources": []references.Source{}, "references": []references.Reference{}, "next_cursor": "", "policy": referencePolicy()})
+	}
+	if err != nil {
+		referenceFailure(w, r, 503, "references_unavailable", html)
+		return
+	}
+	sendReferenceBytes(w, r, 200, buffer.Bytes(), html)
+}
+
 func (s *Server) referenceRead(w http.ResponseWriter, r *http.Request) {
 	html := !strings.HasPrefix(r.URL.Path, "/api/")
 	if !readMethod(r) {
@@ -255,7 +278,7 @@ func (s *Server) referenceRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.cfg.References == nil {
-		referenceFailure(w, r, 503, "references_unavailable", html)
+		s.referenceUnconfigured(w, r, html, detail)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -338,7 +361,7 @@ func (s *Server) referenceRead(w http.ResponseWriter, r *http.Request) {
 		err = web.RenderReferences(&buffer, web.ReferencePage{Sources: sources, References: rows,
 			Query: query.query, SourceFilter: query.source, APIURL: apiURL, NextURL: nextURL, Detail: detail, Now: time.Now()})
 	} else {
-		result := map[string]any{"ok": true, "snapshot_sha256": snapshot.Digest,
+		result := map[string]any{"ok": true, "configured": true, "snapshot_sha256": snapshot.Digest,
 			"generated_at": snapshot.GeneratedAt, "valid_until": snapshot.ValidUntil,
 			"sources": sources, "policy": referencePolicy()}
 		if detail {
@@ -364,7 +387,7 @@ var _ io.Writer = (*referenceBuffer)(nil)
 func addReferenceOpenAPI(paths map[string]any) {
 	response := map[string]any{}
 	for code, description := range map[string]string{
-		"200": "Current reference-only projection; never native identities, jobs or HF-eligible content",
+		"200": "Current reference-only projection, or an empty list with configured=false when no source is enabled; never native identities, jobs or HF-eligible content",
 		"400": "Invalid or ambiguous query/cursor", "404": "Reference unavailable",
 		"409": "Snapshot changed; restart pagination without the old cursor",
 		"429": "Read capacity exhausted; respect Retry-After",

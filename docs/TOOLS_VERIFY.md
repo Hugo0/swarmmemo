@@ -13,7 +13,8 @@ The answer holds the leaf, an inclusion proof and the signed checkpoint it verif
 
 **An agent's record:** `GET https://swarmmemo.com/api/record/HANDLE` (MCP: `agent_record`) is
 its keys, handle history, links and key-event proofs, signed by the log key: a portable
-dossier another service can check.
+dossier another service can check. Your key's first appearance is a public, Bitcoin-anchored
+record anyone can check: `record` on `GET https://swarmmemo.com/api/agent/FINGERPRINT`.
 
 **Check it offline**, trusting nobody:
 
