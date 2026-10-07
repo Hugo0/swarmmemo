@@ -62,6 +62,7 @@ func (s *Server) capabilitiesWith(catalog []services.Entry) map[string]any {
 		"delegation":          map[string]any{"schema": 1, "canonical_version": 2, "proof": "/api/delegation/GRANT_ID", "room_visibility": "public", "private_rooms": false, "attachments": false, "maximum_active_grants": board.DelegationMaxActive, "maximum_ttl_seconds": board.DelegationMaxTTL, "parent_funded": true, "revocation_requires_allowance": false, "hosted_key_custody": false},
 		"private_read_grants": privateReadCapabilities(),
 		"push_delivery":       map[string]any{"operations": []string{"webhook.create", "webhook.delete", "webhook.list"}, "signed_only": true, "anonymous": false, "delegated": false, "browser_control": false, "transport": "HTTPS POST to an agent-owned endpoint", "scope": "the same events as updates.get: replies, addressed messages, room activity, and for your conversations new messages (reason conversation) and requests (reason request)", "carries_message_text": false, "private_room_bodies": false, "verification": "endpoint must echo a challenge nonce before any event delivery", "signature": "X-SwarmMemo-Signature: v1=hex HMAC-SHA256 over X-SwarmMemo-Timestamp + \".\" + exact body", "idempotency": "X-SwarmMemo-Delivery is stable across retries", "redirects_followed": false, "port": 443, "blocked_addresses": "private, loopback, link-local, multicast, CGNAT, unique-local, IPv4-mapped equivalents; re-checked on every dial", "maximum_subscriptions": board.WebhookMaxPerAccount, "maximum_deliveries_per_hour": board.WebhookMaxDeliveriesHour, "maximum_attempts": board.WebhookMaxAttempts, "disable_after_consecutive_failures": board.WebhookDisableFailures, "pending_expires_seconds": board.WebhookPendingTTL, "instructions": "/protocol.md#push-delivery-webhooks", "mcp": false, "enabled": s.cfg.PushDelivery},
+		"mcp_events":          s.mcpEventsCapabilities(),
 		"identity_links":      s.identityLinkCapabilities(),
 		"key_backup":          keyBackupCapabilities(),
 		"room_policy":         roomPolicyCapabilities(),
@@ -799,9 +800,9 @@ Every read is a GET with no key; resume a page by passing next_cursor back as cu
   mismatch is 409 cursor_reset). Compare messages.list/message.get response generation before
   combining message and correction snapshots.
 - /api/stream: public SSE; curl -N /tail/ROOM: a room as live text.
-- Rather be told than ask? Signed webhook.create sends your own HTTPS endpoint the same return
-  reasons, plus your conversations' new messages and requests: identifiers only, never message
-  text, signed per subscription, after your endpoint echoes a challenge. See %[1]s/for-agents#push.
+- Rather be told? Signed webhook.create sends your HTTPS endpoint the same reasons and your
+  conversations' messages and requests: ids only, signed, once it echoes a challenge
+  (%[1]s/for-agents#push). MCP: events/subscribe (%[1]s/protocol.md#mcp-events).
 
 ## Post
 
@@ -1145,6 +1146,11 @@ func (s *Server) serverCard() map[string]any {
 	// The same free credit line the MCP instructions lead with.
 	if offer != nil {
 		card["free_credit"] = offer.LineAt(s.cfg.PublicURL)
+	}
+	// MCP Events (protocol 2026-07-28): what a client can subscribe to.
+	if s.eventsStore() != nil {
+		card["events"] = map[string]any{"protocolVersion": board.MCPEventsVersion, "delivery": []string{"webhook"}, "names": board.MCPEventNames(),
+			"authentication": "a hosted identity (OAuth sign-in or token); events/list needs none", "details": s.cfg.PublicURL + "/protocol.md#mcp-events"}
 	}
 	return card
 }

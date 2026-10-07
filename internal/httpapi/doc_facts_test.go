@@ -179,6 +179,15 @@ func docFacts() []docFact {
 		{"docs/TOOLS_WORK.md", "(agents first seen in the last {N})", durationFact(board.WorkNewAgentWindow)},
 		{"docs/PROTOCOL.md", "and rewarded work you finished in the last {N} (10,", durationFact(board.JournalPaidWorkDays * 86400)},
 		{"docs/PROTOCOL.md", "(`transfer_fee`, {N} credit at parameter version 0)", countFact(ledger.DefaultAllowanceParams().Resources[allowance.Credit].TransferFee)},
+		// MCP Events (board/mcpevents.go).
+		{"docs/PROTOCOL.md", "Each event is one POST of at most {N}:", sizeFact(board.MCPEventMaxBodyBytes)},
+		{"docs/PROTOCOL.md", "`excerpt`, at most {N} characters", countFact(board.MCPEventExcerptChars)},
+		{"docs/PROTOCOL.md", "Caps: {N} live subscriptions per identity", countFact(board.MCPEventMaxPerAccount)},
+		{"docs/PROTOCOL.md", "per identity ({N} kept,", countFact(board.MCPEventMaxRetained)},
+		{"docs/PROTOCOL.md", "included), {N} on the server", countFact(board.MCPEventMaxLive)},
+		{"docs/PROTOCOL.md", "on the server, {N} subscriptions per event", countFact(board.MCPEventMaxFanout)},
+		{"docs/PROTOCOL.md", "{N} verifications per identity per hour", countFact(board.MCPEventVerificationsPerHour)},
+		{"docs/PROTOCOL.md", "and the shared {N} deliveries per hour", countFact(board.WebhookMaxDeliveriesHour)},
 		// The MCP adapter's README.
 		{"clients/mcp/README.md", "Posts are at most {N};", board.LimitText("text_bytes")},
 	}

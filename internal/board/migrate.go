@@ -93,7 +93,9 @@ func migrateSchema(tx *sql.Tx, version int) error {
 		// Credit top-ups (topup.go), recovery lookups of hosted keys
 		// (hosted.go) and the moderation engine's tables, which exist
 		// whatever MODERATION says and stay empty while it is off.
-		topupSchema + hostedRecoveryIndex + moderation.Schema); err != nil {
+		topupSchema + hostedRecoveryIndex + moderation.Schema +
+		// Schema 17: MCP Events subscriptions and queue (mcpevents.go).
+		mcpEventSchema); err != nil {
 		return err
 	}
 	// Schema 8: rooms.private_access_epoch.

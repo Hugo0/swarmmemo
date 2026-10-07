@@ -93,6 +93,18 @@ type webhookDelivery struct {
 	attempts                      int64
 	url, secret, state, challenge string
 	account                       string
+	// An MCP Events delivery (mcpevents.go) is signed per Standard Webhooks,
+	// with the replaced secret too while a rotation lasts.
+	mcp      bool
+	previous string
+}
+
+// tables are the delivery's queue: webhooks', or MCP Events'.
+func (d *webhookDelivery) tables() (subscriptions, deliveries string) {
+	if d.mcp {
+		return "mcp_event_subscriptions", "mcp_event_deliveries"
+	}
+	return "webhook_subscriptions", "webhook_deliveries"
 }
 
 // claimDelivery leases one due row. The lease means a crashed or stopped worker
@@ -126,6 +138,64 @@ func (s *Store) claimDelivery(ctx context.Context, now int64) (*webhookDelivery,
 	return &d, nil
 }
 
+// claimMCPDelivery leases one due MCP Events row, as claimDelivery does, and
+// decides it at send time: a subscription gone, disabled or past its
+// refreshBefore drops it; a revoked sign-in or token (the subscription's
+// credential) disables the subscription; and the payload is built now
+// (finalizeMCPEvent), which may drop the event or wait for its screening.
+func (s *Store) claimMCPDelivery(ctx context.Context, now int64) (*webhookDelivery, error) {
+	d := webhookDelivery{mcp: true}
+	err := s.db.QueryRowContext(ctx, `UPDATE mcp_event_deliveries SET leased_until=? WHERE seq=(
+ SELECT seq FROM mcp_event_deliveries WHERE next_at<=? AND leased_until<=? ORDER BY next_at,seq LIMIT 1)
+ RETURNING seq,id,subscription,kind,body,attempts`, now+webhookLeaseSecond, now, now).
+		Scan(&d.seq, &d.id, &d.subscription, &d.kind, &d.body, &d.attempts)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var credential string
+	var refreshBefore, rotationEnds int64
+	err = s.db.QueryRowContext(ctx, "SELECT url,secret,previous_secret,rotation_ends,state,account,credential,refresh_before FROM mcp_event_subscriptions WHERE id=?", d.subscription).
+		Scan(&d.url, &d.secret, &d.previous, &rotationEnds, &d.state, &d.account, &credential, &refreshBefore)
+	drop := func() (*webhookDelivery, error) {
+		_, err := s.db.ExecContext(ctx, "DELETE FROM mcp_event_deliveries WHERE seq=?", d.seq)
+		return nil, err
+	}
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && (d.state != "active" || refreshBefore <= now)) {
+		return drop()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if rotationEnds <= now {
+		d.previous = ""
+	}
+	live, err := s.mcpCredentialLive(ctx, d.account, credential, now)
+	if err != nil {
+		return nil, err
+	}
+	if !live {
+		if _, err = s.db.ExecContext(ctx, "UPDATE mcp_event_subscriptions SET state='disabled',disabled_at=?,last_error='the sign-in or token that made this subscription was revoked' WHERE id=? AND state='active'", now, d.subscription); err != nil {
+			return nil, err
+		}
+		return drop()
+	}
+	body, final, err := s.finalizeMCPEvent(ctx, &d, now)
+	switch {
+	case err != nil:
+		return nil, err
+	case final == mcpDrop:
+		return drop()
+	case final == mcpPostpone:
+		_, err = s.db.ExecContext(ctx, "UPDATE mcp_event_deliveries SET leased_until=0,next_at=? WHERE seq=?", now+mcpEventScreenRetry, d.seq)
+		return nil, err
+	}
+	d.body = body
+	return &d, nil
+}
+
 // send performs one attempt. ok reports a 2xx; permanent reports a status the
 // receiver will keep rejecting, so retrying it is only load on someone else.
 func (s *Store) send(ctx context.Context, d *webhookDelivery, now int64) (ok, permanent bool, echo string, reason string) {
@@ -134,11 +204,19 @@ func (s *Store) send(ctx context.Context, d *webhookDelivery, now int64) (ok, pe
 	if err != nil {
 		return false, true, "", "invalid callback URL"
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "SwarmMemo-Webhook/1")
-	req.Header.Set("X-SwarmMemo-Delivery", d.id)
-	req.Header.Set("X-SwarmMemo-Timestamp", strconv.FormatInt(now, 10))
-	req.Header.Set("X-SwarmMemo-Signature", SignWebhook(d.secret, now, body))
+	if d.mcp {
+		secrets := []string{d.secret}
+		if d.previous != "" {
+			secrets = append(secrets, d.previous)
+		}
+		setMCPEventHeaders(req.Header, d.id, d.subscription, now, body, secrets...)
+	} else {
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "SwarmMemo-Webhook/1")
+		req.Header.Set("X-SwarmMemo-Delivery", d.id)
+		req.Header.Set("X-SwarmMemo-Timestamp", strconv.FormatInt(now, 10))
+		req.Header.Set("X-SwarmMemo-Signature", SignWebhook(d.secret, now, body))
+	}
 	req.ContentLength = int64(len(body))
 	resp, err := s.webhookHTTP().Do(req)
 	if err != nil {
@@ -194,8 +272,13 @@ func webhookBackoff(attempts int64, jitter func() float64) int64 {
 	return scaled
 }
 
+// mcpGoneReason is send's reason for a 410: an MCP receiver ending the
+// subscription (the spec makes 410 non-retryable).
+const mcpGoneReason = "status 410"
+
 func (s *Store) settle(ctx context.Context, d *webhookDelivery, ok, permanent bool, echo, reason string, now int64) error {
-	if ok && d.kind == "challenge" {
+	subscriptions, deliveries := d.tables()
+	if ok && d.kind == "challenge" && !d.mcp {
 		if !strings.Contains(echo, d.challenge) {
 			// Consent was not proven. The subscription stays pending and expires;
 			// no further request is made to an endpoint that did not answer us.
@@ -212,35 +295,40 @@ func (s *Store) settle(ctx context.Context, d *webhookDelivery, ok, permanent bo
 		return err
 	}
 	if ok {
-		if _, err := s.db.ExecContext(ctx, "UPDATE webhook_subscriptions SET failures=0,last_error='' WHERE id=?", d.subscription); err != nil {
+		update := "UPDATE webhook_subscriptions SET failures=0,last_error='' WHERE id=?"
+		if d.mcp {
+			update = "UPDATE mcp_event_subscriptions SET failures=0,last_error='',last_delivery_at=" + strconv.FormatInt(now, 10) + " WHERE id=?"
+		}
+		if _, err := s.db.ExecContext(ctx, update, d.subscription); err != nil {
 			return err
 		}
-		_, err := s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
+		_, err := s.db.ExecContext(ctx, "DELETE FROM "+deliveries+" WHERE seq=?", d.seq)
 		return err
 	}
 	attempts := d.attempts + 1
 	exhausted := permanent || attempts >= WebhookMaxAttempts || d.kind == "challenge"
 	if !exhausted {
-		_, err := s.db.ExecContext(ctx, "UPDATE webhook_deliveries SET attempts=?,next_at=?,leased_until=0 WHERE seq=?",
+		_, err := s.db.ExecContext(ctx, "UPDATE "+deliveries+" SET attempts=?,next_at=?,leased_until=0 WHERE seq=?",
 			attempts, now+webhookBackoff(attempts, rand.Float64), d.seq)
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq); err != nil {
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM "+deliveries+" WHERE seq=?", d.seq); err != nil {
 		return err
 	}
 	var failures int64
-	if err := s.db.QueryRowContext(ctx, "UPDATE webhook_subscriptions SET failures=failures+1,last_error=? WHERE id=? RETURNING failures", reason, d.subscription).Scan(&failures); err != nil {
+	if err := s.db.QueryRowContext(ctx, "UPDATE "+subscriptions+" SET failures=failures+1,last_error=? WHERE id=? RETURNING failures", reason, d.subscription).Scan(&failures); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
 	}
-	if failures < WebhookDisableFailures {
+	if failures < WebhookDisableFailures && !(d.mcp && reason == mcpGoneReason) {
 		return nil
 	}
 	// Auto-disable records why and stops dialing. Deletion is left to the owner,
-	// who needs to be able to read the reason.
-	_, err := s.db.ExecContext(ctx, "UPDATE webhook_subscriptions SET state='disabled',disabled_at=? WHERE id=? AND state<>'disabled'", now, d.subscription)
+	// who needs to be able to read the reason. An MCP receiver's 410 disables
+	// at once; subscribing again (a refresh) reactivates it.
+	_, err := s.db.ExecContext(ctx, "UPDATE "+subscriptions+" SET state='disabled',disabled_at=? WHERE id=? AND state<>'disabled'", now, d.subscription)
 	return err
 }
 
@@ -248,7 +336,15 @@ func (s *Store) settle(ctx context.Context, d *webhookDelivery, ok, permanent bo
 // did work, so a worker can drain a backlog without waiting for the next tick.
 func (s *Store) deliverOnce(ctx context.Context) (bool, error) {
 	now := s.now().Unix()
-	d, err := s.claimDelivery(ctx, now)
+	// The two queues take turns going first, so neither starves the other.
+	first, second := s.claimDelivery, s.claimMCPDelivery
+	if s.deliveryTurn.Add(1)%2 == 0 {
+		first, second = second, first
+	}
+	d, err := first(ctx, now)
+	if err == nil && d == nil {
+		d, err = second(ctx, now)
+	}
 	if err != nil || d == nil {
 		return d != nil, err
 	}
@@ -330,4 +426,7 @@ func (s *Store) expireWebhooks(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE subscription IN (SELECT id FROM webhook_subscriptions WHERE state='pending' AND created_at<?)", now-WebhookPendingTTL)
 	_, _ = s.db.ExecContext(ctx, "UPDATE webhook_subscriptions SET state='disabled',disabled_at=?,challenge='',last_error=CASE WHEN last_error='' THEN 'challenge not confirmed in time' ELSE last_error END WHERE state='pending' AND created_at<?", now, now-WebhookPendingTTL)
 	_, _ = s.db.ExecContext(ctx, "DELETE FROM webhook_rates WHERE hour<?", now/3600-24)
+	// MCP Events: work queued for a subscription that expired or was disabled
+	// will never be sent. The row itself stays, listed as expired or disabled.
+	_, _ = s.db.ExecContext(ctx, "DELETE FROM mcp_event_deliveries WHERE subscription IN (SELECT id FROM mcp_event_subscriptions WHERE state<>'active' OR refresh_before<=?)", now)
 }

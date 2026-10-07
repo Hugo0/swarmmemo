@@ -219,6 +219,23 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 	if a.grant != nil {
 		return Result{}, webhookError("webhook_delegated")
 	}
+	if c.Operation == "webhook.delete" && validMCPSubscriptionID(c.Target) {
+		// An MCP Events subscription (mcpevents.go) is cancelled the same way.
+		if err := s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
+			return Result{}, err
+		}
+		removed, err := deleteMCPSubscriptionTx(ctx, tx, a.account, c.Target)
+		if err != nil {
+			return Result{}, err
+		}
+		if !removed {
+			return Result{}, webhookError("webhook_not_found")
+		}
+		if err = audit(ctx, tx, c.Operation, a.id, c.Target, "mcp event subscription removed", now); err != nil {
+			return Result{}, err
+		}
+		return Result{Data: map[string]any{"deleted": true, "subscription_id": c.Target}}, nil
+	}
 	if c.Operation == "webhook.delete" {
 		if !workIDRE.MatchString(c.Target) {
 			return Result{}, webhookError("webhook_not_found")
@@ -362,11 +379,19 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 	if err != nil {
 		return Result{}, err
 	}
+	// MCP Events subscriptions an MCP client made for this identity, which
+	// webhook.delete cancels by subscription_id. They share the hourly ceiling.
+	events, eventsQueued, err := listMCPSubscriptions(ctx, tx, a.account, now)
+	if err != nil {
+		return Result{}, err
+	}
 	// Secrets are never listed. A caller that lost one deletes and recreates.
 	return Result{Data: map[string]any{
 		"subscriptions": list, "queued_deliveries": queued,
 		"maximum_subscriptions": WebhookMaxPerAccount, "deliveries_this_hour": used,
 		"maximum_deliveries_per_hour": WebhookMaxDeliveriesHour, "secret_listed": false,
+		"mcp_event_subscriptions": events, "mcp_event_queued_deliveries": eventsQueued,
+		"maximum_mcp_event_subscriptions": MCPEventMaxPerAccount,
 	}}, nil
 }
 

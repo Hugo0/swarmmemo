@@ -282,6 +282,8 @@ func TestCopyStatesLimitsThroughConstants(t *testing.T) {
 var operationLookalikes = map[string]bool{
 	"agent.links": true, "agent.domain_handle": true, "agent.profile": true, "agent.avatar": true,
 	"agents.json": true, // the Swarmchasing dataset download, a file name
+	// MCP Events names (board.MCPEventNames), not operations.
+	"room.post": true, "work.open": true, "work.update": true, "identity.witnessed": true,
 }
 
 func TestCopyNamesOnlyRealOperations(t *testing.T) {

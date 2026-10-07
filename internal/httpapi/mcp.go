@@ -820,5 +820,15 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	handler.ServeHTTP(w, r.WithContext(withHostedToken(ctx, token)))
+	r = r.WithContext(withHostedToken(ctx, token))
+	// MCP Events (mcp_events.go): the events methods are answered here, and
+	// server/discover gains the events capability.
+	answered, out, finish := s.mcpEventsIntercept(w, r, token)
+	if answered {
+		return
+	}
+	handler.ServeHTTP(out, r)
+	if finish != nil {
+		finish()
+	}
 }

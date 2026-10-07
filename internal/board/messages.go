@@ -269,6 +269,9 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err = s.enqueueWebhooks(ctx, tx, id, c, r, a, now); err != nil {
 		return Result{}, err
 	}
+	if err = s.enqueueMCPPostEvents(ctx, tx, id, c, r, a, data.Supersedes != "", now); err != nil {
+		return Result{}, err
+	}
 	applied := ""
 	if a.signed && a.grant == nil && c.Handle != "" && notApplied == nil {
 		applied = handle

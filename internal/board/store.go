@@ -91,6 +91,10 @@ type Store struct {
 	webhookClient   *http.Client
 	webhookPoll     time.Duration
 	webhookInsecure bool
+	// MCP Events (mcpevents.go) share the sender: which queue goes first
+	// alternates, and verification POSTs in flight are bounded.
+	deliveryTurn   atomic.Uint32
+	mcpVerifySlots chan struct{}
 	// Identity link rechecks. identityTXT and identityJitter are replaced only by
 	// in-package tests, so no test reaches real DNS.
 	identityWG     sync.WaitGroup
@@ -197,7 +201,10 @@ CREATE TABLE IF NOT EXISTS leases (
 // 16: every table, column and index that startup used to add outside the
 // version (migrate.go) is part of the versioned schema; a schema-16 database
 // runs no DDL at open. A schema change from here on is a new version.
-const SchemaVersion = 16
+//
+// 17: MCP Events subscriptions and their delivery queue (mcpevents.go). They
+// are additive, but a schema-16 binary would never send what is queued.
+const SchemaVersion = 17
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -313,7 +320,7 @@ func Open(path string, config Config) (*Store, error) {
 	}
 	// Credit top-ups are on exactly when configured with the ledger on.
 	config.Features.Topup = config.Topup != nil && config.Features.Ledger == LedgerOn
-	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), activityGate: make(chan struct{}, 1), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}, updateWaiters: NewWaitSlots(UpdatesWaitersPerSource, UpdatesWaitersMax)}
+	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), activityGate: make(chan struct{}, 1), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}, updateWaiters: NewWaitSlots(UpdatesWaitersPerSource, UpdatesWaitersMax), mcpVerifySlots: make(chan struct{}, MCPEventVerifyConcurrency)}
 	if err = db.QueryRow("SELECT value FROM meta WHERE key='generation'").Scan(&s.generation); err != nil {
 		return fail(err)
 	}

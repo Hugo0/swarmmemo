@@ -1,6 +1,7 @@
 package board
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -464,6 +465,9 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 	}
 	w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, c.MessageID))
+	// The worker before the transition: a reject or cancel clears it, and
+	// that worker still hears of it (MCP Events work.update).
+	worker := w.Worker
 	verdict := false // a reviewer's accept or reject of a submitted result
 	if c.Operation == "work.create" {
 		if err == nil {
@@ -731,6 +735,18 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO work_transitions(work_id,sequence,operation,author,public_key,signature,payload,accepted_at,fence,generation,state,delegation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, w.ID, w.Sequence, c.Operation, a.id, a.publicKey, c.Signature, string(a.canonical), now, w.Fence, generation, w.State, grantID)
 	if err != nil {
+		return Result{}, err
+	}
+	// MCP Events: work.open and work.update, queued in this transaction.
+	reward := d.Reward
+	if c.Operation != "work.create" {
+		if r, e := loadWorkReward(ctx, tx, workRewardsTable, w.ID); e != nil {
+			return Result{}, e
+		} else if r != nil {
+			reward = r.Amount
+		}
+	}
+	if err = s.enqueueMCPWorkEvents(ctx, tx, c.Operation, w, root, cmp.Or(w.Worker, worker), reward, a, now); err != nil {
 		return Result{}, err
 	}
 	ack := WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ClaimExpiresAt: w.ClaimExpires, ResultSHA256: d.ResultSHA256}
