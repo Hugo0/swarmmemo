@@ -240,8 +240,8 @@ func TestKeyBackupAcrossRotation(t *testing.T) {
 	}
 }
 
-// key_backups is additive: an earlier schema-14 database without the table
-// opens, gains it, keeps user_version, and an exact retry of a put replays.
+// key_backups is additive: an earlier database (schema 15) without the table
+// opens, gains it, migrates to schema 16, and an exact retry of a put replays.
 func TestKeyBackupSchemaIsAdditive(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "board.sqlite")
 	s, err := Open(path, Config{})
@@ -251,7 +251,7 @@ func TestKeyBackupSchemaIsAdditive(t *testing.T) {
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
 	owner := keyFor(207)
 	register(t, s, owner)
-	if _, err = s.db.Exec("DROP TABLE key_backups"); err != nil {
+	if _, err = s.db.Exec("DROP TABLE key_backups; PRAGMA user_version=15"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -263,8 +263,8 @@ func TestKeyBackupSchemaIsAdditive(t *testing.T) {
 	if n := sqlCount(t, s, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='key_backups'"); n != 1 {
 		t.Fatal("key_backups was not created on upgrade")
 	}
-	if v := sqlCount(t, s, "PRAGMA user_version"); v != SchemaVersion || SchemaVersion != 15 {
-		t.Fatalf("user_version %d: key backups are additive and keep the schema version", v)
+	if v := sqlCount(t, s, "PRAGMA user_version"); v != SchemaVersion || SchemaVersion != 16 {
+		t.Fatalf("user_version %d after the migration", v)
 	}
 	if n := sqlCount(t, s, "SELECT count(*) FROM identities WHERE id=?", keyID(owner)); n != 1 {
 		t.Fatal("existing identity lost")

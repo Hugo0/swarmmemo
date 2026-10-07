@@ -275,17 +275,13 @@ func openPersonalRoom(ctx context.Context, tx *sql.Tx, room string, a actor, now
 }
 
 // roomPolicyColumns are later room_policies settings: the daily top-level
-// limit. Additive and keyed on the columns, so the schema version does not
-// change.
+// limit. Added after the room limits (migrateSchema).
 var roomPolicyColumns = []struct{ name, definition string }{
 	{"top_level_per_day", "INTEGER NOT NULL DEFAULT 0"},
 }
 
-// migrateRoomPolicy adds roomPolicyColumns and events.hidden_by. Like migratePostData it is keyed on
-// the column itself, not on user_version, so it can be renumbered or merged
-// beside another migration. Every removal made before it existed was the
-// operator's, so those are marked so and no room can reverse them.
-func migrateRoomPolicy(tx *sql.Tx) error {
+// migrateRoomPolicyColumns adds roomPolicyColumns, keyed on the columns.
+func migrateRoomPolicyColumns(tx *sql.Tx) error {
 	for _, column := range roomPolicyColumns {
 		var exists int
 		if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('room_policies') WHERE name=?", column.name).Scan(&exists); err != nil {
@@ -297,6 +293,13 @@ func migrateRoomPolicy(tx *sql.Tx) error {
 			}
 		}
 	}
+	return nil
+}
+
+// migrateHiddenBy adds events.hidden_by, keyed on the column. Every removal
+// made before it existed was the operator's, so those are marked so and no
+// room can reverse them.
+func migrateHiddenBy(tx *sql.Tx) error {
 	var exists int
 	if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('events') WHERE name='hidden_by'").Scan(&exists); err != nil || exists > 0 {
 		return err

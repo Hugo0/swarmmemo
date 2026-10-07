@@ -73,7 +73,7 @@ func TestConversationSchemaUpgradesAnEarlierDatabase(t *testing.T) {
 	register(t, s, owner)
 	run(t, s, signed(owner, Command{Operation: "room.create", Room: "garden"}))
 	run(t, s, signed(owner, Command{Operation: "room.policy.set", Room: "garden", Data: `{"write":"owner"}`}))
-	drop := "DROP INDEX members_account;"
+	drop := "PRAGMA user_version=15; DROP INDEX members_account;"
 	for _, table := range []string{"conversation_members", "conversations", "contact_blocks", "messaging_settings", "message_screens", "hosted_tokens", "hosted_keys", "hosted_issuance", "seal_wraps", "seal_epochs"} {
 		drop += " DROP TABLE " + table + ";"
 	}

@@ -221,8 +221,7 @@ CREATE TABLE IF NOT EXISTS receivers (
  allow_from TEXT NOT NULL DEFAULT '', screen INTEGER NOT NULL DEFAULT 1,
  state TEXT NOT NULL CHECK(state IN ('active','deleted','revoked')), reason TEXT NOT NULL DEFAULT '',
  created_at INTEGER NOT NULL, rotated_at INTEGER NOT NULL DEFAULT 0, finished_at INTEGER NOT NULL DEFAULT 0,
- deliveries INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0,
- dedupe_header TEXT NOT NULL DEFAULT '', duplicates INTEGER NOT NULL DEFAULT 0);
+ deliveries INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS receivers_account ON receivers(account,state,created_at);
 CREATE TABLE IF NOT EXISTS receiver_items (
  seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, receiver TEXT NOT NULL, account TEXT NOT NULL,
@@ -230,8 +229,7 @@ CREATE TABLE IF NOT EXISTS receiver_items (
  verified INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, received_at INTEGER NOT NULL,
  event_seq INTEGER NOT NULL DEFAULT 0,
  screen TEXT NOT NULL CHECK(screen IN ('off','pending','done','failed','unpaid','unavailable')),
- verdict TEXT NOT NULL DEFAULT '', screen_cost INTEGER NOT NULL DEFAULT 0, screened_at INTEGER NOT NULL DEFAULT 0,
- dedupe_key TEXT NOT NULL DEFAULT '');
+ verdict TEXT NOT NULL DEFAULT '', screen_cost INTEGER NOT NULL DEFAULT 0, screened_at INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS receiver_items_account ON receiver_items(account,seq);
 CREATE INDEX IF NOT EXISTS receiver_items_receiver ON receiver_items(receiver,seq);
 CREATE INDEX IF NOT EXISTS receiver_items_pending ON receiver_items(received_at) WHERE screen='pending';
@@ -240,7 +238,7 @@ CREATE TABLE IF NOT EXISTS receiver_days (receiver TEXT NOT NULL, day INTEGER NO
 }
 
 // receiverAdded are the dedupe columns (table, name, declaration), added to
-// tables created before them; MigrateReceivers then indexes dedupe_key.
+// every receiver table, new or old; MigrateReceivers then indexes dedupe_key.
 var receiverAdded = [][3]string{
 	{"receivers", "dedupe_header", "TEXT NOT NULL DEFAULT ''"},
 	{"receivers", "duplicates", "INTEGER NOT NULL DEFAULT 0"},

@@ -430,23 +430,6 @@ func txHashReader(ctx context.Context, q interface {
 	})
 }
 
-// migrateTransparency creates the log's tables and, the first time, backfills
-// the whole public history into it. Schema 15.
-func migrateTransparency(tx *sql.Tx) error {
-	if _, err := tx.Exec(tlogSchema); err != nil {
-		return err
-	}
-	for {
-		n, err := tlogCatchUp(context.Background(), tx)
-		if err != nil {
-			return fmt.Errorf("transparency log backfill: %w", err)
-		}
-		if n == 0 {
-			return nil
-		}
-	}
-}
-
 // transparencyState is the log's signing key and background job state.
 type transparencyState struct {
 	signer *tlog.NoteSigner

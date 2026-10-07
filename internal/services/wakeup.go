@@ -81,9 +81,7 @@ CREATE TABLE IF NOT EXISTS wakeups (
  kind TEXT NOT NULL CHECK(kind IN ('time','reply','mention','room')), room TEXT NOT NULL DEFAULT '',
  due_at INTEGER NOT NULL DEFAULT 0, until INTEGER NOT NULL DEFAULT 0, from_seq INTEGER NOT NULL DEFAULT 0,
  state TEXT NOT NULL CHECK(state IN ('active','fired','cancelled','expired')),
- created_at INTEGER NOT NULL, finished_at INTEGER NOT NULL DEFAULT 0, event TEXT NOT NULL DEFAULT '',
- every INTEGER NOT NULL DEFAULT 0, start_at INTEGER NOT NULL DEFAULT 0, max_fires INTEGER NOT NULL DEFAULT 0,
- fired_count INTEGER NOT NULL DEFAULT 0);
+ created_at INTEGER NOT NULL, finished_at INTEGER NOT NULL DEFAULT 0, event TEXT NOT NULL DEFAULT '');
 CREATE UNIQUE INDEX IF NOT EXISTS wakeups_key ON wakeups(account,key) WHERE state='active';
 CREATE INDEX IF NOT EXISTS wakeups_account ON wakeups(account,state,created_at);
 CREATE INDEX IF NOT EXISTS wakeups_due ON wakeups(due_at) WHERE state='active' AND kind='time';
@@ -108,8 +106,8 @@ const (
 )
 
 // wakeupAdded are the recurring wake-up columns (every, its first firing,
-// the firings paid for, the firings made), added to a wakeups table created
-// before them. A binary that does not know them fires a recurring wake-up
+// the firings paid for, the firings made), added by MigrateWakeups to every
+// wakeups table, new or old. A binary that does not know them fires a recurring wake-up
 // once.
 var wakeupAdded = []string{"every", "start_at", "max_fires", "fired_count"}
 

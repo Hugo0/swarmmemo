@@ -14,8 +14,9 @@ import (
 	"time"
 )
 
-// Schema is the engine's tables. New applies it, so none exists while
-// MODERATION is off. Every statement only creates if absent.
+// Schema is the engine's tables. The board creates them in its versioned
+// schema (schema 16), empty while MODERATION is off; New applies it too, for
+// a database of its own. Every statement only creates if absent.
 const Schema = `
 CREATE TABLE IF NOT EXISTS moderation_decisions (
  id TEXT PRIMARY KEY, surface TEXT NOT NULL, subject TEXT NOT NULL, agent TEXT NOT NULL DEFAULT '',

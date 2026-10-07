@@ -57,7 +57,7 @@ func TestX402VettedReasonMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec("ALTER TABLE x402_vetted DROP COLUMN reason; INSERT INTO x402_vetted(id,url,method,pay_to,state,changed_at) VALUES('r','https://example.com/x','GET','0x1','vetted',1)"); err != nil {
+	if _, err = s.db.Exec("PRAGMA user_version=15; ALTER TABLE x402_vetted DROP COLUMN reason; INSERT INTO x402_vetted(id,url,method,pay_to,state,changed_at) VALUES('r','https://example.com/x','GET','0x1','vetted',1)"); err != nil {
 		s.Close()
 		t.Fatal(err)
 	}

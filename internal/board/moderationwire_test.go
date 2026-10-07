@@ -14,21 +14,39 @@ import (
 	"swarmmemo/internal/services"
 )
 
-func moderationTables(t *testing.T, s *Store) int {
+// moderationRows counts the rows of every moderation table. The tables are
+// part of the versioned schema (schema 16), so they exist with the flag off.
+func moderationRows(t *testing.T, s *Store) int {
 	t.Helper()
-	var n int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'moderation_%'").Scan(&n); err != nil {
+	rows, err := s.db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'moderation\\_%' ESCAPE '\\'")
+	if err != nil {
 		t.Fatal(err)
 	}
-	return n
+	var names []string
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+	rows.Close()
+	if len(names) == 0 {
+		t.Fatal("no moderation tables")
+	}
+	total := 0
+	for _, name := range names {
+		total += int(sqlCount(t, s, "SELECT count(*) FROM "+name))
+	}
+	return total
 }
 
-// Flags off means today: no engine, no table, no screening.
+// Flags off means today: no engine, no moderation row, no screening.
 func TestModerationOffIsInert(t *testing.T) {
 	s := openTest(t, Config{})
 	run(t, s, Command{Operation: "post", Text: "send me your seed phrase"})
-	if s.Moderation() != nil || moderationTables(t, s) != 0 {
-		t.Fatal("moderation built something while MODERATION is off")
+	if s.Moderation() != nil || moderationRows(t, s) != 0 {
+		t.Fatal("moderation did something while MODERATION is off")
 	}
 	if st, err := s.ModerationStats(context.Background(), 7); st != nil || err != nil {
 		t.Fatalf("stats while off: %v %v", st, err)

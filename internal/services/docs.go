@@ -91,18 +91,15 @@ func newDocs(d Deps) Provider { return newDocsCore(d) }
 
 func (d *docs) bindEngine(e *Engine) { d.engine = e }
 
-// Schema creates the docs tables as they now stand. A database from before
-// pastes folded into docs gains the columns from kind on, and their
-// indexes, in MigrateDocs.
+// Schema creates the docs tables as they were first created; MigrateDocs
+// (through MigrateSchema) adds the columns from kind on and their indexes,
+// on a new database too, so every database has the same table text.
 func (*docs) Schema() string {
 	return `
 CREATE TABLE IF NOT EXISTS docs (
  id TEXT PRIMARY KEY, account TEXT NOT NULL, room TEXT NOT NULL DEFAULT '', title TEXT NOT NULL,
  version INTEGER NOT NULL, hash TEXT NOT NULL, bytes INTEGER NOT NULL, stored INTEGER NOT NULL,
- updated_by TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
- kind TEXT NOT NULL DEFAULT 'doc', visibility TEXT NOT NULL DEFAULT 'private', state TEXT NOT NULL DEFAULT 'active',
- reason TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER NOT NULL DEFAULT 0,
- notary_seq INTEGER NOT NULL DEFAULT 0, show_author INTEGER NOT NULL DEFAULT 0, paste_seq INTEGER NOT NULL DEFAULT 0);
+ updated_by TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS docs_account ON docs(account,created_at) WHERE room='';
 CREATE INDEX IF NOT EXISTS docs_room ON docs(room,created_at) WHERE room<>'';
 CREATE TABLE IF NOT EXISTS doc_versions (

@@ -226,7 +226,25 @@ func openDB(t *testing.T) *sql.DB {
 	if _, err = db.Exec(services.Schema); err != nil {
 		t.Fatalf("schema must be idempotent: %v", err)
 	}
+	migrateServices(t, db)
+	migrateServices(t, db) // idempotent too
 	return db
+}
+
+// migrateServices runs services.MigrateSchema, as the board's migration does.
+func migrateServices(t *testing.T, db *sql.DB) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err = services.MigrateSchema(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestNewProviderPlugsIn(t *testing.T) {

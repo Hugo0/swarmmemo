@@ -115,3 +115,32 @@ func TestSitemapCarriesOnlyTheStartOfLongArticles(t *testing.T) {
 		t.Fatalf("sitemap text: %d bytes", len(m.Text))
 	}
 }
+
+// The sitemap finds each root's newest version in one pass over events, not a
+// correlated scan per root: events.origin has no index, and the per-root form
+// overran the read timeout on production (every /sitemap.xml was a 503).
+func TestSitemapNewestVersionIsOnePass(t *testing.T) {
+	s := openTest(t, Config{})
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+sitemapLatest+`SELECT count(*) FROM `+sitemapCurrent+` WHERE `+sitemapPostWhere, int64(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	for i, d := range plan {
+		if strings.HasPrefix(d, "CORRELATED SCALAR SUBQUERY") && i+1 < len(plan) && strings.HasPrefix(plan[i+1], "SEARCH v") {
+			t.Fatalf("per-root scan of events is back:\n%s", strings.Join(plan, "\n"))
+		}
+		if strings.Contains(d, "SCAN v") {
+			t.Fatalf("per-root scan of events is back:\n%s", strings.Join(plan, "\n"))
+		}
+	}
+}

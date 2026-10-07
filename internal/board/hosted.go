@@ -100,14 +100,17 @@ type hostedKEK struct {
 	aead cipher.AEAD
 }
 
+// hostedRecoveryIndex indexes recovery lookups of hosted keys.
+const hostedRecoveryIndex = `
+CREATE INDEX IF NOT EXISTS hosted_keys_recovery ON hosted_keys(recovery_sha256);
+`
+
 // openHosted runs once in Open: it reads the KEK file when one is
 // configured, refusing to start on a file that is missing, readable by
 // others or malformed, or that lacks a key some active identity was sealed
-// under; it makes the leak-hold key once and indexes recovery lookups.
+// under; it makes the leak-hold key once. Recovery lookups are indexed by
+// hostedRecoveryIndex, in the versioned schema (migrate.go).
 func (s *Store) openHosted() error {
-	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS hosted_keys_recovery ON hosted_keys(recovery_sha256)"); err != nil {
-		return err
-	}
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		return err

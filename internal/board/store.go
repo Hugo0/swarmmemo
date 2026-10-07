@@ -29,9 +29,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"swarmmemo/internal/ledger"
 	"swarmmemo/internal/services"
-	"swarmmemo/internal/trust"
 )
 
 // Canonical preserves protocol-v1 bytes for ordinary commands; an explicit
@@ -191,7 +189,11 @@ CREATE TABLE IF NOT EXISTS leases (
 // 15: the transparency log (transparency.go). Its tables are additive, but an
 // older binary would keep writing events without logging them, and the
 // one-time backfill already ran: so it must refuse a schema-15 database.
-const SchemaVersion = 15
+//
+// 16: every table, column and index that startup used to add outside the
+// version (migrate.go) is part of the versioned schema; a schema-16 database
+// runs no DDL at open. A schema change from here on is a new version.
+const SchemaVersion = 16
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -285,128 +287,15 @@ func Open(path string, config Config) (*Store, error) {
 		return fail(err)
 	}
 	defer migration.Rollback()
-	if version == 1 {
-		if _, err = migration.Exec("ALTER TABLE changes ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0"); err != nil {
+	// The versioned schema (migrate.go): nothing at all on a current database.
+	if version < SchemaVersion {
+		if err = migrateSchema(migration, version); err != nil {
 			return fail(err)
 		}
 	}
-	if version > 0 && version < 3 {
-		if _, err = migration.Exec(`ALTER TABLE events ADD COLUMN display_seq INTEGER NOT NULL DEFAULT 0;
- WITH numbering AS (SELECT e.seq,row_number() OVER(PARTITION BY CASE WHEN r.visibility='public' THEN 'public' ELSE 'room:'||r.name END ORDER BY e.seq) AS n FROM events e JOIN rooms r ON r.name=e.room)
- UPDATE events SET display_seq=(SELECT n FROM numbering WHERE numbering.seq=events.seq);`); err != nil {
-			return fail(err)
-		}
-	}
-	// Schema 9 is the SwarmMemo 1.0 vocabulary consolidation. Directory visibility
-	// in readAgents is decided by matching operation names in the audit table, so
-	// every historical audit row has to be renamed with the operations themselves;
-	// otherwise every agent that became public through an 8-era identity.register
-	// or peer.publish would silently vanish from the directory.
-	if version > 0 && version < 9 {
-		for _, rename := range [][2]string{
-			{"identity.register", "agent.register"},
-			{"identity.rotate", "agent.rotate"},
-			{"peer.publish", "agent.profile.publish"},
-			{"peer.remove", "agent.profile.remove"},
-		} {
-			if _, err = migration.Exec("UPDATE audit SET operation=? WHERE operation=?", rename[1], rename[0]); err != nil {
-				return fail(err)
-			}
-		}
-	}
-	if _, err = migration.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + voteSchema + qualitySchema + honorSchema + inviteSchema +
-		// RFC0012 §7 fragments, in this fixed order; each only creates tables and
-		// indexes, so SchemaVersion does not change.
-		design0Schema + ledger.Schema + services.Schema + trust.Schema + endorsementSchema +
-		// RFC0013 (conversation_schema.go): tables and indexes only.
-		conversationSchema +
-		// Cross-network anonymous retries (anonretry.go): an index only.
-		anonRetrySchema +
-		// T56 OAuth for the hosted MCP assistant profile (oauth.go): tables only.
-		oauthSchema +
-		// RFC0014 §5 passkey key backups (keybackup.go): one table, additive.
-		keyBackupSchema +
-		// Identity link witnesses (identitywitness.go): one table, additive.
-		identityWitnessSchema +
-		fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion)); err != nil {
-		return fail(err)
-	}
-	if err = migratePrivateRead(migration); err != nil {
-		return fail(err)
-	}
-	// Schema 11: signed post data (format, supersession). Additive columns.
-	if err = migratePostData(migration); err != nil {
-		return fail(err)
-	}
-	// Schema 12: room policy and room-scoped moderation. Additive.
-	if err = migrateRoomPolicy(migration); err != nil {
-		return fail(err)
-	}
-	// Schema 14: message provenance (events.via) and room policy write_via.
-	// Additive, keyed on the columns, so it renumbers cleanly.
-	if err = migrateVia(migration); err != nil {
-		return fail(err)
-	}
-	// Read indexes for the front page and rankings, and the ranking's flag
-	// table (frontpage.go). Additive, created when missing.
-	if err = migrateReadIndexes(migration); err != nil {
-		return fail(err)
-	}
-	// RFC0013: identities.custody and the room limits. Additive, keyed on
-	// the columns (conversation_schema.go).
-	if err = migrateConversations(migration); err != nil {
-		return fail(err)
-	}
-	// Recurring wake-ups: four additive columns on wakeups, keyed on the
-	// columns (services/wakeup.go).
-	if err = services.MigrateWakeups(migration); err != nil {
-		return fail(err)
-	}
-	// Paste show_author: one additive column on pastes, keyed on the column
-	// (services/paste.go).
-	if err = services.MigratePastes(migration); err != nil {
-		return fail(err)
-	}
-	// Receiver dedupe (dedupe_header, duplicates, items' dedupe_key) and its
-	// index: additive, keyed on the columns (services/receiver.go).
-	if err = services.MigrateReceivers(migration); err != nil {
-		return fail(err)
-	}
-	// Schema 13: room styles (RFC0011), a new table created above. Additive.
-	// 1.24: x402_vetted.reason, who vetted ('' before: the operator).
-	// 1.37: works.reviewer (the named reviewer's account) and
-	// work_rewards.reviewer (the key whose verdict paid it).
-	// 1.39: works.eligibility (who may claim; '' is open).
-	for _, column := range []struct{ table, name string }{{"works", "attempt_grant_id"}, {"work_transitions", "delegation_id"}, {"x402_vetted", "reason"}, {"works", "reviewer"}, {"work_rewards", "reviewer"}, {"works", "eligibility"}} {
-		var exists int
-		if err = migration.QueryRow("SELECT count(*) FROM pragma_table_info(?) WHERE name=?", column.table, column.name).Scan(&exists); err != nil {
-			return fail(err)
-		}
-		if exists == 0 {
-			if _, err = migration.Exec("ALTER TABLE " + column.table + " ADD COLUMN " + column.name + " TEXT NOT NULL DEFAULT ''"); err != nil {
-				return fail(err)
-			}
-		}
-	}
-	// Development schema 3 briefly had attachment references without ordering.
-	var positionColumns int
-	if err = migration.QueryRow("SELECT count(*) FROM pragma_table_info('event_attachments') WHERE name='position'").Scan(&positionColumns); err != nil {
-		return fail(err)
-	}
-	if positionColumns == 0 {
-		if _, err = migration.Exec("ALTER TABLE event_attachments ADD COLUMN position INTEGER NOT NULL DEFAULT 0"); err != nil {
-			return fail(err)
-		}
-	}
-	if _, err = extendLegacyBlobs(migration, time.Now().Unix()); err != nil {
-		return fail(err)
-	}
-	if _, err = migration.Exec(`INSERT OR IGNORE INTO counters(scope,value) SELECT CASE WHEN r.visibility='public' THEN 'public' ELSE 'room:'||r.name END,max(e.display_seq) FROM events e JOIN rooms r ON r.name=e.room GROUP BY 1`); err != nil {
-		return fail(err)
-	}
-	// Schema 15: the transparency log, last, once every source table exists;
-	// the first run backfills the whole public history.
-	if err = migrateTransparency(migration); err != nil {
+	// Every start: data upkeep that is idempotent and keyed on the data
+	// itself, never schema.
+	if err = upkeepData(migration); err != nil {
 		return fail(err)
 	}
 	if err = migration.Commit(); err != nil {

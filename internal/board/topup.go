@@ -81,13 +81,10 @@ func paymentFrom(ctx context.Context) string {
 	return v
 }
 
-// openTopup creates the table (no SchemaVersion change: an older binary
-// ignores it), makes the quote key once, and turns rows a crash left
+// openTopup makes the quote key once (credit_topups is in the versioned
+// schema, migrate.go) and turns rows a crash left
 // settling into unknown, for the operator.
 func (s *Store) openTopup() error {
-	if _, err := s.db.Exec(topupSchema); err != nil {
-		return err
-	}
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		return err

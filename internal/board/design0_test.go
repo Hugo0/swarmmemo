@@ -845,8 +845,8 @@ func TestDesign0SchemaMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A schema-14 database from the previous release has no fragment A tables.
-	if _, err = s.db.Exec("DROP TABLE tier_grants; DROP TABLE tier_grant_log"); err != nil {
+	// A database from before schema 16 without fragment A's tables.
+	if _, err = s.db.Exec("DROP TABLE tier_grants; DROP TABLE tier_grant_log; PRAGMA user_version=15"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -854,7 +854,7 @@ func TestDesign0SchemaMigration(t *testing.T) {
 		if s, err = Open(path, Config{Features: Features{AllowanceTiers: true, AnonPrefix: true}}); err != nil {
 			t.Fatal(err)
 		}
-		if v := sqlCount(t, s, "PRAGMA user_version"); v != int64(SchemaVersion) || SchemaVersion != 15 {
+		if v := sqlCount(t, s, "PRAGMA user_version"); v != int64(SchemaVersion) || SchemaVersion != 16 {
 			t.Fatalf("user_version %d", v)
 		}
 		if n := sqlCount(t, s, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('tier_grants','tier_grant_log')"); n != 2 {

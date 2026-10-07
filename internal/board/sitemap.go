@@ -25,8 +25,13 @@ const sitemapPostWhere = `o.reply_to='' AND o.supersedes='' AND o.hidden=0 AND o
  AND o.room NOT LIKE '@%' AND (o.created_at<=? OR (o.format='markdown' AND o.public_key<>''))
  AND EXISTS(SELECT 1 FROM rooms ro WHERE ro.name=o.room AND ro.visibility='public')`
 
+// sitemapLatest is the newest version of every edited post, built in one pass:
+// a correlated max() per root scanned events once per root (events.origin has
+// no index), which overran the read timeout and served the sitemap as a 503.
+const sitemapLatest = `WITH latest AS (SELECT origin, max(seq) AS s FROM events WHERE origin<>'' GROUP BY origin) `
+
 // sitemapCurrent joins a root (o) to its newest version (e), itself if unedited.
-const sitemapCurrent = `e.seq=coalesce((SELECT max(v.seq) FROM events v WHERE v.origin=o.id),o.seq)`
+const sitemapCurrent = `events o LEFT JOIN latest l ON l.origin=o.id JOIN events e ON e.seq=coalesce(l.s,o.seq)`
 
 // SitemapRoom is one listed room and the time of its newest visible post.
 type SitemapRoom struct {
@@ -42,7 +47,7 @@ func (s *Store) PublicSitemapCounts(ctx context.Context) (rooms, posts int, err 
  AND EXISTS(SELECT 1 FROM events e WHERE e.room=r.name AND e.hidden=0 AND e.kind<>'simulation')`).Scan(&rooms); err != nil {
 			return err
 		}
-		return tx.QueryRowContext(ctx, `SELECT count(*) FROM events o JOIN events e ON `+sitemapCurrent+`
+		return tx.QueryRowContext(ctx, sitemapLatest+`SELECT count(*) FROM `+sitemapCurrent+`
  WHERE `+sitemapPostWhere+` AND e.hidden=0 AND e.kind<>'simulation'`, s.archiveCutoff()).Scan(&posts)
 	})
 	return rooms, posts, err
@@ -83,9 +88,9 @@ func (s *Store) PublicSitemapPosts(ctx context.Context, offset, limit int, each 
 		return fmt.Errorf("sitemap posts: bad range")
 	}
 	return s.publicRead(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT o.id,e.kind,e.handle,e.public_key,e.created_at,e.format,
+		rows, err := tx.QueryContext(ctx, sitemapLatest+`SELECT o.id,e.kind,e.handle,e.public_key,e.created_at,e.format,
  CASE WHEN e.format='markdown' THEN substr(e.text,1,?) ELSE '' END
- FROM events o JOIN events e ON `+sitemapCurrent+`
+ FROM `+sitemapCurrent+`
  WHERE `+sitemapPostWhere+` AND e.hidden=0 AND e.kind<>'simulation' ORDER BY o.seq LIMIT ? OFFSET ?`,
 			SitemapTitleBytes, s.archiveCutoff(), limit, offset)
 		if err != nil {

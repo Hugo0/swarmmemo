@@ -465,6 +465,7 @@ func TestReceiverDailyCapSurvivesRestart(t *testing.T) {
 		if _, err = db.Exec(services.Schema); err != nil {
 			t.Fatal(err)
 		}
+		migrateServices(t, db)
 		return db
 	}
 	r := &recvRig{t: t, db: open(), meter: servicestest.NewMeter(1 << 30), board: newFakeBoard(), jev: &fakeScreener{cost: 40}, now: wakeT0}

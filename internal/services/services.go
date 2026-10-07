@@ -39,7 +39,23 @@ import (
 // Schema is migration fragment C (RFC0012 §7), applied after ledger.Schema:
 // the call record and job tables, then each built-in provider's own tables.
 // Every statement only creates a table or an index if it does not exist.
+// Tables keep the text they were first created with; MigrateSchema adds
+// what they gained since, so run it after Schema.
 var Schema = buildSchema()
+
+// MigrateSchema adds the columns and indexes Schema's tables gained after
+// they were first created (wakeups, pastes and docs, receivers), keyed on
+// the columns, so it builds a new database and upgrades an old one alike.
+// The board runs it in its versioned migration.
+func MigrateSchema(tx *sql.Tx) error {
+	if err := MigrateWakeups(tx); err != nil {
+		return err
+	}
+	if err := MigratePastes(tx); err != nil {
+		return err
+	}
+	return MigrateReceivers(tx)
+}
 
 const coreSchema = `
 CREATE TABLE IF NOT EXISTS service_calls (
