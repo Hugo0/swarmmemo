@@ -15,15 +15,18 @@ import (
 
 // Referrer counters answer "where do visitors come from?" without access logs
 // (see board/referrerstats.go for what is stored). Each admitted request adds
-// at most two in-memory integers: its Referer's registrable domain (or other)
-// and its User-Agent family, if either is known. The header values themselves
-// are discarded at once. Totals are written in the background like the reader
-// counters, and memory is bounded: at most referrerPendingHosts domains per
-// day are held between writes, later new ones count as other. Nothing here is
-// ever served over HTTP; the operator reads it with swarmmemo stats referrers.
+// at most three in-memory integers: its Referer's registrable domain (or
+// other), its User-Agent family, and on a landing page the venue a link named
+// with ?ref=VENUE, if any is known. The header values themselves are
+// discarded at once. Totals are written in the background like the reader
+// counters, and memory is bounded: at most referrerPendingHosts domains and
+// referrerPendingRefs venues per day are held between writes, later new ones
+// count as other and ref-other. Nothing here is ever served over HTTP; the
+// operator reads it with swarmmemo stats referrers.
 
 const (
 	referrerPendingHosts = 1000
+	referrerPendingRefs  = 200
 	referrerHeaderBytes  = 2048
 	userAgentBytes       = 512
 )
@@ -102,6 +105,37 @@ func (c *referrerCounter) referrerKey(raw string) string {
 	return "host:" + domain
 }
 
+// refKey is "ref:VENUE" for a GET of a landing page whose link added
+// ?ref=VENUE (one valid venue: board.ValidReferrerRef), else "". It is how a
+// post, a listing or an outreach message elsewhere is credited without
+// anything about the visitor: the venue is the link's own label.
+func refKey(r *http.Request) string {
+	if r.Method != http.MethodGet || !strings.Contains(r.URL.RawQuery, "ref=") || !refLanding(r.URL.Path) {
+		return ""
+	}
+	refs := r.URL.Query()["ref"]
+	if len(refs) != 1 || !board.ValidReferrerRef(refs[0]) {
+		return ""
+	}
+	return "ref:" + refs[0]
+}
+
+// refLanding reports whether path is a page a link to SwarmMemo lands on:
+// the home page, the agent handoffs, the FAQ, the docs, the tool and guide
+// pages and the platform pages.
+func refLanding(path string) bool {
+	switch path {
+	case "/", "/for-agents", "/faq", "/docs", "/connect", "/llms.txt", "/llms-full.txt", "/skill.md", "/tools", "/guides", "/messages", "/swarmchasing":
+		return true
+	}
+	for _, prefix := range []string{"/tools/", "/guides/", "/for/"} {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // userAgentMarkers map a lowercase User-Agent substring to its family, most
 // specific first. Anything else that names itself a crawler is other-bot;
 // browsers and unknown clients are not counted.
@@ -149,8 +183,11 @@ func userAgentFamily(raw string) string {
 func (s *Server) countReferrer(r *http.Request) {
 	defer func() { _ = recover() }()
 	c := s.referrers
-	keys := make([]string, 0, 2)
+	keys := make([]string, 0, 3)
 	if key := c.referrerKey(r.Header.Get("Referer")); key != "" {
+		keys = append(keys, key)
+	}
+	if key := refKey(r); key != "" {
 		keys = append(keys, key)
 	}
 	if family := userAgentFamily(r.Header.Get("User-Agent")); family != "" {
@@ -181,10 +218,11 @@ func (s *Server) countReferrer(r *http.Request) {
 	}
 }
 
-// referrerDay is one day's unwritten counts and how many domains they name.
+// referrerDay is one day's unwritten counts and how many domains and venues
+// they name.
 type referrerDay struct {
-	counts map[string]int64
-	hosts  int
+	counts      map[string]int64
+	hosts, refs int
 }
 
 // day returns the pending counts for day, creating them; c.mu is held.
@@ -197,15 +235,19 @@ func (c *referrerCounter) day(day string) *referrerDay {
 	return d
 }
 
-// add counts n for key, as other once referrerPendingHosts domains are held.
+// add counts n for key, as other once referrerPendingHosts domains are held
+// and as ref-other once referrerPendingRefs venues are.
 func (d *referrerDay) add(key string, n int64) {
-	if strings.HasPrefix(key, "host:") {
-		if _, held := d.counts[key]; !held {
-			if d.hosts >= referrerPendingHosts {
-				key = "other"
-			} else {
-				d.hosts++
-			}
+	if _, held := d.counts[key]; !held {
+		switch {
+		case strings.HasPrefix(key, "host:") && d.hosts >= referrerPendingHosts:
+			key = "other"
+		case strings.HasPrefix(key, "host:"):
+			d.hosts++
+		case strings.HasPrefix(key, "ref:") && d.refs >= referrerPendingRefs:
+			key = "ref-other"
+		case strings.HasPrefix(key, "ref:"):
+			d.refs++
 		}
 	}
 	d.counts[key] += n

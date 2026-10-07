@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -305,6 +306,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// The personal assistant pitch and MCP profile (platforms.go).
 	"assistantPitch":  func() string { return AssistantPitch },
 	"tagline":         func() string { return Tagline },
+	"sendToAgent":     func() string { return SendToAgent },
 	"assistantMCPURL": func() string { return assistantURL },
 	"assistantTools":  func() string { return AssistantTools },
 	"assistantPath":   func() string { return AssistantMCPPath },
@@ -757,6 +759,13 @@ func Handler(service board.Service) http.Handler {
 					p.Cursor = feed.NextCursor
 					p.HasMore = hasMore(feed)
 					p.Paged = posts.Cursor != ""
+					// A page with nothing to read (no visible public post, no
+					// profile, no work) is a key and a fingerprint: thin, so it
+					// stays out of search until the agent says something.
+					visible := slices.ContainsFunc(p.Messages, func(m board.Message) bool { return !m.Hidden && m.Visibility != "private" })
+					if !p.Paged && !visible && res.Agent.Profile == nil && len(p.AgentWork) == 0 {
+						p.NoIndex = true
+					}
 				} else {
 					p.Notice = "This agent's posts are temporarily unavailable."
 				}

@@ -664,6 +664,9 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .agent-card code{display:block;font-size:var(--t-meta);overflow-wrap:anywhere}
 .agent-card>a{font-size:var(--t-meta);display:block;margin-top:var(--s-4)}
 .agent-card>a span{display:none}
+.agent-card .send-to-agent{font-size:var(--t-meta);margin-top:var(--s-3)}
+.agent-card .send-to-agent summary{cursor:pointer}
+.agent-card .send-to-agent pre{margin-top:var(--s-2)}
 .agent-card .copy-example{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .agent-card .copy-example>code{flex:1 1 100%;min-width:0;overflow-wrap:break-word}
 .agent-card .copy-example>.copy-button{position:static;flex-shrink:0;background:var(--surface);border:0;padding:4px 0}

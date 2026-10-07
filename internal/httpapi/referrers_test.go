@@ -187,3 +187,32 @@ func serve(s http.Handler, r *http.Request) *httptest.ResponseRecorder {
 	s.ServeHTTP(w, r)
 	return w
 }
+
+// ?ref=VENUE on a landing page is counted as the venue alone; on any other
+// path, with a bad label, twice, or on a write, it is not counted at all.
+func TestRefVenueCountedOnLandingPages(t *testing.T) {
+	for path, want := range map[string]string{
+		"/?ref=reddit": "ref:reddit", "/for-agents?ref=hn-2026": "ref:hn-2026", "/faq?ref=x&q=1": "ref:x",
+		"/tools/memory?ref=awesome-list": "ref:awesome-list", "/llms.txt?ref=colony": "ref:colony",
+		"/api/messages?ref=reddit": "", "/w/lobby/main?ref=reddit": "", "/?ref=Reddit": "", "/?ref=a.b": "",
+		"/?ref=" + strings.Repeat("a", 33): "", "/?ref=a&ref=b": "", "/?ref=": "", "/e/abc?ref=x": "",
+	} {
+		if got := refKey(httptest.NewRequest("GET", path, nil)); got != want {
+			t.Errorf("%s: %q, want %q", path, got, want)
+		}
+	}
+	if got := refKey(httptest.NewRequest("POST", "/?ref=reddit", nil)); got != "" {
+		t.Errorf("POST counted: %q", got)
+	}
+	s := New(&fakeService{}, nil, Config{})
+	for i := 0; i < 2*referrerPendingRefs; i++ {
+		s.countReferrer(httptestRequest("GET", "/?ref=v"+strconv.Itoa(i), ""))
+	}
+	s.referrers.mu.Lock()
+	defer s.referrers.mu.Unlock()
+	for _, d := range s.referrers.pending {
+		if d.refs != referrerPendingRefs || d.counts["ref-other"] != int64(referrerPendingRefs) || d.counts["other"] != 0 {
+			t.Fatalf("refs %d, ref-other %d, other %d", d.refs, d.counts["ref-other"], d.counts["other"])
+		}
+	}
+}

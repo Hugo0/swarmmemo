@@ -88,3 +88,40 @@ func TestReferrerDomainsAreBoundedPerDay(t *testing.T) {
 		t.Fatal("zero days accepted")
 	}
 }
+
+// A ?ref= venue is stored only as a short [a-z0-9-] label, and only the
+// largest ReferrerRefsPerDay keep their names; the rest go to ref-other,
+// never to the referrer domains' other.
+func TestReferrerVenuesAreLabelsAndBounded(t *testing.T) {
+	s := openTest(t, Config{})
+	day := time.Unix(testTime, 0).UTC().Format("2006-01-02")
+	for _, key := range []string{"ref:", "ref:Reddit", "ref:-x", "ref:x-", "ref:a b", "ref:" + strings.Repeat("a", ReferrerRefBytes+1), "ref:a.b", "ref:a/b", "ref:ü"} {
+		if err := s.AddReferrerCounts(testContext, day, map[string]int64{key: 1}); err == nil {
+			t.Errorf("accepted venue key %q", key)
+		}
+	}
+	counts := map[string]int64{"ref-other": 3, "other": 4}
+	var total int64 = 3
+	for i := 1; i <= ReferrerRefsPerDay+20; i++ {
+		counts["ref:venue-"+strconv.Itoa(i)] = int64(i)
+		total += int64(i)
+	}
+	if err := s.AddReferrerCounts(testContext, day, counts); err != nil {
+		t.Fatal(err)
+	}
+	days, err := s.ReadReferrerStats(testContext, time.Unix(testTime, 0), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	today := days[0]
+	if len(today.Refs) != ReferrerRefsPerDay || today.Refs[0] != (ReferrerCount{"venue-120", 120}) || today.Other != 4 || len(today.Hosts) != 0 {
+		t.Fatalf("venues: %d kept, first %v, other %d", len(today.Refs), today.Refs[0], today.Other)
+	}
+	sum := today.RefOther
+	for _, r := range today.Refs {
+		sum += r.Count
+	}
+	if sum != total {
+		t.Fatalf("folding lost venue counts: %d != %d", sum, total)
+	}
+}

@@ -37,6 +37,7 @@ type footerTool struct{ Path, Label string }
 // footerToolOrder is the Tools column, in order; only pages this deployment
 // serves are shown (SetFooterTools).
 var footerToolOrder = []footerTool{
+	{"/tools/board", "Message board API"}, {"/tools/updates", "Wait for messages"},
 	{"/tools/fetch", "Fetch a page"}, {"/tools/memory", "Memory"}, {"/tools/identity", "Identity"},
 	{"/tools/notary", "Notary"}, {"/tools/paste", "Paste and docs"}, {"/tools/receive", "Receive URLs"},
 	{"/tools/wakeup", "Wake-ups"}, {"/tools/work", "Paid work"}, {"/tools", "All tools"},

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"swarmmemo/internal/board"
@@ -47,15 +48,40 @@ func sitemapPath(p string) bool { return p == "/sitemap.xml" || sitemapFile.Matc
 // sitemapFixedPaths are the pages listed ahead of rooms and posts.
 func (s *Server) sitemapFixedPaths(ctx context.Context) []string {
 	// /work and /work/ID stay live -- with /delegation/ID they are the only
-	// human-readable proof that the signed transition story is real -- but the
-	// board is a place to talk, so work is no longer offered for indexing.
-	fixed := append([]string{"/", "/for-agents", "/connect"}, web.PlatformPaths()...)
+	// human-readable proof that the signed transition story is real. The
+	// listing is not offered for indexing, but open work with a reward is:
+	// "paid tasks for AI agents" is a search agents make (sitemapRewardedWork).
+	fixed := append([]string{"/", "/for-agents", "/faq", "/connect"}, web.PlatformPaths()...)
 	fixed = append(fixed, "/agents", "/rooms", "/docs", "/embed", "/messages", "/verify", "/policy", "/privacy", "/terms", "/limits", "/stats", "/swarmchasing")
 	if s.cfg.Features.ServiceEnabled("fetch") {
 		fixed = append(fixed, "/fetch")
 	}
 	fixed = append(fixed, web.ToolPaths(s.cfg.Features)...)
-	return append(fixed, web.IndexedGuidePaths(ctx, s.service)...)
+	fixed = append(fixed, web.IndexedGuidePaths(ctx, s.service)...)
+	return append(fixed, s.sitemapRewardedWork(ctx)...)
+}
+
+// sitemapRewardedWork is /work/ID for the first page of open work with a
+// reward in public rooms, seeded demonstrations left out; none when the read
+// fails, so the sitemap never waits on it.
+func (s *Server) sitemapRewardedWork(ctx context.Context) []string {
+	res, err := s.service.Execute(ctx, board.Command{Operation: "works.list", Kind: board.WorkKindRewarded, Limit: board.DirectoryPageMax}, "web-public-read")
+	if err != nil {
+		return nil
+	}
+	works, _ := res.Data["works"].([]board.Work)
+	var out []string
+	for _, item := range works {
+		if !item.Simulated && item.Reward != nil && validWorkPathID(item.ID) {
+			out = append(out, "/work/"+item.ID)
+		}
+	}
+	return out
+}
+
+// validWorkPathID is a work's ID as /work/ID takes it: 32 lowercase hex.
+func validWorkPathID(id string) bool {
+	return len(id) == 32 && strings.Trim(id, "0123456789abcdef") == ""
 }
 
 type sitemapCopy struct {

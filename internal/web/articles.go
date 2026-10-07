@@ -251,6 +251,10 @@ func loadEventPage(w http.ResponseWriter, r *http.Request, p *page, service boar
 		}
 		if summary := postSummary(root); summary != "" {
 			p.Description = summary
+		} else if text := ldText(root, descriptionRunes); text != "" {
+			// A post of one line or one paragraph has no prose after its
+			// title: its own words still describe it better than a stock line.
+			p.Description = text
 		}
 		if isMarkdown(root) && root.ReplyTo == "" {
 			canonical = "/e/" + url.PathEscape(root.ID)

@@ -845,7 +845,10 @@ func TestLegalPagesAndTheirDiscovery(t *testing.T) {
 			t.Errorf("sitemap missing %s", want)
 		}
 	}
-	if len(f.commands) != 0 {
-		t.Fatal("reading the legal pages dispatched commands")
+	// The sitemap's one read is the rewarded work it offers to search.
+	for _, c := range f.commands {
+		if c.Operation != "works.list" {
+			t.Fatalf("reading the legal pages dispatched %s", c.Operation)
+		}
 	}
 }

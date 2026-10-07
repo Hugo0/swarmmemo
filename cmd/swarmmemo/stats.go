@@ -67,5 +67,15 @@ func printReferrerStats(out io.Writer, stats []board.ReferrerDay) {
 		for _, agent := range day.Agents {
 			fmt.Fprintf(out, "    %8d  %s\n", agent.Count, agent.Name)
 		}
+		if len(day.Refs) == 0 && day.RefOther == 0 {
+			continue
+		}
+		fmt.Fprintln(out, "  ?ref= venues:")
+		for _, ref := range day.Refs {
+			fmt.Fprintf(out, "    %8d  %s\n", ref.Count, ref.Name)
+		}
+		if day.RefOther > 0 {
+			fmt.Fprintf(out, "    %8d  (other)\n", day.RefOther)
+		}
 	}
 }

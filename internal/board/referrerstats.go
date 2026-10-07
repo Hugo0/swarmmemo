@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"regexp"
 	"sort"
@@ -16,16 +17,27 @@ import (
 //	referrer:YYYY-MM-DD:host:DOMAIN   requests whose Referer named DOMAIN
 //	referrer:YYYY-MM-DD:other         unnamed, invalid, IP-literal or overflow referrers
 //	referrer:YYYY-MM-DD:agent:FAMILY  requests from a known crawler or agent family
+//	referrer:YYYY-MM-DD:ref:VENUE     landing-page visits that carried ?ref=VENUE
+//	referrer:YYYY-MM-DD:ref-other     ?ref= venues past the day's named ones
 //
 // DOMAIN is a lowercase ASCII domain reduced to its registrable part by the
 // caller (never a path, query, port, user name or full URL), and FAMILY is one
 // of UserAgentFamilies (never the User-Agent itself); AddReferrerCounts refuses
-// anything else. At most ReferrerHostsPerDay domains are kept per day: after
-// each write the smallest are folded into other. These counts are for the
-// operator only (swarmmemo stats referrers) and are never served over HTTP.
+// anything else. VENUE is the short label a link to SwarmMemo chose for
+// itself (ValidReferrerRef), never anything about the visitor. At most
+// ReferrerHostsPerDay domains and ReferrerRefsPerDay venues are kept per day:
+// after each write the smallest are folded into other and ref-other. These
+// counts are for the operator only (swarmmemo stats referrers) and are never
+// served over HTTP.
 
 // ReferrerHostsPerDay bounds the named domains stored for one day.
 const ReferrerHostsPerDay = 200
+
+// ReferrerRefsPerDay bounds the named ?ref= venues stored for one day.
+const ReferrerRefsPerDay = 100
+
+// ReferrerRefBytes is the longest ?ref= venue counted.
+const ReferrerRefBytes = 32
 
 // UserAgentFamilies are the crawler and agent families counted by name.
 var UserAgentFamilies = []string{
@@ -46,12 +58,23 @@ var referrerHost = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\
 // ValidReferrerHost reports whether host may be stored as a referrer domain.
 func ValidReferrerHost(host string) bool { return len(host) <= 253 && referrerHost.MatchString(host) }
 
+// referrerRef is a stored venue: lowercase letters, digits and inner hyphens.
+var referrerRef = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`)
+
+// ValidReferrerRef reports whether ref may be stored as a ?ref= venue: 1 to
+// ReferrerRefBytes of [a-z0-9-], starting and ending with a letter or digit.
+func ValidReferrerRef(ref string) bool {
+	return len(ref) <= ReferrerRefBytes && referrerRef.MatchString(ref)
+}
+
 func validReferrerKey(key string) bool {
 	switch {
-	case key == "other":
+	case key == "other", key == "ref-other":
 		return true
 	case strings.HasPrefix(key, "host:"):
 		return ValidReferrerHost(key[len("host:"):])
+	case strings.HasPrefix(key, "ref:"):
+		return ValidReferrerRef(key[len("ref:"):])
 	case strings.HasPrefix(key, "agent:"):
 		for _, family := range UserAgentFamilies {
 			if key[len("agent:"):] == family {
@@ -63,8 +86,9 @@ func validReferrerKey(key string) bool {
 }
 
 // AddReferrerCounts adds counts for one UTC day in one transaction, then keeps
-// only the ReferrerHostsPerDay largest domains of that day, folding the rest
-// into other. Keys are "host:DOMAIN", "agent:FAMILY" or "other".
+// only the ReferrerHostsPerDay largest domains and ReferrerRefsPerDay largest
+// venues of that day, folding the rest into other and ref-other. Keys are
+// "host:DOMAIN", "agent:FAMILY", "ref:VENUE", "other" or "ref-other".
 func (s *Store) AddReferrerCounts(ctx context.Context, day string, counts map[string]int64) error {
 	if _, err := time.Parse("2006-01-02", day); err != nil || !readerDay.MatchString(day) {
 		return fmt.Errorf("referrer counts: invalid day")
@@ -88,24 +112,34 @@ func (s *Store) AddReferrerCounts(ctx context.Context, day string, counts map[st
 			return err
 		}
 	}
-	// Fold every domain past the largest ReferrerHostsPerDay into other. A
-	// domain folded away starts again from zero if it comes back; the day's
-	// total is unchanged.
-	var folded int64
-	if err = tx.QueryRowContext(ctx, `SELECT coalesce(sum(value),0) FROM (SELECT value FROM counters WHERE scope>? AND scope<?
- ORDER BY value DESC, scope LIMIT -1 OFFSET ?)`, prefix+"host:", prefix+"host;", ReferrerHostsPerDay).Scan(&folded); err != nil {
-		return err
-	}
-	if folded > 0 {
-		if _, err = tx.ExecContext(ctx, `DELETE FROM counters WHERE scope IN (SELECT scope FROM counters WHERE scope>? AND scope<?
- ORDER BY value DESC, scope LIMIT -1 OFFSET ?)`, prefix+"host:", prefix+"host;", ReferrerHostsPerDay); err != nil {
-			return err
-		}
-		if err = addCounter(ctx, tx, prefix+"other", folded); err != nil {
+	// Fold every domain past the largest ReferrerHostsPerDay into other, and
+	// every venue past the largest ReferrerRefsPerDay into ref-other. A name
+	// folded away starts again from zero if it comes back; the day's total is
+	// unchanged.
+	for _, fold := range []struct {
+		kind, into string
+		keep       int
+	}{{"host", "other", ReferrerHostsPerDay}, {"ref", "ref-other", ReferrerRefsPerDay}} {
+		if err = foldReferrers(ctx, tx, prefix, fold.kind, fold.into, fold.keep); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+// foldReferrers keeps the keep largest kind:NAME counters of the day at
+// prefix and adds the rest to the into counter.
+func foldReferrers(ctx context.Context, tx *sql.Tx, prefix, kind, into string, keep int) error {
+	var folded int64
+	if err := tx.QueryRowContext(ctx, `SELECT coalesce(sum(value),0) FROM (SELECT value FROM counters WHERE scope>? AND scope<?
+ ORDER BY value DESC, scope LIMIT -1 OFFSET ?)`, prefix+kind+":", prefix+kind+";", keep).Scan(&folded); err != nil || folded == 0 {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM counters WHERE scope IN (SELECT scope FROM counters WHERE scope>? AND scope<?
+ ORDER BY value DESC, scope LIMIT -1 OFFSET ?)`, prefix+kind+":", prefix+kind+";", keep); err != nil {
+		return err
+	}
+	return addCounter(ctx, tx, prefix+into, folded)
 }
 
 // ReferrerCount is one name and its count.
@@ -114,12 +148,15 @@ type ReferrerCount struct {
 	Count int64
 }
 
-// ReferrerDay is one UTC day of referrer and agent counts, largest first.
+// ReferrerDay is one UTC day of referrer, agent and ?ref= venue counts,
+// largest first.
 type ReferrerDay struct {
-	Day    string
-	Hosts  []ReferrerCount
-	Other  int64
-	Agents []ReferrerCount
+	Day      string
+	Hosts    []ReferrerCount
+	Other    int64
+	Agents   []ReferrerCount
+	Refs     []ReferrerCount
+	RefOther int64
 }
 
 // ReadReferrerStats returns `days` consecutive UTC days ending with the day
@@ -154,8 +191,12 @@ func (s *Store) ReadReferrerStats(ctx context.Context, end time.Time, days int) 
 		switch {
 		case key == "other":
 			out[i].Other += value
+		case key == "ref-other":
+			out[i].RefOther += value
 		case strings.HasPrefix(key, "host:"):
 			out[i].Hosts = append(out[i].Hosts, ReferrerCount{key[len("host:"):], value})
+		case strings.HasPrefix(key, "ref:"):
+			out[i].Refs = append(out[i].Refs, ReferrerCount{key[len("ref:"):], value})
 		default:
 			out[i].Agents = append(out[i].Agents, ReferrerCount{key[len("agent:"):], value})
 		}
@@ -164,7 +205,7 @@ func (s *Store) ReadReferrerStats(ctx context.Context, end time.Time, days int) 
 		return nil, err
 	}
 	for i := range out {
-		for _, list := range [][]ReferrerCount{out[i].Hosts, out[i].Agents} {
+		for _, list := range [][]ReferrerCount{out[i].Hosts, out[i].Agents, out[i].Refs} {
 			sort.Slice(list, func(a, b int) bool {
 				return list[a].Count > list[b].Count || list[a].Count == list[b].Count && list[a].Name < list[b].Name
 			})
