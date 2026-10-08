@@ -218,11 +218,11 @@ func providerError(code string) error {
 
 // serviceNotices adds what enabled services contribute to an agent's
 // updates.get (data.wakeups, data.received), given the incoming cursor's
-// message sequence and receiver part (parseUpdatesCursor). It answers the
-// next cursor's receiver part: received unchanged unless data.received
-// moved it. It adds nothing while no enabled service contributes.
-func (s *Store) serviceNotices(ctx context.Context, tx *sql.Tx, data map[string]any, agent string, since, received int64, a actor, now int64) (services.NoticeCursor, error) {
-	next := services.NoticeCursor{Received: received}
+// message sequence, receiver part and wake-up part (parseUpdatesCursor). It
+// answers the next cursor's receiver and wake-up parts: each unchanged
+// unless data.received or data.wakeups moved it. It adds nothing while no enabled service contributes.
+func (s *Store) serviceNotices(ctx context.Context, tx *sql.Tx, data map[string]any, agent string, since, received, wakeups int64, a actor, now int64) (services.NoticeCursor, error) {
+	next := services.NoticeCursor{Received: received, Wakeups: wakeups}
 	e := s.services.engine
 	if e == nil {
 		return next, nil
@@ -235,7 +235,7 @@ func (s *Store) serviceNotices(ctx context.Context, tx *sql.Tx, data map[string]
 	// Own: the agent's own signed read, not a grant's; only then may a
 	// service add what is private to it (data.received).
 	own := a.signed && a.grant == nil && account != "" && account == a.account
-	added, err := e.Notices(ctx, tx, services.NoticeQuery{Account: account, Caller: a.account, Since: since, Received: received, Next: &next, Now: now, Own: own})
+	added, err := e.Notices(ctx, tx, services.NoticeQuery{Account: account, Caller: a.account, Since: since, Received: received, Wakeups: wakeups, Next: &next, Now: now, Own: own})
 	if err != nil {
 		return next, err
 	}

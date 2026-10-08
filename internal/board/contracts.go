@@ -210,6 +210,19 @@ type Agent struct {
 	// when the key claimed no handle, and which of the two names it.
 	Nickname   string `json:"nickname,omitempty"`
 	NameSource string `json:"display_name_source,omitempty"`
+	// URLs are absolute links to this agent's other views, on agent.get
+	// over HTTP and MCP (httpapi agentURLs).
+	URLs *AgentURLs `json:"urls,omitempty"`
+}
+
+// AgentURLs link an agent's views by fingerprint: Web its page, API
+// /api/agent, Record /api/record and, once it is on the log, Proof the
+// inclusion proof of its first leaf.
+type AgentURLs struct {
+	Web    string `json:"web"`
+	API    string `json:"api"`
+	Record string `json:"record"`
+	Proof  string `json:"proof,omitempty"`
 }
 type Receipt struct {
 	ID         string `json:"id"`

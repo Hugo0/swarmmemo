@@ -71,6 +71,10 @@ type Work struct {
 	// Eligibility is who may claim the work: open (anyone), or one of the
 	// rules in WorkEligibilities, checked on work.claim.
 	Eligibility string `json:"eligibility"`
+	// RewardNote is display text for a reward outside credits, set at
+	// create (e.g. "+0.10 USDC on Base, paid by the poster"). The poster
+	// pays it; the board doesn't hold or verify it.
+	RewardNote string `json:"reward_note,omitempty"`
 	// Eligible says whether EligibleAgent could claim the work now, with
 	// EligibleReason in plain words: for the signer of the read, or, labelled
 	// EligiblePreview, for the agent the read names. Absent on an anonymous
@@ -161,6 +165,7 @@ type workData struct {
 	Reviewer          string
 	ReviewerFee       int64
 	Eligibility       string
+	RewardNote        string
 	ResultSHA256      string
 }
 
@@ -232,6 +237,11 @@ func parseWorkData(raw string, operation string) (workData, error) {
 				return invalid()
 			}
 			err = json.Unmarshal(value, &d.Eligibility)
+		case "reward_note":
+			if !create {
+				return invalid()
+			}
+			err = json.Unmarshal(value, &d.RewardNote)
 		case "result_sha256":
 			if !workResultHashOp(operation) {
 				return invalid()
@@ -256,7 +266,7 @@ func parseWorkData(raw string, operation string) (workData, error) {
 	}
 	if create {
 		want = 4
-		for _, optional := range []string{"reward", "reviewer", "reviewer_fee", "eligibility"} {
+		for _, optional := range []string{"reward", "reviewer", "reviewer_fee", "eligibility", "reward_note"} {
 			if seen[optional] {
 				want++
 			}
@@ -273,6 +283,9 @@ func parseWorkData(raw string, operation string) (workData, error) {
 	}
 	if seen["eligibility"] && !validWorkEligibility(d.Eligibility) {
 		return workData{}, invalidWorkEligibility()
+	}
+	if seen["reward_note"] && !validWorkRewardNote(d.RewardNote) {
+		return workData{}, invalidWorkRewardNote()
 	}
 	if create {
 		if strings.TrimSpace(d.Title) == "" || len(d.Title) > 160 || strings.ContainsRune(d.Title, 0) || d.Capabilities == nil || len(d.Capabilities) > 16 {
@@ -517,6 +530,9 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		if d.ReviewerFee != 0 && root.Kind != "request" {
 			return Result{}, invalidReviewerFee()
+		}
+		if d.RewardNote != "" && root.Kind != "request" {
+			return Result{}, invalidWorkRewardNote()
 		}
 		ttl := c.TTL
 		if ttl == 0 {
@@ -800,6 +816,9 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 		p.Eligibility = WorkEligibilityOpen
 	}
 	var err error
+	if err = tx.QueryRowContext(ctx, `SELECT `+workRewardNoteSQL+` FROM works w WHERE w.id=?`, w.ID).Scan(&p.RewardNote); err != nil {
+		return Work{}, err
+	}
 	if err = json.Unmarshal([]byte(w.Caps), &p.Capabilities); err != nil {
 		return Work{}, err
 	}

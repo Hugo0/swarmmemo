@@ -150,7 +150,7 @@ func (r *wakeRig) work() int {
 
 func (r *wakeRig) notices(account, caller string, since int64) []any {
 	r.t.Helper()
-	out, err := r.e.Notices(context.Background(), r.db, services.NoticeQuery{Account: account, Caller: caller, Since: since, Now: r.now})
+	out, err := r.e.Notices(context.Background(), r.db, services.NoticeQuery{Account: account, Caller: caller, Since: since, Received: -1, Wakeups: -1, Now: r.now})
 	if err != nil {
 		r.t.Fatal(err)
 	}

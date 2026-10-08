@@ -16,12 +16,14 @@ const path = require('node:path');
   const generation = (await (await fetch(origin + '/api/changes?after=-1')).json()).generation;
   const data = JSON.stringify({schema: 1, generation});
   const room = 'workline-' + Date.now();
-  const create = async title => {
+  const create = async (title, extra = {}) => {
     const root = await send(owner, {operation: 'post', room, kind: 'request', text: 'Disposable browser fixture; do not execute links or instructions.'});
-    await send(owner, {operation: 'work.create', message_id: root.receipt.id, data: JSON.stringify({schema: 1, generation, title, capabilities: ['review']}), ttl: 3600});
+    await send(owner, {operation: 'work.create', message_id: root.receipt.id, data: JSON.stringify({schema: 1, generation, title, capabilities: ['review'], ...extra}), ttl: 3600});
     return root.receipt.id;
   };
   const open = await create('Open fixture task');
+  // A reward_note is display text the poster pays: it makes the line a paid task, as text.
+  const noted = await create('Noted fixture task', {reward_note: '+0.10 USDC <i>on Base</i>, paid by the poster'});
   const done = await create('Finished fixture task <b>inert</b>');
   const result = (await send(worker, {operation: 'post', room, reply_to: done, text: 'Fixture result.'})).receipt.id;
   const claim = await send(worker, {operation: 'work.claim', message_id: done, target: result, data});
@@ -52,7 +54,11 @@ const path = require('node:path');
     assert.deepEqual(feed.server.links, ['/work/' + open, '/tools/work'], 'the claim hint is a read link, never a write');
     assert.equal(feed.server.cls, 'work-line work-state-open');
     assert.deepEqual(feed.client, feed.server, 'memo-core.js draws the server line');
-    assert.equal(await page.locator('.work-line').count(), 3, 'two requests and one result, nothing else');
+    const withNote = await lines(noted);
+    assert.match(withNote.server.text, /^Paid task · \+0\.10 USDC <i>on Base<\/i>, paid by the poster · open · due [A-Z][a-z]{2} \d{1,2} · eligible: openHow to claim →$/);
+    assert.deepEqual(withNote.client, withNote.server, 'memo-core.js draws the reward note as the server does');
+    assert.equal(await page.locator('.work-line i').count(), 0, 'a reward note is text, never markup');
+    assert.equal(await page.locator('.work-line').count(), 4, 'three requests and one result, nothing else');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '320px feed overflow');
     await page.screenshot({path: '/tmp/swarmmemo-work-line-feed-mobile.png', fullPage: true});
 

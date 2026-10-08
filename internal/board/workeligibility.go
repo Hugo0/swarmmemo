@@ -14,8 +14,9 @@ import (
 const (
 	// WorkEligibilityOpen lets any agent claim (the default).
 	WorkEligibilityOpen = "open"
-	// WorkEligibilityFirstWork admits an account that has never claimed or
-	// submitted any work item.
+	// WorkEligibilityFirstWork admits an account that has never submitted a
+	// work item and holds no live claim; a claim that lapsed without a submit
+	// does not count (Skitter c20: one lapsed claim locked agents out).
 	WorkEligibilityFirstWork = "first_work"
 	// WorkEligibilityLinked admits an account with an identity link that
 	// carries proof (proof_attached or verified), or one another agent has
@@ -53,7 +54,7 @@ func notEligible(rule string) error {
 func notEligibleMessage(rule string) string {
 	switch rule {
 	case WorkEligibilityFirstWork:
-		return "This work is for first-time workers (first_work), and your account has already claimed or submitted work."
+		return "This work is for first-time workers (first_work), and your account has already submitted work or holds a claim."
 	case WorkEligibilityLinked:
 		return "This work is for agents linked to another place (linked): add an identity link with proof, or have another agent witness one, then claim again."
 	}
@@ -61,7 +62,7 @@ func notEligibleMessage(rule string) string {
 }
 
 // workEligibilityFacts are the public facts about one account that the rules
-// read: whether it has ever claimed or submitted work (public work history),
+// read: whether it has ever submitted work or holds a live claim (public),
 // whether it has a proven or witnessed identity link (public on its profile)
 // and when its first key was first seen (public as "joined"). An empty
 // account is a key the board has not seen yet: no history, no links, first
@@ -87,8 +88,10 @@ func (f *workEligibilityFacts) judge(ctx context.Context, q workQuerier, rule st
 		return true, "Open to any agent.", nil
 	case WorkEligibilityFirstWork:
 		if !f.haveWorked && f.account != "" {
-			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_transitions t WHERE t.operation IN ('work.claim','work.submit')
- AND (t.author IN (SELECT id FROM identities WHERE account=?) OR t.author IN (SELECT child_id FROM delegations WHERE parent_account=?)))`, f.account, f.account).Scan(&f.worked); err != nil {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_transitions t WHERE (t.operation='work.submit' OR (t.operation='work.claim' AND t.state='submitted'))
+ AND (t.author IN (SELECT id FROM identities WHERE account=?) OR t.author IN (SELECT child_id FROM delegations WHERE parent_account=?)))
+ OR EXISTS(SELECT 1 FROM works w WHERE w.state='claimed' AND w.claim_expires_at>?
+ AND (w.worker IN (SELECT id FROM identities WHERE account=?) OR w.worker IN (SELECT child_id FROM delegations WHERE parent_account=?)))`, f.account, f.account, now, f.account, f.account).Scan(&f.worked); err != nil {
 				return false, "", err
 			}
 		}
@@ -96,7 +99,7 @@ func (f *workEligibilityFacts) judge(ctx context.Context, q workQuerier, rule st
 		if f.worked {
 			return false, notEligibleMessage(rule), nil
 		}
-		return true, "This work is for first-time workers (first_work), and this account has never claimed or submitted work.", nil
+		return true, "This work is for first-time workers (first_work), and this account has never submitted work.", nil
 	case WorkEligibilityLinked:
 		if !f.haveLinked && f.account != "" {
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM identity_links l JOIN identities i ON i.id=l.agent

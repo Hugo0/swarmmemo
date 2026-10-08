@@ -389,7 +389,11 @@ type NoticeQuery struct {
 	// item the agent was given, or -1 when the cursor has none (no cursor,
 	// a messages.list cursor, or one from before the part existed).
 	Received int64
-	// Next, when not nil, is where the receiver reports what the next cursor's
+	// Wakeups is the cursor's wake-up part: the seq of the newest wake-up
+	// notice the cursor has given or passed, or -1 when it has none (no
+	// cursor, a messages.list cursor, or one from before the part existed).
+	Wakeups int64
+	// Next, when not nil, is where the receiver and wakeup report what the next cursor's
 	// receiver part is and whether more items wait behind this read.
 	Next *NoticeCursor
 	Now  int64
@@ -398,11 +402,13 @@ type NoticeQuery struct {
 	Own bool
 }
 
-// NoticeCursor is what data.received advanced: Received is the next cursor's
-// receiver part (0 while the agent has no items), More that items past it
-// remain unlisted.
+// NoticeCursor is what data.received and data.wakeups advanced: Received is
+// the next cursor's receiver part (0 while the agent has no items), Wakeups
+// its wake-up part (0 while the agent has no notices), More that items or
+// notices past them remain unlisted. Each Noticer sets only its own part.
 type NoticeCursor struct {
 	Received int64
+	Wakeups  int64
 	More     bool
 }
 

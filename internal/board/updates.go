@@ -56,7 +56,7 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if err != nil {
 		return Result{}, err
 	}
-	seq, received, err := s.parseUpdatesCursor(c.Cursor)
+	seq, received, wakeups, err := s.parseUpdatesCursor(c.Cursor)
 	if err != nil {
 		return Result{}, err
 	}
@@ -128,12 +128,13 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if err = s.screenConversationMessages(ctx, tx, a, events); err != nil {
 		return Result{}, err
 	}
-	// The cursor moves with the page, and with data.received below; a read
+	// The cursor moves with the page, and with data.received and
+	// data.wakeups below; a read
 	// that moves neither hands back the same cursor (a waiting read's test).
 	moved := len(events) > 0 || c.Cursor == "" || c.Cursor == "start"
 	next := c.Cursor
 	if moved {
-		next = s.updatesCursor(seq, received)
+		next = s.updatesCursor(seq, received, wakeups)
 	}
 	data := map[string]any{"has_more": hasMore, "scope": "room_activity"}
 	// Counts only: every id list and count below is computed from the page as
@@ -170,7 +171,7 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 			return Result{}, err
 		}
 	}
-	notices, err := s.serviceNotices(ctx, tx, data, agent, since, received, a, now)
+	notices, err := s.serviceNotices(ctx, tx, data, agent, since, received, wakeups, a, now)
 	if err != nil {
 		return Result{}, err
 	}
@@ -178,8 +179,8 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if notices.More {
 		data["has_more"] = true
 	}
-	if moved || notices.Received != received && notices.Received > 0 {
-		next = s.updatesCursor(seq, notices.Received)
+	if moved || notices.Received != received && notices.Received > 0 || notices.Wakeups != wakeups && notices.Wakeups > 0 {
+		next = s.updatesCursor(seq, notices.Received, notices.Wakeups)
 	}
 	return Result{Messages: page(), NextCursor: next, Data: data}, nil
 }

@@ -55,12 +55,12 @@ func TestWorkReadEligibilityEachRule(t *testing.T) {
 	run(t, s, claimCommand(s, veteran, open))
 	eligibleAnswer(t, readWorkAs(t, s, nil, open, keyID(newcomer)), keyID(newcomer), false, true, "This work is claimed")
 
-	// first_work: the veteran has claimed; the newcomer and an unseen key have not.
+	// first_work: the veteran holds a live claim; the newcomer and an unseen key have not worked.
 	first := eligibleCreate(t, s, owner, WorkEligibilityFirstWork)
-	eligibleAnswer(t, readWorkAs(t, s, veteran, first, ""), keyID(veteran), false, false, "already claimed or submitted")
-	eligibleAnswer(t, readWorkAs(t, s, nil, first, keyID(veteran)), keyID(veteran), false, true, "already claimed or submitted")
-	eligibleAnswer(t, readWorkAs(t, s, nil, first, keyID(newcomer)), keyID(newcomer), true, true, "never claimed")
-	eligibleAnswer(t, readWorkAs(t, s, nil, first, unseen), unseen, true, true, "never claimed")
+	eligibleAnswer(t, readWorkAs(t, s, veteran, first, ""), keyID(veteran), false, false, "already submitted work or holds a claim")
+	eligibleAnswer(t, readWorkAs(t, s, nil, first, keyID(veteran)), keyID(veteran), false, true, "already submitted work or holds a claim")
+	eligibleAnswer(t, readWorkAs(t, s, nil, first, keyID(newcomer)), keyID(newcomer), true, true, "never submitted")
+	eligibleAnswer(t, readWorkAs(t, s, nil, first, unseen), unseen, true, true, "never submitted")
 	fails(t, s, claimCommand(s, veteran, first), "not_eligible")
 
 	// linked: no proof, then proof attached.

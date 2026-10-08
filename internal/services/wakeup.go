@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -614,28 +615,64 @@ func wakeupList(ctx context.Context, q allowance.Querier, query string, args ...
 }
 
 // Notices is data.wakeups in updates.get: the agent's notices fired in the
-// last day and, with a cursor, not before it, newest first. It shows no key
-// or text of the agent's, and names the firing message only to a reader who
-// can read its room.
+// last day and, with a cursor, not yet given to it, newest first. It shows no
+// key or text of the agent's, and names the firing message only to a reader
+// who can read its room.
+//
+// The updates cursor carries the seq of the newest notice it was given or
+// passed (NoticeQuery.Wakeups), as it does for receiver items (C44): the read
+// lists the notices after it, the oldest WakeupNoticesMax first, and n.Next
+// moves the cursor to the newest listed, so a repeated read on a quiet board
+// repeats nothing and a firing alone advances the cursor, while an older
+// cursor still replays it. A cursor without that part (none, a messages.list
+// cursor, or one from before it) lists the newest notices fired at or after
+// its message sequence, as reads always did, and moves the cursor past every
+// notice the account has.
 func (w *wakeup) Notices(ctx context.Context, q allowance.Querier, n NoticeQuery) (string, any, error) {
 	out := []wakeupNotice{}
-	rows, err := q.QueryContext(ctx, "SELECT wakeup,kind,fired_at,due_at,late,event,room FROM wakeup_notices WHERE account=? AND fired_at>=? AND event_seq>=? ORDER BY seq DESC LIMIT ?",
-		n.Account, n.Now-WakeupNoticeWindow, n.Since, WakeupNoticesMax)
+	query := "SELECT seq,wakeup,kind,fired_at,due_at,late,event,room FROM wakeup_notices WHERE account=? AND fired_at>=? AND seq>? ORDER BY seq LIMIT ?"
+	args := []any{n.Account, n.Now - WakeupNoticeWindow, n.Wakeups, WakeupNoticesMax + 1}
+	if n.Wakeups < 0 {
+		query = "SELECT seq,wakeup,kind,fired_at,due_at,late,event,room FROM wakeup_notices WHERE account=? AND fired_at>=? AND event_seq>=? ORDER BY seq DESC LIMIT ?"
+		args = []any{n.Account, n.Now - WakeupNoticeWindow, n.Since, WakeupNoticesMax}
+	}
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return "", nil, err
 	}
+	var seqs []int64
 	for rows.Next() {
 		var v wakeupNotice
-		if err = rows.Scan(&v.ID, &v.On, &v.FiredAt, &v.At, &v.Late, &v.Event, &v.Room); err != nil {
+		var seq int64
+		if err = rows.Scan(&seq, &v.ID, &v.On, &v.FiredAt, &v.At, &v.Late, &v.Event, &v.Room); err != nil {
 			rows.Close()
 			return "", nil, err
 		}
 		out = append(out, v)
+		seqs = append(seqs, seq)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return "", nil, err
+	}
+	next, more := max(n.Wakeups, 0), false
+	if n.Wakeups < 0 {
+		if err = q.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM wakeup_notices WHERE account=?", n.Account).Scan(&next); err != nil {
+			return "", nil, err
+		}
+	} else {
+		if more = len(out) > WakeupNoticesMax; more {
+			out, seqs = out[:WakeupNoticesMax], seqs[:WakeupNoticesMax]
+		}
+		if len(seqs) > 0 {
+			next = seqs[len(seqs)-1]
+		}
+		slices.Reverse(out)
+	}
+	if n.Next != nil {
+		n.Next.Wakeups = next
+		n.Next.More = n.Next.More || more
 	}
 	kept := out[:0]
 	for _, v := range out {

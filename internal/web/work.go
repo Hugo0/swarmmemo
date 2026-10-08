@@ -178,6 +178,8 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 	p.Description = "Unpaid coordination: " + item.Title + ". Read the public brief and explicitly signed transition history."
 	if item.Reward != nil {
 		p.Description = "Work with a credit reward held in escrow: " + item.Title + ". Read the public brief and explicitly signed transition history."
+	} else if item.RewardNote != "" {
+		p.Description = "Paid task, paid by the poster: " + item.Title + ". Read the public brief and explicitly signed transition history."
 	}
 	if item.Simulated {
 		p.Description = "Labeled seeded demonstration, not independent adoption. " + p.Description
@@ -255,9 +257,15 @@ func workLine(m board.Message) *workLineView {
 	switch {
 	case w.Simulated:
 		v.Badge = "Simulated task"
-	case w.Reward != nil:
+	case w.Reward != nil || w.RewardNote != "":
 		v.Badge = "Paid task"
-		parts = append(parts, creditAmount(w.Reward.Amount))
+		if w.Reward != nil {
+			parts = append(parts, creditAmount(w.Reward.Amount))
+		}
+		// Display text the poster pays; the board doesn't hold or verify it.
+		if w.RewardNote != "" {
+			parts = append(parts, w.RewardNote)
+		}
 	}
 	parts = append(parts, wordFor(workStateWords, w.State))
 	if w.State == "open" || w.State == "claimed" || w.State == "submitted" {

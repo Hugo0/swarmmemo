@@ -276,7 +276,7 @@ func TestWorkSSRShowsEligibility(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
-	if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, "First-time workers only") || !strings.Contains(body, "never claimed or submitted work") {
+	if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, "First-time workers only") || !strings.Contains(body, "never submitted work") {
 		t.Fatalf("detail %d %s", w.Code, body)
 	}
 }

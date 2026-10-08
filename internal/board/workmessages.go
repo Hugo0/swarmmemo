@@ -20,7 +20,8 @@ import (
 
 // MessageWork is a message's work mark. On a request: ID, its effective
 // State, Deadline, Eligibility, Claimable (State is open) and, when set,
-// Reward, Reviewer and Simulated. On a reply that a worker submitted as
+// Reward, RewardNote (display text only; the poster pays it), Reviewer
+// and Simulated. On a reply that a worker submitted as
 // the result: ResultOf (the work's ID) and State, one of submitted,
 // accepted or rejected. Title and URL (the work's page) are on both.
 type MessageWork struct {
@@ -30,6 +31,7 @@ type MessageWork struct {
 	State       string             `json:"state"`
 	Simulated   bool               `json:"simulated,omitempty"`
 	Reward      *MessageWorkReward `json:"reward,omitempty"`
+	RewardNote  string             `json:"reward_note,omitempty"`
 	Deadline    int64              `json:"deadline,omitempty"`
 	Eligibility string             `json:"eligibility,omitempty"`
 	Reviewer    *AgentRef          `json:"reviewer,omitempty"`
@@ -90,7 +92,7 @@ func attachWork(ctx context.Context, q workRowsQuerier, events []Message, now in
 		return nil
 	}
 	rows, err := q.QueryContext(ctx, `SELECT w.id,w.title,`+workEffectiveInlineSQL+`,w.state,w.deadline,w.eligibility,e.kind,
- coalesce(rw.amount,0),coalesce(ri.id,''),coalesce(ri.public_key,''),coalesce(ri.handle,''),
+ coalesce(rw.amount,0),`+workRewardNoteSQL+`,coalesce(ri.id,''),coalesce(ri.public_key,''),coalesce(ri.handle,''),
  coalesce((SELECT CASE WHEN r.origin<>'' THEN r.origin ELSE r.id END FROM events r WHERE r.id=w.result_id AND w.result_id<>''),''),
  coalesce((SELECT group_concat(CASE WHEN te.origin<>'' THEN te.origin ELSE te.id END) FROM work_transitions t
   JOIN work_transitions x ON x.work_id=t.work_id AND x.sequence=t.sequence+1 AND x.operation='work.reject'
@@ -115,7 +117,7 @@ func attachWork(ctx context.Context, q workRowsQuerier, events []Message, now in
 		var kind string
 		var reward int64
 		var reviewer AgentRef
-		if err = rows.Scan(&m.root.ID, &m.root.Title, &m.root.State, &m.stored, &m.root.Deadline, &m.root.Eligibility, &kind, &reward, &reviewer.ID, &reviewer.PublicKey, &reviewer.Handle, &m.result, &m.rejected); err != nil {
+		if err = rows.Scan(&m.root.ID, &m.root.Title, &m.root.State, &m.stored, &m.root.Deadline, &m.root.Eligibility, &kind, &reward, &m.root.RewardNote, &reviewer.ID, &reviewer.PublicKey, &reviewer.Handle, &m.result, &m.rejected); err != nil {
 			return err
 		}
 		m.root.Simulated = kind == "simulation"

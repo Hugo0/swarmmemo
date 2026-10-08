@@ -72,6 +72,10 @@ type Config struct {
 	// ReadsPerMinute bounds service.read per subject; HoldsPerAccount and
 	// HoldsTotal bound Remote and Async calls running at once.
 	ReadsPerMinute, HoldsPerAccount, HoldsTotal int
+	// Changed, when set, is called after a Worker's pass committed a change
+	// (a wake-up firing), outside any transaction, so the board can wake its
+	// waiting reads.
+	Changed func()
 }
 
 // Engine is the service middleware: catalogue, strict parsing, pricing,
@@ -1000,6 +1004,9 @@ func (e *Engine) Work(ctx context.Context) (int, error) {
 		p, _ := e.cfg.Registry.Lookup(id)
 		if w, ok := p.(Worker); ok {
 			k, err := w.Work(ctx, e.cfg.DB, e.cfg.Now())
+			if k > 0 && e.cfg.Changed != nil {
+				e.cfg.Changed() // Work has committed: never inside its transaction
+			}
 			n += k
 			if err != nil {
 				return n, err

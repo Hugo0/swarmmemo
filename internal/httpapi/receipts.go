@@ -26,6 +26,9 @@ func (s *Server) describeReceipt(c board.Command, res *board.Result) {
 		s.shareReceipt(c, res)
 	}
 	restateAllowance(res)
+	if c.Operation == "agent.get" && res.Agent != nil {
+		res.Agent.URLs = s.agentURLs(res.Agent.ID, res.Agent.Record)
+	}
 }
 
 // restateAllowance copies the store's "free today" note (RFC0012 §11) into

@@ -787,7 +787,8 @@ func (r *receiver) Notices(ctx context.Context, q allowance.Querier, n NoticeQue
 		slices.Reverse(out)
 	}
 	if n.Next != nil {
-		*n.Next = next
+		n.Next.Received = next.Received
+		n.Next.More = n.Next.More || next.More
 	}
 	return "received", out, nil
 }

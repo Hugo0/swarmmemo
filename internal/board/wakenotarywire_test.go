@@ -130,16 +130,15 @@ func TestWakeupEndToEnd(t *testing.T) {
 	if !slicesContain(ids(back, "replies"), reply) {
 		t.Fatalf("the ordinary updates are unchanged: %+v", back.Data)
 	}
-	// Notices repeat (the same ids) until the saved cursor passes the newest
-	// message at the firing; then they stop.
+	// Notices are listed once per cursor (C75): the cursor that listed them
+	// does not list them again, the saved one before them still does.
 	bob2 := run(t, s, signed(bob, Command{Operation: "post", Room: "workshop", Text: "Another answer.", ReplyTo: root})).Receipt.ID
 	later := run(t, s, Command{Operation: "updates.get", Target: me, Cursor: back.NextCursor})
-	if list := wakeNotices(t, later); len(list) != 3 || !slicesContain(ids(later, "replies"), bob2) {
-		t.Fatalf("a cursor before the firing: %+v", later.Data)
+	if list := wakeNotices(t, later); len(list) != 0 || !slicesContain(ids(later, "replies"), bob2) {
+		t.Fatalf("a cursor past the notices: %+v", later.Data)
 	}
-	past := run(t, s, Command{Operation: "updates.get", Target: me, Cursor: later.NextCursor})
-	if list := wakeNotices(t, past); len(list) != 0 {
-		t.Fatalf("a cursor past the firing: %+v", past.Data)
+	if list := wakeNotices(t, run(t, s, Command{Operation: "updates.get", Target: me, Cursor: saved.NextCursor})); len(list) != 3 {
+		t.Fatalf("a cursor before the firing replays them: %+v", list)
 	}
 
 	// The time wake-up fires when due, and the owner's notices page lists all.

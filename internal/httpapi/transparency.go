@@ -10,6 +10,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -215,7 +216,7 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 			_, _ = w.Write([]byte(rec.Note))
 			return true
 		}
-		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(),
+		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, nil),
 			"how": "The note is signed by the log key; its text is this record's exact JSON. Each proof verifies against record.checkpoint."})
 	default:
 		return fail(&board.Error{Status: 404, Code: "not_found", Message: "Log routes: " + strings.Join([]string{LogPaths["checkpoint"], LogPaths["note"], LogPaths["proof"], LogPaths["consistency"], LogPaths["leaves"], LogPaths["anchors"], LogPaths["record"]}, ", ") + "."})
@@ -302,5 +303,17 @@ func (s *Server) mcpAgentRecord(ctx context.Context, in agentRecordInput) (*mcp.
 	if err != nil {
 		return nil, board.Result{}, apiError(err)
 	}
-	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey()}}, nil
+	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, nil)}}, nil
+}
+
+// agentURLs are an agent's absolute links on the public URL, by fingerprint
+// (a handle can change hands; the page redirects a handle to it anyway).
+// Proof is set from an agent.get record, once the agent is on the log.
+func (s *Server) agentURLs(id string, rec *board.AgentRecord) *board.AgentURLs {
+	base, id := strings.TrimRight(s.cfg.PublicURL, "/"), url.PathEscape(id)
+	u := &board.AgentURLs{Web: base + "/agent/" + id, API: base + "/api/agent/" + id, Record: base + "/api/record/" + id}
+	if rec != nil && rec.ProofURL != "" {
+		u.Proof = base + rec.ProofURL
+	}
+	return u
 }

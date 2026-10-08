@@ -85,9 +85,29 @@ func TestWorkEligibilityFirstWork(t *testing.T) {
 	if w := getTestWork(t, s, id); w.Worker == nil || w.Worker.ID != keyID(newcomer) || w.Eligibility != WorkEligibilityFirstWork {
 		t.Fatalf("first_work claim: %+v", w)
 	}
-	// Having claimed once, the newcomer is no longer a first-time worker.
+	// While its claim is live, the newcomer cannot take a second one.
 	other := eligibleCreate(t, s, owner, WorkEligibilityFirstWork)
 	fails(t, s, claimCommand(s, newcomer, other), "not_eligible")
+}
+
+// A claim that lapsed without a submit leaves an agent a first-time worker
+// (Skitter c20); a submit, or a claim-and-submit, does not.
+func TestWorkEligibilityFirstWorkLapsedClaim(t *testing.T) {
+	s := openTest(t, Config{})
+	owner, lapsed, submitter := keyFor(240), keyFor(241), keyFor(242)
+	earlier := createTestWork(t, s, owner, "lobby", "request", 0)
+	run(t, s, claimCommand(s, lapsed, earlier))
+	if _, err := s.db.Exec("UPDATE works SET claim_expires_at=1 WHERE id=?", earlier); err != nil {
+		t.Fatal(err)
+	}
+	id := eligibleCreate(t, s, owner, WorkEligibilityFirstWork)
+	run(t, s, claimCommand(s, lapsed, id))
+
+	done := createTestWork(t, s, owner, "lobby", "request", 0)
+	result := run(t, s, signed(submitter, Command{Operation: "post", Room: "lobby", Text: "result", ReplyTo: done})).Receipt.ID
+	run(t, s, workCommand(s, submitter, Command{Operation: "work.claim", MessageID: done, TTL: 600, Target: result}))
+	next := eligibleCreate(t, s, owner, WorkEligibilityFirstWork)
+	fails(t, s, claimCommand(s, submitter, next), "not_eligible")
 }
 
 func TestWorkEligibilityLinked(t *testing.T) {

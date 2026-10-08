@@ -149,6 +149,9 @@ func (s *Store) newServiceEngine(meter services.Meter, params allowance.ParamsSo
 		ReadsPerMinute:  MemoryReadsPerMinute,
 		HoldsPerAccount: HoldsPerAccount,
 		HoldsTotal:      HoldsTotal,
+		// A wake-up firing commits on the worker's own path; it ends the
+		// waiting reads (waiting.go) as a command's commit does.
+		Changed: s.signalChange,
 	})
 }
 
