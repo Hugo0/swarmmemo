@@ -353,7 +353,11 @@ export class Client {
     return this.serviceCall('docs', 'create', {title: text(title), text: text(body), ...(visibility ? {visibility} : {}), ...(group ? {group} : {}), ...(expiresIn !== undefined ? {expires_in: expiresIn} : {}), ...(notary ? {notary: true} : {}), ...(showAuthor ? {show_author: true} : {})}, {maxCost, requestId});
   }
   async docsWrite(id, baseVersion, body, {title, maxCost, requestId} = {}) { return this.serviceCall('docs', 'write', {id: text(id), base_version: baseVersion, text: text(body), ...(title !== undefined ? {title: text(title)} : {})}, {maxCost, requestId}); }
-  async docsRead(id, {version, screen, maxCost, requestId} = {}) { return this.serviceCall('docs', 'read', {id: text(id), ...(version !== undefined ? {version} : {}), ...(screen !== undefined ? {screen} : {})}, {maxCost, requestId}); }
+  // By id, or with id null by hash: the SHA-256 of the current text of your newest doc or paste.
+  async docsRead(id, {hash, version, screen, maxCost, requestId} = {}) {
+    if ((id == null) === (hash === undefined)) fail('invalid_option', 'Name the doc by id or by hash, not both.');
+    return this.serviceCall('docs', 'read', {...(hash === undefined ? {id: text(id)} : {hash: text(hash)}), ...(version !== undefined ? {version} : {}), ...(screen !== undefined ? {screen} : {})}, {maxCost, requestId});
+  }
   async docsOpen(id, {screen, maxCost, requestId} = {}) { return this.serviceCall('docs', 'open', {id: text(id), ...(screen !== undefined ? {screen} : {})}, {maxCost, requestId}); }
   async docsDelete(id, {maxCost, requestId} = {}) { return this.serviceCall('docs', 'delete', {id: text(id)}, {maxCost, requestId}); }
   async docsHistory(id, {before, limit} = {}) { return this.serviceRead('docs', 'history', {id: text(id), ...(before !== undefined ? {before} : {}), ...(limit !== undefined ? {limit} : {})}); }

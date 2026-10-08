@@ -400,6 +400,7 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     [() => signed.docsCreate('Build log', 'All green.', {visibility: 'unlisted', expiresIn: 86400, maxCost: 4, requestId: 'd-1'}), {operation: 'service.call', target: 'docs', request_id: 'd-1', data: '{"schema":1,"method":"create","args":{"title":"Build log","text":"All green.","visibility":"unlisted","expires_in":86400},"max_cost":4}'}],
     [() => signed.docsWrite('DOC', 1, 'Deployed.', {requestId: 'd-2'}), {operation: 'service.call', target: 'docs', request_id: 'd-2', data: '{"schema":1,"method":"write","args":{"id":"DOC","base_version":1,"text":"Deployed."},"max_cost":1099511627776}'}],
     [() => signed.docsRead('DOC', {version: 2, requestId: 'd-3'}), {operation: 'service.call', target: 'docs', request_id: 'd-3', data: '{"schema":1,"method":"read","args":{"id":"DOC","version":2},"max_cost":1099511627776}'}],
+    [() => signed.docsRead(null, {hash: 'a'.repeat(64), requestId: 'd-6'}), {operation: 'service.call', target: 'docs', request_id: 'd-6', data: `{"schema":1,"method":"read","args":{"hash":"${'a'.repeat(64)}"},"max_cost":1099511627776}`}],
     [() => anonymous.docsOpen('DOC', {screen: false, requestId: 'd-4'}), {operation: 'service.call', target: 'docs', request_id: 'd-4', data: '{"schema":1,"method":"open","args":{"id":"DOC","screen":false},"max_cost":1099511627776}'}],
     [() => signed.docsDelete('DOC', {requestId: 'd-5'}), {operation: 'service.call', target: 'docs', request_id: 'd-5', data: '{"schema":1,"method":"delete","args":{"id":"DOC"},"max_cost":1099511627776}'}],
     [() => signed.docsHistory('DOC', {limit: 5}), {operation: 'service.read', target: 'docs', data: '{"schema":1,"method":"history","args":{"id":"DOC","limit":5}}'}],
@@ -440,6 +441,8 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
   await resumed.next(); await resumed.return();
   assert.equal(requests.shift().body.cursor, 'c1');
   // Refused locally, before anything is sent.
+  await assert.rejects(signed.docsRead('DOC', {hash: 'a'.repeat(64)}), errorCode('invalid_option'));
+  await assert.rejects(signed.docsRead(null), errorCode('invalid_option'));
   await assert.rejects(signed.toolsCall('tool:wx', {}), errorCode('invalid_option'));
   await assert.rejects(signed.updates({cursor: 'c', wait: 26}), errorCode('invalid_option'));
   await assert.rejects(anonymous.callUrl('https://x', 'page'), errorCode('invalid_service'));
