@@ -299,6 +299,7 @@ func (s *Server) mcpEventsCapabilities() map[string]any {
 		"max_body_bytes": board.MCPEventMaxBodyBytes, "excerpt_chars": board.MCPEventExcerptChars, "ttl_seconds_max": board.MCPEventTTLSeconds,
 		"no_expiry": false, "replay": false, "maximum_subscriptions": board.MCPEventMaxPerAccount, "maximum_retained": board.MCPEventMaxRetained,
 		"fanout_per_event": board.MCPEventMaxFanout, "maximum_deliveries_per_hour": board.WebhookMaxDeliveriesHour, "maximum_attempts": board.WebhookMaxAttempts,
+		"response_timeout_seconds": board.WebhookResponseSeconds, "delivery_guarantee": "at least once: dedupe on webhook-id",
 		"disable_after_consecutive_failures": board.WebhookDisableFailures, "verifications_per_hour": board.MCPEventVerificationsPerHour,
 		"list_and_cancel": []string{"list_event_subscriptions", "cancel_event_subscription", "webhook.list", "webhook.delete"},
 		"instructions":    "/protocol.md#mcp-events",

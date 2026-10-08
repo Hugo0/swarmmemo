@@ -308,7 +308,7 @@ func (s *Store) MCPEventPrincipal(ctx context.Context, token string, now int64) 
 // mcpCredentialLive reports whether the sign-in or token a subscription was
 // made with still acts for its account: an OAuth connection not revoked and
 // not past its refresh lifetime (its access tokens rotate hourly, so the
-// family is the credential), or a token not revoked; and the hosted identity
+// family is the credential), or a token not revoked or expired; and the hosted identity
 // still active (not claimed, not suspended).
 func (s *Store) mcpCredentialLive(ctx context.Context, account, credential string, now int64) (bool, error) {
 	var n int
@@ -319,7 +319,7 @@ func (s *Store) mcpCredentialLive(ctx context.Context, account, credential strin
  WHERE f.family_id=? AND f.account=? AND f.revoked_at=0 AND f.refresh_expires_at>? AND k.state='active'`, id, account, now).Scan(&n)
 	case "token":
 		err = s.db.QueryRowContext(ctx, `SELECT count(*) FROM hosted_tokens t JOIN hosted_keys k ON k.account=t.account
- WHERE t.token_id=? AND t.account=? AND t.revoked_at=0 AND k.state='active'`, id, account).Scan(&n)
+ WHERE t.token_id=? AND t.account=? AND t.revoked_at=0 AND k.state='active'`+hostedUnexpiredFilter, id, account, now).Scan(&n)
 	}
 	return n > 0, err
 }
@@ -779,7 +779,8 @@ func deleteMCPSubscriptionTx(ctx context.Context, tx *sql.Tx, account, id string
 
 // listMCPSubscriptions is the owner's view for webhook.list: never a secret.
 func listMCPSubscriptions(ctx context.Context, tx *sql.Tx, account string, now int64) ([]map[string]any, int64, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,name,arguments,url,via,state,created_at,refreshed_at,refresh_before,confirmed_at,disabled_at,failures,last_error,last_delivery_at
+	rows, err := tx.QueryContext(ctx, `SELECT id,name,arguments,url,via,state,created_at,refreshed_at,refresh_before,confirmed_at,disabled_at,failures,last_error,last_delivery_at,`+
+		deliveryStatusColumns("mcp_event_deliveries", "mcp_event_subscriptions")+`
  FROM mcp_event_subscriptions WHERE account=? ORDER BY created_at,id LIMIT ?`, account, MCPEventMaxRetained)
 	if err != nil {
 		return nil, 0, err
@@ -788,7 +789,9 @@ func listMCPSubscriptions(ctx context.Context, tx *sql.Tx, account string, now i
 	for rows.Next() {
 		var id, name, args, url, via, state, lastError string
 		var created, refreshed, refreshBefore, confirmed, disabled, failures, lastDelivery int64
-		if err = rows.Scan(&id, &name, &args, &url, &via, &state, &created, &refreshed, &refreshBefore, &confirmed, &disabled, &failures, &lastError, &lastDelivery); err != nil {
+		var status deliveryStatus
+		if err = rows.Scan(&id, &name, &args, &url, &via, &state, &created, &refreshed, &refreshBefore, &confirmed, &disabled, &failures, &lastError, &lastDelivery,
+			&status.pending, &status.attempts, &status.nextAt); err != nil {
 			rows.Close()
 			return nil, 0, err
 		}
@@ -807,6 +810,7 @@ func listMCPSubscriptions(ctx context.Context, tx *sql.Tx, account string, now i
 		} else if lastError != "" {
 			item["last_error"] = lastError
 		}
+		status.add(item)
 		list = append(list, item)
 	}
 	err = rows.Err()

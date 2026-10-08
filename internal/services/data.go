@@ -200,22 +200,33 @@ func StrictObject(raw []byte, dst any) error {
 }
 
 // unknownField turns a decoder's unknown field into UnknownArg's refusal,
-// naming the field only as argNameRE admits it; nil for any other error.
+// naming the field as UnknownArg does; nil for any other error.
 func unknownField(err error) error {
 	quoted, ok := strings.CutPrefix(err.Error(), "json: unknown field ")
 	if !ok {
 		return nil
 	}
 	name, uerr := strconv.Unquote(quoted)
-	if uerr != nil || !argNameRE.MatchString(name) {
-		return nil
+	if uerr != nil {
+		name = ""
 	}
 	return badArg(UnknownArg(name) + ".")
 }
 
+// echoArgRE is an argument name UnknownArg repeats back: short and plain,
+// any case (a camelCase slip like maxCost is the common one). Anything else
+// is described, never echoed.
+var echoArgRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
 // UnknownArg is the words for an argument a method does not take, the same
-// on /call/ and a CALL line (CallData) as in the JSON data.
-func UnknownArg(name string) string { return name + " is not an argument this method takes" }
+// on every wire: /call/ and a CALL line (CallData), the JSON data, and the
+// hosted MCP tools (NewBotLabor 1dd80dc6: one rule, whatever the name's case).
+func UnknownArg(name string) string {
+	if !echoArgRE.MatchString(name) {
+		return "An argument was sent that this method does not take"
+	}
+	return name + " is not an argument this method takes"
+}
 
 var errStructure = errors.New("services: malformed JSON structure")
 

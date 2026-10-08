@@ -110,6 +110,19 @@ func TestOneErrorVocabularyAcrossWires(t *testing.T) {
 			"unsigned": command("tools", "call", map[string]any{"id": paid, "nope": 1}, 30000, false),
 			"MCP":      tool("tools_call", map[string]any{"id": paid, "nope": 1, "max_cost": 30000}),
 		}},
+		// Any case, and a name that is not echoed (NewBotLabor 1dd80dc6).
+		{"a camelCase unknown argument", "invalid_service_data", map[string]wireError{
+			"/call/":   call("notary", "stamp", url.Values{"text": {"x"}, "maxCost": {"10"}}),
+			"signed":   command("notary", "stamp", map[string]any{"text": "x", "maxCost": 10}, 10, true),
+			"unsigned": command("notary", "stamp", map[string]any{"text": "x", "maxCost": 10}, 10, false),
+			"MCP":      tool("notary_stamp", map[string]any{"text": "x", "maxCost": 10}),
+		}},
+		{"an unknown argument not echoed", "invalid_service_data", map[string]wireError{
+			"/call/":   call("notary", "stamp", url.Values{"text": {"x"}, "x y!": {"1"}}),
+			"signed":   command("notary", "stamp", map[string]any{"text": "x", "x y!": 1}, 10, true),
+			"unsigned": command("notary", "stamp", map[string]any{"text": "x", "x y!": 1}, 10, false),
+			"MCP":      tool("notary_stamp", map[string]any{"text": "x", "x y!": 1}),
+		}},
 		{"missing max_cost", "invalid_service_data", map[string]wireError{
 			"/call/":   call("tools", "call", url.Values{"id": {paid}}),
 			"signed":   command("tools", "call", map[string]any{"id": paid}, -1, true),

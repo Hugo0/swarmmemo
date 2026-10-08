@@ -55,6 +55,9 @@ const (
 	HostedSecretBytes = 32
 	// HostedTokensMax bounds an identity's live tokens.
 	HostedTokensMax = 4
+	// HostedExpiredTokensListed bounds the expired tokens hosted.token list
+	// shows after the live ones; their rows are kept either way.
+	HostedExpiredTokensListed = 16
 	// HostedTokenLabelBytes bounds a token's label.
 	HostedTokenLabelBytes = 64
 	// HostedHoldSeconds is how long a leak hold's confirmation is valid.
@@ -694,12 +697,22 @@ func (s *Store) recoverHosted(ctx context.Context, tx *sql.Tx, c Command, a acto
 	return Result{Data: data, afterCommit: hostedShown(data, token, recovery)}, nil
 }
 
-// HostedToken is one live token as hosted.token list shows it.
+// hostedUnexpiredFilter is the hosted_tokens condition (alias t) that leaves
+// out a token whose spend limit's expires_at has passed: it no longer
+// authenticates (HostedSigner), so it holds no place under HostedTokensMax and
+// takes no new limit; ? is now.
+const hostedUnexpiredFilter = ` AND NOT EXISTS (SELECT 1 FROM spend_limits l WHERE l.credential='token:'||t.token_id AND l.account=t.account AND l.expires_at BETWEEN 1 AND ?)`
+
+// HostedToken is one token as hosted.token list shows it: a live one, or
+// one whose spend limit's expires_at has passed (Expired), which no longer
+// authenticates and no longer counts toward HostedTokensMax.
 type HostedToken struct {
 	TokenID    string `json:"token_id"`
 	Label      string `json:"label"`
 	CreatedAt  int64  `json:"created_at"`
 	LastUsedAt int64  `json:"last_used_at"`
+	ExpiresAt  int64  `json:"expires_at,omitempty"`
+	Expired    bool   `json:"expired,omitempty"`
 	// Current marks the token this command came through.
 	Current bool `json:"current,omitempty"`
 	// SpendLimit is the token's credit limit (null limits: none) and today's
@@ -728,7 +741,12 @@ func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedD
 	}
 	switch d.Action {
 	case "list":
-		rows, err := tx.QueryContext(ctx, "SELECT token_id,label,created_at,last_used_at FROM hosted_tokens t WHERE account=? AND revoked_at=0"+oauthLiveFilter+" ORDER BY created_at,token_id LIMIT ?", a.account, now, HostedTokensMax+OAuthConnectionsMax)
+		// Live tokens first, then the most recently made expired ones, so
+		// expired rows (kept, never deleted) cannot push a live one off.
+		rows, err := tx.QueryContext(ctx, `SELECT t.token_id,t.label,t.created_at,t.last_used_at,COALESCE(l.expires_at,0),COALESCE(l.expires_at,0) BETWEEN 1 AND ? AS expired
+ FROM hosted_tokens t LEFT JOIN spend_limits l ON l.credential='token:'||t.token_id AND l.account=t.account
+ WHERE t.account=? AND t.revoked_at=0`+oauthLiveFilter+` ORDER BY expired,CASE WHEN expired THEN -t.created_at ELSE t.created_at END,t.token_id LIMIT ?`,
+			now, a.account, now, HostedTokensMax+OAuthConnectionsMax+HostedExpiredTokensListed)
 		if err != nil {
 			return Result{}, err
 		}
@@ -736,7 +754,7 @@ func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedD
 		tokens := []HostedToken{}
 		for rows.Next() {
 			var t HostedToken
-			if err = rows.Scan(&t.TokenID, &t.Label, &t.CreatedAt, &t.LastUsedAt); err != nil {
+			if err = rows.Scan(&t.TokenID, &t.Label, &t.CreatedAt, &t.LastUsedAt, &t.ExpiresAt, &t.Expired); err != nil {
 				return Result{}, err
 			}
 			t.Current = a.credential == credentialTokenPrefix+t.TokenID
@@ -754,7 +772,7 @@ func (s *Store) hostedTokens(ctx context.Context, tx *sql.Tx, a actor, d hostedD
 		return Result{Data: map[string]any{"tokens": tokens, "max": HostedTokensMax, "oauth_max": OAuthConnectionsMax}}, nil
 	case "create":
 		var live int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM hosted_tokens t WHERE account=? AND revoked_at=0"+oauthOwnTokenFilter, a.account).Scan(&live); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM hosted_tokens t WHERE account=? AND revoked_at=0"+oauthOwnTokenFilter+hostedUnexpiredFilter, a.account, now).Scan(&live); err != nil {
 			return Result{}, err
 		}
 		if live >= HostedTokensMax {

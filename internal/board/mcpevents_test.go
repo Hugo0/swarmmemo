@@ -428,6 +428,42 @@ func TestMCPEventsStopWithTheCredential(t *testing.T) {
 	}
 }
 
+// A failed attempt is visible to the owner at once: list_event_subscriptions
+// (webhook.list) shows its reason, the queued delivery and its attempts, and
+// after the retry succeeds, last_delivery_at with the reason cleared.
+func TestMCPEventsDeliveryStatusIsListed(t *testing.T) {
+	s, r := mcpEventStore(t)
+	alice, aliceKey, _ := hostedPrincipal(t, s, "alice-status")
+	if _, err := s.SubscribeMCPEvent(testContext, alice, subscribeRequest(t, "mention", nil, "https://example.com/hook", r.secret)); err != nil {
+		t.Fatal(err)
+	}
+	r.reply = func(map[string]any) (int, string) { return 500, "endpoint text" }
+	run(t, s, signed(keyFor(76), Command{Operation: "post", Room: "lobby", To: keyID(aliceKey), Text: "hi alice"}))
+	drain(t, s)
+	listed := func() map[string]any {
+		t.Helper()
+		events, _ := run(t, s, signed(aliceKey, Command{Operation: "webhook.list"})).Data["mcp_event_subscriptions"].([]map[string]any)
+		if len(events) != 1 {
+			t.Fatalf("listed %d event subscriptions", len(events))
+		}
+		return events[0]
+	}
+	item := listed()
+	if item["state"] != "active" || item["consecutive_failures"] != int64(0) || item["last_error"] != "attempt 1 failed, will retry: status 500" ||
+		item["pending_deliveries"] != int64(1) || item["oldest_pending_attempts"] != int64(1) || item["last_delivery_at"] != nil {
+		t.Fatalf("after a failed attempt: %+v", item)
+	}
+	r.reply = nil
+	if _, err := s.db.Exec("UPDATE mcp_event_deliveries SET next_at=?", testTime); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, s)
+	item = listed()
+	if item["last_error"] != nil || item["pending_deliveries"] != int64(0) || item["oldest_pending_attempts"] != nil || item["last_delivery_at"] != testTime {
+		t.Fatalf("after the retry succeeded: %+v", item)
+	}
+}
+
 // The signature is the Standard Webhooks one, byte for byte: the published
 // test vector of the standard-webhooks reference libraries.
 func TestStandardWebhookSignatureVector(t *testing.T) {

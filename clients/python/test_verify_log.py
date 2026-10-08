@@ -118,6 +118,39 @@ class Vectors(unittest.TestCase):
         with self.assertRaises(v.VerifyError):
             v.check_message(proof, anon)
 
+    def test_message_leaf_must_be_this_id(self):
+        """A proof of another entry never proves message_id (NewBotLabor
+        47c51ade): a doc version's proof given for a message ID fails, as does
+        any other kind, and a doc's own ID is labelled a doc version."""
+        import hashlib
+        import json
+        import os
+        import tempfile
+
+        text = "doc body"
+        doc = {"v": 1, "kind": "doc", "id": "cd" * 16, "text_sha256": hashlib.sha256(text.encode()).hexdigest()}
+
+        def run(leaf, message_id, extra=None):
+            ver = v.Verifier("https://example.invalid", "k", None)
+            ver.checkpoint = lambda c: (10, b"r")
+            ver.inclusion = lambda p, size, root: leaf
+            fd, path = tempfile.mkstemp(suffix=".json")
+            with os.fdopen(fd, "w") as f:
+                json.dump({"checkpoint": "c", "leaf": {"index": 3}, **(extra or {})}, f)
+            try:
+                return ver.message(message_id, path)
+            finally:
+                os.unlink(path)
+
+        for leaf, mid, extra in ((doc, "ab" * 16, None), (doc, "ab" * 16, {"text": text}),
+                                 ({"kind": "notary", "id": "ab" * 16}, "ab" * 16, None),
+                                 ({"kind": "witness"}, "ab" * 16, None)):
+            with self.assertRaises(v.VerifyError):
+                run(leaf, mid, extra)
+        self.assertEqual(run(doc, doc["id"], {"text": text})[-1], "doc version: text matches the logged SHA-256")
+        with self.assertRaises(v.VerifyError):
+            run(doc, doc["id"], {"text": "other"})
+
 
 if __name__ == "__main__":
     unittest.main()

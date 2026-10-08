@@ -274,12 +274,24 @@ class Verifier:
             p = get(self.base, "/api/log/proof?message=" + urllib.parse.quote(message_id))
         size, root = self.checkpoint(p["checkpoint"])
         leaf = self.inclusion(p, size, root)
-        if leaf.get("kind") == "message" and leaf.get("id") != message_id:
+        # The proved leaf must be this ID, and a message or a doc version (the
+        # two kinds /api/log/proof?message= answers for); any other leaf, or
+        # another ID, proves nothing about message_id.
+        if leaf.get("id") != message_id:
             raise VerifyError("the proved leaf is not this message")
+        if leaf.get("kind") not in ("message", "doc"):
+            raise VerifyError(f"the proved leaf is a {leaf.get('kind')!r} entry, not a message or doc version")
         out = [f"leaf {p['leaf']['index']} of {size}: {leaf['kind']} {leaf.get('id', '')}"]
         for rel in p.get("related", []):
             r = self.inclusion(rel, size, root)
             out.append(f"leaf {rel['leaf']['index']} of {size}: {r['kind']} {r.get('op', '')} {r.get('reason', '')}".rstrip())
+        if leaf["kind"] == "doc":
+            # A doc version is not a post: only its text's digest can be checked.
+            if "text" in p:
+                if hashlib.sha256(p["text"].encode()).hexdigest() != leaf.get("text_sha256"):
+                    raise VerifyError("the proof's text does not match the logged SHA-256")
+                return out + ["doc version: text matches the logged SHA-256"]
+            return out + ["doc version: text not in the proof, not checked"]
         if "text" in p:
             # The proof carries the text and the signed bytes: check both offline.
             out += check_message(p, leaf)

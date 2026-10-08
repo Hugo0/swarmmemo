@@ -25,13 +25,24 @@ import (
 // lease, so a crash strands nothing and a restart resumes the same queue with the
 // same backoff. Nothing here runs unless StartWebhookDelivery is called.
 
+// A receiver gets WebhookResponseSeconds from the end of the request to its
+// status line, inside a WebhookRequestSeconds bound on the whole attempt (dial,
+// TLS, send, answer). Standard Webhooks senders allow about 15 s; a tighter
+// window counts a slow 200 as a failure and retries it, which the receiver then
+// sees as a duplicate.
 const (
-	webhookRequestTimeout = 8 * time.Second
-	webhookDialTimeout    = 3 * time.Second
-	webhookResponseBytes  = 8 << 10
-	webhookDefaultWorkers = 2
-	webhookDefaultPoll    = 2 * time.Second
-	webhookMaintainEvery  = 60 * time.Second
+	WebhookResponseSeconds = 10
+	WebhookRequestSeconds  = 15
+)
+
+const (
+	webhookRequestTimeout  = WebhookRequestSeconds * time.Second
+	webhookResponseTimeout = WebhookResponseSeconds * time.Second
+	webhookDialTimeout     = 3 * time.Second
+	webhookResponseBytes   = 8 << 10
+	webhookDefaultWorkers  = 2
+	webhookDefaultPoll     = 2 * time.Second
+	webhookMaintainEvery   = 60 * time.Second
 )
 
 // webhookDial is the SSRF boundary that actually matters: it filters the address
@@ -67,7 +78,7 @@ func (s *Store) webhookHTTP() *http.Client {
 				DialContext:           s.webhookDial,
 				TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
 				TLSHandshakeTimeout:   4 * time.Second,
-				ResponseHeaderTimeout: 5 * time.Second,
+				ResponseHeaderTimeout: webhookResponseTimeout,
 				DisableKeepAlives:     true,
 				MaxIdleConns:          0,
 			},
@@ -308,8 +319,16 @@ func (s *Store) settle(ctx context.Context, d *webhookDelivery, ok, permanent bo
 	attempts := d.attempts + 1
 	exhausted := permanent || attempts >= WebhookMaxAttempts || d.kind == "challenge"
 	if !exhausted {
-		_, err := s.db.ExecContext(ctx, "UPDATE "+deliveries+" SET attempts=?,next_at=?,leased_until=0 WHERE seq=?",
-			attempts, now+webhookBackoff(attempts, rand.Float64), d.seq)
+		if _, err := s.db.ExecContext(ctx, "UPDATE "+deliveries+" SET attempts=?,next_at=?,leased_until=0 WHERE seq=?",
+			attempts, now+webhookBackoff(attempts, rand.Float64), d.seq); err != nil {
+			return err
+		}
+		// Every failed attempt leaves its reason where the owner can read it, not
+		// only the last: a receiver that answers too slowly or 5xx's once should
+		// be able to see why it got the event again. failures counts exhausted
+		// deliveries only, so a retry that later succeeds disables nothing.
+		_, err := s.db.ExecContext(ctx, "UPDATE "+subscriptions+" SET last_error=? WHERE id=?",
+			"attempt "+strconv.FormatInt(attempts, 10)+" failed, will retry: "+reason, d.subscription)
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, "DELETE FROM "+deliveries+" WHERE seq=?", d.seq); err != nil {

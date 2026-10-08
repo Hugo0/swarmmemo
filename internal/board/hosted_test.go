@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -280,6 +281,49 @@ func TestHostedTokensAndRecovery(t *testing.T) {
 	}
 	// A keyed agent has no hosted tokens to manage.
 	fails(t, s, signed(keyFor(91), Command{Operation: "hosted.token", Data: `{"schema":1,"action":"list"}`}), "hosted_required")
+}
+
+// A token past its spend limit's expires_at has ended: it stops
+// authenticating, frees its place under HostedTokensMax without a revoke, is
+// listed as expired (its row kept), and cannot be revived by a new limit.
+func TestHostedExpiredTokenLeavesTheCap(t *testing.T) {
+	s := openTest(t, Config{HostedKEKFile: writeKEK(t, 0o600), Features: Features{Ledger: LedgerOn}})
+	key := hostedKey(t, s, createHosted(t, s, "test-origin", "")["token"].(string))
+	ends := testTime + 60
+	expiring := run(t, s, signed(key, Command{Operation: "hosted.token", Data: `{"schema":1,"action":"create","label":"short","spend_limit":{"expires_at":` + strconv.FormatInt(ends, 10) + `}}`}))
+	expiringID, expiringToken := expiring.Data["token_id"].(string), expiring.Data["token"].(string)
+	for i := 2; i < HostedTokensMax; i++ {
+		run(t, s, signed(key, Command{Operation: "hosted.token", Data: `{"schema":1,"action":"create"}`}))
+	}
+	fails(t, s, signed(key, Command{Operation: "hosted.token", Data: `{"schema":1,"action":"create"}`}), "token_limit")
+
+	s.now = func() time.Time { return time.Unix(ends, 0) }
+	if _, _, err := s.HostedSigner(testContext, expiringToken, ends); !isCode(err, "hosted_token_invalid") {
+		t.Fatalf("an expired token still authenticates: %v", err)
+	}
+	newest := run(t, s, signedNow(s, key, Command{Operation: "hosted.token", Data: `{"schema":1,"action":"create","label":"replacement"}`})).Data["token_id"].(string)
+	fails(t, s, signedNow(s, key, Command{Operation: "hosted.token", Data: `{"schema":1,"action":"create"}`}), "token_limit")
+
+	tokens := run(t, s, signedNow(s, key, Command{Operation: "hosted.token", Data: `{"schema":1,"action":"list"}`})).Data["tokens"].([]HostedToken)
+	if len(tokens) != HostedTokensMax+1 {
+		t.Fatalf("listed %d tokens: %+v", len(tokens), tokens)
+	}
+	for i, token := range tokens {
+		want := token.TokenID == expiringID
+		if token.Expired != want || want && (token.ExpiresAt != ends || i != len(tokens)-1) {
+			t.Fatalf("token %d: %+v", i, token)
+		}
+	}
+	if tokens[HostedTokensMax-1].TokenID != newest {
+		t.Fatalf("live tokens are not listed first, oldest first: %+v", tokens)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM hosted_tokens WHERE token_id='"+expiringID+"' AND revoked_at=0"); n != 1 {
+		t.Fatal("the expired token's row was not kept")
+	}
+	fails(t, s, signedNow(s, key, Command{Operation: "spend_limit.set", Target: expiringID, Data: `{"schema":1}`}), "not_found")
+	if _, _, err := s.HostedSigner(testContext, expiringToken, ends+1); !isCode(err, "hosted_token_invalid") {
+		t.Fatalf("an expired token came back: %v", err)
+	}
 }
 
 // tierName is the allowance tier allowance.get names for agent.

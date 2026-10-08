@@ -149,9 +149,10 @@ type webhookSubscription struct {
 
 const webhookColumns = `id,account,created_by,url,secret,state,challenge,created_at,confirmed_at,disabled_at,failures,last_error`
 
-func scanWebhook(row scanner) (webhookSubscription, error) {
+// scanWebhook reads webhookColumns, then any extra columns selected after them.
+func scanWebhook(row scanner, extra ...any) (webhookSubscription, error) {
 	var s webhookSubscription
-	err := row.Scan(&s.ID, &s.Account, &s.CreatedBy, &s.URL, &s.Secret, &s.State, &s.Challenge, &s.Created, &s.Confirmed, &s.Disabled, &s.Failures, &s.LastError)
+	err := row.Scan(append([]any{&s.ID, &s.Account, &s.CreatedBy, &s.URL, &s.Secret, &s.State, &s.Challenge, &s.Created, &s.Confirmed, &s.Disabled, &s.Failures, &s.LastError}, extra...)...)
 	return s, err
 }
 
@@ -339,14 +340,16 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 	if a.grant != nil {
 		return Result{}, webhookError("webhook_delegated")
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT "+webhookColumns+" FROM webhook_subscriptions WHERE account=? ORDER BY created_at,id LIMIT ?", a.account, limitValue(c.Limit))
+	rows, err := tx.QueryContext(ctx, "SELECT "+webhookColumns+","+deliveryStatusColumns("webhook_deliveries", "webhook_subscriptions")+
+		" FROM webhook_subscriptions WHERE account=? ORDER BY created_at,id LIMIT ?", a.account, limitValue(c.Limit))
 	if err != nil {
 		return Result{}, err
 	}
 	defer rows.Close()
 	list := []map[string]any{}
 	for rows.Next() {
-		w, err := scanWebhook(rows)
+		var status deliveryStatus
+		w, err := scanWebhook(rows, &status.pending, &status.attempts, &status.nextAt)
 		if err != nil {
 			return Result{}, err
 		}
@@ -366,6 +369,7 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 		if w.State == "pending" {
 			item["pending_expires"] = w.Created + WebhookPendingTTL
 		}
+		status.add(item)
 		list = append(list, item)
 	}
 	if err = rows.Err(); err != nil {
@@ -393,6 +397,27 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 		"mcp_event_subscriptions": events, "mcp_event_queued_deliveries": eventsQueued,
 		"maximum_mcp_event_subscriptions": MCPEventMaxPerAccount,
 	}}, nil
+}
+
+// deliveryStatus is what is still queued for one subscription, so an owner can
+// tell a receiver that is being retried from one that is simply quiet.
+type deliveryStatus struct{ pending, attempts, nextAt int64 }
+
+// deliveryStatusColumns selects a subscription row's deliveryStatus as three
+// correlated columns (the queue's UNIQUE(subscription,event_id) index serves
+// them), so a listing stays one statement inside its transaction.
+func deliveryStatusColumns(deliveries, subscriptions string) string {
+	oldest := func(column string) string {
+		return "COALESCE((SELECT " + column + " FROM " + deliveries + " WHERE subscription=" + subscriptions + ".id ORDER BY seq LIMIT 1),0)"
+	}
+	return "(SELECT count(*) FROM " + deliveries + " WHERE subscription=" + subscriptions + ".id)," + oldest("attempts") + "," + oldest("next_at")
+}
+
+func (d deliveryStatus) add(item map[string]any) {
+	item["pending_deliveries"] = d.pending
+	if d.pending > 0 {
+		item["oldest_pending_attempts"], item["oldest_pending_next_attempt_at"] = d.attempts, d.nextAt
+	}
 }
 
 func webhookHourUsed(ctx context.Context, tx *sql.Tx, account string, now int64) (int64, error) {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -442,5 +443,71 @@ func TestWebhookShutdownDrainsWithoutLosingOrRepeating(t *testing.T) {
 	}
 	if leased != 0 {
 		t.Fatalf("%d deliveries were left leased by a stopped worker", leased)
+	}
+}
+
+// A receiver that takes seconds to answer is still inside the response window:
+// its 200 settles the delivery once, rather than timing out and being retried
+// into a duplicate (a scripted receiver saw each event twice, 24 s apart).
+func TestWebhookSlowReceiverIsDeliveredOnce(t *testing.T) {
+	s := insecureStore(t)
+	server, seen := endpoint(t, func(*received) (int, string) {
+		time.Sleep(7 * time.Second)
+		return 200, "ok"
+	})
+	id, _ := activeWebhook(t, s, "account-slow", server.URL+"/hook")
+	if _, err := s.db.Exec("INSERT INTO webhook_deliveries(id,subscription,event_id,kind,body,next_at,created_at) VALUES('slow',?,'e','event','{}',?,?)", id, testTime, testTime); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := s.deliverOnce(testContext); err != nil || !worked {
+		t.Fatalf("delivery did not run: %v", err)
+	}
+	s.now = func() time.Time { return time.Unix(testTime+webhookMaxBackoff+1, 0) }
+	if worked, err := s.deliverOnce(testContext); err != nil || worked {
+		t.Fatalf("a delivered event was attempted again: worked=%v err=%v", worked, err)
+	}
+	if n := len(seen()); n != 1 || queueDepth(t, s) != 0 {
+		t.Fatalf("slow receiver saw %d requests, %d still queued", n, queueDepth(t, s))
+	}
+	if _, failures, reason := subscriptionState(t, s, id); failures != 0 || reason != "" {
+		t.Fatalf("a slow success was recorded as a failure: %d %q", failures, reason)
+	}
+}
+
+// The reason of a failed attempt is visible before the delivery is exhausted,
+// and webhook.list shows what is still queued and how often it was tried.
+func TestWebhookFailedAttemptIsVisibleInTheListing(t *testing.T) {
+	s := insecureStore(t)
+	server, _ := endpoint(t, func(*received) (int, string) { return 500, "<script>endpoint text</script>" })
+	key := keyFor(94)
+	id := run(t, s, signed(key, Command{Operation: "webhook.create", Data: testWebhookData})).Data["subscription_id"].(string)
+	if _, err := s.db.Exec("DELETE FROM webhook_deliveries"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("UPDATE webhook_subscriptions SET state='active',confirmed_at=?,url=? WHERE id=?", testTime, server.URL+"/hook", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("INSERT INTO webhook_deliveries(id,subscription,event_id,kind,body,next_at,created_at) VALUES('visible',?,'e','event','{}',?,?)", id, testTime, testTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.deliverOnce(testContext); err != nil {
+		t.Fatal(err)
+	}
+	state, failures, reason := subscriptionState(t, s, id)
+	if state != "active" || failures != 0 || reason != "attempt 1 failed, will retry: status 500" {
+		t.Fatalf("after one failed attempt: %s %d %q", state, failures, reason)
+	}
+	listed := run(t, s, signed(key, Command{Operation: "webhook.list"}))
+	subscriptions, _ := listed.Data["subscriptions"].([]map[string]any)
+	if len(subscriptions) != 1 {
+		t.Fatalf("listed %d subscriptions", len(subscriptions))
+	}
+	item := subscriptions[0]
+	next, _ := item["oldest_pending_next_attempt_at"].(int64)
+	if item["last_error"] != reason || item["pending_deliveries"] != int64(1) || item["oldest_pending_attempts"] != int64(1) || next <= testTime {
+		t.Fatalf("listing does not show the retry: %+v", item)
+	}
+	if encoded, _ := json.Marshal(listed.Data); strings.Contains(string(encoded), "endpoint text") {
+		t.Fatalf("endpoint-controlled text reached the listing: %s", encoded)
 	}
 }

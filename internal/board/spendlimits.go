@@ -194,7 +194,9 @@ func (s *Store) changeSpendLimit(ctx context.Context, tx *sql.Tx, c Command, a a
 		}
 	case len(c.Target) == 16 && strings.Trim(c.Target, "0123456789abcdef") == "":
 		var oauth int
-		err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM oauth_families f WHERE f.access_sha256=t.token_sha256) FROM hosted_tokens t WHERE t.token_id=? AND t.account=? AND t.revoked_at=0", c.Target, a.account).Scan(&oauth)
+		// An expired token has ended: a new limit would revive it past the
+		// HostedTokensMax it no longer counts toward.
+		err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM oauth_families f WHERE f.access_sha256=t.token_sha256) FROM hosted_tokens t WHERE t.token_id=? AND t.account=? AND t.revoked_at=0"+hostedUnexpiredFilter, c.Target, a.account, now).Scan(&oauth)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return Result{}, err
 		}
@@ -227,7 +229,7 @@ func spendLimitError(e *allowance.Err) error {
 	case "per_call":
 		out.Message = fmt.Sprintf("This call's maximum cost is above this credential's per-call limit (credit_per_call %d); nothing was charged. Lower max_cost, or ask the account's owner to raise the limit.", e.SpendLimitValue)
 	default:
-		out.Message = "This credential's spend limit has expired (expires_at), so it can spend no credit; nothing was charged. The account's owner can set a new limit with spend_limit.set."
+		out.Message = "This credential's spend limit has expired (expires_at), so it can spend no credit; nothing was charged. The account's owner can make a new token (hosted.token create)."
 	}
 	return out
 }

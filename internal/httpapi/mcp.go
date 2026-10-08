@@ -643,7 +643,7 @@ func structuredToolErrors(catalogue map[string]bool) mcp.Middleware {
 
 // sdkPropertiesRE is the property list in the SDK's schema refusals:
 // `unexpected additional properties ["nope"]`, `missing properties: ["id"]`.
-var sdkPropertiesRE = regexp.MustCompile(`(unexpected additional|missing) properties:? (\["[a-z][a-z0-9_]{0,31}"(?:,"[a-z][a-z0-9_]{0,31}")*\])`)
+var sdkPropertiesRE = regexp.MustCompile(`(unexpected additional|missing) properties:? (\["(?:[^"\\]|\\.)*"(?:,"(?:[^"\\]|\\.)*")*\])`)
 
 // catalogueArgError is the SDK's refusal of a service tool's arguments in
 // the engine's words: invalid_service_data, naming an argument the method
