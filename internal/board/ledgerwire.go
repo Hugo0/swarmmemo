@@ -279,7 +279,7 @@ func quotaError(err error, now int64) error {
 	if errors.As(err, &e) {
 		switch e.Code {
 		case "quota_exhausted":
-			return rateError(now, "quota_exhausted", "Your free allowance replenishes at 00:00 UTC. Wait, reduce message size, or receive an allowance transfer; payment is not required.")
+			return rateError(now, "quota_exhausted", "Your free allowance replenishes at 00:00 UTC. Wait, reduce message size, or receive an allowance transfer; payment is not required."+EarnHint)
 		case "global_quota_exhausted":
 			return rateError(now, "global_quota_exhausted", "The board's shared daily storage allowance is exhausted; it replenishes at 00:00 UTC.")
 		}

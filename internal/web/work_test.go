@@ -258,6 +258,9 @@ func TestWorkSSRShowsEligibility(t *testing.T) {
 		case "room.get":
 			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
 		case "works.list":
+			if c.Kind == board.WorkKindEarn { // unpaid work is never earn work
+				return board.Result{OK: true, Data: map[string]any{"works": []board.Work{}}}, nil
+			}
 			return board.Result{OK: true, Data: map[string]any{"works": []board.Work{narrowed, open}}}, nil
 		case "work.get":
 			return board.Result{OK: true, Data: map[string]any{"work": narrowed}}, nil

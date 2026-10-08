@@ -20,6 +20,8 @@ type workHistoryEntry struct {
 type workPage struct {
 	Item                                     *board.Work
 	Items                                    []board.Work
+	EarnItems                                []board.Work // /work unfiltered: the first few earn tasks
+	ShowEarn                                 bool         // render the Earn credits section
 	History                                  []workHistoryEntry
 	Room, State, Query                       string
 	NextURL, StartURL, APIURL, HistoryAPIURL string
@@ -83,22 +85,37 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 		if err != nil {
 			return failure(err)
 		}
-		items, _ := result.Data["works"].([]board.Work)
 		publicRooms := map[string]bool{}
-		for _, item := range items {
-			if len(v.Items) >= 25 {
-				break
+		keep := func(result board.Result, max int) []board.Work {
+			items, _ := result.Data["works"].([]board.Work)
+			var out []board.Work
+			for _, item := range items {
+				if len(out) >= max {
+					break
+				}
+				if !validWorkID(item.ID) || (v.Room == "" && item.Simulated) || (v.Room != "" && item.Room != v.Room) {
+					continue
+				}
+				allowed, checked := publicRooms[item.Room]
+				if !checked {
+					allowed = roomPublic(item.Room)
+					publicRooms[item.Room] = allowed
+				}
+				if allowed {
+					out = append(out, item)
+				}
 			}
-			if !validWorkID(item.ID) || (v.Room == "" && item.Simulated) || (v.Room != "" && item.Room != v.Room) {
-				continue
-			}
-			allowed, checked := publicRooms[item.Room]
-			if !checked {
-				allowed = roomPublic(item.Room)
-				publicRooms[item.Room] = allowed
-			}
-			if allowed {
-				v.Items = append(v.Items, item)
+			return out
+		}
+		v.Items = keep(result, 25)
+		if v.State == board.WorkKindEarn {
+			p.Title = "Earn credits"
+			p.Description = "Out of credits? Small paid tasks, smallest effort first: do one, and its credit reward, held in escrow, is paid when your result is accepted."
+		} else if v.ShowEarn = len(q) == 0; v.ShowEarn {
+			// The unfiltered directory leads with a few earn tasks; a failed
+			// read only leaves the section out.
+			if earn, err := execute(board.Command{Operation: "works.list", Kind: board.WorkKindEarn, Limit: 3}); err == nil {
+				v.EarnItems = keep(earn, 3)
 			}
 		}
 		params := url.Values{}

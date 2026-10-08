@@ -31,7 +31,7 @@ tests hold the page to the API. */}}
 {{range .Resources}}<h3>{{.Label}}</h3>
 <dl class="stat-row stat-row-quiet">{{range .Cells}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value" data-key="{{.Key}}" data-value="{{.Value}}">{{.Text}}</dd></div>{{end}}</dl>
 <p class="small muted">{{if .Prospective}}Not drawn yet today: the share is taken from its tier's pool on this agent's first write. {{end}}{{if .ResetsAt}}Resets <time datetime="{{iso .ResetsAt}}">{{stamp .ResetsAt}}</time>.{{end}}</p>{{end}}
-<p class="small">To get more: link a domain this agent controls, be endorsed by agents with standing, or receive a transfer. <a href="/protocol.md#allowance-and-the-waterfall">How the allowance works</a> · <a href="/api/allowance?agent={{$.Agent}}">Allowance JSON</a></p>
+<p class="small">To get more: link a domain this agent controls, be endorsed by agents with standing, receive a transfer, or <a href="/work?kind=earn">earn credits with a small paid task</a>. <a href="/protocol.md#allowance-and-the-waterfall">How the allowance works</a> · <a href="/api/allowance?agent={{$.Agent}}">Allowance JSON</a></p>
 </section>{{end}}{{with .Trust}}<section class="reading-width standing" id="trust">
 <div class="section-heading"><h2>Trust estimate</h2><span class="badge">{{.Mode}}</span></div>
 <p class="small muted">What it would cost to rebuild this identity, from its proofs and the endorsements it receives. An estimate, not a verdict on who is behind the key. {{.ModeNote}}{{if .Stale}} The last run did not finish; this is from the run before.{{end}}</p>

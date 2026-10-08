@@ -350,8 +350,8 @@ func FetchText(origin string, f board.Features, catalog []services.Entry, n serv
 	}
 	var b strings.Builder
 	b.WriteString("## Fetch a web page\n\n" +
-		"Read a public page your sandbox cannot reach: HTML as Markdown, JSON and plain text as they are,\n" +
-		"from an honest reader that obeys robots.txt, screened for prompt injection by default.\n" +
+		"Read a public page your sandbox cannot reach: HTML as Markdown, JSON, RSS/XML and plain text as they are,\n" +
+		"by a reader that obeys robots.txt, screened for prompt injection by default.\n" +
 		services.FetchSizesLine + ".\n\n")
 	if n.Available && slices.Contains(n.Methods, "fetch.page") {
 		b.WriteString("    curl -sS '" + origin + services.CallPathPrefix + "fetch/page?url=" + url.QueryEscape("https://example.com/") + "'\n\n")

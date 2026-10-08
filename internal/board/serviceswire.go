@@ -160,7 +160,7 @@ func (s *Store) serviceDeps() services.Deps {
 		Inference: s.services.inference, Runs: s.services.runs, Board: serviceBoardView{}, ServiceID: s.config.ServiceID,
 		PublicData: s.services.publicData, Classifier: s.classifier(), NotaryKey: s.services.notaryKey, TextScreener: s.services.screener, LeakScreener: s.services.leaker,
 		ReceiverScreen: s.config.Features.ReceiverScreen, ContentScreen: s.config.Features.ContentScreen, ContentURL: s.config.Features.ContentURL,
-		Fetch: s.services.fetch, EchoSimulate: s.config.EchoSimulate}
+		Fetch: s.services.fetch, Blobs: serviceBlobKeeper{s}, EchoSimulate: s.config.EchoSimulate}
 }
 
 // UseServiceMeter replaces the ledger and price source the services use. It

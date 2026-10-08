@@ -294,6 +294,10 @@ type Deps struct {
 	// lists as unavailable and every call is refused before anything is
 	// reserved.
 	Fetch *FetchConfig
+	// Blobs stores a provider's bytes as a board file (fetch's keep=blob)
+	// under blob.put's own rules, limits and price; nil leaves keeping
+	// unavailable.
+	Blobs BlobKeeper
 	// ReceiverScreen is the operator's screening setting for receivers
 	// (RECEIVER_SCREEN); "" is ScreenDefaultOn.
 	ReceiverScreen ScreenMode
@@ -309,6 +313,29 @@ type Deps struct {
 	// simulation holds one of the board's shared open-hold slots until it
 	// expires, so it stays off (security review 1.20, M4).
 	EchoSimulate bool
+}
+
+// BlobKeeper stores bytes as a board file for a call's caller, exactly as
+// a signed blob.put of them would (room access, size limit, the storage
+// allowance it charges), in a transaction of its own. It is called after
+// the command's transaction has committed, holding none.
+type BlobKeeper interface {
+	KeepBlob(ctx context.Context, k BlobKeep) (KeptBlob, error)
+}
+
+// BlobKeep is one file to keep: blob.put's room, filename and media type.
+type BlobKeep struct {
+	Subject                   allowance.Subject
+	Room, Filename, MediaType string
+	Data                      []byte
+}
+
+// KeptBlob is a kept file: its ID, its SHA-256 and size as stored, the
+// storage allowance it cost (blob.put's price), and its public URL ("" for
+// a file in a private room, read with a signed blob.get).
+type KeptBlob struct {
+	ID, Room, SHA256, URL string
+	Size, Cost            int64
 }
 
 // BoardEvent is one visible, original board message as a watching provider

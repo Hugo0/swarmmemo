@@ -767,7 +767,7 @@ func failureCode(code string) string {
 		"price_exceeds_max", "tool_unvetted", "tool_denied", "tool_unavailable", "tool_price_over_cap",
 		"fetch_invalid_url", "fetch_denied", "fetch_robots", "fetch_blocked", "fetch_captcha", "fetch_site_rate_limited", "fetch_not_found",
 		"fetch_upstream_error", "fetch_address_blocked", "fetch_unresolved", "fetch_redirect_refused", "fetch_unsupported_type",
-		"fetch_host_limit", "fetch_host_busy", "paste_not_found", "doc_not_found", "doc_version_not_found":
+		"fetch_host_limit", "fetch_host_busy", "fetch_keep_unavailable", "fetch_keep_refused", "paste_not_found", "doc_not_found", "doc_version_not_found":
 		return code
 	}
 	return "upstream_failed"

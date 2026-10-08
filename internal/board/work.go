@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -324,6 +325,35 @@ func scanWork(scan interface{ Scan(...any) error }) (workRow, error) {
 // WorkKindRewarded is the works.list filter for open work with a reward
 // held in escrow; the other kinds are effective states.
 const WorkKindRewarded = "rewarded"
+
+// WorkKindEarn is the works.list filter behind "Earn credits" (/work?kind=earn):
+// the same open work with a reward held in escrow as WorkKindRewarded,
+// ordered smallest effort first. Work tagged with the capability WorkEarnTag
+// comes first (standing small tasks the operator keeps posted, re-posting
+// each once it is accepted), then the smallest reward, then the work ID.
+// The work itself is ordinary: one worker at a time, paid on accept.
+const WorkKindEarn = "earn"
+
+// WorkEarnTag is the capability slug that marks a standing earn task.
+const WorkEarnTag = "earn"
+
+// EarnURL is where an agent out of credits finds small paid tasks; the
+// quota refusals point at it.
+const EarnURL = "/work?kind=earn"
+
+// EarnHint ends every refusal for running out of credits.
+const EarnHint = " Out of credits? Earn some by doing a small paid task: " + EarnURL
+
+// workEarnRankSQL is 0 for work tagged WorkEarnTag, 1 otherwise;
+// workEarnAmountSQL is its reward. Together with w.id they order and page
+// the earn listing.
+const (
+	workEarnRankSQL   = `(NOT EXISTS(SELECT 1 FROM json_each(w.capabilities) cap WHERE cap.value='` + WorkEarnTag + `'))`
+	workEarnAmountSQL = `coalesce((SELECT wr.amount FROM work_rewards wr WHERE wr.work_id=w.id),0)`
+)
+
+// earnCursorRE is an earn page's cursor: rank.amount.id of the last row.
+var earnCursorRE = regexp.MustCompile(`^([01])\.([0-9]{1,10})\.([a-f0-9]{32})$`)
 
 const workEffectiveSQL = `CASE WHEN w.state IN ('accepted','cancelled') THEN w.state WHEN w.deadline<=? THEN (CASE WHEN w.state='submitted' AND w.reviewer<>'' THEN 'review_lapsed' ELSE 'expired' END) WHEN w.generation<>? THEN 'recovery_required' WHEN w.state='claimed' AND w.claim_expires_at<=? THEN 'open' ELSE w.state END`
 
@@ -977,7 +1007,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if !utf8.ValidString(c.Query) || strings.ContainsRune(c.Query, 0) {
 		return Result{}, problem(400, "invalid_query", "Query must be valid UTF-8 without NUL.")
 	}
-	if c.Kind != "" && c.Kind != "open" && c.Kind != "claimed" && c.Kind != "submitted" && c.Kind != "accepted" && c.Kind != "cancelled" && c.Kind != "expired" && c.Kind != "review_lapsed" && c.Kind != "recovery_required" && c.Kind != WorkKindRewarded {
+	if c.Kind != "" && c.Kind != "open" && c.Kind != "claimed" && c.Kind != "submitted" && c.Kind != "accepted" && c.Kind != "cancelled" && c.Kind != "expired" && c.Kind != "review_lapsed" && c.Kind != "recovery_required" && c.Kind != WorkKindRewarded && c.Kind != WorkKindEarn {
 		return Result{}, problem(400, "invalid_work_state", "Unknown work state filter.")
 	}
 	// Each row answers eligibility for the agent data names, else the signer.
@@ -1007,11 +1037,12 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if err != nil {
 		return Result{}, err
 	}
-	if cursor.Page != "" && !workIDRE.MatchString(cursor.Page) {
+	earn := c.Kind == WorkKindEarn
+	if cursor.Page != "" && (earn && !earnCursorRE.MatchString(cursor.Page) || !earn && !workIDRE.MatchString(cursor.Page)) {
 		return Result{}, problem(400, "invalid_cursor", "Invalid work directory cursor.")
 	}
-	where := `e.hidden=0 AND w.id>?`
-	args := []any{cursor.Page}
+	where := `e.hidden=0`
+	args := []any{}
 	if c.Room != "" {
 		if _, err = roomAccess(ctx, tx, c.Room, a); err != nil {
 			return Result{}, workReadError(err)
@@ -1023,7 +1054,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	}
 	switch c.Kind {
 	case "":
-	case WorkKindRewarded:
+	case WorkKindRewarded, WorkKindEarn:
 		// Open work whose reward is still held in escrow: what a worker can
 		// claim and be paid for.
 		where += ` AND (` + workEffectiveSQL + `)='open' AND EXISTS(SELECT 1 FROM work_rewards wr WHERE wr.work_id=w.id AND wr.state='held')`
@@ -1041,19 +1072,35 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		where += ` AND (w.requester=? OR w.worker=? OR w.reviewer=?)`
 		args = append(args, agentAccount, agentAccount, agentAccount)
 	}
+	columns, order := workColumns+`,0,0`, `w.id`
+	if earn {
+		columns, order = workColumns+`,`+workEarnRankSQL+`,`+workEarnAmountSQL, workEarnRankSQL+`,`+workEarnAmountSQL+`,w.id`
+		if m := earnCursorRE.FindStringSubmatch(cursor.Page); m != nil {
+			rank, _ := strconv.ParseInt(m[1], 10, 64)
+			amount, _ := strconv.ParseInt(m[2], 10, 64)
+			where += ` AND (` + workEarnRankSQL + `,` + workEarnAmountSQL + `,w.id)>(?,?,?)`
+			args = append(args, rank, amount, m[3])
+		}
+	} else {
+		where += ` AND w.id>?`
+		args = append(args, cursor.Page)
+	}
 	args = append(args, limit+1)
-	rows, err := tx.QueryContext(ctx, `SELECT `+workColumns+` FROM works w JOIN events e ON e.id=w.id JOIN rooms r ON r.name=e.room WHERE `+where+` ORDER BY w.id LIMIT ?`, args...)
+	rows, err := tx.QueryContext(ctx, `SELECT `+columns+` FROM works w JOIN events e ON e.id=w.id JOIN rooms r ON r.name=e.room WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
 	if err != nil {
 		return Result{}, workReadError(err)
 	}
 	stored := []workRow{}
+	keys := []string{}
 	for rows.Next() {
-		w, e := scanWork(rows)
-		if e != nil {
+		var w workRow
+		var rank, amount int64
+		if e := rows.Scan(append(w.fields(), &rank, &amount)...); e != nil {
 			rows.Close()
 			return Result{}, workReadError(e)
 		}
 		stored = append(stored, w)
+		keys = append(keys, fmt.Sprintf("%d.%d.%s", rank, amount, w.ID))
 	}
 	err = rows.Err()
 	rows.Close()
@@ -1078,7 +1125,11 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	}
 	result := Result{Data: map[string]any{"works": works, "has_more": hasMore}}
 	if hasMore {
-		result.NextCursor = s.encodeConversationCursor(conversationCursor{Domain: "works.list", Scope: scope, Page: stored[len(stored)-1].ID})
+		page := stored[len(stored)-1].ID
+		if earn {
+			page = keys[len(stored)-1]
+		}
+		result.NextCursor = s.encodeConversationCursor(conversationCursor{Domain: "works.list", Scope: scope, Page: page})
 	}
 	return result, nil
 }

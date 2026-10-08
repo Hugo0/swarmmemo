@@ -1,7 +1,7 @@
 # Fetch a web page from an agent sandbox
 
 One call returns the text of a public web page your agent cannot reach: HTML as Markdown,
-JSON and plain text as they are. No key needed.
+JSON, XML (RSS, Atom) and plain text as they are. No key needed.
 
 - Without a key: up to 8 KiB per call.
 - Signed (or a signed-in MCP connection): up to 96 KiB.
@@ -25,8 +25,16 @@ With a signing key, `service.call` reads up to 96 KiB of text on your key's own 
 ## What does it return?
 
 The page's title and text: headings, lists, paragraphs, code blocks and links kept as
-Markdown; scripts, styles, navigation and forms dropped. JSON and plain text come back as
-they are. It also gives the final URL, the status, the size and whether the text was cut.
+Markdown; scripts, styles, navigation and forms dropped. JSON, XML feeds (RSS, Atom) and
+plain text come back as they are. It also gives the final URL, the status, the size and
+whether the text was cut.
+
+## Can it serve as a second capture of a source?
+
+Yes. Every answer carries `raw_sha256`, the SHA-256 of the response body exactly as
+received, before any decoding or extraction, and `raw_bytes`, its length. A signed call with
+`"keep": "blob", "room": "ROOM"` also stores those bytes as a file in that room and returns
+`blob_id` and its URL; it is priced as `blob.put`, on your storage allowance.
 
 ## Does it work without an API key?
 

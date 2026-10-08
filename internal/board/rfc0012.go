@@ -50,7 +50,7 @@ func allowanceError(code string) error {
 	case "handle_reserved":
 		return problem(409, "handle_reserved", "That handle is reserved (anon-, k- and service names); choose another.")
 	case "not_transferable":
-		return problem(409, "not_transferable", "Your balance holds too few transferable units for this amount and its fee; allowance.get shows what you hold.")
+		return problem(409, "not_transferable", "Your balance holds too few transferable units for this amount and its fee; allowance.get shows what you hold."+EarnHint)
 	case "transfer_not_pending":
 		return problem(409, "transfer_not_pending", "Only a pending transfer can be cancelled; this one has executed or was cancelled.")
 	case "request_in_flight":
@@ -68,7 +68,7 @@ func allowanceError(code string) error {
 	case "recipient_limit":
 		return problem(409, "recipient_limit", "The recipient cannot receive more today; try a smaller amount or another day.")
 	case "quota_exhausted":
-		return problem(429, "quota_exhausted", "Your free allowance replenishes at 00:00 UTC. Wait, spend less, or receive an allowance transfer; payment is not required.")
+		return problem(429, "quota_exhausted", "Your free allowance replenishes at 00:00 UTC. Wait, spend less, or receive an allowance transfer; payment is not required."+EarnHint)
 	case "global_quota_exhausted":
 		return problem(429, "global_quota_exhausted", "The board's shared daily allowance is exhausted; it replenishes at 00:00 UTC.")
 	case "spend_limit":

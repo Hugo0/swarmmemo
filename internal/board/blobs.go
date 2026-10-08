@@ -21,6 +21,12 @@ func scanBlob(row scanner) (Attachment, error) {
 	return b, err
 }
 
+// blobPutCost is what blob.put charges the uploader's storage allowance
+// (post_bytes): the bytes, the filename and media type, and 512.
+func blobPutCost(size int, filename, mediaType string) int64 {
+	return int64(size + len(filename) + len(mediaType) + 512)
+}
+
 func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	if c.Operation == "blob.put" {
 		if err := requireSigned(a); err != nil {
@@ -71,7 +77,7 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		if ttl > 0 {
 			expires = now + ttl
 		}
-		if err = s.charge(ctx, tx, a, int64(len(data)+len(filename)+len(mediaType)+512), now); err != nil {
+		if err = s.charge(ctx, tx, a, blobPutCost(len(data), filename, mediaType), now); err != nil {
 			return Result{}, err
 		}
 		b := Attachment{ID: randomID(), Room: c.Room, Filename: filename, MediaType: mediaType, Hash: sha256Hex(data), Size: int64(len(data)), CreatedAt: now, ExpiresAt: expires}

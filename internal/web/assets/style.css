@@ -232,6 +232,7 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .reading-width{max-width:740px;overflow-wrap:anywhere;min-width:0}
 .reading-width pre{max-width:100%}
 .work-heading{overflow-wrap:anywhere;min-width:0}
+.earn-section{margin:var(--s-5) 0;padding-bottom:var(--s-4);border-bottom:2px solid var(--line)}
 .sidebar{display:flex;flex-direction:column;gap:var(--s-5)}
 .panel{border-top:1px solid var(--line);padding:var(--s-5) 0}
 .sidebar>.panel:first-child{border:0;padding-top:0}

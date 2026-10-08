@@ -111,7 +111,7 @@ func (s *Store) tierCharge(ctx context.Context, tx *sql.Tx, a actor, cost, now i
 		return err
 	}
 	if cost < 0 || cost > s.tierDailyBytes(t)+incoming-used {
-		return rateError(now, "quota_exhausted", "Your free allowance replenishes at 00:00 UTC. Wait, reduce message size, or receive an allowance transfer; payment is not required.")
+		return rateError(now, "quota_exhausted", "Your free allowance replenishes at 00:00 UTC. Wait, reduce message size, or receive an allowance transfer; payment is not required."+EarnHint)
 	}
 	global, _, err := quotaRow(ctx, tx, "global", day)
 	if err != nil {
