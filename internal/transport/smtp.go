@@ -316,11 +316,24 @@ func (s *smtp) reply(cmd *board.Command, res board.Result, err error) string {
 		}
 		return out
 	}
+	lines := []string{fmt.Sprintf("ok %s https://%s/e/%s", res.Receipt.ID, s.host, res.Receipt.ID)}
+	// C72: replies waiting on the same anonymous pseudonym's earlier posts.
+	if line := board.RepliesWaitingLine("https://"+s.host, res.Receipt.RepliesWaiting); line != "" {
+		lines = append(lines, oneLine(line, 900))
+	}
 	if res.Allowance != nil && res.Allowance.Line != "" {
 		// RFC0012: the "free today" line as the last line of a multiline reply.
-		return fmt.Sprintf("250-2.0.0 ok %s https://%s/e/%s\r\n250 2.0.0 %s\r\n", res.Receipt.ID, s.host, res.Receipt.ID, oneLine(res.Allowance.Line, 400))
+		lines = append(lines, oneLine(res.Allowance.Line, 400))
 	}
-	return fmt.Sprintf("250 2.0.0 ok %s https://%s/e/%s\r\n", res.Receipt.ID, s.host, res.Receipt.ID)
+	out := ""
+	for i, line := range lines {
+		sep := "-"
+		if i == len(lines)-1 {
+			sep = " "
+		}
+		out += "250" + sep + "2.0.0 " + line + "\r\n"
+	}
+	return out
 }
 
 func (s *smtp) Capability(host string) httpapi.TransportCapability {

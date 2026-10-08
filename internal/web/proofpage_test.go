@@ -33,13 +33,19 @@ func pendingCalendar(t *testing.T) *httptest.Server {
 
 // confirmedStore answers every proof as anchored in one Bitcoin block, the
 // state a real anchor reaches an hour or two after its checkpoint.
-type confirmedStore struct{ *board.Store }
+// blockTime is the block's own timestamp; 0 is a block whose header is not
+// read yet.
+type confirmedStore struct {
+	*board.Store
+	blockTime int64
+}
 
 func (s confirmedStore) ReadLogProof(ctx context.Context, index int64, message string, size int64) (board.LogInclusion, error) {
 	p, err := s.Store.ReadLogProof(ctx, index, message, size)
 	if err == nil {
 		p.Anchor = &board.LogAnchor{Size: p.Checkpoint.Size, State: "confirmed", BitcoinHeight: 912345, CheckpointAt: p.Checkpoint.CreatedAt,
-			SubmittedAt: p.Checkpoint.CreatedAt, ConfirmedAt: p.Checkpoint.CreatedAt + 4500, Calendars: []string{"a", "b", "c"}}
+			SubmittedAt: p.Checkpoint.CreatedAt, ConfirmedAt: p.Checkpoint.CreatedAt + 4500, Calendars: []string{"a", "b", "c"},
+			BlockTime: s.blockTime, Explorer: board.ExplorerBlockURL + "912345"}
 	}
 	return p, err
 }
@@ -84,20 +90,29 @@ func TestProofPageStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, page = body(t, f.store, "/e/"+id+"/proof")
-	wantAll(t, "logged", page, `class="proof-step is-done" id="step-logged"`, "of the log, in the checkpoint of", `class="proof-step is-pending" id="step-anchored"`,
-		"The checkpoint goes to OpenTimestamps calendars next")
+	wantAll(t, "logged", page, `class="proof-step is-done" id="step-logged"`, "of the log (entries are numbered from 0), in the checkpoint of", "To detect a fork, compare checkpoints",
+		`class="proof-step is-pending" id="step-anchored"`, "The checkpoint goes next to OpenTimestamps, a public service that commits fingerprints into Bitcoin blocks,",
+		"Until then, this proof rests on the log's signature alone.")
 
 	if err := f.store.AnchorCheckpoints(t.Context(), &ots.Client{Calendars: []string{pendingCalendar(t).URL}}, 3); err != nil {
 		t.Fatal(err)
 	}
 	_, page = body(t, f.store, "/e/"+id+"/proof")
-	wantAll(t, "anchor pending", page, "The checkpoint went to 1 OpenTimestamps calendar ", "usually 1–2 hours after the checkpoint", `class="proof-step is-pending" id="step-anchored"`)
+	wantAll(t, "anchor pending", page, "The checkpoint went to 1 OpenTimestamps calendar ", "OpenTimestamps is a public service that commits fingerprints into Bitcoin blocks", "usually in a block 1–2 hours after the checkpoint", `class="proof-step is-pending" id="step-anchored"`)
 	if strings.Contains(page, "mempool.space") {
 		t.Error("anchor pending: the page links a block")
 	}
 
-	_, page = body(t, confirmedStore{f.store}, "/e/"+id+"/proof")
-	wantAll(t, "confirmed", page, `class="proof-step is-done" id="step-anchored"`, `href="https://mempool.space/block/912345"`, "block 912345</a>, confirmed <time")
+	// Block time unknown: only our checker's time, labeled as ours.
+	_, page = body(t, confirmedStore{Store: f.store}, "/e/"+id+"/proof")
+	wantAll(t, "confirmed", page, `class="proof-step is-done" id="step-anchored"`, `<a href="https://mempool.space/block/912345" rel="noopener noreferrer nofollow">block 912345</a>, through`,
+		"a public service that commits fingerprints into Bitcoin blocks.", " Our checker saw it confirmed at <time", "and the block, this proof rests on the log's signature alone.")
+	if strings.Contains(page, "mined") || strings.Contains(page, ", confirmed <time") {
+		t.Error("confirmed: the page names a block time it does not have")
+	}
+	// Block time known: the block's own timestamp first, ours after.
+	_, page = body(t, confirmedStore{Store: f.store, blockTime: 1759900000}, "/e/"+id+"/proof")
+	wantAll(t, "block time", page, `block 912345</a>, mined <time datetime="2025-10-08T05:06:40Z">`, "by the block's own timestamp, through", " Our checker saw it confirmed at <time")
 }
 
 // TestProofPageMissingHiddenAndEdited: a private or unknown message is a 404

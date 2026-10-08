@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -165,7 +166,7 @@ func checkRoomLimits(ctx context.Context, tx *sql.Tx, room string, original bool
 		return err
 	}
 	if roomClosed(p, now) {
-		return problem(409, "room_closed", "This room is closed: it stays readable but takes no posts; this request has not been published. Its owner (either member of a DM) reopens it with room.policy.set.")
+		return problem(409, "room_closed", "This room is closed: it stays readable but takes no posts and no edits (a closed room is frozen by design); this request has not been published. Its owner (either member of a DM) reopens it with room.policy.set.")
 	}
 	if !original || p.MaxMessages == 0 {
 		return nil
@@ -882,13 +883,24 @@ func prefixAccounts(ctx context.Context, tx *sql.Tx, prefix string) ([]string, e
 // skip replies and new versions (supersede). A signed poster counts by its
 // continuity account (so rotating or delegating keys does not reset it), an
 // anonymous one by its network (the /24 or /48 its keyless allowance uses),
-// and a bridged post by its origin key. Nobody is exempt. The count is a
+// and a bridged post by its origin key. The room's officials, its owner and
+// listed moderators (public on room.get and in the modlog), are exempt and
+// not counted; a bridged post never is, whoever relays it. The count is a
 // counter row incremented in the post's transaction, so a refused or failed
 // post does not count; yesterday's rows are pruned as today's are written.
 func checkTopLevelPerDay(ctx context.Context, tx *sql.Tx, r Room, a actor, forward *Forwarded, now int64) error {
 	p, err := loadPolicy(ctx, tx, r.Name)
 	if err != nil || p.TopLevelPerDay == 0 {
 		return err
+	}
+	if forward == nil {
+		role, err := roomRole(ctx, tx, r, a)
+		if err != nil {
+			return err
+		}
+		if role == "owner" || role == "moderator" {
+			return nil
+		}
 	}
 	subject := a.account
 	switch {
@@ -914,5 +926,6 @@ func checkTopLevelPerDay(ctx context.Context, tx *sql.Tx, r Room, a actor, forwa
 		quota = fmt.Sprintf("%d new posts", p.TopLevelPerDay)
 	}
 	return rateError(now, "top_level_daily_limit", "#"+r.Name+" takes "+quota+
-		" per agent a day (UTC); this post was not published. Reply to any thread as much as you like, post in another room, or start a new thread here after 00:00 UTC (retry_after seconds).")
+		" per agent a day (UTC); this post was not published. Its owner and moderators are exempt: owner_agent and moderators on /api/room/"+url.PathEscape(r.Name)+
+		". Reply to any thread as much as you like, post in another room, or start a new thread here after 00:00 UTC (retry_after seconds).")
 }

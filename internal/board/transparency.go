@@ -987,8 +987,9 @@ func (s *Store) ReadLogLeaves(ctx context.Context, start, end int64) ([]LogEntry
 // LogAnchor is one checkpoint's OpenTimestamps proof and its timeline:
 // checkpoint_at (signed), submitted_at (sent to the calendars), checked_at
 // (last asked for the Bitcoin proof), confirmed_at (when this service first
-// saw the Bitcoin attestation of block bitcoin_height) and, while pending,
-// next_check_at.
+// saw the Bitcoin attestation of block bitcoin_height), block_time (that
+// block's own timestamp, once read from its header) and, while pending,
+// next_check_at. Explorer is the block's page on a public block explorer.
 type LogAnchor struct {
 	Size          int64    `json:"size"`
 	Digest        string   `json:"digest"`
@@ -999,17 +1000,28 @@ type LogAnchor struct {
 	SubmittedAt   int64    `json:"submitted_at"`
 	CheckedAt     int64    `json:"checked_at,omitempty"`
 	ConfirmedAt   int64    `json:"confirmed_at,omitempty"`
+	BlockTime     int64    `json:"block_time,omitempty"`
+	Explorer      string   `json:"explorer,omitempty"`
 	NextCheckAt   int64    `json:"next_check_at,omitempty"`
 	OTS           string   `json:"ots"`
 	Note          string   `json:"note"`
 }
 
-const anchorColumns = "a.size,a.digest,a.state,a.bitcoin_height,a.calendars,coalesce(c.created_at,0),a.submitted_at,a.checked_at FROM tlog_anchors a LEFT JOIN tlog_checkpoints c ON c.size=a.size"
+// blockTimeKey prefixes the meta rows that hold a Bitcoin block's timestamp
+// by height (blockTimeKey+"970409" = Unix seconds): a fact about the block,
+// shared by every anchor in it, so no anchor column is needed.
+const blockTimeKey = "btc_block_time:"
+
+// ExplorerBlockURL is a block's page on a public block explorer.
+const ExplorerBlockURL = "https://mempool.space/block/"
+
+const anchorColumns = "a.size,a.digest,a.state,a.bitcoin_height,a.calendars,coalesce(c.created_at,0),a.submitted_at,a.checked_at," +
+	"coalesce((SELECT CAST(m.value AS INTEGER) FROM meta m WHERE m.key='" + blockTimeKey + "'||a.bitcoin_height),0) FROM tlog_anchors a LEFT JOIN tlog_checkpoints c ON c.size=a.size"
 
 func scanAnchor(row interface{ Scan(...any) error }) (LogAnchor, error) {
 	var a LogAnchor
 	var cals string
-	if err := row.Scan(&a.Size, &a.Digest, &a.State, &a.BitcoinHeight, &cals, &a.CheckpointAt, &a.SubmittedAt, &a.CheckedAt); err != nil {
+	if err := row.Scan(&a.Size, &a.Digest, &a.State, &a.BitcoinHeight, &cals, &a.CheckpointAt, &a.SubmittedAt, &a.CheckedAt, &a.BlockTime); err != nil {
 		return a, err
 	}
 	a.Calendars = strings.Fields(cals)
@@ -1018,6 +1030,9 @@ func scanAnchor(row interface{ Scan(...any) error }) (LogAnchor, error) {
 		// Only a pending anchor is checked again, so the last check of a
 		// confirmed one is the one that saw its Bitcoin attestation.
 		a.ConfirmedAt = a.CheckedAt
+		if a.BitcoinHeight > 0 {
+			a.Explorer = ExplorerBlockURL + strconv.FormatInt(a.BitcoinHeight, 10)
+		}
 	case "pending":
 		a.NextCheckAt = anchorNextCheck(a.SubmittedAt, a.CheckedAt)
 	}
@@ -1102,7 +1117,7 @@ func (s *Store) StartTransparency(ctx context.Context, cfg TransparencyConfig) {
 		cfg.CheckpointEvery = 15 * time.Minute
 	}
 	if cfg.OTS == nil && len(cfg.Calendars) > 0 {
-		cfg.OTS = &ots.Client{Calendars: cfg.Calendars}
+		cfg.OTS = &ots.Client{Calendars: cfg.Calendars, Explorer: ots.DefaultExplorer}
 	}
 	go func() {
 		ticker := time.NewTicker(cfg.CheckpointEvery)
@@ -1155,6 +1170,63 @@ func (s *Store) anchorTick(ctx context.Context, cfg TransparencyConfig, submit i
 	if err := s.UpgradeAnchors(work, cfg.OTS, 12); err != nil && ctx.Err() == nil {
 		slog.Info("OpenTimestamps upgrade incomplete", "error", err)
 	}
+	if err := s.FillBlockTimes(work, cfg.OTS, 4); err != nil && ctx.Err() == nil {
+		slog.Info("Bitcoin block times incomplete", "error", err)
+	}
+}
+
+// FillBlockTimes reads the timestamps of up to limit Bitcoin blocks that
+// confirmed anchors name and that have none yet, newest first, from the
+// client's block explorer (each header checked against the anchor's
+// attestation), and keeps each in meta under blockTimeKey. A block that
+// fails is tried again next time.
+func (s *Store) FillBlockTimes(ctx context.Context, client *ots.Client, limit int) error {
+	if client == nil || client.Explorer == "" {
+		return nil
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT a.bitcoin_height,min(a.size) FROM tlog_anchors a WHERE a.state='confirmed' AND a.bitcoin_height>0 AND NOT EXISTS (SELECT 1 FROM meta m WHERE m.key='"+blockTimeKey+"'||a.bitcoin_height) GROUP BY a.bitcoin_height ORDER BY a.bitcoin_height DESC LIMIT ?", limit)
+	if err != nil {
+		return err
+	}
+	type todo struct{ height, size int64 }
+	var work []todo
+	for rows.Next() {
+		var t todo
+		if err = rows.Scan(&t.height, &t.size); err != nil {
+			rows.Close()
+			return err
+		}
+		work = append(work, t)
+	}
+	if err = rows.Close(); err != nil {
+		return err
+	}
+	var errs []error
+	for _, t := range work {
+		var raw []byte
+		if err = s.db.QueryRowContext(ctx, "SELECT ots FROM tlog_anchors WHERE size=?", t.size).Scan(&raw); err != nil {
+			return err
+		}
+		file, err := ots.ParseFile(raw)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		root := file.Stamp.BitcoinRoot(uint64(t.height))
+		if root == nil {
+			errs = append(errs, fmt.Errorf("anchor %d: no attestation of block %d", t.size, t.height))
+			continue
+		}
+		at, err := client.BlockTime(ctx, uint64(t.height), root)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if _, err = s.db.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES(?,?)", blockTimeKey+strconv.FormatInt(t.height, 10), strconv.FormatInt(at, 10)); err != nil {
+			return err
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // anchorDigest is what a checkpoint's anchor timestamps: SHA-256 of the
@@ -1228,7 +1300,7 @@ const (
 const AnchorTimeline = "A post is in the next checkpoint (signed every 15 minutes by default when the log grew), submitted to the calendars at once (submitted_at). " +
 	"A calendar's Bitcoin transaction is typically mined 10 to 45 minutes later (bitcoin_height: that block's time bounds the post from above), and its proof is served once the transaction has confirmations. " +
 	"Pending anchors are checked every 10 minutes from 30 minutes to 3 hours after submission, then every 30 minutes, then every 2 hours (next_check_at); " +
-	"confirmed_at is when the proof was first seen, typically 1 to 1.5 hours after the checkpoint."
+	"confirmed_at is when this service first saw the proof, typically 1 to 1.5 hours after the checkpoint; block_time is the block's own timestamp."
 
 // anchorNextCheck is when a pending anchor submitted at submitted and last
 // checked at checked (0: never) is next asked for its Bitcoin proof.

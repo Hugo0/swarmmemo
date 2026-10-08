@@ -45,7 +45,7 @@ tests hold the page to the API. */}}
 <h3>Proofs</h3>
 {{if .Proofs}}<ul class="identity-links">{{range .Proofs}}<li><span class="link-kind">{{.Kind}}</span> <code class="link-value" title="{{.Value}}">{{.Value}}</code> <span class="small muted">{{.State}} · counts <span data-key="{{.Contribution.Key}}" data-value="{{.Contribution.Value}}">{{.Contribution.Text}}</span></span></li>{{end}}</ul>{{else}}<p class="small muted">No proofs yet.</p>{{end}}
 <h3>Endorsed by</h3>
-{{if .Endorsers}}<ul class="identity-links">{{range .Endorsers}}<li><a href="/agent/{{path .Agent}}" title="{{.Agent}}">{{nickname .Agent}}</a> <span class="small muted">{{.Kinds}} · flow <span data-key="{{.Flow.Key}}" data-value="{{.Flow.Value}}">{{.Flow.Text}}</span></span></li>{{end}}</ul>
+{{if .Endorsers}}<ul class="identity-links">{{range .Endorsers}}<li><a href="/agent/{{path .Agent}}" title="{{.Agent}}">{{short .Agent}}</a> <span class="small muted">{{.Kinds}} · flow <span data-key="{{.Flow.Key}}" data-value="{{.Flow.Value}}">{{.Flow.Text}}</span></span></li>{{end}}</ul>
 <p class="small muted"><span data-key="{{.EndorsersTotal.Key}}" data-value="{{.EndorsersTotal.Value}}">{{.EndorsersTotal.Text}}</span> endorsers in all, largest flow first; the JSON lists more.</p>{{else}}<p class="small muted">No endorsement reaches this agent yet.</p>{{end}}
 {{if .BreakerActive}}<p class="notice">This account changed recently, by a key rotation or a proof link. Its transfers wait before they run, and for a while its endorsements count as a newcomer's.</p>{{end}}
 {{if .Caveats}}<ul class="small muted">{{range .Caveats}}<li>{{.}}</li>{{end}}</ul>{{end}}

@@ -13,7 +13,7 @@ class Node {
   get classList() { const n = this; return {add: c => { n.className += ' ' + c; }, remove: () => {}}; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k]; }
-  append(...nodes) { for (const n of nodes) { if (n.parent) n.parent.children.splice(n.parent.children.indexOf(n), 1); n.parent = this; this.children.push(n); } }
+  append(...nodes) { for (let n of nodes) { if (typeof n === 'string') { const t = new Node('#text'); t._text = n; n = t; } if (n.parent) n.parent.children.splice(n.parent.children.indexOf(n), 1); n.parent = this; this.children.push(n); } }
   after(...nodes) { const p = this.parent; let i = p.children.indexOf(this) + 1; for (const n of nodes) { if (n.parent) n.parent.children.splice(n.parent.children.indexOf(n), 1); if (n.parent === p && p.children.indexOf(this) + 1 < i) i--; n.parent = p; p.children.splice(i++, 0, n); } }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   attachShadow() { this.shadowRoot = new Node('#shadow'); return this.shadowRoot; }
@@ -102,5 +102,22 @@ function depthOf(node) { let max = 0; for (const c of node.children) max = Math.
   const links = lines.flatMap(p => p.querySelectorAll('a'));
   assert.deepEqual(links.map(a => a.href), ['http://127.0.0.1:9/work/' + task, 'http://127.0.0.1:9/tools/work', 'http://127.0.0.1:9/work/' + task]);
   assert.ok(links.every(a => a.target === '_blank'));
-  console.log('PASS: ' + n + '-reply chain rendered in ' + elapsed + 'ms at DOM depth ' + depthOf(root) + '; count, heart state, sort and work lines.');
+  // Who wrote it (memo-core.js authorNodes, C67/C68): a claimed handle is a name, a
+  // generated name says so beside its key, and an unsigned post shows its daily tag.
+  const fp = '9eb0e947' + 'z'.repeat(56); // not hex, so no avatar fetch
+  const named = mount([
+    {id: 'h', sequence: 1, created_at: 1e9, text: 'a', author: 'z'.repeat(64), public_key: 'k1', author_handle: 'atlas', display_name_source: 'handle'},
+    {id: 'g', sequence: 2, created_at: 1e9 + 1, text: 'b', author: fp, public_key: 'k2', nickname: 'sable-bellows', display_name_source: 'generated'},
+    {id: 'n', sequence: 3, created_at: 1e9 + 2, text: 'c', author: 'anonymous', anon_tag: 'd092'},
+  ]);
+  await named.done();
+  const byline = id => named.body.children[1].shadowRoot.querySelectorAll('article').find(a => a.dataset.id === id).querySelectorAll('strong')[0];
+  assert.equal(byline('h').textContent, 'atlas');
+  const generated = byline('g');
+  assert.equal(generated.textContent, 'sable-bellows key 9eb0e947 (generated name; no handle claimed)');
+  assert.equal(generated.children[0].className, 'generated-name');
+  assert.match(generated.children[0].title, /^Name generated from this key; no handle claimed\./);
+  assert.equal(byline('n').textContent, 'Anonymous · net d092');
+  assert.match(byline('n').children.find(c => c.className === 'name-tag').title, /resets daily/);
+  console.log('PASS: ' + n + '-reply chain rendered in ' + elapsed + 'ms at DOM depth ' + depthOf(root) + '; count, heart state, sort, work lines and bylines.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

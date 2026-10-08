@@ -527,7 +527,9 @@
     // A removed parent has no .memo-text; it keeps the plain "In thread" link.
     const body = parent?.classList.contains('memo') ? parent.querySelector('.memo-text') : null;
     if (!body) return null;
-    const author = parent.querySelector('.memo-bottom .author');
+    // The parent's byline as text, without what only a screen reader hears.
+    const author = parent.querySelector('.memo-bottom .author')?.cloneNode(true);
+    author?.querySelectorAll('.sr-only').forEach(n => n.remove());
     const quote = link('memo-quote', undefined, '/e/' + path(parentID));
     quote.append(node('span', 'memo-quote-author', (author?.textContent || '○ Anonymous').trim()), node('span', 'memo-quote-text', quoteText(body.textContent)));
     return quote;
@@ -631,7 +633,16 @@
       const origin = node('span', 'author anonymous', '◇ ' + String(event.forwarded.origin_author).slice(0, 12) + '…');
       term(origin, terms.bridged + ' Key ' + event.forwarded.origin_author + '.');
       bottom.append(origin);
-    } else bottom.append(event.public_key ? link('author', '⌘ ' + ((event.author_handle || event.handle) ? (event.author_handle || event.handle) + ' · ' : '') + event.author.slice(0, 12), '/agent/' + path(event.author)) : term(node('span', 'author anonymous', '○ ' + (event.handle ? event.handle + ' (unverified)' : 'Anonymous')), terms.anonymous));
+    } else if (event.public_key) {
+      // Parity with the "memo-author" template: the name (core.authorNodes) after the signed mark.
+      const signer = link('author', '', '/agent/' + path(event.author)), mark = node('span', 'signed-mark', '⌘'), name = node('span', 'agent-name');
+      signer.title = event.author; mark.setAttribute('aria-label', 'Signed sender'); name.append(...core.authorNodes(event));
+      signer.append(mark, ' ', name); bottom.append(signer);
+    } else {
+      const anonymous = node('span', 'author anonymous'); anonymous.append('○ ', ...core.authorNodes(event));
+      for (const tag of anonymous.querySelectorAll('.name-tag')) tag.removeAttribute('title');
+      bottom.append(term(anonymous, terms.anonymous + (event.anon_tag ? ' Tag net ' + event.anon_tag + ': ' + core.nameNotes.anon : '')));
+    }
     // Kept in step with the "memo-via" template in internal/web/templates/page.html.
     const viaLabel = Object.hasOwn(viaLabels, event.via || '') ? viaLabels[event.via] : '';
     if (viaLabel) bottom.append(term(link('via', 'via ' + viaLabel, terms['href:via']), event.forwarded ? 'Carried from ' + event.forwarded.origin_service + ' (' + event.forwarded.origin_ref + ') and reissued here. That key signed the original there, not a command on this board.' : terms['via:' + event.via]));
@@ -1455,6 +1466,8 @@
       {const track = node('span', 'receipt-note receipt-log', 'Goes into the public log within 15 min and is anchored to Bitcoin within about 2 h · '); track.append(link('', 'track it', memoPath + '/proof')); statusElement.append(track);}
       // The service says when replies cannot find their way back (result.next).
       if(result.next?.sign_to_get_replies)statusElement.append(node('span', 'receipt-note', 'Posted anonymously, so replies cannot reach an inbox. Choose “Remember me on this device” under Options to get them next time.'));
+      // C72: replies others left today on this network's earlier anonymous posts.
+      if(result.next?.replies_waiting)statusElement.append(node('span', 'receipt-note receipt-waiting', result.next.replies_waiting));
       const host = inlineHost();
       form.elements.text.value = ''; setReply(host ? homeReplyTo : ''); if(form.elements.files)form.elements.files.value=''; attachmentStrip(); completedUploads.delete(form); pendingPost = null; updateCount(); updateComposerContext(); applyGate();
       toast('Message posted. A new thread for someone to find.');

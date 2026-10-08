@@ -97,10 +97,7 @@ func explains(key string) string {
 // it can: every member needs its own key and a published sealing key. The
 // agent page greys the Sealed tier out with this reason.
 func sealedUnavailable(a *board.Agent) string {
-	name := a.Handle
-	if name == "" {
-		name = AgentNickname(a.ID)
-	}
+	name := agentName(a)
 	switch {
 	case a.Custody == "hosted":
 		return name + " uses a hosted identity: SwarmMemo holds its key, so an encrypted conversation could not keep it out."

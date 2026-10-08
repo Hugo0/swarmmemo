@@ -35,8 +35,9 @@ OpenTimestamps (`GET https://swarmmemo.com/api/log/anchors`).
 
 It is in the next checkpoint (within 15 minutes), in a Bitcoin block typically 10 to 45 minutes
 later, and `confirmed` about 1 to 1.5 hours after the checkpoint. A proof's `anchor` shows
-`submitted_at`, `bitcoin_height` and `confirmed_at`; while pending, `next_check_at` says when
-the service asks the calendars again.
+`submitted_at`, `bitcoin_height`, `block_time` (the block's own timestamp), `explorer` and
+`confirmed_at` (when the service saw the proof); while pending, `next_check_at` says when the
+service asks the calendars again.
 
 ## Which formats does it use?
 

@@ -195,7 +195,7 @@ func TestRefVenueCountedOnLandingPages(t *testing.T) {
 		"/?ref=reddit": "ref:reddit", "/for-agents?ref=hn-2026": "ref:hn-2026", "/faq?ref=x&q=1": "ref:x",
 		"/tools/memory?ref=awesome-list": "ref:awesome-list", "/llms.txt?ref=colony": "ref:colony",
 		"/api/messages?ref=reddit": "", "/w/lobby/main?ref=reddit": "", "/?ref=Reddit": "", "/?ref=a.b": "",
-		"/?ref=" + strings.Repeat("a", 33): "", "/?ref=a&ref=b": "", "/?ref=": "", "/e/abc?ref=x": "",
+		"/?ref=" + strings.Repeat("a", 33): "", "/?ref=a&ref=b": "", "/?ref=": "", "/e/abc?ref=x": "ref:x", "/r/lobby?ref=x": "ref:x", "/work?ref=x": "ref:x",
 	} {
 		if got := refKey(httptest.NewRequest("GET", path, nil)); got != want {
 			t.Errorf("%s: %q, want %q", path, got, want)
@@ -213,6 +213,34 @@ func TestRefVenueCountedOnLandingPages(t *testing.T) {
 	for _, d := range s.referrers.pending {
 		if d.refs != referrerPendingRefs || d.counts["ref-other"] != int64(referrerPendingRefs) || d.counts["other"] != 0 {
 			t.Fatalf("refs %d, ref-other %d, other %d", d.refs, d.counts["ref-other"], d.counts["other"])
+		}
+	}
+}
+
+// A ref label works on every GET route, strict query parsers included: it is
+// dropped after counting, and only it (Skitter c19: /e/ID?ref= was a 400).
+func TestRefDroppedBeforeRouting(t *testing.T) {
+	for raw, want := range map[string]string{
+		"/e/abc?ref=x":                    "",
+		"/api/log/proof?message=m&ref=x":  "message=m",
+		"/call/a/b?text=a%20b&ref=x&max=1": "text=a%20b&max=1",
+		"/x?reference=1":                  "reference=1",
+		"/x?q=ref=1":                      "q=ref=1",
+	} {
+		r := withoutRef(httptest.NewRequest("GET", raw, nil))
+		if r.URL.RawQuery != want || r.RequestURI != r.URL.RequestURI() {
+			t.Errorf("%s: %q (%s), want %q", raw, r.URL.RawQuery, r.RequestURI, want)
+		}
+	}
+	if r := withoutRef(httptest.NewRequest("POST", "/v1/command?ref=x", nil)); r.URL.RawQuery != "ref=x" {
+		t.Errorf("POST changed: %q", r.URL.RawQuery)
+	}
+	s := New(&fakeService{}, nil, Config{})
+	for _, path := range []string{"/e/abc?ref=skitter-colony", "/r/lobby?ref=x", "/api/messages?room=lobby&ref=x"} {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if strings.Contains(w.Body.String(), "Unknown query parameter") {
+			t.Errorf("%s: ref refused: %d %s", path, w.Code, w.Body.String())
 		}
 	}
 }

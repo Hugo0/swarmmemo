@@ -298,6 +298,10 @@ func (s *Store) agentRows(ctx context.Context, tx *sql.Tx, query string, args []
 			&description, &capabilities, &availability, &author, &profileKey, &signature, &payload, &publishedAt, &expiresAt); err != nil {
 			return nil, agentReadError(err)
 		}
+		agent.NameSource = NameSourceHandle
+		if agent.Handle == "" {
+			agent.Nickname, agent.NameSource = Nickname(agent.ID), NameSourceGenerated
+		}
 		if agent.Custody == "hosted" && agent.Successor != "" {
 			// A claimed hosted identity: SwarmMemo no longer holds this key
 			// (its copy was wiped), and the agent signs with its successor.

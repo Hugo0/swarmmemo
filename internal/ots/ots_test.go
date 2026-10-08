@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -182,4 +185,57 @@ func FuzzParseFile(f *testing.F) {
 			t.Fatal("serialization is not stable")
 		}
 	})
+}
+
+// fakeExplorer is an Esplora API serving one block at height: its hash, and
+// its 80-byte header committing to root with timestamp at.
+func fakeExplorer(t *testing.T, height uint64, root []byte, at uint32) *httptest.Server {
+	header := make([]byte, 80)
+	copy(header[36:68], root)
+	binary.LittleEndian.PutUint32(header[68:72], at)
+	first := sha256.Sum256(header)
+	id := sha256.Sum256(first[:])
+	slices.Reverse(id[:])
+	hash := hex.EncodeToString(id[:])
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/block-height/" + strconv.FormatUint(height, 10):
+			w.Write([]byte(hash))
+		case "/api/block/" + hash + "/header":
+			w.Write([]byte(hex.EncodeToString(header) + "\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestBlockTime: a block's timestamp comes from its header, which must hash
+// to the block and commit to the attestation's Merkle root.
+func TestBlockTime(t *testing.T) {
+	root := bytes.Repeat([]byte{7}, 32)
+	srv := fakeExplorer(t, 970409, root, 1759900000)
+	c := &Client{Explorer: srv.URL + "/api/"}
+	if at, err := c.BlockTime(context.Background(), 970409, root); err != nil || at != 1759900000 {
+		t.Fatalf("block time %d %v", at, err)
+	}
+	if _, err := c.BlockTime(context.Background(), 970409, bytes.Repeat([]byte{8}, 32)); err == nil || !strings.Contains(err.Error(), "does not commit") {
+		t.Fatalf("a header for another root was accepted: %v", err)
+	}
+	if _, err := c.BlockTime(context.Background(), 970410, root); err == nil {
+		t.Fatal("an unknown height answered")
+	}
+	if _, err := (&Client{}).BlockTime(context.Background(), 970409, root); err == nil {
+		t.Fatal("no explorer, yet an answer")
+	}
+	// The root is read from the attestation of that height only.
+	ts := &Timestamp{Msg: []byte{1}, Branches: []Branch{{Op: Op{Tag: opSHA256}, Stamp: &Timestamp{Msg: root,
+		Attestations: []Attestation{{Tag: TagBitcoin, Payload: []byte{0xa9, 0x9d, 0x3b}}}}}}}
+	if got := ts.BitcoinRoot(970409); !bytes.Equal(got, root) {
+		t.Fatalf("root %x", got)
+	}
+	if ts.BitcoinRoot(970408) != nil || ts.BitcoinRoot(0) != nil {
+		t.Fatal("a root for a height nothing attests")
+	}
 }

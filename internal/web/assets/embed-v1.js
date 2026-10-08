@@ -92,7 +92,7 @@ textarea{resize:none;min-height:42px;height:42px;transition:height .15s}
 section>.notice{margin:0 0 16px}
 article{position:relative;padding:12px 0 4px;min-width:0;border-radius:8px;scroll-margin:24px}
 .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.875em}
-.meta strong{font-weight:600;font-size:1.0714em}
+.meta strong{font-weight:600;font-size:1.0714em}.generated-name{font-style:italic;font-weight:400}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.name-tag{color:var(--m);font-weight:400;font-size:.8125em;white-space:nowrap}
 .meta time,.tag{color:var(--m)}.meta time{cursor:default}.tag{font-size:.8125em;padding:0 6px;border-radius:999px;background:var(--t)}
 .av{width:32px;height:32px;flex:none;border-radius:8px;overflow:hidden;color:var(--a);background:color-mix(in srgb,var(--a) 10%,transparent);display:grid;place-items:center}
 .av svg,.av img{width:70%;height:70%;display:block}.av img{width:100%;height:100%;object-fit:cover}
@@ -262,8 +262,10 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
           return {name: parts[0], date: parts[1], notes: ['imported', ...extra], body: rest.join('\n').replace(/^\n+/, ''), seed: fnv(parts[0]), named: true};
         }
       }
-      const name = message.author_handle || message.handle || (message.public_key ? message.author.slice(0, 10) : 'Anonymous');
-      return {name, notes: message.kind === 'imported' ? ['imported'] : [], body: message.text, seed: message.public_key ? message.author : fnv(name)};
+      // As the board names the author (core.authorNodes): a generated name says so.
+      // A commenter without a key keeps the name it typed, as the widget asks for one.
+      const label = !message.public_key && message.handle ? [message.handle] : core.authorNodes(message), name = label.map(n => typeof n === 'string' ? n : n.className === 'sr-only' ? '' : n.textContent).join('');
+      return {name, label, notes: message.kind === 'imported' ? ['imported'] : [], body: message.text, seed: message.public_key ? message.author : fnv(message.handle || 'Anonymous')};
     }
     const avatarCache = new Map(), avatarQueue = [];
     let avatarActive = 0;
@@ -347,7 +349,8 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
         const when = el('time', view.date || core.ageLabel(message.created_at));
         if (!view.date) { when.setAttribute('datetime', new Date(message.created_at * 1000).toISOString()); when.title = core.exactTime(message.created_at); }
         else { when.setAttribute('datetime', view.date); when.title = 'Originally posted ' + view.date; }
-        meta.append(commenterAvatar(message, view.seed, view.named ? view.name : ''), el('strong', view.name), when);
+        const who = el('strong'); who.append(...(view.label || [view.name]));
+        meta.append(commenterAvatar(message, view.seed, view.named ? view.name : ''), who, when);
         for (const note of [...view.notes, ...(message.edited ? ['edited'] : [])]) meta.append(el('span', note, 'tag'));
         article.append(meta);
         // A work request or result says so, linking to the work on the board.

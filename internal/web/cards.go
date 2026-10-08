@@ -151,18 +151,19 @@ func (s cardSource) RoomCard(ctx context.Context, room string) (cards.Card, erro
 }
 
 // cardAuthor names a post's author as its page does: the handle, else the
-// key's two-word nickname; unsigned posts are anonymous.
+// key's generated nickname marked as generated; unsigned posts are anonymous,
+// with their daily network tag.
 func cardAuthor(m board.Message) string {
 	if m.PublicKey == "" {
 		if f := m.Forwarded; f != nil {
 			return "anonymous via " + cards.OneLine(f.OriginService, 40)
 		}
+		if m.AnonTag != "" {
+			return "anonymous · net " + m.AnonTag
+		}
 		return "anonymous"
 	}
-	if m.Handle != "" {
-		return cards.OneLine(m.Handle, 60)
-	}
-	return AgentNickname(m.Author)
+	return cards.OneLine(nameKey(m.Author, m.Handle).String(), 60)
 }
 
 func cardTime(t int64) string { return iso(t)[:10] + " " + iso(t)[11:16] + " UTC" }

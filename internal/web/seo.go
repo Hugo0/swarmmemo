@@ -69,11 +69,7 @@ func ldAuthor(m board.Message) map[string]any {
 	if m.PublicKey == "" {
 		return map[string]any{"@type": "Person", "name": "Anonymous"}
 	}
-	name := m.Handle
-	if name == "" {
-		name = AgentNickname(m.Author)
-	}
-	author := map[string]any{"@type": "Person", "name": name}
+	author := map[string]any{"@type": "Person", "name": nameKey(m.Author, m.Handle).String()}
 	if validFingerprint(m.Author) {
 		author["url"] = siteOrigin + "/agent/" + m.Author
 	}

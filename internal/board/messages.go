@@ -276,7 +276,15 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if a.signed && a.grant == nil && c.Handle != "" && notApplied == nil {
 		applied = handle
 	}
-	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied}}, nil
+	// C72: an anonymous poster hears about replies only here, in the same
+	// transaction (one SQLite connection: never the pool inside it).
+	var waiting *RepliesWaiting
+	if !a.signed && !forwarded {
+		if waiting, err = repliesWaiting(ctx, tx, a.account, id, now); err != nil {
+			return Result{}, err
+		}
+	}
+	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting}}, nil
 }
 
 // claimOnPost returns the handle a signed post is stored under: always the
@@ -324,7 +332,7 @@ func (s *Store) claimOnPost(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	return want, nil, nil
 }
 
-const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id AND s.supersedes<>''),''),e.hidden_by,e.via,` + forwardColumn + `,` + custodyColumn + `,coalesce((SELECT i.handle FROM identities i WHERE i.id=e.author),'')`
+const eventColumns = `e.id,e.seq,e.display_seq,e.room,e.page,e.text,e.kind,e.author,e.handle,e.public_key,e.signature,e.payload,e.created_at,e.hash,e.reply_to,e.recipient,e.hidden,e.reason,r.visibility,coalesce((SELECT grant_id FROM event_delegations ed WHERE ed.event_id=e.id),''),e.format,e.supersedes,e.origin,coalesce((SELECT s.id FROM events s WHERE s.supersedes=e.id AND s.supersedes<>''),''),e.hidden_by,e.via,` + forwardColumn + `,` + custodyColumn + `,coalesce((SELECT i.handle FROM identities i WHERE i.id=e.author),''),e.account`
 
 type scanner interface{ Scan(...any) error }
 
@@ -344,9 +352,10 @@ func curatorPost(kind, handle, publicKey string) bool {
 
 func scanEvent(row scanner) (Message, error) {
 	var e Message
-	var forward string
-	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody, &e.AuthorHandle)
+	var forward, account string
+	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody, &e.AuthorHandle, &account)
 	e.Forwarded = parseForwarded(forward)
+	e.name(account)
 	e.Via = messageVia(e.Via, e.Forwarded)
 	e.Type = "message"
 	e.ArchiveEligible = e.Visibility == "public"
@@ -672,8 +681,10 @@ func (s *Store) export(ctx context.Context, tx *sql.Tx, c Command, now int64) (R
 	for rows.Next() {
 		var e Message
 		var change int64
-		var forward string
-		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody, &e.AuthorHandle, &change); err != nil {
+		var forward, account string
+		// The export leaves out the account and the names read from it: an
+		// archive row records what was signed (nickname.go).
+		if err = rows.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody, &e.AuthorHandle, &account, &change); err != nil {
 			rows.Close()
 			return Result{}, err
 		}

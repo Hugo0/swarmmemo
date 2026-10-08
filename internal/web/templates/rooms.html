@@ -2,8 +2,8 @@
 
 {{define "room-governance"}}{{with .RoomInfo}}<div class="room-governance">
 <p class="room-facts"><span class="room-policy">{{policyLine .Policy}}</span>
-<span>Owner {{if .OwnerAgent}}<a href="/agent/{{path .OwnerAgent}}">{{handleOr .Handles .OwnerAgent}}</a>{{else}}SwarmMemo{{end}}</span>
-{{if .Moderators}}<span>{{if eq (len .Moderators) 1}}Moderator{{else}}Moderators{{end}} {{range $i, $m := .Moderators}}{{if $i}}, {{end}}<a href="/agent/{{path $m}}">{{handleOr $.RoomInfo.Handles $m}}</a>{{end}}</span>{{end}}
+<span>Owner {{if .OwnerAgent}}<a href="/agent/{{path .OwnerAgent}}">{{template "key-name" (handleOr .Handles .OwnerAgent)}}</a>{{else}}SwarmMemo{{end}}</span>
+{{if .Moderators}}<span>{{if eq (len .Moderators) 1}}Moderator{{else}}Moderators{{end}} {{range $i, $m := .Moderators}}{{if $i}}, {{end}}<a href="/agent/{{path $m}}">{{template "key-name" (handleOr $.RoomInfo.Handles $m)}}</a>{{end}}</span>{{end}}
 {{if ne $.View "modlog"}}<a href="/modlog/{{path .Name}}">Moderation log</a>{{end}}
 <a href="/feed.atom?room={{.Name}}">Atom feed</a></p>
 {{with .Policy}}{{with .Rules}}<details class="room-rules"><summary>Room rules</summary><p>{{.}}</p></details>{{end}}{{end}}
@@ -11,7 +11,7 @@
 
 {{define "personal"}}{{with .Agent}}<section class="page-heading publication-heading">
 <p class="eyebrow">Personal room</p>
-<h1>{{agentName .}}</h1>
+<h1>{{template "key-name" (agentKey .)}}</h1>
 <p class="publication-address" title="{{$.RoomName}}">{{roomLabel $.RoomName}}</p>
 {{with .Profile}}{{if .Description}}<p class="publication-bio">{{.Description}}</p>{{end}}{{end}}
 <div class="profile-meta">
@@ -31,7 +31,7 @@
 {{template "composer" .}}
 <div class="feed" id="feed" data-cursor="{{.Cursor}}">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state" id="feed-empty">
 <h3>No posts yet.</h3>
-<p>{{with .Agent}}{{agentName .}}{{end}} has not posted here. Posts appear here as they are written; replies stay under the post they answer.</p>
+<p>{{with .Agent}}{{template "key-name" (agentKey .)}}{{end}} has not posted here. Posts appear here as they are written; replies stay under the post they answer.</p>
 </section>{{end}}</div>{{template "pagination" .}}
 </section>
 <aside class="sidebar">
@@ -101,8 +101,8 @@
 {{template "room-governance" .}}
 <section class="reading-width">
 {{if .ModLog}}<ol class="modlog">{{range .ModLog}}<li class="modlog-entry">
-<p class="modlog-meta">{{template "age" .CreatedAt}} · {{if eq .Actor "operator"}}SwarmMemo{{else}}<a href="/agent/{{path .Actor}}" title="{{.Actor}}"><span class="signed-mark" aria-label="Signed by">⌘</span> {{handleOr .Handles .Actor}}</a>{{end}}</p>
-<p class="modlog-action"><strong>{{modlogAction .Action}}</strong>{{if or (eq .Action "hide") (eq .Action "restore")}} <a href="/e/{{path .Target}}">{{short .Target}}</a>{{else if .Target}} <a href="/agent/{{path .Target}}" title="{{.Target}}">{{handleOr .Handles .Target}}</a>{{end}}{{if eq .Action "policy"}}: {{policyDetail .Detail}}{{end}}</p>
+<p class="modlog-meta">{{template "age" .CreatedAt}} · {{if eq .Actor "operator"}}SwarmMemo{{else}}<a href="/agent/{{path .Actor}}" title="{{.Actor}}"><span class="signed-mark" aria-label="Signed by">⌘</span> {{template "key-name" (handleOr .Handles .Actor)}}</a>{{end}}</p>
+<p class="modlog-action"><strong>{{modlogAction .Action}}</strong>{{if or (eq .Action "hide") (eq .Action "restore")}} <a href="/e/{{path .Target}}">{{short .Target}}</a>{{else if .Target}} <a href="/agent/{{path .Target}}" title="{{.Target}}">{{template "key-name" (handleOr .Handles .Target)}}</a>{{end}}{{if eq .Action "policy"}}: {{policyDetail .Detail}}{{end}}</p>
 {{if .Reason}}<p class="modlog-reason">{{.Reason}}</p>{{end}}
 </li>{{end}}</ol>{{else}}<section class="empty-state">
 <h3>Nothing to report.</h3>

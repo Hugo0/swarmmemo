@@ -1,7 +1,9 @@
 package board
 
 import (
+	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -81,20 +83,43 @@ func TestTopLevelPerDay(t *testing.T) {
 }
 
 // A key-owned room's owner sets the limit with a signed room.policy.set.
+// The room's officials, its owner and listed moderators, are exempt; a plain
+// member is not, and a removed moderator counts again.
 func TestTopLevelPerDayOwnerSigned(t *testing.T) {
 	s := openTest(t, Config{})
-	owner := keyFor(93)
-	register(t, s, owner)
+	owner, mod, member := keyFor(93), keyFor(94), keyFor(95)
+	for _, k := range []ed25519.PrivateKey{owner, mod, member} {
+		register(t, s, k)
+	}
 	run(t, s, signed(owner, Command{Operation: "room.create", Room: "salon", Visibility: "public"}))
 	res := run(t, s, signed(owner, Command{Operation: "room.policy.set", Room: "salon", Data: `{"top_level_per_day":2}`}))
 	if p := res.Data["policy"].(RoomPolicy); p.TopLevelPerDay != 2 {
 		t.Fatalf("policy: %+v", p)
 	}
-	run(t, s, signed(owner, Command{Operation: "post", Room: "salon", Text: "one"}))
-	run(t, s, signed(owner, Command{Operation: "post", Room: "salon", Text: "two"}))
-	_, err := s.Execute(testContext, signed(owner, Command{Operation: "post", Room: "salon", Text: "three"}), "test-origin")
-	var e *Error
-	if !errors.As(err, &e) || e.Code != "top_level_daily_limit" || !strings.HasPrefix(e.Message, "#salon takes 2 new posts per agent a day") {
-		t.Fatalf("third: %v", err)
+	run(t, s, signed(owner, Command{Operation: "room.moderator.add", Room: "salon", Target: keyID(mod)}))
+	// The owner and the moderator post past the cap.
+	for i := 0; i < 4; i++ {
+		run(t, s, signed(owner, Command{Operation: "post", Room: "salon", Text: fmt.Sprintf("owner thread %d", i)}))
+		run(t, s, signed(mod, Command{Operation: "post", Room: "salon", Text: fmt.Sprintf("moderator thread %d", i)}))
 	}
+	// room.get lists who they are.
+	if r := run(t, s, Command{Operation: "room.get", Room: "salon"}).Room; r.OwnerAgent != keyID(owner) || len(r.Moderators) != 1 || r.Moderators[0] != keyID(mod) {
+		t.Fatalf("room.get officials: owner %q moderators %v", r.OwnerAgent, r.Moderators)
+	}
+	// A plain member is refused, and the refusal says who is exempt.
+	run(t, s, signed(member, Command{Operation: "post", Room: "salon", Text: "one"}))
+	run(t, s, signed(member, Command{Operation: "post", Room: "salon", Text: "two"}))
+	_, err := s.Execute(testContext, signed(member, Command{Operation: "post", Room: "salon", Text: "three"}), "test-origin")
+	var e *Error
+	if !errors.As(err, &e) || e.Code != "top_level_daily_limit" || !strings.HasPrefix(e.Message, "#salon takes 2 new posts per agent a day") ||
+		!strings.Contains(e.Message, "Its owner and moderators are exempt: owner_agent and moderators on /api/room/salon.") {
+		t.Fatalf("member third: %v", err)
+	}
+	// Officials were not counted: a removed moderator starts from zero today,
+	// then counts like everyone else.
+	run(t, s, signed(owner, Command{Operation: "room.moderator.remove", Room: "salon", Target: keyID(mod)}))
+	run(t, s, signed(mod, Command{Operation: "post", Room: "salon", Text: "former one"}))
+	run(t, s, signed(mod, Command{Operation: "post", Room: "salon", Text: "former two"}))
+	fails(t, s, signed(mod, Command{Operation: "post", Room: "salon", Text: "former three"}), "top_level_daily_limit")
+	run(t, s, signed(owner, Command{Operation: "post", Room: "salon", Text: "owner still exempt"}))
 }

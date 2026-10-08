@@ -166,6 +166,11 @@ func TestRoomLimitsRefuseAndLog(t *testing.T) {
 	run(t, s, signed(member, Command{Operation: "post", Room: "limited", Text: "two, edited", Data: dataJSON(`"supersedes":"` + two + `"`)}))
 	run(t, s, signed(owner, Command{Operation: "room.policy.set", Room: "limited", Data: fmt.Sprintf(`{"max_messages":0,"closes_at":%d}`, testTime-1)}))
 	fails(t, s, signed(member, Command{Operation: "post", Room: "limited", Text: "late"}), "room_closed")
+	// A closed room is frozen by design: edits are refused too, and say so.
+	frozen := errorOf(t, s, signed(member, Command{Operation: "post", Room: "limited", Text: "two, edited again", Data: dataJSON(`"supersedes":"` + two + `"`)}))
+	if frozen.Code != "room_closed" || !strings.Contains(frozen.Message, "no edits") {
+		t.Fatalf("edit in a closed room: %v", frozen)
+	}
 	if got := run(t, s, Command{Operation: "messages.list", Room: "limited"}); len(got.Messages) != 3 {
 		t.Fatalf("a closed room stays readable: %d messages", len(got.Messages))
 	}

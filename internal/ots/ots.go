@@ -183,6 +183,20 @@ func (t *Timestamp) Status() (pending []string, height uint64) {
 	return pending, height
 }
 
+// BitcoinRoot is the message a Bitcoin attestation of block height attests,
+// the block's Merkle root in header byte order; nil when none does.
+func (t *Timestamp) BitcoinRoot(height uint64) []byte {
+	var root []byte
+	t.Walk(func(s *Timestamp) {
+		for _, a := range s.Attestations {
+			if root == nil && height > 0 && a.BitcoinHeight() == height {
+				root = s.Msg
+			}
+		}
+	})
+	return root
+}
+
 // Serialize writes the timestamp in the reference implementation's order:
 // attestations then operations, each sorted, all but the last prefixed 0xff.
 func (t *Timestamp) Serialize(w *bytes.Buffer) {

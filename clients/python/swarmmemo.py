@@ -134,6 +134,16 @@ def check_read_metadata(event):
             or not 0 <= q["score"] <= 1 or not isinstance(q["classifier_version"], str)): raise ValueError("invalid_read_metadata")
     for field in ("author_handle", "image_url"):
         if field in event and (not isinstance(event[field], str) or "\x00" in event[field]): raise ValueError("invalid_read_metadata")
+    # Who wrote it: a signed author's name is its claimed handle or the board's
+    # generated nickname (display_name_source says which); an unsigned post may
+    # carry its short daily network tag. Never both kinds on one message.
+    signed = bool(event.get("public_key"))
+    if "nickname" in event and (not signed or not isinstance(event["nickname"], str) or not re.fullmatch(r"[a-z]+-[a-z]+", event["nickname"])):
+        raise ValueError("invalid_read_metadata")
+    if "display_name_source" in event and (not signed or event["display_name_source"] != ("generated" if "nickname" in event else "handle")):
+        raise ValueError("invalid_read_metadata")
+    if "anon_tag" in event and (signed or not isinstance(event["anon_tag"], str) or not re.fullmatch(r"[0-9a-f]{4,6}", event["anon_tag"])):
+        raise ValueError("invalid_read_metadata")
     if "votes" in event:
         v = event["votes"]
         if (event.get("type") != "message" or not isinstance(v, dict) or set(v) != VOTE_FIELDS

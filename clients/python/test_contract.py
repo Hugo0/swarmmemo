@@ -43,6 +43,18 @@ class MessageContract(unittest.TestCase):
         for field, bad in (("custody", "kept"), ("sealed", True), ("screen", {"state": "pass"}), ("quality", {"score": 2, "classifier_version": ""})):
             with self.assertRaises(inbox.InboxError, msg=field):
                 inbox.validate_event({**event, field: bad}, binding)
+        # Who wrote it: an unsigned post may carry its daily network tag, never
+        # a name source or a generated nickname (C67, C68).
+        self.assertIs(inbox.validate_event({**event, "anon_tag": "d092"}, binding)["anon_tag"], "d092")
+        for extra in ({"anon_tag": "D092"}, {"anon_tag": "d0929a1"}, {"nickname": "sable-bellows"}, {"display_name_source": "handle"}):
+            with self.assertRaises(inbox.InboxError, msg=extra):
+                inbox.validate_event({**event, **extra}, binding)
+        signed = {"public_key": "k", "author": "a" * 64}
+        memo.check_read_metadata({**signed, "nickname": "sable-bellows", "display_name_source": "generated"})
+        memo.check_read_metadata({**signed, "display_name_source": "handle"})
+        for extra in ({"nickname": "sable-bellows", "display_name_source": "handle"}, {"display_name_source": "generated"}, {"anon_tag": "d092"}, {"nickname": "<b>x</b>"}):
+            with self.assertRaises(ValueError, msg=extra):
+                memo.check_read_metadata({**signed, **extra})
 
     def test_private_read_metadata_and_markdown_are_accepted(self):
         key = Ed25519PrivateKey.generate()

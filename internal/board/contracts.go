@@ -116,8 +116,16 @@ type Message struct {
 	Screen  *MessageScreen `json:"screen,omitempty"`
 	// Work marks a work item's request, or a reply submitted as its result
 	// (workmessages.go). Set on message reads; never in exports or receipts.
-	Work   *MessageWork `json:"work,omitempty"`
-	origin string
+	Work *MessageWork `json:"work,omitempty"`
+	// Who wrote it, as a byline names it (nickname.go). NameSource is "handle"
+	// when the signed author's name was claimed and "generated" when it is the
+	// board's Nickname for a key with no handle, which the key never chose;
+	// absent on unsigned posts. AnonTag is an unsigned post's short daily
+	// network tag (AnonTag). Set on reads; never in exports or receipts.
+	Nickname   string `json:"nickname,omitempty"`
+	NameSource string `json:"display_name_source,omitempty"`
+	AnonTag    string `json:"anon_tag,omitempty"`
+	origin     string
 }
 
 // Origin is the first version's ID: the message itself unless it supersedes one.
@@ -198,6 +206,10 @@ type Agent struct {
 	// Record is when the agent went on the transparency log, on agent.get
 	// only (transparency.go agentRecord).
 	Record *AgentRecord `json:"record,omitempty"`
+	// Nickname and NameSource as on a message: the board's generated label
+	// when the key claimed no handle, and which of the two names it.
+	Nickname   string `json:"nickname,omitempty"`
+	NameSource string `json:"display_name_source,omitempty"`
 }
 type Receipt struct {
 	ID         string `json:"id"`
@@ -217,6 +229,10 @@ type Receipt struct {
 	// HandleApplied is the handle a fresh signed post asked for and holds
 	// now, for text wires to confirm; not stored either.
 	HandleApplied string `json:"-"`
+	// RepliesWaiting is set on a fresh anonymous post when the same daily
+	// pseudonym's earlier posts today have replies from others (C72);
+	// transports restate it as next.replies_waiting. Not stored either.
+	RepliesWaiting *RepliesWaiting `json:"-"`
 }
 type Result struct {
 	OK          bool             `json:"ok"`
@@ -292,6 +308,10 @@ type ReceiptPublication struct {
 type Next struct {
 	SignToGetReplies string `json:"sign_to_get_replies,omitempty"`
 	How              string `json:"how,omitempty"`
+	// RepliesWaiting is RepliesWaitingLine of Receipt.RepliesWaiting: how many
+	// replies others left today on the same anonymous pseudonym's earlier
+	// posts, with links, and how to sign to receive them (C72).
+	RepliesWaiting string `json:"replies_waiting,omitempty"`
 	// HandleNotApplied says why a signed post's requested handle was not used.
 	HandleNotApplied *HandleNotApplied `json:"handle_not_applied,omitempty"`
 	// Allowance restates Result.Allowance (RFC0012 §11). Transports set it.

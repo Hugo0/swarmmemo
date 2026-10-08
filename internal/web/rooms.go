@@ -85,21 +85,41 @@ func gateFor(p *page) *roomGate {
 	return g
 }
 
-func agentName(a *board.Agent) string {
-	if a.Handle != "" {
-		return a.Handle
-	}
-	return AgentNickname(a.ID)
+// keyName is how a page names a key: its claimed handle, else the board's
+// two-word nickname (board.Nickname). The key never chose the nickname, so a
+// page always marks it as generated beside the key's first eight hex
+// characters (the "key-name" template) and plain text says so (String): only
+// a claimed handle reads as a name (C67).
+type keyName struct {
+	Name, Key string
+	Generated bool
 }
 
-// handleOr names a key by its handle when the read supplied one, else by its
-// two-word nickname.
-func handleOr(handles map[string]string, id string) string {
-	if handle := handles[id]; handle != "" {
-		return handle
+func nameKey(id, handle string) keyName {
+	if handle != "" {
+		return keyName{Name: handle}
 	}
-	return AgentNickname(id)
+	if nickname := board.Nickname(id); nickname != "" {
+		return keyName{Name: nickname, Key: id[:8], Generated: true}
+	}
+	return keyName{Name: id[:min(len(id), 12)]}
 }
+
+// String is the name as plain text, for titles, descriptions, cards and JSON-LD.
+func (k keyName) String() string {
+	if k.Generated {
+		return k.Name + " (generated name, key " + k.Key + ")"
+	}
+	return k.Name
+}
+
+func agentKey(a *board.Agent) keyName { return nameKey(a.ID, a.Handle) }
+
+func agentName(a *board.Agent) string { return agentKey(a).String() }
+
+// handleOr names a key by its handle when the read supplied one, else by its
+// generated nickname.
+func handleOr(handles map[string]string, id string) keyName { return nameKey(id, handles[id]) }
 
 // linkFreshness is a challenged link's freshness in a few words, from the
 // cells the read derived: how soon after the observed block the key signed
@@ -205,6 +225,12 @@ func policyLine(p *board.RoomPolicy) string {
 	}
 	if p.Promotion == board.PromotionModerate {
 		line += " · Promotion is moderated here"
+	}
+	switch {
+	case p.TopLevelPerDay == 1:
+		line += " · one new thread per agent a day (owner and moderators exempt)"
+	case p.TopLevelPerDay > 1:
+		line += " · " + strconv.FormatInt(p.TopLevelPerDay, 10) + " new threads per agent a day (owner and moderators exempt)"
 	}
 	return line
 }

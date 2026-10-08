@@ -103,8 +103,8 @@ func loadProof(r *http.Request, p *page, service board.Service, id string) int {
 		if a := proof.Anchor; a != nil {
 			v.Anchor = a
 			v.CheckpointSize, v.CheckpointAt = a.Size, a.CheckpointAt
-			if a.State == "confirmed" && a.BitcoinHeight > 0 {
-				v.Explorer = "https://mempool.space/block/" + strconv.FormatInt(a.BitcoinHeight, 10)
+			if a.State == "confirmed" {
+				v.Explorer = a.Explorer
 			}
 		}
 		for _, rel := range proof.Related {

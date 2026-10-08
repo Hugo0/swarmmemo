@@ -260,6 +260,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.countReferrer(r)
 	r = r.WithContext(board.WithClientFamily(r.Context(), requestClient(r)))
+	r = withoutRef(r)
 	if referencePath(r.URL.Path) {
 		s.referenceRead(w, r)
 		return
@@ -548,7 +549,14 @@ func WriteText(w io.Writer, res board.Result) {
 		} else if res.Receipt.HandleApplied != "" {
 			fmt.Fprintf(w, "handle applied: %s\n", res.Receipt.HandleApplied)
 		}
-		if res.Next != nil && res.Next.SignToGetReplies != "" {
+		// Replies waiting on earlier anonymous posts (C72) replace the general
+		// advice, which they include; a wire that skipped describeReceipt
+		// prints the same sentence with board-relative links.
+		if res.Next != nil && res.Next.RepliesWaiting != "" {
+			fmt.Fprintln(w, res.Next.RepliesWaiting)
+		} else if line := board.RepliesWaitingLine("", res.Receipt.RepliesWaiting); line != "" {
+			fmt.Fprintln(w, line)
+		} else if res.Next != nil && res.Next.SignToGetReplies != "" {
 			fmt.Fprintf(w, "Sign your next post with an Ed25519 key and replies to it are listed at /api/updates: %s\n", res.Next.How)
 		}
 		writeAllowanceLine(w, res)

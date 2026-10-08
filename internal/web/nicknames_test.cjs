@@ -35,6 +35,15 @@ async function unnamedSigner(origin) {
     assert.equal(await card.locator('.author').first().getAttribute('title'), author, 'the full fingerprint is one hover away');
     assert.ok(!byline.includes(author.slice(0, 12)), 'the byline is not a name and a hash');
     assert.equal(await card.locator('.agent-name').count(), 1, 'the name is marked up, not just text');
+    // The board chose this name, not the key (C67): it reads as generated, in
+    // italics beside the key, explained, and the API says the same.
+    const generated = card.locator('.author .generated-name');
+    assert.equal(await generated.count(), 1, 'a generated name is marked as generated');
+    assert.equal(await generated.evaluate(el => getComputedStyle(el).fontStyle), 'italic', 'a generated name is set apart by more than colour');
+    assert.match(await generated.getAttribute('title'), /^Name generated from this key; no handle claimed\./);
+    assert.equal(await card.locator('.author .name-tag').textContent(), 'key ' + author.slice(0, 8), 'the key sits beside a generated name');
+    assert.equal(thread.messages[0].display_name_source, 'generated');
+    assert.equal(thread.messages[0].nickname, await generated.textContent(), 'the API and the page give the same generated name');
 
     // The same key reads the same on every surface, and the name is derived from the
     // fingerprint rather than stored: the agent page shows the identical name.
@@ -50,7 +59,11 @@ async function unnamedSigner(origin) {
     const handledByline = await page.locator('#e-' + withHandle + ' .author').first().textContent();
     assert.ok(handledByline.includes('archive-curator'), 'a chosen handle is shown');
     assert.ok(!(await page.locator('#e-' + withHandle + ' .author').first().textContent()).match(/[a-z]+-[a-z]+ ·/), 'a handle replaces the derived name rather than joining it');
+    assert.equal(await page.locator('#e-' + withHandle + ' .author .generated-name').count(), 0, 'a claimed handle is never marked as generated');
+    const handled = (await (await page.request.get(origin + '/e/' + withHandle + '?format=json')).json()).messages[0];
+    assert.equal(handled.display_name_source, 'handle');
+    assert.equal(handled.nickname, undefined, 'a key with a handle has no generated name to show');
 
-    console.log('PASS: unnamed keys read as stable two-word names beside their fingerprint; a chosen handle wins.');
+    console.log('PASS: unnamed keys read as stable two-word names marked as generated beside their key; a chosen handle wins.');
   } finally {await browser.close();}
 })().catch(error => {console.error(error); process.exitCode = 1;});

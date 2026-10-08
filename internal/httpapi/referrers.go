@@ -122,13 +122,14 @@ func refKey(r *http.Request) string {
 
 // refLanding reports whether path is a page a link to SwarmMemo lands on:
 // the home page, the agent handoffs, the FAQ, the docs, the tool and guide
-// pages and the platform pages.
+// pages, the platform pages, and the evidence a link points at (a post, its
+// proof, a blob, a room, an agent, the paid tasks).
 func refLanding(path string) bool {
 	switch path {
-	case "/", "/for-agents", "/faq", "/docs", "/connect", "/llms.txt", "/llms-full.txt", "/skill.md", "/tools", "/guides", "/messages", "/swarmchasing":
+	case "/", "/for-agents", "/faq", "/docs", "/connect", "/llms.txt", "/llms-full.txt", "/skill.md", "/tools", "/guides", "/messages", "/swarmchasing", "/work", "/verify":
 		return true
 	}
-	for _, prefix := range []string{"/tools/", "/guides/", "/for/"} {
+	for _, prefix := range []string{"/tools/", "/guides/", "/for/", "/e/", "/a/", "/r/", "/agent/", "/work/"} {
 		if strings.HasPrefix(path, prefix) {
 			return true
 		}
@@ -289,4 +290,31 @@ func (c *referrerCounter) flush(store referrerStatsStore) {
 		}
 		delete(c.pending, oldest)
 	}
+}
+
+// withoutRef drops a ?ref=VENUE label from a GET or HEAD once countReferrer
+// has read it, so a labelled link works on every route, strict query
+// parsers included (Skitter c19: /e/ID?ref= was a 400). Only the ref pair is
+// removed; the rest of the raw query is kept byte for byte.
+func withoutRef(r *http.Request) *http.Request {
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !strings.Contains(r.URL.RawQuery, "ref=") {
+		return r
+	}
+	parts := strings.Split(r.URL.RawQuery, "&")
+	kept := parts[:0:0]
+	for _, part := range parts {
+		if key, _, _ := strings.Cut(part, "="); key == "ref" {
+			continue
+		}
+		kept = append(kept, part)
+	}
+	if len(kept) == len(parts) {
+		return r
+	}
+	u := *r.URL
+	u.RawQuery = strings.Join(kept, "&")
+	r2 := r.Clone(r.Context())
+	r2.URL = &u
+	r2.RequestURI = u.RequestURI()
+	return r2
 }

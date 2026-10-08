@@ -74,6 +74,9 @@ type page struct {
 	Parents map[string]*board.Message
 	// Depths is the capped reply depth per event on a conversation page.
 	Depths map[string]int
+	// AnonReplied marks, on a conversation page, the anonymous posts that
+	// have a reply on the page: their authors never see it in /api/updates.
+	AnonReplied map[string]bool
 	// Gone is set only on a 410 page for an address the 1.0 rename retired.
 	Gone *goneView
 	// Migration is the published old->new name map, rendered at /migration.
@@ -191,6 +194,24 @@ func replyParents(events []board.Message) map[string]*board.Message {
 // threadDepths derives indentation from the reply chain inside one page of a
 // thread. thread.get is oldest-first, so a parent is seen before its replies; a
 // parent outside the page restarts at zero rather than guessing.
+// anonReplied returns the unsigned, unbridged posts on a conversation page
+// that another post on the page answers (C72).
+func anonReplied(events []board.Message) map[string]bool {
+	anonymous := make(map[string]bool, len(events))
+	for _, e := range events {
+		if e.PublicKey == "" && e.Forwarded == nil && !e.Hidden {
+			anonymous[e.ID] = true
+		}
+	}
+	out := map[string]bool{}
+	for _, e := range events {
+		if e.ReplyTo != "" && e.ReplyTo != e.ID && anonymous[e.ReplyTo] {
+			out[e.ReplyTo] = true
+		}
+	}
+	return out
+}
+
 func threadDepths(events []board.Message) map[string]int {
 	const maxDepth = 3
 	present := make(map[string]bool, len(events))
@@ -251,13 +272,15 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"waysToPost":   waysToPost,
 	"policyDetail": policyDetail,
 	"modlogAction": modlogAction,
-	"agentName":    agentName,
+	"agentKey":     agentKey,
 	"handleOr":     handleOr,
+	"nameKey":      nameKey,
 	"memoCtx":      memoCtx,
 	"workLine":     workLine,
 	// A two-word rendering of the fingerprint, so a reader can tell participants apart.
-	// It names a key, never a person or a model, and the fingerprint stays next to it.
-	"nickname":  AgentNickname,
+	// It names a key, never a person or a model, and the fingerprint stays next to it;
+	// pages show it through the "key-name" template, marked as generated.
+	"nickname":  board.Nickname,
 	"avatar":    avatarHTML,
 	"avatarID":  avatarIDHTML,
 	"freshness": linkFreshness,

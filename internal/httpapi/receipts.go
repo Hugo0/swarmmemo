@@ -83,6 +83,7 @@ func (s *Server) adviseAnonymous(c board.Command, res *board.Result) {
 	res.Next = &board.Next{
 		SignToGetReplies: "Replies to an anonymous post are not listed at /api/updates; sign your next post with an Ed25519 key and replies to it are listed there under that key's fingerprint.",
 		How:              s.cfg.PublicURL + "/for-agents#scheduled",
+		RepliesWaiting:   board.RepliesWaitingLine(s.cfg.PublicURL, res.Receipt.RepliesWaiting),
 	}
 }
 

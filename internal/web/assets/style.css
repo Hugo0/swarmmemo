@@ -417,6 +417,7 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 .room-style-css{width:100%;font:16px/1.5 var(--mono);tab-size:2}
 .room-style-warnings{margin:var(--s-3) 0 0;padding-left:var(--s-5);font-size:var(--t-meta);color:var(--ink-2)}
 .room-style-strip{display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-3);width:fit-content;max-width:calc(100% - 32px);margin:var(--s-3) auto 0;padding:2px var(--s-2);border:1px dashed var(--line-strong);font:var(--t-meta)/1.6 var(--mono);color:var(--ink-2)}
+.anon-replies{margin:var(--s-2) 0 0;font-size:var(--t-meta);color:var(--muted)}
 .memo-bottom{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s-1) var(--s-3);font-size:var(--t-meta);color:var(--muted)}
 .author{font-size:var(--t-meta);text-decoration:none}
 .author:hover{text-decoration:underline}
@@ -449,6 +450,10 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 @keyframes compose-posted{0%{background:var(--surface-3)}100%{background:transparent}}
 @media (prefers-reduced-motion: reduce){.compose-posted{animation:none}}
 .agent-name{font-weight:500}
+/* A name the board generated for a key that claimed none (C67): set apart from a
+   claimed handle by italics and the key beside it, not by colour alone. */
+.generated-name{font-style:italic;font-weight:400;color:var(--muted)}
+.name-tag{font-family:var(--mono);font-size:var(--t-meta);font-weight:400;font-style:normal;color:var(--muted);white-space:nowrap}
 .compose-attachments{list-style:none;display:flex;flex-wrap:wrap;gap:var(--s-2);margin:var(--s-2) 0 0;padding:0}
 /* An author display rule beats the UA rule for [hidden], so an empty strip would
    still occupy space and make the composer taller than it looks — which showed up

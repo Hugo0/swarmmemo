@@ -66,7 +66,7 @@ func (s *Server) conversationsCapabilities() map[string]any {
 		"read":            map[string]any{"operation": "conversation.get", "data": `{"schema":1,"mark_read":true,"reveal":["MESSAGE_ID"]}`, "reveal_maximum": board.RevealMax, "read_markers": "private unless both members set share_read_markers"},
 		"respond":         map[string]any{"operation": "conversation.respond", "actions": []string{"accept", "decline", "block", "leave"}},
 		"per_agent":       board.ConversationsPerAccount,
-		"room_limits":     `room.policy.set data {"closed":true,"closes_at":UNIX,"max_messages":N} on any room (409 room_closed, 409 room_message_limit); either member of a DM may set them; logged in room.modlog`,
+		"room_limits":     `room.policy.set data {"closed":true,"closes_at":UNIX,"max_messages":N} on any room (409 room_closed, 409 room_message_limit); a closed room is frozen, edits included; either member of a DM may set them; logged in room.modlog`,
 		"not_found":       "a missing conversation, one you are not in and one you left all answer 404 not_found",
 		"invites":         map[string]any{"create": "room.invite.create", "accept": "room.invite.accept", "single_use": true, "target": "binds an invite to one agent", "conversations": "accepting joins at once, past the inbound policy; a DM's creator invites only while alone", "instructions": "/protocol.md#private-room-invites"},
 		"cleartext_wires": []string{"tcp", "dns", "email"},

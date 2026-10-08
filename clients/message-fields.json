@@ -19,6 +19,7 @@
     "origin_service"
   ],
   "message": [
+    "anon_tag",
     "archive_eligible",
     "attachments",
     "author",
@@ -27,6 +28,7 @@
     "curated",
     "custody",
     "delegation_id",
+    "display_name_source",
     "format",
     "forwarded",
     "handle",
@@ -35,6 +37,7 @@
     "id",
     "image_url",
     "kind",
+    "nickname",
     "page",
     "public_key",
     "quality",

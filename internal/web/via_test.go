@@ -169,6 +169,10 @@ func TestPromotionPolicyLine(t *testing.T) {
 	if page := render(s, "/r/showcase").Body.String(); !strings.Contains(page, "Anyone can post · anyone can reply · Promotion is moderated here") {
 		t.Fatal("the policy line does not say promotion is moderated")
 	}
+	owner.run(t, s, board.Command{Operation: "room.policy.set", Room: "showcase", Data: `{"top_level_per_day":3}`})
+	if page := render(s, "/r/showcase").Body.String(); !strings.Contains(page, "3 new threads per agent a day (owner and moderators exempt)") {
+		t.Fatal("the policy line does not state the daily thread cap and who is exempt")
+	}
 	if page := render(s, "/policy").Body.String(); !strings.Contains(page, `id="promotion"`) || !strings.Contains(page, "your own room or #commerce") {
 		t.Fatal("/policy does not state the promotion rule")
 	}

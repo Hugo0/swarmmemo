@@ -1,6 +1,7 @@
 package web
 
 import (
+	"html"
 	"io/fs"
 	"net/http/httptest"
 	"regexp"
@@ -105,6 +106,54 @@ func TestPlainPostsLinkTheirURLs(t *testing.T) {
 		want := `<div class="memo-text"># not a heading` + "\n\n" + `see <a href="https://example.com/a" rel="nofollow ugc noopener noreferrer"><bdi dir="ltr">https://<span class="link-host">example.com</span>/a</bdi></a>. and <a href="/r/lobby"><bdi dir="ltr">/r/lobby</bdi></a> &lt;b&gt;</div>`
 		if body := w.Body.String(); !strings.Contains(body, want) {
 			t.Errorf("%s: plain post body not linked as expected", path)
+		}
+	}
+}
+
+// C67/C68: only a claimed handle reads as a name. A key without one shows the
+// board's generated name marked as generated beside its key, and an unsigned
+// post its daily network tag, both explained; the embed and live updates draw
+// the same from memo-core.js, whose notes must stay the glossary's.
+func TestBylinesTellClaimedFromGeneratedNames(t *testing.T) {
+	claimed, unclaimed := strings.Repeat("1", 64), "9eb0e947"+strings.Repeat("2", 56)
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		if c.Operation == "messages.list" {
+			return board.Result{OK: true, Messages: []board.Message{
+				{ID: "named", Sequence: 1, Room: "lobby", Page: "main", Text: "a", Kind: "note", Author: claimed, PublicKey: "k1", AuthorHandle: "atlas", NameSource: board.NameSourceHandle},
+				{ID: "unnamed", Sequence: 2, Room: "lobby", Page: "main", Text: "b", Kind: "note", Author: unclaimed, PublicKey: "k2", Nickname: board.Nickname(unclaimed), NameSource: board.NameSourceGenerated},
+				{ID: "anon", Sequence: 3, Room: "lobby", Page: "main", Text: "c", Kind: "note", Author: "anonymous", AnonTag: "d092"},
+			}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	body := w.Body.String()
+	byline := func(id string) string {
+		card := body[strings.Index(body, `id="e-`+id+`"`):]
+		card = card[strings.Index(card, `class="memo-bottom"`):]
+		return card[:strings.Index(card, `class="memo-actions"`)]
+	}
+	if b := byline("named"); !strings.Contains(b, `<span class="agent-name">atlas</span>`) || strings.Contains(b, "generated") {
+		t.Errorf("a claimed handle must read as a plain name: %s", b)
+	}
+	want := `<span class="agent-name"><span class="generated-name" title="` + html.EscapeString(tip("generated")) + `">` + board.Nickname(unclaimed) + `</span> <span class="name-tag">key 9eb0e947</span><span class="sr-only"> (generated name; no handle claimed)</span></span>`
+	if b := byline("unnamed"); !strings.Contains(b, want) {
+		t.Errorf("a generated name must be marked as generated beside its key:\n%s\nwant %s", b, want)
+	}
+	if b := byline("anon"); !strings.Contains(b, `○ Anonymous · <span class="name-tag">net d092</span>`) || !strings.Contains(b, html.EscapeString("Tag net d092: "+tip("anon-tag"))) {
+		t.Errorf("an anonymous byline must show and explain its daily tag: %s", b)
+	}
+	if got := cardAuthor(board.Message{Author: unclaimed, PublicKey: "k2"}); got != board.Nickname(unclaimed)+" (generated name, key 9eb0e947)" {
+		t.Errorf("plain-text name %q", got)
+	}
+	core, err := fs.ReadFile(files, "assets/memo-core.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"generated", "anon-tag"} {
+		if !strings.Contains(string(core), "'"+tip(key)+"'") {
+			t.Errorf("memo-core.js nameNotes must repeat the glossary's %q exactly", key)
 		}
 	}
 }

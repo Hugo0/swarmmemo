@@ -517,3 +517,88 @@ func TestTransparencyAnchors(t *testing.T) {
 		t.Fatalf("stored proof height %d", height)
 	}
 }
+
+// TestAnchorBlockTime: a confirmed anchor gains its block's own timestamp
+// (block_time) from the explorer's header, which must commit to the
+// attestation; confirmed_at stays this service's time. Until the header is
+// read, block_time is absent and the block is asked again next time.
+func TestAnchorBlockTime(t *testing.T) {
+	s := openTest(t, Config{})
+	run(t, s, Command{Operation: "post", Room: "lobby", Text: "anchor me"})
+	if _, err := s.SignCheckpoint(testContext); err != nil {
+		t.Fatal(err)
+	}
+	var ready atomic.Bool
+	ready.Store(true)
+	client := &ots.Client{Calendars: []string{fakeCalendar(t, &ready, nil).URL}}
+	if err := s.AnchorCheckpoints(testContext, client, 3); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := s.ReadLogAnchors(testContext, 0, 10)
+	s.now = func() time.Time { return time.Unix(a[0].SubmittedAt+anchorFirstCheck, 0) }
+	if err := s.UpgradeAnchors(testContext, client, 5); err != nil {
+		t.Fatal(err)
+	}
+	// The calendar attests sha256(digest) in block 100: the Merkle root.
+	digest, _ := hex.DecodeString(a[0].Digest)
+	root := sha256.Sum256(digest)
+	header := make([]byte, 80)
+	copy(header[36:68], root[:])
+	mined := int64(1759900000)
+	header[68], header[69], header[70], header[71] = byte(mined), byte(mined>>8), byte(mined>>16), byte(mined>>24)
+	first := sha256.Sum256(header)
+	id := sha256.Sum256(first[:])
+	for i, j := 0, len(id)-1; i < j; i, j = i+1, j-1 {
+		id[i], id[j] = id[j], id[i]
+	}
+	hash := hex.EncodeToString(id[:])
+	var serve atomic.Bool
+	explorer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case !serve.Load():
+			http.Error(w, "down", 503)
+		case r.URL.Path == "/block-height/100":
+			io.WriteString(w, hash)
+		case r.URL.Path == "/block/"+hash+"/header":
+			io.WriteString(w, hex.EncodeToString(header))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(explorer.Close)
+	client.Explorer = explorer.URL
+
+	// No explorer configured: nothing is asked, nothing is known.
+	if err := s.FillBlockTimes(testContext, &ots.Client{}, 4); err != nil {
+		t.Fatal(err)
+	}
+	// The explorer is down: no block_time, an error, and the block stays due.
+	if err := s.FillBlockTimes(testContext, client, 4); err == nil {
+		t.Fatal("a failed header read reported no error")
+	}
+	proof, err := s.ReadLogProof(testContext, 0, "", -1)
+	if err != nil || proof.Anchor == nil || proof.Anchor.State != "confirmed" || proof.Anchor.BlockTime != 0 ||
+		proof.Anchor.Explorer != "https://mempool.space/block/100" || proof.Anchor.ConfirmedAt == 0 {
+		t.Fatalf("confirmed without a block time: %+v %v", proof.Anchor, err)
+	}
+	serve.Store(true)
+	if err := s.FillBlockTimes(testContext, client, 4); err != nil {
+		t.Fatal(err)
+	}
+	proof, err = s.ReadLogProof(testContext, 0, "", -1)
+	if err != nil || proof.Anchor.BlockTime != mined || proof.Anchor.ConfirmedAt != a[0].SubmittedAt+anchorFirstCheck {
+		t.Fatalf("block time: %+v %v", proof.Anchor, err)
+	}
+	raw, _ := json.Marshal(proof.Anchor)
+	if !strings.Contains(string(raw), `"block_time":1759900000`) || !strings.Contains(string(raw), `"explorer":"https://mempool.space/block/100"`) {
+		t.Fatalf("anchor JSON: %s", raw)
+	}
+	// Known blocks are never asked again.
+	serve.Store(false)
+	if err := s.FillBlockTimes(testContext, client, 4); err != nil {
+		t.Fatalf("a known block was asked again: %v", err)
+	}
+	if list, _ := s.ReadLogAnchors(testContext, 0, 10); list[0].BlockTime != mined {
+		t.Fatalf("anchors list: %+v", list[0])
+	}
+}

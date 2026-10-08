@@ -319,6 +319,13 @@ func (d *dns) Render(req Request, res board.Result, err error) []byte {
 		if err == nil && res.Allowance != nil && res.Allowance.Line != "" {
 			optional = append(optional, oneLine(res.Allowance.Line, 255))
 		}
+		// C72: replies waiting on the same anonymous pseudonym's earlier
+		// posts, with board-relative links, as whole 255-byte strings.
+		if err == nil && res.Receipt != nil {
+			if line := board.RepliesWaitingLine("", res.Receipt.RepliesWaiting); line != "" {
+				optional = append(optional, chunk(oneLine(line, 1020), 255)...)
+			}
+		}
 		return d.fitted(q, text, labelOf(req.Notice), optional, req.Budget)
 	case "write-ack":
 		return d.message(q, rcodeOK, answer(dnsTypeTXT, 0, txtData([]string{req.Arg})), nil, req.Budget)

@@ -54,7 +54,7 @@ IDENTIFIER = r"[A-Za-z0-9_-]{1,128}"
 HASH = r"[0-9a-f]{64}"
 GENERATION = r"[0-9a-f]{32}"
 BINDING_FIELDS = set("schema type origin service_id room reader_public_key start_mode storage offline_bodies".split())
-EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments hidden_by via work delegation_id format supersedes superseded_by curated forwarded votes quality author_handle image_url custody sealed screen".split())
+EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments hidden_by via work delegation_id format supersedes superseded_by curated forwarded votes quality author_handle image_url custody sealed screen nickname display_name_source anon_tag".split())
 POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 
