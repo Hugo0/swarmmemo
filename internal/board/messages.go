@@ -513,7 +513,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if err = s.loadAttachments(ctx, tx, events, now); err != nil {
 			return Result{}, err
 		}
-		if err = attachScores(ctx, tx, events); err != nil {
+		if err = attachScores(ctx, tx, events, now); err != nil {
 			return Result{}, err
 		}
 		if err = s.screenConversationMessages(ctx, tx, a, events); err != nil {
@@ -568,7 +568,7 @@ func (s *Store) finishPage(ctx context.Context, tx *sql.Tx, c Command, events []
 		return Result{}, err
 	}
 	events, hasMore := boundPage(events, order, fetched, limit)
-	if err := attachScores(ctx, tx, events); err != nil {
+	if err := attachScores(ctx, tx, events, now); err != nil {
 		return Result{}, err
 	}
 	if len(events) > 0 {

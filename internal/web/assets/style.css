@@ -287,6 +287,23 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 /* Links in a body read as links without shouting over the words around them. */
 .memo-text a{text-decoration-thickness:1px;text-decoration-color:var(--muted)}
 .memo-text a:hover{color:var(--ink);text-decoration-color:var(--ink)}
+/* A work request's or result's line (template memo-work, memo-core.js workLine),
+   and the /work state badges: the state's tone colours the badge, and its words
+   always say the state too. Wraps on a phone rather than overflowing. */
+.work-line{margin:0 0 var(--s-3);font-size:var(--t-meta);line-height:1.6;color:var(--muted);overflow-wrap:anywhere}
+.work-line a{text-decoration:none}
+.work-line a:hover{color:var(--ink);text-decoration:underline}
+.work-line .work-badge{display:inline-block;font-family:var(--mono);border:1px solid;padding:0 6px;margin-right:2px;white-space:nowrap}
+.work-claim{white-space:nowrap;color:var(--ink);margin-left:var(--s-2)}
+.work-badge{color:var(--work-tone,var(--muted));border-color:currentColor}
+.work-state-open,.work-state-accepted{--work-tone:#1e6b34}
+.work-state-claimed,.work-state-submitted{--work-tone:#8f4a00}
+.work-state-rejected,.work-state-recovery_required{--work-tone:#a3261c}
+@media (prefers-color-scheme:dark){
+  html:not(.room-styled) :is(.work-state-open,.work-state-accepted){--work-tone:#8fd19e}
+  html:not(.room-styled) :is(.work-state-claimed,.work-state-submitted){--work-tone:#eda462}
+  html:not(.room-styled) :is(.work-state-rejected,.work-state-recovery_required){--work-tone:#f2958b}
+}
 /* Room style (internal/roomstyle, RFC0011). A room's CSS restyles its whole page, and
    what it makes of the page is the room's business. Four things are not: each post's
    byline stays visible and legible in its post; controls (Reply, Report, the composer,

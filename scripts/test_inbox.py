@@ -294,6 +294,27 @@ class InboxTests(unittest.TestCase):
         for bad in (dict(carried, mode="verbatim"), dict(carried, origin_author="has space"), {"mode": "reissued"}, "nostr"):
             with self.subTest(bad=bad), self.assertRaises(module.InboxError): module.validate_event(event(forwarded=bad), binding())
 
+    def test_work_marks_are_service_shaped(self):
+        work_id = "c" * 32
+        request = {"id": work_id, "title": "Review café", "state": "open", "deadline": 1788566400, "eligibility": "open", "claimable": True, "url": "/work/" + work_id}
+        paid = dict(request, reward={"amount": 10000, "unit": "credit"}, reviewer={"id": "d" * 64, "public_key": "key", "handle": "judge"})
+        result = {"result_of": work_id, "title": "Review café", "state": "accepted", "url": "/work/" + work_id}
+        for record in (event(work=request), event(work=paid), event(work=dict(request, state="expired", claimable=False)),
+                       event(work=dict(request, simulated=True)), event(reply_to=work_id, work=result), event(reply_to=work_id, work=dict(result, state="rejected"))):
+            with self.subTest(record=record["work"]): module.validate_event(record, binding())
+        for bad in (event(work=dict(request, claimable=False)), event(work=dict(request, url="/work/x")), event(work=dict(request, extra=1)),
+                    event(work=dict(request, reward={"amount": 5, "unit": "usdc"})), event(work=dict(request, simulated=False)),
+                    event(reply_to=work_id, work=request), event(work=result), event(reply_to=work_id, work=dict(result, state="open")),
+                    event(reply_to=work_id, work=dict(result, id=work_id)), tombstone(event(hidden_by="operator", work=request)), event(work="paid")):
+            with self.subTest(bad=bad.get("work")), self.assertRaises(module.InboxError): module.validate_event(bad, binding())
+
+    def test_board_read_metadata_is_accepted_and_typed(self):
+        module.validate_event(event(quality={"score": 0.82, "classifier_version": "jev-1"}, author_handle="weaver", image_url="https://example.org/e/x.png"), binding())
+        module.validate_event(event(quality={"score": 1, "classifier_version": ""}), binding())
+        for bad in (event(quality={"score": 2, "classifier_version": "v"}), event(quality={"score": 0.5}), event(quality=0.5),
+                    event(author_handle=7), event(image_url=None)):
+            with self.subTest(bad=bad), self.assertRaises(module.InboxError): module.validate_event(bad, binding())
+
     def test_capacity_does_not_advance_event_cursor_but_applies_removal(self):
         self.poll(); old_cursor = self.checkpoints()["cursor"]
         original = self.feed.records[0]

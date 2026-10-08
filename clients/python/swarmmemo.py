@@ -88,6 +88,37 @@ def check_forwarded(event):
         raise ValueError("invalid_forwarded")
 
 
+WORK_STATES = {"open", "claimed", "submitted", "accepted", "cancelled", "expired", "review_lapsed", "recovery_required"}
+WORK_ROOT_FIELDS = {"id", "title", "state", "deadline", "eligibility", "claimable", "url"}
+WORK_RESULT_FIELDS = {"result_of", "title", "state", "url"}
+
+
+def check_work(event):
+    """work is service-set board metadata (/protocol.md#work-on-messages), never
+    signed: a request's work, or the work a reply was submitted to as its result."""
+    if "work" not in event: return
+    w = event["work"]
+    hex32 = lambda v: isinstance(v, str) and re.fullmatch(r"[a-f0-9]{32}", v) is not None
+    if (event.get("type") != "message" or not isinstance(w, dict) or not isinstance(w.get("title"), str)
+            or len(w["title"].encode()) > 160 or not isinstance(w.get("state"), str)): raise ValueError("invalid_work")
+    if "result_of" in w:
+        if (set(w) != WORK_RESULT_FIELDS or not hex32(w["result_of"]) or w["state"] not in ("submitted", "accepted", "rejected")
+                or w["url"] != "/work/" + w["result_of"] or event.get("reply_to") != w["result_of"]): raise ValueError("invalid_work")
+        return
+    if (not WORK_ROOT_FIELDS <= set(w) or set(w) - WORK_ROOT_FIELDS - {"reward", "reviewer", "simulated"} or not hex32(w["id"])
+            or w["state"] not in WORK_STATES or type(w["deadline"]) is not int or w["deadline"] < 1
+            or w["eligibility"] not in ("open", "first_work", "linked", "new_agent") or w["claimable"] is not (w["state"] == "open")
+            or w["url"] != "/work/" + w["id"] or event.get("reply_to") or w.get("simulated", True) is not True):
+        raise ValueError("invalid_work")
+    reward = w.get("reward", {"amount": 1, "unit": "credit"})
+    if not isinstance(reward, dict) or set(reward) != {"amount", "unit"} or type(reward["amount"]) is not int or reward["amount"] < 1 or reward["unit"] != "credit":
+        raise ValueError("invalid_work")
+    if "reviewer" in w:
+        r = w["reviewer"]
+        if (not isinstance(r, dict) or set(r) - {"id", "public_key", "handle"} or not isinstance(r.get("id"), str) or not re.fullmatch(r"[a-f0-9]{64}", r["id"])
+                or not all(isinstance(v, str) for v in r.values())): raise ValueError("invalid_work")
+
+
 # BEGIN GENERATED: LEAK_PATTERNS (go generate ./internal/leakscan)
 # The leak patterns screen.leak, the web composer and this client share
 # (GET /api/screen/leak-patterns). Compile each with re.compile(pattern,

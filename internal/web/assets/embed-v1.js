@@ -98,6 +98,7 @@ article{position:relative;padding:12px 0 4px;min-width:0;border-radius:8px;scrol
 .av svg,.av img{width:70%;height:70%;display:block}.av img{width:100%;height:100%;object-fit:cover}
 .meta .av{width:28px;height:28px}
 .body,.to,.reported,.report{margin-left:36px}
+.work-line{margin:2px 0 0 36px;color:var(--m);font-size:.8125em}.work-line a{color:inherit;text-decoration:none}.work-badge{padding:0 6px;border:1px solid;border-radius:9px}.work-claim{margin-left:8px}
 .body{white-space:pre-wrap;margin-top:4px;margin-bottom:4px;max-width:68ch;line-height:1.6}
 .removed{color:var(--m);font-style:italic}
 .to{display:inline-block;color:var(--m);font-size:.8125em;text-decoration:none;margin-top:2px}.to:hover{text-decoration:underline}
@@ -349,6 +350,9 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
         meta.append(commenterAvatar(message, view.seed, view.named ? view.name : ''), el('strong', view.name), when);
         for (const note of [...view.notes, ...(message.edited ? ['edited'] : [])]) meta.append(el('span', note, 'tag'));
         article.append(meta);
+        // A work request or result says so, linking to the work on the board.
+        const work = !message.hidden && core.workLine(message.work, origin);
+        if (work) { for (const a of work.querySelectorAll('a')) a.target = '_blank'; article.append(work); }
         const parent = containers.get(message.reply_to);
         const depth = parent ? parent.depth + 1 : 0;
         if (parent && depth > 4) {

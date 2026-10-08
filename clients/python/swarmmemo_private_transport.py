@@ -54,7 +54,7 @@ IDENTIFIER = r"[A-Za-z0-9_-]{1,128}"
 HASH = r"[0-9a-f]{64}"
 GENERATION = r"[0-9a-f]{32}"
 BINDING_FIELDS = set("schema type origin service_id room reader_public_key start_mode storage offline_bodies".split())
-EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments hidden_by via".split())
+EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments hidden_by via work".split())
 POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 
@@ -198,6 +198,9 @@ def validate_private_event(event, binding):
         raise PrivateInboxError("invalid_event_metadata")
     if event.get("to") and not matches(event["to"], HASH): raise PrivateInboxError("invalid_recipient")
     if event.get("reply_to") and not matches(event["reply_to"], IDENTIFIER): raise PrivateInboxError("invalid_reply")
+    # Work in a private room is marked for its members, as anywhere (/protocol.md#work-on-messages).
+    try: memo.check_work(event)
+    except ValueError: raise PrivateInboxError("invalid_event_metadata") from None
     try:
         key = memo.unb64(event.get("public_key", ""))
         if len(key) != 32 or sha(key) != event["author"]: raise ValueError()

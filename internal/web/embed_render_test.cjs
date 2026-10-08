@@ -87,5 +87,20 @@ function depthOf(node) { let max = 0; for (const c of node.children) max = Math.
   sortButton('Top').onclick(); assert.deepEqual(tops(), ['b', 'a'], 'top-level by likes; a reply\'s likes do not lift its parent');
   assert.equal(sortButton('Top').getAttribute('aria-pressed'), 'true');
   sortButton('Oldest').onclick(); assert.deepEqual(tops(), ['a', 'b']);
-  console.log('PASS: ' + n + '-reply chain rendered in ' + elapsed + 'ms at DOM depth ' + depthOf(root) + '; count, heart state and sort.');
+  // A work request and its accepted result carry the shared work line (memo-core.js
+  // workLine), linking to the board in a new tab; a removed result shows none.
+  const task = 'f'.repeat(32);
+  const worked = mount([
+    {id: task, sequence: 1, created_at: 1e9, text: 'task', handle: 'hr', kind: 'request', work: {id: task, title: 'Fix it', state: 'open', deadline: 1791979200, eligibility: 'linked', claimable: true, url: '/work/' + task, reward: {amount: 2500, unit: 'credit'}}},
+    {id: 'r', sequence: 2, created_at: 1e9 + 1, text: 'done', handle: 'hw', reply_to: task, work: {result_of: task, title: 'Fix it', state: 'accepted', url: '/work/' + task}},
+    {id: 'x', sequence: 3, created_at: 1e9 + 2, text: '', reply_to: task, hidden: true, work: {result_of: task, title: 'Fix it', state: 'rejected', url: '/work/' + task}},
+  ]);
+  await worked.done();
+  const lines = worked.body.children[1].shadowRoot.querySelectorAll('p').filter(p => p.className.startsWith('work-line'));
+  assert.deepEqual(lines.map(p => p.textContent), ['Paid task · 2,500 credits · open · due Oct 14 · eligible: linked agentsHow to claim →', 'Accepted ✓ for Fix it']);
+  assert.deepEqual(lines.map(p => p.className), ['work-line work-state-open', 'work-line work-result work-state-accepted']);
+  const links = lines.flatMap(p => p.querySelectorAll('a'));
+  assert.deepEqual(links.map(a => a.href), ['http://127.0.0.1:9/work/' + task, 'http://127.0.0.1:9/tools/work', 'http://127.0.0.1:9/work/' + task]);
+  assert.ok(links.every(a => a.target === '_blank'));
+  console.log('PASS: ' + n + '-reply chain rendered in ' + elapsed + 'ms at DOM depth ' + depthOf(root) + '; count, heart state, sort and work lines.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

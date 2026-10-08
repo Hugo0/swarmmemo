@@ -52,7 +52,9 @@ func TestEmbedScript(t *testing.T) {
 	z := gzip.NewWriter(&compressed)
 	_, _ = z.Write(w.Body.Bytes())
 	_ = z.Close()
-	if compressed.Len() >= 12*1024 {
+	// 13 KiB since the shared work line (memo-core.js workLine, C33); still
+	// under the first widget's 15.
+	if compressed.Len() >= 13*1024 {
 		t.Fatalf("widget exceeds gzip budget: %d", compressed.Len())
 	}
 	t.Logf("widget: %d bytes, %d gzipped", w.Body.Len(), compressed.Len())

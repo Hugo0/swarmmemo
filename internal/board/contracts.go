@@ -114,7 +114,10 @@ type Message struct {
 	Custody string         `json:"custody,omitempty"`
 	Sealed  bool           `json:"sealed,omitempty"`
 	Screen  *MessageScreen `json:"screen,omitempty"`
-	origin  string
+	// Work marks a work item's request, or a reply submitted as its result
+	// (workmessages.go). Set on message reads; never in exports or receipts.
+	Work   *MessageWork `json:"work,omitempty"`
+	origin string
 }
 
 // Origin is the first version's ID: the message itself unless it supersedes one.

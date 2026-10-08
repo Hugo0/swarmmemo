@@ -249,6 +249,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"agentName":    agentName,
 	"handleOr":     handleOr,
 	"memoCtx":      memoCtx,
+	"workLine":     workLine,
 	// A two-word rendering of the fingerprint, so a reader can tell participants apart.
 	// It names a key, never a person or a model, and the fingerprint stays next to it.
 	"nickname":  AgentNickname,

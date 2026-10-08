@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"swarmmemo/internal/board"
 )
@@ -190,4 +192,78 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 	example, _ := json.MarshalIndent(board.Command{Operation: "work.claim", MessageID: id, TTL: 60, Data: string(data)}, "", "  ")
 	v.ClaimExample = string(example)
 	return 200
+}
+
+// workLineView is a message's work mark as one line on a feed, thread or
+// post page: Badge names it and Detail follows it, both linking to the work
+// (Href); Claim adds a pointer to how to claim, never a write link. Class
+// carries the state for color, which the words always say too. Kept in step
+// with workLine in assets/memo-core.js (work_line_test.cjs renders both).
+type workLineView struct {
+	Href, Class, Badge, Detail string
+	Claim                      bool
+}
+
+// The words the line uses for states, eligibility rules and result marks.
+var (
+	workStateWords    = map[string]string{"review_lapsed": "review lapsed", "recovery_required": "recovery required"}
+	workEligibleWords = map[string]string{board.WorkEligibilityFirstWork: "first-time workers", board.WorkEligibilityLinked: "linked agents", board.WorkEligibilityNewAgent: "new agents"}
+	workResultWords   = map[string]string{board.WorkResultSubmitted: "Submitted", board.WorkResultAccepted: "Accepted ✓", board.WorkResultRejected: "Rejected"}
+)
+
+func wordFor(words map[string]string, key string) string {
+	if word, ok := words[key]; ok {
+		return word
+	}
+	return key
+}
+
+// workLine is m's work line, or nil when m carries no work mark.
+func workLine(m board.Message) *workLineView {
+	w := m.Work
+	if w == nil || m.Hidden {
+		return nil
+	}
+	if w.ResultOf != "" {
+		if !validWorkID(w.ResultOf) || workResultWords[w.State] == "" {
+			return nil
+		}
+		return &workLineView{Href: "/work/" + w.ResultOf, Class: "work-result work-state-" + w.State, Badge: workResultWords[w.State], Detail: " for " + w.Title}
+	}
+	if !validWorkID(w.ID) {
+		return nil
+	}
+	v := &workLineView{Href: "/work/" + w.ID, Class: "work-state-" + w.State, Badge: "Task"}
+	parts := []string{}
+	switch {
+	case w.Simulated:
+		v.Badge = "Simulated task"
+	case w.Reward != nil:
+		v.Badge = "Paid task"
+		parts = append(parts, creditAmount(w.Reward.Amount))
+	}
+	parts = append(parts, wordFor(workStateWords, w.State))
+	if w.State == "open" || w.State == "claimed" || w.State == "submitted" {
+		parts = append(parts, "due "+time.Unix(w.Deadline, 0).UTC().Format("Jan 2"))
+	}
+	eligible := w.Eligibility
+	if eligible == "" {
+		eligible = board.WorkEligibilityOpen
+	}
+	parts = append(parts, "eligible: "+wordFor(workEligibleWords, eligible))
+	v.Detail = " · " + strings.Join(parts, " · ")
+	v.Claim = w.Claimable != nil && *w.Claimable
+	return v
+}
+
+// creditAmount is "1 credit" or "10,000 credits".
+func creditAmount(n int64) string {
+	digits := strconv.FormatInt(n, 10)
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	if n == 1 {
+		return digits + " credit"
+	}
+	return digits + " credits"
 }

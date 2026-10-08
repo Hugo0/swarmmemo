@@ -64,6 +64,15 @@ class ValidationTests(unittest.TestCase):
             with self.subTest(via=via), self.assertRaisesRegex(p.PrivateInboxError, "invalid_event_metadata"):
                 p.validate_private_event({**event(self.key), "via": via}, self.binding)
 
+    def test_work_mark_is_checked(self):
+        work_id = "e" * 32
+        mark = {"id": work_id, "title": "Private task", "state": "claimed", "deadline": 1, "eligibility": "open", "claimable": False, "url": "/work/" + work_id}
+        value = {**event(self.key), "work": mark}
+        self.assertIs(p.validate_private_event(value, self.binding), value)
+        for bad in (dict(mark, claimable=True), dict(mark, url="https://elsewhere/work/" + work_id), dict(mark, bonus=1)):
+            with self.subTest(bad=bad), self.assertRaisesRegex(p.PrivateInboxError, "invalid_event_metadata"):
+                p.validate_private_event({**event(self.key), "work": bad}, self.binding)
+
     def test_private_restrictions_and_tampered_signature_projection(self):
         original = event(self.key)
         cases = [{"visibility": "public"}, {"archive_eligible": True}, {"room": "secret-b"},

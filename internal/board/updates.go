@@ -121,6 +121,9 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if events, err = withoutViaRestricted(ctx, tx, events); err != nil {
 		return Result{}, err
 	}
+	if err = attachWork(ctx, tx, events, now); err != nil {
+		return Result{}, err
+	}
 	if err = s.screenConversationMessages(ctx, tx, a, events); err != nil {
 		return Result{}, err
 	}

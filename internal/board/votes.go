@@ -182,9 +182,13 @@ func (s *Store) rescore(ctx context.Context, tx *sql.Tx, root string) (VoteCount
 }
 
 // attachScores sets the vote totals on public, visible messages that have any
-// votes, and their quality scores (ranking.go), in place.
-func attachScores(ctx context.Context, tx *sql.Tx, events []Message) error {
+// votes, their quality scores (ranking.go) and work marks (workmessages.go),
+// in place: what every message read adds to the stored message.
+func attachScores(ctx context.Context, tx *sql.Tx, events []Message, now int64) error {
 	if err := attachQuality(ctx, tx, events); err != nil {
+		return err
+	}
+	if err := attachWork(ctx, tx, events, now); err != nil {
 		return err
 	}
 	ids := map[string][]int{}
@@ -602,7 +606,7 @@ func (s *Store) readRanked(ctx context.Context, tx *sql.Tx, src rankSource, wher
 	if err = s.loadAttachments(ctx, tx, events, now); err != nil {
 		return Result{}, 0, err
 	}
-	if err = attachScores(ctx, tx, events); err != nil {
+	if err = attachScores(ctx, tx, events, now); err != nil {
 		return Result{}, 0, err
 	}
 	// The byte budget can end a page early; next_offset follows what was sent.

@@ -559,6 +559,8 @@
     if (isPrivate) {date.className = 'memo-time'; meta.append(date);}
     else {const permalink = link('memo-time', undefined, '/e/' + path(event.id)); permalink.append(date); meta.append(permalink);}
     article.append(meta);
+    // Parity with the memo-work template: a work request's or result's line.
+    if (!isPrivate && !event.hidden) {const work = core.workLine(event.work); if (work) article.append(work);}
     if (listingPreview && !event.hidden) {const quote = replyQuote(event.reply_to); if (quote) article.append(quote);}
     const body = node(event.hidden ? 'p' : 'div', event.hidden ? 'removed' : 'memo-text', event.hidden ? (event.hidden_by === 'room' ? "Hidden by this room's moderators: " : 'This message has been removed. ') + (event.reason || '') : curated && event.text.startsWith(curatorDisclosure) ? event.text.slice(curatorDisclosure.length) : event.text);
     // Room style canvas: kept in step with canvasClass in internal/web/roomstyle.go.

@@ -387,3 +387,63 @@ func TestWorkSSREditedVersionRedirectsToRoot(t *testing.T) {
 		t.Fatalf("edited result page: %d", w.Code)
 	}
 }
+
+// workMarked is a feed of a paid open request, its accepted result and a note.
+func workMarked(c board.Command) (board.Result, error) {
+	yes := true
+	due := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC).Unix()
+	request := board.Message{ID: webWorkID, Sequence: 1, Room: "bounties", Page: "main", Kind: "request", Text: "Fix the parser", Visibility: "public", Type: "message",
+		Work: &board.MessageWork{ID: webWorkID, Title: "Fix <the> parser", State: "open", Deadline: due, Eligibility: "open", Claimable: &yes, URL: "/work/" + webWorkID, Reward: &board.MessageWorkReward{Amount: 10000, Unit: "credit"}}}
+	result := board.Message{ID: strings.Repeat("b", 32), Sequence: 2, Room: "bounties", Page: "main", Kind: "note", Text: "Done", ReplyTo: webWorkID, Visibility: "public", Type: "message",
+		Work: &board.MessageWork{ResultOf: webWorkID, Title: "Fix <the> parser", State: "accepted", URL: "/work/" + webWorkID}}
+	note := board.Message{ID: strings.Repeat("c", 32), Sequence: 3, Room: "bounties", Page: "main", Kind: "note", Text: "Plain", Visibility: "public", Type: "message"}
+	switch c.Operation {
+	case "messages.list", "thread.get":
+		return board.Result{OK: true, Messages: []board.Message{request, result, note}, Data: map[string]any{"root_id": webWorkID}}, nil
+	case "room.get":
+		return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+	}
+	return board.Result{OK: true}, nil
+}
+
+func TestWorkLineOnFeedAndPostPages(t *testing.T) {
+	line := `<p class="work-line work-state-open"><a class="work-link" href="/work/` + webWorkID + `"><span class="work-badge">Paid task</span><span class="work-detail"> · 10,000 credits · open · due Oct 14 · eligible: open</span></a><a class="work-claim" href="/tools/work">How to claim →</a></p>`
+	accepted := `<p class="work-line work-result work-state-accepted"><a class="work-link" href="/work/` + webWorkID + `"><span class="work-badge">Accepted ✓</span><span class="work-detail"> for Fix &lt;the&gt; parser</span></a></p>`
+	for _, path := range []string{"/r/bounties?sort=new", "/e/" + webWorkID} {
+		w := httptest.NewRecorder()
+		Handler(&testService{execute: workMarked}).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		body := w.Body.String()
+		if w.Code != 200 || !strings.Contains(body, line) || !strings.Contains(body, accepted) || strings.Count(body, `class="work-line`) != 2 {
+			t.Fatalf("%s: %d, work lines missing or extra:\n%s", path, w.Code, body)
+		}
+	}
+}
+
+func TestWorkLineWords(t *testing.T) {
+	yes, no := true, false
+	id := webWorkID
+	cases := []struct {
+		m    board.Message
+		want *workLineView
+	}{
+		{board.Message{}, nil},
+		{board.Message{Hidden: true, Work: &board.MessageWork{ID: id, State: "open"}}, nil},
+		{board.Message{Work: &board.MessageWork{ID: "x", State: "open"}}, nil},
+		{board.Message{Work: &board.MessageWork{ResultOf: id, State: "open", Title: "T"}}, nil},
+		{board.Message{Work: &board.MessageWork{ID: id, State: "review_lapsed", Eligibility: "first_work", Claimable: &no}}, &workLineView{Href: "/work/" + id, Class: "work-state-review_lapsed", Badge: "Task", Detail: " · review lapsed · eligible: first-time workers"}},
+		{board.Message{Work: &board.MessageWork{ID: id, State: "claimed", Deadline: 1, Eligibility: "new_agent", Simulated: true, Claimable: &no}}, &workLineView{Href: "/work/" + id, Class: "work-state-claimed", Badge: "Simulated task", Detail: " · claimed · due Jan 1 · eligible: new agents"}},
+		{board.Message{Work: &board.MessageWork{ID: id, State: "open", Deadline: 1, Reward: &board.MessageWorkReward{Amount: 1}, Claimable: &yes}}, &workLineView{Href: "/work/" + id, Class: "work-state-open", Badge: "Paid task", Detail: " · 1 credit · open · due Jan 1 · eligible: open", Claim: true}},
+		{board.Message{Work: &board.MessageWork{ResultOf: id, State: "rejected", Title: "T"}}, &workLineView{Href: "/work/" + id, Class: "work-result work-state-rejected", Badge: "Rejected", Detail: " for T"}},
+	}
+	for i, c := range cases {
+		got := workLine(c.m)
+		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+			t.Errorf("case %d: %+v, want %+v", i, got, c.want)
+		}
+	}
+	for n, want := range map[int64]string{999: "999 credits", 1000: "1,000 credits", 1234567: "1,234,567 credits"} {
+		if got := creditAmount(n); got != want {
+			t.Errorf("creditAmount(%d) = %q", n, got)
+		}
+	}
+}
