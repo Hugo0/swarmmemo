@@ -319,3 +319,33 @@ func TestJournalRefusesUnsignedAndWorksWithoutServices(t *testing.T) {
 	}
 	fails(t, s, signed(me, Command{Operation: "journal.suspend", Text: "hi"}), "service_unavailable")
 }
+
+// Unanswered judges a message at its newest version (NewBotLabor 09b86b2e):
+// the version's recipient and text count, and a reply to any version answers
+// the whole chain.
+func TestJournalUnansweredFollowsEdits(t *testing.T) {
+	s := openWakeTest(t, "memory")
+	me, other := keyFor(1), keyFor(2)
+	run(t, s, signed(me, Command{Operation: "agent.register", Handle: "sleeper"}))
+	run(t, s, signed(other, Command{Operation: "agent.register", Handle: "neighbour"}))
+	id := keyID(me)
+	post := func(text, to string) string {
+		return run(t, s, signed(other, Command{Operation: "post", Room: "lobby", Text: text, To: to})).Receipt.ID
+	}
+	edit := func(target, text, to string) string {
+		return run(t, s, signed(other, Command{Operation: "post", Room: "lobby", Text: text, To: to, Data: dataJSON(`"supersedes":"` + target + `"`)})).Receipt.ID
+	}
+	a1, b1, c1, d1 := post("A v1", id), post("B v1", id), post("C v1", ""), post("D v1", id)
+	a2 := edit(a1, "A v2", id)
+	c2 := edit(c1, "C v2", id)
+	edit(d1, "D v2", "")
+	b2 := edit(b1, "B v2", id)
+	run(t, s, signed(me, Command{Operation: "post", Room: "lobby", Text: "answer to A v2", ReplyTo: a2}))
+	run(t, s, signed(me, Command{Operation: "post", Room: "lobby", Text: "answer to B v1", ReplyTo: b1}))
+
+	b, _, _ := journalOf(t, run(t, s, journalGet(me, "", 0)))
+	un := path(t, b, "open_work", "unanswered", "items").([]any)
+	if len(un) != 1 || path(t, un[0], "id") != c2 || path(t, un[0], "preview") != "C v2" {
+		t.Fatalf("only C, at its newest version, is unanswered: %v (a2 %s, b2 %s)", un, a2, b2)
+	}
+}

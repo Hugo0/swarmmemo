@@ -183,7 +183,8 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 
 	// MCP: the server card and tools/list name list_services and one tool
 	// per public read and per method callable without a key, exactly, the
-	// tools search and call first.
+	// tools search and call first; a deprecated alias whose replacement runs
+	// (paste_open beside docs_open) is not listed.
 	wantTools := []string{"list_services"}
 	ordered := slices.Clone(catalog)
 	toolsAt := slices.IndexFunc(ordered, func(e services.Entry) bool { return e.ID == services.ToolsID })
@@ -191,7 +192,7 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 	ordered = append([]services.Entry{tools}, slices.Delete(ordered, toolsAt, toolsAt+1)...)
 	for _, e := range ordered {
 		for _, m := range e.Methods {
-			if !m.Write() && !m.Signed || m.Write() && m.Anonymous {
+			if (!m.Write() && !m.Signed || m.Write() && m.Anonymous) && !hiddenAlias(catalog, m) {
 				wantTools = append(wantTools, web.MCPToolName(e, m))
 			}
 		}

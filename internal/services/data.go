@@ -59,6 +59,11 @@ func badArg(msg string) error {
 	return &allowance.Err{Code: "invalid_service_data", Message: msg}
 }
 
+// ArgRefusal is badArg for a wire that refuses arguments before they reach
+// the engine (the hosted MCP tools' input schemas), so the refusal is the
+// engine's.
+func ArgRefusal(msg string) error { return badArg(msg) }
+
 // intArg reads integer argument name strictly (see Integer), within
 // [min, max]; a refusal names the argument, its unit and its range. unit is
 // what the integer counts ("seconds"), or "".
@@ -186,10 +191,31 @@ func StrictObject(raw []byte, dst any) error {
 		if named := typeError(err); named != nil {
 			return named
 		}
+		if named := unknownField(err); named != nil {
+			return named
+		}
 		return refusal("invalid_service_data")
 	}
 	return nil
 }
+
+// unknownField turns a decoder's unknown field into UnknownArg's refusal,
+// naming the field only as argNameRE admits it; nil for any other error.
+func unknownField(err error) error {
+	quoted, ok := strings.CutPrefix(err.Error(), "json: unknown field ")
+	if !ok {
+		return nil
+	}
+	name, uerr := strconv.Unquote(quoted)
+	if uerr != nil || !argNameRE.MatchString(name) {
+		return nil
+	}
+	return badArg(UnknownArg(name) + ".")
+}
+
+// UnknownArg is the words for an argument a method does not take, the same
+// on /call/ and a CALL line (CallData) as in the JSON data.
+func UnknownArg(name string) string { return name + " is not an argument this method takes" }
 
 var errStructure = errors.New("services: malformed JSON structure")
 

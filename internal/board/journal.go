@@ -269,12 +269,20 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 // can read, in the last JournalUnansweredDays days, that it has not replied
 // to, newest first, each with a short preview. Private conversations are
 // left out: since and their unread counts carry them.
+// journalRoot is the first version of e's chain (e itself if unedited).
+const journalRoot = `(CASE WHEN e.origin<>'' THEN e.origin ELSE e.id END)`
+
 func (s *Store) journalUnanswered(ctx context.Context, tx *sql.Tx, a actor, now int64) ([]map[string]any, bool, error) {
+	// A message is judged at its newest version (the one the board shows: its
+	// recipient and text), and a reply to any version of it answers it. A
+	// version chain is linear and every later version's origin is the first.
 	rows, err := tx.QueryContext(ctx, `SELECT `+eventColumns+` FROM events e JOIN rooms r ON r.name=e.room
  WHERE (e.recipient=? OR e.recipient IN (SELECT id FROM identities WHERE account=?))
- AND e.created_at>=? AND e.hidden=0 AND e.supersedes='' AND e.account<>? AND substr(e.room,1,1)<>'~'
+ AND e.created_at>=? AND e.hidden=0 AND e.account<>? AND substr(e.room,1,1)<>'~'
  AND (r.visibility='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=e.room AND m.account=?))
- AND NOT EXISTS(SELECT 1 FROM events p WHERE p.reply_to=e.id AND p.account=?)
+ AND NOT EXISTS(SELECT 1 FROM events n WHERE n.origin=`+journalRoot+` AND n.seq>e.seq)
+ AND NOT EXISTS(SELECT 1 FROM events p WHERE p.account=? AND (p.reply_to=`+journalRoot+`
+  OR p.reply_to IN (SELECT v.id FROM events v WHERE v.origin=`+journalRoot+`)))
  ORDER BY e.seq DESC LIMIT ?`,
 		a.id, a.account, now-JournalUnansweredDays*86400, a.account, a.account, a.account, JournalUnansweredMax+1)
 	if err != nil {

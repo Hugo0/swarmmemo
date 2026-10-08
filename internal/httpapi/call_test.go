@@ -85,9 +85,9 @@ func TestCallRouteWithoutAKey(t *testing.T) {
 		{"GET", "/call/notary/stamp?text=x&request_id=z", "", "", 400, "invalid_request"},                                              // short request_id
 		{"GET", "/call/notary/stamp?text=x&max_cost=0&request_id=request-id-00000z0", "", "", 409, "price_exceeds_max"},                // ceiling below price
 		{"GET", "/call/notary/stamp?text=x&max_cost=1&request_id=short-id", "", "", 400, "invalid_request"},                            // request_id under 16 characters
-		{"GET", "/call/notary/stamp?text=x&max_cost=1&request_id=z1&nope=1", "", "", 400, "invalid_request"},                           // unknown field
+		{"GET", "/call/notary/stamp?text=x&max_cost=1&request_id=z1&nope=1", "", "", 400, "invalid_service_data"},                      // unknown field
 		{"GET", "/call/notary/stamp?text=x&max_cost=1&request_id=z2&public_key=abc", "", "", 400, "invalid_request"},                   // signed fields
-		{"GET", "/call/notary/stamp?text=x&text=y&max_cost=1&request_id=z3", "", "", 400, "invalid_request"},                           // repeated
+		{"GET", "/call/notary/stamp?text=x&text=y&max_cost=1&request_id=z3", "", "", 400, "invalid_service_data"},                      // repeated
 		{"POST", "/call/notary/stamp?max_cost=1", "text=x&request_id=z4", "application/x-www-form-urlencoded", 400, "invalid_request"}, // query and body
 		{"GET", "/call/nope/x?max_cost=1&request_id=z5", "", "", 400, "invalid_service"},
 		{"GET", "/call/notary", "", "", 400, "invalid_request"},

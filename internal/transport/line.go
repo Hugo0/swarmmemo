@@ -3,7 +3,6 @@ package transport
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -157,7 +156,7 @@ func (l lineProtocol) parseCall(rest string) (Request, error) {
 	}
 	e, m, found := services.LookupMethod(l.help.catalog, id, name)
 	if !found {
-		return Request{}, &board.Error{Status: 400, Code: "invalid_service", Message: "No enabled service method " + target + "; HELP lists the services."}
+		return Request{}, board.ServiceRefusal(services.UnknownTarget(l.help.catalog, id, name))
 	}
 	fields, err := url.ParseQuery(strings.TrimSpace(query))
 	if err != nil {
@@ -165,11 +164,7 @@ func (l lineProtocol) parseCall(rest string) (Request, error) {
 	}
 	data, requestID, err := services.CallData(m, fields)
 	if err != nil {
-		msg := err.Error()
-		if errors.Is(err, services.ErrCallArgs) {
-			msg = strings.TrimPrefix(msg, services.ErrCallArgs.Error()+": ")
-		}
-		return Request{}, bad(msg + ".")
+		return Request{}, board.ServiceRefusal(services.CallArgsRefusal(err))
 	}
 	if !m.Write() {
 		if m.Signed || requestID != "" {

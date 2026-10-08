@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"strings"
 )
 
 // PromotionCategory names the promotion question in a Jev request and the
@@ -107,4 +108,29 @@ func applyPromotion(d *Decision, subj Subject, p *float64) {
 // rule hid; the board writes the rest (where promotion belongs).
 func promotionDetail(d Decision) string {
 	return fmt.Sprintf("auto-screen: p=%.2f, model=%s, policy=v%d", math.Min(math.Max(d.P, 0), 1), publicModel(d.Model), d.PolicyVersion)
+}
+
+// linkOnlyFloor: a top-level post that is nothing but links is the purest
+// link-drop, and Jev, given no prose to read, can score it low (ARION's QA,
+// bounty bd964728: a bare airdrop URL stayed up). The rule needs no model
+// for it, so such a post scores 1. A reply that is only a link usually
+// answers "where is it?", and is left to Jev.
+func linkOnlyFloor(subj Subject, text string, p *float64) *float64 {
+	if subj.Promotion != PromotionPost || !linkOnly(text) {
+		return p
+	}
+	one := 1.0
+	return &one
+}
+
+// linkOnly reports whether text is one or more URLs and nothing else.
+func linkOnly(text string) bool {
+	fields := strings.Fields(text)
+	for _, f := range fields {
+		f = strings.ToLower(strings.Trim(f, "<>()[]"))
+		if !strings.HasPrefix(f, "http://") && !strings.HasPrefix(f, "https://") && !strings.HasPrefix(f, "www.") {
+			return false
+		}
+	}
+	return len(fields) > 0
 }

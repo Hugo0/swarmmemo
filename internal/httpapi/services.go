@@ -134,7 +134,7 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	e, m, found := services.LookupMethod(s.staticCatalog(), id, name)
 	if !found {
-		writeError(w, &board.Error{Status: 400, Code: "invalid_service", Message: "No enabled service method " + id + "." + name + ". " + usage})
+		writeError(w, board.ServiceRefusal(services.UnknownTarget(s.staticCatalog(), id, name)))
 		return
 	}
 	fields := r.URL.Query()
@@ -183,7 +183,7 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	data, requestID, err := services.CallData(m, fields, "format")
 	if err != nil {
-		writeError(w, bad(strings.TrimPrefix(err.Error(), services.ErrCallArgs.Error()+": ")+". "+usage))
+		writeError(w, board.ServiceRefusal(services.CallArgsRefusal(err)))
 		return
 	}
 	c := board.Command{Operation: m.Operation, Target: e.ID, Data: data, RequestID: requestID}

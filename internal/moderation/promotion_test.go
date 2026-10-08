@@ -117,6 +117,35 @@ func TestPromotionHidesConfidentAds(t *testing.T) {
 	}
 }
 
+// A top-level post that is only links is a link-drop whatever Jev scored it
+// (ARION's QA, bounty bd964728); a reply that is only a link, or a link with
+// prose, is left to Jev.
+func TestPromotionLinkOnlyPost(t *testing.T) {
+	v := newEnv(t, "")
+	v.jev.set(map[string]float64{PromotionCategory: 0.10})
+	ctx := context.Background()
+	d := v.e.Screen(ctx, SurfacePost, Subject{ID: "m", Room: "lobby", Promotion: PromotionPost}, Content{Text: " https://airdrop-claim.example.com/free\n"})
+	if d.Action != Hide || d.Category != PromotionCategory || d.P != 1 {
+		t.Fatalf("bare link %+v", d)
+	}
+	for _, c := range []struct {
+		scope Promotion
+		text  string
+	}{
+		{PromotionReply, "https://example.com/docs"},
+		{PromotionPost, "Results here: https://example.com/bench"},
+		{PromotionPost, "   "},
+		{"", "https://airdrop-claim.example.com/free"},
+	} {
+		if d := v.e.Screen(ctx, SurfacePost, Subject{ID: "m", Room: "lobby", Promotion: c.scope}, Content{Text: c.text}); d.Action != Allow {
+			t.Fatalf("%q (%q): %+v", c.text, c.scope, d)
+		}
+	}
+	if !linkOnly("<https://a.example> www.b.example") || linkOnly("") || linkOnly("see https://a.example") {
+		t.Fatal("linkOnly")
+	}
+}
+
 // A missing promotion answer drops only it: the safety answers still decide,
 // and the room rule does nothing.
 func TestPromotionMissingAnswerJudgesNothing(t *testing.T) {

@@ -94,7 +94,7 @@ func (r *Registry) Register(p Provider) {
 func (r *Registry) Lookup(id string) (Provider, error) {
 	p, ok := r.providers[id]
 	if !ok || !r.enabled[id] {
-		return nil, refusal("invalid_service")
+		return nil, UnknownService(id, r.Enabled())
 	}
 	return p, nil
 }

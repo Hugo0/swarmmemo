@@ -145,8 +145,13 @@ func TestToolsCallRoutesAndRefuses(t *testing.T) {
 	if _, err = runCall(t, e, db, alice, services.ToolsID, toolsData("swarmmemo:notary.stamp", stamp, 0), "id:r2", now); code(err) != "price_exceeds_max" {
 		t.Fatalf("max_cost below the price: %v", err)
 	}
-	for _, id := range []string{"", "notary.stamp", "swarmmemo:nope.call", "swarmmemo:notary.get", "swarmmemo:notary", "swarmmemo:tools.call", "swarmmemo:echo.echo", "swarmmemo:x402.call", "tool:weather.forecast"} {
-		if _, err = runCall(t, e, db, alice, services.ToolsID, toolsData(id, stamp, -1), "id:r3", now); code(err) != "invalid_service_data" {
+	// No id is an argument missing; an id that names no tool is an unknown
+	// method, as on every wire (C53).
+	if _, err = runCall(t, e, db, alice, services.ToolsID, toolsData("", stamp, -1), "id:r3", now); code(err) != "invalid_service_data" {
+		t.Errorf("no id: %v", err)
+	}
+	for _, id := range []string{"notary.stamp", "swarmmemo:nope.call", "swarmmemo:notary.get", "swarmmemo:notary", "swarmmemo:tools.call", "swarmmemo:echo.echo", "swarmmemo:x402.call", "tool:weather.forecast"} {
+		if _, err = runCall(t, e, db, alice, services.ToolsID, toolsData(id, stamp, -1), "id:r3", now); code(err) != "invalid_service" {
 			t.Errorf("id %q: %v", id, err)
 		}
 	}

@@ -232,6 +232,22 @@ var callIntegerRE = regexp.MustCompile(`^-?(0|[1-9][0-9]{0,17})$`)
 // ErrCallArgs is a /call/ URL or CALL line whose fields do not fit the method.
 var ErrCallArgs = errors.New("services: call fields do not fit the method")
 
+// MaxCostWords is the refusal of a max_cost that is not a whole number, on
+// /call/, a CALL line and the hosted call tools.
+func MaxCostWords(resource string) string {
+	return "max_cost must be a whole number of " + resource + ", or left out"
+}
+
+// CallArgsRefusal is CallData's error as the engine refuses arguments that
+// do not fit (invalid_service_data, naming the field), so /call/ and a CALL
+// line answer as service.call does; err itself when it is not ErrCallArgs.
+func CallArgsRefusal(err error) error {
+	if !errors.Is(err, ErrCallArgs) {
+		return err
+	}
+	return badArg(strings.TrimPrefix(err.Error(), ErrCallArgs.Error()+": ") + ".")
+}
+
 // CallData builds a service.call or service.read data field from a /call/
 // URL's fields (or a TCP CALL line's), typed by the method's documented
 // arguments: a string argument is taken as text, an integer, number or
@@ -265,7 +281,7 @@ func CallData(m MethodEntry, fields url.Values, skip ...string) (data, requestID
 			}
 			n, perr := strconv.ParseInt(v, 10, 64)
 			if perr != nil || !integerRE.MatchString(v) || n > MaxCostMax {
-				return bad("max_cost must be a whole number of %s", m.Resource)
+				return bad("%s", MaxCostWords(m.Resource))
 			}
 			maxCost = n
 			continue
@@ -279,7 +295,7 @@ func CallData(m MethodEntry, fields url.Values, skip ...string) (data, requestID
 		}
 		typ, ok := types[key]
 		if !ok {
-			return bad("%s is not an argument of %s", key, m.Name)
+			return bad("%s", UnknownArg(key))
 		}
 		var raw json.RawMessage
 		switch typ {

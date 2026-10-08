@@ -334,6 +334,11 @@ func (s *Store) callService(ctx context.Context, tx *sql.Tx, c Command, a actor,
 // anonymous tier (none while the signed-services lever is pulled), and a
 // request_id (its only retry key: it has no nonce).
 func (s *Store) admitUnsignedCall(ctx context.Context, tx *sql.Tx, c Command, now int64) error {
+	// A call naming no enabled service or method is refused as it is when
+	// signed (invalid_service), not with a request for a key.
+	if err := s.services.engine.Unknown(c.Target, c.Data); err != nil {
+		return serviceError(err)
+	}
 	if !s.services.engine.Anonymous(c.Target, c.Data) {
 		return s.anonymousNotAllowed(ctx, tx, now)
 	}
@@ -538,6 +543,11 @@ func (s *Store) serviceRetry(ctx context.Context, tx *sql.Tx, a actor, stored Re
 	return stored, nil
 }
 
+// ServiceRefusal is serviceError for the wires that refuse a call before
+// it reaches the store (/call/, a CALL line, the hosted MCP tools), so the
+// same mistake is the same code and message on every wire.
+func ServiceRefusal(err error) error { return serviceError(err) }
+
 // serviceError maps the engine's refusals; the RFC0012 codes go through
 // fromAllowance, the others keep codes the service already returns.
 func serviceError(err error) error {
@@ -561,6 +571,10 @@ func serviceError(err error) error {
 	// An argument-level refusal names the argument and what it takes.
 	if e.Code == "invalid_service_data" && e.Message != "" {
 		return problem(400, e.Code, e.Message+" Each method's args are in services.list.")
+	}
+	// An unknown service or method names what is enabled (services.UnknownMethod).
+	if e.Code == "invalid_service" && e.Message != "" {
+		return problem(400, e.Code, e.Message)
 	}
 	switch e.Code {
 	case "signature_required":

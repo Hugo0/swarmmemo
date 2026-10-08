@@ -761,7 +761,8 @@ func (s *Server) hostedCapabilities() map[string]any {
 	for _, t := range hostedTools {
 		tools = append(tools, t.Name)
 	}
-	for _, t := range hostedServiceTools(s.staticCatalog()) {
+	catalog := s.staticCatalog()
+	for _, t := range listedTools(catalog, hostedServiceTools(catalog)) {
 		tools = append(tools, t.spec.Name)
 	}
 	return map[string]any{

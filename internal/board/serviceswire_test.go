@@ -491,7 +491,7 @@ func TestServiceRefusals(t *testing.T) {
 	owner := keyFor(1)
 	fails(t, s, svcCall(owner, "search", "q", map[string]any{}, 1, ""), "invalid_service")
 	fails(t, s, svcCall(owner, "memory", "get", map[string]string{"key": "a"}, 1, ""), "invalid_service_data")
-	fails(t, s, svcCall(owner, "memory", "nope", map[string]any{}, 1, ""), "invalid_service_data")
+	fails(t, s, svcCall(owner, "memory", "nope", map[string]any{}, 1, ""), "invalid_service")
 	fails(t, s, signed(owner, Command{Operation: "service.call", Target: "memory", Data: `{"schema":1,"method":"put","args":{"key":"a","value":"b"}}`}), "invalid_service_data")
 	fails(t, s, svcRead(owner, "memory", "put", map[string]string{"key": "a", "value": "b"}), "invalid_service_data")
 	fails(t, s, svcRead(owner, "echo", "status", map[string]string{"call": "nope"}), "invalid_service_data")
@@ -618,17 +618,19 @@ func TestSizeRefusalsStateTheValueSent(t *testing.T) {
 	}
 }
 
-// An unknown method, or one sent as the wrong operation, names the service's
-// methods; a method name the envelope does not admit is never echoed.
+// An unknown method (invalid_service), or one sent as the wrong operation
+// (invalid_service_data), names the service's methods; a method name the
+// envelope does not admit is never echoed.
 func TestUnknownMethodNamesTheMethods(t *testing.T) {
 	s, _, _ := openServiceTest(t)
 	owner := keyFor(1)
+	want := "invalid_service"
 	message := func(c Command) string {
 		t.Helper()
 		_, err := s.Execute(testContext, c, "test-origin")
 		var e *Error
-		if !errors.As(err, &e) || e.Code != "invalid_service_data" {
-			t.Fatalf("want invalid_service_data, got %v", err)
+		if !errors.As(err, &e) || e.Code != want {
+			t.Fatalf("want %s, got %v", want, err)
 		}
 		return e.Message
 	}
@@ -639,6 +641,7 @@ func TestUnknownMethodNamesTheMethods(t *testing.T) {
 	if got = message(svcRead(owner, "memory", "nope", map[string]any{})); !strings.HasPrefix(got, `memory has no method "nope"; its methods are `) {
 		t.Errorf("unknown read: %q", got)
 	}
+	want = "invalid_service_data"
 	if got = message(svcCall(owner, "memory", "get", map[string]string{"key": "a"}, 1, "")); !strings.Contains(got, `memory method "get" is a read; send it as service.read.`) {
 		t.Errorf("read sent as a call: %q", got)
 	}

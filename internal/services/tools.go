@@ -173,7 +173,7 @@ func (e *Engine) RouteTool(data string) (service, routed string, err error) {
 		return "", "", badArg("args must be an object: the tool's arguments, as its input_schema states.")
 	}
 	id := *a.ID
-	unknown := badArg("id names no tool here: tools search lists them (" + ToolIDPrefix + "SERVICE.METHOD or " + BundlerPrefix + "NAME).")
+	unknown := &allowance.Err{Code: "invalid_service", Message: "id names no tool here: tools search lists them (" + ToolIDPrefix + "SERVICE.METHOD or " + BundlerPrefix + "NAME)."}
 	if rest, ok := strings.CutPrefix(id, ToolIDPrefix); ok {
 		svc, method, _ := strings.Cut(rest, ".")
 		p, lerr := e.cfg.Registry.Lookup(svc)
@@ -193,12 +193,18 @@ func (e *Engine) RouteTool(data string) (service, routed string, err error) {
 			return "", "", unknown
 		}
 		if maxCost >= CallDefaultMaxCost {
-			return "", "", badArg("max_cost is required for a " + BundlerPrefix + " tool: the most this call may cost, in credit (its price.max_cost in tools search, or less).")
+			return "", "", BundlerMaxCostRequired()
 		}
 		raw := canonicalJSON(map[string]any{"schema": 1, "method": "call", "args": map[string]any{"resource": id, "body": args}, "max_cost": maxCost})
 		return "x402", string(raw), nil
 	}
 	return "", "", unknown
+}
+
+// BundlerMaxCostRequired is the refusal of a call to a catalogue tool
+// without max_cost, on every wire: its price is known only at run time.
+func BundlerMaxCostRequired() error {
+	return badArg("max_cost is required for a " + BundlerPrefix + " tool: the most this call may cost, in credit (its price.max_cost in tools search, or less).")
 }
 
 // Featured.

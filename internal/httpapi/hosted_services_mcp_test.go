@@ -88,7 +88,7 @@ func (f *fakePaidTools) count() int {
 // hostedServicesServer is a store with hosted identities, the allowance
 // ledger and memory, wake-ups and the x402 relay on, its paid tools served
 // by fakePaidTools.
-func hostedServicesServer(t *testing.T) (*Server, *fakePaidTools) {
+func hostedServicesServer(t *testing.T, more ...string) (*Server, *fakePaidTools) {
 	t.Helper()
 	dir := t.TempDir()
 	write := func(name, body string) string {
@@ -120,8 +120,8 @@ func hostedServicesServer(t *testing.T) (*Server, *fakePaidTools) {
 		}
 		return (&net.Dialer{}).DialContext(ctx, network, target)
 	})
-	features := board.Features{Services: []string{"memory", "wakeup", "x402"}, Ledger: board.LedgerOn, AnonPrefix: true}
-	store, err := board.Open(filepath.Join(dir, "board.sqlite"), board.Config{ServiceID: "swarmmemo.com", Features: features, HostedKEKFile: kek, X402: x402})
+	features := board.Features{Services: append([]string{"memory", "wakeup", "x402"}, more...), Ledger: board.LedgerOn, AnonPrefix: true}
+	store, err := board.Open(filepath.Join(dir, "board.sqlite"), board.Config{ServiceID: "swarmmemo.com", Features: features, HostedKEKFile: kek, X402: x402, NotaryKeyFile: filepath.Join(dir, "notary.key")})
 	if err != nil {
 		t.Fatal(err)
 	}

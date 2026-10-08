@@ -379,6 +379,7 @@ func (e *Engine) Screen(ctx context.Context, s Surface, subj Subject, c Content)
 	}
 	// The room's promotion rule (promotion.go): only on a post every safety
 	// question allowed, and the score is kept with the others for review.
+	promotion = linkOnlyFloor(subj, c.Text, promotion)
 	applyPromotion(&d, subj, promotion)
 	if promotion != nil {
 		d.Scores[PromotionCategory] = *promotion

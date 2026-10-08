@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -260,7 +261,7 @@ func anonymousCallCommand(target string, m services.MethodEntry, in map[string]a
 		var ok bool
 		n, ok = maxCost.(float64)
 		if !ok || n < 0 || n != float64(int64(n)) || n > services.MaxCostMax {
-			return board.Command{}, bad("max_cost must be a whole number, your ceiling in " + m.Resource + "; or leave it out.")
+			return board.Command{}, board.ServiceRefusal(services.ArgRefusal(services.MaxCostWords(m.Resource) + "."))
 		}
 	}
 	data, err := json.Marshal(map[string]any{"schema": 1, "method": m.Name, "args": args, "max_cost": int64(n)})
@@ -313,9 +314,53 @@ func (p mcpProfile) only(data map[string]any) map[string]any {
 	return out
 }
 
-// mcpToolListWith is mcpToolList for this profile.
+// mcpToolListWith is mcpToolList for this profile: what tools/list, the
+// server card and /capabilities show. A deprecated alias (paste.*) is left
+// out while what replaces it runs (hiddenAlias); its tool stays callable.
 func (s *Server) mcpToolListWith(p mcpProfile) []mcpToolSpec {
+	return s.mcpToolsWith(p, false)
+}
+
+// hiddenAlias reports whether m is a deprecated alias whose replacement
+// (ReplacedBy's service) is in catalog: its tool is registered, so old
+// clients keep calling it, but never listed (C54).
+func hiddenAlias(catalog []services.Entry, m services.MethodEntry) bool {
+	if !m.Deprecated {
+		return false
+	}
+	service, _, _ := strings.Cut(m.ReplacedBy, ".")
+	return slices.ContainsFunc(catalog, func(e services.Entry) bool { return e.ID == service })
+}
+
+// listedTools is tools less the hidden aliases of catalog.
+func listedTools(catalog []services.Entry, tools []serviceTool) []serviceTool {
+	return slices.DeleteFunc(tools, func(t serviceTool) bool { return hiddenAlias(catalog, t.method) })
+}
+
+// hideTools leaves names out of every tools/list answer; the tools stay
+// registered and callable.
+func hideTools(names map[string]bool) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			res, err := next(ctx, method, req)
+			if r, ok := res.(*mcp.ListToolsResult); ok && err == nil && len(names) > 0 {
+				r.Tools = slices.DeleteFunc(slices.Clone(r.Tools), func(t *mcp.Tool) bool { return names[t.Name] })
+			}
+			return res, err
+		}
+	}
+}
+
+// mcpToolsWith is the profile's tools; with aliases, the hidden aliases too
+// (every tool the server registers).
+func (s *Server) mcpToolsWith(p mcpProfile, aliases bool) []mcpToolSpec {
 	offer, catalog := p.offer, p.catalog
+	listed := func(tools []serviceTool) []serviceTool {
+		if aliases {
+			return tools
+		}
+		return listedTools(catalog, tools)
+	}
 	withOffer := func(t mcpToolSpec) mcpToolSpec {
 		if offer != nil {
 			t.Desc += " " + offer.LineAt(s.cfg.PublicURL)
@@ -357,7 +402,7 @@ func (s *Server) mcpToolListWith(p mcpProfile) []mcpToolSpec {
 			listTool.Desc += " A hosted identity also has tools of its own for the signed methods of " + named + ", signed as it."
 		}
 		list = append(list, withOffer(listTool))
-		for _, t := range serviceTools(catalog) {
+		for _, t := range listed(serviceTools(catalog)) {
 			if hosted && hostedSignedReads[t.entry.ID+"."+t.method.Name] {
 				t.spec.Desc += hostedOwnReadNote
 			}
@@ -371,7 +416,7 @@ func (s *Server) mcpToolListWith(p mcpProfile) []mcpToolSpec {
 		for _, t := range hostedTools {
 			list = append(list, t.mcpToolSpec)
 		}
-		for _, t := range hostedServiceTools(catalog) {
+		for _, t := range listed(hostedServiceTools(catalog)) {
 			list = append(list, t.spec)
 		}
 		// The assistant profile has no payment tools (its instructions say
@@ -573,24 +618,68 @@ var resultOutputSchema = func() *jsonschema.Schema {
 // beside the text a model reads: a client branches on the code, as it does
 // over HTTP, never on the prose. A tool's own refusal is a board error; any
 // other error reaching a result is the SDK refusing the arguments before
-// the tool ran (invalid_request, its text as the message).
-func structuredToolErrors(next mcp.MethodHandler) mcp.MethodHandler {
-	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-		res, err := next(ctx, method, req)
-		if r, ok := res.(*mcp.CallToolResult); ok && err == nil && r.IsError && r.StructuredContent == nil {
-			var be *board.Error
-			if cause := r.GetError(); !errors.As(cause, &be) {
-				be = &board.Error{Status: 400, Code: "invalid_request", Message: fmt.Sprint(cause)}
+// the tool ran: invalid_request, its text as the message, or for a service
+// tool (catalogue) the refusal /call/ and service.call give the same
+// arguments (catalogueArgError).
+func structuredToolErrors(catalogue map[string]bool) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			res, err := next(ctx, method, req)
+			if r, ok := res.(*mcp.CallToolResult); ok && err == nil && r.IsError && r.StructuredContent == nil {
+				var be *board.Error
+				if cause := r.GetError(); !errors.As(cause, &be) {
+					be = &board.Error{Status: 400, Code: "invalid_request", Message: fmt.Sprint(cause)}
+					if call, ok := req.(*mcp.CallToolRequest); ok && call.Params != nil && catalogue[call.Params.Name] {
+						be = catalogueArgError(fmt.Sprint(cause))
+						r.Content = []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("%d %s: %s", be.Status, be.Code, be.Message)}}
+					}
+				}
+				r.StructuredContent = map[string]any{"ok": false, "error": be}
 			}
-			r.StructuredContent = map[string]any{"ok": false, "error": be}
+			return res, err
 		}
-		return res, err
 	}
+}
+
+// sdkPropertiesRE is the property list in the SDK's schema refusals:
+// `unexpected additional properties ["nope"]`, `missing properties: ["id"]`.
+var sdkPropertiesRE = regexp.MustCompile(`(unexpected additional|missing) properties:? (\["[a-z][a-z0-9_]{0,31}"(?:,"[a-z][a-z0-9_]{0,31}")*\])`)
+
+// catalogueArgError is the SDK's refusal of a service tool's arguments in
+// the engine's words: invalid_service_data, naming an argument the method
+// does not take as /call/ and service.call do (services.UnknownArg), and a
+// paid tool's missing max_cost as services.BundlerMaxCostRequired.
+func catalogueArgError(sdk string) *board.Error {
+	msg := "The arguments do not fit this tool's input schema: " + sdk + "."
+	if m := sdkPropertiesRE.FindStringSubmatch(sdk); m != nil {
+		var names []string
+		if json.Unmarshal([]byte(m[2]), &names) == nil && len(names) > 0 {
+			switch {
+			case m[1] == "unexpected additional":
+				msg = services.UnknownArg(names[0]) + "."
+			case names[0] == services.CallFieldMaxCost:
+				return apiError(board.ServiceRefusal(services.BundlerMaxCostRequired()))
+			default:
+				msg = names[0] + " is required."
+			}
+		}
+	}
+	return apiError(board.ServiceRefusal(services.ArgRefusal(msg)))
+}
+
+// catalogueToolNames are the profile's service tools (serviceTools and
+// hostedServiceTools), whose argument refusals are the engine's.
+func catalogueToolNames(catalog []services.Entry) map[string]bool {
+	names := map[string]bool{}
+	for _, t := range append(serviceTools(catalog), hostedServiceTools(catalog)...) {
+		names[t.spec.Name] = true
+	}
+	return names
 }
 
 func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "swarmmemo", Version: s.cfg.Version}, &mcp.ServerOptions{Instructions: instructions})
-	server.AddReceivingMiddleware(structuredToolErrors)
+	server.AddReceivingMiddleware(structuredToolErrors(catalogueToolNames(p.catalog)))
 	// Sign-in (OAuth): refusals carry the challenge that starts it, and the
 	// tools say which need it.
 	signIn := s.oauthStore() != nil
@@ -607,7 +696,15 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	destructive, openWorld := false, true
 	readHints := &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, DestructiveHint: &destructive, OpenWorldHint: &openWorld}
 	postHints := &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, DestructiveHint: &destructive, OpenWorldHint: &openWorld}
-	tools := s.mcpToolListWith(p)
+	tools := s.mcpToolsWith(p, true)
+	hidden := map[string]bool{}
+	for _, t := range tools {
+		hidden[t.Name] = true
+	}
+	for _, t := range s.mcpToolListWith(p) {
+		delete(hidden, t.Name)
+	}
+	server.AddReceivingMiddleware(hideTools(hidden))
 	tool := func(name string) *mcp.Tool {
 		for _, t := range tools {
 			if t.Name == name {

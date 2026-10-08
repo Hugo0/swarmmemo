@@ -194,12 +194,12 @@ func hostedCallData(m services.MethodEntry, shape hostedShape, in map[string]any
 		args[k] = v
 	}
 	if r, _ := args["resource"].(string); shape.prefix != "" && !services.IsToolID(r) {
-		return "", "", bad("resource must be a " + shape.prefix + " id from x402_tools_search.")
+		return "", "", board.ServiceRefusal(services.ArgRefusal("resource must be a " + shape.prefix + " id from x402_tools_search."))
 	}
 	call := map[string]any{"schema": 1, "method": m.Name, "args": args}
 	if m.Write() {
 		if maxCost == nil {
-			return "", "", bad("max_cost is required: the most this call may cost, in " + m.Resource + ".")
+			return "", "", board.ServiceRefusal(services.BundlerMaxCostRequired())
 		}
 		call["max_cost"] = maxCost
 	}
@@ -296,7 +296,7 @@ func hostedRun(hc *hostedCaller, c board.Command) (*mcp.CallToolResult, board.Re
 // service tools, by title: "Memory, Wake-ups and x402 relay".
 func hostedServicesNamed(catalog []services.Entry) string {
 	var titles []string
-	for _, t := range hostedServiceTools(catalog) {
+	for _, t := range listedTools(catalog, hostedServiceTools(catalog)) {
 		if !slices.Contains(titles, t.entry.Title) {
 			titles = append(titles, t.entry.Title)
 		}

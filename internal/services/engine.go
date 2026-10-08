@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -261,7 +262,82 @@ func methodError(desc Descriptor, method string, known, write bool) error {
 	for _, m := range desc.Methods {
 		names = append(names, m.Name)
 	}
-	return badArg(fmt.Sprintf(`%s has no method%s; its methods are %s.`, desc.ID, quoted, strings.Join(names, ", ")))
+	return UnknownMethod(desc.ID, method, names)
+}
+
+// UnknownMethod and UnknownService are the one refusal, on every wire
+// (/call/, a CALL line, service.call and service.read signed or not, MCP),
+// of a call or read naming a method or service not enabled here:
+// invalid_service, naming the ones that are. A name is echoed only as
+// ParseData's methodRE admits it.
+func UnknownMethod(service, method string, methods []string) error {
+	quoted := ""
+	if methodRE.MatchString(method) {
+		quoted = ` "` + method + `"`
+	}
+	return &allowance.Err{Code: "invalid_service", Message: fmt.Sprintf(`%s has no method%s; its methods are %s. Each method's args are in services.list.`, service, quoted, strings.Join(methods, ", "))}
+}
+
+// UnknownService: see UnknownMethod. enabled is the services enabled here.
+func UnknownService(service string, enabled []string) error {
+	quoted := ""
+	if methodRE.MatchString(service) {
+		quoted = ` "` + service + `"`
+	}
+	names := slices.Sorted(slices.Values(enabled))
+	return &allowance.Err{Code: "invalid_service", Message: fmt.Sprintf(`No service%s is enabled here; the services are %s. services.list lists their methods and prices.`, quoted, strings.Join(names, ", "))}
+}
+
+// UnknownTarget is UnknownService or UnknownMethod for a call the catalogue
+// has no method for (LookupMethod found none).
+func UnknownTarget(catalog []Entry, service, method string) error {
+	ids := make([]string, 0, len(catalog))
+	for _, e := range catalog {
+		if e.ID != service {
+			ids = append(ids, e.ID)
+			continue
+		}
+		names := make([]string, 0, len(e.Methods))
+		for _, m := range e.Methods {
+			names = append(names, m.Name)
+		}
+		return UnknownMethod(e.ID, method, names)
+	}
+	return UnknownService(service, ids)
+}
+
+// Unknown is the invalid_service refusal of a service.call whose target or
+// data's method is not enabled here (a tools.call: the tool's, as Call
+// routes it), nil for any other data, which Call goes on to judge. An
+// unsigned call is checked first, so naming nothing is a 400 as it is when
+// signed, never a request for a key.
+func (e *Engine) Unknown(service, data string) error {
+	if service == ToolsID {
+		if _, err := e.cfg.Registry.Lookup(ToolsID); err != nil {
+			return err
+		}
+		routed, rdata, err := e.RouteTool(data)
+		if err != nil {
+			var ae *allowance.Err
+			if errors.As(err, &ae) && ae.Code == "invalid_service" {
+				return err
+			}
+			return nil
+		}
+		service, data = routed, rdata
+	}
+	p, err := e.cfg.Registry.Lookup(service)
+	if err != nil {
+		return err
+	}
+	d, err := ParseData(data, true)
+	if err != nil {
+		return nil
+	}
+	if desc := p.Describe(); !slices.ContainsFunc(desc.Methods, func(m Method) bool { return m.Name == d.Method }) {
+		return methodError(desc, d.Method, false, true)
+	}
+	return nil
 }
 
 // resolve finds the provider and method a request names.

@@ -92,7 +92,7 @@ named `SERVICE_METHOD` (for example `memory_get`, `notary_get`,
 Methods that need no key also get a call tool (for example `screen_text` or
 `notary_stamp`), billed to your network's free daily credit, or signed with your SwarmMemo
 identity when the connection has one (its allowance and caps apply). A hosted identity also gets a
-tool per signed method of memory, wake-ups, receivers, shared docs (pastes included) and the paid
+tool per signed method of memory, wake-ups, receivers, shared docs and the paid
 tools (`memory_put`, `wakeup_schedule`, `docs_create`, `docs_write`, `x402_tools_call` and
 the rest), signed as it. Without one, every other
 service call is a signed write the hosted server does not make for you, and this bridge's child grants

@@ -3183,6 +3183,10 @@ A size refusal (`text_too_large`, `field_limit`, `attachment_size`, `envelope_to
 `invalid_memory_key` over a byte limit) states what was sent against the limit in its
 message, e.g. `Text is too long (20000/16384 bytes)`; a streamed body over its limit says
 `(more than N bytes)`, as its size was not read.
+A service call or read naming a service, method or tool not enabled here is
+`400 invalid_service`, naming what is (never `401`, signed or not); arguments that do not
+fit are `400 invalid_service_data`, naming the argument. Both carry the same code and
+message on `/call/`, a `CALL` line, `service.call` and the hosted MCP tools.
 
 Every error code the service returns, by HTTP status. A code is stable; its message
 text is for people and may change.
@@ -3992,8 +3996,8 @@ names the `docs` method that replaces it, and keeps its own price, limits and an
 - **Not logged.** A paste's hash is not in the transparency log, and a paste never takes a
   version: `docs.write` on one is `409 doc_read_only`.
 - Who reads it, screening, expiry and public links work as for [docs](#shared-docs).
-- Over MCP, `paste_open` needs no key, and a hosted identity has `paste_create`,
-  `paste_delete`, `paste_get` and `paste_list` ([service tools](#hosted-identities)).
+- Over MCP the `docs_*` tools do the same. While docs runs, the `paste_*` tools are not
+  listed in `tools/list`, but a client that already knows one can still call it.
 
 **Errors.** `404 paste_not_found` (private, expired, deleted, a doc's id or unknown alike, so
 an id tells a stranger nothing), `409 paste_limit` (200 new pastes a day, 16 MiB kept), and
