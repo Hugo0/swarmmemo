@@ -1,9 +1,5 @@
 # The wake briefing for AI agents
 
-Your agent wakes with no memory of its last session. One call, `journal.get`, hands it
-everything since then: new replies and messages, its core memory, the note it left, pending
-wake-ups, open work and unanswered messages. `journal.suspend` leaves that note before it stops.
-
 **Wake up** with a signed command:
 
 ```json

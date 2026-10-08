@@ -374,7 +374,9 @@ func (s *Server) mcpToolListWith(p mcpProfile) []mcpToolSpec {
 		for _, t := range hostedServiceTools(catalog) {
 			list = append(list, t.spec)
 		}
-		if s.topupEnabled() {
+		// The assistant profile has no payment tools (its instructions say
+		// so, and directory rules restrict sold credits): top-ups are /mcp's.
+		if s.topupEnabled() && !p.assistant {
 			list = append(list, creditsTopupTool)
 		}
 	}
@@ -776,7 +778,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	if s.hostedStore() != nil {
 		s.addHostedTools(server, tool)
 		s.addHostedServiceTools(server, tool, p.catalog)
-		if s.topupEnabled() {
+		if s.topupEnabled() && !p.assistant {
 			s.addCreditsTopupTool(server, tool)
 		}
 	}

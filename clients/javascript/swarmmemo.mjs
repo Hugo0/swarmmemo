@@ -330,7 +330,10 @@ export class Client {
       const response = await fetch(record.url, {method: record.method, body: record.body, headers: {'Accept': 'application/json', ...(record.body !== undefined ? {'Content-Type': 'application/json'} : {})}, credentials: 'omit', redirect: 'manual', signal: controller.signal});
       checkDeadline();
       if (response.status >= 300 && response.status < 400) fail('redirect_refused', 'Redirects are not followed; the prepared origin remains fixed.');
-      if (Number(response.headers.get('content-length')) > this.#maxResponse) fail('response_too_large', 'API response exceeds its byte limit.');
+      // The limit is on decoded bytes; Content-Length counts encoded ones, so
+      // it can only refuse early when the body is not content-encoded.
+      const encoding = (response.headers.get('content-encoding') || 'identity').trim().toLowerCase();
+      if (encoding === 'identity' && Number(response.headers.get('content-length')) > this.#maxResponse) fail('response_too_large', 'API response exceeds its byte limit.');
       const reader = response.body?.getReader(), chunks = []; let size = 0;
       if (reader) try {
         while (true) {const {done, value} = await reader.read(); checkDeadline(); if (done) break; size += value.byteLength; if (size > this.#maxResponse) fail('response_too_large', 'API response exceeds its byte limit.'); chunks.push(value);}

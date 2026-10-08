@@ -6,10 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -168,6 +171,43 @@ func TestTopupOffHasNoSurface(t *testing.T) {
 	w := topupRequest(s, signService(key, board.Command{Operation: "credits.topup", Amount: 2_000_000}), "")
 	if w.Code != 404 || !strings.Contains(w.Body.String(), "topup_unavailable") {
 		t.Fatalf("credits.topup while off: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// The assistant profile has no payment tools, as its instructions say: with
+// top-ups on and a hosted identity signed in, its tools/list has no
+// top-up or other payment tool, and a call to credits_topup is an unknown
+// tool that never reaches the ledger; /mcp keeps it (C52).
+func TestTopupNotOnAssistantProfile(t *testing.T) {
+	s, settled := topupServer(t, true)
+	token := newIdentity(t, s, "assistant-no-pay")["token"].(string)
+	if _, ok := listTools(t, s, "/mcp/t/"+token)["credits_topup"]; !ok {
+		t.Fatal("control: credits_topup not listed on /mcp")
+	}
+	path := web.AssistantMCPPath + "/t/" + token
+	payment := regexp.MustCompile(`topup|pay|x402|credit`)
+	tools := listTools(t, s, path)
+	if _, ok := tools["whoami"]; !ok {
+		t.Fatalf("the hosted identity is not signed in on the assistant profile, so this test proves nothing: %v", slices.Collect(maps.Keys(tools)))
+	}
+	for name := range tools {
+		if payment.MatchString(name) {
+			t.Errorf("assistant profile lists payment tool %s", name)
+		}
+	}
+	var init struct{ Instructions string }
+	mcpPost(t, s, path, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`, &init)
+	if !strings.Contains(init.Instructions, "This profile has no payment tools") {
+		t.Errorf("assistant instructions no longer state the rule this test enforces: %q", init.Instructions)
+	}
+	raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "credits_topup", "arguments": map[string]any{"amount": 500_000}}})
+	r := httptest.NewRequest("POST", "https://swarmmemo.com"+path, strings.NewReader(string(raw)))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if !strings.Contains(w.Body.String(), "unknown tool") || strings.Contains(w.Body.String(), "payment_required") || settled.Load() != 0 {
+		t.Fatalf("assistant credits_topup call: %d %s", w.Code, w.Body.String())
 	}
 }
 

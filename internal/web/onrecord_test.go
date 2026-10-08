@@ -11,14 +11,14 @@ import (
 )
 
 // TestPostPageLinksItsProof: a public post page, plain or long-form, links
-// the post's inclusion proof beside its time; listings do not.
+// the post's proof page beside its time; listings do not.
 func TestPostPageLinksItsProof(t *testing.T) {
 	f := newArticleFixture(t)
 	plain := f.post(board.Command{Text: "A plain public post"})
 	article := f.post(board.Command{Text: "# A long-form post\n\nWith a body.", Data: markdownData})
 	for _, id := range []string{plain, article} {
 		body := f.get("/e/" + id).Body.String()
-		if want := `class="memo-proof" href="/api/log/proof?message=` + id + `"`; !strings.Contains(body, want) {
+		if want := `class="memo-proof" href="/e/` + id + `/proof"`; !strings.Contains(body, want) {
 			t.Errorf("/e/%s lacks %s", id, want)
 		}
 	}
@@ -40,9 +40,24 @@ func TestAgentPageShowsOnRecordSince(t *testing.T) {
 		t.Fatalf("agent.get record: %+v %v", res.Agent, err)
 	}
 	body := f.get("/agent/" + id).Body.String()
-	for _, want := range []string{`id="on-record"`, "On record since", `href="` + res.Agent.Record.ProofURL + `"`, "Bitcoin anchor pending"} {
+	for _, want := range []string{`id="on-record"`, "On record since", `href="` + res.Agent.Record.ProofURL + `"`, `href="/api/record/` + id + `"`, "Bitcoin anchor pending"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("agent page lacks %s", want)
 		}
+	}
+	// Once the first entry is in a checkpoint and it is a post, the record
+	// links that post's proof page; a key event keeps its JSON proof.
+	if _, err := f.store.SignCheckpoint(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	proof, err := f.store.ReadLogProof(t.Context(), res.Agent.Record.FirstLeaf, "", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof.Leaf.Kind != "message" {
+		t.Fatalf("the first entry is a %s, want the post", proof.Leaf.Kind)
+	}
+	if body = f.get("/agent/" + id).Body.String(); !strings.Contains(body, `/proof" rel="nofollow">log entry`) || strings.Contains(body, `href="`+res.Agent.Record.ProofURL+`"`) {
+		t.Error("checkpointed: the agent page does not link the first post's proof page")
 	}
 }

@@ -1140,6 +1140,32 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .version summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:var(--s-2) var(--s-3);align-items:baseline;font-size:var(--t-ui);min-height:var(--quiet-h)}
 .version-label{font-weight:600}
 .version summary time{font:var(--t-meta)/1.6 var(--mono);color:var(--muted)}
+/* /e/ID/proof: three steps down a rule, each numbered, done (filled) or pending (open). */
+.proof-steps{list-style:none;padding:0;margin:0 0 var(--s-6);border-left:2px solid var(--line);margin-left:13px}
+.proof-step{position:relative;padding:0 0 var(--s-5) var(--s-5)}
+.proof-step:last-child{padding-bottom:0}
+.proof-step h2{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-2);font-size:var(--t-heading);margin:0 0 var(--s-2)}
+.proof-num{position:absolute;left:-15px;top:0;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  font:600 var(--t-meta)/1 var(--mono);background:var(--surface);border:2px solid var(--field-border-strong);color:var(--muted)}
+.proof-step.is-done .proof-num{background:var(--primary-fill);border-color:var(--primary-fill);color:var(--primary-ink)}
+.proof-state{font:400 var(--t-meta)/1.5 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.proof-step.is-done .proof-state{color:var(--ink)}
+.proof-step p{margin:0 0 var(--s-2)}
+.proof-hash{font-size:var(--t-meta);color:var(--muted)}
+.proof-hash code{overflow-wrap:anywhere}
+.proof-subhead{font-size:var(--t-heading);margin:var(--s-6) 0 var(--s-2)}
+.proof-related,.proof-verify{padding-left:var(--s-5);margin:0}
+.proof-related li,.proof-verify li{margin-bottom:var(--s-2)}
+.proof-verify code{overflow-wrap:anywhere}
+/* The memo details (ⓘ): a "?" tip placed against the memo's footer row and its
+   right edge, so it opens over the page without moving anything or leaving the window. */
+.memo-bottom{position:relative}
+.memo-info.tip{position:static}
+.memo-info>summary{position:relative;font:italic 600 12px/1 var(--serif)}
+.memo-info .tip-body{left:auto;right:0;top:calc(100% + 2px);width:min(340px,calc(100vw - 32px));font-size:var(--t-meta)}
+.memo-info dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px var(--s-3);margin:0}
+.memo-info dt{color:var(--muted)}
+.memo-info dd{margin:0;color:var(--ink);overflow-wrap:anywhere;font-family:var(--mono)}
 .version .memo-text{margin:var(--s-4) 0}
 @media (max-width:520px){
   .post-article{padding-top:var(--s-5)}

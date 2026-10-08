@@ -56,10 +56,11 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if err != nil {
 		return Result{}, err
 	}
-	seq, err := s.parseCursor(c.Cursor)
+	seq, received, err := s.parseUpdatesCursor(c.Cursor)
 	if err != nil {
 		return Result{}, err
 	}
+	since := seq
 	// Same room visibility rule as every other read: public rooms, plus private
 	// rooms this caller is a member of. A cursor never widens access.
 	where := []string{"(r.visibility='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=e.room AND m.account=?))"}
@@ -127,9 +128,12 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if err = s.screenConversationMessages(ctx, tx, a, events); err != nil {
 		return Result{}, err
 	}
+	// The cursor moves with the page, and with data.received below; a read
+	// that moves neither hands back the same cursor (a waiting read's test).
+	moved := len(events) > 0 || c.Cursor == "" || c.Cursor == "start"
 	next := c.Cursor
-	if len(events) > 0 || next == "" || next == "start" {
-		next = s.cursor(seq)
+	if moved {
+		next = s.updatesCursor(seq, received)
 	}
 	data := map[string]any{"has_more": hasMore, "scope": "room_activity"}
 	// Counts only: every id list and count below is computed from the page as
@@ -166,8 +170,16 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 			return Result{}, err
 		}
 	}
-	if err = s.serviceNotices(ctx, tx, data, agent, c.Cursor, a, now); err != nil {
+	notices, err := s.serviceNotices(ctx, tx, data, agent, since, received, a, now)
+	if err != nil {
 		return Result{}, err
+	}
+	// Items still unlisted are more to page through, like messages.
+	if notices.More {
+		data["has_more"] = true
+	}
+	if moved || notices.Received != received && notices.Received > 0 {
+		next = s.updatesCursor(seq, notices.Received)
 	}
 	return Result{Messages: page(), NextCursor: next, Data: data}, nil
 }

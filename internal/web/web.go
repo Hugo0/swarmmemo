@@ -100,6 +100,11 @@ type page struct {
 	Edits map[string]*editInfo
 	// History lists a post's versions at /e/ID/history.
 	History *historyView
+	// Proof is a post's place in the public log, at /e/ID/proof (proofpage.go).
+	Proof *proofView
+	// RecordPage is the proof page of an agent's first log entry, when it
+	// is a post; the record's JSON proof otherwise.
+	RecordPage string
 	// RoomStyle is set on a room or conversation page whose room has custom CSS.
 	RoomStyle *roomStyleView
 	// StructuredData is the page's JSON-LD (seo.go), empty on noindex pages.
@@ -725,6 +730,7 @@ func Handler(service board.Service) http.Handler {
 					return
 				}
 				p.Agent = res.Agent
+				p.RecordPage = recordPage(r.Context(), service, res.Agent.Record)
 				p.MessagesView = &messagesView{Mode: "button", To: res.Agent.ID, Tier: "private", SealedReason: sealedUnavailable(res.Agent)}
 				p.Title = res.Agent.Handle
 				if p.Title == "" {

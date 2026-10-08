@@ -29,6 +29,12 @@ class OperationTests(unittest.TestCase):
         self.path.write_text(json.dumps(self.value)); self.path.chmod(0o600)
         return load_profile(self.path)
 
+    def test_message_validator_covers_the_server_fields(self):
+        # Thread reads validate each message with swarmmemo_inbox.validate_event;
+        # clients/message-fields.json is derived from the Go Message struct.
+        contract = json.loads((Path(__file__).resolve().parents[1] / "message-fields.json").read_text())
+        self.assertEqual(set(contract["message"]) - op.inbox.EVENT_FIELDS, set())
+
     def test_draft_staging_offline_exact_id_digest_and_discovery_no_creation(self):
         with patch.object(op, "_request", side_effect=AssertionError("network")), patch.object(op.memo, "load_key", side_effect=AssertionError("key")):
             self.assertNotIn("deliver_intent", op.tool_schemas(self.profile))
@@ -60,6 +66,30 @@ class OperationTests(unittest.TestCase):
             if action == "submit": self.assertEqual(stored["target"], "c" * 32)
         with self.assertRaisesRegex(BridgeError, "intent_too_large"):
             op.dispatch(self.profile, "stage_post", {"intent_id": "escape", "text": "\x01" * 16000})
+
+    def test_hosted_argument_names_are_aliases(self):
+        # Hosted MCP's find_work takes kind and read_work message_id; the bridge
+        # takes them beside its own state and work_id, and refuses both at once.
+        schemas = op.tool_schemas(self.profile)
+        self.assertEqual(schemas["find_work"]["properties"]["kind"], {"type": "string", "enum": op.STATES})
+        self.assertIn("message_id", schemas["read_work"]["properties"]); self.assertEqual(schemas["read_work"]["required"], [])
+        self.assertIn("message_id", schemas["stage_work"]["properties"]); self.assertNotIn("work_id", schemas["stage_work"]["required"])
+        paths = []
+        def request(_profile, path, body=None):
+            paths.append(path); raise BridgeError("transport_error")
+        with patch.object(op, "_request", side_effect=request), patch.object(op, "_public_room"):
+            for action, args in (("find_work", {"kind": "open"}), ("find_work", {"state": "open"}),
+                                 ("read_work", {"message_id": "a" * 32}), ("read_work", {"work_id": "a" * 32})):
+                with self.subTest(action=action, args=args), self.assertRaisesRegex(BridgeError, "transport_error"):
+                    op.dispatch(self.profile, action, args)
+        self.assertEqual(paths[0], paths[1]); self.assertIn("kind=open", paths[0])
+        self.assertEqual(paths[2], paths[3]); self.assertEqual(paths[2], "/api/work/" + "a" * 32)
+        for action, args in (("find_work", {"kind": "open", "state": "open"}), ("find_work", {"kind": "nope"}),
+                             ("read_work", {"message_id": "a" * 32, "work_id": "a" * 32}), ("read_work", {}), ("read_work", {"message_id": "x"})):
+            with self.subTest(action=action, args=args), self.assertRaisesRegex(BridgeError, "invalid_arguments"):
+                op.dispatch(self.profile, action, args)
+        staged = op.dispatch(self.profile, "stage_work", {"intent_id": "alias", "action": "claim", "message_id": "b" * 32, "generation": "a" * 32, "ttl": 60})
+        self.assertEqual(staged["work_id"], "b" * 32)
 
     def test_private_thread_and_untrusted_extras_never_return_body(self):
         room = {"ok": True, "room": {"name": "lab", "visibility": "public"}}

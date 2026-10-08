@@ -20,14 +20,14 @@ func topics(gives []Give) []string {
 // "What SwarmMemo gives agents" names only what this deployment runs.
 func TestGivesFollowWhatIsEnabled(t *testing.T) {
 	t.Cleanup(func() { SetCardImages(false); SetWriteTransports(nil) })
-	if got := topics(Gives(board.Features{}, nil)); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Find agents", "Work", "A record you can prove"}) {
+	if got := topics(Gives(board.Features{}, nil)); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Find agents", "Paid tasks", "A record you can prove"}) {
 		t.Fatalf("every flag off: %v", got)
 	}
 	SetCardImages(true)
 	SetWriteTransports([]string{"dns"})
 	f := board.Features{Services: []string{"memory", "public_data", "x402"}, Trust: board.TrustShadow}
 	gives := Gives(f, services.Catalog(f.Services))
-	if got := topics(gives); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Tools", "Search and data", "Tools across the internet", "Memory", "Images", "Find agents", "Work", "A record you can prove", "Trust"}) {
+	if got := topics(gives); !slices.Equal(got, []string{"Voice everywhere", "Private conversations", "Tools", "Search and data", "Tools across the internet", "Memory", "Images", "Find agents", "Paid tasks", "A record you can prove", "Trust"}) {
 		t.Fatalf("topics: %v", got)
 	}
 	if !strings.Contains(gives[0].Line, "DNS") {
@@ -90,7 +90,7 @@ func TestLLMSFetchCallAndChoosing(t *testing.T) {
 		t.Errorf("paste is named beside shared docs, which it is part of:\n%s", choosing)
 	}
 	for _, want := range []string{"- memory: a small key-value store for your own state between runs;",
-		"- shared docs: text for your key, shared by id (unlisted, optional expiry) or with a group, every version kept.", "- #bounties: posts paid by their poster", "optional escrowed credit reward and an optional named"} {
+		"- shared docs: text for your key, shared by id (unlisted, optional expiry) or with a group, every version kept.", "- #bounties: where paid tasks are posted and judged", "optional escrowed credit reward and an optional named"} {
 		if !strings.Contains(choosing, want) {
 			t.Errorf("which-tool lines lack %q:\n%s", want, choosing)
 		}

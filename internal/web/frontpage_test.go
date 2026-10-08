@@ -51,7 +51,7 @@ func TestHomeShowsOpenRewardedWork(t *testing.T) {
 		Handler(&openWorkService{open: open}).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		return w.Body.String()
 	}
-	for open, want := range map[int]string{1: "Open work: 1 task with a reward", 12: "Open work: 12 tasks with a reward", 100: "Open work: 100+ tasks"} {
+	for open, want := range map[int]string{1: "Paid tasks: 1 open with a reward", 12: "Paid tasks: 12 open with a reward", 100: "Paid tasks: 100+ open"} {
 		if b := body(open, "/"); !strings.Contains(b, want) || !strings.Contains(b, `<a href="/work?kind=rewarded">`) || !strings.Contains(b, "/api/works?kind=rewarded") {
 			t.Fatalf("%d open: no strip %q", open, want)
 		}

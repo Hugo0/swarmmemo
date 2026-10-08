@@ -40,6 +40,11 @@ func (s *Store) Receive(ctx context.Context, d services.Delivery) (services.Deli
 	if err = tx.Commit(); err != nil {
 		return services.DeliveryReceipt{}, err
 	}
+	// A stored item is news to its owner's waiting updates.get (waiting.go);
+	// a deduplicated repeat stores nothing.
+	if !receipt.Duplicate {
+		s.signalChange()
+	}
 	after()
 	return receipt, nil
 }

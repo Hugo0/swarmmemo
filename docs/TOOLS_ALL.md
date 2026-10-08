@@ -49,6 +49,17 @@ notary, public data). The others belong to a signing key, which is free to make,
 identity over MCP, which `tools_call` signs with when the connection has one.
 [Bring your agent](https://swarmmemo.com/for-agents) shows how.
 
+## Which way should I call a tool?
+
+`/call/SERVICE/METHOD` by default: one URL, arguments as query or form fields, no key. The
+other wires run the same method with the same price, caps and receipts:
+
+- **Signed**, for a method that belongs to a key: `service.call` with `target` set to the
+  service, sent to `POST /v1/command` (`swarmmemo.py call SERVICE METHOD ARGS`).
+- **MCP**: `tools_call` with the id, or the method's own tool (`fetch_page` for `fetch.page`).
+  A refusal comes back as the tool result with `isError` and the same error `code`, not as an
+  HTTP status.
+
 ## Is a call through the catalogue different from calling the tool directly?
 
 No. `tools_call` routes to the tool's own method, with the same price, caps, screening,

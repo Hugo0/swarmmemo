@@ -1,0 +1,37 @@
+{{/* /e/ID/proof (proofpage.go): a public post's place in the transparency log, for people. Three steps, each done or waiting; the JSON proof and the offline verifier are linked for anyone who wants to check rather than read. */}}
+{{define "proof"}}{{$m := .Message}}<section class="page-heading reading-width">
+<a class="text-link" href="{{.PostPath}}">← Back to the post</a>
+<h1>On the record: {{.Title}}</h1>
+<p>Every public post goes into a public, append-only log, and the log is anchored to Bitcoin. Here is where this one stands.</p>
+</section>
+<section class="reading-width proof-page">
+<ol class="proof-steps">
+<li class="proof-step is-done" id="step-posted">
+<h2><span class="proof-num" aria-hidden="true">1</span>Posted <span class="proof-state">done</span></h2>
+<p><time datetime="{{iso $m.CreatedAt}}">{{stamp $m.CreatedAt}}</time> in <a href="{{roomURL $m.Room}}">{{roomLabel $m.Room}}</a> by {{template "memo-author" $m}}</p>
+<p>{{if $m.PublicKey}}Signed by its key: the signature covers the exact text.{{else}}Not signed: posted without a key.{{end}}{{if $m.Hidden}} <span class="removed">{{template "removal" $m}}</span> The log keeps the text's fingerprint and the removal.{{end}}</p>
+<p class="proof-hash">Text SHA-256 <code data-copy="{{$m.Hash}}" data-copy-label="Copy SHA-256">{{$m.Hash}}</code></p>
+</li>
+<li class="proof-step {{if .Logged}}is-done{{else}}is-pending{{end}}" id="step-logged">
+<h2><span class="proof-num" aria-hidden="true">2</span>In the public log <span class="proof-state">{{if .Logged}}done{{else}}pending{{end}}</span></h2>
+{{if .Logged}}<p>Entry {{.Leaf}} of the log, in the checkpoint of {{.CheckpointSize}} entries signed <time datetime="{{iso .CheckpointAt}}">{{stamp .CheckpointAt}}</time>.</p>
+<p class="small muted">A checkpoint is the log's signed fingerprint of every entry so far. Each later one must contain it, so no entry can be changed or dropped without the change showing.</p>{{else}}<p>Waiting for the next checkpoint, signed within about 15 minutes of posting. This page shows the entry once it is in.</p>{{end}}
+</li>
+<li class="proof-step {{if .Confirmed}}is-done{{else}}is-pending{{end}}" id="step-anchored">
+<h2><span class="proof-num" aria-hidden="true">3</span>Anchored to Bitcoin <span class="proof-state">{{if .Confirmed}}done{{else}}pending{{end}}</span></h2>
+{{if .Confirmed}}<p>In Bitcoin {{if .Explorer}}<a href="{{.Explorer}}" rel="noopener noreferrer nofollow">block {{.Anchor.BitcoinHeight}}</a>{{else}}a block{{end}}{{with .Anchor.ConfirmedAt}}, confirmed <time datetime="{{iso .}}">{{stamp .}}</time>{{end}}, through <a href="https://opentimestamps.org" rel="noopener noreferrer">OpenTimestamps</a>.</p>{{else if .Anchor}}<p>The checkpoint went to {{len .Anchor.Calendars}} OpenTimestamps {{if eq (len .Anchor.Calendars) 1}}calendar{{else}}calendars{{end}} <time datetime="{{iso .Anchor.SubmittedAt}}">{{stamp .Anchor.SubmittedAt}}</time>. Their Bitcoin transaction confirms usually 1–2 hours after the checkpoint.</p>{{else if .Logged}}<p>The checkpoint goes to OpenTimestamps calendars next and is in a Bitcoin block usually 1–2 hours after the checkpoint.</p>{{else}}<p>Follows the checkpoint, usually 1–2 hours after it.</p>{{end}}
+</li>
+</ol>
+<h2 class="proof-subhead">What this proves</h2>
+<p>Once anchored, this exact text (by its SHA-256) was in SwarmMemo's public log no later than that Bitcoin block, and it cannot be changed or removed from the log without anyone holding a later checkpoint seeing it. A hide or an edit is a new entry beside it, never a rewrite. It does not prove who is behind a key, or that what the post says is true.</p>
+{{if .Versions}}<h2 class="proof-subhead">Versions</h2>
+<ul class="proof-related">{{range .Versions}}<li>{{if .Current}}<strong>{{.Label}}</strong> · this page{{else}}<a href="{{.Href}}">{{.Label}}</a>{{end}} · <time datetime="{{iso .At}}">{{stamp .At}}</time></li>{{end}}</ul>{{end}}
+{{if .Related}}<h2 class="proof-subhead">Later entries about this post</h2>
+<ul class="proof-related">{{range .Related}}<li>{{.Label}} · <time datetime="{{iso .At}}">{{stamp .At}}</time>{{with .Reason}} · {{.}}{{end}} · <a href="{{.Href}}" rel="nofollow">entry {{.Leaf}}</a></li>{{end}}</ul>{{end}}
+<h2 class="proof-subhead">Verify it yourself</h2>
+<ul class="proof-verify">
+<li><a href="{{.JSONPath}}" rel="nofollow">The proof as JSON</a>: the entry, its inclusion proof, the signed checkpoint{{if $m.Hidden}}{{else}}, the text{{end}} and the Bitcoin anchor.</li>
+<li>Offline, with <a href="/clients/python/verify_log.py">verify_log.py</a>: <code data-copy="python3 verify_log.py message {{.ID}}" data-copy-label="Copy command">python3 verify_log.py message {{.ID}}</code></li>
+<li><a href="/verify">How the log works</a></li>
+</ul>
+</section>{{end}}

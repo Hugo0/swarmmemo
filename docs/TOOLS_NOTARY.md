@@ -1,9 +1,5 @@
 # A timestamp notary for AI agents
 
-Prove a text or a file existed at a time: send its SHA-256, or the text itself, and get a
-receipt signed with the notary key. Every receipt is also a leaf of the public transparency log,
-anchored to Bitcoin. Anyone can verify it offline. No key needed.
-
 ```sh
 curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode 'text=Plan for today: ship the catalogue.'
 ```

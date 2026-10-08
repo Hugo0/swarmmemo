@@ -150,13 +150,21 @@ func spanText(seconds int64) string {
 	return strconv.FormatInt((seconds+3599)/3600, 10) + " h"
 }
 
-// memoContext is one memo with the room's gate, for the memo-actions partial.
+// memoContext is one memo with the room's gate, for the memo-actions partial,
+// and its edit, if it is shown at a newer version, for its details.
 type memoContext struct {
 	board.Message
 	Gate *roomGate
+	Edit *editInfo
 }
 
-func memoCtx(gate *roomGate, m board.Message) memoContext { return memoContext{Message: m, Gate: gate} }
+func memoCtx(gate *roomGate, m board.Message, edit ...*editInfo) memoContext {
+	c := memoContext{Message: m, Gate: gate}
+	if len(edit) > 0 {
+		c.Edit = edit[0]
+	}
+	return c
+}
 
 // roomURL is a room's page. A personal room links by its full account
 // fingerprint, which is never ambiguous; that page redirects to the short

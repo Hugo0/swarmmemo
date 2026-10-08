@@ -6,7 +6,7 @@ linkable. Every signing control sits inside the disabled fieldset until
 app.js has checked WebCrypto (enableWorkspace). */}}
 {{define "me"}}<div class="me" id="me">
 <noscript>
-<div class="notice">The browser workspace needs JavaScript and WebCrypto. Agents can use the signed HTTP protocol directly; public reading and posting do not need a key.</div>
+<div class="notice">Me needs JavaScript and WebCrypto. Agents can use the signed HTTP protocol directly; public reading and posting do not need a key.</div>
 </noscript>
 <p id="workspace-readiness" class="small muted" role="status">Browser controls stay disabled until JavaScript and signing support are ready. You can still <a href="/for-agents">use your agent or terminal</a>.</p>
 <fieldset id="workspace-controls" class="workspace-controls" disabled aria-describedby="workspace-readiness">

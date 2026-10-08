@@ -532,6 +532,42 @@
     quote.append(node('span', 'memo-quote-author', (author?.textContent || '○ Anonymous').trim()), node('span', 'memo-quote-text', quoteText(body.textContent)));
     return quote;
   }
+  // A public memo's details, collapsed. Kept in step with the "memo-info"
+  // template; a memo that arrives live has no edits yet.
+  function memoInfo(event) {
+    const info = node('details', 'tip memo-info'); info.dataset.infoId = event.id;
+    const summary = node('summary', '', 'i'); summary.setAttribute('aria-label', 'Message details'); summary.title = 'Message details';
+    const body = node('div', 'tip-body'), list = node('dl');
+    const code = (value, text, label) => {const c = node('code', '', text); c.dataset.copy = value; c.dataset.copyLabel = label; c.title = value; return c;};
+    const row = (term, value) => {const dd = node('dd'); if (typeof value === 'string') dd.textContent = value; else dd.append(value); list.append(node('dt', '', term), dd); return dd;};
+    row('ID', code(event.id, event.id, 'Copy ID'));
+    row('Room', roomLabel(event.room) + '/' + event.page);
+    row('Sequence', String(event.sequence));
+    row('Author key', event.public_key ? code(event.author, event.author.slice(0, 12), 'Copy fingerprint') : 'none');
+    row('Signed', event.public_key ? 'yes' : 'no');
+    row('Via', event.via || 'not recorded');
+    row('Text SHA-256', code(event.sha256 || '', String(event.sha256 || '').slice(0, 12), 'Copy SHA-256'));
+    row('Edits', 'none');
+    row('Public log', link('', 'see the proof page', '/e/' + path(event.id) + '/proof')).className = 'memo-info-log';
+    body.append(list); info.append(summary, body); return info;
+  }
+  // The log status loads once, on a memo's first details open: one request,
+  // never one per memo on page load. The proof page link stays beside it.
+  document.addEventListener('toggle', async event => {
+    const info = event.target; if (!info.matches?.('details.memo-info') || !info.open || info.dataset.logLoaded) return;
+    info.dataset.logLoaded = '1';
+    const cell = info.querySelector('.memo-info-log'), proofLink = cell?.querySelector('a'); if (!cell || !proofLink) return;
+    let text = 'pending: in the next checkpoint, within 15 min';
+    try {
+      const res = await fetch('/api/log/proof?message=' + path(info.dataset.infoId), {headers: {Accept: 'application/json'}});
+      if (res.ok) {
+        const proof = await res.json(), anchor = proof.anchor;
+        text = 'entry ' + proof.leaf.index + (anchor?.state === 'confirmed' ? ', in Bitcoin block ' + anchor.bitcoin_height : ', Bitcoin anchor pending');
+      } else if (res.status !== 404 && res.status !== 503) return;
+    } catch (_) {return;}
+    proofLink.textContent = 'proof page';
+    cell.replaceChildren(document.createTextNode(text + ' · '), proofLink);
+  }, true);
   function eventElement(event, isPrivate = false) {
     const listingPreview = !isPrivate && ['home','room'].includes(document.body.dataset.view);
     const article = node('article', 'memo'); article.id = `e-${event.id}`; article.dataset.messageId = event.id; article.dataset.sequence = event.sequence;
@@ -628,6 +664,7 @@
         moderate.dataset.moderate = event.hidden ? 'restore' : 'hide'; moderate.dataset.moderateId = event.id; moderate.dataset.author = event.author;
         actions.append(moderate);
       }
+      if (event.visibility === 'public') actions.append(memoInfo(event));
       actions.append(report); bottom.append(actions);
     }
     article.append(bottom); enhanceCopy(article); return article;
@@ -1414,6 +1451,8 @@
       receiptActions.append(link('', 'Open message →', memoPath), copyButton(() => new URL(memoPath, location.origin).href, 'Copy link'));
       if(pendingPost.key)receiptActions.append(link('', 'Back up my identity', '/me'));
       statusElement.append(receiptActions);
+      // Where the post goes next: the public log, then Bitcoin (/e/ID/proof).
+      {const track = node('span', 'receipt-note receipt-log', 'Goes into the public log within 15 min and is anchored to Bitcoin within about 2 h · '); track.append(link('', 'track it', memoPath + '/proof')); statusElement.append(track);}
       // The service says when replies cannot find their way back (result.next).
       if(result.next?.sign_to_get_replies)statusElement.append(node('span', 'receipt-note', 'Posted anonymously, so replies cannot reach an inbox. Choose “Remember me on this device” under Options to get them next time.'));
       const host = inlineHost();

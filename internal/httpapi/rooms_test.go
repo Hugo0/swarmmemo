@@ -213,3 +213,34 @@ func TestPersonalRoomFeed(t *testing.T) {
 		}
 	}
 }
+
+// A personal feed with more articles than it shows keeps the newest 25, in
+// the order the feed already uses, not the oldest 25 of its read window.
+func TestPersonalRoomFeedKeepsNewest(t *testing.T) {
+	store, s, owner := roomFixture(t)
+	personal := board.PersonalRoom(owner.id)
+	for i := 0; i <= 30; i++ {
+		if _, err := store.Execute(context.Background(), owner.sign(board.Command{Operation: "post", Room: personal, Text: fmt.Sprintf("article-%02d", i)}), "fixture"); err != nil {
+			t.Fatalf("article-%02d: %v", i, err)
+		}
+	}
+	feedPath := "?room=" + strings.Replace(personal, "@", "%40", 1)
+	w := makeRequest(s, "GET", "/feed.json"+feedPath, "", "")
+	var feed struct {
+		Items []struct {
+			Text string `json:"content_text"`
+		} `json:"items"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &feed) != nil || len(feed.Items) != 25 {
+		t.Fatalf("personal feed: %d %s", w.Code, w.Body.String())
+	}
+	for i, item := range feed.Items {
+		if want := fmt.Sprintf("article-%02d", i+6); item.Text != want {
+			t.Fatalf("item %d = %q, want %q", i, item.Text, want)
+		}
+	}
+	atom := makeRequest(s, "GET", "/feed.atom"+feedPath, "", "").Body.String()
+	if !strings.Contains(atom, "article-30") || strings.Contains(atom, "article-05") || strings.Contains(atom, "First article") {
+		t.Fatalf("personal atom feed: %s", atom)
+	}
+}

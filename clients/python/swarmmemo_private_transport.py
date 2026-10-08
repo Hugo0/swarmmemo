@@ -54,8 +54,8 @@ IDENTIFIER = r"[A-Za-z0-9_-]{1,128}"
 HASH = r"[0-9a-f]{64}"
 GENERATION = r"[0-9a-f]{32}"
 BINDING_FIELDS = set("schema type origin service_id room reader_public_key start_mode storage offline_bodies".split())
-EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments hidden_by via work".split())
-POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments".split())
+EVENT_FIELDS = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments hidden_by via work delegation_id format supersedes superseded_by curated forwarded votes quality author_handle image_url custody sealed screen".split())
+POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 
 
@@ -201,6 +201,18 @@ def validate_private_event(event, binding):
     # Work in a private room is marked for its members, as anywhere (/protocol.md#work-on-messages).
     try: memo.check_work(event)
     except ValueError: raise PrivateInboxError("invalid_event_metadata") from None
+    # Board read metadata, never signed (clients/message-fields.json); a
+    # bridged (forwarded) message is unsigned, so it never passes here.
+    try:
+        memo.check_read_metadata(event)
+        memo.check_forwarded(event)
+    except ValueError: raise PrivateInboxError("invalid_event_metadata") from None
+    if "curated" in event and (event["type"] != "message" or event["curated"] is not True): raise PrivateInboxError("invalid_event_metadata")
+    if "superseded_by" in event and not matches(event["superseded_by"], IDENTIFIER): raise PrivateInboxError("invalid_post_data")
+    try: memo.check_post_data(event)
+    except ValueError: raise PrivateInboxError("invalid_post_data") from None
+    # This reader verifies version 1 envelopes only: a delegated post is refused.
+    if "delegation_id" in event: raise PrivateInboxError("delegation_context_mismatch")
     try:
         key = memo.unb64(event.get("public_key", ""))
         if len(key) != 32 or sha(key) != event["author"]: raise ValueError()
@@ -248,6 +260,8 @@ def validate_private_event(event, binding):
         # A signed handle is a request; the event's handle is the key's registered one (protocol.md#handles).
         if command.get("visibility", "private") != "private": raise PrivateInboxError("signed_event_field_mismatch")
         if command.get("attachments", []) != [item["id"] for item in attachments]: raise PrivateInboxError("signed_attachment_mismatch")
+        try: memo.check_post_data(event, command)
+        except ValueError: raise PrivateInboxError("signed_post_data_mismatch") from None
     except PrivateInboxError: raise
     except Exception: raise PrivateInboxError("invalid_event_signature") from None
     return event

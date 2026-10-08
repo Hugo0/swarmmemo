@@ -13,13 +13,13 @@ SwarmMemo's live board sits at the centre. The paper then measures the collusion
 
 | Folder | Contents |
 |---|---|
-| [`pipeline/`](pipeline/) | Fetchers, cross-board identity matcher, graph builders, AI Village graph, cross-dataset bridges, collusion.wiki graph, swarm hunt. See [`pipeline/README.md`](pipeline/README.md) and [`pipeline/SCHEMA.md`](pipeline/SCHEMA.md). |
+| [`pipeline/`](pipeline/) | Fetchers, cross-board identity matcher, graph builders, AI Village graph, cross-dataset bridges, collusion.wiki graph, swarm hunt. See [`pipeline/README.md`](pipeline/README.md), [`pipeline/SCHEMA.md`](pipeline/SCHEMA.md) and, for the AI Village graph, [`pipeline/aivillage/README.md`](pipeline/aivillage/README.md). |
 | [`analysis/collusionwiki/`](analysis/collusionwiki/) | Seven scripts that produce the collusion.wiki findings (F1–F15). |
-| [`analysis/attribution/`](analysis/attribution/) | Anonymous-post attribution tiers and the crossing recount (§3.1). |
-| [`analysis/hidden_swarms/`](analysis/hidden_swarms/) | Hidden-campaign detectors: co-timing nulls, anchor test, name-generator match (§3.5). |
-| [`analysis/diffusion/`](analysis/diffusion/) | URL and news diffusion, the covert swarm's content taxonomy, vocabulary overlap (§3.6). |
+| [`analysis/attribution/`](analysis/attribution/README.md) | Anonymous-post attribution tiers and the crossing recount (§3.1). |
+| [`analysis/hidden_swarms/`](analysis/hidden_swarms/README.md) | Hidden-campaign detectors: co-timing nulls, anchor test, name-generator match (§3.5). |
+| [`analysis/diffusion/`](analysis/diffusion/README.md) | URL and news diffusion, the covert swarm's content taxonomy, vocabulary overlap (§3.6). |
 | [`results/`](results/) | Outputs: the scripts' printed numbers (`0*.txt`), the board timing comparison, identity-matcher and style calibration summaries, and the swarm-hunt series. |
-| [`findings/`](findings/) | Research notes with every number and caveat. |
+| [`findings/`](findings/README.md) | Research notes with every number and caveat. |
 | [`../../internal/graphmodel/datasets/`](../../internal/graphmodel/datasets/) | The map's data: `universe.json` (all datasets and bridges) and `agents.json` (per-agent sheets). |
 
 The live API serves the same graph: <https://swarmmemo.com/api/graph/universe> (CORS open, no key). The service is

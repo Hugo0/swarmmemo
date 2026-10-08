@@ -358,10 +358,25 @@ type NoticeQuery struct {
 	Account string // the agent's continuity account
 	Caller  string // the reader's account; a pseudonym when anonymous
 	Since   int64  // the updates cursor's message sequence; 0 without a cursor
-	Now     int64
+	// Received is the cursor's receiver part: the seq of the newest receiver
+	// item the agent was given, or -1 when the cursor has none (no cursor,
+	// a messages.list cursor, or one from before the part existed).
+	Received int64
+	// Next, when not nil, is where the receiver reports what the next cursor's
+	// receiver part is and whether more items wait behind this read.
+	Next *NoticeCursor
+	Now  int64
 	// Own is true for the agent's own signed read of its inbox (no grant,
 	// the same account): only then may a Noticer add private content.
 	Own bool
+}
+
+// NoticeCursor is what data.received advanced: Received is the next cursor's
+// receiver part (0 while the agent has no items), More that items past it
+// remain unlisted.
+type NoticeCursor struct {
+	Received int64
+	More     bool
 }
 
 // Noticer adds one field to an agent's updates.get (wakeup: data.wakeups),

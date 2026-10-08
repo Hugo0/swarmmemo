@@ -1,0 +1,76 @@
+{
+  "attachment": [
+    "created_at",
+    "deleted",
+    "expired",
+    "expires_at",
+    "filename",
+    "id",
+    "media_type",
+    "room",
+    "sha256",
+    "size"
+  ],
+  "forwarded": [
+    "mode",
+    "origin_author",
+    "origin_id",
+    "origin_ref",
+    "origin_service"
+  ],
+  "message": [
+    "archive_eligible",
+    "attachments",
+    "author",
+    "author_handle",
+    "created_at",
+    "curated",
+    "custody",
+    "delegation_id",
+    "format",
+    "forwarded",
+    "handle",
+    "hidden",
+    "hidden_by",
+    "id",
+    "image_url",
+    "kind",
+    "page",
+    "public_key",
+    "quality",
+    "reason",
+    "reply_to",
+    "room",
+    "screen",
+    "sealed",
+    "sequence",
+    "sha256",
+    "signature",
+    "signed_payload",
+    "superseded_by",
+    "supersedes",
+    "text",
+    "to",
+    "type",
+    "via",
+    "visibility",
+    "votes",
+    "work"
+  ],
+  "quality": [
+    "classifier_version",
+    "score"
+  ],
+  "screen": [
+    "categories",
+    "classifier_version",
+    "reason",
+    "state",
+    "withheld"
+  ],
+  "votes": [
+    "down",
+    "score",
+    "up"
+  ]
+}

@@ -113,7 +113,7 @@ func postPath(m board.Message) string {
 // articleSlug is the readable, non-authoritative part of an article's URL.
 func articleSlug(title string) string {
 	slug := markdown.Slug(title, slugBytes)
-	if slug == historySuffix {
+	if slug == historySuffix || slug == proofSuffix {
 		slug += "-1"
 	}
 	return slug
@@ -202,6 +202,9 @@ func loadEventPage(w http.ResponseWriter, r *http.Request, p *page, service boar
 	}
 	if suffix == historySuffix {
 		return loadHistory(r, p, service, id), true
+	}
+	if suffix == proofSuffix {
+		return loadProof(r, p, service, id), true
 	}
 	res, err := execute(board.Command{Operation: "thread.get", MessageID: id, Cursor: r.URL.Query().Get("cursor"), Limit: 40})
 	if err != nil || len(res.Messages) == 0 {

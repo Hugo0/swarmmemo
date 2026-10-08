@@ -390,41 +390,73 @@ func problem(status int, code, message string) error {
 }
 func (s *Store) cursor(seq int64) string { return s.cursorFor(seq, 0) }
 func (s *Store) cursorFor(seq int64, kind byte) string {
-	s.cursorMu.RLock()
-	defer s.cursorMu.RUnlock()
 	plain := make([]byte, 9)
 	plain[0] = kind
 	binary.BigEndian.PutUint64(plain[1:], uint64(seq))
+	return s.sealCursor(plain)
+}
+
+// updatesCursor is updates.get's cursor: the message sequence and, once the
+// agent's own read has listed receiver items, the seq of the newest item it
+// was given (data.received). Without one it is the plain message cursor.
+// Either kind resumes either read: parseCursor ignores the receiver part.
+func (s *Store) updatesCursor(seq, received int64) string {
+	if received <= 0 {
+		return s.cursor(seq)
+	}
+	plain := make([]byte, 17)
+	binary.BigEndian.PutUint64(plain[1:9], uint64(seq))
+	binary.BigEndian.PutUint64(plain[9:], uint64(received))
+	return s.sealCursor(plain)
+}
+
+func (s *Store) sealCursor(plain []byte) string {
+	s.cursorMu.RLock()
+	defer s.cursorMu.RUnlock()
 	sealed := s.cursorCipher.Seal(nil, nil, plain, []byte(s.generation))
 	return s.generation + ":" + base64.RawURLEncoding.EncodeToString(sealed)
 }
 func (s *Store) parseCursor(cursor string) (int64, error) { return s.parseCursorFor(cursor, 0) }
 func (s *Store) parseCursorFor(cursor string, kind byte) (int64, error) {
+	n, _, err := s.parseCursorParts(cursor, kind)
+	return n, err
+}
+
+// parseUpdatesCursor reads updatesCursor; received is -1 when the cursor has
+// no receiver part (none given, a messages.list cursor, or an older one).
+func (s *Store) parseUpdatesCursor(cursor string) (seq, received int64, err error) {
+	return s.parseCursorParts(cursor, 0)
+}
+
+func (s *Store) parseCursorParts(cursor string, kind byte) (int64, int64, error) {
 	if cursor == "" || cursor == "start" {
-		return 0, nil
+		return 0, -1, nil
 	}
 	s.cursorMu.RLock()
 	defer s.cursorMu.RUnlock()
 	parts := strings.Split(cursor, ":")
 	if len(parts) != 2 {
-		return 0, problem(400, "invalid_cursor", "Use a cursor returned by this server.")
+		return 0, 0, problem(400, "invalid_cursor", "Use a cursor returned by this server.")
 	}
 	if parts[0] != s.generation {
-		return 0, problem(409, "cursor_reset", "The server generation changed; resynchronize from an empty cursor and deduplicate event IDs.")
+		return 0, 0, problem(409, "cursor_reset", "The server generation changed; resynchronize from an empty cursor and deduplicate event IDs.")
 	}
 	sealed, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return 0, problem(400, "invalid_cursor", "Invalid opaque cursor.")
+		return 0, 0, problem(400, "invalid_cursor", "Invalid opaque cursor.")
 	}
 	plain, err := s.cursorCipher.Open(nil, nil, sealed, []byte(s.generation))
-	if err != nil || len(plain) != 9 || plain[0] != kind {
-		return 0, problem(400, "invalid_cursor", "Cursor is invalid or belongs to another endpoint.")
+	if err != nil || (len(plain) != 9 && (len(plain) != 17 || kind != 0)) || plain[0] != kind {
+		return 0, 0, problem(400, "invalid_cursor", "Cursor is invalid or belongs to another endpoint.")
 	}
-	n := int64(binary.BigEndian.Uint64(plain[1:]))
-	if n < 0 {
-		return 0, problem(400, "invalid_cursor", "Invalid cursor sequence.")
+	n, received := int64(binary.BigEndian.Uint64(plain[1:9])), int64(-1)
+	if len(plain) == 17 {
+		received = int64(binary.BigEndian.Uint64(plain[9:]))
 	}
-	return n, nil
+	if n < 0 || (len(plain) == 17 && received < 1) {
+		return 0, 0, problem(400, "invalid_cursor", "Invalid cursor sequence.")
+	}
+	return n, received, nil
 }
 
 var slug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,` + strconv.Itoa(SlugMaxChars-1) + `}$`)

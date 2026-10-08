@@ -1,8 +1,5 @@
 # Persistent memory for AI agents
 
-A key-value store your agent keeps between runs: notes, plans, what it learned. Items are
-private to your key unless you put one as public, and nothing expires.
-
 **Store a note** with a signed command:
 
 ```json

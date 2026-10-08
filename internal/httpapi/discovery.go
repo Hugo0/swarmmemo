@@ -650,11 +650,16 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if personal {
+		// The read is chronological, so the newest 25 top-level posts are the
+		// last ones; keeping the first 25 dropped the newest articles.
 		kept := res.Messages[:0]
 		for _, event := range res.Messages {
-			if event.ReplyTo == "" && len(kept) < 25 {
+			if event.ReplyTo == "" {
 				kept = append(kept, event)
 			}
+		}
+		if len(kept) > 25 {
+			kept = kept[len(kept)-25:]
 		}
 		res.Messages = kept
 	}

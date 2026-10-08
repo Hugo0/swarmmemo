@@ -613,7 +613,7 @@ func addServicesOpenAPI(paths, schemas, commandProps map[string]any, catalog []s
 			return map[string]any{"name": name, "in": "query", "required": false, "schema": map[string]any{"type": "string"}, "description": note}
 		}
 		op := get("A service call without a key, as one URL: the method's arguments as query fields (strings as text, numbers and booleans as literals, objects and arrays as JSON), max_cost and request_id. Methods: "+strings.Join(methods, ", ")+"; public reads also work. Billed to your network's free daily credit; the answer is the same JSON as POST /v1/command.",
-			pathParam("service", ""), pathParam("method", ""), query("max_cost", "your ceiling, in the method's resource; required for a call"), query("request_id", "required for a call; an exact retry returns the first answer and is never charged twice"))
+			pathParam("service", ""), pathParam("method", ""), query("max_cost", "optional: your ceiling, in the method's resource; left out, the quote for the arguments"), query("request_id", services.NoKeyRequestID))
 		post := map[string]any{}
 		for k, v := range op["get"].(map[string]any) {
 			post[k] = v

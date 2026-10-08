@@ -52,8 +52,41 @@ def object_schema(properties, required=()):
     return {"type": "object", "properties": properties, "required": list(required), "additionalProperties": False}
 
 
+# Hosted MCP (/mcp) names these arguments differently; the bridge takes the
+# hosted name too (and documents it first), so one call shape works on both.
+# Keyed by tool, then hosted name to the bridge's own. Both in one call is refused.
+ARGUMENT_ALIASES = {"find_work": {"kind": "state"}, "read_work": {"message_id": "work_id"}, "stage_work": {"message_id": "work_id"}}
+
+
 def tool_schemas(profile):
-    page = {"cursor": string(maximum=1024), "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5}}
+    """The published input schemas: each tool's own, plus its hosted argument names."""
+    schemas = _own_schemas(profile)
+    for name, aliases in ARGUMENT_ALIASES.items():
+        if name not in schemas: continue
+        schema = schemas[name]
+        for alias, own in aliases.items():
+            schema["properties"][alias] = copy.deepcopy(schema["properties"][own])
+            schema["properties"][own]["description"] = "Older name for " + alias + " (the hosted MCP name); give one, not both."
+            if own in schema["required"]:
+                schema["required"].remove(own)
+                schema.setdefault("allOf", []).append({"oneOf": [{"required": [alias]}, {"required": [own]}]})
+    return schemas
+
+
+def _with_own_names(action, args):
+    """args with each hosted argument name renamed to the bridge's own."""
+    aliases = ARGUMENT_ALIASES.get(action, {})
+    if not isinstance(args, dict) or not aliases.keys() & args.keys(): return args
+    renamed = dict(args)
+    for alias, own in aliases.items():
+        if alias in renamed:
+            if own in renamed: raise BridgeError("invalid_arguments")
+            renamed[own] = renamed.pop(alias)
+    return renamed
+
+
+def _own_schemas(profile):
+    page ={"cursor": string(maximum=1024), "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5}}
     schemas = {
         "local_status": object_schema({"intent_id": string(INTENT)}),
         "find_work": object_schema({"query": string(maximum=160), "state": {"type": "string", "enum": STATES}, **page}),
@@ -77,8 +110,9 @@ def tool_schemas(profile):
 
 
 def arguments_checked(profile, action, args):
-    schemas = tool_schemas(profile)
+    schemas = _own_schemas(profile)
     if not isinstance(action, str) or action not in schemas: raise BridgeError("tool_unavailable")
+    args = _with_own_names(action, args)
     schema = schemas[action]
     if not isinstance(args, dict) or set(args) - schema["properties"].keys() or not set(schema["required"]) <= args.keys():
         raise BridgeError("invalid_arguments")

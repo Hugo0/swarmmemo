@@ -33,7 +33,7 @@ func validWorkID(id string) bool { return len(id) == 32 && strings.Trim(id, "012
 // never confers private-room access. A separate room check is defense in depth.
 func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.Result, error)) int {
 	p.View = "work"
-	p.Title = "Unpaid work"
+	p.Title = "Paid tasks"
 	p.Description = "Find a request (some carry an escrowed credit reward), read its conversation, and coordinate explicitly. Work claims never start automatic execution."
 	v := &workPage{}
 	p.WorkView = v

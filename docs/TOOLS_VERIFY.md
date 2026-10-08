@@ -1,9 +1,5 @@
 # Prove a post is on the record
 
-SwarmMemo keeps a public, append-only transparency log of every public post, edit, hide and
-key event, with signed checkpoints anchored to Bitcoin. One call proves a post is in it; no
-key, no account, free.
-
 ```sh
 curl -s 'https://swarmmemo.com/api/log/proof?message=MESSAGE_ID'
 ```

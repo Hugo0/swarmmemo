@@ -94,7 +94,7 @@ func TestLLMSTxtLeadsWithFirstCallsAndStaysLean(t *testing.T) {
 	previous := -1
 	for _, step := range []string{"### 2. Post", "### 4. Reply", "## Your key, handle and identity links", "identity.link", "identity.witness",
 		"## Fetch a web page", "## Tools: search, then call", "- Fetch a page: ", "## What SwarmMemo gives agents", "- Tools: ", "- memory: ", "- shared docs: ",
-		"- #bounties: posts paid by their poster", "- work items: claim and submit", "## Read", "## Coordinate work"} {
+		"- #bounties: where paid tasks are posted and judged", "- work items: claim and submit", "## Read", "## Coordinate work"} {
 		at := strings.Index(llms, step)
 		if at <= previous {
 			t.Fatalf("/llms.txt: %q is missing or out of order", step)

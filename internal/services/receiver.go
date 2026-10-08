@@ -735,14 +735,27 @@ type ReceivedNotice struct {
 }
 
 // Notices is data.received in updates.get, for the agent's own signed read
-// only: its fresh items received since the cursor (at or after it, so
-// deduplicate by id), newest first. Anyone else's read gets nothing.
+// only, newest first. Anyone else's read gets nothing.
+//
+// The updates cursor carries the seq of the newest item it was given
+// (NoticeQuery.Received): the read lists the fresh items after it, the
+// oldest ReceiverNoticesMax first, and n.Next moves the cursor to the newest
+// listed, so a repeated read repeats nothing and a delivery alone advances
+// the cursor. A cursor without that part (none, a messages.list cursor, or
+// one from before it) lists the newest fresh items received since its
+// message sequence, as reads always did, and moves the cursor past every
+// item the account has.
 func (r *receiver) Notices(ctx context.Context, q allowance.Querier, n NoticeQuery) (string, any, error) {
 	if !n.Own || n.Account == "" {
 		return "", nil, nil
 	}
-	rows, err := q.QueryContext(ctx, "SELECT "+itemColumns+" FROM receiver_items WHERE account=? AND received_at>? AND event_seq>=? ORDER BY seq DESC LIMIT ?",
-		n.Account, n.Now-ReceiverRetention, n.Since, ReceiverNoticesMax)
+	query := "SELECT " + itemColumns + " FROM receiver_items WHERE account=? AND received_at>? AND seq>? ORDER BY seq LIMIT ?"
+	args := []any{n.Account, n.Now - ReceiverRetention, n.Received, ReceiverNoticesMax + 1}
+	if n.Received < 0 {
+		query = "SELECT " + itemColumns + " FROM receiver_items WHERE account=? AND received_at>? AND event_seq>=? ORDER BY seq DESC LIMIT ?"
+		args = []any{n.Account, n.Now - ReceiverRetention, n.Since, ReceiverNoticesMax}
+	}
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return "", nil, err
 	}
@@ -755,7 +768,28 @@ func (r *receiver) Notices(ctx context.Context, q allowance.Querier, n NoticeQue
 		}
 		out = append(out, ReceivedNotice{Seq: it.Seq, ID: it.ID, Receiver: it.Receiver, ReceivedAt: it.ReceivedAt, ContentType: it.ContentType, Bytes: it.Bytes, Screened: it.Screened, Screen: it.Screen, Verdict: it.Verdict})
 	}
-	return "received", out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return "", nil, err
+	}
+	rows.Close()
+	next := NoticeCursor{Received: max(n.Received, 0)}
+	if n.Received < 0 {
+		if err = q.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM receiver_items WHERE account=?", n.Account).Scan(&next.Received); err != nil {
+			return "", nil, err
+		}
+	} else {
+		if next.More = len(out) > ReceiverNoticesMax; next.More {
+			out = out[:ReceiverNoticesMax]
+		}
+		if len(out) > 0 {
+			next.Received = out[len(out)-1].Seq
+		}
+		slices.Reverse(out)
+	}
+	if n.Next != nil {
+		*n.Next = next
+	}
+	return "received", out, nil
 }
 
 // Delivery is one POST to a receive URL, as the HTTP layer read it.

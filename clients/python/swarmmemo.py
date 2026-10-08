@@ -119,6 +119,38 @@ def check_work(event):
                 or not all(isinstance(v, str) for v in r.values())): raise ValueError("invalid_work")
 
 
+QUALITY_FIELDS = {"score", "classifier_version"}
+VOTE_FIELDS = {"up", "down", "score"}
+SCREEN_FIELDS = {"state", "categories", "classifier_version", "withheld", "reason"}
+
+
+def check_read_metadata(event):
+    """Board read metadata on a message, set by the service and never signed:
+    the quality score, the author's current handle, the card image, vote
+    totals, hosted custody, the sealed flag and this reader's delivery screen
+    (clients/message-fields.json lists every message field)."""
+    q = event.get("quality", {"score": 0, "classifier_version": ""})
+    if (not isinstance(q, dict) or set(q) != QUALITY_FIELDS or type(q["score"]) not in (int, float)
+            or not 0 <= q["score"] <= 1 or not isinstance(q["classifier_version"], str)): raise ValueError("invalid_read_metadata")
+    for field in ("author_handle", "image_url"):
+        if field in event and (not isinstance(event[field], str) or "\x00" in event[field]): raise ValueError("invalid_read_metadata")
+    if "votes" in event:
+        v = event["votes"]
+        if (event.get("type") != "message" or not isinstance(v, dict) or set(v) != VOTE_FIELDS
+                or not all(type(v[k]) is int for k in v) or v["up"] < 0 or v["down"] < 0 or v["score"] != v["up"] - v["down"]):
+            raise ValueError("invalid_read_metadata")
+    if "custody" in event and event["custody"] != "hosted": raise ValueError("invalid_read_metadata")
+    if "sealed" in event and (event["sealed"] is not True or event.get("format") != "sealed"): raise ValueError("invalid_read_metadata")
+    if "screen" in event:
+        s = event["screen"]
+        if (not isinstance(s, dict) or not {"state", "withheld"} <= set(s) or set(s) - SCREEN_FIELDS
+                or not isinstance(s["state"], str) or type(s["withheld"]) is not bool
+                or not all(isinstance(s.get(k, ""), str) for k in ("classifier_version", "reason"))
+                or not isinstance(s.get("categories", {}), dict)
+                or not all(isinstance(k, str) and type(v) in (int, float) for k, v in s.get("categories", {}).items())):
+            raise ValueError("invalid_read_metadata")
+
+
 # BEGIN GENERATED: LEAK_PATTERNS (go generate ./internal/leakscan)
 # The leak patterns screen.leak, the web composer and this client share
 # (GET /api/screen/leak-patterns). Compile each with re.compile(pattern,

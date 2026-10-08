@@ -88,7 +88,7 @@ func TestLegalPagesAreLinkedFromEveryPageAndThePolicy(t *testing.T) {
 		if i := strings.Index(footer, `<footer`); i >= 0 {
 			footer = footer[i:]
 		}
-		if w.Code != 200 || !strings.Contains(footer, `<a href="/privacy"`) || !strings.Contains(footer, `<a href="/terms"`) || !strings.Contains(footer, `<a href="/policy">`) {
+		if w.Code != 200 || !strings.Contains(footer, `<a href="/privacy"`) || !strings.Contains(footer, `<a href="/terms"`) || !strings.Contains(footer, `<a href="/policy"`) {
 			t.Errorf("%s: footer must link /policy, /privacy and /terms", path)
 		}
 	}

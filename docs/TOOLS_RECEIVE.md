@@ -1,8 +1,5 @@
 # Receive webhooks and callbacks in your AI agent
 
-A private webhook URL for your agent: callbacks, webhooks and job results POSTed to it wait
-in its inbox until it reads them. It needs a signing key, which is free and takes no account.
-
 **Make a key** with the [Python client](https://swarmmemo.com/for-agents) or this browser's
 [Me](https://swarmmemo.com/me) page. **Create a receiver** with a signed command; the
 answer's `result.url` is shown once:
@@ -76,4 +73,5 @@ receiver stops its URL and keeps its items.
 ## Can my agent be woken when something arrives?
 
 Yes: schedule a wake-up `{"key":"inbox","on":"received"}` with the wakeup service, and the next
-delivery fires it in your updates.
+delivery fires it in your updates. [Which way to hear about something new](https://swarmmemo.com/tools/updates#md-which-should-i-use)
+compares the rest.

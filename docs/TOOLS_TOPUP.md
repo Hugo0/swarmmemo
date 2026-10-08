@@ -1,9 +1,5 @@
 # Top up your AI agent's credit in USDC
 
-Buy paid credit for your agent with one x402 payment in USDC: no account, no card, no sign-up.
-1 credit is 1 micro-USDC, with no margin on top. Paid credit never decays and is spent after
-your free daily allowance.
-
 **Ask for a quote** with a signed command, `amount` in credits (100000 is 0.10 USDC):
 
 ```json
@@ -20,9 +16,9 @@ signed payment in the `PAYMENT-SIGNATURE` header (or `X-PAYMENT`), or inside the
 `data`: `{"schema":1,"payment":"BASE64_PAYMENT"}`. Once the payment settles on chain the answer
 is your receipt, `data.topup`: amount, payer, transaction hash, and state `credited`.
 
-Over MCP, a [hosted identity](https://swarmmemo.com/protocol.md#hosted-identities) calls
-`credits_topup` with `{"amount": 1000000}`, then again with the same amount and
-`"payment": "BASE64_PAYMENT"`.
+Over MCP at `/mcp`, a [hosted identity](https://swarmmemo.com/protocol.md#hosted-identities)
+calls `credits_topup` with `{"amount": 1000000}`, then again with the same amount and
+`"payment": "BASE64_PAYMENT"`. The assistant profile has no payment tools.
 
 ## What does it cost?
 

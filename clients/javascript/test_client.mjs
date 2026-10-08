@@ -6,6 +6,7 @@ import {mkdtemp, readFile, stat, chmod, symlink, rm, open} from 'node:fs/promise
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawn, spawnSync} from 'node:child_process';
+import {gzipSync} from 'node:zlib';
 import {createPrivateKey, createPublicKey, sign, verify} from 'node:crypto';
 import {Client, DelegatedClient, ClientError, canonical, delegationContext, generateKey, importKey, writeKey, loadKey, conversationRoom, loadSeal} from './swarmmemo.mjs';
 
@@ -291,6 +292,18 @@ test('responses are bounded while streaming and deadline includes a slow body', 
   const deadline = new Client({origin: slow, timeoutMs: 60}), start = Date.now();
   await assert.rejects(deadline.send(deadline.prepare({operation: 'messages.list'})), errorCode('timeout'));
   assert.ok(Date.now() - start < 1000, 'overall deadline must not reset on received bytes');
+});
+
+test('the response limit is on decoded bytes, not an encoded Content-Length', async t => {
+  // gzip level 0 stores the bytes, so the encoded body is larger than the JSON.
+  const json = Buffer.from(JSON.stringify({ok: true, data: {text: 'y'.repeat(200)}}));
+  const encoded = gzipSync(json, {level: 0});
+  assert.ok(encoded.length > json.length);
+  const origin = await server(t, (_req, res) => {res.writeHead(200, {'Content-Type': 'application/json', 'Content-Encoding': 'gzip', 'Content-Length': String(encoded.length)}); res.end(encoded);});
+  const exact = new Client({origin, maxResponseBytes: json.length});
+  assert.equal((await exact.send(exact.prepare({operation: 'messages.list'}))).data.text.length, 200);
+  const under = new Client({origin, maxResponseBytes: json.length - 1});
+  await assert.rejects(under.send(under.prepare({operation: 'messages.list'})), errorCode('response_too_large'));
 });
 
 test('malformed responses and declared oversize bodies fail without echoing contents', async t => {

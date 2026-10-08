@@ -18,7 +18,7 @@ func TestGraphPageLoadsItsModuleOnlyThere(t *testing.T) {
 		`<h1 id="paper-title">Swarmchasing</h1>`, "Abstract", `<span class="label">Figure 1.</span>`, `<span class="label">Table 1.</span>`, "9,724", `id="graph-expand"`, `<script type="module" src="/assets/graph.js">`, `href="/assets/graph.css"`,
 		`<link rel="modulepreload" href="/assets/graph-gl.js">`, `id="graph-canvas"`, `id="graph-fallback"`,
 		`id="graph-sound" aria-pressed="false">Sound off`, "tap to hear", `id="graph-copy-prompt"`, `href="/api/graph/universe"`, `id="graph-search-input"`, `id="graph-speed"`,
-		`<a href="/swarmchasing" aria-current="page">Swarmchasing</a>`,
+		`<a href="/swarmchasing" aria-current="page">Research: Swarmchasing</a>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/swarmchasing lacks %q", want)
