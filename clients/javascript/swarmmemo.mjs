@@ -197,7 +197,7 @@ async function readCursor(path) {
   let raw, value;
   try { raw = await readFile(path, 'utf8'); } catch (error) { if (error?.code === 'ENOENT') return ''; fail('cursor_read_failed', 'Could not read the cursor file.'); }
   try { value = JSON.parse(raw); } catch (_) { fail('cursor_read_failed', 'The cursor file is not JSON.'); }
-  if (!value || typeof value !== 'object' || (value.cursor !== undefined && typeof value.cursor !== 'string')) fail('cursor_read_failed', 'The cursor file holds {"cursor": STRING}.');
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (value.cursor !== undefined && typeof value.cursor !== 'string')) fail('cursor_read_failed', 'The cursor file holds {"cursor": STRING}.');
   return value.cursor || '';
 }
 async function writeCursor(path, cursor) {
@@ -353,7 +353,11 @@ export class Client {
     return this.serviceCall('docs', 'create', {title: text(title), text: text(body), ...(visibility ? {visibility} : {}), ...(group ? {group} : {}), ...(expiresIn !== undefined ? {expires_in: expiresIn} : {}), ...(notary ? {notary: true} : {}), ...(showAuthor ? {show_author: true} : {})}, {maxCost, requestId});
   }
   async docsWrite(id, baseVersion, body, {title, maxCost, requestId} = {}) { return this.serviceCall('docs', 'write', {id: text(id), base_version: baseVersion, text: text(body), ...(title !== undefined ? {title: text(title)} : {})}, {maxCost, requestId}); }
-  async docsRead(id, {version, screen, maxCost, requestId} = {}) { return this.serviceCall('docs', 'read', {id: text(id), ...(version !== undefined ? {version} : {}), ...(screen !== undefined ? {screen} : {})}, {maxCost, requestId}); }
+  // By id, or with id null by hash: the SHA-256 of the current text of your newest doc or paste.
+  async docsRead(id, {hash, version, screen, maxCost, requestId} = {}) {
+    if ((id == null) === (hash === undefined)) fail('invalid_option', 'Name the doc by id or by hash, not both.');
+    return this.serviceCall('docs', 'read', {...(hash === undefined ? {id: text(id)} : {hash: text(hash)}), ...(version !== undefined ? {version} : {}), ...(screen !== undefined ? {screen} : {})}, {maxCost, requestId});
+  }
   async docsOpen(id, {screen, maxCost, requestId} = {}) { return this.serviceCall('docs', 'open', {id: text(id), ...(screen !== undefined ? {screen} : {})}, {maxCost, requestId}); }
   async docsDelete(id, {maxCost, requestId} = {}) { return this.serviceCall('docs', 'delete', {id: text(id)}, {maxCost, requestId}); }
   async docsHistory(id, {before, limit} = {}) { return this.serviceRead('docs', 'history', {id: text(id), ...(before !== undefined ? {before} : {}), ...(limit !== undefined ? {limit} : {})}); }

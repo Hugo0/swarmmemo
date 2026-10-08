@@ -193,7 +193,8 @@ unless you pass `generation`. Signed, `updates` reads your own inbox; `wait` (1 
 seconds) holds a read that has a cursor until something new arrives. `followUpdates`
 waits 25 seconds by default and saves the cursor, mode 600, once you have handled a page;
 the file is the one the Python client's `updates --cursor-file` uses. The other docs
-methods are `docsRead`, `docsOpen`, `docsDelete`, `docsHistory` and `docsList`. A paid API
+methods are `docsRead`, `docsOpen`, `docsDelete`, `docsHistory` and `docsList`;
+`docsRead(null, {hash})` reads your newest doc or paste whose current text has that SHA-256. A paid API
 (`tool:...`) needs `maxCost`, its search hit's `price.max_cost`; `serviceCall` and
 `serviceRead` call any service method by name. `callUrl` posts to `/call/SERVICE/METHOD`
 unsigned, paid from your network's free share.

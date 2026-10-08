@@ -263,7 +263,7 @@ func TestKeyBackupSchemaIsAdditive(t *testing.T) {
 	if n := sqlCount(t, s, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='key_backups'"); n != 1 {
 		t.Fatal("key_backups was not created on upgrade")
 	}
-	if v := sqlCount(t, s, "PRAGMA user_version"); v != SchemaVersion || SchemaVersion != 20 {
+	if v := sqlCount(t, s, "PRAGMA user_version"); v != SchemaVersion || SchemaVersion != 21 {
 		t.Fatalf("user_version %d after the migration", v)
 	}
 	if n := sqlCount(t, s, "SELECT count(*) FROM identities WHERE id=?", keyID(owner)); n != 1 {

@@ -170,6 +170,10 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if _, err := tx.Exec(tlogSchema); err != nil {
 		return err
 	}
+	// Schema 21: signed inclusion promises (logpromise.go, C95).
+	if _, err := tx.Exec(tlogPromiseSchema); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

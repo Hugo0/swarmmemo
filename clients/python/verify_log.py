@@ -10,11 +10,19 @@ notes). Standard library plus `cryptography` for Ed25519.
     python3 verify_log.py notary SHA256_HEX     # prove a notary stamp and its key are
     python3 verify_log.py consistency OLD [NEW] # prove the log only grew
     python3 verify_log.py record HANDLE         # verify an agent's signed record
+    python3 verify_log.py promise FILE          # check a post's signed log promise: kept,
+                                                # pending, overdue, or BROKEN with evidence
 
 Pin the log key with --key (printed by `checkpoint`); without it the key is
 fetched from the server, which proves consistency but not who signed. --state
 FILE remembers the last checkpoint and its key, and checks that every new
 checkpoint extends it.
+
+A promise FILE is the note itself, a post result carrying log_promise, or the
+/api/log/promise answer. Exit status: 0 kept or pending, 1 a check failed,
+2 a fetch failed, 3 broken (the log key signed a promise and a checkpoint
+that disagree: --evidence FILE saves the proof anyone can check), 4 overdue
+(no checkpoint covers the promised leaf after merge-by).
 """
 
 from __future__ import annotations
@@ -24,6 +32,7 @@ import base64
 import hashlib
 import json
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -205,6 +214,50 @@ def parse_checkpoint(text: str):
     return lines[0], int(lines[1]), root
 
 
+PROMISE_TYPE = "promise/v1"
+
+
+def parse_promise(text: str) -> dict:
+    """Parse a promise body (tlog.Promise): the origin, promise/v1, then index,
+    leaf, kind, id, received and merge-by, one "NAME VALUE" line each, exactly.
+    A checkpoint never parses as one (its second line is a number)."""
+    lines = text.split("\n")
+    if len(lines) != 9 or lines[8] != "" or not lines[0] or " " in lines[0] or lines[1] != PROMISE_TYPE:
+        raise VerifyError("malformed promise")
+    out = {"origin": lines[0]}
+    for i, name in enumerate(("index", "leaf", "kind", "id", "received", "merge-by"), start=2):
+        prefix, sep, value = lines[i].partition(" ")
+        if prefix != name or not sep or not value or any(c.isspace() for c in value):
+            raise VerifyError("malformed promise")
+        if name in ("index", "received", "merge-by"):
+            if not value.isascii() or not value.isdigit() or str(int(value)) != value:
+                raise VerifyError("malformed promise")
+            value = int(value)
+        out[name] = value
+    try:
+        leaf = base64.b64decode(out["leaf"], validate=True)
+    except ValueError:
+        raise VerifyError("malformed promise leaf") from None
+    if len(leaf) != 32 or out["merge-by"] < out["received"]:
+        raise VerifyError("malformed promise")
+    out["leaf"] = leaf
+    return out
+
+
+def read_promise(path: str) -> str:
+    """The promise note in FILE: the note itself, a post result carrying
+    log_promise, or a /api/log/promise answer."""
+    with open(path, encoding="utf-8") as f:
+        raw = f.read()
+    if raw.lstrip().startswith("{"):
+        doc = json.loads(raw)
+        doc = doc.get("log_promise") or doc
+        if not isinstance(doc, dict) or not isinstance(doc.get("note"), str):
+            raise VerifyError("the JSON file has no log_promise note")
+        return doc["note"]
+    return raw
+
+
 def get(base: str, path: str, raw: bool = False):
     req = urllib.request.Request(base + path, headers={"Accept": "application/json", "User-Agent": "swarmmemo-verify-log/1"})
     with urllib.request.urlopen(req, timeout=30) as resp:
@@ -339,6 +392,60 @@ class Verifier:
         verify_consistency(m, n, hashes(c["proof"]), root_m, root_n)
         return [f"checkpoint {m} is a prefix of checkpoint {n}"]
 
+    def promise(self, note: str, proof_file: str | None = None, evidence: str | None = None, now: int | None = None):
+        """Check a signed log promise: its signature under the log key and,
+        once a checkpoint covers its index, that the leaf there is the
+        promised one. Returns (state, lines): kept, pending, overdue or
+        broken; broken is a contradiction under one key that anyone can check
+        offline, saved to evidence when given."""
+        if proof_file:
+            with open(proof_file) as f:
+                p = json.load(f)
+            cp = p["checkpoint"]
+        else:
+            p = None
+            try:
+                cp = get(self.base, "/api/log/checkpoint")["checkpoint"]
+            except urllib.error.HTTPError as e:
+                if e.code != 503:
+                    raise
+                cp = None  # no checkpoint signed yet
+        if self.key is None:
+            if cp is None:
+                raise VerifyError("no checkpoint to take the log key from: pin it with --key")
+            self.key = cp["verifier_key"]
+        pr = parse_promise(open_note(note, self.key))
+        idx = pr["index"]
+        out = [f"promise signed by the log key: leaf {idx} is {pr['kind']} {pr['id']}, received {pr['received']}, merge-by {pr['merge-by']}"]
+        size = 0
+        if cp is not None:
+            origin = parse_checkpoint(open_note(cp["note"], self.key))[0]
+            if origin != pr["origin"]:
+                raise VerifyError(f"the promise is for log {pr['origin']!r}, the checkpoint for {origin!r}")
+            size, root = self.checkpoint(cp)
+        if size <= idx:
+            late = (int(time.time()) if now is None else now) > pr["merge-by"]
+            state = "overdue" if late else "pending"
+            return state, out + [f"{state}: no signed checkpoint covers leaf {idx} yet (latest has {size} leaves); merge-by {pr['merge-by']}"]
+        if p is None:
+            p = get(self.base, f"/api/log/proof?leaf={idx}&size={size}")
+        if p["leaf"]["index"] != idx:
+            raise VerifyError(f"the proof is for leaf {p['leaf']['index']}, not the promised leaf {idx}")
+        leaf = self.inclusion(p, size, root)
+        got = leaf_hash(p["leaf"]["data"].encode())
+        if got == pr["leaf"] and leaf.get("kind") == pr["kind"] and leaf.get("id") == pr["id"]:
+            return "kept", out + [f"kept: leaf {idx} of checkpoint {size} is the promised {pr['kind']} {pr['id']}"]
+        # Both notes verify under the pinned key and the inclusion proof binds
+        # this other leaf to index idx of the signed checkpoint.
+        if evidence:
+            with open(evidence, "w") as f:
+                json.dump({"schema": "swarmmemo-promise-violation/1", "verifier_key": self.key, "promise": note,
+                           "checkpoint": cp["note"], "index": idx, "tree_size": size, "leaf_data": p["leaf"]["data"],
+                           "proof": p["proof"]}, f, indent=1)
+        return "broken", out + [f"broken: checkpoint {size} holds leaf hash {base64.b64encode(got).decode()} at index {idx}, "
+                                f"not the promised {base64.b64encode(pr['leaf']).decode()}"
+                                + (f"; evidence saved to {evidence}" if evidence else "; save it with --evidence FILE")]
+
     def record(self, who: str):
         r = get(self.base, "/api/record/" + urllib.parse.quote(who))
         if self.key is None:
@@ -366,6 +473,10 @@ def main(argv=None):
     c.add_argument("old", type=int)
     c.add_argument("new", type=int, nargs="?")
     sub.add_parser("record").add_argument("who")
+    pm = sub.add_parser("promise")
+    pm.add_argument("file", help="the promise note, a post result with log_promise, or a /api/log/promise answer")
+    pm.add_argument("--proof", help="a saved /api/log/proof?leaf=INDEX answer: verify with no fetch (pin --key)")
+    pm.add_argument("--evidence", help="where to save the evidence of a broken promise")
     args = ap.parse_args(argv)
     v = Verifier(args.base, args.key, args.state)
     try:
@@ -378,6 +489,13 @@ def main(argv=None):
             lines = v.notary(args.hash)
         elif args.cmd == "consistency":
             lines = v.consistency(args.old, args.new)
+        elif args.cmd == "promise":
+            state, lines = v.promise(read_promise(args.file), args.proof, args.evidence)
+            if state in ("broken", "overdue"):
+                print("OK", lines[0])
+                for line in lines[1:]:
+                    print(state.upper(), line.removeprefix(state + ": "))
+                return 3 if state == "broken" else 4
         else:
             lines = v.record(args.who)
     except urllib.error.HTTPError as e:

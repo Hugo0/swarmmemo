@@ -152,5 +152,141 @@ class Vectors(unittest.TestCase):
             run(doc, doc["id"], {"text": "other"})
 
 
+
+def _tree(leaves: list[bytes]) -> bytes:
+    """RFC 6962 MTH over leaf data."""
+    if len(leaves) == 1:
+        return v.leaf_hash(leaves[0])
+    k = 1
+    while k * 2 < len(leaves):
+        k *= 2
+    return v.node_hash(_tree(leaves[:k]), _tree(leaves[k:]))
+
+
+def _path(m: int, leaves: list[bytes]) -> list[bytes]:
+    """RFC 6962 PATH(m, D[n]): the inclusion proof of leaf m."""
+    if len(leaves) == 1:
+        return []
+    k = 1
+    while k * 2 < len(leaves):
+        k *= 2
+    if m < k:
+        return _path(m, leaves[:k]) + [_tree(leaves[k:])]
+    return _path(m - k, leaves[k:]) + [_tree(leaves[:k])]
+
+
+class Promises(unittest.TestCase):
+    """verify_log promise against a log built here: one key signs the
+    checkpoint and the promise, as the board's log key does."""
+
+    ORIGIN = "swarmmemo.com/log"
+
+    def setUp(self):
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        except ImportError:
+            self.skipTest("cryptography is not installed")
+        import hashlib
+        import json
+        import tempfile
+
+        self.json, self.dir = json, tempfile.mkdtemp()
+        self.sk = Ed25519PrivateKey.generate()
+        pub = self.sk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        self.keyhash = hashlib.sha256(self.ORIGIN.encode() + b"\n\x01" + pub).digest()[:4]
+        self.vkey = self.ORIGIN + "+" + self.keyhash.hex() + "+" + base64.b64encode(b"\x01" + pub).decode()
+        self.leaves = [json.dumps({"v": 1, "kind": "message", "at": 100 + i, "id": f"{i:032x}"}, separators=(",", ":")).encode() for i in range(5)]
+
+    def sign(self, text: str) -> str:
+        return text + "\n— " + self.ORIGIN + " " + base64.b64encode(self.keyhash + self.sk.sign(text.encode())).decode() + "\n"
+
+    def promise(self, index: int, leaf: bytes | None = None, merge_by: int = 1900) -> str:
+        h = leaf if leaf is not None else v.leaf_hash(self.leaves[index])
+        return self.sign(f"{self.ORIGIN}\n{v.PROMISE_TYPE}\nindex {index}\nleaf {base64.b64encode(h).decode()}\n"
+                         f"kind message\nid {index:032x}\nreceived {100 + index}\nmerge-by {merge_by}\n")
+
+    def proof_file(self, index: int, size: int) -> str:
+        """A saved /api/log/proof?leaf=INDEX&size=SIZE answer."""
+        import os
+
+        root = _tree(self.leaves[:size])
+        rootb = base64.b64encode(root).decode()
+        cp = {"size": size, "root": rootb, "note": self.sign(f"{self.ORIGIN}\n{size}\n{rootb}\n"), "verifier_key": self.vkey}
+        data = self.leaves[index].decode() if index < size else ""
+        body = {"checkpoint": cp, "tree_size": size, "proof": [base64.b64encode(x).decode() for x in _path(index, self.leaves[:size])] if index < size else [],
+                "leaf": {"index": index, "data": data, "leaf_hash": base64.b64encode(v.leaf_hash(data.encode())).decode()}}
+        path = os.path.join(self.dir, f"proof-{index}-{size}.json")
+        with open(path, "w") as f:
+            self.json.dump(body, f)
+        return path
+
+    def check(self, note: str, proof: str, **kw):
+        return v.Verifier("http://127.0.0.1:9", self.vkey, None).promise(note, proof, **kw)
+
+    def test_parse(self):
+        note = self.promise(3)
+        body = v.open_note(note, self.vkey)
+        p = v.parse_promise(body)
+        self.assertEqual((p["origin"], p["index"], p["kind"], p["id"], p["received"], p["merge-by"]), (self.ORIGIN, 3, "message", f"{3:032x}", 103, 1900))
+        with self.assertRaises(v.VerifyError):
+            v.parse_checkpoint(body)
+        root = base64.b64encode(bytes(32)).decode()
+        for bad in (f"{self.ORIGIN}\n5\n{root}\n", body + "extra\n", body.replace("index 3", "index 03"),
+                    body.replace("promise/v1", "promise/v2"), body.replace("kind ", "kind  "), body.replace("merge-by 1900", "merge-by 1")):
+            with self.assertRaises(v.VerifyError):
+                v.parse_promise(bad)
+
+    def test_kept(self):
+        state, lines = self.check(self.promise(3), self.proof_file(3, 5))
+        self.assertEqual(state, "kept")
+        self.assertIn("kept: leaf 3 of checkpoint 5", lines[-1])
+
+    def test_pending_and_overdue(self):
+        note, proof = self.promise(3), self.proof_file(0, 3)
+        self.assertEqual(self.check(note, proof, now=1800)[0], "pending")
+        self.assertEqual(self.check(note, proof, now=1901)[0], "overdue")
+
+    def test_broken_is_evidence(self):
+        """A promise for another leaf at index 3, under the same key as a
+        checkpoint whose proof puts this leaf there: a provable violation."""
+        import os
+
+        forged = self.promise(3, leaf=v.leaf_hash(b"the promised leaf"))
+        out = os.path.join(self.dir, "evidence.json")
+        state, lines = self.check(forged, self.proof_file(3, 5), evidence=out)
+        self.assertEqual(state, "broken")
+        self.assertIn("evidence saved", lines[-1])
+        with open(out) as f:
+            ev = self.json.load(f)
+        # The evidence checks on its own: both notes under the key, the proof
+        # binds the other leaf at the promised index of the signed checkpoint.
+        p = v.parse_promise(v.open_note(ev["promise"], ev["verifier_key"]))
+        _, size, root = v.parse_checkpoint(v.open_note(ev["checkpoint"], ev["verifier_key"]))
+        v.verify_inclusion(ev["index"], size, v.leaf_hash(ev["leaf_data"].encode()), v.hashes(ev["proof"]), root)
+        self.assertEqual(p["index"], ev["index"])
+        self.assertNotEqual(p["leaf"], v.leaf_hash(ev["leaf_data"].encode()))
+
+    def test_refusals(self):
+        note = self.promise(3)
+        with self.assertRaises(v.VerifyError):  # not signed by the log key
+            self.check(note.replace("index 3", "index 2"), self.proof_file(3, 5))
+        with self.assertRaises(v.VerifyError):  # a proof of another index
+            self.check(note, self.proof_file(2, 5))
+        with self.assertRaises(v.VerifyError):  # a checkpoint note is not a promise
+            self.check(self.sign(f"{self.ORIGIN}\n5\n{base64.b64encode(bytes(32)).decode()}\n"), self.proof_file(3, 5))
+
+    def test_read_promise(self):
+        import os
+
+        note = self.promise(1)
+        docs = (note, self.json.dumps({"ok": True, "log_promise": {"note": note}}), self.json.dumps({"note": note, "state": "pending"}))
+        for i, content in enumerate(docs):
+            path = os.path.join(self.dir, f"p{i}")
+            with open(path, "w") as f:
+                f.write(content)
+            self.assertEqual(v.read_promise(path), note)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -49,6 +49,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"swarmmemo/internal/ots"
@@ -603,6 +604,9 @@ type transparencyState struct {
 	signer *tlog.NoteSigner
 	origin string
 	mu     sync.Mutex // one checkpoint at a time
+	// mergeDelay is the merge delay new promises carry, in seconds
+	// (logpromise.go); zero until StartTransparency sets it.
+	mergeDelay atomic.Int64
 }
 
 // openTransparency loads the log key (LOG_KEY_FILE, default log.key beside
@@ -1097,6 +1101,10 @@ type TransparencyConfig struct {
 	Calendars []string
 	// OTS is the calendar client; nil uses one for Calendars.
 	OTS *ots.Client
+	// MergeDelay is how long after a post its log promise says a checkpoint
+	// will cover it (logpromise.go); zero is twice CheckpointEvery. Each
+	// promise stores its own merge-by, so a change never alters one issued.
+	MergeDelay time.Duration
 }
 
 // anchorPollEvery is how often pending anchors are looked at (with up to
@@ -1116,6 +1124,10 @@ func (s *Store) StartTransparency(ctx context.Context, cfg TransparencyConfig) {
 	if cfg.CheckpointEvery <= 0 {
 		cfg.CheckpointEvery = 15 * time.Minute
 	}
+	if cfg.MergeDelay <= 0 {
+		cfg.MergeDelay = 2 * cfg.CheckpointEvery
+	}
+	s.transparency.mergeDelay.Store(int64(max(cfg.MergeDelay/time.Second, 1)))
 	if cfg.OTS == nil && len(cfg.Calendars) > 0 {
 		cfg.OTS = &ots.Client{Calendars: cfg.Calendars, Explorer: ots.DefaultExplorer}
 	}

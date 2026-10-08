@@ -247,6 +247,46 @@ func TestCheckpointRoundTrip(t *testing.T) {
 	}
 }
 
+// A promise round-trips, is strict about its lines, and never parses as a
+// checkpoint: the same key signs both, so the bodies must not overlap.
+func TestPromiseRoundTrip(t *testing.T) {
+	p := Promise{Origin: "swarmmemo.com/log", Index: 482113, Kind: "message", ID: strings.Repeat("9f", 16), Received: 1791472440, MergeBy: 1791474240}
+	p.Leaf[0], p.Leaf[31] = 0xde, 0xad
+	body := p.String()
+	got, err := ParsePromise(body)
+	if err != nil || got != p {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if want := "swarmmemo.com/log\npromise/v1\nindex 482113\nleaf " + base64.StdEncoding.EncodeToString(p.Leaf[:]) + "\nkind message\nid " + p.ID + "\nreceived 1791472440\nmerge-by 1791474240\n"; body != want {
+		t.Fatalf("body:\n%s\nwant:\n%s", body, want)
+	}
+	if _, err = ParseCheckpoint(body); err == nil {
+		t.Fatal("a promise parsed as a checkpoint")
+	}
+	if _, err = ParsePromise(Checkpoint{Origin: p.Origin, Size: 3}.String()); err == nil {
+		t.Fatal("a checkpoint parsed as a promise")
+	}
+	for _, bad := range []string{
+		"", body + "extra\n", strings.TrimSuffix(body, "\n"), strings.Replace(body, "promise/v1", "promise/v2", 1),
+		strings.Replace(body, "index 482113", "index 0482113", 1), strings.Replace(body, "index 482113", "index -1", 1),
+		strings.Replace(body, "kind message", "kind  message", 1), strings.Replace(body, "id ", "ID ", 1),
+		strings.Replace(body, "leaf ", "leaf AAAA", 1), strings.Replace(body, "merge-by 1791474240", "merge-by 1", 1),
+		strings.Replace(body, "received 1791472440\nmerge-by", "merge-by 1791474240\nreceived", 1),
+	} {
+		if _, err = ParsePromise(bad); err == nil {
+			t.Fatalf("parsed %q", bad)
+		}
+	}
+	signer, _ := NewNoteSigner(p.Origin, ed25519.NewKeyFromSeed(make([]byte, 32)))
+	note, err := signer.Sign(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text, err := OpenNote([]byte(note), signer.VerifierKey()); err != nil || text != body {
+		t.Fatalf("open: %q %v", text, err)
+	}
+}
+
 func TestKeyFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), KeyFileName)
 	k1, err := LoadOrCreateKey(path)
@@ -292,6 +332,7 @@ func FuzzOpenNote(f *testing.F) {
 		text, err := OpenNote(note, vkey)
 		if err == nil {
 			_, _ = ParseCheckpoint(text)
+			_, _ = ParsePromise(text)
 		}
 	})
 }

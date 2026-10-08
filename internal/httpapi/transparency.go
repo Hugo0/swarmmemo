@@ -29,6 +29,7 @@ type transparencyReader interface {
 	ReadLogAnchors(ctx context.Context, before int64, limit int) ([]board.LogAnchor, error)
 	ReadLogAnchorFile(ctx context.Context, size int64) ([]byte, error)
 	ReadLogRecord(ctx context.Context, who string) (board.SignedRecord, error)
+	ReadLogPromise(ctx context.Context, message string, index int64) (board.LogPromiseStatus, error)
 	LogVerifierKey() string
 }
 
@@ -38,6 +39,7 @@ var LogPaths = map[string]string{
 	"note":        "/api/log/checkpoint/note",
 	"proof":       "/api/log/proof?message=ID",
 	"notary":      "/api/log/proof?notary=HASH",
+	"promise":     board.LogPromisePath + "?message=ID",
 	"consistency": "/api/log/consistency?from=SIZE&to=SIZE",
 	"leaves":      "/api/log/leaves?start=0&end=256",
 	"anchors":     "/api/log/anchors",
@@ -142,6 +144,24 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		// is not confirmed yet.
 		cacheFor(w, q["size"] >= 0 && proof.Text == nil && proof.Anchor != nil && proof.Anchor.State == "confirmed")
 		jsonResponse(w, 200, proof)
+	case p == board.LogPromisePath:
+		q, err := logQuery(r, "message", "leaf")
+		if err != nil {
+			return fail(err)
+		}
+		message := r.URL.Query().Get("message")
+		if (message != "") == (q["leaf"] >= 0) {
+			return fail(bad("Give exactly one of message=ID or leaf=INDEX."))
+		}
+		promise, err := store.ReadLogPromise(ctx, message, q["leaf"])
+		if err != nil {
+			return fail(err)
+		}
+		// The note never changes; the state does, until a checkpoint covers it.
+		cacheFor(w, false)
+		promise.Check = s.cfg.PublicURL + promise.Check
+		promise.Verify = "python3 verify_log.py promise FILE, with this answer or the note saved as FILE: " + s.cfg.PublicURL + LogPaths["verifier"]
+		jsonResponse(w, 200, promise)
 	case p == "/api/log/consistency":
 		q, err := logQuery(r, "from", "to")
 		if err != nil {
@@ -219,7 +239,7 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, nil),
 			"how": "The note is signed by the log key; its text is this record's exact JSON. Each proof verifies against record.checkpoint."})
 	default:
-		return fail(&board.Error{Status: 404, Code: "not_found", Message: "Log routes: " + strings.Join([]string{LogPaths["checkpoint"], LogPaths["note"], LogPaths["proof"], LogPaths["consistency"], LogPaths["leaves"], LogPaths["anchors"], LogPaths["record"]}, ", ") + "."})
+		return fail(&board.Error{Status: 404, Code: "not_found", Message: "Log routes: " + strings.Join([]string{LogPaths["checkpoint"], LogPaths["note"], LogPaths["proof"], LogPaths["promise"], LogPaths["consistency"], LogPaths["leaves"], LogPaths["anchors"], LogPaths["record"]}, ", ") + "."})
 	}
 	return true
 }
@@ -237,6 +257,7 @@ func (s *Server) transparencyCapabilities() map[string]any {
 		"message_proof":   "a public, unhidden post's proof carries its text (SHA-256 is the leaf's text_sha256) and, when signed, signed_payload: the exact bytes the leaf's signature covers",
 		"post_text":       "GET /e/MESSAGE_ID/text: a public, unhidden post's exact text as text/plain; X-Content-SHA256 and the strong ETag are its SHA-256, the leaf's text_sha256",
 		"routes":          LogPaths,
+		"log_promise":     board.PromiseCapabilities(),
 		"mcp_tools":       []string{"log_proof", "agent_record"},
 		"instructions":    "/protocol.md#verifiable",
 	}

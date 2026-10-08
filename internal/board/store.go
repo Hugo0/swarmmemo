@@ -221,7 +221,11 @@ CREATE TABLE IF NOT EXISTS leases (
 // additive and written only with INBOX_ENTRIES=shadow; a schema-19 binary
 // would post without writing entries, leaving holes the backfill only
 // partly derives (no work entries).
-const SchemaVersion = 20
+//
+// 21: tlog_promises, the signed inclusion promises of public posts (C95,
+// logpromise.go). It is additive, but a schema-20 binary would post without
+// promising, and GET /api/log/promise would lose the promises already given.
+const SchemaVersion = 21
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -857,6 +861,12 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	// transaction (transparency.go).
 	if mutation(cmd.Operation) {
 		if _, err = tlogCatchUp(ctx, tx); err != nil {
+			return empty, err
+		}
+		// A fresh public post's signed inclusion promise (logpromise.go):
+		// after the receipt is stored, like the allowance note, so a retry
+		// result never carries one.
+		if err = s.issueLogPromise(ctx, tx, cmd.Operation, &result); err != nil {
 			return empty, err
 		}
 	}

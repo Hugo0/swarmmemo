@@ -319,7 +319,7 @@ func TestTransparencyBackfillEqualsIncremental(t *testing.T) {
 		t.Fatal(err)
 	}
 	liveLeaves := logLeaves(t, s)
-	if _, err = s.db.Exec("DROP TABLE tlog_anchors; DROP TABLE tlog_checkpoints; DROP TABLE tlog_leaves; DROP TABLE tlog_hashes; DROP TABLE tlog_cursors; PRAGMA user_version=14"); err != nil {
+	if _, err = s.db.Exec("DROP TABLE tlog_promises; DROP TABLE tlog_anchors; DROP TABLE tlog_checkpoints; DROP TABLE tlog_leaves; DROP TABLE tlog_hashes; DROP TABLE tlog_cursors; PRAGMA user_version=14"); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {

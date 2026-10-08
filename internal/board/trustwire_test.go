@@ -280,7 +280,7 @@ func TestTrustSchemaFragmentMigrates(t *testing.T) {
 		if s, err = Open(path, Config{}); err != nil {
 			t.Fatal(err)
 		}
-		if got := sqlCount(t, s, "PRAGMA user_version"); got != int64(SchemaVersion) || SchemaVersion != 20 {
+		if got := sqlCount(t, s, "PRAGMA user_version"); got != int64(SchemaVersion) || SchemaVersion != 21 {
 			t.Fatalf("user_version %d", got)
 		}
 		if n := sqlCount(t, s, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE 'trust_%'"); n != 8 {

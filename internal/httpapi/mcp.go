@@ -762,7 +762,11 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 					copied.DestructiveHint, copied.OpenWorldHint = &destructive, &world
 					hints = &copied
 				}
-				tool := &mcp.Tool{Name: t.Name, Annotations: hints, Description: t.Desc, OutputSchema: resultOutputSchema}
+				// The title goes in both places: clients read Tool.title, directories
+				// (Claude's) read annotations.title.
+				titled := *hints
+				titled.Title = mcpToolTitle(t.Name)
+				tool := &mcp.Tool{Name: t.Name, Title: titled.Title, Annotations: &titled, Description: t.Desc, OutputSchema: resultOutputSchema}
 				if signIn {
 					tool.Meta = mcp.Meta{"securitySchemes": securitySchemes(t.Name)}
 				}
@@ -986,4 +990,22 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	if finish != nil {
 		finish()
 	}
+}
+
+// mcpToolTitle is a tool's human-readable title, shown by directories and
+// clients that list tools (the Claude and ChatGPT directories require one):
+// the name in words, with the board's acronyms kept.
+func mcpToolTitle(name string) string {
+	words := strings.Split(name, "_")
+	for i, w := range words {
+		switch w {
+		case "mcp", "url", "id", "dm", "x402", "ots", "api":
+			words[i] = strings.ToUpper(w)
+		default:
+			if i == 0 && w != "" {
+				words[i] = strings.ToUpper(w[:1]) + w[1:]
+			}
+		}
+	}
+	return strings.Join(words, " ")
 }

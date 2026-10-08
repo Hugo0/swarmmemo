@@ -187,6 +187,72 @@ func ParseCheckpoint(text string) (Checkpoint, error) {
 	return c, nil
 }
 
+// PromiseType is a promise body's second line. It is not a decimal number,
+// so a promise never parses as a checkpoint (whose second line is the tree
+// size): the domain separation between the two notes one key signs.
+const PromiseType = "promise/v1"
+
+// Promise is a signed inclusion promise (the log's SCT, carrying the leaf
+// index): the log commits that the leaf whose hash is Leaf is at Index, and
+// that a checkpoint covering it is signed by MergeBy. Its body is the origin
+// line, "promise/v1", then one "NAME VALUE" line each for index, leaf
+// (standard base64), kind, id, received and merge-by (Unix seconds), in that
+// order.
+type Promise struct {
+	Origin   string
+	Index    int64
+	Leaf     Hash
+	Kind     string
+	ID       string
+	Received int64
+	MergeBy  int64
+}
+
+// String is the promise body, the text a note signs.
+func (p Promise) String() string {
+	return fmt.Sprintf("%s\n%s\nindex %d\nleaf %s\nkind %s\nid %s\nreceived %d\nmerge-by %d\n",
+		p.Origin, PromiseType, p.Index, base64.StdEncoding.EncodeToString(p.Leaf[:]), p.Kind, p.ID, p.Received, p.MergeBy)
+}
+
+// ParsePromise parses a promise body: exactly the lines String writes, no
+// extension lines.
+func ParsePromise(text string) (Promise, error) {
+	bad := errors.New("tlog: malformed promise")
+	lines := strings.Split(text, "\n")
+	if len(lines) != 9 || lines[8] != "" || !validNoteName(lines[0]) || lines[1] != PromiseType {
+		return Promise{}, bad
+	}
+	field := func(i int, name string) (string, bool) {
+		v, ok := strings.CutPrefix(lines[i], name+" ")
+		return v, ok && v != "" && strings.IndexFunc(v, unicode.IsSpace) < 0
+	}
+	number := func(i int, name string) (int64, bool) {
+		v, ok := field(i, name)
+		n, err := strconv.ParseInt(v, 10, 64)
+		return n, ok && err == nil && n >= 0 && strconv.FormatInt(n, 10) == v
+	}
+	p := Promise{Origin: lines[0]}
+	var ok [6]bool
+	p.Index, ok[0] = number(2, "index")
+	leaf, okLeaf := field(3, "leaf")
+	raw, err := base64.StdEncoding.DecodeString(leaf)
+	ok[1] = okLeaf && err == nil && len(raw) == len(p.Leaf)
+	p.Kind, ok[2] = field(4, "kind")
+	p.ID, ok[3] = field(5, "id")
+	p.Received, ok[4] = number(6, "received")
+	p.MergeBy, ok[5] = number(7, "merge-by")
+	for _, v := range ok {
+		if !v {
+			return Promise{}, bad
+		}
+	}
+	if p.MergeBy < p.Received {
+		return Promise{}, bad
+	}
+	copy(p.Leaf[:], raw)
+	return p, nil
+}
+
 // ParseHash decodes a hash in standard base64 or lowercase hex.
 func ParseHash(s string) (Hash, error) {
 	var h Hash

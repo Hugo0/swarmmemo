@@ -41,7 +41,7 @@ func mcpPost(t *testing.T, s *Server, path, body string, result any) {
 type listedTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
-	Annotations map[string]bool `json:"annotations"`
+	Annotations hintMap `json:"annotations"`
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 

@@ -276,6 +276,11 @@ type Result struct {
 	// docs/rfcs/0008-shared-receipts.md. Transports set it; the store never does,
 	// so a stored retry result gains it without being rewritten.
 	SharedReceipt *SharedReceipt `json:"shared_receipt,omitempty"`
+	// LogPromise is a fresh public post's signed inclusion promise
+	// (logpromise.go), native only: never in shared_receipt. Set after the
+	// receipt is stored, so a retry result never carries it; GET
+	// /api/log/promise serves the stored one.
+	LogPromise *LogPromise `json:"log_promise,omitempty"`
 	// Allowance is the RFC0012 "free today" note (AllowanceNote), set after the
 	// receipt is stored, so it is never persisted in requests and an exact retry
 	// does not repeat it. Transports restate it as next.allowance.

@@ -44,7 +44,7 @@ func TestMCPToolListAnnotationsWithoutServiceCommands(t *testing.T) {
 			Result  struct {
 				Tools []struct {
 					Name        string          `json:"name"`
-					Annotations map[string]bool `json:"annotations"`
+					Annotations hintMap `json:"annotations"`
 				} `json:"tools"`
 				NextCursor string `json:"nextCursor"`
 			} `json:"result"`
@@ -70,7 +70,7 @@ func TestMCPToolListAnnotationsWithoutServiceCommands(t *testing.T) {
 				"readOnlyHint": readOnly, "idempotentHint": readOnly,
 				"destructiveHint": false, "openWorldHint": true,
 			}
-			if !reflect.DeepEqual(tool.Annotations, want) {
+			if !reflect.DeepEqual(map[string]bool(tool.Annotations), want) {
 				t.Errorf("%s annotations = %#v; want %#v", tool.Name, tool.Annotations, want)
 			}
 		}
@@ -102,7 +102,7 @@ func TestMCPServerCardMatchesRegisteredTools(t *testing.T) {
 			Tools []struct {
 				Name        string          `json:"name"`
 				Description string          `json:"description"`
-				Annotations map[string]bool `json:"annotations"`
+				Annotations hintMap `json:"annotations"`
 			} `json:"tools"`
 		} `json:"result"`
 	}
@@ -233,4 +233,62 @@ func TestMCPToolErrorsAreStructured(t *testing.T) {
 	if dig(out, "result", "isError") != true || dig(out, "result", "structuredContent", "error", "code") != "invalid_request" {
 		t.Fatalf("argument refusal: %v", out)
 	}
+}
+
+// Every listed tool has a human-readable title: the Claude and ChatGPT
+// directories require one (C98).
+func TestMCPToolsHaveTitles(t *testing.T) {
+	server := httptest.NewServer(New(&fakeService{}, nil, Config{}))
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var envelope struct {
+		Result struct {
+			Tools []struct {
+				Name, Title string
+				Annotations struct {
+					Title string `json:"title"`
+				} `json:"annotations"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil || len(envelope.Result.Tools) == 0 {
+		t.Fatalf("tools/list: %v", err)
+	}
+	for _, tool := range envelope.Result.Tools {
+		if tool.Title == "" || strings.Contains(tool.Title, "_") || tool.Annotations.Title != tool.Title {
+			t.Errorf("%s: title %q, annotations.title %q", tool.Name, tool.Title, tool.Annotations.Title)
+		}
+	}
+	if got := mcpToolTitle("read_x402_url"); got != "Read X402 URL" {
+		t.Errorf("mcpToolTitle: %q", got)
+	}
+}
+
+// hintMap is a tool's boolean annotations (the hints); other keys, such as
+// the string title, are skipped.
+type hintMap map[string]bool
+
+func (h *hintMap) UnmarshalJSON(b []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*h = hintMap{}
+	for k, v := range raw {
+		var flag bool
+		if json.Unmarshal(v, &flag) == nil {
+			(*h)[k] = flag
+		}
+	}
+	return nil
 }

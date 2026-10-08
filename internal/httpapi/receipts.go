@@ -25,6 +25,11 @@ func (s *Server) describeReceipt(c board.Command, res *board.Result) {
 		s.adviseHandle(res)
 		s.shareReceipt(c, res)
 	}
+	// The log promise's check link, absolute like read_back. It is native
+	// only: shared_receipt never carries it.
+	if res.LogPromise != nil && strings.HasPrefix(res.LogPromise.Check, "/") {
+		res.LogPromise.Check = s.cfg.PublicURL + res.LogPromise.Check
+	}
 	restateAllowance(res)
 	if c.Operation == "agent.get" && res.Agent != nil {
 		res.Agent.URLs = s.agentURLs(res.Agent.ID, res.Agent.Record)
