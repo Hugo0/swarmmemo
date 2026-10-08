@@ -15,8 +15,11 @@ package board
 // the verdict, accept or reject, in the requester's place. An optional
 // reviewer_fee is a second escrow, paid to the reviewer on its first verdict
 // on a submitted result and released like the reward otherwise. A reviewer
-// that lets a submitted result reach the deadline leaves the work
-// review_lapsed: both escrows go back to the requester; nothing is paid.
+// silent ReviewerSilenceDays after a submit lets the requester decide in its
+// place (before the deadline): that verdict moves the reward as usual and
+// returns the fee to the requester (reason reviewer_silent). A reviewer that
+// lets a submitted result reach the deadline leaves the work review_lapsed:
+// both escrows go back to the requester; nothing is paid.
 //
 // A paid reward gets a notary receipt when the notary runs: the SHA-256 of
 // a statement naming the work, both accounts, the amount, the transfer, the
@@ -105,7 +108,9 @@ type WorkRewardReceipt struct {
 
 // workRewardStatement is what a paid reward's receipt stamps: this struct's
 // JSON, fields in this order, no spaces. Reviewer, the fingerprint of the
-// key whose verdict paid it, is present only on work with a reviewer.
+// key whose verdict paid it, is present only on work with a reviewer. When
+// the requester decided in a silent reviewer's place, Reviewer is the named
+// reviewer's key and DecidedBy the requester key that accepted.
 type workRewardStatement struct {
 	Schema     string `json:"schema"`
 	ServiceID  string `json:"service_id"`
@@ -118,6 +123,7 @@ type workRewardStatement struct {
 	ResultID   string `json:"result_id"`
 	PaidAt     int64  `json:"paid_at"`
 	Reviewer   string `json:"reviewer,omitempty"`
+	DecidedBy  string `json:"decided_by,omitempty"`
 }
 
 // rewardRow is a row of work_rewards or work_review_fees (Table); Worker is
@@ -126,6 +132,7 @@ type rewardRow struct {
 	Table                                                                                string
 	WorkID, Requester, HoldID, State, Worker, TransferID, Reason, Statement, ReceiptHash string
 	Reviewer                                                                             string
+	DecidedBy                                                                            string // statement only: the requester key of a fallback verdict
 	Amount, Fee, Created, ExecuteAt, Settled                                             int64
 }
 
@@ -255,7 +262,7 @@ func (s *Store) markRewardPaid(ctx context.Context, tx *sql.Tx, r *rewardRow, re
 	statement, hash := "", ""
 	if r.Table == workRewardsTable && s.workRewardNotary() {
 		b, _ := json.Marshal(workRewardStatement{Schema: WorkRewardSchema, ServiceID: s.config.ServiceID, WorkID: r.WorkID, Requester: r.Requester, Worker: r.Worker,
-			Amount: r.Amount, Unit: "credit", TransferID: r.TransferID, ResultID: result, PaidAt: now, Reviewer: r.Reviewer})
+			Amount: r.Amount, Unit: "credit", TransferID: r.TransferID, ResultID: result, PaidAt: now, Reviewer: r.Reviewer, DecidedBy: r.DecidedBy})
 		statement, hash = string(b), sha256Hex(b)
 		if _, err := services.StampHash(ctx, tx, s.services.notaryKey, s.config.ServiceID, workRewardNotaryAccount, hash, now); err != nil {
 			return err
@@ -344,6 +351,16 @@ func (s *Store) settleWorkEscrows(ctx context.Context, tx *sql.Tx, table string,
 			var result string
 			if err = tx.QueryRowContext(ctx, "SELECT result_id FROM works WHERE id=?", id).Scan(&result); err != nil {
 				return n, err
+			}
+			if table == workRewardsTable {
+				// An accept by a key outside the reviewer's account was the
+				// requester's, in a silent reviewer's place.
+				err = tx.QueryRowContext(ctx, `SELECT coalesce((SELECT t.author FROM work_transitions t JOIN works w ON w.id=t.work_id
+ WHERE t.work_id=? AND t.operation='work.accept' AND w.reviewer<>'' AND coalesce((SELECT i.account FROM identities i WHERE i.id=t.author),'')<>w.reviewer
+ ORDER BY t.sequence DESC LIMIT 1),'')`, id).Scan(&r.DecidedBy)
+				if err != nil {
+					return n, err
+				}
 			}
 			err = s.markRewardPaid(ctx, tx, r, result, now)
 		case "cancelled":

@@ -210,7 +210,8 @@ func (s *Store) loadAttachments(ctx context.Context, tx *sql.Tx, events []Messag
 			return err
 		}
 	}
-	return nil
+	// Pages link the registered @handles a message mentions (mentions.go).
+	return loadMentionAgents(ctx, tx, events)
 }
 
 // AttachmentMaxTTL bounds an explicit ttl only so now+ttl cannot overflow; it is

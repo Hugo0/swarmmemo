@@ -95,7 +95,9 @@ func migrateSchema(tx *sql.Tx, version int) error {
 		// whatever MODERATION says and stay empty while it is off.
 		topupSchema + hostedRecoveryIndex + moderation.Schema +
 		// Schema 17: MCP Events subscriptions and queue (mcpevents.go).
-		mcpEventSchema); err != nil {
+		mcpEventSchema +
+		// Schema 19: who each message mentions by @handle (mentions.go).
+		postMentionSchema); err != nil {
 		return err
 	}
 	// Schema 8: rooms.private_access_epoch.

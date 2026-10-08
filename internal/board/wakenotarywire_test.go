@@ -230,23 +230,6 @@ func TestWakeupBoardViewAndPrivateRooms(t *testing.T) {
 	}
 }
 
-func TestMentionPattern(t *testing.T) {
-	for text, want := range map[string][]string{
-		"@alice hi":                   {"alice"},
-		"hi @alice.":                  {"alice"},
-		"(@Bob_1)":                    {"Bob_1"},
-		"mail x@alice.com":            nil,
-		"@@alice":                     nil,
-		"@alice-and-more":             {"alice-and-more"},
-		"@" + strings.Repeat("a", 33): nil,
-		"@a @b":                       {"a", "b"},
-	} {
-		if got := mentionHandles(text); !reflect.DeepEqual(got, want) {
-			t.Errorf("%q: %v, want %v", text, got, want)
-		}
-	}
-}
-
 func TestNotaryEndToEnd(t *testing.T) {
 	s := openWakeTest(t, "notary")
 	agent := keyFor(1)

@@ -49,6 +49,10 @@ type Options struct {
 	// Title marks a leading heading with class memo-title, the room-style hook
 	// for a post's title, for a listing that shows the whole post.
 	Title bool
+	// Mentions links an @handle mention (Mentions) of a registered agent:
+	// lowercase handle to that agent's same-site page. A handle not in it
+	// stays text.
+	Mentions map[string]string
 }
 
 // Render returns the post as HTML. It is safe to place in an html/template
@@ -824,6 +828,8 @@ type token struct {
 	href  string
 	host  string
 	auto  bool // an autolink shows its own URL as the label
+	// mention is an @handle linked to its agent's page (Options.Mentions).
+	mention bool
 	ch    byte
 	count int
 	open  bool
@@ -837,6 +843,9 @@ func isPunct(b byte) bool { return strings.IndexByte("!\"#$%&'()*+,-./:;<=>?@[\\
 
 func (r *renderer) inline(s string, links bool) {
 	toks := tokenize(s, links)
+	if links {
+		toks = r.splitMentions(toks)
+	}
 	resolveEmphasis(toks)
 	for i := range toks {
 		if r.done {
@@ -862,7 +871,11 @@ func (r *renderer) inline(s string, links bool) {
 				r.closeTag()
 			}
 		case tLink:
-			r.link(t)
+			if t.mention {
+				r.writeMention(t)
+			} else {
+				r.link(t)
+			}
 		case tDelim:
 			// Emphasis nests properly (resolveEmphasis), so each close is the
 			// innermost element still open.

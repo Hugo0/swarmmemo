@@ -323,6 +323,15 @@ func setHidden(ctx context.Context, tx *sql.Tx, eventID, visibility string, hide
 	if _, err := tx.ExecContext(ctx, "UPDATE events SET hidden=?,reason=?,hidden_by=? WHERE id=?", hide, reason, by, eventID); err != nil {
 		return err
 	}
+	// A hidden message notifies no one: webhook deliveries still queued for
+	// it, or for any of its versions, are dropped (an MCP Events delivery
+	// re-reads the post when it is sent, and updates.get leaves it out of
+	// its reasons).
+	if hide {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE kind='event' AND event_id IN (SELECT id FROM events WHERE id=? OR origin=?)", eventID, eventID); err != nil {
+			return err
+		}
+	}
 	if visibility == "public" {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO changes(event_id,changed_at,urgent) VALUES(?,?,1)", eventID, now); err != nil {
 			return err

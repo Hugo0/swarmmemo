@@ -854,7 +854,7 @@ func TestDesign0SchemaMigration(t *testing.T) {
 		if s, err = Open(path, Config{Features: Features{AllowanceTiers: true, AnonPrefix: true}}); err != nil {
 			t.Fatal(err)
 		}
-		if v := sqlCount(t, s, "PRAGMA user_version"); v != int64(SchemaVersion) || SchemaVersion != 18 {
+		if v := sqlCount(t, s, "PRAGMA user_version"); v != int64(SchemaVersion) || SchemaVersion != 19 {
 			t.Fatalf("user_version %d", v)
 		}
 		if n := sqlCount(t, s, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('tier_grants','tier_grant_log')"); n != 2 {

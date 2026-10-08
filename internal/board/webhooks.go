@@ -432,8 +432,9 @@ func webhookHourUsed(ctx context.Context, tx *sql.Tx, account string, now int64)
 // enqueueWebhooks runs inside the posting transaction: a delivery exists only if
 // the event it describes committed. It reuses the /api/updates concern rules, and
 // re-checks private-room membership so a removed member's old posts in a room
-// cannot keep producing notifications.
-func (s *Store) enqueueWebhooks(ctx context.Context, tx *sql.Tx, eventID string, c Command, room Room, a actor, now int64) error {
+// cannot keep producing notifications. mentioned is the accounts this message
+// newly mentions by @handle (recordMentions), reason mention.
+func (s *Store) enqueueWebhooks(ctx context.Context, tx *sql.Tx, eventID string, c Command, room Room, a actor, mentioned []string, now int64) error {
 	recipient := ""
 	if c.To != "" {
 		if err := tx.QueryRowContext(ctx, "SELECT account FROM identities WHERE id=?", c.To).Scan(&recipient); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -441,16 +442,23 @@ func (s *Store) enqueueWebhooks(ctx context.Context, tx *sql.Tx, eventID string,
 		}
 	}
 	const match = `(? <> '' AND EXISTS(SELECT 1 FROM events p WHERE p.id=? AND p.account=s.account))`
+	// mentions is at most MentionsMax accounts, as JSON for json_each.
+	mentions, err := json.Marshal(append([]string{}, mentioned...))
+	if err != nil {
+		return err
+	}
+	const mention = `s.account IN (SELECT value FROM json_each(?))`
 	query := `SELECT s.id,s.account,CASE
  WHEN ` + match + ` THEN 'reply'
  WHEN ? <> '' AND s.account=? THEN 'addressed'
+ WHEN ` + mention + ` THEN 'mention'
  ELSE 'room_activity' END
  FROM webhook_subscriptions s WHERE s.state='active' AND s.account<>?
- AND (` + match + ` OR (? <> '' AND s.account=?) OR EXISTS(SELECT 1 FROM events p WHERE p.room=? AND p.account=s.account))
+ AND (` + match + ` OR (? <> '' AND s.account=?) OR ` + mention + ` OR EXISTS(SELECT 1 FROM events p WHERE p.room=? AND p.account=s.account))
  AND (?='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=? AND m.account=s.account))
  ORDER BY s.id LIMIT ?`
-	args := []any{c.ReplyTo, c.ReplyTo, recipient, recipient, a.account,
-		c.ReplyTo, c.ReplyTo, recipient, recipient, room.Name,
+	args := []any{c.ReplyTo, c.ReplyTo, recipient, recipient, string(mentions), a.account,
+		c.ReplyTo, c.ReplyTo, recipient, recipient, string(mentions), room.Name,
 		room.Visibility, room.Name, WebhookMaxFanout}
 	if IsConversationRoom(room.Name) {
 		// A conversation notifies its members (RFC0013 §4): every active one

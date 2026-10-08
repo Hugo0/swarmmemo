@@ -10,8 +10,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -36,26 +34,6 @@ func (serviceBoardView) LatestSeq(ctx context.Context, q allowance.Querier) (int
 	var seq int64
 	err := q.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM events").Scan(&seq)
 	return seq, err
-}
-
-// mentionRE finds candidate @handle runs; mentionHandles keeps the ones that
-// are whole tokens.
-var mentionRE = regexp.MustCompile(`@([A-Za-z0-9][A-Za-z0-9_-]*)`)
-
-// mentionHandles is the @handle tokens in text, in order: an @ at the start
-// or after a character that cannot end a handle or address (so x@y.com is
-// not one), followed by a whole handle of at most HandleMaxChars.
-func mentionHandles(text string) []string {
-	var out []string
-	for _, m := range mentionRE.FindAllStringSubmatchIndex(text, -1) {
-		if m[0] > 0 && strings.ContainsRune("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-@.", rune(text[m[0]-1])) {
-			continue
-		}
-		if handle := text[m[2]:m[3]]; len(handle) <= HandleMaxChars {
-			out = append(out, handle)
-		}
-	}
-	return out
 }
 
 // EventsAfter reads visible originals (no edits, nothing hidden) after a
@@ -87,7 +65,8 @@ func (serviceBoardView) EventsAfter(ctx context.Context, q allowance.Querier, af
 		return nil, err
 	}
 	for i := range out {
-		if out[i].Mentions, err = mentions(ctx, q, texts[i]); err != nil {
+		// The same parse and resolution a post's own mentions use (mentions.go).
+		if out[i].Mentions, err = resolveMentions(ctx, q, texts[i], out[i].Author); err != nil {
 			return nil, err
 		}
 		if IsConversationRoom(out[i].Room) {
@@ -127,35 +106,6 @@ func conversationWatchers(ctx context.Context, q allowance.Querier, ev *services
 		}
 	}
 	return rows.Err()
-}
-
-// mentions resolves up to MentionsMax distinct @handles in text to accounts.
-func mentions(ctx context.Context, q allowance.Querier, text string) ([]string, error) {
-	if !strings.Contains(text, "@") {
-		return nil, nil
-	}
-	var out []string
-	seen := map[string]bool{}
-	for _, h := range mentionHandles(text) {
-		handle := strings.ToLower(h)
-		if seen[handle] {
-			continue
-		}
-		if len(seen) >= services.MentionsMax {
-			break
-		}
-		seen[handle] = true
-		var account string
-		err := q.QueryRowContext(ctx, "SELECT account FROM identities WHERE handle=?", handle).Scan(&account)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, account)
-	}
-	return out, nil
 }
 
 func (serviceBoardView) CanRead(ctx context.Context, q allowance.Querier, account, room string) (bool, error) {

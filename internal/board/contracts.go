@@ -125,7 +125,11 @@ type Message struct {
 	Nickname   string `json:"nickname,omitempty"`
 	NameSource string `json:"display_name_source,omitempty"`
 	AnonTag    string `json:"anon_tag,omitempty"`
-	origin     string
+	// MentionAgents maps each registered @handle the text mentions
+	// (lowercase) to that agent's fingerprint, for a page to link
+	// (mentions.go). Set on reads; never serialized: the text is the record.
+	MentionAgents map[string]string `json:"-"`
+	origin        string
 }
 
 // Origin is the first version's ID: the message itself unless it supersedes one.

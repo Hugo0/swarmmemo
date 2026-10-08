@@ -34,9 +34,10 @@ func parseUpdatesOptions(raw string) (updatesOptions, error) {
 }
 
 // readUpdates answers the one question an agent has on waking: what happened
-// since my cursor that concerns me. It composes three existing reads — replies
-// to this agent's messages, messages addressed to it, and activity in rooms it
-// has posted in — into a single bounded page, and stores nothing new. The
+// since my cursor that concerns me. It composes four existing reads — replies
+// to this agent's messages, messages addressed to it, messages mentioning it
+// by @handle (post_mentions, mentions.go), and activity in rooms it has posted
+// in — into a single bounded page, and stores nothing new. The
 // agent's own posts are left out: they are not news to their author.
 //
 // Without an agent there is nothing personal to return, so the read degrades to
@@ -77,11 +78,15 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		if own {
 			mine = inboxRooms
 		}
+		// An @handle mention (mentions.go) is the version that delivered it,
+		// while no version of its message is hidden.
 		where = append(where,
 			"(e.reply_to IN (SELECT p.id FROM events p WHERE p.account="+account+")"+
 				" OR e.recipient=? OR e.recipient IN (SELECT id FROM identities WHERE account="+account+")"+
+				" OR (e.hidden=0 AND e.id IN (SELECT pm.event_id FROM post_mentions pm WHERE pm.account="+account+")"+
+				" AND NOT EXISTS(SELECT 1 FROM events h WHERE h.id=e.origin AND h.hidden=1))"+
 				" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+")"+mine+")")
-		args = append(args, agent, agent, agent, agent)
+		args = append(args, agent, agent, agent, agent, agent)
 		if own {
 			args = append(args, a.account)
 		}
@@ -159,13 +164,13 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	}
 	data["scope"] = "agent"
 	data["agent"] = agent
-	replies, addressed, activity, err := s.classifyUpdates(ctx, tx, events, agent)
+	replies, addressed, mentions, activity, err := s.classifyUpdates(ctx, tx, events, agent)
 	if err != nil {
 		return Result{}, err
 	}
 	// One message can belong to more than one reason; every returned message
 	// appears under each reason it satisfies, so nothing is silently recategorised.
-	data["replies"], data["addressed"], data["room_activity"] = replies, addressed, activity
+	data["replies"], data["addressed"], data["mentions"], data["room_activity"] = replies, addressed, mentions, activity
 	if own {
 		if err = s.addInbox(ctx, tx, a, events, data); err != nil {
 			return Result{}, err
@@ -187,46 +192,50 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 
 // classifyUpdates says why each returned message concerns this agent, so a
 // caller can act on a reply without a second read to work out what it is.
-func (s *Store) classifyUpdates(ctx context.Context, tx *sql.Tx, events []Message, agent string) ([]string, []string, []string, error) {
-	replies, addressed, activity := []string{}, []string{}, []string{}
+func (s *Store) classifyUpdates(ctx context.Context, tx *sql.Tx, events []Message, agent string) ([]string, []string, []string, []string, error) {
+	replies, addressed, mentions, activity := []string{}, []string{}, []string{}, []string{}
 	if len(events) == 0 {
-		return replies, addressed, activity, nil
+		return replies, addressed, mentions, activity, nil
 	}
 	mine := map[string]bool{}
 	rows, err := tx.QueryContext(ctx, "SELECT id FROM events WHERE account IN (SELECT account FROM identities WHERE id=?)", agent)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	for rows.Next() {
 		var id string
 		if err = rows.Scan(&id); err != nil {
 			rows.Close()
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		mine[id] = true
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	keys := map[string]bool{agent: true}
 	rows, err = tx.QueryContext(ctx, "SELECT id FROM identities WHERE account IN (SELECT account FROM identities WHERE id=?)", agent)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	for rows.Next() {
 		var id string
 		if err = rows.Scan(&id); err != nil {
 			rows.Close()
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		keys[id] = true
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+	mentioned, err := mentionedEvents(ctx, tx, events, agent)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 	for _, e := range events {
 		matched := false
@@ -238,9 +247,13 @@ func (s *Store) classifyUpdates(ctx context.Context, tx *sql.Tx, events []Messag
 			addressed = append(addressed, e.ID)
 			matched = true
 		}
+		if mentioned[e.ID] {
+			mentions = append(mentions, e.ID)
+			matched = true
+		}
 		if !matched {
 			activity = append(activity, e.ID)
 		}
 	}
-	return replies, addressed, activity, nil
+	return replies, addressed, mentions, activity, nil
 }

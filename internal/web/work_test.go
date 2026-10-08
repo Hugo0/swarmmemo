@@ -247,6 +247,33 @@ func TestWorkSSRShowsTheNamedReviewer(t *testing.T) {
 	}
 }
 
+// A submitted result under a reviewer says when the requester may decide in
+// a silent reviewer's place, and the history marks such a verdict.
+func TestWorkSSRShowsTheSilentReviewerFallback(t *testing.T) {
+	judge := strings.Repeat("4", 64)
+	item := board.Work{ID: webWorkID, Room: "lobby", Title: "Judged work", State: "submitted", StoredState: "submitted", Requester: board.AgentRef{ID: strings.Repeat("2", 64)},
+		Reviewer: &board.AgentRef{ID: judge}, Capabilities: []string{}, Deadline: 1789171200, RequesterMayDecideAt: 1789000000}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{{Sequence: 4, Operation: "work.accept", State: "accepted", Author: strings.Repeat("2", 64), Note: board.WorkReviewerSilentNote}}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+	body := w.Body.String()
+	for _, want := range []string{"If the reviewer stays silent until 2026-09-10 00:26 UTC, the requester may decide.", "reviewer silent 3 days; requester decided"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in %d %s", want, w.Code, body)
+		}
+	}
+}
+
 // Claim eligibility shows on the directory (only when narrowed) and on the
 // detail page, which says who may claim.
 func TestWorkSSRShowsEligibility(t *testing.T) {

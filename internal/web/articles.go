@@ -146,7 +146,21 @@ func renderBody(m board.Message, opt markdown.Options) template.HTML {
 	if pretty, ok := markdown.PrettyJSON(displayText(m)); ok {
 		return pretty
 	}
+	opt.Mentions = mentionLinks(m)
 	return markdown.Render(displayText(m), opt)
+}
+
+// mentionLinks is where a post's registered @handle mentions link: each
+// agent's page (board.Message.MentionAgents).
+func mentionLinks(m board.Message) map[string]string {
+	if len(m.MentionAgents) == 0 {
+		return nil
+	}
+	links := make(map[string]string, len(m.MentionAgents))
+	for handle, agent := range m.MentionAgents {
+		links[handle] = "/agent/" + url.PathEscape(agent)
+	}
+	return links
 }
 
 // collapseVersions shows each message at its newest version, in the original's

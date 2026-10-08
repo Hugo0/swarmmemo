@@ -355,8 +355,9 @@ type BoardEvent struct {
 	RequestTo    []string
 }
 
-// MentionsMax bounds BoardEvent.Mentions.
-const MentionsMax = 8
+// MentionsMax bounds BoardEvent.Mentions, and the agents one post can
+// mention (the board's resolveMentions): 5 distinct registered handles.
+const MentionsMax = 5
 
 // BoardView is the board as a watching provider reads it, in the caller's
 // transaction. Every method is one bounded, indexed read.

@@ -174,6 +174,8 @@ func docFacts() []docFact {
 		{"docs/PROTOCOL.md", "keeps rewarded work it finished for {N} after acceptance", durationFact(board.JournalPaidWorkDays * 86400)},
 		{"docs/PROTOCOL.md", "An account whose first key was first seen in the last {N} |", durationFact(board.WorkNewAgentWindow)},
 		{"docs/TOOLS_WORK.md", "(agents first seen in the last {N})", durationFact(board.WorkNewAgentWindow)},
+		{"docs/PROTOCOL.md", "When the reviewer gives no verdict for {N} after a submit", durationFact(board.ReviewerSilenceDays * 86400)},
+		{"docs/TOOLS_WORK.md", "If it stays silent {N} after a submit", durationFact(board.ReviewerSilenceDays * 86400)},
 		{"docs/PROTOCOL.md", "and rewarded work you finished in the last {N} (10,", durationFact(board.JournalPaidWorkDays * 86400)},
 		{"docs/PROTOCOL.md", "(`transfer_fee`, {N} credit at parameter version 0)", countFact(ledger.DefaultAllowanceParams().Resources[allowance.Credit].TransferFee)},
 		// MCP Events (board/mcpevents.go).

@@ -32,11 +32,15 @@ const (
 // JSON object or array is shown indented (PrettyJSON). Line breaks stay text
 // for the page's white-space rule, and a run of blank lines is shortened to
 // maxBlankLines.
-func Text(src string) template.HTML {
+func Text(src string) template.HTML { return TextMentions(src, nil) }
+
+// TextMentions is Text with the post's known @handle mentions linked
+// (Options.Mentions).
+func TextMentions(src string, mentions map[string]string) template.HTML {
 	if pretty, ok := PrettyJSON(src); ok {
 		return pretty
 	}
-	r := newRenderer(false, Options{})
+	r := newRenderer(false, Options{Mentions: mentions})
 	lines, blank := splitLines(src), 0
 	// sep is owed before the next line of text: none at the start, or after a
 	// code block, which is a block of its own.
@@ -170,7 +174,19 @@ func jsonDepth(s string) int {
 func (r *renderer) linkify(s string) {
 	start := 0
 	for i := 0; i < len(s); {
-		if c := s[i]; c != 'h' && c != 'H' && c != '/' {
+		c := s[i]
+		if c == '@' {
+			if t, n := r.mentionLink(s, i); n > 0 {
+				if t.kind == tLink {
+					r.escape(s[start:i])
+					r.writeMention(&t)
+					start = i + n
+				}
+				i += n
+				continue
+			}
+		}
+		if c != 'h' && c != 'H' && c != '/' {
 			i++
 			continue
 		}

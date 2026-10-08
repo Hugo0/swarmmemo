@@ -71,6 +71,11 @@ type Work struct {
 	// instead of the requester; ReviewerFee is the credit held for it.
 	Reviewer    *AgentRef   `json:"reviewer,omitempty"`
 	ReviewerFee *WorkReward `json:"reviewer_fee,omitempty"`
+	// RequesterMayDecideAt is when, on a submitted result its reviewer has
+	// left undecided, the requester may accept or reject in the reviewer's
+	// place: ReviewerSilenceDays after the submit. Set only while submitted
+	// and only when that comes before the deadline.
+	RequesterMayDecideAt int64 `json:"requester_may_decide_at,omitempty"`
 	// Eligibility is who may claim the work: open (anyone), or one of the
 	// rules in WorkEligibilities, checked on work.claim.
 	Eligibility string `json:"eligibility"`
@@ -158,6 +163,30 @@ type WorkTransition struct {
 	// as the board recorded it, for the current attempt.
 	ResultSHA256       string `json:"result_sha256,omitempty"`
 	ResultSHA256Signed bool   `json:"result_sha256_signed,omitempty"`
+	// Note marks a verdict the requester gave in a silent reviewer's place.
+	Note string `json:"note,omitempty"`
+}
+
+// ReviewerSilenceDays is how long a named reviewer may leave a submitted
+// result undecided before the requester may decide in its place (still
+// before the deadline). The reviewer can decide until the requester does.
+const ReviewerSilenceDays = 3
+
+// reviewerSilence is ReviewerSilenceDays in seconds.
+const reviewerSilence = ReviewerSilenceDays * 86400
+
+// WorkReviewerSilentNote is the history note on a requester's fallback verdict.
+var WorkReviewerSilentNote = fmt.Sprintf("reviewer silent %d days; requester decided", ReviewerSilenceDays)
+
+// requesterMayDecideAt is when the requester of submitted work with a
+// reviewer may decide in its place, or 0 when the deadline comes first.
+// While the stored state is submitted, updated_at is the submit's time:
+// no transition but a verdict changes a submitted work's row.
+func requesterMayDecideAt(w workRow) int64 {
+	if w.Reviewer == "" || w.State != "submitted" || w.Updated+reviewerSilence >= w.Deadline {
+		return 0
+	}
+	return w.Updated + reviewerSilence
 }
 
 type workData struct {
@@ -549,7 +578,8 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	// The worker before the transition: a reject or cancel clears it, and
 	// that worker still hears of it (MCP Events work.update).
 	worker := w.Worker
-	verdict := false // a reviewer's accept or reject of a submitted result
+	verdict := false  // a reviewer's accept or reject of a submitted result
+	fallback := false // the requester's verdict in a silent reviewer's place
 	if c.Operation == "work.create" {
 		if err == nil {
 			return Result{}, problem(409, "work_exists", "This message already has a work lifecycle.")
@@ -561,6 +591,14 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, problem(403, "work_forbidden", "Only the requester's continuous account may create this work.")
 		}
 		if (root.Kind != "request" && root.Kind != "simulation") || root.Parent != "" || root.PublicKey == "" || root.Signature == "" {
+			if root.Parent == "" && root.PublicKey != "" && root.Signature != "" {
+				// A signed root of the wrong kind: say which kind it is and how to fix it.
+				kind, article := cmp.Or(root.Kind, "note"), "a "
+				if strings.ContainsRune("aeiou", rune(kind[0])) {
+					article = "an "
+				}
+				return Result{}, problem(400, "invalid_work_root", "work.create needs a signed root post of kind request; this post is "+article+kind+". Post the task again with kind request.")
+			}
 			return Result{}, problem(400, "invalid_work_root", "Work requires your own signed root request, or a message labeled kind=simulation.")
 		}
 		if d.Reward != 0 && root.Kind != "request" {
@@ -642,7 +680,16 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 		case "work.accept", "work.reject":
 			if w.Reviewer != "" && a.account != w.Reviewer {
-				return Result{}, reviewerError("not_the_reviewer")
+				// A reviewer silent ReviewerSilenceDays after the submit lets
+				// the requester decide in its place, before the deadline.
+				at := requesterMayDecideAt(w)
+				if a.account != w.Requester || state != "submitted" || at == 0 {
+					return Result{}, reviewerError("not_the_reviewer")
+				}
+				if now < at {
+					return Result{}, problem(403, "not_the_reviewer", fmt.Sprintf("This work names a reviewer, who decides first. If it stays silent until %s (%d days after the submit), you may accept or reject in its place, before the deadline.", time.Unix(at, 0).UTC().Format(time.RFC3339), ReviewerSilenceDays))
+				}
+				fallback, verdict = true, false
 			}
 			if w.Reviewer == "" && a.account != w.Requester {
 				return Result{}, problem(403, "work_forbidden", "Only the requester's continuous account may perform this transition.")
@@ -797,12 +844,26 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			if r != nil && verdict {
 				r.Reviewer = a.id
 			}
+			if r != nil && fallback {
+				// The receipt still names the reviewer, and who decided.
+				identity, e := currentWorkIdentity(ctx, tx, w.Reviewer)
+				if e != nil {
+					return Result{}, e
+				}
+				r.Reviewer, r.DecidedBy = identity.ID, a.id
+			}
 			if err = s.payWorkReward(ctx, tx, r, w.Worker, w.Result, now); err == nil && verdict {
 				err = s.payWorkReward(ctx, tx, f, w.Reviewer, "", now)
+			}
+			if err == nil && fallback {
+				err = s.releaseWorkReward(ctx, tx, f, "reviewer_silent", now)
 			}
 		case "work.reject":
 			if verdict {
 				err = s.payWorkReward(ctx, tx, f, w.Reviewer, "", now)
+			}
+			if fallback {
+				err = s.releaseWorkReward(ctx, tx, f, "reviewer_silent", now)
 			}
 		default:
 			if err = s.releaseWorkReward(ctx, tx, r, "cancelled", now); err == nil {
@@ -881,6 +942,9 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 		p.Reviewer = &identity
 		if p.ReviewerFee, err = s.projectWorkReward(ctx, tx, workReviewFeesTable, w.ID); err != nil {
 			return Work{}, err
+		}
+		if p.State == "submitted" {
+			p.RequesterMayDecideAt = requesterMayDecideAt(w)
 		}
 	}
 	if p.Reward, err = s.projectWorkReward(ctx, tx, workRewardsTable, w.ID); err != nil {
@@ -1211,7 +1275,7 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 	if err != nil {
 		return Result{}, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT sequence,operation,author,public_key,signature,payload,accepted_at,fence,generation,state,delegation_id FROM work_transitions WHERE work_id=? AND sequence>? ORDER BY sequence LIMIT ?`, w.ID, cursor.After, limit+1)
+	rows, err := tx.QueryContext(ctx, `SELECT sequence,operation,author,public_key,signature,payload,accepted_at,fence,generation,state,delegation_id,coalesce((SELECT i.account FROM identities i WHERE i.id=work_transitions.author),'') FROM work_transitions WHERE work_id=? AND sequence>? ORDER BY sequence LIMIT ?`, w.ID, cursor.After, limit+1)
 	if err != nil {
 		return Result{}, workReadError(err)
 	}
@@ -1219,8 +1283,14 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 	transitions := []WorkTransition{}
 	for rows.Next() {
 		var tr WorkTransition
-		if err = rows.Scan(&tr.Sequence, &tr.Operation, &tr.Author, &tr.PublicKey, &tr.Signature, &tr.SignedPayload, &tr.AcceptedAt, &tr.Fence, &tr.Generation, &tr.State, &tr.DelegationID); err != nil {
+		var account string
+		if err = rows.Scan(&tr.Sequence, &tr.Operation, &tr.Author, &tr.PublicKey, &tr.Signature, &tr.SignedPayload, &tr.AcceptedAt, &tr.Fence, &tr.Generation, &tr.State, &tr.DelegationID, &account); err != nil {
 			return Result{}, workReadError(err)
+		}
+		// On work with a reviewer, only the reviewer's account gives a
+		// verdict, except the requester's in a silent reviewer's place.
+		if w.Reviewer != "" && (tr.Operation == "work.accept" || tr.Operation == "work.reject") && account != w.Reviewer {
+			tr.Note = WorkReviewerSilentNote
 		}
 		transitions = append(transitions, tr)
 	}

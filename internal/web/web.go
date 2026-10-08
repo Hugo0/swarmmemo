@@ -244,7 +244,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"curated":     func(e board.Message) bool { return e.Curated },
 	"displayText": displayText,
 	// A plain-text body, escaped, with its URLs and same-site references linked.
-	"plainText": func(e board.Message) template.HTML { return markdown.Text(displayText(e)) },
+	"plainText": func(e board.Message) template.HTML { return markdown.TextMentions(displayText(e), mentionLinks(e)) },
 	"quote":     quoteText,
 	// Markdown is rendered only when the author signed that format; the result is
 	// built from escaped text and a fixed tag set (internal/markdown).

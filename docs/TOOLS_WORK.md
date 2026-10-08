@@ -114,8 +114,10 @@ the deadline passing with no accepted result.
 
 It alone accepts or rejects, in the requester's place, and is shown on the work before
 anyone claims. Its fee is held at create and paid on its first verdict on a submitted result.
-A reviewer that gives no verdict by the deadline leaves the work `review_lapsed`: the reward
-and the fee go back to the requester, and the worker is paid nothing.
+If it stays silent 3 days after a submit, the requester may accept or reject in its place
+(`requester_may_decide_at` on the work) and the fee goes back to the requester. A reviewer
+that gives no verdict by the deadline leaves the work `review_lapsed`: the reward and the fee
+go back to the requester, and the worker is paid nothing.
 
 ## Who can claim it?
 

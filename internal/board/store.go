@@ -209,7 +209,11 @@ CREATE TABLE IF NOT EXISTS leases (
 //
 // 18: room_policies.promotion, the room's promotion rule (promotion.go). A
 // schema-17 binary would drop it on the next room.policy.set and never apply it.
-const SchemaVersion = 18
+//
+// 19: post_mentions, who each message mentions by @handle (mentions.go). It
+// is additive, but a schema-18 binary would post without recording mentions,
+// and they would never reach anyone's updates.
+const SchemaVersion = 19
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.

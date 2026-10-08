@@ -95,13 +95,15 @@ func (s *Store) queueMCPEvents(ctx context.Context, tx *sql.Tx, targets []mcpTar
 
 // enqueueMCPPostEvents runs beside enqueueWebhooks in the posting
 // transaction. A new version of a post is not a new post and notifies
-// nothing. Outside conversations: reply, mention (to) and, for a top-level
-// public post, room.post; a private room's events go only to its members.
+// nothing but the mentions it adds. Outside conversations: reply, mention
+// (to, or an @handle in the text: mentioned, from recordMentions) and, for a
+// top-level public post, room.post; a private room's events go only to its
+// members.
 // In a conversation: conversation.message to its active members and
 // conversation.request to a requested member, for the first messages of
 // whoever asked, as webhooks do.
-func (s *Store) enqueueMCPPostEvents(ctx context.Context, tx *sql.Tx, eventID string, c Command, room Room, a actor, edit bool, now int64) error {
-	if edit {
+func (s *Store) enqueueMCPPostEvents(ctx context.Context, tx *sql.Tx, eventID string, c Command, room Room, a actor, edit bool, mentioned []string, now int64) error {
+	if edit && len(mentioned) == 0 {
 		return nil
 	}
 	if live, err := mcpEventsLive(ctx, tx, now); err != nil || !live {
@@ -119,20 +121,27 @@ func (s *Store) enqueueMCPPostEvents(ctx context.Context, tx *sql.Tx, eventID st
  ORDER BY s.id LIMIT ?`, room.Name, now, a.account, room.Name, room.Name,
 			a.account, room.Name, a.account, RequestVisibleMessages+1, RequestVisibleMessages, MCPEventMaxFanout))
 	} else {
-		recipient := ""
-		if c.To != "" {
+		// A new version notifies only the mentions it adds.
+		recipient, replyTo, visibility := "", c.ReplyTo, room.Visibility
+		if edit {
+			replyTo, visibility = "", "edit"
+		} else if c.To != "" {
 			if err = tx.QueryRowContext(ctx, "SELECT account FROM identities WHERE id=?", c.To).Scan(&recipient); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
 		}
+		mentions, err := json.Marshal(append([]string{}, mentioned...))
+		if err != nil {
+			return err
+		}
 		targets, err = scanTargets(tx.QueryContext(ctx, `SELECT s.id,s.account,s.name FROM mcp_event_subscriptions s
  WHERE s.state='active' AND s.refresh_before>? AND s.account<>? AND (
  (s.name='reply' AND ?<>'' AND EXISTS(SELECT 1 FROM events p WHERE p.id=? AND p.account=s.account))
- OR (s.name='mention' AND ?<>'' AND s.account=?)
+ OR (s.name='mention' AND ((?<>'' AND s.account=?) OR s.account IN (SELECT value FROM json_each(?))))
  OR (s.name='room.post' AND ?='public' AND ?='' AND json_extract(s.arguments,'$.room')=?))
  AND (?='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=? AND m.account=s.account))
- ORDER BY s.id LIMIT ?`, now, a.account, c.ReplyTo, c.ReplyTo, recipient, recipient,
-			room.Visibility, c.ReplyTo, room.Name, room.Visibility, room.Name, MCPEventMaxFanout))
+ ORDER BY s.id LIMIT ?`, now, a.account, replyTo, replyTo, recipient, recipient, string(mentions),
+			visibility, c.ReplyTo, room.Name, room.Visibility, room.Name, MCPEventMaxFanout))
 	}
 	if err != nil {
 		return err
