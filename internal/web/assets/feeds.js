@@ -226,7 +226,7 @@ for (const box of document.querySelectorAll('.feed-fork')) {
   }
   const visibility = () => form.querySelector('input[name=visibility]:checked')?.value || 'public';
   function commands() {
-    $('tune-read-command').textContent = 'curl -sG ' + root.dataset.origin + '/api/feed --data-urlencode ' + shellQuote('override=' + JSON.stringify(readForm(false))) + ' --data-urlencode explain=true';
+    $('tune-read-command').textContent = 'curl -sG ' + root.dataset.origin + '/api/feed --data-urlencode ' + shellQuote('override=' + JSON.stringify(readForm(false))) + ' --data-urlencode explain=true --data-urlencode limit=' + size;
     const save = $('tune-save-command'); if (save) save.textContent = signedCommand('feed.profile.put', {}, {profile: readForm(true), visibility: visibility()});
   }
 

@@ -37,7 +37,7 @@ func topupFromEnvironment(features board.Features) *services.TopupConfig {
 		return nil
 	}
 	slog.Info("Credit top-ups configured", "network", cfg.Network, "pay_to", cfg.PayTo.String(), "facilitator", cfg.FacilitatorURL,
-		"min", cfg.Min, "max", cfg.Max, "account_daily", cfg.AccountDaily)
+		"min", cfg.Min, "max", cfg.Max, "account_daily", cfg.AccountDaily, "board_daily", cfg.BoardDaily)
 	return cfg
 }
 
@@ -50,8 +50,8 @@ func topupCheck(out io.Writer) error {
 	fmt.Fprintf(out, "network %s, asset %s %q v%s\n", cfg.Network, cfg.Asset, cfg.AssetName, cfg.AssetVersion)
 	fmt.Fprintf(out, "pay_to %s (receiving only; no key is loaded)\n", cfg.PayTo)
 	fmt.Fprintf(out, "facilitator %s\n", cfg.FacilitatorURL)
-	fmt.Fprintf(out, "limits (credits = micro-USDC): min %d (%s USDC), max %d (%s USDC), per account per day %d (%s USDC)\n",
-		cfg.Min, services.FormatUSDC(cfg.Min), cfg.Max, services.FormatUSDC(cfg.Max), cfg.AccountDaily, services.FormatUSDC(cfg.AccountDaily))
+	fmt.Fprintf(out, "limits (credits = micro-USDC): min %d (%s USDC), max %d (%s USDC), per account per day %d (%s USDC), board-wide per day %d (%s USDC)\n",
+		cfg.Min, services.FormatUSDC(cfg.Min), cfg.Max, services.FormatUSDC(cfg.Max), cfg.AccountDaily, services.FormatUSDC(cfg.AccountDaily), cfg.BoardDaily, services.FormatUSDC(cfg.BoardDaily))
 	return nil
 }
 

@@ -445,7 +445,7 @@ func loadFeedTune(r *http.Request, p *page, execute func(board.Command) (board.R
 		v.Rows, v.Gone = feedRows(res, baseline)
 		v.Hash, _ = res.Data["profile_hash"].(string)
 	}
-	v.ReadCommand = "curl -sG " + canonicalOrigin + "/api/feed --data-urlencode " + shellQuote("override="+compactJSON(override)) + " --data-urlencode explain=true"
+	v.ReadCommand = "curl -sG " + canonicalOrigin + "/api/feed --data-urlencode " + shellQuote("override="+compactJSON(override)) + " --data-urlencode explain=true --data-urlencode limit=" + strconv.Itoa(feedPreviewSize)
 	v.SaveCommand = signedCommand("feed.profile.put", nil, putData{Profile: v.Form.doc(true), Visibility: v.Form.Visibility})
 	return 200
 }

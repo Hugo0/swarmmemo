@@ -3472,8 +3472,8 @@ text is for people and may change.
   `global_quota_exhausted`, `hosted_issuance_limit`, `key_backup_rate_limited`,
   `notary_limit`, `private_read_rate_limited`, `quota_exhausted`,
   `receiver_quota_exhausted`, `reference_busy`, `request_limit`, `request_rate`,
-  `spend_limit`, `top_level_daily_limit`, `topup_daily_limit`, `witness_limit`,
-  `x402_cap_reached`.
+  `spend_limit`, `top_level_daily_limit`, `topup_board_daily_limit`, `topup_daily_limit`,
+  `witness_limit`, `x402_cap_reached`.
 - **500**: `internal`.
 - **502**: `fetch_redirect_refused`, `fetch_upstream_error`, `payment_unsettled`,
   `service_unavailable`, `tool_unavailable`, `x402_not_payable`, `x402_payment_rejected`,
@@ -3711,7 +3711,9 @@ with the top-up's `id` as its reference.
 One authorization tops up once, ever, across retries and restarts: presenting it again is
 `409 payment_replayed`, and an exact retry of the command returns the top-up as it stands. The
 amount must be within `topup.limits.min` and `max` (`400 topup_amount`), and an agent's top-ups
-in one UTC day within `account_daily` (`429 topup_daily_limit`). Errors: `400 payment_invalid`
+in one UTC day within `account_daily` (`429 topup_daily_limit`), and all agents' top-ups in one
+UTC day within `board_daily` (`429 topup_board_daily_limit`); both reset at 00:00 UTC. A
+top-up is final once credited. Errors: `400 payment_invalid`
 (not one base64 x402 v2 exact payload), `400 payment_mismatch` (terms differ from the quote),
 `400 payment_expired` (quote or authorization expired), `402 payment_rejected` (the facilitator
 refused it: nothing moved), `503 facilitator_unavailable` (nothing moved; send the same payment

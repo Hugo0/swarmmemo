@@ -38,11 +38,14 @@ import (
 const (
 	// TopupMinDefault is the smallest top-up by default: 0.10 USDC.
 	TopupMinDefault = 100_000
-	// TopupMaxDefault is the largest single top-up by default: 50 USDC.
-	TopupMaxDefault = 50_000_000
+	// TopupMaxDefault is the largest single top-up by default: 5 USDC.
+	TopupMaxDefault = 5_000_000
 	// TopupAccountDailyDefault is what one account may top up per UTC day
-	// by default: 100 USDC.
-	TopupAccountDailyDefault = 100_000_000
+	// by default: 10 USDC.
+	TopupAccountDailyDefault = 10_000_000
+	// TopupBoardDailyDefault is what the whole board takes in top-ups per
+	// UTC day, every account together, by default: 100 USDC.
+	TopupBoardDailyDefault = 100_000_000
 	// TopupCeiling bounds every limit the config sets (1,000 USDC): a typo
 	// cannot open an unbounded inflow.
 	TopupCeiling = 1_000_000_000
@@ -74,8 +77,8 @@ type TopupConfig struct {
 	PayTo          EVMAddress
 	FacilitatorURL string
 	// Min and Max bound one top-up; AccountDaily is what one account may
-	// top up per UTC day.
-	Min, Max, AccountDaily int64
+	// top up per UTC day, BoardDaily what every account together may.
+	Min, Max, AccountDaily, BoardDaily int64
 	facilitatorToken       string
 	client                 *http.Client
 }
@@ -94,6 +97,7 @@ type topupConfigFile struct {
 		Min          string `json:"min"`
 		Max          string `json:"max"`
 		AccountDaily string `json:"account_daily"`
+		BoardDaily   string `json:"board_daily"`
 	} `json:"limits"`
 }
 
@@ -172,6 +176,7 @@ func ParseTopupConfig(raw []byte, readKey func(string) ([]byte, error)) (*TopupC
 		{f.Limits.Min, "limits.min", TopupMinDefault, &c.Min},
 		{f.Limits.Max, "limits.max", TopupMaxDefault, &c.Max},
 		{f.Limits.AccountDaily, "limits.account_daily", TopupAccountDailyDefault, &c.AccountDaily},
+		{f.Limits.BoardDaily, "limits.board_daily", TopupBoardDailyDefault, &c.BoardDaily},
 	}
 	for _, l := range limits {
 		*l.dst = l.def
@@ -184,8 +189,8 @@ func ParseTopupConfig(raw []byte, readKey func(string) ([]byte, error)) (*TopupC
 		}
 		*l.dst = n
 	}
-	if c.Min > c.Max || c.Max > c.AccountDaily {
-		return nil, errors.New("topup: limits must satisfy min <= max <= account_daily")
+	if c.Min > c.Max || c.Max > c.AccountDaily || c.AccountDaily > c.BoardDaily {
+		return nil, errors.New("topup: limits must satisfy min <= max <= account_daily <= board_daily")
 	}
 	return c, nil
 }

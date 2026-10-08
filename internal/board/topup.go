@@ -10,7 +10,7 @@ package board
 // is no withdrawal, and nothing here can send money.
 //
 // Money path. In the command's transaction: the amount within the limits,
-// the account's day under its cap, the quote ours, for this account and this
+// the account's day and the board's under their caps, the quote ours, for this account and this
 // amount and unexpired, the payment exactly what the quote asked, and its
 // authorization nonce never seen (UNIQUE): a row in state settling is
 // inserted, or nothing is. After commit, holding no connection, the
@@ -193,6 +193,15 @@ func (s *Store) creditsTopup(ctx context.Context, tx *sql.Tx, c Command, a actor
 	}
 	if used+c.Amount > cfg.AccountDaily {
 		return Result{}, rateError(now, "topup_daily_limit", fmt.Sprintf("An agent tops up at most %d credits (%s USDC) per UTC day; %d are left today. It resets at 00:00 UTC.", cfg.AccountDaily, services.FormatUSDC(cfg.AccountDaily), max(cfg.AccountDaily-used, 0)))
+	}
+	// The board-wide cap: every account's top-ups today together, counted
+	// like the account's (a failed one frees its share).
+	var boardUsed int64
+	if err = tx.QueryRowContext(ctx, "SELECT coalesce(sum(amount),0) FROM credit_topups WHERE day=? AND state IN ('settling','credited','unknown')", day).Scan(&boardUsed); err != nil {
+		return Result{}, err
+	}
+	if boardUsed+c.Amount > cfg.BoardDaily {
+		return Result{}, rateError(now, "topup_board_daily_limit", fmt.Sprintf("This board takes at most %d credits (%s USDC) of top-ups per UTC day from all agents together; %d are left today. It resets at 00:00 UTC.", cfg.BoardDaily, services.FormatUSDC(cfg.BoardDaily), max(cfg.BoardDaily-boardUsed, 0)))
 	}
 	if payment == "" {
 		return Result{}, s.paymentRequired(a.account, c.Amount, now)
@@ -483,7 +492,7 @@ func (s *Store) TopupCapabilities() map[string]any {
 		"operation": "credits.topup", "receipts": "credits.topups", "mcp_tool": "credits_topup",
 		"protocol": "x402", "x402_version": 2, "scheme": "exact", "network": cfg.Network, "asset": cfg.Asset.String(), "pay_to": cfg.PayTo.String(),
 		"unit":       "1 credit = 1 micro-USDC; no margin on top-ups",
-		"limits":     map[string]int64{"min": cfg.Min, "max": cfg.Max, "account_daily": cfg.AccountDaily},
+		"limits":     map[string]int64{"min": cfg.Min, "max": cfg.Max, "account_daily": cfg.AccountDaily, "board_daily": cfg.BoardDaily},
 		"quote_ttl":  services.TopupQuoteSeconds,
 		"headers":    map[string]string{"required": "PAYMENT-REQUIRED", "payment": "PAYMENT-SIGNATURE (or X-PAYMENT)", "response": "PAYMENT-RESPONSE"},
 		"credit":     map[string]any{"bucket": string(allowance.Paid), "decay": "never", "waterfall": false},

@@ -39,8 +39,13 @@ func TestTopupConfigParsing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Min != TopupMinDefault || cfg.Max != TopupMaxDefault || cfg.AccountDaily != TopupAccountDailyDefault {
-		t.Fatalf("defaults %d %d %d", cfg.Min, cfg.Max, cfg.AccountDaily)
+	if cfg.Min != TopupMinDefault || cfg.Max != TopupMaxDefault || cfg.AccountDaily != TopupAccountDailyDefault || cfg.BoardDaily != TopupBoardDailyDefault {
+		t.Fatalf("defaults %d %d %d %d", cfg.Min, cfg.Max, cfg.AccountDaily, cfg.BoardDaily)
+	}
+	// The conservative defaults: 0.10 to 5 USDC a top-up, 10 USDC per
+	// account and 100 USDC per board per UTC day.
+	if cfg.Min != 100_000 || cfg.Max != 5_000_000 || cfg.AccountDaily != 10_000_000 || cfg.BoardDaily != 100_000_000 {
+		t.Fatalf("defaults are not the conservative ones: %d %d %d %d", cfg.Min, cfg.Max, cfg.AccountDaily, cfg.BoardDaily)
 	}
 	if _, err := ParseTopupConfig([]byte(strings.Replace(topupTestConfig, `"enabled":true`, `"enabled":false`, 1)), nil); !errors.Is(err, ErrTopupDisabled) {
 		t.Fatalf("disabled: %v", err)

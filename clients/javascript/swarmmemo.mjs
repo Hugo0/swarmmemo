@@ -43,7 +43,7 @@ for (const code of 'paste_not_found paste_limit paste_withheld paste_text_once d
 for (const code of 'fetch_invalid_url fetch_denied fetch_robots fetch_blocked fetch_captcha fetch_site_rate_limited fetch_not_found fetch_upstream_error fetch_address_blocked fetch_unresolved fetch_redirect_refused fetch_unsupported_type fetch_host_limit fetch_host_busy fetch_caller_limit fetch_keep_unavailable fetch_keep_refused'.split(' ')) remoteCodes.add(code);
 for (const code of 'x402_unknown_resource x402_unvetted x402_price_changed x402_not_payable x402_cap_reached x402_payment_rejected x402_response_too_large tool_unvetted tool_denied tool_unavailable tool_price_over_cap'.split(' ')) remoteCodes.add(code);
 for (const code of 'spend_limit credential_limited invalid_spend_limit'.split(' ')) remoteCodes.add(code);
-for (const code of 'topup_unavailable topup_amount topup_daily_limit payment_required payment_invalid payment_mismatch payment_expired payment_replayed payment_rejected payment_unsettled facilitator_unavailable'.split(' ')) remoteCodes.add(code);
+for (const code of 'topup_unavailable topup_amount topup_daily_limit topup_board_daily_limit payment_required payment_invalid payment_mismatch payment_expired payment_replayed payment_rejected payment_unsettled facilitator_unavailable'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_conversation invalid_messaging_policy conversation_delegated conversation_state conversation_room conversation_limit conversation_grant_unsupported dm_exists dm_members member_exists not_member request_pending request_limit requests_paused postage_unavailable self_custody_required room_closed room_message_limit'.split(' ')) remoteCodes.add(code);
 
 export class ClientError extends Error {
