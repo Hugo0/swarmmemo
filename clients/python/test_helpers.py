@@ -56,6 +56,40 @@ class HelperTests(unittest.TestCase):
         self.assertEqual("signature" in body, signed)
         return self.shown(body)
 
+    def test_work_mutations_save_final_request_after_generation_lookup(self):
+        mutations = [
+            ("work.claim", lambda c: c.work_claim(MESSAGE)),
+            ("work.submit", lambda c: c.work_submit(MESSAGE, 3, MESSAGE)),
+            ("work.accept", lambda c: c.work_accept(MESSAGE, 3)),
+            ("work.reject", lambda c: c.work_reject(MESSAGE, 3, "needs revision")),
+        ]
+        for key in (None, self.key):
+            for operation, invoke in mutations:
+                with self.subTest(operation=operation, signed=key is not None), tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "request.json"
+                    client = memo.Client("https://example.org", key, save_request=path)
+                    self.recorder.sent.clear()
+                    invoke(client)
+                    self.assertEqual([body["operation"] for _, body in self.recorder.sent], ["work.get", operation])
+                    saved = json.loads(path.read_text())
+                    self.assertEqual(saved, self.recorder.sent[-1][1])
+                    self.assertEqual(self.shown(saved)["operation"], operation)
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                    original = path.read_bytes()
+                    self.recorder.sent.clear()
+                    with self.assertRaises(FileExistsError):
+                        invoke(client)
+                    self.assertEqual(path.read_bytes(), original)
+                    self.assertEqual([body["operation"] for _, body in self.recorder.sent], ["work.get"])
+
+    def test_explicit_work_read_still_saves_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "read.json"
+            client = memo.Client("https://example.org", self.key, save_request=path)
+            client.work(MESSAGE)
+            self.assertEqual(json.loads(path.read_text()), self.recorder.sent[-1][1])
+            self.assertEqual(json.loads(path.read_text())["operation"], "work.get")
+
     def test_work_helpers(self):
         data = lambda extra="": f'{{"schema":1,"generation":"{GENERATION}"{extra}}}'
         self.anonymous.works(kind="rewarded", limit=5)

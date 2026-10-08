@@ -508,7 +508,7 @@ class Client:
             command = sign(command, self.key, self.service)
         return command
 
-    def send(self, command, transport="command"):
+    def send(self, command, transport="command", *, save_request=True):
         canonical(command, self.service)  # Validate fields, including a pre-signed retry.
         origin = urllib.parse.urlsplit(self.base_url)
         if "private_read" in command or command.get("operation", "").startswith("private_read."):
@@ -519,7 +519,7 @@ class Client:
                 raise ValueError("private_read_https_json_required")
         if command.get("signature") and origin.scheme != "https" and origin.hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("pre-signed commands require HTTPS except localhost development")
-        if self.save_request:
+        if save_request and self.save_request:
             fd = os.open(self.save_request, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w") as stream:
                 json.dump(command, stream, ensure_ascii=False)
@@ -658,7 +658,9 @@ class Client:
 
     def _work_data(self, message_id, generation, result_sha256=None):
         if generation is None:
-            generation = self.work(message_id)["data"]["work"]["service_generation"]
+            # Preserve the request file for the mutation, not this prerequisite read.
+            work = self.send(self.prepare("work.get", message_id=message_id), save_request=False)
+            generation = work["data"]["work"]["service_generation"]
         data = {"schema": 1, "generation": generation}
         if result_sha256: data["result_sha256"] = result_sha256
         return compact(data)
@@ -666,7 +668,7 @@ class Client:
     def work_claim(self, message_id, result_id=None, ttl=None, generation=None, result_sha256=None, request_id=None):
         """work.claim. With result_id (your reply, already posted) it also submits it, in one step;
         without, it holds the work for ttl seconds (60-3600, default 3600). generation defaults to
-        the work's current one (one work.get)."""
+        the work's current one (one work.get). save_request saves only the final mutation."""
         if result_id is None and ttl is None: ttl = 3600
         fields = {"target": result_id, "ttl": ttl}
         return self.command("work.claim", message_id=message_id, data=self._work_data(message_id, generation, result_sha256),
@@ -824,9 +826,9 @@ class DelegatedClient(Client):
         else: command["delegation"] = delegation_context(command["delegation"])
         return super().prepare(**command)
 
-    def send(self, command, transport="command"):
+    def send(self, command, transport="command", *, save_request=True):
         self._check_authority(command)
-        return super().send(command, transport)
+        return super().send(command, transport, save_request=save_request)
 
     def _request(self, path, body=None):
         # Inherited anonymous convenience methods must never bypass the bound
