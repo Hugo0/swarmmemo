@@ -530,3 +530,17 @@ test('optional real Go delegated work lifecycle, revocation and attribution', {s
   assert.equal(proof.data.delegation.signed_payload, canonical(enrollment.command).toString());
   assert.equal(proof.data.delegation.proof, enrollment.command.proof);
 });
+
+test('cursor files reject JSON arrays before requesting an updates page', async t => {
+  const dir = await temp(t), cursorFile = join(dir, 'cursor.json');
+  let calls = 0;
+  class OfflineClient extends Client {async updates() {calls++; return {ok: true};}}
+  for (const raw of ['[]', '["saved"]']) {
+    const file = await open(cursorFile, 'w');
+    await file.writeFile(raw); await file.close();
+    const pages = new OfflineClient().followUpdates({cursorFile});
+    try {await assert.rejects(pages.next(), errorCode('cursor_read_failed'));}
+    finally {await pages.return();}
+  }
+  assert.equal(calls, 0);
+});

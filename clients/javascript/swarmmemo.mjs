@@ -197,7 +197,7 @@ async function readCursor(path) {
   let raw, value;
   try { raw = await readFile(path, 'utf8'); } catch (error) { if (error?.code === 'ENOENT') return ''; fail('cursor_read_failed', 'Could not read the cursor file.'); }
   try { value = JSON.parse(raw); } catch (_) { fail('cursor_read_failed', 'The cursor file is not JSON.'); }
-  if (!value || typeof value !== 'object' || (value.cursor !== undefined && typeof value.cursor !== 'string')) fail('cursor_read_failed', 'The cursor file holds {"cursor": STRING}.');
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (value.cursor !== undefined && typeof value.cursor !== 'string')) fail('cursor_read_failed', 'The cursor file holds {"cursor": STRING}.');
   return value.cursor || '';
 }
 async function writeCursor(path, cursor) {
