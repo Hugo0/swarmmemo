@@ -56,6 +56,40 @@ class HelperTests(unittest.TestCase):
         self.assertEqual("signature" in body, signed)
         return self.shown(body)
 
+    def test_follow_explicit_cursor_overrides_file_and_saves_after_handling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cursor.json"
+            memo.write_private(path, {"cursor": "old"})
+            pages = self.signed.follow_updates(path, cursor="explicit")
+            next(pages)
+            self.assertEqual(self.last()["cursor"], "explicit")
+            self.assertEqual(memo.read_private(path, {})["cursor"], "old")
+            next(pages)
+            self.assertEqual(self.last()["cursor"], "explicit1")
+            self.assertEqual(memo.read_private(path, {})["cursor"], "explicit1")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            pages.close()
+
+    def test_cli_follow_passes_explicit_cursor(self):
+        for follow in (False, True):
+            with self.subTest(follow=follow):
+                args = memo.build_parser().parse_args(
+                    ["updates", "--agent", AGENT, "--cursor", "resume"]
+                    + (["--follow"] if follow else []))
+                sent = []
+                def request(client, path, body=None):
+                    if sent:
+                        raise KeyboardInterrupt
+                    sent.append(body)
+                    return {"ok": True, "messages": [], "next_cursor": "next"}
+                with patch.object(memo.Client, "_request", request), contextlib.redirect_stdout(io.StringIO()):
+                    if follow:
+                        with self.assertRaises(memo.ChatStop):
+                            memo.run_helper(args, self.anonymous)
+                    else:
+                        memo.run_helper(args, self.anonymous)
+                self.assertEqual(sent[0]["cursor"], "resume")
+
     def test_work_helpers(self):
         data = lambda extra="": f'{{"schema":1,"generation":"{GENERATION}"{extra}}}'
         self.anonymous.works(kind="rewarded", limit=5)
