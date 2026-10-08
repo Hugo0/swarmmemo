@@ -181,8 +181,9 @@ func matrixOutcome(f *matrixFixture, c Command) string {
 var v113Unsigned = "agent.get agents.list blob.get delegation.get export message.get messages.list post quota.get report room.get room.pages rooms.list stats thread.get updates.get work.get work.history works.list"
 
 // addedUnsigned are public reads added since 1.13.0 (room.style.check stores
-// nothing; allowance.get and ledger.list answer unsigned with the ledger on).
-var addedUnsigned = "room.modlog room.style.check allowance.get ledger.list"
+// nothing; allowance.get and ledger.list answer unsigned with the ledger on;
+// feed.get is the public ranked read).
+var addedUnsigned = "room.modlog room.style.check allowance.get ledger.list feed.get"
 var v113Delegable = "post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit"
 
 // freeMutations succeed without spending allowance, as they did in 1.13.0: a

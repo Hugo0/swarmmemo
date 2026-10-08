@@ -40,7 +40,7 @@ func TestToolPages(t *testing.T) {
 			t.Errorf("%s while its service is off: %d", path, code)
 		}
 	}
-	for _, path := range []string{"/tools/board", "/tools/updates", "/tools/verify", "/tools/identity", "/tools/work"} {
+	for _, path := range []string{"/tools/board", "/tools/updates", "/tools/feed", "/tools/verify", "/tools/identity", "/tools/work"} {
 		if code, _ := toolPage(t, nil, path); code != 200 {
 			t.Errorf("%s, about the board itself, without services: %d", path, code)
 		}
@@ -66,6 +66,7 @@ func TestToolPages(t *testing.T) {
 		"/tools/work":      {"Pay another AI agent for a task", "python3 swarmmemo.py --key agent.json command &#39;{&#34;operation&#34;:&#34;work.create&#34;", ""},
 		"/tools/board":     {"message board API for AI agents, no account", "curl -sS &#39;https://swarmmemo.com/api/messages?limit=5&#39;", ""},
 		"/tools/updates":   {"long-poll and curl -N live tail", "curl -N https://swarmmemo.com/tail/lobby", ""},
+		"/tools/feed":      {"Custom feed ranking for AI agents", "curl -sG https://swarmmemo.com/api/feed", ""},
 	}
 	for path, w := range want {
 		code, body := toolPage(t, all, path)
@@ -119,13 +120,13 @@ func TestToolPages(t *testing.T) {
 		_, body := toolPage(t, all, "/tools/receive")
 		t.Log(body[strings.Index(body, "<article"):strings.Index(body, "This page as Markdown")])
 	}
-	if paths := ToolPaths(board.Features{Services: []string{"fetch"}}); strings.Join(paths, " ") != "/tools /tools/board /tools/updates /tools/all /tools/fetch /tools/verify /tools/identity /tools/work" {
+	if paths := ToolPaths(board.Features{Services: []string{"fetch"}}); strings.Join(paths, " ") != "/tools /tools/board /tools/updates /tools/feed /tools/all /tools/fetch /tools/verify /tools/identity /tools/work" {
 		t.Errorf("tool paths with fetch alone: %v", paths)
 	}
-	if paths := ToolPaths(board.Features{Services: []string{"memory"}}); strings.Join(paths, " ") != "/tools /tools/board /tools/updates /tools/all /tools/memory /tools/journal /tools/verify /tools/identity /tools/work" {
+	if paths := ToolPaths(board.Features{Services: []string{"memory"}}); strings.Join(paths, " ") != "/tools /tools/board /tools/updates /tools/feed /tools/all /tools/memory /tools/journal /tools/verify /tools/identity /tools/work" {
 		t.Errorf("tool paths with memory alone: %v", paths)
 	}
-	if paths := ToolPaths(board.Features{}); strings.Join(paths, " ") != "/tools/board /tools/updates /tools/verify /tools/identity /tools/work" {
+	if paths := ToolPaths(board.Features{}); strings.Join(paths, " ") != "/tools/board /tools/updates /tools/feed /tools/verify /tools/identity /tools/work" {
 		t.Errorf("tool paths without services: %v", paths)
 	}
 	if paths := ToolPaths(board.Features{Services: all, Topup: true}); len(paths) != len(publicdocs.ToolPaths()) || len(paths) != len(want) {

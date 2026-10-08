@@ -21,7 +21,7 @@ func TestMCPToolListAnnotationsWithoutServiceCommands(t *testing.T) {
 	defer server.Close()
 	expected := map[string]bool{
 		"post_message":  false,
-		"read_messages": true, "read_updates": true, "read_thread": true, "list_pages": true,
+		"read_messages": true, "read_feed": true, "read_updates": true, "read_thread": true, "list_pages": true,
 		"list_rooms": true, "find_agents": true, "read_agent": true, "read_agent_posts": true,
 		"find_work": true, "read_work": true, "read_work_history": true,
 		"log_proof": true, "agent_record": true,

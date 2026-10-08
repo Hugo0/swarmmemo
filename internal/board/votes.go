@@ -159,9 +159,7 @@ func (s *Store) vote(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err != nil {
 		return Result{}, err
 	}
-	s.rankMu.Lock()
-	s.rankCache = nil
-	s.rankMu.Unlock()
+	s.dropRankings()
 	return Result{Data: map[string]any{"message_id": root, "value": *body.Value, "votes": counts}}, nil
 }
 
@@ -305,8 +303,14 @@ type rankedPost struct {
 	edited  sql.NullFloat64 // the newest scored later version's
 	flagged bool            // a flag open for review on any version
 	replies int64
+	room    string
+	account string // the author's continuity account
+	signed  bool
 	rank    float64
-	fresh   bool // merged into a cached ranking after it was made
+	merit   float64 // the score's parts (feed.get explain): merit before recency,
+	decay   float64 // the recency factor
+	weight  float64 // and the room weight
+	fresh   bool    // merged into a cached ranking after it was made
 }
 
 // merit is the post's quality prior, the lower of its original's and its
@@ -326,10 +330,20 @@ func (r rankedPost) effectiveQuality() *float64 {
 
 type rankEntry struct {
 	at     time.Time
+	gen    int64        // this ranking's generation, unique per build (feed cursors name it)
+	scored int64        // the clock base was scored at (feed cursors rescore at it)
 	head   int64        // the newest event when base was made
 	base   []rankedPost // the ranking as made
 	merged []rankedPost // base plus the posts since, for first pages
 	top    int64        // the newest event when merged was made
+}
+
+// candEntry is one view's candidates with their inputs, unscored: what every
+// ranking of the view shares, whatever its weights (candidates).
+type candEntry struct {
+	at    time.Time
+	head  int64 // the newest event when posts were read
+	posts []rankedPost
 }
 
 // rankSource is where a ranking finds its candidates: a bounded walk,
@@ -390,78 +404,120 @@ func seqAtOrBefore(ctx context.Context, tx *sql.Tx, t, top int64) (int64, error)
 	return lo, nil
 }
 
-// rankInputs are what each candidate carries into Rank, computed for at most
-// HotCandidates posts per walk: its votes, its original's quality, the
+// rankInputs are what each candidate carries into a score, computed for at
+// most HotCandidates posts per walk: its votes, its original's quality, the
 // quality of its newest scored later version (events_origin), whether any
-// version has a flag open (event_flags_root), and the distinct signed agents
+// version has a flag open (event_flags_root), the distinct signed agents
 // other than its author among its newest ReplyScanRows replies who could vote
 // on it: a visible public post at least VoterMinAge old (events_author, below
-// the sequence of that age), counted to reply_agents_max.
+// the sequence of that age), counted to FeedReplyAgentsMax (a feed profile's
+// highest reply_agents_max), and its room, author account and whether it is
+// signed, for a feed profile's room weights and filters.
 const rankInputs = `SELECT e.id,e.seq,e.created_at,coalesce(v.score,0),q.quality,
  (SELECT eq.quality FROM events ev JOIN event_quality eq ON eq.event_id=ev.id WHERE ev.origin=e.id AND ev.origin<>'' ORDER BY ev.seq DESC LIMIT 1),
  EXISTS(SELECT 1 FROM event_flags f WHERE f.root=e.id),
  (SELECT count(*) FROM (SELECT DISTINCT x.account FROM (SELECT account,hidden,public_key FROM events WHERE reply_to=e.id AND room=e.room ORDER BY seq DESC LIMIT ?) x
   WHERE x.hidden=0 AND x.public_key<>'' AND x.account<>e.account
-  AND EXISTS(SELECT 1 FROM events y JOIN rooms ry ON ry.name=y.room WHERE y.account=x.account AND y.seq<=? AND y.created_at<=? AND y.hidden=0 AND ry.visibility='public') LIMIT ?))
+  AND EXISTS(SELECT 1 FROM events y JOIN rooms ry ON ry.name=y.room WHERE y.account=x.account AND y.seq<=? AND y.created_at<=? AND y.hidden=0 AND ry.visibility='public') LIMIT ?)),
+ e.room,e.account,e.public_key<>''
  FROM (%s) c CROSS JOIN events e ON e.seq=c.seq LEFT JOIN event_scores v ON v.event_id=e.id LEFT JOIN event_quality q ON q.event_id=e.id`
 
-// ranking orders the candidate posts for one view, from the cache when fresh.
-// Every walk is bounded: the source walks at most RankScanRows index entries,
-// the score walk reads the score index highest first, and inputs are computed
-// for at most HotCandidates posts of each. A cached ranking stays for
-// RankCacheTTL (a vote or a flag clears it); posts made since it was built are
-// ranked on their own and merged in (marked fresh), so a new post shows on
-// the first page at once without a full ranking per post. A pinned read (an
-// offset page) gets the base ranking its first page was cut from, without
-// merges, for RankSnapshotTTL, so pages neither repeat nor skip as posts
-// arrive. top is the newest event's sequence.
-func (s *Store) ranking(ctx context.Context, tx *sql.Tx, src rankSource, where []string, args []any, bias float64, now int64, pinned bool) (list []rankedPost, top int64, err error) {
-	key := fmt.Sprintf("%+v\x00%s\x00%q\x00%g", src, strings.Join(where, " AND "), args, bias)
-	if err := tx.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM events").Scan(&top); err != nil {
-		return nil, 0, err
+// rankView is one source of candidates: a bounded walk (rankSource), the SQL
+// terms every candidate meets beyond the ranked-view rules (selecting what
+// the reader may see), whether only the last HotWindowSeconds count, how
+// many posts each walk keeps, and whether the highest-scored voted posts are
+// read too. A feed's room slice (slice names its room) is its room's newest
+// FeedRoomSlice rankable posts of the window.
+type rankView struct {
+	src      rankSource
+	where    []string
+	args     []any
+	windowed bool
+	limit    int
+	scored   bool
+	slice    string
+}
+
+func (v rankView) key() string {
+	return fmt.Sprintf("%+v\x00%s\x00%q\x00%t\x00%d\x00%t", v.src, strings.Join(v.where, " AND "), v.args, v.windowed, v.limit, v.scored)
+}
+
+// rankRead is one read's clock: the newest event and the seasoned-voter
+// bound, read once however many views it collects.
+type rankRead struct {
+	top, now              int64
+	seasoned, seasonedSeq int64
+	haveSeasoned          bool
+}
+
+func (rd *rankRead) seasonedBound(ctx context.Context, tx *sql.Tx) (int64, int64, error) {
+	if !rd.haveSeasoned {
+		rd.seasoned = rd.now - int64(VoterMinAge/time.Second)
+		seq, err := seqAtOrBefore(ctx, tx, rd.seasoned, rd.top)
+		if err != nil {
+			return 0, 0, err
+		}
+		rd.seasonedSeq, rd.haveSeasoned = seq, true
 	}
+	return rd.seasoned, rd.seasonedSeq, nil
+}
+
+// Whether candidates had a view's inputs at hand (or only merged the posts
+// since), read them in full, or left them for a later read.
+const (
+	candWarm = iota
+	candBuilt
+	candSkipped
+)
+
+// candidates are one view's candidate posts with their inputs, unscored,
+// from the cache when fresh: the SQL half of a ranking, shared by every
+// ranking of the view whatever its weights. Every walk is bounded: the
+// source walks at most RankScanRows index entries, the score walk reads the
+// score index highest first, and inputs are computed for at most v.limit
+// posts of each. Cached inputs stay for RankCacheTTL (a vote or a flag clears
+// them); posts made since are read on their own and merged in, so a new post
+// costs one short walk, not a new read of every candidate. cold false leaves
+// a view with no fresh inputs unread (candSkipped). It reads only tx.
+func (s *Store) candidates(ctx context.Context, tx *sql.Tx, v rankView, rd *rankRead, cold bool) (candEntry, int, error) {
+	key := v.key()
 	clock := s.now()
 	s.rankMu.Lock()
-	cached, ok := s.rankCache[key]
-	base, hasBase := s.rankPinned[key]
+	cached, ok := s.candCache[key]
 	s.rankMu.Unlock()
-	if pinned && hasBase && clock.Sub(base.at) >= 0 && clock.Sub(base.at) < RankSnapshotTTL {
-		return base.base, top, nil
-	}
 	if ok && (clock.Sub(cached.at) < 0 || clock.Sub(cached.at) >= RankCacheTTL) {
 		ok = false
 	}
-	if ok && cached.top == top {
-		if pinned {
-			return cached.base, top, nil
-		}
-		return cached.merged, top, nil
+	if ok && cached.head == rd.top {
+		return cached, candWarm, nil
 	}
-	where = append(append([]string{}, where...), "r.visibility='public'", "e.hidden=0", "+e.reply_to=''", "e.supersedes=''")
-	if bias > 0 {
+	if !ok && !cold {
+		return candEntry{}, candSkipped, nil
+	}
+	where := append(append([]string{}, v.where...), "r.visibility='public'", "e.hidden=0", "+e.reply_to=''", "e.supersedes=''")
+	args := append([]any{}, v.args...)
+	if v.windowed {
 		where = append(where, "e.created_at>=?")
-		args = append(append([]any{}, args...), now-HotWindowSeconds)
+		args = append(args, rd.now-HotWindowSeconds)
 	}
 	cond := strings.Join(where, " AND ")
-	seasoned := now - int64(VoterMinAge/time.Second)
-	seasonedSeq, err := seqAtOrBefore(ctx, tx, seasoned, top)
+	seasoned, seasonedSeq, err := rd.seasonedBound(ctx, tx)
 	if err != nil {
-		return nil, 0, err
+		return candEntry{}, 0, err
 	}
 	found := map[string]rankedPost{}
-	collect := func(candidates string, cargs []any, fresh bool) error {
-		rows, err := tx.QueryContext(ctx, fmt.Sprintf(rankInputs, candidates), append([]any{ReplyScanRows, seasonedSeq, seasoned, Ranking.ReplyAgentsMax}, cargs...)...)
+	collect := func(candidates string, cargs []any) error {
+		rows, err := tx.QueryContext(ctx, fmt.Sprintf(rankInputs, candidates), append([]any{ReplyScanRows, seasonedSeq, seasoned, FeedReplyAgentsMax}, cargs...)...)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
 			var r rankedPost
-			if err = rows.Scan(&r.id, &r.seq, &r.at, &r.score, &r.quality, &r.edited, &r.flagged, &r.replies); err != nil {
+			if err = rows.Scan(&r.id, &r.seq, &r.at, &r.score, &r.quality, &r.edited, &r.flagged, &r.replies, &r.room, &r.account, &r.signed); err != nil {
 				rows.Close()
 				return err
 			}
 			if !r.flagged {
-				r.fresh = fresh
 				found[r.id] = r
 			}
 		}
@@ -469,112 +525,251 @@ func (s *Store) ranking(ctx context.Context, tx *sql.Tx, src rankSource, where [
 	}
 	after := int64(0)
 	if ok {
-		// Only what arrived since the cached ranking; its posts keep their inputs.
+		// Only what arrived since the cached inputs; their posts keep theirs.
 		after = cached.head
 	}
-	// The walk reads rankRowsFirst entries, and all RankScanRows only when
-	// those leave the candidates short and there are more to read.
-	for n := rankRowsFirst; ; n = RankScanRows {
-		source, sargs, err := src.sql(ctx, tx, after, n)
+	// The walk reads twice the view's limit in entries, and all RankScanRows
+	// only when those leave the candidates short and there are more to read.
+	for n := 2 * v.limit; ; n = RankScanRows {
+		source, sargs, err := v.src.sql(ctx, tx, after, n)
 		if err != nil {
-			return nil, 0, err
+			return candEntry{}, 0, err
 		}
 		before := len(found)
-		if err := collect("SELECT e.seq FROM ("+source+") s CROSS JOIN events e ON e.seq=s.seq JOIN rooms r ON r.name=e.room WHERE "+cond+" ORDER BY e.seq DESC LIMIT ?", append(append(sargs, args...), HotCandidates), ok); err != nil {
-			return nil, 0, err
+		if err := collect("SELECT e.seq FROM ("+source+") s CROSS JOIN events e ON e.seq=s.seq JOIN rooms r ON r.name=e.room WHERE "+cond+" ORDER BY e.seq DESC LIMIT ?", append(append(sargs, args...), v.limit)); err != nil {
+			return candEntry{}, 0, err
 		}
-		if n == RankScanRows || len(found)-before >= HotCandidates {
+		if n == RankScanRows || len(found)-before >= v.limit {
 			break
 		}
 		var walked int
 		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM ("+source+")", sargs...).Scan(&walked); err != nil {
-			return nil, 0, err
+			return candEntry{}, 0, err
 		}
 		if walked < n {
 			break
 		}
 	}
-	if !ok {
-		if err := collect("SELECT e.seq FROM (SELECT event_id,score FROM event_scores INDEXED BY event_scores_score ORDER BY score DESC LIMIT ?) v CROSS JOIN events e ON e.id=v.event_id JOIN rooms r ON r.name=e.room WHERE "+cond+" ORDER BY v.score DESC LIMIT ?", append(append([]any{RankScanRows}, args...), HotCandidates), false); err != nil {
-			return nil, 0, err
+	if !ok && v.scored {
+		if err := collect("SELECT e.seq FROM (SELECT event_id,score FROM event_scores INDEXED BY event_scores_score ORDER BY score DESC LIMIT ?) v CROSS JOIN events e ON e.id=v.event_id JOIN rooms r ON r.name=e.room WHERE "+cond+" ORDER BY v.score DESC LIMIT ?", append(append([]any{RankScanRows}, args...), v.limit)); err != nil {
+			return candEntry{}, 0, err
 		}
 	}
-	rankList := func(posts []rankedPost) []rankedPost {
-		sort.Slice(posts, func(i, j int) bool {
-			if a, b := posts[i], posts[j]; a.rank != b.rank {
-				return a.rank > b.rank
-			}
-			return posts[i].seq > posts[j].seq
-		})
-		// No page reaches past the largest offset plus one full page.
-		return posts[:min(len(posts), HotCandidates+PageMax+1)]
-	}
-	entry := rankEntry{at: clock, head: top, top: top}
-	list = make([]rankedPost, 0, len(found))
+	entry := candEntry{at: clock, head: rd.top}
+	entry.posts = make([]rankedPost, 0, len(found)+len(cached.posts))
 	for _, r := range found {
-		r.rank = Ranking.Rank(r.score, r.effectiveQuality(), r.replies, now-r.at, bias)
-		list = append(list, r)
+		entry.posts = append(entry.posts, r)
 	}
 	if ok {
-		// The base keeps the ranks it was made with, so its posts keep their
-		// order among themselves (offset pages read the base).
-		entry.at, entry.head, entry.base = cached.at, cached.head, cached.base // a merge does not extend the ranking's life
-		for _, r := range cached.base {
+		// A merge does not extend the inputs' life.
+		entry.at = cached.at
+		for _, r := range cached.posts {
 			if _, again := found[r.id]; !again {
+				entry.posts = append(entry.posts, r)
+			}
+		}
+	}
+	s.rankMu.Lock()
+	if s.candCache == nil || len(s.candCache) >= rankCacheEntries {
+		s.candCache = map[string]candEntry{}
+	}
+	s.candCache[key] = entry
+	s.rankMu.Unlock()
+	if ok {
+		return entry, candWarm, nil
+	}
+	return entry, candBuilt, nil
+}
+
+// sortRanked orders scored posts, highest first, newest first on a tie, and
+// keeps no more than any page reaches: the largest offset plus one full page.
+func sortRanked(posts []rankedPost) []rankedPost {
+	sort.Slice(posts, func(i, j int) bool {
+		if a, b := posts[i], posts[j]; a.rank != b.rank {
+			return a.rank > b.rank
+		}
+		return posts[i].seq > posts[j].seq
+	})
+	return posts[:min(len(posts), HotCandidates+PageMax+1)]
+}
+
+// rankResult is a ranking as a read gets it: the posts in order, the newest
+// event's sequence, the ranking's generation and the room slices left for a
+// later read (feed.get's warming).
+type rankResult struct {
+	list    []rankedPost
+	top     int64
+	gen     int64
+	scored  int64
+	warming []string
+}
+
+// ranking orders the candidate posts of views by the scorer f, from the cache
+// when fresh: the candidates (SQL, shared by every scorer, see candidates)
+// scored in memory (feedScorer.score). A cached ranking stays for
+// RankCacheTTL from its inputs (a vote or a flag clears it); posts made since
+// it was built are scored on their own and merged in (marked fresh), so a new
+// post shows on the first page at once without a full ranking per post. A
+// pinned read (an offset page) gets the base ranking its first page was cut
+// from, without merges, for RankSnapshotTTL, so pages neither repeat nor skip
+// as posts arrive. At most FeedColdSlices room slices without fresh inputs
+// are read per call; the rest are named in warming, and a ranking that left
+// any is neither cached nor pinned.
+func (s *Store) ranking(ctx context.Context, tx *sql.Tx, views []rankView, f *feedScorer, now int64, pinned bool) (rankResult, error) {
+	keys := make([]string, len(views))
+	for i, v := range views {
+		keys[i] = v.key()
+	}
+	key := strings.Join(keys, "\x01") + "\x00" + f.hash
+	rd := &rankRead{now: now}
+	if err := tx.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM events").Scan(&rd.top); err != nil {
+		return rankResult{}, err
+	}
+	top := rd.top
+	clock := s.now()
+	s.rankMu.Lock()
+	cached, ok := s.rankCache[key]
+	base, hasBase := s.rankPinned[key]
+	s.rankMu.Unlock()
+	if pinned && hasBase && clock.Sub(base.at) >= 0 && clock.Sub(base.at) < RankSnapshotTTL {
+		return rankResult{list: base.base, top: top, gen: base.gen, scored: base.scored}, nil
+	}
+	if ok && (clock.Sub(cached.at) < 0 || clock.Sub(cached.at) >= RankCacheTTL) {
+		ok = false
+	}
+	if ok && cached.top == top {
+		if pinned {
+			return rankResult{list: cached.base, top: top, gen: cached.gen, scored: cached.scored}, nil
+		}
+		return rankResult{list: cached.merged, top: top, gen: cached.gen, scored: cached.scored}, nil
+	}
+	var (
+		all     []rankedPost
+		warming []string
+		inputs  time.Time
+		cold    int
+	)
+	seen := map[string]bool{}
+	for _, v := range views {
+		e, state, err := s.candidates(ctx, tx, v, rd, v.slice == "" || cold < FeedColdSlices)
+		if err != nil {
+			return rankResult{}, err
+		}
+		if state == candSkipped {
+			warming = append(warming, v.slice)
+			continue
+		}
+		if state == candBuilt && v.slice != "" {
+			cold++
+		}
+		if inputs.IsZero() || e.at.Before(inputs) {
+			inputs = e.at
+		}
+		for _, p := range e.posts {
+			if !seen[p.id] {
+				seen[p.id] = true
+				all = append(all, p)
+			}
+		}
+	}
+	if inputs.IsZero() {
+		inputs = clock
+	}
+	// The ranking lives as long as its oldest inputs.
+	entry := rankEntry{at: inputs, head: top, top: top}
+	var list []rankedPost
+	if ok {
+		// Only the posts since the cached ranking are scored; the base keeps
+		// the scores it was made with, so its posts keep their order among
+		// themselves (offset pages read the base).
+		var since []rankedPost
+		for _, p := range all {
+			if p.seq > cached.head {
+				since = append(since, p)
+			}
+		}
+		list = f.score(since, now)
+		again := make(map[string]bool, len(list))
+		for i := range list {
+			list[i].fresh = true
+			again[list[i].id] = true
+		}
+		entry.at, entry.head, entry.base, entry.gen, entry.scored = cached.at, cached.head, cached.base, cached.gen, cached.scored // a merge does not extend the ranking's life
+		for _, r := range cached.base {
+			if !again[r.id] {
 				list = append(list, r)
 			}
 		}
+	} else {
+		list = f.score(all, now)
 	}
-	list = rankList(list)
+	list = sortRanked(list)
+	s.rankMu.Lock()
 	if !ok {
 		entry.base = list
+		s.rankGen++
+		entry.gen, entry.scored = s.rankGen, now
 	}
 	entry.merged = list
-	s.rankMu.Lock()
-	if s.rankCache == nil || len(s.rankCache) >= rankCacheEntries {
-		s.rankCache = map[string]rankEntry{}
-	}
-	s.rankCache[key] = entry
-	if !ok {
-		if s.rankPinned == nil || len(s.rankPinned) >= rankCacheEntries {
-			s.rankPinned = map[string]rankEntry{}
+	if len(warming) == 0 {
+		if s.rankCache == nil || len(s.rankCache) >= rankCacheEntries {
+			s.rankCache = map[string]rankEntry{}
 		}
-		s.rankPinned[key] = rankEntry{at: entry.at, head: entry.head, base: entry.base}
+		s.rankCache[key] = entry
+		if !ok {
+			if s.rankPinned == nil || len(s.rankPinned) >= rankCacheEntries {
+				s.rankPinned = map[string]rankEntry{}
+			}
+			s.rankPinned[key] = rankEntry{at: entry.at, gen: entry.gen, scored: entry.scored, head: entry.head, base: entry.base}
+		}
 	}
 	s.rankMu.Unlock()
+	res := rankResult{list: list, top: top, gen: entry.gen, scored: entry.scored, warming: warming}
 	if pinned {
-		return entry.base, top, nil
+		res.list = entry.base
 	}
-	return list, top, nil
+	return res, nil
 }
 
-// readRanked lists top-level posts (not replies, not later versions) in public
-// rooms by hot rank or all-time score. where and args already select what the
-// caller may read. Ranking reads only ids, times and scores; the page's posts
-// are loaded afterwards and held to the same byte budget as any page. Pages
-// are by offset into the ranking the first page was cut from (its base, see
-// ranking): next_offset counts only the base's posts a page delivered, so a
-// post merged into a first page since its ranking was made neither shifts
-// nor repeats the pages after it. ranked is how many posts the view ranks
-// (from the offset), for the first-contact fallback.
-func (s *Store) readRanked(ctx context.Context, tx *sql.Tx, src rankSource, where []string, args []any, o ListOptions, limit int, now int64) (res Result, ranked int, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	list, head, err := s.ranking(ctx, tx, src, where, args, *o.Bias, now, o.Offset > 0)
+// rankTimeout is a ranking's error as the reader sees it: past the two-second
+// work budget, 503 rank_read_timeout.
+func rankTimeout(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return Result{}, 0, &Error{Status: 503, Code: "rank_read_timeout", Message: "Ranking exceeded its two-second work budget; retry or read sort=new.", RetryAfter: 2}
+		return &Error{Status: 503, Code: "rank_read_timeout", Message: "Ranking exceeded its two-second work budget; retry or read sort=new.", RetryAfter: 2}
 	}
-	if err != nil {
-		return Result{}, 0, err
-	}
-	if o.Offset >= len(list) {
+	return err
+}
+
+// rankBudget is the work budget of one ranked read.
+const rankBudget = 2 * time.Second
+
+// rankedPageOut is one page cut from a ranking: its messages, the ranked
+// posts it delivered, the offset the next page starts at, whether there are
+// more, and how many posts the ranking holds from the offset.
+type rankedPageOut struct {
+	events  []Message
+	page    []rankedPost
+	next    int
+	hasMore bool
+	ranked  int
+}
+
+// rankedPage loads the posts of list from offset, up to limit, held to the
+// same byte budget as any page. hidden and flags are checked again: a cached
+// or pinned ranking can predate a removal or a flag. next counts only the
+// base ranking's posts a page delivered (fresh ones are merged into first
+// pages alone), so a post merged into a first page since its ranking was
+// made neither shifts nor repeats the pages after it.
+func (s *Store) rankedPage(ctx context.Context, tx *sql.Tx, list []rankedPost, offset, limit int, now int64) (rankedPageOut, error) {
+	var out rankedPageOut
+	if offset >= len(list) {
 		list = nil
 	} else {
-		list = list[o.Offset:]
+		list = list[offset:]
 	}
-	ranked = len(list)
-	hasMore := len(list) > limit
-	if hasMore {
+	out.ranked = len(list)
+	out.hasMore = len(list) > limit
+	if out.hasMore {
 		list = list[:limit]
 	}
 	events := make([]Message, 0, len(list))
@@ -584,49 +779,68 @@ func (s *Store) readRanked(ctx context.Context, tx *sql.Tx, src rankSource, wher
 		for i, r := range list {
 			ids[i], order[r.id] = r.id, i
 		}
-		// hidden and flags are checked again: a cached or pinned ranking can
-		// predate a removal or a flag.
 		rows, err := tx.QueryContext(ctx, "SELECT "+eventColumns+" FROM events e JOIN rooms r ON r.name=e.room WHERE e.hidden=0 AND NOT EXISTS(SELECT 1 FROM event_flags f WHERE f.root=e.id) AND e.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
 		if err != nil {
-			return Result{}, 0, err
+			return out, err
 		}
 		for rows.Next() {
 			e, err := scanEvent(rows)
 			if err != nil {
 				rows.Close()
-				return Result{}, 0, err
+				return out, err
 			}
 			events = append(events, e)
 		}
 		if err = closeRows(rows); err != nil {
-			return Result{}, 0, err
+			return out, err
 		}
 		sort.Slice(events, func(i, j int) bool { return order[events[i].ID] < order[events[j].ID] })
 	}
-	if err = s.loadAttachments(ctx, tx, events, now); err != nil {
-		return Result{}, 0, err
+	if err := s.loadAttachments(ctx, tx, events, now); err != nil {
+		return out, err
 	}
-	if err = attachScores(ctx, tx, events, now); err != nil {
-		return Result{}, 0, err
+	if err := attachScores(ctx, tx, events, now); err != nil {
+		return out, err
 	}
-	// The byte budget can end a page early; next_offset follows what was sent.
+	// The byte budget can end a page early; next follows what was sent.
 	delivered := len(list)
 	events, cut := boundPage(events, "ASC", len(events), -1)
 	if cut {
 		// Count from the ranking, not the page: a post hidden since the ranking
 		// was cached is skipped, not repeated.
-		hasMore, delivered = true, 0
+		out.hasMore, delivered = true, 0
 		if len(events) > 0 {
 			delivered = order[events[len(events)-1].ID] + 1
 		}
 	}
-	// Offsets count the base ranking's posts only (fresh ones are merged into
-	// first pages alone).
-	next := o.Offset
-	for _, r := range list[:delivered] {
+	out.events, out.page, out.next = events, list[:delivered], offset
+	for _, r := range out.page {
 		if !r.fresh {
-			next++
+			out.next++
 		}
+	}
+	return out, nil
+}
+
+// readRanked lists top-level posts (not replies, not later versions) in public
+// rooms by hot rank or all-time score: the default feed profile at the
+// read's bias (feed.go), so messages.list sort=hot and feed.get with no
+// override are one ranking. where and args already select what the caller
+// may read. Ranking reads only ids, times and scores; the page's posts are
+// loaded afterwards (rankedPage). Pages are by offset into the ranking the
+// first page was cut from (its base, see ranking). ranked is how many posts
+// the view ranks (from the offset), for the first-contact fallback.
+func (s *Store) readRanked(ctx context.Context, tx *sql.Tx, src rankSource, where []string, args []any, o ListOptions, limit int, now int64) (res Result, ranked int, err error) {
+	ctx, cancel := context.WithTimeout(ctx, rankBudget)
+	defer cancel()
+	view := rankView{src: src, where: where, args: args, windowed: *o.Bias > 0, limit: HotCandidates, scored: true}
+	rr, err := s.ranking(ctx, tx, []rankView{view}, defaultFeedScorer(*o.Bias), now, o.Offset > 0)
+	if err != nil {
+		return Result{}, 0, rankTimeout(err)
+	}
+	pg, err := s.rankedPage(ctx, tx, rr.list, o.Offset, limit, now)
+	if err != nil {
+		return Result{}, 0, err
 	}
 	sortName := "hot"
 	if *o.Bias == 0 {
@@ -634,5 +848,5 @@ func (s *Store) readRanked(ctx context.Context, tx *sql.Tx, src rankSource, wher
 	}
 	// next_cursor is where the chronological feed (a cursor read) resumes
 	// from now, so a reader that starts ranked can poll for what is new.
-	return Result{Messages: events, NextCursor: s.cursor(head), Data: map[string]any{"has_more": hasMore, "sort": sortName, "bias": *o.Bias, "offset": o.Offset, "next_offset": next}}, ranked, nil
+	return Result{Messages: pg.events, NextCursor: s.cursor(rr.top), Data: map[string]any{"has_more": pg.hasMore, "sort": sortName, "bias": *o.Bias, "offset": o.Offset, "next_offset": pg.next}}, pg.ranked, nil
 }

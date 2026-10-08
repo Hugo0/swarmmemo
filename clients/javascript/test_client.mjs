@@ -363,6 +363,90 @@ test('allowance, memory, trust and vouch helpers send the documented command sha
   assert.equal(bodies.length, 0);
 });
 
+test('work, updates, journal, docs, tools and /call helpers send the documented shapes, signed (C56)', async t => {
+  const requests = [], generation = 'g'.repeat(32), agent = 'a'.repeat(64), id = 'm'.repeat(26);
+  const origin = await server(t, (req, res) => {
+    let body = ''; req.on('data', chunk => {body += chunk;});
+    req.on('end', () => {
+      const parsed = JSON.parse(body); requests.push({path: req.url, body: parsed});
+      const reply = parsed.operation === 'work.get' ? {ok: true, data: {work: {service_generation: generation, fence: 3}}}
+        : parsed.operation === 'updates.get' ? {ok: true, messages: [], next_cursor: parsed.cursor ? parsed.cursor + '+' : 'c1', data: {}}
+        : {ok: true};
+      res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(reply));
+    });
+  });
+  const signed = new Client({origin, key: fixtureKey, allowInsecureLoopback: true}), anonymous = new Client({origin});
+  const verifySigned = body => {
+    const unsigned = {...body}; delete unsigned.signature;
+    assert.equal(body.public_key, fixtureKey.public_key);
+    assert.equal(verify(null, canonical(unsigned), createPublicKey({key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(fixtureKey.public_key, 'base64url')]), format: 'der', type: 'spki'}), Buffer.from(body.signature, 'base64url')), true);
+  };
+  const shown = body => {const copy = {...body}; for (const field of ['public_key', 'timestamp', 'nonce', 'signature']) delete copy[field]; return copy;};
+  const work = (fields, extra = '') => ({...fields, data: `{"schema":1,"generation":"${generation}"${extra}}`});
+  const cases = [
+    [() => anonymous.works({kind: 'rewarded', limit: 5}), {operation: 'works.list', kind: 'rewarded', limit: 5}],
+    [() => signed.works({kind: 'earn', eligibleFor: agent}), {operation: 'works.list', kind: 'earn', data: `{"schema":1,"eligible_for":"${agent}"}`}],
+    [() => anonymous.work(id, {agent}), {operation: 'work.get', message_id: id, target: agent}],
+    [() => signed.claimWork(id, {generation, requestId: 'c-1'}), work({operation: 'work.claim', message_id: id, ttl: 3600, request_id: 'c-1'})],
+    [() => signed.claimWork(id, {result: 'r1', generation, resultSha256: 'f'.repeat(64), requestId: 'c-2'}), work({operation: 'work.claim', message_id: id, target: 'r1', request_id: 'c-2'}, `,"result_sha256":"${'f'.repeat(64)}"`)],
+    [() => signed.submitWork(id, 3, 'r1', {generation, requestId: 's-1'}), work({operation: 'work.submit', message_id: id, amount: 3, target: 'r1', request_id: 's-1'})],
+    [() => signed.acceptWork(id, 3, {generation, requestId: 'a-1'}), work({operation: 'work.accept', message_id: id, amount: 3, request_id: 'a-1'})],
+    [() => signed.rejectWork(id, 3, 'Breaks the build.', {generation, requestId: 'j-1'}), work({operation: 'work.reject', message_id: id, amount: 3, reason: 'Breaks the build.', request_id: 'j-1'})],
+    [() => signed.updates(), {operation: 'updates.get', target: fixtureKey.fingerprint}],
+    [() => signed.updates({cursor: 'c9', wait: 25, limit: 10}), {operation: 'updates.get', target: fixtureKey.fingerprint, cursor: 'c9', limit: 10, data: '{"schema":1,"wait":25}'}],
+    [() => anonymous.updates({agent, wait: 5}), {operation: 'updates.get', target: agent}],
+    [() => anonymous.updates({agent, cursor: 'c9', counts: true}), {operation: 'updates.get', target: agent, cursor: 'c9', data: '{"schema":1,"counts":true}'}],
+    [() => signed.journal({cursor: 'c9', limit: 20}), {operation: 'journal.get', cursor: 'c9', limit: 20}],
+    [() => signed.docsCreate('Build log', 'All green.', {visibility: 'unlisted', expiresIn: 86400, maxCost: 4, requestId: 'd-1'}), {operation: 'service.call', target: 'docs', request_id: 'd-1', data: '{"schema":1,"method":"create","args":{"title":"Build log","text":"All green.","visibility":"unlisted","expires_in":86400},"max_cost":4}'}],
+    [() => signed.docsWrite('DOC', 1, 'Deployed.', {requestId: 'd-2'}), {operation: 'service.call', target: 'docs', request_id: 'd-2', data: '{"schema":1,"method":"write","args":{"id":"DOC","base_version":1,"text":"Deployed."},"max_cost":1099511627776}'}],
+    [() => signed.docsRead('DOC', {version: 2, requestId: 'd-3'}), {operation: 'service.call', target: 'docs', request_id: 'd-3', data: '{"schema":1,"method":"read","args":{"id":"DOC","version":2},"max_cost":1099511627776}'}],
+    [() => anonymous.docsOpen('DOC', {screen: false, requestId: 'd-4'}), {operation: 'service.call', target: 'docs', request_id: 'd-4', data: '{"schema":1,"method":"open","args":{"id":"DOC","screen":false},"max_cost":1099511627776}'}],
+    [() => signed.docsDelete('DOC', {requestId: 'd-5'}), {operation: 'service.call', target: 'docs', request_id: 'd-5', data: '{"schema":1,"method":"delete","args":{"id":"DOC"},"max_cost":1099511627776}'}],
+    [() => signed.docsHistory('DOC', {limit: 5}), {operation: 'service.read', target: 'docs', data: '{"schema":1,"method":"history","args":{"id":"DOC","limit":5}}'}],
+    [() => signed.docsList({kind: 'paste', limit: 20}), {operation: 'service.read', target: 'docs', data: '{"schema":1,"method":"list","args":{"kind":"paste","limit":20}}'}],
+    [() => anonymous.toolsSearch('weather forecast', {kind: 'catalogue'}), {operation: 'service.read', target: 'tools', data: '{"schema":1,"method":"search","args":{"query":"weather forecast","kind":"catalogue"}}'}],
+    [() => signed.toolsCall('tool:wx', {city: 'Lisbon'}, {maxCost: 30, requestId: 't-1'}), {operation: 'service.call', target: 'tools', request_id: 't-1', data: '{"schema":1,"method":"call","args":{"id":"tool:wx","args":{"city":"Lisbon"}},"max_cost":30}'}],
+    [() => signed.serviceCall('wakeup', 'schedule', {key: 'replies', on: 'reply'}, {maxCost: 1, requestId: 'w-1'}), {operation: 'service.call', target: 'wakeup', request_id: 'w-1', data: '{"schema":1,"method":"schedule","args":{"key":"replies","on":"reply"},"max_cost":1}'}],
+  ];
+  for (const [call, expected] of cases) {
+    await call();
+    const {path, body} = requests.shift();
+    assert.equal(path, '/v1/command');
+    assert.deepEqual(shown(body), expected, call.toString());
+    assert.equal(!!body.signature, call.toString().startsWith('() => signed.'));
+    if (body.signature) verifySigned(body); else assert.equal(body.public_key, undefined);
+  }
+  // Left out, the generation is read once with work.get, then signed into the transition.
+  await signed.acceptWork(id, 3, {requestId: 'a-2'});
+  assert.deepEqual(requests.map(r => r.body.operation), ['work.get', 'work.accept']);
+  assert.equal(requests[1].body.data, `{"schema":1,"generation":"${generation}"}`); verifySigned(requests[1].body); requests.length = 0;
+  // /call: unsigned POST, args as the body's fields, with max_cost and request_id.
+  await signed.callUrl('fetch', 'page', {url: 'https://example.com/'}, {maxCost: 8, requestId: 'r'.repeat(16)});
+  assert.deepEqual(requests.shift(), {path: '/call/fetch/page', body: {url: 'https://example.com/', max_cost: 8, request_id: 'r'.repeat(16)}});
+  await anonymous.callUrl('public_data', 'fetch', {dataset: 'sea_ice_extent'});
+  assert.deepEqual(requests.shift(), {path: '/call/public_data/fetch', body: {dataset: 'sea_ice_extent'}});
+  // followUpdates resumes from and saves the cursor file, owner-only, after the page is handled.
+  const cursorFile = join(await temp(t), 'cursor.json');
+  const pages = signed.followUpdates({cursorFile, wait: 20});
+  assert.equal((await pages.next()).value.next_cursor, 'c1');
+  assert.equal(requests.shift().body.cursor, undefined);
+  await assert.rejects(stat(cursorFile));
+  await pages.next();
+  assert.deepEqual(JSON.parse(await readFile(cursorFile, 'utf8')), {cursor: 'c1'});
+  assert.equal((await stat(cursorFile)).mode & 0o777, 0o600);
+  assert.deepEqual(shown(requests.shift().body), {operation: 'updates.get', target: fixtureKey.fingerprint, cursor: 'c1', data: '{"schema":1,"wait":20}'});
+  await pages.return();
+  const resumed = signed.followUpdates({cursorFile});
+  await resumed.next(); await resumed.return();
+  assert.equal(requests.shift().body.cursor, 'c1');
+  // Refused locally, before anything is sent.
+  await assert.rejects(signed.toolsCall('tool:wx', {}), errorCode('invalid_option'));
+  await assert.rejects(signed.updates({cursor: 'c', wait: 26}), errorCode('invalid_option'));
+  await assert.rejects(anonymous.callUrl('https://x', 'page'), errorCode('invalid_service'));
+  await assert.rejects(anonymous.callUrl('fetch', 'page', {}, {maxCost: -1}), errorCode('invalid_option'));
+  assert.equal(requests.length, 0);
+});
+
 test('direct module execution has no implicit CLI side effects', () => {
   const result = spawnSync(process.execPath, [new URL('./swarmmemo.mjs', import.meta.url).pathname], {encoding: 'utf8'});
   assert.equal(result.status, 0); assert.equal(result.stdout, ''); assert.equal(result.stderr, '');

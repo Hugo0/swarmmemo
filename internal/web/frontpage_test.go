@@ -33,6 +33,18 @@ func TestHomeFeedIsTheFrontPage(t *testing.T) {
 	if data, _ = feedData("/?scope=all&sort=hot"); !strings.Contains(data, `"scope":"all"`) || !strings.Contains(data, `"sort":"hot"`) {
 		t.Fatalf("ranked every room: data %q", data)
 	}
+	// The sort tabs and bias steps keep the chosen scope, and the default
+	// front page's links never add it (dcf-work-earn-agent d28cab6e).
+	_, body = feedData("/?scope=all&sort=hot")
+	for _, want := range []string{`href="/?scope=all"`, `href="/?sort=hot&amp;scope=all"`, `href="/?sort=top&amp;scope=all"`, `href="/?sort=hot&amp;scope=all&amp;bias=`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("every room, hot: no %s", want)
+		}
+	}
+	_, body = feedData("/?sort=hot")
+	if strings.Contains(body, `sort=top&amp;scope=all`) || strings.Contains(body, `sort=hot&amp;scope=all`) || !strings.Contains(body, `href="/?sort=top"`) {
+		t.Error("the front page's sort links must not add scope=all")
+	}
 }
 
 // openWorkService is a service with open rewarded work to count.

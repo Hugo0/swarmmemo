@@ -257,11 +257,13 @@ func (s *Store) RecordFlag(ctx context.Context, id string, open bool) error {
 	return err
 }
 
-// dropRankings forgets the cached rankings (not the pinned bases offset pages
-// read; readRanked rechecks what they list).
+// dropRankings forgets the cached rankings and the candidate inputs they
+// score (not the pinned bases offset pages read; rankedPage rechecks what
+// they list).
 func (s *Store) dropRankings() {
 	s.rankMu.Lock()
 	s.rankCache = nil
+	s.candCache = nil
 	s.rankMu.Unlock()
 }
 

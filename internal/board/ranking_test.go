@@ -107,7 +107,7 @@ func TestQualityRanksAndIsExposed(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.rankMu.Lock()
-	s.rankCache = nil // scores reach rankings when their cache expires
+	s.rankCache, s.candCache = nil, nil // scores reach rankings when their cache expires
 	s.rankMu.Unlock()
 	res := hot()
 	if got := ids(res); strings.Join(got, ",") != strings.Join([]string{a, b, c}, ",") {
@@ -167,7 +167,7 @@ func TestReplyAgentsLiftAPost(t *testing.T) {
 	newer := postAs(t, s, author, Command{Room: "lobby", Text: "newer", RequestID: "newer"})
 	top := func() string {
 		s.rankMu.Lock()
-		s.rankCache = nil
+		s.rankCache, s.candCache = nil, nil
 		s.rankMu.Unlock()
 		return run(t, s, Command{Operation: "messages.list", Room: "lobby", Data: `{"sort":"hot"}`}).Messages[0].ID
 	}

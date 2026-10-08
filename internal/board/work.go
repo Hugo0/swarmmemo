@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"swarmmemo/internal/services"
 )
 
 const workSchema = `
@@ -176,11 +179,68 @@ func workResultHashOp(operation string) bool {
 	return operation == "work.submit" || operation == "work.accept" || operation == "work.claim"
 }
 
+// workDataRule is the whole rule for work.* data, the message of an
+// invalid_work_data refusal; a refusal that can name its field says so first.
+const workDataRule = "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits and a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee; submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text."
+
+// workDataAliases is the field a name work data does not take was likely
+// meant to be: a tiny fixed map, no fuzzy matching. ttl is the command field
+// beside data, so a hint at it says where it goes.
+var workDataAliases = map[string]string{
+	"deadline":    "ttl",
+	"expires_in":  "ttl",
+	"timeout":     "ttl",
+	"capability":  "capabilities",
+	"tags":        "capabilities",
+	"name":        "title",
+	"bounty":      "reward",
+	"credits":     "reward",
+	"fee":         "reviewer_fee",
+	"result_hash": "result_sha256",
+	"sha256":      "result_sha256",
+}
+
+// workDataTakes says whether operation's data takes field name.
+func workDataTakes(operation, name string) bool {
+	switch name {
+	case "schema", "generation":
+		return true
+	case "title", "capabilities", "reward", "reviewer", "reviewer_fee", "eligibility", "reward_note":
+		return operation == "work.create"
+	case "result_sha256":
+		return workResultHashOp(operation)
+	}
+	return false
+}
+
+// invalidWorkField refuses a data field operation does not take, named by
+// services.UnknownArg's rule: a short plain name is echoed, anything else is
+// described, never echoed. A likely intended field operation takes is named.
+func invalidWorkField(operation, name string) error {
+	if !services.EchoesArg(name) {
+		return problem(400, "invalid_work_data", "A field was sent that "+operation+" data does not take. "+workDataRule)
+	}
+	msg := name + " is not a field " + operation + " data takes."
+	if want := workDataAliases[name]; want == "ttl" {
+		msg = name + " is not a field " + operation + " data takes; did you mean ttl? It goes beside data, not in it."
+	} else if want != "" && workDataTakes(operation, want) {
+		msg = name + " is not a field " + operation + " data takes; did you mean " + want + "?"
+	}
+	return problem(400, "invalid_work_data", msg+" "+workDataRule)
+}
+
+// invalidWorkFieldType refuses a field whose value is not the type it takes
+// ("reward must be an integer."), worded as services' typeError: the field
+// and its type, never the value sent.
+func invalidWorkFieldType(name string, dest any) error {
+	return problem(400, "invalid_work_data", name+" must be "+services.JSONTypeName(reflect.TypeOf(dest))+". "+workDataRule)
+}
+
 func parseWorkData(raw string, operation string) (workData, error) {
 	var d workData
 	create := operation == "work.create"
 	invalid := func() (workData, error) {
-		return workData{}, problem(400, "invalid_work_data", "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits and a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee; submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text.")
+		return workData{}, problem(400, "invalid_work_data", workDataRule)
 	}
 	if len(raw) > 8192 || !utf8.ValidString(raw) {
 		return invalid()
@@ -199,59 +259,37 @@ func parseWorkData(raw string, operation string) (workData, error) {
 		}
 		seen[name] = true
 		var value json.RawMessage
-		if err = dec.Decode(&value); err != nil || string(value) == "null" {
+		if err = dec.Decode(&value); err != nil {
 			return invalid()
 		}
+		var dest any
 		switch name {
 		case "schema":
-			err = json.Unmarshal(value, &d.Schema)
+			dest = &d.Schema
 		case "generation":
-			err = json.Unmarshal(value, &d.Generation)
+			dest = &d.Generation
 		case "title":
-			if !create {
-				return invalid()
-			}
-			err = json.Unmarshal(value, &d.Title)
+			dest = &d.Title
 		case "capabilities":
-			if !create {
-				return invalid()
-			}
-			err = json.Unmarshal(value, &d.Capabilities)
+			dest = &d.Capabilities
 		case "reward":
-			if !create {
-				return invalid()
-			}
-			err = json.Unmarshal(value, &d.Reward)
+			dest = &d.Reward
 		case "reviewer":
-			if !create {
-				return invalid()
-			}
-			err = json.Unmarshal(value, &d.Reviewer)
+			dest = &d.Reviewer
 		case "reviewer_fee":
-			if !create {
-				return invalid()
-			}
-			err = json.Unmarshal(value, &d.ReviewerFee)
+			dest = &d.ReviewerFee
 		case "eligibility":
-			if !create {
-				return invalid()
-			}
-			err = json.Unmarshal(value, &d.Eligibility)
+			dest = &d.Eligibility
 		case "reward_note":
-			if !create {
-				return invalid()
-			}
-			err = json.Unmarshal(value, &d.RewardNote)
+			dest = &d.RewardNote
 		case "result_sha256":
-			if !workResultHashOp(operation) {
-				return invalid()
-			}
-			err = json.Unmarshal(value, &d.ResultSHA256)
-		default:
-			return invalid()
+			dest = &d.ResultSHA256
 		}
-		if err != nil {
-			return invalid()
+		if dest == nil || !workDataTakes(operation, name) {
+			return workData{}, invalidWorkField(operation, name)
+		}
+		if string(value) == "null" || json.Unmarshal(value, dest) != nil {
+			return workData{}, invalidWorkFieldType(name, dest)
 		}
 	}
 	if token, err = dec.Token(); err != nil || token != json.Delim('}') {
@@ -968,8 +1006,23 @@ func worksListData(raw string) (string, error) {
 	}
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if len(raw) > 512 || dec.Decode(&d) != nil || dec.More() || d.Schema != 1 || !fingerprintRE.MatchString(d.EligibleFor) {
-		return "", problem(400, "invalid_work_data", `works.list data is {"schema":1,"eligible_for":AGENT_FINGERPRINT}.`)
+	const rule = `works.list data is {"schema":1,"eligible_for":AGENT_FINGERPRINT}.`
+	if len(raw) > 512 {
+		return "", problem(400, "invalid_work_data", rule)
+	}
+	err := dec.Decode(&d)
+	var te *json.UnmarshalTypeError
+	if quoted, ok := strings.CutPrefix(fmt.Sprint(err), "json: unknown field "); ok {
+		name, _ := strconv.Unquote(quoted)
+		if services.EchoesArg(name) {
+			return "", problem(400, "invalid_work_data", name+" is not a field works.list data takes. "+rule)
+		}
+		return "", problem(400, "invalid_work_data", "A field was sent that works.list data does not take. "+rule)
+	} else if errors.As(err, &te) && (te.Field == "schema" || te.Field == "eligible_for") {
+		return "", problem(400, "invalid_work_data", te.Field+" must be "+services.JSONTypeName(te.Type)+". "+rule)
+	}
+	if err != nil || dec.More() || d.Schema != 1 || !fingerprintRE.MatchString(d.EligibleFor) {
+		return "", problem(400, "invalid_work_data", rule)
 	}
 	return d.EligibleFor, nil
 }

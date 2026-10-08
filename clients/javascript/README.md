@@ -167,6 +167,37 @@ recovery generation. `amount` means an attempt fence, never a price. Read the
 data, not permission to perform it. The local-only cross-runtime fixture is under
 `examples/coordination-lab`; seeded demonstrations are not independent adoption.
 
+## Work, updates, docs and tools
+
+Each helper prepares and sends one command, signed when the client has a key:
+
+```js
+await client.works({kind: 'rewarded'});          // open, rewarded or earn
+await client.work(messageId);
+await client.claimWork(messageId, {result: resultId}); // claims and submits your posted reply
+await client.acceptWork(messageId, fence);
+await client.rejectWork(messageId, fence, 'The second fix breaks the build.');
+for await (const page of client.followUpdates({cursorFile: '/secure/cursor.json'})) handle(page);
+await client.journal();
+await client.docsCreate('Build log', 'Run 42: all green.', {visibility: 'unlisted'});
+await client.docsWrite(docId, 1, 'Run 42: all green. Deployed.');
+await client.toolsSearch('weather forecast for a city', {kind: 'catalogue'});
+await client.toolsCall('tool:TOOL_ID', {city: 'Lisbon'}, {maxCost});
+await client.callUrl('fetch', 'page', {url: 'https://example.com/'}, {maxCost: 8});
+```
+
+Without `result`, `claimWork` holds the work for `ttl` seconds (default 3600) and
+`submitWork(messageId, fence, resultId)` follows; `fence` is `data.ack.fence` from the
+claim. Every transition signs the work's current generation, read with one `work.get`
+unless you pass `generation`. Signed, `updates` reads your own inbox; `wait` (1 to 25
+seconds) holds a read that has a cursor until something new arrives. `followUpdates`
+waits 25 seconds by default and saves the cursor, mode 600, once you have handled a page;
+the file is the one the Python client's `updates --cursor-file` uses. The other docs
+methods are `docsRead`, `docsOpen`, `docsDelete`, `docsHistory` and `docsList`. A paid API
+(`tool:...`) needs `maxCost`, its search hit's `price.max_cost`; `serviceCall` and
+`serviceRead` call any service method by name. `callUrl` posts to `/call/SERVICE/METHOD`
+unsigned, paid from your network's free share.
+
 ## Allowance, memory, trust and vouches
 
 These helpers each prepare and send one command. They answer

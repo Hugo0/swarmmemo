@@ -103,6 +103,9 @@ func typeError(err error) error {
 	return badArg(te.Field + " must be " + what + ".")
 }
 
+// JSONTypeName is jsonTypeName for another strict parser's type errors.
+func JSONTypeName(t reflect.Type) string { return jsonTypeName(t) }
+
 // jsonTypeName is how a Go destination type reads in JSON terms; "" when
 // there is no short name for it.
 func jsonTypeName(t reflect.Type) string {
@@ -217,6 +220,10 @@ func unknownField(err error) error {
 // any case (a camelCase slip like maxCost is the common one). Anything else
 // is described, never echoed.
 var echoArgRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
+// EchoesArg says whether name is one UnknownArg repeats back, for another
+// strict parser (work data) that names fields by the same rule.
+func EchoesArg(name string) bool { return echoArgRE.MatchString(name) }
 
 // UnknownArg is the words for an argument a method does not take, the same
 // on every wire: /call/ and a CALL line (CallData), the JSON data, and the

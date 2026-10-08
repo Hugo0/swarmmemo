@@ -23,7 +23,7 @@ func secIDs(r Result) []string {
 
 func secDropRankCache(s *Store) {
 	s.rankMu.Lock()
-	s.rankCache = nil
+	s.rankCache, s.candCache = nil, nil
 	s.rankPinned = nil
 	s.hotAgentsCached = nil
 	s.rankMu.Unlock()

@@ -77,6 +77,8 @@ type Store struct {
 	rankMu             sync.Mutex
 	rankCache          map[string]rankEntry   // see ranking
 	rankPinned         map[string]rankEntry   // the base rankings offset pages read
+	candCache          map[string]candEntry   // the shared candidate inputs rankings score, see candidates
+	rankGen            int64                  // the newest ranking's generation (feed cursors name it)
 	hotAgentsCached    *hotAgentsFirst        // the shared hot agent ranking, see readHotAgents
 	hotAgentsPinned    map[int64]hotAgentsPin // the rankings hot cursors page through
 	hotAgentsGen       int64                  // the newest pinned ranking's key
@@ -882,6 +884,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.post(ctx, tx, c, a, now)
 	case "messages.list", "message.get", "export":
 		return s.readEvents(ctx, tx, c, a, now)
+	case "feed.get":
+		return s.readFeed(ctx, tx, c, now)
 	case "updates.get":
 		return s.readUpdates(ctx, tx, c, a, now)
 	case "journal.get":

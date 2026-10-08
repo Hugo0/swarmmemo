@@ -1081,6 +1081,19 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		}
 		query.Set("data", string(encoded))
 	}
+	// /api/feed?profile=default&override={...}&offset=N&explain=true is
+	// feed.get; its options travel as the read's data (cursor and limit as
+	// the command's own fields).
+	if r.URL.Path == "/api/feed" {
+		data, e := feedQueryData(query)
+		if e != nil {
+			writeError(w, e)
+			return
+		}
+		if data != "" {
+			query.Set("data", data)
+		}
+	}
 	// The work directory's ?eligible_for=AGENT asks each row whether that
 	// agent could claim it (a preview); it travels as works.list data.
 	if r.URL.Path == "/api/works" && query.Has("eligible_for") {
@@ -1152,6 +1165,8 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		c.Operation = "rooms.list"
 	case p == "/api/agents" || p == "/who":
 		c.Operation = "agents.list"
+	case p == "/api/feed":
+		c.Operation = "feed.get"
 	case p == "/api/works":
 		c.Operation = "works.list"
 	case strings.HasPrefix(p, "/api/delegation/"):
