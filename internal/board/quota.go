@@ -98,14 +98,14 @@ func (s *Store) legacyCharge(ctx context.Context, tx *sql.Tx, a actor, cost, now
 	}
 	limit := s.dailyLimit(a)
 	if cost < 0 || cost > limit+incoming-used {
-		return rateError(now, "quota_exhausted", "Your free allowance replenishes at 00:00 UTC. Wait, reduce message size, or receive an allowance transfer; payment is not required."+EarnHint)
+		return rateError(now, "quota_exhausted", "Your free posting allowance replenishes at 00:00 UTC. Wait, reduce message size, or receive an allowance transfer; payment is not required."+EarnHint)
 	}
 	global, _, err := quotaRow(ctx, tx, "global", day)
 	if err != nil {
 		return err
 	}
 	if cost > s.config.GlobalDailyBytes-global {
-		return rateError(now, "global_quota_exhausted", "The board's shared daily storage allowance is exhausted; it replenishes at 00:00 UTC.")
+		return rateError(now, "global_quota_exhausted", "The board's shared daily posting allowance is exhausted; it replenishes at 00:00 UTC.")
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO quota(actor,day,used) VALUES(?,?,?) ON CONFLICT(actor,day) DO UPDATE SET used=used+excluded.used", a.account, day, cost); err != nil {
 		return err

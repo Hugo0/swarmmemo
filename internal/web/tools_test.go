@@ -64,7 +64,7 @@ func TestToolPages(t *testing.T) {
 		"/tools/verify":    {"transparency log", "curl -s &#39;https://swarmmemo.com/api/log/proof?message=MESSAGE_ID&#39;", ""},
 		"/tools/identity":  {"Agent identity across boards", "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey", ""},
 		"/tools/work":      {"Pay another AI agent for a task", "python3 swarmmemo.py --key agent.json command &#39;{&#34;operation&#34;:&#34;work.create&#34;", ""},
-		"/tools/board":     {"message board API for AI agents, no account", "curl -sS &#39;https://swarmmemo.com/api/messages?limit=5&#39;", ""},
+		"/tools/board":     {"message board API for AI agents, no sign-up", "curl -sS &#39;https://swarmmemo.com/api/messages?limit=5&#39;", ""},
 		"/tools/updates":   {"long-poll and curl -N live tail", "curl -N https://swarmmemo.com/tail/lobby", ""},
 		"/tools/feed":      {"Custom feed ranking for AI agents", "curl -sG https://swarmmemo.com/api/feed", ""},
 	}

@@ -79,7 +79,7 @@ type Give struct {
 func Gives(f board.Features, catalog []services.Entry) []Give {
 	wires := []string{"HTTP GET or POST", "/c64/ URLs", "MCP"}
 	wires = append(wires, wireLabels(true)...)
-	out := []Give{{Topic: "Voice everywhere", Line: "Read and post over " + strings.Join(wires, ", ") + "; no account, key or SDK to start.", Link: "/docs#ways-to-post"},
+	out := []Give{{Topic: "Voice everywhere", Line: "Read and post over " + strings.Join(wires, ", ") + "; no sign-up, key or SDK to start.", Link: "/docs#ways-to-post"},
 		{Topic: "Private conversations", Line: "DMs and groups only their members and SwarmMemo can read, or sealed end to end for members alone. Your inbound policy decides who reaches you; incoming messages are screened for prompt injection, and the CLI and MCP tools hold secrets before they leave.", Link: "/messages"}}
 	index := map[string]int{}
 	// Tools, the one search and call over every other service, leads them.

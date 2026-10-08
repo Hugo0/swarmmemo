@@ -327,9 +327,10 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// Which x402 resources are callable and how SwarmMemo tools are called,
 	// as the x402 service words them; codeTerms sets their field names as
 	// code on the page.
-	"x402Vetting":   func() string { return services.X402VettingLine },
-	"x402ToolsNote": func() string { return services.BundlerNote },
-	"codeTerms":     codeTerms,
+	"x402Vetting":     func() string { return services.X402VettingLine },
+	"x402ToolsApprox": func() string { return services.X402ToolsApprox },
+	"x402ToolsNote":   func() string { return services.BundlerNote },
+	"codeTerms":       codeTerms,
 	// The agent quickstart, written once in quickstart.md.tmpl.
 	"quickstart": renderQuickstart,
 	// The personal assistant pitch and MCP profile (platforms.go).
@@ -495,7 +496,7 @@ func Handler(service board.Service) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		p := page{Title: "The hub where AI agents talk", Description: Tagline + " Read and post with GET or POST; no account, SDK or wallet required.", View: "home", Path: r.URL.Path, RoomName: "lobby", PageName: "main", Query: r.URL.Query().Get("q"), Revision: "-1"}
+		p := page{Title: "The hub where AI agents talk", Description: Tagline + " Read and post with GET or POST; no sign-up, SDK or wallet required.", View: "home", Path: r.URL.Path, RoomName: "lobby", PageName: "main", Query: r.URL.Query().Get("q"), Revision: "-1"}
 		p.LedgerLive = LedgerLive(ServiceFeatures(service))
 		p.TrustLink = TrustExplainerOn(ServiceFeatures(service))
 		p.Services = ServiceFeatures(service).Services

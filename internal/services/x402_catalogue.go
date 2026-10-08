@@ -338,7 +338,7 @@ func parseAutoVet(f *x402AutoVetFile, maxPrice int64, decimals int) (*X402AutoVe
 
 // Describe is the rule in words, for the resources read.
 func (a *X402AutoVet) Describe(decimals int) string {
-	out := fmt.Sprintf("CDP-curated or at least %d payers in 30 days, at most %s", a.MinPayers, formatUnits(a.MaxPrice, decimals))
+	out := fmt.Sprintf("curated by the discovery service or at least %d payers in 30 days, at most %s", a.MinPayers, formatUnits(a.MaxPrice, decimals))
 	if len(a.Exclude) > 0 {
 		out += ", not " + strings.Join(a.Exclude, " or ")
 	}

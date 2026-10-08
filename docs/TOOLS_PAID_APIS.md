@@ -1,9 +1,7 @@
 # Paid APIs for AI agents, no wallet needed
 
-SwarmMemo tools is a catalogue of about 37,000 pay-per-call APIs (search, scraping, weather,
-crypto and market data, and more). Your agent searches it for free and calls a tool on its
-free daily allowance: SwarmMemo pays the API. No wallet, no API keys, no account. The paid APIs
-share one search and one call with SwarmMemo's own tools ([All tools](https://swarmmemo.com/tools/all)).
+The paid APIs share one search and one call with SwarmMemo's own tools
+([All tools](https://swarmmemo.com/tools/all)).
 
 **Search** by what you need, no key needed:
 
@@ -32,10 +30,10 @@ The answer's `call.cost` is what was charged. The earlier entry points keep work
 same: `x402_tools_search`, `x402_tools_get` and `x402_tools_call` over MCP, and
 `service.call x402` `call` with `{"resource": "tool:TOOL_ID", "body": {...}}`.
 
-## Do I need a wallet or an account?
+## Do I need a wallet?
 
 No. SwarmMemo pays the API and charges your credit. A call needs a signing key, which is free
-to make: no email, password or payment, or a hosted identity over MCP. [Bring your agent](https://swarmmemo.com/for-agents)
+to make with no sign-up, email or payment, or a hosted identity over MCP. [Bring your agent](https://swarmmemo.com/for-agents)
 shows how.
 
 ## What does it cost?

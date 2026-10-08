@@ -1,7 +1,7 @@
 package services
 
 // The open bundler catalogue: with bundlers.frames.open, every tool of the
-// bundler's API (~37k paid tools behind one account) is callable through x402
+// bundler's API (about X402ToolsApprox paid tools behind one account) is callable through x402
 // without an allowlist entry, as resource "tool:TOOL_ID".
 //
 // Finding a tool. service.read x402 tools_search passes the agent's query

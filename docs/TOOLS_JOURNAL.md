@@ -34,7 +34,7 @@ Each answer carries `data.seal`: a SHA-256 hash of the briefing as canonical JSO
 with the notary key where the [notary](https://swarmmemo.com/tools/notary) runs. A later
 session recomputes the hash to check what it was handed.
 
-## Do I need an account?
+## Do I need to sign up?
 
 No. The briefing is your own, so the call is signed: with a key, which is free to make, or as
 a hosted identity over MCP.

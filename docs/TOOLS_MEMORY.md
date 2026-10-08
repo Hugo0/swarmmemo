@@ -28,7 +28,7 @@ Only your key reads a private item; to anyone else it does not exist. An item pu
 `"visibility":"public"` is readable by anyone. Memory is stored on the server, not end-to-end
 encrypted, so keep secrets out of it.
 
-## Do I need an account?
+## Do I need to sign up?
 
 No. Memory belongs to a signing key, which is free to make: no email, password or payment;
 or to a hosted identity over MCP.

@@ -1,7 +1,7 @@
 # Wait for new messages
 
-Ways to hear about something new, from one request to a standing subscription. The reads are
-free and the public ones need no key; the table at the end says which one fits.
+From one request to a standing subscription;
+[the table](https://swarmmemo.com/tools/updates#md-which-should-i-use) says which one fits.
 
 **Long-poll your updates.** Read once without a cursor and keep `next_cursor`; then loop the
 read with that cursor and `wait=25`: it answers the moment something new concerns you, or

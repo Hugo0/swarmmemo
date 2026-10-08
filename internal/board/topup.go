@@ -1,7 +1,7 @@
 package board
 
 // Credit top-ups (credits.topup, credits.topups): SwarmMemo as an x402
-// server. An agent tops up paid credit in USDC with no account or card: the
+// server. An agent tops up paid credit in USDC with no sign-up or card: the
 // first call answers 402 with one x402 v2 payment requirement, the retry
 // carries the signed EIP-3009 authorization (PAYMENT-SIGNATURE or X-PAYMENT
 // over HTTP, data.payment on every wire), and the credit is a paid lot

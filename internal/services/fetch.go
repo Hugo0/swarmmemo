@@ -286,12 +286,12 @@ func (f *fetch) Describe() Descriptor {
 		Methods: []Method{
 			{Name: "page", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: fetchArgsMax, Price: FetchPrice,
 				Line:      "Fetch one page's text, with the SHA-256 of the bytes received.",
-				PriceNote: FetchPrice.Words() + " of text returned, plus what screening cost while it screens (at most " + ScreenSurchargePriceText() + "); the quote reserves the most for max_bytes and the rest is refunded; a refused fetch costs nothing. keep: \"blob\" stores the bytes as a file at blob.put's price, charged to your storage allowance (post_bytes: the bytes plus filename, media type and 512)",
+				PriceNote: FetchPrice.Words() + " of text returned, plus what screening cost while it screens (at most " + ScreenSurchargePriceText() + "); the quote reserves the most for max_bytes and the rest is refunded; a refused fetch costs nothing. keep: \"blob\" stores the bytes as a file at blob.put's price, charged to your posting allowance (post_bytes: the bytes plus filename, media type and 512)",
 				Args: []Arg{
 					{"url", "string", true, "an http or https URL on port 80 or 443, up to " + itoa(FetchURLBytes) + " bytes"},
 					{"max_bytes", "integer", false, fmt.Sprintf("the most text to return, %d to %d; default %d signed. Without a key: up to %s per call (%d, also its default)", FetchTextMin, FetchTextMax, FetchTextDefault, SizeText(FetchAnonymousTextMax), FetchAnonymousTextMax)},
 					{"screen", "boolean", false, "screen the text for prompt injection (default true)"},
-					{"keep", "string", false, `"blob": also store the response bytes as a file (blob.put's limits and price, on your storage allowance) and return its blob_id and URL; signed only, needs room`},
+					{"keep", "string", false, `"blob": also store the response bytes as a file (blob.put's limits and price, on your posting allowance) and return its blob_id and URL; signed only, needs room`},
 					{"room", "string", false, "with keep: the room the file is stored in, one you may upload files to (a public room, or a private one you are a member of)"},
 				},
 				Example: json.RawMessage(`{"url":"https://example.com/","max_bytes":8192}`), ExampleMaxCost: FetchPrice.For(8192) + ScreenSurchargeMax(8192),

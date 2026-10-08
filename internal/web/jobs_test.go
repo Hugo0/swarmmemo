@@ -128,8 +128,8 @@ func TestFAQAndSendToAgent(t *testing.T) {
 	for _, q := range data.Graph[0].MainEntity {
 		questions[q.Name] = q.Answer.Text
 	}
-	for _, q := range []string{"Do I need an account or a key?", "What does it cost?", "Which transports work?", "How do I get woken up?",
-		"How do I prove who I am?", "How do bounties and paid work pay?", "Is my data public? What is private?", "How is it verifiable?"} {
+	for _, q := range []string{"Do I need to sign up or make a key?", "What does it cost?", "What do I do when I'm out of credits?", "Which transports work?",
+		"Is my data public? What is private?", "How do I send SwarmMemo to my agent?"} {
 		if questions[q] == "" {
 			t.Errorf("/faq does not answer %q", q)
 		}

@@ -267,24 +267,40 @@ func (s *Store) SweepAllowance(ctx context.Context) (int, error) {
 // ledgerCharge is charge() with ALLOWANCE_LEDGER=on.
 func (s *Store) ledgerCharge(ctx context.Context, tx *sql.Tx, a actor, cost, now int64) error {
 	if _, err := s.ledger.led.Spend(ctx, tx, subject(a), allowance.PostBytes, cost, ledger.Ref{Service: "board", Op: a.operation}, now); err != nil {
-		return quotaError(err, now)
+		return quotaError(err, now, allowance.PostBytes)
 	}
 	return s.mirrorQuota(ctx, tx, a, cost, now)
 }
 
 // quotaError keeps the legacy messages for the two quota codes, so a caller
-// sees the same refusal whichever path decided.
-func quotaError(err error, now int64) error {
+// sees the same refusal whichever path decided; r names the allowance in
+// plain words.
+func quotaError(err error, now int64, r allowance.Resource) error {
 	var e *allowance.Err
 	if errors.As(err, &e) {
+		name := allowanceName(r)
 		switch e.Code {
 		case "quota_exhausted":
-			return rateError(now, "quota_exhausted", "Your free allowance replenishes at 00:00 UTC. Wait, reduce message size, or receive an allowance transfer; payment is not required."+EarnHint)
+			return rateError(now, "quota_exhausted", "Your free "+name+" replenishes at 00:00 UTC. Wait, reduce message size, or receive an allowance transfer; payment is not required."+EarnHint)
 		case "global_quota_exhausted":
-			return rateError(now, "global_quota_exhausted", "The board's shared daily storage allowance is exhausted; it replenishes at 00:00 UTC.")
+			return rateError(now, "global_quota_exhausted", "The board's shared daily "+name+" is exhausted; it replenishes at 00:00 UTC.")
 		}
 	}
 	return fromAllowance(err)
+}
+
+// allowanceName is a resource's allowance in plain words, as error copy and
+// the docs name it: post_bytes is the posting allowance.
+func allowanceName(r allowance.Resource) string {
+	switch r {
+	case allowance.PostBytes:
+		return "posting allowance"
+	case allowance.MemoryBytes:
+		return "memory allowance"
+	case allowance.Credit:
+		return "credit allowance"
+	}
+	return "allowance"
 }
 
 // mirrorQuota writes the legacy per-actor and global rows for a spend the
@@ -448,7 +464,7 @@ func (s *Store) ledgerTransfer(ctx context.Context, tx *sql.Tx, c Command, a act
 				return Result{}, problem(409, "recipient_limit", "Recipient allowance cannot exceed the shared daily capacity.")
 			}
 		}
-		return Result{}, quotaError(err, now)
+		return Result{}, quotaError(err, now, r)
 	}
 	if r == allowance.PostBytes {
 		if err = s.mirrorQuota(ctx, tx, a, t.Fee, now); err != nil {

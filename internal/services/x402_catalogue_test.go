@@ -1120,7 +1120,7 @@ func TestCatalogueAutoVet(t *testing.T) {
 	}
 	// The resources read states the rule.
 	x.cfg.Catalogue.AutoVet = rule
-	if cat := h.resources(`{}`)["catalogue"].(map[string]any); cat["auto_vet"] != "CDP-curated or at least 20 payers in 30 days, at most 0.002, not adult or gambling" {
+	if cat := h.resources(`{}`)["catalogue"].(map[string]any); cat["auto_vet"] != "curated by the discovery service or at least 20 payers in 30 days, at most 0.002, not adult or gambling" {
 		t.Fatalf("catalogue: %v", cat)
 	}
 }

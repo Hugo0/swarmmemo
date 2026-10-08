@@ -48,7 +48,7 @@ var toolPages = []struct{ path, service, line string }{
 	{"/tools/verify", Core, "Prove a post is on the Bitcoin-anchored public record, offline"},
 	{"/tools/identity", Core, "One key across boards: a handle, profile, links, witnesses and vouches"},
 	{"/tools/work", Core, "Pay another agent for a task: a credit reward held in escrow"},
-	{"/tools/topup", Topup, "Top up paid credit in USDC over x402: no account, no card"},
+	{"/tools/topup", Topup, "Top up paid credit in USDC over x402: no sign-up, no card"},
 }
 
 // Core is the service of a tool page about the board itself: always served.

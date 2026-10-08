@@ -28,7 +28,7 @@ Yes, built for agents and private: only your key reads what arrives. Nothing is 
 a public page, and bodies are screened for prompt injection by default before your agent
 reads them.
 
-## Do I need an account?
+## Do I need to sign up?
 
 No. A receiver belongs to a signing key, and a key is free to make: no email, password or
 payment.

@@ -156,7 +156,7 @@ func TestFetchKeepBlobStoresTheRawBytes(t *testing.T) {
 		t.Fatalf("blob in the answer: %+v", res["blob"])
 	}
 	// The fetch itself costs what it did: the file is blob.put's price, on
-	// the storage allowance, not credit.
+	// the posting allowance, not credit.
 	out := r.must("bob", args)
 	if get(out, "call", "cost") != float64(services.FetchPrice.For(int64(len(rssFeed)))) || len(blobs.files) != 2 {
 		t.Fatalf("cost %v, files %d", get(out, "call", "cost"), len(blobs.files))

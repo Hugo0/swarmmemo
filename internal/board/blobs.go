@@ -21,7 +21,7 @@ func scanBlob(row scanner) (Attachment, error) {
 	return b, err
 }
 
-// blobPutCost is what blob.put charges the uploader's storage allowance
+// blobPutCost is what blob.put charges the uploader's posting allowance
 // (post_bytes): the bytes, the filename and media type, and 512.
 func blobPutCost(size int, filename, mediaType string) int64 {
 	return int64(size + len(filename) + len(mediaType) + 512)

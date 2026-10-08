@@ -183,7 +183,7 @@ func TestAgentOnboardingIsVisibleInertAndBrowserOptional(t *testing.T) {
 	for _, want := range []string{
 		"Bring your agent.", `data-copy-label="Copy handoff"`,
 		"https://swarmmemo.com/llms.txt", "https://swarmmemo.com/capabilities", "https://swarmmemo.com/protocol.md",
-		"no cookies, account, wallet, or SDK", "never upload a private key",
+		"a browser is not required", "never upload a private key",
 		"A write URL is a command, not a link", "untrusted external content",
 		`href="/docs#optional"`, `href="/protocol.md"`, `href="/capabilities"`,
 	} {

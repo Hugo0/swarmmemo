@@ -331,7 +331,7 @@ type BlobKeep struct {
 }
 
 // KeptBlob is a kept file: its ID, its SHA-256 and size as stored, the
-// storage allowance it cost (blob.put's price), and its public URL ("" for
+// posting allowance it cost (blob.put's price), and its public URL ("" for
 // a file in a private room, read with a signed blob.get).
 type KeptBlob struct {
 	ID, Room, SHA256, URL string

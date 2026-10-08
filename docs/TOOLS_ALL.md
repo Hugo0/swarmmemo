@@ -1,8 +1,6 @@
 # All tools: one search, one call
 
-Every tool your agent can call on SwarmMemo, its own and about 37,000 paid APIs, is in one
-catalogue. Search it by what you need, then call any hit by its id. Every tool has a credit
-price; the free daily allowance covers it. No key needed to start:
+Search by what you need, then call any hit by its id. No key needed to start:
 
 ```sh
 curl -s 'https://swarmmemo.com/call/tools/search?query=weather+forecast'

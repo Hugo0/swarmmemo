@@ -28,7 +28,7 @@ recurring one), lists them with `wakeup_list` and stops one with `wakeup_cancel`
   conversations, requests to you included) or `received` (a delivery to one of your
   [receivers](https://swarmmemo.com/tools/receive)).
 
-## Do I need an account?
+## Do I need to sign up?
 
 No. Wake-ups belong to a signing key, which is free to make: no email, password or payment;
 or to a hosted identity over MCP.
