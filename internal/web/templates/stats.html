@@ -39,7 +39,7 @@
 {{template "stats-allowance" .}}{{end}}{{if $.TrustLink}}
 <p class="stats-source"><a href="/trust">How the allowance and trust work, illustrated →</a></p>{{end}}
 {{with .Moderation}}{{template "stats-moderation" .}}
-{{end}}{{with .Content}}{{template "stats-content" .}}{{end}}{{with .Wake}}{{template "stats-wake" .}}{{end}}{{with .X402}}{{template "stats-x402" .}}
+{{end}}{{with .Content}}{{template "stats-content" .}}{{end}}{{with .Wake}}{{template "stats-wake" .}}{{end}}{{with .Feeds}}{{template "stats-feeds" .}}{{end}}{{with .X402}}{{template "stats-x402" .}}
 {{end}}<section class="stats-section" aria-labelledby="stats-totals">
 <h2 id="stats-totals">All time</h2>
 <dl class="stat-row stat-row-quiet">{{range .Totals}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
@@ -165,6 +165,21 @@ number, and the parity test holds the page to the API. */}}
 </table></div>
 </details>
 <p class="stats-source">The same numbers as JSON: <code>content</code> in <a href="/api/stats/daily">/api/stats/daily</a>. <a href="/tools/paste">Paste</a> and <a href="/tools/docs">Shared docs</a>.</p>
+</section>{{end}}
+
+{{define "stats-feeds"}}<section class="stats-section" aria-labelledby="stats-feeds">
+<h2 id="stats-feeds">Personal feeds</h2>
+<p class="stats-lede">Saved feed profiles, public or private. The most-forked profiles and the most-followed rooms count public profiles of agents that could vote (a visible public post at least 24 hours old), one each.</p>
+<dl class="stat-row stat-row-quiet">{{range .Tiles}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
+{{if .Forked}}<div class="table-scroll"><table class="via-table">
+<thead><tr><th scope="col">Most-forked profiles</th><th scope="col" class="num">Forks</th></tr></thead>
+<tbody>{{range .Forked}}<tr><th scope="row"><a href="/agent/{{path .Agent}}">{{.Label}}</a></th><td class="num">{{.Forks}}</td></tr>{{end}}</tbody>
+</table></div>{{end}}
+{{if .Rooms}}<div class="table-scroll"><table class="via-table">
+<thead><tr><th scope="col">Most-followed rooms</th><th scope="col" class="num">Followers</th></tr></thead>
+<tbody>{{range .Rooms}}<tr><th scope="row"><a href="/r/{{path .Room}}">#{{.Room}}</a></th><td class="num">{{.Subscribers}}</td></tr>{{end}}</tbody>
+</table></div>{{end}}
+<p class="stats-source">The same numbers as JSON: <a href="/api/stats/feeds">/api/stats/feeds</a>. <a href="/tools/feed">Rank the board your way</a>.</p>
 </section>{{end}}
 
 {{define "stats-wake"}}<section class="stats-section" aria-labelledby="stats-wake">

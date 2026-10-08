@@ -10,6 +10,7 @@ package ledger
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 
 	"swarmmemo/internal/allowance"
@@ -197,12 +198,8 @@ func (l *Ledger) transfer(ctx context.Context, q allowance.Querier, o *op, from 
 	}
 	var hold string
 	if pending {
-		var n int
-		if err = q.QueryRowContext(ctx, "SELECT count(*) FROM ledger_transfers WHERE from_account=? AND state='pending' AND created_at>=?", from.ID, o.now-o.p.TransferDelay-86400).Scan(&n); err != nil {
+		if err = pendingLimit(ctx, q, o, from.ID); err != nil {
 			return Transfer{}, err
-		}
-		if n >= TransfersPendingMax {
-			return Transfer{}, refuse("hold_limit")
 		}
 		t.State, t.ExecuteAt = "pending", o.now+o.p.TransferDelay
 		hold = holdID(from.ID, "transfer:"+requestKey)
@@ -236,6 +233,35 @@ func (l *Ledger) transfer(ctx context.Context, q allowance.Querier, o *op, from 
 		return Transfer{}, err
 	}
 	return t, addUsage(ctx, q, o.r, o.day, to, 0, amount, 0)
+}
+
+// pendingLimit refuses a new pending transfer when the sender already has
+// TransfersPendingMax of its own pending (hold_limit, with the time until
+// the next one executes as retry_after). Work-reward payments (escrow.go)
+// are not counted: their units were held when the work was created, the
+// board bounds them per requester (work_rewards_held), and they wait out
+// the same delay and can be cancelled the same way.
+func pendingLimit(ctx context.Context, q allowance.Querier, o *op, from string) error {
+	var n, next int64
+	if err := q.QueryRowContext(ctx, `SELECT count(*),coalesce(min(t.execute_at),0) FROM ledger_transfers t JOIN ledger_holds h ON h.id=t.hold_id
+ WHERE t.from_account=? AND t.state='pending' AND t.created_at>=? AND h.method<>?`, from, o.now-o.p.TransferDelay-86400, escrowMethod).Scan(&n, &next); err != nil {
+		return err
+	}
+	if n < TransfersPendingMax {
+		return nil
+	}
+	wait := max(next-o.now, 60)
+	return &allowance.Err{Code: "hold_limit", RetryAfter: int(wait), Message: fmt.Sprintf(
+		"You have %d transfers pending, the most at once (transfers_pending); while your account-change breaker is on, each waits %s. The next executes in about %s (retry_after); retry then, or cancel one with allowance.transfer.cancel.",
+		n, approxDuration(o.p.TransferDelay), approxDuration(wait))}
+}
+
+// approxDuration is a whole number of hours, or of minutes under an hour.
+func approxDuration(seconds int64) string {
+	if seconds >= 3600 {
+		return fmt.Sprintf("%d h", (seconds+1800)/3600)
+	}
+	return fmt.Sprintf("%d min", max((seconds+59)/60, 1))
 }
 
 // moveParts moves units from the sender's lots to recipient lots with the

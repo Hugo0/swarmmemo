@@ -141,6 +141,9 @@ func parsePut(raw json.RawMessage) (memoryPut, error) {
 	if err := memoryKeyError(a.Key); err != nil {
 		return a, err
 	}
+	if ReservedMemoryKey(a.Key) {
+		return a, refusal("reserved_key")
+	}
 	if a.Value != nil && len(*a.Value) > MemoryValueBytes {
 		return a, tooLarge("invalid_service_data", len(*a.Value), MemoryValueBytes)
 	}
@@ -226,26 +229,8 @@ func (m *memory) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 			return Result{}, err
 		}
 		size := int64(len(a.Key) + len(*a.Value))
-		var oldBytes, version int64
-		err = tx.QueryRowContext(ctx, "SELECT bytes,version FROM memory_items WHERE account=? AND key=?", account, a.Key).Scan(&oldBytes, &version)
-		exists := err == nil
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return Result{}, err
-		}
-		if !exists {
-			usage.Keys++
-		}
-		usage.Bytes += size - oldBytes
-		if usage.Keys > MemoryKeysMax || usage.Bytes > MemoryBytesMax {
-			return Result{}, refusal("memory_limit")
-		}
-		version++
-		if _, err = tx.ExecContext(ctx, `INSERT INTO memory_items(account,key,value,visibility,bytes,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)
-ON CONFLICT(account,key) DO UPDATE SET value=excluded.value, visibility=excluded.visibility, bytes=excluded.bytes, version=excluded.version, updated_at=excluded.updated_at`,
-			account, a.Key, *a.Value, a.Visibility, size, version, c.Now, c.Now); err != nil {
-			return Result{}, err
-		}
-		if err = putUsage(ctx, tx, account, usage); err != nil {
+		version, err := putItem(ctx, tx, account, a.Key, *a.Value, a.Visibility, c.Now, &usage)
+		if err != nil {
 			return Result{}, err
 		}
 		body, _ := json.Marshal(map[string]any{"key": a.Key, "version": version, "bytes": size, "visibility": a.Visibility, "updated_at": c.Now, "usage": usage})
@@ -329,6 +314,84 @@ func OwnMemoryValue(ctx context.Context, q allowance.Querier, account, key strin
 		return "", 0, false, nil
 	}
 	return value, updated, err == nil, err
+}
+
+// putItem stores key for account: the version bumped, usage (the account's,
+// read in tx) updated and held to the caps. It is put's one write path.
+func putItem(ctx context.Context, tx *sql.Tx, account, key, value, visibility string, now int64, usage *memoryUsage) (int64, error) {
+	size := int64(len(key) + len(value))
+	var oldBytes, version int64
+	err := tx.QueryRowContext(ctx, "SELECT bytes,version FROM memory_items WHERE account=? AND key=?", account, key).Scan(&oldBytes, &version)
+	exists := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	if !exists {
+		usage.Keys++
+	}
+	usage.Bytes += size - oldBytes
+	if usage.Keys > MemoryKeysMax || usage.Bytes > MemoryBytesMax {
+		return 0, refusal("memory_limit")
+	}
+	version++
+	if _, err = tx.ExecContext(ctx, `INSERT INTO memory_items(account,key,value,visibility,bytes,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)
+ON CONFLICT(account,key) DO UPDATE SET value=excluded.value, visibility=excluded.visibility, bytes=excluded.bytes, version=excluded.version, updated_at=excluded.updated_at`,
+		account, key, value, visibility, size, version, now, now); err != nil {
+		return 0, err
+	}
+	return version, putUsage(ctx, tx, account, *usage)
+}
+
+// ReservedMemoryPrefixes are key prefixes memory.put refuses (409
+// reserved_key): each has one writer, a board operation that validates the
+// value (feed/: feed.profile.put). memory.get, list and delete still take
+// them, so an owner can read and erase the item as any other.
+var ReservedMemoryPrefixes = []string{"feed/"}
+
+// ReservedMemoryKey reports whether k is under a reserved prefix.
+func ReservedMemoryKey(k string) bool {
+	for _, p := range ReservedMemoryPrefixes {
+		if strings.HasPrefix(k, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// PutOwnMemory stores key for account inside the caller's transaction,
+// through put's write path (version, usage, caps) without its price: the
+// board's validating writers of reserved keys use it. visibility is
+// "private" or "public". It returns the new version.
+func PutOwnMemory(ctx context.Context, tx *sql.Tx, account, key, value, visibility string, now int64) (int64, error) {
+	if err := memoryKeyError(key); err != nil {
+		return 0, err
+	}
+	if len(value) > MemoryValueBytes || visibility != "private" && visibility != "public" {
+		return 0, refusal("invalid_service_data")
+	}
+	usage, err := usageOf(ctx, tx, account)
+	if err != nil {
+		return 0, err
+	}
+	return putItem(ctx, tx, account, key, value, visibility, now, &usage)
+}
+
+// MemoryRecord is one item with its visibility and version.
+type MemoryRecord struct {
+	Value      string
+	Visibility string
+	Version    int64
+	UpdatedAt  int64
+}
+
+// ReadMemoryItem is account's item key; found is false when it has none.
+// It reads private items too: the caller decides who may see one.
+func ReadMemoryItem(ctx context.Context, q allowance.Querier, account, key string) (rec MemoryRecord, found bool, err error) {
+	err = q.QueryRowContext(ctx, "SELECT value,visibility,version,updated_at FROM memory_items WHERE account=? AND key=?", account, key).Scan(&rec.Value, &rec.Visibility, &rec.Version, &rec.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return rec, false, nil
+	}
+	return rec, err == nil, err
 }
 
 func putUsage(ctx context.Context, tx *sql.Tx, account string, u memoryUsage) error {

@@ -249,7 +249,7 @@ var hostedTools = append([]hostedToolSpec{
 	{mcpToolSpec{"manage_tokens", false, "List (action list), create (action create, label optional; at most " + strconv.Itoa(board.HostedTokensMax) + " live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend." + tokenNote}, true, false},
 	{mcpToolSpec{"list_event_subscriptions", true, "List the MCP Events subscriptions your apps made for you (events/subscribe: replies, mentions, conversations, rooms, work, witnesses): event, filters, callback URL, state (active, expired or disabled, with why), when it must be refreshed, when it last delivered, what is still queued and why the last attempt failed, and your webhooks beside them. Never a secret." + tokenNote}, false, true},
 	{mcpToolSpec{"cancel_event_subscription", false, "Cancel one of your MCP Events subscriptions (or webhooks) by its subscription_id from list_event_subscriptions: nothing more is sent to it, and anything queued is dropped." + tokenNote}, true, true},
-}, hostedWorkTools...)
+}, append(hostedWorkTools, hostedFeedTools...)...)
 
 // hostedToolHints are the annotations of a hosted tool, and ok is false for
 // any other tool.
@@ -567,6 +567,7 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool)
 		})
 	})
 	s.addHostedWorkTools(server, tool)
+	s.addHostedFeedTools(server, tool)
 }
 
 type cancelSubscriptionInput struct {

@@ -54,7 +54,7 @@ func limits0012() []Limit {
 		{"vouches_per_day", VouchesPerDay, "", "Vouches per agent per UTC day"},
 		{"vouches_active", VouchesActiveMax, "", "Active vouches per agent"},
 		{"open_holds", HoldsPerAccount, "", "Metered calls open at once per agent"},
-		{"transfers_pending", TransfersPendingMax, "", "Pending transfers per agent"},
+		{"transfers_pending", TransfersPendingMax, "", "Pending transfers per agent (work-reward payments aside)"},
 		{"ledger_page_maximum", LedgerPageMax, "", "Journal entries per ledger read"},
 		{"endorsement_export_page_maximum", EndorsementExportPageMax, "", "Records per endorsement export page"},
 		{"service_args_bytes", ServiceArgsBytes, "bytes", "Arguments of one service call"},

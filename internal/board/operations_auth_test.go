@@ -245,7 +245,7 @@ func TestOperationAuthorityMatrix(t *testing.T) {
 		}
 		// Room governance: never by a key that neither owns nor moderates.
 		// An invite's secret, not ownership, is what admits its acceptor.
-		if strings.HasPrefix(op.Name, "room.") && op.Signed && op.Name != "room.create" && op.Name != "room.invite.accept" {
+		if strings.HasPrefix(op.Name, "room.") && op.Signed && op.Name != "room.create" && op.Name != "room.invite.accept" && op.Name != "room.subscribe" && op.Name != "room.unsubscribe" {
 			if n := got["nonowner"]; n != "owner_required" && n != "moderator_required" && n != "not_found" {
 				t.Errorf("room operation not refused to a non-owner: %s", line)
 			}

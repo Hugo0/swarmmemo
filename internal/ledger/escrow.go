@@ -5,7 +5,8 @@ package ledger
 // EscrowPay moves them to the recipient with the transfer's rules (inbound
 // cap, spike and account-change breaker: with an active breaker, or with
 // transfers frozen, the payment is a pending transfer that the sweeper
-// executes and that can be cancelled like any other); EscrowRelease returns
+// executes and that can be cancelled like any other, though it does not
+// count against the pending-transfer bound); EscrowRelease returns
 // them. The transfer fee is charged when the units are held, as a transfer
 // charges it when it is made, and stays spent when they are released, as a
 // cancelled pending transfer's does.
@@ -200,13 +201,10 @@ func (l *Ledger) escrowPay(ctx context.Context, q allowance.Querier, o *op, h Ho
 	}
 	doneAt := int64(0)
 	if pending {
-		var n int
-		if err = q.QueryRowContext(ctx, "SELECT count(*) FROM ledger_transfers WHERE from_account=? AND state='pending' AND created_at>=?", h.Account, o.now-o.p.TransferDelay-86400).Scan(&n); err != nil {
-			return Transfer{}, err
-		}
-		if n >= TransfersPendingMax {
-			return Transfer{}, refuse("hold_limit")
-		}
+		// Not counted against TransfersPendingMax (pendingLimit): the units
+		// have been held since the escrow, so a pending payment holds
+		// nothing new, and the board bounds escrows per requester. The
+		// delay, and the cancel it allows, are what protect the account.
 		t.State = "pending"
 		if !o.lv.FreezeTransfers {
 			t.ExecuteAt = o.now + o.p.TransferDelay

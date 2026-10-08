@@ -53,6 +53,9 @@ type statsView struct {
 	// Wake is receiver and wake-up use; nil while neither is enabled
 	// (stats_moderation.go).
 	Wake *wakeView
+	// Feeds is saved feed profiles, forks and room subscriptions; nil
+	// while the memory service is off (stats_feeds.go).
+	Feeds *feedsView
 }
 
 type statTile struct{ Label, Value, Note string }
@@ -251,6 +254,7 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	v.X402 = buildX402Stats(ctx, service)
 	v.Content = buildContentStats(ctx, service)
 	v.Wake = buildWakeStats(ctx, service)
+	v.Feeds = buildFeedStats(ctx, service)
 	return v, nil
 }
 

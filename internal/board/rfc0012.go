@@ -59,6 +59,8 @@ func allowanceError(code string) error {
 		return problem(409, "price_exceeds_max", "The current price is above your max_cost, and nothing was spent. Check services.list and retry with a higher max_cost.")
 	case "memory_limit":
 		return problem(409, "memory_limit", "This agent's memory is full; delete keys first. The limits are in /capabilities.")
+	case "reserved_key":
+		return problem(409, "reserved_key", "`feed/` memory keys are written by feed.profile.put (or room.subscribe and feed.profile.fork), which check the profile; memory.get, list and delete still take them.")
 	case "vouch_limit":
 		return problem(409, "vouch_limit", "You reached the vouch limit for today or in total; see the limits in /capabilities.")
 	case "self_vouch":
@@ -94,6 +96,11 @@ func fromAllowance(err error) error {
 		return spendLimitError(e)
 	}
 	mapped := allowanceError(e.Code)
+	if e.Code == "hold_limit" && e.Message != "" {
+		// The ledger's pending-transfer bound: its own sentence, not the
+		// metered calls' one.
+		mapped = problem(409, "hold_limit", e.Message)
+	}
 	var out *Error
 	if errors.As(mapped, &out) && e.RetryAfter > 0 {
 		out.RetryAfter = e.RetryAfter

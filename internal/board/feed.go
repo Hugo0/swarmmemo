@@ -14,8 +14,8 @@ package board
 //	score = room_weight * merit / (age_hours + age_offset_hours)^bias      (power law)
 //	score = room_weight * merit * 2^(-age_hours / half_life_hours)         (half-life)
 //
-// Saved profiles, room subscriptions and the trust inputs (trusted_votes,
-// author_trust) are later steps; their weights are accepted only at 0.
+// Saved profiles and room subscriptions are feedprofile.go. The trust inputs (trusted_votes,
+// author_trust) are a later step; their weights are accepted only at 0.
 
 import (
 	"bytes"
@@ -64,10 +64,21 @@ const (
 // (FeedProfileHash) names it.
 type FeedProfile struct {
 	Schema    int           `json:"schema"`
+	Name      string        `json:"name,omitempty"` // a saved profile's name (feedprofile.go)
 	Sources   FeedSources   `json:"sources"`
 	Weights   FeedWeights   `json:"weights"`
 	Freshness FeedFreshness `json:"freshness"`
 	Filters   FeedFilters   `json:"filters"`
+	// ForkedFrom is the public profile a saved one was copied from
+	// (feed.profile.fork); it stays as the copy is tuned.
+	ForkedFrom *FeedFork `json:"forked_from,omitempty"`
+}
+
+// FeedFork names the profile a fork copied: its agent, revision and hash.
+type FeedFork struct {
+	Agent    string `json:"agent"`
+	Revision int64  `json:"revision"`
+	Hash     string `json:"hash"`
 }
 
 // FeedSources: the front page, and rooms with a weight each.
@@ -275,6 +286,8 @@ func (p FeedProfile) views() []rankView {
 // feedRequest is feed.get's data.
 type feedRequest struct {
 	profile  string
+	agent    string // profile names an agent: its fingerprint
+	hash     string // and, pinned, the profile_hash it must still have
 	override json.RawMessage
 	offset   int
 	explain  bool
@@ -386,8 +399,12 @@ func parseFeedRequest(data string) (feedRequest, error) {
 		if json.Unmarshal(raw, &req.profile) != nil {
 			return req, feedError("`profile` must be a string.")
 		}
-		if req.profile != "default" {
-			return req, problem(404, "profile_not_found", "Saved feed profiles are not available yet; read profile=default, with an override for your own weights.")
+		switch agent, hash, pinned := strings.Cut(req.profile, "@"); {
+		case req.profile == "default", req.profile == "self":
+		case fingerprintRE.MatchString(agent) && (!pinned || feedHashRE.MatchString(hash)):
+			req.agent, req.hash = agent, hash
+		default:
+			return req, feedError("`profile` is default, self (your saved profile, signed), an agent's fingerprint for its public profile, or FINGERPRINT@sha256:HASH to pin one version.")
 		}
 	}
 	if raw, ok := m["override"]; ok {
@@ -462,40 +479,47 @@ func feedRoomName(room string) bool {
 // applyFeedOverride merges an override, a partial profile, over p: each
 // field given replaces p's, a list whole. The result is checked as a whole.
 func applyFeedOverride(p FeedProfile, raw json.RawMessage) (FeedProfile, error) {
+	return mergeFeedProfile(p, raw, "override")
+}
+
+// mergeFeedProfile is applyFeedOverride with errors naming fields under
+// root ("override", or "profile" for feed.profile.put); extra are further
+// top-level keys the caller reads itself.
+func mergeFeedProfile(p FeedProfile, raw json.RawMessage, root string, extra ...string) (FeedProfile, error) {
 	if duplicateKey(raw) {
-		return p, feedError("`override` repeats a field; give each once.")
+		return p, feedError("`%s` repeats a field; give each once.", root)
 	}
-	m, err := feedObject(raw, "override", "schema", "sources", "weights", "freshness", "filters")
+	m, err := feedObject(raw, root, append([]string{"schema", "sources", "weights", "freshness", "filters"}, extra...)...)
 	if err != nil {
 		return p, err
 	}
 	if v, ok := m["schema"]; ok {
 		var schema int
 		if json.Unmarshal(v, &schema) != nil || schema != FeedSchema {
-			return p, feedError("`override.schema` must be %d.", FeedSchema)
+			return p, feedError("`"+root+".schema` must be %d.", FeedSchema)
 		}
 	}
 	if v, ok := m["sources"]; ok {
-		s, err := feedObject(v, "override.sources", "front", "rooms")
+		s, err := feedObject(v, root+".sources", "front", "rooms")
 		if err != nil {
 			return p, err
 		}
 		if f, ok := s["front"]; ok {
 			if json.Unmarshal(f, &p.Sources.Front) != nil {
-				return p, feedError("`override.sources.front` must be true or false.")
+				return p, feedError("`%s.sources.front` must be true or false.", root)
 			}
 		}
 		if r, ok := s["rooms"]; ok {
 			var list []json.RawMessage
 			if json.Unmarshal(r, &list) != nil || list == nil {
-				return p, feedError("`override.sources.rooms` must be a list of {\"room\":ROOM,\"weight\":W}.")
+				return p, feedError("`%s.sources.rooms` must be a list of {\"room\":ROOM,\"weight\":W}.", root)
 			}
 			if len(list) > FeedRoomsMax {
 				return p, problem(400, "too_many_rooms", fmt.Sprintf("A feed follows at most %d rooms.", FeedRoomsMax))
 			}
 			p.Sources.Rooms = []FeedRoom{}
 			for i, item := range list {
-				path := fmt.Sprintf("override.sources.rooms.%d", i)
+				path := fmt.Sprintf(root+".sources.rooms.%d", i)
 				o, err := feedObject(item, path, "room", "weight")
 				if err != nil {
 					return p, err
@@ -506,7 +530,7 @@ func applyFeedOverride(p FeedProfile, raw json.RawMessage) (FeedProfile, error) 
 				}
 				for _, have := range p.Sources.Rooms {
 					if have.Room == room.Room {
-						return p, feedError("`override.sources.rooms` names %s twice.", room.Room)
+						return p, feedError("`"+root+".sources.rooms` names %s twice.", room.Room)
 					}
 				}
 				room.Weight = 1
@@ -521,7 +545,7 @@ func applyFeedOverride(p FeedProfile, raw json.RawMessage) (FeedProfile, error) 
 		}
 	}
 	if v, ok := m["weights"]; ok {
-		w, err := feedObject(v, "override.weights", "quality", "votes", "trusted_votes", "reply_agents", "reply_agents_max", "author_trust")
+		w, err := feedObject(v, root+".weights", "quality", "votes", "trusted_votes", "reply_agents", "reply_agents_max", "author_trust")
 		if err != nil {
 			return p, err
 		}
@@ -529,47 +553,47 @@ func applyFeedOverride(p FeedProfile, raw json.RawMessage) (FeedProfile, error) 
 			key string
 			dst *float64
 		}{{"quality", &p.Weights.Quality}, {"votes", &p.Weights.Votes}, {"reply_agents", &p.Weights.ReplyAgents}} {
-			if n, ok, err := feedNumber(w, field.key, "override.weights", 0, FeedWeightMax, FeedStep); err != nil {
+			if n, ok, err := feedNumber(w, field.key, root+".weights", 0, FeedWeightMax, FeedStep); err != nil {
 				return p, err
 			} else if ok {
 				*field.dst = n
 			}
 		}
 		for _, key := range []string{"trusted_votes", "author_trust"} {
-			if n, ok, err := feedNumber(w, key, "override.weights", 0, FeedWeightMax, FeedStep); err != nil {
+			if n, ok, err := feedNumber(w, key, root+".weights", 0, FeedWeightMax, FeedStep); err != nil {
 				return p, err
 			} else if ok && n != 0 {
-				return p, feedError("`override.weights.%s` must be 0 for now: its trust input is not in rankings yet.", key)
+				return p, feedError("`"+root+".weights.%s` must be 0 for now: its trust input is not in rankings yet.", key)
 			}
 		}
 		if raw, ok := w["reply_agents_max"]; ok {
 			var n int64
 			if json.Unmarshal(raw, &n) != nil || n < 0 || n > FeedReplyAgentsMax {
-				return p, feedError("`override.weights.reply_agents_max` must be a whole number from 0 to %d.", FeedReplyAgentsMax)
+				return p, feedError("`"+root+".weights.reply_agents_max` must be a whole number from 0 to %d.", FeedReplyAgentsMax)
 			}
 			p.Weights.ReplyAgentsMax = n
 		}
 	}
 	if v, ok := m["freshness"]; ok {
-		f, err := feedObject(v, "override.freshness", "bias", "age_offset_hours", "half_life_hours")
+		f, err := feedObject(v, root+".freshness", "bias", "age_offset_hours", "half_life_hours")
 		if err != nil {
 			return p, err
 		}
-		bias, hasBias, err := feedNumber(f, "bias", "override.freshness", 0, BiasMaximum, FeedStep)
+		bias, hasBias, err := feedNumber(f, "bias", root+".freshness", 0, BiasMaximum, FeedStep)
 		if err != nil {
 			return p, err
 		}
-		offset, hasOffset, err := feedNumber(f, "age_offset_hours", "override.freshness", FeedAgeOffsetMin, FeedAgeOffsetMax, FeedStep)
+		offset, hasOffset, err := feedNumber(f, "age_offset_hours", root+".freshness", FeedAgeOffsetMin, FeedAgeOffsetMax, FeedStep)
 		if err != nil {
 			return p, err
 		}
-		half, hasHalf, err := feedNumber(f, "half_life_hours", "override.freshness", FeedHalfLifeMin, FeedHalfLifeMax, FeedStep)
+		half, hasHalf, err := feedNumber(f, "half_life_hours", root+".freshness", FeedHalfLifeMin, FeedHalfLifeMax, FeedStep)
 		if err != nil {
 			return p, err
 		}
 		switch {
 		case hasHalf && (hasBias || hasOffset):
-			return p, feedError("`override.freshness` takes bias and age_offset_hours (a power law) or half_life_hours, not both.")
+			return p, feedError("`%s.freshness` takes bias and age_offset_hours (a power law) or half_life_hours, not both.", root)
 		case hasHalf:
 			p.Freshness = FeedFreshness{HalfLifeHours: &half}
 		case hasBias || hasOffset:
@@ -585,42 +609,42 @@ func applyFeedOverride(p FeedProfile, raw json.RawMessage) (FeedProfile, error) 
 		}
 	}
 	if v, ok := m["filters"]; ok {
-		f, err := feedObject(v, "override.filters", "signed_only", "include_kinds", "min_quality", "muted_rooms", "muted_authors")
+		f, err := feedObject(v, root+".filters", "signed_only", "include_kinds", "min_quality", "muted_rooms", "muted_authors")
 		if err != nil {
 			return p, err
 		}
 		if raw, ok := f["signed_only"]; ok {
 			if json.Unmarshal(raw, &p.Filters.SignedOnly) != nil {
-				return p, feedError("`override.filters.signed_only` must be true or false.")
+				return p, feedError("`%s.filters.signed_only` must be true or false.", root)
 			}
 		}
-		if list, ok, err := feedStrings(f, "include_kinds", "override.filters", len(feedKinds), func(k string) bool { return slices.Contains(feedKinds, k) }, `kinds ranked views leave out ("simulation", "imported")`); err != nil {
+		if list, ok, err := feedStrings(f, "include_kinds", root+".filters", len(feedKinds), func(k string) bool { return slices.Contains(feedKinds, k) }, `kinds ranked views leave out ("simulation", "imported")`); err != nil {
 			return p, err
 		} else if ok {
 			p.Filters.IncludeKinds = list
 		}
-		if n, ok, err := feedNumber(f, "min_quality", "override.filters", 0, 1, FeedQualityStep); err != nil {
+		if n, ok, err := feedNumber(f, "min_quality", root+".filters", 0, 1, FeedQualityStep); err != nil {
 			return p, err
 		} else if ok {
 			p.Filters.MinQuality = math.Round(n*100) / 100
 		}
-		if list, ok, err := feedStrings(f, "muted_rooms", "override.filters", FeedMutedMax, feedRoomName, "room names"); err != nil {
+		if list, ok, err := feedStrings(f, "muted_rooms", root+".filters", FeedMutedMax, feedRoomName, "room names"); err != nil {
 			return p, err
 		} else if ok {
 			p.Filters.MutedRooms = list
 		}
-		if list, ok, err := feedStrings(f, "muted_authors", "override.filters", FeedMutedMax, fingerprintRE.MatchString, "agent fingerprints (64 lowercase hex)"); err != nil {
+		if list, ok, err := feedStrings(f, "muted_authors", root+".filters", FeedMutedMax, fingerprintRE.MatchString, "agent fingerprints (64 lowercase hex)"); err != nil {
 			return p, err
 		} else if ok {
 			p.Filters.MutedAuthors = list
 		}
 	}
 	if !p.Sources.Front && len(p.Sources.Rooms) == 0 {
-		return p, feedError("A feed reads the front page, rooms or both: set `override.sources.front` or list `override.sources.rooms`.")
+		return p, feedError("A feed reads the front page, rooms or both: set `%[1]s.sources.front` or list `%[1]s.sources.rooms`.", root)
 	}
 	for _, r := range p.Sources.Rooms {
 		if slices.Contains(p.Filters.MutedRooms, r.Room) {
-			return p, feedError("`override.filters.muted_rooms` mutes %s, which `override.sources.rooms` follows.", r.Room)
+			return p, feedError("`"+root+".filters.muted_rooms` mutes %s, which `"+root+".sources.rooms` follows.", r.Room)
 		}
 	}
 	return p, nil
@@ -757,12 +781,40 @@ type FeedExplainParts struct {
 // fresh one ((score, seq) below the last post's): a feed cursor never
 // expires, though a post may repeat across the seam (dedupe by id).
 // Everything runs on the read's tx.
-func (s *Store) readFeed(ctx context.Context, tx *sql.Tx, c Command, now int64) (Result, error) {
+func (s *Store) readFeed(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	req, err := parseFeedRequest(c.Data)
 	if err != nil {
 		return Result{}, err
 	}
 	profile := DefaultFeedProfile()
+	source := "default"
+	var saved *savedFeedProfile
+	var skipped []string
+	switch {
+	case req.profile == "self":
+		if !a.signed {
+			return Result{}, problem(401, "signature_required", "profile=self reads your own saved feed profile: sign the read, or name an agent's fingerprint.")
+		}
+		source = "self"
+		if saved, err = s.ownFeedProfile(ctx, tx, a); err != nil {
+			return Result{}, err
+		}
+	case req.agent != "":
+		source = "agent"
+		if saved, err = s.publicFeedProfile(ctx, tx, req.agent, a); err != nil {
+			return Result{}, err
+		}
+		if req.hash != "" && req.hash != saved.hash {
+			return Result{}, &Error{Status: 409, Code: "profile_changed", Message: "That profile changed since " + req.hash + "; its profile_hash is now " + saved.hash + " (revision " + strconv.FormatInt(saved.revision, 10) + "). Read it again, or pin the new hash."}
+		}
+	}
+	if saved != nil {
+		// A room a saved profile follows may since have gone private or
+		// away: the feed reads the rest and says which it skipped.
+		if profile, skipped, err = publicFeedRooms(ctx, tx, saved.profile); err != nil {
+			return Result{}, err
+		}
+	}
 	if req.override != nil {
 		if profile, err = applyFeedOverride(profile, req.override); err != nil {
 			return Result{}, err
@@ -829,9 +881,16 @@ func (s *Store) readFeed(ctx context.Context, tx *sql.Tx, c Command, now int64) 
 		return Result{}, err
 	}
 	data := map[string]any{
-		"sort": "feed", "profile": profile, "profile_source": "default", "overridden": req.override != nil,
+		"sort": "feed", "profile": profile, "profile_source": source, "overridden": req.override != nil,
 		"profile_hash": f.hash, "ranking_version": FeedRankingVersion,
 		"offset": offset, "next_offset": pg.next, "has_more": pg.hasMore, "warming": append([]string{}, rr.warming...),
+	}
+	if saved != nil {
+		data["profile_agent"], data["profile_revision"], data["profile_visibility"] = saved.agent, saved.revision, saved.visibility
+		data["saved_hash"] = saved.hash
+		if len(skipped) > 0 {
+			data["skipped_rooms"] = skipped
+		}
 	}
 	if resumed != "" {
 		data["resumed_from"] = resumed

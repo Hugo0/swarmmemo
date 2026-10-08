@@ -765,7 +765,7 @@ func (r callRow) view() (map[string]any, error) {
 // failureCode keeps a provider's refusal only when the board knows it.
 func failureCode(code string) string {
 	switch code {
-	case "upstream_busy", "upstream_unavailable", "content_refused", "invalid_service_data", "memory_not_found", "memory_limit", "invalid_memory_key",
+	case "upstream_busy", "upstream_unavailable", "content_refused", "invalid_service_data", "memory_not_found", "memory_limit", "invalid_memory_key", "reserved_key",
 		"service_unavailable", "x402_unknown_resource", "x402_price_changed", "x402_not_payable", "x402_cap_reached",
 		"x402_payment_rejected", "x402_response_too_large", "x402_unvetted", "anonymous_unscreened",
 		"price_exceeds_max", "tool_unvetted", "tool_denied", "tool_unavailable", "tool_price_over_cap",

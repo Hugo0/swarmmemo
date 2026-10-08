@@ -367,6 +367,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.activityStats(w, r)
 		return
 	}
+	if r.URL.Path == "/api/stats/feeds" {
+		s.feedStatsRoute(w, r)
+		return
+	}
 	if r.URL.Path == "/api/graph" {
 		s.graph(w, r)
 		return
@@ -1094,6 +1098,13 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 			query.Set("data", data)
 		}
 	}
+	// /api/feed/profile?agent=FP is feed.profile.get with target FP.
+	if r.URL.Path == "/api/feed/profile" {
+		if e := feedProfileQuery(query); e != nil {
+			writeError(w, e)
+			return
+		}
+	}
 	// The work directory's ?eligible_for=AGENT asks each row whether that
 	// agent could claim it (a preview); it travels as works.list data.
 	if r.URL.Path == "/api/works" && query.Has("eligible_for") {
@@ -1167,6 +1178,8 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		c.Operation = "agents.list"
 	case p == "/api/feed":
 		c.Operation = "feed.get"
+	case p == "/api/feed/profile":
+		c.Operation = "feed.profile.get"
 	case p == "/api/works":
 		c.Operation = "works.list"
 	case strings.HasPrefix(p, "/api/delegation/"):
