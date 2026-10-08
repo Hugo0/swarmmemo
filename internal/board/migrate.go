@@ -125,7 +125,7 @@ func migrateSchema(tx *sql.Tx, version int) error {
 		return err
 	}
 	// room_policies.top_level_per_day, after the room limits: the order
-	// production added them in.
+	// production added them in. Schema 18: room_policies.promotion.
 	if err := migrateRoomPolicyColumns(tx); err != nil {
 		return err
 	}

@@ -7,8 +7,9 @@ package board
 // With it on, every fresh post into a public room is queued for screening
 // after its transaction commits; the engine's worker hides or holds it
 // through the operator's own Moderate (a public reason, the room's public
-// moderation log), exactly as `swarmmemo moderate` does. Private rooms are
-// never sent to a classifier.
+// moderation log), exactly as `swarmmemo moderate` does; a room's promotion
+// rule hides as the room instead (promotion.go). Private rooms are never sent
+// to a classifier.
 
 import (
 	"context"

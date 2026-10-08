@@ -7,18 +7,17 @@ import (
 	"testing"
 )
 
-// Schema 17 (MCP Events, mcpevents.go): a populated schema-16 database
-// (testdata/schema16.sql, the pin 1.45 ships) migrates to exactly the schema
-// a new database gets, keeps every row, and its second start runs no DDL.
-func TestSchema17UpgradeFrom16(t *testing.T) {
-	ddl, err := os.ReadFile(filepath.Join("testdata", "schema16.sql"))
+// Schema 18 (room_policies.promotion, promotion.go): a populated schema-17
+// database (testdata/schema17.sql, the pin 1.48 ships) migrates to exactly
+// the schema a new database gets, keeps every row, gives every existing room
+// policy promotion "allow", and its second start runs no DDL.
+func TestSchema18UpgradeFrom17(t *testing.T) {
+	ddl, err := os.ReadFile(filepath.Join("testdata", "schema17.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "schema16.db")
+	path := filepath.Join(t.TempDir(), "schema17.db")
 	db := rawDB(t, path)
-	// The pin is ordered by type and name (indexes first): create the tables,
-	// then everything that names them.
 	_, body, _ := strings.Cut(string(ddl), "do not edit.\n")
 	blocks := strings.Split(strings.TrimPrefix(body, "-- "), "\n-- ")
 	for _, tables := range []bool{true, false} {
@@ -32,7 +31,7 @@ func TestSchema17UpgradeFrom16(t *testing.T) {
 			}
 		}
 	}
-	if _, err = db.Exec("PRAGMA user_version=16"); err != nil {
+	if _, err = db.Exec("PRAGMA user_version=17"); err != nil {
 		t.Fatal(err)
 	}
 	seedEveryTable(t, db)
@@ -42,7 +41,7 @@ func TestSchema17UpgradeFrom16(t *testing.T) {
 	}
 	openClose(t, path, Config{})
 	db = rawDB(t, path)
-	if v := pragmaInt(t, db, "user_version"); v != SchemaVersion || SchemaVersion < 17 {
+	if v := pragmaInt(t, db, "user_version"); v != SchemaVersion || SchemaVersion != 18 {
 		t.Fatalf("user_version %d, SchemaVersion %d", v, SchemaVersion)
 	}
 	if got, fresh := normalizedSchema(t, db), freshSchema(t, Config{}); got != fresh {
@@ -54,8 +53,9 @@ func TestSchema17UpgradeFrom16(t *testing.T) {
 			t.Errorf("%s: %d rows before, %d after", table, n, after[table])
 		}
 	}
-	if after["mcp_event_subscriptions"] != 0 || after["mcp_event_deliveries"] != 0 {
-		t.Fatalf("new tables are not empty: %+v", after)
+	var policies, allow int
+	if err = db.QueryRow("SELECT count(*),coalesce(sum(promotion='allow'),0) FROM room_policies").Scan(&policies, &allow); err != nil || policies == 0 || allow != policies {
+		t.Fatalf("room policies %d, promotion allow %d: %v", policies, allow, err)
 	}
 	cookie := pragmaInt(t, db, "schema_version")
 	if err = db.Close(); err != nil {

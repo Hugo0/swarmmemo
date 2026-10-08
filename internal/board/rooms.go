@@ -94,7 +94,9 @@ func PersonalOwner(room string) (string, bool) {
 // room, or one past closes_at, takes no posts, and max_messages bounds its
 // original messages; it stays readable and nothing is deleted. 0 is unset.
 // TopLevelPerDay bounds the top-level posts each poster starts per UTC day
-// (checkTopLevelPerDay; 0 is off).
+// (checkTopLevelPerDay; 0 is off). Promotion is "allow" (the default) or
+// "moderate": with moderation on, a public post there that the screen finds
+// is mainly an advertisement is hidden with a public reason (promotion.go).
 type RoomPolicy struct {
 	Write          string   `json:"write"`
 	Reply          string   `json:"reply"`
@@ -105,6 +107,7 @@ type RoomPolicy struct {
 	ClosesAt       int64    `json:"closes_at,omitempty"`
 	MaxMessages    int64    `json:"max_messages,omitempty"`
 	TopLevelPerDay int64    `json:"top_level_per_day,omitempty"`
+	Promotion      string   `json:"promotion,omitempty"`
 	UpdatedAt      int64    `json:"updated_at,omitempty"`
 	frontPage      string   // stored: "", "on" or "off"
 }
@@ -129,16 +132,16 @@ type ModerationEntry struct {
 
 func defaultPolicy(room string) RoomPolicy {
 	if personalRoomRE.MatchString(room) {
-		return RoomPolicy{Write: "owner", Reply: "anyone", FrontPage: frontPageDefault(room)}
+		return RoomPolicy{Write: "owner", Reply: "anyone", FrontPage: frontPageDefault(room), Promotion: PromotionAllow}
 	}
-	return RoomPolicy{Write: "open", Reply: "anyone", FrontPage: frontPageDefault(room)}
+	return RoomPolicy{Write: "open", Reply: "anyone", FrontPage: frontPageDefault(room), Promotion: PromotionAllow}
 }
 
 func loadPolicy(ctx context.Context, tx *sql.Tx, room string) (RoomPolicy, error) {
 	p := defaultPolicy(room)
 	var writeVia string
-	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day FROM room_policies WHERE room=?", room).
-		Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia, &p.frontPage, &p.Closed, &p.ClosesAt, &p.MaxMessages, &p.TopLevelPerDay)
+	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day,promotion FROM room_policies WHERE room=?", room).
+		Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia, &p.frontPage, &p.Closed, &p.ClosesAt, &p.MaxMessages, &p.TopLevelPerDay, &p.Promotion)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
@@ -275,9 +278,11 @@ func openPersonalRoom(ctx context.Context, tx *sql.Tx, room string, a actor, now
 }
 
 // roomPolicyColumns are later room_policies settings: the daily top-level
-// limit. Added after the room limits (migrateSchema).
+// limit, then (schema 18) the promotion rule. Added after the room limits
+// (migrateSchema), in this order.
 var roomPolicyColumns = []struct{ name, definition string }{
 	{"top_level_per_day", "INTEGER NOT NULL DEFAULT 0"},
+	{"promotion", "TEXT NOT NULL DEFAULT 'allow'"},
 }
 
 // migrateRoomPolicyColumns adds roomPolicyColumns, keyed on the columns.
@@ -425,9 +430,9 @@ func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, operato
 		if err != nil {
 			return logEntry{}, Result{}, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day,promotion) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
  ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at,write_via=excluded.write_via,front_page=excluded.front_page,
- closed=excluded.closed,closes_at=excluded.closes_at,max_messages=excluded.max_messages,top_level_per_day=excluded.top_level_per_day`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia), p.frontPage, p.Closed, p.ClosesAt, p.MaxMessages, p.TopLevelPerDay); err != nil {
+ closed=excluded.closed,closes_at=excluded.closes_at,max_messages=excluded.max_messages,top_level_per_day=excluded.top_level_per_day,promotion=excluded.promotion`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia), p.frontPage, p.Closed, p.ClosesAt, p.MaxMessages, p.TopLevelPerDay, p.Promotion); err != nil {
 			return logEntry{}, Result{}, err
 		}
 		p.UpdatedAt = now
@@ -504,11 +509,12 @@ func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bo
 		ClosesAt    *int64          `json:"closes_at"`
 		MaxMessages *int64          `json:"max_messages"`
 		TopLevel    *int64          `json:"top_level_per_day"`
+		Promotion   *string         `json:"promotion"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader([]byte(data)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil && in.FrontPage == nil && in.Closed == nil && in.ClosesAt == nil && in.MaxMessages == nil && in.TopLevel == nil) {
-		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via", "front_page", "closed", "closes_at", "max_messages", "top_level_per_day".`)
+	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil && in.FrontPage == nil && in.Closed == nil && in.ClosesAt == nil && in.MaxMessages == nil && in.TopLevel == nil && in.Promotion == nil) {
+		return RoomPolicy{}, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via", "front_page", "closed", "closes_at", "max_messages", "top_level_per_day", "promotion".`)
 	}
 	p, err := loadPolicy(ctx, tx, room)
 	if err != nil {
@@ -559,6 +565,9 @@ func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bo
 	if in.TopLevel != nil {
 		p.TopLevelPerDay = *in.TopLevel
 	}
+	if in.Promotion != nil {
+		p.Promotion = *in.Promotion
+	}
 	if in.WriteVia != nil {
 		if p.WriteVia, err = parseWriteVia(in.WriteVia); err != nil {
 			return p, err
@@ -579,6 +588,8 @@ func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bo
 		return p, problem(400, "invalid_policy", fmt.Sprintf("max_messages is 0 (no limit) to %d.", RoomMaxMessagesLimit))
 	case p.TopLevelPerDay < 0 || p.TopLevelPerDay > RoomTopLevelPerDayLimit:
 		return p, problem(400, "invalid_policy", fmt.Sprintf("top_level_per_day is 0 (no limit) to %d.", RoomTopLevelPerDayLimit))
+	case p.Promotion != PromotionAllow && p.Promotion != PromotionModerate:
+		return p, problem(400, "invalid_policy", `promotion must be "allow" (the default) or "moderate".`)
 	}
 	return p, nil
 }

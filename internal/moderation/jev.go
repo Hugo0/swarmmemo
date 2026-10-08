@@ -273,6 +273,11 @@ func jevRequest(s Surface, subj Subject) (map[string]jevQuestion, func(text stri
 			return map[string]any{"service": codeNote, "code": map[string]any{"text": text}}
 		}
 	case SurfacePost:
+		if subj.Promotion != "" {
+			return postPromotionQuestions, func(text string) any {
+				return map[string]any{"board": boardNote, "room_rule": promotionNote, "message": map[string]any{"room": subj.Room, "signed": subj.Signed, "reply": subj.Promotion == PromotionReply, "text": text}}
+			}
+		}
 		return postQuestions, func(text string) any {
 			return map[string]any{"board": boardNote, "message": map[string]any{"room": subj.Room, "signed": subj.Signed, "text": text}}
 		}
@@ -430,8 +435,10 @@ func (j *jevClient) call(ctx context.Context, body []byte, timeout time.Duration
 				// The quality question is a ranking signal, never a safety
 				// one: a missing or invalid answer to it drops only it, so the
 				// post screen still acts on the safety answers and the post is
-				// left unscored (quality.go). Any other bad answer fails the call.
-				if k == QualityCategory {
+				// left unscored (quality.go). The promotion question likewise:
+				// without an answer the room rule does nothing (promotion.go).
+				// Any other bad answer fails the call.
+				if k == QualityCategory || k == PromotionCategory {
 					delete(out.Answers, k)
 					continue
 				}

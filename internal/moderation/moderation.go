@@ -147,6 +147,9 @@ type Subject struct {
 	Agent  string // key fingerprint or anonymous pseudonym; rate rules count by it
 	Room   string // posts: the room (context for Jev)
 	Signed bool   // posts: whether the author signed
+	// Promotion is how the room's promotion rule judges a post (promotion.go):
+	// "" asks nothing more.
+	Promotion Promotion
 }
 
 // Content is what a surface screens: Text, or for run.egress a Destination.
@@ -304,6 +307,7 @@ func (e *Engine) Screen(ctx context.Context, s Surface, subj Subject, c Content)
 	d.Action, d.Proposed = Allow, Allow
 	var degraded string
 	var models []string
+	var promotion *float64
 	for _, name := range sp.Classifiers {
 		var r classResult
 		var err error
@@ -314,6 +318,10 @@ func (e *Engine) Screen(ctx context.Context, s Surface, subj Subject, c Content)
 				d.Quality, d.qualityModel = &u, r.model
 				delete(r.scores, QualityCategory)
 			}
+			if u, ok := r.scores[PromotionCategory]; ok && err == nil {
+				promotion = &u
+			}
+			delete(r.scores, PromotionCategory)
 		case "rules":
 			r = classifyRules(sp, c)
 		case "size":
@@ -368,6 +376,12 @@ func (e *Engine) Screen(ctx context.Context, s Surface, subj Subject, c Content)
 		if fail.stronger(d.Action) {
 			d.Action = fail
 		}
+	}
+	// The room's promotion rule (promotion.go): only on a post every safety
+	// question allowed, and the score is kept with the others for review.
+	applyPromotion(&d, subj, promotion)
+	if promotion != nil {
+		d.Scores[PromotionCategory] = *promotion
 	}
 	// The burst rule: too many hides or blocks in one category in the window
 	// means flag the further ones in that category (downgrade), or only alert
@@ -534,7 +548,11 @@ func publicReason(d Decision, sp *SurfacePolicy, pol *Policy) string {
 	case d.Degraded != "" && d.Action != d.Proposed:
 		prefix = "auto-screen: screen unavailable (" + strings.Replace(d.Degraded, "jev_", "classifier_", 1) + "): "
 	}
-	r := fmt.Sprintf("%s%s (p=%.2f, model=%s, policy=v%d); policy: hide only clearly malicious", prefix, label, math.Min(math.Max(d.P, 0), 1), model, pol.Version)
+	rule := "hide only clearly malicious"
+	if d.Category == PromotionCategory {
+		rule = "promotion is moderated in this room"
+	}
+	r := fmt.Sprintf("%s%s (p=%.2f, model=%s, policy=v%d); policy: %s", prefix, label, math.Min(math.Max(d.P, 0), 1), model, pol.Version, rule)
 	if !reasonRE.MatchString(r) {
 		return fmt.Sprintf("auto-screen: %s (policy=v%d)", d.Action, pol.Version)
 	}

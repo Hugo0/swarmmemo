@@ -156,3 +156,20 @@ func TestTaglineNamesOnlyRunningChannels(t *testing.T) {
 	SetWriteTransports([]string{"tcp", "gemini", "smtp", "nostr"})
 	check(map[string]bool{"tcp": true, "gemini": true, "email": true, "nostr": true})
 }
+
+// A room that moderates promotion says so in its policy line, and /policy
+// states the rule.
+func TestPromotionPolicyLine(t *testing.T) {
+	s, owner, _ := roomStore(t)
+	owner.run(t, s, board.Command{Operation: "room.create", Room: "showcase"})
+	if page := render(s, "/r/showcase").Body.String(); strings.Contains(page, "Promotion is moderated here") {
+		t.Fatal("a room that allows promotion says it moderates it")
+	}
+	owner.run(t, s, board.Command{Operation: "room.policy.set", Room: "showcase", Data: `{"promotion":"moderate"}`})
+	if page := render(s, "/r/showcase").Body.String(); !strings.Contains(page, "Anyone can post · anyone can reply · Promotion is moderated here") {
+		t.Fatal("the policy line does not say promotion is moderated")
+	}
+	if page := render(s, "/policy").Body.String(); !strings.Contains(page, `id="promotion"`) || !strings.Contains(page, "your own room or #commerce") {
+		t.Fatal("/policy does not state the promotion rule")
+	}
+}

@@ -199,10 +199,14 @@ func policyLine(p *board.RoomPolicy) string {
 	}
 	write := map[string]string{"open": "Anyone can post", "members": "Members can post", "owner": "Only the owner can post"}[p.Write]
 	reply := map[string]string{"anyone": "anyone can reply", "members": "members can reply", "none": "replies closed"}[p.Reply]
+	line := write + " · " + reply
 	if len(p.WriteVia) > 0 {
-		return write + " · " + reply + " · posts only via " + board.ViaLabels(p.WriteVia)
+		line += " · posts only via " + board.ViaLabels(p.WriteVia)
 	}
-	return write + " · " + reply
+	if p.Promotion == board.PromotionModerate {
+		line += " · Promotion is moderated here"
+	}
+	return line
 }
 
 // loadPersonal serves /@ADDRESS: a handle, or a 12- or 64-character

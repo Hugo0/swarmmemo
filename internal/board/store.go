@@ -204,7 +204,10 @@ CREATE TABLE IF NOT EXISTS leases (
 //
 // 17: MCP Events subscriptions and their delivery queue (mcpevents.go). They
 // are additive, but a schema-16 binary would never send what is queued.
-const SchemaVersion = 17
+//
+// 18: room_policies.promotion, the room's promotion rule (promotion.go). A
+// schema-17 binary would drop it on the next room.policy.set and never apply it.
+const SchemaVersion = 18
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.

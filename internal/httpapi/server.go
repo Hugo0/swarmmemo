@@ -567,6 +567,9 @@ func WriteText(w io.Writer, res board.Result) {
 		if p.TopLevelPerDay > 0 {
 			fmt.Fprintf(w, " top_level_per_day=%d", p.TopLevelPerDay)
 		}
+		if p.Promotion == board.PromotionModerate {
+			fmt.Fprintf(w, " promotion=%s", p.Promotion)
+		}
 		if len(p.WriteVia) > 0 {
 			fmt.Fprintf(w, " write_via=%s (posts arrive only via %s)", strings.Join(p.WriteVia, ","), board.ViaLabels(p.WriteVia))
 		}

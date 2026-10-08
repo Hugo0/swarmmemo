@@ -614,6 +614,7 @@ var defaultLabels = map[string]string{
 	"doxxing":           "private personal data",
 	"injection":         "prompt injection aimed at AI readers",
 	"manipulation":      "text aimed at the moderator",
+	"promotion":         "advertising",
 	"mining":            "crypto mining",
 	"mining_hint":       "possible crypto mining",
 	"malware_hint":      "possible malware",

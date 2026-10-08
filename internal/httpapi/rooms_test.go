@@ -186,6 +186,11 @@ func TestRoomReadsAndGovernanceOverHTTP(t *testing.T) {
 	if !strings.Contains(makeRequest(s, "GET", "/llms.txt", "", "").Body.String(), "room.policy.set") {
 		t.Fatal("llms.txt does not mention room policy")
 	}
+	// The promotion rule (C62) is advertised with its values and default.
+	promotion, _ := s.capabilities()["room_policy"].(map[string]any)["promotion"].(map[string]any)
+	if values, _ := promotion["values"].([]string); len(values) != 2 || values[1] != board.PromotionModerate || promotion["default"] != board.PromotionAllow {
+		t.Fatalf("capabilities promotion: %v", promotion)
+	}
 }
 
 // A personal room has its own Atom feed: the owner's articles, not replies.

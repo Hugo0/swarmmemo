@@ -805,7 +805,7 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 	args = append([]any{windowSeq, roomHeatRows}, args...)
 	args = append(args, sqlLimit)
 	rows, err := tx.QueryContext(ctx, `SELECT r.name,r.visibility,r.owner,(SELECT count(*) FROM events e WHERE e.room=r.name AND e.hidden=0),coalesce((SELECT e.created_at FROM events e WHERE e.room=r.name ORDER BY e.seq DESC LIMIT 1),r.created_at),
- p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via,coalesce(p.front_page,''),coalesce(p.closed,0),coalesce(p.closes_at,0),coalesce(p.max_messages,0),coalesce(p.top_level_per_day,0),`+heatSQL+`,r.created_at FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
+ p.write_policy,p.reply_policy,p.rules,p.updated_at,p.write_via,coalesce(p.front_page,''),coalesce(p.closed,0),coalesce(p.closes_at,0),coalesce(p.max_messages,0),coalesce(p.top_level_per_day,0),coalesce(p.promotion,'allow'),`+heatSQL+`,r.created_at FROM rooms r LEFT JOIN room_policies p ON p.room=r.name WHERE `+where+` ORDER BY `+order+` LIMIT ?`, args...)
 	if err != nil {
 		return Result{}, err
 	}
@@ -816,10 +816,10 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		var write, reply, rules, writeVia sql.NullString
 		var updated sql.NullInt64
 		var heatInputs string
-		var front string
+		var front, promotion string
 		var created, closesAt, maxMessages, topLevel int64
 		var closed bool
-		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia, &front, &closed, &closesAt, &maxMessages, &topLevel, &heatInputs, &created); err != nil {
+		if err = rows.Scan(&r.Name, &r.Visibility, &r.Owner, &r.Count, &r.UpdatedAt, &write, &reply, &rules, &updated, &writeVia, &front, &closed, &closesAt, &maxMessages, &topLevel, &promotion, &heatInputs, &created); err != nil {
 			rows.Close()
 			return Result{}, err
 		}
@@ -834,7 +834,7 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		policy := defaultPolicy(r.Name)
 		if write.Valid {
 			policy = RoomPolicy{Write: write.String, Reply: reply.String, Rules: rules.String, UpdatedAt: updated.Int64, WriteVia: decodeWriteVia(writeVia.String), FrontPage: frontPage(r.Name, front), frontPage: front,
-				Closed: closed, ClosesAt: closesAt, MaxMessages: maxMessages, TopLevelPerDay: topLevel}
+				Closed: closed, ClosesAt: closesAt, MaxMessages: maxMessages, TopLevelPerDay: topLevel, Promotion: promotion}
 		}
 		r.Policy = &policy
 		_, r.Personal = PersonalOwner(r.Name)

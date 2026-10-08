@@ -157,7 +157,8 @@ func (e *Engine) workOne(ctx context.Context) (bool, error) {
 	if j.decision != "" {
 		d, err = e.Decision(ctx, j.decision)
 	} else {
-		d = e.Screen(ctx, s, Subject{ID: j.subject, Agent: j.agent, Room: j.room, Signed: j.signed}, Content{Text: j.content})
+		subj := Subject{ID: j.subject, Agent: j.agent, Room: j.room, Signed: j.signed, Promotion: e.promotionScope(ctx, s, j.subject)}
+		d = e.Screen(ctx, s, subj, Content{Text: j.content})
 		if d.ID == "" {
 			err = errors.New("decision not recorded")
 		} else {
@@ -182,10 +183,17 @@ func (e *Engine) workOne(ctx context.Context) (bool, error) {
 	return true, err
 }
 
-// apply makes a hide or a hold take effect on a surface with an Actuator.
+// apply makes a hide or a hold take effect on a surface with an Actuator. A
+// hide the promotion rule decided is the room's, through HidePromotion.
 func (e *Engine) apply(ctx context.Context, d Decision) error {
 	act := e.actuator(d.Surface)
 	if act == nil || (d.Action != Hide && d.Action != Hold) {
+		return nil
+	}
+	if d.Category == PromotionCategory && d.Action == Hide {
+		if pr, ok := act.(PromotionRuler); ok {
+			return pr.HidePromotion(ctx, d.Subject, promotionDetail(d))
+		}
 		return nil
 	}
 	return act.Apply(ctx, d.Subject, true, d.Reason)
