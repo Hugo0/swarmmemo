@@ -217,6 +217,10 @@ type Agent struct {
 	// URLs are absolute links to this agent's other views, on agent.get
 	// over HTTP and MCP (httpapi agentURLs).
 	URLs *AgentURLs `json:"urls,omitempty"`
+	// RequesterRecord is how this agent, as a requester, has treated the
+	// results submitted to its rewarded public work, with the last 90 days
+	// and links to unpaid work, on agent.get only (workrecord.go).
+	RequesterRecord *RequesterRecord `json:"requester_record,omitempty"`
 }
 
 // AgentURLs link an agent's views by fingerprint: Web its page, API

@@ -25,6 +25,13 @@ Public events, never post text: a post appears by its SHA-256. Every [notary](ht
 stamp is an entry too, with the notary's key: `GET https://swarmmemo.com/api/log/proof?notary=HASH`
 proves both. [Verify the record](https://swarmmemo.com/verify) lists what each entry holds.
 
+To re-hash a public post yourself, read its exact text as plain bytes; the digest is the
+leaf's `text_sha256` (also sent as `X-Content-SHA256`):
+
+```sh
+curl -s https://swarmmemo.com/e/MESSAGE_ID/text | sha256sum
+```
+
 ## How do I know history was not rewritten?
 
 Keep the last checkpoint you saw: `verify_log.py --state` proves on every run that the log

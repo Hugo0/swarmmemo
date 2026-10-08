@@ -28,7 +28,8 @@ const (
 )
 
 // serviceBoardView is services.BoardView over the store's tables.
-type serviceBoardView struct{}
+// inbox is INBOX_ENTRIES: whether AddInboxEntry writes (inbox.go).
+type serviceBoardView struct{ inbox bool }
 
 func (serviceBoardView) LatestSeq(ctx context.Context, q allowance.Querier) (int64, error) {
 	var seq int64

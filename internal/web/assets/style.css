@@ -305,6 +305,8 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
   html:not(.room-styled) :is(.work-state-claimed,.work-state-submitted){--work-tone:#eda462}
   html:not(.room-styled) :is(.work-state-rejected,.work-state-recovery_required){--work-tone:#f2958b}
 }
+/* The requester record (RFC C89): unpaid results read in the alert colour. */
+.pay-unpaid{color:var(--alert)}
 /* Room style (internal/roomstyle, RFC0011). A room's CSS restyles its whole page, and
    what it makes of the page is the room's business. Four things are not: each post's
    byline stays visible and legible in its post; controls (Reply, Report, the composer,
@@ -1121,9 +1123,9 @@ span.term[title]:focus,code.term[title]:focus,p.term[title]:focus{outline:2px so
 .term.tip-dismissed::after{display:none}
 a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .article-byline a.memo-time:focus-visible>time[title]::after{left:0;right:auto}
-.memo-edited,.memo-proof{font-size:var(--t-meta);color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
-.memo-proof{margin-left:.5em}
-.memo-edited:hover,.memo-proof:hover{color:var(--ink);text-decoration:underline}
+.memo-edited,.memo-proof,.memo-plain{font-size:var(--t-meta);color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
+.memo-proof,.memo-plain{margin-left:.5em}
+.memo-edited:hover,.memo-proof:hover,.memo-plain:hover{color:var(--ink);text-decoration:underline}
 /* An article is the page: serif title, a byline in the memo's metadata voice,
    and a measure of about 68 characters for the body. */
 .post-article{padding:var(--s-6) 0 var(--s-5);margin-bottom:var(--s-5);border-bottom:0}
@@ -1132,7 +1134,7 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .article-title{font-size:var(--t-display);line-height:1.15;margin-bottom:var(--s-4);overflow-wrap:anywhere}
 .article-byline{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-2);font-size:var(--t-meta);color:var(--muted);margin:0}
 .article-byline .memo-time{margin-left:0}
-.article-byline :is(.memo-edited,.memo-proof){display:inline;min-height:0;margin-left:0}
+.article-byline :is(.memo-edited,.memo-proof,.memo-plain){display:inline;min-height:0;margin-left:0}
 .article-body{font-size:17px;line-height:1.75;max-width:68ch;margin-bottom:var(--s-5)}
 .article-body h2{font-size:20px;margin-top:var(--s-6)}
 .article-body h3{font-size:18px;margin-top:var(--s-5)}
@@ -1399,3 +1401,55 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .tool-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:32rem;overflow:auto}
 .tool-items{list-style:none;padding:0}
 .tool-item{border-top:1px solid var(--line);padding-top:var(--s-3)}
+/* Personal feeds (feeds.html): the tune page, its preview, a room's Subscribe
+   and an agent's feed algorithm. Tokens only, so dark mode follows. */
+.tune-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s-6);align-items:start;margin-bottom:var(--s-7)}
+.tune-set{border:0;border-top:1px solid var(--line);padding:var(--s-4) 0 var(--s-2);margin:0;min-width:0}
+.tune-set legend{font-size:var(--t-heading);font-weight:600;padding:0 0 var(--s-2)}
+.tune-formula{font-family:var(--mono);overflow-wrap:anywhere}
+.tune-field{margin:var(--s-3) 0}
+.tune-field>label{font-size:var(--t-ui);font-weight:500}
+.tune-field p{margin:var(--s-1) 0 0}
+.tune-control{display:flex;align-items:center;gap:var(--s-3)}
+.tune-control input[type=range]{flex:1;min-width:0;margin:0;padding:0;border:0;background:none;accent-color:var(--ink);min-height:var(--touch)}
+.tune-control input[type=number]{flex:0 0 6.5em;width:6.5em;margin:0}
+.tune-choice{display:flex;flex-wrap:wrap;gap:var(--s-2) var(--s-4);margin:var(--s-2) 0}
+.tune-choice label,.tune-check{display:flex;align-items:center;gap:var(--s-2);min-height:var(--touch);font-size:var(--t-ui)}
+.tune-choice input,.tune-check input{accent-color:var(--ink)}
+.tune-rooms{list-style:none;padding:0;margin:var(--s-2) 0}
+.tune-room{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;gap:var(--s-3);align-items:end;padding:var(--s-2) 0;border-bottom:1px solid var(--line)}
+.tune-room label{font-size:var(--t-meta);color:var(--muted)}
+.tune-room .tune-control input[type=number]{flex-basis:5em;width:5em}
+.tune-room-remove{min-height:var(--touch)}
+.tune-actions{margin-top:var(--s-5)}
+.tune-status{min-height:1.6em}
+.tune-status.error,.feed-fork-status.error,#room-subscribe-status.error,#personal-feed-status.error{color:var(--alert)}
+.tune-agent{margin:var(--s-4) 0;font-size:var(--t-ui)}
+.tune-agent pre,.feed-fork pre,.room-subscribe pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.tune-preview{position:sticky;top:var(--s-4);min-width:0}
+.tune-hash code,.feed-hash code{overflow-wrap:anywhere}
+.feed-preview{list-style:none;padding:0;margin:var(--s-3) 0;counter-reset:rank}
+.feed-preview[aria-busy=true]{opacity:.6}
+.feed-row{display:flex;gap:var(--s-3);align-items:baseline;padding:var(--s-3) 0;border-bottom:1px solid var(--line);counter-increment:rank}
+.feed-row::before{content:counter(rank);flex:0 0 1.6em;font:var(--t-meta)/1.6 var(--mono);color:var(--faint);text-align:right}
+.feed-row-empty{padding:var(--s-4) 0;color:var(--muted);font-size:var(--t-ui)}
+.feed-moved{flex:0 0 2.6em;font:var(--t-meta)/1.6 var(--mono);color:var(--muted)}
+.feed-moved-up,.feed-moved-new{color:var(--ink);font-weight:600}
+.feed-row-main{display:flex;flex-direction:column;gap:2px;min-width:0}
+.feed-row-title{color:var(--ink);font-size:var(--t-ui);overflow-wrap:anywhere}
+.feed-row-meta a{color:inherit}
+.feed-summary{margin:var(--s-2) 0 var(--s-3);padding-left:var(--s-5);color:var(--ink-2)}
+.feed-fork{margin:var(--s-4) 0}
+.room-subscribe{max-width:770px;margin:0 0 var(--s-5);padding:var(--s-3) 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.room-subscribe-controls{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3)}
+.weight-chips{display:flex;gap:var(--s-2);border:0;padding:0;margin:0}
+.weight-chips label{position:relative;display:inline-flex;align-items:center;min-height:var(--touch);padding:0 var(--s-3);border:1px solid var(--field-border-strong);border-radius:999px;font-size:var(--t-ui);cursor:pointer}
+.weight-chips label:has(input:checked){background:var(--primary-fill);color:var(--primary-ink);border-color:var(--primary-fill)}
+.weight-chips label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
+.weight-chips input{position:absolute;inset:0;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+@media (max-width:860px){
+  .tune-grid{grid-template-columns:minmax(0,1fr);gap:var(--s-4)}
+  .tune-preview{position:static;order:-1}
+  .tune-room{grid-template-columns:minmax(0,1fr) auto}
+  .tune-room-weight{grid-column:1/-1;grid-row:2}
+}

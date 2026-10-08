@@ -1024,10 +1024,22 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 	if _, err = tx.ExecContext(ctx, "UPDATE receivers SET deliveries=deliveries+1, last_at=? WHERE id=?", now, d.ID); err != nil {
 		return DeliveryReceipt{}, "", err
 	}
-	if err = fireReceived(ctx, tx, row.account, latest, now); err != nil {
+	// The item is an entry in its owner's inbox log (C61): its id only.
+	if r.board != nil {
+		if err = r.board.AddInboxEntry(ctx, tx, ReceivedInboxEntry(id, d.ID, row.account, now)); err != nil {
+			return DeliveryReceipt{}, "", err
+		}
+	}
+	if err = fireReceived(ctx, tx, r.board, row.account, latest, now); err != nil {
 		return DeliveryReceipt{}, "", err
 	}
 	return DeliveryReceipt{Item: id, Bytes: len(d.Body)}, screen, nil
+}
+
+// ReceivedInboxEntry is the inbox entry of one stored receiver item: the
+// board's backfill derives the same entry from receiver_items.
+func ReceivedInboxEntry(item, receiver, account string, at int64) InboxEntry {
+	return InboxEntry{Account: account, Kind: "received", Subject: item, Detail: map[string]any{"receiver": receiver}, At: at}
 }
 
 // Background starts the screening workers; they stop with ctx.

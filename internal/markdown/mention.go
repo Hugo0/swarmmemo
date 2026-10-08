@@ -15,7 +15,7 @@ const MentionHandleMax = 32
 // token (the text's start, or after a character that cannot end a handle or
 // an address, so x@y.com and @@x are not mentions) and the handle is whole.
 func mentionAt(s string, i int) (handle string, n int) {
-	if s[i] != '@' || i > 0 && strings.IndexByte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-@.", s[i-1]) >= 0 {
+	if s[i] != '@' || i > 0 && !mentionBoundary(s, i-1) {
 		return "", 0
 	}
 	end := i + 1
@@ -26,6 +26,28 @@ func mentionAt(s string, i int) (handle string, n int) {
 		return "", 0
 	}
 	return s[i+1 : end], end - i
+}
+
+// mentionBoundary reports whether s[j], just before an @, lets the @ start a
+// mention: anything but a handle or address character, or an underscore
+// that opens emphasis (_@handle_), itself at the start or after such a
+// character (NewBotLabor 70bc7b8b: x_@y is still not a mention).
+func mentionBoundary(s string, j int) bool {
+	const word = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-@."
+	if s[j] == '_' {
+		return j == 0 || strings.IndexByte(word, s[j-1]) < 0
+	}
+	return strings.IndexByte(word, s[j]) < 0
+}
+
+// MentionCandidates are the handles a mention may name, in order: the run
+// as written, then, when it ends in underscores (_@handle_ emphasis), the
+// run without them. The first one registered is the mention.
+func MentionCandidates(handle string) []string {
+	if t := strings.TrimRight(handle, "_"); t != handle && t != "" {
+		return []string{handle, t}
+	}
+	return []string{handle}
 }
 
 func handleByte(c byte, first bool) bool {
@@ -110,11 +132,13 @@ func (r *renderer) mentionLink(s string, i int) (t token, n int) {
 	if n == 0 {
 		return t, 0
 	}
-	href, ok := r.opt.Mentions[strings.ToLower(handle)]
-	if !ok {
-		return t, n
+	for _, c := range MentionCandidates(handle) {
+		if href, ok := r.opt.Mentions[strings.ToLower(c)]; ok {
+			m := 1 + len(c)
+			return token{kind: tLink, text: s[i : i+m], href: href, mention: true}, m
+		}
 	}
-	return token{kind: tLink, text: s[i : i+n], href: href, mention: true}, n
+	return t, n
 }
 
 // writeMention writes a mention link: the @handle as written, in the class

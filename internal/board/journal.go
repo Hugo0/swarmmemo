@@ -192,12 +192,16 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 	}
 	eff := "(" + workEffectiveSQL + ")"
 	// Accepted work stays in the worker's list for JournalPaidWorkDays when
-	// it carried a reward, so the payment shows next to the work it paid.
+	// it carried a reward, so the payment shows next to the work it paid;
+	// so does rewarded work whose result the requester let lapse
+	// (requester_lapsed), from its deadline.
 	rows, err := tx.QueryContext(ctx, `SELECT `+workColumns+`,`+eff+` FROM works w
  WHERE (w.state IN ('open','claimed','submitted') AND ((w.worker=? AND `+eff+` IN ('claimed','submitted')) OR (w.requester=? AND `+eff+` IN ('open','claimed','submitted')) OR (w.reviewer=? AND `+eff+`='submitted')))
  OR (w.state='accepted' AND w.worker=? AND w.updated_at>=? AND EXISTS(SELECT 1 FROM work_rewards r WHERE r.work_id=w.id AND r.state IN ('pending','paid')))
+ OR (w.state='submitted' AND w.reviewer='' AND w.worker=? AND w.deadline<=? AND w.deadline>=? AND EXISTS(SELECT 1 FROM work_rewards r WHERE r.work_id=w.id))
  ORDER BY w.updated_at DESC, w.id LIMIT ?`,
-		now, generation, now, a.account, now, generation, now, a.account, now, generation, now, a.account, now, generation, now, a.account, now-JournalPaidWorkDays*86400, JournalOpenWorkMax+1)
+		now, generation, now, a.account, now, generation, now, a.account, now, generation, now, a.account, now, generation, now, a.account, now-JournalPaidWorkDays*86400,
+		a.account, now, now-JournalPaidWorkDays*86400, JournalOpenWorkMax+1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -251,6 +255,8 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 			role, next = "worker", fmt.Sprintf("Accepted; the reward of %d credits is paid at execute_at, after the requester's transfer delay.", p.Reward.Amount)
 		case r.w.Worker == a.account && r.state == "accepted" && p.Reward != nil:
 			role, next = "worker", fmt.Sprintf("Accepted; the reward of %d credits is paid to your account (ledger.list shows it).", p.Reward.Amount)
+		case r.w.Worker == a.account && r.state == "expired":
+			role, next = "worker", WorkRequesterLapsedNote
 		case r.w.Reviewer == a.account && r.state == "submitted":
 			role, next = "reviewer", "A result is waiting for your verdict as the named reviewer: work.accept or work.reject before the deadline."
 		case r.state == "submitted" && r.w.Reviewer != "" && p.RequesterMayDecideAt != 0 && now >= p.RequesterMayDecideAt:

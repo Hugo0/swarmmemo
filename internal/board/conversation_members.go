@@ -288,6 +288,14 @@ func (s *Store) reachMember(ctx context.Context, tx *sql.Tx, conv conversationRo
 	if _, err = setMemberState(ctx, tx, memberChange{Room: conv.Room, Account: recipient, State: state, AddedBy: a.account}, now); err != nil {
 		return "", err
 	}
+	// A request is an entry in the recipient's inbox log (C61), waiting for
+	// an answer; only the recipient's own reads ever see it.
+	if state == memberRequested {
+		if err = s.recordInbox(ctx, tx, inboxSource{kind: inboxRequest, account: recipient, subject: conv.Room, room: conv.Room,
+			actor: signedActor(a), actorAccount: a.account, at: now, needsAnswer: true}); err != nil {
+			return "", err
+		}
+	}
 	if postage > 0 {
 		if err = s.holdPostage(ctx, tx, a, conv.Room, recipient, postage, now); err != nil {
 			return "", err

@@ -67,6 +67,18 @@ class OperationTests(unittest.TestCase):
         with self.assertRaisesRegex(BridgeError, "intent_too_large"):
             op.dispatch(self.profile, "stage_post", {"intent_id": "escape", "text": "\x01" * 16000})
 
+    def test_work_requester_record_is_validated(self):
+        fingerprint = hashlib.sha256(op.memo.unb64(self.public)).hexdigest()
+        record = {"results": 3, "paid": 1, "rejected": 1, "unpaid_lapsed": 1, "cancelled_after_submit": 0, "median_hours_to_verdict": 9.5, "distinct_workers": 2, "since": 1700000000}
+        work = {"id": "b" * 32, "room": "lab", "title": "t", "capabilities": [], "simulated": False, "state": "open", "stored_state": "open", "generation": "a" * 32,
+                "service_generation": "a" * 32, "service_id": self.profile.service_id, "created_at": 1, "updated_at": 1, "deadline": 2, "fence": 0, "claim_expires_at": 0,
+                "requester_author": fingerprint, "requester": {"id": fingerprint, "public_key": self.public}, "result_available": False, "requester_record": record}
+        self.assertEqual(op._work(self.profile, dict(work))["requester_record"], record)
+        self.assertIsNotNone(op._work(self.profile, {**work, "requester_record": {**record, "median_hours_to_verdict": None}}))
+        for bad in ({**record, "paid": "1"}, {**record, "extra": 1}, {k: v for k, v in record.items() if k != "paid"}, {**record, "median_hours_to_verdict": "9"}, [], {**record, "unpaid_lapsed": -1}):
+            with self.subTest(record=bad), self.assertRaisesRegex(BridgeError, "invalid_response"):
+                op._work(self.profile, {**work, "requester_record": bad})
+
     def test_hosted_argument_names_are_aliases(self):
         # Hosted MCP's find_work takes kind and read_work message_id; the bridge
         # takes them beside its own state and work_id, and refuses both at once.

@@ -270,6 +270,11 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err != nil {
 		return Result{}, err
 	}
+	// The inbox entry log (C61, inbox.go): who this message concerns, in this
+	// transaction, while INBOX_ENTRIES is on.
+	if err = s.recordInbox(ctx, tx, postInboxSource(id, r, c.ReplyTo, c.To, data.Supersedes != "", mentioned, a, now)); err != nil {
+		return Result{}, err
+	}
 	// Push notifications are queued in this transaction, so a delivery exists only
 	// for an event that committed. Nothing is sent from here.
 	if err = s.enqueueWebhooks(ctx, tx, id, c, r, a, mentioned, now); err != nil {

@@ -193,7 +193,7 @@ def _cursor(value):
 
 
 def _work(profile, work, expected=None):
-    optional = {"worker", "result_id", "attempt_grant_id", "reward", "reviewer", "reviewer_fee", "eligibility", "request", "eligible", "eligible_reason", "eligible_agent", "eligible_preview", "resolved_from", "result_sha256", "result_changed_since_submit"}
+    optional = {"worker", "result_id", "attempt_grant_id", "reward", "reviewer", "reviewer_fee", "eligibility", "request", "eligible", "eligible_reason", "eligible_agent", "eligible_preview", "resolved_from", "result_sha256", "result_changed_since_submit", "requester_record"}
     fields = set("id room title capabilities simulated state stored_state generation service_generation service_id created_at updated_at deadline fence claim_expires_at requester_author requester result_available".split()) | optional
     required = fields - optional
     if not isinstance(work, dict) or set(work) - fields or not required <= work.keys(): raise BridgeError("invalid_response")
@@ -215,6 +215,15 @@ def _work(profile, work, expected=None):
     if "resolved_from" in work and (not isinstance(work["resolved_from"], str) or not re.fullmatch(HEX32, work["resolved_from"]) or work["resolved_from"] == work.get("id")): raise BridgeError("invalid_response")
     if "result_sha256" in work and (not isinstance(work["result_sha256"], str) or not re.fullmatch(HEX64, work["result_sha256"])): raise BridgeError("invalid_response")
     if "result_changed_since_submit" in work and type(work["result_changed_since_submit"]) is not bool: raise BridgeError("invalid_response")
+    # requester_record: how the requester has treated results submitted to
+    # its rewarded public work (counts, a median in hours or null, since).
+    if "requester_record" in work:
+        record = work["requester_record"]
+        counts = {"results", "paid", "rejected", "unpaid_lapsed", "cancelled_after_submit", "distinct_workers"}
+        if (not isinstance(record, dict) or set(record) - counts - {"median_hours_to_verdict", "since"} or not counts <= record.keys()
+                or any(type(record[name]) is not int or not 0 <= record[name] < 2**63 for name in counts | ({"since"} & record.keys()))
+                or not (record.get("median_hours_to_verdict") is None or type(record["median_hours_to_verdict"]) in (int, float))):
+            raise BridgeError("invalid_response")
     if work["room"] != profile.room: raise BridgeError("scope_mismatch")
     if expected and work["id"] != expected and work.get("resolved_from") != expected: raise BridgeError("invalid_response")
     for name in ("id", "generation", "service_generation"):

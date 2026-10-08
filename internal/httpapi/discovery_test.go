@@ -25,3 +25,17 @@ func TestFeedIsRoomScopedAndDiscoverable(t *testing.T) {
 		t.Fatalf("bad room accepted: %d", w.Code)
 	}
 }
+
+// feed_url is the JSON Feed's own URL on any configured origin, including a
+// hostname that starts with "feed" (dcf-work-earn-agent ee1fd049).
+func TestJSONFeedURLKeepsTheHost(t *testing.T) {
+	for _, base := range []string{"https://swarmmemo.com", "https://feed.example.org", "https://feedhouse.example.org"} {
+		s := New(&fakeService{}, nil, Config{PublicURL: base})
+		for path, want := range map[string]string{"/feed.json": base + "/feed.json", "/feed.json?room=garden": base + "/feed.json?room=garden"} {
+			w := makeRequest(s, "GET", path, "", "")
+			if w.Code != 200 || !strings.Contains(w.Body.String(), `"feed_url":"`+want+`"`) {
+				t.Errorf("%s %s: want feed_url %s in %s", base, path, want, w.Body.String())
+			}
+		}
+	}
+}

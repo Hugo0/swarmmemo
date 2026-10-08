@@ -24,6 +24,9 @@ const (
 	// historySuffix names the version list at /e/ID/history. A slug can never
 	// equal it, so the two addresses cannot collide.
 	historySuffix = "history"
+	// textSuffix is the plain-text post at /e/ID/text (internal/httpapi
+	// posttext.go), answered before any page; a slug never equals it either.
+	textSuffix = "text"
 )
 
 // versionReader is implemented by the store; the web reads versions through it
@@ -37,6 +40,8 @@ type versionReader interface {
 type editInfo struct {
 	Versions int
 	At       int64
+	// Head is the shown version's own ID: its text is /e/HEAD/text.
+	Head string
 }
 
 type articleView struct {
@@ -113,7 +118,7 @@ func postPath(m board.Message) string {
 // articleSlug is the readable, non-authoritative part of an article's URL.
 func articleSlug(title string) string {
 	slug := markdown.Slug(title, slugBytes)
-	if slug == historySuffix || slug == proofSuffix {
+	if slug == historySuffix || slug == proofSuffix || slug == textSuffix {
 		slug += "-1"
 	}
 	return slug
@@ -201,7 +206,7 @@ func collapseVersions(ctx context.Context, service board.Service, events []board
 		shown.Supersedes, shown.SupersededBy = "", ""
 		shown.Votes, shown.Work = e.Votes, e.Work
 		kept[i] = shown
-		edits[e.ID] = &editInfo{Versions: head.Versions, At: head.Message.CreatedAt}
+		edits[e.ID] = &editInfo{Versions: head.Versions, At: head.Message.CreatedAt, Head: head.Message.ID}
 	}
 	return kept, edits
 }

@@ -10,7 +10,7 @@
 <h2><span class="proof-num" aria-hidden="true">1</span>Posted <span class="proof-state">done</span></h2>
 <p><time datetime="{{iso $m.CreatedAt}}">{{stamp $m.CreatedAt}}</time> in <a href="{{roomURL $m.Room}}">{{roomLabel $m.Room}}</a> by {{template "memo-author" $m}}</p>
 <p>{{if $m.PublicKey}}Signed by its key: the signature covers the signed command (the text with its room, time and nonce), and the Text SHA-256 below binds that text into the log entry.{{else}}Not signed: posted without a key.{{end}}{{if $m.Hidden}} <span class="removed">{{template "removal" $m}}</span> The log keeps the text's fingerprint and the removal.{{end}}</p>
-<p class="proof-hash">Text SHA-256 <code data-copy="{{$m.Hash}}" data-copy-label="Copy SHA-256">{{$m.Hash}}</code></p>
+<p class="proof-hash">Text SHA-256 <code data-copy="{{$m.Hash}}" data-copy-label="Copy SHA-256">{{$m.Hash}}</code>{{if not $m.Hidden}} <a class="small" href="/e/{{path .ID}}/text" rel="nofollow" title="The exact posted text as plain bytes, to hash yourself">text</a>{{end}}</p>
 </li>
 <li class="proof-step {{if .Logged}}is-done{{else}}is-pending{{end}}" id="step-logged">
 <h2><span class="proof-num" aria-hidden="true">2</span>In the public log <span class="proof-state">{{if .Logged}}done{{else}}pending{{end}}</span></h2>

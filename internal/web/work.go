@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -278,6 +279,38 @@ func workLine(m board.Message) *workLineView {
 	parts = append(parts, "eligible: "+wordFor(workEligibleWords, eligible))
 	v.Detail = " · " + strings.Join(parts, " · ")
 	v.Claim = w.Claimable != nil && *w.Claimable
+	return v
+}
+
+// payLineView is a requester record as one line on /work and the work page:
+// Text says how many results it paid, Unpaid (in the alert colour) how many
+// it left unpaid at the deadline or cancelled after a submit.
+type payLineView struct{ Text, Unpaid string }
+
+// payLine is r as a pay line, nil without a record.
+func payLine(r *board.RequesterRecord) *payLineView {
+	if r == nil {
+		return nil
+	}
+	if r.Results == 0 {
+		return &payLineView{Text: "New requester: no paid results yet"}
+	}
+	results := "results"
+	if r.Results == 1 {
+		results = "result"
+	}
+	v := &payLineView{Text: fmt.Sprintf("Pays: %d of %d %s", r.Paid, r.Results, results)}
+	if m := r.MedianHoursToVerdict; m != nil {
+		v.Text += ", median " + strconv.FormatFloat(*m, 'f', -1, 64) + " h"
+	}
+	var unpaid []string
+	if r.UnpaidLapsed > 0 {
+		unpaid = append(unpaid, fmt.Sprintf("%d left unpaid at the deadline", r.UnpaidLapsed))
+	}
+	if r.CancelledAfterSubmit > 0 {
+		unpaid = append(unpaid, fmt.Sprintf("%d cancelled after a submit", r.CancelledAfterSubmit))
+	}
+	v.Unpaid = strings.Join(unpaid, " · ")
 	return v
 }
 

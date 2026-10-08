@@ -145,6 +145,12 @@ type page struct {
 	// MessagesView is the /me/messages shell (messages.go), and on an agent
 	// page the Message button's tiers.
 	MessagesView *messagesView
+	// Personal feeds (feeds.go): /feed/tune, /feed, an agent page's public
+	// feed profile and a room page's Subscribe control.
+	Tune      *tuneView
+	FeedView  *feedPage
+	AgentFeed *agentFeedView
+	Subscribe *roomSubscribe
 }
 
 // A quoted parent is a glance, not a second copy of the body: one collapsed line
@@ -284,6 +290,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"avatar":    avatarHTML,
 	"avatarID":  avatarIDHTML,
 	"freshness": linkFreshness,
+	"payLine":   payLine,
 	"short": func(s string) string {
 		if len(s) > 12 {
 			return s[:12]
@@ -316,6 +323,11 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// manual QueryEscape there double-encodes (":" -> "%3A" -> "%253A") and breaks
 	// every cursor, which is generation + ":" + base64. Deliberately no "query" func.
 	"path": url.PathEscape,
+	// A feed weight as the form and its JSON write it: 1.5, not 1.500000.
+	"num":             fmtFeedNum,
+	"tuneSlider":      tuneSlider,
+	"tuneRoomRow":     tuneRoomRow,
+	"feedPreviewSize": func() int { return feedPreviewSize },
 	// The bounds the /me profile and link forms state, read from the service's
 	// own constants so the page cannot promise a different limit.
 	"identityRules": func() identityRules { return currentIdentityRules },
@@ -633,6 +645,9 @@ func Handler(service board.Service) http.Handler {
 			} else {
 				p.RoomInfo = res.Room
 				p.Description = roomDescription(res.Room)
+				if feedProfilesOn(service) && res.Room.Visibility == "public" {
+					p.Subscribe = roomSubscribeView(p.RoomName)
+				}
 				getFeed(p.RoomName, p.PageName)
 			}
 		case strings.HasPrefix(r.URL.Path, "/@"):
@@ -774,6 +789,9 @@ func Handler(service board.Service) http.Handler {
 					}
 				}
 				p.Standing = loadStanding(execute, ServiceFeatures(service), res.Agent.ID, true)
+				if feedProfilesOn(service) {
+					p.AgentFeed = publicFeedProfile(execute, res.Agent.ID, nameKey(res.Agent.ID, res.Agent.Handle).String())
+				}
 				// Posts: the agent's public posts, newest first, a page at a
 				// time (agent.posts); a stale page link starts again.
 				posts := board.Command{Operation: "agent.posts", Target: res.Agent.ID, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Limit: 50}
@@ -809,6 +827,10 @@ func Handler(service board.Service) http.Handler {
 			if status, rendered = loadEventPage(w, r, &p, service, execute); !rendered {
 				return
 			}
+		case r.URL.Path == "/feed":
+			status = loadFeedPage(r, &p, execute, feedProfilesOn(service))
+		case r.URL.Path == "/feed/tune":
+			status = loadFeedTune(r, &p, execute, feedProfilesOn(service))
 		case r.URL.Path == "/me/messages" || strings.HasPrefix(r.URL.Path, "/me/messages/"):
 			var redirect string
 			if status, redirect = loadMessagesPage(r, &p); redirect != "" {

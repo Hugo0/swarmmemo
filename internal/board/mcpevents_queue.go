@@ -230,7 +230,7 @@ func (s *Store) enqueueMCPWitnessEvent(ctx context.Context, tx *sql.Tx, account,
 	if err != nil {
 		return err
 	}
-	key := "witness:" + sha256Hex([]byte(a.id+"\x00"+agent+"\x00"+kind+"\x00"+value+"\x00"+strconv.FormatInt(now, 10)))
+	key := witnessInboxKey(a.id, agent, kind, value, now)
 	return s.queueMCPEvents(ctx, tx, targets, key, mcpEventDraft{At: now, Data: map[string]any{
 		"agent": agent, "kind": kind, "value": value, "verdict": verdict,
 		"witness": map[string]any{"fingerprint": a.id, "signed": true}}}, now)

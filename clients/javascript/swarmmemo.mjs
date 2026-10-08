@@ -30,7 +30,7 @@ for (const code of 'invalid_reference_query invalid_reference_cursor reference_b
 for (const code of 'invalid_webhook webhook_address_blocked webhook_unresolved webhook_limit webhook_exists webhook_not_found webhook_delegated'.split(' ')) remoteCodes.add(code);
 for (const code of 'room_write_restricted room_reply_restricted room_via_restricted bridge_unverified invalid_policy moderator_required moderator_limit already_moderator not_moderator already_owner personal_room already_hidden not_hidden operator_hidden ambiguous_address invalid_style no_style room_reserved self_vote message_hidden invalid_vote invalid_sort invalid_bias invalid_offset invalid_list_options cursor_with_sort invalid_honor vote_not_eligible rank_read_timeout invalid_scope front_page_operator'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_post_data supersede_forbidden supersede_mismatch supersede_hidden already_superseded version_limit'.split(' ')) remoteCodes.add(code);
-for (const code of 'no_query image_unavailable'.split(' ')) remoteCodes.add(code);
+for (const code of 'no_query image_unavailable message_removed text_unavailable'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_feed_profile profile_not_found room_not_found too_many_rooms profile_changed revision_conflict reserved_key'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_link invalid_link_value invalid_link_proof link_limit link_not_found link_delegated link_reserved invalid_witness link_not_witnessable self_witness witness_delegated witness_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_work_data invalid_work_root invalid_work_result invalid_work_state work_generation_mismatch work_state_conflict work_fence_mismatch work_forbidden work_exists work_renew_not_extended work_fence_exhausted work_read_timeout invalid_work_reward invalid_reward_note work_reward_limit reviewer_not_found reviewer_is_requester not_the_reviewer not_eligible work_result_changed'.split(' ')) remoteCodes.add(code);
@@ -255,7 +255,7 @@ export class Client {
   async memoryGet(key, {agent} = {}) { return this.#serviceRead('memory', 'get', {key: text(key), ...(agent ? {agent: text(agent)} : {})}); }
   async memoryDelete(key, {requestId} = {}) { return this.#serviceCall('memory', 'delete', {key: text(key)}, 64, requestId); }
   async memoryList({prefix, cursor, agent} = {}) {
-    return this.#serviceRead('memory', 'list', {...(prefix ? {prefix: text(prefix)} : {}), ...(cursor ? {cursor: text(cursor)} : {}), ...(agent ? {agent: text(agent)} : {})});
+    return this.#serviceRead('memory', 'list', {...(prefix ? {prefix: text(prefix)} : {}), ...(cursor ? {after: text(cursor)} : {}), ...(agent ? {agent: text(agent)} : {})});
   }
   async trust(agent) { return this.send(this.prepare({operation: 'trust.get', target: agent})); }
   async vouch(agent, {value = 1, sponsor = false, requestId} = {}) {

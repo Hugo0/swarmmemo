@@ -101,6 +101,10 @@ type Work struct {
 	// worker has edited the result since. Both appear with result_id.
 	ResultSHA256             string `json:"result_sha256,omitempty"`
 	ResultChangedSinceSubmit *bool  `json:"result_changed_since_submit,omitempty"`
+	// RequesterRecord is how the requester has treated results submitted
+	// to its rewarded public work (workrecord.go), on work.get and
+	// works.list, so a worker can check before it claims.
+	RequesterRecord *RequesterRecord `json:"requester_record,omitempty"`
 }
 
 // WorkRequest is the text of a work item's request at its newest version,
@@ -142,6 +146,9 @@ type WorkAck struct {
 	// are absent otherwise, so an acknowledgement keeps its original shape.
 	ResolvedFrom string `json:"resolved_from,omitempty"`
 	ResultSHA256 string `json:"result_sha256,omitempty"`
+	// Note, on a submit, warns the worker when the requester has left
+	// results unpaid before (its requester_record); absent otherwise.
+	Note string `json:"note,omitempty"`
 }
 
 type WorkTransition struct {
@@ -894,9 +901,20 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err = s.enqueueMCPWorkEvents(ctx, tx, c.Operation, w, root, cmp.Or(w.Worker, worker), reward, a, now); err != nil {
 		return Result{}, err
 	}
+	// The inbox entry log (C61): the same parties, and a named reviewer.
+	if err = s.recordInbox(ctx, tx, workInboxSource(c.Operation, w, root.Room, cmp.Or(w.Worker, worker), a, now)); err != nil {
+		return Result{}, err
+	}
 	ack := WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ClaimExpiresAt: w.ClaimExpires, ResultSHA256: d.ResultSHA256}
 	if named != w.ID {
 		ack.ResolvedFrom = named
+	}
+	if w.State == "submitted" && (c.Operation == "work.submit" || c.Operation == "work.claim") {
+		record, e := requesterRecord(ctx, tx, w.Requester, now, false)
+		if e != nil {
+			return Result{}, e
+		}
+		ack.Note = requesterUnpaidNote(record)
 	}
 	return Result{Data: map[string]any{"ack": ack}}, nil
 }
@@ -1135,6 +1153,9 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		}
 		opt.requestBytes = WorkRequestTextMax
 		p, err := s.projectWork(ctx, tx, w, root, generation, now, opt)
+		if err == nil {
+			p.RequesterRecord, err = requesterRecord(ctx, tx, w.Requester, now, false)
+		}
 		if named != id {
 			p.ResolvedFrom = named
 		}
@@ -1258,6 +1279,18 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 			return Result{}, workReadError(e)
 		}
 		works = append(works, p)
+	}
+	// Every row's requester record, in one query for the page.
+	requesters := make([]string, len(stored))
+	for i, w := range stored {
+		requesters[i] = w.Requester
+	}
+	records, err := requesterRecords(ctx, tx, requesters, now, false)
+	if err != nil {
+		return Result{}, workReadError(err)
+	}
+	for i := range works {
+		works[i].RequesterRecord = records[stored[i].Requester]
 	}
 	result := Result{Data: map[string]any{"works": works, "has_more": hasMore}}
 	if hasMore {

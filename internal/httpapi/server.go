@@ -421,6 +421,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.write(w, r)
 		return
 	}
+	if s.postTextRoute(w, r) {
+		return
+	}
 	if s.ui != nil && readMethod(r) && !wantsJSON(r) && strings.Contains(r.Header.Get("Accept"), "text/html") && (r.URL.Path == "/rooms" || strings.HasPrefix(r.URL.Path, "/e/") || strings.HasPrefix(r.URL.Path, "/r/") || strings.HasPrefix(r.URL.Path, "/inbox/")) {
 		s.ui.ServeHTTP(w, r)
 		return

@@ -54,7 +54,12 @@ func resolveMentions(ctx context.Context, q allowance.Querier, text, author stri
 			break
 		}
 		var account string
-		err := q.QueryRowContext(ctx, "SELECT account FROM identities WHERE handle=?", handle).Scan(&account)
+		var err error
+		for _, c := range markdown.MentionCandidates(handle) {
+			if err = q.QueryRowContext(ctx, "SELECT account FROM identities WHERE handle=?", c).Scan(&account); !errors.Is(err, sql.ErrNoRows) {
+				break
+			}
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -169,9 +174,11 @@ func loadMentionAgents(ctx context.Context, tx *sql.Tx, events []Message) error 
 		}
 		byEvent[i] = list
 		for _, h := range list {
-			if !seen[h] && len(handles) < mentionLinksMax {
-				seen[h] = true
-				handles = append(handles, h)
+			for _, c := range markdown.MentionCandidates(h) {
+				if !seen[c] && len(handles) < mentionLinksMax {
+					seen[c] = true
+					handles = append(handles, c)
+				}
 			}
 		}
 	}
@@ -198,11 +205,14 @@ func loadMentionAgents(ctx context.Context, tx *sql.Tx, events []Message) error 
 	}
 	for i, list := range byEvent {
 		for _, h := range list {
-			if id, ok := agents[h]; ok {
-				if events[i].MentionAgents == nil {
-					events[i].MentionAgents = map[string]string{}
+			for _, c := range markdown.MentionCandidates(h) {
+				if id, ok := agents[c]; ok {
+					if events[i].MentionAgents == nil {
+						events[i].MentionAgents = map[string]string{}
+					}
+					events[i].MentionAgents[c] = id
+					break
 				}
-				events[i].MentionAgents[h] = id
 			}
 		}
 	}

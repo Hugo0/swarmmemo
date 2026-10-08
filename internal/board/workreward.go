@@ -294,7 +294,8 @@ func (s *Store) releaseWorkReward(ctx context.Context, tx *sql.Tx, r *rewardRow,
 // settleWorkRewards is the sweeper's work-reward step: rewards and reviewer
 // fees of work whose deadline passed without an accepted result are
 // released (reason review_lapsed when a named reviewer left a submitted
-// result undecided, expired otherwise), and pending payments the ledger has
+// result undecided, requester_lapsed when the requester did, expired
+// otherwise), and pending payments the ledger has
 // since executed or cancelled are recorded.
 func (s *Store) settleWorkRewards(ctx context.Context, tx *sql.Tx, now int64, limit int) (int, error) {
 	n := 0
@@ -324,13 +325,12 @@ func (s *Store) settleWorkEscrows(ctx context.Context, tx *sql.Tx, table string,
 		if err != nil {
 			return n, err
 		}
-		reason := "expired"
-		var lapsed int
-		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM works WHERE id=? AND state='submitted' AND reviewer<>''", id).Scan(&lapsed); err != nil {
+		// A submitted result left undecided is attributable: to the named
+		// reviewer (review_lapsed), else to the requester (requester_lapsed,
+		// on its requester record). Work nobody finished is expired.
+		var reason string
+		if err = tx.QueryRowContext(ctx, `SELECT coalesce((SELECT CASE WHEN reviewer<>'' THEN 'review_lapsed' ELSE 'requester_lapsed' END FROM works WHERE id=? AND state='submitted'),'expired')`, id).Scan(&reason); err != nil {
 			return n, err
-		}
-		if lapsed > 0 {
-			reason = "review_lapsed"
 		}
 		if err = s.releaseWorkReward(ctx, tx, r, reason, now); err != nil {
 			return n, err

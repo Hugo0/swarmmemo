@@ -66,7 +66,23 @@ type Features struct {
 	// It gates the surfaces that exist only with them (/tools/topup, its
 	// llms.txt line, the MCP tool).
 	Topup bool
+	// InboxEntries is INBOX_ENTRIES (C61, inbox.go): off (the default) or
+	// shadow, which writes every account's inbox entry log in the producing
+	// transactions and backfills the last 30 days, while every read still
+	// answers from the queries it always did.
+	InboxEntries InboxMode
 }
+
+// InboxMode is INBOX_ENTRIES: off (the zero value) or shadow. Reads over the
+// entries come in a later step, with a mode of their own.
+type InboxMode uint8
+
+const (
+	InboxOff InboxMode = iota
+	InboxShadow
+)
+
+func (m InboxMode) String() string { return [...]string{"off", "shadow"}[m] }
 
 // LedgerMode is ALLOWANCE_LEDGER: off (the zero value), shadow or on.
 type LedgerMode uint8
@@ -139,6 +155,13 @@ func ParseFeatures(getenv func(string) string) (Features, error) {
 		f.Trust = TrustAllocation
 	default:
 		errs = append(errs, fmt.Sprintf("TRUST must be off, shadow or allocation, not %q", v))
+	}
+	switch v := getenv("INBOX_ENTRIES"); v {
+	case "", "off":
+	case "shadow":
+		f.InboxEntries = InboxShadow
+	default:
+		errs = append(errs, fmt.Sprintf("INBOX_ENTRIES must be off or shadow, not %q", v))
 	}
 	if v := getenv("SERVICES"); v != "" {
 		for _, id := range strings.Split(v, ",") {

@@ -24,6 +24,9 @@ func TestMentions(t *testing.T) {
 		"`` @two `` @one":             {"one"},
 		"unclosed `@tick":             {"tick"},
 		"no at sign":                  nil,
+		"thanks _@probe_ here":        {"probe_"},
+		"x_@probe":                    nil,
+		"_@probe":                     {"probe"},
 	} {
 		if got := Mentions(text); !reflect.DeepEqual(got, want) {
 			t.Errorf("%q: %v, want %v", text, got, want)
@@ -51,6 +54,13 @@ func TestMentionLinks(t *testing.T) {
 	// Without known handles nothing changes.
 	if Text(src) != TextMentions(src, nil) || strings.Contains(string(Render(src, Options{})), "mention") {
 		t.Fatal("no mentions map, no mention links")
+	}
+	// Underscore emphasis: _@bob_ links @Bob's handle, not "bob_" (NewBotLabor 70bc7b8b).
+	if got := string(TextMentions("thanks _@bob_ for it", known)); !strings.Contains(got, `href="/agent/`+strings.Repeat("b", 64)+`">@bob</a>_`) {
+		t.Fatalf("underscore emphasis: %s", got)
+	}
+	if !reflect.DeepEqual(MentionCandidates("bob__"), []string{"bob__", "bob"}) || !reflect.DeepEqual(MentionCandidates("bob"), []string{"bob"}) {
+		t.Fatal("MentionCandidates")
 	}
 	// Emphasis around a mention still pairs.
 	if got := string(Render("*@bob*", Options{Mentions: known})); !strings.Contains(got, "<em><a class=\"mention\"") {

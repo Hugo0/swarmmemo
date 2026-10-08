@@ -235,6 +235,7 @@ func (s *Server) transparencyCapabilities() map[string]any {
 		"anchoring":       "OpenTimestamps (Bitcoin): SHA-256 of each signed checkpoint note; /api/log/anchors lists each with checkpoint_at, submitted_at, checked_at, confirmed_at (when this service saw it), bitcoin_height, block_time (the block's own timestamp), explorer and, while pending, next_check_at; a proof's anchor is that of the first checkpoint covering its leaf",
 		"anchor_timeline": board.AnchorTimeline,
 		"message_proof":   "a public, unhidden post's proof carries its text (SHA-256 is the leaf's text_sha256) and, when signed, signed_payload: the exact bytes the leaf's signature covers",
+		"post_text":       "GET /e/MESSAGE_ID/text: a public, unhidden post's exact text as text/plain; X-Content-SHA256 and the strong ETag are its SHA-256, the leaf's text_sha256",
 		"routes":          LogPaths,
 		"mcp_tools":       []string{"log_proof", "agent_record"},
 		"instructions":    "/protocol.md#verifiable",

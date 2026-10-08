@@ -97,7 +97,9 @@ func migrateSchema(tx *sql.Tx, version int) error {
 		// Schema 17: MCP Events subscriptions and queue (mcpevents.go).
 		mcpEventSchema +
 		// Schema 19: who each message mentions by @handle (mentions.go).
-		postMentionSchema); err != nil {
+		postMentionSchema +
+		// Schema 20: every account's inbox entry log (inbox.go, C61).
+		inboxEntrySchema); err != nil {
 		return err
 	}
 	// Schema 8: rooms.private_access_epoch.

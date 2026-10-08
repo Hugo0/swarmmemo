@@ -147,7 +147,7 @@
     const readEpoch=credentialEpoch;
     const key=selectedKey ? {...selectedKey} : null;
     if (requireIdentity && !key) throw Error('Create or import a signing key first.');
-    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore)|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete)|conversation\.(open|respond|seal)|messaging\.policy\.set|key\.backup\.(put|delete)$)/.test(command.operation);
+    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore|subscribe$|unsubscribe$)|feed\.profile\.(put|fork)$|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete)|conversation\.(open|respond|seal)|messaging\.policy\.set|key\.backup\.(put|delete)$)/.test(command.operation);
     const intentCommand={...command};delete intentCommand.request_id;delete intentCommand.nonce;delete intentCommand.timestamp;delete intentCommand.signature;delete intentCommand.proof;
     const intent=mutation?JSON.stringify([key?.public_key||'',intentCommand]):'';
     let record=pendingRequests.get(intent);
@@ -571,7 +571,7 @@
     cell.replaceChildren(document.createTextNode(text + ' · '), proofLink);
   }, true);
   function eventElement(event, isPrivate = false) {
-    const listingPreview = !isPrivate && ['home','room'].includes(document.body.dataset.view);
+    const listingPreview = !isPrivate && ['home','room','feed'].includes(document.body.dataset.view);
     const article = node('article', 'memo'); article.id = `e-${event.id}`; article.dataset.messageId = event.id; article.dataset.sequence = event.sequence;
     // Parity with the server: every card takes programmatic focus for j/k.
     article.tabIndex = -1;
@@ -2365,7 +2365,7 @@
   new MutationObserver(records => {
     for (const record of records) for (const added of record.addedNodes) if (added.nodeType === 1 && !added.closest('.avatar')) enhanceAvatars(added.parentElement || added);
   }).observe(document.body, {childList: true, subtree: true});
-  window.SwarmPage = Object.freeze({timeElement, enhanceCopy, enhanceCode, sigil, avatar, avatarSlot, refreshNotifications: () => notify.refresh()});
+  window.SwarmPage = Object.freeze({timeElement, enhanceCopy, enhanceCode, sigil, avatar, avatarSlot, eventElement, refreshNotifications: () => notify.refresh()});
   window.SwarmSign = Object.freeze({request, uuid, toast, ready: capabilitiesReady,
     get identity() { return identity ? {fingerprint: identity.fingerprint, public_key: identity.public_key, handle: identity.handle || ''} : null; },
     get service() { return serviceID; }});

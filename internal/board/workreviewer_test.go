@@ -197,7 +197,7 @@ func TestWorkReviewLapseReleasesTheHolds(t *testing.T) {
 	if w.Reward.State != "released" || w.Reward.Reason != "review_lapsed" || w.ReviewerFee.State != "released" || w.ReviewerFee.Reason != "review_lapsed" {
 		t.Fatalf("after the lapse: reward %+v fee %+v", w.Reward, w.ReviewerFee)
 	}
-	if r := getTestWork(t, s, plain).Reward; r.State != "released" || r.Reason != "expired" {
+	if r := getTestWork(t, s, plain).Reward; r.State != "released" || r.Reason != "requester_lapsed" {
 		t.Fatalf("plain work: %+v", r)
 	}
 	if held := creditIn(t, s, requester, "held"); held != 0 || creditIn(t, s, requester, "remaining") != before {

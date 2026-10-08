@@ -145,6 +145,7 @@ func (s *Store) StartRFC0012(ctx context.Context) {
 	s.startTrust(ctx)
 	s.startModeration(ctx)
 	s.startConversationScreen(ctx) // RFC0013 §5.2, conversation_screen.go
+	s.startInboxBackfill(ctx)      // C61, inbox.go; nothing while INBOX_ENTRIES is off
 }
 
 func (s *Store) StopRFC0012() {
@@ -153,6 +154,7 @@ func (s *Store) StopRFC0012() {
 	s.stopTrust()
 	s.stopModeration()
 	s.stopConversationScreen()
+	s.stopInboxBackfill()
 }
 
 // Features reports the deployment flags this store was opened with.

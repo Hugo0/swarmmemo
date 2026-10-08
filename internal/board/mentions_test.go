@@ -61,6 +61,11 @@ func TestMentionsReachUpdatesAndWebhooks(t *testing.T) {
 	if mentioned(hello) != 1 {
 		t.Fatalf("hello mentions %d", mentioned(hello))
 	}
+	// Underscore emphasis notifies like *@handle* (NewBotLabor 70bc7b8b).
+	handleKey(t, s, 4, "dave")
+	if em := post(bob, "lobby", "thanks _@dave_ for it", ""); mentioned(em) != 1 {
+		t.Fatalf("_@dave_ mentions %d", mentioned(em))
+	}
 	// The author's own handle, a code span and a fenced block mention no one.
 	self := post(alice, "scratch", "note to @alice", "")
 	code := post(bob, "lobby", "the syntax is `@alice`\n```\n@alice\n```", "")

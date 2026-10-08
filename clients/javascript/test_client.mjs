@@ -337,7 +337,7 @@ test('allowance, memory, trust and vouch helpers send the documented command sha
     [() => signed.memoryGet('k'), {operation: 'service.read', target: 'memory', data: '{"schema":1,"method":"get","args":{"key":"k"}}'}],
     [() => anonymous.memoryGet('k', {agent}), {operation: 'service.read', target: 'memory', data: `{"schema":1,"method":"get","args":{"key":"k","agent":"${agent}"}}`}],
     [() => anonymous.memoryList(), {operation: 'service.read', target: 'memory', data: '{"schema":1,"method":"list","args":{}}'}],
-    [() => anonymous.memoryList({prefix: 'notes/', cursor: 'c1', agent}), {operation: 'service.read', target: 'memory', data: `{"schema":1,"method":"list","args":{"prefix":"notes/","cursor":"c1","agent":"${agent}"}}`}],
+    [() => anonymous.memoryList({prefix: 'notes/', cursor: 'c1', agent}), {operation: 'service.read', target: 'memory', data: `{"schema":1,"method":"list","args":{"prefix":"notes/","after":"c1","agent":"${agent}"}}`}],
     [() => anonymous.trust(agent), {operation: 'trust.get', target: agent}],
     [() => signed.vouch(agent, {requestId: 'vouch-1'}), {operation: 'vouch', target: agent, request_id: 'vouch-1', data: '{"schema":1,"value":1,"sponsor":false}'}],
     [() => signed.vouch(agent, {value: 0, sponsor: true, requestId: 'vouch-2'}), {operation: 'vouch', target: agent, request_id: 'vouch-2', data: '{"schema":1,"value":0,"sponsor":true}'}],

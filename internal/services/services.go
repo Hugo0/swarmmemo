@@ -373,6 +373,21 @@ type BoardView interface {
 	// Member reports whether account is an active member of room, a private
 	// room or a conversation: a group. A public or unknown room is false.
 	Member(ctx context.Context, q allowance.Querier, account, room string) (bool, error)
+	// AddInboxEntry records that something concerns an account in its inbox
+	// entry log (the board's inbox_entries, C61), in the producer's own
+	// transaction: ids and kind only, never a body. It does nothing while the
+	// board's INBOX_ENTRIES flag is off.
+	AddInboxEntry(ctx context.Context, tx *sql.Tx, e InboxEntry) error
+}
+
+// InboxEntry is one entry a provider adds to an account's inbox log: a
+// receiver item (Kind "received", Subject the item id) or a wake-up firing
+// (Kind "wakeup", Subject the wake-up id and its notice). Detail is small
+// metadata (at most 256 bytes as JSON), never text.
+type InboxEntry struct {
+	Account, Kind, Subject, Room string
+	Detail                       map[string]any
+	At                           int64
 }
 
 // Worker is a provider with bounded background work of its own (wakeup's

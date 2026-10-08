@@ -242,6 +242,11 @@ func (s *Store) witnessIdentityLink(ctx context.Context, tx *sql.Tx, c Command, 
 	if err = s.enqueueMCPWitnessEvent(ctx, tx, account, d.Agent, d.Kind, value, d.Verdict, a, now); err != nil {
 		return Result{}, err
 	}
+	// The inbox entry log (C61): the witnessed agent's entry.
+	if err = s.recordInbox(ctx, tx, inboxSource{kind: inboxWitness, account: account, subject: witnessInboxKey(a.id, d.Agent, d.Kind, value, now),
+		actor: a.id, actorAccount: a.account, at: now, detail: map[string]any{"kind": d.Kind, "verdict": d.Verdict}}); err != nil {
+		return Result{}, err
+	}
 	data := map[string]any{"agent": d.Agent, "kind": d.Kind, "value": value, "link_state": state, "verdict": d.Verdict, "nonce": d.Nonce, "at": now, "replaced": replaced > 0, "fresh_for_nonce": false}
 	// fresh_for_nonce says the link's own signed challenge carries this
 	// witness's nonce; link_freshness holds that challenge's derived cells.

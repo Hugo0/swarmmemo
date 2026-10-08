@@ -57,6 +57,8 @@ func (b *fakeBoard) EventsAfter(_ context.Context, _ allowance.Querier, after in
 	return out, nil
 }
 
+func (b *fakeBoard) AddInboxEntry(context.Context, *sql.Tx, services.InboxEntry) error { return nil }
+
 func (b *fakeBoard) CanRead(_ context.Context, _ allowance.Querier, account, room string) (bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

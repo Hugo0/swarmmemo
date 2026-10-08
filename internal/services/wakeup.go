@@ -711,16 +711,38 @@ func (w *wakeup) Notices(ctx context.Context, q allowance.Querier, n NoticeQuery
 // in the firing's transaction: every kind of firing (time, recurring, event,
 // received) writes it here. seq is the newest message's sequence when it
 // fired: an updates.get cursor at or before it has not yet shown the notice.
-func addWakeNotice(ctx context.Context, tx *sql.Tx, id, account, kind, event, room string, dueAt, firedAt, seq int64, late bool) error {
-	_, err := tx.ExecContext(ctx, "INSERT INTO wakeup_notices(wakeup,account,kind,event,room,due_at,fired_at,event_seq,late) VALUES(?,?,?,?,?,?,?,?,?)", id, account, kind, event, room, dueAt, firedAt, seq, late)
-	return err
+// The firing is also an entry in the account's inbox log (board, when set;
+// C61), keyed on the wake-up and its notice.
+func addWakeNotice(ctx context.Context, tx *sql.Tx, board BoardView, id, account, kind, event, room string, dueAt, firedAt, seq int64, late bool) error {
+	res, err := tx.ExecContext(ctx, "INSERT INTO wakeup_notices(wakeup,account,kind,event,room,due_at,fired_at,event_seq,late) VALUES(?,?,?,?,?,?,?,?,?)", id, account, kind, event, room, dueAt, firedAt, seq, late)
+	if err != nil || board == nil {
+		return err
+	}
+	notice, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	return board.AddInboxEntry(ctx, tx, WakeInboxEntry(id, account, kind, event, room, notice, firedAt, late))
+}
+
+// WakeInboxEntry is the inbox entry of one wake-up firing (its notice):
+// the board's backfill derives the same entry from wakeup_notices.
+func WakeInboxEntry(id, account, kind, event, room string, notice, firedAt int64, late bool) InboxEntry {
+	detail := map[string]any{"on": kind}
+	if late {
+		detail["late"] = true
+	}
+	if event != "" {
+		detail["event"] = event
+	}
+	return InboxEntry{Account: account, Kind: "wakeup", Subject: id + "@" + strconv.FormatInt(notice, 10), Room: room, Detail: detail, At: firedAt}
 }
 
 // fireReceived fires the account's active on:"received" wake-ups (at most
 // WakeupsPerAccount), in a delivery's transaction: latest is the newest
 // message's sequence, so an updates.get cursor at or before it has not yet
 // shown the notice.
-func fireReceived(ctx context.Context, tx *sql.Tx, account string, latest, now int64) error {
+func fireReceived(ctx context.Context, tx *sql.Tx, board BoardView, account string, latest, now int64) error {
 	rows, err := tx.QueryContext(ctx, "SELECT id FROM wakeups WHERE account=? AND state='active' AND kind='room' AND room=? LIMIT ?", account, receivedRoom, WakeupsPerAccount)
 	if err != nil {
 		return err
@@ -746,7 +768,7 @@ func fireReceived(ctx context.Context, tx *sql.Tx, account string, latest, now i
 		if n, _ := res.RowsAffected(); n != 1 {
 			continue
 		}
-		if err = addWakeNotice(ctx, tx, id, account, "received", "", "", 0, now, latest, false); err != nil {
+		if err = addWakeNotice(ctx, tx, board, id, account, "received", "", "", 0, now, latest, false); err != nil {
 			return err
 		}
 	}
@@ -765,6 +787,7 @@ func (w *wakeup) budget(now int64) int64 {
 // Every firing or expiry in the scan spends one unit of budget.
 type wakePass struct {
 	tx             *sql.Tx
+	board          BoardView
 	now, latest    int64
 	budget         int64
 	fired, expired int64
@@ -782,7 +805,7 @@ func (p *wakePass) fire(ctx context.Context, id, account, kind, event, room stri
 	late := kind == "time" && p.now-dueAt > WakeupLateAfter
 	// event_seq is the newest message when it fired: an updates.get cursor
 	// at or before it has not yet been shown this notice.
-	if err = addWakeNotice(ctx, p.tx, id, account, kind, event, room, dueAt, p.now, p.latest, late); err != nil {
+	if err = addWakeNotice(ctx, p.tx, p.board, id, account, kind, event, room, dueAt, p.now, p.latest, late); err != nil {
 		return err
 	}
 	p.fired++
@@ -820,7 +843,7 @@ func (p *wakePass) fireRecurring(ctx context.Context, d dueWakeup) error {
 		return nil
 	}
 	late := p.now-d.at > WakeupLateAfter
-	if err = addWakeNotice(ctx, p.tx, d.id, d.account, "time", "", "", d.at, p.now, p.latest, late); err != nil {
+	if err = addWakeNotice(ctx, p.tx, p.board, d.id, d.account, "time", "", "", d.at, p.now, p.latest, late); err != nil {
 		return err
 	}
 	p.fired++
@@ -855,7 +878,7 @@ func (w *wakeup) Work(ctx context.Context, db *sql.DB, now int64) (int, error) {
 		return 0, err
 	}
 	expired, _ := res.RowsAffected()
-	p := &wakePass{tx: tx, now: now, budget: w.budget(now)}
+	p := &wakePass{tx: tx, board: w.board, now: now, budget: w.budget(now)}
 	if p.latest, err = w.board.LatestSeq(ctx, tx); err != nil {
 		return 0, err
 	}

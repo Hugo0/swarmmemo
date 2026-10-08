@@ -129,6 +129,8 @@ type Store struct {
 	// the slots updates.get waits take.
 	changes       changeSignal
 	updateWaiters *WaitSlots
+	// C61: the inbox entry log's backfill (inbox.go).
+	inboxBackfill inboxBackfillState
 }
 
 const schema = `
@@ -214,7 +216,12 @@ CREATE TABLE IF NOT EXISTS leases (
 // 19: post_mentions, who each message mentions by @handle (mentions.go). It
 // is additive, but a schema-18 binary would post without recording mentions,
 // and they would never reach anyone's updates.
-const SchemaVersion = 19
+//
+// 20: inbox_entries, every account's inbox entry log (C61, inbox.go). It is
+// additive and written only with INBOX_ENTRIES=shadow; a schema-19 binary
+// would post without writing entries, leaving holes the backfill only
+// partly derives (no work entries).
+const SchemaVersion = 20
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
