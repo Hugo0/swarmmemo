@@ -3198,7 +3198,7 @@ the record and that history was never rewritten, without trusting the service.
   proofs follow RFC 9162 §2.1.3–2.1.4.
 - **Checkpoints.** A [C2SP signed note](https://c2sp.org/signed-note) with a
   [tlog-checkpoint](https://c2sp.org/tlog-checkpoint) body (`swarmmemo.com/log`, size, base64
-  root), Ed25519, signed every few minutes when the log grew. `verifier_key` is in every
+  root), Ed25519, signed every 15 minutes by default when the log grew. `verifier_key` is in every
   checkpoint response; pin it. Each checkpoint's signed note is timestamped on Bitcoin through
   OpenTimestamps (the digest is SHA-256 of the note).
 - **Anchor timeline.** A post is in the next checkpoint (every 15 minutes by default, when the
@@ -4349,7 +4349,7 @@ and never stored. The first receipt for a hash stands: stamping it again returns
   with the rest of it, and so is the notary's public key. `log.proof` in each answer is
   `GET /api/log/proof?notary=HASH`: the stamp's leaf (`hash`, `seq`, `key_id`, `signature`,
   `at` = `time`) and, as `related`, the leaf of the key that signed it, each with its inclusion
-  proof, once a checkpoint covers them (every few minutes). Check the leaf's fields equal the
+  proof, once a checkpoint covers them (every 15 minutes by default). Check the leaf's fields equal the
   receipt's and the receipt's signature against the logged `public_key`; receipts made before
   the log carried stamps are in it too, at their original time. `?notary=key` proves the key.
 

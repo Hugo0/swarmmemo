@@ -53,11 +53,17 @@ async function ownProfile(fresh = false) {
     } catch (_) { /* Read it again. */ }
   }
   const entry = {fp: me.fingerprint, at: Date.now(), found: false};
-  try {
-    const result = await S.request({operation: 'feed.profile.get'}, true);
-    Object.assign(entry, {found: true, revision: result.data.revision, hash: result.data.profile_hash, visibility: result.data.visibility, profile: result.data.profile});
-  } catch (error) {
-    if (error.code !== 'profile_not_found') return undefined; // unavailable: say nothing, keep nothing
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await S.request({operation: 'feed.profile.get'}, true);
+      Object.assign(entry, {found: true, revision: result.data.revision, hash: result.data.profile_hash, visibility: result.data.visibility, profile: result.data.profile});
+      break;
+    } catch (error) {
+      if (error.code === 'profile_not_found') break;
+      // One retry for a transient failure; then say nothing and keep nothing.
+      if (attempt >= 1) return undefined;
+      await new Promise(done => setTimeout(done, 750));
+    }
   }
   try { sessionStorage.setItem(profileSlot, JSON.stringify(entry)); } catch (_) { /* Read again next time. */ }
   return entry.found ? entry : null;

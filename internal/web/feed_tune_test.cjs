@@ -139,7 +139,9 @@ async function agent(origin, handle) {
     assert.equal(await page.locator('#feed-hash').textContent(), saved.data.profile_hash);
     // Reopening the tune page starts from the saved profile.
     await page.goto(origin + '/feed/tune');
-    await statusMatches(page, 'tune-status', /Loaded your saved feed \(revision 1\)/);
+    // Wait for the loaded profile itself: the status line is overwritten by the
+    // preview that follows, so under load a poll can miss it (C91).
+    await page.waitForFunction(r => document.getElementById('tune-room-0')?.value === r, room, {timeout: 60000});
     assert.equal(await page.locator('#tune-room-0').inputValue(), room);
     assert.equal(await page.locator('input[name=front]').isChecked(), false);
     // Subscribe and Unsubscribe on a room page.

@@ -334,7 +334,7 @@ const NotaryKeyLogProof = "/api/log/proof?notary=key"
 
 // notaryLog is where a receipt's transparency-log proof is: its notary leaf,
 // appended when the log next catches up and provable once a checkpoint
-// (signed every few minutes) covers it, with the key's leaf as related.
+// (signed every 15 minutes by default) covers it, with the key's leaf as related.
 func notaryLog(hash string) map[string]string {
 	return map[string]string{"proof": "/api/log/proof?notary=" + hash, "anchors": "/api/log/anchors"}
 }

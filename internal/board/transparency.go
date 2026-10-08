@@ -779,7 +779,7 @@ func (s *Store) ReadLogProof(ctx context.Context, index int64, message string, s
 	if message == "" {
 		out, err = s.inclusion(ctx, index, cp)
 	} else {
-		out, err = s.refProof(ctx, message, cp, nil, problem(404, "not_logged", "That message is not in the latest checkpoint: it is private, unknown, or newer than the checkpoint (signed every few minutes)."))
+		out, err = s.refProof(ctx, message, cp, nil, problem(404, "not_logged", "That message is not in the latest checkpoint: it is private, unknown, or newer than the checkpoint (signed every 15 minutes by default)."))
 	}
 	if out, err = s.withAnchor(ctx)(out, err); err != nil || out.Leaf.Kind != "message" {
 		return out, err
@@ -839,7 +839,7 @@ func (s *Store) ReadNotaryProof(ctx context.Context, hash string, size int64) (L
 			len(notaryKeyRef), notaryKeyRef, cp.Size).Scan(&ref); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return LogInclusion{}, err
 		}
-		return s.withAnchor(ctx)(s.refProof(ctx, ref, cp, nil, problem(404, "not_logged", "The notary key is not in the latest checkpoint: the notary is off here, or its key is newer than the checkpoint (signed every few minutes).")))
+		return s.withAnchor(ctx)(s.refProof(ctx, ref, cp, nil, problem(404, "not_logged", "The notary key is not in the latest checkpoint: the notary is off here, or its key is newer than the checkpoint (signed every 15 minutes by default).")))
 	}
 	keyLeaf := func(data string) string {
 		var l logLeaf
@@ -848,7 +848,7 @@ func (s *Store) ReadNotaryProof(ctx context.Context, hash string, size int64) (L
 		}
 		return notaryKeyRef + l.KeyID
 	}
-	return s.withAnchor(ctx)(s.refProof(ctx, notaryStampRef+hash, cp, keyLeaf, problem(404, "not_logged", "No notary receipt for that hash is in the latest checkpoint: it is unknown, or newer than the checkpoint (signed every few minutes).")))
+	return s.withAnchor(ctx)(s.refProof(ctx, notaryStampRef+hash, cp, keyLeaf, problem(404, "not_logged", "No notary receipt for that hash is in the latest checkpoint: it is unknown, or newer than the checkpoint (signed every 15 minutes by default).")))
 }
 
 // refProof proves the first leaf with ref against cp, with the later leaves
