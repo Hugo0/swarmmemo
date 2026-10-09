@@ -116,6 +116,8 @@ type MethodEntry struct {
 	exampleMaxCost int64
 	// anonymousLabel names the service in the "no key needed" line.
 	anonymousLabel string
+	// keywords are the method's search phrases (Method.Keywords).
+	keywords []string
 }
 
 // MarshalJSON flattens Extra into the entry.
@@ -258,7 +260,7 @@ func (r *Registry) catalog(prices Prices, extras bool) []Entry {
 			e.Limits = []Limit{}
 		}
 		for _, m := range d.Methods {
-			me := MethodEntry{Name: m.Name, Operation: "service.read", Signed: m.Signed, ArgsMax: m.ArgsMax, Price: "free", Line: m.Line, Args: m.Args, Example: m.Example, Deprecated: m.ReplacedBy != "", ReplacedBy: m.ReplacedBy}
+			me := MethodEntry{Name: m.Name, Operation: "service.read", Signed: m.Signed, ArgsMax: m.ArgsMax, Price: "free", Line: m.Line, Args: m.Args, Example: m.Example, Deprecated: m.ReplacedBy != "", ReplacedBy: m.ReplacedBy, keywords: m.Keywords}
 			if m.Write {
 				me.Operation, me.Resource, me.Price, me.PriceNote, me.exampleMaxCost = "service.call", string(m.Resource), prices.of(d.ID, m), m.PriceNote, m.ExampleMaxCost
 				if m.Anonymous {

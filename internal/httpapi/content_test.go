@@ -212,3 +212,23 @@ func TestDailyStatsCountPastesAndDocs(t *testing.T) {
 		t.Fatalf("yesterday's content counts: %+v", before)
 	}
 }
+
+// /capabilities names docs as the share-text capability and paste.* only as
+// deprecated aliases (C111): no paste URL, no paste.open without a key.
+func TestCapabilitiesShareTextIsDocs(t *testing.T) {
+	_, h := anonCallServer(t, 2000, "paste", "docs")
+	var caps map[string]any
+	if err := json.Unmarshal(makeRequest(h, "GET", "/capabilities", "", "").Body.Bytes(), &caps); err != nil {
+		t.Fatal(err)
+	}
+	paste, _ := dig(caps, "services", "paste").(map[string]any)
+	share, _ := dig(caps, "services", "docs", "share_text").(string)
+	if paste["deprecated"] != true || paste["open"] != nil || paste["methods"] != nil || dig(paste, "replaced_by", "open") != "docs.open" ||
+		!strings.Contains(share, "docs.create") || !strings.Contains(share, "docs.open") {
+		t.Fatalf("paste %v, docs.share_text %q", paste, share)
+	}
+	methods, _ := json.Marshal(dig(caps, "services", "without_key", "methods"))
+	if strings.Contains(string(methods), "paste.") || !strings.Contains(string(methods), `"docs.open"`) {
+		t.Fatalf("without a key: %s", methods)
+	}
+}

@@ -127,6 +127,10 @@ type Method struct {
 	// ReplacedBy marks a deprecated alias: the SERVICE.METHOD that replaces
 	// it. The alias keeps working; the catalogue says what to use instead.
 	ReplacedBy string
+	// Keywords are the phrases an agent searches with for this capability
+	// that Line does not use ("pastebin", "share text"): tools.search
+	// matches them, and a query that names one ranks this tool first.
+	Keywords []string
 }
 
 type Descriptor struct {

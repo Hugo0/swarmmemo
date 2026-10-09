@@ -154,6 +154,33 @@ func TestToolsSearchMixesBothKinds(t *testing.T) {
 	}
 }
 
+// C111: a query that names a capability SwarmMemo has ranks its own tool
+// above every paid API, and kind "swarmmemo" finds it.
+func TestToolsSearchRanksOwnCapabilityFirst(t *testing.T) {
+	h, api := newBundlerHarnessWith(t, "", "", []string{"docs"}, Deps{})
+	api.hits = `[{"id":"` + toolOK + `","title":"Pastebin","description":"Paste text, get a link: a pastebin API","payment":{"price_hint":"0.001"}}]`
+	for _, query := range []string{"pastebin", "pastebin api", "paste", "share text", "snippet", "gist", "shared docs", "collaborative document", "pastebin weather"} {
+		page, raw := h.toolsSearch(`{"query":"` + query + `"}`)
+		if list := toolEntries(page); len(list) == 0 || list[0]["id"] != "swarmmemo:docs.create" || !strings.Contains(raw, `"kind":"catalogue"`) {
+			t.Fatalf("%q: docs.create first, the paid APIs after: %s", query, raw)
+		}
+	}
+	page, raw := h.toolsSearch(`{"query":"pastebin","kind":"swarmmemo"}`)
+	ids := []string{}
+	for _, e := range toolEntries(page) {
+		ids = append(ids, e["id"].(string))
+	}
+	if len(ids) < 2 || ids[0] != "swarmmemo:docs.create" || ids[1] != "swarmmemo:docs.open" {
+		t.Fatalf("pastebin, kind swarmmemo: %v\n%s", ids, raw)
+	}
+	// A query that names no capability keeps the catalogue ahead of a
+	// partial match.
+	page, raw = h.toolsSearch(`{"query":"weather text"}`)
+	if first := toolEntries(page)[0]; first["kind"] != "catalogue" {
+		t.Fatalf("text alone names no capability: %s", raw)
+	}
+}
+
 // A paid API through tools.call: max_cost required, then the same call,
 // payment, charge and record as x402 call; the direct path is unchanged.
 func TestToolsCallsACatalogueTool(t *testing.T) {

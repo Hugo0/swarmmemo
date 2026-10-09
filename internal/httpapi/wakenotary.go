@@ -51,14 +51,25 @@ func providerCapabilities(caps map[string]any, f board.Features) {
 	}
 	screening := "text read by anyone but its writer is screened for prompt injection once, paid by the writer; screen: false skips it, and every answer says what was applied"
 	if f.ServiceEnabled(services.PasteID) {
-		caps[services.PasteID] = map[string]any{
-			"methods": []string{"create", "delete", "open", "get", "list"}, "visibility": []string{"private", "unlisted"},
-			"open":       services.CallPathPrefix + "paste/open?id=PASTE_ID",
-			"download":   services.CallPathPrefix + "paste/open?id=PASTE_ID&format=text: the text alone, text/plain attachment, nosniff, CSP sandbox, noindex",
-			"text_bytes": services.PasteTextBytes, "expiry_max_seconds": services.PasteExpiryMax, "addressed_by": "id (128 random bits) and the text's SHA-256",
-			"rendered_as_html": false, "public_listing": false, "public_links": f.ContentURL != "", "screening": screening, "resource": "credit",
-			"deprecated": true, "replaced_by": map[string]string{"create": "docs.create", "delete": "docs.delete", "open": "docs.open", "get": "docs.read", "list": "docs.list"},
-			"stored_as": "a doc of kind paste: one version that never changes; docs.open, docs.read and docs.delete take paste ids",
+		replacedBy := map[string]string{"create": "docs.create", "delete": "docs.delete", "open": "docs.open", "get": "docs.read", "list": "docs.list"}
+		if f.ServiceEnabled(services.DocsID) {
+			// The share-text capability is docs; paste.* are aliases that
+			// keep old ids and URLs working.
+			caps[services.PasteID] = map[string]any{
+				"deprecated": true, "replaced_by": replacedBy, "use": "docs.share_text",
+				"aliases":   "paste.create, paste.delete, paste.open, paste.get and paste.list keep working for old clients; they are not listed as tools",
+				"stored_as": "a doc of kind paste: one version that never changes; docs.open, docs.read and docs.delete take paste ids",
+			}
+		} else {
+			caps[services.PasteID] = map[string]any{
+				"methods": []string{"create", "delete", "open", "get", "list"}, "visibility": []string{"private", "unlisted"},
+				"open":       services.CallPathPrefix + "paste/open?id=PASTE_ID",
+				"download":   services.CallPathPrefix + "paste/open?id=PASTE_ID&format=text: the text alone, text/plain attachment, nosniff, CSP sandbox, noindex",
+				"text_bytes": services.PasteTextBytes, "expiry_max_seconds": services.PasteExpiryMax, "addressed_by": "id (128 random bits) and the text's SHA-256",
+				"rendered_as_html": false, "public_listing": false, "public_links": f.ContentURL != "", "screening": screening, "resource": "credit",
+				"deprecated": true, "replaced_by": replacedBy,
+				"stored_as": "a doc of kind paste: one version that never changes; docs.open, docs.read and docs.delete take paste ids",
+			}
 		}
 	}
 	if f.ServiceEnabled(services.DocsID) {
@@ -70,7 +81,8 @@ func providerCapabilities(caps map[string]any, f board.Features) {
 			"versions":   "every version kept; write names base_version, and a stale one is 409 doc_conflict with details.current",
 			"logged":     "each version's SHA-256 as a doc leaf of the transparency log: /api/log/proof?message=VERSION_ID; pastes are not logged",
 			"text_bytes": services.DocTextBytes, "expiry_max_seconds": services.PasteExpiryMax, "pastes": "docs of kind paste: docs.list with kind paste lists them",
-			"e2ee": false, "public_listing": false, "rendered_as_html": false, "screening": screening, "resource": "credit",
+			"share_text": "a pastebin with no auth to open: docs.create with visibility unlisted, then anyone holding the id opens it with docs.open, no key needed",
+			"e2ee":       false, "public_listing": false, "rendered_as_html": false, "screening": screening, "resource": "credit",
 		}
 	}
 }

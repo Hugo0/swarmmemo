@@ -182,10 +182,12 @@ func TestMultipartPostIsRefusedNotStoredRaw(t *testing.T) {
 	}
 }
 
-// An anonymous receipt carries one piece of advice beside it: sign, and replies
-// come back through /api/updates. Nothing that existed before moves.
+// An anonymous receipt carries one piece of advice beside it (C113): where
+// its replies are read, and that signing brings them to /api/updates. The
+// same line on every transport; nothing that existed before moves.
 func TestAnonymousReceiptAdvisesSigning(t *testing.T) {
 	const how = "https://swarmmemo.com/for-agents#scheduled"
+	const line = "Replies to this post reach no inbox: read them at https://swarmmemo.com/e/memo123, or sign your posts (python3 swarmmemo.py keygen; signed GET /c64/... for GET-only tools) to get replies in /api/updates."
 	s := New(&fakeService{}, nil, Config{})
 	for _, tc := range []struct{ name, method, path, body, ct string }{
 		{"command", "POST", "/v1/command", `{"operation":"post","text":"hello"}`, "application/json"},
@@ -196,7 +198,7 @@ func TestAnonymousReceiptAdvisesSigning(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != 200 || result.Receipt == nil || result.Receipt.ID != "memo123" {
 			t.Fatalf("%s: %d %s %v", tc.name, w.Code, w.Body.String(), err)
 		}
-		if result.Next == nil || result.Next.How != how || !strings.Contains(result.Next.SignToGetReplies, "/api/updates") {
+		if result.Next == nil || result.Next.How != how || result.Next.SignToGetReplies != line {
 			t.Fatalf("%s: no signing advice: %s", tc.name, w.Body.String())
 		}
 	}
@@ -205,7 +207,7 @@ func TestAnonymousReceiptAdvisesSigning(t *testing.T) {
 	if w.Code != 200 || len(lines) != 2 || lines[0] != "ok memo123 sha256=hash123 url=/e/memo123 duplicate=false" {
 		t.Fatalf("text receipt: %d %q", w.Code, w.Body.String())
 	}
-	if lines[1] != "Sign your next post with an Ed25519 key and replies to it are listed at /api/updates: "+how {
+	if lines[1] != line {
 		t.Fatalf("text advice: %q", lines[1])
 	}
 
@@ -219,7 +221,7 @@ func TestAnonymousReceiptAdvisesSigning(t *testing.T) {
 			StructuredContent board.Result `json:"structuredContent"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(mw.Body.Bytes(), &rpc); err != nil || rpc.Result.StructuredContent.Next == nil || rpc.Result.StructuredContent.Next.How != how || rpc.Result.StructuredContent.SharedReceipt == nil || rpc.Result.StructuredContent.SharedReceipt.Acceptance.ID != "memo123" {
+	if err := json.Unmarshal(mw.Body.Bytes(), &rpc); err != nil || rpc.Result.StructuredContent.Next == nil || rpc.Result.StructuredContent.Next.How != how || rpc.Result.StructuredContent.Next.SignToGetReplies != line || rpc.Result.StructuredContent.SharedReceipt == nil || rpc.Result.StructuredContent.SharedReceipt.Acceptance.ID != "memo123" {
 		t.Fatalf("MCP post: %d %s %v", mw.Code, mw.Body.String(), err)
 	}
 }

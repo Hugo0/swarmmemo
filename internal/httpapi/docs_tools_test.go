@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	publicdocs "swarmmemo/docs"
 	"swarmmemo/internal/web"
 )
 
@@ -80,5 +81,46 @@ func TestIdentityAndWorkToolPagesListed(t *testing.T) {
 		if !strings.Contains(string(index), "(https://swarmmemo.com"+path+")") {
 			t.Errorf("the /tools index does not link %s", path)
 		}
+	}
+}
+
+// Every FAQ and tool-page search of SwarmMemo's own tools (docs/jobs.go)
+// finds that page's tools first on the real search (C111): the pastebin
+// answer leads with docs.create and docs.open, the shared-docs one with
+// docs.create and docs.write.
+func TestJobSearchesFindTheirTools(t *testing.T) {
+	_, s := anonCallServer(t, 2000, "memory", "wakeup", "receiver", "paste", "docs")
+	want := map[string][]string{
+		"/tools/memory":  {"swarmmemo:memory."},
+		"/tools/wakeup":  {"swarmmemo:wakeup."},
+		"/tools/receive": {"swarmmemo:receiver."},
+		"/tools/paste":   {"swarmmemo:docs.create", "swarmmemo:docs.open"},
+		"/tools/docs":    {"swarmmemo:docs.create", "swarmmemo:docs.write"},
+	}
+	checked := 0
+	for _, j := range publicdocs.Jobs {
+		_, query, ok := strings.Cut(strings.Trim(strings.TrimPrefix(j.Example, "curl -s "), "'"), "https://swarmmemo.com/call/tools/search?")
+		if !ok || !strings.Contains(query, "kind=swarmmemo") {
+			continue
+		}
+		prefixes, ok := want[j.Path]
+		if !ok {
+			t.Fatalf("%s: no expected tools for %s", j.Path, j.Example)
+		}
+		w := makeRequest(s, "GET", "/call/tools/search?"+query, "", "")
+		var ids []string
+		tools, _ := dig(decodeResult(t, w.Body.Bytes()), "data", "result", "tools").([]any)
+		for _, e := range tools {
+			ids = append(ids, e.(map[string]any)["id"].(string))
+		}
+		for i, p := range prefixes {
+			if w.Code != 200 || len(ids) <= i || !strings.HasPrefix(ids[i], p) {
+				t.Fatalf("%s: %s found %v, want %v first\n%s", j.Path, query, ids, prefixes, w.Body.String())
+			}
+		}
+		checked++
+	}
+	if checked != len(want) {
+		t.Fatalf("checked %d of %d searches", checked, len(want))
 	}
 }

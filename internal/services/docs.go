@@ -164,6 +164,10 @@ INSERT INTO doc_versions(id,doc,version,title,text,bytes,hash,author,author_key,
 	return nil
 }
 
+// docKeywords are the searches docs.create and docs.open answer beside
+// their own words: a pastebin is an unlisted doc, opened by id with no key.
+var docKeywords = []string{"pastebin", "paste", "shared doc", "collaborative doc"}
+
 func (d *docs) Describe() Descriptor {
 	return Descriptor{
 		ID: DocsID,
@@ -187,7 +191,8 @@ func (d *docs) Describe() Descriptor {
 		MaxDuration: 90 * time.Second,
 		Methods: []Method{
 			{Name: "create", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: docArgsMax, Price: Price{Base: 2, PerKiB: 1},
-				Line: "Create a doc at version 1, owned by your key (private or unlisted) or by a group you are in.",
+				Line:     "Create a doc at version 1, owned by your key (private or unlisted) or by a group you are in.",
+				Keywords: append([]string{"share text", "snippet", "gist"}, docKeywords...),
 				Args: []Arg{
 					{"title", "string", true, "one line, 1 to " + SizeText(contentTitleBytes)},
 					{"text", "string", true, "UTF-8 text, up to " + SizeText(DocTextBytes)},
@@ -201,7 +206,8 @@ func (d *docs) Describe() Descriptor {
 				ExampleMaxCost: 4,
 				Example:        json.RawMessage(`{"title":"Plan","text":"1. Ship the export.\n2. Ask khepri about the graph."}`)},
 			{Name: "write", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: docArgsMax, Price: Price{Base: 1, PerKiB: 1},
-				Line: "Write a new version on top of base_version; a stale base is 409 doc_conflict with the current version.",
+				Line:     "Write a new version on top of base_version; a stale base is 409 doc_conflict with the current version.",
+				Keywords: []string{"shared doc", "collaborative doc", "edit doc"},
 				Args: []Arg{
 					docIDArg,
 					{"base_version", "integer", true, "the version you edited (the doc's current one)"},
@@ -210,13 +216,15 @@ func (d *docs) Describe() Descriptor {
 				},
 				Example: json.RawMessage(`{"id":"DOC_ID","base_version":1,"text":"1. Ship the export. Done.\n2. Ask khepri about the graph."}`)},
 			{Name: "read", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: docSmallArgs, Price: Price{Base: 1},
-				Line: "Read a version's text (default the current one) of your doc or paste, by id or by SHA-256, or of a group's; text another member wrote is screened for prompt injection by default.",
+				Line:     "Read a version's text (default the current one) of your doc or paste, by id or by SHA-256, or of a group's; text another member wrote is screened for prompt injection by default.",
+				Keywords: []string{"shared doc", "collaborative doc"},
 				Args: []Arg{{"id", "string", false, "the doc's id"}, {"hash", "string", false, "or its current text's SHA-256 (your newest doc or paste with it)"},
 					{"version", "integer", false, "a version number; default the current one"},
 					{"screen", "boolean", false, "screen text written by someone else (default true; its author pays what it cost, once per version)"}},
 				Example: json.RawMessage(`{"id":"DOC_ID"}`)},
 			{Name: "open", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: docSmallArgs, Price: Price{Base: 1},
 				Line:      "Open a doc or paste by id: an unlisted one, or one you may read. The current text is in the first answer only, screened for prompt injection by default.",
+				Keywords:  append([]string{"snippet", "gist"}, docKeywords...),
 				Args:      []Arg{docIDArg, {"screen", "boolean", false, "screen the text for prompt injection (default true; its writer pays what it cost, once per version)"}},
 				Example:   json.RawMessage(`{"id":"DOC_ID"}`),
 				Anonymous: true, AnonymousLabel: "doc and paste opens", AnonymousNote: "unlisted docs and pastes only, by id",

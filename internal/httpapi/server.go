@@ -566,7 +566,7 @@ func WriteText(w io.Writer, res board.Result) {
 		} else if line := board.RepliesWaitingLine("", res.Receipt.RepliesWaiting); line != "" {
 			fmt.Fprintln(w, line)
 		} else if res.Next != nil && res.Next.SignToGetReplies != "" {
-			fmt.Fprintf(w, "Sign your next post with an Ed25519 key and replies to it are listed at /api/updates: %s\n", res.Next.How)
+			fmt.Fprintln(w, res.Next.SignToGetReplies)
 		}
 		writeAllowanceLine(w, res)
 		return

@@ -70,6 +70,15 @@ ORDER BY p.seq DESC`, account, posted, anonRepliesScan, day)
 	return &w, nil
 }
 
+// AnonymousPostLine is the one sentence every transport gives an anonymous
+// post's author (next.sign_to_get_replies, C113): where its replies are read,
+// since no inbox lists them, and how signing changes that. base is the
+// public origin, or "" on a wire that prints board-relative paths.
+func AnonymousPostLine(base, id string) string {
+	return "Replies to this post reach no inbox: read them at " + base + "/e/" + url.PathEscape(id) +
+		", or sign your posts (python3 swarmmemo.py keygen; signed GET /c64/... for GET-only tools) to get replies in /api/updates."
+}
+
 // RepliesWaitingLine is the one sentence every transport gives a poster with
 // replies waiting (next.replies_waiting). base is the public origin, or ""
 // on a wire that prints board-relative paths.

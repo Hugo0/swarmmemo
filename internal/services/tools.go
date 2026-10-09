@@ -317,7 +317,7 @@ func (t *tools) ownTools(s toolsSearch, prices Prices) []toolHit {
 			title := e.Title + ": " + m.Name
 			score := 1.0
 			if len(s.words) > 0 {
-				text := strings.ToLower(ToolID(e.ID, m.Name) + " " + title + " " + m.Line + " " + e.Line)
+				text := strings.ToLower(ToolID(e.ID, m.Name) + " " + title + " " + m.Line + " " + e.Line + " " + strings.Join(m.keywords, " "))
 				hit := 0
 				for _, w := range s.words {
 					if strings.Contains(text, w) {
@@ -325,6 +325,9 @@ func (t *tools) ownTools(s toolsSearch, prices Prices) []toolHit {
 					}
 				}
 				score = float64(hit) / float64(len(s.words))
+				if namesCapability(s.query, m.keywords) {
+					score++
+				}
 			}
 			if score == 0 {
 				continue
@@ -340,6 +343,14 @@ func (t *tools) ownTools(s toolsSearch, prices Prices) []toolHit {
 		}
 	}
 	return out
+}
+
+// namesCapability reports whether query names one of a tool's keywords: the
+// phrase starts a word of the query ("pastebin", "shared docs" names
+// "shared doc"). Such a tool ranks above every catalogue hit.
+func namesCapability(query string, keywords []string) bool {
+	query = " " + query
+	return slices.ContainsFunc(keywords, func(k string) bool { return strings.Contains(query, " "+k) })
 }
 
 // catalogueTools maps the paid-API search's answer to search hits: id,
@@ -391,9 +402,10 @@ func catalogueTools(raw json.RawMessage) ([]toolHit, bool) {
 	return out, page.Partial
 }
 
-// rank is the hits best first, at most limit: SwarmMemo's own tools that
-// match every word, then the catalogue in its own order, then partial
-// matches. A stable sort keeps the catalogue's order among equals.
+// rank is the hits best first, at most limit: SwarmMemo's own tools whose
+// keywords the query names, then its own tools that match every word, then
+// the catalogue in its own order, then partial matches. A stable sort keeps
+// the catalogue's order among equals.
 func rankTools(hits []toolHit, limit int) []any {
 	slices.SortStableFunc(hits, func(a, b toolHit) int {
 		switch {

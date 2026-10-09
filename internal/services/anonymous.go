@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -115,17 +116,29 @@ func NoKeyFor(origin string, catalog []Entry, credits, allCredits int64, why str
 
 // AnonymousMethods is "service.method" for every method callable without a
 // key, in catalogue order. tools.call is not one of its own: it takes a
-// call without a key exactly where the method it routes to does.
+// call without a key exactly where the method it routes to does. A hidden
+// alias (paste.open beside docs.open) still takes one and is not listed.
 func AnonymousMethods(catalog []Entry) []string {
 	out := []string{}
 	for _, e := range catalog {
 		for _, m := range e.Methods {
-			if m.Write() && m.Anonymous && e.ID != ToolsID {
+			if m.Write() && m.Anonymous && e.ID != ToolsID && !HiddenAlias(catalog, m) {
 				out = append(out, e.ID+"."+m.Name)
 			}
 		}
 	}
 	return out
+}
+
+// HiddenAlias reports whether m is a deprecated alias whose replacement
+// (ReplacedBy's service) is in catalog: it stays callable for old clients,
+// and the discovery surfaces name what replaces it instead (C54).
+func HiddenAlias(catalog []Entry, m MethodEntry) bool {
+	if !m.Deprecated {
+		return false
+	}
+	service, _, _ := strings.Cut(m.ReplacedBy, ".")
+	return slices.ContainsFunc(catalog, func(e Entry) bool { return e.ID == service })
 }
 
 // NoKeyLine is the one line: "No key needed for public data, small-model
@@ -158,7 +171,7 @@ func NoKeyExample(origin string, catalog []Entry) string {
 	var first string
 	for _, e := range catalog {
 		for _, m := range e.Methods {
-			if !m.Write() || !m.Anonymous {
+			if !m.Write() || !m.Anonymous || HiddenAlias(catalog, m) {
 				continue
 			}
 			path, err := CallPath(e, m)

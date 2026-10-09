@@ -67,7 +67,7 @@ func (v *anonEnv) call(t *testing.T, s allowance.Subject, service, method, args 
 func TestAnonymousAllowlistIsTheCatalogue(t *testing.T) {
 	all := services.Catalog(services.Known())
 	got := services.AnonymousMethods(all)
-	want := []string{"screen.text", "screen.leak", "inference.complete", "public_data.fetch", "public_data.bulk", "notary.stamp", "fetch.page", "paste.open", "docs.open"}
+	want := []string{"screen.text", "screen.leak", "inference.complete", "public_data.fetch", "public_data.bulk", "notary.stamp", "fetch.page", "docs.open"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("methods without a key: %v, want %v", got, want)
 	}

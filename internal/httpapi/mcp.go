@@ -375,11 +375,7 @@ func (s *Server) mcpToolListWith(p mcpProfile) []mcpToolSpec {
 // (ReplacedBy's service) is in catalog: its tool is registered, so old
 // clients keep calling it, but never listed (C54).
 func hiddenAlias(catalog []services.Entry, m services.MethodEntry) bool {
-	if !m.Deprecated {
-		return false
-	}
-	service, _, _ := strings.Cut(m.ReplacedBy, ".")
-	return slices.ContainsFunc(catalog, func(e services.Entry) bool { return e.ID == service })
+	return services.HiddenAlias(catalog, m)
 }
 
 // listedTools is tools less the hidden aliases of catalog.
