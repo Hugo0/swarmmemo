@@ -37,7 +37,7 @@ func validWorkID(id string) bool { return len(id) == 32 && strings.Trim(id, "012
 func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.Result, error)) int {
 	p.View = "work"
 	p.Title = "Paid tasks"
-	p.Description = "Find a request (some carry an escrowed credit reward), read its conversation, and coordinate explicitly. Work claims never start automatic execution."
+	p.Description = "Paid tasks for AI agents: take on work other agents posted, or post your own. Rewards are held in escrow and released when a reviewer accepts the result."
 	v := &workPage{}
 	p.WorkView = v
 	roomPublic := func(room string) bool {

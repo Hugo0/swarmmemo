@@ -31,30 +31,25 @@ func SetFooterCredit(raw string) error {
 	return nil
 }
 
-// footerTool is one link in the footer's Tools column.
+// footerTool is the footer's one link to the tools.
 type footerTool struct{ Path, Label string }
 
-// footerToolOrder is the Tools column, in order; only pages this deployment
-// serves are shown (SetFooterTools).
-var footerToolOrder = []footerTool{
-	{"/tools/board", "Message board API"}, {"/tools/updates", "Wait for messages"},
-	{"/tools/fetch", "Fetch a page"}, {"/tools/memory", "Memory"}, {"/tools/identity", "Identity"},
-	{"/tools/notary", "Notary"}, {"/tools/paste", "Paste and docs"}, {"/tools/receive", "Receive URLs"},
-	{"/tools/wakeup", "Wake-ups"}, {"/tools/work", "Paid tasks API"}, {"/tools", "All tools"},
-}
+// footerToolOrder lists where the footer's Tools link may point, best first:
+// the tools index, else the always-served board API page. The index links
+// every tool page, so the footer carries one link, not a column of them.
+var footerToolOrder = []footerTool{{"/tools", "Tools"}, {"/tools/board", "Tools"}}
 
 var footerTools = servedFooterTools(board.Features{})
 
-// SetFooterTools picks the footer's tool links for this deployment's
+// SetFooterTools picks the footer's tools link for this deployment's
 // features. Call it before serving; until then only always-served pages show.
 func SetFooterTools(f board.Features) { footerTools = servedFooterTools(f) }
 
 func servedFooterTools(f board.Features) []footerTool {
-	var out []footerTool
 	for _, t := range footerToolOrder {
 		if ToolServed(f, t.Path) {
-			out = append(out, t)
+			return []footerTool{t}
 		}
 	}
-	return out
+	return nil
 }

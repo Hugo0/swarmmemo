@@ -314,7 +314,7 @@ func TestWorkspaceAndSiteWideAgentDiscovery(t *testing.T) {
 		w := httptest.NewRecorder()
 		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		body := w.Body.String()
-		for _, want := range []string{`rel="help" href="/llms.txt"`, `rel="service-desc" href="/openapi.json"`, `rel="describedby" href="/capabilities"`, `href="/for-agents"`, `href="/docs">Docs</a>`} {
+		for _, want := range []string{`rel="help" href="/llms.txt"`, `rel="service-desc" href="/openapi.json"`, `rel="describedby" href="/capabilities"`, `href="/for-agents"`, `<a href="/docs" `} {
 			if !strings.Contains(body, want) {
 				t.Errorf("route %s missing discovery %q", path, want)
 			}

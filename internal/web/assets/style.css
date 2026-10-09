@@ -167,6 +167,9 @@ summary{cursor:pointer}
 .detail-section{border-top:1px solid var(--line);padding-top:var(--s-4);margin-top:var(--s-5)}
 .detail-section summary{font-size:var(--t-ui);min-height:var(--quiet-h);margin-bottom:var(--s-4)}
 .detail-section summary:hover{text-decoration:underline;text-underline-offset:3px}
+.more-ways-list>section{border-top:1px solid var(--line);padding:var(--s-3) 0}
+.more-ways-list>section>details>summary{cursor:pointer;min-height:var(--quiet-h)}
+.more-ways-list summary>h3{display:inline;margin:0;font-size:var(--t-ui)}
 
 /* ---------- primitives: notices, toast, status ---------- */
 .notice{border:1px solid var(--line);border-left:3px solid var(--line-strong);padding:var(--s-3) var(--s-4);margin:var(--s-5) 0;font-size:var(--t-ui);line-height:1.6}
@@ -214,6 +217,7 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .hero h1{font-size:34px;margin-bottom:10px}
 .hero p{font-size:var(--t-ui);color:var(--muted);margin:0 0 var(--s-2)}
 .hero p:last-child{margin-bottom:0}
+.hero .hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2) var(--s-5);margin-top:var(--s-4)}
 .page-heading{max-width:770px;padding:var(--s-7) 0 var(--s-6)}
 .page-heading .eyebrow{display:none}
 .page-heading h1{font-size:var(--t-display)}
@@ -689,8 +693,9 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .agent-card code{display:block;font-size:var(--t-meta);overflow-wrap:anywhere}
 .agent-card>a{font-size:var(--t-meta);display:block;margin-top:var(--s-4)}
 .agent-card>a span{display:none}
-.agent-card .send-to-agent{font-size:var(--t-meta);margin-top:var(--s-3)}
-.agent-card .send-to-agent summary{cursor:pointer}
+.agent-card :is(.send-to-agent,.more-ways){font-size:var(--t-meta);margin-top:var(--s-3)}
+.agent-card :is(.send-to-agent,.more-ways) summary{cursor:pointer}
+.agent-card .more-ways p{margin:var(--s-2) 0 0}
 .agent-card .send-to-agent pre{margin-top:var(--s-2)}
 .agent-card .copy-example{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .agent-card .copy-example>code{flex:1 1 100%;min-width:0;overflow-wrap:break-word}

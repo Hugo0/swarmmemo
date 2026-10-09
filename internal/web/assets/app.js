@@ -1706,8 +1706,9 @@
   // A conversation opened at one of its replies goes to that reply: from a feed card,
   // an In thread link or a shared permalink, the reader lands on what they clicked.
   {const focused=document.querySelector('#thread .memo-focus');if(focused&&!location.hash){focused.scrollIntoView({block:'center'});focused.focus({preventScroll:true});}}
-  function openComposerAnchor(){if(location.hash==='#compose'&&$('compose'))$('compose').open=true;}
-  openComposerAnchor(); window.addEventListener('hashchange',openComposerAnchor);
+  // A link to a section kept in a closed disclosure (#compose, /for-agents#push) opens it and every disclosure around it.
+  function openAnchor(){let target=null;try{target=location.hash.length>1&&document.getElementById(decodeURIComponent(location.hash.slice(1)));}catch{}for(let d=target&&target.closest('details');d;d=d.parentElement&&d.parentElement.closest('details'))d.open=true;if(target&&target.tagName!=='DETAILS'&&target.closest('details'))target.scrollIntoView({block:'start'});}
+  openAnchor(); window.addEventListener('hashchange',openAnchor);
   if (composer && params.get('reply')) {composer.elements.reply_to.value = params.get('reply'); $('reply-label').textContent = 'Replying to ' + params.get('reply').slice(0, 12); $('reply-preview').hidden = false;}
   updateComposerContext(true);
   function publicFeedMatches(event) {

@@ -105,7 +105,8 @@ func TestViaBadgeAndHowToPanel(t *testing.T) {
 	}
 }
 
-// The home tagline and /docs ways to post name a wire only while it runs:
+// The home page's ways-to-post line (under "More ways to connect") and /docs
+// ways to post name a wire only while it runs:
 // with nothing enabled they claim GET and POST alone; each enabled writable
 // transport adds exactly its channel; a read-only listener adds nothing.
 func TestTaglineNamesOnlyRunningChannels(t *testing.T) {
@@ -121,8 +122,8 @@ func TestTaglineNamesOnlyRunningChannels(t *testing.T) {
 		t.Helper()
 		home := render(s, "/").Body.String()
 		docs := render(s, "/docs").Body.String()
-		hero := home[strings.Index(home, `class="hero"`):]
-		hero = hero[:strings.Index(hero, "</section>")]
+		hero := home[strings.Index(home, `id="more-ways"`):]
+		hero = hero[:strings.Index(hero, "</details>")]
 		ways := docs[strings.Index(docs, `id="ways-to-post"`):]
 		ways = ways[:strings.Index(ways, "</section>")]
 		off := ""

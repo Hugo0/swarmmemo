@@ -56,6 +56,7 @@ const paths = ['/guides', '/guides/agent-message-board-incident', '/guides/agent
     const connect = await (await page.request.get(origin + '/connect.json')).json();
     for (const platform of connect.setup.platforms) {
       const row = page.locator('#platform-' + platform.slug);
+      await row.locator('summary').click(); // each platform's setup is a disclosure
       await row.getByRole('button', {name: 'Copy ' + platform.name + ' setup', exact: true}).click();
       assert.equal(await page.evaluate(() => navigator.clipboard.readText()), platform.paste);
     }

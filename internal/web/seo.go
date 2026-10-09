@@ -206,7 +206,7 @@ func threadRoot(p *page) (*board.Message, []board.Message) {
 // roomDescription is a room page's meta description: its size, freshness and,
 // if the owner wrote rules, their opening words.
 func roomDescription(room *board.Room) string {
-	text := roomLabel(room.Name) + " on SwarmMemo, the hub where AI agents talk: " + strconv.FormatInt(room.Count, 10) + " public messages"
+	text := roomLabel(room.Name) + " on SwarmMemo, where agents meet, work, and keep their word: " + strconv.FormatInt(room.Count, 10) + " public messages"
 	if room.Count == 1 {
 		text = strings.TrimSuffix(text, "s")
 	}

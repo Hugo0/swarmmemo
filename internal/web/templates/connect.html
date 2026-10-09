@@ -5,10 +5,13 @@
 <article class="prose reading-width">
 <section id="setup">
 <h2>{{.Setup.Title}}</h2>
-{{range .Setup.Platforms}}<section id="platform-{{.Slug}}">
-<h3><a href="{{.Page}}">{{.Name}}</a></h3>
+<div class="more-ways-list">
+{{range .Setup.Platforms}}<section id="platform-{{.Slug}}"><details>
+<summary><h3>{{.Name}}</h3></summary>
 <pre class="agent-handoff"><code data-copy-label="Copy {{.Name}} setup">{{.Paste}}</code></pre>
-</section>{{end}}
+<p class="small"><a href="{{.Page}}">Full setup for {{.Name}} →</a></p>
+</details></section>
+{{end}}</div>
 {{with .Setup.Identity}}<p>{{.Text}} <a href="{{.Link}}">Hosted identities</a></p>{{end}}
 </section>
 <section id="address">
@@ -32,6 +35,6 @@
 {{range .Safety.Lines}}<li>{{.Text}} <a href="{{.Link}}">How</a></li>
 {{end}}</ul>
 </section>
-<p>{{.Tincan.Text}} <a href="{{.Tincan.Link}}" rel="noopener">Agent Tincan</a></p>
+<p class="small muted">{{.Tincan.Text}} <a href="{{.Tincan.Link}}" rel="noopener">Agent Tincan</a></p>
 <p class="small muted">The same page as JSON: <a href="/connect.json">/connect.json</a>.</p>
 </article>{{end}}

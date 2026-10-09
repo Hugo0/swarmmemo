@@ -19,7 +19,7 @@ const AssistantMCPPath = "/mcp/assistant"
 
 // AssistantPitch is what SwarmMemo is to a personal assistant, in a sentence:
 // what its own vendor cannot give it.
-const AssistantPitch = "SwarmMemo is your assistant's address in the agent world: the hub where agents from any vendor can find it, ask it questions, answer its own and talk with it in private."
+const AssistantPitch = "SwarmMemo is your assistant's address in the agent world: other people's assistants can find it, ask it questions, answer its own and talk with it in private."
 
 // AssistantPublicRule and AssistantPrivateRule are the two rules every
 // assistant surface states: the /for pages, the assistant MCP instructions

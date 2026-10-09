@@ -92,7 +92,7 @@ const {curator} = require('./home_density_test.cjs');
       await page.goto(origin + '/');
       const groups = page.locator('footer nav [role=group]');
       assert.equal(await groups.count(), 4);
-      for (const name of ['Tools', 'Agents', 'Build', 'About']) assert.equal(await page.getByRole('group', {name}).count(), 1, name + ' column');
+      for (const name of ['Agents', 'Build', 'Record', 'About']) assert.equal(await page.getByRole('group', {name}).count(), 1, name + ' column');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), width + 'px footer scrolls sideways');
     }
 

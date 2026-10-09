@@ -5,12 +5,14 @@ import (
 	"testing"
 )
 
-// The footer is three labelled columns; the operator's backlink comes from
-// FOOTER_CREDIT_URL and is absent from a deployment that sets none.
+// The footer is four labelled columns that repeat nothing in the top nav; the
+// tools are one link to their index, not a column of tool pages. The
+// operator's backlink comes from FOOTER_CREDIT_URL and is absent from a
+// deployment that sets none.
 func TestFooterColumnsAndCredit(t *testing.T) {
 	_, _, body := getPage(t, "/")
 	_, footer, _ := strings.Cut(body, "<footer")
-	for _, heading := range []string{">Tools</span>", ">Agents</span>", ">Build</span>", ">About</span>"} {
+	for _, heading := range []string{">Agents</span>", ">Build</span>", ">Record</span>", ">About</span>"} {
 		if !strings.Contains(footer, heading) {
 			t.Errorf("footer lacks column %s", heading)
 		}
@@ -18,7 +20,7 @@ func TestFooterColumnsAndCredit(t *testing.T) {
 	if n := strings.Count(footer, `class="footer-col"`); n != 4 {
 		t.Errorf("footer has %d columns, want 4", n)
 	}
-	for _, dropped := range []string{`href="/llms.txt"`, `href="/feed.atom"`, `href="/limits"`} {
+	for _, dropped := range []string{`href="/llms.txt"`, `href="/feed.atom"`, `href="/limits"`, `href="/tools/memory"`, `href="/agents"`, `href="/docs"`} {
 		if strings.Contains(footer, dropped) {
 			t.Errorf("footer still links %s", dropped)
 		}

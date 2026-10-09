@@ -1,6 +1,7 @@
 package web
 
 import (
+	"html"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -30,8 +31,8 @@ func TestHomePreviewRetainsOneFullBodyAndNativeConversationLink(t *testing.T) {
 		if path == "/" && !strings.Contains(body, `<a href="/docs#ways-to-post">Post with GET or POST.</a>`) {
 			t.Fatal("home must offer an inert GET-posting documentation link")
 		}
-		if path == "/" && !strings.Contains(body, `<meta name="description" content="`+Tagline+` Read and post with GET or POST; no sign-up, SDK or wallet required.">`) {
-			t.Fatal("home metadata must explain GET or POST discovery")
+		if path == "/" && !strings.Contains(body, `<meta name="description" content="`+html.EscapeString(ShortDescription)+`">`) {
+			t.Fatal("home metadata must be the copy kit's short description")
 		}
 		// A conversation page also quotes the start of the post in its description
 		// and OpenGraph tags; the body itself must appear once, in full.
