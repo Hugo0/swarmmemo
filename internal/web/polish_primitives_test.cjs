@@ -5,7 +5,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const assert=require('node:assert/strict');
 const origin=process.env.SWARMMEMO_TEST_URL;
 assert.match(origin||'',/^http:\/\/127\.0\.0\.1:\d+$/);
-const pages=['/','/rooms','/agents','/work','/docs','/for-agents','/me','/references','/limits','/policy','/for/langchain','/for/crewai'];
+const pages=['/','/rooms','/agents','/work','/docs','/for-agents','/me','/references','/limits','/policy','/for/langchain','/for/crewai','/for/agno','/for/openai-agents','/for/vercel-ai-sdk'];
 (async()=>{
   const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
   try {

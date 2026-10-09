@@ -352,9 +352,11 @@ func TestPluginPackage(t *testing.T) {
 }
 
 // Every framework /for page renders from its table, as HTML and as its JSON
-// twin, shows the install line, the example, the signed-identity line and the
-// MCP route, points at the live core profile, and is listed in /for-agents,
-// /docs, llms.txt and the sitemap; its package is in the public snapshot.
+// twin, shows the install line, the example, the identity line and the MCP
+// route, points at the live core profile, and is listed in /for-agents,
+// /docs, llms.txt and the sitemap. A package framework's package is in the
+// public snapshot; an MCP-only one's example is the MCP route, and it says
+// how to sign in.
 func TestFrameworkPages(t *testing.T) {
 	s := realServer(t)
 	listings := map[string]string{
@@ -365,7 +367,7 @@ func TestFrameworkPages(t *testing.T) {
 	}
 	published := publicSnapshotFiles(t)
 	paths := web.FrameworkPaths()
-	if !slices.Equal(paths, []string{"/for/langchain", "/for/crewai"}) {
+	if !slices.Equal(paths, []string{"/for/langchain", "/for/crewai", "/for/agno", "/for/openai-agents", "/for/vercel-ai-sdk"}) {
 		t.Fatalf("framework pages: %v", paths)
 	}
 	for _, path := range paths {
@@ -378,34 +380,59 @@ func TestFrameworkPages(t *testing.T) {
 			t.Fatalf("%s.json and Accept: application/json differ", path)
 		}
 		var view struct {
-			Slug, Name, Page, Intro, Package, Install, Example, Identity, Keygen string
-			KeyExample                                                           string `json:"key_example"`
-			MCPURL                                                               string `json:"mcp_url"`
-			MCP                                                                  string `json:"mcp"`
-			MCPCode                                                              string `json:"mcp_code"`
-			Tools                                                                []struct{ Name, Line string }
+			Slug, Name, Kind, Lang, Page, Intro, Package, Install, Example, Identity, Keygen string
+			KeyExample                                                                       string `json:"key_example"`
+			MCPURL                                                                           string `json:"mcp_url"`
+			MCP                                                                              string `json:"mcp"`
+			MCPCode                                                                          string `json:"mcp_code"`
+			Tools                                                                            []struct{ Name, Line string }
 		}
 		if err := json.Unmarshal(twin.Body.Bytes(), &view); err != nil {
 			t.Fatal(err)
 		}
-		if "/for/"+view.Slug != path || view.Page != "https://swarmmemo.com"+path || view.Install != "pip install "+view.Package || len(view.Tools) != 5 {
+		if "/for/"+view.Slug != path || view.Page != "https://swarmmemo.com"+path || view.Install == "" || view.Lang == "" || len(view.Tools) != 5 {
 			t.Errorf("%s JSON twin: %+v", path, view)
 		}
-		if view.MCPURL != "https://swarmmemo.com"+mcpProfileCore || !strings.Contains(view.MCPCode, view.MCPURL) {
+		route := view.MCPCode
+		switch view.Kind {
+		case "package":
+			if view.Install != "pip install "+view.Package || view.Keygen == "" {
+				t.Errorf("%s JSON twin: %+v", path, view)
+			}
+		case "mcp":
+			route = view.Example
+			if view.Package != "" || view.Keygen != "" || view.MCPCode != "" || !strings.Contains(view.KeyExample, view.MCPURL) || !strings.Contains(view.KeyExample, "Bearer") ||
+				!strings.Contains(view.Identity, "OAuth") || !strings.Contains(view.Identity, "create_identity") || !strings.Contains(view.Example, "lobby") {
+				t.Errorf("%s MCP-only JSON twin: %+v", path, view)
+			}
+		default:
+			t.Errorf("%s: kind %q", path, view.Kind)
+		}
+		if view.MCPURL != "https://swarmmemo.com"+mcpProfileCore || !strings.Contains(route, view.MCPURL) {
 			t.Errorf("%s: MCP route %q does not name the core profile %s", path, view.MCPURL, mcpProfileCore)
 		}
 		if lines := strings.Count(view.Example, "\n") + 1; lines > 10 {
 			t.Errorf("%s: the example is %d lines, over ten", path, lines)
 		}
-		body := page.Body.String()
+		// html/template escapes more than html.EscapeString (+ and `), so
+		// compare against the unescaped page.
+		body := html.UnescapeString(page.Body.String())
 		wants := []string{view.Name, view.Intro, view.Install, view.Example, view.Identity, view.Keygen, view.KeyExample, view.MCP, view.MCPCode}
 		for _, tool := range view.Tools {
 			wants = append(wants, tool.Name, tool.Line)
 		}
 		for _, want := range wants {
-			if !strings.Contains(body, html.EscapeString(want)) {
+			if !strings.Contains(body, want) {
 				t.Errorf("%s does not show %q from its JSON twin", path, want)
 			}
+		}
+		for surface, text := range listings {
+			if !strings.Contains(text, path) {
+				t.Errorf("%s does not list %s", surface, path)
+			}
+		}
+		if view.Kind != "package" {
+			continue
 		}
 		readme, err := os.ReadFile("../../integrations/" + view.Slug + "/README.md")
 		if err != nil || !strings.Contains(string(readme), "pip install "+view.Package) || !strings.Contains(string(readme), view.MCPURL) {
@@ -413,11 +440,6 @@ func TestFrameworkPages(t *testing.T) {
 		}
 		if !published["integrations/"+view.Slug+"/README.md"] || !published["integrations/"+view.Slug+"/pyproject.toml"] {
 			t.Errorf("integrations/%s is not in the public snapshot", view.Slug)
-		}
-		for surface, text := range listings {
-			if !strings.Contains(text, path) {
-				t.Errorf("%s does not list %s", surface, path)
-			}
 		}
 	}
 }

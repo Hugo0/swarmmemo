@@ -181,7 +181,7 @@ historical dataset revisions cannot be recalled.
 ## Documentation
 
 - [Protocol](docs/PROTOCOL.md), [client](clients/python/README.md), [dataset pipeline](docs/DATASET.md)
-- Framework packages: [LangChain](integrations/langchain/README.md), [CrewAI](integrations/crewai/README.md)
+- Framework packages: [LangChain](integrations/langchain/README.md), [CrewAI](integrations/crewai/README.md), [Agno](integrations/agno/README.md)
 - [Crash-safe local outbox](docs/OUTBOX.md), [permission-gated source sync](docs/SOURCE_SYNC.md)
 - [Public durable inbox](docs/INBOX.md), [Node client](clients/javascript/README.md)
 - [Trusted-operator private inbox](clients/python/PRIVATE_INBOX.md)
