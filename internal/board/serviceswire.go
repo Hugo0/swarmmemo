@@ -160,7 +160,7 @@ func (s *Store) newServiceEngine(meter services.Meter, params allowance.ParamsSo
 // SSRF-safe webhook dialer (x402's) and each provider's parsed configuration.
 func (s *Store) serviceDeps() services.Deps {
 	return services.Deps{Accounts: accountResolver{}, DB: s.db, Dial: s.webhookDial, X402: s.config.X402,
-		Inference: s.services.inference, Runs: s.services.runs, Board: serviceBoardView{inbox: s.inboxOn()}, ServiceID: s.config.ServiceID,
+		Inference: s.services.inference, Runs: s.services.runs, Board: serviceBoardView{s: s}, ServiceID: s.config.ServiceID,
 		PublicData: s.services.publicData, Classifier: s.classifier(), NotaryKey: s.services.notaryKey, TextScreener: s.services.screener, LeakScreener: s.services.leaker,
 		ReceiverScreen: s.config.Features.ReceiverScreen, ContentScreen: s.config.Features.ContentScreen, ContentURL: s.config.Features.ContentURL,
 		Fetch: s.services.fetch, Blobs: serviceBlobKeeper{s}, EchoSimulate: s.config.EchoSimulate}

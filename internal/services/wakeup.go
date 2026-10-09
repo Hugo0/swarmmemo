@@ -792,6 +792,68 @@ func fireReceived(ctx context.Context, tx *sql.Tx, board BoardView, account stri
 	return nil
 }
 
+// WakeOnEntries fires, in tx (the transaction that wrote the entries),
+// each account's active personal wake-ups an inbox entry satisfies: on
+// reply, on mention, and on message (stored as a room wake-up on
+// messageRoom), registered before the entry and not past their until. It
+// returns the firings made; nothing while the wakeup service is off.
+// Bounded by the entries: at most WakeupsPerAccount firings each, and a
+// message makes at most RoomMembersMax+1 entries. It never takes the
+// clock's lock: the clock holds it while it waits for the one connection
+// this transaction holds.
+func (e *Engine) WakeOnEntries(ctx context.Context, tx *sql.Tx, wakes []EntryWake, now int64) (int, error) {
+	p, err := e.cfg.Registry.Lookup("wakeup")
+	if err != nil || len(wakes) == 0 {
+		return 0, nil
+	}
+	w, ok := p.(*wakeup)
+	if !ok || w.board == nil {
+		return 0, nil
+	}
+	pass := &wakePass{tx: tx, board: w.board, now: now, budget: int64(len(wakes)) * WakeupsPerAccount}
+	if pass.latest, err = w.board.LatestSeq(ctx, tx); err != nil {
+		return 0, err
+	}
+	for _, ew := range wakes {
+		var kinds []string
+		message := false
+		for _, on := range ew.On {
+			switch on {
+			case "reply", "mention":
+				kinds = append(kinds, on)
+			case "message":
+				message = true
+			}
+		}
+		if ew.Account == "" || len(kinds) == 0 && !message {
+			continue
+		}
+		query := "SELECT id,account,CASE WHEN kind='room' THEN 'message' ELSE kind END FROM wakeups WHERE state='active' AND account=? AND from_seq<? AND until>? AND ("
+		args := []any{ew.Account, ew.Before, now}
+		var clauses []string
+		if len(kinds) > 0 {
+			clauses = append(clauses, "kind IN (?"+strings.Repeat(",?", len(kinds)-1)+")")
+			for _, k := range kinds {
+				args = append(args, k)
+			}
+		}
+		if message {
+			clauses = append(clauses, "(kind='room' AND room=?)")
+			args = append(args, messageRoom)
+		}
+		matches, err := wakeMatches(ctx, tx, query+strings.Join(clauses, " OR ")+") ORDER BY created_at, id LIMIT ?", append(args, WakeupsPerAccount)...)
+		if err != nil {
+			return int(pass.fired), err
+		}
+		for _, m := range matches {
+			if err = pass.fire(ctx, m.id, m.account, m.kind, ew.Event, ew.Room, 0); err != nil {
+				return int(pass.fired), err
+			}
+		}
+	}
+	return int(pass.fired), nil
+}
+
 // budget is how many firings this pass may make under the minute bound.
 func (w *wakeup) budget(now int64) int64 {
 	if minute := now / 60; minute != w.minute {
@@ -995,7 +1057,21 @@ func (w *wakeup) scan(ctx context.Context, p *wakePass, after int64) (int64, err
 	if err != nil {
 		return after, err
 	}
+	// Personal wake-ups fire as their inbox entries are written
+	// (WakeOnEntries) when the board says so: the scan then matches room
+	// wake-ups only, and an edit, which wakes no room wake-up, is passed.
+	onEntries := false
+	if ew, ok := w.board.(EntryWaker); ok {
+		onEntries = ew.WakesOnEntries(ctx)
+	}
 	for _, ev := range events {
+		if onEntries {
+			if ev.Edit {
+				after = ev.Seq
+				continue
+			}
+			ev.ReplyToAuthor, ev.Addressed, ev.Mentions, ev.Conversation = "", "", nil, false
+		}
 		readable := map[string]bool{}
 		canRead := func(account string) (bool, error) {
 			ok, seen := readable[account]
@@ -1026,9 +1102,11 @@ func (w *wakeup) scan(ctx context.Context, p *wakePass, after int64) (int64, err
 			query += " OR (kind='mention' AND account IN (?" + strings.Repeat(",?", len(mentioned)-1) + "))"
 			args = append(args, mentioned...)
 		}
-		personal, err := wakeMatches(ctx, p.tx, query+") ORDER BY created_at, id", args...)
-		if err != nil {
-			return after, err
+		var personal []wakeMatch
+		if !onEntries {
+			if personal, err = wakeMatches(ctx, p.tx, query+") ORDER BY created_at, id", args...); err != nil {
+				return after, err
+			}
 		}
 		for _, m := range personal {
 			ok, err := canRead(m.account)

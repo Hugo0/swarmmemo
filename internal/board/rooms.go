@@ -326,9 +326,11 @@ func setHidden(ctx context.Context, tx *sql.Tx, eventID, visibility string, hide
 	// A hidden message notifies no one: webhook deliveries still queued for
 	// it, or for any of its versions, are dropped (an MCP Events delivery
 	// re-reads the post when it is sent, and updates.get leaves it out of
-	// its reasons).
+	// its reasons). Under INBOX_ENTRIES=read a delivery is keyed on the
+	// entry about the message (inbox_push.go), so those go too.
 	if hide {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE kind='event' AND event_id IN (SELECT id FROM events WHERE id=? OR origin=?)", eventID, eventID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM webhook_deliveries WHERE kind='event' AND (event_id IN (SELECT id FROM events WHERE id=? OR origin=?)
+ OR event_id IN (SELECT i.id FROM inbox_entries i WHERE i.subject IN (SELECT id FROM events WHERE id=? OR origin=?)))`, eventID, eventID, eventID, eventID); err != nil {
 			return err
 		}
 	}

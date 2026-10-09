@@ -189,6 +189,11 @@ func (s *Store) enqueueMCPWorkEvents(ctx context.Context, tx *sql.Tx, op string,
 			"work_id": w.ID, "room": root.Room, "reward": reward, "eligibility": w.Eligibility, "simulated": root.Kind == "simulation",
 			"requester": map[string]any{"fingerprint": a.id, "signed": true}, "deadline": rfc3339(w.Deadline)}}, now)
 	}
+	// Under INBOX_ENTRIES=read work.update goes from the work entries
+	// (inbox_push.go:pushWork).
+	if s.inboxRead(ctx) {
+		return nil
+	}
 	state := w.State
 	switch op {
 	case "work.reject":
@@ -273,6 +278,14 @@ func (s *Store) finalizeMCPEvent(ctx context.Context, d *webhookDelivery, now in
 		data["witnessed_at"] = rfc3339(draft.At)
 		agent, _ := data["agent"].(string)
 		data["links"] = map[string]any{"web": origin + "/me", "api": origin + "/api/agent/" + agent}
+	case "conversation.request":
+		// Under INBOX_ENTRIES=read a request is one event, when it is made,
+		// about the conversation (inbox_push.go); before, one per early
+		// message.
+		final, err := s.finalizeRequest(ctx, d, draft, data, origin, now)
+		if final != mcpSend || err != nil {
+			return "", final, err
+		}
 	default:
 		final, err := s.finalizePost(ctx, d, draft, data, origin, now)
 		if final != mcpSend || err != nil {
@@ -350,6 +363,31 @@ func (s *Store) finalizePost(ctx context.Context, d *webhookDelivery, draft mcpE
 			data["excerpt"], data["excerpt_truncated"] = excerpt(text, MCPEventExcerptChars)
 		}
 	}
+	return mcpSend, nil
+}
+
+// finalizeRequest fills a conversation.request payload: about a message
+// (queued per early message) as finalizePost does, or, queued from a
+// request entry, about the conversation: its room, who asks, when, and
+// where to read and answer it, never a body. A request no longer pending
+// sends nothing.
+func (s *Store) finalizeRequest(ctx context.Context, d *webhookDelivery, draft mcpEventDraft, data map[string]any, origin string, now int64) (mcpFinal, error) {
+	if !IsConversationRoom(draft.Subject) {
+		return s.finalizePost(ctx, d, draft, data, origin, now)
+	}
+	readable, err := s.mcpReadable(ctx, d.account, draft.Name, draft.Subject, "private")
+	if err != nil || !readable {
+		return mcpDrop, err
+	}
+	delete(data, "from")
+	data["room"], data["visibility"], data["created_at"] = draft.Subject, "conversation", rfc3339(draft.At)
+	if from, _ := draft.Data["from"].(string); from != "" {
+		ref := map[string]any{"fingerprint": from, "signed": true}
+		s.describeAgent(ctx, ref, from)
+		data["author"] = ref
+	}
+	data["links"] = map[string]any{"web": origin + "/messages", "api": origin + "/v1/command"}
+	data["read"] = "read_updates (MCP) or a signed updates.get: data.requests shows the request and its first messages; answer with accept_request"
 	return mcpSend, nil
 }
 

@@ -184,7 +184,12 @@ func mcpQueued(t *testing.T, s *Store) int64 {
 // only after screening allowed the post, a hidden post sends nothing, and
 // unsubscribe stops delivery.
 func TestMCPEventsReplyDeliveredOnceSigned(t *testing.T) {
+	forInboxModes(t, testMCPEventsReplyDeliveredOnceSigned)
+}
+
+func testMCPEventsReplyDeliveredOnceSigned(t *testing.T, mode InboxMode) {
 	s, r := mcpEventStore(t)
+	setInboxMode(s, mode)
 	alice, aliceKey, _ := hostedPrincipal(t, s, "alice-events")
 	sub, err := s.SubscribeMCPEvent(testContext, alice, subscribeRequest(t, "reply", nil, "https://example.com/hook", r.secret))
 	if err != nil {
@@ -273,7 +278,12 @@ func TestMCPEventsReplyDeliveredOnceSigned(t *testing.T) {
 // A private conversation's event names the message and carries no body,
 // whichever of message or request it is.
 func TestMCPEventsConversationCarriesNoBody(t *testing.T) {
+	forInboxModes(t, testMCPEventsConversationCarriesNoBody)
+}
+
+func testMCPEventsConversationCarriesNoBody(t *testing.T, mode InboxMode) {
 	s, r := mcpEventStore(t)
+	setInboxMode(s, mode)
 	alice, aliceKey, _ := hostedPrincipal(t, s, "alice-dm")
 	for _, name := range []string{"conversation.message", "conversation.request"} {
 		if _, err := s.SubscribeMCPEvent(testContext, alice, subscribeRequest(t, name, nil, "https://example.com/hook", r.secret)); err != nil {
@@ -298,8 +308,11 @@ func TestMCPEventsConversationCarriesNoBody(t *testing.T) {
 
 // Work events: a rewarded-only work.open filter skips unrewarded work, and
 // the requester hears its work claimed.
-func TestMCPEventsWork(t *testing.T) {
+func TestMCPEventsWork(t *testing.T) { forInboxModes(t, testMCPEventsWork) }
+
+func testMCPEventsWork(t *testing.T, mode InboxMode) {
 	s, r := mcpEventStore(t)
+	setInboxMode(s, mode)
 	alice, aliceKey, _ := hostedPrincipal(t, s, "alice-work")
 	carol, _, _ := hostedPrincipal(t, s, "carol-work")
 	if _, err := s.SubscribeMCPEvent(testContext, carol, subscribeRequest(t, "work.open", map[string]any{"kind": "rewarded"}, "https://example.com/open", r.secret)); err != nil {

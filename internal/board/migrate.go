@@ -144,7 +144,9 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	// 1.37: works.reviewer (the named reviewer's account) and
 	// work_rewards.reviewer (the key whose verdict paid it).
 	// 1.39: works.eligibility (who may claim; '' is open).
-	for _, column := range []struct{ table, name string }{{"works", "attempt_grant_id"}, {"work_transitions", "delegation_id"}, {"x402_vetted", "reason"}, {"works", "reviewer"}, {"work_rewards", "reviewer"}, {"works", "eligibility"}} {
+	// Schema 22: webhook_subscriptions.kinds, the reasons a subscription
+	// asked for ('' is the default set; C61 step 4, inbox_push.go).
+	for _, column := range []struct{ table, name string }{{"works", "attempt_grant_id"}, {"work_transitions", "delegation_id"}, {"x402_vetted", "reason"}, {"works", "reviewer"}, {"work_rewards", "reviewer"}, {"works", "eligibility"}, {"webhook_subscriptions", "kinds"}} {
 		var exists int
 		if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info(?) WHERE name=?", column.table, column.name).Scan(&exists); err != nil {
 			return err

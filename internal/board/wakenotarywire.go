@@ -27,9 +27,18 @@ const (
 	NotaryPerAccountDay = services.NotaryPerAccountDay
 )
 
-// serviceBoardView is services.BoardView over the store's tables.
-// inbox is INBOX_ENTRIES: whether AddInboxEntry writes (inbox.go).
-type serviceBoardView struct{ inbox bool }
+// serviceBoardView is services.BoardView over the store's tables. s, when
+// set, is the store whose INBOX_ENTRIES decides whether AddInboxEntry writes
+// (inbox.go) and whether personal wake-ups fire on entries (inbox_push.go);
+// without it the view is off.
+type serviceBoardView struct{ s *Store }
+
+// WakesOnEntries is services.EntryWaker: under INBOX_ENTRIES=read personal
+// wake-ups fire as entries are written, and the clock matches room
+// wake-ups only.
+func (v serviceBoardView) WakesOnEntries(ctx context.Context) bool {
+	return v.s != nil && v.s.inboxRead(ctx)
+}
 
 func (serviceBoardView) LatestSeq(ctx context.Context, q allowance.Querier) (int64, error) {
 	var seq int64
@@ -43,7 +52,10 @@ func (serviceBoardView) LatestSeq(ctx context.Context, q allowance.Querier) (int
 // a mention an earlier version already made is not repeated; an edit
 // concerns no one else. The author is empty for an anonymous message, so it
 // never counts as the watcher's own.
-func (serviceBoardView) EventsAfter(ctx context.Context, q allowance.Querier, after int64, limit int) ([]services.BoardEvent, error) {
+func (v serviceBoardView) EventsAfter(ctx context.Context, q allowance.Querier, after int64, limit int) ([]services.BoardEvent, error) {
+	if v.WakesOnEntries(ctx) {
+		return roomEventsAfter(ctx, q, after, limit)
+	}
 	rows, err := q.QueryContext(ctx, `SELECT e.seq,e.id,e.room,CASE WHEN e.public_key='' THEN '' ELSE e.account END,
  coalesce((SELECT CASE WHEN p.public_key='' THEN '' ELSE p.account END FROM events p WHERE p.id=e.reply_to AND e.reply_to<>''),''),
  CASE WHEN e.recipient='' THEN '' ELSE coalesce((SELECT i.account FROM identities i WHERE i.id=e.recipient),e.recipient) END, e.text, e.supersedes<>'', e.origin
@@ -90,6 +102,26 @@ func (serviceBoardView) EventsAfter(ctx context.Context, q allowance.Querier, af
 		}
 	}
 	return out, nil
+}
+
+// roomEventsAfter is EventsAfter while personal wake-ups fire on entries:
+// the originals only, with their room and author, all a room wake-up reads.
+func roomEventsAfter(ctx context.Context, q allowance.Querier, after int64, limit int) ([]services.BoardEvent, error) {
+	rows, err := q.QueryContext(ctx, `SELECT e.seq,e.id,e.room,CASE WHEN e.public_key='' THEN '' ELSE e.account END
+ FROM events e WHERE e.seq>? AND e.hidden=0 AND e.supersedes='' ORDER BY e.seq LIMIT ?`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []services.BoardEvent
+	for rows.Next() {
+		var ev services.BoardEvent
+		if err = rows.Scan(&ev.Seq, &ev.ID, &ev.Room, &ev.Author); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
 }
 
 // editMentions is the accounts an edit newly mentioned, as it recorded them.

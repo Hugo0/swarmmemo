@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// mentionReasons is each webhook delivery's event ID and reason for one
+// mentionReasons is each webhook delivery's message ID and reason for one
 // subscription, in queue order.
 func mentionReasons(t *testing.T, s *Store, subscription string) map[string]string {
 	t.Helper()
@@ -19,11 +19,16 @@ func mentionReasons(t *testing.T, s *Store, subscription string) map[string]stri
 		}
 		var body struct {
 			Reason string `json:"reason"`
+			Event  struct {
+				ID string `json:"id"`
+			} `json:"event"`
 		}
 		if err := json.Unmarshal([]byte(row["body"]), &body); err != nil {
 			t.Fatal(err)
 		}
-		out[row["event"]] = body.Reason
+		// The message it is about: the queue's key is the message id, or
+		// under INBOX_ENTRIES=read the entry id.
+		out[body.Event.ID] = body.Reason
 	}
 	return out
 }
@@ -41,7 +46,11 @@ func handleKey(t *testing.T, s *Store, n byte, handle string) ed25519.PrivateKey
 // room's non-members and hidden messages notify no one; at most
 // MentionsMax agents per message; an edit notifies only the mentions it adds.
 func TestMentionsReachUpdatesAndWebhooks(t *testing.T) {
-	s := openTest(t, updatesConfig())
+	forInboxModes(t, testMentionsReachUpdatesAndWebhooks)
+}
+
+func testMentionsReachUpdatesAndWebhooks(t *testing.T, mode InboxMode) {
+	s := openTest(t, withInbox(updatesConfig(), mode))
 	alice := handleKey(t, s, 1, "alice")
 	bob := handleKey(t, s, 2, "bob")
 	carol := handleKey(t, s, 3, "carol")
@@ -129,8 +138,11 @@ func TestMentionsReachUpdatesAndWebhooks(t *testing.T) {
 
 // The same mention reaches an MCP Events mention subscription, once, and an
 // edit that adds it notifies once.
-func TestMentionsReachMCPEvents(t *testing.T) {
+func TestMentionsReachMCPEvents(t *testing.T) { forInboxModes(t, testMentionsReachMCPEvents) }
+
+func testMentionsReachMCPEvents(t *testing.T, mode InboxMode) {
 	s, r := mcpEventStore(t)
+	setInboxMode(s, mode)
 	alice, _, _ := hostedPrincipal(t, s, "alice-events")
 	if _, err := s.SubscribeMCPEvent(testContext, alice, subscribeRequest(t, "mention", nil, "https://example.com/hook", r.secret)); err != nil {
 		t.Fatal(err)
@@ -156,7 +168,13 @@ func TestMentionsReachMCPEvents(t *testing.T) {
 
 // Wake-ups on mention read the same parse: a code span does not wake.
 func TestMentionWakeupUsesTheSameParse(t *testing.T) {
+	forInboxModes(t, testMentionWakeupUsesTheSameParse)
+}
+
+func testMentionWakeupUsesTheSameParse(t *testing.T, mode InboxMode) {
 	s := openWakeTest(t, "wakeup")
+	setInboxMode(s, mode)
+	wakeWork := wakeFired
 	alice := handleKey(t, s, 1, "alice")
 	bob := handleKey(t, s, 2, "bob")
 	wakeWork(t, s)
@@ -221,7 +239,13 @@ func TestMentionAfterManyUnknownHandles(t *testing.T) {
 // message that already made it, wakes no one again, and an edit wakes no
 // room wake-up.
 func TestMentionWakeupFiresOnTheEditThatAddsIt(t *testing.T) {
+	forInboxModes(t, testMentionWakeupFiresOnTheEditThatAddsIt)
+}
+
+func testMentionWakeupFiresOnTheEditThatAddsIt(t *testing.T, mode InboxMode) {
 	s := openWakeTest(t, "wakeup")
+	setInboxMode(s, mode)
+	wakeWork := wakeFired
 	alice := handleKey(t, s, 1, "alice")
 	bob := handleKey(t, s, 2, "bob")
 	carol := handleKey(t, s, 3, "carol")

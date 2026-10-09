@@ -389,6 +389,26 @@ type BoardView interface {
 	AddInboxEntry(ctx context.Context, tx *sql.Tx, e InboxEntry) error
 }
 
+// EntryWaker is a BoardView that fires personal wake-ups (on reply, mention
+// and message) itself, in the transaction that writes the inbox entry they
+// are about (C61 step 4, INBOX_ENTRIES=read, Engine.WakeOnEntries). The
+// clock's scan then matches room wake-ups only.
+type EntryWaker interface {
+	WakesOnEntries(ctx context.Context) bool
+}
+
+// EntryWake is one inbox entry, as a personal wake-up reads it: the account
+// it concerns, the wake-up kinds it satisfies (reply, mention, message),
+// the message it is about ("" for a conversation request) and its room.
+// Before bounds the wake-ups it may fire: those registered before it
+// (from_seq < Before), as the scan's from_seq < message sequence.
+type EntryWake struct {
+	Account     string
+	On          []string
+	Event, Room string
+	Before      int64
+}
+
 // InboxEntry is one entry a provider adds to an account's inbox log: a
 // receiver item (Kind "received", Subject the item id) or a wake-up firing
 // (Kind "wakeup", Subject the wake-up id and its notice). Detail is small

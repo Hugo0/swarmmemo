@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS leases (
 // 21: tlog_promises, the signed inclusion promises of public posts (C95,
 // logpromise.go). It is additive, but a schema-20 binary would post without
 // promising, and GET /api/log/promise would lose the promises already given.
-const SchemaVersion = 21
+const SchemaVersion = 22
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.

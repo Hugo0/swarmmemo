@@ -941,9 +941,16 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err = s.enqueueMCPWorkEvents(ctx, tx, c.Operation, w, root, cmp.Or(w.Worker, worker), reward, a, now); err != nil {
 		return Result{}, err
 	}
-	// The inbox entry log (C61): the same parties, and a named reviewer.
-	if err = s.recordInbox(ctx, tx, workInboxSource(c.Operation, w, root.Room, cmp.Or(w.Worker, worker), a, now)); err != nil {
+	// The inbox entry log (C61): the same parties, and a named reviewer;
+	// under INBOX_ENTRIES=read work.update is pushed from those entries.
+	entries, err := s.recordInbox(ctx, tx, workInboxSource(c.Operation, w, root.Room, cmp.Or(w.Worker, worker), a, now))
+	if err != nil {
 		return Result{}, err
+	}
+	if s.inboxRead(ctx) {
+		if err = s.pushWork(ctx, tx, c.Operation, w, root, cmp.Or(w.Worker, worker), reward, a, entries, now); err != nil {
+			return Result{}, err
+		}
 	}
 	// A verdict (or a cancel) answers the review the submit asked for (C71).
 	if c.Operation == "work.accept" || c.Operation == "work.reject" || c.Operation == "work.cancel" {

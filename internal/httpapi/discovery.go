@@ -87,6 +87,19 @@ func (s *Server) capabilitiesWith(catalog []services.Entry) map[string]any {
 	caps["gives"] = web.Gives(s.cfg.Features, catalog)
 	caps["personal_assistants"] = s.assistantCapabilities()
 	caps["core_profile"] = s.coreCapabilities()
+	if s.cfg.Features.InboxEntries == board.InboxRead {
+		// C61 step 4: push is a transport of the inbox entry log.
+		caps["push_delivery"].(map[string]any)["inbox"] = map[string]any{
+			"kinds": board.WebhookKinds, "default_kinds": board.WebhookDefaultKinds,
+			"data":         `{"schema":1,"url":"https://...","kinds":["reply","work"]}`,
+			"delivery":     "one per inbox entry and subscription, carrying entry {id, kind, reasons, subject, room, actor, created_at, detail}; room_activity is not an entry",
+			"opt_in":       "received, wakeup, work and witness arrive only for a subscription whose kinds name them, with entry and no event",
+			"request":      "once, when it is made, with entry and no event",
+			"dedupe":       "X-SwarmMemo-Delivery; entry.id names what it is about",
+			"instructions": "/protocol.md#push-delivery-webhooks",
+		}
+		caps["mcp_events"].(map[string]any)["inbox"] = "personal events (reply, mention, conversation.message, conversation.request, work.update, identity.witnessed) are sent from inbox entries, one per entry; conversation.request once, when it is made"
+	}
 	// free_credit is the offer /for-agents and /llms.txt lead with; absent
 	// while the store makes none.
 	if offer := s.freeCredit(); offer != nil {

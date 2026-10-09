@@ -290,10 +290,17 @@ func (s *Store) reachMember(ctx context.Context, tx *sql.Tx, conv conversationRo
 	}
 	// A request is an entry in the recipient's inbox log (C61), waiting for
 	// an answer; only the recipient's own reads ever see it.
+	// Under INBOX_ENTRIES=read it is pushed once, now (inbox_push.go).
 	if state == memberRequested {
-		if err = s.recordInbox(ctx, tx, inboxSource{kind: inboxRequest, account: recipient, subject: conv.Room, room: conv.Room,
-			actor: signedActor(a), actorAccount: a.account, at: now, needsAnswer: true}); err != nil {
+		entries, err := s.recordInbox(ctx, tx, inboxSource{kind: inboxRequest, account: recipient, subject: conv.Room, room: conv.Room,
+			actor: signedActor(a), actorAccount: a.account, at: now, needsAnswer: true})
+		if err != nil {
 			return "", err
+		}
+		if s.inboxRead(ctx) {
+			if err = s.pushRequest(ctx, tx, entries, a, now); err != nil {
+				return "", err
+			}
 		}
 	}
 	if postage > 0 {

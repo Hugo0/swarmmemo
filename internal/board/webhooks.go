@@ -89,6 +89,50 @@ func webhookError(code string) error {
 	return problem(400, "invalid_webhook", fmt.Sprintf("Data must be a strict schema-1 JSON object with an https URL of up to %d bytes, no credentials, no fragment and no port other than 443.", WebhookMaxURLBytes))
 }
 
+// webhookKindsError refuses a kinds list that is not a non-empty list of
+// distinct WebhookKinds.
+func webhookKindsError() error {
+	return problem(400, "invalid_webhook", "kinds is a list of distinct reasons from: "+strings.Join(WebhookKinds, ", ")+"; leave it out for "+strings.Join(WebhookDefaultKinds, ", ")+".")
+}
+
+// encodeWebhookKinds is kinds as stored: comma-separated in WebhookKinds
+// order; "" for none given (the default set).
+func encodeWebhookKinds(kinds []string) (string, error) {
+	if kinds == nil {
+		return "", nil
+	}
+	if len(kinds) == 0 || len(kinds) > len(WebhookKinds) {
+		return "", webhookKindsError()
+	}
+	var out []string
+	for _, k := range WebhookKinds {
+		n := 0
+		for _, got := range kinds {
+			if got == k {
+				n++
+			}
+		}
+		if n > 1 {
+			return "", webhookKindsError()
+		}
+		if n == 1 {
+			out = append(out, k)
+		}
+	}
+	if len(out) != len(kinds) {
+		return "", webhookKindsError()
+	}
+	return strings.Join(out, ","), nil
+}
+
+// webhookKindsList is a subscription's stored kinds as the list it receives.
+func webhookKindsList(stored string) []string {
+	if stored == "" {
+		return append([]string{}, WebhookDefaultKinds...)
+	}
+	return strings.Split(stored, ",")
+}
+
 // publicWebhookIP is the single address decision, shared with every other
 // outbound request through internal/safenet.
 func publicWebhookIP(ip net.IP) error {
@@ -156,53 +200,61 @@ func scanWebhook(row scanner, extra ...any) (webhookSubscription, error) {
 	return s, err
 }
 
-// parseWebhookData accepts only {"schema":1,"url":"https://..."}; an unknown or
+// parseWebhookData accepts only {"schema":1,"url":"https://..."}, and with
+// withKinds (INBOX_ENTRIES=read) an optional "kinds" list; an unknown or
 // repeated field is an error rather than something silently ignored, matching
-// how peer cards and delegation contexts are parsed.
-func parseWebhookData(raw string) (string, error) {
+// how peer cards and delegation contexts are parsed. kinds is as stored
+// (encodeWebhookKinds): "" when not given.
+func parseWebhookData(raw string, withKinds bool) (string, string, error) {
 	if len(raw) > 1024 || !utf8.ValidString(raw) {
-		return "", webhookError("invalid_webhook")
+		return "", "", webhookError("invalid_webhook")
 	}
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
-		return "", webhookError("invalid_webhook")
+		return "", "", webhookError("invalid_webhook")
 	}
 	seen := map[string]bool{}
 	schema, target := 0, ""
+	var kinds []string
 	for decoder.More() {
 		token, err = decoder.Token()
 		name, ok := token.(string)
 		if err != nil || !ok || seen[name] {
-			return "", webhookError("invalid_webhook")
+			return "", "", webhookError("invalid_webhook")
 		}
 		seen[name] = true
 		var value json.RawMessage
 		if err = decoder.Decode(&value); err != nil || string(value) == "null" {
-			return "", webhookError("invalid_webhook")
+			return "", "", webhookError("invalid_webhook")
 		}
-		switch name {
-		case "schema":
+		switch {
+		case name == "schema":
 			err = json.Unmarshal(value, &schema)
-		case "url":
+		case name == "url":
 			err = json.Unmarshal(value, &target)
+		case name == "kinds" && withKinds:
+			if json.Unmarshal(value, &kinds) != nil || kinds == nil {
+				return "", "", webhookKindsError()
+			}
 		default:
-			return "", webhookError("invalid_webhook")
+			return "", "", webhookError("invalid_webhook")
 		}
 		if err != nil {
-			return "", webhookError("invalid_webhook")
+			return "", "", webhookError("invalid_webhook")
 		}
 	}
 	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
-		return "", webhookError("invalid_webhook")
+		return "", "", webhookError("invalid_webhook")
 	}
 	if _, err = decoder.Token(); !errors.Is(err, io.EOF) {
-		return "", webhookError("invalid_webhook")
+		return "", "", webhookError("invalid_webhook")
 	}
-	if len(seen) != 2 || schema != 1 {
-		return "", webhookError("invalid_webhook")
+	if !seen["schema"] || !seen["url"] || schema != 1 {
+		return "", "", webhookError("invalid_webhook")
 	}
-	return target, nil
+	stored, err := encodeWebhookKinds(kinds)
+	return target, stored, err
 }
 
 func webhookSecret() string {
@@ -265,7 +317,7 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 		}
 		return Result{Data: map[string]any{"deleted": true, "subscription_id": c.Target}}, nil
 	}
-	target, err := parseWebhookData(c.Data)
+	target, kinds, err := parseWebhookData(c.Data, s.inboxRead(ctx))
 	if err != nil {
 		return Result{}, err
 	}
@@ -291,11 +343,11 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 	}
 	id, secret, nonce := randomID(), webhookSecret(), randomID()
 	if sameURL > 0 {
-		_, err = tx.ExecContext(ctx, "UPDATE webhook_subscriptions SET id=?,created_by=?,secret=?,state='pending',challenge=?,created_at=?,confirmed_at=0,disabled_at=0,failures=0,last_error='' WHERE account=? AND url=? AND "+webhookExpiredSQL,
-			id, a.id, secret, nonce, now, a.account, u.String())
+		_, err = tx.ExecContext(ctx, "UPDATE webhook_subscriptions SET id=?,created_by=?,secret=?,state='pending',challenge=?,created_at=?,confirmed_at=0,disabled_at=0,failures=0,last_error='',kinds=? WHERE account=? AND url=? AND "+webhookExpiredSQL,
+			id, a.id, secret, nonce, now, kinds, a.account, u.String())
 	} else {
-		_, err = tx.ExecContext(ctx, "INSERT INTO webhook_subscriptions(id,account,created_by,url,secret,state,challenge,created_at) VALUES(?,?,?,?,?,'pending',?,?)",
-			id, a.account, a.id, u.String(), secret, nonce, now)
+		_, err = tx.ExecContext(ctx, "INSERT INTO webhook_subscriptions(id,account,created_by,url,secret,state,challenge,created_at,kinds) VALUES(?,?,?,?,?,'pending',?,?,?)",
+			id, a.account, a.id, u.String(), secret, nonce, now, kinds)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -316,13 +368,17 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 	if err = audit(ctx, tx, c.Operation, a.id, id, "webhook subscription created, pending endpoint echo", now); err != nil {
 		return Result{}, err
 	}
-	return Result{Data: map[string]any{
+	data := map[string]any{
 		"subscription_id": id, "url": u.String(), "state": "pending", "secret": secret,
 		"signature":       "hex HMAC-SHA256 over X-SwarmMemo-Timestamp + \".\" + the exact body bytes, sent as X-SwarmMemo-Signature: v1=...",
 		"challenge":       "A challenge POST is queued; echo its nonce in a 2xx response body to activate this subscription.",
 		"pending_expires": now + WebhookPendingTTL,
 		"notice":          "This secret is shown once. Deliveries carry identifiers only, never message text; fetch the message with your own key.",
-	}}, nil
+	}
+	if s.inboxRead(ctx) {
+		data["kinds"] = webhookKindsList(kinds)
+	}
+	return Result{Data: data}, nil
 }
 
 // queueDelivery is INSERT OR IGNORE against UNIQUE(subscription,event_id): one
@@ -341,7 +397,7 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 		return Result{}, webhookError("webhook_delegated")
 	}
 	rows, err := tx.QueryContext(ctx, "SELECT "+webhookColumns+","+deliveryStatusColumns("webhook_deliveries", "webhook_subscriptions")+
-		" FROM webhook_subscriptions WHERE account=? ORDER BY created_at,id LIMIT ?", a.account, limitValue(c.Limit))
+		",kinds FROM webhook_subscriptions WHERE account=? ORDER BY created_at,id LIMIT ?", a.account, limitValue(c.Limit))
 	if err != nil {
 		return Result{}, err
 	}
@@ -349,7 +405,8 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 	list := []map[string]any{}
 	for rows.Next() {
 		var status deliveryStatus
-		w, err := scanWebhook(rows, &status.pending, &status.attempts, &status.nextAt)
+		var kinds string
+		w, err := scanWebhook(rows, &status.pending, &status.attempts, &status.nextAt, &kinds)
 		if err != nil {
 			return Result{}, err
 		}
@@ -370,6 +427,9 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 			item["pending_expires"] = w.Created + WebhookPendingTTL
 		}
 		status.add(item)
+		if s.inboxRead(ctx) {
+			item["kinds"] = webhookKindsList(kinds)
+		}
 		list = append(list, item)
 	}
 	if err = rows.Err(); err != nil {

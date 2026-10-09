@@ -112,11 +112,12 @@ type inboxSource struct {
 
 type workParty struct{ account, role string }
 
-// inboxEntry is one row the resolver decided on.
+// inboxEntry is one row the resolver decided on; id is set once it is
+// written (addInboxEntries).
 type inboxEntry struct {
-	account, kind, subject, room, actor, detail string
-	reasons                                     []string
-	needsAnswer                                 bool
+	id, account, kind, subject, room, actor, detail string
+	reasons                                         []string
+	needsAnswer                                     bool
 }
 
 // concerned is the one "who is concerned" rule: the entries src makes, at
@@ -276,26 +277,29 @@ func encodeInboxDetail(detail map[string]any) string {
 // addInboxEntries inserts entries in tx; an entry already there (the same
 // account, kind and subject) is kept as it is, so a repeat or a backfill
 // over live rows changes nothing. eventSeq is the newest message's sequence
-// the entries follow (-1: read it now), created the time they happened.
-func addInboxEntries(ctx context.Context, tx *sql.Tx, entries []inboxEntry, eventSeq, created int64) (int, error) {
+// the entries follow (-1: read it now), created the time they happened. It
+// returns the entries it wrote, with their ids: what push delivers
+// (inbox_push.go), once per entry.
+func addInboxEntries(ctx context.Context, tx *sql.Tx, entries []inboxEntry, eventSeq, created int64) ([]inboxEntry, error) {
 	if len(entries) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	if eventSeq < 0 {
 		if err := tx.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM events").Scan(&eventSeq); err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
-	added := 0
+	var added []inboxEntry
 	for _, e := range entries {
+		e.id = randomID()
 		res, err := tx.ExecContext(ctx, `INSERT INTO inbox_entries(id,account,kind,reasons,subject,room,actor,event_seq,detail,needs_answer,created_at)
  VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account,kind,subject) DO NOTHING`,
-			randomID(), e.account, e.kind, strings.Join(e.reasons, ","), e.subject, e.room, e.actor, eventSeq, e.detail, e.needsAnswer, created)
+			e.id, e.account, e.kind, strings.Join(e.reasons, ","), e.subject, e.room, e.actor, eventSeq, e.detail, e.needsAnswer, created)
 		if err != nil {
 			return added, err
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
-			added++
+			added = append(added, e)
 		}
 	}
 	return added, nil
@@ -305,19 +309,21 @@ func addInboxEntries(ctx context.Context, tx *sql.Tx, entries []inboxEntry, even
 func (s *Store) inboxOn() bool { return s.config.Features.InboxEntries != InboxOff }
 
 // recordInbox is every producer's hook: in its own transaction, the entries
-// src makes, while INBOX_ENTRIES is on.
-func (s *Store) recordInbox(ctx context.Context, tx *sql.Tx, src inboxSource) error {
+// src makes, while INBOX_ENTRIES is on. It returns the entries written, for
+// the producer to push under INBOX_ENTRIES=read (inbox_push.go).
+func (s *Store) recordInbox(ctx context.Context, tx *sql.Tx, src inboxSource) ([]inboxEntry, error) {
 	if !s.inboxOn() {
-		return nil
+		return nil, nil
 	}
 	entries, err := concerned(ctx, tx, src)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if _, err = addInboxEntries(ctx, tx, entries, -1, src.at); err != nil {
-		return err
+	added, err := addInboxEntries(ctx, tx, entries, -1, src.at)
+	if err != nil {
+		return nil, err
 	}
-	return autoDisposePost(ctx, tx, src)
+	return added, autoDisposePost(ctx, tx, src)
 }
 
 // autoDisposePost is a signed message's own answer: a reply marks the
@@ -386,8 +392,10 @@ func witnessInboxKey(witness, agent, kind, value string, at int64) string {
 
 // AddInboxEntry is services.BoardView's: a provider's entry (a receiver
 // item, a wake-up firing) in its own transaction.
+// Under INBOX_ENTRIES=read the entry is pushed to the webhook
+// subscriptions that asked for its kind.
 func (v serviceBoardView) AddInboxEntry(ctx context.Context, tx *sql.Tx, e services.InboxEntry) error {
-	if !v.inbox {
+	if v.s == nil || !v.s.inboxOn() {
 		return nil
 	}
 	if e.Kind != inboxReceived && e.Kind != inboxWakeup {
@@ -397,7 +405,11 @@ func (v serviceBoardView) AddInboxEntry(ctx context.Context, tx *sql.Tx, e servi
 	if err != nil {
 		return err
 	}
-	_, err = addInboxEntries(ctx, tx, entries, -1, e.At)
+	added, err := addInboxEntries(ctx, tx, entries, -1, e.At)
+	if err != nil || !v.s.inboxRead(ctx) {
+		return err
+	}
+	_, err = v.s.webhookEntries(ctx, tx, added, nil, e.At)
 	return err
 }
 
@@ -606,7 +618,7 @@ func backfillPosts(ctx context.Context, tx *sql.Tx, after, cutoff int64) (int64,
 		if err = autoDisposePost(ctx, tx, p.src); err != nil {
 			return after, 0, 0, err
 		}
-		added += n
+		added += len(n)
 		after = p.seq
 	}
 	return after, len(posts), added, nil
@@ -682,7 +694,7 @@ func backfillRows(ctx context.Context, tx *sql.Tx, rows *sql.Rows, after int64, 
 		if err != nil {
 			return after, 0, 0, err
 		}
-		added += n
+		added += len(n)
 		after = it.row
 	}
 	return after, len(items), added, nil

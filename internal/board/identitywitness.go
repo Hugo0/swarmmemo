@@ -260,12 +260,20 @@ func (s *Store) witnessIdentityLink(ctx context.Context, tx *sql.Tx, c Command, 
 	if err = audit(ctx, tx, c.Operation, a.id, d.Agent, "identity link witnessed "+d.Verdict+": "+d.Kind+" "+value, now); err != nil {
 		return Result{}, err
 	}
-	if err = s.enqueueMCPWitnessEvent(ctx, tx, account, d.Agent, d.Kind, value, d.Verdict, a, now); err != nil {
+	// The inbox entry log (C61): the witnessed agent's entry. Under
+	// INBOX_ENTRIES=read identity.witnessed is pushed from it; before, from
+	// its own match.
+	entries, err := s.recordInbox(ctx, tx, inboxSource{kind: inboxWitness, account: account, subject: witnessInboxKey(a.id, d.Agent, d.Kind, value, now),
+		actor: a.id, actorAccount: a.account, at: now, detail: map[string]any{"kind": d.Kind, "verdict": d.Verdict}})
+	if err != nil {
 		return Result{}, err
 	}
-	// The inbox entry log (C61): the witnessed agent's entry.
-	if err = s.recordInbox(ctx, tx, inboxSource{kind: inboxWitness, account: account, subject: witnessInboxKey(a.id, d.Agent, d.Kind, value, now),
-		actor: a.id, actorAccount: a.account, at: now, detail: map[string]any{"kind": d.Kind, "verdict": d.Verdict}}); err != nil {
+	if s.inboxRead(ctx) {
+		err = s.pushWitness(ctx, tx, entries, d.Agent, d.Kind, value, d.Verdict, a, now)
+	} else {
+		err = s.enqueueMCPWitnessEvent(ctx, tx, account, d.Agent, d.Kind, value, d.Verdict, a, now)
+	}
+	if err != nil {
 		return Result{}, err
 	}
 	data := map[string]any{"agent": d.Agent, "kind": d.Kind, "value": value, "link_state": state, "verdict": d.Verdict, "nonce": d.Nonce, "at": now, "replaced": replaced > 0, "fresh_for_nonce": false}

@@ -209,7 +209,11 @@ func TestWebhookCreationSpendsAllowance(t *testing.T) {
 // The three reasons must match what updates.get would have returned to the same
 // key, and the body must never carry text.
 func TestWebhookEnqueueFollowsUpdatesScopeAndCarriesNoText(t *testing.T) {
-	s := openTest(t, Config{})
+	forInboxModes(t, testWebhookEnqueueFollowsUpdatesScopeAndCarriesNoText)
+}
+
+func testWebhookEnqueueFollowsUpdatesScopeAndCarriesNoText(t *testing.T, mode InboxMode) {
+	s := openTest(t, withInbox(Config{}, mode))
 	subscriber, poster := keyFor(95), keyFor(96)
 	register(t, s, subscriber)
 	register(t, s, poster)
@@ -268,7 +272,11 @@ func TestWebhookEnqueueFollowsUpdatesScopeAndCarriesNoText(t *testing.T) {
 }
 
 func TestWebhookPrivateRoomNeedsCurrentMembership(t *testing.T) {
-	s := openTest(t, Config{})
+	forInboxModes(t, testWebhookPrivateRoomNeedsCurrentMembership)
+}
+
+func testWebhookPrivateRoomNeedsCurrentMembership(t *testing.T, mode InboxMode) {
+	s := openTest(t, withInbox(Config{}, mode))
 	owner, member := keyFor(97), keyFor(98)
 	register(t, s, owner)
 	register(t, s, member)
@@ -290,7 +298,11 @@ func TestWebhookPrivateRoomNeedsCurrentMembership(t *testing.T) {
 }
 
 func TestWebhookHourlyDeliveryCeiling(t *testing.T) {
-	s := openTest(t, Config{})
+	forInboxModes(t, testWebhookHourlyDeliveryCeiling)
+}
+
+func testWebhookHourlyDeliveryCeiling(t *testing.T, mode InboxMode) {
+	s := openTest(t, withInbox(Config{}, mode))
 	subscriber, poster := keyFor(99), keyFor(100)
 	register(t, s, subscriber)
 	register(t, s, poster)
@@ -311,7 +323,11 @@ func TestWebhookHourlyDeliveryCeiling(t *testing.T) {
 }
 
 func TestWebhookOnlyOneDeliveryPerEventPerSubscription(t *testing.T) {
-	s := openTest(t, Config{})
+	forInboxModes(t, testWebhookOnlyOneDeliveryPerEventPerSubscription)
+}
+
+func testWebhookOnlyOneDeliveryPerEventPerSubscription(t *testing.T, mode InboxMode) {
+	s := openTest(t, withInbox(Config{}, mode))
 	subscriber, poster := keyFor(101), keyFor(102)
 	register(t, s, subscriber)
 	register(t, s, poster)
@@ -324,4 +340,3 @@ func TestWebhookOnlyOneDeliveryPerEventPerSubscription(t *testing.T) {
 		t.Fatalf("one event produced %d deliveries", len(rows))
 	}
 }
-
