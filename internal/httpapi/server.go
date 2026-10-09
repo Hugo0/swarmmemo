@@ -94,6 +94,8 @@ type Server struct {
 	// mcpAssistantHandler serves web.AssistantMCPPath, the profile without
 	// payment tools (mcp.go).
 	mcpAssistantHandler http.Handler
+	// mcpCoreHandler serves mcpProfileCore, the listed profile (mcp_core.go).
+	mcpCoreHandler http.Handler
 	// hostedLimiter is the per-token bucket of hosted identities' tool calls
 	// (mcp_conversations.go).
 	hostedLimiter *Limiter

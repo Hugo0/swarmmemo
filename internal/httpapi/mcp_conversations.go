@@ -66,11 +66,11 @@ func withHostedToken(ctx context.Context, token string) context.Context {
 	return context.WithValue(ctx, hostedTokenKey{}, token)
 }
 
-// mcpPath splits an MCP request path into its profile path ("/mcp" or
-// web.AssistantMCPPath) and the hosted token a /t/TOKEN suffix carries. ok
+// mcpPath splits an MCP request path into its profile path ("/mcp",
+// web.AssistantMCPPath or mcpProfileCore) and the hosted token a /t/TOKEN suffix carries. ok
 // is false for any other path.
 func mcpPath(path string) (profile, token string, ok bool) {
-	for _, p := range []string{web.AssistantMCPPath, "/mcp"} {
+	for _, p := range []string{web.AssistantMCPPath, mcpProfileCore, "/mcp"} {
 		if path == p {
 			return p, "", true
 		}

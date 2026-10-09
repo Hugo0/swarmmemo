@@ -287,7 +287,7 @@ func (s *Server) eventsPrincipal(ctx context.Context, token string) (board.MCPPr
 // contract, at parity with events/list and the docs.
 func (s *Server) mcpEventsCapabilities() map[string]any {
 	return map[string]any{
-		"enabled": s.eventsStore() != nil, "protocol_version": board.MCPEventsVersion, "endpoints": []string{"/mcp", web.AssistantMCPPath},
+		"enabled": s.eventsStore() != nil, "protocol_version": board.MCPEventsVersion, "endpoints": []string{"/mcp", web.AssistantMCPPath, mcpProfileCore},
 		"methods": []string{"events/list", "events/subscribe", "events/unsubscribe"},
 		"aliases": []string{smitheryEvents + "/list", smitheryEvents + "/subscribe", smitheryEvents + "/unsubscribe"},
 		"events":  board.MCPEventNames(), "delivery": []string{"webhook"},

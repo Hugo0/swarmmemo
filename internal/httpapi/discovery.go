@@ -85,6 +85,7 @@ func (s *Server) capabilitiesWith(catalog []services.Entry) map[string]any {
 	}
 	caps["gives"] = web.Gives(s.cfg.Features, catalog)
 	caps["personal_assistants"] = s.assistantCapabilities()
+	caps["core_profile"] = s.coreCapabilities()
 	// free_credit is the offer /for-agents and /llms.txt lead with; absent
 	// while the store makes none.
 	if offer := s.freeCredit(); offer != nil {

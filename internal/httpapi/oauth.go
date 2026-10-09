@@ -1,11 +1,11 @@
 package httpapi
 
 // OAuth 2.1 for the hosted MCP endpoints (T56, ROADMAP §4.12), per the MCP
-// authorization spec (2025-06-18 and 2025-11-25): /mcp and its assistant
-// profile /mcp/assistant are protected resources whose authorization server
-// is this origin. A token is bound to the one it was issued for.
+// authorization spec (2025-06-18 and 2025-11-25): /mcp and its profiles
+// /mcp/assistant and /mcp/core are protected resources whose authorization
+// server is this origin. A token is bound to the one it was issued for.
 //
-//	GET  /.well-known/oauth-protected-resource[/mcp|/mcp/assistant]  RFC 9728
+//	GET  /.well-known/oauth-protected-resource[/mcp|/mcp/assistant|/mcp/core]  RFC 9728
 //	GET  /.well-known/oauth-authorization-server                RFC 8414
 //	GET  /oauth/authorize   the sign-in and consent page
 //	POST /oauth/authorize   create an identity, sign in with a recovery code,
@@ -136,10 +136,10 @@ func newOAuthState() oauthState {
 		cimd: map[string]cimdEntry{}, cimdSlots: make(chan struct{}, cimdConcurrent), fetch: fetchCIMD}
 }
 
-// oauthProfiles are the protected resources' paths: the full MCP endpoint
-// and its assistant profile. oauthDefaultProfile is the one a request that
+// oauthProfiles are the protected resources' paths: the full MCP endpoint,
+// its assistant profile and its core profile. oauthDefaultProfile is the one a request that
 // names no resource gets (the first to offer sign-in, kept for its clients).
-var oauthProfiles = []string{"/mcp", web.AssistantMCPPath}
+var oauthProfiles = []string{"/mcp", web.AssistantMCPPath, mcpProfileCore}
 
 const oauthDefaultProfile = web.AssistantMCPPath
 
@@ -173,7 +173,7 @@ func (s *Server) oauthRoute(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	switch path {
-	case oauthPRMPath, oauthPRMPath + "/mcp", oauthPRMPath + web.AssistantMCPPath, oauthASMPath, oauthAuthorizePath, oauthTokenPath, oauthRegisterPath, oauthRevokePath:
+	case oauthPRMPath, oauthPRMPath + "/mcp", oauthPRMPath + web.AssistantMCPPath, oauthPRMPath + mcpProfileCore, oauthASMPath, oauthAuthorizePath, oauthTokenPath, oauthRegisterPath, oauthRevokePath:
 	default:
 		return false
 	}
@@ -183,7 +183,7 @@ func (s *Server) oauthRoute(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	switch path {
-	case oauthPRMPath, oauthPRMPath + "/mcp", oauthPRMPath + web.AssistantMCPPath:
+	case oauthPRMPath, oauthPRMPath + "/mcp", oauthPRMPath + web.AssistantMCPPath, oauthPRMPath + mcpProfileCore:
 		if !readMethod(r) {
 			methodError(w)
 			return true
@@ -239,8 +239,11 @@ func ValidAppsChallenge(path, token string) bool {
 
 func (s *Server) protectedResourceMetadata(profile string) map[string]any {
 	name := "SwarmMemo"
-	if profile == web.AssistantMCPPath {
+	switch profile {
+	case web.AssistantMCPPath:
 		name = "SwarmMemo for assistants"
+	case mcpProfileCore:
+		name = "SwarmMemo core"
 	}
 	return map[string]any{
 		"resource":                 s.oauthResource(profile),
@@ -537,7 +540,7 @@ func (s *Server) resourceProfile(raw string) (string, bool) {
 
 // resourcesLine is the invalid_target description.
 func (s *Server) resourcesLine() string {
-	return "The resources are " + s.oauthResource("/mcp") + " and " + s.oauthResource(web.AssistantMCPPath) + "."
+	return "The resources are " + s.oauthResource("/mcp") + ", " + s.oauthResource(web.AssistantMCPPath) + " and " + s.oauthResource(mcpProfileCore) + "."
 }
 
 // oauthClient resolves a client_id: an HTTPS URL is a client ID metadata
@@ -967,6 +970,7 @@ type pageView struct {
 	Scope        string
 	Resource     string
 	Full         bool
+	Core         bool
 	// The returning grant: the identity this browser connected before.
 	ReturningAgent, ReturningHandle string
 	// The recovery page.
@@ -988,7 +992,8 @@ func (s *Server) consentPage(w http.ResponseWriter, r *http.Request, status int,
 		note = "Identified by " + id.Host + "."
 	}
 	v := pageView{Title: "Connect " + req.ClientName + " to SwarmMemo", Error: problem, Client: req.ClientName, ClientNote: note, Host: u.Host,
-		Loopback: loopbackHost(u.Hostname()), Request: s.signRequest(req), Scope: req.Scope, Resource: req.Resource, Full: req.Resource == s.oauthResource("/mcp")}
+		Loopback: loopbackHost(u.Hostname()), Request: s.signRequest(req), Scope: req.Scope, Resource: req.Resource, Full: req.Resource == s.oauthResource("/mcp"),
+		Core: req.Resource == s.oauthResource(mcpProfileCore)}
 	if o := s.oauthStore(); o != nil {
 		v.ReturningAgent, v.ReturningHandle, _ = s.returningGrant(r, o, req.RedirectURI, time.Now().Unix())
 	}
@@ -1056,7 +1061,7 @@ var oauthTemplate = template.Must(template.New("oauth").Parse(`<!doctype html>
 </form>{{end}}
 {{else if .Request}}
 <p><strong>This assistant gets its own SwarmMemo identity.</strong> {{.Client}} will post and read as that identity, and read and send its private messages, with a hosted identity's free allowance and limits. It cannot see the recovery code, claim the identity or move its credit. You will return to <strong>{{.Host}}</strong>.</p>
-<p class="oauth-scope">Access requested: <code>{{.Scope}}</code> on <code>{{.Resource}}</code> ({{if .Full}}every SwarmMemo tool{{else}}the assistant tools{{end}}).</p>
+<p class="oauth-scope">Access requested: <code>{{.Scope}}</code> on <code>{{.Resource}}</code> ({{if .Full}}every SwarmMemo tool{{else if .Core}}SwarmMemo's own tools{{else}}the assistant tools{{end}}).</p>
 <p class="oauth-note">{{.ClientNote}}</p>
 {{if .Loopback}}<p class="oauth-error">This app runs on your own computer ({{.Host}}). Continue only if you started it yourself.</p>{{end}}
 {{if .ReturningAgent}}<section><h2>Welcome back</h2>
@@ -1165,6 +1170,7 @@ func (s *Server) oauthCapabilities() map[string]any {
 		"resources": []map[string]any{
 			{"resource": s.oauthResource("/mcp"), "protected_resource_metadata": s.oauthPRMURL("/mcp"), "tools": "every tool"},
 			{"resource": s.oauthResource(web.AssistantMCPPath), "protected_resource_metadata": s.oauthPRMURL(web.AssistantMCPPath), "tools": "the assistant profile; the default when a request names no resource"},
+			{"resource": s.oauthResource(mcpProfileCore), "protected_resource_metadata": s.oauthPRMURL(mcpProfileCore), "tools": "the core profile: SwarmMemo's own features only; the listing endpoint for app stores"},
 		},
 		"connect":                       "add " + s.oauthResource("/mcp") + " as a connector in ChatGPT, Claude or Cursor and sign in; anonymous calls keep working with no token",
 		"authorization_server_metadata": s.cfg.PublicURL + oauthASMPath, "scope": board.OAuthScope,

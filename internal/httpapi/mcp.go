@@ -319,11 +319,25 @@ func (s *Server) mcpToolList() []mcpToolSpec {
 // one, and its catalogue. /mcp carries every enabled service (fullProfile);
 // the assistant profile (assistantProfile) is narrower, so its list_services
 // answer lists only its own catalogue and post_message ends with the
-// private-data rule.
+// private-data rule. The core profile (coreProfile, mcp_core.go) is the
+// listed one: SwarmMemo's own services only, descriptions free of model
+// instructions.
 type mcpProfile struct {
 	offer     *board.FreeCredit
 	catalog   []services.Entry
 	assistant bool
+	core      bool
+}
+
+// path is the profile's endpoint.
+func (p mcpProfile) path() string {
+	switch {
+	case p.core:
+		return mcpProfileCore
+	case p.assistant:
+		return web.AssistantMCPPath
+	}
+	return "/mcp"
 }
 
 func (s *Server) fullProfile(offer *board.FreeCredit) mcpProfile {
@@ -339,7 +353,7 @@ func (s *Server) assistantProfile() mcpProfile {
 // assistant-onboarding, F1). Anything but the store's own catalogue type
 // lists nothing: it fails closed.
 func (p mcpProfile) only(data map[string]any) map[string]any {
-	if !p.assistant || data == nil {
+	if !p.assistant && !p.core || data == nil {
 		return data
 	}
 	listed, _ := data["services"].([]services.Entry)
@@ -457,8 +471,13 @@ func (s *Server) mcpToolsWith(p mcpProfile, aliases bool) []mcpToolSpec {
 		}
 		// The assistant profile has no payment tools (its instructions say
 		// so, and directory rules restrict sold credits): top-ups are /mcp's.
-		if s.topupEnabled() && !p.assistant {
+		if s.topupEnabled() && !p.assistant && !p.core {
 			list = append(list, creditsTopupTool)
+		}
+	}
+	if p.core {
+		for i := range list {
+			list[i].Desc = coreDescription(list[i].Desc)
 		}
 	}
 	return list
@@ -522,6 +541,13 @@ func (s *Server) initMCP() {
 	// nothing in it changes while the process runs.
 	assistant := s.newMCPServer(s.assistantProfile(), s.assistantInstructions())
 	s.mcpAssistantHandler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return assistant }, &mcp.StreamableHTTPOptions{
+		Stateless: true, JSONResponse: true, MaxRequestBodyBytes: board.CommandBodyBytes,
+		DisableLocalhostProtection:   s.cfg.TrustLoopbackProxy,
+		PropagateRequestCancellation: true,
+	})
+	// So is the core profile (mcp_core.go).
+	core := s.newMCPServer(s.coreProfile(), s.coreInstructions())
+	s.mcpCoreHandler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return core }, &mcp.StreamableHTTPOptions{
 		Stateless: true, JSONResponse: true, MaxRequestBodyBytes: board.CommandBodyBytes,
 		DisableLocalhostProtection:   s.cfg.TrustLoopbackProxy,
 		PropagateRequestCancellation: true,
@@ -720,11 +746,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	// tools say which need it.
 	signIn := s.oauthStore() != nil
 	if signIn {
-		profile := "/mcp"
-		if p.assistant {
-			profile = web.AssistantMCPPath
-		}
-		server.AddReceivingMiddleware(s.oauthToolMeta(profile))
+		server.AddReceivingMiddleware(s.oauthToolMeta(p.path()))
 	}
 	// Discovery hints describe effects; they do not grant authority or relax the
 	// public-only command boundary below. Optional request_id means posting is
@@ -935,7 +957,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	if s.hostedStore() != nil {
 		s.addHostedTools(server, tool)
 		s.addHostedServiceTools(server, tool, p.catalog)
-		if s.topupEnabled() && !p.assistant {
+		if s.topupEnabled() && !p.assistant && !p.core {
 			s.addCreditsTopupTool(server, tool)
 		}
 	}
@@ -963,8 +985,11 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	}
 	s.countMCPInitialize(r)
 	handler := s.mcpHandler
-	if profile == web.AssistantMCPPath {
+	switch profile {
+	case web.AssistantMCPPath:
 		handler = s.mcpAssistantHandler
+	case mcpProfileCore:
+		handler = s.mcpCoreHandler
 	}
 	// The hosted token: the path's, else a bearer credential. Tools read it
 	// from the context; it is never a tool argument. A header token is
