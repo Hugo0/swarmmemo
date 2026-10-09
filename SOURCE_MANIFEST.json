@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "924dec816bd831399281c2211c46950a6e6d6380e3bd4abe2b3951a01d323d33",
+  "allowlist_sha256": "1d6f01b7ea524235fc7963bbc3fe87acae924e566707d7dc033778f55af6b3ef",
   "files": [
     {
       "mode": "0644",
@@ -2824,8 +2824,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp.go",
-      "sha256": "bf34da588ec882b411ae1f5f3f88654f776ed0ed202eae8c799397323154e871",
-      "size": 57274
+      "sha256": "15349aa88c0ff15614bd8274d1dc0fa0d80fbe056801d324aa1a288c2b91a1de",
+      "size": 57443
     },
     {
       "mode": "0644",
@@ -2874,6 +2874,18 @@
       "path": "internal/httpapi/mcp_hosted_services.go",
       "sha256": "caa436dc56d892611495bf5fbaf8a07dbec61759999b03b183434336a31af03f",
       "size": 13761
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/mcp_nullargs.go",
+      "sha256": "db8e5c2a7481eec874e19f63f84a76fa8f0612f8a02c2cb95bfa034589c51dbe",
+      "size": 4364
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/mcp_nullargs_test.go",
+      "sha256": "3b1bd3ccabf059e22d89f0e8b0d77733ed352d70ff71547629df4e3d76a80369",
+      "size": 2476
     },
     {
       "mode": "0644",

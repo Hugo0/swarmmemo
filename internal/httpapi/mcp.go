@@ -752,6 +752,9 @@ func catalogueToolNames(catalog []services.Entry) map[string]bool {
 
 func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "swarmmemo", Version: s.cfg.Version}, &mcp.ServerOptions{Instructions: instructions})
+	// Added first, so innermost: optional nulls are dropped just before the
+	// SDK validates the arguments (C125).
+	server.AddReceivingMiddleware(dropNullOptionalArgs())
 	server.AddReceivingMiddleware(structuredToolErrors(catalogueToolNames(p.catalog), s.toolMaxCostRequired))
 	// Sign-in (OAuth): refusals carry the challenge that starts it, and the
 	// tools say which need it.
