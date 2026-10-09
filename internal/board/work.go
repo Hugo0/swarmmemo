@@ -177,6 +177,11 @@ type WorkTransition struct {
 	ResultSHA256Signed bool   `json:"result_sha256_signed,omitempty"`
 	// Note marks a verdict the requester gave in a silent reviewer's place.
 	Note string `json:"note,omitempty"`
+	// Reviewer and PreviousReviewer are, on a work.reviewer.set, the
+	// fingerprints of the reviewer it named and of the one it replaced
+	// (empty when the work had none), both as the signed commands named them.
+	Reviewer         string `json:"reviewer,omitempty"`
+	PreviousReviewer string `json:"previous_reviewer,omitempty"`
 	// Checks is the per-property list a verdict (accept or reject) signed
 	// in its data (C97); absent when it sent none.
 	Checks []VerdictCheck `json:"checks,omitempty"`
@@ -197,6 +202,11 @@ type WorkVerdictChecks struct {
 // result undecided before the requester may decide in its place (still
 // before the deadline). The reviewer can decide until the requester does.
 const ReviewerSilenceDays = 3
+
+// WorkReviewerSet is the requester's command that names a new reviewer for
+// its work while the work is open or claimed (no result waiting for a
+// verdict). A held reviewer_fee stays held and goes to whoever reviews.
+const WorkReviewerSet = "work.reviewer.set"
 
 // reviewerSilence is ReviewerSilenceDays in seconds.
 const reviewerSilence = ReviewerSilenceDays * 86400
@@ -243,7 +253,7 @@ func workResultHashOp(operation string) bool {
 
 // workDataRule is the whole rule for work.* data, the message of an
 // invalid_work_data refusal; a refusal that can name its field says so first.
-const workDataRule = "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits, a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee, an eligibility (open, first_work, linked or new_agent) and a reward_note (one line, display only); submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text; accept and reject may add checks, the verifier's per-property list."
+const workDataRule = "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits, a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee, an eligibility (open, first_work, linked or new_agent) and a reward_note (one line, display only); work.reviewer.set takes reviewer, the new one's fingerprint; submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text; accept and reject may add checks, the verifier's per-property list."
 
 // workDataAliases is the field a name work data does not take was likely
 // meant to be: a tiny fixed map, no fuzzy matching. ttl is the command field
@@ -267,7 +277,9 @@ func workDataTakes(operation, name string) bool {
 	switch name {
 	case "schema", "generation":
 		return true
-	case "title", "capabilities", "reward", "reviewer", "reviewer_fee", "eligibility", "reward_note":
+	case "reviewer":
+		return operation == "work.create" || operation == WorkReviewerSet
+	case "title", "capabilities", "reward", "reviewer_fee", "eligibility", "reward_note":
 		return operation == "work.create"
 	case "result_sha256":
 		return workResultHashOp(operation)
@@ -376,6 +388,13 @@ func parseWorkData(raw string, operation string) (workData, error) {
 		want++
 	}
 	if seen["checks"] {
+		want++
+	}
+	if operation == WorkReviewerSet {
+		// The new reviewer is the command's whole point.
+		if !seen["reviewer"] {
+			return workData{}, problem(400, "invalid_work_data", WorkReviewerSet+" data names the new reviewer: reviewer, a 64-hex agent fingerprint. "+workDataRule)
+		}
 		want++
 	}
 	if create {
@@ -697,6 +716,11 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			allowed = state == "claimed" || state == "submitted" || state == "recovery_required"
 		case "work.cancel":
 			allowed = state == "open" || state == "claimed" || state == "submitted" || state == "recovery_required"
+		case WorkReviewerSet:
+			allowed = state == "open" || state == "claimed"
+			if !allowed && a.account == w.Requester {
+				return Result{}, problem(409, "work_state_conflict", "The reviewer can change only while the work is open or claimed: not once a result waits for a verdict, nor after the work is accepted, cancelled or past its deadline.")
+			}
 		}
 		if !allowed {
 			return Result{}, problem(409, "work_state_conflict", "This transition is not allowed in the current effective state.")
@@ -746,7 +770,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 				return Result{}, problem(403, "work_forbidden", "Only the requester's continuous account may perform this transition.")
 			}
 		}
-		if c.Operation != "work.claim" && c.Operation != "work.cancel" && (c.Amount != w.Fence || c.Amount < 0 || (c.Amount == 0 && state != "recovery_required")) {
+		if c.Operation != "work.claim" && c.Operation != "work.cancel" && c.Operation != WorkReviewerSet && (c.Amount != w.Fence || c.Amount < 0 || (c.Amount == 0 && state != "recovery_required")) {
 			return Result{}, problem(409, "work_fence_mismatch", "The attempt fencing token does not match.")
 		}
 		// A claim that names its result (target) submits it at once, so it
@@ -855,6 +879,20 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			w.ClaimExpires = 0
 		case "work.cancel":
 			w.State = "cancelled"
+		case WorkReviewerSet:
+			// The same checks as at create: registered, can read the room,
+			// no stake. Nor the worker holding the claim: it cannot judge
+			// its own result.
+			reviewer, e := workReviewer(ctx, tx, a, root.Room, d.Reviewer)
+			if e != nil {
+				return Result{}, e
+			}
+			if state == "claimed" && reviewer == w.Worker {
+				return Result{}, problem(403, "work_forbidden", "The reviewer cannot be the worker holding the claim.")
+			}
+			// Any held reviewer_fee stays in escrow: it is paid to the
+			// reviewer at the time of its verdict (payWorkReward).
+			w.Reviewer = reviewer
 		}
 		w.Generation = generation
 		w.Updated = now
@@ -863,7 +901,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, err
 	}
 	w.Sequence++
-	_, err = tx.ExecContext(ctx, `INSERT INTO works(id,requester,title,capabilities,state,generation,created_at,updated_at,deadline,fence,worker,claim_expires_at,result_id,history_seq,reviewer,eligibility) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,generation=excluded.generation,updated_at=excluded.updated_at,fence=excluded.fence,worker=excluded.worker,claim_expires_at=excluded.claim_expires_at,result_id=excluded.result_id,history_seq=excluded.history_seq`, w.ID, w.Requester, w.Title, w.Caps, w.State, w.Generation, w.Created, w.Updated, w.Deadline, w.Fence, w.Worker, w.ClaimExpires, w.Result, w.Sequence, w.Reviewer, w.Eligibility)
+	_, err = tx.ExecContext(ctx, `INSERT INTO works(id,requester,title,capabilities,state,generation,created_at,updated_at,deadline,fence,worker,claim_expires_at,result_id,history_seq,reviewer,eligibility) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,generation=excluded.generation,updated_at=excluded.updated_at,fence=excluded.fence,worker=excluded.worker,claim_expires_at=excluded.claim_expires_at,result_id=excluded.result_id,history_seq=excluded.history_seq,reviewer=excluded.reviewer`, w.ID, w.Requester, w.Title, w.Caps, w.State, w.Generation, w.Created, w.Updated, w.Deadline, w.Fence, w.Worker, w.ClaimExpires, w.Result, w.Sequence, w.Reviewer, w.Eligibility)
 	if err != nil {
 		return Result{}, err
 	}
@@ -1373,18 +1411,15 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 	}
 	defer rows.Close()
 	transitions := []WorkTransition{}
+	authors := []string{} // each transition's author account
 	for rows.Next() {
 		var tr WorkTransition
 		var account string
 		if err = rows.Scan(&tr.Sequence, &tr.Operation, &tr.Author, &tr.PublicKey, &tr.Signature, &tr.SignedPayload, &tr.AcceptedAt, &tr.Fence, &tr.Generation, &tr.State, &tr.DelegationID, &account); err != nil {
 			return Result{}, workReadError(err)
 		}
-		// On work with a reviewer, only the reviewer's account gives a
-		// verdict, except the requester's in a silent reviewer's place.
-		if w.Reviewer != "" && (tr.Operation == "work.accept" || tr.Operation == "work.reject") && account != w.Reviewer {
-			tr.Note = WorkReviewerSilentNote
-		}
 		transitions = append(transitions, tr)
+		authors = append(authors, account)
 	}
 	if err = rows.Err(); err != nil {
 		return Result{}, workReadError(err)
@@ -1393,6 +1428,9 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 	hasMore := len(transitions) > limit
 	if hasMore {
 		transitions = transitions[:limit]
+	}
+	if err = annotateWorkReviewers(ctx, tx, w.ID, cursor.After, transitions, authors); err != nil {
+		return Result{}, workReadError(err)
 	}
 	// The current attempt's result, as its submit bound it: the hash the
 	// board records for a transition that did not sign one.
@@ -1424,6 +1462,83 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 		r.NextCursor = s.encodeConversationCursor(conversationCursor{Domain: "work.history", Scope: w.ID, After: transitions[len(transitions)-1].Sequence})
 	}
 	return r, nil
+}
+
+// signedWorkReviewer is the reviewer fingerprint a signed work command's data
+// named ("" for none).
+func signedWorkReviewer(payload string) string {
+	var envelope struct {
+		Command struct {
+			Data string `json:"data"`
+		} `json:"command"`
+	}
+	var data struct {
+		Reviewer string `json:"reviewer"`
+	}
+	if json.Unmarshal([]byte(payload), &envelope) != nil || json.Unmarshal([]byte(envelope.Command.Data), &data) != nil {
+		return ""
+	}
+	return data.Reviewer
+}
+
+// workNamesReviewer says whether a transition sets the work's reviewer: the
+// create (with or without one) and every work.reviewer.set.
+func workNamesReviewer(operation string) bool {
+	return operation == "work.create" || operation == WorkReviewerSet
+}
+
+// annotateWorkReviewers replays the reviewer in force along a page of work
+// history (after is the page's cursor): a work.reviewer.set shows the
+// reviewer it named and the one it replaced, and a verdict on work with a
+// reviewer that its reviewer did not give is the requester's in a silent
+// reviewer's place (its note). Reads run after the page's rows are closed.
+func annotateWorkReviewers(ctx context.Context, tx *sql.Tx, id string, after int64, transitions []WorkTransition, authors []string) error {
+	reviewer := ""
+	if after > 0 {
+		var payload string
+		err := tx.QueryRowContext(ctx, `SELECT payload FROM work_transitions WHERE work_id=? AND sequence<=? AND operation IN ('work.create',?) ORDER BY sequence DESC LIMIT 1`, id, after, WorkReviewerSet).Scan(&payload)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		reviewer = signedWorkReviewer(payload)
+	}
+	accounts := map[string]string{}
+	accountOf := func(fingerprint string) (string, error) {
+		if account, ok := accounts[fingerprint]; ok {
+			return account, nil
+		}
+		var account string
+		err := tx.QueryRowContext(ctx, `SELECT account FROM identities WHERE id=?`, fingerprint).Scan(&account)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+		accounts[fingerprint] = account
+		return account, nil
+	}
+	for i := range transitions {
+		tr := &transitions[i]
+		if workNamesReviewer(tr.Operation) {
+			named := signedWorkReviewer(tr.SignedPayload)
+			if tr.Operation == WorkReviewerSet {
+				tr.Reviewer, tr.PreviousReviewer = named, reviewer
+			}
+			reviewer = named
+			continue
+		}
+		// On work with a reviewer, only the reviewer's account gives a
+		// verdict, except the requester's in a silent reviewer's place.
+		if reviewer == "" || !workVerdictOp(tr.Operation) {
+			continue
+		}
+		account, err := accountOf(reviewer)
+		if err != nil {
+			return err
+		}
+		if authors[i] != account {
+			tr.Note = WorkReviewerSilentNote
+		}
+	}
+	return nil
 }
 
 // annotateWorkTransition reads what a transition's signed command named: an

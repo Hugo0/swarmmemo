@@ -1016,7 +1016,12 @@ func (s *Server) recoveryPage(w http.ResponseWriter, r *http.Request, req authRe
 // off, and forms allowed to post here and to go on to the client's redirect
 // URI only (browsers apply form-action to the redirect after a post too).
 func (s *Server) oauthHeaders(w http.ResponseWriter, redirect string) {
+	// 'self' plus this origin by name: in a client's sign-in popup (ChatGPT's)
+	// Chrome refused the post back here under 'self' alone.
 	formAction := "'self'"
+	if s.cfg.PublicURL != "" {
+		formAction += " " + strings.TrimRight(s.cfg.PublicURL, "/")
+	}
 	if u, err := url.Parse(redirect); err == nil && redirect != "" {
 		formAction += " " + u.Scheme + "://" + u.Host
 	}

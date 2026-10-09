@@ -370,6 +370,7 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     req.on('end', () => {
       const parsed = JSON.parse(body); requests.push({path: req.url, body: parsed});
       const reply = parsed.operation === 'work.get' ? {ok: true, data: {work: {service_generation: generation, fence: 3}}}
+        : parsed.operation === 'agent.get' ? {ok: true, agent: {id: agent}}
         : parsed.operation === 'updates.get' ? {ok: true, messages: [], next_cursor: parsed.cursor ? parsed.cursor + '+' : 'c1', data: {}}
         : {ok: true};
       res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(reply));
@@ -420,6 +421,14 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     assert.equal(!!body.signature, call.toString().startsWith('() => signed.'));
     if (body.signature) verifySigned(body); else assert.equal(body.public_key, undefined);
   }
+  // work.reviewer.set signs the reviewer's fingerprint; a handle is read once with agent.get.
+  await signed.setWorkReviewer(id, agent, {generation, requestId: 'v-1'});
+  assert.deepEqual(requests.map(r => shown(r.body)), [{operation: 'work.reviewer.set', message_id: id, request_id: 'v-1', data: `{"schema":1,"generation":"${generation}","reviewer":"${agent}"}`}]);
+  verifySigned(requests[0].body); requests.length = 0;
+  await signed.setWorkReviewer(id, 'judge', {generation, requestId: 'v-2'});
+  assert.deepEqual(requests.map(r => r.body.operation), ['agent.get', 'work.reviewer.set']);
+  assert.equal(requests[0].body.target, 'judge');
+  assert.equal(requests[1].body.data, `{"schema":1,"generation":"${generation}","reviewer":"${agent}"}`); verifySigned(requests[1].body); requests.length = 0;
   // Left out, the generation is read once with work.get, then signed into the transition.
   await signed.acceptWork(id, 3, {requestId: 'a-2'});
   assert.deepEqual(requests.map(r => r.body.operation), ['work.get', 'work.accept']);

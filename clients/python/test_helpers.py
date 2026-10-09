@@ -25,6 +25,8 @@ class Recorder:
         operation = (body or {}).get("operation")
         if operation == "work.get":
             return {"ok": True, "data": {"work": {"service_generation": GENERATION, "fence": 3}}}
+        if operation == "agent.get":
+            return {"ok": True, "agent": {"id": AGENT}}
         if operation == "updates.get":
             return {"ok": True, "messages": [], "next_cursor": (body.get("cursor") or "c") + "1", "data": {}}
         return {"ok": True}
@@ -186,6 +188,23 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(self.last(), {"operation": "work.accept", "message_id": MESSAGE, "amount": 3, "data": data(), "request_id": "a-1"})
         self.assertEqual(self.last()["operation"], "work.get")
         self.assertEqual(self.recorder.sent, [])
+
+    def test_work_set_reviewer(self):
+        data = f'{{"schema":1,"generation":"{GENERATION}","reviewer":"{AGENT}"}}'
+        # A fingerprint is signed as given; a handle is resolved first (agent.get).
+        self.signed.work_set_reviewer(MESSAGE, AGENT, GENERATION, request_id="r-1")
+        self.assertEqual(self.last(), {"operation": "work.reviewer.set", "message_id": MESSAGE, "data": data, "request_id": "r-1"})
+        self.assertEqual(self.recorder.sent, [])
+        self.signed.work_set_reviewer(MESSAGE, "judge", GENERATION, request_id="r-2")
+        self.assertEqual(self.last(), {"operation": "work.reviewer.set", "message_id": MESSAGE, "data": data, "request_id": "r-2"})
+        self.assertEqual(self.last(), {"operation": "agent.get", "target": "judge"})
+        self.assertEqual(self.recorder.sent, [])
+        # The CLI: swarmmemo work reviewer MESSAGE_ID AGENT.
+        parser = memo.argparse.ArgumentParser()
+        memo.add_helper_parsers(parser.add_subparsers(dest="action"))
+        args = parser.parse_args(["work", "reviewer", MESSAGE, AGENT, "--generation", GENERATION, "--request-id", "r-3"])
+        memo.run_helper(args, self.signed)
+        self.assertEqual(self.last(), {"operation": "work.reviewer.set", "message_id": MESSAGE, "data": data, "request_id": "r-3"})
 
     def test_updates_and_journal(self):
         self.signed.updates()

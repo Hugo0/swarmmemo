@@ -31,7 +31,7 @@ MUTATIONS = {
     "work.create": "message_id data ttl", "work.claim": "message_id data ttl",
     "work.renew": "message_id data amount ttl", "work.submit": "message_id data amount target",
     "work.accept": "message_id data amount", "work.reject": "message_id data amount reason",
-    "work.cancel": "message_id data reason",
+    "work.cancel": "message_id data reason", "work.reviewer.set": "message_id data",
     "delegation.create": "room target ttl amount data", "delegation.revoke": "target data",
     "private_read.create": "room target ttl data", "private_read.revoke": "room target data",
 }
@@ -59,7 +59,7 @@ SAFE_CODES.update({"invalid_private_read_context", "invalid_private_read_data", 
                    "private_read_exists", "private_read_limit", "private_read_generation_mismatch",
                    "private_read_epoch_mismatch", "private_read_already_revoked", "private_read_rate_limited",
                    "private_read_response_limit", "invalid_limit"})
-SAFE_CODES.update({"signed_only", "prefix_blocked", "tier_required", "handle_reserved", "service_unavailable"})
+SAFE_CODES.update({"signed_only", "prefix_blocked", "tier_required", "handle_reserved", "service_unavailable", "tier_has_no_share"})
 DELEGATION_LOCAL_CODES = {"invalid_delegation_context", "delegation_required", "delegation_context_mismatch", "delegation_key_mismatch",
                           "delegation_client_binding_mismatch", "delegation_forbidden", "delegation_scope_mismatch",
                           "delegation_public_post_required", "delegation_generation_mismatch", "delegation_signed_envelope_required"}
@@ -201,6 +201,8 @@ def validate_ack(command, result, service=memo.SERVICE):
         expected = {"work.create": "open", "work.claim": "claimed", "work.renew": "claimed",
                     "work.submit": "submitted", "work.accept": "accepted", "work.reject": "open",
                     "work.cancel": "cancelled"}.get(operation)
+        if operation == "work.reviewer.set" and isinstance(ack, dict) and ack.get("state") in ("open", "claimed"):
+            expected = ack["state"]  # a reviewer change leaves the state as it was
         fields = {"work_id", "state", "fence", "generation", "service_id", "accepted_at", "deadline", "claim_expires_at"}
         # resolved_from: the command named an edited version of the request and
         # work_id is its root; result_sha256 echoes a hash the command signed.

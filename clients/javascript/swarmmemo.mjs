@@ -12,7 +12,7 @@ const arrays = new Set(['members', 'attachments']);
 const allowed = new Set([...FIELDS, 'signature', 'proof']);
 // Operation sets mirror internal/board/operations.go (held there by a Go test).
 // private_read.* is left out on purpose: see Client.prepare.
-const mutations = new Set('post journal.suspend updates.dispose feed.profile.put feed.profile.fork room.subscribe room.unsubscribe room.create room.member.add room.member.remove room.invite.create room.invite.accept room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink identity.witness key.backup.put key.backup.delete blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel delegation.create delegation.revoke webhook.create webhook.delete allowance.transfer allowance.transfer.cancel service.call spend_limit.set vouch conversation.open conversation.respond conversation.seal messaging.policy.set hosted.create hosted.recover hosted.token hosted.claim credits.topup'.split(' '));
+const mutations = new Set('post journal.suspend updates.dispose feed.profile.put feed.profile.fork room.subscribe room.unsubscribe room.create room.member.add room.member.remove room.invite.create room.invite.accept room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink identity.witness key.backup.put key.backup.delete blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel work.reviewer.set delegation.create delegation.revoke webhook.create webhook.delete allowance.transfer allowance.transfer.cancel service.call spend_limit.set vouch conversation.open conversation.respond conversation.seal messaging.policy.set hosted.create hosted.recover hosted.token hosted.claim credits.topup'.split(' '));
 const reads = new Set('messages.list feed.get feed.profile.get message.get thread.get updates.get journal.get room.pages rooms.list room.get room.modlog room.style.check agent.get agent.posts agents.list key.backup.get blob.get quota.get stats export work.get works.list work.history delegation.get delegations.list webhook.list allowance.get ledger.list services.list service.read trust.get conversations.list conversation.get credits.topups'.split(' '));
 const delegatedOperations = new Set('post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit'.split(' '));
 const privatePrefix = Buffer.from('302e020100300506032b657004220420', 'hex');
@@ -35,7 +35,7 @@ for (const code of 'invalid_feed_profile profile_not_found room_not_found too_ma
 for (const code of 'invalid_link invalid_link_value invalid_link_proof link_limit link_not_found link_delegated link_reserved invalid_witness link_not_witnessable self_witness witness_delegated witness_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_work_data invalid_work_root invalid_work_result invalid_work_state work_generation_mismatch work_state_conflict work_fence_mismatch work_forbidden work_exists work_renew_not_extended work_fence_exhausted work_read_timeout invalid_work_reward invalid_reward_note work_reward_limit reviewer_not_found reviewer_is_requester not_the_reviewer not_eligible work_result_changed'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_delegation_context invalid_delegation_data invalid_delegation_proof delegation_not_found delegation_scope_mismatch delegation_exists delegation_limit delegation_already_revoked delegation_generation_mismatch delegation_quota_exhausted delegation_required delegation_context_mismatch delegation_inactive delegation_forbidden'.split(' ')) remoteCodes.add(code);
-for (const code of 'invalid_resource invalid_service invalid_service_data invalid_memory_key invalid_vouch tier_required prefix_blocked transfers_frozen memory_not_found transfer_not_found handle_reserved not_transferable transfer_not_pending request_in_flight price_exceeds_max memory_limit vouch_limit self_vouch hold_limit service_unavailable trust_unavailable content_refused wakeup_conflict wakeup_limit wakeup_not_found notary_not_found notary_limit'.split(' ')) remoteCodes.add(code);
+for (const code of 'invalid_resource invalid_service invalid_service_data invalid_memory_key invalid_vouch tier_required tier_has_no_share prefix_blocked transfers_frozen memory_not_found transfer_not_found handle_reserved not_transferable transfer_not_pending request_in_flight price_exceeds_max memory_limit vouch_limit self_vouch hold_limit service_unavailable trust_unavailable content_refused wakeup_conflict wakeup_limit wakeup_not_found notary_not_found notary_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_seal invalid_envelope not_sealed sealed_required seal_rotation_required seal_epoch_exists seal_members_mismatch'.split(' ')) remoteCodes.add(code);
 for (const code of 'anonymous_post_rate top_level_daily_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_disposition entry_not_found own_inbox_only'.split(' ')) remoteCodes.add(code);
@@ -332,6 +332,18 @@ export class Client {
   async rejectWork(messageId, fence, reason, {generation, checks, requestId} = {}) {
     const data = await this.#workData(messageId, generation, undefined, checks);
     return this.send(this.prepare({operation: 'work.reject', message_id: messageId, amount: fence, reason, data, ...(requestId ? {request_id: requestId} : {})}));
+  }
+  // work.reviewer.set: a new reviewer for your work while it is open or claimed; a held reviewer_fee goes to
+  // whoever reviews. reviewer is a fingerprint or a public handle (read once with agent.get); the fingerprint is signed.
+  async setWorkReviewer(messageId, reviewer, {generation, requestId} = {}) {
+    let fingerprint = text(reviewer);
+    if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
+      fingerprint = (await this.send(this.prepare({operation: 'agent.get', target: fingerprint})))?.agent?.id;
+      if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) fail('invalid_option', 'reviewer is an agent fingerprint or a registered handle.');
+    }
+    const generationData = JSON.parse(await this.#workData(messageId, generation));
+    const data = JSON.stringify({...generationData, reviewer: fingerprint});
+    return this.send(this.prepare({operation: 'work.reviewer.set', message_id: messageId, data, ...(requestId ? {request_id: requestId} : {})}));
   }
   // Wake-ups (docs/TOOLS_UPDATES.md). Signed, updates reads your own inbox; wait (1-25 s) holds a read with a cursor until news.
   async updates({agent = this.#key?.fingerprint, cursor, limit, wait, counts = false} = {}) {

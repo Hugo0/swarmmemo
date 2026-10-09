@@ -277,7 +277,7 @@ def _work(profile, work, expected=None):
 
 
 def _transition(profile, item, work_id):
-    optional = {"delegation_id", "resolved_from", "result_sha256", "result_sha256_signed", "checks"}
+    optional = {"delegation_id", "resolved_from", "result_sha256", "result_sha256_signed", "checks", "reviewer", "previous_reviewer"}
     fields = set("sequence operation author public_key signature signed_payload accepted_at fence generation state".split()) | optional
     if not isinstance(item, dict) or set(item) - fields or not fields - optional <= item.keys(): raise BridgeError("invalid_response")
     for name in ("sequence", "accepted_at", "fence"):
@@ -287,7 +287,7 @@ def _transition(profile, item, work_id):
         envelope = strict_json(item["signed_payload"])
         if set(envelope) != {"version", "service", "command"} or envelope["service"] != profile.service_id: raise ValueError()
         command = envelope["command"]
-        allowed_operations = {"work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel"}
+        allowed_operations = {"work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel", "work.reviewer.set"}
         if (item["signed_payload"].encode() != memo.canonical(command, profile.service_id)
                 or envelope["version"] != (2 if "delegation" in command else 1)
                 or command.get("operation") != item["operation"] or item["operation"] not in allowed_operations
@@ -305,7 +305,9 @@ def _transition(profile, item, work_id):
             if field in ("timestamp", "ttl", "amount"):
                 if type(value) is not int or not 0 <= value < 2**63: raise ValueError()
             elif not isinstance(value, str) or "\x00" in value: raise ValueError()
-        expected_state = {"work.create": "open", "work.claim": "claimed", "work.renew": "claimed", "work.submit": "submitted", "work.accept": "accepted", "work.reject": "open", "work.cancel": "cancelled"}[item["operation"]]
+        expected_state = {"work.create": "open", "work.claim": "claimed", "work.renew": "claimed", "work.submit": "submitted", "work.accept": "accepted", "work.reject": "open", "work.cancel": "cancelled", "work.reviewer.set": item["state"]}[item["operation"]]
+        # A reviewer change leaves the state as it was, open or claimed.
+        if item["operation"] == "work.reviewer.set" and item["state"] not in ("open", "claimed"): raise ValueError()
         if item["operation"] == "work.claim" and "target" in command: expected_state = "submitted"
         if item["state"] != expected_state or item["sequence"] < 1 or item["accepted_at"] < 1: raise ValueError()
         if item["operation"] == "work.create" and item["fence"] != 0: raise ValueError()
@@ -324,6 +326,13 @@ def _transition(profile, item, work_id):
             if not _valid_checks(data["checks"]) or item.get("checks") != data["checks"]: raise ValueError()
             data_fields = data_fields | {"checks"}
         elif "checks" in item: raise ValueError()
+        # A reviewer change signs the new reviewer; the service adds the one it replaced.
+        if item["operation"] == "work.reviewer.set":
+            if (not isinstance(data, dict) or not isinstance(data.get("reviewer"), str) or not re.fullmatch(HEX64, data["reviewer"])
+                    or item.get("reviewer") != data["reviewer"] or not isinstance(item.get("previous_reviewer", ""), str)
+                    or (item.get("previous_reviewer") and not re.fullmatch(HEX64, item["previous_reviewer"]))): raise ValueError()
+            data_fields = data_fields | {"reviewer"}
+        elif "reviewer" in item or "previous_reviewer" in item: raise ValueError()
         if "result_sha256" in item and (not isinstance(item["result_sha256"], str) or not re.fullmatch(HEX64, item["result_sha256"])): raise ValueError()
         if (not isinstance(data, dict) or set(data) != data_fields or type(data.get("schema")) is not int or data["schema"] != 1
                 or not isinstance(data.get("generation"), str) or not re.fullmatch(HEX32, data["generation"])

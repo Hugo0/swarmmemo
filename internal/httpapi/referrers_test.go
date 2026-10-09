@@ -14,23 +14,25 @@ import (
 	"swarmmemo/internal/web"
 )
 
-func TestReferrerKeyKeepsOnlyTheDomain(t *testing.T) {
+func TestReferrerDomainKeepsOnlyTheDomain(t *testing.T) {
 	c := newReferrerCounter("https://board.example")
 	for raw, want := range map[string]string{
 		"":                                             "",
 		"https://swarmmemo.com/r/lobby":                "",
 		"https://www.swarmmemo.com/":                   "",
+		"https://publicbbs.com/r/lobby":                "", // our own mirror domain
+		"https://www.publicbbs.com/":                   "",
 		"https://board.example/e/1":                    "",
 		"https://api.board.example/":                   "",
-		"https://evilswarmmemo.com/":                   "host:evilswarmmemo.com",
-		"https://swarmmemo.com.evil.example/x":         "host:evil.example",
-		"https://news.ycombinator.com/item?id=1":       "host:ycombinator.com",
-		"https://WWW.Example.COM./Path?q=secret#f":     "host:example.com",
-		"http://user:password@example.org:8443/a":      "host:example.org",
-		"https://www.bbc.co.uk/news":                   "host:bbc.co.uk",
+		"https://evilswarmmemo.com/":                   "evilswarmmemo.com",
+		"https://swarmmemo.com.evil.example/x":         "evil.example",
+		"https://news.ycombinator.com/item?id=1":       "ycombinator.com",
+		"https://WWW.Example.COM./Path?q=secret#f":     "example.com",
+		"http://user:password@example.org:8443/a":      "example.org",
+		"https://www.bbc.co.uk/news":                   "bbc.co.uk",
 		"https://co.uk/":                               "other",
-		"https://alice.github.io/private-blog":         "host:github.io",
-		"https://xn--bcher-kva.de/":                    "host:xn--bcher-kva.de",
+		"https://alice.github.io/private-blog":         "github.io",
+		"https://xn--bcher-kva.de/":                    "xn--bcher-kva.de",
 		"https://bücher.de/":                           "other",
 		"https://еxample.com/":                         "other", // Cyrillic е
 		"https://93.184.216.34/":                       "other",
@@ -53,11 +55,38 @@ func TestReferrerKeyKeepsOnlyTheDomain(t *testing.T) {
 		"https://" + strings.Repeat("a", 64) + ".com/": "other",
 		"https://example.com/" + strings.Repeat("p", referrerHeaderBytes): "other",
 	} {
-		if got := c.referrerKey(raw); got != want {
+		if got := c.referrerDomain(raw); got != want {
 			t.Errorf("%q: got %q, want %q", raw, got, want)
 		}
-		if got := c.referrerKey(raw); strings.Contains(got, "/") || strings.Contains(got, "?") || strings.Contains(got, "@") || strings.Contains(got, "secret") {
+		if got := c.referrerDomain(raw); strings.Contains(got, "/") || strings.Contains(got, "?") || strings.Contains(got, "@") || strings.Contains(got, "secret") {
 			t.Errorf("%q leaked more than a domain: %q", raw, got)
+		}
+	}
+}
+
+// A visit (GET/HEAD of a landing page) is counted as "host:DOMAIN"; every
+// other Referer-bearing request — a non-landing path, a non-GET/HEAD method,
+// an image or API call — is counted as "asset:DOMAIN" instead, so an embed or
+// hotlink stays visible without being mistaken for a visit. Our own mirror
+// domain (publicbbs.com) is never counted either way.
+func TestReferrerKeyDistinguishesVisitsFromAssets(t *testing.T) {
+	c := newReferrerCounter("https://swarmmemo.com")
+	for _, tc := range []struct{ method, path, referer, want string }{
+		{"GET", "/", "https://news.ycombinator.com/item?id=1", "host:ycombinator.com"},
+		{"HEAD", "/for-agents", "https://news.ycombinator.com/", "host:ycombinator.com"},
+		{"GET", "/r/lobby", "https://news.ycombinator.com/", "host:ycombinator.com"},
+		{"GET", "/i/post-1.png", "https://www.google.com/search?q=swarmmemo", "asset:google.com"},
+		{"GET", "/api/messages", "https://news.ycombinator.com/", "asset:ycombinator.com"},
+		{"POST", "/", "https://news.ycombinator.com/", "asset:ycombinator.com"},
+		{"GET", "/favicon.ico", "https://publicbbs.com/r/lobby", ""},
+		{"GET", "/", "", ""},
+	} {
+		r := httptest.NewRequest(tc.method, tc.path, nil)
+		if tc.referer != "" {
+			r.Header.Set("Referer", tc.referer)
+		}
+		if got := c.referrerKey(r); got != tc.want {
+			t.Errorf("%s %s referer=%q: got %q, want %q", tc.method, tc.path, tc.referer, got, tc.want)
 		}
 	}
 }
@@ -138,7 +167,30 @@ func TestReferrerMemoryIsBounded(t *testing.T) {
 	}
 }
 
+// The same bound applies to "asset:" domains, folding past it into
+// asset-other rather than other, so a hotlinking flood cannot be confused
+// with a landing-page flood either.
+func TestAssetReferrerMemoryIsBounded(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{})
+	for i := 0; i < 3*referrerPendingHosts; i++ {
+		r := httptestRequest("GET", "/i/post.png", "https://site"+strconv.Itoa(i)+".example/")
+		s.countReferrer(r)
+	}
+	s.referrers.mu.Lock()
+	defer s.referrers.mu.Unlock()
+	if len(s.referrers.pending) != 1 {
+		t.Fatalf("days pending: %d", len(s.referrers.pending))
+	}
+	for _, d := range s.referrers.pending {
+		if d.assets != referrerPendingHosts || d.hosts != 0 || d.counts["asset-other"] != int64(2*referrerPendingHosts) || d.counts["other"] != 0 {
+			t.Fatalf("assets %d, hosts %d, asset-other %d, other %d", d.assets, d.hosts, d.counts["asset-other"], d.counts["other"])
+		}
+	}
+}
+
 // Counted end to end, stored as domains only, and never served publicly.
+// Landing-page visits are stored as "host:" and an image hotlinked elsewhere
+// (a non-landing path) is stored separately as "asset:".
 func TestReferrersStoredPrivately(t *testing.T) {
 	store, err := board.Open(filepath.Join(t.TempDir(), "referrers.sqlite"), board.Config{})
 	if err != nil {
@@ -151,6 +203,9 @@ func TestReferrersStoredPrivately(t *testing.T) {
 		r.Header.Set("User-Agent", "Mozilla/5.0 (compatible; ClaudeBot/1.0)")
 		serve(s, r)
 	}
+	for i := 0; i < 2; i++ {
+		serve(s, httptestRequest("GET", "/i/post-1.png", "https://www.google.com/search?q=swarmmemo"))
+	}
 	serve(s, httptestRequest("GET", "/", "https://swarmmemo.com/r/lobby"))
 	s.FlushReaderCounts()
 	days, err := store.ReadReferrerStats(context.Background(), time.Now(), 1)
@@ -161,12 +216,15 @@ func TestReferrersStoredPrivately(t *testing.T) {
 	if len(day.Hosts) != 1 || day.Hosts[0] != (board.ReferrerCount{Name: "ycombinator.com", Count: 3}) || day.Other != 0 {
 		t.Fatalf("hosts: %+v other %d", day.Hosts, day.Other)
 	}
+	if len(day.Assets) != 1 || day.Assets[0] != (board.ReferrerCount{Name: "google.com", Count: 2}) || day.AssetOther != 0 {
+		t.Fatalf("assets: %+v assetOther %d", day.Assets, day.AssetOther)
+	}
 	if len(day.Agents) != 1 || day.Agents[0] != (board.ReferrerCount{Name: "ClaudeBot", Count: 3}) {
 		t.Fatalf("agents: %+v", day.Agents)
 	}
 	for _, path := range []string{"/api/stats/daily", "/capabilities", "/api/stats", "/llms.txt", "/metrics"} {
 		body := makeRequest(s, "GET", path, "", "").Body.String()
-		if strings.Contains(body, "ycombinator") || strings.Contains(body, "secret-thread") {
+		if strings.Contains(body, "ycombinator") || strings.Contains(body, "secret-thread") || strings.Contains(body, "google.com") {
 			t.Fatalf("%s exposes referrer data", path)
 		}
 	}
@@ -221,11 +279,11 @@ func TestRefVenueCountedOnLandingPages(t *testing.T) {
 // dropped after counting, and only it (Skitter c19: /e/ID?ref= was a 400).
 func TestRefDroppedBeforeRouting(t *testing.T) {
 	for raw, want := range map[string]string{
-		"/e/abc?ref=x":                    "",
-		"/api/log/proof?message=m&ref=x":  "message=m",
+		"/e/abc?ref=x":                     "",
+		"/api/log/proof?message=m&ref=x":   "message=m",
 		"/call/a/b?text=a%20b&ref=x&max=1": "text=a%20b&max=1",
-		"/x?reference=1":                  "reference=1",
-		"/x?q=ref=1":                      "q=ref=1",
+		"/x?reference=1":                   "reference=1",
+		"/x?q=ref=1":                       "q=ref=1",
 	} {
 		r := withoutRef(httptest.NewRequest("GET", raw, nil))
 		if r.URL.RawQuery != want || r.RequestURI != r.URL.RequestURI() {

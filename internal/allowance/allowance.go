@@ -102,6 +102,10 @@ type Err struct {
 	// "per_call" or "expired") and its value in credits.
 	SpendLimit      string
 	SpendLimitValue int64
+	// Resource and Tier are a tier_has_no_share refusal's: the resource the
+	// parameters give the subject's tier no share of, and that tier (1–4).
+	Resource Resource
+	Tier     int
 	// Details is structured context the refusal must carry to be
 	// actionable (doc_conflict's current version); never secrets.
 	Details any

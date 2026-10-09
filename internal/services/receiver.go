@@ -1027,7 +1027,7 @@ func (r *receiver) deliver(ctx context.Context, tx *sql.Tx, meter Meter, d Deliv
 	subject := allowance.Subject{ID: row.account, KeyID: row.keyID, Signed: true, Hosted: row.hosted}
 	if _, err = meter.Spend(ctx, tx, subject, allowance.Credit, cost, ledger.Ref{Service: ReceiverID, Op: "receive", Method: "deliver"}, now); err != nil {
 		var ae *allowance.Err
-		if errors.As(err, &ae) && (ae.Code == "quota_exhausted" || ae.Code == "global_quota_exhausted") {
+		if errors.As(err, &ae) && (ae.Code == "quota_exhausted" || ae.Code == "global_quota_exhausted" || ae.Code == "tier_has_no_share") {
 			return DeliveryReceipt{}, "", &allowance.Err{Code: "receiver_quota_exhausted", RetryAfter: ae.RetryAfter}
 		}
 		return DeliveryReceipt{}, "", err

@@ -240,13 +240,25 @@ type op struct {
 	// hourBound is set by planSpend when the anonymous tier's hourly
 	// release (tier4Released) is what left a spend short.
 	hourBound bool
+	// noShareTier is set by planSpend to the tier of a free lot it could not
+	// draw from because the parameters give that tier no share (noShare).
+	noShareTier int
 }
 
 // refusal is the refusal of a spend planSpend left short: the day's, or,
 // when the anonymous tier's hourly release bound it, global_quota_exhausted
-// with retry_after at the next hour, when more is released.
+// with retry_after at the next hour, when more is released. A tier the
+// parameters give no share is tier_has_no_share, without retry_after:
+// waiting never helps.
 func (o *op) refusal(short string, c claimRow) error {
 	code := o.shortCode(short, c)
+	if code == "tier_has_no_share" {
+		t := c.Tier
+		if !o.noShare(t) {
+			t = o.noShareTier
+		}
+		return &allowance.Err{Code: code, Resource: o.r, Tier: t}
+	}
 	if code == "global_quota_exhausted" && o.hourBound {
 		return &allowance.Err{Code: code, RetryAfter: int(3600 - mod(o.now, 3600))}
 	}
@@ -372,11 +384,33 @@ func (o *op) capOwn(lots []lot, c claimRow) {
 	}
 }
 
-// shortCode refines a refusal for a subject whose share today is zero only
-// because its tier had no water when it claimed: that is the shared budget
-// running out (global_quota_exhausted), not its own share being used up. A
-// share a lever set to zero stays quota_exhausted.
+// noShare reports whether the parameters, not a lever or the day's demand,
+// give tier t no share of the resource: its cap is 0, or its share_max_ppm
+// is 0 (for tiers 1–3 only when the tier does not borrow from lower tiers;
+// for tier 4 unless the tier-4 share lever overrides it). Such a tier's
+// refusal is tier_has_no_share: waiting for 00:00 UTC never helps.
+func (o *op) noShare(t int) bool {
+	if t < 1 || t > 4 {
+		return false
+	}
+	if o.rp.Cap[t-1] == 0 {
+		return true
+	}
+	if t == 4 {
+		return o.lv.Tier4SharePPM < 0 && o.rp.ShareMaxPPM[3] == 0
+	}
+	return o.rp.ShareMaxPPM[t-1] == 0 && !o.rp.Borrow[t-1]
+}
+
+// shortCode refines a refusal. A subject whose tier the parameters give no
+// share of the resource is tier_has_no_share. A subject whose share today is
+// zero only because its tier had no water when it claimed meets the shared
+// budget running out (global_quota_exhausted), not its own share being used
+// up. A share a lever set to zero stays quota_exhausted.
 func (o *op) shortCode(short string, c claimRow) string {
+	if short == "quota_exhausted" && o.noShare(c.Tier) {
+		return "tier_has_no_share"
+	}
 	if short != "quota_exhausted" || c.Granted != 0 || c.Tier < 1 || c.Tier > 4 || o.rp.Cap[c.Tier-1] == 0 {
 		return short
 	}
@@ -392,12 +426,14 @@ func (o *op) shortCode(short string, c claimRow) string {
 // day's budget); a lot whose tier has run dry yields what the pools still
 // hold, and the spend moves on to the next bucket. short is the refusal when
 // the lots cannot cover units: global_quota_exhausted when dry pools stood in
-// the way, quota_exhausted when the subject's own units are used up.
+// the way, tier_has_no_share when the only pools in the way are those of a
+// tier the parameters give no share (noShare), quota_exhausted when the
+// subject's own units are used up.
 func (o *op) planSpend(lots []lot, units int64, ok func(lot) bool) (parts []part, d dayState, short string) {
 	d = o.d
 	var got int64
 	dry := false
-	o.hourBound = false
+	o.hourBound, o.noShareTier = false, 0
 	for _, x := range lots {
 		if got >= units {
 			break
@@ -420,8 +456,13 @@ func (o *op) planSpend(lots []lot, units int64, ok func(lot) bool) (parts []part
 				}
 			}
 			if can < take {
-				take, dry = can, true
-				o.hourBound = o.hourBound || hourly
+				take = can
+				if can == 0 && o.noShare(t) {
+					o.noShareTier = t
+				} else {
+					dry = true
+					o.hourBound = o.hourBound || hourly
+				}
 			}
 			if take <= 0 {
 				continue
@@ -434,6 +475,9 @@ func (o *op) planSpend(lots []lot, units int64, ok func(lot) bool) (parts []part
 	if got < units {
 		if dry {
 			return nil, o.d, "global_quota_exhausted"
+		}
+		if o.noShareTier != 0 {
+			return nil, o.d, "tier_has_no_share"
 		}
 		return nil, o.d, "quota_exhausted"
 	}

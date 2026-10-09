@@ -59,6 +59,15 @@ func printReferrerStats(out io.Writer, stats []board.ReferrerDay) {
 		if day.Other > 0 {
 			fmt.Fprintf(out, "    %8d  (other)\n", day.Other)
 		}
+		if len(day.Assets) > 0 || day.AssetOther > 0 {
+			fmt.Fprintln(out, "  embeds and hotlinks (not visits):")
+			for _, host := range day.Assets {
+				fmt.Fprintf(out, "    %8d  %s\n", host.Count, host.Name)
+			}
+			if day.AssetOther > 0 {
+				fmt.Fprintf(out, "    %8d  (other)\n", day.AssetOther)
+			}
+		}
 		fmt.Fprint(out, "  crawlers and agents:")
 		if len(day.Agents) == 0 {
 			fmt.Fprint(out, " none")

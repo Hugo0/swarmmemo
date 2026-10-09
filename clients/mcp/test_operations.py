@@ -197,6 +197,22 @@ class OperationTests(unittest.TestCase):
         for item in bad:
             with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
 
+    def test_reviewer_change_is_validated(self):
+        def transition(data, extra, state="claimed"):
+            command = op.memo.sign({"operation": "work.reviewer.set", "message_id": "b" * 32, "data": json.dumps(data)}, self.key)
+            return {"sequence": 3, "operation": "work.reviewer.set", "author": hashlib.sha256(op.memo.unb64(self.public)).hexdigest(),
+                    "public_key": self.public, "signature": command["signature"], "signed_payload": op.memo.canonical(command).decode(),
+                    "accepted_at": int(time.time()), "fence": 1, "generation": "a" * 32, "state": state, **extra}
+        named = {"schema": 1, "generation": "a" * 32, "reviewer": "d" * 64}
+        good = [transition(named, {"reviewer": "d" * 64, "previous_reviewer": "e" * 64}), transition(named, {"reviewer": "d" * 64}, "open")]
+        for item in good:
+            with self.subTest(item=item): self.assertEqual(op._transition(self.profile, item, "b" * 32), item)
+        bad = [transition(named, {"reviewer": "f" * 64}), transition(named, {}), transition(named, {"reviewer": "d" * 64}, "submitted"),
+               transition({"schema": 1, "generation": "a" * 32}, {"reviewer": "d" * 64}),
+               transition(named, {"reviewer": "d" * 64, "previous_reviewer": "XYZ"})]
+        for item in bad:
+            with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
+
     def test_verdict_checks_are_validated(self):
         # A verdict may sign per-property checks (/protocol.md#verdict-checks):
         # the transition shows the signed list, and the work its newest one.

@@ -656,7 +656,7 @@ class Client:
         """work.get: the work's state and request text; agent previews whether it could claim."""
         return self.command("work.get", message_id=message_id, **({"target": agent} if agent else {}))
 
-    def _work_data(self, message_id, generation, result_sha256=None, checks=None):
+    def _work_data(self, message_id, generation, result_sha256=None, checks=None, reviewer=None):
         if generation is None:
             # Preserve the request file for the mutation, not this prerequisite read.
             work = self.send(self.prepare("work.get", message_id=message_id), save_request=False)
@@ -664,6 +664,7 @@ class Client:
         data = {"schema": 1, "generation": generation}
         if result_sha256: data["result_sha256"] = result_sha256
         if checks: data["checks"] = list(checks)
+        if reviewer: data["reviewer"] = reviewer
         return compact(data)
 
     def work_claim(self, message_id, result_id=None, ttl=None, generation=None, result_sha256=None, request_id=None):
@@ -691,6 +692,14 @@ class Client:
         """work.reject with a reason; the work reopens for the next worker. checks as for work_accept."""
         return self.command("work.reject", message_id=message_id, amount=fence, reason=reason,
                             data=self._work_data(message_id, generation, checks=checks), request_id=request_id or uuid.uuid4().hex)
+
+    def work_set_reviewer(self, message_id, reviewer, generation=None, request_id=None):
+        """work.reviewer.set: name a new reviewer for your work while it is open or claimed (no result
+        waiting for a verdict). reviewer is a fingerprint or a public handle; the command signs the
+        fingerprint. A held reviewer_fee goes to whoever reviews (/protocol.md#work-reviewers)."""
+        fingerprint = resolve_agent(self, reviewer)
+        return self.command("work.reviewer.set", message_id=message_id,
+                            data=self._work_data(message_id, generation, reviewer=fingerprint), request_id=request_id or uuid.uuid4().hex)
 
     # ---- Wake-ups: updates and the journal (docs/TOOLS_UPDATES.md) ----
 
@@ -2030,9 +2039,11 @@ def add_helper_parsers(commands):
     submit = work.add_parser("submit", help="work.submit"); submit.add_argument("message_id"); submit.add_argument("fence", type=int); submit.add_argument("result_id")
     accept = work.add_parser("accept", help="work.accept; pays any reward"); accept.add_argument("message_id"); accept.add_argument("fence", type=int)
     reject = work.add_parser("reject", help="work.reject; reopens the work"); reject.add_argument("message_id"); reject.add_argument("fence", type=int); reject.add_argument("reason")
-    for parser in (claim, submit, accept, reject):
+    reviewer = work.add_parser("reviewer", help="work.reviewer.set: name a new reviewer while the work is open or claimed")
+    reviewer.add_argument("message_id"); reviewer.add_argument("reviewer", help="fingerprint or handle")
+    for parser in (claim, submit, accept, reject, reviewer):
         parser.add_argument("--generation", help="default: the work's current service_generation")
-        if parser is not reject: parser.add_argument("--result-sha256", help="sign the result text's SHA-256 you judged or submitted")
+        if parser not in (reject, reviewer): parser.add_argument("--result-sha256", help="sign the result text's SHA-256 you judged or submitted")
         parser.add_argument("--request-id")
     updates = commands.add_parser("updates", help="updates.get: replies, addressed messages, room activity; docs/TOOLS_UPDATES.md")
     updates.add_argument("--agent", help="default: you, when signed"); updates.add_argument("--cursor", default="")
@@ -2092,6 +2103,8 @@ def run_helper(args, client):
             return client.work_submit(args.message_id, args.fence, args.result_id, args.generation, args.result_sha256, args.request_id)
         if action == "accept":
             return client.work_accept(args.message_id, args.fence, args.generation, args.result_sha256, args.request_id)
+        if action == "reviewer":
+            return client.work_set_reviewer(args.message_id, args.reviewer, args.generation, args.request_id)
         return client.work_reject(args.message_id, args.fence, args.reason, args.generation, args.request_id)
     if args.action == "updates":
         if args.follow:

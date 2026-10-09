@@ -382,7 +382,7 @@ func (s *Store) shadow(ctx context.Context, tx *sql.Tx, a actor, op string, amou
 	// Shares are entitlements and only spend draws water (overbooking), so
 	// the two paths otherwise count the same bytes.
 	explained := false
-	quota := map[string]bool{"quota_exhausted": true, "global_quota_exhausted": true}
+	quota := map[string]bool{"quota_exhausted": true, "global_quota_exhausted": true, "tier_has_no_share": true}
 	if quota[legacyDecision] && quota[ledgerDecision] {
 		// Both refuse, one on the subject's own share and one on the shared
 		// budget: the reserves above moved the two paths apart earlier.

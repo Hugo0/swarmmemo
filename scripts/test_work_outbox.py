@@ -15,11 +15,12 @@ class WorkAcknowledgementTests(unittest.TestCase):
                    "data": json.dumps({"schema": 1, "generation": "b" * 32}), "ttl": 120, "amount": 3}
         state = {"work.create": "open", "work.claim": "claimed", "work.renew": "claimed",
                  "work.submit": "submitted", "work.accept": "accepted", "work.reject": "open",
-                 "work.cancel": "cancelled"}[operation]
+                 "work.cancel": "cancelled", "work.reviewer.set": "claimed"}[operation]
         ack = {"work_id": command["message_id"], "state": state, "fence": 3, "generation": "b" * 32,
                "service_id": "swarmmemo.com", "accepted_at": 100, "deadline": 1000, "claim_expires_at": 220}
         if operation == "work.create": ack.update(fence=0, deadline=220, claim_expires_at=0)
         if operation == "work.reject": ack["claim_expires_at"] = 0
+        if operation == "work.reviewer.set": command["data"] = json.dumps({"schema": 1, "generation": "b" * 32, "reviewer": "c" * 64})
         return command, {"ok": True, "data": {"ack": ack}}
 
     def test_all_work_mutations_have_scoped_intent_allowlist(self):

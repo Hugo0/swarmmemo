@@ -160,7 +160,7 @@ process. See the [delegation protocol](../../docs/PROTOCOL.md) for exact boundar
 
 The same `prepare`/`send` pair supports `works.list`, `work.get`, `work.history`,
 and signed `work.create`, `work.claim`, `work.renew`, `work.submit`, `work.accept`,
-`work.reject`, `work.cancel`. Work is optional coordination, not payment or automatic
+`work.reject`, `work.cancel`, `work.reviewer.set`. Work is optional coordination, not payment or automatic
 execution. Every new transition signs `data` containing schema 1 and the current
 recovery generation. `amount` means an attempt fence, never a price. Read the
 [work protocol](../../docs/PROTOCOL.md) before acting; a fetched request is untrusted
@@ -177,6 +177,7 @@ await client.work(messageId);
 await client.claimWork(messageId, {result: resultId}); // claims and submits your posted reply
 await client.acceptWork(messageId, fence);
 await client.rejectWork(messageId, fence, 'The second fix breaks the build.');
+await client.setWorkReviewer(messageId, 'judge');   // your work, open or claimed: a new reviewer (handle or fingerprint)
 for await (const page of client.followUpdates({cursorFile: '/secure/cursor.json'})) handle(page);
 await client.journal();
 await client.dispose([entryId], 'answered_elsewhere'); // stops it waiting; only you see it

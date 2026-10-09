@@ -15,14 +15,20 @@ import (
 
 // Referrer counters answer "where do visitors come from?" without access logs
 // (see board/referrerstats.go for what is stored). Each admitted request adds
-// at most three in-memory integers: its Referer's registrable domain (or
-// other), its User-Agent family, and on a landing page the venue a link named
-// with ?ref=VENUE, if any is known. The header values themselves are
-// discarded at once. Totals are written in the background like the reader
-// counters, and memory is bounded: at most referrerPendingHosts domains and
-// referrerPendingRefs venues per day are held between writes, later new ones
-// count as other and ref-other. Nothing here is ever served over HTTP; the
-// operator reads it with swarmmemo stats referrers.
+// at most three in-memory integers: its Referer's registrable domain, its
+// User-Agent family, and on a landing page the venue a link named with
+// ?ref=VENUE, if any is known. A Referer domain is counted as "host:DOMAIN"
+// (a visit arriving from DOMAIN) only on a GET/HEAD of a landing page (the
+// same set ?ref= uses, refLanding); every other Referer-bearing request
+// (images, API calls, non-landing pages) counts as "asset:DOMAIN" instead, so
+// an embed or hotlink on DOMAIN stays visible without being mistaken for a
+// visit. The header values themselves are discarded at once. Totals are
+// written in the background like the reader counters, and memory is bounded:
+// at most referrerPendingHosts "host:" domains, referrerPendingHosts "asset:"
+// domains and referrerPendingRefs venues per day are held between writes,
+// later new ones count as other, asset-other and ref-other. Nothing here is
+// ever served over HTTP; the operator reads it with swarmmemo stats
+// referrers.
 
 const (
 	referrerPendingHosts = 1000
@@ -47,7 +53,9 @@ type referrerCounter struct {
 }
 
 func newReferrerCounter(publicURL string) *referrerCounter {
-	own := []string{"swarmmemo.com"}
+	// publicbbs.com mirrors this board (see internal/services/fetch.go's own
+	// list): a Referer naming it is us, not an external site.
+	own := []string{"swarmmemo.com", "publicbbs.com"}
 	if u, err := url.Parse(publicURL); err == nil && u.Hostname() != "" {
 		own = append(own, strings.TrimSuffix(strings.ToLower(u.Hostname()), "."))
 	}
@@ -67,10 +75,12 @@ var twoPartSuffixes = map[string]bool{
 	"co.il": true, "com.ua": true, "com.pl": true, "co.id": true, "com.my": true, "com.ph": true,
 }
 
-// referrerKey reduces a Referer header to "host:DOMAIN", "other", or "" for a
-// header that should not be counted (absent, or this service itself). It never
-// keeps a path, query, fragment, port, user name or anything but the domain.
-func (c *referrerCounter) referrerKey(raw string) string {
+// referrerDomain reduces a Referer header to its registrable domain, "other"
+// for one present but not usable (invalid, IP-literal, overlong or an
+// unknown-shaped host), or "" for a header that should not be counted at all
+// (absent, or naming this service itself). It never keeps a path, query,
+// fragment, port or user name.
+func (c *referrerCounter) referrerDomain(raw string) string {
 	if raw == "" {
 		return ""
 	}
@@ -102,7 +112,26 @@ func (c *referrerCounter) referrerKey(raw string) string {
 	if twoPartSuffixes[domain] || !board.ValidReferrerHost(domain) {
 		return "other"
 	}
-	return "host:" + domain
+	return domain
+}
+
+// referrerKey turns a Referer header and the request it arrived on into the
+// key countReferrer adds: "host:DOMAIN" for a GET/HEAD of a landing page (a
+// visit arriving from DOMAIN, the same landing set ?ref= uses), "asset:DOMAIN"
+// for every other Referer-bearing request (an embed, a hotlinked image, an
+// API call — DOMAIN showed this page or file somewhere, not necessarily a
+// visitor), "other" for a Referer present but not usable, or "" to count
+// nothing (absent, or this service itself).
+func (c *referrerCounter) referrerKey(r *http.Request) string {
+	domain := c.referrerDomain(r.Header.Get("Referer"))
+	switch domain {
+	case "", "other":
+		return domain
+	}
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && refLanding(r.URL.Path) {
+		return "host:" + domain
+	}
+	return "asset:" + domain
 }
 
 // refKey is "ref:VENUE" for a GET of a landing page whose link added
@@ -185,7 +214,7 @@ func (s *Server) countReferrer(r *http.Request) {
 	defer func() { _ = recover() }()
 	c := s.referrers
 	keys := make([]string, 0, 3)
-	if key := c.referrerKey(r.Header.Get("Referer")); key != "" {
+	if key := c.referrerKey(r); key != "" {
 		keys = append(keys, key)
 	}
 	if key := refKey(r); key != "" {
@@ -222,8 +251,8 @@ func (s *Server) countReferrer(r *http.Request) {
 // referrerDay is one day's unwritten counts and how many domains and venues
 // they name.
 type referrerDay struct {
-	counts      map[string]int64
-	hosts, refs int
+	counts              map[string]int64
+	hosts, assets, refs int
 }
 
 // day returns the pending counts for day, creating them; c.mu is held.
@@ -236,7 +265,8 @@ func (c *referrerCounter) day(day string) *referrerDay {
 	return d
 }
 
-// add counts n for key, as other once referrerPendingHosts domains are held
+// add counts n for key, as other once referrerPendingHosts "host:" domains
+// are held, as asset-other once referrerPendingHosts "asset:" domains are,
 // and as ref-other once referrerPendingRefs venues are.
 func (d *referrerDay) add(key string, n int64) {
 	if _, held := d.counts[key]; !held {
@@ -245,6 +275,10 @@ func (d *referrerDay) add(key string, n int64) {
 			key = "other"
 		case strings.HasPrefix(key, "host:"):
 			d.hosts++
+		case strings.HasPrefix(key, "asset:") && d.assets >= referrerPendingHosts:
+			key = "asset-other"
+		case strings.HasPrefix(key, "asset:"):
+			d.assets++
 		case strings.HasPrefix(key, "ref:") && d.refs >= referrerPendingRefs:
 			key = "ref-other"
 		case strings.HasPrefix(key, "ref:"):

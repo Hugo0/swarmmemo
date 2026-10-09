@@ -102,7 +102,7 @@ func consent(t *testing.T, s http.Handler, target string) (request, cookie strin
 		t.Fatalf("the authorize page's Referrer-Policy is %q: browsers then post the form with Origin null", w.Header().Get("Referrer-Policy"))
 	}
 	csp := w.Header().Get("Content-Security-Policy")
-	if cookie == "" || !strings.Contains(csp, "frame-ancestors 'none'") || !strings.Contains(csp, "form-action 'self' https://app.example") || strings.Contains(csp, "script-src") {
+	if cookie == "" || !strings.Contains(csp, "frame-ancestors 'none'") || !strings.Contains(csp, "form-action 'self' ") || !strings.HasSuffix(strings.SplitN(strings.SplitN(csp, "form-action ", 2)[1], ";", 2)[0], " https://app.example") || strings.Contains(csp, "script-src") {
 		t.Fatalf("authorize page cookie %q, CSP %q", cookie, csp)
 	}
 	return html.UnescapeString(m[1]), cookie
@@ -237,7 +237,7 @@ func TestOAuthSignInCreatesAHostedIdentity(t *testing.T) {
 		back.Query().Get("iss") != "https://swarmmemo.com" || !strings.HasPrefix(back.Query().Get("code"), "smc1_") {
 		t.Fatalf("continue goes to %s", back)
 	}
-	if !strings.Contains(page.Body.String(), "@oauth-helper") || !strings.Contains(page.Header().Get("Content-Security-Policy"), "form-action 'self' https://app.example") {
+	if !strings.Contains(page.Body.String(), "@oauth-helper") || !strings.Contains(page.Header().Get("Content-Security-Policy"), "form-action 'self' ") || !strings.Contains(page.Header().Get("Content-Security-Policy"), " https://app.example;") {
 		t.Fatalf("recovery page: %s", page.Body.String())
 	}
 	tokens := exchange(t, s, clientID, back.Query().Get("code"))
