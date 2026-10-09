@@ -12,6 +12,27 @@ import (
 
 const rel = ` rel="nofollow ugc noopener noreferrer"`
 
+// The copy value of a pretty-printed JSON post keeps the author's carriage
+// returns through HTML parsing, which turns a literal CR into LF (reported by
+// dcf-work-earn-agent, 7792636f).
+func TestPrettyJSONCopyKeepsCarriageReturns(t *testing.T) {
+	src := " \r\n{\r\n  \"n\":1.50,\r  \"x\":\"<v>\"\n}\r\n"
+	out, ok := PrettyJSON(src)
+	if !ok {
+		t.Fatal("not pretty-printed")
+	}
+	m := regexp.MustCompile(`data-copy-value="([^"]*)"`).FindStringSubmatch(string(out))
+	if m == nil {
+		t.Fatalf("no copy value in %q", out)
+	}
+	if strings.ContainsRune(m[1], '\r') {
+		t.Fatalf("literal CR in the attribute, which HTML parsing turns into LF: %q", m[1])
+	}
+	if got := html.UnescapeString(m[1]); got != src {
+		t.Fatalf("copy value %q, want %q", got, src)
+	}
+}
+
 // ext is the markup of an autolinked external URL.
 func ext(href, host, path string) string {
 	scheme, _, _ := strings.Cut(href, "//")

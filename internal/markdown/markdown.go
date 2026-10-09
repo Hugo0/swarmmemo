@@ -398,18 +398,23 @@ func splitRow(line string) []string {
 		t = t[:len(t)-1]
 	}
 	cells := []string{}
-	start, ticks := 0, 0
+	ticks, start := backtickRuns(t), 0
 	for i := 0; i < len(t); i++ {
 		switch t[i] {
 		case '\\':
 			i++
 		case '`':
-			ticks ^= 1
-		case '|':
-			if ticks == 0 {
-				cells = append(cells, strings.TrimSpace(t[start:i]))
-				start = i + 1
+			// A code span is the inline scanner's: a run closed by the next
+			// run of the same length. An unmatched run is cell text.
+			n := runLength(t, i, '`')
+			if end := ticks.next(n, i+n); end >= 0 {
+				i = end + n - 1
+			} else {
+				i += n - 1
 			}
+		case '|':
+			cells = append(cells, strings.TrimSpace(t[start:i]))
+			start = i + 1
 		}
 	}
 	if start < len(t) || len(cells) > 0 || t != "" {
@@ -647,12 +652,22 @@ func (r *renderer) anchor(text string) string {
 	if base == "" {
 		return ""
 	}
-	id := "md-" + base
-	if n := r.anchors[base]; n > 0 {
-		id += "-" + strconv.Itoa(n+1)
+	// anchors holds every id taken (>0) and, for a taken one, the last suffix
+	// tried on it, so a repeat resumes there: a generated "alpha-2" is reserved
+	// too, and a heading that is literally "Alpha-2" moves on to "alpha-2-2".
+	n := r.anchors[base]
+	if n == 0 {
+		r.anchors[base] = 1
+		return "md-" + base
 	}
-	r.anchors[base]++
-	return id
+	for {
+		n++
+		id := base + "-" + strconv.Itoa(n)
+		if r.anchors[id] == 0 {
+			r.anchors[base], r.anchors[id] = n, 1
+			return "md-" + id
+		}
+	}
 }
 
 func (r *renderer) paragraph(text string, bare bool) {
@@ -1087,13 +1102,11 @@ func codeSpan(s string) string {
 // next run of exactly that length, by binary search over precomputed positions.
 type tickIndex map[int][]int
 
+// Inside a code span a backslash is literal, so it cannot escape a closing
+// run: every run is indexed. Callers skip an escaped opener outside code.
 func backtickRuns(s string) tickIndex {
 	idx := tickIndex{}
 	for i := 0; i < len(s); {
-		if s[i] == '\\' {
-			i += 2
-			continue
-		}
 		if s[i] != '`' {
 			i++
 			continue
@@ -1114,14 +1127,23 @@ func (idx tickIndex) next(n, from int) int {
 	return -1
 }
 
-// matchBrackets pairs [ and ] in one linear pass, skipping escapes.
+// matchBrackets pairs [ and ] in one linear pass, skipping escapes and code
+// spans (a bracket in `code` belongs to the code, not to a link label).
 func matchBrackets(s string) map[int]int {
 	pairs := map[int]int{}
 	stack := []int{}
+	ticks := backtickRuns(s)
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '\\':
 			i++
+		case '`':
+			n := runLength(s, i, '`')
+			if end := ticks.next(n, i+n); end >= 0 {
+				i = end + n - 1
+			} else {
+				i += n - 1
+			}
 		case '[':
 			stack = append(stack, i)
 		case ']':

@@ -102,7 +102,7 @@ func (r *renderer) plainLine(s string) {
 	for i := 0; i < len(s); {
 		switch {
 		case s[i] == '\\':
-			// Skipped as backtickRuns skips it, so the two agree on every run.
+			// An escaped backtick opens nothing, as in the Markdown scanner.
 			i += 2
 			continue
 		case s[i] != '`':
@@ -144,7 +144,9 @@ func PrettyJSON(src string) (template.HTML, bool) {
 	if json.Indent(&out, []byte(t), "", "  ") != nil {
 		return "", false
 	}
-	return template.HTML(`<pre><code data-lang="json" data-copy-value="` + template.HTMLEscapeString(src) + `">` + // #nosec: escaped text and fixed tags
+	// HTML parsing turns a literal CR into LF; a character reference survives.
+	copyValue := strings.ReplaceAll(template.HTMLEscapeString(src), "\r", "&#13;")
+	return template.HTML(`<pre><code data-lang="json" data-copy-value="` + copyValue + `">` + // #nosec: escaped text and fixed tags
 		template.HTMLEscapeString(out.String()) + `</code></pre>`), true
 }
 

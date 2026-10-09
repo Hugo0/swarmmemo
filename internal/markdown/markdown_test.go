@@ -10,6 +10,85 @@ import (
 
 func render(src string) string { return string(Render(src, Options{})) }
 
+// Every heading id on a page is unique, also when a heading's own text ends
+// in a number that a repeated heading's suffix would generate (reported by
+// dcf-work-earn-agent, 5e82b4fd).
+func TestHeadingAnchorsUniqueAcrossLiteralSuffixes(t *testing.T) {
+	got := string(Render("## Alpha\n\n## Alpha\n\n## Alpha-2\n\n## Alpha\n\n## Alpha-2-2", Options{Anchors: true}))
+	var ids []string
+	for _, m := range regexp.MustCompile(` id="(md-[^"]+)"`).FindAllStringSubmatch(got, -1) {
+		ids = append(ids, m[1])
+	}
+	want := []string{"md-alpha", "md-alpha-2", "md-alpha-2-2", "md-alpha-3", "md-alpha-2-2-2"}
+	if strings.Join(ids, " ") != strings.Join(want, " ") {
+		t.Fatalf("heading ids %v, want %v", ids, want)
+	}
+}
+
+// A pipe-table cell with an unmatched backtick keeps it as text and the row
+// keeps its columns; a matched code span still keeps its pipes (reported by
+// dcf-work-earn-agent, 6050408d).
+func TestTableCellUnmatchedBacktick(t *testing.T) {
+	for _, tc := range []struct{ row, want string }{
+		{"| literal` | right-marker |", "<td>literal`</td><td>right-marker</td>"},
+		{"| ``a`b`` | c |", "<td><code>a`b</code></td><td>c</td>"},
+		{"| `a|b` | c |", "<td><code>a|b</code></td><td>c</td>"},
+		{"| a\\|b | c |", "<td>a|b</td><td>c</td>"},
+	} {
+		got := render("| L | R |\n|---|---|\n" + tc.row)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.row, got, tc.want)
+		}
+	}
+}
+
+// A backslash inside a code span is literal and does not escape its closing
+// backticks, in a Markdown and in a plain post; an escaped opener still makes
+// no code (reported by zero-capital-769f9705, 8fc27828).
+func TestCodeSpanBackslashLiteral(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"`C:\\`", "<code>C:\\</code>"},
+		{"``C:\\``", "<code>C:\\</code>"},
+		{"`a\\b`", "<code>a\\b</code>"},
+		{"`foo\\`bar`", "<code>foo\\</code>bar`"},
+		{"`text`", "<code>text</code>"},
+	} {
+		for name, got := range map[string]string{"markdown": render(tc.in), "plain": string(Text(tc.in))} {
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("%s %q: got %q, want %q", name, tc.in, got, tc.want)
+			}
+		}
+	}
+	for _, in := range []string{"\\`literal`", "\\`a\\`"} {
+		for name, got := range map[string]string{"markdown": render(in), "plain": string(Text(in))} {
+			if strings.Contains(got, "<code>") {
+				t.Errorf("%s %q: escaped opener made code: %q", name, in, got)
+			}
+		}
+	}
+}
+
+// A link label whose code span holds a bracket stays one link (reported by
+// zero-capital-769f9705, 2b23ddd1).
+func TestLinkLabelCodeSpanBrackets(t *testing.T) {
+	for _, tc := range []struct{ label, code string }{
+		{"`a]b`", "<code>a]b</code>"},
+		{"`a[b`", "<code>a[b</code>"},
+		{"``a]b``", "<code>a]b</code>"},
+		{"`abc`", "<code>abc</code>"},
+		{"abc", "abc"},
+	} {
+		got := render("[" + tc.label + "](/docs)")
+		if want := `<a href="/docs"><bdi>` + tc.code + `</bdi></a>`; !strings.Contains(got, want) {
+			t.Errorf("%q: got %q, want %q", tc.label, got, want)
+		}
+	}
+	// A code span that starts inside a label and ends past it wins over the link.
+	if got := render("[a`](/x)`"); strings.Contains(got, "<a ") || !strings.Contains(got, "<code>](/x)</code>") {
+		t.Errorf("code span across a label: %q", got)
+	}
+}
+
 // A document keeps its own heading levels under the page's h1, where a post
 // shifts them down one; neither ever emits an h1 or goes past h4.
 func TestDocumentHeadingLevels(t *testing.T) {

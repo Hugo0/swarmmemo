@@ -476,8 +476,14 @@ func (s *Server) servicesCapabilities(catalog []services.Entry) map[string]any {
 	if len(f.Services) == 0 {
 		return nil
 	}
+	// enabled is what can be called: the catalogue's ids, with tools, which
+	// any service but echo brings along without a flag of its own.
+	enabled := make([]string, 0, len(catalog))
+	for _, e := range catalog {
+		enabled = append(enabled, e.ID)
+	}
 	caps := map[string]any{
-		"enabled": f.Services, "call": "service.call", "read": "service.read", "list": "services.list", "catalogue": "/api/services",
+		"enabled": enabled, "call": "service.call", "read": "service.read", "list": "services.list", "catalogue": "/api/services",
 		"data":   `{"schema":1,"method":METHOD,"args":{...},"max_cost":N}; max_cost only on service.call, which is refused with price_exceeds_max, spending nothing, when the current price is higher`,
 		"status": `service.read {"schema":1,"method":"status","args":{"call":CALL_ID}} reads a remote or async call you made`,
 		// inference (its configured upstreams), public_data (its catalogue's

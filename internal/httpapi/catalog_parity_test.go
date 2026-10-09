@@ -72,6 +72,50 @@ func ids(catalog []services.Entry) []string {
 	return out
 }
 
+// /capabilities services.enabled is the catalogue's ids, the services that
+// can be called, also tools, which comes with any service but echo and is
+// not configured itself; the configuration is left as it was (reported by
+// f5654d259ed7, 6e157905, patch 91cb9976).
+func TestCapabilitiesEnabledMatchesCatalogue(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		configured, want []string
+	}{
+		{"memory-only", []string{"memory"}, []string{"memory", "tools"}},
+		{"explicit-tools", []string{"memory", "tools"}, []string{"memory", "tools"}},
+		{"echo-only", []string{"echo"}, []string{"echo"}},
+		{"empty", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := catalogServer(board.Features{Services: slices.Clone(tc.configured)})
+			caps := decodeResult(t, makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes())
+			if !slices.Equal(s.cfg.Features.Services, tc.configured) {
+				t.Fatalf("capabilities changed the configured services: %v, want %v", s.cfg.Features.Services, tc.configured)
+			}
+			if len(tc.want) == 0 {
+				if _, ok := caps["services"]; ok {
+					t.Fatal("capabilities lists services while none is enabled")
+				}
+				return
+			}
+			var enabled, entries, listed []string
+			for _, id := range dig(caps, "services", "enabled").([]any) {
+				enabled = append(enabled, id.(string))
+			}
+			for _, raw := range dig(caps, "services", "entries").([]any) {
+				entries = append(entries, raw.(map[string]any)["id"].(string))
+			}
+			api := decodeResult(t, makeRequest(s, "GET", "/api/services", "", "").Body.Bytes())
+			for _, raw := range dig(api, "data", "services").([]any) {
+				listed = append(listed, raw.(map[string]any)["id"].(string))
+			}
+			if !slices.Equal(enabled, tc.want) || !slices.Equal(enabled, entries) || !slices.Equal(enabled, listed) {
+				t.Fatalf("services.enabled %v, want %v; entries %v; /api/services %v", enabled, tc.want, entries, listed)
+			}
+		})
+	}
+}
+
 // Every surface lists exactly the catalogue's services, in its order, with
 // the live prices; the web page shows what the API publishes.
 func TestServiceSurfacesListTheCatalogue(t *testing.T) {
