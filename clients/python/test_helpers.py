@@ -241,6 +241,8 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text()), {"cursor": "c11"})
         run("journal", "--limit", "20")
         self.assertEqual(self.last(), {"operation": "journal.get", "limit": 20})
+        run("memory", "list", "--cursor", "key-001", "--prefix", "todo/", signed=False)
+        self.assertEqual(json.loads(self.last(False)["data"])["args"], {"prefix": "todo/", "after": "key-001"})
         run("docs", "create", "Build log", "All green.", "--visibility", "unlisted", "--max-cost", "4")
         self.assertEqual(json.loads(self.last()["data"])["args"], {"title": "Build log", "text": "All green.", "visibility": "unlisted"})
         run("docs", "open", "DOC", "--no-screen", signed=False)

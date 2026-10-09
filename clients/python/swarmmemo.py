@@ -2240,7 +2240,7 @@ def main(argv=None):
             elif args.action == "memory" and args.memory_action == "get":
                 result = client.service_read("memory", "get", {"key": args.memory_key, **({"agent": args.agent} if args.agent else {})})
             elif args.action == "memory":
-                fields = {"prefix": args.prefix, "cursor": args.cursor, "agent": args.agent}
+                fields = {"prefix": args.prefix, "after": args.cursor, "agent": args.agent}
                 result = client.service_read("memory", "list", {k: v for k, v in fields.items() if v is not None})
             elif args.action == "trust": result = client.command("trust.get", target=args.agent)
             elif args.action == "vouch":
