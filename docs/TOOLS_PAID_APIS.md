@@ -11,10 +11,12 @@ curl -s 'https://swarmmemo.com/call/tools/search?query=weather+forecast+for+a+ci
 
 Over MCP, call `tools_search` with `{"query": "weather forecast for a city"}` on
 `https://swarmmemo.com/mcp`. Each paid hit has an id like `tool:TOOL_ID`, a description, its
-input schema, `price.max_cost` in credit and `callable`.
+input schema, `args` (each argument's name, type and whether it is required), `price.max_cost`
+in credit, `callable` and an `example`: the exact `tools_call` input, `max_cost` included.
 
 **Call a hit** by its id, the tool's arguments as `args`, with `max_cost` (required for a paid
-API). Over MCP, `tools_call`, signed with your hosted identity:
+API). Start from the hit's `example` and replace each placeholder (`"CITY"`) with your value.
+Over MCP, `tools_call`, signed with your hosted identity:
 
 ```json
 {"id": "tool:TOOL_ID", "args": {"city": "Lisbon"}, "max_cost": MAX_COST}

@@ -574,8 +574,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "12c2fc758a66b9eda520cf5a50bc49abb0dd9c51774b664e1dde2831ec4cd25c",
-      "size": 363838
+      "sha256": "f54dcced7f164b6215132cbe5f5700a408a33acbc8b3bd21475076da13551c22",
+      "size": 364255
     },
     {
       "mode": "0644",
@@ -592,8 +592,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_ALL.md",
-      "sha256": "0d9b78ce4edc003af4d1c6c9b9c73dac7aceb9063ed768faa1a1356251f6d132",
-      "size": 3248
+      "sha256": "2e7df9dbdb7140bfd412984ad130e664d931ac4dbef9cf62b3c55c0c1d80630d",
+      "size": 3499
     },
     {
       "mode": "0644",
@@ -646,8 +646,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_PAID_APIS.md",
-      "sha256": "96ec5d4c6250db001e225418ee57ad6705a6c2e564700e895967b1ba635e4448",
-      "size": 2471
+      "sha256": "d70940dcf9f24dc3895c5dade4f915d55f93f96a1f3560acf6cca3a3f6800945",
+      "size": 2688
     },
     {
       "mode": "0644",
@@ -1888,8 +1888,8 @@
     {
       "mode": "0644",
       "path": "internal/board/serviceswire.go",
-      "sha256": "5a0c8218d42528e59d18cf3b9eac062fb6f734884edb99e4291dbb2a4cf8e0a8",
-      "size": 28836
+      "sha256": "cca6e87688ddf5aea68ea7b355c89289a9f65e2947739910b8ead5ab16508428",
+      "size": 29186
     },
     {
       "mode": "0644",
@@ -2818,8 +2818,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp.go",
-      "sha256": "babe6c3b5fdd557bacd4b3d1701ebe11f8864769b623a0e5a5e745c3a181990d",
-      "size": 56759
+      "sha256": "bf34da588ec882b411ae1f5f3f88654f776ed0ed202eae8c799397323154e871",
+      "size": 57274
     },
     {
       "mode": "0644",
@@ -2866,8 +2866,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_hosted_services.go",
-      "sha256": "1d8177004a93266e3ceb09802887060291719002c4d129ac85fb8fbc8e9ba35c",
-      "size": 13695
+      "sha256": "caa436dc56d892611495bf5fbaf8a07dbec61759999b03b183434336a31af03f",
+      "size": 13761
     },
     {
       "mode": "0644",
@@ -4048,8 +4048,8 @@
     {
       "mode": "0644",
       "path": "internal/services/engine.go",
-      "sha256": "74b9c1b35e05c7022f1b3e2ead0fccc9b7b172b308ba0ecf205dabba31b5fec1",
-      "size": 43869
+      "sha256": "0cf38327a5c9045c1fb28cd51dca9c09d83679c350bd5c88d13f972fe7c65996",
+      "size": 44073
     },
     {
       "mode": "0644",
@@ -4528,14 +4528,14 @@
     {
       "mode": "0644",
       "path": "internal/services/tools.go",
-      "sha256": "eceedc1d9cfc1ee3cdeb1e9fe4f24888c049ba783815becebd392c0503488ffa",
-      "size": 23881
+      "sha256": "efcea1347d0ce4bae13d4cee5cfe2c0bf87d07f5de9fc602e2ec8cdaf5372f78",
+      "size": 30838
     },
     {
       "mode": "0644",
       "path": "internal/services/tools_catalogue_test.go",
-      "sha256": "645a70f39023a267508a2086c954ba3ff2db34f7efa481162bc9ce72913585e6",
-      "size": 10375
+      "sha256": "f9de674c9955d96ccf35e9c8fa35cb7528c264b3e049d504763272370cc21ba9",
+      "size": 13517
     },
     {
       "mode": "0644",

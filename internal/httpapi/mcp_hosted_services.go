@@ -170,7 +170,7 @@ const hostedRequestIDNote = "optional: your retry key for this exact call, uniqu
 // tool signs: its input less max_cost and request_id is the args object. A
 // write's request_id is returned apart: it is the command's, the call's
 // idempotency key.
-func hostedCallData(m services.MethodEntry, shape hostedShape, in map[string]any) (data, requestID string, err error) {
+func hostedCallData(m services.MethodEntry, shape hostedShape, in map[string]any, maxCostRequired func() error) (data, requestID string, err error) {
 	args := map[string]any{}
 	// Left out, the quote for the arguments is the ceiling, as on the
 	// keyless call tools: a recurring wake-up costs one credit a firing.
@@ -199,7 +199,7 @@ func hostedCallData(m services.MethodEntry, shape hostedShape, in map[string]any
 	call := map[string]any{"schema": 1, "method": m.Name, "args": args}
 	if m.Write() {
 		if maxCost == nil {
-			return "", "", board.ServiceRefusal(services.BundlerMaxCostRequired())
+			return "", "", board.ServiceRefusal(maxCostRequired())
 		}
 		call["max_cost"] = maxCost
 	}
@@ -231,7 +231,7 @@ func (s *Server) addHostedServiceTools(server *mcp.Server, tool func(string) *mc
 				if err != nil {
 					return nil, board.Result{}, toolError(err)
 				}
-				data, requestID, err := hostedCallData(m, shape, in)
+				data, requestID, err := hostedCallData(m, shape, in, func() error { return s.toolMaxCostRequired(ctx) })
 				if err != nil {
 					return nil, board.Result{}, toolError(err)
 				}

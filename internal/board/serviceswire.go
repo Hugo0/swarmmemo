@@ -521,6 +521,16 @@ func (s *Store) NoKey(ctx context.Context) services.NoKey {
 	return s.noKey(ctx, s.db, s.now().Unix())
 }
 
+// ToolMaxCost is a paid catalogue tool's price.max_cost now, for the wires
+// that refuse a call without max_cost before the engine (C116); 0 when no
+// paid tools are served.
+func (s *Store) ToolMaxCost(ctx context.Context) int64 {
+	if s.services.engine == nil {
+		return 0
+	}
+	return s.services.engine.ToolMaxCostNow(ctx, s.db, s.now().Unix())
+}
+
 // serviceRequestKey is the call's retry key, the same one the requests table
 // uses: the request ID when given, else the signed nonce.
 func serviceRequestKey(c Command) string {

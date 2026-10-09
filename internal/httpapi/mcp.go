@@ -682,7 +682,7 @@ var resultOutputSchema = func() *jsonschema.Schema {
 // the tool ran: invalid_request, its text as the message, or for a service
 // tool (catalogue) the refusal /call/ and service.call give the same
 // arguments (catalogueArgError).
-func structuredToolErrors(catalogue map[string]bool) mcp.Middleware {
+func structuredToolErrors(catalogue map[string]bool, maxCostRequired func(context.Context) error) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			res, err := next(ctx, method, req)
@@ -691,7 +691,7 @@ func structuredToolErrors(catalogue map[string]bool) mcp.Middleware {
 				if cause := r.GetError(); !errors.As(cause, &be) {
 					be = &board.Error{Status: 400, Code: "invalid_request", Message: fmt.Sprint(cause)}
 					if call, ok := req.(*mcp.CallToolRequest); ok && call.Params != nil && catalogue[call.Params.Name] {
-						be = catalogueArgError(fmt.Sprint(cause))
+						be = catalogueArgError(fmt.Sprint(cause), func() error { return maxCostRequired(ctx) })
 						r.Content = []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("%d %s: %s", be.Status, be.Code, be.Message)}}
 					}
 				}
@@ -706,11 +706,23 @@ func structuredToolErrors(catalogue map[string]bool) mcp.Middleware {
 // `unexpected additional properties ["nope"]`, `missing properties: ["id"]`.
 var sdkPropertiesRE = regexp.MustCompile(`(unexpected additional|missing) properties:? (\["(?:[^"\\]|\\.)*"(?:,"(?:[^"\\]|\\.)*")*\])`)
 
+// toolMaxCostRequired is the refusal of a paid tool's call without max_cost,
+// naming the value to send as the engine's does (C116).
+func (s *Server) toolMaxCostRequired(ctx context.Context) error {
+	var n int64
+	if store, ok := s.service.(interface {
+		ToolMaxCost(context.Context) int64
+	}); ok {
+		n = store.ToolMaxCost(ctx)
+	}
+	return services.BundlerMaxCostRequiredOf(n)
+}
+
 // catalogueArgError is the SDK's refusal of a service tool's arguments in
 // the engine's words: invalid_service_data, naming an argument the method
 // does not take as /call/ and service.call do (services.UnknownArg), and a
-// paid tool's missing max_cost as services.BundlerMaxCostRequired.
-func catalogueArgError(sdk string) *board.Error {
+// paid tool's missing max_cost as maxCostRequired (toolMaxCostRequired).
+func catalogueArgError(sdk string, maxCostRequired func() error) *board.Error {
 	msg := "The arguments do not fit this tool's input schema: " + sdk + "."
 	if m := sdkPropertiesRE.FindStringSubmatch(sdk); m != nil {
 		var names []string
@@ -719,7 +731,7 @@ func catalogueArgError(sdk string) *board.Error {
 			case m[1] == "unexpected additional":
 				msg = services.UnknownArg(names[0]) + "."
 			case names[0] == services.CallFieldMaxCost:
-				return apiError(board.ServiceRefusal(services.BundlerMaxCostRequired()))
+				return apiError(board.ServiceRefusal(maxCostRequired()))
 			default:
 				msg = names[0] + " is required."
 			}
@@ -740,7 +752,7 @@ func catalogueToolNames(catalog []services.Entry) map[string]bool {
 
 func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "swarmmemo", Version: s.cfg.Version}, &mcp.ServerOptions{Instructions: instructions})
-	server.AddReceivingMiddleware(structuredToolErrors(catalogueToolNames(p.catalog)))
+	server.AddReceivingMiddleware(structuredToolErrors(catalogueToolNames(p.catalog), s.toolMaxCostRequired))
 	// Sign-in (OAuth): refusals carry the challenge that starts it, and the
 	// tools say which need it.
 	signIn := s.oauthStore() != nil

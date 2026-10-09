@@ -377,7 +377,10 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 		if _, err = e.cfg.Registry.Lookup(ToolsID); err != nil {
 			return Outcome{}, err
 		}
-		if req.Service, req.Data, err = e.RouteTool(req.Data); err != nil {
+		// The price table is read only for a paid tool called without
+		// max_cost, whose refusal names the value to send.
+		toolMaxCost := func() int64 { return e.ToolMaxCostNow(ctx, tx, now) }
+		if req.Service, req.Data, err = e.routeTool(req.Data, toolMaxCost); err != nil {
 			return Outcome{}, err
 		}
 	}

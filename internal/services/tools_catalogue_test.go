@@ -263,3 +263,70 @@ func TestFeaturedExamplesParse(t *testing.T) {
 		}
 	}
 }
+
+// C116: every paid hit carries a call that runs as it is (id, args from its
+// input schema, max_cost from its price.max_cost) and an args summary; a
+// call without max_cost is told the value to send.
+func TestToolsSearchPaidHitExampleRuns(t *testing.T) {
+	h, api := newToolsHarness(t)
+	page, raw := h.toolsSearch(`{"query":"weather"}`)
+	var hit map[string]any
+	for _, e := range toolEntries(page) {
+		if e["kind"] == "catalogue" && e["example"] == nil {
+			t.Errorf("%v: a paid hit without an example", e["id"])
+		}
+		if e["id"] == "tool:"+toolOK {
+			hit = e
+		}
+	}
+	if hit == nil {
+		t.Fatalf("no weather hit: %s", raw)
+	}
+	ex := hit["example"].(map[string]any)
+	maxCost := hit["price"].(map[string]any)["max_cost"].(float64)
+	if ex["id"] != "tool:"+toolOK || ex["max_cost"].(float64) != maxCost || fmt.Sprint(ex["args"]) != "map[city:CITY]" {
+		t.Fatalf("example: %+v", ex)
+	}
+	if fmt.Sprint(hit["args"]) != "[map[name:city required:false type:string]]" {
+		t.Fatalf("args: %+v", hit["args"])
+	}
+	// The example, sent as it is, runs.
+	args, _ := json.Marshal(map[string]any{"id": ex["id"], "args": ex["args"]})
+	if _, err := h.toolsCall(string(args), int64(ex["max_cost"].(float64))); err != nil {
+		t.Fatalf("the example: %v", err)
+	}
+	if fmt.Sprint(api.lastInvoke["calls"].([]any)[0].(map[string]any)["args"]) != "map[city:CITY]" {
+		t.Fatalf("the tool's args: %v", api.lastInvoke)
+	}
+	// Without max_cost: the refusal names the field and the value.
+	_, err := h.toolsCall(string(args), -1)
+	if errCode(err) != "invalid_service_data" || !strings.Contains(err.(*allowance.Err).Message, fmt.Sprintf("send max_cost: %d", int64(maxCost))) {
+		t.Fatalf("no max_cost: %v", err)
+	}
+}
+
+func TestSchemaArgs(t *testing.T) {
+	for _, c := range []struct{ schema, args, example string }{
+		{`{"type":"object","properties":{"city":{"type":"string"},"days":{"type":["integer","null"]},"units":{"type":"string","enum":["metric","imperial"]}},"required":["city","units"]}`,
+			`[{city string true} {units string true} {days integer false}]`, `map[city:CITY units:metric]`},
+		{`{"type":"http","method":"GET","queryParams":{"q":{"type":"string","required":true},"limit":{"type":"number"}}}`,
+			`[{q string true} {limit number false}]`, `map[q:Q]`},
+		{`{"type":"http","body":{"type":"object","properties":{"coin-id":{"type":"string"}}}}`, `[{coin-id string false}]`, `map[coin-id:COIN_ID]`},
+		{`{"type":"http","body":{"n":3,"ok":true,"tags":["a"]}}`, `[{n integer false} {ok boolean false} {tags array false}]`, `map[n:1 ok:true tags:[]]`},
+		{`{"type":"http","body":{"bad name\u0000":"x","fine":"y"}}`, `[{fine string false}]`, `map[fine:FINE]`},
+		{`[1,2]`, `[]`, `map[]`},
+		{``, `[]`, `map[]`},
+	} {
+		args := schemaArgs(json.RawMessage(c.schema))
+		parts := []string{}
+		for _, a := range args {
+			parts = append(parts, fmt.Sprintf("{%s %s %v}", a.name, a.typ, a.required))
+		}
+		if got := "[" + strings.Join(parts, " ") + "]"; got != c.args {
+			t.Errorf("%s: args %s, want %s", c.schema, got, c.args)
+		}
+		if got := fmt.Sprint(exampleArgs(args)); got != c.example {
+			t.Errorf("%s: example %s, want %s", c.schema, got, c.example)
+		}
+	}
+}

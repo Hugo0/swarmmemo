@@ -125,6 +125,12 @@ func ToolID(service, method string) string { return ToolIDPrefix + service + "."
 // a catalogue tool is refused, since its price is known only at run time.
 // Pure: it checks the id against the registry, nothing else.
 func (e *Engine) RouteTool(data string) (service, routed string, err error) {
+	return e.routeTool(data, nil)
+}
+
+// routeTool is RouteTool; toolMaxCost, when given, is a paid tool's
+// price.max_cost, read only for the refusal of a call without max_cost.
+func (e *Engine) routeTool(data string, toolMaxCost func() int64) (service, routed string, err error) {
 	var env struct {
 		Schema  json.RawMessage `json:"schema"`
 		Method  *string         `json:"method"`
@@ -193,7 +199,11 @@ func (e *Engine) RouteTool(data string) (service, routed string, err error) {
 			return "", "", unknown
 		}
 		if maxCost >= CallDefaultMaxCost {
-			return "", "", BundlerMaxCostRequired()
+			var n int64
+			if toolMaxCost != nil {
+				n = toolMaxCost()
+			}
+			return "", "", BundlerMaxCostRequiredOf(n)
 		}
 		raw := canonicalJSON(map[string]any{"schema": 1, "method": "call", "args": map[string]any{"resource": id, "body": args}, "max_cost": maxCost})
 		return "x402", string(raw), nil
@@ -205,6 +215,44 @@ func (e *Engine) RouteTool(data string) (service, routed string, err error) {
 // without max_cost, on every wire: its price is known only at run time.
 func BundlerMaxCostRequired() error {
 	return badArg("max_cost is required for a " + BundlerPrefix + " tool: the most this call may cost, in credit (its price.max_cost in tools search, or less).")
+}
+
+// BundlerMaxCostRequiredOf is BundlerMaxCostRequired naming the value to
+// send: the tool's price.max_cost, n credits (n <= 0: not known here).
+func BundlerMaxCostRequiredOf(n int64) error {
+	if n <= 0 {
+		return BundlerMaxCostRequired()
+	}
+	return badArg("max_cost is required for paid tools; send max_cost: " + itoa(n) + " (this tool's price.max_cost in tools search: the most this call may cost, in credit).")
+}
+
+// ToolMaxCost is a paid catalogue tool's price.max_cost at prices (the
+// defaults when nil), the same for every tool: what the most one call may
+// pay comes to in credit; 0 when paid tools are not served here.
+func (e *Engine) ToolMaxCost(prices Prices) int64 {
+	p, err := e.cfg.Registry.Lookup("x402")
+	if err != nil {
+		return 0
+	}
+	x, ok := p.(*x402)
+	if !ok || x.fr == nil || x.fr.cfg == nil {
+		return 0
+	}
+	price, ok := prices["x402.call"]
+	if !ok {
+		price = DefaultPrices()["x402.call"]
+	}
+	return price.For(x.fr.cfg.MaxPrice)
+}
+
+// ToolMaxCostNow is ToolMaxCost at the price table q reads now, for a wire
+// that refuses a paid tool's missing max_cost before the engine sees it.
+func (e *Engine) ToolMaxCostNow(ctx context.Context, q allowance.Querier, now int64) int64 {
+	_, prices, err := e.prices(ctx, q, now)
+	if err != nil {
+		prices = nil
+	}
+	return e.ToolMaxCost(prices)
 }
 
 // Featured.
@@ -395,11 +443,210 @@ func catalogueTools(raw json.RawMessage) ([]toolHit, bool) {
 		if len(h.Schema) > 0 {
 			entry["input_schema"] = h.Schema
 		}
+		// C116: a call that runs as it is, max_cost and all, and the
+		// arguments the schema names.
+		args := schemaArgs(h.Schema)
+		if len(args) > 0 {
+			summary := make([]map[string]any, 0, len(args))
+			for _, a := range args {
+				summary = append(summary, map[string]any{"name": a.name, "type": a.typ, "required": a.required})
+			}
+			entry["args"] = summary
+		}
+		if h.MaxCost > 0 {
+			entry["example"] = map[string]any{"id": h.ID, "args": exampleArgs(args), "max_cost": h.MaxCost}
+		}
 		// The catalogue's own order is its relevance: first hit just under a
 		// full match of SwarmMemo's own tools, then down.
 		out = append(out, toolHit{entry: entry, score: 0.99 - float64(i)/float64(4*max(len(page.Hits), 1))})
 	}
 	return out, page.Partial
+}
+
+// toolArgsMax bounds the arguments a paid hit's args summary and example
+// carry.
+const toolArgsMax = 16
+
+// toolArg is one argument a paid tool's input schema names.
+type toolArg struct {
+	name, typ string
+	required  bool
+	enum      any // the first of its enum, when it has a plain one
+}
+
+// schemaArgs is the arguments a paid tool's input schema names, required
+// first then by name, at most toolArgsMax, each name plain (EchoesArg). It
+// reads a JSON Schema object (properties, required), the same nested under
+// body, query, queryParams, bodyFields, params or input, a map of field
+// specs ({"city":{"type":"string","required":true}}) or a sample body
+// ({"city":"London"}, every field optional). Anything else names none.
+func schemaArgs(schema json.RawMessage) []toolArg {
+	var top map[string]json.RawMessage
+	if len(schema) == 0 || json.Unmarshal(schema, &top) != nil {
+		return nil
+	}
+	var args []toolArg
+	if props, ok := top["properties"]; ok {
+		args = jsonSchemaArgs(props, top["required"])
+	} else {
+		for _, k := range []string{"body", "bodyFields", "queryParams", "query", "params", "input"} {
+			var inner map[string]json.RawMessage
+			if json.Unmarshal(top[k], &inner) != nil || len(inner) == 0 {
+				continue
+			}
+			if props, ok := inner["properties"]; ok {
+				args = jsonSchemaArgs(props, inner["required"])
+			} else {
+				args = fieldArgs(inner)
+			}
+			break
+		}
+	}
+	slices.SortFunc(args, func(a, b toolArg) int {
+		if a.required != b.required {
+			if a.required {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.name, b.name)
+	})
+	if len(args) > toolArgsMax {
+		args = args[:toolArgsMax]
+	}
+	return args
+}
+
+// jsonSchemaArgs reads a JSON Schema's properties and required list.
+func jsonSchemaArgs(rawProps, rawRequired json.RawMessage) []toolArg {
+	var props map[string]json.RawMessage
+	if json.Unmarshal(rawProps, &props) != nil {
+		return nil
+	}
+	var required []string
+	_ = json.Unmarshal(rawRequired, &required)
+	var out []toolArg
+	for name, raw := range props {
+		if !EchoesArg(name) {
+			continue
+		}
+		a := specArg(name, raw)
+		a.required = slices.Contains(required, name)
+		out = append(out, a)
+	}
+	return out
+}
+
+// fieldArgs reads a map of field specs or a sample body.
+func fieldArgs(fields map[string]json.RawMessage) []toolArg {
+	var out []toolArg
+	for name, raw := range fields {
+		if !EchoesArg(name) {
+			continue
+		}
+		var spec struct {
+			Type     json.RawMessage `json:"type"`
+			Required bool            `json:"required"`
+		}
+		if json.Unmarshal(raw, &spec) == nil && len(spec.Type) > 0 {
+			a := specArg(name, raw)
+			a.required = spec.Required
+			out = append(out, a)
+			continue
+		}
+		out = append(out, toolArg{name: name, typ: jsonKind(raw)})
+	}
+	return out
+}
+
+// specArg is one property's type (the first non-null of a list) and enum.
+func specArg(name string, raw json.RawMessage) toolArg {
+	a := toolArg{name: name, typ: "any"}
+	var spec struct {
+		Type json.RawMessage `json:"type"`
+		Enum []any           `json:"enum"`
+	}
+	if json.Unmarshal(raw, &spec) != nil {
+		return a
+	}
+	var one string
+	var many []string
+	if json.Unmarshal(spec.Type, &one) == nil {
+		many = []string{one}
+	} else {
+		_ = json.Unmarshal(spec.Type, &many)
+	}
+	for _, t := range many {
+		if t != "null" && slices.Contains([]string{"string", "integer", "number", "boolean", "array", "object"}, t) {
+			a.typ = t
+			break
+		}
+	}
+	if len(spec.Enum) > 0 {
+		switch v := spec.Enum[0].(type) {
+		case string:
+			if len(v) <= 64 && EchoesArg(v) {
+				a.enum = v
+			}
+		case float64, bool:
+			a.enum = v
+		}
+	}
+	return a
+}
+
+// jsonKind is a sample value's JSON Schema type.
+func jsonKind(raw json.RawMessage) string {
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return "any"
+	}
+	switch n := v.(type) {
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case float64:
+		if n == float64(int64(n)) {
+			return "integer"
+		}
+		return "number"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	}
+	return "any"
+}
+
+// exampleArgs is an example call's arguments: the required ones (every one
+// when none is required), each a placeholder of its type, a string its
+// name in capitals ("CITY") or its enum's first value.
+func exampleArgs(args []toolArg) map[string]any {
+	out := map[string]any{}
+	anyRequired := slices.ContainsFunc(args, func(a toolArg) bool { return a.required })
+	for _, a := range args {
+		if anyRequired && !a.required {
+			continue
+		}
+		if a.enum != nil {
+			out[a.name] = a.enum
+			continue
+		}
+		switch a.typ {
+		case "integer", "number":
+			out[a.name] = 1
+		case "boolean":
+			out[a.name] = true
+		case "array":
+			out[a.name] = []any{}
+		case "object":
+			out[a.name] = map[string]any{}
+		default:
+			out[a.name] = strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(a.name))
+		}
+	}
+	return out
 }
 
 // rank is the hits best first, at most limit: SwarmMemo's own tools whose

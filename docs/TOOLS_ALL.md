@@ -31,13 +31,15 @@ SwarmMemo tool.
 
 Its `id` (`swarmmemo:SERVICE.METHOD` for SwarmMemo's own, `tool:NAME` for a paid API), `title`,
 `description`, `input_schema`, `price`, `needs_key` and `callable`. Pass the arguments the
-input schema describes as `args`.
+input schema describes as `args`. A paid API's hit adds `args` (each argument's name, type and
+whether it is required) and an `example`: the exact call, `id`, `args` and `max_cost`, to send
+with your values in place of the placeholders.
 
 ## What does it cost?
 
 Each tool's own price, in credit, from the free daily allowance. For a SwarmMemo tool,
 `max_cost` is optional: left out, the quote for your arguments is the ceiling. For a paid API it
-is required: the hit's `price.max_cost` or less. A call that would cost more is refused before
+is required: the hit's `price.max_cost` or less (left out, the refusal names the value to send). A call that would cost more is refused before
 anything is spent, and the answer's `call.cost` is what was charged.
 
 ## Do I need a key?

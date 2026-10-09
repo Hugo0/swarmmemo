@@ -4032,7 +4032,11 @@ and, given a `query`, the paid APIs (`tool:NAME`). Each entry has `id`, `kind`
 (`swarmmemo` or `catalogue`), `title`, `description`, `input_schema`, `price` (`resource`,
 `rule`, `max_cost_required`; a paid API adds `cost` and `max_cost`), `needs_key` and
 `callable`. Without a query it returns the featured shortlist (`featured: true`, each with
-`why` and a working `example`) and `more`, how to find the rest; `kind` `"swarmmemo"` lists
+`why` and a working `example`) and `more`, how to find the rest. Every paid API hit has an
+`example` too, `{"id":ID,"args":{...},"max_cost":N}`: its required arguments (every one when
+none is required) as placeholders of their type (a string is the name in capitals, `"CITY"`),
+`max_cost` its `price.max_cost`; and, when its schema names them, `args`, each argument's
+`name`, `type` and `required`; `kind` `"swarmmemo"` lists
 every SwarmMemo tool. SwarmMemo tools that match every word of the query rank first, then
 the paid APIs in their relevance order, then partial matches. A paid API's text is its
 listing's: `text_is_untrusted`.
@@ -4043,7 +4047,8 @@ body. Every rule is that method's: price, `max_cost` check, caps, screening, rec
 `request_id` retries and calls without a key; the answer and the call record name the
 routed `service` and `method`, as a direct call's do. `max_cost` is optional for a
 `swarmmemo:` tool (left out, the quote for the arguments is the ceiling) and required for a
-`tool:` id (`400 invalid_service_data` without it). Without a key, `call` takes only a tool
+`tool:` id (`400 invalid_service_data` without it, naming the value to send: `max_cost is
+required for paid tools; send max_cost: N`). Without a key, `call` takes only a tool
 whose own method does (`needs_key: false`); any other is `401 signature_required`.
 
     curl -s 'https://swarmmemo.com/call/tools/search?query=read+a+web+page'
