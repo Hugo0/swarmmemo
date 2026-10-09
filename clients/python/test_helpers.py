@@ -104,6 +104,38 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             pages.close()
 
+    def test_cli_memory_list_sends_after(self):
+        sent = []
+        with patch.object(memo.Client, "service_read", lambda client, service, method, data: sent.append((service, method, data)) or {"ok": True}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            memo.main(["--url", "http://127.0.0.1:9", "memory", "list", "--cursor", "page2"])
+        self.assertEqual(sent, [("memory", "list", {"after": "page2"})])
+
+    def memory_put(self, *argv, stdin=""):
+        sent = []
+        def call(client, service, method, data, cost, request_id):
+            sent.append((service, method, data, cost))
+            return {"ok": True}
+        err = io.StringIO()
+        with patch.object(memo.Client, "service_call", call), patch("sys.stdin", io.StringIO(stdin)), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = memo.main(["--url", "http://127.0.0.1:9", "memory", "put", *argv])
+        return code, sent, err.getvalue()
+
+    def test_cli_memory_put_dash_reads_stdin(self):
+        value = "notes from the last session\nsecond line\n"
+        code, sent, _ = self.memory_put("notes", "-", stdin=value)
+        self.assertEqual(code, 0)
+        self.assertEqual(sent, [("memory", "put", {"key": "notes", "value": value, "visibility": "private"},
+                                 memo.memory_put_price("notes", value))])
+        code, sent, _ = self.memory_put("notes", "literal", stdin="ignored")
+        self.assertEqual(sent[0][2]["value"], "literal")
+
+    def test_cli_memory_put_dash_empty_stdin_stores_nothing(self):
+        code, sent, err = self.memory_put("notes", "-", stdin="")
+        self.assertEqual((code, sent), (1, []))
+        self.assertIn("stdin was empty", err)
+
     def test_cli_follow_passes_explicit_cursor(self):
         for follow in (False, True):
             with self.subTest(follow=follow):
@@ -142,6 +174,13 @@ class HelperTests(unittest.TestCase):
         self.signed.work_reject(MESSAGE, 3, "Breaks the build.", GENERATION, request_id="j-1")
         self.assertEqual(self.last(), {"operation": "work.reject", "message_id": MESSAGE, "amount": 3, "reason": "Breaks the build.",
                                        "data": data(), "request_id": "j-1"})
+        # A verdict may sign what it checked, per property (C97).
+        checks = [{"property": "integrity", "state": "pass", "subject_sha256": "a" * 64}, {"property": "conformance", "state": "not_checked"}]
+        self.signed.work_reject(MESSAGE, 3, "Fails conformance.", GENERATION, request_id="j-2", checks=checks[1:])
+        self.assertEqual(self.last()["data"], data(',"checks":[{"property":"conformance","state":"not_checked"}]'))
+        self.signed.work_accept(MESSAGE, 3, GENERATION, "f" * 64, request_id="a-0", checks=checks)
+        self.assertEqual(self.last(), {"operation": "work.accept", "message_id": MESSAGE, "amount": 3, "request_id": "a-0",
+                                       "data": data(f',"result_sha256":"{"f" * 64}","checks":{json.dumps(checks, separators=(",", ":"))}')})
         # Left out, the generation is read once with work.get, then signed into the transition.
         self.signed.work_accept(MESSAGE, 3, request_id="a-1")
         self.assertEqual(self.last(), {"operation": "work.accept", "message_id": MESSAGE, "amount": 3, "data": data(), "request_id": "a-1"})

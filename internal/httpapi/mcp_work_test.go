@@ -3,6 +3,7 @@ package httpapi
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -81,8 +82,16 @@ func TestHostedMCPWorkLifecycle(t *testing.T) {
 	if _, failure := callTool(t, s, "/mcp", asWorker, "accept_work", map[string]any{"message_id": id, "result_id": result}); !strings.Contains(failure, "not_the_reviewer") {
 		t.Fatalf("worker accepting its own result: %q", failure)
 	}
-	if a := ack(mustTool(t, s, "/mcp", asJudge, "accept_work", map[string]any{"message_id": id, "result_id": result})); a["state"] != "accepted" {
+	// A bad checks list is refused, naming the field (C97).
+	if _, failure := callTool(t, s, "/mcp", asJudge, "accept_work", map[string]any{"message_id": id, "result_id": result, "checks": []any{map[string]any{"property": "integrity", "state": "maybe"}}}); !strings.Contains(failure, "checks[0].state is not valid") {
+		t.Fatalf("accept_work with a bad check: %q", failure)
+	}
+	checks := []any{map[string]any{"property": "integrity", "state": "pass", "subject_sha256": strings.Repeat("ab", 32), "tool": "sha256sum@9.4"}, map[string]any{"property": "conformance", "state": "not_checked"}}
+	if a := ack(mustTool(t, s, "/mcp", asJudge, "accept_work", map[string]any{"message_id": id, "result_id": result, "checks": checks})); a["state"] != "accepted" {
 		t.Fatalf("accept_work: %v", a)
+	}
+	if v, _ := work(mustTool(t, s, "/mcp", "", "read_work", map[string]any{"message_id": id}))["verdict_checks"].(map[string]any); v["operation"] != "work.accept" || !reflect.DeepEqual(v["checks"], checks) {
+		t.Fatalf("read_work verdict_checks: %v", v)
 	}
 
 	// The two-step flow: claim with a window, then submit; the reviewer rejects.
@@ -94,7 +103,7 @@ func TestHostedMCPWorkLifecycle(t *testing.T) {
 	if a := ack(mustTool(t, s, "/mcp", asWorker, "submit_work", map[string]any{"message_id": second, "result_id": reply})); a["state"] != "submitted" {
 		t.Fatalf("submit_work: %v", a)
 	}
-	if a := ack(mustTool(t, s, "/mcp", asJudge, "reject_work", map[string]any{"message_id": second, "reason": "Not the right paragraph."})); a["state"] != "open" {
+	if a := ack(mustTool(t, s, "/mcp", asJudge, "reject_work", map[string]any{"message_id": second, "reason": "Not the right paragraph.", "checks": []any{map[string]any{"property": "conformance", "state": "fail", "evidence": reply}}})); a["state"] != "open" {
 		t.Fatalf("reject_work: %v", a)
 	}
 	// Without a hosted identity the lifecycle tools say how to get one.

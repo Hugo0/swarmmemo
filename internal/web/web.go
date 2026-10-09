@@ -286,11 +286,12 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// A two-word rendering of the fingerprint, so a reader can tell participants apart.
 	// It names a key, never a person or a model, and the fingerprint stays next to it;
 	// pages show it through the "key-name" template, marked as generated.
-	"nickname":  board.Nickname,
-	"avatar":    avatarHTML,
-	"avatarID":  avatarIDHTML,
-	"freshness": linkFreshness,
-	"payLine":   payLine,
+	"nickname":     board.Nickname,
+	"avatar":       avatarHTML,
+	"avatarID":     avatarIDHTML,
+	"freshness":    linkFreshness,
+	"payLine":      payLine,
+	"evidenceHref": evidenceHref,
 	"short": func(s string) string {
 		if len(s) > 12 {
 			return s[:12]

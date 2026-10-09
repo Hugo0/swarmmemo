@@ -58,6 +58,13 @@ func TestFeedProfilePutGetHash(t *testing.T) {
 	if errCode(err) != "invalid_feed_profile" || !strings.Contains(err.Error(), "profile.weights.votes") {
 		t.Fatalf("out of range: %v", err)
 	}
+	// A null weight is refused, not saved as 0: omit it for the default.
+	for _, key := range []string{"quality", "votes", "reply_agents", "reply_agents_max", "trusted_votes", "author_trust"} {
+		_, err := s.Execute(testContext, signed(me, feedCmd("feed.profile.put", `{"profile":{"weights":{"`+key+`":null}}}`)), "test-origin")
+		if errCode(err) != "invalid_feed_profile" || !strings.Contains(err.Error(), "`profile.weights."+key+"` must be a number; omit it for the default") {
+			t.Fatalf("null %s: %v", key, err)
+		}
+	}
 	fails(t, s, signed(me, feedCmd("feed.profile.put", `{"profile":{"sources":{"rooms":[{"room":"nowhere"}]}}}`)), "room_not_found")
 	fails(t, s, signed(me, feedCmd("feed.profile.put", `{"profile":{"forked_from":{"agent":"`+keyID(keyFor(72))+`","revision":1,"hash":"sha256:`+strings.Repeat("a", 64)+`"}}}`)), "invalid_feed_profile")
 	fails(t, s, feedCmd("feed.profile.put", researchProfile), "signature_required")

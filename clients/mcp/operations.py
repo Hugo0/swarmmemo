@@ -192,8 +192,27 @@ def _cursor(value):
     return value
 
 
+CHECK_STATES = ("pass", "fail", "not_checkable", "not_checked")
+
+
+def _valid_checks(checks):
+    """A verdict's signed per-property checks (/protocol.md#verdict-checks): 1 to 16 entries."""
+    def text(value, limit):
+        return isinstance(value, str) and value and value == value.strip() and len(value) <= limit and not any(
+            ord(ch) < 32 or 127 <= ord(ch) < 160 or ch in "\u2028\u2029" for ch in value)
+    if not isinstance(checks, list) or not 1 <= len(checks) <= 16: return False
+    for check in checks:
+        if (not isinstance(check, dict) or set(check) - {"property", "state", "subject_sha256", "tool", "evidence"}
+                or not isinstance(check.get("property"), str) or not re.fullmatch(r"[a-z0-9_.-]{1,40}", check["property"])
+                or check.get("state") not in CHECK_STATES
+                or ("subject_sha256" in check and (not isinstance(check["subject_sha256"], str) or not re.fullmatch(HEX64, check["subject_sha256"])))
+                or ("tool" in check and not text(check["tool"], 80)) or ("evidence" in check and not text(check["evidence"], 200))):
+            return False
+    return True
+
+
 def _work(profile, work, expected=None):
-    optional = {"worker", "result_id", "attempt_grant_id", "reward", "reviewer", "reviewer_fee", "eligibility", "request", "eligible", "eligible_reason", "eligible_agent", "eligible_preview", "resolved_from", "result_sha256", "result_changed_since_submit", "requester_record"}
+    optional = {"worker", "result_id", "attempt_grant_id", "reward", "reviewer", "reviewer_fee", "eligibility", "request", "eligible", "eligible_reason", "eligible_agent", "eligible_preview", "resolved_from", "result_sha256", "result_changed_since_submit", "requester_record", "verdict_checks"}
     fields = set("id room title capabilities simulated state stored_state generation service_generation service_id created_at updated_at deadline fence claim_expires_at requester_author requester result_available".split()) | optional
     required = fields - optional
     if not isinstance(work, dict) or set(work) - fields or not required <= work.keys(): raise BridgeError("invalid_response")
@@ -224,6 +243,13 @@ def _work(profile, work, expected=None):
                 or any(type(record[name]) is not int or not 0 <= record[name] < 2**63 for name in counts | ({"since"} & record.keys()))
                 or not (record.get("median_hours_to_verdict") is None or type(record["median_hours_to_verdict"]) in (int, float))):
             raise BridgeError("invalid_response")
+    # verdict_checks: the newest accept or reject that signed a checks list.
+    if "verdict_checks" in work:
+        verdict = work["verdict_checks"]
+        if (not isinstance(verdict, dict) or set(verdict) != {"operation", "sequence", "author", "at", "checks"}
+                or verdict["operation"] not in ("work.accept", "work.reject") or type(verdict["sequence"]) is not int or type(verdict["at"]) is not int
+                or not isinstance(verdict["author"], str) or not re.fullmatch(HEX64, verdict["author"]) or not _valid_checks(verdict["checks"])):
+            raise BridgeError("invalid_response")
     if work["room"] != profile.room: raise BridgeError("scope_mismatch")
     if expected and work["id"] != expected and work.get("resolved_from") != expected: raise BridgeError("invalid_response")
     for name in ("id", "generation", "service_generation"):
@@ -251,7 +277,7 @@ def _work(profile, work, expected=None):
 
 
 def _transition(profile, item, work_id):
-    optional = {"delegation_id", "resolved_from", "result_sha256", "result_sha256_signed"}
+    optional = {"delegation_id", "resolved_from", "result_sha256", "result_sha256_signed", "checks"}
     fields = set("sequence operation author public_key signature signed_payload accepted_at fence generation state".split()) | optional
     if not isinstance(item, dict) or set(item) - fields or not fields - optional <= item.keys(): raise BridgeError("invalid_response")
     for name in ("sequence", "accepted_at", "fence"):
@@ -293,6 +319,11 @@ def _transition(profile, item, work_id):
             if item.get("result_sha256") != data["result_sha256"] or item.get("result_sha256_signed") is not True: raise ValueError()
             data_fields = data_fields | {"result_sha256"}
         elif "result_sha256_signed" in item: raise ValueError()
+        # A verdict may sign per-property checks; the service shows the signed list.
+        if isinstance(data, dict) and "checks" in data and item["operation"] in ("work.accept", "work.reject"):
+            if not _valid_checks(data["checks"]) or item.get("checks") != data["checks"]: raise ValueError()
+            data_fields = data_fields | {"checks"}
+        elif "checks" in item: raise ValueError()
         if "result_sha256" in item and (not isinstance(item["result_sha256"], str) or not re.fullmatch(HEX64, item["result_sha256"])): raise ValueError()
         if (not isinstance(data, dict) or set(data) != data_fields or type(data.get("schema")) is not int or data["schema"] != 1
                 or not isinstance(data.get("generation"), str) or not re.fullmatch(HEX32, data["generation"])

@@ -59,6 +59,9 @@ func TestFeedProfilesOverHTTPAndMCP(t *testing.T) {
 	if _, failure := callTool(t, s, "/mcp", asAuthor, "tune_feed", map[string]any{"action": "put", "if_revision": 1, "profile": map[string]any{}}); !strings.Contains(failure, "revision_conflict") {
 		t.Fatalf("stale put: %q", failure)
 	}
+	if _, failure := callTool(t, s, "/mcp", asAuthor, "tune_feed", map[string]any{"action": "put", "profile": map[string]any{"weights": map[string]any{"reply_agents_max": nil}}}); !strings.Contains(failure, "`profile.weights.reply_agents_max` must be a number; omit it for the default") {
+		t.Fatalf("put null reply_agents_max: %q", failure)
+	}
 	self := mustTool(t, s, "/mcp", asAuthor, "read_feed", map[string]any{"profile": "self"})
 	if dig(self, "data", "profile_source") != "self" || dig(self, "data", "profile_hash") != hash {
 		t.Fatalf("read_feed self: %v", dig(self, "data"))

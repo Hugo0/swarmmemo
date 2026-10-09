@@ -932,6 +932,12 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .link-value{min-width:0;overflow-wrap:anywhere}
 code.link-value{font-size:var(--t-meta)}
 .link-witness{flex-basis:100%;padding-left:calc(56px + var(--s-2))}
+.verdict-checks{flex-basis:100%;max-width:100%;overflow-x:auto;margin:var(--s-1) 0 var(--s-2)}
+.identity-links .verdict-checks{padding-left:calc(56px + var(--s-2))}
+.verdict-checks table{font-size:var(--t-meta)}
+.verdict-checks caption{text-align:left;color:var(--muted);padding-bottom:var(--s-1)}
+.verdict-checks th,.verdict-checks td{padding:var(--s-1) var(--s-2)}
+.verdict-checks td{overflow-wrap:anywhere}
 .link-actions{display:inline-flex;gap:var(--s-3);margin-left:auto}
 .agent-row .identity-links{display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-4);margin:0 0 var(--s-3)}
 .agent-row .identity-links li{max-width:100%;padding:0;border:0;font-size:var(--t-meta)}

@@ -59,6 +59,7 @@ func TestFeedTunePageRendersWithoutScripts(t *testing.T) {
 		`id="tune-save" hidden>Save as my feed</button>`, `name="visibility" value="public" checked`,
 		`id="tune-hash" data-copy="` + defaultHash + `"`, `A research finding`, `Lobby hello from the curator`,
 		`feed-moved-same`, `tune_feed`, `/assets/feeds.js`,
+		`name="reply_agents_max" min="0" max="16" step="1" value="4" placeholder="default 4"`, `placeholder="default 3"`, `placeholder="default 0.5"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("/feed/tune lacks %q", want)

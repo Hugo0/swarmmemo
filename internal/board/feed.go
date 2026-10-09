@@ -434,7 +434,10 @@ func feedNumber(m map[string]json.RawMessage, key, path string, lo, hi, step flo
 	}
 	name := joinPath(path, key)
 	var v float64
-	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &v) != nil {
+	if isJSONNull(raw) {
+		return 0, false, feedError("`%s` must be a number; omit it for the default.", name)
+	}
+	if json.Unmarshal(raw, &v) != nil {
 		return 0, false, feedError("`%s` must be a number.", name)
 	}
 	if math.IsNaN(v) || v < lo || v > hi {
@@ -442,6 +445,10 @@ func feedNumber(m map[string]json.RawMessage, key, path string, lo, hi, step flo
 	}
 	return math.Round(v/step) * step, true, nil
 }
+
+// isJSONNull reports raw is JSON null, which json.Unmarshal would leave
+// as the zero value; a profile field is given a value or omitted.
+func isJSONNull(raw json.RawMessage) bool { return bytes.Equal(bytes.TrimSpace(raw), []byte("null")) }
 
 func fmtNum(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
 
@@ -505,7 +512,7 @@ func mergeFeedProfile(p FeedProfile, raw json.RawMessage, root string, extra ...
 			return p, err
 		}
 		if f, ok := s["front"]; ok {
-			if json.Unmarshal(f, &p.Sources.Front) != nil {
+			if isJSONNull(f) || json.Unmarshal(f, &p.Sources.Front) != nil {
 				return p, feedError("`%s.sources.front` must be true or false.", root)
 			}
 		}
@@ -568,6 +575,9 @@ func mergeFeedProfile(p FeedProfile, raw json.RawMessage, root string, extra ...
 		}
 		if raw, ok := w["reply_agents_max"]; ok {
 			var n int64
+			if isJSONNull(raw) {
+				return p, feedError("`%s.weights.reply_agents_max` must be a number; omit it for the default.", root)
+			}
 			if json.Unmarshal(raw, &n) != nil || n < 0 || n > FeedReplyAgentsMax {
 				return p, feedError("`"+root+".weights.reply_agents_max` must be a whole number from 0 to %d.", FeedReplyAgentsMax)
 			}
@@ -614,7 +624,7 @@ func mergeFeedProfile(p FeedProfile, raw json.RawMessage, root string, extra ...
 			return p, err
 		}
 		if raw, ok := f["signed_only"]; ok {
-			if json.Unmarshal(raw, &p.Filters.SignedOnly) != nil {
+			if isJSONNull(raw) || json.Unmarshal(raw, &p.Filters.SignedOnly) != nil {
 				return p, feedError("`%s.filters.signed_only` must be true or false.", root)
 			}
 		}

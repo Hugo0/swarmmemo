@@ -75,6 +75,9 @@ type LinkWitness struct {
 	At            int64  `json:"at"`
 	Signature     string `json:"signature"`
 	SignedPayload string `json:"signed_payload"`
+	// Checks is the per-property list the witness signed beside its
+	// verdict (C97), read from signed_payload; absent when it sent none.
+	Checks []VerdictCheck `json:"checks,omitempty"`
 }
 
 func witnessError(code string) error {
@@ -90,19 +93,24 @@ func witnessError(code string) error {
 	case "witness_delegated":
 		return problem(403, "witness_delegated", "A scoped child grant cannot witness links for its parent.")
 	}
-	return problem(400, "invalid_witness", fmt.Sprintf(`Data must be a strict JSON object {"schema":1,"agent":FINGERPRINT,"kind":KIND,"value":VALUE,"nonce":NONCE,"verdict":"verified"|"failed"}: agent a 64-hex fingerprint, nonce %d to %d printable ASCII characters without spaces, at most 1024 bytes.`, IdentityLinkNonceMin, IdentityLinkNonceMax))
+	return problem(400, "invalid_witness", fmt.Sprintf(`Data must be a strict JSON object {"schema":1,"agent":FINGERPRINT,"kind":KIND,"value":VALUE,"nonce":NONCE,"verdict":"verified"|"failed"}: agent a 64-hex fingerprint, nonce %d to %d printable ASCII characters without spaces, at most 1024 bytes, plus an optional "checks" list (what was checked, per property).`, IdentityLinkNonceMin, IdentityLinkNonceMax))
 }
 
 type witnessData struct {
 	Agent, Kind, Value, Nonce, Verdict string
+	Checks                             []VerdictCheck
 }
+
+// witnessDataBytesMax bounds identity.witness data: 1024 bytes, plus room
+// for an optional checks list.
+const witnessDataBytesMax = 1024 + VerdictChecksBytesMax
 
 // parseWitnessData accepts only the documented object, with every field
 // present once and no other; the same strictness as identity.link data.
 func parseWitnessData(raw string) (witnessData, error) {
 	var d witnessData
 	invalid := witnessError("invalid_witness")
-	if len(raw) > 1024 || !utf8.ValidString(raw) {
+	if len(raw) > witnessDataBytesMax || !utf8.ValidString(raw) {
 		return d, invalid
 	}
 	decoder := json.NewDecoder(strings.NewReader(raw))
@@ -110,7 +118,7 @@ func parseWitnessData(raw string) (witnessData, error) {
 		return d, invalid
 	}
 	seen := map[string]bool{}
-	schema := 0
+	schema, checksLen := 0, 0
 	for decoder.More() {
 		token, err := decoder.Token()
 		name, ok := token.(string)
@@ -135,6 +143,12 @@ func parseWitnessData(raw string) (witnessData, error) {
 			err = json.Unmarshal(value, &d.Nonce)
 		case "verdict":
 			err = json.Unmarshal(value, &d.Verdict)
+		case "checks":
+			checksLen = len(value)
+			var why string
+			if d.Checks, why = parseVerdictChecks(value); why != "" {
+				return d, problem(400, "invalid_witness", why+" "+VerdictChecksRule)
+			}
 		default:
 			return d, invalid
 		}
@@ -148,7 +162,14 @@ func parseWitnessData(raw string) (witnessData, error) {
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return d, invalid
 	}
-	if schema != 1 || len(seen) != 6 || !fingerprintRE.MatchString(d.Agent) || (d.Verdict != "verified" && d.Verdict != "failed") ||
+	want := 6
+	if seen["checks"] {
+		want++
+	}
+	if len(raw)-checksLen > 1024 {
+		return d, invalid
+	}
+	if schema != 1 || len(seen) != want || !fingerprintRE.MatchString(d.Agent) || (d.Verdict != "verified" && d.Verdict != "failed") ||
 		!challengeText(d.Nonce, IdentityLinkNonceMin, IdentityLinkNonceMax, false) {
 		return d, invalid
 	}
@@ -248,6 +269,9 @@ func (s *Store) witnessIdentityLink(ctx context.Context, tx *sql.Tx, c Command, 
 		return Result{}, err
 	}
 	data := map[string]any{"agent": d.Agent, "kind": d.Kind, "value": value, "link_state": state, "verdict": d.Verdict, "nonce": d.Nonce, "at": now, "replaced": replaced > 0, "fresh_for_nonce": false}
+	if len(d.Checks) > 0 {
+		data["checks"] = d.Checks
+	}
 	// fresh_for_nonce says the link's own signed challenge carries this
 	// witness's nonce; link_freshness holds that challenge's derived cells.
 	if r, ok := decodeLinkRecord(proof); ok && (r.Nonce != "" || r.ObservedAt != "") {
@@ -321,6 +345,7 @@ func attachLinkWitnesses(ctx context.Context, tx *sql.Tx, agent *Agent) error {
 		if err = rows.Scan(&kind, &value, &w.Fingerprint, &w.PublicKey, &w.Handle, &w.Verdict, &w.Nonce, &w.At, &w.Signature, &w.SignedPayload); err != nil {
 			return err
 		}
+		w.Checks = signedChecks(w.SignedPayload)
 		for i := range agent.Links {
 			if l := &agent.Links[i]; l.Kind == kind && l.Value == value {
 				l.Witnesses = append(l.Witnesses, w)

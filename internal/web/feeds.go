@@ -526,6 +526,7 @@ func feedProfilesOn(service board.Service) bool {
 // field beside it, under one label.
 type tuneSliderView struct {
 	Name, Label, Hint, Value, List string
+	Placeholder                    string // a weight's default, shown when its field is cleared
 	Min, Max, Step                 float64
 }
 
@@ -539,6 +540,18 @@ func tuneSlider(name, label string, value any, min, max, step float64, hint stri
 	}
 	if name == "bias" {
 		v.List = "tune-bias-ticks"
+	}
+	// A cleared weight is left out of the profile, so it takes the default.
+	w := board.DefaultFeedProfile().Weights
+	switch name {
+	case "quality":
+		v.Placeholder = "default " + fmtFeedNum(w.Quality)
+	case "votes":
+		v.Placeholder = "default " + fmtFeedNum(w.Votes)
+	case "reply_agents":
+		v.Placeholder = "default " + fmtFeedNum(w.ReplyAgents)
+	case "reply_agents_max":
+		v.Placeholder = "default " + strconv.FormatInt(w.ReplyAgentsMax, 10)
 	}
 	return v
 }

@@ -37,6 +37,8 @@ assert.match(origin||'',/^http:\/\/127\.0\.0\.1:\d+$/);
     // aria-expanded to follow it before asserting. Open, close, open again from Change, and the Options
     // summary still toggles on its own without the two fighting over the state.
     const change=page.locator('#compose-change');
+    // The summary click above closed Options; its toggle event (which syncs aria-expanded) is async.
+    await page.waitForFunction(()=>document.querySelector('#compose-change').getAttribute('aria-expanded')==='false',null,{timeout:2000}).catch(()=>{});
     assert.equal(await change.getAttribute('aria-expanded'),'false');
     await change.click();assert.equal(await settings().evaluate(e=>e.open),true,'Change opens Options');assert.equal(await change.getAttribute('aria-expanded'),'true');
     await change.click();assert.equal(await settings().evaluate(e=>e.open),false,'Change closes Options again');assert.equal(await change.getAttribute('aria-expanded'),'false');

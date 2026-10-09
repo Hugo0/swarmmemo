@@ -612,8 +612,8 @@ func TestPublicDataCBPolicy(t *testing.T) {
 	if v.fakes["stats.bis.org"].count() != hits || at(d, "banks", "ECB", "policy_rate_pct") != nil {
 		t.Error("next_meeting makes no upstream request")
 	}
-	_, d = v.mustFetch(t, "cb_policy_rates", `{"bank":"ECB","what":"next_meeting"}`, unix("2027-01-05"))
-	if !strings.Contains(d["calendar_staleness_warning"].(string), "2026-12-31") {
+	_, d = v.mustFetch(t, "cb_policy_rates", `{"bank":"ECB","what":"next_meeting"}`, unix("2028-01-05"))
+	if !strings.Contains(d["calendar_staleness_warning"].(string), "2027-12-31") {
 		t.Errorf("the calendar staleness guard: %v", d)
 	}
 
@@ -637,6 +637,71 @@ func TestPublicDataCBPolicy(t *testing.T) {
 	eq(t, "boj rate gone", at(d, "banks", "BOJ", "rate_available"), false)
 	eq(t, "boj calendar kept", at(d, "banks", "BOJ", "next_decision"), "2026-09-18")
 	near(t, "ecb unharmed", at(d, "banks", "ECB", "policy_rate_pct"), 2.25)
+}
+
+// cbCalendarHorizonDays is how far ahead every listed bank must have a
+// scheduled decision: the next one at a fixed date, and the table's last
+// one against the real clock (so the lists are refreshed before they run
+// out).
+const cbCalendarHorizonDays = 60
+
+// TestPublicDataCBCalendarCoverage pins the decision calendars at a fixed
+// date: each bank either has a next decision within the horizon or says
+// explicitly (schedule_status "unknown", with a reason) that it has none.
+func TestPublicDataCBCalendarCoverage(t *testing.T) {
+	v := newPDEnv(t, false)
+	ref := "2026-10-15"
+	limit := mustDay(t, ref).AddDate(0, 0, cbCalendarHorizonDays).Format("2006-01-02")
+	_, d := v.mustFetch(t, "cb_policy_rates", `{"bank":"all","what":"next_meeting"}`, unix(ref))
+	for _, b := range services.CBCalendarsForTest() {
+		row := at(d, "banks", b.Code)
+		if b.ScheduleUnknown != "" {
+			eq(t, b.Code+" status", at(row, "schedule_status"), "unknown")
+			eq(t, b.Code+" note", at(row, "calendar_note"), b.ScheduleUnknown)
+			eq(t, b.Code+" no next", at(row, "next_decision"), nil)
+			continue
+		}
+		eq(t, b.Code+" status", at(row, "schedule_status"), "scheduled")
+		next, _ := at(row, "next_decision").(string)
+		if next == "" || next > limit {
+			t.Errorf("%s: next decision %q is not within %d days of %s; add the bank's newly published dates", b.Code, next, cbCalendarHorizonDays, ref)
+		}
+	}
+	// Every listed date is a real calendar day, in order.
+	for _, b := range services.CBCalendarsForTest() {
+		for i, ds := range b.Decisions {
+			mustDay(t, ds)
+			if i > 0 && ds <= b.Decisions[i-1] {
+				t.Errorf("%s: decisions out of order at %s", b.Code, ds)
+			}
+		}
+	}
+}
+
+// TestPublicDataCBCalendarFreshness runs against the real clock: it fails
+// when a bank's last listed decision is fewer than the horizon away, so the
+// table is refreshed from the bank's published calendar before it runs dry.
+// A bank with an explicitly unknown schedule only logs a reminder.
+func TestPublicDataCBCalendarFreshness(t *testing.T) {
+	limit := time.Now().UTC().AddDate(0, 0, cbCalendarHorizonDays).Format("2006-01-02")
+	for _, b := range services.CBCalendarsForTest() {
+		last := b.Decisions[len(b.Decisions)-1]
+		switch {
+		case b.ScheduleUnknown != "":
+			t.Logf("%s: schedule unknown (%s); add its published dates when available", b.Code, b.ScheduleUnknown)
+		case last < limit:
+			t.Errorf("%s: last listed decision %s is fewer than %d days away; refresh it from %s", b.Code, last, cbCalendarHorizonDays, b.CalendarSource)
+		}
+	}
+}
+
+func mustDay(t *testing.T, s string) time.Time {
+	t.Helper()
+	d, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		t.Fatalf("bad date %q: %v", s, err)
+	}
+	return d
 }
 
 func TestPublicDataNowcasts(t *testing.T) {

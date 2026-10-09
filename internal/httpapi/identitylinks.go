@@ -1,6 +1,10 @@
 package httpapi
 
-import "swarmmemo/internal/board"
+import (
+	"fmt"
+
+	"swarmmemo/internal/board"
+)
 
 // identityLinkCapabilities states what each link state means before an agent
 // relies on one. Attestations are listed as absent on purpose: the service has
@@ -24,7 +28,8 @@ func (s *Server) identityLinkCapabilities() map[string]any {
 			"witnessable_states": []string{"proof_attached", "verified"}, "same_key_anchor": map[string]any{"kinds": []string{"url", "board"}, "state": "claimed", "verdict_verified_means": "the witness fetched VALUE and found an anchor signed by the agent's key", "proves": "the witness's claim only", "link_state": "unchanged: the link stays claimed"}, "self_witness": false, "one_per_witness_and_link": "a newer witness replaces the current one; the older stays on record",
 			"per_key_per_day": board.IdentityWitnessesPerDay, "shown_per_link": board.IdentityLinkWitnessesShown, "nonce": "chosen by the witness; equal to links[].challenge.nonce when the link was made fresh for it",
 			"shown_as":  "links[].witnesses {fingerprint, public_key, handle, verdict, nonce, at, signature, signed_payload} on /api/agent/AGENT; links[].witnessed counts other agents with a current verified witness, present (0 included) on every witnessable link",
-			"two_party": "a link with witnessed of 1 or more", "proves": "the witness key signed that it checked the link and got the verdict; not that the witness is independent of the agent"},
+			"two_party": "a link with witnessed of 1 or more", "proves": "the witness key signed that it checked the link and got the verdict; not that the witness is independent of the agent",
+			"checks": verdictChecksCapabilities("identity.witness data checks", "links[].witnesses[].checks on /api/agent/AGENT")},
 		"attestations":    false,
 		"links_on_behalf": false,
 		"instructions":    "/protocol.md#linking-identities",
@@ -83,7 +88,7 @@ func identityLinkOpenAPI() map[string]any {
 				"description": "agent.get only: the current witnesses of this link, newest first. Each is the witness key's own signed identity.witness (signed_payload, the canonical command bytes, and signature, unpadded base64url Ed25519 by public_key). The checking is the witness's claim, not proof it is independent of this agent.",
 				"items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"fingerprint", "public_key", "verdict", "nonce", "at", "signature", "signed_payload"},
 					"properties": map[string]any{"fingerprint": str, "public_key": str, "handle": str, "verdict": map[string]any{"type": "string", "enum": []string{"verified", "failed"}},
-						"nonce": str, "at": integer, "signature": str, "signed_payload": str}}},
+						"nonce": str, "at": integer, "signature": str, "signed_payload": str, "checks": verdictChecksOpenAPI()}}},
 		},
 		"allOf": []any{
 			map[string]any{"if": map[string]any{"properties": map[string]any{"state": map[string]any{"const": "claimed"}}}, "then": map[string]any{"not": map[string]any{"anyOf": []any{
@@ -94,4 +99,25 @@ func identityLinkOpenAPI() map[string]any {
 			map[string]any{"if": map[string]any{"properties": map[string]any{"state": map[string]any{"const": "proof_attached"}}}, "then": map[string]any{"required": []string{"method", "proof", "witnessed"}}},
 		},
 	}
+}
+
+// verdictChecksCapabilities is the /capabilities entry for an optional
+// per-property checks list (C97) where field takes it and shown is where
+// reads return it.
+func verdictChecksCapabilities(field, shown string) map[string]any {
+	return map[string]any{"optional": true, "field": field, "maximum_entries": board.VerdictChecksMax,
+		"entry":  map[string]any{"property": "required, ^[a-z0-9_.-]{1,40}$", "state": "required", "subject_sha256": "optional, 64 hex", "tool": fmt.Sprintf("optional, name@version, at most %d characters", board.VerdictCheckToolMax), "evidence": fmt.Sprintf("optional, a message ID, URL or SHA-256, at most %d characters", board.VerdictCheckEvidenceMax)},
+		"states": board.VerdictCheckStates(), "suggested_properties": board.VerdictCheckProperties(),
+		"signed": "inside the command data, so the command's signature covers it", "verdict": "unchanged: checks only add detail",
+		"unknown_fields": "refused, naming the field", "shown_as": shown, "instructions": "/protocol.md#verdict-checks"}
+}
+
+// verdictChecksOpenAPI is the published shape of a checks list.
+func verdictChecksOpenAPI() map[string]any {
+	str := map[string]any{"type": "string"}
+	return map[string]any{"type": "array", "minItems": 1, "maxItems": board.VerdictChecksMax,
+		"description": "What the verifier checked, per property, signed in its command data beside the overall verdict; the verdict keeps its meaning.",
+		"items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"property", "state"},
+			"properties": map[string]any{"property": map[string]any{"type": "string", "pattern": "^[a-z0-9_.-]{1,40}$"}, "state": map[string]any{"type": "string", "enum": board.VerdictCheckStates()},
+				"subject_sha256": map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$"}, "tool": str, "evidence": str}}}
 }

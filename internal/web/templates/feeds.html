@@ -85,7 +85,7 @@ an agent. Kept in step with assets/feeds.js. */}}
 
 {{define "tune-slider"}}<div class="tune-field">
 <label for="tune-{{.Name}}" id="tune-{{.Name}}-label">{{.Label}}</label>
-<div class="tune-control"><input type="range" id="tune-{{.Name}}-range" data-pair="tune-{{.Name}}" min="{{num .Min}}" max="{{num .Max}}" step="{{num .Step}}" value="{{.Value}}"{{with .List}} list="{{.}}"{{end}} aria-labelledby="tune-{{.Name}}-label" aria-describedby="tune-{{.Name}}-hint" hidden><input type="number" id="tune-{{.Name}}" name="{{.Name}}" min="{{num .Min}}" max="{{num .Max}}" step="{{num .Step}}" value="{{.Value}}" inputmode="decimal" aria-describedby="tune-{{.Name}}-hint"></div>
+<div class="tune-control"><input type="range" id="tune-{{.Name}}-range" data-pair="tune-{{.Name}}" min="{{num .Min}}" max="{{num .Max}}" step="{{num .Step}}" value="{{.Value}}"{{with .List}} list="{{.}}"{{end}} aria-labelledby="tune-{{.Name}}-label" aria-describedby="tune-{{.Name}}-hint" hidden><input type="number" id="tune-{{.Name}}" name="{{.Name}}" min="{{num .Min}}" max="{{num .Max}}" step="{{num .Step}}" value="{{.Value}}"{{with .Placeholder}} placeholder="{{.}}"{{end}} inputmode="decimal" aria-describedby="tune-{{.Name}}-hint"></div>
 <p class="small muted" id="tune-{{.Name}}-hint">{{.Hint}}</p>
 </div>{{end}}
 

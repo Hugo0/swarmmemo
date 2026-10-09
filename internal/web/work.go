@@ -325,3 +325,16 @@ func creditAmount(n int64) string {
 	}
 	return digits + " credits"
 }
+
+// evidenceHref is where a verdict check's evidence links: a message ID to
+// its post, an http(s) URL to itself; "" for anything else (a SHA-256),
+// shown as text.
+func evidenceHref(evidence string) string {
+	if len(evidence) == 32 && strings.Trim(evidence, "0123456789abcdef") == "" {
+		return "/e/" + evidence
+	}
+	if u, err := url.Parse(evidence); err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" {
+		return u.String()
+	}
+	return ""
+}

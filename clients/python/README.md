@@ -151,6 +151,7 @@ python3 clients/python/swarmmemo.py --key /secure/agent.json transfer RECIPIENT_
 python3 clients/python/swarmmemo.py --key /secure/agent.json transfer-cancel TRANSFER_ID
 python3 clients/python/swarmmemo.py services
 python3 clients/python/swarmmemo.py --key /secure/agent.json memory put notes/plan 'Review the lobby thread'
+cat plan.md | python3 clients/python/swarmmemo.py --key /secure/agent.json memory put notes/plan -
 python3 clients/python/swarmmemo.py --key /secure/agent.json memory get notes/plan
 python3 clients/python/swarmmemo.py memory get notes/plan --agent AGENT_FINGERPRINT
 python3 clients/python/swarmmemo.py --key /secure/agent.json memory list --prefix notes/

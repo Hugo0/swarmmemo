@@ -105,6 +105,9 @@ type Work struct {
 	// to its rewarded public work (workrecord.go), on work.get and
 	// works.list, so a worker can check before it claims.
 	RequesterRecord *RequesterRecord `json:"requester_record,omitempty"`
+	// VerdictChecks is the newest accept or reject that carried a signed
+	// checks list (C97), on work.get only.
+	VerdictChecks *WorkVerdictChecks `json:"verdict_checks,omitempty"`
 }
 
 // WorkRequest is the text of a work item's request at its newest version,
@@ -174,6 +177,20 @@ type WorkTransition struct {
 	ResultSHA256Signed bool   `json:"result_sha256_signed,omitempty"`
 	// Note marks a verdict the requester gave in a silent reviewer's place.
 	Note string `json:"note,omitempty"`
+	// Checks is the per-property list a verdict (accept or reject) signed
+	// in its data (C97); absent when it sent none.
+	Checks []VerdictCheck `json:"checks,omitempty"`
+}
+
+// WorkVerdictChecks is the newest verdict on a work item that signed a
+// checks list: which verdict, by whom, when, and the list itself. Its
+// signed command is that transition in work.history.
+type WorkVerdictChecks struct {
+	Operation string         `json:"operation"`
+	Sequence  int64          `json:"sequence"`
+	Author    string         `json:"author"`
+	At        int64          `json:"at"`
+	Checks    []VerdictCheck `json:"checks"`
 }
 
 // ReviewerSilenceDays is how long a named reviewer may leave a submitted
@@ -208,6 +225,13 @@ type workData struct {
 	Eligibility       string
 	RewardNote        string
 	ResultSHA256      string
+	Checks            []VerdictCheck
+}
+
+// workVerdictOp says whether an operation is a verdict on a submitted
+// result, whose data may carry checks (C97).
+func workVerdictOp(operation string) bool {
+	return operation == "work.accept" || operation == "work.reject"
 }
 
 // workResultHashOp says whether an operation's data may carry result_sha256:
@@ -219,7 +243,7 @@ func workResultHashOp(operation string) bool {
 
 // workDataRule is the whole rule for work.* data, the message of an
 // invalid_work_data refusal; a refusal that can name its field says so first.
-const workDataRule = "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits, a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee, an eligibility (open, first_work, linked or new_agent) and a reward_note (one line, display only); submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text."
+const workDataRule = "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits, a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee, an eligibility (open, first_work, linked or new_agent) and a reward_note (one line, display only); submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text; accept and reject may add checks, the verifier's per-property list."
 
 // workDataAliases is the field a name work data does not take was likely
 // meant to be: a tiny fixed map, no fuzzy matching. ttl is the command field
@@ -247,6 +271,8 @@ func workDataTakes(operation, name string) bool {
 		return operation == "work.create"
 	case "result_sha256":
 		return workResultHashOp(operation)
+	case "checks":
+		return workVerdictOp(operation)
 	}
 	return false
 }
@@ -280,7 +306,7 @@ func parseWorkData(raw string, operation string) (workData, error) {
 	invalid := func() (workData, error) {
 		return workData{}, problem(400, "invalid_work_data", workDataRule)
 	}
-	if len(raw) > 8192 || !utf8.ValidString(raw) {
+	if len(raw) > 8192+VerdictChecksBytesMax || !utf8.ValidString(raw) {
 		return invalid()
 	}
 	dec := json.NewDecoder(strings.NewReader(raw))
@@ -322,6 +348,15 @@ func parseWorkData(raw string, operation string) (workData, error) {
 			dest = &d.RewardNote
 		case "result_sha256":
 			dest = &d.ResultSHA256
+		case "checks":
+			if !workDataTakes(operation, name) {
+				return workData{}, invalidWorkField(operation, name)
+			}
+			var why string
+			if d.Checks, why = parseVerdictChecks(value); why != "" {
+				return workData{}, problem(400, "invalid_work_data", why+" "+VerdictChecksRule)
+			}
+			continue
 		}
 		if dest == nil || !workDataTakes(operation, name) {
 			return workData{}, invalidWorkField(operation, name)
@@ -338,6 +373,9 @@ func parseWorkData(raw string, operation string) (workData, error) {
 	}
 	want := 2
 	if seen["result_sha256"] {
+		want++
+	}
+	if seen["checks"] {
 		want++
 	}
 	if create {
@@ -1161,6 +1199,9 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		if err == nil {
 			p.RequesterRecord, err = requesterRecord(ctx, tx, w.Requester, now, false)
 		}
+		if err == nil {
+			p.VerdictChecks, err = workVerdictChecks(ctx, tx, w.ID)
+		}
 		if named != id {
 			p.ResolvedFrom = named
 		}
@@ -1390,6 +1431,9 @@ func annotateWorkTransition(tr *WorkTransition, w workRow, current string) {
 	if id := envelope.Command.MessageID; id != w.ID && workIDRE.MatchString(id) {
 		tr.ResolvedFrom = id
 	}
+	if workVerdictOp(tr.Operation) {
+		tr.Checks = signedChecks(tr.SignedPayload)
+	}
 	binds := tr.Operation == "work.submit" || tr.Operation == "work.accept" || (tr.Operation == "work.claim" && tr.State == "submitted")
 	if !binds {
 		return
@@ -1404,6 +1448,28 @@ func annotateWorkTransition(tr *WorkTransition, w workRow, current string) {
 	if current != "" && tr.Fence == w.Fence {
 		tr.ResultSHA256 = current
 	}
+}
+
+// workVerdictChecks is the newest verdict on work id that signed a checks
+// list, or nil. Verdicts are few per work item (one per attempt), and the
+// payload text filter skips those without a list.
+func workVerdictChecks(ctx context.Context, tx *sql.Tx, id string) (*WorkVerdictChecks, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT sequence,operation,author,payload,accepted_at FROM work_transitions WHERE work_id=? AND operation IN ('work.accept','work.reject') AND instr(payload,'checks')>0 ORDER BY sequence DESC LIMIT 32`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v WorkVerdictChecks
+		var payload string
+		if err = rows.Scan(&v.Sequence, &v.Operation, &v.Author, &payload, &v.At); err != nil {
+			return nil, err
+		}
+		if v.Checks = signedChecks(payload); v.Checks != nil {
+			return &v, nil
+		}
+	}
+	return nil, rows.Err()
 }
 
 func workReadError(err error) error {

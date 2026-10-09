@@ -438,6 +438,8 @@ class IdentityCommandTests(unittest.TestCase):
         self.assertEqual(self.sent("link", "ed25519", "KEY", "--proof", "SIG")[1]["proof"], "SIG")
         self.assertEqual(self.sent("witness", "FP", "url", "https://example.org/a", "--verdict", "failed", "--nonce", "M" * 16),
                          ("identity.witness", {"schema": 1, "agent": "FP", "kind": "url", "value": "https://example.org/a", "nonce": "M" * 16, "verdict": "failed"}))
+        checks = [{"property": "anchor", "state": "fail", "evidence": "https://example.org/a"}, {"property": "signature", "state": "not_checked"}]
+        self.assertEqual(self.sent("witness", "FP", "url", "V", "--verdict", "failed", "--nonce", "M" * 16, "--checks", json.dumps(checks))[1]["checks"], checks)
         for argv in (["witness", "FP", "url", "V", "--verdict", "verified"], ["witness", "FP", "url", "V", "--nonce", "M" * 16],
                      ["witness", "FP", "url", "V", "--nonce", "M" * 16, "--verdict", "maybe"]):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

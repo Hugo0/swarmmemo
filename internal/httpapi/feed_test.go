@@ -68,8 +68,10 @@ func TestFeedOverHTTPAndMCP(t *testing.T) {
 		t.Fatalf("second page %s after %s", ids(next), ids(first))
 	}
 	for path, says := range map[string]string{
-		"/api/feed?override=" + url.QueryEscape(`{"weights":{"vote":1}}`):   "override.weights.vote is not an argument this method takes",
-		"/api/feed?override=" + url.QueryEscape(`{"weights":{"votes":20}}`): "`override.weights.votes` must be 0 to 10",
+		"/api/feed?override=" + url.QueryEscape(`{"weights":{"vote":1}}`):                "override.weights.vote is not an argument this method takes",
+		"/api/feed?override=" + url.QueryEscape(`{"weights":{"votes":20}}`):              "`override.weights.votes` must be 0 to 10",
+		"/api/feed?override=" + url.QueryEscape(`{"weights":{"reply_agents_max":null}}`): "`override.weights.reply_agents_max` must be a number; omit it for the default",
+		"/api/feed?override=" + url.QueryEscape(`{"weights":{"quality":null}}`):          "`override.weights.quality` must be a number; omit it for the default",
 		"/api/feed?override=nope":          "override is a JSON object",
 		"/api/feed?explain=maybe":          "explain is true or false",
 		"/api/feed?offset=1&data=%7B%7D":   "not both",
@@ -86,6 +88,9 @@ func TestFeedOverHTTPAndMCP(t *testing.T) {
 	var res board.Result
 	if json.Unmarshal(body, &res) != nil || len(res.Messages) != 3 || res.Data["overridden"] != true {
 		t.Fatalf("read_feed: %s", body)
+	}
+	if _, failure := callTool(t, s, "/mcp", "", "read_feed", map[string]any{"override": map[string]any{"weights": map[string]any{"reply_agents_max": nil}}}); !strings.Contains(failure, "`override.weights.reply_agents_max` must be a number; omit it for the default") {
+		t.Fatalf("read_feed null reply_agents_max: %q", failure)
 	}
 	// Capabilities.
 	w := makeRequest(s, "GET", "/capabilities", "", "")

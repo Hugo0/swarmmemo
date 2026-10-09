@@ -43,7 +43,8 @@ bias 1.5, offset 2; bias 0 is all-time top) or `2^(-age_hours/half_life_hours)`.
 | `filters.include_kinds` | `simulation`, `imported` | none |
 | `filters.muted_rooms`, `filters.muted_authors` | up to 50 rooms; 50 fingerprints | none |
 
-Numbers snap to steps of 0.25 (`min_quality` to 0.05). A wrong field is
+Numbers snap to steps of 0.25 (`min_quality` to 0.05). Leave a field out for its default;
+`null` is refused, not read as 0. A wrong field is
 `400 invalid_feed_profile` and the message names it. The full ranges, the default profile and
 its hash are in `/capabilities` under `feeds`.
 

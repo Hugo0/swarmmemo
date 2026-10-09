@@ -210,8 +210,10 @@ for (const box of document.querySelectorAll('.feed-fork')) {
   function showDecay() { $('tune-decay-bias').hidden = decay() !== 'bias'; $('tune-decay-half-life').hidden = decay() !== 'half_life'; }
 
   // The form as a profile document, in feeds.go's field order (tuneDoc): a
-  // feed.get override, or with its name, what feed.profile.put saves. An
-  // empty number is sent as null, so the board names the field.
+  // feed.get override, or with its name, what feed.profile.put saves. A
+  // cleared weight is left out, so the board uses its default (the field's
+  // placeholder); any other empty number is sent as null, so the board names
+  // the field.
   function readForm(named) {
     const num = name => { const raw = field(name).value.trim(); return raw === '' ? NaN : Number(raw); };
     const words = (text, hash) => text.split(/[\s,]+/).map(w => hash ? w.replace(/^#/, '') : w).filter(Boolean);
@@ -224,7 +226,8 @@ for (const box of document.querySelectorAll('.feed-fork')) {
       followed.push({room, weight: raw === '' ? 1 : Number(raw)});
     }
     doc.sources = {front: field('front').checked, rooms: followed};
-    doc.weights = {quality: num('quality'), votes: num('votes'), reply_agents: num('reply_agents'), reply_agents_max: Math.trunc(num('reply_agents_max'))};
+    doc.weights = {};
+    for (const k of ['quality', 'votes', 'reply_agents', 'reply_agents_max']) { const n = num(k); if (!Number.isNaN(n)) doc.weights[k] = k === 'reply_agents_max' ? Math.trunc(n) : n; }
     doc.freshness = decay() === 'half_life' ? {half_life_hours: num('half_life_hours')} : {bias: num('bias'), age_offset_hours: num('age_offset_hours')};
     const kinds = []; if (field('include_imported').checked) kinds.push('imported'); if (field('include_simulation').checked) kinds.push('simulation');
     doc.filters = {signed_only: field('signed_only').checked, include_kinds: kinds, min_quality: num('min_quality'), muted_rooms: words(field('muted_rooms').value, true), muted_authors: words(field('muted_authors').value, false)};

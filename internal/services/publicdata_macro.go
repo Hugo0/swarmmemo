@@ -337,7 +337,7 @@ const (
 	bcbHost             = "api.bcb.gov.br"
 	cbHistoryObs        = 260
 	cbMaxUpcoming       = 4
-	cbCalendarValidThru = "2026-12-31"
+	cbCalendarValidThru = "2027-12-31"
 	cbEffectiveLagDays  = 10
 	bisRateSource       = "BIS daily central bank policy rates (stats.bis.org, WS_CBPOL)"
 )
@@ -347,6 +347,10 @@ type cbBank struct {
 	Decisions                  []string
 	CalendarSource             string
 	CalendarNote               string
+	// ScheduleUnknown, when set, says why no future decision date is
+	// listed; the API then answers schedule_status "unknown" with this
+	// reason instead of silently returning no next_decision.
+	ScheduleUnknown string
 }
 
 // cbBanks are the covered banks, with decision dates (announcement day)
@@ -360,26 +364,33 @@ var cbBanks = func() []cbBank {
 		{Code: "FED", Name: "US Federal Reserve (FOMC)", Area: "US", RateName: "federal funds target range (BIS publishes the midpoint)", Decisions: fed,
 			CalendarSource: "Federal Reserve FOMC calendar, www.federalreserve.gov/monetarypolicy/fomccalendars.htm"},
 		{Code: "ECB", Name: "European Central Bank (euro area)", Area: "XM", RateName: "deposit facility rate (ECB steering rate since Sep 2024)",
-			Decisions:      []string{"2026-09-10", "2026-10-29", "2026-12-17", "2027-02-04", "2027-03-18", "2027-04-29", "2027-06-10", "2027-07-22"},
+			Decisions:      []string{"2026-09-10", "2026-10-29", "2026-12-17", "2027-02-04", "2027-03-18", "2027-04-29", "2027-06-10", "2027-07-22", "2027-09-09", "2027-10-28", "2027-12-16"},
 			CalendarSource: "ECB Governing Council calendar, www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"},
 		{Code: "BOJ", Name: "Bank of Japan", Area: "JP", RateName: "uncollateralized overnight call rate (target)",
 			Decisions:      []string{"2026-09-18", "2026-10-30", "2026-12-18", "2027-01-22", "2027-03-18", "2027-04-28", "2027-06-11", "2027-07-22", "2027-09-22", "2027-10-29", "2027-12-17"},
 			CalendarSource: "BOJ MPM schedule, www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"},
 		{Code: "BOE", Name: "Bank of England", Area: "GB", RateName: "Bank Rate",
-			Decisions:      []string{"2026-09-17", "2026-11-05", "2026-12-17", "2027-02-04", "2027-03-18", "2027-04-29", "2027-06-17"},
-			CalendarSource: "BoE MPC dates for 2026 and 2027 (2027 provisional), bankofengland.co.uk/monetary-policy/upcoming-mpc-dates"},
+			Decisions:      []string{"2026-09-17", "2026-11-05", "2026-12-17", "2027-02-04", "2027-03-18", "2027-04-29", "2027-06-17", "2027-07-29", "2027-09-16", "2027-11-04", "2027-12-16"},
+			CalendarSource: "BoE MPC dates for 2026 and 2027 (both confirmed), bankofengland.co.uk/monetary-policy/upcoming-mpc-dates"},
 		{Code: "BCB", Name: "Banco Central do Brasil (Copom / Selic)", Area: "BR", RateName: "Selic target rate (Meta Selic definida pelo Copom), % a.a.",
-			Decisions:      []string{"2026-09-16", "2026-11-04", "2026-12-09"},
-			CalendarSource: "Copom calendar, www.bcb.gov.br/en/monetarypolicy/copomdates"},
+			Decisions: []string{"2026-09-16", "2026-11-04", "2026-12-09", "2027-01-27", "2027-03-17", "2027-04-28", "2027-06-16", "2027-08-04", "2027-09-22",
+				"2027-10-27", "2027-12-08"},
+			CalendarSource: "Copom calendar (BCB Comunicados 43.383 and 45.452), www.bcb.gov.br/en/monetarypolicy/copomdates"},
 		{Code: "SNB", Name: "Swiss National Bank", Area: "CH", RateName: "SNB policy rate",
-			Decisions: []string{"2026-09-24", "2026-12-10"}, CalendarSource: "SNB quarterly monetary policy assessment schedule, www.snb.ch"},
+			Decisions:      []string{"2026-09-24", "2026-12-10", "2027-03-18", "2027-06-24", "2027-09-23", "2027-12-16"},
+			CalendarSource: "SNB quarterly monetary policy assessment schedule, www.snb.ch/en/services-events/digital-services/event-schedule"},
 		{Code: "RBA", Name: "Reserve Bank of Australia", Area: "AU", RateName: "cash rate target",
-			Decisions: []string{"2026-08-11", "2026-09-29", "2026-11-03", "2026-12-08"}, CalendarSource: "RBA 2026 Monetary Policy Board meeting dates, www.rba.gov.au"},
+			Decisions: []string{"2026-08-11", "2026-09-29", "2026-11-03", "2026-12-08", "2027-02-09", "2027-03-23", "2027-05-04", "2027-06-22", "2027-08-10",
+				"2027-09-28", "2027-11-02", "2027-12-14"},
+			CalendarSource: "RBA Monetary Policy Board meeting dates 2026 and 2027, www.rba.gov.au/schedules-events/board-meeting-schedules.html"},
 		{Code: "BOC", Name: "Bank of Canada", Area: "CA", RateName: "target for the overnight rate",
-			Decisions: []string{"2026-09-02", "2026-10-28", "2026-12-09"}, CalendarSource: "Bank of Canada interest-rate announcement schedule, www.bankofcanada.ca"},
+			Decisions: []string{"2026-09-02", "2026-10-28", "2026-12-09", "2027-01-27", "2027-03-03", "2027-04-28", "2027-06-02", "2027-07-21", "2027-09-08",
+				"2027-10-27", "2027-12-08"},
+			CalendarSource: "Bank of Canada interest-rate announcement schedule (2027 published July 2026), www.bankofcanada.ca"},
 		{Code: "BOI", Name: "Bank of Israel", Area: "IL", RateName: "Bank of Israel interest rate",
 			Decisions: []string{"2026-09-01"}, CalendarSource: "Bank of Israel monetary committee schedule, www.boi.org.il",
-			CalendarNote: "only the 2026-09-01 decision could be verified; later 2026 dates are not included, so verify the next date near resolution"},
+			ScheduleUnknown: "the Bank of Israel's forward decision schedule could not be verified from its own site, so no future date is listed; " +
+				"the next decision date is unknown here: check www.boi.org.il (each decision's press release names the next one)"},
 	}
 }()
 
@@ -596,6 +607,7 @@ type cbRow struct {
 	LastScheduledDecision *string   `json:"last_scheduled_decision_in_table,omitempty"`
 	CalendarSource        string    `json:"calendar_source,omitempty"`
 	CalendarNote          string    `json:"calendar_note,omitempty"`
+	ScheduleStatus        string    `json:"schedule_status,omitempty"`
 	RateMayBeStale        bool      `json:"rate_may_be_stale"`
 	RateStaleReason       string    `json:"rate_stale_reason,omitempty"`
 	hasCalendar           bool
@@ -612,7 +624,7 @@ var dsCBPolicy = &pdDataset{
 	ID: "cb_policy_rates", SchemaVersion: 1,
 	Title:       "Central-bank policy rates and decision dates",
 	Description: "A central bank's policy rate (BIS, with the date and size of its last change; the Fed's target range from FRED; Brazil's Selic target from the BCB) and its next scheduled decision dates. Covers FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, or all.",
-	Output:      "data: today, what, banks {CODE: {bank, policy_rate_pct, rate_as_of, rate_effective_from, previous_rate_pct, last_change_bps, target_range_pct, selic_target_pct, next_decision, upcoming_decisions, last_scheduled_decision_in_table, calendar_source, rate_available, rate_may_be_stale, ...}} (one entry, or every bank for all), calendar_staleness_warning",
+	Output:      "data: today, what, banks {CODE: {bank, policy_rate_pct, rate_as_of, rate_effective_from, previous_rate_pct, last_change_bps, target_range_pct, selic_target_pct, next_decision, upcoming_decisions, last_scheduled_decision_in_table, calendar_source, schedule_status (scheduled, or unknown with the reason in calendar_note), rate_available, rate_may_be_stale, ...}} (one entry, or every bank for all), calendar_staleness_warning",
 	Params: []pdParam{
 		{Name: "bank", Kind: "string", Required: true, MaxLen: 64, Pattern: pdWordRE, Norm: pdTrim, Doc: "FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, a common name (Brazil, Copom, FOMC), or all"},
 		{Name: "what", Kind: "enum", Enum: []string{"rate", "next_meeting", "both"}, Default: "both", Doc: "rate, next_meeting (no upstream request) or both",
@@ -677,8 +689,12 @@ func cbBankRow(ctx context.Context, r *pdRun, b cbBank, what, today string) *cbR
 			row.NextDecision = sptr(upcoming[0])
 		}
 		row.CalendarSource = b.CalendarSource
+		row.ScheduleStatus = "scheduled"
 		switch {
+		case len(upcoming) == 0 && b.ScheduleUnknown != "":
+			row.ScheduleStatus, row.CalendarNote = "unknown", b.ScheduleUnknown
 		case len(upcoming) == 0:
+			row.ScheduleStatus = "unknown"
 			row.CalendarNote = "the decision calendar has no future dates left; verify the next meeting date from the bank's own calendar"
 		case b.CalendarNote != "":
 			row.CalendarNote = b.CalendarNote
@@ -696,6 +712,7 @@ func cbBankRow(ctx context.Context, r *pdRun, b cbBank, what, today string) *cbR
 				row.UpcomingDecisions = later
 			}
 			row.NextDecision = sptr(liveNext)
+			row.ScheduleStatus = "scheduled"
 			row.CalendarSource = "BCB SGS 432 forward validity window (live, api.bcb.gov.br); " + b.CalendarSource
 		}
 	}

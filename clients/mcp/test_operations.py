@@ -197,6 +197,35 @@ class OperationTests(unittest.TestCase):
         for item in bad:
             with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
 
+    def test_verdict_checks_are_validated(self):
+        # A verdict may sign per-property checks (/protocol.md#verdict-checks):
+        # the transition shows the signed list, and the work its newest one.
+        fingerprint = hashlib.sha256(op.memo.unb64(self.public)).hexdigest()
+        checks = [{"property": "integrity", "state": "pass", "subject_sha256": "d" * 64, "tool": "sha256sum@9.4"}, {"property": "conformance", "state": "not_checked"}]
+        def transition(data, extra, operation="work.accept", state="accepted"):
+            fields = {"operation": operation, "message_id": "b" * 32, "amount": 7, "data": json.dumps(data)}
+            if operation == "work.reject": fields["reason"] = "no"
+            command = op.memo.sign(fields, self.key)
+            return {"sequence": 3, "operation": operation, "author": fingerprint, "public_key": self.public, "signature": command["signature"],
+                    "signed_payload": op.memo.canonical(command).decode(), "accepted_at": int(time.time()), "fence": 7, "generation": "a" * 32, "state": state, **extra}
+        plain, checked = {"schema": 1, "generation": "a" * 32}, {"schema": 1, "generation": "a" * 32, "checks": checks}
+        for item in (transition(checked, {"checks": checks}), transition(checked, {"checks": checks}, "work.reject", "open"), transition(plain, {})):
+            with self.subTest(item=item): self.assertEqual(op._transition(self.profile, item, "b" * 32), item)
+        bad_list = {"schema": 1, "generation": "a" * 32, "checks": [{"property": "integrity", "state": "maybe"}]}
+        for item in (transition(checked, {}), transition(checked, {"checks": checks[:1]}), transition(plain, {"checks": checks}),
+                     transition(bad_list, {"checks": bad_list["checks"]})):
+            with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
+        work = {"id": "b" * 32, "room": "lab", "title": "t", "capabilities": [], "simulated": False, "state": "accepted", "stored_state": "accepted", "generation": "a" * 32,
+                "service_generation": "a" * 32, "service_id": self.profile.service_id, "created_at": 1, "updated_at": 1, "deadline": 2, "fence": 7, "claim_expires_at": 0,
+                "requester_author": fingerprint, "requester": {"id": fingerprint, "public_key": self.public}, "result_available": False}
+        verdict = {"operation": "work.accept", "sequence": 3, "author": fingerprint, "at": 5, "checks": checks}
+        self.assertEqual(op._work(self.profile, {**work, "verdict_checks": verdict})["verdict_checks"], verdict)
+        for bad in ({**verdict, "operation": "work.submit"}, {**verdict, "checks": []}, {**verdict, "checks": [{"property": "A", "state": "pass"}]},
+                    {**verdict, "checks": [{"property": "a", "state": "pass", "note": "x"}]}, {**verdict, "checks": [{"property": "a", "state": "pass", "evidence": "a\nb"}]},
+                    {**verdict, "extra": 1}):
+            with self.subTest(verdict=bad), self.assertRaisesRegex(BridgeError, "invalid_response"):
+                op._work(self.profile, {**work, "verdict_checks": bad})
+
     @unittest.skipUnless(os.environ.get("SWARMMEMO_MCP_TEST_BINARY"), "requires explicit disposable Go binary")
     def test_actual_go_public_work_lifecycle_exact_replay_and_inactive_status(self):
         listener = socket.socket(); listener.bind(("127.0.0.1", 0)); port = listener.getsockname()[1]; listener.close()

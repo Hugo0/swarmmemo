@@ -656,13 +656,14 @@ class Client:
         """work.get: the work's state and request text; agent previews whether it could claim."""
         return self.command("work.get", message_id=message_id, **({"target": agent} if agent else {}))
 
-    def _work_data(self, message_id, generation, result_sha256=None):
+    def _work_data(self, message_id, generation, result_sha256=None, checks=None):
         if generation is None:
             # Preserve the request file for the mutation, not this prerequisite read.
             work = self.send(self.prepare("work.get", message_id=message_id), save_request=False)
             generation = work["data"]["work"]["service_generation"]
         data = {"schema": 1, "generation": generation}
         if result_sha256: data["result_sha256"] = result_sha256
+        if checks: data["checks"] = list(checks)
         return compact(data)
 
     def work_claim(self, message_id, result_id=None, ttl=None, generation=None, result_sha256=None, request_id=None):
@@ -679,15 +680,17 @@ class Client:
         return self.command("work.submit", message_id=message_id, amount=fence, target=result_id,
                             data=self._work_data(message_id, generation, result_sha256), request_id=request_id or uuid.uuid4().hex)
 
-    def work_accept(self, message_id, fence, generation=None, result_sha256=None, request_id=None):
-        """work.accept (requester or named reviewer); pays any reward. result_sha256 signs the text you judged."""
+    def work_accept(self, message_id, fence, generation=None, result_sha256=None, request_id=None, checks=None):
+        """work.accept (requester or named reviewer); pays any reward. result_sha256 signs the text you judged.
+        checks, optional, says per property what you checked: [{"property", "state", "subject_sha256"?,
+        "tool"?, "evidence"?}], state pass, fail, not_checkable or not_checked (/protocol.md#verdict-checks)."""
         return self.command("work.accept", message_id=message_id, amount=fence,
-                            data=self._work_data(message_id, generation, result_sha256), request_id=request_id or uuid.uuid4().hex)
+                            data=self._work_data(message_id, generation, result_sha256, checks), request_id=request_id or uuid.uuid4().hex)
 
-    def work_reject(self, message_id, fence, reason, generation=None, request_id=None):
-        """work.reject with a reason; the work reopens for the next worker."""
+    def work_reject(self, message_id, fence, reason, generation=None, request_id=None, checks=None):
+        """work.reject with a reason; the work reopens for the next worker. checks as for work_accept."""
         return self.command("work.reject", message_id=message_id, amount=fence, reason=reason,
-                            data=self._work_data(message_id, generation), request_id=request_id or uuid.uuid4().hex)
+                            data=self._work_data(message_id, generation, checks=checks), request_id=request_id or uuid.uuid4().hex)
 
     # ---- Wake-ups: updates and the journal (docs/TOOLS_UPDATES.md) ----
 
@@ -2152,7 +2155,8 @@ def build_parser():
     call.add_argument("--request-id")
     memory = commands.add_parser("memory", help="key-value memory; server-readable, not end-to-end encrypted")
     memory_actions = memory.add_subparsers(dest="memory_action", required=True)
-    put = memory_actions.add_parser("put"); put.add_argument("memory_key", metavar="key"); put.add_argument("value")
+    put = memory_actions.add_parser("put"); put.add_argument("memory_key", metavar="key")
+    put.add_argument("value", help="the value to store, or - to read it from stdin (stored as read, newlines included)")
     put.add_argument("--public", action="store_true"); put.add_argument("--max-cost", type=int); put.add_argument("--request-id")
     get = memory_actions.add_parser("get"); get.add_argument("memory_key", metavar="key"); get.add_argument("--agent")
     forget = memory_actions.add_parser("delete"); forget.add_argument("memory_key", metavar="key"); forget.add_argument("--request-id")
@@ -2173,6 +2177,7 @@ def build_parser():
     witness.add_argument("agent", help="the linking agent's fingerprint"); witness.add_argument("kind"); witness.add_argument("value")
     witness.add_argument("--nonce", required=True, help="the challenge you used in your check, 16-128 characters")
     witness.add_argument("--verdict", required=True, choices=["verified", "failed"])
+    witness.add_argument("--checks", type=json.loads, help='optional JSON list of what you checked, per property: [{"property":"signature","state":"pass"}]; /protocol.md#verdict-checks')
     rotate = commands.add_parser("rotate"); rotate.add_argument("new_key", type=Path)
     upload = commands.add_parser("upload"); upload.add_argument("room"); upload.add_argument("path", type=Path)
     upload.add_argument("--media-type", default="application/octet-stream"); upload.add_argument("--ttl", type=int, default=None, help="optional seconds until removal; omit to keep the file")
@@ -2232,15 +2237,18 @@ def main(argv=None):
                     raise ValueError("args must be a JSON object")
                 result = client.service_method(args.target_service, args.method, call_args, args.max_cost, args.request_id)
             elif args.action == "memory" and args.memory_action == "put":
-                entry = {"key": args.memory_key, "value": args.value, "visibility": "public" if args.public else "private"}
-                cost = memory_put_price(args.memory_key, args.value) if args.max_cost is None else args.max_cost
+                value = sys.stdin.read() if args.value == "-" else args.value
+                if args.value == "-" and not value:
+                    raise ChatStop(1, "memory put: stdin was empty, nothing stored (a literal - value is not supported)")
+                entry = {"key": args.memory_key, "value": value, "visibility": "public" if args.public else "private"}
+                cost = memory_put_price(args.memory_key, value) if args.max_cost is None else args.max_cost
                 result = client.service_call("memory", "put", entry, cost, args.request_id)
             elif args.action == "memory" and args.memory_action == "delete":
                 result = client.service_call("memory", "delete", {"key": args.memory_key}, 64, args.request_id)
             elif args.action == "memory" and args.memory_action == "get":
                 result = client.service_read("memory", "get", {"key": args.memory_key, **({"agent": args.agent} if args.agent else {})})
             elif args.action == "memory":
-                fields = {"prefix": args.prefix, "cursor": args.cursor, "agent": args.agent}
+                fields = {"prefix": args.prefix, "after": args.cursor, "agent": args.agent}
                 result = client.service_read("memory", "list", {k: v for k, v in fields.items() if v is not None})
             elif args.action == "trust": result = client.command("trust.get", target=args.agent)
             elif args.action == "vouch":
@@ -2251,7 +2259,9 @@ def main(argv=None):
                           "observed_height": args.observed_height, "observed_time": args.observed_time, "nonce_log": args.nonce_log, "nonce_log_size": args.nonce_log_size}
                 result = client.command("identity.link", data=compact({k: v for k, v in fields.items() if v is not None}))
             elif args.action == "witness":
-                data = compact({"schema": 1, "agent": args.agent, "kind": args.kind, "value": args.value, "nonce": args.nonce, "verdict": args.verdict})
+                fields = {"schema": 1, "agent": args.agent, "kind": args.kind, "value": args.value, "nonce": args.nonce, "verdict": args.verdict}
+                if args.checks: fields["checks"] = args.checks
+                data = compact(fields)
                 result = client.command("identity.witness", data=data)
             elif args.action == "rotate": result = client.rotate(load_key(args.new_key))
             elif args.action == "upload": result = client.upload(args.room, args.path, args.media_type, args.ttl, args.request_id)

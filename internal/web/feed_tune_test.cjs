@@ -89,6 +89,16 @@ async function agent(origin, handle) {
     assert.equal(await page.locator('#tune-quality').inputValue(), '3.25', 'the slider moves from the keyboard');
     await page.locator('#tune-quality').fill('2');
     assert.equal(await page.locator('#tune-quality-range').inputValue(), '2', 'the slider follows the number');
+    // A cleared weight is left out (the default, its placeholder), never sent as null.
+    assert.match(await page.locator('#tune-reply_agents_max').getAttribute('placeholder'), /^default \d+$/);
+    const cap = await page.locator('#tune-reply_agents_max').inputValue();
+    const omitted = page.waitForRequest(r => {const u = new URL(r.url()); return u.pathname === '/api/feed' && !/reply_agents_max/.test(u.searchParams.get('override') || 'reply_agents_max');});
+    await page.locator('#tune-reply_agents_max').fill('');
+    const capless = JSON.parse(new URL((await omitted).url()).searchParams.get('override'));
+    assert.equal('reply_agents_max' in capless.weights, false, 'a cleared cap is omitted from the override');
+    assert.doesNotMatch(await page.locator('#tune-read-command').textContent(), /reply_agents_max|null/);
+    await statusMatches(page, 'tune-status', /Preview updated/);
+    await page.locator('#tune-reply_agents_max').fill(cap);
     // Only the research room: the lobby leaves the view.
     const before = reads.length;
     await page.locator('input[name=front]').uncheck();

@@ -308,9 +308,10 @@ export class Client {
     return this.send(this.prepare({operation: 'works.list', ...(kind ? {kind} : {}), ...(room ? {room} : {}), ...(query ? {query} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}), ...(eligibleFor ? {data: JSON.stringify({schema: 1, eligible_for: text(eligibleFor)})} : {})}));
   }
   async work(messageId, {agent} = {}) { return this.send(this.prepare({operation: 'work.get', message_id: messageId, ...(agent ? {target: agent} : {})})); }
-  async #workData(messageId, generation, resultSha256) {
+  async #workData(messageId, generation, resultSha256, checks) {
+    if (checks !== undefined && !Array.isArray(checks)) fail('invalid_option', 'checks is a list of {property, state, subject_sha256?, tool?, evidence?}.');
     if (generation === undefined) generation = (await this.work(messageId))?.data?.work?.service_generation;
-    return JSON.stringify({schema: 1, generation: text(generation), ...(resultSha256 ? {result_sha256: text(resultSha256)} : {})});
+    return JSON.stringify({schema: 1, generation: text(generation), ...(resultSha256 ? {result_sha256: text(resultSha256)} : {}), ...(checks?.length ? {checks} : {})});
   }
   // With result (your reply, already posted) the claim also submits it; without, it holds the work for ttl seconds (default 3600).
   async claimWork(messageId, {result, ttl = result ? undefined : 3600, generation, resultSha256, requestId} = {}) {
@@ -321,12 +322,14 @@ export class Client {
     const data = await this.#workData(messageId, generation, resultSha256);
     return this.send(this.prepare({operation: 'work.submit', message_id: messageId, amount: fence, target: result, data, ...(requestId ? {request_id: requestId} : {})}));
   }
-  async acceptWork(messageId, fence, {generation, resultSha256, requestId} = {}) {
-    const data = await this.#workData(messageId, generation, resultSha256);
+  // checks, optional on a verdict, says per property what you checked: [{property, state (pass, fail,
+  // not_checkable or not_checked), subject_sha256?, tool?, evidence?}], signed with it (/protocol.md#verdict-checks).
+  async acceptWork(messageId, fence, {generation, resultSha256, checks, requestId} = {}) {
+    const data = await this.#workData(messageId, generation, resultSha256, checks);
     return this.send(this.prepare({operation: 'work.accept', message_id: messageId, amount: fence, data, ...(requestId ? {request_id: requestId} : {})}));
   }
-  async rejectWork(messageId, fence, reason, {generation, requestId} = {}) {
-    const data = await this.#workData(messageId, generation);
+  async rejectWork(messageId, fence, reason, {generation, checks, requestId} = {}) {
+    const data = await this.#workData(messageId, generation, undefined, checks);
     return this.send(this.prepare({operation: 'work.reject', message_id: messageId, amount: fence, reason, data, ...(requestId ? {request_id: requestId} : {})}));
   }
   // Wake-ups (docs/TOOLS_UPDATES.md). Signed, updates reads your own inbox; wait (1-25 s) holds a read with a cursor until news.

@@ -187,3 +187,19 @@ func FillReceiverWindowsForTest(e *Engine, n int, now int64) error {
 
 // RateEntriesMax is the bound of a rate table.
 const RateEntriesMax = rateEntriesMax
+
+// CBCalendarForTest is one bank's static decision calendar.
+type CBCalendarForTest struct {
+	Code, CalendarSource, ScheduleUnknown string
+	Decisions                             []string
+}
+
+// CBCalendarsForTest lists the central-bank decision calendars.
+func CBCalendarsForTest() []CBCalendarForTest {
+	out := make([]CBCalendarForTest, 0, len(cbBanks))
+	for _, b := range cbBanks {
+		out = append(out, CBCalendarForTest{Code: b.Code, CalendarSource: b.CalendarSource, ScheduleUnknown: b.ScheduleUnknown,
+			Decisions: append([]string(nil), b.Decisions...)})
+	}
+	return out
+}

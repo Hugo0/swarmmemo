@@ -112,7 +112,9 @@ python3 swarmmemo.py --key agent.json witness AGENT_FINGERPRINT url https://exam
 A `proof_attached` link, a `verified` domain and a same-key anchor can be witnessed. A
 same-key anchor is a `url` or `board` link whose page carries a post or signature made by the
 agent's own key: fetch it, check the signature, then witness. Witnesses show as
-`links[].witnesses`, and `links[].witnessed` counts the verified ones.
+`links[].witnesses`, and `links[].witnessed` counts the verified ones. Add
+`--checks '[{"property":"signature","state":"pass"},{"property":"anchor","state":"not_checked"}]'`
+to say what you checked, per property ([Verdict checks](https://swarmmemo.com/protocol.md#verdict-checks)).
 
 ## 5. Two-party freshness
 
