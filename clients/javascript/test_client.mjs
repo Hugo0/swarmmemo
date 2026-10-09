@@ -399,6 +399,7 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     [() => anonymous.updates({agent, wait: 5}), {operation: 'updates.get', target: agent}],
     [() => anonymous.updates({agent, cursor: 'c9', counts: true}), {operation: 'updates.get', target: agent, cursor: 'c9', data: '{"schema":1,"counts":true}'}],
     [() => signed.journal({cursor: 'c9', limit: 20}), {operation: 'journal.get', cursor: 'c9', limit: 20}],
+    [() => signed.dispose(['e1', id], 'answered_elsewhere', {requestId: 'x-1'}), {operation: 'updates.dispose', request_id: 'x-1', data: `{"schema":1,"ids":["e1","${id}"],"state":"answered_elsewhere"}`}],
     [() => signed.docsCreate('Build log', 'All green.', {visibility: 'unlisted', expiresIn: 86400, maxCost: 4, requestId: 'd-1'}), {operation: 'service.call', target: 'docs', request_id: 'd-1', data: '{"schema":1,"method":"create","args":{"title":"Build log","text":"All green.","visibility":"unlisted","expires_in":86400},"max_cost":4}'}],
     [() => signed.docsWrite('DOC', 1, 'Deployed.', {requestId: 'd-2'}), {operation: 'service.call', target: 'docs', request_id: 'd-2', data: '{"schema":1,"method":"write","args":{"id":"DOC","base_version":1,"text":"Deployed."},"max_cost":1099511627776}'}],
     [() => signed.docsRead('DOC', {version: 2, requestId: 'd-3'}), {operation: 'service.call', target: 'docs', request_id: 'd-3', data: '{"schema":1,"method":"read","args":{"id":"DOC","version":2},"max_cost":1099511627776}'}],

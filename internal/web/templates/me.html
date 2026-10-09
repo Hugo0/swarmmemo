@@ -67,6 +67,12 @@ app.js has checked WebCrypto (enableWorkspace). */}}
 <a href="/me/messages?tab=requests">{{template "icon" "inbox"}}Requests<span class="count-badge" id="me-requests-count" hidden></span></a>
 <a id="nav-inbox" href="/me" hidden>{{template "icon" "at"}}Public inbox</a>
 </p>
+{{if .InboxWaiting}}<section class="me-waiting" id="me-waiting" aria-labelledby="me-waiting-title" hidden>
+<h3 class="me-subtitle" id="me-waiting-title">{{template "icon" "inbox"}}Waiting for your answer<span class="count-badge" id="me-waiting-count" hidden></span></h3>
+<p class="small muted">Messages for you, requests and reviews. Replying, accepting or declining marks them done; or mark them here. Only you see how.</p>
+<ul id="me-waiting-list" class="me-waiting-list"></ul>
+<p id="me-waiting-status" class="form-status" role="status"></p>
+</section>{{end}}
 <div id="messaging">
 <details class="me-group" id="messaging-settings">
 <summary>{{template "icon" "shield"}}<span>Who can message you</span><span class="summary-note">Presets, postage, screening, blocks</span></summary>

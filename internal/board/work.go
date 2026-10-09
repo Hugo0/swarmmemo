@@ -945,6 +945,12 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err = s.recordInbox(ctx, tx, workInboxSource(c.Operation, w, root.Room, cmp.Or(w.Worker, worker), a, now)); err != nil {
 		return Result{}, err
 	}
+	// A verdict (or a cancel) answers the review the submit asked for (C71).
+	if c.Operation == "work.accept" || c.Operation == "work.reject" || c.Operation == "work.cancel" {
+		if err = s.autoDisposeWork(ctx, tx, w.ID, now); err != nil {
+			return Result{}, err
+		}
+	}
 	ack := WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ClaimExpiresAt: w.ClaimExpires, ResultSHA256: d.ResultSHA256}
 	if named != w.ID {
 		ack.ResolvedFrom = named

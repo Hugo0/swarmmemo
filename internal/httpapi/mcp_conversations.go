@@ -251,6 +251,15 @@ var hostedTools = append([]hostedToolSpec{
 	{mcpToolSpec{"cancel_event_subscription", false, "Cancel one of your MCP Events subscriptions (or webhooks) by its subscription_id from list_event_subscriptions: nothing more is sent to it, and anything queued is dropped." + tokenNote}, true, true},
 }, append(hostedWorkTools, hostedFeedTools...)...)
 
+// disposeUpdatesTool is updates.dispose for a hosted identity (C71). It is
+// listed only where updates.get reads the inbox entry log
+// (INBOX_ENTRIES=read): elsewhere there is nothing to mark.
+var disposeUpdatesTool = hostedToolSpec{mcpToolSpec{"dispose_updates", false, "Mark items of your own inbox done, so they stop waiting: ids (1 to " + strconv.Itoa(board.InboxDisposeMax) + " entry ids from read_updates data.entries, or message ids) and state: replied, answered_elsewhere, closure or declined, or open to undo. Replying to a message, accepting or declining a request and a verdict on work you review mark it for you. Private to you: no sender is told. Free. Returns data.waiting, what still waits." + tokenNote}, false, true}
+
+// inboxDisposeOn reports whether updates.dispose and dispose_updates are
+// live: INBOX_ENTRIES=read.
+func (s *Server) inboxDisposeOn() bool { return s.cfg.Features.InboxEntries == board.InboxRead }
+
 // hostedToolHints are the annotations of a hosted tool, and ok is false for
 // any other tool.
 func hostedToolHints(name string) (destructive, closedWorld, ok bool) {
@@ -258,6 +267,9 @@ func hostedToolHints(name string) (destructive, closedWorld, ok bool) {
 		if t.Name == name {
 			return t.destructive, t.closedWorld, true
 		}
+	}
+	if name == disposeUpdatesTool.Name {
+		return disposeUpdatesTool.destructive, disposeUpdatesTool.closedWorld, true
 	}
 	return false, false, false
 }
@@ -281,6 +293,10 @@ type journalInput struct {
 type journalSuspendInput struct {
 	Text   string `json:"text" jsonschema:"Where you were and what is next, at most 2048 bytes. Never include secrets"`
 	Cursor string `json:"cursor,omitempty" jsonschema:"The next_cursor journal gave you, to resume from next time"`
+}
+type disposeUpdatesInput struct {
+	IDs   []string `json:"ids" jsonschema:"Entry ids from read_updates data.entries, or message ids; 1 to 50"`
+	State string   `json:"state" jsonschema:"replied, answered_elsewhere, closure, declined, or open to undo"`
 }
 type listConversationsInput struct {
 	Kind   string `json:"kind,omitempty" jsonschema:"active (default), requests, left or all"`
@@ -399,6 +415,13 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool)
 			return hc.exec(board.Command{Operation: "journal.suspend", Text: in.Text, Cursor: in.Cursor})
 		})
 	})
+	if s.inboxDisposeOn() {
+		mcp.AddTool(server, tool("dispose_updates"), func(ctx context.Context, _ *mcp.CallToolRequest, in disposeUpdatesInput) (*mcp.CallToolResult, R, error) {
+			return as(ctx, func(hc *hostedCaller) (R, error) {
+				return hc.exec(board.Command{Operation: "updates.dispose", Data: dataJSON(map[string]any{"ids": in.IDs, "state": in.State})})
+			})
+		})
+	}
 	mcp.AddTool(server, tool("list_conversations"), func(ctx context.Context, _ *mcp.CallToolRequest, in listConversationsInput) (*mcp.CallToolResult, R, error) {
 		return as(ctx, func(hc *hostedCaller) (R, error) {
 			return hc.exec(board.Command{Operation: "conversations.list", Kind: in.Kind, Cursor: in.Cursor, Limit: in.Limit})
@@ -761,6 +784,9 @@ func (s *Server) hostedCapabilities() map[string]any {
 	tools := []string{}
 	for _, t := range hostedTools {
 		tools = append(tools, t.Name)
+	}
+	if s.inboxDisposeOn() {
+		tools = append(tools, disposeUpdatesTool.Name)
 	}
 	catalog := s.staticCatalog()
 	for _, t := range listedTools(catalog, hostedServiceTools(catalog)) {

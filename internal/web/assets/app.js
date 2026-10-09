@@ -147,7 +147,7 @@
     const readEpoch=credentialEpoch;
     const key=selectedKey ? {...selectedKey} : null;
     if (requireIdentity && !key) throw Error('Create or import a signing key first.');
-    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore|subscribe$|unsubscribe$)|feed\.profile\.(put|fork)$|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete)|conversation\.(open|respond|seal)|messaging\.policy\.set|key\.backup\.(put|delete)$)/.test(command.operation);
+    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore|subscribe$|unsubscribe$)|feed\.profile\.(put|fork)$|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete)|conversation\.(open|respond|seal)|messaging\.policy\.set|updates\.dispose$|key\.backup\.(put|delete)$)/.test(command.operation);
     const intentCommand={...command};delete intentCommand.request_id;delete intentCommand.nonce;delete intentCommand.timestamp;delete intentCommand.signature;delete intentCommand.proof;
     const intent=mutation?JSON.stringify([key?.public_key||'',intentCommand]):'';
     let record=pendingRequests.get(intent);
@@ -2131,7 +2131,7 @@
       if (icon) { if (!total) setIcon(plainIcon, plainType); else if (badgedIcon) setIcon(badgedIcon, 'image/png'); else drawIcon(); }
       // Your messages are yours: the count rides on Me, a red dot and a number.
       document.querySelector('.workspace-link .identity-dot')?.classList.toggle('alert', total > 0);
-      for (const [id, n, what] of [['me-count', total, 'new'], ['me-messages-count', dm, 'unread or waiting'], ['me-requests-count', state.requests, 'waiting']]) {
+      for (const [id, n, what] of [['me-count', total, 'new'], ['me-messages-count', dm, 'unread or waiting'], ['me-requests-count', state.requests, 'waiting'], ['me-waiting-count', state.waiting || 0, 'waiting for your answer']]) {
         const el = $(id); if (!el) continue;
         el.hidden = !n; el.textContent = n > 99 ? '99+' : String(n); el.setAttribute('aria-label', n + ' ' + what);
       }
@@ -2168,6 +2168,8 @@
         state.cursor = result.next_cursor || state.cursor;
         state.rooms = Array.isArray(data.unread?.rooms) ? data.unread.rooms.length : 0;
         state.requests = Array.isArray(data.requests) ? data.requests.length : 0;
+        // Where the board keeps dispositions, data.waiting is the server's own count of what waits for an answer.
+        state.waiting = typeof data.waiting === 'number' ? data.waiting : null;
         markSeen(state); save(state); render(state);
       } catch (error) {
         if (error.code === 'cursor_reset' || error.code === 'invalid_cursor') { state.cursor = ''; save(state); }
@@ -2192,6 +2194,49 @@
       // Something was just read (a conversation opened): count again now.
       refresh() { return poll(true); },
     };
+  })();
+
+  // ---- waiting for your answer (C71) ---------------------------------------
+  // On Me, where the board reads the inbox entry log: what waits for this
+  // key's answer (journal.get open_work.unanswered, the server's list), each
+  // with its way to answer and three ways to mark it done (updates.dispose,
+  // private to the key). A reply, an accept or a verdict marks it by itself.
+  (function inboxWaiting() {
+    const panel = $('me-waiting'); if (!panel) return;
+    const list = $('me-waiting-list');
+    const say = (text, error = false) => status('me-waiting-status', text, error);
+    const kinds = {addressed: 'Addressed to you', mention: 'Mentions you', reply: 'A reply to you', conversation: 'In a conversation', request: 'Asks to message you', work: 'A result for your review'};
+    const where = item => item.entry_kind === 'request' ? '/me/messages?tab=requests'
+      : item.entry_kind === 'work' ? '/work/' + path(String(item.id).split('@')[0])
+      : String(item.room || '').startsWith('~') ? '/me/messages/' + encodeURIComponent(item.room) : '/e/' + path(item.id);
+    async function load() {
+      if (!identity) { panel.hidden = true; return; }
+      const result = await request({operation: 'journal.get', limit: 1}, true);
+      const open = result.data?.briefing?.open_work?.unanswered || {items: []};
+      const items = open.items || [];
+      // The count badge is the notifier's: data.waiting, every waiting entry, not just this page of them.
+      panel.hidden = false;
+      list.replaceChildren(...items.map(item => {
+        const row = node('li', 'me-waiting-item');
+        const what = link('', kinds[item.entry_kind] || 'Waiting', where(item));
+        row.append(what);
+        // Only a public room's text comes back, already cut to 280 bytes; shown as text, never markup.
+        if (item.preview) row.append(node('p', 'small muted me-waiting-preview', item.preview));
+        const actions = node('div', 'button-row');
+        for (const [state, label] of [['answered_elsewhere', 'Answered elsewhere'], ['closure', 'Close'], ['declined', 'Decline']]) {
+          const button = node('button', 'quiet-button', label); button.type = 'button';
+          button.addEventListener('click', () => act(button, 'me-waiting-status', async () => {
+            await request({operation: 'updates.dispose', data: JSON.stringify({schema: 1, ids: [item.entry], state}), request_id: uuid()}, true);
+            await load(); say('Marked done. Only you see this.'); notify.refresh();
+          }));
+          actions.append(button);
+        }
+        row.append(actions);
+        return row;
+      }));
+      if (!items.length) list.append(node('li', 'small muted', 'Nothing waits for your answer.'));
+    }
+    capabilitiesReady.then(load).catch(error => say(error.message, true));
   })();
 
   // ---- room settings -----------------------------------------------------

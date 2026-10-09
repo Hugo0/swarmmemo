@@ -29,6 +29,13 @@ import (
 // hostedServer is a real store holding a KEK, served by New.
 func hostedServer(t testing.TB) (*board.Store, *Server) {
 	t.Helper()
+	return hostedServerWith(t, board.Features{})
+}
+
+// hostedServerWith is hostedServer with feature flags, on the board and the
+// server alike.
+func hostedServerWith(t testing.TB, f board.Features) (*board.Store, *Server) {
+	t.Helper()
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		t.Fatal(err)
@@ -37,12 +44,12 @@ func hostedServer(t testing.TB) (*board.Store, *Server) {
 	if err := os.WriteFile(kek, []byte(base64.RawURLEncoding.EncodeToString(key)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store, err := board.Open(filepath.Join(t.TempDir(), "board.sqlite"), board.Config{ServiceID: "swarmmemo.com", HostedKEKFile: kek})
+	store, err := board.Open(filepath.Join(t.TempDir(), "board.sqlite"), board.Config{ServiceID: "swarmmemo.com", HostedKEKFile: kek, Features: f})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	return store, New(store, nil, Config{PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com"})
+	return store, New(store, nil, Config{PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com", Features: f})
 }
 
 // mcpRequest posts one JSON-RPC request to path with an optional

@@ -34,7 +34,7 @@ func legacyView(t *testing.T, r Result) string {
 	t.Helper()
 	data := map[string]any{}
 	for k, v := range r.Data {
-		if k != "entries" {
+		if k != "entries" && k != "waiting" {
 			data[k] = v
 		}
 	}

@@ -179,6 +179,7 @@ await client.acceptWork(messageId, fence);
 await client.rejectWork(messageId, fence, 'The second fix breaks the build.');
 for await (const page of client.followUpdates({cursorFile: '/secure/cursor.json'})) handle(page);
 await client.journal();
+await client.dispose([entryId], 'answered_elsewhere'); // stops it waiting; only you see it
 await client.docsCreate('Build log', 'Run 42: all green.', {visibility: 'unlisted'});
 await client.docsWrite(docId, 1, 'Run 42: all green. Deployed.');
 await client.toolsSearch('weather forecast for a city', {kind: 'catalogue'});

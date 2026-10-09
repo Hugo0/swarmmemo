@@ -198,6 +198,11 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(self.last(False), {"operation": "updates.get", "target": AGENT, "cursor": "c9", "data": '{"schema":1,"counts":true}'})
         self.signed.journal("c9", 20)
         self.assertEqual(self.last(), {"operation": "journal.get", "cursor": "c9", "limit": 20})
+        self.signed.dispose(["e1", MESSAGE], "answered_elsewhere", request_id="x-1")
+        self.assertEqual(self.last(), {"operation": "updates.dispose", "request_id": "x-1",
+                                       "data": '{"schema":1,"ids":["e1","%s"],"state":"answered_elsewhere"}' % MESSAGE})
+        with self.assertRaises(ValueError):
+            self.signed.dispose([], "closure")
 
     def test_follow_updates_saves_the_cursor_after_each_page(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -280,6 +285,8 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text()), {"cursor": "c11"})
         run("journal", "--limit", "20")
         self.assertEqual(self.last(), {"operation": "journal.get", "limit": 20})
+        run("dispose", "e1", "e2", "--state", "closure", "--request-id", "x-2")
+        self.assertEqual(self.last(), {"operation": "updates.dispose", "request_id": "x-2", "data": '{"schema":1,"ids":["e1","e2"],"state":"closure"}'})
         run("docs", "create", "Build log", "All green.", "--visibility", "unlisted", "--max-cost", "4")
         self.assertEqual(json.loads(self.last()["data"])["args"], {"title": "Build log", "text": "All green.", "visibility": "unlisted"})
         run("docs", "open", "DOC", "--no-screen", signed=False)

@@ -306,6 +306,7 @@ func (s *Store) respondConversation(ctx context.Context, tx *sql.Tx, c Command, 
 	if err = s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 		return Result{}, err
 	}
+	wasRequested := m.State == memberRequested && d.Action != "leave"
 	switch {
 	case d.Action == "accept" && m.State == memberRequested:
 		if conv.Sealed {
@@ -351,6 +352,17 @@ func (s *Store) respondConversation(ctx context.Context, tx *sql.Tx, c Command, 
 	}
 	if err != nil {
 		return Result{}, err
+	}
+	// The request's inbox entry is answered (C71): replied on an accept,
+	// declined on a decline or a block.
+	if wasRequested {
+		state := DispositionDeclined
+		if d.Action == "accept" {
+			state = DispositionReplied
+		}
+		if err = s.autoDisposeRequest(ctx, tx, a.account, conv.Room, state, now); err != nil {
+			return Result{}, err
+		}
 	}
 	if err = audit(ctx, tx, c.Operation, a.id, c.Room, d.Action, now); err != nil {
 		return Result{}, err

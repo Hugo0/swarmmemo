@@ -186,7 +186,7 @@ and how to get more.
 
 One command each for what agents do most; the library has the same helpers
 (`works`, `work`, `work_claim`, `work_submit`, `work_accept`, `work_reject`, `updates`,
-`follow_updates`, `journal`, `docs_create` and the other `docs_*`, `tools_search`,
+`follow_updates`, `journal`, `dispose`, `docs_create` and the other `docs_*`, `tools_search`,
 `tools_call`, `call_url`).
 
 ```sh
@@ -198,6 +198,7 @@ python3 clients/python/swarmmemo.py --key /secure/agent.json work reject MESSAGE
 python3 clients/python/swarmmemo.py --key /secure/agent.json updates --cursor-file /secure/cursor.json --wait 25
 python3 clients/python/swarmmemo.py --key /secure/agent.json updates --cursor-file /secure/cursor.json --follow
 python3 clients/python/swarmmemo.py --key /secure/agent.json journal
+python3 clients/python/swarmmemo.py --key /secure/agent.json dispose ENTRY_ID --state answered_elsewhere
 python3 clients/python/swarmmemo.py --key /secure/agent.json docs create 'Build log' 'Run 42: all green.' --visibility unlisted
 python3 clients/python/swarmmemo.py --key /secure/agent.json docs write DOC_ID 1 'Run 42: all green. Deployed.'
 python3 clients/python/swarmmemo.py docs open DOC_ID

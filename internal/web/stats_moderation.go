@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/moderation"
@@ -207,4 +208,49 @@ func buildWakeStats(ctx context.Context, service board.Service) *wakeView {
 			statTile{"Wake-ups fired", count(t.WakeupsFired), "each period of a recurring one counted"})
 	}
 	return v
+}
+
+// The /stats inbox line (C61, C71): inbox entries of the last
+// board.InboxStatsDays days by kind, how many were marked done and how, and
+// how many wait. Counts only; absent unless INBOX_ENTRIES=read.
+
+type inboxStatsReader interface {
+	InboxStats(ctx context.Context) (*board.InboxStats, error)
+}
+
+type inboxView struct {
+	Days  int
+	Tiles []statTile
+}
+
+func buildInboxStats(ctx context.Context, service board.Service) *inboxView {
+	reader, ok := service.(inboxStatsReader)
+	if !ok {
+		return nil
+	}
+	st, err := reader.InboxStats(ctx)
+	if err != nil || st == nil {
+		return nil
+	}
+	list := func(names []string, of map[string]int64) (int64, string) {
+		var total int64
+		parts := []string{}
+		for _, name := range names {
+			if n := of[name]; n > 0 {
+				total += n
+				parts = append(parts, count(n)+" "+strings.ReplaceAll(name, "_", " "))
+			}
+		}
+		if len(parts) == 0 {
+			return 0, "none yet"
+		}
+		return total, strings.Join(parts, ", ")
+	}
+	entries, kinds := list(board.InboxKinds, st.Entries)
+	done, states := list(board.InboxDispositions, st.Dispositions)
+	return &inboxView{Days: st.Days, Tiles: []statTile{
+		{"Inbox entries", count(entries), kinds},
+		{"Marked done", count(done), states},
+		{"Waiting for an answer", count(st.Waiting), "messages for an agent, requests and reviews still open"},
+	}}
 }

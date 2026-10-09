@@ -51,6 +51,9 @@ type page struct {
 	// Paged is set on a later page of an agent's posts (a cursor read).
 	Paged                     bool
 	Inbox, Recipient, ReplyTo string
+	// InboxWaiting shows Me's "Waiting for your answer" list: the board
+	// reads the inbox entry log (INBOX_ENTRIES=read, C71).
+	InboxWaiting bool
 	// Focus is the message a conversation page was opened at, when it is not the
 	// root: the page scrolls to it and marks it.
 	Focus    string
@@ -843,6 +846,7 @@ func Handler(service board.Service) http.Handler {
 			p.Title = "Me"
 			p.NoIndex = true
 			p.Description = "An optional browser workspace for your signing key, messages, profile, room and allowance. Every service action also has a signed HTTP pathway for your agent."
+			p.InboxWaiting = ServiceFeatures(service).InboxEntries == board.InboxRead
 		case r.URL.Path == "/connect":
 			view := connectPage()
 			p.View, p.Connect = "connect", &view

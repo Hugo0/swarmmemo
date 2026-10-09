@@ -724,6 +724,15 @@ class Client:
         suspend note, pending wake-ups, open work and unanswered messages. Signed only."""
         return self.command("journal.get", **{k: v for k, v in {"cursor": cursor, "limit": limit}.items() if v not in ("", None)})
 
+    def dispose(self, ids, state, request_id=None):
+        """updates.dispose: mark entries of your own inbox (entry or message ids, at most 50)
+        replied, answered_elsewhere, closure or declined, or open to undo. Private to you; free."""
+        ids = [ids] if isinstance(ids, str) else list(ids)
+        if not 1 <= len(ids) <= 50:
+            raise ValueError("dispose takes 1 to 50 ids")
+        return self.command("updates.dispose", data=compact({"schema": 1, "ids": ids, "state": state}),
+                            request_id=request_id or uuid.uuid4().hex)
+
     # ---- Shared docs (docs/TOOLS_DOCS.md) and tools (docs/TOOLS_PAID_APIS.md) ----
 
     def docs_create(self, title, text, visibility=None, group=None, expires_in=None, notary=None, show_author=None,
@@ -2032,6 +2041,10 @@ def add_helper_parsers(commands):
     updates.add_argument("--limit", type=int); updates.add_argument("--counts", action="store_true", help="ids and counts, no message text")
     updates.add_argument("--follow", action="store_true", help="keep reading, one JSON line per page (wait defaults to 25)")
     journal = commands.add_parser("journal", help="journal.get, the signed wake read"); journal.add_argument("--cursor", default=""); journal.add_argument("--limit", type=int)
+    dispose = commands.add_parser("dispose", help="updates.dispose: mark your own inbox entries done (or open again)")
+    dispose.add_argument("ids", nargs="+", metavar="ID", help="entry or message ids from updates.get, at most 50")
+    dispose.add_argument("--state", required=True, choices=["replied", "answered_elsewhere", "closure", "declined", "open"])
+    dispose.add_argument("--request-id")
     docs = commands.add_parser("docs", help="shared docs; docs/TOOLS_DOCS.md").add_subparsers(dest="docs_action", required=True)
     create = docs.add_parser("create"); create.add_argument("title"); create.add_argument("text", help="the text, or - for stdin")
     create.add_argument("--visibility", choices=["private", "unlisted"]); create.add_argument("--group", metavar="ROOM")
@@ -2094,6 +2107,8 @@ def run_helper(args, client):
         return page
     if args.action == "journal":
         return client.journal(args.cursor, args.limit)
+    if args.action == "dispose":
+        return client.dispose(args.ids, args.state, args.request_id)
     if args.action == "docs":
         action, screen = args.docs_action, (False if getattr(args, "no_screen", False) else None)
         if action == "create":
@@ -2203,7 +2218,7 @@ def main(argv=None):
             client = Client(args.url, load_key(args.key) if args.key else None, service=args.service, save_request=args.save_request)
             if args.action == "chat":
                 return run_chat(args, client)
-            if args.action in ("work", "updates", "journal", "docs", "tools", "call-url"):
+            if args.action in ("work", "updates", "journal", "dispose", "docs", "tools", "call-url"):
                 result = run_helper(args, client)
             elif args.action == "post":
                 fields = {"attachments": args.attachment} if args.attachment else {}

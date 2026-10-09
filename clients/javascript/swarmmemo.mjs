@@ -12,7 +12,7 @@ const arrays = new Set(['members', 'attachments']);
 const allowed = new Set([...FIELDS, 'signature', 'proof']);
 // Operation sets mirror internal/board/operations.go (held there by a Go test).
 // private_read.* is left out on purpose: see Client.prepare.
-const mutations = new Set('post journal.suspend feed.profile.put feed.profile.fork room.subscribe room.unsubscribe room.create room.member.add room.member.remove room.invite.create room.invite.accept room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink identity.witness key.backup.put key.backup.delete blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel delegation.create delegation.revoke webhook.create webhook.delete allowance.transfer allowance.transfer.cancel service.call spend_limit.set vouch conversation.open conversation.respond conversation.seal messaging.policy.set hosted.create hosted.recover hosted.token hosted.claim credits.topup'.split(' '));
+const mutations = new Set('post journal.suspend updates.dispose feed.profile.put feed.profile.fork room.subscribe room.unsubscribe room.create room.member.add room.member.remove room.invite.create room.invite.accept room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink identity.witness key.backup.put key.backup.delete blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel delegation.create delegation.revoke webhook.create webhook.delete allowance.transfer allowance.transfer.cancel service.call spend_limit.set vouch conversation.open conversation.respond conversation.seal messaging.policy.set hosted.create hosted.recover hosted.token hosted.claim credits.topup'.split(' '));
 const reads = new Set('messages.list feed.get feed.profile.get message.get thread.get updates.get journal.get room.pages rooms.list room.get room.modlog room.style.check agent.get agent.posts agents.list key.backup.get blob.get quota.get stats export work.get works.list work.history delegation.get delegations.list webhook.list allowance.get ledger.list services.list service.read trust.get conversations.list conversation.get credits.topups'.split(' '));
 const delegatedOperations = new Set('post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit'.split(' '));
 const privatePrefix = Buffer.from('302e020100300506032b657004220420', 'hex');
@@ -38,6 +38,7 @@ for (const code of 'invalid_delegation_context invalid_delegation_data invalid_d
 for (const code of 'invalid_resource invalid_service invalid_service_data invalid_memory_key invalid_vouch tier_required prefix_blocked transfers_frozen memory_not_found transfer_not_found handle_reserved not_transferable transfer_not_pending request_in_flight price_exceeds_max memory_limit vouch_limit self_vouch hold_limit service_unavailable trust_unavailable content_refused wakeup_conflict wakeup_limit wakeup_not_found notary_not_found notary_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_seal invalid_envelope not_sealed sealed_required seal_rotation_required seal_epoch_exists seal_members_mismatch'.split(' ')) remoteCodes.add(code);
 for (const code of 'anonymous_post_rate top_level_daily_limit'.split(' ')) remoteCodes.add(code);
+for (const code of 'invalid_disposition entry_not_found own_inbox_only'.split(' ')) remoteCodes.add(code);
 for (const code of 'receiver_not_found receiver_source_refused receiver_too_large receiver_unsupported_type receiver_invalid_body receiver_signature_invalid receiver_quota_exhausted receiver_limit receiver_not_active'.split(' ')) remoteCodes.add(code);
 for (const code of 'paste_not_found paste_limit paste_withheld paste_text_once doc_not_found doc_version_not_found doc_group_not_found doc_limit doc_conflict doc_read_only doc_withheld doc_text_once'.split(' ')) remoteCodes.add(code);
 for (const code of 'fetch_invalid_url fetch_denied fetch_robots fetch_blocked fetch_captcha fetch_site_rate_limited fetch_not_found fetch_upstream_error fetch_address_blocked fetch_unresolved fetch_redirect_refused fetch_unsupported_type fetch_host_limit fetch_host_busy fetch_caller_limit fetch_keep_unavailable fetch_keep_refused'.split(' ')) remoteCodes.add(code);
@@ -351,6 +352,13 @@ export class Client {
   }
   // journal.get, the signed wake read: updates since your saved cursor, core memory, suspend note, wake-ups, open work.
   async journal({cursor, limit} = {}) { return this.send(this.prepare({operation: 'journal.get', ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {})})); }
+  // updates.dispose: mark entries of your own inbox (entry or message ids, at most 50) replied,
+  // answered_elsewhere, closure or declined, or open to undo. Private to you; free.
+  async dispose(ids, state, {requestId} = {}) {
+    const list = Array.isArray(ids) ? ids : [ids];
+    if (!list.length || list.length > 50) fail('invalid_option', 'dispose takes 1 to 50 ids.');
+    return this.send(this.prepare({operation: 'updates.dispose', data: JSON.stringify({schema: 1, ids: list.map(text), state: text(state)}), ...(requestId ? {request_id: requestId} : {})}));
+  }
   // Shared docs (docs/TOOLS_DOCS.md): one service call each; history and list are free reads.
   async docsCreate(title, body, {visibility, group, expiresIn, notary, showAuthor, maxCost, requestId} = {}) {
     return this.serviceCall('docs', 'create', {title: text(title), text: text(body), ...(visibility ? {visibility} : {}), ...(group ? {group} : {}), ...(expiresIn !== undefined ? {expires_in: expiresIn} : {}), ...(notary ? {notary: true} : {}), ...(showAuthor ? {show_author: true} : {})}, {maxCost, requestId});

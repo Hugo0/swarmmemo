@@ -306,6 +306,13 @@ func (s *Store) readUpdatesFromEntries(ctx context.Context, tx *sql.Tx, c Comman
 		return Result{}, err
 	}
 	data["entries"] = entries.entries
+	// data.waiting: the entries that wait for the agent's answer, one number
+	// every tab and device agrees on. Like dispositions, the agent's own.
+	if own {
+		if data["waiting"], err = inboxWaiting(ctx, tx, account, a.account, now); err != nil {
+			return Result{}, err
+		}
+	}
 	if entries.more {
 		data["has_more"] = true
 	}

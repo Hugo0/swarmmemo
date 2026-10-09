@@ -302,7 +302,12 @@ func TestInboxEntriesParity(t *testing.T) {
 				t.Errorf("%s: unexpected entry %+v", keyID(k)[:8], e)
 				continue
 			}
-			if e.Kind != w.kind || strings.Join(e.Reasons, ",") != w.reasons || e.NeedsAnswer != w.needs || e.Stale || e.Disposition != "" || e.EventSeq < 0 || e.Kind != inboxRequest && e.EventSeq == 0 {
+			// C71: alice's reply to bob's hi and bob's accept answered them.
+			disposition := ""
+			if k.Equal(alice) && subject == sc.hi || k.Equal(bob) && subject == sc.dm {
+				disposition = DispositionReplied
+			}
+			if e.Kind != w.kind || strings.Join(e.Reasons, ",") != w.reasons || e.NeedsAnswer != w.needs || e.Stale || e.Disposition != disposition || e.EventSeq < 0 || e.Kind != inboxRequest && e.EventSeq == 0 {
 				t.Errorf("%s: entry %+v, want %+v", keyID(k)[:8], e, w)
 			}
 			if strings.Contains(e.Detail, "alice") || strings.Contains(e.Detail, "hello") {

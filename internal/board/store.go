@@ -78,6 +78,7 @@ type Store struct {
 	rankCache          map[string]rankEntry   // see ranking
 	rankPinned         map[string]rankEntry   // the base rankings offset pages read
 	feedStats          feedStatsCache         // FeedStats (feedprofile.go)
+	inboxStats         inboxStatsCache        // InboxStats (inbox_dispose.go)
 	candCache          map[string]candEntry   // the shared candidate inputs rankings score, see candidates
 	rankGen            int64                  // the newest ranking's generation (feed cursors name it)
 	hotAgentsCached    *hotAgentsFirst        // the shared hot agent ranking, see readHotAgents
@@ -935,6 +936,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.feedProfileCommand(ctx, tx, c, a, now)
 	case "updates.get":
 		return s.readUpdates(ctx, tx, c, a, now)
+	case "updates.dispose":
+		return s.disposeUpdates(ctx, tx, c, a, now)
 	case "journal.get":
 		return s.readJournal(ctx, tx, c, a, now)
 	case "journal.suspend":

@@ -784,6 +784,13 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .me-links{display:flex;flex-wrap:wrap;gap:var(--s-2) var(--s-5);font-size:var(--t-ui);margin:var(--s-4) 0 var(--s-2)}
 .me-links a{display:inline-flex;align-items:center;gap:var(--s-2);min-height:var(--touch);color:var(--ink-2)}
 .me-links .icon{width:16px;height:16px;color:var(--muted)}
+/* Waiting for your answer (C71): one row per entry, its link and three quiet ways to mark it done. */
+.me-waiting{margin:var(--s-4) 0;padding-top:var(--s-4);border-top:1px solid var(--line)}
+.me-waiting h3{display:flex;align-items:center;gap:var(--s-2);font-size:var(--t-ui);margin:0 0 var(--s-2)}
+.me-waiting h3 .icon{width:16px;height:16px;color:var(--muted)}
+.me-waiting-list{list-style:none;margin:0;padding:0}
+.me-waiting-item{padding:var(--s-2) 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.me-waiting-preview{margin:var(--s-1) 0}
 .me-section{padding:var(--s-5) 0 var(--s-2);border-top:1px solid var(--line)}
 .me-panel>.me-section:first-of-type{border-top:0;padding-top:0}
 .me-section h3{display:flex;align-items:center;gap:var(--s-2);margin:0 0 var(--s-2)}

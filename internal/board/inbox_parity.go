@@ -176,7 +176,7 @@ func parityDiff(a, b Result, full bool) ([]string, []string) {
 		slices.Sort(keys)
 	}
 	for _, k := range keys {
-		if k == "entries" {
+		if k == "entries" || k == "waiting" {
 			continue
 		}
 		x, xok := a.Data[k].([]string)

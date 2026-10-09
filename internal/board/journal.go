@@ -117,7 +117,14 @@ func (s *Store) readJournal(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if err != nil {
 		return Result{}, err
 	}
-	unanswered, unansweredMore, err := s.journalUnanswered(ctx, tx, a, now)
+	// Under INBOX_ENTRIES=read, unanswered is the waiting entries
+	// (inbox_dispose.go): requests and review-waiting work too, and nothing
+	// the agent answered elsewhere.
+	unansweredFrom := s.journalUnanswered
+	if s.inboxRead(ctx) {
+		unansweredFrom = s.journalUnansweredFromEntries
+	}
+	unanswered, unansweredMore, err := unansweredFrom(ctx, tx, a, now)
 	if err != nil {
 		return Result{}, err
 	}

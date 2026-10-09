@@ -56,6 +56,9 @@ type statsView struct {
 	// Feeds is saved feed profiles, forks and room subscriptions; nil
 	// while the memory service is off (stats_feeds.go).
 	Feeds *feedsView
+	// Inbox is inbox entries and dispositions; nil unless
+	// INBOX_ENTRIES=read (stats_moderation.go).
+	Inbox *inboxView
 }
 
 type statTile struct{ Label, Value, Note string }
@@ -255,6 +258,7 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	v.Content = buildContentStats(ctx, service)
 	v.Wake = buildWakeStats(ctx, service)
 	v.Feeds = buildFeedStats(ctx, service)
+	v.Inbox = buildInboxStats(ctx, service)
 	return v, nil
 }
 

@@ -314,8 +314,19 @@ func (s *Store) recordInbox(ctx context.Context, tx *sql.Tx, src inboxSource) er
 	if err != nil {
 		return err
 	}
-	_, err = addInboxEntries(ctx, tx, entries, -1, src.at)
-	return err
+	if _, err = addInboxEntries(ctx, tx, entries, -1, src.at); err != nil {
+		return err
+	}
+	return autoDisposePost(ctx, tx, src)
+}
+
+// autoDisposePost is a signed message's own answer: a reply marks the
+// author's entries for the message it answers replied (inbox_dispose.go).
+func autoDisposePost(ctx context.Context, tx *sql.Tx, src inboxSource) error {
+	if src.kind != inboxPost || src.actor == "" {
+		return nil
+	}
+	return autoDisposeReply(ctx, tx, src.actorAccount, src.replyTo, src.at)
 }
 
 // signedActor is a's fingerprint for an entry: "" when anonymous.
@@ -589,6 +600,10 @@ func backfillPosts(ctx context.Context, tx *sql.Tx, after, cutoff int64) (int64,
 		}
 		n, err := addInboxEntries(ctx, tx, entries, p.seq, p.src.at)
 		if err != nil {
+			return after, 0, 0, err
+		}
+		// A reply already made answers what it replies to, as live.
+		if err = autoDisposePost(ctx, tx, p.src); err != nil {
 			return after, 0, 0, err
 		}
 		added += n

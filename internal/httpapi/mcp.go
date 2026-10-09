@@ -466,6 +466,9 @@ func (s *Server) mcpToolsWith(p mcpProfile, aliases bool) []mcpToolSpec {
 		for _, t := range hostedTools {
 			list = append(list, t.mcpToolSpec)
 		}
+		if s.inboxDisposeOn() {
+			list = append(list, disposeUpdatesTool.mcpToolSpec)
+		}
 		for _, t := range listed(hostedServiceTools(catalog)) {
 			list = append(list, t.spec)
 		}
