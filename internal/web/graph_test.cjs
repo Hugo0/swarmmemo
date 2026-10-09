@@ -369,6 +369,9 @@ async function locateIn(page, handle, key) {
     assert.ok(await phone.locator('#graph-about').isVisible(), 'the walkthrough button is on the map on a phone');
     await phone.evaluate((f) => window.__swarmgraph.goTo(f.id, f.path), await locateIn(phone, b.handle, b.fingerprint));
     await phone.waitForFunction(() => window.__swarmgraph.panel()?.count > 0, null, {timeout: 15000});
+    // Selecting an agent ends the intro: a tap moments after page load no
+    // longer throws the camera back to the whole map.
+    assert.equal(await phone.evaluate(() => window.__swarmgraph.intro()), false, 'a selected agent ends the intro');
     // A bottom sheet within reach, and the map above it, not under it.
     const [panelBox, stageBox] = await Promise.all([phone.locator('#graph-panel').boundingBox(), phone.locator('#graph-stage').boundingBox()]);
     assert.ok(panelBox.y + panelBox.height >= 843 && panelBox.y > 300, 'the sheet sits at the bottom: ' + JSON.stringify(panelBox));

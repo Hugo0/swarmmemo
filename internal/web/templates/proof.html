@@ -15,12 +15,14 @@
 <li class="proof-step {{if .Logged}}is-done{{else}}is-pending{{end}}" id="step-logged">
 <h2><span class="proof-num" aria-hidden="true">2</span>In the public log <span class="proof-state">{{if .Logged}}done{{else}}pending{{end}}</span></h2>
 {{if .Logged}}<p>Entry {{.Leaf}} of the log (entries are numbered from 0), in the checkpoint of {{.CheckpointSize}} entries signed <time datetime="{{iso .CheckpointAt}}">{{stamp .CheckpointAt}}</time>.</p>
+<p class="proof-hash">Tree root <code title="{{.Root}}" data-copy="{{.Root}}" data-copy-label="Copy tree root">{{printf "%.16s" .Root}}…</code> <a class="small" href="{{.NotePath}}" rel="nofollow" title="The signed checkpoint note of {{.CheckpointSize}} entries">signed note</a></p>
 <p class="small muted">A checkpoint is the log's signed fingerprint of every entry so far. Each later one must contain it, so no entry can be changed or dropped without the change showing. To detect a fork, compare checkpoints: yours against other readers' or a later one.</p>{{else}}<p>Waiting for the next checkpoint, signed within about 15 minutes of posting. This page shows the entry once it is in.</p>{{end}}
 </li>
 <li class="proof-step {{if .Confirmed}}is-done{{else}}is-pending{{end}}" id="step-anchored">
 <h2><span class="proof-num" aria-hidden="true">3</span>Anchored to Bitcoin <span class="proof-state">{{if .Confirmed}}done{{else}}pending{{end}}</span></h2>
 {{if .Confirmed}}<p>In Bitcoin {{if .Explorer}}<a href="{{.Explorer}}" rel="noopener noreferrer nofollow">block {{.Anchor.BitcoinHeight}}</a>{{else}}a block{{end}}{{with .Anchor.BlockTime}}, mined <time datetime="{{iso .}}">{{stamp .}}</time> by the block's own timestamp{{end}}, through <a href="https://opentimestamps.org" rel="noopener noreferrer">OpenTimestamps</a>, a public service that commits fingerprints into Bitcoin blocks.{{with .Anchor.ConfirmedAt}} Our checker saw it confirmed at <time datetime="{{iso .}}">{{stamp .}}</time>.{{end}}</p>
 <p class="small muted">Between the checkpoint (<time datetime="{{iso .CheckpointAt}}">{{stamp .CheckpointAt}}</time>) and the block, this proof rests on the log's signature alone.</p>{{else if .Anchor}}<p>The checkpoint went to {{len .Anchor.Calendars}} OpenTimestamps {{if eq (len .Anchor.Calendars) 1}}calendar{{else}}calendars{{end}} <time datetime="{{iso .Anchor.SubmittedAt}}">{{stamp .Anchor.SubmittedAt}}</time>. OpenTimestamps is a public service that commits fingerprints into Bitcoin blocks; this one is usually in a block 1–2 hours after the checkpoint. Until then, this proof rests on the log's signature alone.</p>{{else if .Logged}}<p>The checkpoint goes next to OpenTimestamps, a public service that commits fingerprints into Bitcoin blocks, and is in a block usually 1–2 hours after the checkpoint. Until then, this proof rests on the log's signature alone.</p>{{else}}<p>Follows the checkpoint, usually 1–2 hours after it.</p>{{end}}
+{{if .Logged}}<p class="proof-hash">Bitcoin commits to the SHA-256 of the <a href="{{.NotePath}}" rel="nofollow">signed checkpoint note</a> of {{.CheckpointSize}} entries, which contains the tree root: <code title="{{.NoteSHA}}" data-copy="{{.NoteSHA}}" data-copy-label="Copy note SHA-256">{{printf "%.16s" .NoteSHA}}…</code></p>{{end}}
 </li>
 </ol>
 <h2 class="proof-subhead">What this proves</h2>
@@ -31,8 +33,9 @@
 <ul class="proof-related">{{range .Related}}<li>{{.Label}} · <time datetime="{{iso .At}}">{{stamp .At}}</time>{{with .Reason}} · {{.}}{{end}} · <a href="{{.Href}}" rel="nofollow">entry {{.Leaf}}</a></li>{{end}}</ul>{{end}}
 <h2 class="proof-subhead">Verify it yourself</h2>
 <ul class="proof-verify">
-<li><a href="{{.JSONPath}}" rel="nofollow">The proof as JSON</a>: the entry, its inclusion proof, the signed checkpoint{{if $m.Hidden}}{{else}}, the text{{end}} and the Bitcoin anchor.</li>
-<li>Offline, with <a href="/clients/python/verify_log.py">verify_log.py</a>: <code data-copy="python3 verify_log.py message {{.ID}}" data-copy-label="Copy command">python3 verify_log.py message {{.ID}}</code></li>
+<li><a href="{{.JSONPath}}" rel="nofollow">The proof as JSON</a>: the entry, its inclusion proof{{if .Logged}} against the checkpoint of {{.CheckpointSize}} entries above{{end}}, the signed checkpoint{{if $m.Hidden}}{{else}}, the text{{end}} and the Bitcoin anchor.</li>
+{{if .ConsistencyPath}}<li><a href="{{.ConsistencyPath}}" rel="nofollow">The consistency proof</a>: the checkpoint of {{.CheckpointSize}} entries is a prefix of the latest, of {{.LatestSize}} entries, so the entry is in today's log too.</li>
+{{end}}<li>Offline, with <a href="/clients/python/verify_log.py">verify_log.py</a>: <code data-copy="python3 verify_log.py message {{.ID}}" data-copy-label="Copy command">python3 verify_log.py message {{.ID}}</code> proves the entry against the latest checkpoint{{if .ConsistencyPath}}; <code data-copy="python3 verify_log.py consistency {{.CheckpointSize}}" data-copy-label="Copy command">python3 verify_log.py consistency {{.CheckpointSize}}</code> connects the checkpoint of {{.CheckpointSize}} entries to it{{end}}.</li>
 <li><a href="/verify">How the log works</a></li>
 </ul>
 </section>{{end}}

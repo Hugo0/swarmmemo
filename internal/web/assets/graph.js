@@ -150,7 +150,7 @@ let tCut = Infinity, heat = new Map(), stress = 0;
 const ROLE = { halo: 0, core: 1, msg: 2, dust: 3 };
 const born = new Map();       // point key -> birth (s): a point blooms in once, when it first appears
 const bridgeBorn = new Map(); // bridge aggregate key -> birth
-let introAt = 0, introSkipped = false, replayDs = -1;
+let introAt = 0, introSkipped = false, introFlying = false, replayDs = -1;
 
 function camera() {
   const w = gl.width, h = gl.height;
@@ -433,7 +433,7 @@ function overlay(now) {
 }
 
 // ---- camera ----
-function flyTo(n, pad = 0.2, ms = 900) { if (gl && n) gl.flyTo(n.x, n.y, n.r, ms, pad); }
+function flyTo(n, pad = 0.2, ms = 900) { if (gl && n) { if (!introFlying) endIntro(false); gl.flyTo(n.x, n.y, n.r, ms, pad); } }
 // The bottom of the stage hidden by the tour card or a bottom sheet: the
 // camera frames what it shows in the part left free.
 function coverPx() {
@@ -447,6 +447,7 @@ function coverPx() {
 // Fly so a world rectangle fills the free part of the stage.
 function frameRect(x0, y0, x1, y1, ms = 900, fill = 0.9) {
   if (!gl) return;
+  if (!introFlying) endIntro(false);
   const cover = coverPx(), w = gl.width, h = gl.height - cover;
   const z = Math.min(w / Math.max(x1 - x0, 1e-6), h / Math.max(y1 - y0, 1e-6)) * fill;
   gl.flyTo((x0 + x1) / 2, (y0 + y1) / 2 + cover / 2 / z, Math.min(w, gl.height) / (2 * z), ms, 0);
@@ -1382,19 +1383,24 @@ function openLinkIndex(j) {
 // The first view: close on SwarmMemo, then the camera pulls back to the
 // whole universe while the bridges out of it light up one by one. Any input
 // skips it; reduced motion starts on the whole universe.
+// Once anything else moves the camera (a tour step, a search, a selected
+// agent), the intro is over: neither its pull-back nor a later tap may
+// throw the visitor back to the whole map.
 function intro() {
   const sm = N.get(liveGalaxy());
   if (reducedMotion || !sm) { fitAll(0); return; }
   gl.setCamera(sm.x, sm.y, gl.zoomFor(sm.r, 0.25));
   introAt = nowS();
-  setTimeout(() => { if (!introSkipped) fitAll(2900); }, 450);
+  setTimeout(() => { if (!introSkipped) { introFlying = true; fitAll(2900); introFlying = false; } }, 450);
   gl.on('interact', skipIntro);
 }
-function skipIntro() {
+// Finish the intro's bridges at once; with jump, also its camera.
+function endIntro(jump) {
   if (!introAt || introSkipped) return;
   introSkipped = true;
-  if (nowS() < introAt + 3.6) { fitAll(0); for (const [k, b] of bridgeBorn) if (b > nowS()) bridgeBorn.set(k, nowS() - 1); dirty = true; }
+  if (nowS() < introAt + 3.6) { if (jump) fitAll(0); for (const [k, b] of bridgeBorn) if (b > nowS()) bridgeBorn.set(k, nowS() - 1); dirty = true; }
 }
+function skipIntro() { endIntro(true); }
 
 async function main() {
   readTheme();

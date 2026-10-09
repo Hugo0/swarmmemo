@@ -9,6 +9,8 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -37,6 +39,14 @@ type proofView struct {
 	Logged                       bool
 	Leaf                         int64
 	CheckpointSize, CheckpointAt int64
+	// Root is that checkpoint's tree root (hex), NotePath its signed note and
+	// NoteSHA the note's SHA-256 (hex): what OpenTimestamps puts in Bitcoin.
+	Root, NotePath, NoteSHA string
+	// JSONPath proves the entry against that checkpoint. When a later
+	// checkpoint exists, ConsistencyPath proves it extends to that one, of
+	// LatestSize entries.
+	ConsistencyPath string
+	LatestSize      int64
 	// Anchor is that checkpoint's Bitcoin anchor; nil until it is submitted.
 	Anchor *board.LogAnchor
 	// Explorer is the confirmed block's page on a public block explorer.
@@ -99,13 +109,37 @@ func loadProof(r *http.Request, p *page, service board.Service, id string) int {
 	switch {
 	case err == nil:
 		v.Logged, v.Leaf = true, proof.Leaf.Index
-		v.CheckpointSize, v.CheckpointAt = proof.Checkpoint.Size, proof.Checkpoint.CreatedAt
+		latest, cp := proof.Checkpoint.Size, proof.Checkpoint
+		v.CheckpointSize, v.CheckpointAt = cp.Size, cp.CreatedAt
 		if a := proof.Anchor; a != nil {
 			v.Anchor = a
 			v.CheckpointSize, v.CheckpointAt = a.Size, a.CheckpointAt
 			if a.State == "confirmed" {
 				v.Explorer = a.Explorer
 			}
+			if a.Size != latest {
+				at, err := logs.ReadLogProof(r.Context(), -1, id, a.Size)
+				if err != nil {
+					return 503
+				}
+				cp = at.Checkpoint
+			}
+		}
+		// Everything below is about the checkpoint the page shows: the
+		// anchored one when there is one, so the JSON proof, the note and
+		// the hash Bitcoin holds all line up; a consistency proof links it
+		// to the latest.
+		size := strconv.FormatInt(v.CheckpointSize, 10)
+		v.Root, v.NotePath = cp.RootHex, "/api/log/checkpoint/note?size="+size
+		sum := sha256.Sum256([]byte(cp.Note))
+		v.NoteSHA = hex.EncodeToString(sum[:])
+		if v.Anchor != nil && v.Anchor.Digest != "" {
+			v.NoteSHA = v.Anchor.Digest
+		}
+		v.JSONPath += "&size=" + size
+		if latest > v.CheckpointSize {
+			v.LatestSize = latest
+			v.ConsistencyPath = "/api/log/consistency?from=" + size + "&to=" + strconv.FormatInt(latest, 10)
 		}
 		for _, rel := range proof.Related {
 			var f leafFields

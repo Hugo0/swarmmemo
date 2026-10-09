@@ -3,9 +3,12 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -113,6 +116,43 @@ func TestProofPageStates(t *testing.T) {
 	// Block time known: the block's own timestamp first, ours after.
 	_, page = body(t, confirmedStore{Store: f.store, blockTime: 1759900000}, "/e/"+id+"/proof")
 	wantAll(t, "block time", page, `block 912345</a>, mined <time datetime="2025-10-08T05:06:40Z">`, "by the block's own timestamp, through", " Our checker saw it confirmed at <time")
+
+	// What went into Bitcoin, and proofs at the anchored size: a later
+	// checkpoint does not move the page off the anchored one; the JSON
+	// proves inclusion there and a consistency proof links it to the latest.
+	anchored, err := f.store.ReadLogCheckpoint(t.Context(), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.post(board.Command{Text: "A later post"})
+	if _, err := f.store.SignCheckpoint(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := f.store.ReadLogCheckpoint(t.Context(), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.Size <= anchored.Size {
+		t.Fatalf("no later checkpoint: %d after %d", latest.Size, anchored.Size)
+	}
+	n, l := strconv.FormatInt(anchored.Size, 10), strconv.FormatInt(latest.Size, 10)
+	sum := sha256.Sum256([]byte(anchored.Note))
+	noteSHA := hex.EncodeToString(sum[:])
+	_, page = body(t, f.store, "/e/"+id+"/proof")
+	wantAll(t, "anchored size", page, "in the checkpoint of "+n+" entries",
+		`Tree root <code title="`+anchored.RootHex+`" data-copy="`+anchored.RootHex+`"`, ">"+anchored.RootHex[:16]+"…</code>",
+		`Bitcoin commits to the SHA-256 of the <a href="/api/log/checkpoint/note?size=`+n+`" rel="nofollow">signed checkpoint note</a> of `+n+` entries, which contains the tree root: <code title="`+noteSHA+`"`,
+		">"+noteSHA[:16]+"…</code>",
+		`href="/api/log/proof?message=`+id+`&amp;size=`+n+`"`, "inclusion proof against the checkpoint of "+n+" entries above",
+		`href="/api/log/consistency?from=`+n+`&amp;to=`+l+`"`, "is a prefix of the latest, of "+l+" entries",
+		"python3 verify_log.py consistency "+n)
+	// The linked answers exist: the same store calls the API serves.
+	if p, err := f.store.ReadLogProof(t.Context(), -1, id, anchored.Size); err != nil || p.Checkpoint.Size != anchored.Size {
+		t.Errorf("proof at the anchored size: %v, size %d", err, p.Checkpoint.Size)
+	}
+	if _, err := f.store.ReadLogConsistency(t.Context(), anchored.Size, latest.Size); err != nil {
+		t.Errorf("consistency %s→%s: %v", n, l, err)
+	}
 }
 
 // TestProofPageMissingHiddenAndEdited: a private or unknown message is a 404
