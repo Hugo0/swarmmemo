@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"swarmmemo/internal/services"
 )
 
 // updatesOptions is updates.get's optional data, always schema 1 ({"schema":1}
@@ -62,6 +64,15 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		return Result{}, err
 	}
 	since := seq
+	// Under INBOX_ENTRIES=read an agent's personal reasons come from its
+	// inbox entries (inbox_read.go).
+	read := s.inboxRead(ctx) && agent != ""
+	entryAccount := ""
+	if read {
+		if entryAccount, err = inboxAccount(ctx, tx, agent); err != nil {
+			return Result{}, err
+		}
+	}
 	// Same room visibility rule as every other read: public rooms, plus private
 	// rooms this caller is a member of. A cursor never widens access.
 	where := []string{"(r.visibility='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=e.room AND m.account=?))"}
@@ -80,13 +91,18 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		}
 		// An @handle mention (mentions.go) is the version that delivered it,
 		// while no version of its message is hidden.
-		where = append(where,
-			"(e.reply_to IN (SELECT p.id FROM events p WHERE p.account="+account+")"+
-				" OR e.recipient=? OR e.recipient IN (SELECT id FROM identities WHERE account="+account+")"+
-				" OR (e.hidden=0 AND e.id IN (SELECT pm.event_id FROM post_mentions pm WHERE pm.account="+account+")"+
-				" AND NOT EXISTS(SELECT 1 FROM events h WHERE h.id=e.origin AND h.hidden=1))"+
-				" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+")"+mine+")")
-		args = append(args, agent, agent, agent, agent, agent)
+		if read {
+			where = append(where, "("+inboxMessageClause+" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+")"+mine+")")
+			args = append(args, entryAccount, agent)
+		} else {
+			where = append(where,
+				"(e.reply_to IN (SELECT p.id FROM events p WHERE p.account="+account+")"+
+					" OR e.recipient=? OR e.recipient IN (SELECT id FROM identities WHERE account="+account+")"+
+					" OR (e.hidden=0 AND e.id IN (SELECT pm.event_id FROM post_mentions pm WHERE pm.account="+account+")"+
+					" AND NOT EXISTS(SELECT 1 FROM events h WHERE h.id=e.origin AND h.hidden=1))"+
+					" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+")"+mine+")")
+			args = append(args, agent, agent, agent, agent, agent)
+		}
 		if own {
 			args = append(args, a.account)
 		}
@@ -164,6 +180,9 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	}
 	data["scope"] = "agent"
 	data["agent"] = agent
+	if read {
+		return s.readUpdatesFromEntries(ctx, tx, c, a, own, agent, entryAccount, since, seq, limit, events, data, page, now)
+	}
 	replies, addressed, mentions, activity, err := s.classifyUpdates(ctx, tx, events, agent)
 	if err != nil {
 		return Result{}, err
@@ -176,7 +195,7 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 			return Result{}, err
 		}
 	}
-	notices, err := s.serviceNotices(ctx, tx, data, agent, since, received, wakeups, a, now)
+	notices, err := s.serviceNotices(ctx, tx, data, agent, since, received, wakeups, nil, a, now)
 	if err != nil {
 		return Result{}, err
 	}
@@ -256,4 +275,46 @@ func (s *Store) classifyUpdates(ctx context.Context, tx *sql.Tx, events []Messag
 		}
 	}
 	return replies, addressed, mentions, activity, nil
+}
+
+// readUpdatesFromEntries finishes an agent's updates.get under
+// INBOX_ENTRIES=read: the reasons, data.entries, data.received and
+// data.wakeups from the entry log, and a v2 cursor. since is the incoming
+// cursor's message sequence, seq the page's.
+func (s *Store) readUpdatesFromEntries(ctx context.Context, tx *sql.Tx, c Command, a actor, own bool, agent, account string, since, seq int64, limit int, events []Message, data map[string]any, page func() []Message, now int64) (Result, error) {
+	replies, addressed, mentions, activity, err := classifyByEntries(ctx, tx, events, account)
+	if err != nil {
+		return Result{}, err
+	}
+	data["replies"], data["addressed"], data["mentions"], data["room_activity"] = replies, addressed, mentions, activity
+	if own {
+		if err = s.addInbox(ctx, tx, a, events, data); err != nil {
+			return Result{}, err
+		}
+	}
+	entries, err := s.inboxPage(ctx, tx, c.Cursor, since, account, a.account, own, limit, now)
+	if err != nil {
+		return Result{}, err
+	}
+	// Without a cursor there is no position: data.received and data.wakeups
+	// list the newest, as they always did. With one, the entry page says.
+	var notices *services.NoticeEntries
+	if c.Cursor != "" && c.Cursor != "start" {
+		notices = &entries.notices
+	}
+	if _, err = s.serviceNotices(ctx, tx, data, agent, since, -1, -1, notices, a, now); err != nil {
+		return Result{}, err
+	}
+	data["entries"] = entries.entries
+	if entries.more {
+		data["has_more"] = true
+	}
+	// The cursor moves with the page and the entries; a read that moves
+	// neither hands back the same cursor (a waiting read's test). Any other
+	// cursor than a v2 one is answered with a v2 one.
+	next := c.Cursor
+	if len(events) > 0 || c.Cursor == "" || c.Cursor == "start" || entries.next != s.cursorEntryPart(c.Cursor) {
+		next = s.updatesCursorV2(seq, entries.next)
+	}
+	return Result{Messages: page(), NextCursor: next, Data: data}, nil
 }

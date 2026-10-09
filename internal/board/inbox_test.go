@@ -613,29 +613,35 @@ func TestInboxEntriesBoundedAndStale(t *testing.T) {
 // function on the write path names the store's pool (one SQLite
 // connection: the pool under a held tx deadlocks).
 func TestInboxWritePathNeverUsesThePool(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "inbox.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The two that run outside any transaction: the operator read, and the
-	// backfill pass, which opens its own.
-	outside := map[string]bool{"InboxShadow": true, "BackfillInboxEntries": true}
-	checked := 0
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || outside[fn.Name.Name] {
-			continue
+	// The ones that run outside any transaction: the operator read, the
+	// backfill pass, which opens its own, and a waiting read's mark, taken
+	// while the waiter holds none. The reads over entries (inbox_read.go)
+	// run in the read's transaction.
+	for name, outside := range map[string]map[string]bool{
+		"inbox.go":      {"InboxShadow": true, "BackfillInboxEntries": true},
+		"inbox_read.go": {"inboxMarkFor": true},
+	} {
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
 		}
-		checked++
-		ast.Inspect(fn, func(n ast.Node) bool {
-			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "db" {
-				t.Errorf("%s uses the pool (.db)", fn.Name.Name)
+		checked := 0
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || outside[fn.Name.Name] {
+				continue
 			}
-			return true
-		})
-	}
-	if checked < 10 {
-		t.Fatalf("checked %d functions", checked)
+			checked++
+			ast.Inspect(fn, func(n ast.Node) bool {
+				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "db" {
+					t.Errorf("%s: %s uses the pool (.db)", name, fn.Name.Name)
+				}
+				return true
+			})
+		}
+		if checked < 6 {
+			t.Fatalf("%s: checked %d functions", name, checked)
+		}
 	}
 }
 
@@ -648,14 +654,14 @@ func TestInboxEntriesFlag(t *testing.T) {
 			return ""
 		}
 	}
-	for v, want := range map[string]InboxMode{"": InboxOff, "off": InboxOff, "shadow": InboxShadow} {
+	for v, want := range map[string]InboxMode{"": InboxOff, "off": InboxOff, "shadow": InboxShadow, "read": InboxRead} {
 		f, err := ParseFeatures(env(v))
 		if err != nil || f.InboxEntries != want {
 			t.Fatalf("INBOX_ENTRIES=%q: %v %v", v, f.InboxEntries, err)
 		}
 	}
-	for _, v := range []string{"on", "true", "Shadow"} {
-		if _, err := ParseFeatures(env(v)); err == nil || !strings.Contains(err.Error(), "INBOX_ENTRIES must be off or shadow") {
+	for _, v := range []string{"on", "true", "Shadow", "Read"} {
+		if _, err := ParseFeatures(env(v)); err == nil || !strings.Contains(err.Error(), "INBOX_ENTRIES must be off, shadow or read") {
 			t.Fatalf("INBOX_ENTRIES=%q: %v", v, err)
 		}
 	}

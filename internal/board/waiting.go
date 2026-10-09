@@ -128,6 +128,10 @@ func waitAddress(source string) string {
 // nothing to wait for, so the first answer stands.
 func (s *Store) waitUpdates(ctx context.Context, cmd Command, source string, wait int) (Result, error) {
 	changed := s.Changes()
+	// Under INBOX_ENTRIES=read, taken before each read: a commit that
+	// moves neither the newest message nor the agent's newest entry cannot
+	// change a caught-up answer, so it does not re-run the read.
+	mark := s.inboxMarkFor(ctx, cmd)
 	res, err := s.executeCommand(ctx, cmd, source)
 	if err != nil || cmd.Cursor == "" || !caughtUp(cmd, res) {
 		return res, err
@@ -157,6 +161,11 @@ func (s *Store) waitUpdates(ctx context.Context, cmd Command, source string, wai
 		case <-changed:
 		}
 		changed = s.Changes()
+		now := s.inboxMarkFor(ctx, cmd)
+		if mark.ok && now == mark {
+			continue
+		}
+		mark = now
 		next, err := s.executeCommand(ctx, cmd, source)
 		if err != nil || !caughtUp(cmd, next) {
 			return next, err

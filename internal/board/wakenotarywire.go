@@ -203,7 +203,8 @@ func providerError(code string) error {
 // message sequence, receiver part and wake-up part (parseUpdatesCursor). It
 // answers the next cursor's receiver and wake-up parts: each unchanged
 // unless data.received or data.wakeups moved it. It adds nothing while no enabled service contributes.
-func (s *Store) serviceNotices(ctx context.Context, tx *sql.Tx, data map[string]any, agent string, since, received, wakeups int64, a actor, now int64) (services.NoticeCursor, error) {
+// With entries (INBOX_ENTRIES=read) they list what the entry page points at.
+func (s *Store) serviceNotices(ctx context.Context, tx *sql.Tx, data map[string]any, agent string, since, received, wakeups int64, entries *services.NoticeEntries, a actor, now int64) (services.NoticeCursor, error) {
 	next := services.NoticeCursor{Received: received, Wakeups: wakeups}
 	e := s.services.engine
 	if e == nil {
@@ -217,7 +218,7 @@ func (s *Store) serviceNotices(ctx context.Context, tx *sql.Tx, data map[string]
 	// Own: the agent's own signed read, not a grant's; only then may a
 	// service add what is private to it (data.received).
 	own := a.signed && a.grant == nil && account != "" && account == a.account
-	added, err := e.Notices(ctx, tx, services.NoticeQuery{Account: account, Caller: a.account, Since: since, Received: received, Wakeups: wakeups, Next: &next, Now: now, Own: own})
+	added, err := e.Notices(ctx, tx, services.NoticeQuery{Account: account, Caller: a.account, Since: since, Received: received, Wakeups: wakeups, Next: &next, Now: now, Own: own, Entries: entries})
 	if err != nil {
 		return next, err
 	}

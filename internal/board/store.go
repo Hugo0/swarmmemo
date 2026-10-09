@@ -464,24 +464,24 @@ func (s *Store) parseCursorParts(cursor string, kind byte) (int64, int64, int64,
 	if cursor == "" || cursor == "start" {
 		return 0, -1, -1, nil
 	}
-	s.cursorMu.RLock()
-	defer s.cursorMu.RUnlock()
-	parts := strings.Split(cursor, ":")
-	if len(parts) != 2 {
-		return 0, 0, 0, problem(400, "invalid_cursor", "Use a cursor returned by this server.")
-	}
-	if parts[0] != s.generation {
-		return 0, 0, 0, problem(409, "cursor_reset", "The server generation changed; resynchronize from an empty cursor and deduplicate event IDs.")
-	}
-	sealed, err := base64.RawURLEncoding.DecodeString(parts[1])
+	plain, err := s.openCursor(cursor)
 	if err != nil {
-		return 0, 0, 0, problem(400, "invalid_cursor", "Invalid opaque cursor.")
+		return 0, 0, 0, err
 	}
-	plain, err := s.cursorCipher.Open(nil, nil, sealed, []byte(s.generation))
-	if err != nil || (len(plain) != 9 && (len(plain) != 17 && len(plain) != 25 || kind != 0)) || plain[0] != kind {
+	if (len(plain) != 9 && (len(plain) != 17 && len(plain) != 25 && len(plain) != updatesCursorV2Size || kind != 0)) || plain[0] != kind {
 		return 0, 0, 0, problem(400, "invalid_cursor", "Cursor is invalid or belongs to another endpoint.")
 	}
 	n, received, wakeups := int64(binary.BigEndian.Uint64(plain[1:9])), int64(-1), int64(-1)
+	if len(plain) == updatesCursorV2Size {
+		// Cursor v2 (C61, inbox_read.go): its entry part is read by
+		// cursorEntryPart; every other read resumes at its message
+		// sequence, and a legacy updates.get reads it as a cursor without
+		// receiver or wake-up parts.
+		if plain[9] != updatesCursorV2Tag || n < 0 || int64(binary.BigEndian.Uint64(plain[10:])) < 0 {
+			return 0, 0, 0, problem(400, "invalid_cursor", "Invalid cursor sequence.")
+		}
+		return n, -1, -1, nil
+	}
 	if len(plain) >= 17 {
 		received = int64(binary.BigEndian.Uint64(plain[9:17]))
 	}
@@ -496,6 +496,29 @@ func (s *Store) parseCursorParts(cursor string, kind byte) (int64, int64, int64,
 		return 0, 0, 0, problem(400, "invalid_cursor", "Invalid cursor sequence.")
 	}
 	return n, received, wakeups, nil
+}
+
+// openCursor unseals a cursor of this generation; err is invalid_cursor or
+// cursor_reset. The plaintext's layout is the caller's to check.
+func (s *Store) openCursor(cursor string) ([]byte, error) {
+	s.cursorMu.RLock()
+	defer s.cursorMu.RUnlock()
+	parts := strings.Split(cursor, ":")
+	if len(parts) != 2 {
+		return nil, problem(400, "invalid_cursor", "Use a cursor returned by this server.")
+	}
+	if parts[0] != s.generation {
+		return nil, problem(409, "cursor_reset", "The server generation changed; resynchronize from an empty cursor and deduplicate event IDs.")
+	}
+	sealed, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, problem(400, "invalid_cursor", "Invalid opaque cursor.")
+	}
+	plain, err := s.cursorCipher.Open(nil, nil, sealed, []byte(s.generation))
+	if err != nil {
+		return nil, problem(400, "invalid_cursor", "Cursor is invalid or belongs to another endpoint.")
+	}
+	return plain, nil
 }
 
 var slug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,` + strconv.Itoa(SlugMaxChars-1) + `}$`)

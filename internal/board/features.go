@@ -66,23 +66,25 @@ type Features struct {
 	// It gates the surfaces that exist only with them (/tools/topup, its
 	// llms.txt line, the MCP tool).
 	Topup bool
-	// InboxEntries is INBOX_ENTRIES (C61, inbox.go): off (the default) or
+	// InboxEntries is INBOX_ENTRIES (C61, inbox.go): off (the default),
 	// shadow, which writes every account's inbox entry log in the producing
-	// transactions and backfills the last 30 days, while every read still
-	// answers from the queries it always did.
+	// transactions and backfills the last 30 days while every read still
+	// answers from the queries it always did, or read, which also answers
+	// updates.get, journal.get since and wait= from the log (inbox_read.go).
 	InboxEntries InboxMode
 }
 
-// InboxMode is INBOX_ENTRIES: off (the zero value) or shadow. Reads over the
-// entries come in a later step, with a mode of their own.
+// InboxMode is INBOX_ENTRIES: off (the zero value), shadow (written, not
+// read) or read (written and read).
 type InboxMode uint8
 
 const (
 	InboxOff InboxMode = iota
 	InboxShadow
+	InboxRead
 )
 
-func (m InboxMode) String() string { return [...]string{"off", "shadow"}[m] }
+func (m InboxMode) String() string { return [...]string{"off", "shadow", "read"}[m] }
 
 // LedgerMode is ALLOWANCE_LEDGER: off (the zero value), shadow or on.
 type LedgerMode uint8
@@ -160,8 +162,10 @@ func ParseFeatures(getenv func(string) string) (Features, error) {
 	case "", "off":
 	case "shadow":
 		f.InboxEntries = InboxShadow
+	case "read":
+		f.InboxEntries = InboxRead
 	default:
-		errs = append(errs, fmt.Sprintf("INBOX_ENTRIES must be off or shadow, not %q", v))
+		errs = append(errs, fmt.Sprintf("INBOX_ENTRIES must be off, shadow or read, not %q", v))
 	}
 	if v := getenv("SERVICES"); v != "" {
 		for _, id := range strings.Split(v, ",") {

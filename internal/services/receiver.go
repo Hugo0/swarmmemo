@@ -749,6 +749,9 @@ func (r *receiver) Notices(ctx context.Context, q allowance.Querier, n NoticeQue
 	if !n.Own || n.Account == "" {
 		return "", nil, nil
 	}
+	if n.Entries != nil {
+		return r.noticesByEntry(ctx, q, n)
+	}
 	query := "SELECT " + itemColumns + " FROM receiver_items WHERE account=? AND received_at>? AND seq>? ORDER BY seq LIMIT ?"
 	args := []any{n.Account, n.Now - ReceiverRetention, n.Received, ReceiverNoticesMax + 1}
 	if n.Received < 0 {
@@ -791,6 +794,33 @@ func (r *receiver) Notices(ctx context.Context, q allowance.Querier, n NoticeQue
 		n.Next.More = n.Next.More || next.More
 	}
 	return "received", out, nil
+}
+
+// noticesByEntry is data.received under INBOX_ENTRIES=read: the items the
+// entry page names, in the same retention window and bound, newest first.
+func (r *receiver) noticesByEntry(ctx context.Context, q allowance.Querier, n NoticeQuery) (string, any, error) {
+	out := []ReceivedNotice{}
+	if len(n.Entries.Items) == 0 {
+		return "received", out, nil
+	}
+	args := []any{n.Account, n.Now - ReceiverRetention}
+	for _, id := range n.Entries.Items {
+		args = append(args, id)
+	}
+	args = append(args, ReceiverNoticesMax)
+	rows, err := q.QueryContext(ctx, "SELECT "+itemColumns+" FROM receiver_items WHERE account=? AND received_at>? AND id IN (?"+strings.Repeat(",?", len(n.Entries.Items)-1)+") ORDER BY seq DESC LIMIT ?", args...)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		it, err := scanItem(rows, nil, n.Now)
+		if err != nil {
+			return "", nil, err
+		}
+		out = append(out, ReceivedNotice{Seq: it.Seq, ID: it.ID, Receiver: it.Receiver, ReceivedAt: it.ReceivedAt, ContentType: it.ContentType, Bytes: it.Bytes, Screened: it.Screened, Screen: it.Screen, Verdict: it.Verdict})
+	}
+	return "received", out, rows.Err()
 }
 
 // Delivery is one POST to a receive URL, as the HTTP layer read it.

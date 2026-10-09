@@ -421,6 +421,19 @@ type NoticeQuery struct {
 	// Own is true for the agent's own signed read of its inbox (no grant,
 	// the same account): only then may a Noticer add private content.
 	Own bool
+	// Entries, when not nil, is the board's inbox entry page (C61,
+	// INBOX_ENTRIES=read): the receiver lists exactly the items named in
+	// Items, and the wakeup the notices whose seqs are in Notices, newest
+	// first, each in its own window and bound. The cursor parts above are
+	// then unused: the entry page is the position.
+	Entries *NoticeEntries
+}
+
+// NoticeEntries is the receiver items and wake-up notices an inbox entry
+// page points at.
+type NoticeEntries struct {
+	Items   []string
+	Notices []int64
 }
 
 // NoticeCursor is what data.received and data.wakeups advanced: Received is

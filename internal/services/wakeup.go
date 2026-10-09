@@ -632,7 +632,20 @@ func (w *wakeup) Notices(ctx context.Context, q allowance.Querier, n NoticeQuery
 	out := []wakeupNotice{}
 	query := "SELECT seq,wakeup,kind,fired_at,due_at,late,event,room FROM wakeup_notices WHERE account=? AND fired_at>=? AND seq>? ORDER BY seq LIMIT ?"
 	args := []any{n.Account, n.Now - WakeupNoticeWindow, n.Wakeups, WakeupNoticesMax + 1}
-	if n.Wakeups < 0 {
+	byEntry := n.Entries != nil
+	if byEntry {
+		// Under INBOX_ENTRIES=read the entry page names the notices: the
+		// same window and bound, newest first, and no cursor part to move.
+		query, args = "SELECT seq,wakeup,kind,fired_at,due_at,late,event,room FROM wakeup_notices WHERE 0", nil
+		if len(n.Entries.Notices) > 0 {
+			query = "SELECT seq,wakeup,kind,fired_at,due_at,late,event,room FROM wakeup_notices WHERE account=? AND fired_at>=? AND seq IN (?" + strings.Repeat(",?", len(n.Entries.Notices)-1) + ") ORDER BY seq DESC LIMIT ?"
+			args = []any{n.Account, n.Now - WakeupNoticeWindow}
+			for _, seq := range n.Entries.Notices {
+				args = append(args, seq)
+			}
+			args = append(args, WakeupNoticesMax)
+		}
+	} else if n.Wakeups < 0 {
 		query = "SELECT seq,wakeup,kind,fired_at,due_at,late,event,room FROM wakeup_notices WHERE account=? AND fired_at>=? AND event_seq>=? ORDER BY seq DESC LIMIT ?"
 		args = []any{n.Account, n.Now - WakeupNoticeWindow, n.Since, WakeupNoticesMax}
 	}
@@ -657,11 +670,15 @@ func (w *wakeup) Notices(ctx context.Context, q allowance.Querier, n NoticeQuery
 		return "", nil, err
 	}
 	next, more := max(n.Wakeups, 0), false
-	if n.Wakeups < 0 {
+	// Positioned by the entry page (byEntry), there is no cursor part to
+	// report.
+	switch {
+	case byEntry:
+	case n.Wakeups < 0:
 		if err = q.QueryRowContext(ctx, "SELECT coalesce(max(seq),0) FROM wakeup_notices WHERE account=?", n.Account).Scan(&next); err != nil {
 			return "", nil, err
 		}
-	} else {
+	default:
 		if more = len(out) > WakeupNoticesMax; more {
 			out, seqs = out[:WakeupNoticesMax], seqs[:WakeupNoticesMax]
 		}
@@ -670,7 +687,7 @@ func (w *wakeup) Notices(ctx context.Context, q allowance.Querier, n NoticeQuery
 		}
 		slices.Reverse(out)
 	}
-	if n.Next != nil {
+	if n.Next != nil && !byEntry {
 		n.Next.Wakeups = next
 		n.Next.More = n.Next.More || more
 	}
