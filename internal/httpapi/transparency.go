@@ -236,7 +236,7 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 			_, _ = w.Write([]byte(rec.Note))
 			return true
 		}
-		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, nil),
+		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent),
 			"how": "The note is signed by the log key; its text is this record's exact JSON. Each proof verifies against record.checkpoint."})
 	default:
 		return fail(&board.Error{Status: 404, Code: "not_found", Message: "Log routes: " + strings.Join([]string{LogPaths["checkpoint"], LogPaths["note"], LogPaths["proof"], LogPaths["promise"], LogPaths["consistency"], LogPaths["leaves"], LogPaths["anchors"], LogPaths["record"]}, ", ") + "."})
@@ -325,7 +325,7 @@ func (s *Server) mcpAgentRecord(ctx context.Context, in agentRecordInput) (*mcp.
 	if err != nil {
 		return nil, board.Result{}, apiError(err)
 	}
-	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, nil)}}, nil
+	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent)}}, nil
 }
 
 // agentURLs are an agent's absolute links on the public URL, by fingerprint

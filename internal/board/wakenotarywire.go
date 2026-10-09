@@ -37,28 +37,35 @@ func (serviceBoardView) LatestSeq(ctx context.Context, q allowance.Querier) (int
 	return seq, err
 }
 
-// EventsAfter reads visible originals (no edits, nothing hidden) after a
-// sequence. The author is empty for an anonymous message, so it never counts
-// as the watcher's own.
+// EventsAfter reads visible messages after a sequence: originals, and the
+// edits that added a mention (C100). An edit's mentions are the ones it
+// delivered, the post_mentions rows keyed on its event ID (mentions.go), so
+// a mention an earlier version already made is not repeated; an edit
+// concerns no one else. The author is empty for an anonymous message, so it
+// never counts as the watcher's own.
 func (serviceBoardView) EventsAfter(ctx context.Context, q allowance.Querier, after int64, limit int) ([]services.BoardEvent, error) {
 	rows, err := q.QueryContext(ctx, `SELECT e.seq,e.id,e.room,CASE WHEN e.public_key='' THEN '' ELSE e.account END,
  coalesce((SELECT CASE WHEN p.public_key='' THEN '' ELSE p.account END FROM events p WHERE p.id=e.reply_to AND e.reply_to<>''),''),
- CASE WHEN e.recipient='' THEN '' ELSE coalesce((SELECT i.account FROM identities i WHERE i.id=e.recipient),e.recipient) END, e.text
- FROM events e WHERE e.seq>? AND e.hidden=0 AND e.supersedes='' ORDER BY e.seq LIMIT ?`, after, limit)
+ CASE WHEN e.recipient='' THEN '' ELSE coalesce((SELECT i.account FROM identities i WHERE i.id=e.recipient),e.recipient) END, e.text, e.supersedes<>'', e.origin
+ FROM events e WHERE e.seq>? AND e.hidden=0 AND (e.supersedes='' OR EXISTS(SELECT 1 FROM post_mentions m WHERE m.root=e.origin AND m.event_id=e.id)) ORDER BY e.seq LIMIT ?`, after, limit)
 	if err != nil {
 		return nil, err
 	}
 	var out []services.BoardEvent
-	var texts []string
+	var texts, roots []string
 	for rows.Next() {
 		var ev services.BoardEvent
-		var text string
-		if err = rows.Scan(&ev.Seq, &ev.ID, &ev.Room, &ev.Author, &ev.ReplyToAuthor, &ev.Addressed, &text); err != nil {
+		var text, root string
+		if err = rows.Scan(&ev.Seq, &ev.ID, &ev.Room, &ev.Author, &ev.ReplyToAuthor, &ev.Addressed, &text, &ev.Edit, &root); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		if ev.Edit {
+			ev.ReplyToAuthor, ev.Addressed = "", ""
+		}
 		out = append(out, ev)
 		texts = append(texts, text)
+		roots = append(roots, root)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -66,6 +73,12 @@ func (serviceBoardView) EventsAfter(ctx context.Context, q allowance.Querier, af
 		return nil, err
 	}
 	for i := range out {
+		if out[i].Edit {
+			if out[i].Mentions, err = editMentions(ctx, q, roots[i], out[i].ID); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		// The same parse and resolution a post's own mentions use (mentions.go).
 		if out[i].Mentions, err = resolveMentions(ctx, q, texts[i], out[i].Author); err != nil {
 			return nil, err
@@ -77,6 +90,24 @@ func (serviceBoardView) EventsAfter(ctx context.Context, q allowance.Querier, af
 		}
 	}
 	return out, nil
+}
+
+// editMentions is the accounts an edit newly mentioned, as it recorded them.
+func editMentions(ctx context.Context, q allowance.Querier, root, id string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, "SELECT account FROM post_mentions WHERE root=? AND event_id=? LIMIT ?", root, id, MentionsMax)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var account string
+		if err = rows.Scan(&account); err != nil {
+			return nil, err
+		}
+		out = append(out, account)
+	}
+	return out, rows.Err()
 }
 
 // conversationWatchers fills a conversation message's members for message

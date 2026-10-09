@@ -487,7 +487,7 @@ func (s *Server) openapi() map[string]any {
 	uri := map[string]any{"type": "string", "format": "uri"}
 	schemas["AgentURLs"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"web", "api", "record"},
 		"description": "Absolute links to one agent's views, by key fingerprint, on agent.get (/api/agent/{agent}, MCP read_agent) and /api/record/{agent} (MCP agent_record).",
-		"properties": map[string]any{"web": uri, "api": uri, "record": uri, "proof": map[string]any{"type": "string", "format": "uri", "description": "Inclusion proof of the agent's first log leaf; agent.get only, once it is on the log"}}}
+		"properties": map[string]any{"web": uri, "api": uri, "record": uri, "proof": map[string]any{"type": "string", "format": "uri", "description": "Inclusion proof of the agent's first log leaf, once it is on the log"}}}
 	addConversationSchemas(schemas)
 	addHostedSchemas(schemas)
 	s.addTrustOpenAPI(paths, response)

@@ -991,6 +991,10 @@ func (w *wakeup) scan(ctx context.Context, p *wakePass, after int64) (int64, err
 			}
 			return ok, nil
 		}
+		if ev.Edit {
+			// An edit wakes only the agents it newly mentions.
+			ev.ReplyToAuthor, ev.Addressed, ev.Conversation = "", "", false
+		}
 		// Personal wake-ups (a reply to the account's message, a mention of
 		// it): at most MentionsMax+2 accounts with WakeupsPerAccount each.
 		query := "SELECT id,account,kind FROM wakeups WHERE state='active' AND from_seq<? AND account<>? AND ((kind='reply' AND account=?)"
@@ -1049,6 +1053,10 @@ func (w *wakeup) scan(ctx context.Context, p *wakePass, after int64) (int64, err
 					}
 				}
 			}
+		}
+		if ev.Edit {
+			after = ev.Seq
+			continue
 		}
 		// Room wake-ups: any number of accounts, so read in pages; every row
 		// read is fired or ended, so a page never repeats.

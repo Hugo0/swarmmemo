@@ -1402,14 +1402,14 @@
     {
       "mode": "0644",
       "path": "internal/board/mentions.go",
-      "sha256": "2ece17ec574c25d70abc3cf6f4b8c762b62fba8a5d46194f247cb195be27f11e",
-      "size": 6815
+      "sha256": "03de13519ce632421f9efb7a98ab2474c6751ee70fd0408e9b54cc29db699ee8",
+      "size": 8841
     },
     {
       "mode": "0644",
       "path": "internal/board/mentions_test.go",
-      "sha256": "2e32f9452c379a22d83bfea7afe3062a3c02f04e82d66741a85fbec2d5202ece",
-      "size": 7641
+      "sha256": "ea98b8b3d97396d2ed115da98480a4ae33357ffd024167c682177cc304bf4fea",
+      "size": 11822
     },
     {
       "mode": "0644",
@@ -1972,8 +1972,8 @@
     {
       "mode": "0644",
       "path": "internal/board/transparency.go",
-      "sha256": "e68c0e426d6ea2ca6588755df2b4fe59debef19d005aaa89f1b1a069fa5cc8f6",
-      "size": 63145
+      "sha256": "dbf09b337939f5fddb73dc61a9dda551aa2fed8982439728a29b21961b48d847",
+      "size": 63534
     },
     {
       "mode": "0644",
@@ -2050,8 +2050,8 @@
     {
       "mode": "0644",
       "path": "internal/board/wakenotarywire.go",
-      "sha256": "3a373f9e1cf41b14ee5b279379362621b997bf580d0bfb62da379d115ccd2956",
-      "size": 9323
+      "sha256": "f5d8150dc6c02929b502bf9d9df9e9097b20b90df5d45dce4bdc9b0e12f104d8",
+      "size": 10484
     },
     {
       "mode": "0644",
@@ -2380,8 +2380,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/agenturls_test.go",
-      "sha256": "3c518e57303843b46236f16aecec2b0688835f7ed60314aa9ede30330158407b",
-      "size": 3028
+      "sha256": "7e365f8b64def422c97ca60161bfd8e08beed019beb303d4a1dcaac8cb53e6a0",
+      "size": 3107
     },
     {
       "mode": "0644",
@@ -2494,8 +2494,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "a900bb2afd8b3aa2378442a03f035a1d4aa1de79e0cbbd7ee93fa732b463282c",
-      "size": 112620
+      "sha256": "1dcb9ac4895686c5bfb06c71e07bd3020d0cbf1c70ef30657b2bfc9ccbf3dfef",
+      "size": 112604
     },
     {
       "mode": "0644",
@@ -3166,8 +3166,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/transparency.go",
-      "sha256": "fb8cd6c6eae9ce2c405e05d54c9d414e5f61fdf6ae1f3f4ce5cc5b6367c1a3df",
-      "size": 14657
+      "sha256": "09337b6c6340e352dbbe2da0a6ac433e7a22699c0ed6f9a911a0890d5e22b18d",
+      "size": 14669
     },
     {
       "mode": "0644",
@@ -4252,8 +4252,8 @@
     {
       "mode": "0644",
       "path": "internal/services/services.go",
-      "sha256": "16f643eacad17602bd80a9ad1675efc18666192a3961b37d7e859010840f7c16",
-      "size": 20260
+      "sha256": "0a0d3ef4d99acc710212f2d62c9202de393d7cae5e6a3636a0d72a2f149b0e77",
+      "size": 20527
     },
     {
       "mode": "0644",
@@ -4468,8 +4468,8 @@
     {
       "mode": "0644",
       "path": "internal/services/wakeup.go",
-      "sha256": "ef7d42bcc5f0d2252d1d92c89575520acda4d5b71c6cf3ad24b1066dfa58fa20",
-      "size": 43912
+      "sha256": "8f0114ce7c4ff3626355b1a6e793f0c704679f848ecc4ee4bf6dc7bf3e0ee93e",
+      "size": 44102
     },
     {
       "mode": "0644",

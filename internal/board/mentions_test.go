@@ -174,3 +174,94 @@ func TestMentionWakeupUsesTheSameParse(t *testing.T) {
 		t.Fatalf("the wake-up's read lists the mention: %v", back.Data["mentions"])
 	}
 }
+
+// Unknown @words before a registered handle never use up the mention, however
+// many there are (C101): the registered handle is mentioned and linked, the
+// author's own still skipped, and the first MentionsMax registered ones win.
+func TestMentionAfterManyUnknownHandles(t *testing.T) {
+	s := openTest(t, updatesConfig())
+	alice := handleKey(t, s, 1, "alice")
+	bob := handleKey(t, s, 2, "bob")
+	carol := handleKey(t, s, 3, "carol")
+	var unknown []string
+	for i := 0; i < 450; i++ {
+		unknown = append(unknown, fmt.Sprintf("@ghost%d", i))
+	}
+	text := strings.Join(unknown, " ") + " @bob @alice_ and @carol"
+	id := run(t, s, signed(bob, Command{Operation: "post", Room: "lobby", Text: text})).Receipt.ID
+	for _, k := range []ed25519.PrivateKey{alice, carol} {
+		if sqlCount(t, s, "SELECT count(*) FROM post_mentions WHERE root=? AND account=?", id, keyID(k)) != 1 {
+			t.Fatalf("%s is not mentioned after %d unknown handles", keyID(k), len(unknown))
+		}
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM post_mentions WHERE root=?", id); n != 2 {
+		t.Fatalf("mentions %d, want alice and carol (the author's own skipped)", n)
+	}
+	got := run(t, s, Command{Operation: "message.get", MessageID: id}).Messages[0].MentionAgents
+	if len(got) != 3 || got["alice"] != keyID(alice) || got["carol"] != keyID(carol) || got["bob"] != keyID(bob) {
+		t.Fatalf("mention links %v", got)
+	}
+	// The resolution itself: the first MentionsMax registered handles in order.
+	var named []string
+	for i := 0; i < MentionsMax+1; i++ {
+		handleKey(t, s, byte(60+i), fmt.Sprintf("r%d", i))
+		named = append(named, fmt.Sprintf("@r%d", i))
+	}
+	accounts, err := resolveMentions(testContext, s.db, strings.Join(unknown, " ")+" "+strings.Join(named, " "), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != MentionsMax || accounts[0] != keyID(keyFor(60)) || accounts[MentionsMax-1] != keyID(keyFor(byte(60+MentionsMax-1))) {
+		t.Fatalf("resolved %v", accounts)
+	}
+}
+
+// An edit that adds a mention wakes the newly mentioned agent once, on that
+// version (C100); a later version that keeps the mention, or an edit of a
+// message that already made it, wakes no one again, and an edit wakes no
+// room wake-up.
+func TestMentionWakeupFiresOnTheEditThatAddsIt(t *testing.T) {
+	s := openWakeTest(t, "wakeup")
+	alice := handleKey(t, s, 1, "alice")
+	bob := handleKey(t, s, 2, "bob")
+	carol := handleKey(t, s, 3, "carol")
+	wakeWork(t, s)
+	schedule := func(key ed25519.PrivateKey, name string, args map[string]any) {
+		t.Helper()
+		args["key"] = name
+		run(t, s, svcCall(key, "wakeup", "schedule", args, 1, "w-"+name))
+	}
+	edit := func(prev, text string) string {
+		t.Helper()
+		return run(t, s, signed(bob, Command{Operation: "post", Room: "lobby", Text: text, Data: dataJSON(`"supersedes":"` + prev + `"`)})).Receipt.ID
+	}
+	schedule(alice, "m1", map[string]any{"on": "mention"})
+	draft := run(t, s, signed(bob, Command{Operation: "post", Room: "lobby", Text: "draft"})).Receipt.ID
+	if n := wakeWork(t, s); n != 0 {
+		t.Fatalf("no mention yet: %d", n)
+	}
+	schedule(carol, "r", map[string]any{"on": "room", "room": "lobby"})
+	edit1 := edit(draft, "draft for @alice")
+	if n := wakeWork(t, s); n != 1 {
+		t.Fatalf("the edit adding @alice (and no room wake-up) fired %d", n)
+	}
+	page := run(t, s, svcRead(alice, "wakeup", "notices", map[string]any{}))
+	notices := svcField(t, page.Data, "result", "notices").([]any)
+	if len(notices) != 1 || svcField(t, notices[0], "on") != "mention" || svcField(t, notices[0], "event") != edit1 {
+		t.Fatalf("notices %+v, want the mention on %s", notices, edit1)
+	}
+	schedule(alice, "m2", map[string]any{"on": "mention"})
+	edit(edit1, "draft for @alice, revised")
+	if n := wakeWork(t, s); n != 0 {
+		t.Fatalf("a version keeping the mention fired %d", n)
+	}
+	original := run(t, s, signed(bob, Command{Operation: "post", Room: "lobby", Text: "hi @alice"})).Receipt.ID
+	if n := wakeWork(t, s); n != 2 {
+		t.Fatalf("the original mention wakes m2 and the room wake-up: %d", n)
+	}
+	schedule(alice, "m3", map[string]any{"on": "mention"})
+	edit(original, "hi again @alice")
+	if n := wakeWork(t, s); n != 0 {
+		t.Fatalf("an edit of a message that already mentioned alice fired %d", n)
+	}
+}

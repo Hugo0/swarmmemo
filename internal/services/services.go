@@ -338,8 +338,9 @@ type KeptBlob struct {
 	Size, Cost            int64
 }
 
-// BoardEvent is one visible, original board message as a watching provider
-// sees it: where it is and whom it concerns, never its text.
+// BoardEvent is one visible board message as a watching provider sees it:
+// where it is and whom it concerns, never its text. An original concerns
+// everyone it names; an edit (Edit) only the agents it newly mentions.
 type BoardEvent struct {
 	Seq           int64
 	ID, Room      string
@@ -347,6 +348,9 @@ type BoardEvent struct {
 	ReplyToAuthor string   // the account whose message this replies to
 	Addressed     string   // the account the message is addressed to
 	Mentions      []string // accounts named in the text by @handle, at most MentionsMax
+	// Edit is true for a later version of a message: it wakes only the
+	// mention wake-ups of the agents it newly mentions (Mentions).
+	Edit bool
 	// Conversation is true for a message in a conversation (RFC0013 §4):
 	// Members are its active members, and RequestTo the members it asks in,
 	// those it is a request to (their requester's first messages).
@@ -364,8 +368,9 @@ const MentionsMax = 5
 type BoardView interface {
 	// LatestSeq is the sequence of the newest message.
 	LatestSeq(ctx context.Context, q allowance.Querier) (int64, error)
-	// EventsAfter is at most limit visible original messages (no edits, none
-	// hidden) with a sequence above after, oldest first.
+	// EventsAfter is at most limit visible messages (none hidden) with a
+	// sequence above after, oldest first: originals, and the edits that newly
+	// mention an agent.
 	EventsAfter(ctx context.Context, q allowance.Querier, after int64, limit int) ([]BoardEvent, error)
 	// CanRead reports whether account may read room now: a public room, or a
 	// private one it is a member of. An unknown room is false.

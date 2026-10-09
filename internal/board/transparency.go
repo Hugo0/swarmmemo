@@ -52,6 +52,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"swarmmemo/internal/allowance"
 	"swarmmemo/internal/ots"
 	"swarmmemo/internal/services"
 	"swarmmemo/internal/tlog"
@@ -1432,6 +1433,10 @@ type RecordLink struct {
 type SignedRecord struct {
 	Record LogRecord `json:"record"`
 	Note   string    `json:"note"`
+	// Agent is when the agent went on the record, as agent.get carries it
+	// (nil before it is logged); outside the signed record, it gives the
+	// record's urls the same proof link agent.get's have (C102).
+	Agent *AgentRecord `json:"-"`
 }
 
 // ReadLogRecord builds and signs the record of a public agent named by
@@ -1565,7 +1570,11 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 	if err != nil {
 		return SignedRecord{}, err
 	}
-	return SignedRecord{Record: r, Note: note}, nil
+	agent, err := agentRecord(ctx, s.db, r.Agent)
+	if err != nil {
+		return SignedRecord{}, err
+	}
+	return SignedRecord{Record: r, Note: note, Agent: agent}, nil
 }
 
 // AgentRecord is when an agent went on the record: its first identity or
@@ -1584,7 +1593,7 @@ type AgentRecord struct {
 // the first identity or message leaf by the subject index (it stops at the
 // first match), then the earliest confirmed anchor whose checkpoint covers
 // that leaf, by the anchors' primary key. Nil when nothing is logged yet.
-func agentRecord(ctx context.Context, tx *sql.Tx, agent string) (*AgentRecord, error) {
+func agentRecord(ctx context.Context, tx allowance.Querier, agent string) (*AgentRecord, error) {
 	var r AgentRecord
 	err := tx.QueryRowContext(ctx, `SELECT l.idx,l.created_at FROM identities k JOIN tlog_leaves l ON l.idx=(
  SELECT f.idx FROM tlog_leaves f WHERE f.subject=k.id AND f.subject<>'' AND f.kind IN ('identity','message') ORDER BY f.idx LIMIT 1)

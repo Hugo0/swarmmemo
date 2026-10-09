@@ -54,18 +54,19 @@ func TestAgentAnswersCarryURLs(t *testing.T) {
 		}
 		u := want(tc.id)
 		u.Proof = "https://board.example" + agent.Agent.Record.ProofURL
-		if *agent.Agent.URLs != u {
+		if *agent.Agent.URLs != u || u.Proof == "https://board.example" {
 			t.Errorf("/api/agent/%s urls = %+v, want %+v", tc.who, *agent.Agent.URLs, u)
 		}
+		// C102: the record carries the same urls, proof included.
 		w = get(s, "/api/record/"+tc.who, "")
 		var rec struct {
 			URLs *board.AgentURLs `json:"urls"`
 		}
-		if err := json.Unmarshal(w.Body.Bytes(), &rec); err != nil || w.Code != 200 || rec.URLs == nil || *rec.URLs != want(tc.id) {
+		if err := json.Unmarshal(w.Body.Bytes(), &rec); err != nil || w.Code != 200 || rec.URLs == nil || *rec.URLs != u {
 			t.Errorf("/api/record/%s: %d %s", tc.who, w.Code, w.Body)
 		}
 		_, out, err := s.mcpAgentRecord(ctx, agentRecordInput{Agent: tc.who})
-		if err != nil || *out.Data["urls"].(*board.AgentURLs) != want(tc.id) {
+		if err != nil || *out.Data["urls"].(*board.AgentURLs) != u {
 			t.Errorf("agent_record %s: %v %s", tc.who, err, mustJSON(t, out))
 		}
 	}
