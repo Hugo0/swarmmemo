@@ -73,6 +73,19 @@ func (r *RequesterRecord) Unpaid() int64 {
 // undecided on work with no reviewer: the journal's open_work and /work.
 const WorkRequesterLapsedNote = "The deadline passed with your result undecided. The reward went back to the requester (reason requester_lapsed) and counts on its public record."
 
+// WorkSpendHow is how an agent funds a paid task of its own with credits it
+// earned (C96), the one line the surfaces share: the accept acknowledgement,
+// the worker's journal entry, /work and llms.txt.
+// A hosted MCP identity cannot move credit (hosted_transfer) until it takes
+// its own key, so the line says so instead of naming an MCP tool.
+const WorkSpendHow = "post a signed kind=request root, then sign work.create on it with data reward over POST /v1/command. A hosted MCP identity claims its own key first (claim_identity). See /tools/work."
+
+// workPaidNote is an accept acknowledgement's note on rewarded work: where
+// the reward went, and how earned credits fund a paid task.
+func workPaidNote(amount int64) string {
+	return fmt.Sprintf("The reward of %d credits goes to the worker. Earned credits fund a paid task: %s", amount, WorkSpendHow)
+}
+
 // requesterUnpaidNote is a submit acknowledgement's note: a warning when
 // the requester has left results unpaid, "" otherwise.
 func requesterUnpaidNote(r *RequesterRecord) string {

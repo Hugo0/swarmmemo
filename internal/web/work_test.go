@@ -203,7 +203,10 @@ func TestWorkSSRRealStorePublicPrivateAndSimulation(t *testing.T) {
 		path             string
 		status           int
 		contains, absent string
-	}{{"/work", 200, "Genuine local public fixture", "Explicit simulation fixture"}, {"/work?room=lobby", 200, "Labeled simulation", "Never reveal"}, {"/work/" + publicID, 200, "work.create", "Never reveal"}, {"/work/" + simID, 200, "Labeled simulation", "Never reveal"}, {"/work/" + privateID, 404, "unavailable", "Never reveal"}, {"/work?room=web-private-work", 404, "unavailable", "Never reveal"}} {
+	}{{"/work", 200, "Genuine local public fixture", "Explicit simulation fixture"}, {"/work?room=lobby", 200, "Labeled simulation", "Never reveal"}, {"/work/" + publicID, 200, "work.create", "Never reveal"}, {"/work/" + simID, 200, "Labeled simulation", "Never reveal"}, {"/work/" + privateID, 404, "unavailable", "Never reveal"}, {"/work?room=web-private-work", 404, "unavailable", "Never reveal"},
+		// The spend path (C96): the directory and the earn view say how to post a
+		// paid task, with the exact commands; a task's own page does not.
+		{"/work", 200, `<h2 id="post-task-heading">Post a paid task</h2>`, "Never reveal"}, {"/work?kind=earn", 200, `{"operation":"work.create","message_id":"MESSAGE_ID"`, "Never reveal"}, {"/work/" + publicID, 200, "Copy unsigned work intent", `id="post-task"`}} {
 		w := httptest.NewRecorder()
 		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
 		body := w.Body.String()

@@ -125,7 +125,11 @@ func TestWorkRewardHeldAndPaidOnce(t *testing.T) {
 	// The worker cannot accept its own submission.
 	fails(t, s, workCommand(s, worker, Command{Operation: "work.accept", MessageID: id, Amount: fence}), "work_forbidden")
 	accept := workCommand(s, owner, Command{Operation: "work.accept", MessageID: id, Amount: fence})
-	first, _ := json.Marshal(run(t, s, accept).Data["ack"])
+	acked := run(t, s, accept).Data["ack"].(WorkAck)
+	if acked.Note != workPaidNote(600) || !strings.Contains(acked.Note, "600 credits") || !strings.Contains(acked.Note, "work.create") || !strings.Contains(acked.Note, "POST /v1/command") {
+		t.Fatalf("accept note: %q", acked.Note)
+	}
+	first, _ := json.Marshal(acked)
 	if got := creditIn(t, s, payee, "remaining"); got != 600 {
 		t.Fatalf("the worker received %d", got)
 	}
@@ -175,7 +179,7 @@ func TestWorkRewardHeldAndPaidOnce(t *testing.T) {
 	}
 	b, _, _ := journalOf(t, run(t, s, journalGet(worker, "", 0)))
 	items := path(t, b, "open_work", "work", "items").([]any)
-	if len(items) != 1 || path(t, items[0], "work", "reward", "state") != "paid" || !strings.Contains(path(t, items[0], "next").(string), "600 credits") {
+	if len(items) != 1 || path(t, items[0], "work", "reward", "state") != "paid" || !strings.Contains(path(t, items[0], "next").(string), "600 credits") || !strings.Contains(path(t, items[0], "next").(string), WorkSpendHow) {
 		t.Fatalf("worker's open_work: %v", items)
 	}
 	if err := s.Integrity(testContext); err != nil {
@@ -390,5 +394,17 @@ func TestWorkRewardNeedsTheLedger(t *testing.T) {
 	var n int
 	if err := s.db.QueryRow("SELECT count(*) FROM work_rewards").Scan(&n); err != nil || n != 0 {
 		t.Fatal(n, err)
+	}
+}
+
+// An accept with no credit reward pays nothing, so it carries no spend note.
+func TestWorkAcceptSpendNoteOnlyWithReward(t *testing.T) {
+	s := openTest(t, Config{})
+	owner, worker := keyFor(142), keyFor(143)
+	id := createTestWork(t, s, owner, "lobby", "request", 0)
+	fence := claimAndSubmit(t, s, worker, id, "lobby")
+	ack := run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: id, Amount: fence})).Data["ack"].(WorkAck)
+	if ack.State != "accepted" || ack.Note != "" {
+		t.Fatalf("unrewarded accept: %+v", ack)
 	}
 }

@@ -59,7 +59,11 @@ func TestOversizeFrameRefusedIdentically(t *testing.T) {
 func TestRateLimitIsSharedAndKeyedOnPeer(t *testing.T) {
 	store := openStore(t)
 	seed(t, store, "room exists")
-	limiter := httpapi.NewLimiter()
+	// No refill: at the production 30 tokens/s any pause over ~33ms between
+	// exhausting the budget and a wire's request (routine under a loaded full
+	// gate) earns the peer a token back and the wire is wrongly admitted. The
+	// burst and the shared, peer-keyed table are the production machinery.
+	limiter := httpapi.NewLimiterRate(120, 0)
 	c, addrs := started(t, store, limiter)
 	api := httpapi.New(store, nil, httpapi.Config{Limiter: limiter})
 	for limiter.Admit("127.0.0.1") {

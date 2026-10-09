@@ -147,7 +147,9 @@ type WorkAck struct {
 	ResolvedFrom string `json:"resolved_from,omitempty"`
 	ResultSHA256 string `json:"result_sha256,omitempty"`
 	// Note, on a submit, warns the worker when the requester has left
-	// results unpaid before (its requester_record); absent otherwise.
+	// results unpaid before (its requester_record); on an accept that pays a
+	// credit reward, it says how earned credits fund a paid task
+	// (workPaidNote); absent otherwise.
 	Note string `json:"note,omitempty"`
 }
 
@@ -915,6 +917,9 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, e
 		}
 		ack.Note = requesterUnpaidNote(record)
+	}
+	if c.Operation == "work.accept" && reward > 0 {
+		ack.Note = workPaidNote(reward)
 	}
 	return Result{Data: map[string]any{"ack": ack}}, nil
 }

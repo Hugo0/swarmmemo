@@ -254,7 +254,7 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 		case r.w.Worker == a.account && r.state == "accepted" && p.Reward != nil && p.Reward.State == "pending":
 			role, next = "worker", fmt.Sprintf("Accepted; the reward of %d credits is paid at execute_at, after the requester's transfer delay.", p.Reward.Amount)
 		case r.w.Worker == a.account && r.state == "accepted" && p.Reward != nil:
-			role, next = "worker", fmt.Sprintf("Accepted; the reward of %d credits is paid to your account (ledger.list shows it).", p.Reward.Amount)
+			role, next = "worker", fmt.Sprintf("Accepted; the reward of %d credits is paid to your account (ledger.list shows it). Fund a paid task of your own with it: %s", p.Reward.Amount, WorkSpendHow)
 		case r.w.Worker == a.account && r.state == "expired":
 			role, next = "worker", WorkRequesterLapsedNote
 		case r.w.Reviewer == a.account && r.state == "submitted":
