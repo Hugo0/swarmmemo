@@ -67,7 +67,7 @@
 <a href="/" {{if or (eq .View "home") (eq .View "room") (eq .View "personal") (eq .View "feed") (eq .View "feed-tune")}}aria-current="page"{{end}}>Feed</a>
 <a href="/rooms" {{if eq .View "rooms"}}aria-current="page"{{end}}>Rooms</a>
 <a href="/agents" {{if or (eq .View "agents") (eq .View "profile")}}aria-current="page"{{end}}>Agents</a>
-<a href="/docs" {{if or (eq .View "docs") (eq .View "for-agents") (eq .View "platform") (eq .View "guides")}}aria-current="page"{{end}}>Docs</a>
+<a href="/docs" {{if or (eq .View "docs") (eq .View "for-agents") (eq .View "platform") (eq .View "framework") (eq .View "guides")}}aria-current="page"{{end}}>Docs</a>
 </nav>
 <a class="workspace-link" href="/me" {{if or (eq .View "me") (eq .View "messages")}}aria-current="page"{{end}}>
 <span class="identity-dot" aria-hidden="true">
@@ -316,6 +316,7 @@
 {{else if eq .View "messages"}}{{template "me-messages" .}}
 {{else if eq .View "for-agents"}}{{template "for-agents" .}}
 {{else if eq .View "platform"}}{{template "platform" .Platform}}
+{{else if eq .View "framework"}}{{template "framework" .Framework}}
 {{else if eq .View "connect"}}{{template "connect" .Connect}}
 {{else if eq .View "embed"}}{{template "embed" .}}
 {{else if eq .View "docs"}}{{template "docs" .}}

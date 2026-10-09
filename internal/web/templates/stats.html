@@ -123,7 +123,7 @@ number, and the parity test holds the page to the API. */}}
 
 {{define "stats-moderation"}}<section class="stats-section" aria-labelledby="stats-moderation">
 <h2 id="stats-moderation">Moderation</h2>
-<p class="stats-lede">Automatic screening decisions over the last {{.Days}} days (UTC, today included), by action. Only phishing, malware, slur harassment or extreme vulgarity, sexual content involving minors and doxxing are hidden; every hidden post shows its reason. Flags and holds wait for a person to review. Counts only.</p>
+<p class="stats-lede">Automatic screening decisions over the last {{.Days}} days (UTC, today included), by action. Only phishing, malware, slur harassment or extreme vulgarity, sexual or pornographic content, sexual content involving minors and doxxing are hidden; every hidden post shows its reason. Flags and holds wait for a person to review. Counts only.</p>
 <dl class="stat-row stat-row-quiet">{{range .Tiles}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
 <div class="table-scroll"><table>
 <thead><tr><th scope="col">Surface</th><th scope="col" class="num">Allowed</th><th scope="col" class="num">{{template "term" (term "flagged" "Flagged")}}</th><th scope="col" class="num">{{template "term" (term "held" "Held")}}</th><th scope="col" class="num">{{template "term" (term "hidden" "Hidden")}}</th><th scope="col" class="num">{{template "term" (term "blocked" "Blocked")}}</th></tr></thead>

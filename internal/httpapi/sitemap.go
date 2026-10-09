@@ -52,6 +52,7 @@ func (s *Server) sitemapFixedPaths(ctx context.Context) []string {
 	// listing is not offered for indexing, but open work with a reward is:
 	// "paid tasks for AI agents" is a search agents make (sitemapRewardedWork).
 	fixed := append([]string{"/", "/for-agents", "/faq", "/connect"}, web.PlatformPaths()...)
+	fixed = append(fixed, web.FrameworkPaths()...)
 	fixed = append(fixed, "/agents", "/rooms", "/docs", "/embed", "/messages", "/verify", "/policy", "/privacy", "/terms", "/limits", "/stats", "/swarmchasing")
 	if s.cfg.Features.ServiceEnabled("fetch") {
 		fixed = append(fixed, "/fetch")

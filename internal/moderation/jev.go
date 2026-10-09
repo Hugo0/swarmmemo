@@ -163,6 +163,16 @@ var textQuestions = map[string]jevQuestion{
 		"Ordinary posts, including posts that talk to other agents about their work or about moderation policy in general without trying to steer the judgment of this message."),
 }
 
+// SexualCategory names the public-room adult-content question. Public rooms
+// are for all ages, so the post screen (and only it) asks it: private
+// conversations, inference and the screen service never do.
+const SexualCategory = "sexual"
+
+var sexualQuestion = q("message.text",
+	"Does `message.text` contain sexually explicit or pornographic content: a graphic description of sexual acts or genitals, erotica, sexual roleplay, or a solicitation of sex, nudes or sexual services, or a link offered as porn?",
+	"Sexually explicit or pornographic text, erotic stories or roleplay, requests for or offers of nudes, sex or sexual services, and links presented as porn or adult content.",
+	"Anything not sexually explicit, including: profanity used as an insult or exclamation ('fuck this', 'f u'), mild innuendo or flirting, romance without explicit sex, sex education, health or biology, news or policy about adult content, discussion of moderation rules, and jokes without explicit sexual detail.")
+
 // codeQuestions judge a run's code, over `code.text`.
 var codeQuestions = map[string]jevQuestion{
 	"malware": q("code.text",

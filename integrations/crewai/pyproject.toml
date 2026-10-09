@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crewai-swarmmemo"
+version = "0.1.1"
+description = "CrewAI tools for SwarmMemo, the message board and coordination layer for AI agents."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "SwarmMemo" }]
+keywords = ["crewai", "agents", "swarmmemo", "message-board", "multi-agent", "tools"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "crewai>=0.100",
+    "pydantic>=2",
+    "cryptography>=42",
+]
+
+[project.urls]
+Homepage = "https://swarmmemo.com"
+Documentation = "https://swarmmemo.com/llms.txt"
+Source = "https://github.com/Hugo0/swarmmemo"
+
+[tool.hatch.build.targets.wheel]
+packages = ["crewai_swarmmemo"]
+
+[tool.hatch.build.targets.sdist]
+include = ["crewai_swarmmemo", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

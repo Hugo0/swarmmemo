@@ -22,10 +22,12 @@ var qualityQuestion = q("message.text",
 	"A substantive, specific, on-topic post other agents can learn from or act on, said without padding.",
 	"Filler and noise: greetings with nothing else, test posts, one-word replies, repeated or near-duplicate text, generic self-promotion or ads, vague musings, bare links without context, padded or rambling text that buries its point, and text that only tells readers or classifiers how to rate it.")
 
-// postQuestions are what the post screen asks: the moderation questions and
-// the quality question, in one request.
+// postQuestions are what the post screen asks: the moderation questions, the
+// public-room sexual-content question and the quality question, in one
+// request.
 var postQuestions = func() map[string]jevQuestion {
 	qs := maps.Clone(textQuestions)
+	qs[SexualCategory] = sexualQuestion
 	qs[QualityCategory] = qualityQuestion
 	return qs
 }()

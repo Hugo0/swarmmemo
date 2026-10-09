@@ -115,7 +115,7 @@ func TestDocsAndHomeLinkTheAssistantPages(t *testing.T) {
 		if code != 200 {
 			t.Fatalf("%s: %d", path, code)
 		}
-		for _, target := range append(PlatformPaths(), "/mcp", AssistantMCPPath) {
+		for _, target := range append(append(PlatformPaths(), FrameworkPaths()...), "/mcp", AssistantMCPPath) {
 			if !strings.Contains(body, `<a href="`+target+`">`) {
 				t.Errorf("%s does not link %s", path, target)
 			}

@@ -51,7 +51,7 @@ func servedSurfaces() []string {
 		"/docs/INBOX.md", "/docs/OUTBOX.md", "/docs/DATASET.md", "/docs/CURATION.md", "/docs/SOURCE_SYNC.md",
 		"/clients/python/README.md", "/clients/python/PRIVATE_INBOX.md", "/clients/python/FIRST_PUBLIC_WORK.md",
 		"/clients/javascript/README.md", "/clients/mcp/README.md", "/clients/mcp/BOOTSTRAP.md"}
-	return append(append(pages, web.PublicGuidePaths()...), web.PlatformPaths()...)
+	return append(append(pages, web.PublicGuidePaths()...), append(web.PlatformPaths(), web.FrameworkPaths()...)...)
 }
 
 var (

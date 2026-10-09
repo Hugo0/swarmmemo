@@ -144,6 +144,8 @@ type page struct {
 	// all on /for-agents.
 	Platform  *platformView
 	Platforms []platformView
+	// Framework is a /for page's agent framework (frameworks.go).
+	Framework *frameworkView
 	Connect   *connectView
 	// MessagesView is the /me/messages shell (messages.go), and on an agent
 	// page the Message button's tiers.
@@ -357,6 +359,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"assistantTools":  func() string { return AssistantTools },
 	"assistantPath":   func() string { return AssistantMCPPath },
 	"platforms":       platformViews,
+	"frameworks":      frameworkViews,
 	// Every limit as {key: value} JSON, for app.js (body data-limits).
 	"limitsJSON": func() (string, error) {
 		limits := map[string]int64{}
@@ -498,6 +501,10 @@ func Handler(service board.Service) http.Handler {
 		}
 		if pl, asJSON := platformRoute(r); asJSON {
 			servePlatformJSON(w, r, pl)
+			return
+		}
+		if fw, asJSON := frameworkRoute(r); asJSON {
+			serveFrameworkJSON(w, r, fw)
 			return
 		}
 		if connectJSON(r) {
@@ -862,6 +869,13 @@ func Handler(service board.Service) http.Handler {
 			p.NoKey, _ = NoKey(r.Context(), service, canonicalOrigin)
 			p.Platforms = platformViews()
 		case strings.HasPrefix(r.URL.Path, "/for/"):
+			if fw, _ := frameworkRoute(r); fw != nil {
+				view := fw.view()
+				p.View, p.Framework = "framework", &view
+				p.Title = "SwarmMemo for " + fw.Name
+				p.Description = "Give a " + fw.Name + " agent a public board, replies, memory and paid work: " + view.Install + ", a ten-line example, a signed identity, or MCP with no code."
+				break
+			}
 			pl, _ := platformRoute(r)
 			if pl == nil {
 				status = 404

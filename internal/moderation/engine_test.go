@@ -13,11 +13,11 @@ import (
 	"swarmmemo/internal/services"
 )
 
-// The defaults follow the moderation standard: the five severe categories
+// The defaults follow the moderation standard: the six severe categories
 // hide a post at p >= 0.90 and flag it at 0.60; everything else stays up.
 func TestPostDefaultsFollowTheStandard(t *testing.T) {
 	v := newEnv(t, "")
-	for _, cat := range []string{"phishing", "malware", "hate", "minors", "doxxing"} {
+	for _, cat := range []string{"phishing", "malware", "hate", "minors", "sexual", "doxxing"} {
 		v.jev.set(map[string]float64{cat: 0.95})
 		d := v.screen(t, SurfacePost, "h-"+cat, "text")
 		if d.Action != Hide || d.Category != cat || d.Queued {
@@ -581,5 +581,45 @@ func TestPublicModelHidesTheClassifierModel(t *testing.T) {
 	}
 	if got := publicModel(""); got != "none" {
 		t.Errorf("publicModel(\"\") = %q", got)
+	}
+}
+
+// Public rooms are for all ages: the post screen, and only it, asks the
+// sexual-content question, and hides at the severe threshold with a public
+// reason. Private conversations, the screen service and inference are never
+// asked it.
+func TestSexualContentIsAPublicPostCategoryOnly(t *testing.T) {
+	for name, qs := range map[string]map[string]jevQuestion{"post": postQuestions, "post promotion": postPromotionQuestions} {
+		if qs[SexualCategory].Instructions["question"] == "" {
+			t.Fatalf("%s screen does not ask the sexual-content question", name)
+		}
+	}
+	for name, qs := range map[string]map[string]jevQuestion{"conversation": agentTextQuestions(), "screen.text": screenQuestions, "inference": textQuestions, "code": codeQuestions} {
+		if _, ok := qs[SexualCategory]; ok {
+			t.Fatalf("%s screen asks the sexual-content question", name)
+		}
+	}
+	pol := DefaultPolicy()
+	for _, s := range []Surface{SurfaceInferencePrompt, SurfaceInferenceOutput, SurfaceRunCode} {
+		if pol.surface(s).Categories[SexualCategory] != nil {
+			t.Fatalf("%s configures the sexual category", s)
+		}
+	}
+	v := newEnv(t, "")
+	v.jev.set(map[string]float64{SexualCategory: 0.93})
+	d := v.screen(t, SurfacePost, "adult", "text")
+	if d.Action != Hide || !strings.Contains(d.Reason, "auto-screen: sexual or pornographic content (p=0.93") {
+		t.Fatalf("sexual at 0.93: %+v", d)
+	}
+	v.jev.mu.Lock()
+	asked := v.jev.lastAsks[SexualCategory]
+	v.jev.mu.Unlock()
+	if !asked {
+		t.Fatal("the post request did not carry the sexual-content question")
+	}
+	// Profanity or innuendo that Jev scores low stays up.
+	v.jev.set(map[string]float64{SexualCategory: 0.2})
+	if d := v.screen(t, SurfacePost, "rude", "fuck this benchmark"); d.Action != Allow {
+		t.Fatalf("low score: %+v", d)
 	}
 }

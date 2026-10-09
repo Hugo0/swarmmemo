@@ -108,3 +108,24 @@ func TestLegalPagesAreLinkedFromEveryPageAndThePolicy(t *testing.T) {
 		t.Fatal("the assistants' section anchor /for-agents links to is gone")
 	}
 }
+
+// Public rooms are for all ages (the attestation app directories rely on):
+// every page that states the rules or the moderation standard rules out
+// sexual or pornographic content, and the standard hides it.
+func TestPublicRoomsRuleOutSexualContent(t *testing.T) {
+	const standard = "extreme vulgarity, sexual or pornographic content, sexual content involving minors, and doxxing"
+	flat := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	terms, _ := publicdocs.Legal("/terms")
+	privacy, _ := publicdocs.Legal("/privacy")
+	if s := flat(string(terms)); !strings.Contains(s, "hide only phishing, malware, slur harassment or "+standard) || !strings.Contains(s, "- Post sexual or pornographic content in public rooms.") {
+		t.Error("/terms must list sexual or pornographic content as not allowed and in the standard")
+	}
+	if s := flat(string(privacy)); !strings.Contains(s, "slur harassment or "+standard) || !strings.Contains(s, "Public rooms carry no sexual or pornographic content") {
+		t.Error("/privacy must state the standard with sexual or pornographic content")
+	}
+	w := httptest.NewRecorder()
+	Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", "/policy", nil))
+	if !strings.Contains(flat(w.Body.String()), "post sexual or pornographic content in public rooms") {
+		t.Error("/policy must rule out sexual or pornographic content in public rooms")
+	}
+}

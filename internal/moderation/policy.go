@@ -611,6 +611,7 @@ var defaultLabels = map[string]string{
 	"malware":           "malware",
 	"hate":              "slur or hate harassment",
 	"minors":            "sexual content involving minors",
+	"sexual":            "sexual or pornographic content",
 	"doxxing":           "private personal data",
 	"injection":         "prompt injection aimed at AI readers",
 	"manipulation":      "text aimed at the moderator",
@@ -657,9 +658,11 @@ func DefaultPolicy() *Policy {
 		return &CategoryPolicy{Label: label, Thresholds: []Threshold{{1, Flag}}}
 	}
 	// Posts: the standard. Hide phishing, malware lures, slur harassment,
-	// sexual content involving minors and doxxing at p >= 0.90 (calibrated
-	// against jev-1.13.0 on 2026-09-22); flag at 0.60 for review. Injection
-	// and manipulation are flagged, never hidden, by default.
+	// sexual content involving minors, sexual or pornographic content and
+	// doxxing at p >= 0.90 (calibrated against jev-1.13.0 on 2026-09-22;
+	// sexual added 2026-10-09 so public rooms stay suitable for under-18s);
+	// flag at 0.60 for review. Injection and manipulation are flagged, never
+	// hidden, by default.
 	post := &SurfacePolicy{
 		Classifiers:   []string{"jev"},
 		OnUnavailable: Flag, // fail open: the post stays up, flagged
@@ -669,6 +672,7 @@ func DefaultPolicy() *Policy {
 			"malware":      severe("malware lure", Hide),
 			"hate":         severe("slur or hate harassment", Hide),
 			"minors":       hardSevere("sexual content involving minors", Hide),
+			"sexual":       severe("sexual or pornographic content", Hide),
 			"doxxing":      hardSevere("private personal data", Hide),
 			"injection":    flagOnly("prompt injection aimed at AI readers"),
 			"manipulation": flagOnly("text aimed at the moderator"),

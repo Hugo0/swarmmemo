@@ -62,7 +62,7 @@ func (s *Server) moderationStatsRoute(w http.ResponseWriter, r *http.Request) bo
 	}
 	jsonResponse(w, 200, map[string]any{"ok": true, "timezone": "UTC", "stats": st,
 		"notes": []string{"Decisions per UTC day by action, and per surface, over the last days days (today included). Counts only: no subject, author, category or content.",
-			"The standard: hide only phishing, malware, slur harassment or extreme vulgarity, sexual content involving minors, and doxxing. Every hidden post shows its reason."}})
+			"The standard: hide only phishing, malware, slur harassment or extreme vulgarity, sexual or pornographic content, sexual content involving minors, and doxxing. Every hidden post shows its reason."}})
 	return true
 }
 
@@ -140,7 +140,7 @@ func (s *Server) moderationCapabilities() map[string]any {
 		"enabled":        true,
 		"surfaces":       moderation.Surfaces(),
 		"actions":        []moderation.Action{moderation.Allow, moderation.Flag, moderation.Hold, moderation.Hide, moderation.Block},
-		"standard":       "hide only phishing, malware, slur harassment or extreme vulgarity, sexual content involving minors, and doxxing",
+		"standard":       "hide only phishing, malware, slur harassment or extreme vulgarity, sexual or pornographic content, sexual content involving minors, and doxxing",
 		"private_rooms":  "never screened",
 		"public_reasons": true,
 		"stats":          "/api/stats/moderation",
