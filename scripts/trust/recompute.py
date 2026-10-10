@@ -38,7 +38,11 @@ endorse edges, with oppose edges subtracted locally (compute_standing()); versio
 c / (1 − pass), leaves self-dealt spend out of the seed, caps spend's seed and
 prices a domain by its registration age when known; version 4 (rule 2) gives
 each act its kind's absolute weight, passes only pass × W / (K + W) along edges
-of total weight W (the rest returns to the seeds) and reports c. Every amount is an
+of total weight W (the rest returns to the seeds) and reports c; version 6
+(rule 3) replaces the propagation with stakes: a vouch, an accepted work item and
+a verified witness move a share of the endorser's own standing to the target, and
+votes, witness verdicts and those acts are positions settled by later independent
+endorsement, losers paying winners within a pot (run_stakes()). Every amount is an
 integer; divisions truncate toward zero as Go's do; curves are published daily
 factors applied one whole day at a time with floor. The flow is Dinic's
 algorithm specified down to edge insertion order and the path search, since a
@@ -159,6 +163,8 @@ STANDING_KEYS = {"mode", "half_life_days", "day_factor_ppm", "pass_ppm", "iterat
 STANDING_KEYS_V3 = {"rule", "v_floor_cents", "spend_cap_cents", "funded_days"}
 # From parameter version 4 (rule 2, absolute weights).
 STANDING_KEYS_V4 = {"keep_weight", "edge_weights", "vouch_weight_max"}
+# From parameter version 6 (rule 3, endorsements are stakes).
+STANDING_KEYS_V6 = {"stake_ppm", "stake_budget_ppm", "prior_min_posts"}
 EDGE_WEIGHT_KINDS = {"vote", "down_vote", "vouch", "work_accept", "witness"}
 EDGE_KEYS = {"base_ppm", "half_life_days", "day_factor_ppm"}
 
@@ -173,8 +179,9 @@ def check_params(body: dict) -> None:
     if "standing" in body:
         exact(body, PARAM_KEYS | {"standing"}, "body")
         st = body["standing"]
-        if not isinstance(st, dict) or not STANDING_KEYS <= set(st) <= STANDING_KEYS | STANDING_KEYS_V3 | STANDING_KEYS_V4:
-            raise InputError(f"params standing: fields must be {sorted(STANDING_KEYS)}, plus any of {sorted(STANDING_KEYS_V3 | STANDING_KEYS_V4)}")
+        extra = STANDING_KEYS_V3 | STANDING_KEYS_V4 | STANDING_KEYS_V6
+        if not isinstance(st, dict) or not STANDING_KEYS <= set(st) <= STANDING_KEYS | extra:
+            raise InputError(f"params standing: fields must be {sorted(STANDING_KEYS)}, plus any of {sorted(extra)}")
         if body["standing"]["mode"] not in ("shadow", "active"):
             raise InputError("params standing.mode must be shadow or active")
         if st.get("rule", 0) >= 2:
@@ -183,6 +190,11 @@ def check_params(body: dict) -> None:
             exact(st["edge_weights"], EDGE_WEIGHT_KINDS, "standing.edge_weights")
         elif set(st) & STANDING_KEYS_V4:
             raise InputError(f"params standing: {sorted(STANDING_KEYS_V4)} need rule 2")
+        if st.get("rule", 0) >= 3:
+            if set(st) & STANDING_KEYS_V6 != STANDING_KEYS_V6:
+                raise InputError(f"params standing: rule 3 needs {sorted(STANDING_KEYS_V6)}")
+        elif set(st) & STANDING_KEYS_V6:
+            raise InputError(f"params standing: {sorted(STANDING_KEYS_V6)} need rule 3")
     else:
         exact(body, PARAM_KEYS, "body")
     for section, keys in PARAM_SECTIONS.items():
@@ -1065,9 +1077,9 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
     # Rule 1: spend paid to oneself (the payee shares the spender's root, or
     # either funded the other within funded_days) is not seed.
     self_dealt = None
+    funded = set()
     if rule >= 1:
         inputs["spend_self_dealt"] = 0
-        funded = set()
         lo = as_of - funded_days * DAY
         for r in snap.transfers:
             t_from = r["from"] if "from" in r else ""
@@ -1104,13 +1116,17 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
         if r.created_at < ws or r.target == "":
             continue
         if r.kind in ("vote", "vouch") and r.value == 1:
-            acts.append((r.voter, r.target, r.kind, r.created_at, False, r.weight))
+            acts.append((r.voter, r.target, r.kind, r.created_at, False, r.weight, r.message_id))
         elif r.kind == "vote" and r.value == -1:
-            acts.append((r.voter, r.target, "down_vote", r.created_at, True, 0))
-    for r in snap.acts:
+            acts.append((r.voter, r.target, "down_vote", r.created_at, True, 0, r.message_id))
+    for r in sorted(snap.acts, key=record_key):
         if r.created_at >= as_of or r.created_at < ws or r.kind not in ("work_accept", "witness"):
             continue
-        acts.append((r["from"] if "from" in r else "", r.to, r.kind, r.created_at, False, 0))
+        # A failed witness verdict (value -1) is read from rule 3 only: a
+        # position against the witnessed claim, no edge.
+        if r.value < 0 and (rule < 3 or r.kind != "witness"):
+            continue
+        acts.append((r["from"] if "from" in r else "", r.to, r.kind, r.created_at, r.value < 0, 0, r.id))
 
     def act_weight(kind, chosen):
         if kind == "vouch" and chosen > 0:
@@ -1118,7 +1134,10 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
         return st["edge_weights"][kind]
     pair_sum = {}
     kind_sum, kind_weight = {}, {}
-    for src, dst, kind, at, oppose, chosen in acts:
+    staked = []
+    if rule >= 3:
+        inputs["witness_failed"] = 0
+    for src, dst, kind, at, oppose, chosen, item in acts:
         if src == "" or dst == "" or src == dst or src in service or dst in service or src in reset:
             continue
         if root_of(src) == root_of(dst):
@@ -1126,7 +1145,12 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
         v = cv.decay(st["day_factor_ppm"], D - day_of(at))
         if v <= 0:
             continue
-        inputs[kind] += 1
+        if kind == "witness" and oppose:
+            inputs["witness_failed"] += 1
+        else:
+            inputs[kind] += 1
+        if rule >= 3:
+            staked.append((src, dst, kind, item, at, oppose, act_weight(kind, chosen) * v))
         if rule >= 2:
             k = (src, dst, oppose, kind)
             kind_sum[k] = kind_sum.get(k, 0) + v
@@ -1155,11 +1179,16 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
         lst.sort(key=lambda e: (e[0], e[2]))
     pen = [min(PPM, penalty.get(a, 0)) for a in nodes]
 
+    stake_out = None
+    if rule >= 3:
+        stake_out = run_stakes(st, as_of, ws, nodes, seed, pen, staked,
+                               lambda a, b: a != b and root_of(a) != root_of(b) and (a, b) not in funded)
+
     c = list(seed)
     keep = st.get("keep_weight", 0) * PPM
     restart = [x - mul_div(x, st["pass_ppm"], PPM) for x in seed]
     opposed = [0] * n
-    for _ in range(st["iterations"]):
+    for _ in range(st["iterations"] if rule < 3 else 0):
         nxt = list(restart)
         opposed = [0] * n
         back = 0
@@ -1219,11 +1248,17 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
     }
     wb = summary["would_be"]
     parts, extra, moves, total = {}, [], [], 0
+    if rule >= 3:
+        c = stake_out["c"]
     for i, a in enumerate(nodes):
         raw, opp = c[i], opposed[i]
+        if rule >= 3:
+            raw = stake_out["raw"][i]  # before the penalty; c[i] is after it
         if rule == 1:  # reported as c / (1 − pass); rule 2 reports c
             raw, opp = mul_div(raw, PPM, PPM - st["pass_ppm"]), mul_div(opp, PPM, PPM - st["pass_ppm"])
         cents = mul_div(max(0, raw - opp), PPM - pen[i], PPM) // MASS_PER_CENT
+        if rule >= 3:
+            cents = c[i] // MASS_PER_CENT
         part = {"cents": cents, "raw_cents": raw // MASS_PER_CENT, "opposed_cents": opp // MASS_PER_CENT, "penalty_ppm": pen[i],
                 "seed_cents": seed[i] // MASS_PER_CENT, "received_cents": max(0, raw - seed[i]) // MASS_PER_CENT, "band": band(cents, st),
                 "vote_weight_ppm": vw(cents), "share_weight_ppm": share_weight_ppm(cents, p), "breakdown": []}
@@ -1232,7 +1267,18 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
             contribution = mul_div(own, mass, seed[i]) // MASS_PER_CENT if seed[i] > 0 else 0
             part["breakdown"].append({"root": root, "kind": kind, "source": source, "state": state, "seed_cents": mass // MASS_PER_CENT,
                                       "contribution": contribution})
-        if raw > seed[i]:
+        if raw > seed[i] and rule >= 3:
+            # What it holds above its seed: what its judgement earned
+            # (settled stakes), and what endorsers moved to it.
+            above = raw - seed[i]
+            judged = min(above, max(0, stake_out["judged"][i]))
+            if above - judged >= MASS_PER_CENT:
+                part["breakdown"].append({"root": "endorsements", "kind": "earned", "source": "edges", "state": "computed", "seed_cents": 0,
+                                          "contribution": (above - judged) // MASS_PER_CENT})
+            if judged >= MASS_PER_CENT:
+                part["breakdown"].append({"root": "judgement", "kind": "earned", "source": "stakes", "state": "computed", "seed_cents": 0,
+                                          "contribution": judged // MASS_PER_CENT})
+        elif raw > seed[i]:
             part["breakdown"].append({"root": "endorsements", "kind": "earned", "source": "edges", "state": "computed", "seed_cents": 0,
                                       "contribution": (raw - seed[i]) // MASS_PER_CENT})
         part["breakdown"].sort(key=lambda b: (-b["contribution"], -b["seed_cents"], b["root"]))
@@ -1287,6 +1333,191 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
             break
         summary["largest_moves"].append(m)
     return parts, summary, sorted(extra)
+
+
+def _score(R: int, P: int) -> int:
+    """(R − P) / (R + P) in ppm, P ≥ 1."""
+    if R >= P:
+        return mul_div(R - P, PPM, R + P)
+    return -mul_div(P - R, PPM, R + P)
+
+
+def _lower_median(xs: list) -> int:
+    if not xs:
+        return 0
+    xs = sorted(xs)
+    return xs[(len(xs) - 1) // 2]
+
+
+def run_stakes(st, as_of, ws, nodes, seed, pen, acts, indep):
+    """Rule 3: endorsements are stakes. Each act commits stake_ppm × weight ×
+    decay of its author's standing (scaled down together above
+    stake_budget_ppm). A vouch, an accepted work item and a verified witness
+    move it to the target; a vote on a post, a witness verdict on a claim and
+    a vouch or accept on its target are positions. A post opens at its
+    author's median reception (the median over all posts until the author
+    has prior_min_posts with any), priced at the larger of that and the stake
+    already on it; a claim opens at nothing; an agent at its trajectory. R is
+    the stake of independent accounts (another root, no transfer within
+    funded_days): on the post, on the claim's side less against it, moved to
+    the agent after the act. r = (R − P) / (R + P); within a pot (an author's
+    posts, a claim, an agent) losers pay up to |r|/2 of their stake to
+    winners, pro rata; a penalised agent's vouchers score −1 and lose half
+    their stake times the penalty. Standing is the fixed point of seed +
+    moved in − moved out + settled, iterated from the seed."""
+    n = len(nodes)
+    index = {a: i for i, a in enumerate(nodes)}
+    acts = [a for a in acts if a[0] in index and a[1] in index and a[6] > 0]
+    acts.sort(key=lambda a: (a[4], a[0], a[1], a[2], a[3], a[5]))
+    m = len(acts)
+    src = [index[a[0]] for a in acts]
+    dst = [index[a[1]] for a in acts]
+    transfer = [False] * m
+    obj_of = [""] * m
+    load = [0] * n
+    objects, transfers_in, post_author = {}, {}, {}
+    positions = 0
+    for x, (s_, d_, kind, item, at, against, ld) in enumerate(acts):
+        if kind in ("vouch", "work_accept"):
+            transfer[x], obj_of[x] = True, "g\x00" + d_
+        elif kind == "witness" and not against:
+            transfer[x] = True
+            if item != "":
+                obj_of[x] = "c\x00" + d_ + "\x00" + item
+        elif kind == "witness":
+            if item != "":
+                obj_of[x] = "c\x00" + d_ + "\x00" + item
+        elif kind == "vote" and item != "":
+            obj_of[x] = "p\x00" + d_ + "\x00" + item
+            post_author[obj_of[x]] = dst[x]
+        if transfer[x]:
+            load[src[x]] += ld
+            transfers_in.setdefault(dst[x], []).append(x)
+        if obj_of[x][:1] in ("p", "c"):
+            load[src[x]] += ld
+        if obj_of[x] != "":
+            objects.setdefault(obj_of[x], []).append(x)
+            positions += 1
+    scale = []
+    for i in range(n):
+        share = mul_div(st["stake_ppm"], load[i], PPM)
+        scale.append(mul_div(st["stake_budget_ppm"], PPM, share) if share > st["stake_budget_ppm"] else PPM)
+    keys = sorted(objects)
+    agents = sorted(transfers_in)
+    eff = [mul_div(s, PPM - pen[i], PPM) for i, s in enumerate(seed)]
+    S = sum(eff)
+    window = max(1, as_of - ws)
+    c = list(seed)
+    raw = [0] * n
+    judged = [0] * n
+    sig = [0] * m
+    r = [0] * m
+    on = [False] * m
+    for _ in range(st["iterations"]):
+        nxt = list(seed)
+        judged = [0] * n
+        for x, a in enumerate(acts):
+            sig[x] = mul_div(mul_div(c[src[x]], st["stake_ppm"], PPM), mul_div(a[6], scale[src[x]], PPM), PPM)
+            if transfer[x]:
+                nxt[src[x]] -= sig[x]
+                nxt[dst[x]] += sig[x]
+        reception, everything = {}, []
+        for k in keys:
+            if k[0] != "p":
+                continue
+            mass = sum(sig[x] for x in objects[k])
+            if mass > 0:
+                reception.setdefault(post_author[k], []).append(mass)
+                everything.append(mass)
+        unknown = _lower_median(everything)
+        totals = [t for t in (sum(sig[y] for y in transfers_in[d]) for d in agents) if t > 0]
+        agent_median = _lower_median(totals)
+        for k in keys:
+            xs = objects[k]
+            if k[0] == "p":
+                rec = reception.get(post_author[k], [])
+                p0 = _lower_median(rec) if len(rec) >= st["prior_min_posts"] else unknown
+                for x in xs:
+                    R = B = 0
+                    for y in xs:
+                        if acts[y][4] < acts[x][4]:
+                            B += sig[y]
+                        if y != x and indep(acts[x][0], acts[y][0]):
+                            R += sig[y]
+                    r[x], on[x] = _score(R, max(p0, B, 1)), True
+            elif k[0] == "c":
+                for x in xs:
+                    same = other = B = 0
+                    for y in xs:
+                        if acts[y][5] == acts[x][5] and acts[y][4] < acts[x][4]:
+                            B += sig[y]
+                        if y == x or not indep(acts[x][0], acts[y][0]):
+                            continue
+                        if acts[y][5] == acts[x][5]:
+                            same += sig[y]
+                        else:
+                            other += sig[y]
+                    on[x] = same + other > 0
+                    r[x] = _score(max(0, same - other), max(B, 1))
+            else:
+                for x in xs:
+                    R = before = 0
+                    for y in transfers_in[dst[x]]:
+                        if acts[y][4] < acts[x][4]:
+                            before += sig[y]
+                        elif acts[y][4] > acts[x][4] and indep(acts[x][0], acts[y][0]):
+                            R += sig[y]
+                    left = max(0, as_of - acts[x][4])
+                    P = mul_div(before, left, max(1, acts[x][4] - ws)) if before > 0 else mul_div(agent_median, left, window)
+                    r[x], on[x] = _score(R, max(P, 1)), True
+                    if pen[dst[x]] > 0:
+                        r[x] = -PPM
+        pots = {}
+        for k in keys:
+            pot = "a\x00" + acts[objects[k][0]][1] if k[0] == "p" else k
+            pots.setdefault(pot, []).extend(objects[k])
+        back = 0
+        for pk in sorted(pots):
+            xs = pots[pk]
+            L = sum(mul_div(sig[x], -r[x], 2 * PPM) for x in xs if on[x] and r[x] < 0)
+            G = sum(mul_div(sig[x], r[x], 2 * PPM) for x in xs if on[x] and r[x] > 0)
+            paid = min(L, G)
+            taken = given = 0
+            if paid > 0:
+                for x in xs:
+                    if on[x] and r[x] < 0:
+                        t = mul_div(mul_div(sig[x], -r[x], 2 * PPM), paid, L)
+                        taken += t
+                        judged[src[x]] -= t
+                for x in xs:
+                    if on[x] and r[x] > 0:
+                        g = mul_div(mul_div(sig[x], r[x], 2 * PPM), taken, G)
+                        given += g
+                        judged[src[x]] += g
+            back += taken - given
+            if pk[0] == "g":
+                for x in xs:
+                    burn = mul_div(sig[x], pen[dst[x]], 2 * PPM)
+                    if burn > 0:
+                        judged[src[x]] -= burn
+                        back += burn
+        deficit = 0
+        removed = [0] * n
+        for i in range(n):
+            nxt[i] += judged[i]
+            removed[i] = mul_div(max(0, nxt[i]), pen[i], PPM)
+            nxt[i] -= removed[i]
+            back += removed[i]
+            if nxt[i] < 0:
+                deficit -= nxt[i]
+                nxt[i] = 0
+        back = max(0, back - deficit)
+        for i in range(n):
+            if S > 0 and eff[i] > 0:
+                nxt[i] += mul_div(back, eff[i], S)
+            raw[i] = nxt[i] + removed[i]
+        c = nxt
+    return {"c": c, "raw": raw, "judged": judged, "positions": positions}
 
 
 def sponsor(p, snap, as_of, service, first_seen, reset, index, own_avg, root_of, pair_sum, flow_total, inflow):

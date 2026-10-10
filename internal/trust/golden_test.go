@@ -240,17 +240,19 @@ func TestGoldenFixture(t *testing.T) {
 	testGolden(t, "golden_standing_v2", goldenStandingV2Snapshot)
 	testGolden(t, "golden_standing_v3", goldenStandingV3Snapshot)
 	testGolden(t, "golden_standing_v4", goldenStandingV4Snapshot)
+	testGolden(t, "golden_standing_v5", goldenStandingV5Snapshot)
 	testGolden(t, "golden_standing", goldenStandingSnapshot)
 }
 
-// goldenStandingSnapshot is the standing fixture of the current version (5,
-// the assessed roots, C144): version 4's inputs under DefaultParams, plus
+// goldenStandingV5Snapshot is the standing fixture of parameter version 5
+// (the assessed roots, C144): version 4's inputs under version 5, plus
 // wallet, github and pow proofs: counted, capped, saturating, stale,
 // unverified, a record without a root, and one wallet root claimed by two
-// accounts (its seed is split between them, never multiplied).
-func goldenStandingSnapshot() Snapshot {
+// accounts (its seed is split between them, never multiplied). Its output
+// is frozen: version 5 runs recompute byte for byte.
+func goldenStandingV5Snapshot() Snapshot {
 	snap := goldenStandingV4Snapshot()
-	p := DefaultParams()
+	p := paramsV5()
 	p.ServiceAccounts = snap.Params.ServiceAccounts
 	snap.Params = p
 	alice, bob, carol, dave := acct("alice"), acct("bob"), acct("carol"), acct("dave")
@@ -266,6 +268,55 @@ func goldenStandingSnapshot() Snapshot {
 		Record{Type: "proof", Account: dave, Kind: "wallet", LinkValue: "0x00000000000000000000000000000000000000cc", State: "verified", CreatedAt: testAsOf - day, CheckedAt: fresh, Assessed: 10},
 		Record{Type: "proof", Account: bob, Kind: "pow", LinkValue: "sha256", State: "verified", CreatedAt: testAsOf - 20*day, CheckedAt: fresh, Root: "pow:" + bob, Assessed: 2158000 * 25},
 		Record{Type: "proof", Account: dave, Kind: "pow", LinkValue: "sha256", State: "verified", CreatedAt: testAsOf - 20*day, CheckedAt: fresh, Root: "pow:" + dave, Assessed: 1 << 40})
+	return snap
+}
+
+// goldenStandingSnapshot is the standing fixture of the current version (6,
+// endorsements as stakes): version 5's inputs under DefaultParams, plus what
+// rule 3 reads: witness verdicts on claims (verified and failed, from
+// independent and linked witnesses, and one nobody else checked), early and
+// late votes on posts, a vouch for the penalised account, an accepted work
+// item, and a transfer that links two voters.
+func goldenStandingSnapshot() Snapshot {
+	snap := goldenStandingV5Snapshot()
+	p := DefaultParams()
+	p.ServiceAccounts = snap.Params.ServiceAccounts
+	snap.Params = p
+	alice, bob, carol, dave := acct("alice"), acct("bob"), acct("carol"), acct("dave")
+	seeds := p.Seeds
+	snap.Acts = append(snap.Acts,
+		Record{Type: "edge", Kind: "witness", ID: "ed25519:k1", From: seeds[0], To: alice, Value: 1, CreatedAt: testAsOf - 6*day},
+		Record{Type: "edge", Kind: "witness", ID: "ed25519:k1", From: seeds[1], To: alice, Value: 1, CreatedAt: testAsOf - 5*day},
+		Record{Type: "edge", Kind: "witness", ID: "ed25519:k1", From: bob, To: alice, Value: -1, CreatedAt: testAsOf - 4*day},
+		Record{Type: "edge", Kind: "witness", ID: "domain:bad.example", From: carol, To: bob, Value: 1, CreatedAt: testAsOf - 6*day},
+		Record{Type: "edge", Kind: "witness", ID: "domain:bad.example", From: seeds[2], To: bob, Value: -1, CreatedAt: testAsOf - 3*day},
+		Record{Type: "edge", Kind: "witness", ID: "domain:bad.example", From: seeds[3], To: bob, Value: -1, CreatedAt: testAsOf - 2*day},
+		Record{Type: "edge", Kind: "witness", ID: "url:lonely", From: dave, To: carol, Value: 1, CreatedAt: testAsOf - 2*day},
+		Record{Type: "edge", Kind: "work_accept", ID: "w9", From: seeds[4], To: dave, CreatedAt: testAsOf - 7*day})
+	snap.Transfers = append(snap.Transfers, Record{Type: "transfer", From: seeds[1], To: seeds[2], Amount: 100000, CreatedAt: testAsOf - 3*day})
+	seq := int64(0)
+	for _, r := range snap.Endorsements {
+		seq = max(seq, r.Seq)
+	}
+	end := func(kind, from, to, msg string, minutesAgo int64) {
+		seq++
+		snap.Endorsements = append(snap.Endorsements, Record{Type: "endorsement", Seq: seq, Kind: kind, Voter: from, Target: to, MessageID: msg,
+			Value: 1, CreatedAt: testAsOf - minutesAgo*60})
+	}
+	var bobPost string
+	for _, r := range snap.Posts {
+		if r.Account == bob && r.ReplyTo == "" {
+			bobPost = r.ID
+			break
+		}
+	}
+	end("vote", carol, bob, bobPost, 3000) // early
+	for i, s := range seeds[:6] {          // later, independent
+		end("vote", s, bob, bobPost, int64(2000-100*i))
+	}
+	for _, r := range snap.Penalties { // a vouch for the penalised account
+		end("vouch", alice, r.Account, "", 5000)
+	}
 	return snap
 }
 
@@ -358,11 +409,19 @@ func paramsV3() Params {
 	return p
 }
 
+// paramsV5 is trust parameter version 5: the assessed roots' pricing rows
+// (C144), version 6 with version 5's standing section.
+func paramsV5() Params {
+	p := DefaultParams()
+	p.Version, p.Standing = RootsVersion, StandingV5()
+	return p
+}
+
 // paramsV4 is trust parameter version 4: absolute edge weights (C151),
 // version 5 without the assessed roots' pricing rows.
 func paramsV4() Params {
 	p := DefaultParams()
-	p.Version = StandingWeightsVersion
+	p.Version, p.Standing = StandingWeightsVersion, StandingV4()
 	for _, kind := range AssessedKinds() {
 		delete(p.Proofs, kind)
 	}

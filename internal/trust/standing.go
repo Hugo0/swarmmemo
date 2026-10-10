@@ -67,6 +67,12 @@ import (
 // not, and what recipients gain is taken from every seed in proportion. So
 // standing is reported as c itself, not rescaled.
 //
+// Rule 3 (version 6) replaces the propagation with stakes (stakes.go): a
+// vouch, a work.accept and a verified witness move a share of the
+// endorser's own standing to the target, and votes, witness verdicts and
+// vouches are positions settled by later independent endorsement, losers
+// paying winners. Down votes only rank.
+//
 // A liability penalty (RFC0012 trust_evidence: a public, logged finding the
 // arbiter can lift) is an oppose from the arbiter: the penalised account's
 // outflow and its standing are scaled by (1 − fraction).
@@ -128,6 +134,26 @@ type StandingParams struct {
 	EdgeWeights map[string]int64 `json:"edge_weights,omitempty"`
 	// VouchWeightMax caps the weight a vouch's author may choose.
 	VouchWeightMax int64 `json:"vouch_weight_max,omitempty"`
+
+	// From parameter version 6 (rule 3, endorsements are stakes, C152).
+	// Absent in versions 2 to 4. Rule 3 replaces the propagation (pass_ppm
+	// and keep_weight are not read; iterations is the number of settlement
+	// steps): standing is the seed, plus what endorsers moved to the account,
+	// less what it moved to others, plus what its judgement earned.
+	//
+	// StakePPM is the share of the endorser's own standing one act of weight
+	// 1 commits (edge_weights scale it): a vouch, an accepted work item and a
+	// verified witness move it to their target; a vote, a witness verdict on
+	// a claim and the vouch itself are positions settled by later
+	// independent endorsement.
+	StakePPM int64 `json:"stake_ppm,omitempty"`
+	// StakeBudgetPPM caps what an account commits in all, as a share of its
+	// standing (its acts are scaled down together above it).
+	StakeBudgetPPM int64 `json:"stake_budget_ppm,omitempty"`
+	// PriorMinPosts is how many posts with independent endorsement an author
+	// needs before its own median sets a post's opening price; below it the
+	// median over all such posts does.
+	PriorMinPosts int64 `json:"prior_min_posts,omitempty"`
 }
 
 // EdgeKinds are the kinds edge_weights prices (rule 2).
@@ -145,18 +171,40 @@ const StandingFixVersion = 3
 // weights and the keep weight (rule 2; C151).
 const StandingWeightsVersion = 4
 
+// StandingStakesVersion is the parameter version in which endorsements are
+// stakes settled by independent confirmation (rule 3; C152).
+const StandingStakesVersion = 6
+
 // Standing modes.
 const (
 	StandingShadow = "shadow"
 	StandingActive = "active"
 )
 
-// DefaultStanding is the standing section of parameter version 4, in
-// shadow: version 3's (StandingV3) with absolute weights (rule 2). K = 100
-// and a vote weighs 1, so one vote carries 1/101 of the voter's pass; a
-// vouch weighs 10 by default (about ten votes), its author may choose 1 to
-// 50; work.accept and a verified witness weigh 10, a down vote 1.
+// DefaultStanding is the standing section of parameter version 6, in
+// shadow: version 5's (StandingV5) under rule 3. One weight unit commits
+// 0.25% of the endorser's standing (a vote 0.25%, a default vouch 2.5%, a
+// vouch at 50 12.5%), at most half of it in all; an author's own median
+// opens its posts' price from its third post with independent endorsement.
 func DefaultStanding() *StandingParams {
+	st := StandingV5()
+	st.Rule = 3
+	st.StakePPM = 2500
+	st.StakeBudgetPPM = 500000
+	st.PriorMinPosts = 3
+	return st
+}
+
+// StandingV5 is the standing section of parameter version 5, which only
+// added the assessed roots' pricing rows (roots.go): version 4's.
+func StandingV5() *StandingParams { return StandingV4() }
+
+// StandingV4 is the standing section of parameter version 4: version 3's
+// (StandingV3) with absolute weights (rule 2). K = 100 and a vote weighs 1,
+// so one vote carries 1/101 of the voter's pass; a vouch weighs 10 by
+// default (about ten votes), its author may choose 1 to 50; work.accept and
+// a verified witness weigh 10, a down vote 1.
+func StandingV4() *StandingParams {
 	st := StandingV3()
 	st.Rule = 2
 	st.KeepWeight = 100
@@ -211,7 +259,7 @@ func (st *StandingParams) validate(in func(string, int64, int64, int64), check f
 	in("standing.theta2_cents", st.Theta2Cents, 1, st.Theta1Cents)
 	in("standing.v0_ppm", st.V0PPM, 0, 1e6)
 	in("standing.c_ref_cents", st.CRefCents, 1, 1e9)
-	in("standing.rule", st.Rule, 0, 2)
+	in("standing.rule", st.Rule, 0, 3)
 	in("standing.v_floor_cents", st.VFloorCents, 0, 1e9)
 	in("standing.spend_cap_cents", st.SpendCapCents, 0, 1e9)
 	in("standing.funded_days", st.FundedDays, 0, 365)
@@ -230,6 +278,13 @@ func (st *StandingParams) validate(in func(string, int64, int64, int64), check f
 		in("standing.edge_weights."+k, w, 0, 1e4)
 	}
 	check(st.EdgeWeights["vouch"] <= st.VouchWeightMax, "standing.edge_weights.vouch must be at most vouch_weight_max")
+	if st.Rule < 3 {
+		check(st.StakePPM == 0 && st.StakeBudgetPPM == 0 && st.PriorMinPosts == 0, "standing.stake_ppm, stake_budget_ppm and prior_min_posts need rule 3")
+		return
+	}
+	in("standing.stake_ppm", st.StakePPM, 1, 1e5)
+	in("standing.stake_budget_ppm", st.StakeBudgetPPM, 1, 1e6)
+	in("standing.prior_min_posts", st.PriorMinPosts, 1, 1000)
 }
 
 // actWeight is one act's weight under rule 2: the kind's, or for a vouch the
@@ -528,9 +583,9 @@ func computeStanding(in standingInput) standingResult {
 	// either funded the other (a transfer or a bounty reward) within
 	// funded_days.
 	var selfDealt func(r Record) bool
+	funded := map[[2]string]bool{}
 	if st.Rule >= 1 {
 		inputs["spend_self_dealt"] = 0
-		funded := map[[2]string]bool{}
 		from := in.asOf - st.FundedDays*day
 		for _, r := range in.snap.Transfers {
 			if r.CreatedAt >= from && r.CreatedAt < in.asOf && r.From != "" && r.To != "" && r.From != r.To && r.Amount > 0 {
@@ -579,7 +634,8 @@ func computeStanding(in standingInput) standingResult {
 		src, dst, kind string
 		at             int64
 		oppose         bool
-		weight         int64 // a vouch's chosen weight (rule 2)
+		weight         int64  // a vouch's chosen weight (rule 2)
+		item           string // rule 3: the voted message, the work item or the witnessed claim
 	}
 	var acts []act
 	for _, r := range in.current {
@@ -588,16 +644,21 @@ func computeStanding(in standingInput) standingResult {
 		}
 		switch {
 		case (r.Kind == "vote" || r.Kind == "vouch") && r.Value == 1:
-			acts = append(acts, act{r.Voter, r.Target, r.Kind, r.CreatedAt, false, r.Weight})
+			acts = append(acts, act{r.Voter, r.Target, r.Kind, r.CreatedAt, false, r.Weight, r.MessageID})
 		case r.Kind == "vote" && r.Value == -1:
-			acts = append(acts, act{r.Voter, r.Target, "down_vote", r.CreatedAt, true, 0})
+			acts = append(acts, act{r.Voter, r.Target, "down_vote", r.CreatedAt, true, 0, r.MessageID})
 		}
 	}
 	for _, r := range sortRecords(in.snap.Acts) {
 		if r.CreatedAt >= in.asOf || r.CreatedAt < ws || (r.Kind != "work_accept" && r.Kind != "witness") {
 			continue
 		}
-		acts = append(acts, act{r.From, r.To, r.Kind, r.CreatedAt, false, 0})
+		// A failed witness verdict (value -1) is read from rule 3 only: a
+		// position against the witnessed claim, no edge.
+		if r.Value < 0 && (st.Rule < 3 || r.Kind != "witness") {
+			continue
+		}
+		acts = append(acts, act{r.From, r.To, r.Kind, r.CreatedAt, r.Value < 0, 0, r.ID})
 	}
 	type edgeKey struct {
 		src, dst string
@@ -610,6 +671,10 @@ func computeStanding(in standingInput) standingResult {
 	}
 	pairSum := map[edgeKey]int64{}
 	kindSum, kindWeight := map[kindKey]int64{}, map[kindKey]int64{}
+	var staked []stakeAct
+	if st.Rule >= 3 {
+		inputs["witness_failed"] = 0
+	}
 	for _, c := range acts {
 		if c.src == "" || c.dst == "" || c.src == c.dst || in.service[c.src] || in.service[c.dst] || in.reset[c.src] {
 			continue
@@ -621,7 +686,15 @@ func computeStanding(in standingInput) standingResult {
 		if v <= 0 {
 			continue
 		}
-		inputs[c.kind]++
+		if c.kind == "witness" && c.oppose {
+			inputs["witness_failed"]++
+		} else {
+			inputs[c.kind]++
+		}
+		if st.Rule >= 3 {
+			staked = append(staked, stakeAct{src: c.src, dst: c.dst, kind: c.kind, item: c.item, at: c.at, against: c.oppose,
+				load: st.actWeight(c.kind, c.weight) * v})
+		}
 		if st.Rule >= 2 {
 			k := kindKey{edgeKey{c.src, c.dst, c.oppose}, c.kind}
 			kindSum[k] += v
@@ -699,6 +772,13 @@ func computeStanding(in standingInput) standingResult {
 		pen[i] = min(1e6, in.penalty[a])
 	}
 
+	var stakeOut stakeResult
+	if st.Rule >= 3 {
+		stakeOut = runStakes(st, in.asOf, ws, nodes, seed, pen, staked, func(a, b string) bool {
+			return a != b && in.rootOf(a) != in.rootOf(b) && !funded[[2]string{a, b}]
+		})
+	}
+
 	// Personalized PageRank from the seed mass, in integers. Each step a
 	// node restarts with (1 − pass) of its seed and passes pass of what it
 	// holds along its out-edges; a node with no out-edges keeps it (rule 0)
@@ -713,7 +793,7 @@ func computeStanding(in standingInput) standingResult {
 		restart[i] = seed[i] - mulDiv(seed[i], st.PassPPM, 1e6)
 	}
 	opposed := make([]int64, n)
-	for it := int64(0); it < st.Iterations; it++ {
+	for it := int64(0); it < st.Iterations && st.Rule < 3; it++ {
 		next := append([]int64(nil), restart...)
 		for i := range opposed {
 			opposed[i] = 0
@@ -800,8 +880,14 @@ func computeStanding(in standingInput) standingResult {
 	var extra []string
 	var moves []StandingMove
 	var total int64
+	if st.Rule >= 3 {
+		c = stakeOut.c
+	}
 	for i, a := range nodes {
 		raw, opp := c[i], opposed[i]
+		if st.Rule >= 3 {
+			raw = stakeOut.raw[i] // before the penalty; c[i] is after it
+		}
 		if st.Rule == 1 {
 			// Reported as c / (1 − pass): a node's own seed counts whole
 			// whether or not it passes anything on. (Rule 2 reports c: a
@@ -810,6 +896,9 @@ func computeStanding(in standingInput) standingResult {
 			raw, opp = mulDiv(raw, 1e6, 1e6-st.PassPPM), mulDiv(opp, 1e6, 1e6-st.PassPPM)
 		}
 		cents := mulDiv(max(0, raw-opp), 1e6-pen[i], 1e6) / massPerCent
+		if st.Rule >= 3 {
+			cents = c[i] / massPerCent
+		}
 		part := &StandingPart{Cents: cents, RawCents: raw / massPerCent, OpposedCents: opp / massPerCent, PenaltyPPM: pen[i], SeedCents: seed[i] / massPerCent,
 			ReceivedCents: max(0, raw-seed[i]) / massPerCent, Band: st.Band(cents), VoteWeightPPM: st.VoteWeight(cents), ShareWeightPPM: ShareWeightPPM(cents, p),
 			Breakdown: []StandingRoot{}}
@@ -823,7 +912,19 @@ func computeStanding(in standingInput) standingResult {
 			}
 			part.Breakdown = append(part.Breakdown, StandingRoot{Root: r.root, Kind: r.kind, Source: r.source, State: r.state, SeedCents: r.mass / massPerCent, Contribution: contribution})
 		}
-		if raw > seed[i] {
+		switch {
+		case raw > seed[i] && st.Rule >= 3:
+			// What it holds above its seed: what its judgement earned
+			// (settled stakes), and what endorsers moved to it.
+			above := raw - seed[i]
+			judged := min(above, max(0, stakeOut.judged[i]))
+			if above-judged >= massPerCent {
+				part.Breakdown = append(part.Breakdown, StandingRoot{Root: "endorsements", Kind: "earned", Source: "edges", State: "computed", Contribution: (above - judged) / massPerCent})
+			}
+			if judged >= massPerCent {
+				part.Breakdown = append(part.Breakdown, StandingRoot{Root: "judgement", Kind: "earned", Source: "stakes", State: "computed", Contribution: judged / massPerCent})
+			}
+		case raw > seed[i]:
 			part.Breakdown = append(part.Breakdown, StandingRoot{Root: "endorsements", Kind: "earned", Source: "edges", State: "computed", Contribution: (raw - seed[i]) / massPerCent})
 		}
 		sort.Slice(part.Breakdown, func(x, y int) bool {

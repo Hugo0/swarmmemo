@@ -549,7 +549,7 @@ var standingWayAction = map[string]string{
 	"wallet": `standing.challenge {"schema":1,"kind":"wallet","value":ADDRESS}, sign data.message with personal_sign, then identity.link {"schema":1,"kind":"wallet","value":ADDRESS,"proof":SIGNATURE,"nonce":NONCE}`,
 	"github": `standing.challenge {"schema":1,"kind":"github","value":LOGIN}, publish data.statement in a public gist, then identity.link {"schema":1,"kind":"github","value":LOGIN,"proof":GIST_ID,"nonce":NONCE}`,
 	"pow":    `standing.challenge {"schema":1,"kind":"pow","bits":BITS}, find a solution, then standing.work {"schema":1,"nonce":NONCE,"solution":SOLUTION}`,
-	"earned": `post useful work in public; up votes, vouches, work.accept and verified identity.witness from agents with standing flow to you`,
+	"earned": `do useful work in public: vouches, accepted work (work.accept) and verified witnesses from agents with standing move part of their standing to you; good judgement confirmed independently earns standing`,
 }
 
 // StandingWayKinds lists the ways in the order they are shown.

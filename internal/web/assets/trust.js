@@ -1181,7 +1181,8 @@
   register('vouch', fig => {
     const svg = fig.querySelector('svg'), read = out(fig, 'read');
     const bSell = act(fig, 'sell'), bKeep = act(fig, 'keep');
-    // The illustration's numbers: standing 100 a day; a vouch carries at most
+    // The illustration's numbers (a real vouch stakes less: /trust-model):
+    // standing 100 a day; a vouch carries at most
     // half of it (λ = 0.5); 20% a week that the ring is caught; 30 days lost.
     const A_S = 100, LAMBDA = 0.5, P_DAY = 1 - Math.pow(0.8, 1 / 7), T = 30, DAYS = 90;
     const OFFER = {count: 10, flow: A_S * LAMBDA}, VALUE = {count: 260, flow: A_S * LAMBDA};
@@ -1341,7 +1342,7 @@
         : 'Only your friends endorse your newcomer. That inflow is not independent of you, so you earn nothing.';
       else if (!st.choice) s = st.rules === 'count'
         ? 'The ring offers 10 a day for one vouch. Under counted trust your vouch costs you nothing to give.'
-        : 'The ring offers 50 a day: half your standing, the most your vouch can carry. If the ring is caught, you lose 30 days of standing, 3,000.';
+        : 'The ring offers 50 a day, all your vouch can carry. If the ring is caught, you lose 30 days of standing, 3,000.';
       else if (st.choice === 'keep') s = 'You keep your vouch and your standing.';
       else if (st.rules === 'count') s = 'You earn 10 a day and risk nothing. Your vouch carries 260 a day of standing to the ring, 26 times what it pays you. Everyone who is asked sells.';
       else {

@@ -59,7 +59,7 @@ func TestStandingVoterKeepsStanding(t *testing.T) {
 // capped at vouch_weight_max.
 func TestStandingOneVotePassesLittle(t *testing.T) {
 	received := func(kind string, weight int64) (recipient, voter int64) {
-		st := DefaultStanding()
+		st := StandingV4()
 		st.ArbiterSeedCents = 100000 // resolution: the voter passes 30,000 cents a step
 		b := newBuilder("v", "s2")
 		b.account("v", 100, 10, 0).account("s2", 100, 10, 0).account("r", 30, 3, 0)
@@ -70,7 +70,7 @@ func TestStandingOneVotePassesLittle(t *testing.T) {
 		return standingOf(out, "r").Cents, standingOf(out, "v").Cents
 	}
 	vote, v := received("vote", 0)
-	pass := v * DefaultStanding().PassPPM / 1e6
+	pass := v * StandingV4().PassPPM / 1e6
 	t.Logf("one vote: %d cents of the voter's %d (pass %d)", vote, v, pass)
 	if vote <= 0 || vote*101 > pass+101 || vote*110 < pass {
 		t.Fatalf("one vote carried %d cents of a %d-cent pass", vote, pass)
@@ -130,7 +130,7 @@ func TestStandingRingGainsNothingOverV3(t *testing.T) {
 	}
 	for _, vouch := range []bool{true, false} {
 		s3, r3 := gain(StandingV3(), vouch)
-		s4, r4 := gain(DefaultStanding(), vouch)
+		s4, r4 := gain(StandingV4(), vouch)
 		t.Logf("vouch ring %v: version 3 %d → %d, version 4 %d → %d", vouch, s3, r3, s4, r4)
 		if s3 <= 0 || s4 <= 0 || (r4-s4)*s3 >= (r3-s3)*s4 {
 			t.Fatalf("ring gains more in version 4: v3 %d → %d, v4 %d → %d", s3, r3, s4, r4)

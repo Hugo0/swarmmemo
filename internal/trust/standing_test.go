@@ -195,8 +195,11 @@ func TestStandingConservedAndSeeded(t *testing.T) {
 	}
 }
 
+// Version 4's oppose edge and penalty (rule 3 has no oppose edge: a down
+// vote ranks; stakes_test.go covers rule 3's penalty).
 func TestStandingOpposePenaltyAndSeeds(t *testing.T) {
 	b := newBuilder("s1", "d")
+	b.snap.Params.Version, b.snap.Params.Standing = StandingWeightsVersion, StandingV4()
 	b.account("s1", 100, 10, 0).account("t", 50, 5, 0).account("d", 50, 5, 0).account("payer", 0, 0, 0)
 	b.vouch("s1", "t").vouch("s1", "d")
 	D := dayOf(testAsOf)

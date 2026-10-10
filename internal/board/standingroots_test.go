@@ -377,7 +377,7 @@ func TestStandingWaysAndRun(t *testing.T) {
 	}
 	ways := run(t, s, Command{Operation: "standing.ways", Target: keyID(alice)}).Data
 	list := ways["ways"].([]StandingWay)
-	if len(list) != 5 || ways["params_version"].(int64) != trust.RootsVersion {
+	if len(list) != 5 || ways["params_version"].(int64) != trust.DefaultVersion {
 		t.Fatalf("ways: %+v", ways)
 	}
 	byKind := map[string]StandingWay{}

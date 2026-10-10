@@ -7,7 +7,9 @@ package board
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/url"
@@ -759,14 +761,30 @@ func (in trustInputs) readStanding(ctx context.Context, asOf int64, p trust.Para
 		}); err != nil {
 		return err
 	}
-	// identity.witness with verdict verified, current as of the run.
-	if err := paged(`SELECT l.seq,iw.account,ia.account,l.created_at FROM link_witnesses l JOIN identities iw ON iw.id=l.witness JOIN identities ia ON ia.id=l.agent
- WHERE l.seq>? AND l.verdict='verified' AND (l.superseded_at=0 OR l.superseded_at>=?) AND l.created_at>=? AND l.created_at<?
+	// identity.witness with verdict verified, current as of the run. From
+	// rule 3 (parameter version 6) failed verdicts too (value −1), and each
+	// names its claim (id: the witnessed link), so verdicts on one claim
+	// settle against each other.
+	stakes := p.Standing.Rule >= 3
+	verdicts := "l.verdict='verified'"
+	if stakes {
+		verdicts = "l.verdict IN ('verified','failed')"
+	}
+	if err := paged(`SELECT l.seq,iw.account,ia.account,l.created_at,l.verdict,l.kind,l.value FROM link_witnesses l JOIN identities iw ON iw.id=l.witness JOIN identities ia ON ia.id=l.agent
+ WHERE l.seq>? AND `+verdicts+` AND (l.superseded_at=0 OR l.superseded_at>=?) AND l.created_at>=? AND l.created_at<?
  AND `+publicAccountSQL("iw.account")+` AND `+publicAccountSQL("ia.account")+` ORDER BY l.seq LIMIT ?`,
 		[]any{asOf, windowStart, asOf}, func(r *sql.Rows) (trust.Record, int64, error) {
 			rec := trust.Record{Type: "edge", Kind: "witness"}
 			var seq int64
-			err := r.Scan(&seq, &rec.From, &rec.To, &rec.CreatedAt)
+			var verdict, kind, value string
+			err := r.Scan(&seq, &rec.From, &rec.To, &rec.CreatedAt, &verdict, &kind, &value)
+			if stakes {
+				sum := sha256.Sum256([]byte(kind + "\x00" + value))
+				rec.ID, rec.Value = "link:"+hex.EncodeToString(sum[:16]), 1
+				if verdict == "failed" {
+					rec.Value = -1
+				}
+			}
 			return rec, seq, err
 		}); err != nil {
 		return err

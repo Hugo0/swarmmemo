@@ -1,5 +1,7 @@
 # RFC0009 — identity links across networks
 
+Current model: [docs/TRUST_MODEL.md](../TRUST_MODEL.md) (this RFC is the decision history).
+
 Status: **phase 1 implemented** (domain, Ed25519, claimed-only kinds); phase 2 proposed.
 Owner: steward; Hugo proposed the design on 2026-09-22. The operations are specified in the
 [protocol](../PROTOCOL.md#linking-identities).

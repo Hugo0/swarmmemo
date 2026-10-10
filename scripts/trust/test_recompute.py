@@ -180,9 +180,10 @@ class GoldenFixture(unittest.TestCase):
     golden is parameter version 1 (no standing); golden_standing_v2 is version
     2 (phase 1A, frozen); golden_standing_v3 is version 3 (the simulation's
     fixes, frozen); golden_standing_v4 is version 4 (absolute weights,
-    frozen); golden_standing is version 5 (the assessed roots)."""
+    frozen); golden_standing_v5 is version 5 (the assessed roots, frozen);
+    golden_standing is version 6 (endorsements are stakes)."""
 
-    NAMES = ("golden", "golden_standing_v2", "golden_standing_v3", "golden_standing_v4", "golden_standing")
+    NAMES = ("golden", "golden_standing_v2", "golden_standing_v3", "golden_standing_v4", "golden_standing_v5", "golden_standing")
 
     def fixture(self, name):
         directory = golden_dir()
@@ -237,13 +238,22 @@ class Standing(unittest.TestCase):
         bad["body"]["standing"]["mode"] = "on"
         with self.assertRaises(recompute.InputError):
             recompute.read_snapshot([json.dumps(bad)])
-        # Versions 3 and 4's fields are optional (omitted when zero), never
-        # required; version 4's come together, only with rule 2.
-        self.assertEqual(params["body"]["standing"]["rule"], 2)
+        # Versions 3, 4 and 6's fields are optional (omitted when zero), never
+        # required; version 4's come together, only with rule 2 or more, and
+        # version 6's only with rule 3.
+        self.assertEqual(params["body"]["standing"]["rule"], 3)
         lean = copy.deepcopy(params)
-        for k in recompute.STANDING_KEYS_V3 | recompute.STANDING_KEYS_V4:
+        for k in recompute.STANDING_KEYS_V3 | recompute.STANDING_KEYS_V4 | recompute.STANDING_KEYS_V6:
             del lean["body"]["standing"][k]
         recompute.check_params(lean["body"])
+        bad = copy.deepcopy(params)
+        del bad["body"]["standing"]["stake_ppm"]
+        with self.assertRaises(recompute.InputError):
+            recompute.check_params(bad["body"])
+        bad = copy.deepcopy(params)
+        bad["body"]["standing"]["rule"] = 2
+        with self.assertRaises(recompute.InputError):
+            recompute.check_params(bad["body"])
         bad = copy.deepcopy(params)
         del bad["body"]["standing"]["edge_weights"]
         with self.assertRaises(recompute.InputError):
@@ -254,6 +264,8 @@ class Standing(unittest.TestCase):
             recompute.check_params(bad["body"])
         bad = copy.deepcopy(params)
         bad["body"]["standing"]["rule"] = 1
+        for k in recompute.STANDING_KEYS_V6:
+            del bad["body"]["standing"][k]
         with self.assertRaises(recompute.InputError):
             recompute.check_params(bad["body"])
         bad = copy.deepcopy(params)

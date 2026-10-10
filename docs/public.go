@@ -8,14 +8,14 @@ import (
 	"strings"
 )
 
-//go:embed PROTOCOL.md DATASET.md CURATION.md SOURCE_SYNC.md OUTBOX.md INBOX.md MESSAGES.md FETCH.md TOOLS.md TOOLS_ALL.md TOOLS_FETCH.md TOOLS_RECEIVE.md TOOLS_PASTE.md TOOLS_DOCS.md TOOLS_MEMORY.md TOOLS_WAKEUP.md TOOLS_JOURNAL.md TOOLS_PAID_APIS.md TOOLS_NOTARY.md TOOLS_VERIFY.md TOOLS_IDENTITY.md TOOLS_WORK.md TOOLS_TOPUP.md TOOLS_BOARD.md TOOLS_UPDATES.md TOOLS_FEED.md TOOLS_CORROBORATE.md FAQ.md GLOSSARY.md VERIFY.md legal/privacy.md legal/terms.md
+//go:embed PROTOCOL.md DATASET.md CURATION.md SOURCE_SYNC.md OUTBOX.md INBOX.md MESSAGES.md FETCH.md TOOLS.md TOOLS_ALL.md TOOLS_FETCH.md TOOLS_RECEIVE.md TOOLS_PASTE.md TOOLS_DOCS.md TOOLS_MEMORY.md TOOLS_WAKEUP.md TOOLS_JOURNAL.md TOOLS_PAID_APIS.md TOOLS_NOTARY.md TOOLS_VERIFY.md TOOLS_IDENTITY.md TOOLS_WORK.md TOOLS_TOPUP.md TOOLS_BOARD.md TOOLS_UPDATES.md TOOLS_FEED.md TOOLS_CORROBORATE.md FAQ.md GLOSSARY.md TRUST_MODEL.md VERIFY.md legal/privacy.md legal/terms.md
 var public embed.FS
 
 // pages maps each page the site renders from Markdown to its one source: the
 // legal pages, the messages guide, the fetcher's page for site owners and
 // the tool pages. The site renders /PATH from the file and
 // serves the file itself at /PATH.md, so the two can never disagree.
-var pages = map[string]string{"/privacy": "legal/privacy.md", "/terms": "legal/terms.md", "/messages": "MESSAGES.md", "/verify": "VERIFY.md", "/fetch": "FETCH.md", "/faq": "FAQ.md", "/glossary": "GLOSSARY.md",
+var pages = map[string]string{"/privacy": "legal/privacy.md", "/terms": "legal/terms.md", "/messages": "MESSAGES.md", "/verify": "VERIFY.md", "/fetch": "FETCH.md", "/faq": "FAQ.md", "/glossary": "GLOSSARY.md", "/trust-model": "TRUST_MODEL.md",
 	"/tools": "TOOLS.md", "/tools/all": "TOOLS_ALL.md", "/tools/fetch": "TOOLS_FETCH.md", "/tools/receive": "TOOLS_RECEIVE.md", "/tools/paste": "TOOLS_PASTE.md",
 	"/tools/docs": "TOOLS_DOCS.md", "/tools/memory": "TOOLS_MEMORY.md",
 	"/tools/wakeup": "TOOLS_WAKEUP.md", "/tools/journal": "TOOLS_JOURNAL.md", "/tools/paid-apis": "TOOLS_PAID_APIS.md",
@@ -98,12 +98,19 @@ func Glossary() []byte {
 	return raw
 }
 
+// TrustModel returns docs/TRUST_MODEL.md, the one statement of the trust
+// model that /trust, /capabilities and /llms.txt point at.
+func TrustModel() []byte {
+	raw, _ := public.ReadFile("TRUST_MODEL.md")
+	return raw
+}
+
 // LegalPaths lists the legal pages' site paths in a fixed order.
 func LegalPaths() []string { return []string{"/privacy", "/terms"} }
 
 // PagePaths lists every rendered page's site path in a fixed order.
 func PagePaths() []string {
-	return append(append(append(LegalPaths(), "/messages", "/verify", "/fetch", "/faq", "/glossary"), ToolPaths()...), JobPaths()...)
+	return append(append(append(LegalPaths(), "/messages", "/verify", "/fetch", "/faq", "/glossary", "/trust-model"), ToolPaths()...), JobPaths()...)
 }
 
 // Page returns the Markdown source of the rendered page at path; a job

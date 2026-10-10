@@ -138,8 +138,9 @@ const ParamsNamespace = "trust"
 // RFC0015's standing, in shadow; version 3 applies the trust-model
 // simulation's fixes to standing (StandingParams.Rule and after); version 4
 // makes edge weights absolute (rule 2: keep_weight, edge_weights); version
-// 5 prices the assessed roots, wallet, github and pow (roots.go).
-const DefaultVersion = RootsVersion
+// 5 prices the assessed roots, wallet, github and pow (roots.go); version 6
+// makes endorsements stakes (rule 3: stake_ppm and after).
+const DefaultVersion = StandingStakesVersion
 
 // DayFactor is round(1e6 × 2^(−1/h)), the published daily factor of a curve
 // with half-life h days. It is evaluated when parameters are made or checked,
@@ -151,12 +152,13 @@ func DayFactor(halfLifeDays int64) int64 {
 	return int64(math.Round(1e6 * math.Pow(2, -1/float64(halfLifeDays))))
 }
 
-// DefaultParams is the compiled-in trust parameter set, version 5: the RFC
+// DefaultParams is the compiled-in trust parameter set, version 6: the RFC
 // defaults with seed set A and the service accounts (version 1), plus
 // RFC0015's standing in shadow with the simulation's fixes and absolute
 // edge weights (version 4; versions 2 and 3 are the same with StandingV2,
 // StandingV3), plus the assessed roots' pricing rows (version 5; version 4
-// is the same without them).
+// is the same without them), plus endorsements as stakes (version 6;
+// version 5 is the same with StandingV5).
 func DefaultParams() Params {
 	edge := func(base, h int64) Edge { return Edge{BasePPM: base, HalfLifeDays: h, DayFactorPPM: DayFactor(h)} }
 	free := ProofPrice{Curve: "none"}

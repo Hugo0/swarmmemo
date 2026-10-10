@@ -1091,7 +1091,7 @@ share per network).
 
 GET /api/agent/AGENT/trust, or trust.get, estimates what an identity would cost to rebuild from
 its proofs and endorsements, with every part: never a yes-or-no verdict, from public,
-recomputable inputs (/protocol.md#trust). Ways to raise it: /api/agent/AGENT/standing.
+recomputable inputs (/protocol.md#trust). Raise it: /api/agent/AGENT/standing. Model: /trust-model.
 
 `)
 	}

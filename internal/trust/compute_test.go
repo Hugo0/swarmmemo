@@ -17,8 +17,15 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if p.Version != 5 || len(p.Seeds) != 6 || p.SeedsReason != SeedsAReason || p.Standing == nil || p.Standing.Mode != StandingShadow || p.Standing.Rule != 2 || len(p.Proofs) != 8 {
-		t.Fatalf("version 5 must be version 1 plus standing (rule 2) in shadow plus the assessed rows: %+v", p)
+	if p.Version != 6 || len(p.Seeds) != 6 || p.SeedsReason != SeedsAReason || p.Standing == nil || p.Standing.Mode != StandingShadow || p.Standing.Rule != 3 || len(p.Proofs) != 8 {
+		t.Fatalf("version 6 must be version 1 plus standing (rule 3) in shadow plus the assessed rows: %+v", p)
+	}
+	// Version 5 is byte for byte the body of the C144 release.
+	if sum := sha256.Sum256(paramsV5().Body()); hex.EncodeToString(sum[:]) != "1022db51ae34884066ad1cc5ccbdbd709569ce10699055757579b7a662c0363a" {
+		t.Fatalf("version 5 body changed: %x %s", sum, paramsV5().Body())
+	}
+	if _, err := ParseParams(5, paramsV5().Body()); err != nil {
+		t.Fatalf("version 5 no longer parses: %v", err)
 	}
 	// Version 4 is byte for byte the body of the C151 release.
 	if sum := sha256.Sum256(paramsV4().Body()); hex.EncodeToString(sum[:]) != "d6560eba8a20582d2c4b85ca255c9c302aaee7153db31554108e67710675eb63" {
@@ -49,7 +56,7 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 	if _, err := ParseParams(1, paramsV1().Body()); err != nil {
 		t.Fatalf("version 1 no longer parses: %v", err)
 	}
-	back, err := ParseParams(5, p.Body())
+	back, err := ParseParams(6, p.Body())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,11 +82,18 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 		},
 		"edge kind missing": func(s string) string { return strings.Replace(s, `"witness":10,`, ``, 1) },
 		"keep weight zero":  func(s string) string { return strings.Replace(s, `"keep_weight":100`, `"keep_weight":0`, 1) },
+		"stakes under rule 2": func(s string) string {
+			return strings.Replace(s, `"rule":3`, `"rule":2`, 1)
+		},
 		"weights under rule 1": func(s string) string {
-			return strings.Replace(s, `"rule":2`, `"rule":1`, 1)
+			return strings.Replace(strings.Replace(s, `"rule":3`, `"rule":1`, 1), `"stake_budget_ppm":500000,"stake_ppm":2500,`, ``, 1)
+		},
+		"stake zero": func(s string) string { return strings.Replace(s, `"stake_ppm":2500`, `"stake_ppm":0`, 1) },
+		"budget over 1": func(s string) string {
+			return strings.Replace(s, `"stake_budget_ppm":500000`, `"stake_budget_ppm":2000000`, 1)
 		},
 	} {
-		if _, err := ParseParams(5, []byte(mutate(string(p.Body())))); err == nil {
+		if _, err := ParseParams(6, []byte(mutate(string(p.Body())))); err == nil {
 			t.Errorf("%s accepted", name)
 		}
 	}

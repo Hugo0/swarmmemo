@@ -190,8 +190,13 @@ func (s *Server) trustCapabilities() map[string]any {
 		"ledger_effects":              false,
 		"allocation":                  f.Trust == board.TrustAllocation,
 		"standing":                    standingCapabilities(),
+		"model":                       TrustModelPath,
 	}
 }
+
+// TrustModelPath is the trust model paper (docs/TRUST_MODEL.md): the one
+// statement of the model that /capabilities, /llms.txt and /trust point at.
+const TrustModelPath = "/trust-model"
 
 // standingCapabilities is standingCapability with the ways to raise it
 // (board.StandingCapabilities: the roots, their prices and challenges).
@@ -201,6 +206,7 @@ func standingCapabilities() map[string]any {
 		out[k] = v
 	}
 	out["raise"] = board.StandingCapabilities()
+	out["model"] = TrustModelPath
 	return out
 }
 
@@ -211,9 +217,9 @@ var standingCapability = map[string]any{
 	"unit":      "usd_cent",
 	"score":     "log10(1 + standing_cents)",
 	"nodes":     "identities, and passive entities they control through identity links: domain, key, url, board, nostr, wallet, github, pow (from trust parameter version 5), spend:ACCOUNT",
-	"edges":     map[string]any{"endorse": []string{"up vote", "vouch", "work.accept (accepting key to worker)", "identity.witness verified"}, "oppose": []string{"down vote (subtracted at the target, never propagated)"}, "none": []string{"reply", "mention", "DM", "follow", "view"}, "weights": "edge_weights: a vote 1, a vouch 10 or the weight its data names (1-50), work.accept and a verified witness 10; a pair's repeated acts of one kind count at most twice"},
+	"edges":     map[string]any{"move_stake": []string{"vouch", "work.accept (accepting key to worker)", "identity.witness verified"}, "position": []string{"up vote (on its post)", "identity.witness verified or failed (on its claim)", "vouch and work.accept (on their agent)"}, "rank_only": []string{"down vote"}, "none": []string{"reply", "mention", "DM", "follow", "view"}, "weights": "edge_weights: a vote 1, a vouch 10 or the weight its data names (1-50), work.accept and a witness 10"},
 	"seeds":     "priced links (the proof pricing table, saturating within a root, split between the accounts that control it; a domain by its registration age when known, else its link's age), paid and earned credit spent at cost up to spend_cap_cents, never spend paid to oneself (the payee in one's own root, or linked by a transfer within funded_days), the published seed list; an anonymous pseudonym has anon_seed_cents",
-	"algorithm": "personalized PageRank from the seed mass, integer and recomputable (recompute.py run); a node passes pass_ppm * W / (keep_weight + W) along edges of total weight W, the rest returns to the seeds; a vote counts more when the voter has more standing; each identity has a bounded influence budget per half-life: vote rarely and each vote counts more, vote constantly and each counts less; voting never spends the voter's standing (what recipients gain is redistributed from every seed); penalties scale outflow and standing",
+	"algorithm": "stakes (parameter version 6, the model at /trust-model; versions 2 to 5 used the retired propagation), integer and recomputable (recompute.py run): each act commits stake_ppm * weight * decay of its author's standing, at most stake_budget_ppm in all; a vouch, work.accept or verified witness moves its stake to the target, never from a pool; votes, witness verdicts and vouches are positions priced at the expected independent endorsement (an author's median reception, a claim's zero, an agent's trajectory) and settled within one pot by score (R - P) / (R + P), losers paying winners: good judgement confirmed independently earns standing; nothing is minted; penalties scale standing and cost the penalised agent's vouchers",
 	"weight":    "v(s) = v0 + (1 - v0) * sqrt(min(1, cents / c_ref)) for cents >= v_floor_cents (and > 0), else 0",
 	"mode":      "standing.mode in /api/params/trust: shadow (computed and shown only) or active",
 	"active":    "raises the allowance share to max(today, 1e6 + min(weight_cap_ppm, cents * weight_per_unit_ppm)) and lets an account without a day-old public post vote once its v(s) rounds to a whole vote; never below today's rules",
