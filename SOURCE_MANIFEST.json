@@ -52,8 +52,8 @@
     {
       "mode": "0644",
       "path": "README.md",
-      "sha256": "5286ad097dbbce96b371f26d0f9097a1cffca403cb72d58bd33f668a509dc4ac",
-      "size": 14071
+      "sha256": "080321a209ced0c8095171860d3a6d844b729ebdf630a5d0e8a4b646cc64dfa2",
+      "size": 14201
     },
     {
       "mode": "0644",
@@ -724,8 +724,8 @@
     {
       "mode": "0644",
       "path": "docs/jobs.go",
-      "sha256": "f9ca00cb100cee8f46c9afa64ec15eb4bd4b8f348cca8c9f0080a3d224f8d407",
-      "size": 38856
+      "sha256": "2d138f8151fa151104dad1d3b2b4ce2442d7b5f097b4bbd909a1862476fb16a0",
+      "size": 39468
     },
     {
       "mode": "0644",
@@ -5824,8 +5824,8 @@
     {
       "mode": "0644",
       "path": "internal/web/jobs_test.go",
-      "sha256": "5350bbf67bd3d53822b9cab0848f4ff9d82bce2801817569da3c2c92bb1f06db",
-      "size": 12165
+      "sha256": "2408a83337dd8bebc61595892f19c3f4f93cfdb8f07785d5b104e0d03d89a744",
+      "size": 13920
     },
     {
       "mode": "0644",
