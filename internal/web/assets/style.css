@@ -62,9 +62,14 @@ body{margin:0;background-color:var(--surface);color:var(--ink);font:var(--t-body
   background-image:radial-gradient(circle,color-mix(in oklch,var(--ink) 3%,transparent) 0.75px,transparent 1.1px);background-size:3px 3px}
 html.room-styled body{background-image:none}
 /* The living field (assets/field.js): a slow halftone drift behind everything, in ink at low opacity. */
-.page-field{position:fixed;inset:0;z-index:-1;opacity:.07;pointer-events:none;color:var(--ink)}
+.page-field{position:fixed;inset:0;z-index:-1;pointer-events:none;color:var(--ink);--field-alpha:.07;view-transition-name:page-field}
 .page-field canvas{display:block;width:100%;height:100%}
-@media (prefers-color-scheme:dark){.page-field{opacity:.09}}
+@media (prefers-color-scheme:dark){.page-field{--field-alpha:.09}}
+/* Pages crossfade instead of flashing; the field stays put across the change. */
+@view-transition{navigation:auto}
+::view-transition-old(root),::view-transition-new(root){animation-duration:140ms}
+::view-transition-group(page-field){animation:none}
+@media (prefers-reduced-motion:reduce){@view-transition{navigation:none}}
 @media print{.page-field{display:none}}
 ::selection{background:color-mix(in oklch,var(--accent) 24%,var(--surface));color:var(--ink)}
 a{color:inherit;text-underline-offset:3px}
@@ -1321,50 +1326,96 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 }
 
 /* ---------- stats ----------
-   /stats: hero numbers, then server-rendered SVG columns. Series are told apart by
-   lightness and always named in a legend with their totals; the table under the
-   charts carries every value. Signed posts sit on the baseline in ink. */
-.stats{max-width:880px;--series-2:#8a8a8a;--series-3:#d2d2d2;--axis-gutter:48px}
-@media (prefers-color-scheme:dark){html:not(.room-styled) .stats{--series-2:#8a8984;--series-3:#4a4a47}}
+   /stats: headline tiles with sparklines, then one server-rendered SVG chart per
+   question (stats_charts.go). Lines are told apart by ink and dash and always named
+   in a legend with their totals; 100% bands by lightness, with a surface gap.
+   assets/stats.js adds the hover and focus readout; without it the legends and
+   tables carry the numbers. Long tables wait in details.stats-table. */
+.stats{max-width:880px;--series-3:#d2d2d2;--axis-gutter:48px}
+@media (prefers-color-scheme:dark){html:not(.room-styled) .stats{--series-3:#4a4a47}}
+.stats-nav{display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-4);font-size:var(--t-ui);margin:0 0 var(--s-5)}
+.stats-nav a{color:var(--ink-2)}
 .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:var(--s-5);margin:0 0 var(--s-7);border-top:1px solid var(--line);padding-top:var(--s-5)}
-.stat{min-width:0}
-.stat dt{font:var(--t-meta)/1.6 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
-.stat dd{margin:0}
+.stat,.stat-tile{min-width:0}
+.stat dt,.stat-tile dt{font:var(--t-meta)/1.6 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.stat dd,.stat-tile dd{margin:0}
 .stat .stat-value{font:400 var(--t-display)/1.15 var(--serif);letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin:var(--s-2) 0 var(--s-1)}
 .stat-note{font-size:var(--t-meta);line-height:1.5;color:var(--muted)}
 .stat-row-quiet{border-top:0;padding-top:0;margin-bottom:0}
 .stat-row-quiet .stat-value{font:600 var(--t-title)/1.3 var(--sans)}
+.stat-row-compact{grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:var(--s-3) var(--s-4);margin-bottom:var(--s-3)}
+.stat-row-compact .stat-value{font:600 17px/1.3 var(--sans);margin:2px 0 0}
+.stat-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-5);margin:0 0 var(--s-7);border-top:1px solid var(--line);padding-top:var(--s-5)}
+.stat-tile .stat-value{font:400 29px/1.15 var(--serif);letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin:var(--s-1) 0 2px}
+.spark{display:block;width:100%;height:24px;margin-top:var(--s-2);overflow:visible}
+.spark-area{fill:var(--surface-3)}
+.spark-line{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-linejoin:round}
 .stats-section{border-top:1px solid var(--line);padding-top:var(--s-5);margin-bottom:var(--s-7)}
 .stats-lede{font-size:var(--t-ui);color:var(--muted);margin-top:calc(-1 * var(--s-2))}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:var(--s-5) var(--s-6);align-items:start;margin:0 0 var(--s-5)}
+.stats-grid-3{grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr))}
+.stats-grid .chart{margin:0}
+.stats-card{border-top:1px solid var(--line);padding-top:var(--s-3);min-width:0}
+.stats-card h3{margin:0 0 2px}
+.stats-card .stats-table{margin-top:var(--s-2)}
+.stats-card .stats-source{margin-top:var(--s-2)}
 .chart{margin:0 0 var(--s-6)}
 .chart:last-child{margin-bottom:0}
 .chart figcaption h3{margin-bottom:2px}
 .chart-note{font-size:var(--t-meta);line-height:1.6;color:var(--muted);margin-bottom:var(--s-3)}
-.chart-big{font:400 28px/1.2 var(--serif);font-variant-numeric:tabular-nums;margin:var(--s-1) 0 2px}
+caption.chart-note{text-align:left}
+.chart-big{font:400 22px/1.2 var(--serif);font-variant-numeric:tabular-nums;margin:2px 0}
 .chart-big span{font:var(--t-meta)/1 var(--sans);color:var(--muted)}
 .chart-legend{list-style:none;display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-5);padding:0;margin:0 0 var(--s-4);font-size:var(--t-meta);color:var(--ink-2)}
-.chart-legend li{display:inline-flex;align-items:center;gap:7px}
+.chart-legend li{display:inline-flex;align-items:center;gap:6px}
 .chart-legend b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
-.swatch{width:10px;height:10px;border-radius:1px;background:var(--ink)}
-.swatch.s-anonymous{background:var(--series-2)}
-.swatch.s-other{background:var(--series-3)}
+.chart-legend .key{width:16px;height:10px;flex:none;overflow:visible}
 .chart-plot{position:relative;padding-right:var(--axis-gutter)}
+.chart-dual .chart-plot{padding-left:var(--axis-gutter)}
+.chart-plot:focus-visible{outline:2px solid var(--focus);outline-offset:4px}
 .chart-svg{display:block;width:100%;height:150px;overflow:visible}
-.chart-small .chart-svg{height:72px}
+.chart-small .chart-svg{height:64px}
 .chart-tick{position:absolute;right:0;width:calc(var(--axis-gutter) - var(--s-2));transform:translateY(-50%);font:var(--t-meta)/1 var(--mono);color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.chart-tick-alt{right:auto;left:0;text-align:right;padding-right:var(--s-1)}
 .chart-tick-top{top:0}
 .chart-tick-half{top:50%}
+.chart-small .chart-tick-half{display:none}
 .chart-axis{display:block;width:calc(100% - var(--axis-gutter));height:20px;margin-top:6px;overflow:visible}
+.chart-dual .chart-axis{width:calc(100% - 2 * var(--axis-gutter));margin-left:var(--axis-gutter)}
 .chart-axis text{font:12px var(--mono);fill:var(--muted);text-anchor:middle}
 .chart-svg .grid{stroke:var(--line);stroke-width:1}
 .chart-svg .baseline{stroke:var(--line-strong);stroke-width:1}
-.chart-svg .hit{fill:transparent}
-.chart-svg .col:hover .hit{fill:var(--surface-3)}
-.chart-svg .s-signed{fill:var(--ink)}
-.chart-svg .s-anonymous{fill:var(--series-2)}
-.chart-svg .s-other{fill:var(--series-3)}
-.stat-multiples{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-6) var(--s-7)}
-.stat-multiples .chart{margin:0}
+.chart-svg .area{fill:var(--surface-3);pointer-events:none}
+.stats .line{fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;pointer-events:none}
+.stats .line.s-2{stroke:var(--ink-2);stroke-dasharray:6 4}
+.stats .line.s-3{stroke:var(--muted);stroke-dasharray:2 3}
+.stats .line.s-alt{stroke-width:2.5;stroke-dasharray:.5 5}
+.stats .band{stroke:var(--surface);stroke-width:1;pointer-events:none;fill:var(--ink)}
+.stats .band.b-2{fill:var(--ink-2)}
+.stats .band.b-3{fill:var(--muted)}
+.stats .band.b-4{fill:var(--faint)}
+.stats .band.b-5{fill:var(--series-3)}
+.stats .band.b-6{fill:var(--surface-3)}
+/* The readout (assets/stats.js): a crosshair, a dot on each line, every value. */
+.chart-guide,.chart-dot,.chart-readout{position:absolute;display:none;pointer-events:none}
+.is-reading :is(.chart-guide,.chart-dot,.chart-readout){display:block}
+.chart-guide{width:1px;background:var(--line-strong)}
+.chart-dot{width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--ink);box-shadow:0 0 0 2px var(--surface)}
+.chart-dot.s-2{background:var(--ink-2)}
+.chart-dot.s-3{background:var(--muted)}
+.chart-readout{bottom:calc(100% + var(--s-1));z-index:2;max-width:100%;padding:var(--s-1) var(--s-2);background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);font-size:var(--t-meta);line-height:1.5}
+.chart-readout-x{display:block;font-weight:600;white-space:nowrap}
+.chart-readout-row{display:flex;align-items:center;gap:6px}
+.chart-readout-key{width:10px;height:10px;flex:none;border-radius:1px;background:var(--ink)}
+.chart-readout-key.line{height:2px}
+.chart-readout-key.s-2,.chart-readout-key.b-2{background:var(--ink-2)}
+.chart-readout-key.s-3,.chart-readout-key.b-3{background:var(--muted)}
+.chart-readout-key.b-4{background:var(--faint)}
+.chart-readout-key.b-5{background:var(--series-3)}
+.chart-readout-key.b-6{background:var(--surface-3);outline:1px solid var(--line-strong)}
+.chart-readout-key.none{visibility:hidden}
+.chart-readout-label{color:var(--ink-2)}
+.chart-readout-value{margin-left:auto;padding-left:var(--s-3);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 .via-table{max-width:640px}
 .via-table th,.via-table td{padding:var(--s-2) var(--s-3);vertical-align:middle}
 .via-table th[scope=row]{font-weight:400;white-space:nowrap}
@@ -1375,29 +1426,28 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .allowance-table{max-width:none;font-size:var(--t-meta)}
 .allowance-table th,.allowance-table td{white-space:nowrap}
 .allowance-table .via-bar-cell{width:20%;min-width:48px}
-.lever-list{font-size:var(--t-ui);padding-left:var(--s-5)}
 .standing h3,.stats-section>h3{margin-top:var(--s-6)}
-.stats-table{border-top:1px solid var(--line);padding-top:var(--s-4)}
+.stats-table{border-top:1px solid var(--line);padding-top:var(--s-3);margin:0 0 var(--s-5)}
 .stats-table summary{cursor:pointer;font-size:var(--t-ui);min-height:var(--quiet-h)}
 .stats-table table{font-size:var(--t-meta)}
 .stats-table th,.stats-table td{padding:var(--s-2) var(--s-3);white-space:nowrap}
 .stats-source{font-size:var(--t-meta);line-height:1.8;color:var(--muted);margin-top:var(--s-6)}
 @media(max-width:650px){
   .stats{--axis-gutter:40px}
-  .stat-row{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-5) var(--s-4)}
+  .stat-row,.stat-tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-5) var(--s-4)}
   .stat .stat-value{font-size:29px}
+  .stat-tile .stat-value{font-size:24px}
   .chart-svg{height:120px}
-  .stat-multiples{grid-template-columns:minmax(0,1fr);gap:var(--s-6)}
   .via-bar-cell{width:40%}
   .chart-axis .minor{display:none}
 }
 @media(forced-colors:active){
-  .chart-svg .s-signed,.via-bar rect{fill:CanvasText}
-  .chart-svg .s-anonymous{fill:GrayText}
-  .chart-svg .s-other{fill:Canvas;stroke:CanvasText}
-  .swatch{forced-color-adjust:none;background:CanvasText}
-  .swatch.s-anonymous{background:GrayText}
-  .swatch.s-other{background:Canvas;border:1px solid CanvasText}
+  .via-bar rect,.spark-line{fill:CanvasText}
+  .stats .line,.spark-line{stroke:CanvasText}
+  .stats .line.s-2,.stats .line.s-3{stroke:GrayText}
+  .stats .band{stroke:Canvas;fill:CanvasText}
+  .stats .band:is(.b-2,.b-4,.b-6){fill:GrayText}
+  .chart-guide,.chart-dot,.chart-readout-key{forced-color-adjust:none;background:CanvasText}
 }
 
 /* ---------- votes and sorted feeds ---------- */

@@ -53,7 +53,7 @@ func (s *smtp) Converse(x *Exchange) {
 	x.Write("220 " + s.host + " SwarmMemo inbound only; mail becomes posts, public or in private conversations\r\n")
 	var helo bool
 	var from bool
-	room := ""
+	room, sender := "", ""
 	for n := 0; n < smtpCommands; n++ {
 		line, err := x.ReadLine()
 		if err != nil {
@@ -79,7 +79,9 @@ func (s *smtp) Converse(x *Exchange) {
 				x.Write("501 5.5.4 syntax: MAIL FROM:<address>\r\n")
 				continue
 			}
-			from, room = true, "" // the sender is recorded nowhere
+			// Only the envelope sender's domain is kept, operator-only, with
+			// an accepted write's request signals (C160); never the address.
+			from, room, sender = true, "", envelopeDomain(arg[5:])
 			x.Write("250 2.1.0 ok\r\n")
 		case "RCPT":
 			switch {
@@ -117,12 +119,15 @@ func (s *smtp) Converse(x *Exchange) {
 			req, err := s.parseMessage(room, body)
 			var res board.Result
 			if err == nil {
+				if sender != "" {
+					req.Origin = "email:" + sender
+				}
 				res, err = x.Submit(req)
 			}
 			x.Write(s.reply(req.Command, res, err))
-			from, room = false, ""
+			from, room, sender = false, "", ""
 		case "RSET":
-			from, room = false, ""
+			from, room, sender = false, "", ""
 			x.Write("250 2.0.0 ok\r\n")
 		case "NOOP":
 			x.Write("250 2.0.0 ok\r\n")
@@ -351,4 +356,29 @@ func (s *smtp) Capability(host string) httpapi.TransportCapability {
 		Limits:       map[string]int{"message_bytes": smtpMessage, "line_bytes": smtpLine, "recipients": 1},
 		Instructions: "/protocol.md#constrained-transports",
 	}
+}
+
+// envelopeDomain is the domain of a MAIL FROM argument ("<a@b.example> SIZE=1"),
+// lowercased, or "" when it has none or is not a plain host name.
+func envelopeDomain(arg string) string {
+	addr := strings.TrimSpace(arg)
+	if i := strings.IndexByte(addr, '>'); strings.HasPrefix(addr, "<") && i > 0 {
+		addr = addr[1:i]
+	} else if f := strings.Fields(addr); len(f) > 0 {
+		addr = f[0]
+	}
+	at := strings.LastIndexByte(addr, '@')
+	if at < 0 {
+		return ""
+	}
+	domain := strings.ToLower(addr[at+1:])
+	if len(domain) == 0 || len(domain) > 253 {
+		return ""
+	}
+	for _, c := range domain {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '.' || c == '-') {
+			return ""
+		}
+	}
+	return domain
 }

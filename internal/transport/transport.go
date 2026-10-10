@@ -133,6 +133,10 @@ type Request struct {
 	// Notice is the cleartext label (cleartextNotice) the adapter shows
 	// before the answer, set once the board has answered; empty otherwise.
 	Notice string
+	// Origin is what the wire itself says about where the request came from
+	// (the SMTP envelope sender's domain), kept operator-only with an
+	// accepted write's request signals (board/signals.go, C160).
+	Origin string
 }
 
 // Limits are an adapter's reduced byte limits, advertised in /capabilities.
@@ -800,6 +804,11 @@ func (c *Core) run(ctx context.Context, peer string, req Request) (board.Result,
 	}
 	if req.SignedOnly && (req.Command.PublicKey == "" || req.Command.Signature == "") {
 		return board.Result{}, &board.Error{Status: 401, Code: "signature_required", Message: "This transport accepts signed commands only."}
+	}
+	if req.Origin != "" {
+		sig := board.RequestSignalsFrom(ctx)
+		sig.Origin = req.Origin
+		ctx = board.WithRequestSignals(ctx, sig)
 	}
 	res, err := c.execute(ctx, peer, *req.Command)
 	var be *board.Error

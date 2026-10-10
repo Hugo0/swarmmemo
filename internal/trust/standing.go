@@ -154,6 +154,13 @@ type StandingParams struct {
 	// needs before its own median sets a post's opening price; below it the
 	// median over all such posts does.
 	PriorMinPosts int64 `json:"prior_min_posts,omitempty"`
+	// SignalLinkDays (rule 3, C160; 0 = off, as in version 6) makes two
+	// accounts that wrote from the same network with the same User-Agent
+	// within that many days before the run not independent: neither
+	// confirms the other's stakes. The links come from operator-only request
+	// signals and are not in the published snapshot, so a run with it set
+	// cannot be recomputed from the snapshot alone.
+	SignalLinkDays int64 `json:"signal_link_days,omitempty"`
 }
 
 // EdgeKinds are the kinds edge_weights prices (rule 2).
@@ -279,9 +286,10 @@ func (st *StandingParams) validate(in func(string, int64, int64, int64), check f
 	}
 	check(st.EdgeWeights["vouch"] <= st.VouchWeightMax, "standing.edge_weights.vouch must be at most vouch_weight_max")
 	if st.Rule < 3 {
-		check(st.StakePPM == 0 && st.StakeBudgetPPM == 0 && st.PriorMinPosts == 0, "standing.stake_ppm, stake_budget_ppm and prior_min_posts need rule 3")
+		check(st.StakePPM == 0 && st.StakeBudgetPPM == 0 && st.PriorMinPosts == 0 && st.SignalLinkDays == 0, "standing.stake_ppm, stake_budget_ppm, prior_min_posts and signal_link_days need rule 3")
 		return
 	}
+	in("standing.signal_link_days", st.SignalLinkDays, 0, 90)
 	in("standing.stake_ppm", st.StakePPM, 1, 1e5)
 	in("standing.stake_budget_ppm", st.StakeBudgetPPM, 1, 1e6)
 	in("standing.prior_min_posts", st.PriorMinPosts, 1, 1000)
@@ -774,8 +782,19 @@ func computeStanding(in standingInput) standingResult {
 
 	var stakeOut stakeResult
 	if st.Rule >= 3 {
+		// C160: accounts that wrote from one network with one client are
+		// not independent, while signal_link_days is set.
+		linked := map[[2]string]bool{}
+		if st.SignalLinkDays > 0 {
+			for _, r := range in.snap.SignalLinks {
+				if r.Account != "" && r.LinkAccount != "" && r.Account != r.LinkAccount {
+					linked[[2]string{r.Account, r.LinkAccount}], linked[[2]string{r.LinkAccount, r.Account}] = true, true
+				}
+			}
+			inputs["signal_links"] = int64(len(linked) / 2)
+		}
 		stakeOut = runStakes(st, in.asOf, ws, nodes, seed, pen, staked, func(a, b string) bool {
-			return a != b && in.rootOf(a) != in.rootOf(b) && !funded[[2]string{a, b}]
+			return a != b && in.rootOf(a) != in.rootOf(b) && !funded[[2]string{a, b}] && !linked[[2]string{a, b}]
 		})
 	}
 

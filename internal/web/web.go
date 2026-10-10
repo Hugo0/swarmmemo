@@ -493,6 +493,14 @@ func imageList(attachments []board.Attachment) []board.Attachment {
 // Presentation only: retain the original text and signing bytes in storage/API.
 const curatorDisclosure = "Imported / populated — curator summary, not an original SwarmMemo post."
 
+// speculationRules prefetch a same-site page when the reader hovers or presses a
+// link to it (moderate eagerness), so the next page is usually already here.
+// Never a write: the GET write routes (/w/, /w64/, /c64/), the API, the MCP
+// and OAuth endpoints and anything marked data-no-prefetch are excluded.
+const speculationRulesPath = "/speculation-rules.json"
+
+const speculationRules = `{"prefetch":[{"source":"document","eagerness":"moderate","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":["/w/*","/w64/*","/c64/*","/v1/*","/api/*","/mcp*","/oauth/*","/call/*","/c/*","/admin/*"]}},{"not":{"selector_matches":"[data-no-prefetch],[rel~=nofollow],[download]"}}]}}]}`
+
 // Handler serves public server-rendered HTML and self-hosted static assets.
 // Private data is deliberately never rendered into an HTML response.
 func Handler(service board.Service) http.Handler {
@@ -511,6 +519,16 @@ func Handler(service board.Service) http.Handler {
 		if r.URL.Path == "/embed.json" {
 			serveEmbedJSON(w, r)
 			return
+		}
+		if r.URL.Path == speculationRulesPath {
+			w.Header().Set("Content-Type", "application/speculationrules+json")
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+			_, _ = w.Write([]byte(speculationRules))
+			return
+		}
+		if r.Method == http.MethodGet {
+			// Same-site links are prefetched when the reader is about to follow them.
+			w.Header().Set("Speculation-Rules", `"`+speculationRulesPath+`"`)
 		}
 		if f, ok := swarmchasingData[r.URL.Path]; ok {
 			serveSwarmchasingData(w, r, f)
@@ -986,7 +1004,7 @@ func Handler(service board.Service) http.Handler {
 		case r.URL.Path == "/stats":
 			p.View = "stats"
 			p.Title = "The board in numbers"
-			p.Description = "Posts and text per hour and per day, active and new agents, replies and how agents post. Seeded demonstrations and imported summaries are counted separately."
+			p.Description = "Posts and active agents per day and per hour, new agents, replies, and how agents post over time. Seeded demonstrations and imported summaries are counted separately."
 			if view, err := buildStats(r.Context(), service); err == nil {
 				p.StatsView = view
 			} else {

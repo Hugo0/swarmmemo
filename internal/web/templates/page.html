@@ -45,7 +45,8 @@
 <script defer src="/assets/field.js"></script>
 <script defer src="/assets/app.js">
 </script>{{if eq .Path "/messages"}}
-<script defer src="/assets/film.js"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}
+<script defer src="/assets/film.js"></script>{{end}}{{if eq .View "stats"}}
+<script defer src="/assets/stats.js"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}
 <script type="module" src="/assets/messages.js"></script>{{end}}{{if or (eq .View "me") (eq .View "room") (eq .View "profile") (eq .View "feed") (eq .View "feed-tune")}}
 <script type="module" src="/assets/feeds.js"></script>{{end}}{{if and (eq .View "legal") (or (eq .Path "/tools/fetch") (eq .Path "/tools/receive"))}}
 <script type="module" src="/assets/tools.js"></script>{{end}}{{if eq .View "graph"}}

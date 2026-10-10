@@ -739,6 +739,13 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 		if err := in.readStanding(ctx, asOf, p, exists, paged, emit); err != nil {
 			return err
 		}
+		// C160: shared network and client links, only while the parameter
+		// asks for them (signals.go); never in the published snapshot.
+		if p.Standing.Rule >= 3 && p.Standing.SignalLinkDays > 0 {
+			if err := in.readSignalLinks(ctx, asOf, p.Standing.SignalLinkDays, emit); err != nil {
+				return err
+			}
+		}
 	}
 	return emit(meta)
 }

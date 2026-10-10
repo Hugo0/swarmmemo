@@ -381,22 +381,31 @@ func (s *Server) activityStats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 503, Code: "storage_unavailable", Message: "Activity statistics are temporarily unavailable."})
 		return
 	}
-	buckets := func(in []board.ActivityBucket) []map[string]any {
+	buckets := func(in []board.ActivityBucket, days bool) []map[string]any {
 		out := make([]map[string]any, len(in))
 		for i, b := range in {
 			out[i] = map[string]any{"start": b.Start.Format(time.RFC3339), "posts": b.Posts, "text_bytes": b.Bytes, "native": map[string]int64{"agents": b.Agents, "new_agents": b.NewAgents, "replies": b.Replies, "rooms": b.Rooms}}
+			if days {
+				via := b.Via
+				if via == nil {
+					via = map[string]int64{}
+				}
+				out[i]["native_via"] = via
+				out[i]["entry_reads"] = map[string]int64{"other": b.Reads, "crawler": b.CrawlerReads}
+			}
 		}
 		return out
 	}
 	jsonResponse(w, 200, map[string]any{
 		"ok": true, "timezone": "UTC", "generated_at": a.Generated.Format(time.RFC3339),
-		"hourly": buckets(a.Hours), "daily": buckets(a.Days),
+		"hourly": buckets(a.Hours, false), "daily": buckets(a.Days, true),
 		"native_via": a.Via, "native_agents_7d": a.Agents7, "native_agents_30d": a.Agents30,
 		"database_bytes": a.DatabaseBytes,
 		"notes": []string{
 			"Visible messages in public rooms. Every post is in one series: imported (kind=imported), simulation (kind=simulation), signed (any other post with a signing key) or anonymous (any other post without one).",
 			"native counts cover signed and anonymous posts only; native.agents counts signed accounts. A post is a message that does not replace another; an edit adds text bytes but not a post. The last bucket is still filling.",
-			"Recomputed at most once a minute. Totals are at /api/stats; reads of the agent entry points at /api/stats/daily.",
+			"Each daily bucket also carries native_via, its native posts by the channel they arrived on (\"\" for posts older than provenance), and entry_reads, the reads of the agent entry points split by whether the reader named itself a crawler (crawler) or not (other), as in /api/stats/daily.",
+			"Recomputed at most once a minute. Totals are at /api/stats; every reader metric per day at /api/stats/daily.",
 		},
 	})
 }

@@ -42,6 +42,13 @@ type Snapshot struct {
 	// endorsement records, and credit spent.
 	Acts   []Record // type "edge"
 	Spends []Record // type "spend"
+	// SignalLinks (type "signal_link": account link_account) are pairs of
+	// accounts that wrote from one network with one client (C160), read only
+	// while standing.signal_link_days is set. They come from operator-only
+	// request signals, so Records and WriteJSONL never include them: the
+	// published snapshot leaves them out, and a run that read some says how
+	// many in inputs.standing.inputs.signal_links.
+	SignalLinks []Record
 }
 
 // Meta is the run's frame: its as-of time and the input positions it read.
@@ -186,6 +193,8 @@ func (s *Snapshot) Add(r Record) error {
 		s.Acts = append(s.Acts, r)
 	case "spend":
 		s.Spends = append(s.Spends, r)
+	case "signal_link":
+		s.SignalLinks = append(s.SignalLinks, r)
 	default:
 		return fmt.Errorf("trust input: unknown record type %q", r.Type)
 	}
@@ -193,7 +202,8 @@ func (s *Snapshot) Add(r Record) error {
 }
 
 // Records lists the snapshot as records: meta, params, then each type in
-// canonical order, which is also the order WriteJSONL uses.
+// canonical order, which is also the order WriteJSONL uses. SignalLinks are
+// never listed: they are operator-only (C160).
 func (s *Snapshot) Records() []Record {
 	m := s.Meta
 	out := []Record{

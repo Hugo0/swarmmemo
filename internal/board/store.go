@@ -117,6 +117,8 @@ type Store struct {
 	ledger   ledgerState
 	services servicesState
 	trust    trustState
+	// signals is the write signals' HMAC key (signals.go, C160).
+	signals signalsState
 	// The moderation engine (moderationwire.go); nil while MODERATION is off.
 	moderation moderationState
 	// Arrivals by client (clientstats.go), in memory until written.
@@ -248,7 +250,11 @@ CREATE TABLE IF NOT EXISTS leases (
 // totals and weighs v(standing) in rankings. Existing rows were all cast by
 // seasoned accounts (the old admission rule), so the column defaults to 1. A
 // schema-24 binary would refuse unseasoned votes and rank by the shown count.
-const SchemaVersion = 25
+//
+// 26: the write signals table, the operator-only request signals of every
+// accepted write (C160, signals.go). Additive, but a schema-25 binary would
+// write without recording them and never prune the rows already kept.
+const SchemaVersion = 26
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -385,6 +391,10 @@ func Open(path string, config Config) (*Store, error) {
 		return fail(err)
 	}
 	if err = s.openHosted(); err != nil {
+		return fail(err)
+	}
+	// C160: the write signals' HMAC key (signals.go).
+	if err = s.openSignals(path); err != nil {
 		return fail(err)
 	}
 	if err = s.openTopup(); err != nil {
@@ -906,6 +916,10 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 			if _, err = tx.ExecContext(ctx, "INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES(?,?,?,?,?)", a.requestNamespace, key, digest, string(encoded), now); err != nil {
 				return empty, err
 			}
+		}
+		// C160: the operator-only request signals of this accepted write.
+		if err = s.recordWriteSignal(ctx, tx, cmd, a, source, result, now); err != nil {
+			return empty, err
 		}
 	}
 	// After the receipt is stored, so the note is never part of a retry result.

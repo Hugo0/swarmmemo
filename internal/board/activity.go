@@ -81,6 +81,9 @@ type ActivityBucket struct {
 	// Reads and CrawlerReads are the day's reader counters (ReaderMetrics),
 	// split by whether the reader named itself a crawler. Days only.
 	Reads, CrawlerReads int64
+	// Via counts the bucket's native posts by the channel they arrived on
+	// (Vias names; "" for posts older than provenance). Days only.
+	Via map[string]int64
 }
 
 const (
@@ -157,18 +160,28 @@ func (s *Store) computeActivity(ctx context.Context, now time.Time) (*Activity, 
 			}
 		}
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT e.via, count(*)"+activityFrom+activityPosts+" AND e.created_at>=? GROUP BY e.via", dayStart.Unix())
+	// Channels per day, in the same scan that used to count them over the
+	// whole range; Via is their sum.
+	rows, err := s.db.QueryContext(ctx, "SELECT e.created_at/86400, e.via, count(*)"+activityFrom+activityPosts+" AND e.created_at>=? GROUP BY 1,2", dayStart.Unix())
 	if err != nil {
 		return nil, err
 	}
+	first := dayStart.Unix() / 86400
 	for rows.Next() {
+		var day int64
 		var via string
 		var n int64
-		if err = rows.Scan(&via, &n); err != nil {
+		if err = rows.Scan(&day, &via, &n); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		a.Via[via] += n
+		if i := day - first; i >= 0 && i < int64(len(a.Days)) {
+			if a.Days[i].Via == nil {
+				a.Days[i].Via = map[string]int64{}
+			}
+			a.Days[i].Via[via] += n
+		}
 	}
 	if err = closeRows(rows); err != nil {
 		return nil, err

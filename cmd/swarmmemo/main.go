@@ -109,10 +109,11 @@ func run() error {
 		"receiver",     // receiver.go
 		"inbox",        // inbox.go
 		"paste", "doc", // receiver.go
-		"fetch": // fetch.go
+		"fetch",   // fetch.go
+		"signals": // signals.go
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|mcp-stdio [--profile core|assistant|full]|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|topup check|topup unknown|topup resolve ID credit TXHASH|topup resolve ID fail|moderation|receiver revoke ID REASON|inbox parity [AGENTS [CURSOR_BACK]]|doc hide ID REASON|paste hide ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist]")
+		return errors.New("usage: swarmmemo [serve|mcp-stdio [--profile core|assistant|full]|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|topup check|topup unknown|topup resolve ID credit TXHASH|topup resolve ID fail|moderation|receiver revoke ID REASON|inbox parity [AGENTS [CURSOR_BACK]]|doc hide ID REASON|paste hide ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist|signals account FINGERPRINT|signals message ID|signals cluster [--days N] [--min N]]")
 	}
 }
 
@@ -125,7 +126,7 @@ func operator(command string) error {
 	if err != nil {
 		return err
 	}
-	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), Features: features, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")})
+	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), Features: features, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE")})
 	if err != nil {
 		return err
 	}
@@ -151,12 +152,18 @@ func operator(command string) error {
 		return operatorDoc(ctx, store, os.Args[2:], os.Stdout)
 	case "fetch":
 		return operatorFetch(ctx, store, os.Args[2:], os.Stdout)
+	case "signals":
+		return operatorSignals(ctx, store, os.Args[2:], os.Stdout)
 	case "maintenance":
 		n, err := store.PruneExpiredBlobs(ctx)
 		if err != nil {
 			return err
 		}
 		fmt.Println("Expired file payloads removed:", n)
+		if n, err = store.PruneWriteSignals(ctx); err != nil {
+			return err
+		}
+		fmt.Printf("Write signals older than %d days removed: %d\n", board.WriteSignalsRetentionDays, n)
 	case "backup":
 		if len(os.Args) != 3 {
 			return errors.New("usage: swarmmemo backup NEW_FILE; contains private data, encrypt before off-machine storage")
@@ -415,6 +422,13 @@ func serve() error {
 			if err != nil && ctx.Err() == nil {
 				slog.Warn("Attachment expiry maintenance failed; downloads still enforce expiry")
 			}
+			// C160: write signals are kept board.WriteSignalsRetentionDays.
+			work, cancel = context.WithTimeout(ctx, 30*time.Second)
+			_, err = store.PruneWriteSignals(work)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				slog.Warn("Write signal retention maintenance failed; it retries in an hour")
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -522,7 +536,7 @@ func storeConfigFromEnvironment() (board.Config, string, error) {
 	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
 		reserved = append(reserved, parsed.Hostname())
 	}
-	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReviewerGraceSeconds: grace, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")}, publicURL, nil
+	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReviewerGraceSeconds: grace, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE")}, publicURL, nil
 }
 
 // bridgeTokens reads each operator bridge's secret (board.Vias with Bridge

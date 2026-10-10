@@ -370,6 +370,8 @@ func TestActivityStatsEndpoint(t *testing.T) {
 			Posts  board.ActivitySeries `json:"posts"`
 			Bytes  board.ActivitySeries `json:"text_bytes"`
 			Native map[string]int64     `json:"native"`
+			Via    map[string]int64     `json:"native_via"`
+			Reads  map[string]int64     `json:"entry_reads"`
 		}
 		Via   map[string]int64 `json:"native_via"`
 		Notes []string
@@ -382,6 +384,10 @@ func TestActivityStatsEndpoint(t *testing.T) {
 	}
 	if last := body.Hourly[len(body.Hourly)-1]; last.Posts.Anonymous != 1 || last.Bytes.Anonymous != 5 || len(last.Native) != 4 || body.Via["get"] != 1 {
 		t.Fatalf("last hour: %+v via %v", last, body.Via)
+	}
+	// Channels per day add up to the range's channels; hours carry none.
+	if today := body.Daily[len(body.Daily)-1]; today.Via["get"] != 1 || len(today.Reads) != 2 || body.Hourly[len(body.Hourly)-1].Via != nil {
+		t.Fatalf("today: via %v reads %v", today.Via, today.Reads)
 	}
 	for _, query := range []string{"?hours=5", "?days=2"} {
 		if w := makeRequest(s, "GET", "/api/stats/activity"+query, "", ""); w.Code != 400 {

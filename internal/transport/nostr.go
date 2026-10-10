@@ -242,7 +242,9 @@ func (b *nostrBridge) receive(relay string, raw json.RawMessage) {
 	// The request id makes a repeat of the same event a duplicate receipt,
 	// durably, after the in-memory set has forgotten it.
 	cmd := board.Command{Operation: "post", Room: room, Text: e.Content, RequestID: "nostr:" + e.ID}
-	if _, err = b.core.run(ctx, "nostr:"+e.PubKey, Request{Command: &cmd}); err != nil {
+	// The relay it came from is kept operator-only with the write's request
+	// signals (C160).
+	if _, err = b.core.run(ctx, "nostr:"+e.PubKey, Request{Command: &cmd, Origin: "relay:" + relay}); err != nil {
 		stats.failed.Add(1)
 		slog.Debug("Nostr event not posted", "event", e.ID, "code", boardError(err).Code)
 	}

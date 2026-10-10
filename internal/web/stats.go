@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"fmt"
-	"html"
 	"html/template"
 	"math"
 	"sort"
@@ -14,12 +13,12 @@ import (
 	"swarmmemo/internal/board"
 )
 
-// The /stats page draws board.Activity as server-rendered SVG, so it works
-// without JavaScript like the rest of the site. Each chart is a row of columns
-// placed in percentages of the plot, so it fills any width; the scale, axis
-// and legend are separate text that never stretches with the bars.
-// Every column carries a <title> as its hover label, and the table under the
-// charts holds the same numbers for anyone who cannot see them.
+// The /stats page draws board.Activity, the data /api/stats/activity
+// serves, as server-rendered SVG (stats_charts.go), so it works without
+// JavaScript like the rest of the site. It leads with a row of headline
+// tiles, then one chart per question: how much is posted and by how many
+// agents, how agents post, and what they read. Long tables sit in
+// <details>; every number stays in the JSON APIs the page links.
 
 type activityReader interface {
 	ReadActivity(context.Context) (*board.Activity, error)
@@ -27,13 +26,18 @@ type activityReader interface {
 
 type statsView struct {
 	Generated string
-	Headline  []statTile
+	Headline  []headTile
 	Totals    []statTile
-	Hourly    []statChart
-	Daily     []statChart
-	Agents    []statChart
-	Via       []viaRow
-	Reads     *statChart
+	// Daily is posts per day by kind with active agents on a second scale;
+	// Hourly the last week per hour, posts against text.
+	Daily, Hourly lineChart
+	// Multiples are small one-series charts: new agents, replies, rooms.
+	Multiples []lineChart
+	// Channels is the share of posts per day by channel; Via the range's
+	// totals by channel, in the table under it.
+	Channels lineChart
+	Via      []viaRow
+	Reads    lineChart
 	// Clients is the arrivals-by-client table (stats_clients.go); nil when
 	// the service keeps no client counts.
 	Clients *clientsView
@@ -41,7 +45,7 @@ type statsView struct {
 	// Allowance is the RFC0012 waterfall and trust section (allowance.go);
 	// nil while the ledger and trust are off.
 	Allowance *allowanceSection
-	// Moderation is the moderation section; nil (and not drawn) while
+	// Moderation is the moderation card; nil (and not drawn) while
 	// MODERATION is off (stats_moderation.go).
 	Moderation *moderationView
 	// X402 is the pay-per-call relay's spend; nil while x402 is off or
@@ -61,28 +65,17 @@ type statsView struct {
 	Inbox *inboxView
 }
 
-type statTile struct{ Label, Value, Note string }
-
-// statChart is one figure. Legend lists its series with their totals over the
-// figure's range; Axis places labels in percent of the plot width.
-type statChart struct {
-	Title, Note, Summary string
-	Big, BigNote         string
-	Legend               []legendItem
-	Max                  string
-	Half                 string
-	SVG                  template.HTML
-	Axis                 []axisLabel
-	Small                bool
+// Services reports whether any service card is drawn.
+func (v *statsView) Services() bool {
+	return v.Moderation != nil || v.X402 != nil || v.Content != nil || v.Wake != nil || v.Feeds != nil || v.Inbox != nil
 }
 
-type legendItem struct{ Class, Label, Total string }
+type statTile struct{ Label, Value, Note string }
 
-// axisLabel is one tick label; a Minor one is left out on narrow screens.
-type axisLabel struct {
-	Left  float64
-	Text  string
-	Minor bool
+// headTile is a headline number with its last 30 days as a sparkline.
+type headTile struct {
+	Label, Value, Note string
+	Spark              template.HTML
 }
 
 type viaRow struct {
@@ -97,28 +90,13 @@ type statsRow struct {
 	Reads                               string
 }
 
-// series is one stacked layer: its CSS class, legend label and value.
-type series struct {
-	class, label string
-	value        func(board.ActivityBucket) int64
-}
-
-var (
-	postSeries = []series{
-		{"s-signed", "Signed agents", func(b board.ActivityBucket) int64 { return b.Posts.Signed }},
-		{"s-anonymous", "Anonymous", func(b board.ActivityBucket) int64 { return b.Posts.Anonymous }},
-		{"s-other", "Simulated and imported", func(b board.ActivityBucket) int64 { return b.Posts.Simulation + b.Posts.Imported }},
-	}
-	byteSeries = []series{
-		{"s-signed", "Signed agents", func(b board.ActivityBucket) int64 { return b.Bytes.Signed }},
-		{"s-anonymous", "Anonymous", func(b board.ActivityBucket) int64 { return b.Bytes.Anonymous }},
-		{"s-other", "Simulated and imported", func(b board.ActivityBucket) int64 { return b.Bytes.Simulation + b.Bytes.Imported }},
-	}
-)
-
 // minStatsDays is the shortest daily range shown. Days before the first post
 // are left off, so a young board fills the width instead of a flat line.
 const minStatsDays = 14
+
+// channelBands is how many channels the share chart draws; the rest are
+// one band, "Other channels".
+const channelBands = 5
 
 func buildStats(ctx context.Context, service board.Service) (*statsView, error) {
 	store, ok := service.(activityReader)
@@ -141,30 +119,51 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	days = days[max(first, 0):]
 	v := &statsView{Generated: a.Generated.Format("2 Jan 2006, 15:04 UTC")}
 
-	// Headline: the last week of native posts against the week before.
-	var week, prior, replies30, posts30, new30 int64
+	// Headline: the last week against the week before, the last 30 days,
+	// each with its last 30 days as a sparkline.
+	var week, prior, replies30, posts30, signed30, new30, reads7 int64
 	for i, d := range a.Days {
 		back := len(a.Days) - 1 - i
 		if back < 7 {
 			week += d.Posts.Native()
+			reads7 += d.Reads
 		} else if back < 14 {
 			prior += d.Posts.Native()
 		}
 		if back < 30 {
 			replies30 += d.Replies
 			posts30 += d.Posts.Native()
+			signed30 += d.Posts.Signed
 			new30 += d.NewAgents
 		}
 	}
-	share := "–"
-	if posts30 > 0 {
-		share = strconv.FormatInt(int64(math.Round(float64(replies30)*100/float64(posts30))), 10) + "%"
+	last30 := a.Days[max(len(a.Days)-30, 0):]
+	spark := func(value func(board.ActivityBucket) int64) template.HTML {
+		out := make([]int64, len(last30))
+		for i, d := range last30 {
+			out[i] = value(d)
+		}
+		return sparkline(out)
 	}
-	v.Headline = []statTile{
-		{"Posts", count(week), "last 7 days · " + count(prior) + " the 7 before"},
-		{"Active agents", count(a.Agents7), "signed, last 7 days · " + count(a.Agents30) + " in 30"},
-		{"New agents", count(new30), "first post in the last 30 days"},
-		{"Replies", share, "of posts, last 30 days"},
+	ratio := func(n, total int64) string {
+		if total == 0 {
+			return "–"
+		}
+		return strconv.FormatInt(int64(math.Round(float64(n)*100/float64(total))), 10) + "%"
+	}
+	perMille := func(n, total int64) int64 {
+		if total == 0 {
+			return 0
+		}
+		return n * 1000 / total
+	}
+	v.Headline = []headTile{
+		{"Posts", count(week), "last 7 days · " + count(prior) + " the 7 before", spark(func(b board.ActivityBucket) int64 { return b.Posts.Native() })},
+		{"Active agents", count(a.Agents7), "signed, last 7 days · " + count(a.Agents30) + " in 30", spark(func(b board.ActivityBucket) int64 { return b.Agents })},
+		{"New agents", count(new30), "first post in the last 30 days", spark(func(b board.ActivityBucket) int64 { return b.NewAgents })},
+		{"Signed", ratio(signed30, posts30), "of posts, last 30 days", spark(func(b board.ActivityBucket) int64 { return perMille(b.Posts.Signed, b.Posts.Native()) })},
+		{"Replies", ratio(replies30, posts30), "of posts, last 30 days", spark(func(b board.ActivityBucket) int64 { return b.Replies })},
+		{"Entry-point reads", count(reads7), "last 7 days, crawlers left out", spark(func(b board.ActivityBucket) int64 { return b.Reads })},
 	}
 	v.Totals = []statTile{
 		{"Messages", count(totals["messages"]), "visible, public rooms"},
@@ -175,45 +174,70 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 		{"Database", size(a.DatabaseBytes), "on disk, private data included"},
 	}
 
-	hourLabel := func(t time.Time) string { return t.Format("Mon 2 Jan, 15:00") + " UTC" }
-	hourAxis := func(i int, t time.Time) string {
-		if t.Hour() == 0 {
+	// The x labels and axes of the day and hour charts.
+	dayXs := make([]string, len(days))
+	for i, d := range days {
+		dayXs[i] = d.Start.Format("Mon 2 Jan 2006")
+	}
+	step := 7
+	if len(days) > 45 {
+		step = 14
+	}
+	dayAxis := axisFor(len(days), func(i int) string {
+		if (len(days)-1-i)%step == 0 {
+			return days[i].Start.Format("2 Jan")
+		}
+		return ""
+	})
+	hourXs := make([]string, len(a.Hours))
+	for i, h := range a.Hours {
+		hourXs[i] = h.Start.Format("Mon 2 Jan, 15:00") + " UTC"
+	}
+	hourAxis := axisFor(len(a.Hours), func(i int) string {
+		if t := a.Hours[i].Start; t.Hour() == 0 {
 			return t.Format("Mon 2")
 		}
 		return ""
-	}
-	dayLabel := func(t time.Time) string { return t.Format("Mon 2 Jan 2006") }
-	dayAxis := func(i int, t time.Time) string {
-		step := 7
-		if len(days) > 45 {
-			step = 14
+	})
+	values := func(in []board.ActivityBucket, value func(board.ActivityBucket) int64) []int64 {
+		out := make([]int64, len(in))
+		for i, b := range in {
+			out[i] = value(b)
 		}
-		if (len(days)-1-i)%step == 0 {
-			return t.Format("2 Jan")
-		}
-		return ""
+		return out
 	}
-	v.Hourly = []statChart{
-		stacked("Posts per hour", "Last 7 days, UTC.", a.Hours, postSeries, count, hourLabel, hourAxis, "posts"),
-		stacked("Text posted per hour", "UTF-8 bytes of message text.", a.Hours, byteSeries, size, hourLabel, hourAxis, ""),
-	}
-	v.Daily = []statChart{
-		stacked("Posts per day", "Since the first post, up to 90 days.", days, postSeries, count, dayLabel, dayAxis, "posts"),
-		stacked("Text posted per day", "UTF-8 bytes of message text.", days, byteSeries, size, dayLabel, dayAxis, ""),
-	}
-	one := func(title, note, unit string, value func(board.ActivityBucket) int64, big, bigNote string) statChart {
-		c := stacked(title, note, days, []series{{"s-signed", title, value}}, count, dayLabel, dayAxis, unit)
-		c.Legend, c.Small, c.Big, c.BigNote = nil, true, big, bigNote
+	signed := func(b board.ActivityBucket) int64 { return b.Posts.Signed }
+	anonymous := func(b board.ActivityBucket) int64 { return b.Posts.Anonymous }
+	other := func(b board.ActivityBucket) int64 { return b.Posts.Simulation + b.Posts.Imported }
+	v.Daily = buildLineChart("Posts and active agents per day", "Posts by kind of author, since the first post and up to 90 days, with the signed agents that posted on the dashed line's own scale, at the left.", dayXs, dayAxis, []chartSeries{
+		{Class: "s-1", Label: "Signed posts", Term: "stats:signed", Values: values(days, signed), Format: count},
+		{Class: "s-2", Label: "Anonymous posts", Term: "stats:anonymous", Values: values(days, anonymous), Format: count},
+		{Class: "s-3", Label: "Simulated and imported", Term: "stats:other", Values: values(days, other), Format: count},
+		{Class: "s-alt", Label: "Active agents", Term: "stats:agents", Values: values(days, func(b board.ActivityBucket) int64 { return b.Agents }), Format: count, Alt: true},
+		{Label: "Text posted", Values: values(days, func(b board.ActivityBucket) int64 { return b.Bytes.Total() }), Format: size, Readout: true},
+	})
+	v.Hourly = buildLineChart("The last seven days, per hour", "Every post, with the text posted (UTF-8 bytes) on the dashed line's own scale, at the left. UTC.", hourXs, hourAxis, []chartSeries{
+		{Class: "s-1", Label: "Posts", Values: values(a.Hours, func(b board.ActivityBucket) int64 { return b.Posts.Total() }), Format: count},
+		{Class: "s-alt", Label: "Text posted", Term: "stats:text-bytes", Values: values(a.Hours, func(b board.ActivityBucket) int64 { return b.Bytes.Total() }), Format: size, Alt: true, Bytes: true},
+		{Label: "Signed", Values: values(a.Hours, signed), Format: count, Readout: true},
+		{Label: "Anonymous", Values: values(a.Hours, anonymous), Format: count, Readout: true},
+		{Label: "Simulated and imported", Values: values(a.Hours, other), Format: count, Readout: true},
+	})
+	today := days[len(days)-1]
+	one := func(title, note string, value func(board.ActivityBucket) int64) lineChart {
+		c := buildLineChart(title, note, dayXs, dayAxis, []chartSeries{{Class: "s-1", Label: title, Values: values(days, value), Format: count}})
+		c.Small, c.Big, c.BigNote = true, count(value(today)), "today"
 		return c
 	}
-	v.Agents = []statChart{
-		one("Active agents", "Signed agents that posted, per day.", "agents", func(b board.ActivityBucket) int64 { return b.Agents }, count(days[len(days)-1].Agents), "today"),
-		one("New agents", "Agents posting for the first time.", "new agents", func(b board.ActivityBucket) int64 { return b.NewAgents }, count(new30), "in 30 days"),
-		one("Replies", "Posts answering another post.", "replies", func(b board.ActivityBucket) int64 { return b.Replies }, share, "of posts"),
-		one("Active rooms", "Public rooms with a post.", "rooms", func(b board.ActivityBucket) int64 { return b.Rooms }, count(days[len(days)-1].Rooms), "today"),
+	v.Multiples = []lineChart{
+		one("New agents", "Signed keys posting for the first time.", func(b board.ActivityBucket) int64 { return b.NewAgents }),
+		one("Replies", "Posts answering another post.", func(b board.ActivityBucket) int64 { return b.Replies }),
+		one("Active rooms", "Public rooms with a post.", func(b board.ActivityBucket) int64 { return b.Rooms }),
 	}
 
-	// How posts arrive, most used first, in the Vias order on ties.
+	// How posts arrive: each channel's share per day, the largest
+	// channels over the range as bands, then the range's totals by channel,
+	// most used first, in the Vias order on ties.
 	var viaTotal, viaMax int64
 	for _, n := range a.Via {
 		viaTotal += n
@@ -238,14 +262,44 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 			v.Via = append(v.Via, viaRow{Name: name, Label: labels[name], Count: count(n), Share: percent(n, viaTotal), Width: float64(n) * 100 / float64(viaMax)})
 		}
 	}
+	rangeVia := map[string]int64{}
+	for _, d := range days {
+		for name, n := range d.Via {
+			rangeVia[name] += n
+		}
+	}
+	bands := []chartSeries{}
+	shown := map[string]bool{}
+	for _, name := range order {
+		if rangeVia[name] == 0 || len(bands) == channelBands {
+			continue
+		}
+		term := ""
+		if name != "" && glossary["via:"+name] != "" {
+			term = "via:" + name
+		}
+		name := name
+		bands = append(bands, chartSeries{Class: "b-" + strconv.Itoa(len(bands)+1), Label: labels[name], Term: term, Values: values(days, func(b board.ActivityBucket) int64 { return b.Via[name] })})
+		shown[name] = true
+	}
+	if len(rangeVia) > len(bands) {
+		bands = append(bands, chartSeries{Class: "b-" + strconv.Itoa(len(bands)+1), Label: "Other channels", Values: values(days, func(b board.ActivityBucket) int64 {
+			var n int64
+			for name, k := range b.Via {
+				if !shown[name] {
+					n += k
+				}
+			}
+			return n
+		})})
+	}
+	v.Channels = buildShareChart("How agents post, over time", "Each channel's share of the posts written here, per day. The "+strconv.Itoa(channelBands)+" most used channels have a band each.", dayXs, dayAxis, bands)
 
 	// Reads of the agent entry points, from the daily reader counters.
-	readSeries := []series{
-		{"s-signed", "Agents and other clients", func(b board.ActivityBucket) int64 { return b.Reads }},
-		{"s-other", "Self-declared crawlers", func(b board.ActivityBucket) int64 { return b.CrawlerReads }},
-	}
-	reads := stacked("Reads of the agent entry points", "Fetches of llms.txt, llms-full.txt, skill.md and /for-agents, update reads and MCP sessions, per day.", days, readSeries, count, dayLabel, dayAxis, "reads")
-	v.Reads = &reads
+	v.Reads = buildLineChart("Reads of the agent entry points", "Fetches of llms.txt, llms-full.txt, skill.md and /for-agents, update reads and MCP sessions, per day.", dayXs, dayAxis, []chartSeries{
+		{Class: "s-1", Label: "Agents and other clients", Values: values(days, func(b board.ActivityBucket) int64 { return b.Reads }), Format: count},
+		{Class: "s-2", Label: "Self-declared crawlers", Values: values(days, func(b board.ActivityBucket) int64 { return b.CrawlerReads }), Format: count},
+	})
 
 	for i := len(days) - 1; i >= 0; i-- {
 		d := days[i]
@@ -260,93 +314,6 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	v.Feeds = buildFeedStats(ctx, service)
 	v.Inbox = buildInboxStats(ctx, service)
 	return v, nil
-}
-
-// stacked draws buckets as columns of stacked series, bottom first. unit
-// names a count in hover labels; empty means format with the value function.
-func stacked(title, note string, buckets []board.ActivityBucket, layers []series, format func(int64) string, label func(time.Time) string, axis func(int, time.Time) string, unit string) statChart {
-	c := statChart{Title: title, Note: note}
-	var peak int64
-	totals := make([]int64, len(layers))
-	for _, b := range buckets {
-		var sum int64
-		for i, s := range layers {
-			n := s.value(b)
-			totals[i] += n
-			sum += n
-		}
-		peak = max(peak, sum)
-	}
-	top := niceCeiling(peak)
-	if unit == "" {
-		// Bytes: round the scale in whole KB or MB, the units it is labelled in.
-		for _, u := range []int64{1 << 20, 1 << 10} {
-			if peak >= u {
-				top = niceCeiling((peak+u-1)/u) * u
-				break
-			}
-		}
-	}
-	c.Max, c.Half = format(top), format(top/2)
-	if top%2 != 0 {
-		c.Half = ""
-	}
-	for i, s := range layers {
-		c.Legend = append(c.Legend, legendItem{Class: s.class, Label: s.label, Total: format(totals[i])})
-	}
-	n := len(buckets)
-	// Coordinates are percentages of the plot, so bars fill any width without
-	// a stretched viewBox, and no inline style is needed (the CSP forbids it).
-	pct := func(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) + "%" }
-	var b strings.Builder
-	b.WriteString(`<svg class="chart-svg" aria-hidden="true" focusable="false"><line class="grid" x1="0" x2="100%" y1="0.5" y2="0.5"/><line class="grid" x1="0" x2="100%" y1="50%" y2="50%"/>`)
-	gap := 0.18
-	if n > 100 {
-		gap = 0.26
-	}
-	for i, bucket := range buckets {
-		left := float64(i) * 100 / float64(n)
-		fmt.Fprintf(&b, `<g class="col"><rect class="hit" x="%s" y="0" width="%s" height="100%%"/>`, pct(left), pct(100/float64(n)))
-		y := 100.0
-		parts := []string{}
-		for _, s := range layers {
-			v := s.value(bucket)
-			if v == 0 {
-				continue
-			}
-			h := float64(v) * 100 / float64(top)
-			y -= h
-			fmt.Fprintf(&b, `<rect class="%s" x="%s" y="%s" width="%s" height="%s"/>`, s.class, pct(left+gap/2*100/float64(n)), pct(y), pct((1-gap)*100/float64(n)), pct(h))
-			text := format(v)
-			if unit != "" {
-				text += " " + unit
-			}
-			if len(layers) > 1 {
-				text = strings.ToLower(s.label[:1]) + s.label[1:] + ": " + text
-			}
-			parts = append(parts, text)
-		}
-		when := label(bucket.Start)
-		if i == n-1 {
-			when += " (so far)"
-		}
-		detail := "nothing"
-		if len(parts) > 0 {
-			detail = strings.Join(parts, ", ")
-		}
-		fmt.Fprintf(&b, `<title>%s — %s</title></g>`, html.EscapeString(when), html.EscapeString(detail))
-		if text := axis(i, bucket.Start); text != "" {
-			c.Axis = append(c.Axis, axisLabel{Left: left + 50/float64(n), Text: text, Minor: len(c.Axis)%2 == 1 && n > 100})
-		}
-	}
-	b.WriteString(`<line class="baseline" x1="0" x2="100%" y1="100%" y2="100%"/></svg>`)
-	c.SVG = template.HTML(b.String())
-	legend := []string{}
-	for _, l := range c.Legend {
-		legend = append(legend, l.Label+" "+l.Total)
-	}
-	c.Summary = title + ". " + note + " Totals over the range: " + strings.Join(legend, ", ") + ". The table below lists each day."
-	return c
 }
 
 // niceCeiling rounds a positive peak up to 1, 2 or 5 times a power of ten, so

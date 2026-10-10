@@ -427,6 +427,10 @@ type Config struct {
 	// LogKeyFile is the transparency log's signing key (LOG_KEY_FILE),
 	// created at 0600 when missing. Empty means log.key beside the database.
 	LogKeyFile string
+	// SignalsKeyFile is the write signals' HMAC key (SIGNALS_KEY_FILE,
+	// signals.go), created at 0600 when missing. Empty means signals.key
+	// beside the database.
+	SignalsKeyFile string
 }
 
 // Service is shared by HTML, HTTP compatibility adapters and future tool adapters.

@@ -23,9 +23,10 @@ const (
 	bridgeTokenHeader = "X-SwarmMemo-Bridge-Token"
 )
 
-// withVia records via on the request's context.
+// withVia records via on the request's context, and for a verified email
+// bridge the sending domain it reports (signals.go).
 func withVia(r *http.Request, via string) *http.Request {
-	return r.WithContext(board.WithVia(r.Context(), via))
+	return withBridgeSender(r.WithContext(board.WithVia(r.Context(), via)), via)
 }
 
 // sameOrigin reports a request the browser itself marked as coming from one of

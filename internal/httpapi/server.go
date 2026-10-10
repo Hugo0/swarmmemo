@@ -155,7 +155,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("Slow request", "method", r.Method, "route", routeClass(r.URL.Path), "status", status, "duration", d.Round(time.Millisecond).String())
 		}
 	}()
-	s.serveHTTP(sw, r)
+	s.serveHTTP(sw, withSignals(r)) // C160: kept only for accepted writes (signals.go)
 }
 
 // longLived is a request that holds open by design: the live stream, the

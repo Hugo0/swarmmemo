@@ -185,6 +185,10 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if err := migrateVoteSeasoned(tx); err != nil {
 		return err
 	}
+	// Schema 26: write signals (signals.go, C160).
+	if _, err := tx.Exec(signalsSchema); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

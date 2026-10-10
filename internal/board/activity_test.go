@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -89,6 +90,16 @@ func TestActivitySplitsPostsByKind(t *testing.T) {
 	// Native posts by channel; the edit, simulated and imported posts are left out.
 	if len(a.Via) != 2 || a.Via["post"] != 3 || a.Via["get"] != 2 {
 		t.Fatalf("via: %v", a.Via)
+	}
+	// Per day, the same channels: they add up to Via, carol's old post on its day.
+	sum := map[string]int64{}
+	for _, d := range a.Days {
+		for via, n := range d.Via {
+			sum[via] += n
+		}
+	}
+	if fmt.Sprint(sum) != fmt.Sprint(a.Via) || a.Days[len(a.Days)-21].Via["post"] != 1 || a.Hours[len(a.Hours)-1].Via != nil {
+		t.Fatalf("via per day: %v, day-20 %v", sum, a.Days[len(a.Days)-21].Via)
 	}
 	if h := a.Hours[len(a.Hours)-4]; h.Posts.Total() != 0 || h.Bytes.Total() != 0 {
 		t.Fatalf("edit of a hidden original counted: %+v", h)

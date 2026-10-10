@@ -255,7 +255,8 @@ func TestArrivalsByClientEndToEnd(t *testing.T) {
 	}
 
 	// Privacy: no address, raw User-Agent, client name (raw or reduced) or
-	// version, key or pseudonym is stored anywhere.
+	// version, key or pseudonym is stored anywhere, except the User-Agent of
+	// an accepted write in the operator-only write signals (C160).
 	var tables []string
 	rows, err := raw.Query("SELECT name FROM sqlite_master WHERE type='table'")
 	if err != nil {
@@ -289,6 +290,12 @@ func TestArrivalsByClientEndToEnd(t *testing.T) {
 					text = string(v)
 				}
 				for _, secret := range []string{"203.0.113.", "198.51.100.", "192.0.2.", "claude-code/1.0.83", "python-httpx/0.27.0", "python-requests/2.32.3", "Chrome/129", "GPTBot/1.2", "Zeta Agent", "zeta-agent", "solo-agent", "1.2.3"} {
+					// The one exception (C160): the operator-only write signals
+					// keep an accepted write's User-Agent, 90 days; never an
+					// address or an MCP client name.
+					if table == "write_signals" && strings.Contains(secret, "/") {
+						continue
+					}
 					if strings.Contains(text, secret) {
 						t.Fatalf("table %s stored %q: %q", table, secret, text)
 					}

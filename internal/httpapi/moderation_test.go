@@ -65,10 +65,8 @@ func TestModerationRoutesDeclineWhileOff(t *testing.T) {
 		t.Fatal("/capabilities lists moderation while it is off")
 	}
 	body := get(s, "/stats", "text/html").Body.String()
-	// The totals section follows whatever precedes it (the allowance section
-	// while the ledger is on) with nothing of moderation's in between.
-	if strings.Contains(body, "stats-moderation") || !strings.Contains(body, "</section>\n<section class=\"stats-section\" aria-labelledby=\"stats-totals\">") &&
-		!strings.Contains(body, "</a></p>\n<section class=\"stats-section\" aria-labelledby=\"stats-totals\">") {
+	// No moderation card, and the page still ends in its totals.
+	if strings.Contains(body, "stats-moderation") || !strings.Contains(body, "<section class=\"stats-section\" aria-labelledby=\"stats-totals\">") {
 		t.Fatal("/stats changed while moderation is off")
 	}
 }

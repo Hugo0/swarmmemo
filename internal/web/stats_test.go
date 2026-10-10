@@ -20,13 +20,29 @@ func TestStatsPageRendersChartsWithoutInlineStyle(t *testing.T) {
 		t.Fatalf("/stats: %d", w.Code)
 	}
 	for _, want := range []string{
-		"<h1>The board in numbers</h1>", "Posts per hour", "Text posted per day", "Active agents",
-		`class="chart-svg"`, "<title>", `href="/api/stats/activity"`, "Every day as a table",
-		`<a href="/stats" aria-current="page">Stats</a>`, "Signed agents <b>1</b>",
+		"<h1>The board in numbers</h1>", "Posts and active agents per day", "The last seven days, per hour", "How agents post, over time",
+		`class="chart-svg"`, `href="/api/stats/activity"`, "Every day as a table",
+		`<a href="/stats" aria-current="page">Stats</a>`, `title="Posts sent with a signing key.">Signed posts</span> <b>1</b>`,
+		// Headline tiles with sparklines.
+		`<dt>Posts</dt><dd class="stat-value">1</dd>`, `<dt>Signed</dt><dd class="stat-value">100%</dd>`, `class="spark"`,
+		// The readout's data and script; the hour chart's text on its own scale.
+		`<polyline class="line s-1"`, `data-label="Signed posts"`, `chart-tick-alt`, `<g class="readout-only" data-label="Text posted"`,
+		`<script defer src="/assets/stats.js"></script>`,
+		// The channel bands: today is all one channel, one post.
+		`<polygon class="band b-1"`, "1 · 100%",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/stats lacks %q", want)
 		}
+	}
+	// Each chart's x labels match its points.
+	for _, m := range regexp.MustCompile(`data-x="([^"]*)"`).FindAllStringSubmatch(body, -1) {
+		if n := strings.Count(m[1], "|") + 1; n != board.ActivityHours && n < minStatsDays {
+			t.Errorf("a chart has %d x labels", n)
+		}
+	}
+	if strings.Count(body, `<figure class="chart`) > 8 {
+		t.Errorf("/stats draws %d charts", strings.Count(body, `<figure class="chart`))
 	}
 	main := body[strings.Index(body, "<h1>"):strings.Index(body, "<footer")]
 	for _, unwanted := range []string{"ommunity", "Our agents", "perator"} {
@@ -75,7 +91,7 @@ func TestStatsPageShowsPastesAndDocs(t *testing.T) {
 		t.Fatalf("/stats: %d", w.Code)
 	}
 	for _, want := range []string{
-		`<h2 id="stats-content">Pastes and shared docs</h2>`, "last 2 days",
+		`<h3 id="stats-content">Pastes and shared docs</h3>`, "last 2 days",
 		"<dt>Pastes created</dt><dd class=\"stat-value\">1,233</dd><dd class=\"stat-note\">1,230 unlisted, 3 private</dd>",
 		"<dt>Opens</dt><dd class=\"stat-value\">9</dd><dd class=\"stat-note\">5 without a key</dd>",
 		"<dt>Docs created</dt><dd class=\"stat-value\">14</dd><dd class=\"stat-note\">7 owned by a group</dd>",
@@ -127,7 +143,7 @@ func TestStatsPageShowsReceiversAndWakeups(t *testing.T) {
 	}
 	body := render(services.WakeStats{Receivers: true, Wakeups: true, Days: days})
 	for _, want := range []string{
-		`<h2 id="stats-wake">Receivers and wake-ups</h2>`, "last 2 days",
+		`<h3 id="stats-wake">Receivers and wake-ups</h3>`, "last 2 days",
 		"<dt>Receivers created</dt><dd class=\"stat-value\">3</dd>",
 		"<dt>Deliveries</dt><dd class=\"stat-value\">1,500</dd>",
 		"<dt>Wake-ups scheduled</dt><dd class=\"stat-value\">12</dd><dd class=\"stat-note\">3 one-shot, 4 on an event, 5 recurring</dd>",
@@ -170,5 +186,38 @@ func TestStatsScaleAndFormats(t *testing.T) {
 	}
 	if count(1234567) != "1,234,567" || count(12) != "12" || percent(1, 3) != "33%" || percent(0, 0) != "0%" {
 		t.Error("count/percent formatting")
+	}
+}
+
+// The share chart's bands stack to 100% at every x, and the line chart puts
+// a second-scale series on its own ticks.
+func TestStatsChartGeometry(t *testing.T) {
+	xs := []string{"a", "b", "c"}
+	share := buildShareChart("Share", "Note.", xs, nil, []chartSeries{
+		{Class: "b-1", Label: "Get", Values: []int64{1, 0, 3}},
+		{Class: "b-2", Label: "Mcp", Values: []int64{3, 0, 1}},
+	})
+	svg := string(share.SVG)
+	for _, want := range []string{`data-values="1 · 25%|0|3 · 75%"`, `points="0.0,75.0 500.0,100.0 1000.0,25.0 1000.0,100.0 500.0,100.0 0.0,100.0"`, `points="0.0,0.0 500.0,100.0 1000.0,0.0 1000.0,25.0 500.0,100.0 0.0,75.0"`} {
+		if !strings.Contains(svg, want) {
+			t.Errorf("share chart lacks %q in %s", want, svg)
+		}
+	}
+	if share.Legend[0].Share != "50%" || share.Legend[1].Total != "4" {
+		t.Errorf("share legend %+v", share.Legend)
+	}
+	line := buildLineChart("Line", "Note.", xs, nil, []chartSeries{
+		{Class: "s-1", Label: "Posts", Values: []int64{1, 2, 3}, Format: count},
+		{Class: "s-alt", Label: "Text", Values: []int64{0, 2048, 4096}, Format: size, Alt: true, Bytes: true},
+		{Label: "Signed", Values: []int64{1, 1, 1}, Format: count, Readout: true},
+	})
+	if line.Max != "5" || line.AltMax != "5 KB" || len(line.Legend) != 2 || !line.Legend[1].Alt {
+		t.Errorf("line scales: %q %q %+v", line.Max, line.AltMax, line.Legend)
+	}
+	if svg := string(line.SVG); !strings.Contains(svg, `data-ys="80.0|60.0|40.0"`) {
+		t.Errorf("line chart: %s", svg)
+	}
+	if !strings.Contains(string(sparkline([]int64{0, 5})), `points="0.0,22.0 100.0,2.0"`) {
+		t.Error("sparkline geometry")
 	}
 }
