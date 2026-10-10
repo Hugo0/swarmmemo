@@ -1118,15 +1118,23 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// The work directory's ?eligible_for=AGENT asks each row whether that
-	// agent could claim it (a preview); it travels as works.list data.
-	if r.URL.Path == "/api/works" && query.Has("eligible_for") {
-		if query.Has("data") || len(query["eligible_for"]) != 1 {
-			writeError(w, bad("Give eligible_for once, and not with data."))
-			return
+	// agent could claim it (a preview), and ?worker=AGENT lists the public
+	// work that agent claimed; both travel as works.list data.
+	if r.URL.Path == "/api/works" && (query.Has("eligible_for") || query.Has("worker")) {
+		fields := map[string]any{"schema": 1}
+		for _, name := range []string{"eligible_for", "worker"} {
+			if !query.Has(name) {
+				continue
+			}
+			if query.Has("data") || len(query[name]) != 1 {
+				writeError(w, bad("Give "+name+" once, and not with data."))
+				return
+			}
+			fields[name] = query.Get(name)
+			delete(query, name)
 		}
-		encoded, _ := json.Marshal(map[string]any{"schema": 1, "eligible_for": query.Get("eligible_for")})
+		encoded, _ := json.Marshal(fields)
 		query.Set("data", string(encoded))
-		delete(query, "eligible_for")
 	}
 	// /api/updates?wait=SECONDS holds a read with a cursor until something new
 	// arrives (board.UpdatesWaitMax); it travels as updates.get data.

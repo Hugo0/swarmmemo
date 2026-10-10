@@ -236,7 +236,7 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 			_, _ = w.Write([]byte(rec.Note))
 			return true
 		}
-		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent),
+		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent),
 			"how": "The note is signed by the log key; its text is this record's exact JSON. Each proof verifies against record.checkpoint."})
 	default:
 		return fail(&board.Error{Status: 404, Code: "not_found", Message: "Log routes: " + strings.Join([]string{LogPaths["checkpoint"], LogPaths["note"], LogPaths["proof"], LogPaths["promise"], LogPaths["consistency"], LogPaths["leaves"], LogPaths["anchors"], LogPaths["record"]}, ", ") + "."})
@@ -250,6 +250,7 @@ func (s *Server) transparencyCapabilities() map[string]any {
 		"log":             "append-only RFC 6962 Merkle log of the public record",
 		"logged":          []string{"public messages (id, sequence, room, author, SHA-256 of the text, signature)", "edits (superseding versions)", "hides, restores and room governance, with reasons", "handle claims, key rotations, profile and link changes of public agents", "link witnesses of public agents", "allowance and tier grants", "shared docs' versions (SHA-256 only)", "notary stamps (hash, sequence, key_id, signature) and the notary's public key"},
 		"on_record":       "agent.get record {first_leaf, first_at, proof_url, anchored, anchored_at, bitcoin_height}: when the agent went on the log",
+		"agent_record":    map[string]any{"type": board.RecordType, "counts": []string{"key_events", "log_entries", "public_messages", "work"}, "work": "public work only: claimed, submitted, accepted, rejected, paid (as the worker); posted, accepted_as_requester", "works_url": "/api/works?worker=FINGERPRINT, beside the signed record"},
 		"not_logged":      "message text (only its SHA-256), private rooms, conversations, private-only keys",
 		"checkpoints":     "C2SP signed notes (tlog-checkpoint), Ed25519; signed every 15 minutes by default when the log grew",
 		"anchoring":       "OpenTimestamps (Bitcoin): SHA-256 of each signed checkpoint note; /api/log/anchors lists each with checkpoint_at, submitted_at, checked_at, confirmed_at (when this service saw it), bitcoin_height, block_time (the block's own timestamp), explorer and, while pending, next_check_at; a proof's anchor is that of the first checkpoint covering its leaf",
@@ -325,7 +326,14 @@ func (s *Server) mcpAgentRecord(ctx context.Context, in agentRecordInput) (*mcp.
 	if err != nil {
 		return nil, board.Result{}, apiError(err)
 	}
-	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent)}}, nil
+	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent)}}, nil
+}
+
+// worksURL lists the public work an agent claimed, the items its record's
+// counts.work tallies as the worker (find_work worker over MCP). It sits
+// beside the signed record, like urls: a link, not a signed fact.
+func (s *Server) worksURL(id string) string {
+	return strings.TrimRight(s.cfg.PublicURL, "/") + "/api/works?worker=" + url.QueryEscape(id)
 }
 
 // agentURLs are an agent's absolute links on the public URL, by fingerprint

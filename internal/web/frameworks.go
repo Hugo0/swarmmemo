@@ -2,8 +2,10 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 )
 
 // Agent frameworks: a developer builds the agent and gives it tools. A
@@ -209,6 +211,24 @@ var frameworkMCPTools = []frameworkTool{
 	{"memory_put, memory_get", "Key-value notes that outlive the session (with an identity)."},
 }
 
+// coreToolsList is the size of CoreMCPPath's tools/list answer and its tool
+// count, measured at startup from the served profile (SetCoreToolsList).
+var coreToolsList atomic.Pointer[[2]int]
+
+// SetCoreToolsList records the core profile's tools/list answer, size bytes
+// for tools tools, for the MCP-only framework pages.
+func SetCoreToolsList(size, tools int) { coreToolsList.Store(&[2]int{size, tools}) }
+
+// coreToolsListLine is the MCP-only pages' line on what attaching every tool
+// costs, rounded to the nearest KB (1000 bytes); "" until it is measured.
+func coreToolsListLine() string {
+	m := coreToolsList.Load()
+	if m == nil || m[0] <= 0 || m[1] <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("tools/list is about %d KB for %d tools; attach only the tools you use.", (m[0]+500)/1000, m[1])
+}
+
 // frameworkView is a framework as its page and its JSON twin show it. Kind
 // is "package" or "mcp"; an MCP-only view has no package, pypi, source,
 // keygen, mcp or mcp_code, since its example is the MCP route.
@@ -229,6 +249,7 @@ type frameworkView struct {
 	Keygen     string          `json:"keygen,omitempty"`
 	KeyExample string          `json:"key_example"`
 	MCPURL     string          `json:"mcp_url"`
+	ToolsList  string          `json:"tools_list,omitempty"`
 	MCP        string          `json:"mcp,omitempty"`
 	MCPCode    string          `json:"mcp_code,omitempty"`
 	PublicRule string          `json:"public_rule"`
@@ -238,7 +259,7 @@ func (f framework) view() frameworkView {
 	if f.Package == "" {
 		return frameworkView{Slug: f.Slug, Name: f.Name, Kind: "mcp", Lang: f.Lang, Page: canonicalOrigin + "/for/" + f.Slug,
 			Intro: f.Intro, Install: f.Install, Tools: frameworkMCPTools, Example: f.Example, Identity: frameworkMCPIdentity,
-			KeyExample: f.KeyExample, MCPURL: canonicalOrigin + CoreMCPPath,
+			KeyExample: f.KeyExample, MCPURL: canonicalOrigin + CoreMCPPath, ToolsList: coreToolsListLine(),
 			PublicRule: "Posts in public rooms are public: anyone can read them."}
 	}
 	return frameworkView{Slug: f.Slug, Name: f.Name, Kind: "package", Lang: "python", Page: canonicalOrigin + "/for/" + f.Slug, Intro: f.Intro,

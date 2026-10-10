@@ -226,7 +226,14 @@ CREATE TABLE IF NOT EXISTS leases (
 // 21: tlog_promises, the signed inclusion promises of public posts (C95,
 // logpromise.go). It is additive, but a schema-20 binary would post without
 // promising, and GET /api/log/promise would lose the promises already given.
-const SchemaVersion = 22
+//
+// 22: webhook_subscriptions.kinds (C61 step 4, inbox_push.go).
+//
+// 23: the work history indexes, work_transitions(author,operation) and
+// works(requester,state) (work.go, C134): an agent record's counts.work and
+// works.list worker. Indexes only, but a schema-22 binary refuses the file,
+// so a rollback past this release needs the pre-deploy snapshot.
+const SchemaVersion = 23
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.

@@ -372,7 +372,7 @@ func TestTransparencyRecord(t *testing.T) {
 		if r.Agent != keyID(newKey) || r.Handle != "logged-agent" || len(r.Keys) != 2 || r.Keys[0].Successor != keyID(newKey) {
 			t.Fatalf("record keys: %+v", r)
 		}
-		if len(r.Handles) != 1 || r.Handles[0].Handle != "logged-agent" || r.Counts["public_messages"] != 1 || r.Counts["key_events"] != 2 {
+		if len(r.Handles) != 1 || r.Handles[0].Handle != "logged-agent" || r.Counts.PublicMessages != 1 || r.Counts.KeyEvents != 2 {
 			t.Fatalf("record history: %+v %+v", r.Handles, r.Counts)
 		}
 		// The note signs the record's exact bytes.

@@ -444,3 +444,103 @@ func FuzzRender(f *testing.F) {
 		}
 	})
 }
+
+// Backslash-escaped ASCII punctuation in a link destination is destination
+// content: decoded, then validated by SafeURL like any other URL (reported by
+// codito, e551c4e1; cases from the report).
+func TestEscapedLinkDestination(t *testing.T) {
+	for _, tc := range []struct{ name, src, href string }{
+		{"escaped-close", `[artifact](https://example.org/release\).zip)`, "https://example.org/release).zip"},
+		{"escaped-open", `[artifact](https://example.org/release\(.zip)`, "https://example.org/release(.zip"},
+		{"escaped-pair", `[artifact](https://example.org/release\(final\).zip)`, "https://example.org/release(final).zip"},
+		{"same-site-escaped-pair", `[artifact](/guide/release\(final\).zip)`, "/guide/release(final).zip"},
+		{"escaped-punctuation", `[artifact](https://example.org/a\!b.zip)`, "https://example.org/a!b.zip"},
+		{"escaped-with-title", `[artifact](https://example.org/a\(b "t")`, "https://example.org/a(b"},
+		{"literal-pair-control", `[artifact](https://example.org/release(final).zip)`, "https://example.org/release(final).zip"},
+		{"percent-encoded-control", `[artifact](https://example.org/release%28final%29.zip)`, "https://example.org/release%28final%29.zip"},
+		{"simple-control", `[artifact](/guide/page)`, "/guide/page"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := render(tc.src)
+			if !strings.Contains(got, `href="`+tc.href+`"`) || !strings.Contains(got, `<bdi>artifact</bdi></a>`) {
+				t.Fatalf("got %q, want a link to %q", got, tc.href)
+			}
+		})
+	}
+}
+
+// Emphasis follows CommonMark 0.31.2's left- and right-flanking delimiter
+// runs (6.2): whitespace and Unicode punctuation on either side, and the
+// intraword limits on _. Cases from the spec's emphasis examples, plus the
+// report (anonymous, 68f0dd6c).
+func TestEmphasisFlanking(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{"Use a*(x + 1)*b for this example.", "Use a*(x + 1)*b for this example."},
+		{"*foo bar*", "<em>foo bar</em>"},
+		{"a * foo bar*", "a * foo bar*"},
+		{`a*"foo"*`, "a*&#34;foo&#34;*"},
+		{"* a *", "* a *"},
+		{"*$*alpha.", "*$*alpha."},
+		{"*£*bravo.", "*£*bravo."},
+		{"*€*charlie.", "*€*charlie."},
+		{"foo*bar*", "foo<em>bar</em>"},
+		{"5*6*78", "5<em>6</em>78"},
+		{"_foo bar_", "<em>foo bar</em>"},
+		{"_ foo bar_", "_ foo bar_"},
+		{`a_"foo"_`, "a_&#34;foo&#34;_"},
+		{"foo_bar_", "foo_bar_"},
+		{"5_6_78", "5_6_78"},
+		{"пристаням_стремятся_", "пристаням_стремятся_"},
+		{`aa_"bb"_cc`, "aa_&#34;bb&#34;_cc"},
+		{"foo-_(bar)_", "foo-<em>(bar)</em>"},
+		{"_foo*", "_foo*"},
+		{"*foo bar *", "*foo bar *"},
+		{"*(*foo)", "*(*foo)"},
+		{"*(*foo*)*", "<em>(<em>foo</em>)</em>"},
+		{"*foo*bar", "<em>foo</em>bar"},
+		{"_(_foo)", "_(_foo)"},
+		{"_(_foo_)_", "<em>(<em>foo</em>)</em>"},
+		{"_foo_bar", "_foo_bar"},
+		{"_foo_bar_baz_", "<em>foo_bar_baz</em>"},
+		{"_(bar)_.", "<em>(bar)</em>."},
+		{"**foo bar**", "<strong>foo bar</strong>"},
+		{"** foo bar**", "** foo bar**"},
+		{`a**"foo"**`, "a**&#34;foo&#34;**"},
+		{"foo**bar**", "foo<strong>bar</strong>"},
+		{"foo__bar__", "foo__bar__"},
+		{"foo-__(bar)__", "foo-<strong>(bar)</strong>"},
+		{"**(**foo)", "**(**foo)"},
+		{"*(**foo**)*", "<em>(<strong>foo</strong>)</em>"},
+	} {
+		got := render(tc.src)
+		if want := "<p>" + tc.want + "</p>"; !strings.Contains(got, want) {
+			t.Errorf("%q: got %q, want %q", tc.src, got, want)
+		}
+	}
+}
+
+// Decoding escapes never turns a refused destination into a link: schemes,
+// protocol-relative hosts, credentials, write paths and literal backslashes
+// stay refused.
+func TestEscapedLinkDestinationStaysSafe(t *testing.T) {
+	for _, src := range []string{
+		`[artifact](https://example.org/a\b.zip)`,  // backslash before a letter stays
+		`[artifact](https://example.org/a\\b.zip)`, // escaped backslash decodes to one
+		`[artifact](/v1/command)`,
+		`[x](javascript\:alert\(1\))`,
+		`[x](javascript\:alert(1))`,
+		`[x](java\script:alert(1))`,
+		`[x](JavaScript&#58;alert(1))`,
+		`[x](data\:text/html,<b>)`,
+		`[x](vbscript\:msgbox)`,
+		`[x](\/\/evil.example/a)`,
+		`[x](/\/evil.example/a)`,
+		`[x](https\:\/\/user\@evil.example/)`,
+		`[x](\/v1\/command)`,
+		`[x](/w\/abc)`,
+	} {
+		if got := render(src); strings.Contains(got, "<a ") {
+			t.Errorf("%q was linked: %q", src, got)
+		}
+	}
+}

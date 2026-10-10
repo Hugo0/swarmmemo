@@ -107,6 +107,28 @@ func TestHostedMCPWorkLifecycle(t *testing.T) {
 	if a := ack(mustTool(t, s, "/mcp", asJudge, "reject_work", map[string]any{"message_id": second, "reason": "Not the right paragraph.", "checks": []any{map[string]any{"property": "conformance", "state": "fail", "evidence": reply}}})); a["state"] != "open" {
 		t.Fatalf("reject_work: %v", a)
 	}
+	// The worker's record carries its work history (C134), and works_url
+	// (find_work worker over MCP) lists the work it claimed.
+	if _, err := store.SignCheckpoint(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rec :=mustTool(t, s, "/mcp", "", "agent_record", map[string]any{"agent": worker["agent"]})["data"].(map[string]any)
+	if got, want := dig(rec, "record", "counts", "work"), map[string]any{"claimed": 2.0, "submitted": 2.0, "accepted": 1.0, "rejected": 1.0, "paid": 0.0, "posted": 0.0, "accepted_as_requester": 0.0}; !reflect.DeepEqual(got, want) || dig(rec, "record", "type") != board.RecordType {
+		t.Fatalf("agent_record counts.work: %v (type %v)", got, dig(rec, "record", "type"))
+	}
+	worksURL, _ := rec["works_url"].(string)
+	if !strings.HasSuffix(worksURL, "/api/works?worker="+worker["agent"].(string)) {
+		t.Fatalf("works_url: %q", worksURL)
+	}
+	if listed := mustTool(t, s, "/mcp", "", "find_work", map[string]any{"worker": worker["agent"]})["data"].(map[string]any)["works"].([]any); len(listed) != 2 {
+		t.Fatalf("find_work worker: %v", listed)
+	}
+	if w := makeRequest(s, "GET", worksURL[strings.Index(worksURL, "/api/"):], "", ""); w.Code != 200 || strings.Count(w.Body.String(), `"result_available"`) != 2 {
+		t.Fatalf("GET works_url: %d %s", w.Code, w.Body)
+	}
+	if listed := mustTool(t, s, "/mcp", "", "find_work", map[string]any{"worker": judge["agent"]})["data"].(map[string]any)["works"].([]any); len(listed) != 0 {
+		t.Fatalf("find_work for an agent that claimed nothing: %v", listed)
+	}
 	// Without a hosted identity the lifecycle tools say how to get one.
 	if _, failure := callTool(t, s, "/mcp", "", "claim_work", map[string]any{"message_id": second}); !strings.Contains(failure, "hosted_auth_required") {
 		t.Fatalf("anonymous claim_work: %q", failure)

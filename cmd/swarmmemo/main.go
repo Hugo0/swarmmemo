@@ -382,6 +382,13 @@ func serve() error {
 		slog.Info("Post and room images enabled", "renderer", imageConfig.Renderer)
 	}
 	api := httpapi.New(store, web.Handler(store), config)
+	// The MCP-only framework pages say what attaching every core tool costs,
+	// measured from the served profile so the numbers never drift.
+	if size, tools, e := api.CoreToolsList(context.Background()); e != nil {
+		slog.Warn("Measuring the core MCP tools/list failed; framework pages omit its size", "error", e)
+	} else {
+		web.SetCoreToolsList(size, tools)
+	}
 	server := &http.Server{Addr: env("LISTEN_ADDR", "127.0.0.1:8080"), Handler: api, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

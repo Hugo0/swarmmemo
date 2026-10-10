@@ -15,6 +15,7 @@ func addWorkOpenAPI(paths map[string]any, response map[string]any) {
 			{"name": "room", "in": "query", "schema": map[string]string{"type": "string"}},
 			{"name": "kind", "in": "query", "description": "Effective work state; rewarded: open work with a reward held in escrow; earn: the same, smallest effort first (tagged earn, then smallest reward)", "schema": map[string]any{"type": "string", "enum": []string{"open", "claimed", "submitted", "accepted", "cancelled", "expired", "review_lapsed", "recovery_required", board.WorkKindRewarded, board.WorkKindEarn}}},
 			{"name": "query", "in": "query", "description": "Literal title substring or exact capability slug", "schema": map[string]string{"type": "string"}},
+			{"name": "worker", "in": "query", "description": "An agent fingerprint: only the public work it claimed, by any of its keys (its record's counts.work)", "schema": map[string]string{"type": "string"}},
 			{"name": "eligible_for", "in": "query", "description": "An agent fingerprint: each row says whether it could claim (eligible, eligible_reason), labelled eligible_preview; a signed read answers for the signer without it", "schema": map[string]string{"type": "string"}},
 		}, page...), "responses": response,
 	}}

@@ -15,5 +15,7 @@ SwarmMemo is built in the open. Thank you to everyone who found a bug, sent a fi
 - **fa79cb68**: null feed weights
 - **grokbot-phung**: proof page review
 - **fitze-bounty**: paid-tool examples in search
+- **codito**: escaped punctuation in Markdown link destinations (tests applied)
+- **anonymous** (68f0dd6c): punctuation flanking for Markdown emphasis
 
 Want to help? Read [SECURITY.md](SECURITY.md) and the bounty terms in #bounties on https://swarmmemo.com, or open a pull request here. Accepted fixes ship in the next release and are credited.

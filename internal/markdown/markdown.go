@@ -1039,13 +1039,7 @@ func tokenize(s string, links bool) []token {
 		case c == '*' || c == '_':
 			n := runLength(s, i, c)
 			flush()
-			before, after := prevRune(s, i), nextRune(s, i+n)
-			open := !unicode.IsSpace(after) && after != utf8.RuneError
-			closeOK := i > 0 && !unicode.IsSpace(before)
-			if c == '_' {
-				open = open && !isWord(before)
-				closeOK = closeOK && !isWord(after)
-			}
+			open, closeOK := flanking(c, prevRune(s, i), nextRune(s, i+n))
 			toks = append(toks, token{kind: tDelim, ch: c, count: n, open: open, close: closeOK})
 			i += n
 			continue
@@ -1120,6 +1114,30 @@ func nextRune(s string, i int) rune {
 
 func isWord(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
 
+// isPunctRune is CommonMark's Unicode punctuation: ASCII punctuation or any
+// character in the Unicode P (punctuation) or S (symbol) categories.
+func isPunctRune(r rune) bool {
+	if r < utf8.RuneSelf {
+		return isPunct(byte(r))
+	}
+	return unicode.IsPunct(r) || unicode.IsSymbol(r)
+}
+
+// flanking reports whether a delimiter run of c between the runes before and
+// after it can open and can close emphasis (CommonMark 0.31.2 6.2). The start
+// and end of the text count as whitespace. Invalid UTF-8 after a run never
+// opens.
+func flanking(c byte, before, after rune) (open, closeOK bool) {
+	spaceB, spaceA := unicode.IsSpace(before), unicode.IsSpace(after)
+	punctB, punctA := isPunctRune(before), isPunctRune(after)
+	left := !spaceA && after != utf8.RuneError && (!punctA || spaceB || punctB)
+	right := !spaceB && (!punctB || spaceA || punctA)
+	if c == '_' {
+		return left && (!right || punctB), right && (!left || punctA)
+	}
+	return left, right
+}
+
 func codeSpan(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	if len(s) >= 2 && s[0] == ' ' && s[len(s)-1] == ' ' && strings.Trim(s, " ") != "" {
@@ -1187,14 +1205,21 @@ func matchBrackets(s string) map[int]int {
 }
 
 // destination reads "(url)" or "(url "title")" starting after the "(".
+// A backslash before ASCII punctuation escapes it (CommonMark 6.3): the pair
+// is destination content, never structure, and is decoded before the caller
+// validates the URL. A backslash before anything else stays, and SafeURL
+// refuses it.
 func destination(s string, i int) (string, int, bool) {
 	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
 		i++
 	}
-	start, depth := i, 0
+	start, depth, escaped := i, 0, false
 	for ; i < len(s) && i-start <= maxURLBytes; i++ {
 		c := s[i]
-		if c == '(' {
+		if c == '\\' && i+1 < len(s) && isPunct(s[i+1]) {
+			i++
+			escaped = true
+		} else if c == '(' {
 			// CommonMark's bound. Without it each "[](" candidate scanned
 			// maxURLBytes through the "[](" candidates after it.
 			if depth++; depth > maxParenDepth {
@@ -1210,6 +1235,9 @@ func destination(s string, i int) (string, int, bool) {
 		}
 	}
 	dest := s[start:i]
+	if escaped {
+		dest = unescapePunct(dest)
+	}
 	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
 		i++
 	}
@@ -1228,6 +1256,18 @@ func destination(s string, i int) (string, int, bool) {
 		return "", 0, false
 	}
 	return dest, i + 1, true
+}
+
+// unescapePunct drops the backslash of each backslash-punctuation pair.
+func unescapePunct(s string) string {
+	b := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && isPunct(s[i+1]) {
+			i++
+		}
+		b = append(b, s[i])
+	}
+	return string(b)
 }
 
 // bareURL measures an http(s) URL in running text, leaving trailing

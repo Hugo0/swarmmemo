@@ -1402,12 +1402,62 @@ type LogRecord struct {
 	Keys        []RecordKey    `json:"keys"`
 	Handles     []RecordHandle `json:"handles"`
 	Bindings    []RecordLink   `json:"bindings"`
-	Counts      map[string]int `json:"counts"`
+	Counts      RecordCounts   `json:"counts"`
 	FirstSeen   int64          `json:"first_seen"`
 	LastSeen    int64          `json:"last_seen"`
 	Checkpoint  LogCheckpoint  `json:"checkpoint"`
 	Proofs      []LogInclusion `json:"proofs"`
 }
+
+// RecordType is the record's format: v2 made counts an object with the
+// nested work history (counts.work); v1's counts held numbers only.
+const RecordType = "swarmmemo.record/v2"
+
+// RecordCounts are a record's tallies, in the key order v1's counts had.
+type RecordCounts struct {
+	KeyEvents      int        `json:"key_events"`
+	LogEntries     int        `json:"log_entries"`
+	PublicMessages int        `json:"public_messages"`
+	Work           RecordWork `json:"work"`
+}
+
+// RecordWork is an agent's work history on public, non-simulated work items
+// whose request is not hidden: as the worker, the claims its keys (or
+// grants it issued) signed and the results it submitted, with the verdict
+// on each (accepted, of which paid when a credit reward was paid; rejected);
+// as the requester, the items it posted and how many it accepted.
+type RecordWork struct {
+	Claimed             int64 `json:"claimed"`
+	Submitted           int64 `json:"submitted"`
+	Accepted            int64 `json:"accepted"`
+	Rejected            int64 `json:"rejected"`
+	Paid                int64 `json:"paid"`
+	Posted              int64 `json:"posted"`
+	AcceptedAsRequester int64 `json:"accepted_as_requester"`
+}
+
+// recordWorkSQL is RecordWork in one statement: the account's transitions
+// by the work_transitions(author,operation) index (its keys and its grants'
+// child keys), each submit's verdict by the primary key (the next
+// transition), and its requested work by works(requester,state). Every
+// argument is the account.
+const recordWorkSQL = `SELECT
+ coalesce(sum(t.operation='work.claim'),0),
+ coalesce(sum(t.state='submitted'),0),
+ coalesce(sum(t.state='submitted' AND v.operation='work.accept'),0),
+ coalesce(sum(t.state='submitted' AND v.operation='work.reject'),0),
+ coalesce(sum(t.state='submitted' AND v.operation='work.accept' AND EXISTS(SELECT 1 FROM work_rewards wr WHERE wr.work_id=t.work_id AND wr.state IN ('paid','pending'))),0),
+ (SELECT count(*) FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room WHERE w.requester=? AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0),
+ (SELECT count(*) FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room WHERE w.requester=? AND w.state='accepted' AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0)
+ FROM work_transitions t JOIN events e ON e.id=t.work_id JOIN rooms rm ON rm.name=e.room
+ LEFT JOIN work_transitions v ON v.work_id=t.work_id AND v.sequence=t.sequence+1
+ WHERE t.operation IN ('work.claim','work.submit') AND t.author IN (` + workerAuthorsSQL + `)
+ AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0`
+
+// workerAuthorsSQL names the keys whose work transitions are an account's:
+// its own keys and the child keys of the grants it issued (one argument,
+// the account, twice).
+const workerAuthorsSQL = `SELECT id FROM identities WHERE account=? UNION ALL SELECT child_id FROM delegations WHERE parent_account=?`
 
 type RecordKey struct {
 	Fingerprint string `json:"fingerprint"`
@@ -1469,7 +1519,7 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 	if err != nil {
 		return SignedRecord{}, err
 	}
-	r := LogRecord{Type: "swarmmemo.record/v1", Service: s.config.ServiceID, GeneratedAt: s.now().Unix(), Account: account, Keys: []RecordKey{}, Handles: []RecordHandle{}, Bindings: []RecordLink{}, Counts: map[string]int{}, Checkpoint: cp, Proofs: []LogInclusion{}}
+	r := LogRecord{Type: RecordType, Service: s.config.ServiceID, GeneratedAt: s.now().Unix(), Account: account, Keys: []RecordKey{}, Handles: []RecordHandle{}, Bindings: []RecordLink{}, Checkpoint: cp, Proofs: []LogInclusion{}}
 	rows, err := s.db.QueryContext(ctx, "SELECT id,public_key,created_at,successor,handle,last_seen FROM identities WHERE account=? ORDER BY created_at,id", account)
 	if err != nil {
 		return SignedRecord{}, err
@@ -1548,7 +1598,11 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 	if err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM tlog_leaves WHERE subject IN ("+placeholders+") AND subject<>''", args...).Scan(&logged); err != nil {
 		return SignedRecord{}, err
 	}
-	r.Counts["public_messages"], r.Counts["log_entries"], r.Counts["key_events"] = messages, logged, len(events)
+	r.Counts.PublicMessages, r.Counts.LogEntries, r.Counts.KeyEvents = messages, logged, len(events)
+	w := &r.Counts.Work
+	if err = s.db.QueryRowContext(ctx, recordWorkSQL, account, account, account, account).Scan(&w.Claimed, &w.Submitted, &w.Accepted, &w.Rejected, &w.Paid, &w.Posted, &w.AcceptedAsRequester); err != nil {
+		return SignedRecord{}, err
+	}
 	if len(events) > recordProofsMax {
 		events = events[len(events)-recordProofsMax:]
 	}

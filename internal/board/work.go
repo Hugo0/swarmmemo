@@ -34,7 +34,15 @@ CREATE TABLE IF NOT EXISTS work_transitions (
  signature TEXT NOT NULL, payload TEXT NOT NULL, accepted_at INTEGER NOT NULL,
  fence INTEGER NOT NULL, generation TEXT NOT NULL, state TEXT NOT NULL,
  PRIMARY KEY(work_id,sequence));
-` + workRewardSchema
+` + workRecordIndexes + workRewardSchema
+
+// workRecordIndexes (schema 23) serve an agent's work history: the
+// transitions its keys signed, by author (the record's counts.work and
+// works.list worker), and the work it requested, by requester.
+const workRecordIndexes = `
+CREATE INDEX IF NOT EXISTS work_transitions_author ON work_transitions(author,operation);
+CREATE INDEX IF NOT EXISTS works_requester ON works(requester,state);
+`
 
 const WorkDefaultTTL int64 = 7 * 86400
 const WorkMaxTTL int64 = 30 * 86400
@@ -1171,37 +1179,49 @@ func (s *Store) PublicOpenRewardedWork(ctx context.Context) (int, error) {
 }
 
 // worksListData is works.list's optional data: eligible_for, the agent to
-// answer eligibility for on each row.
-func worksListData(raw string) (string, error) {
+// answer eligibility for on each row, and worker, the agent whose work to
+// list (the items it claimed, public only). Each is optional, but data names
+// at least one.
+func worksListData(raw string) (eligibleFor, worker string, err error) {
 	if raw == "" {
-		return "", nil
+		return "", "", nil
 	}
 	var d struct {
-		Schema      int    `json:"schema"`
-		EligibleFor string `json:"eligible_for"`
+		Schema      int     `json:"schema"`
+		EligibleFor *string `json:"eligible_for"`
+		Worker      *string `json:"worker"`
 	}
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
-	const rule = `works.list data is {"schema":1,"eligible_for":AGENT_FINGERPRINT}.`
 	if len(raw) > 512 {
-		return "", problem(400, "invalid_work_data", rule)
+		return "", "", problem(400, "invalid_work_data", WorksListDataRule)
 	}
-	err := dec.Decode(&d)
+	err = dec.Decode(&d)
 	var te *json.UnmarshalTypeError
 	if quoted, ok := strings.CutPrefix(fmt.Sprint(err), "json: unknown field "); ok {
 		name, _ := strconv.Unquote(quoted)
 		if services.EchoesArg(name) {
-			return "", problem(400, "invalid_work_data", name+" is not a field works.list data takes. "+rule)
+			return "", "", problem(400, "invalid_work_data", name+" is not a field works.list data takes. "+WorksListDataRule)
 		}
-		return "", problem(400, "invalid_work_data", "A field was sent that works.list data does not take. "+rule)
-	} else if errors.As(err, &te) && (te.Field == "schema" || te.Field == "eligible_for") {
-		return "", problem(400, "invalid_work_data", te.Field+" must be "+services.JSONTypeName(te.Type)+". "+rule)
+		return "", "", problem(400, "invalid_work_data", "A field was sent that works.list data does not take. "+WorksListDataRule)
+	} else if errors.As(err, &te) && (te.Field == "schema" || te.Field == "eligible_for" || te.Field == "worker") {
+		return "", "", problem(400, "invalid_work_data", te.Field+" must be "+services.JSONTypeName(te.Type)+". "+WorksListDataRule)
 	}
-	if err != nil || dec.More() || d.Schema != 1 || !fingerprintRE.MatchString(d.EligibleFor) {
-		return "", problem(400, "invalid_work_data", rule)
+	valid := func(v *string) bool { return v == nil || fingerprintRE.MatchString(*v) }
+	if err != nil || dec.More() || d.Schema != 1 || (d.EligibleFor == nil && d.Worker == nil) || !valid(d.EligibleFor) || !valid(d.Worker) {
+		return "", "", problem(400, "invalid_work_data", WorksListDataRule)
 	}
-	return d.EligibleFor, nil
+	if d.EligibleFor != nil {
+		eligibleFor = *d.EligibleFor
+	}
+	if d.Worker != nil {
+		worker = *d.Worker
+	}
+	return eligibleFor, worker, nil
 }
+
+// WorksListDataRule is works.list data's shape, the line its refusals end with.
+const WorksListDataRule = `works.list data is {"schema":1,"eligible_for":AGENT_FINGERPRINT,"worker":AGENT_FINGERPRINT}, either field optional.`
 
 func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -1266,7 +1286,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	}
 	// Each row answers eligibility for the agent data names, else the signer.
 	// The facts are read once for the page, not per row.
-	eligibleFor, err := worksListData(c.Data)
+	eligibleFor, worker, err := worksListData(c.Data)
 	if err != nil {
 		return Result{}, err
 	}
@@ -1285,7 +1305,19 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 			return Result{}, err
 		}
 	}
-	scopeBytes, _ := json.Marshal([]string{c.Room, c.Kind, c.Query, c.Target})
+	// worker (data) is part of the scope only when set, so a cursor from
+	// before it existed still decodes.
+	workerAccount := ""
+	if worker != "" {
+		if workerAccount, err = lookupAccount(ctx, tx, worker); err != nil {
+			return Result{}, err
+		}
+	}
+	scopeParts := []string{c.Room, c.Kind, c.Query, c.Target}
+	if worker != "" {
+		scopeParts = append(scopeParts, "worker:"+worker)
+	}
+	scopeBytes, _ := json.Marshal(scopeParts)
 	scope := string(scopeBytes)
 	cursor, err := s.decodeConversationCursor(c.Cursor, "works.list", scope)
 	if err != nil {
@@ -1305,6 +1337,13 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		args = append(args, c.Room)
 	} else {
 		where += ` AND r.visibility='public' AND e.kind<>'simulation'`
+	}
+	if workerAccount != "" {
+		// An agent's work as the worker (the record's counts.work): items it
+		// claimed, by any of its keys or its grants' keys, by the author
+		// index. Public items only, even in a named room the reader may read.
+		where += ` AND r.visibility='public' AND e.kind<>'simulation' AND w.id IN (SELECT t.work_id FROM work_transitions t WHERE t.operation='work.claim' AND t.author IN (` + workerAuthorsSQL + `))`
+		args = append(args, workerAccount, workerAccount)
 	}
 	switch c.Kind {
 	case "":

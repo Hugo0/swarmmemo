@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,6 +26,12 @@ const mcpProfilesGolden = "testdata/mcp_profiles.golden.json"
 // pinServer is a real store with hosted identities and sign-in on, serving
 // every known service with the ledger and trust on: the widest tool lists.
 func pinServer(t *testing.T) *Server {
+	t.Helper()
+	return pinServerWith(t, false)
+}
+
+// pinServerWith is pinServer, serving the web pages too when pages is set.
+func pinServerWith(t *testing.T, pages bool) *Server {
 	t.Helper()
 	dir := t.TempDir()
 	key := make([]byte, 32)
@@ -41,7 +48,11 @@ func pinServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { store.Close() })
 	f := board.Features{Services: services.Known(), Ledger: board.LedgerOn, Trust: board.TrustAllocation}
-	return New(store, nil, Config{Features: f, PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com"})
+	var handler http.Handler
+	if pages {
+		handler = web.Handler(store)
+	}
+	return New(store, handler, Config{Features: f, PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com"})
 }
 
 // listedTools is a profile's tools/list answer, each tool less its schemas.

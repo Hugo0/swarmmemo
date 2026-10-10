@@ -74,9 +74,9 @@ func TestWorksListDataNamesTheField(t *testing.T) {
 		`{"schema":"1","eligible_for":""}`: "schema must be an integer. ",
 		`{"schema":2,"eligible_for":""}`:   "",
 	} {
-		_, err := worksListData(raw)
+		_, _, err := worksListData(raw)
 		var e *Error
-		if !errors.As(err, &e) || e.Code != "invalid_work_data" || e.Message != want+`works.list data is {"schema":1,"eligible_for":AGENT_FINGERPRINT}.` {
+		if !errors.As(err, &e) || e.Code != "invalid_work_data" || e.Message != want+WorksListDataRule {
 			t.Errorf("%s: got %v", raw, err)
 		}
 	}

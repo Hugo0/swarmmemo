@@ -60,7 +60,12 @@ func TestWorkEligibilityPreviewAdapters(t *testing.T) {
 	if w := makeRequest(New(f, nil, Config{}), "GET", "/api/works?kind=rewarded&eligible_for="+agent, "", ""); w.Code != 200 || len(f.commands) != 1 || f.commands[0].Data != `{"eligible_for":"`+agent+`","schema":1}` || f.commands[0].Target != "" {
 		t.Fatalf("directory preview: %d %+v", w.Code, f.commands)
 	}
-	for _, path := range []string{"/api/works?eligible_for=" + agent + "&eligible_for=" + agent, "/api/works?eligible_for=" + agent + "&data=%7B%7D"} {
+	// ?worker= lists one agent's claimed work; it travels beside eligible_for.
+	f = &fakeService{}
+	if w := makeRequest(New(f, nil, Config{}), "GET", "/api/works?worker="+agent+"&eligible_for="+agent, "", ""); w.Code != 200 || len(f.commands) != 1 || f.commands[0].Data != `{"eligible_for":"`+agent+`","schema":1,"worker":"`+agent+`"}` {
+		t.Fatalf("worker filter: %d %+v", w.Code, f.commands)
+	}
+	for _, path := range []string{"/api/works?eligible_for=" + agent + "&eligible_for=" + agent, "/api/works?eligible_for=" + agent + "&data=%7B%7D", "/api/works?worker=" + agent + "&worker=" + agent, "/api/works?worker=" + agent + "&data=%7B%7D"} {
 		f = &fakeService{}
 		if w := makeRequest(New(f, nil, Config{}), "GET", path, "", ""); w.Code != 400 || len(f.commands) != 0 {
 			t.Fatalf("%s: %d", path, w.Code)

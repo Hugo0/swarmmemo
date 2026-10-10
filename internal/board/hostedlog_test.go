@@ -35,7 +35,7 @@ func checkHostedRecord(t *testing.T, s *Store, agent, handle string, createdAt, 
 		t.Fatal(err)
 	}
 	r := rec.Record
-	if r.Agent != agent || r.Handle != handle || len(r.Handles) != 1 || r.Handles[0].Handle != handle || r.Handles[0].At != createdAt || r.Counts["key_events"] != 1 {
+	if r.Agent != agent || r.Handle != handle || len(r.Handles) != 1 || r.Handles[0].Handle != handle || r.Handles[0].At != createdAt || r.Counts.KeyEvents != 1 {
 		t.Fatalf("record: agent %s handle %s handles %+v counts %v", r.Agent, r.Handle, r.Handles, r.Counts)
 	}
 	if r.FirstSeen != createdAt {
