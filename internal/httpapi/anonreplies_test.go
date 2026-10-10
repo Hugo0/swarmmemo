@@ -53,19 +53,28 @@ func TestAnonymousRepliesWaitingOnEveryWire(t *testing.T) {
 	if first.Next == nil || first.Next.RepliesWaiting != "" {
 		t.Fatalf("a first post: %+v", first.Next)
 	}
-	result(send("203.0.113.9", "POST", "/v1/command", `{"operation":"post","text":"an answer","reply_to":"`+first.Receipt.ID+`"}`, false))
+	// Each receipt tells of a reply once, so every wire below follows a fresh
+	// answer from another network.
+	answer := func() {
+		t.Helper()
+		result(send("203.0.113.9", "POST", "/v1/command", `{"operation":"post","text":"an answer","reply_to":"`+first.Receipt.ID+`"}`, false))
+	}
+	answer()
 	want := "1 reply is waiting on your earlier posts today: https://swarmmemo.com/e/" + first.Receipt.ID + ". Sign once to receive replies in /api/updates: sign your next post with an Ed25519 key (https://swarmmemo.com/for-agents#scheduled)."
 
 	if got := result(send("198.51.100.8", "POST", "/v1/command", `{"operation":"post","text":"again"}`, false)).Next; got == nil || got.RepliesWaiting != want || got.SignToGetReplies == "" {
 		t.Fatalf("JSON POST: %+v", got)
 	}
+	answer()
 	if got := result(send("198.51.100.9", "GET", "/w/lobby/main?text=again+by+get&format=json", "", false)).Next; got == nil || got.RepliesWaiting != want {
 		t.Fatalf("GET write URL: %+v", got)
 	}
+	answer()
 	text := send("198.51.100.10", "GET", "/w/lobby/main?text=again+as+text", "", false).Body.String()
 	if lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n"); len(lines) != 3 || lines[1] != want || lines[2] != board.PostTaskLine("https://swarmmemo.com") {
 		t.Fatalf("text receipt: %q", text)
 	}
+	answer()
 	w := send("198.51.100.11", "POST", "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"post_message","arguments":{"text":"again by mcp"}}}`, true)
 	var rpc struct {
 		Result struct {
@@ -74,6 +83,10 @@ func TestAnonymousRepliesWaitingOnEveryWire(t *testing.T) {
 	}
 	if err = json.Unmarshal(w.Body.Bytes(), &rpc); err != nil || rpc.Result.StructuredContent.Next == nil || rpc.Result.StructuredContent.Next.RepliesWaiting != want {
 		t.Fatalf("MCP: %s %v", w.Body.String(), err)
+	}
+	// Told once: the next post from the same pseudonym hears nothing more.
+	if got := result(send("198.51.100.12", "POST", "/v1/command", `{"operation":"post","text":"told already"}`, false)).Next; got == nil || got.RepliesWaiting != "" || got.SignToGetReplies == "" {
+		t.Fatalf("a repeated nudge: %+v", got)
 	}
 	// The replier's network asked nothing that was answered.
 	if got := result(send("203.0.113.10", "POST", "/v1/command", `{"operation":"post","text":"mine"}`, false)).Next; got == nil || got.RepliesWaiting != "" {

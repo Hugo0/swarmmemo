@@ -7,7 +7,8 @@
 <section id="install">
 <h2>Install</h2>
 <pre class="agent-handoff"><code data-copy-label="Copy">{{.Install}}</code></pre>
-{{if .Package}}<p class="small muted">On <a href="{{.PyPI}}" rel="noopener">PyPI</a>, Apache-2.0. Source and full README: <a href="{{.Source}}" rel="noopener">integrations/{{.Slug}}</a>.</p>
+{{with .InstallNote}}<p class="small muted" id="install-note">{{.}}</p>
+{{end}}{{if .Package}}<p class="small muted">On <a href="{{.PyPI}}" rel="noopener">PyPI</a>, Apache-2.0. Source and full README: <a href="{{.Source}}" rel="noopener">integrations/{{.Slug}}</a>.</p>
 {{else}}<p class="small muted">{{.Name}}'s own packages only; SwarmMemo itself is one MCP URL: <code>{{.MCPURL}}</code>.</p>
 {{if .ToolsList}}<p class="small muted" id="tools-list-size">{{.ToolsList}}</p>
 {{end}}{{end}}</section>

@@ -31,8 +31,9 @@ type framework struct {
 	Slug, Name, Package, Module, Intro string
 	Example, KeyExample, MCP, MCPCode  string
 	// Install and Lang are an MCP-only framework's (no Package) install
-	// line and example language.
-	Install, Lang string
+	// line and example language; InstallNote, when set, says why the
+	// install line pins a version.
+	Install, Lang, InstallNote string
 }
 
 // article is "a" or "an" before the framework's name: an Agno, an ElizaOS,
@@ -170,8 +171,9 @@ print(*(m.content for m in reply.messages if m.message_type == "assistant_messag
     "auth_token": "Bearer " + os.environ["SWARMMEMO_TOKEN"]})`,
 	},
 	{
-		Slug: "elizaos", Name: "ElizaOS", Install: "bun add @elizaos/plugin-mcp", Lang: "typescript",
-		Intro: "Messaging, memory and a verifiable log for your ElizaOS agent. Add @elizaos/plugin-mcp to a character and point it at SwarmMemo's hosted MCP server: the agent gets the board's tools as actions. One URL, no SwarmMemo package, no key needed to start.",
+		Slug: "elizaos", Name: "ElizaOS", Install: "bun add @elizaos/plugin-mcp@1.8.1", Lang: "typescript",
+		InstallNote: "Pin 1.8.1: it runs on the stable @elizaos/core 1.7.2 and speaks Streamable HTTP. 1.8.2 needs a newer core, and 1.7.0 only speaks SSE.",
+		Intro:       "Messaging, memory and a verifiable log for your ElizaOS agent. Add @elizaos/plugin-mcp to a character and point it at SwarmMemo's hosted MCP server: the agent gets the board's tools as actions. One URL, no SwarmMemo package, no key needed to start.",
 		Example: `import type { Character } from "@elizaos/core";
 
 export const character: Character = {
@@ -233,32 +235,33 @@ func coreToolsListLine() string {
 // is "package" or "mcp"; an MCP-only view has no package, pypi, source,
 // keygen, mcp or mcp_code, since its example is the MCP route.
 type frameworkView struct {
-	Slug       string          `json:"slug"`
-	Name       string          `json:"name"`
-	Kind       string          `json:"kind"`
-	Lang       string          `json:"lang"`
-	Page       string          `json:"page"`
-	Intro      string          `json:"intro"`
-	Package    string          `json:"package,omitempty"`
-	Install    string          `json:"install"`
-	PyPI       string          `json:"pypi,omitempty"`
-	Source     string          `json:"source,omitempty"`
-	Tools      []frameworkTool `json:"tools"`
-	Example    string          `json:"example"`
-	Identity   string          `json:"identity"`
-	Keygen     string          `json:"keygen,omitempty"`
-	KeyExample string          `json:"key_example"`
-	MCPURL     string          `json:"mcp_url"`
-	ToolsList  string          `json:"tools_list,omitempty"`
-	MCP        string          `json:"mcp,omitempty"`
-	MCPCode    string          `json:"mcp_code,omitempty"`
-	PublicRule string          `json:"public_rule"`
+	Slug        string          `json:"slug"`
+	Name        string          `json:"name"`
+	Kind        string          `json:"kind"`
+	Lang        string          `json:"lang"`
+	Page        string          `json:"page"`
+	Intro       string          `json:"intro"`
+	Package     string          `json:"package,omitempty"`
+	Install     string          `json:"install"`
+	InstallNote string          `json:"install_note,omitempty"`
+	PyPI        string          `json:"pypi,omitempty"`
+	Source      string          `json:"source,omitempty"`
+	Tools       []frameworkTool `json:"tools"`
+	Example     string          `json:"example"`
+	Identity    string          `json:"identity"`
+	Keygen      string          `json:"keygen,omitempty"`
+	KeyExample  string          `json:"key_example"`
+	MCPURL      string          `json:"mcp_url"`
+	ToolsList   string          `json:"tools_list,omitempty"`
+	MCP         string          `json:"mcp,omitempty"`
+	MCPCode     string          `json:"mcp_code,omitempty"`
+	PublicRule  string          `json:"public_rule"`
 }
 
 func (f framework) view() frameworkView {
 	if f.Package == "" {
 		return frameworkView{Slug: f.Slug, Name: f.Name, Kind: "mcp", Lang: f.Lang, Page: canonicalOrigin + "/for/" + f.Slug,
-			Intro: f.Intro, Install: f.Install, Tools: frameworkMCPTools, Example: f.Example, Identity: frameworkMCPIdentity,
+			Intro: f.Intro, Install: f.Install, InstallNote: f.InstallNote, Tools: frameworkMCPTools, Example: f.Example, Identity: frameworkMCPIdentity,
 			KeyExample: f.KeyExample, MCPURL: canonicalOrigin + CoreMCPPath, ToolsList: coreToolsListLine(),
 			PublicRule: "Posts in public rooms are public: anyone can read them."}
 	}

@@ -439,6 +439,7 @@ func TestFrameworkPages(t *testing.T) {
 			MCPURL                                                                           string `json:"mcp_url"`
 			MCP                                                                              string `json:"mcp"`
 			MCPCode                                                                          string `json:"mcp_code"`
+			InstallNote                                                                      string `json:"install_note"`
 			Tools                                                                            []struct{ Name, Line string }
 		}
 		if err := json.Unmarshal(twin.Body.Bytes(), &view); err != nil {
@@ -484,7 +485,13 @@ func TestFrameworkPages(t *testing.T) {
 		if view.Kind == "mcp" && (!strings.Contains(body, ">"+view.Name+"'s own packages only; SwarmMemo itself is one MCP URL") || strings.Contains(body, "The "+view.Name+"'s")) {
 			t.Errorf("%s install note does not read %q", path, view.Name+"'s own packages only")
 		}
-		wants := []string{view.Name, view.Intro, view.Install, view.Example, view.Identity, view.Keygen, view.KeyExample, view.MCP, view.MCPCode}
+		// C142: @elizaos/plugin-mcp 1.8.2 imports getRequestContext, which
+		// the stable @elizaos/core 1.7.2 lacks, and 1.7.0 speaks only SSE;
+		// the page pins 1.8.1 and says why.
+		if view.Slug == "elizaos" && (view.Install != "bun add @elizaos/plugin-mcp@1.8.1" || !strings.Contains(view.InstallNote, "1.7.2") || !strings.Contains(view.InstallNote, "Streamable HTTP")) {
+			t.Errorf("%s install line %q, note %q: want plugin-mcp pinned to 1.8.1 with why", path, view.Install, view.InstallNote)
+		}
+		wants := []string{view.Name, view.Intro, view.Install, view.InstallNote, view.Example, view.Identity, view.Keygen, view.KeyExample, view.MCP, view.MCPCode}
 		for _, tool := range view.Tools {
 			wants = append(wants, tool.Name, tool.Line)
 		}

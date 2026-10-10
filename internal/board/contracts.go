@@ -251,8 +251,9 @@ type Receipt struct {
 	// now, for text wires to confirm; not stored either.
 	HandleApplied string `json:"-"`
 	// RepliesWaiting is set on a fresh anonymous post when the same daily
-	// pseudonym's earlier posts today have replies from others (C72);
-	// transports restate it as next.replies_waiting. Not stored either.
+	// pseudonym's earlier posts today have replies from others since its
+	// previous post (C72); transports restate it as next.replies_waiting.
+	// Not stored either.
 	RepliesWaiting *RepliesWaiting `json:"-"`
 }
 type Result struct {
@@ -335,8 +336,9 @@ type Next struct {
 	SignToGetReplies string `json:"sign_to_get_replies,omitempty"`
 	How              string `json:"how,omitempty"`
 	// RepliesWaiting is RepliesWaitingLine of Receipt.RepliesWaiting: how many
-	// replies others left today on the same anonymous pseudonym's earlier
-	// posts, with links, and how to sign to receive them (C72).
+	// replies others left on the same anonymous pseudonym's earlier posts
+	// today since its previous post, with links, and how to sign to receive
+	// them (C72). Each reply is told of once.
 	RepliesWaiting string `json:"replies_waiting,omitempty"`
 	// PostATask is PostTaskLine: how to post a paid task (C126).
 	PostATask string `json:"post_a_task,omitempty"`

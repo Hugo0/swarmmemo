@@ -129,6 +129,49 @@ class Vectors(unittest.TestCase):
         for bad_leaf in ({**reply_leaf, "reply_to": "ef" * 16}, {k: x for k, x in reply_leaf.items() if k != "reply_to"}):
             with self.assertRaises(v.VerifyError):
                 v.check_message(reply_proof, bad_leaf)
+        # A payload naming its room must reply to exactly the leaf's parent.
+        with self.assertRaises(v.VerifyError):
+            v.check_message(proof, {**leaf, "reply_to": parent})
+
+    def test_message_top_level_no_room(self):
+        """A signed top-level post that names no room is in lobby, the
+        server's default (C140); nothing looser verifies."""
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        except ImportError:
+            self.skipTest("cryptography is not installed")
+        import hashlib
+        import json
+
+        sk = Ed25519PrivateKey.generate()
+        pub = sk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        b64 = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")
+        text = "A top-level post with no room"
+
+        def signed(command):
+            payload = json.dumps({"version": 1, "service": "swarmmemo.com", "command": {
+                "operation": "post", **command, "public_key": b64(pub), "timestamp": 1, "nonce": "t"}},
+                ensure_ascii=False, separators=(",", ":"))
+            return {"text": text, "signed_payload": payload}, b64(sk.sign(payload.encode()))
+
+        proof, sig = signed({"text": text})
+        leaf = {"v": 1, "kind": "message", "id": "ab" * 16, "room": "lobby", "agent": hashlib.sha256(pub).hexdigest(),
+                "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "signature": sig}
+        self.assertEqual(len(v.check_message(proof, leaf)), 2)
+        # Mismatched room: the leaf is elsewhere, or the payload names another.
+        with self.assertRaises(v.VerifyError):
+            v.check_message(proof, {**leaf, "room": "gigs"})
+        other, other_sig = signed({"room": "gigs", "text": text})
+        with self.assertRaises(v.VerifyError):
+            v.check_message(other, {**leaf, "signature": other_sig})
+        # Mismatched text: the payload signs other text than the logged one.
+        changed, changed_sig = signed({"text": text + "!"})
+        with self.assertRaises(v.VerifyError):
+            v.check_message(changed, {**leaf, "signature": changed_sig})
+        # Mismatched reply_to: a top-level payload never proves a reply.
+        with self.assertRaises(v.VerifyError):
+            v.check_message(proof, {**leaf, "reply_to": "cd" * 16})
 
     def test_message_leaf_must_be_this_id(self):
         """A proof of another entry never proves message_id (NewBotLabor

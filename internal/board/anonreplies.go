@@ -13,6 +13,9 @@ import (
 // the receipt of its next post, so that receipt says which of its earlier
 // posts today have been answered (C72). "Its" means the same stored daily
 // pseudonym (events.account, the value AnonTag shows), never an address.
+// Each reply is told of once: only replies stored after the pseudonym's
+// previous post (seq above that post's seq) are new, since that post's
+// receipt already told of the older ones. Nothing is stored for it.
 
 const (
 	// anonRepliesScan bounds how many of the pseudonym's newest posts are
@@ -23,7 +26,8 @@ const (
 )
 
 // RepliesWaiting is what a fresh anonymous post's receipt carries when the
-// same pseudonym's earlier posts today have replies from others: Replies
+// same pseudonym's earlier posts today have replies from others that no
+// earlier receipt told of: Replies
 // counted (bounded by the scan) and the answered posts' IDs, newest first,
 // at most anonRepliesLinks. Not serialised, so an exact retry never repeats it.
 type RepliesWaiting struct {
@@ -32,19 +36,31 @@ type RepliesWaiting struct {
 }
 
 // repliesWaiting reads, inside the post's transaction, the replies others
-// left today on the pseudonym's earlier posts in public rooms. It reads
-// events through events_author (account,seq) for at most anonRepliesScan
-// rows and counts replies through events_reply (reply_to,room,seq).
+// left today on the pseudonym's earlier posts in public rooms since its
+// previous post. It reads one row, the previous post, then at most
+// anonRepliesScan rows through events_author (account,seq), and counts
+// replies through events_reply (reply_to,room,seq) with seq as the range.
 func repliesWaiting(ctx context.Context, tx *sql.Tx, account, posted string, now int64) (*RepliesWaiting, error) {
 	if account == "" {
 		return nil, nil
 	}
 	day := now - now%86400
-	rows, err := tx.QueryContext(ctx, `SELECT p.id, p.room, (SELECT count(*) FROM events r WHERE r.reply_to=p.id AND r.room=p.room AND r.account<>p.account AND r.hidden=0 AND r.supersedes='')
+	// told is the seq of the pseudonym's previous post today: its receipt
+	// told of every reply stored before it. No such post, nothing to tell.
+	// Both reads walk events_author newest first and stop at a fixed count,
+	// so "today" is checked on the rows read, never used to seek.
+	var told, at int64
+	err := tx.QueryRowContext(ctx, `SELECT seq, created_at FROM events WHERE account=? AND id<>? ORDER BY seq DESC LIMIT 1`, account, posted).Scan(&told, &at)
+	if err == sql.ErrNoRows || (err == nil && at < day) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT p.id, p.room, (SELECT count(*) FROM events r WHERE r.reply_to=p.id AND r.room=p.room AND r.seq>? AND r.account<>p.account AND r.hidden=0 AND r.supersedes='')
 FROM (SELECT seq, id, room, account, created_at, hidden, supersedes FROM events WHERE account=? AND id<>? ORDER BY seq DESC LIMIT ?) p
 JOIN rooms ro ON ro.name=p.room AND ro.visibility='public'
 WHERE p.created_at>=? AND p.hidden=0 AND p.supersedes=''
-ORDER BY p.seq DESC`, account, posted, anonRepliesScan, day)
+ORDER BY p.seq DESC`, told, account, posted, anonRepliesScan, day)
 	if err != nil {
 		return nil, err
 	}

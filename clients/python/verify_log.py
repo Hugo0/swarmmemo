@@ -199,12 +199,14 @@ def check_message(proof: dict, leaf: dict) -> list[str]:
         Ed25519PublicKey.from_public_bytes(pub).verify(b64url(leaf["signature"]), payload.encode())
     except InvalidSignature:
         raise VerifyError("the signature does not verify over signed_payload") from None
-    # A reply that names no room is posted to its parent's room: then the
-    # payload must reply to the leaf's parent.
-    room = cmd.get("room") or None
-    if room is None and cmd.get("reply_to") and cmd.get("reply_to") == leaf.get("reply_to"):
-        room = leaf.get("room")
-    if cmd.get("operation") != "post" or cmd.get("text", "") != text or room != leaf.get("room"):
+    # The server's placement of a post that names no room (board.Store.post):
+    # a reply goes to its parent's public room (or lobby), which only the
+    # leaf records, so it is the leaf's room; a top-level post goes to lobby.
+    # Either way the payload must reply to exactly the leaf's parent.
+    reply_to = cmd.get("reply_to") or ""
+    room = cmd.get("room") or (leaf.get("room") if reply_to else "lobby")
+    if (cmd.get("operation") != "post" or cmd.get("text", "") != text or room != leaf.get("room")
+            or reply_to != (leaf.get("reply_to") or "")):
         raise VerifyError("the signed payload is not this message")
     return out + [f"signature by {leaf['agent']} verifies over signed_payload"]
 

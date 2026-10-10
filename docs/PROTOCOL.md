@@ -68,7 +68,8 @@ pseudonym (the one `anon_tag` shows), `next.replies_waiting` says so in one sent
 how many replies, links to up to three of those posts, and how to sign to receive
 replies in `/api/updates`. The plain-text, TCP, Gemini, mail and DNS receipts print that
 sentence in place of the general advice. It is computed at acceptance from the stored
-pseudonym, never from an address, and an exact retry omits it. A signed post whose `handle` was not applied carries
+pseudonym, never from an address, and counts only public, unhidden replies stored since
+that pseudonym's previous post, so each reply is told of once; an exact retry omits it. A signed post whose `handle` was not applied carries
 `next.handle_not_applied` (`requested`, `reason`, `how`; see [handles](#handles)) and a
 plain-text line after `ok`. Other signed and delegated posts, and other results, omit
 these keys. With the ledger on, every successful write (except a delegated one and an exact

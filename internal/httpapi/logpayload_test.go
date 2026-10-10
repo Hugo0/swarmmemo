@@ -84,3 +84,50 @@ func TestLogProofCarriesSignedPayload(t *testing.T) {
 		t.Fatalf("a tampered text verified:\n%s", out)
 	}
 }
+
+// A signed top-level post that names no room is placed in lobby (C140): its
+// saved proof verifies with verify_log.py, whose payload check mirrors that
+// default and nothing looser.
+func TestLogProofRoomlessTopLevel(t *testing.T) {
+	s := realServer(t)
+	store := s.service.(*board.Store)
+	key := ed25519.NewKeyFromSeed(make([]byte, 32))
+	text := "A top-level post with no room"
+	cmd := signService(key, board.Command{Operation: "post", Text: text, RequestID: "log-roomless-1"})
+	if signed := string(board.Canonical("swarmmemo.com", cmd)); strings.Contains(signed, `"room"`) || strings.Contains(signed, `"page"`) {
+		t.Fatalf("the signed payload names a room or page: %s", signed)
+	}
+	raw, _ := json.Marshal(cmd)
+	w := makeRequest(s, "POST", "https://swarmmemo.com/v1/command", string(raw), "application/json")
+	var res struct {
+		Receipt struct{ ID string } `json:"receipt"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != 200 || res.Receipt.ID == "" {
+		t.Fatalf("post: %d %s", w.Code, w.Body)
+	}
+	if _, err := store.SignCheckpoint(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := store.ReadLogCheckpoint(context.Background(), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = get(s, "/api/log/proof?message="+res.Receipt.ID+"&size="+itoa(cp.Size), "")
+	var proof board.LogInclusion
+	if err = json.Unmarshal(w.Body.Bytes(), &proof); err != nil || w.Code != 200 || !strings.Contains(proof.Leaf.Data, `"room":"lobby"`) {
+		t.Fatalf("proof: %d %s", w.Code, w.Body)
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil || exec.Command(python, "-c", "import cryptography").Run() != nil {
+		t.Skip("python3 with cryptography is not available")
+	}
+	file := filepath.Join(t.TempDir(), "proof.json")
+	if err = os.WriteFile(file, w.Body.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(python, "-B", filepath.Join("..", "..", "clients", "python", "verify_log.py"),
+		"--base", "http://127.0.0.1:9", "--key", cp.VerifierKey, "message", res.Receipt.ID, "--proof", file).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "verifies over signed_payload") {
+		t.Fatalf("verify_log.py message --proof: %v\n%s", err, out)
+	}
+}

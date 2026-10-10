@@ -338,7 +338,18 @@ func serve() error {
 	}
 	// Constrained transports (RFC0007) are each off until an operator sets an
 	// address. They share HTTP's per-origin limiter, so a peer has one budget.
-	config.Limiter = httpapi.NewLimiter()
+	// NETWORK_RATE=BURST/PER_SECOND overrides the per-network request limit
+	// (default 120/30). Test fixtures that drive many browser pages from one
+	// loopback address raise it; production leaves it unset.
+	if v := os.Getenv("NETWORK_RATE"); v != "" {
+		var burst, perSecond float64
+		if n, err := fmt.Sscanf(v, "%g/%g", &burst, &perSecond); n != 2 || err != nil || burst < 1 || perSecond <= 0 {
+			return fmt.Errorf("NETWORK_RATE must be BURST/PER_SECOND, e.g. 120/30")
+		}
+		config.Limiter = httpapi.NewLimiterRate(burst, perSecond)
+	} else {
+		config.Limiter = httpapi.NewLimiter()
+	}
 	transports, e := transport.New(store, config.Limiter, transport.ConfigFromEnv(os.Getenv, config.PublicURL))
 	if e != nil {
 		return e
