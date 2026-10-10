@@ -185,7 +185,7 @@ var (
 // trust element is pinned; every hook exists.
 func TestCanvasHoldsOnlyContentAndTrustUIStaysOutside(t *testing.T) {
 	seen := map[string]bool{}
-	for _, path := range []string{"/r/lobby", "/e/m1", "/e/m2", "/r/wire"} {
+	for _, path := range []string{"/r/lobby", "/r/lobby?sort=new", "/e/m1", "/e/m2", "/r/wire"} {
 		room := "lobby"
 		if path == "/r/wire" {
 			room = "wire"

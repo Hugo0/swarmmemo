@@ -34,7 +34,7 @@ func TestPublicSSRContainsEscapedMessagesAndStablePermalinks(t *testing.T) {
 		return board.Result{OK: true}, nil
 	}}
 	w := httptest.NewRecorder()
-	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/?sort=new", nil))
 	body := w.Body.String()
 	if w.Code != 200 || !strings.Contains(body, "</html>") {
 		t.Fatalf("incomplete HTML: %d %s", w.Code, body)
@@ -759,7 +759,7 @@ func TestFeedForwardLinkFollowsHasMoreNotCursor(t *testing.T) {
 		name, path string
 		more, want bool
 	}{
-		{"newest window has nothing after it", "/", true, false},
+		{"newest window has nothing after it", "/?sort=new", true, false},
 		{"walking forward with more to come", "/?cursor=start", true, true},
 		{"end of the forward walk", "/?cursor=start", false, false},
 	} {
@@ -836,6 +836,16 @@ func TestReplyReferenceIsALinkOnBothRenderingSurfaces(t *testing.T) {
 	}}
 	w := httptest.NewRecorder()
 	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/e/"+child, nil))
+	// On a conversation page the parent is drawn above, so the link is the
+	// head line's "parent" (threadtree.go); listings without a tree keep ↳.
+	if !strings.Contains(w.Body.String(), `<a class="memo-parent" href="#e-`+parent+`">parent</a>`) {
+		t.Fatal("the server no longer links a reply to its parent")
+	}
+	s.execute = func(c board.Command) (board.Result, error) {
+		return board.Result{OK: true, Messages: []board.Message{{ID: child, Room: "lobby", Page: "main", Text: "An answer", ReplyTo: parent}}}, nil
+	}
+	w = httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/inbox/"+strings.Repeat("a", 64), nil))
 	if !strings.Contains(w.Body.String(), `<a class="reply-ref" href="/e/`+parent+`">`) {
 		t.Fatal("the server no longer links a reply reference to its parent")
 	}

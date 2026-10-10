@@ -12,20 +12,27 @@ import (
 func TestVoteWeight(t *testing.T) {
 	st := DefaultStanding()
 	for _, c := range []struct{ cents, want int64 }{
-		{-5, 0}, {0, 0},
-		{1, 250000 + 750000*44721/1000000}, // √(1/500) = 0.044721
-		{125, 625000},                      // √(1/4) = 0.5
+		{-5, 0}, {0, 0}, {1, 0}, {49, 0}, // below the floor: no weight
+		{50, 250000 + 750000*316227/1000000}, // √(1/10) = 0.316227
+		{125, 625000},                        // √(1/4) = 0.5
 		{500, 1000000}, {501, 1000000}, {1e9, 1000000},
 	} {
 		if got := st.VoteWeight(c.cents); got != c.want {
 			t.Errorf("v(%d) = %d, want %d", c.cents, got, c.want)
 		}
 	}
+	// Version 2 had no floor: any C > 0 weighed at least v0.
+	if v2 := StandingV2(); v2.VoteWeight(1) != 250000+750000*44721/1000000 {
+		t.Fatalf("version 2 v(1) = %d", v2.VoteWeight(1))
+	}
 	// Against the float definition, and monotone.
 	prev := int64(0)
 	for cents := int64(1); cents <= 600; cents++ {
 		v := st.VoteWeight(cents)
 		f := 0.25 + 0.75*math.Sqrt(math.Min(1, float64(cents)/500))
+		if cents < 50 {
+			f = 0
+		}
 		if math.Abs(float64(v)/1e6-f) > 2e-6 || v < prev || v > 1e6 {
 			t.Fatalf("v(%d) = %d, float %.6f", cents, v, f)
 		}
@@ -87,10 +94,69 @@ func standingOf(out Output, name string) StandingPart {
 	return *sc.Parts.Standing
 }
 
-// Standing is a conserved flow from the seeds: it never sums above the seed
-// mass, a region with no seed and no inbound edge gets nothing however
-// densely it endorses itself, and an endorsement from a seeded account
-// carries standing.
+// Splitting standing over many keys must not multiply vote weight: the v0
+// floor applies only from v_floor_cents (the simulation: with v0 for any
+// C > 0, 1-cent keys bought 140 times the weight per dollar of one key).
+func TestVoteWeightSplitDoesNotPay(t *testing.T) {
+	st := DefaultStanding()
+	one := st.VoteWeight(500)
+	var split int64
+	for i := 0; i < 500; i++ {
+		split += st.VoteWeight(1)
+	}
+	if split >= one {
+		t.Fatalf("500 keys of 1 cent weigh %d, one key of 500 cents %d", split, one)
+	}
+	// Version 2 paid 140 times over for the same split.
+	if v2 := StandingV2(); 500*v2.VoteWeight(1) < 100*v2.VoteWeight(500) {
+		t.Fatalf("version 2 split %d", 500*v2.VoteWeight(1))
+	}
+}
+
+// Casting votes costs the voter nothing (rule 1): a node with no out-edges
+// returns its pass to the seeds instead of keeping it, and standing is
+// reported as c / (1 − pass). In version 2 one up vote halved the voter's
+// standing. The voter's standing may move by a second-order amount: before
+// it votes, its share of the seeds' return includes its own pass (at most
+// its seed share × pass × (1 − pass) of it; here 9% × 0.21, 562 → 548
+// cents, against 200 → 100 in version 2).
+func TestStandingVotingDoesNotCostTheVoter(t *testing.T) {
+	build := func(st *StandingParams, votes int) Output {
+		b := newBuilder("s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8")
+		for i := 1; i <= 8; i++ {
+			b.account("s"+strconv.Itoa(i), 100, 10, 0)
+		}
+		b.account("voter", 100, 10, 0).domain("voter", "voter.example")
+		b.snap.Proofs[len(b.snap.Proofs)-1].RegisteredAt = testAsOf - 3*365*day
+		for i := 0; i < 50; i++ {
+			b.account("t"+strconv.Itoa(i), 30, 3, 0)
+		}
+		for i := 0; i < votes; i++ {
+			b.vote("voter", "t"+strconv.Itoa(i))
+		}
+		b.snap.Params.Standing = st
+		return compute(t, b)
+	}
+	for _, votes := range []int{1, 50} {
+		before := standingOf(build(DefaultStanding(), 0), "voter").Cents
+		after := standingOf(build(DefaultStanding(), votes), "voter").Cents
+		t.Logf("%d votes: rule 1 %d → %d", votes, before, after)
+		if before < 390 || after < before*97/100 {
+			t.Fatalf("%d votes: voter %d → %d cents", votes, before, after)
+		}
+		old0 := standingOf(build(StandingV2(), 0), "voter").Cents
+		old1 := standingOf(build(StandingV2(), votes), "voter").Cents
+		t.Logf("%d votes: version 2 %d → %d", votes, old0, old1)
+		if old1 > old0*6/10 {
+			t.Fatalf("version 2 should halve the voter: %d → %d", old0, old1)
+		}
+	}
+}
+
+// Standing is a conserved flow from the seeds: its mass never sums above the
+// seed mass (reported standing at most seed / (1 − pass)), a region with no
+// seed and no inbound edge gets nothing however densely it endorses itself,
+// and an endorsement from a seeded account carries standing.
 func TestStandingConservedAndSeeded(t *testing.T) {
 	b := newBuilder("s1", "s2")
 	b.account("s1", 100, 10, 0).account("s2", 100, 10, 0).account("x", 50, 5, 0).account("y", 50, 5, 0)
@@ -103,7 +169,8 @@ func TestStandingConservedAndSeeded(t *testing.T) {
 	}
 	out := compute(t, b)
 	st := out.Standing
-	if st == nil || st.SeedCents != 1000 || st.StandingCents > st.SeedCents || st.StandingCents < st.SeedCents-5 {
+	bound := st.SeedCents * 1e6 / (1e6 - b.snap.Params.Standing.PassPPM)
+	if st == nil || st.SeedCents != 1000 || st.StandingCents > bound || st.StandingCents < st.SeedCents {
 		t.Fatalf("not conserved: %+v", st)
 	}
 	for i := 0; i < 20; i++ {
@@ -137,8 +204,9 @@ func TestStandingOpposePenaltyAndSeeds(t *testing.T) {
 		Record{Type: "spend", Account: acct("payer"), Day: D, Amount: 1000000}) // today: not yet
 	before := compute(t, b)
 	pay := standingOf(before, "payer")
-	// Spent at cost, decayed one day.
-	if pay.SeedCents != 99 || pay.Cents != pay.SeedCents || scoreOf(before, "payer").Tier != 3 {
+	// Spent at cost, decayed one day; a silent account also receives its
+	// share of what silent nodes return to the seeds.
+	if pay.SeedCents != 99 || pay.Cents < pay.SeedCents || scoreOf(before, "payer").Tier != 3 {
 		t.Fatalf("payer: %+v", pay)
 	}
 	// A down vote from d takes from t locally and is spent by d.

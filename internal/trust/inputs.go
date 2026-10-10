@@ -66,6 +66,7 @@ type Meta struct {
 //	             account the edge points at: the author of the voted post's
 //	             edit-chain root, or the vouched account)
 //	proof        account kind link_value state created_at checked_at link_account
+//	             registered_at (a domain's registry creation time, when known)
 //	breaker      account started_at trust_until
 //	transfer     from to amount created_at
 //	claim        account day claimed spent
@@ -76,6 +77,9 @@ type Meta struct {
 //	             key's account → the worker's, id the work item; witness, the
 //	             witness's account → the witnessed agent's, verdict verified)
 //	spend        account day amount (paid and earned credit spent that day)
+//	             to link_value (from version 3: the payee, an account or a
+//	             host, when the payment went to one: a self-dealt spend is
+//	             not seed)
 type Record struct {
 	Type string `json:"type"`
 	// meta
@@ -111,6 +115,9 @@ type Record struct {
 	State       string `json:"state,omitempty"`
 	CheckedAt   int64  `json:"checked_at,omitempty"`
 	LinkAccount string `json:"link_account,omitempty"`
+	// RegisteredAt is a domain's registration time (the registry's RDAP
+	// creation date), when known; read from parameter version 3.
+	RegisteredAt int64 `json:"registered_at,omitempty"`
 	// breaker
 	StartedAt  int64 `json:"started_at,omitempty"`
 	TrustUntil int64 `json:"trust_until,omitempty"`

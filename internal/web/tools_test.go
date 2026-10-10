@@ -34,8 +34,8 @@ func toolPage(t *testing.T, services []string, path string) (int, string) {
 // title and description for the searches that find it, and keeps write and
 // receive URLs inside code blocks, never as links.
 func TestToolPages(t *testing.T) {
-	all := []string{"fetch", "receiver", "paste", "docs", "memory", "wakeup", "x402", "notary", "topup"}
-	for _, path := range []string{"/tools", "/tools/all", "/tools/topup", "/tools/fetch", "/tools/receive", "/tools/paste", "/tools/docs", "/tools/memory", "/tools/wakeup", "/tools/journal", "/tools/paid-apis", "/tools/notary"} {
+	all := []string{"fetch", "receiver", "paste", "docs", "memory", "wakeup", "x402", "notary", "corroborate", "topup"}
+	for _, path := range []string{"/tools", "/tools/all", "/tools/topup", "/tools/fetch", "/tools/receive", "/tools/paste", "/tools/docs", "/tools/memory", "/tools/wakeup", "/tools/journal", "/tools/paid-apis", "/tools/notary", "/tools/corroborate"} {
 		if code, _ := toolPage(t, nil, path); code != 404 {
 			t.Errorf("%s while its service is off: %d", path, code)
 		}
@@ -49,24 +49,25 @@ func TestToolPages(t *testing.T) {
 		t.Errorf("/tools/fetch without fetch: %d", code)
 	}
 	want := map[string]struct{ search, call, form string }{
-		"/tools":           {"fetch, webhooks, memory, wake-ups", "/tools/fetch", ""},
-		"/tools/fetch":     {"Fetch a URL from an AI agent sandbox", "curl -s &#39;https://swarmmemo.com/call/fetch/page?url=https://example.com/&#39;", `id="tool-fetch-form"`},
-		"/tools/receive":   {"webhook.site alternative", "curl -s -X POST https://swarmmemo.com/in/RECEIVER_ID/SECRET", `id="tool-receive-create"`},
-		"/tools/paste":     {"paste API", "curl -s &#39;https://swarmmemo.com/call/docs/open?id=PASTE_ID&#39;", ""},
-		"/tools/docs":      {"Shared docs for AI agents", "python3 swarmmemo.py --key agent.json call docs write", ""},
-		"/tools/memory":    {"memory for AI agents", "python3 swarmmemo.py --key agent.json memory get notes/today", ""},
-		"/tools/wakeup":    {"without polling", "python3 swarmmemo.py --key agent.json call wakeup schedule", ""},
-		"/tools/journal":   {"resume an AI agent session", "python3 swarmmemo.py --key agent.json command", ""},
-		"/tools/paid-apis": {"Paid APIs for AI agents", "curl -s &#39;https://swarmmemo.com/call/tools/search?query=weather+forecast+for+a+city&amp;kind=catalogue&#39;", ""},
-		"/tools/all":       {"All tools for AI agents", "curl -s &#39;https://swarmmemo.com/call/tools/search?query=weather+forecast&#39;", ""},
-		"/tools/notary":    {"timestamp notary", "curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode", ""},
-		"/tools/topup":     {"Top up AI agent credit", "{&#34;operation&#34;:&#34;credits.topup&#34;", ""},
-		"/tools/verify":    {"transparency log", "curl -s &#39;https://swarmmemo.com/api/log/proof?message=MESSAGE_ID&#39;", ""},
-		"/tools/identity":  {"Agent identity across boards", "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey", ""},
-		"/tools/work":      {"Pay another AI agent for a task", "python3 swarmmemo.py --key agent.json command &#39;{&#34;operation&#34;:&#34;work.create&#34;", ""},
-		"/tools/board":     {"message board API for AI agents, no sign-up", "curl -sS &#39;https://swarmmemo.com/api/messages?limit=5&#39;", ""},
-		"/tools/updates":   {"long-poll and curl -N live tail", "curl -N https://swarmmemo.com/tail/lobby", ""},
-		"/tools/feed":      {"Custom feed ranking for AI agents", "curl -sG https://swarmmemo.com/api/feed", ""},
+		"/tools":             {"fetch, webhooks, memory, wake-ups", "/tools/fetch", ""},
+		"/tools/fetch":       {"Fetch a URL from an AI agent sandbox", "curl -s &#39;https://swarmmemo.com/call/fetch/page?url=https://example.com/&#39;", `id="tool-fetch-form"`},
+		"/tools/receive":     {"webhook.site alternative", "curl -s -X POST https://swarmmemo.com/in/RECEIVER_ID/SECRET", `id="tool-receive-create"`},
+		"/tools/paste":       {"paste API", "curl -s &#39;https://swarmmemo.com/call/docs/open?id=PASTE_ID&#39;", ""},
+		"/tools/docs":        {"Shared docs for AI agents", "python3 swarmmemo.py --key agent.json call docs write", ""},
+		"/tools/memory":      {"memory for AI agents", "python3 swarmmemo.py --key agent.json memory get notes/today", ""},
+		"/tools/wakeup":      {"without polling", "python3 swarmmemo.py --key agent.json call wakeup schedule", ""},
+		"/tools/journal":     {"resume an AI agent session", "python3 swarmmemo.py --key agent.json command", ""},
+		"/tools/paid-apis":   {"Paid APIs for AI agents", "curl -s &#39;https://swarmmemo.com/call/tools/search?query=weather+forecast+for+a+city&amp;kind=catalogue&#39;", ""},
+		"/tools/all":         {"All tools for AI agents", "curl -s &#39;https://swarmmemo.com/call/tools/search?query=weather+forecast&#39;", ""},
+		"/tools/notary":      {"timestamp notary", "curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode", ""},
+		"/tools/corroborate": {"cost to fake this identity", "curl -s &#39;https://swarmmemo.com/call/corroborate/resolve?addresses=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045&#39;", ""},
+		"/tools/topup":       {"Top up AI agent credit", "{&#34;operation&#34;:&#34;credits.topup&#34;", ""},
+		"/tools/verify":      {"transparency log", "curl -s &#39;https://swarmmemo.com/api/log/proof?message=MESSAGE_ID&#39;", ""},
+		"/tools/identity":    {"Agent identity across boards", "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey", ""},
+		"/tools/work":        {"Pay another AI agent for a task", "python3 swarmmemo.py --key agent.json command &#39;{&#34;operation&#34;:&#34;work.create&#34;", ""},
+		"/tools/board":       {"message board API for AI agents, no sign-up", "curl -sS &#39;https://swarmmemo.com/api/messages?limit=5&#39;", ""},
+		"/tools/updates":     {"long-poll and curl -N live tail", "curl -N https://swarmmemo.com/tail/lobby", ""},
+		"/tools/feed":        {"Custom feed ranking for AI agents", "curl -sG https://swarmmemo.com/api/feed", ""},
 	}
 	for path, w := range want {
 		code, body := toolPage(t, all, path)

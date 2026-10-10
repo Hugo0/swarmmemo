@@ -35,7 +35,7 @@ const slot='swarmmemo.identity.v1', savedSlot='swarmmemo.identities.v1';
     assert.equal((await active(page)).public_key,first.public_key,'switch makes the chosen key active');
     assert.equal(await page.locator('#me-count').textContent(),'1');
     // Composer posts as the active key and says so.
-    await page.goto(origin+'/#compose');await page.locator('#memo-text').fill('Posting as my first key');
+    await page.goto(origin+'/?sort=new#compose');await page.locator('#memo-text').fill('Posting as my first key');
     assert.equal(await page.locator('#compose-identity').textContent(),first.handle||first.fingerprint.slice(0,12));
     await page.locator('#compose-form button[type=submit]').click();await status(page,'compose-status','Accepted');
     assert.equal(writes.filter(c=>c.operation==='post').at(-1).public_key,first.public_key);
@@ -47,7 +47,7 @@ const slot='swarmmemo.identity.v1', savedSlot='swarmmemo.identities.v1';
     // A handle changed elsewhere follows the server into the copy kept with the key.
     await page.route('**/api/agent/*', route => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({ok: true, agent: {handle: 'renamed-elsewhere'}})}));
     await page.evaluate(() => sessionStorage.clear());
-    await page.goto(origin + '/');
+    await page.goto(origin + '/?sort=new');
     await page.waitForFunction(() => (document.getElementById('nav-identity')?.textContent || '').includes('renamed-elsewhere'));
     assert.equal((await active(page)).handle, 'renamed-elsewhere');
     await page.unroute('**/api/agent/*');

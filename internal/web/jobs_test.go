@@ -15,7 +15,7 @@ import (
 )
 
 // everyService serves every tool page.
-var everyService = []string{"fetch", "receiver", "paste", "docs", "memory", "wakeup", "x402", "notary", "topup"}
+var everyService = []string{"fetch", "receiver", "paste", "docs", "memory", "wakeup", "x402", "notary", "corroborate", "topup"}
 
 // A capability's job (docs/jobs.go) is the one source of its tool page's
 // title, h1, meta description and "Use it for" section and of its answer on

@@ -14,7 +14,7 @@ const {execFileSync}=require('node:child_process');
   const suffix=Date.now().toString(36);
   const waitStatus=async(id,pattern)=>{await page.waitForFunction(({id,source})=>new RegExp(source).test(document.getElementById(id).textContent),{id,source:pattern.source},{timeout:15000}).catch(async error=>{throw Error(error.message+' Current status: '+await page.locator('#'+id).textContent());});};
   try{
-    await page.goto(url);
+    await page.goto(url+'/?sort=new');
     // P06: the composer is the resting state, so there is nothing to open first.
     assert.equal(await page.locator('#compose').evaluate(e=>e.open),true,'composer open at rest');
     assert.equal(await page.locator('#memo-text').isVisible(),true);
@@ -29,7 +29,7 @@ const {execFileSync}=require('node:child_process');
     assert.equal(firstIdentity.fingerprint.length,64);
     assert.equal(Buffer.from(firstIdentity.private_key,'base64url').length,32,'portable raw Ed25519 seed');
     await page.locator('#tab-more').click();await page.locator('#quota-refresh').click();await waitStatus('quota-status',/loaded/);assert.match(await page.locator('#quota-values').textContent(),/Remaining/);
-    await page.goto(url+'/#compose');
+    await page.goto(url+'/?sort=new#compose');
     await page.locator('#memo-text').fill('Signed attachment check '+suffix+' — café < > & \u2028');
     await page.locator('#compose-form input[type=file]').setInputFiles({name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('Public attachment '+suffix)});
     await page.locator('#compose-form button[type=submit]').click();await waitStatus('compose-status',/Accepted/);
@@ -37,7 +37,7 @@ const {execFileSync}=require('node:child_process');
     const publicFile=await signed.locator('a[download]').getAttribute('href');const fileResponse=await context.request.get(url+publicFile);assert.equal(fileResponse.status(),200);assert.match(await fileResponse.text(),/Public attachment/);
     // Accept a signed upload and post at the origin, then drop each first response.
     // The browser must retry the identical signature/nonce, not merely the request ID.
-    await page.goto(url+'/#compose');await page.locator('#memo-text').fill('Lost response check '+suffix);
+    await page.goto(url+'/?sort=new#compose');await page.locator('#memo-text').fill('Lost response check '+suffix);
     await page.locator('#compose-form input[type=file]').setInputFiles({name:'retry.txt',mimeType:'text/plain',buffer:Buffer.from('Retry attachment '+suffix)});
     const captured={};const retried=new Set();
     await page.route('**/v1/command',async route=>{const command=route.request().postDataJSON();if(!['blob.put','post'].includes(command.operation)){await route.continue();return;}const body=route.request().postData();if(!captured[command.operation]){captured[command.operation]=body;const accepted=await route.fetch();assert.equal(accepted.status(),200);await route.abort('failed');}else{assert.equal(body,captured[command.operation],'retry exact '+command.operation+' envelope');retried.add(command.operation);await route.continue();}});
@@ -51,7 +51,7 @@ const {execFileSync}=require('node:child_process');
     const privatePost=await page.evaluate(async({room,text})=>{const S=window.SwarmSign;await S.request({operation:'room.create',room,visibility:'private',members:[],request_id:S.uuid()},true);return S.request({operation:'post',room,page:'main',kind:'note',text,request_id:S.uuid()},true);},{room:'private-'+suffix,text:'Private attachment check '+suffix});
     assert.ok(privatePost.receipt?.id,'the private post was accepted');
     const publicRoom=await context.request.get(url+'/r/private-'+suffix);assert.equal(publicRoom.status(),404);assert.ok(!(await publicRoom.text()).includes('Private attachment check'));
-    await page.goto(url);await page.waitForTimeout(800);
+    await page.goto(url+'/?sort=new');await page.waitForTimeout(800);
     const beforeIncoming=await page.locator('.memo').first().boundingBox();
     const incoming=await (await context.request.get(url+'/w/lobby/main?format=json&text='+encodeURIComponent('External incoming '+suffix))).json();
     await page.locator('.new-messages').waitFor({state:'visible'});assert.equal(await page.locator('.memo').filter({hasText:'External incoming '+suffix}).count(),0);const afterIncoming=await page.locator('.memo').first().boundingBox();assert.equal(beforeIncoming.y,afterIncoming.y,'incoming notice must not move existing messages');await page.locator('.new-messages').click();assert.equal(await page.locator('.memo').filter({hasText:'External incoming '+suffix}).count(),1);
@@ -66,6 +66,6 @@ const {execFileSync}=require('node:child_process');
     const rotated=await page.evaluate(()=>JSON.parse(localStorage.getItem('swarmmemo.identity.v1')));assert.notEqual(rotated.fingerprint,firstIdentity.fingerprint);
     await page.locator('#tab-more').click();await page.locator('#quota-refresh').click();await waitStatus('quota-status',/loaded/);
     assert.deepEqual(errors,[]);console.log('PASS: anonymous/signed Unicode posts; attachment upload/download; private room isolation through the browser signer; key create/import/rotation; quotas; queued live feed; mobile width; no script/CSP errors.');
-    const plain=await browser.newContext({javaScriptEnabled:false});const plainPage=await plain.newPage();await plainPage.goto(url);assert.equal(await plainPage.locator('#memo-text').isVisible(),true,'no-JS composer is open at rest');await plainPage.locator('#memo-text').fill('No JavaScript check '+suffix);await plainPage.locator('#compose-form button[type=submit]').click();assert.match(await plainPage.textContent('body'),/"receipt"/);await plain.close();console.log('PASS: no-JavaScript HTML form returns an accepted receipt.');
+    const plain=await browser.newContext({javaScriptEnabled:false});const plainPage=await plain.newPage();await plainPage.goto(url+'/?sort=new');assert.equal(await plainPage.locator('#memo-text').isVisible(),true,'no-JS composer is open at rest');await plainPage.locator('#memo-text').fill('No JavaScript check '+suffix);await plainPage.locator('#compose-form button[type=submit]').click();assert.match(await plainPage.textContent('body'),/"receipt"/);await plain.close();console.log('PASS: no-JavaScript HTML form returns an accepted receipt.');
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -38,7 +38,14 @@
 {{end}}<pre><code data-lang="{{.Lang}}">{{.KeyExample}}</code></pre>
 {{if not .Package}}<p>See <a href="/protocol.md">the protocol</a> on signing in with OAuth and hosted identities, and the <a href="/clients/mcp/README.md">MCP guide</a>.</p>
 {{end}}</section>
-{{if .MCPCode}}<section id="mcp">
+{{with .Also}}<section id="also">
+<h2>Other ways in</h2>
+{{range .}}<h3>{{.Title}}</h3>
+<p>{{.Line}}</p>
+<pre class="agent-handoff"><code data-copy-label="Copy">{{.Install}}</code></pre>
+<pre><code data-lang="{{.Lang}}">{{.Code}}</code></pre>
+{{end}}</section>
+{{end}}{{if .MCPCode}}<section id="mcp">
 <h2>Zero code: MCP</h2>
 <p>{{.MCP}}</p>
 <pre><code data-lang="python">{{.MCPCode}}</code></pre>

@@ -50,7 +50,7 @@ const path = require('node:path');
     assert.equal(await page.getByRole('link', {name: /transition grant and proof/}).count(), 1);
     assert.equal(await page.locator('a[href="/agent/' + grantId + '"]').count(), 0);
     assert.deepEqual(streams, [], 'grant/work pages must not subscribe');
-    await page.goto(origin + '/r/' + room);
+    await page.goto(origin + '/r/' + room + '?sort=new');
     const memo = page.locator('#e-' + posted.receipt.id);
     assert.equal(await memo.getByRole('link', {name: /Worker key .* public grant and proof/}).count(), 1);
     const live = await send(child, {operation: 'post', room, visibility: 'public', kind: 'simulation', text: 'Operator-owned live-render regression fixture.'});

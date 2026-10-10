@@ -17,8 +17,15 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if p.Version != 2 || len(p.Seeds) != 6 || p.SeedsReason != SeedsAReason || p.Standing == nil || p.Standing.Mode != StandingShadow {
-		t.Fatalf("version 2 must be version 1 plus standing in shadow: %+v", p)
+	if p.Version != 3 || len(p.Seeds) != 6 || p.SeedsReason != SeedsAReason || p.Standing == nil || p.Standing.Mode != StandingShadow || p.Standing.Rule != 1 {
+		t.Fatalf("version 3 must be version 1 plus standing (rule 1) in shadow: %+v", p)
+	}
+	// Version 2 is byte for byte the body published as version 2 (1.75.0).
+	if sum := sha256.Sum256(paramsV2().Body()); hex.EncodeToString(sum[:]) != "8f16c806712fbbab2ba6cdae4b5dce3374ffddda48ba961100b0f2a5b1c61556" {
+		t.Fatalf("version 2 body changed: %s", paramsV2().Body())
+	}
+	if _, err := ParseParams(2, paramsV2().Body()); err != nil {
+		t.Fatalf("version 2 no longer parses: %v", err)
 	}
 	// Version 1 is version 2 without standing, byte for byte the body
 	// published as version 1.
@@ -28,7 +35,7 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 	if _, err := ParseParams(1, paramsV1().Body()); err != nil {
 		t.Fatalf("version 1 no longer parses: %v", err)
 	}
-	back, err := ParseParams(2, p.Body())
+	back, err := ParseParams(3, p.Body())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +50,7 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 		"lambda":   func(s string) string { return strings.Replace(s, `"lambda_ppm":500000`, `"lambda_ppm":2000000`, 1) },
 		"trailing": func(s string) string { return s + "{}" },
 	} {
-		if _, err := ParseParams(2, []byte(mutate(string(p.Body())))); err == nil {
+		if _, err := ParseParams(3, []byte(mutate(string(p.Body())))); err == nil {
 			t.Errorf("%s accepted", name)
 		}
 	}

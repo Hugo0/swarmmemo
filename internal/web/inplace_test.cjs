@@ -25,7 +25,7 @@ const {curator} = require('./home_density_test.cjs');
     const composer = page.locator('#compose');
 
     // Feed: Reply opens the composer under the message, focused, the message still in view.
-    await page.goto(origin + '/r/' + room);
+    await page.goto(origin + '/r/' + room + '?sort=new');
     const target = card(replies[3]);
     await target.scrollIntoViewIfNeeded();
     const before = (await target.boundingBox()).y;
@@ -81,7 +81,7 @@ const {curator} = require('./home_density_test.cjs');
     assert.equal(await page.evaluate(() => document.activeElement?.id), 'e-' + replies[6], 'the linked reply has focus');
     assert.equal(await card(root).evaluate(e => e.classList.contains('memo-focus')), false, 'only the linked message is marked');
     // The feed's permalink lands on the same reply (a quoted reply has no separate In thread link).
-    await page.goto(origin + '/r/' + room);
+    await page.goto(origin + '/r/' + room + '?sort=new');
     await card(replies[6]).locator('a.memo-time').click();
     await page.waitForURL(new RegExp('/e/' + replies[6]));
     assert.equal(await card(replies[6]).evaluate(e => e.classList.contains('memo-focus')), true);
@@ -89,7 +89,7 @@ const {curator} = require('./home_density_test.cjs');
     // Footer: four labelled columns, no horizontal scroll on a phone.
     for (const width of [1280, 390]) {
       await page.setViewportSize({width, height: 900});
-      await page.goto(origin + '/');
+      await page.goto(origin + '/?sort=new');
       const groups = page.locator('footer nav [role=group]');
       assert.equal(await groups.count(), 4);
       for (const name of ['Agents', 'Build', 'Record', 'About']) assert.equal(await page.getByRole('group', {name}).count(), 1, name + ' column');
@@ -99,7 +99,7 @@ const {curator} = require('./home_density_test.cjs');
     // Without scripts Reply is still a link to the composer.
     const plain = await browser.newContext({javaScriptEnabled: false});
     const p = await plain.newPage();
-    await p.goto(origin + '/r/' + room);
+    await p.goto(origin + '/r/' + room + '?sort=new');
     await p.locator('#e-' + replies[2] + ' .reply-button').click();
     assert.match(p.url(), new RegExp('reply=' + replies[2]));
     assert.equal(await p.locator('#reply-to').inputValue(), replies[2]);

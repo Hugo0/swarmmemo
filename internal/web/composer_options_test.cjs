@@ -20,7 +20,7 @@ assert.match(origin||'',/^http:\/\/127\.0\.0\.1:\d+$/);
     if(process.env.SWARMMEMO_SCREENSHOT_DIR)await page.screenshot({path:process.env.SWARMMEMO_SCREENSHOT_DIR+'/'+name+'.png',fullPage:true});
   };
   try{
-    await page.goto(origin+'/#compose');await page.locator('#posting-mode').waitFor({state:'attached'});
+    await page.goto(origin+'/?sort=new#compose');await page.locator('#posting-mode').waitFor({state:'attached'});
     assert.equal(await settings().evaluate(e=>e.open),false);
     // P06: the resting composer is a large field, one primary button and a caret cue.
     assert.equal(await page.locator('#compose').evaluate(e=>e.open),true);
@@ -96,7 +96,7 @@ assert.match(origin||'',/^http:\/\/127\.0\.0\.1:\d+$/);
     await submit();await status('Could not reach');await openOptions();await page.locator('#memo-kind').selectOption('note');await submit();await status('previous message is unresolved');assert.equal(attempts,1);
     await page.locator('#memo-kind').selectOption('request');await page.locator('#compose-settings>summary').click();await submit();await status('Accepted');assert.equal(attempts,2);await page.unroute('**/v1/command');
     const result=await (await context.request.get(origin+'/api/messages?room='+room+'&page=chat')).json();assert.equal(result.messages.length,1);const event=result.messages[0];assert.equal(event.to,recipient);assert.equal(event.kind,'request');
-    await page.goto(origin+'/r/'+room+'/chat?reply='+event.id+'&to='+recipient+'#compose');
+    await page.goto(origin+'/r/'+room+'/chat?sort=new&reply='+event.id+'&to='+recipient+'#compose');
     assert.equal(await settings().evaluate(e=>e.open),false,'another room or a reply must not unfold the options at a reader');
     await page.locator('#compose-settings>summary').click();assert.equal(await page.locator('#reply-preview').isVisible(),true);assert.ok((await page.locator('#compose-context').textContent()).includes(recipient));
     await page.locator('#e-'+event.id+' .reply-button').click();assert.match(await page.locator('#compose-destination').textContent(),new RegExp('#'+room+' /chat'));assert.equal(await page.locator('#reply-preview').isVisible(),true);
@@ -114,7 +114,7 @@ assert.match(origin||'',/^http:\/\/127\.0\.0\.1:\d+$/);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'200% composer text must wrap at320px');
     await screenshot('options-mobile-text200');
     await page.goto(origin+'/inbox/'+recipient+'#compose');assert.equal(await settings().evaluate(e=>e.open),false,'options stay closed; the context line carries the recipient');await page.locator('#compose-settings>summary').click();assert.ok((await page.locator('#compose-context').textContent()).includes(recipient));
-    await page.goto(origin+'/#compose');await page.locator('#memo-text').fill('Remembered identity with compact composer');await submit();await status('Accepted');
+    await page.goto(origin+'/?sort=new#compose');await page.locator('#memo-text').fill('Remembered identity with compact composer');await submit();await status('Accepted');
     await page.reload();await openOptions();await page.locator('#compose-form input[type=file]').setInputFiles({name:'visible-choice.txt',mimeType:'text/plain',buffer:Buffer.from('a')});await page.locator('#compose-settings>summary').click();assert.match(await page.locator('#compose-context').textContent(),/1 file selected/);
     const beforeFiles=writes.length;await page.locator('#compose-form input[type=file]').setInputFiles([]);assert.equal(await page.locator('#compose-context').isVisible(),false);assert.equal(writes.length,beforeFiles,'selecting files never uploads');
     // Retired addresses are gone, not redirected: the browser stays on the old

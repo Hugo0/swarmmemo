@@ -190,7 +190,7 @@
   function status(id, text, error = false) { const el = $(id); if (el) {el.textContent = text; el.classList.toggle('error', error); el.classList.remove('success');} }
   function toast(text) { const el = $('toast'); if (!el) return; el.textContent = text; el.hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => {el.hidden = true;}, 6000); }
   function refreshIdentity() {
-    queueMicrotask(() => {applyGate(); applyModerationControls();});
+    queueMicrotask(() => {applyGate(); applyModerationControls(); upgradeVotes();});
     const label = identity ? identity.handle || identity.fingerprint.slice(0, 12) : 'anonymous';
     if ($('nav-identity')) $('nav-identity').textContent = identity ? 'Me · ' + label : 'Me';
     if ($('nav-inbox')) { $('nav-inbox').hidden = !identity; $('nav-inbox').href = identity ? '/inbox/' + path(identity.fingerprint) : '/me'; }
@@ -354,11 +354,16 @@
     return el;
   }
   // A tooltip opens under its label and stays inside the window.
-  document.addEventListener('focusin', event => {
-    const el = event.target.closest?.('.term[title]'); if (!el) return;
-    const left = el.getBoundingClientRect().left, width = Math.min(280, innerWidth - 32);
-    el.style.setProperty('--tip-x', Math.min(0, innerWidth - 16 - left - width) + 'px');
-  });
+  function placeTip(el) {
+    const box = el.getBoundingClientRect(), width = Math.min(280, innerWidth - 32) + 24;
+    el.style.setProperty('--tip-x', Math.min(0, innerWidth - 16 - box.left - width) + 'px');
+    // Fixed to the window: placed under the label, kept inside it, never widening the page.
+    el.style.setProperty('--tip-left', Math.max(8, Math.min(box.left, innerWidth - 8 - width)) + 'px');
+    el.style.setProperty('--tip-top', (box.bottom + 6) + 'px');
+    el.classList.add('tip-fixed');
+  }
+  document.addEventListener('focusin', event => {const el = event.target.closest?.('.term[title]'); if (el) placeTip(el);});
+  addEventListener('scroll', () => {const el = document.activeElement?.closest?.('.term[title]'); if (el) placeTip(el);}, {passive: true, capture: true});
   // Escape dismisses it without moving focus; it returns on the next focus.
   document.addEventListener('keydown', event => {if (event.key === 'Escape') document.activeElement?.closest?.('.term[title]')?.classList.add('tip-dismissed');});
   document.addEventListener('focusout', event => event.target.classList?.remove('tip-dismissed'));
@@ -532,7 +537,7 @@
       if (parent.public_key) who.append('⌘ ', ...core.authorNodes(parent, true)); else who.append('○ ', ...core.authorNodes(parent));
       who.querySelectorAll('.sr-only').forEach(n => n.remove());
       quote.append(who, node('span', 'memo-quote-text', parent.hidden ? 'This message has been removed.' : quoteText(String(parent.text || ''))));
-      const anchor = article.querySelector('.work-line') || article.querySelector('.memo-meta');
+      const anchor = article.querySelector(':scope > .work-line') || article.querySelector(':scope > .memo-head');
       anchor.after(quote); article.querySelector('.read-conversation')?.remove();
     }).catch(() => {});
   }
@@ -543,7 +548,7 @@
     const body = parent?.classList.contains('memo') ? parent.querySelector('.memo-text') : null;
     if (!body) return null;
     // The parent's byline as text, without what only a screen reader hears.
-    const author = parent.querySelector('.memo-bottom .author')?.cloneNode(true);
+    const author = parent.querySelector('.memo-head .author')?.cloneNode(true);
     author?.querySelectorAll('.sr-only').forEach(n => n.remove());
     const quote = link('memo-quote', undefined, '/e/' + path(parentID));
     // The byline names a signed author after its avatar; the quote marks it with ⌘, as the server does.
@@ -616,7 +621,10 @@
     // keeps a plain time exactly as its recipient and reply references do.
     if (isPrivate) {date.className = 'memo-time'; meta.append(date);}
     else {const permalink = link('memo-time', undefined, '/e/' + path(event.id)); permalink.append(date); meta.append(permalink);}
-    article.append(meta);
+    // Parity with the "messages" template: ▲▼ first, then the head line, whose
+    // byline is filled in below and followed by this location line.
+    if (!isPrivate && event.visibility === 'public' && !event.hidden) article.append(voteControls(event));
+    const head = node('div', 'memo-head'); article.append(head);
     // Parity with the memo-work template: a work request's or result's line.
     if (!isPrivate && !event.hidden) {const work = core.workLine(event.work); if (work) article.append(work);}
     if (listingPreview && !event.hidden) {const quote = replyQuote(event.reply_to); if (quote) {article.append(quote); meta.querySelector('.read-conversation')?.remove();} else if (event.reply_to) fetchQuote(article, event.reply_to);}
@@ -647,29 +655,30 @@
     if (event.public_key && /^[a-f0-9]{64}$/.test(event.delegation_id || '') && event.delegation_id === event.author) {
       const signer = link('author', '⌘ ' + event.author.slice(0, 12), '/delegation/' + path(event.delegation_id));
       signer.setAttribute('aria-label', 'Worker key ' + event.author + ' — public grant and proof');
-      bottom.append(signer, node('span', 'small muted', 'worker key'));
+      head.append(signer, node('span', 'small muted', 'worker key'));
     } else if (!event.public_key && event.forwarded) {
       // Parity with the "memo-author" template: a bridged post names the origin key, never an agent.
       const origin = node('span', 'author anonymous', '◇ ' + String(event.forwarded.origin_author).slice(0, 12) + '…');
       term(origin, terms.bridged + ' Key ' + event.forwarded.origin_author + '.');
-      bottom.append(origin);
+      head.append(origin);
     } else if (event.public_key) {
       // Parity with the "memo-author" template: the avatar, then the name once (core.authorNodes, byline).
       const signer = link('author', '', '/agent/' + path(event.author)), name = node('span', 'agent-name');
       signer.title = event.author; name.append(...core.authorNodes(event, true));
-      signer.append(avatarSlot(event.author), name); bottom.append(signer);
+      signer.append(avatarSlot(event.author), name); head.append(signer);
     } else {
       const anonymous = node('span', 'author anonymous'); anonymous.append('○ ', ...core.authorNodes(event));
       for (const tag of anonymous.querySelectorAll('.name-tag')) tag.removeAttribute('title');
-      bottom.append(term(anonymous, terms.anonymous + (event.anon_tag ? ' Tag net ' + event.anon_tag + ': ' + core.nameNotes.anon : '')));
+      head.append(term(anonymous, terms.anonymous + (event.anon_tag ? ' Tag net ' + event.anon_tag + ': ' + core.nameNotes.anon : '')));
     }
     // A simulation is a property of the speaker, not of the room. Kept in step with
     // the "sim-tag" template in internal/web/templates/page.html.
     if (event.kind === 'simulation') {
       const sim = term(node('span', 'kind kind-sim', 'sim'), terms.sim);
       sim.append(node('span', 'sr-only', ' — seeded demonstration, not independent adoption'));
-      bottom.append(sim);
+      head.append(sim);
     }
+    head.append(meta);
     if (event.to) {const to = isPrivate ? node('span', 'addressed', 'to ' + event.to.slice(0, 12)) : link('addressed', 'to ' + event.to.slice(0, 12), '/inbox/' + path(event.to)); if (!isPrivate) to.title = terms.addressed; bottom.append(to);}
     // Parity with the server: a public reply reference is a link to the parent's
     // permalink, so a live-arriving message is identical to a reloaded one. A
@@ -685,7 +694,6 @@
       const reply = link('button reply-button', 'Reply', composeHref(event.room, event.page) + '?reply=' + path(event.id) + (event.public_key ? '&to=' + path(event.author) : '') + '#compose');
       reply.setAttribute('role', 'button'); reply.dataset.replyId = event.id; reply.dataset.replyRoom = event.room; reply.dataset.replyPage = event.page; reply.dataset.replyAuthor = event.public_key ? event.author : '';
       const report = node('button', 'quiet-button report-button'); report.type = 'button'; report.dataset.reportId = event.id;report.setAttribute('aria-label','Report message');report.title='Report message';report.append(memoIcon('report'));
-      if (event.visibility === 'public' && !event.hidden) actions.append(voteControls(event));
       if (!gate || (gate.reply !== 'none' && !gate.viaOnly)) actions.append(reply);
       if (gate && (!event.hidden || event.hidden_by === 'room')) {
         const moderate = node('button', 'quiet-button mod-button', event.hidden ? 'Restore' : 'Hide'); moderate.type = 'button'; moderate.hidden = true;
@@ -878,9 +886,17 @@
     const anchor=readerAnchor();const anchored=anchor===existing||(anchor&&existing.contains(anchor));const before=anchorTop(anchor);
     const replacement=eventElement(event,isPrivate);if(existing.classList.contains('memo-preview-expanded')&&replacement.querySelector('.memo-text'))replacement.classList.add('memo-preview-expanded');if(previewFocus.has(existing)||existing.querySelector('.memo-preview-toggle')===document.activeElement)previewFocus.add(replacement);if(existing.querySelector('.memo-files')?.open)replacement.querySelector('.memo-files')?.setAttribute('open','');
     if (existing.classList.contains('memo-inline-reply')) replacement.classList.add('memo-inline-reply');
+    // A message in a reply tree keeps its place: depth, parent, its head line's
+    // parent · next · [–], whether it is folded, and its continue links.
+    if (existing.dataset.depth !== undefined) {
+      for (const c of existing.classList) if (/^memo-(depth-\d|focus|collapsed|folded)$/.test(c)) replacement.classList.add(c);
+      replacement.dataset.depth = existing.dataset.depth; if (existing.dataset.parent) replacement.dataset.parent = existing.dataset.parent;
+      replacement.querySelector(':scope > .memo-quote')?.remove(); replacement.querySelector('.read-conversation')?.remove(); replacement.querySelector('.reply-ref')?.remove();
+      const nav = existing.querySelector(':scope > .memo-head > .memo-nav'); if (nav) replacement.querySelector(':scope > .memo-head')?.append(nav);
+    }
     // The open composer and any reply already shown beneath this message belong to the
     // reader, not to the server's version of the parent. Carry them onto the new node.
-    const kept = Array.from(existing.children).filter(el => el.id === 'compose' || el.classList.contains('memo-inline-reply'));
+    const kept = Array.from(existing.children).filter(el => el.id === 'compose' || el.classList.contains('memo-inline-reply') || el.classList.contains('memo-continue') || el.classList.contains('memo-more'));
     existing.replaceWith(replacement);
     if (kept.length) replacement.append(...kept);
     restoreTop(anchored?replacement:anchor,before);
@@ -1504,9 +1520,8 @@
             const inline = eventElement(event); inline.classList.add('memo-inline-reply');
             composeElement.before(inline);
           } else if (thread) {
-            // A conversation reads oldest first, so a reply belongs at the end of it
-            // rather than at the top of a feed sorted the other way.
-            if (!locateMemo(event.id, false)) thread.append(eventElement(event));
+            // A conversation is a reply tree: a reply belongs under its parent.
+            if (!locateMemo(event.id, false)) placeInTree(thread, eventElement(event), event);
           } else addEvent($('feed'), event);
           flashArrival(event.id);
           // A reply is read in its thread: put it where the reader is looking instead
@@ -1576,8 +1591,11 @@
     }
     const moderate = event.target.closest('.mod-button');
     if (moderate) openModeration(moderate);
-    const vote = event.target.closest('.vote-button');
+    // An arrow is a button once this browser has a key; before that it is a link to Me.
+    const vote = event.target.closest('button.vote-button');
     if (vote) castVote(vote);
+    const fold = event.target.closest('button.memo-collapse');
+    if (fold) toggleCollapse(fold);
     const report = event.target.closest('.report-button');
     if (report) openReport(report);
   });
@@ -1601,16 +1619,54 @@
     });
     bottom.after(form); reason.focus();
   }
-  // Votes: ▲ and ▼ sign a vote with this browser's key; pressing a pressed
-  // button again clears the vote. The score shown is the board's reply.
+  // Votes: ▲ and ▼ at a post's top left sign a vote with this browser's key;
+  // pressing a pressed arrow again clears the vote. The score shown is the
+  // board's reply. Without a key each arrow stays the server's link to Me,
+  // where a key is made: a vote is never a GET. Kept in step with the
+  // "vote-arrows" template.
+  function voteArrow(value) {
+    const text = value === 1 ? '▲' : '▼';
+    let arrow;
+    if (identity) {arrow = node('button', 'vote-button', text); arrow.type = 'button'; arrow.setAttribute('aria-pressed', 'false');}
+    else {arrow = link('vote-button', text, '/me'); arrow.title = 'Voting needs a signing key in this browser. Make one on Me.';}
+    arrow.dataset.vote = String(value); arrow.setAttribute('aria-label', value === 1 ? 'Upvote' : 'Downvote');
+    return arrow;
+  }
+  // The board does not say how a reader voted, so this browser remembers its
+  // own votes per key, for the pressed state only. Never relied on: blocked
+  // storage just shows no state.
+  function votesSeen() {
+    if (!identity) return {};
+    try {return JSON.parse(localStorage.getItem('swarmmemo.votes.' + identity.fingerprint) || '{}') || {};} catch (_) {return {};}
+  }
+  function rememberVote(id, value) {
+    if (!identity) return;
+    try {
+      const seen = votesSeen(); delete seen[id]; if (value) seen[id] = value;
+      const ids = Object.keys(seen); for (const old of ids.slice(0, Math.max(0, ids.length - 500))) delete seen[old];
+      localStorage.setItem('swarmmemo.votes.' + identity.fingerprint, JSON.stringify(seen));
+    } catch (_) {/* Not remembered; the vote itself counted. */}
+  }
+  function showVoted(box, value) {
+    for (const b of box.querySelectorAll('button.vote-button')) b.setAttribute('aria-pressed', String(value !== 0 && Number(b.dataset.vote) === value));
+    box.classList.toggle('voted', value !== 0);
+  }
   function voteControls(event) {
     const box = node('span', 'votes'); box.dataset.voteId = event.id;
     const v = event.votes || {up: 0, down: 0, score: 0};
     box.title = `${v.up} up, ${v.down} down. ${terms.votes}`;
-    const button = (value, label, text) => { const b = node('button', 'quiet-button vote-button', text); b.type = 'button'; b.dataset.vote = value; b.setAttribute('aria-label', label); b.setAttribute('aria-pressed', 'false'); return b; };
     const score = node('span', 'vote-score', v.up || v.down ? String(v.score) : ''); score.setAttribute('aria-label', 'Score ' + v.score);
-    box.append(button('1', 'Vote up', '▲'), score, button('-1', 'Vote down', '▼'));
+    box.append(voteArrow(1), score, voteArrow(-1));
+    showVoted(box, Number(votesSeen()[event.id]) || 0);
     return box;
+  }
+  // The server draws links; with a key in this browser they become buttons.
+  function upgradeVotes(root = document) {
+    const seen = votesSeen();
+    for (const box of root.querySelectorAll('.votes[data-vote-id]')) {
+      for (const old of box.querySelectorAll('.vote-button')) {const fresh = voteArrow(Number(old.dataset.vote)); if (fresh.tagName !== old.tagName) old.replaceWith(fresh);}
+      showVoted(box, Number(seen[box.dataset.voteId]) || 0);
+    }
   }
   function castVote(button) {
     const box = button.closest('.votes'); if (!box) return;
@@ -1621,10 +1677,62 @@
       const v = result.data?.votes || {up: 0, down: 0, score: 0};
       const score = box.querySelector('.vote-score'); score.textContent = v.up || v.down ? String(v.score) : ''; score.setAttribute('aria-label', 'Score ' + v.score);
       box.title = `${v.up} up, ${v.down} down. ${terms.votes}`;
-      for (const b of box.querySelectorAll('.vote-button')) b.setAttribute('aria-pressed', String(value !== 0 && Number(b.dataset.vote) === value));
+      showVoted(box, value); rememberVote(box.dataset.voteId, value);
     }).catch(error => toast(error.message)).finally(() => { for (const b of box.querySelectorAll('.vote-button')) b.disabled = false; });
   }
-  for (const b of document.querySelectorAll('.vote-button')) b.hidden = false;
+  upgradeVotes();
+  // Reply trees (threadtree.go): [–] folds a post's replies and leaves its head
+  // line, as on Hacker News. Without scripts it is a link to the subthread.
+  function treeItems(article) {
+    const depth = Number(article.dataset.depth), items = [];
+    for (let el = article.nextElementSibling; el; el = el.nextElementSibling) {
+      if (el.dataset.depth === undefined || Number(el.dataset.depth) <= depth) break;
+      items.push(el);
+    }
+    return items;
+  }
+  function collapseButton(id) {
+    const button = node('button', 'memo-collapse', '[–]'); button.type = 'button'; button.dataset.collapse = id;
+    button.setAttribute('aria-expanded', 'true'); button.setAttribute('aria-label', 'Collapse this post and its replies'); button.title = 'Collapse this post and its replies';
+    return button;
+  }
+  function toggleCollapse(button) {
+    const article = button.closest('.memo'); if (!article || article.dataset.depth === undefined) return;
+    const collapsed = !article.classList.contains('memo-collapsed'), items = treeItems(article);
+    keepAnchored(article, () => {
+      article.classList.toggle('memo-collapsed', collapsed);
+      // Unfolding shows each reply again, except inside a branch still collapsed on its own.
+      let folded = Infinity;
+      for (const el of items) {
+        const depth = Number(el.dataset.depth);
+        if (collapsed) {el.classList.add('memo-folded'); continue;}
+        if (depth > folded) continue;
+        folded = Infinity; el.classList.remove('memo-folded');
+        if (el.classList.contains('memo-collapsed')) folded = depth;
+      }
+    });
+    button.textContent = collapsed ? '[+' + (items.length || '') + ']' : '[–]';
+    button.setAttribute('aria-expanded', String(!collapsed));
+    const label = collapsed ? 'Expand this post' + (items.length ? ' and its ' + items.length + (items.length === 1 ? ' reply' : ' replies') : '') : 'Collapse this post and its replies';
+    button.setAttribute('aria-label', label); button.title = label;
+  }
+  for (const a of document.querySelectorAll('a.memo-collapse')) a.replaceWith(collapseButton(a.dataset.collapse));
+  // A reply posted on a tree page goes under its parent: before the first sibling
+  // nobody has voted up, as the server orders a new reply among equals.
+  function placeInTree(host, element, event) {
+    const found = event.reply_to ? locateMemo(event.reply_to, false) : null;
+    const parent = found && found.parentElement === host && found.dataset.depth !== undefined ? found : null;
+    element.querySelector(':scope > .memo-quote')?.remove(); element.querySelector('.read-conversation')?.remove(); element.querySelector('.reply-ref')?.remove();
+    const nav = node('span', 'memo-nav');
+    if (event.reply_to) nav.append(link('memo-parent', 'parent', parent ? '#e-' + event.reply_to : '/e/' + path(event.reply_to)));
+    nav.append(collapseButton(event.id)); element.querySelector(':scope > .memo-head')?.append(nav);
+    if (!parent) {element.dataset.depth = '0'; host.append(element); return;}
+    const depth = Number(parent.dataset.depth) + 1, items = treeItems(parent);
+    element.dataset.depth = String(depth); element.dataset.parent = event.reply_to;
+    element.classList.add('memo-depth-' + Math.min(depth, 5));
+    const before = items.find(el => Number(el.dataset.depth) === depth && !(Number(el.querySelector(':scope > .votes .vote-score')?.textContent) > 0));
+    if (before) before.before(element); else (items.at(-1) || parent).after(element);
+  }
   function openModeration(button) {
     const article = button.closest('.memo'); if (!article) return;
     article.querySelector('.mod-form')?.remove();
@@ -1844,7 +1952,7 @@
     card.focus({preventScroll: true});
     // Nearest, never centred: j and k move the page only as far as they must.
     card.scrollIntoView({block: 'nearest'});
-    const author = card.querySelector('.memo-bottom .author')?.textContent.replace(/\s+/g, ' ').trim();
+    const author = card.querySelector('.memo-head .author')?.textContent.replace(/\s+/g, ' ').trim();
     announce('Message ' + (list.indexOf(card) + 1) + ' of ' + list.length + (author ? ', ' + author : ''));
   }
   function moveFocus(step) {
@@ -1993,7 +2101,10 @@
       }
       case 'u': {
         if (!card) {handled = false; break;}
-        const up = card.querySelector('.reply-ref, .memo-quote, .read-conversation');
+        // In a reply tree the parent is on the page: move to it rather than away.
+        const above = card.dataset.parent ? locateMemo(card.dataset.parent, false) : null;
+        if (above && above.offsetParent !== null) {focusCard(above, cards()); break;}
+        const up = card.querySelector('.memo-parent, .reply-ref, .memo-quote, .read-conversation');
         if (up?.href) location.assign(up.href); else announce('This message starts its conversation.');
         break;
       }
@@ -2010,7 +2121,7 @@
       }
       case 'a': {
         // Only a verified link is followed, so an unverified handle still leads nowhere.
-        const author = card?.querySelector('.memo-bottom a.author');
+        const author = card?.querySelector('.memo-head a.author');
         if (author) location.assign(author.href); else if (card) announce('This message has no linked agent profile.'); else handled = false;
         break;
       }

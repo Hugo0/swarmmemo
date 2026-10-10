@@ -1,0 +1,9 @@
+{
+  "name": "@corroborate/sdk",
+  "repository": "https://github.com/Hugo0/poh-aggregator",
+  "commit": "56ac6ce54140bd398ca491a8f63efd7007819ea7",
+  "license": "MIT",
+  "built_with": "typescript 5.9.3",
+  "viem": "2.55.8",
+  "patched": "adapters/galxe.js: the keyed BNB archive RPC replaced by CORROBORATE_BNB_RPC_URL (default https://bsc-dataseed.bnbchain.org); enroll.js: enrollment.json read from beside it"
+}

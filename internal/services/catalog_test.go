@@ -30,8 +30,9 @@ var argShapes = map[string]any{
 	}{},
 	"echo.echo":       echoArgs{},
 	"receiver.create": receiverCreateArgs{}, "receiver.rotate": receiverRef{}, "receiver.delete": receiverRef{}, "receiver.list": struct{}{}, "receiver.items": receiverItemsArgs{},
-	"fetch.page":   fetchArgs{},
-	"paste.create": pasteCreateArgs{}, "paste.delete": struct {
+	"fetch.page":          fetchArgs{},
+	"corroborate.resolve": corroborateArgs{},
+	"paste.create":        pasteCreateArgs{}, "paste.delete": struct {
 		ID string `json:"id"`
 	}{}, "paste.open": docOpenArgs{}, "paste.get": pasteGetArgs{}, "paste.list": pasteListArgs{},
 	"docs.create": docCreateArgs{}, "docs.write": docWriteArgs{}, "docs.read": docReadArgs{}, "docs.open": docOpenArgs{}, "docs.delete": struct {

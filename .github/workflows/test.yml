@@ -43,6 +43,8 @@ jobs:
           node -e 'if (Number(process.versions.node.split(".")[0]) < 22) throw Error("Node 22+ required")'
           node --test clients/javascript/test_client.mjs deploy/cloudflare-email/worker.test.mjs
           node --experimental-strip-types --test workers/runs-loader/test/loader.test.mjs
+          npm ci --ignore-scripts --no-audit --no-fund --prefix workers/corroborate
+          node --test workers/corroborate/test/sidecar.test.mjs
         env:
           SWARMMEMO_TEST_BINARY: /tmp/swarmmemo-test
           SWARMMEMO_DELEGATION_TEST_BINARY: /tmp/swarmmemo-test

@@ -441,6 +441,7 @@ func TestFrameworkPages(t *testing.T) {
 			MCPCode                                                                          string `json:"mcp_code"`
 			InstallNote                                                                      string `json:"install_note"`
 			Tools                                                                            []struct{ Name, Line string }
+			Also                                                                             []struct{ Title, Line, Install, Lang, Code string }
 		}
 		if err := json.Unmarshal(twin.Body.Bytes(), &view); err != nil {
 			t.Fatal(err)
@@ -491,9 +492,35 @@ func TestFrameworkPages(t *testing.T) {
 		if view.Slug == "elizaos" && (view.Install != "bun add @elizaos/plugin-mcp@1.8.1" || !strings.Contains(view.InstallNote, "1.7.2") || !strings.Contains(view.InstallNote, "Streamable HTTP")) {
 			t.Errorf("%s install line %q, note %q: want plugin-mcp pinned to 1.8.1 with why", path, view.Install, view.InstallNote)
 		}
+		// Letta's Python server is retired and letta/letta now ships Letta
+		// Code (outside agents, 2026-10-10): the page leads with the Agent
+		// SDK pinned to the release it was run against, then Letta Code and
+		// the Letta API on Letta Cloud, each pointing at the core profile.
+		if view.Slug == "letta" {
+			if view.Install != "npm install @letta-ai/letta-agent-sdk@0.8.18" || view.Lang != "typescript" || !strings.Contains(view.InstallNote, "0.8.18") ||
+				!strings.Contains(view.InstallNote, "retired") || !strings.Contains(view.InstallNote, "Letta Code") ||
+				!strings.Contains(view.Example, `mcpServers: { swarmmemo: { type: "http", url: "`+view.MCPURL+`" } }`) || strings.Contains(view.Example, "8283") {
+				t.Errorf("%s: install %q, note %q, example %q", path, view.Install, view.InstallNote, view.Example)
+			}
+			installs := []string{}
+			for _, alt := range view.Also {
+				installs = append(installs, alt.Install)
+				if alt.Title == "" || alt.Line == "" || alt.Lang == "" || !strings.Contains(alt.Code, view.MCPURL) || strings.Contains(alt.Code, "8283") {
+					t.Errorf("%s other route: %+v", path, alt)
+				}
+			}
+			if !slices.Equal(installs, []string{"npm install -g @letta-ai/letta-code", "pip install letta-client==1.12.1"}) {
+				t.Errorf("%s other routes install %v", path, installs)
+			}
+		} else if len(view.Also) != 0 {
+			t.Errorf("%s: unexpected other routes %+v", path, view.Also)
+		}
 		wants := []string{view.Name, view.Intro, view.Install, view.InstallNote, view.Example, view.Identity, view.Keygen, view.KeyExample, view.MCP, view.MCPCode}
 		for _, tool := range view.Tools {
 			wants = append(wants, tool.Name, tool.Line)
+		}
+		for _, alt := range view.Also {
+			wants = append(wants, alt.Title, alt.Line, alt.Install, alt.Code)
 		}
 		for _, want := range wants {
 			if !strings.Contains(body, want) {

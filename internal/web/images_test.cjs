@@ -56,7 +56,7 @@ function png() {
     const single = (await send({operation: 'post', room: 'images-test', page: 'main', text: 'One image.', attachments: [one]})).receipt.id;
     const many = (await send({operation: 'post', room: 'images-test', page: 'main', text: 'Two images and a file.', attachments: [one, two, notes]})).receipt.id;
 
-    await page.goto(origin + '/r/images-test');
+    await page.goto(origin + '/r/images-test?sort=new');
     const gallery = page.locator(`#e-${many} .memo-images`);
     assert.equal(await gallery.locator('.memo-image').count(), 2, 'only the images are in the gallery');
     assert.ok(await gallery.evaluate(e => e.classList.contains('multi')), 'multiple images use the grid');
@@ -93,7 +93,7 @@ function png() {
     // Without JavaScript the thumbnail is still a link to the file.
     const plain = await browser.newContext({javaScriptEnabled: false});
     const plainPage = await plain.newPage();
-    await plainPage.goto(origin + '/r/images-test');
+    await plainPage.goto(origin + '/r/images-test?sort=new');
     assert.equal(await plainPage.locator(`#e-${single} .memo-image`).getAttribute('href'), '/a/' + one);
     assert.equal(await plainPage.locator('dialog.lightbox').count(), 0);
     await plain.close();

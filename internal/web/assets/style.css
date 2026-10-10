@@ -515,7 +515,7 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 .memo-quote{display:block;margin:0 0 var(--s-3);padding:2px 0 2px var(--s-3);border-left:2px solid var(--line);color:var(--muted);font-size:var(--t-meta);line-height:1.6;text-decoration:none;overflow-wrap:anywhere}
 .memo-quote:hover{border-left-color:var(--line-strong);color:var(--ink)}
 .memo-quote-author{display:block;font-family:var(--mono);font-size:var(--t-meta);color:var(--faint)}
-.memo-quote-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:var(--t-meta)}
+.memo-quote-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden;font-size:var(--t-meta)}
 /* Inline reply. There is exactly one composer; JavaScript relocates that element
    under the message being answered and returns it on Cancel. The no-JavaScript path
    never moves it and keeps the fixed form action. */
@@ -541,11 +541,6 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 /* A reply posted from an inline composer is shown where it was written, in full. */
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo.memo-inline-reply{margin:var(--s-3) 0 0;padding:var(--s-3) 0 0 var(--s-3);border-top:1px solid var(--line);border-left:2px solid var(--line-strong)}
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo-inline-reply .memo-text{display:block;-webkit-line-clamp:unset;max-height:none;overflow:visible;white-space:pre-wrap}
-/* Conversation indentation is capped at three levels so a deep thread still fits 320px. */
-.memo-depth-1,.memo-depth-2,.memo-depth-3{border-left:1px solid var(--line);padding-left:var(--s-3)}
-.memo-depth-1{margin-left:var(--s-3)}
-.memo-depth-2{margin-left:calc(var(--s-3)*2)}
-.memo-depth-3{margin-left:calc(var(--s-3)*3)}
 /* Home and room listings retain one complete body and one native reading link (pilot.24 expansion rules, unchanged). */
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo{padding:var(--s-4) 0}
 /* A listed card opens when clicked. The affordance is the card's own tint, not a
@@ -555,7 +550,7 @@ a.memo-time:hover{color:var(--ink);text-decoration:underline}
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo :is(a,button,summary,input,textarea,select,label){cursor:auto}
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo :is(a,button,summary,[role="button"]){cursor:pointer}
 @media(hover:hover){:is(body[data-view="home"],body[data-view="room"]) #feed .memo:hover{background:var(--surface-2)}}
-:is(body[data-view="home"],body[data-view="room"]) #feed .memo-meta{margin-bottom:var(--s-2)}
+:is(body[data-view="home"],body[data-view="room"]) #feed .memo-head{margin-bottom:var(--s-2)}
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo-text{font-size:var(--t-body);line-height:1.6;margin-bottom:var(--s-2);white-space:pre-line;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;max-height:6.4em;overflow:hidden}
 :is(body[data-view="home"],body[data-view="room"]) #feed .page-label{max-width:none;min-width:0;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
 :is(body[data-view="home"],body[data-view="room"]) #feed .memo-preview-expanded .memo-text{display:block;-webkit-line-clamp:unset;max-height:none;overflow:visible;white-space:pre-wrap}
@@ -1105,10 +1100,6 @@ code.link-value{font-size:var(--t-meta)}
   .memo-actions{margin-left:0;width:100%;justify-content:flex-start;gap:var(--s-4);padding-top:var(--s-1)}
   .memo-quote{padding-left:var(--s-2)}
   .memo-quote-author{margin-bottom:2px}
-  .memo-depth-1{margin-left:var(--s-2)}
-  .memo-depth-2{margin-left:calc(var(--s-2)*2)}
-  .memo-depth-3{margin-left:calc(var(--s-2)*3)}
-  .memo-depth-1,.memo-depth-2,.memo-depth-3{padding-left:var(--s-2)}
   .page-heading{padding:var(--s-6) 0 var(--s-5)}
   .page-heading h1{font-size:30px}
   .me{padding-top:var(--s-5)}
@@ -1188,6 +1179,8 @@ span.term[title]:focus,code.term[title]:focus,p.term[title]:focus{outline:2px so
   width:max-content;max-width:min(280px,calc(100vw - 32px));padding:var(--s-2) var(--s-3);border-radius:var(--radius);background:var(--primary-fill);color:var(--primary-ink);
   font:400 var(--t-meta)/1.5 var(--sans);letter-spacing:normal;text-transform:none;text-align:left;white-space:normal;overflow-wrap:break-word;pointer-events:none}
 .term.tip-dismissed::after{display:none}
+/* With script, an open tooltip is placed in the window (fixed), so it never widens the page. */
+.term.tip-fixed[title]:is(:focus,:focus-visible)::after{position:fixed;top:var(--tip-top);left:var(--tip-left)}
 a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .article-byline a.memo-time:focus-visible>time[title]::after{left:0;right:auto}
 /* An article is the page: serif title, a byline in the memo's metadata voice,
@@ -1359,10 +1352,48 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .sort-tabs a:hover{color:var(--ink);text-decoration:underline}
 .sort-tabs a[aria-current]{color:var(--ink);text-decoration:underline;text-underline-offset:5px}
 .sort-bias{display:inline-flex;gap:var(--s-3);margin-left:var(--s-2);padding-left:var(--s-3);border-left:1px solid var(--line);font-size:var(--t-meta)}
-.votes{display:inline-flex;align-items:center;gap:2px;margin-right:var(--s-2);font:var(--t-meta)/1 var(--mono);color:var(--muted)}
-.vote-button{min-width:var(--quiet-h);justify-content:center;font-size:var(--t-meta)}
+/* A post in a listing reads like a Hacker News comment: ▲▼ in a narrow column at the
+   top left, beside the head line (who · where · when · parent · next · [–]); the body
+   and actions line up under the head line, not under the arrows. */
+.feed .memo{display:flow-root}
+.feed .memo>.votes{float:left;width:24px}
+.feed .memo>:not(.votes){margin-left:32px}
+.votes{display:inline-flex;flex-direction:column;align-items:center;font:12px/1 var(--mono);color:var(--muted)}
+.vote-button{display:inline-flex;align-items:center;justify-content:center;width:24px;height:20px;padding:0;border:0;background:none;font:12px/1 var(--mono);color:var(--muted);text-decoration:none;cursor:pointer}
+.vote-button:hover{color:var(--ink);text-decoration:none}
+.vote-button:focus-visible{outline:2px solid var(--focus);outline-offset:0}
+.vote-button:disabled{opacity:.5;cursor:progress}
 .vote-button[aria-pressed="true"]{color:var(--ink);font-weight:700}
 .vote-score{min-width:1.5ch;text-align:center;color:var(--ink);font-variant-numeric:tabular-nums}
+.vote-score:empty{display:none}
+/* A long-form post's arrows sit in its byline, in a row. */
+.article-byline .votes{flex-direction:row;margin-right:var(--s-1)}
+.memo-head{display:flex;flex-wrap:wrap;align-items:center;gap:2px var(--s-2);min-height:20px;margin-bottom:var(--s-3);font-size:var(--t-meta);color:var(--muted)}
+.memo-head>.memo-meta{margin-bottom:0}
+.memo-nav{display:inline-flex;flex-wrap:wrap;align-items:center;gap:var(--s-2);font:var(--t-meta)/1.5 var(--mono)}
+.memo-nav a,.memo-nav button{color:var(--muted);text-decoration:none;font:inherit}
+.memo-nav a:hover,.memo-nav button:hover{color:var(--ink);text-decoration:underline}
+.memo-nav button{background:none;border:0;padding:0;cursor:pointer}
+.memo-continue,.memo-more{display:inline-flex;align-items:center;min-height:var(--quiet-h);margin-top:var(--s-2);font-size:var(--t-meta);color:var(--muted)}
+.memo-continue:hover,.memo-more:hover{color:var(--ink)}
+/* Reply trees (threadtree.go): 2.5em per level, five at most; deeper is a subthread. */
+.memo-depth-1{margin-left:2.5em}
+.memo-depth-2{margin-left:5em}
+.memo-depth-3{margin-left:7.5em}
+.memo-depth-4{margin-left:10em}
+.memo-depth-5{margin-left:12.5em}
+/* Collapsed with [–] (app.js): the head line stays, as on Hacker News. */
+.memo.memo-collapsed>:not(.memo-head):not(.votes){display:none}
+.feed .memo-inline-reply>.memo-quote{display:none}
+.memo.memo-folded{display:none}
+@media(max-width:650px){
+  .memo-depth-1{margin-left:.75em}
+  .memo-depth-2{margin-left:1.5em}
+  .memo-depth-3{margin-left:2.25em}
+  .memo-depth-4{margin-left:3em}
+  .memo-depth-5{margin-left:3.75em}
+  .feed .memo>:not(.votes){margin-left:28px}
+}
 .honors{list-style:none;padding:0;margin:0 0 var(--s-3);display:flex;flex-wrap:wrap;gap:var(--s-2) var(--s-4);font-size:var(--t-ui);color:var(--ink)}
 .honors li{display:inline-flex;gap:6px;align-items:baseline}
 /* Messages (RFC0013 §11): /me/messages, the Message button, Who can message you. */

@@ -16,7 +16,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
   const accepted = () => page.waitForFunction(()=>document.getElementById('compose-status').textContent.includes('Accepted'));
   const submit = () => page.locator('#compose-form button[type=submit]').click();
   try {
-    await page.goto(origin);
+    await page.goto(origin+'/?sort=new');
     assert.equal(await page.locator('#compose-form').count(),1);
     assert.equal(await page.locator('.sidebar #compose').count(),0);
     const summary=page.locator('#compose > summary');
@@ -35,7 +35,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     assert.equal(await page.locator('.primary:visible').count(),1,'Post memo is the single visible primary');
     assert.equal(await page.locator('.compose-policy a[href="/policy"]').isVisible(),true,'the publication notice stays visible');
     const reduced=await browser.newContext({reducedMotion:'reduce'}),rm=await reduced.newPage();
-    await rm.goto(origin);
+    await rm.goto(origin+'/?sort=new');
     assert.equal(await rm.locator('.compose-caret').evaluate(e=>getComputedStyle(e).animationName),'none','reduced motion never blinks');
     await reduced.close();
     // The real caret takes over on focus; the decorative one stands down.
@@ -89,7 +89,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     assert.ok(!copied.includes('Hello from a disposable composer check.'),'handoff never copies memo bodies');
     assert.equal(writes,beforeCopy,'copy does not post');
     assert.equal(await page.locator('#memo-text').inputValue(),'');
-    const searchPage=await context.newPage();await searchPage.goto(origin);
+    const searchPage=await context.newPage();await searchPage.goto(origin+'/?sort=new');
     // Search is a sidebar control, never a row of the feed.
     assert.equal(await searchPage.locator('.sidebar .search-panel #search').count(),1,'search lives in the sidebar');
     assert.equal(await searchPage.locator('.feed-column .search-form').count(),0,'search is not part of the feed column');
@@ -104,7 +104,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     assert.equal(await searchPage.locator('#search').isVisible(),true,'search is reachable at 320px');
     assert.ok(await searchPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     const plain=await browser.newContext({javaScriptEnabled:false,viewport:{width:320,height:850}}),plainSearch=await plain.newPage();
-    await plainSearch.goto(origin);
+    await plainSearch.goto(origin+'/?sort=new');
     assert.equal(await plainSearch.locator('#search').isVisible(),true,'search is reachable without scripts at 320px');
     await plainSearch.getByRole('searchbox',{name:'Search public messages'}).fill('café 雪');
     await plainSearch.getByRole('button',{name:'Search public messages',exact:true}).click();
@@ -147,7 +147,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     assert.equal(await page.locator('.post-handoff').count(),0,'stale accepted verification must not revive a CTA after a newer failure');
 
     const alias=origin.replace('127.0.0.1','localhost');const aliasPage=await context.newPage();
-    await aliasPage.goto(alias+'/#compose');await aliasPage.locator('#memo-text').fill('Local alias conversation');
+    await aliasPage.goto(alias+'/?sort=new#compose');await aliasPage.locator('#memo-text').fill('Local alias conversation');
     await aliasPage.locator('#compose-form button[type=submit]').click();await aliasPage.locator('.post-handoff').waitFor();
     assert.ok((await aliasPage.locator('.post-handoff').getByRole('link',{name:'Public message →'}).getAttribute('href')).startsWith(alias+'/e/'));
     await aliasPage.close();
@@ -155,18 +155,18 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     // A loaded signing key must not silently downgrade when signing is unavailable.
     await page.goto(origin+'/me');await page.locator('#identity-create').click();
     await page.waitForFunction(()=>document.getElementById('identity-status').textContent.includes('registered'));
-    await page.goto(origin+'/#compose');await page.locator('#memo-text').fill('Signed public hello');await submit();await accepted();
+    await page.goto(origin+'/?sort=new#compose');await page.locator('#memo-text').fill('Signed public hello');await submit();await accepted();
     await page.locator('.post-handoff').waitFor();
     const signedURL=await page.locator('.post-handoff').getByRole('link',{name:'Public message →'}).getAttribute('href');
     const signedEvent=(await (await context.request.get(signedURL+'?format=json')).json()).messages[0];
     assert.ok(signedEvent.public_key&&signedEvent.signature,'normal identity signing remains intact');
     const privateRoom='conversion-private-'+Date.now().toString(36);
     await page.evaluate(async room=>{const S=window.SwarmSign;await S.request({operation:'room.create',room,visibility:'private',members:[],request_id:S.uuid()},true);},privateRoom);
-    await page.goto(origin+'/#compose');await page.locator('#compose-settings>summary').click();await page.locator('#compose-form input[name=room]').fill(privateRoom);
+    await page.goto(origin+'/?sort=new#compose');await page.locator('#compose-settings>summary').click();await page.locator('#compose-form input[name=room]').fill(privateRoom);
     await page.locator('#memo-text').fill('Private must never become public handoff');await submit();await accepted();
     await page.waitForFunction(()=>!document.querySelector('#compose-form button[type=submit]').disabled);
     assert.equal(await page.locator('.post-handoff').count(),0,'actual private receipt must not create a public sharing CTA');
-    await page.goto(origin+'/#compose');await page.locator('#memo-text').fill('Signed failure must retain me');
+    await page.goto(origin+'/?sort=new#compose');await page.locator('#memo-text').fill('Signed failure must retain me');
     await page.evaluate(()=>Object.defineProperty(crypto,'subtle',{configurable:true,value:undefined}));
     const beforeSigningFailure=writes;await submit();
     await page.waitForFunction(()=>document.getElementById('compose-status').classList.contains('error'));
@@ -178,7 +178,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
       const plain=await browser.newContext({javaScriptEnabled:mode!=='disabled',viewport:{width:320,height:850}});
       const p=await plain.newPage();if(mode==='blocked')await p.route('**/assets/app.js',r=>r.abort());
       const requests=[];p.on('request',r=>requests.push({url:r.url(),method:r.method(),data:r.postData()}));
-      await p.goto(origin);
+      await p.goto(origin+'/?sort=new');
       assert.equal(await p.locator('#memo-text').isVisible(),true,'no-JS composer is open at rest');
       assert.equal(await p.locator('#compose-settings').evaluate(e=>e.open),false,'Options remain a native closed disclosure');
       await p.locator('#compose-settings>summary').click();

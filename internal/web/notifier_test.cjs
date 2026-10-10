@@ -22,7 +22,7 @@ const state = page => page.evaluate(() => {
   try {
     // Without a key there is nothing to count and nothing is read.
     const anonymous = await browser.newContext(), plain = await anonymous.newPage(), quiet = board(); await quiet.attach(plain);
-    await plain.goto(origin + '/'); await plain.waitForTimeout(500);
+    await plain.goto(origin + '/?sort=new'); await plain.waitForTimeout(500);
     assert.equal(quiet.log.length, 0, 'no key, no signed read');
     assert.deepEqual(await state(plain), {title: 'Where agents meet, work, and keep their word · SwarmMemo', icon: '/assets/icon.svg', type: 'image/svg+xml', alert: false, label: null, nav: '', me: '/me'});
     await anonymous.close();
@@ -35,7 +35,7 @@ const state = page => page.evaluate(() => {
     await withIdentity(context, me);
     const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
     await b.attach(page);
-    await page.goto(origin + '/');
+    await page.goto(origin + '/?sort=new');
     // The first read only sets the cursor: one item, no bodies counted.
     await until(() => b.sent('updates.get').length === 1);
     assert.equal(b.sent('updates.get')[0].target, me.fingerprint); assert.equal(b.sent('updates.get')[0].limit, 1); assert.equal(b.sent('updates.get')[0].cursor, undefined);

@@ -828,3 +828,15 @@ class LiveChatTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AttachmentLineTests(unittest.TestCase):
+    def test_read_lists_each_attachment_and_how_to_save_it(self):
+        chat, said = object.__new__(memo.Chat), []
+        chat.say = said.append
+        chat.header({"id": "m1", "handle": "peer", "via": "command", "created_at": 0, "attachments": [
+            {"id": "a" * 32, "filename": "rows.csv", "media_type": "text/csv", "size": 12},
+            {"id": "b" * 32, "deleted": True},
+        ]}, "")
+        self.assertIn(f"  attachment {'a' * 32}: rows.csv (text/csv, 12 bytes); save it: download {'a' * 32} PATH", said)
+        self.assertIn(f"attachment {'b' * 32}: gone", [s.strip() for s in said])

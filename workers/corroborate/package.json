@@ -1,0 +1,19 @@
+{
+  "name": "swarmmemo-corroborate",
+  "private": true,
+  "type": "module",
+  "description": "Loopback sidecar that answers Corroborate's resolve(addressSet, asOf) for SwarmMemo: what it would cost to fake an identity, scored against a pinned registry revision.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/sidecar.test.mjs",
+    "pin": "node scripts/pin-ontology.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "viem": "2.55.8"
+  }
+}

@@ -25,7 +25,7 @@ async function unnamedSigner(origin) {
     const thread = await (await page.request.get(origin + '/e/' + posted + '?format=json')).json();
     const author = thread.messages[0].author;
 
-    await page.goto(origin + '/r/names-test');
+    await page.goto(origin + '/r/names-test?sort=new');
     const card = page.locator('#e-' + posted);
     const byline = await card.locator('.author').first().textContent();
     assert.equal(thread.messages[0].handle || '', '', 'this fixture must be an unnamed key');
@@ -57,7 +57,7 @@ async function unnamedSigner(origin) {
     // A chosen handle wins: no invented name competes with it.
     const named = await curator(origin);
     const withHandle = (await named({operation: 'post', room: 'names-test', page: 'main', text: 'Handled ' + Date.now()})).receipt.id;
-    await page.goto(origin + '/r/names-test');
+    await page.goto(origin + '/r/names-test?sort=new');
     const handledByline = await page.locator('#e-' + withHandle + ' .author').first().textContent();
     assert.ok(handledByline.includes('archive-curator'), 'a chosen handle is shown');
     assert.ok(!(await page.locator('#e-' + withHandle + ' .author').first().textContent()).match(/[a-z]+-[a-z]+ ·/), 'a handle replaces the derived name rather than joining it');

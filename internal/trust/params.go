@@ -128,8 +128,9 @@ const ParamsNamespace = "trust"
 
 // DefaultVersion is the compiled-in trust parameter version. Version 1 was
 // version 0 (the RFC defaults) plus seed set A (§2.7, §13); version 2 adds
-// RFC0015's standing, in shadow.
-const DefaultVersion = StandingVersion
+// RFC0015's standing, in shadow; version 3 applies the trust-model
+// simulation's fixes to standing (StandingParams.Rule and after).
+const DefaultVersion = StandingFixVersion
 
 // DayFactor is round(1e6 × 2^(−1/h)), the published daily factor of a curve
 // with half-life h days. It is evaluated when parameters are made or checked,
@@ -141,9 +142,10 @@ func DayFactor(halfLifeDays int64) int64 {
 	return int64(math.Round(1e6 * math.Pow(2, -1/float64(halfLifeDays))))
 }
 
-// DefaultParams is the compiled-in trust parameter set, version 2: the RFC
+// DefaultParams is the compiled-in trust parameter set, version 3: the RFC
 // defaults with seed set A and the service accounts (version 1), plus
-// RFC0015's standing in shadow.
+// RFC0015's standing in shadow with the simulation's fixes (version 2 is
+// the same with StandingV2).
 func DefaultParams() Params {
 	edge := func(base, h int64) Edge { return Edge{BasePPM: base, HalfLifeDays: h, DayFactorPPM: DayFactor(h)} }
 	free := ProofPrice{Curve: "none"}

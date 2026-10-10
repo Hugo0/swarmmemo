@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -124,14 +125,15 @@ func goldenSnapshot() Snapshot {
 	return b.snap
 }
 
-// goldenStandingSnapshot is the standing fixture (parameter version 2): the
-// golden inputs plus every standing input: work.accept and witness edges, a
-// down vote (already in the golden inputs), credit spent, a
-// spend-only account, a service account's spend (ignored), and a
-// penalised account.
-func goldenStandingSnapshot() Snapshot {
+// goldenStandingV2Snapshot is the standing fixture of parameter version 2
+// (phase 1A, published in 1.75.0): the golden inputs plus every standing
+// input: work.accept and witness edges, a down vote (already in the golden
+// inputs), credit spent, a spend-only account, a service account's spend
+// (ignored), and a penalised account. Its output is frozen: version 2 runs
+// recompute byte for byte.
+func goldenStandingV2Snapshot() Snapshot {
 	snap := goldenSnapshot()
-	p := DefaultParams()
+	p := paramsV2()
 	p.ServiceAccounts = snap.Params.ServiceAccounts
 	snap.Params = p
 	seeds := p.Seeds
@@ -152,8 +154,46 @@ func goldenStandingSnapshot() Snapshot {
 	return snap
 }
 
+// goldenStandingSnapshot is the standing fixture of the current version
+// (3, the simulation's fixes): version 2's inputs under DefaultParams, plus
+// what rule 1 reads: spend over the cap, self-dealt spend (to an account in
+// the spender's root, to a host on the spender's verified domain, to an
+// account the spender funded by a transfer within funded_days, and recycled
+// through a bounty reward), spend to an unrelated payee (counted), and
+// domains with and without a known registration date.
+func goldenStandingSnapshot() Snapshot {
+	snap := goldenStandingV2Snapshot()
+	p := DefaultParams()
+	p.ServiceAccounts = snap.Params.ServiceAccounts
+	snap.Params = p
+	alice, bob, carol, dave := acct("alice"), acct("bob"), acct("carol"), acct("dave")
+	payer, collector := acct("payer"), acct("collector")
+	D := dayOf(testAsOf)
+	for i, r := range snap.Proofs {
+		switch {
+		case r.Kind == "domain" && r.LinkValue == "anchor0.example":
+			snap.Proofs[i].RegisteredAt = testAsOf - 3*365*day // old: full price from day one
+		case r.Kind == "domain" && r.LinkValue == "bob.co.uk":
+			snap.Proofs[i].RegisteredAt = testAsOf - 20*day
+		}
+	}
+	snap.Transfers = append(snap.Transfers,
+		Record{Type: "transfer", From: payer, To: carol, Amount: 500000, CreatedAt: testAsOf - 20*day}, // payer funded carol
+		Record{Type: "transfer", From: dave, To: alice, Amount: 300000, CreatedAt: testAsOf - 40*day})  // too old to count
+	snap.Spends = append(snap.Spends,
+		Record{Type: "spend", Account: payer, Day: D - 2, Amount: 3000000, To: carol},                     // funded payee: self-dealt
+		Record{Type: "spend", Account: carol, Day: D - 2, Amount: 3000000, To: payer},                     // and back: self-dealt
+		Record{Type: "spend", Account: bob, Day: D - 3, Amount: 1000000, LinkValue: "api.shop.bob.co.uk"}, // own domain: self-dealt
+		Record{Type: "spend", Account: carol, Day: D - 4, Amount: 1000000, To: dave},                      // carol's root holds dave's key: self-dealt
+		Record{Type: "spend", Account: dave, Day: D - 5, Amount: 400000, To: alice},                       // funded 40 days ago: counts
+		Record{Type: "spend", Account: collector, Day: D - 1, Amount: 900000, LinkValue: "api.unrelated.example"},
+		Record{Type: "spend", Account: acct("steward"), Day: D - 1, Amount: 100000, To: alice}) // service: ignored
+	return snap
+}
+
 func TestGoldenFixture(t *testing.T) {
 	testGolden(t, "golden", goldenSnapshot)
+	testGolden(t, "golden_standing_v2", goldenStandingV2Snapshot)
 	testGolden(t, "golden_standing", goldenStandingSnapshot)
 }
 
@@ -204,7 +244,7 @@ func testGolden(t *testing.T, name string, build func() Snapshot) {
 	if !out.SeedsBUsed || len(out.Evidence) == 0 || len(out.Dividends) == 0 || len(out.Penalties) == 0 {
 		t.Fatalf("fixture coverage: seeds_b=%v evidence=%d dividends=%d penalties=%d", out.SeedsBUsed, len(out.Evidence), len(out.Dividends), len(out.Penalties))
 	}
-	if name == "golden_standing" {
+	if strings.HasPrefix(name, "golden_standing") {
 		if out.Standing == nil || out.Standing.Inputs["work_accept"] == 0 || out.Standing.Inputs["witness"] == 0 || out.Standing.Inputs["down_vote"] == 0 ||
 			out.Standing.Inputs["spend"] == 0 || len(out.Standing.LargestMoves) == 0 {
 			t.Fatalf("standing fixture coverage: %+v", out.Standing)
@@ -229,6 +269,13 @@ func testGolden(t *testing.T, name string, build func() Snapshot) {
 func paramsV1() Params {
 	p := DefaultParams()
 	p.Version, p.Standing = SeedsAVersion, nil
+	return p
+}
+
+// paramsV2 is trust parameter version 2: phase 1A's standing, as published.
+func paramsV2() Params {
+	p := DefaultParams()
+	p.Version, p.Standing = StandingVersion, StandingV2()
 	return p
 }
 

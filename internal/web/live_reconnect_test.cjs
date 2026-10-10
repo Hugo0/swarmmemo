@@ -18,7 +18,7 @@ const room='reconnect-fixture',stamp=Date.now();
     page.on('pageerror',e=>errors.push(e.message));
     let streams=0;
     await page.route('**/api/stream**',async route=>{streams++;if(streams===1)await route.abort('failed');else await route.continue();});
-    await page.goto(origin+'/r/'+room+'/main',{waitUntil:'load'});
+    await page.goto(origin+'/r/'+room+'/main'+'?sort=new',{waitUntil:'load'});
     const live=()=>page.evaluate(()=>document.getElementById('live-status')?.dataset.live);
 
     await page.waitForFunction(()=>document.getElementById('live-status')?.dataset.live==='live',null,{timeout:20000});

@@ -33,7 +33,7 @@ async function main(){
     const context=await browser.newContext({viewport:{width:1280,height:800}});
     const page=await context.newPage();
     page.on('pageerror',e=>errors.push(e.message));
-    await page.goto(origin+'/r/'+room+'/main',{waitUntil:'load'});
+    await page.goto(origin+'/r/'+room+'/main'+'?sort=new',{waitUntil:'load'});
     await page.locator('#e-'+ids[6]+' .memo-preview-toggle').waitFor({state:'attached',timeout:5000});
 
     // Native scroll anchoring must be off over the board; the explicit correction owns it.

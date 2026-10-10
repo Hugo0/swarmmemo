@@ -23,7 +23,11 @@ func TestHomePreviewRetainsOneFullBodyAndNativeConversationLink(t *testing.T) {
 	}}
 	for _, path := range []string{"/", "/r/lobby", "/e/" + event.ID} {
 		w := httptest.NewRecorder()
-		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		target := path
+		if !strings.HasPrefix(path, "/e/") {
+			target += "?sort=new" // the flat stream that quotes; Hot nests instead
+		}
+		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", target, nil))
 		body := w.Body.String()
 		if strings.Contains(body, "memo-preview-toggle") || strings.Contains(body, ">Show more</button>") {
 			t.Fatal("inline expansion must be a measured JS enhancement, not inert SSR controls")
@@ -137,7 +141,7 @@ func TestListingQuotesOnlyParentsAlreadyOnThePage(t *testing.T) {
 		}
 		return board.Result{OK: true}, nil
 	}}
-	for _, path := range []string{"/", "/r/lobby"} {
+	for _, path := range []string{"/?sort=new", "/r/lobby?sort=new"} {
 		w := httptest.NewRecorder()
 		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		body := w.Body.String()
@@ -204,35 +208,5 @@ func TestListingQuotesParentsOffThePage(t *testing.T) {
 	got, err := s.PublicMessagesByID(t.Context(), []string{parent, "unknown"})
 	if err != nil || len(got) != 1 || got[0].ID != parent {
 		t.Fatalf("PublicMessagesByID: %v %v", got, err)
-	}
-}
-
-// P05: a conversation page indents by reply structure, capped so 320px still fits.
-func TestConversationIndentsByReplyStructureWithACap(t *testing.T) {
-	events := []board.Message{
-		{ID: "root", Sequence: 1, Room: "lobby", Page: "main", Kind: "note", Text: "root"},
-		{ID: "a", Sequence: 2, Room: "lobby", Page: "main", Kind: "note", Text: "a", ReplyTo: "root"},
-		{ID: "b", Sequence: 3, Room: "lobby", Page: "main", Kind: "note", Text: "b", ReplyTo: "a"},
-		{ID: "c", Sequence: 4, Room: "lobby", Page: "main", Kind: "note", Text: "c", ReplyTo: "b"},
-		{ID: "d", Sequence: 5, Room: "lobby", Page: "main", Kind: "note", Text: "d", ReplyTo: "c"},
-		{ID: "orphan", Sequence: 6, Room: "lobby", Page: "main", Kind: "note", Text: "orphan", ReplyTo: "elsewhere"},
-	}
-	s := &testService{execute: func(c board.Command) (board.Result, error) {
-		return board.Result{OK: true, Messages: events, Data: map[string]any{"root_id": "root"}}, nil
-	}}
-	w := httptest.NewRecorder()
-	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/e/root", nil))
-	body := w.Body.String()
-	for id, class := range map[string]string{"root": `class="memo"`, "a": `class="memo memo-depth-1"`, "b": `class="memo memo-depth-2"`, "c": `class="memo memo-depth-3"`, "d": `class="memo memo-depth-3"`, "orphan": `class="memo"`} {
-		if !strings.Contains(body, class+` id="e-`+id+`"`) {
-			t.Errorf("%s: expected %s", id, class)
-		}
-	}
-	if strings.Contains(body, "memo-depth-4") {
-		t.Fatal("indentation must cap at three levels")
-	}
-	// Listings quote; conversation pages indent. They must not do both.
-	if strings.Contains(body, `class="memo-quote"`) {
-		t.Fatal("a conversation page shows structure, not quoted duplicates")
 	}
 }

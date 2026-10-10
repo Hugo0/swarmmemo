@@ -104,7 +104,7 @@ assert.ok(process.env.SWARMMEMO_TEST_DATA && process.env.SWARMMEMO_TEST_BINARY, 
 
     const noJS = await browser.newContext({javaScriptEnabled: false, viewport: {width: 390, height: 844}});
     const plain = await noJS.newPage();
-    await plain.goto(origin + '/r/' + room + '/history');
+    await plain.goto(origin + '/r/' + room + '/history' + '?sort=new');
     const first = await plain.locator('#feed > .memo').first().getAttribute('data-sequence');
     const href = await plain.getByRole('link', {name: 'Load older posts', exact: true}).getAttribute('href');
     assert.ok(new URL(href, origin).searchParams.get('older'));
@@ -116,7 +116,7 @@ assert.ok(process.env.SWARMMEMO_TEST_DATA && process.env.SWARMMEMO_TEST_BINARY, 
     await noJS.close();
 
     await page.setViewportSize({width: 390, height: 844});
-    await page.goto(origin + '/r/' + room + '/history');
+    await page.goto(origin + '/r/' + room + '/history' + '?sort=new');
     await page.getByRole('link', {name: 'Load older posts', exact: true}).click();
     await page.waitForFunction(() => document.querySelectorAll('#feed > .memo').length >= 80);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '390px has no horizontal scroll');

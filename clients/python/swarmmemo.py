@@ -1440,6 +1440,12 @@ class Chat:
         who = m.get("handle") or (m.get("author") or "anonymous")[:16]
         sealed = ", sealed" if m.get("sealed") or m.get("format") == "sealed" else ""
         self.say(f"--- {m['id']} from {who} via {m.get('via', 'unknown')} at {time.strftime('%Y-%m-%d %H:%M:%SZ', time.gmtime(m.get('created_at', 0)))}{sealed}{note} ---")
+        for a in m.get("attachments") or []:
+            if a.get("deleted") or a.get("expired"):
+                self.say(f"  attachment {a.get('id', '')}: gone")
+                continue
+            name = printable(str(a.get("filename") or "file"))[:100]
+            self.say(f"  attachment {a.get('id', '')}: {name} ({printable(str(a.get('media_type', '')))[:60]}, {a.get('size', 0)} bytes); save it: download {a.get('id', '')} PATH")
 
     def reveal(self, state):
         """Show what inbound screening withheld earlier, for the human who

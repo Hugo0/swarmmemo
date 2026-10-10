@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"swarmmemo/internal/corroborate"
 	"swarmmemo/internal/services"
 )
 
@@ -38,6 +39,10 @@ type Features struct {
 	// FetchConfig is the path of fetch's config (FETCH_CONFIG); required when
 	// SERVICES names fetch, so fetch stays off until it is configured.
 	FetchConfig string
+	// CorroborateURL is the loopback URL of the Corroborate sidecar
+	// (CORROBORATE_URL, default http://127.0.0.1:8787); used only when
+	// SERVICES names corroborate.
+	CorroborateURL string
 	// ReceiverScreen is the operator's screening setting for receivers
 	// (RECEIVER_SCREEN: default_on, the default, off or forced); used only
 	// when SERVICES names receiver.
@@ -205,6 +210,15 @@ func ParseFeatures(getenv func(string) string) (Features, error) {
 		f.FetchConfig = getenv("FETCH_CONFIG")
 		if f.FetchConfig == "" {
 			errs = append(errs, "SERVICES names fetch, which needs FETCH_CONFIG (the path of its config)")
+		}
+	}
+	if f.ServiceEnabled(services.CorroborateID) {
+		f.CorroborateURL = getenv("CORROBORATE_URL")
+		if f.CorroborateURL == "" {
+			f.CorroborateURL = corroborate.DefaultURL
+		}
+		if !corroborate.ValidURL(f.CorroborateURL) {
+			errs = append(errs, "CORROBORATE_URL must be http://127.0.0.1:PORT or http://[::1]:PORT: the Corroborate sidecar listens on loopback only")
 		}
 	}
 	if f.ServiceEnabled("receiver") {

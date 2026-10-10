@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/allowance"
+	"swarmmemo/internal/corroborate"
 	"swarmmemo/internal/services"
 )
 
@@ -33,14 +34,15 @@ func init() {
 // servicesState is the service engine the Store carries (Store.services); nil
 // while SERVICES is empty.
 type servicesState struct {
-	engine     *services.Engine
-	inference  *services.InferenceConfig  // nil unless SERVICES names inference
-	runs       *services.RunsConfig       // nil unless SERVICES names runs
-	publicData *services.PublicDataConfig // nil unless SERVICES names public_data
-	fetch      *services.FetchConfig      // nil unless SERVICES names fetch and FETCH_CONFIG loads
-	notaryKey  ed25519.PrivateKey         // nil unless SERVICES names notary, runs, screen or paste
-	screener   services.TextScreener      // screen's classifier; nil unless MODERATION is on
-	leaker     services.LeakScreener      // screen.leak's classifier (mode full); nil unless MODERATION is on
+	engine      *services.Engine
+	inference   *services.InferenceConfig  // nil unless SERVICES names inference
+	runs        *services.RunsConfig       // nil unless SERVICES names runs
+	publicData  *services.PublicDataConfig // nil unless SERVICES names public_data
+	fetch       *services.FetchConfig      // nil unless SERVICES names fetch and FETCH_CONFIG loads
+	corroborate *corroborate.Client        // nil unless SERVICES names corroborate
+	notaryKey   ed25519.PrivateKey         // nil unless SERVICES names notary, runs, screen or paste
+	screener    services.TextScreener      // screen's classifier; nil unless MODERATION is on
+	leaker      services.LeakScreener      // screen.leak's classifier (mode full); nil unless MODERATION is on
 	// content caches ContentStats (contentwire.go) for contentStatsTTL.
 	content contentStatsCache
 	// wake caches WakeStats (wakenotarywire.go) for contentStatsTTL.
@@ -97,6 +99,13 @@ func (s *Store) openServices() error {
 			cfg = loaded
 		}
 		s.services.fetch = cfg
+	}
+	if s.config.Features.ServiceEnabled(services.CorroborateID) {
+		client, err := corroborate.New(s.config.Features.CorroborateURL)
+		if err != nil {
+			return err
+		}
+		s.services.corroborate = client
 	}
 	if s.config.Features.Moderation {
 		s.services.screener, s.services.leaker = moderationScreener{s}, moderationScreener{s}
@@ -163,7 +172,7 @@ func (s *Store) serviceDeps() services.Deps {
 		Inference: s.services.inference, Runs: s.services.runs, Board: serviceBoardView{s: s}, ServiceID: s.config.ServiceID,
 		PublicData: s.services.publicData, Classifier: s.classifier(), NotaryKey: s.services.notaryKey, TextScreener: s.services.screener, LeakScreener: s.services.leaker,
 		ReceiverScreen: s.config.Features.ReceiverScreen, ContentScreen: s.config.Features.ContentScreen, ContentURL: s.config.Features.ContentURL,
-		Fetch: s.services.fetch, Blobs: serviceBlobKeeper{s}, EchoSimulate: s.config.EchoSimulate}
+		Fetch: s.services.fetch, Blobs: serviceBlobKeeper{s}, Corroborate: s.services.corroborate, EchoSimulate: s.config.EchoSimulate}
 }
 
 // UseServiceMeter replaces the ledger and price source the services use. It
@@ -606,6 +615,12 @@ func serviceError(err error) error {
 		return &Error{Status: 503, Code: "service_unavailable", Message: "The service is busy and nothing was charged; retry with a new request ID in a few seconds.", RetryAfter: 5}
 	case "upstream_unavailable":
 		return &Error{Status: 503, Code: "service_unavailable", Message: "No upstream for this service can be called right now (none configured, suspended, or its daily budget is spent), and nothing was charged. services.list shows what is available; budgets reset at 00:00 UTC.", RetryAfter: 60}
+	case services.RefusalCorroborateUnavailable:
+		retry := e.RetryAfter
+		if retry <= 0 {
+			retry = 30
+		}
+		return &Error{Status: 503, Code: "service_unavailable", Message: "The Corroborate resolver could not read the chains just now, so nothing was scored (an unavailable answer is never a zero). Retry after retry_after seconds.", RetryAfter: retry}
 	case "content_refused":
 		return problem(403, "content_refused", "Moderation refused this request, and nothing was charged.")
 	case "anonymous_limit":

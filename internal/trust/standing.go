@@ -46,11 +46,14 @@ import (
 //
 // One propagation: personalized PageRank from the seed mass. Each step a
 // node restarts with (1 − pass_ppm) of its seed and passes pass_ppm of what
-// it holds along its out-edges in proportion to their weights (a node with
-// no out-edges keeps it); a penalised share and every oppose share return to
-// the seeds in proportion to their seed. Mass is conserved and never minted
-// (integer floors only lose it), so standing sums to at most the seed mass,
-// and a region with no seed receives only what its inbound edges carry to it.
+// it holds along its out-edges in proportion to their weights; a penalised
+// share and every oppose share return to the seeds in proportion to their
+// seed, and from rule 1 (version 3) so does the pass of a node with no
+// out-edges (in version 2 such a node kept it, so casting one vote halved
+// the voter's standing). Mass is conserved and never minted (integer floors
+// only lose it); from rule 1 standing is reported as c / (1 − pass_ppm), so
+// it sums to at most the seed mass / (1 − pass_ppm), and a region with no
+// seed receives only what its inbound edges carry to it.
 //
 // A liability penalty (RFC0012 trust_evidence: a public, logged finding the
 // arbiter can lift) is an oppose from the arbiter: the penalised account's
@@ -82,11 +85,34 @@ type StandingParams struct {
 	// V0PPM and CRefCents shape the vote weight v(s) (VoteWeightPPM).
 	V0PPM     int64 `json:"v0_ppm"`
 	CRefCents int64 `json:"c_ref_cents"`
+
+	// From parameter version 3 (the trust-model simulation's fixes, C148).
+	// Each is absent (zero) in version 2, whose runs they leave byte for byte
+	// unchanged.
+	//
+	// Rule 1 changes the algorithm in three places: a node with no
+	// out-edges returns its pass to the seeds (it no longer keeps it, so
+	// casting a vote costs the voter nothing) and standing is reported as
+	// c / (1 − pass); spend paid to oneself is not seed (the payee shares
+	// the spender's root, or one funded the other by a transfer or a bounty
+	// reward within FundedDays); and a domain is priced by its registration
+	// age when it is known, not by the link's age.
+	Rule int64 `json:"rule,omitempty"`
+	// VFloorCents gates v0: v(s) is 0 below this standing (VoteWeightPPM).
+	VFloorCents int64 `json:"v_floor_cents,omitempty"`
+	// SpendCapCents caps an account's seed from spent credit.
+	SpendCapCents int64 `json:"spend_cap_cents,omitempty"`
+	// FundedDays is how far back a transfer funds its recipient (rule 1).
+	FundedDays int64 `json:"funded_days,omitempty"`
 }
 
 // StandingVersion is the first trust parameter version with a standing
 // section (RFC0015 phase 1A).
 const StandingVersion = 2
+
+// StandingFixVersion is the parameter version with the trust-model
+// simulation's fixes (rule 1, the gated v(s), the spend cap; C148).
+const StandingFixVersion = 3
 
 // Standing modes.
 const (
@@ -94,8 +120,24 @@ const (
 	StandingActive = "active"
 )
 
-// DefaultStanding is the standing section of parameter version 2, in shadow.
+// DefaultStanding is the standing section of parameter version 3, in
+// shadow: version 2's (StandingV2) with the simulation's fixes and defaults:
+// pass 0.3 over 20 steps (20 agree with 200 to a thousandth of a cent),
+// v0 only from 50 cents, spend seed capped at theta2, and rule 1.
 func DefaultStanding() *StandingParams {
+	st := StandingV2()
+	st.PassPPM = 300000
+	st.Iterations = 20
+	st.Rule = 1
+	st.VFloorCents = 50
+	st.SpendCapCents = st.Theta2Cents
+	st.FundedDays = 30
+	return st
+}
+
+// StandingV2 is the standing section of parameter version 2 (phase 1A, as
+// published in 1.75.0).
+func StandingV2() *StandingParams {
 	return &StandingParams{
 		Mode:             StandingShadow,
 		HalfLifeDays:     90,
@@ -124,16 +166,23 @@ func (st *StandingParams) validate(in func(string, int64, int64, int64), check f
 	in("standing.theta2_cents", st.Theta2Cents, 1, st.Theta1Cents)
 	in("standing.v0_ppm", st.V0PPM, 0, 1e6)
 	in("standing.c_ref_cents", st.CRefCents, 1, 1e9)
+	in("standing.rule", st.Rule, 0, 1)
+	in("standing.v_floor_cents", st.VFloorCents, 0, 1e9)
+	in("standing.spend_cap_cents", st.SpendCapCents, 0, 1e9)
+	in("standing.funded_days", st.FundedDays, 0, 365)
 }
 
 // Active reports whether standing is in active mode.
 func (st *StandingParams) Active() bool { return st != nil && st.Mode == StandingActive }
 
 // VoteWeightPPM is v(s), the one weight function (RFC0015 §0.3), in ppm:
-// 0 for C = 0, else v0 + (1 − v0) × √min(1, C / C_ref). Votes, replies,
-// heat, forks and reviews read it; nobody's weighs more than 1e6.
-func VoteWeightPPM(cents, v0PPM, cRefCents int64) int64 {
-	if cents <= 0 || cRefCents <= 0 {
+// 0 for C = 0 or C below the floor, else v0 + (1 − v0) × √min(1, C / C_ref).
+// Votes, replies, heat, forks and reviews read it; nobody's weighs more than
+// 1e6. The floor gates v0: without it any C > 0 weighed at least v0, so
+// splitting standing into many 1-cent keys multiplied vote weight (the
+// simulation: 140× per dollar).
+func VoteWeightPPM(cents, v0PPM, cRefCents, floorCents int64) int64 {
+	if cents <= 0 || cRefCents <= 0 || cents < floorCents {
 		return 0
 	}
 	frac := int64(1e6)
@@ -146,7 +195,7 @@ func VoteWeightPPM(cents, v0PPM, cRefCents int64) int64 {
 
 // VoteWeight is v(s) under these parameters.
 func (st *StandingParams) VoteWeight(cents int64) int64 {
-	return VoteWeightPPM(cents, st.V0PPM, st.CRefCents)
+	return VoteWeightPPM(cents, st.V0PPM, st.CRefCents, st.VFloorCents)
 }
 
 // FlooredVoteWeightPPM is the vote weight with today's rule as a floor
@@ -366,12 +415,37 @@ func computeStanding(in standingInput) standingResult {
 			}
 		}
 	}
-	for _, b := range bests {
-		mass := int64(0)
-		if n := claimants[b.part.Root]; n > 0 && b.part.Contribution > 0 {
-			mass = b.part.Contribution * massPerCent / n
+	// Rule 1 prices a domain by its registration age when it is known (the
+	// registry's creation date, RDAP), in full: an old domain counts on day
+	// one. Otherwise the link's age bounds it, at most half (the table's
+	// rule), and the state says so.
+	registered := map[string]int64{}
+	if st.Rule >= 1 {
+		for _, r := range in.snap.Proofs {
+			if r.Kind != "domain" || r.RegisteredAt <= 0 || r.RegisteredAt > in.asOf {
+				continue
+			}
+			k := r.Account + "\x00" + r.LinkValue
+			if t, ok := registered[k]; !ok || r.RegisteredAt < t {
+				registered[k] = r.RegisteredAt
+			}
 		}
-		state := b.part.State
+	}
+	for _, b := range bests {
+		contribution, state := b.part.Contribution, b.part.State
+		if st.Rule >= 1 && b.part.Kind == "domain" && b.part.Note != "not counted in this state" {
+			if t, ok := registered[b.account+"\x00"+b.part.Value]; ok {
+				price := p.Proofs["domain"]
+				contribution = min(price.Forge, price.Rent) * cv.ramp(price.DayFactorPPM, max(0, in.D-dayOf(t))) / 1e6
+				state += " (registration age)"
+			} else {
+				state += " (link age: registration date unknown)"
+			}
+		}
+		mass := int64(0)
+		if n := claimants[b.part.Root]; n > 0 && contribution > 0 {
+			mass = contribution * massPerCent / n
+		}
 		if b.part.Note == "not counted in this state" {
 			state += " (not counted)"
 		}
@@ -379,15 +453,49 @@ func computeStanding(in standingInput) standingResult {
 	}
 	// Spent credit at cost, decayed. Credit held is not an input: its rent
 	// is a negligible signal, and publishing it per account is not.
+	// Rule 1: spend paid to oneself is not seed. A spend record names its
+	// payee when the payment went to an account (to) or a host (link_value);
+	// it is self-dealt when the payee shares the spender's root, or when
+	// either funded the other (a transfer or a bounty reward) within
+	// funded_days.
+	var selfDealt func(r Record) bool
+	if st.Rule >= 1 {
+		inputs["spend_self_dealt"] = 0
+		funded := map[[2]string]bool{}
+		from := in.asOf - st.FundedDays*day
+		for _, r := range in.snap.Transfers {
+			if r.CreatedAt >= from && r.CreatedAt < in.asOf && r.From != "" && r.To != "" && r.From != r.To && r.Amount > 0 {
+				funded[[2]string{r.From, r.To}], funded[[2]string{r.To, r.From}] = true, true
+			}
+		}
+		suffixes := make(map[string]bool, len(p.DomainSuffixes))
+		for _, x := range p.DomainSuffixes {
+			suffixes[x] = true
+		}
+		selfDealt = func(r Record) bool {
+			root := in.rootOf(r.Account)
+			if r.To != "" && (r.To == r.Account || in.rootOf(r.To) == root || funded[[2]string{r.Account, r.To}]) {
+				return true
+			}
+			return r.LinkValue != "" && in.rootOf(domainRoot(r.LinkValue, suffixes)) == root
+		}
+	}
 	spend := map[string]int64{}
 	for _, r := range sortRecords(in.snap.Spends) {
 		if r.Account == "" || in.service[r.Account] || r.Day >= in.D || r.Amount <= 0 {
+			continue
+		}
+		if selfDealt != nil && selfDealt(r) {
+			inputs["spend_self_dealt"]++
 			continue
 		}
 		inputs["spend"]++
 		spend[r.Account] += mulDiv(min(r.Amount, 1e15), cv.decay(st.DayFactorPPM, in.D-r.Day)*massPerCent, 1e6*st.CreditsPerCent)
 	}
 	for a, m := range spend {
+		if st.SpendCapCents > 0 {
+			m = min(m, st.SpendCapCents*massPerCent)
+		}
 		seeds[a] = append(seeds[a], seedRoot{"spend:" + a, "earned", "spend", "computed", m})
 	}
 	for _, s := range p.Seeds {
@@ -500,9 +608,10 @@ func computeStanding(in standingInput) standingResult {
 
 	// Personalized PageRank from the seed mass, in integers. Each step a
 	// node restarts with (1 − pass) of its seed and passes pass of what it
-	// holds along its out-edges; a node with no out-edges keeps it, and so
-	// does the rounding. Penalised and oppose shares return to the seeds by
-	// seed. At the fixed point the standing of all accounts sums to the seed.
+	// holds along its out-edges; a node with no out-edges keeps it (rule 0)
+	// or returns it to the seeds (rule 1), and keeps the rounding. Penalised
+	// and oppose shares return to the seeds by seed. At the fixed point the
+	// mass of all accounts sums to the seed.
 	c := append([]int64(nil), seed...)
 	restart := make([]int64, n)
 	for i := range seed {
@@ -521,7 +630,11 @@ func computeStanding(in standingInput) standingResult {
 			pass -= held
 			back += held
 			if wsum[u] == 0 {
-				next[u] += pass
+				if st.Rule >= 1 {
+					back += pass // dangling: returns to the seeds
+				} else {
+					next[u] += pass
+				}
 				continue
 			}
 			var sent int64
@@ -588,9 +701,14 @@ func computeStanding(in standingInput) standingResult {
 	var moves []StandingMove
 	var total int64
 	for i, a := range nodes {
-		raw := c[i]
-		cents := mulDiv(max(0, raw-opposed[i]), 1e6-pen[i], 1e6) / massPerCent
-		part := &StandingPart{Cents: cents, RawCents: raw / massPerCent, OpposedCents: opposed[i] / massPerCent, PenaltyPPM: pen[i], SeedCents: seed[i] / massPerCent,
+		raw, opp := c[i], opposed[i]
+		if st.Rule >= 1 {
+			// Reported as c / (1 − pass): a node's own seed counts whole
+			// whether or not it passes anything on.
+			raw, opp = mulDiv(raw, 1e6, 1e6-st.PassPPM), mulDiv(opp, 1e6, 1e6-st.PassPPM)
+		}
+		cents := mulDiv(max(0, raw-opp), 1e6-pen[i], 1e6) / massPerCent
+		part := &StandingPart{Cents: cents, RawCents: raw / massPerCent, OpposedCents: opp / massPerCent, PenaltyPPM: pen[i], SeedCents: seed[i] / massPerCent,
 			ReceivedCents: max(0, raw-seed[i]) / massPerCent, Band: st.Band(cents), VoteWeightPPM: st.VoteWeight(cents), ShareWeightPPM: ShareWeightPPM(cents, p),
 			Breakdown: []StandingRoot{}}
 		// The account's own seed counts first, split over its roots by
@@ -654,7 +772,8 @@ func computeStanding(in standingInput) standingResult {
 		default:
 			sum.WouldBe.VoteWeight["full"]++
 		}
-		active := &StandingParams{Mode: StandingActive, V0PPM: st.V0PPM, CRefCents: st.CRefCents}
+		active := *st
+		active.Mode = StandingActive
 		if !seasoned[a] && active.VoteCounts(false, cents) {
 			sum.WouldBe.VoteWeight["admitted_unseasoned"]++
 		}

@@ -17,7 +17,7 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
   try {
     const context=await browser.newContext({viewport:{width:320,height:850}}),a=await context.newPage(),b=await context.newPage();
     const writes=[];context.on('request',r=>{if(new URL(r.url()).pathname==='/v1/command'&&r.method()==='POST')writes.push(r.postDataJSON());});
-    await Promise.all([a.goto(origin+'/#compose'),b.goto(origin+'/#compose')]);
+    await Promise.all([a.goto(origin+'/?sort=new#compose'),b.goto(origin+'/?sort=new#compose')]);
     assert.equal(await key(a),null);assert.equal(writes.length,0,'reads must never create identities');
     assert.equal(await a.locator('#compose-settings').evaluate(e=>e.open),false,'Options are closed at rest');
     await options(a);
@@ -97,7 +97,7 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
         if(failure==='locks')Object.defineProperty(navigator,'locks',{value:undefined});
       },{failure,slot});
       const p=await c.newPage();let sent=0;p.on('request',r=>{if(r.method()==='POST')sent++;});
-      await p.goto(origin+'/#compose');await p.locator('#memo-text').fill('No silent fallback '+failure);await submit(p);await status(p,'compose-status','storage|HTTPS|Web Locks');
+      await p.goto(origin+'/?sort=new#compose');await p.locator('#memo-text').fill('No silent fallback '+failure);await submit(p);await status(p,'compose-status','storage|HTTPS|Web Locks');
       assert.equal(sent,0);assert.equal(await p.locator('#memo-text').inputValue(),'No silent fallback '+failure);
       if(failure==='write'||failure==='readback'){await submit(p);await status(p,'compose-status','storage');assert.equal(sent,0);assert.equal(await p.evaluate(()=>window.keyGenerations),1,'failed first save retries the same in-memory key, not replacement keys');}
       await options(p);await p.getByRole('radio',{name:'Anonymous',exact:true}).check();await submit(p);await status(p,'compose-status','Accepted');assert.equal(sent,1);
@@ -105,13 +105,13 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
     }
     console.log('PASS: blocked storage/readback, missing WebCrypto/WebLocks refuse remembered send; anonymous requires explicit selection.');
 
-    const capped=await browser.newContext(),cap=await capped.newPage();await cap.goto(origin+'/#compose');await post(cap,'Pending token cap setup');
+    const capped=await browser.newContext(),cap=await capped.newPage();await cap.goto(origin+'/?sort=new#compose');await post(cap,'Pending token cap setup');
     await cap.evaluate(async()=>{window.releaseTestTokens=[];await Promise.all(Array.from({length:32},(_,i)=>new Promise(resolve=>navigator.locks.request('swarmmemo-pending-v1:test-cap-'+i,async()=>{let release;const done=new Promise(r=>release=r);window.releaseTestTokens.push(release);resolve();await done;}))));});
     let capWrites=0;cap.on('request',r=>{if(r.method()==='POST')capWrites++;});await cap.locator('#memo-text').fill('Wait for an open-tab token');await submit(cap);await status(cap,'compose-status','Too many unresolved requests');assert.equal(capWrites,0);
     await cap.evaluate(()=>window.releaseTestTokens.forEach(release=>release()));await submit(cap);await status(cap,'compose-status','Accepted');assert.equal(capWrites,1);await capped.close();
 
     const recovery=await browser.newContext({acceptDownloads:true}),p=await recovery.newPage();
-    await p.goto(origin+'/#compose');await post(p,'Rotation recovery setup');const original=await key(p);
+    await p.goto(origin+'/?sort=new#compose');await post(p,'Rotation recovery setup');const original=await key(p);
     await p.goto(origin+'/me#key');let rotationWire='';
     await p.route('**/v1/command',async route=>{
       if(route.request().postDataJSON().operation!=='agent.rotate')return route.continue();
@@ -149,7 +149,7 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
     await recovery.close();
     console.log('PASS: global32 pending-token admission, rotation unknown/forget guard, explicit exact recovery after tab close, backup/import/cancellation, origin separation, signed read epoch fencing.');
 
-    const plain=await browser.newContext({javaScriptEnabled:false}),n=await plain.newPage();await n.goto(origin+'/#compose');
+    const plain=await browser.newContext({javaScriptEnabled:false}),n=await plain.newPage();await n.goto(origin+'/?sort=new#compose');
     assert.equal(await n.locator('#memo-text').isVisible(),true,'no-JS composer is open at rest');
     assert.equal(await n.locator('#compose-settings').evaluate(e=>e.open),false,'Options stay a closed native disclosure without scripts');
     assert.equal(await n.locator('#posting-mode').isVisible(),false);await n.locator('#memo-text').fill('Native anonymous without scripts');await submit(n);

@@ -8,10 +8,13 @@ import (
 	"swarmmemo/internal/board"
 )
 
-// feedSort is a feed's sorted view: new (the live, cursor-paged default), hot
-// (score over age, weighted by a recency bias) or top (all-time score, bias 0).
+// feedSort is a feed's sorted view: hot (score over age, weighted by a recency
+// bias; the home and room default), top (all-time score, bias 0) or new (the
+// live, cursor-paged stream). Hot and top nest each post's replies under it;
+// new is flat and quotes each reply's parent (threadtree.go).
 type feedSort struct {
 	Sort       string
+	Default    string // the view's sort when the URL names none
 	Scope      string // "all": every public room, not the front page (board/frontpage.go)
 	Bias       float64
 	Offset     int
@@ -26,13 +29,34 @@ var biasSteps = []struct {
 	Bias  float64
 }{{"Less recent", 0.75}, {"Balanced", board.BiasDefault}, {"More recent", 3}}
 
-func parseFeedSort(q url.Values) feedSort {
-	f := feedSort{Sort: "new", Bias: board.BiasDefault}
+// sortTab is one of a feed's sort tabs, in the order the page shows them.
+type sortTab struct{ Sort, Label string }
+
+var sortTabs = []sortTab{{"hot", "Hot"}, {"new", "New"}, {"top", "Top"}}
+
+// newFeedParams are the new feed's own parameters: a search, a cursor or a
+// filter reads the chronological stream whatever the view's default.
+var newFeedParams = []string{"q", "cursor", "older", "target", "kind", "to"}
+
+// parseFeedSort reads a feed's sort; def is the view's default, "hot" on the
+// home and room pages and "new" elsewhere.
+func parseFeedSort(q url.Values, def string) feedSort {
+	f := feedSort{Sort: def, Default: def, Bias: board.BiasDefault}
+	for _, key := range newFeedParams {
+		if q.Get(key) != "" {
+			f.Sort = "new"
+		}
+	}
 	switch q.Get("sort") {
+	case "new":
+		f.Sort = "new"
 	case "hot":
 		f.Sort = "hot"
 	case "top":
-		f.Sort, f.Bias = "top", 0
+		f.Sort = "top"
+	}
+	if f.Sort == "top" {
+		f.Bias = 0
 	}
 	if f.Sort == "hot" {
 		if b, err := strconv.ParseFloat(q.Get("bias"), 64); err == nil && b >= 0 && b <= board.BiasMaximum {
@@ -52,6 +76,10 @@ func parseFeedSort(q url.Values) feedSort {
 }
 
 func (f feedSort) Ranked() bool { return f.Sort == "hot" || f.Sort == "top" }
+
+// IsDefault reports whether s is this view's default sort, which keeps the
+// view's plain address; another sort is linked with ?sort=.
+func (f feedSort) IsDefault(s string) bool { return s == f.Default }
 
 func (f feedSort) data() string {
 	b, _ := json.Marshal(board.ListOptions{Sort: f.Sort, Bias: &f.Bias, Offset: f.Offset, Scope: f.Scope})

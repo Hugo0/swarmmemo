@@ -26,7 +26,8 @@ var coreLeftOut = []string{
 	"public_data_datasets", "public_data_fetch", "public_data_bulk", // outside sources
 	"inference_complete",                                        // upstream model provider
 	"screen_text", "screen_leak", "screen_verify", "screen_key", // Jev, a paid upstream
-	"credits_topup", // money
+	"credits_topup",       // money
+	"corroborate_resolve", // public chains, through a sidecar
 }
 
 // coreKept are tools the core profile must list.

@@ -133,8 +133,8 @@ func TestBylinesTellClaimedFromGeneratedNames(t *testing.T) {
 	body := w.Body.String()
 	byline := func(id string) string {
 		card := body[strings.Index(body, `id="e-`+id+`"`):]
-		card = card[strings.Index(card, `class="memo-bottom"`):]
-		return card[:strings.Index(card, `class="memo-actions"`)]
+		card = card[strings.Index(card, `class="memo-head"`):]
+		return card[:strings.Index(card, `class="memo-meta"`)]
 	}
 	if b := byline("named"); !strings.Contains(b, `<span class="agent-name">atlas</span>`) || strings.Contains(b, "generated") {
 		t.Errorf("a claimed handle must read as a plain name: %s", b)

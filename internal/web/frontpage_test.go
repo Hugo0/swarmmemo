@@ -22,12 +22,25 @@ func TestHomeFeedIsTheFrontPage(t *testing.T) {
 		t.Fatalf("%s read no feed", path)
 		return "", ""
 	}
+	// Hot is the default order; New and Top are a tab away.
 	data, body := feedData("/")
-	if !strings.Contains(data, `"sort":"new"`) || !strings.Contains(body, `href="/?scope=all">Include utility rooms</a>`) {
+	if !strings.Contains(data, `"sort":"hot"`) || !strings.Contains(body, `href="/?scope=all">Include utility rooms</a>`) {
 		t.Fatalf("front page: data %q", data)
 	}
+	for _, want := range []string{`<a href="/" aria-current="page">Hot</a>`, `<a rel="nofollow" href="/?sort=new">New</a>`, `<a rel="nofollow" href="/?sort=top">Top</a>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("front page tabs: no %s", want)
+		}
+	}
+	if data, _ = feedData("/?sort=new"); !strings.Contains(data, `"sort":"new"`) {
+		t.Fatalf("new tab: data %q", data)
+	}
+	// A search, a cursor or a filter reads the chronological stream.
+	if data, _ = feedData("/?q=needle"); !strings.Contains(data, `"sort":"new"`) {
+		t.Fatalf("search: data %q", data)
+	}
 	data, body = feedData("/?scope=all")
-	if !strings.Contains(data, `"scope":"all"`) || !strings.Contains(data, `"sort":"new"`) || !strings.Contains(body, `<a href="/">Front page only</a>`) {
+	if !strings.Contains(data, `"scope":"all"`) || !strings.Contains(data, `"sort":"hot"`) || !strings.Contains(body, `<a href="/">Front page only</a>`) {
 		t.Fatalf("every room: data %q", data)
 	}
 	if data, _ = feedData("/?scope=all&sort=hot"); !strings.Contains(data, `"scope":"all"`) || !strings.Contains(data, `"sort":"hot"`) {
@@ -36,13 +49,13 @@ func TestHomeFeedIsTheFrontPage(t *testing.T) {
 	// The sort tabs and bias steps keep the chosen scope, and the default
 	// front page's links never add it (dcf-work-earn-agent d28cab6e).
 	_, body = feedData("/?scope=all&sort=hot")
-	for _, want := range []string{`href="/?scope=all"`, `href="/?sort=hot&amp;scope=all"`, `href="/?sort=top&amp;scope=all"`, `href="/?sort=hot&amp;scope=all&amp;bias=`} {
+	for _, want := range []string{`href="/?scope=all"`, `href="/?sort=new&amp;scope=all"`, `href="/?sort=top&amp;scope=all"`, `href="/?sort=hot&amp;scope=all&amp;bias=`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("every room, hot: no %s", want)
 		}
 	}
 	_, body = feedData("/?sort=hot")
-	if strings.Contains(body, `sort=top&amp;scope=all`) || strings.Contains(body, `sort=hot&amp;scope=all`) || !strings.Contains(body, `href="/?sort=top"`) {
+	if strings.Contains(body, `scope=all&amp;`) || strings.Contains(body, `sort=hot&amp;scope=all`) || !strings.Contains(body, `href="/?sort=top"`) || !strings.Contains(body, `href="/?sort=new"`) {
 		t.Error("the front page's sort links must not add scope=all")
 	}
 }

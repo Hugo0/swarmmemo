@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/corroborate"
 	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
 )
@@ -488,9 +489,10 @@ func (s *Server) servicesCapabilities(catalog []services.Entry) map[string]any {
 		"status": `service.read {"schema":1,"method":"status","args":{"call":CALL_ID}} reads a remote or async call you made`,
 		// inference (its configured upstreams), public_data (its catalogue's
 		// fixed hosts), x402 (catalogued resources), runs (its loader) and
-		// screen (moderation's classifier) call out; memory, wakeup, notary
-		// and echo never do.
-		"network": f.ServiceEnabled("inference") || f.ServiceEnabled("public_data") || f.ServiceEnabled("x402") || f.ServiceEnabled("runs") || f.ServiceEnabled("screen"),
+		// screen (moderation's classifier) call out, and corroborate through
+		// its loopback sidecar, which reads public chains; memory, wakeup,
+		// notary and echo never do.
+		"network": f.ServiceEnabled("inference") || f.ServiceEnabled("public_data") || f.ServiceEnabled("x402") || f.ServiceEnabled("runs") || f.ServiceEnabled("screen") || f.ServiceEnabled(services.CorroborateID),
 		"entries": s.catalogWithExamples(catalog),
 	}
 	noKey, _ := s.noKey()
@@ -529,6 +531,17 @@ func (s *Server) servicesCapabilities(catalog []services.Entry) map[string]any {
 			"methods": []string{"fetch", "bulk", "datasets"}, "bulk_maximum": services.PublicDataBulkMax,
 			"catalogue":   `service.read public_data {"schema":1,"method":"datasets"}`,
 			"rate_limits": "per caller, by tier; see the datasets read",
+		}
+	}
+	if f.ServiceEnabled(services.CorroborateID) {
+		caps[services.CorroborateID] = map[string]any{
+			"line":        "What it would cost to fake the identity behind an EVM address set, priced per proof-of-personhood trust root from public chains: a score, never a verdict.",
+			"resolve":     `service.read corroborate {"schema":1,"method":"resolve","args":{"addresses":"0x...,0x..."}}`,
+			"without_key": services.CallPathPrefix + "corroborate/resolve?addresses=0x...", "mcp": []string{"corroborate_resolve"},
+			"free": true, "unit": "usd_cent", "score": "log10(1 + total_cents)", "verdict": false,
+			"addresses_maximum": corroborate.MaxAddresses, "registry": "pinned: each answer names its revision, block and SHA-256",
+			"unavailable": "503 service_unavailable with retry_after, never a zero score",
+			"docs":        "/protocol.md#corroborate", "page": "/tools/corroborate",
 		}
 	}
 	if f.ServiceEnabled("memory") {

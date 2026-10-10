@@ -25,7 +25,7 @@ const {resolve}=require('node:path');
   const context=await browser.newContext({viewport:{width:1280,height:900}});
   const page=await context.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
   try{
-    await page.goto(origin+'/r/'+room);
+    await page.goto(origin+'/r/'+room + '?sort=new');
     const card=id=>page.locator('#e-'+id);
     await card(long).locator('.author img[referrerpolicy="no-referrer"]').waitFor();
     await page.waitForFunction(id=>document.querySelector('#e-'+id+' .author img')?.naturalWidth > 0,long);
@@ -33,7 +33,7 @@ const {resolve}=require('node:path');
     assert.equal(await card(long).locator('.author img').getAttribute('decoding'),'async');
     await page.goto(origin+'/e/'+long);
     await card(long).locator('.author img[referrerpolicy="no-referrer"]').waitFor();
-    await page.goto(origin+'/r/'+room);
+    await page.goto(origin+'/r/'+room + '?sort=new');
     // A Markdown post in a listing is the whole post, folded to a few lines of
     // body-size text; Show more expands it in place, with no link to another page.
     const body0=card(long).locator('.memo-text.md');
@@ -85,7 +85,7 @@ const {resolve}=require('node:path');
       await page.goto(origin+path);
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),path+' scrolls sideways at 320px');
     }
-    await page.goto(origin+'/r/'+room);
+    await page.goto(origin+'/r/'+room + '?sort=new');
     await card(plain).locator('.author.anonymous.term').focus();
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'an open tooltip scrolls the page sideways');
     assert.deepEqual(errors,[]);

@@ -35,6 +35,7 @@ var coreExcluded = []struct{ ID, Why string }{
 	{"inference", "inference_complete calls an upstream model provider"},
 	{"screen", "screen_text and screen_leak call the Jev classifier, a paid upstream model API; screen_verify and screen_key only check their receipts"},
 	{"runs", "runs execute code on a third-party sandbox (Cloudflare) with optional network egress"},
+	{services.CorroborateID, "corroborate_resolve reads public chains, through a sidecar, for the wallets an agent names"},
 	{"echo", "a test service"},
 }
 

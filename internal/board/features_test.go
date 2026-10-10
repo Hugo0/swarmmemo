@@ -41,4 +41,16 @@ func TestParseFeatures(t *testing.T) {
 	if _, err := ParseFeatures(env(map[string]string{"SERVICES": "docs", "CONTENT_SCREEN": "sometimes"})); err == nil {
 		t.Error("CONTENT_SCREEN=sometimes must be refused")
 	}
+	// The Corroborate sidecar is on loopback, at 8787 unless CORROBORATE_URL says otherwise.
+	if c, err := ParseFeatures(env(map[string]string{"SERVICES": "corroborate"})); err != nil || c.CorroborateURL != "http://127.0.0.1:8787" {
+		t.Fatalf("corroborate default: %+v %v", c.CorroborateURL, err)
+	}
+	if c, err := ParseFeatures(env(map[string]string{"SERVICES": "corroborate", "CORROBORATE_URL": "http://[::1]:9000"})); err != nil || c.CorroborateURL != "http://[::1]:9000" {
+		t.Fatalf("corroborate URL: %+v %v", c.CorroborateURL, err)
+	}
+	for _, bad := range []string{"https://127.0.0.1:8787", "http://10.0.0.5:8787", "http://example.com:8787", "http://127.0.0.1:8787/resolve"} {
+		if _, err := ParseFeatures(env(map[string]string{"SERVICES": "corroborate", "CORROBORATE_URL": bad})); err == nil {
+			t.Errorf("CORROBORATE_URL=%s must be refused", bad)
+		}
+	}
 }

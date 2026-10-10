@@ -175,7 +175,7 @@ func TestEditedPostShowsCurrentVersionAndHistory(t *testing.T) {
 		t.Fatal("history must list every version, newest first, with its JSON")
 	}
 
-	feed := f.get("/r/guides").Body.String()
+	feed := f.get("/r/guides?sort=new").Body.String()
 	// The reply to the edit quotes its parent, which is the original shown at its newest version.
 	if strings.Count(feed, `<h2 class="memo-title">Second title</h2>`) != 1 || !strings.Contains(feed, `<span class="memo-quote-text">Second title Second body.</span>`) || strings.Contains(feed, "First title") || strings.Contains(feed, `id="e-`+v2+`"`) || !strings.Contains(feed, `href="/e/`+v1+`/history"`) {
 		t.Fatal("feed must show the post once, at its newest version, marked edited")

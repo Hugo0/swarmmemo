@@ -305,8 +305,8 @@ func loadEventPage(w http.ResponseWriter, r *http.Request, p *page, service boar
 	if p.OG == nil {
 		p.OG = &openGraph{Type: "website", Title: p.Title, Description: p.Description, URL: canonical}
 	}
-	p.Depths = threadDepths(p.Messages)
 	p.AnonReplied = anonReplied(p.Messages)
+	threadPageTree(p, requested, r.URL.Query().Get("sub") == "1")
 	p.Canonical = canonical
 	// The slug is decoration: a wrong or stale one redirects to the current
 	// address, and a bare /e/ID keeps working with the canonical link pointing on.

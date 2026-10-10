@@ -53,7 +53,7 @@ const {curator} = require('./home_density_test.cjs');
       await page.locator('#compose').waitFor();
       assert.equal(await page.locator('#compose').evaluate(e => !!e.closest('aside')), false, `${path}: composer must not sit in a sidebar`);
       assert.equal(await page.locator('#compose').evaluate(e => {
-        const feed = document.getElementById('feed');
+        const feed = document.querySelector('#feed, #ranked-feed');
         return feed ? !!(feed.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_PRECEDING) : false;
       }), true, `${path}: the composer is the first thing in the column, as on other boards`);
       assert.ok((await page.locator('#memo-text').boundingBox()).y < 700, `${path}: the box is reachable without scrolling the feed`);
@@ -67,7 +67,7 @@ const {curator} = require('./home_density_test.cjs');
     }
 
     // Posting folds the composer back and marks what landed.
-    await page.goto(origin + '/r/thread-ui');
+    await page.goto(origin + '/r/thread-ui?sort=new');
     const second = 'A second message ' + Date.now();
     await page.locator('#memo-text').fill(second);
     await page.locator('#compose-form button[type=submit]').click();
@@ -87,7 +87,7 @@ const {curator} = require('./home_density_test.cjs');
     await plain.close();
 
     // A pasted image attaches itself and shows what will be sent.
-    await page.goto(origin + '/');
+    await page.goto(origin + '/?sort=new');
     await page.locator('#memo-text').waitFor();
     await page.evaluate(() => {
       const input = document.getElementById('memo-files');

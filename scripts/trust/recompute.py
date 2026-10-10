@@ -22,13 +22,18 @@ Three commands:
       meta, params, account, post, endorsement, proof, breaker, transfer, claim,
       prior, penalty and sponsorship, and from parameter version 2 edge and
       spend, the format of internal/trust's golden fixtures
-      (testdata/golden_inputs.jsonl, testdata/golden_standing_inputs.jsonl).
+      (testdata/golden_inputs.jsonl, testdata/golden_standing_v2_inputs.jsonl,
+      testdata/golden_standing_inputs.jsonl). From parameter version 3 a proof
+      may carry registered_at and a spend to and link_value (its payee).
 
 The algorithm is the published one (RFC0012 §4.2–4.5), restated here from the
 specification rather than translated from the Go reference, and checked against
 the reference's golden fixtures by test_recompute.py. From parameter version 2
 the run also computes standing (RFC0015 §3): seeded personalized PageRank over
-endorse edges, with oppose edges subtracted locally (compute_standing()). Every amount is an
+endorse edges, with oppose edges subtracted locally (compute_standing()); version
+3 (standing.rule 1) returns a dangling node's pass to the seeds, reports
+c / (1 − pass), leaves self-dealt spend out of the seed, caps spend's seed and
+prices a domain by its registration age when known. Every amount is an
 integer; divisions truncate toward zero as Go's do; curves are published daily
 factors applied one whole day at a time with floor. The flow is Dinic's
 algorithm specified down to edge insertion order and the path search, since a
@@ -83,7 +88,7 @@ RECORD_FIELDS = [
     ("endorsements_seq", 0), ("ledger_seq", 0), ("version", 0), ("body", None), ("account", ""), ("created_at", 0),
     ("first_seen", 0), ("id", ""), ("reply_to", ""), ("reply_to_account", ""), ("seq", 0), ("kind", ""), ("voter", ""),
     ("target", ""), ("message_id", ""), ("value", 0), ("sponsor", False), ("link_value", ""), ("state", ""),
-    ("checked_at", 0), ("link_account", ""), ("started_at", 0), ("trust_until", 0), ("from", ""), ("to", ""),
+    ("checked_at", 0), ("link_account", ""), ("registered_at", 0), ("started_at", 0), ("trust_until", 0), ("from", ""), ("to", ""),
     ("amount", 0), ("day", 0), ("claimed", 0), ("spent", 0), ("flow_sum", 0), ("standing", False), ("evidence", ""),
     ("fraction_ppm", 0), ("ends_at", 0), ("invitee", ""), ("sponsor_account", ""), ("high_water", 0),
 ]
@@ -142,6 +147,8 @@ PARAM_SECTIONS = {
 PROOF_KEYS = {"forge", "rent", "curve", "half_life_days", "day_factor_ppm"}
 STANDING_KEYS = {"mode", "half_life_days", "day_factor_ppm", "pass_ppm", "iterations", "arbiter_seed_cents", "anon_seed_cents",
                  "credits_per_cent", "theta1_cents", "theta2_cents", "v0_ppm", "c_ref_cents"}
+# From parameter version 3 (the simulation's fixes); each is omitted when zero.
+STANDING_KEYS_V3 = {"rule", "v_floor_cents", "spend_cap_cents", "funded_days"}
 EDGE_KEYS = {"base_ppm", "half_life_days", "day_factor_ppm"}
 
 
@@ -154,7 +161,9 @@ def check_params(body: dict) -> None:
             raise InputError(f"params {where}: fields must be exactly {sorted(keys)}")
     if "standing" in body:
         exact(body, PARAM_KEYS | {"standing"}, "body")
-        exact(body["standing"], STANDING_KEYS, "standing")
+        st = body["standing"]
+        if not isinstance(st, dict) or not STANDING_KEYS <= set(st) <= STANDING_KEYS | STANDING_KEYS_V3:
+            raise InputError(f"params standing: fields must be {sorted(STANDING_KEYS)}, plus any of {sorted(STANDING_KEYS_V3)}")
         if body["standing"]["mode"] not in ("shadow", "active"):
             raise InputError("params standing.mode must be shadow or active")
     else:
@@ -931,9 +940,10 @@ def mul_div(a: int, b: int, c: int) -> int:
     return min(a * b // c, INT64_MAX)
 
 
-def vote_weight_ppm(cents: int, v0: int, c_ref: int) -> int:
-    """v(s) in ppm: 0 for C = 0, else v0 + (1 − v0) × √min(1, C / C_ref)."""
-    if cents <= 0 or c_ref <= 0:
+def vote_weight_ppm(cents: int, v0: int, c_ref: int, floor: int = 0) -> int:
+    """v(s) in ppm: 0 for C = 0 or C below the floor (v_floor_cents), else
+    v0 + (1 − v0) × √min(1, C / C_ref)."""
+    if cents <= 0 or c_ref <= 0 or cents < floor:
         return 0
     frac = PPM if cents >= c_ref else mul_div(cents, PPM, c_ref)
     return v0 + mul_div(PPM - v0, math.isqrt(frac * PPM), PPM)
@@ -959,6 +969,8 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
     per pair and polarity; personalized PageRank from the seeds; oppose
     shares subtracted at the target; penalties scale outflow and standing."""
     st = p["standing"]
+    rule, v_floor = st.get("rule", 0), st.get("v_floor_cents", 0)
+    spend_cap, funded_days = st.get("spend_cap_cents", 0), st.get("funded_days", 0)
     cv = Curves()
     ws = as_of - p["window_days"] * DAY
     inputs = {"vote": 0, "vouch": 0, "work_accept": 0, "witness": 0, "down_vote": 0, "spend": 0}
@@ -973,19 +985,62 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
             bests.append((a, part))
             if part["contribution"] > 0:
                 claimants[part["root"]] = claimants.get(part["root"], 0) + 1
+    # Rule 1: a domain is priced by its registration age when known (in
+    # full), else by the link's age (at most half), and the state says which.
+    registered = {}
+    if rule >= 1:
+        for r in snap.proofs:
+            if r.kind != "domain" or r.registered_at <= 0 or r.registered_at > as_of:
+                continue
+            k = (r.account, r.link_value)
+            if k not in registered or r.registered_at < registered[k]:
+                registered[k] = r.registered_at
     for a, part in bests:
+        contribution, state = part["contribution"], part["state"]
+        if rule >= 1 and part["kind"] == "domain" and part["note"] != "not counted in this state":
+            if (a, part["value"]) in registered:
+                price = p["proofs"]["domain"]
+                age = max(0, D - day_of(registered[(a, part["value"])]))
+                contribution = min(price["forge"], price["rent"]) * cv.ramp(price["day_factor_ppm"], age) // PPM
+                state += " (registration age)"
+            else:
+                state += " (link age: registration date unknown)"
         n = claimants.get(part["root"], 0)
-        mass = part["contribution"] * MASS_PER_CENT // n if n > 0 and part["contribution"] > 0 else 0
-        state = part["state"] + (" (not counted)" if part["note"] == "not counted in this state" else "")
+        mass = contribution * MASS_PER_CENT // n if n > 0 and contribution > 0 else 0
+        state += " (not counted)" if part["note"] == "not counted in this state" else ""
         seeds.setdefault(a, []).append((part["root"], "imported", part["kind"], state, mass))
+    # Rule 1: spend paid to oneself (the payee shares the spender's root, or
+    # either funded the other within funded_days) is not seed.
+    self_dealt = None
+    if rule >= 1:
+        inputs["spend_self_dealt"] = 0
+        funded = set()
+        lo = as_of - funded_days * DAY
+        for r in snap.transfers:
+            t_from = r["from"] if "from" in r else ""
+            if lo <= r.created_at < as_of and t_from != "" and r.to != "" and t_from != r.to and r.amount > 0:
+                funded.add((t_from, r.to))
+                funded.add((r.to, t_from))
+        suffixes = set(p["domain_suffixes"])
+
+        def self_dealt(r):
+            root = root_of(r.account)
+            if r.to != "" and (r.to == r.account or root_of(r.to) == root or (r.account, r.to) in funded):
+                return True
+            return r.link_value != "" and root_of(domain_root(r.link_value, suffixes)) == root
     spend = {}
     for r in sorted(snap.spends, key=record_key):
         if r.account == "" or r.account in service or r.day >= D or r.amount <= 0:
+            continue
+        if self_dealt is not None and self_dealt(r):
+            inputs["spend_self_dealt"] += 1
             continue
         inputs["spend"] += 1
         spend[r.account] = spend.get(r.account, 0) + mul_div(min(r.amount, 10**15), cv.decay(st["day_factor_ppm"], D - r.day) * MASS_PER_CENT,
                                                              PPM * st["credits_per_cent"])
     for a, m in spend.items():
+        if spend_cap > 0:
+            m = min(m, spend_cap * MASS_PER_CENT)
         seeds.setdefault(a, []).append(("spend:" + a, "earned", "spend", "computed", m))
     for s in p["seeds"]:
         if s not in service:
@@ -1044,7 +1099,10 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
             pas -= held
             back += held
             if wsum[u] == 0:
-                nxt[u] += pas
+                if rule >= 1:
+                    back += pas  # dangling: returns to the seeds
+                else:
+                    nxt[u] += pas
                 continue
             sent = 0
             for dst, w, oppose in outs[u]:
@@ -1064,6 +1122,9 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
     seasoned = {r.account for r in posts if r.created_at <= as_of - DAY}
     scored_set = set(scored)
     v0, c_ref = st["v0_ppm"], st["c_ref_cents"]
+
+    def vw(cents):
+        return vote_weight_ppm(cents, v0, c_ref, v_floor)
     entities = {}
     for a in nodes:
         for root, _, _, _, mass in seeds.get(a, []):
@@ -1078,18 +1139,20 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
                      "vote_weight": {"zero": 0, "partial": 0, "full": 0, "votes": 0, "votes_weight_ppm": 0, "votes_floored_ppm": 0,
                                      "admitted_unseasoned": 0},
                      "inbox_known": {"today": 0, "would_be": 0, "raised": 0}},
-        "anonymous": {"cents": st["anon_seed_cents"], "vote_weight_ppm": vote_weight_ppm(st["anon_seed_cents"], v0, c_ref),
+        "anonymous": {"cents": st["anon_seed_cents"], "vote_weight_ppm": vw(st["anon_seed_cents"]),
                       "share_weight_ppm": share_weight_ppm(st["anon_seed_cents"], p)},
         "entities": entities, "largest_moves": [], "accounts": 0, "nonzero": 0,
     }
     wb = summary["would_be"]
     parts, extra, moves, total = {}, [], [], 0
     for i, a in enumerate(nodes):
-        raw = c[i]
-        cents = mul_div(max(0, raw - opposed[i]), PPM - pen[i], PPM) // MASS_PER_CENT
-        part = {"cents": cents, "raw_cents": raw // MASS_PER_CENT, "opposed_cents": opposed[i] // MASS_PER_CENT, "penalty_ppm": pen[i],
+        raw, opp = c[i], opposed[i]
+        if rule >= 1:  # reported as c / (1 − pass)
+            raw, opp = mul_div(raw, PPM, PPM - st["pass_ppm"]), mul_div(opp, PPM, PPM - st["pass_ppm"])
+        cents = mul_div(max(0, raw - opp), PPM - pen[i], PPM) // MASS_PER_CENT
+        part = {"cents": cents, "raw_cents": raw // MASS_PER_CENT, "opposed_cents": opp // MASS_PER_CENT, "penalty_ppm": pen[i],
                 "seed_cents": seed[i] // MASS_PER_CENT, "received_cents": max(0, raw - seed[i]) // MASS_PER_CENT, "band": band(cents, st),
-                "vote_weight_ppm": vote_weight_ppm(cents, v0, c_ref), "share_weight_ppm": share_weight_ppm(cents, p), "breakdown": []}
+                "vote_weight_ppm": vw(cents), "share_weight_ppm": share_weight_ppm(cents, p), "breakdown": []}
         own = min(raw, seed[i])
         for root, kind, source, state, mass in seeds.get(a, []):
             contribution = mul_div(own, mass, seed[i]) // MASS_PER_CENT if seed[i] > 0 else 0
@@ -1141,7 +1204,7 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
             continue
         wb["vote_weight"]["votes"] += 1
         cents = parts[r.voter]["cents"] if r.voter in parts else 0
-        v = vote_weight_ppm(cents, v0, c_ref)
+        v = vw(cents)
         wb["vote_weight"]["votes_weight_ppm"] += v
         wb["vote_weight"]["votes_floored_ppm"] += max(PPM, v)
     moves.sort(key=lambda m: (-m["share_weight_ppm"], -m["cents"], m["account"]))

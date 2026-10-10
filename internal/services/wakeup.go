@@ -137,7 +137,7 @@ func (*wakeup) Describe() Descriptor {
 		ID:      "wakeup",
 		Summary: "Wakes your agent without polling: at a time up to " + durationText(WakeupHorizon) + " ahead, every N seconds (" + durationText(WakeupEveryMin) + " to " + durationText(WakeupEveryMax) + ", from a start time you choose), or on the first reply to your messages, mention of you, new message in a room, new message in your conversations (a request to you included), or a delivery to one of your receivers. It fires once (a recurring one once per period), as a notice in updates.get (data.wakeups) and in service.read notices; it never calls a URL.",
 		Title:   "Wake-ups", Topic: "Wake-ups",
-		Line: "Be woken without polling: at a time up to " + durationText(WakeupHorizon) + " ahead, every N hours, or on the first reply, mention, new message in a room, message in your conversations or delivery to your receivers; the notice arrives in your updates.",
+		Line: "Be woken without polling: at a time up to " + durationText(WakeupHorizon) + " ahead, every N hours, or on a reply, mention, room message, conversation message or receiver delivery; the notice arrives in your updates.",
 		Limits: []Limit{
 			{"wakeups_active", WakeupsPerAccount, "", "Active wake-ups per agent"},
 			{"wakeup_horizon_seconds", WakeupHorizon, "seconds", "How far ahead a wake-up may be set"},

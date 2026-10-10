@@ -10,6 +10,8 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -265,7 +267,8 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 	accounts := map[string]bool{}
 	exists := map[string]bool{}
 	if err := in.page(ctx, func(q allowance.Querier) error {
-		for _, name := range []string{"account_breakers", "ledger_transfers", "allowance_claims", "ledger_entries"} {
+		for _, name := range []string{"account_breakers", "ledger_transfers", "allowance_claims", "ledger_entries", "domain_registrations",
+			"service_calls", "x402_payments", "credit_topups"} {
 			ok, err := tableExists(ctx, q, name)
 			if err != nil {
 				return err
@@ -407,6 +410,34 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 	// agent.get and trust.get treat as not found (private rooms only) is left
 	// out, so the published snapshot never names it (security review 1.20,
 	// M11). A linked ed25519 key's account is named only when it is public too.
+	// From parameter version 3 a domain proof carries its registrable
+	// domain's registration time, when known: domain_registrations(domain,
+	// registered_at, source, checked_at), read when the table exists.
+	// TODO(C148): the RDAP lookup that creates and fills it (IANA bootstrap,
+	// the safe fetcher, cached, rechecked rarely; a schema version of its
+	// own). Until then every domain is priced by its link's age, and the
+	// standing breakdown says so.
+	registered := map[string]int64{}
+	if p.Standing != nil && p.Standing.Rule >= 1 && exists["domain_registrations"] {
+		if err := in.page(ctx, func(q allowance.Querier) error {
+			r, err := q.QueryContext(ctx, "SELECT domain,registered_at FROM domain_registrations WHERE registered_at>0 AND registered_at<?", asOf)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			for r.Next() {
+				var d string
+				var t int64
+				if err = r.Scan(&d, &t); err != nil {
+					return err
+				}
+				registered[d] = t
+			}
+			return r.Err()
+		}); err != nil {
+			return err
+		}
+	}
 	for after = 0; ; {
 		var batch []trust.Record
 		scanned := 0
@@ -429,6 +460,9 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 				if public && rec.CreatedAt < asOf {
 					if rec.CheckedAt >= asOf {
 						rec.CheckedAt = 0 // checked after the as-of time: not yet known then
+					}
+					if rec.Kind == "domain" && len(registered) > 0 {
+						rec.RegisteredAt = registered[strings.TrimPrefix(trust.DomainRoot(rec.LinkValue, p.DomainSuffixes), "domain:")]
 					}
 					batch = append(batch, rec)
 				}
@@ -526,8 +560,15 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 			return err
 		}
 	}
+	// Transfers: the funnel detector's window, and from parameter version 3
+	// standing's funded_days (a transfer or bounty reward links its two
+	// accounts: spend between them is not seed).
+	transfersFrom := funnelFrom
+	if p.Standing != nil && p.Standing.Rule >= 1 {
+		transfersFrom = min(transfersFrom, asOf-p.Standing.FundedDays*86400)
+	}
 	if exists["ledger_transfers"] {
-		if err := paged("SELECT rowid,from_account,to_account,amount,done_at FROM ledger_transfers WHERE rowid>? AND state='done' AND done_at>=? AND done_at<? ORDER BY rowid LIMIT ?", []any{funnelFrom, asOf},
+		if err := paged("SELECT rowid,from_account,to_account,amount,done_at FROM ledger_transfers WHERE rowid>? AND state='done' AND done_at>=? AND done_at<? ORDER BY rowid LIMIT ?", []any{transfersFrom, asOf},
 			func(r *sql.Rows) (trust.Record, int64, error) {
 				rec := trust.Record{Type: "transfer"}
 				var id int64
@@ -700,11 +741,108 @@ func (in trustInputs) readStanding(ctx context.Context, asOf int64, p trust.Para
 		}
 	}
 	oldest := day - min(3650, 8*p.Standing.HalfLifeDays)
+	// From version 3 a paid x402 call is read on its own with its payee
+	// (readPaidCalls); the aggregate leaves it out.
+	payees := p.Standing.Rule >= 1 && exists["service_calls"] && exists["x402_payments"]
+	notPaidCall := ""
+	if payees {
+		notPaidCall = " AND NOT (kind='commit' AND service='x402')"
+	}
 	if err := grouped("ledger_entries", "spend", `SELECT g.account,g.day,g.amount FROM (SELECT account,day,sum(abs(amount)) AS amount FROM ledger_entries
- WHERE kind IN ('spend','commit') AND resource='credit' AND bucket IN ('paid','earned') AND day>=? AND day<? AND account NOT LIKE 'anon:%'
+ WHERE kind IN ('spend','commit') AND resource='credit' AND bucket IN ('paid','earned') AND day>=? AND day<? AND account NOT LIKE 'anon:%'`+notPaidCall+`
  AND (account>? OR (account=? AND day>?)) GROUP BY account,day ORDER BY account,day) g WHERE g.amount>0 AND `+publicAccountSQL("g.account")+` ORDER BY g.account,g.day LIMIT ?`,
 		oldest, day); err != nil {
 		return err
+	}
+	if payees {
+		return in.readPaidCalls(ctx, asOf-p.Standing.FundedDays*86400, asOf, oldest, day, exists, emit)
+	}
+	return nil
+}
+
+// readPaidCalls emits, per public account, day and payee, the paid and
+// earned credit committed to x402 calls (parameter version 3), so standing
+// can tell a payment from paying oneself. link_value is the resource's host
+// (public in the catalogue), which standing compares with the spender's
+// verified domains. to names the account that topped up credit from the
+// address the call paid, only when naming it reveals nothing new: the
+// spender itself, or an account a public transfer (or bounty reward) linked
+// to the spender within funded_days. Which wallet funded which account is
+// not published otherwise.
+func (in trustInputs) readPaidCalls(ctx context.Context, fundedFrom, asOf, oldest, day int64, exists map[string]bool, emit func(trust.Record) error) error {
+	type key struct {
+		account, to, host string
+		day               int64
+	}
+	sum := map[key]int64{}
+	topups := exists["credit_topups"]
+	linked := "0"
+	if exists["ledger_transfers"] {
+		linked = `EXISTS(SELECT 1 FROM ledger_transfers x WHERE x.state='done' AND x.done_at>=` + strconv.FormatInt(fundedFrom, 10) + ` AND x.done_at<` + strconv.FormatInt(asOf, 10) + `
+ AND ((x.from_account=le.account AND x.to_account=t.account) OR (x.from_account=t.account AND x.to_account=le.account)))`
+	}
+	for after := int64(0); ; {
+		n := 0
+		if err := in.page(ctx, func(q allowance.Querier) error {
+			payee := "''"
+			if topups {
+				payee = `coalesce((SELECT t.account FROM credit_topups t WHERE t.state='credited' AND lower(t.payer)=lower(p.pay_to)
+ AND (t.account=le.account OR ` + linked + `) ORDER BY t.account=le.account DESC, t.account LIMIT 1),'')`
+			}
+			r, err := q.QueryContext(ctx, `SELECT le.seq,le.account,le.day,abs(le.amount),`+payee+`,
+ coalesce((SELECT c.url FROM x402_catalogue c WHERE c.id=p.resource),(SELECT v.url FROM x402_vetted v WHERE v.id=p.resource),'')
+ FROM ledger_entries le JOIN service_calls sc ON sc.hold_id=le.hold_id AND sc.service='x402' JOIN x402_payments p ON p.account=sc.account AND p.request_key=sc.request_key
+ WHERE le.seq>? AND le.kind='commit' AND le.service='x402' AND le.resource='credit' AND le.bucket IN ('paid','earned') AND le.hold_id<>''
+ AND le.day>=? AND le.day<? AND le.account NOT LIKE 'anon:%' AND `+publicAccountSQL("le.account")+` ORDER BY le.seq LIMIT ?`, after, oldest, day, trust.PageRows)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			for r.Next() {
+				var k key
+				var amount int64
+				var resource string
+				if err = r.Scan(&after, &k.account, &k.day, &amount, &k.to, &resource); err != nil {
+					return err
+				}
+				n++
+				if u, err := url.Parse(resource); err == nil {
+					k.host = strings.ToLower(u.Hostname())
+				}
+				sum[k] += amount
+			}
+			return r.Err()
+		}); err != nil {
+			return err
+		}
+		if n < trust.PageRows {
+			break
+		}
+	}
+	keys := make([]key, 0, len(sum))
+	for k := range sum {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := keys[i], keys[j]
+		if a.account != b.account {
+			return a.account < b.account
+		}
+		if a.day != b.day {
+			return a.day < b.day
+		}
+		if a.to != b.to {
+			return a.to < b.to
+		}
+		return a.host < b.host
+	})
+	for _, k := range keys {
+		if sum[k] <= 0 {
+			continue
+		}
+		if err := emit(trust.Record{Type: "spend", Account: k.account, Day: k.day, Amount: sum[k], To: k.to, LinkValue: k.host}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

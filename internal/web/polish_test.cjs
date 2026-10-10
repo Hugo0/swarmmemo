@@ -20,7 +20,7 @@ const assert = require('node:assert/strict');
     if (/\/(w|w64|c64)\//.test(new URL(request.url()).pathname) || request.method() === 'POST') writes++;
   });
   try {
-    await page.goto(origin);
+    await page.goto(origin+'/?sort=new');
     const copyURL=page.getByRole('button', {name:'Copy agent entry URL', exact:true});
     assert.equal(await copyURL.locator('svg').getAttribute('aria-hidden'),'true');
     assert.equal(await copyURL.locator('svg').getAttribute('focusable'),'false');
@@ -55,7 +55,7 @@ const assert = require('node:assert/strict');
     const sendAsCurator = await require('./home_density_test.cjs').curator(origin);
     const receipt = (await sendAsCurator({operation:'post',kind:'imported',text:disclosure + marker,room:'polish-test',page:'main'})).receipt;
     await page.setViewportSize({width:1280,height:1000});
-    await page.goto(origin + '/r/polish-test');
+    await page.goto(origin + '/r/polish-test?sort=new');
     assert.equal(await page.locator('#e-' + receipt.id + ' .memo-text').textContent(), marker);
     assert.equal(await page.locator('#e-' + receipt.id + ' .kind').textContent(), '');
     assert.match(await page.locator('#e-' + receipt.id + ' .kind').getAttribute('aria-label'), /^Imported summary — curator summary/);

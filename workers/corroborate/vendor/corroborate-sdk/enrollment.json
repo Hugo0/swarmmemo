@@ -1,0 +1,152 @@
+{
+  "note": "Where a person can actually go and acquire a credential, keyed by TRUST ROOT rather than by adapter — because acquiring a second credential in a root you already hold raises nothing. This is the routing half of the aggregator: the registry says what evidence is worth, this says where to get the evidence you are missing. Deliberately NOT on-chain: these are UX pointers that rot, not weights that need an audit trail. Every URL was fetched and returned 200 on 2026-07-25 except Coinbase, which 403s non-browser clients (same as base.org) and was confirmed by inspection.",
+  "privacyNote": "Each entry states what the enrolment costs you, not only what it gains. A score is not worth a permanent public biometric if you did not want one.",
+  "byRoot": {
+    "iris-registry:world-orb": [
+      {
+        "name": "World ID — Orb verification",
+        "url": "https://world.org/find-orb",
+        "effort": "In person at an Orb, ~5 minutes",
+        "price": "Free",
+        "youGive": "An iris scan. The iris code is not stored, but a stable global identifier for you is published on a public chain.",
+        "note": "The cheapest single credential to rent at scale, which is why we price it at $0.50 rather than the cost of the hardware."
+      }
+    ],
+    "state-document:icao-9303": [
+      {
+        "name": "ZKPassport",
+        "url": "https://zkpassport.id/",
+        "effort": "Phone with NFC, tap your passport, ~2 minutes",
+        "price": "Free",
+        "youGive": "Nothing linkable. Nullifiers are scoped per service, so this credential cannot be correlated across apps — including by us.",
+        "note": "Strongest privacy in the roster. The trade-off is that we cannot read it unsolicited; a consumer who verifies the proof has to hand it to us."
+      },
+      {
+        "name": "Self",
+        "url": "https://self.xyz/",
+        "effort": "Phone with NFC, tap your passport",
+        "price": "Free",
+        "youGive": "A globally scoped nullifier, so this one IS correlatable across apps.",
+        "note": "Same passport chip as ZKPassport, therefore the same trust root. Holding both adds nothing to your independence."
+      }
+    ],
+    "social-vouching:poh": [
+      {
+        "name": "Proof of Humanity",
+        "url": "https://app.proofofhumanity.id/",
+        "effort": "Video submission plus a voucher who already registered, then a challenge period",
+        "price": "A refundable deposit, plus gas on Gnosis",
+        "youGive": "A public video of your face and voice, permanently, on IPFS. This is the least private option here by a wide margin.",
+        "note": "Weighted on a survival ramp, so it is worth little at first and more as it survives challenge windows. Do not expect an immediate score."
+      }
+    ],
+    "social-trust:circles": [
+      {
+        "name": "Circles",
+        "url": "https://app.aboutcircles.com/",
+        "effort": "Needs an invitation from someone already in the graph",
+        "price": "Free to you — the inviter spends four days of their own issuance",
+        "youGive": "A public position in a social trust graph. No document, no biometric, no liveness check anywhere in the protocol.",
+        "note": "Registration alone is near-worthless as evidence; what carries signal is who trusts you and how well-connected they are."
+      }
+    ],
+    "kyc-vendor:persona": [
+      {
+        "name": "Coinbase Onchain Verification",
+        "url": "https://www.coinbase.com/onchain-verify",
+        "effort": "A Coinbase account that has completed identity verification",
+        "price": "Free",
+        "youGive": "A full KYC file to Coinbase and its vendor. The attestation itself is public on Base.",
+        "note": "Persona-rooted, so it shares a root with every other Persona-backed credential. Over half of these have been revoked, so we check revocation explicitly."
+      }
+    ],
+    "behavioral:wallet-history": [
+      {
+        "name": "Human Passport",
+        "url": "https://app.passport.xyz/",
+        "effort": "Connect wallets and accounts, ~10 minutes",
+        "price": "Free",
+        "youGive": "Links between your wallets and social accounts — which is a correlation you may not want to publish.",
+        "note": "Mostly a republisher of other people's credentials. We root it in wallet history so its own stamps do not get counted twice against their real issuers."
+      }
+    ],
+    "social-account:farcaster": [
+      {
+        "name": "Farcaster account",
+        "url": "https://farcaster.xyz/",
+        "effort": "Minutes",
+        "price": "About $0.44 to register plus ~$0.20/yr on chain",
+        "youGive": "A public social account.",
+        "note": "Weak as personhood evidence and priced accordingly. Useful mainly as an independent root when you have few others."
+      }
+    ],
+    "kyc-vendor:facetec": [
+      {
+        "name": "Holonym / Human Network",
+        "url": "https://human.tech/",
+        "effort": "Government ID or a face scan, minutes",
+        "price": "Free tier available",
+        "youGive": "Either a government document or biometrics, to a vendor.",
+        "note": "FaceTec's 1:N deduplication is per-integrator and never global, so this yields liveness rather than genuine uniqueness."
+      }
+    ],
+    "ceremony:encointer": [
+      {
+        "name": "Encointer",
+        "url": "https://encointer.org/",
+        "effort": "Attend an in-person key-signing meetup at a fixed time and place",
+        "price": "Free",
+        "youGive": "Your physical presence at a specific place and time, to strangers.",
+        "note": "The only root here with the property Ohlhaver argues actually matters: one person cannot physically show up as two."
+      }
+    ],
+    "biometric-registry:humanode": [
+      {
+        "name": "Humanode",
+        "url": "https://humanode.io/",
+        "effort": "Face scan, minutes",
+        "price": "Free",
+        "youGive": "Face biometrics to a private registry.",
+        "note": "Uniqueness is enforced inside Humanode's own set only."
+      }
+    ],
+    "social-account:lens": [
+      {
+        "name": "Lens account",
+        "url": "https://lens.xyz/",
+        "effort": "Minutes",
+        "price": "Free — account creation is gas-sponsored",
+        "youGive": "A public social account. Ownership transfers need no recipient consent, so an account can also be planted on an address that never asked for it.",
+        "note": "Priced at 1¢ — below the independence floor by design. It never moves a score; what it adds is texture: a username, an acquisition date, and someday graph position."
+      }
+    ],
+    "kyc-vendor:sumsub": [
+      {
+        "name": "Galxe Passport",
+        "url": "https://app.galxe.com/passport",
+        "effort": "Government ID plus a liveness check, minutes",
+        "price": "Free to mint",
+        "youGive": "A full KYC file to Sumsub, Galxe's vendor. The soulbound token itself is public on BNB Chain.",
+        "note": "Shares its trust root with Linea PoH — holding both counts once."
+      },
+      {
+        "name": "Linea Proof of Humanity",
+        "url": "https://poh.linea.build/",
+        "effort": "Government ID plus a liveness check via a partner, minutes",
+        "price": "Free",
+        "youGive": "A KYC file to Sumsub via one of Linea's attestation partners.",
+        "note": "Shares its trust root with Galxe Passport — holding both counts once."
+      }
+    ],
+    "kyc-vendor:unattributed": [
+      {
+        "name": "Holonym / Human Network — government ID",
+        "url": "https://human.tech/",
+        "effort": "Government document scan, minutes",
+        "price": "Free tier available",
+        "youGive": "A government document to a vendor whose downstream KYC processor is not publicly attributed — which is why this root is priced separately from the named vendors.",
+        "note": "Distinct root from Holonym's biometric path (FaceTec); holding both is two roots."
+      }
+    ]
+  }
+}

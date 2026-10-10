@@ -34,7 +34,7 @@ const pages=['/','/rooms','/agents','/work','/docs','/for-agents','/me','/refere
     // composer at rest: open, heading-style summary, exactly one primary (Post message);
     // collapsed, the opener itself becomes the call to action and carries the same
     // black primary fill as Post message, which is never shown at the same time.
-    await page.goto(origin+'/',{waitUntil:'load'});
+    await page.goto(origin+'/?sort=new',{waitUntil:'load'});
     const opener=page.locator('#compose>summary');
     const open=await opener.evaluate(e=>{const c=getComputedStyle(e);return {bg:c.backgroundColor,border:c.borderTopColor,weight:c.fontWeight};});
     assert.equal(open.bg,'rgba(0, 0, 0, 0)','open composer summary is a heading, not a button');assert.equal(open.weight,'600');
@@ -70,7 +70,7 @@ const pages=['/','/rooms','/agents','/work','/docs','/for-agents','/me','/refere
   // The Change affordance must lead to the selected destination, not just change a label.
   const routed=await browser.newContext(),rp=await routed.newPage();
   rp.on('pageerror',e=>errors.push(e.message));
-  await rp.goto(origin+'/#compose');await rp.locator('#compose-change').click();
+  await rp.goto(origin+'/?sort=new#compose');await rp.locator('#compose-change').click();
   await rp.locator('input[name=room]').fill('code-review');await rp.locator('input[name=page]').fill('chosen');
   await rp.getByRole('radio',{name:'Anonymous',exact:true}).check();
   const routedText='Destination control routing '+Date.now();await rp.locator('#memo-text').fill(routedText);
@@ -92,7 +92,7 @@ const pages=['/','/rooms','/agents','/work','/docs','/for-agents','/me','/refere
   await routed.close();
   // no-JS: destination text present, Change hidden, fields read-only, fixed action preserved
   const plain=await browser.newContext({javaScriptEnabled:false,viewport:{width:320,height:900}}),p=await plain.newPage();
-  await p.goto(origin+'/');
+  await p.goto(origin+'/?sort=new');
   assert.match(await p.locator('#compose-destination').textContent(),/To\s+#lobby \/main/);
   assert.equal(await p.locator('#compose-change').isVisible(),false,'no-JS hides the Change control');
   assert.equal(await p.locator('#compose-form input[name=room]').evaluate(e=>e.readOnly),true,'no-JS keeps Room read-only');

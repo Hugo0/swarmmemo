@@ -22,7 +22,7 @@ async function post(text,extra=''){
     const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
     const status=()=>page.locator('#shortcut-status').textContent();
     const active=()=>page.evaluate(()=>{const e=document.activeElement;return e?.id||e?.tagName;});
-    await page.goto(origin+'/r/'+room+'/main',{waitUntil:'load'});
+    await page.goto(origin+'/r/'+room+'/main'+'?sort=new',{waitUntil:'load'});
     await page.locator('#shortcuts-hint').waitFor({state:'visible'});
     assert.equal(await page.locator('#shortcut-status').getAttribute('aria-live'),'polite');
 
@@ -119,7 +119,7 @@ async function post(text,extra=''){
     await page.waitForFunction(()=>/Permalink copied/.test(document.getElementById('shortcut-status').textContent));
 
     // / focuses search where search exists (home).
-    await page.goto(origin+'/',{waitUntil:'load'});await page.locator('#shortcuts-hint').waitFor({state:'visible'});
+    await page.goto(origin+'/?sort=new',{waitUntil:'load'});await page.locator('#shortcuts-hint').waitFor({state:'visible'});
     await page.keyboard.press('/');assert.equal(await active(),'search');
     await page.keyboard.type('jk');assert.equal(await page.locator('#search').inputValue(),'jk','typing in search stays text');
     await page.keyboard.press('Escape');assert.notEqual(await active(),'search');
@@ -157,7 +157,8 @@ async function post(text,extra=''){
     const parent=ids[0];const child=await post('A reply for the u key.','&reply_to='+parent);
     await page.goto(origin+'/e/'+child,{waitUntil:'load'});
     await page.locator('#e-'+child).focus();await page.keyboard.press('u');
-    await page.waitForURL(u=>new URL(u).pathname==='/e/'+parent);
+    // In the reply tree the parent is on the page, so u moves focus to it.
+    await page.waitForFunction(id=>document.activeElement?.id==='e-'+id,parent);assert.equal(new URL(page.url()).pathname,'/e/'+child);
 
     // 320px: the dialog fits without horizontal scroll.
     await page.setViewportSize({width:320,height:800});await page.keyboard.press('?');
@@ -166,7 +167,7 @@ async function post(text,extra=''){
 
     // Without scripts none of this exists, and nothing pretends it does.
     const plain=await browser.newContext({javaScriptEnabled:false}),p=await plain.newPage();
-    await p.goto(origin+'/');assert.equal(await p.locator('#shortcuts-hint').isVisible(),false,'no-JS hides the shortcuts hint');await plain.close();
+    await p.goto(origin+'/?sort=new');assert.equal(await p.locator('#shortcuts-hint').isVisible(),false,'no-JS hides the shortcuts hint');await plain.close();
 
     assert.deepEqual(errors,[]);
     console.log('PASS: typing never triggers shortcuts; j/k move real visible focus with announcements; . e r Esc y / g u work; ? opens a modal dialog with trapped focus and Esc returns focus; Shift/Ctrl+Enter post through the normal path; Escape keeps drafts; 320px and no-JS.');

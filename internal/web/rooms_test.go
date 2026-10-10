@@ -194,7 +194,7 @@ func TestOlderRoomPagesRenderActualHistory(t *testing.T) {
 	for i := 0; i < 85; i++ {
 		ids = append(ids, owner.run(t, s, board.Command{Operation: "post", Room: "history", Page: "notes", Text: fmt.Sprintf("post %d", i)}).Receipt.ID)
 	}
-	path := "/r/history/notes"
+	path := "/r/history/notes?sort=new" // the chronological stream; Hot is the default
 	remaining := len(ids)
 	for page := 0; page < 3; page++ {
 		w := render(s, path)

@@ -177,9 +177,11 @@ class Helpers(unittest.TestCase):
 class GoldenFixture(unittest.TestCase):
     """The Go reference's golden fixtures (internal/trust/testdata): the same
     inputs must give byte-identical output. TRUST_GOLDEN_DIR points elsewhere.
-    golden is parameter version 1 (no standing); golden_standing is version 2."""
+    golden is parameter version 1 (no standing); golden_standing_v2 is version
+    2 (phase 1A, frozen); golden_standing is version 3 (the simulation's
+    fixes)."""
 
-    NAMES = ("golden", "golden_standing")
+    NAMES = ("golden", "golden_standing_v2", "golden_standing")
 
     def fixture(self, name):
         directory = golden_dir()
@@ -195,7 +197,7 @@ class GoldenFixture(unittest.TestCase):
                 snap = recompute.read_snapshot(f)
             got = recompute.canonical(recompute.compute(snap))
             self.assertEqual(got, output.read_text(encoding="utf-8").rstrip("\n"), name)
-            self.assertEqual("standing" in json.loads(got), name == "golden_standing")
+            self.assertEqual("standing" in json.loads(got), name.startswith("golden_standing"))
 
     def test_record_order_does_not_matter(self):
         for name in self.NAMES:
@@ -212,6 +214,11 @@ class Standing(unittest.TestCase):
         self.assertEqual(recompute.vote_weight_ppm(500, 250000, 500), 1_000_000)
         self.assertEqual(recompute.vote_weight_ppm(10**9, 250000, 500), 1_000_000)
         self.assertEqual(recompute.vote_weight_ppm(1, 250000, 500), 250000 + 750000 * 44721 // 1_000_000)
+        # Version 3 gates v0 at v_floor_cents: below it no weight, so 500 keys
+        # of 1 cent weigh less than one key of 500 cents.
+        self.assertEqual(recompute.vote_weight_ppm(49, 250000, 500, 50), 0)
+        self.assertEqual(recompute.vote_weight_ppm(50, 250000, 500, 50), 250000 + 750000 * 316227 // 1_000_000)
+        self.assertLess(500 * recompute.vote_weight_ppm(1, 250000, 500, 50), recompute.vote_weight_ppm(500, 250000, 500, 50))
 
     def test_mul_div(self):
         self.assertEqual(recompute.mul_div(7, 3, 2), 10)
@@ -227,6 +234,16 @@ class Standing(unittest.TestCase):
             recompute.read_snapshot([json.dumps(bad)])
         bad = copy.deepcopy(params)
         bad["body"]["standing"]["mode"] = "on"
+        with self.assertRaises(recompute.InputError):
+            recompute.read_snapshot([json.dumps(bad)])
+        # Version 3's fields are optional (omitted when zero), never required.
+        self.assertEqual(params["body"]["standing"]["rule"], 1)
+        lean = copy.deepcopy(params)
+        for k in recompute.STANDING_KEYS_V3:
+            del lean["body"]["standing"][k]
+        recompute.check_params(lean["body"])
+        bad = copy.deepcopy(params)
+        del bad["body"]["standing"]["pass_ppm"]
         with self.assertRaises(recompute.InputError):
             recompute.read_snapshot([json.dumps(bad)])
 

@@ -21,6 +21,8 @@
 // x402_catalogue.go, bundler.go); and fetch, to the public page an agent
 // names, under the honest-fetch rules in fetch.go (safenet's address
 // decision at resolve and connect time, robots.txt, per-host bounds).
+// corroborate asks only the loopback sidecar its operator configured
+// (internal/corroborate), which reads public chains itself.
 // Receivers make none.
 package services
 
@@ -34,6 +36,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/allowance"
+	"swarmmemo/internal/corroborate"
 )
 
 // Schema is migration fragment C (RFC0012 §7), applied after ledger.Schema:
@@ -312,6 +315,10 @@ type Deps struct {
 	// public pastes (CONTENT_URL, no trailing slash); "" leaves public
 	// links off.
 	ContentURL string
+	// Corroborate is the client of the loopback Corroborate sidecar
+	// (CORROBORATE_URL); nil leaves corroborate unavailable, and every
+	// resolve is refused with service_unavailable.
+	Corroborate *corroborate.Client
 	// EchoSimulate lets echo's args.simulate stand in for an upstream (remote,
 	// async, delay, failure, crash). Tests only: in production a crashed
 	// simulation holds one of the board's shared open-hold slots until it

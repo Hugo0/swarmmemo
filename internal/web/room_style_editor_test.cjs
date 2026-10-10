@@ -73,7 +73,7 @@ async function agent(origin, handle) {
     await context.close();
 
     ({page, context} = await open(null, '/r/' + room));
-    const response = await page.goto(origin + '/r/' + room);
+    const response = await page.goto(origin + '/r/' + room + '?sort=new');
     assert.match(response.headers()['content-security-policy'], /style-src 127\.0\.0\.1:\d+\/assets\/ 127\.0\.0\.1:\d+\/room-style\//);
     assert.equal(await styled(page), 'rgb(5, 11, 7)', 'a reader sees the saved style');
     assert.equal(await page.locator('#room-style-strip').isVisible(), true, 'and the disclosure');

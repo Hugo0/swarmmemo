@@ -75,8 +75,12 @@ type page struct {
 	// a reply answers (listingParents): parents on the page, plus the public
 	// ones off it in one bounded read. Absent parents simply render no quote.
 	Parents map[string]*board.Message
-	// Depths is the capped reply depth per event on a conversation page.
-	Depths map[string]int
+	// Tree places each message in a reply tree (threadtree.go): conversation
+	// pages and the Hot and Top feeds. Nil on flat listings, such as New.
+	Tree map[string]*treeNode
+	// Sub is set on a conversation page opened at one branch (?sub=1): the
+	// tree starts at Focus, under a link to the whole conversation.
+	Sub bool
 	// AnonReplied marks, on a conversation page, the anonymous posts that
 	// have a reply on the page: their authors never see it in /api/updates.
 	AnonReplied map[string]bool
@@ -244,9 +248,6 @@ func listingParents(ctx context.Context, service board.Service, events []board.M
 	return parents
 }
 
-// threadDepths derives indentation from the reply chain inside one page of a
-// thread. thread.get is oldest-first, so a parent is seen before its replies; a
-// parent outside the page restarts at zero rather than guessing.
 // anonReplied returns the unsigned, unbridged posts on a conversation page
 // that another post on the page answers (C72).
 func anonReplied(events []board.Message) map[string]bool {
@@ -263,27 +264,6 @@ func anonReplied(events []board.Message) map[string]bool {
 		}
 	}
 	return out
-}
-
-func threadDepths(events []board.Message) map[string]int {
-	const maxDepth = 3
-	present := make(map[string]bool, len(events))
-	for _, e := range events {
-		present[e.ID] = true
-	}
-	depth := make(map[string]int, len(events))
-	for _, e := range events {
-		if e.ReplyTo == "" || e.ReplyTo == e.ID || !present[e.ReplyTo] {
-			depth[e.ID] = 0
-			continue
-		}
-		if next := depth[e.ReplyTo] + 1; next < maxDepth {
-			depth[e.ID] = next
-		} else {
-			depth[e.ID] = maxDepth
-		}
-	}
-	return depth
 }
 
 var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
@@ -330,6 +310,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"handleOr":     handleOr,
 	"nameKey":      nameKey,
 	"memoCtx":      memoCtx,
+	"sortTabs":     func() []sortTab { return sortTabs },
 	"workLine":     workLine,
 	// A two-word rendering of the fingerprint, so a reader can tell participants apart.
 	// It names a key, never a person or a model, and the fingerprint stays next to it;
@@ -586,12 +567,19 @@ func Handler(service board.Service) http.Handler {
 					p.Revision = strconv.FormatInt(revision, 10)
 				}
 			}
-			p.Feed = parseFeedSort(r.URL.Query())
+			sortDefault := "new"
+			if p.View == "home" || p.View == "room" {
+				sortDefault = "hot"
+			}
+			p.Feed = parseFeedSort(r.URL.Query(), sortDefault)
 			list := board.Command{Operation: "messages.list", Room: room, Page: pageName, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Older: r.URL.Query().Get("older"), Target: r.URL.Query().Get("target"), Kind: r.URL.Query().Get("kind"), To: r.URL.Query().Get("to"), Limit: 40, Data: p.Feed.data()}
 			if p.Feed.Ranked() {
-				// Ranked views reorder the same posts; the new feed is the one to index.
 				list.Cursor, list.Older, list.Data = "", "", p.Feed.data()
-				p.NoIndex = true
+				// The view's default order is the one to index; another order of
+				// the same posts is not (any query string is noindex below).
+				if p.Feed.Sort != p.Feed.Default {
+					p.NoIndex = true
+				}
 			} else if p.Feed.Scope == "all" {
 				p.NoIndex = true
 			}
@@ -638,6 +626,12 @@ func Handler(service board.Service) http.Handler {
 			// A forward link is only ever useful while walking forward. Without a
 			// cursor this page is the newest window, so there is nothing after it.
 			p.HasMore = hasMore(res) && r.URL.Query().Get("cursor") != ""
+			if p.Feed.Ranked() {
+				// Hot and Top draw each post with its replies nested under it;
+				// New stays flat and quotes each reply's parent instead.
+				nestFeedReplies(r.Context(), service, execute, &p, time.Now().Unix())
+				return
+			}
 			p.Parents = listingParents(r.Context(), service, p.Messages)
 		}
 		switch {

@@ -48,7 +48,7 @@ async function main(){
     await page.goto(origin+'/e/'+id,{waitUntil:'load'});
     assert.equal(await page.locator('#e-'+id+' .memo-info-log a').getAttribute('href'),'/e/'+id+'/proof','the details link the human proof page');
     assert.equal(await page.locator('a[href="/e/'+id+'/proof"]').count(),1,'the post page links its proof once');
-    await page.goto(origin+'/r/'+room+'/main',{waitUntil:'load'});
+    await page.goto(origin+'/r/'+room+'/main'+'?sort=new',{waitUntil:'load'});
     const memo=page.locator('#e-'+id);
     const info=memo.locator('details.memo-info');
     await info.waitFor({state:'attached',timeout:5000});
