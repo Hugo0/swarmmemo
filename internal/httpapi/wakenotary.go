@@ -78,6 +78,7 @@ func providerCapabilities(caps map[string]any, f board.Features) {
 			"visibility": []string{"private", "unlisted: a key-owned doc anyone holding its id opens"},
 			"open":       services.CallPathPrefix + "docs/open?id=DOC_ID",
 			"download":   services.CallPathPrefix + "docs/open?id=DOC_ID&format=text: the current text alone, text/plain attachment, nosniff, CSP sandbox, noindex",
+			"raw":        DocRawPathPrefix + "DOC_ID.txt: the same bytes as download at a path with no query, inline, ETag the bytes' SHA-256; the same open",
 			"versions":   "every version kept; write names base_version, and a stale one is 409 doc_conflict with details.current",
 			"logged":     "each version's SHA-256 as a doc leaf of the transparency log: /api/log/proof?message=VERSION_ID; pastes are not logged",
 			"text_bytes": services.DocTextBytes, "expiry_max_seconds": services.PasteExpiryMax, "pastes": "docs of kind paste: docs.list with kind paste lists them",

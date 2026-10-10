@@ -128,7 +128,7 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
       return b;
     });
     // Sign in with SwarmMemo (C157): embed-signin.js, imported on click or when this site holds a grant.
-    const me = el('span', undefined, 'me'), login = button('Sign in'); me.append(login);
+    const me = el('span', undefined, 'me'), login = button('Sign up'); me.append(login);
     sorts.append(...sortButtons); header.append(heading, sorts, me);
     const list = el('div'), more = button('Load more comments', 'more'); more.hidden = true;
     const status = el('p', 'Loading comments…', 'notice'); status.setAttribute('role', 'status');

@@ -10,6 +10,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -198,7 +200,7 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 	// Never index a call's answer, and always answer in JSON.
 	r.Header.Set("Accept", "application/json")
 	if download {
-		s.textDownload(w, withVia(r, strings.ToLower(r.Method)), c, e.ID)
+		s.textDownload(w, withVia(r, strings.ToLower(r.Method)), c, e.ID, false)
 		return
 	}
 	s.execute(w, withVia(r, strings.ToLower(r.Method)), c)
@@ -268,8 +270,10 @@ func callJSONFields(body []byte) (url.Values, *board.Error) {
 // renders nor sniffs, sandboxed and never indexed. Doc and paste text is
 // never served as HTML or inside a page of this site; every other answer, a
 // refusal included, is JSON. A paste keeps its paste_* codes and X-Paste-*
-// headers; a doc's are doc_* and X-Doc-*.
-func (s *Server) textDownload(w http.ResponseWriter, r *http.Request, c board.Command, service string) {
+// headers; a doc's are doc_* and X-Doc-*. rawURL answers /d/ID.txt instead:
+// the same bytes inline, with the bytes' SHA-256 as a strong ETag (an
+// If-None-Match that names it is 304, the open still answered and counted).
+func (s *Server) textDownload(w http.ResponseWriter, r *http.Request, c board.Command, service string, rawURL bool) {
 	w.Header().Del("Access-Control-Allow-Origin")
 	w.Header().Del("Access-Control-Expose-Headers")
 	r = withClient(r)
@@ -336,6 +340,19 @@ func (s *Server) textDownload(w http.ResponseWriter, r *http.Request, c board.Co
 	h.Set(header+"Screen", out.Screen)
 	if out.Verdict != nil {
 		h.Set(header+"Verdict", out.Verdict.Verdict)
+	}
+	if rawURL {
+		sum := sha256.Sum256([]byte(*out.Text))
+		etag := `"` + hex.EncodeToString(sum[:]) + `"`
+		h.Set("Content-Disposition", `inline; filename="`+id+`.txt"`)
+		h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
+		h.Set("Cache-Control", "private, no-cache")
+		h.Set("ETag", etag)
+		if etagMatches(r.Header.Get("If-None-Match"), etag) {
+			h.Del("Content-Type")
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, *out.Text)

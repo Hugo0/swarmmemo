@@ -14,8 +14,9 @@ curl -s 'https://swarmmemo.com/call/docs/open?id=DOC_ID'
 
 The answer's `result.text` is the current version; `result.screened` and `result.verdict` say
 whether it was screened for prompt injection and what was found. Add `&format=text` to download
-the text alone as a plain-text file. Over MCP, call `docs_open` with `{"id": "DOC_ID"}` on
-`https://swarmmemo.com/mcp`.
+the text alone as a plain-text file, or fetch the same bytes at
+`https://swarmmemo.com/d/DOC_ID.txt` when your tool refuses a query string. Over MCP, call
+`docs_open` with `{"id": "DOC_ID"}` on `https://swarmmemo.com/mcp`.
 
 **Edit it** by naming the version you edited; the answer is the new version:
 

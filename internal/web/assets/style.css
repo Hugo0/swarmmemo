@@ -1328,13 +1328,18 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 /* ---------- stats ----------
    /stats: one screen grouped by question (templates/stats.html). A sticky table
    of contents, six headline tiles with their change and a sparkline, one chart or
-   one row of numbers per section, and every long table in the one All numbers
-   block. The charts are server-rendered SVG (stats_charts.go) carrying their own
+   one compact visual per section (a tier bar, a row of counts, number cards; every
+   explanation in a tooltip), and every long table in the one All numbers
+   block. Nothing sets a fixed width, so at 360px the page never scrolls sideways:
+   tables scroll in their .table-scroll box and long numbers wrap.
+   The charts are server-rendered SVG (stats_charts.go) carrying their own
    size, fill and stroke attributes, so they draw sanely without this file; these
    rules refine them. Lines are told apart by ink and dash and named in a legend;
    100% bands by lightness, with a surface gap. assets/stats.js adds the hover,
    tap and focus readout. */
-.stats{max-width:880px;color:var(--ink);--series-3:#d2d2d2;--axis-gutter:48px}
+.stats{max-width:880px;min-width:0;color:var(--ink);--series-3:#d2d2d2;--axis-gutter:48px}
+.stats .table-scroll{max-width:100%}
+.stats .stat-value{overflow-wrap:anywhere}
 @media (prefers-color-scheme:dark){html:not(.room-styled) .stats{--series-3:#4a4a47}}
 .page-heading:has(+.stats){padding-bottom:var(--s-4)}
 .stats-toc{position:sticky;top:0;z-index:3;display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-2);margin:0 0 var(--s-5);padding:var(--s-2) 0;background:var(--surface);border-bottom:1px solid var(--line);font-size:var(--t-ui)}
@@ -1417,11 +1422,33 @@ caption.chart-note{text-align:left;caption-side:top}
 .chart-readout-key.none{visibility:hidden}
 .chart-readout-label{color:var(--ink-2)}
 .chart-readout-value{margin-left:auto;padding-left:var(--s-3);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
-/* Services and moderation: small numbers in a grid. */
-.svc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:var(--s-4) var(--s-6);align-items:start}
-.svc{min-width:0}
-.svc h3{font-size:var(--t-ui);font-weight:600;margin:0 0 var(--s-2)}
-.svc h3 .muted{font-weight:400}
+/* Work and credits: today's allowance as one tier bar per resource (the pool
+   split by tier, by the bands' lightness; the part drawn as an ink line under
+   it), spent of budget beside it, then one row of accounts per tier. */
+.allowance{margin:var(--s-4) 0 var(--s-2)}
+.allowance h3,.stats-section h3{font-size:var(--t-ui);font-weight:600;margin:0 0 var(--s-2)}
+.allowance .chart-legend{margin-bottom:var(--s-2)}
+.allow-row{display:grid;grid-template-columns:5.5em minmax(0,1fr) auto;align-items:center;gap:var(--s-1) var(--s-3);margin:0 0 var(--s-2);font-size:var(--t-meta)}
+.allow-name{color:var(--ink-2)}
+.allow-bar{display:block;min-width:0}
+.allow-nums{color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+.allow-nums b{color:var(--ink);font-weight:600}
+.tier-bar{display:block;width:100%;height:14px;color:var(--ink)}
+.tier-bar .track{fill:var(--surface-3);fill-opacity:1}
+.tier-bar .drawn{fill:var(--ink)}
+.stat-tag{font:var(--t-meta)/1.4 var(--mono);font-weight:400;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:0 6px;text-decoration:none}
+.stat-inline{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-1) var(--s-4);margin:var(--s-2) 0 0;font-size:var(--t-meta);color:var(--ink-2)}
+.stat-inline b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.stat-inline-item{white-space:nowrap}
+/* Services and moderation: number cards, an icon, the number, a short label
+   whose tooltip explains it, and a sparkline when there is daily data. */
+.svc-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,132px),1fr));gap:var(--s-3);margin:0 0 var(--s-3)}
+.svc-card{display:flex;flex-direction:column;min-width:0;padding:var(--s-3);border:1px solid var(--line);border-radius:var(--radius)}
+.svc-card dt{display:flex;align-items:center;gap:6px;order:2;font-size:var(--t-meta);line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
+.svc-card dt .icon{width:15px;height:15px}
+.svc-card dd{margin:0}
+.svc-card .stat-value{order:1;font:400 24px/1.15 var(--serif);letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--ink)}
+.svc-card .svc-spark{order:3;margin-top:auto}
 .svc-numbers{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:var(--s-2) var(--s-4);margin:0 0 var(--s-2)}
 .svc-numbers>div{min-width:0}
 .svc-numbers dt{font-size:var(--t-meta);line-height:1.4;color:var(--muted)}
@@ -1456,9 +1483,17 @@ caption.chart-note{text-align:left;caption-side:top}
   .chart-svg{height:120px}
   .via-bar-cell{width:40%}
   .chart-axis .minor{display:none}
+  .allow-row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name nums" "bar bar"}
+  .allow-name{grid-area:name}
+  .allow-nums{grid-area:nums}
+  .allow-bar{grid-area:bar}
+  .svc-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .svc-card .stat-value{font-size:21px}
 }
 @media(forced-colors:active){
-  .via-bar rect{fill:CanvasText}
+  .via-bar rect,.tier-bar .drawn{fill:CanvasText}
+  .tier-bar .track{fill:Canvas;stroke:CanvasText}
+  .svc-card{border-color:CanvasText}
   .spark-area{fill:none}
   .stats .line,.spark-line{stroke:CanvasText}
   .stats .line.s-2,.stats .line.s-3,.stats .line.s-alt{stroke:GrayText}

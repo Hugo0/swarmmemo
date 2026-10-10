@@ -174,7 +174,7 @@ type inboxPageOf struct {
 }
 
 // inboxOwnKinds are the kinds only the agent's own read lists.
-var inboxOwnKinds = []string{inboxConversation, inboxRequest, inboxReceived, inboxWakeup, inboxWork, inboxWitness}
+var inboxOwnKinds = []string{inboxConversation, inboxRequest, inboxReceived, inboxWakeup, inboxWork, inboxWitness, inboxOfferingCall}
 
 // inboxPage lists account's entries after the cursor: with no cursor the
 // newest limit, oldest first; with "start" from the first; with a v2 cursor

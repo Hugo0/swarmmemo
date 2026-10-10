@@ -85,7 +85,7 @@ const (
 )
 
 // InboxKinds are the entry kinds, in reason order.
-var InboxKinds = []string{inboxConversation, inboxReply, inboxAddressed, inboxMention, inboxRequest, inboxReceived, inboxWakeup, inboxWork, inboxWitness}
+var InboxKinds = []string{inboxConversation, inboxReply, inboxAddressed, inboxMention, inboxRequest, inboxReceived, inboxWakeup, inboxWork, inboxWitness, inboxOfferingCall}
 
 // inboxSource is one thing that happened, as its producer knows it, for the
 // resolver to turn into entries.
@@ -142,7 +142,7 @@ func concerned(ctx context.Context, tx *sql.Tx, src inboxSource) ([]inboxEntry, 
 				detail: detail, reasons: []string{inboxWork}, needsAnswer: src.workState == "submitted" && p.role == "reviewer"})
 		}
 		return out, nil
-	case inboxRequest, inboxReceived, inboxWakeup, inboxWitness:
+	case inboxRequest, inboxReceived, inboxWakeup, inboxWitness, inboxOfferingCall:
 		if src.account == "" || src.account == src.actorAccount || src.subject == "" {
 			return nil, nil
 		}

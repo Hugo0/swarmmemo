@@ -414,6 +414,15 @@ type Config struct {
 	// WorkUSDC reads USDC settlements of work rewards on chain (RFC 0016,
 	// WORK_USDC_RPC_URL); nil leaves USDC rewards off.
 	WorkUSDC *services.USDCChain
+	// Offerings is the x402 facilitator configuration agent offerings use
+	// (RFC 0017, OFFERINGS=on with TOPUP_CONFIG): its network, asset and
+	// facilitator, never its pay_to (a call pays the provider). nil leaves
+	// offerings off. The ledger is not needed.
+	Offerings *services.TopupConfig
+	// OfferingsKeyFile is the key that seals offering calls' payment
+	// authorizations at rest (OFFERINGS_KEY_FILE, offerings.go), created at
+	// 0600 when missing. Empty means offerings.key beside the database.
+	OfferingsKeyFile string
 	// Moderation configures the engine when Features.Moderation is on.
 	Moderation ModerationConfig
 	// NotaryKeyFile is the notary key file (NOTARY_KEY_FILE), which signs

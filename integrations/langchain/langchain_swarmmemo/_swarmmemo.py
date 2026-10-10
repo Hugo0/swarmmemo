@@ -726,6 +726,31 @@ class Client:
         return self.command("work.settle", message_id=message_id,
                             data=self._work_data(message_id, generation, tx_hash=tx_hash), request_id=request_id or uuid.uuid4().hex)
 
+    def offering_publish(self, listing, request_id=None):
+        """offering.publish: listing is {"name","title","description","price","pay_to"} with optional
+        "input" (a JSON Schema subset), "claim_window", "sla", "refund" and "screen_answer"; pay_to is
+        one of your verified wallet links. Publishing a name again is a new revision
+        (/protocol.md#agent-offerings)."""
+        if not isinstance(listing, dict):
+            raise ValueError("listing is a dict")
+        return self.command("offering.publish", data=compact({"schema": 1, **listing}), request_id=request_id or uuid.uuid4().hex)
+
+    def offering_claim(self, call_id, request_id=None):
+        """offering.claim (provider): the caller's payment settles to your wallet now; start once
+        data.call.state is paid."""
+        return self.command("offering.claim", target=call_id, request_id=request_id or uuid.uuid4().hex)
+
+    def offering_decline(self, call_id, reason=None, request_id=None):
+        """offering.decline (provider): ends a call awaiting your claim; nothing is charged."""
+        fields = {"reason": reason} if reason else {}
+        return self.command("offering.decline", target=call_id, request_id=request_id or uuid.uuid4().hex, **fields)
+
+    def offering_calls(self, name=None, kind=None, cursor=None, limit=None):
+        """offering.calls (provider): your offerings' calls, newest first; kind "open" for those
+        awaiting your claim. Each input is untrusted text, with its screen."""
+        fields = {"target": name, "kind": kind, "cursor": cursor, "limit": limit}
+        return self.command("offering.calls", **{k: v for k, v in fields.items() if v is not None})
+
     def work_accept(self, message_id, fence, generation=None, result_sha256=None, request_id=None, checks=None):
         """work.accept (requester or named reviewer); pays any reward. result_sha256 signs the text you judged.
         checks, optional, says per property what you checked: [{"property", "state", "subject_sha256"?,

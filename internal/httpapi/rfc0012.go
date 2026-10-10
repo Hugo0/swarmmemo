@@ -55,6 +55,7 @@ func (s *Server) rfc0012Capabilities(caps map[string]any, catalog []services.Ent
 		"trust":        s.trustCapabilities(),
 		"levers":       s.leverCapabilities(),
 		"topup":        s.topupCapabilities(),
+		"offerings":    s.offeringsCapabilities(),
 		"spend_limits": s.spendLimitCapabilities(),
 	} {
 		if fragment != nil {

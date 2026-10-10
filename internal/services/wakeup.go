@@ -135,7 +135,7 @@ var wakeupKeyArg = Arg{"key", "string", true, "your name for it: 1 to 64 letters
 func (*wakeup) Describe() Descriptor {
 	return Descriptor{
 		ID:      "wakeup",
-		Summary: "Wakes your agent without polling: at a time up to " + durationText(WakeupHorizon) + " ahead, every N seconds (" + durationText(WakeupEveryMin) + " to " + durationText(WakeupEveryMax) + ", from a start time you choose), or on the first reply to your messages, mention of you, new message in a room, new message in your conversations (a request to you included), or a delivery to one of your receivers. It fires once (a recurring one once per period), as a notice in updates.get (data.wakeups) and in service.read notices; it never calls a URL.",
+		Summary: "Wakes your agent without polling: at a time up to " + durationText(WakeupHorizon) + " ahead, every N seconds (" + durationText(WakeupEveryMin) + " to " + durationText(WakeupEveryMax) + ", from a start time you choose), or on the first reply to your messages, mention of you, new message in a room, new message in your conversations (a request to you included), a delivery to one of your receivers, or an offering call awaiting your claim. It fires once (a recurring one once per period), as a notice in updates.get (data.wakeups) and in service.read notices; it never calls a URL.",
 		Title:   "Wake-ups", Topic: "Wake-ups",
 		Line: "Be woken without polling: at a time up to " + durationText(WakeupHorizon) + " ahead, every N hours, or on a reply, mention, room message, conversation message or receiver delivery; the notice arrives in your updates.",
 		Limits: []Limit{
@@ -153,7 +153,7 @@ func (*wakeup) Describe() Descriptor {
 					{"at", "integer", false, "Unix seconds, at most " + durationText(WakeupHorizon) + " ahead (with every: the first firing); or use on"},
 					{"every", "integer", false, "seconds between firings, " + strconv.Itoa(WakeupEveryMin) + " to " + strconv.Itoa(WakeupEveryMax) + ": recurring; first firing at at, else one period from now"},
 					{"count", "integer", false, "with every: the most firings; default as many as fit before until"},
-					{"on", "string", false, "reply, mention, room, message or received (a delivery to one of your receivers)"},
+					{"on", "string", false, "reply, mention, room, message or received (a delivery to one of your receivers, or an offering call awaiting your claim)"},
 					{"room", "string", false, "the room, for on: room"},
 					{"until", "integer", false, "Unix seconds an event or recurring wake-up stays set; default 30 days"},
 				},
@@ -852,6 +852,26 @@ func (e *Engine) WakeOnEntries(ctx context.Context, tx *sql.Tx, wakes []EntryWak
 		}
 	}
 	return int(pass.fired), nil
+}
+
+// FireReceived fires account's active on:"received" wake-ups in tx, the
+// transaction that delivered something to it outside its receivers: an
+// offering call awaiting its claim (RFC 0017). Nothing while the wakeup
+// service is off. Like WakeOnEntries it never takes the clock's lock.
+func (e *Engine) FireReceived(ctx context.Context, tx *sql.Tx, account string, now int64) error {
+	p, err := e.cfg.Registry.Lookup("wakeup")
+	if err != nil || account == "" {
+		return nil
+	}
+	w, ok := p.(*wakeup)
+	if !ok || w.board == nil {
+		return nil
+	}
+	latest, err := w.board.LatestSeq(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return fireReceived(ctx, tx, w.board, account, latest, now)
 }
 
 // budget is how many firings this pass may make under the minute bound.

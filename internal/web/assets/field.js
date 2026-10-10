@@ -41,13 +41,18 @@
   addEventListener('pointerdown', e => {
     if (still) return;
     ripples.push({x: e.clientX, y: e.clientY, at: performance.now()});
-    if (ripples.length > 5) ripples.shift();
+    if (ripples.length > 8) ripples.shift();
     lastInput = performance.now(); wake();
   }, {passive: true});
   document.documentElement.addEventListener('pointerleave', () => {px = py = -1e4; heat = 0;});
   // Wall-clock time, so the pattern continues from page to page instead of restarting.
   const clock = () => (Date.now() / 1000) % 86400;
-  const waveSpeed = 170, waveLife = 4.2, waveWidth = 46, glowR = 190, glowS = 70;
+  // The click wave is a stone dropped in water: the surface first dips under
+  // the pointer, then rings of crest and trough spread out, slowing and
+  // fading. A crest brightens and pushes the dots outward, a trough darkens
+  // and draws them in, so the pattern itself moves, not just a ring on top.
+  const waveSpeed = 150, waveLife = 4, waveLength = 72, waveDecay = 1.4, waveTrail = 130, waveFront = 34, glowR = 190, glowS = 70;
+  const waveK = 2 * Math.PI / waveLength;
   let prev = performance.now();
   function draw(t) {
     const w = Math.max(1, canvas.clientWidth), h = Math.max(1, canvas.clientHeight);
@@ -80,18 +85,31 @@
           sx -= dx * push / glowS; sy -= dy * push / glowS;
           e = (0.04 + 0.56 * heat) * g;
         }
+        let hgt = 0, px2 = 0, py2 = 0;
         for (const r of waves) {
-          const rx = gx - r.x, ry = gy - r.y, dist = Math.hypot(rx, ry) || 1, d = dist - r.age * waveSpeed;
-          if (d > -2.5 * waveWidth && d < 2.5 * waveWidth) {
-            const fade = Math.pow(1 - r.age / waveLife, 1.6), g = Math.exp(-(d * d) / (2 * waveWidth * waveWidth));
-            const push = 30 * fade * g * Math.sin(d / waveWidth * 2.2);
-            sx += rx / dist * push; sy += ry / dist * push;
-            e = Math.max(e, 0.32 * fade * g);
-          }
+          const rx = gx - r.x, ry = gy - r.y, dist = Math.hypot(rx, ry) || 1, front = r.age * waveSpeed, d = dist - front;
+          const ux = rx / dist, uy = ry / dist;
+          // The shove: water the front has passed is pushed outward and
+          // settles back over a few seconds, so the pattern itself moves.
+          if (d < 0) { const shove = 22 * (1 - Math.exp(d / 40)) * Math.exp(-r.age / 2.2) * Math.exp(-dist / 260); px2 += ux * shove; py2 += uy * shove; }
+          if (d > 3 * waveFront || d < -3 * waveTrail) continue;
+          // Ahead of the front the water is still; behind it the rings fade.
+          const env = d > 0 ? Math.exp(-(d * d) / (2 * waveFront * waveFront)) : Math.exp(d / waveTrail);
+          const amp = Math.exp(-r.age / waveDecay) * env / Math.sqrt(1 + dist / 160);
+          const z = -amp * Math.cos(waveK * d);
+          hgt += z; px2 += ux * z * 14; py2 += uy * z * 14;
         }
+        // Many quick clicks overlap: saturate the sum instead of adding without
+        // bound, so a burst of taps stays a rough sea rather than a jolt.
+        hgt = Math.tanh(hgt);
+        const pm = Math.hypot(px2, py2);
+        if (pm > 30) { px2 *= 30 / pm; py2 *= 30 / pm; }
+        sx -= px2; sy -= py2;
         const cx = ((sx - dragX) / w - 0.5) * asp + 0.5, cy = (sy - dragY) / h;
         const c = smooth(0.5, 0.95, noise(cx * 3.2 + t * 0.06, cy * 3.2 - t * 0.045)) * 0.7;
-        const v = Math.max(c, e * 0.9);
+        // A crest lifts dots (brighter, larger), a trough presses them down.
+        const v = Math.max(0, Math.max(c, e * 0.9) * (1 + 0.9 * hgt) + Math.max(0, hgt) * 0.45);
+        e = Math.max(e, Math.max(0, hgt) * 0.35);
         if (v <= 0.04) continue;
         const j = (hash(gx, gy) - 0.5) * cell * 0.35;
         ctx.globalAlpha = Math.min(1, (0.35 + v) * (base + e * 0.4));

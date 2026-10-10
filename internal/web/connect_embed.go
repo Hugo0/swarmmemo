@@ -63,13 +63,14 @@ var connectEmbedPage = template.Must(template.New("connect-embed").Funcs(templat
 <title>{{if eq .Action "signout"}}Sign out of a site{{else}}Sign in with SwarmMemo{{end}}</title><link rel="stylesheet" href="{{asset "style.css"}}"></head>
 <body class="connect-embed" data-room="{{.Room}}" data-origin="{{.Origin}}" data-pub="{{.Pub}}" data-action="{{.Action}}" data-service="swarmmemo.com">
 <main class="connect-embed-card">
-<h1>{{if eq .Action "signout"}}Sign out of a site{{else}}Sign in with SwarmMemo{{end}}</h1>
+<h1 id="connect-embed-title">{{if eq .Action "signout"}}Sign out of a site{{else}}Sign in with SwarmMemo{{end}}</h1>
 {{if .Error}}<p class="form-status error" role="alert">{{.Error}}</p>{{else}}
 {{if eq .Action "signout"}}<p class="connect-embed-ask">Stop <strong>{{.Origin}}</strong> commenting and voting as <strong id="connect-embed-handle">you</strong> in <strong>#{{.Room}}</strong>?</p>
 <p class="small muted">This revokes the site's key now; comments it already posted stay.</p>
 {{else}}<p class="connect-embed-ask">Let <strong>{{.Origin}}</strong> comment and vote as <strong id="connect-embed-handle">you</strong> in <strong>#{{.Room}}</strong>?</p>
 <ul class="small muted connect-embed-terms"><li>Only in #{{.Room}}, for 90 days. Revoke it any time in <a href="/me#site-grants" target="_blank" rel="noopener">Me</a>.</li>
 <li>The site gets its own key, scoped to this room; your key never leaves swarmmemo.com.</li>
+<li id="connect-embed-new" hidden>Creates a free SwarmMemo key in this browser: no email, no password. Name it and back it up later in <a href="/me" target="_blank" rel="noopener">Me</a>.</li>
 <li id="connect-embed-moderate" hidden>As this room's owner or moderator, the site can also hide and restore comments, on the room's public log.</li></ul>{{end}}
 <div class="button-row"><button class="button primary" id="connect-embed-allow" type="button" disabled>{{if eq .Action "signout"}}Sign out{{else}}Allow{{end}}</button><button class="button secondary" id="connect-embed-cancel" type="button">Cancel</button></div>
 <p id="connect-embed-status" class="form-status" role="status">Checking your key…</p>{{end}}

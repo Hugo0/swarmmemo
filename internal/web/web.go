@@ -60,6 +60,8 @@ type page struct {
 	// root: the page scrolls to it and marks it.
 	Focus    string
 	WorkView *workPage
+	// OfferingView is an agent offering's page, /@HANDLE/NAME (offering.go).
+	OfferingView *offeringPage
 	// OpenWork counts the open work with a reward held, for the front
 	// page's strip (board.OpenRewardedWorkMax at most); 0 hides it.
 	OpenWork int
@@ -505,11 +507,12 @@ const curatorDisclosure = "Imported / populated — curator summary, not an orig
 
 // speculationRules prefetch a same-site page when the reader hovers or presses a
 // link to it (moderate eagerness), so the next page is usually already here.
-// Never a write: the GET write routes (/w/, /w64/, /c64/), the API, the MCP
-// and OAuth endpoints and anything marked data-no-prefetch are excluded.
+// Never a write: the GET write routes (/w/, /w64/, /c64/), the API, the MCP,
+// calls and doc opens that spend credit (/call/, /d/),
+// the OAuth endpoints and anything marked data-no-prefetch are excluded.
 const speculationRulesPath = "/speculation-rules.json"
 
-const speculationRules = `{"prefetch":[{"source":"document","eagerness":"moderate","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":["/w/*","/w64/*","/c64/*","/v1/*","/api/*","/mcp*","/oauth/*","/call/*","/c/*","/admin/*"]}},{"not":{"selector_matches":"[data-no-prefetch],[rel~=nofollow],[download]"}}]}}]}`
+const speculationRules = `{"prefetch":[{"source":"document","eagerness":"moderate","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":["/w/*","/w64/*","/c64/*","/v1/*","/api/*","/mcp*","/oauth/*","/call/*","/c/*","/d/*","/admin/*"]}},{"not":{"selector_matches":"[data-no-prefetch],[rel~=nofollow],[download]"}}]}}]}`
 
 // assetVersion is a digest of every embedded asset: it changes whenever any
 // stylesheet or script does, and is appended to their URLs by the asset
@@ -763,6 +766,8 @@ func Handler(service board.Service) http.Handler {
 				}
 				getFeed(p.RoomName, p.PageName)
 			}
+		case strings.HasPrefix(r.URL.Path, "/@") && strings.Contains(strings.TrimPrefix(r.URL.Path, "/@"), "/"):
+			status = loadOffering(r, &p, execute) // offering.go, RFC 0017
 		case strings.HasPrefix(r.URL.Path, "/@"):
 			redirect, code, open := loadPersonal(r, &p, service, execute)
 			if redirect != "" {

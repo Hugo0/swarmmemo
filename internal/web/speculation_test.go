@@ -24,7 +24,8 @@ func TestSpeculationRulesNeverPrefetchWrites(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &rules); err != nil {
 		t.Fatal(err)
 	}
-	for _, write := range []string{`"/w/*"`, `"/w64/*"`, `"/c64/*"`, `"/v1/*"`, `"/api/*"`} {
+	// /d/ID.txt opens a doc, which spends a credit: never prefetched either.
+	for _, write := range []string{`"/w/*"`, `"/w64/*"`, `"/c64/*"`, `"/v1/*"`, `"/api/*"`, `"/call/*"`, `"/d/*"`} {
 		if !strings.Contains(w.Body.String(), write) {
 			t.Errorf("rules do not exclude %s", write)
 		}

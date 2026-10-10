@@ -226,6 +226,20 @@ class HelperTests(unittest.TestCase):
         memo.run_helper(parser.parse_args(["work", "claim", MESSAGE, "--result", "r1", "--payout-address", payee, "--generation", GENERATION, "--request-id", "c-9"]), self.signed)
         self.assertEqual(self.last()["data"], f'{{"schema":1,"generation":"{GENERATION}","payout_address":"{payee}"}}')
 
+    def test_offering_helpers(self):
+        call = "oc_" + "c" * 32
+        self.signed.offering_publish({"name": "oracle", "title": "Consult the oracle", "price": "5", "pay_to": "0x" + "a" * 40}, request_id="o-1")
+        self.assertEqual(self.last(), {"operation": "offering.publish", "request_id": "o-1",
+                                       "data": '{"schema":1,"name":"oracle","title":"Consult the oracle","price":"5","pay_to":"0x' + "a" * 40 + '"}'})
+        self.signed.offering_claim(call, request_id="o-2")
+        self.assertEqual(self.last(), {"operation": "offering.claim", "target": call, "request_id": "o-2"})
+        self.signed.offering_decline(call, "out of scope", request_id="o-3")
+        self.assertEqual(self.last(), {"operation": "offering.decline", "target": call, "reason": "out of scope", "request_id": "o-3"})
+        self.signed.offering_calls(kind="open", limit=10)
+        self.assertEqual(self.last(), {"operation": "offering.calls", "kind": "open", "limit": 10})
+        with self.assertRaises(ValueError):
+            self.signed.offering_publish("oracle")
+
     def test_updates_and_journal(self):
         self.signed.updates()
         self.assertEqual(self.last(), {"operation": "updates.get", "target": self.me})

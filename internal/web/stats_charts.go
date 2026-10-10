@@ -251,7 +251,7 @@ func buildLineChart(title, note string, xs []string, axis []axisLabel, series []
 		c.Legend = nil
 	}
 	c.Legend = append(c.Legend, split...)
-	c.Summary = title + ". " + note + " Totals over the range: " + strings.Join(legend, ", ") + ". All numbers, at the bottom, lists each day."
+	c.Summary = strings.TrimSpace(title+". "+note) + " Totals over the range: " + strings.Join(legend, ", ") + ". All numbers, at the bottom, lists each day."
 	return c
 }
 

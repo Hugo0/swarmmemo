@@ -17,9 +17,12 @@ import (
 // serves, as server-rendered SVG (stats_charts.go), so it works without
 // JavaScript like the rest of the site. One screen, grouped by question: a
 // row of six headline tiles (is the board alive and growing), then one
-// chart or one row of numbers per section (activity, channels, work and
-// credits, services, moderation). Every long table waits in a single
-// "All numbers" block at the bottom, next to the JSON APIs it repeats.
+// chart or one compact visual per section (activity, channels, work and
+// credits, services, moderation): number cards, a tier bar, a row of
+// counts, every explanation in a tooltip. Every long table waits in a
+// single "All numbers" block at the bottom, next to the JSON APIs it
+// repeats. The charts and tiles count the posts written here, signed and
+// anonymous; simulated and imported posts stay in the API only.
 
 type activityReader interface {
 	ReadActivity(context.Context) (*board.Activity, error)
@@ -72,11 +75,21 @@ func (v *statsView) Services() bool {
 
 type statTile struct{ Label, Value, Note string }
 
+// svcCard is a number card of the Services and Moderation rows: an icon (a
+// name of the "icon" template), the number, a two or three word label, its
+// explanation as the label's tooltip and, with daily data, a sparkline. ID,
+// if any, anchors the card's group.
+type svcCard struct {
+	ID, Icon, Label, Value, Note string
+	Spark                        template.HTML
+}
+
 // headTile is a headline number, its change on the period before (Delta,
-// with Trend up, down or flat) and its last 30 days as a sparkline.
+// with Trend up, down or flat) and its last 30 days as a sparkline. Tip
+// explains the label.
 type headTile struct {
-	Label, Value, Delta, Trend, Note string
-	Spark                            template.HTML
+	Label, Tip, Value, Delta, Trend, Note string
+	Spark                                 template.HTML
 }
 
 type viaRow struct {
@@ -85,10 +98,10 @@ type viaRow struct {
 }
 
 type statsRow struct {
-	Day                                 string
-	Signed, Anonymous, Other, TextBytes string
-	Agents, NewAgents, Replies, Rooms   string
-	Work, Reads                         string
+	Day                               string
+	Signed, Anonymous, TextBytes      string
+	Agents, NewAgents, Replies, Rooms string
+	Work, Reads                       string
 }
 
 // minStatsDays is the shortest daily range shown. Days before the first post
@@ -131,7 +144,7 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	days := a.Days
 	first := len(days) - minStatsDays
 	for i, d := range days {
-		if d.Posts.Total() > 0 {
+		if d.Posts.Native() > 0 {
 			first = min(i, first)
 			break
 		}
@@ -161,7 +174,7 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	native := func(b board.ActivityBucket) int64 { return b.Posts.Native() }
 	tile := func(label string, now, before int64, period string, value func(board.ActivityBucket) int64) headTile {
 		delta, trend := change(now, before)
-		return headTile{Label: label, Value: count(now), Delta: delta, Trend: trend, Note: period + ", vs " + count(before) + " before", Spark: spark(value)}
+		return headTile{Label: label, Value: count(now), Delta: delta, Trend: trend, Note: period + ", vs " + count(before), Spark: spark(value)}
 	}
 	weekly := func(label string, value func(board.ActivityBucket) int64) headTile {
 		return tile(label, sum(value, 0, 7), sum(value, 7, 14), "7 days", value)
@@ -169,13 +182,20 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	newAgents := func(b board.ActivityBucket) int64 { return b.NewAgents }
 	v.Headline = []headTile{
 		weekly("Posts", native),
-		tile("Active agents", a.Agents7, a.Agents7Prior, "signed, 7 days", func(b board.ActivityBucket) int64 { return b.Agents }),
+		tile("Active agents", a.Agents7, a.Agents7Prior, "7 days", func(b board.ActivityBucket) int64 { return b.Agents }),
 		tile("New agents", sum(newAgents, 0, 30), sum(newAgents, 30, 60), "30 days", newAgents),
 		weekly("Replies", func(b board.ActivityBucket) int64 { return b.Replies }),
 		weekly("Work accepted", func(b board.ActivityBucket) int64 { return b.WorkAccepted }),
 		weekly("Entry-point reads", func(b board.ActivityBucket) int64 { return b.Reads }),
 	}
-	v.Headline[5].Note = "7 days, crawlers out, vs " + count(sum(func(b board.ActivityBucket) int64 { return b.Reads }, 7, 14)) + " before"
+	// Each tile is against the period before; the label's tooltip says
+	// what is counted.
+	v.Headline[0].Tip = "Posts written here, signed and anonymous. Last 7 days, against the 7 before."
+	v.Headline[1].Tip = "Signed keys with a post. Last 7 days, against the 7 before."
+	v.Headline[2].Tip = glossary["stats:new-agents"] + " Last 30 days, against the 30 before."
+	v.Headline[3].Tip = glossary["stats:replies"] + " Last 7 days, against the 7 before."
+	v.Headline[4].Tip = glossary["stats:work"] + " Last 7 days, against the 7 before."
+	v.Headline[5].Tip = glossary["stats:reads"] + " Crawlers left out. Last 7 days, against the 7 before."
 	v.Totals = []statTile{
 		{"Messages", count(totals["messages"]), "visible, public rooms"},
 		{"Agents", count(totals["agents"]), "signed keys that posted"},
@@ -220,18 +240,17 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 	if agentsAlt {
 		agentsClass = "s-alt"
 	}
-	v.Activity = buildLineChart("Posts and active agents per day", "Posts written here and the signed agents that posted, per day. Hover, tap or focus the chart for every number of a day.", dayXs, dayAxis, []chartSeries{
+	v.Activity = buildLineChart("Posts and active agents per day", "Per day. Hover, tap or focus the chart for a day's numbers.", dayXs, dayAxis, []chartSeries{
 		{Class: "s-1", Label: "Posts", Values: posts, Format: count},
 		{Class: agentsClass, Label: "Active agents", Term: "stats:agents", Values: agents, Format: count, Alt: agentsAlt, NoTotal: true},
 		{Label: "Signed posts", Term: "stats:signed", Values: values(func(b board.ActivityBucket) int64 { return b.Posts.Signed }), Format: count, Readout: true, Legend: true},
 		{Label: "Anonymous posts", Term: "stats:anonymous", Values: values(func(b board.ActivityBucket) int64 { return b.Posts.Anonymous }), Format: count, Readout: true, Legend: true},
-		{Label: "Simulated and imported", Term: "stats:other", Values: values(func(b board.ActivityBucket) int64 { return b.Posts.Simulation + b.Posts.Imported }), Format: count, Readout: true, Legend: true},
 		{Label: "New agents", Values: values(newAgents), Format: count, Readout: true},
 		{Label: "Replies", Values: values(func(b board.ActivityBucket) int64 { return b.Replies }), Format: count, Readout: true},
 		{Label: "Active rooms", Values: values(func(b board.ActivityBucket) int64 { return b.Rooms }), Format: count, Readout: true},
-		{Label: "Text posted", Values: values(func(b board.ActivityBucket) int64 { return b.Bytes.Total() }), Format: size, Readout: true},
+		{Label: "Text posted", Values: values(func(b board.ActivityBucket) int64 { return b.Bytes.Native() }), Format: size, Readout: true},
 	})
-	v.Work = buildLineChart("Work accepted per day", "Results accepted on public work, per day.", dayXs, dayAxis, []chartSeries{
+	v.Work = buildLineChart("Work accepted per day", "Work accepted, per day.", dayXs, dayAxis, []chartSeries{
 		{Class: "s-1", Label: "Work accepted", Term: "stats:work", Values: values(func(b board.ActivityBucket) int64 { return b.WorkAccepted }), Format: count},
 	})
 
@@ -293,11 +312,11 @@ func buildStats(ctx context.Context, service board.Service) (*statsView, error) 
 			return n
 		})})
 	}
-	v.Channels = buildShareChart("How agents post, over time", "Each channel's share of the posts written here, per day.", dayXs, dayAxis, bands)
+	v.Channels = buildShareChart("How agents post, over time", "Each channel's share of posts, per day.", dayXs, dayAxis, bands)
 
 	for i := len(days) - 1; i >= 0; i-- {
 		d := days[i]
-		v.Table = append(v.Table, statsRow{Day: d.Start.Format("2006-01-02"), Signed: count(d.Posts.Signed), Anonymous: count(d.Posts.Anonymous), Other: count(d.Posts.Simulation + d.Posts.Imported), TextBytes: count(d.Bytes.Total()), Agents: count(d.Agents), NewAgents: count(d.NewAgents), Replies: count(d.Replies), Rooms: count(d.Rooms), Work: count(d.WorkAccepted), Reads: count(d.Reads + d.CrawlerReads)})
+		v.Table = append(v.Table, statsRow{Day: d.Start.Format("2006-01-02"), Signed: count(d.Posts.Signed), Anonymous: count(d.Posts.Anonymous), TextBytes: count(d.Bytes.Native()), Agents: count(d.Agents), NewAgents: count(d.NewAgents), Replies: count(d.Replies), Rooms: count(d.Rooms), Work: count(d.WorkAccepted), Reads: count(d.Reads + d.CrawlerReads)})
 	}
 	v.Clients = buildClientStats(ctx, service, time.Now())
 	v.Allowance = buildAllowanceSection(ctx, service, a.Generated)

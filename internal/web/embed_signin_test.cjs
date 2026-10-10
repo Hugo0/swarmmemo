@@ -61,7 +61,7 @@ const {curator} = require('./home_density_test.cjs');
 
     // Sign in: the window opens on SwarmMemo with this room, this origin and a fresh worker key.
     const opened = page.waitForEvent('popup');
-    await page.getByRole('button', {name: 'Sign in', exact: true}).click();
+    await page.getByRole('button', {name: 'Sign up', exact: true}).click();
     const popup = await opened;
     await popup.waitForURL(url => url.pathname === '/connect/embed');
     const asked = new URL(popup.url());
@@ -122,7 +122,7 @@ const {curator} = require('./home_density_test.cjs');
     const revokeWindow = page.waitForEvent('popup');
     await page.getByRole('button', {name: 'Sign out of this site', exact: true}).click();
     const out = await revokeWindow;
-    await page.getByRole('button', {name: 'Sign in', exact: true}).waitFor();
+    await page.getByRole('button', {name: 'Sign up', exact: true}).waitFor();
     assert.equal(await page.evaluate(() => localStorage.getItem('swarmmemo.embed.grant.v1')), null, 'the worker key is forgotten');
     await out.waitForURL(url => url.searchParams.get('action') === 'signout');
     await out.locator('#connect-embed-allow:not([disabled])').waitFor();
@@ -144,6 +144,29 @@ const {curator} = require('./home_density_test.cjs');
     }
     assert.deepEqual(await context.cookies(), []);
     assert.deepEqual(errors, []);
+
+    // A reader with no SwarmMemo key signs up in one click: the window makes a
+    // key on SwarmMemo's origin and grants the site in the same step.
+    const freshContext = await browser.newContext({viewport: {width: 390, height: 844}});
+    const fresh = await freshContext.newPage();
+    const freshErrors = []; fresh.on('pageerror', error => freshErrors.push(error.message));
+    await fresh.goto(hostOrigin);
+    await fresh.locator('article').first().waitFor();
+    const signupWindow = fresh.waitForEvent('popup');
+    await fresh.getByRole('button', {name: 'Sign up', exact: true}).click();
+    const signup = await signupWindow;
+    await signup.getByRole('heading', {name: 'Sign up with SwarmMemo'}).waitFor();
+    assert.equal(await signup.locator('#connect-embed-new').isVisible(), true, 'the window says a free key is made, no email or password');
+    await signup.locator('#connect-embed-allow:not([disabled])').waitFor();
+    const signupClosed = signup.waitForEvent('close');
+    await signup.getByRole('button', {name: 'Sign up and comment', exact: true}).click();
+    await signupClosed;
+    await fresh.getByRole('status').filter({hasText: 'Signed in with SwarmMemo.'}).waitFor();
+    const made = await (await freshContext.newPage()).goto(origin + '/me').then(r => r.frame().evaluate(() => JSON.parse(localStorage.getItem('swarmmemo.identity.v1'))));
+    assert.match(made.fingerprint, /^[a-f0-9]{64}$/, 'the new key is kept on swarmmemo.com like Me keeps it');
+    assert.equal(await fresh.evaluate(() => localStorage.getItem('swarmmemo.identity.v1')), null, 'the new key never reaches the host origin');
+    assert.deepEqual(freshErrors, []);
+    await freshContext.close();
     await context.close();
     console.log('PASS: embed sign-in window (never framed, strict query), room-scoped 90-day grant posted to the host origin only, delegated comment, like, owner hide and restore on the public log, panel, sign out with revocation, Me lists the site, no cookies.');
   } finally { await browser.close(); await new Promise(done => host.close(done)); }

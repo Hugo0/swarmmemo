@@ -63,7 +63,8 @@ type Store struct {
 	config             Config
 	generation         string
 	cursorCipher       cipher.AEAD
-	topupKey           []byte // credit top-up quotes' HMAC key (topup.go)
+	topupKey           []byte        // credit top-up quotes' HMAC key (topup.go)
+	offerings          offeringState // agent offerings (offerings.go, RFC 0017)
 	cursorMu           sync.RWMutex
 	now                func() time.Time
 	privateSlots       chan struct{}
@@ -257,7 +258,11 @@ CREATE TABLE IF NOT EXISTS leases (
 //
 // 27: work_usdc, a work reward's USDC asset (workusdc.go, RFC 0016, C156).
 // Additive, but a schema-26 binary would neither owe nor settle USDC.
-const SchemaVersion = 27
+//
+// 28: offerings, offering_revisions and offering_calls, agents' priced
+// offerings over x402 (offerings.go, RFC 0017, C168). Additive, but a
+// schema-27 binary would neither lapse nor wipe a held authorization.
+const SchemaVersion = 28
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -401,6 +406,10 @@ func Open(path string, config Config) (*Store, error) {
 		return fail(err)
 	}
 	if err = s.openTopup(); err != nil {
+		return fail(err)
+	}
+	// RFC 0017: offering calls' sealing key and crash recovery (offerings.go).
+	if err = s.openOfferings(path); err != nil {
 		return fail(err)
 	}
 	secret := make([]byte, 32)
@@ -734,8 +743,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 			return empty, err
 		}
 	}
-	ctx = s.preflightSettle(ctx, cmd, a) // RFC 0016: the chain read, no transaction held
-	s.preflightScreen(ctx, a, cmd)       // RFC0013 §5.2: a protected reader's catch-up, no transaction held
+	ctx = s.preflightSettle(ctx, cmd, a)         // RFC 0016: the chain read, no transaction held
+	ctx = s.preflightOfferingScreen(ctx, cmd, a) // RFC 0017: a listing's screen, no transaction held
+	s.preflightScreen(ctx, a, cmd)               // RFC0013 §5.2: a protected reader's catch-up, no transaction held
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return empty, err
@@ -846,6 +856,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 				}
 				if cmd.Operation == "credits.topup" {
 					return s.topupRetry(ctx, tx, a, result)
+				}
+				if cmd.Operation == "offering.buy" || cmd.Operation == "offering.claim" {
+					return s.offeringRetry(ctx, tx, cmd, result, now)
 				}
 				return result, nil
 			}
@@ -1071,6 +1084,16 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.creditsTopup(ctx, tx, c, a, now)
 	case "credits.topups":
 		return s.readTopups(ctx, tx, c, a)
+	case "offering.publish", "offering.retire":
+		return s.changeOffering(ctx, tx, c, a, now)
+	case "offering.list", "offering.get":
+		return s.readOfferings(ctx, tx, c, a, now)
+	case "offering.buy":
+		return s.offeringBuy(ctx, tx, c, a, now)
+	case "offering.claim", "offering.decline":
+		return s.offeringDecide(ctx, tx, c, a, now)
+	case "offering.calls", "offering.call.get":
+		return s.readOfferingCalls(ctx, tx, c, a, now)
 	case "trust.get":
 		return s.readTrust(ctx, tx, c, a, now)
 	case "standing.ways":

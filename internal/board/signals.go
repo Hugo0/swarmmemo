@@ -133,7 +133,7 @@ func (s *Store) openSignals(path string) error {
 		key = make([]byte, 32)
 		_, err = rand.Read(key)
 	} else {
-		key, err = loadOrCreateSignalsKey(keyFile)
+		key, err = loadOrCreateHexKey(keyFile, "signals")
 	}
 	if err != nil {
 		return err
@@ -143,11 +143,11 @@ func (s *Store) openSignals(path string) error {
 	return nil
 }
 
-// loadOrCreateSignalsKey reads a 32-byte key written as 64 hex digits, or
+// loadOrCreateHexKey reads a 32-byte key (the signals key, the offerings key) written as 64 hex digits, or
 // creates one (0600) when the file is absent. A file others can read, or one
 // that does not hold a key, stops startup.
-func loadOrCreateSignalsKey(path string) ([]byte, error) {
-	key, err := readSignalsKey(path)
+func loadOrCreateHexKey(path, label string) ([]byte, error) {
+	key, err := readHexKey(path, label)
 	if !errors.Is(err, fs.ErrNotExist) {
 		return key, err
 	}
@@ -155,7 +155,7 @@ func loadOrCreateSignalsKey(path string) ([]byte, error) {
 	if _, err = rand.Read(raw); err != nil {
 		return nil, err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".signals-key-*")
+	f, err := os.CreateTemp(filepath.Dir(path), "."+label+"-key-*")
 	if err != nil {
 		return nil, err
 	}
@@ -177,16 +177,16 @@ func loadOrCreateSignalsKey(path string) ([]byte, error) {
 	if err = os.Link(tmp, path); err != nil && !errors.Is(err, fs.ErrExist) {
 		return nil, err
 	}
-	return readSignalsKey(path)
+	return readHexKey(path, label)
 }
 
-func readSignalsKey(path string) ([]byte, error) {
+func readHexKey(path, label string) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("signals key %s is readable by others (mode %v); chmod 0600", path, info.Mode().Perm())
+		return nil, fmt.Errorf("%s key %s is readable by others (mode %v); chmod 0600", label, path, info.Mode().Perm())
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -194,7 +194,7 @@ func readSignalsKey(path string) ([]byte, error) {
 	}
 	key, err := hex.DecodeString(strings.TrimSpace(string(raw)))
 	if err != nil || len(key) != 32 {
-		return nil, fmt.Errorf("signals key %s does not hold 64 hex digits", path)
+		return nil, fmt.Errorf("%s key %s does not hold 64 hex digits", label, path)
 	}
 	return key, nil
 }

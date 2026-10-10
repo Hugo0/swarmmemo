@@ -21,7 +21,7 @@ type moderationStatsReader interface {
 type moderationView struct {
 	Days     int
 	Policy   string
-	Tiles    []statTile
+	Cards    []svcCard
 	Rows     []moderationRow // one per surface, in name order
 	DaysRows []moderationRow // one per day, newest first
 }
@@ -61,14 +61,17 @@ func buildModerationStats(ctx context.Context, service board.Service) *moderatio
 		v.Rows = append(v.Rows, row(label, s.Counts))
 		all.Allow, all.Flag, all.Hold, all.Hide, all.Block = all.Allow+s.Allow, all.Flag+s.Flag, all.Hold+s.Hold, all.Hide+s.Hide, all.Block+s.Block
 	}
+	screened := make([]int64, len(st.Daily))
 	for i := len(st.Daily) - 1; i >= 0; i-- {
 		v.DaysRows = append(v.DaysRows, row(st.Daily[i].Day, st.Daily[i].Counts))
+		screened[i] = st.Daily[i].Counts.Total()
 	}
-	v.Tiles = []statTile{
-		{"Screened", count(all.Total()), "decisions"},
-		{"Hidden or blocked", count(all.Hide + all.Block), "with a public reason"},
-		{"Flagged or held", count(all.Flag + all.Hold), "for human review"},
-		{"Awaiting review", count(st.PendingReview), strconv.FormatInt(st.Reviewed, 10) + " reviewed in the range"},
+	period := "the last " + strconv.Itoa(st.Days) + " days"
+	v.Cards = []svcCard{
+		{Icon: "shield", Label: "Screened", Value: count(all.Total()), Note: "Screening decisions over " + period + ", policy " + v.Policy + ".", Spark: sparkline(screened)},
+		{Icon: "lock", Label: "Hidden or blocked", Value: count(all.Hide + all.Block), Note: "Only phishing, malware, slur harassment or extreme vulgarity, sexual content and doxxing are hidden, each with a public reason. Nothing is deleted."},
+		{Icon: "bell", Label: "Flagged or held", Value: count(all.Flag + all.Hold), Note: "Kept for a person to review."},
+		{Icon: "list", Label: "Awaiting review", Value: count(st.PendingReview), Note: strconv.FormatInt(st.Reviewed, 10) + " reviewed over " + period + "."},
 	}
 	return v
 }
@@ -82,7 +85,7 @@ type x402StatsReader interface {
 
 type x402View struct {
 	Days  int
-	Tiles []statTile
+	Cards []svcCard
 	Rows  []x402Row // one per day, newest first
 }
 
@@ -100,16 +103,18 @@ func buildX402Stats(ctx context.Context, service board.Service) *x402View {
 	usd := func(n int64) string { return "$" + services.FormatUnits(n, st.Decimals) }
 	v := &x402View{Days: len(st.Days)}
 	var paid, calls int64
+	daily := make([]int64, len(st.Days))
 	for i := len(st.Days) - 1; i >= 0; i-- {
 		d := st.Days[i]
 		paid, calls = paid+d.Paid, calls+d.Calls
+		daily[i] = d.Calls
 		v.Rows = append(v.Rows, x402Row{d.Day, usd(d.Paid), usd(d.AtRisk), count(d.Calls), count(d.Refused)})
 	}
 	today := st.Days[len(st.Days)-1]
-	v.Tiles = []statTile{
-		{"Paid today", usd(today.Paid), "of $" + st.GlobalDaily + " a day"},
-		{"Paid calls", count(calls), usd(paid)},
-		{"Resources", count(int64(st.Pinned + st.Open)), strconv.Itoa(st.Pinned) + " pinned, " + strconv.Itoa(st.Open) + " open"},
+	v.Cards = []svcCard{
+		{ID: "stats-x402", Icon: "send", Label: "Paid API calls", Value: count(calls), Note: "Pay-per-call APIs SwarmMemo paid for agents, charged to their credit: " + usd(paid) + " over " + periodWords(len(st.Days)) + ".", Spark: sparkline(daily)},
+		{Icon: "gauge", Label: "Paid today", Value: usd(today.Paid), Note: "Of $" + st.GlobalDaily + " a day."},
+		{Icon: "list", Label: "Paid APIs listed", Value: count(int64(st.Pinned + st.Open)), Note: strconv.Itoa(st.Pinned) + " pinned, " + strconv.Itoa(st.Open) + " open."},
 	}
 	return v
 }
@@ -123,7 +128,7 @@ type contentStatsReader interface {
 
 type contentView struct {
 	Days  int
-	Tiles []statTile
+	Cards []svcCard
 	Rows  []contentRow // one per day, newest first
 }
 
@@ -145,18 +150,22 @@ func buildContentStats(ctx context.Context, service board.Service) *contentView 
 	}
 	v := &contentView{Days: len(days)}
 	var t services.ContentDay
+	pastes, opens, docs, versions := make([]int64, len(days)), make([]int64, len(days)), make([]int64, len(days)), make([]int64, len(days))
 	for i := len(days) - 1; i >= 0; i-- {
 		d := days[i]
+		pastes[i], opens[i] = d.PastesPrivate+d.PastesUnlisted, d.PasteOpensSigned+d.PasteOpensAnonymous
+		docs[i], versions[i] = d.DocsOwn+d.DocsGroup, d.DocVersions
 		t.PastesPrivate, t.PastesUnlisted = t.PastesPrivate+d.PastesPrivate, t.PastesUnlisted+d.PastesUnlisted
 		t.PasteOpensSigned, t.PasteOpensAnonymous = t.PasteOpensSigned+d.PasteOpensSigned, t.PasteOpensAnonymous+d.PasteOpensAnonymous
 		t.DocsOwn, t.DocsGroup, t.DocVersions = t.DocsOwn+d.DocsOwn, t.DocsGroup+d.DocsGroup, t.DocVersions+d.DocVersions
 		v.Rows = append(v.Rows, contentRow{d.Day, count(d.PastesPrivate), count(d.PastesUnlisted), count(d.PasteOpensSigned), count(d.PasteOpensAnonymous), count(d.DocsOwn), count(d.DocsGroup), count(d.DocVersions)})
 	}
-	v.Tiles = []statTile{
-		{"Pastes created", count(t.PastesPrivate + t.PastesUnlisted), count(t.PastesUnlisted) + " unlisted, " + count(t.PastesPrivate) + " private"},
-		{"Opens", count(t.PasteOpensSigned + t.PasteOpensAnonymous), count(t.PasteOpensAnonymous) + " without a key"},
-		{"Docs created", count(t.DocsOwn + t.DocsGroup), count(t.DocsGroup) + " owned by a group"},
-		{"Doc versions", count(t.DocVersions), ""},
+	over := " Over " + periodWords(len(days)) + "."
+	v.Cards = []svcCard{
+		{ID: "stats-content", Icon: "code", Label: "Pastes", Value: count(t.PastesPrivate + t.PastesUnlisted), Note: count(t.PastesUnlisted) + " unlisted, " + count(t.PastesPrivate) + " private." + over, Spark: sparkline(pastes)},
+		{Icon: "download", Label: "Paste opens", Value: count(t.PasteOpensSigned + t.PasteOpensAnonymous), Note: count(t.PasteOpensAnonymous) + " without a key." + over, Spark: sparkline(opens)},
+		{Icon: "pencil", Label: "Shared docs", Value: count(t.DocsOwn + t.DocsGroup), Note: count(t.DocsGroup) + " owned by a group." + over, Spark: sparkline(docs)},
+		{Icon: "rotate", Label: "Doc versions", Value: count(t.DocVersions), Note: "First versions included." + over, Spark: sparkline(versions)},
 	}
 	return v
 }
@@ -171,7 +180,7 @@ type wakeStatsReader interface {
 type wakeView struct {
 	Days               int
 	Receivers, Wakeups bool
-	Tiles              []statTile
+	Cards              []svcCard
 	Rows               []wakeRow // one per day, newest first
 }
 
@@ -190,22 +199,30 @@ func buildWakeStats(ctx context.Context, service board.Service) *wakeView {
 	}
 	v := &wakeView{Days: len(st.Days), Receivers: st.Receivers, Wakeups: st.Wakeups}
 	var t services.WakeDay
+	n := len(st.Days)
+	created, delivered, scheduled, fired := make([]int64, n), make([]int64, n), make([]int64, n), make([]int64, n)
 	for i := len(st.Days) - 1; i >= 0; i-- {
 		d := st.Days[i]
+		created[i], delivered[i], fired[i] = d.ReceiversCreated, d.ReceiverDeliveries, d.WakeupsFired
+		scheduled[i] = d.WakeupsOneShot + d.WakeupsEvent + d.WakeupsRecurring
 		t.ReceiversCreated, t.ReceiverDeliveries = t.ReceiversCreated+d.ReceiversCreated, t.ReceiverDeliveries+d.ReceiverDeliveries
 		t.WakeupsOneShot, t.WakeupsEvent, t.WakeupsRecurring = t.WakeupsOneShot+d.WakeupsOneShot, t.WakeupsEvent+d.WakeupsEvent, t.WakeupsRecurring+d.WakeupsRecurring
 		t.WakeupsFired += d.WakeupsFired
 		v.Rows = append(v.Rows, wakeRow{d.Day, count(d.ReceiversCreated), count(d.ReceiverDeliveries), count(d.WakeupsOneShot), count(d.WakeupsEvent), count(d.WakeupsRecurring), count(d.WakeupsFired)})
 	}
+	over := " Over " + periodWords(n) + "."
 	if st.Receivers {
-		v.Tiles = append(v.Tiles,
-			statTile{"Receivers created", count(t.ReceiversCreated), ""},
-			statTile{"Deliveries", count(t.ReceiverDeliveries), ""})
+		v.Cards = append(v.Cards,
+			svcCard{Icon: "inbox", Label: "Receivers", Value: count(t.ReceiversCreated), Note: "Private drop boxes for callbacks, created." + over, Spark: sparkline(created)},
+			svcCard{Icon: "download", Label: "Deliveries", Value: count(t.ReceiverDeliveries), Note: "Callbacks stored in a receiver." + over, Spark: sparkline(delivered)})
 	}
 	if st.Wakeups {
-		v.Tiles = append(v.Tiles,
-			statTile{"Wake-ups scheduled", count(t.WakeupsOneShot + t.WakeupsEvent + t.WakeupsRecurring), count(t.WakeupsOneShot) + " one-shot, " + count(t.WakeupsEvent) + " on an event, " + count(t.WakeupsRecurring) + " recurring"},
-			statTile{"Wake-ups fired", count(t.WakeupsFired), ""})
+		v.Cards = append(v.Cards,
+			svcCard{Icon: "bell", Label: "Wake-ups set", Value: count(t.WakeupsOneShot + t.WakeupsEvent + t.WakeupsRecurring), Note: count(t.WakeupsOneShot) + " one-shot, " + count(t.WakeupsEvent) + " on an event, " + count(t.WakeupsRecurring) + " recurring." + over, Spark: sparkline(scheduled)},
+			svcCard{Icon: "rotate", Label: "Wake-ups fired", Value: count(t.WakeupsFired), Note: "Each period of a recurring one counted." + over, Spark: sparkline(fired)})
+	}
+	if len(v.Cards) > 0 {
+		v.Cards[0].ID = "stats-wake"
 	}
 	return v
 }
@@ -220,7 +237,7 @@ type inboxStatsReader interface {
 
 type inboxView struct {
 	Days  int
-	Tiles []statTile
+	Cards []svcCard
 }
 
 func buildInboxStats(ctx context.Context, service board.Service) *inboxView {
@@ -248,9 +265,18 @@ func buildInboxStats(ctx context.Context, service board.Service) *inboxView {
 	}
 	entries, kinds := list(board.InboxKinds, st.Entries)
 	done, states := list(board.InboxDispositions, st.Dispositions)
-	return &inboxView{Days: st.Days, Tiles: []statTile{
-		{"Inbox entries", count(entries), kinds},
-		{"Marked done", count(done), states},
-		{"Waiting for an answer", count(st.Waiting), ""},
+	over := " Over " + periodWords(st.Days) + "."
+	return &inboxView{Days: st.Days, Cards: []svcCard{
+		{ID: "stats-inbox", Icon: "inbox", Label: "Inbox entries", Value: count(entries), Note: capitalize(kinds) + "." + over},
+		{Icon: "send", Label: "Marked done", Value: count(done), Note: capitalize(states) + "." + over},
+		{Icon: "at", Label: "Awaiting answer", Value: count(st.Waiting), Note: "Inbox entries waiting for an answer."},
 	}}
+}
+
+// periodWords is a card tooltip's range: "today" or "the last N days".
+func periodWords(days int) string {
+	if days <= 1 {
+		return "today"
+	}
+	return "the last " + strconv.Itoa(days) + " days"
 }

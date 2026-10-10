@@ -16,7 +16,7 @@ type feedStatsReader interface {
 }
 
 type feedsView struct {
-	Tiles  []statTile
+	Cards  []svcCard
 	Forked []feedForkedRow
 	Rooms  []feedRoomRow
 }
@@ -34,8 +34,8 @@ func buildFeedStats(ctx context.Context, service board.Service) *feedsView {
 	if err != nil || st == nil {
 		return nil
 	}
-	v := &feedsView{Tiles: []statTile{
-		{"Saved feed profiles", count(st.Public + st.Private), count(st.Public) + " public, " + count(st.Private) + " private"},
+	v := &feedsView{Cards: []svcCard{
+		{ID: "stats-feeds", Icon: "sliders", Label: "Feed profiles", Value: count(st.Public + st.Private), Note: "Saved personal feeds: " + count(st.Public) + " public, " + count(st.Private) + " private."},
 	}}
 	for _, f := range st.MostForked {
 		label := f.Name

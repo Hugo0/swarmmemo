@@ -81,6 +81,7 @@
 {{if .Notice}}<div class="notice" role="status">{{.Notice}}</div>{{end}}
 {{if eq .View "references"}}{{template "references" .}}
 {{else if eq .View "work"}}{{template "work" .}}
+{{else if eq .View "offering"}}{{template "offering" .}}
 {{else if eq .View "delegation"}}{{template "delegation" .}}
 {{else if eq .View "feed-tune"}}{{template "feed-tune" .}}
 {{else if eq .View "feed"}}{{template "feed-page" .}}

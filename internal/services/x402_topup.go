@@ -62,6 +62,27 @@ const (
 	// topupValidBeforeMargin is how long an authorization must still be
 	// valid when it reaches us, so it cannot lapse while it settles.
 	topupValidBeforeMargin = 30
+	// X402ValidBeforeMargin is topupValidBeforeMargin for a caller that
+	// settles later (offerings): an authorization must still be valid this
+	// long when it is settled.
+	X402ValidBeforeMargin = topupValidBeforeMargin
+)
+
+// Agent offerings (RFC 0017): bounds of an offering's price and of its claim
+// window, which is its payment requirement's maxTimeoutSeconds.
+const (
+	// OfferingPriceFloor and OfferingPriceCeiling bound an offering's price
+	// in micro-USDC: 0.01 to 100 USDC, the operator's per-call cap, which
+	// the config's offerings.max_price may only lower.
+	OfferingPriceFloor   = 10_000
+	OfferingPriceCeiling = 100_000_000
+	// OfferingTimeoutFloor and OfferingTimeoutCeiling bound the claim window
+	// in seconds. The default facilitator (PayAI) documents no maximum
+	// maxTimeoutSeconds, so the ceiling is the RFC's 3600 unless the
+	// config's offerings.max_timeout_seconds names the facilitator's smaller
+	// one; a longer claim window is clamped to it.
+	OfferingTimeoutFloor   = 60
+	OfferingTimeoutCeiling = 3600
 )
 
 // TopupConfig is the loaded, validated top-up configuration
@@ -79,8 +100,12 @@ type TopupConfig struct {
 	// Min and Max bound one top-up; AccountDaily is what one account may
 	// top up per UTC day, BoardDaily what every account together may.
 	Min, Max, AccountDaily, BoardDaily int64
-	facilitatorToken       string
-	client                 *http.Client
+	// OfferingMaxPrice bounds one offering call's price (RFC 0017), in
+	// micro-USDC; OfferingMaxTimeout is the facilitator's largest
+	// maxTimeoutSeconds, to which a claim window is clamped.
+	OfferingMaxPrice, OfferingMaxTimeout int64
+	facilitatorToken                     string
+	client                               *http.Client
 }
 
 type topupConfigFile struct {
@@ -99,6 +124,12 @@ type topupConfigFile struct {
 		AccountDaily string `json:"account_daily"`
 		BoardDaily   string `json:"board_daily"`
 	} `json:"limits"`
+	// Offerings (RFC 0017), optional: the per-call cap and the
+	// facilitator's largest maxTimeoutSeconds.
+	Offerings struct {
+		MaxPrice          string      `json:"max_price"`
+		MaxTimeoutSeconds json.Number `json:"max_timeout_seconds"`
+	} `json:"offerings"`
 }
 
 // ErrTopupDisabled is LoadTopupConfig's answer for a config with "enabled"
@@ -192,6 +223,21 @@ func ParseTopupConfig(raw []byte, readKey func(string) ([]byte, error)) (*TopupC
 	if c.Min > c.Max || c.Max > c.AccountDaily || c.AccountDaily > c.BoardDaily {
 		return nil, errors.New("topup: limits must satisfy min <= max <= account_daily <= board_daily")
 	}
+	c.OfferingMaxPrice, c.OfferingMaxTimeout = OfferingPriceCeiling, OfferingTimeoutCeiling
+	if f.Offerings.MaxPrice != "" {
+		n, ok := parseUnits(f.Offerings.MaxPrice, 6)
+		if !ok || n < OfferingPriceFloor || n > OfferingPriceCeiling {
+			return nil, bad("offerings.max_price (a USDC amount from " + formatUnits(OfferingPriceFloor, 6) + " to " + formatUnits(OfferingPriceCeiling, 6) + ")")
+		}
+		c.OfferingMaxPrice = n
+	}
+	if f.Offerings.MaxTimeoutSeconds != "" {
+		n, err := strconv.ParseInt(f.Offerings.MaxTimeoutSeconds.String(), 10, 64)
+		if err != nil || n < OfferingTimeoutFloor || n > OfferingTimeoutCeiling {
+			return nil, bad(fmt.Sprintf("offerings.max_timeout_seconds (the facilitator's largest maxTimeoutSeconds, %d to %d)", OfferingTimeoutFloor, OfferingTimeoutCeiling))
+		}
+		c.OfferingMaxTimeout = n
+	}
 	return c, nil
 }
 
@@ -231,6 +277,24 @@ type TopupRequirement struct {
 	Expires int64
 }
 
+// X402Requirement is any payment requirement this server issues on the
+// configured network and asset: Amount atomic units to PayTo, good until
+// Expires, Quote binding it, MaxTimeout its maxTimeoutSeconds. A top-up's
+// pays the operator for TopupQuoteSeconds; an offering's (RFC 0017) pays
+// the provider's linked wallet within its claim window.
+type X402Requirement struct {
+	PayTo      EVMAddress
+	Amount     int64
+	Quote      string
+	Expires    int64
+	MaxTimeout int64
+}
+
+// topup is r as the general requirement: our receiving address.
+func (c *TopupConfig) topup(r TopupRequirement) X402Requirement {
+	return X402Requirement{PayTo: c.PayTo, Amount: r.Amount, Quote: r.Quote, Expires: r.Expires, MaxTimeout: TopupQuoteSeconds}
+}
+
 type topupExtraWire struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
@@ -248,14 +312,19 @@ type topupRequirementWire struct {
 }
 
 // wire is r as an x402 v2 PaymentRequirements object.
-func (c *TopupConfig) wire(r TopupRequirement) topupRequirementWire {
+func (c *TopupConfig) wire(r X402Requirement) topupRequirementWire {
 	return topupRequirementWire{Scheme: "exact", Network: c.Network, Amount: strconv.FormatInt(r.Amount, 10), Asset: c.Asset.String(),
-		PayTo: c.PayTo.String(), MaxTimeoutSeconds: TopupQuoteSeconds, Extra: topupExtraWire{Name: c.AssetName, Version: c.AssetVersion, Quote: r.Quote}}
+		PayTo: r.PayTo.String(), MaxTimeoutSeconds: r.MaxTimeout, Extra: topupExtraWire{Name: c.AssetName, Version: c.AssetVersion, Quote: r.Quote}}
 }
 
 // PaymentRequired is the x402 v2 PaymentRequired object for r, and its
 // base64 encoding for the PAYMENT-REQUIRED header.
 func (c *TopupConfig) PaymentRequired(r TopupRequirement, resourceURL, description string) (map[string]any, string) {
+	return c.PaymentRequiredFor(c.topup(r), resourceURL, description)
+}
+
+// PaymentRequiredFor is PaymentRequired for any requirement we issue.
+func (c *TopupConfig) PaymentRequiredFor(r X402Requirement, resourceURL, description string) (map[string]any, string) {
 	body := map[string]any{
 		"x402Version": 2,
 		"error":       "payment required",
@@ -405,6 +474,12 @@ func ParseTopupPayment(header string) (TopupPayment, error) {
 // The quote's binding to the account and its expiry are the caller's
 // (it holds the key); r carries what it verified.
 func (c *TopupConfig) Check(p TopupPayment, r TopupRequirement, now int64) error {
+	return c.CheckRequirement(p, c.topup(r), now)
+}
+
+// CheckRequirement is Check for any requirement we issue: r.PayTo is the
+// recipient the accepted requirement and the authorization must both name.
+func (c *TopupConfig) CheckRequirement(p TopupPayment, r X402Requirement, now int64) error {
 	mismatch := topupRefusal("payment_mismatch")
 	if p.Scheme != "exact" || p.Network != c.Network || p.Quote != r.Quote {
 		return mismatch
@@ -412,7 +487,7 @@ func (c *TopupConfig) Check(p TopupPayment, r TopupRequirement, now int64) error
 	if asset, ok := ParseEVMAddress(p.Asset); !ok || asset != c.Asset {
 		return mismatch
 	}
-	if payTo, ok := ParseEVMAddress(p.PayTo); !ok || payTo != c.PayTo || p.To != c.PayTo {
+	if payTo, ok := ParseEVMAddress(p.PayTo); !ok || r.PayTo == (EVMAddress{}) || payTo != r.PayTo || p.To != r.PayTo {
 		return mismatch
 	}
 	if (p.Name != "" && p.Name != c.AssetName) || (p.Version != "" && p.Version != c.AssetVersion) {
@@ -429,7 +504,7 @@ func (c *TopupConfig) Check(p TopupPayment, r TopupRequirement, now int64) error
 
 // facilitatorBody is the /verify and /settle request: our own requirement,
 // never the payer's echo of it, and the payload rebuilt from what we parsed.
-func (c *TopupConfig) facilitatorBody(p TopupPayment, r TopupRequirement) ([]byte, error) {
+func (c *TopupConfig) facilitatorBody(p TopupPayment, r X402Requirement) ([]byte, error) {
 	req := c.wire(r)
 	payload := map[string]any{
 		"x402Version": 2,
@@ -457,25 +532,47 @@ type TopupSettlement struct {
 // the outcome is unknown (the facilitator was asked to settle and gave no
 // usable answer), and no credit may follow until the operator resolves it.
 func (c *TopupConfig) Settle(ctx context.Context, dial func(ctx context.Context, network, addr string) (net.Conn, error), p TopupPayment, r TopupRequirement) (TopupSettlement, error) {
+	req := c.topup(r)
+	if err := c.Verify(ctx, dial, p, req); err != nil {
+		return TopupSettlement{}, err
+	}
+	return c.SettleVerified(ctx, dial, p, req)
+}
+
+// Verify has the facilitator verify p against r (POST /verify) and nothing
+// more: no money moves. Every refusal is a Definite *TopupError; Reason
+// TopupFacilitatorUnavailable says it could not be verified, so the same
+// payment may be presented again.
+func (c *TopupConfig) Verify(ctx context.Context, dial func(ctx context.Context, network, addr string) (net.Conn, error), p TopupPayment, r X402Requirement) error {
 	body, err := c.facilitatorBody(p, r)
 	if err != nil {
-		return TopupSettlement{}, &TopupError{Code: "payment_unsettled", Reason: "encode", Definite: true}
+		return &TopupError{Code: "payment_unsettled", Reason: "encode", Definite: true}
 	}
-	client := c.httpClient(dial)
 	var v struct {
 		IsValid       *bool  `json:"isValid"`
 		InvalidReason string `json:"invalidReason"`
 		Payer         string `json:"payer"`
 	}
-	status, err := c.post(ctx, client, "/verify", body, &v)
+	status, err := c.post(ctx, c.httpClient(dial), "/verify", body, &v)
 	switch {
 	case err != nil || status >= 500 || v.IsValid == nil:
 		// Verifying moves nothing: the payer may present it again.
-		return TopupSettlement{}, &TopupError{Code: "payment_unsettled", Reason: TopupFacilitatorUnavailable, Definite: true}
+		return &TopupError{Code: "payment_unsettled", Reason: TopupFacilitatorUnavailable, Definite: true}
 	case !*v.IsValid:
-		return TopupSettlement{}, &TopupError{Code: "payment_rejected", Reason: sanitizeReason(v.InvalidReason), Definite: true}
+		return &TopupError{Code: "payment_rejected", Reason: sanitizeReason(v.InvalidReason), Definite: true}
 	case v.Payer != "" && !samePayer(v.Payer, p.From):
-		return TopupSettlement{}, &TopupError{Code: "payment_rejected", Reason: "payer_mismatch", Definite: true}
+		return &TopupError{Code: "payment_rejected", Reason: "payer_mismatch", Definite: true}
+	}
+	return nil
+}
+
+// SettleVerified has the facilitator settle p against r (POST /settle),
+// which broadcasts the transfer; call it for a payment Verify accepted.
+// Errors are Settle's.
+func (c *TopupConfig) SettleVerified(ctx context.Context, dial func(ctx context.Context, network, addr string) (net.Conn, error), p TopupPayment, r X402Requirement) (TopupSettlement, error) {
+	body, err := c.facilitatorBody(p, r)
+	if err != nil {
+		return TopupSettlement{}, &TopupError{Code: "payment_unsettled", Reason: "encode", Definite: true}
 	}
 	var s struct {
 		Success     *bool  `json:"success"`
@@ -484,7 +581,7 @@ func (c *TopupConfig) Settle(ctx context.Context, dial func(ctx context.Context,
 		Network     string `json:"network"`
 		Payer       string `json:"payer"`
 	}
-	status, err = c.post(ctx, client, "/settle", body, &s)
+	status, err := c.post(ctx, c.httpClient(dial), "/settle", body, &s)
 	switch {
 	case err != nil || status >= 500 || s.Success == nil:
 		return TopupSettlement{}, &TopupError{Code: "payment_unsettled", Reason: "settle_unknown"}

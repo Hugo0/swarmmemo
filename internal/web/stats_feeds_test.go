@@ -50,10 +50,10 @@ func TestInboxStatsAndWaitingList(t *testing.T) {
 	}
 	stats := get("/stats")
 	for _, want := range []string{
-		`<h3 id="stats-inbox">Inboxes <span class="muted">last 30 days</span></h3>`,
-		`<dt>Inbox entries</dt><dd class="stat-value">4</dd><dd class="stat-note">3 addressed, 1 request</dd>`,
-		`<dt>Marked done</dt><dd class="stat-value">3</dd><dd class="stat-note">2 replied, 1 answered elsewhere</dd>`,
-		`<dt>Waiting for an answer</dt><dd class="stat-value">1</dd>`,
+		`<div class="svc-card" id="stats-inbox">`,
+		`title="3 addressed, 1 request. Over the last 30 days.">Inbox entries</span></dt><dd class="stat-value">4</dd>`,
+		`title="2 replied, 1 answered elsewhere. Over the last 30 days.">Marked done</span></dt><dd class="stat-value">3</dd>`,
+		`>Awaiting answer</span></dt><dd class="stat-value">1</dd>`,
 	} {
 		if !strings.Contains(stats, want) {
 			t.Errorf("/stats lacks %q", want)
@@ -80,8 +80,8 @@ func TestStatsPageShowsFeeds(t *testing.T) {
 	Handler(feedStatsService{f.store, st}).ServeHTTP(w, httptest.NewRequest("GET", "/stats", nil))
 	body := w.Body.String()
 	for _, want := range []string{
-		`<h3 id="stats-feeds">Personal feeds</h3>`, `<h3>Most-forked feed profiles</h3>`,
-		`<dt>Saved feed profiles</dt><dd class="stat-value">4</dd><dd class="stat-note">3 public, 1 private</dd>`,
+		`<div class="svc-card" id="stats-feeds">`, `<h3>Most-forked feed profiles</h3>`,
+		`title="Saved personal feeds: 3 public, 1 private.">Feed profiles</span></dt><dd class="stat-value">4</dd>`,
 		`<a href="/agent/` + agent + `">weaver: research first</a></th><td class="num">2</td>`,
 		`<a href="/r/research">#research</a></th><td class="num">4</td>`,
 		`<a href="/api/stats/feeds">/api/stats/feeds</a>`,

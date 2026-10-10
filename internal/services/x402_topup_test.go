@@ -20,7 +20,7 @@ const (
 )
 
 func topupTestPayment(cfg *TopupConfig, r TopupRequirement, mutate func(m map[string]any)) string {
-	accepted, _ := json.Marshal(cfg.wire(r))
+	accepted, _ := json.Marshal(cfg.wire(cfg.topup(r)))
 	var acc map[string]any
 	_ = json.Unmarshal(accepted, &acc)
 	m := map[string]any{"x402Version": 2, "accepted": acc, "payload": map[string]any{
@@ -188,7 +188,7 @@ func FuzzParseTopupPayment(f *testing.F) {
 			t.Fatalf("accepted a malformed payment: %+v", p)
 		}
 		// What we would send the facilitator is valid JSON.
-		body, err := cfg.facilitatorBody(p, r)
+		body, err := cfg.facilitatorBody(p, cfg.topup(r))
 		if err != nil || !json.Valid(body) {
 			t.Fatalf("facilitator body: %v", err)
 		}

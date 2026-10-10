@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"html/template"
 	"math"
 	"sort"
 	"strconv"
@@ -553,6 +555,8 @@ type waterfallView struct {
 	Sentence  string
 	Shadow    bool
 	Resources []resourceView
+	// Legend names the tiers the bars draw, each with its band's key.
+	Legend    []chartKey
 	Transfers []cell
 	Services  []serviceRow
 	Levers    []LeverState
@@ -563,6 +567,11 @@ type resourceView struct {
 	Title, Day string
 	Summary    []cell
 	Tiers      []tierRow
+	// Bar is today's pool split by tier (tierBar), BarTip the same in
+	// words for its tooltip; Spent and Budget the two numbers beside it.
+	Bar           template.HTML
+	BarTip        string
+	Spent, Budget cell
 }
 
 type tierRow struct {
@@ -627,6 +636,8 @@ func allowanceSectionFrom(stats *AllowanceStats) *allowanceSection {
 				{Label: "Spent", Note: "used by writes today", Key: p + "spent", Value: r.Spent, Text: units(r.Resource, r.Spent)},
 				{Label: "Not shared out", Note: "left over after every tier", Key: p + "unallocated", Value: r.Unallocated, Text: units(r.Resource, r.Unallocated)},
 			}
+			rv.Spent, rv.Budget = rv.Summary[2], rv.Summary[0]
+			rv.Bar, rv.BarTip = tierBar(r)
 			for j, t := range r.Tiers {
 				q := p + "tiers." + strconv.Itoa(j) + "."
 				row := tierRow{Name: capitalize(t.Name), Fill: float64(t.FillPPM) / 10_000}
@@ -643,6 +654,20 @@ func allowanceSectionFrom(stats *AllowanceStats) *allowanceSection {
 				rv.Tiers = append(rv.Tiers, row)
 			}
 			v.Resources = append(v.Resources, rv)
+		}
+		drawn := map[int]bool{}
+		for _, r := range w.Resources {
+			for _, t := range r.Tiers {
+				if t.Water > 0 {
+					drawn[t.Tier] = true
+				}
+			}
+		}
+		for tier := 0; tier <= 4; tier++ {
+			if drawn[tier] {
+				cls := tierClass(tier)
+				v.Legend = append(v.Legend, chartKey{Class: cls, Label: capitalize(TierName(tier)), Term: "tier", Area: true, Key: keySVG(cls, true)})
+			}
 		}
 		tr := w.Transfers
 		v.Transfers = []cell{
@@ -692,6 +717,50 @@ func allowanceSectionFrom(stats *AllowanceStats) *allowanceSection {
 		s.Trust = v
 	}
 	return s
+}
+
+// tierClass is the band class of a tier in the allowance bar.
+func tierClass(tier int) string { return "b-" + strconv.Itoa(min(max(tier, 0), 4)+1) }
+
+// tierBar draws one resource's pool today as a horizontal stack: each tier's
+// water (its pool after spill) as a band, by the tier's lightness, and under
+// it a thin ink line for the part drawn. What no tier holds is the empty
+// track at the right. Like the charts it carries its own size and fills, so
+// it draws without the stylesheet; tip says the same in words.
+func tierBar(r ResourceDay) (template.HTML, string) {
+	total := r.Budget
+	var water int64
+	for _, t := range r.Tiers {
+		water += t.Water
+	}
+	total = max(total, water, 1)
+	var b strings.Builder
+	b.WriteString(`<svg class="tier-bar" width="100%" height="14" viewBox="0 0 1000 14" preserveAspectRatio="none" aria-hidden="true" focusable="false">`)
+	b.WriteString(`<rect class="track" x="0" y="0" width="1000" height="10" fill="currentColor" fill-opacity=".06"/>`)
+	parts := []string{}
+	x := 0.0
+	for _, t := range r.Tiers {
+		if t.Water <= 0 {
+			continue
+		}
+		w := float64(t.Water) * 1000 / float64(total)
+		cls := tierClass(t.Tier)
+		fmt.Fprintf(&b, `<rect class="band %s" x="%s" y="0" width="%s" height="10" fill="currentColor" fill-opacity="%s" vector-effect="non-scaling-stroke"/>`, cls, num(x), num(w), bandOpacity(cls))
+		if t.FillPPM > 0 {
+			fmt.Fprintf(&b, `<rect class="drawn" x="%s" y="11.5" width="%s" height="2.5" fill="currentColor"/>`, num(x), num(max(w*float64(t.FillPPM)/1_000_000, 2)))
+		}
+		parts = append(parts, capitalize(TierName(t.Tier))+" "+units(r.Resource, t.Water)+", "+ppmPercent(t.FillPPM)+" drawn")
+		x += w
+	}
+	b.WriteString(`</svg>`)
+	if r.Unallocated > 0 {
+		parts = append(parts, "not shared out "+units(r.Resource, r.Unallocated))
+	}
+	tip := resourceLabel(r.Resource) + " today, by tier: " + strings.Join(parts, " · ") + "."
+	if len(parts) == 0 {
+		tip = resourceLabel(r.Resource) + " today: nothing shared out yet."
+	}
+	return template.HTML(b.String()), tip
 }
 
 func binLabel(b TrustBin) string {

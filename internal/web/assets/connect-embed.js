@@ -45,17 +45,45 @@
     return key;
   }
 
+  // The key format and slots app.js uses: the active key and the list of keys
+  // kept in this browser, both read back to be sure they were stored.
+  async function createKey() {
+    const pair = await crypto.subtle.generateKey({name: 'Ed25519'}, true, ['sign', 'verify']);
+    const raw = await crypto.subtle.exportKey('raw', pair.publicKey);
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
+    const made = {version: 1, service, public_key: b64(raw), private_key: b64(pkcs8.slice(-32)), fingerprint: hex(await crypto.subtle.digest('SHA-256', raw)), handle: ''};
+    const encoded = JSON.stringify(made);
+    let list = [];
+    try { const parsed = JSON.parse(localStorage.getItem('swarmmemo.identities.v1') || '[]'); if (Array.isArray(parsed)) list = parsed; } catch (_) { list = []; }
+    list.push(made);
+    try {
+      localStorage.setItem('swarmmemo.identities.v1', JSON.stringify(list));
+      localStorage.setItem('swarmmemo.identity.v1', encoded);
+      if (localStorage.getItem('swarmmemo.identity.v1') !== encoded) throw Error('readback');
+    } catch (_) { throw Error('This browser would not store a key for swarmmemo.com (private window or blocked storage). Nothing was signed.'); }
+    return made;
+  }
+
   async function main() {
     if (!window.isSecureContext || !crypto?.subtle) throw Error('Signing needs HTTPS and a browser with Ed25519 support.');
-    const key = storedKey();
-    if (!key) {
-      const me = document.createElement('a'); me.href = '/me'; me.textContent = 'Open Me on SwarmMemo';
-      line.replaceChildren('No SwarmMemo key in this browser yet. ', me, ' to create or restore one, then sign in again.');
-      return;
+    let key = storedKey();
+    // No key in this browser yet: sign-up is one click. Allow then makes a free
+    // key here (no email, no password), keeps it like Me does, and grants the
+    // site in the same step; Me can back it up or name it later.
+    const fresh = !key;
+    if (fresh && signout) { say('No SwarmMemo key in this browser, so there is nothing to sign out of.'); return; }
+    let handle = '';
+    if (fresh) {
+      document.title = 'Sign up with SwarmMemo';
+      $('connect-embed-title').textContent = 'Sign up with SwarmMemo';
+      $('connect-embed-handle').textContent = 'you';
+      allow.textContent = 'Sign up and comment';
+      $('connect-embed-new').hidden = false;
+    } else {
+      handle = key.handle || '';
+      try { handle = (await getJSON('/api/agent/' + key.fingerprint)).agent?.handle || handle; } catch (_) { /* An unregistered key has no profile yet. */ }
+      $('connect-embed-handle').textContent = handle || key.fingerprint.slice(0, 12);
     }
-    let handle = key.handle || '';
-    try { handle = (await getJSON('/api/agent/' + key.fingerprint)).agent?.handle || handle; } catch (_) { /* An unregistered key has no profile yet. */ }
-    $('connect-embed-handle').textContent = handle || key.fingerprint.slice(0, 12);
     const child = hex(await crypto.subtle.digest('SHA-256', unb64(pub)));
 
     if (signout) {
@@ -84,7 +112,7 @@
     if (info.room?.visibility !== 'public') throw Error('#' + room + ' is not a public room. Sites can sign in only to public rooms.');
     if (!/^[a-f0-9]{32}$/.test(list.generation || '')) throw Error('SwarmMemo could not confirm the room. Try again.');
     // Hide and restore only when this key owns or moderates the room now.
-    const moderator = info.room.owner_agent === key.fingerprint || (info.room.moderators || []).includes(key.fingerprint);
+    const moderator = !fresh && (info.room.owner_agent === key.fingerprint || (info.room.moderators || []).includes(key.fingerprint));
     $('connect-embed-moderate').hidden = !moderator;
     const operations = ['post', 'vote', 'messages.list', 'message.get', 'thread.get', 'room.get', ...(moderator ? ['room.hide', 'room.restore'] : [])];
     // The opener proves its origin: only a window at that origin can answer
@@ -96,11 +124,12 @@
     say('Waiting for ' + origin + '…');
     tell({type: 'swarmmemo-connect-ready'});
     allow.onclick = async () => {
-      allow.disabled = true; say('Signing…');
+      allow.disabled = true; say(fresh ? 'Creating your key…' : 'Signing…');
       try {
+        if (fresh && !key) key = await createKey();
         const command = await signed({operation: 'delegation.create', room, target: pub, ttl, amount, data: JSON.stringify({schema: 1, generation: list.generation, operations, disclosure: 'public', origin}), request_id: uuid()}, key);
         tell({type: 'swarmmemo-connect-grant', command, handle, agent: key.fingerprint});
-        say('Signed in. You can close this window.'); setTimeout(() => window.close(), 800);
+        say(fresh ? 'Signed up. You can close this window; Me on SwarmMemo keeps your key and its backup.' : 'Signed in. You can close this window.'); setTimeout(() => window.close(), 800);
       } catch (error) { say(error.message, true); allow.disabled = false; }
     };
   }

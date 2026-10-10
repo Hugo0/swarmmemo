@@ -350,6 +350,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mcp(w, r)
 		return
 	}
+	if s.offeringRoute(w, r) { // offerings.go: /@HANDLE/NAME (RFC 0017)
+		return
+	}
 	if guessedWriteRoute(w, r) {
 		return
 	}
@@ -412,6 +415,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
 		s.callRoute(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, DocRawPathPrefix) {
+		s.docRaw(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/a/") {
@@ -531,7 +538,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command
 		}
 	}
 	res, err := s.service.Execute(r.Context(), c, s.peer(r))
-	if c.Operation == "credits.topup" {
+	if c.Operation == "credits.topup" || c.Operation == "offering.buy" {
 		x402Headers(w, res, err)
 	}
 	if err != nil {
@@ -706,7 +713,7 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A credit top-up's x402 payment (board/topup.go) travels in a header,
-	// as x402 clients send it; only credits.topup reads it.
+	// as x402 clients send it; only credits.topup and offering.buy read it.
 	if payment, err := paymentHeader(r); err != nil {
 		writeError(w, err)
 		return

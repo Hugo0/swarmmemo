@@ -252,9 +252,11 @@ func TestAllowanceStatsPageMatchesAPI(t *testing.T) {
 	api := getJSON(t, s, "GET", "/api/stats/allowance", "")
 	data := api["data"]
 	page := getHTML(t, s, "/stats")
-	// Today's numbers sit in Work and credits, the tier, service, history and
-	// trust tables in All numbers; each part holds every cell to the API, in
-	// the API's order, and together they cover the page's cells.
+	// Today's numbers sit in Work and credits (each resource's spent and
+	// budget beside its tier bar, the transfers, accounts per tier), the
+	// tier, service, history and trust tables in All numbers; each part
+	// holds every cell to the API, in the API's order, and together they
+	// cover the page's cells.
 	start, all := strings.Index(page, `id="stats-allowance"`), strings.Index(page, `id="all-allowance"`)
 	if start < 0 || all < start {
 		t.Fatal("/stats has no allowance section with the ledger on")
@@ -262,8 +264,8 @@ func TestAllowanceStatsPageMatchesAPI(t *testing.T) {
 	today, tables := pageCells(t, page[start:all]), pageCells(t, page[all:])
 	holdToAPI(t, "/stats", today, data)
 	holdToAPI(t, "/stats All numbers", tables, data)
-	if n := len(pageCells(t, page)); n != len(today)+len(tables) || len(today) != 2*4+4 {
-		t.Fatalf("/stats shows %d API cells, %d of them today's (want 12) and %d in All numbers", n, len(today), len(tables))
+	if n := len(pageCells(t, page)); n != len(today)+len(tables) || len(today) != 2*2+2+3 {
+		t.Fatalf("/stats shows %d API cells, %d of them today's (want 9) and %d in All numbers", n, len(today), len(tables))
 	}
 	// The one sentence, the tiers in order, and the numbers the API derives.
 	for _, want := range []string{web.WaterfallSentence, "Trusted", "Anonymous", "tier4-shrink", "Trust estimates", "under 10", "/api/stats/allowance"} {
@@ -307,7 +309,13 @@ func TestAllowanceStatsTrustOnly(t *testing.T) {
 	if strings.Contains(page, `id="stats-allowance"`) || !strings.Contains(page, `id="stats-trust"`) {
 		t.Fatal("trust-only /stats shows the wrong sections")
 	}
-	holdToAPI(t, "/stats", pageCells(t, page), api["data"])
+	// Accounts per tier in Work and credits, the trust tables in All numbers.
+	all := strings.Index(page, `id="stats-trust"`)
+	if !strings.Contains(page[:all], `id="stats-standing"`) {
+		t.Fatal("trust-only /stats lacks the accounts per tier row")
+	}
+	holdToAPI(t, "/stats", pageCells(t, page[:all]), api["data"])
+	holdToAPI(t, "/stats All numbers", pageCells(t, page[all:]), api["data"])
 }
 
 // Agent pages: allowance at a glance and trust parts, against allowance.get
