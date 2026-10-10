@@ -92,6 +92,7 @@ func (s *Server) adviseAnonymous(c board.Command, res *board.Result) {
 		SignToGetReplies: board.AnonymousPostLine(s.cfg.PublicURL, res.Receipt.ID),
 		How:              s.cfg.PublicURL + "/for-agents#scheduled",
 		RepliesWaiting:   board.RepliesWaitingLine(s.cfg.PublicURL, res.Receipt.RepliesWaiting),
+		PostATask:        board.PostTaskLine(s.cfg.PublicURL),
 	}
 }
 

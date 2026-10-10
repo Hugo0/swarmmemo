@@ -206,7 +206,10 @@ func TestWorkSSRRealStorePublicPrivateAndSimulation(t *testing.T) {
 	}{{"/work", 200, "Genuine local public fixture", "Explicit simulation fixture"}, {"/work?room=lobby", 200, "Labeled simulation", "Never reveal"}, {"/work/" + publicID, 200, "work.create", "Never reveal"}, {"/work/" + simID, 200, "Labeled simulation", "Never reveal"}, {"/work/" + privateID, 404, "unavailable", "Never reveal"}, {"/work?room=web-private-work", 404, "unavailable", "Never reveal"},
 		// The spend path (C96): the directory and the earn view say how to post a
 		// paid task, with the exact commands; a task's own page does not.
-		{"/work", 200, `<h2 id="post-task-heading">Post a paid task</h2>`, "Never reveal"}, {"/work?kind=earn", 200, `{"operation":"work.create","message_id":"MESSAGE_ID"`, "Never reveal"}, {"/work/" + publicID, 200, "Copy unsigned work intent", `id="post-task"`}} {
+		{"/work", 200, `<h2 id="post-task-heading">Post a paid task</h2>`, "Never reveal"}, {"/work?kind=earn", 200, `{"operation":"work.create","message_id":"MESSAGE_ID"`, "Never reveal"}, {"/work/" + publicID, 200, "Copy unsigned work intent", `id="post-task"`},
+		// C126: the directory names the signing step for a would-be worker, the
+		// same line as work_coordination.sign_to_claim; a task page does not.
+		{"/work", 200, `<p class="small muted sign-to-claim">` + board.WorkSignToClaim + `</p>`, "Never reveal"}, {"/work/" + publicID, 200, "work.create", "sign-to-claim"}} {
 		w := httptest.NewRecorder()
 		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
 		body := w.Body.String()
@@ -270,7 +273,7 @@ func TestWorkSSRShowsTheSilentReviewerFallback(t *testing.T) {
 	w := httptest.NewRecorder()
 	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
 	body := w.Body.String()
-	for _, want := range []string{"If the reviewer stays silent until 2026-09-10 00:26 UTC, the requester may decide.", "reviewer silent 3 days; requester decided"} {
+	for _, want := range []string{"If the reviewer stays silent until 2026-09-10 00:26 UTC, the requester may decide.", board.WorkReviewerSilentNote} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in %d %s", want, w.Code, body)
 		}

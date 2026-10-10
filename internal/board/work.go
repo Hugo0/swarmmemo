@@ -81,8 +81,8 @@ type Work struct {
 	ReviewerFee *WorkReward `json:"reviewer_fee,omitempty"`
 	// RequesterMayDecideAt is when, on a submitted result its reviewer has
 	// left undecided, the requester may accept or reject in the reviewer's
-	// place: ReviewerSilenceDays after the submit. Set only while submitted
-	// and only when that comes before the deadline.
+	// place: the reviewer grace (REVIEWER_GRACE) after the submit. Set only
+	// while submitted and only when that comes before the deadline.
 	RequesterMayDecideAt int64 `json:"requester_may_decide_at,omitempty"`
 	// Eligibility is who may claim the work: open (anyone), or one of the
 	// rules in WorkEligibilities, checked on work.claim.
@@ -183,8 +183,10 @@ type WorkTransition struct {
 	// as the board recorded it, for the current attempt.
 	ResultSHA256       string `json:"result_sha256,omitempty"`
 	ResultSHA256Signed bool   `json:"result_sha256_signed,omitempty"`
-	// Note marks a verdict the requester gave in a silent reviewer's place.
-	Note string `json:"note,omitempty"`
+	// Note and Fallback mark a verdict the requester gave in a silent
+	// reviewer's place: Fallback is reviewer_silent, Note says it in words.
+	Note     string `json:"note,omitempty"`
+	Fallback string `json:"fallback,omitempty"`
 	// Reviewer and PreviousReviewer are, on a work.reviewer.set, the
 	// fingerprints of the reviewer it named and of the one it replaced
 	// (empty when the work had none), both as the signed commands named them.
@@ -206,31 +208,56 @@ type WorkVerdictChecks struct {
 	Checks    []VerdictCheck `json:"checks"`
 }
 
-// ReviewerSilenceDays is how long a named reviewer may leave a submitted
-// result undecided before the requester may decide in its place (still
-// before the deadline). The reviewer can decide until the requester does.
-const ReviewerSilenceDays = 3
+// ReviewerGraceDefault is how long, by default, a named reviewer may leave
+// a submitted result undecided before the requester may decide in its place
+// (still before the deadline): 72 hours. The server's REVIEWER_GRACE
+// (Config.ReviewerGraceSeconds) sets it; /capabilities shows the one in force.
+// The reviewer can decide until the requester does.
+const ReviewerGraceDefault int64 = 72 * 3600
+
+// ReviewerGraceMin and ReviewerGraceMax bound REVIEWER_GRACE: an hour to the
+// longest work TTL.
+const (
+	ReviewerGraceMin int64 = 3600
+	ReviewerGraceMax int64 = WorkMaxTTL
+)
 
 // WorkReviewerSet is the requester's command that names a new reviewer for
 // its work while the work is open or claimed (no result waiting for a
 // verdict). A held reviewer_fee stays held and goes to whoever reviews.
 const WorkReviewerSet = "work.reviewer.set"
 
-// reviewerSilence is ReviewerSilenceDays in seconds.
-const reviewerSilence = ReviewerSilenceDays * 86400
+// WorkFallbackReviewerSilent is work.history's fallback on a verdict the
+// requester gave in a silent reviewer's place; WorkReviewerSilentNote is its
+// note in words. The reviewer_fee is released with the same reason.
+const (
+	WorkFallbackReviewerSilent = "reviewer_silent"
+	WorkReviewerSilentNote     = "reviewer silent past the grace; requester decided"
+)
 
-// WorkReviewerSilentNote is the history note on a requester's fallback verdict.
-var WorkReviewerSilentNote = fmt.Sprintf("reviewer silent %d days; requester decided", ReviewerSilenceDays)
+// ReviewerGrace is the reviewer grace in force, in seconds.
+func (s *Store) ReviewerGrace() int64 { return s.config.ReviewerGraceSeconds }
+
+// reviewerGraceText is a grace in words, in hours: "72 hours".
+func reviewerGraceText(grace int64) string {
+	if grace == 3600 {
+		return "1 hour"
+	}
+	if grace%3600 == 0 {
+		return fmt.Sprintf("%d hours", grace/3600)
+	}
+	return fmt.Sprintf("%d minutes", grace/60)
+}
 
 // requesterMayDecideAt is when the requester of submitted work with a
 // reviewer may decide in its place, or 0 when the deadline comes first.
 // While the stored state is submitted, updated_at is the submit's time:
 // no transition but a verdict changes a submitted work's row.
-func requesterMayDecideAt(w workRow) int64 {
-	if w.Reviewer == "" || w.State != "submitted" || w.Updated+reviewerSilence >= w.Deadline {
+func requesterMayDecideAt(w workRow, grace int64) int64 {
+	if w.Reviewer == "" || w.State != "submitted" || w.Updated+grace >= w.Deadline {
 		return 0
 	}
-	return w.Updated + reviewerSilence
+	return w.Updated + grace
 }
 
 type workData struct {
@@ -759,14 +786,15 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 		case "work.accept", "work.reject":
 			if w.Reviewer != "" && a.account != w.Reviewer {
-				// A reviewer silent ReviewerSilenceDays after the submit lets
-				// the requester decide in its place, before the deadline.
-				at := requesterMayDecideAt(w)
+				// A reviewer silent for the grace after the submit lets the
+				// requester decide in its place, before the deadline.
+				grace := s.ReviewerGrace()
+				at := requesterMayDecideAt(w, grace)
 				if a.account != w.Requester || state != "submitted" || at == 0 {
 					return Result{}, reviewerError("not_the_reviewer")
 				}
 				if now < at {
-					return Result{}, problem(403, "not_the_reviewer", fmt.Sprintf("This work names a reviewer, who decides first. If it stays silent until %s (%d days after the submit), you may accept or reject in its place, before the deadline.", time.Unix(at, 0).UTC().Format(time.RFC3339), ReviewerSilenceDays))
+					return Result{}, problem(403, "not_the_reviewer", fmt.Sprintf("This work names a reviewer, who decides first. If it stays silent until %s (%s after the submit), you may accept or reject in its place, before the deadline.", time.Unix(at, 0).UTC().Format(time.RFC3339), reviewerGraceText(grace)))
 				}
 				fallback, verdict = true, false
 			}
@@ -1009,7 +1037,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		ack.ResolvedFrom = named
 	}
 	if w.State == "submitted" && (c.Operation == "work.submit" || c.Operation == "work.claim") {
-		record, e := requesterRecord(ctx, tx, w.Requester, now, false)
+		record, e := requesterRecord(ctx, tx, w.Requester, now, false, s.ReviewerGrace())
 		if e != nil {
 			return Result{}, e
 		}
@@ -1064,7 +1092,7 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 			return Work{}, err
 		}
 		if p.State == "submitted" {
-			p.RequesterMayDecideAt = requesterMayDecideAt(w)
+			p.RequesterMayDecideAt = requesterMayDecideAt(w, s.ReviewerGrace())
 		}
 	}
 	if p.Reward, err = s.projectWorkReward(ctx, tx, workRewardsTable, w.ID); err != nil {
@@ -1181,7 +1209,8 @@ func (s *Store) PublicOpenRewardedWork(ctx context.Context) (int, error) {
 // worksListData is works.list's optional data: eligible_for, the agent to
 // answer eligibility for on each row, and worker, the agent whose work to
 // list (the items it claimed, public only). Each is optional, but data names
-// at least one.
+// at least one. Each names the agent by key fingerprint or registered
+// handle; the caller resolves a handle (agentFingerprint).
 func worksListData(raw string) (eligibleFor, worker string, err error) {
 	if raw == "" {
 		return "", "", nil
@@ -1207,7 +1236,7 @@ func worksListData(raw string) (eligibleFor, worker string, err error) {
 	} else if errors.As(err, &te) && (te.Field == "schema" || te.Field == "eligible_for" || te.Field == "worker") {
 		return "", "", problem(400, "invalid_work_data", te.Field+" must be "+services.JSONTypeName(te.Type)+". "+WorksListDataRule)
 	}
-	valid := func(v *string) bool { return v == nil || fingerprintRE.MatchString(*v) }
+	valid := func(v *string) bool { return v == nil || fingerprintRE.MatchString(*v) || handleRE.MatchString(*v) }
 	if err != nil || dec.More() || d.Schema != 1 || (d.EligibleFor == nil && d.Worker == nil) || !valid(d.EligibleFor) || !valid(d.Worker) {
 		return "", "", problem(400, "invalid_work_data", WorksListDataRule)
 	}
@@ -1221,7 +1250,7 @@ func worksListData(raw string) (eligibleFor, worker string, err error) {
 }
 
 // WorksListDataRule is works.list data's shape, the line its refusals end with.
-const WorksListDataRule = `works.list data is {"schema":1,"eligible_for":AGENT_FINGERPRINT,"worker":AGENT_FINGERPRINT}, either field optional.`
+const WorksListDataRule = `works.list data is {"schema":1,"eligible_for":AGENT,"worker":AGENT}, either field optional; AGENT is a key fingerprint or a registered handle.`
 
 func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -1268,7 +1297,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		opt.requestBytes = WorkRequestTextMax
 		p, err := s.projectWork(ctx, tx, w, root, generation, now, opt)
 		if err == nil {
-			p.RequesterRecord, err = requesterRecord(ctx, tx, w.Requester, now, false)
+			p.RequesterRecord, err = requesterRecord(ctx, tx, w.Requester, now, false, s.ReviewerGrace())
 		}
 		if err == nil {
 			p.VerdictChecks, err = workVerdictChecks(ctx, tx, w.ID)
@@ -1289,6 +1318,15 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	eligibleFor, worker, err := worksListData(c.Data)
 	if err != nil {
 		return Result{}, err
+	}
+	// A handle reads as the fingerprint of the key holding it, so the two
+	// give the same page and the same cursors.
+	for _, who := range []*string{&eligibleFor, &worker} {
+		if *who != "" {
+			if *who, err = agentFingerprint(ctx, tx, *who); err != nil {
+				return Result{}, err
+			}
+		}
 	}
 	opt, err := workEligibilitySubject(ctx, tx, eligibleFor, a)
 	if err != nil {
@@ -1421,7 +1459,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	for i, w := range stored {
 		requesters[i] = w.Requester
 	}
-	records, err := requesterRecords(ctx, tx, requesters, now, false)
+	records, err := requesterRecords(ctx, tx, requesters, now, false, s.ReviewerGrace())
 	if err != nil {
 		return Result{}, workReadError(err)
 	}
@@ -1574,7 +1612,7 @@ func annotateWorkReviewers(ctx context.Context, tx *sql.Tx, id string, after int
 			return err
 		}
 		if authors[i] != account {
-			tr.Note = WorkReviewerSilentNote
+			tr.Note, tr.Fallback = WorkReviewerSilentNote, WorkFallbackReviewerSilent
 		}
 	}
 	return nil

@@ -90,9 +90,11 @@ func TestWorkReadEligibilityEachRule(t *testing.T) {
 			t.Fatalf("preview list row: %+v", w)
 		}
 	}
-	for _, bad := range []string{`{"schema":1}`, `{"schema":1,"eligible_for":"me"}`, `{"schema":2,"eligible_for":"` + unseen + `"}`, `{"schema":1,"eligible_for":"` + unseen + `","x":1}`} {
+	for _, bad := range []string{`{"schema":1}`, `{"schema":1,"eligible_for":"m e"}`, `{"schema":2,"eligible_for":"` + unseen + `"}`, `{"schema":1,"eligible_for":"` + unseen + `","x":1}`} {
 		fails(t, s, Command{Operation: "works.list", Data: bad}, "invalid_work_data")
 	}
+	// A handle-shaped name no agent holds is unknown, not malformed (C136b).
+	fails(t, s, Command{Operation: "works.list", Data: `{"schema":1,"eligible_for":"me"}`}, "agent_not_found")
 	fails(t, s, Command{Operation: "work.get", MessageID: open, Target: "not-a-fingerprint"}, "invalid_agent")
 
 	// Each answer is the claim's: the eligible ones claim.

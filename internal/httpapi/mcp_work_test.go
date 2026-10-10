@@ -113,7 +113,7 @@ func TestHostedMCPWorkLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec :=mustTool(t, s, "/mcp", "", "agent_record", map[string]any{"agent": worker["agent"]})["data"].(map[string]any)
-	if got, want := dig(rec, "record", "counts", "work"), map[string]any{"claimed": 2.0, "submitted": 2.0, "accepted": 1.0, "rejected": 1.0, "paid": 0.0, "posted": 0.0, "accepted_as_requester": 0.0}; !reflect.DeepEqual(got, want) || dig(rec, "record", "type") != board.RecordType {
+	if got, want := dig(rec, "record", "counts", "work"), map[string]any{"claimed": 2.0, "submitted": 2.0, "accepted": 1.0, "rejected": 1.0, "expired_unjudged": 0.0, "paid": 0.0, "posted": 0.0, "accepted_as_requester": 0.0}; !reflect.DeepEqual(got, want) || dig(rec, "record", "type") != board.RecordType {
 		t.Fatalf("agent_record counts.work: %v (type %v)", got, dig(rec, "record", "type"))
 	}
 	worksURL, _ := rec["works_url"].(string)
@@ -128,6 +128,25 @@ func TestHostedMCPWorkLifecycle(t *testing.T) {
 	}
 	if listed := mustTool(t, s, "/mcp", "", "find_work", map[string]any{"worker": judge["agent"]})["data"].(map[string]any)["works"].([]any); len(listed) != 0 {
 		t.Fatalf("find_work for an agent that claimed nothing: %v", listed)
+	}
+	// worker and eligible_for take a handle as /api/record does (C136b): the
+	// same answer as the fingerprint, over MCP and GET; an unknown one is 404.
+	for _, field := range []string{"worker", "eligible_for"} {
+		byKey := mustTool(t, s, "/mcp", "", "find_work", map[string]any{field: worker["agent"]})["data"]
+		if byHandle := mustTool(t, s, "/mcp", "", "find_work", map[string]any{field: "Work-Taker"})["data"]; !reflect.DeepEqual(byHandle, byKey) {
+			t.Fatalf("find_work %s by handle: %v, by fingerprint %v", field, byHandle, byKey)
+		}
+		key := makeRequest(s, "GET", "/api/works?"+field+"="+worker["agent"].(string), "", "")
+		handle := makeRequest(s, "GET", "/api/works?"+field+"=work-taker", "", "")
+		if key.Code != 200 || handle.Code != 200 || handle.Body.String() != key.Body.String() {
+			t.Fatalf("GET %s by handle: %d %s, by fingerprint %d %s", field, handle.Code, handle.Body, key.Code, key.Body)
+		}
+		if w := makeRequest(s, "GET", "/api/works?"+field+"=nobody-here", "", ""); w.Code != 404 || !strings.Contains(w.Body.String(), "agent_not_found") {
+			t.Fatalf("GET %s by an unknown handle: %d %s", field, w.Code, w.Body)
+		}
+		if _, failure := callTool(t, s, "/mcp", "", "find_work", map[string]any{field: "nobody-here"}); !strings.Contains(failure, "No agent has that handle") {
+			t.Fatalf("find_work %s by an unknown handle: %q", field, failure)
+		}
 	}
 	// Without a hosted identity the lifecycle tools say how to get one.
 	if _, failure := callTool(t, s, "/mcp", "", "claim_work", map[string]any{"message_id": second}); !strings.Contains(failure, "hosted_auth_required") {

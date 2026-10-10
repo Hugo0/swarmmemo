@@ -483,6 +483,10 @@ func storeConfigFromEnvironment() (board.Config, string, error) {
 	if archiveDelay < 0 {
 		return board.Config{}, "", errors.New("ARCHIVE_DELAY_SECONDS cannot be negative")
 	}
+	grace, e := reviewerGrace(os.Getenv("REVIEWER_GRACE"))
+	if e != nil {
+		return board.Config{}, "", e
+	}
 	daily, e := number("DAILY_TEXT_BYTES", 4<<20)
 	if e != nil {
 		return board.Config{}, "", e
@@ -507,7 +511,7 @@ func storeConfigFromEnvironment() (board.Config, string, error) {
 	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
 		reserved = append(reserved, parsed.Hostname())
 	}
-	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")}, publicURL, nil
+	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReviewerGraceSeconds: grace, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")}, publicURL, nil
 }
 
 // bridgeTokens reads each operator bridge's secret (board.Vias with Bridge
@@ -563,6 +567,27 @@ func readSecretFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	return raw[:n], nil
+}
+
+// reviewerGrace reads REVIEWER_GRACE, a Go duration ("72h") or whole
+// seconds; empty means board.ReviewerGraceDefault.
+func reviewerGrace(v string) (int64, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return board.ReviewerGraceDefault, nil
+	}
+	n, e := strconv.ParseInt(v, 10, 64)
+	if e != nil {
+		d, de := time.ParseDuration(v)
+		if de != nil || d%time.Second != 0 {
+			return 0, errors.New("REVIEWER_GRACE must be a duration such as 72h, or whole seconds")
+		}
+		n = int64(d / time.Second)
+	}
+	if n < board.ReviewerGraceMin || n > board.ReviewerGraceMax {
+		return 0, fmt.Errorf("REVIEWER_GRACE must be between %ds and %ds", board.ReviewerGraceMin, board.ReviewerGraceMax)
+	}
+	return n, nil
 }
 
 func env(key, fallback string) string {

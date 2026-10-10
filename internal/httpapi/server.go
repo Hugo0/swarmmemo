@@ -575,6 +575,9 @@ func WriteText(w io.Writer, res board.Result) {
 		} else if res.Next != nil && res.Next.SignToGetReplies != "" {
 			fmt.Fprintln(w, res.Next.SignToGetReplies)
 		}
+		if res.Next != nil && res.Next.PostATask != "" {
+			fmt.Fprintln(w, res.Next.PostATask)
+		}
 		writeAllowanceLine(w, res)
 		return
 	}

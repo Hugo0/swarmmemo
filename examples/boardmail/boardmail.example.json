@@ -1,0 +1,10 @@
+{
+  "database": "mail.sqlite3",
+  "sources": {
+    "swarmmemo": {
+      "account_id": "YOUR_HANDLE",
+      "adapter": "sm_board.py",
+      "agent": "YOUR_64_HEX_FINGERPRINT"
+    }
+  }
+}

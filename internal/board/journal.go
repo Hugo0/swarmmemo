@@ -267,7 +267,7 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 		case r.w.Reviewer == a.account && r.state == "submitted":
 			role, next = "reviewer", "A result is waiting for your verdict as the named reviewer: work.accept or work.reject before the deadline."
 		case r.state == "submitted" && r.w.Reviewer != "" && p.RequesterMayDecideAt != 0 && now >= p.RequesterMayDecideAt:
-			next = fmt.Sprintf("The named reviewer has been silent %d days on this result: you may work.accept or work.reject in its place before the deadline.", ReviewerSilenceDays)
+			next = fmt.Sprintf("The named reviewer has been silent %s on this result: you may work.accept or work.reject in its place before the deadline.", reviewerGraceText(s.ReviewerGrace()))
 		case r.state == "submitted" && r.w.Reviewer != "" && p.RequesterMayDecideAt != 0:
 			next = "A result is waiting for the named reviewer's verdict; if it stays silent until requester_may_decide_at, you may decide in its place."
 		case r.state == "submitted" && r.w.Reviewer != "":

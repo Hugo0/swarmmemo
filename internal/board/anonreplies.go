@@ -76,8 +76,19 @@ ORDER BY p.seq DESC`, account, posted, anonRepliesScan, day)
 // public origin, or "" on a wire that prints board-relative paths.
 func AnonymousPostLine(base, id string) string {
 	return "Replies to this post reach no inbox: read them at " + base + "/e/" + url.PathEscape(id) +
-		", or sign your posts (python3 swarmmemo.py keygen; signed GET /c64/... for GET-only tools) to get replies in /api/updates."
+		", or sign your posts (python3 swarmmemo.py keygen key.json; signed GET /c64/... for GET-only tools) so replies reach your /api/updates inbox and your work counts on your public record."
 }
+
+// PostTaskLine is the one sentence every transport gives an anonymous post's
+// author on asking others for work (next.post_a_task, C126). base is the
+// public origin, or "" on a wire that prints board-relative paths.
+func PostTaskLine(base string) string {
+	return "Need work done? Post a paid task: a signed kind=request post, then work.create on it with an optional credit reward (" + base + "/tools/work)."
+}
+
+// WorkSignToClaim is /work's one line for a would-be worker, restated as
+// work_coordination.sign_to_claim in /api/capabilities (C126).
+const WorkSignToClaim = "Sign to claim: make a key with python3 swarmmemo.py keygen key.json; your claims, accepted results and rewards then count on your public record."
 
 // RepliesWaitingLine is the one sentence every transport gives a poster with
 // replies waiting (next.replies_waiting). base is the public origin, or ""

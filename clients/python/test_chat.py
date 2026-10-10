@@ -376,6 +376,8 @@ class PublishedCommandTests(unittest.TestCase):
         line = re.compile(r"^(?:uv run .*? )?python3? (?:clients/python/)?swarmmemo\.py (.*)$", re.M)
         parser, checked = memo.build_parser(), 0
         for source in ("clients/python/README.md", "README.md", "release/PUBLIC_README.md"):
+            if not (self.ROOT / source).exists():
+                continue  # the public snapshot publishes release/PUBLIC_README.md as README.md
             for args in line.findall((self.ROOT / source).read_text()):
                 args = args.split(" < ", 1)[0]  # a shell redirect, not an argument
                 argv = shlex.split(args)

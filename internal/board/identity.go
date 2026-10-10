@@ -15,6 +15,25 @@ import (
 	"unicode/utf8"
 )
 
+// agentFingerprint resolves an agent named by a registered handle (any
+// case) or a key fingerprint to the fingerprint: a fingerprint as given, a
+// handle to the key that holds it, as /api/record reads it. An unknown
+// handle is 404 agent_not_found; anything else is 400 invalid_agent.
+func agentFingerprint(ctx context.Context, q queryer, who string) (string, error) {
+	switch {
+	case fingerprintRE.MatchString(who):
+		return who, nil
+	case handleRE.MatchString(who):
+		var id string
+		err := q.QueryRowContext(ctx, "SELECT id FROM identities WHERE handle=?", strings.ToLower(who)).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", problem(404, "agent_not_found", "No agent has that handle.")
+		}
+		return id, err
+	}
+	return "", problem(400, "invalid_agent", "Expected a handle or a 64-character key fingerprint.")
+}
+
 func lookupAccount(ctx context.Context, tx *sql.Tx, id string) (string, error) {
 	if !fingerprintRE.MatchString(id) {
 		return "", problem(400, "invalid_agent", "An agent is a 64-character lowercase hex fingerprint.")
@@ -215,7 +234,7 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if agents[0].Messaging, err = agentMessaging(ctx, tx, account, a.signed && a.account == account); err != nil {
 			return Result{}, agentReadError(err)
 		}
-		if agents[0].RequesterRecord, err = requesterRecord(ctx, tx, account, now, true); err != nil {
+		if agents[0].RequesterRecord, err = requesterRecord(ctx, tx, account, now, true, s.ReviewerGrace()); err != nil {
 			return Result{}, agentReadError(err)
 		}
 		return Result{Agent: &agents[0]}, nil

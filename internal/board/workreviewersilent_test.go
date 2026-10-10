@@ -42,7 +42,7 @@ func TestWorkSilentReviewerRequesterAccepts(t *testing.T) {
 	}
 	fence := claimAndSubmit(t, s, worker, id, "lobby")
 	submitted := s.now().Unix()
-	at := submitted + ReviewerSilenceDays*86400
+	at := submitted + ReviewerGraceDefault
 	if w := getTestWork(t, s, id); w.RequesterMayDecideAt != at {
 		t.Fatalf("requester_may_decide_at %d, want %d", w.RequesterMayDecideAt, at)
 	}
@@ -95,11 +95,11 @@ func TestWorkSilentReviewerRequesterAccepts(t *testing.T) {
 	h := run(t, s, Command{Operation: "work.history", MessageID: id}).Data
 	transitions := h["transitions"].([]WorkTransition)
 	last := transitions[len(transitions)-1]
-	if last.Operation != "work.accept" || last.Note != WorkReviewerSilentNote || last.Note != "reviewer silent 3 days; requester decided" {
+	if last.Operation != "work.accept" || last.Note != WorkReviewerSilentNote || last.Fallback != "reviewer_silent" {
 		t.Fatalf("the fallback transition: %+v", last)
 	}
 	for _, tr := range transitions[:len(transitions)-1] {
-		if tr.Note != "" {
+		if tr.Note != "" || tr.Fallback != "" {
 			t.Fatalf("transition %s has note %q", tr.Operation, tr.Note)
 		}
 	}
@@ -123,7 +123,7 @@ func TestWorkSilentReviewerReviewerStillDecides(t *testing.T) {
 	run(t, s, reviewedCreate(s, owner, id, map[string]any{"reward": 300, "reviewer": reviewer, "reviewer_fee": 20}, 0))
 	fence := claimAndSubmit(t, s, worker, id, "lobby")
 	// Past the silence window, the reviewer may still decide first, and is paid.
-	atTime(s, s.now().Unix()+ReviewerSilenceDays*86400+60)
+	atTime(s, s.now().Unix()+ReviewerGraceDefault+60)
 	run(t, s, workCommand(s, judge, Command{Operation: "work.accept", MessageID: id, Amount: fence}))
 	if creditIn(t, s, payee, "remaining") != 300 || creditIn(t, s, reviewer, "remaining") != 20 {
 		t.Fatal("the reviewer's verdict did not pay the worker and the reviewer")
@@ -137,7 +137,7 @@ func TestWorkSilentReviewerReviewerStillDecides(t *testing.T) {
 		t.Fatalf("receipt statement: %+v %v", st, err)
 	}
 	for _, tr := range run(t, s, Command{Operation: "work.history", MessageID: id}).Data["transitions"].([]WorkTransition) {
-		if tr.Note != "" {
+		if tr.Note != "" || tr.Fallback != "" {
 			t.Fatalf("a reviewer's verdict has note %q", tr.Note)
 		}
 	}
@@ -153,7 +153,7 @@ func TestWorkSilentReviewerRequesterRejects(t *testing.T) {
 	id := rewardRequest(t, s, owner, "lobby")
 	run(t, s, reviewedCreate(s, owner, id, map[string]any{"reward": 200, "reviewer": reviewer, "reviewer_fee": 10}, 0))
 	fence := claimAndSubmit(t, s, first, id, "lobby")
-	atTime(s, s.now().Unix()+ReviewerSilenceDays*86400)
+	atTime(s, s.now().Unix()+ReviewerGraceDefault)
 	run(t, s, workCommand(s, owner, Command{Operation: "work.reject", MessageID: id, Amount: fence, Reason: "wrong file"}))
 	w := getTestWork(t, s, id)
 	if w.State != "open" || w.Reward.State != "held" || w.ReviewerFee.State != "released" || w.ReviewerFee.Reason != "reviewer_silent" || creditIn(t, s, requester, "held") != 200 {

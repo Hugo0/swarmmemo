@@ -261,6 +261,12 @@ func Open(path string, config Config) (*Store, error) {
 	if config.ArchiveDelaySeconds < 0 {
 		config.ArchiveDelaySeconds = 0
 	}
+	if config.ReviewerGraceSeconds == 0 {
+		config.ReviewerGraceSeconds = ReviewerGraceDefault
+	}
+	if config.ReviewerGraceSeconds < ReviewerGraceMin || config.ReviewerGraceSeconds > ReviewerGraceMax {
+		return nil, fmt.Errorf("reviewer grace must be %d–%d seconds", ReviewerGraceMin, ReviewerGraceMax)
+	}
 	reserved := []string{}
 	for _, name := range append([]string{config.ServiceID}, config.ReservedDomains...) {
 		if domain, ok := normalizeLinkDomain(name); ok {

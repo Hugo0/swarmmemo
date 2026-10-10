@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/allowance"
 )
@@ -41,6 +42,14 @@ func TestRecordWorkHistory(t *testing.T) {
 	run(t, s, workCommand(s, worker, Command{Operation: "work.claim", MessageID: claimed, TTL: 600}))
 	waiting := createTestWork(t, s, owner, "lobby", "request", 0)
 	run(t, s, workCommand(s, worker, Command{Operation: "work.claim", MessageID: waiting, Target: workResult(t, s, worker, waiting, "lobby")}))
+	// Submitted but never judged: the requester cancels one with the result
+	// waiting, and lets another reach its deadline (below, once the clock
+	// moves past it).
+	cancelled := createTestWork(t, s, owner, "lobby", "request", 0)
+	run(t, s, workCommand(s, worker, Command{Operation: "work.claim", MessageID: cancelled, Target: workResult(t, s, worker, cancelled, "lobby")}))
+	run(t, s, workCommand(s, owner, Command{Operation: "work.cancel", MessageID: cancelled, Reason: "no longer needed"}))
+	lapsed := createTestWork(t, s, owner, "lobby", "request", 120)
+	run(t, s, workCommand(s, worker, Command{Operation: "work.claim", MessageID: lapsed, Target: workResult(t, s, worker, lapsed, "lobby")}))
 	// Never counted: a private room's work, accepted; a hidden request.
 	run(t, s, signed(owner, Command{Operation: "room.create", Room: "record-private", Visibility: "private", Members: []string{keyID(worker)}, Timestamp: s.now().Unix()}))
 	private := createTestWork(t, s, owner, "record-private", "request", 0)
@@ -74,10 +83,22 @@ func TestRecordWorkHistory(t *testing.T) {
 		}
 		return rec.Record.Counts.Work
 	}
-	if got, want := record(worker), (RecordWork{Claimed: 5, Submitted: 4, Accepted: 2, Rejected: 1, Paid: 1}); got != want {
+	// Before its deadline the lapsing result is pending: submitted, not
+	// judged, not expired.
+	if got, want := record(worker), (RecordWork{Claimed: 7, Submitted: 6, Accepted: 2, Rejected: 1, ExpiredUnjudged: 1, Paid: 1}); got != want {
+		t.Fatalf("worker's counts.work before the deadline %+v, want %+v", got, want)
+	}
+	now := s.now().Unix() + 121
+	s.now = func() time.Time { return time.Unix(now, 0) }
+	if state := getTestWork(t, s, lapsed).State; state != "expired" {
+		t.Fatalf("lapsed work is %q", state)
+	}
+	// submitted counts every result; the two never judged are
+	// expired_unjudged, the claim-and-submit still waiting (6-2-1-2) pending.
+	if got, want := record(worker), (RecordWork{Claimed: 7, Submitted: 6, Accepted: 2, Rejected: 1, ExpiredUnjudged: 2, Paid: 1}); got != want {
 		t.Fatalf("worker's counts.work %+v, want %+v", got, want)
 	}
-	if got, want := record(owner), (RecordWork{Posted: 4, AcceptedAsRequester: 2}); got != want {
+	if got, want := record(owner), (RecordWork{Posted: 6, AcceptedAsRequester: 2}); got != want {
 		t.Fatalf("requester's counts.work %+v, want %+v", got, want)
 	}
 	if got := record(idle); got != (RecordWork{}) {
@@ -85,7 +106,7 @@ func TestRecordWorkHistory(t *testing.T) {
 	}
 
 	// One statement, by the schema-23 indexes, never a scan of every transition.
-	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+recordWorkSQL, "a", "a", "a", "a")
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+recordWorkSQL, 0, "a", "a", "a", "a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +142,7 @@ func TestRecordWorkHistory(t *testing.T) {
 		return ids
 	}
 	byWorker := func(k ed25519.PrivateKey) string { return `{"schema":1,"worker":"` + keyID(k) + `"}` }
-	want := []string{paid, retried, claimed, waiting}
+	want := []string{paid, retried, claimed, waiting, cancelled, lapsed}
 	slices.Sort(want)
 	if got := list(Command{Operation: "works.list", Data: byWorker(worker), Limit: 1}); !slices.Equal(got, want) {
 		t.Fatalf("works.list worker: %v, want %v", got, want)
@@ -144,5 +165,56 @@ func TestRecordWorkHistory(t *testing.T) {
 	first := run(t, s, Command{Operation: "works.list", Data: byWorker(worker), Limit: 1})
 	fails(t, s, Command{Operation: "works.list", Data: byWorker(idle), Limit: 1, Cursor: first.NextCursor}, "invalid_cursor")
 	fails(t, s, Command{Operation: "works.list", Data: `{"schema":1,"worker":"` + strings.Repeat("c", 64) + `"}`}, "agent_not_found")
-	fails(t, s, Command{Operation: "works.list", Data: `{"schema":1,"worker":"nope"}`}, "invalid_work_data")
+	fails(t, s, Command{Operation: "works.list", Data: `{"schema":1,"worker":"nope"}`}, "agent_not_found")
+	fails(t, s, Command{Operation: "works.list", Data: `{"schema":1,"eligible_for":"nope"}`}, "agent_not_found")
+	fails(t, s, Command{Operation: "works.list", Data: `{"schema":1,"worker":"no pe"}`}, "invalid_work_data")
+
+	// A registered handle names the agent as its fingerprint does (C136b), in
+	// any case: the same pages, page by page, and the same cursors.
+	run(t, s, signed(worker, Command{Operation: "post", Room: "lobby", Text: "taking work", Handle: "record-worker", Timestamp: s.now().Unix()}))
+	if _, err := s.ReadLogRecord(testContext, "Record-Worker"); err != nil {
+		t.Fatal(err)
+	}
+	page := func(data, cursor string) (string, string) {
+		t.Helper()
+		res := run(t, s, Command{Operation: "works.list", Data: data, Limit: 2, Cursor: cursor})
+		raw, err := json.Marshal(res.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw), res.NextCursor
+	}
+	for _, field := range []string{"worker", "eligible_for"} {
+		byKey, byHandle := `{"schema":1,"`+field+`":"`+keyID(worker)+`"}`, `{"schema":1,"`+field+`":"Record-Worker"}`
+		keyCursor, handleCursor, pages := "", "", 0
+		for {
+			keyPage, nextKey := page(byKey, keyCursor)
+			handlePage, nextHandle := page(byHandle, handleCursor)
+			if keyPage != handlePage {
+				t.Fatalf("%s page %d by handle differs:\n%s\n%s", field, pages, handlePage, keyPage)
+			}
+			// Each cursor pages the other form's listing the same way.
+			if nextKey != "" {
+				crossed, _ := page(byHandle, nextKey)
+				same, _ := page(byKey, nextKey)
+				if crossed != same {
+					t.Fatalf("%s: a fingerprint's cursor pages the handle's listing differently", field)
+				}
+			}
+			if (nextKey == "") != (nextHandle == "") {
+				t.Fatalf("%s: cursors %q and %q", field, nextKey, nextHandle)
+			}
+			pages++
+			if nextKey == "" {
+				break
+			}
+			keyCursor, handleCursor = nextKey, nextHandle
+		}
+		if pages < 2 {
+			t.Fatalf("%s listed %d pages", field, pages)
+		}
+	}
+	if got := list(Command{Operation: "works.list", Data: `{"schema":1,"worker":"RECORD-WORKER"}`, Limit: 1}); !slices.Equal(got, want) {
+		t.Fatalf("works.list worker by handle: %v, want %v", got, want)
+	}
 }

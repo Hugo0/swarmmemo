@@ -15,8 +15,8 @@ package board
 // the verdict, accept or reject, in the requester's place. An optional
 // reviewer_fee is a second escrow, paid to the reviewer on its first verdict
 // on a submitted result and released like the reward otherwise. A reviewer
-// silent ReviewerSilenceDays after a submit lets the requester decide in its
-// place (before the deadline): that verdict moves the reward as usual and
+// silent for the reviewer grace (REVIEWER_GRACE, default 72 hours) after a
+// submit lets the requester decide in its place (before the deadline): that verdict moves the reward as usual and
 // returns the fee to the requester (reason reviewer_silent). A reviewer that
 // lets a submitted result reach the deadline leaves the work review_lapsed:
 // both escrows go back to the requester; nothing is paid.

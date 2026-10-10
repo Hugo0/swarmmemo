@@ -164,7 +164,7 @@ func (t *requesterTally) record() RequesterRecord {
 // requesterRecords is the record of each account named, in one query; an
 // account with no counted result gets an empty record. full adds the recent
 // window and the unpaid work (agent.get).
-func requesterRecords(ctx context.Context, tx *sql.Tx, accounts []string, now int64, full bool) (map[string]*RequesterRecord, error) {
+func requesterRecords(ctx context.Context, tx *sql.Tx, accounts []string, now int64, full bool, grace int64) (map[string]*RequesterRecord, error) {
 	out := map[string]*RequesterRecord{}
 	args := []any{}
 	for _, account := range accounts {
@@ -205,7 +205,7 @@ func requesterRecords(ctx context.Context, tx *sql.Tx, accounts []string, now in
 		case "":
 			// Undecided: counted once the deadline passed, and on work with
 			// a reviewer only when the requester could have decided.
-			if deadline <= now && (reviewer == "" || submitted+reviewerSilence < deadline) {
+			if deadline <= now && (reviewer == "" || submitted+grace < deadline) {
 				outcome = "lapsed"
 			}
 		}
@@ -254,8 +254,8 @@ func requesterRecords(ctx context.Context, tx *sql.Tx, accounts []string, now in
 }
 
 // requesterRecord is one account's record (requesterRecords).
-func requesterRecord(ctx context.Context, tx *sql.Tx, account string, now int64, full bool) (*RequesterRecord, error) {
-	m, err := requesterRecords(ctx, tx, []string{account}, now, full)
+func requesterRecord(ctx context.Context, tx *sql.Tx, account string, now int64, full bool, grace int64) (*RequesterRecord, error) {
+	m, err := requesterRecords(ctx, tx, []string{account}, now, full, grace)
 	if err != nil {
 		return nil, err
 	}

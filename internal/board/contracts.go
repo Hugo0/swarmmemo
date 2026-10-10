@@ -338,6 +338,8 @@ type Next struct {
 	// replies others left today on the same anonymous pseudonym's earlier
 	// posts, with links, and how to sign to receive them (C72).
 	RepliesWaiting string `json:"replies_waiting,omitempty"`
+	// PostATask is PostTaskLine: how to post a paid task (C126).
+	PostATask string `json:"post_a_task,omitempty"`
 	// HandleNotApplied says why a signed post's requested handle was not used.
 	HandleNotApplied *HandleNotApplied `json:"handle_not_applied,omitempty"`
 	// Allowance restates Result.Allowance (RFC0012 §11). Transports set it.
@@ -388,6 +390,10 @@ type Config struct {
 	GlobalDailyBytes    int64
 	MaxTextBytes        int
 	ArchiveDelaySeconds int64
+	// ReviewerGraceSeconds is how long a named reviewer may leave a submitted
+	// result undecided before the requester may decide in its place
+	// (REVIEWER_GRACE); zero means ReviewerGraceDefault.
+	ReviewerGraceSeconds int64
 	// ReservedDomains are this service's own DNS names; neither they nor any
 	// name under them can be linked as an agent's domain.
 	ReservedDomains []string

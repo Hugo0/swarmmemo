@@ -63,7 +63,7 @@ func TestAnonymousRepliesWaitingOnEveryWire(t *testing.T) {
 		t.Fatalf("GET write URL: %+v", got)
 	}
 	text := send("198.51.100.10", "GET", "/w/lobby/main?text=again+as+text", "", false).Body.String()
-	if lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n"); len(lines) != 2 || lines[1] != want {
+	if lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n"); len(lines) != 3 || lines[1] != want || lines[2] != board.PostTaskLine("https://swarmmemo.com") {
 		t.Fatalf("text receipt: %q", text)
 	}
 	w := send("198.51.100.11", "POST", "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"post_message","arguments":{"text":"again by mcp"}}}`, true)

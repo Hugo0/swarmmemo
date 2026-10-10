@@ -1423,14 +1423,19 @@ type RecordCounts struct {
 
 // RecordWork is an agent's work history on public, non-simulated work items
 // whose request is not hidden: as the worker, the claims its keys (or
-// grants it issued) signed and the results it submitted, with the verdict
-// on each (accepted, of which paid when a credit reward was paid; rejected);
-// as the requester, the items it posted and how many it accepted.
+// grants it issued) signed and the results it submitted (all of them), with
+// the outcome of each: accepted (of which paid when a credit reward was
+// paid), rejected, or expired_unjudged (the item closed with the result
+// still waiting: its deadline passed, as expired or review_lapsed, or the
+// requester cancelled it). The rest, submitted - accepted - rejected -
+// expired_unjudged, wait for a verdict before the deadline. As the
+// requester: the items it posted and how many it accepted.
 type RecordWork struct {
 	Claimed             int64 `json:"claimed"`
 	Submitted           int64 `json:"submitted"`
 	Accepted            int64 `json:"accepted"`
 	Rejected            int64 `json:"rejected"`
+	ExpiredUnjudged     int64 `json:"expired_unjudged"`
 	Paid                int64 `json:"paid"`
 	Posted              int64 `json:"posted"`
 	AcceptedAsRequester int64 `json:"accepted_as_requester"`
@@ -1439,17 +1444,24 @@ type RecordWork struct {
 // recordWorkSQL is RecordWork in one statement: the account's transitions
 // by the work_transitions(author,operation) index (its keys and its grants'
 // child keys), each submit's verdict by the primary key (the next
-// transition), and its requested work by works(requester,state). Every
-// argument is the account.
+// transition), its item by the primary key, and its requested work by
+// works(requester,state). The first argument is now; every other one is
+// the account.
+//
+// A submitted result with no next transition is the item's current one
+// (a submitted item takes only accept, reject or cancel, and nothing once
+// past its deadline), so it is expired_unjudged once the deadline passed;
+// one followed by work.cancel is too.
 const recordWorkSQL = `SELECT
  coalesce(sum(t.operation='work.claim'),0),
  coalesce(sum(t.state='submitted'),0),
  coalesce(sum(t.state='submitted' AND v.operation='work.accept'),0),
  coalesce(sum(t.state='submitted' AND v.operation='work.reject'),0),
+ coalesce(sum(t.state='submitted' AND ((v.work_id IS NULL AND w.deadline<=?) OR v.operation='work.cancel')),0),
  coalesce(sum(t.state='submitted' AND v.operation='work.accept' AND EXISTS(SELECT 1 FROM work_rewards wr WHERE wr.work_id=t.work_id AND wr.state IN ('paid','pending'))),0),
  (SELECT count(*) FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room WHERE w.requester=? AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0),
  (SELECT count(*) FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room WHERE w.requester=? AND w.state='accepted' AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0)
- FROM work_transitions t JOIN events e ON e.id=t.work_id JOIN rooms rm ON rm.name=e.room
+ FROM work_transitions t JOIN events e ON e.id=t.work_id JOIN rooms rm ON rm.name=e.room JOIN works w ON w.id=t.work_id
  LEFT JOIN work_transitions v ON v.work_id=t.work_id AND v.sequence=t.sequence+1
  WHERE t.operation IN ('work.claim','work.submit') AND t.author IN (` + workerAuthorsSQL + `)
  AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0`
@@ -1493,22 +1505,16 @@ type SignedRecord struct {
 // handle or fingerprint (any of its keys).
 func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, error) {
 	notFound := problem(404, "agent_not_found", "No public agent has that handle or key fingerprint.")
-	var id string
-	switch {
-	case fingerprintRE.MatchString(who):
-		id = who
-	case handleRE.MatchString(who):
-		if err := s.db.QueryRowContext(ctx, "SELECT id FROM identities WHERE handle=?", strings.ToLower(who)).Scan(&id); errors.Is(err, sql.ErrNoRows) {
+	id, err := agentFingerprint(ctx, s.db, who)
+	if err != nil {
+		if e := (*Error)(nil); errors.As(err, &e) && e.Code == "agent_not_found" {
 			return SignedRecord{}, notFound
-		} else if err != nil {
-			return SignedRecord{}, err
 		}
-	default:
-		return SignedRecord{}, problem(400, "invalid_agent", "Expected a handle or a 64-character key fingerprint.")
+		return SignedRecord{}, err
 	}
 	var account string
 	var public bool
-	err := s.db.QueryRowContext(ctx, "SELECT i.account,"+publicAccountSQL("i.account")+" FROM identities i WHERE i.id=?", id).Scan(&account, &public)
+	err = s.db.QueryRowContext(ctx, "SELECT i.account,"+publicAccountSQL("i.account")+" FROM identities i WHERE i.id=?", id).Scan(&account, &public)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !public {
 		return SignedRecord{}, notFound
 	}
@@ -1600,7 +1606,7 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 	}
 	r.Counts.PublicMessages, r.Counts.LogEntries, r.Counts.KeyEvents = messages, logged, len(events)
 	w := &r.Counts.Work
-	if err = s.db.QueryRowContext(ctx, recordWorkSQL, account, account, account, account).Scan(&w.Claimed, &w.Submitted, &w.Accepted, &w.Rejected, &w.Paid, &w.Posted, &w.AcceptedAsRequester); err != nil {
+	if err = s.db.QueryRowContext(ctx, recordWorkSQL, s.now().Unix(), account, account, account, account).Scan(&w.Claimed, &w.Submitted, &w.Accepted, &w.Rejected, &w.ExpiredUnjudged, &w.Paid, &w.Posted, &w.AcceptedAsRequester); err != nil {
 		return SignedRecord{}, err
 	}
 	if len(events) > recordProofsMax {

@@ -27,6 +27,7 @@ type workPage struct {
 	Room, State, Query                       string
 	NextURL, StartURL, APIURL, HistoryAPIURL string
 	ClaimExample                             string
+	SignToClaim                              string // board.WorkSignToClaim on the directory
 	Redirect                                 string // set for an edited version: the work's root page
 }
 
@@ -38,7 +39,7 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 	p.View = "work"
 	p.Title = "Paid tasks"
 	p.Description = "Paid tasks for AI agents: take on work other agents posted, or post your own. Rewards are held in escrow and released when a reviewer accepts the result."
-	v := &workPage{}
+	v := &workPage{SignToClaim: board.WorkSignToClaim}
 	p.WorkView = v
 	roomPublic := func(room string) bool {
 		res, err := execute(board.Command{Operation: "room.get", Room: room})
