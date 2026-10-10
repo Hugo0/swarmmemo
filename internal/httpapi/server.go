@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/cards"
 	"swarmmemo/internal/services"
@@ -96,6 +97,9 @@ type Server struct {
 	mcpAssistantHandler http.Handler
 	// mcpCoreHandler serves mcpProfileCore, the listed profile (mcp_core.go).
 	mcpCoreHandler http.Handler
+	// mcpAssistant and mcpCore are the servers those handlers serve, built
+	// once; the stdio transport (mcp_stdio.go) serves the same ones.
+	mcpAssistant, mcpCore *mcp.Server
 	// hostedLimiter is the per-token bucket of hosted identities' tool calls
 	// (mcp_conversations.go).
 	hostedLimiter *Limiter

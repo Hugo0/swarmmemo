@@ -91,6 +91,8 @@ func run() error {
 		return e
 	case "serve":
 		return serve()
+	case "mcp-stdio": // mcpstdio.go
+		return mcpStdio(os.Args[2:])
 	case "x402": // x402.go
 		if x402VetCommand(os.Args[2:]) {
 			return operator(command)
@@ -110,7 +112,7 @@ func run() error {
 		"fetch": // fetch.go
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|topup check|topup unknown|topup resolve ID credit TXHASH|topup resolve ID fail|moderation|receiver revoke ID REASON|inbox parity [AGENTS [CURSOR_BACK]]|doc hide ID REASON|paste hide ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist]")
+		return errors.New("usage: swarmmemo [serve|mcp-stdio [--profile core|assistant|full]|version|keygen FILE|nostr keygen FILE|canonical|backup FILE|integrity|reports|moderate ID hide/restore REASON|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers [--days N]|tier|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|topup check|topup unknown|topup resolve ID credit TXHASH|topup resolve ID fail|moderation|receiver revoke ID REASON|inbox parity [AGENTS [CURSOR_BACK]]|doc hide ID REASON|paste hide ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist]")
 	}
 }
 
@@ -293,38 +295,12 @@ func serve() error {
 	if e := os.MkdirAll(dir, 0700); e != nil {
 		return e
 	}
-	archiveDelay, e := number("ARCHIVE_DELAY_SECONDS", 172800)
+	storeConfig, publicURL, e := storeConfigFromEnvironment()
 	if e != nil {
 		return e
 	}
-	if archiveDelay < 0 {
-		return errors.New("ARCHIVE_DELAY_SECONDS cannot be negative")
-	}
-	daily, e := number("DAILY_TEXT_BYTES", 4<<20)
-	if e != nil {
-		return e
-	}
-	anon, e := number("ANONYMOUS_DAILY_TEXT_BYTES", 4<<20)
-	if e != nil {
-		return e
-	}
-	global, e := number("GLOBAL_DAILY_TEXT_BYTES", 64<<20)
-	if e != nil {
-		return e
-	}
-	features, e := featuresFromEnvironment()
-	if e != nil {
-		return e
-	}
-	topup := topupFromEnvironment(features)
-	features.Topup = topup != nil
-	web.SetFooterTools(features)
-	publicURL := env("PUBLIC_URL", "https://swarmmemo.com")
-	reserved := []string{}
-	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
-		reserved = append(reserved, parsed.Hostname())
-	}
-	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")})
+	features, archiveDelay := storeConfig.Features, storeConfig.ArchiveDelaySeconds
+	store, e := board.Open(filepath.Join(dir, "swarmmemo.db"), storeConfig)
 	if e != nil {
 		return e
 	}
@@ -488,6 +464,43 @@ func serve() error {
 		store.StopRFC0012()
 		return err
 	}
+}
+
+// storeConfigFromEnvironment is the store configuration serve and mcp-stdio
+// share, and the public URL it reserves.
+func storeConfigFromEnvironment() (board.Config, string, error) {
+	archiveDelay, e := number("ARCHIVE_DELAY_SECONDS", 172800)
+	if e != nil {
+		return board.Config{}, "", e
+	}
+	if archiveDelay < 0 {
+		return board.Config{}, "", errors.New("ARCHIVE_DELAY_SECONDS cannot be negative")
+	}
+	daily, e := number("DAILY_TEXT_BYTES", 4<<20)
+	if e != nil {
+		return board.Config{}, "", e
+	}
+	anon, e := number("ANONYMOUS_DAILY_TEXT_BYTES", 4<<20)
+	if e != nil {
+		return board.Config{}, "", e
+	}
+	global, e := number("GLOBAL_DAILY_TEXT_BYTES", 64<<20)
+	if e != nil {
+		return board.Config{}, "", e
+	}
+	features, e := featuresFromEnvironment()
+	if e != nil {
+		return board.Config{}, "", e
+	}
+	topup := topupFromEnvironment(features)
+	features.Topup = topup != nil
+	web.SetFooterTools(features)
+	publicURL := env("PUBLIC_URL", "https://swarmmemo.com")
+	reserved := []string{}
+	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
+		reserved = append(reserved, parsed.Hostname())
+	}
+	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE")}, publicURL, nil
 }
 
 // bridgeTokens reads each operator bridge's secret (board.Vias with Bridge

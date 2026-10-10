@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "02b0fd76d44921e8576ebd66b4bf0b8291bc3ffa779d2f966f22689f4fbe8c51",
+  "allowlist_sha256": "4da58cefeaaffae9c586d28cc975da15710a4a1838f0aa65bfeacec78fe457d8",
   "files": [
     {
       "mode": "0644",
@@ -94,8 +94,8 @@
     {
       "mode": "0644",
       "path": "clients/mcp/README.md",
-      "sha256": "3a038a8dab9337bfb2b066ba78f10a05e6299f077084680c8c8fc59b148df4bb",
-      "size": 19385
+      "sha256": "e13aee5b5ceecad869e988955d96405fac410237b6ddb1182931a7f2897404e6",
+      "size": 20376
     },
     {
       "mode": "0644",
@@ -346,8 +346,20 @@
     {
       "mode": "0644",
       "path": "cmd/swarmmemo/main.go",
-      "sha256": "1c3fe695d4847f41175b6e7313cb45d55ee0563fa898b116540e423eb3e74c00",
-      "size": 21538
+      "sha256": "3ab78b805a6d5cc80f93790eab5a7ca00a9cf2aef25d9b138bdb61d8e57467b1",
+      "size": 22158
+    },
+    {
+      "mode": "0644",
+      "path": "cmd/swarmmemo/mcpstdio.go",
+      "sha256": "2e14ac2af0ab9024683defe0011a35bd83c5ca22367cc390184bb6ac55abf7cb",
+      "size": 2180
+    },
+    {
+      "mode": "0644",
+      "path": "cmd/swarmmemo/mcpstdio_test.go",
+      "sha256": "b0794f9f89fefbe5ec4b9280f80fc738e4603d7796b5be77c2305bce9622cfe5",
+      "size": 4153
     },
     {
       "mode": "0644",
@@ -580,8 +592,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "66b138c5b691d311f4e785dcc9c2a2d03702cf9d45d65825d174bd6fa206d332",
-      "size": 366774
+      "sha256": "5c7895b99ad69f23a4894d84f468c3417a5003eadfc4767b7365636716577f65",
+      "size": 367027
     },
     {
       "mode": "0644",
@@ -756,6 +768,12 @@
       "path": "examples/coordination-lab/worker.mjs",
       "sha256": "9b60ceeb77e9e1949cd7306cb00479e02ae6438dc152dfe5c8a7445bba96c723",
       "size": 11361
+    },
+    {
+      "mode": "0644",
+      "path": "glama.json",
+      "sha256": "befee11fb94f0e41f9b3da306d82c18b69b209c407069771f90eaa351528be22",
+      "size": 88
     },
     {
       "mode": "0644",
@@ -3034,8 +3052,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp.go",
-      "sha256": "98f2863841edf83568c130fbfdc98c023729c5226561510ae5fef22d7a361a0c",
-      "size": 57843
+      "sha256": "d3e62c27491bf74a26066cce3c4271a841c66627f8920b6dd911a55919baa526",
+      "size": 57861
     },
     {
       "mode": "0644",
@@ -3108,6 +3126,12 @@
       "path": "internal/httpapi/mcp_size_test.go",
       "sha256": "d20af987e613594c76f76e1a5b74f9b7e602cab5900f7299b7154633d0f5ec17",
       "size": 4567
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/mcp_stdio.go",
+      "sha256": "21fc334c1e1d1ff0bb2fdffad22e06cb0550c0dfe8a607abc498b0b3942eb48b",
+      "size": 1506
     },
     {
       "mode": "0644",
@@ -3382,8 +3406,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "d8baa2a7b48fe876667d96b98d762870e59860f131ad278b4ac7f0b8ceeedfb8",
-      "size": 52990
+      "sha256": "5490e1a284d7a1e2bd6d36238e09dc1d8175318dd663e54651e5de7f39b72f75",
+      "size": 53211
     },
     {
       "mode": "0644",

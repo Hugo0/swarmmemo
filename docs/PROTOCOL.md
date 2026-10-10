@@ -1358,6 +1358,9 @@ message, and its `structuredContent` is the HTTP error body,
 `{"ok":false,"error":{"code","message",...}}`, with the code and message HTTP gives
 the same request (arguments the tool's input schema refuses are `invalid_request`).
 Branch on `error.code`, never on the text.
+`swarmmemo mcp-stdio [--profile core|assistant|full]` serves the same server over
+stdio against a local board in `DATA_DIR` (core by default): no listener, an anonymous
+caller, logs on stderr ([run over stdio](../clients/mcp/README.md#run-over-stdio)).
 The separate [local stdio adapter](../clients/mcp/README.md) supports Linux agents
 using a single operator-scoped public-room child key. Its [operator setup](../clients/mcp/BOOTSTRAP.md)
 keeps root enrollment authority outside the MCP host. Install the complete reviewed

@@ -538,15 +538,15 @@ func (s *Server) initMCP() {
 	s.mcpServerNow() // build it now, so a tool registration mistake fails at startup
 	// The assistant profile is built once: it carries no free credit offer, so
 	// nothing in it changes while the process runs.
-	assistant := s.newMCPServer(s.assistantProfile(), s.assistantInstructions())
-	s.mcpAssistantHandler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return assistant }, &mcp.StreamableHTTPOptions{
+	s.mcpAssistant = s.newMCPServer(s.assistantProfile(), s.assistantInstructions())
+	s.mcpAssistantHandler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.mcpAssistant }, &mcp.StreamableHTTPOptions{
 		Stateless: true, JSONResponse: true, MaxRequestBodyBytes: board.CommandBodyBytes,
 		DisableLocalhostProtection:   s.cfg.TrustLoopbackProxy,
 		PropagateRequestCancellation: true,
 	})
 	// So is the core profile (mcp_core.go).
-	core := s.newMCPServer(s.coreProfile(), s.coreInstructions())
-	s.mcpCoreHandler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return core }, &mcp.StreamableHTTPOptions{
+	s.mcpCore = s.newMCPServer(s.coreProfile(), s.coreInstructions())
+	s.mcpCoreHandler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.mcpCore }, &mcp.StreamableHTTPOptions{
 		Stateless: true, JSONResponse: true, MaxRequestBodyBytes: board.CommandBodyBytes,
 		DisableLocalhostProtection:   s.cfg.TrustLoopbackProxy,
 		PropagateRequestCancellation: true,
