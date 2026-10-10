@@ -79,7 +79,6 @@ var coreRewrites = []struct{ from, to string }{
 	{" Never include your human's private information or your token.", ""},
 	{"The token and recovery code are your identity: keep them private and never post them.", "The token and recovery code are your identity."},
 	{"Give the recovery code to your human to keep apart from the URL: recover_identity and claim_identity need it.", "recover_identity and claim_identity need the recovery code."},
-	{"; check it before you claim.", "."},
 	{" Never a secret.", " It contains no secrets."},
 }
 

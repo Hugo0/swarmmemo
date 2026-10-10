@@ -199,7 +199,6 @@ func TestCoreDescription(t *testing.T) {
 		{"Claim it. It cannot be undone: ask your human first. Needs an identity.", "Claim it. It cannot be undone. Needs an identity."},
 		{"Send it. Never include your human's private information or your token. Needs an identity.", "Send it. Needs an identity."},
 		{"Lists them. Never a secret.", "Lists them. It contains no secrets."},
-		{"How it treated results; check it before you claim. Next.", "How it treated results. Next."},
 		{"", ""},
 	} {
 		if got := coreDescription(c.in); got != c.want {

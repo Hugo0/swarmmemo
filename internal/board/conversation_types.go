@@ -175,8 +175,7 @@ type SealKey struct {
 // AgentMessaging is what agent.get shows of an agent's inbound policy: the
 // preset name and any advertised postage; Settings, the stored Protection
 // JSON, only to the agent itself. It is raw so Result keeps a finite JSON
-// schema (PolicyCondition nests); MCP's output schema takes a raw field as
-// any JSON value (httpapi's resultOutputSchema).
+// schema (PolicyCondition nests).
 type AgentMessaging struct {
 	Preset   string          `json:"preset"`
 	Postage  int64           `json:"postage,omitempty"`

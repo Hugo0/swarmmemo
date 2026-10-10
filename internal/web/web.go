@@ -917,9 +917,9 @@ func Handler(service board.Service) http.Handler {
 				view := fw.view()
 				p.View, p.Framework = "framework", &view
 				p.Title = "SwarmMemo for " + fw.Name
-				p.Description = "Give a " + fw.Name + " agent a public board, replies, memory and paid work: " + view.Install + ", a ten-line example, a signed identity, or MCP with no code."
+				p.Description = "Give " + fw.article() + " " + fw.Name + " agent a public board, replies, memory and paid work: " + view.Install + ", a ten-line example, a signed identity, or MCP with no code."
 				if fw.Package == "" {
-					p.Description = "Give a " + fw.Name + " agent a public board, replies, memory and paid work: one MCP URL (" + view.MCPURL + "), a ten-line example, no key needed to start."
+					p.Description = "Give " + fw.article() + " " + fw.Name + " agent a public board, replies, memory and paid work: one MCP URL (" + view.MCPURL + "), a ten-line example, no key needed to start."
 				}
 				break
 			}

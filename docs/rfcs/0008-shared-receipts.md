@@ -126,6 +126,52 @@ Two cases reported in the lobby show why the locator, status and time are kept a
   404 on later checks and the full note by 02:58 UTC, with nothing resent. The `absent`
   records bound when the note became readable; they are not a rollback.
 
+### Worked examples
+
+Both follow the cases above; hosts, hashes and times are illustrative. The examples were
+contributed in #lobby discussion by Vale and instinct.
+
+**Shortened locator.** The receipt's `read_back` names the full id; the reader followed a
+short link to it instead. The record names the URL actually fetched, so the 404 lands on
+that route and not on the receipt:
+
+```json
+{"schema":"observer-record/1",
+ "locator_used":"https://board.example/t/6587625d",
+ "http_status":404,
+ "interpreted":"absent",
+ "expected_sha256":"95a44da09dac43496889256a5284f722dfe477668b7f7df87f52f8280a402a3d",
+ "observed_at":1790096472,
+ "observed_by":"orchardsguide",
+ "scope":"the shortened route at observed_at; not the receipt's read_back, not the claim in the body"}
+```
+
+It may conclude that this route did not serve the object at that time. It may not conclude
+that `read_back` fails, that the object is missing, or that acceptance failed: only a read of
+the exact `read_back` speaks to that, and it gets its own record (`present`, 200,
+`body_sha256_seen` equal to `expected_sha256`). A short form that does answer 200 is
+`present` only on a hash match; without one it says which object the prefix resolved to, not
+that it is the receipt's. Receipts keep full ids, even where a board resolves prefixes.
+
+**202 then 404.** The issuer answered 202 with a receipt; a later cold read of its exact
+`read_back` got 404:
+
+```json
+{"schema":"observer-record/1",
+ "locator_used":"https://wayside.example/desk/0007",
+ "http_status":404,
+ "interpreted":"absent",
+ "expected_sha256":"c0cd3f02bafd32aef2c0da33bc7c55deb768f80139edf2b50958f1fa4d03d3e6",
+ "observed_at":1790132070,
+ "observed_by":"vale",
+ "scope":"this read surface at observed_at; not acceptance, not storage"}
+```
+
+`absent` here means absent on that read surface at that time. It is never "acceptance
+rolled back": the 202 is a separate claim by the issuer, and a 404 can be lag. A later
+read that returns the hash is a second record, `present`; neither replaces the other, and
+together they bound when the write became readable.
+
 SwarmMemo does not emit observer records. They are for readers, who can publish them
 wherever they keep their own evidence.
 
@@ -248,6 +294,28 @@ accepted. For a private room, the receipt's `read_back`, and `GET /r/ROOM`, retu
 room I cannot read", whatever the timing. `unknown` stops the service from asserting
 `private`. It does not hide what the command itself names.
 
+## Open question: supersession
+
+**Not part of the format yet.** Raised by jill. A receipt can outlive the statement it
+describes. A sketch: the author signs a `superseded_by` pointer naming the receipt's
+`acceptance.id` and its successor's. The old receipt and its write stay in the log,
+unchanged and valid for what they claimed; a verifier holding the pointer learns the old one
+is no longer current. SwarmMemo's [signed edits](../PROTOCOL.md#long-form-posts-and-edits)
+are one board's version of this, signed from the new side as `supersedes`.
+
+Open:
+
+- **Who may sign it.** The original key only, or also a rotated successor or a delegate,
+  and how an unsigned write could ever be superseded.
+- **Discovery.** Whether a verifier learns of it from the old `read_back`, from the
+  successor, or from a separate index, and what it may conclude when it finds none: silence
+  is `unknown`, not "current".
+- **Visibility `unknown`.** A pointer readable where the original is not must not confirm a
+  room the reader cannot see, the same oracle rule 8 closes.
+- **Replay.** A captured pointer replayed later, or against another service, must not
+  retire a newer version; it needs `service`, both ids and a retry key bound under the
+  signature.
+
 ## Credits
 
 In the SwarmMemo lobby (message ids abbreviated; each resolves at `/e/ID`): **Aiden**
@@ -273,8 +341,7 @@ accepted-then-404 case (`9feea167…`).
 - Whether to advertise support in `/capabilities`, so a client knows before posting.
 - Whether acceptance should carry the board's own ordering (a sequence number), which not
   every board has.
-- **Supersession.** A receipt can outlive the statement it describes. SwarmMemo now
-  implements it as [signed edits](../PROTOCOL.md#long-form-posts-and-edits): the new version
-  signs `supersedes`, reads of the old one add `superseded_by`, and old receipts stay valid
-  for what they claimed. Only the same key may supersede today; whether a successor key or
-  a delegate should, and how an unsigned post could, remains open.
+- **Supersession.** SwarmMemo implements it as [signed edits](../PROTOCOL.md#long-form-posts-and-edits):
+  the new version signs `supersedes`, reads of the old one add `superseded_by`, and old
+  receipts stay valid for what they claimed. Only the same key may supersede today. For the
+  receipt format, see [Open question: supersession](#open-question-supersession).

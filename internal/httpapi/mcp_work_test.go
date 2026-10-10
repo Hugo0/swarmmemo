@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -163,5 +164,64 @@ func TestHostedMCPWorkEditedVersionAndResultHash(t *testing.T) {
 	accepted := mustTool(t, s, "/mcp", asJudge, "accept_work", map[string]any{"message_id": edit, "result_id": result})["data"].(map[string]any)["ack"].(map[string]any)
 	if accepted["state"] != "accepted" || accepted["result_sha256"] != submitted {
 		t.Fatalf("accept_work: %v", accepted)
+	}
+}
+
+// find_work pages 10 compact rows by default (C132b); detail=true and a
+// limit restore full rows and bigger pages, and /api/works keeps its own
+// default (25) and full rows.
+func TestMCPFindWorkCompactByDefault(t *testing.T) {
+	store, s := hostedServer(t)
+	requester := ed25519.NewKeyFromSeed(make([]byte, 32))
+	feed, err := store.Execute(t.Context(), board.Command{Operation: "messages.list"}, "mcp-work-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 12 {
+		res, err := store.Execute(t.Context(), signService(requester, board.Command{Operation: "post", Room: "gigs", Kind: "request", Text: "Task " + strings.Repeat("x", i+1)}), "mcp-work-test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := json.Marshal(map[string]any{"schema": 1, "generation": feed.Generation, "title": "Summarize a page", "capabilities": []string{"writing"}})
+		if _, err := store.Execute(t.Context(), signService(requester, board.Command{Operation: "work.create", MessageID: res.Receipt.ID, Data: string(data)}), "mcp-work-test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	works := func(result map[string]any) []any {
+		t.Helper()
+		return dig(result, "data", "works").([]any)
+	}
+	compact := mustTool(t, s, "/mcp", "", "find_work", map[string]any{})
+	rows := works(compact)
+	if len(rows) != findWorkLimit || dig(compact, "data", "has_more") != true || compact["next_cursor"] == nil {
+		t.Fatalf("find_work {}: %d rows, %v", len(rows), compact["data"])
+	}
+	want := []string{"deadline", "eligibility", "id", "state", "title", "url"}
+	for _, r := range rows {
+		row := r.(map[string]any)
+		var keys []string
+		for k := range row {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		if !reflect.DeepEqual(keys, want) || row["url"] != "https://swarmmemo.com/work/"+row["id"].(string) || row["state"] != "open" || row["eligibility"] != "open" {
+			t.Fatalf("compact row %v", row)
+		}
+	}
+	// The next page resumes after the first.
+	next := works(mustTool(t, s, "/mcp", "", "find_work", map[string]any{"cursor": compact["next_cursor"]}))
+	if len(next) != 2 || next[0].(map[string]any)["id"] == rows[0].(map[string]any)["id"] {
+		t.Fatalf("second page %v", next)
+	}
+	detailed := works(mustTool(t, s, "/mcp", "", "find_work", map[string]any{"detail": true, "limit": 12}))
+	if len(detailed) != 12 || dig(detailed[0], "request", "text") == nil || dig(detailed[0], "requester") == nil {
+		t.Fatalf("detail rows %v", detailed[0])
+	}
+	var api map[string]any
+	if err := json.Unmarshal(makeRequest(s, "GET", "/api/works", "", "").Body.Bytes(), &api); err != nil {
+		t.Fatal(err)
+	}
+	if rows := dig(api, "data", "works").([]any); len(rows) != 12 || dig(rows[0], "request", "text") == nil {
+		t.Fatalf("/api/works changed: %d rows, %v", len(rows), rows[0])
 	}
 }

@@ -417,6 +417,19 @@ func TestFrameworkPages(t *testing.T) {
 		// html/template escapes more than html.EscapeString (+ and `), so
 		// compare against the unescaped page.
 		body := html.UnescapeString(page.Body.String())
+		// The meta and og descriptions take the right article (C132c), and an
+		// MCP-only framework's install note reads "Letta's own packages".
+		article := map[string]string{"Agno": "an", "OpenAI Agents SDK": "an", "ElizaOS": "an"}[view.Name]
+		if article == "" {
+			article = "a"
+		}
+		give := "Give " + article + " " + view.Name + " agent "
+		if !strings.Contains(body, `<meta name="description" content="`+give) || !strings.Contains(body, `<meta property="og:description" content="`+give) {
+			t.Errorf("%s descriptions do not open %q", path, give)
+		}
+		if view.Kind == "mcp" && (!strings.Contains(body, ">"+view.Name+"'s own packages only; SwarmMemo itself is one MCP URL") || strings.Contains(body, "The "+view.Name+"'s")) {
+			t.Errorf("%s install note does not read %q", path, view.Name+"'s own packages only")
+		}
 		wants := []string{view.Name, view.Intro, view.Install, view.Example, view.Identity, view.Keygen, view.KeyExample, view.MCP, view.MCPCode}
 		for _, tool := range view.Tools {
 			wants = append(wants, tool.Name, tool.Line)

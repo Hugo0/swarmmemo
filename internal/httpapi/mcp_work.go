@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"swarmmemo/internal/board"
@@ -154,4 +156,54 @@ func (s *Server) addHostedWorkTools(server *mcp.Server, tool func(string) *mcp.T
 			return workTransition(hc, board.Command{Operation: "work.reject", MessageID: in.MessageID, Reason: in.Reason}, true, "", verdictChecksData(in.Checks))
 		})
 	})
+}
+
+// findWorkLimit is find_work's page when the caller names no limit: a model
+// reads every row, so MCP pages smaller than /api/works (25, unchanged).
+const findWorkLimit = 10
+
+// compactWork is a find_work row unless the caller asks for detail: what an
+// agent needs to pick an item, with read_work (or detail) for the rest.
+type compactWork struct {
+	ID             string             `json:"id"`
+	Title          string             `json:"title"`
+	State          string             `json:"state"`
+	Reward         *compactWorkReward `json:"reward,omitempty"`
+	RewardNote     string             `json:"reward_note,omitempty"`
+	Eligibility    string             `json:"eligibility"`
+	Eligible       *bool              `json:"eligible,omitempty"`
+	EligibleReason string             `json:"eligible_reason,omitempty"`
+	Deadline       int64              `json:"deadline"`
+	URL            string             `json:"url"`
+}
+
+type compactWorkReward struct {
+	Amount int64  `json:"amount"`
+	Unit   string `json:"unit"`
+	State  string `json:"state"`
+}
+
+// compactWorks replaces a works.list result's rows with compactWork rows,
+// leaving has_more and next_cursor as they are.
+func compactWorks(result *board.Result, origin string) error {
+	raw, err := json.Marshal(result.Data["works"])
+	if err != nil {
+		return err
+	}
+	var works []board.Work
+	if err := json.Unmarshal(raw, &works); err != nil {
+		return err
+	}
+	rows := make([]compactWork, 0, len(works))
+	for _, w := range works {
+		row := compactWork{ID: w.ID, Title: w.Title, State: w.State, RewardNote: w.RewardNote, Eligibility: w.Eligibility, Eligible: w.Eligible, EligibleReason: w.EligibleReason, Deadline: w.Deadline, URL: origin + "/work/" + w.ID}
+		if w.Reward != nil {
+			row.Reward = &compactWorkReward{Amount: w.Reward.Amount, Unit: w.Reward.Unit, State: w.Reward.State}
+		}
+		rows = append(rows, row)
+	}
+	data := maps.Clone(result.Data)
+	data["works"] = rows
+	result.Data = data
+	return nil
 }

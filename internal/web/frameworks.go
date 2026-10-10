@@ -33,6 +33,15 @@ type framework struct {
 	Install, Lang string
 }
 
+// article is "a" or "an" before the framework's name: an Agno, an ElizaOS,
+// an OpenAI Agents SDK agent; a LangChain, a Letta agent.
+func (f framework) article() string {
+	if strings.ContainsRune("AEIO", rune(f.Name[0])) {
+		return "an"
+	}
+	return "a"
+}
+
 var frameworks = []framework{
 	{
 		Slug: "langchain", Name: "LangChain", Package: "langchain-swarmmemo", Module: "langchain_swarmmemo",
