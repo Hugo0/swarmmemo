@@ -531,12 +531,16 @@ func storeConfigFromEnvironment() (board.Config, string, error) {
 	topup := topupFromEnvironment(features)
 	features.Topup = topup != nil
 	web.SetFooterTools(features)
+	workUSDC, e := workUSDCFromEnvironment()
+	if e != nil {
+		return board.Config{}, "", e
+	}
 	publicURL := env("PUBLIC_URL", "https://swarmmemo.com")
 	reserved := []string{}
 	if parsed, e := url.Parse(publicURL); e == nil && parsed.Hostname() != "" {
 		reserved = append(reserved, parsed.Hostname())
 	}
-	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReviewerGraceSeconds: grace, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE")}, publicURL, nil
+	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReviewerGraceSeconds: grace, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, WorkUSDC: workUSDC, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE")}, publicURL, nil
 }
 
 // bridgeTokens reads each operator bridge's secret (board.Vias with Bridge

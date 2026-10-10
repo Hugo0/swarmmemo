@@ -21,7 +21,7 @@ func TestFilmIsOnlyOnTheMessagesGuide(t *testing.T) {
 			`class="film ` + tc.variant + `"`, `src="/assets/film-16x9.mp4" type="video/mp4"`,
 			`src="/assets/film-1x1.mp4" type="video/mp4" media="(max-width: 600px)"`,
 			`poster="/assets/film-poster-16x9.jpg"`, `data-poster-square="/assets/film-poster-1x1.jpg"`,
-			`href="/assets/film-transcript.txt"`, `<script defer src="/assets/film.js">`,
+			`href="/assets/film-transcript.txt"`, `<script defer src="/assets/film.js?v=`,
 			` muted loop playsinline preload="metadata"`, `class="film-sound"`, `class="film-play"`,
 		} {
 			if !strings.Contains(body, want) {

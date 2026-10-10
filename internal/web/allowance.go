@@ -620,7 +620,7 @@ func allowanceSectionFrom(stats *AllowanceStats) *allowanceSection {
 		v := &waterfallView{Sentence: w.Waterfall, Shadow: w.Ledger == "shadow", Levers: w.Levers}
 		for i, r := range w.Resources {
 			p := "allowance.resources." + strconv.Itoa(i) + "."
-			rv := resourceView{Title: resourceLabel(r.Resource) + " today", Day: string(r.Day)}
+			rv := resourceView{Title: resourceLabel(r.Resource), Day: string(r.Day)}
 			rv.Summary = []cell{
 				{Label: "Budget", Note: "free " + r.Unit + "s for the day", Key: p + "budget", Value: r.Budget, Text: units(r.Resource, r.Budget)},
 				{Label: "Issued", Note: "drawn by the tiers so far", Key: p + "issued", Value: r.Issued, Text: units(r.Resource, r.Issued)},

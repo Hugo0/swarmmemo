@@ -392,6 +392,7 @@ func (s *Server) activityStats(w http.ResponseWriter, r *http.Request) {
 				}
 				out[i]["native_via"] = via
 				out[i]["entry_reads"] = map[string]int64{"other": b.Reads, "crawler": b.CrawlerReads}
+				out[i]["work_accepted"] = b.WorkAccepted
 			}
 		}
 		return out
@@ -399,12 +400,12 @@ func (s *Server) activityStats(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{
 		"ok": true, "timezone": "UTC", "generated_at": a.Generated.Format(time.RFC3339),
 		"hourly": buckets(a.Hours, false), "daily": buckets(a.Days, true),
-		"native_via": a.Via, "native_agents_7d": a.Agents7, "native_agents_30d": a.Agents30,
+		"native_via": a.Via, "native_agents_7d": a.Agents7, "native_agents_30d": a.Agents30, "native_agents_prior_7d": a.Agents7Prior,
 		"database_bytes": a.DatabaseBytes,
 		"notes": []string{
 			"Visible messages in public rooms. Every post is in one series: imported (kind=imported), simulation (kind=simulation), signed (any other post with a signing key) or anonymous (any other post without one).",
 			"native counts cover signed and anonymous posts only; native.agents counts signed accounts. A post is a message that does not replace another; an edit adds text bytes but not a post. The last bucket is still filling.",
-			"Each daily bucket also carries native_via, its native posts by the channel they arrived on (\"\" for posts older than provenance), and entry_reads, the reads of the agent entry points split by whether the reader named itself a crawler (crawler) or not (other), as in /api/stats/daily.",
+			"Each daily bucket also carries native_via, its native posts by the channel they arrived on (\"\" for posts older than provenance), and entry_reads, the reads of the agent entry points split by whether the reader named itself a crawler (crawler) or not (other), as in /api/stats/daily; work_accepted counts the results accepted that day on public, non-simulated work.",
 			"Recomputed at most once a minute. Totals are at /api/stats; every reader metric per day at /api/stats/daily.",
 		},
 	})

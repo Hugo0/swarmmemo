@@ -20,21 +20,35 @@
   };
   const smooth = (a, b, x) => {const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t);};
   const cell = 7;
-  // Interaction: a soft brightening under the pointer, and on click or tap a
-  // brighter ring that expands and fades. The field runs at 10 fps at rest and
-  // 30 while someone is interacting, then settles back.
-  let px = -1e4, py = -1e4, lastInput = -1e9;
+  // Interaction. The pointer warms the field the longer it rests (a quick
+  // sweep barely registers), pushes the dots outward like a lens, and drags
+  // the drifting pattern along with its motion. A click or tap sends a slow
+  // wave that displaces the pattern as it travels, then fades. The field runs
+  // at 10 fps at rest and 30 while someone is interacting, then settles back.
+  let px = -1e4, py = -1e4, lastInput = -1e9, lastMove = 0, heat = 0, speed = 0;
+  let dragX = 0, dragY = 0, velX = 0, velY = 0, warming = false;
   const ripples = [];
-  addEventListener('pointermove', e => {if (still) return; px = e.clientX; py = e.clientY; lastInput = performance.now(); wake();}, {passive: true});
+  addEventListener('pointermove', e => {
+    if (still) return;
+    const now = performance.now(), dt = Math.max(8, now - lastMove);
+    if (px > -1e3) {
+      const mx = e.clientX - px, my = e.clientY - py;
+      speed = Math.min(4, Math.hypot(mx, my) / dt);
+      velX += mx * 0.0009; velY += my * 0.0009;
+    }
+    px = e.clientX; py = e.clientY; lastMove = lastInput = now; wake();
+  }, {passive: true});
   addEventListener('pointerdown', e => {
     if (still) return;
     ripples.push({x: e.clientX, y: e.clientY, at: performance.now()});
-    if (ripples.length > 6) ripples.shift();
+    if (ripples.length > 5) ripples.shift();
     lastInput = performance.now(); wake();
   }, {passive: true});
-  document.documentElement.addEventListener('pointerleave', () => {px = py = -1e4;});
+  document.documentElement.addEventListener('pointerleave', () => {px = py = -1e4; heat = 0;});
   // Wall-clock time, so the pattern continues from page to page instead of restarting.
   const clock = () => (Date.now() / 1000) % 86400;
+  const waveSpeed = 170, waveLife = 4.2, waveWidth = 46, glowR = 190, glowS = 70;
+  let prev = performance.now();
   function draw(t) {
     const w = Math.max(1, canvas.clientWidth), h = Math.max(1, canvas.clientHeight);
     if (canvas.width !== w || canvas.height !== h) {canvas.width = w; canvas.height = h;}
@@ -42,21 +56,41 @@
     const style = getComputedStyle(box);
     ctx.fillStyle = style.color;
     const base = parseFloat(style.getPropertyValue('--field-alpha')) || 0.07;
-    const now = performance.now();
-    for (let i = ripples.length - 1; i >= 0; i--) if (now - ripples[i].at > 1800) ripples.splice(i, 1);
-    const asp = w / h, glowR = 150;
+    const now = performance.now(), dt = Math.min(0.2, (now - prev) / 1000); prev = now;
+    for (let i = ripples.length - 1; i >= 0; i--) if (now - ripples[i].at > waveLife * 1000) ripples.splice(i, 1);
+    // Heat rises over about two seconds while the pointer rests or drifts
+    // slowly, and drains quickly while it moves fast or after it leaves.
+    if (now - lastMove > 120) speed *= Math.pow(0.02, dt);
+    const target = px < -1e3 ? 0 : Math.max(0, 1 - speed * 0.9);
+    heat += (target - heat) * (1 - Math.pow(target > heat ? 0.55 : 0.02, dt));
+    warming = Math.abs(target - heat) > 0.01;
+    // The drag decays, so the pattern eases back to its own drift.
+    velX *= Math.pow(0.25, dt); velY *= Math.pow(0.25, dt);
+    dragX += velX * dt * 30; dragY += velY * dt * 30;
+    const asp = w / h, waves = ripples.map(r => ({x: r.x, y: r.y, age: (now - r.at) / 1000}));
     for (let gy = cell / 2; gy < h; gy += cell) {
       for (let gx = cell / 2; gx < w; gx += cell) {
-        const cx = (gx / w - 0.5) * asp + 0.5, cy = gy / h;
-        const c = smooth(0.5, 0.95, noise(cx * 3.2 + t * 0.06, cy * 3.2 - t * 0.045)) * 0.7;
-        // Excitement from the pointer and from ripples, 0..1.
-        let e = 0;
+        // Displacement of the sample point: a lens around the pointer and a
+        // radial push riding each wave front.
+        let sx = gx, sy = gy, e = 0;
         const dx = gx - px, dy = gy - py;
-        if (dx > -glowR && dx < glowR && dy > -glowR && dy < glowR) e = Math.max(e, 0.45 * Math.exp(-(dx * dx + dy * dy) / (2 * 55 * 55)));
-        for (const r of ripples) {
-          const age = (now - r.at) / 1000, radius = age * 420, d = Math.hypot(gx - r.x, gy - r.y) - radius;
-          if (d > -40 && d < 40) e = Math.max(e, (1 - age / 1.8) * Math.exp(-(d * d) / (2 * 14 * 14)));
+        if (dx > -glowR && dx < glowR && dy > -glowR && dy < glowR) {
+          const g = Math.exp(-(dx * dx + dy * dy) / (2 * glowS * glowS));
+          const push = 26 * (0.3 + heat) * g;
+          sx -= dx * push / glowS; sy -= dy * push / glowS;
+          e = (0.04 + 0.56 * heat) * g;
         }
+        for (const r of waves) {
+          const rx = gx - r.x, ry = gy - r.y, dist = Math.hypot(rx, ry) || 1, d = dist - r.age * waveSpeed;
+          if (d > -2.5 * waveWidth && d < 2.5 * waveWidth) {
+            const fade = Math.pow(1 - r.age / waveLife, 1.6), g = Math.exp(-(d * d) / (2 * waveWidth * waveWidth));
+            const push = 30 * fade * g * Math.sin(d / waveWidth * 2.2);
+            sx += rx / dist * push; sy += ry / dist * push;
+            e = Math.max(e, 0.32 * fade * g);
+          }
+        }
+        const cx = ((sx - dragX) / w - 0.5) * asp + 0.5, cy = (sy - dragY) / h;
+        const c = smooth(0.5, 0.95, noise(cx * 3.2 + t * 0.06, cy * 3.2 - t * 0.045)) * 0.7;
         const v = Math.max(c, e * 0.9);
         if (v <= 0.04) continue;
         const j = (hash(gx, gy) - 0.5) * cell * 0.35;
@@ -72,7 +106,7 @@
   addEventListener('resize', () => draw(clock()), {passive: true});
   let raf = 0, last = 0;
   const loop = now => {
-    const active = now - lastInput < 2000 || ripples.length > 0;
+    const active = now - lastInput < 2500 || ripples.length > 0 || warming || Math.abs(velX) + Math.abs(velY) > 0.002;
     if (still && !active) {raf = 0; draw(clock()); return;}
     if (now - last > 1000 / (active ? 30 : 10)) {last = now; draw(still ? 2 : clock());}
     raf = document.hidden ? 0 : requestAnimationFrame(loop);

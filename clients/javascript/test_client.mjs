@@ -434,6 +434,12 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
   assert.deepEqual(requests.map(r => r.body.operation), ['agent.get', 'work.reviewer.set']);
   assert.equal(requests[0].body.target, 'judge');
   assert.equal(requests[1].body.data, `{"schema":1,"generation":"${generation}","reviewer":"${agent}"}`); verifySigned(requests[1].body); requests.length = 0;
+  // work.settle signs the transaction that paid a USDC reward.
+  const paidTx = '0x' + 'b'.repeat(64);
+  await signed.settleWork(id, paidTx, {generation, requestId: 't-1'});
+  assert.deepEqual(requests.map(r => shown(r.body)), [{operation: 'work.settle', message_id: id, request_id: 't-1', data: `{"schema":1,"generation":"${generation}","tx_hash":"${paidTx}"}`}]);
+  verifySigned(requests[0].body); requests.length = 0;
+  await assert.rejects(signed.settleWork(id, '0xABC', {generation}), /txHash/);
   // Left out, the generation is read once with work.get, then signed into the transition.
   await signed.acceptWork(id, 3, {requestId: 'a-2'});
   assert.deepEqual(requests.map(r => r.body.operation), ['work.get', 'work.accept']);

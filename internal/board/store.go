@@ -254,7 +254,10 @@ CREATE TABLE IF NOT EXISTS leases (
 // 26: the write signals table, the operator-only request signals of every
 // accepted write (C160, signals.go). Additive, but a schema-25 binary would
 // write without recording them and never prune the rows already kept.
-const SchemaVersion = 26
+//
+// 27: work_usdc, a work reward's USDC asset (workusdc.go, RFC 0016, C156).
+// Additive, but a schema-26 binary would neither owe nor settle USDC.
+const SchemaVersion = 27
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -731,7 +734,8 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 			return empty, err
 		}
 	}
-	s.preflightScreen(ctx, a, cmd) // RFC0013 §5.2: a protected reader's catch-up, no transaction held
+	ctx = s.preflightSettle(ctx, cmd, a) // RFC 0016: the chain read, no transaction held
+	s.preflightScreen(ctx, a, cmd)       // RFC0013 §5.2: a protected reader's catch-up, no transaction held
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return empty, err
@@ -1013,7 +1017,7 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readAgentPosts(ctx, tx, c, now)
 	case "agent.profile.publish", "agent.profile.remove":
 		return s.changeProfile(ctx, tx, c, a, now)
-	case "work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel", "work.reviewer.set":
+	case "work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel", "work.reviewer.set", "work.settle":
 		return s.changeWork(ctx, tx, c, a, now)
 	case "work.get", "works.list", "work.history":
 		return s.readWork(ctx, tx, c, a, now)

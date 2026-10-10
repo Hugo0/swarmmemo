@@ -79,3 +79,13 @@ func operatorTopup(ctx context.Context, store *board.Store, args []string, out i
 	}
 	return errors.New(topupUsage)
 }
+
+// workUSDCFromEnvironment is the work-reward USDC chain reader
+// (WORK_USDC_RPC_URL, RFC 0016): nil, and USDC rewards off, when unset.
+func workUSDCFromEnvironment() (*services.USDCChain, error) {
+	v := os.Getenv("WORK_USDC_RPC_URL")
+	if v == "" {
+		return nil, nil
+	}
+	return services.NewUSDCChain(v)
+}

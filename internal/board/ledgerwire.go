@@ -261,7 +261,12 @@ func (s *Store) SweepAllowance(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return n + m, tx.Commit()
+	// And USDC promised to work that lapsed (workusdc.go).
+	v, err := settleWorkUSDCLapsed(ctx, tx, now, ledger.SweepMax)
+	if err != nil {
+		return 0, err
+	}
+	return n + m + v, tx.Commit()
 }
 
 // ledgerCharge is charge() with ALLOWANCE_LEDGER=on.

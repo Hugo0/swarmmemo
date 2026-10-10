@@ -840,3 +840,117 @@ class AttachmentLineTests(unittest.TestCase):
         ]}, "")
         self.assertIn(f"  attachment {'a' * 32}: rows.csv (text/csv, 12 bytes); save it: download {'a' * 32} PATH", said)
         self.assertIn(f"attachment {'b' * 32}: gone", [s.strip() for s in said])
+
+
+ROOM = "~" + "a" * 26
+
+
+class FakeBoard(memo.Client):
+    """Records each signed command and answers like the board, without a network."""
+    def __init__(self):
+        super().__init__(key=memo.crypto()[0].from_private_bytes(bytes(32)))
+        self.sent, self.files = [], {}
+
+    def command(self, operation, **fields):
+        self.sent.append((operation, fields))
+        if operation == "blob.put":
+            blob = "b%031d" % len(self.sent)
+            self.files[blob] = fields["data"]
+            return {"ok": True, "data": {"blob": {"id": blob}}}
+        if operation == "blob.get":
+            data = self.files[fields["message_id"]]
+            raw = memo.unb64(data)
+            return {"ok": True, "data": {"data": data, "blob": {"size": len(raw), "sha256": memo.hashlib.sha256(raw).hexdigest()}}}
+        if operation == "post":
+            return {"ok": True, "receipt": {"id": "m" * 32}}
+        raise AssertionError("unexpected " + operation)
+
+
+class ChatAttachTests(TempHome):
+    """chat send --attach (C150): a private conversation lists the uploaded blobs on the
+    post; a sealed one encrypts each file under its own key and names it only inside
+    the sealed message, so no cleartext byte or filename reaches the board."""
+    def chat(self, board, *argv):
+        args = memo.build_parser().parse_args(["--key", "KEY.json", "chat", *argv])
+        out, err = io.StringIO(), io.StringIO()
+        return memo.Chat(args, board, out, err), out, err
+
+    def pin(self, sealed):
+        memo.write_private(memo.chat_home() / "chat" / "pins.json", {ROOM: {"sealed": sealed, "creator": "x"}})
+
+    def files(self, *contents):
+        paths = []
+        for n, content in enumerate(contents):
+            path = self.home / f"notes{n}.txt"
+            path.write_bytes(content)
+            paths.append(str(path))
+        return paths
+
+    def test_private_conversation_attaches_blobs(self):
+        self.pin(False)
+        board = FakeBoard()
+        paths = self.files(b"rows,1\n", b"\x00\x01binary")
+        chat, out, _ = self.chat(board, "send", ROOM, "-", "--attach", paths[0], "--attach", paths[1])
+        self.assertEqual(chat.send(ROOM, "here are the files", files=chat.args.attach), 0)
+        puts = [f for op, f in board.sent if op == "blob.put"]
+        self.assertEqual([(f["room"], f["filename"], memo.unb64(f["data"])) for f in puts],
+                         [(ROOM, "notes0.txt", b"rows,1\n"), (ROOM, "notes1.txt", b"\x00\x01binary")])
+        self.assertEqual(puts[0]["media_type"], "text/plain")
+        post = [f for op, f in board.sent if op == "post"][0]
+        self.assertEqual((post["text"], post["visibility"], len(post["attachments"])), ("here are the files", "private", 2))
+        self.assertIn("with 2 files", out.getvalue())
+
+    def test_sealed_conversation_encrypts_each_file(self):
+        seal = memo.seal_module()
+        self.pin(True)
+        board, key = FakeBoard(), seal.new_epoch_key()
+        paths = self.files(b"secret plan")
+        chat, _, _ = self.chat(board, "send", ROOM, "-", "--attach", paths[0])
+        with patch.object(memo.Chat, "sealed_epoch", lambda self, room: (1, key)):
+            self.assertEqual(chat.send(ROOM, "sealed note", files=chat.args.attach), 0)
+        put = [f for op, f in board.sent if op == "blob.put"][0]
+        self.assertEqual((put["filename"], put["media_type"]), ("sealed.bin", "application/octet-stream"))
+        everything = json.dumps(board.sent)
+        self.assertNotIn("secret plan", everything)
+        self.assertNotIn("notes0", everything)
+        post = [f for op, f in board.sent if op == "post"][0]
+        self.assertNotIn("attachments", post)
+        body = seal.open_envelope({1: key}, board.service, ROOM, chat.me, post["text"])
+        self.assertEqual(body["text"], "sealed note")
+        entry = body["files"][0]
+        self.assertEqual((entry["blob"], entry["name"]), (list(board.files)[0], "notes0.txt"))
+        self.assertEqual(seal.decrypt_file(memo.unb64(put["data"]), entry), b"secret plan")
+
+        # The recipient finds the file in the sealed message, decrypts and checks it.
+        message = {"id": "m" * 32, "author": chat.me, "sealed": True, "text": post["text"]}
+        conv = {"room": ROOM, "members": [], "created": {"public_key": memo.b64(memo.public_bytes(board.key))}}
+        page = {"sealed": True, "data": {"conversation": conv, "seal": {"keys": []}, "has_more": False}, "messages": [message]}
+        learn = lambda self, entries: self.keys.update({1: key})
+        target = self.home / "saved.txt"
+        reader, out, _ = self.chat(board, "download", ROOM, entry["blob"], str(target))
+        with patch.object(memo.Chat, "get", lambda self, room, **kw: page), patch.object(memo.SealedRoom, "learn", learn):
+            self.assertEqual(reader.download(), 0)
+            other, _, _ = self.chat(board, "download", ROOM, "c" * 32, str(self.home / "other.txt"))
+            with self.assertRaises(memo.ChatStop):
+                other.download()
+        self.assertEqual(target.read_bytes(), b"secret plan")
+        self.assertEqual(oct(target.stat().st_mode & 0o777), "0o600")
+        self.assertIn("decrypted", out.getvalue())
+        rooms = memo.SealedRoom(reader, conv)
+        rooms.keys[1] = key
+        text, _ = rooms.open(message)
+        self.assertIn(f"[sealed file notes0.txt ({entry['blob']}): save it: chat download {ROOM} {entry['blob']} PATH]", text)
+
+    def test_limits_and_secrets_hold_before_anything_is_sent(self):
+        self.pin(False)
+        board = FakeBoard()
+        big = self.home / "big.bin"
+        big.write_bytes(b"x" * (memo.ATTACHMENT_BYTES + 1))
+        chat, _, err = self.chat(board, "send", ROOM, "-", "--attach", str(big))
+        with self.assertRaises(memo.ChatStop): chat.send(ROOM, "hi", files=chat.args.attach)
+        with self.assertRaises(memo.ChatStop): chat.send(ROOM, "hi", files=self.files(b"a") * 9)
+        leaky = self.files(b"export GITHUB_TOKEN='abcdefgh123456'\n")
+        with self.assertRaises(memo.ChatStop) as stop: chat.send(ROOM, "hi", files=leaky)
+        self.assertEqual(stop.exception.code, 3)
+        self.assertIn("notes0.txt, line 1", err.getvalue())
+        self.assertEqual(board.sent, [])

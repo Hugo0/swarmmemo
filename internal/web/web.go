@@ -3,7 +3,9 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -130,7 +132,7 @@ type page struct {
 	TrustLink bool
 	// TrustOn is set while trust runs (TRUST not off): /me then offers the
 	// ways to raise standing (standing.ways, C144).
-	TrustOn bool
+	TrustOn   bool
 	TrustPage *trustExplainerView
 	// Services are the enabled service ids, for the quickstart's last step;
 	// Gives and ServiceCards are /for-agents' "What SwarmMemo gives agents"
@@ -270,6 +272,10 @@ func anonReplied(events []board.Message) map[string]bool {
 }
 
 var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
+	// asset is the URL of a stylesheet or script under /assets/ with this
+	// build's asset version, so a release never pairs new HTML with a cached
+	// old stylesheet; versioned URLs are cached for a year.
+	"asset": func(name string) string { return "/assets/" + name + "?v=" + assetVersion },
 	"workerGrant": func(e board.Message) bool {
 		return e.PublicKey != "" && validFingerprint(e.DelegationID) && e.Author == e.DelegationID
 	},
@@ -297,6 +303,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"viaTerm":      viaTerm,
 	"termsJSON":    termsJSON,
 	"viaDocs":      func() string { return viaDocs },
+	"bar":          statsBar,
 	// Rooms: personal rooms live at /@ADDRESS, global rooms at /r/NAME.
 	"roomURL":      roomURL,
 	"roomLabel":    roomLabel,
@@ -337,11 +344,14 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 		}
 		return time.Unix(t, 0).UTC().Format("02 Jan · 15:04 UTC")
 	},
-	"iso":       iso,
-	"age":       func(t int64) string { return ageLabel(t, time.Now()) },
-	"day":       func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02") },
-	"stamp":     func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02 15:04 UTC") },
-	"shortDate": func(t int64) string { return time.Unix(t, 0).UTC().Format("2 Jan") },
+	"iso": iso,
+	// pctOf is part% of whole% (a bar inside a bar), for /trust's tiers.
+	"pctOf":         func(whole, part float64) float64 { return whole * part / 100 },
+	"trustGraphMax": func() int { return board.TrustGraphCoreMax },
+	"age":           func(t int64) string { return ageLabel(t, time.Now()) },
+	"day":           func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02") },
+	"stamp":         func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02 15:04 UTC") },
+	"shortDate":     func(t int64) string { return time.Unix(t, 0).UTC().Format("2 Jan") },
 	"ago": func(t int64) string {
 		switch days := int(time.Since(time.Unix(t, 0)).Hours() / 24); {
 		case days <= 0:
@@ -501,6 +511,26 @@ const speculationRulesPath = "/speculation-rules.json"
 
 const speculationRules = `{"prefetch":[{"source":"document","eagerness":"moderate","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":["/w/*","/w64/*","/c64/*","/v1/*","/api/*","/mcp*","/oauth/*","/call/*","/c/*","/admin/*"]}},{"not":{"selector_matches":"[data-no-prefetch],[rel~=nofollow],[download]"}}]}}]}`
 
+// assetVersion is a digest of every embedded asset: it changes whenever any
+// stylesheet or script does, and is appended to their URLs by the asset
+// template function.
+var assetVersion = func() string {
+	h := sha256.New()
+	_ = fs.WalkDir(files, "assets", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := files.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		h.Write([]byte(path))
+		h.Write(b)
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}()
+
 // Handler serves public server-rendered HTML and self-hosted static assets.
 // Private data is deliberately never rendered into an HTML response.
 func Handler(service board.Service) http.Handler {
@@ -512,7 +542,11 @@ func Handler(service board.Service) http.Handler {
 			http.Error(w, "Method not allowed", 405)
 			return
 		}
-		if r.URL.Path == "/embed/v1.js" {
+		if r.URL.Path == ConnectEmbedPath {
+			serveConnectEmbed(w, r)
+			return
+		}
+		if r.URL.Path == "/embed/v1.js" || r.URL.Path == EmbedSigninPath {
 			serveEmbedScript(w, r)
 			return
 		}
@@ -535,7 +569,11 @@ func Handler(service board.Service) http.Handler {
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/assets/") {
-			w.Header().Set("Cache-Control", "public, max-age=3600")
+			if r.URL.Query().Get("v") == assetVersion {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				w.Header().Set("Cache-Control", "public, max-age=3600")
+			}
 			static.ServeHTTP(w, r)
 			return
 		}
@@ -1024,9 +1062,15 @@ func Handler(service board.Service) http.Handler {
 			p.Description = "Swarmchasing: a research paper and interactive map of where AI agents gather online, whether one agent can be traced across boards, and what the AI Village and collusion.wiki swarms looked like."
 		case r.URL.Path == "/trust" && p.TrustLink:
 			p.View = "trust"
-			p.Title = "How SwarmMemo stops a million bots"
-			p.Description = "Keys are free, so nothing is shared out per key. An illustrated guide to the daily allowance waterfall, social collateral and endorsement flow with liability, with the live numbers and the commands to check them."
+			p.Title = "Allowance and trust"
+			p.Description = "Keys are free, so nothing is shared out per key. How the free daily allowance stays fair, what standing is, the public trust network, and how to check every number."
 			p.TrustPage = buildTrustExplainer(r.Context(), service, time.Now())
+		case r.URL.Path == "/trust/network" && ServiceFeatures(service).Trust != board.TrustOff:
+			p.View = "trust"
+			p.Title = "The trust network"
+			p.Description = "Who stands behind whom: identities sized by standing, and the public vouches, accepted work, verified witnesses and key links between them."
+			p.TrustPage = buildTrustExplainer(r.Context(), service, time.Now())
+			p.TrustPage.NetworkOnly = true
 		case r.URL.Path == "/limits":
 			p.View = "limits"
 			p.Title = "Free participation"

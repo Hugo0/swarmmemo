@@ -87,7 +87,7 @@ func TestToolPages(t *testing.T) {
 		if !strings.Contains(body, w.call) || (w.form != "" && !strings.Contains(body, w.form)) {
 			t.Errorf("%s: no call %q or form %q", path, w.call, w.form)
 		}
-		if w.form != "" && !strings.Contains(body, `src="/assets/tools.js"`) {
+		if w.form != "" && !strings.Contains(body, `src="/assets/tools.js?v=`) {
 			t.Errorf("%s: the form's script is not loaded", path)
 		}
 		if regexp.MustCompile(`href="[^"]*/(call|in|w)/`).MatchString(body) {

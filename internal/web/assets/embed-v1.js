@@ -127,7 +127,9 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
       b.onclick = () => { order = key; for (const s of sortButtons) s.setAttribute('aria-pressed', String(s === b)); render(); };
       return b;
     });
-    sorts.append(...sortButtons); header.append(heading, sorts);
+    // Sign in with SwarmMemo (C157): embed-signin.js, imported on click or when this site holds a grant.
+    const me = el('span', undefined, 'me'), login = button('Sign in'); me.append(login);
+    sorts.append(...sortButtons); header.append(heading, sorts, me);
     const list = el('div'), more = button('Load more comments', 'more'); more.hidden = true;
     const status = el('p', 'Loading comments…', 'notice'); status.setAttribute('role', 'status');
     // The composer: one field until focused, then the handle, identity and Post.
@@ -155,7 +157,7 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
       const sheet = new CSSStyleSheet(); sheet.replaceSync(style.textContent); root.adoptedStyleSheets = [sheet];
     } else root.append(style);
     root.append(section);
-    let replyTo = '', cursor = 'start', loaded = false, keyPromise, editing = null, mine = '', placed = '', firstRender = true;
+    let replyTo = '', cursor = 'start', loaded = false, keyPromise, editing = null, mine = '', placed = '', firstRender = true, session;
     const messages = new Map(), votes = new Map(), pending = new Map(), reported = new Set();
     let saved;
     try { saved = localStorage.getItem(slot); } catch (_) { /* A session key still works. */ }
@@ -229,15 +231,15 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
       let record = pending.get(intent);
       if (!record) {
         if (pending.size >= 16) throw Error('Resolve earlier requests before starting another.');
-        const key = await identity();
-        if (!key && command.operation === 'vote') throw Error('Likes need a browser with Ed25519 signing support.');
-        const payload = {...command, request_id: uuid()};
-        if (key) {
+        const payload = {...command, request_id: uuid()}, key = !session?.ops.includes(command.operation) && await identity();
+        if (key === false) await session.sign(payload);
+        else if (key) {
           key.handle = handle.value.trim(); save(key); if (!mine) { mine = key.public_key; showWho(); }
           Object.assign(payload, {public_key: key.public_key, timestamp: Math.floor(Date.now() / 1000), nonce: uuid()});
           const privateKey = await crypto.subtle.importKey('pkcs8', unb64(key.private_key), 'Ed25519', false, ['sign']);
           payload.signature = b64(await crypto.subtle.sign('Ed25519', privateKey, core.canonical(payload, service)));
-        } else identityNote.textContent = 'Ed25519 signing is unavailable; this is sent anonymously.';
+        } else if (command.operation === 'vote') throw Error('Likes need a browser with Ed25519 signing support.');
+        else identityNote.textContent = 'Ed25519 signing is unavailable; this is sent anonymously.';
         record = {payload, ambiguous: false}; pending.set(intent, record);
       }
       try {
@@ -338,7 +340,7 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
       });
       // A removed comment with nothing visible under it is left out entirely.
       const kids = new Map(); for (const m of roots) { if (!kids.has(m.reply_to)) kids.set(m.reply_to, []); kids.get(m.reply_to).push(m); }
-      const live = new Map(), alive = m => { if (!live.has(m.id)) { live.set(m.id, false); live.set(m.id, !m.hidden || (kids.get(m.id) || []).some(alive)); } return live.get(m.id); };
+      const live = new Map(), alive = m => { if (!live.has(m.id)) { live.set(m.id, false); live.set(m.id, !m.hidden || session?.mod || (kids.get(m.id) || []).some(alive)); } return live.get(m.id); };
       const ordered = roots.filter(alive).sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.created_at - b.created_at);
       let count = 0;
       for (const message of ordered) {
@@ -404,7 +406,7 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
           menu.onclick = () => { extra.hidden = !extra.hidden; menu.setAttribute('aria-expanded', String(!extra.hidden)); };
           extra.append(copy, report); actions.append(menu, extra);
         }
-        article.append(actions);
+        article.append(actions); session?.decorate(actions, message);
         // Nesting stops at depth four: deeper replies join that ancestor's flat
         // list in order, so any commenter's long reply chain stays a shallow DOM.
         let replies = parent?.node;
@@ -480,6 +482,10 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
       } catch (error) { status.textContent = error.message; }
       finally { submit.disabled = false; }
     };
+    const signIn = win => import(origin + '/embed/signin-v1.js').then(m => m.default({core, origin, room, me, win, status, handle, whoami, meAvatar, request, messages, render, mine: v => { mine = v; }}))
+      .then(s => { session = s; render(); }, error => { status.textContent = error.message; });
+    login.onclick = () => signIn(open('', 'swarmmemo-connect', 'popup,width=480,height=640'));
+    try { if (localStorage.getItem('swarmmemo.embed.grant.v1')) signIn(); } catch (_) { /* Signed out. */ }
     showWho();
     await load();
   }

@@ -23,7 +23,7 @@ func TestEmbedDocuments(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
 				t.Fatal(err)
 			}
-			if doc.Snippet != embedSnippet || len(doc.Sections) != 11 {
+			if doc.Snippet != embedSnippet || len(doc.Sections) != 12 {
 				t.Fatalf("incomplete JSON: %+v", doc)
 			}
 			// Signed first (C158): own the room and post the welcome with the

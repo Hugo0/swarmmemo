@@ -79,9 +79,11 @@ const SwarmMemoCore = (() => {
     const part = (tag, cls, text) => { const n = document.createElement(tag); n.className = cls; n.textContent = text; return n; };
     let badge = workResult[s], detail = ' for ' + w.title;
     if (!w.result_of) {
-      const r = !w.simulated && w.reward?.amount, note = !w.simulated && typeof w.reward_note === 'string' && w.reward_note, due = new Date(w.deadline * 1000);
-      badge = w.simulated ? 'Simulated task' : r || note ? 'Paid task' : 'Task';
-      detail = [r && String(r).replace(/\B(?=(\d{3})+$)/g, ',') + (r === 1 ? ' credit' : ' credits'), note, workWord[s] || s,
+      const r = !w.simulated && w.reward?.amount, u = !w.simulated && w.reward_usdc, note = !w.simulated && typeof w.reward_note === 'string' && w.reward_note, due = new Date(w.deadline * 1000);
+      const c = r && String(r).replace(/\B(?=(\d{3})+$)/g, ',') + (r === 1 ? ' credit' : ' credits');
+      badge = w.simulated ? 'Simulated task' : r || u || note ? 'Paid task' : 'Task';
+      detail = [u ? (r ? c + ' (' + w.reward.state + ') + ' : '') + u.amount + ' USDC (' + u.state + ')' : c, note, workWord[s] || s,
+        u && /^pa/.test(w.reward_state) && 'reward ' + w.reward_state.replace('_', ' '),
         /^(open|claimed|submitted)$/.test(s) && 'due ' + months[due.getUTCMonth()] + ' ' + due.getUTCDate(),
         'eligible: ' + (workWord[w.eligibility] || w.eligibility || 'open')].filter(Boolean).map(t => ' · ' + t).join('');
     }

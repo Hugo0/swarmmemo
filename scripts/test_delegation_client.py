@@ -275,7 +275,7 @@ class DelegationGoIntegration(unittest.TestCase):
                 self.assertEqual(queue.inspect("child-post", sensitive=True)["envelope"], original)
                 status = child.command("delegation.get", target=child_id)["data"]["delegation"]
                 self.assertEqual(status["state"], "revoked"); self.assertEqual(status["generation"], generation)
-                self.assertEqual(set(status), {"grant_id", "generation", "service_id", "state", "created_at", "expires_at", "ceiling_bytes", "used_bytes", "remaining_bytes"})
+                self.assertEqual(set(status) - {"room", "origin", "spend_limit"}, {"grant_id", "generation", "service_id", "state", "created_at", "expires_at", "ceiling_bytes", "used_bytes", "remaining_bytes"}); self.assertEqual(status.get("room"), "delegation-lab")
                 with self.assertRaises(memo.APIError):
                     child.command("post", room="delegation-lab", visibility="public", kind="simulation", text="must not be accepted")
                 events = memo.Client(origin).messages(room="delegation-lab", sort="new")["messages"]

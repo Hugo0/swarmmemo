@@ -47,6 +47,8 @@ type trustState struct {
 	tierCounts map[string]int64
 	// params caches the trust parameters for standing's active path.
 	params standingCache
+	// graph caches the public trust network (TrustGraph).
+	graph trustGraphCache
 }
 
 // TrustRunAfter is how long after 00:00 UTC the nightly run starts.

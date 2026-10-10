@@ -217,6 +217,18 @@
     }
     drawSwitcher();
     if ($('profile-form')) void loadSelf();
+    // After the script has run: the first refreshIdentity comes before
+    // capabilitiesReady is declared, and request() awaits it (a signed read
+    // started now would throw in its temporal dead zone and list nothing).
+    // Only once the section is on screen: a visit to Me reads no settings
+    // (delegations.list is a signed read), the same rule as the backup status.
+    const grantsList = $('site-grants-list');
+    if (grantsList) queueMicrotask(() => {
+      if (grantsSeen) { void loadSiteGrants(); return; }
+      if (!('IntersectionObserver' in window)) return;
+      const seen = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) { seen.disconnect(); grantsSeen = true; void loadSiteGrants(); } });
+      seen.observe($('site-grants'));
+    });
     // After the script has run: the backup code below declares its state.
     // Only when the Key & backup section is on screen: the status read shares the
     // restore read's hourly limit, so merely opening Me must not spend it.
@@ -226,6 +238,35 @@
       const seen = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) { seen.disconnect(); void loadBackupStatus(); } });
       seen.observe(backupState);
     });
+  }
+  // Me, Settings: the worker keys this key granted (delegations.list), sites
+  // first by origin (the embed's Sign in with SwarmMemo names it), each active
+  // one with Revoke (delegation.revoke). A newer read discards an older one.
+  let grantsEpoch = 0, grantsSeen = false;
+  async function loadSiteGrants() {
+    const host = $('site-grants-list'), epoch = ++grantsEpoch;
+    if (!identity) { host.replaceChildren(); return; }
+    let list;
+    try { list = (await request({operation: 'delegations.list', limit: 32}, true)).data?.delegations || []; }
+    catch (error) { if (epoch === grantsEpoch) status('site-grants-status', error.message, true); return; }
+    if (epoch !== grantsEpoch) return;
+    list.sort((a, b) => (b.state === 'active') - (a.state === 'active') || b.created_at - a.created_at);
+    host.replaceChildren(...(list.length ? list.map(g => {
+      const row = node('li'), what = node('span');
+      what.append(node('strong', '', g.origin ? g.origin.replace(/^https:\/\//, '') : 'Worker key ' + g.grant_id.slice(0, 12)), ' in ', link('', '#' + g.room, '/r/' + path(g.room)), node('span', 'small muted', ' · ' + (g.state === 'active' ? 'until ' + new Date(g.expires_at * 1000).toISOString().slice(0, 10) : g.state.replace('_', ' '))));
+      row.append(what);
+      if (g.state === 'active') {
+        const revoke = node('button', 'quiet-button danger', 'Revoke'); revoke.type = 'button';
+        revoke.setAttribute('aria-label', 'Revoke ' + (g.origin || 'worker key ' + g.grant_id.slice(0, 12)) + ' in #' + g.room);
+        revoke.addEventListener('click', () => act(revoke, 'site-grants-status', async () => {
+          await request({operation: 'delegation.revoke', target: g.grant_id, data: JSON.stringify({schema: 1, generation: g.generation}), request_id: uuid()}, true);
+          status('site-grants-status', 'Revoked. ' + (g.origin || 'That worker key') + ' can no longer post or vote as you.');
+          void loadSiteGrants();
+        }));
+        row.append(revoke);
+      }
+      return row;
+    }) : [node('li', 'small muted', 'No sites or worker keys yet. Sign in to a site\'s comment section with SwarmMemo and it shows here.')]));
   }
   // The keys kept in this browser, on Me: the active one marked, the others one
   // click from signing. Switching reloads the page so every count and read

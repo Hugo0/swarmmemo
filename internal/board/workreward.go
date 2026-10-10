@@ -213,9 +213,8 @@ func (s *Store) holdWorkEscrows(ctx context.Context, tx *sql.Tx, a actor, w work
 	if err := refuseHostedTransfer(a); err != nil {
 		return err
 	}
-	var held int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT work_id FROM work_rewards WHERE requester=? AND state IN ('held','pending')
- UNION SELECT work_id FROM work_review_fees WHERE requester=? AND state IN ('held','pending'))`, a.account, a.account).Scan(&held); err != nil {
+	held, err := openWorkRewards(ctx, tx, a.account, w.ID)
+	if err != nil {
 		return err
 	}
 	if held >= WorkRewardsHeldMax {
@@ -260,7 +259,13 @@ func (s *Store) payWorkReward(ctx context.Context, tx *sql.Tx, r *rewardRow, to,
 // markRewardPaid records a done payment and stamps a reward's receipt.
 func (s *Store) markRewardPaid(ctx context.Context, tx *sql.Tx, r *rewardRow, result string, now int64) error {
 	statement, hash := "", ""
-	if r.Table == workRewardsTable && s.workRewardNotary() {
+	// A reward with a USDC asset gets one receipt for every asset, once
+	// all are paid (stampWorkPaid), not this credit-only one.
+	withUSDC, err := workHasUSDC(ctx, tx, r.WorkID)
+	if err != nil {
+		return err
+	}
+	if r.Table == workRewardsTable && s.workRewardNotary() && !withUSDC {
 		b, _ := json.Marshal(workRewardStatement{Schema: WorkRewardSchema, ServiceID: s.config.ServiceID, WorkID: r.WorkID, Requester: r.Requester, Worker: r.Worker,
 			Amount: r.Amount, Unit: "credit", TransferID: r.TransferID, ResultID: result, PaidAt: now, Reviewer: r.Reviewer, DecidedBy: r.DecidedBy})
 		statement, hash = string(b), sha256Hex(b)
@@ -269,8 +274,13 @@ func (s *Store) markRewardPaid(ctx context.Context, tx *sql.Tx, r *rewardRow, re
 		}
 	}
 	r.State, r.Settled, r.Statement, r.ReceiptHash = "paid", now, statement, hash
-	_, err := tx.ExecContext(ctx, "UPDATE "+r.Table+" SET state='paid',worker=?,transfer_id=?,settled_at=?,statement=?,receipt_hash=?,reviewer=? WHERE work_id=?", r.Worker, r.TransferID, now, statement, hash, r.Reviewer, r.WorkID)
-	return err
+	if _, err = tx.ExecContext(ctx, "UPDATE "+r.Table+" SET state='paid',worker=?,transfer_id=?,settled_at=?,statement=?,receipt_hash=?,reviewer=? WHERE work_id=?", r.Worker, r.TransferID, now, statement, hash, r.Reviewer, r.WorkID); err != nil {
+		return err
+	}
+	if r.Table == workRewardsTable && withUSDC {
+		return s.stampWorkPaid(ctx, tx, r.WorkID, now)
+	}
+	return nil
 }
 
 // workRewardNotary reports whether a paid reward gets a notary receipt.

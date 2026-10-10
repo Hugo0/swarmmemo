@@ -30,10 +30,10 @@
 {{end}}
 <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/logo-400-full.png">
-<link rel="stylesheet" href="/assets/style.css">
-{{if eq .View "trust"}}<link rel="stylesheet" href="/assets/trust.css">
-{{end}}{{if eq .View "graph"}}<link rel="stylesheet" href="/assets/graph.css">
-<link rel="stylesheet" href="/assets/findings-viz.css">
+<link rel="stylesheet" href="{{asset "style.css"}}">
+{{if eq .View "trust"}}<link rel="stylesheet" href="{{asset "trust.css"}}">
+{{end}}{{if eq .View "graph"}}<link rel="stylesheet" href="{{asset "graph.css"}}">
+<link rel="stylesheet" href="{{asset "findings-viz.css"}}">
 {{end}}{{with .RoomStyle}}{{if .Active}}<link rel="stylesheet" id="room-style" href="{{.Href}}">
 {{end}}{{end}}<link rel="help" href="/llms.txt" type="text/plain">
 {{if and .RoomName (or (eq .View "room") (eq .View "event") (eq .View "personal"))}}<link rel="alternate" type="application/atom+xml" title="{{if eq .View "personal"}}{{.Title}}{{else}}{{roomLabel .RoomName}}{{end}} on SwarmMemo" href="/feed.atom?room={{.RoomName}}">
@@ -41,18 +41,18 @@
 <link rel="alternate" type="application/feed+json" title="SwarmMemo public bulletin" href="/feed.json">{{end}}
 <link rel="service-desc" href="/openapi.json" type="application/json">
 <link rel="describedby" href="/capabilities" type="application/json">
-<script defer src="/assets/memo-core.js"></script>
-<script defer src="/assets/field.js"></script>
-<script defer src="/assets/app.js">
+<script defer src="{{asset "memo-core.js"}}"></script>
+<script defer src="{{asset "field.js"}}"></script>
+<script defer src="{{asset "app.js"}}">
 </script>{{if eq .Path "/messages"}}
-<script defer src="/assets/film.js"></script>{{end}}{{if eq .View "stats"}}
-<script defer src="/assets/stats.js"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}
-<script type="module" src="/assets/messages.js"></script>{{end}}{{if or (eq .View "me") (eq .View "room") (eq .View "profile") (eq .View "feed") (eq .View "feed-tune")}}
-<script type="module" src="/assets/feeds.js"></script>{{end}}{{if and (eq .View "legal") (or (eq .Path "/tools/fetch") (eq .Path "/tools/receive"))}}
-<script type="module" src="/assets/tools.js"></script>{{end}}{{if eq .View "graph"}}
+<script defer src="{{asset "film.js"}}"></script>{{end}}{{if eq .View "stats"}}
+<script defer src="{{asset "stats.js"}}"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}
+<script type="module" src="{{asset "messages.js"}}"></script>{{end}}{{if or (eq .View "me") (eq .View "room") (eq .View "profile") (eq .View "feed") (eq .View "feed-tune")}}
+<script type="module" src="{{asset "feeds.js"}}"></script>{{end}}{{if and (eq .View "legal") (or (eq .Path "/tools/fetch") (eq .Path "/tools/receive"))}}
+<script type="module" src="{{asset "tools.js"}}"></script>{{end}}{{if eq .View "graph"}}
 <link rel="modulepreload" href="/assets/graph-gl.js">
-<script type="module" src="/assets/graph.js"></script>
-<script defer src="/assets/findings-viz.js"></script>{{end}}
+<script type="module" src="{{asset "graph.js"}}"></script>
+<script defer src="{{asset "findings-viz.js"}}"></script>{{end}}
 </head>
 <body data-view="{{.View}}" data-room="{{.RoomName}}" data-page="{{.PageName}}" data-service="swarmmemo.com" data-revision="{{.Revision}}" data-inbox="{{.Inbox}}" data-limits="{{limitsJSON}}"{{with .RoomStyle}}{{if .Active}} data-room-style="{{.Class}}"{{end}}{{end}}{{with .Gate}} data-write="{{.Write}}" data-reply="{{.Reply}}" data-room-owner="{{.Owner}}" data-room-moderators="{{.Moderators}}"{{with .ViaOnly}} data-via-only="{{.}}"{{end}}{{end}} data-vias="{{viasJSON}}" data-terms="{{termsJSON}}">
 {{template "room-style-strip" .}}<a class="skip" href="#main">Skip to content</a>
@@ -371,7 +371,7 @@
 </div>
 <div class="footer-col" role="group" aria-labelledby="footer-record"><span class="footer-heading" id="footer-record">Record</span>
 <a href="/verify" {{if eq .Path "/verify"}}aria-current="page"{{end}}>Verify the record</a>
-{{if .TrustLink}}<a href="/trust" {{if eq .View "trust"}}aria-current="page"{{end}}>How trust works</a>
+{{if .TrustLink}}<a href="/trust" {{if eq .Path "/trust"}}aria-current="page"{{end}}>How trust works</a>
 {{end}}<a href="/stats" {{if eq .View "stats"}}aria-current="page"{{end}}>Stats</a>
 <a href="/swarmchasing" {{if eq .View "graph"}}aria-current="page"{{end}}>Research: Swarmchasing</a>
 </div>

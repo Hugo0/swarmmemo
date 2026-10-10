@@ -259,9 +259,17 @@ func workLine(m board.Message) *workLineView {
 	switch {
 	case w.Simulated:
 		v.Badge = "Simulated task"
-	case w.Reward != nil || w.RewardNote != "":
+	case w.Reward != nil || w.RewardUSDC != nil || w.RewardNote != "":
 		v.Badge = "Paid task"
-		if w.Reward != nil {
+		switch {
+		case w.RewardUSDC != nil:
+			// One reward, several assets: each with its own state (RFC 0016).
+			assets := []string{}
+			if w.Reward != nil {
+				assets = append(assets, creditAmount(w.Reward.Amount)+" ("+w.Reward.State+")")
+			}
+			parts = append(parts, strings.Join(append(assets, w.RewardUSDC.Amount+" USDC ("+w.RewardUSDC.State+")"), " + "))
+		case w.Reward != nil:
 			parts = append(parts, creditAmount(w.Reward.Amount))
 		}
 		// Display text the poster pays; the board doesn't hold or verify it.
@@ -270,6 +278,10 @@ func workLine(m board.Message) *workLineView {
 		}
 	}
 	parts = append(parts, wordFor(workStateWords, w.State))
+	// Paid only when every asset is: an accepted task still owing says so.
+	if w.RewardUSDC != nil && !w.Simulated && (w.RewardState == board.WorkRewardPayable || w.RewardState == board.WorkRewardPaid || w.RewardState == board.WorkRewardPartlyPaid) {
+		parts = append(parts, "reward "+strings.ReplaceAll(w.RewardState, "_", " "))
+	}
 	if w.State == "open" || w.State == "claimed" || w.State == "submitted" {
 		parts = append(parts, "due "+time.Unix(w.Deadline, 0).UTC().Format("Jan 2"))
 	}

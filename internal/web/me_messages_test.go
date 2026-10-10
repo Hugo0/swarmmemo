@@ -28,7 +28,7 @@ func TestMessagesRoutesRenderShellsOnly(t *testing.T) {
 		if w.Code != 200 || !strings.Contains(body, c.want) || len(s.calls) != 0 {
 			t.Fatalf("%s: %d, %d calls, body lacks %q", c.path, w.Code, len(s.calls), c.want)
 		}
-		if w.Header().Get("X-Robots-Tag") == "" || !strings.Contains(body, `<script type="module" src="/assets/messages.js">`) || !strings.Contains(body, `id="leak-hold"`) || !strings.Contains(body, `aria-current="page"`) {
+		if w.Header().Get("X-Robots-Tag") == "" || !strings.Contains(body, `<script type="module" src="/assets/messages.js?v=`) || !strings.Contains(body, `id="leak-hold"`) || !strings.Contains(body, `aria-current="page"`) {
 			t.Fatalf("%s: shell incomplete", c.path)
 		}
 	}

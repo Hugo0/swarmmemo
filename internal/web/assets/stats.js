@@ -1,11 +1,24 @@
 // /stats readouts: a progressive enhancement of the server-rendered charts.
 // Each .chart-plot carries its x labels (data-x) and each series its
 // formatted values (data-values) and, for a line, its heights (data-ys, in
-// percent from the top). Hovering or focusing a plot shows a crosshair, a
-// dot on each line and every series' value at that x; the arrow keys, Home
-// and End move it. Without this script the legends and tables carry the numbers.
+// percent from the top). Hovering, tapping or focusing a plot shows a
+// crosshair, a dot on each line and every series' value at that x; the arrow
+// keys, Home and End move it. Without this script the legends and the All
+// numbers tables carry the numbers.
 (() => {
   'use strict';
+  // A link to All numbers, or to a table inside it, opens the block.
+  const reveal = () => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    const target = id && document.getElementById(id);
+    const block = target && target.closest('details');
+    if (block && !block.open) {
+      block.open = true;
+      target.scrollIntoView();
+    }
+  };
+  window.addEventListener('hashchange', reveal);
+  reveal();
   const make = (tag, cls, parent) => {
     const el = document.createElement(tag);
     el.className = cls;
@@ -66,7 +79,11 @@
       show(Math.round(((e.clientX - r.left) / r.width) * (n - 1)));
     };
     plot.addEventListener('pointermove', fromPointer);
-    plot.addEventListener('pointerdown', fromPointer);
+    // A tap focuses the plot, so its readout stays until the next tap elsewhere.
+    plot.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse') plot.focus({preventScroll: true});
+      fromPointer(e);
+    });
     plot.addEventListener('pointerleave', () => {
       if (document.activeElement !== plot) off();
     });

@@ -53,11 +53,13 @@ type claimWorkInput struct {
 	ResultID  string `json:"result_id,omitempty" jsonschema:"Your result, already posted as a reply to the request: claims and submits in one step"`
 	TTL       int64  `json:"ttl,omitempty" jsonschema:"Without result_id: how long the claim lasts, 60 to 3600 seconds (default 3600)"`
 	Hash      string `json:"result_sha256,omitempty" jsonschema:"With result_id, optional: the SHA-256 (64 hex) of your result's text, refused if the text differs"`
+	Payout    string `json:"payout_address,omitempty" jsonschema:"USDC reward only: where to pay you, 0x+40 hex (default: your linked wallet)"`
 }
 type submitWorkInput struct {
 	MessageID string `json:"message_id" jsonschema:"The work's message_id"`
 	ResultID  string `json:"result_id" jsonschema:"Your reply to the request, in its room"`
 	Hash      string `json:"result_sha256,omitempty" jsonschema:"Optional: the SHA-256 (64 hex) of your result's text, refused if the text differs"`
+	Payout    string `json:"payout_address,omitempty" jsonschema:"USDC reward only: where to pay you, 0x+40 hex (default: your linked wallet)"`
 }
 type acceptWorkInput struct {
 	MessageID string              `json:"message_id" jsonschema:"The work's message_id"`
@@ -83,12 +85,18 @@ func hostedWork(hc *hostedCaller, id string) (board.Work, error) {
 
 // workTransition is the signed work command c as hc, with the current
 // generation (and fence, when it takes one), and the result hash if given.
-func workTransition(hc *hostedCaller, c board.Command, fenced bool, hash string, checks []board.VerdictCheck) (board.Result, error) {
+func workTransition(hc *hostedCaller, c board.Command, fenced bool, hash string, checks []board.VerdictCheck, extra ...string) (board.Result, error) {
 	w, err := hostedWork(hc, c.MessageID)
 	if err != nil {
 		return board.Result{}, err
 	}
 	data := map[string]any{"generation": w.ServiceGeneration}
+	// extra is field, value pairs; an empty value is left out.
+	for i := 0; i+1 < len(extra); i += 2 {
+		if extra[i+1] != "" {
+			data[extra[i]] = extra[i+1]
+		}
+	}
 	if hash != "" {
 		data["result_sha256"] = hash
 	}
@@ -120,12 +128,12 @@ func (s *Server) addHostedWorkTools(server *mcp.Server, tool func(string) *mcp.T
 			if c.Target == "" && c.TTL == 0 {
 				c.TTL = 3600
 			}
-			return workTransition(hc, c, false, in.Hash, nil)
+			return workTransition(hc, c, false, in.Hash, nil, "payout_address", in.Payout)
 		})
 	})
 	mcp.AddTool(server, tool("submit_work"), func(ctx context.Context, _ *mcp.CallToolRequest, in submitWorkInput) (*mcp.CallToolResult, R, error) {
 		return as(ctx, func(hc *hostedCaller) (R, error) {
-			return workTransition(hc, board.Command{Operation: "work.submit", MessageID: in.MessageID, Target: in.ResultID}, true, in.Hash, nil)
+			return workTransition(hc, board.Command{Operation: "work.submit", MessageID: in.MessageID, Target: in.ResultID}, true, in.Hash, nil, "payout_address", in.Payout)
 		})
 	})
 	mcp.AddTool(server, tool("accept_work"), func(ctx context.Context, _ *mcp.CallToolRequest, in acceptWorkInput) (*mcp.CallToolResult, R, error) {
@@ -169,12 +177,19 @@ type compactWork struct {
 	Title          string             `json:"title"`
 	State          string             `json:"state"`
 	Reward         *compactWorkReward `json:"reward,omitempty"`
+	RewardUSDC     *compactWorkUSDC   `json:"reward_usdc,omitempty"`
+	RewardState    string             `json:"reward_state,omitempty"`
 	RewardNote     string             `json:"reward_note,omitempty"`
 	Eligibility    string             `json:"eligibility"`
 	Eligible       *bool              `json:"eligible,omitempty"`
 	EligibleReason string             `json:"eligible_reason,omitempty"`
 	Deadline       int64              `json:"deadline"`
 	URL            string             `json:"url"`
+}
+
+type compactWorkUSDC struct {
+	Amount string `json:"amount"`
+	State  string `json:"state"`
 }
 
 type compactWorkReward struct {
@@ -199,6 +214,9 @@ func compactWorks(result *board.Result, origin string) error {
 		row := compactWork{ID: w.ID, Title: w.Title, State: w.State, RewardNote: w.RewardNote, Eligibility: w.Eligibility, Eligible: w.Eligible, EligibleReason: w.EligibleReason, Deadline: w.Deadline, URL: origin + "/work/" + w.ID}
 		if w.Reward != nil {
 			row.Reward = &compactWorkReward{Amount: w.Reward.Amount, Unit: w.Reward.Unit, State: w.Reward.State}
+		}
+		if w.RewardUSDC != nil {
+			row.RewardUSDC, row.RewardState = &compactWorkUSDC{Amount: w.RewardUSDC.Amount, State: w.RewardUSDC.State}, w.RewardState
 		}
 		rows = append(rows, row)
 	}

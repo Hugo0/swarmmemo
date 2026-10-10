@@ -252,11 +252,19 @@ func TestAllowanceStatsPageMatchesAPI(t *testing.T) {
 	api := getJSON(t, s, "GET", "/api/stats/allowance", "")
 	data := api["data"]
 	page := getHTML(t, s, "/stats")
-	start := strings.Index(page, `id="stats-allowance"`)
-	if start < 0 {
+	// Today's numbers sit in Work and credits, the tier, service, history and
+	// trust tables in All numbers; each part holds every cell to the API, in
+	// the API's order, and together they cover the page's cells.
+	start, all := strings.Index(page, `id="stats-allowance"`), strings.Index(page, `id="all-allowance"`)
+	if start < 0 || all < start {
 		t.Fatal("/stats has no allowance section with the ledger on")
 	}
-	holdToAPI(t, "/stats", pageCells(t, page[start:]), data)
+	today, tables := pageCells(t, page[start:all]), pageCells(t, page[all:])
+	holdToAPI(t, "/stats", today, data)
+	holdToAPI(t, "/stats All numbers", tables, data)
+	if n := len(pageCells(t, page)); n != len(today)+len(tables) || len(today) != 2*4+4 {
+		t.Fatalf("/stats shows %d API cells, %d of them today's (want 12) and %d in All numbers", n, len(today), len(tables))
+	}
 	// The one sentence, the tiers in order, and the numbers the API derives.
 	for _, want := range []string{web.WaterfallSentence, "Trusted", "Anonymous", "tier4-shrink", "Trust estimates", "under 10", "/api/stats/allowance"} {
 		if !strings.Contains(page, want) {

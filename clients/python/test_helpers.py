@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import urllib.error
+import urllib.request
 from unittest.mock import patch
 
 import swarmmemo as memo
@@ -206,6 +207,24 @@ class HelperTests(unittest.TestCase):
         args = parser.parse_args(["work", "reviewer", MESSAGE, AGENT, "--generation", GENERATION, "--request-id", "r-3"])
         memo.run_helper(args, self.signed)
         self.assertEqual(self.last(), {"operation": "work.reviewer.set", "message_id": MESSAGE, "data": data, "request_id": "r-3"})
+
+    def test_work_usdc_payout_and_settle(self):
+        payee, tx = "0x" + "a" * 40, "0x" + "b" * 64
+        self.signed.work_submit(MESSAGE, 3, "r1", GENERATION, request_id="s-2", payout_address=payee)
+        self.assertEqual(self.last()["data"], f'{{"schema":1,"generation":"{GENERATION}","payout_address":"{payee}"}}')
+        self.signed.work_settle(MESSAGE, tx, GENERATION, request_id="t-1")
+        self.assertEqual(self.last(), {"operation": "work.settle", "message_id": MESSAGE, "request_id": "t-1",
+                                       "data": f'{{"schema":1,"generation":"{GENERATION}","tx_hash":"{tx}"}}'})
+        with self.assertRaises(ValueError):
+            self.signed.work_settle(MESSAGE, "0xABC", GENERATION)
+        # The CLI: swarmmemo work settle MESSAGE_ID TXHASH, and --payout-address on claim.
+        parser = memo.argparse.ArgumentParser()
+        memo.add_helper_parsers(parser.add_subparsers(dest="action"))
+        memo.run_helper(parser.parse_args(["work", "settle", MESSAGE, tx, "--generation", GENERATION, "--request-id", "t-2"]), self.signed)
+        self.assertEqual(self.last(), {"operation": "work.settle", "message_id": MESSAGE, "request_id": "t-2",
+                                       "data": f'{{"schema":1,"generation":"{GENERATION}","tx_hash":"{tx}"}}'})
+        memo.run_helper(parser.parse_args(["work", "claim", MESSAGE, "--result", "r1", "--payout-address", payee, "--generation", GENERATION, "--request-id", "c-9"]), self.signed)
+        self.assertEqual(self.last()["data"], f'{{"schema":1,"generation":"{GENERATION}","payout_address":"{payee}"}}')
 
     def test_updates_and_journal(self):
         self.signed.updates()
@@ -509,3 +528,76 @@ class PlainErrorBodyTests(unittest.TestCase):
                 client._request("/v1/commands")
         self.assertEqual(caught.exception.code, "http_error")
         self.assertIn("HTTP 404 from https://swarmmemo.example/v1/commands: 404 page not found", str(caught.exception))
+
+
+class FakePage(io.BytesIO):
+    """A urllib response: the bytes, a status, the final URL and headers."""
+    def __init__(self, body, status=200, url="https://example.org/page", content_type="text/html"):
+        super().__init__(body)
+        self.status, self.url, self.headers = status, url, {"Content-Type": content_type}
+
+    def geturl(self):
+        return self.url
+
+
+class FakeOpener:
+    def __init__(self, page):
+        self.page, self.requests = page, []
+
+    def open(self, req, timeout=None):
+        self.requests.append((req.full_url, timeout))
+        return self.page
+
+
+class StampFetchTests(unittest.TestCase):
+    """notary stamp-fetch (C159): the exact bytes fetched are hashed, and the record of
+    the fetch is stamped as text; its SHA-256 is the receipt's hash."""
+    def stamp(self, page, url="https://example.org/page", save=None):
+        calls, out = [], io.StringIO()
+
+        def service_call(client, service, method, args, max_cost=None, request_id=None):
+            calls.append((service, method, args, max_cost))
+            digest = hashlib.sha256(args["text"].encode()).hexdigest()
+            return {"ok": True, "data": {"result": {"schema": "swarmmemo-notary/1", "hash": digest, "time": 1760000000, "seq": 7}}}
+        with patch.object(memo.Client, "service_call", service_call):
+            code = memo.stamp_fetch(memo.Client("https://swarmmemo.com"), url, save, out, FakeOpener(page))
+        return code, calls, out.getvalue()
+
+    def test_stamps_the_record_of_what_was_fetched(self):
+        body = b"<h1>Prices</h1>\n"
+        with tempfile.TemporaryDirectory() as folder:
+            saved = Path(folder) / "page.html"
+            code, calls, out = self.stamp(FakePage(body), save=str(saved))
+            self.assertEqual(saved.read_bytes(), body)
+        self.assertEqual(code, 0)
+        (service, method, args, max_cost), = calls
+        self.assertEqual((service, method, max_cost), ("notary", "stamp", 1))
+        record = json.loads(args["text"])
+        self.assertEqual({k: record[k] for k in ("url", "status", "content_type", "bytes", "sha256")},
+                         {"url": "https://example.org/page", "status": 200, "content_type": "text/html",
+                          "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()})
+        self.assertRegex(record["fetched_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertNotIn("final_url", record)
+        digest = hashlib.sha256(args["text"].encode()).hexdigest()
+        self.assertIn(args["text"] + "\n", out)
+        self.assertIn(f"https://swarmmemo.com/api/notary/{digest}", out)
+        self.assertIn(f"python3 verify_log.py notary {digest}", out)
+
+    def test_an_error_page_and_a_redirect_are_recorded(self):
+        page = FakePage(b"gone", status=404, url="https://example.org/moved")
+        _, calls, _ = self.stamp(page)
+        record = json.loads(calls[0][2]["text"])
+        self.assertEqual((record["status"], record["final_url"]), (404, "https://example.org/moved"))
+
+    def test_refusals(self):
+        for url in ("http://example.org/", "https://user:pw@example.org/", "file:///etc/passwd"):
+            with self.assertRaises(memo.ChatStop):
+                self.stamp(FakePage(b""), url=url)
+        with self.assertRaises(memo.ChatStop):
+            memo.fetch_for_stamp("https://example.org/page", FakeOpener(FakePage(b"12345")), cap=4)
+        redirect = memo.HTTPSOnlyRedirect()
+        req = urllib.request.Request("https://example.org/a")
+        with self.assertRaises(memo.ChatStop):
+            redirect.redirect_request(req, None, 302, "Found", {}, "http://example.org/b")
+        self.assertEqual(redirect.redirect_request(req, None, 302, "Found", {}, "https://example.org/b").full_url, "https://example.org/b")
+        self.assertEqual(memo.build_parser().parse_args(["notary", "stamp-fetch", "https://example.org/"]).fetch_url, "https://example.org/")

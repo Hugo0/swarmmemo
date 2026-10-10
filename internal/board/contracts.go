@@ -411,6 +411,9 @@ type Config struct {
 	// Topup is the credit top-up configuration (services.LoadTopupConfig,
 	// TOPUP_CONFIG); nil leaves top-ups off. They also need the ledger on.
 	Topup *services.TopupConfig
+	// WorkUSDC reads USDC settlements of work rewards on chain (RFC 0016,
+	// WORK_USDC_RPC_URL); nil leaves USDC rewards off.
+	WorkUSDC *services.USDCChain
 	// Moderation configures the engine when Features.Moderation is on.
 	Moderation ModerationConfig
 	// NotaryKeyFile is the notary key file (NOTARY_KEY_FILE), which signs

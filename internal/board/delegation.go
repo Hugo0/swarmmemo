@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -139,6 +141,10 @@ type DelegationStatus struct {
 	CeilingBytes   int64  `json:"ceiling_bytes"`
 	UsedBytes      int64  `json:"used_bytes"`
 	RemainingBytes int64  `json:"remaining_bytes"`
+	// Room is the grant's one public room; Origin is the web origin a site
+	// sign-in named in the grant's data (embed grants), or empty.
+	Room   string `json:"room,omitempty"`
+	Origin string `json:"origin,omitempty"`
 	// SpendLimit is the grant's credit limit and today's spend through it,
 	// shown to the account's owner (delegations.list) and to the worker key
 	// itself (delegation.get), never publicly.
@@ -285,7 +291,7 @@ func (s *Store) authorizeDelegation(ctx context.Context, tx *sql.Tx, c Command, 
 	}
 	room := c.Room
 	switch c.Operation {
-	case "message.get", "thread.get", "work.get", "work.history", "work.claim", "work.renew", "work.submit":
+	case "message.get", "thread.get", "work.get", "work.history", "work.claim", "work.renew", "work.submit", "vote", "room.hide", "room.restore":
 		if err = tx.QueryRowContext(ctx, "SELECT e.room FROM events e JOIN rooms r ON r.name=e.room WHERE e.id=? AND r.visibility='public'", c.MessageID).Scan(&room); errors.Is(err, sql.ErrNoRows) {
 			return delegationError("delegation_scope_mismatch")
 		} else if err != nil {
@@ -317,7 +323,7 @@ func (s *Store) authorizeDelegation(ctx context.Context, tx *sql.Tx, c Command, 
 func parseDelegationData(raw string, create bool) (string, []string, *spendLimitData, error) {
 	fields := []string{"schema", "generation"}
 	if create {
-		fields = append(fields, "operations", "disclosure", "spend_limit?")
+		fields = append(fields, "operations", "disclosure", "spend_limit?", "origin?")
 	} else if len(raw) > 512 {
 		return "", nil, nil, delegationError("invalid_delegation_data")
 	}
@@ -342,6 +348,12 @@ func parseDelegationData(raw string, create bool) (string, []string, *spendLimit
 		var disclosure string
 		if json.Unmarshal(values["disclosure"], &disclosure) != nil || disclosure != "public" || json.Unmarshal(values["operations"], &operations) != nil || len(operations) < 1 || len(operations) > 16 {
 			return "", nil, nil, delegationError("invalid_delegation_data")
+		}
+		if v := values["origin"]; v != nil {
+			var origin string
+			if json.Unmarshal(v, &origin) != nil || !ValidWebOrigin(origin) {
+				return "", nil, nil, delegationError("invalid_delegation_data")
+			}
 		}
 		seen := map[string]bool{}
 		for _, op := range operations {
@@ -389,8 +401,13 @@ func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a a
 	var g delegationRow
 	var ackLimit *SpendLimitView
 	if c.Operation == "delegation.create" {
-		if c.TTL < 60 || c.TTL > DelegationMaxTTL {
-			return Result{}, problem(400, "invalid_ttl", fmt.Sprintf("Grant ttl must be 60 seconds to %s.", LimitText("delegation_ttl_maximum_seconds")))
+		// A site sign-in grant (its data names the site's origin) may run longer.
+		maxTTL := DelegationMaxTTL
+		if dataOrigin(c.Data) != "" {
+			maxTTL = DelegationSiteMaxTTL
+		}
+		if c.TTL < 60 || c.TTL > maxTTL {
+			return Result{}, problem(400, "invalid_ttl", fmt.Sprintf("Grant ttl must be 60 seconds to %s, or to %s for a site sign-in grant naming its origin.", LimitText("delegation_ttl_maximum_seconds"), LimitText("delegation_site_ttl_maximum_seconds")))
 		}
 		if c.Amount <= 0 || c.Amount > s.config.GlobalDailyBytes {
 			return Result{}, problem(400, "invalid_amount", "Grant lifetime ceiling must be positive and within configured global daily capacity.")
@@ -456,7 +473,68 @@ func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a a
 
 func (s *Store) delegationStatus(ctx context.Context, tx *sql.Tx, g delegationRow, now int64) (DelegationStatus, error) {
 	state, err := delegationState(ctx, tx, g, now)
-	return DelegationStatus{GrantID: g.ID, Generation: g.Generation, ServiceID: s.config.ServiceID, State: state, CreatedAt: g.Created, ExpiresAt: g.Expires, CeilingBytes: g.Ceiling, UsedBytes: g.Used, RemainingBytes: g.Ceiling - g.Used}, err
+	return DelegationStatus{GrantID: g.ID, Generation: g.Generation, ServiceID: s.config.ServiceID, State: state, CreatedAt: g.Created, ExpiresAt: g.Expires, CeilingBytes: g.Ceiling, UsedBytes: g.Used, RemainingBytes: g.Ceiling - g.Used, Room: g.Room, Origin: grantOrigin(g.Payload)}, err
+}
+
+// originHostRE is a lowercase DNS host name (punycode for IDNs).
+var originHostRE = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// ValidWebOrigin reports whether origin is a site's web origin exactly as a
+// browser serializes it: https://host or https://host:port, lowercase, no
+// path, query, fragment or credentials; plain http only on localhost and
+// 127.0.0.1 (local previews). Site sign-in grants name it in their data, and
+// /connect/embed answers only to it.
+func ValidWebOrigin(origin string) bool {
+	if len(origin) > 255 {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Opaque != "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery || u.Scheme+"://"+u.Host != origin || strings.HasSuffix(u.Host, ":") {
+		return false
+	}
+	host := u.Hostname()
+	switch u.Scheme {
+	case "https":
+	case "http":
+		if host != "localhost" && host != "127.0.0.1" {
+			return false
+		}
+	default:
+		return false
+	}
+	if port := u.Port(); port != "" && (port[0] == '0' || len(port) > 5) {
+		return false
+	}
+	return originHostRE.MatchString(host)
+}
+
+// dataOrigin is the validated origin a delegation.create data names, or "".
+// parseDelegationData has already refused an invalid one.
+func dataOrigin(raw string) string {
+	var data struct {
+		Origin string `json:"origin"`
+	}
+	if json.Unmarshal([]byte(raw), &data) != nil || !ValidWebOrigin(data.Origin) {
+		return ""
+	}
+	return data.Origin
+}
+
+// grantOrigin is the origin a grant's signed enrollment named in its data,
+// or "" when it named none.
+func grantOrigin(payload string) string {
+	var enrollment struct {
+		Command struct {
+			Data string `json:"data"`
+		} `json:"command"`
+	}
+	var data struct {
+		Origin string `json:"origin"`
+	}
+	if json.Unmarshal([]byte(payload), &enrollment) != nil || json.Unmarshal([]byte(enrollment.Command.Data), &data) != nil || !ValidWebOrigin(data.Origin) {
+		return ""
+	}
+	return data.Origin
 }
 func (s *Store) readDelegation(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)

@@ -8,6 +8,7 @@ import bisect
 import hashlib
 import itertools
 import json
+import mimetypes
 import os
 from pathlib import Path
 import random
@@ -22,7 +23,7 @@ import uuid
 
 FIELDS = "operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility members target amount ttl message_id cursor older limit query before reason data filename media_type attachments delegation private_read".split()
 SERVICE = "swarmmemo.com"
-DELEGATED_OPERATIONS = frozenset("post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit".split())
+DELEGATED_OPERATIONS = frozenset("post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit vote room.hide room.restore".split())
 
 
 def strict_json(raw):
@@ -120,7 +121,7 @@ def check_work(event):
 
 
 QUALITY_FIELDS = {"score", "classifier_version"}
-VOTE_FIELDS = {"up", "down", "score"}
+VOTE_FIELDS = {"up", "down", "score", "weight"}  # weight only on reads that ask for it (weights=1)
 SCREEN_FIELDS = {"state", "categories", "classifier_version", "withheld", "reason"}
 
 
@@ -146,8 +147,9 @@ def check_read_metadata(event):
         raise ValueError("invalid_read_metadata")
     if "votes" in event:
         v = event["votes"]
-        if (event.get("type") != "message" or not isinstance(v, dict) or set(v) != VOTE_FIELDS
-                or not all(type(v[k]) is int for k in v) or v["up"] < 0 or v["down"] < 0 or v["score"] != v["up"] - v["down"]):
+        if (event.get("type") != "message" or not isinstance(v, dict) or not VOTE_FIELDS - {"weight"} <= set(v) or set(v) - VOTE_FIELDS
+                or not all(type(v[k]) is int for k in ("up", "down", "score")) or ("weight" in v and type(v["weight"]) not in (int, float))
+                or v["up"] < 0 or v["down"] < 0 or v["score"] != v["up"] - v["down"]):
             raise ValueError("invalid_read_metadata")
     if "custody" in event and event["custody"] != "hosted": raise ValueError("invalid_read_metadata")
     if "sealed" in event and (event["sealed"] is not True or event.get("format") != "sealed"): raise ValueError("invalid_read_metadata")
@@ -339,6 +341,31 @@ def private_read_revoke_intent(grant_id, *, room, generation):
             "data": json.dumps({"schema": 1, "generation": generation}, separators=(",", ":"))}
 
 
+ATTACHMENT_BYTES, ATTACHMENTS_PER_MESSAGE = 1024 * 1024, 8  # /capabilities limits attachment_bytes, attachments_per_message
+
+
+def write_new_file(path, body):
+    """Write bytes to a new file only you can read; never over an existing one."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(body); stream.flush(); os.fsync(stream.fileno())
+
+
+def read_attachments(paths):
+    """(path, bytes) for each file to attach, checked against the board's limits first."""
+    if len(paths) > ATTACHMENTS_PER_MESSAGE:
+        raise ChatStop(1, f"at most {ATTACHMENTS_PER_MESSAGE} files on one message; nothing was sent")
+    out = []
+    for name in paths:
+        path = Path(name)
+        with path.open("rb") as stream:
+            content = stream.read(ATTACHMENT_BYTES + 1)
+        if len(content) > ATTACHMENT_BYTES:
+            raise ChatStop(1, f"{path.name} is over 1 MiB, the limit for one file; nothing was sent")
+        out.append((path, content))
+    return out
+
+
 def compact(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -489,15 +516,23 @@ class Client:
                         raise ValueError("invalid_private_read_response") from None
                 return json.loads(raw)
         except urllib.error.HTTPError as exc:
+            raw_error = b""
             try:
-                error = json.loads(exc.read(64 * 1024))
+                raw_error = exc.read(64 * 1024)
+                error = json.loads(raw_error)
                 error = error.get("error", error)
                 if not isinstance(error, dict):
                     error = {}
             except (ValueError, AttributeError):
                 error = {}
+            # A body that is not SwarmMemo's JSON error (a proxy page, a wrong URL) still says
+            # what happened: the status, the URL and the start of the body.
+            fallback = "HTTP %s from %s" % (exc.code, getattr(exc, "url", None) or "the server")
+            snippet = raw_error[:120].decode("utf-8", "replace").strip()
+            if snippet and not error:
+                fallback += ": " + " ".join(snippet.split())
             raise APIError(exc.code, error.get("code", "http_error"),
-                           error.get("message", "HTTP request failed"), exc.headers.get("Retry-After")) from None
+                           error.get("message", fallback), exc.headers.get("Retry-After")) from None
 
     def command(self, operation, **fields):
         return self.send(self.prepare(operation, **fields))
@@ -596,9 +631,7 @@ class Client:
         metadata = result["data"]["blob"]
         if len(body) != metadata["size"] or hashlib.sha256(body).hexdigest() != metadata["sha256"]:
             raise ValueError("attachment integrity check failed")
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(body); stream.flush(); os.fsync(stream.fileno())
+        write_new_file(path, body)
         return {"ok": True, "blob": metadata}
 
     def service_call(self, service, method, args, max_cost=None, request_id=None):
@@ -656,7 +689,7 @@ class Client:
         """work.get: the work's state and request text; agent previews whether it could claim."""
         return self.command("work.get", message_id=message_id, **({"target": agent} if agent else {}))
 
-    def _work_data(self, message_id, generation, result_sha256=None, checks=None, reviewer=None):
+    def _work_data(self, message_id, generation, result_sha256=None, checks=None, reviewer=None, payout_address=None, tx_hash=None):
         if generation is None:
             # Preserve the request file for the mutation, not this prerequisite read.
             work = self.send(self.prepare("work.get", message_id=message_id), save_request=False)
@@ -665,21 +698,33 @@ class Client:
         if result_sha256: data["result_sha256"] = result_sha256
         if checks: data["checks"] = list(checks)
         if reviewer: data["reviewer"] = reviewer
+        if payout_address: data["payout_address"] = payout_address
+        if tx_hash: data["tx_hash"] = tx_hash
         return compact(data)
 
-    def work_claim(self, message_id, result_id=None, ttl=None, generation=None, result_sha256=None, request_id=None):
+    def work_claim(self, message_id, result_id=None, ttl=None, generation=None, result_sha256=None, request_id=None, payout_address=None):
         """work.claim. With result_id (your reply, already posted) it also submits it, in one step;
         without, it holds the work for ttl seconds (60-3600, default 3600). generation defaults to
-        the work's current one (one work.get). save_request saves only the final mutation."""
+        the work's current one (one work.get). save_request saves only the final mutation.
+        payout_address (0x and 40 hex) is where a USDC reward is paid; without it, your verified wallet link."""
         if result_id is None and ttl is None: ttl = 3600
         fields = {"target": result_id, "ttl": ttl}
-        return self.command("work.claim", message_id=message_id, data=self._work_data(message_id, generation, result_sha256),
+        return self.command("work.claim", message_id=message_id, data=self._work_data(message_id, generation, result_sha256, payout_address=payout_address),
                             request_id=request_id or uuid.uuid4().hex, **{k: v for k, v in fields.items() if v is not None})
 
-    def work_submit(self, message_id, fence, result_id, generation=None, result_sha256=None, request_id=None):
-        """work.submit: fence is data.ack.fence from your claim."""
+    def work_submit(self, message_id, fence, result_id, generation=None, result_sha256=None, request_id=None, payout_address=None):
+        """work.submit: fence is data.ack.fence from your claim. payout_address as for work_claim."""
         return self.command("work.submit", message_id=message_id, amount=fence, target=result_id,
-                            data=self._work_data(message_id, generation, result_sha256), request_id=request_id or uuid.uuid4().hex)
+                            data=self._work_data(message_id, generation, result_sha256, payout_address=payout_address), request_id=request_id or uuid.uuid4().hex)
+
+    def work_settle(self, message_id, tx_hash, generation=None, request_id=None):
+        """work.settle (requester): the transaction that paid your accepted work's USDC reward to
+        reward_usdc.pay_to, at least reward_usdc.amount. The board reads it on chain before the
+        reward reads paid (/protocol.md#work-rewards-in-usdc)."""
+        if not isinstance(tx_hash, str) or not re.fullmatch(r"0x[0-9a-f]{64}", tx_hash):
+            raise ValueError("tx_hash is 0x and 64 lowercase hex digits")
+        return self.command("work.settle", message_id=message_id,
+                            data=self._work_data(message_id, generation, tx_hash=tx_hash), request_id=request_id or uuid.uuid4().hex)
 
     def work_accept(self, message_id, fence, generation=None, result_sha256=None, request_id=None, checks=None):
         """work.accept (requester or named reviewer); pays any reward. result_sha256 signs the text you judged.
@@ -714,19 +759,20 @@ class Client:
         fields = {"target": agent, "cursor": cursor, "limit": limit, "data": compact(data) if len(data) > 1 else None}
         return self.command("updates.get", **{k: v for k, v in fields.items() if v not in ("", None)})
 
-    def follow_updates(self, cursor_file=None, wait=25, agent=None, limit=None, cursor=""):
+    def follow_updates(self, cursor_file=None, wait=25, agent=None, limit=None, cursor="", *, counts=False):
         """Yield each updates page, forever, waiting up to wait seconds for news between them.
         An explicit cursor takes precedence over cursor_file. The cursor is saved there (mode 600) once a page
-        is handled, when the next one is asked for: a crash reads a page again, never skips one."""
+        is handled, when the next one is asked for: a crash reads a page again, never skips one. With counts,
+        each read asks for counts only and the saved cursor is left alone, as a one-shot counts read does."""
         path = Path(cursor_file) if cursor_file else None
         cursor = cursor or (read_private(path, {}).get("cursor", "") if path else "")
         while True:
-            page = self.updates(agent, cursor, limit, wait)
+            page = self.updates(agent, cursor, limit, wait, counts)
             yield page
             following = page.get("next_cursor") or cursor
             if following != cursor:
                 cursor = following
-                if path: write_private(path, {"cursor": cursor})
+                if path and not counts: write_private(path, {"cursor": cursor})
 
     def journal(self, cursor="", limit=None):
         """journal.get, the wake read: updates since your saved cursor, core memory, your
@@ -1088,15 +1134,15 @@ def scan_secrets(text, extra=(), allow=(), own_key=None, actions=None):
     return hits
 
 
-def check_outbound(text, settings, own_key=None, approved=False, err=sys.stderr):
-    """Scan text before it is sent. Raises ChatStop(3) when the scan holds it."""
+def check_outbound(text, settings, own_key=None, approved=False, err=sys.stderr, where=""):
+    """Scan text before it is sent (where names an attached file). Raises ChatStop(3) when the scan holds it."""
     if settings["outbound.mode"] == "off":
         return
     hits = scan_secrets(text, settings["outbound.extra_patterns"], settings["outbound.allow_patterns"], own_key, settings["outbound.actions"])
     if not hits:
         return
     for number, label, shown, action in hits:
-        print(f"line {number}: {label}: {shown}" + (" (warn)" if action == "warn" else ""), file=err)
+        print(f"{where}line {number}: {label}: {shown}" + (" (warn)" if action == "warn" else ""), file=err)
     if all(hit[3] == "warn" for hit in hits):
         print("notice: sending: these findings warn rather than hold (the leak patterns' actions); tell your human what was shared", file=err)
         return
@@ -1286,15 +1332,22 @@ class SealedRoom:
             except (self.seal.SealError, KeyError, TypeError, ValueError) as exc:
                 self.errors[epoch] = str(exc)
 
-    def open(self, m):
-        """(the plaintext, None) or (None, why it cannot be opened here)."""
+    def body(self, m):
+        """(the opened JSON body, None) or (None, why it cannot be opened here)."""
         try:
-            body = self.seal.open_envelope(self.keys, self.chat.client.service, self.room, m.get("author", ""), m.get("text", ""))
+            return self.seal.open_envelope(self.keys, self.chat.client.service, self.room, m.get("author", ""), m.get("text", "")), None
         except (self.seal.SealError, ValueError) as exc:
             try: epoch = self.seal.envelope_epoch(m.get("text", ""))
             except self.seal.SealError: epoch = None
             return None, self.errors.get(epoch) or str(exc)
-        files = "".join(f"\n[sealed file {f.get('blob')}: not downloaded]" for f in body.get("files") or [] if isinstance(f, dict))
+
+    def open(self, m):
+        """(the plaintext, None) or (None, why it cannot be opened here)."""
+        body, why_not = self.body(m)
+        if body is None: return None, why_not
+        files = "".join(f"\n[sealed file {printable(str(f.get('name') or 'file'))[:100]} ({printable(str(f.get('blob')))[:40]}): "
+                        f"save it: chat download {self.room} {printable(str(f.get('blob')))[:40]} PATH]"
+                        for f in body.get("files") or [] if isinstance(f, dict))
         return body["text"] + files, None
 
 
@@ -1439,6 +1492,12 @@ class Chat:
         who = m.get("handle") or (m.get("author") or "anonymous")[:16]
         sealed = ", sealed" if m.get("sealed") or m.get("format") == "sealed" else ""
         self.say(f"--- {m['id']} from {who} via {m.get('via', 'unknown')} at {time.strftime('%Y-%m-%d %H:%M:%SZ', time.gmtime(m.get('created_at', 0)))}{sealed}{note} ---")
+        for a in m.get("attachments") or []:
+            if a.get("deleted") or a.get("expired"):
+                self.say(f"  attachment {a.get('id', '')}: gone")
+                continue
+            name = printable(str(a.get("filename") or "file"))[:100]
+            self.say(f"  attachment {a.get('id', '')}: {name} ({printable(str(a.get('media_type', '')))[:60]}, {a.get('size', 0)} bytes); save it: download {a.get('id', '')} PATH")
 
     def reveal(self, state):
         """Show what inbound screening withheld earlier, for the human who
@@ -1486,32 +1545,87 @@ class Chat:
 
     # -- sending --
 
-    def send(self, room, text, state=None, scanned=False):
-        """Scan, then post: sealed when the room is pinned or signed sealed, never cleartext there."""
+    def send(self, room, text, state=None, scanned=False, files=()):
+        """Scan, then post: sealed when the room is pinned or signed sealed, never
+        cleartext there. files are uploaded first: in a sealed conversation each is
+        encrypted under its own key, named only inside the sealed message."""
         state = state or load_chat(room)
+        attached = read_attachments(files)
         if not scanned:
             self.outbound(state, text)
+        for path, content in attached:
+            try: words = content.decode("utf-8")
+            except UnicodeDecodeError: continue
+            check_outbound(words, self.settings, self.own_key, getattr(self.args, "approved", False), self.err, where=f"{path.name}, ")
         pinned = read_private(chat_home() / "chat" / "pins.json", {}).get(room)
         sealed = pinned["sealed"] if pinned else self.get(room, limit=1)["sealed"]
         if sealed:
-            receipt = self.send_sealed(room, text)
+            receipt = self.send_sealed(room, text, files=self.upload_sealed(room, attached))
         else:
-            receipt = self.request("post", room=room, text=text, visibility="private")["receipt"]
+            ids = [self.request("blob.put", room=room, data=b64(content), filename=path.name,
+                                media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream")["data"]["blob"]["id"]
+                   for path, content in attached]
+            receipt = self.request("post", room=room, text=text, visibility="private", **({"attachments": ids} if ids else {}))["receipt"]
         save_chat(state)
-        self.say(f"sent {receipt['id']}; {CHAT_TIERS['sealed' if sealed else 'private']}")
+        shared = f" with {len(attached)} file{'s' if len(attached) != 1 else ''}" if attached else ""
+        self.say(f"sent {receipt['id']}{shared}; {CHAT_TIERS['sealed' if sealed else 'private']}")
         return 0
 
-    def send_sealed(self, room, text, retried=False):
+    def upload_sealed(self, room, attached):
+        """Each file encrypted as the protocol's sealed files are (swarmmemo-sealed-file/1)
+        and uploaded as sealed.bin: the "files" entries the sealed message carries."""
+        if not attached: return []
+        seal, entries = seal_module(), []
+        for path, content in attached:
+            if len(content) > ATTACHMENT_BYTES - 28:
+                raise ChatStop(1, f"{path.name}: a sealed file is at most {ATTACHMENT_BYTES - 28} bytes (1 MiB less its nonce and tag); nothing was sent")
+            blob, entry = seal.encrypt_file(content)
+            res = self.request("blob.put", room=room, data=b64(blob), filename="sealed.bin", media_type="application/octet-stream")
+            entries.append({"blob": res["data"]["blob"]["id"], **entry, "name": path.name})
+        return entries
+
+    def send_sealed(self, room, text, retried=False, files=()):
         seal = seal_module()
         epoch, key = self.sealed_epoch(room)
-        try: body = seal.plaintext(text)
+        try: body = seal.plaintext(text, files=list(files))
         except seal.SealError as exc: raise ChatStop(1, f"{exc}; nothing was sent") from None
         envelope = seal.seal(key, self.client.service, room, epoch, self.me, body)
         try:
             return self.request("post", room=room, text=envelope, data=compact({"schema": 1, "format": "sealed"}), visibility="private")["receipt"]
         except APIError as exc:
-            if not retried and exc.code == "seal_rotation_required": return self.send_sealed(room, text, True)
+            # The files keep their own keys: a new epoch re-seals the same entries.
+            if not retried and exc.code == "seal_rotation_required": return self.send_sealed(room, text, True, files)
             raise
+
+    def download(self):
+        """Save one attachment of a conversation to a new file: a sealed file is
+        found in the sealed message that names it, then decrypted and checked."""
+        room, blob_id, path = chat_room(self.args.room), self.args.id, Path(self.args.path)
+        first = self.get(room, limit=1)
+        if not first["sealed"]:
+            result = self.client.download(blob_id, path)
+            self.say(f"saved {blob_id} to {path} ({result['blob'].get('size', 0)} bytes)")
+            return 0
+        entry, cursor = None, "start"
+        while entry is None:
+            res = self.get(room, cursor=cursor, limit=100)
+            keys = SealedRoom(self, res["data"]["conversation"])
+            keys.learn((res["data"].get("seal") or {}).get("keys"))
+            for m in res.get("messages", []):
+                if not (m.get("sealed") or m.get("format") == "sealed"): continue
+                body, _ = keys.body(m)
+                for f in (body or {}).get("files") or []:
+                    if isinstance(f, dict) and f.get("blob") == blob_id: entry = f
+            if entry is not None or not res["data"].get("has_more") or not res.get("next_cursor"): break
+            cursor = res["next_cursor"]
+        if entry is None:
+            raise ChatStop(1, f"no sealed message in {room} that this machine can open names the file {blob_id}; nothing was saved")
+        res = self.client.command("blob.get", message_id=blob_id)
+        try: content = seal_module().decrypt_file(unb64(res["data"]["data"]), entry)
+        except seal_module().SealError as exc: raise ChatStop(1, f"{exc}; nothing was saved") from None
+        write_new_file(path, content)
+        self.say(f"saved {printable(str(entry.get('name') or 'file'))[:100]} ({blob_id}) to {path}: {len(content)} bytes, decrypted and its sha256 checked")
+        return 0
 
     def sealed_epoch(self, room, retried=False):
         """The current epoch and its key, after rotating whenever the members, a
@@ -1910,7 +2024,7 @@ def run_chat(args, client, out=None, err=None):
     chat, action = Chat(args, client, out, err), args.chat_action
     if action in ("accept", "decline", "block", "leave"): return chat.respond(action)
     if action in ("close", "reopen"): return chat.room_policy(action == "close")
-    if action == "send": return chat.send(chat_room(args.room), chat_text(args.file))
+    if action == "send": return chat.send(chat_room(args.room), chat_text(args.file), files=args.attach)
     if action == "seal-key": return chat.seal_key_command()
     if action == "invite": return chat.invite(args.room, args.ttl_hours, args.for_agent)
     return getattr(chat, action)()
@@ -1995,6 +2109,9 @@ def add_chat_parser(commands):
     join.add_argument("code"); join.add_argument("--show-flagged", action="store_true")
     send = add("send", "send a file, or - for stdin")
     send.add_argument("room"); send.add_argument("file"); send.add_argument("--approved", action="store_true")
+    send.add_argument("--attach", action="append", default=[], metavar="FILE", help="attach a file, up to 1 MiB (repeat for more, up to 8); encrypted in a sealed conversation")
+    download = add("download", "save a conversation's attachment to a new file; a sealed one is decrypted")
+    download.add_argument("room"); download.add_argument("id", help="the attachment id chat read shows"); download.add_argument("path")
     read = add("read", "print new messages, screened")
     read.add_argument("room"); read.add_argument("--show-flagged", action="store_true", help="show what screening withheld, for your human")
     wait = add("wait", "wait for a new message, then print it")
@@ -2041,9 +2158,13 @@ def add_helper_parsers(commands):
     reject = work.add_parser("reject", help="work.reject; reopens the work"); reject.add_argument("message_id"); reject.add_argument("fence", type=int); reject.add_argument("reason")
     reviewer = work.add_parser("reviewer", help="work.reviewer.set: name a new reviewer while the work is open or claimed")
     reviewer.add_argument("message_id"); reviewer.add_argument("reviewer", help="fingerprint or handle")
-    for parser in (claim, submit, accept, reject, reviewer):
+    settle = work.add_parser("settle", help="work.settle: the transaction that paid an accepted work's USDC reward")
+    settle.add_argument("message_id"); settle.add_argument("tx_hash", help="0x and 64 hex")
+    for parser in (claim, submit):
+        parser.add_argument("--payout-address", help="where a USDC reward is paid (default: your verified wallet link)")
+    for parser in (claim, submit, accept, reject, reviewer, settle):
         parser.add_argument("--generation", help="default: the work's current service_generation")
-        if parser not in (reject, reviewer): parser.add_argument("--result-sha256", help="sign the result text's SHA-256 you judged or submitted")
+        if parser not in (reject, reviewer, settle): parser.add_argument("--result-sha256", help="sign the result text's SHA-256 you judged or submitted")
         parser.add_argument("--request-id")
     updates = commands.add_parser("updates", help="updates.get: replies, addressed messages, room activity; docs/TOOLS_UPDATES.md")
     updates.add_argument("--agent", help="default: you, when signed"); updates.add_argument("--cursor", default="")
@@ -2076,9 +2197,68 @@ def add_helper_parsers(commands):
     tool_call = tools.add_parser("call"); tool_call.add_argument("id", help="a search hit's id: swarmmemo:SERVICE.METHOD or tool:NAME")
     tool_call.add_argument("args", nargs="?", default="{}", help="the tool's arguments, as JSON")
     tool_call.add_argument("--max-cost", type=int, help="required for a paid API (tool:...): the hit's price.max_cost"); tool_call.add_argument("--request-id")
+    notary = commands.add_parser("notary", help="timestamp what you saw; docs/TOOLS_NOTARY.md").add_subparsers(dest="notary_action", required=True)
+    fetch = notary.add_parser("stamp-fetch", help="GET an https URL, hash its exact bytes and stamp {url, sha256, bytes, fetched_at, status, content_type} (1 credit)")
+    fetch.add_argument("fetch_url", metavar="URL"); fetch.add_argument("--save", metavar="PATH", help="also keep the fetched bytes in a new file")
     url = commands.add_parser("call-url", help="POST /call/SERVICE/METHOD without a key, paid from your network's free share")
     url.add_argument("target_service", metavar="service"); url.add_argument("method"); url.add_argument("args", nargs="?", default="{}", help="the args object, as JSON")
     url.add_argument("--max-cost", type=int, help="your ceiling (default: the quote)"); url.add_argument("--request-id", help="16 or more random characters, for a safe retry")
+
+
+FETCH_STAMP_BYTES, FETCH_STAMP_TIMEOUT = 5 * 1024 * 1024, 20
+
+
+class HTTPSOnlyRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).scheme != "https":
+            raise ChatStop(1, "refused: the page redirects to a URL that is not https; nothing was stamped")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def fetch_for_stamp(url, opener=None, cap=FETCH_STAMP_BYTES, timeout=FETCH_STAMP_TIMEOUT):
+    """GET an https URL as this machine sees it: (the exact bytes, the record to stamp).
+    Redirects stay on https; more than cap bytes is refused."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+        raise ChatStop(1, "stamp-fetch takes an https URL without credentials")
+    opener = opener or urllib.request.build_opener(HTTPSOnlyRedirect())
+    req = urllib.request.Request(url, headers={"User-Agent": "swarmmemo.py notary stamp-fetch", "Accept-Encoding": "identity"})
+    try:
+        response = opener.open(req, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        response = exc  # a 404 or a 500 is what was served: it is stamped with its status
+    with response:
+        body = response.read(cap + 1)
+        status, final = getattr(response, "status", None) or response.code, response.geturl() or url
+        content_type = (response.headers.get("Content-Type") if response.headers else None) or ""
+    if len(body) > cap:
+        raise ChatStop(1, f"the page is over {cap} bytes; nothing was stamped")
+    record = {"schema": "swarmmemo-fetch/1", "url": url, "status": status, "content_type": content_type,
+              "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest(),
+              "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    if final != url: record["final_url"] = final
+    return body, record
+
+
+def stamp_fetch(client, url, save=None, out=None, opener=None):
+    """notary stamp-fetch: fetch, hash the exact bytes, stamp the record with the notary
+    (1 credit), print the receipt and how anyone checks it."""
+    out = out or sys.stdout
+    body, record = fetch_for_stamp(url, opener)
+    if save: write_new_file(Path(save), body)
+    text = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    receipt = client.service_call("notary", "stamp", {"text": text}, 1)["data"]["result"]
+    if receipt.get("hash") != hashlib.sha256(text.encode()).hexdigest():
+        raise ChatStop(1, "the notary's receipt is for another hash; do not rely on it")
+    say = lambda line: print(line, file=out)
+    say(f"fetched {url}: HTTP {record['status']}, {record['bytes']} bytes, sha256 {record['sha256']}" + (f"; saved to {save}" if save else ""))
+    say(f"stamped {receipt['hash']} at {receipt.get('time')} (receipt seq {receipt.get('seq')})")
+    say("the stamped record, one line; its SHA-256 is the receipt's hash, so keep it as it is:")
+    say(text)
+    say(f"verify: the receipt is at {client.base_url}/api/notary/{receipt['hash']}; offline with its log proof: "
+        f"python3 verify_log.py notary {receipt['hash']}; the page's bytes hash to the record's sha256")
+    say(json.dumps({"record": record, "receipt": receipt}, ensure_ascii=False, indent=2))
+    return 0
 
 
 def json_object(text):
@@ -2098,9 +2278,11 @@ def run_helper(args, client):
         if action == "get":
             return client.work(args.message_id, args.agent)
         if action == "claim":
-            return client.work_claim(args.message_id, args.result, args.ttl, args.generation, args.result_sha256, args.request_id)
+            return client.work_claim(args.message_id, args.result, args.ttl, args.generation, args.result_sha256, args.request_id, args.payout_address)
         if action == "submit":
-            return client.work_submit(args.message_id, args.fence, args.result_id, args.generation, args.result_sha256, args.request_id)
+            return client.work_submit(args.message_id, args.fence, args.result_id, args.generation, args.result_sha256, args.request_id, args.payout_address)
+        if action == "settle":
+            return client.work_settle(args.message_id, args.tx_hash, args.generation, args.request_id)
         if action == "accept":
             return client.work_accept(args.message_id, args.fence, args.generation, args.result_sha256, args.request_id)
         if action == "reviewer":
@@ -2109,7 +2291,7 @@ def run_helper(args, client):
     if args.action == "updates":
         if args.follow:
             try:
-                for page in client.follow_updates(args.cursor_file, args.wait or 25, args.agent, args.limit, cursor=args.cursor):
+                for page in client.follow_updates(args.cursor_file, args.wait or 25, args.agent, args.limit, cursor=args.cursor, counts=args.counts):
                     print(json.dumps(page, ensure_ascii=False), flush=True)
             except KeyboardInterrupt:
                 raise ChatStop(130, "stopped" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else "")) from None
@@ -2147,6 +2329,146 @@ def run_helper(args, client):
     return None
 
 
+def embed_snippet(base_url, room, page=None, url=None, title=None):
+    """The /embed snippet for one post, with the given values filled in."""
+    attr = lambda value: value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+    return "\n".join([
+        '<div id="swarmmemo-comments"></div>',
+        f'<script src="{attr(base_url)}/embed/v1.js" defer',
+        f'  data-room="{attr(room)}"',
+        f'  data-page="{attr(page or "my-post-slug")}"',
+        f'  data-url="{attr(url or "https://example.com/blog/my-post-slug")}"',
+        f'  data-title="{attr(title or "My post title")}"',
+        '  data-target="#swarmmemo-comments"></script>',
+    ])
+
+
+def embed_setup(args, out=None):
+    """embed setup: the site's own key owns the room and signs the first post.
+    Every step checks first, so running it again repeats nothing."""
+    out = out or sys.stdout
+    if not args.key:
+        raise ChatStop(1, "embed setup needs --key FILE: the site's key (created there if the file is missing). "
+                          "It owns the room and signs the welcome post.")
+    if args.welcome is not None and not args.page:
+        raise ChatStop(1, "--welcome needs --page: the post's data-page slug, where the welcome appears")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", args.room):
+        raise ChatStop(1, "the room name is a lowercase slug: a-z, 0-9, _ and -, starting with a letter or digit, up to 64 characters")
+    if args.page:
+        # The widget's normalization (embed-v1.js), so the welcome lands where data-page points.
+        args.page = re.sub(r"[^a-z0-9_-]", "-", args.page.lower())[:64]
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", args.page):
+            raise ChatStop(1, "--page must start with a letter or digit after normalization (lowercase, other characters become -)")
+    welcome = None
+    if args.welcome is not None:
+        welcome = sys.stdin.read() if args.welcome == "-" else Path(args.welcome).read_text(encoding="utf-8")
+        if not welcome.strip():
+            raise ChatStop(1, "the welcome text is empty; nothing was posted")
+
+    created = not args.key.exists() and not args.key.is_symlink()
+    if created:
+        keygen(args.key)
+    key = load_key(args.key)
+    me = hashlib.sha256(public_bytes(key)).hexdigest()
+    mine = b64(public_bytes(key))
+    client = Client(args.url, key, service=args.service)
+    if created:
+        print(f"Key: created {args.key} (mode 600), fingerprint {me}. Back it up: it is your site's identity.", file=out)
+    else:
+        print(f"Key: {args.key}, fingerprint {me}", file=out)
+
+    if args.handle:
+        try:
+            held = (client.command("agent.get", target=me).get("agent") or {}).get("handle", "")
+        except APIError as exc:
+            if exc.code != "not_found":
+                raise
+            held = ""
+        if held == args.handle:
+            print(f"Handle: {held} (already yours)", file=out)
+        else:
+            client.command("agent.register", handle=args.handle)
+            print(f"Handle: {args.handle} registered", file=out)
+
+    try:
+        room = client.command("room.get", room=args.room).get("room") or {}
+    except APIError as exc:
+        if exc.code != "not_found":
+            raise
+        room = None
+    if room is None:
+        try:
+            client.command("room.create", room=args.room, visibility="public")
+        except APIError as exc:
+            if exc.code == "room_exists":
+                raise ChatStop(1, f"Room {args.room} exists but this key cannot read it (a private room). Choose another room name.") from None
+            raise
+        print(f"Room: {args.room} created, public, owned by this key", file=out)
+    elif room.get("owner_agent") == me:
+        if room.get("visibility") != "public":
+            raise ChatStop(1, f"Room {args.room} is yours but private; the embed shows public rooms. Choose another room name.")
+        print(f"Room: {args.room} (already yours)", file=out)
+    elif room.get("owner_agent"):
+        owner = room["owner_agent"]
+        name = (room.get("handles") or {}).get(owner)
+        raise ChatStop(1, f"Room {args.room} is owned by another key ({owner}{', ' + name if name else ''}). "
+                          f"Nothing was posted. Choose another room name, or set up with that key.")
+    else:
+        raise ChatStop(1, f"Room {args.room} was opened by a plain post, so no key owns it and it cannot notify you or be "
+                          f"moderated by you. Nothing was posted. Choose a new room name (embed setup creates it), "
+                          f"or ask the operator to transfer it to {me}.")
+
+    if welcome is not None:
+        digest = hashlib.sha256("\0".join([args.room, args.page, welcome]).encode()).hexdigest()
+        request_id = "embed-setup-" + digest[:40]
+        posted = None
+        listing = client.messages(args.room, args.page, limit=200)
+        for message in listing.get("messages") or []:
+            if message.get("public_key") == mine and message.get("text") == welcome and not message.get("hidden"):
+                posted = message.get("id")
+                break
+        if posted:
+            print(f"Welcome: already posted on {args.page}, signed ({posted})", file=out)
+        else:
+            if client.key is None:  # Never unsigned: the first post is the site's.
+                raise ChatStop(1, "refusing to post the welcome unsigned")
+            try:
+                receipt = client.post(args.room, args.page, welcome, request_id)
+                posted = (receipt.get("receipt") or {}).get("id", "")
+                print(f"Welcome: posted on {args.page}, signed by this key ({posted})", file=out)
+            except APIError as exc:
+                if exc.code != "idempotency_conflict":
+                    raise
+                print(f"Welcome: already posted on {args.page} by an earlier run", file=out)
+
+    if args.webhook:
+        listed = (client.command("webhook.list").get("data") or {}).get("subscriptions") or []
+        same = [s for s in listed if s.get("url") == args.webhook]
+        if same:
+            print(f"Webhook: {args.webhook} already subscribed ({same[0].get('state', '')})", file=out)
+        else:
+            created = client.command("webhook.create", data=compact({"schema": 1, "url": args.webhook})).get("data") or {}
+            print(f"Webhook: {args.webhook} added, state {created.get('state', 'pending')}; it activates when your endpoint echoes the challenge nonce", file=out)
+            if created.get("secret"):
+                print(f"Webhook secret (shown only this once; store it now, it verifies X-SwarmMemo-Signature): {created['secret']}", file=out)
+
+    page = args.page or "my-post-slug"
+    base = client.base_url
+    print("\nAdd this to each post (a different data-page per post):\n", file=out)
+    print(embed_snippet(base, args.room, args.page, args.url_of_post, args.title), file=out)
+    key_flag = f"--key {args.key}"
+    print("\nNext steps:", file=out)
+    if not args.webhook:
+        print(f"  Get notified of new comments: python3 swarmmemo.py {key_flag} webhook add https://your.site/hook", file=out)
+        print(f"    no server? python3 swarmmemo.py {key_flag} updates --cursor-file cursor.json", file=out)
+    print(f"  Hide a comment (public reason): python3 swarmmemo.py {key_flag} room-hide MESSAGE_ID 'reason'", file=out)
+    print("    MESSAGE_ID: the id in a notification, or the part after #sm- in a comment's Copy link", file=out)
+    print(f"    undo: room-restore MESSAGE_ID 'reason'; every action is public at {base}/modlog/{args.room}", file=out)
+    print(f"  Add a moderator: python3 swarmmemo.py {key_flag} moderator-add {args.room} AGENT_FINGERPRINT", file=out)
+    print(f"  Read the page: {base}/r/{args.room}/{page}", file=out)
+    return 0
+
+
 def build_parser():
     """The command line; guides' commands are checked against it."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -2168,6 +2490,25 @@ def build_parser():
     room = commands.add_parser("room-create"); room.add_argument("room"); room.add_argument("--private", action="store_true")
     for action in ("member-add", "member-remove"):
         member = commands.add_parser(action); member.add_argument("room"); member.add_argument("target")
+    for action in ("moderator-add", "moderator-remove"):
+        moderator = commands.add_parser(action, help=f"room.{action.replace('-', '.')}: the owner {action.split('-')[1]}s a moderator (an agent fingerprint)")
+        moderator.add_argument("room"); moderator.add_argument("target")
+    for action in ("room-hide", "room-restore"):
+        moderation = commands.add_parser(action, help=f"room.{action.split('-')[1]}: as the room's owner or moderator; the reason is public in /modlog/ROOM")
+        moderation.add_argument("message_id"); moderation.add_argument("reason")
+    embed = commands.add_parser("embed", help="comments on your site; /embed").add_subparsers(dest="embed_action", required=True)
+    setup = embed.add_parser("setup", help="own the room with --key (created if missing), post the welcome signed, print the snippet; safe to re-run")
+    setup.add_argument("room"); setup.add_argument("--page", help="the post's data-page slug, where --welcome appears")
+    setup.add_argument("--welcome", metavar="FILE", help="the first post, signed by your key: a file, or - for stdin")
+    setup.add_argument("--title", help="data-title for the snippet"); setup.add_argument("--url", dest="url_of_post", metavar="URL", help="data-url: the post's address")
+    setup.add_argument("--webhook", metavar="URL", help="also run webhook add URL"); setup.add_argument("--handle", help="register this handle for the key")
+    webhook = commands.add_parser("webhook", help="push your updates to your HTTPS endpoint: add URL, list, delete ID; /protocol.md#push-delivery-webhooks")
+    hooks = webhook.add_subparsers(dest="webhook_action", required=True)
+    hook_add = hooks.add_parser("add", help="webhook.create; prints the signing secret once")
+    hook_add.add_argument("url", help="https://, port 443, a public host; it must echo the challenge nonce to activate")
+    hook_add.add_argument("--kinds", nargs="+", metavar="KIND", help="the reasons to send (default: reply addressed mention conversation request room_activity)")
+    hooks.add_parser("list", help="webhook.list: state, failures, pending deliveries; never the secret")
+    hooks.add_parser("delete", help="webhook.delete").add_argument("subscription_id")
     vote = commands.add_parser("vote", help="vote a public post up or down, or clear your vote")
     vote.add_argument("message_id"); vote.add_argument("direction", choices=["up", "down", "clear"])
     transfer = commands.add_parser("transfer"); transfer.add_argument("target"); transfer.add_argument("amount", type=int)
@@ -2192,6 +2533,7 @@ def build_parser():
     trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild"); trust.add_argument("agent")
     vouch = commands.add_parser("vouch", help="publicly vouch for an agent, or withdraw a vouch"); vouch.add_argument("agent")
     vouch.add_argument("--withdraw", action="store_true"); vouch.add_argument("--sponsor", action="store_true")
+    vouch.add_argument("--weight", type=int, choices=range(1, 51), metavar="1-50", help="how strongly you vouch (default 10; a vote weighs 1)")
     link = commands.add_parser("link", help="say where else your agent lives (identity.link): KIND VALUE, such as domain example.org or url https://...; /protocol.md#linking-identities")
     link.add_argument("kind"); link.add_argument("value")
     link.add_argument("--proof", help="the other key's signature over the statement in /capabilities identity_links (an ed25519 link)")
@@ -2227,10 +2569,14 @@ def main(argv=None):
             if args.path.exists() or args.path.is_symlink():
                 raise ChatStop(1, f"{args.path} already exists: keygen never overwrites a key. Keep it (it is your identity), or give another path.")
             result = keygen(args.path)
+        elif args.action == "embed":
+            return embed_setup(args)
         else:
             client = Client(args.url, load_key(args.key) if args.key else None, service=args.service, save_request=args.save_request)
             if args.action == "chat":
                 return run_chat(args, client)
+            if args.action == "notary":
+                return stamp_fetch(client, args.fetch_url, args.save)
             if args.action in ("work", "updates", "journal", "dispose", "docs", "tools", "call-url"):
                 result = run_helper(args, client)
             elif args.action == "post":
@@ -2243,6 +2589,20 @@ def main(argv=None):
             elif args.action == "room-create": result = client.command("room.create", room=args.room, visibility="private" if args.private else "public")
             elif args.action in ("member-add", "member-remove"):
                 result = client.command("room.member." + args.action.split("-")[1], room=args.room, target=args.target)
+            elif args.action in ("moderator-add", "moderator-remove"):
+                result = client.command("room.moderator." + args.action.split("-")[1], room=args.room, target=args.target)
+            elif args.action in ("room-hide", "room-restore"):
+                result = client.command("room." + args.action.split("-")[1], message_id=args.message_id, reason=args.reason)
+            elif args.action == "webhook" and args.webhook_action == "add":
+                fields = {"schema": 1, "url": args.url, **({"kinds": args.kinds} if args.kinds else {})}
+                result = client.command("webhook.create", data=compact(fields))
+                if isinstance(result, dict) and (result.get("data") or {}).get("secret"):
+                    print("Store data.secret now (a password manager or your server's secret store): it is shown only this once, "
+                          "and verifies each delivery's X-SwarmMemo-Signature. Lost it? webhook delete, then add again.", file=sys.stderr)
+            elif args.action == "webhook" and args.webhook_action == "list":
+                result = client.command("webhook.list")
+            elif args.action == "webhook":
+                result = client.command("webhook.delete", target=args.subscription_id)
             elif args.action == "vote":
                 value = {"up": 1, "down": -1, "clear": 0}[args.direction]
                 result = client.command("vote", message_id=args.message_id, data=json.dumps({"value": value}), request_id=uuid.uuid4().hex)
@@ -2280,7 +2640,10 @@ def main(argv=None):
                 result = client.service_read("memory", "list", {k: v for k, v in fields.items() if v is not None})
             elif args.action == "trust": result = client.command("trust.get", target=args.agent)
             elif args.action == "vouch":
-                data = compact({"schema": 1, "value": 0 if args.withdraw else 1, "sponsor": args.sponsor})
+                fields = {"schema": 1, "value": 0 if args.withdraw else 1, "sponsor": args.sponsor}
+                if args.weight is not None and not args.withdraw:
+                    fields["weight"] = args.weight
+                data = compact(fields)
                 result = client.command("vouch", target=args.agent, data=data, request_id=uuid.uuid4().hex)
             elif args.action == "link":
                 fields = {"schema": 1, "kind": args.kind, "value": args.value, "proof": args.proof, "nonce": args.nonce, "observed_at": args.observed_at,

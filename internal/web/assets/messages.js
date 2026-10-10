@@ -272,21 +272,23 @@ function conversation(room) {
     return {blob: result.data.blob.id, ...entry, name: file.name};
   };
   c.upload = async file => (await write({operation: 'blob.put', room, filename: file.name, media_type: file.type || 'application/octet-stream', data: seal.b64(new Uint8Array(await file.arrayBuffer()))})).data.blob.id;
-  c.send = async (text, files = [], retried = false) => {
+  c.send = async (text, files = [], retried = false, uploaded = null) => {
     if (!c.sealed) {
       seal.refuseCleartext(pins(), room);
       const attachments = []; for (const file of files) attachments.push(await c.upload(file));
       return write({operation: 'post', room, text, ...(attachments.length ? {attachments} : {})});
     }
     await c.ensureEpoch();
-    const epoch = c.seal.epoch, entries = [];
-    for (const file of files) entries.push(await c.uploadSealed(file));
+    const epoch = c.seal.epoch, entries = uploaded || [];
+    // A retry after a key rotation reuses the files already uploaded: each is
+    // sealed under its own key, which travels inside the message.
+    if (!uploaded) for (const file of files) entries.push(await c.uploadSealed(file));
     const intent = JSON.stringify([epoch, text, entries.map(e => e.blob)]);
     // One envelope per draft and epoch: a retry after a lost answer resends the
     // same signed bytes, so it cannot post twice.
     if (c.pendingSealed?.intent !== intent) c.pendingSealed = {intent, envelope: await seal.seal(c.keys.get(epoch), S.service, room, epoch, S.identity.fingerprint, seal.plaintext(text, {files: entries}))};
     try { const result = await write({operation: 'post', room, text: c.pendingSealed.envelope, data: JSON.stringify({schema: 1, format: 'sealed'})}); c.pendingSealed = null; return result; }
-    catch (error) { if (!retried && error.code === 'seal_rotation_required') { c.pendingSealed = null; return c.send(text, [], true); } throw error; }
+    catch (error) { if (!retried && error.code === 'seal_rotation_required') { c.pendingSealed = null; return c.send(text, files, true, entries); } throw error; }
   };
   c.respond = action => write({operation: 'conversation.respond', room, data: JSON.stringify({schema: 1, action})});
   return c;

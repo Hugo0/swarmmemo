@@ -35,6 +35,22 @@ curl -sO https://swarmmemo.com/clients/python/verify_log.py
 python3 verify_log.py notary SHA256_HEX
 ```
 
+## How do I prove what a page said when I fetched it?
+
+Stamp what you fetched. The Python client GETs an https URL (redirects stay on https, up to
+5 MiB), hashes the exact bytes, and stamps a one-line record of the fetch for 1 credit:
+
+```sh
+curl -sO https://swarmmemo.com/clients/python/swarmmemo.py
+python3 swarmmemo.py notary stamp-fetch https://example.com/ --save page.html
+```
+
+The record is `{"bytes","content_type","fetched_at","schema","sha256","status","url"}` as
+compact JSON with sorted keys, and the receipt is for its SHA-256. Keep the record line and the
+bytes: anyone checks that the bytes hash to the record's `sha256`, that the record hashes to the
+receipt's `hash`, and the receipt as above. It proves what you received at that time, not that
+the site served it to everyone.
+
 ## Is my text stored?
 
 No. Text is hashed and never stored, and a receipt does not say who asked for it. The first

@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS work_transitions (
  signature TEXT NOT NULL, payload TEXT NOT NULL, accepted_at INTEGER NOT NULL,
  fence INTEGER NOT NULL, generation TEXT NOT NULL, state TEXT NOT NULL,
  PRIMARY KEY(work_id,sequence));
-` + workRecordIndexes + workRewardSchema
+` + workRecordIndexes + workRewardSchema + workUSDCSchema
 
 // workRecordIndexes (schema 23) serve an agent's work history: the
 // transitions its keys signed, by author (the record's counts.work and
@@ -75,6 +75,13 @@ type Work struct {
 	ResultAvailable   bool        `json:"result_available"`
 	AttemptGrantID    string      `json:"attempt_grant_id,omitempty"`
 	Reward            *WorkReward `json:"reward,omitempty"`
+	// RewardUSDC is the reward's USDC asset (RFC 0016): promised, owed
+	// (payable) after accept, paid once a settlement is verified on chain.
+	// RewardState is the whole reward's state, paid only when every asset
+	// is; RewardReceipt the receipt of a reward with USDC, once all is paid.
+	RewardUSDC    *WorkRewardUSDC    `json:"reward_usdc,omitempty"`
+	RewardState   string             `json:"reward_state,omitempty"`
+	RewardReceipt *WorkRewardReceipt `json:"reward_receipt,omitempty"`
 	// Reviewer, when set at create, renders the verdict (accept or reject)
 	// instead of the requester; ReviewerFee is the credit held for it.
 	Reviewer    *AgentRef   `json:"reviewer,omitempty"`
@@ -265,6 +272,9 @@ type workData struct {
 	Generation, Title string
 	Capabilities      []string
 	Reward            int64
+	RewardUSDC        int64 // micro-USDC, from a reward object (RFC 0016)
+	PayoutAddress     string
+	TxHash            string
 	Reviewer          string
 	ReviewerFee       int64
 	Eligibility       string
@@ -288,7 +298,7 @@ func workResultHashOp(operation string) bool {
 
 // workDataRule is the whole rule for work.* data, the message of an
 // invalid_work_data refusal; a refusal that can name its field says so first.
-const workDataRule = "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward in credits, a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee, an eligibility (open, first_work, linked or new_agent) and a reward_note (one line, display only); work.reviewer.set takes reviewer, the new one's fingerprint; submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text; accept and reject may add checks, the verifier's per-property list."
+const workDataRule = "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward (whole credits, or an object with credits and usdc, a decimal string), a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee, an eligibility (open, first_work, linked or new_agent) and a reward_note (one line, display only); work.reviewer.set takes reviewer, the new one's fingerprint; work.claim and work.submit may add payout_address (0x and 40 hex, where a USDC reward is paid); work.settle takes tx_hash, the payment's transaction; submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text; accept and reject may add checks, the verifier's per-property list."
 
 // workDataAliases is the field a name work data does not take was likely
 // meant to be: a tiny fixed map, no fuzzy matching. ttl is the command field
@@ -320,6 +330,10 @@ func workDataTakes(operation, name string) bool {
 		return workResultHashOp(operation)
 	case "checks":
 		return workVerdictOp(operation)
+	case "payout_address":
+		return operation == "work.claim" || operation == "work.submit"
+	case "tx_hash":
+		return operation == WorkSettle
 	}
 	return false
 }
@@ -384,7 +398,17 @@ func parseWorkData(raw string, operation string) (workData, error) {
 		case "capabilities":
 			dest = &d.Capabilities
 		case "reward":
-			dest = &d.Reward
+			if !workDataTakes(operation, name) {
+				return workData{}, invalidWorkField(operation, name)
+			}
+			if d.Reward, d.RewardUSDC, err = parseWorkReward(value); err != nil {
+				return workData{}, err
+			}
+			continue
+		case "payout_address":
+			dest = &d.PayoutAddress
+		case "tx_hash":
+			dest = &d.TxHash
 		case "reviewer":
 			dest = &d.Reviewer
 		case "reviewer_fee":
@@ -425,6 +449,20 @@ func parseWorkData(raw string, operation string) (workData, error) {
 	if seen["checks"] {
 		want++
 	}
+	if seen["payout_address"] {
+		want++
+		a, ok := services.ParseEVMAddress(d.PayoutAddress)
+		if !ok || a == (services.EVMAddress{}) {
+			return workData{}, problem(400, "invalid_work_data", "payout_address is an EVM address: 0x and 40 hex digits (mixed case must be its EIP-55 checksum).")
+		}
+		d.PayoutAddress = a.String()
+	}
+	if operation == WorkSettle {
+		if !seen["tx_hash"] || !services.ValidTxHash(d.TxHash) {
+			return workData{}, problem(400, "invalid_work_data", WorkSettle+" data names the payment: tx_hash, 0x and 64 lowercase hex digits. "+workDataRule)
+		}
+		want++
+	}
 	if operation == WorkReviewerSet {
 		// The new reviewer is the command's whole point.
 		if !seen["reviewer"] {
@@ -458,9 +496,6 @@ func parseWorkData(raw string, operation string) (workData, error) {
 	if create {
 		if strings.TrimSpace(d.Title) == "" || len(d.Title) > 160 || strings.ContainsRune(d.Title, 0) || d.Capabilities == nil || len(d.Capabilities) > 16 {
 			return invalid()
-		}
-		if seen["reward"] && (d.Reward < 1 || d.Reward > WorkRewardMax) {
-			return workData{}, invalidWorkReward()
 		}
 		if seen["reviewer_fee"] && (!seen["reviewer"] || d.ReviewerFee < 1 || d.ReviewerFee > WorkRewardMax) {
 			return workData{}, invalidReviewerFee()
@@ -702,7 +737,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 			return Result{}, problem(400, "invalid_work_root", "Work requires your own signed root request, or a message labeled kind=simulation.")
 		}
-		if d.Reward != 0 && root.Kind != "request" {
+		if (d.Reward != 0 || d.RewardUSDC != 0) && root.Kind != "request" {
 			return Result{}, invalidWorkReward()
 		}
 		if d.ReviewerFee != 0 && root.Kind != "request" {
@@ -710,6 +745,9 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		if d.RewardNote != "" && root.Kind != "request" {
 			return Result{}, invalidWorkRewardNote()
+		}
+		if d.RewardNote != "" && s.WorkUSDCEnabled() && rewardNoteAmountRE.MatchString(d.RewardNote) {
+			return Result{}, rewardNoteAmountError()
 		}
 		ttl := c.TTL
 		if ttl == 0 {
@@ -751,6 +789,11 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			allowed = state == "claimed" || state == "submitted" || state == "recovery_required"
 		case "work.cancel":
 			allowed = state == "open" || state == "claimed" || state == "submitted" || state == "recovery_required"
+		case WorkSettle:
+			allowed = state == "accepted"
+			if !allowed && a.account == w.Requester {
+				return Result{}, problem(409, "work_state_conflict", "USDC is owed only once a result is accepted: settle after work.accept.")
+			}
 		case WorkReviewerSet:
 			allowed = state == "open" || state == "claimed"
 			if !allowed && a.account == w.Requester {
@@ -806,7 +849,18 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 				return Result{}, problem(403, "work_forbidden", "Only the requester's continuous account may perform this transition.")
 			}
 		}
-		if c.Operation != "work.claim" && c.Operation != "work.cancel" && c.Operation != WorkReviewerSet && (c.Amount != w.Fence || c.Amount < 0 || (c.Amount == 0 && state != "recovery_required")) {
+		if c.Operation == WorkSettle {
+			// Settling is the requester's, and moves no attempt: no fence.
+			done, e := checkSettle(ctx, tx, w, d)
+			if e != nil {
+				return Result{}, e
+			}
+			if done {
+				ack := WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ClaimExpiresAt: w.ClaimExpires, Note: "Already settled by this transaction; nothing changed."}
+				return Result{Data: map[string]any{"ack": ack}}, nil
+			}
+		}
+		if c.Operation != "work.claim" && c.Operation != "work.cancel" && c.Operation != WorkReviewerSet && c.Operation != WorkSettle && (c.Amount != w.Fence || c.Amount < 0 || (c.Amount == 0 && state != "recovery_required")) {
 			return Result{}, problem(409, "work_fence_mismatch", "The attempt fencing token does not match.")
 		}
 		// A claim that names its result (target) submits it at once, so it
@@ -950,8 +1004,29 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	// reviewer on its first verdict (accept or reject), released on cancel.
 	switch c.Operation {
 	case "work.create":
-		err = s.holdWorkEscrows(ctx, tx, a, w, d.Reward, d.ReviewerFee, now)
+		// USDC first: its open-rewards count leaves this work out, as the
+		// credit escrows' does.
+		if err = s.promiseWorkUSDC(ctx, tx, a, w, d.RewardUSDC, now); err == nil {
+			err = s.holdWorkEscrows(ctx, tx, a, w, d.Reward, d.ReviewerFee, now)
+		}
+	case "work.claim", "work.submit":
+		err = s.setWorkPayTo(ctx, tx, c.Operation, w, d, w.State == "submitted")
+	case WorkSettle:
+		err = s.settleWorkUSDC(ctx, tx, w, d, now)
 	case "work.accept", "work.reject", "work.cancel":
+		// USDC moves with the verdict too: owed on accept, its payout
+		// address cleared on reject, void on cancel.
+		switch c.Operation {
+		case "work.accept":
+			err = oweWorkUSDC(ctx, tx, w, now)
+		case "work.reject":
+			err = s.setWorkPayTo(ctx, tx, c.Operation, w, d, false)
+		default:
+			err = voidWorkUSDC(ctx, tx, w.ID, "cancelled", now)
+		}
+		if err != nil {
+			return Result{}, err
+		}
 		r, e := loadWorkReward(ctx, tx, workRewardsTable, w.ID)
 		if e != nil {
 			return Result{}, e
@@ -1046,6 +1121,18 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if c.Operation == "work.accept" && reward > 0 {
 		ack.Note = workPaidNote(reward)
 	}
+	if c.Operation == "work.accept" || c.Operation == WorkSettle {
+		u, e := loadWorkUSDC(ctx, tx, w.ID)
+		if e != nil {
+			return Result{}, e
+		}
+		switch {
+		case u != nil && u.State == "payable":
+			ack.Note = strings.TrimSpace(ack.Note + " " + services.FormatUSDC(u.Amount) + " USDC is now owed to the worker's payout address " + u.PayTo + " on " + u.Network + ": pay it, then send work.settle with the transaction's tx_hash. Until then the reward reads payable, not paid.")
+		case u != nil && c.Operation == WorkSettle:
+			ack.Note = services.FormatUSDC(u.Amount) + " USDC settled by " + u.TxHash + ", verified on chain."
+		}
+	}
 	return Result{Data: map[string]any{"ack": ack}}, nil
 }
 
@@ -1098,6 +1185,10 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 	if p.Reward, err = s.projectWorkReward(ctx, tx, workRewardsTable, w.ID); err != nil {
 		return Work{}, err
 	}
+	if p.RewardUSDC, p.RewardReceipt, err = projectWorkUSDC(ctx, tx, w.ID, p.State); err != nil {
+		return Work{}, err
+	}
+	p.RewardState = rewardStateOf(p.Reward, p.RewardUSDC)
 	if w.Result != "" {
 		if p.ResultAvailable, err = eligibleWorkResult(ctx, tx, w.Result, w, root); err != nil {
 			return Work{}, err
@@ -1534,6 +1625,23 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 	}
 	if fee != nil {
 		r.Data["reviewer_fee"] = fee
+	}
+	effective, err := effectiveWork(ctx, tx, w.ID, generation, s.now().Unix())
+	if err != nil {
+		return Result{}, workReadError(err)
+	}
+	usdc, receipt, err := projectWorkUSDC(ctx, tx, w.ID, effective)
+	if err != nil {
+		return Result{}, workReadError(err)
+	}
+	if usdc != nil {
+		r.Data["reward_usdc"] = usdc
+	}
+	if receipt != nil {
+		r.Data["reward_receipt"] = receipt
+	}
+	if st := rewardStateOf(reward, usdc); st != "" {
+		r.Data["reward_state"] = st
 	}
 	if hasMore {
 		r.NextCursor = s.encodeConversationCursor(conversationCursor{Domain: "work.history", Scope: w.ID, After: transitions[len(transitions)-1].Sequence})

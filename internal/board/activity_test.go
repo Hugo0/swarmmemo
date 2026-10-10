@@ -46,6 +46,7 @@ func TestActivitySplitsPostsByKind(t *testing.T) {
 	insert("lobby", "note", "bob", "hidden", "", "", "post", hour(2), 1)   // hidden: never counted
 	insert("secret", "note", "bob", "private", "", "", "post", hour(2), 0) // private: never counted
 	insert("lobby", "note", "carol", "old", "", "", "post", now.AddDate(0, 0, -20), 0)
+	insert("lobby", "note", "gwen", "last week", "", "", "post", now.AddDate(0, 0, -10), 0) // the 7 days before the last 7
 	// An edit is not activity, and an edit of a hidden original is not counted at all.
 	insert("lobby", "note", "frank", "edited", "", "y", "post", hour(3), 0)
 	if _, err = store.db.Exec("UPDATE events SET origin=(SELECT id FROM events WHERE text='hidden') WHERE text='edited'"); err != nil {
@@ -56,9 +57,28 @@ func TestActivitySplitsPostsByKind(t *testing.T) {
 	if err = store.AddReaderCounts(context.Background(), now.Format("2006-01-02"), map[string]int64{"llms_txt:other": 3, "skill_md:crawler": 2, "for_agents:other": 1}); err != nil {
 		t.Fatal(err)
 	}
+	// Accepted work counts on the accept's day: public work only, simulated
+	// work left out.
+	for _, text := range []string{"hello", "demo"} {
+		var id string
+		if err = store.db.QueryRow("SELECT id FROM events WHERE text=?", text).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = store.db.Exec(`INSERT INTO works(id,requester,title,capabilities,state,generation,created_at,updated_at,deadline) VALUES(?,'alice','t','[]','accepted','g',?,?,?)`, id, now.Unix(), now.Unix(), now.Unix()+86400); err != nil {
+			t.Fatal(err)
+		}
+		for seq, op := range []string{"work.claim", "work.accept"} {
+			if _, err = store.db.Exec(`INSERT INTO work_transitions(work_id,sequence,operation,author,public_key,signature,payload,accepted_at,fence,generation,state) VALUES(?,?,?,'alice','k','s','{}',?,0,'g','accepted')`, id, seq+1, op, now.Unix()); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	a, err := store.ReadActivity(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if d := a.Days[len(a.Days)-1]; d.WorkAccepted != 1 || a.Days[len(a.Days)-2].WorkAccepted != 0 {
+		t.Fatalf("work accepted today: %d", d.WorkAccepted)
 	}
 	if d := a.Days[len(a.Days)-1]; d.Reads != 4 || d.CrawlerReads != 2 {
 		t.Fatalf("reads today: %d other, %d crawler", d.Reads, d.CrawlerReads)
@@ -84,11 +104,11 @@ func TestActivitySplitsPostsByKind(t *testing.T) {
 	if today.Posts != (ActivitySeries{Signed: 3, Anonymous: 1, Simulation: 1, Imported: 1}) || today.Agents != 2 || today.NewAgents != 2 {
 		t.Fatalf("today: %+v", today)
 	}
-	if a.Days[len(a.Days)-21].NewAgents != 1 || a.Agents7 != 2 || a.Agents30 != 3 {
-		t.Fatalf("new/active agents: day-20 %+v, 7d %d, 30d %d", a.Days[len(a.Days)-21], a.Agents7, a.Agents30)
+	if a.Days[len(a.Days)-21].NewAgents != 1 || a.Agents7 != 2 || a.Agents30 != 4 || a.Agents7Prior != 1 {
+		t.Fatalf("new/active agents: day-20 %+v, 7d %d, 30d %d, the 7 before %d", a.Days[len(a.Days)-21], a.Agents7, a.Agents30, a.Agents7Prior)
 	}
 	// Native posts by channel; the edit, simulated and imported posts are left out.
-	if len(a.Via) != 2 || a.Via["post"] != 3 || a.Via["get"] != 2 {
+	if len(a.Via) != 2 || a.Via["post"] != 4 || a.Via["get"] != 2 {
 		t.Fatalf("via: %v", a.Via)
 	}
 	// Per day, the same channels: they add up to Via, carol's old post on its day.
@@ -105,7 +125,7 @@ func TestActivitySplitsPostsByKind(t *testing.T) {
 		t.Fatalf("edit of a hidden original counted: %+v", h)
 	}
 	// Totals are the stats operation's own counts, cached with the rest.
-	if a.DatabaseBytes <= 0 || a.Totals["messages"] != 10 {
+	if a.DatabaseBytes <= 0 || a.Totals["messages"] != 11 {
 		t.Fatalf("database %d, totals %v", a.DatabaseBytes, a.Totals)
 	}
 

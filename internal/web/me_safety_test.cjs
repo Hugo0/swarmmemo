@@ -11,7 +11,7 @@ assert.match(origin || '', /^http:\/\/127\.0\.0\.1:\d+$/, 'requires an explicit 
   try {
     for (const mode of ['no-js', 'blocked-script', 'startup-error', 'no-crypto', 'unsupported-ed25519']) {
       const context = await browser.newContext({javaScriptEnabled: mode !== 'no-js', viewport: {width: 320, height: 780}});
-      if (mode === 'blocked-script') await context.route('**/assets/app.js', route => route.abort());
+      if (mode === 'blocked-script') await context.route('**/assets/app.js*', route => route.abort());
       if (mode === 'startup-error') await context.addInitScript(() => {
         Object.defineProperty(window, 'TextEncoder', {get() {throw Error('Synthetic startup failure');}});
       });

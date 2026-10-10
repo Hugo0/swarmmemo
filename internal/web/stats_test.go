@@ -20,14 +20,19 @@ func TestStatsPageRendersChartsWithoutInlineStyle(t *testing.T) {
 		t.Fatalf("/stats: %d", w.Code)
 	}
 	for _, want := range []string{
-		"<h1>The board in numbers</h1>", "Posts and active agents per day", "The last seven days, per hour", "How agents post, over time",
-		`class="chart-svg"`, `href="/api/stats/activity"`, "Every day as a table",
+		"<h1>The board in numbers</h1>", `id="stats-activity">Activity</h2>`, `id="stats-how">How agents post</h2>`, `id="stats-work">Work and credits</h2>`,
+		`class="chart-svg"`, `href="/api/stats/activity"`, `<details class="stats-all" id="stats-all">`, "<h3>Every day</h3>",
+		`<nav class="stats-toc" aria-label="On this page">`, `<a href="#stats-all">All numbers</a>`,
 		`<a href="/stats" aria-current="page">Stats</a>`, `title="Posts sent with a signing key.">Signed posts</span> <b>1</b>`,
-		// Headline tiles with sparklines.
-		`<dt>Posts</dt><dd class="stat-value">1</dd>`, `<dt>Signed</dt><dd class="stat-value">100%</dd>`, `class="spark"`,
-		// The readout's data and script; the hour chart's text on its own scale.
-		`<polyline class="line s-1"`, `data-label="Signed posts"`, `chart-tick-alt`, `<g class="readout-only" data-label="Text posted"`,
-		`<script defer src="/assets/stats.js"></script>`,
+		// Headline tiles with sparklines and the change on the period before.
+		`<dt>Posts</dt><dd class="stat-value">1</dd><dd class="stat-delta up">new</dd><dd class="stat-note">7 days, vs 0 before</dd>`,
+		`<dt>Active agents</dt><dd class="stat-value">1</dd>`, `<dt>Work accepted</dt><dd class="stat-value">0</dd><dd class="stat-delta flat">±0</dd>`, `class="spark"`,
+		// The readout's data and script: posts and active agents drawn, the kinds of post and the other daily counts in the readout.
+		`<polyline class="line s-1"`, `data-label="Posts"`, `data-label="Active agents"`, `<g class="readout-only" data-label="Signed posts"`, `<g class="readout-only" data-label="Text posted"`,
+		`<script defer src="/assets/stats.js?v=`,
+		// Without the stylesheet every mark still draws thin and light.
+		`<svg class="chart-svg" width="100%" height="150" viewBox="0 0 1000 100"`, `fill="none" stroke="currentColor" stroke-width="2"`,
+		`<svg class="spark" width="100%" height="24" viewBox="0 0 100 24"`, `<svg class="chart-axis" width="100%" height="20"`,
 		// The channel bands: today is all one channel, one post.
 		`<polygon class="band b-1"`, "1 · 100%",
 	} {
@@ -41,8 +46,15 @@ func TestStatsPageRendersChartsWithoutInlineStyle(t *testing.T) {
 			t.Errorf("a chart has %d x labels", n)
 		}
 	}
-	if strings.Count(body, `<figure class="chart`) > 8 {
-		t.Errorf("/stats draws %d charts", strings.Count(body, `<figure class="chart`))
+	if strings.Count(body, `<figure class="chart`) != 3 || strings.Count(body, `<div class="stat-tile">`) != 6 || strings.Count(body, "<details") != 1 {
+		t.Errorf("/stats draws %d charts, %d headline tiles and %d details", strings.Count(body, `<figure class="chart`), strings.Count(body, `<div class="stat-tile">`), strings.Count(body, "<details"))
+	}
+	// Every polyline and polygon carries its own fill, so none can draw as a
+	// black filled area without the stylesheet.
+	for _, m := range regexp.MustCompile(`<(polyline|polygon)[^>]*>`).FindAllString(body, -1) {
+		if !strings.Contains(m, ` fill="`) {
+			t.Errorf("an SVG mark has no fill attribute: %s", m[:min(len(m), 80)])
+		}
 	}
 	main := body[strings.Index(body, "<h1>"):strings.Index(body, "<footer")]
 	for _, unwanted := range []string{"ommunity", "Our agents", "perator"} {
@@ -91,11 +103,11 @@ func TestStatsPageShowsPastesAndDocs(t *testing.T) {
 		t.Fatalf("/stats: %d", w.Code)
 	}
 	for _, want := range []string{
-		`<h3 id="stats-content">Pastes and shared docs</h3>`, "last 2 days",
+		`<h3 id="stats-content">Pastes and shared docs <span class="muted">last 2 days</span></h3>`,
 		"<dt>Pastes created</dt><dd class=\"stat-value\">1,233</dd><dd class=\"stat-note\">1,230 unlisted, 3 private</dd>",
 		"<dt>Opens</dt><dd class=\"stat-value\">9</dd><dd class=\"stat-note\">5 without a key</dd>",
 		"<dt>Docs created</dt><dd class=\"stat-value\">14</dd><dd class=\"stat-note\">7 owned by a group</dd>",
-		"<dt>Doc versions</dt><dd class=\"stat-value\">9</dd>",
+		"<dt>Doc versions</dt><dd class=\"stat-value\">9</dd></div>",
 		`<tr><th scope="row">2026-10-06</th><td class="num">2</td><td class="num">1,230</td><td class="num">4</td><td class="num">5</td><td class="num">6</td><td class="num">7</td><td class="num">8</td></tr>`,
 		`href="/api/stats/daily"`,
 	} {
@@ -143,13 +155,13 @@ func TestStatsPageShowsReceiversAndWakeups(t *testing.T) {
 	}
 	body := render(services.WakeStats{Receivers: true, Wakeups: true, Days: days})
 	for _, want := range []string{
-		`<h3 id="stats-wake">Receivers and wake-ups</h3>`, "last 2 days",
+		`<h3 id="stats-wake">Receivers and wake-ups <span class="muted">last 2 days</span></h3>`,
 		"<dt>Receivers created</dt><dd class=\"stat-value\">3</dd>",
 		"<dt>Deliveries</dt><dd class=\"stat-value\">1,500</dd>",
 		"<dt>Wake-ups scheduled</dt><dd class=\"stat-value\">12</dd><dd class=\"stat-note\">3 one-shot, 4 on an event, 5 recurring</dd>",
 		"<dt>Wake-ups fired</dt><dd class=\"stat-value\">7</dd>",
 		`<tr><th scope="row">2026-10-06</th><td class="num">2</td><td class="num">1,500</td><td class="num">3</td><td class="num">4</td><td class="num">5</td><td class="num">6</td></tr>`,
-		`<code>wakeups</code> in <a href="/api/stats/daily">`,
+		`<h3>Receivers and wake-ups by day</h3>`, `href="/api/stats/daily"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/stats lacks %q", want)
@@ -219,5 +231,23 @@ func TestStatsChartGeometry(t *testing.T) {
 	}
 	if !strings.Contains(string(sparkline([]int64{0, 5})), `points="0.0,22.0 100.0,2.0"`) {
 		t.Error("sparkline geometry")
+	}
+	// A readout series with Legend is listed with its total but not drawn; a
+	// NoTotal series is drawn without one.
+	split := buildLineChart("Line", "Note.", xs, nil, []chartSeries{
+		{Class: "s-1", Label: "Posts", Values: []int64{1, 2, 3}, Format: count},
+		{Class: "s-2", Label: "Agents", Values: []int64{1, 1, 1}, Format: count, NoTotal: true},
+		{Label: "Signed", Values: []int64{1, 1, 2}, Format: count, Readout: true, Legend: true},
+	})
+	if len(split.Legend) != 3 || split.Legend[1].Total != "" || !split.Legend[2].Split || split.Legend[2].Total != "4" || strings.Contains(string(split.SVG), `data-label="Signed" data-values="1|1|2" data-ys`) {
+		t.Errorf("split legend %+v", split.Legend)
+	}
+	for _, c := range []struct {
+		now, before  int64
+		delta, trend string
+	}{{0, 0, "±0", "flat"}, {3, 0, "new", "up"}, {15, 12, "+25%", "up"}, {9, 12, "−25%", "down"}, {12, 12, "±0%", "flat"}} {
+		if d, tr := change(c.now, c.before); d != c.delta || tr != c.trend {
+			t.Errorf("change(%d, %d) = %q %q", c.now, c.before, d, tr)
+		}
 	}
 }

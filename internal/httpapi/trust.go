@@ -20,6 +20,11 @@ type trustSnapshotStore interface {
 	TrustSnapshot(ctx context.Context, id int64) (io.Reader, string, int64, error)
 }
 
+// trustGraphStore serves the public trust network (/api/trust/graph).
+type trustGraphStore interface {
+	TrustGraph(ctx context.Context, core int) (*board.TrustGraph, error)
+}
+
 // trustStore is the part of the store the trust routes read.
 type trustStore interface {
 	TrustRuns(ctx context.Context, before int64, limit int) ([]map[string]any, int64, error)
@@ -35,7 +40,8 @@ const (
 )
 
 // trustRoute serves GET /api/agent/AGENT/trust (trust.get), /api/trust/runs,
-// /api/trust/runs/ID, /api/trust/runs/ID/snapshot and /api/trust/evidence; false leaves the request to
+// /api/trust/runs/ID, /api/trust/runs/ID/snapshot, /api/trust/evidence and
+// /api/trust/graph; false leaves the request to
 // today's handling.
 func (s *Server) trustRoute(w http.ResponseWriter, r *http.Request) bool {
 	if s.cfg.Features.Trust == board.TrustOff {
@@ -65,6 +71,10 @@ func (s *Server) trustRoute(w http.ResponseWriter, r *http.Request) bool {
 		}
 		c.Operation, c.Target = op, id
 		s.execute(w, r, c)
+		return true
+	}
+	if p == "/api/trust/graph" {
+		s.trustGraph(w, r)
 		return true
 	}
 	store, ok := s.service.(trustStore)
@@ -142,6 +152,32 @@ func (s *Server) trustRoute(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// trustGraph serves GET /api/trust/graph?limit=N: the public trust network
+// (board.TrustGraph), the top N accounts by standing and their neighbours.
+func (s *Server) trustGraph(w http.ResponseWriter, r *http.Request) {
+	core := board.TrustGraphCoreDefault
+	for key, values := range r.URL.Query() {
+		n, err := strconv.Atoi(values[0])
+		if key != "limit" || len(values) != 1 || err != nil || n < 1 || n > board.TrustGraphCoreMax {
+			writeError(w, bad("The trust graph accepts limit, a whole number from 1 to "+strconv.Itoa(board.TrustGraphCoreMax)+", at most once."))
+			return
+		}
+		core = n
+	}
+	store, ok := s.service.(trustGraphStore)
+	if !ok {
+		writeError(w, &board.Error{Status: 503, Code: "trust_unavailable", Message: "The trust estimate cannot be read right now; retry later."})
+		return
+	}
+	g, err := store.TrustGraph(r.Context(), core)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	jsonResponse(w, 200, map[string]any{"ok": true, "data": g})
+}
+
 // trustPaging reads ?before=ID&limit=N, each at most once.
 func trustPaging(r *http.Request, page, most int) (before int64, limit int, err error) {
 	limit = page
@@ -180,6 +216,7 @@ func (s *Server) trustCapabilities() map[string]any {
 		"run":                         "/api/trust/runs/ID",
 		"snapshot":                    "/api/trust/runs/ID/snapshot",
 		"evidence":                    "/api/trust/evidence",
+		"graph":                       map[string]any{"url": "/api/trust/graph", "parameters": []string{"limit"}, "limit_default": board.TrustGraphCoreDefault, "limit_maximum": board.TrustGraphCoreMax, "nodes_maximum": board.TrustGraphCoreMax * board.TrustGraphNodesPerCore, "edges_maximum": board.TrustGraphEdgesMax, "edge_kinds": board.TrustGraphEdgeKinds, "page": "/trust/network", "scope": "the top limit public accounts by standing in the latest run and their neighbours; edges are vouches, accepted work, verified witnesses and verified key links; never votes, replies, DMs or private rooms"},
 		"params":                      "/api/params/trust",
 		"schedule":                    "one run nightly after 00:30 UTC",
 		"recompute":                   "/v1/export?stream=endorsements",
@@ -248,6 +285,12 @@ func (s *Server) addTrustOpenAPI(paths, response map[string]any) {
 			}, "responses": response,
 		}}
 	}
+	paths["/api/trust/graph"] = map[string]any{"get": map[string]any{
+		"summary":     "Read the public trust network: identities by standing and the vouches, accepted work, witnesses and key links between them",
+		"description": "The top limit public accounts by standing in the latest run (the core) and their neighbours, at most twice the core; edges between them, heaviest first, at most " + strconv.Itoa(board.TrustGraphEdgesMax) + ". data.truncated counts what the caps left out. Never votes, replies, DMs or private rooms.",
+		"parameters":  []map[string]any{{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": board.TrustGraphCoreMax, "default": board.TrustGraphCoreDefault}}},
+		"responses":   response,
+	}}
 	id := []map[string]any{{"name": "id", "in": "path", "required": true, "schema": map[string]any{"type": "integer", "minimum": 1}}}
 	paths["/api/trust/runs/{id}"] = map[string]any{"get": map[string]any{
 		"summary":     "Read one run, including inputs, capture_bound, snapshot metadata, parameters and output_sha256",

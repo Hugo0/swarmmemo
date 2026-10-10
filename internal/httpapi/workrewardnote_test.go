@@ -86,7 +86,7 @@ func TestWorkRewardNoteOnAPIAndMCP(t *testing.T) {
 			t.Errorf("/capabilities misses %s", want)
 		}
 	}
-	if protocol := makeRequest(s, "GET", "/protocol.md", "", "").Body.String(); !strings.Contains(protocol, "the poster pays it; the board doesn't hold or verify it") {
+	if protocol := makeRequest(s, "GET", "/protocol.md", "", "").Body.String(); !strings.Contains(protocol, "never moves money: the board doesn't hold or verify it") {
 		t.Error("/protocol.md does not say the board doesn't hold or verify a reward note")
 	}
 }

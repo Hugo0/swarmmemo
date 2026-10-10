@@ -287,7 +287,7 @@ def _transition(profile, item, work_id):
         envelope = strict_json(item["signed_payload"])
         if set(envelope) != {"version", "service", "command"} or envelope["service"] != profile.service_id: raise ValueError()
         command = envelope["command"]
-        allowed_operations = {"work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel", "work.reviewer.set"}
+        allowed_operations = {"work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel", "work.reviewer.set", "work.settle"}
         if (item["signed_payload"].encode() != memo.canonical(command, profile.service_id)
                 or envelope["version"] != (2 if "delegation" in command else 1)
                 or command.get("operation") != item["operation"] or item["operation"] not in allowed_operations
@@ -296,7 +296,7 @@ def _transition(profile, item, work_id):
         # says so (resolved_from) and the work is still this one.
         if "resolved_from" in item and (not isinstance(item["resolved_from"], str) or not re.fullmatch(HEX32, item["resolved_from"]) or item["resolved_from"] == work_id): raise ValueError()
         if command.get("message_id") != work_id and command.get("message_id") != item.get("resolved_from"): raise ValueError()
-        allowed_fields = {"operation", "public_key", "request_id", "timestamp", "nonce", "delegation"} | set(outbox.MUTATIONS[item["operation"]].split())
+        allowed_fields = {"operation", "public_key", "request_id", "timestamp", "nonce", "delegation"} | set(outbox.MUTATIONS.get(item["operation"], "message_id data").split())
         # A claim that names its result (target) submits it in the same step.
         if item["operation"] == "work.claim": allowed_fields.add("target")
         if set(command) - allowed_fields: raise ValueError()
@@ -305,7 +305,7 @@ def _transition(profile, item, work_id):
             if field in ("timestamp", "ttl", "amount"):
                 if type(value) is not int or not 0 <= value < 2**63: raise ValueError()
             elif not isinstance(value, str) or "\x00" in value: raise ValueError()
-        expected_state = {"work.create": "open", "work.claim": "claimed", "work.renew": "claimed", "work.submit": "submitted", "work.accept": "accepted", "work.reject": "open", "work.cancel": "cancelled", "work.reviewer.set": item["state"]}[item["operation"]]
+        expected_state = {"work.create": "open", "work.claim": "claimed", "work.renew": "claimed", "work.submit": "submitted", "work.accept": "accepted", "work.reject": "open", "work.cancel": "cancelled", "work.reviewer.set": item["state"], "work.settle": "accepted"}[item["operation"]]
         # A reviewer change leaves the state as it was, open or claimed.
         if item["operation"] == "work.reviewer.set" and item["state"] not in ("open", "claimed"): raise ValueError()
         if item["operation"] == "work.claim" and "target" in command: expected_state = "submitted"
@@ -333,6 +333,14 @@ def _transition(profile, item, work_id):
                     or (item.get("previous_reviewer") and not re.fullmatch(HEX64, item["previous_reviewer"]))): raise ValueError()
             data_fields = data_fields | {"reviewer"}
         elif "reviewer" in item or "previous_reviewer" in item: raise ValueError()
+        # A USDC reward (RFC 0016): a claim or submit may sign the payout address;
+        # a settle signs the paying transaction.
+        if isinstance(data, dict) and "payout_address" in data and item["operation"] in ("work.claim", "work.submit"):
+            if not isinstance(data["payout_address"], str) or not re.fullmatch(r"0x[0-9a-fA-F]{40}", data["payout_address"]): raise ValueError()
+            data_fields = data_fields | {"payout_address"}
+        if item["operation"] == "work.settle":
+            if not isinstance(data, dict) or not isinstance(data.get("tx_hash"), str) or not re.fullmatch(r"0x[0-9a-f]{64}", data["tx_hash"]): raise ValueError()
+            data_fields = data_fields | {"tx_hash"}
         if "result_sha256" in item and (not isinstance(item["result_sha256"], str) or not re.fullmatch(HEX64, item["result_sha256"])): raise ValueError()
         if (not isinstance(data, dict) or set(data) != data_fields or type(data.get("schema")) is not int or data["schema"] != 1
                 or not isinstance(data.get("generation"), str) or not re.fullmatch(HEX32, data["generation"])
@@ -395,10 +403,13 @@ def _dispatch(profile, action, a):
         result = client.send(client.prepare("delegation.get", target=profile.grant_id))
         status = result.get("data", {}).get("delegation")
         fields = set("grant_id generation service_id state created_at expires_at ceiling_bytes used_bytes remaining_bytes".split())
-        if not isinstance(status, dict) or set(status) != fields or status["grant_id"] != profile.grant_id or status["generation"] != profile.generation or status["service_id"] != profile.service_id: raise BridgeError("invalid_response")
+        # room and origin are optional (C157); spend_limit is the grant's own view.
+        if not isinstance(status, dict) or not fields <= set(status) or set(status) - fields - {"room", "origin", "spend_limit"} or status["grant_id"] != profile.grant_id or status["generation"] != profile.generation or status["service_id"] != profile.service_id: raise BridgeError("invalid_response")
         if status["state"] not in ("active", "revoked", "expired", "epoch_disabled", "issuer_rotated"): raise BridgeError("invalid_response")
         for field in ("created_at", "expires_at", "ceiling_bytes", "used_bytes", "remaining_bytes"):
             if type(status[field]) is not int or not 0 <= status[field] < 2**63: raise BridgeError("invalid_response")
+        for field in ("room", "origin"):
+            if field in status and (not isinstance(status[field], str) or len(status[field]) > 256): raise BridgeError("invalid_response")
         return {"delegation": status, "status_is_service_assertion": True, "generation_not_refreshed": True}
     _public_room(profile)
     limit = a.get("limit", 5)

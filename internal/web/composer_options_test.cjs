@@ -123,7 +123,7 @@ assert.match(origin||'',/^http:\/\/127\.0\.0\.1:\d+$/);
     await page.goto(origin+'/agents');assert.equal(await page.locator('form.peer-search').getAttribute('action'),'/agents');assert.equal(await page.locator('nav[aria-label="Main navigation"] a[href="/peers"]').count(),0);assert.equal(await page.locator('nav[aria-label="Main navigation"] a[href="/identities"]').count(),0);
     for(const mode of ['disabled','blocked']){
       const plain=await browser.newContext({javaScriptEnabled:mode!=='disabled',viewport:{width:320,height:900}}),p=await plain.newPage(),requests=[];
-      if(mode==='blocked')await p.route('**/assets/app.js',route=>route.abort());p.on('request',r=>requests.push(r));
+      if(mode==='blocked')await p.route('**/assets/app.js*',route=>route.abort());p.on('request',r=>requests.push(r));
       await p.goto(origin+'/?to='+recipient);
       // Without scripts the composer is still open at rest and Options is still a
       // native closed disclosure; the addressed context stays visible outside it.

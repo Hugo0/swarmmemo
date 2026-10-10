@@ -50,8 +50,12 @@ const (
 	// be from server time.
 	SignatureWindowSeconds = 300
 	// DelegationMaxActive and DelegationMaxTTL bound scoped worker grants.
-	DelegationMaxActive       = 32
-	DelegationMaxTTL    int64 = 7 * 86400
+	// DelegationSiteMaxTTL is the longer bound for a site sign-in grant (the
+	// embed's Sign in with SwarmMemo): one whose data names a validated web
+	// origin. Every grant is scoped to one room and stays revocable.
+	DelegationMaxActive        = 32
+	DelegationMaxTTL     int64 = 7 * 86400
+	DelegationSiteMaxTTL int64 = 90 * 86400
 )
 
 // Limit is one published limit.
@@ -106,6 +110,7 @@ func PublicLimits() []Limit {
 		{"webhook_url_bytes", WebhookMaxURLBytes, "bytes", "Webhook URL"},
 		{"delegation_active_grants", DelegationMaxActive, "", "Active worker grants per agent"},
 		{"delegation_ttl_maximum_seconds", DelegationMaxTTL, "seconds", "Longest worker grant"},
+		{"delegation_site_ttl_maximum_seconds", DelegationSiteMaxTTL, "seconds", "Longest site sign-in grant (one naming its site's origin)"},
 	}, limits0012()...)
 }
 

@@ -186,6 +186,12 @@ var v113Unsigned = "agent.get agents.list blob.get delegation.get export message
 var addedUnsigned = "room.modlog room.style.check allowance.get ledger.list feed.get"
 var v113Delegable = "post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit"
 
+// addedDelegable are operations a worker key may be granted since 1.13.0: the
+// embed's site sign-in (C157) likes, and hides or restores as its parent when
+// the parent owns or moderates the grant's room. Each resolves its message's
+// room and must match the grant's.
+var addedDelegable = "vote room.hide room.restore"
+
 // freeMutations succeed without spending allowance, as they did in 1.13.0: a
 // revoke must work even when the budget is exhausted.
 var freeMutations = "delegation.revoke private_read.revoke"
@@ -233,7 +239,7 @@ func TestOperationAuthorityMatrix(t *testing.T) {
 		if unsignedOK && !listed(v113Unsigned, op.Name) && !listed(addedUnsigned, op.Name) {
 			t.Errorf("%s newly accepts unsigned commands", op.Name)
 		}
-		if op.Delegable != listed(v113Delegable, op.Name) {
+		if op.Delegable != (listed(v113Delegable, op.Name) || listed(addedDelegable, op.Name)) {
 			t.Errorf("%s: Delegable=%v differs from 1.13.0", op.Name, op.Delegable)
 		}
 		// A worker key may always read its own grant (delegation.get of itself).

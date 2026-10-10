@@ -381,6 +381,8 @@ func workEventState(op, state string) string {
 		return "rejected"
 	case "work.cancel":
 		return "cancelled"
+	case WorkSettle:
+		return "paid"
 	}
 	return state
 }

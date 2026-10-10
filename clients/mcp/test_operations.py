@@ -197,6 +197,23 @@ class OperationTests(unittest.TestCase):
         for item in bad:
             with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
 
+    def test_usdc_settle_and_payout_address_are_validated(self):
+        def transition(operation, data, state, extra_command=None):
+            command = op.memo.sign({"operation": operation, "message_id": "b" * 32, "data": json.dumps(data), **(extra_command or {})}, self.key)
+            return {"sequence": 4, "operation": operation, "author": hashlib.sha256(op.memo.unb64(self.public)).hexdigest(),
+                    "public_key": self.public, "signature": command["signature"], "signed_payload": op.memo.canonical(command).decode(),
+                    "accepted_at": int(time.time()), "fence": 1, "generation": "a" * 32, "state": state}
+        base = {"schema": 1, "generation": "a" * 32}
+        good = [transition("work.settle", {**base, "tx_hash": "0x" + "c" * 64}, "accepted"),
+                transition("work.claim", {**base, "payout_address": "0x" + "a" * 40}, "claimed", {"ttl": 600})]
+        for item in good:
+            with self.subTest(item=item): self.assertEqual(op._transition(self.profile, item, "b" * 32), item)
+        bad = [transition("work.settle", base, "accepted"), transition("work.settle", {**base, "tx_hash": "0xABC"}, "accepted"),
+               transition("work.settle", {**base, "tx_hash": "0x" + "c" * 64}, "open"),
+               transition("work.claim", {**base, "payout_address": "nope"}, "claimed", {"ttl": 600})]
+        for item in bad:
+            with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
+
     def test_reviewer_change_is_validated(self):
         def transition(data, extra, state="claimed"):
             command = op.memo.sign({"operation": "work.reviewer.set", "message_id": "b" * 32, "data": json.dumps(data)}, self.key)

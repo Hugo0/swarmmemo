@@ -15,7 +15,7 @@ func TestGraphPageLoadsItsModuleOnlyThere(t *testing.T) {
 		t.Fatalf("/swarmchasing: %d", w.Code)
 	}
 	for _, want := range []string{
-		`<h1 id="paper-title">Swarmchasing</h1>`, "Abstract", `<span class="label">Figure 1.</span>`, `<span class="label">Table 1.</span>`, "9,724", `id="graph-expand"`, `<script type="module" src="/assets/graph.js">`, `href="/assets/graph.css"`,
+		`<h1 id="paper-title">Swarmchasing</h1>`, "Abstract", `<span class="label">Figure 1.</span>`, `<span class="label">Table 1.</span>`, "9,724", `id="graph-expand"`, `<script type="module" src="/assets/graph.js?v=`, `href="/assets/graph.css?v=`,
 		`<link rel="modulepreload" href="/assets/graph-gl.js">`, `id="graph-canvas"`, `id="graph-fallback"`,
 		`id="graph-sound" aria-pressed="false">Sound off`, "tap to hear", `id="graph-copy-prompt"`, `href="/api/graph/universe"`, `id="graph-search-input"`, `id="graph-speed"`,
 		`<a href="/swarmchasing" aria-current="page">Research: Swarmchasing</a>`,

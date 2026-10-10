@@ -189,6 +189,8 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if _, err := tx.Exec(signalsSchema); err != nil {
 		return err
 	}
+	// Schema 27: work_usdc, a work reward's USDC asset (workusdc.go, RFC
+	// 0016), created with workSchema above.
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

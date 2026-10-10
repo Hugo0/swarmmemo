@@ -16,6 +16,8 @@ import (
 	"database/sql"
 	"slices"
 	"strings"
+
+	"swarmmemo/internal/services"
 )
 
 // MessageWork is a message's work mark. On a request: ID, its effective
@@ -31,6 +33,8 @@ type MessageWork struct {
 	State       string             `json:"state"`
 	Simulated   bool               `json:"simulated,omitempty"`
 	Reward      *MessageWorkReward `json:"reward,omitempty"`
+	RewardUSDC  *MessageWorkUSDC   `json:"reward_usdc,omitempty"`
+	RewardState string             `json:"reward_state,omitempty"`
 	RewardNote  string             `json:"reward_note,omitempty"`
 	Deadline    int64              `json:"deadline,omitempty"`
 	Eligibility string             `json:"eligibility,omitempty"`
@@ -44,6 +48,16 @@ type MessageWork struct {
 type MessageWorkReward struct {
 	Amount int64  `json:"amount"`
 	Unit   string `json:"unit"`
+	// State is the escrow's (held, pending, paid, released), given only
+	// beside a USDC asset, where the line shows each asset's state.
+	State string `json:"state,omitempty"`
+}
+
+// MessageWorkUSDC is a reward's USDC asset (RFC 0016): Amount in USDC
+// ("0.10") and its State, promised, payable, paid or void.
+type MessageWorkUSDC struct {
+	Amount string `json:"amount"`
+	State  string `json:"state"`
 }
 
 // The result marks a reply can carry.
@@ -92,7 +106,7 @@ func attachWork(ctx context.Context, q workRowsQuerier, events []Message, now in
 		return nil
 	}
 	rows, err := q.QueryContext(ctx, `SELECT w.id,w.title,`+workEffectiveInlineSQL+`,w.state,w.deadline,w.eligibility,e.kind,
- coalesce(rw.amount,0),`+workRewardNoteSQL+`,coalesce(ri.id,''),coalesce(ri.public_key,''),coalesce(ri.handle,''),
+ coalesce(rw.amount,0),coalesce(rw.state,''),coalesce(wu.amount,0),coalesce(wu.state,''),`+workRewardNoteSQL+`,coalesce(ri.id,''),coalesce(ri.public_key,''),coalesce(ri.handle,''),
  coalesce((SELECT CASE WHEN r.origin<>'' THEN r.origin ELSE r.id END FROM events r WHERE r.id=w.result_id AND w.result_id<>''),''),
  coalesce((SELECT group_concat(CASE WHEN te.origin<>'' THEN te.origin ELSE te.id END) FROM work_transitions t
   JOIN work_transitions x ON x.work_id=t.work_id AND x.sequence=t.sequence+1 AND x.operation='work.reject'
@@ -100,6 +114,7 @@ func attachWork(ctx context.Context, q workRowsQuerier, events []Message, now in
   WHERE t.work_id=w.id AND t.state='submitted'),'')
  FROM works w JOIN events e ON e.id=w.id
  LEFT JOIN work_rewards rw ON rw.work_id=w.id
+ LEFT JOIN work_usdc wu ON wu.work_id=w.id
  LEFT JOIN identities ri ON w.reviewer<>'' AND ri.account=w.reviewer AND ri.successor=''
  WHERE e.hidden=0 AND w.id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")+`)`, append([]any{now, now}, keys...)...)
 	if err != nil {
@@ -115,9 +130,10 @@ func attachWork(ctx context.Context, q workRowsQuerier, events []Message, now in
 	for rows.Next() {
 		var m mark
 		var kind string
-		var reward int64
+		var reward, usdc int64
+		var rewardState, usdcState string
 		var reviewer AgentRef
-		if err = rows.Scan(&m.root.ID, &m.root.Title, &m.root.State, &m.stored, &m.root.Deadline, &m.root.Eligibility, &kind, &reward, &m.root.RewardNote, &reviewer.ID, &reviewer.PublicKey, &reviewer.Handle, &m.result, &m.rejected); err != nil {
+		if err = rows.Scan(&m.root.ID, &m.root.Title, &m.root.State, &m.stored, &m.root.Deadline, &m.root.Eligibility, &kind, &reward, &rewardState, &usdc, &usdcState, &m.root.RewardNote, &reviewer.ID, &reviewer.PublicKey, &reviewer.Handle, &m.result, &m.rejected); err != nil {
 			return err
 		}
 		m.root.Simulated = kind == "simulation"
@@ -126,6 +142,21 @@ func attachWork(ctx context.Context, q workRowsQuerier, events []Message, now in
 		}
 		if reward > 0 {
 			m.root.Reward = &MessageWorkReward{Amount: reward, Unit: "credit"}
+		}
+		if usdc > 0 {
+			if usdcState == "promised" && (m.root.State == "expired" || m.root.State == "review_lapsed" || m.root.State == "cancelled") {
+				usdcState = "void"
+			}
+			m.root.RewardUSDC = &MessageWorkUSDC{Amount: services.FormatUSDC(usdc), State: usdcState}
+			if m.root.Reward != nil {
+				m.root.Reward.State = rewardState
+			}
+		}
+		if reward > 0 || usdc > 0 {
+			if reward == 0 {
+				rewardState = ""
+			}
+			m.root.RewardState = workRewardState(rewardState, usdcState)
 		}
 		if reviewer.ID != "" {
 			m.root.Reviewer = &reviewer

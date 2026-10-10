@@ -65,7 +65,7 @@ func buildModerationStats(ctx context.Context, service board.Service) *moderatio
 		v.DaysRows = append(v.DaysRows, row(st.Daily[i].Day, st.Daily[i].Counts))
 	}
 	v.Tiles = []statTile{
-		{"Screened", count(all.Total()), "decisions, last " + strconv.Itoa(st.Days) + " days"},
+		{"Screened", count(all.Total()), "decisions"},
 		{"Hidden or blocked", count(all.Hide + all.Block), "with a public reason"},
 		{"Flagged or held", count(all.Flag + all.Hold), "for human review"},
 		{"Awaiting review", count(st.PendingReview), strconv.FormatInt(st.Reviewed, 10) + " reviewed in the range"},
@@ -108,7 +108,7 @@ func buildX402Stats(ctx context.Context, service board.Service) *x402View {
 	today := st.Days[len(st.Days)-1]
 	v.Tiles = []statTile{
 		{"Paid today", usd(today.Paid), "of $" + st.GlobalDaily + " a day"},
-		{"Paid calls", count(calls), "last " + strconv.Itoa(len(st.Days)) + " days, " + usd(paid)},
+		{"Paid calls", count(calls), usd(paid)},
 		{"Resources", count(int64(st.Pinned + st.Open)), strconv.Itoa(st.Pinned) + " pinned, " + strconv.Itoa(st.Open) + " open"},
 	}
 	return v
@@ -156,7 +156,7 @@ func buildContentStats(ctx context.Context, service board.Service) *contentView 
 		{"Pastes created", count(t.PastesPrivate + t.PastesUnlisted), count(t.PastesUnlisted) + " unlisted, " + count(t.PastesPrivate) + " private"},
 		{"Opens", count(t.PasteOpensSigned + t.PasteOpensAnonymous), count(t.PasteOpensAnonymous) + " without a key"},
 		{"Docs created", count(t.DocsOwn + t.DocsGroup), count(t.DocsGroup) + " owned by a group"},
-		{"Doc versions", count(t.DocVersions), "written, first versions included"},
+		{"Doc versions", count(t.DocVersions), ""},
 	}
 	return v
 }
@@ -199,13 +199,13 @@ func buildWakeStats(ctx context.Context, service board.Service) *wakeView {
 	}
 	if st.Receivers {
 		v.Tiles = append(v.Tiles,
-			statTile{"Receivers created", count(t.ReceiversCreated), "private drop boxes for callbacks"},
-			statTile{"Deliveries", count(t.ReceiverDeliveries), "stored in a receiver"})
+			statTile{"Receivers created", count(t.ReceiversCreated), ""},
+			statTile{"Deliveries", count(t.ReceiverDeliveries), ""})
 	}
 	if st.Wakeups {
 		v.Tiles = append(v.Tiles,
 			statTile{"Wake-ups scheduled", count(t.WakeupsOneShot + t.WakeupsEvent + t.WakeupsRecurring), count(t.WakeupsOneShot) + " one-shot, " + count(t.WakeupsEvent) + " on an event, " + count(t.WakeupsRecurring) + " recurring"},
-			statTile{"Wake-ups fired", count(t.WakeupsFired), "each period of a recurring one counted"})
+			statTile{"Wake-ups fired", count(t.WakeupsFired), ""})
 	}
 	return v
 }
@@ -251,6 +251,6 @@ func buildInboxStats(ctx context.Context, service board.Service) *inboxView {
 	return &inboxView{Days: st.Days, Tiles: []statTile{
 		{"Inbox entries", count(entries), kinds},
 		{"Marked done", count(done), states},
-		{"Waiting for an answer", count(st.Waiting), "messages for an agent, requests and reviews still open"},
+		{"Waiting for an answer", count(st.Waiting), ""},
 	}}
 }

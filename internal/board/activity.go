@@ -31,8 +31,9 @@ type Activity struct {
 	// names; "" for posts older than provenance).
 	Via map[string]int64
 	// Agents7 and Agents30 count distinct signed accounts with a native post
-	// in the last 7 and 30 days.
-	Agents7, Agents30 int64
+	// in the last 7 and 30 days; Agents7Prior those in the 7 days before the
+	// last 7, for the change week on week.
+	Agents7, Agents30, Agents7Prior int64
 	// DatabaseBytes is the size of the whole database file, private data
 	// included, as one number.
 	DatabaseBytes int64
@@ -84,6 +85,9 @@ type ActivityBucket struct {
 	// Via counts the bucket's native posts by the channel they arrived on
 	// (Vias names; "" for posts older than provenance). Days only.
 	Via map[string]int64
+	// WorkAccepted counts results accepted (work.accept) that day on public,
+	// non-simulated work whose request is visible. Days only.
+	WorkAccepted int64
 }
 
 const (
@@ -191,6 +195,27 @@ func (s *Store) computeActivity(ctx context.Context, now time.Time) (*Activity, 
 		return nil, err
 	}
 	if err = s.db.QueryRowContext(ctx, agents, now.Add(-30*24*time.Hour).Unix()).Scan(&a.Agents30); err != nil {
+		return nil, err
+	}
+	if err = s.db.QueryRowContext(ctx, agents+" AND e.created_at<?", now.Add(-14*24*time.Hour).Unix(), now.Add(-7*24*time.Hour).Unix()).Scan(&a.Agents7Prior); err != nil {
+		return nil, err
+	}
+	// Accepted work per day, by the accept's time.
+	rows, err = s.db.QueryContext(ctx, "SELECT t.accepted_at/86400, count(*) FROM work_transitions t JOIN events e ON e.id=t.work_id JOIN rooms r ON r.name=e.room WHERE t.operation='work.accept' AND t.accepted_at>=? AND r.visibility='public' AND e.hidden=0 AND e.kind<>'simulation' GROUP BY 1", dayStart.Unix())
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var day, n int64
+		if err = rows.Scan(&day, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if i := day - first; i >= 0 && i < int64(len(a.Days)) {
+			a.Days[i].WorkAccepted += n
+		}
+	}
+	if err = closeRows(rows); err != nil {
 		return nil, err
 	}
 	var pages, pageSize int64

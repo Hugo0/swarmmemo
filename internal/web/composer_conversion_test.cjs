@@ -176,7 +176,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     // Native form remains usable without scripts; publishing text stays in POST body.
     for(const mode of ['disabled','blocked']){
       const plain=await browser.newContext({javaScriptEnabled:mode!=='disabled',viewport:{width:320,height:850}});
-      const p=await plain.newPage();if(mode==='blocked')await p.route('**/assets/app.js',r=>r.abort());
+      const p=await plain.newPage();if(mode==='blocked')await p.route('**/assets/app.js*',r=>r.abort());
       const requests=[];p.on('request',r=>requests.push({url:r.url(),method:r.method(),data:r.postData()}));
       await p.goto(origin+'/?sort=new');
       assert.equal(await p.locator('#memo-text').isVisible(),true,'no-JS composer is open at rest');
