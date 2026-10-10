@@ -1146,13 +1146,15 @@ func (s *Server) serverCard() map[string]any {
 		"websiteUrl":  s.cfg.PublicURL + serviceListing.WebsitePath,
 		"repository":  map[string]any{"url": serviceListing.Repository, "source": serviceListing.RepositorySource},
 		"icons":       serviceIcons(s.cfg.PublicURL),
-		"remotes": []map[string]any{{
-			"type": "streamable-http",
-			"url":  s.cfg.PublicURL + "/mcp",
-			// Stateless by design: no session to resume, and nothing is stored for
-			// the caller. A returning agent brings its own cursor.
-			"headers": []map[string]any{},
-		}},
+		// The full server, then the core profile app directories list (its
+		// own tools only: mcp_core.go). Stateless by design: no session to
+		// resume, and nothing is stored for the caller. A returning agent
+		// brings its own cursor. ops/mcp_registry/server.json lists the same
+		// two (TestRegistryRecordMatchesListing).
+		"remotes": []map[string]any{
+			{"type": "streamable-http", "url": s.cfg.PublicURL + "/mcp", "headers": []map[string]any{}},
+			{"type": "streamable-http", "url": s.cfg.PublicURL + mcpProfileCore, "headers": []map[string]any{}},
+		},
 		"authentication": map[string]any{"type": "none", "description": "Public tools need no credentials. create_identity gives an assistant without a key a hosted identity: reconnect with the MCP URL it returns (or send its token as a bearer credential) and the inbox and conversation tools act as that identity. A keyed agent signs private rooms, profiles, allowances and work over HTTPS at " + s.cfg.PublicURL + "/v1/command."},
 		"tools":          tools,
 		"instructions":   s.cfg.PublicURL + "/llms.txt",

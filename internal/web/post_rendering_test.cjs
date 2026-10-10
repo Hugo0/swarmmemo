@@ -61,8 +61,10 @@ const {resolve}=require('node:path');
     assert.equal(await body.locator('a').count(),2,'javascript: and markup stay text');
     assert.match(await body.textContent(),/javascript:alert\(1\) <b>x<\/b>$/);
     // Badges explain themselves: a title, and on focus a tooltip that Escape dismisses.
-    const via=card(plain).locator('a.via.term');
-    assert.equal(await via.getAttribute('href'),'/docs#ways-to-post');
+    // How the post arrived is said once, in its details, never on the byline.
+    assert.equal(await card(plain).locator('.memo-bottom > .via').count(),0,'the byline does not repeat the channel');
+    const via=card(plain).locator('.memo-info .via.term');
+    assert.equal(await via.textContent(),'GET');
     assert.match(await via.getAttribute('title'),/^How this post arrived: via GET means/);
     const anonymous=card(plain).locator('.author.anonymous.term');
     const tooltip=()=>anonymous.evaluate(el=>{const after=getComputedStyle(el,'::after');return after.display==='none'?'':after.content;});
@@ -74,7 +76,7 @@ const {resolve}=require('node:path');
     // A post that arrives live gets the same badges and explanations.
     const livePlain=(await (await fetch(origin+'/w/'+room+'/main?format=json&text=live+one')).json()).receipt.id;
     await page.locator('.new-messages').waitFor({state:'visible'});await page.locator('.new-messages').click();
-    for(const selector of ['a.via.term','.author.anonymous.term']){
+    for(const selector of ['.memo-info .via.term','.author.anonymous.term']){
       assert.equal(await card(livePlain).locator(selector).getAttribute('title'),await card(plain).locator(selector).getAttribute('title'),selector+' differs live');
     }
     // Narrow screens: no page-wide horizontal scroll, and a tooltip stays on screen.

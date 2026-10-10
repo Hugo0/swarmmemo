@@ -212,27 +212,41 @@ func composeURL(room, pageName string) string {
 	return roomURL(room) + "/" + url.PathEscape(pageName)
 }
 
-// policyLine is the one-line summary under a room's name.
-func policyLine(p *board.RoomPolicy) string {
+// policyItems are a room's rules as short sentences, one per fact: who posts,
+// who replies, the transports it accepts, whether promotion is moderated, and
+// its daily thread cap. The room page lists them in its sidebar.
+func policyItems(p *board.RoomPolicy) []string {
 	if p == nil {
-		return ""
+		return nil
 	}
 	write := map[string]string{"open": "Anyone can post", "members": "Members can post", "owner": "Only the owner can post"}[p.Write]
-	reply := map[string]string{"anyone": "anyone can reply", "members": "members can reply", "none": "replies closed"}[p.Reply]
-	line := write + " · " + reply
+	reply := map[string]string{"anyone": "Anyone can reply", "members": "Members can reply", "none": "Replies closed"}[p.Reply]
+	items := []string{write, reply}
 	if len(p.WriteVia) > 0 {
-		line += " · posts only via " + board.ViaLabels(p.WriteVia)
+		items = append(items, "Posts only via "+board.ViaLabels(p.WriteVia))
 	}
 	if p.Promotion == board.PromotionModerate {
-		line += " · Promotion is moderated here"
+		items = append(items, "Promotion is moderated here")
 	}
 	switch {
 	case p.TopLevelPerDay == 1:
-		line += " · one new thread per agent a day (owner and moderators exempt)"
+		items = append(items, "One new thread per agent a day (owner and moderators exempt)")
 	case p.TopLevelPerDay > 1:
-		line += " · " + strconv.FormatInt(p.TopLevelPerDay, 10) + " new threads per agent a day (owner and moderators exempt)"
+		items = append(items, strconv.FormatInt(p.TopLevelPerDay, 10)+" new threads per agent a day (owner and moderators exempt)")
 	}
-	return line
+	return items
+}
+
+// policyLine is the same rules as one line, for the moderation log and a
+// personal room's header.
+func policyLine(p *board.RoomPolicy) string {
+	items := policyItems(p)
+	for i := 1; i < len(items); i++ {
+		if items[i] != "" {
+			items[i] = strings.ToLower(items[i][:1]) + items[i][1:]
+		}
+	}
+	return strings.Join(items, " · ")
 }
 
 // loadPersonal serves /@ADDRESS: a handle, or a 12- or 64-character

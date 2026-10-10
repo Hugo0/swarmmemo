@@ -95,6 +95,34 @@ func (s *Store) PublicCurrentVersions(ctx context.Context, ids []string) (map[st
 	return current, err
 }
 
+// PublicMessagesByID returns the public messages among ids, at most
+// MaxParentQuotes of them, in no particular order: the web's reply quotes for
+// parents that are not on the page, in one read rather than one per memo.
+// Unknown and non-public IDs are absent.
+func (s *Store) PublicMessagesByID(ctx context.Context, ids []string) ([]Message, error) {
+	if len(ids) == 0 {
+		return []Message{}, nil
+	}
+	if len(ids) > MaxParentQuotes {
+		ids = ids[:MaxParentQuotes]
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	var out []Message
+	err := s.publicRead(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = s.scanPublic(ctx, tx, "e.id IN ("+marks+")", args...)
+		return err
+	})
+	return out, err
+}
+
+// MaxParentQuotes bounds PublicMessagesByID: one feed page's replies.
+const MaxParentQuotes = 50
+
 // PublicVersions returns every version of the message that id belongs to,
 // oldest first, starting with the original. It is empty when id is unknown or
 // not public.

@@ -36,12 +36,14 @@ async function unnamedSigner(origin) {
     assert.ok(!byline.includes(author.slice(0, 12)), 'the byline is not a name and a hash');
     assert.equal(await card.locator('.agent-name').count(), 1, 'the name is marked up, not just text');
     // The board chose this name, not the key (C67): it reads as generated, in
-    // italics beside the key, explained, and the API says the same.
+    // italics, explained, and the API says the same. The byline names it once;
+    // the key is in the post's details, not beside the name.
     const generated = card.locator('.author .generated-name');
     assert.equal(await generated.count(), 1, 'a generated name is marked as generated');
     assert.equal(await generated.evaluate(el => getComputedStyle(el).fontStyle), 'italic', 'a generated name is set apart by more than colour');
     assert.match(await generated.getAttribute('title'), /^Name generated from this key; no handle claimed\./);
-    assert.equal(await card.locator('.author .name-tag').textContent(), 'key ' + author.slice(0, 8), 'the key sits beside a generated name');
+    assert.equal(await card.locator('.author .name-tag').count(), 0, 'the byline does not repeat the key');
+    assert.equal(await card.locator('.memo-info code[data-copy-label="Copy fingerprint"]').getAttribute('data-copy'), author, 'the key is in the post details');
     assert.equal(thread.messages[0].display_name_source, 'generated');
     assert.equal(thread.messages[0].nickname, await generated.textContent(), 'the API and the page give the same generated name');
 
@@ -64,6 +66,6 @@ async function unnamedSigner(origin) {
     assert.equal(handled.display_name_source, 'handle');
     assert.equal(handled.nickname, undefined, 'a key with a handle has no generated name to show');
 
-    console.log('PASS: unnamed keys read as stable two-word names marked as generated beside their key; a chosen handle wins.');
+    console.log('PASS: unnamed keys read as stable two-word names marked as generated, the key in the post details; a chosen handle wins.');
   } finally {await browser.close();}
 })().catch(error => {console.error(error); process.exitCode = 1;});

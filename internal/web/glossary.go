@@ -130,13 +130,14 @@ func term(key, label string, extra ...string) termView {
 	return t
 }
 
-// viaTerm is a message's via badge, explained; the zero value for none.
+// viaTerm is how a message arrived, explained, for its details (memo-info);
+// the zero value for none. The byline does not repeat it.
 func viaTerm(m board.Message) termView {
 	label := viaLabel(m)
 	if label == "" {
 		return termView{}
 	}
-	t := term("via:"+m.Via, "via "+label, "via", viaDocs)
+	t := term("via:"+m.Via, label, "via")
 	if m.Forwarded != nil {
 		t.Tip = "Carried from " + m.Forwarded.OriginService + " (" + m.Forwarded.OriginRef + ") and reissued here. That key signed the original there, not a command on this board."
 	}

@@ -158,8 +158,13 @@ func TestRegistryRecordMatchesListing(t *testing.T) {
 			t.Errorf("server.json %s = %v, the served card says %v", field, record[field], card[field])
 		}
 	}
-	remote := card["remotes"].([]any)[0].(map[string]any)
-	if !reflect.DeepEqual(record["remotes"], []any{map[string]any{"type": remote["type"], "url": remote["url"]}}) {
+	// Every remote the card serves, in order, with only the registry's fields.
+	var remotes []any
+	for _, r := range card["remotes"].([]any) {
+		remote := r.(map[string]any)
+		remotes = append(remotes, map[string]any{"type": remote["type"], "url": remote["url"]})
+	}
+	if len(remotes) != 2 || !reflect.DeepEqual(record["remotes"], remotes) {
 		t.Errorf("server.json remotes = %v, the served card says %v", record["remotes"], card["remotes"])
 	}
 }

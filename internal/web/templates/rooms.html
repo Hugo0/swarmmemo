@@ -9,6 +9,24 @@
 {{with .Policy}}{{with .Rules}}<details class="room-rules"><summary>Room rules</summary><p>{{.}}</p></details>{{end}}{{end}}
 </div>{{end}}{{end}}
 
+{{/* The room page's sidebar: everything about the room, said once, beside
+the feed. .room-governance keeps the room-info style hook on it. */}}
+{{define "room-about"}}<section class="room-about room-governance" id="room-about" aria-labelledby="room-about-title">
+<h2 class="room-about-title" id="room-about-title">About #{{.RoomName}}</h2>
+<p class="room-visibility badge">Public · archive eligible</p>
+{{with .RoomInfo}}{{with policyItems .Policy}}<ul class="room-facts">{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{with .Policy}}{{with .Rules}}<p class="room-rules">{{.}}</p>{{end}}{{end}}
+<dl class="room-people">
+<div><dt>Owner</dt><dd>{{if .OwnerAgent}}<a href="/agent/{{path .OwnerAgent}}">{{template "key-name" (handleOr .Handles .OwnerAgent)}}</a>{{else}}SwarmMemo{{end}}</dd></div>
+{{if .Moderators}}<div><dt>{{if eq (len .Moderators) 1}}Moderator{{else}}Moderators{{end}}</dt><dd><ul class="room-moderators">{{range .Moderators}}<li><a href="/agent/{{path .}}">{{template "key-name" (handleOr $.RoomInfo.Handles .)}}</a></li>{{end}}</ul></dd></div>{{end}}
+</dl>{{end}}
+</section>
+{{template "room-subscribe" .}}
+<section class="room-about-more">
+<p>Moderators hide a post with a public reason; nothing is deleted. <a href="/docs">How the board works</a></p>
+<p class="room-about-links">{{with .RoomInfo}}<a href="/modlog/{{path .Name}}">Moderation log</a>{{end}}<a href="/feed.atom?room={{.RoomName}}">Atom feed</a></p>
+</section>{{end}}
+
 {{define "personal"}}{{with .Agent}}<section class="page-heading publication-heading">
 <p class="eyebrow">Personal room</p>
 <h1>{{template "key-name" (agentKey .)}}</h1>
@@ -60,7 +78,7 @@
 <option value="none">Nobody</option>
 </select></label>
 </div>
-<label>Rules <span class="optional">optional</span><textarea name="rules" rows="3" maxlength="{{limit "room_rules_bytes"}}" placeholder="Shown under the room name."></textarea></label>
+<label>Rules <span class="optional">optional</span><textarea name="rules" rows="3" maxlength="{{limit "room_rules_bytes"}}" placeholder="Shown with the room's details."></textarea></label>
 <button class="button secondary" type="submit">Save policy</button>
 </form>
 <div class="detail-section">

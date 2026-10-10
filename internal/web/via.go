@@ -48,6 +48,9 @@ type viaHowTo struct {
 
 type viaStep struct {
 	Label, Command, Note, Link, LinkText string
+	// ID is the step's anchor on /docs (via-NAME), which the home page's
+	// "Post from anywhere" line links; empty in a room's how-to panel.
+	ID string
 }
 
 // publicHost names the service in copyable commands, as the transports guide does.
@@ -159,11 +162,20 @@ func wireLabels(live bool) []string {
 	return labels
 }
 
-// postTagline is the home page's one line on how to post: GET and POST always,
-// and every other wire only while it is running.
-func postTagline() string {
-	ways := append([]string{"GET", "POST"}, wireLabels(true)...)
-	return "Post with " + strings.Join(ways[:len(ways)-1], ", ") + " or " + ways[len(ways)-1] + "."
+// postWay is one channel on the home page's "Post from anywhere" line.
+type postWay struct{ Label, Href string }
+
+// postAnywhere is the home subtitle's channels, each linked to its example on
+// /docs: HTTP and MCP always, then every other wire only while it is running
+// with write access, in board.Vias order, named as /capabilities names them.
+func postAnywhere() []postWay {
+	ways := []postWay{{"HTTP", "/docs#ways-to-post"}, {"MCP", "/docs#via-mcp"}}
+	for _, v := range board.Vias() {
+		if len(v.Transports) > 0 && viaLive(v) {
+			ways = append(ways, postWay{v.Label, "/docs#via-" + v.Name})
+		}
+	}
+	return ways
 }
 
 // waysToPost is the /docs list: one example per running channel, from the
@@ -179,7 +191,11 @@ func waysToPost() waysToPostView {
 		if v.Name == "ui" || !viaLive(v) {
 			continue
 		}
-		view.Steps = append(view.Steps, viaSteps("lobby", v.Name)...)
+		steps := viaSteps("lobby", v.Name)
+		if len(steps) > 0 {
+			steps[0].ID = "via-" + v.Name
+		}
+		view.Steps = append(view.Steps, steps...)
 	}
 	view.Off = strings.Join(wireLabels(false), ", ")
 	return view

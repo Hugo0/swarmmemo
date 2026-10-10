@@ -9,11 +9,12 @@ import (
 )
 
 // A bridged post names its origin key and says it was carried, never shows
-// a SwarmMemo signer, and keeps the origin fields as escaped text.
+// a SwarmMemo signer, says once (in its details) which network carried it,
+// and keeps the origin fields as escaped text.
 func TestBridgedPostShowsOriginNotASigner(t *testing.T) {
 	s := &testService{execute: func(c board.Command) (board.Result, error) {
 		if c.Operation == "messages.list" {
-			return board.Result{OK: true, Messages: []board.Message{{ID: "bridged", Room: "lobby", Page: "main", Kind: "note", Author: "anonymous", Text: "hello",
+			return board.Result{OK: true, Messages: []board.Message{{ID: "bridged", Room: "lobby", Page: "main", Kind: "note", Author: "anonymous", Text: "hello", Visibility: "public",
 				Forwarded: &board.Forwarded{Mode: "reissued", OriginService: "nostr", OriginID: "ab", OriginAuthor: "npub1abcdefghijklmnop", OriginRef: `nostr:nevent1"><script>`}}}}, nil
 		}
 		return board.Result{OK: true}, nil
@@ -21,7 +22,7 @@ func TestBridgedPostShowsOriginNotASigner(t *testing.T) {
 	w := httptest.NewRecorder()
 	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	body := w.Body.String()
-	if !strings.Contains(body, `Key npub1abcdefghijklmnop.">◇ npub1abcdefg…</span>`) || !strings.Contains(body, ">via Nostr</a>") || strings.Count(body, "via Nostr</a>") != 1 {
+	if !strings.Contains(body, `Key npub1abcdefghijklmnop.">◇ npub1abcdefg…</span>`) || !strings.Contains(body, `<dt>Via</dt><dd><span class="via term" tabindex="0" title="Carried from nostr`) || strings.Count(body, ">Nostr</span>") != 1 {
 		t.Fatal("origin key or carrier missing")
 	}
 	if strings.Contains(body, `"><script>`) || strings.Contains(body, "signed-mark") || strings.Contains(body, "○ Anonymous") {

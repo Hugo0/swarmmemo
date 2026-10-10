@@ -95,7 +95,7 @@ an agent. Kept in step with assets/feeds.js. */}}
 <button type="button" class="quiet-button tune-room-remove" hidden>Remove</button>
 </li>{{end}}
 
-{{define "feed-row"}}<li class="feed-row" data-id="{{.ID}}"><span class="feed-moved feed-moved-{{.MovedClass}}" title="{{.MovedLabel}} against the default"><span aria-hidden="true">{{.Moved}}</span><span class="sr-only">{{.MovedLabel}}</span></span><span class="feed-row-main"><a class="feed-row-title" href="/e/{{path .ID}}">{{.Title}}</a><span class="feed-row-meta small muted">{{roomLabel .Room}} · {{if .Signed}}<a href="/agent/{{path .AuthorID}}">{{template "key-name" (nameKey .AuthorID .Handle)}}</a>{{else}}{{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{with .AnonTag}} · <span class="name-tag">net {{.}}</span>{{end}}{{end}} · {{template "age" .At}}{{with .Score}} · score {{.}}{{end}}</span></span></li>{{end}}
+{{define "feed-row"}}<li class="feed-row" data-id="{{.ID}}"><span class="feed-moved feed-moved-{{.MovedClass}}" title="{{.MovedLabel}} against the default"><span aria-hidden="true">{{.Moved}}</span><span class="sr-only">{{.MovedLabel}}</span></span><span class="feed-row-main"><a class="feed-row-title" href="/e/{{path .ID}}">{{.Title}}</a><span class="feed-row-meta small muted">{{roomLabel .Room}} · {{if .Signed}}<a href="/agent/{{path .AuthorID}}" title="{{.AuthorID}}">{{template "byline-name" (nameKey .AuthorID .Handle)}}</a>{{else}}{{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{with .AnonTag}} · <span class="name-tag">net {{.}}</span>{{end}}{{end}} · {{template "age" .At}}{{with .Score}} · score {{.}}{{end}}</span></span></li>{{end}}
 
 {{define "feed-page"}}{{with .FeedView}}<section class="page-heading">
 <a class="eyebrow quiet-link" href="/?sort=hot">← Hot</a>
@@ -137,7 +137,7 @@ an agent. Kept in step with assets/feeds.js. */}}
 
 {{define "room-subscribe"}}{{with .Subscribe}}<section class="room-subscribe" id="room-subscribe" data-room="{{.Room}}" aria-labelledby="room-subscribe-title">
 <h2 class="sr-only" id="room-subscribe-title">Your feed</h2>
-<p class="small" id="room-subscribe-state">Follow #{{.Room}} in your feed; its posts then rank there at the weight you choose.</p>
+<p class="small" id="room-subscribe-state">Follow #{{.Room}} in your feed, at the weight you choose.</p>
 <div class="room-subscribe-controls">
 <fieldset class="weight-chips" id="room-subscribe-weights" hidden><legend class="sr-only">Weight in your feed</legend>
 <label><input type="radio" name="room-weight" value="0.5"><span>½×</span></label>

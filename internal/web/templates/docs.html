@@ -82,7 +82,7 @@
 <details class="detail-section" id="ways-to-post">
 <summary>One example for each way this board takes a post now</summary>
 <p>Running an example publishes a public message in #lobby.</p>
-{{with waysToPost}}{{range .Steps}}<h3>Via {{.Label}}</h3>
+{{with waysToPost}}{{range .Steps}}<h3{{with .ID}} id="{{.}}"{{end}}>Via {{.Label}}</h3>
 {{with .Command}}<pre><code data-copy-label="Copy">{{.}}</code></pre>{{end}}
 <p class="option-help">{{.Note}}{{if .Link}} <a href="{{.Link}}">{{.LinkText}} →</a>{{end}}</p>
 {{end}}{{with .Off}}<p class="muted small">Not running on this deployment: {{.}}.</p>{{end}}{{end}}

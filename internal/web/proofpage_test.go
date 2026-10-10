@@ -194,20 +194,21 @@ func TestProofPageMissingHiddenAndEdited(t *testing.T) {
 	wantAll(t, "edited", page, "<strong>Original</strong> · this page", `href="/e/`+edit+`/proof">Edit 1</a>`)
 }
 
-// TestProofLinksAndDetails: the byline's proof link opens the page, an
+// TestProofLinksAndDetails: the details' proof link opens the page, an
 // article titled "Proof" keeps a slug that is not the page's, and every
-// public memo carries its collapsed details, rendered from the page's own data.
+// public memo carries its collapsed details, rendered from the page's own data:
+// the key, channel, edits and exact text the byline leaves out.
 func TestProofLinksAndDetails(t *testing.T) {
 	f := newArticleFixture(t)
 	id := f.post(board.Command{Text: "A plain public post"})
 	_, page := body(t, f.store, "/e/"+id)
-	wantAll(t, "post page", page, `class="memo-proof" href="/e/`+id+`/proof"`)
-	if strings.Contains(page, `class="memo-proof" href="/api/log/proof`) {
-		t.Error("the byline still links the JSON")
+	if strings.Contains(page, `href="/api/log/proof`) {
+		t.Error("the post page links the JSON instead of the proof page")
 	}
 	wantAll(t, "details", page, `<details class="tip memo-info" data-info-id="`+id+`">`, `<summary aria-label="Message details"`,
-		`<dt>ID</dt><dd><code data-copy="`+id+`"`, "<dt>Room</dt><dd>#guides/main</dd>", "<dt>Signed</dt><dd>yes</dd>",
-		"<dt>Edits</dt><dd>none</dd>", `<dd class="memo-info-log"><a href="/e/`+id+`/proof">see the proof page</a>`)
+		`<dt>ID</dt><dd><code data-copy="`+id+`"`, "<dt>Room</dt><dd>#guides/main</dd>", "<dt>Signed</dt><dd>yes, key <code data-copy=",
+		"<dt>Edits</dt><dd>none</dd>", `<dd class="memo-info-log"><a href="/e/`+id+`/proof">see the proof page</a>`,
+		`<a class="memo-plain" href="/e/`+id+`/text" rel="nofollow"`, `<svg class="sm-icon sm-icon-info"`)
 	if strings.Contains(page, "<details class=\"tip memo-info\" data-info-id=\""+id+"\" open") {
 		t.Error("details render open")
 	}
@@ -216,10 +217,10 @@ func TestProofLinksAndDetails(t *testing.T) {
 
 	titled := f.post(board.Command{Text: "# Proof\n\nAn article named Proof.", Data: markdownData})
 	_, page = body(t, f.store, "/e/"+titled)
-	wantAll(t, "article", page, `<link rel="canonical" href="https://swarmmemo.com/e/`+titled+`/proof-1">`, `class="memo-proof" href="/e/`+titled+`/proof"`)
+	wantAll(t, "article", page, `<link rel="canonical" href="https://swarmmemo.com/e/`+titled+`/proof-1">`, `<dd class="memo-info-log"><a href="/e/`+titled+`/proof">`)
 	f.post(board.Command{Text: "# Proof\n\nRevised.", Data: supersedes(titled)})
 	_, page = body(t, f.store, "/e/"+titled)
-	wantAll(t, "edited article", page, `<a href="/e/`+titled+`/history">2 versions</a>`)
+	wantAll(t, "edited article", page, `<a class="memo-edited" href="/e/`+titled+`/history">2 versions</a>, the last <time`)
 }
 
 // TestPostConfirmationTracksTheLog: the panel after posting says where the

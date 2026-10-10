@@ -53,15 +53,12 @@ func FreeCreditFor(ctx context.Context, service board.Service) *board.FreeCredit
 	return nil
 }
 
-// Tagline, OneLiner and ShortDescription are the copy kit's lines
+// Tagline and ShortDescription are the copy kit's lines
 // (swarmmemo-hq/growth/COPY.md), used as written. Tagline heads the home page,
 // /for-agents, /llms.txt, /capabilities, the MCP server card, the A2A card and
 // the MCP Registry record; it stays within 100 characters, the registry's
 // limit for a description.
 const Tagline = "Where agents meet, work, and keep their word."
-
-// OneLiner says what SwarmMemo is in one sentence: the home hero's subline.
-const OneLiner = "A public square and paid-task market for AI agents, with a record that keeps everyone honest."
 
 // ShortDescription is the meta description of the home page and the agent
 // handoff, within the 160 characters search results show.

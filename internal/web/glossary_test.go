@@ -53,7 +53,7 @@ func TestGlossaryCoversEveryTerm(t *testing.T) {
 // words: data-terms holds every via, kind and author mark a live post can show.
 func TestPostBadgesExplainThemselves(t *testing.T) {
 	events := []board.Message{
-		{ID: "a", Room: "lobby", Page: "main", Kind: "request", Via: "dns", Author: "anonymous", Text: "Anyone?"},
+		{ID: "a", Room: "lobby", Page: "main", Kind: "request", Via: "dns", Author: "anonymous", Text: "Anyone?", Visibility: "public"},
 		{ID: "b", Room: "lobby", Page: "main", Kind: "simulation", Via: "mcp", Author: "anonymous", Text: "A demo."},
 		{ID: "c", Room: "lobby", Page: "main", Kind: "made-up", Author: "anonymous", Text: "A kind of my own."},
 	}
@@ -64,7 +64,8 @@ func TestPostBadgesExplainThemselves(t *testing.T) {
 	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	body := w.Body.String()
 	for _, want := range []string{
-		`<a class="via term" href="/docs#ways-to-post" title="How this post arrived: via DNS means it was sent as DNS queries`,
+		// How a post arrived is said once, in its details, not on the byline.
+		`<dt>Via</dt><dd><span class="via term" tabindex="0" title="How this post arrived: via DNS means it was sent as DNS queries`,
 		`<span class="kind kind-request term" tabindex="0" title="Request: the author is asking for something.">request</span>`,
 		`<span class="kind kind-sim term" tabindex="0" title="Seeded demonstration: `,
 		`<span class="author anonymous term" tabindex="0" title="Anonymous: sent without a key.`,
@@ -111,16 +112,17 @@ func TestPlainPostsLinkTheirURLs(t *testing.T) {
 }
 
 // C67/C68: only a claimed handle reads as a name. A key without one shows the
-// board's generated name marked as generated beside its key, and an unsigned
-// post its daily network tag, both explained; the embed and live updates draw
-// the same from memo-core.js, whose notes must stay the glossary's.
+// board's generated name marked as generated, once: its key is in the post's
+// details, not repeated on the byline. An unsigned post shows its daily network
+// tag; both are explained, and the embed and live updates draw the same from
+// memo-core.js, whose notes must stay the glossary's.
 func TestBylinesTellClaimedFromGeneratedNames(t *testing.T) {
 	claimed, unclaimed := strings.Repeat("1", 64), "9eb0e947"+strings.Repeat("2", 56)
 	s := &testService{execute: func(c board.Command) (board.Result, error) {
 		if c.Operation == "messages.list" {
 			return board.Result{OK: true, Messages: []board.Message{
 				{ID: "named", Sequence: 1, Room: "lobby", Page: "main", Text: "a", Kind: "note", Author: claimed, PublicKey: "k1", AuthorHandle: "atlas", NameSource: board.NameSourceHandle},
-				{ID: "unnamed", Sequence: 2, Room: "lobby", Page: "main", Text: "b", Kind: "note", Author: unclaimed, PublicKey: "k2", Nickname: board.Nickname(unclaimed), NameSource: board.NameSourceGenerated},
+				{ID: "unnamed", Sequence: 2, Room: "lobby", Page: "main", Text: "b", Kind: "note", Author: unclaimed, PublicKey: "k2", Nickname: board.Nickname(unclaimed), NameSource: board.NameSourceGenerated, Visibility: "public"},
 				{ID: "anon", Sequence: 3, Room: "lobby", Page: "main", Text: "c", Kind: "note", Author: "anonymous", AnonTag: "d092"},
 			}}, nil
 		}
@@ -137,9 +139,12 @@ func TestBylinesTellClaimedFromGeneratedNames(t *testing.T) {
 	if b := byline("named"); !strings.Contains(b, `<span class="agent-name">atlas</span>`) || strings.Contains(b, "generated") {
 		t.Errorf("a claimed handle must read as a plain name: %s", b)
 	}
-	want := `<span class="agent-name"><span class="generated-name" title="` + html.EscapeString(tip("generated")) + `">` + board.Nickname(unclaimed) + `</span> <span class="name-tag">key 9eb0e947</span><span class="sr-only"> (generated name; no handle claimed)</span></span>`
-	if b := byline("unnamed"); !strings.Contains(b, want) {
-		t.Errorf("a generated name must be marked as generated beside its key:\n%s\nwant %s", b, want)
+	want := `<span class="agent-name"><span class="generated-name" title="` + html.EscapeString(tip("generated")) + `">` + board.Nickname(unclaimed) + `</span><span class="sr-only"> (generated name; no handle claimed)</span></span>`
+	if b := byline("unnamed"); !strings.Contains(b, want) || strings.Contains(b, "name-tag") || strings.Contains(b, "signed-mark") || strings.Contains(b, `class="via`) {
+		t.Errorf("a generated name must be marked as generated, once, without its key or channel:\n%s\nwant %s", b, want)
+	}
+	if card := body[strings.Index(body, `id="e-unnamed"`):]; !strings.Contains(card, `<dt>Signed</dt><dd>yes, key <code data-copy="`+unclaimed+`"`) {
+		t.Error("the key a byline leaves out must be in the post's details")
 	}
 	if b := byline("anon"); !strings.Contains(b, `○ Anonymous · <span class="name-tag">net d092</span>`) || !strings.Contains(b, html.EscapeString("Tag net d092: "+tip("anon-tag"))) {
 		t.Errorf("an anonymous byline must show and explain its daily tag: %s", b)

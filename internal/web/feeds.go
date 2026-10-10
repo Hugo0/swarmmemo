@@ -497,7 +497,6 @@ func loadFeedPage(r *http.Request, p *page, execute func(board.Command) (board.R
 		return status
 	}
 	p.Messages = res.Messages
-	p.Parents = replyParents(p.Messages)
 	v.Hash, _ = res.Data["profile_hash"].(string)
 	v.More, _ = res.Data["has_more"].(bool)
 	v.NextOffset = v.Offset + len(res.Messages)

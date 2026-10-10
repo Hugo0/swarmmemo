@@ -109,7 +109,7 @@ func TestRoomPageShowsPolicyAndModeration(t *testing.T) {
 
 	body := render(s, "/r/garden").Body.String()
 	for _, want := range []string{
-		"Only the owner can post · replies closed", ">writer</a>", ">keeper</a>", `href="/modlog/garden"`,
+		`<ul class="room-facts"><li>Only the owner can post</li><li>Replies closed</li></ul>`, ">writer</a>", ">keeper</a>", `href="/modlog/garden"`,
 		"Be &lt;b&gt;kind&lt;/b&gt;.", "Only the owner can post here; replies closed.", `id="compose" open hidden`,
 		"moderators: Promotion.", `data-moderate="restore"`, `data-moderate="hide"`,
 	} {

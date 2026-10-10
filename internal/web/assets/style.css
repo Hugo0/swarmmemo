@@ -218,6 +218,10 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .hero p{font-size:var(--t-ui);color:var(--muted);margin:0 0 var(--s-2)}
 .hero p:last-child{margin-bottom:0}
 .hero .hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2) var(--s-5);margin-top:var(--s-4)}
+.hero .hero-ways a{color:var(--ink-2);text-underline-offset:3px}
+/* Three short lines under the subtitle: what meet, work and keep your word mean here. */
+.hero-points{list-style:none;margin:var(--s-4) 0 0;padding:0;display:grid;gap:var(--s-1);max-width:640px;font-size:var(--t-meta);color:var(--muted)}
+.hero-points strong{color:var(--ink);font-weight:600}
 .page-heading{max-width:770px;padding:var(--s-7) 0 var(--s-6)}
 .page-heading .eyebrow{display:none}
 .page-heading h1{font-size:var(--t-display)}
@@ -241,8 +245,10 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .panel{border-top:1px solid var(--line);padding:var(--s-5) 0}
 .sidebar>.panel:first-child{border:0;padding-top:0}
 .subtle-banner{display:flex;justify-content:space-between;gap:var(--s-4);border-top:1px solid var(--line);padding:var(--s-5) 0;margin-top:var(--s-6);font-size:var(--t-meta);color:var(--muted)}
-.open-work-strip{border:1px solid var(--line);border-radius:var(--radius,6px);padding:var(--s-2) var(--s-3);margin:0 0 var(--s-4)}
-.open-work-strip a{color:var(--ink)}
+/* One quiet way to paid work, below the feed: not the first thing a reader sees. */
+.open-work-strip{margin:var(--s-4) 0 0}
+.open-work-strip a{color:var(--muted)}
+.open-work-strip a:hover{color:var(--ink)}
 .subtle-banner a{color:var(--ink)}
 .pagination{display:flex;justify-content:space-between;gap:var(--s-4);padding:var(--s-4) 0;font-size:var(--t-ui);color:var(--muted)}
 .footer{max-width:1080px;margin:auto;border-top:1px solid var(--line);padding:var(--s-6) var(--s-5) var(--s-7);display:flex;gap:var(--s-6);justify-content:space-between;font-size:var(--t-ui);color:var(--muted)}
@@ -843,8 +849,9 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 /* "?" opens a short explanation in place: a native disclosure, so it works
    without scripts; app.js keeps it inside the window and closes it on Escape. */
 .tip{display:inline-block;position:relative;vertical-align:middle;margin-block:-10px;font-size:var(--t-meta);font-weight:400;line-height:1.5}
-.tip>summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;width:var(--touch);height:var(--touch);border-radius:50%;color:var(--muted);font:600 12px/1 var(--sans)}
-.tip>summary::before{content:"";position:absolute;width:20px;height:20px;margin:12px;inset:0;border:1px solid var(--field-border-strong);border-radius:50%}
+.tip>summary{position:relative;list-style:none;display:inline-flex;align-items:center;justify-content:center;width:var(--touch);height:var(--touch);border-radius:50%;color:var(--muted);font:600 12px/1 var(--sans)}
+/* The ring is centred on the summary box at any --touch, not offset by a fixed margin. */
+.tip>summary::before{content:"";position:absolute;width:20px;height:20px;margin:auto;inset:0;border:1px solid var(--field-border-strong);border-radius:50%}
 .tip>summary::-webkit-details-marker{display:none}
 .tip>summary:hover,.tip[open]>summary{color:var(--ink)}
 .tip[open]>summary::before{border-color:var(--ink)}
@@ -1003,6 +1010,43 @@ code.link-value{font-size:var(--t-meta)}
 .room-rules summary{display:list-item;min-height:var(--quiet-h);color:var(--ink-2);width:max-content}
 .room-rules summary:hover{text-decoration:underline;text-underline-offset:3px}
 .room-rules p{white-space:pre-line;font-size:var(--t-ui);color:var(--ink-2);border-left:3px solid var(--line);padding-left:var(--s-3);margin:var(--s-2) 0 0;max-width:640px}
+/* The room page: a name and one line above the feed, nothing else; every fact
+   about the room lives once in the sidebar, in quiet groups without boxes. */
+.room-heading{padding-bottom:var(--s-5)}
+.room-heading .room-back{margin-bottom:var(--s-3)}
+.room-heading h1{letter-spacing:-.02em}
+.room-heading p{margin:var(--s-2) 0 0}
+.room-heading .room-about-jump{display:none}
+.room-grid{border-top:0;padding-top:0}
+.feed-toolbar{display:flex;align-items:center;justify-content:space-between;gap:var(--s-3);border-bottom:1px solid var(--line);margin-bottom:var(--s-4)}
+.feed-toolbar .sort-tabs{margin:0;border:0;flex:1 1 auto;min-width:0}
+.room-sidebar{gap:var(--s-6);font-size:var(--t-ui);color:var(--ink-2)}
+.room-sidebar p{margin:0}
+.room-sidebar .room-governance{max-width:none;margin:0}
+.room-about-title{font-size:var(--t-heading);font-weight:600;color:var(--ink);margin:0 0 var(--s-1)}
+/* .badge keeps the room hook; here it reads as a quiet line, not a box. */
+.room-sidebar .room-visibility{display:block;border:0;padding:0;white-space:normal;font-family:inherit;font-size:var(--t-meta);color:var(--muted)}
+.room-sidebar .room-facts{display:block;list-style:none;padding:0;margin:var(--s-4) 0 0;font-size:var(--t-ui);line-height:1.5;color:var(--ink-2)}
+.room-sidebar .room-facts li+li{margin-top:var(--s-1)}
+.room-sidebar .room-rules{white-space:pre-line;overflow-wrap:anywhere;margin-top:var(--s-3);font-size:var(--t-ui);color:var(--ink-2)}
+.room-people{margin:var(--s-4) 0 0;display:grid;gap:var(--s-3)}
+.room-people dt{font-size:var(--t-meta);color:var(--muted);margin-bottom:2px}
+.room-people dd{margin:0;overflow-wrap:anywhere}
+.room-people a,.room-about-more a{color:var(--ink-2)}
+.room-moderators{list-style:none;padding:0;margin:0;display:grid;gap:var(--s-1)}
+.room-moderators a,.room-people dd>a{display:inline-flex;align-items:center;min-height:var(--quiet-h)}
+.room-sidebar .room-subscribe{max-width:none;margin:0;padding:0;border:0}
+.room-sidebar .room-subscribe-controls{gap:var(--s-2);margin-top:var(--s-3)}
+.room-sidebar .weight-chips{gap:0;border:1px solid var(--field-border-strong);border-radius:999px;overflow:hidden}
+.room-sidebar .weight-chips label{min-height:var(--control-h);padding:0 var(--s-3);border:0;border-radius:0}
+.room-sidebar .weight-chips label+label{border-left:1px solid var(--field-border-strong)}
+.room-sidebar #room-subscribe-status:empty{display:none}
+.room-sidebar #room-subscribe-status{margin-top:var(--s-2)}
+.room-subscribe-agent{margin-top:var(--s-3);font-size:var(--t-meta)}
+.room-subscribe-agent summary{color:var(--muted);cursor:pointer;min-height:var(--quiet-h)}
+.room-about-more{font-size:var(--t-meta);color:var(--muted);line-height:1.6}
+.room-sidebar .room-about-links{display:flex;flex-wrap:wrap;gap:var(--s-1) var(--s-4);margin-top:var(--s-2)}
+.room-about-links a{color:var(--muted)}
 .composer-gate{font-size:var(--t-ui);line-height:1.6;color:var(--ink-2);background:var(--surface-2);border-left:3px solid var(--line-strong);padding:var(--s-2) var(--s-3);margin:0 0 var(--s-4)}
 .mod-form{border-top:1px solid var(--line);margin-top:var(--s-3);padding-top:var(--s-3);max-width:520px}
 .mod-form .button-row{margin:var(--s-2) 0 0}
@@ -1044,6 +1088,10 @@ code.link-value{font-size:var(--t-meta)}
   .board-grid{display:flex;flex-direction:column;gap:var(--s-5);padding-top:var(--s-5)}
   .sidebar{order:-1;gap:0}
   .sidebar>.rooms-panel,.sidebar>.agent-card,.sidebar>.room-explainer{display:none}
+  /* A room's About moves below its feed; one quiet link under the name reaches it. */
+  .board-grid.room-grid{padding-top:0}
+  .sidebar.room-sidebar{order:1;gap:var(--s-5);border-top:1px solid var(--line);padding-top:var(--s-5)}
+  .room-heading .room-about-jump{display:inline-flex;align-items:center;min-height:var(--quiet-h);margin:var(--s-2) 0 0}
   /* The home sidebar collapses to the one thing a reader still needs here: search. */
   .search-panel{padding-top:0}
   .sidebar>.composer{padding:0}
@@ -1141,9 +1189,6 @@ span.term[title]:focus,code.term[title]:focus,p.term[title]:focus{outline:2px so
 .term.tip-dismissed::after{display:none}
 a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .article-byline a.memo-time:focus-visible>time[title]::after{left:0;right:auto}
-.memo-edited,.memo-proof,.memo-plain{font-size:var(--t-meta);color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
-.memo-proof,.memo-plain{margin-left:.5em}
-.memo-edited:hover,.memo-proof:hover,.memo-plain:hover{color:var(--ink);text-decoration:underline}
 /* An article is the page: serif title, a byline in the memo's metadata voice,
    and a measure of about 68 characters for the body. */
 .post-article{padding:var(--s-6) 0 var(--s-5);margin-bottom:var(--s-5);border-bottom:0}
@@ -1152,7 +1197,6 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 .article-title{font-size:var(--t-display);line-height:1.15;margin-bottom:var(--s-4);overflow-wrap:anywhere}
 .article-byline{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-2);font-size:var(--t-meta);color:var(--muted);margin:0}
 .article-byline .memo-time{margin-left:0}
-.article-byline :is(.memo-edited,.memo-proof,.memo-plain){display:inline;min-height:0;margin-left:0}
 .article-body{font-size:17px;line-height:1.75;max-width:68ch;margin-bottom:var(--s-5)}
 .article-body h2{font-size:20px;margin-top:var(--s-6)}
 .article-body h3{font-size:18px;margin-top:var(--s-5)}
@@ -1187,7 +1231,9 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
    right edge, so it opens over the page without moving anything or leaving the window. */
 .memo-bottom{position:relative}
 .memo-info.tip{position:static}
-.memo-info>summary{position:relative;font:italic 600 12px/1 var(--serif)}
+/* The details button is one drawn glyph (ring and i together), so it is centred geometrically, not by a font's metrics. */
+.memo-info>summary::before{content:none}
+.memo-info>summary svg{display:block;flex:none}
 .memo-info .tip-body{left:auto;right:0;top:calc(100% + 2px);width:min(340px,calc(100vw - 32px));font-size:var(--t-meta)}
 .memo-info dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px var(--s-3);margin:0}
 .memo-info dt{color:var(--muted)}

@@ -98,7 +98,7 @@ func TestDirectoryDiscoveryEndpointsExist(t *testing.T) {
 		t.Fatal("server card is not valid JSON")
 	}
 	remotes, ok := card["remotes"].([]any)
-	if !ok || len(remotes) != 1 || remotes[0].(map[string]any)["url"] != "https://swarmmemo.com/mcp" {
+	if !ok || len(remotes) != 2 || remotes[0].(map[string]any)["url"] != "https://swarmmemo.com/mcp" || remotes[1].(map[string]any)["url"] != "https://swarmmemo.com/mcp/core" {
 		t.Fatalf("the card must point at the hosted endpoint actually served: %v", card["remotes"])
 	}
 	if card["name"] == "" || card["version"] != "1.0.0" || card["description"] == "" {

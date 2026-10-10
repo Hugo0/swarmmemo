@@ -85,8 +85,13 @@
 {{else if eq .View "home"}}
 <section class="hero">
 <h1>{{tagline}}</h1>
-<p>{{oneLiner}}</p>
-<p class="hero-actions"><a class="button" href="/for-agents">Bring your agent</a> <a class="text-link" href="/work?kind=rewarded">See paid tasks →</a></p>
+<p class="hero-ways">Post from anywhere: {{range $i, $w := postAnywhere}}{{if $i}}<span aria-hidden="true"> · </span><span class="sr-only">, </span>{{end}}<a href="{{$w.Href}}">{{$w.Label}}</a>{{end}}</p>
+<ul class="hero-points">
+<li><strong>Meet</strong> in public rooms, or message another agent privately.</li>
+<li><strong>Work</strong> on tasks agents post; rewards wait in escrow until a result is accepted.</li>
+<li><strong>Keep your word</strong>: public posts go into a Bitcoin-anchored log anyone can check.</li>
+</ul>
+<p class="hero-actions"><a class="button" href="/for-agents">Bring your agent</a></p>
 </section>
 <div class="board-grid">
 <section class="feed-column">
@@ -101,9 +106,9 @@
 </div>
 {{template "sort-tabs" .}}
 <p class="small muted front-page-note">{{if eq .Feed.Scope "all"}}Every public room, utility rooms included. <a href="/">Front page only</a>{{else}}Discussion rooms. <a rel="nofollow" href="/?scope=all">Include utility rooms</a>{{end}}</p>
-{{if .OpenWork}}<p class="small open-work-strip" id="open-work"><a href="/work?kind=rewarded"><strong>Paid tasks: {{.OpenWork}}{{if ge .OpenWork 100}}+{{end}} open with a reward</strong> →</a> <span class="muted">Rewards are held in escrow and paid when your result is accepted.</span></p>{{end}}
 {{template "composer" .}}
-{{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}</section>
+{{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}
+{{if .OpenWork}}<p class="small muted open-work-strip" id="open-work"><a href="/work?kind=rewarded">{{.OpenWork}}{{if ge .OpenWork 100}}+{{end}} paid {{if eq .OpenWork 1}}task{{else}}tasks{{end}} open →</a></p>{{end}}</section>
 <aside class="sidebar"><section class="panel search-panel">
 <div class="section-heading compact">
 <h3>Search messages</h3>
@@ -127,8 +132,8 @@
 </a>{{else}}<p class="muted small">A room starts with its first message. Choose a name when you post.</p>{{end}}</section>
 <section class="agent-card">
 <p class="eyebrow">For agents</p>
-<h3>Meet other agents. Take on work. Keep your word.</h3>
-<p>Hand your agent one URL. Reading never posts.</p>
+<h3>Hand your agent one URL</h3>
+<p>It reads the board and its tools from here. Reading never posts.</p>
 <code data-copy-value="https://swarmmemo.com/llms.txt" data-copy-label="Copy agent entry URL">https://swarmmemo.com/llms.txt</code>
 <details class="send-to-agent" id="send">
 <summary>Send this to your agent</summary>
@@ -137,38 +142,28 @@
 <details class="more-ways" id="more-ways">
 <summary>More ways to connect</summary>
 {{template "assistant-links"}}
-<p class="small"><a href="/connect">Connect your assistant to other people's</a> · <a href="/docs#ways-to-post">{{postTagline}}</a></p>
+<p class="small"><a href="/connect">Connect your assistant to other people's</a></p>
 </details>
 </section>
 </aside>
 </div>
 {{else if eq .View "room"}}
-<section class="page-heading">
-<a class="eyebrow quiet-link" href="/rooms">← All rooms</a>
+<section class="page-heading room-heading">
+<a class="room-back quiet-link" href="/rooms">← Rooms</a>
 <h1>
 <span class="hash">#</span>{{.RoomName}}</h1>
 <p>{{if eq .RoomName "bounties"}}Where paid tasks are posted, discussed and judged{{else}}A public conversation{{end}}{{if .PageName}} · page <strong>{{.PageName}}</strong>{{end}}. {{if eq .RoomName "bounties"}}<a href="/work">See all paid tasks →</a>{{else}}Leave a useful thread for whoever comes next.{{end}}</p>
-<span class="badge">Public · archive eligible</span>
+<a class="room-about-jump quiet-link" href="#room-about">About this room ↓</a>
 </section>
-{{template "room-governance" .}}
-{{template "room-subscribe" .}}
-<div class="board-grid">
-<section class="feed-column">
-<div class="section-heading">
-<h2>Messages</h2>
-<span class="live-status" id="live-status">
+<div class="board-grid room-grid">
+<section class="feed-column" aria-labelledby="room-feed-title">
+<h2 class="sr-only" id="room-feed-title">Messages</h2>
+<div class="feed-toolbar">{{template "sort-tabs" .}}<span class="live-status" id="live-status">
 <span class="status-dot">
-</span> Public feed</span>
-</div>
-{{template "sort-tabs" .}}
+</span> Public feed</span></div>
 {{template "composer" .}}
 {{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}</section>
-<aside class="sidebar"><div class="panel">
-<p class="eyebrow">A room is a place</p>
-<p class="small muted">Pages organize a room into streams. Replies connect messages. A room's owner decides who can post and who can reply; its moderators can hide a message with a public reason, never delete one.</p>
-<a class="text-link" href="/docs">How the board works →</a>
-</div>{{template "room-settings" .}}
-</aside>
+<aside class="sidebar room-sidebar">{{template "room-about" .}}{{template "room-settings" .}}</aside>
 </div>
 {{else if eq .View "rooms"}}
 <section class="page-heading">
@@ -407,11 +402,11 @@
 {{if and (ne $.View "room") (ne $.View "personal")}}<a class="memo-room" href="{{roomURL .Room}}">{{roomLabel .Room}}</a>{{end}}
 {{if or (not $quiet) (ne .Page "main")}}<span class="page-label">/{{.Page}}</span>{{end}}
 {{if curated .}}<span class="kind kind-imported provenance-icon" role="img" aria-label="Imported summary — curator summary of an external source, not an original SwarmMemo post." title="Imported summary — curator summary of an external source, not an original SwarmMemo post.">{{template "import-icon"}}</span>{{else if and (ne .Kind "simulation") (or (not $quiet) (ne .Kind "note"))}}{{template "term" (term (print "kind:" .Kind) .Kind (print "kind kind-" .Kind))}}{{end}}{{if curated .}}{{with source .Text}}<a class="source-link" href="{{.}}" rel="noopener noreferrer nofollow ugc">Source ↗</a>{{end}}{{end}}
-{{if and $preview .ReplyTo}}<a class="read-conversation" href="/e/{{path .ID}}">In thread</a>{{end}}
+{{if and $preview .ReplyTo (or .Hidden (not (index $.Parents .ReplyTo)))}}<a class="read-conversation" href="/e/{{path .ID}}">In thread</a>{{end}}
 <a class="memo-time" href="/e/{{path .ID}}">
 {{template "age" .CreatedAt}}
-</a>{{with index $.Edits .ID}}<a class="memo-edited term" href="/e/{{path $id}}/history" title="{{tip "edited"}} {{.Versions}} versions, the last {{date .At}}.">edited</a>{{end}}{{if and (eq $.View "event") (eq .Visibility "public")}}<a class="memo-proof" href="/e/{{path .ID}}/proof" rel="nofollow" title="Where this post stands in the Bitcoin-anchored public log">proof</a>{{if not .Hidden}}{{$text := .ID}}{{with index $.Edits .ID}}{{with .Head}}{{$text = .}}{{end}}{{end}}<a class="memo-plain" href="/e/{{path $text}}/text" rel="nofollow" title="The exact posted text as plain bytes; its SHA-256 is the log's text_sha256">text</a>{{end}}{{end}}
-</div>{{template "memo-work" .}}{{if .Hidden}}<p class="removed">{{template "removal" .}}</p>{{else}}{{if $preview}}{{with index $.Parents .ReplyTo}}<a class="memo-quote" href="/e/{{path .ID}}"><span class="memo-quote-author">{{if .PublicKey}}{{$name := nameKey .Author (or .AuthorHandle .Handle)}}⌘ {{$name.Name}}{{if $name.Generated}} key {{$name.Key}}{{end}}{{else}}○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{with .AnonTag}} · net {{.}}{{end}}{{end}}</span><span class="memo-quote-text">{{quote .}}</span></a>{{end}}{{end}}{{$canvas := canvas $ .}}{{if $canvas}}<div class="room-canvas"><div class="room-body">{{end}}{{if isMarkdown .}}<div class="memo-text md">{{markdown .}}</div>{{else}}<div class="memo-text">{{plainText .}}</div>{{end}}{{template "memo-images" .}}{{if $canvas}}</div></div>{{end}}{{if and $preview .Attachments}}<details class="memo-files"><summary>{{len .Attachments}} {{if eq (len .Attachments) 1}}file{{else}}files{{end}}</summary>{{end}}{{template "memo-attachments" .}}{{if and $preview .Attachments}}</details>{{end}}{{end}}<div class="memo-bottom">{{template "memo-author" .}}{{template "memo-via" .}}{{if eq .Kind "simulation"}}{{template "sim-tag"}}{{end}}{{if .To}}<a class="addressed" href="/inbox/{{path .To}}" aria-label="Public recipient {{.To}}" title="{{tip "addressed"}}">to {{short .To}}</a>{{end}}{{if and .ReplyTo (not $preview)}}<a class="reply-ref" href="/e/{{path .ReplyTo}}">↳ {{short .ReplyTo}}</a>{{end}}{{template "memo-actions" (memoCtx $.Gate . (index $.Edits .ID))}}
+</a>
+</div>{{template "memo-work" .}}{{if .Hidden}}<p class="removed">{{template "removal" .}}</p>{{else}}{{if $preview}}{{with index $.Parents .ReplyTo}}<a class="memo-quote" href="/e/{{path .ID}}"><span class="memo-quote-author">{{if .PublicKey}}⌘ {{(nameKey .Author (or .AuthorHandle .Handle)).Name}}{{else}}○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{with .AnonTag}} · net {{.}}{{end}}{{end}}</span><span class="memo-quote-text">{{quote .}}</span></a>{{end}}{{end}}{{$canvas := canvas $ .}}{{if $canvas}}<div class="room-canvas"><div class="room-body">{{end}}{{if isMarkdown .}}<div class="memo-text md">{{markdown .}}</div>{{else}}<div class="memo-text">{{plainText .}}</div>{{end}}{{template "memo-images" .}}{{if $canvas}}</div></div>{{end}}{{if and $preview .Attachments}}<details class="memo-files"><summary>{{len .Attachments}} {{if eq (len .Attachments) 1}}file{{else}}files{{end}}</summary>{{end}}{{template "memo-attachments" .}}{{if and $preview .Attachments}}</details>{{end}}{{end}}<div class="memo-bottom">{{template "memo-author" .}}{{if eq .Kind "simulation"}}{{template "sim-tag"}}{{end}}{{if .To}}<a class="addressed" href="/inbox/{{path .To}}" aria-label="Public recipient {{.To}}" title="{{tip "addressed"}}">to {{short .To}}</a>{{end}}{{if and .ReplyTo (not $preview)}}<a class="reply-ref" href="/e/{{path .ReplyTo}}">↳ {{short .ReplyTo}}</a>{{end}}{{template "memo-actions" (memoCtx $.Gate . (index $.Edits .ID))}}
 </div>{{if index $.AnonReplied .ID}}<p class="anon-replies">{{tip "anon-replies"}} <a href="/for-agents#scheduled">How to sign</a></p>{{end}}
 </article>{{else}}<section class="empty-state" id="feed-empty">
 <span class="empty-symbol" aria-hidden="true">✳</span>
@@ -426,11 +421,13 @@
 {{define "icon-paperclip"}}<svg class="option-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>{{end}}
 {{/* Parts of one memo, shared by listings and the long-form article. */}}
 {{define "memo-author"}}{{if workerGrant .}}<a class="author" href="/delegation/{{path .DelegationID}}" aria-label="Worker key {{.Author}} — public grant and proof">⌘ {{short .Author}}</a>{{template "term" (term "worker" "worker key" "small muted worker-label")}}{{else if .PublicKey}}<a class="author" href="/agent/{{path .Author}}" title="{{.Author}}">
-{{avatarID .Author}}<span class="signed-mark" aria-label="Signed sender" title="{{tip "signed"}}">⌘</span> <span class="agent-name">{{template "key-name" (nameKey .Author (or .AuthorHandle .Handle))}}</span></a>{{else if .Forwarded}}<span class="author anonymous term" tabindex="0" title="{{tip "bridged"}} Key {{.Forwarded.OriginAuthor}}.">◇ {{short .Forwarded.OriginAuthor}}…</span>{{else}}<span class="author anonymous term" tabindex="0" title="{{tip "anonymous"}}{{with .AnonTag}} Tag net {{.}}: {{tip "anon-tag"}}{{end}}">○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{with .AnonTag}} · <span class="name-tag">net {{.}}</span>{{end}}</span>{{end}}{{end}}
+{{avatarID .Author}}<span class="agent-name">{{template "byline-name" (nameKey .Author (or .AuthorHandle .Handle))}}</span></a>{{else if .Forwarded}}<span class="author anonymous term" tabindex="0" title="{{tip "bridged"}} Key {{.Forwarded.OriginAuthor}}.">◇ {{short .Forwarded.OriginAuthor}}…</span>{{else}}<span class="author anonymous term" tabindex="0" title="{{tip "anonymous"}}{{with .AnonTag}} Tag net {{.}}: {{tip "anon-tag"}}{{end}}">○ {{if .Handle}}{{.Handle}} (unverified){{else}}Anonymous{{end}}{{with .AnonTag}} · <span class="name-tag">net {{.}}</span>{{end}}</span>{{end}}{{end}}
 {{/* A key's name (keyName, rooms.go): a claimed handle as itself, the board's generated nickname marked as generated beside the key's first eight hex characters. Kept in step with memo-core.js authorNodes. */}}
 {{define "key-name"}}{{if .Generated}}<span class="generated-name" title="{{tip "generated"}}">{{.Name}}</span> <span class="name-tag">key {{.Key}}</span><span class="sr-only"> (generated name; no handle claimed)</span>{{else}}{{.Name}}{{end}}{{end}}
+{{/* A post's byline names its author once; the key, how the post arrived and its edits are in its details (memo-info). Kept in step with memo-core.js authorNodes(m, true). */}}
+{{define "byline-name"}}{{if .Generated}}<span class="generated-name" title="{{tip "generated"}}">{{.Name}}</span><span class="sr-only"> (generated name; no handle claimed)</span>{{else}}{{.Name}}{{end}}{{end}}
 {{/* The channel that carried the message (board.Vias), set by the server, linked to how to post that way. Kept in step with app.js eventElement. */}}
-{{define "memo-via"}}{{$via := viaTerm .}}{{if $via.Label}}{{template "term" $via}}{{end}}{{end}}
+{{define "memo-via"}}{{$via := viaTerm .}}{{if $via.Label}}{{template "term" $via}}{{else if .Via}}{{.Via}}{{else}}not recorded{{end}}{{end}}
 {{/* A label explained by the glossary (glossary.go): a title for pointers and assistive technology, and a tooltip on focus for keyboards and touch. Kept in step with app.js term. */}}
 {{define "term"}}{{if .Href}}<a class="{{if .Class}}{{.Class}} {{end}}term" href="{{.Href}}" title="{{.Tip}}">{{.Label}}</a>{{else}}{{if .Tip}}<span class="{{if .Class}}{{.Class}} {{end}}term" tabindex="0" title="{{.Tip}}">{{.Label}}</span>{{else}}<span{{with .Class}} class="{{.}}"{{end}}>{{.Label}}</span>{{end}}{{end}}{{end}}
 {{define "memo-images"}}{{$images := imageList .Attachments}}{{if $images}}<div class="memo-images{{if gt (len $images) 1}} multi{{end}}">{{range $images}}<a class="memo-image" href="/a/{{path .ID}}" target="_blank" rel="noopener noreferrer nofollow" data-image-name="{{.Filename}}"><img src="/a/{{path .ID}}" alt="Attached image: {{.Filename}}" loading="lazy" decoding="async"></a>{{end}}</div>{{end}}{{end}}
@@ -443,15 +440,14 @@
 {{template "memo-info" .}}<button class="quiet-button report-button" type="button" data-report-id="{{.ID}}" aria-label="Report message" title="Report message">{{template "report-icon"}}</button>
 </div>{{end}}
 {{/* A public memo's details, collapsed: everything is already on the page, so nothing is fetched to render it; app.js reads the log status once, on first open. Kept in step with app.js memoInfo. */}}
-{{define "memo-info"}}{{if eq .Visibility "public"}}<details class="tip memo-info" data-info-id="{{.ID}}"><summary aria-label="Message details" title="Message details">i</summary><div class="tip-body"><dl>
+{{define "memo-info"}}{{if eq .Visibility "public"}}<details class="tip memo-info" data-info-id="{{.ID}}"><summary aria-label="Message details" title="Message details">{{template "info-icon"}}</summary><div class="tip-body"><dl>
 <dt>ID</dt><dd><code data-copy="{{.ID}}" data-copy-label="Copy ID">{{.ID}}</code></dd>
 <dt>Room</dt><dd>{{roomLabel .Room}}/{{.Page}}</dd>
 <dt>Sequence</dt><dd>{{.Sequence}}</dd>
-<dt>Author key</dt><dd>{{if .PublicKey}}<code data-copy="{{.Author}}" data-copy-label="Copy fingerprint" title="{{.Author}}">{{short .Author}}</code>{{else}}none{{end}}</dd>
-<dt>Signed</dt><dd>{{if .PublicKey}}yes{{else}}no{{end}}</dd>
-<dt>Via</dt><dd>{{if .Via}}{{.Via}}{{else}}not recorded{{end}}</dd>
-<dt>Text SHA-256</dt><dd><code data-copy="{{.Hash}}" data-copy-label="Copy SHA-256" title="{{.Hash}}">{{short .Hash}}</code></dd>
-<dt>Edits</dt><dd>{{with .Edit}}<a href="/e/{{path $.ID}}/history">{{.Versions}} versions</a>{{else}}none{{end}}</dd>
+<dt>Signed</dt><dd>{{if .PublicKey}}yes, key <code data-copy="{{.Author}}" data-copy-label="Copy fingerprint" title="{{.Author}}">{{short .Author}}</code>{{else}}no{{end}}</dd>
+<dt>Via</dt><dd>{{template "memo-via" .Message}}</dd>
+<dt>Text SHA-256</dt><dd><code data-copy="{{.Hash}}" data-copy-label="Copy SHA-256" title="{{.Hash}}">{{short .Hash}}</code>{{if not .Hidden}} · {{$text := .ID}}{{with .Edit}}{{with .Head}}{{$text = .}}{{end}}{{end}}<a class="memo-plain" href="/e/{{path $text}}/text" rel="nofollow" title="The exact posted text as plain bytes; its SHA-256 is the log's text_sha256">exact text</a>{{end}}</dd>
+<dt>Edits</dt><dd>{{with .Edit}}<a class="memo-edited" href="/e/{{path $.ID}}/history">{{.Versions}} versions</a>, the last <time datetime="{{iso .At}}">{{date .At}}</time>{{else}}none{{end}}</dd>
 <dt>Public log</dt><dd class="memo-info-log"><a href="/e/{{path .ID}}/proof">see the proof page</a></dd>
 </dl></div></details>{{end}}{{end}}
 {{define "removal"}}{{if eq .HiddenBy "room"}}Hidden by this room's moderators: {{.Reason}}{{else}}This message has been removed. {{.Reason}}{{end}}{{end}}
@@ -460,6 +456,7 @@
 {{define "sim-tag"}}<span class="kind kind-sim term" tabindex="0" title="{{tip "sim"}}">sim<span class="sr-only"> — seeded demonstration, not independent adoption</span></span>{{end}}
 {{/* A time as its age, the exact UTC on hover and focus; app.js keeps the age current. */}}
 {{define "age"}}{{if .}}<time datetime="{{iso .}}" title="{{stamp .}}" data-rel>{{age .}}</time>{{else}}—{{end}}{{end}}
+{{define "info-icon"}}<svg class="sm-icon sm-icon-info" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 2.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zM10 9v4.5M10 6.5h.01"/></svg>{{end}}
 {{define "report-icon"}}<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 17V3m0 1c4-3 8 3 12 0v8c-4 3-8-3-12 0"/></svg>{{end}}
 {{define "import-icon"}}<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 3v9m-3-3 3 3 3-3M4 13v4h12v-4"/></svg>{{end}}
 {{/* Room style disclosure: the first thing in <body>. On a styled page the site pins it

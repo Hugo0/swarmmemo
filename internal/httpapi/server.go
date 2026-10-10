@@ -423,6 +423,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.write(w, r)
 		return
 	}
+	if s.idPrefixRoute(w, r) {
+		return
+	}
 	if s.postTextRoute(w, r) {
 		return
 	}

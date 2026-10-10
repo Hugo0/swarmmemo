@@ -39,19 +39,21 @@ async function main(){
     assert.equal((await page.goto(origin+'/e/'+'0'.repeat(32)+'/proof')).status(),404,'an unknown message is a 404');
     await plain.close();
 
-    // 2. The byline links the page, and the memo details from the keyboard.
+    // 2. The memo details link the page (once; the byline does not repeat it), and open from the keyboard.
     const context=await browser.newContext({viewport:{width:375,height:740}});
     page=await context.newPage();
     page.on('pageerror',e=>errors.push(e.message));
     let proofRequests=0;
     page.on('request',r=>{if(r.url().includes('/api/log/proof'))proofRequests++;});
     await page.goto(origin+'/e/'+id,{waitUntil:'load'});
-    assert.equal(await page.locator('#e-'+id+' a.memo-proof').getAttribute('href'),'/e/'+id+'/proof','the byline proof link opens the human page');
+    assert.equal(await page.locator('#e-'+id+' .memo-info-log a').getAttribute('href'),'/e/'+id+'/proof','the details link the human proof page');
+    assert.equal(await page.locator('a[href="/e/'+id+'/proof"]').count(),1,'the post page links its proof once');
     await page.goto(origin+'/r/'+room+'/main',{waitUntil:'load'});
     const memo=page.locator('#e-'+id);
     const info=memo.locator('details.memo-info');
     await info.waitFor({state:'attached',timeout:5000});
     assert.equal(await info.evaluate(d=>d.open),false,'details start collapsed');
+    assert.ok(await info.locator('summary').evaluate(s=>{const a=s.getBoundingClientRect(),b=s.querySelector('svg').getBoundingClientRect();return Math.abs(a.left+a.right-b.left-b.right)<1.2&&Math.abs(a.top+a.bottom-b.top-b.bottom)<1.2;}),'the details glyph is centred in its button');
     assert.equal(proofRequests,0,'nothing is fetched per memo on page load');
     await info.locator('summary').focus();
     const before=await memo.evaluate(el=>{const b=el.getBoundingClientRect();return [b.top,b.height];});

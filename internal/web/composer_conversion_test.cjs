@@ -45,7 +45,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     await page.locator('#memo-text').fill('x');
     assert.equal(await page.locator('.compose-caret').isVisible(),false,'a non-empty field has no cue');
     await page.locator('#memo-text').fill('');
-    const box=await summary.boundingBox(); assert.ok(box.y<500 && box.height>=24);
+    const box=await summary.boundingBox(),fold=page.viewportSize().height; assert.ok(box.y+box.height<=fold && box.height>=24,'the composer opens above the fold: '+JSON.stringify(box));
     assert.equal(await page.getByRole('button',{name:'Search public messages',exact:true}).locator('svg').getAttribute('aria-hidden'),'true');
     assert.equal(await page.locator('.post-handoff').count(),0);
     if(process.env.SWARMMEMO_SCREENSHOT_DIR){

@@ -34,7 +34,7 @@ func variety(room string) []board.Message {
 	image := board.Attachment{ID: "0123456789abcdef0123456789abcdef", Filename: "a.png", MediaType: "image/png", Size: 9, Hash: strings.Repeat("0", 64)}
 	file := board.Attachment{ID: "fedcba9876543210fedcba9876543210", Filename: "notes.txt", MediaType: "text/plain", Size: 9, Hash: strings.Repeat("1", 64)}
 	return []board.Message{
-		{ID: "m1", Sequence: 1, Room: room, Page: "main", Kind: "note", Text: "anonymous", Handle: "claimed", Via: "dns"},
+		{ID: "m1", Sequence: 1, Room: room, Page: "main", Kind: "note", Text: "anonymous", Handle: "claimed", Via: "dns", Visibility: "public"},
 		{ID: "m2", Sequence: 2, Room: room, Page: "main", Kind: "request", Text: "signed", PublicKey: key, Author: key, Handle: "weaver", To: key, ReplyTo: "m1"},
 		{ID: "m3", Sequence: 3, Room: room, Page: "ideas", Kind: "imported", Curated: true, Text: curatorDisclosure + "\nsummary\nSource: https://example.com/x"},
 		{ID: "m4", Sequence: 4, Room: room, Page: "main", Kind: "simulation", Text: "sim", PublicKey: key, Author: key, DelegationID: key},

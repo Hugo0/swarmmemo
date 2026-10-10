@@ -71,9 +71,9 @@ type page struct {
 	// legacy pages; GuideMoved names the legacy paths they replace.
 	GuidePosts []board.Message
 	GuideMoved map[string]string
-	// Parents maps a parent event ID to the parent already present in this same
-	// page of events, so a listing can quote what a reply answers without a
-	// second read per memo. Absent parents simply render no quote.
+	// Parents maps a parent event ID to its message, so a listing can quote what
+	// a reply answers (listingParents): parents on the page, plus the public
+	// ones off it in one bounded read. Absent parents simply render no quote.
 	Parents map[string]*board.Message
 	// Depths is the capped reply depth per event on a conversation page.
 	Depths map[string]int
@@ -202,6 +202,48 @@ func replyParents(events []board.Message) map[string]*board.Message {
 	return parents
 }
 
+// parentReader reads public messages by ID in one statement (board.Store).
+type parentReader interface {
+	PublicMessagesByID(context.Context, []string) ([]board.Message, error)
+}
+
+// listingParents is replyParents plus the parents that are not on the page,
+// read in one bounded query, so every reply in a listing quotes what it
+// answers. A parent that is private, unknown or unreadable is simply absent and
+// the reply keeps its plain "In thread" link.
+func listingParents(ctx context.Context, service board.Service, events []board.Message) map[string]*board.Message {
+	parents := replyParents(events)
+	reader, ok := service.(parentReader)
+	if !ok {
+		return parents
+	}
+	seen := map[string]bool{}
+	missing := []string{}
+	for _, e := range events {
+		if e.ReplyTo == "" || e.ReplyTo == e.ID || parents[e.ReplyTo] != nil || seen[e.ReplyTo] {
+			continue
+		}
+		seen[e.ReplyTo] = true
+		missing = append(missing, e.ReplyTo)
+	}
+	if len(missing) == 0 {
+		return parents
+	}
+	found, err := reader.PublicMessagesByID(ctx, missing)
+	if err != nil {
+		return parents
+	}
+	shown, _ := collapseVersions(ctx, service, found)
+	for i := range shown {
+		if shown[i].Visibility != "" && shown[i].Visibility != "public" {
+			continue
+		}
+		parent := shown[i]
+		parents[parent.ID] = &parent
+	}
+	return parents
+}
+
 // threadDepths derives indentation from the reply chain inside one page of a
 // thread. thread.get is oldest-first, so a parent is seen before its replies; a
 // parent outside the page restarts at zero rather than guessing.
@@ -276,8 +318,9 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"roomLabel":    roomLabel,
 	"composeURL":   composeURL,
 	"policyLine":   policyLine,
+	"policyItems":  policyItems,
 	"viasJSON":     viasJSON,
-	"postTagline":  postTagline,
+	"postAnywhere": postAnywhere,
 	"credit":       func() footerCredit { return credit },
 	"footerTools":  func() []footerTool { return footerTools },
 	"waysToPost":   waysToPost,
@@ -354,7 +397,6 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// The personal assistant pitch and MCP profile (platforms.go).
 	"assistantPitch":  func() string { return AssistantPitch },
 	"tagline":         func() string { return Tagline },
-	"oneLiner":        func() string { return OneLiner },
 	"sendToAgent":     func() string { return SendToAgent },
 	"assistantMCPURL": func() string { return assistantURL },
 	"assistantTools":  func() string { return AssistantTools },
@@ -596,7 +638,7 @@ func Handler(service board.Service) http.Handler {
 			// A forward link is only ever useful while walking forward. Without a
 			// cursor this page is the newest window, so there is nothing after it.
 			p.HasMore = hasMore(res) && r.URL.Query().Get("cursor") != ""
-			p.Parents = replyParents(p.Messages)
+			p.Parents = listingParents(r.Context(), service, p.Messages)
 		}
 		switch {
 		case r.URL.Path == "/":
@@ -841,6 +883,7 @@ func Handler(service board.Service) http.Handler {
 			}
 		case r.URL.Path == "/feed":
 			status = loadFeedPage(r, &p, execute, feedProfilesOn(service))
+			p.Parents = listingParents(r.Context(), service, p.Messages)
 		case r.URL.Path == "/feed/tune":
 			status = loadFeedTune(r, &p, execute, feedProfilesOn(service))
 		case r.URL.Path == "/me/messages" || strings.HasPrefix(r.URL.Path, "/me/messages/"):

@@ -514,7 +514,7 @@ type workRoot struct{ Room, Account, Author, Kind, Parent, PublicKey, Signature 
 func visibleWorkRoot(ctx context.Context, tx *sql.Tx, id string, a actor) (workRoot, error) {
 	var root workRoot
 	if !workIDRE.MatchString(id) {
-		return root, problem(400, "invalid_message_id", "A message ID is 32 lowercase hexadecimal characters.")
+		return root, problem(400, "invalid_message_id", "A message ID is 32 lowercase hexadecimal characters; GET /api/work/ID also takes a unique prefix: use at least 8 hex characters.")
 	}
 	err := tx.QueryRowContext(ctx, `SELECT room,account,author,kind,reply_to,public_key,signature FROM events WHERE id=? AND hidden=0`, id).Scan(&root.Room, &root.Account, &root.Author, &root.Kind, &root.Parent, &root.PublicKey, &root.Signature)
 	if errors.Is(err, sql.ErrNoRows) {

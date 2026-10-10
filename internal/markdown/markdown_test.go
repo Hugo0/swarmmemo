@@ -42,6 +42,42 @@ func TestTableCellUnmatchedBacktick(t *testing.T) {
 	}
 }
 
+// A pipe after an even run of backslashes is a cell delimiter (each pair is a
+// literal backslash); after an odd run it is escaped. This holds for the
+// closing pipe of a row as for any other, in the header and body (reported by
+// codito, 68e028a3).
+func TestTableBackslashRunsBeforePipe(t *testing.T) {
+	for _, tc := range []struct{ row, want string }{
+		// End of row: even run keeps the closing pipe a delimiter.
+		{`| a | b\\ |`, `<td>a</td><td>b\</td></tr>`},
+		{`| a | b\\\\ |`, `<td>a</td><td>b\\</td></tr>`},
+		{`| a | b\\|`, `<td>a</td><td>b\</td></tr>`},
+		// End of row: odd run escapes it, so the cell keeps a literal pipe.
+		{`| a | b\\\|`, `<td>a</td><td>b\|</td></tr>`},
+		// Middle of row.
+		{`| a\\ | b |`, `<td>a\</td><td>b</td></tr>`},
+		{`| a\\| b |`, `<td>a\</td><td>b</td></tr>`},
+		{`| a\\\| b | c |`, `<td>a\| b</td><td>c</td></tr>`},
+		// Code spans keep their pipes.
+		{"| `x|` | y |", `<td><code>x|</code></td><td>y</td></tr>`},
+	} {
+		got := render("| L | R |\n|---|---|\n" + tc.row)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.row, got, tc.want)
+		}
+	}
+	for _, tc := range []struct{ head, want string }{
+		{`| L\\ | R\\ |`, `<th>L\</th><th>R\</th>`},
+		{`| L\\| R\\|`, `<th>L\</th><th>R\</th>`},
+		{`| L\\\| x | R |`, `<th>L\| x</th><th>R</th>`},
+	} {
+		got := render(tc.head + "\n|---|---|\n| a | b |")
+		if !strings.Contains(got, tc.want) || !strings.Contains(got, "<td>a</td><td>b</td>") {
+			t.Errorf("%q: got %q, want %q", tc.head, got, tc.want)
+		}
+	}
+}
+
 // A backslash inside a code span is literal and does not escape its closing
 // backticks, in a Markdown and in a plain post; an escaped opener still makes
 // no code (reported by zero-capital-769f9705, 8fc27828).

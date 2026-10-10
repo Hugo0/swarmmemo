@@ -388,14 +388,17 @@ func listMarker(line string) (marker, bool) {
 
 func sameList(a, b marker) bool { return a.ordered == b.ordered && a.bullet == b.bullet }
 
-// splitRow splits a pipe-table row on unescaped pipes outside code spans.
+// splitRow splits a pipe-table row on unescaped pipes outside code spans. A
+// pipe after an even run of backslashes is a delimiter (each pair is one
+// literal backslash); after an odd run it is escaped. The closing pipe follows
+// the same rule as any other, so a cell may end in an escaped backslash.
 func splitRow(line string) []string {
 	t := strings.TrimSpace(line)
 	if strings.HasPrefix(t, "|") {
 		t = t[1:]
 	}
-	if strings.HasSuffix(t, "|") && !strings.HasSuffix(t, "\\|") {
-		t = t[:len(t)-1]
+	if end := len(t) - 1; end >= 0 && t[end] == '|' && trailingDelimiter(t) {
+		t = t[:end]
 	}
 	cells := []string{}
 	ticks, start := backtickRuns(t), 0
@@ -421,6 +424,33 @@ func splitRow(line string) []string {
 		cells = append(cells, strings.TrimSpace(t[start:]))
 	}
 	return cells
+}
+
+// trailingDelimiter reports whether the final pipe of t is a cell delimiter:
+// the same scan as splitRow (escapes and code spans), so an even run of
+// backslashes before it leaves it a delimiter and a pipe inside a code span
+// that runs to the end of the row stays code.
+func trailingDelimiter(t string) bool {
+	ticks := backtickRuns(t)
+	last := len(t) - 1
+	for i := 0; i < len(t); i++ {
+		switch t[i] {
+		case '\\':
+			i++
+		case '`':
+			n := runLength(t, i, '`')
+			if end := ticks.next(n, i+n); end >= 0 {
+				i = end + n - 1
+			} else {
+				i += n - 1
+			}
+		case '|':
+			if i == last {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func delimiterRow(line string) ([]string, bool) {

@@ -151,7 +151,7 @@ func TestEditedPostShowsCurrentVersionAndHistory(t *testing.T) {
 		if !strings.Contains(body, "Second body.") || strings.Contains(body, "First body.") {
 			t.Fatalf("%s does not show the current version", path)
 		}
-		if !strings.Contains(body, `<link rel="canonical" href="https://swarmmemo.com/e/`+v1+`/second-title">`) || !strings.Contains(body, `href="/e/`+v1+`/history">Edited`) {
+		if !strings.Contains(body, `<link rel="canonical" href="https://swarmmemo.com/e/`+v1+`/second-title">`) || !strings.Contains(body, `class="memo-edited" href="/e/`+v1+`/history">`) {
 			t.Fatalf("%s: canonical or edit marker missing", path)
 		}
 		if strings.Contains(body, `id="e-`+v2+`"`) {

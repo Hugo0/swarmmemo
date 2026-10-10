@@ -28,8 +28,8 @@ func TestHomePreviewRetainsOneFullBodyAndNativeConversationLink(t *testing.T) {
 		if strings.Contains(body, "memo-preview-toggle") || strings.Contains(body, ">Show more</button>") {
 			t.Fatal("inline expansion must be a measured JS enhancement, not inert SSR controls")
 		}
-		if path == "/" && !strings.Contains(body, `<a href="/docs#ways-to-post">Post with GET or POST.</a>`) {
-			t.Fatal("home must offer an inert GET-posting documentation link")
+		if path == "/" && !strings.Contains(body, `<p class="hero-ways">Post from anywhere: <a href="/docs#ways-to-post">HTTP</a>`) {
+			t.Fatal("home must offer an inert link to how to post")
 		}
 		if path == "/" && !strings.Contains(body, `<meta name="description" content="`+html.EscapeString(ShortDescription)+`">`) {
 			t.Fatal("home metadata must be the copy kit's short description")
@@ -117,8 +117,9 @@ func TestListingMetadataOmitsOnlyRedundantDefaults(t *testing.T) {
 	}
 }
 
-// P05: a reply in a listing quotes the parent it answers, but only from the events
-// already on the page — never a per-memo read — and never as a second full body.
+// P05: a reply in a listing quotes the parent it answers, never with a per-memo
+// read and never as a second full body. A service without the one-statement
+// parent read (parentReader) quotes only parents already on the page.
 func TestListingQuotesOnlyParentsAlreadyOnThePage(t *testing.T) {
 	long := strings.Repeat("Café 雪 ", 60)
 	parent := board.Message{ID: "parent", Sequence: 1, Room: "lobby", Page: "main", Kind: "note", Text: "A question\nwith <b>markup</b> and\n\nblank lines.", Handle: "asker", PublicKey: "key", Author: strings.Repeat("a", 64)}
@@ -147,7 +148,11 @@ func TestListingQuotesOnlyParentsAlreadyOnThePage(t *testing.T) {
 			t.Errorf("%s: a quote must link to the parent permalink", path)
 		}
 		if strings.Contains(body, `href="/e/not-here"`) {
-			t.Errorf("%s: a parent that is not on the page must not be quoted or fetched", path)
+			t.Errorf("%s: a parent this service cannot read must not be quoted", path)
+		}
+		// A reply whose parent is quoted needs no In thread link: the quote is the context.
+		if strings.Count(body, `class="read-conversation"`) != 1 || !strings.Contains(body, `class="read-conversation" href="/e/off-page"`) {
+			t.Errorf("%s: only the unquoted reply keeps its In thread link", path)
 		}
 		// Whitespace is collapsed to one glance line and markup stays escaped.
 		if !strings.Contains(body, `<span class="memo-quote-text">A question with &lt;b&gt;markup&lt;/b&gt; and blank lines.</span>`) {
@@ -176,6 +181,29 @@ func TestListingQuotesOnlyParentsAlreadyOnThePage(t *testing.T) {
 	}
 	if quoteText(&board.Message{Hidden: true, Text: "sentinel"}) != "This message has been removed." {
 		t.Fatal("a removed parent must never be quoted")
+	}
+}
+
+// A reply whose parent is not on the page still quotes it in a listing: the
+// store reads every missing parent in one statement, public rooms only, and
+// the quote names the author once, escaped and bounded.
+func TestListingQuotesParentsOffThePage(t *testing.T) {
+	s, owner, mod := roomStore(t)
+	parent := owner.run(t, s, board.Command{Operation: "post", Room: "lobby", Text: "Which cache header <b>should</b> I send?"}).Receipt.ID
+	mod.run(t, s, board.Command{Operation: "post", Room: "lobby", Text: "Use an ETag answer.", ReplyTo: parent})
+	for _, path := range []string{"/?q=ETag", "/r/lobby?q=ETag"} {
+		body := render(s, path).Body.String()
+		main := body[strings.Index(body, "<main"):]
+		if strings.Contains(main, "Which cache header <b>") || !strings.Contains(main, `<a class="memo-quote" href="/e/`+parent+`"><span class="memo-quote-author">⌘ writer</span><span class="memo-quote-text">Which cache header &lt;b&gt;should&lt;/b&gt; I send?</span></a>`) {
+			t.Fatalf("%s: the off-page parent is not quoted", path)
+		}
+		if strings.Contains(main, `class="read-conversation"`) {
+			t.Errorf("%s: a quoted reply needs no In thread link", path)
+		}
+	}
+	got, err := s.PublicMessagesByID(t.Context(), []string{parent, "unknown"})
+	if err != nil || len(got) != 1 || got[0].ID != parent {
+		t.Fatalf("PublicMessagesByID: %v %v", got, err)
 	}
 }
 

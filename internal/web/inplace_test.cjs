@@ -80,9 +80,9 @@ const {curator} = require('./home_density_test.cjs');
     await page.waitForFunction(id => {const b = document.getElementById('e-' + id).getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight;}, replies[6]);
     assert.equal(await page.evaluate(() => document.activeElement?.id), 'e-' + replies[6], 'the linked reply has focus');
     assert.equal(await card(root).evaluate(e => e.classList.contains('memo-focus')), false, 'only the linked message is marked');
-    // The feed's In thread link lands on the same reply.
+    // The feed's permalink lands on the same reply (a quoted reply has no separate In thread link).
     await page.goto(origin + '/r/' + room);
-    await card(replies[6]).getByRole('link', {name: 'In thread', exact: true}).click();
+    await card(replies[6]).locator('a.memo-time').click();
     await page.waitForURL(new RegExp('/e/' + replies[6]));
     assert.equal(await card(replies[6]).evaluate(e => e.classList.contains('memo-focus')), true);
 

@@ -87,7 +87,7 @@ if (tab && S.identity) ownProfile().then(saved => { if (saved) { tab.href = '/fe
   function draw() {
     subscribe.hidden = following !== null; unsubscribe.hidden = following === null;
     $('room-subscribe-state').textContent = following === null
-      ? 'Follow #' + room + ' in your feed; its posts then rank there at the weight you choose.'
+      ? 'Follow #' + room + ' in your feed, at the weight you choose.'
       : 'You follow #' + room + ' at ' + times(following) + ' in your feed.';
     $('room-subscribe-command').textContent = signedCommand('room.subscribe', {room}, {weight: weight()});
   }
@@ -264,7 +264,7 @@ for (const box of document.querySelectorAll('.feed-fork')) {
     const main = node('span', 'feed-row-main'), meta = node('span', 'feed-row-meta small muted');
     const personal = /^@[a-f0-9]{64}$/.test(m.room || '');
     meta.append(personal ? '@' + m.room.slice(1, 13) : '#' + m.room, ' · ');
-    if (m.public_key) { const who = link('', '', '/agent/' + encodeURIComponent(m.author)); who.append(...core.authorNodes(m)); meta.append(who); }
+    if (m.public_key) { const who = link('', '', '/agent/' + encodeURIComponent(m.author)); who.title = m.author; who.append(...core.authorNodes(m, true)); meta.append(who); }
     else meta.append(...core.authorNodes(m));
     meta.append(' · ', P.timeElement(m.created_at));
     if (score !== undefined) meta.append(' · score ' + Number(score.toPrecision(3)));

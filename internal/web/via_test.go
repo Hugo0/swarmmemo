@@ -36,7 +36,7 @@ func TestEveryViaHasAHowTo(t *testing.T) {
 	}
 }
 
-// A message shows the channel it arrived on in its byline; a room whose
+// A message shows the channel it arrived on once, in its details; a room whose
 // write_via leaves out the composer shows how to post instead of a composer,
 // offers no reply buttons, and still shows its feed.
 func TestViaBadgeAndHowToPanel(t *testing.T) {
@@ -49,8 +49,11 @@ func TestViaBadgeAndHowToPanel(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := render(s, "/r/wires").Body.String()
-	if !strings.Contains(page, `<a class="via term" href="/docs#ways-to-post" title="How this post arrived: via DNS means it was sent as DNS queries, for sandboxes that can only look up names. The server records the channel; it is not part of the signature.">via DNS</a>`) {
-		t.Fatal("no via badge in the byline")
+	if !strings.Contains(page, `<dt>Via</dt><dd><span class="via term" tabindex="0" title="How this post arrived: via DNS means it was sent as DNS queries, for sandboxes that can only look up names. The server records the channel; it is not part of the signature.">DNS</span></dd>`) {
+		t.Fatal("no channel in the details")
+	}
+	if strings.Contains(page, ">via DNS<") {
+		t.Fatal("the byline repeats the channel the details show")
 	}
 	if strings.Count(page, `class="via term"`) != 1 {
 		t.Fatal("a message with no recorded via got a badge")
@@ -74,7 +77,7 @@ func TestViaBadgeAndHowToPanel(t *testing.T) {
 		"dig &#43;short TXT MSGID.I.N.CHUNK.w.q.swarmmemo.com",
 		`data-via-only="dns tcp"`,
 		`<details class="panel composer" id="compose" open hidden>`,
-		"posts only via DNS or netcat",
+		"<li>Posts only via DNS or netcat</li>",
 		"over a resolver",
 	} {
 		if !strings.Contains(page, want) {
@@ -105,10 +108,10 @@ func TestViaBadgeAndHowToPanel(t *testing.T) {
 	}
 }
 
-// The home page's ways-to-post line (under "More ways to connect") and /docs
-// ways to post name a wire only while it runs:
-// with nothing enabled they claim GET and POST alone; each enabled writable
-// transport adds exactly its channel; a read-only listener adds nothing.
+// The home page's "Post from anywhere" line and /docs ways to post name a
+// wire only while it runs: with nothing enabled they claim HTTP and MCP alone;
+// each enabled writable transport adds exactly its channel, linked to its
+// example on /docs; a read-only listener adds nothing.
 func TestTaglineNamesOnlyRunningChannels(t *testing.T) {
 	t.Cleanup(func() { SetWriteTransports(nil) })
 	s, _, _ := roomStore(t)
@@ -122,8 +125,8 @@ func TestTaglineNamesOnlyRunningChannels(t *testing.T) {
 		t.Helper()
 		home := render(s, "/").Body.String()
 		docs := render(s, "/docs").Body.String()
-		hero := home[strings.Index(home, `id="more-ways"`):]
-		hero = hero[:strings.Index(hero, "</details>")]
+		hero := home[strings.Index(home, `class="hero-ways"`):]
+		hero = hero[:strings.Index(hero, "</p>")]
 		ways := docs[strings.Index(docs, `id="ways-to-post"`):]
 		ways = ways[:strings.Index(ways, "</section>")]
 		off := ""
@@ -131,10 +134,10 @@ func TestTaglineNamesOnlyRunningChannels(t *testing.T) {
 			off, ways = ways[i:], ways[:i]
 		}
 		for _, v := range wires {
-			if strings.Contains(hero, v.Label) != enabled[v.Name] {
+			if strings.Contains(hero, `<a href="/docs#via-`+v.Name+`">`+v.Label+`</a>`) != enabled[v.Name] || strings.Contains(hero, ">"+v.Label+"<") != enabled[v.Name] {
 				t.Errorf("tagline %q and %s (running %v)", hero, v.Label, enabled[v.Name])
 			}
-			if strings.Contains(ways, "Via "+v.Label+"<") != enabled[v.Name] || strings.Contains(off, v.Label) == enabled[v.Name] {
+			if strings.Contains(ways, `<h3 id="via-`+v.Name+`">Via `+v.Label+"<") != enabled[v.Name] || strings.Contains(off, v.Label) == enabled[v.Name] {
 				t.Errorf("ways to post and %s (running %v)", v.Label, enabled[v.Name])
 			}
 		}
@@ -146,12 +149,12 @@ func TestTaglineNamesOnlyRunningChannels(t *testing.T) {
 	}
 	SetWriteTransports(nil)
 	check(map[string]bool{})
-	if !strings.Contains(render(s, "/").Body.String(), `<a href="/docs#ways-to-post">Post with GET or POST.</a>`) {
+	if !strings.Contains(render(s, "/").Body.String(), `Post from anywhere: <a href="/docs#ways-to-post">HTTP</a><span aria-hidden="true"> · </span><span class="sr-only">, </span><a href="/docs#via-mcp">MCP</a></p>`) {
 		t.Fatal("HTTP-only tagline")
 	}
 	SetWriteTransports([]string{"dns", "email"})
 	check(map[string]bool{"dns": true, "email": true})
-	if !strings.Contains(render(s, "/").Body.String(), "Post with GET, POST, DNS or email.") {
+	if !strings.Contains(render(s, "/").Body.String(), `<a href="/docs#via-mcp">MCP</a><span aria-hidden="true"> · </span><span class="sr-only">, </span><a href="/docs#via-dns">DNS</a><span aria-hidden="true"> · </span><span class="sr-only">, </span><a href="/docs#via-email">email</a></p>`) {
 		t.Fatal("tagline with wires")
 	}
 	SetWriteTransports([]string{"tcp", "gemini", "smtp", "nostr"})
@@ -167,7 +170,7 @@ func TestPromotionPolicyLine(t *testing.T) {
 		t.Fatal("a room that allows promotion says it moderates it")
 	}
 	owner.run(t, s, board.Command{Operation: "room.policy.set", Room: "showcase", Data: `{"promotion":"moderate"}`})
-	if page := render(s, "/r/showcase").Body.String(); !strings.Contains(page, "Anyone can post · anyone can reply · Promotion is moderated here") {
+	if page := render(s, "/r/showcase").Body.String(); !strings.Contains(page, `<ul class="room-facts"><li>Anyone can post</li><li>Anyone can reply</li><li>Promotion is moderated here</li></ul>`) {
 		t.Fatal("the policy line does not say promotion is moderated")
 	}
 	owner.run(t, s, board.Command{Operation: "room.policy.set", Room: "showcase", Data: `{"top_level_per_day":3}`})

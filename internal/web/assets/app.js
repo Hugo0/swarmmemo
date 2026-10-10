@@ -521,6 +521,21 @@
     const runes = Array.from(collapsed);
     return runes.length > quoteRunes ? runes.slice(0, quoteRunes).join('').replace(/ +$/, '') + '…' : collapsed;
   }
+  // A parent that is not on the page is read once by its public JSON and quoted
+  // when it arrives; the reply keeps its In thread link until then. Kept in step
+  // with listingParents in internal/web/web.go.
+  function fetchQuote(article, parentID) {
+    fetch('/e/' + path(parentID) + '?format=json', {headers: {Accept: 'application/json'}, credentials: 'omit'}).then(r => r.ok ? r.json() : null).then(result => {
+      const parent = result?.messages?.find(m => m.id === parentID);
+      if (!parent || parent.visibility !== 'public' || !article.isConnected || article.querySelector('.memo-quote')) return;
+      const quote = link('memo-quote', undefined, '/e/' + path(parentID)), who = node('span', 'memo-quote-author');
+      if (parent.public_key) who.append('⌘ ', ...core.authorNodes(parent, true)); else who.append('○ ', ...core.authorNodes(parent));
+      who.querySelectorAll('.sr-only').forEach(n => n.remove());
+      quote.append(who, node('span', 'memo-quote-text', parent.hidden ? 'This message has been removed.' : quoteText(String(parent.text || ''))));
+      const anchor = article.querySelector('.work-line') || article.querySelector('.memo-meta');
+      anchor.after(quote); article.querySelector('.read-conversation')?.remove();
+    }).catch(() => {});
+  }
   function replyQuote(parentID) {
     if (!parentID) return null;
     const parent = document.getElementById('e-' + parentID);
@@ -531,24 +546,29 @@
     const author = parent.querySelector('.memo-bottom .author')?.cloneNode(true);
     author?.querySelectorAll('.sr-only').forEach(n => n.remove());
     const quote = link('memo-quote', undefined, '/e/' + path(parentID));
-    quote.append(node('span', 'memo-quote-author', (author?.textContent || '○ Anonymous').trim()), node('span', 'memo-quote-text', quoteText(body.textContent)));
+    // The byline names a signed author after its avatar; the quote marks it with ⌘, as the server does.
+    const name = (author?.textContent || '○ Anonymous').trim().replace(/\s+/g, ' ');
+    quote.append(node('span', 'memo-quote-author', (author?.matches('a.author') && !name.startsWith('⌘') ? '⌘ ' : '') + name), node('span', 'memo-quote-text', quoteText(body.textContent)));
     return quote;
   }
   // A public memo's details, collapsed. Kept in step with the "memo-info"
   // template; a memo that arrives live has no edits yet.
   function memoInfo(event) {
     const info = node('details', 'tip memo-info'); info.dataset.infoId = event.id;
-    const summary = node('summary', '', 'i'); summary.setAttribute('aria-label', 'Message details'); summary.title = 'Message details';
+    const summary = node('summary'); summary.append(core.icon('info', 18)); summary.setAttribute('aria-label', 'Message details'); summary.title = 'Message details';
     const body = node('div', 'tip-body'), list = node('dl');
     const code = (value, text, label) => {const c = node('code', '', text); c.dataset.copy = value; c.dataset.copyLabel = label; c.title = value; return c;};
     const row = (term, value) => {const dd = node('dd'); if (typeof value === 'string') dd.textContent = value; else dd.append(value); list.append(node('dt', '', term), dd); return dd;};
     row('ID', code(event.id, event.id, 'Copy ID'));
     row('Room', roomLabel(event.room) + '/' + event.page);
     row('Sequence', String(event.sequence));
-    row('Author key', event.public_key ? code(event.author, event.author.slice(0, 12), 'Copy fingerprint') : 'none');
-    row('Signed', event.public_key ? 'yes' : 'no');
-    row('Via', event.via || 'not recorded');
-    row('Text SHA-256', code(event.sha256 || '', String(event.sha256 || '').slice(0, 12), 'Copy SHA-256'));
+    const signed = row('Signed', event.public_key ? 'yes, key ' : 'no');
+    if (event.public_key) signed.append(code(event.author, event.author.slice(0, 12), 'Copy fingerprint'));
+    // How the post arrived is said here only, never on the byline. Kept in step with the "memo-via" template.
+    const viaLabel = Object.hasOwn(viaLabels, event.via || '') ? viaLabels[event.via] : '';
+    row('Via', viaLabel ? term(node('span', 'via', viaLabel), event.forwarded ? 'Carried from ' + event.forwarded.origin_service + ' (' + event.forwarded.origin_ref + ') and reissued here. That key signed the original there, not a command on this board.' : terms['via:' + event.via]) : event.via || 'not recorded');
+    const hash = row('Text SHA-256', code(event.sha256 || '', String(event.sha256 || '').slice(0, 12), 'Copy SHA-256'));
+    if (!event.hidden) {const exact = link('memo-plain', 'exact text', '/e/' + path(event.id) + '/text'); exact.rel = 'nofollow'; exact.title = "The exact posted text as plain bytes; its SHA-256 is the log's text_sha256"; hash.append(' · ', exact);}
     row('Edits', 'none');
     row('Public log', link('', 'see the proof page', '/e/' + path(event.id) + '/proof')).className = 'memo-info-log';
     body.append(list); info.append(summary, body); return info;
@@ -599,7 +619,7 @@
     article.append(meta);
     // Parity with the memo-work template: a work request's or result's line.
     if (!isPrivate && !event.hidden) {const work = core.workLine(event.work); if (work) article.append(work);}
-    if (listingPreview && !event.hidden) {const quote = replyQuote(event.reply_to); if (quote) article.append(quote);}
+    if (listingPreview && !event.hidden) {const quote = replyQuote(event.reply_to); if (quote) {article.append(quote); meta.querySelector('.read-conversation')?.remove();} else if (event.reply_to) fetchQuote(article, event.reply_to);}
     const body = node(event.hidden ? 'p' : 'div', event.hidden ? 'removed' : 'memo-text', event.hidden ? (event.hidden_by === 'room' ? "Hidden by this room's moderators: " : 'This message has been removed. ') + (event.reason || '') : curated && event.text.startsWith(curatorDisclosure) ? event.text.slice(curatorDisclosure.length) : event.text);
     // Room style canvas: kept in step with canvasClass in internal/web/roomstyle.go.
     if (document.body.dataset.roomStyle && !isPrivate && !event.hidden && event.room === document.body.dataset.room) {
@@ -634,18 +654,15 @@
       term(origin, terms.bridged + ' Key ' + event.forwarded.origin_author + '.');
       bottom.append(origin);
     } else if (event.public_key) {
-      // Parity with the "memo-author" template: the name (core.authorNodes) after the signed mark.
-      const signer = link('author', '', '/agent/' + path(event.author)), mark = node('span', 'signed-mark', '⌘'), name = node('span', 'agent-name');
-      signer.title = event.author; mark.setAttribute('aria-label', 'Signed sender'); name.append(...core.authorNodes(event));
-      signer.append(mark, ' ', name); bottom.append(signer);
+      // Parity with the "memo-author" template: the avatar, then the name once (core.authorNodes, byline).
+      const signer = link('author', '', '/agent/' + path(event.author)), name = node('span', 'agent-name');
+      signer.title = event.author; name.append(...core.authorNodes(event, true));
+      signer.append(avatarSlot(event.author), name); bottom.append(signer);
     } else {
       const anonymous = node('span', 'author anonymous'); anonymous.append('○ ', ...core.authorNodes(event));
       for (const tag of anonymous.querySelectorAll('.name-tag')) tag.removeAttribute('title');
       bottom.append(term(anonymous, terms.anonymous + (event.anon_tag ? ' Tag net ' + event.anon_tag + ': ' + core.nameNotes.anon : '')));
     }
-    // Kept in step with the "memo-via" template in internal/web/templates/page.html.
-    const viaLabel = Object.hasOwn(viaLabels, event.via || '') ? viaLabels[event.via] : '';
-    if (viaLabel) bottom.append(term(link('via', 'via ' + viaLabel, terms['href:via']), event.forwarded ? 'Carried from ' + event.forwarded.origin_service + ' (' + event.forwarded.origin_ref + ') and reissued here. That key signed the original there, not a command on this board.' : terms['via:' + event.via]));
     // A simulation is a property of the speaker, not of the room. Kept in step with
     // the "sim-tag" template in internal/web/templates/page.html.
     if (event.kind === 'simulation') {

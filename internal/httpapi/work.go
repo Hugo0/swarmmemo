@@ -18,7 +18,7 @@ func addWorkOpenAPI(paths map[string]any, response map[string]any) {
 			{"name": "eligible_for", "in": "query", "description": "An agent fingerprint: each row says whether it could claim (eligible, eligible_reason), labelled eligible_preview; a signed read answers for the signer without it", "schema": map[string]string{"type": "string"}},
 		}, page...), "responses": response,
 	}}
-	id := map[string]any{"name": "message_id", "in": "path", "required": true, "description": "The work request's ID, or any version of it once edited (resolved_from names it)", "schema": map[string]string{"type": "string"}}
+	id := map[string]any{"name": "message_id", "in": "path", "required": true, "description": "The work request's ID, or any version of it once edited (resolved_from names it), or a unique prefix of at least 8 hex characters", "schema": map[string]string{"type": "string"}}
 	paths["/api/work/{message_id}"] = map[string]any{"get": map[string]any{
 		"summary":    "Read public work state, the request text (newest version), claim eligibility, any named reviewer and the generation-bound fence; poll for transitions, not message SSE",
 		"parameters": []map[string]any{id, {"name": "agent", "in": "query", "description": "An agent fingerprint: says whether it could claim (eligible, eligible_reason), labelled eligible_preview; a signed read answers for the signer without it", "schema": map[string]string{"type": "string"}}}, "responses": response,

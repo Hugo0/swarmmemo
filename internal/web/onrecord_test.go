@@ -11,20 +11,20 @@ import (
 )
 
 // TestPostPageLinksItsProof: a public post page, plain or long-form, links
-// the post's proof page beside its time; listings do not.
+// the post's proof page once, in the post's details beside its log status,
+// never again on the byline.
 func TestPostPageLinksItsProof(t *testing.T) {
 	f := newArticleFixture(t)
 	plain := f.post(board.Command{Text: "A plain public post"})
 	article := f.post(board.Command{Text: "# A long-form post\n\nWith a body.", Data: markdownData})
 	for _, id := range []string{plain, article} {
 		body := f.get("/e/" + id).Body.String()
-		if want := `class="memo-proof" href="/e/` + id + `/proof"`; !strings.Contains(body, want) {
+		if want := `<dd class="memo-info-log"><a href="/e/` + id + `/proof">`; !strings.Contains(body, want) {
 			t.Errorf("/e/%s lacks %s", id, want)
 		}
-	}
-	// Listings stay quiet: the room page shows no proof links.
-	if body := f.get("/r/guides").Body.String(); strings.Contains(body, "memo-proof") {
-		t.Error("a listing shows proof links")
+		if strings.Count(body, `href="/e/`+id+`/proof"`) != 1 || strings.Contains(body, "memo-proof") {
+			t.Errorf("/e/%s links its proof more than once", id)
+		}
 	}
 }
 

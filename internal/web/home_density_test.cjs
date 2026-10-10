@@ -58,8 +58,9 @@ async function main(){
     assert.equal(await row.locator('a.memo-time').getAttribute('href'),'/e/'+event.id);
     assert.equal(await row.locator('a.memo-time time').count(),1);
     assert.ok(await row.evaluate(e=>e.querySelector('a.memo-time').getBoundingClientRect().top<e.querySelector('.memo-text').getBoundingClientRect().top),'the permalink is on the location line, above the body');
-    assert.equal(await row.getByRole('link',{name:'In thread',exact:true}).count(),event.reply_to?1:0);
-    if(event.reply_to)assert.ok(await row.evaluate(e=>e.querySelector('.memo-meta .read-conversation')!==null),'thread context belongs to the location line');
+    // A reply carries one form of thread context: the quoted parent, or In thread when the parent cannot be quoted.
+    assert.equal(await row.getByRole('link',{name:'In thread',exact:true}).count()+await row.locator('.memo-quote').count(),event.reply_to?1:0);
+    if(event.reply_to&&!await row.locator('.memo-quote').count())assert.ok(await row.evaluate(e=>e.querySelector('.memo-meta .read-conversation')!==null),'thread context belongs to the location line');
     assert.equal(await row.getByRole('link',{name:'Open',exact:true}).count(),0,'the Open action is gone');
     assert.equal(await row.locator('.reply-ref').count(),0);assert.equal(await row.getByRole('button',{name:'Reply',exact:true}).count(),1);
     // Band 3 is attribution then action, and Reply is the strongest mark in it.
@@ -100,7 +101,7 @@ async function main(){
     assert.equal(await page.locator('#e-'+f.messages[3].id+' .memo-text').textContent(),f.messages[3].text);
     await page.goBack();await page.locator('#e-'+f.messages[3].id+' .memo-text').waitFor();
     const resizeBody=card(f.messages[5].id).locator('.memo-text');await resizeBody.evaluate(e=>e.style.fontSize='30px');await card(f.messages[5].id).getByRole('button',{name:'Show more',exact:true}).waitFor();await resizeBody.evaluate(e=>e.style.removeProperty('font-size'));await page.waitForFunction(id=>!document.getElementById('e-'+id).querySelector('.memo-preview-toggle'),f.messages[5].id);
-    assert.equal(await card(f.reply).locator('.reply-ref').count(),0);assert.equal(await card(f.reply).getByRole('link',{name:'In thread',exact:true}).getAttribute('href'),'/e/'+f.reply);
+    assert.equal(await card(f.reply).locator('.reply-ref').count(),0);assert.equal(await card(f.reply).getByRole('link',{name:'In thread',exact:true}).count(),0,'a quoted reply needs no In thread link');assert.equal(new URL(await card(f.reply).locator('.memo-quote').getAttribute('href'),origin).pathname,'/e/'+f.messages[1].id);
     assert.equal(await card(f.files).locator('.memo-files').evaluate(e=>e.open),false);assert.equal(await card(f.files).locator('.memo-files>summary').textContent(),'2 files');
     assert.equal(await card(f.files).locator('a[download]').count(),2);assert.equal(await card(f.files).locator('a[download]').first().isVisible(),false);
     console.log('AFTER card heights',await page.locator('#feed .memo').evaluateAll(es=>es.map(e=>Math.round(e.getBoundingClientRect().height))));
@@ -143,12 +144,12 @@ const checkRoute=async()=>{const row=card(routed.receipt.id);assert.equal(await 
     await page.goto(origin);await page.locator('#live-status').waitFor();
     const incomingText=thoughts+'\n\nLive-added tail.';const added=await f.send({operation:'post',room:'lobby',page:'main',text:incomingText,reply_to:f.messages[0].id});
     await page.locator('.new-messages').waitFor({state:'visible'});assert.equal(await card(added.receipt.id).count(),0);await page.locator('.new-messages').click();await preview({id:added.receipt.id,text:incomingText,reply_to:f.messages[0].id});
-    assert.equal(await card(added.receipt.id).getByRole('link',{name:'In thread',exact:true}).getAttribute('href'),'/e/'+added.receipt.id);
+    assert.equal(await card(added.receipt.id).getByRole('link',{name:'In thread',exact:true}).count(),0,'a live reply that quotes its parent drops In thread, as the server does');
     // P05: a reply quotes the parent already on this page, and the SSE-appended
     // quote must be byte-identical to the one the server renders for the same memo.
     const quoteOf=id=>page.locator('#e-'+id+' .memo-quote');
     const liveQuote={href:new URL(await quoteOf(added.receipt.id).getAttribute('href'),origin).pathname,author:await quoteOf(added.receipt.id).locator('.memo-quote-author').textContent(),text:await quoteOf(added.receipt.id).locator('.memo-quote-text').textContent()};
-    assert.equal(liveQuote.href,'/e/'+f.messages[0].id);assert.equal(liveQuote.text,f.messages[0].text);assert.equal(liveQuote.author,(await page.locator('#e-'+f.messages[0].id+' .memo-bottom .author').textContent()).trim(),'the quote carries the parent authorship exactly as the parent row shows it');
+    assert.equal(liveQuote.href,'/e/'+f.messages[0].id);assert.equal(liveQuote.text,f.messages[0].text);assert.equal(liveQuote.author.replace(/^⌘ /,''),(await page.locator('#e-'+f.messages[0].id+' .memo-bottom .author').textContent()).trim().replace(/\s+/g,' '),'the quote carries the parent authorship as the parent row shows it (a signed author marked with ⌘)');
     const home=await (await context.request.get(origin)).text();
     const ssrCard=home.slice(home.indexOf('id="e-'+added.receipt.id+'"'));
     const ssrQuote=ssrCard.slice(0,ssrCard.indexOf('<p class="memo-text"'));
@@ -199,7 +200,7 @@ const checkRoute=async()=>{const row=card(routed.receipt.id);assert.equal(await 
       assert.ok(await p.locator('#memo-to').evaluate(e=>{const a=e.getBoundingClientRect();return ['compose','compose-settings'].every(id=>{const b=document.getElementById(id).getBoundingClientRect();return a.bottom<=b.bottom&&a.top>=b.top;});}));
       await p.locator('#memo-to').fill('');await p.locator('#compose-settings>summary').click();await p.locator('#compose-settings>summary').click();await p.locator('#memo-to').fill('c'.repeat(64));assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await c.close();
     }
-    const plain=await browser.newContext({javaScriptEnabled:false,viewport:{width:320,height:1000}}),p=await plain.newPage();for(const path of ['','/r/lobby']){await p.goto(origin+path);assert.equal(await p.locator('#e-'+f.messages[1].id+' .memo-text').textContent(),thoughts);assert.equal(await p.locator('#e-'+f.messages[1].id+' .memo-text').evaluate(e=>getComputedStyle(e).webkitLineClamp),'4');assert.equal(await p.locator('.expand-memo').count(),0);assert.equal(await p.locator('#e-'+f.reply).getByRole('link',{name:'In thread',exact:true}).getAttribute('href'),'/e/'+f.reply);}
+    const plain=await browser.newContext({javaScriptEnabled:false,viewport:{width:320,height:1000}}),p=await plain.newPage();for(const path of ['','/r/lobby']){await p.goto(origin+path);assert.equal(await p.locator('#e-'+f.messages[1].id+' .memo-text').textContent(),thoughts);assert.equal(await p.locator('#e-'+f.messages[1].id+' .memo-text').evaluate(e=>getComputedStyle(e).webkitLineClamp),'4');assert.equal(await p.locator('.expand-memo').count(),0);assert.equal(new URL(await p.locator('#e-'+f.reply+' .memo-quote').getAttribute('href'),origin).pathname,'/e/'+f.messages[1].id);}
     assert.equal(await p.locator('#e-'+f.messages[1].id+' .memo-text').textContent(),thoughts);assert.equal(await p.locator('#e-'+f.messages[1].id+' .memo-text').evaluate(e=>getComputedStyle(e).webkitLineClamp),'4');
     await p.locator('#e-'+f.files+' .memo-files>summary').click();await p.locator('#e-'+f.files+' a[download]').first().waitFor({state:'visible',timeout:1000});assert.equal(await p.locator('#e-'+f.files+' a[download]').first().isVisible(),true);
     assert.equal(await p.locator('#e-'+f.messages[0].id+' .kind-note,#e-'+f.messages[0].id+' .page-label,#e-'+f.messages[0].id+' .memo-room').count(),0);assert.equal(await p.locator('#e-'+f.messages[1].id+' .memo-text').evaluate(e=>getComputedStyle(e).whiteSpace),'pre-line');assert.equal(await p.locator('#e-'+routed.receipt.id+' .page-label').textContent(),'/'+alternatePage);assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));if(process.env.SWARMMEMO_SCREENSHOT_DIR)await p.screenshot({path:process.env.SWARMMEMO_SCREENSHOT_DIR+'/memo-row-refined-nojs-mobile.png',fullPage:true});
