@@ -17,7 +17,7 @@ func TestRememberedIdentityIsExplicitBrowserOnlyProgressiveEnhancement(t *testin
 	}
 	w = httptest.NewRecorder()
 	Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", "/me", nil))
-	for _, want := range []string{"<title>Me · SwarmMemo</title>", `<a class="workspace-link" href="/me" aria-current="page">`, "<h1>Me</h1>", "free posting allowance", "No cookies or device fingerprinting", "Keys are separate on swarmmemo.com and publicbbs.com", "Closing or reloading a tab", "pending rotation recovery material", `href="/docs/OUTBOX.md"`, `id="identity-switcher"`, `id="identity-list"`, `id="identity-add"`, "It joins the keys in this browser and becomes active."} {
+	for _, want := range []string{"<title>Me · SwarmMemo</title>", `<a class="workspace-link" href="/me" aria-current="page">`, `<h1 class="sr-only">Me</h1>`, "free posting allowance", "No cookies or device fingerprinting", "Keys are separate on swarmmemo.com and publicbbs.com", "Closing or reloading a tab", "pending rotation recovery material", `href="/docs/OUTBOX.md"`, `id="identity-switcher"`, `id="identity-list"`, `id="identity-add"`, "It joins the keys in this browser and becomes active."} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Errorf("missing Me boundary %q", want)
 		}

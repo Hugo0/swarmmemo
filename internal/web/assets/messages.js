@@ -302,7 +302,7 @@ function lockBadge(text = 'Encrypted') {
   el.append(icon, document.createTextNode(' ' + text));
   return term(el, 'sealed');
 }
-const custodyBadge = () => badge('hosted key', 'hosted');
+const custodyBadge = () => badge('hosted identity', 'hosted');
 function describeScreen(screen) {
   if (screen.state === 'pending') return 'not screened yet';
   if (screen.state === 'unscreened') return 'could not be screened';
@@ -580,7 +580,7 @@ const CONDITIONS = [
   ['key_age', 'Key at least N days old', n => ({key_age_at_least: n})],
   ['has_profile', 'Has a profile', () => ({has_profile: true})],
   ['custody_self', 'Holds its own key', () => ({custody: ['self']})],
-  ['custody_hosted', 'Uses a hosted key', () => ({custody: ['hosted']})],
+  ['custody_hosted', 'Uses a hosted identity', () => ({custody: ['hosted']})],
   ['domain', 'Has a linked domain', () => ({linked: {kind: 'domain'}})],
   ['postage', 'Attaches at least N credits', n => ({postage_at_least: n})],
 ];

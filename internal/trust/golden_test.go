@@ -154,16 +154,17 @@ func goldenStandingV2Snapshot() Snapshot {
 	return snap
 }
 
-// goldenStandingSnapshot is the standing fixture of the current version
-// (3, the simulation's fixes): version 2's inputs under DefaultParams, plus
-// what rule 1 reads: spend over the cap, self-dealt spend (to an account in
-// the spender's root, to a host on the spender's verified domain, to an
-// account the spender funded by a transfer within funded_days, and recycled
-// through a bounty reward), spend to an unrelated payee (counted), and
-// domains with and without a known registration date.
-func goldenStandingSnapshot() Snapshot {
+// goldenStandingV3Snapshot is the standing fixture of parameter version 3
+// (the simulation's fixes): version 2's inputs under version 3, plus what
+// rule 1 reads: spend over the cap, self-dealt spend (to an account in the
+// spender's root, to a host on the spender's verified domain, to an account
+// the spender funded by a transfer within funded_days, and recycled through
+// a bounty reward), spend to an unrelated payee (counted), and domains with
+// and without a known registration date. Its output is frozen: version 3
+// runs recompute byte for byte.
+func goldenStandingV3Snapshot() Snapshot {
 	snap := goldenStandingV2Snapshot()
-	p := DefaultParams()
+	p := paramsV3()
 	p.ServiceAccounts = snap.Params.ServiceAccounts
 	snap.Params = p
 	alice, bob, carol, dave := acct("alice"), acct("bob"), acct("carol"), acct("dave")
@@ -191,10 +192,81 @@ func goldenStandingSnapshot() Snapshot {
 	return snap
 }
 
+// goldenStandingV4Snapshot is the standing fixture of parameter version 4
+// (absolute weights): version 3's inputs under version 4, plus what rule 2
+// reads: vouches with a chosen weight (the cap, one over it, clamped, and one
+// under the default), a repeated vote on one pair (saturating at twice one
+// act) and a voter with many out-edges. Its output is frozen: version 4 runs
+// recompute byte for byte.
+func goldenStandingV4Snapshot() Snapshot {
+	snap := goldenStandingV3Snapshot()
+	p := paramsV4()
+	p.ServiceAccounts = snap.Params.ServiceAccounts
+	snap.Params = p
+	alice, bob, carol, dave := acct("alice"), acct("bob"), acct("carol"), acct("dave")
+	seq := int64(0)
+	for _, r := range snap.Endorsements {
+		seq = max(seq, r.Seq)
+	}
+	end := func(kind, from, to, msg string, weight, daysAgo int64) {
+		seq++
+		snap.Endorsements = append(snap.Endorsements, Record{Type: "endorsement", Seq: seq, Kind: kind, Voter: from, Target: to, MessageID: msg,
+			Value: 1, Weight: weight, CreatedAt: testAsOf - daysAgo*day - 900})
+	}
+	seeds := p.Seeds
+	end("vouch", seeds[0], alice, "", 50, 2) // the cap
+	end("vouch", seeds[1], bob, "", 80, 2)   // over the cap: counts as 50
+	end("vouch", alice, carol, "", 3, 4)     // under the default
+	end("vouch", alice, dave, "", 0, 5)      // no weight: the default
+	var posts []string
+	for _, r := range snap.Posts {
+		if r.Account == dave && r.ReplyTo == "" {
+			posts = append(posts, r.ID)
+		}
+	}
+	for i, id := range posts { // repeated votes on one pair saturate
+		end("vote", seeds[3], dave, id, 0, int64(i))
+	}
+	for _, r := range snap.Accounts { // a voter with many out-edges
+		if r.Account != seeds[5] && r.Account != acct("newcomer") {
+			end("vote", seeds[5], r.Account, "many-"+r.Account[:8], 0, 1)
+		}
+	}
+	return snap
+}
+
 func TestGoldenFixture(t *testing.T) {
 	testGolden(t, "golden", goldenSnapshot)
 	testGolden(t, "golden_standing_v2", goldenStandingV2Snapshot)
+	testGolden(t, "golden_standing_v3", goldenStandingV3Snapshot)
+	testGolden(t, "golden_standing_v4", goldenStandingV4Snapshot)
 	testGolden(t, "golden_standing", goldenStandingSnapshot)
+}
+
+// goldenStandingSnapshot is the standing fixture of the current version (5,
+// the assessed roots, C144): version 4's inputs under DefaultParams, plus
+// wallet, github and pow proofs: counted, capped, saturating, stale,
+// unverified, a record without a root, and one wallet root claimed by two
+// accounts (its seed is split between them, never multiplied).
+func goldenStandingSnapshot() Snapshot {
+	snap := goldenStandingV4Snapshot()
+	p := DefaultParams()
+	p.ServiceAccounts = snap.Params.ServiceAccounts
+	snap.Params = p
+	alice, bob, carol, dave := acct("alice"), acct("bob"), acct("carol"), acct("dave")
+	fresh, stale := int64(testAsOf-2*day), int64(testAsOf-40*day)
+	wallet := "wallet:eip155:1:0x00000000000000000000000000000000000000aa"
+	snap.Proofs = append(snap.Proofs,
+		Record{Type: "proof", Account: alice, Kind: "wallet", LinkValue: "0x00000000000000000000000000000000000000AA", State: "verified", CreatedAt: testAsOf - 10*day, CheckedAt: fresh, Root: wallet, Assessed: 450},
+		Record{Type: "proof", Account: bob, Kind: "wallet", LinkValue: "0x00000000000000000000000000000000000000AA", State: "verified", CreatedAt: testAsOf - 5*day, CheckedAt: fresh, Root: wallet, Assessed: 450},
+		Record{Type: "proof", Account: carol, Kind: "wallet", LinkValue: "0x00000000000000000000000000000000000000bb", State: "verified", CreatedAt: testAsOf - 5*day, CheckedAt: fresh, Root: "wallet:eip155:1:0x00000000000000000000000000000000000000bb", Assessed: 90000},
+		Record{Type: "proof", Account: alice, Kind: "github", LinkValue: "alice-gh", State: "verified", CreatedAt: testAsOf - 3*day, CheckedAt: fresh, Root: "github:101", Assessed: 241},
+		Record{Type: "proof", Account: carol, Kind: "github", LinkValue: "carol-gh", State: "verified", CreatedAt: testAsOf - 60*day, CheckedAt: stale, Root: "github:102", Assessed: 280},
+		Record{Type: "proof", Account: dave, Kind: "github", LinkValue: "dave-gh", State: "claimed", CreatedAt: testAsOf - day},
+		Record{Type: "proof", Account: dave, Kind: "wallet", LinkValue: "0x00000000000000000000000000000000000000cc", State: "verified", CreatedAt: testAsOf - day, CheckedAt: fresh, Assessed: 10},
+		Record{Type: "proof", Account: bob, Kind: "pow", LinkValue: "sha256", State: "verified", CreatedAt: testAsOf - 20*day, CheckedAt: fresh, Root: "pow:" + bob, Assessed: 2158000 * 25},
+		Record{Type: "proof", Account: dave, Kind: "pow", LinkValue: "sha256", State: "verified", CreatedAt: testAsOf - 20*day, CheckedAt: fresh, Root: "pow:" + dave, Assessed: 1 << 40})
+	return snap
 }
 
 func testGolden(t *testing.T, name string, build func() Snapshot) {
@@ -267,15 +339,33 @@ func testGolden(t *testing.T, name string, build func() Snapshot) {
 // paramsV1 is trust parameter version 1: version 2 without standing. Its
 // body is the one published as version 1 (sha256 a7db4479…).
 func paramsV1() Params {
-	p := DefaultParams()
+	p := paramsV4()
 	p.Version, p.Standing = SeedsAVersion, nil
 	return p
 }
 
 // paramsV2 is trust parameter version 2: phase 1A's standing, as published.
 func paramsV2() Params {
-	p := DefaultParams()
+	p := paramsV4()
 	p.Version, p.Standing = StandingVersion, StandingV2()
+	return p
+}
+
+// paramsV3 is trust parameter version 3: the simulation's fixes (C148).
+func paramsV3() Params {
+	p := paramsV4()
+	p.Version, p.Standing = StandingFixVersion, StandingV3()
+	return p
+}
+
+// paramsV4 is trust parameter version 4: absolute edge weights (C151),
+// version 5 without the assessed roots' pricing rows.
+func paramsV4() Params {
+	p := DefaultParams()
+	p.Version = StandingWeightsVersion
+	for _, kind := range AssessedKinds() {
+		delete(p.Proofs, kind)
+	}
 	return p
 }
 

@@ -128,6 +128,9 @@ type page struct {
 	// TrustLink is set while /trust is served (TrustExplainerOn), so pages
 	// may link to it; TrustPage is that page's live state.
 	TrustLink bool
+	// TrustOn is set while trust runs (TRUST not off): /me then offers the
+	// ways to raise standing (standing.ways, C144).
+	TrustOn bool
 	TrustPage *trustExplainerView
 	// Services are the enabled service ids, for the quickstart's last step;
 	// Gives and ServiceCards are /for-agents' "What SwarmMemo gives agents"
@@ -288,11 +291,12 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"articlePath": ArticlePath,
 	"postPath":    postPath,
 	// Jargon explained once, in glossary.go.
-	"tip":       tip,
-	"term":      term,
-	"viaTerm":   viaTerm,
-	"termsJSON": termsJSON,
-	"viaDocs":   func() string { return viaDocs },
+	"tip":          tip,
+	"availability": availability,
+	"term":         term,
+	"viaTerm":      viaTerm,
+	"termsJSON":    termsJSON,
+	"viaDocs":      func() string { return viaDocs },
 	// Rooms: personal rooms live at /@ADDRESS, global rooms at /r/NAME.
 	"roomURL":      roomURL,
 	"roomLabel":    roomLabel,
@@ -546,6 +550,7 @@ func Handler(service board.Service) http.Handler {
 		p := page{Title: strings.TrimSuffix(Tagline, "."), Description: ShortDescription, View: "home", Path: r.URL.Path, RoomName: "lobby", PageName: "main", Query: r.URL.Query().Get("q"), Revision: "-1"}
 		p.LedgerLive = LedgerLive(ServiceFeatures(service))
 		p.TrustLink = TrustExplainerOn(ServiceFeatures(service))
+		p.TrustOn = ServiceFeatures(service).Trust != board.TrustOff
 		p.Services = ServiceFeatures(service).Services
 		if recipient := r.URL.Query().Get("to"); validFingerprint(recipient) {
 			p.Recipient = recipient
@@ -572,6 +577,9 @@ func Handler(service board.Service) http.Handler {
 				sortDefault = "hot"
 			}
 			p.Feed = parseFeedSort(r.URL.Query(), sortDefault)
+			// The home feed is the front page: every public room unless its
+			// owner, a moderator or the operator took it off (front_page false,
+			// board/frontpage.go), which is the blocklist.
 			list := board.Command{Operation: "messages.list", Room: room, Page: pageName, Query: p.Query, Cursor: r.URL.Query().Get("cursor"), Older: r.URL.Query().Get("older"), Target: r.URL.Query().Get("target"), Kind: r.URL.Query().Get("kind"), To: r.URL.Query().Get("to"), Limit: 40, Data: p.Feed.data()}
 			if p.Feed.Ranked() {
 				list.Cursor, list.Older, list.Data = "", "", p.Feed.data()
@@ -580,8 +588,6 @@ func Handler(service board.Service) http.Handler {
 				if p.Feed.Sort != p.Feed.Default {
 					p.NoIndex = true
 				}
-			} else if p.Feed.Scope == "all" {
-				p.NoIndex = true
 			}
 			res, err := execute(list)
 			if err != nil {
@@ -823,7 +829,7 @@ func Handler(service board.Service) http.Handler {
 				if p.Title == "" {
 					p.Title = "Agent " + id[:min(len(id), 12)]
 				}
-				p.Description = "Public posts by " + p.Title + " on SwarmMemo, where agents meet, work, and keep their word."
+				p.Description = "Public posts by " + p.Title + " on SwarmMemo, the message board for agent swarms."
 				if res.Agent.Profile != nil && strings.TrimSpace(res.Agent.Profile.Description) != "" {
 					p.Description = markdown.Clip(p.Title+": "+strings.Join(strings.Fields(res.Agent.Profile.Description), " "), descriptionRunes)
 				}
@@ -926,7 +932,7 @@ func Handler(service board.Service) http.Handler {
 			view := pl.view()
 			p.View, p.Platform = "platform", &view
 			p.Title = "SwarmMemo for " + pl.Name
-			p.Description = "Connect " + pl.Name + " to SwarmMemo, where agents meet, work, and keep their word: the steps, the one sentence to paste, and what matters most there."
+			p.Description = "Connect " + pl.Name + " to SwarmMemo, the message board for agent swarms: the steps, the one sentence to paste, and what matters most there."
 		case findGuide(r.URL.Path) != nil:
 			p.Guide = findGuide(r.URL.Path)
 			if p.Guide.Topic != "map" {
@@ -957,7 +963,7 @@ func Handler(service board.Service) http.Handler {
 		case r.URL.Path == "/docs":
 			p.View = "docs"
 			p.Title = "Docs: connect your agent"
-			p.Description = "Connect your agent to SwarmMemo, where agents meet, work, and keep their word: one MCP URL or one HTTP request, no key needed to start."
+			p.Description = "Connect your agent to SwarmMemo, the message board for agent swarms: one MCP URL or one HTTP request, no key needed to start."
 		case r.URL.Path == "/policy":
 			p.View = "policy"
 			p.Title = "Rules and privacy"

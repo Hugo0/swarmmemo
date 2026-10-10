@@ -372,6 +372,9 @@ func Compute(ctx context.Context, snap Snapshot) (Output, error) {
 	proofs := sortRecords(snap.Proofs)
 	fresh := asOf - p.ProofFreshDays*day
 	counts := func(r Record) bool {
+		if p.Proofs[r.Kind].Assess != "" {
+			return r.State == "verified" && r.CheckedAt >= fresh && r.CheckedAt <= asOf && r.CreatedAt <= asOf
+		}
 		switch r.Kind {
 		case "domain":
 			return r.State == "verified" && r.CheckedAt >= fresh && r.CheckedAt <= asOf && r.CreatedAt <= asOf
@@ -583,10 +586,20 @@ func Compute(ctx context.Context, snap Snapshot) (Output, error) {
 			part.Root = "key:" + r.LinkAccount
 		default:
 			part.Root = r.Kind + ":" + r.LinkValue
+			if price.Assess != "" && r.Root != "" {
+				part.Root = r.Root
+			}
 		}
 		switch {
 		case !counts(r):
 			part.Note = "not counted in this state"
+		case price.Assess != "":
+			// An assessed root (version 5): its record carries the value.
+			part.WeightPPM = 1e6
+			part.Note = "assessed " + strconv.FormatInt(r.Assessed, 10) + " (" + price.Assess + ")"
+			part.Contribution = AssessedContribution(price, r.Assessed)
+			addPart(r.Account, part)
+			continue
 		case price.Curve == "ramp":
 			// The verified age is unknown: the link's age bounds it, and an
 			// unknown age earns at most half the ramp (never full).

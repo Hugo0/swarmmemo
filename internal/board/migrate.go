@@ -176,6 +176,10 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if _, err := tx.Exec(tlogPromiseSchema); err != nil {
 		return err
 	}
+	// Schema 24: standing challenges and assessments (standingroots.go, C144).
+	if _, err := tx.Exec(standingSchema); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

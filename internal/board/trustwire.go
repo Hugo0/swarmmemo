@@ -268,7 +268,7 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 	exists := map[string]bool{}
 	if err := in.page(ctx, func(q allowance.Querier) error {
 		for _, name := range []string{"account_breakers", "ledger_transfers", "allowance_claims", "ledger_entries", "domain_registrations",
-			"service_calls", "x402_payments", "credit_topups"} {
+			"service_calls", "x402_payments", "credit_topups", "standing_assessments"} {
 			ok, err := tableExists(ctx, q, name)
 			if err != nil {
 				return err
@@ -365,6 +365,7 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 				if e.Sponsor != nil {
 					rec.Sponsor = *e.Sponsor
 				}
+				rec.Weight = int64(e.Weight)
 				var err error
 				if rec.Voter, err = resolveAccount(ctx, q, e.Voter); err != nil {
 					return err
@@ -438,14 +439,26 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 			return err
 		}
 	}
+	// From parameter version 4 a wallet or github proof carries its root and
+	// assessment (standing_assessments, standingroots.go), the assessment
+	// only while it is no older than proof_fresh_days.
+	assessedSQL := "'',0,0"
+	if exists["standing_assessments"] {
+		assessedSQL = "coalesce(sa.root,''),coalesce(sa.assessed,0),coalesce(sa.assessed_at,0)"
+	}
+	assessedJoin := ""
+	if exists["standing_assessments"] {
+		assessedJoin = " LEFT JOIN standing_assessments sa ON sa.agent=l.agent AND sa.kind=l.kind AND sa.value=l.value"
+	}
+	freshAssessment := asOf - p.ProofFreshDays*86400
 	for after = 0; ; {
 		var batch []trust.Record
 		scanned := 0
 		if err := in.page(ctx, func(q allowance.Querier) error {
 			r, err := q.QueryContext(ctx, `SELECT l.rowid,i.account,l.kind,l.value,l.state,l.created_at,l.checked_at,
  coalesce((SELECT o.account FROM identities o WHERE l.kind='ed25519' AND o.public_key=l.value AND `+publicAccountSQL("o.account")+`),''),
- `+publicAccountSQL("i.account")+`
- FROM identity_links l JOIN identities i ON i.id=l.agent WHERE l.rowid>? AND i.successor='' AND NOT (l.kind='x25519' AND l.state='lapsed') ORDER BY l.rowid LIMIT ?`, after, rows)
+ `+publicAccountSQL("i.account")+`,`+assessedSQL+`
+ FROM identity_links l JOIN identities i ON i.id=l.agent`+assessedJoin+` WHERE l.rowid>? AND i.successor='' AND NOT (l.kind='x25519' AND l.state='lapsed') ORDER BY l.rowid LIMIT ?`, after, rows)
 			if err != nil {
 				return err
 			}
@@ -453,7 +466,9 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 			for r.Next() {
 				rec := trust.Record{Type: "proof"}
 				var public bool
-				if err = r.Scan(&after, &rec.Account, &rec.Kind, &rec.LinkValue, &rec.State, &rec.CreatedAt, &rec.CheckedAt, &rec.LinkAccount, &public); err != nil {
+				var root string
+				var assessed, assessedAt int64
+				if err = r.Scan(&after, &rec.Account, &rec.Kind, &rec.LinkValue, &rec.State, &rec.CreatedAt, &rec.CheckedAt, &rec.LinkAccount, &public, &root, &assessed, &assessedAt); err != nil {
 					return err
 				}
 				scanned++
@@ -464,8 +479,62 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 					if rec.Kind == "domain" && len(registered) > 0 {
 						rec.RegisteredAt = registered[strings.TrimPrefix(trust.DomainRoot(rec.LinkValue, p.DomainSuffixes), "domain:")]
 					}
+					if p.Proofs[rec.Kind].Assess != "" {
+						rec.Root = root
+						if rec.Kind == "wallet" {
+							rec.Root = walletRoot(rec.LinkValue)
+						}
+						if assessedAt >= freshAssessment && assessedAt < asOf {
+							rec.Assessed = assessed
+						}
+					}
 					batch = append(batch, rec)
 				}
+			}
+			return r.Err()
+		}); err != nil {
+			return err
+		}
+		for _, rec := range batch {
+			accounts[rec.Account] = true
+			if err := emit(rec); err != nil {
+				return err
+			}
+		}
+		if scanned < rows {
+			break
+		}
+	}
+
+	// Proof of work (version 4): one pow root per current public key, its
+	// work as the assessment, checked at its last solution.
+	// The run reads the total work so far; work after the as-of time also
+	// moves the check past it, so such a root is not counted in that run.
+	for after = 0; p.Proofs["pow"].Assess != "" && exists["standing_assessments"]; {
+		var batch []trust.Record
+		scanned := 0
+		if err := in.page(ctx, func(q allowance.Querier) error {
+			r, err := q.QueryContext(ctx, `SELECT sa.rowid,i.account,sa.root,sa.assessed,sa.created_at,sa.assessed_at,`+publicAccountSQL("i.account")+`
+ FROM standing_assessments sa JOIN identities i ON i.id=sa.agent WHERE sa.rowid>? AND sa.kind='pow' AND i.successor='' ORDER BY sa.rowid LIMIT ?`, after, rows)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			for r.Next() {
+				rec := trust.Record{Type: "proof", Kind: "pow", LinkValue: PowValue, State: "verified"}
+				var at int64
+				var public bool
+				if err = r.Scan(&after, &rec.Account, &rec.Root, &rec.Assessed, &rec.CreatedAt, &at, &public); err != nil {
+					return err
+				}
+				scanned++
+				if !public || rec.CreatedAt >= asOf {
+					continue
+				}
+				if at < asOf {
+					rec.CheckedAt = at
+				}
+				batch = append(batch, rec)
 			}
 			return r.Err()
 		}); err != nil {

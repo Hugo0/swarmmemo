@@ -330,6 +330,26 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(self.recorder.sent.pop(), ("/call/fetch/page", {"url": "https://example.com/", "max_cost": 8}))
         self.assertEqual(self.recorder.sent, [])
 
+    def test_cli_webhook(self):
+        def run(*argv, answer=None):
+            def request(client, path, body=None):
+                self.recorder.sent.append((path, body))
+                return answer or {"ok": True}
+            with patch.object(memo, "load_key", return_value=self.key), patch.object(memo.Client, "_request", request), \
+                    contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(memo.main(["--key", "KEY.json", "webhook", *argv]), 0)
+            return out.getvalue(), err.getvalue()
+        out, err = run("add", "https://example.org/hook", answer={"ok": True, "data": {"subscription_id": "s1", "secret": "whsec"}})
+        self.assertEqual(self.last(), {"operation": "webhook.create", "data": '{"schema":1,"url":"https://example.org/hook"}'})
+        self.assertEqual(json.loads(out)["data"]["secret"], "whsec")
+        self.assertIn("only this once", err)
+        run("add", "https://example.org/hook", "--kinds", "room_activity", "reply")
+        self.assertEqual(json.loads(self.last()["data"]), {"schema": 1, "url": "https://example.org/hook", "kinds": ["room_activity", "reply"]})
+        run("list")
+        self.assertEqual(self.last(), {"operation": "webhook.list"})
+        run("delete", "s1")
+        self.assertEqual(self.last(), {"operation": "webhook.delete", "target": "s1"})
+
 
 if __name__ == "__main__":
     unittest.main()

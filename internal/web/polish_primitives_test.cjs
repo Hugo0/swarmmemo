@@ -31,23 +31,29 @@ const pages=['/','/rooms','/agents','/work','/docs','/for-agents','/me','/refere
       assert.deepEqual(navTargets,[],`${label} ${path}: interactive targets are at least 24px tall`);
       assert.equal(await page.evaluate(()=>{const b=document.createElement('button');b.disabled=true;document.body.append(b);const c=getComputedStyle(b).cursor;b.remove();return c;}),'not-allowed',`${label} ${path}: disabled cursor`);
     }
-    // composer at rest: open, heading-style summary, exactly one primary (Post message);
+    // composer at rest: open, heading-style summary, exactly one primary (Post);
     // collapsed, the opener itself becomes the call to action and carries the same
-    // black primary fill as Post message, which is never shown at the same time.
+    // black primary fill as Post, which is never shown at the same time.
     await page.goto(origin+'/?sort=new',{waitUntil:'load'});
     const opener=page.locator('#compose>summary');
     const open=await opener.evaluate(e=>{const c=getComputedStyle(e);return {bg:c.backgroundColor,border:c.borderTopColor,weight:c.fontWeight};});
     assert.equal(open.bg,'rgba(0, 0, 0, 0)','open composer summary is a heading, not a button');assert.equal(open.weight,'600');
-    assert.equal(await page.locator('.primary:visible').count(),1,'exactly one primary (Post message) in the composer');
+    assert.equal(await page.locator('.primary:visible').count(),1,'exactly one primary (Post) in the composer');
     await opener.hover();assert.equal(await opener.evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)','open summary never turns grey on hover');
     await opener.click();await page.mouse.move(0,0);await page.waitForTimeout(200);
     const rest=await opener.evaluate(e=>{const c=getComputedStyle(e);return {bg:c.backgroundColor,color:c.color,border:c.borderTopWidth,h:Math.round(e.getBoundingClientRect().height)};});
-    assert.equal(rest.bg,'rgb(23, 23, 23)','collapsed opener carries the primary fill');assert.equal(rest.color,'rgb(255, 255, 255)');assert.equal(rest.border,'1px');assert.ok(rest.h>=40,'opener target 40px');
+    // Colours are OKLCH tokens, so compare against the resolved tokens and check the
+    // rendered sRGB: a near-black fill with light ink that keeps its contrast.
+    const tokens=await page.evaluate(()=>{const d=document.createElement('div');document.body.append(d);const get=v=>{d.style.backgroundColor='var('+v+')';return getComputedStyle(d).backgroundColor;};const t={fill:get('--primary-fill'),ink:get('--primary-ink'),hover:get('--primary-hover')};d.remove();return t;});
+    const contrastOf=(fg,bg)=>page.evaluate(([fg,bg])=>{const ctx=document.createElement('canvas').getContext('2d',{willReadFrequently:true});const rgb=s=>{ctx.clearRect(0,0,1,1);ctx.fillStyle='rgba(0,0,0,0)';ctx.fillStyle=s;ctx.fillRect(0,0,1,1);return [...ctx.getImageData(0,0,1,1).data];};const lum=([r,g,b])=>{const f=v=>{v/=255;return v<=.03928?v/12.92:((v+.055)/1.055)**2.4;};return .2126*f(r)+.7152*f(g)+.0722*f(b);};const a=lum(rgb(fg)),b=lum(rgb(bg));return {ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05),bgLum:b};},[fg,bg]);
+    assert.equal(rest.bg,tokens.fill,'collapsed opener carries the primary fill');assert.equal(rest.color,tokens.ink);
+    const restContrast=await contrastOf(rest.color,rest.bg);assert.ok(restContrast.bgLum<.02,'the primary fill is near-black');assert.ok(restContrast.ratio>=7,`opener text contrast ${restContrast.ratio.toFixed(2)}`);assert.equal(rest.border,'1px');assert.ok(rest.h>=40,'opener target 40px');
     const submitFill=await page.evaluate(()=>{const b=document.querySelector('#compose-form button[type=submit]');const c=getComputedStyle(b);return {bg:c.backgroundColor,color:c.color,weight:c.fontWeight};});
     assert.equal(rest.bg,submitFill.bg,'the opener matches Post message weight for weight');assert.equal(rest.color,submitFill.color);
     await opener.hover();
     const hover=await opener.evaluate(e=>{const c=getComputedStyle(e);return {bg:c.backgroundColor,color:c.color};});
-    assert.equal(hover.color,'rgb(255, 255, 255)','opener text stays on the fill on hover');assert.equal(hover.bg,'rgb(68, 68, 68)','opener hover is the primary hover fill');
+    assert.equal(hover.color,tokens.ink,'opener text stays on the fill on hover');assert.equal(hover.bg,tokens.hover,'opener hover is the primary hover fill');assert.notEqual(tokens.hover,tokens.fill,'hover shows');
+    const hoverContrast=await contrastOf(hover.color,hover.bg);assert.ok(hoverContrast.ratio>=4.5,`opener hover text contrast ${hoverContrast.ratio.toFixed(2)}`);
     assert.equal(await page.locator('.primary:visible').count(),0,'the submit primary is not shown while the composer is collapsed');
     await opener.click();await page.waitForTimeout(200);
     // destination: signposted and editable with the script

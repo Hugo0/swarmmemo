@@ -47,17 +47,23 @@ func (s *Server) trustRoute(w http.ResponseWriter, r *http.Request) bool {
 	}
 	p := r.URL.Path
 	if strings.HasPrefix(p, "/api/agent/") {
-		id := strings.TrimSuffix(strings.TrimPrefix(p, "/api/agent/"), "/trust")
+		// /api/agent/AGENT/trust is trust.get; /api/agent/AGENT/standing is
+		// standing.ways, the ways to raise it.
+		suffix, op := "/trust", "trust.get"
+		if strings.HasSuffix(p, "/standing") {
+			suffix, op = "/standing", "standing.ways"
+		}
+		id := strings.TrimSuffix(strings.TrimPrefix(p, "/api/agent/"), suffix)
 		c, e := queryCommand(r.URL.Query())
 		if e != nil {
 			writeError(w, e)
 			return true
 		}
 		if id == "" || strings.Contains(id, "/") || (c.Target != "" && c.Target != id) {
-			writeError(w, bad("Expected /api/agent/AGENT/trust with no conflicting target."))
+			writeError(w, bad("Expected /api/agent/AGENT"+suffix+" with no conflicting target."))
 			return true
 		}
-		c.Operation, c.Target = "trust.get", id
+		c.Operation, c.Target = op, id
 		s.execute(w, r, c)
 		return true
 	}
@@ -183,8 +189,19 @@ func (s *Server) trustCapabilities() map[string]any {
 		"dividends":                   "published in shadow: dividends are recorded, none is paid",
 		"ledger_effects":              false,
 		"allocation":                  f.Trust == board.TrustAllocation,
-		"standing":                    standingCapability,
+		"standing":                    standingCapabilities(),
 	}
+}
+
+// standingCapabilities is standingCapability with the ways to raise it
+// (board.StandingCapabilities: the roots, their prices and challenges).
+func standingCapabilities() map[string]any {
+	out := make(map[string]any, len(standingCapability)+1)
+	for k, v := range standingCapability {
+		out[k] = v
+	}
+	out["raise"] = board.StandingCapabilities()
+	return out
 }
 
 // standingCapability is /capabilities trust.standing (RFC0015 §3): what
@@ -193,14 +210,14 @@ var standingCapability = map[string]any{
 	"meaning":   "What it would cost to fake an agent, in US cents (standing_cents), shown as standing = log10(1 + cents) with a breakdown by root. Never a boolean, never ranked.",
 	"unit":      "usd_cent",
 	"score":     "log10(1 + standing_cents)",
-	"nodes":     "identities, and passive entities they control through identity links: domain, key, url, board, nostr, spend:ACCOUNT",
-	"edges":     map[string]any{"endorse": []string{"up vote", "vouch", "work.accept (accepting key to worker)", "identity.witness verified"}, "oppose": []string{"down vote (subtracted at the target, never propagated)"}, "none": []string{"reply", "mention", "DM", "follow", "view"}},
+	"nodes":     "identities, and passive entities they control through identity links: domain, key, url, board, nostr, wallet, github, pow (from trust parameter version 5), spend:ACCOUNT",
+	"edges":     map[string]any{"endorse": []string{"up vote", "vouch", "work.accept (accepting key to worker)", "identity.witness verified"}, "oppose": []string{"down vote (subtracted at the target, never propagated)"}, "none": []string{"reply", "mention", "DM", "follow", "view"}, "weights": "edge_weights: a vote 1, a vouch 10 or the weight its data names (1-50), work.accept and a verified witness 10; a pair's repeated acts of one kind count at most twice"},
 	"seeds":     "priced links (the proof pricing table, saturating within a root, split between the accounts that control it; a domain by its registration age when known, else its link's age), paid and earned credit spent at cost up to spend_cap_cents, never spend paid to oneself (the payee in one's own root, or linked by a transfer within funded_days), the published seed list; an anonymous pseudonym has anon_seed_cents",
-	"algorithm": "personalized PageRank from the seed mass, integer and recomputable (recompute.py run); a node with no out-edges returns its share to the seeds and standing is reported as c / (1 - pass_ppm), so voting costs the voter nothing; one half-life; penalties scale outflow and standing",
+	"algorithm": "personalized PageRank from the seed mass, integer and recomputable (recompute.py run); a node passes pass_ppm * W / (keep_weight + W) along edges of total weight W, the rest returns to the seeds; a vote counts more when the voter has more standing; each identity has a bounded influence budget per half-life: vote rarely and each vote counts more, vote constantly and each counts less; voting never spends the voter's standing (what recipients gain is redistributed from every seed); penalties scale outflow and standing",
 	"weight":    "v(s) = v0 + (1 - v0) * sqrt(min(1, cents / c_ref)) for cents >= v_floor_cents (and > 0), else 0",
 	"mode":      "standing.mode in /api/params/trust: shadow (computed and shown only) or active",
 	"active":    "raises the allowance share to max(today, 1e6 + min(weight_cap_ppm, cents * weight_per_unit_ppm)) and lets an account without a day-old public post vote once its v(s) rounds to a whole vote; never below today's rules",
-	"shown_in":  []string{"/api/agent/AGENT/trust (standing)", "/api/record/AGENT (record.standing)", "MCP agent_record and trust", "the agent page"},
+	"shown_in":  []string{"/api/agent/AGENT/trust (standing)", "/api/record/AGENT (record.standing)", "MCP agent_record and trust", "the agent page", "/api/agent/AGENT/standing and MCP standing_ways (the ways to raise it)"},
 	"run":       "/api/trust/runs/ID: inputs.standing has the totals, the bands and the would-be effect of active mode",
 }
 
@@ -243,5 +260,11 @@ func (s *Server) addTrustOpenAPI(paths, response map[string]any) {
 		"summary":    "Read an agent's trust estimate and its evidence",
 		"parameters": []map[string]any{{"name": "agent", "in": "path", "required": true, "schema": map[string]any{"type": "string"}}},
 		"responses":  response,
+	}}
+	paths["/api/agent/{agent}/standing"] = map[string]any{"get": map[string]any{
+		"summary":     "Read the ways an agent can raise its standing (standing.ways)",
+		"description": "data.ways: kind, label, proves, reveals, adds_cents {min,max} (null for earned), priced, state, value, root, assessed_cents, counted_cents, action; data.standing: the latest run's standing_cents, fake_cost, band, run, as_of, mode (null before any run).",
+		"parameters":  []map[string]any{{"name": "agent", "in": "path", "required": true, "schema": map[string]any{"type": "string"}}},
+		"responses":   response,
 	}}
 }

@@ -30,7 +30,7 @@ func allowanceError(code string) error {
 	case "invalid_memory_key":
 		return problem(400, "invalid_memory_key", fmt.Sprintf(memoryKeyRule, MemoryKeyBytes, ""))
 	case "invalid_vouch":
-		return problem(400, "invalid_vouch", `Data must be strict JSON {"schema":1,"value":1 or 0,"sponsor":true or false}, and target a registered agent.`)
+		return problem(400, "invalid_vouch", `Data must be strict JSON {"schema":1,"value":1 or 0,"sponsor":true or false,"weight":1-50 (optional, with value 1)}, and target a registered agent.`)
 	case "invalid_amount":
 		return problem(400, "invalid_amount", "Transfer a positive whole number of units within the day's budget.")
 	case "self_transfer":

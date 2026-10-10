@@ -178,10 +178,11 @@ class GoldenFixture(unittest.TestCase):
     """The Go reference's golden fixtures (internal/trust/testdata): the same
     inputs must give byte-identical output. TRUST_GOLDEN_DIR points elsewhere.
     golden is parameter version 1 (no standing); golden_standing_v2 is version
-    2 (phase 1A, frozen); golden_standing is version 3 (the simulation's
-    fixes)."""
+    2 (phase 1A, frozen); golden_standing_v3 is version 3 (the simulation's
+    fixes, frozen); golden_standing_v4 is version 4 (absolute weights,
+    frozen); golden_standing is version 5 (the assessed roots)."""
 
-    NAMES = ("golden", "golden_standing_v2", "golden_standing")
+    NAMES = ("golden", "golden_standing_v2", "golden_standing_v3", "golden_standing_v4", "golden_standing")
 
     def fixture(self, name):
         directory = golden_dir()
@@ -236,12 +237,25 @@ class Standing(unittest.TestCase):
         bad["body"]["standing"]["mode"] = "on"
         with self.assertRaises(recompute.InputError):
             recompute.read_snapshot([json.dumps(bad)])
-        # Version 3's fields are optional (omitted when zero), never required.
-        self.assertEqual(params["body"]["standing"]["rule"], 1)
+        # Versions 3 and 4's fields are optional (omitted when zero), never
+        # required; version 4's come together, only with rule 2.
+        self.assertEqual(params["body"]["standing"]["rule"], 2)
         lean = copy.deepcopy(params)
-        for k in recompute.STANDING_KEYS_V3:
+        for k in recompute.STANDING_KEYS_V3 | recompute.STANDING_KEYS_V4:
             del lean["body"]["standing"][k]
         recompute.check_params(lean["body"])
+        bad = copy.deepcopy(params)
+        del bad["body"]["standing"]["edge_weights"]
+        with self.assertRaises(recompute.InputError):
+            recompute.check_params(bad["body"])
+        bad = copy.deepcopy(params)
+        del bad["body"]["standing"]["edge_weights"]["witness"]
+        with self.assertRaises(recompute.InputError):
+            recompute.check_params(bad["body"])
+        bad = copy.deepcopy(params)
+        bad["body"]["standing"]["rule"] = 1
+        with self.assertRaises(recompute.InputError):
+            recompute.check_params(bad["body"])
         bad = copy.deepcopy(params)
         del bad["body"]["standing"]["pass_ppm"]
         with self.assertRaises(recompute.InputError):

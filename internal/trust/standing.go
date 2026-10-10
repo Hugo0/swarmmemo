@@ -34,9 +34,12 @@ import (
 //     judgement.
 //
 // Each act weighs 1, decayed by the one half-life; a pair's acts saturate
-// (s / (1 + s)) per polarity. No edge within one root (shared verified
-// domain or linked keys), none from a service account or an account whose
-// breaker is on.
+// (s / (1 + s)) per polarity. From rule 2 (version 4) each act weighs its
+// kind's absolute weight (edge_weights: a vote 1, a vouch 10 or the weight
+// its author chose, 1 to vouch_weight_max), and a pair's acts of one kind
+// saturate at twice one act (w × 2s / (1 + s)). No edge within one root
+// (shared verified domain or linked keys), none from a service account or an
+// account whose breaker is on.
 //
 // Seed mass enters only where faking costs money or effort: a priced entity
 // (the proof pricing table: min(forge, rent) × curve, saturating within the
@@ -54,6 +57,15 @@ import (
 // only lose it); from rule 1 standing is reported as c / (1 − pass_ppm), so
 // it sums to at most the seed mass / (1 − pass_ppm), and a region with no
 // seed receives only what its inbound edges carry to it.
+//
+// Rule 2 (version 4) makes weights absolute. A node whose out-edges weigh W
+// in all passes only pass × W / (K + W) along them (K = keep_weight); the
+// rest returns to the seeds with the dangling pass (rule 1 is the W = 0
+// case). One vote (W = 1, K = 100) carries 1/101 of the pass, not all of it.
+// At the fixed point c = seed + received − seed × T / S, T being what all
+// nodes pass along edges: a node keeps its own standing whether it votes or
+// not, and what recipients gain is taken from every seed in proportion. So
+// standing is reported as c itself, not rescaled.
 //
 // A liability penalty (RFC0012 trust_evidence: a public, logged finding the
 // arbiter can lift) is an oppose from the arbiter: the penalised account's
@@ -104,7 +116,22 @@ type StandingParams struct {
 	SpendCapCents int64 `json:"spend_cap_cents,omitempty"`
 	// FundedDays is how far back a transfer funds its recipient (rule 1).
 	FundedDays int64 `json:"funded_days,omitempty"`
+
+	// From parameter version 4 (rule 2, absolute weights, C151). Absent in
+	// versions 2 and 3.
+	//
+	// KeepWeight is K: a node passes pass × W / (K + W) along out-edges of
+	// total weight W, in the units of EdgeWeights.
+	KeepWeight int64 `json:"keep_weight,omitempty"`
+	// EdgeWeights is one act's weight by kind: vote, down_vote, vouch (the
+	// default when the vouch names none), work_accept and witness.
+	EdgeWeights map[string]int64 `json:"edge_weights,omitempty"`
+	// VouchWeightMax caps the weight a vouch's author may choose.
+	VouchWeightMax int64 `json:"vouch_weight_max,omitempty"`
 }
+
+// EdgeKinds are the kinds edge_weights prices (rule 2).
+var EdgeKinds = []string{"down_vote", "vote", "vouch", "witness", "work_accept"}
 
 // StandingVersion is the first trust parameter version with a standing
 // section (RFC0015 phase 1A).
@@ -114,17 +141,35 @@ const StandingVersion = 2
 // simulation's fixes (rule 1, the gated v(s), the spend cap; C148).
 const StandingFixVersion = 3
 
+// StandingWeightsVersion is the parameter version with absolute edge
+// weights and the keep weight (rule 2; C151).
+const StandingWeightsVersion = 4
+
 // Standing modes.
 const (
 	StandingShadow = "shadow"
 	StandingActive = "active"
 )
 
-// DefaultStanding is the standing section of parameter version 3, in
-// shadow: version 2's (StandingV2) with the simulation's fixes and defaults:
-// pass 0.3 over 20 steps (20 agree with 200 to a thousandth of a cent),
-// v0 only from 50 cents, spend seed capped at theta2, and rule 1.
+// DefaultStanding is the standing section of parameter version 4, in
+// shadow: version 3's (StandingV3) with absolute weights (rule 2). K = 100
+// and a vote weighs 1, so one vote carries 1/101 of the voter's pass; a
+// vouch weighs 10 by default (about ten votes), its author may choose 1 to
+// 50; work.accept and a verified witness weigh 10, a down vote 1.
 func DefaultStanding() *StandingParams {
+	st := StandingV3()
+	st.Rule = 2
+	st.KeepWeight = 100
+	st.EdgeWeights = map[string]int64{"vote": 1, "down_vote": 1, "vouch": 10, "work_accept": 10, "witness": 10}
+	st.VouchWeightMax = 50
+	return st
+}
+
+// StandingV3 is the standing section of parameter version 3: version 2's
+// (StandingV2) with the simulation's fixes and defaults: pass 0.3 over 20
+// steps (20 agree with 200 to a thousandth of a cent), v0 only from 50
+// cents, spend seed capped at theta2, and rule 1.
+func StandingV3() *StandingParams {
 	st := StandingV2()
 	st.PassPPM = 300000
 	st.Iterations = 20
@@ -166,10 +211,34 @@ func (st *StandingParams) validate(in func(string, int64, int64, int64), check f
 	in("standing.theta2_cents", st.Theta2Cents, 1, st.Theta1Cents)
 	in("standing.v0_ppm", st.V0PPM, 0, 1e6)
 	in("standing.c_ref_cents", st.CRefCents, 1, 1e9)
-	in("standing.rule", st.Rule, 0, 1)
+	in("standing.rule", st.Rule, 0, 2)
 	in("standing.v_floor_cents", st.VFloorCents, 0, 1e9)
 	in("standing.spend_cap_cents", st.SpendCapCents, 0, 1e9)
 	in("standing.funded_days", st.FundedDays, 0, 365)
+	if st.Rule < 2 {
+		check(st.KeepWeight == 0 && st.EdgeWeights == nil && st.VouchWeightMax == 0, "standing.keep_weight, edge_weights and vouch_weight_max need rule 2")
+		return
+	}
+	// Bounds keep a node's total out-weight (pairs × kinds × 1e4 × 2e6 ppm)
+	// and K × 1e6 far inside int64.
+	in("standing.keep_weight", st.KeepWeight, 1, 1e6)
+	in("standing.vouch_weight_max", st.VouchWeightMax, 1, 1e4)
+	check(len(st.EdgeWeights) == len(EdgeKinds), "standing.edge_weights names exactly %s", strings.Join(EdgeKinds, ", "))
+	for _, k := range EdgeKinds {
+		w, ok := st.EdgeWeights[k]
+		check(ok, "standing.edge_weights.%s is required", k)
+		in("standing.edge_weights."+k, w, 0, 1e4)
+	}
+	check(st.EdgeWeights["vouch"] <= st.VouchWeightMax, "standing.edge_weights.vouch must be at most vouch_weight_max")
+}
+
+// actWeight is one act's weight under rule 2: the kind's, or for a vouch the
+// weight its author chose (clamped to 1..vouch_weight_max; 0 is the default).
+func (st *StandingParams) actWeight(kind string, chosen int64) int64 {
+	if kind == "vouch" && chosen > 0 {
+		return min(chosen, st.VouchWeightMax)
+	}
+	return st.EdgeWeights[kind]
 }
 
 // Active reports whether standing is in active mode.
@@ -510,6 +579,7 @@ func computeStanding(in standingInput) standingResult {
 		src, dst, kind string
 		at             int64
 		oppose         bool
+		weight         int64 // a vouch's chosen weight (rule 2)
 	}
 	var acts []act
 	for _, r := range in.current {
@@ -518,22 +588,28 @@ func computeStanding(in standingInput) standingResult {
 		}
 		switch {
 		case (r.Kind == "vote" || r.Kind == "vouch") && r.Value == 1:
-			acts = append(acts, act{r.Voter, r.Target, r.Kind, r.CreatedAt, false})
+			acts = append(acts, act{r.Voter, r.Target, r.Kind, r.CreatedAt, false, r.Weight})
 		case r.Kind == "vote" && r.Value == -1:
-			acts = append(acts, act{r.Voter, r.Target, "down_vote", r.CreatedAt, true})
+			acts = append(acts, act{r.Voter, r.Target, "down_vote", r.CreatedAt, true, 0})
 		}
 	}
 	for _, r := range sortRecords(in.snap.Acts) {
 		if r.CreatedAt >= in.asOf || r.CreatedAt < ws || (r.Kind != "work_accept" && r.Kind != "witness") {
 			continue
 		}
-		acts = append(acts, act{r.From, r.To, r.Kind, r.CreatedAt, false})
+		acts = append(acts, act{r.From, r.To, r.Kind, r.CreatedAt, false, 0})
 	}
 	type edgeKey struct {
 		src, dst string
 		oppose   bool
 	}
+	// Rule 2 saturates per pair, polarity and kind, at the kind's weight.
+	type kindKey struct {
+		edgeKey
+		kind string
+	}
 	pairSum := map[edgeKey]int64{}
+	kindSum, kindWeight := map[kindKey]int64{}, map[kindKey]int64{}
 	for _, c := range acts {
 		if c.src == "" || c.dst == "" || c.src == c.dst || in.service[c.src] || in.service[c.dst] || in.reset[c.src] {
 			continue
@@ -546,7 +622,21 @@ func computeStanding(in standingInput) standingResult {
 			continue
 		}
 		inputs[c.kind]++
+		if st.Rule >= 2 {
+			k := kindKey{edgeKey{c.src, c.dst, c.oppose}, c.kind}
+			kindSum[k] += v
+			kindWeight[k] = max(kindWeight[k], st.actWeight(c.kind, c.weight))
+			continue
+		}
 		pairSum[edgeKey{c.src, c.dst, c.oppose}] += v
+	}
+	// A pair's weight under rule 2, in ppm of a weight unit: each kind
+	// counts w × 2s / (1 + s), so one fresh act is its weight and repeats
+	// saturate at twice it.
+	for k, s := range kindSum {
+		if w := kindWeight[k] * mulDiv(2e6, s, 1e6+s); w > 0 {
+			pairSum[k.edgeKey] += w
+		}
 	}
 
 	// Nodes: every account with a seed or an edge, plus every scored one.
@@ -586,7 +676,10 @@ func computeStanding(in standingInput) standingResult {
 	outs := make([][]out, n)
 	wsum := make([]int64, n)
 	for k, s := range pairSum {
-		w := 1e6 * s / (1e6 + s)
+		w := s // rule 2: already the pair's weight
+		if st.Rule < 2 {
+			w = 1e6 * s / (1e6 + s)
+		}
 		if w > 0 {
 			i := index[k.src]
 			outs[i] = append(outs[i], out{index[k.dst], w, k.oppose})
@@ -609,9 +702,11 @@ func computeStanding(in standingInput) standingResult {
 	// Personalized PageRank from the seed mass, in integers. Each step a
 	// node restarts with (1 − pass) of its seed and passes pass of what it
 	// holds along its out-edges; a node with no out-edges keeps it (rule 0)
-	// or returns it to the seeds (rule 1), and keeps the rounding. Penalised
-	// and oppose shares return to the seeds by seed. At the fixed point the
-	// mass of all accounts sums to the seed.
+	// or returns it to the seeds (rule 1), and keeps the rounding. Under
+	// rule 2 only pass × W / (K + W) goes along the edges and the rest
+	// returns to the seeds. Penalised and oppose shares return to the seeds
+	// by seed. At the fixed point the mass of all accounts sums to the seed.
+	keep := st.KeepWeight * 1e6
 	c := append([]int64(nil), seed...)
 	restart := make([]int64, n)
 	for i := range seed {
@@ -636,6 +731,11 @@ func computeStanding(in standingInput) standingResult {
 					next[u] += pass
 				}
 				continue
+			}
+			if st.Rule >= 2 {
+				out := mulDiv(pass, wsum[u], wsum[u]+keep)
+				back += pass - out // kept: returns to the seeds
+				pass = out
 			}
 			var sent int64
 			for _, e := range outs[u] {
@@ -702,9 +802,11 @@ func computeStanding(in standingInput) standingResult {
 	var total int64
 	for i, a := range nodes {
 		raw, opp := c[i], opposed[i]
-		if st.Rule >= 1 {
+		if st.Rule == 1 {
 			// Reported as c / (1 − pass): a node's own seed counts whole
-			// whether or not it passes anything on.
+			// whether or not it passes anything on. (Rule 2 reports c: a
+			// node's own seed returns to it whole, less its seed share of
+			// what all nodes pass.)
 			raw, opp = mulDiv(raw, 1e6, 1e6-st.PassPPM), mulDiv(opp, 1e6, 1e6-st.PassPPM)
 		}
 		cents := mulDiv(max(0, raw-opp), 1e6-pen[i], 1e6) / massPerCent

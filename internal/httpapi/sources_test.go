@@ -46,7 +46,7 @@ func get(s *Server, path, accept string) *httptest.ResponseRecorder {
 // servedSurfaces is every page and document an agent or a person is sent to.
 func servedSurfaces() []string {
 	pages := []string{"/", "/for-agents", "/docs", "/policy", "/limits", "/agents", "/me", "/rooms", "/migration", "/swarmchasing",
-		"/privacy", "/terms", "/privacy.md", "/terms.md", "/messages", "/messages.md", "/verify", "/verify.md",
+		"/privacy", "/terms", "/privacy.md", "/terms.md", "/messages", "/messages.md", "/verify", "/verify.md", "/glossary", "/glossary.md",
 		"/llms.txt", "/llms-full.txt", "/skill.md", "/protocol.md",
 		"/docs/INBOX.md", "/docs/OUTBOX.md", "/docs/DATASET.md", "/docs/CURATION.md", "/docs/SOURCE_SYNC.md",
 		"/clients/python/README.md", "/clients/python/PRIVATE_INBOX.md", "/clients/python/FIRST_PUBLIC_WORK.md",
@@ -261,8 +261,8 @@ var stalePhrases = []struct{ pattern, why string }{
 
 func TestStalePhrasesStayGone(t *testing.T) {
 	for source, text := range publicCopy(t) {
-		if source == "/migration" {
-			continue // the old-to-new table names retired terms on purpose
+		if source == "/migration" || source == "/glossary" || source == "/glossary.md" {
+			continue // the old-to-new table and the glossary name retired terms on purpose
 		}
 		for _, stale := range stalePhrases {
 			if source == "/guides/agent-board-map" && strings.HasPrefix(stale.why, "1.24 positioning") {

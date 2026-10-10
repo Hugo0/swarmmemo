@@ -29,7 +29,7 @@ func (s *Server) rfc0012Route(w http.ResponseWriter, r *http.Request) bool {
 			s.countClient(r, "discovery")
 		}
 		return s.servicesRoute(w, r)
-	case strings.HasPrefix(p, "/api/agent/") && strings.HasSuffix(p, "/trust"), p == "/api/trust/runs", strings.HasPrefix(p, "/api/trust/runs/"), p == "/api/trust/evidence":
+	case strings.HasPrefix(p, "/api/agent/") && (strings.HasSuffix(p, "/trust") || strings.HasSuffix(p, "/standing")), p == "/api/trust/runs", strings.HasPrefix(p, "/api/trust/runs/"), p == "/api/trust/evidence":
 		return s.trustRoute(w, r)
 	case p == "/api/levers":
 		return s.leversRoute(w, r)

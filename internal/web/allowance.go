@@ -731,6 +731,8 @@ type standingView struct {
 	Allowance *agentAllowance
 	Trust     *agentTrust
 	TrustOn   bool
+	// Ways are the ways to raise its standing (standing.ways, standingways.go).
+	Ways []standingWayView
 }
 
 type agentAllowance struct {
@@ -830,8 +832,11 @@ func loadStanding(execute func(board.Command) (board.Result, error), f board.Fea
 				v.Trust = agentTrustFrom(&t)
 			}
 		}
+		if res, err := execute(board.Command{Operation: "standing.ways", Target: agent}); err == nil {
+			v.Ways = standingWaysFrom(res.Data)
+		}
 	}
-	if v.Allowance == nil && v.Trust == nil && (full || !v.TrustOn) {
+	if v.Allowance == nil && v.Trust == nil && len(v.Ways) == 0 && (full || !v.TrustOn) {
 		return nil
 	}
 	return v

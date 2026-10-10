@@ -489,6 +489,17 @@ func webhookHourUsed(ctx context.Context, tx *sql.Tx, account string, now int64)
 	return used, err
 }
 
+// roomActivityClause is who hears of a room's activity: a subscription
+// whose account posted in the room, owns it or moderates it (C153: an embed
+// operator who never posted still hears of every comment). It takes the room
+// name three times; conversations notify their members instead.
+const roomActivityClause = `(EXISTS(SELECT 1 FROM events p WHERE p.room=? AND p.account=s.account)
+ OR EXISTS(SELECT 1 FROM rooms o WHERE o.name=? AND o.owner=s.account)
+ OR EXISTS(SELECT 1 FROM room_moderators rm WHERE rm.room=? AND rm.account=s.account))`
+
+// notConversationRoom keeps conversations (~name) out of a query on rooms.
+const notConversationRoom = "name NOT LIKE '~%'"
+
 // enqueueWebhooks runs inside the posting transaction: a delivery exists only if
 // the event it describes committed. It reuses the /api/updates concern rules, and
 // re-checks private-room membership so a removed member's old posts in a room
@@ -514,11 +525,11 @@ func (s *Store) enqueueWebhooks(ctx context.Context, tx *sql.Tx, eventID string,
  WHEN ` + mention + ` THEN 'mention'
  ELSE 'room_activity' END
  FROM webhook_subscriptions s WHERE s.state='active' AND s.account<>?
- AND (` + match + ` OR (? <> '' AND s.account=?) OR ` + mention + ` OR EXISTS(SELECT 1 FROM events p WHERE p.room=? AND p.account=s.account))
+ AND (` + match + ` OR (? <> '' AND s.account=?) OR ` + mention + ` OR ` + roomActivityClause + `)
  AND (?='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=? AND m.account=s.account))
  ORDER BY s.id LIMIT ?`
 	args := []any{c.ReplyTo, c.ReplyTo, recipient, recipient, string(mentions), a.account,
-		c.ReplyTo, c.ReplyTo, recipient, recipient, string(mentions), room.Name,
+		c.ReplyTo, c.ReplyTo, recipient, recipient, string(mentions), room.Name, room.Name, room.Name,
 		room.Visibility, room.Name, WebhookMaxFanout}
 	if IsConversationRoom(room.Name) {
 		// A conversation notifies its members (RFC0013 §4): every active one

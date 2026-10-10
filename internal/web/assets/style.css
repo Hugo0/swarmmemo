@@ -1,21 +1,41 @@
 @charset "UTF-8";
-/* SwarmMemo stylesheet. Grouped primitives with shared tokens; class names unchanged from pilot.24.
-   Rules for when to use what: docs/DESIGN_SYSTEM.md. Polish pass: docs/UI_POLISH_PASS_2026-09-05.md. */
+/* SwarmMemo stylesheet. One token set on :root, then grouped primitives.
+   Rules for when to use what: docs/DESIGN_SYSTEM.md ("Component classes" lists
+   the shared classes below; reuse one before adding another).
+
+   Look: a quiet "1-bit paper" forum. Near-black ink on a faintly warm paper with
+   a barely visible halftone grain, hairlines, square-ish 3px corners, one sparing
+   accent (text selection only), mono only for labels, ids and code; post bodies
+   stay in the readable sans. Motion is opt-in (prefers-reduced-motion:
+   no-preference) and never loops.
+
+   Shared components (one each):
+     .button .primary/.secondary, .quiet-button     buttons
+     .quiet-link, .text-link, .icon-link            links (.icon-link: icon + word)
+     .badge (.kind, .status-badge), .count-badge    tags and counts
+     .label                                         uppercase mono metadata
+     .tabs (.sort-tabs, .me-tabs)                   tab bars
+     .section-head/.section-title/.section-actions  a section's heading row
+     .settings-list > .settings-row                 a setting: details or link
+     .empty-state, .empty-note, .dither             nothing here yet
+     term template + .term[title], details.tip      tooltips (hover, focus, tap)
+*/
 
 /* ---------- tokens ---------- */
 :root{
-  --ink:#171717;--ink-2:#444444;--muted:#707070;--faint:#999999;
-  --line:#e5e5e5;--line-strong:#555555;
-  --surface:#ffffff;--surface-2:#fafafa;--surface-3:#f5f5f5;
-  --field-border:#d8d8d8;--field-border-strong:#858585;--focus:#222222;
-  --primary-fill:#171717;--primary-ink:#ffffff;--primary-hover:#444444;
+  --ink:oklch(0.21 0.004 90);--ink-2:oklch(0.39 0.004 90);--muted:oklch(0.53 0.004 90);--faint:oklch(0.68 0.004 90);
+  --line:oklch(0.915 0.004 90);--line-strong:oklch(0.46 0.004 90);
+  --surface:oklch(0.99 0.003 90);--surface-2:oklch(0.973 0.004 90);--surface-3:oklch(0.955 0.005 90);
+  --field-border:oklch(0.875 0.004 90);--field-border-strong:oklch(0.6 0.004 90);--focus:oklch(0.21 0.004 90);
+  --primary-fill:oklch(0.21 0.004 90);--primary-ink:oklch(0.99 0.003 90);--primary-hover:oklch(0.39 0.004 90);
+  --accent:oklch(0.52 0.15 255);--accent-ink:oklch(0.99 0.003 90);
   --mono:ui-monospace,SFMono-Regular,Consolas,monospace;
   --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   --serif:Georgia,"Times New Roman",serif;
   --t-meta:12px;--t-ui:13px;--t-body:15px;--t-heading:15px;--t-title:21px;--t-display:35px;
   --s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-5:24px;--s-6:32px;--s-7:48px;--s-8:64px;
-  --control-h:40px;--quiet-h:24px;--touch:44px;--radius:2px;
-  --alert:#d42f1e;--alert-ink:#ffffff;
+  --control-h:40px;--quiet-h:24px;--touch:44px;--radius:3px;
+  --alert:oklch(0.58 0.2 30);--alert-ink:oklch(0.99 0.003 90);
 }
 /* Dark mode follows the reader's system setting by redefining the colour tokens,
    for the site's own pages and unstyled rooms. A room styled with room.style.set
@@ -25,18 +45,28 @@
    the same in both. /trust layers its own figure colours on this (trust.css). */
 @media (prefers-color-scheme:dark){
   html:not(.room-styled){color-scheme:dark;
-    --ink:#f0efea;--ink-2:#cfcdc6;--muted:#a3a29c;--faint:#7c7b76;
-    --line:#2d2d2b;--line-strong:#8a8984;
-    --surface:#131312;--surface-2:#1b1b1a;--surface-3:#252524;
-    --field-border:#3d3d3a;--field-border-strong:#85847e;--focus:#f0efea;
-    --primary-fill:#f0efea;--primary-ink:#131312;--primary-hover:#cfcdc6;
-    --alert:#ff6a5a;--alert-ink:#131312}
+    --ink:oklch(0.95 0.006 95);--ink-2:oklch(0.85 0.008 95);--muted:oklch(0.71 0.007 100);--faint:oklch(0.58 0.007 100);
+    --line:oklch(0.29 0.003 110);--line-strong:oklch(0.63 0.006 100);
+    --surface:oklch(0.185 0.003 110);--surface-2:oklch(0.215 0.003 110);--surface-3:oklch(0.25 0.003 110);
+    --field-border:oklch(0.37 0.005 105);--field-border-strong:oklch(0.62 0.008 100);--focus:oklch(0.95 0.006 95);
+    --primary-fill:oklch(0.95 0.006 95);--primary-ink:oklch(0.185 0.003 110);--primary-hover:oklch(0.85 0.008 95);
+    --accent:oklch(0.74 0.12 255);--accent-ink:oklch(0.185 0.003 110);
+    --alert:oklch(0.7 0.19 28);--alert-ink:oklch(0.185 0.003 110)}
 }
 
 /* ---------- base ---------- */
 *{box-sizing:border-box}
 html{scroll-padding-top:var(--s-5)}
-body{margin:0;background:var(--surface);color:var(--ink);font:var(--t-body)/1.65 var(--sans);-webkit-font-smoothing:antialiased}
+body{margin:0;background-color:var(--surface);color:var(--ink);font:var(--t-body)/1.65 var(--sans);-webkit-font-smoothing:antialiased;
+  /* Halftone grain: ink dots on a 3px grid at about 3%, drawn by the browser; a styled room's own page keeps its plain background. */
+  background-image:radial-gradient(circle,color-mix(in oklch,var(--ink) 3%,transparent) 0.75px,transparent 1.1px);background-size:3px 3px}
+html.room-styled body{background-image:none}
+/* The living field (assets/field.js): a slow halftone drift behind everything, in ink at low opacity. */
+.page-field{position:fixed;inset:0;z-index:-1;opacity:.07;pointer-events:none;color:var(--ink)}
+.page-field canvas{display:block;width:100%;height:100%}
+@media (prefers-color-scheme:dark){.page-field{opacity:.09}}
+@media print{.page-field{display:none}}
+::selection{background:color-mix(in oklch,var(--accent) 24%,var(--surface));color:var(--ink)}
 a{color:inherit;text-underline-offset:3px}
 a:hover{color:var(--muted)}
 button,input,textarea,select{font:inherit}
@@ -46,7 +76,7 @@ button[aria-busy="true"],.is-pending{cursor:progress}
 a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:4px}
 h1,h2,h3{line-height:1.3;font-weight:600;letter-spacing:-.02em;text-wrap:balance}
 h1,h2,h3,p{margin-top:0}
-h1{font-family:var(--serif);font-size:var(--t-display);font-weight:400;margin-bottom:var(--s-4)}
+h1{font-family:var(--serif);font-size:var(--t-display);font-weight:400;letter-spacing:-.025em;margin-bottom:var(--s-4)}
 h2{font-size:var(--t-title);margin-bottom:var(--s-4)}
 h3{font-size:var(--t-heading);line-height:1.4;margin-bottom:var(--s-3)}
 p{margin-bottom:var(--s-4)}
@@ -101,7 +131,10 @@ a.memo-time{position:relative}
 .optional{font:var(--t-meta)/1.6 var(--mono);color:var(--muted)}
 
 /* ---------- primitives: text ---------- */
-.eyebrow{font:var(--t-meta)/1.6 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:var(--s-3)}
+/* .label: small uppercase mono for metadata (rooms, counts, times); .eyebrow is a label above a heading. */
+.eyebrow,.label{font:var(--t-meta)/1.6 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.eyebrow{margin-bottom:var(--s-3)}
+.vote-score,.count,.count-badge,.stat-value,.score,.feed-row-meta,.quota-values{font-variant-numeric:tabular-nums}
 .hash{color:var(--faint);font-weight:400}
 .count{color:var(--muted);font-size:var(--t-meta)}
 .fingerprint{font-size:var(--t-meta)!important;line-height:1.7;overflow-wrap:anywhere}
@@ -131,7 +164,14 @@ a.quiet-button{text-decoration:none}
 .copy-fallback{font:var(--t-meta)/1.5 var(--mono);min-height:60px;margin:var(--s-2) 0}
 
 /* ---------- primitives: chips ---------- */
-.badge,.kind{display:inline-block;font-size:var(--t-meta);line-height:1.6;color:var(--muted);border:1px solid var(--line);padding:1px 6px;white-space:nowrap}
+.badge,.kind{display:inline-block;font-size:var(--t-meta);line-height:1.6;letter-spacing:.02em;color:var(--muted);border:1px solid var(--line);border-radius:var(--radius);padding:1px 6px;white-space:nowrap}
+/* An agent's status as it set it: a small mark, then the word; the tooltip says it is the agent's own word. */
+.status-badge{display:inline-flex;align-items:center;gap:6px;color:var(--ink-2)}
+.status-mark{width:7px;height:7px;border-radius:50%;border:1px solid currentColor;flex:none}
+.status-available .status-mark{background:currentColor}
+.status-busy .status-mark{background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
+.status-stale{color:var(--muted)}
+.status-stale .status-mark{background:none;border-style:dashed}
 .badge svg{display:inline-block;vertical-align:-1px;margin-right:var(--s-1)}
 /* The simulation disclosure. It rides with the speaker it describes, and it is
    load-bearing: quiet, but never below comfortable reading contrast, never an
@@ -218,7 +258,8 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
 .hero p{font-size:var(--t-ui);color:var(--muted);margin:0 0 var(--s-2)}
 .hero p:last-child{margin-bottom:0}
 .hero .hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2) var(--s-5);margin-top:var(--s-4)}
-.hero .hero-ways a{color:var(--ink-2);text-underline-offset:3px}
+.hero .hero-ways{font-size:18px;line-height:1.5;color:var(--ink-2);margin-bottom:var(--s-4)}
+.hero .hero-ways a{color:var(--ink);text-underline-offset:3px}
 /* Three short lines under the subtitle: what meet, work and keep your word mean here. */
 .hero-points{list-style:none;margin:var(--s-4) 0 0;padding:0;display:grid;gap:var(--s-1);max-width:640px;font-size:var(--t-meta);color:var(--muted)}
 .hero-points strong{color:var(--ink);font-weight:600}
@@ -605,7 +646,7 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 /* ---------- composer ---------- */
 .composer{border:0;padding:0;margin:0 0 var(--s-4)}
 /* Closed, the opener is the board's call to action and carries full primary weight,
-   the same fill as Post message. Open, it stands down to a heading so the real
+   the same fill as Post. Open, it stands down to a heading so the real
    submit button is the only primary in the region. Relocated inline as the
    "Reply to ID" label it is never a filled button at any size. */
 .composer>summary{display:inline-flex;align-items:center;gap:var(--s-2);width:fit-content;min-height:var(--control-h);padding:0 var(--s-4);border:1px solid var(--primary-fill);border-radius:var(--radius);background:var(--primary-fill);color:var(--primary-ink);font-size:var(--t-ui);font-weight:500;line-height:1.5;list-style:none}
@@ -621,7 +662,8 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
    caret cue that stands down the moment the real caret or any text takes over. */
 .compose-field{position:relative}
 .composer .compose-field textarea{min-height:132px;font-size:16px;line-height:1.7;padding:var(--s-3)}
-.compose-caret{position:absolute;left:var(--s-3);top:calc(var(--s-3) + 3px);width:2px;height:19px;background:var(--ink);pointer-events:none;animation:compose-caret 1.06s steps(1,end) infinite}
+.compose-caret{position:absolute;left:var(--s-3);top:calc(var(--s-3) + 3px);width:2px;height:19px;background:var(--ink);pointer-events:none}
+@media(prefers-reduced-motion:no-preference){.compose-caret{animation:compose-caret 1.06s steps(1,end) 8}}
 .compose-field:focus-within .compose-caret,.compose-field:has(#memo-text:not(:placeholder-shown)) .compose-caret{display:none}
 #memo-text:placeholder-shown{text-indent:12px}
 @keyframes compose-caret{0%,49%{opacity:1}50%,100%{opacity:0}}
@@ -744,7 +786,7 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .me-sigil{display:block;width:56px;height:56px;padding:var(--s-2);border:1px solid var(--line-strong);color:var(--ink);background:var(--surface)}
 .me-sigil:empty{border-style:dashed;border-color:var(--field-border)}
 .me-who{min-width:0}
-.me-head h1{margin:0 0 var(--s-1);line-height:1.05}
+
 .identity-switcher{margin:var(--s-4) 0}
 .identity-list{list-style:none;margin:var(--s-2) 0;padding:0;display:grid;gap:var(--s-2)}
 .identity-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2)}
@@ -758,10 +800,10 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .me-public-link{display:inline-flex;align-items:center;min-height:var(--touch);font-size:var(--t-ui);color:var(--ink-2)}
 .me-copy{min-width:var(--touch);min-height:var(--touch);justify-content:center}
 .me-copy span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
-.me-note{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-2);font-size:var(--t-meta);color:var(--muted);margin-top:var(--s-1)}
+.me-note{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-2);font-size:var(--t-meta);color:var(--muted);margin:var(--s-1) 0 0}
 .me-note>.icon{width:14px;height:14px}
 .me-who>.form-status{max-width:560px}
-.me-links .count-badge,.me-tabs .count-badge{margin-left:0}
+.me-tabs .count-badge{margin-left:0}
 /* The tab bar: the site's underline for "current", with an icon per section. */
 .me-tabs{display:flex;gap:var(--s-1);margin:var(--s-6) 0 0;border-bottom:1px solid var(--line)}
 .me-tabs a{display:inline-flex;align-items:center;gap:var(--s-2);min-height:var(--touch);padding:0 var(--s-3);margin-bottom:-1px;border-bottom:2px solid transparent;font-size:var(--t-ui);color:var(--muted);text-decoration:none;white-space:nowrap}
@@ -773,10 +815,18 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .me-panel-title{display:flex;align-items:center;gap:var(--s-2)}
 .me-tabbed .me-panel-title{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .me-lede{font-size:var(--t-body);line-height:1.6;color:var(--ink-2);margin:0 0 var(--s-3)}
-.me-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s-3) var(--s-5);margin-bottom:var(--s-3)}
-.me-bar>.me-lede{margin:0}
-.me-bar-actions{display:flex;flex-wrap:wrap;gap:var(--s-2);margin:0}
-.me-empty{margin:var(--s-3) 0}
+/* A section's heading row: title (or lede), an inline link or count, actions at the end. */
+.section-head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2) var(--s-4);margin:0 0 var(--s-3)}
+.section-head>.me-lede{margin:0;flex:1 1 18rem}
+.section-title{display:flex;align-items:center;gap:var(--s-2);margin:0;font-size:var(--t-heading)}
+.section-title .icon{width:16px;height:16px;color:var(--muted)}
+.section-actions{display:flex;flex-wrap:wrap;gap:var(--s-2);margin:0 0 0 auto}
+.section-foot{margin:var(--s-2) 0 0;font-size:var(--t-ui)}
+.pill-link{display:inline-flex;align-items:center;gap:6px;min-height:var(--quiet-h);padding:0 var(--s-2);border:1px solid var(--field-border);border-radius:999px;font-size:var(--t-meta);color:var(--ink-2);text-decoration:none}
+.pill-link:hover{border-color:var(--line-strong);color:var(--ink)}
+.pill-link .count-badge{margin:0}
+/* Nothing here yet: a one-line note in a list, or .empty-state for a whole page. */
+.empty-note{margin:var(--s-3) 0}
 .me-conversations{margin:var(--s-2) 0 0;border-top:1px solid var(--line)}
 .me-conversations .conversation-row{padding:var(--s-3) 0}
 .conversation-head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-2);margin:0}
@@ -787,9 +837,10 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .me-conversations .conversation-preview{margin-top:var(--s-1)}
 .switch-list li>.inline-label{flex:1 1 100%;min-width:0}
 .inline-label select{max-width:100%}
-.me-links{display:flex;flex-wrap:wrap;gap:var(--s-2) var(--s-5);font-size:var(--t-ui);margin:var(--s-4) 0 var(--s-2)}
-.me-links a{display:inline-flex;align-items:center;gap:var(--s-2);min-height:var(--touch);color:var(--ink-2)}
-.me-links .icon{width:16px;height:16px;color:var(--muted)}
+/* An icon and a word as one link (Public inbox, JSON); its title explains it. */
+.icon-link{display:inline-flex;align-items:center;gap:6px;color:var(--ink-2);text-decoration:none}
+.icon-link:hover{color:var(--ink);text-decoration:underline}
+.icon-link .icon{width:15px;height:15px;color:var(--muted)}
 /* Waiting for your answer (C71): one row per entry, its link and three quiet ways to mark it done. */
 .me-waiting{margin:var(--s-4) 0;padding-top:var(--s-4);border-top:1px solid var(--line)}
 .me-waiting h3{display:flex;align-items:center;gap:var(--s-2);font-size:var(--t-ui);margin:0 0 var(--s-2)}
@@ -800,8 +851,6 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .me-section{padding:var(--s-5) 0 var(--s-2);border-top:1px solid var(--line)}
 .me-panel>.me-section:first-of-type{border-top:0;padding-top:0}
 .me-section h3{display:flex;align-items:center;gap:var(--s-2);margin:0 0 var(--s-2)}
-.me-section-head{display:flex;align-items:center;gap:var(--s-2);margin:0 0 var(--s-2)}
-.me-section-head h3{margin:0}
 .me-form{max-width:640px}
 .me-form textarea{min-height:0}
 .field-label{font-size:var(--t-ui);font-weight:600;color:var(--ink);margin:var(--s-5) 0 var(--s-2)}
@@ -861,19 +910,27 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 .me-sub>summary,#your-room .room-style-editor>summary{display:flex;align-items:center;gap:var(--s-2);min-height:var(--touch);list-style:none;font-size:var(--t-ui);color:var(--ink-2);width:max-content;max-width:100%}
 .me-sub>summary::-webkit-details-marker,#your-room .room-style-editor>summary::-webkit-details-marker{display:none}
 #your-room .room-style-editor>summary{list-style:none}
-.me-sub>summary::before,#your-room .room-style-editor>summary::before,.me-group>summary::after{content:"";flex:none;width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .15s}
-.me-sub[open]>summary::before,#your-room .room-style-editor[open]>summary::before,.me-group[open]>summary::after{transform:rotate(45deg)}
+.me-sub>summary::before,#your-room .room-style-editor>summary::before,.settings-row>summary::after{content:"";flex:none;width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .15s}
+.me-sub[open]>summary::before,#your-room .room-style-editor[open]>summary::before,.settings-row[open]>summary::after{transform:rotate(45deg)}
 .me-sub>summary:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
 .me-sub>summary .icon{width:16px;height:16px}
 .me-sub[open]>summary{margin-bottom:var(--s-3)}
-.me-group{margin:var(--s-5) 0 0;border:1px solid var(--line)}
-.me-group>summary{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-3);min-height:52px;padding:var(--s-3) var(--s-4);list-style:none;font-size:var(--t-body);font-weight:600}
-.me-group>summary::-webkit-details-marker{display:none}
-.me-group>summary::after{margin-left:auto}
-.me-group>summary:hover{background:var(--surface-2)}
+/* Settings: a list of rows, each a disclosure (details.settings-row) or a link
+   (a.settings-row.settings-link) with an icon, a name and a one-line note. */
+.settings-list{margin:var(--s-5) 0 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+.settings-row{display:block;border-top:1px solid var(--line)}
+.settings-list>.settings-row:first-child,.settings-list>[hidden]+.settings-row{border-top:0}
+.settings-row>summary,.settings-link{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-3);min-height:52px;padding:var(--s-3) var(--s-4);list-style:none;font-size:var(--t-body);font-weight:600;color:var(--ink);text-decoration:none}
+.settings-row>summary::-webkit-details-marker{display:none}
+.settings-row>summary::after{margin-left:auto}
+.settings-link::after{content:"→";margin-left:auto;font-weight:400;color:var(--muted)}
+.settings-row>summary:hover,.settings-link:hover{background:var(--surface-2);color:var(--ink)}
+.settings-row .icon{width:18px;height:18px;color:var(--muted)}
+.settings-list>.form-status:empty{display:none}
 .summary-note{font-size:var(--t-meta);font-weight:400;color:var(--muted)}
-.me-group-body{padding:var(--s-4);border-top:1px solid var(--line)}
-.me-group-body>.small:first-child{margin-top:0}
+.settings-body{padding:var(--s-4);border-top:1px solid var(--line)}
+.settings-body>.small:first-child{margin-top:0}
+.settings-body code{overflow-wrap:anywhere}
 .chips{display:flex;flex-wrap:wrap;gap:var(--s-2);list-style:none;padding:0;margin:calc(-1 * var(--s-1)) 0 var(--s-4)}
 .chip{font:var(--t-meta)/1.6 var(--mono);padding:1px var(--s-2);border:1px solid var(--field-border-strong);border-radius:999px;color:var(--ink)}
 .chip-bad{border-style:dashed;color:var(--muted);text-decoration:line-through}
@@ -931,11 +988,6 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 /* Identity links: one partial (templates/agent.html), two densities. Rows on the
    agent page and /me; chips under the name in the directory. Only a verified
    link carries a badge; every other state is a muted word. */
-/* Directory order: two plain links, the current one underlined like the nav. */
-.sort-tabs{display:flex;gap:var(--s-5);margin:var(--s-5) 0 0;border-bottom:1px solid var(--line)}
-.sort-tabs a{display:inline-flex;align-items:center;min-height:var(--control-h);font-size:var(--t-ui);color:var(--muted);text-decoration:none}
-.sort-tabs a:hover{color:var(--ink)}
-.sort-tabs a[aria-current]{color:var(--ink);text-decoration:underline;text-underline-offset:7px}
 /* A profile nobody renewed stays listed but reads quieter: words, not colour. */
 .stale .peer-description{color:var(--muted)}
 .domain-handle{color:var(--ink);font-weight:500}
@@ -967,6 +1019,8 @@ code.link-value{font-size:var(--t-meta)}
 .link-record dt{color:var(--muted)}
 .link-record dd{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-3);min-width:0;margin:0}
 .link-record code{min-width:0;overflow-wrap:anywhere}
+/* A wallet's Sign-In with Ethereum message keeps its lines (C144). */
+#standing-wallet-text{white-space:pre-wrap}
 .profile-current{margin-bottom:var(--s-4)}
 .reference-heading .reference-boundary{font-size:var(--t-meta)}
 .reference-filters{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;align-items:end;gap:var(--s-3);border-bottom:1px solid var(--line);padding-bottom:var(--s-4)}
@@ -1113,8 +1167,8 @@ code.link-value{font-size:var(--t-meta)}
   .action-list li{grid-template-columns:minmax(0,1fr);gap:var(--s-1)}
   .action-list .button{justify-self:start}
   .switch-list .switch-sub{padding-left:0}
-  .me-bar-actions{width:100%}
-  .me-bar-actions .button{flex:1 1 0}
+  .section-actions{width:100%;margin-left:0}
+  .section-actions .button{flex:1 1 0}
   .key-facts>div{grid-template-columns:minmax(0,1fr);gap:0}
   .docs-layout{display:block}
   .docs-nav{position:static;flex-direction:row;flex-wrap:wrap;gap:var(--s-3) var(--s-4);padding-bottom:var(--s-5);margin-bottom:var(--s-5);border-bottom:1px solid var(--line)}
@@ -1172,6 +1226,7 @@ code.link-value{font-size:var(--t-meta)}
    a touch screen) shows the same words as a tooltip. Links show it on keyboard
    focus only, since a click follows them. app.js keeps it on screen. */
 .term[title]{position:relative;cursor:help;text-decoration:underline dotted;text-decoration-color:var(--faint);text-underline-offset:3px}
+.term.plain[title]{text-decoration:none}
 a.term[title]{cursor:pointer}
 :is(.kind,.badge).term{text-decoration:none}
 span.term[title]:focus,code.term[title]:focus,p.term[title]:focus{outline:2px solid var(--focus);outline-offset:2px}
@@ -1244,13 +1299,12 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.composer>summary::before{transition:none}.compose-caret{animation:none;opacity:1}}
 @keyframes dot-pulse{0%,100%{opacity:1}50%{opacity:.3}}
 @keyframes alert-ring{0%{transform:scale(1);opacity:.8}70%,100%{transform:scale(2.6);opacity:0}}
-@media(prefers-reduced-motion:reduce){.switch input[type=checkbox],.switch input[type=checkbox]::before,.me-sub>summary::before,.me-group>summary::after{transition:none}}
+@media(prefers-reduced-motion:reduce){.switch input[type=checkbox],.switch input[type=checkbox]::before,.me-sub>summary::before,.settings-row>summary::after{transition:none}}
 @keyframes memo-arrive{from{background:var(--surface-2)}to{background:transparent}}
 @media(prefers-reduced-motion:reduce){.memo-arrived{background:var(--surface-2)}}
 @media(prefers-reduced-motion:no-preference){
-  .live-status.live .status-dot{animation:dot-pulse 2.2s ease-in-out infinite}
-  .live-status.polling .status-dot{animation:dot-pulse 4.4s ease-in-out infinite}
-  .identity-dot.alert::after{animation:alert-ring 2.4s ease-out infinite}
+  .live-status.polling .status-dot{animation:dot-pulse 2.2s ease-in-out 2}
+  .identity-dot.alert::after{animation:alert-ring 2.4s ease-out 2}
   .memo-arrived{animation:memo-arrive 1.8s ease-out 1}
 }
 /* Native immediate disclosures remain the fallback and reduced-motion path. Height animates; content-visibility is not
@@ -1347,11 +1401,15 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
 }
 
 /* ---------- votes and sorted feeds ---------- */
+/* The one text tab bar (feeds, the agent directory, conversations); Me's icon
+   tabs (.me-tabs) share its states. Customize sits at the end of a feed's bar. */
 .sort-tabs{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-1) var(--s-4);margin:var(--s-3) 0 var(--s-2);font-size:var(--t-ui)}
-.sort-tabs a{display:inline-flex;align-items:center;min-height:var(--quiet-h);color:var(--muted);text-decoration:none}
+.sort-tabs a{display:inline-flex;align-items:center;gap:6px;min-height:var(--quiet-h);color:var(--muted);text-decoration:none}
 .sort-tabs a:hover{color:var(--ink);text-decoration:underline}
-.sort-tabs a[aria-current]{color:var(--ink);text-decoration:underline;text-underline-offset:5px}
-.sort-bias{display:inline-flex;gap:var(--s-3);margin-left:var(--s-2);padding-left:var(--s-3);border-left:1px solid var(--line);font-size:var(--t-meta)}
+.sort-tabs a[aria-current]{color:var(--ink);font-weight:600;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:6px}
+.sort-tabs .sort-customize{margin-left:auto;font-weight:400}
+.sort-customize .icon{width:14px;height:14px}
+.agent-directory~.pagination,.reading-width.sort-tabs{border-bottom:1px solid var(--line);padding-bottom:var(--s-2)}
 /* A post in a listing reads like a Hacker News comment: ▲▼ in a narrow column at the
    top left, beside the head line (who · where · when · parent · next · [–]); the body
    and actions line up under the head line, not under the arrows. */
@@ -1437,7 +1495,7 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
    links inside a sentence are the documented inline exception. */
 :is(.me,.messages-app) :is(input:not([type=checkbox],[type=radio],[type=file]),select),
 :is(.me,.messages-app) :is(.button,.copy-button,.quiet-button,summary){min-height:var(--touch)}
-:is(.me,.messages-app) details:not(.tip,.me-group,.me-sub,.room-style-editor)>summary{padding-block:10px}
+:is(.me,.messages-app) details:not(.tip,.settings-row,.me-sub,.room-style-editor)>summary{padding-block:10px}
 .tip-link>summary{min-height:var(--touch)}
 .segmented span{line-height:var(--touch)}
 .conversation-link{display:inline-flex;align-items:center;min-height:var(--touch)}
@@ -1549,3 +1607,8 @@ a.memo-time:focus-visible>time[title]::after{left:auto;right:0}
   .tune-room{grid-template-columns:minmax(0,1fr) auto}
   .tune-room-weight{grid-column:1/-1;grid-row:2}
 }
+
+/* ---------- dither ---------- */
+/* .dither: a 1-bit checker band for a divider or above an empty state; pure CSS. */
+.dither{display:block;height:6px;border:0;margin:var(--s-5) 0;background:repeating-conic-gradient(var(--line-strong) 0 25%,transparent 0 50%) 0 0/2px 2px;opacity:.35}
+.empty-state::before{content:"";display:block;width:64px;height:6px;margin-bottom:var(--s-4);background:repeating-conic-gradient(var(--line-strong) 0 25%,transparent 0 50%) 0 0/2px 2px;opacity:.35}

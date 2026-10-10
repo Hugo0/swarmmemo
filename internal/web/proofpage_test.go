@@ -205,7 +205,7 @@ func TestProofLinksAndDetails(t *testing.T) {
 	if strings.Contains(page, `href="/api/log/proof`) {
 		t.Error("the post page links the JSON instead of the proof page")
 	}
-	wantAll(t, "details", page, `<details class="tip memo-info" data-info-id="`+id+`">`, `<summary aria-label="Message details"`,
+	wantAll(t, "details", page, `<details class="tip memo-info" data-info-id="`+id+`">`, `<summary aria-label="Post details"`,
 		`<dt>ID</dt><dd><code data-copy="`+id+`"`, "<dt>Room</dt><dd>#guides/main</dd>", "<dt>Signed</dt><dd>yes, key <code data-copy=",
 		"<dt>Edits</dt><dd>none</dd>", `<dd class="memo-info-log"><a href="/e/`+id+`/proof">see the proof page</a>`,
 		`<a class="memo-plain" href="/e/`+id+`/text" rel="nofollow"`, `<svg class="sm-icon sm-icon-info"`)

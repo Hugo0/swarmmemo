@@ -136,7 +136,12 @@ const {resolve}=require('node:path');
     const chrome=['body','.site-nav a','#e-'+signedID,'#e-'+signedID+' .memo-text','#e-'+signedID+' .author','#e-'+signedID+' .link-host','#e-'+signedID+' .memo-text code'];
     const light=await look('light','/r/'+room,chrome),dark=await look('dark','/r/'+room,chrome);
     assert.notEqual(light.styles.body,dark.styles.body,'the site has a dark mode');
-    assert.match(dark.styles.body,/rgb\(19, 19, 18\)$|rgb\(19, 19, 18\) \|/,'dark surface');
+    // Tokens are OKLCH, so computed colours serialize as oklch(); the dark
+    // surface is the near-black rgb(19, 19, 18) once rendered to sRGB.
+    const surface=await (async()=>{const {context,page}=await open({colorScheme:'dark'});await page.goto(origin+'/r/'+room);
+      const c=await page.evaluate(()=>{const x=document.createElement('canvas').getContext('2d');x.fillStyle=getComputedStyle(document.body).backgroundColor;x.fillRect(0,0,1,1);return [...x.getImageData(0,0,1,1).data];});
+      await context.close();return c;})();
+    assert.ok(surface[3]===255&&[19,19,18].every((v,i)=>Math.abs(surface[i]-v)<=3),'dark surface '+surface.join(','));
     // A styled room renders identically in both.
     const styledSelectors=['html','body','.site-nav a','#e-'+styledID,'#e-'+styledID+' .memo-text','#e-'+styledID+' .author','#e-'+styledID+' .link-host','#e-'+styledID+' pre','#room-style-strip'];
     const styledLight=await look('light','/r/'+styled,styledSelectors),styledDark=await look('dark','/r/'+styled,styledSelectors);
@@ -148,7 +153,9 @@ const {resolve}=require('node:path');
       const {context,page}=await open({colorScheme:scheme});
       await page.goto(origin+path);await page.waitForFunction(()=>document.readyState==='complete');
       const ratios=await page.evaluate(selectors=>{
-        const rgb=s=>(s.match(/[\d.]+/g)||[]).map(Number);
+        // Canvas renders any CSS colour (oklch tokens included) to sRGB bytes.
+        const ctx=document.createElement('canvas').getContext('2d',{willReadFrequently:true});
+        const rgb=s=>{ctx.clearRect(0,0,1,1);ctx.fillStyle='rgba(0,0,0,0)';ctx.fillStyle=s;ctx.fillRect(0,0,1,1);const d=[...ctx.getImageData(0,0,1,1).data];return [d[0],d[1],d[2],d[3]/255];};
         const lum=([r,g,b])=>{const f=v=>{v/=255;return v<=.03928?v/12.92:((v+.055)/1.055)**2.4;};return .2126*f(r)+.7152*f(g)+.0722*f(b);};
         const bg=e=>{for(;e;e=e.parentElement){const c=rgb(getComputedStyle(e).backgroundColor);if(c.length<4||c[3]>0)return c;}return [255,255,255];};
         return Object.fromEntries(selectors.map(s=>{const e=document.querySelector(s);if(!e)return [s,0];const a=lum(rgb(getComputedStyle(e).color)),b=lum(bg(e));return [s,(Math.max(a,b)+.05)/(Math.min(a,b)+.05)];}));

@@ -48,7 +48,7 @@ func TestHomePreviewRetainsOneFullBodyAndNativeConversationLink(t *testing.T) {
 			t.Fatal("preview must escape untrusted content")
 		}
 		if path == "/" || path == "/r/lobby" {
-			for _, want := range []string{`class="read-conversation" href="/e/density-message">In thread</a>`, `aria-label="Report message" title="Report message"`} {
+			for _, want := range []string{`class="read-conversation" href="/e/density-message">In thread</a>`, `aria-label="Report post" title="Report post"`} {
 				if !strings.Contains(body, want) {
 					t.Errorf("missing native preview context %s", want)
 				}

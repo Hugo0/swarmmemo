@@ -46,7 +46,7 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     assert.equal(await page.locator('.compose-caret').isVisible(),false,'a non-empty field has no cue');
     await page.locator('#memo-text').fill('');
     const box=await summary.boundingBox(),fold=page.viewportSize().height; assert.ok(box.y+box.height<=fold && box.height>=24,'the composer opens above the fold: '+JSON.stringify(box));
-    assert.equal(await page.getByRole('button',{name:'Search public messages',exact:true}).locator('svg').getAttribute('aria-hidden'),'true');
+    assert.equal(await page.getByRole('button',{name:'Search posts',exact:true}).locator('svg').getAttribute('aria-hidden'),'true');
     assert.equal(await page.locator('.post-handoff').count(),0);
     if(process.env.SWARMMEMO_SCREENSHOT_DIR){
       await page.screenshot({path:process.env.SWARMMEMO_SCREENSHOT_DIR+'/composer-desktop-before.png',fullPage:true});
@@ -94,8 +94,8 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     assert.equal(await searchPage.locator('.sidebar .search-panel #search').count(),1,'search lives in the sidebar');
     assert.equal(await searchPage.locator('.feed-column .search-form').count(),0,'search is not part of the feed column');
     assert.ok(await searchPage.evaluate(()=>document.getElementById('search').getBoundingClientRect().left>document.getElementById('feed').getBoundingClientRect().right),'search sits beside the feed, not above it');
-    await searchPage.getByRole('searchbox',{name:'Search public messages'}).fill('café 雪');
-    await searchPage.getByRole('button',{name:'Search public messages',exact:true}).click();
+    await searchPage.getByRole('searchbox',{name:'Search posts'}).fill('café 雪');
+    await searchPage.getByRole('button',{name:'Search posts',exact:true}).click();
     assert.equal(new URL(searchPage.url()).searchParams.get('q'),'café 雪');
     assert.match(await searchPage.locator('#feed').textContent(),/café 雪/);
     assert.match(await searchPage.locator('.search-active').textContent(),/Showing matches for/);
@@ -106,8 +106,8 @@ assert.ok(origin && /^http:\/\/127\.0\.0\.1:\d+$/.test(origin), 'explicit dispos
     const plain=await browser.newContext({javaScriptEnabled:false,viewport:{width:320,height:850}}),plainSearch=await plain.newPage();
     await plainSearch.goto(origin+'/?sort=new');
     assert.equal(await plainSearch.locator('#search').isVisible(),true,'search is reachable without scripts at 320px');
-    await plainSearch.getByRole('searchbox',{name:'Search public messages'}).fill('café 雪');
-    await plainSearch.getByRole('button',{name:'Search public messages',exact:true}).click();
+    await plainSearch.getByRole('searchbox',{name:'Search posts'}).fill('café 雪');
+    await plainSearch.getByRole('button',{name:'Search posts',exact:true}).click();
     await plainSearch.waitForURL(/[?&]q=/);
     assert.equal(new URL(plainSearch.url()).searchParams.get('q'),'café 雪','no-JS search keeps its route');
     await plain.close();await searchPage.close();

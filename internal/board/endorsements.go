@@ -55,6 +55,30 @@ CREATE TABLE IF NOT EXISTS blocked_prefixes (
 // VouchCost is the posting allowance a vouch spends, in bytes (§5.2).
 const VouchCost = 256
 
+// VouchWeightMax is the largest weight a vouch may name (data "weight",
+// optional, 1..VouchWeightMax; absent is the trust parameters' default). The
+// trust run caps it again at its parameters' vouch_weight_max.
+const VouchWeightMax = 50
+
+// vouchWeightOf reads a vouch record's weight from its signed payload: the
+// signed data is the one source, so the weight needs no column of its own.
+// A payload that does not parse has none (0).
+func vouchWeightOf(payload string) int {
+	var envelope struct {
+		Command struct {
+			Data string `json:"data"`
+		} `json:"command"`
+	}
+	if json.Unmarshal([]byte(payload), &envelope) != nil {
+		return 0
+	}
+	_, _, weight, err := parseVouchData(envelope.Command.Data)
+	if err != nil {
+		return 0
+	}
+	return weight
+}
+
 // legacyScanRows bounds the votes rows one legacy export page reads, so a
 // page costs the same whatever share of votes is already recorded.
 const legacyScanRows = 5000
@@ -106,30 +130,37 @@ func (s *Store) recordVote(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 }
 
 // parseVouchData is the strict vouch data parser: exactly one JSON object
-// {"schema":1,"value":1|0,"sponsor":true|false}, sponsor optional (false) and
-// only with value 1, nothing else and nothing after it.
-func parseVouchData(data string) (value int, sponsor bool, err error) {
+// {"schema":1,"value":1|0,"sponsor":true|false,"weight":1..50}, sponsor
+// optional (false) and only with value 1, weight optional (0: the default)
+// and only with value 1, nothing else and nothing after it.
+func parseVouchData(data string) (value int, sponsor bool, weight int, err error) {
 	invalid := allowanceError("invalid_vouch")
 	var body struct {
 		Schema  *int  `json:"schema"`
 		Value   *int  `json:"value"`
 		Sponsor *bool `json:"sponsor"`
+		Weight  *int  `json:"weight"`
 	}
 	dec := json.NewDecoder(strings.NewReader(data))
 	dec.DisallowUnknownFields()
 	if data == "" || dec.Decode(&body) != nil || body.Schema == nil || *body.Schema != 1 || body.Value == nil || (*body.Value != 0 && *body.Value != 1) {
-		return 0, false, invalid
+		return 0, false, 0, invalid
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return 0, false, invalid
+		return 0, false, 0, invalid
 	}
 	if body.Sponsor != nil {
 		sponsor = *body.Sponsor
 	}
 	if sponsor && *body.Value != 1 {
-		return 0, false, invalid
+		return 0, false, 0, invalid
 	}
-	return *body.Value, sponsor, nil
+	if body.Weight != nil {
+		if weight = *body.Weight; weight < 1 || weight > VouchWeightMax || *body.Value != 1 {
+			return 0, false, 0, invalid
+		}
+	}
+	return *body.Value, sponsor, weight, nil
 }
 
 // vouch is the vouch operation (§5.2): a public, liability-bearing
@@ -141,7 +172,7 @@ func (s *Store) vouch(ctx context.Context, tx *sql.Tx, c Command, a actor, now i
 	if !s.config.Features.VoteRecords {
 		return Result{}, allowanceError("service_unavailable")
 	}
-	value, sponsor, err := parseVouchData(c.Data)
+	value, sponsor, weight, err := parseVouchData(c.Data)
 	if err != nil {
 		return Result{}, err
 	}
@@ -190,7 +221,11 @@ func (s *Store) vouch(ctx context.Context, tx *sql.Tx, c Command, a actor, now i
 	if _, err = tx.ExecContext(ctx, "INSERT INTO vouches(voter_account,target_account,value,sponsor,record_seq,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(voter_account,target_account) DO UPDATE SET value=excluded.value,sponsor=excluded.sponsor,record_seq=excluded.record_seq,created_at=excluded.created_at", a.account, target, value, sponsor, seq, now); err != nil {
 		return Result{}, err
 	}
-	return Result{Data: map[string]any{"target": target, "value": value, "sponsor": sponsor, "seq": seq, "created_at": now, "cost_bytes": VouchCost, "export": "/v1/export?stream=endorsements"}}, nil
+	data := map[string]any{"target": target, "value": value, "sponsor": sponsor, "seq": seq, "created_at": now, "cost_bytes": VouchCost, "export": "/v1/export?stream=endorsements"}
+	if weight > 0 {
+		data["weight"] = weight
+	}
+	return Result{Data: data}, nil
 }
 
 // sameRoot reports whether two accounts share a saturation root other than
@@ -231,14 +266,16 @@ func (s *Store) sameRoot(ctx context.Context, tx *sql.Tx, voter, target string, 
 // the message the voter signed. A legacy_vote has seq 0, no key, payload or
 // signature, and weighs 0; so does a record whose Signature is null.
 type EndorsementRecord struct {
-	Type          string  `json:"type"` // "vote", "vouch", "legacy_vote"
-	Seq           int64   `json:"seq"`
-	MessageID     string  `json:"message_id,omitempty"`
-	Target        string  `json:"target,omitempty"`
-	Voter         string  `json:"voter"`
-	PublicKey     string  `json:"public_key"`
-	Value         int     `json:"value"`
-	Sponsor       *bool   `json:"sponsor,omitempty"`
+	Type      string `json:"type"` // "vote", "vouch", "legacy_vote"
+	Seq       int64  `json:"seq"`
+	MessageID string `json:"message_id,omitempty"`
+	Target    string `json:"target,omitempty"`
+	Voter     string `json:"voter"`
+	PublicKey string `json:"public_key"`
+	Value     int    `json:"value"`
+	Sponsor   *bool  `json:"sponsor,omitempty"`
+	// Weight is a vouch's chosen weight, when its data named one.
+	Weight        int     `json:"weight,omitempty"`
 	CreatedAt     int64   `json:"created_at"`
 	SignedPayload string  `json:"signed_payload"`
 	Signature     *string `json:"signature"`
@@ -261,6 +298,7 @@ func scanEndorsement(rows *sql.Rows) (EndorsementRecord, error) {
 	if kind == "vouch" {
 		r.Sponsor = &sponsor
 		r.MessageID = ""
+		r.Weight = vouchWeightOf(r.SignedPayload)
 	}
 	if class == "signed" {
 		r.Signature = &signature
@@ -472,8 +510,8 @@ func VerifyEndorsementRecord(serviceID string, r EndorsementRecord) error {
 			return errors.New("signed vote value differs from the record's")
 		}
 	case "vouch":
-		value, sponsor, err := parseVouchData(c.Data)
-		if err != nil || value != r.Value || r.Sponsor == nil || sponsor != *r.Sponsor {
+		value, sponsor, weight, err := parseVouchData(c.Data)
+		if err != nil || value != r.Value || r.Sponsor == nil || sponsor != *r.Sponsor || weight != r.Weight {
 			return errors.New("signed vouch data differs from the record's")
 		}
 		if !fingerprintRE.MatchString(c.Target) {

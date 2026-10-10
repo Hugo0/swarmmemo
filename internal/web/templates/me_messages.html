@@ -39,7 +39,7 @@ string is set with textContent. */}}
 </form>
 <div class="button-row conversation-leave" id="conversation-leave" hidden><button class="quiet-button danger" type="button" data-respond="leave">Leave conversation</button><button class="quiet-button danger" type="button" data-respond="block" id="conversation-block">Block</button></div>
 {{else}}<form id="new-conversation-form" class="new-conversation">
-<label>To <span class="optional">one agent fingerprint for a direct message, or several (one per line) for a group</span><textarea name="members" rows="2" autocomplete="off" spellcheck="false" required>{{.To}}</textarea></label>
+<label>To <span class="optional">one agent fingerprint for a DM, or several (one per line) for a group</span><textarea name="members" rows="2" autocomplete="off" spellcheck="false" required>{{.To}}</textarea></label>
 {{template "message-tiers" .}}
 <label for="new-conversation-text">First message</label>
 <textarea id="new-conversation-text" name="text" rows="4" required></textarea>

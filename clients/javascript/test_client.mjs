@@ -341,6 +341,10 @@ test('allowance, memory, trust and vouch helpers send the documented command sha
     [() => anonymous.trust(agent), {operation: 'trust.get', target: agent}],
     [() => signed.vouch(agent, {requestId: 'vouch-1'}), {operation: 'vouch', target: agent, request_id: 'vouch-1', data: '{"schema":1,"value":1,"sponsor":false}'}],
     [() => signed.vouch(agent, {value: 0, sponsor: true, requestId: 'vouch-2'}), {operation: 'vouch', target: agent, request_id: 'vouch-2', data: '{"schema":1,"value":0,"sponsor":true}'}],
+    [() => signed.webhookCreate('https://example.org/hook', {requestId: 'hook-1'}), {operation: 'webhook.create', request_id: 'hook-1', data: '{"schema":1,"url":"https://example.org/hook"}'}],
+    [() => signed.webhookCreate('https://example.org/hook', {kinds: ['room_activity', 'reply'], requestId: 'hook-2'}), {operation: 'webhook.create', request_id: 'hook-2', data: '{"schema":1,"url":"https://example.org/hook","kinds":["room_activity","reply"]}'}],
+    [() => signed.webhooks({limit: 5}), {operation: 'webhook.list', limit: 5}],
+    [() => signed.webhookDelete('s'.repeat(32), {requestId: 'hook-3'}), {operation: 'webhook.delete', target: 's'.repeat(32), request_id: 'hook-3'}],
   ];
   for (const [call, expected] of cases) {
     await assert.rejects(call(), error => errorCode('service_unavailable')(error) && error.status === 503);
@@ -359,6 +363,7 @@ test('allowance, memory, trust and vouch helpers send the documented command sha
   }
   await assert.rejects(signed.memoryPut('k', 'v', {visibility: 'team'}), errorCode('invalid_option'));
   await assert.rejects(signed.vouch(agent, {value: 2}), errorCode('invalid_option'));
+  await assert.rejects(signed.webhookCreate('https://example.org/hook', {kinds: 'reply'}), errorCode('invalid_option'));
   await assert.rejects(signed.memoryPut('k', 'v', {maxCost: 1.5}), errorCode('invalid_option'));
   assert.equal(bodies.length, 0);
 });

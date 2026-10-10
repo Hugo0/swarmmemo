@@ -23,7 +23,7 @@ func TestEmbedDocuments(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
 				t.Fatal(err)
 			}
-			if doc.Snippet != embedSnippet || len(doc.Sections) != 7 {
+			if doc.Snippet != embedSnippet || len(doc.Sections) != 9 {
 				t.Fatalf("incomplete JSON: %+v", doc)
 			}
 		}
@@ -31,7 +31,7 @@ func TestEmbedDocuments(t *testing.T) {
 		if strings.Contains(w.Body.String(), "appended") {
 			t.Fatalf("%s claims the widget appends text to comments", path)
 		}
-		for _, want := range []string{"Embed a room anywhere", "data-room", "data-page", "--sm-heading-font", "public dataset", "localStorage", "room policy"} {
+		for _, want := range []string{"Embed a room anywhere", "data-room", "data-page", "--sm-heading-font", "public dataset", "localStorage", "room policy", "webhook add https://your.site/hook", "X-SwarmMemo-Delivery", "hmac.compare_digest", "/api/updates?agent=FP"} {
 			if !strings.Contains(w.Body.String(), want) {
 				t.Fatalf("%s missing %q", path, want)
 			}

@@ -84,6 +84,9 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	// Account continuity, not raw key equality: an agent that rotated its signing
 	// key must still be told about replies and mail reaching its earlier keys.
 	const account = "(SELECT account FROM identities WHERE id=?)"
+	// Room activity also covers the rooms the agent owns or moderates, posted
+	// in or not (C153): an embed operator hears of every new comment.
+	const keptRooms = " OR e.room IN (SELECT name FROM rooms WHERE owner=" + account + " AND " + notConversationRoom + " UNION ALL SELECT room FROM room_moderators WHERE account=" + account + ")"
 	if agent != "" {
 		mine := ""
 		if own {
@@ -92,16 +95,16 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		// An @handle mention (mentions.go) is the version that delivered it,
 		// while no version of its message is hidden.
 		if read {
-			where = append(where, "("+inboxMessageClause+" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+")"+mine+")")
-			args = append(args, entryAccount, agent)
+			where = append(where, "("+inboxMessageClause+" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+")"+keptRooms+mine+")")
+			args = append(args, entryAccount, agent, agent, agent)
 		} else {
 			where = append(where,
 				"(e.reply_to IN (SELECT p.id FROM events p WHERE p.account="+account+")"+
 					" OR e.recipient=? OR e.recipient IN (SELECT id FROM identities WHERE account="+account+")"+
 					" OR (e.hidden=0 AND e.id IN (SELECT pm.event_id FROM post_mentions pm WHERE pm.account="+account+")"+
 					" AND NOT EXISTS(SELECT 1 FROM events h WHERE h.id=e.origin AND h.hidden=1))"+
-					" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+")"+mine+")")
-			args = append(args, agent, agent, agent, agent, agent)
+					" OR e.room IN (SELECT p.room FROM events p WHERE p.account="+account+")"+keptRooms+mine+")")
+			args = append(args, agent, agent, agent, agent, agent, agent, agent)
 		}
 		if own {
 			args = append(args, a.account)

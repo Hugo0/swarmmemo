@@ -1,5 +1,5 @@
 /* SwarmMemo personal feeds (RFC C69 step 3): the browser side of /feed/tune,
- * /feed?profile=self, the home page's My feed tab, a room's Subscribe control
+ * /feed?profile=self, Me's Feed settings, a room's Subscribe control
  * and an agent page's Fork.
  *
  * Nothing here is new on the wire. The live preview is the unsigned
@@ -70,10 +70,30 @@ async function ownProfile(fresh = false) {
 }
 function forgetProfile() { try { sessionStorage.removeItem(profileSlot); } catch (_) { /* Nothing kept. */ } }
 
-// ---- home: the My feed tab ------------------------------------------------
-// It leads to /feed/tune until this key has a saved profile, then to the feed.
-const tab = $('my-feed-tab');
-if (tab && S.identity) ownProfile().then(saved => { if (saved) { tab.href = '/feed?profile=self'; tab.title = 'The board ranked by your saved feed profile'; } }).catch(() => {});
+// ---- Me, Settings: Feed -----------------------------------------------------
+// Says which ranking this key uses and, once a profile is saved, links to the
+// board read through it. The feed page itself only links here (Customize).
+// A visit to Me reads no settings: the signed read waits until the section is
+// on screen (its tab open and scrolled to), like the other settings on Me.
+const feedState = $('me-feed-state');
+function showFeedState() {
+  ownProfile().then(saved => {
+    if (!saved) return;
+    const name = saved.profile?.name;
+    feedState.textContent = 'Using your saved feed' + (name ? ' \u201c' + name + '\u201d' : '') + ', revision ' + saved.revision + (saved.visibility === 'private' ? ' (private).' : ' (public).');
+    $('me-feed-read').hidden = false;
+  }).catch(() => {});
+}
+if (feedState && S.identity) {
+  if (!window.IntersectionObserver) showFeedState();
+  else {
+    const seen = new IntersectionObserver(entries => {
+      if (!entries.some(entry => entry.isIntersecting)) return;
+      seen.disconnect(); showFeedState();
+    });
+    seen.observe(feedState);
+  }
+}
 
 // ---- room page: Subscribe -------------------------------------------------
 (function roomSubscribe() {
@@ -149,7 +169,7 @@ for (const box of document.querySelectorAll('.feed-fork')) {
     for (const message of result.messages || []) feed.append(P.eventElement(message));
     const hash = $('feed-hash'); if (hash) { hash.textContent = result.data.profile_hash; hash.dataset.copy = result.data.profile_hash; }
     const skipped = result.data.skipped_rooms?.length ? ' Skipped, no longer public: ' + result.data.skipped_rooms.join(', ') + '.' : '';
-    if (!feed.children.length) say('personal-feed-status', 'Nothing ranks in your feed yet.' + skipped, false, link('text-link', 'Tune it →', '/feed/tune'));
+    if (!feed.children.length) say('personal-feed-status', 'Nothing ranks in your feed yet.' + skipped, false, link('text-link', 'Customize →', '/feed/tune'));
     else say('personal-feed-status', 'Revision ' + result.data.profile_revision + ', ' + result.data.profile_visibility + '.' + skipped);
     cursor = result.data.next_cursor || ''; more.hidden = !result.data.has_more || !cursor;
   }

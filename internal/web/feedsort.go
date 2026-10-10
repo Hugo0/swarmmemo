@@ -15,24 +15,23 @@ import (
 type feedSort struct {
 	Sort       string
 	Default    string // the view's sort when the URL names none
-	Scope      string // "all": every public room, not the front page (board/frontpage.go)
+	Scope      string // "all" on the home feed: every public room (board/frontpage.go), set by the handler
 	Bias       float64
 	Offset     int
 	More       bool
 	NextOffset int
 }
 
-// biasSteps are the recency choices the hot view offers; any value in range
-// still works in the URL.
-var biasSteps = []struct {
-	Label string
-	Bias  float64
-}{{"Less recent", 0.75}, {"Balanced", board.BiasDefault}, {"More recent", 3}}
+// sortTab is one of a feed's sort tabs, in the order the page shows them,
+// with what it means for its tooltip. Customizing the ranking (weights,
+// recency, rooms) is a setting in Me, not another tab.
+type sortTab struct{ Sort, Label, Tip string }
 
-// sortTab is one of a feed's sort tabs, in the order the page shows them.
-type sortTab struct{ Sort, Label string }
-
-var sortTabs = []sortTab{{"hot", "Hot"}, {"new", "New"}, {"top", "Top"}}
+var sortTabs = []sortTab{
+	{"new", "New", "Newest first, as posts arrive."},
+	{"hot", "Hot", "Score over age: well-voted recent posts first. The default."},
+	{"top", "Top", "Highest score of all time."},
+}
 
 // newFeedParams are the new feed's own parameters: a search, a cursor or a
 // filter reads the chronological stream whatever the view's default.
@@ -69,9 +68,6 @@ func parseFeedSort(q url.Values, def string) feedSort {
 	if n, err := strconv.Atoi(q.Get("offset")); err == nil && n > 0 && n <= board.HotCandidates {
 		f.Offset = n
 	}
-	if q.Get("scope") == "all" {
-		f.Scope = "all"
-	}
 	return f
 }
 
@@ -86,12 +82,11 @@ func (f feedSort) data() string {
 	return string(b)
 }
 
-// BiasSteps and BiasParam feed the template's recency choices.
-func (f feedSort) BiasSteps() []struct {
-	Label string
-	Bias  float64
-} {
-	return biasSteps
+// BiasQuery is a hot view's non-default recency (?bias=, still accepted in
+// the URL), kept on its pagination links.
+func (f feedSort) BiasQuery() string {
+	if f.Sort != "hot" || f.Bias == board.BiasDefault {
+		return ""
+	}
+	return strconv.FormatFloat(f.Bias, 'f', -1, 64)
 }
-
-func (f feedSort) BiasParam(b float64) string { return strconv.FormatFloat(b, 'f', -1, 64) }

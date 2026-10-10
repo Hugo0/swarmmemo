@@ -23,8 +23,11 @@ Three commands:
       prior, penalty and sponsorship, and from parameter version 2 edge and
       spend, the format of internal/trust's golden fixtures
       (testdata/golden_inputs.jsonl, testdata/golden_standing_v2_inputs.jsonl,
+      testdata/golden_standing_v3_inputs.jsonl, testdata/golden_standing_v4_inputs.jsonl,
       testdata/golden_standing_inputs.jsonl). From parameter version 3 a proof
-      may carry registered_at and a spend to and link_value (its payee).
+      may carry registered_at and a spend to and link_value (its payee); from
+      version 4 a vouch may carry weight; from version 5 a proof of an assessed
+      kind (wallet, github, pow) may carry root and assessed.
 
 The algorithm is the published one (RFC0012 §4.2–4.5), restated here from the
 specification rather than translated from the Go reference, and checked against
@@ -33,7 +36,9 @@ the run also computes standing (RFC0015 §3): seeded personalized PageRank over
 endorse edges, with oppose edges subtracted locally (compute_standing()); version
 3 (standing.rule 1) returns a dangling node's pass to the seeds, reports
 c / (1 − pass), leaves self-dealt spend out of the seed, caps spend's seed and
-prices a domain by its registration age when known. Every amount is an
+prices a domain by its registration age when known; version 4 (rule 2) gives
+each act its kind's absolute weight, passes only pass × W / (K + W) along edges
+of total weight W (the rest returns to the seeds) and reports c. Every amount is an
 integer; divisions truncate toward zero as Go's do; curves are published daily
 factors applied one whole day at a time with floor. The flow is Dinic's
 algorithm specified down to edge insertion order and the path search, since a
@@ -87,8 +92,8 @@ RECORD_FIELDS = [
     ("type", ""), ("schema", 0), ("as_of", 0), ("prior_runs", 0), ("pause_new_keys_since", 0), ("events_seq", 0),
     ("endorsements_seq", 0), ("ledger_seq", 0), ("version", 0), ("body", None), ("account", ""), ("created_at", 0),
     ("first_seen", 0), ("id", ""), ("reply_to", ""), ("reply_to_account", ""), ("seq", 0), ("kind", ""), ("voter", ""),
-    ("target", ""), ("message_id", ""), ("value", 0), ("sponsor", False), ("link_value", ""), ("state", ""),
-    ("checked_at", 0), ("link_account", ""), ("registered_at", 0), ("started_at", 0), ("trust_until", 0), ("from", ""), ("to", ""),
+    ("target", ""), ("message_id", ""), ("value", 0), ("sponsor", False), ("weight", 0), ("link_value", ""), ("state", ""),
+    ("checked_at", 0), ("link_account", ""), ("registered_at", 0), ("root", ""), ("assessed", 0), ("started_at", 0), ("trust_until", 0), ("from", ""), ("to", ""),
     ("amount", 0), ("day", 0), ("claimed", 0), ("spent", 0), ("flow_sum", 0), ("standing", False), ("evidence", ""),
     ("fraction_ppm", 0), ("ends_at", 0), ("invitee", ""), ("sponsor_account", ""), ("high_water", 0),
 ]
@@ -145,10 +150,16 @@ PARAM_SECTIONS = {
     "sponsor": {"window_days", "slots_per_share", "dividend_ppm", "dividend_days", "daily_cap", "resource"},
 }
 PROOF_KEYS = {"forge", "rent", "curve", "half_life_days", "day_factor_ppm"}
+# From parameter version 5: the optional assessed rows and the rule of each.
+ASSESSED_KINDS = {"wallet": "capped", "github": "capped", "pow": "saturating"}
+ASSESSED_MAX = 10 ** 15
 STANDING_KEYS = {"mode", "half_life_days", "day_factor_ppm", "pass_ppm", "iterations", "arbiter_seed_cents", "anon_seed_cents",
                  "credits_per_cent", "theta1_cents", "theta2_cents", "v0_ppm", "c_ref_cents"}
 # From parameter version 3 (the simulation's fixes); each is omitted when zero.
 STANDING_KEYS_V3 = {"rule", "v_floor_cents", "spend_cap_cents", "funded_days"}
+# From parameter version 4 (rule 2, absolute weights).
+STANDING_KEYS_V4 = {"keep_weight", "edge_weights", "vouch_weight_max"}
+EDGE_WEIGHT_KINDS = {"vote", "down_vote", "vouch", "work_accept", "witness"}
 EDGE_KEYS = {"base_ppm", "half_life_days", "day_factor_ppm"}
 
 
@@ -162,18 +173,30 @@ def check_params(body: dict) -> None:
     if "standing" in body:
         exact(body, PARAM_KEYS | {"standing"}, "body")
         st = body["standing"]
-        if not isinstance(st, dict) or not STANDING_KEYS <= set(st) <= STANDING_KEYS | STANDING_KEYS_V3:
-            raise InputError(f"params standing: fields must be {sorted(STANDING_KEYS)}, plus any of {sorted(STANDING_KEYS_V3)}")
+        if not isinstance(st, dict) or not STANDING_KEYS <= set(st) <= STANDING_KEYS | STANDING_KEYS_V3 | STANDING_KEYS_V4:
+            raise InputError(f"params standing: fields must be {sorted(STANDING_KEYS)}, plus any of {sorted(STANDING_KEYS_V3 | STANDING_KEYS_V4)}")
         if body["standing"]["mode"] not in ("shadow", "active"):
             raise InputError("params standing.mode must be shadow or active")
+        if st.get("rule", 0) >= 2:
+            if set(st) & STANDING_KEYS_V4 != STANDING_KEYS_V4:
+                raise InputError(f"params standing: rule 2 needs {sorted(STANDING_KEYS_V4)}")
+            exact(st["edge_weights"], EDGE_WEIGHT_KINDS, "standing.edge_weights")
+        elif set(st) & STANDING_KEYS_V4:
+            raise InputError(f"params standing: {sorted(STANDING_KEYS_V4)} need rule 2")
     else:
         exact(body, PARAM_KEYS, "body")
     for section, keys in PARAM_SECTIONS.items():
         exact(body[section], keys, section)
     for kind in ("domain", "ed25519", "board", "url", "nostr"):
         exact(body["proofs"].get(kind), PROOF_KEYS, "proofs." + kind)
-    if set(body["proofs"]) != {"domain", "ed25519", "board", "url", "nostr"}:
-        raise InputError("params proofs: exactly domain, ed25519, board, url and nostr")
+    for kind, rule in ASSESSED_KINDS.items():
+        if kind in body["proofs"]:
+            exact(body["proofs"][kind], PROOF_KEYS | {"assess", "units_per_cent"}, "proofs." + kind)
+            if body["proofs"][kind]["assess"] != rule or not isinstance(body["proofs"][kind]["units_per_cent"], int) \
+                    or body["proofs"][kind]["units_per_cent"] < 1:
+                raise InputError(f"params proofs.{kind}: assess must be {rule} with a positive units_per_cent")
+    if not {"domain", "ed25519", "board", "url", "nostr"} <= set(body["proofs"]) <= {"domain", "ed25519", "board", "url", "nostr"} | set(ASSESSED_KINDS):
+        raise InputError("params proofs: exactly domain, ed25519, board, url and nostr, and optionally wallet, github and pow")
     for kind in ("vote", "vouch", "reply", "legacy_vote"):
         exact(body["edges"].get(kind), EDGE_KEYS, "edges." + kind)
     if set(body["edges"]) != {"vote", "vouch", "reply", "legacy_vote"}:
@@ -244,6 +267,21 @@ def read_snapshot(lines) -> Snapshot:
 
 # ---------------------------------------------------------------------------
 # Curves, roots
+
+
+def assessed_contribution(price, assessed):
+    """What an assessed root adds, in cents: min(cap, v) (capped) or
+    cap * v / (v + cap) (saturating), v = assessed / units_per_cent, exact."""
+    u = price.get("units_per_cent", 0)
+    if assessed <= 0 or u <= 0:
+        return 0
+    assessed = min(assessed, ASSESSED_MAX)
+    ceiling = min(price["forge"], price["rent"])
+    if price["assess"] == "capped":
+        return min(ceiling, assessed // u)
+    if price["assess"] == "saturating":
+        return ceiling * assessed // (assessed + ceiling * u) if ceiling > 0 else 0
+    return 0
 
 
 class Curves:
@@ -616,6 +654,8 @@ def compute(snap: Snapshot) -> dict:
     fresh = as_of - p["proof_fresh_days"] * DAY
 
     def counts(r):
+        if p["proofs"].get(r.kind, {}).get("assess", ""):
+            return r.state == "verified" and fresh <= r.checked_at <= as_of and r.created_at <= as_of
         if r.kind == "domain":
             return r.state == "verified" and fresh <= r.checked_at <= as_of and r.created_at <= as_of
         if r.kind == "ed25519":
@@ -738,8 +778,17 @@ def compute(snap: Snapshot) -> dict:
             part["root"] = "key:" + r.link_account
         else:
             part["root"] = r.kind + ":" + r.link_value
+            if price.get("assess", "") and r.root != "":
+                part["root"] = r.root
         if not counts(r):
             part["note"] = "not counted in this state"
+        elif price.get("assess", ""):
+            # An assessed root (version 5): its record carries the value.
+            part["weight_ppm"] = PPM
+            part["note"] = f"assessed {r.assessed} ({price['assess']})"
+            part["contribution"] = assessed_contribution(price, r.assessed)
+            account_proofs.setdefault(r.account, []).append(part)
+            continue
         elif price["curve"] == "ramp":
             part["weight_ppm"] = min(500000, cv.ramp(price["day_factor_ppm"], part["age_days"]))
             part["note"] = "verified age unknown: at most half weight, bounded by the link's age"
@@ -967,7 +1016,11 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
     endorse edges (up votes, vouches, work.accept, verified witnesses) and
     oppose edges (down votes), one weight per act, one half-life, saturating
     per pair and polarity; personalized PageRank from the seeds; oppose
-    shares subtracted at the target; penalties scale outflow and standing."""
+    shares subtracted at the target; penalties scale outflow and standing.
+    Rule 2: an act weighs its kind's weight (a vouch the weight its author
+    chose, capped), saturating per pair, polarity and kind at twice one act;
+    a node passes pass × W / (K + W) along its edges and returns the rest to
+    the seeds; standing is c, not rescaled."""
     st = p["standing"]
     rule, v_floor = st.get("rule", 0), st.get("v_floor_cents", 0)
     spend_cap, funded_days = st.get("spend_cap_cents", 0), st.get("funded_days", 0)
@@ -1051,15 +1104,21 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
         if r.created_at < ws or r.target == "":
             continue
         if r.kind in ("vote", "vouch") and r.value == 1:
-            acts.append((r.voter, r.target, r.kind, r.created_at, False))
+            acts.append((r.voter, r.target, r.kind, r.created_at, False, r.weight))
         elif r.kind == "vote" and r.value == -1:
-            acts.append((r.voter, r.target, "down_vote", r.created_at, True))
+            acts.append((r.voter, r.target, "down_vote", r.created_at, True, 0))
     for r in snap.acts:
         if r.created_at >= as_of or r.created_at < ws or r.kind not in ("work_accept", "witness"):
             continue
-        acts.append((r["from"] if "from" in r else "", r.to, r.kind, r.created_at, False))
+        acts.append((r["from"] if "from" in r else "", r.to, r.kind, r.created_at, False, 0))
+
+    def act_weight(kind, chosen):
+        if kind == "vouch" and chosen > 0:
+            return min(chosen, st["vouch_weight_max"])
+        return st["edge_weights"][kind]
     pair_sum = {}
-    for src, dst, kind, at, oppose in acts:
+    kind_sum, kind_weight = {}, {}
+    for src, dst, kind, at, oppose, chosen in acts:
         if src == "" or dst == "" or src == dst or src in service or dst in service or src in reset:
             continue
         if root_of(src) == root_of(dst):
@@ -1068,7 +1127,17 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
         if v <= 0:
             continue
         inputs[kind] += 1
+        if rule >= 2:
+            k = (src, dst, oppose, kind)
+            kind_sum[k] = kind_sum.get(k, 0) + v
+            kind_weight[k] = max(kind_weight.get(k, 0), act_weight(kind, chosen))
+            continue
         pair_sum[(src, dst, oppose)] = pair_sum.get((src, dst, oppose), 0) + v
+    # Rule 2: each kind counts w × 2s / (1 + s), summed per pair and polarity.
+    for k, total in kind_sum.items():
+        w = kind_weight[k] * mul_div(2 * PPM, total, PPM + total)
+        if w > 0:
+            pair_sum[k[:3]] = pair_sum.get(k[:3], 0) + w
 
     nodes = sorted(set(seeds) | {k[0] for k in pair_sum} | {k[1] for k in pair_sum} | set(scored))
     index = {a: i for i, a in enumerate(nodes)}
@@ -1078,7 +1147,7 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
     outs = [[] for _ in range(n)]
     wsum = [0] * n
     for (src, dst, oppose), total in pair_sum.items():
-        w = PPM * total // (PPM + total)
+        w = total if rule >= 2 else PPM * total // (PPM + total)
         if w > 0:
             outs[index[src]].append((index[dst], w, oppose))
             wsum[index[src]] += w
@@ -1087,6 +1156,7 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
     pen = [min(PPM, penalty.get(a, 0)) for a in nodes]
 
     c = list(seed)
+    keep = st.get("keep_weight", 0) * PPM
     restart = [x - mul_div(x, st["pass_ppm"], PPM) for x in seed]
     opposed = [0] * n
     for _ in range(st["iterations"]):
@@ -1104,6 +1174,10 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
                 else:
                     nxt[u] += pas
                 continue
+            if rule >= 2:
+                out = mul_div(pas, wsum[u], wsum[u] + keep)
+                back += pas - out  # kept: returns to the seeds
+                pas = out
             sent = 0
             for dst, w, oppose in outs[u]:
                 share = mul_div(pas, w, wsum[u])
@@ -1147,7 +1221,7 @@ def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts,
     parts, extra, moves, total = {}, [], [], 0
     for i, a in enumerate(nodes):
         raw, opp = c[i], opposed[i]
-        if rule >= 1:  # reported as c / (1 − pass)
+        if rule == 1:  # reported as c / (1 − pass); rule 2 reports c
             raw, opp = mul_div(raw, PPM, PPM - st["pass_ppm"]), mul_div(opp, PPM, PPM - st["pass_ppm"])
         cents = mul_div(max(0, raw - opp), PPM - pen[i], PPM) // MASS_PER_CENT
         part = {"cents": cents, "raw_cents": raw // MASS_PER_CENT, "opposed_cents": opp // MASS_PER_CENT, "penalty_ppm": pen[i],
@@ -1351,7 +1425,7 @@ def b64url(text: str) -> bytes:
 # Endorsement export
 
 
-EXPORT_FIELDS = {"type", "seq", "message_id", "target", "voter", "public_key", "value", "sponsor", "created_at",
+EXPORT_FIELDS = {"type", "seq", "message_id", "target", "voter", "public_key", "value", "sponsor", "weight", "created_at",
                  "signed_payload", "signature"}
 
 
@@ -1390,9 +1464,12 @@ def verify_record(record: dict, service: str) -> str | None:
         if command.get("message_id") != record.get("message_id") or data.get("value") != record["value"] or isinstance(data.get("value"), bool):
             return "signed vote differs"
     elif record["type"] == "vouch":
-        if set(data) - {"schema", "value", "sponsor"} or data.get("schema") != 1 or data.get("value") not in (0, 1) \
+        weight = data.get("weight", 0)
+        if set(data) - {"schema", "value", "sponsor", "weight"} or data.get("schema") != 1 or data.get("value") not in (0, 1) \
                 or isinstance(data.get("value"), bool) or data.get("value") != record["value"] \
-                or bool(data.get("sponsor", False)) != bool(record.get("sponsor")):
+                or bool(data.get("sponsor", False)) != bool(record.get("sponsor")) \
+                or isinstance(weight, bool) or not isinstance(weight, int) or weight != record.get("weight", 0) \
+                or ("weight" in data and not (1 <= weight <= 50 and data.get("value") == 1)):
             return "signed vouch differs"
     else:
         return "unknown record type"
@@ -1423,7 +1500,7 @@ def trust_input(record: dict) -> dict:
         kind = "unsigned"
     out = {"type": "endorsement", "seq": record.get("seq", 0), "kind": kind, "voter": record.get("voter", ""),
            "target": record.get("target", ""), "message_id": record.get("message_id", ""), "value": record.get("value", 0),
-           "sponsor": bool(record.get("sponsor", False)), "created_at": record.get("created_at", 0)}
+           "sponsor": bool(record.get("sponsor", False)), "weight": record.get("weight", 0), "created_at": record.get("created_at", 0)}
     return {k: v for k, v in out.items() if k == "type" or v not in (0, "", False)}
 
 

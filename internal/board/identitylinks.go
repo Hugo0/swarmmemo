@@ -174,6 +174,9 @@ type linkRecord struct {
 	ObservedHeight int64  `json:"observed_height,omitempty"`
 	ObservedTime   int64  `json:"observed_time,omitempty"`
 	Proof          string `json:"proof,omitempty"`
+	// Message is what a challenged kind's proof covers: a wallet's EIP-4361
+	// message, a GitHub gist's statement (standingroots.go).
+	Message string `json:"message,omitempty"`
 }
 
 func encodeLinkRecord(r linkRecord) string {
@@ -217,15 +220,22 @@ func challengeText(v string, lo, hi int, space bool) bool {
 // check, when set, is a live verification the rechecker repeats on schedule.
 // Phase 2 adds Nostr proofs by giving "nostr" an attach, and board profiles by
 // giving "board" a check through the webhook dialer; nothing else changes.
+//
+// challenge, when set, replaces attach for a kind that needs a server-issued
+// challenge (standingroots.go: wallet, github): it consumes the key's
+// challenge in the command's transaction and returns the state and the
+// message the proof covers, kept with the link so anyone can check it.
 type linkKind struct {
 	normalize func(value string) (string, bool)
 	attach    func(s *Store, fingerprint, value, proof string) (string, error)
-	check     func(s *Store, ctx context.Context, fingerprint, value string) linkOutcome
+	check     linkChecker
+	challenge func(ctx context.Context, tx *sql.Tx, s *Store, a actor, d linkData, value string, now int64) (string, string, error)
 	method    string
 }
 
 var linkKinds = map[string]linkKind{
-	"domain":  {normalize: normalizeLinkDomain, attach: claimOnly, check: (*Store).checkDomainLink, method: "dns-txt"},
+	"domain": {normalize: normalizeLinkDomain, attach: claimOnly, method: "dns-txt",
+		check: func(s *Store, ctx context.Context, fingerprint, value, _ string) linkOutcome { return s.checkDomainLink(ctx, fingerprint, value) }},
 	"ed25519": {normalize: normalizeEd25519Key, attach: attachEd25519Proof, method: "ed25519-signature"},
 	"nostr":   {normalize: normalizeNostrKey, attach: claimOnly},
 	"url":     {normalize: normalizeLinkURL, attach: claimOnly},
@@ -233,10 +243,17 @@ var linkKinds = map[string]linkKind{
 	// x25519 publishes the key's sealing key (RFC0013 §6, seal.go). The
 	// signed identity.link itself is its proof, stored and shown with it.
 	"x25519": {normalize: normalizeX25519Key, attach: selfSignedOnly, method: "signed-command"},
+	// Raise your standing (standingroots.go): a wallet's EIP-4361 signature
+	// of a standing.challenge message, verified in the command and repriced
+	// daily; a GitHub account's gist, verified by the checker, weekly.
+	"wallet": {normalize: normalizeWallet, attach: claimOnly, challenge: challengeWallet, check: (*Store).checkWalletLink, method: "eip4361-signature"},
+	"github": {normalize: normalizeGitHub, attach: claimOnly, challenge: challengeGitHub, check: (*Store).checkGitHubLink, method: "github-gist"},
 }
 
 // LinkKinds lists the accepted kinds for discovery, in a stable order.
-func LinkKinds() []string { return []string{"domain", "ed25519", "nostr", "url", "board", "x25519"} }
+func LinkKinds() []string {
+	return []string{"domain", "ed25519", "nostr", "url", "board", "x25519", "wallet", "github"}
+}
 
 // selfSignedOnly takes no separate proof: the link's own signed command is
 // the proof (see changeIdentityLink).
@@ -262,7 +279,7 @@ func linkError(code string) error {
 	case "link_reserved":
 		return problem(400, "link_reserved", "This service's own domains cannot be linked by an agent.")
 	}
-	return problem(400, "invalid_link", fmt.Sprintf(`Data must be a strict JSON object {"schema":1,"kind":KIND,"value":VALUE} with an optional "proof", "nonce" (%d to %d printable ASCII characters) and "observed_at" (up to %d), with an optional "nonce_log" and "nonce_log_size" (the log and size the nonce commits to, both or neither) and "observed_height" and "observed_time" (the observed block's, no later than the command's timestamp plus two hours), at most 1024 bytes; kind is domain, ed25519, nostr, url, board or x25519.`, IdentityLinkNonceMin, IdentityLinkNonceMax, IdentityLinkObservedAtMax))
+	return problem(400, "invalid_link", fmt.Sprintf(`Data must be a strict JSON object {"schema":1,"kind":KIND,"value":VALUE} with an optional "proof", "nonce" (%d to %d printable ASCII characters) and "observed_at" (up to %d), with an optional "nonce_log" and "nonce_log_size" (the log and size the nonce commits to, both or neither) and "observed_height" and "observed_time" (the observed block's, no later than the command's timestamp plus two hours), at most 1024 bytes; kind is domain, ed25519, nostr, url, board, x25519, wallet or github (wallet and github with the proof and nonce of a standing.challenge).`, IdentityLinkNonceMin, IdentityLinkNonceMax, IdentityLinkObservedAtMax))
 }
 
 func claimOnly(_ *Store, _, _, proof string) (string, error) {
@@ -477,7 +494,12 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 	if d.Kind == "ed25519" && value == a.publicKey {
 		return Result{}, linkError("invalid_link_value")
 	}
-	state, err := kind.attach(s, a.id, value, d.Proof)
+	var state, message string
+	if kind.challenge != nil {
+		state, message, err = kind.challenge(ctx, tx, s, a, d, value, now)
+	} else {
+		state, err = kind.attach(s, a.id, value, d.Proof)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -531,9 +553,12 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		// Linking again can attach or replace a proof, and asks for a recheck;
 		// it never downgrades what a live check already established.
 		proof := d.Proof
-		if kind.check != nil {
+		switch {
+		case kind.challenge != nil:
+			// A new challenge replaces the proof and its state.
+		case kind.check != nil:
 			state, proof = existing, ""
-		} else if state == "claimed" && existing == "proof_attached" {
+		case state == "claimed" && existing == "proof_attached":
 			state = existing
 			proof = ""
 		}
@@ -543,7 +568,9 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 			if proof == "" && state == "proof_attached" {
 				proof = theirProof(existingProof)
 			}
-			proof = encodeLinkRecord(d.record(c, a.canonical, proof))
+			rec := d.record(c, a.canonical, proof)
+			rec.Message = message
+			proof = encodeLinkRecord(rec)
 		}
 		query := "UPDATE identity_links SET state=?,next_check_at=? WHERE agent=? AND kind=? AND value=?"
 		args := []any{state, next, a.id, d.Kind, value}
@@ -557,10 +584,23 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 	} else {
 		proof := d.Proof
 		if challenged && d.Kind != "x25519" {
-			proof = encodeLinkRecord(d.record(c, a.canonical, d.Proof))
+			rec := d.record(c, a.canonical, d.Proof)
+			rec.Message = message
+			proof = encodeLinkRecord(rec)
 		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO identity_links(agent,kind,value,proof,state,created_at,next_check_at) VALUES(?,?,?,?,?,?,?)",
 			a.id, d.Kind, value, proof, state, now, next); err != nil {
+			return Result{}, err
+		}
+	}
+	if kind.challenge != nil {
+		// A challenged link starts its check history again: verified now
+		// (wallet) or claimed until the checker reads the gist (github).
+		checked := int64(0)
+		if state == "verified" {
+			checked = now
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE identity_links SET checked_at=?,lapsed_at=0,failures=0,last_error='' WHERE agent=? AND kind=? AND value=?", checked, a.id, d.Kind, value); err != nil {
 			return Result{}, err
 		}
 	}
@@ -594,6 +634,15 @@ func (s *Store) changeIdentityLink(ctx context.Context, tx *sql.Tx, c Command, a
 		}
 	case "ed25519":
 		data["statement"] = LinkStatement(s.config.ServiceID, a.id, value)
+	case "wallet":
+		data["root"] = walletRoot(value)
+		data["checks_enabled"] = s.identityChecks.Load()
+	case "github":
+		data["statement"] = message
+		data["checks_enabled"] = s.identityChecks.Load()
+		if next > 0 {
+			data["check_after"] = next
+		}
 	}
 	return Result{Data: data}, nil
 }
@@ -648,6 +697,15 @@ func (s *Store) readIdentityLinks(ctx context.Context, tx *sql.Tx, agents ...str
 		}
 		if r, ok := decodeLinkRecord(proof); ok && (r.Nonce != "" || r.ObservedAt != "") {
 			l.Challenge = s.challengeOf(r)
+			if r.Message != "" {
+				// A wallet's signature and the message it covers, or a
+				// GitHub gist and the statement it publishes: anyone can
+				// check them again. A claim shows only its statement.
+				l.Statement = r.Message
+				if l.State != "claimed" {
+					l.Proof = r.Proof
+				}
+			}
 		}
 		links[agent] = append(links[agent], l)
 	}

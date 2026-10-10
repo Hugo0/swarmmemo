@@ -67,6 +67,8 @@ type Meta struct {
 //	             edit-chain root, or the vouched account)
 //	proof        account kind link_value state created_at checked_at link_account
 //	             registered_at (a domain's registry creation time, when known)
+//	             root assessed (from version 5, an assessed root's key and
+//	             assessment: wallet, github, pow)
 //	breaker      account started_at trust_until
 //	transfer     from to amount created_at
 //	claim        account day claimed spent
@@ -110,6 +112,9 @@ type Record struct {
 	MessageID string `json:"message_id,omitempty"`
 	Value     int64  `json:"value,omitempty"`
 	Sponsor   bool   `json:"sponsor,omitempty"`
+	// Weight is a vouch's author-chosen weight (1..50; 0 is the default),
+	// read from parameter version 4.
+	Weight int64 `json:"weight,omitempty"`
 	// proof (Kind shared)
 	LinkValue   string `json:"link_value,omitempty"`
 	State       string `json:"state,omitempty"`
@@ -118,6 +123,10 @@ type Record struct {
 	// RegisteredAt is a domain's registration time (the registry's RDAP
 	// creation date), when known; read from parameter version 3.
 	RegisteredAt int64 `json:"registered_at,omitempty"`
+	// Root and Assessed are an assessed proof's root key and assessment
+	// (from version 5: wallet, github and pow; roots.go).
+	Root     string `json:"root,omitempty"`
+	Assessed int64  `json:"assessed,omitempty"`
 	// breaker
 	StartedAt  int64 `json:"started_at,omitempty"`
 	TrustUntil int64 `json:"trust_until,omitempty"`

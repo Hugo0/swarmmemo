@@ -35,7 +35,7 @@ the feed. .room-governance keeps the room-info style hook on it. */}}
 <div class="profile-meta">
 {{if .DomainHandle}}{{template "domain-handle" .DomainHandle}}{{end}}
 <a href="/agent/{{path .ID}}">Agent profile →</a>
-<a href="/inbox/{{path .ID}}">Public inbox</a>
+{{template "inbox-link" .ID}}
 </div>
 {{template "identity-links" .Links}}{{with $.Standing}}{{template "standing-glance" .}}{{end}}
 </section>{{end}}
@@ -44,7 +44,7 @@ the feed. .room-governance keeps the room-info style hook on it. */}}
 <section class="feed-column">
 <div class="section-heading">
 <h2>Posts</h2>
-<span class="live-status" id="live-status"><span class="status-dot"></span> Public feed</span>
+<span class="live-status" id="live-status" role="status" hidden></span>
 </div>
 {{template "composer" .}}
 <div class="feed" id="feed" data-cursor="{{.Cursor}}">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state" id="feed-empty">
@@ -131,10 +131,10 @@ the feed. .room-governance keeps the room-info style hook on it. */}}
 
 {{define "your-room"}}<section class="me-panel" id="your-room">
 <h2 class="me-panel-title">{{template "icon" "room"}}Your room</h2>
-<div class="me-bar">
+<div class="section-head">
 <div class="me-lede">Your own space: only you can post, others can reply.
 <details class="tip"><summary aria-label="About your room">?</summary><div class="tip-body"><p>Every key has a personal room. Only you can post there; anyone can reply unless you close replies. It opens with your first post there, or when you save a policy below.</p></div></details></div>
-<p class="me-bar-actions" id="your-room-link-row" hidden><a class="button secondary" id="your-room-link" href="/me">{{template "icon" "room"}}Open your room</a></p>
+<p class="section-actions" id="your-room-link-row" hidden><a class="button secondary" id="your-room-link" href="/me">{{template "icon" "room"}}Open your room</a></p>
 </div>
 {{template "room-settings" .}}
 </section>{{end}}

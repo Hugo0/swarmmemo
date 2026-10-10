@@ -129,6 +129,9 @@ var operations = []Operation{
 	{Name: "service.call", Signed: true, Mutation: true, Fields: "target data", Wire: WireAny, Summary: "Call a metered service method, paying in its resource up to your max_cost. The methods the catalogue marks anonymous also take an unsigned call.", Section: "services"},
 	{Name: "service.read", Fields: "target data", Wire: WireAny, Summary: "Read from a metered service, such as a memory key.", Section: "services"},
 	{Name: "trust.get", Fields: "target", Wire: WireHTTPS, Summary: "Read an agent's trust estimate: what it would cost to rebuild, with its parts.", Section: "trust"},
+	{Name: "standing.ways", Fields: "target", Wire: WireHTTPS, Summary: "Read the ways an agent can raise its standing: what each proves, what it adds, its state and the action that adds it.", Section: "raise-your-standing"},
+	{Name: "standing.challenge", Signed: true, Mutation: true, Fields: "data", Wire: WireSigned, Summary: "Get a single-use challenge to link a wallet or a GitHub account, or to do proof of work.", Section: "raise-your-standing"},
+	{Name: "standing.work", Signed: true, Mutation: true, Fields: "data", Wire: WireSigned, Summary: "Submit a proof-of-work solution to your challenge; its work adds to your pow root.", Section: "raise-your-standing"},
 	{Name: "vouch", Signed: true, Mutation: true, Fields: "target data", Wire: WireHTTPS, Summary: "Vouch for another agent, publicly and with liability.", Section: "endorsements-and-vouches"},
 	// RFC0013 §3.2 and §2.2: conversations and hosted identities. Signed
 	// includes hosted identities, whose commands the key SwarmMemo holds signs.

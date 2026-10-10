@@ -43,19 +43,19 @@ func TestAgentPageShowsLinkStatesHonestly(t *testing.T) {
 	}
 	section := body[strings.Index(body, `id="elsewhere"`):]
 	section = section[:strings.Index(section, "</section>")]
-	if n := strings.Count(section, `class="badge"`); n != 1 {
+	if n := strings.Count(section, `class="badge term"`); n != 1 {
 		t.Fatalf("%d emphasised states; only the verified link may be emphasised", n)
 	}
-	if !regexp.MustCompile(`@atlas\.example\.org</span>\s*<span class="badge">verified <time`).MatchString(section) {
+	if !regexp.MustCompile(`@atlas\.example\.org</span>\s*<span class="badge term" tabindex="0" title="Verified:[^"]*">verified <time`).MatchString(section) {
 		t.Fatal("verified domain is not shown as a checked @handle")
 	}
 	if !strings.Contains(body, `<span class="domain-handle term" tabindex="0" title="`+tip("domain")+`">@atlas.example.org</span>`) {
 		t.Fatal("verified domain handle missing from the page heading")
 	}
 	for _, want := range []string{
-		`claimed.example.net</span>` + "\n" + `<span class="small muted">claimed</span>`,
-		`<span class="small muted">lapsed <time`,
-		`<span class="small muted">signed proof attached</span>`,
+		`claimed.example.net</span>` + "\n" + `<span class="small muted term" tabindex="0" title="Claimed: the key&#39;s word alone, with no proof attached.">claimed</span>`,
+		`<span class="small muted term" tabindex="0" title="Lapsed:`,
+		`">signed proof attached</span>`,
 		`rel="nofollow noopener ugc"`,
 		`<span class="link-witness small muted">witness: verified by <a href="/agent/` + strings.Repeat("b", 64) + `" title="` + strings.Repeat("b", 64) + `">` + strings.Repeat("b", 12) + `</a> <time`,
 		`witness: failed by <a href="/agent/` + strings.Repeat("c", 64),
@@ -124,7 +124,7 @@ func TestDirectoryRendersLinksLikeTheAgentPage(t *testing.T) {
 		return html[start : start+strings.Index(html[start:], "</ul>")]
 	}
 	chips := list(row)
-	if chips == "" || strings.Count(chips, "<li ") != 2 || strings.Count(chips, `class="badge"`) != 1 || !strings.Contains(chips, `<span class="small muted">claimed</span>`) {
+	if chips == "" || strings.Count(chips, "<li ") != 2 || strings.Count(chips, `class="badge term"`) != 1 || !strings.Contains(chips, `">claimed</span>`) {
 		t.Fatalf("directory chips wrong:\n%s", chips)
 	}
 	bareRow := body[strings.Index(body, `id="agent-`+bare.ID+`"`):]
@@ -163,24 +163,24 @@ func TestDirectoryKeepsStaleProfilesAndOrders(t *testing.T) {
 		return w.Body.String()
 	}
 	body := get("/agents")
-	for _, want := range []string{`class="peer-card agent-row stale"`, "Still here in spirit.", "Self-described · available, last confirmed 2 Oct", "Not renewed since", ">2 Oct</time>; may be inactive"} {
+	for _, want := range []string{`class="peer-card agent-row stale"`, "Still here in spirit.", "Available, as of 2 Oct", `class="badge status-badge status-available status-stale term"`, "Not renewed since", ">2 Oct</time>; may be inactive"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("stale profile lacks %q", want)
 		}
 	}
 	// The first page is hot, as over the API, and pages on like every order.
-	if s.calls[0].Kind != "hot" || !strings.Contains(body, `<a href="/agents" aria-current="page">Hot</a>`) || !strings.Contains(body, `<a href="/agents">First page</a>`) {
+	if s.calls[0].Kind != "hot" || !strings.Contains(body, `<a href="/agents" aria-current="page" class="term plain" title="Most active in public lately">Hot</a>`) || !strings.Contains(body, `<a href="/agents">First page</a>`) {
 		t.Errorf("default order is not hot: %+v", s.calls[0])
 	}
 	body = get("/agents?sort=active")
-	if s.calls[1].Kind != "active" || !strings.Contains(body, `aria-current="page">Recently active</a>`) || !strings.Contains(body, `href="/agents?sort=active">First page`) {
+	if s.calls[1].Kind != "active" || !strings.Contains(body, `aria-current="page" class="term plain" title="Last seen most recently">Recently active</a>`) || !strings.Contains(body, `href="/agents?sort=active">First page`) {
 		t.Errorf("sort=active not applied: %+v", s.calls[1])
 	}
 	if get("/agents?sort=oldest"); s.calls[2].Kind != "hot" {
 		t.Errorf("an unknown order must fall back to the default: %+v", s.calls[2])
 	}
 	body = get("/agents?sort=new")
-	if s.calls[3].Kind != "new" || !strings.Contains(body, `<a href="/agents?sort=new" aria-current="page">Newest</a>`) {
+	if s.calls[3].Kind != "new" || !strings.Contains(body, `<a href="/agents?sort=new" aria-current="page" class="term plain" title="Newest keys first">Newest</a>`) {
 		t.Errorf("sort=new not applied: %+v", s.calls[3])
 	}
 	if get("/agents?q=go"); s.calls[4].Kind != "new" {
@@ -222,6 +222,14 @@ func TestMeFormsStateServiceLimits(t *testing.T) {
 			// A sealing key is made and published by Messages, never typed.
 			if strings.Contains(body, `<option value="x25519">`) {
 				t.Error("/me offers typing a sealing key")
+			}
+			continue
+		}
+		if kind == "wallet" || kind == "github" {
+			// Linked with a standing challenge, from Raise your standing
+			// (present while trust runs), never typed into the link form.
+			if strings.Contains(body, `<option value="`+kind+`">`) {
+				t.Errorf("/me offers typing a %s link without its challenge", kind)
 			}
 			continue
 		}

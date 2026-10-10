@@ -30,7 +30,7 @@ func trustFixture(t *testing.T, mutate func(*trust.Params)) (s *Store, seed, ali
 	sig := "sig"
 	yes := false
 	records := []EndorsementRecord{
-		{Type: "vouch", Seq: 1, Voter: keyID(seed), Target: keyID(alice), Value: 1, Sponsor: &yes, CreatedAt: testTime - 86400, Signature: &sig},
+		{Type: "vouch", Seq: 1, Voter: keyID(seed), Target: keyID(alice), Value: 1, Sponsor: &yes, Weight: 30, CreatedAt: testTime - 86400, Signature: &sig},
 		{Type: "vote", Seq: 2, Voter: keyID(alice), MessageID: bobPost, Value: 1, CreatedAt: testTime - 86400, Signature: &sig},
 		{Type: "vote", Seq: 3, Voter: keyID(seed), MessageID: bobPost, Value: 1, CreatedAt: testTime - 86400}, // unsigned: weight 0
 	}
@@ -185,6 +185,10 @@ func TestTrustRunIsRecomputable(t *testing.T) {
 	snap, err := trust.ReadJSONL(&inputs)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A vouch's chosen weight reaches the run (parameter version 4).
+	if len(snap.Endorsements) == 0 || snap.Endorsements[0].Kind != "vouch" || snap.Endorsements[0].Weight != 30 {
+		t.Fatalf("vouch weight not in the snapshot: %+v", snap.Endorsements)
 	}
 	out, err := trust.Compute(testContext, snap)
 	if err != nil {

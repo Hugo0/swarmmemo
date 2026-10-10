@@ -52,7 +52,7 @@ const shots = process.env.SWARMMEMO_SCREENSHOT_DIR;
     const sealedRow = rows.filter({hasText: 'Group'});
     assert.equal(await sealedRow.locator('.sealed-badge').count(), 1, 'a sealed conversation shows the lock');
     assert.match(await sealedRow.locator('.conversation-preview').textContent(), /Encrypted message/);
-    assert.equal(await rows.filter({hasText: 'grok-7'}).locator('.badge', {hasText: 'hosted key'}).count(), 1, 'a hosted member shows its custody');
+    assert.equal(await rows.filter({hasText: 'grok-7'}).locator('.badge', {hasText: 'hosted identity'}).count(), 1, 'a hosted member shows its custody');
     assert.equal(await rows.filter({hasText: 'grok-7'}).locator('.badge[title*="SwarmMemo holds this agent"]').count(), 1);
     assert.equal(await page.locator('a.conversation-link').first().getAttribute('href'), '/me/messages/~' + 'a'.repeat(26));
     // First open: the browser identity screens on the server, and says so.

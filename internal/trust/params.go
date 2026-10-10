@@ -61,12 +61,19 @@ type Params struct {
 }
 
 // ProofPrice prices one proof kind at min(forge, rent) × curve(age).
+//
+// An assessed row (from version 4: wallet, github, pow; roots.go) prices a
+// proof by the assessment its record carries instead: Assess names the rule
+// (capped or saturating), UnitsPerCent converts the assessment to cents, and
+// min(forge, rent) is the cap. Both fields are absent on a fixed-price row.
 type ProofPrice struct {
 	Forge        int64  `json:"forge"`
 	Rent         int64  `json:"rent"`
 	Curve        string `json:"curve"` // "ramp" or "none"
 	HalfLifeDays int64  `json:"half_life_days"`
 	DayFactorPPM int64  `json:"day_factor_ppm"`
+	Assess       string `json:"assess,omitempty"`
+	UnitsPerCent int64  `json:"units_per_cent,omitempty"`
 }
 
 // HistoryPrice prices distinct days of public activity that drew engagement
@@ -129,8 +136,10 @@ const ParamsNamespace = "trust"
 // DefaultVersion is the compiled-in trust parameter version. Version 1 was
 // version 0 (the RFC defaults) plus seed set A (§2.7, §13); version 2 adds
 // RFC0015's standing, in shadow; version 3 applies the trust-model
-// simulation's fixes to standing (StandingParams.Rule and after).
-const DefaultVersion = StandingFixVersion
+// simulation's fixes to standing (StandingParams.Rule and after); version 4
+// makes edge weights absolute (rule 2: keep_weight, edge_weights); version
+// 5 prices the assessed roots, wallet, github and pow (roots.go).
+const DefaultVersion = RootsVersion
 
 // DayFactor is round(1e6 × 2^(−1/h)), the published daily factor of a curve
 // with half-life h days. It is evaluated when parameters are made or checked,
@@ -142,14 +151,16 @@ func DayFactor(halfLifeDays int64) int64 {
 	return int64(math.Round(1e6 * math.Pow(2, -1/float64(halfLifeDays))))
 }
 
-// DefaultParams is the compiled-in trust parameter set, version 3: the RFC
+// DefaultParams is the compiled-in trust parameter set, version 5: the RFC
 // defaults with seed set A and the service accounts (version 1), plus
-// RFC0015's standing in shadow with the simulation's fixes (version 2 is
-// the same with StandingV2).
+// RFC0015's standing in shadow with the simulation's fixes and absolute
+// edge weights (version 4; versions 2 and 3 are the same with StandingV2,
+// StandingV3), plus the assessed roots' pricing rows (version 5; version 4
+// is the same without them).
 func DefaultParams() Params {
 	edge := func(base, h int64) Edge { return Edge{BasePPM: base, HalfLifeDays: h, DayFactorPPM: DayFactor(h)} }
 	free := ProofPrice{Curve: "none"}
-	return Params{
+	p := Params{
 		Version:         DefaultVersion,
 		Schema:          1,
 		CollateralUnit:  "usd_cent",
@@ -196,6 +207,10 @@ func DefaultParams() Params {
 		Sponsor:       Sponsor{WindowDays: 7, SlotsPerShare: 3, DividendPPM: 1000000, DividendDays: 90, DailyCap: 100, Resource: "credit"},
 		Standing:      DefaultStanding(),
 	}
+	for kind, row := range assessedRows() {
+		p.Proofs[kind] = row
+	}
+	return p
 }
 
 // Body is the canonical JSON of the parameter set (sorted keys, no spaces),
@@ -271,6 +286,7 @@ func (p Params) Validate() error {
 		}
 		in("proofs."+kind+".forge", pr.Forge, 0, 1e9)
 		in("proofs."+kind+".rent", pr.Rent, 0, 1e9)
+		check(pr.Assess == "" && pr.UnitsPerCent == 0, "proofs.%s is a fixed price: no assess or units_per_cent", kind)
 		switch pr.Curve {
 		case "ramp":
 			curve("proofs."+kind, pr.HalfLifeDays, pr.DayFactorPPM)
@@ -280,7 +296,22 @@ func (p Params) Validate() error {
 			check(false, "proofs.%s.curve must be ramp or none", kind)
 		}
 	}
-	check(len(p.Proofs) == 5, "proofs names exactly domain, ed25519, board, url and nostr")
+	// The assessed rows are optional (version 4 has all three), each with
+	// its one rule, no curve, and a cap small enough for exact integers.
+	assessed := 0
+	for _, kind := range AssessedKinds() {
+		pr, ok := p.Proofs[kind]
+		if !ok {
+			continue
+		}
+		assessed++
+		in("proofs."+kind+".forge", pr.Forge, 0, 1e7)
+		in("proofs."+kind+".rent", pr.Rent, 0, 1e7)
+		in("proofs."+kind+".units_per_cent", pr.UnitsPerCent, 1, 1e9)
+		check(pr.Assess == assessedKinds[kind], "proofs.%s.assess must be %s", kind, assessedKinds[kind])
+		check(pr.Curve == "none" && pr.HalfLifeDays == 0 && pr.DayFactorPPM == 0, "proofs.%s: an assessed row takes curve none", kind)
+	}
+	check(len(p.Proofs) == 5+assessed, "proofs names exactly domain, ed25519, board, url and nostr, and optionally wallet, github and pow")
 	check(len(p.DomainSuffixes) <= 1024, "domain_suffixes lists at most 1024 suffixes")
 	for _, s := range p.DomainSuffixes {
 		check(strings.Count(s, ".") >= 1 && s == strings.ToLower(s) && !strings.HasPrefix(s, ".") && !strings.HasSuffix(s, "."), "domain suffix %q must be lowercase with two or more labels", s)

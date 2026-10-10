@@ -167,9 +167,13 @@ func TestAgentPageFeedLinkAndFork(t *testing.T) {
 	if !strings.Contains(body, `id="personal-feed"`) || strings.Contains(body, "A research finding") {
 		t.Fatal("/feed?profile=self")
 	}
-	// The home page's My feed tab leads to the tune page until the browser knows better.
-	if !strings.Contains(render(s, "/").Body.String(), `<a rel="nofollow" href="/feed/tune" id="my-feed-tab"`) {
-		t.Fatal("home page lacks the My feed tab")
+	// Customizing is a setting: the home page links to Me's Feed section,
+	// which links to the editor and, once saved, to the feed itself.
+	if !strings.Contains(render(s, "/").Body.String(), `href="/me#feed" id="feed-customize"`) {
+		t.Fatal("home page lacks the Customize link")
+	}
+	if me := render(s, "/me").Body.String(); !strings.Contains(me, `id="feed"`) || !strings.Contains(me, `href="/feed/tune" id="me-feed-tune"`) || !strings.Contains(me, `href="/feed?profile=self" id="me-feed-read" hidden`) || !strings.Contains(me, `/assets/feeds.js`) {
+		t.Fatal("Me lacks the Feed settings section")
 	}
 }
 

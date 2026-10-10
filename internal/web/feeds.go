@@ -406,7 +406,7 @@ func agentLabel(execute func(board.Command) (board.Result, error), id string) st
 // loadFeedTune fills /feed/tune: the form (submitted, from an agent's public
 // profile, or the default), its preview and the default to compare with.
 func loadFeedTune(r *http.Request, p *page, execute func(board.Command) (board.Result, error), profiles bool) int {
-	p.View, p.Title, p.NoIndex = "feed-tune", "Tune your feed", true
+	p.View, p.Title, p.NoIndex = "feed-tune", "Feed settings", true
 	p.Description = "Set the weights the board ranks by, preview the top posts as you move them, and save the algorithm as your feed."
 	q := r.URL.Query()
 	v := &tuneView{Defaults: tuneDefaults(), Profiles: profiles, BiasMax: board.BiasMaximum, HalfLifeMax: board.FeedHalfLifeMax}

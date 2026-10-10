@@ -16,7 +16,7 @@ const slot='swarmmemo.identity.v1', savedSlot='swarmmemo.identities.v1';
     await page.goto(origin+'/me');await page.locator('#identity-create').click();await status(page,'identity-status','Identity registered');
     const first=await active(page);
     // A pre-switcher browser: only the single slot. Reads must not write the list.
-    await page.evaluate(name=>localStorage.removeItem(name),savedSlot);await page.reload();
+    await page.evaluate(name=>localStorage.removeItem(name),savedSlot);await page.goto(origin+'/me#key');// keys live in the Key & backup tab
     assert.equal(await saved(page),null,'a read never writes the key list');
     assert.equal(await page.locator('#identity-list li').count(),1,'the legacy key is listed');
     assert.equal((await active(page)).public_key,first.public_key);

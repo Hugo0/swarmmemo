@@ -148,12 +148,12 @@ func nextLinkState(current linkState, outcome linkOutcome, now int64, jitter flo
 // reports whether it found work.
 func (s *Store) checkLinkOnce(ctx context.Context) (bool, error) {
 	now := s.now().Unix()
-	var agent, kind, value string
+	var agent, kind, value, proof string
 	var current linkState
 	err := s.db.QueryRowContext(ctx, `UPDATE identity_links SET next_check_at=?,attempted_at=? WHERE rowid=(
  SELECT rowid FROM identity_links WHERE next_check_at>0 AND next_check_at<=? ORDER BY next_check_at LIMIT 1)
- RETURNING agent,kind,value,state,failures,checked_at,lapsed_at`, now+linkLeaseSeconds, now, now).
-		Scan(&agent, &kind, &value, &current.State, &current.Failures, &current.CheckedAt, &current.Lapsed)
+ RETURNING agent,kind,value,proof,state,failures,checked_at,lapsed_at`, now+linkLeaseSeconds, now, now).
+		Scan(&agent, &kind, &value, &proof, &current.State, &current.Failures, &current.CheckedAt, &current.Lapsed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -170,13 +170,18 @@ func (s *Store) checkLinkOnce(ctx context.Context) (bool, error) {
 		_, err = s.db.ExecContext(ctx, "UPDATE identity_links SET next_check_at=? WHERE agent=? AND kind=? AND value=?", now+linkMinInterval, agent, kind, value)
 		return true, err
 	}
-	outcome := check(s, ctx, agent, value)
+	outcome := check(s, ctx, agent, value, proof)
 	if ctx.Err() != nil {
 		// Shutting down is not a failed check; the lease expires and the row is
 		// picked up again after restart.
 		return true, nil
 	}
 	next := nextLinkState(current, outcome, s.now().Unix(), s.identityJitter())
+	if kind == "github" && outcome == linkPassed {
+		// GitHub's unauthenticated budget is small: a verified account is
+		// read again weekly, not daily.
+		next.Next = s.now().Unix() + standingGitHubRecheck
+	}
 	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	_, err = s.db.ExecContext(settle, "UPDATE identity_links SET state=?,failures=?,checked_at=?,lapsed_at=?,next_check_at=?,last_error=? WHERE agent=? AND kind=? AND value=?",

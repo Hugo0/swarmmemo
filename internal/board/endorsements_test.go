@@ -231,7 +231,8 @@ func TestVouchLimitsAndSelfVouch(t *testing.T) {
 		}
 	}
 	for i, data := range []string{"", "{}", `{"value":1}`, `{"schema":2,"value":1}`, `{"schema":1,"value":-1}`, `{"schema":1,"value":2}`,
-		`{"schema":1,"value":0,"sponsor":true}`, `{"schema":1,"value":1,"extra":1}`, `{"schema":1,"value":1} {}`, `{"schema":1,"value":"1"}`, `{"schema":1,"value":1,"sponsor":"yes"}`, `[1]`} {
+		`{"schema":1,"value":0,"sponsor":true}`, `{"schema":1,"value":1,"extra":1}`, `{"schema":1,"value":1} {}`, `{"schema":1,"value":"1"}`, `{"schema":1,"value":1,"sponsor":"yes"}`, `[1]`,
+		`{"schema":1,"value":1,"weight":0}`, `{"schema":1,"value":1,"weight":51}`, `{"schema":1,"value":0,"weight":5}`, `{"schema":1,"value":1,"weight":"5"}`, `{"schema":1,"value":1,"weight":2.5}`} {
 		if _, err := vouchAs(s, alice, keyID(bob), data, fmt.Sprintf("bad-%d", i)); errCode(err) != "invalid_vouch" {
 			t.Fatalf("data %q: %v", data, err)
 		}
@@ -284,6 +285,41 @@ func TestVouchLimitsAndSelfVouch(t *testing.T) {
 	}
 }
 
+// A vouch may name its weight (1..VouchWeightMax, trust parameters version
+// 4); the record exports it, the signature covers it, and a record whose
+// weight differs from its signed data does not verify.
+func TestVouchWeight(t *testing.T) {
+	s := endorsementStore(t)
+	alice, bob, carol := keyFor(83), keyFor(84), keyFor(85)
+	register(t, s, alice)
+	register(t, s, bob)
+	register(t, s, carol)
+	res, err := vouchAs(s, alice, keyID(bob), `{"schema":1,"value":1,"weight":30}`, "w30")
+	if err != nil || res.Data["weight"] != 30 {
+		t.Fatalf("weighted vouch: %v %v", res.Data, err)
+	}
+	if _, err = vouchAs(s, alice, keyID(carol), `{"schema":1,"value":1}`, "w0"); err != nil {
+		t.Fatal(err)
+	}
+	records := exportAll(t, s, 10)
+	if len(records) != 2 || records[0].Weight != 30 || records[1].Weight != 0 {
+		t.Fatalf("export: %+v", records)
+	}
+	for _, r := range records {
+		if err := VerifyEndorsementRecord("swarmmemo.com", r); err != nil {
+			t.Fatalf("verify %+v: %v", r, err)
+		}
+	}
+	r := records[0]
+	r.Weight = 50
+	if VerifyEndorsementRecord("swarmmemo.com", r) == nil {
+		t.Fatal("a changed weight verified")
+	}
+	if raw, _ := json.Marshal(records[1]); strings.Contains(string(raw), `"weight"`) {
+		t.Fatalf("an unweighted vouch exports a weight: %s", raw)
+	}
+}
+
 // A retried vouch is one record: the request table answers the retry.
 func TestVouchRetryIsOneRecord(t *testing.T) {
 	s := endorsementStore(t)
@@ -302,18 +338,23 @@ func TestVouchRetryIsOneRecord(t *testing.T) {
 }
 
 func FuzzEndorsementData(f *testing.F) {
-	for _, seed := range []string{`{"schema":1,"value":1}`, `{"schema":1,"value":0,"sponsor":false}`, `{"schema":1,"value":1,"sponsor":true}`, `{"value":1}`, `{"schema":1,"value":1}{}`, "", "null", `{"schema":1e0,"value":1}`} {
+	for _, seed := range []string{`{"schema":1,"value":1}`, `{"schema":1,"value":0,"sponsor":false}`, `{"schema":1,"value":1,"sponsor":true}`, `{"value":1}`, `{"schema":1,"value":1}{}`, "", "null", `{"schema":1e0,"value":1}`,
+		`{"schema":1,"value":1,"weight":50}`, `{"schema":1,"value":0,"weight":1}`} {
 		f.Add(seed, seed)
 	}
 	key := keyFor(91)
 	f.Fuzz(func(t *testing.T, data, payload string) {
-		value, sponsor, err := parseVouchData(data)
+		value, sponsor, weight, err := parseVouchData(data)
 		if err == nil {
-			if value != 0 && value != 1 || sponsor && value != 1 {
-				t.Fatalf("accepted %q as %d %v", data, value, sponsor)
+			if value != 0 && value != 1 || sponsor && value != 1 || weight < 0 || weight > VouchWeightMax || weight > 0 && value != 1 {
+				t.Fatalf("accepted %q as %d %v %d", data, value, sponsor, weight)
 			}
-			again, _ := json.Marshal(map[string]any{"schema": 1, "value": value, "sponsor": sponsor})
-			if v, sp, err := parseVouchData(string(again)); err != nil || v != value || sp != sponsor {
+			body := map[string]any{"schema": 1, "value": value, "sponsor": sponsor}
+			if weight > 0 {
+				body["weight"] = weight
+			}
+			again, _ := json.Marshal(body)
+			if v, sp, w, err := parseVouchData(string(again)); err != nil || v != value || sp != sponsor || w != weight {
 				t.Fatalf("round trip of %q: %v", data, err)
 			}
 		} else if code := errCode(err); code != "invalid_vouch" {
@@ -324,7 +365,7 @@ func FuzzEndorsementData(f *testing.F) {
 		c := signed(key, Command{Operation: "vouch", Target: keyID(keyFor(92)), Data: data, Nonce: "n"})
 		payloadBytes := Canonical("swarmmemo.com", c)
 		sponsorCopy := sponsor
-		r := EndorsementRecord{Type: "vouch", Seq: 1, Voter: keyID(key), Target: keyID(keyFor(92)), PublicKey: c.PublicKey, Value: value, Sponsor: &sponsorCopy, SignedPayload: string(payloadBytes), Signature: &c.Signature}
+		r := EndorsementRecord{Type: "vouch", Seq: 1, Voter: keyID(key), Target: keyID(keyFor(92)), PublicKey: c.PublicKey, Value: value, Sponsor: &sponsorCopy, Weight: weight, SignedPayload: string(payloadBytes), Signature: &c.Signature}
 		if got := VerifyEndorsementRecord("swarmmemo.com", r); (got == nil) != (err == nil) {
 			t.Fatalf("data %q: parse %v, verify %v", data, err, got)
 		}

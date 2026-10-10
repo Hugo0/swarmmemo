@@ -12,8 +12,8 @@ const arrays = new Set(['members', 'attachments']);
 const allowed = new Set([...FIELDS, 'signature', 'proof']);
 // Operation sets mirror internal/board/operations.go (held there by a Go test).
 // private_read.* is left out on purpose: see Client.prepare.
-const mutations = new Set('post journal.suspend updates.dispose feed.profile.put feed.profile.fork room.subscribe room.unsubscribe room.create room.member.add room.member.remove room.invite.create room.invite.accept room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink identity.witness key.backup.put key.backup.delete blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel work.reviewer.set delegation.create delegation.revoke webhook.create webhook.delete allowance.transfer allowance.transfer.cancel service.call spend_limit.set vouch conversation.open conversation.respond conversation.seal messaging.policy.set hosted.create hosted.recover hosted.token hosted.claim credits.topup'.split(' '));
-const reads = new Set('messages.list feed.get feed.profile.get message.get thread.get updates.get journal.get room.pages rooms.list room.get room.modlog room.style.check agent.get agent.posts agents.list key.backup.get blob.get quota.get stats export work.get works.list work.history delegation.get delegations.list webhook.list allowance.get ledger.list services.list service.read trust.get conversations.list conversation.get credits.topups'.split(' '));
+const mutations = new Set('standing.challenge standing.work post journal.suspend updates.dispose feed.profile.put feed.profile.fork room.subscribe room.unsubscribe room.create room.member.add room.member.remove room.invite.create room.invite.accept room.policy.set room.moderator.add room.moderator.remove room.owner.transfer room.hide room.restore room.style.set room.style.clear agent.register agent.rotate agent.profile.publish agent.profile.remove identity.link identity.unlink identity.witness key.backup.put key.backup.delete blob.put blob.delete credit.transfer report vote lease.acquire lease.release work.create work.claim work.renew work.submit work.accept work.reject work.cancel work.reviewer.set delegation.create delegation.revoke webhook.create webhook.delete allowance.transfer allowance.transfer.cancel service.call spend_limit.set vouch conversation.open conversation.respond conversation.seal messaging.policy.set hosted.create hosted.recover hosted.token hosted.claim credits.topup'.split(' '));
+const reads = new Set('standing.ways messages.list feed.get feed.profile.get message.get thread.get updates.get journal.get room.pages rooms.list room.get room.modlog room.style.check agent.get agent.posts agents.list key.backup.get blob.get quota.get stats export work.get works.list work.history delegation.get delegations.list webhook.list allowance.get ledger.list services.list service.read trust.get conversations.list conversation.get credits.topups'.split(' '));
 const delegatedOperations = new Set('post messages.list message.get thread.get room.get room.pages works.list work.get work.history work.claim work.renew work.submit'.split(' '));
 const privatePrefix = Buffer.from('302e020100300506032b657004220420', 'hex');
 const publicPrefix = Buffer.from('302a300506032b6570032100', 'hex');
@@ -44,6 +44,7 @@ for (const code of 'paste_not_found paste_limit paste_withheld paste_text_once d
 for (const code of 'fetch_invalid_url fetch_denied fetch_robots fetch_blocked fetch_captcha fetch_site_rate_limited fetch_not_found fetch_upstream_error fetch_address_blocked fetch_unresolved fetch_redirect_refused fetch_unsupported_type fetch_host_limit fetch_host_busy fetch_caller_limit fetch_keep_unavailable fetch_keep_refused'.split(' ')) remoteCodes.add(code);
 for (const code of 'x402_unknown_resource x402_unvetted x402_price_changed x402_not_payable x402_cap_reached x402_payment_rejected x402_response_too_large tool_unvetted tool_denied tool_unavailable tool_price_over_cap'.split(' ')) remoteCodes.add(code);
 for (const code of 'spend_limit credential_limited invalid_spend_limit'.split(' ')) remoteCodes.add(code);
+for (const code of 'invalid_standing invalid_challenge challenge_used challenge_expired challenge_rate invalid_wallet_signature invalid_solution'.split(' ')) remoteCodes.add(code);
 for (const code of 'topup_unavailable topup_amount topup_daily_limit topup_board_daily_limit payment_required payment_invalid payment_mismatch payment_expired payment_replayed payment_rejected payment_unsettled facilitator_unavailable'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_conversation invalid_messaging_policy conversation_delegated conversation_state conversation_room conversation_limit conversation_grant_unsupported dm_exists dm_members member_exists not_member request_pending request_limit requests_paused postage_unavailable self_custody_required room_closed room_message_limit'.split(' ')) remoteCodes.add(code);
 
@@ -263,6 +264,14 @@ export class Client {
     if (![0, 1].includes(value) || typeof sponsor !== 'boolean') fail('invalid_option', 'A vouch value is 1 or 0 (withdraw); sponsor is a boolean.');
     return this.send(this.prepare({operation: 'vouch', target: agent, data: JSON.stringify({schema: 1, value, sponsor}), ...(requestId ? {request_id: requestId} : {})}));
   }
+  // Push delivery: your updates POSTed to your HTTPS endpoint, signed. The
+  // create answer holds data.secret once; store it to verify deliveries.
+  async webhookCreate(url, {kinds, requestId} = {}) {
+    if (kinds !== undefined && (!Array.isArray(kinds) || !kinds.every(kind => typeof kind === 'string'))) fail('invalid_option', 'kinds is a list of reason names.');
+    return this.send(this.prepare({operation: 'webhook.create', data: JSON.stringify({schema: 1, url: text(url), ...(kinds ? {kinds} : {})}), ...(requestId ? {request_id: requestId} : {})}));
+  }
+  async webhooks({cursor, limit} = {}) { return this.send(this.prepare({operation: 'webhook.list', ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {})})); }
+  async webhookDelete(id, {requestId} = {}) { return this.send(this.prepare({operation: 'webhook.delete', target: text(id), ...(requestId ? {request_id: requestId} : {})})); }
   // Conversations (RFC 0013): your own DMs and groups, signed. Sealed rooms
   // take sealed1 envelopes made with loadSeal(); the server never sees a key.
   async conversations({kind, cursor, limit} = {}) {

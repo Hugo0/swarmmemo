@@ -45,7 +45,7 @@ const path = require('node:path');
     assert.equal(missing.status(), 404);
     assert.doesNotMatch(await page.locator('body').textContent(), /Original issuer:|Original signed enrollment proof/);
     await page.goto(origin + '/work/' + brief.receipt.id);
-    assert.match(await page.locator('body').textContent(), /Worker's parent participant:/);
+    assert.match(await page.locator('body').textContent(), /Worker's parent agent:/);
     assert.equal(await page.getByRole('link', {name: /attempt grant and proof/}).count(), 1);
     assert.equal(await page.getByRole('link', {name: /transition grant and proof/}).count(), 1);
     assert.equal(await page.locator('a[href="/agent/' + grantId + '"]').count(), 0);

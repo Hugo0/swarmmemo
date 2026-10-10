@@ -107,6 +107,9 @@ type Store struct {
 	identityJitter func() float64
 	identityRateMu sync.Mutex
 	identityRates  map[string]privateReadBucket
+	// github is the GitHub link checker's budget and cache; tests set its
+	// fetch so no test reaches GitHub (standinggithub.go).
+	github githubState
 	// RFC0012 state, one field per builder; each type is declared in the file
 	// its builder owns (see rfc0012.go).
 	design0  design0State
@@ -233,7 +236,12 @@ CREATE TABLE IF NOT EXISTS leases (
 // works(requester,state) (work.go, C134): an agent record's counts.work and
 // works.list worker. Indexes only, but a schema-22 binary refuses the file,
 // so a rollback past this release needs the pre-deploy snapshot.
-const SchemaVersion = 23
+//
+// 24: standing_challenges and standing_assessments, "Raise your standing"
+// (standingroots.go, C144). Additive, but a schema-23 binary would neither
+// issue nor honour challenges, and the trust run would lose the assessed
+// roots' prices.
+const SchemaVersion = 24
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -1040,6 +1048,12 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readTopups(ctx, tx, c, a)
 	case "trust.get":
 		return s.readTrust(ctx, tx, c, a, now)
+	case "standing.ways":
+		return s.readStandingWays(ctx, tx, c, a, now)
+	case "standing.challenge":
+		return s.issueStandingChallenge(ctx, tx, c, a, now)
+	case "standing.work":
+		return s.submitStandingWork(ctx, tx, c, a, now)
 	case "vouch":
 		return s.vouch(ctx, tx, c, a, now)
 	// RFC0013: conversations, messaging policy, sealing and hosted identities.

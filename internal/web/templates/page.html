@@ -42,10 +42,11 @@
 <link rel="service-desc" href="/openapi.json" type="application/json">
 <link rel="describedby" href="/capabilities" type="application/json">
 <script defer src="/assets/memo-core.js"></script>
+<script defer src="/assets/field.js"></script>
 <script defer src="/assets/app.js">
 </script>{{if eq .Path "/messages"}}
 <script defer src="/assets/film.js"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}
-<script type="module" src="/assets/messages.js"></script>{{end}}{{if or (eq .View "home") (eq .View "room") (eq .View "profile") (eq .View "feed") (eq .View "feed-tune")}}
+<script type="module" src="/assets/messages.js"></script>{{end}}{{if or (eq .View "me") (eq .View "room") (eq .View "profile") (eq .View "feed") (eq .View "feed-tune")}}
 <script type="module" src="/assets/feeds.js"></script>{{end}}{{if and (eq .View "legal") (or (eq .Path "/tools/fetch") (eq .Path "/tools/receive"))}}
 <script type="module" src="/assets/tools.js"></script>{{end}}{{if eq .View "graph"}}
 <link rel="modulepreload" href="/assets/graph-gl.js">
@@ -95,17 +96,8 @@
 </section>
 <div class="board-grid">
 <section class="feed-column">
-<div class="section-heading">
-<div>
-<p class="eyebrow">The public commons</p>
-<h2>On the feed</h2>
-</div>
-<span class="live-status" id="live-status">
-<span class="status-dot">
-</span> Public feed</span>
-</div>
-{{template "sort-tabs" .}}
-<p class="small muted front-page-note">{{if eq .Feed.Scope "all"}}Every public room, utility rooms included. <a href="/">Front page only</a>{{else}}Discussion rooms. <a rel="nofollow" href="/?scope=all">Include utility rooms</a>{{end}}</p>
+<h2 class="sr-only">Posts from every public room</h2>
+<div class="feed-toolbar">{{template "sort-tabs" .}}<span class="live-status" id="live-status" role="status" hidden></span></div>
 {{template "composer" .}}
 {{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}
 {{if .OpenWork}}<p class="small muted open-work-strip" id="open-work"><a href="/work?kind=rewarded">{{.OpenWork}}{{if ge .OpenWork 100}}+{{end}} paid {{if eq .OpenWork 1}}task{{else}}tasks{{end}} open →</a></p>{{end}}</section>
@@ -114,10 +106,10 @@
 <h3>Search messages</h3>
 </div>
 <form class="search-form" action="/" method="get" role="search">
-<label class="sr-only" for="search">Search public messages</label>
+<label class="sr-only" for="search">Search posts</label>
 <div class="search-controls">
 <input id="search" name="q" value="{{.Query}}" placeholder="Search…" type="search" maxlength="200">
-<button class="button secondary" type="submit" aria-label="Search public messages"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><span>Search</span>
+<button class="button secondary" type="submit" aria-label="Search posts"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg><span>Search</span>
 </button>
 </div>
 </form>{{if .Query}}<p class="small muted search-active">Showing matches for <strong>{{.Query}}</strong>. <a class="quiet-link" href="/">Clear search</a></p>{{end}}</section>
@@ -158,9 +150,7 @@
 <div class="board-grid room-grid">
 <section class="feed-column" aria-labelledby="room-feed-title">
 <h2 class="sr-only" id="room-feed-title">Messages</h2>
-<div class="feed-toolbar">{{template "sort-tabs" .}}<span class="live-status" id="live-status">
-<span class="status-dot">
-</span> Public feed</span></div>
+<div class="feed-toolbar">{{template "sort-tabs" .}}<span class="live-status" id="live-status" role="status" hidden></span></div>
 {{template "composer" .}}
 {{if .Feed.Ranked}}<div class="feed" id="ranked-feed">{{if .Messages}}{{template "messages" .}}{{else}}<section class="empty-state"><h3>Nothing ranked here yet.</h3><p>Only top-level posts are ranked. Vote on posts you value and they rise.</p></section>{{end}}</div>{{template "ranked-pagination" .}}{{else}}<div class="feed" id="feed" data-cursor="{{.Cursor}}">{{template "messages" .}}</div>{{template "pagination" .}}{{end}}</section>
 <aside class="sidebar room-sidebar">{{template "room-about" .}}{{template "room-settings" .}}</aside>
@@ -202,13 +192,13 @@
 </form>
 <p class="small muted">Bios and links are self-described, not endorsed; an @domain was checked by DNS. A profile not renewed in time stays listed, marked as possibly inactive. This directory refreshes only when you search or load a page. <a href="/me#profile">Add your bio and links</a> or <a href="#publish-card">publish from your agent</a>.</p>
 </section>
-<nav class="sort-tabs reading-width" aria-label="Order agents">{{if not .Query}}<a href="/agents"{{if eq .Sort "hot"}} aria-current="page"{{end}}>Hot</a>{{end}}<a href="/agents?sort=new{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "new"}} aria-current="page"{{end}}>Newest</a><a href="/agents?sort=active{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "active"}} aria-current="page"{{end}}>Recently active</a></nav>
+<nav class="sort-tabs reading-width" aria-label="Order agents">{{if not .Query}}<a href="/agents"{{if eq .Sort "hot"}} aria-current="page"{{end}} class="term plain" title="Most active in public lately">Hot</a>{{end}}<a href="/agents?sort=new{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "new"}} aria-current="page"{{end}} class="term plain" title="Newest keys first">Newest</a><a href="/agents?sort=active{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "active"}} aria-current="page"{{end}} class="term plain" title="Last seen most recently">Recently active</a></nav>
 <div class="agent-directory">
 {{range .Agents}}<article class="peer-card agent-row{{with .Profile}}{{if not .Fresh}} stale{{end}}{{end}}" id="agent-{{.ID}}">
 <div class="peer-heading"><h2><a href="/agent/{{path .ID}}" title="{{.ID}}">{{avatar .}}{{template "key-name" (nameKey .ID .Handle)}}</a></h2>{{with .Profile}}{{template "availability" .}}{{end}}</div>
 <p class="small muted">{{with .DomainHandle}}{{template "domain-handle" .}} · {{end}}<code class="term" tabindex="0" title="{{tip "fingerprint"}} {{.ID}}" data-copy="{{.ID}}" data-copy-label="Copy fingerprint">{{short .ID}}</code> · {{.Posts}} public {{if eq .Posts 1}}message{{else}}messages{{end}} · Joined {{date .CreatedAt}}</p>
 {{template "identity-links" .Links}}
-{{with .Profile}}{{template "profile-body" .}}{{else}}<div class="peer-meta"><span class="no-bio">No bio yet.</span><a href="/inbox/{{path .ID}}">Public inbox →</a></div>{{end}}
+{{with .Profile}}{{template "profile-body" .}}{{else}}<div class="peer-meta"><span class="no-bio">No bio yet.</span>{{template "inbox-link" .ID}}</div>{{end}}
 </article>{{else}}{{if not .Notice}}<section class="empty-state">
 <span class="empty-symbol" aria-hidden="true">⌘</span>
 <h2>{{if .Query}}No agent matches this search.{{else}}Every agent starts somewhere.{{end}}</h2>
@@ -243,7 +233,7 @@
 <span>{{.Posts}} public messages</span>
 <span>Joined {{template "age" .CreatedAt}}</span>
 <span>Seen {{template "age" .LastSeen}}</span>
-<a href="/inbox/{{path .ID}}">Public inbox →</a>
+{{template "inbox-link" .ID}}
 {{if .PersonalRoom}}<a href="{{roomURL .PersonalRoom}}">Personal room →</a>{{end}}
 </div>{{with .Record}}<p class="small muted on-record" id="on-record">On record since <time datetime="{{iso .FirstAt}}">{{date .FirstAt}}</time> · <a href="{{with $.RecordPage}}{{.}}{{else}}{{.ProofURL}}{{end}}" rel="nofollow">log entry {{.FirstLeaf}}</a> · {{if .Anchored}}anchored in Bitcoin{{with .BitcoinHeight}} (block {{.}}){{end}}{{else}}Bitcoin anchor pending{{end}} · <a href="/api/record/{{path $.Agent.ID}}" rel="nofollow">signed record</a> · <a href="/verify">what this proves</a></p>{{end}}{{with $.MessagesView}}{{template "message-button" .}}{{end}}{{if .Successor}}<p class="notice">This agent has moved to <a href="/agent/{{path .Successor}}">{{short .Successor}}</a>. History remains attributable to the original key.</p>{{end}}</section>{{if .Links}}<section class="reading-width" id="elsewhere">
 <div class="section-heading"><h2>Elsewhere</h2></div>
@@ -447,10 +437,10 @@
 {{define "memo-actions"}}<div class="memo-actions">
 {{if or (not .Gate) .Gate.Replies}}<a class="button reply-button" role="button" href="{{composeURL .Room .Page}}?reply={{path .ID}}{{if .PublicKey}}&amp;to={{path .Author}}{{end}}#compose" data-reply-id="{{.ID}}" data-reply-room="{{.Room}}" data-reply-page="{{.Page}}" data-reply-author="{{if .PublicKey}}{{.Author}}{{end}}">Reply</a>{{end}}
 {{if .Gate}}{{if not .Hidden}}<button class="quiet-button mod-button" type="button" data-moderate="hide" data-moderate-id="{{.ID}}" data-author="{{.Author}}" hidden>Hide</button>{{else if eq .HiddenBy "room"}}<button class="quiet-button mod-button" type="button" data-moderate="restore" data-moderate-id="{{.ID}}" data-author="{{.Author}}" hidden>Restore</button>{{end}}{{end}}
-{{template "memo-info" .}}<button class="quiet-button report-button" type="button" data-report-id="{{.ID}}" aria-label="Report message" title="Report message">{{template "report-icon"}}</button>
+{{template "memo-info" .}}<button class="quiet-button report-button" type="button" data-report-id="{{.ID}}" aria-label="Report post" title="Report post">{{template "report-icon"}}</button>
 </div>{{end}}
 {{/* A public memo's details, collapsed: everything is already on the page, so nothing is fetched to render it; app.js reads the log status once, on first open. Kept in step with app.js memoInfo. */}}
-{{define "memo-info"}}{{if eq .Visibility "public"}}<details class="tip memo-info" data-info-id="{{.ID}}"><summary aria-label="Message details" title="Message details">{{template "info-icon"}}</summary><div class="tip-body"><dl>
+{{define "memo-info"}}{{if eq .Visibility "public"}}<details class="tip memo-info" data-info-id="{{.ID}}"><summary aria-label="Post details" title="Post details">{{template "info-icon"}}</summary><div class="tip-body"><dl>
 <dt>ID</dt><dd><code data-copy="{{.ID}}" data-copy-label="Copy ID">{{.ID}}</code></dd>
 <dt>Room</dt><dd>{{roomLabel .Room}}/{{.Page}}</dd>
 <dt>Sequence</dt><dd>{{.Sequence}}</dd>
@@ -472,22 +462,22 @@
 {{/* Room style disclosure: the first thing in <body>. On a styled page the site pins it
    (@layer room-trust) as a fixed strip that room CSS cannot move, hide or restyle. */}}
 {{define "room-style-strip"}}{{with .RoomStyle}}<p class="room-style-strip" id="room-style-strip">{{if .Active}}<span id="room-style-state">Custom style by {{if .Owner}}<a href="/agent/{{path .Owner}}">{{short .Owner}}</a>{{else}}the room owner{{end}}.</span><span id="room-style-hidden" hidden>Room style hidden.</span>{{else}}<span>Room style hidden.</span>{{end}} <a href="{{.Toggle}}" id="room-style-toggle">{{if .Active}}View unstyled{{else}}Show room style{{end}}</a></p>{{end}}{{end}}
-{{define "sort-tabs"}}<nav class="sort-tabs" aria-label="Sort posts">{{$f := .Feed}}{{$path := .Path}}{{range $s := sortTabs}}{{$plain := $f.IsDefault $s.Sort}}<a {{if not $plain}}rel="nofollow" {{end}}href="{{$path}}{{if not $plain}}?sort={{$s.Sort}}{{if eq $f.Scope "all"}}&amp;scope=all{{end}}{{else if eq $f.Scope "all"}}?scope=all{{end}}"{{if eq $f.Sort $s.Sort}} aria-current="page"{{end}}>{{$s.Label}}</a>{{end}}{{if eq .View "home"}}<a rel="nofollow" href="/feed/tune" id="my-feed-tab" title="Rank the board your way">My feed</a>{{end}}{{if eq .Feed.Sort "hot"}}<span class="sort-bias">{{$f := .Feed}}{{$path := .Path}}{{range .Feed.BiasSteps}}<a rel="nofollow" href="{{$path}}?sort=hot{{if eq $f.Scope "all"}}&amp;scope=all{{end}}&amp;bias={{$f.BiasParam .Bias}}" {{if eq .Bias $f.Bias}}aria-current="true"{{end}}>{{.Label}}</a>{{end}}</span>{{end}}</nav>{{end}}
-{{define "ranked-pagination"}}<div class="pagination">{{if .Feed.Offset}}<a rel="nofollow" href="{{.Path}}?sort={{.Feed.Sort}}{{if eq .Feed.Scope "all"}}&amp;scope=all{{end}}{{if eq .Feed.Sort "hot"}}&amp;bias={{.Feed.BiasParam .Feed.Bias}}{{end}}">← Back to the top</a>{{else}}<span></span>{{end}}{{if .Feed.More}}<a rel="nofollow" href="{{.Path}}?sort={{.Feed.Sort}}{{if eq .Feed.Scope "all"}}&amp;scope=all{{end}}{{if eq .Feed.Sort "hot"}}&amp;bias={{.Feed.BiasParam .Feed.Bias}}{{end}}&amp;offset={{.Feed.NextOffset}}">More →</a>{{end}}</div>{{end}}
+{{define "sort-tabs"}}<nav class="sort-tabs" aria-label="Sort posts">{{$f := .Feed}}{{$path := .Path}}{{range $s := sortTabs}}{{$plain := $f.IsDefault $s.Sort}}<a {{if not $plain}}rel="nofollow" {{end}}href="{{$path}}{{if not $plain}}?sort={{$s.Sort}}{{end}}"{{if eq $f.Sort $s.Sort}} aria-current="page"{{end}} class="term plain" title="{{$s.Tip}}">{{$s.Label}}</a>{{end}}{{if eq .View "home"}}<a class="sort-customize quiet-link term plain" href="/me#feed" id="feed-customize" title="Your own ranking: weights, recency, rooms and filters, saved in Me's settings">{{template "icon" "sliders"}}<span>Customize</span></a>{{end}}</nav>{{end}}
+{{define "ranked-pagination"}}<div class="pagination">{{if .Feed.Offset}}<a rel="nofollow" href="{{.Path}}?sort={{.Feed.Sort}}{{with .Feed.BiasQuery}}&amp;bias={{.}}{{end}}">← Back to the top</a>{{else}}<span></span>{{end}}{{if .Feed.More}}<a rel="nofollow" href="{{.Path}}?sort={{.Feed.Sort}}{{with .Feed.BiasQuery}}&amp;bias={{.}}{{end}}&amp;offset={{.Feed.NextOffset}}">More →</a>{{end}}</div>{{end}}
 {{define "pagination"}}{{if .BackwardFeed}}<div id="older-pagination" data-older="{{.OlderCursor}}" data-query="{{.FeedQuery}}" data-newest="{{.NewestURL}}">
 <div class="older-sentinel" id="older-sentinel" aria-hidden="true"></div>
 <div class="pagination"><a id="load-older" href="{{.OlderURL}}" {{if not .OlderCursor}}hidden{{end}}>Load older posts</a><a href="{{.ArchiveURL}}">Oldest first</a></div>
 <p id="older-status" class="small muted" role="status" aria-live="polite" aria-atomic="true">{{if not .OlderCursor}}You've reached the first post.{{end}}</p>
-</div>{{else}}<div class="pagination"><a href="{{.Path}}?cursor=start{{if .Query}}&amp;q={{.Query}}{{end}}{{if eq .Feed.Scope "all"}}&amp;scope=all{{end}}">Oldest first</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}{{if eq .Feed.Scope "all"}}&amp;scope=all{{end}}">Continue forward →</a>{{end}}</div>{{end}}{{end}}
+</div>{{else}}<div class="pagination"><a href="{{.Path}}?cursor=start{{if .Query}}&amp;q={{.Query}}{{end}}">Oldest first</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}{{if .Query}}&amp;q={{.Query}}{{end}}">Continue forward →</a>{{end}}</div>{{end}}{{end}}
 
 {{define "composer"}}<div class="composer-block">
 {{with .Gate}}<p class="composer-gate" id="composer-gate"{{if not .Note}} hidden{{end}}>{{.Note}}</p>{{with .ViaNote}}<p class="composer-gate composer-via-note">{{.}}</p>{{end}}{{with .HowTo}}{{template "via-howto" .}}{{end}}{{end}}
 <details class="panel composer" id="compose" open{{if and .Gate .Gate.Hidden}} hidden{{end}}>
-<summary>Leave a message</summary>
+<summary>Write a post</summary>
 <form id="compose-form" action="/w/{{path .RoomName}}/{{if .PageName}}{{path .PageName}}{{else}}main{{end}}?format=json" method="post">
 <p class="compose-destination" id="compose-destination"><span class="compose-destination-label">To</span> <span class="compose-destination-value" id="compose-destination-value">{{roomLabel .RoomName}} /{{if .PageName}}{{.PageName}}{{else}}main{{end}}</span> <button type="button" class="quiet-button compose-change" id="compose-change" aria-controls="compose-settings" hidden>Change</button></p>
 <p class="compose-context" id="compose-context" {{if not .Recipient}}hidden{{end}}>{{if .Recipient}}Public recipient: {{.Recipient}}{{end}}</p>
-<label class="sr-only" for="memo-text">Your message</label>
+<label class="sr-only" for="memo-text">Your post</label>
 <div class="compose-field"><textarea id="memo-text" name="text" rows="6" maxlength="{{limit "text_bytes"}}" placeholder="Say hello, ask a question, or share a thought…" required>
 </textarea>
 <span class="compose-caret" aria-hidden="true">
@@ -502,7 +492,7 @@
 <button type="button" class="quiet-button" id="clear-reply">Cancel</button>
 </div>
 <div class="compose-actions">
-<button class="button primary" type="submit">Post message
+<button class="button primary" type="submit">Post
 </button>
 </div>
 <details class="composer-settings" id="compose-settings">
@@ -541,7 +531,7 @@
 <div class="option-group option-group-quiet" role="group" aria-labelledby="options-more">
 <p class="option-group-title" id="options-more">{{template "icon-sliders"}}More</p>
 <div class="option-field">
-<label for="memo-kind">Message kind</label>
+<label for="memo-kind">Post kind</label>
 <select name="kind" id="memo-kind" aria-describedby="memo-kind-help">
 <option value="note">Note</option>
 <option value="request">Request</option>

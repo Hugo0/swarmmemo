@@ -7,8 +7,9 @@ import (
 	"testing"
 )
 
-// The home feed is the front page, with every room one link away; the
-// "Every room" view reads scope=all, as the API does.
+// The home feed is the front page: every public room except those taken off
+// it (front_page false, the blocklist), so it never forces scope=all. Hot is
+// the default, the tabs are New, Hot and Top, and no link carries a scope.
 func TestHomeFeedIsTheFrontPage(t *testing.T) {
 	feedData := func(path string) (string, string) {
 		s := &testService{}
@@ -22,41 +23,31 @@ func TestHomeFeedIsTheFrontPage(t *testing.T) {
 		t.Fatalf("%s read no feed", path)
 		return "", ""
 	}
-	// Hot is the default order; New and Top are a tab away.
 	data, body := feedData("/")
-	if !strings.Contains(data, `"sort":"hot"`) || !strings.Contains(body, `href="/?scope=all">Include utility rooms</a>`) {
-		t.Fatalf("front page: data %q", data)
+	if !strings.Contains(data, `"sort":"hot"`) || strings.Contains(data, `"scope":"all"`) {
+		t.Fatalf("home: data %q", data)
 	}
-	for _, want := range []string{`<a href="/" aria-current="page">Hot</a>`, `<a rel="nofollow" href="/?sort=new">New</a>`, `<a rel="nofollow" href="/?sort=top">Top</a>`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("front page tabs: no %s", want)
+	tabs := between(body, `<nav class="sort-tabs" aria-label="Sort posts">`, `</nav>`)
+	newAt, hotAt, topAt := strings.Index(tabs, `>New</a>`), strings.Index(tabs, `>Hot</a>`), strings.Index(tabs, `>Top</a>`)
+	if newAt < 0 || !(newAt < hotAt && hotAt < topAt) || !strings.Contains(tabs, `<a href="/" aria-current="page"`) {
+		t.Errorf("home tabs are not New, Hot (current), Top: %s", tabs)
+	}
+	for _, gone := range []string{"scope=all", "My feed", "sort-bias", "Include utility rooms", "On the feed", "Public feed"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("home still shows %q", gone)
 		}
 	}
-	if data, _ = feedData("/?sort=new"); !strings.Contains(data, `"sort":"new"`) {
-		t.Fatalf("new tab: data %q", data)
+	if !strings.Contains(tabs, `href="/me#feed" id="feed-customize"`) {
+		t.Error("home lacks the Customize link to Me's feed settings")
 	}
-	// A search, a cursor or a filter reads the chronological stream.
-	if data, _ = feedData("/?q=needle"); !strings.Contains(data, `"sort":"new"`) {
-		t.Fatalf("search: data %q", data)
-	}
-	data, body = feedData("/?scope=all")
-	if !strings.Contains(data, `"scope":"all"`) || !strings.Contains(data, `"sort":"hot"`) || !strings.Contains(body, `<a href="/">Front page only</a>`) {
-		t.Fatalf("every room: data %q", data)
-	}
-	if data, _ = feedData("/?scope=all&sort=hot"); !strings.Contains(data, `"scope":"all"`) || !strings.Contains(data, `"sort":"hot"`) {
-		t.Fatalf("ranked every room: data %q", data)
-	}
-	// The sort tabs and bias steps keep the chosen scope, and the default
-	// front page's links never add it (dcf-work-earn-agent d28cab6e).
-	_, body = feedData("/?scope=all&sort=hot")
-	for _, want := range []string{`href="/?scope=all"`, `href="/?sort=new&amp;scope=all"`, `href="/?sort=top&amp;scope=all"`, `href="/?sort=hot&amp;scope=all&amp;bias=`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("every room, hot: no %s", want)
+	for _, path := range []string{"/?sort=new", "/?q=needle", "/?sort=top"} {
+		if data, _ = feedData(path); strings.Contains(data, `"scope":"all"`) {
+			t.Errorf("%s: data %q", path, data)
 		}
 	}
-	_, body = feedData("/?sort=hot")
-	if strings.Contains(body, `scope=all&amp;`) || strings.Contains(body, `sort=hot&amp;scope=all`) || !strings.Contains(body, `href="/?sort=top"`) || !strings.Contains(body, `href="/?sort=new"`) {
-		t.Error("the front page's sort links must not add scope=all")
+	// A chosen recency still pages on, without a scope.
+	if _, body = feedData("/?sort=hot&bias=3&offset=40"); !strings.Contains(body, `href="/?sort=hot&amp;bias=3"`) {
+		t.Error("hot pagination drops a chosen bias")
 	}
 }
 

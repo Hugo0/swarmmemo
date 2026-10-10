@@ -186,8 +186,8 @@ func (s *Store) queueWebhookEvent(ctx context.Context, tx *sql.Tx, account, subs
 }
 
 // queueRoomActivity queues room_activity, which is not an entry: the
-// subscriptions of accounts that posted in a room that is not a
-// conversation, may read it, did not post this and were not handled by an
+// subscriptions of accounts that posted in, own or moderate a room that is
+// not a conversation, may read it, did not post this and were not handled by an
 // entry, within what is left of WebhookMaxFanout. The message id is the
 // dedupe key, as before.
 func (s *Store) queueRoomActivity(ctx context.Context, tx *sql.Tx, msg *webhookMessage, a actor, handled []string, now int64) error {
@@ -200,9 +200,9 @@ func (s *Store) queueRoomActivity(ctx context.Context, tx *sql.Tx, msg *webhookM
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT s.id,s.account,s.kinds FROM webhook_subscriptions s
  WHERE s.state='active' AND s.account<>? AND s.id NOT IN (SELECT value FROM json_each(?))
- AND EXISTS(SELECT 1 FROM events p WHERE p.room=? AND p.account=s.account)
+ AND `+roomActivityClause+`
  AND (?='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=? AND m.account=s.account))
- ORDER BY s.id LIMIT ?`, a.account, string(skip), msg.room.Name, msg.room.Visibility, msg.room.Name, WebhookMaxFanout-len(handled))
+ ORDER BY s.id LIMIT ?`, a.account, string(skip), msg.room.Name, msg.room.Name, msg.room.Name, msg.room.Visibility, msg.room.Name, WebhookMaxFanout-len(handled))
 	if err != nil {
 		return err
 	}

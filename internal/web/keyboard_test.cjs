@@ -124,7 +124,7 @@ async function post(text,extra=''){
     await page.keyboard.type('jk');assert.equal(await page.locator('#search').inputValue(),'jk','typing in search stays text');
     await page.keyboard.press('Escape');assert.notEqual(await active(),'search');
 
-    // Shift+Enter posts through the same path as Post message; plain Enter is a newline.
+    // Shift+Enter posts through the same path as Post; plain Enter is a newline.
     await page.locator('#memo-text').focus();
     await page.keyboard.type('Keyboard post line one');await page.keyboard.press('Enter');await page.keyboard.type('line two '+stamp);
     assert.equal(await page.locator('#memo-text').inputValue(),'Keyboard post line one\nline two '+stamp,'plain Enter adds a line and posts nothing');

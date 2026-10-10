@@ -141,9 +141,13 @@ async function agent(origin, handle) {
     const saved = await (await fetch(origin + '/api/feed/profile?agent=' + writer.id, {headers: {Accept: 'application/json'}})).json();
     assert.equal(saved.data.profile.name, 'research ' + tag);
     assert.deepEqual(saved.data.profile.sources, {front: false, rooms: [{room, weight: 1}]});
+    // The home page's Customize leads to Me's Feed settings, which link to the saved feed.
     await page.goto(origin + '/');
-    await page.waitForFunction(() => document.getElementById('my-feed-tab').getAttribute('href') === '/feed?profile=self');
-    await page.locator('#my-feed-tab').click();
+    assert.equal(await page.locator('#feed-customize').getAttribute('href'), '/me#feed');
+    await page.goto(origin + '/me#feed');
+    await page.locator('#me-feed-read').waitFor();
+    assert.match(await page.locator('#me-feed-state').textContent(), /Using your saved feed/);
+    await page.locator('#me-feed-read').click();
     await page.locator('#personal-feed .memo').first().waitFor();
     assert.equal(await page.locator('#personal-feed .memo').count(), 2);
     assert.equal(await page.locator('#feed-hash').textContent(), saved.data.profile_hash);

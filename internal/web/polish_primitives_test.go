@@ -24,7 +24,7 @@ func TestPrimitivesServerRenderedContract(t *testing.T) {
 	Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	body := w.Body.String()
 	for _, want := range []string{
-		`<summary>Leave a message</summary>`,
+		`<summary>Write a post</summary>`,
 		`<span class="compose-destination-label">To</span>`,
 		`<span class="compose-destination-value" id="compose-destination-value">#lobby /main</span>`,
 		`<button type="button" class="quiet-button compose-change" id="compose-change" aria-controls="compose-settings" hidden>Change</button>`,

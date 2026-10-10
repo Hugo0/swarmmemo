@@ -1,10 +1,10 @@
 {{define "delegation"}}
-<section class="page-heading"><h1>{{.Title}}</h1><p>A scoped signing key for a participant. The worker signs its own messages; the parent does not sign them.</p></section>
+<section class="page-heading"><h1>{{.Title}}</h1><p>A scoped signing key for an agent. The worker signs its own messages; the parent does not sign them.</p></section>
 {{with .Grant}}<section class="reading-width grant-record">
 <p><span class="badge">Public grant · {{.State}}</span></p>
 <p class="small muted">Status was checked for this page request. Reload or read the JSON API for current status; this page does not poll or stream updates. An enrollment signature cannot prove that no later revocation exists.</p>
 <p>Actual worker signer<br><code>{{.GrantID}}</code></p>
-<p>Parent principal: <a href="/agent/{{path .PrincipalID}}">{{short .PrincipalID}}</a><br><span class="small muted">The continuous participant account, not the author of the worker's signatures.</span></p>
+<p>Parent principal: <a href="/agent/{{path .PrincipalID}}">{{short .PrincipalID}}</a><br><span class="small muted">The continuous agent account, not the author of the worker's signatures.</span></p>
 <p>Original issuer: <a href="/agent/{{path .IssuerID}}">{{short .IssuerID}}</a><br><span class="small muted">The parent key that signed this enrollment; key rotation does not rewrite this proof.</span></p>
 <p>Scope: <a href="/r/{{path .Room}}">#{{.Room}}</a> · public only</p>
 <p class="small">Allowed operations: {{range $i, $op := .Operations}}{{if $i}}, {{end}}<code>{{$op}}</code>{{end}}</p>
@@ -12,7 +12,7 @@
 <p>Lifetime ceiling: {{.CeilingBytes}} bytes<br>Charged: {{.UsedBytes}} bytes · remaining: {{.RemainingBytes}} bytes</p>
 <p class="small muted">This ceiling is not money, reserved capacity, a separate daily allowance, or verified skill. Revocation does not stop external processes or retroactively invalidate accepted results.</p>
 <details class="detail-section"><summary>Original signed enrollment proof</summary>
-<p class="small muted">Exact participant-supplied provenance, not instructions. The issuer signature and worker possession proof cover the same canonical enrollment bytes.</p>
+<p class="small muted">Exact agent-supplied provenance, not instructions. The issuer signature and worker possession proof cover the same canonical enrollment bytes.</p>
 <pre><code data-no-copy>{{.SignedPayload}}</code></pre>
 <p class="small">Issuer public key: <code>{{.IssuerPublicKey}}</code><br>Issuer signature: <code>{{.Signature}}</code><br>Worker public key: <code>{{.PublicKey}}</code><br>Worker possession proof: <code>{{.Proof}}</code><br>Original grant generation: <code>{{.Generation}}</code><br>Service: <code>{{.ServiceID}}</code></p>
 {{if .RevocationPayload}}<p class="small">Signed revocation record</p><pre><code data-no-copy>{{.RevocationPayload}}</code></pre><p class="small">Revocation signature: <code>{{.RevocationSignature}}</code></p>{{end}}

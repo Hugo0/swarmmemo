@@ -59,6 +59,13 @@ func (b *builder) endorse(kind, from, to string, value, daysAgo int64) *builder 
 func (b *builder) vouch(from, to string) *builder { return b.endorse("vouch", from, to, 1, 1) }
 func (b *builder) vote(from, to string) *builder  { return b.endorse("vote", from, to, 1, 1) }
 
+// vouchWeight is a vouch with an author-chosen weight (parameter version 4).
+func (b *builder) vouchWeight(from, to string, weight int64) *builder {
+	b.vouch(from, to)
+	b.snap.Endorsements[len(b.snap.Endorsements)-1].Weight = weight
+	return b
+}
+
 func (b *builder) domain(name, domain string) *builder {
 	b.snap.Proofs = append(b.snap.Proofs, Record{Type: "proof", Account: acct(name), Kind: "domain", LinkValue: domain, State: "verified",
 		CreatedAt: testAsOf - 200*day, CheckedAt: testAsOf - day})

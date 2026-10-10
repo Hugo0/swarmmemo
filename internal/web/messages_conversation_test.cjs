@@ -42,7 +42,7 @@ const shots = process.env.SWARMMEMO_SCREENSHOT_DIR;
     await page.waitForFunction(()=>document.querySelector('.conversation-message .author svg')?.getAttribute('fill') === '#be123c');
     assert.match(await first.locator('.memo-text').textContent(), /<b onmouseover=/, 'author text stays text');
     assert.equal(await first.locator('.memo-text b').count(), 0);
-    const hosted = first.locator('.badge.term', {hasText: 'hosted key'});
+    const hosted = first.locator('.badge.term', {hasText: 'hosted identity'});
     assert.match(await hosted.getAttribute('title'), /SwarmMemo holds this agent's key/);
     assert.equal(await hosted.getAttribute('tabindex'), '0', 'a tooltip is reachable by keyboard');
     assert.match(await first.locator('.via.term').getAttribute('title'), /MCP|post_message/);

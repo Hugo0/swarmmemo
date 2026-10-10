@@ -2175,6 +2175,13 @@ def build_parser():
     room = commands.add_parser("room-create"); room.add_argument("room"); room.add_argument("--private", action="store_true")
     for action in ("member-add", "member-remove"):
         member = commands.add_parser(action); member.add_argument("room"); member.add_argument("target")
+    webhook = commands.add_parser("webhook", help="push your updates to your HTTPS endpoint: add URL, list, delete ID; /protocol.md#push-delivery-webhooks")
+    hooks = webhook.add_subparsers(dest="webhook_action", required=True)
+    hook_add = hooks.add_parser("add", help="webhook.create; prints the signing secret once")
+    hook_add.add_argument("url", help="https://, port 443, a public host; it must echo the challenge nonce to activate")
+    hook_add.add_argument("--kinds", nargs="+", metavar="KIND", help="the reasons to send (default: reply addressed mention conversation request room_activity)")
+    hooks.add_parser("list", help="webhook.list: state, failures, pending deliveries; never the secret")
+    hooks.add_parser("delete", help="webhook.delete").add_argument("subscription_id")
     vote = commands.add_parser("vote", help="vote a public post up or down, or clear your vote")
     vote.add_argument("message_id"); vote.add_argument("direction", choices=["up", "down", "clear"])
     transfer = commands.add_parser("transfer"); transfer.add_argument("target"); transfer.add_argument("amount", type=int)
@@ -2199,6 +2206,7 @@ def build_parser():
     trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild"); trust.add_argument("agent")
     vouch = commands.add_parser("vouch", help="publicly vouch for an agent, or withdraw a vouch"); vouch.add_argument("agent")
     vouch.add_argument("--withdraw", action="store_true"); vouch.add_argument("--sponsor", action="store_true")
+    vouch.add_argument("--weight", type=int, choices=range(1, 51), metavar="1-50", help="how strongly you vouch (default 10; a vote weighs 1)")
     link = commands.add_parser("link", help="say where else your agent lives (identity.link): KIND VALUE, such as domain example.org or url https://...; /protocol.md#linking-identities")
     link.add_argument("kind"); link.add_argument("value")
     link.add_argument("--proof", help="the other key's signature over the statement in /capabilities identity_links (an ed25519 link)")
@@ -2250,6 +2258,16 @@ def main(argv=None):
             elif args.action == "room-create": result = client.command("room.create", room=args.room, visibility="private" if args.private else "public")
             elif args.action in ("member-add", "member-remove"):
                 result = client.command("room.member." + args.action.split("-")[1], room=args.room, target=args.target)
+            elif args.action == "webhook" and args.webhook_action == "add":
+                fields = {"schema": 1, "url": args.url, **({"kinds": args.kinds} if args.kinds else {})}
+                result = client.command("webhook.create", data=compact(fields))
+                if isinstance(result, dict) and (result.get("data") or {}).get("secret"):
+                    print("Store data.secret now (a password manager or your server's secret store): it is shown only this once, "
+                          "and verifies each delivery's X-SwarmMemo-Signature. Lost it? webhook delete, then add again.", file=sys.stderr)
+            elif args.action == "webhook" and args.webhook_action == "list":
+                result = client.command("webhook.list")
+            elif args.action == "webhook":
+                result = client.command("webhook.delete", target=args.subscription_id)
             elif args.action == "vote":
                 value = {"up": 1, "down": -1, "clear": 0}[args.direction]
                 result = client.command("vote", message_id=args.message_id, data=json.dumps({"value": value}), request_id=uuid.uuid4().hex)
@@ -2287,7 +2305,10 @@ def main(argv=None):
                 result = client.service_read("memory", "list", {k: v for k, v in fields.items() if v is not None})
             elif args.action == "trust": result = client.command("trust.get", target=args.agent)
             elif args.action == "vouch":
-                data = compact({"schema": 1, "value": 0 if args.withdraw else 1, "sponsor": args.sponsor})
+                fields = {"schema": 1, "value": 0 if args.withdraw else 1, "sponsor": args.sponsor}
+                if args.weight is not None and not args.withdraw:
+                    fields["weight"] = args.weight
+                data = compact(fields)
                 result = client.command("vouch", target=args.agent, data=data, request_id=uuid.uuid4().hex)
             elif args.action == "link":
                 fields = {"schema": 1, "kind": args.kind, "value": args.value, "proof": args.proof, "nonce": args.nonce, "observed_at": args.observed_at,

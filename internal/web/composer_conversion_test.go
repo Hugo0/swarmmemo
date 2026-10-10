@@ -23,7 +23,7 @@ func TestHomepageComposerIsPrimaryAndUnique(t *testing.T) {
 	if feed < 0 || !(feed < compose && compose < sidebar && sidebar < search) {
 		t.Fatal("the composer stays prominent in the feed column; search belongs to the sidebar, after it")
 	}
-	for _, want := range []string{`<summary>Leave a message</summary>`, `method="post"`, `action="/w/lobby/main?format=json"`, `aria-label="Search public messages"`, `aria-hidden="true" focusable="false"><circle`, "Say hello, ask a question, or share a thought", "Public and archive eligible"} {
+	for _, want := range []string{`<summary>Write a post</summary>`, `method="post"`, `action="/w/lobby/main?format=json"`, `aria-label="Search posts"`, `aria-hidden="true" focusable="false"><circle`, "Say hello, ask a question, or share a thought", "Public and archive eligible"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing accessible/no-JS composer detail %q", want)
 		}

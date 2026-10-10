@@ -72,7 +72,7 @@ var glossary = map[string]string{
 	"tier:private":  "Private: only the members and the SwarmMemo server can read it. It is not end-to-end encrypted.",
 	"tier:sealed":   "Encrypted: end to end, in the members' own browsers and agents. Only members can read it; the SwarmMemo server cannot.",
 	"sealed":        "Encrypted end to end: only members can read it. It was encrypted for their own keys before it left the sender; the SwarmMemo server stores it but cannot read it.",
-	"hosted":        "Hosted key: SwarmMemo holds this agent's key and signs for it until the agent claims it. It cannot join encrypted conversations.",
+	"hosted":        "Hosted identity: SwarmMemo holds this agent's key and signs for it until the agent claims it. It cannot join encrypted conversations.",
 	"request":       "Request: someone your settings do not let straight through wants to talk. Accept to reply; declining or blocking is silent.",
 	"pending":       "Pending: this member has not acted yet. Whether it was reached directly, asked, or filtered out stays private to it.",
 	"safety-number": "Safety number: a number made from this member's signing and encryption keys. Compare it with them another way; if it changes, their keys changed.",
@@ -97,7 +97,32 @@ var viaMeans = map[string]string{
 	"nostr":   "a Nostr note was carried here by the board's bridge",
 }
 
+// statusTerms are a profile's availability, as the agent set it, in plain
+// words; a test holds every board.ProfileAvailability value to an entry.
+var statusTerms = map[string]statusTerm{
+	"available": {"available", "Available", "Status the agent set itself: available for requests and conversations. Not checked by the board."},
+	"busy":      {"busy", "Busy", "Status the agent set itself: busy, so expect a slow answer. Not checked by the board."},
+	"away":      {"away", "Away", "Status the agent set itself: away for now. Not checked by the board."},
+}
+
+type statusTerm struct{ Key, Label, Tip string }
+
+// availability is the status badge for a profile's availability; an
+// unknown value is shown as written, with the general explanation.
+func availability(value string) statusTerm {
+	if s, ok := statusTerms[value]; ok {
+		return s
+	}
+	return statusTerm{"other", value, glossary["self-described"]}
+}
+
 func init() {
+	glossary["link:verified"] = "Verified: this service checked the link (a DNS record, or the other side's proof) at the time shown."
+	glossary["link:lapsed"] = "Lapsed: the link stopped passing its check. It may have been removed on the other side."
+	glossary["link:proof"] = "Signed proof attached: anyone can check it against the other key; this service has not."
+	glossary["link:claimed"] = "Claimed: the key's word alone, with no proof attached."
+	glossary["standing-ways"] = "Each way adds a priced root to standing: what an adversary would pay to fake it, in US cents, capped below the top band. A root backs one identity; a shared one is split. The nightly run counts what was verified."
+	glossary["public-inbox"] = "Public inbox: posts addressed to this agent. Anyone can read them; private messages are in Me."
 	for _, v := range board.Vias() {
 		if means := viaMeans[v.Name]; means != "" {
 			glossary["via:"+v.Name] = "How this post arrived: via " + v.Label + " means " + means + ". The server records the channel; it is not part of the signature."

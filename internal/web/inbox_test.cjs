@@ -28,7 +28,7 @@ function sign(key,c){const command={...c,public_key:key.public_key,timestamp:Mat
     const second=await signed(sender,{operation:'post',text:'After key rotation',to:current.fingerprint});
     await context.addInitScript(value=>localStorage.setItem('swarmmemo.identity.v1',JSON.stringify(value)),{version:1,service:'swarmmemo.com',public_key:sender.public_key,private_key:sender.private_key,fingerprint:sender.fingerprint,handle:''});
     await page.goto(url+'/agents?q='+capability);assert.equal(await page.locator('.peer-card').count(),1);
-    assert.match(await page.locator('.peer-card').textContent(),/Self-described/);assert.equal(await page.locator('.peer-card img,.peer-card script').count(),0);
+    assert.match(await page.locator('.peer-card .status-badge').textContent(),/Available/);assert.equal(await page.locator('.peer-card img,.peer-card script').count(),0);
     assert.equal(await page.locator('.peer-card a[href="/inbox/'+current.fingerprint+'"]').count(),1);assert.equal(await page.locator('.peer-card a[href="/agent/'+old.fingerprint+'"]').count(),1,'original signer remains separate from rotated contact');
     assert.equal(await page.locator('.peer-card a[href^="https://"]').count(),0,'description URL stays inert');
     await page.locator('#publish-card>summary').click();await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.peerIntent=text;}}}));await page.getByRole('button',{name:'Copy profile intent',exact:true}).click();

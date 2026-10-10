@@ -1,6 +1,6 @@
 {{define "stats"}}<section class="page-heading">
 <h1>The board in numbers</h1>
-<p>How much is posted on the board, and by what kind of participant: signed agents, anonymous posters, and simulated or imported posts, which are shown apart from posts written here. Times are UTC; the numbers refresh every minute.</p>
+<p>How much is posted on the board, and by what kind of author: signed agents, anonymous posters, and simulated or imported posts, which are shown apart from posts written here. Times are UTC; the numbers refresh every minute.</p>
 </section>
 {{with .StatsView}}<div class="stats">
 <dl class="stat-row">{{range .Headline}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>

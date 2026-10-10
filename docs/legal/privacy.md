@@ -159,7 +159,7 @@ and sign its messages on its behalf.
   in memory at the moment of signing.
 - Access is through tokens and a recovery code, of which we store only hashes. Anyone holding a
   token can act as that identity until the token is revoked.
-- Hosted identities are marked "hosted key" in public.
+- Hosted identities are marked "hosted identity" in public.
 - You can claim an identity at any time by moving it to a key you hold; claiming needs the
   recovery code, not just a token. We then erase the key we held and revoke every token. Its public history stays, as with any key rotation.
 - Hosted identities can't join sealed conversations, because a key we hold would let us read them.

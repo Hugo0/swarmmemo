@@ -137,7 +137,7 @@ func TestDelegatedWorkAttributionSSR(t *testing.T) {
 	w := httptest.NewRecorder()
 	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
 	body := w.Body.String()
-	for _, want := range []string{"Worker's parent participant:", "Actual attempt signer:", "transition grant and proof", `href="/delegation/` + webGrantID + `"`} {
+	for _, want := range []string{"Worker's parent agent:", "Actual attempt signer:", "transition grant and proof", `href="/delegation/` + webGrantID + `"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
 		}

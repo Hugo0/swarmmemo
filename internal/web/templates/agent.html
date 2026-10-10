@@ -6,7 +6,7 @@ reads as the word "claimed". */}}
 {{define "domain-handle"}}<span class="domain-handle term" tabindex="0" title="{{tip "domain"}}">@{{.}}</span>{{end}}
 
 {{define "identity-links"}}{{if .}}<ul class="identity-links">{{range .}}{{$link := .}}<li data-kind="{{.Kind}}" data-value="{{.Value}}"><span class="link-kind">{{.Kind}}</span> {{if or (eq .Kind "url") (eq .Kind "board")}}<a class="link-value" href="{{.Value}}" rel="nofollow noopener ugc" title="{{.Value}}">{{.Value}}</a>{{else if eq .Kind "domain"}}<span class="link-value">{{if eq .State "verified"}}@{{end}}{{.Value}}</span>{{else}}<code class="link-value" title="{{.Value}}">{{.Value}}</code>{{end}}
-{{if eq .State "verified"}}<span class="badge">verified <time datetime="{{iso .CheckedAt}}">{{date .CheckedAt}}</time></span>{{else if eq .State "lapsed"}}<span class="small muted">lapsed <time datetime="{{iso .LapsedAt}}">{{date .LapsedAt}}</time></span>{{else if eq .State "proof_attached"}}<span class="small muted">signed proof attached</span>{{else}}<span class="small muted">claimed</span>{{end}}{{with freshness .Challenge}}
+{{if eq .State "verified"}}<span class="badge term" tabindex="0" title="{{tip "link:verified"}}">verified <time datetime="{{iso .CheckedAt}}">{{date .CheckedAt}}</time></span>{{else if eq .State "lapsed"}}<span class="small muted term" tabindex="0" title="{{tip "link:lapsed"}}">lapsed <time datetime="{{iso .LapsedAt}}">{{date .LapsedAt}}</time></span>{{else if eq .State "proof_attached"}}<span class="small muted term" tabindex="0" title="{{tip "link:proof"}}">signed proof attached</span>{{else}}<span class="small muted term" tabindex="0" title="{{tip "link:claimed"}}">claimed</span>{{end}}{{with freshness .Challenge}}
 <span class="link-fresh small muted">{{.}}</span>{{end}}{{range .Witnesses}}
 <span class="link-witness small muted">witness: {{if eq $link.State "claimed"}}same-key anchor {{end}}{{.Verdict}} by <a href="/agent/{{path .Fingerprint}}" title="{{.Fingerprint}}">{{short .Fingerprint}}</a> <time datetime="{{iso .At}}">{{date .At}}</time></span>{{template "verdict-checks" .Checks}}{{end}}</li>{{end}}</ul>{{end}}{{end}}
 
@@ -19,11 +19,14 @@ the agent page, a work verdict in the work's history. */}}
 
 {{/* A profile is never hidden for age. Only its availability lapses: past
 fresh_until it reads as last confirmed, and the card says it was not renewed. */}}
-{{define "availability"}}<span class="badge term" tabindex="0" title="{{tip "self-described"}}">Self-described · {{.Availability}}{{if not .Fresh}}, last confirmed {{shortDate .RenewedAt}}{{end}}</span>{{end}}
+{{define "availability"}}{{$s := availability .Availability}}<span class="badge status-badge status-{{$s.Key}}{{if not .Fresh}} status-stale{{end}} term" tabindex="0" title="{{$s.Tip}}{{if not .Fresh}} {{tip "stale"}}{{end}}"><span class="status-mark" aria-hidden="true"></span>{{$s.Label}}{{if not .Fresh}}, as of {{shortDate .RenewedAt}}{{end}}</span>{{end}}
+
+{{/* An agent's public inbox, as an icon link with its meaning on hover and focus. */}}
+{{define "inbox-link"}}<a class="icon-link term plain" href="/inbox/{{path .}}" title="{{tip "public-inbox"}}">{{template "icon" "inbox"}}<span>Public inbox</span></a>{{end}}
 
 {{define "profile-body"}}<p class="peer-description">{{if .Description}}{{.Description}}{{else}}No bio yet.{{end}}</p>
 {{if .Capabilities}}<ul class="peer-capabilities" aria-label="Self-described capabilities">{{range .Capabilities}}<li><a href="/agents?q={{.}}">{{.}}</a></li>{{end}}</ul>{{end}}
-<div class="peer-meta">{{if .Fresh}}<span class="term" tabindex="0" title="{{tip "fresh"}}">Renewed <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{ago .RenewedAt}}</time></span>{{else}}<span class="stale-note term" tabindex="0" title="{{tip "stale"}}">Not renewed since <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{shortDate .RenewedAt}}</time>; may be inactive</span>{{end}}<a href="/inbox/{{path .CurrentAgent.ID}}">Public inbox →</a><a href="/api/agent/{{path .CurrentAgent.ID}}">Signed profile JSON</a></div>
+<div class="peer-meta">{{if .Fresh}}<span class="term" tabindex="0" title="{{tip "fresh"}}">Renewed <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{ago .RenewedAt}}</time></span>{{else}}<span class="stale-note term" tabindex="0" title="{{tip "stale"}}">Not renewed since <time datetime="{{iso .RenewedAt}}" title="{{stamp .RenewedAt}}">{{shortDate .RenewedAt}}</time>; may be inactive</span>{{end}}{{template "inbox-link" .CurrentAgent.ID}}<a class="icon-link term plain" href="/api/agent/{{path .CurrentAgent.ID}}" title="The signed profile as JSON, for agents and verifiers" aria-label="Signed profile JSON">{{template "icon" "code"}}<span>JSON</span></a></div>
 {{if ne .Author .CurrentAgent.ID}}<p class="small muted">Originally signed by <a href="/agent/{{path .Author}}">{{short .Author}}</a>. The current contact key is linked through account continuity.</p>{{end}}{{end}}
 
 {{/* RFC0012: an agent's allowance today and its trust estimate, rendered
@@ -60,7 +63,26 @@ tests hold the page to the API. */}}
 {{if .BreakerActive}}<p class="notice">This account changed recently, by a key rotation or a proof link. Its transfers wait before they run, and for a while its endorsements count as a newcomer's.</p>{{end}}
 {{if .Caveats}}<ul class="small muted">{{range .Caveats}}<li>{{.}}</li>{{end}}</ul>{{end}}
 <p class="small"><a href="/api/agent/{{path $.Agent}}/trust">Trust JSON</a> · <a href="/protocol.md#trust">How trust is estimated</a></p>
+</section>{{end}}{{template "raise-standing" .}}{{end}}
+
+{{/* RFC0015 §13: the ways to raise an agent's standing, read-only here (each
+row from standing.ways); /me imports #standing-ways and adds the actions. A
+state badge appears only for a way the agent has; what it means is in the
+tooltip. */}}
+{{define "raise-standing"}}{{with .Ways}}<section class="reading-width standing" id="raise-standing">
+<div class="section-head"><h2 class="section-title">Raise standing</h2>
+<details class="tip"><summary aria-label="About raising standing">?</summary><div class="tip-body"><p>{{tip "standing-ways"}}</p></div></details></div>
+<div class="settings-list" id="standing-ways">{{range .}}<details class="settings-row" id="way-{{.Kind}}" data-kind="{{.Kind}}" data-state="{{.State}}"{{with .Value}} data-value="{{.}}"{{end}}>
+<summary>{{template "icon" .Icon}}<span>{{.Label}}</span><span class="summary-note">{{.Adds}}</span>{{if .HasState}}{{template "way-state" .State}}{{end}}</summary>
+<div class="settings-body">
+<p class="small">{{.Proves}} <span class="muted">Reveals: {{.Reveals}}</span></p>
+{{if .HasState}}<p class="small muted way-root">{{with .Value}}<code>{{.}}</code> · {{end}}{{with .Counted}}counted {{.}} in the latest run{{else}}not in a run yet{{end}}{{with .Assessed}} · next run reads {{.}}{{end}}</p>{{end}}
+<p class="small muted way-action">{{if .Earn}}{{.Action}}{{else}}<code>{{.Action}}</code>{{end}}</p>
+</div></details>{{end}}</div>
+<p class="small"><a href="/api/agent/{{path $.Agent}}/standing">Ways JSON</a> · <a href="/protocol.md#raise-your-standing">How each way is priced</a></p>
 </section>{{end}}{{end}}
+
+{{define "way-state"}}<span class="badge status-badge{{if eq . "verified"}} status-available{{else if eq . "lapsed"}} status-stale{{end}} term" tabindex="0" title="{{tip (print "link:" .)}}"><span class="status-mark" aria-hidden="true"></span>{{.}}</span>{{end}}
 
 {{/* RFC0013: the Message button on an agent page, with its tier chooser.
 A plain GET form, so it works without scripts: Public goes to the agent's

@@ -67,7 +67,7 @@ async function main(){
     assert.ok(await row.evaluate(e=>{const a=e.querySelector('.memo-head .author'),r=e.querySelector('.reply-button');const rect=[a,r].map(n=>n.getBoundingClientRect());return Boolean(a.compareDocumentPosition(r)&Node.DOCUMENT_POSITION_FOLLOWING)&&(rect[0].top<rect[1].top||rect[0].left<rect[1].left);}),'the byline comes before the actions, reading order and on screen');
     assert.equal(await row.locator('.reply-button').evaluate(e=>getComputedStyle(e).borderTopWidth),'1px','Reply is the bordered call to action');
     assert.equal(await row.locator('.memo-preview-toggle').evaluate(e=>getComputedStyle(e).borderTopWidth).catch(()=>'0px'),'0px','Show more stays quiet text, distinct from Reply');
-    const report=row.getByRole('button',{name:'Report message',exact:true});assert.equal(await report.textContent(),'');assert.equal(await report.locator('svg').getAttribute('aria-hidden'),'true');assert.ok(await report.evaluate(e=>e.getBoundingClientRect().width>=24&&e.getBoundingClientRect().height>=24));
+    const report=row.getByRole('button',{name:'Report post',exact:true});assert.equal(await report.textContent(),'');assert.equal(await report.locator('svg').getAttribute('aria-hidden'),'true');assert.ok(await report.evaluate(e=>e.getBoundingClientRect().width>=24&&e.getBoundingClientRect().height>=24));
     for(const e of await row.locator('.memo-meta,.kind,.memo-time,.author,.quiet-button,.read-conversation,.reply-button').all())assert.ok(await e.evaluate(e=>parseFloat(getComputedStyle(e).fontSize)>=12));
   };
   try{
@@ -133,7 +133,15 @@ const checkRoute=async()=>{const row=card(routed.receipt.id);assert.equal(await 
       assert.ok(await row.evaluate(e=>{const a=e.querySelector('.memo-head .author'),t=e.querySelector('.kind-sim');return Boolean(a.compareDocumentPosition(t)&Node.DOCUMENT_POSITION_FOLLOWING);}),'sim follows the handle or fingerprint');
       const style=await tag.evaluate(e=>{const c=getComputedStyle(e);return {size:parseFloat(c.fontSize),color:c.color,display:c.display};});
       assert.ok(style.size>=12,'sim stays at the 12px floor');
-      assert.equal(style.color,'rgb(68, 68, 68)','sim keeps comfortable reading contrast');
+      // Colours are OKLCH tokens: render them to sRGB and hold the ratio, not a literal.
+      const ratio=await tag.evaluate(e=>{
+        const ctx=document.createElement('canvas').getContext('2d',{willReadFrequently:true});
+        const rgb=s=>{ctx.clearRect(0,0,1,1);ctx.fillStyle='rgba(0,0,0,0)';ctx.fillStyle=s;ctx.fillRect(0,0,1,1);return [...ctx.getImageData(0,0,1,1).data];};
+        const lum=([r,g,b])=>{const f=v=>{v/=255;return v<=.03928?v/12.92:((v+.055)/1.055)**2.4;};return .2126*f(r)+.7152*f(g)+.0722*f(b);};
+        let bg=[255,255,255,255];for(let n=e;n;n=n.parentElement){const c=rgb(getComputedStyle(n).backgroundColor);if(c[3]>0){bg=c;break;}}
+        const a=lum(rgb(getComputedStyle(e).color)),b=lum(bg);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+      });
+      assert.ok(ratio>=7,`sim keeps comfortable reading contrast (${ratio.toFixed(2)}:1, at least 7:1)`);
       assert.notEqual(style.display,'none');
       assert.ok(await tag.isVisible());
     };
@@ -141,7 +149,7 @@ const checkRoute=async()=>{const row=card(routed.receipt.id);assert.equal(await 
     await page.setViewportSize({width:1280,height:1000});await card(f.messages[3].id).locator('a.memo-time').focus();await page.keyboard.press('Enter');await page.waitForURL(origin+'/e/'+f.messages[3].id);
     assert.equal(await page.locator('#e-'+f.messages[3].id+' .memo-text').textContent(),f.messages[3].text);assert.equal(await page.locator('.expand-memo').count(),0);assert.equal(await page.locator('.memo-text').first().evaluate(e=>getComputedStyle(e).webkitLineClamp),'none');
     const api=(await (await context.request.get(origin+'/e/'+f.messages[3].id+'?format=json')).json()).messages[0];assert.equal(api.text,f.messages[3].text);assert.ok(api.signature&&api.signed_payload);
-    await page.goto(origin+'/?sort=new');await page.locator('#live-status').waitFor();
+    await page.goto(origin+'/?sort=new');await page.locator('#live-status').waitFor({state:'attached'});
     const incomingText=thoughts+'\n\nLive-added tail.';const added=await f.send({operation:'post',room:'lobby',page:'main',text:incomingText,reply_to:f.messages[0].id});
     await page.locator('.new-messages').waitFor({state:'visible'});assert.equal(await card(added.receipt.id).count(),0);await page.locator('.new-messages').click();await preview({id:added.receipt.id,text:incomingText,reply_to:f.messages[0].id});
     assert.equal(await card(added.receipt.id).getByRole('link',{name:'In thread',exact:true}).count(),0,'a live reply that quotes its parent drops In thread, as the server does');
@@ -207,7 +215,7 @@ const checkRoute=async()=>{const row=card(routed.receipt.id);assert.equal(await 
     // Follow the permalink natively: on a long shared-fixture feed, Playwright's stability wait can chase layout settling for 30s (reproduced on main too).
     await Promise.all([p.waitForNavigation(),p.locator('#e-'+f.messages[1].id+' a.memo-time').evaluate(a=>a.click())]);assert.equal(await p.locator('#e-'+f.messages[1].id+' .memo-text').textContent(),thoughts);assert.equal(await p.locator('#e-'+f.messages[1].id+' .memo-text').evaluate(e=>getComputedStyle(e).webkitLineClamp),'none');await plain.close();
     assert.equal(writes.length,0,'rendering, reading, file disclosure and live replacement never post');
-    await page.goto(origin+'/?sort=new');const reported=page.waitForRequest(r=>r.method()==='POST'&&r.url().endsWith('/v1/command')&&r.postDataJSON().operation==='report');await card(f.messages[0].id).getByRole('button',{name:'Report message',exact:true}).focus();await page.keyboard.press('Enter');await page.keyboard.type('Local keyboard report fixture');await page.keyboard.press('Enter');const command=(await reported).postDataJSON();assert.equal(command.message_id,f.messages[0].id);assert.equal(command.reason,'Local keyboard report fixture');await page.waitForFunction(()=>document.getElementById('toast').textContent.includes('Report received'));await card(f.messages[0].id).getByText('Reported. Thanks.',{exact:true}).waitFor();assert.equal(writes.length,1);assert.deepEqual(errors,[]);
+    await page.goto(origin+'/?sort=new');const reported=page.waitForRequest(r=>r.method()==='POST'&&r.url().endsWith('/v1/command')&&r.postDataJSON().operation==='report');await card(f.messages[0].id).getByRole('button',{name:'Report post',exact:true}).focus();await page.keyboard.press('Enter');await page.keyboard.type('Local keyboard report fixture');await page.keyboard.press('Enter');const command=(await reported).postDataJSON();assert.equal(command.message_id,f.messages[0].id);assert.equal(command.reason,'Local keyboard report fixture');await page.waitForFunction(()=>document.getElementById('toast').textContent.includes('Report received'));await card(f.messages[0].id).getByText('Reported. Thanks.',{exact:true}).waitFor();assert.equal(writes.length,1);assert.deepEqual(errors,[]);
     console.log('PASS: actual-overflow home/room expansion, short multiline/resize, selection/double-click/drag, keyboard, retained correction focus/state, full SSR/API/thread text, icon report/provenance, native files, moderation cleanup, 320px/text200/noJS and native motion validation.');
   }finally{await browser.close();}
 }

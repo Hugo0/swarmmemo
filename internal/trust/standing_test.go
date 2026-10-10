@@ -140,7 +140,7 @@ func TestStandingVotingDoesNotCostTheVoter(t *testing.T) {
 	for _, votes := range []int{1, 50} {
 		before := standingOf(build(DefaultStanding(), 0), "voter").Cents
 		after := standingOf(build(DefaultStanding(), votes), "voter").Cents
-		t.Logf("%d votes: rule 1 %d → %d", votes, before, after)
+		t.Logf("%d votes: current version %d → %d", votes, before, after)
 		if before < 390 || after < before*97/100 {
 			t.Fatalf("%d votes: voter %d → %d cents", votes, before, after)
 		}
@@ -154,13 +154,14 @@ func TestStandingVotingDoesNotCostTheVoter(t *testing.T) {
 }
 
 // Standing is a conserved flow from the seeds: its mass never sums above the
-// seed mass (reported standing at most seed / (1 − pass)), a region with no
+// seed mass (reported standing at most seed / (1 − pass) under rule 1, the
+// seed itself, less integer floors, under rule 2), a region with no
 // seed and no inbound edge gets nothing however densely it endorses itself,
 // and an endorsement from a seeded account carries standing.
 func TestStandingConservedAndSeeded(t *testing.T) {
 	b := newBuilder("s1", "s2")
 	b.account("s1", 100, 10, 0).account("s2", 100, 10, 0).account("x", 50, 5, 0).account("y", 50, 5, 0)
-	b.vouch("s1", "x").vote("x", "y")
+	b.vouchWeight("s1", "x", 50).vouchWeight("x", "y", 50)
 	for i := 0; i < 20; i++ { // a sybil ring, no seed, no edge in
 		n := "sybil" + strconv.Itoa(i)
 		b.account(n, 3, 2, 0)
@@ -169,8 +170,7 @@ func TestStandingConservedAndSeeded(t *testing.T) {
 	}
 	out := compute(t, b)
 	st := out.Standing
-	bound := st.SeedCents * 1e6 / (1e6 - b.snap.Params.Standing.PassPPM)
-	if st == nil || st.SeedCents != 1000 || st.StandingCents > bound || st.StandingCents < st.SeedCents {
+	if st == nil || st.SeedCents != 1000 || st.StandingCents > st.SeedCents || st.StandingCents < st.SeedCents-st.Accounts {
 		t.Fatalf("not conserved: %+v", st)
 	}
 	for i := 0; i < 20; i++ {
@@ -183,20 +183,20 @@ func TestStandingConservedAndSeeded(t *testing.T) {
 		t.Fatalf("endorsements carry nothing: x %+v y %+v", x, y)
 	}
 	// One attack edge into the ring: what the ring gets is bounded by what
-	// that edge carries from y, never more.
-	b.vouch("y", "sybil0")
+	// that edge carries from x, never more.
+	b.vouchWeight("x", "sybil0", 50)
 	out2 := compute(t, b)
 	var ring int64
 	for i := 0; i < 20; i++ {
 		ring += standingOf(out2, "sybil"+strconv.Itoa(i)).Cents
 	}
 	if ring == 0 || ring > standingOf(out, "y").Cents+standingOf(out, "x").Cents {
-		t.Fatalf("ring %d through one edge from y (%d)", ring, standingOf(out, "y").Cents)
+		t.Fatalf("ring %d through one edge from x (%d)", ring, standingOf(out, "x").Cents)
 	}
 }
 
 func TestStandingOpposePenaltyAndSeeds(t *testing.T) {
-	b := newBuilder("s1")
+	b := newBuilder("s1", "d")
 	b.account("s1", 100, 10, 0).account("t", 50, 5, 0).account("d", 50, 5, 0).account("payer", 0, 0, 0)
 	b.vouch("s1", "t").vouch("s1", "d")
 	D := dayOf(testAsOf)
@@ -204,9 +204,10 @@ func TestStandingOpposePenaltyAndSeeds(t *testing.T) {
 		Record{Type: "spend", Account: acct("payer"), Day: D, Amount: 1000000}) // today: not yet
 	before := compute(t, b)
 	pay := standingOf(before, "payer")
-	// Spent at cost, decayed one day; a silent account also receives its
-	// share of what silent nodes return to the seeds.
-	if pay.SeedCents != 99 || pay.Cents < pay.SeedCents || scoreOf(before, "payer").Tier != 3 {
+	// Spent at cost, decayed one day; a silent account keeps its seed less
+	// its seed share of what s1's vouches pass (rule 2: what recipients
+	// gain is taken from every seed in proportion).
+	if pay.SeedCents != 99 || pay.Cents > pay.SeedCents || pay.Cents < pay.SeedCents*9/10 || scoreOf(before, "payer").Tier != 3 {
 		t.Fatalf("payer: %+v", pay)
 	}
 	// A down vote from d takes from t locally and is spent by d.

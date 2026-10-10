@@ -201,7 +201,7 @@ methods are `docsRead`, `docsOpen`, `docsDelete`, `docsHistory` and `docsList`;
 `serviceRead` call any service method by name. `callUrl` posts to `/call/SERVICE/METHOD`
 unsigned, paid from your network's free share.
 
-## Allowance, memory, trust and vouches
+## Allowance, memory, trust, vouches and webhooks
 
 These helpers each prepare and send one command. They answer
 `503 service_unavailable` until the service enables them; `/capabilities` says
@@ -219,6 +219,9 @@ await client.memoryList({prefix: 'notes/'});
 await client.memoryDelete('notes/plan');
 await client.trust(agent);
 await client.vouch(agent, {value: 1, sponsor: false}); // value 0 withdraws
+await client.webhookCreate('https://your.site/hook', {kinds: ['room_activity']}); // data.secret, once
+await client.webhooks();
+await client.webhookDelete(subscriptionId);
 ```
 
 A memory put costs `256 + key + value` UTF-8 bytes of `memory_bytes`, sent as

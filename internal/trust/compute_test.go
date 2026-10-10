@@ -17,8 +17,22 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if p.Version != 3 || len(p.Seeds) != 6 || p.SeedsReason != SeedsAReason || p.Standing == nil || p.Standing.Mode != StandingShadow || p.Standing.Rule != 1 {
-		t.Fatalf("version 3 must be version 1 plus standing (rule 1) in shadow: %+v", p)
+	if p.Version != 5 || len(p.Seeds) != 6 || p.SeedsReason != SeedsAReason || p.Standing == nil || p.Standing.Mode != StandingShadow || p.Standing.Rule != 2 || len(p.Proofs) != 8 {
+		t.Fatalf("version 5 must be version 1 plus standing (rule 2) in shadow plus the assessed rows: %+v", p)
+	}
+	// Version 4 is byte for byte the body of the C151 release.
+	if sum := sha256.Sum256(paramsV4().Body()); hex.EncodeToString(sum[:]) != "d6560eba8a20582d2c4b85ca255c9c302aaee7153db31554108e67710675eb63" {
+		t.Fatalf("version 4 body changed: %x %s", sum, paramsV4().Body())
+	}
+	if _, err := ParseParams(4, paramsV4().Body()); err != nil {
+		t.Fatalf("version 4 no longer parses: %v", err)
+	}
+	// Version 3 is byte for byte the body of the C148 release.
+	if sum := sha256.Sum256(paramsV3().Body()); hex.EncodeToString(sum[:]) != "8dcd245248606a6dc266c0e69ffc994b6c071b9ddcd6d73668b6f8d285dfdd17" {
+		t.Fatalf("version 3 body changed: %s", paramsV3().Body())
+	}
+	if _, err := ParseParams(3, paramsV3().Body()); err != nil {
+		t.Fatalf("version 3 no longer parses: %v", err)
 	}
 	// Version 2 is byte for byte the body published as version 2 (1.75.0).
 	if sum := sha256.Sum256(paramsV2().Body()); hex.EncodeToString(sum[:]) != "8f16c806712fbbab2ba6cdae4b5dce3374ffddda48ba961100b0f2a5b1c61556" {
@@ -35,7 +49,7 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 	if _, err := ParseParams(1, paramsV1().Body()); err != nil {
 		t.Fatalf("version 1 no longer parses: %v", err)
 	}
-	back, err := ParseParams(3, p.Body())
+	back, err := ParseParams(5, p.Body())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,8 +63,23 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 		},
 		"lambda":   func(s string) string { return strings.Replace(s, `"lambda_ppm":500000`, `"lambda_ppm":2000000`, 1) },
 		"trailing": func(s string) string { return s + "{}" },
+		"assess":   func(s string) string { return strings.Replace(s, `"assess":"saturating"`, `"assess":"capped"`, 1) },
+		"unknown proof": func(s string) string {
+			return strings.Replace(s, `"proofs":{`, `"proofs":{"x":{"curve":"none","day_factor_ppm":0,"forge":1,"half_life_days":0,"rent":1},`, 1)
+		},
+		"fixed row assessed": func(s string) string {
+			return strings.Replace(s, `"domain":{`, `"domain":{"assess":"capped","units_per_cent":1,`, 1)
+		},
+		"vouch over its cap": func(s string) string {
+			return strings.Replace(s, `"vouch_weight_max":50`, `"vouch_weight_max":5`, 1)
+		},
+		"edge kind missing": func(s string) string { return strings.Replace(s, `"witness":10,`, ``, 1) },
+		"keep weight zero":  func(s string) string { return strings.Replace(s, `"keep_weight":100`, `"keep_weight":0`, 1) },
+		"weights under rule 1": func(s string) string {
+			return strings.Replace(s, `"rule":2`, `"rule":1`, 1)
+		},
 	} {
-		if _, err := ParseParams(3, []byte(mutate(string(p.Body())))); err == nil {
+		if _, err := ParseParams(5, []byte(mutate(string(p.Body())))); err == nil {
 			t.Errorf("%s accepted", name)
 		}
 	}

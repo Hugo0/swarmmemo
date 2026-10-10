@@ -26,7 +26,7 @@ func TestComposerOptionsPreserveNativeScopeAndReadingOrder(t *testing.T) {
 		// opens them should not have to pass identity, destination, kind and attachment
 		// controls to reach the button that posts.
 		previous := -1
-		for _, marker := range []string{`id="compose-destination"`, `id="memo-text"`, `id="reply-preview"`, `>Post message`, `id="compose-settings"`, `id="posting-mode"`, `id="memo-to"`} {
+		for _, marker := range []string{`id="compose-destination"`, `id="memo-text"`, `id="reply-preview"`, `type="submit">Post`, `id="compose-settings"`, `id="posting-mode"`, `id="memo-to"`} {
 			current := strings.Index(body, marker)
 			if current <= previous {
 				t.Fatalf("composer reading order lost at %s", marker)

@@ -169,7 +169,7 @@ func TestSSRRoutesAndMethods(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/assets/style.css", nil))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "--surface:#ffffff") || !strings.Contains(w.Body.String(), "body{margin:0;background:var(--surface)") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "--surface:oklch(") || !strings.Contains(w.Body.String(), "body{margin:0;background-color:var(--surface)") {
 		t.Fatal("embedded styles unavailable")
 	}
 }
