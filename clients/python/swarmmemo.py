@@ -120,7 +120,7 @@ def check_work(event):
 
 
 QUALITY_FIELDS = {"score", "classifier_version"}
-VOTE_FIELDS = {"up", "down", "score"}
+VOTE_FIELDS = {"up", "down", "score", "weight"}  # weight only on reads that ask for it (weights=1)
 SCREEN_FIELDS = {"state", "categories", "classifier_version", "withheld", "reason"}
 
 
@@ -146,8 +146,9 @@ def check_read_metadata(event):
         raise ValueError("invalid_read_metadata")
     if "votes" in event:
         v = event["votes"]
-        if (event.get("type") != "message" or not isinstance(v, dict) or set(v) != VOTE_FIELDS
-                or not all(type(v[k]) is int for k in v) or v["up"] < 0 or v["down"] < 0 or v["score"] != v["up"] - v["down"]):
+        if (event.get("type") != "message" or not isinstance(v, dict) or not VOTE_FIELDS - {"weight"} <= set(v) or set(v) - VOTE_FIELDS
+                or not all(type(v[k]) is int for k in ("up", "down", "score")) or ("weight" in v and type(v["weight"]) not in (int, float))
+                or v["up"] < 0 or v["down"] < 0 or v["score"] != v["up"] - v["down"]):
             raise ValueError("invalid_read_metadata")
     if "custody" in event and event["custody"] != "hosted": raise ValueError("invalid_read_metadata")
     if "sealed" in event and (event["sealed"] is not True or event.get("format") != "sealed"): raise ValueError("invalid_read_metadata")
@@ -489,15 +490,23 @@ class Client:
                         raise ValueError("invalid_private_read_response") from None
                 return json.loads(raw)
         except urllib.error.HTTPError as exc:
+            raw_error = b""
             try:
-                error = json.loads(exc.read(64 * 1024))
+                raw_error = exc.read(64 * 1024)
+                error = json.loads(raw_error)
                 error = error.get("error", error)
                 if not isinstance(error, dict):
                     error = {}
             except (ValueError, AttributeError):
                 error = {}
+            # A body that is not SwarmMemo's JSON error (a proxy page, a wrong URL) still says
+            # what happened: the status, the URL and the start of the body.
+            fallback = "HTTP %s from %s" % (exc.code, getattr(exc, "url", None) or "the server")
+            snippet = raw_error[:120].decode("utf-8", "replace").strip()
+            if snippet and not error:
+                fallback += ": " + " ".join(snippet.split())
             raise APIError(exc.code, error.get("code", "http_error"),
-                           error.get("message", "HTTP request failed"), exc.headers.get("Retry-After")) from None
+                           error.get("message", fallback), exc.headers.get("Retry-After")) from None
 
     def command(self, operation, **fields):
         return self.send(self.prepare(operation, **fields))
@@ -2154,6 +2163,146 @@ def run_helper(args, client):
     return None
 
 
+def embed_snippet(base_url, room, page=None, url=None, title=None):
+    """The /embed snippet for one post, with the given values filled in."""
+    attr = lambda value: value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+    return "\n".join([
+        '<div id="swarmmemo-comments"></div>',
+        f'<script src="{attr(base_url)}/embed/v1.js" defer',
+        f'  data-room="{attr(room)}"',
+        f'  data-page="{attr(page or "my-post-slug")}"',
+        f'  data-url="{attr(url or "https://example.com/blog/my-post-slug")}"',
+        f'  data-title="{attr(title or "My post title")}"',
+        '  data-target="#swarmmemo-comments"></script>',
+    ])
+
+
+def embed_setup(args, out=None):
+    """embed setup: the site's own key owns the room and signs the first post.
+    Every step checks first, so running it again repeats nothing."""
+    out = out or sys.stdout
+    if not args.key:
+        raise ChatStop(1, "embed setup needs --key FILE: the site's key (created there if the file is missing). "
+                          "It owns the room and signs the welcome post.")
+    if args.welcome is not None and not args.page:
+        raise ChatStop(1, "--welcome needs --page: the post's data-page slug, where the welcome appears")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", args.room):
+        raise ChatStop(1, "the room name is a lowercase slug: a-z, 0-9, _ and -, starting with a letter or digit, up to 64 characters")
+    if args.page:
+        # The widget's normalization (embed-v1.js), so the welcome lands where data-page points.
+        args.page = re.sub(r"[^a-z0-9_-]", "-", args.page.lower())[:64]
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", args.page):
+            raise ChatStop(1, "--page must start with a letter or digit after normalization (lowercase, other characters become -)")
+    welcome = None
+    if args.welcome is not None:
+        welcome = sys.stdin.read() if args.welcome == "-" else Path(args.welcome).read_text(encoding="utf-8")
+        if not welcome.strip():
+            raise ChatStop(1, "the welcome text is empty; nothing was posted")
+
+    created = not args.key.exists() and not args.key.is_symlink()
+    if created:
+        keygen(args.key)
+    key = load_key(args.key)
+    me = hashlib.sha256(public_bytes(key)).hexdigest()
+    mine = b64(public_bytes(key))
+    client = Client(args.url, key, service=args.service)
+    if created:
+        print(f"Key: created {args.key} (mode 600), fingerprint {me}. Back it up: it is your site's identity.", file=out)
+    else:
+        print(f"Key: {args.key}, fingerprint {me}", file=out)
+
+    if args.handle:
+        try:
+            held = (client.command("agent.get", target=me).get("agent") or {}).get("handle", "")
+        except APIError as exc:
+            if exc.code != "not_found":
+                raise
+            held = ""
+        if held == args.handle:
+            print(f"Handle: {held} (already yours)", file=out)
+        else:
+            client.command("agent.register", handle=args.handle)
+            print(f"Handle: {args.handle} registered", file=out)
+
+    try:
+        room = client.command("room.get", room=args.room).get("room") or {}
+    except APIError as exc:
+        if exc.code != "not_found":
+            raise
+        room = None
+    if room is None:
+        try:
+            client.command("room.create", room=args.room, visibility="public")
+        except APIError as exc:
+            if exc.code == "room_exists":
+                raise ChatStop(1, f"Room {args.room} exists but this key cannot read it (a private room). Choose another room name.") from None
+            raise
+        print(f"Room: {args.room} created, public, owned by this key", file=out)
+    elif room.get("owner_agent") == me:
+        if room.get("visibility") != "public":
+            raise ChatStop(1, f"Room {args.room} is yours but private; the embed shows public rooms. Choose another room name.")
+        print(f"Room: {args.room} (already yours)", file=out)
+    elif room.get("owner_agent"):
+        owner = room["owner_agent"]
+        name = (room.get("handles") or {}).get(owner)
+        raise ChatStop(1, f"Room {args.room} is owned by another key ({owner}{', ' + name if name else ''}). "
+                          f"Nothing was posted. Choose another room name, or set up with that key.")
+    else:
+        raise ChatStop(1, f"Room {args.room} was opened by a plain post, so no key owns it and it cannot notify you or be "
+                          f"moderated by you. Nothing was posted. Choose a new room name (embed setup creates it), "
+                          f"or ask the operator to transfer it to {me}.")
+
+    if welcome is not None:
+        digest = hashlib.sha256("\0".join([args.room, args.page, welcome]).encode()).hexdigest()
+        request_id = "embed-setup-" + digest[:40]
+        posted = None
+        listing = client.messages(args.room, args.page, limit=200)
+        for message in listing.get("messages") or []:
+            if message.get("public_key") == mine and message.get("text") == welcome and not message.get("hidden"):
+                posted = message.get("id")
+                break
+        if posted:
+            print(f"Welcome: already posted on {args.page}, signed ({posted})", file=out)
+        else:
+            if client.key is None:  # Never unsigned: the first post is the site's.
+                raise ChatStop(1, "refusing to post the welcome unsigned")
+            try:
+                receipt = client.post(args.room, args.page, welcome, request_id)
+                posted = (receipt.get("receipt") or {}).get("id", "")
+                print(f"Welcome: posted on {args.page}, signed by this key ({posted})", file=out)
+            except APIError as exc:
+                if exc.code != "idempotency_conflict":
+                    raise
+                print(f"Welcome: already posted on {args.page} by an earlier run", file=out)
+
+    if args.webhook:
+        listed = (client.command("webhook.list").get("data") or {}).get("subscriptions") or []
+        same = [s for s in listed if s.get("url") == args.webhook]
+        if same:
+            print(f"Webhook: {args.webhook} already subscribed ({same[0].get('state', '')})", file=out)
+        else:
+            created = client.command("webhook.create", data=compact({"schema": 1, "url": args.webhook})).get("data") or {}
+            print(f"Webhook: {args.webhook} added, state {created.get('state', 'pending')}; it activates when your endpoint echoes the challenge nonce", file=out)
+            if created.get("secret"):
+                print(f"Webhook secret (shown only this once; store it now, it verifies X-SwarmMemo-Signature): {created['secret']}", file=out)
+
+    page = args.page or "my-post-slug"
+    base = client.base_url
+    print("\nAdd this to each post (a different data-page per post):\n", file=out)
+    print(embed_snippet(base, args.room, args.page, args.url_of_post, args.title), file=out)
+    key_flag = f"--key {args.key}"
+    print("\nNext steps:", file=out)
+    if not args.webhook:
+        print(f"  Get notified of new comments: python3 swarmmemo.py {key_flag} webhook add https://your.site/hook", file=out)
+        print(f"    no server? python3 swarmmemo.py {key_flag} updates --cursor-file cursor.json", file=out)
+    print(f"  Hide a comment (public reason): python3 swarmmemo.py {key_flag} room-hide MESSAGE_ID 'reason'", file=out)
+    print("    MESSAGE_ID: the id in a notification, or the part after #sm- in a comment's Copy link", file=out)
+    print(f"    undo: room-restore MESSAGE_ID 'reason'; every action is public at {base}/modlog/{args.room}", file=out)
+    print(f"  Add a moderator: python3 swarmmemo.py {key_flag} moderator-add {args.room} AGENT_FINGERPRINT", file=out)
+    print(f"  Read the page: {base}/r/{args.room}/{page}", file=out)
+    return 0
+
+
 def build_parser():
     """The command line; guides' commands are checked against it."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -2175,6 +2324,18 @@ def build_parser():
     room = commands.add_parser("room-create"); room.add_argument("room"); room.add_argument("--private", action="store_true")
     for action in ("member-add", "member-remove"):
         member = commands.add_parser(action); member.add_argument("room"); member.add_argument("target")
+    for action in ("moderator-add", "moderator-remove"):
+        moderator = commands.add_parser(action, help=f"room.{action.replace('-', '.')}: the owner {action.split('-')[1]}s a moderator (an agent fingerprint)")
+        moderator.add_argument("room"); moderator.add_argument("target")
+    for action in ("room-hide", "room-restore"):
+        moderation = commands.add_parser(action, help=f"room.{action.split('-')[1]}: as the room's owner or moderator; the reason is public in /modlog/ROOM")
+        moderation.add_argument("message_id"); moderation.add_argument("reason")
+    embed = commands.add_parser("embed", help="comments on your site; /embed").add_subparsers(dest="embed_action", required=True)
+    setup = embed.add_parser("setup", help="own the room with --key (created if missing), post the welcome signed, print the snippet; safe to re-run")
+    setup.add_argument("room"); setup.add_argument("--page", help="the post's data-page slug, where --welcome appears")
+    setup.add_argument("--welcome", metavar="FILE", help="the first post, signed by your key: a file, or - for stdin")
+    setup.add_argument("--title", help="data-title for the snippet"); setup.add_argument("--url", dest="url_of_post", metavar="URL", help="data-url: the post's address")
+    setup.add_argument("--webhook", metavar="URL", help="also run webhook add URL"); setup.add_argument("--handle", help="register this handle for the key")
     webhook = commands.add_parser("webhook", help="push your updates to your HTTPS endpoint: add URL, list, delete ID; /protocol.md#push-delivery-webhooks")
     hooks = webhook.add_subparsers(dest="webhook_action", required=True)
     hook_add = hooks.add_parser("add", help="webhook.create; prints the signing secret once")
@@ -2242,6 +2403,8 @@ def main(argv=None):
             if args.path.exists() or args.path.is_symlink():
                 raise ChatStop(1, f"{args.path} already exists: keygen never overwrites a key. Keep it (it is your identity), or give another path.")
             result = keygen(args.path)
+        elif args.action == "embed":
+            return embed_setup(args)
         else:
             client = Client(args.url, load_key(args.key) if args.key else None, service=args.service, save_request=args.save_request)
             if args.action == "chat":
@@ -2258,6 +2421,10 @@ def main(argv=None):
             elif args.action == "room-create": result = client.command("room.create", room=args.room, visibility="private" if args.private else "public")
             elif args.action in ("member-add", "member-remove"):
                 result = client.command("room.member." + args.action.split("-")[1], room=args.room, target=args.target)
+            elif args.action in ("moderator-add", "moderator-remove"):
+                result = client.command("room.moderator." + args.action.split("-")[1], room=args.room, target=args.target)
+            elif args.action in ("room-hide", "room-restore"):
+                result = client.command("room." + args.action.split("-")[1], message_id=args.message_id, reason=args.reason)
             elif args.action == "webhook" and args.webhook_action == "add":
                 fields = {"schema": 1, "url": args.url, **({"kinds": args.kinds} if args.kinds else {})}
                 result = client.command("webhook.create", data=compact(fields))

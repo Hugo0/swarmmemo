@@ -44,7 +44,7 @@ const {curator} = require('./home_density_test.cjs');
     });
     // A small server page makes pagination observable without hundreds of writes.
     await page.route(origin + '/api/messages?*', route => {
-      const url = new URL(route.request().url()); url.searchParams.set('limit', '2');
+      const url = new URL(route.request().url()); assert.equal(url.searchParams.get('weights'), '1', 'reads ask for the ranking weight Top sorts by'); url.searchParams.set('limit', '2');
       return route.continue({url: url.href});
     });
     await page.goto(hostOrigin);
@@ -92,8 +92,8 @@ const {curator} = require('./home_density_test.cjs');
     assert.match(await page.locator(`article[data-id="${id}"] > .meta`).textContent(), /edited/);
     assert.equal(JSON.parse(writes[2].data).supersedes, id, 'the edit supersedes the original');
     assert.equal(await page.locator(`article[data-id="${id}"] .replies`).getByText('Reply from the same browser key', {exact: true}).count(), 1, 'replies stay under the edited comment');
-    // Heart: aria-pressed and the count follow the board's reply (stubbed: a new
-    // key cannot vote yet; the real refusal path is checked below).
+    // Heart: aria-pressed and the count follow the board's reply (stubbed here;
+    // a real vote from a brand-new key is checked below).
     const voted = [];
     await page.route(origin + '/v1/command', route => {
       const command = route.request().postDataJSON();
@@ -185,9 +185,11 @@ const {curator} = require('./home_density_test.cjs');
     await blockedPage.locator(`article[data-id="${parent}"] > .actions > button.heart`).click();
     const vote = (await voteRequest).postDataJSON();
     assert.equal(vote.message_id, parent); assert.deepEqual(JSON.parse(vote.data), {value: 1}); assert.ok(vote.signature);
-    const refusal = await (await voteResponse).json();
-    assert.equal(refusal.error.code, 'vote_not_eligible');
-    await blockedPage.getByRole('status').filter({hasText: refusal.error.message}).waitFor();
+    // A brand-new key's like counts at once: the vote count takes every signed vote.
+    const accepted = await (await voteResponse).json();
+    assert.equal(accepted.ok, true); assert.equal(accepted.data.votes.up, 1);
+    await blockedPage.getByRole('status').filter({hasText: 'Liked.'}).waitFor();
+    await blockedPage.locator(`article[data-id="${parent}"] > .actions > button.heart[aria-pressed="true"]`).waitFor();
     await blocked.close();
 
     // A browser without Ed25519 still uses the same anonymous post endpoint.
@@ -209,6 +211,6 @@ const {curator} = require('./home_density_test.cjs');
     await anonPage.locator('article').getByText(/Anonymous fallback comment/).waitFor();
     assert.equal(await anonPage.locator('article > .body').textContent(), 'Anonymous fallback comment', 'the widget never adds to what someone wrote');
     await anonymous.close();
-    console.log('PASS: cross-origin embed under host CSP, literal text, imported label, chronological pagination, signed comments/replies, heart toggle, report flow, copy link, sort, collapse, persistent browser key, theming, 390px layout, no console errors/cookies/third-party requests, anonymous fallback, automatic target, blocked storage, exact retries and signed vote eligibility errors.');
+    console.log('PASS: cross-origin embed under host CSP, literal text, imported label, chronological pagination, signed comments/replies, heart toggle, report flow, copy link, sort, collapse, persistent browser key, theming, 390px layout, no console errors/cookies/third-party requests, anonymous fallback, automatic target, blocked storage, exact retries and a brand-new key\'s signed like.');
   } finally {await browser.close(); await new Promise(resolve => host.close(resolve));}
 })().catch(error => {console.error(error); process.exitCode = 1;});

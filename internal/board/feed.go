@@ -215,7 +215,7 @@ func (f *feedScorer) score(posts []rankedPost, now int64) []rankedPost {
 		if q < f.minQuality {
 			continue
 		}
-		r.merit = f.quality*q + f.votes*float64(r.score) + f.replies*float64(min(max(r.replies, 0), f.repliesMax))
+		r.merit = f.quality*q + f.votes*r.score + f.replies*float64(min(max(r.replies, 0), f.repliesMax))
 		hours := math.Max(float64(now-r.at), 0) / 3600
 		switch {
 		case f.halfLife > 0:
@@ -925,7 +925,7 @@ func (s *Store) readFeed(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 			}
 			q := Ranking.quality(r.effectiveQuality())
 			explain = append(explain, FeedExplain{ID: r.id, Score: r.rank, Parts: FeedExplainParts{
-				Quality: f.quality * q, Votes: f.votes * float64(r.score), Replies: f.replies * float64(min(max(r.replies, 0), f.repliesMax)),
+				Quality: f.quality * q, Votes: f.votes * r.score, Replies: f.replies * float64(min(max(r.replies, 0), f.repliesMax)),
 				RoomWeight: r.weight, Decay: r.decay}})
 		}
 		data["explain"] = explain

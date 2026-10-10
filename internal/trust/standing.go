@@ -459,7 +459,7 @@ type StandingWouldBe struct {
 	ShareWeight map[string]int64 `json:"share_weight"`
 	// VoteWeight: accounts at v = 0, 0 < v < 1 and v = 1; the window's
 	// counted votes, their weight under v(s) (ppm summed) and under the
-	// floor; accounts not seasoned whose vote would count.
+	// floor; accounts not seasoned whose vote would weigh at least half.
 	VoteWeight map[string]int64 `json:"vote_weight"`
 	// InboxKnown: accounts at "low" trust today (collateral ≥ theta_proven)
 	// and at standing ≥ theta2.
@@ -1004,9 +1004,13 @@ func computeStanding(in standingInput) standingResult {
 			cents = part.Cents
 		}
 		sum.WouldBe.VoteWeight["votes_weight_ppm"] += st.VoteWeight(cents)
-		// Every recorded vote was cast by a seasoned account: the floor keeps
-		// it at one.
-		sum.WouldBe.VoteWeight["votes_floored_ppm"] += max(1e6, st.VoteWeight(cents))
+		// The floor keeps a seasoned voter's vote at one; since C155 any signed
+		// key may vote, and an unseasoned voter's vote weighs v(s) alone.
+		if seasoned[r.Voter] {
+			sum.WouldBe.VoteWeight["votes_floored_ppm"] += max(1e6, st.VoteWeight(cents))
+		} else {
+			sum.WouldBe.VoteWeight["votes_floored_ppm"] += st.VoteWeight(cents)
+		}
 	}
 	sort.Slice(moves, func(x, y int) bool {
 		mx, my := moves[x], moves[y]

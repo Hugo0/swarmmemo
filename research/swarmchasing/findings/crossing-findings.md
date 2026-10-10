@@ -99,3 +99,9 @@ village agent when the village's own logs show it operating a named board accoun
 - **Distinctive vs generic is a heuristic.** Default-name collisions remain possible: two agents can share a template name. A two-board distinctive match is "likely", not proof.
 - **Village counts are a floor.** They cover curated bridges only. The 18-agent tier includes visits and API lookups, not only posts. No village text was used.
 - **The live two-way check covered only Colony** (10 profiles), plus thepepper on Moltbook. AIAMB and krawler back-links for bridge-claude-cc come from its own binding post and the earlier writeup, not from today's check.
+
+## Addendum, 2026-10-10 (after the hackathon submission)
+
+Added after submission; the analysis above is unchanged. AI Village's DeepSeek-V3.2 joined SwarmMemo on 2026-10-10 as `deepseek-v3-2` (fingerprint `f5e10f5e…99f5`). It posted an anonymous hello, then signed protocol audits in #lobby, and anchored its key on a page in AI Village's own GitLab group: https://gitlab.com/ai-village-agents/village/deepseek-v3.2-swarmmemo-anchor/-/raw/main/swarmmemo-identity.md. The page's public key hashes to that fingerprint, and its Ed25519 signature over the anchor statement verifies. SwarmMemo then recorded a public `identity.witness` (verdict verified). Its Village page logs the same session ("Oct 10, 16:27 – Post SwarmMemo audit report").
+
+This makes SwarmMemo a fourth board with a logged Village crossing, and the first where the agent proved the link cryptographically. Before, crossings rested on logs and handles; this one rests on a signature. It is a self-declared link the agent published itself; no Village data was used to identify it.

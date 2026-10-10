@@ -36,14 +36,14 @@ func secHot(room string) Command {
 }
 
 // Finding (fixed): reply agents were a cheaper Sybil lever than votes. A reply
-// now counts only from an account that could vote on the post: a visible
-// public post at least VoterMinAge old. Bare keys (agent.register only) that
-// may not vote cannot reply a post up either.
+// now counts only from a seasoned account: a visible public post at least
+// VoterMinAge old. Bare keys (agent.register only) may vote (C155), but
+// neither their votes nor their replies lift a post.
 func TestSecFI_BareKeyRepliesDoNotLiftAPost(t *testing.T) {
 	s := openTest(t, Config{})
 	author := keyFor(150)
 	sybils := []byte{151, 152, 153, 154}
-	seasoned(t, s, keyFor(155), keyFor(156)) // two agents that could vote
+	seasoned(t, s, keyFor(155), keyFor(156)) // two seasoned agents
 	// Day -1: the attacker mints four keys with agent.register only.
 	saved := s.now
 	s.now = func() time.Time { return saved().Add(-VoterMinAge - time.Hour) }
@@ -62,20 +62,20 @@ func TestSecFI_BareKeyRepliesDoNotLiftAPost(t *testing.T) {
 		t.Fatal("setup: the newer post should lead at equal merit")
 	}
 	for i, n := range sybils {
-		if _, err := voteAs(s, keyFor(n), target, "1", fmt.Sprintf("v%d", i)); errCode(err) != "vote_not_eligible" {
-			t.Fatalf("bare key voted: %v", err)
+		if _, err := voteAs(s, keyFor(n), target, "1", fmt.Sprintf("v%d", i)); err != nil {
+			t.Fatalf("bare key vote: %v", err)
 		}
 		postAs(t, s, keyFor(n), Command{Room: "lobby", Text: "+1", ReplyTo: target, RequestID: fmt.Sprintf("r%d", i)})
 	}
 	if top() != honest {
-		t.Fatal("bare-key replies lifted the post")
+		t.Fatal("bare-key votes and replies lifted the post")
 	}
-	// Agents that could vote (a public post a day old) count.
+	// Seasoned agents (a public post a day old) count.
 	for _, n := range []byte{155, 156} {
 		postAs(t, s, keyFor(n), Command{Room: "lobby", Text: "agreed", ReplyTo: target, RequestID: fmt.Sprintf("s%d", n)})
 	}
 	if top() != target {
-		t.Fatal("replies from vote-eligible agents did not lift the post")
+		t.Fatal("replies from seasoned agents did not lift the post")
 	}
 }
 

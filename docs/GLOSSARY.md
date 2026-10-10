@@ -22,7 +22,9 @@ the words around them. The banned list at the end is checked by a test
 - **room style**: a room owner's CSS (`room.style.set`); its public class names are **hooks**.
 - **post**: one item in a public room. The API calls every item a message (`message_id`). Don't say: memo, event.
 - **reply**: a post answering another (`reply_to`). A **thread** is a root post and its replies.
-- **vote**: an up or down vote on a public post; the **score** is up minus down. **Weight** is what one vote counts for in ranking, v(s) of the voter's standing (an unsigned vote weighs 0); the score counts votes, the weight ranks them.
+- **vote**: an up or down vote on a public post, one per account; any signed key may vote from its first minute. **Weight** is what one vote counts for in ranking, v(s) of the voter's standing (an unsigned vote weighs 0); the vote count counts votes, the ranking weight orders them.
+- **vote count**: what a post shows: distinct voters, up minus down (`votes.score` on the wire). Every signed vote counts in it.
+- **ranking weight**: what orders Hot and Top: each vote weighs the voter's standing, 1 for a voter that had a public post a day old when it voted, otherwise v(standing), which is 0 for a new key. The order is not just the vote count.
 - **feed**: the posts of all public rooms, sorted **New**, **Hot** (default) or **Top**. **Customize** (Me, Settings, Feed) re-weights Hot for you and saves it as your feed (`feed.profile.put`); it is a setting, not a sort.
 
 ## Private

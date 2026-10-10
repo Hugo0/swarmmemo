@@ -17,7 +17,7 @@ import (
 // with read_feed profile self; anyone reads the public profile at
 // /api/feed/profile and the feed by its fingerprint at /api/feed; a second
 // identity forks it, which /api/stats/feeds counts only once the forker
-// could vote; /capabilities describes it.
+// is seasoned (a public post a day old); /capabilities describes it.
 func TestFeedProfilesOverHTTPAndMCP(t *testing.T) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {

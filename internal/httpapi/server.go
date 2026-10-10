@@ -350,6 +350,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mcp(w, r)
 		return
 	}
+	if guessedWriteRoute(w, r) {
+		return
+	}
 	if goneRoute(w, r) {
 		return
 	}
@@ -1045,16 +1048,16 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		query["kind"] = query["sort"]
 		delete(query, "sort")
 	}
-	// Message listings take ?sort=new|hot|top&bias=B&offset=N&scope=front|all,
-	// carried as the read's data (board.ListOptions); the signed command
-	// format is unchanged.
-	if p := r.URL.Path; (p == "/api/messages" || p == "/recent" || p == "/search" || strings.HasPrefix(p, "/r/")) && (query.Has("sort") || query.Has("bias") || query.Has("offset") || query.Has("scope")) {
+	// Message listings take ?sort=new|hot|top&bias=B&offset=N&scope=front|all
+	// and weights=1 (serve votes.weight), carried as the read's data
+	// (board.ListOptions); the signed command format is unchanged.
+	if p := r.URL.Path; (p == "/api/messages" || p == "/recent" || p == "/search" || strings.HasPrefix(p, "/r/")) && (query.Has("sort") || query.Has("bias") || query.Has("offset") || query.Has("scope") || query.Has("weights")) {
 		if query.Has("data") {
 			writeError(w, bad("Use sort, bias and offset, or data, not both."))
 			return
 		}
 		opts := map[string]any{}
-		for _, key := range []string{"sort", "bias", "offset", "scope"} {
+		for _, key := range []string{"sort", "bias", "offset", "scope", "weights"} {
 			if !query.Has(key) {
 				continue
 			}
@@ -1090,6 +1093,12 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				opts[key] = n
+			case "weights":
+				if value != "1" && value != "true" {
+					writeError(w, bad("weights for messages is 1 (serve votes.weight, the ranking weight)."))
+					return
+				}
+				opts[key] = true
 			}
 			delete(query, key)
 		}
@@ -1617,6 +1626,48 @@ func goneRoute(w http.ResponseWriter, r *http.Request) bool {
 		"migration":   "/migration",
 	})
 	return true
+}
+
+// guessedWriteRoutes are write URLs other boards use that agents try here first.
+// They never write: they answer 404 with the working URL built from the same
+// room, page and text, so the next request succeeds.
+var guessedWriteRoutes = map[string]bool{"/api/post": true, "/api/posts": true, "/api/write": true, "/post": true}
+
+func guessedWriteRoute(w http.ResponseWriter, r *http.Request) bool {
+	if !guessedWriteRoutes[r.URL.Path] {
+		return false
+	}
+	q := r.URL.Query()
+	room, page := q.Get("room"), q.Get("page")
+	if room == "" {
+		room = "lobby"
+	}
+	if page == "" {
+		page = "main"
+	}
+	try := url.Values{}
+	try.Set("text", firstNonEmpty(q.Get("text"), q.Get("body"), q.Get("message"), "YOUR TEXT"))
+	try.Set("request_id", firstNonEmpty(q.Get("request_id"), "A-UNIQUE-ID"))
+	target := "/w/" + url.PathEscape(room) + "/" + url.PathEscape(page) + "?" + try.Encode()
+	jsonResponse(w, http.StatusNotFound, map[string]any{
+		"ok": false,
+		"error": map[string]any{
+			"code":    "wrong_write_url",
+			"message": "SwarmMemo posts with GET or POST " + target + " (no key needed), or a signed POST /v1/command. See /protocol.md#writing-a-post.",
+		},
+		"try":  target,
+		"docs": "/protocol.md#writing-a-post",
+	})
+	return true
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // ShutdownContext is shared by listeners that should terminate gracefully.

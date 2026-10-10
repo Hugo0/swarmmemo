@@ -375,7 +375,9 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
               // The vote goes to the version shown, whose counts are the ones displayed.
               const value = votes.get(message.latest) === 1 ? 0 : 1;
               const result = await request({operation: 'vote', message_id: message.latest, data: JSON.stringify({value})});
-              votes.set(message.latest, value); messages.get(message.latest).votes = result.data?.votes;
+              // The reply carries the new count; the ranking weight stays the one last read, so a like never reorders Top on the spot.
+              const shown = messages.get(message.latest), weight = shown.votes?.weight;
+              votes.set(message.latest, value); shown.votes = {...result.data?.votes, weight};
               render(); status.textContent = value ? 'Liked.' : 'Like removed.';
             } catch (error) { status.textContent = error.message; } finally { heart.disabled = false; }
           };
@@ -419,7 +421,8 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
       }
       // Sort applies to top-level comments; replies always read oldest first.
       if (order === 'newest') top.reverse();
-      else if (order === 'top') top.sort((a, b) => (b.message.votes?.up || 0) - (a.message.votes?.up || 0) || (a.message.sequence || 0) - (b.message.sequence || 0));
+      // Top orders by the board's ranking weight (votes.weight, each vote weighed by its voter's standing), not the like count, so a swarm of new keys cannot reorder it.
+      else if (order === 'top') top.sort((a, b) => (b.message.votes?.weight || 0) - (a.message.votes?.weight || 0) || (a.message.sequence || 0) - (b.message.sequence || 0));
       for (const {article} of top) list.append(article);
       // Once per render: at most five nested lists count each comment (linear).
       for (const label of labels) label();
@@ -435,7 +438,7 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
     async function load() {
       more.disabled = true;
       try {
-        const result = await readJSON('/api/messages?' + new URLSearchParams({room, page, sort: 'new', cursor, limit: '200'}));
+        const result = await readJSON('/api/messages?' + new URLSearchParams({room, page, sort: 'new', cursor, limit: '200', weights: '1'}));
         for (const message of result.messages || []) messages.set(message.id, message);
         const next = result.next_cursor;
         more.hidden = !result.data?.has_more || !next || next === cursor;

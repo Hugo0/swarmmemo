@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -45,15 +46,20 @@ func TestVotesOnePerAccountNoSelfPublicOnly(t *testing.T) {
 	alice, bob, carol := keyFor(11), keyFor(12), keyFor(13)
 	post := postAs(t, s, alice, Command{Room: "lobby", Text: "alice one", RequestID: "a1"})
 
-	// A key with no public post a day old cannot vote yet.
-	if _, err := voteAs(s, bob, post, "1", "fresh"); errCode(err) != "vote_not_eligible" {
-		t.Fatalf("fresh key: %v", err)
+	// A brand-new key votes from its first minute: the vote count takes it,
+	// the ranking weight does not (it was not seasoned when it voted).
+	if r, err := voteAs(s, bob, post, "1", "fresh"); err != nil || r.Data["votes"].(VoteCounts) != (VoteCounts{Up: 1, Score: 1}) {
+		t.Fatalf("fresh key: %+v %v", r.Data, err)
+	}
+	if w := seasonedScore(t, s, post); w != 0 {
+		t.Fatalf("a fresh key's vote weighs %d whole votes", w)
 	}
 	seasoned(t, s, bob, carol)
 	if _, err := voteAs(s, alice, post, "1", "self"); errCode(err) != "self_vote" {
 		t.Fatalf("self vote: %v", err)
 	}
-	if r, err := voteAs(s, bob, post, "1", "b1"); err != nil || r.Data["votes"].(VoteCounts) != (VoteCounts{Up: 1, Score: 1}) {
+	// Voting again, now seasoned, re-weighs the vote at that time.
+	if r, err := voteAs(s, bob, post, "1", "b1"); err != nil || r.Data["votes"].(VoteCounts) != (VoteCounts{Up: 1, Score: 1}) || seasonedScore(t, s, post) != 1 {
 		t.Fatalf("bob up: %+v %v", r.Data, err)
 	}
 	// A second vote by the same account replaces the first.
@@ -63,7 +69,7 @@ func TestVotesOnePerAccountNoSelfPublicOnly(t *testing.T) {
 	if r, err := voteAs(s, carol, post, "-1", "c1"); err != nil || r.Data["votes"].(VoteCounts) != (VoteCounts{Down: 2, Score: -2}) {
 		t.Fatalf("carol down: %+v %v", r.Data, err)
 	}
-	if r, err := voteAs(s, bob, post, "0", "b3"); err != nil || r.Data["votes"].(VoteCounts) != (VoteCounts{Down: 1, Score: -1}) {
+	if r, err := voteAs(s, bob, post, "0", "b3"); err != nil || r.Data["votes"].(VoteCounts) != (VoteCounts{Down: 1, Score: -1}) || seasonedScore(t, s, post) != -1 {
 		t.Fatalf("bob clears: %+v %v", r.Data, err)
 	}
 	for _, bad := range []string{"2", `"1"`, "1,\"x\":1", ""} {
@@ -92,6 +98,86 @@ func TestVotesOnePerAccountNoSelfPublicOnly(t *testing.T) {
 	}
 	if _, err := voteAs(s, bob, post, "1", "hidden"); errCode(err) != "message_hidden" {
 		t.Fatalf("hidden: %v", err)
+	}
+}
+
+// seasonedScore is a post's stored whole-vote ranking weight.
+func seasonedScore(t *testing.T, s *Store, id string) int64 {
+	t.Helper()
+	var n int64
+	if err := s.db.QueryRow("SELECT coalesce((SELECT score FROM event_scores WHERE event_id=?),0)", id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A fresh key is free: any number of them move the vote count shown, and
+// the ranking not at all. 300 fresh keys vote through the real command and a
+// million more votes are written as rows (what the command stores for an
+// unseasoned voter); one vote from an established account still lifts its
+// post above the flooded one, in hot and in top, while the flooded post shows
+// 1,000,300 votes.
+func TestFreshKeysMoveTheCountNotTheRanking(t *testing.T) {
+	s := openTest(t, Config{})
+	author, established := keyFor(81), keyFor(82)
+	seasoned(t, s, established)
+	// Three posts of one age; at equal merit the newest (control) leads.
+	backed := postAs(t, s, author, Command{Room: "lobby", Text: "one established vote", RequestID: "backed"})
+	flooded := postAs(t, s, author, Command{Room: "lobby", Text: "a million fresh keys", RequestID: "flooded"})
+	control := postAs(t, s, author, Command{Room: "lobby", Text: "no votes", RequestID: "control"})
+	if _, err := voteAs(s, established, backed, "1", "established"); err != nil {
+		t.Fatal(err)
+	}
+	const viaCommand, viaRows = 300, 1_000_000
+	for i := 0; i < viaCommand; i++ {
+		seed := make([]byte, 32)
+		seed[0], seed[1], seed[31] = byte(i), byte(i>>8), 0xfe
+		if _, err := voteAs(s, ed25519.NewKeyFromSeed(seed), flooded, "1", fmt.Sprintf("fresh-%d", i)); err != nil {
+			t.Fatalf("fresh key %d: %v", i, err)
+		}
+	}
+	if _, err := s.db.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?)
+ INSERT INTO votes(event_id,account,value,created_at,seasoned) SELECT ?,printf('sybil-%07d',i),1,?,0 FROM n`, viaRows, flooded, testTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("UPDATE event_scores SET ups=ups+? WHERE event_id=?", viaRows, flooded); err != nil {
+		t.Fatal(err)
+	}
+	secDropRankCache(s)
+	got := map[string]*VoteCounts{}
+	for _, m := range run(t, s, Command{Operation: "messages.list", Room: "lobby"}).Messages {
+		got[m.ID] = m.Votes
+	}
+	if v := got[flooded]; v == nil || v.Score != viaCommand+viaRows || v.Weight != 0 {
+		t.Fatalf("flooded post: %+v", v)
+	}
+	if v := got[backed]; v == nil || v.Score != 1 || v.Weight != 1 {
+		t.Fatalf("backed post: %+v", v)
+	}
+	if got[backed].Served != nil {
+		t.Fatal("votes.weight served unasked: clients that predate it check the fields exactly")
+	}
+	// Asked for, the ranking weight is served: one rounded sum per post.
+	for _, m := range run(t, s, Command{Operation: "messages.list", Room: "lobby", Data: `{"sort":"new","weights":true}`}).Messages {
+		want := map[string]float64{backed: 1, flooded: 0}[m.ID]
+		if m.Votes != nil && (m.Votes.Served == nil || *m.Votes.Served != want) {
+			t.Fatalf("%s served weight %v, want %v", m.ID, m.Votes.Served, want)
+		}
+	}
+	if raw, _ := json.Marshal(VoteCounts{Up: 1, Score: 1}); string(raw) != `{"up":1,"down":0,"score":1}` {
+		t.Fatalf("unasked votes encode as %s", raw)
+	}
+	// One established vote leads; the flooded post ranks exactly as an
+	// unvoted one (below the newer control on the tie).
+	for _, sort := range []string{"hot", "top"} {
+		res := run(t, s, Command{Operation: "messages.list", Room: "lobby", Data: `{"sort":"` + sort + `"}`})
+		var order []string
+		for _, m := range res.Messages {
+			order = append(order, m.ID)
+		}
+		if len(order) != 3 || order[0] != backed || order[1] != control || order[2] != flooded {
+			t.Fatalf("%s: want backed, control, flooded; got %v (backed %s, control %s, flooded %s)", sort, order, backed, control, flooded)
+		}
 	}
 }
 

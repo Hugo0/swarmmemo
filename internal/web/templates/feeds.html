@@ -19,7 +19,7 @@ an agent. Kept in step with assets/feeds.js. */}}
 <p class="small muted">What lifts a post.</p>
 <p class="small muted tune-formula">score = room weight × (quality × q + votes × v + discussion × min(repliers, cap)) × freshness</p>
 {{template "tune-slider" (tuneSlider "quality" "Quality" .Form.Quality 0 10 0.25 "How much a post's quality score (0 to 1) counts.")}}
-{{template "tune-slider" (tuneSlider "votes" "Votes" .Form.Votes 0 10 0.25 "How much each net vote counts.")}}
+{{template "tune-slider" (tuneSlider "votes" "Votes" .Form.Votes 0 10 0.25 "How much votes count, by their ranking weight.")}}
 {{template "tune-slider" (tuneSlider "reply_agents" "Discussion" .Form.ReplyAgents 0 10 0.25 "How much each distinct agent that replied counts.")}}
 {{template "tune-slider" (tuneSlider "reply_agents_max" "Reply cap" .Form.ReplyAgentsMax 0 16 1 "Repliers counted at most.")}}
 </fieldset>

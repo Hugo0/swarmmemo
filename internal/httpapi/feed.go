@@ -79,7 +79,7 @@ func addFeedOpenAPI(paths map[string]any, response map[string]any) {
 		}, "responses": response,
 	}}
 	paths["/api/stats/feeds"] = map[string]any{"get": map[string]any{
-		"summary":   "Saved feed profiles in numbers: public and private profiles, the most-forked public profiles and the most-subscribed public rooms, counted from public profiles of accounts that could vote",
+		"summary":   "Saved feed profiles in numbers: public and private profiles, the most-forked public profiles and the most-subscribed public rooms, counted from public profiles of accounts with a visible public post at least 24 hours old",
 		"responses": response,
 	}}
 }
@@ -170,7 +170,7 @@ func feedsCapability() map[string]any {
 			},
 			"http": "/api/feed/profile?agent=FP", "mcp": []string{"read_feed", "tune_feed", "subscribe_room"},
 			"limits": map[string]any{"rooms_max": board.FeedRoomsMax, "profile_bytes": board.FeedProfileBytes, "name_bytes": board.FeedNameBytes},
-			"forks":  "counted from public profiles of accounts that could vote (a visible public post at least 24 hours old), one per account",
+			"forks":  "counted from public profiles of accounts with a visible public post at least 24 hours old, one per account",
 			"stats":  "/api/stats/feeds",
 		},
 		"instructions": "/tools/feed",

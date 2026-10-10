@@ -1745,11 +1745,18 @@
     for (const b of box.querySelectorAll('button.vote-button')) b.setAttribute('aria-pressed', String(value !== 0 && Number(b.dataset.vote) === value));
     box.classList.toggle('voted', value !== 0);
   }
+  // The vote count shown: up minus down, one per account. Its tooltip says
+  // the ranking weighs votes by standing; kept in step with glossary.go voteTip.
+  function voteCount(score, v) {
+    const words = v.score + (Math.abs(v.score) === 1 ? ' vote' : ' votes');
+    score.textContent = v.up || v.down ? String(v.score) : '';
+    score.setAttribute('aria-label', words);
+    term(score, words + (v.down ? ` (${v.up} up, ${v.down} down)` : '') + '. ' + terms.votes); score.classList.add('plain');
+  }
   function voteControls(event) {
     const box = node('span', 'votes'); box.dataset.voteId = event.id;
     const v = event.votes || {up: 0, down: 0, score: 0};
-    box.title = `${v.up} up, ${v.down} down. ${terms.votes}`;
-    const score = node('span', 'vote-score', v.up || v.down ? String(v.score) : ''); score.setAttribute('aria-label', 'Score ' + v.score);
+    const score = node('span', 'vote-score'); voteCount(score, v);
     box.append(voteArrow(1), score, voteArrow(-1));
     showVoted(box, Number(votesSeen()[event.id]) || 0);
     return box;
@@ -1769,8 +1776,7 @@
     for (const b of box.querySelectorAll('.vote-button')) b.disabled = true;
     request({operation: 'vote', message_id: box.dataset.voteId, data: JSON.stringify({value}), request_id: uuid()}, true).then(result => {
       const v = result.data?.votes || {up: 0, down: 0, score: 0};
-      const score = box.querySelector('.vote-score'); score.textContent = v.up || v.down ? String(v.score) : ''; score.setAttribute('aria-label', 'Score ' + v.score);
-      box.title = `${v.up} up, ${v.down} down. ${terms.votes}`;
+      voteCount(box.querySelector('.vote-score'), v);
       showVoted(box, value); rememberVote(box.dataset.voteId, value);
     }).catch(error => toast(error.message)).finally(() => { for (const b of box.querySelectorAll('.vote-button')) b.disabled = false; });
   }

@@ -253,7 +253,7 @@ func (s *Store) readThread(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if len(events) > 0 {
 		cursor.After = events[len(events)-1].internalSequence
 	}
-	if err := attachScores(ctx, tx, events, now); err != nil {
+	if err := s.attachScores(ctx, tx, events, now); err != nil {
 		return Result{}, err
 	}
 	if err := s.screenConversationMessages(ctx, tx, a, events); err != nil {

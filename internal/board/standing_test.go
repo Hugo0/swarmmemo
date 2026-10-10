@@ -11,8 +11,9 @@ import (
 
 // Standing in shadow is computed and shown (trust.get, the record) and
 // changes nothing; one parameter version switching it active raises the
-// allowance share and admits an unseasoned vote backed by standing, never
-// lowering anyone below today's rules.
+// allowance share and gives an unseasoned vote its v(s) in the ranking
+// weight, never lowering anyone below today's rules. Every signed key votes
+// in both modes, and the vote count shown never reads standing.
 func TestStandingShadowThenActive(t *testing.T) {
 	newcomer := keyFor(64)
 	s, _, alice, bob, bobPost := trustFixture(t, func(p *trust.Params) { p.Seeds = append(p.Seeds, keyID(keyFor(64))) })
@@ -38,10 +39,22 @@ func TestStandingShadowThenActive(t *testing.T) {
 		t.Fatalf("the newcomer is on the seed list: %+v %v", n, err)
 	}
 
-	// Shadow: today's rules.
+	// weight is bobPost's vote count and ranking weight, as reads show them.
+	weight := func() (int64, float64) {
+		t.Helper()
+		m := run(t, s, Command{Operation: "message.get", MessageID: bobPost}).Messages[0]
+		if m.Votes == nil {
+			return 0, 0
+		}
+		return m.Votes.Score, m.Votes.Weight
+	}
+	// Shadow: an unseasoned vote is counted and weighs nothing.
 	postAs(t, s, newcomer, Command{Room: "lobby", Text: "new here", RequestID: "t-new"})
-	if _, err = voteAs(s, newcomer, bobPost, "1", "v-shadow"); errCode(err) != "vote_not_eligible" {
+	if _, err = voteAs(s, newcomer, bobPost, "1", "v-shadow"); err != nil {
 		t.Fatalf("an unseasoned vote in shadow: %v", err)
+	}
+	if n, w := weight(); n != 1 || w != 0 {
+		t.Fatalf("shadow: count %d, ranking weight %v", n, w)
 	}
 	share := func(subject allowance.Subject) int64 {
 		st, err := s.classifier().Classify(testContext, s.db, subject, s.now().Unix())
@@ -76,18 +89,29 @@ func TestStandingShadowThenActive(t *testing.T) {
 	if w := share(allowance.Subject{ID: "anon:0123456789abcdef0123456789abcdef"}); w != 1e6+p.Standing.AnonSeedCents*p.WeightPerUnit {
 		t.Fatalf("active anonymous share %d", w)
 	}
+	// Active, with no code change: the same unseasoned vote weighs v(s).
+	vs := float64(p.Standing.VoteWeight(n.StandingCents)) / 1e6
+	if n, w := weight(); n != 1 || w != vs || vs <= 0 {
+		t.Fatalf("active: count %d, ranking weight %v, want v(s) %v", n, w, vs)
+	}
 	if _, err = voteAs(s, newcomer, bobPost, "1", "v-active"); err != nil {
 		t.Fatalf("an unseasoned vote backed by standing: %v", err)
 	}
-	// Nobody is refused who votes today.
+	// A seasoned vote weighs one, as today.
 	if _, err = voteAs(s, alice, bobPost, "1", "v-alice"); err != nil {
 		t.Fatalf("a seasoned vote: %v", err)
 	}
-	// An unseasoned key with no standing is still refused.
+	if n, w := weight(); n != 2 || w != 1+vs {
+		t.Fatalf("active with alice: count %d, ranking weight %v", n, w)
+	}
+	// An unseasoned key with no standing is counted and weighs nothing.
 	stranger := keyFor(65)
 	postAs(t, s, stranger, Command{Room: "lobby", Text: "hi", RequestID: "t-stranger"})
-	if _, err = voteAs(s, stranger, bobPost, "1", "v-stranger"); errCode(err) != "vote_not_eligible" {
+	if _, err = voteAs(s, stranger, bobPost, "1", "v-stranger"); err != nil {
 		t.Fatalf("an unseasoned vote with no standing: %v", err)
+	}
+	if n, w := weight(); n != 3 || w != 1+vs {
+		t.Fatalf("active with the stranger: count %d, ranking weight %v", n, w)
 	}
 }
 

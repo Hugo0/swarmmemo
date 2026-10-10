@@ -410,7 +410,7 @@ func limitValue(n int) int {
 	return n
 }
 
-func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
+func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (res Result, err error) {
 	if c.Operation == "export" {
 		return s.export(ctx, tx, c, now)
 	}
@@ -459,10 +459,16 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	var opts ListOptions
 	if c.Operation == "messages.list" && c.Data != "" {
-		var err error
 		if opts, err = parseListOptions(c.Data); err != nil {
 			return Result{}, err
 		}
+	}
+	if opts.Weights {
+		defer func() {
+			if err == nil {
+				serveWeights(res.Messages)
+			}
+		}()
 	}
 	// The all-rooms feed shows front-page rooms unless scope=all (frontpage.go).
 	if c.Older != "" && (opts.Sort != "new" || c.Cursor != "") {
@@ -542,7 +548,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if err = s.loadAttachments(ctx, tx, events, now); err != nil {
 			return Result{}, err
 		}
-		if err = attachScores(ctx, tx, events, now); err != nil {
+		if err = s.attachScores(ctx, tx, events, now); err != nil {
 			return Result{}, err
 		}
 		if err = s.screenConversationMessages(ctx, tx, a, events); err != nil {
@@ -573,7 +579,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, err
 	}
 	rows.Close()
-	res, err := s.finishPage(ctx, tx, c, events, order, limit, seq, now, opts.Sort == "new" && c.Cursor == "")
+	res, err = s.finishPage(ctx, tx, c, events, order, limit, seq, now, opts.Sort == "new" && c.Cursor == "")
 	if err == nil {
 		err = s.screenConversationMessages(ctx, tx, a, res.Messages)
 	}
@@ -597,7 +603,7 @@ func (s *Store) finishPage(ctx context.Context, tx *sql.Tx, c Command, events []
 		return Result{}, err
 	}
 	events, hasMore := boundPage(events, order, fetched, limit)
-	if err := attachScores(ctx, tx, events, now); err != nil {
+	if err := s.attachScores(ctx, tx, events, now); err != nil {
 		return Result{}, err
 	}
 	if len(events) > 0 {

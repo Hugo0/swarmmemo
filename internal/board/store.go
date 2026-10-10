@@ -241,7 +241,14 @@ CREATE TABLE IF NOT EXISTS leases (
 // (standingroots.go, C144). Additive, but a schema-23 binary would neither
 // issue nor honour challenges, and the trust run would lose the assessed
 // roots' prices.
-const SchemaVersion = 24
+//
+// 25: votes.seasoned, whether the voter had a visible public post a day old
+// when it voted (C155, votes.go). Every signed key may vote from its first
+// minute; a vote from an account that was not seasoned counts in the shown
+// totals and weighs v(standing) in rankings. Existing rows were all cast by
+// seasoned accounts (the old admission rule), so the column defaults to 1. A
+// schema-24 binary would refuse unseasoned votes and rank by the shown count.
+const SchemaVersion = 25
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.

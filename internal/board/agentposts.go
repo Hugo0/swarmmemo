@@ -101,7 +101,7 @@ func (s *Store) readAgentPosts(ctx context.Context, tx *sql.Tx, c Command, now i
 		}
 		budget += len(encoded)
 	}
-	if err = attachScores(ctx, tx, events, now); err != nil {
+	if err = s.attachScores(ctx, tx, events, now); err != nil {
 		return Result{}, agentPostsError(err)
 	}
 	res := Result{Messages: events, Data: map[string]any{"has_more": more, "agent": id, "sort": "new"}}

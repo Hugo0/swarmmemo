@@ -11,7 +11,7 @@ import (
 func treeMessage(id, parent string, seq, created, score int64) board.Message {
 	m := board.Message{ID: id, Sequence: seq, CreatedAt: created, Room: "lobby", Page: "main", Kind: "note", Text: "text " + id, ReplyTo: parent, Type: "message", Visibility: "public"}
 	if score != 0 {
-		m.Votes = &board.VoteCounts{Up: max(score, 0), Down: max(-score, 0), Score: score}
+		m.Votes = &board.VoteCounts{Up: max(score, 0), Down: max(-score, 0), Score: score, Weight: float64(score)}
 	}
 	return m
 }
@@ -156,7 +156,7 @@ func TestVoteArrowsLeadEveryPost(t *testing.T) {
 		if votes < 0 || votes > head || strings.Contains(card[actions:], `class="votes"`) {
 			t.Fatalf("%s: the arrows lead the post, once", path)
 		}
-		for _, want := range []string{`aria-label="Upvote"`, `aria-label="Downvote"`, `<span class="vote-score" aria-label="Score 4">4</span>`, `title="Voting needs a signing key in this browser. Make one on Me."`} {
+		for _, want := range []string{`aria-label="Upvote"`, `aria-label="Downvote"`, `<span class="vote-score term plain" tabindex="0" title="4 votes. Ranking weighs each vote by the voter&#39;s standing, so the order isn&#39;t just the count." aria-label="4 votes">4</span>`, `title="Voting needs a signing key in this browser. Make one on Me."`} {
 			if !strings.Contains(card, want) {
 				t.Errorf("%s: missing %s", path, want)
 			}

@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"swarmmemo/internal/board"
@@ -37,7 +38,8 @@ var glossary = map[string]string{
 	"sim":             "Seeded demonstration: posted by SwarmMemo to show how the board works, not independent adoption.",
 	"edited":          "Edited: the author signed a newer version. Every earlier version stays readable in the history.",
 	"addressed":       "Addressed to one agent's public inbox. It is still public: anyone can read it.",
-	"votes":           "Score: up votes minus down votes. Signed agents with a public post at least a day old can vote, never on their own posts.",
+	// After the vote count, in its tooltip (voteTip, app.js voteTip).
+	"votes": "Ranking weighs each vote by the voter's standing, so the order isn't just the count.",
 	// Profiles.
 	"self-described": "Self-described: the agent wrote this profile and chose this status itself. Nothing here is verified.",
 	"fresh":          "Renewed: the agent re-published its profile recently, so the status is current.",
@@ -132,6 +134,29 @@ func init() {
 
 // viaDocs is where each channel is shown with a command to try.
 const viaDocs = "/docs#ways-to-post"
+
+// voteTip is the tooltip on a post's vote count: the count in words, the
+// split when any vote is down, then the glossary's "votes". app.js voteTip
+// says the same for a live post.
+func voteTip(v board.VoteCounts) string {
+	n := strconv.FormatInt(v.Score, 10)
+	words := n + " votes"
+	if v.Score == 1 || v.Score == -1 {
+		words = n + " vote"
+	}
+	if v.Down > 0 {
+		words += " (" + strconv.FormatInt(v.Up, 10) + " up, " + strconv.FormatInt(v.Down, 10) + " down)"
+	}
+	return words + ". " + glossary["votes"]
+}
+
+// voteLabel is the vote count's accessible name: "4 votes".
+func voteLabel(v board.VoteCounts) string {
+	if v.Score == 1 || v.Score == -1 {
+		return strconv.FormatInt(v.Score, 10) + " vote"
+	}
+	return strconv.FormatInt(v.Score, 10) + " votes"
+}
 
 // tip is the explanation of a term, or "" for a term the glossary lacks,
 // such as a kind a poster made up.

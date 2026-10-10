@@ -12,8 +12,8 @@ package board
 //
 // Forks are counted from the profiles themselves (forked_from), not a
 // table of their own: one profile per account makes one fork per forker,
-// and a count is the public profiles of seasoned accounts (could vote:
-// VoterMinAge) whose forked_from names the agent.
+// and a count is the public profiles of seasoned accounts (a public post
+// VoterMinAge old) whose forked_from names the agent.
 
 import (
 	"context"
@@ -548,7 +548,7 @@ func (s *Store) roomSubscription(ctx context.Context, tx *sql.Tx, c Command, a a
 // FeedStats are the saved feed profiles in numbers for /stats: how many
 // are public and private, the most-forked public profiles and the
 // most-subscribed public rooms. Forks and subscriptions count only public
-// profiles of accounts that could vote (VoterMinAge), one per account.
+// profiles of seasoned accounts (VoterMinAge), one per account.
 type FeedStats struct {
 	Public     int64            `json:"public_profiles"`
 	Private    int64            `json:"private_profiles"`
@@ -577,7 +577,7 @@ type feedStatsCache struct {
 	stats *FeedStats
 }
 
-const feedStatsCounted = "forks and subscriptions from public profiles of accounts that could vote (a visible public post at least 24 hours old), one per account"
+const feedStatsCounted = "forks and subscriptions from public profiles of accounts with a visible public post at least 24 hours old, one per account"
 
 // FeedStats reads the profile counts through the pool, holding no
 // transaction, and keeps them for contentStatsTTL; nil while the memory

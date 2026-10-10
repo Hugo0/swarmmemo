@@ -74,6 +74,7 @@
   "votes": [
     "down",
     "score",
-    "up"
+    "up",
+    "weight"
   ]
 }

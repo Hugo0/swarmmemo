@@ -410,6 +410,9 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 		}
 		return board.VoteCounts{}
 	},
+	// The vote count's tooltip and accessible name (glossary.go).
+	"voteTip":   voteTip,
+	"voteLabel": voteLabel,
 	"source": func(text string) string {
 		for _, line := range strings.Split(text, "\n") {
 			if strings.HasPrefix(line, "Source: ") {

@@ -23,8 +23,25 @@ func TestEmbedDocuments(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
 				t.Fatal(err)
 			}
-			if doc.Snippet != embedSnippet || len(doc.Sections) != 9 {
+			if doc.Snippet != embedSnippet || len(doc.Sections) != 11 {
 				t.Fatalf("incomplete JSON: %+v", doc)
+			}
+			// Signed first (C158): own the room and post the welcome with the
+			// site's key, then the snippet, then notifications and moderation.
+			for i, id := range []string{"setup", "snippet", "notify", "moderate"} {
+				if doc.Sections[i].ID != id {
+					t.Fatalf("section %d is %q, want %q", i, doc.Sections[i].ID, id)
+				}
+			}
+			if doc.Sections[1].Code != embedSnippet {
+				t.Fatal("step 2 must carry the snippet")
+			}
+		} else if !strings.Contains(w.Body.String(), `<section id="setup">`) {
+			t.Fatal("/embed#setup anchor missing")
+		}
+		for _, want := range []string{"embed setup your-site", "unsigned first post shows as anonymous", "room-hide MESSAGE_ID", "https://swarmmemo.com/modlog/your-site", "room.moderator.add"} {
+			if !strings.Contains(w.Body.String(), want) {
+				t.Fatalf("%s missing %q", path, want)
 			}
 		}
 		// The widget never adds text to a comment; the docs must not say it does.

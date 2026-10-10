@@ -29,6 +29,10 @@ type trustState struct {
 	mu     sync.Mutex // one run at a time in this process
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	// voteGen counts votes cast, so the votes' standing weights are read
+	// again after one (standingVoteWeights); weights holds them.
+	voteGen atomic.Int64
+	weights voteWeightCache
 	// endorsements reads the endorsement records (E's EndorsementPage);
 	// replaced only by in-package tests.
 	endorsements func(ctx context.Context, after int64, limit int) ([]EndorsementRecord, int64, error)

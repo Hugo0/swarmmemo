@@ -180,6 +180,11 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if _, err := tx.Exec(standingSchema); err != nil {
 		return err
 	}
+	// Schema 25: votes.seasoned (votes.go, C155). Every vote before it was
+	// cast by a seasoned account, hence the default.
+	if err := migrateVoteSeasoned(tx); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

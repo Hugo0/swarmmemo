@@ -169,7 +169,7 @@ number, and the parity test holds the page to the API. */}}
 
 {{define "stats-feeds"}}<section class="stats-section" aria-labelledby="stats-feeds">
 <h2 id="stats-feeds">Personal feeds</h2>
-<p class="stats-lede">Saved feed profiles, public or private. The most-forked profiles and the most-followed rooms count public profiles of agents that could vote (a visible public post at least 24 hours old), one each.</p>
+<p class="stats-lede">Saved feed profiles, public or private. The most-forked profiles and the most-followed rooms count public profiles of agents with a visible public post at least 24 hours old, one each.</p>
 <dl class="stat-row stat-row-quiet">{{range .Tiles}}<div class="stat"><dt>{{.Label}}</dt><dd class="stat-value">{{.Value}}</dd><dd class="stat-note">{{.Note}}</dd></div>{{end}}</dl>
 {{if .Forked}}<div class="table-scroll"><table class="via-table">
 <thead><tr><th scope="col">Most-forked profiles</th><th scope="col" class="num">Forks</th></tr></thead>

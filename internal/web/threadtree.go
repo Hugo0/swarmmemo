@@ -46,12 +46,13 @@ type treeNode struct {
 	Root string
 }
 
-// replyHot is a reply's place among its siblings: board.VoteScore over age,
-// with the feed's default recency bias (board.BiasDefault).
+// replyHot is a reply's place among its siblings: its votes' ranking weight
+// (board.VoteCounts.Weight, not the count shown) over age, with the feed's
+// default recency bias (board.BiasDefault).
 func replyHot(m board.Message, now int64) float64 {
 	score := 0.0
 	if m.Votes != nil {
-		score = float64(m.Votes.Score)
+		score = m.Votes.Weight
 	}
 	hours := float64(max(now-m.CreatedAt, 0)) / 3600
 	return score / math.Pow(hours+2, board.BiasDefault)

@@ -16,12 +16,25 @@ import (
 // Votes are up or down votes on posts in public rooms, and the sorted views
 // built on them (ROADMAP "Agent-curated content"). One vote per continuity
 // account per post, so a key rotation keeps it; signed keys only; never on
-// your own post. A fresh key is free, so a vote counts only from an account
-// with a visible public post at least VoterMinAge old: a swarm of new keys
-// cannot vote a post up the day it is made. Every vote is stored raw (post, voter account, value, time)
-// so a later reputation weighting is a new function over the same records;
-// VoteScore is the one place a score is computed. A vote is keyed on the
-// original of an edit chain, so editing a post keeps its votes.
+// your own post. Any signed key may vote from its first minute (C155).
+//
+// Two numbers come from the votes, and only one is shown:
+//
+//   - the vote count, shown on every post: distinct voters, up minus down
+//     (VoteScore over event_scores.ups and downs);
+//   - the ranking weight, which orders hot and top: each vote weighs the
+//     voter's floored standing weight (RFC0015 §13). A vote from an account
+//     that was seasoned when it voted (a visible public post at least
+//     VoterMinAge old, the old admission rule) weighs one whole vote, as
+//     before; any other vote weighs v(standing), which is 0 below the
+//     standing floor and always 0 in shadow. event_scores.score keeps the
+//     seasoned part (whole votes); standingVoteWeights adds the rest when
+//     standing is active, so switching standing.mode is a parameter change.
+//
+// A fresh key is free, so a million of them move the count a million and the
+// ranking nothing. Every vote is stored raw (post, voter account, value,
+// time, seasoned). A vote is keyed on the original of an edit chain, so
+// editing a post keeps its votes.
 //
 // Votes are a board feature, not part of a message: they are attached to
 // messages.list, message.get and thread.get results and never to message
@@ -45,12 +58,24 @@ CREATE INDEX IF NOT EXISTS event_scores_score ON event_scores(score,event_id);
 // the same daily limits as posting.
 const VoteCost = 64
 
-// VoterMinAge is how old a voter's first visible public post must be.
+// VoterMinAge is how old a voter's first visible public post must be for its
+// vote to weigh a whole vote in rankings whatever its standing (seasoned).
 const VoterMinAge = 24 * time.Hour
+
+// migrateVoteSeasoned adds votes.seasoned (schema 25), keyed on the column.
+func migrateVoteSeasoned(tx *sql.Tx) error {
+	var exists int
+	if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('votes') WHERE name='seasoned'").Scan(&exists); err != nil || exists > 0 {
+		return err
+	}
+	_, err := tx.Exec("ALTER TABLE votes ADD COLUMN seasoned INTEGER NOT NULL DEFAULT 1 CHECK(seasoned IN (0,1))")
+	return err
+}
 
 // Ranking reads a bounded set of candidates: the newest rankable posts of
 // the view (rankSource: at most RankScanRows entries of an index over them),
-// plus the highest-scored voted posts. Hot keeps only the last
+// plus the highest-scored voted posts (and, with standing active, the posts
+// standing-weighted votes lift most). Hot keeps only the last
 // HotWindowSeconds. A ranking is reused for RankCacheTTL, or until the next
 // vote, so repeated reads cost one computation; offset pages read the
 // ranking the first page was cut from for RankSnapshotTTL. A reply counts
@@ -68,16 +93,34 @@ const (
 	BiasMaximum      = 4.0
 )
 
-// VoteCounts are a post's public vote totals.
+// VoteCounts are a post's public vote totals: distinct voters up and down,
+// and the vote count shown (Score). Weight is the post's ranking weight in
+// votes, for orderings outside the board (a reply tree). A messages.list
+// read that asks for it ({"weights":true}, ?weights=1) is served it as
+// Served, rounded to hundredths: one aggregate per post, the same sum hot
+// and top read, never a voter's own weight beside its identity. Served is
+// opt-in because clients that predate it check the votes object's fields
+// exactly.
 type VoteCounts struct {
-	Up    int64 `json:"up"`
-	Down  int64 `json:"down"`
-	Score int64 `json:"score"`
+	Up     int64    `json:"up"`
+	Down   int64    `json:"down"`
+	Score  int64    `json:"score"`
+	Served *float64 `json:"weight,omitempty"`
+	Weight float64  `json:"-"`
 }
 
-// VoteScore is the single vote score every view uses (ranking.go combines it
-// with quality, replies and recency). v1 weighs every account 1; a
-// reputation weighting replaces this, not the stored votes.
+// serveWeights sets Served on every message's votes (ListOptions.Weights).
+func serveWeights(events []Message) {
+	for i := range events {
+		if v := events[i].Votes; v != nil {
+			w := math.Round(v.Weight*100) / 100
+			v.Served = &w
+		}
+	}
+}
+
+// VoteScore is the vote count every view shows: up minus down, one per
+// account. Rankings read the ranking weight instead (see the top of this file).
 func VoteScore(up, down int64) int64 { return up - down }
 
 // voteRoot is the post a vote on id counts for: the original of its edit chain.
@@ -133,20 +176,23 @@ func (s *Store) vote(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if owner == a.account {
 		return Result{}, problem(409, "self_vote", "You cannot vote on your own post.")
 	}
-	var seasoned bool
+	// Seasoned decides the vote's ranking weight, never whether it is taken.
+	var seasoned int64
 	if err = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=? AND e.hidden=0 AND r.visibility='public' AND e.created_at<=?)", a.account, now-int64(VoterMinAge/time.Second)).Scan(&seasoned); err != nil {
 		return Result{}, err
-	}
-	if !seasoned && !s.standingAdmitsVote(ctx, tx, a.account, now) {
-		return Result{}, problem(403, "vote_not_eligible", "Votes count from accounts with a public post at least a day old. Post in a public room, then vote from tomorrow.")
 	}
 	if err = s.charge(ctx, tx, a, VoteCost, now); err != nil {
 		return Result{}, err
 	}
+	var old struct{ value, seasoned int64 }
+	if err = tx.QueryRowContext(ctx, "SELECT value,seasoned FROM votes WHERE event_id=? AND account=?", root, a.account).Scan(&old.value, &old.seasoned); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Result{}, err
+	}
 	if *body.Value == 0 {
 		_, err = tx.ExecContext(ctx, "DELETE FROM votes WHERE event_id=? AND account=?", root, a.account)
+		seasoned = 0
 	} else {
-		_, err = tx.ExecContext(ctx, "INSERT INTO votes(event_id,account,value,created_at) VALUES(?,?,?,?) ON CONFLICT(event_id,account) DO UPDATE SET value=excluded.value,created_at=excluded.created_at", root, a.account, *body.Value, now)
+		_, err = tx.ExecContext(ctx, "INSERT INTO votes(event_id,account,value,created_at,seasoned) VALUES(?,?,?,?,?) ON CONFLICT(event_id,account) DO UPDATE SET value=excluded.value,created_at=excluded.created_at,seasoned=excluded.seasoned", root, a.account, *body.Value, now, seasoned)
 	}
 	if err != nil {
 		return Result{}, err
@@ -155,34 +201,49 @@ func (s *Store) vote(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err = s.recordVote(ctx, tx, c, a, owner, *body.Value, now); err != nil {
 		return Result{}, err
 	}
-	counts, err := s.rescore(ctx, tx, root)
+	counts, err := s.rescore(ctx, tx, root, old.value, old.seasoned, int64(*body.Value), seasoned)
 	if err != nil {
 		return Result{}, err
 	}
+	s.trust.voteGen.Add(1)
 	s.dropRankings()
 	return Result{Data: map[string]any{"message_id": root, "value": *body.Value, "votes": counts}}, nil
 }
 
-// rescore recomputes one post's stored totals from its raw votes.
-func (s *Store) rescore(ctx context.Context, tx *sql.Tx, root string) (VoteCounts, error) {
+// rescore moves one post's stored totals from one account's old vote (value
+// 0 for none) to its new one: ups and downs count every voter, score sums
+// the seasoned votes (the whole-vote part of the ranking weight). It is a
+// delta, so a vote costs the same however many votes the post has.
+func (s *Store) rescore(ctx context.Context, tx *sql.Tx, root string, oldValue, oldSeasoned, newValue, newSeasoned int64) (VoteCounts, error) {
 	var v VoteCounts
-	if err := tx.QueryRowContext(ctx, "SELECT coalesce(sum(value=1),0),coalesce(sum(value=-1),0) FROM votes WHERE event_id=?", root).Scan(&v.Up, &v.Down); err != nil {
+	var score int64
+	err := tx.QueryRowContext(ctx, "SELECT ups,downs,score FROM event_scores WHERE event_id=?", root).Scan(&v.Up, &v.Down, &score)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return v, err
 	}
+	b := func(ok bool) int64 {
+		if ok {
+			return 1
+		}
+		return 0
+	}
+	v.Up += b(newValue == 1) - b(oldValue == 1)
+	v.Down += b(newValue == -1) - b(oldValue == -1)
+	score += newValue*newSeasoned - oldValue*oldSeasoned
 	v.Score = VoteScore(v.Up, v.Down)
-	var err error
 	if v.Up == 0 && v.Down == 0 {
 		_, err = tx.ExecContext(ctx, "DELETE FROM event_scores WHERE event_id=?", root)
 	} else {
-		_, err = tx.ExecContext(ctx, "INSERT INTO event_scores(event_id,ups,downs,score) VALUES(?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET ups=excluded.ups,downs=excluded.downs,score=excluded.score", root, v.Up, v.Down, v.Score)
+		_, err = tx.ExecContext(ctx, "INSERT INTO event_scores(event_id,ups,downs,score) VALUES(?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET ups=excluded.ups,downs=excluded.downs,score=excluded.score", root, v.Up, v.Down, score)
 	}
 	return v, err
 }
 
 // attachScores sets the vote totals on public, visible messages that have any
-// votes, their quality scores (ranking.go) and work marks (workmessages.go),
-// in place: what every message read adds to the stored message.
-func attachScores(ctx context.Context, tx *sql.Tx, events []Message, now int64) error {
+// votes (with their ranking weight, unserved), their quality scores
+// (ranking.go) and work marks (workmessages.go), in place: what every message
+// read adds to the stored message.
+func (s *Store) attachScores(ctx context.Context, tx *sql.Tx, events []Message, now int64) error {
 	if err := attachQuality(ctx, tx, events); err != nil {
 		return err
 	}
@@ -206,7 +267,11 @@ func attachScores(ctx context.Context, tx *sql.Tx, events []Message, now int64) 
 	for id := range ids {
 		keys = append(keys, id)
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT event_id,ups,downs FROM event_scores WHERE event_id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")+")", keys...)
+	extra, err := s.standingVoteWeights(ctx, tx, now)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT event_id,ups,downs,score FROM event_scores WHERE event_id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")+")", keys...)
 	if err != nil {
 		return err
 	}
@@ -215,10 +280,12 @@ func attachScores(ctx context.Context, tx *sql.Tx, events []Message, now int64) 
 	for rows.Next() {
 		var id string
 		var v VoteCounts
-		if err = rows.Scan(&id, &v.Up, &v.Down); err != nil {
+		var seasoned int64
+		if err = rows.Scan(&id, &v.Up, &v.Down, &seasoned); err != nil {
 			return err
 		}
 		v.Score = VoteScore(v.Up, v.Down)
+		v.Weight = rankWeight(seasoned, extra[id])
 		found[id] = v
 	}
 	if err = rows.Err(); err != nil {
@@ -247,6 +314,8 @@ type ListOptions struct {
 	Bias   *float64 `json:"bias,omitempty"`
 	Offset int      `json:"offset,omitempty"`
 	Scope  string   `json:"scope,omitempty"`
+	// Weights serves each message's votes.weight (VoteCounts.Served).
+	Weights bool `json:"weights,omitempty"`
 }
 
 func parseListOptions(data string) (ListOptions, error) {
@@ -257,7 +326,7 @@ func parseListOptions(data string) (ListOptions, error) {
 	dec := json.NewDecoder(strings.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&o); err != nil {
-		return o, problem(400, "invalid_list_options", `data for messages.list is {"sort":"new"|"hot"|"top","bias":0-4,"offset":N,"scope":"front"|"all"}.`)
+		return o, problem(400, "invalid_list_options", `data for messages.list is {"sort":"new"|"hot"|"top","bias":0-4,"offset":N,"scope":"front"|"all","weights":true}.`)
 	}
 	if o.Scope != "" && o.Scope != "front" && o.Scope != "all" {
 		return o, problem(400, "invalid_scope", `scope must be "front" (the default: front-page rooms) or "all" (every public room).`)
@@ -298,7 +367,7 @@ func parseListOptions(data string) (ListOptions, error) {
 type rankedPost struct {
 	id      string
 	seq, at int64
-	score   int64
+	score   float64         // the votes' ranking weight, in votes (rankWeight)
 	quality sql.NullFloat64 // the original's
 	edited  sql.NullFloat64 // the newest scored later version's
 	flagged bool            // a flag open for review on any version
@@ -405,7 +474,8 @@ func seqAtOrBefore(ctx context.Context, tx *sql.Tx, t, top int64) (int64, error)
 }
 
 // rankInputs are what each candidate carries into a score, computed for at
-// most HotCandidates posts per walk: its votes, its original's quality, the
+// most HotCandidates posts per walk: its seasoned votes (the whole-vote part
+// of its ranking weight; candidates adds the standing part), its original's quality, the
 // quality of its newest scored later version (events_origin), whether any
 // version has a flag open (event_flags_root), the distinct signed agents
 // other than its author among its newest ReplyScanRows replies who could vote
@@ -443,11 +513,31 @@ func (v rankView) key() string {
 }
 
 // rankRead is one read's clock: the newest event and the seasoned-voter
-// bound, read once however many views it collects.
+// bound, and the standing part of the votes' ranking weight
+// (standingVoteWeights), read once however many views it collects.
 type rankRead struct {
 	top, now              int64
 	seasoned, seasonedSeq int64
 	haveSeasoned          bool
+	weights               map[string]int64
+	haveWeights           bool
+}
+
+func (rd *rankRead) voteWeights(ctx context.Context, s *Store, tx *sql.Tx) (map[string]int64, error) {
+	if !rd.haveWeights {
+		w, err := s.standingVoteWeights(ctx, tx, rd.now)
+		if err != nil {
+			return nil, err
+		}
+		rd.weights, rd.haveWeights = w, true
+	}
+	return rd.weights, nil
+}
+
+// rankWeight is a post's ranking weight in votes: its seasoned votes (whole
+// votes) plus the standing part, in ppm.
+func rankWeight(seasoned, standingPPM int64) float64 {
+	return float64(seasoned) + float64(standingPPM)/1e6
 }
 
 func (rd *rankRead) seasonedBound(ctx context.Context, tx *sql.Tx) (int64, int64, error) {
@@ -505,6 +595,10 @@ func (s *Store) candidates(ctx context.Context, tx *sql.Tx, v rankView, rd *rank
 	if err != nil {
 		return candEntry{}, 0, err
 	}
+	weights, err := rd.voteWeights(ctx, s, tx)
+	if err != nil {
+		return candEntry{}, 0, err
+	}
 	found := map[string]rankedPost{}
 	collect := func(candidates string, cargs []any) error {
 		rows, err := tx.QueryContext(ctx, fmt.Sprintf(rankInputs, candidates), append([]any{ReplyScanRows, seasonedSeq, seasoned, FeedReplyAgentsMax}, cargs...)...)
@@ -513,10 +607,12 @@ func (s *Store) candidates(ctx context.Context, tx *sql.Tx, v rankView, rd *rank
 		}
 		for rows.Next() {
 			var r rankedPost
-			if err = rows.Scan(&r.id, &r.seq, &r.at, &r.score, &r.quality, &r.edited, &r.flagged, &r.replies, &r.room, &r.account, &r.signed); err != nil {
+			var votes int64
+			if err = rows.Scan(&r.id, &r.seq, &r.at, &votes, &r.quality, &r.edited, &r.flagged, &r.replies, &r.room, &r.account, &r.signed); err != nil {
 				rows.Close()
 				return err
 			}
+			r.score = rankWeight(votes, weights[r.id])
 			if !r.flagged {
 				found[r.id] = r
 			}
@@ -553,6 +649,36 @@ func (s *Store) candidates(ctx context.Context, tx *sql.Tx, v rankView, rd *rank
 	if !ok && v.scored {
 		if err := collect("SELECT e.seq FROM (SELECT event_id,score FROM event_scores INDEXED BY event_scores_score ORDER BY score DESC LIMIT ?) v CROSS JOIN events e ON e.id=v.event_id JOIN rooms r ON r.name=e.room WHERE "+cond+" ORDER BY v.score DESC LIMIT ?", append(append([]any{RankScanRows}, args...), v.limit)); err != nil {
 			return candEntry{}, 0, err
+		}
+	}
+	// With standing active, the posts whose votes weigh most by standing
+	// (standingVoteWeights) join too: event_scores ranks only the seasoned
+	// part, so an old post lifted by standing alone would otherwise rank only
+	// while the newest walk reaches it. At most v.limit, highest first.
+	if !ok && v.scored && len(weights) > 0 {
+		ids := make([]string, 0, len(weights))
+		for id, w := range weights {
+			if w > 0 {
+				ids = append(ids, id)
+			}
+		}
+		sort.Slice(ids, func(i, j int) bool {
+			if weights[ids[i]] != weights[ids[j]] {
+				return weights[ids[i]] > weights[ids[j]]
+			}
+			return ids[i] < ids[j]
+		})
+		if len(ids) > v.limit {
+			ids = ids[:v.limit]
+		}
+		if len(ids) > 0 {
+			idArgs := make([]any, 0, len(ids)+len(args)+1)
+			for _, id := range ids {
+				idArgs = append(idArgs, id)
+			}
+			if err := collect("SELECT e.seq FROM events e JOIN rooms r ON r.name=e.room WHERE e.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+") AND "+cond+" ORDER BY e.seq DESC LIMIT ?", append(append(idArgs, args...), v.limit)); err != nil {
+				return candEntry{}, 0, err
+			}
 		}
 	}
 	entry := candEntry{at: clock, head: rd.top}
@@ -799,7 +925,7 @@ func (s *Store) rankedPage(ctx context.Context, tx *sql.Tx, list []rankedPost, o
 	if err := s.loadAttachments(ctx, tx, events, now); err != nil {
 		return out, err
 	}
-	if err := attachScores(ctx, tx, events, now); err != nil {
+	if err := s.attachScores(ctx, tx, events, now); err != nil {
 		return out, err
 	}
 	// The byte budget can end a page early; next follows what was sent.

@@ -69,9 +69,9 @@ function depthOf(node) { let max = 0; for (const c of node.children) max = Math.
   assert.equal(articles.find(a => a.dataset.id === 'm3').querySelectorAll('button').find(b => b.className === 'fold').textContent, 'Hide replies');
   // Header count, heart state and sorting of top-level comments (replies stay in order).
   const small = mount([
-    {id: 'a', sequence: 1, created_at: 1e9, text: 'first', handle: 'ha', votes: {up: 0}},
-    {id: 'b', sequence: 2, created_at: 1e9 + 1, text: 'second', handle: 'hb', votes: {up: 5}},
-    {id: 'c', sequence: 3, created_at: 1e9 + 2, text: 'reply', handle: 'hc', reply_to: 'a', votes: {up: 9}},
+    {id: 'a', sequence: 1, created_at: 1e9, text: 'first', handle: 'ha', votes: {up: 40, weight: 0}},
+    {id: 'b', sequence: 2, created_at: 1e9 + 1, text: 'second', handle: 'hb', votes: {up: 5, weight: 2}},
+    {id: 'c', sequence: 3, created_at: 1e9 + 2, text: 'reply', handle: 'hc', reply_to: 'a', votes: {up: 9, weight: 9}},
     {id: 'd', sequence: 4, created_at: 1e9 + 3, text: 'gone', hidden: true},
   ]);
   await small.done();
@@ -84,7 +84,7 @@ function depthOf(node) { let max = 0; for (const c of node.children) max = Math.
   assert.deepEqual(tops(), ['a', 'b']);
   const sortButton = name => sroot.querySelectorAll('button').find(b => b.textContent === name);
   sortButton('Newest').onclick(); assert.deepEqual(tops(), ['b', 'a']);
-  sortButton('Top').onclick(); assert.deepEqual(tops(), ['b', 'a'], 'top-level by likes; a reply\'s likes do not lift its parent');
+  sortButton('Top').onclick(); assert.deepEqual(tops(), ['b', 'a'], 'top-level by ranking weight: forty new-key likes (weight 0) do not lift a; a reply\'s weight does not lift its parent');
   assert.equal(sortButton('Top').getAttribute('aria-pressed'), 'true');
   sortButton('Oldest').onclick(); assert.deepEqual(tops(), ['a', 'b']);
   // A work request and its accepted result carry the shared work line (memo-core.js

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 import swarmmemo as memo
@@ -351,5 +352,160 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(self.last(), {"operation": "webhook.delete", "target": "s1"})
 
 
+class FakeBoard:
+    """A small in-memory board for embed setup: rooms, page messages, handles and
+    webhooks, answering like /v1/command and refusing an unsigned write."""
+    def __init__(self):
+        self.rooms, self.messages, self.handles, self.hooks, self.sent, self.ids = {}, [], {}, [], [], {}
+
+    def __call__(self, client, path, body=None):
+        self.sent.append((path, body))
+        op = (body or {}).get("operation")
+        me = hashlib.sha256(memo.unb64(body["public_key"])).hexdigest() if body and "public_key" in body else ""
+        fail = lambda status, code: (_ for _ in ()).throw(memo.APIError(status, code, code))
+        if op == "agent.get":
+            return {"ok": True, "agent": {"id": body["target"], "handle": self.handles.get(body["target"], "")}}
+        if op == "agent.register":
+            self.handles[me] = body["handle"]; return {"ok": True}
+        if op == "room.get":
+            room = self.rooms.get(body["room"])
+            return {"ok": True, "room": dict(room)} if room else fail(404, "not_found")
+        if op == "room.create":
+            if body["room"] in self.rooms: fail(409, "room_exists")
+            self.rooms[body["room"]] = {"name": body["room"], "visibility": body["visibility"], "owner_agent": me}
+            return {"ok": True, "data": {"room": body["room"]}}
+        if op == "messages.list":
+            return {"ok": True, "messages": [m for m in self.messages if m["room"] == body["room"] and m["page"] == body["page"]]}
+        if op == "post":
+            if not me: fail(400, "unsigned_in_test")
+            seen = self.ids.get(body["request_id"])
+            if seen is not None:
+                return fail(409, "idempotency_conflict")
+            message = {"id": "m%d" % len(self.messages), "room": body["room"], "page": body["page"], "text": body["text"], "public_key": body["public_key"]}
+            self.messages.append(message); self.ids[body["request_id"]] = message
+            return {"ok": True, "receipt": {"id": message["id"]}}
+        if op == "webhook.list":
+            return {"ok": True, "data": {"subscriptions": [{"url": u, "state": "active"} for u in self.hooks]}}
+        if op == "webhook.create":
+            self.hooks.append(json.loads(body["data"])["url"]); return {"ok": True, "data": {"state": "pending", "secret": "whsec_test"}}
+        return {"ok": True}
+
+    def operations(self):
+        return [body["operation"] for _, body in self.sent]
+
+
+class EmbedSetupTests(unittest.TestCase):
+    """embed setup (C158): the site's key owns the room and signs the first post."""
+    def setUp(self):
+        self.board = FakeBoard()
+        patcher = patch.object(memo.Client, "_request", lambda client, path, body=None: self.board(client, path, body))
+        patcher.start(); self.addCleanup(patcher.stop)
+        folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup)
+        self.dir = Path(folder.name)
+        self.key = self.dir / "site.json"
+        self.welcome = self.dir / "welcome.txt"
+        self.welcome.write_text("Welcome to the comments. Be kind.\n")
+
+    def run_setup(self, *argv, key=None):
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+            code = memo.main(["--url", "http://127.0.0.1:9", "--key", str(key or self.key), "embed", "setup", *argv])
+        return code, out.getvalue(), err.getvalue()
+
+    def full(self):
+        return self.run_setup("voice-site", "--page", "Hello World", "--welcome", str(self.welcome), "--title", "Hello",
+                              "--url", "https://voice.example/hello", "--webhook", "https://voice.example/hook", "--handle", "voice")
+
+    def test_first_run_owns_room_posts_signed_and_prints_snippet(self):
+        code, out, _ = self.full()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.key.stat().st_mode & 0o777, 0o600)
+        me = hashlib.sha256(memo.public_bytes(memo.load_key(self.key))).hexdigest()
+        self.assertIn(f"created {self.key} (mode 600), fingerprint {me}", out)
+        self.assertEqual(self.board.operations(), ["agent.get", "agent.register", "room.get", "room.create", "messages.list",
+                                                   "post", "webhook.list", "webhook.create"])
+        self.assertTrue(all("signature" in body for _, body in self.board.sent))
+        self.assertEqual(self.board.rooms["voice-site"], {"name": "voice-site", "visibility": "public", "owner_agent": me})
+        post = next(body for _, body in self.board.sent if body["operation"] == "post")
+        self.assertEqual((post["room"], post["page"], post["text"]), ("voice-site", "hello-world", "Welcome to the comments. Be kind.\n"))
+        self.assertTrue(post["request_id"].startswith("embed-setup-"))
+        for line in ('data-room="voice-site"', 'data-page="hello-world"', 'data-url="https://voice.example/hello"',
+                     'data-title="Hello"', 'src="http://127.0.0.1:9/embed/v1.js"', "whsec_test", "room-hide MESSAGE_ID",
+                     "/modlog/voice-site", "moderator-add voice-site"):
+            self.assertIn(line, out)
+
+    def test_rerun_repeats_nothing(self):
+        self.full()
+        self.board.sent.clear()
+        code, out, _ = self.full()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.board.operations(), ["agent.get", "room.get", "messages.list", "webhook.list"])
+        self.assertEqual(len(self.board.messages), 1)
+        for line in ("Handle: voice (already yours)", "Room: voice-site (already yours)", "Welcome: already posted", "already subscribed"):
+            self.assertIn(line, out)
+
+    def test_rerun_after_unseen_post_relies_on_request_id(self):
+        self.full()
+        self.board.messages.clear()  # The listing missed it: the derived request_id still stops a duplicate.
+        code, out, _ = self.full()
+        self.assertEqual(code, 0, out)
+        self.assertIn("already posted on hello-world by an earlier run", out)
+        self.assertEqual(self.board.messages, [])
+
+    def test_refuses_a_room_someone_else_owns(self):
+        self.board.rooms["voice-site"] = {"name": "voice-site", "visibility": "public", "owner_agent": "f" * 64, "handles": {"f" * 64: "squatter"}}
+        code, _, err = self.full()
+        self.assertEqual(code, 1)
+        self.assertIn("owned by another key", err); self.assertIn("squatter", err)
+        self.assertNotIn("post", self.board.operations()); self.assertNotIn("room.create", self.board.operations())
+
+    def test_refuses_a_room_opened_by_a_plain_post(self):
+        self.board.rooms["voice-site"] = {"name": "voice-site", "visibility": "public"}
+        code, _, err = self.full()
+        self.assertEqual(code, 1)
+        self.assertIn("no key owns it", err); self.assertIn("transfer", err)
+        self.assertNotIn("post", self.board.operations())
+
+    def test_needs_a_key_and_a_page_for_the_welcome(self):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(memo.main(["--url", "http://127.0.0.1:9", "embed", "setup", "voice-site"]), 1)
+        self.assertIn("needs --key", err.getvalue())
+        code, _, err = self.run_setup("voice-site", "--welcome", str(self.welcome))
+        self.assertEqual(code, 1); self.assertIn("--welcome needs --page", err)
+        self.assertFalse(self.key.exists())
+        self.assertEqual(self.board.sent, [])
+
+    def test_snippet_without_post_details_and_welcome_from_stdin(self):
+        with patch("sys.stdin", io.StringIO("Hi from stdin")):
+            code, out, _ = self.run_setup("voice-site", "--page", "intro", "--welcome", "-")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.board.messages[0]["text"], "Hi from stdin")
+        self.assertIn('data-url="https://example.com/blog/my-post-slug"', out)
+        self.assertIn("webhook add https://your.site/hook", out)
+
+    def test_moderation_commands(self):
+        key = memo.crypto()[0].from_private_bytes(bytes(range(32)))
+        for argv, want in [(["room-hide", MESSAGE, "spam"], {"operation": "room.hide", "message_id": MESSAGE, "reason": "spam"}),
+                           (["room-restore", MESSAGE, "not spam"], {"operation": "room.restore", "message_id": MESSAGE, "reason": "not spam"}),
+                           (["moderator-add", "voice-site", AGENT], {"operation": "room.moderator.add", "room": "voice-site", "target": AGENT}),
+                           (["moderator-remove", "voice-site", AGENT], {"operation": "room.moderator.remove", "room": "voice-site", "target": AGENT})]:
+            with patch.object(memo, "load_key", return_value=key), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(memo.main(["--key", "KEY.json", *argv]), 0)
+            _, body = self.board.sent.pop()
+            self.assertIn("signature", body)
+            self.assertEqual({k: v for k, v in body.items() if k not in ("signature", "public_key", "timestamp", "nonce")}, want)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlainErrorBodyTests(unittest.TestCase):
+    def test_a_non_json_error_says_status_url_and_body(self):
+        client = memo.Client("https://swarmmemo.example")
+        def fail(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, io.BytesIO(b"404 page not found\n"))
+        with patch.object(client.opener, "open", fail):
+            with self.assertRaises(memo.APIError) as caught:
+                client._request("/v1/commands")
+        self.assertEqual(caught.exception.code, "http_error")
+        self.assertIn("HTTP 404 from https://swarmmemo.example/v1/commands: 404 page not found", str(caught.exception))
