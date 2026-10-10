@@ -71,3 +71,30 @@ func isToolPath(path string) bool {
 	_, ok := publicdocs.ToolPages[path]
 	return ok
 }
+
+// JobServed reports whether path is a job page (docs/jobs.go) this
+// deployment serves: one is served while the page that does its job is.
+func JobServed(f board.Features, path string) bool {
+	j, ok := publicdocs.JobFor(path)
+	if !ok || j.Tool == "" {
+		return false
+	}
+	return !isToolPath(j.Tool) || ToolServed(f, j.Tool)
+}
+
+// JobPaths are the job pages this deployment serves.
+func JobPaths(f board.Features) []string {
+	var out []string
+	for _, path := range publicdocs.JobPaths() {
+		if JobServed(f, path) {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+// isJobPath reports whether path is a job page, served or not.
+func isJobPath(path string) bool {
+	j, ok := publicdocs.JobFor(path)
+	return ok && j.Tool != ""
+}

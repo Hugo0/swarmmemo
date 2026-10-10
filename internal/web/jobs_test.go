@@ -36,8 +36,11 @@ func TestJobsAreOneSourceForToolPagesAndFAQ(t *testing.T) {
 	faqText := html.UnescapeString(faq)
 	placeholder := regexp.MustCompile(`\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|\b(ROOM|PAGE|AGENT|KEY|ID)\b`)
 	for _, j := range publicdocs.Jobs {
-		if seen[j.Path] || !isToolPath(j.Path) {
-			t.Errorf("%s: a duplicate job or no tool page", j.Path)
+		page := isToolPath(j.Path) && j.Tool == "" && j.More == "" ||
+			j.Tool != "" && strings.HasPrefix(j.Path, j.Tool+"/") && (isToolPath(j.Tool) || legalPage(j.Tool) != nil) &&
+				strings.Contains(j.More, "](https://swarmmemo.com"+j.Tool+")")
+		if seen[j.Path] || !page {
+			t.Errorf("%s: a duplicate job, no tool page, or a job page that does not link the page doing its job", j.Path)
 		}
 		seen[j.Path] = true
 		if n := len([]rune(j.Title)); n > 58 {
@@ -101,6 +104,60 @@ func TestJobsAreOneSourceForToolPagesAndFAQ(t *testing.T) {
 				t.Errorf("%s does not state %q", path, fact)
 			}
 		}
+	}
+}
+
+// A job page answers one search at its own address under the page that does
+// the job: its job's title and "Use it for", then "How it works" ending at
+// that page, which lists it, as does /tools. It is served while that page is,
+// keeps write and receive URLs out of links, and has its .md twin.
+func TestJobPages(t *testing.T) {
+	paths := publicdocs.JobPaths()
+	if len(paths) < 8 {
+		t.Fatalf("%d job pages", len(paths))
+	}
+	_, index := toolPage(t, everyService, "/tools")
+	for _, path := range paths {
+		j, _ := publicdocs.JobFor(path)
+		code, body := toolPage(t, everyService, path)
+		if code != 200 {
+			t.Fatalf("%s: %d", path, code)
+		}
+		text := html.UnescapeString(body)
+		for _, want := range []string{">How it works</h2>", `href="` + j.Tool + `"`, `<link rel="canonical" href="https://swarmmemo.com` + path + `">`} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s lacks %q", path, want)
+			}
+		}
+		if regexp.MustCompile(`href="[^"]*/(call|in|w|w64|c64)/`).MatchString(body) {
+			t.Errorf("%s links a write or receive URL", path)
+		}
+		lower := strings.ToLower(j.More)
+		for _, claim := range []string{"every post is signed", "every post signed", "untested", "not confirmed", "experimental"} {
+			if strings.Contains(lower, claim) {
+				t.Errorf("%s claims or hedges %q", path, claim)
+			}
+		}
+		if md, ok := publicdocs.ReadPath(path + ".md"); !ok || string(md) != string(j.JobPage()) {
+			t.Errorf("%s.md is not the page's source", path)
+		}
+		if _, tool := toolPage(t, everyService, j.Tool); !strings.Contains(tool, `href="`+path+`"`) {
+			t.Errorf("%s does not list %s", j.Tool, path)
+		}
+		if !strings.Contains(index, `href="`+path+`"`) {
+			t.Errorf("/tools does not list %s", path)
+		}
+		// Served while the page doing its job is: off with its service.
+		code, _ = toolPage(t, nil, path)
+		if want := map[bool]int{true: 404, false: 200}[isToolPath(j.Tool) && !ToolServed(board.Features{}, j.Tool)]; code != want {
+			t.Errorf("%s without services: %d, want %d", path, code, want)
+		}
+	}
+	if strings.Contains(index, "<!--") {
+		t.Error("/tools shows the job-pages marker")
+	}
+	if code, _ := toolPage(t, everyService, "/tools/notary/no-such-job"); code != 404 {
+		t.Errorf("an unknown job page: %d", code)
 	}
 }
 

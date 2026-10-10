@@ -58,6 +58,7 @@ func (s *Server) sitemapFixedPaths(ctx context.Context) []string {
 		fixed = append(fixed, "/fetch")
 	}
 	fixed = append(fixed, web.ToolPaths(s.cfg.Features)...)
+	fixed = append(fixed, web.JobPaths(s.cfg.Features)...)
 	fixed = append(fixed, web.IndexedGuidePaths(ctx, s.service)...)
 	return append(fixed, s.sitemapRewardedWork(ctx)...)
 }

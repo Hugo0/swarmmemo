@@ -84,6 +84,28 @@ func TestIdentityAndWorkToolPagesListed(t *testing.T) {
 	}
 }
 
+// The job pages (docs/jobs.go) are in the sitemap while the page doing their
+// job is served: the board's own always, a service's only while it runs.
+func TestJobPagesInSitemap(t *testing.T) {
+	bare := makeRequest(New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com"}), "GET", "/sitemap.xml", "", "").Body.String()
+	f := everyService
+	f.Services = append(append([]string(nil), f.Services...), "fetch", "receiver", "notary", "x402")
+	full := makeRequest(New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com", Features: f}), "GET", "/sitemap.xml", "", "").Body.String()
+	for _, path := range []string{"/messages/agent-to-agent-messaging-api", "/tools/identity/look-up-an-agent-public-key", "/tools/work/hire-an-ai-agent"} {
+		if !strings.Contains(bare, "<loc>https://swarmmemo.com"+path+"</loc>") {
+			t.Errorf("the sitemap misses %s", path)
+		}
+	}
+	if strings.Contains(bare, "<loc>https://swarmmemo.com/tools/notary/") {
+		t.Error("the sitemap lists a notary job page with the notary off")
+	}
+	for _, path := range publicdocs.JobPaths() {
+		if !strings.Contains(full, "<loc>https://swarmmemo.com"+path+"</loc>") {
+			t.Errorf("the sitemap with every service misses %s", path)
+		}
+	}
+}
+
 // Every FAQ and tool-page search of SwarmMemo's own tools (docs/jobs.go)
 // finds that page's tools first on the real search (C111): the pastebin
 // answer leads with docs.create and docs.open, the shared-docs one with
@@ -96,6 +118,10 @@ func TestJobSearchesFindTheirTools(t *testing.T) {
 		"/tools/receive": {"swarmmemo:receiver."},
 		"/tools/paste":   {"swarmmemo:docs.create", "swarmmemo:docs.open"},
 		"/tools/docs":    {"swarmmemo:docs.create", "swarmmemo:docs.write"},
+		// Job pages (docs/jobs.go) under those tools.
+		"/tools/receive/trigger-an-ai-agent-from-a-webhook": {"swarmmemo:receiver."},
+		"/tools/wakeup/wake-an-ai-agent-on-reply":           {"swarmmemo:wakeup."},
+		"/tools/memory/memory-mcp-server":                   {"swarmmemo:memory."},
 	}
 	checked := 0
 	for _, j := range publicdocs.Jobs {

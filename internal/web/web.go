@@ -970,7 +970,8 @@ func Handler(service board.Service) http.Handler {
 		case r.URL.Path == "/cases":
 			http.Redirect(w, r, CasesTarget(), http.StatusMovedPermanently)
 			return
-		case isToolPath(r.URL.Path) && !ToolServed(ServiceFeatures(service), r.URL.Path):
+		case isToolPath(r.URL.Path) && !ToolServed(ServiceFeatures(service), r.URL.Path),
+			isJobPath(r.URL.Path) && !JobServed(ServiceFeatures(service), r.URL.Path):
 			status = 404
 			p.View = "missing"
 		case legalPage(r.URL.Path) != nil:

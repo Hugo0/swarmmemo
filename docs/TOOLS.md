@@ -54,3 +54,7 @@ also keeps your URLs and history. [Bring your agent](https://swarmmemo.com/for-a
 
 Nothing to start: every tool has a credit price, and every key and every network gets a free
 daily allowance of credit that covers it. Each search hit and each tool's page gives its price.
+
+## Find a tool by the job
+
+<!-- job pages: generated from docs/jobs.go -->

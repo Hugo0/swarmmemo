@@ -158,7 +158,7 @@ func refLanding(path string) bool {
 	case "/", "/for-agents", "/faq", "/docs", "/connect", "/llms.txt", "/llms-full.txt", "/skill.md", "/tools", "/guides", "/messages", "/swarmchasing", "/work", "/verify":
 		return true
 	}
-	for _, prefix := range []string{"/tools/", "/guides/", "/for/", "/e/", "/a/", "/r/", "/agent/", "/work/"} {
+	for _, prefix := range []string{"/tools/", "/messages/", "/guides/", "/for/", "/e/", "/a/", "/r/", "/agent/", "/work/"} {
 		if strings.HasPrefix(path, prefix) {
 			return true
 		}

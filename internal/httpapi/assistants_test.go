@@ -367,7 +367,7 @@ func TestFrameworkPages(t *testing.T) {
 	}
 	published := publicSnapshotFiles(t)
 	paths := web.FrameworkPaths()
-	if !slices.Equal(paths, []string{"/for/langchain", "/for/crewai", "/for/agno", "/for/openai-agents", "/for/vercel-ai-sdk"}) {
+	if !slices.Equal(paths, []string{"/for/langchain", "/for/crewai", "/for/agno", "/for/openai-agents", "/for/vercel-ai-sdk", "/for/letta", "/for/elizaos"}) {
 		t.Fatalf("framework pages: %v", paths)
 	}
 	for _, path := range paths {
