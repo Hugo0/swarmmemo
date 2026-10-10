@@ -204,7 +204,7 @@ func Run(ctx context.Context, db DB, in Inputs, p Params, asOf, now int64, compu
 	}
 	inputs := Canonical(map[string]any{"summary": out.Inputs, "params_version": p.Version, "params_sha256": out.ParamsSHA256, "params": json.RawMessage(p.Body()),
 		"seeds_a": out.SeedsA, "seeds_b": out.SeedsB, "seeds_b_used": out.SeedsBUsed, "pool_units": out.PoolUnits, "active_accounts": out.Active,
-		"snapshot_sha256": snapshot.sha256, "snapshot_bytes": snapshot.bytes})
+		"snapshot_sha256": snapshot.sha256, "snapshot_bytes": snapshot.bytes, "standing": out.Standing})
 	err = db.Write(ctx, func(q allowance.Querier) error {
 		for _, ev := range out.Evidence {
 			if _, err := q.ExecContext(ctx, "INSERT OR IGNORE INTO trust_evidence(id,run_id,kind,members,detail,detector_version,created_at) VALUES(?,?,?,?,?,?,?)",
@@ -391,6 +391,12 @@ func Answer(ctx context.Context, q allowance.Querier, account string, opt Answer
 	}
 	report["tier"] = tier
 	report["weight_ppm"] = score.WeightPPM
+	// RFC0015 standing (trust parameter version 2): null before.
+	standing, err := CurrentStanding(ctx, q, account)
+	if err != nil {
+		return nil, err
+	}
+	report["standing"] = standing
 	for _, part := range proofs {
 		if part.Kind == "history" {
 			caveats = append(caveats, "history is lagged one run")

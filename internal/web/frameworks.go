@@ -1,11 +1,14 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
+
+	"swarmmemo/internal/board"
 )
 
 // Agent frameworks: a developer builds the agent and gives it tools. A
@@ -256,6 +259,64 @@ type frameworkView struct {
 	MCP         string          `json:"mcp,omitempty"`
 	MCPCode     string          `json:"mcp_code,omitempty"`
 	PublicRule  string          `json:"public_rule"`
+	// PaidTasks is the public open paid work that names this framework
+	// (frameworkPaidTasks); the page shows its block only when there is some.
+	PaidTasks []frameworkPaidTask `json:"paid_tasks"`
+}
+
+// frameworkPaidTask is one open paid task on a framework page: its reward in
+// credits held in escrow (0 when none) and the poster's reward_note.
+type frameworkPaidTask struct {
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	URL           string `json:"url"`
+	RewardCredits int64  `json:"reward_credits,omitempty"`
+	RewardNote    string `json:"reward_note,omitempty"`
+}
+
+// Reward is the task's reward as the page shows it.
+func (t frameworkPaidTask) Reward() string {
+	parts := []string{}
+	if t.RewardCredits > 0 {
+		parts = append(parts, creditAmount(t.RewardCredits))
+	}
+	if t.RewardNote != "" {
+		parts = append(parts, t.RewardNote)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// frameworkPaidTasksMax is how many open paid tasks a framework page lists.
+const frameworkPaidTasksMax = 3
+
+// terms are the words that tie a task to f: its name and its slug (a
+// hyphenated slug also as words), matched in a task's title as a whole word
+// or phrase, or exactly as one of its capabilities.
+func (f framework) terms() []string {
+	return []string{f.Name, f.Slug, strings.ReplaceAll(f.Slug, "-", " ")}
+}
+
+// frameworkPaidTasks is the newest public open paid work that names f, at
+// most frameworkPaidTasksMax, from one bounded store read; empty when the
+// service cannot answer or there is none.
+func frameworkPaidTasks(ctx context.Context, service board.Service, f *framework) []frameworkPaidTask {
+	out := []frameworkPaidTask{}
+	reader, ok := service.(interface {
+		PublicOpenPaidWorkNaming(context.Context, []string, int) ([]board.OpenPaidWork, error)
+	})
+	if !ok {
+		return out
+	}
+	works, err := reader.PublicOpenPaidWorkNaming(ctx, f.terms(), frameworkPaidTasksMax)
+	if err != nil {
+		return out
+	}
+	for _, w := range works {
+		if validWorkID(w.ID) {
+			out = append(out, frameworkPaidTask{ID: w.ID, Title: w.Title, URL: canonicalOrigin + "/work/" + w.ID, RewardCredits: w.Reward, RewardNote: w.RewardNote})
+		}
+	}
+	return out
 }
 
 func (f framework) view() frameworkView {
@@ -318,13 +379,15 @@ func frameworkRoute(r *http.Request) (*framework, bool) {
 }
 
 // serveFrameworkJSON is a framework page's JSON twin.
-func serveFrameworkJSON(w http.ResponseWriter, r *http.Request, f *framework) {
+func serveFrameworkJSON(w http.ResponseWriter, r *http.Request, service board.Service, f *framework) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == http.MethodHead {
 		return
 	}
+	view := f.view()
+	view.PaidTasks = frameworkPaidTasks(r.Context(), service, f)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
-	_ = enc.Encode(f.view())
+	_ = enc.Encode(view)
 }

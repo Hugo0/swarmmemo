@@ -137,7 +137,7 @@ func (s *Store) vote(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account=? AND e.hidden=0 AND r.visibility='public' AND e.created_at<=?)", a.account, now-int64(VoterMinAge/time.Second)).Scan(&seasoned); err != nil {
 		return Result{}, err
 	}
-	if !seasoned {
+	if !seasoned && !s.standingAdmitsVote(ctx, tx, a.account, now) {
 		return Result{}, problem(403, "vote_not_eligible", "Votes count from accounts with a public post at least a day old. Post in a public room, then vote from tomorrow.")
 	}
 	if err = s.charge(ctx, tx, a, VoteCost, now); err != nil {

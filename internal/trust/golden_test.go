@@ -3,8 +3,11 @@ package trust
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -19,7 +22,7 @@ var updateGolden = flag.Bool("update", false, "rewrite internal/trust/testdata g
 // liability, an earlier penalty and a sponsorship that earns a dividend.
 func goldenSnapshot() Snapshot {
 	b := newBuilder()
-	b.snap.Params = DefaultParams()
+	b.snap.Params = paramsV1()
 	b.snap.Params.ServiceAccounts = []string{acct("steward")}
 	b.snap.Meta = Meta{Schema: 1, AsOf: testAsOf, PriorRuns: 30, EventsSeq: 5000, EndorsementsSeq: 400, LedgerSeq: 900}
 	seeds := DefaultParams().Seeds
@@ -121,11 +124,44 @@ func goldenSnapshot() Snapshot {
 	return b.snap
 }
 
+// goldenStandingSnapshot is the standing fixture (parameter version 2): the
+// golden inputs plus every standing input: work.accept and witness edges, a
+// down vote (already in the golden inputs), credit spent, a
+// spend-only account, a service account's spend (ignored), and a
+// penalised account.
+func goldenStandingSnapshot() Snapshot {
+	snap := goldenSnapshot()
+	p := DefaultParams()
+	p.ServiceAccounts = snap.Params.ServiceAccounts
+	snap.Params = p
+	seeds := p.Seeds
+	alice, bob, carol, dave := acct("alice"), acct("bob"), acct("carol"), acct("dave")
+	D := dayOf(testAsOf)
+	snap.Acts = append(snap.Acts,
+		Record{Type: "edge", Kind: "work_accept", ID: "w1", From: acct("anchor0"), To: alice, CreatedAt: testAsOf - 3*day},
+		Record{Type: "edge", Kind: "work_accept", ID: "w2", From: bob, To: acct("newcomer"), CreatedAt: testAsOf - 2*day},
+		Record{Type: "edge", Kind: "work_accept", ID: "w3", From: alice, To: alice, CreatedAt: testAsOf - 2*day}, // self: no edge
+		Record{Type: "edge", Kind: "witness", From: seeds[2], To: dave, CreatedAt: testAsOf - day},
+		Record{Type: "edge", Kind: "witness", From: seeds[3], To: carol, CreatedAt: testAsOf + day}) // after the as-of time
+	snap.Spends = append(snap.Spends,
+		Record{Type: "spend", Account: bob, Day: D - 10, Amount: 2000000},
+		Record{Type: "spend", Account: carol, Day: D - 1, Amount: 50000},
+		Record{Type: "spend", Account: acct("payer"), Day: D - 30, Amount: 5000000},
+		Record{Type: "spend", Account: acct("steward"), Day: D - 1, Amount: 9000000},
+		Record{Type: "spend", Account: alice, Day: D, Amount: 7000000}) // today: not yet
+	return snap
+}
+
 func TestGoldenFixture(t *testing.T) {
-	inPath := filepath.Join("testdata", "golden_inputs.jsonl")
-	outPath := filepath.Join("testdata", "golden_output.json")
+	testGolden(t, "golden", goldenSnapshot)
+	testGolden(t, "golden_standing", goldenStandingSnapshot)
+}
+
+func testGolden(t *testing.T, name string, build func() Snapshot) {
+	inPath := filepath.Join("testdata", name+"_inputs.jsonl")
+	outPath := filepath.Join("testdata", name+"_output.json")
 	if *updateGolden {
-		snap := goldenSnapshot()
+		snap := build()
 		var buf bytes.Buffer
 		if err := snap.WriteJSONL(&buf); err != nil {
 			t.Fatal(err)
@@ -168,6 +204,15 @@ func TestGoldenFixture(t *testing.T) {
 	if !out.SeedsBUsed || len(out.Evidence) == 0 || len(out.Dividends) == 0 || len(out.Penalties) == 0 {
 		t.Fatalf("fixture coverage: seeds_b=%v evidence=%d dividends=%d penalties=%d", out.SeedsBUsed, len(out.Evidence), len(out.Dividends), len(out.Penalties))
 	}
+	if name == "golden_standing" {
+		if out.Standing == nil || out.Standing.Inputs["work_accept"] == 0 || out.Standing.Inputs["witness"] == 0 || out.Standing.Inputs["down_vote"] == 0 ||
+			out.Standing.Inputs["spend"] == 0 || len(out.Standing.LargestMoves) == 0 {
+			t.Fatalf("standing fixture coverage: %+v", out.Standing)
+		}
+		testRecomputePy(t, raw, out.Canonical())
+	} else if out.Standing != nil {
+		t.Fatal("a version 1 run has a standing summary")
+	}
 	history := false
 	for _, sc := range out.Scores {
 		for _, p := range sc.Parts.Proofs {
@@ -176,5 +221,35 @@ func TestGoldenFixture(t *testing.T) {
 	}
 	if !history {
 		t.Fatal("fixture has no history proof")
+	}
+}
+
+// paramsV1 is trust parameter version 1: version 2 without standing. Its
+// body is the one published as version 1 (sha256 a7db4479…).
+func paramsV1() Params {
+	p := DefaultParams()
+	p.Version, p.Standing = SeedsAVersion, nil
+	return p
+}
+
+// testRecomputePy runs the independent verifier (scripts/trust/recompute.py
+// run) on the inputs and compares the sha256 of its output with Go's.
+func testRecomputePy(t *testing.T, inputs, want []byte) {
+	t.Helper()
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not installed")
+	}
+	file := filepath.Join(t.TempDir(), "inputs.jsonl")
+	if err = os.WriteFile(file, inputs, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command(python, "-B", filepath.Join("..", "..", "scripts", "trust", "recompute.py"), "run", file).Output()
+	if err != nil {
+		t.Fatalf("recompute.py run: %v", err)
+	}
+	g, w := sha256.Sum256(got), sha256.Sum256(want)
+	if g != w {
+		t.Fatalf("recompute.py output sha256 %s, Go %s", hex.EncodeToString(g[:]), hex.EncodeToString(w[:]))
 	}
 }

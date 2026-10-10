@@ -37,6 +37,8 @@ type trustState struct {
 	tierRun    int64
 	tierAt     int64
 	tierCounts map[string]int64
+	// params caches the trust parameters for standing's active path.
+	params standingCache
 }
 
 // TrustRunAfter is how long after 00:00 UTC the nightly run starts.
@@ -617,7 +619,94 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 		}); err != nil {
 		return err
 	}
+	if p.Standing != nil {
+		if err := in.readStanding(ctx, asOf, p, exists, paged, emit); err != nil {
+			return err
+		}
+	}
 	return emit(meta)
+}
+
+// readStanding emits the standing inputs of trust parameter version 2
+// (RFC0015 §3): work.accept and verified witness edges between public
+// accounts, and per public account and day the paid and earned credit spent
+// (already public in the ledger journal). Credit held is never read.
+// Accounts that are not public are never named, as for proofs.
+func (in trustInputs) readStanding(ctx context.Context, asOf int64, p trust.Params, exists map[string]bool,
+	paged func(string, []any, func(*sql.Rows) (trust.Record, int64, error)) error, emit func(trust.Record) error) error {
+	windowStart := asOf - p.WindowDays*86400
+	// work.accept: the accepting key's account → the worker, on public,
+	// visible, non-simulated work items that stayed accepted.
+	if err := paged(`SELECT t.rowid,t.work_id,ia.account,w.worker,t.accepted_at FROM work_transitions t JOIN works w ON w.id=t.work_id
+ JOIN events e ON e.id=w.id JOIN rooms r ON r.name=e.room JOIN identities ia ON ia.id=t.author
+ WHERE t.rowid>? AND t.operation='work.accept' AND w.state='accepted' AND w.worker<>'' AND r.visibility='public' AND e.hidden=0 AND e.kind<>'simulation'
+ AND t.accepted_at>=? AND t.accepted_at<? AND `+publicAccountSQL("ia.account")+` AND `+publicAccountSQL("w.worker")+` ORDER BY t.rowid LIMIT ?`,
+		[]any{windowStart, asOf}, func(r *sql.Rows) (trust.Record, int64, error) {
+			rec := trust.Record{Type: "edge", Kind: "work_accept"}
+			var id int64
+			err := r.Scan(&id, &rec.ID, &rec.From, &rec.To, &rec.CreatedAt)
+			return rec, id, err
+		}); err != nil {
+		return err
+	}
+	// identity.witness with verdict verified, current as of the run.
+	if err := paged(`SELECT l.seq,iw.account,ia.account,l.created_at FROM link_witnesses l JOIN identities iw ON iw.id=l.witness JOIN identities ia ON ia.id=l.agent
+ WHERE l.seq>? AND l.verdict='verified' AND (l.superseded_at=0 OR l.superseded_at>=?) AND l.created_at>=? AND l.created_at<?
+ AND `+publicAccountSQL("iw.account")+` AND `+publicAccountSQL("ia.account")+` ORDER BY l.seq LIMIT ?`,
+		[]any{asOf, windowStart, asOf}, func(r *sql.Rows) (trust.Record, int64, error) {
+			rec := trust.Record{Type: "edge", Kind: "witness"}
+			var seq int64
+			err := r.Scan(&seq, &rec.From, &rec.To, &rec.CreatedAt)
+			return rec, seq, err
+		}); err != nil {
+		return err
+	}
+	// Credit spent, per (account, day), paged by that key.
+	day := asOf / 86400
+	grouped := func(table, typ, query string, args ...any) error {
+		if !exists[table] {
+			return nil
+		}
+		account, after := "", int64(-1<<62)
+		for {
+			var batch []trust.Record
+			if err := in.page(ctx, func(q allowance.Querier) error {
+				bound := append(append([]any{}, args...), account, account, after, trust.PageRows)
+				r, err := q.QueryContext(ctx, query, bound...)
+				if err != nil {
+					return err
+				}
+				defer r.Close()
+				for r.Next() {
+					rec := trust.Record{Type: typ}
+					if err = r.Scan(&rec.Account, &rec.Day, &rec.Amount); err != nil {
+						return err
+					}
+					account, after = rec.Account, rec.Day
+					batch = append(batch, rec)
+				}
+				return r.Err()
+			}); err != nil {
+				return err
+			}
+			for _, rec := range batch {
+				if err := emit(rec); err != nil {
+					return err
+				}
+			}
+			if len(batch) < trust.PageRows {
+				return nil
+			}
+		}
+	}
+	oldest := day - min(3650, 8*p.Standing.HalfLifeDays)
+	if err := grouped("ledger_entries", "spend", `SELECT g.account,g.day,g.amount FROM (SELECT account,day,sum(abs(amount)) AS amount FROM ledger_entries
+ WHERE kind IN ('spend','commit') AND resource='credit' AND bucket IN ('paid','earned') AND day>=? AND day<? AND account NOT LIKE 'anon:%'
+ AND (account>? OR (account=? AND day>?)) GROUP BY account,day ORDER BY account,day) g WHERE g.amount>0 AND `+publicAccountSQL("g.account")+` ORDER BY g.account,g.day LIMIT ?`,
+		oldest, day); err != nil {
+		return err
+	}
+	return nil
 }
 
 // resolveAccount maps a key fingerprint (or an account) to its continuity

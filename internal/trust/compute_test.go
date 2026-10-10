@@ -3,6 +3,8 @@ package trust
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"math/rand"
 	"strconv"
@@ -15,10 +17,18 @@ func TestDefaultParamsValidateAndRoundTrip(t *testing.T) {
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if p.Version != 1 || len(p.Seeds) != 6 || p.SeedsReason != SeedsAReason {
-		t.Fatalf("version 1 must be version 0 plus seed set A: %+v", p)
+	if p.Version != 2 || len(p.Seeds) != 6 || p.SeedsReason != SeedsAReason || p.Standing == nil || p.Standing.Mode != StandingShadow {
+		t.Fatalf("version 2 must be version 1 plus standing in shadow: %+v", p)
 	}
-	back, err := ParseParams(1, p.Body())
+	// Version 1 is version 2 without standing, byte for byte the body
+	// published as version 1.
+	if sum := sha256.Sum256(paramsV1().Body()); hex.EncodeToString(sum[:]) != "a7db44793ddaa0e98f4dcd934a159aff4ffc4ee5e3e738b2a1935e56c58ac581" {
+		t.Fatalf("version 1 body changed: %s", paramsV1().Body())
+	}
+	if _, err := ParseParams(1, paramsV1().Body()); err != nil {
+		t.Fatalf("version 1 no longer parses: %v", err)
+	}
+	back, err := ParseParams(2, p.Body())
 	if err != nil {
 		t.Fatal(err)
 	}

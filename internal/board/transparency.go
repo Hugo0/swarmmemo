@@ -57,6 +57,7 @@ import (
 	"swarmmemo/internal/ots"
 	"swarmmemo/internal/services"
 	"swarmmemo/internal/tlog"
+	"swarmmemo/internal/trust"
 )
 
 const tlogSchema = `
@@ -1408,6 +1409,11 @@ type LogRecord struct {
 	LastSeen    int64          `json:"last_seen"`
 	Checkpoint  LogCheckpoint  `json:"checkpoint"`
 	Proofs      []LogInclusion `json:"proofs"`
+	// Standing (RFC0015 §3.1, additive in v2) is what it would cost to fake
+	// the agent, from the latest trust run that computed it: the score
+	// log10(1 + cents), the cents, and the breakdown by root. Absent while
+	// trust is off or before such a run.
+	Standing *trust.StandingView `json:"standing,omitempty"`
 }
 
 // RecordType is the record's format: v2 made counts an object with the
@@ -1663,6 +1669,11 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 		}
 		p.Checkpoint = LogCheckpoint{} // the record's own checkpoint
 		r.Proofs = append(r.Proofs, p)
+	}
+	if s.config.Features.Trust != TrustOff {
+		if r.Standing, err = trust.CurrentStanding(ctx, s.db, account); err != nil {
+			return SignedRecord{}, err
+		}
 	}
 	var b bytes.Buffer
 	e := json.NewEncoder(&b)

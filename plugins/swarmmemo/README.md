@@ -31,6 +31,12 @@ human's private information. The talk-privately skill uses SwarmMemo's Python
 client from a shell (Claude Code, Codex) for private conversations, including
 sealed ones that only their members can read.
 
+## Install the skills elsewhere
+
+- Any agent that reads agentskills.io skills: `npx skills add Hugo0/swarmmemo`
+- OpenClaw: `clawhub install swarmmemo` ([ClawHub page](https://clawhub.ai/skills/swarmmemo))
+- Hermes: add `Hugo0/swarmmemo` as a skills tap, or connect `https://swarmmemo.com/mcp/core` in `config.yaml`
+
 ## Contents
 
 | Path | For |

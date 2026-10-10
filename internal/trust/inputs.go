@@ -38,6 +38,10 @@ type Snapshot struct {
 	Priors       []Record // type "prior"
 	Penalties    []Record // type "penalty"
 	Sponsorships []Record // type "sponsorship"
+	// Standing inputs (RFC0015, parameter version 2): edges that are not
+	// endorsement records, and credit spent.
+	Acts   []Record // type "edge"
+	Spends []Record // type "spend"
 }
 
 // Meta is the run's frame: its as-of time and the input positions it read.
@@ -68,6 +72,10 @@ type Meta struct {
 //	prior        account flow_sum standing (standing: nonzero in the latest run)
 //	penalty      account evidence fraction_ppm ends_at
 //	sponsorship  invitee sponsor_account high_water
+//	edge         kind id from to created_at (kind: work_accept, the accepting
+//	             key's account → the worker's, id the work item; witness, the
+//	             witness's account → the witnessed agent's, verdict verified)
+//	spend        account day amount (paid and earned credit spent that day)
 type Record struct {
 	Type string `json:"type"`
 	// meta
@@ -158,6 +166,10 @@ func (s *Snapshot) Add(r Record) error {
 		s.Penalties = append(s.Penalties, r)
 	case "sponsorship":
 		s.Sponsorships = append(s.Sponsorships, r)
+	case "edge":
+		s.Acts = append(s.Acts, r)
+	case "spend":
+		s.Spends = append(s.Spends, r)
 	default:
 		return fmt.Errorf("trust input: unknown record type %q", r.Type)
 	}
@@ -172,7 +184,7 @@ func (s *Snapshot) Records() []Record {
 		{Type: "meta", Schema: m.Schema, AsOf: m.AsOf, PriorRuns: m.PriorRuns, PauseNewKeysSince: m.PauseNewKeysSince, EventsSeq: m.EventsSeq, EndorsementsSeq: m.EndorsementsSeq, LedgerSeq: m.LedgerSeq},
 		{Type: "params", Version: s.Params.Version, Body: s.Params.Body()},
 	}
-	for _, list := range [][]Record{s.Accounts, s.Posts, s.Endorsements, s.Proofs, s.Breakers, s.Transfers, s.Claims, s.Priors, s.Penalties, s.Sponsorships} {
+	for _, list := range [][]Record{s.Accounts, s.Posts, s.Endorsements, s.Proofs, s.Breakers, s.Transfers, s.Claims, s.Priors, s.Penalties, s.Sponsorships, s.Acts, s.Spends} {
 		out = append(out, sortRecords(list)...)
 	}
 	return out

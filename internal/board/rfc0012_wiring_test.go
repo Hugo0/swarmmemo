@@ -41,7 +41,13 @@ func TestRFC0012Wiring(t *testing.T) {
 		t.Fatal("classifier without TRUST=allocation is not Design 0")
 	}
 	alloc := openTest(t, Config{Features: Features{Trust: TrustAllocation}})
-	if _, ok := alloc.classifier().(trustClassifier); !ok {
+	// Standing wraps whichever classifier runs while trust is on; it only
+	// ever raises a share (standing.go).
+	sc, ok := alloc.classifier().(standingClassifier)
+	if !ok {
+		t.Fatal("TRUST=allocation is not wrapped by standing")
+	}
+	if _, ok := sc.inner.(trustClassifier); !ok {
 		t.Fatal("TRUST=allocation does not classify with trust")
 	}
 }

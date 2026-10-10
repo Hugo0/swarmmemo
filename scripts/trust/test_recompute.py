@@ -175,27 +175,60 @@ class Helpers(unittest.TestCase):
 
 
 class GoldenFixture(unittest.TestCase):
-    """The Go reference's golden fixture (internal/trust/testdata): the same
-    inputs must give byte-identical output. TRUST_GOLDEN_DIR points elsewhere."""
+    """The Go reference's golden fixtures (internal/trust/testdata): the same
+    inputs must give byte-identical output. TRUST_GOLDEN_DIR points elsewhere.
+    golden is parameter version 1 (no standing); golden_standing is version 2."""
+
+    NAMES = ("golden", "golden_standing")
+
+    def fixture(self, name):
+        directory = golden_dir()
+        inputs, output = directory / f"{name}_inputs.jsonl", directory / f"{name}_output.json"
+        if not inputs.exists():
+            self.skipTest(f"no golden fixture {name} at {directory}")
+        return inputs, output
 
     def test_matches_reference(self):
-        directory = golden_dir()
-        inputs, output = directory / "golden_inputs.jsonl", directory / "golden_output.json"
-        if not inputs.exists():
-            self.skipTest(f"no golden fixture at {directory}")
-        with inputs.open(encoding="utf-8") as f:
-            snap = recompute.read_snapshot(f)
-        got = recompute.canonical(recompute.compute(snap))
-        self.assertEqual(got, output.read_text(encoding="utf-8").rstrip("\n"))
+        for name in self.NAMES:
+            inputs, output = self.fixture(name)
+            with inputs.open(encoding="utf-8") as f:
+                snap = recompute.read_snapshot(f)
+            got = recompute.canonical(recompute.compute(snap))
+            self.assertEqual(got, output.read_text(encoding="utf-8").rstrip("\n"), name)
+            self.assertEqual("standing" in json.loads(got), name == "golden_standing")
 
     def test_record_order_does_not_matter(self):
-        directory = golden_dir()
-        inputs, output = directory / "golden_inputs.jsonl", directory / "golden_output.json"
-        if not inputs.exists():
-            self.skipTest(f"no golden fixture at {directory}")
-        lines = inputs.read_text(encoding="utf-8").splitlines()
-        snap = recompute.read_snapshot(list(reversed(lines)))
-        self.assertEqual(recompute.canonical(recompute.compute(snap)), output.read_text(encoding="utf-8").rstrip("\n"))
+        for name in self.NAMES:
+            inputs, output = self.fixture(name)
+            lines = inputs.read_text(encoding="utf-8").splitlines()
+            snap = recompute.read_snapshot(list(reversed(lines)))
+            self.assertEqual(recompute.canonical(recompute.compute(snap)), output.read_text(encoding="utf-8").rstrip("\n"), name)
+
+
+class Standing(unittest.TestCase):
+    def test_vote_weight(self):
+        self.assertEqual(recompute.vote_weight_ppm(0, 250000, 500), 0)
+        self.assertEqual(recompute.vote_weight_ppm(125, 250000, 500), 625000)
+        self.assertEqual(recompute.vote_weight_ppm(500, 250000, 500), 1_000_000)
+        self.assertEqual(recompute.vote_weight_ppm(10**9, 250000, 500), 1_000_000)
+        self.assertEqual(recompute.vote_weight_ppm(1, 250000, 500), 250000 + 750000 * 44721 // 1_000_000)
+
+    def test_mul_div(self):
+        self.assertEqual(recompute.mul_div(7, 3, 2), 10)
+        self.assertEqual(recompute.mul_div(0, 3, 2), 0)
+        self.assertEqual(recompute.mul_div(1 << 62, 1 << 40, 3), 2**63 - 1)
+
+    def test_standing_params_are_checked(self):
+        lines = (golden_dir() / "golden_standing_inputs.jsonl").read_text(encoding="utf-8").splitlines()
+        params = next(json.loads(line) for line in lines if '"type":"params"' in line)
+        bad = copy.deepcopy(params)
+        bad["body"]["standing"]["extra"] = 1
+        with self.assertRaises(recompute.InputError):
+            recompute.read_snapshot([json.dumps(bad)])
+        bad = copy.deepcopy(params)
+        bad["body"]["standing"]["mode"] = "on"
+        with self.assertRaises(recompute.InputError):
+            recompute.read_snapshot([json.dumps(bad)])
 
 
 if __name__ == "__main__":

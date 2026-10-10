@@ -971,6 +971,9 @@ func (s *Store) SetAllowanceParams(ctx context.Context, namespace string, body [
 	if err = tx.Commit(); err != nil {
 		return 0, err
 	}
+	if namespace == trust.ParamsNamespace {
+		s.trust.forgetParams()
+	}
 	if namespace == moderation.ParamsNamespace && s.moderation.engine != nil {
 		_ = s.moderation.engine.ReloadPolicy(ctx) // after commit: the policy reads on the pool
 	}

@@ -20,12 +20,15 @@ Three commands:
       JSON (sorted keys, no spaces), which must equal the published run byte for
       byte. The input is the run's snapshot: one JSON record per line, typed
       meta, params, account, post, endorsement, proof, breaker, transfer, claim,
-      prior, penalty and sponsorship, the format of internal/trust's golden
-      fixture (testdata/golden_inputs.jsonl).
+      prior, penalty and sponsorship, and from parameter version 2 edge and
+      spend, the format of internal/trust's golden fixtures
+      (testdata/golden_inputs.jsonl, testdata/golden_standing_inputs.jsonl).
 
 The algorithm is the published one (RFC0012 §4.2–4.5), restated here from the
 specification rather than translated from the Go reference, and checked against
-the reference's golden fixture by test_recompute.py. Every amount is an
+the reference's golden fixtures by test_recompute.py. From parameter version 2
+the run also computes standing (RFC0015 §3): seeded personalized PageRank over
+endorse edges, with oppose edges subtracted locally (compute_standing()). Every amount is an
 integer; divisions truncate toward zero as Go's do; curves are published daily
 factors applied one whole day at a time with floor. The flow is Dinic's
 algorithm specified down to edge insertion order and the path search, since a
@@ -38,6 +41,7 @@ import argparse
 import base64
 import hashlib
 import json
+import math
 import sys
 
 DAY = 86400
@@ -85,7 +89,7 @@ RECORD_FIELDS = [
 ]
 FIELD_ZERO = dict(RECORD_FIELDS)
 RECORD_TYPES = {"meta", "params", "account", "post", "endorsement", "proof", "breaker", "transfer", "claim", "prior",
-                "penalty", "sponsorship"}
+                "penalty", "sponsorship", "edge", "spend"}
 
 
 def record_key(r: dict) -> str:
@@ -136,6 +140,8 @@ PARAM_SECTIONS = {
     "sponsor": {"window_days", "slots_per_share", "dividend_ppm", "dividend_days", "daily_cap", "resource"},
 }
 PROOF_KEYS = {"forge", "rent", "curve", "half_life_days", "day_factor_ppm"}
+STANDING_KEYS = {"mode", "half_life_days", "day_factor_ppm", "pass_ppm", "iterations", "arbiter_seed_cents", "anon_seed_cents",
+                 "credits_per_cent", "theta1_cents", "theta2_cents", "v0_ppm", "c_ref_cents"}
 EDGE_KEYS = {"base_ppm", "half_life_days", "day_factor_ppm"}
 
 
@@ -146,7 +152,13 @@ def check_params(body: dict) -> None:
     def exact(obj, keys, where):
         if not isinstance(obj, dict) or set(obj) != keys:
             raise InputError(f"params {where}: fields must be exactly {sorted(keys)}")
-    exact(body, PARAM_KEYS, "body")
+    if "standing" in body:
+        exact(body, PARAM_KEYS | {"standing"}, "body")
+        exact(body["standing"], STANDING_KEYS, "standing")
+        if body["standing"]["mode"] not in ("shadow", "active"):
+            raise InputError("params standing.mode must be shadow or active")
+    else:
+        exact(body, PARAM_KEYS, "body")
     for section, keys in PARAM_SECTIONS.items():
         exact(body[section], keys, section)
     for kind in ("domain", "ed25519", "board", "url", "nostr"):
@@ -180,7 +192,7 @@ class Snapshot:
         lists = self.__dict__.get("lists", {})
         singular = {"accounts": "account", "posts": "post", "endorsements": "endorsement", "proofs": "proof",
                     "breakers": "breaker", "transfers": "transfer", "claims": "claim", "priors": "prior",
-                    "penalties": "penalty", "sponsorships": "sponsorship"}
+                    "penalties": "penalty", "sponsorships": "sponsorship", "acts": "edge", "spends": "spend"}
         if name in singular:
             return lists[singular[name]]
         raise AttributeError(name)
@@ -863,12 +875,30 @@ def compute(snap: Snapshot) -> dict:
         sc["weight_ppm"] = gdiv((PPM + min(p["weight_cap_ppm"], sc["collateral"] * p["weight_per_unit_ppm"])) * (PPM - effective.get(a, 0)), PPM)
         scores.append(sc)
 
+    standing_summary = None
+    if "standing" in p:
+        parts_by, standing_summary, extra = compute_standing(
+            p, snap, as_of, D, service, root_of, reset, effective, posts, current, account_proofs,
+            sorted(set(nodes) | set(account_proofs)), {sc["account"]: sc["tier"] for sc in scores},
+            {sc["account"]: sc["collateral"] for sc in scores})
+        for sc in scores:
+            sc["parts"]["standing"] = parts_by[sc["account"]]
+        # An account whose only evidence is a standing input is scored too.
+        for a in extra:
+            pen = effective.get(a, 0)
+            scores.append({"account": a, "root": root_of(a), "proof_collateral": 0, "flow_a": 0, "flow_b": None, "flow": 0,
+                           "collateral": 0, "tier": 3, "weight_ppm": PPM * (PPM - pen) // PPM,
+                           "parts": {"proofs": [], "endorsers": [], "endorsers_total": 0, "down_votes": down_votes.get(a, 0),
+                                     "penalty_ppm": pen, "own_avg": 0, "transit": 0, "seed": "", "reset": a in reset,
+                                     "standing": parts_by[a]}})
+        scores.sort(key=lambda sc: sc["account"])
+
     sponsorships, dividends = sponsor(p, snap, as_of, service, first_seen, reset, index, own_avg, root_of, pair_sum, flow_total,
                                       lambda x: [] if x not in index else [(nodes[edges[k][0]], edge_flow(k)) for k in in_edges.get(index[x], [])])
 
     max_transit = max([transit[i] for i, a in enumerate(nodes) if a not in seed_a and a not in seed_b] or [0])
     body = canonical(p)
-    return {
+    out = {
         "schema": 1, "as_of": as_of, "params_version": snap.params_version,
         "params_sha256": hashlib.sha256(body.encode()).hexdigest(),
         "inputs": {"events_seq": snap.meta.events_seq, "endorsements_seq": snap.meta.endorsements_seq, "ledger_seq": snap.meta.ledger_seq,
@@ -881,6 +911,245 @@ def compute(snap: Snapshot) -> dict:
                           "statement": "Whatever the number of sybils, a region behind k attack edges receives at most k x edge_cap_units flow units, and at most max_transit_units through any one non-seed endorser."},
         "scores": scores, "evidence": evidence, "penalties": penalties, "sponsorships": sponsorships, "dividends": dividends,
     }
+    if standing_summary is not None:
+        out["standing"] = standing_summary
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Standing (RFC0015 §3, trust parameter version 2)
+
+MASS_PER_CENT = 1000  # the run's mass unit: a thousandth of a cent
+INT64_MAX = 2**63 - 1
+
+
+def mul_div(a: int, b: int, c: int) -> int:
+    """floor(a × b / c) for non-negative a, b and positive c; a quotient past
+    int64 saturates, as the reference's 128-bit mulDiv does."""
+    if a <= 0 or b <= 0 or c <= 0:
+        return 0
+    return min(a * b // c, INT64_MAX)
+
+
+def vote_weight_ppm(cents: int, v0: int, c_ref: int) -> int:
+    """v(s) in ppm: 0 for C = 0, else v0 + (1 − v0) × √min(1, C / C_ref)."""
+    if cents <= 0 or c_ref <= 0:
+        return 0
+    frac = PPM if cents >= c_ref else mul_div(cents, PPM, c_ref)
+    return v0 + mul_div(PPM - v0, math.isqrt(frac * PPM), PPM)
+
+
+def share_weight_ppm(cents: int, p) -> int:
+    return PPM + min(p["weight_cap_ppm"], max(0, cents) * p["weight_per_unit_ppm"])
+
+
+def band(cents: int, st) -> int:
+    if cents >= st["theta1_cents"]:
+        return 1
+    if cents >= st["theta2_cents"]:
+        return 2
+    return 3
+
+
+def compute_standing(p, snap, as_of, D, service, root_of, reset, penalty, posts, current, account_proofs, scored, tiers, collateral):
+    """Seed mass on priced entities (split between their controllers), credit
+    spent (at cost, decayed), and the arbiter's seed list;
+    endorse edges (up votes, vouches, work.accept, verified witnesses) and
+    oppose edges (down votes), one weight per act, one half-life, saturating
+    per pair and polarity; personalized PageRank from the seeds; oppose
+    shares subtracted at the target; penalties scale outflow and standing."""
+    st = p["standing"]
+    cv = Curves()
+    ws = as_of - p["window_days"] * DAY
+    inputs = {"vote": 0, "vouch": 0, "work_accept": 0, "witness": 0, "down_vote": 0, "spend": 0}
+
+    seeds = {}  # account -> [(root, kind, source, state, mass)]
+    claimants = {}
+    bests = []
+    for a in sorted(account_proofs):
+        for part in account_proofs[a]:
+            if part["saturated_by"] != "" or part["kind"] == "history":
+                continue
+            bests.append((a, part))
+            if part["contribution"] > 0:
+                claimants[part["root"]] = claimants.get(part["root"], 0) + 1
+    for a, part in bests:
+        n = claimants.get(part["root"], 0)
+        mass = part["contribution"] * MASS_PER_CENT // n if n > 0 and part["contribution"] > 0 else 0
+        state = part["state"] + (" (not counted)" if part["note"] == "not counted in this state" else "")
+        seeds.setdefault(a, []).append((part["root"], "imported", part["kind"], state, mass))
+    spend = {}
+    for r in sorted(snap.spends, key=record_key):
+        if r.account == "" or r.account in service or r.day >= D or r.amount <= 0:
+            continue
+        inputs["spend"] += 1
+        spend[r.account] = spend.get(r.account, 0) + mul_div(min(r.amount, 10**15), cv.decay(st["day_factor_ppm"], D - r.day) * MASS_PER_CENT,
+                                                             PPM * st["credits_per_cent"])
+    for a, m in spend.items():
+        seeds.setdefault(a, []).append(("spend:" + a, "earned", "spend", "computed", m))
+    for s in p["seeds"]:
+        if s not in service:
+            seeds.setdefault(s, []).append(("arbiter", "earned", "arbiter_seed", "seed list", st["arbiter_seed_cents"] * MASS_PER_CENT))
+
+    acts = []
+    for r in current:
+        if r.created_at < ws or r.target == "":
+            continue
+        if r.kind in ("vote", "vouch") and r.value == 1:
+            acts.append((r.voter, r.target, r.kind, r.created_at, False))
+        elif r.kind == "vote" and r.value == -1:
+            acts.append((r.voter, r.target, "down_vote", r.created_at, True))
+    for r in snap.acts:
+        if r.created_at >= as_of or r.created_at < ws or r.kind not in ("work_accept", "witness"):
+            continue
+        acts.append((r["from"] if "from" in r else "", r.to, r.kind, r.created_at, False))
+    pair_sum = {}
+    for src, dst, kind, at, oppose in acts:
+        if src == "" or dst == "" or src == dst or src in service or dst in service or src in reset:
+            continue
+        if root_of(src) == root_of(dst):
+            continue
+        v = cv.decay(st["day_factor_ppm"], D - day_of(at))
+        if v <= 0:
+            continue
+        inputs[kind] += 1
+        pair_sum[(src, dst, oppose)] = pair_sum.get((src, dst, oppose), 0) + v
+
+    nodes = sorted(set(seeds) | {k[0] for k in pair_sum} | {k[1] for k in pair_sum} | set(scored))
+    index = {a: i for i, a in enumerate(nodes)}
+    n = len(nodes)
+    seed = [sum(r[4] for r in seeds.get(a, [])) for a in nodes]
+    S = sum(seed)
+    outs = [[] for _ in range(n)]
+    wsum = [0] * n
+    for (src, dst, oppose), total in pair_sum.items():
+        w = PPM * total // (PPM + total)
+        if w > 0:
+            outs[index[src]].append((index[dst], w, oppose))
+            wsum[index[src]] += w
+    for lst in outs:
+        lst.sort(key=lambda e: (e[0], e[2]))
+    pen = [min(PPM, penalty.get(a, 0)) for a in nodes]
+
+    c = list(seed)
+    restart = [x - mul_div(x, st["pass_ppm"], PPM) for x in seed]
+    opposed = [0] * n
+    for _ in range(st["iterations"]):
+        nxt = list(restart)
+        opposed = [0] * n
+        back = 0
+        for u in range(n):
+            pas = mul_div(c[u], st["pass_ppm"], PPM)
+            held = mul_div(pas, pen[u], PPM)
+            pas -= held
+            back += held
+            if wsum[u] == 0:
+                nxt[u] += pas
+                continue
+            sent = 0
+            for dst, w, oppose in outs[u]:
+                share = mul_div(pas, w, wsum[u])
+                sent += share
+                if oppose:
+                    opposed[dst] += share
+                    back += share
+                    continue
+                nxt[dst] += share
+            nxt[u] += pas - sent
+        for i in range(n):
+            if S > 0 and seed[i] > 0:
+                nxt[i] += mul_div(back, seed[i], S)
+        c = nxt
+
+    seasoned = {r.account for r in posts if r.created_at <= as_of - DAY}
+    scored_set = set(scored)
+    v0, c_ref = st["v0_ppm"], st["c_ref_cents"]
+    entities = {}
+    for a in nodes:
+        for root, _, _, _, mass in seeds.get(a, []):
+            typ = root.split(":", 1)[0]
+            e = entities.setdefault(typ, {"controls": 0, "seed_cents": 0})
+            e["controls"] += 1
+            e["seed_cents"] += mass // MASS_PER_CENT
+    summary = {
+        "mode": st["mode"], "seed_cents": S // MASS_PER_CENT, "inputs": inputs, "bands": {"1": 0, "2": 0, "3": 0},
+        "would_be": {"allowance_tier": {"raised": 0, "lowered": 0, "same": 0},
+                     "share_weight": {"raised": 0, "added_ppm": 0, "max_added_ppm": 0},
+                     "vote_weight": {"zero": 0, "partial": 0, "full": 0, "votes": 0, "votes_weight_ppm": 0, "votes_floored_ppm": 0,
+                                     "admitted_unseasoned": 0},
+                     "inbox_known": {"today": 0, "would_be": 0, "raised": 0}},
+        "anonymous": {"cents": st["anon_seed_cents"], "vote_weight_ppm": vote_weight_ppm(st["anon_seed_cents"], v0, c_ref),
+                      "share_weight_ppm": share_weight_ppm(st["anon_seed_cents"], p)},
+        "entities": entities, "largest_moves": [], "accounts": 0, "nonzero": 0,
+    }
+    wb = summary["would_be"]
+    parts, extra, moves, total = {}, [], [], 0
+    for i, a in enumerate(nodes):
+        raw = c[i]
+        cents = mul_div(max(0, raw - opposed[i]), PPM - pen[i], PPM) // MASS_PER_CENT
+        part = {"cents": cents, "raw_cents": raw // MASS_PER_CENT, "opposed_cents": opposed[i] // MASS_PER_CENT, "penalty_ppm": pen[i],
+                "seed_cents": seed[i] // MASS_PER_CENT, "received_cents": max(0, raw - seed[i]) // MASS_PER_CENT, "band": band(cents, st),
+                "vote_weight_ppm": vote_weight_ppm(cents, v0, c_ref), "share_weight_ppm": share_weight_ppm(cents, p), "breakdown": []}
+        own = min(raw, seed[i])
+        for root, kind, source, state, mass in seeds.get(a, []):
+            contribution = mul_div(own, mass, seed[i]) // MASS_PER_CENT if seed[i] > 0 else 0
+            part["breakdown"].append({"root": root, "kind": kind, "source": source, "state": state, "seed_cents": mass // MASS_PER_CENT,
+                                      "contribution": contribution})
+        if raw > seed[i]:
+            part["breakdown"].append({"root": "endorsements", "kind": "earned", "source": "edges", "state": "computed", "seed_cents": 0,
+                                      "contribution": (raw - seed[i]) // MASS_PER_CENT})
+        part["breakdown"].sort(key=lambda b: (-b["contribution"], -b["seed_cents"], b["root"]))
+        parts[a] = part
+        if a not in scored_set:
+            if cents == 0 and seed[i] == 0:
+                continue
+            extra.append(a)
+        total += cents
+        summary["accounts"] += 1
+        if cents > 0:
+            summary["nonzero"] += 1
+        summary["bands"][str(part["band"])] += 1
+        tier = tiers.get(a, 3)
+        if part["band"] < tier:
+            wb["allowance_tier"]["raised"] += 1
+        elif part["band"] > tier:
+            wb["allowance_tier"]["lowered"] += 1
+        else:
+            wb["allowance_tier"]["same"] += 1
+        added = part["share_weight_ppm"] - PPM
+        if added > 0:
+            wb["share_weight"]["raised"] += 1
+            wb["share_weight"]["added_ppm"] += added
+            wb["share_weight"]["max_added_ppm"] = max(wb["share_weight"]["max_added_ppm"], added)
+        v = part["vote_weight_ppm"]
+        wb["vote_weight"]["zero" if v == 0 else "partial" if v < PPM else "full"] += 1
+        if a not in seasoned and v >= 500000:
+            wb["vote_weight"]["admitted_unseasoned"] += 1
+        today = collateral.get(a, 0) >= p["theta_proven"] and collateral.get(a, 0) > 0
+        would = cents >= st["theta2_cents"]
+        if today:
+            wb["inbox_known"]["today"] += 1
+        if would:
+            wb["inbox_known"]["would_be"] += 1
+            if not today:
+                wb["inbox_known"]["raised"] += 1
+        moves.append({"account": a, "cents": cents, "band": part["band"], "tier": tier, "share_weight_ppm": part["share_weight_ppm"],
+                      "vote_weight_ppm": v, "seasoned": a in seasoned})
+    summary["standing_cents"] = total
+    for r in current:
+        if r.kind != "vote" or r.created_at < ws or r.value not in (1, -1):
+            continue
+        wb["vote_weight"]["votes"] += 1
+        cents = parts[r.voter]["cents"] if r.voter in parts else 0
+        v = vote_weight_ppm(cents, v0, c_ref)
+        wb["vote_weight"]["votes_weight_ppm"] += v
+        wb["vote_weight"]["votes_floored_ppm"] += max(PPM, v)
+    moves.sort(key=lambda m: (-m["share_weight_ppm"], -m["cents"], m["account"]))
+    for m in moves:
+        if len(summary["largest_moves"]) == 10 or m["share_weight_ppm"] <= PPM:
+            break
+        summary["largest_moves"].append(m)
+    return parts, summary, sorted(extra)
 
 
 def sponsor(p, snap, as_of, service, first_seen, reset, index, own_avg, root_of, pair_sum, flow_total, inflow):

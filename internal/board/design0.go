@@ -150,11 +150,19 @@ func (s *Store) standing(ctx context.Context, q allowance.Querier, a actor, now 
 // table), or with TRUST=allocation classifier v1 (§4.4), which reads the
 // latest trust run for signed accounts and keeps Design 0 for anonymous
 // subjects.
+//
+// Whatever classifies, standing (RFC0015, standingClassifier) can only raise
+// the share it gives, and only once the trust parameters set standing
+// active.
 func (s *Store) classifier() allowance.Classifier {
+	var c allowance.Classifier = design0Classifier{s}
 	if s.config.Features.Trust == TrustAllocation {
-		return s.trustClassifier(design0Classifier{s})
+		c = s.trustClassifier(c)
 	}
-	return design0Classifier{s}
+	if s.config.Features.Trust != TrustOff {
+		c = standingClassifier{inner: c, s: s}
+	}
+	return c
 }
 
 type design0Classifier struct{ s *Store }

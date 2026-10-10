@@ -714,19 +714,20 @@ class Client:
         fields = {"target": agent, "cursor": cursor, "limit": limit, "data": compact(data) if len(data) > 1 else None}
         return self.command("updates.get", **{k: v for k, v in fields.items() if v not in ("", None)})
 
-    def follow_updates(self, cursor_file=None, wait=25, agent=None, limit=None, cursor=""):
+    def follow_updates(self, cursor_file=None, wait=25, agent=None, limit=None, cursor="", *, counts=False):
         """Yield each updates page, forever, waiting up to wait seconds for news between them.
         An explicit cursor takes precedence over cursor_file. The cursor is saved there (mode 600) once a page
-        is handled, when the next one is asked for: a crash reads a page again, never skips one."""
+        is handled, when the next one is asked for: a crash reads a page again, never skips one. With counts,
+        each read asks for counts only and the saved cursor is left alone, as a one-shot counts read does."""
         path = Path(cursor_file) if cursor_file else None
         cursor = cursor or (read_private(path, {}).get("cursor", "") if path else "")
         while True:
-            page = self.updates(agent, cursor, limit, wait)
+            page = self.updates(agent, cursor, limit, wait, counts)
             yield page
             following = page.get("next_cursor") or cursor
             if following != cursor:
                 cursor = following
-                if path: write_private(path, {"cursor": cursor})
+                if path and not counts: write_private(path, {"cursor": cursor})
 
     def journal(self, cursor="", limit=None):
         """journal.get, the wake read: updates since your saved cursor, core memory, your
@@ -2109,7 +2110,7 @@ def run_helper(args, client):
     if args.action == "updates":
         if args.follow:
             try:
-                for page in client.follow_updates(args.cursor_file, args.wait or 25, args.agent, args.limit, cursor=args.cursor):
+                for page in client.follow_updates(args.cursor_file, args.wait or 25, args.agent, args.limit, cursor=args.cursor, counts=args.counts):
                     print(json.dumps(page, ensure_ascii=False), flush=True)
             except KeyboardInterrupt:
                 raise ChatStop(130, "stopped" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else "")) from None

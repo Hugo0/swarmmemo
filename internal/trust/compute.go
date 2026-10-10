@@ -29,6 +29,10 @@ type Output struct {
 	Penalties     []PenaltyOut     `json:"penalties"`
 	Sponsorships  []SponsorshipOut `json:"sponsorships"`
 	Dividends     []DividendOut    `json:"dividends"`
+	// Standing is RFC0015's standing summary: present from parameter
+	// version 2 (standing.go), absent before, so earlier runs recompute
+	// byte for byte.
+	Standing *StandingSummary `json:"standing,omitempty"`
 	// Work is the number of edge examinations; a run statistic, not output.
 	Work int64 `json:"-"`
 }
@@ -81,6 +85,8 @@ type Parts struct {
 	Transit        int64          `json:"transit"`
 	Seed           string         `json:"seed"` // "", "a", "b" or "ab"
 	Reset          bool           `json:"reset"`
+	// Standing is the account's RFC0015 standing (parameter version 2).
+	Standing *StandingPart `json:"standing,omitempty"`
 }
 
 // ProofPart is one priced proof.
@@ -875,6 +881,32 @@ func Compute(ctx context.Context, snap Snapshot) (Output, error) {
 		scores = append(scores, sc)
 	}
 
+	var standingSummary *StandingSummary
+	if p.Standing != nil {
+		proofParts := make(map[string][]ProofPart, len(accountProofs))
+		for a, ps := range accountProofs {
+			proofParts[a] = ps.parts
+		}
+		tiers := make(map[string]int64, len(scores))
+		collateral := make(map[string]int64, len(scores))
+		for _, sc := range scores {
+			tiers[sc.Account], collateral[sc.Account] = sc.Tier, sc.Collateral
+		}
+		res := computeStanding(standingInput{p: p, snap: snap, asOf: asOf, D: D, service: service, rootOf: rootOf, reset: reset, penalty: effectivePenalty,
+			posts: posts, current: current, proofs: proofParts, scored: accounts, tier: tiers, collateral: collateral})
+		for i := range scores {
+			scores[i].Parts.Standing = res.parts[scores[i].Account]
+		}
+		// An account whose only evidence is a standing input (credit spent or
+		// held) is scored too, at tier 3 and one share.
+		for _, a := range res.extra {
+			scores = append(scores, ScoreOut{Account: a, Root: rootOf(a), Tier: 3, WeightPPM: 1e6 * (1e6 - effectivePenalty[a]) / 1e6,
+				Parts: Parts{Proofs: []ProofPart{}, Endorsers: []EndorserPart{}, DownVotes: downVotes[a], PenaltyPPM: effectivePenalty[a], Reset: reset[a], Standing: res.parts[a]}})
+		}
+		sort.Slice(scores, func(i, j int) bool { return scores[i].Account < scores[j].Account })
+		standingSummary = res.summary
+	}
+
 	sponsorships, dividends := sponsor(p, snap, asOf, service, firstSeen, reset, index, ownAvg, rootOf, pairSum, flowTotal, func(invitee string) []endorserFlow {
 		i, ok := index[invitee]
 		if !ok {
@@ -904,7 +936,7 @@ func Compute(ctx context.Context, snap Snapshot) (Output, error) {
 		SeedsA: seedsAList, SeedsB: seedsBList, SeedsBUsed: useB,
 		CaptureBound: CaptureBound{UnitPerShare: U, EdgeCapUnits: p.EdgeCapPPM * U / 1e6, LambdaPPM: p.LambdaPPM, MaxTransitUnits: maxTransit, PoolUnits: pool,
 			Statement: "Whatever the number of sybils, a region behind k attack edges receives at most k x edge_cap_units flow units, and at most max_transit_units through any one non-seed endorser."},
-		Scores: scores, Evidence: evidence, Penalties: penaltiesOut, Sponsorships: sponsorships, Dividends: dividends, Work: work,
+		Scores: scores, Evidence: evidence, Penalties: penaltiesOut, Sponsorships: sponsorships, Dividends: dividends, Standing: standingSummary, Work: work,
 	}, nil
 }
 

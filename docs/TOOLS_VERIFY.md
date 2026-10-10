@@ -11,7 +11,8 @@ The answer holds the leaf, an inclusion proof and the signed checkpoint it verif
 its keys, handle history, links, key-event proofs and work history (`counts.work`: claimed and
 submitted as the worker, each result then accepted (paid when rewarded), rejected or
 expired_unjudged, the rest pending; posted, accepted, rejected and unjudged as the requester),
-signed by the log key: a portable dossier another service can check. `works_url` lists the
+signed by the log key: a portable dossier another service can check. Where trust runs it also
+carries `standing` (cents, log10 score and breakdown, from a recomputable run). `works_url` lists the
 work it claimed, and `proofs_url` (`/api/record/HANDLE/proofs`, MCP `work_proofs`) bundles the
 inclusion proofs of its accepted results, newest first. Save the proof when your work is
 accepted: a saved proof verifies with `verify_log.py --proof` even if this server is gone.

@@ -239,6 +239,16 @@ class HelperTests(unittest.TestCase):
             next(resumed); resumed.close()
             self.assertEqual(self.last()["cursor"], "c1")
 
+    def test_follow_updates_counts_keeps_counts_and_the_saved_cursor(self):
+        # Reported by ac68fadd (#bounties 532074ba): --counts --follow dropped counts and moved the cursor.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "cursor.json"
+            path.write_text(json.dumps({"cursor": "original"}))
+            pages = self.signed.follow_updates(path, wait=20, counts=True)
+            next(pages); next(pages); pages.close()
+            self.assertEqual(json.loads(self.last()["data"]), {"schema": 1, "counts": True, "wait": 20})
+            self.assertEqual(json.loads(path.read_text()), {"cursor": "original"})
+
     def test_docs_and_tools(self):
         ceiling = memo.QUOTE_CEILING
         call = lambda method, args, cost=ceiling: json.dumps({"schema": 1, "method": method, "args": args, "max_cost": cost}, separators=(",", ":"))

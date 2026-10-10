@@ -55,6 +55,9 @@ type Params struct {
 	Detectors      Detectors       `json:"detectors"`
 	Liability      Liability       `json:"liability"`
 	Sponsor        Sponsor         `json:"sponsor"`
+	// Standing is RFC0015's standing (standing.go). Absent in parameter
+	// version 1, whose runs it leaves byte for byte unchanged.
+	Standing *StandingParams `json:"standing,omitempty"`
 }
 
 // ProofPrice prices one proof kind at min(forge, rent) × curve(age).
@@ -123,9 +126,10 @@ type Sponsor struct {
 // ParamsNamespace is the parameter namespace of the trust module (§2.7).
 const ParamsNamespace = "trust"
 
-// DefaultVersion is the compiled-in trust parameter version: version 0 (the
-// RFC defaults) plus seed set A (§2.7, §13).
-const DefaultVersion = SeedsAVersion
+// DefaultVersion is the compiled-in trust parameter version. Version 1 was
+// version 0 (the RFC defaults) plus seed set A (§2.7, §13); version 2 adds
+// RFC0015's standing, in shadow.
+const DefaultVersion = StandingVersion
 
 // DayFactor is round(1e6 × 2^(−1/h)), the published daily factor of a curve
 // with half-life h days. It is evaluated when parameters are made or checked,
@@ -137,8 +141,9 @@ func DayFactor(halfLifeDays int64) int64 {
 	return int64(math.Round(1e6 * math.Pow(2, -1/float64(halfLifeDays))))
 }
 
-// DefaultParams is the compiled-in trust parameter set, version 1: the RFC
-// defaults with seed set A and the service accounts.
+// DefaultParams is the compiled-in trust parameter set, version 2: the RFC
+// defaults with seed set A and the service accounts (version 1), plus
+// RFC0015's standing in shadow.
 func DefaultParams() Params {
 	edge := func(base, h int64) Edge { return Edge{BasePPM: base, HalfLifeDays: h, DayFactorPPM: DayFactor(h)} }
 	free := ProofPrice{Curve: "none"}
@@ -187,6 +192,7 @@ func DefaultParams() Params {
 		Detectors:     Detectors{Version: 1, FunnelK: 5, FunnelDays: 7, FunnelSpendPPM: 100000, RingMin: 3, RingInsidePPM: 800000},
 		Liability:     Liability{PhiPPM: 1000000, PhiMaxPPM: 1000000, PenaltyDays: 30, EdgeDays: 30},
 		Sponsor:       Sponsor{WindowDays: 7, SlotsPerShare: 3, DividendPPM: 1000000, DividendDays: 90, DailyCap: 100, Resource: "credit"},
+		Standing:      DefaultStanding(),
 	}
 }
 
@@ -331,6 +337,9 @@ func (p Params) Validate() error {
 	in("sponsor.dividend_days", p.Sponsor.DividendDays, 0, 365)
 	in("sponsor.daily_cap", p.Sponsor.DailyCap, 0, 1e9)
 	check(p.Sponsor.Resource == "credit" || p.Sponsor.Resource == "post_bytes" || p.Sponsor.Resource == "memory_bytes", "sponsor.resource must be a metered resource")
+	if p.Standing != nil {
+		p.Standing.validate(in, check, curve)
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("trust params: %s", strings.Join(errs, "; "))
 	}

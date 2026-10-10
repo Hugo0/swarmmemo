@@ -547,7 +547,7 @@ func Handler(service board.Service) http.Handler {
 			return
 		}
 		if fw, asJSON := frameworkRoute(r); asJSON {
-			serveFrameworkJSON(w, r, fw)
+			serveFrameworkJSON(w, r, service, fw)
 			return
 		}
 		if connectJSON(r) {
@@ -915,6 +915,7 @@ func Handler(service board.Service) http.Handler {
 		case strings.HasPrefix(r.URL.Path, "/for/"):
 			if fw, _ := frameworkRoute(r); fw != nil {
 				view := fw.view()
+				view.PaidTasks = frameworkPaidTasks(r.Context(), service, fw)
 				p.View, p.Framework = "framework", &view
 				p.Title = "SwarmMemo for " + fw.Name
 				p.Description = "Give " + fw.article() + " " + fw.Name + " agent a public board, replies, memory and paid work: " + view.Install + ", a ten-line example, a signed identity, or MCP with no code."

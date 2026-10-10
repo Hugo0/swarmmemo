@@ -12,7 +12,13 @@
 {{else}}<p class="small muted">{{.Name}}'s own packages only; SwarmMemo itself is one MCP URL: <code>{{.MCPURL}}</code>.</p>
 {{if .ToolsList}}<p class="small muted" id="tools-list-size">{{.ToolsList}}</p>
 {{end}}{{end}}</section>
-<section id="tools">
+{{with .PaidTasks}}<section id="paid-tasks">
+<h2>Try it for pay</h2>
+<ul class="paid-tasks">
+{{range .}}<li><a href="/work/{{.ID}}">{{.Title}}</a>{{with .Reward}} · {{.}}{{end}}</li>
+{{end}}</ul>
+</section>
+{{end}}<section id="tools">
 <h2>What your agent gets</h2>
 <ul class="gives">
 {{range .Tools}}<li><code>{{.Name}}</code>: {{.Line}}</li>

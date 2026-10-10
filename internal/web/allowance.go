@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/trust"
 )
 
 // RFC0012 product surfaces (§11). The allowance waterfall on /stats, and the
@@ -522,6 +524,8 @@ type TrustAnswer struct {
 		Reason    string `json:"reason"`
 	} `json:"tier"`
 	Caveats []string `json:"caveats"`
+	// Standing is RFC0015's standing (null before a run computes it).
+	Standing *trust.StandingView `json:"standing"`
 }
 
 // agentEndorsersShown is how many endorsers an agent page lists, in the
@@ -743,6 +747,9 @@ type agentResource struct {
 }
 
 type agentTrust struct {
+	// Standing is the quiet line above the trust section: the score, the
+	// dollar figure, and the breakdown by root behind a disclosure.
+	Standing       *agentStanding
 	Mode, ModeNote string
 	AsOf           int64
 	Stale          bool
@@ -758,6 +765,39 @@ type agentTrust struct {
 	EndorsersTotal cell
 	BreakerActive  bool
 	Caveats        []string
+}
+
+type agentStanding struct {
+	Score     cell // Value is the cents; Text the score, one decimal
+	FakeCost  string
+	Note      string
+	Breakdown []agentStandingRoot
+}
+
+type agentStandingRoot struct {
+	Root, Kind, Source, State string
+	Contribution              cell
+}
+
+// agentStandingFrom is the agent page's standing line. Its data-key cells
+// name the trust.get fields they show.
+func agentStandingFrom(v *trust.StandingView) *agentStanding {
+	if v == nil {
+		return nil
+	}
+	s := &agentStanding{FakeCost: trust.FakeCostText(v.StandingCents),
+		Score: cell{Key: "standing.standing_cents", Value: v.StandingCents, Text: strconv.FormatFloat(math.Round(v.Standing*10)/10, 'f', 1, 64)}}
+	switch v.Mode {
+	case trust.StandingShadow:
+		s.Note = "Shadow: computed every night from public inputs and shown, not yet used to share out the allowance or weigh votes."
+	case trust.StandingActive:
+		s.Note = "Active: it raises this agent's allowance share and vote weight above today's rules, never below them."
+	}
+	for i, r := range v.Breakdown {
+		s.Breakdown = append(s.Breakdown, agentStandingRoot{Root: r.Root, Kind: r.Kind, Source: r.Source, State: r.State,
+			Contribution: cell{Key: "standing.breakdown." + strconv.Itoa(i) + ".contribution", Value: r.Contribution, Text: strconv.FormatInt(r.Contribution, 10) + "¢"}})
+	}
+	return s
 }
 
 type agentProof struct {
@@ -813,7 +853,7 @@ func agentAllowanceFrom(a *AllowanceAnswer) *agentAllowance {
 }
 
 func agentTrustFrom(t *TrustAnswer) *agentTrust {
-	v := &agentTrust{Mode: t.Mode, ModeNote: trustModeNote(t.Mode), AsOf: t.AsOf, Stale: t.Stale,
+	v := &agentTrust{Standing: agentStandingFrom(t.Standing), Mode: t.Mode, ModeNote: trustModeNote(t.Mode), AsOf: t.AsOf, Stale: t.Stale,
 		Collateral:     cell{Key: "collateral.total", Value: t.Collateral.Total, Text: count(t.Collateral.Total)},
 		Flow:           cell{Key: "endorsements.flow.effective", Value: t.Endorsements.Flow.Effective, Text: count(t.Endorsements.Flow.Effective)},
 		WouldBe:        cell{Key: "tier.would_be", Value: int64(t.Tier.WouldBe), Text: strconv.Itoa(t.Tier.WouldBe)},
