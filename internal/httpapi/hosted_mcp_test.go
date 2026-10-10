@@ -298,6 +298,10 @@ func TestHostedTokenNeverLogged(t *testing.T) {
 // token's limit does not touch another's.
 func TestHostedMCPRateLimit(t *testing.T) {
 	_, s := hostedServer(t)
+	// The clock stands still, so the burst is all there is however slowly
+	// the calls run (the race detector makes them seconds apart).
+	frozen := time.Now()
+	s.hostedLimiter.now = func() time.Time { return frozen }
 	busy, other := newIdentity(t, s, "")["token"].(string), newIdentity(t, s, "")["token"].(string)
 	limited := 0
 	for i := 0; i < hostedBurst+5; i++ {
@@ -307,7 +311,7 @@ func TestHostedMCPRateLimit(t *testing.T) {
 			t.Fatalf("call %d: %s", i, failure)
 		}
 	}
-	if limited == 0 || limited > 5 {
+	if limited != 5 {
 		t.Fatalf("%d of %d calls were limited; want the ones past the burst of %d", limited, hostedBurst+5, hostedBurst)
 	}
 	mustTool(t, s, "/mcp/t/"+other, "", "whoami", map[string]any{})

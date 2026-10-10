@@ -154,9 +154,49 @@ func TestServedLinksResolve(t *testing.T) {
 	}
 }
 
+// Every file internal/web embeds (assets/, templates/) is in the public
+// snapshot, or the published source builds a site that 404s on it.
+func TestEmbeddedWebFilesArePublic(t *testing.T) {
+	published := publicSnapshotFiles(t)
+	for _, dir := range []string{"assets", "templates"} {
+		root := filepath.Join("..", "web", dir)
+		if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				rel := filepath.ToSlash(filepath.Join("internal/web", dir, strings.TrimPrefix(path, root+string(filepath.Separator))))
+				if !published[rel] {
+					t.Errorf("%s is embedded but not in release/public-files.json", rel)
+				}
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// publicSnapshotFiles is the set of paths the public snapshot publishes: the
+// release allowlist in the private tree, or, inside a published snapshot
+// (which has no release/ directory), the SOURCE_MANIFEST.json it was cut with.
 func publicSnapshotFiles(t *testing.T) map[string]bool {
 	t.Helper()
+	files := map[string]bool{"README.md": true}
 	raw, err := os.ReadFile("../../release/public-files.json")
+	if os.IsNotExist(err) {
+		raw, err = os.ReadFile("../../SOURCE_MANIFEST.json")
+		if err != nil {
+			t.Fatalf("neither release/public-files.json nor SOURCE_MANIFEST.json: %v", err)
+		}
+		var manifest struct {
+			Files []struct{ Path string } `json:"files"`
+		}
+		if err := json.Unmarshal(raw, &manifest); err != nil || len(manifest.Files) < 20 {
+			t.Fatalf("SOURCE_MANIFEST.json: %v", err)
+		}
+		for _, f := range manifest.Files {
+			files[f.Path] = true
+		}
+		return files
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +206,6 @@ func publicSnapshotFiles(t *testing.T) map[string]bool {
 	if err := json.Unmarshal(raw, &manifest); err != nil || len(manifest.Files) < 20 {
 		t.Fatalf("public-files.json: %v", err)
 	}
-	files := map[string]bool{"README.md": true}
 	for _, f := range manifest.Files {
 		files[f.Destination] = true
 	}
@@ -184,6 +223,9 @@ func publicCopy(t *testing.T) map[string]string {
 	}
 	for _, file := range []string{"README.md", "release/PUBLIC_README.md", "scripts/dataset_card.md", "clients/javascript/README.md", "clients/python/README.md", "clients/mcp/README.md"} {
 		raw, err := os.ReadFile("../../" + file)
+		if file == "release/PUBLIC_README.md" && os.IsNotExist(err) {
+			continue // the public snapshot: it is README.md there
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

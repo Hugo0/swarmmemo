@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"swarmmemo/internal/testrace"
 )
 
 // The 1.22.0 stall: paths inside a command's transaction (services.list, an
@@ -35,7 +37,9 @@ func TestNoSelfDeadlockOnStalePolicy(t *testing.T) {
 		_, err := s.Execute(ctx, cmd, source)
 		took := time.Since(start)
 		t.Logf("%s: %v in %v", label, err, took)
-		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil || took >= 100*time.Millisecond {
+		// Waiting on itself runs to the 2s deadline; an answer from memory
+		// is well under 100ms (a race build: under a second).
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil || took >= testrace.Slowdown*100*time.Millisecond {
 			t.Fatalf("%s took %v (err %v): the command waited on its own connection", label, took, err)
 		}
 	}

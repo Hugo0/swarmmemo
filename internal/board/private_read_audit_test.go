@@ -269,6 +269,9 @@ SELECT printf('%064x',v+?), 'synthetic-history-key-'||(v+?), ?,?,?,?, ?,
 }
 
 func TestPrivateReadAuditHistoricalAdmissionDoesNotBlockPrepaidRevoke(t *testing.T) {
+	if testing.Short() {
+		t.Skip("seeds 4,095 private messages three times")
+	}
 	for _, mode := range []string{"owner_history_across_rooms", "room_history", "global_history"} {
 		t.Run(mode, func(t *testing.T) {
 			s, owner, child := auditPrivateFixture(t, Config{})

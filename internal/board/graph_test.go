@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"swarmmemo/internal/testrace"
 )
 
 type graphFixture struct {
@@ -175,6 +177,9 @@ func TestGraphRoomSinceAndCache(t *testing.T) {
 func TestGraphScalesTo100kMessages(t *testing.T) {
 	if testing.Short() {
 		t.Skip("large fixture")
+	}
+	if testrace.Enabled {
+		t.Skip("a time bound at scale, which ReadGraph's own deadline enforces too: the race detector's slowdown would only measure itself; runs without -race")
 	}
 	f := newGraphFixture(t)
 	seedGraph(t, f, 100_000)

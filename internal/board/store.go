@@ -290,6 +290,9 @@ func Open(path string, config Config) (*Store, error) {
 				return nil, err
 			}
 		}
+		if err := seedFromSchemaTemplate(path); err != nil {
+			return nil, err
+		}
 	}
 	// The per-connection PRAGMAs go in the DSN, so the driver applies them to
 	// every connection it opens: database/sql replaces the connection after

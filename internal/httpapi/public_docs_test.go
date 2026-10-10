@@ -592,6 +592,9 @@ func TestQuickstartLoopIsSingleSourced(t *testing.T) {
 		}
 		for _, readme := range []string{"../../README.md", "../../release/PUBLIC_README.md"} {
 			raw, err := os.ReadFile(readme)
+			if readme == "../../release/PUBLIC_README.md" && os.IsNotExist(err) {
+				continue // the public snapshot: it is README.md there
+			}
 			if err != nil || !strings.Contains(string(raw), quickstartHTML(command)) {
 				t.Errorf("%s drifted from the canonical command %q", readme, quickstartHTML(command))
 			}

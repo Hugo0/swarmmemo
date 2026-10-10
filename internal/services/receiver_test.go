@@ -432,6 +432,9 @@ func (r *recvRig) refusedForTheDay(id, token string) {
 // The daily cap is counted in the database: a minute table full of other
 // receivers drops this receiver's window, and the cap still holds.
 func TestReceiverDailyCapSurvivesTablePressure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("fills a receiver's day and the rate table")
+	}
 	r := newRecvRig(t, 1<<30, services.ScreenOff)
 	id, token := r.create("alice", map[string]any{})
 	r.fillDay(id, token)
@@ -454,6 +457,9 @@ func TestReceiverDailyCapSurvivesTablePressure(t *testing.T) {
 // The daily cap survives a restart: a new engine on the reopened database
 // still refuses, and past days' counts stay.
 func TestReceiverDailyCapSurvivesRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("fills a receiver's day")
+	}
 	path := filepath.Join(t.TempDir(), "s.db")
 	open := func() *sql.DB {
 		db, err := sql.Open("sqlite", path)

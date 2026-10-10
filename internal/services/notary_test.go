@@ -129,6 +129,9 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 }
 
 func TestNotaryDailyCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("stamps a whole day's notary allowance")
+	}
 	r := newWakeRig(t)
 	for i := 0; i < services.NotaryPerAccountDay; i++ {
 		sum := sha256.Sum256([]byte{byte(i), byte(i >> 8)})

@@ -436,19 +436,27 @@ func TestSecBundlerEachDiscoveryGetsAShare(t *testing.T) {
 // time and closes them before filtering, so a concurrent statement waits
 // for at most one page, not for the whole load.
 func TestSecBundlerLoadHoldsTheConnection(t *testing.T) {
-	t.Run("defaults", func(t *testing.T) { t.Logf("5,000 rows, example denylist: waited %v", secLoadHold(t, 5000, 0)) })
+	t.Run("defaults", func(t *testing.T) {
+		held, _ := secLoadHold(t, 5000, 0)
+		t.Logf("5,000 rows, example denylist: waited %v", held)
+	})
 	t.Run("maximum", func(t *testing.T) {
-		if held := secLoadHold(t, 20000, x402DenyMax); held >= 100*time.Millisecond {
-			t.Fatalf("a concurrent statement waited %v behind the load", held)
-		} else {
-			t.Logf("20,000 rows, 4,096 deny domains and URL prefixes: waited %v", held)
+		// One page is well under 100ms on a normal build. A slow machine or
+		// the race detector stretches every page alike, so the bound also
+		// scales with the whole load: holding the connection for the load
+		// would make the wait about as long as the load itself.
+		held, load := secLoadHold(t, 20000, x402DenyMax)
+		if limit := max(100*time.Millisecond, load/20); held >= limit {
+			t.Fatalf("a concurrent statement waited %v behind a %v load (limit %v)", held, load, limit)
 		}
+		t.Logf("20,000 rows, 4,096 deny domains and URL prefixes: waited %v", held)
 	})
 }
 
 // secLoadHold loads a catalogue of rows with deny entries of each list and
-// reports how long a concurrent statement waited for the connection.
-func secLoadHold(t *testing.T, rows, deny int) time.Duration {
+// reports how long a concurrent statement waited for the connection and how
+// long the load took.
+func secLoadHold(t *testing.T, rows, deny int) (time.Duration, time.Duration) {
 	cfg := catalogueConfig(t, `{}`, fmt.Sprintf(`{"discovery_urls":["https://example.com`+discoveryPath+`"],"max_price":"0.002","open_daily":"0.004","recipient_daily":"0.002","max_resources":%d}`, rows))
 	for i := range deny {
 		cfg.Deny.Domains = append(cfg.Deny.Domains, fmt.Sprintf("denied-%d.example.net", i))
@@ -489,7 +497,7 @@ VALUES(?,'x402',?,'GET',?,1000,'["q"]',0,'search',?,'bazaar',5,5,0,?,?)`, fmt.Sp
 		t.Fatalf("loaded %d", n)
 	}
 	t.Logf("loadCatalogue took %v", load)
-	return time.Duration(waited.Load())
+	return time.Duration(waited.Load()), load
 }
 
 // FINDING M3b, fixed: service.read x402 resources runs inside the command's

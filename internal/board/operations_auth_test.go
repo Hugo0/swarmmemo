@@ -196,6 +196,9 @@ func listed(list, op string) bool { return strings.Contains(" "+list+" ", " "+op
 // key that owns nothing, through a scoped worker key of the owner, and signed
 // by the owner, and holds the results to the operation table and to 1.13.0.
 func TestOperationAuthorityMatrix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs every operation in four modes, each on a fresh fixture")
+	}
 	known := map[string]bool{}
 	var lines []string
 	for _, op := range Operations() {

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"swarmmemo/internal/testrace"
 )
 
 // Secrets are assembled at run time, so no literal here trips a repository's
@@ -200,12 +202,13 @@ func hostileInputs() map[string]string {
 }
 
 // Scan is linear and bounded on hostile input: each 16 KiB input in well
-// under a second, and never more than MaxFindings findings.
+// under a second (on a race build, under testrace.Slowdown seconds), and
+// never more than MaxFindings findings.
 func TestHostileInputsLinear(t *testing.T) {
 	for name, text := range hostileInputs() {
 		start := time.Now()
 		f := Scan(text)
-		if d := time.Since(start); d > time.Second {
+		if d := time.Since(start); d > testrace.Slowdown*time.Second {
 			t.Errorf("%s: %v", name, d)
 		}
 		if len(f) > MaxFindings {

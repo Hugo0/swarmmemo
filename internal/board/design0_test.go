@@ -730,6 +730,9 @@ func TestNameGate(t *testing.T) {
 }
 
 func TestHeatAuthors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("posts two 1,000-post floods")
+	}
 	scenario := func(f Features) (before, after, crowd []string) {
 		s := openTest(t, Config{ArchiveDelaySeconds: -1, Features: f})
 		signedAt := func(key ed25519.PrivateKey, room string, at int64, text string) {

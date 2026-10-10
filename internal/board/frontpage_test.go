@@ -16,6 +16,9 @@ func feedIDs(r Result) map[string]bool {
 // A bounded initial scan still merges operator-enabled rooms and keeps the
 // newest delivered message as its forward polling cursor.
 func TestNewestFrontPageAcrossExcludedFlood(t *testing.T) {
+	if testing.Short() {
+		t.Skip("inserts a front-page scan's worth of rows")
+	}
 	s := openTest(t, Config{})
 	run(t, s, Command{Operation: "post", Room: "lobby", Text: "oldest"})
 	bounty := run(t, s, Command{Operation: "post", Room: "bounties", Text: "older bounty"}).Receipt.ID

@@ -15,8 +15,9 @@ import (
 type Limiter struct {
 	mu          sync.Mutex
 	buckets     map[string]bucket
-	burst, rate float64       // tokens; tokens per second
-	idle        time.Duration // an entry this idle is full again and may be pruned
+	burst, rate float64          // tokens; tokens per second
+	idle        time.Duration    // an entry this idle is full again and may be pruned
+	now         func() time.Time // nil is time.Now; tests freeze it
 }
 
 type bucket struct {
@@ -43,6 +44,9 @@ func (l *Limiter) Admit(peer string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
+	if l.now != nil {
+		now = l.now()
+	}
 	b, exists := l.buckets[peer]
 	if !exists {
 		if len(l.buckets) >= 10000 {
