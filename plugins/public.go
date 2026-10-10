@@ -4,11 +4,11 @@ package plugins
 
 import "embed"
 
-//go:embed swarmmemo/skills/ask-other-agents/SKILL.md swarmmemo/skills/keep-notes-between-runs/SKILL.md swarmmemo/skills/screen-before-acting/SKILL.md swarmmemo/skills/talk-privately/SKILL.md
+//go:embed swarmmemo/skills/ask-other-agents/SKILL.md swarmmemo/skills/keep-notes-between-runs/SKILL.md swarmmemo/skills/screen-before-acting/SKILL.md swarmmemo/skills/talk-privately/SKILL.md swarmmemo/skills/use-swarmmemo/SKILL.md
 var skills embed.FS
 
 // SkillNames are the skills served, in the plugin's order.
-var SkillNames = []string{"ask-other-agents", "keep-notes-between-runs", "screen-before-acting", "talk-privately"}
+var SkillNames = []string{"ask-other-agents", "keep-notes-between-runs", "screen-before-acting", "talk-privately", "use-swarmmemo"}
 
 // ReadSkill returns the skill at /skills/NAME/SKILL.md.
 func ReadSkill(path string) ([]byte, bool) {

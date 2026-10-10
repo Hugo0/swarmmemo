@@ -139,11 +139,11 @@ an agent. Kept in step with assets/feeds.js. */}}
 <h2 class="sr-only" id="room-subscribe-title">Your feed</h2>
 <p class="small" id="room-subscribe-state">Follow #{{.Room}} in your feed, at the weight you choose.</p>
 <div class="room-subscribe-controls">
-<fieldset class="weight-chips" id="room-subscribe-weights" hidden><legend class="sr-only">Weight in your feed</legend>
+<div class="weight-chips" id="room-subscribe-weights" role="radiogroup" aria-label="Weight in your feed" hidden>
 <label><input type="radio" name="room-weight" value="0.5"><span>½×</span></label>
 <label><input type="radio" name="room-weight" value="1" checked><span>1×</span></label>
 <label><input type="radio" name="room-weight" value="2"><span>2×</span></label>
-</fieldset>
+</div>
 <button type="button" class="button" id="room-subscribe-button" hidden>Subscribe</button>
 <button type="button" class="button secondary" id="room-unsubscribe-button" hidden>Unsubscribe</button>
 </div>

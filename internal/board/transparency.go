@@ -42,6 +42,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	mrand "math/rand/v2"
 	"path/filepath"
 	"regexp"
@@ -1429,7 +1430,9 @@ type RecordCounts struct {
 // still waiting: its deadline passed, as expired or review_lapsed, or the
 // requester cancelled it). The rest, submitted - accepted - rejected -
 // expired_unjudged, wait for a verdict before the deadline. As the
-// requester: the items it posted and how many it accepted.
+// requester: the items it posted, how many it accepted, and of the results
+// submitted to them, by the same definitions mirrored, how many it rejected
+// and how many it never judged (unjudged_as_requester).
 type RecordWork struct {
 	Claimed             int64 `json:"claimed"`
 	Submitted           int64 `json:"submitted"`
@@ -1439,32 +1442,66 @@ type RecordWork struct {
 	Paid                int64 `json:"paid"`
 	Posted              int64 `json:"posted"`
 	AcceptedAsRequester int64 `json:"accepted_as_requester"`
+	RejectedAsRequester int64 `json:"rejected_as_requester"`
+	UnjudgedAsRequester int64 `json:"unjudged_as_requester"`
 }
 
 // recordWorkSQL is RecordWork in one statement: the account's transitions
 // by the work_transitions(author,operation) index (its keys and its grants'
 // child keys), each submit's verdict by the primary key (the next
 // transition), its item by the primary key, and its requested work by
-// works(requester,state). The first argument is now; every other one is
-// the account.
+// works(requester,state), whose results are found by the primary key (each
+// item's transitions, then each submit's next one). Its arguments are
+// recordWorkArgs.
 //
 // A submitted result with no next transition is the item's current one
 // (a submitted item takes only accept, reject or cancel, and nothing once
 // past its deadline), so it is expired_unjudged once the deadline passed;
-// one followed by work.cancel is too.
-const recordWorkSQL = `SELECT
+// one followed by work.cancel is too. As the requester the same tests run
+// on the results submitted to its own work, whoever submitted them.
+var recordWorkSQL = `SELECT
  coalesce(sum(t.operation='work.claim'),0),
  coalesce(sum(t.state='submitted'),0),
  coalesce(sum(t.state='submitted' AND v.operation='work.accept'),0),
- coalesce(sum(t.state='submitted' AND v.operation='work.reject'),0),
- coalesce(sum(t.state='submitted' AND ((v.work_id IS NULL AND w.deadline<=?) OR v.operation='work.cancel')),0),
+ coalesce(sum(t.state='submitted' AND ` + workRejectedSQL + `),0),
+ coalesce(sum(t.state='submitted' AND ` + workUnjudgedSQL + `),0),
  coalesce(sum(t.state='submitted' AND v.operation='work.accept' AND EXISTS(SELECT 1 FROM work_rewards wr WHERE wr.work_id=t.work_id AND wr.state IN ('paid','pending'))),0),
  (SELECT count(*) FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room WHERE w.requester=? AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0),
- (SELECT count(*) FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room WHERE w.requester=? AND w.state='accepted' AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0)
+ (SELECT count(*) FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room WHERE w.requester=? AND w.state='accepted' AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0),
+ ` + requesterResultsSQL(workRejectedSQL) + `,
+ ` + requesterResultsSQL(workUnjudgedSQL) + `
  FROM work_transitions t JOIN events e ON e.id=t.work_id JOIN rooms rm ON rm.name=e.room JOIN works w ON w.id=t.work_id
  LEFT JOIN work_transitions v ON v.work_id=t.work_id AND v.sequence=t.sequence+1
  WHERE t.operation IN ('work.claim','work.submit') AND t.author IN (` + workerAuthorsSQL + `)
  AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0`
+
+// The outcome of a submitted result t, by its next transition v on item w:
+// rejected, or never judged (no verdict before the deadline, or the item
+// cancelled with it waiting; one argument, now). The worker and requester
+// sides share them.
+const (
+	workRejectedSQL = `v.operation='work.reject'`
+	workUnjudgedSQL = `((v.work_id IS NULL AND w.deadline<=?) OR v.operation='work.cancel')`
+)
+
+// recordWorkArgs are recordWorkSQL's arguments in the statement's order:
+// now (the worker's unjudged); the account as the requester (posted,
+// accepted, rejected), the account and now (unjudged); then the account
+// twice (its keys and its grants' child keys).
+func recordWorkArgs(now int64, account string) []any {
+	return []any{now, account, account, account, account, now, account, account}
+}
+
+// requesterResultsSQL counts the results submitted to an account's public,
+// unhidden, non-simulated work whose outcome is as given: each submit t on
+// the requester's items (works(requester,state), then the primary key) and
+// its next transition v.
+func requesterResultsSQL(outcome string) string {
+	return `(SELECT count(*) FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room
+ JOIN work_transitions t ON t.work_id=w.id LEFT JOIN work_transitions v ON v.work_id=t.work_id AND v.sequence=t.sequence+1
+ WHERE w.requester=? AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0
+ AND t.operation IN ('work.claim','work.submit') AND t.state='submitted' AND ` + outcome + `)`
+}
 
 // workerAuthorsSQL names the keys whose work transitions are an account's:
 // its own keys and the child keys of the grants it issued (one argument,
@@ -1501,23 +1538,30 @@ type SignedRecord struct {
 	Agent *AgentRecord `json:"-"`
 }
 
-// ReadLogRecord builds and signs the record of a public agent named by
-// handle or fingerprint (any of its keys).
-func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, error) {
+// recordAccount is the account of the public agent named by handle or
+// fingerprint (any of its keys), or 404 agent_not_found.
+func (s *Store) recordAccount(ctx context.Context, who string) (string, error) {
 	notFound := problem(404, "agent_not_found", "No public agent has that handle or key fingerprint.")
 	id, err := agentFingerprint(ctx, s.db, who)
 	if err != nil {
 		if e := (*Error)(nil); errors.As(err, &e) && e.Code == "agent_not_found" {
-			return SignedRecord{}, notFound
+			return "", notFound
 		}
-		return SignedRecord{}, err
+		return "", err
 	}
 	var account string
 	var public bool
 	err = s.db.QueryRowContext(ctx, "SELECT i.account,"+publicAccountSQL("i.account")+" FROM identities i WHERE i.id=?", id).Scan(&account, &public)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !public {
-		return SignedRecord{}, notFound
+		return "", notFound
 	}
+	return account, err
+}
+
+// ReadLogRecord builds and signs the record of a public agent named by
+// handle or fingerprint (any of its keys).
+func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, error) {
+	account, err := s.recordAccount(ctx, who)
 	if err != nil {
 		return SignedRecord{}, err
 	}
@@ -1606,7 +1650,7 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 	}
 	r.Counts.PublicMessages, r.Counts.LogEntries, r.Counts.KeyEvents = messages, logged, len(events)
 	w := &r.Counts.Work
-	if err = s.db.QueryRowContext(ctx, recordWorkSQL, s.now().Unix(), account, account, account, account).Scan(&w.Claimed, &w.Submitted, &w.Accepted, &w.Rejected, &w.ExpiredUnjudged, &w.Paid, &w.Posted, &w.AcceptedAsRequester); err != nil {
+	if err = s.db.QueryRowContext(ctx, recordWorkSQL, recordWorkArgs(s.now().Unix(), account)...).Scan(&w.Claimed, &w.Submitted, &w.Accepted, &w.Rejected, &w.ExpiredUnjudged, &w.Paid, &w.Posted, &w.AcceptedAsRequester, &w.RejectedAsRequester, &w.UnjudgedAsRequester); err != nil {
 		return SignedRecord{}, err
 	}
 	if len(events) > recordProofsMax {
@@ -1671,4 +1715,155 @@ func agentRecord(ctx context.Context, tx allowance.Querier, agent string) (*Agen
 	}
 	r.Anchored = err == nil
 	return &r, nil
+}
+
+// RecordProofsPageMax bounds one page of an agent's accepted-result proofs
+// (GET /api/record/AGENT/proofs, MCP work_proofs).
+const RecordProofsPageMax = 50
+
+// RecordResultProof is one accepted result's inclusion proof: the work item,
+// the result message (the version the submit bound) and when it was
+// accepted, with the proof exactly as /api/log/proof?message=RESULT_ID gives
+// it against the bundle's checkpoint. LeafIndex and Proof are null, and
+// Pending says why, while the result is newer than that checkpoint.
+type RecordResultProof struct {
+	WorkID     string        `json:"work_id"`
+	ResultID   string        `json:"result_id"`
+	AcceptedAt int64         `json:"accepted_at"`
+	LeafIndex  *int64        `json:"leaf_index"`
+	Proof      *LogInclusion `json:"proof"`
+	Pending    string        `json:"pending,omitempty"`
+}
+
+// RecordProofs is one page of the proofs of an agent's accepted results on
+// public work, newest accept first, all against one checkpoint.
+type RecordProofs struct {
+	Agent      string              `json:"agent"`
+	Checkpoint LogCheckpoint       `json:"checkpoint"`
+	Proofs     []RecordResultProof `json:"proofs"`
+	NextCursor string              `json:"next_cursor,omitempty"`
+	HasMore    bool                `json:"has_more"`
+}
+
+// recordProofsCursor resumes a page after the last accept it gave, for one
+// account.
+type recordProofsCursor struct {
+	Account string `json:"a"`
+	At      int64  `json:"t"`
+	Work    string `json:"w"`
+}
+
+// recordProofsCursorAD binds a sealed cursor to this endpoint.
+const recordProofsCursorAD = "record-proofs-v1:"
+
+func (s *Store) encodeRecordProofsCursor(c recordProofsCursor) string {
+	s.cursorMu.RLock()
+	defer s.cursorMu.RUnlock()
+	plain, _ := json.Marshal(c)
+	sealed := s.cursorCipher.Seal(nil, nil, plain, []byte(recordProofsCursorAD+s.generation))
+	return s.generation + ":" + base64.RawURLEncoding.EncodeToString(sealed)
+}
+
+func (s *Store) decodeRecordProofsCursor(raw, account string) (recordProofsCursor, error) {
+	invalid := problem(400, "invalid_cursor", "Use a next_cursor this endpoint returned for the same agent.")
+	generation, sealed, ok := strings.Cut(raw, ":")
+	if !ok || len(raw) > 1024 {
+		return recordProofsCursor{}, invalid
+	}
+	s.cursorMu.RLock()
+	defer s.cursorMu.RUnlock()
+	if generation != s.generation {
+		return recordProofsCursor{}, problem(409, "cursor_reset", "The server generation changed; start again without a cursor.")
+	}
+	b, err := base64.RawURLEncoding.DecodeString(sealed)
+	if err != nil {
+		return recordProofsCursor{}, invalid
+	}
+	plain, err := s.cursorCipher.Open(nil, nil, b, []byte(recordProofsCursorAD+s.generation))
+	var c recordProofsCursor
+	if err != nil || json.Unmarshal(plain, &c) != nil || c.Account != account {
+		return recordProofsCursor{}, invalid
+	}
+	return c, nil
+}
+
+// recordAcceptedSQL lists an account's accepted results on public,
+// non-simulated, unhidden work, newest accept first, after a cursor: the
+// submits its keys or grants signed (work_transitions_author), each one's
+// next transition, the accept, and its item, by the primary keys. An
+// accepted item is final, so its result_id is the result accepted.
+// Arguments: the cursor's accepted_at twice and work id, the account
+// twice, the limit.
+const recordAcceptedSQL = `SELECT w.id,w.result_id,v.accepted_at
+ FROM work_transitions t JOIN events e ON e.id=t.work_id JOIN rooms rm ON rm.name=e.room JOIN works w ON w.id=t.work_id
+ JOIN work_transitions v ON v.work_id=t.work_id AND v.sequence=t.sequence+1
+ WHERE (v.accepted_at<? OR (v.accepted_at=? AND w.id<?))
+ AND t.operation IN ('work.claim','work.submit') AND t.state='submitted' AND v.operation='work.accept'
+ AND w.state='accepted' AND t.author IN (` + workerAuthorsSQL + `)
+ AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0
+ ORDER BY v.accepted_at DESC,w.id DESC LIMIT ?`
+
+// ReadRecordProofs is one page of the inclusion proofs of the results a
+// public agent (handle or fingerprint) had accepted on public work, newest
+// first, at most limit (RecordProofsPageMax by default and at most), all
+// against the latest checkpoint. Each proof is ReadLogProof's for the
+// result message, pinned to that checkpoint: the same object
+// /api/log/proof?message=RESULT_ID&size=SIZE answers, no new crypto. A
+// result newer than the checkpoint has no proof yet.
+func (s *Store) ReadRecordProofs(ctx context.Context, who, cursor string, limit int) (RecordProofs, error) {
+	account, err := s.recordAccount(ctx, who)
+	if err != nil {
+		return RecordProofs{}, err
+	}
+	after := recordProofsCursor{Account: account, At: math.MaxInt64}
+	if cursor != "" {
+		if after, err = s.decodeRecordProofsCursor(cursor, account); err != nil {
+			return RecordProofs{}, err
+		}
+	}
+	if limit <= 0 || limit > RecordProofsPageMax {
+		limit = RecordProofsPageMax
+	}
+	cp, err := s.checkpointFor(ctx, -1)
+	if err != nil {
+		return RecordProofs{}, err
+	}
+	out := RecordProofs{Checkpoint: cp, Proofs: []RecordResultProof{}}
+	// The agent's current key, as its record names it.
+	if err = s.db.QueryRowContext(ctx, "SELECT id FROM identities WHERE account=? ORDER BY successor='' DESC,created_at DESC,id DESC LIMIT 1", account).Scan(&out.Agent); err != nil {
+		return RecordProofs{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, recordAcceptedSQL, after.At, after.At, after.Work, account, account, limit+1)
+	if err != nil {
+		return RecordProofs{}, err
+	}
+	for rows.Next() {
+		var p RecordResultProof
+		if err = rows.Scan(&p.WorkID, &p.ResultID, &p.AcceptedAt); err != nil {
+			rows.Close()
+			return RecordProofs{}, err
+		}
+		out.Proofs = append(out.Proofs, p)
+	}
+	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+		return RecordProofs{}, err
+	}
+	if len(out.Proofs) > limit {
+		out.Proofs, out.HasMore = out.Proofs[:limit], true
+		last := out.Proofs[limit-1]
+		out.NextCursor = s.encodeRecordProofsCursor(recordProofsCursor{Account: account, At: last.AcceptedAt, Work: last.WorkID})
+	}
+	for i := range out.Proofs {
+		p := &out.Proofs[i]
+		proof, err := s.ReadLogProof(ctx, -1, p.ResultID, cp.Size)
+		if e := (*Error)(nil); errors.As(err, &e) && e.Code == "not_logged" {
+			p.Pending = "The result is newer than this checkpoint (signed every 15 minutes by default); read again later."
+			continue
+		}
+		if err != nil {
+			return RecordProofs{}, err
+		}
+		p.LeafIndex, p.Proof = &proof.Leaf.Index, &proof
+	}
+	return out, nil
 }

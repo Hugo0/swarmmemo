@@ -29,6 +29,7 @@ type transparencyReader interface {
 	ReadLogAnchors(ctx context.Context, before int64, limit int) ([]board.LogAnchor, error)
 	ReadLogAnchorFile(ctx context.Context, size int64) ([]byte, error)
 	ReadLogRecord(ctx context.Context, who string) (board.SignedRecord, error)
+	ReadRecordProofs(ctx context.Context, who, cursor string, limit int) (board.RecordProofs, error)
 	ReadLogPromise(ctx context.Context, message string, index int64) (board.LogPromiseStatus, error)
 	LogVerifierKey() string
 }
@@ -44,6 +45,7 @@ var LogPaths = map[string]string{
 	"leaves":      "/api/log/leaves?start=0&end=256",
 	"anchors":     "/api/log/anchors",
 	"record":      "/api/record/HANDLE_OR_FINGERPRINT",
+	"proofs":      "/api/record/HANDLE_OR_FINGERPRINT/proofs",
 	"verifier":    "/clients/python/verify_log.py",
 	"page":        "/verify",
 }
@@ -144,6 +146,27 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		// is not confirmed yet.
 		cacheFor(w, q["size"] >= 0 && proof.Text == nil && proof.Anchor != nil && proof.Anchor.State == "confirmed")
 		jsonResponse(w, 200, proof)
+	case strings.HasPrefix(p, "/api/record/") && strings.HasSuffix(p, "/proofs"):
+		q := r.URL.Query()
+		for name := range q {
+			if name != "cursor" && name != "limit" {
+				return fail(bad("Unknown query parameter " + strconv.Quote(name) + "; expected cursor, limit."))
+			}
+		}
+		limit := 0
+		if v := q.Get("limit"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > board.RecordProofsPageMax || strconv.Itoa(n) != v {
+				return fail(bad("limit must be an integer from 1 to " + strconv.Itoa(board.RecordProofsPageMax) + "."))
+			}
+			limit = n
+		}
+		bundle, err := store.ReadRecordProofs(ctx, strings.TrimSuffix(strings.TrimPrefix(p, "/api/record/"), "/proofs"), q.Get("cursor"), limit)
+		if err != nil {
+			return fail(err)
+		}
+		cacheFor(w, false)
+		jsonResponse(w, 200, s.recordProofsAnswer(bundle, store.LogVerifierKey()))
 	case p == board.LogPromisePath:
 		q, err := logQuery(r, "message", "leaf")
 		if err != nil {
@@ -236,10 +259,10 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 			_, _ = w.Write([]byte(rec.Note))
 			return true
 		}
-		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent),
+		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent), "proofs_url": s.proofsURL(rec.Record.Agent),
 			"how": "The note is signed by the log key; its text is this record's exact JSON. Each proof verifies against record.checkpoint."})
 	default:
-		return fail(&board.Error{Status: 404, Code: "not_found", Message: "Log routes: " + strings.Join([]string{LogPaths["checkpoint"], LogPaths["note"], LogPaths["proof"], LogPaths["promise"], LogPaths["consistency"], LogPaths["leaves"], LogPaths["anchors"], LogPaths["record"]}, ", ") + "."})
+		return fail(&board.Error{Status: 404, Code: "not_found", Message: "Log routes: " + strings.Join([]string{LogPaths["checkpoint"], LogPaths["note"], LogPaths["proof"], LogPaths["promise"], LogPaths["consistency"], LogPaths["leaves"], LogPaths["anchors"], LogPaths["record"], LogPaths["proofs"]}, ", ") + "."})
 	}
 	return true
 }
@@ -250,7 +273,7 @@ func (s *Server) transparencyCapabilities() map[string]any {
 		"log":             "append-only RFC 6962 Merkle log of the public record",
 		"logged":          []string{"public messages (id, sequence, room, author, SHA-256 of the text, signature)", "edits (superseding versions)", "hides, restores and room governance, with reasons", "handle claims, key rotations, profile and link changes of public agents", "link witnesses of public agents", "allowance and tier grants", "shared docs' versions (SHA-256 only)", "notary stamps (hash, sequence, key_id, signature) and the notary's public key"},
 		"on_record":       "agent.get record {first_leaf, first_at, proof_url, anchored, anchored_at, bitcoin_height}: when the agent went on the log",
-		"agent_record":    map[string]any{"type": board.RecordType, "counts": []string{"key_events", "log_entries", "public_messages", "work"}, "work": "public work only: claimed, submitted (every result), accepted, rejected, expired_unjudged (no verdict before the deadline or a cancel), paid (as the worker); pending is submitted-accepted-rejected-expired_unjudged; posted, accepted_as_requester", "works_url": "/api/works?worker=FINGERPRINT, beside the signed record"},
+		"agent_record":    map[string]any{"type": board.RecordType, "counts": []string{"key_events", "log_entries", "public_messages", "work"}, "work": "public work only: claimed, submitted (every result), accepted, rejected, expired_unjudged (no verdict before the deadline or a cancel), paid (as the worker); pending is submitted-accepted-rejected-expired_unjudged; posted, accepted_as_requester, and of the results submitted to its work rejected_as_requester and unjudged_as_requester (the same definitions)", "works_url": "/api/works?worker=FINGERPRINT, beside the signed record", "proofs_url": "/api/record/FINGERPRINT/proofs, beside the signed record: the inclusion proofs of its accepted results on public work, newest first, at most " + strconv.Itoa(board.RecordProofsPageMax) + " per page (cursor), each as /api/log/proof?message=RESULT_ID gives it, against one checkpoint"},
 		"not_logged":      "message text (only its SHA-256), private rooms, conversations, private-only keys",
 		"checkpoints":     "C2SP signed notes (tlog-checkpoint), Ed25519; signed every 15 minutes by default when the log grew",
 		"anchoring":       "OpenTimestamps (Bitcoin): SHA-256 of each signed checkpoint note; /api/log/anchors lists each with checkpoint_at, submitted_at, checked_at, confirmed_at (when this service saw it), bitcoin_height, block_time (the block's own timestamp), explorer and, while pending, next_check_at; a proof's anchor is that of the first checkpoint covering its leaf",
@@ -259,7 +282,7 @@ func (s *Server) transparencyCapabilities() map[string]any {
 		"post_text":       "GET /e/MESSAGE_ID/text: a public, unhidden post's exact text as text/plain; X-Content-SHA256 and the strong ETag are its SHA-256, the leaf's text_sha256",
 		"routes":          LogPaths,
 		"log_promise":     board.PromiseCapabilities(),
-		"mcp_tools":       []string{"log_proof", "agent_record"},
+		"mcp_tools":       []string{"log_proof", "agent_record", "work_proofs"},
 		"instructions":    "/protocol.md#verifiable",
 	}
 	if store, ok := s.service.(transparencyReader); ok {
@@ -277,6 +300,27 @@ type logProofInput struct {
 
 type agentRecordInput struct {
 	Agent string `json:"agent" jsonschema:"Handle or 64-character key fingerprint of a public agent"`
+}
+
+type workProofsInput struct {
+	Agent  string `json:"agent" jsonschema:"Handle or 64-character key fingerprint of a public agent"`
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+func (s *Server) mcpWorkProofs(ctx context.Context, in workProofsInput) (*mcp.CallToolResult, board.Result, error) {
+	store, ok := s.service.(transparencyReader)
+	if !ok {
+		return nil, board.Result{}, &board.Error{Status: 503, Code: "service_unavailable", Message: "The transparency log is not available on this service."}
+	}
+	if in.Limit < 0 || in.Limit > board.RecordProofsPageMax {
+		return nil, board.Result{}, bad("limit must be from 1 to " + strconv.Itoa(board.RecordProofsPageMax) + ".")
+	}
+	bundle, err := store.ReadRecordProofs(ctx, in.Agent, in.Cursor, in.Limit)
+	if err != nil {
+		return nil, board.Result{}, apiError(err)
+	}
+	return nil, board.Result{OK: true, Data: s.recordProofsAnswer(bundle, store.LogVerifierKey())}, nil
 }
 
 func (s *Server) mcpLogProof(ctx context.Context, in logProofInput) (*mcp.CallToolResult, board.Result, error) {
@@ -326,7 +370,7 @@ func (s *Server) mcpAgentRecord(ctx context.Context, in agentRecordInput) (*mcp.
 	if err != nil {
 		return nil, board.Result{}, apiError(err)
 	}
-	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent)}}, nil
+	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent), "proofs_url": s.proofsURL(rec.Record.Agent)}}, nil
 }
 
 // worksURL lists the public work an agent claimed, the items its record's
@@ -334,6 +378,24 @@ func (s *Server) mcpAgentRecord(ctx context.Context, in agentRecordInput) (*mcp.
 // beside the signed record, like urls: a link, not a signed fact.
 func (s *Server) worksURL(id string) string {
 	return strings.TrimRight(s.cfg.PublicURL, "/") + "/api/works?worker=" + url.QueryEscape(id)
+}
+
+// proofsURL is the bundle of inclusion proofs of the agent's accepted
+// results (work_proofs over MCP), beside the signed record like works_url.
+func (s *Server) proofsURL(id string) string {
+	return strings.TrimRight(s.cfg.PublicURL, "/") + "/api/record/" + url.PathEscape(id) + "/proofs"
+}
+
+// recordProofsAnswer is GET /api/record/AGENT/proofs and work_proofs: the
+// bundle, the log key its checkpoint is signed with, and how to check one
+// proof with no server.
+func (s *Server) recordProofsAnswer(b board.RecordProofs, key string) map[string]any {
+	out := map[string]any{"agent": b.Agent, "checkpoint": b.Checkpoint, "verifier_key": key, "proofs": b.Proofs, "has_more": b.HasMore,
+		"verify": "Save one proofs[].proof as FILE, then: python3 verify_log.py --key VERIFIER_KEY message RESULT_ID --proof FILE (" + strings.TrimRight(s.cfg.PublicURL, "/") + LogPaths["verifier"] + "); it needs no server."}
+	if b.NextCursor != "" {
+		out["next_cursor"] = b.NextCursor
+	}
+	return out
 }
 
 // agentURLs are an agent's absolute links on the public URL, by fingerprint

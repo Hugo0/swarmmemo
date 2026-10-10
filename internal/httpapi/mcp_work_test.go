@@ -3,6 +3,9 @@ package httpapi
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"os"
+	osexec "os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -113,12 +116,58 @@ func TestHostedMCPWorkLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec :=mustTool(t, s, "/mcp", "", "agent_record", map[string]any{"agent": worker["agent"]})["data"].(map[string]any)
-	if got, want := dig(rec, "record", "counts", "work"), map[string]any{"claimed": 2.0, "submitted": 2.0, "accepted": 1.0, "rejected": 1.0, "expired_unjudged": 0.0, "paid": 0.0, "posted": 0.0, "accepted_as_requester": 0.0}; !reflect.DeepEqual(got, want) || dig(rec, "record", "type") != board.RecordType {
+	if got, want := dig(rec, "record", "counts", "work"), map[string]any{"claimed": 2.0, "submitted": 2.0, "accepted": 1.0, "rejected": 1.0, "expired_unjudged": 0.0, "paid": 0.0, "posted": 0.0, "accepted_as_requester": 0.0, "rejected_as_requester": 0.0, "unjudged_as_requester": 0.0}; !reflect.DeepEqual(got, want) || dig(rec, "record", "type") != board.RecordType {
 		t.Fatalf("agent_record counts.work: %v (type %v)", got, dig(rec, "record", "type"))
 	}
 	worksURL, _ := rec["works_url"].(string)
 	if !strings.HasSuffix(worksURL, "/api/works?worker="+worker["agent"].(string)) {
 		t.Fatalf("works_url: %q", worksURL)
+	}
+	// proofs_url (work_proofs over MCP) bundles the proofs of its accepted
+	// results (C139): the one accepted, as /api/log/proof gives it, which
+	// verify_log.py checks from the saved proof with no server.
+	proofsURL, _ := rec["proofs_url"].(string)
+	if proofsURL != "https://swarmmemo.com/api/record/"+worker["agent"].(string)+"/proofs" {
+		t.Fatalf("proofs_url: %q", proofsURL)
+	}
+	bundleGet := makeRequest(s, "GET", proofsURL[strings.Index(proofsURL, "/api/"):], "", "")
+	var bundle struct {
+		Agent       string `json:"agent"`
+		VerifierKey string `json:"verifier_key"`
+		Checkpoint  board.LogCheckpoint
+		HasMore     bool `json:"has_more"`
+		Proofs      []struct {
+			WorkID    string          `json:"work_id"`
+			ResultID  string          `json:"result_id"`
+			LeafIndex int64           `json:"leaf_index"`
+			Proof     json.RawMessage `json:"proof"`
+		} `json:"proofs"`
+	}
+	if err := json.Unmarshal(bundleGet.Body.Bytes(), &bundle); err != nil || bundleGet.Code != 200 || bundle.Agent != worker["agent"] || bundle.HasMore || len(bundle.Proofs) != 1 || bundle.Proofs[0].WorkID != id || bundle.Proofs[0].ResultID != result {
+		t.Fatalf("GET proofs_url: %d %s", bundleGet.Code, bundleGet.Body)
+	}
+	alone := makeRequest(s, "GET", "/api/log/proof?message="+result+"&size="+itoa(bundle.Checkpoint.Size), "", "")
+	if alone.Code != 200 || strings.TrimSpace(alone.Body.String()) != string(bundle.Proofs[0].Proof) {
+		t.Fatalf("the bundled proof is not /api/log/proof's:\n%s\n%s", bundle.Proofs[0].Proof, alone.Body)
+	}
+	if byMCP := mustTool(t, s, "/mcp", "", "work_proofs", map[string]any{"agent": "Work-Taker"})["data"].(map[string]any); len(byMCP["proofs"].([]any)) != 1 || dig(byMCP, "checkpoint", "size") != float64(bundle.Checkpoint.Size) {
+		t.Fatalf("work_proofs: %v", byMCP)
+	}
+	for path, code := range map[string]string{"/api/record/nobody-here/proofs": "agent_not_found", proofsURL[strings.Index(proofsURL, "/api/"):] + "?limit=51": "invalid_request", proofsURL[strings.Index(proofsURL, "/api/"):] + "?size=1": "invalid_request"} {
+		if w := makeRequest(s, "GET", path, "", ""); w.Code/100 != 4 || !strings.Contains(w.Body.String(), code) {
+			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body)
+		}
+	}
+	if python, err := osexec.LookPath("python3"); err == nil && osexec.Command(python, "-c", "import cryptography").Run() == nil {
+		file := filepath.Join(t.TempDir(), "proof.json")
+		if err = os.WriteFile(file, bundle.Proofs[0].Proof, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, err := osexec.Command(python, "-B", filepath.Join("..", "..", "clients", "python", "verify_log.py"),
+			"--base", "http://127.0.0.1:9", "--key", bundle.VerifierKey, "message", result, "--proof", file).CombinedOutput()
+		if err != nil || !strings.Contains(string(out), "OK text matches the logged SHA-256") {
+			t.Fatalf("verify_log.py on a bundled proof: %v\n%s\n%s", err, out, bundle.Proofs[0].Proof)
+		}
 	}
 	if listed := mustTool(t, s, "/mcp", "", "find_work", map[string]any{"worker": worker["agent"]})["data"].(map[string]any)["works"].([]any); len(listed) != 2 {
 		t.Fatalf("find_work worker: %v", listed)

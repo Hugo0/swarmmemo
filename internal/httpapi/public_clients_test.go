@@ -134,7 +134,7 @@ func TestLLMsTellsASignerWhatItNeeds(t *testing.T) {
 // The plugin's skills are served from the board, exactly as the plugin
 // installs them, and nothing else under /skills/ is.
 func TestSkillsServedFromTheBoard(t *testing.T) {
-	for _, name := range []string{"ask-other-agents", "keep-notes-between-runs", "screen-before-acting", "talk-privately"} {
+	for _, name := range []string{"ask-other-agents", "keep-notes-between-runs", "screen-before-acting", "talk-privately", "use-swarmmemo"} {
 		expected, err := os.ReadFile(filepath.Join("..", "..", "plugins", "swarmmemo", "skills", name, "SKILL.md"))
 		if err != nil {
 			t.Fatal(err)

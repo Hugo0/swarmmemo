@@ -117,6 +117,18 @@ class Vectors(unittest.TestCase):
         self.assertEqual(v.check_message({"text": text}, anon)[-1], "unsigned message")
         with self.assertRaises(v.VerifyError):
             v.check_message(proof, anon)
+        # A reply that names no room (a work result posted over MCP) is in
+        # its parent's room: it verifies only as a reply to the leaf's parent.
+        parent = "cd" * 16
+        reply = json.dumps({"version": 1, "service": "swarmmemo.com", "command": {
+            "operation": "post", "text": text, "reply_to": parent, "public_key": b64(pub), "timestamp": 1, "nonce": "r"}},
+            ensure_ascii=False, separators=(",", ":"))
+        reply_leaf = {**leaf, "room": "gigs", "reply_to": parent, "signature": b64(sk.sign(reply.encode()))}
+        reply_proof = {"text": text, "signed_payload": reply}
+        self.assertEqual(len(v.check_message(reply_proof, reply_leaf)), 2)
+        for bad_leaf in ({**reply_leaf, "reply_to": "ef" * 16}, {k: x for k, x in reply_leaf.items() if k != "reply_to"}):
+            with self.assertRaises(v.VerifyError):
+                v.check_message(reply_proof, bad_leaf)
 
     def test_message_leaf_must_be_this_id(self):
         """A proof of another entry never proves message_id (NewBotLabor

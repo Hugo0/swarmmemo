@@ -3,6 +3,7 @@ package board
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -88,6 +89,12 @@ func TestRecordWorkHistory(t *testing.T) {
 	if got, want := record(worker), (RecordWork{Claimed: 7, Submitted: 6, Accepted: 2, Rejected: 1, ExpiredUnjudged: 1, Paid: 1}); got != want {
 		t.Fatalf("worker's counts.work before the deadline %+v, want %+v", got, want)
 	}
+	// The requester's side mirrors it (C138): of the results submitted to its
+	// work, one rejected (retried's first), one cancelled while it waited;
+	// the lapsing one is not unjudged yet.
+	if got, want := record(owner), (RecordWork{Posted: 6, AcceptedAsRequester: 2, RejectedAsRequester: 1, UnjudgedAsRequester: 1}); got != want {
+		t.Fatalf("requester's counts.work before the deadline %+v, want %+v", got, want)
+	}
 	now := s.now().Unix() + 121
 	s.now = func() time.Time { return time.Unix(now, 0) }
 	if state := getTestWork(t, s, lapsed).State; state != "expired" {
@@ -98,7 +105,7 @@ func TestRecordWorkHistory(t *testing.T) {
 	if got, want := record(worker), (RecordWork{Claimed: 7, Submitted: 6, Accepted: 2, Rejected: 1, ExpiredUnjudged: 2, Paid: 1}); got != want {
 		t.Fatalf("worker's counts.work %+v, want %+v", got, want)
 	}
-	if got, want := record(owner), (RecordWork{Posted: 6, AcceptedAsRequester: 2}); got != want {
+	if got, want := record(owner), (RecordWork{Posted: 6, AcceptedAsRequester: 2, RejectedAsRequester: 1, UnjudgedAsRequester: 2}); got != want {
 		t.Fatalf("requester's counts.work %+v, want %+v", got, want)
 	}
 	if got := record(idle); got != (RecordWork{}) {
@@ -106,7 +113,7 @@ func TestRecordWorkHistory(t *testing.T) {
 	}
 
 	// One statement, by the schema-23 indexes, never a scan of every transition.
-	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+recordWorkSQL, 0, "a", "a", "a", "a")
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+recordWorkSQL, recordWorkArgs(0, "a")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,5 +223,150 @@ func TestRecordWorkHistory(t *testing.T) {
 	}
 	if got := list(Command{Operation: "works.list", Data: `{"schema":1,"worker":"RECORD-WORKER"}`, Limit: 1}); !slices.Equal(got, want) {
 		t.Fatalf("works.list worker by handle: %v, want %v", got, want)
+	}
+}
+
+// The proofs bundle (C139): the inclusion proofs of an agent's accepted
+// results on public work, newest first, paged, each the very proof
+// ReadLogProof gives for the result message against the bundle's
+// checkpoint, verifying with the log key. Rejected, private and hidden
+// work stay out; a result newer than the checkpoint waits, without a proof.
+func TestRecordProofsBundle(t *testing.T) {
+	s := openTest(t, Config{})
+	owner, worker, idle := keyFor(230), keyFor(231), keyFor(232)
+	register(t, s, owner)
+	register(t, s, worker)
+	register(t, s, idle)
+	clock := s.now().Unix()
+	s.now = func() time.Time { return time.Unix(clock, 0) }
+	accept := func(room string) (work, result string) {
+		t.Helper()
+		work = createTestWork(t, s, owner, room, "request", 0)
+		result = workResult(t, s, worker, work, room)
+		ack := run(t, s, workCommand(s, worker, Command{Operation: "work.claim", MessageID: work, Target: result})).Data["ack"].(WorkAck)
+		clock++ // each accept a second after the last
+		run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: work, Amount: ack.Fence}))
+		return work, result
+	}
+	type pair struct{ work, result string }
+	var want []pair // newest first
+	for range 3 {
+		w, r := accept("lobby")
+		want = append([]pair{{w, r}}, want...)
+	}
+	// Rejected only: never in the bundle.
+	rejected := createTestWork(t, s, owner, "lobby", "request", 0)
+	fence := claimAndSubmit(t, s, worker, rejected, "lobby")
+	run(t, s, workCommand(s, owner, Command{Operation: "work.reject", MessageID: rejected, Amount: fence, Reason: "no"}))
+	// Private and hidden work, accepted: never in the bundle.
+	run(t, s, signed(owner, Command{Operation: "room.create", Room: "proofs-private", Visibility: "private", Members: []string{keyID(worker)}, Timestamp: s.now().Unix()}))
+	accept("proofs-private")
+	hidden, _ := accept("lobby")
+	if _, err := s.db.Exec("UPDATE events SET hidden=1 WHERE id=?", hidden); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SignCheckpoint(testContext); err != nil {
+		t.Fatal(err)
+	}
+	// Accepted after the checkpoint: listed first, its proof pending.
+	late, lateResult := accept("lobby")
+
+	var got []RecordResultProof
+	var cp LogCheckpoint
+	cursor, pages := "", 0
+	for {
+		page, err := s.ReadRecordProofs(testContext, keyID(worker), cursor, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if page.Agent != keyID(worker) || len(page.Proofs) > 2 || page.HasMore != (page.NextCursor != "") {
+			t.Fatalf("page %d: %+v", pages, page)
+		}
+		if pages > 0 && page.Checkpoint.Size != cp.Size {
+			t.Fatalf("checkpoint moved between pages: %d, %d", cp.Size, page.Checkpoint.Size)
+		}
+		cp = page.Checkpoint
+		got, pages = append(got, page.Proofs...), pages+1
+		if !page.HasMore {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if pages != 2 || len(got) != 4 {
+		t.Fatalf("%d pages, %d proofs: %+v", pages, len(got), got)
+	}
+	if got[0].WorkID != late || got[0].ResultID != lateResult || got[0].Proof != nil || got[0].LeafIndex != nil || got[0].Pending == "" {
+		t.Fatalf("the result newer than the checkpoint: %+v", got[0])
+	}
+	body := verifyCheckpoint(t, s, cp)
+	for i, p := range got[1:] {
+		if p.WorkID != want[i].work || p.ResultID != want[i].result || p.Proof == nil || p.LeafIndex == nil || *p.LeafIndex != p.Proof.Leaf.Index || p.Pending != "" {
+			t.Fatalf("proof %d: %+v, want %+v", i, p, want[i])
+		}
+		if p.AcceptedAt > got[i].AcceptedAt {
+			t.Fatalf("not newest first: %d after %d", p.AcceptedAt, got[i].AcceptedAt)
+		}
+		// The leaf is the result message's, and the proof verifies.
+		var leaf logLeaf
+		if json.Unmarshal([]byte(p.Proof.Leaf.Data), &leaf) != nil || leaf.ID != p.ResultID || p.Proof.Leaf.Kind != "message" {
+			t.Fatalf("proof %d proves leaf %s", i, p.Proof.Leaf.Data)
+		}
+		verifyInclusion(t, s, *p.Proof, body)
+		if p.Proof.Checkpoint.Note != cp.Note || p.Proof.Text == nil {
+			t.Fatalf("proof %d: checkpoint %d, text %v", i, p.Proof.Checkpoint.Size, p.Proof.Text)
+		}
+		// The same object /api/log/proof?message=RESULT_ID&size=SIZE gives.
+		alone, err := s.ReadLogProof(testContext, -1, p.ResultID, cp.Size)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, _ := json.Marshal(alone)
+		b, _ := json.Marshal(*p.Proof)
+		if string(a) != string(b) {
+			t.Fatalf("proof %d differs from /api/log/proof:\n%s\n%s", i, b, a)
+		}
+	}
+
+	// An agent with no accepted work has an empty bundle; the requester too.
+	for _, k := range []ed25519.PrivateKey{idle, owner} {
+		if page, err := s.ReadRecordProofs(testContext, keyID(k), "", 0); err != nil || len(page.Proofs) != 0 || page.HasMore {
+			t.Fatalf("empty bundle: %+v %v", page, err)
+		}
+	}
+	// A cursor pages only the agent it was given for.
+	first, err := s.ReadRecordProofs(testContext, keyID(worker), "", 1)
+	if err != nil || first.NextCursor == "" {
+		t.Fatalf("first page: %+v %v", first, err)
+	}
+	for _, c := range []struct{ who, cursor, code string }{
+		{keyID(idle), first.NextCursor, "invalid_cursor"},
+		{keyID(worker), "nope", "invalid_cursor"},
+		{keyID(worker), s.generation + ":AAAA", "invalid_cursor"},
+		{"nobody-here", "", "agent_not_found"},
+	} {
+		_, err := s.ReadRecordProofs(testContext, c.who, c.cursor, 1)
+		if e := (*Error)(nil); !errors.As(err, &e) || e.Code != c.code {
+			t.Fatalf("%s %q: %v, want %s", c.who, c.cursor, err, c.code)
+		}
+	}
+
+	// One indexed statement: the account's transitions by
+	// work_transitions_author, never a scan.
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+recordAcceptedSQL, 1, 1, "", "a", "a", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err = rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	rows.Close()
+	if joined := strings.Join(plan, "\n"); !strings.Contains(joined, "work_transitions_author") || strings.Contains(joined, "SCAN ") {
+		t.Fatalf("accepted results plan:\n%s", joined)
 	}
 }

@@ -1037,9 +1037,10 @@ code.link-value{font-size:var(--t-meta)}
 .room-moderators a,.room-people dd>a{display:inline-flex;align-items:center;min-height:var(--quiet-h)}
 .room-sidebar .room-subscribe{max-width:none;margin:0;padding:0;border:0}
 .room-sidebar .room-subscribe-controls{gap:var(--s-2);margin-top:var(--s-3)}
-.room-sidebar .weight-chips{gap:0;border:1px solid var(--field-border-strong);border-radius:999px;overflow:hidden}
-.room-sidebar .weight-chips label{min-height:var(--control-h);padding:0 var(--s-3);border:0;border-radius:0}
-.room-sidebar .weight-chips label+label{border-left:1px solid var(--field-border-strong)}
+.room-sidebar .room-subscribe-controls{align-items:center}
+/* One segmented control, the height of the button beside it: a rounded track, a rounded thumb. */
+.room-sidebar .weight-chips{display:inline-flex;align-items:stretch;gap:2px;height:var(--control-h);box-sizing:border-box;padding:2px;border:1px solid var(--field-border-strong);border-radius:999px}
+.room-sidebar .weight-chips label{box-sizing:border-box;height:100%;min-height:0;justify-content:center;min-width:2.75em;padding:0 var(--s-3);border:0;border-radius:999px}
 .room-sidebar #room-subscribe-status:empty{display:none}
 .room-sidebar #room-subscribe-status{margin-top:var(--s-2)}
 .room-subscribe-agent{margin-top:var(--s-3);font-size:var(--t-meta)}

@@ -252,8 +252,8 @@ func TestPluginPackage(t *testing.T) {
 	}
 	type server struct{ Type, URL string }
 	var portable struct {
-		Schema string `json:"$schema"`
-		Name   string
+		Schema                     string `json:"$schema"`
+		Name, Version, Description string
 	}
 	var mcpConfig struct {
 		Schema     string `json:"$schema"`
@@ -284,6 +284,60 @@ func TestPluginPackage(t *testing.T) {
 	}
 	if cursor.Version != claude.Version || cursor.Description != claude.Description || cursor.Description == "" {
 		t.Errorf("the Cursor and Claude manifests disagree: %+v %+v", cursor, claude)
+	}
+	if portable.Version != claude.Version || portable.Description != claude.Description {
+		t.Errorf("plugin.json and the Claude manifest disagree: %+v %+v", portable, claude)
+	}
+	// Codex reads extensions.com.openai in plugin.json; .codex-plugin is its
+	// fallback, and the one awesome-codex-plugins mirrors (with the files its
+	// skills, mcpServers and interface fields name, LICENSE, SECURITY.md and
+	// .codexignore). Same metadata and listing, same server, no hooks.
+	var codex struct {
+		Name, Version, Description string
+		License, Repository        string
+		Skills, MCPServers         string
+		Interface                  map[string]any
+	}
+	read(".codex-plugin/plugin.json", &codex)
+	var codexMCP struct{ MCPServers map[string]server }
+	read(strings.TrimPrefix(codex.MCPServers, "./"), &codexMCP)
+	if codex.Name != portable.Name || codex.Version != claude.Version || codex.Description != claude.Description || codex.License != "Apache-2.0" || codex.Repository != "https://github.com/Hugo0/swarmmemo" || codex.Skills != "./skills/" {
+		t.Errorf(".codex-plugin/plugin.json disagrees with the other manifests: %+v", codex)
+	}
+	if got := codexMCP.MCPServers["swarmmemo"]; len(codexMCP.MCPServers) != 1 || got.URL != url || got.Type != "http" {
+		t.Errorf("%s: %+v", codex.MCPServers, codexMCP.MCPServers)
+	}
+	var portableInterface struct {
+		Extensions struct {
+			OpenAI struct{ Interface map[string]any } `json:"com.openai"`
+		}
+	}
+	read("plugin.json", &portableInterface)
+	if !reflect.DeepEqual(codex.Interface, portableInterface.Extensions.OpenAI.Interface) || codex.Interface["shortDescription"] != web.Tagline {
+		t.Errorf("the Codex fallback's interface differs from plugin.json's or its shortDescription is not the tagline: %v", codex.Interface)
+	}
+	for _, key := range []string{"composerIcon", "logo"} {
+		if icon, _ := codex.Interface[key].(string); !strings.HasPrefix(icon, "./assets/") {
+			t.Errorf("interface.%s %q", key, icon)
+		} else if _, err := os.Stat(filepath.Join(root, icon)); err != nil {
+			t.Errorf("interface.%s: %v", key, err)
+		}
+	}
+	for _, name := range []string{"plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json", ".cursor-plugin/plugin.json"} {
+		var raw map[string]any
+		read(name, &raw)
+		extensions, _ := raw["extensions"].(map[string]any)
+		if openai, _ := extensions["com.openai"].(map[string]any); raw["hooks"] != nil || openai["hooks"] != nil {
+			t.Errorf("%s declares lifecycle hooks", name)
+		}
+	}
+	for _, name := range []string{"hooks", "SECURITY.md", ".codexignore"} {
+		if _, err := os.Stat(filepath.Join(root, name)); (err == nil) != (name != "hooks") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if !published["plugins/swarmmemo/LICENSE"] {
+		t.Error("the public snapshot does not copy LICENSE into plugins/swarmmemo")
 	}
 	var openai struct {
 		Extensions struct {
@@ -329,7 +383,7 @@ func TestPluginPackage(t *testing.T) {
 	frontmatter := regexp.MustCompile(`(?s)\A---\nname: ([^\n]+)\ndescription: ([^\n]+)\n---\n`)
 	tool := regexp.MustCompile("`([a-z]+_[a-z_]+)`")
 	skills, _ := filepath.Glob(filepath.Join(root, "skills", "*", "SKILL.md"))
-	if len(skills) != 4 {
+	if len(skills) != 5 {
 		t.Fatalf("skills: %v", skills)
 	}
 	for _, path := range skills {
@@ -341,7 +395,7 @@ func TestPluginPackage(t *testing.T) {
 			continue
 		}
 		for _, name := range tool.FindAllStringSubmatch(text, -1) {
-			if _, ok := assistant[name[1]]; !ok && !slices.Contains([]string{"reply_to", "message_id", "max_cost", "next_cursor"}, name[1]) {
+			if _, ok := assistant[name[1]]; !ok && !slices.Contains([]string{"reply_to", "message_id", "max_cost", "next_cursor", "request_id"}, name[1]) {
 				t.Errorf("%s names %s, which the assistant profile does not register", path, name[1])
 			}
 		}
