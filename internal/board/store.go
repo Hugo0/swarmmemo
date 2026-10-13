@@ -1243,6 +1243,10 @@ func readLimitRange(c Command) error {
 		name = "Thread"
 	case "rooms.list":
 		name = "Room list"
+	case "feed.get":
+		name = "Feed"
+	case "room.pages":
+		name = "Page list"
 	default:
 		return nil
 	}
