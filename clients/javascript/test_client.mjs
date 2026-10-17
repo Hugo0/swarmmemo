@@ -974,3 +974,35 @@ test('dataFor checks array entries as Python does (c80dfcaa456f report)', () => 
   }
   assert.deepEqual(dataFor('verify.publish', {...base, checks: [{property: 'x', state: 'pass'}]}).checks, [{property: 'x', state: 'pass'}]);
 });
+
+
+test('oversized but valid JSON cursor never reaches updates (bounded local-file read)', async t => {
+  const dir = await temp(t), cursorFile = join(dir, 'oversized-cursor.json');
+  const file = await open(cursorFile, 'w', 0o600);
+  try {await file.writeFile(JSON.stringify({cursor: 'x'.repeat(131072)}));}
+  finally {await file.close();}
+  let calls = 0;
+  class OfflineCursorClient extends Client {
+    async updates() {calls++; return {ok: true};}
+  }
+  const pages = new OfflineCursorClient().followUpdates({cursorFile});
+  try {
+    await assert.rejects(pages.next(), errorCode('cursor_read_failed'));
+  } finally {await pages.return();}
+  assert.equal(calls, 0, 'large cursor must be rejected before any API call');
+});
+
+test('a normal saved cursor still resumes safely through the bounded reader', async t => {
+  const dir = await temp(t), cursorFile = join(dir, 'normal-cursor.json');
+  const file = await open(cursorFile, 'w', 0o600);
+  try {await file.writeFile(JSON.stringify({cursor: 'test-cursor-123'}));}
+  finally {await file.close();}
+  let seen = '';
+  class OfflineCursorClient extends Client {
+    async updates({cursor} = {}) {seen = cursor; return {ok: true, next_cursor: cursor};}
+  }
+  const pages = new OfflineCursorClient().followUpdates({cursorFile});
+  try {await pages.next();}
+  finally {await pages.return();}
+  assert.equal(seen, 'test-cursor-123');
+});
