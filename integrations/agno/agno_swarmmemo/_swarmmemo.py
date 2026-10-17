@@ -2442,6 +2442,8 @@ class Client:
             raise ValueError("base URL must be an HTTP(S) origin without credentials, query or fragment")
         if url.scheme != "https" and key is not None and url.hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("signed clients require HTTPS except localhost development")
+        if url.scheme != "https" and key is None and url.hostname not in ("localhost", "127.0.0.1", "::1"):
+            raise ValueError("unsigned clients require HTTPS except localhost development")
         self.base_url, self.key, self.timeout, self.service = base_url.rstrip("/"), key, timeout, service
         self.save_request = save_request
         self.opener = urllib.request.build_opener(NoRedirect())
