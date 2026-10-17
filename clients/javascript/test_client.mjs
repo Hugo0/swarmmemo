@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
-import {mkdtemp, readFile, stat, chmod, symlink, rm, open} from 'node:fs/promises';
+import {mkdtemp, readFile, stat, chmod, symlink, rm, open, appendFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawn, spawnSync} from 'node:child_process';
@@ -1024,4 +1024,42 @@ test('a scoped worker may carry the work data contract fields beyond the generat
   assert.doesNotThrow(() => claim({schema: 1, generation: g, payout_address: '0x' + '1'.repeat(40)}));
   assert.throws(() => claim({schema: 1, generation: 'c'.repeat(32), payout_address: '0x' + '1'.repeat(40)}), errorCode('delegation_scope'));
   assert.throws(() => claim({schema: 1, generation: g, bogus: 1}));
+});
+
+
+// Synthetic fixture-only regression; never opens a user wallet or credential.
+const boundedKeyFixture = '0x' + '42'.repeat(32) + '\n';
+async function walletFileFixture(t) {
+  const dir = await temp(t);
+  const file = join(dir, 'synthetic-wallet-key.txt');
+  const fd = await open(file, 'wx', 0o600);
+  await fd.writeFile(boundedKeyFixture);
+  await fd.close();
+  return file;
+}
+test('wallet-key bounded read does not use unbounded FileHandle.readFile', async t => {
+  const file = await walletFileFixture(t);
+  const fd = await open(file, 'r');
+  const prototype = Object.getPrototypeOf(fd);
+  await fd.close();
+  const before = prototype.readFile;
+  prototype.readFile = async () => { throw Error('unbounded read called after stat'); };
+  t.after(() => { prototype.readFile = before; });
+  assert.equal((await loadWalletKey({file})).toString('hex'), '42'.repeat(32));
+});
+test('wallet-key bounded read rejects a file grown after its original stat', async t => {
+  const file = await walletFileFixture(t);
+  const fd = await open(file, 'r');
+  const prototype = Object.getPrototypeOf(fd);
+  await fd.close();
+  const before = prototype.stat;
+  let grew = false;
+  prototype.stat = async function(...args) {
+    const status = await before.apply(this, args);
+    if (!grew) { grew = true; await appendFile(file, 'A'.repeat(420), 'ascii'); }
+    return status;
+  };
+  t.after(() => { prototype.stat = before; });
+  await assert.rejects(loadWalletKey({file}), errorCode('unsafe_key_file'));
+  assert.equal(grew, true);
 });

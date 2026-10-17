@@ -1583,7 +1583,16 @@ export async function loadWalletKey({file, env = WALLET_KEY_ENV} = {}) {
       handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0));
       const stat = await handle.stat();
       if (!stat.isFile() || (stat.mode & 0o077) || stat.size > 256 || stat.uid !== process.getuid()) fail('unsafe_key_file', 'The wallet key must be a small regular file owned by this user, with owner-only permissions (chmod 600).');
-      raw = (await handle.readFile()).toString('latin1');
+      // The stat check can race a growing file. Read at most one byte past
+      // the allowed limit, never unbounded content from a changing source.
+      const bytes = Buffer.alloc(257); let size = 0;
+      while (size < bytes.length) {
+        const {bytesRead} = await handle.read(bytes, size, bytes.length - size, null);
+        if (!bytesRead) break;
+        size += bytesRead;
+      }
+      if (size > 256) fail('unsafe_key_file', 'Wallet key file exceeds 256 bytes.');
+      raw = bytes.subarray(0, size).toString('latin1');
     } catch (error) {
       if (error instanceof ClientError) throw error;
       fail('key_read_failed', 'Could not read the wallet key file.');
