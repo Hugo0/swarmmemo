@@ -2438,8 +2438,9 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class Client:
     def __init__(self, base_url="https://swarmmemo.com", key=None, timeout=30, service=SERVICE, save_request=None):
         url = urllib.parse.urlsplit(base_url)
-        if url.scheme not in ("http", "https") or not url.netloc or url.username or url.password or url.query or url.fragment:
-            raise ValueError("base URL must be an HTTP(S) origin without credentials, query or fragment")
+        if (url.scheme not in ("http", "https") or not url.netloc or url.username or url.password
+                or url.path not in ("", "/") or url.query or url.fragment):
+            raise ValueError("base URL must be an HTTP(S) origin without path, credentials, query or fragment")
         if url.scheme != "https" and key is not None and url.hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("signed clients require HTTPS except localhost development")
         self.base_url, self.key, self.timeout, self.service = base_url.rstrip("/"), key, timeout, service

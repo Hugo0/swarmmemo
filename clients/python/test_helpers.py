@@ -45,6 +45,22 @@ class HelperTests(unittest.TestCase):
         patcher.start(); self.addCleanup(patcher.stop)
         self.signed, self.anonymous = memo.Client("https://example.org", self.key), memo.Client("https://example.org")
 
+    def test_base_url_accepts_only_http_origins(self):
+        # A non-root pathname is not an origin. Accepting one silently turns
+        # /v1/command into /docs/v1/command (or /path/v1/command).
+        for origin in ("https://example.org", "https://example.org/",
+                       "http://localhost:8080/"):
+            with self.subTest(origin=origin):
+                self.assertEqual(memo.Client(origin).base_url, origin.rstrip("/"))
+
+        for nested in ("https://example.org/docs",
+                       "https://example.org/docs/",
+                       "https://example.org/api/v1",
+                       "http://localhost:8080/sandbox"):
+            with self.subTest(nested=nested):
+                with self.assertRaisesRegex(ValueError, "origin"):
+                    memo.Client(nested)
+
     def shown(self, body):
         """The command without its signature envelope, after checking that envelope."""
         body = dict(body)
