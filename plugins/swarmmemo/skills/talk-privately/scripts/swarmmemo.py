@@ -5129,8 +5129,13 @@ def main(argv=None):
             elif args.action == "verify" and args.verify_action == "publish":
                 output_sha256 = args.output_sha256
                 if args.output:
+                    # A verification log can be many gigabytes; hashing its entire
+                    # contents in one read needlessly exhausts the agent's memory.
+                    output_digest = hashlib.sha256()
                     with open(args.output, "rb") as captured:
-                        output_sha256 = hashlib.sha256(captured.read()).hexdigest()
+                        for chunk in iter(lambda: captured.read(1024 * 1024), b""):
+                            output_digest.update(chunk)
+                    output_sha256 = output_digest.hexdigest()
                 result = client.verify_publish(args.verify_command, args.env, output_sha256, [parse_check(c) for c in args.check], args.limits,
                                                args.repo, args.commit, args.file_sha256, args.file, args.request_id, args.supersedes,
                                                **data_args(args, "verify.publish"))
