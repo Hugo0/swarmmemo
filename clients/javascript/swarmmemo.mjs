@@ -2,7 +2,7 @@
 // Importing this module does no I/O.
 import {createECDH, createHash, createHmac, createPrivateKey, createPublicKey, randomBytes, randomUUID, sign, verify} from 'node:crypto';
 import {constants} from 'node:fs';
-import {open, readFile, rename} from 'node:fs/promises';
+import {open, rename} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 
 // BEGIN GENERATED: CONTRACT (go generate ./internal/clientcontract)
@@ -1704,9 +1704,27 @@ function verifyCommand(command, service) {
 const QUOTE_CEILING = LIMITS.call_default_max_cost;
 // The updates cursor file, shared with the Python client: {"cursor":...},
 // owner-only, replaced atomically.
+const CURSOR_FILE_MAX_BYTES = 65536;
 async function readCursor(path) {
-  let raw, value;
-  try { raw = await readFile(path, 'utf8'); } catch (error) { if (error?.code === 'ENOENT') return ''; fail('cursor_read_failed', 'Could not read the cursor file.'); }
+  let raw, value, file;
+  try {
+    file = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK || 0));
+    const pieces = []; let size = 0;
+    // Stop after one sentinel byte beyond the maximum. This stays bounded
+    // even if another process grows the cursor file while the client reads it.
+    while (size <= CURSOR_FILE_MAX_BYTES) {
+      const next = Buffer.alloc(Math.min(8192, CURSOR_FILE_MAX_BYTES + 1 - size));
+      const {bytesRead} = await file.read(next, 0, next.length, null);
+      if (!bytesRead) break;
+      pieces.push(next.subarray(0, bytesRead)); size += bytesRead;
+    }
+    if (size > CURSOR_FILE_MAX_BYTES) fail('cursor_read_failed', 'Cursor file exceeds 65536 bytes.');
+    raw = Buffer.concat(pieces, size).toString('utf8');
+  } catch (error) {
+    if (error instanceof ClientError) throw error;
+    if (error?.code === 'ENOENT') return '';
+    fail('cursor_read_failed', 'Could not read the cursor file.');
+  } finally { await file?.close().catch(() => {}); }
   try { value = JSON.parse(raw); } catch (_) { fail('cursor_read_failed', 'The cursor file is not JSON.'); }
   if (!value || typeof value !== 'object' || Array.isArray(value) || (value.cursor !== undefined && typeof value.cursor !== 'string')) fail('cursor_read_failed', 'The cursor file holds {"cursor": STRING}.');
   return value.cursor || '';

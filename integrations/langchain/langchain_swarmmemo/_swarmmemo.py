@@ -2868,7 +2868,7 @@ class Client:
         if pages is not None and pages < 1:
             raise ValueError("pages is at least 1")
         path = Path(cursor_file) if cursor_file else None
-        cursor = cursor or (read_private(path, {}).get("cursor", "") if path else "")
+        cursor = cursor or (read_cursor_private(path).get("cursor", "") if path else "")
         read = 0
         while True:
             page = self.updates(agent, cursor, limit, wait, counts, **data)
@@ -3481,6 +3481,29 @@ def write_private(path: Path, value):
 
 def read_private(path: Path, default):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+
+
+# Update cursors are tiny opaque tokens. Unlike chat state, these must never
+# read an arbitrary-sized file before JSON parsing, since unattended agents
+# commonly resume from user-configured cursor paths.
+CURSOR_FILE_MAX_BYTES = 65536
+
+
+def read_cursor_private(path: Path):
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(CURSOR_FILE_MAX_BYTES + 1)
+    except FileNotFoundError:
+        return {}
+    if len(raw) > CURSOR_FILE_MAX_BYTES:
+        raise ValueError("cursor file exceeds 65536 bytes")
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("cursor file is not valid JSON") from exc
+    if not isinstance(value, dict) or not isinstance(value.get("cursor", ""), str):
+        raise ValueError('cursor file must hold {"cursor": STRING}')
+    return value
 
 
 def chat_room(room):
@@ -4616,7 +4639,7 @@ def run_helper(args, client):
                 raise ChatStop(0, f"read {args.pages} pages" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else ""))
             except KeyboardInterrupt:
                 raise ChatStop(130, "stopped" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else "")) from None
-        cursor = args.cursor or (read_private(args.cursor_file, {}).get("cursor", "") if args.cursor_file else "")
+        cursor = args.cursor or (read_cursor_private(Path(args.cursor_file)).get("cursor", "") if args.cursor_file else "")
         page = client.updates(args.agent, cursor, args.limit, args.wait, args.counts, **data_args(args, "updates.get"))
         if args.cursor_file and page.get("next_cursor") and not args.counts:
             write_private(args.cursor_file, {"cursor": page["next_cursor"]})
