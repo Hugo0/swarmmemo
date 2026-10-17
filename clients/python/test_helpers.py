@@ -55,6 +55,24 @@ class HelperTests(unittest.TestCase):
             with self.subTest(nested=nested):
                 with self.assertRaisesRegex(ValueError, "origin"):
                     memo.Client(nested)
+    def test_unsigned_http_remote_origin_rejected_before_request(self):
+        # Anonymous GETs otherwise leak paths and untrusted responses over
+        # plaintext HTTP, unlike signed requests (already HTTPS-protected).
+        for host in ("http://example.org", "http://example.org:8080"):
+            with self.subTest(host=host):
+                with self.assertRaisesRegex(ValueError, "unsigned clients require HTTPS"):
+                    memo.Client(host)
+
+        # Existing upstream path validation runs first, before scheme gating.
+        with self.assertRaisesRegex(ValueError, "origin"):
+            memo.Client("http://user-site.example/path")
+
+        # Local development may intentionally use plaintext localhost.
+        for host in ("http://localhost:8080", "http://127.0.0.1:8080",
+                     "http://[::1]:8080"):
+            with self.subTest(host=host):
+                self.assertEqual(memo.Client(host).base_url, host)
+        self.assertEqual(memo.Client("https://example.org").base_url, "https://example.org")
 
     def shown(self, body):
         """The command without its signature envelope, after checking that envelope."""
