@@ -1020,7 +1020,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 			if done {
 				ack := WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ClaimExpiresAt: w.ClaimExpires, Note: "Already settled by this transaction; nothing changed."}
-				return Result{Data: map[string]any{"ack": ack}}, nil
+				return Result{Data: ResultData(WorkAckData{Ack: ack})}, nil
 			}
 		}
 		if c.Operation != "work.claim" && c.Operation != "work.cancel" && c.Operation != WorkReviewerSet && c.Operation != WorkSuccessorSet && c.Operation != WorkSettle && (c.Amount != w.Fence || c.Amount < 0 || (c.Amount == 0 && state != "recovery_required")) {
@@ -1386,10 +1386,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if standingNote != "" {
 		ack.Note = strings.TrimSpace(standingNote + " " + ack.Note)
 	}
-	if rated != nil {
-		return Result{Data: map[string]any{"ack": ack, "review": rated}, ratedPost: ratedPost}, nil
-	}
-	return Result{Data: map[string]any{"ack": ack}}, nil
+	return Result{Data: ResultData(WorkAckData{Ack: ack, Review: rated}), ratedPost: ratedPost}, nil
 }
 
 func currentWorkIdentity(ctx context.Context, tx *sql.Tx, account string) (AgentRef, error) {

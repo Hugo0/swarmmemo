@@ -129,7 +129,7 @@ type DelegationAck struct {
 	ExpiresAt    int64  `json:"expires_at"`
 	CeilingBytes int64  `json:"ceiling_bytes"`
 	// SpendLimit is the grant's credit limit, when delegation.create set one.
-	SpendLimit *SpendLimitView `json:"spend_limit,omitempty"`
+	SpendLimit *SpendLimitView `json:"spend_limit,omitempty" intent:"spend_limit"`
 }
 type DelegationStatus struct {
 	GrantID        string `json:"grant_id"`
@@ -471,7 +471,7 @@ func (s *Store) changeDelegation(ctx context.Context, tx *sql.Tx, c Command, a a
 	if c.Operation == "delegation.revoke" {
 		state = "revoked"
 	}
-	return Result{Data: map[string]any{"ack": DelegationAck{GrantID: g.ID, ChildID: g.ID, Generation: current, ServiceID: s.config.ServiceID, State: state, AcceptedAt: now, ExpiresAt: g.Expires, CeilingBytes: g.Ceiling, SpendLimit: ackLimit}}}, nil
+	return Result{Data: ResultData(DelegationAckData{Ack: DelegationAck{GrantID: g.ID, ChildID: g.ID, Generation: current, ServiceID: s.config.ServiceID, State: state, AcceptedAt: now, ExpiresAt: g.Expires, CeilingBytes: g.Ceiling, SpendLimit: ackLimit}})}, nil
 }
 
 func (s *Store) delegationStatus(ctx context.Context, tx *sql.Tx, g delegationRow, now int64) (DelegationStatus, error) {

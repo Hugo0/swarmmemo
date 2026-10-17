@@ -656,9 +656,9 @@ def _dispatch(profile, action, a):
         client = _client(profile)
         result = client.send(client.prepare("delegation.get", target=profile.grant_id))
         status = result.get("data", {}).get("delegation")
-        fields = set("grant_id generation service_id state created_at expires_at ceiling_bytes used_bytes remaining_bytes".split())
-        # room and origin are optional (C157); spend_limit is the grant's own view.
-        if not isinstance(status, dict) or not fields <= set(status) or set(status) - fields - {"room", "origin", "spend_limit"} or status["grant_id"] != profile.grant_id or status["generation"] != profile.generation or status["service_id"] != profile.service_id: raise BridgeError("invalid_response")
+        # The server's delegation.get shape (contract structs.delegation_status, C398): room and
+        # origin are optional (C157); spend_limit is the grant's own view.
+        if not outbox.shaped(status, "delegation_status", "delegation.get", None) or status["grant_id"] != profile.grant_id or status["generation"] != profile.generation or status["service_id"] != profile.service_id: raise BridgeError("invalid_response")
         if status["state"] not in ("active", "revoked", "expired", "epoch_disabled", "issuer_rotated"): raise BridgeError("invalid_response")
         for field in ("created_at", "expires_at", "ceiling_bytes", "used_bytes", "remaining_bytes"):
             if type(status[field]) is not int or not 0 <= status[field] < 2**63: raise BridgeError("invalid_response")

@@ -3530,6 +3530,48 @@
       ],
       "optional": []
     },
+    "delegation_ack": {
+      "required": [
+        "accepted_at",
+        "ceiling_bytes",
+        "child_id",
+        "expires_at",
+        "generation",
+        "grant_id",
+        "service_id",
+        "state"
+      ],
+      "optional": [
+        "spend_limit"
+      ],
+      "intent": {
+        "spend_limit": "spend_limit"
+      }
+    },
+    "delegation_ack_data": {
+      "required": [
+        "ack"
+      ],
+      "optional": []
+    },
+    "delegation_status": {
+      "required": [
+        "ceiling_bytes",
+        "created_at",
+        "expires_at",
+        "generation",
+        "grant_id",
+        "remaining_bytes",
+        "service_id",
+        "state",
+        "used_bytes"
+      ],
+      "optional": [
+        "origin",
+        "room",
+        "spend_limit"
+      ]
+    },
     "forwarded": {
       "required": [
         "mode",
@@ -3731,6 +3773,34 @@
         "worker",
         "worker_subject"
       ]
+    },
+    "work_ack": {
+      "required": [
+        "accepted_at",
+        "claim_expires_at",
+        "deadline",
+        "fence",
+        "generation",
+        "service_id",
+        "state",
+        "work_id"
+      ],
+      "optional": [
+        "note",
+        "resolved_from",
+        "result_sha256"
+      ]
+    },
+    "work_ack_data": {
+      "required": [
+        "ack"
+      ],
+      "optional": [
+        "review"
+      ],
+      "intent": {
+        "review": "review"
+      }
     },
     "work_result": {
       "required": [

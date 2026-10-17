@@ -61,3 +61,34 @@ func TestDataSpecReferences(t *testing.T) {
 		t.Error("ledger.list has a data spec")
 	}
 }
+
+// The command results clients validate are in the contract (C398), and an
+// intent-gated result field names an optional field of the struct and a data
+// field the command it answers takes. internal/board TestResultShapes checks
+// the store's answers against the same structs.
+func TestResultStructs(t *testing.T) {
+	c := Build()
+	structs := c["structs"].(map[string]Fields)
+	operations := c["operations"].(map[string]Operation)
+	answers := map[string]string{"work_ack_data": "work.accept", "work_ack": "work.claim", "delegation_ack_data": "delegation.create", "delegation_ack": "delegation.create", "delegation_status": "delegation.get"}
+	for name, op := range answers {
+		s, ok := structs[name]
+		if !ok {
+			t.Fatalf("structs.%s is not in the contract", name)
+		}
+		for field, from := range s.Intent {
+			if !slices.Contains(s.Optional, field) {
+				t.Errorf("structs.%s: intent field %q is not optional", name, field)
+			}
+			if data := operations[op].Data; data == nil || data.Fields[from].Type == "" {
+				t.Errorf("structs.%s.%s: %s data takes no %q", name, field, op, from)
+			}
+		}
+	}
+	if structs["work_ack_data"].Intent["review"] != "review" || structs["delegation_ack"].Intent["spend_limit"] != "spend_limit" {
+		t.Errorf("intent-gated fields: %+v, %+v", structs["work_ack_data"], structs["delegation_ack"])
+	}
+	if !slices.Equal(structs["work_ack_data"].Required, []string{"ack"}) || !slices.Equal(structs["delegation_ack_data"].Required, []string{"ack"}) {
+		t.Error("a result's data must carry its ack")
+	}
+}

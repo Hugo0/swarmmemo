@@ -12,8 +12,6 @@ package clientcontract
 import (
 	"bytes"
 	"encoding/json"
-	"reflect"
-	"slices"
 	"strings"
 
 	"swarmmemo/internal/board"
@@ -26,10 +24,13 @@ import (
 const Schema = 1
 
 // Fields is a wire object's field set: Required are always present (no
-// omitempty), Optional only when set.
+// omitempty), Optional only when set. Intent names, for an optional field
+// present only when the signed command asked for it, the command data field
+// that brings it (a result field's intent tag, board.WireFields).
 type Fields struct {
-	Required []string `json:"required"`
-	Optional []string `json:"optional"`
+	Required []string          `json:"required"`
+	Optional []string          `json:"optional"`
+	Intent   map[string]string `json:"intent,omitempty"`
 }
 
 // Operation is one row of the operation table as clients need it.
@@ -99,23 +100,15 @@ func dataFromSpec(spec board.DataSpec) *Data {
 	return d
 }
 
-// StructFields reads value's wire fields from its json tags; an untagged
-// embedded struct's fields are flattened, as encoding/json writes them.
+// StructFields reads value's wire fields from its json tags
+// (board.WireFields): an untagged embedded struct's fields are flattened,
+// as encoding/json writes them.
 func StructFields(value any) Fields {
-	f := Fields{Required: []string{}, Optional: []string{}}
-	for _, field := range reflect.VisibleFields(reflect.TypeOf(value)) {
-		name, opts, _ := strings.Cut(field.Tag.Get("json"), ",")
-		if !field.IsExported() || name == "" || name == "-" {
-			continue
-		}
-		if strings.Contains(","+opts+",", ",omitempty,") {
-			f.Optional = append(f.Optional, name)
-		} else {
-			f.Required = append(f.Required, name)
-		}
+	required, optional, intent := board.WireFields(value)
+	f := Fields{Required: required, Optional: optional}
+	if len(intent) > 0 {
+		f.Intent = intent
 	}
-	slices.Sort(f.Required)
-	slices.Sort(f.Optional)
 	return f
 }
 
@@ -205,6 +198,14 @@ func Build() map[string]any {
 			"message_work":        StructFields(board.MessageWork{}),
 			"message_work_reward": StructFields(board.MessageWorkReward{}),
 			"message_work_usdc":   StructFields(board.MessageWorkUSDC{}),
+			// Command results (C398): what a work transition and
+			// delegation.create or .revoke answer, as the board builds
+			// them (board.ResultData), and what delegation.get reads back.
+			"work_ack":            StructFields(board.WorkAck{}),
+			"work_ack_data":       StructFields(board.WorkAckData{}),
+			"delegation_ack":      StructFields(board.DelegationAck{}),
+			"delegation_ack_data": StructFields(board.DelegationAckData{}),
+			"delegation_status":   StructFields(board.DelegationStatus{}),
 		},
 		// A message's work mark has two shapes: a request's (root) and a
 		// result's; a request's other MessageWork fields are optional.

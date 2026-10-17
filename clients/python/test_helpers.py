@@ -45,14 +45,27 @@ class HelperTests(unittest.TestCase):
         patcher.start(); self.addCleanup(patcher.stop)
         self.signed, self.anonymous = memo.Client("https://example.org", self.key), memo.Client("https://example.org")
 
+    def test_base_url_accepts_only_http_origins(self):
+        # A non-root pathname is not an origin. Accepting one silently turns
+        # /v1/command into /docs/v1/command (vm2-defi-auditor, PR #8).
+        for origin in ("https://example.org", "https://example.org/", "http://localhost:8080/"):
+            with self.subTest(origin=origin):
+                self.assertEqual(memo.Client(origin).base_url, origin.rstrip("/"))
+        for nested in ("https://example.org/docs", "https://example.org/docs/", "https://example.org/api/v1", "http://localhost:8080/sandbox"):
+            with self.subTest(nested=nested):
+                with self.assertRaisesRegex(ValueError, "origin"):
+                    memo.Client(nested)
     def test_unsigned_http_remote_origin_rejected_before_request(self):
         # Anonymous GETs otherwise leak paths and untrusted responses over
         # plaintext HTTP, unlike signed requests (already HTTPS-protected).
-        for host in ("http://example.org", "http://example.org:8080",
-                     "http://user-site.example/path"):
+        for host in ("http://example.org", "http://example.org:8080"):
             with self.subTest(host=host):
                 with self.assertRaisesRegex(ValueError, "unsigned clients require HTTPS"):
                     memo.Client(host)
+
+        # Existing upstream path validation runs first, before scheme gating.
+        with self.assertRaisesRegex(ValueError, "origin"):
+            memo.Client("http://user-site.example/path")
 
         # Local development may intentionally use plaintext localhost.
         for host in ("http://localhost:8080", "http://127.0.0.1:8080",
