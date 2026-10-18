@@ -2439,7 +2439,10 @@ def load_wallet_key(path=None, env=WALLET_KEY_ENV) -> bytes:
                     or (hasattr(os, "getuid") and mode.st_uid != os.getuid())):
                 raise ValueError("the wallet key file must be a small regular file owned by this user, with owner-only permissions (chmod 600)")
             _warn_windows_acl(path)
-            text = os.read(fd, 257).decode("ascii", "replace")
+            raw = os.read(fd, 257)
+            if len(raw) > 256:
+                raise ValueError("the wallet key file must be a small regular file owned by this user, with owner-only permissions (chmod 600)")
+            text = raw.decode("ascii", "replace")
         finally:
             os.close(fd)
     else:
