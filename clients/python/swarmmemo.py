@@ -2181,22 +2181,51 @@ def keygen(path: Path) -> dict:
     return {"public_key": record["public_key"], "id": hashlib.sha256(public_bytes(key)).hexdigest()}
 
 
-def load_key(path: Path):
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    with os.fdopen(fd, encoding="utf-8") as stream:
-        mode = os.fstat(stream.fileno())
-        # Windows has no POSIX permission bits (st_mode reads 0o666): its file ACL is the guard there.
-        if not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077):
-            raise ValueError("key file must be a regular file accessible only to its owner (chmod 600)")
+def read_owner_key_bytes(path, cap, *, invalid_message, open_message, too_large_error=ValueError):
+    """Bounded owner-only key bytes from one fd; no check-then-unbounded-read gap.
+
+    Used by identity and wallet loaders. The cap+1 read detects file growth
+    after fstat without ever slurping arbitrarily large private content.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        raise ValueError(open_message) from None
+    try:
+        mode = os.fstat(fd)
+        if (not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077)
+                or (hasattr(os, "getuid") and mode.st_uid != os.getuid())):
+            raise ValueError(invalid_message)
+        if mode.st_size > cap:
+            raise too_large_error(invalid_message)
         _warn_windows_acl(path)
-        record = json.loads(read_bounded(stream, "the key file", STATE_BYTES))
+        raw = bytearray()
+        while len(raw) <= cap:
+            chunk = os.read(fd, cap + 1 - len(raw))
+            if not chunk:
+                break
+            raw.extend(chunk)
+        if len(raw) > cap:
+            raise too_large_error(invalid_message)
+        return bytes(raw)
+    finally:
+        os.close(fd)
+
+
+def load_key(path: Path):
+    raw = read_owner_key_bytes(
+        path, min(16384, STATE_BYTES),
+        invalid_message="key file must be a regular file accessible only to its owner (chmod 600)",
+        open_message="could not open the owner-only key file",
+        too_large_error=InputTooLarge
+    )
+    record = json.loads(raw.decode("utf-8"))
     private, _, serialization = crypto()
-    raw = unb64(record["private_key"])
-    if len(raw) == 32:
-        key = private.from_private_bytes(raw)
-    elif len(raw) == 48 and raw.startswith(bytes.fromhex("302e020100300506032b657004220420")):
-        # Early browser backups used standard Ed25519 PKCS8; new exports use raw seed.
-        key = serialization.load_der_private_key(raw, password=None)
+    key_bytes = unb64(record["private_key"])
+    if len(key_bytes) == 32:
+        key = private.from_private_bytes(key_bytes)
+    elif len(key_bytes) == 48 and key_bytes.startswith(bytes.fromhex("302e020100300506032b657004220420")):
+        key = serialization.load_der_private_key(key_bytes, password=None)
         if not isinstance(key, private):
             raise ValueError("backup must contain an Ed25519 key")
     else:
@@ -2425,23 +2454,16 @@ def wallet_challenge_ok(message: str, service: str, address: str, fingerprint: s
 
 
 def load_wallet_key(path=None, env=WALLET_KEY_ENV) -> bytes:
-    """An EVM private key, 64 hex digits (0x optional), from a file only its owner can
-    read, else from the environment variable env; never from an argument, which other
-    users and shell history can see. Errors never quote the key."""
+    """A wallet private key from owner-only local file or original env variable.
+
+    Never logs the content, and cannot read an unbounded file after fstat.
+    """
     if path is not None:
-        try:
-            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-        except OSError:
-            raise ValueError("could not open the wallet key file (it must exist and not be a symlink)") from None
-        try:
-            mode = os.fstat(fd)
-            if (not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077) or mode.st_size > 256
-                    or (hasattr(os, "getuid") and mode.st_uid != os.getuid())):
-                raise ValueError("the wallet key file must be a small regular file owned by this user, with owner-only permissions (chmod 600)")
-            _warn_windows_acl(path)
-            text = os.read(fd, 257).decode("ascii", "replace")
-        finally:
-            os.close(fd)
+        text = read_owner_key_bytes(
+            path, 256,
+            invalid_message="the wallet key file must be a small regular file owned by this user, with owner-only permissions (chmod 600)",
+            open_message="could not open the wallet key file (it must exist and not be a symlink)"
+        ).decode("ascii", "replace")
     else:
         text = os.environ.get(env, "")
         if not text: raise ValueError(f"no wallet key: pass --wallet-key FILE or set {env}")

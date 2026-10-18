@@ -1437,20 +1437,38 @@ export async function writeKey(path, record = generateKey()) {
   if (failed) fail('key_write_failed', 'Could not durably create the owner-only key file. A newly created key may remain; preserve it and inspect locally. No file was overwritten or deleted.');
   return Object.freeze({public_key: key.public_key, fingerprint: key.fingerprint});
 }
-export async function loadKey(path) {
+// Shared owner-only bounded reader for the identity key and EVM wallet key.
+// A cap+1 read catches files that grow after stat without unbounded secret IO.
+async function readOwnerOnlyKeyBytes(path, limit, invalidMessage, openMessage) {
   secureFiles(); let file;
   try {
     file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0));
-    const stat = await file.stat();
-    if (!stat.isFile() || (stat.mode & 0o077) || stat.size > 16384 || stat.uid !== process.getuid()) fail('unsafe_key_file', 'Key must be a small regular file owned by this user, with owner-only permissions.');
-    const buffer = Buffer.alloc(16385); let size = 0;
-    while (size < buffer.length) {const {bytesRead} = await file.read(buffer, size, buffer.length - size, size); if (!bytesRead) break; size += bytesRead;}
-    if (size > 16384) fail('unsafe_key_file', 'Key file is too large.');
-    return importKey(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(buffer.subarray(0, size))));
+    const stats = await file.stat();
+    if (!stats.isFile() || (stats.mode & 0o077) || stats.size > limit || stats.uid !== process.getuid())
+      fail('unsafe_key_file', invalidMessage);
+    const buffer = Buffer.alloc(limit + 1); let size = 0;
+    while (size < buffer.length) {
+      const {bytesRead} = await file.read(buffer, size, buffer.length - size, null);
+      if (!bytesRead) break;
+      size += bytesRead;
+    }
+    if (size > limit) fail('unsafe_key_file', invalidMessage);
+    return buffer.subarray(0, size);
+  } catch (error) {
+    if (error instanceof ClientError) throw error;
+    fail('key_read_failed', openMessage);
+  } finally { await file?.close(); }
+}
+export async function loadKey(path) {
+  const raw = await readOwnerOnlyKeyBytes(path, 16384,
+    'Key must be a small regular file owned by this user, with owner-only permissions.',
+    'Could not read a valid owner-only key file.');
+  try {
+    return importKey(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw)));
   } catch (error) {
     if (error instanceof ClientError) throw error;
     fail('key_read_failed', 'Could not read a valid owner-only key file.');
-  } finally { await file?.close(); }
+  }
 }
 // C343: an EVM wallet's personal_sign (EIP-191) for linkWallet, with no
 // dependency: Keccak-256 (node:crypto's sha3-256 pads differently), secp256k1
@@ -1587,25 +1605,10 @@ export function walletChallengeOK(message, service, address, fingerprint, nonce)
 export async function loadWalletKey({file, env = WALLET_KEY_ENV} = {}) {
   let raw;
   if (file !== undefined) {
-    secureFiles(); let handle;
-    try {
-      handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0));
-      const stat = await handle.stat();
-      if (!stat.isFile() || (stat.mode & 0o077) || stat.size > 256 || stat.uid !== process.getuid()) fail('unsafe_key_file', 'The wallet key must be a small regular file owned by this user, with owner-only permissions (chmod 600).');
-      // The stat check can race a growing file. Read at most one byte past
-      // the allowed limit, never unbounded content from a changing source.
-      const bytes = Buffer.alloc(257); let size = 0;
-      while (size < bytes.length) {
-        const {bytesRead} = await handle.read(bytes, size, bytes.length - size, null);
-        if (!bytesRead) break;
-        size += bytesRead;
-      }
-      if (size > 256) fail('unsafe_key_file', 'Wallet key file exceeds 256 bytes.');
-      raw = bytes.subarray(0, size).toString('latin1');
-    } catch (error) {
-      if (error instanceof ClientError) throw error;
-      fail('key_read_failed', 'Could not read the wallet key file.');
-    } finally { await handle?.close(); }
+    const bytes = await readOwnerOnlyKeyBytes(file, 256,
+      'The wallet key must be a small regular file owned by this user, with owner-only permissions (chmod 600).',
+      'Could not read the wallet key file.');
+    raw = bytes.toString('latin1');
   } else {
     raw = process.env[text(env)];
     if (!raw) fail('invalid_wallet_key', `No wallet key: pass {file} or set ${env}.`);
