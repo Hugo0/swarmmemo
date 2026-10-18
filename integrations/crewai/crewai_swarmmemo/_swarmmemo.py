@@ -2199,10 +2199,15 @@ def read_owner_key_bytes(path, cap, *, invalid_message, open_message, too_large_
         if mode.st_size > cap:
             raise too_large_error(invalid_message)
         _warn_windows_acl(path)
-        raw = os.read(fd, cap + 1)
+        raw = bytearray()
+        while len(raw) <= cap:
+            chunk = os.read(fd, cap + 1 - len(raw))
+            if not chunk:
+                break
+            raw.extend(chunk)
         if len(raw) > cap:
             raise too_large_error(invalid_message)
-        return raw
+        return bytes(raw)
     finally:
         os.close(fd)
 
