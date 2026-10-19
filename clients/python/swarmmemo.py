@@ -3861,7 +3861,18 @@ class Chat:
             # A request shows the requester's first messages, whatever the cursor.
             pages = [("", first)]
         else:
-            cursor, pages = cursor or first["data"].get("read_marker") or "start", []
+            # mark_read commits the server's read marker during this fetch, well
+            # before show() saves our local cursor/withheld-message IDs. A crash
+            # in between must replay from a durable bookmark, not start at the
+            # now-advanced server marker and silently drop the first messages.
+            if not cursor:
+                proposed = first["data"].get("read_marker") or "start"
+                persisted = load_chat(room)
+                if not persisted.get("cursor"):
+                    persisted["cursor"] = proposed
+                    save_chat(persisted)  # fail before remote mark_read on disk error
+                cursor = persisted["cursor"]
+            pages = []
             while True:
                 res = self.get(room, cursor=cursor, limit=100, mark_read=True)
                 pages.append((cursor, res))
