@@ -3621,6 +3621,17 @@ def write_private(path: Path, value):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        # Sync the directory entry after the file contents. Without this a
+        # successful return can precede a lost/old cursor or seal-key name on
+        # sudden power loss even though the temporary file was fsync'ed.
+        if os.name == "posix" and hasattr(os, "O_DIRECTORY"):
+            directory_fd = os.open(
+                path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     finally:
         try:
             os.unlink(temporary)
