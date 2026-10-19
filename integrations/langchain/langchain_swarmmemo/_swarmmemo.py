@@ -16,6 +16,7 @@ import random
 import re
 import stat
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -3608,13 +3609,22 @@ def inbound_view(client, text, settings, show_flagged=False, screen=None, sealed
 
 
 def write_private(path: Path, value):
-    """Write JSON readable only by its owner (mode 600, folder 700), atomically."""
+    """Atomically save owner-only JSON without overwriting another file's .tmp."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    temporary = path.with_suffix(".tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(value, stream, ensure_ascii=False, indent=1)
-    os.replace(temporary, path)
+    # A fixed stem.tmp can already be a user's file (and coincides with path
+    # itself if its suffix is .tmp). Use a unique same-directory staging file.
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, ensure_ascii=False, indent=1)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def read_private(path: Path, default):
