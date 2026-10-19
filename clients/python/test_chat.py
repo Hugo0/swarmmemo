@@ -588,6 +588,70 @@ class LiveChatTests(unittest.TestCase):
         conv = self.api(who).command("conversation.get", room=room, limit=1)["data"]["conversation"]
         return next(m["state"] for m in conv["members"] if m["agent"] == self.fp(about))
 
+    def test_opt_in_peek_leaves_remote_and_local_read_markers_unchanged(self):
+        """An opt-in preview does not consume messages even after printing them."""
+        opened = self.ok("alice", "new", "--title", "Synthetic preview room",
+                         "--max-messages", "9", "--ttl-hours", "24", "--invite")
+        line = re.search(r"chat join (\S+)", opened).group(1)
+        room = line.rpartition(".")[0]
+        self.ok("bob", "join", line, "--inbound-mode", "off")
+        self.ok("alice", "send", room, "-", stdin="Unread synthetic preview-only message")
+
+        path = self.work / "bob" / ".swarmmemo" / "chat" / f"{room}.json"
+        before = path.read_bytes()
+        unread_before = self.api("bob").command("conversation.get", room=room, limit=1)["data"]["conversation"]["unread"]
+
+        first = self.ok("bob", "read", room, "--peek", "--inbound-mode", "off")
+        second = self.ok("bob", "read", room, "--peek", "--inbound-mode", "off")
+        for result in [first, second]:
+            self.assertIn("Unread synthetic preview-only message", result)
+        self.assertEqual(path.read_bytes(), before, "no local acknowledgement or policy state persisted")
+        unread_after = self.api("bob").command("conversation.get", room=room, limit=1)["data"]["conversation"]["unread"]
+        self.assertEqual(unread_after, unread_before, "no server unread count consumed")
+
+        self.assertIn("Unread synthetic preview-only message",
+                      self.ok("bob", "read", room, "--inbound-mode", "off"))
+        self.assertIn("no new messages", self.ok("bob", "read", room, "--inbound-mode", "off"))
+
+    def test_opt_in_peek_broken_output_can_replay_same_message(self):
+        """A failed stdout must not skip unseen messages on the next run."""
+        from types import SimpleNamespace
+
+        class BrokenOutput:
+            def write(self, data):
+                raise BrokenPipeError("synthetic closed output pipe")
+
+        opened = self.ok("alice", "new", "--title", "Synthetic broken stdout room",
+                         "--max-messages", "9", "--ttl-hours", "24", "--invite")
+        line = re.search(r"chat join (\S+)", opened).group(1)
+        room = line.rpartition(".")[0]
+        self.ok("bob", "join", line, "--inbound-mode", "off")
+        self.ok("alice", "send", room, "-", stdin="Never lose this after a broken pipe")
+        path = self.work / "bob" / ".swarmmemo" / "chat" / f"{room}.json"
+        prior = path.read_bytes()
+        before = self.api("bob").command("conversation.get", room=room, limit=1)["data"]["conversation"]["unread"]
+        args = SimpleNamespace(room=room, key=str(self.keys["bob"]), inbound_mode="off",
+                               outbound_mode=None, threshold=None, show_flagged=False, peek=True)
+        with patch.dict(os.environ, {"HOME": str(self.work / "bob")}):
+            chat = memo.Chat(args, self.api("bob"), BrokenOutput(), io.StringIO())
+            with self.assertRaisesRegex(BrokenPipeError, "synthetic closed output pipe"):
+                chat.read()
+        after = self.api("bob").command("conversation.get", room=room, limit=1)["data"]["conversation"]["unread"]
+        self.assertEqual(before, after)
+        self.assertEqual(path.read_bytes(), prior)
+        self.assertIn("Never lose this after a broken pipe",
+                      self.ok("bob", "read", room, "--inbound-mode", "off"))
+
+    def test_opt_in_peek_rejects_show_flagged_ambiguity(self):
+        opened = self.ok("alice", "new", "--title", "Synthetic flagged preview conflict",
+                         "--max-messages", "9", "--ttl-hours", "24", "--invite")
+        line = re.search(r"chat join (\S+)", opened).group(1)
+        room = line.rpartition(".")[0]
+        self.ok("bob", "join", line, "--inbound-mode", "off")
+        code, output, error = self.cli("bob", "read", room, "--peek", "--show-flagged")
+        self.assertEqual(code, 1)
+        self.assertIn("cannot be combined", error)
+
     def test_a_conversation_end_to_end(self):
         out = self.ok("alice", "new", "--title", "flaky test", "--max-messages", "4", "--ttl-hours", "24", "--invite")
         self.assertRegex(out, r"opened ~[a-z2-7]{26}; private: members and the SwarmMemo server can read this; limits: 4 messages, until ")
