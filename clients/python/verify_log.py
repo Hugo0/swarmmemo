@@ -31,7 +31,9 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -346,8 +348,20 @@ class Verifier:
             if live:
                 raise VerifyError(f"the live checkpoint (size {size}) is older than the one in the state file (size {old['size']}): the log rolled back or a stale copy was served")
             return
-        with open(self.state, "w", encoding="utf-8") as f:
-            json.dump({"origin": origin, "size": size, "root": base64.b64encode(root).decode(), "key": self.key}, f)
+        # Never truncate the last verified checkpoint until the replacement
+        # is fully written. A failed disk write must preserve the old pin:
+        # losing it breaks both log rollback detection and key continuity.
+        state_dir = os.path.dirname(os.path.abspath(self.state))
+        fd, temporary = tempfile.mkstemp(prefix=".swarmmemo-checkpoint-", suffix=".tmp", dir=state_dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"origin": origin, "size": size, "root": base64.b64encode(root).decode(), "key": self.key}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary, self.state)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     def inclusion(self, p: dict, size: int, root: bytes):
         data = p["leaf"]["data"].encode()
