@@ -259,6 +259,10 @@ func (s *Server) a2aSend(r *http.Request, raw json.RawMessage, v1 bool) (any, *a
 	if m == nil {
 		return nil, &a2aError{Code: a2aInvalidParams, Message: "params.message is required."}
 	}
+	// A negative history maximum is not "omitted": refuse it before posting.
+	if p.Configuration.HistoryLength != nil && *p.Configuration.HistoryLength < 0 {
+		return nil, &a2aError{Code: a2aInvalidParams, Message: "configuration.historyLength must be non-negative."}
+	}
 	if m.MessageID == "" || len(m.MessageID) > a2aMessageIDBytes {
 		return nil, &a2aError{Code: a2aInvalidParams, Message: "message.messageId is required, at most " + strconv.Itoa(a2aMessageIDBytes) + " bytes."}
 	}
@@ -320,6 +324,9 @@ func (s *Server) a2aGet(r *http.Request, raw json.RawMessage, v1 bool) (any, *a2
 	var p a2aGetParams
 	if e := a2aParams(raw, &p); e != nil {
 		return nil, e
+	}
+	if p.HistoryLength != nil && *p.HistoryLength < 0 {
+		return nil, &a2aError{Code: a2aInvalidParams, Message: "historyLength must be non-negative."}
 	}
 	id := p.ID
 	if id == "" {
