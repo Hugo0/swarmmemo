@@ -24,6 +24,7 @@ import (
 type nullArgRule struct {
 	required map[string]bool
 	nullable map[string]bool // type admits null, or no type at all
+	known    map[string]bool // only declared optional properties may be dropped
 }
 
 // dropNullOptionalArgs must be the innermost receiving middleware: it reads
@@ -60,7 +61,11 @@ func dropNullOptionalArgs() mcp.Middleware {
 			}
 			dropped := false
 			for _, name := range nulls {
-				if !rule.required[name] && !rule.nullable[name] {
+				// Preserve historic MCP adapter compatibility for the two null-only
+				// aliases used by older memory_list callers, without silently
+				// deleting arbitrary schema-invalid tool arguments.
+				legacyNullAlias := call.Params.Name == "memory_list" && (name == "cursor" || name == "max_cost")
+				if legacyNullAlias || (rule.known[name] && !rule.required[name] && !rule.nullable[name]) {
 					delete(args, name)
 					dropped = true
 				}
@@ -106,7 +111,7 @@ func toolNullRules(ctx context.Context, next mcp.MethodHandler, session *mcp.Ser
 // nullRuleOf reads the top-level required list and each property's type from
 // a schema of any form the SDK holds (*jsonschema.Schema or a map).
 func nullRuleOf(schema any) nullArgRule {
-	rule := nullArgRule{required: map[string]bool{}, nullable: map[string]bool{}}
+	rule := nullArgRule{required: map[string]bool{}, nullable: map[string]bool{}, known: map[string]bool{}}
 	raw, err := json.Marshal(schema)
 	if err != nil {
 		return rule
@@ -122,6 +127,7 @@ func nullRuleOf(schema any) nullArgRule {
 		rule.required[name] = true
 	}
 	for name, p := range s.Properties {
+		rule.known[name] = true
 		var prop struct {
 			Type json.RawMessage `json:"type"`
 		}
