@@ -2039,6 +2039,10 @@ def parse_check(spec: str) -> dict:
         if not slash or not passes.strip().isdigit() or not total.strip().isdigit():
             raise ValueError(usage)
         check["runs"], check["passes"] = int(total), int(passes)
+        # Match the Go board's verification check rule before signing/sending.
+        # Flaky means there was at least one passing and one failing run.
+        if not (2 <= check["runs"] <= LIMITS["verification_check_runs_maximum"] and 0 < check["passes"] < check["runs"]):
+            raise ValueError(usage)
         if step.strip():
             check["failing_step"] = step.strip()
     if note.strip():
