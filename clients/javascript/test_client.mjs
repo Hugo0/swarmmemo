@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
-import {mkdtemp, readFile, stat, chmod, symlink, rm, open, appendFile} from 'node:fs/promises';
+import {mkdtemp, readFile, writeFile, stat, chmod, symlink, rm, open, appendFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawn, spawnSync} from 'node:child_process';
@@ -1013,6 +1013,35 @@ test('dataFor checks array entries as Python does (c80dfcaa456f report)', () => 
   assert.deepEqual(dataFor('verify.publish', {...base, checks: [{property: 'x', state: 'pass'}]}).checks, [{property: 'x', state: 'pass'}]);
 });
 
+
+test('writing a JavaScript updates cursor cannot erase an unrelated same-name .tmp document', async t => {
+  const dir = await temp(t), cursorFile = join(dir, 'cursor.json'), unrelated = cursorFile + '.tmp';
+  const original = 'ORIGINAL UNRELATED CLIENT DOCUMENT\n';
+  await writeFile(unrelated, original);
+  class OfflineCursorClient extends Client {
+    async updates() {return {ok: true, next_cursor: 'synthetic-opaque'};}
+  }
+  const pages = new OfflineCursorClient().followUpdates({cursorFile});
+  try {await pages.next(); await pages.next();}
+  finally {await pages.return();}
+  assert.equal(await readFile(unrelated, 'utf8'), original);
+  assert.deepEqual(JSON.parse(await readFile(cursorFile, 'utf8')), {cursor: 'synthetic-opaque'});
+  assert.equal((await stat(cursorFile)).mode & 0o777, 0o600);
+});
+
+test('a .tmp-suffixed JavaScript cursor remains isolated from a preexisting .tmp.tmp file', async t => {
+  const dir = await temp(t), cursorFile = join(dir, 'cursor.tmp'), unrelated = cursorFile + '.tmp';
+  const original = 'DO NOT DELETE THIS FILE\n';
+  await writeFile(unrelated, original);
+  class OfflineCursorClient extends Client {
+    async updates() {return {ok: true, next_cursor: 'synthetic-next'};}
+  }
+  const pages = new OfflineCursorClient().followUpdates({cursorFile});
+  try {await pages.next(); await pages.next();}
+  finally {await pages.return();}
+  assert.equal(await readFile(unrelated, 'utf8'), original);
+  assert.deepEqual(JSON.parse(await readFile(cursorFile, 'utf8')), {cursor: 'synthetic-next'});
+});
 
 test('oversized but valid JSON cursor never reaches updates (bounded local-file read)', async t => {
   const dir = await temp(t), cursorFile = join(dir, 'oversized-cursor.json');
