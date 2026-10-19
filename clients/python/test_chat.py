@@ -588,6 +588,44 @@ class LiveChatTests(unittest.TestCase):
         conv = self.api(who).command("conversation.get", room=room, limit=1)["data"]["conversation"]
         return next(m["state"] for m in conv["members"] if m["agent"] == self.fp(about))
 
+    def test_first_join_interrupted_after_fetch_replays_unshown_message(self):
+        """A first-time join must not acknowledge a message ahead of local durability."""
+        from types import SimpleNamespace
+        opened = self.ok("alice", "new", "--title", "Synthetic durable unread title",
+                         "--max-messages", "8", "--ttl-hours", "24", "--invite")
+        code = re.search(r"chat join (\S+)", opened).group(1)
+        room = code.rpartition(".")[0]
+        args = SimpleNamespace(code=code, key=str(self.keys["bob"]), outbound_mode=None,
+                               inbound_mode="off", threshold=None, show_flagged=False)
+        with patch.dict(os.environ, {"HOME": str(self.work / "bob")}):
+            chat = memo.Chat(args, self.api("bob"), io.StringIO(), io.StringIO())
+            # The real CLI calls fetch before show. A process can die between them.
+            with patch.object(chat, "show", side_effect=RuntimeError("synthetic process stop")):
+                with self.assertRaisesRegex(RuntimeError, "synthetic process stop"):
+                    chat.join()
+        # Brand-new process, SAME first-party synthetic key/home. No hidden reboot.
+        out = self.ok("bob", "read", room, "--inbound-mode", "off")
+        self.assertIn("Synthetic durable unread title", out,
+                      "the message cannot be skipped by a server read marker when the local cursor was never saved")
+
+    def test_first_join_disk_write_failure_does_not_advance_server_read_marker(self):
+        """Fail closed if the first local replay bookmark cannot be made durable."""
+        from types import SimpleNamespace
+        opened = self.ok("alice", "new", "--title", "Synthetic disk failure title",
+                         "--max-messages", "8", "--ttl-hours", "24", "--invite")
+        code = re.search(r"chat join (\S+)", opened).group(1)
+        room = code.rpartition(".")[0]
+        args = SimpleNamespace(code=code, key=str(self.keys["bob"]), outbound_mode=None,
+                               inbound_mode="off", threshold=None, show_flagged=False)
+        with patch.dict(os.environ, {"HOME": str(self.work / "bob")}):
+            chat = memo.Chat(args, self.api("bob"), io.StringIO(), io.StringIO())
+            with patch.object(memo, "save_chat", side_effect=OSError("synthetic disk failure")):
+                with self.assertRaisesRegex(OSError, "synthetic disk failure"):
+                    chat.join()
+        response = self.api("bob").command("conversation.get", room=room, limit=1)
+        self.assertGreater(response["data"]["conversation"]["unread"], 0,
+                           "failed local state persistence must not remotely acknowledge unread messages")
+
     def test_a_conversation_end_to_end(self):
         out = self.ok("alice", "new", "--title", "flaky test", "--max-messages", "4", "--ttl-hours", "24", "--invite")
         self.assertRegex(out, r"opened ~[a-z2-7]{26}; private: members and the SwarmMemo server can read this; limits: 4 messages, until ")
