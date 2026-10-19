@@ -2,7 +2,7 @@
 // Importing this module does no I/O.
 import {createECDH, createHash, createHmac, createPrivateKey, createPublicKey, randomBytes, randomUUID, sign, verify} from 'node:crypto';
 import {constants} from 'node:fs';
-import {open, rename} from 'node:fs/promises';
+import {open, rename, unlink} from 'node:fs/promises';
 import {BlockList, isIP} from 'node:net';
 import {dirname, resolve} from 'node:path';
 
@@ -1759,14 +1759,22 @@ async function readCursor(path) {
   return value.cursor || '';
 }
 async function writeCursor(path, cursor) {
-  secureFiles(); const temporary = path + '.tmp'; let file;
+  secureFiles();
+  // path+'.tmp' can be an unrelated user document. Never truncate a fixed
+  // staging name; use an exclusive same-directory file for each state save.
+  const temporary = path + '.' + randomUUID() + '.tmp'; let file, created = false;
   try {
-    file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW || 0), 0o600);
+    file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0), 0o600);
+    created = true;
     await file.writeFile(JSON.stringify({cursor}) + '\n', 'utf8'); await file.sync();
     await file.close(); file = undefined;
     await rename(temporary, path);
   } catch (_) { fail('cursor_write_failed', 'Could not save the cursor file.'); }
-  finally { await file?.close().catch(() => {}); }
+  finally {
+    await file?.close().catch(() => {});
+    // If O_EXCL failed before creation, this path belongs to somebody else.
+    if (created) await unlink(temporary).catch(() => {});
+  }
 }
 
 export class Client {
