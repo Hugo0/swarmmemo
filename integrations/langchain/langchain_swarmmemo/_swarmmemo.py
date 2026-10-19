@@ -3849,10 +3849,9 @@ class Chat:
                               f"it {'sealed' if sealed else 'not sealed'}; nothing was sent or shown. Tell your human.")
         return sealed
 
-    def fetch(self, room, cursor):
-        """Every message after cursor, opened when sealed: the conversation, the
-        messages, the page cursor each came from, and the cursor after them.
-        No cursor starts at this key's read marker. Each page raises it."""
+    def fetch(self, room, cursor, *, mark_read=True):
+        """Fetch message pages. An opt-in peek does not remotely mark pages
+        read; an ordinary fetch retains its original acknowledgement behavior."""
         first = self.get(room, limit=1)
         conv = first["data"]["conversation"]
         got = {"conversation": conv, "sealed": first["sealed"], "messages": [], "pages": {}, "opened": {}, "cursor": cursor}
@@ -3863,7 +3862,7 @@ class Chat:
         else:
             cursor, pages = cursor or first["data"].get("read_marker") or "start", []
             while True:
-                res = self.get(room, cursor=cursor, limit=100, mark_read=True)
+                res = self.get(room, cursor=cursor, limit=100, mark_read=mark_read)
                 pages.append((cursor, res))
                 cursor = res.get("next_cursor") or cursor
                 if not res["data"].get("has_more"): break
@@ -3877,10 +3876,9 @@ class Chat:
                     got["opened"][m["id"]] = sealed.open(m)
         return got
 
-    def show(self, state, got, show_flagged=False):
-        """Print new messages from others (and, with --show-flagged, those
-        withheld before), each through inbound screening; save the cursor;
-        exit 4 if anything was withheld."""
+    def show(self, state, got, show_flagged=False, *, acknowledge=True):
+        """Screen and print messages; optionally commit a local read marker.
+        A --peek never acknowledges messages remotely or locally."""
         announce(state, weakened(self.settings, self.sources, "inbound"), self.err)
         conv, room = got["conversation"], state["room"]
         if got["sealed"]:
@@ -3915,9 +3913,10 @@ class Chat:
             print(f"error: {unscreened}, so the messages above are withheld (inbound.fail_closed). Ask your human to choose: "
                   f"chat read {room} --show-flagged shows them once; --inbound-mode warn shows unscreened messages, labelled; "
                   "chat protect set inbound.mode=server has the SwarmMemo server screen them at delivery.", file=self.err)
-        if got["cursor"]:
-            state["cursor"] = got["cursor"]
-        save_chat(state)
+        if acknowledge:
+            if got["cursor"]:
+                state["cursor"] = got["cursor"]
+            save_chat(state)
         return 4 if withheld else 0
 
     def header(self, m, note):
@@ -4243,8 +4242,12 @@ class Chat:
         return self.show(state, got, self.args.show_flagged)
 
     def read(self):
+        peek = getattr(self.args, "peek", False)
+        if peek and self.args.show_flagged:
+            raise ChatStop(1, "--peek cannot be combined with --show-flagged: withheld-message acknowledgement requires a normal read")
         state = load_chat(self.args.room)
-        return self.show(state, self.fetch(self.args.room, state.get("cursor")), self.args.show_flagged)
+        got = self.fetch(self.args.room, state.get("cursor"), mark_read=not peek)
+        return self.show(state, got, self.args.show_flagged, acknowledge=not peek)
 
     def wait(self):
         """Poll one conversation, or the one inbox (--all), until another party writes."""
@@ -4547,6 +4550,7 @@ def add_chat_parser(commands):
     download.add_argument("room"); download.add_argument("id", help="the attachment id chat read shows"); download.add_argument("path")
     read = add("read", "print new messages, screened")
     read.add_argument("room"); read.add_argument("--show-flagged", action="store_true", help="show what screening withheld, for your human")
+    read.add_argument("--peek", action="store_true", help="screen and print unread messages without advancing server or local read markers; repeatable after broken stdout")
     wait = add("wait", "wait for a new message, then print it")
     wait.add_argument("room", nargs="?"); wait.add_argument("--all", action="store_true", help="anything new: the one inbox")
     wait.add_argument("--timeout", type=int, default=600); wait.add_argument("--show-flagged", action="store_true")
