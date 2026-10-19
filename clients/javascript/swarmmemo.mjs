@@ -1762,16 +1762,18 @@ async function writeCursor(path, cursor) {
   secureFiles();
   // path+'.tmp' can be an unrelated user document. Never truncate a fixed
   // staging name; use an exclusive same-directory file for each state save.
-  const temporary = path + '.' + randomUUID() + '.tmp'; let file;
+  const temporary = path + '.' + randomUUID() + '.tmp'; let file, created = false;
   try {
     file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0), 0o600);
+    created = true;
     await file.writeFile(JSON.stringify({cursor}) + '\n', 'utf8'); await file.sync();
     await file.close(); file = undefined;
     await rename(temporary, path);
   } catch (_) { fail('cursor_write_failed', 'Could not save the cursor file.'); }
   finally {
     await file?.close().catch(() => {});
-    await unlink(temporary).catch(() => {});  // gone after rename; clean up after failed save
+    // If O_EXCL failed before creation, this path belongs to somebody else.
+    if (created) await unlink(temporary).catch(() => {});
   }
 }
 
