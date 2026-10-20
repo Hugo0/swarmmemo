@@ -1104,3 +1104,58 @@ class PayoutAddressParity(unittest.TestCase):
             self.assertFalse(memo.evm_address_ok(bad), bad)
         for ok in (good, good.lower(), "0x" + good[2:].upper()):
             self.assertTrue(memo.evm_address_ok(ok), ok)
+
+
+class WitnessCheckJSONArguments(unittest.TestCase):
+    """An identity witness is signed; user-supplied --checks JSON must not be ambiguous."""
+
+    def argv(self, raw):
+        return ["witness", "a" * 64, "domain", "example.org",
+                "--nonce", "nonce-" + "n" * 24, "--verdict", "verified",
+                "--checks", raw]
+
+    def test_ambiguous_witness_checks_are_refused_before_dispatch(self):
+        unsafe = (
+            '[{"property":"signature","state":"pass","state":"fail"}]',
+            '[{"property":"signature","state":"pass","note":{"a":1,"a":2}}]',
+            '[{"property":"signature","state":"pass","note":NaN}]',
+            '[{"property":"signature","state":"pass","note":Infinity}]',
+            '{"property":"signature","state":"pass"}',
+            '[{"property":"signature","state":"pass"},null]',
+        )
+        with patch.object(memo.Client, "witness", side_effect=AssertionError("signed dispatch must not run")):
+            for raw in unsafe:
+                with self.subTest(raw=raw):
+                    with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as stopped:
+                        memo.main(self.argv(raw))
+                    self.assertEqual(stopped.exception.code, 2)
+
+    def test_valid_witness_check_array_remains_byte_semantically_unchanged(self):
+        raw = '[{"property":"signature","state":"pass","note":"checked"},{"property":"ownership","state":"fail"}]'
+        actual = memo.build_parser().parse_args(self.argv(raw))
+        self.assertEqual(actual.checks, [
+            {"property": "signature", "state": "pass", "note": "checked"},
+            {"property": "ownership", "state": "fail"}
+        ])
+        self.assertEqual(actual.verdict, "verified")
+
+
+class WitnessValidDispatchParity(unittest.TestCase):
+    """A valid --checks list retains the exact command argument structure."""
+
+    def test_unambiguous_list_reaches_client_once_without_rewriting(self):
+        recorded = []
+        def witness(client, agent, kind, value, nonce, verdict, checks, **data):
+            recorded.append((agent, kind, value, nonce, verdict, checks, data))
+            return {"ok": True}
+        raw = '[{"property":"signature","state":"pass","note":"checked evidence"}]'
+        with patch.object(memo.Client, "witness", witness), contextlib.redirect_stdout(io.StringIO()):
+            exit_code = memo.main(["witness", AGENT, "domain", "example.org",
+                                   "--nonce", "nonce-" + "n" * 24, "--verdict", "verified",
+                                   "--checks", raw])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(recorded[0][5],
+                         [{"property":"signature", "state":"pass", "note":"checked evidence"}])
+        self.assertEqual(recorded[0][1:5],
+                         ("domain","example.org","nonce-" + "n" * 24,"verified"))
