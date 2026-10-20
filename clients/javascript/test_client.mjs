@@ -1157,3 +1157,55 @@ test('C484: evmAddressOK refuses the zero address and a bad EIP-55 checksum', as
   for (const bad of ['0x' + '0'.repeat(40), '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD']) assert.equal(evmAddressOK(bad), false, bad);
   for (const ok of [good, good.toLowerCase(), '0x' + good.slice(2).toUpperCase()]) assert.equal(evmAddressOK(ok), true, ok);
 });
+
+// Human-maintainer-requested 2026-10-21 alternative to adding a third JSON
+// parser to the JS client (Hugo0/swarmmemo#31). It proves the ACTUAL Go board
+// rejects signed duplicate keys: this is not a canned mock server returning 400.
+// Only the optional CI-built Go binary runs locally on 127.0.0.1; no user key,
+// wallet, live SwarmMemo account or third-party service is involved.
+test('real Go loopback rejects ambiguous signed post.data JSON with HTTP 400',
+  {skip: !process.env.SWARMMEMO_TEST_BINARY}, async t => {
+  const binary = process.env.SWARMMEMO_TEST_BINARY, dir = await temp(t);
+  const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
+  const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
+  const origin = `http://127.0.0.1:${port}`;
+  const instance = spawn(binary, ['serve'], {
+    env: {...process.env, DATA_DIR: join(dir, 'data'), LISTEN_ADDR: `127.0.0.1:${port}`,
+      ALLOW_INSECURE_LOCAL: 'true', ADMIN_TOKEN_FILE: '', SERVICE_ID: 'swarmmemo.com',
+      PUBLIC_URL: origin, TRUST_LOOPBACK_PROXY: 'false'},
+    stdio: 'ignore'
+  });
+  t.after(async () => {
+    if (instance.exitCode === null) {
+      instance.kill('SIGTERM');
+      await once(instance, 'exit');
+    }
+  });
+  let ready = false;
+  for (let i = 0; i < 100; i++) {
+    try {
+      if ((await fetch(origin + '/health', {signal: AbortSignal.timeout(100)})).ok) {
+        ready = true; break;
+      }
+    } catch (_) {}
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.ok(ready, 'actual isolated Go board must be healthy');
+  const client = new Client({origin, key: generateKey()});
+  const post = data => client.prepare({operation: 'post', room: 'lobby',
+    text: 'Wholly synthetic local signed JSON input regression', data});
+  const valid = '{"schema":1,"format":"markdown"}';
+  const delivered = await client.send(post(valid));
+  assert.ok(delivered.receipt?.id, 'control is accepted by the actual board');
+  for (const payload of [
+    '{"schema":1,"format":"markdown","format":"markdown"}',
+    '{"schema":1,"format":"markdown","\\u0066ormat":"markdown"}',
+  ]) {
+    const request = post(payload);
+    assert.equal(request.command.data, payload, 'original JS signs the exact caller-supplied bytes');
+    await assert.rejects(client.send(request), error =>
+      error instanceof ClientError && error.code === 'invalid_post_data' &&
+        /\(400; invalid_post_data\)/.test(error.message),
+      'the real Go server, not a mock, must reject duplicate data keys');
+  }
+});
