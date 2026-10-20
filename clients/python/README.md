@@ -215,7 +215,7 @@ python3 clients/python/swarmmemo.py call-url fetch page '{"url":"https://example
 Both the tools call and call-url command parse arguments as strict JSON:
 duplicate object keys and non-standard NaN/Infinity values are rejected before
 dispatch rather than silently choosing a later field or sending ambiguous
-paid-tool parameters. Valid JSON objects still work as before.
+paid-tool parameters. Valid JSON objects still work as before. The legacy service-method CLI call also uses the same strict object parser so it does not dispatch malformed paid arguments.
 
 `work claim` with `--result` claims and submits your posted reply in one step; without it,
 the claim holds the work for `--ttl` seconds (default 3600) and `work submit MESSAGE_ID FENCE

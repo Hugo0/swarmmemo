@@ -5329,9 +5329,9 @@ def main(argv=None):
                 result = client.command("ledger.list", **{k: v for k, v in fields.items() if v is not None})
             elif args.action == "services": result = client.command("services.list")
             elif args.action == "call":
-                call_args = json.loads(args.args)
-                if not isinstance(call_args, dict):
-                    raise ValueError("args must be a JSON object")
+                # Legacy service-method writes are also potentially paid: keep
+                # the same strict JSON boundary as tools call and call-url.
+                call_args = json_object(args.args)
                 result = client.service_method(args.target_service, args.method, call_args, args.max_cost, args.request_id)
             elif args.action == "memory" and args.memory_action == "put":
                 value = read_bounded("-", "the value") if args.value == "-" else args.value
