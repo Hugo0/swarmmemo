@@ -9,7 +9,7 @@ import {spawn, spawnSync} from 'node:child_process';
 import {gzipSync} from 'node:zlib';
 import {fileURLToPath} from 'node:url';
 import {createECDH, createPrivateKey, createPublicKey, randomBytes, sign, verify} from 'node:crypto';
-import {Client, DelegatedClient, ClientError, CONTRACT, FIELDS, canonical, delegationContext, generateKey, importKey, writeKey, loadKey, conversationRoom, loadSeal, agentSubjectID, workCreateData, standingTier, WORK_STANDING_CREATE, markdownAuto, MARKDOWN_POST_DATA, keccak256, walletAddress, personalSign, loadWalletKey, walletChallengeOK, WALLET_KEY_ENV, dataFor, workRatingPost, USER_AGENT, isLoopbackHost, unb64} from './swarmmemo.mjs';
+import {Client, DelegatedClient, ClientError, CONTRACT, FIELDS, canonical, delegationContext, generateKey, importKey, writeKey, loadKey, conversationRoom, loadSeal, agentSubjectID, workCreateData, standingTier, WORK_STANDING_CREATE, markdownAuto, MARKDOWN_POST_DATA, keccak256, walletAddress, personalSign, loadWalletKey, walletChallengeOK, WALLET_KEY_ENV, dataFor, workRatingPost, USER_AGENT, isLoopbackHost, unb64, strictJSON, jsonObject} from './swarmmemo.mjs';
 
 const vector = JSON.parse(await readFile(new URL('../python/signing-vector.json', import.meta.url), 'utf8'));
 const fixtureKey = importKey({private_key: Buffer.from(vector.seed_hex, 'hex').toString('base64url'), public_key: vector.command.public_key});
@@ -1156,4 +1156,44 @@ test('C484: evmAddressOK refuses the zero address and a bad EIP-55 checksum', as
   const good = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
   for (const bad of ['0x' + '0'.repeat(40), '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD']) assert.equal(evmAddressOK(bad), false, bad);
   for (const ok of [good, good.toLowerCase(), '0x' + good.slice(2).toUpperCase()]) assert.equal(evmAddressOK(ok), true, ok);
+});
+
+// Human-maintainer-requested 2026-10-21 parity: reject Python CLI-like
+// ambiguous JSON before any JS client prepares a signed request.
+test('JS JSON arguments reject nested duplicate and escaped-alias keys', () => {
+  assert.deepEqual(strictJSON('{"checks":[{"property":"integrity","state":"pass"}],"schema":1}'),
+    {checks:[{property:'integrity',state:'pass'}],schema:1});
+  assert.deepEqual(jsonObject('{"a":[{"v":3},{"v":4}]}'),{a:[{v:3},{v:4}]});
+  for(const raw of [
+    '{"a":1,"a":2}', '{"a":1,"\\u0061":2}',
+    '{"checks":[{"property":"s","state":"pass","state":"fail"}]}',
+    '{"nested":{"ok":1,"ok":2}}',
+    '{"x":NaN}', '{"x":Infinity}', '{"x":-Infinity}', '{"x":1e999}',
+    '{"max_cost":9007199254740993}',
+    '{', '["ok",]', '{"trailing":1,}', '{"unterminated":"hi}',
+  ]) assert.throws(() => strictJSON(raw), errorCode('invalid_json'), raw);
+});
+
+test('JS argument JSON object rejects primitives and arrays but accepts intentional plain JSON',()=>{
+  for(const raw of ['[{"property":"works","state":"pass"}]', '"words"', 'null', 'true', '42'])
+    assert.throws(() => jsonObject(raw),errorCode('invalid_json'),raw);
+  assert.deepEqual(jsonObject('{"data":"JSON that contains {\\\"x\\\":1} inside a string"}'),
+    {data:'JSON that contains {"x":1} inside a string'});
+});
+
+test('JS client refuses ambiguous contract JSON before signing; keeps raw service data raw',()=>{
+  const signed = new Client({key: fixtureKey});
+  for (const [operation, data] of [
+    ['identity.witness','{"schema":1,"checks":[{"property":"s","state":"pass","state":"fail"}]}'],
+    ['work.accept','{"schema":1,"generation":"a","checks":[{"property":"conformance","property":"integrity","state":"pass"}]}'],
+    ['messaging.policy.set','{"schema":1,"inbound":{"state":"allowed","state":"blocked"}}'],
+    ['work.accept','{"schema":1,"checks":NaN}'],
+  ]) assert.throws(()=>signed.prepare({operation,message_id:'a'.repeat(32),amount:1,data}),
+      errorCode('invalid_json'),operation);
+  assert.doesNotThrow(()=>signed.prepare({operation:'work.accept',message_id:'a'.repeat(32),amount:1,
+    data:'{"schema":1,"generation":"a"}'}));
+  // Contract declares service.call.data raw, not JSON; do not silently make
+  // the SDK reject valid raw service payloads or change signed bytes.
+  assert.doesNotThrow(()=>signed.prepare({operation:'service.call',target:'memory',
+    data:'service-native opaque text'}));
 });
