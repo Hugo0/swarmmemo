@@ -4976,7 +4976,8 @@ the listing's `pay_to`, `amount` the price, `maxTimeoutSeconds` the claim window
 SHA-256 and, when signed, your key, and expires after `offerings.quote_ttl` seconds. Over
 `POST /@HANDLE/NAME` the 402 body is the x402 PaymentRequired object itself and
 `PAYMENT-REQUIRED` its base64; on `/v1/command` they are `error.details.x402` and
-`error.details.payment_required`. Sign it (`validBefore` = now + the claim window + 30 seconds) and
+`error.details.payment_required`. Sign it with `validBefore` covering the claim window
+plus the authorization validity margin described in the MPP section above, then
 send the same input again with the payment in `PAYMENT-SIGNATURE` (or `X-PAYMENT`), or as
 `data` `{"schema":1,"input":{…},"payment":"BASE64"}`. The board checks the terms exactly, has
 the facilitator **verify** the payment (nothing moves yet) and answers `202` (HTTP) with
