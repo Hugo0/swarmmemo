@@ -168,6 +168,28 @@ test('scoped client pins signer, room, generation and operations even for prepar
   assert.doesNotThrow(() => worker.prepare({operation: 'work.claim', message_id: 'a'.repeat(32), ttl: 60, data: JSON.stringify({schema: 1, generation: 'a'.repeat(32)})}));
 });
 
+test('delegated work command refuses duplicate JSON generation and payout keys BEFORE any signed prepare', () => {
+  const g = 'a'.repeat(32), other = 'b'.repeat(32), id = 'c'.repeat(32);
+  const worker = new DelegatedClient({origin: 'https://example.org', key: fixtureKey,
+    grantId: fixtureKey.fingerprint, generation: g, room: 'lab', operations: ['work.claim']});
+  const claim = data => worker.prepare({operation: 'work.claim', message_id: id, ttl: 60, data});
+  assert.doesNotThrow(() => claim(JSON.stringify({schema: 1, generation: g})));
+  // A single escaped key is valid; only a second equivalent key is ambiguous.
+  assert.doesNotThrow(() => claim('{"schema":1,"ge\\u006eeration":"' + g + '"}'));
+  const cases = [
+    '{"schema":1,"generation":"' + other + '","generation":"' + g + '"}',
+    '{"schema":1,"generation":"' + other + '","ge\\u006eeration":"' + g + '"}',
+    '{"schema":1,"generation":"' + g + '","schema":1}',
+    '{"schema":1,"generation":"' + g + '","payout_address":"0x' + 'f'.repeat(40) + '","payout_address":"0x' + 'e'.repeat(40) + '"}'
+  ];
+  for(const json of cases) {
+    assert.throws(() => claim(json), errorCode('delegation_scope'),
+      'Repeated JSON keys must fail closed, not permit silently overwritten generation or payout evidence');
+  }
+  for(const json of ['{"schema":1,"generation":NaN}', '{"schema":1,"generation":Infinity}', '{"schema":1,"generation":}', '{"schema":1,"generation":"' + g + '","extra":1}'])
+    assert.throws(() => claim(json), errorCode('delegation_scope'));
+});
+
 test('keys are portable, exclusive, owner-only, and never confused with a public key', async t => {
   const dir = await temp(t), path = join(dir, 'key.json'), summary = await writeKey(path, fixtureKey);
   assert.equal(summary.private_key, undefined); assert.equal((await stat(path)).mode & 0o777, 0o600);

@@ -2210,6 +2210,39 @@ export class Client {
 // payoutAddress is the USDC payout address the grant pins (delegation.create
 // data payout_address), if any: a delegated claim or submit may name exactly it
 // and no other; without a pin it may name none (the server enforces both).
+// Node's JSON.parse silently keeps the LAST value of repeated object keys.
+// A delegated worker signs caller-supplied raw command.data, so the local
+// grant check must reject ambiguous JSON before any prepare/sign/send. Parse
+// once with Node for full JSON syntax (also rejects NaN/Infinity), then scan
+// object keys at each depth, decoding JSON escapes before comparing names.
+// Arrays have their own depth but never own object keys. No extra package.
+function unambiguousJSON(raw) {
+  const value = JSON.parse(raw), scopes = [];
+  for (let i = 0; i < raw.length;) {
+    const c = raw[i];
+    if (c === '"') {
+      const start = i++;
+      // JSON.parse(raw) already checked escaping and well-formed syntax.
+      while (i < raw.length) {
+        if (raw[i] === '\\') { i += 2; continue; }
+        if (raw[i++] === '"') break;
+      }
+      let after = i;
+      while (after < raw.length && /[ \t\r\n]/.test(raw[after])) after++;
+      const parent = scopes.at(-1);
+      if (raw[after] === ':' && parent instanceof Set) {
+        const key = JSON.parse(raw.slice(start, i));
+        if (parent.has(key)) throw new SyntaxError('ambiguous duplicate JSON object key');
+        parent.add(key);
+      }
+    } else if (c === '{') { scopes.push(new Set()); i++; }
+    else if (c === '[') { scopes.push(null); i++; }
+    else if (c === '}' || c === ']') { scopes.pop(); i++; }
+    else i++;
+  }
+  return value;
+}
+
 export class DelegatedClient {
   #client; #context; #room; #operations; #payout;
   constructor({key, grantId, generation, room, operations, payoutAddress, ...options} = {}) {
@@ -2236,7 +2269,7 @@ export class DelegatedClient {
     if (command.operation === 'post' && (command.visibility !== 'public' || command.handle || command.attachments?.length)) fail('delegation_scope', 'Delegated posts require explicit public visibility, no borrowed handle and no attachments.');
     if (['work.claim', 'work.renew', 'work.submit'].includes(command.operation)) {
       let data;
-      try {data = JSON.parse(command.data);} catch (_) {fail('delegation_scope', 'Work data must bind the same recovery generation as this grant.');}
+      try {data = unambiguousJSON(command.data);} catch (_) {fail('delegation_scope', 'Work data must be unambiguous JSON bound to the same recovery generation as this grant.');}
       // The grant binds schema and generation; the operation's other contract
       // fields (payout_address, result_sha256) may ride along (citepulse-ai, 10-17).
       if (!data || typeof data !== 'object' || Array.isArray(data) || data.schema !== 1 || data.generation !== this.#context.generation) fail('delegation_scope', 'Work data must bind the same recovery generation as this grant.');
