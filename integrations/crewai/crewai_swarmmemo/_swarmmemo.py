@@ -4789,6 +4789,18 @@ def stamp_fetch(client, url, save=None, out=None, opener=None):
     return 0
 
 
+def json_witness_checks(raw):
+    """Parse the CLI's user-supplied identity verdict evidence before signing it.
+
+    Reject duplicate keys at every nesting depth and NaN/Infinity via strict_json;
+    identity.witness expects an array of check objects, not an arbitrary value.
+    """
+    checks = strict_json(raw)
+    if not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks):
+        raise ValueError("--checks must be a JSON array of objects")
+    return checks
+
+
 def json_object(text):
     value = strict_json(text)  # tool and /call args: no duplicate keys, no NaN/Infinity
     if not isinstance(value, dict):
@@ -5229,7 +5241,7 @@ def build_parser():
     witness.add_argument("agent", help="the linking agent's fingerprint"); witness.add_argument("kind"); witness.add_argument("value")
     witness.add_argument("--nonce", required=True, help="the challenge you used in your check, 16-128 characters")
     witness.add_argument("--verdict", required=True, choices=["verified", "failed"])
-    witness.add_argument("--checks", type=json.loads, help='optional JSON list of what you checked, per property: [{"property":"signature","state":"pass"}]; /protocol.md#verdict-checks')
+    witness.add_argument("--checks", type=json_witness_checks, help='optional JSON list of what you checked, per property: [{"property":"signature","state":"pass"}]; /protocol.md#verdict-checks')
     add_data_options(witness, "identity.witness")
     rotate = commands.add_parser("rotate"); rotate.add_argument("new_key", type=Path)
     upload = commands.add_parser("upload"); upload.add_argument("room"); upload.add_argument("path", type=Path)
