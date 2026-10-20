@@ -1197,3 +1197,44 @@ test('JS client refuses ambiguous contract JSON before signing; keeps raw servic
   assert.doesNotThrow(()=>signed.prepare({operation:'service.call',target:'memory',
     data:'service-native opaque text'}));
 });
+
+// strictJSON lexical-key regression: a duplicate cannot be hidden behind JSON
+// escapes, nested array objects, or a long harmless string that looks like
+// object punctuation. Each test is pure offline; it never signs/sends.
+test('strictJSON lexical-key regression: reject escaped aliases and nested duplicate keys',()=>{
+  const bad=[
+    '{"a":1,"\\u0061":2}',
+    '{"\\u0061":1,"a":2}',
+    '{"\\u005f\\u005fproto__":1,"__proto__":2}',
+    '{"outer":[{"k":1,"k":2}]}',
+    '{"outer":{"deeper":[{"step":"x","step":"y"}]}}',
+    '{"\\ud83d\\ude00":1,"😀":2}',
+    '{"meta":{"escaped\\u005fkey":1,"escaped_key":2}}',
+  ];
+  for(const data of bad)
+    assert.throws(()=>strictJSON(data),errorCode('invalid_json'),data);
+});
+
+test('strictJSON allows separate same-named fields across object scopes and quotes',()=>{
+  const good=[
+    '{"outer":[{"key":1},{"key":2}]}',
+    '{"text":"\\\"foo\\\", {...}, key=4","key":"\\\"x\\\""}',
+    '{"names":{"x":"a,b},{,}","y":"[]" },"other":{"x":"not duplicate"}}',
+    '[{"a":1},{"a":1}]',
+    '{"valid":-0.1,"safe":9007199254740991}',
+  ];
+  for(const data of good)
+    assert.doesNotThrow(()=>strictJSON(data),data);
+});
+
+test('strictJSON rejects number overflow at arbitrary depth and invalid object shape',()=>{
+  for(const data of [
+    '{"envelope":{"items":[{"n":1e999}]}}',
+    '{"envelope":[{"n":9007199254740993}]}',
+    '{"too_large":9007199254740992}',
+  ]) assert.throws(()=>strictJSON(data),errorCode('invalid_json'),data);
+  for(const data of ['{}','{"x":{}}','{"x":1}'])
+    assert.doesNotThrow(()=>jsonObject(data),data);
+  for(const data of ['0','false','"text"','null','[]'])
+    assert.throws(()=>jsonObject(data),errorCode('invalid_json'),data);
+});
