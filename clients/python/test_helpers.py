@@ -1097,3 +1097,89 @@ class PayoutAddressParity(unittest.TestCase):
             self.assertFalse(memo.evm_address_ok(bad), bad)
         for ok in (good, good.lower(), "0x" + good[2:].upper()):
             self.assertTrue(memo.evm_address_ok(ok), ok)
+
+
+class StrictCLIServiceArgs(unittest.TestCase):
+    """Human sponsor PR #27 follow-up: the direct paid-service CLI is also untrusted JSON."""
+
+    def test_service_call_rejects_ambiguous_args_before_dispatch(self):
+        # These used to be silently coerced by bare json.loads and could create
+        # a different paid tool request from the argument text the user reviewed.
+        invalid = (
+            '{"a":1,"a":2}',
+            '{"nested":{"limit":1,"limit":2}}',
+            '{"value":NaN}',
+            '{"value":Infinity}',
+            '{"value":-Infinity}',
+            '[]',
+        )
+        sent = []
+        def fake_service(client, service, method, args, max_cost=None, request_id=None):
+            sent.append((service, method, args))
+            return {"ok": True}
+        with patch.object(memo.Client, "service_method", fake_service):
+            for raw in invalid:
+                with self.subTest(raw=raw), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(memo.main(["call", "memory", "list", raw]), 1)
+                    self.assertEqual(sent, [], "invalid service.call JSON reached dispatch")
+
+    def test_valid_nested_service_call_preserves_argument_values(self):
+        sent = []
+        def fake_service(client, service, method, args, max_cost=None, request_id=None):
+            sent.append((service, method, args, max_cost, request_id))
+            return {"ok": True}
+        raw = '{"key":"alpha","filters":{"status":"open","active":true,"count":0,"maybe":null}}'
+        with patch.object(memo.Client, "service_method", fake_service), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(memo.main(["call", "memory", "list", raw, "--max-cost", "5", "--request-id", "known-request-12345678"]), 0)
+        self.assertEqual(sent, [(
+            "memory", "list", {"key": "alpha", "filters": {"status": "open", "active": True, "count": 0, "maybe": None}},
+            5, "known-request-12345678")])
+
+    def test_chat_protect_refuses_ambiguous_json_without_a_policy_write(self):
+        # protect set permits literal strings for user convenience, but an
+        # ambiguous JSON-looking value must never silently become a string.
+        from types import SimpleNamespace
+        actor = object.__new__(memo.Chat)
+        actor.settings_own = lambda: {}
+        actor.say = lambda line: None
+        sent = []
+        actor.set_messaging = lambda **data: sent.append(data)
+        for raw in (
+            '{"key":1,"key":2}',
+            '{"nested":{"x":1,"x":2}}',
+            '[1,NaN]',
+            '"unterminated',
+            'NaN', 'Infinity', '-Infinity',
+        ):
+            with self.subTest(raw=raw):
+                actor.args = SimpleNamespace(protect_action="set", pairs=("inbound.categories=" + raw,))
+                with self.assertRaises(memo.ChatStop):
+                    actor.protect()
+                self.assertEqual(sent, [], "ambiguous policy JSON reached server-held settings")
+        # It also must not partially dispatch if the first pair was valid.
+        actor.args = SimpleNamespace(protect_action="set", pairs=(
+            "inbound.categories=phishing,spam",
+            'inbound.threshold={"a":1,"a":2}',
+        ))
+        with self.assertRaises(memo.ChatStop):
+            actor.protect()
+        self.assertEqual(sent, [])
+
+    def test_chat_protect_retains_plain_category_strings_and_valid_json(self):
+        from types import SimpleNamespace
+        actor = object.__new__(memo.Chat)
+        actor.settings_own = lambda: {}
+        actor.say = lambda line: None
+        sent = []
+        actor.set_messaging = lambda **data: sent.append(data)
+        actor.args = SimpleNamespace(protect_action="set", pairs=(
+            "inbound.categories=phishing,spam",
+            "inbound.threshold=0.75",
+        ))
+        self.assertEqual(actor.protect(), 0)
+        self.assertEqual(sent, [{"inbound": {"categories": ["phishing", "spam"], "threshold": 0.75}}])
+        actor.args = SimpleNamespace(protect_action="set", pairs=(
+            'inbound.categories=["phishing","spam"]',
+        ))
+        self.assertEqual(actor.protect(), 0)
+        self.assertEqual(sent[-1], {"inbound": {"categories": ["phishing", "spam"]}})
