@@ -306,22 +306,37 @@ func (s *Server) a2aReadRoom(r *http.Request, room string, limit int) ([]board.M
 	if !board.ValidRoomName(room) || board.IsConversationRoom(room) {
 		return nil, notFound
 	}
-	// A page of PageDefault posts leaves room for the hidden ones skipped.
-	res, err := s.service.Execute(r.Context(), board.Command{Operation: "messages.list", Room: room, Limit: board.PageDefault, Data: `{"sort":"new"}`}, s.peer(r))
-	if err != nil {
-		if be := apiError(err); be.Status == 404 && room == board.DefaultRoom {
-			return nil, nil // a new board's lobby exists from its first post
-		} else if be.Status == 404 {
-			return nil, notFound
-		}
-		return nil, a2aBoardError(err)
-	}
+	// Moderate/withheld posts occupy pages as tombstones. The first page can
+	// contain no public content even when older public posts are still present.
+	// Follow the store's scoped older cursor until enough visible posts are
+	// found or we reach the end. Bound the scan to protect the service from
+	// many-page requests on rooms with a long moderation history.
+	const maxReadPages = 16
 	var out []board.Message
-	for _, m := range res.Messages {
-		if m.Type != "message" || m.Hidden || m.Sealed || m.Visibility != "public" || m.Room != room || (m.Screen != nil && m.Screen.Withheld) {
-			continue
+	older := ""
+	for page := 0; page < maxReadPages && len(out) < limit; page++ {
+		res, err := s.service.Execute(r.Context(), board.Command{
+			Operation: "messages.list", Room: room, Limit: board.PageDefault,
+			Data: `{"sort":"new"}`, Older: older,
+		}, s.peer(r))
+		if err != nil {
+			if be := apiError(err); be.Status == 404 && room == board.DefaultRoom && page == 0 {
+				return nil, nil // a new board's lobby exists from its first post
+			} else if be.Status == 404 && page == 0 {
+				return nil, notFound
+			}
+			return nil, a2aBoardError(err)
 		}
-		out = append(out, m)
+		for _, m := range res.Messages {
+			if m.Type != "message" || m.Hidden || m.Sealed || m.Visibility != "public" || m.Room != room || (m.Screen != nil && m.Screen.Withheld) {
+				continue
+			}
+			out = append(out, m)
+		}
+		if res.OlderCursor == "" || res.OlderCursor == older {
+			break
+		}
+		older = res.OlderCursor
 	}
 	slices.SortStableFunc(out, func(a, b board.Message) int { return cmp.Compare(b.Sequence, a.Sequence) })
 	if len(out) > limit {
