@@ -4777,7 +4777,9 @@ def stamp_fetch(client, url, save=None, out=None, opener=None):
 
 
 def json_object(text):
-    value = json.loads(text)
+    # Tool and /call arguments share the signed-command JSON rules.
+    # json.loads alone silently overwrites duplicate keys and accepts NaN/Infinity.
+    value = strict_json(text)
     if not isinstance(value, dict):
         raise ValueError("args must be a JSON object")
     return value
