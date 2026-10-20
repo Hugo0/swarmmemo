@@ -4471,8 +4471,17 @@ class Chat:
             for pair in self.args.pairs:
                 key, sep, raw = pair.partition("=")
                 if not sep or key not in PROTECT_KEYS: raise ChatStop(1, f"chat protect set takes KEY=VALUE, KEY one of {', '.join(PROTECT_KEYS)}")
-                try: value = json.loads(raw)
-                except ValueError: value = raw.split(",") if key == "inbound.categories" else raw
+                try:
+                    value = strict_json(raw)
+                except ValueError:
+                    # protect set deliberately accepts unquoted plain strings and
+                    # comma-separated category names. Keep that convenience, but
+                    # never reinterpret an invalid JSON object, array, quoted
+                    # string, or NaN/Infinity as a literal policy value.
+                    text = raw.strip()
+                    if text.startswith(("{", "[", '"')) or text in ("NaN", "Infinity", "-Infinity"):
+                        raise ChatStop(1, "chat protect set: invalid or ambiguous JSON") from None
+                    value = raw.split(",") if key == "inbound.categories" else raw
                 section, _, name = key.rpartition(".")
                 {"inbound": inbound, "outbound": outbound, "": extra}[section][name] = value
             self.set_messaging(**({"inbound": inbound} if inbound else {}), **({"outbound": outbound} if outbound else {}), **extra)
@@ -5340,7 +5349,10 @@ def main(argv=None):
                 result = client.command("ledger.list", **{k: v for k, v in fields.items() if v is not None})
             elif args.action == "services": result = client.command("services.list")
             elif args.action == "call":
-                call_args = json.loads(args.args)
+                # Raw CLI arguments are as untrusted as tools-call JSON: duplicate
+                # keys (including nested ones) and NaN/Infinity cannot be signed
+                # or charged using a parser that silently changes their meaning.
+                call_args = strict_json(args.args)
                 if not isinstance(call_args, dict):
                     raise ValueError("args must be a JSON object")
                 result = client.service_method(args.target_service, args.method, call_args, args.max_cost, args.request_id)
