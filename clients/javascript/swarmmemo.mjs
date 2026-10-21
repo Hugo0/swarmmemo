@@ -1275,6 +1275,74 @@ export class ClientError extends Error {
   }
 }
 function fail(code, message) { throw new ClientError(code, message); }
+// JavaScript parity with the Python CLI strict_json/json_object boundary:
+// JSON.parse silently keeps the *last* duplicate object key. An apparently
+// valid --checks, --json or service argument can therefore change meaning.
+// Validate JSON syntax with the runtime first, then scan only quoted object
+// keys with a stack. Decode each key with JSON.parse to catch escaped aliases
+// (e.g. "key" and "k\\u0065y"). JSON data values are not reserialized.
+export function strictJSON(raw) {
+  if (typeof raw !== 'string') fail('invalid_json', 'JSON input must be text.');
+  let value;
+  try {value = JSON.parse(raw);}
+  catch (_) {fail('invalid_json', 'Input is not strict JSON.');}
+  const frames = [];
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === '"') {
+      const begin = i;
+      for (i++; i < raw.length; i++) {
+        if (raw[i] === '\\') {i++; continue;}
+        if (raw[i] === '"') break;
+      }
+      const frame = frames.at(-1);
+      if (frame?.object && frame.expectKey) {
+        const key = JSON.parse(raw.slice(begin, i + 1));
+        if (frame.keys.has(key)) fail('invalid_json', 'Duplicate JSON object field.');
+        frame.keys.add(key);
+        frame.expectKey = false;
+      }
+    } else if (ch === '{') {
+      frames.push({object: true, expectKey: true, keys: new Set()});
+    } else if (ch === '[') {
+      frames.push({object: false});
+    } else if (ch === '}' || ch === ']') {
+      frames.pop(); // JSON.parse above proved structural validity.
+    } else if (ch === ',' && frames.at(-1)?.object) {
+      frames.at(-1).expectKey = true;
+    }
+  }
+  // JSON.parse accepts finite-looking syntax with exponents that overflow a
+  // JS Number (1e999 -> Infinity); reject that ambiguity before signing too.
+  const todo = [value];
+  while (todo.length) {
+    const item = todo.pop();
+    if (typeof item === 'number' &&
+        (!Number.isFinite(item) || (Number.isInteger(item) && !Number.isSafeInteger(item))))
+      fail('invalid_json', 'Non-finite or unsafe JSON number.');
+    if (item && typeof item === 'object')
+      for (const child of Object.values(item)) todo.push(child);
+  }
+  return value;
+}
+
+// Accept one unambiguous JSON *object* for Python CLI --json and tool/call
+// argument equivalents. Plain chat-protection words belong to the separate
+// plain-string path, not to this JSON parser.
+export function jsonObject(raw) {
+  const value = strictJSON(raw);
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    fail('invalid_json', 'JSON arguments must be one object.');
+  return value;
+}
+
+function checkJSONCommandData(command) {
+  // Service calls, blob payloads and other raw wire data are not JSON fields.
+  // Contract-generated metadata tells us which operation actually takes JSON.
+  const spec = CONTRACT.operations[command.operation]?.data;
+  if (command.data !== undefined && spec && !spec.raw)
+    jsonObject(command.data); // no rewrite of signed/wire bytes
+}
 // Operation data (C377): what each operation's data carries is the board's
 // DataSpec, in CONTRACT.operations[op].data: every field's JSON type, whether
 // it is required, its enum, its aliases and the fields it no longer takes.
@@ -2112,6 +2180,9 @@ export class Client {
   }
   prepare(input,{transport = 'command', successorKey = null, targetKey = null, format} = {}) {
     const command = commandCopy(input), mutation = mutations.has(command.operation);
+    // Reject ambiguous JSON data before preparing any new signed command.
+    // Also fail closed for a pre-signed relay; neither case transmits bytes.
+    checkJSONCommandData(command);
     if (![undefined, 'markdown', 'plain'].includes(format)) fail('invalid_option', 'format is markdown or plain.');
     if (command.private_read || command.operation.startsWith('private_read.')) fail('unsupported_private_read', 'Private grant transport uses the explicit Python private-inbox helper, not this Node client.');
     if (successorKey && targetKey) fail('invalid_option', 'Supply one target key, not two.');

@@ -7,8 +7,14 @@ This is repository source, not a claim that an npm package has been published.
 Secure key-file helpers support POSIX systems (Linux/macOS), not Windows ACLs.
 
 Importing the module—or running `node swarmmemo.mjs`—does nothing to the network,
-filesystem, or bulletin. There is no CLI with implicit actions. From this directory,
-an explicit terminal read looks like:
+filesystem, or bulletin. There is no CLI with implicit actions. If a caller does accept JSON
+arguments from its own terminal/UI, import \`strictJSON(text)\` or
+\`jsonObject(text)\` to reject duplicate keys (including escaped aliases),
+non-finite numbers, and malformed JSON before use. \`Client.prepare\` also
+validates JSON data for contract-declared JSON operations before signing;
+binary and service-native raw data remains unchanged. Plain word inputs
+(e.g. chat protection categories) are not JSON and should be handled
+separately. From this directory, an explicit terminal read looks like:
 
 ```sh
 node --input-type=module <<'JS'
