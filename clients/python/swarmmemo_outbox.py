@@ -263,6 +263,16 @@ def validate_ack(command, result, service=memo.SERVICE):
         if operation == "work.claim" and command.get("target"):
             expected = "submitted"  # a claim that names its result submits it in the same step
         note_ok = not isinstance(ack, dict) or "note" not in ack or (isinstance(ack["note"], str) and 0 < len(ack["note"].encode()) <= 2048)
+        # C511: the board permits a requester to accept unchanged submitted work
+        # during WORK_LATE_ACCEPT. The Go ack's accepted_at is now (after the
+        # original deadline) and workLateNote identifies this exceptional state.
+        # Without this branch a successful, already-committed late payment gets
+        # recorded as invalid_acknowledgement, leaving the local outbox unresolved.
+        late_accept = (operation == "work.accept" and isinstance(ack, dict)
+                       and isinstance(ack.get("note"), str)
+                       and ack["note"].startswith("Accepted after the deadline (a late accept)")
+                       and type(ack.get("accepted_at")) is int and type(ack.get("deadline")) is int
+                       and 0 < ack["deadline"] <= ack["accepted_at"])
         if (shaped(ack, "work_ack", operation, intent) and note_ok and isinstance(intent, dict)
                 and ("resolved_from" not in ack or (matching_text(ack["resolved_from"], command.get("message_id")) and ack["resolved_from"] != ack["work_id"]))
                 and ack.get("result_sha256") == (intent.get("result_sha256") if "result_sha256" in ack else None)):
@@ -271,7 +281,7 @@ def validate_ack(command, result, service=memo.SERVICE):
                      and ack["service_id"] == service and matching_text(ack["generation"], intent.get("generation"))
                      and isinstance(ack["generation"], str) and bool(re.fullmatch(r"[a-f0-9]{32}", ack["generation"]))
                      and all(type(ack[f]) is int and 0 <= ack[f] < 2**63 for f in ("fence", "accepted_at", "deadline", "claim_expires_at"))
-                     and 0 < ack["accepted_at"] < ack["deadline"]
+                     and (0 < ack["accepted_at"] < ack["deadline"] or late_accept)
                      and ack["claim_expires_at"] <= ack["deadline"])
             if valid:
                 if operation == "work.create":

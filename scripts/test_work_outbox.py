@@ -68,6 +68,31 @@ class WorkAcknowledgementTests(unittest.TestCase):
         result["data"]["ack"]["claim_expires_at"] = 99
         outbox.validate_ack(command, result)
 
+    def test_late_work_accept_ack_is_not_mistaken_for_an_invalid_response(self):
+        # Go: TestWorkLateAccept in internal/board/worklate_test.go.
+        # C511 allows a requester to accept a submitted result after the
+        # deadline (within WORK_LATE_ACCEPT), with a successful accepted ack.
+        command, result = self.fixture("work.accept")
+        result["data"]["ack"].update(
+            accepted_at=1060, deadline=1000, claim_expires_at=220,
+            note="Accepted after the deadline (a late accept).")
+        outbox.validate_ack(command, result)
+
+        # A server cannot use an arbitrary old deadline or a generic note to
+        # evade the normal strict accepted_at < deadline check.
+        for note in (None, "Accepted in time.", "late accept", ""):
+            wrong = copy.deepcopy(result)
+            if note is None:
+                wrong["data"]["ack"].pop("note")
+            else:
+                wrong["data"]["ack"]["note"] = note
+            with self.subTest(note=note), self.assertRaises(outbox.OutboxError):
+                outbox.validate_ack(command, wrong)
+        command["operation"] = "work.reject"
+        result["data"]["ack"].update(state="open", claim_expires_at=0)
+        with self.assertRaises(outbox.OutboxError):
+            outbox.validate_ack(command, result)
+
     def test_allowance_note_is_accepted_and_never_stored(self):
         # With the ledger on every write carries next.allowance (C36, RFC 0021 §12); an
         # exact retry has none, and both acknowledge the same intent.
