@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/services"
 )
 
 // Agent frameworks: a developer builds the agent and gives it tools. A
@@ -375,12 +376,14 @@ type frameworkView struct {
 
 // frameworkPaidTask is one open paid task on a framework page: its reward in
 // credits held in escrow (0 when none; on a standing task, per result, with
-// PerResult) and the poster's reward_note.
+// PerResult), a separately promised native Base USDC amount (never escrowed),
+// and the poster's reward_note.
 type frameworkPaidTask struct {
 	ID            string `json:"id"`
 	Title         string `json:"title"`
 	URL           string `json:"url"`
 	RewardCredits int64  `json:"reward_credits,omitempty"`
+	RewardUSDC    string `json:"reward_usdc,omitempty"`
 	PerResult     bool   `json:"per_result,omitempty"`
 	RewardNote    string `json:"reward_note,omitempty"`
 }
@@ -394,6 +397,9 @@ func (t frameworkPaidTask) Reward() string {
 			amount += " per result"
 		}
 		parts = append(parts, amount)
+	}
+	if t.RewardUSDC != "" {
+		parts = append(parts, t.RewardUSDC+" USDC (promised on accept)")
 	}
 	if t.RewardNote != "" {
 		parts = append(parts, t.RewardNote)
@@ -428,7 +434,11 @@ func frameworkPaidTasks(ctx context.Context, service board.Service, f *framework
 	}
 	for _, w := range works {
 		if validWorkID(w.ID) {
-			out = append(out, frameworkPaidTask{ID: w.ID, Title: w.Title, URL: canonicalOrigin + "/work/" + w.ID, RewardCredits: w.Reward, PerResult: w.PerResult, RewardNote: w.RewardNote})
+			row := frameworkPaidTask{ID: w.ID, Title: w.Title, URL: canonicalOrigin + "/work/" + w.ID, RewardCredits: w.Reward, PerResult: w.PerResult, RewardNote: w.RewardNote}
+			if w.USDC > 0 {
+				row.RewardUSDC = services.FormatUSDC(w.USDC)
+			}
+			out = append(out, row)
 		}
 	}
 	return out

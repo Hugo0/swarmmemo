@@ -11,13 +11,15 @@ import (
 )
 
 // OpenPaidWork is one public open paid task as a guide page lists it: a
-// reward in credits held in escrow (Reward, 0 when none), a reward_note the
-// poster pays (RewardNote), or both. On a standing task Reward is what one
+// reward in credits held in escrow (Reward, 0 when none), a promised native
+// Base USDC amount (USDC in six-decimal atomic units), a reward_note the
+// poster pays (RewardNote), or a combination. On a standing task Reward is what one
 // result is paid (standing.per_result, PerResult true), not its pool.
 type OpenPaidWork struct {
 	ID         string
 	Title      string
 	Reward     int64
+	USDC       int64 // native Base USDC atoms, not held in escrow
 	PerResult  bool
 	RewardNote string
 	CreatedAt  int64
@@ -37,7 +39,7 @@ const (
 // term when its title holds the term as a whole word or phrase (case
 // folded; a letter or digit on either side breaks the match), or when one of
 // its capabilities is the term. Paid is a reward held in escrow or a
-// reward_note. Hidden, private-room and simulated work is left out, as
+// promised USDC reward or reward_note. Hidden, private-room and simulated work is left out, as
 // works.list leaves it out, and so is a standing task with no seat open,
 // as works.list kind=rewarded leaves it out (standingSeatOpen). One bounded statement over works narrows by
 // substring and capability; Go checks the word boundaries, then reads the
@@ -74,7 +76,8 @@ func (s *Store) PublicOpenPaidWorkNaming(ctx context.Context, terms []string, li
 		// it before any event or room is read. The reward_note sits in the
 		// signed create payload, costly to read on every row, so it is read
 		// below only for the newest candidates, until limit are paid.
-		query := `SELECT w.id,w.title,w.capabilities,w.created_at,w.deadline,coalesce((SELECT wr.amount FROM work_rewards wr WHERE wr.work_id=w.id AND wr.state='held'),0)
+		query := `SELECT w.id,w.title,w.capabilities,w.created_at,w.deadline,coalesce((SELECT wr.amount FROM work_rewards wr WHERE wr.work_id=w.id AND wr.state='held'),0),
+ coalesce((SELECT wu.amount FROM work_usdc wu WHERE wu.work_id=w.id AND wu.state='promised'),0)
  FROM works w CROSS JOIN events e ON e.id=w.id CROSS JOIN rooms r ON r.name=e.room
  WHERE w.state IN ('open','claimed') AND w.deadline>? AND (` + strings.Join(match, " OR ") + `)
  AND e.hidden=0 AND r.visibility='public' AND e.kind<>'simulation' AND (` + workEffectiveSQL + `)='open'
@@ -87,7 +90,7 @@ func (s *Store) PublicOpenPaidWorkNaming(ctx context.Context, terms []string, li
 		for rows.Next() {
 			var w OpenPaidWork
 			var capsJSON string
-			if err := rows.Scan(&w.ID, &w.Title, &capsJSON, &w.CreatedAt, &w.deadline, &w.Reward); err != nil {
+			if err := rows.Scan(&w.ID, &w.Title, &capsJSON, &w.CreatedAt, &w.deadline, &w.Reward, &w.USDC); err != nil {
 				rows.Close()
 				return err
 			}
@@ -118,7 +121,7 @@ func (s *Store) PublicOpenPaidWorkNaming(ctx context.Context, terms []string, li
 			if err := tx.QueryRowContext(ctx, `SELECT `+workRewardNoteSQL+` FROM works w WHERE w.id=?`, w.ID).Scan(&w.RewardNote); err != nil {
 				return err
 			}
-			if w.Reward > 0 || w.RewardNote != "" {
+			if w.Reward > 0 || w.USDC > 0 || w.RewardNote != "" {
 				out = append(out, w)
 			}
 		}
