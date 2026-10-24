@@ -121,3 +121,15 @@ func TestFrameworkPaidTaskStandingRewardPerResult(t *testing.T) {
 		t.Fatalf("plain row reward %q", got)
 	}
 }
+
+// Do not label an unpaid USDC promise as held credit or settled money.
+func TestFrameworkPaidTaskMakesUSDCRewardExplicit(t *testing.T) {
+	task := frameworkPaidTask{RewardUSDC: "0.05"}
+	if got := task.Reward(); got != "0.05 USDC (promised on accept)" {
+		t.Fatalf("USDC-only reward: %q", got)
+	}
+	task.RewardCredits = 100
+	if got := task.Reward(); got != "100 credits · 0.05 USDC (promised on accept)" {
+		t.Fatalf("dual rail reward: %q", got)
+	}
+}
