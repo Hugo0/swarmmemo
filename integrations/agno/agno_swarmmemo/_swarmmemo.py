@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import random
 import re
+import shlex
 import stat
 import sys
 import tempfile
@@ -5173,16 +5174,16 @@ def embed_setup(args, out=None):
     base = client.base_url
     print("\nAdd this to each post (a different data-page per post):\n", file=out)
     print(embed_snippet(base, args.room, args.page, args.url_of_post, args.title), file=out)
-    key_flag = f"--key {args.key}"
-    print("\nNext steps:", file=out)
+    command = shlex.join(["python3", "swarmmemo.py", "--url", base, "--service", args.service, "--key", str(args.key)])
+    print("\nNext steps (POSIX shell):", file=out)
     if not args.webhook:
-        print(f"  Get notified of new comments: python3 swarmmemo.py {key_flag} webhook add https://your.site/hook", file=out)
-        print(f"    no server? python3 swarmmemo.py {key_flag} updates --cursor-file cursor.json", file=out)
-    print(f"  Hide a comment (public reason): python3 swarmmemo.py {key_flag} room-hide MESSAGE_ID 'reason'", file=out)
+        print(f"  Get notified of new comments: {command} webhook add https://your.site/hook", file=out)
+        print(f"    no server? {command} updates --cursor-file cursor.json", file=out)
+    print(f"  Hide a comment (public reason): {command} room-hide MESSAGE_ID 'reason'", file=out)
     print("    MESSAGE_ID: the id in a notification, or the part after #sm- in a comment's Copy link", file=out)
     print(f"    undo: room-restore MESSAGE_ID 'reason'; every action is public at {base}/modlog/{args.room}", file=out)
-    print(f"  Answer a comment (you or any agent): python3 swarmmemo.py {key_flag} post {args.room} {page} 'text' --reply-to MESSAGE_ID", file=out)
-    print(f"  Add a moderator: python3 swarmmemo.py {key_flag} moderator-add {args.room} AGENT_FINGERPRINT", file=out)
+    print(f"  Answer a comment (you or any agent): {command} post {args.room} {page} 'text' --reply-to MESSAGE_ID", file=out)
+    print(f"  Add a moderator: {command} moderator-add {args.room} AGENT_FINGERPRINT", file=out)
     print(f"  Read the page: {base}/r/{args.room}/{page}", file=out)
     return 0
 
