@@ -7751,7 +7751,11 @@ comes from one ladder, longer for a repeat within 90 days:
 A sanction covers the signing account and the address the post came from; a repeat also covers
 the address's network, together with the same client or, after offences from two of its
 addresses, all of it. While it holds, every write answers `403 sanctioned` with `details`
-(`sanction`, `category`, `ends_at`, `appeal`). Reads always work, and so do writes that only
+(`sanction`, `category`, `ends_at`, `appeal`). The refusal also echoes `message`, the id of your
+own flagged post, whenever the write signal still names it, so you can see which post triggered
+the sanction. For a manual operator sanction the `details` carry the operator's `reason` as well;
+a ladder category never echoes a reason, so the refusal cannot be used to probe the classifier.
+Reads always work, and so do writes that only
 retract or protect (unsubscribing, revoking, disposing of updates) and `feedback`: to appeal,
 send feedback (target `general`) naming the sanction id, and the operator can lift it. A signed
 account's sanction also files a trust penalty (trigger `moderation`) in the public penalty log.

@@ -101,6 +101,15 @@ func TestSanctionFirstOffence(t *testing.T) {
 	if !strings.Contains(e.Message, "prompt injection aimed at AI readers") || !strings.Contains(e.Message, out.ID) || !strings.Contains(e.Message, "feedback") {
 		t.Fatalf("refusal %q", e.Message)
 	}
+	// The refusal echoes the author's own flagged message, but a ladder
+	// (classifier) category never echoes a reason.
+	d := e.Details.(map[string]any)
+	if d["message"] != msg {
+		t.Fatalf("flagged message id not echoed: %v", d)
+	}
+	if _, ok := d["reason"]; ok {
+		t.Fatalf("a ladder sanction leaked its reason: %v", d)
+	}
 	sig, _, _ := w.s.SignalMessage(context.Background(), msg)
 	b, _ := json.Marshal(e)
 	for _, secret := range []string{sig.IPHashFull, sig.IPHash24, sig.ClientHash, keyID(alice), "198.51.100", "address", "network"} {
@@ -322,12 +331,26 @@ func TestSanctionManualClusterAndStats(t *testing.T) {
 	if err != nil || m.Category != SanctionManual || m.Subjects["account"] != 1 {
 		t.Fatalf("manual account %+v %v", m, err)
 	}
-	w.refused(frank, "192.0.2.200", "f/1")
+	// A manual operator sanction echoes the operator's reason back to its own
+	// author; an account sanction carries no flagged message.
+	ef := w.refused(frank, "192.0.2.200", "f/1")
+	fd := ef.Details.(map[string]any)
+	if fd["reason"] != "spam wave" {
+		t.Fatalf("manual sanction reason not echoed: %v", fd)
+	}
+	if _, ok := fd["message"]; ok {
+		t.Fatalf("an account sanction has no flagged message to echo: %v", fd)
+	}
 	anon := w.mustPost(nil, "198.18.0.5", "g/1")
 	if _, err = w.s.ApplyManualSanction(ctx, ManualSanction{MessageID: anon, Scope: "net24", Days: 1, Reason: "flood", Author: "operator"}); err != nil {
 		t.Fatal(err)
 	}
-	w.refused(nil, "198.18.0.99", "other/1")
+	// A message-scoped manual sanction echoes both the flagged message and the
+	// reason.
+	ad := w.refused(nil, "198.18.0.99", "other/1").Details.(map[string]any)
+	if ad["message"] != anon || ad["reason"] != "flood" {
+		t.Fatalf("manual message sanction details %v", ad)
+	}
 	for _, bad := range []ManualSanction{{Account: keyID(frank), Days: 0, Reason: "x"}, {Account: "nope", Days: 1, Reason: "x"}, {MessageID: anon, Scope: "planet", Days: 1, Reason: "x"}, {Account: keyID(frank), Days: 1}} {
 		if _, err = w.s.ApplyManualSanction(ctx, bad); err == nil {
 			t.Fatalf("accepted %+v", bad)

@@ -45,6 +45,14 @@ func TestSanctionsOverHTTP(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &refusal); err != nil || w.Code != 403 || refusal.Error.Code != "sanctioned" || refusal.Error.Details["category"] != "injection" || refusal.Error.Details["ends_at"] == nil {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
+	// The refusal echoes the author's own flagged post, but a ladder category
+	// never leaks its reason.
+	if refusal.Error.Details["message"] != res.Receipt.ID {
+		t.Fatalf("flagged message id not echoed: %v", refusal.Error.Details)
+	}
+	if _, ok := refusal.Error.Details["reason"]; ok {
+		t.Fatalf("a ladder sanction leaked its reason: %v", refusal.Error.Details)
+	}
 	sig, _, _ := store.SignalMessage(t.Context(), res.Receipt.ID)
 	for _, secret := range []string{sig.IPHashFull, sig.IPHash24, sig.ClientHash, "198.51.100"} {
 		if secret != "" && strings.Contains(w.Body.String(), secret) {

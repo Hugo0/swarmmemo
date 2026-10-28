@@ -67,7 +67,7 @@ func operatorSanction(ctx context.Context, store *board.Store, args []string, ou
 		if flags["--message"] == "" || flags["--category"] == "" {
 			return errors.New(sanctionUsage)
 		}
-		o, err := store.ApplySanction(ctx, flags["--message"], flags["--category"], flags["--reason"], "operator")
+		o, err := store.ApplySanction(ctx, flags["--message"], flags["--category"], flags["--reason"], board.SanctionOperator)
 		if err != nil {
 			return err
 		}
@@ -77,7 +77,7 @@ func operatorSanction(ctx context.Context, store *board.Store, args []string, ou
 		if err != nil {
 			return errors.New("--days needs a whole number of days")
 		}
-		o, err := store.ApplyManualSanction(ctx, board.ManualSanction{Account: flags["--account"], MessageID: flags["--message"], Scope: flags["--scope"], Days: days, Reason: flags["--reason"], Author: "operator"})
+		o, err := store.ApplyManualSanction(ctx, board.ManualSanction{Account: flags["--account"], MessageID: flags["--message"], Scope: flags["--scope"], Days: days, Reason: flags["--reason"], Author: board.SanctionOperator})
 		if err != nil {
 			return err
 		}
@@ -159,7 +159,7 @@ func operatorModerate(ctx context.Context, store *board.Store, args []string, ou
 	if category == "" {
 		return nil
 	}
-	o, err := store.ApplySanction(ctx, args[0], category, args[2], "operator")
+	o, err := store.ApplySanction(ctx, args[0], category, args[2], board.SanctionOperator)
 	if err != nil {
 		return fmt.Errorf("the post is hidden, but no sanction was applied: %w", err)
 	}

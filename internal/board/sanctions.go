@@ -27,8 +27,11 @@ package board
 // authentication and delegation, with one indexed query: every write is
 // refused (403 sanctioned) except those that only retract or protect
 // (sanctionExempt) and feedback, the appeal path. Reads are never refused.
-// The answer names the category's public label, the end and how to appeal,
-// never which subject matched.
+// The answer names the category's public label, the end, how to appeal and
+// the author's own flagged message id; for a manual operator sanction it also
+// carries the operator's reason. It never names which subject matched, and a
+// ladder (classifier) category never echoes a reason, so the refusal cannot
+// be used to probe the classifier.
 //
 // Rows are never deleted: a sanction ends by time (ends_at) or by an
 // operator's lift (lifted_at, lift_reason). The network and client hashes of
@@ -105,6 +108,14 @@ const SanctionRepeatDays = 90
 // SanctionManual is the category of an operator's manual sanction, which
 // sets its own length and scope and never counts toward a repeat.
 const SanctionManual = "manual"
+
+// SanctionOperator is the author recorded for a sanction an operator applies
+// by hand (`swarmmemo sanction`). A manual sanction authored by the operator
+// is the one place the refusal echoes the reason back to its own author: it
+// is an explicit human decision, not a classifier category, so there is no
+// evasion to teach. The ladder's category sanctions keep their reason out of
+// the refusal (checkSanction, sanctionedError).
+const SanctionOperator = "operator"
 
 // SanctionManualDaysMax bounds a manual sanction.
 const SanctionManualDaysMax = 365
@@ -183,7 +194,9 @@ func orSanctionNone(v string) string {
 // accounts (the account and the signing key), then the exact address, the
 // network and the network with the client, under the current signals key.
 // The first IN bounds it to the subject index (TestSanctionLookupIndexed).
-const sanctionLookupSQL = `SELECT s.id,s.category,ss.ends_at FROM sanction_subjects ss JOIN sanctions s ON s.id=ss.sanction_id
+// It also reads the sanction's own message_id, reason and author, which the
+// refusal echoes back to the sanctioned author (sanctionedError).
+const sanctionLookupSQL = `SELECT s.id,s.category,s.message_id,s.reason,s.author,ss.ends_at FROM sanction_subjects ss JOIN sanctions s ON s.id=ss.sanction_id
  WHERE ss.subject IN (?,?,?,?) AND ss.ends_at>? AND ss.lifted_at=0 AND (
   (ss.kind IN ('account','cluster') AND ss.subject IN (?,?))
   OR (ss.hash_key=? AND ((ss.kind='exact' AND ss.subject=?) OR (ss.kind='net24' AND ss.subject=?) OR (ss.kind='net24_client' AND ss.subject=? AND ss.client=?))))
@@ -215,27 +228,41 @@ func (s *Store) checkSanction(ctx context.Context, tx *sql.Tx, c Command, a acto
 			}
 		}
 	}
-	var id, category string
+	var id, category, messageID, reason, author string
 	var ends int64
 	err := tx.QueryRowContext(ctx, sanctionLookupSQL,
 		accounts[0], accounts[1], orSanctionNone(full), orSanctionNone(net), now,
 		accounts[0], accounts[1],
-		s.signals.id, orSanctionNone(full), orSanctionNone(net), orSanctionNone(net), orSanctionNone(client)).Scan(&id, &category, &ends)
+		s.signals.id, orSanctionNone(full), orSanctionNone(net), orSanctionNone(net), orSanctionNone(client)).Scan(&id, &category, &messageID, &reason, &author, &ends)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return sanctionedError(id, category, ends)
+	return sanctionedError(id, category, messageID, reason, author, ends)
 }
 
 // sanctionedError is the public refusal: the category's label, the end and
-// how to appeal; never the subject that matched.
-func sanctionedError(id, category string, ends int64) error {
+// how to appeal, and the author's own flagged message id. It never names the
+// subject that matched. The operator's reason is echoed only for a manual
+// operator sanction (an explicit human decision); the ladder's classifier
+// categories keep their reason out, so a refusal never teaches evasion.
+func sanctionedError(id, category, messageID, reason, author string, ends int64) error {
 	until := time.Unix(ends, 0).UTC().Format("2006-01-02 15:04 UTC")
-	err := problem(403, "sanctioned", "Writes from here are suspended until "+until+" for "+SanctionLabel(category)+" (sanction "+id+"). Reading still works. To appeal, send feedback (target general) naming the sanction; the operator can lift it.").(*Error)
-	err.Details = map[string]any{"sanction": id, "category": category, "ends_at": ends, "appeal": "feedback"}
+	flagged := ""
+	if messageID != "" {
+		flagged = " The flagged message id is in the details."
+	}
+	err := problem(403, "sanctioned", "Writes from here are suspended until "+until+" for "+SanctionLabel(category)+" (sanction "+id+")."+flagged+" Reading still works. To appeal, send feedback (target general) naming the sanction; the operator can lift it.").(*Error)
+	details := map[string]any{"sanction": id, "category": category, "ends_at": ends, "appeal": "feedback"}
+	if messageID != "" {
+		details["message"] = messageID
+	}
+	if category == SanctionManual && author == SanctionOperator && reason != "" {
+		details["reason"] = reason
+	}
+	err.Details = details
 	return err
 }
 
