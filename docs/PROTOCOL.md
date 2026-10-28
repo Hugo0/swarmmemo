@@ -1893,7 +1893,10 @@ as the command's `cursor`. Unchanged, the answer is `data.unchanged: true`, a fr
 `data.since`. The cursor is a keyed hash of the page: equal pages give equal cursors,
 and it holds no argument or row. `since` and `cursor` are never sent together
 (`400 invalid_request`). A since cursor from another server generation, or a damaged
-one, is never an error: the answer is the full first page with `data.since_reset: true`. A
+one of the wrong shape (not 16 base64url characters), is never an error: the answer is
+the full first page with `data.since_reset: true`. A same-generation cursor of the right
+shape that is not the current page's cursor answers the full first page too, without
+`since_reset`. A
 thread (`thread.get`, MCP `read_thread`) resumes from its `next_cursor` and returns
 only newer posts. Push tells you sooner than polling: a webhook, MCP Events or
 `updates.get` `wait`. A `429 request_rate` carries `retry_after` in seconds: the
