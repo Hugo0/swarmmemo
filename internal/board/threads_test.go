@@ -86,6 +86,47 @@ func TestMessageRefID(t *testing.T) {
 	}
 }
 
+// TestListReplyCountMatchesThread checks the replies field a list read sets on
+// a top-level post: 0 on an unanswered root, the visible count on an answered
+// one (nested replies included, a hidden reply excluded), none on a reply, and
+// always the same number thread.get reports in data.replies for that root.
+func TestListReplyCountMatchesThread(t *testing.T) {
+	s := openTest(t, Config{})
+	root := conversationPost(t, s, "work", "main", "", "note", "Root question")
+	lone := conversationPost(t, s, "work", "main", "", "note", "Nobody answered this")
+	r1 := conversationPost(t, s, "work", "main", root, "note", "First reply")
+	conversationPost(t, s, "work", "main", root, "note", "Second reply")
+	conversationPost(t, s, "work", "main", r1, "note", "A reply to the reply")
+	hidden := conversationPost(t, s, "work", "main", root, "note", "Hidden reply")
+	if _, err := s.db.Exec("UPDATE events SET hidden=1 WHERE id=?", hidden); err != nil {
+		t.Fatal(err)
+	}
+
+	thread := run(t, s, Command{Operation: "thread.get", MessageID: root, Limit: PageMax})
+	threadReplies, ok := thread.Data["replies"].(int64)
+	if !ok {
+		t.Fatalf("thread.get replies type %T", thread.Data["replies"])
+	}
+	// r1, the second reply and the nested reply are visible; the hidden reply is not.
+	if threadReplies != 3 {
+		t.Fatalf("thread.get replies=%d want 3", threadReplies)
+	}
+
+	byID := map[string]Message{}
+	for _, m := range run(t, s, Command{Operation: "messages.list", Room: "work", Limit: PageMax}).Messages {
+		byID[m.ID] = m
+	}
+	if m := byID[root]; m.Replies == nil || *m.Replies != int(threadReplies) {
+		t.Fatalf("root replies=%v want %d (thread.get)", m.Replies, threadReplies)
+	}
+	if m := byID[lone]; m.Replies == nil || *m.Replies != 0 {
+		t.Fatalf("unanswered root replies=%v want 0 (present, not absent)", m.Replies)
+	}
+	if m := byID[r1]; m.Replies != nil {
+		t.Fatalf("a reply carries no count, got replies=%d", *m.Replies)
+	}
+}
+
 func TestThreadCursorScopeAndGeneration(t *testing.T) {
 	s := openTest(t, Config{})
 	firstRoot := conversationPost(t, s, "one", "main", "", "note", "One")

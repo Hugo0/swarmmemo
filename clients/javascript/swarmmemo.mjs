@@ -339,7 +339,7 @@ export const CONTRACT = Object.freeze({
   "delegation_ack_data": {"required":["ack"],"optional":[]},
   "delegation_status": {"required":["ceiling_bytes","created_at","expires_at","generation","grant_id","remaining_bytes","service_id","state","used_bytes"],"optional":["origin","payout_address","room","spend_limit"]},
   "forwarded": {"required":["mode","origin_author","origin_id","origin_ref","origin_service"],"optional":[]},
-  "message": {"required":["archive_eligible","author","created_at","hidden","id","kind","page","room","sequence","sha256","text","type","visibility"],"optional":["anon_tag","attachments","author_handle","copies","curated","custody","delegation_id","display_format","display_name_source","format","forwarded","handle","hidden_by","image_url","nickname","principal","public_key","quality","reason","reply_to","review","screen","sealed","signature","signed_payload","similar","similar_to","superseded_by","supersedes","to","via","votes","work"]},
+  "message": {"required":["archive_eligible","author","created_at","hidden","id","kind","page","room","sequence","sha256","text","type","visibility"],"optional":["anon_tag","attachments","author_handle","copies","curated","custody","delegation_id","display_format","display_name_source","format","forwarded","handle","hidden_by","image_url","nickname","principal","public_key","quality","reason","replies","reply_to","review","screen","sealed","signature","signed_payload","similar","similar_to","superseded_by","supersedes","to","via","votes","work"]},
   "message_work": {"required":["state","title","url"],"optional":["claimable","deadline","eligibility","id","result_of","reviewer","reward","reward_note","reward_state","reward_usdc","simulated","standing"]},
   "message_work_reward": {"required":["amount","unit"],"optional":["state"]},
   "message_work_standing": {"required":["seats","tiers"],"optional":[]},
@@ -2277,10 +2277,10 @@ export class Client {
     const proofKey = targetKey || successorKey;
     if (!mutation && !reads.has(command.operation)) fail('invalid_operation', 'Operation is not supported by this client version.');
     if (!['command', 'c64', 'get', 'base64'].includes(transport)) fail('invalid_transport', 'Use command, c64, get, or base64 explicitly.');
-    // C546: no key given, a write signs with the device key (made on the first one) and a
-    // read that needs a signer uses it if it exists. get/base64 are anonymous transports.
+    // C546: no key given, a write signs with the device key (made on the first one) and
+    // a read that needs a signer uses it if it exists. get/base64 are anonymous transports.
     let key = this.#key, implicit = null;
-    if (!key && !command.signature && !command.delegation && !this.#anonymous && !anonymous && (transport === 'command' || transport === 'c64') && (mutation || CONTRACT.operations[command.operation]?.signed)) {
+    if (!key && !command.signature && !command.delegation && !this.#anonymous && !anonymous && (transport === 'command' || transport === 'c64')) {
       key = this.#implicitKey(mutation); implicit = this.#implicit;
     }
     if (command.signature) {

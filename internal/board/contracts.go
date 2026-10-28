@@ -116,6 +116,15 @@ type Message struct {
 	// (ranking.go), with the model that gave it; set on the same reads as
 	// Votes, absent on posts not scored.
 	Quality *Quality `json:"quality,omitempty"`
+	// Replies is the number of visible posts in this top-level post's thread
+	// after the root, the same count read_thread reports in data.replies
+	// (threadReplyStats): a reader learns whether a post was answered without a
+	// second read. Set on the same reads as Votes, on top-level origin posts
+	// only (reply_to=='' and supersedes==''); a reply, and a newer version
+	// listed as a root, carry none (the seeded walk matches read_thread only
+	// from the origin). Present even when 0, so an unanswered root is told apart
+	// from a reply. Never in exports or receipts.
+	Replies *int `json:"replies,omitempty"`
 	// Copies is set on a ranked entry across rooms (the front page's hot
 	// and top, feed.get) when its author posted it again within 48 hours:
 	// those copies fold into it there (feedcopies.go). Never in exports.

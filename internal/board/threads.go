@@ -444,6 +444,96 @@ func threadReplyStats(ctx context.Context, tx *sql.Tx, refs []threadReference) (
 	return replies, last, nil
 }
 
+// replyCountWalkMax bounds the whole batched reply-count walk — every root on
+// the page together — as ThreadTraversalLimit bounds one thread.get. A page of
+// ordinary threads never approaches it; a pathological thread can only make the
+// list's count an underestimate, never unbounded work.
+const replyCountWalkMax = 50000
+
+// replyCountsFor counts, for each id in rootIDs, the visible posts in its
+// thread after the root: the same number threadReplyStats gives read_thread
+// (data.replies), for a whole page of roots in one statement instead of a
+// traversal each. A root with no replies is absent from the map (read as 0).
+// The walk mirrors threadReferences' edges (replies by reply_to, newer versions
+// by supersedes, older same-room rows only) and carries each descendant's root
+// and room through the recursion, so a page spanning rooms stays correct; the
+// count filters exactly as threadReplyStats does (hidden excluded, one row per
+// message however often edited: supersedes='').
+func replyCountsFor(ctx context.Context, tx *sql.Tx, rootIDs []string) (map[string]int64, error) {
+	out := map[string]int64{}
+	if len(rootIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(rootIDs)+1)
+	for _, id := range rootIDs {
+		args = append(args, id)
+	}
+	args = append(args, replyCountWalkMax)
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(rootIDs)), ",")
+	query := `WITH RECURSIVE down(root, room, id, seq, hidden, supersedes) AS (
+ SELECT e.id, e.room, e.id, e.seq, e.hidden, e.supersedes FROM events e WHERE e.id IN (` + marks + `)
+ UNION
+ SELECT d.root, d.room, c.id, c.seq, c.hidden, c.supersedes FROM down d JOIN events c ON c.reply_to=d.id AND c.room=d.room AND c.seq>d.seq
+ UNION
+ SELECT d.root, d.room, c.id, c.seq, c.hidden, c.supersedes FROM down d JOIN events c ON c.supersedes=d.id AND c.supersedes<>'' AND c.room=d.room AND c.seq>d.seq
+ LIMIT ?)
+SELECT root, count(*) FROM down WHERE id<>root AND hidden=0 AND supersedes='' GROUP BY root`
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, conversationError(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var root string
+		var n int64
+		if err = rows.Scan(&root, &n); err != nil {
+			return nil, conversationError(err)
+		}
+		out[root] = n
+	}
+	if err = rows.Err(); err != nil {
+		return nil, conversationError(err)
+	}
+	return out, nil
+}
+
+// attachReplyCounts sets Replies on each top-level ORIGIN post (reply_to=='' and
+// supersedes=='') in events to its thread's visible reply count, the number
+// read_thread reports (threadReplyStats). A reply carries none, and so does a
+// newer version shown as a root (supersedes!=''): the walk is seeded from the
+// listed id, and only an origin's subtree matches read_thread, which resolves to
+// the origin first. Withholding the count there (nil) sends the reader to
+// read_thread rather than risk an undercount read as "unanswered". One batched
+// walk serves the whole page (replyCountsFor), never a query per post.
+func attachReplyCounts(ctx context.Context, tx *sql.Tx, events []Message) error {
+	idx := map[string][]int{}
+	ids := make([]string, 0, len(events))
+	for i, e := range events {
+		if e.Type != "message" || e.ReplyTo != "" || e.Supersedes != "" {
+			continue
+		}
+		if _, seen := idx[e.ID]; !seen {
+			ids = append(ids, e.ID)
+		}
+		idx[e.ID] = append(idx[e.ID], i)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	counts, err := replyCountsFor(ctx, tx, ids)
+	if err != nil {
+		return err
+	}
+	for id, at := range idx {
+		n := int(counts[id])
+		for _, i := range at {
+			c := n
+			events[i].Replies = &c
+		}
+	}
+	return nil
+}
+
 func (s *Store) readRoomPages(ctx context.Context, tx *sql.Tx, c Command, a actor) (Result, error) {
 	if !ValidRoomName(c.Room) {
 		return Result{}, problem(400, "invalid_slug", "room.pages requires an explicit lowercase room slug or personal room.")

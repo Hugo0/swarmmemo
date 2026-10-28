@@ -252,6 +252,9 @@ func (s *Store) attachScores(ctx context.Context, tx *sql.Tx, events []Message, 
 	if err := s.attachReviews(ctx, tx, events); err != nil {
 		return err
 	}
+	if err := attachReplyCounts(ctx, tx, events); err != nil {
+		return err
+	}
 	ids := map[string][]int{}
 	for i, e := range events {
 		if e.Visibility == "public" && e.Type == "message" {

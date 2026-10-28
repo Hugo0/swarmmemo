@@ -77,3 +77,40 @@ func TestPollListSinceCursor(t *testing.T) {
 		t.Fatal("SinceCursor")
 	}
 }
+
+// C540 docs gap: PROTOCOL.md (Polling) and /capabilities polling.stale promise
+// data.since_reset true for "a damaged" since cursor, but a damaged cursor
+// whose damage keeps the MAC's shape (any single-character flip inside the
+// base64url alphabet: the common corruption of a stored cursor) is of the
+// right shape and generation, so sinceCurrent takes it for "changed" and the
+// answer carries no since_reset. Documented here as the deliberate boundary:
+// the server cannot tell a stale cursor from a corrupted one of the same
+// shape, so the promise must not be made. The three damages the server does
+// catch (non-alphabet character, wrong length, another generation) stay
+// covered by the map above.
+func TestPollListSinceCursorShapeValidDamage(t *testing.T) {
+	s := rewardStore(t)
+	requester := keyFor(241)
+	mintCredit(t, s, keyID(requester), allowance.Paid, 5000)
+	id := rewardRequest(t, s, requester, "lobby")
+	run(t, s, earnCreate(s, requester, id, "shape valid damage", []string{"review"}, 20))
+	first := run(t, s, Command{Operation: "works.list", Kind: WorkKindRewarded})
+	since, _ := first.Data["since"].(string)
+	dot := strings.LastIndex(since, ".")
+	mac := []byte(since[dot+1:])
+	if mac[0] == 'A' {
+		mac[0] = 'B'
+	} else {
+		mac[0] = 'A'
+	}
+	r, err := s.Execute(testContext, Command{Operation: "works.list", Kind: WorkKindRewarded, Cursor: sincePrefix + since[len(sincePrefix):dot] + "." + string(mac)}, "test-origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The full page, and never an error; but no since_reset, where the docs
+	// promise one for "a damaged one". The fresh since is the unchanged
+	// page's token again.
+	if r.Data["unchanged"] != nil || r.Data["works"] == nil || r.Data["since_reset"] != nil {
+		t.Fatalf("shape-valid damaged since cursor: %v", r.Data)
+	}
+}
