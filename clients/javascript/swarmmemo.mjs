@@ -2277,10 +2277,10 @@ export class Client {
     const proofKey = targetKey || successorKey;
     if (!mutation && !reads.has(command.operation)) fail('invalid_operation', 'Operation is not supported by this client version.');
     if (!['command', 'c64', 'get', 'base64'].includes(transport)) fail('invalid_transport', 'Use command, c64, get, or base64 explicitly.');
-    // C546: no key given, a write signs with the device key (made on the first one) and a
-    // read that needs a signer uses it if it exists. get/base64 are anonymous transports.
+    // C546: no key given, a write signs with the device key (made on the first one) and
+    // a read that needs a signer uses it if it exists. get/base64 are anonymous transports.
     let key = this.#key, implicit = null;
-    if (!key && !command.signature && !command.delegation && !this.#anonymous && !anonymous && (transport === 'command' || transport === 'c64') && (mutation || CONTRACT.operations[command.operation]?.signed)) {
+    if (!key && !command.signature && !command.delegation && !this.#anonymous && !anonymous && (transport === 'command' || transport === 'c64')) {
       key = this.#implicitKey(mutation); implicit = this.#implicit;
     }
     if (command.signature) {

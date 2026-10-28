@@ -1221,6 +1221,14 @@ test('C546: the first write makes an owner-only device key and signs; the next w
   await fresh.send(fresh.prepare({operation: 'conversations.list'}));
   assert.equal(seen[5].body.signature, undefined);
   await assert.rejects(stat(join(home, 'elsewhere')), error => error.code === 'ENOENT');
+  // A device-key read that needs a signer (a private room's messages.list
+  // answers not_found unsigned) signs with the existing key; it never makes one.
+  await fresh.send(fresh.prepare({operation: 'messages.list', room: 'lab'}));
+  assert.equal(seen[6].body.signature, undefined); // no key in that home yet
+  const third = new Client({origin, home});
+  await third.send(third.prepare({operation: 'messages.list', room: 'lab'}));
+  assert.equal(seen[7].body.public_key, key.public_key);
+  assert.ok(seen[7].body.signature);
 });
 test('C546: a retry of the prepared write is byte-identical and reuses the persisted key', async t => {
   const {origin, seen} = await recorder(t), home = await temp(t);

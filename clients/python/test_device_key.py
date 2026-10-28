@@ -105,6 +105,28 @@ class DeviceKeyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "GET convenience posting is anonymous"):
             memo.Client(key=memo.load_key(explicit)).post("lobby", "main", "hi", transport="get")
 
+    def test_a_read_that_needs_a_signer_uses_the_existing_device_key(self):
+        # A private room's messages.list answers not_found unsigned (the server
+        # hides it), so the README promises: a read that needs a signer uses the
+        # device key once it exists. It still never makes one.
+        self.cli("read", "lab", "--limit", "5")  # no key yet: unsigned, makes nothing
+        self.assertFalse(self.home.exists())
+        self.assertEqual(self.sent[-1][1], None)
+        self.cli("post", "lobby", "main", "hello")  # makes the device key
+        public = memo.b64(memo.public_bytes(memo.load_key(self.key_file)))
+        before = self.key_file.read_bytes()
+        self.cli("read", "lab", "--limit", "5")
+        path, body = self.sent[-1]
+        self.assertEqual(path, "/v1/command")
+        self.assertEqual(body["operation"], "messages.list")
+        self.assertEqual(body["public_key"], public)
+        self.assertIn("signature", body)
+        self.assertEqual(self.key_file.read_bytes(), before)  # the read made nothing
+        # The library client does the same on the same home.
+        client = memo.Client(device_key=True)
+        client.messages("lab")
+        self.assertEqual(self.sent[-1][1]["public_key"], public)
+
     def test_readme_examples_run_verbatim(self):
         lines = [line for line in README.read_text().splitlines() if line.startswith("python3 clients/python/swarmmemo.py ")][:4]
         self.assertEqual(len(lines), 4)

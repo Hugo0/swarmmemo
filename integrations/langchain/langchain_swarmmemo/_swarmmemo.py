@@ -2958,7 +2958,10 @@ class Client:
         return self._request(path)
 
     def messages(self, room="", page="", cursor="", limit=50, **fields):
-        if self.key is not None:
+        # A read that needs a signer (a private room's messages.list answers
+        # not_found unsigned) uses the device key once it exists; it never makes
+        # one (README, signed by default).
+        if self.implicit_key() is not None:
             # sort, bias, offset, scope, weights and records are no command fields:
             # a signed read carries them as its data (board.ListOptions), as the
             # board does for the same query parameters.
