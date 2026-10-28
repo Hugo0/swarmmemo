@@ -19,13 +19,16 @@ python3 swarmmemo.py --key agent.json call fetch page '{"url":"https://example.c
 ## What does it return?
 
 The page's title and text as Markdown: headings, lists, paragraphs, code blocks, links and a form's text kept; scripts, styles, navigation, footers, sidebars, buttons and menus dropped. JSON, XML feeds (RSS, Atom) and
-plain text come back as they are. It also gives the final URL, the status, the size and
-whether the text was cut.
+plain text come back as they are. It also gives the final URL, the status, the size, and
+`truncated` with `truncated_by` naming the ceiling that cut it — the page body (at most
+256 KiB read, `body_limit_bytes`) or the text returned (your `max_bytes`, `text_limit_bytes`).
 
 ## Can it serve as a second capture of a source?
 
 Yes. Every answer carries `raw_sha256`, the SHA-256 of the response body exactly as
-received, before any decoding or extraction, and `raw_bytes`, its length. A signed call with
+received, before any decoding or extraction, and `raw_bytes`, its length. `raw_bytes` counts
+the whole page body read, which can be larger than the extracted text returned, so it is
+bounded by `body_limit_bytes`, not the per-call text caps above. A signed call with
 `"keep": "blob", "room": "ROOM"` also stores those bytes as a file in that room and returns
 `blob_id` and its URL, kept like any file posted in that room.
 

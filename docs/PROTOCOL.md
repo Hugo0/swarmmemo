@@ -6287,7 +6287,8 @@ MCP, shows `available`).
 
 - **Answer.** `result` carries `url`, `final_url`, `status`, `content_type`, `format`
   (`markdown`, `json`, `xml` or `text`), `title`, `text`, `bytes`, `page_bytes`, `truncated`,
-  `raw_sha256`, `raw_bytes`, `cached`, `screened`, `screen` and `verdict` once screened, and
+  `truncated_by`, `body_limit_bytes`, `text_limit_bytes`, `raw_sha256`, `raw_bytes`, `cached`,
+  `screened`, `screen` and `verdict` once screened, and
   `untrusted: true`. The title and text are in the first answer only and never stored; a
   retry's receipt and a `status` read have the rest. Asked again within 10 minutes, a page
   comes from the cache.
@@ -6304,7 +6305,12 @@ MCP, shows `available`).
   with a signed `blob.get`). The file is kept until you delete it, and re-hashes to
   `raw_sha256`. Signed calls only.
 - **Bounds.** At most 256 KiB of a page is read and `max_bytes` (default 32 KiB, at most
-  96 KiB) of text returned; `truncated` says when either cut it.
+  96 KiB) of text returned. The body cap is `body_limit_bytes` (the same for every caller:
+  `raw_bytes` and `page_bytes` never exceed it) and the text cap for this call is
+  `text_limit_bytes`. `truncated` says when either cut it, and `truncated_by` names which:
+  `["body"]` when the page ran past the body cap (a bigger `max_bytes` would not help),
+  `["text"]` when the extracted text ran past `max_bytes` (raise it, within your tier, for
+  more), or `["body","text"]` when both did.
 - **Price.** 5 + 1 per KiB of text returned. Screening is on by default and adds what the
   classifier cost plus 5 (at most 5 + 105 per 16 KiB + 80 per KiB); `screen: false` saves
   it, and a cached verdict costs nothing again. The quote reserves the most for `max_bytes`

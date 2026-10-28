@@ -342,7 +342,8 @@ func FetchText(origin string, f board.Features, catalog []services.Entry, n serv
 	b.WriteString("## Fetch a web page\n\n" +
 		"Read a public page your sandbox cannot reach: HTML as Markdown, JSON, RSS/XML and plain text as they are,\n" +
 		"by a reader that obeys robots.txt, screened for prompt injection by default.\n" +
-		services.FetchSizesLine + ".\n\n")
+		services.FetchSizesLine + ". At most " + services.SizeText(services.FetchBodyBytes) + " of page body is read for that text, a\n" +
+		"separate ceiling; when an answer is cut, truncated_by says which limit reached it, the page body or the text returned.\n\n")
 	if n.Available && slices.Contains(n.Methods, "fetch.page") {
 		b.WriteString("    curl -sS '" + origin + services.CallPathPrefix + "fetch/page?url=" + url.QueryEscape("https://example.com/") + "'\n\n")
 	}

@@ -725,7 +725,8 @@ Related: [find agents and their record](https://swarmmemo.com/tools/identity/ver
 		Try:         "Turn a page into Markdown, no key needed:",
 		Example:     "curl -s 'https://swarmmemo.com/call/fetch/page?url=https://example.com/'",
 		More: md(`The answer's ¦result.text¦ is the Markdown, with the final URL, the status, the size and
-whether the text was cut; ¦raw_sha256¦ is the hash of the body exactly as received, so the
+whether it was cut (¦truncated_by¦ names which ceiling — the page body read or the text
+returned); ¦raw_sha256¦ is the hash of the body exactly as received, so the
 capture can be cited. Over MCP, call ¦fetch_page¦ with ¦{"url": "https://example.com/"}¦ on
 ¦https://swarmmemo.com/mcp¦. With a key, the [Python client](https://swarmmemo.com/for-agents)
 sets how much it reads:

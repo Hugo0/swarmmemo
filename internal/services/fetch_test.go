@@ -413,6 +413,70 @@ func TestFetchRefusesWhatItMustNot(t *testing.T) {
 	}
 }
 
+// truncated_by names which ceiling cut an answer, and body_limit_bytes /
+// text_limit_bytes carry the two caps, so truncated is actionable (C612): the
+// page body (FetchBodyBytes, every caller) and the text returned (max_bytes).
+func TestFetchTruncationNamesTheCeiling(t *testing.T) {
+	s := newSite(t, false, map[string]http.HandlerFunc{
+		// Body over 256 KiB but a tiny text: the script is dropped, so only
+		// the body cap cut it.
+		"/bodyonly": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, "<html><body><p>tiny</p><script>"+strings.Repeat("x", 300<<10)+"</script></body></html>")
+		},
+		// Read whole (under 256 KiB) but longer than 96 KiB of text: only the
+		// text cap cut it.
+		"/textonly": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Write([]byte(strings.Repeat("b", 200<<10)))
+		},
+	})
+	r := newFetchRig(t, s, fetchOpts{})
+
+	// The page body cap: raw_bytes and page_bytes are the 256 KiB ceiling,
+	// truncated_by is ["body"], and a bigger max_bytes would not help.
+	body := get(r.must("alice", map[string]any{"url": "http://site.test/bodyonly", "screen": false, "max_bytes": services.FetchTextMax}), "result").(map[string]any)
+	if body["truncated"] != true || !sameStrings(body["truncated_by"], "body") {
+		t.Fatalf("body cap: truncated %v by %v", body["truncated"], body["truncated_by"])
+	}
+	if body["body_limit_bytes"] != float64(services.FetchBodyBytes) || body["raw_bytes"] != float64(services.FetchBodyBytes) || body["page_bytes"] != float64(services.FetchBodyBytes) {
+		t.Fatalf("body cap sizes: %+v", body)
+	}
+	if body["text_limit_bytes"] != float64(services.FetchTextMax) {
+		t.Fatalf("text_limit_bytes with a key: %v", body["text_limit_bytes"])
+	}
+
+	// The text cap at 96 KiB for a signed caller: body read whole (not
+	// truncated), truncated_by is ["text"], text_limit_bytes is max_bytes.
+	text := get(r.must("bob", map[string]any{"url": "http://site.test/textonly", "screen": false, "max_bytes": services.FetchTextMax}), "result").(map[string]any)
+	if text["truncated"] != true || !sameStrings(text["truncated_by"], "text") {
+		t.Fatalf("text cap: truncated %v by %v", text["truncated"], text["truncated_by"])
+	}
+	if text["bytes"] != float64(services.FetchTextMax) || text["text_limit_bytes"] != float64(services.FetchTextMax) {
+		t.Fatalf("text cap sizes: %+v", text)
+	}
+
+	// Not truncated: truncated_by is an empty list (never null).
+	whole := get(r.must("carol", noScreen("http://site.test/small")), "result").(map[string]any)
+	if whole["truncated"] != false || !sameStrings(whole["truncated_by"]) {
+		t.Fatalf("untruncated: %v %v", whole["truncated"], whole["truncated_by"])
+	}
+}
+
+// sameStrings reports whether v is a JSON array holding exactly want, in order.
+func sameStrings(v any, want ...string) bool {
+	arr, ok := v.([]any)
+	if !ok || len(arr) != len(want) {
+		return false
+	}
+	for i, w := range want {
+		if arr[i] != w {
+			return false
+		}
+	}
+	return true
+}
+
 // The address check holds at connect time: with production's decision, a
 // host that resolves public but is dialled at loopback is refused.
 func TestFetchChecksTheAddressItConnectsTo(t *testing.T) {
@@ -610,6 +674,12 @@ func TestFetchWithoutAKey(t *testing.T) {
 	got, err := call(map[string]any{"url": "http://site.test/long", "screen": false})
 	if err != nil || get(got, "result", "bytes") != float64(services.FetchAnonymousTextMax) {
 		t.Fatalf("without a key: %v %+v", err, got)
+	}
+	// The anonymous text cap is 8 KiB: truncated_by names the text ceiling and
+	// text_limit_bytes is it, while the body cap is the same for every caller.
+	res := get(got, "result").(map[string]any)
+	if !sameStrings(res["truncated_by"], "text") || res["text_limit_bytes"] != float64(services.FetchAnonymousTextMax) || res["body_limit_bytes"] != float64(services.FetchBodyBytes) {
+		t.Fatalf("anonymous text cap signal: %+v", res)
 	}
 	_, err = call(map[string]any{"url": "http://site.test/long", "max_bytes": 16384})
 	if code(err) != "invalid_service_data" {

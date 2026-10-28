@@ -910,8 +910,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "672119164759d3273c8b38175203e8e869c4293342b8a6d28064e65e4275edcc",
-      "size": 593675
+      "sha256": "fd3857e61d76113b3c3d4398535fd4b3d025fda3ae8482c17120e89b02a532b0",
+      "size": 594156
     },
     {
       "mode": "0644",
@@ -958,8 +958,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_FETCH.md",
-      "sha256": "a23190a8c8d6abe4c5ec099359f6d3a0b02b70b925a5378746df368ca3cb5fe9",
-      "size": 2754
+      "sha256": "8663378d8009b6fc34f6d036492e8fac1b060eaf7de41b6d01b4c0b958c7c5b7",
+      "size": 3087
     },
     {
       "mode": "0644",
@@ -1096,8 +1096,8 @@
     {
       "mode": "0644",
       "path": "docs/jobpages.go",
-      "sha256": "d93881fbb7e012b23daca73880d57a36963d1b4b0bf0257b4845ce1157e548d4",
-      "size": 50425
+      "sha256": "c42a1b2f5f173fffd93cd83fa78d95cd929bc5922fc46b6c4a0bea0628a10019",
+      "size": 50502
     },
     {
       "mode": "0644",
@@ -4822,8 +4822,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/doc_facts_test.go",
-      "sha256": "654b3b7aede016a5af2bf57929e06fed92d3c9df4bb51d32d16b9db16b21f3f6",
-      "size": 36179
+      "sha256": "370f8777594d3444b838b52482135fe10a82a22b5c2ba95ea25d350559858d80",
+      "size": 36297
     },
     {
       "mode": "0644",
@@ -7396,8 +7396,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch.go",
-      "sha256": "2b46acc1d589c51c5d37c0b2289875db34a857e30de90a27f25b7960c3c0b4e9",
-      "size": 45240
+      "sha256": "23032574642d24d690e524430f09883610e419a49bcf63ec4eed04a8df5036d6",
+      "size": 46187
     },
     {
       "mode": "0644",
@@ -7426,8 +7426,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch_test.go",
-      "sha256": "f1050ff3b249a08c7a9ec3d619018862518f4209ec6b96e6f288bafa57cdd9a7",
-      "size": 27735
+      "sha256": "896e58457475ef1370569e9053150c2d044a8dcd60e85db5773179e801dc44b2",
+      "size": 31218
     },
     {
       "mode": "0644",
@@ -9166,8 +9166,8 @@
     {
       "mode": "0644",
       "path": "internal/web/catalog.go",
-      "sha256": "f716273f9cc9e8220219d837a158fd16d0712379ebbe05ceeac96dcc0fae78ef",
-      "size": 24078
+      "sha256": "059eeb525b3d51c5ccf46c37798e14edc668ab5a71601fa2d3b30ef2bcca71a5",
+      "size": 24302
     },
     {
       "mode": "0644",

@@ -65,6 +65,7 @@ func docFacts() []docFact {
 		{"docs/TOOLS_FETCH.md", "signed-in MCP connection, returns up to {N}", sizeFact(services.FetchTextMax)},
 		{"docs/TOOLS_FETCH.md", "client](https://swarmmemo.com/for-agents) reads up to {N} of", sizeFact(services.FetchTextMax)},
 		{"docs/TOOLS_FETCH.md", "is free and returns up to {N} of text", sizeFact(services.FetchAnonymousTextMax)},
+		{"docs/TOOLS_FETCH.md", "the page body (at most {N} read, `body_limit_bytes`)", sizeFact(services.FetchBodyBytes)},
 		{"docs/TOOLS_SCREEN.md", "a text can be up to {N} and", sizeFact(services.ScreenAnonymousTextBytes)},
 		{"docs/TOOLS_SCREEN.md", "screens up to {N} a call", sizeFact(services.ScreenTextBytes)},
 		{"docs/TOOLS_FETCH.md", "again within {N} comes from the cache", durationFact(services.FetchCacheSeconds)},
