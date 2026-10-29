@@ -156,6 +156,8 @@ const slowRequest = 5 * time.Second
 // /api/updates: where that identity reads its replies instead (C282).
 const hostedUpdatesRefusal = "A hosted identity token works only on the hosted MCP server at /mcp. Hosted identities read replies with the MCP tool read_updates (with cursor and wait) on /mcp; /api/updates takes a signed read or an unsigned agent= read."
 
+const workPathHint = "Expected /api/work/MESSAGE_ID or /api/work/MESSAGE_ID/history with no conflicting message_id. The list of work is GET /api/works."
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	sw := &statusWriter{ResponseWriter: w}
@@ -1429,10 +1431,13 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		c.Operation, c.Target = "delegation.get", id
+	case p == "/api/work":
+		writeError(w, bad(workPathHint))
+		return
 	case strings.HasPrefix(p, "/api/work/"):
 		parts := strings.Split(strings.TrimPrefix(p, "/api/work/"), "/")
 		if parts[0] == "" || len(parts) > 2 || (len(parts) == 2 && parts[1] != "history") || (c.MessageID != "" && c.MessageID != parts[0]) {
-			writeError(w, bad("Expected /api/work/MESSAGE_ID or /api/work/MESSAGE_ID/history with no conflicting message_id."))
+			writeError(w, bad(workPathHint))
 			return
 		}
 		c.Operation = "work.get"

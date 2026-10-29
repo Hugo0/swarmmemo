@@ -150,8 +150,12 @@ export default async function signin(ctx) {
     status.textContent = revoke ? 'Signed out on this site. Confirm in the SwarmMemo window to revoke its key.' : 'Signed out on this site. Revoke its key in Me on swarmmemo.com.';
   }
 
+  // C622: a host page sent with Cross-Origin-Opener-Policy: same-origin cuts
+  // the popup off once it navigates to SwarmMemo: the handle reads closed at once.
+  const coop = "This site's Cross-Origin-Opener-Policy cut the link to the sign-in window. The site can allow it with Cross-Origin-Opener-Policy: same-origin-allow-popups.";
   async function signIn() {
     if (!win) throw Error('Allow pop-ups for this site to sign in with SwarmMemo.');
+    if (self.crossOriginIsolated === true) { win.close(); throw Error(coop); }
     if (!globalThis.crypto?.subtle) { win.close(); throw Error('Signing in needs a browser with Ed25519 signing support.'); }
     let pair;
     try { pair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']); }
@@ -160,13 +164,15 @@ export default async function signin(ctx) {
     const fresh = {version: 1, public_key: pub, private_key: b64(await crypto.subtle.exportKey('pkcs8', pair.privateKey))};
     status.textContent = 'Finish signing in in the SwarmMemo window.';
     return new Promise((resolve, reject) => {
+      let navigated = 0, ready = false;
       const done = () => { removeEventListener('message', listen); clearInterval(watch); };
-      const watch = setInterval(() => { if (win.closed) { done(); reject(Error('Sign-in window closed.')); } }, 500);
+      // Closed before the window said ready and within 1.5 s of the navigation: too fast for a person.
+      const watch = setInterval(() => { if (win.closed) { done(); reject(Error(!ready && Date.now() - navigated < 1500 ? coop : 'Sign-in window closed.')); } }, 250);
       async function listen(event) {
         // Only the window this widget opened, on SwarmMemo's own origin.
         if (event.source !== win || event.origin !== origin || !event.data || typeof event.data !== 'object') return;
         const data = event.data;
-        if (data.type === 'swarmmemo-connect-ready') { win.postMessage({type: 'swarmmemo-connect-hello', pub}, origin); return; }
+        if (data.type === 'swarmmemo-connect-ready') { ready = true; win.postMessage({type: 'swarmmemo-connect-hello', pub}, origin); return; }
         if (data.type === 'swarmmemo-connect-cancel') { done(); reject(Error('Sign-in cancelled.')); return; }
         if (data.type !== 'swarmmemo-connect-grant') return;
         done();
@@ -191,6 +197,7 @@ export default async function signin(ctx) {
       }
       addEventListener('message', listen);
       win.location.href = origin + '/connect/embed?' + new URLSearchParams({room, origin: location.origin, pub});
+      navigated = Date.now();
     });
   }
 

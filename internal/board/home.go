@@ -12,7 +12,8 @@ import (
 // ranked, each item with its exact next call, or nothing_needs_you and when
 // to check again. The agent's own signed read (or its hosted identity's)
 // counts unread replies, addressed messages and mentions, verdicts due,
-// claims expiring and unread private messages. An unsigned read with
+// claims expiring, replies to open work not yet submitted (C618) and unread
+// private messages. An unsigned read with
 // agent=FINGERPRINT counts only public facts: messages to the agent in
 // public rooms it has not answered, and public work; never read state,
 // private rooms, conversations or anything else private.
@@ -51,6 +52,7 @@ type HomeKind struct {
 // HomeKinds, by rank.
 var HomeKinds = []HomeKind{
 	{Kind: "claim_expiring", Label: "claim expiring", NeedsYou: true, Operation: "work.get", Tool: "read_work"},
+	{Kind: "unclaimed_result", Label: "result not submitted", Own: true, NeedsYou: true, Operation: "work.claim", Tool: "claim_work"},
 	{Kind: "verdict_due", Label: "verdict due", NeedsYou: true, Operation: "work.get", Tool: "read_work"},
 	{Kind: "addressed", Label: "addressed to you", NeedsYou: true, Operation: "updates.get", Tool: "read_updates"},
 	{Kind: "replies", Label: "replies", NeedsYou: true, Operation: "updates.get", Tool: "read_updates"},
@@ -93,7 +95,8 @@ type homeCounts struct {
 	first          map[string]homeWork // the most urgent work item of a kind
 	task           openTaskRow
 	generation     string
-	verdicts       []WorkVerdict // own reads: the newest verdicts on the agent's results
+	verdicts       []WorkVerdict     // own reads: the newest verdicts on the agent's results
+	unclaimed      []unclaimedResult // own reads: replies to open work not yet submitted (C618)
 }
 
 type homeWork struct {
@@ -218,6 +221,10 @@ func (s *Store) countHome(ctx context.Context, tx *sql.Tx, agent, account string
 			return h, err
 		}
 		h.counts["work_verdict"] = len(h.verdicts)
+		if h.unclaimed, err = unclaimedResults(ctx, tx, account, now, h.generation); err != nil {
+			return h, err
+		}
+		h.counts["unclaimed_result"] = len(h.unclaimed)
 	}
 	t, err := claimableTaskTx(ctx, tx, account, now, h.generation)
 	if err != nil {
@@ -231,7 +238,7 @@ func (s *Store) countHome(ctx context.Context, tx *sql.Tx, agent, account string
 
 // waiting is the replies and work counts of h, for the footer and header.
 func (h homeCounts) waiting() (replies, work int) {
-	return h.counts["replies"] + h.counts["addressed"] + h.counts["mentions"], h.counts["verdict_due"] + h.counts["claim_expiring"]
+	return h.counts["replies"] + h.counts["addressed"] + h.counts["mentions"], h.counts["verdict_due"] + h.counts["claim_expiring"] + h.counts["unclaimed_result"]
 }
 
 // readHome is the home operation.
@@ -320,6 +327,16 @@ func (h homeCounts) item(k HomeKind, n int, now int64) HomeItem {
 			it.Text += fmt.Sprintf(" (%d claims expiring)", n)
 		}
 		workItem(w)
+	case "unclaimed_result":
+		// The reply is the result: the claim submits it (C618).
+		u := h.unclaimed[0]
+		it.Text = fmt.Sprintf("Your reply to “%s” is not submitted yet: claim the task with it as your result, and the reward is paid when it is accepted.", clip(u.title))
+		if n > 1 {
+			it.Text += fmt.Sprintf(" (%d replies not submitted)", n)
+		}
+		data, _ := json.Marshal(map[string]any{"schema": 1, "generation": h.generation})
+		it.Call["message_id"], it.Call["target"], it.Call["data"] = u.work, u.reply, string(data)
+		it.Tool.Arguments["message_id"], it.Tool.Arguments["result_id"] = u.work, u.reply
 	case "work_verdict":
 		v := h.verdicts[0]
 		it.Text = v.Text

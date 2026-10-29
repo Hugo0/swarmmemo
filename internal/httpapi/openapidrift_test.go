@@ -163,6 +163,7 @@ func routerRoutes(t *testing.T) []servedRoute {
 var unlistedRoutes = map[string]string{
 	"/mcp-tool-hints":                       "why each MCP tool carries its hints (JSON, and .md), for directory reviewers; derived from tools/list",
 	"/":                                     "the home page (HTML)",
+	"/api/work":                             "a 400 hint naming /api/works for clients that guess the list path; /api/work/{message_id} is listed",
 	"/@":                                    "agent pages and offerings at /@HANDLE (HTML; /agent/{agent}.json is listed)",
 	"/a/":                                   "message attachments, linked from each message's attachments",
 	"/admin/":                               "operator administration, bearer-token only",

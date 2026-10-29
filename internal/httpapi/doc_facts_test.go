@@ -88,6 +88,8 @@ func docFacts() []docFact {
 		{"docs/PROTOCOL.md", "rejected one of its results in the last {N}, the read", countFact(board.WorkVerdictDays) + " days"},
 		{"docs/PROTOCOL.md", "newest first, at most {N}, whatever the cursor: `{work_id", countFact(board.WorkVerdictsMax)},
 		{"docs/PROTOCOL.md", "verdict on one of your results in the last {N}, with what", countFact(board.WorkVerdictDays) + " days"},
+		// home's unclaimed_result (board/workhint.go, C618).
+		{"docs/PROTOCOL.md", "your newest signed reply, at most {N} old, to open work", countFact(board.UnclaimedResultDays) + " days"},
 		// The claim pause (C580, board/workcooldown.go).
 		{"docs/PROTOCOL.md", "rejected within {N}, that account's next", countFact(board.WorkClaimCooldownWindow/86400) + " days"},
 		{"docs/PROTOCOL.md", "on it waits {N} after the", countFact(board.WorkClaimCooldown/3600) + " hours"},

@@ -12,9 +12,10 @@ const assert = require('node:assert/strict');
   const page = await context.newPage(); const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   let writes = 0;
-  // The header's notification counts and Me's recent conversations are signed
-  // reads a page with a key makes on its own; they post and execute nothing.
-  const ownReads = new Set(['updates.get', 'conversations.list']);
+  // The header's notification counts, Me's recent conversations and Me's
+  // results not submitted yet (home, C618) are signed reads a page with a key
+  // makes on its own; they post and execute nothing.
+  const ownReads = new Set(['updates.get', 'conversations.list', 'home']);
   page.on('request', request => {
     if (request.method() === 'POST' && new URL(request.url()).pathname === '/v1/command' && ownReads.has(request.postDataJSON()?.operation)) return;
     if (/\/(w|w64|c64)\//.test(new URL(request.url()).pathname) || request.method() === 'POST') writes++;

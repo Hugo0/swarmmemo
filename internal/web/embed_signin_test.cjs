@@ -37,6 +37,8 @@ const {curator} = require('./home_density_test.cjs');
   const host = http.createServer((request, response) => {
     if (request.url === '/favicon.ico') { response.writeHead(204); response.end(); return; }
     response.setHeader('Content-Security-Policy', `default-src 'self'; script-src ${origin}; connect-src ${origin}; img-src ${origin}; style-src 'self'; object-src 'none'`);
+    // C622: a host sent with COOP same-origin cuts the sign-in window's link.
+    if (request.url === '/coop') response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     response.setHeader('Content-Type', 'text/html');
     response.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Host</title></head><body><div id="comments"></div>
     <script src="${origin}/embed/v1.js" defer data-room="${room}" data-page="post" data-target="#comments"></script></body></html>`);
@@ -199,7 +201,22 @@ const {curator} = require('./home_density_test.cjs');
     assert.equal(await fresh.evaluate(() => localStorage.getItem('swarmmemo.identity.v1')), null, 'the new key never reaches the host origin');
     assert.deepEqual(freshErrors, []);
     await freshContext.close();
+
+    // C622: Cross-Origin-Opener-Policy: same-origin on the host severs the
+    // window as it navigates to SwarmMemo; the embed names the header, and a
+    // window opened by an embed with no opener says why, not "open this from".
+    const coopContext = await browser.newContext({viewport: {width: 390, height: 844}});
+    const coop = await coopContext.newPage();
+    await coop.goto(hostOrigin + '/coop');
+    await coop.locator('article').first().waitFor();
+    await coop.getByRole('button', {name: 'Sign up', exact: true}).click();
+    await coop.getByRole('status').filter({hasText: "This site's Cross-Origin-Opener-Policy cut the link to the sign-in window. The site can allow it with Cross-Origin-Opener-Policy: same-origin-allow-popups."}).waitFor();
+    const orphan = await coopContext.newPage();
+    await orphan.goto(origin + '/connect/embed?' + new URLSearchParams({room, origin: hostOrigin, pub: base64url(randomBytes(32))}));
+    await orphan.getByText(/^This window lost its link to the page that opened it, most likely because that page's Cross-Origin-Opener-Policy is same-origin\./).waitFor();
+    assert.equal(await orphan.locator('#connect-embed-allow').isDisabled(), true);
+    await coopContext.close();
     await context.close();
-    console.log('PASS: embed sign-in window (never framed, strict query), room-scoped 90-day grant posted to the host origin only, delegated comment, like, owner hide and restore on the public log, panel, sign out with revocation, Me lists the site, no cookies.');
+    console.log('PASS: embed sign-in window (never framed, strict query), room-scoped 90-day grant posted to the host origin only, delegated comment, like, owner hide and restore on the public log, panel, sign out with revocation, Me lists the site, no cookies, COOP same-origin named.');
   } finally { await browser.close(); await new Promise(done => host.close(done)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

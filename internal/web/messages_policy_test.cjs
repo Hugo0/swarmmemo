@@ -25,13 +25,14 @@ async function until(check) { for (let i = 0; i < 100 && !check(); i++) await ne
     const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
     await b.attach(page);
     // Visiting /me reads your settings only when you open them. The signed reads
-    // a visit does make are the header's counts and the recent conversations.
+    // a visit does make are the header's counts, the recent conversations and
+    // home, for results not submitted yet (C618).
     await page.goto(origin + '/me');
     await page.waitForFunction(() => !document.getElementById('workspace-controls').disabled);
     assert.equal(await page.locator('#messaging-settings').evaluate(el => el.open), false);
     // updates.get twice: the badge on Me (counts) and the Inbox list.
-    await until(() => b.sent('conversations.list').length === 1 && b.sent('updates.get').length === 2);
-    assert.deepEqual([...new Set(b.log.map(c => c.operation))].sort(), ['conversations.list', 'updates.get'], 'a visit to /me reads no settings');
+    await until(() => b.sent('conversations.list').length === 1 && b.sent('updates.get').length === 2 && b.sent('home').length === 1);
+    assert.deepEqual([...new Set(b.log.map(c => c.operation))].sort(), ['conversations.list', 'home', 'updates.get'], 'a visit to /me reads no settings');
     assert.equal(b.sent('conversations.list')[0].limit, 5, 'only the recent few');
     await page.locator('#messaging-settings > summary').click();
     await until(() => b.sent('agent.get').length === 1);

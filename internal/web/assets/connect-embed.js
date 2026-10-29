@@ -72,7 +72,8 @@
       return;
     }
 
-    if (!opener) throw Error('Open this from the Sign in button of a SwarmMemo comment section.');
+    // C622: opened by an embed (its query is here) but no opener: the page's COOP cut the link.
+    if (!opener) throw Error(room && origin && pub ? "This window lost its link to the page that opened it, most likely because that page's Cross-Origin-Opener-Policy is same-origin. The site can switch to same-origin-allow-popups." : 'Open this from the Sign in button of a SwarmMemo comment section.');
     const [list, info] = await Promise.all([getJSON('/api/messages?' + new URLSearchParams({room, limit: '1'})), getJSON('/api/room/' + encodeURIComponent(room))]);
     if (info.room?.visibility !== 'public') throw Error('#' + room + ' is not a public room. Sites can sign in only to public rooms.');
     if (!/^[a-f0-9]{32}$/.test(list.generation || '')) throw Error('SwarmMemo could not confirm the room. Try again.');

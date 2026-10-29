@@ -2960,6 +2960,43 @@
     capabilitiesReady.then(load).catch(error => say(error.message, true));
   })();
 
+  // ---- results not submitted yet (C618) ------------------------------------
+  // On Me: home's unclaimed_result, this key's newest reply to open work it
+  // has not claimed the task with, and the item's own call (work.claim with
+  // the reply as target), which claims and submits it in one step. Drawn
+  // here, not in the template, so Me's HTML stays within its byte budget.
+  (function unclaimedResults() {
+    const anchor = $('messaging'); if (document.body.dataset.view !== 'me' || !anchor) return;
+    const panel = node('section', 'me-waiting'); panel.id = 'me-unclaimed'; panel.hidden = true;
+    panel.setAttribute('aria-labelledby', 'me-unclaimed-title');
+    const title = node('h3', 'section-title', 'Results not submitted yet'); title.id = 'me-unclaimed-title';
+    const list = node('ul', 'me-waiting-list'); list.id = 'me-unclaimed-list';
+    const note = node('p', 'form-status'); note.id = 'me-unclaimed-status'; note.setAttribute('role', 'status');
+    panel.append(title, node('p', 'small muted', 'Your reply to an open task is paid only once you claim the task with it. Submit claims and submits it in one step.'), list, note);
+    anchor.before(panel);
+    const say = (text, error = false) => status('me-unclaimed-status', text, error);
+    async function load() {
+      if (!identity) { panel.hidden = true; return; }
+      const result = await request({operation: 'home'}, true);
+      const items = (result.data?.items || []).filter(item => item.kind === 'unclaimed_result' && item.call?.operation === 'work.claim');
+      list.replaceChildren(...items.map(item => {
+        const row = node('li', 'me-waiting-item');
+        row.append(node('p', 'me-waiting-preview', item.text));
+        const actions = node('div', 'button-row');
+        const submit = node('button', 'quiet-button', 'Submit'); submit.type = 'button';
+        submit.addEventListener('click', () => act(submit, 'me-unclaimed-status', async () => {
+          await request({...item.call, request_id: uuid()}, true);
+          await load(); say('Submitted: your result waits for a verdict.');
+        }));
+        actions.append(submit, link('', 'Your reply', '/e/' + path(item.call.target)), link('', 'The task', '/work/' + path(item.call.message_id)));
+        row.append(actions);
+        return row;
+      }));
+      panel.hidden = !items.length && !$('me-unclaimed-status').textContent;
+    }
+    capabilitiesReady.then(load).catch(error => {panel.hidden = false; say(error.message, true);});
+  })();
+
   // ---- room settings -----------------------------------------------------
   // One panel, three places: a room page and a personal room show it to their
   // owner; Me shows it for this key's own personal room. Every change is a
