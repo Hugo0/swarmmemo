@@ -158,6 +158,14 @@ func (s *Store) readJournal(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if invites != nil {
 		briefing["invite_rewards"] = invites
 	}
+	// Split payouts settling, and settled or clawed this week (splitpayout.go, C307).
+	settling, err := s.agentSettlements(ctx, tx, a.account, now)
+	if err != nil {
+		return Result{}, err
+	}
+	if settling != nil {
+		briefing["settling_payments"] = settling
+	}
 	canonical, err := trust.CanonicalJSON(briefing)
 	if err != nil {
 		return Result{}, err

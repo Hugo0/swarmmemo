@@ -96,6 +96,7 @@ type WorkReward struct {
 	Reason     string             `json:"reason,omitempty"`
 	TransferID string             `json:"transfer_id,omitempty"`
 	Receipt    *WorkRewardReceipt `json:"receipt,omitempty"`
+	Settlement *WorkSettlement    `json:"settlement,omitempty"`
 }
 
 // WorkRewardReceipt is a paid reward's notary record: the statement, its
@@ -299,11 +300,12 @@ func (s *Store) payWorkReward(ctx context.Context, tx *sql.Tx, r *rewardRow, to,
 		_, err = tx.ExecContext(ctx, "UPDATE "+r.Table+" SET state='pending',worker=?,transfer_id=?,execute_at=?,reviewer=? WHERE work_id=?", to, t.ID, t.ExecuteAt, r.Reviewer, r.WorkID)
 		return err
 	}
-	return s.markRewardPaid(ctx, tx, r, result, now)
+	return s.markRewardPaid(ctx, tx, r, result, t.Amount, now)
 }
 
-// markRewardPaid records a done payment and stamps a reward's receipt.
-func (s *Store) markRewardPaid(ctx context.Context, tx *sql.Tx, r *rewardRow, result string, now int64) error {
+// markRewardPaid records a done payment of paid units (the whole reward, or a
+// split's deferred half) and stamps a reward's receipt for that amount.
+func (s *Store) markRewardPaid(ctx context.Context, tx *sql.Tx, r *rewardRow, result string, paid, now int64) error {
 	statement, hash := "", ""
 	// A reward with a USDC asset gets one receipt for every asset, once
 	// all are paid (stampWorkPaid), not this credit-only one.
@@ -313,7 +315,7 @@ func (s *Store) markRewardPaid(ctx context.Context, tx *sql.Tx, r *rewardRow, re
 	}
 	if r.Table == workRewardsTable && s.workRewardNotary() && !withUSDC {
 		b, _ := json.Marshal(workRewardStatement{Schema: WorkRewardSchema, ServiceID: s.config.ServiceID, WorkID: r.WorkID, Requester: r.Requester, Worker: r.Worker,
-			Amount: r.Amount, Unit: "credit", TransferID: r.TransferID, ResultID: result, PaidAt: now, Reviewer: r.Reviewer, DecidedBy: r.DecidedBy})
+			Amount: paid, Unit: "credit", TransferID: r.TransferID, ResultID: result, PaidAt: now, Reviewer: r.Reviewer, DecidedBy: r.DecidedBy})
 		statement, hash = string(b), sha256Hex(b)
 		if _, err := services.StampHash(ctx, tx, s.services.notaryKey, s.config.ServiceID, workRewardNotaryAccount, hash, now); err != nil {
 			return err
@@ -362,7 +364,9 @@ func (s *Store) settleWorkRewards(ctx context.Context, tx *sql.Tx, now int64, li
 			return n, err
 		}
 	}
-	return n, nil
+	// C307: the deferred half of a split payout whose 14-day settlement is due.
+	m, err := s.settleSplitPayouts(ctx, tx, now, limit)
+	return n + m, err
 }
 
 func (s *Store) settleWorkEscrows(ctx context.Context, tx *sql.Tx, table string, now int64, limit int) (int, error) {
@@ -434,7 +438,7 @@ func (s *Store) settleWorkEscrows(ctx context.Context, tx *sql.Tx, table string,
 					return n, err
 				}
 			}
-			err = s.markRewardPaid(ctx, tx, r, result, now)
+			err = s.markRewardPaid(ctx, tx, r, result, t.Amount, now)
 		case "cancelled":
 			_, err = tx.ExecContext(ctx, "UPDATE "+table+" SET state='released',settled_at=?,reason='payment cancelled' WHERE work_id=?", now, id)
 		default:
@@ -489,6 +493,16 @@ func (s *Store) projectWorkReward(ctx context.Context, tx *sql.Tx, table, id str
 	}
 	if r.ReceiptHash != "" {
 		p.Receipt = &WorkRewardReceipt{Statement: r.Statement, Hash: r.ReceiptHash, Notary: "/api/notary/" + r.ReceiptHash}
+	}
+	// C307: a split payout reads as its settlement, not a bare held/paid/released
+	// reward; the deferred half's state leads.
+	set, err := s.workSettlement(ctx, tx, r)
+	if err != nil {
+		return nil, err
+	}
+	if set != nil {
+		p.Settlement = set
+		p.State, p.Reason = set.State, ""
 	}
 	return p, nil
 }

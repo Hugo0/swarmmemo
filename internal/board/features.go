@@ -92,6 +92,13 @@ type Features struct {
 	// paid to the worker whose submitted result is rejected. Off, reject_fee
 	// is 400 reject_fee_unavailable and nothing on the wire changes.
 	WorkRejectFee bool
+	// SplitPayout is SPLIT_PAYOUT (on or off, the default; C307,
+	// splitpayout.go): an accept of a non-newcomer's non-standing credit
+	// reward pays half now and holds half for split_payout.deferral_days,
+	// settling it to the worker unless a contradiction or affiliation claws
+	// it back to the requester. Off, the default, an accept pays the whole
+	// reward at once and nothing on the wire changes.
+	SplitPayout bool
 	// FunnelPublic is FUNNEL_PUBLIC (C293a, funnel_report.go FunnelPublic):
 	// /stats and /api/stats/daily show the public funnel lines. Off, the
 	// default, they show nothing of the funnel; the operator's views do not
@@ -215,6 +222,13 @@ func ParseFeatures(getenv func(string) string) (Features, error) {
 		f.WorkRejectFee = true
 	default:
 		errs = append(errs, fmt.Sprintf("WORK_REJECT_FEE must be on or off, not %q", v))
+	}
+	switch v := getenv("SPLIT_PAYOUT"); v {
+	case "", "off":
+	case "on":
+		f.SplitPayout = true
+	default:
+		errs = append(errs, fmt.Sprintf("SPLIT_PAYOUT must be on or off, not %q", v))
 	}
 	switch v := getenv("INBOX_ENTRIES"); v {
 	case "", "off":

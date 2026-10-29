@@ -1491,7 +1491,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 				}
 				r.Reviewer, r.DecidedBy = identity.ID, a.id
 			}
-			if err = s.payWorkReward(ctx, tx, r, w.Worker, w.Result, now); err == nil && verdict {
+			if err = s.payWorkRewardSplit(ctx, tx, r, &w, now); err == nil && verdict {
 				err = s.payWorkReward(ctx, tx, f, w.Reviewer, "", now)
 			}
 			if err == nil && fallback {
@@ -1594,6 +1594,16 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	if c.Operation == "work.accept" && reward > 0 {
 		ack.Note = workPaidNote(reward)
+		// C307: a split payout settled half now and holds half; say so.
+		if r, e := loadWorkReward(ctx, tx, workRewardsTable, w.ID); e != nil {
+			return Result{}, e
+		} else if splitState(r) == "settling" {
+			if set, e := s.workSettlement(ctx, tx, r); e != nil {
+				return Result{}, e
+			} else if set != nil {
+				ack.Note = workSplitNote(set.Upfront, set.Deferred, set.SettlesAt)
+			}
+		}
 	}
 	if late {
 		ack.Note = strings.TrimSpace(workLateNote(reward) + " " + ack.Note)

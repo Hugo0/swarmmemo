@@ -150,6 +150,14 @@ func (s *Server) capabilitiesWith(catalog []services.Entry) map[string]any {
 			"flag":     "WORK_REJECT_FEE", "instructions": "/protocol.md#work-reject-fee",
 		}
 	}
+	if s.cfg.Features.SplitPayout {
+		// C307: split bounty payout; absent while SPLIT_PAYOUT is off.
+		if sp, ok := s.service.(interface {
+			SplitPayoutCapabilities(context.Context) map[string]any
+		}); ok {
+			caps["work_coordination"].(map[string]any)["split_payout"] = sp.SplitPayoutCapabilities(context.Background())
+		}
+	}
 	if s.cfg.Features.InboxEntries == board.InboxRead {
 		// C61 step 4: push is a transport of the inbox entry log.
 		caps["push_delivery"].(map[string]any)["inbox"] = map[string]any{
