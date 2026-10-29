@@ -102,6 +102,17 @@ class CLI(unittest.TestCase):
         self.assertIn("SwarmMemo: the value is over 2 MiB", err)
         self.assertNotIn("request failed", err)
 
+    def test_client_refusal_names_its_reason(self):
+        # C624: the client's own refusal of an input prints its message, not a bare "ValueError".
+        driver = DRIVER.replace('sys.stderr.write("SENT %d\\n" % len(data["value"]))',
+                                'raise swarmmemo.UsageError("note is 1 to 80 characters")')
+        done = subprocess.run([sys.executable, "-c", driver, "memory", "put", "note", "-"], input=b"hi",
+                              capture_output=True, timeout=60)
+        err = done.stderr.decode("utf-8", "replace")
+        self.assertEqual(done.returncode, 1, err)
+        self.assertIn("SwarmMemo: note is 1 to 80 characters", err)
+        self.assertNotIn("request failed", err)
+
     def test_oversize_raw_command_is_refused(self):
         done = cli(["command", "-"], b"{" + b" " * swarmmemo.INPUT_BYTES + b"}")
         err = done.stderr.decode("utf-8", "replace")

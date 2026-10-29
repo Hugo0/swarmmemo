@@ -432,8 +432,8 @@ DATA_TYPES = {
 def data_spec(operation):
     """operation's data spec (CONTRACT["operations"][op]["data"]); ValueError when it takes none."""
     op = CONTRACT["operations"].get(operation)
-    if op is None: raise ValueError(f"unknown operation {operation}")
-    if op.get("data") is None: raise ValueError(f"{operation} takes no data")
+    if op is None: raise UsageError(f"unknown operation {operation}")
+    if op.get("data") is None: raise UsageError(f"{operation} takes no data")
     return op["data"]
 
 
@@ -444,10 +444,10 @@ def data_for(operation, fields=None, /, **named):
     spells. A None value is left out. schema 1 is added where the board requires it
     (an optional schema, as vote and messages.list take, is left to the caller)."""
     spec = data_spec(operation)
-    if spec.get("raw"): raise ValueError(f"{operation} data is a {spec['raw']} string, not fields")
+    if spec.get("raw"): raise UsageError(f"{operation} data is a {spec['raw']} string, not fields")
     values = dict(fields or {})
     for name, value in named.items():
-        if name in values: raise ValueError(f"{operation} data.{name} is given twice")
+        if name in values: raise UsageError(f"{operation} data.{name} is given twice")
         values[name] = value
     specs = spec["fields"]
     data = {"schema": 1} if specs.get("schema", {}).get("required") else {}
@@ -455,27 +455,27 @@ def data_for(operation, fields=None, /, **named):
     for name, value in values.items():
         if value is None: continue
         if name in spec["removed"]:
-            raise ValueError(f"{operation} data no longer takes {name} (removed in {spec['removed'][name]})")
+            raise UsageError(f"{operation} data no longer takes {name} (removed in {spec['removed'][name]})")
         name = spec["aliases"].get(name, name)
         field = specs.get(name)
         if field is None:
-            raise ValueError(f"{operation} data takes no {name}; it takes " + ", ".join(sorted(specs)))
-        if name in given: raise ValueError(f"{operation} data.{name} is given twice")
+            raise UsageError(f"{operation} data takes no {name}; it takes " + ", ".join(sorted(specs)))
+        if name in given: raise UsageError(f"{operation} data.{name} is given twice")
         given.add(name)
         types = field["type"].split("|")
         if not any(DATA_TYPES[t](value) for t in types):
-            raise ValueError(f"{operation} data.{name} is {' or '.join(types)}, not {type(value).__name__}")
+            raise UsageError(f"{operation} data.{name} is {' or '.join(types)}, not {type(value).__name__}")
         if isinstance(value, tuple): value = list(value)
         if field.get("enum"):
             allowed = ENUMS[field["enum"]]
             if any(item not in allowed for item in (value if isinstance(value, list) else [value])):
-                raise ValueError(f"{operation} data.{name} is one of " + ", ".join(map(str, allowed)))
+                raise UsageError(f"{operation} data.{name} is one of " + ", ".join(map(str, allowed)))
         if field.get("items"):
             for i, entry in enumerate(value):
                 _data_entry(f"{operation} data.{name}[{i}]", field["items"], entry)
         data[name] = value
     missing = sorted(name for name, field in specs.items() if field["required"] and name not in data)
-    if missing: raise ValueError(f"{operation} data needs " + ", ".join(missing))
+    if missing: raise UsageError(f"{operation} data needs " + ", ".join(missing))
     return data
 
 
@@ -483,18 +483,18 @@ def _data_entry(at, spec, entry):
     """One entry of an array field whose entries are objects (a checks list's check): its names,
     JSON types, enums and required fields, as the contract's items spec says. The board checks
     the rest (bounds, and which fields go together)."""
-    if not isinstance(entry, dict): raise ValueError(f"{at} is an object")
+    if not isinstance(entry, dict): raise UsageError(f"{at} is an object")
     fields = spec["fields"]
     for name, value in entry.items():
         field = fields.get(name)
-        if field is None: raise ValueError(f"{at} takes no {name}; it takes " + ", ".join(sorted(fields)))
+        if field is None: raise UsageError(f"{at} takes no {name}; it takes " + ", ".join(sorted(fields)))
         types = field["type"].split("|")
         if not any(DATA_TYPES[t](value) for t in types):
-            raise ValueError(f"{at}.{name} is {' or '.join(types)}, not {type(value).__name__}")
+            raise UsageError(f"{at}.{name} is {' or '.join(types)}, not {type(value).__name__}")
         if field.get("enum") and value not in ENUMS[field["enum"]]:
-            raise ValueError(f"{at}.{name} is one of " + ", ".join(map(str, ENUMS[field["enum"]])))
+            raise UsageError(f"{at}.{name} is one of " + ", ".join(map(str, ENUMS[field["enum"]])))
     missing = sorted(name for name, field in fields.items() if field["required"] and name not in entry)
-    if missing: raise ValueError(f"{at} needs " + ", ".join(missing))
+    if missing: raise UsageError(f"{at} needs " + ", ".join(missing))
 
 
 def data_json(operation, fields=None, /, **named):
@@ -530,10 +530,10 @@ def strict_json(raw):
     def pairs(values):
         result = {}
         for key, value in values:
-            if key in result: raise ValueError("duplicate_json_field")
+            if key in result: raise UsageError("duplicate_json_field")
             result[key] = value
         return result
-    def constant(_): raise ValueError("invalid_json_number")
+    def constant(_): raise UsageError("invalid_json_number")
     return json.loads(raw, object_pairs_hook=pairs, parse_constant=constant)
 
 
@@ -542,13 +542,13 @@ def delegation_context(value):
             or type(value["schema"]) is not int or value["schema"] != 1
             or not isinstance(value["grant_id"], str) or not re.fullmatch(r"[a-f0-9]{64}", value["grant_id"])
             or not isinstance(value["generation"], str) or not re.fullmatch(r"[a-f0-9]{32}", value["generation"])):
-        raise ValueError("invalid_delegation_context")
+        raise UsageError("invalid_delegation_context")
     return {field: value[field] for field in ("schema", "grant_id", "generation")}
 
 
 def private_read_context(value):
     try: return delegation_context(value)
-    except ValueError: raise ValueError("invalid_private_read_context") from None
+    except ValueError: raise UsageError("invalid_private_read_context") from None
 
 
 def post_data(value):
@@ -560,7 +560,7 @@ def post_data(value):
             or ("review" in data and not isinstance(data["review"], dict))
             or ("format" in data and data["format"] not in ("markdown", "sealed"))
             or ("supersedes" in data and (not isinstance(data["supersedes"], str) or not re.fullmatch(r"[a-f0-9]{32}", data["supersedes"])))):
-        raise ValueError("invalid_post_data")
+        raise UsageError("invalid_post_data")
     return {"format": data.get("format", ""), "supersedes": data.get("supersedes", "")}
 
 
@@ -568,13 +568,13 @@ def check_post_data(event, command=None):
     """An event's format and supersedes must be exactly what its author signed in
     data; an unsigned event carries neither. A tombstone keeps supersedes only."""
     for field in ("format", "supersedes"):
-        if field in event and not isinstance(event[field], str): raise ValueError("invalid_post_data")
+        if field in event and not isinstance(event[field], str): raise UsageError("invalid_post_data")
     if event.get("format", "markdown") not in ("markdown", "sealed") or ("supersedes" in event and not re.fullmatch(r"[a-f0-9]{32}", event["supersedes"])):
-        raise ValueError("invalid_post_data")
+        raise UsageError("invalid_post_data")
     if command is None: return
     signed = post_data(command["data"]) if "data" in command else {"format": "", "supersedes": ""}
     if signed != {"format": event.get("format", ""), "supersedes": event.get("supersedes", "")}:
-        raise ValueError("signed_post_data_mismatch")
+        raise UsageError("signed_post_data_mismatch")
 
 
 # C324, C376: a post's text that is Markdown and renders without loss is signed
@@ -1636,7 +1636,7 @@ def check_forwarded(event):
     if (not isinstance(value, dict) or set(value) != FORWARDED_FIELDS or value["mode"] != "reissued"
             or not all(matches("forward_token", v) for v in value.values())
             or event.get("public_key") or event.get("signature") or event.get("signed_payload")):
-        raise ValueError("invalid_forwarded")
+        raise UsageError("invalid_forwarded")
 
 
 WORK_STATES = set(ENUMS["work_states"])
@@ -1681,14 +1681,14 @@ def standing_tier(value):
     {"name","credits"[,"usdc"]}, or the CLI's NAME:CREDITS[:USDC] (bug+fix:500:0.40)."""
     if isinstance(value, str):
         parts = value.split(":")
-        if len(parts) not in (2, 3) or not parts[1].isdigit(): raise ValueError("a tier is NAME:CREDITS[:USDC], e.g. bug:500:0.20")
+        if len(parts) not in (2, 3) or not parts[1].isdigit(): raise UsageError("a tier is NAME:CREDITS[:USDC], e.g. bug:500:0.20")
         name, credits, usdc = (parts + [""])[:3]
         value = {"name": name, "credits": int(credits), **({"usdc": usdc} if usdc else {})}
     if not isinstance(value, dict) or not set(WORK_STANDING_TIER["required"]) <= value.keys() <= struct_fields("work_standing_tier"):
-        raise ValueError("a tier is {name, credits[, usdc]}")
-    if not matches("standing_tier", value["name"]): raise ValueError("a tier name is 1-32 of a-z 0-9 +_.-, starting with a letter or digit")
-    if type(value["credits"]) is not int or not 1 <= value["credits"] <= LIMITS["work_reward_maximum"]: raise ValueError("a tier's credits are whole, at least 1")
-    if "usdc" in value and not isinstance(value["usdc"], str): raise ValueError("a tier's usdc is a decimal string, e.g. 0.20")
+        raise UsageError("a tier is {name, credits[, usdc]}")
+    if not matches("standing_tier", value["name"]): raise UsageError("a tier name is 1-32 of a-z 0-9 +_.-, starting with a letter or digit")
+    if type(value["credits"]) is not int or not 1 <= value["credits"] <= LIMITS["work_reward_maximum"]: raise UsageError("a tier's credits are whole, at least 1")
+    if "usdc" in value and not isinstance(value["usdc"], str): raise UsageError("a tier's usdc is a decimal string, e.g. 0.20")
     return {k: value[k] for k in ("name", "credits", "usdc") if k in value}
 
 
@@ -1696,7 +1696,7 @@ def work_answer_commit(salt, answer):
     """A sealed known answer's commit (work.create answer_commit, /protocol.md#work-known-answers):
     the lowercase hex SHA-256 of salt + "\n" + answer, UTF-8. Keep salt (random, no newline) and
     answer to send with work_reveal once the work is closed."""
-    if "\n" in salt: raise ValueError("salt has no newline")
+    if "\n" in salt: raise UsageError("salt has no newline")
     return hashlib.sha256((salt + "\n" + answer).encode()).hexdigest()
 
 
@@ -1706,23 +1706,23 @@ def work_create_data(title, generation, capabilities=(), **fields):
     seats, per_agent_day, day_max, results_max, tiers (standing_tier each) and the USDC
     caps; the server checks how they go together."""
     unknown = fields.keys() - (set(CONTRACT["work_create_data"]) - {"schema", "generation", "title", "capabilities"})
-    if unknown: raise ValueError("work.create data takes no " + ", ".join(sorted(unknown)))
+    if unknown: raise UsageError("work.create data takes no " + ", ".join(sorted(unknown)))
     data = {"schema": 1, "generation": generation, "title": title, "capabilities": list_of(capabilities)}
     data.update((k, v) for k, v in fields.items() if v is not None and k not in WORK_STANDING_CREATE)
     standing = {k: fields[k] for k in WORK_STANDING_CREATE if fields.get(k) is not None}
     if standing:
         seats = standing.get("seats")
         if type(seats) is not int or not 1 <= seats <= LIMITS["work_standing_seats_maximum"]:
-            raise ValueError(f"a standing task's seats are 1 to {LIMITS['work_standing_seats_maximum']}")
+            raise UsageError(f"a standing task's seats are 1 to {LIMITS['work_standing_seats_maximum']}")
         if "per_agent_day" in standing and (type(standing["per_agent_day"]) is not int or not 1 <= standing["per_agent_day"] <= seats):
-            raise ValueError("per_agent_day is 1 to seats")
+            raise UsageError("per_agent_day is 1 to seats")
         if "day_max" in standing and (type(standing["day_max"]) is not int or not 1 <= standing["day_max"] <= LIMITS["work_standing_day_maximum"]):
-            raise ValueError(f"day_max is 1 to {LIMITS['work_standing_day_maximum']}")
+            raise UsageError(f"day_max is 1 to {LIMITS['work_standing_day_maximum']}")
         if "results_max" in standing and (type(standing["results_max"]) is not int or not seats <= standing["results_max"] <= LIMITS["work_standing_results_maximum"]):
-            raise ValueError(f"results_max is seats to {LIMITS['work_standing_results_maximum']}")
+            raise UsageError(f"results_max is seats to {LIMITS['work_standing_results_maximum']}")
         if "tiers" in standing:
             tiers = [standing_tier(t) for t in standing["tiers"]]
-            if not 1 <= len(tiers) <= LIMITS["work_standing_tiers_maximum"]: raise ValueError(f"tiers are 1 to {LIMITS['work_standing_tiers_maximum']}")
+            if not 1 <= len(tiers) <= LIMITS["work_standing_tiers_maximum"]: raise UsageError(f"tiers are 1 to {LIMITS['work_standing_tiers_maximum']}")
             standing["tiers"] = tiers
         data.update(standing)
     return data_for("work.create", data)
@@ -1735,7 +1735,7 @@ def check_work(event):
     w = event["work"]
     hex32 = lambda v: matches("work_id", v)
     if (event.get("type") != "message" or not isinstance(w, dict) or not isinstance(w.get("title"), str)
-            or len(w["title"].encode()) > LIMITS["work_title_bytes"] or not isinstance(w.get("state"), str)): raise ValueError("invalid_work")
+            or len(w["title"].encode()) > LIMITS["work_title_bytes"] or not isinstance(w.get("state"), str)): raise UsageError("invalid_work")
     if "result_of" in w:
         if (set(w) != WORK_RESULT_FIELDS or not hex32(w["result_of"]) or w["state"] not in WORK_RESULT_STATES
                 or w["url"] != "/work/" + w["result_of"]
@@ -1743,13 +1743,13 @@ def check_work(event):
                 # (a standing task's result) its own task (Denis Task Desk 5dfba31a).
                 # An edited standing result keeps the task of its first version, an
                 # id the edit chain reaches but this one record can't show (f5654d25).
-                or w["result_of"] not in (event.get("reply_to"), event.get("id")) and not hex32(event.get("supersedes"))): raise ValueError("invalid_work")
+                or w["result_of"] not in (event.get("reply_to"), event.get("id")) and not hex32(event.get("supersedes"))): raise UsageError("invalid_work")
         return
     if (not WORK_ROOT_FIELDS <= set(w) or set(w) - WORK_ROOT_FIELDS - WORK_ROOT_OPTIONAL or not hex32(w["id"])
             or w["state"] not in WORK_STATES or type(w["deadline"]) is not int or w["deadline"] < 1
             or w["eligibility"] not in WORK_ELIGIBILITIES or w["claimable"] is not (w["state"] == "open")
             or w["url"] != "/work/" + w["id"] or event.get("reply_to") or w.get("simulated", True) is not True):
-        raise ValueError("invalid_work")
+        raise UsageError("invalid_work")
     # reward is credits (with its escrow state beside a USDC asset); reward_usdc
     # a USDC asset (RFC 0016, a decimal string); reward_state the whole
     # reward's; reward_note one printable line of 1 to 80 characters the poster pays.
@@ -1757,30 +1757,30 @@ def check_work(event):
     required = set(CONTRACT["structs"]["message_work_reward"]["required"])
     if (not isinstance(reward, dict) or not required <= set(reward) or set(reward) - struct_fields("message_work_reward")
             or type(reward["amount"]) is not int or reward["amount"] < 1 or reward["unit"] != "credit"
-            or reward.get("state", "held") not in WORK_CREDIT_STATES): raise ValueError("invalid_work")
+            or reward.get("state", "held") not in WORK_CREDIT_STATES): raise UsageError("invalid_work")
     if "reward_usdc" in w:
         usdc = w["reward_usdc"]
         if (not isinstance(usdc, dict) or set(usdc) != struct_fields("message_work_usdc") or not isinstance(usdc["amount"], str)
-                or not re.fullmatch(r"[0-9]{1,13}(\.[0-9]{1,6})?", usdc["amount"]) or usdc["state"] not in WORK_USDC_STATES): raise ValueError("invalid_work")
-    if "reward_state" in w and w["reward_state"] not in WORK_REWARD_STATES: raise ValueError("invalid_work")
+                or not re.fullmatch(r"[0-9]{1,13}(\.[0-9]{1,6})?", usdc["amount"]) or usdc["state"] not in WORK_USDC_STATES): raise UsageError("invalid_work")
+    if "reward_state" in w and w["reward_state"] not in WORK_REWARD_STATES: raise UsageError("invalid_work")
     if "reward_note" in w:
         note = w["reward_note"]
-        if not isinstance(note, str) or not 1 <= len(note) <= LIMITS["work_reward_note_chars"] or note != note.strip() or not note.isprintable(): raise ValueError("invalid_work")
+        if not isinstance(note, str) or not 1 <= len(note) <= LIMITS["work_reward_note_chars"] or note != note.strip() or not note.isprintable(): raise UsageError("invalid_work")
     if "reviewer" in w:
         r = w["reviewer"]
         if (not isinstance(r, dict) or set(r) - struct_fields("agent_ref") or not matches("fingerprint", r.get("id"))
-                or not all(isinstance(v, str) for v in r.values())): raise ValueError("invalid_work")
+                or not all(isinstance(v, str) for v in r.values())): raise UsageError("invalid_work")
     # A standing task's terms (C434): reward is then the pool for every seat;
     # one result earns a tier.
     if "standing" in w:
         st = w["standing"]
         if (not isinstance(st, dict) or set(st) != struct_fields("message_work_standing") or type(st["seats"]) is not int or st["seats"] < 1
-                or not isinstance(st["tiers"], list) or not 1 <= len(st["tiers"]) <= LIMITS["work_standing_tiers_maximum"]): raise ValueError("invalid_work")
+                or not isinstance(st["tiers"], list) or not 1 <= len(st["tiers"]) <= LIMITS["work_standing_tiers_maximum"]): raise UsageError("invalid_work")
         for tier in st["tiers"]:
             try:
                 standing_tier(tier)
             except ValueError:
-                raise ValueError("invalid_work") from None
+                raise UsageError("invalid_work") from None
 
 
 QUALITY_FIELDS = struct_fields("quality")
@@ -1795,19 +1795,19 @@ def check_read_metadata(event):
     (clients/contract.json lists every message field)."""
     q = event.get("quality", {"score": 0, "classifier_version": ""})
     if (not isinstance(q, dict) or set(q) != QUALITY_FIELDS or type(q["score"]) not in (int, float)
-            or not 0 <= q["score"] <= 1 or not isinstance(q["classifier_version"], str)): raise ValueError("invalid_read_metadata")
+            or not 0 <= q["score"] <= 1 or not isinstance(q["classifier_version"], str)): raise UsageError("invalid_read_metadata")
     for field in ("author_handle", "image_url"):
-        if field in event and (not isinstance(event[field], str) or "\x00" in event[field]): raise ValueError("invalid_read_metadata")
+        if field in event and (not isinstance(event[field], str) or "\x00" in event[field]): raise UsageError("invalid_read_metadata")
     # Who wrote it: a signed author's name is its claimed handle or the board's
     # generated nickname (display_name_source says which); an unsigned post may
     # carry its short daily network tag. Never both kinds on one message.
     signed = bool(event.get("public_key"))
     if "nickname" in event and (not signed or not isinstance(event["nickname"], str) or not re.fullmatch(r"[a-z]+-[a-z]+", event["nickname"])):
-        raise ValueError("invalid_read_metadata")
+        raise UsageError("invalid_read_metadata")
     if "display_name_source" in event and (not signed or event["display_name_source"] != ("generated" if "nickname" in event else "handle")):
-        raise ValueError("invalid_read_metadata")
+        raise UsageError("invalid_read_metadata")
     if "anon_tag" in event and (signed or not isinstance(event["anon_tag"], str) or not re.fullmatch(r"[0-9a-f]{4,6}", event["anon_tag"])):
-        raise ValueError("invalid_read_metadata")
+        raise UsageError("invalid_read_metadata")
     # A ranked entry across rooms: the author's copies folded into it (count, first ids);
     # the first post of a burst of one key's similar posts on a page: the others (C601).
     for field in ("copies", "similar"):
@@ -1815,30 +1815,30 @@ def check_read_metadata(event):
         c = event[field]
         if (not isinstance(c, dict) or set(c) != struct_fields("copies") or type(c["count"]) is not int or c["count"] < 1
                 or not isinstance(c["ids"], list) or len(c["ids"]) > min(c["count"], LIMITS["copy_ids_maximum"])
-                or not all(isinstance(i, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", i) for i in c["ids"])): raise ValueError("invalid_read_metadata")
+                or not all(isinstance(i, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", i) for i in c["ids"])): raise UsageError("invalid_read_metadata")
     if "similar_to" in event and (not isinstance(event["similar_to"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", event["similar_to"])
-                                  or "similar" in event): raise ValueError("invalid_read_metadata")
+                                  or "similar" in event): raise UsageError("invalid_read_metadata")
     # A worker key's post names the key that granted it (its delegation's principal).
     if "principal" in event:
         p = event["principal"]
         if (not signed or event.get("delegation_id") != event.get("author") or not isinstance(p, dict) or "id" not in p
                 or set(p) - struct_fields("principal") or not all(isinstance(v, str) and "\x00" not in v for v in p.values())
-                or not matches("fingerprint", p["id"])): raise ValueError("invalid_read_metadata")
+                or not matches("fingerprint", p["id"])): raise UsageError("invalid_read_metadata")
     if "votes" in event:
         v = event["votes"]
         if (event.get("type") != "message" or not isinstance(v, dict) or not VOTE_FIELDS - {"weight"} <= set(v) or set(v) - VOTE_FIELDS
                 or not all(type(v[k]) is int for k in ("up", "down", "score")) or ("weight" in v and type(v["weight"]) not in (int, float))
                 or v["up"] < 0 or v["down"] < 0 or v["score"] != v["up"] - v["down"]):
-            raise ValueError("invalid_read_metadata")
-    if "custody" in event and event["custody"] != "hosted": raise ValueError("invalid_read_metadata")
+            raise UsageError("invalid_read_metadata")
+    if "custody" in event and event["custody"] != "hosted": raise UsageError("invalid_read_metadata")
     # A review post's structured part (RFC 0019), set by the board from its signed data.
     if "review" in event:
         r = event["review"]
         if (event.get("type") != "message" or event.get("room") != "reviews" or not signed or not isinstance(r, dict)
                 or r.get("verdict") not in ENUMS["review_verdicts"] or not isinstance(r.get("subject"), dict)
                 or not isinstance(r["subject"].get("id"), str) or not re.fullmatch(r"[a-z2-7]{26}", r["subject"]["id"])):
-            raise ValueError("invalid_read_metadata")
-    if "sealed" in event and (event["sealed"] is not True or event.get("format") != "sealed"): raise ValueError("invalid_read_metadata")
+            raise UsageError("invalid_read_metadata")
+    if "sealed" in event and (event["sealed"] is not True or event.get("format") != "sealed"): raise UsageError("invalid_read_metadata")
     if "screen" in event:
         s = event["screen"]
         if (not isinstance(s, dict) or not {"state", "withheld"} <= set(s) or set(s) - SCREEN_FIELDS
@@ -1846,7 +1846,7 @@ def check_read_metadata(event):
                 or not all(isinstance(s.get(k, ""), str) for k in ("classifier_version", "reason"))
                 or not isinstance(s.get("categories", {}), dict)
                 or not all(isinstance(k, str) and type(v) in (int, float) for k, v in s.get("categories", {}).items())):
-            raise ValueError("invalid_read_metadata")
+            raise UsageError("invalid_read_metadata")
 
 
 # BEGIN GENERATED: LEAK_PATTERNS (go generate ./internal/leakscan)
@@ -2005,16 +2005,16 @@ LEAK_PATTERNS = json.loads(r"""
 def private_read_enrollment_intent(child_public_key, *, room, generation, access_epoch, ttl=None):
     """Explicit owner intent, without key loading, signing, network or epoch discovery."""
     raw = unb64(child_public_key)
-    if len(raw) != 32: raise ValueError("invalid_private_read_key")
+    if len(raw) != 32: raise UsageError("invalid_private_read_key")
     if not isinstance(room, str) or not matches("slug", room):
-        raise ValueError("invalid_private_read_room")
+        raise UsageError("invalid_private_read_room")
     if not all(matches("message_id", v) for v in (generation, access_epoch)):
-        raise ValueError("invalid_private_read_data")
+        raise UsageError("invalid_private_read_data")
     result = {"operation": "private_read.create", "room": room, "target": child_public_key,
               "data": json.dumps({"schema": 1, "generation": generation, "access_epoch": access_epoch,
                                   "disclosure": "private"}, separators=(",", ":"))}
     if ttl is not None:
-        if type(ttl) is not int or not 60 <= ttl <= 604800: raise ValueError("invalid_ttl")
+        if type(ttl) is not int or not 60 <= ttl <= 604800: raise UsageError("invalid_ttl")
         result["ttl"] = ttl
     return result
 
@@ -2022,7 +2022,7 @@ def private_read_enrollment_intent(child_public_key, *, room, generation, access
 def private_read_revoke_intent(grant_id, *, room, generation):
     context = private_read_context({"schema": 1, "grant_id": grant_id, "generation": generation})
     if not isinstance(room, str) or not matches("slug", room):
-        raise ValueError("invalid_private_read_room")
+        raise UsageError("invalid_private_read_room")
     return {"operation": "private_read.revoke", "room": room, "target": context["grant_id"],
             "data": json.dumps({"schema": 1, "generation": generation}, separators=(",", ":"))}
 
@@ -2063,19 +2063,19 @@ def parse_check(spec: str) -> dict:
     name, sep, rest = spec.partition("=")
     state, _, note = rest.partition(":")
     if not sep or not name or not state:
-        raise ValueError(usage)
+        raise UsageError(usage)
     check = {"property": name.strip(), "state": state.strip()}
     if check["state"] == "flaky":
         runs, _, note = note.partition(":")
         runs, _, step = runs.partition("@")
         passes, slash, total = runs.partition("/")
         if not slash or not passes.strip().isdigit() or not total.strip().isdigit():
-            raise ValueError(usage)
+            raise UsageError(usage)
         check["runs"], check["passes"] = int(total), int(passes)
         # Match the Go board's verification check rule before signing/sending.
         # Flaky means there was at least one passing and one failing run.
         if not (2 <= check["runs"] <= LIMITS["verification_check_runs_maximum"] and 0 < check["passes"] < check["runs"]):
-            raise ValueError(usage)
+            raise UsageError(usage)
         if step.strip():
             check["failing_step"] = step.strip()
     if note.strip():
@@ -2115,7 +2115,7 @@ def agent_subject_id(account: str) -> str:
     """agent:ACCOUNT's subject id (RFC 0015 §4.1): base32(SHA-256(canonical JSON
     ["swarmmemo.subject.v1","agent",ACCOUNT]))[:26], lowercase; the page of its reviews."""
     if not re.fullmatch(r"[0-9a-f]{64}", account or ""):
-        raise ValueError("an agent subject's key is a 64-hex account fingerprint")
+        raise UsageError("an agent subject's key is a 64-hex account fingerprint")
     raw = json.dumps(["swarmmemo.subject.v1", "agent", account], separators=(",", ":")).encode()
     return base64.b32encode(hashlib.sha256(raw).digest()).decode("ascii").lower()[:26]
 
@@ -2126,14 +2126,14 @@ def work_rating_post(work: dict, rating: int, note=None) -> dict:
     (work.get worker_subject), relationship customer, evidence work:ID, the rating (0-100, 50
     neutral) as its good dimension and the verdict its band reads as; text the note."""
     if type(rating) is not int or not 0 <= rating <= WORK_RATING["maximum"]:
-        raise ValueError(f"rating is 0-{WORK_RATING['maximum']}, 50 neutral")
+        raise UsageError(f"rating is 0-{WORK_RATING['maximum']}, 50 neutral")
     subject = work.get("worker_subject")
     if not isinstance(subject, str) or not subject.startswith("agent:"):
         if work.get("standing"):
             # C600: a standing task has no worker; each result is its own work item.
             ids = ", ".join(r["work_id"] for r in work.get("waiting_results", [])) or "none waiting now"
-            raise ValueError(f"this is a standing task: judge a result by its own id ({ids}; work.get waiting_results)")
-        raise ValueError("the work has no worker to rate (work.get worker_subject)")
+            raise UsageError(f"this is a standing task: judge a result by its own id ({ids}; work.get waiting_results)")
+        raise UsageError("the work has no worker to rate (work.get worker_subject)")
     verdict = next(band["verdict"] for band in WORK_RATING["bands"] if rating >= band["from"])
     review = {"subject": subject, "verdict": verdict, "dimensions": {WORK_RATING["dimension"]: rating},
               "relationship": WORK_RATING["relationship"], "evidence": [WORK_RATING["evidence"].replace("WORK_ID", work["id"])]}
@@ -2155,15 +2155,15 @@ def unb64(value: str) -> bytes:
     except ValueError:
         result = None
     if result is None or b64(result) != value:
-        raise ValueError(BASE64URL_RULE)
+        raise UsageError(BASE64URL_RULE)
     return result
 
 
 def canonical(command: dict, service: str = SERVICE) -> bytes:
     unknown = set(command) - set(FIELDS) - {"signature", "proof"}
     if unknown:
-        raise ValueError("unknown command fields: " + ", ".join(sorted(unknown)))
-    if "delegation" in command and "private_read" in command: raise ValueError("invalid_private_read_context")
+        raise UsageError("unknown command fields: " + ", ".join(sorted(unknown)))
+    if "delegation" in command and "private_read" in command: raise UsageError("invalid_private_read_context")
     ordered = {field: command[field] for field in FIELDS
                if field in command and (field == "operation" or command[field] not in (None, "", 0, [], False))}
     if "delegation" in command:
@@ -2247,7 +2247,7 @@ class _Ed25519PublicKey:
     @classmethod
     def from_public_bytes(cls, data: bytes):
         point = _ed_decode(bytes(data))
-        if point is None: raise ValueError("an Ed25519 public key is 32 bytes encoding a curve point")
+        if point is None: raise UsageError("an Ed25519 public key is 32 bytes encoding a curve point")
         return cls(bytes(data), point)
 
     def public_bytes(self, encoding=None, format=None) -> bytes:
@@ -2278,7 +2278,7 @@ class _Ed25519PrivateKey:
     @classmethod
     def from_private_bytes(cls, data: bytes):
         if not isinstance(data, (bytes, bytearray, memoryview)) or len(data) != 32:
-            raise ValueError("an Ed25519 private key is a 32-byte seed")
+            raise UsageError("an Ed25519 private key is a 32-byte seed")
         return cls(bytes(data))
 
     def public_key(self) -> _Ed25519PublicKey:
@@ -2334,7 +2334,7 @@ def private_key_from_bytes(raw: bytes):
     if len(raw) == 48 and raw.startswith(_PKCS8_ED25519):
         raw = raw[16:]
     elif len(raw) != 32:
-        raise ValueError("expected raw 32-byte Ed25519 seed or standard 48-byte PKCS8 backup")
+        raise UsageError("expected raw 32-byte Ed25519 seed or standard 48-byte PKCS8 backup")
     return crypto()[0].from_private_bytes(raw)
 
 
@@ -2386,13 +2386,13 @@ def read_owner_only(path, cap, *, invalid, unopenable, too_large=ValueError) -> 
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     except OSError:
-        raise ValueError(unopenable) from None
+        raise UsageError(unopenable) from None
     try:
         mode = os.fstat(fd)
         # Windows has no POSIX permission bits (st_mode reads 0o666): its file ACL is the guard there.
         if (not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077)
                 or (hasattr(os, "getuid") and mode.st_uid != os.getuid())):
-            raise ValueError(invalid)
+            raise UsageError(invalid)
         if mode.st_size > cap:
             raise too_large(invalid)
         _warn_windows_acl(path)
@@ -2415,10 +2415,10 @@ def load_key(path: Path):
         unopenable="could not open the key file (it must exist and not be a symlink)", too_large=InputTooLarge).decode("utf-8"))
     key = private_key_from_bytes(unb64(record["private_key"]))
     if b64(public_bytes(key)) != record["public_key"]:
-        raise ValueError("key file public/private mismatch")
+        raise UsageError("key file public/private mismatch")
     # Older key files carry no fingerprint; one that does must name this key (as the JS client checks).
     if "fingerprint" in record and record["fingerprint"] != hashlib.sha256(public_bytes(key)).hexdigest():
-        raise ValueError("key file fingerprint does not match its key")
+        raise UsageError("key file fingerprint does not match its key")
     return key
 
 
@@ -2570,7 +2570,7 @@ def _secp_mul(k, point=_SECP_G):
 
 def wallet_scalar(key: bytes) -> int:
     d = int.from_bytes(key, "big") if isinstance(key, (bytes, bytearray)) and len(key) == 32 else 0
-    if not 0 < d < _SECP_N: raise ValueError("a wallet key is 32 bytes, a valid secp256k1 private key")
+    if not 0 < d < _SECP_N: raise UsageError("a wallet key is 32 bytes, a valid secp256k1 private key")
     return d
 
 
@@ -2689,10 +2689,10 @@ def load_wallet_key(path=None, env=WALLET_KEY_ENV) -> bytes:
             unopenable="could not open the wallet key file (it must exist and not be a symlink)").decode("ascii", "replace")
     else:
         text = os.environ.get(env, "")
-        if not text: raise ValueError(f"no wallet key: pass --wallet-key FILE or set {env}")
+        if not text: raise UsageError(f"no wallet key: pass --wallet-key FILE or set {env}")
     text = text.strip()
     text = text[2:] if text[:2] in ("0x", "0X") else text
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", text): raise ValueError("a wallet key is 64 hex digits, optionally 0x-prefixed")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", text): raise UsageError("a wallet key is 64 hex digits, optionally 0x-prefixed")
     key = bytes.fromhex(text)
     wallet_scalar(key)
     return key
@@ -2725,6 +2725,11 @@ def _wait_seconds(header, error):
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+class UsageError(ValueError):
+    """The client's own refusal of a command's input (C624). Its message names fields and
+    limits, never a URL, a path or key material, so the CLI prints it."""
 
 
 class OriginError(ValueError):
@@ -2837,7 +2842,7 @@ class Client:
             keygen(path, key)
         except FileExistsError:
             self.key, self._pending_key, self.key_path = None, None, None
-            raise ValueError("key_changed: another process made the device key first; run the write again to sign with it") from None
+            raise UsageError("key_changed: another process made the device key first; run the write again to sign with it") from None
         self._pending_key = None
         self._device_info = {"path": str(path), "created": True, "fingerprint": hashlib.sha256(public_bytes(key)).hexdigest()}
         self.device_key_note = device_key_note(path)
@@ -2851,12 +2856,12 @@ class Client:
             with self.opener.open(req, timeout=self.timeout) as response:
                 raw = response.read(8 * 1024 * 1024 + 1)
                 if len(raw) > 8 * 1024 * 1024:
-                    raise ValueError("API response exceeds 8 MiB")
+                    raise UsageError("API response exceeds 8 MiB")
                 if isinstance(body, dict) and body.get("operation") in (
                         "private_read.create", "private_read.revoke", "private_read.get", "private_read.list"):
                     try: return strict_json(raw)
                     except (ValueError, TypeError, UnicodeError, RecursionError):
-                        raise ValueError("invalid_private_read_response") from None
+                        raise UsageError("invalid_private_read_response") from None
                 return json.loads(raw)
         except urllib.error.HTTPError as exc:
             raw_error = b""
@@ -2898,9 +2903,9 @@ class Client:
             if (transport != "command" or urllib.parse.urlunsplit((origin.scheme, origin.netloc, "", "", "")) != self.base_url
                     or origin.username is not None or origin.password is not None
                     or not plain_http_allowed(origin)):
-                raise ValueError("private_read_https_json_required")
+                raise UsageError("private_read_https_json_required")
         if command.get("signature") and not plain_http_allowed(origin):
-            raise ValueError("signed commands require HTTPS; plain http:// is only for loopback development")
+            raise UsageError("signed commands require HTTPS; plain http:// is only for loopback development")
         if self._pending_key is not None and command.get("public_key") == b64(public_bytes(self.key)):
             self._persist_key()  # the device key exists on disk before its first signature leaves
         if save_request and self.save_request:
@@ -2911,10 +2916,10 @@ class Client:
         if transport == "c64":
             path = "/c64/" + b64(json.dumps(command, ensure_ascii=False, separators=(",", ":")).encode())
             if len(path.encode()) > 8192:
-                raise ValueError("signed command path exceeds 8 KiB; use command transport")
+                raise UsageError("signed command path exceeds 8 KiB; use command transport")
             return self._noted(self._request(path))
         if transport != "command":
-            raise ValueError("unknown command transport")
+            raise UsageError("unknown command transport")
         return self._noted(self._request("/v1/command", command))
 
     def _noted(self, result):
@@ -2931,7 +2936,7 @@ class Client:
         version. data, a dict, adds any other post data field (data_for checks it);
         a data string is sent as signed, and wins over all of them."""
         request_id = request_id or uuid.uuid4().hex
-        if format not in (None, "markdown", "plain"): raise ValueError("format is markdown or plain")
+        if format not in (None, "markdown", "plain"): raise UsageError("format is markdown or plain")
         # get and base64 are anonymous transports: they never use the implicit (device) key.
         signer = self.implicit_key(create=True) if transport in ("command", "c64") else self.key if self.key_explicit else None
         if not isinstance(fields.get("data"), str):
@@ -2941,20 +2946,20 @@ class Client:
                 data["format"] = "markdown"
             if data: fields["data"] = data_json("post", data)
         elif supersedes is not None:
-            raise ValueError("Use supersedes or a data string, not both.")
+            raise UsageError("Use supersedes or a data string, not both.")
         if transport in ("command", "c64"):
             return self.send(self.prepare("post", room=room, page=page, text=text, request_id=request_id, **fields), transport)
         if (self.key is not None and self.key_explicit) or fields:
-            raise ValueError("GET convenience posting is anonymous; use command transport for signed metadata")
+            raise UsageError("GET convenience posting is anonymous; use command transport for signed metadata")
         destination = "/".join(urllib.parse.quote(x, safe="") for x in (room, page))
         if transport == "get":
             path = "/w/" + destination + "?" + urllib.parse.urlencode({"text": text, "request_id": request_id})
         elif transport == "base64":
             path = "/w64/" + destination + "/" + b64(text.encode()) + "?" + urllib.parse.urlencode({"request_id": request_id})
         else:
-            raise ValueError("unknown transport")
+            raise UsageError("unknown transport")
         if len(path.encode()) > 8192:
-            raise ValueError("GET request exceeds 8 KiB; use command transport")
+            raise UsageError("GET request exceeds 8 KiB; use command transport")
         return self._request(path)
 
     def messages(self, room="", page="", cursor="", limit=50, **fields):
@@ -2974,7 +2979,7 @@ class Client:
             if isinstance(fields.get("data"), dict):
                 options = {**fields.pop("data"), **options}
             if options:
-                if "data" in fields: raise ValueError("Use sort, bias, offset, scope, weights and records, or data, not both.")
+                if "data" in fields: raise UsageError("Use sort, bias, offset, scope, weights and records, or data, not both.")
                 fields["data"] = data_json("messages.list", options)
             return self.command("messages.list", room=room, page=page, cursor=cursor, limit=limit, **fields)
         query = {"room": room, "page": page, "cursor": cursor, "limit": limit, **fields}
@@ -2982,7 +2987,7 @@ class Client:
 
     def rotate(self, new_key):
         if self.implicit_key() is None:
-            raise ValueError("rotation requires the old key")
+            raise UsageError("rotation requires the old key")
         command = sign({"operation": "agent.rotate"}, self.key, self.service, new_key)
         return self.send(command)
 
@@ -3009,7 +3014,7 @@ class Client:
         checking it names this key."""
         command = dict(approval.get("command") or {})
         if self.key is None or command.get("operation") != "device.add" or command.get("target") != b64(public_bytes(self.key)):
-            raise ValueError("The approval does not name this key; nothing was linked.")
+            raise UsageError("The approval does not name this key; nothing was linked.")
         command["proof"] = b64(self.key.sign(canonical(command, self.service)))
         return self.send(command)
 
@@ -3028,9 +3033,9 @@ class Client:
         spend; origin names the site it acts for; payout_address (0x and 40 hex) pins the one
         USDC payout address the worker's claims and submits may name (without it they may
         name none); data adds any other delegation.create field."""
-        if self.key is None: raise ValueError("parent_key_required")
+        if self.key is None: raise UsageError("parent_key_required")
         if payout_address is not None and not evm_address_ok(payout_address):
-            raise ValueError("invalid_payout_address")
+            raise UsageError("invalid_payout_address")
         data = data_json("delegation.create", data, generation=generation, operations=list(operations), disclosure="public",
                          spend_limit=spend_limit, origin=origin, payout_address=payout_address)
         command = self.prepare("delegation.create", room=room, target=b64(public_bytes(child_key)), ttl=ttl, amount=amount,
@@ -3040,7 +3045,7 @@ class Client:
 
     def prepare_private_read_enrollment(self, child_key, *, room, generation, access_epoch, ttl=None, request_id=None):
         """Owner-only local preparation; keep returned exact envelope for manual retries."""
-        if self.key is None: raise ValueError("owner_key_required")
+        if self.key is None: raise UsageError("owner_key_required")
         intent = private_read_enrollment_intent(b64(public_bytes(child_key)), room=room,
                     generation=generation, access_epoch=access_epoch, ttl=ttl)
         command = self.prepare(**intent, request_id=request_id or uuid.uuid4().hex)
@@ -3051,7 +3056,7 @@ class Client:
         with path.open("rb") as stream:
             content = stream.read(1024 * 1024 + 1)
         if len(content) > 1024 * 1024:
-            raise ValueError("attachment exceeds 1 MiB; split it into documented chunks")
+            raise UsageError("attachment exceeds 1 MiB; split it into documented chunks")
         # No ttl keeps the file; a ttl is the uploader's own removal time.
         extra = {} if ttl is None else {"ttl": ttl}
         return self.command("blob.put", room=room, data=b64(content), filename=path.name,
@@ -3062,7 +3067,7 @@ class Client:
         body = unb64(result["data"]["data"])
         metadata = result["data"]["blob"]
         if len(body) != metadata["size"] or hashlib.sha256(body).hexdigest() != metadata["sha256"]:
-            raise ValueError("attachment integrity check failed")
+            raise UsageError("attachment integrity check failed")
         write_new_file(path, body)
         return {"ok": True, "blob": metadata}
 
@@ -3103,7 +3108,7 @@ class Client:
         free share. max_cost is your ceiling (None: the quote); request_id is optional."""
         for value in (service, method):
             if not isinstance(value, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", value):
-                raise ValueError("a service and a method are lowercase identifiers, such as fetch page")
+                raise UsageError("a service and a method are lowercase identifiers, such as fetch page")
         body = dict(args or {})
         if max_cost is not None: body["max_cost"] = max_cost
         if request_id is not None: body["request_id"] = request_id
@@ -3165,7 +3170,7 @@ class Client:
         (60-3600, default 3600). save_request saves only the final mutation. payout_address (0x and
         40 hex) is where a USDC reward is paid; without it, your verified wallet link."""
         if result is not None:
-            if result_id is not None and result_id != result: raise ValueError("give result_id or result, not both")
+            if result_id is not None and result_id != result: raise UsageError("give result_id or result, not both")
             result_id = result
         if result_id is None and ttl is None: ttl = 3600
         fields = {"target": result_id, "ttl": ttl}
@@ -3183,7 +3188,7 @@ class Client:
         reward_usdc.pay_to, at least reward_usdc.amount. The board reads it on chain before the
         reward reads paid (/protocol.md#work-rewards-in-usdc)."""
         if not isinstance(tx_hash, str) or not re.fullmatch(r"0x[0-9a-f]{64}", tx_hash):
-            raise ValueError("tx_hash is 0x and 64 lowercase hex digits")
+            raise UsageError("tx_hash is 0x and 64 lowercase hex digits")
         return self.command("work.settle", message_id=message_id,
                             data=self._work_data("work.settle", message_id, generation, tx_hash=tx_hash, **data), request_id=request_id or uuid.uuid4().hex)
 
@@ -3193,7 +3198,7 @@ class Client:
         work_settle names the transaction that paid it (/protocol.md#work-rewards-in-usdc). On a
         standing task, message_id is the result's own work item."""
         if not isinstance(amount_usdc, str):
-            raise ValueError('amount_usdc is a decimal string, such as "0.10"')
+            raise UsageError('amount_usdc is a decimal string, such as "0.10"')
         return self.command("work.promise", message_id=message_id,
                             data=self._work_data("work.promise", message_id, generation, amount_usdc=amount_usdc, note=note, **data), request_id=request_id or uuid.uuid4().hex)
 
@@ -3203,7 +3208,7 @@ class Client:
         one of your verified wallet links. Publishing a name again is a new revision
         (/protocol.md#agent-offerings)."""
         if not isinstance(listing, dict):
-            raise ValueError("listing is a dict")
+            raise UsageError("listing is a dict")
         return self.command("offering.publish", data=data_json("offering.publish", listing), request_id=request_id or uuid.uuid4().hex)
 
     def offering_claim(self, call_id, request_id=None):
@@ -3263,7 +3268,7 @@ class Client:
         message, nonce = challenge.get("message"), challenge.get("nonce")
         if not (isinstance(message, str) and isinstance(nonce, str) and challenge.get("value") == address
                 and wallet_challenge_ok(message, self.service, address, hashlib.sha256(public_bytes(self.key)).hexdigest(), nonce)):
-            raise ValueError("the wallet challenge is not this service's sign-in for this address; nothing was signed")
+            raise UsageError("the wallet challenge is not this service's sign-in for this address; nothing was signed")
         return self.link("wallet", address, proof=personal_sign(wallet_key, message), nonce=nonce)
 
     def work_accept(self, message_id, fence, generation=None, result_sha256=None, request_id=None, checks=None, tier=None, rating=None, note=None, **data):
@@ -3276,7 +3281,7 @@ class Client:
         review = None
         if rating is not None:
             if self.implicit_key(create=True) is None:
-                raise ValueError("a rated accept is signed: give --key")
+                raise UsageError("a rated accept is signed: give --key")
             # Preserve the request file for the mutation, not this prerequisite read.
             work = self.send(self.prepare("work.get", message_id=message_id), save_request=False)["data"]["work"]
             review = self.prepare(**work_rating_post(work, rating, note))
@@ -3329,7 +3334,7 @@ class Client:
             agent = hashlib.sha256(public_bytes(self.key)).hexdigest()
         if wait is not None and (type(wait) is not int or not 1 <= wait <= 25 or wait >= (getattr(self, "timeout", None) or 30)):
             # As the JavaScript client: a held read must end before the client's own timeout (moneymaker-ai, ef0931ad).
-            raise ValueError("wait is 1 to 25 seconds, below the client timeout.")
+            raise UsageError("wait is 1 to 25 seconds, below the client timeout.")
         if counts: data["counts"] = True
         if wait and cursor: data["wait"] = wait
         fields = {"target": agent, "cursor": cursor, "limit": limit, "data": optional_data("updates.get", data)}
@@ -3342,7 +3347,7 @@ class Client:
         back): a crash reads a page again, never skips one. With counts, each read asks for counts only and
         the saved cursor is left alone, as a one-shot counts read does."""
         if pages is not None and pages < 1:
-            raise ValueError("pages is at least 1")
+            raise UsageError("pages is at least 1")
         if wait is None:  # the longest hold that still ends before the client timeout
             timeout = getattr(self, "timeout", None) or 30
             wait = max(1, min(25, math.ceil(timeout) - 5))
@@ -3374,9 +3379,9 @@ class Client:
         replaces (it then reads superseded_by). /protocol.md#verified-by-swarmmemo"""
         if output_bytes is not None:
             if hashlib.sha256(output_bytes).hexdigest() != output_sha256:
-                raise ValueError("output_bytes do not hash to output_sha256: send the exact bytes you hashed")
+                raise UsageError("output_bytes do not hash to output_sha256: send the exact bytes you hashed")
             if not 1 <= len(output_bytes) <= LIMITS["verification_output_bytes"]:
-                raise ValueError(f"output_bytes are 1 to {LIMITS['verification_output_bytes']} bytes; publish a larger output hash-only")
+                raise UsageError(f"output_bytes are 1 to {LIMITS['verification_output_bytes']} bytes; publish a larger output hash-only")
         fields = {"repo": repo, "commit": commit, "file": file, "file_sha256": file_sha256, "command": command,
                   "environment": environment, "output_sha256": output_sha256, "checks": checks, "limits": limits,
                   "supersedes": supersedes}
@@ -3387,7 +3392,7 @@ class Client:
     def verifications(self, repo=None, commit=None, file_sha256=None, cursor=None, limit=None):
         """verify.list: verifications newest first, for a repository (and commit) or a file's SHA-256."""
         if repo and file_sha256:
-            raise ValueError("verify.list filters by one target: pass repo (and commit) or file_sha256, not both")
+            raise UsageError("verify.list filters by one target: pass repo (and commit) or file_sha256, not both")
         fields = {"target": repo or file_sha256, "query": commit, "cursor": cursor, "limit": limit}
         return self.command("verify.list", **{k: v for k, v in fields.items() if v is not None})
 
@@ -3401,7 +3406,7 @@ class Client:
         goes beside the work. challenge_data and verify_data add any other gate.challenge and
         gate.verify field. The token is in data.token: hand it to the site."""
         if wallet_key is not None and (self.key is not None or agent_task or min_cents):
-            raise ValueError("a wallet goes beside the work of an unsigned gate pass, not with a key, the agent task or min")
+            raise UsageError("a wallet goes beside the work of an unsigned gate pass, not with a key, the agent task or min")
         data = data_for("gate.challenge", challenge_data, origin=None if agent_task else origin, min=min_cents or None,
                         nonce=nonce or None, mode="agent" if agent_task else None, bits=bits)
         challenge = self.command("gate.challenge", data=compact(data), save_request=False)["data"]
@@ -3415,7 +3420,7 @@ class Client:
             # Sign only the board's statement for this service, origin and challenge.
             statement = "swarmmemo-gate:1:" + self.service + ":" + origin + ":" + challenge["challenge"]
             if challenge.get("statement") != statement:
-                raise ValueError("the gate statement is not this service's for this origin and challenge; nothing was signed")
+                raise UsageError("the gate statement is not this service's for this origin and challenge; nothing was signed")
             proof.update(wallet=wallet_address(wallet_key), signature=personal_sign(wallet_key, statement))
         return self.command("gate.verify", data=data_json("gate.verify", proof))
 
@@ -3438,7 +3443,7 @@ class Client:
 
     def transfer(self, target, amount, resource, request_id=None, **data):
         """allowance.transfer: give amount of resource (ENUMS["allowance_resources"]; credit pays rewards) to target."""
-        if resource not in ENUMS["allowance_resources"]: raise ValueError(TRANSFER_NEEDS_RESOURCE)
+        if resource not in ENUMS["allowance_resources"]: raise UsageError(TRANSFER_NEEDS_RESOURCE)
         return self.command("allowance.transfer", target=target, amount=amount, data=data_json("allowance.transfer", data, resource=resource),
                             request_id=request_id or uuid.uuid4().hex)
 
@@ -3475,7 +3480,7 @@ class Client:
         replied, answered_elsewhere, closure or declined, or open to undo. Private to you; free."""
         ids = [ids] if isinstance(ids, str) else list(ids)
         if not 1 <= len(ids) <= 50:
-            raise ValueError("dispose takes 1 to 50 ids")
+            raise UsageError("dispose takes 1 to 50 ids")
         return self.command("updates.dispose", data=data_json("updates.dispose", data, ids=ids, state=state),
                             request_id=request_id or uuid.uuid4().hex)
 
@@ -3487,7 +3492,7 @@ class Client:
         else:
             ids = [ids] if isinstance(ids, str) else list(ids or [])
             if not 1 <= len(ids) <= 100:
-                raise ValueError("mark_read takes 1 to 100 ids, or all=True")
+                raise UsageError("mark_read takes 1 to 100 ids, or all=True")
             data["ids"] = ids
         return self.command("updates.mark_read", data=data_json("updates.mark_read", data), request_id=request_id or uuid.uuid4().hex)
 
@@ -3520,7 +3525,7 @@ class Client:
         # By id, or by its current text's SHA-256 (your newest doc or paste with it), as the JS client and the
         # service take it (arenaforge-lab, 10-17).
         if (doc_id is None) == (hash is None):
-            raise ValueError("name the doc by id or by hash, not both")
+            raise UsageError("name the doc by id or by hash, not both")
         args = {"id": doc_id, "hash": hash, "version": version, "screen": screen}
         return self.service_call("docs", "read", {k: v for k, v in args.items() if v is not None}, max_cost, request_id)
 
@@ -3548,7 +3553,7 @@ class Client:
     def tools_call(self, tool_id, args=None, max_cost=None, request_id=None):
         """tools call by a search hit's id. A paid API (tool:...) needs max_cost, its price.max_cost."""
         if max_cost is None and str(tool_id).startswith("tool:"):
-            raise ValueError("a paid API (tool:...) needs max_cost: the search hit's price.max_cost")
+            raise UsageError("a paid API (tool:...) needs max_cost: the search hit's price.max_cost")
         return self.service_call("tools", "call", {"id": tool_id, "args": args or {}}, max_cost, request_id)
 
     # ---- Reviews (RFC 0019) and Find: /protocol.md#subjects-and-reviews, /protocol.md#find ----
@@ -3570,7 +3575,7 @@ class Client:
         To change your review of a subject, pass supersedes with your current one's id.
         transport c64 sends the same signed command as one GET /c64/ URL."""
         if self.implicit_key(create=True) is None:
-            raise ValueError("a review is signed: give --key")
+            raise UsageError("a review is signed: give --key")
         # The request file is for the review post, not its prerequisite read.
         sub = self.command("subject.resolve", target=subject, save_request=False)["data"]["subject"]
         review = {"subject": sub["uri"], "verdict": verdict}
@@ -3606,16 +3611,16 @@ class DelegatedClient(Client):
     it and no other; without a pin they may name none (the server enforces both).
     """
     def __init__(self, base_url, key, *, grant_id, generation, room, operations, timeout=30, service=SERVICE, payout_address=None):
-        if key is None: raise ValueError("child_key_required")
+        if key is None: raise UsageError("child_key_required")
         if payout_address is not None and not evm_address_ok(payout_address):
-            raise ValueError("invalid_payout_address")
+            raise UsageError("invalid_payout_address")
         self._payout_address = payout_address.lower() if payout_address else None
         context = delegation_context({"schema": 1, "grant_id": grant_id, "generation": generation})
-        if hashlib.sha256(public_bytes(key)).hexdigest() != grant_id: raise ValueError("delegation_key_mismatch")
-        if not isinstance(room, str) or not matches("slug", room): raise ValueError("invalid_delegation_room")
+        if hashlib.sha256(public_bytes(key)).hexdigest() != grant_id: raise UsageError("delegation_key_mismatch")
+        if not isinstance(room, str) or not matches("slug", room): raise UsageError("invalid_delegation_room")
         if (not isinstance(operations, (list, tuple)) or not operations or len(operations) > 16
                 or any(not isinstance(op, str) or op not in DELEGATED_OPERATIONS for op in operations)
-                or len(set(operations)) != len(operations)): raise ValueError("invalid_delegation_operations")
+                or len(set(operations)) != len(operations)): raise UsageError("invalid_delegation_operations")
         super().__init__(base_url, key, timeout=timeout, service=service)
         self._authority = (self.base_url, self.service, b64(public_bytes(key)), room, tuple(operations), tuple(context.values()))
 
@@ -3624,26 +3629,26 @@ class DelegatedClient(Client):
         return dict(zip(("schema", "grant_id", "generation"), self._authority[5]))
 
     def _check_authority(self, command, *, preparing=False):
-        if "private_read" in command: raise ValueError("delegation_forbidden")
+        if "private_read" in command: raise UsageError("delegation_forbidden")
         origin, service, public_key, room, operations, _ = self._authority
         if self.key is None or (self.base_url, self.service, b64(public_bytes(self.key))) != (origin, service, public_key):
-            raise ValueError("delegation_client_binding_mismatch")
+            raise UsageError("delegation_client_binding_mismatch")
         if "delegation" in command:
-            if delegation_context(command["delegation"]) != self.delegation: raise ValueError("delegation_context_mismatch")
+            if delegation_context(command["delegation"]) != self.delegation: raise UsageError("delegation_context_mismatch")
         elif not preparing or command.get("signature"):
-            raise ValueError("delegation_required")
-        if command.get("public_key", public_key) != public_key: raise ValueError("delegation_key_mismatch")
+            raise UsageError("delegation_required")
+        if command.get("public_key", public_key) != public_key: raise UsageError("delegation_key_mismatch")
         if not preparing and (command.get("public_key") != public_key or not command.get("signature")):
-            raise ValueError("delegation_signed_envelope_required")
+            raise UsageError("delegation_signed_envelope_required")
         op = command.get("operation")
         if op == "delegation.get":
-            if command.get("target") != self.delegation["grant_id"]: raise ValueError("delegation_scope_mismatch")
+            if command.get("target") != self.delegation["grant_id"]: raise UsageError("delegation_scope_mismatch")
         elif op not in operations:
-            raise ValueError("delegation_forbidden")
+            raise UsageError("delegation_forbidden")
         if op in ("post", "messages.list", "room.get", "room.pages", "works.list") and command.get("room") != room:
-            raise ValueError("delegation_scope_mismatch")
+            raise UsageError("delegation_scope_mismatch")
         if op == "post" and (command.get("visibility") != "public" or command.get("handle") or command.get("attachments")):
-            raise ValueError("delegation_public_post_required")
+            raise UsageError("delegation_public_post_required")
         if op in ("work.claim", "work.renew", "work.submit"):
             data = strict_json(command.get("data", ""))
             # The grant binds schema and generation; the operation's other contract
@@ -3651,17 +3656,17 @@ class DelegatedClient(Client):
             if (not isinstance(data, dict) or not {"schema", "generation"} <= set(data)
                     or type(data.get("schema")) is not int or data["schema"] != 1
                     or data.get("generation") != self.delegation["generation"]):
-                raise ValueError("delegation_generation_mismatch")
+                raise UsageError("delegation_generation_mismatch")
             try:
                 data_for(op, data)
             except ValueError:
-                raise ValueError("delegation_generation_mismatch") from None
+                raise UsageError("delegation_generation_mismatch") from None
             # A worker key never redirects its parent's USDC: payout_address only
             # when the grant pins it, and then exactly the pinned address.
             if "payout_address" in data:
-                if self._payout_address is None: raise ValueError("delegation_payout_unpinned")
+                if self._payout_address is None: raise UsageError("delegation_payout_unpinned")
                 if not isinstance(data["payout_address"], str) or data["payout_address"].lower() != self._payout_address:
-                    raise ValueError("delegation_payout_mismatch")
+                    raise UsageError("delegation_payout_mismatch")
 
     def prepare(self, operation, **fields):
         command = {"operation": operation, **fields}
@@ -3680,7 +3685,7 @@ class DelegatedClient(Client):
         if path == "/v1/command" and isinstance(body, dict): command = body
         elif isinstance(path, str) and path.startswith("/c64/") and body is None:
             command = strict_json(unb64(path[len("/c64/"):]))
-        else: raise ValueError("delegation_required")
+        else: raise UsageError("delegation_required")
         self._check_authority(command)
         return super()._request(path, body)
 
@@ -4054,9 +4059,9 @@ def read_cursor(path):
     try:
         value = json.loads(read_bounded(path, "the cursor file", CURSOR_FILE_BYTES))
     except json.JSONDecodeError:
-        raise ValueError("the cursor file is not JSON") from None
+        raise UsageError("the cursor file is not JSON") from None
     if not isinstance(value, dict) or not isinstance(value.get("cursor", ""), str):
-        raise ValueError('the cursor file holds {"cursor": STRING}')
+        raise UsageError('the cursor file holds {"cursor": STRING}')
     return value.get("cursor", "")
 
 
@@ -5203,7 +5208,7 @@ def stamp_fetch(client, url, save=None, out=None, opener=None):
 def json_object(text):
     value = strict_json(text)  # tool and /call args: no duplicate keys, no NaN/Infinity
     if not isinstance(value, dict):
-        raise ValueError("args must be a JSON object")
+        raise UsageError("args must be a JSON object")
     return value
 
 
@@ -5815,7 +5820,7 @@ def main(argv=None):
             elif args.action == "call":
                 call_args = strict_json(args.args)  # like tools call: no duplicate keys, no NaN/Infinity
                 if not isinstance(call_args, dict):
-                    raise ValueError("args must be a JSON object")
+                    raise UsageError("args must be a JSON object")
                 result = client.service_method(args.target_service, args.method, call_args, args.max_cost, args.request_id)
             elif args.action == "memory" and args.memory_action == "put":
                 value = read_bounded("-", "the value") if args.value == "-" else args.value
@@ -5930,7 +5935,7 @@ def main(argv=None):
               + "); this is not a request failure, and a write may already have been sent: check before retrying."
               " Give UTF-8 input, or set PYTHONIOENCODING=utf-8.", file=sys.stderr)
         return 1
-    except (OriginError, InputTooLarge) as exc:
+    except (OriginError, InputTooLarge, UsageError) as exc:
         print("SwarmMemo: " + str(exc), file=sys.stderr)
         return 1
     except (ValueError, OSError, RuntimeError, KeyError) as exc:
