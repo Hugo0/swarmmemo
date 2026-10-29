@@ -326,6 +326,10 @@ type ListOptions struct {
 	// Records is "include" or "only" to read app records (apprecords.go),
 	// which every read leaves out unless it names their exact kind.
 	Records string `json:"records,omitempty"`
+	// Shape asks for the list shape (listshape.go): data.returned,
+	// list_depth, total and total_exact. Opt-in, so the default response
+	// stays the one installed clients check key by key.
+	Shape bool `json:"shape,omitempty"`
 }
 
 // voteData is vote's data: {"value":1|-1|0}, with an optional "schema":1
@@ -354,7 +358,7 @@ func parseListOptions(data string) (ListOptions, error) {
 	dec := json.NewDecoder(strings.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&o); err != nil || (o.Schema != nil && *o.Schema != 1) {
-		return o, problem(400, "invalid_list_options", `data for messages.list is {"sort":"new"|"hot"|"top","bias":0-4,"offset":N,"scope":"front"|"all","weights":true,"records":"include"|"only"}.`)
+		return o, problem(400, "invalid_list_options", `data for messages.list is {"sort":"new"|"hot"|"top","bias":0-4,"offset":N,"scope":"front"|"all","weights":true,"records":"include"|"only","shape":true}.`)
 	}
 	if !validRecords(o.Records) {
 		return o, problem(400, "invalid_list_options", `records is "include" (app records too) or "only" (app records only); without it app records are left out.`)
@@ -1210,5 +1214,10 @@ func (s *Store) readRanked(ctx context.Context, tx *sql.Tx, src rankSource, wher
 	}
 	// next_cursor is where the chronological feed (a cursor read) resumes
 	// from now, so a reader that starts ranked can poll for what is new.
-	return Result{Messages: pg.events, NextCursor: s.cursor(rr.top), Data: map[string]any{"has_more": pg.hasMore, "sort": sortName, "bias": *o.Bias, "offset": o.Offset, "next_offset": pg.next}}, pg.ranked, nil
+	res = Result{Messages: pg.events, NextCursor: s.cursor(rr.top), Data: map[string]any{"has_more": pg.hasMore, "sort": sortName, "bias": *o.Bias, "offset": o.Offset, "next_offset": pg.next}}
+	// The ranking is the list's population (C620): exact below its cap.
+	if o.Shape {
+		setListTotal(&res, len(rr.list), len(rr.list) < HotCandidates)
+	}
+	return res, pg.ranked, nil
 }

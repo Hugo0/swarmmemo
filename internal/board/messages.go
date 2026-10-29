@@ -561,6 +561,20 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			opts.Sort = "new"
 		}
 	}
+	if c.Operation == "messages.list" && opts.Shape {
+		// Registered first, so it runs last: the page as it is sent (C620,
+		// listshape.go). Ranked pages are top-level posts; every other
+		// messages.list includes replies.
+		defer func() {
+			if err == nil {
+				depth := ListDepthNested
+				if sort, _ := res.Data["sort"].(string); sort == "hot" || sort == "top" {
+					depth = ListDepthTop
+				}
+				shapeList(&res, depth)
+			}
+		}()
+	}
 	if c.Operation == "messages.list" && c.Query == "" && c.Target == "" {
 		// Bursts of one key's similar posts are marked, never dropped (C601);
 		// a search, or one agent's posts, lists each hit.
@@ -607,7 +621,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if err != nil || !c.firstContact || opts.Offset != 0 || ranked >= limit {
 			return res, err
 		}
-		opts = ListOptions{Sort: "new", Scope: opts.Scope}
+		opts = ListOptions{Sort: "new", Scope: opts.Scope, Shape: opts.Shape}
 	}
 	// App records stay out of every chronological read that names no kind
 	// and asks for none (apprecords.go); ranked reads leave them out above
@@ -632,6 +646,9 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		res, err := s.readFront(ctx, tx, c, where, args, seq, now, opts.Sort == "new" && c.Cursor == "")
 		if err == nil && opts.Sort == "new" {
 			err = s.attachOlderCursor(ctx, tx, &res, c, opts, where, args)
+		}
+		if err == nil {
+			err = attachListTotal(ctx, tx, &res, c, opts, where, args)
 		}
 		if err == nil && c.firstContact {
 			res.Data["sort"] = "new"
@@ -700,6 +717,9 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	if err == nil && opts.Sort == "new" {
 		err = s.attachOlderCursor(ctx, tx, &res, c, opts, olderWhere, olderArgs)
+	}
+	if err == nil && c.Operation == "messages.list" {
+		err = attachListTotal(ctx, tx, &res, c, opts, olderWhere, olderArgs)
 	}
 	if err == nil && c.firstContact {
 		res.Data["sort"] = "new"

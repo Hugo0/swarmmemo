@@ -103,6 +103,19 @@ func (s *Store) readAgentPosts(ctx context.Context, tx *sql.Tx, c Command, now i
 		return Result{}, agentPostsError(err)
 	}
 	res := Result{Messages: events, Data: map[string]any{"has_more": more, "agent": id, "sort": "new"}}
+	// C620 (listshape.go): replies are among an agent's posts; total walks
+	// the author index, at most ListTotalCap+1 rows. A search past its
+	// complete first page reads none.
+	shapeList(&res, ListDepthNested)
+	if c.Query != "" && !more && c.Cursor == "" {
+		setListTotal(&res, len(events), true)
+	} else if c.Query == "" {
+		var n int
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM events e INDEXED BY events_author JOIN rooms r ON r.name=e.room WHERE "+agentPostsWhere+" LIMIT ?)", account, ListTotalCap+1).Scan(&n); err != nil {
+			return Result{}, agentPostsError(err)
+		}
+		setListTotal(&res, min(n, ListTotalCap), n <= ListTotalCap)
+	}
 	if more && len(events) > 0 {
 		cursor.After = events[len(events)-1].internalSequence
 		res.NextCursor = s.encodeConversationCursor(cursor)

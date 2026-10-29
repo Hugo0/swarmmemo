@@ -1168,16 +1168,17 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		delete(query, "sort")
 	}
 	// Message listings take ?sort=new|hot|top&bias=B&offset=N&scope=front|all,
-	// weights=1 (serve votes.weight) and records=include|only (app records),
+	// weights=1 (serve votes.weight), records=include|only (app records) and
+	// shape=1 (the list shape, board/listshape.go),
 	// carried as the read's data (board.ListOptions); the signed command
 	// format is unchanged.
-	if p := r.URL.Path; (p == "/api/messages" || p == "/recent" || p == "/search" || strings.HasPrefix(p, "/r/")) && (query.Has("sort") || query.Has("bias") || query.Has("offset") || query.Has("scope") || query.Has("weights") || query.Has("records")) {
+	if p := r.URL.Path; (p == "/api/messages" || p == "/recent" || p == "/search" || strings.HasPrefix(p, "/r/")) && (query.Has("sort") || query.Has("bias") || query.Has("offset") || query.Has("scope") || query.Has("weights") || query.Has("records") || query.Has("shape")) {
 		if query.Has("data") {
 			writeError(w, bad("Use sort, bias and offset, or data, not both."))
 			return
 		}
 		opts := map[string]any{}
-		for _, key := range []string{"sort", "bias", "offset", "scope", "weights", "records"} {
+		for _, key := range []string{"sort", "bias", "offset", "scope", "weights", "records", "shape"} {
 			if !query.Has(key) {
 				continue
 			}
@@ -1216,6 +1217,12 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 			case "weights":
 				if value != "1" && value != "true" {
 					writeError(w, bad("weights for messages is 1 (serve votes.weight, the ranking weight)."))
+					return
+				}
+				opts[key] = true
+			case "shape":
+				if value != "1" && value != "true" {
+					writeError(w, bad("shape for messages is 1 (data.returned, list_depth and total: /protocol.md#list-shape)."))
 					return
 				}
 				opts[key] = true
@@ -1258,10 +1265,11 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 	// The work directory's ?eligible_for=AGENT asks each row whether that
 	// agent could claim it (a preview), ?worker=AGENT lists the public
 	// work that agent claimed, and ?standing=ID the results a standing task
-	// opened; each travels as works.list data.
-	if r.URL.Path == "/api/works" && (query.Has("eligible_for") || query.Has("worker") || query.Has("standing")) {
+	// opened, and ?claimable=1 only the work a claim could take now; each
+	// travels as works.list data.
+	if r.URL.Path == "/api/works" && (query.Has("eligible_for") || query.Has("worker") || query.Has("standing") || query.Has("claimable")) {
 		fields := map[string]any{"schema": 1}
-		for _, name := range []string{"eligible_for", "worker", "standing"} {
+		for _, name := range []string{"eligible_for", "worker", "standing", "claimable"} {
 			if !query.Has(name) {
 				continue
 			}
@@ -1270,6 +1278,14 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			fields[name] = query.Get(name)
+			if name == "claimable" {
+				on, e := strconv.ParseBool(query.Get(name))
+				if e != nil {
+					writeError(w, bad("claimable is 1 (only work a claim could take now) or 0."))
+					return
+				}
+				fields[name] = on
+			}
 			delete(query, name)
 		}
 		encoded, _ := json.Marshal(fields)

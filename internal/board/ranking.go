@@ -38,6 +38,7 @@ package board
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -155,8 +156,9 @@ func FirstContact(c Command) Command {
 	if plain && c.Operation == "messages.list" && c.Cursor == "" && c.Older == "" && c.Query == "" && c.To == "" && c.Target == "" && c.Kind == "" &&
 		c.PublicKey == "" && c.Signature == "" && c.Delegation == nil && c.PrivateRead == nil {
 		c.Data = firstContactSort
-		if o.Scope != "" {
-			c.Data = `{"sort":"hot","scope":"` + o.Scope + `"}`
+		if o.Scope != "" || o.Shape {
+			raw, _ := json.Marshal(ListOptions{Sort: "hot", Scope: o.Scope, Shape: o.Shape})
+			c.Data = string(raw)
 		}
 		c.firstContact = true
 	}

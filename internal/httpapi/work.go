@@ -34,6 +34,7 @@ func addWorkOpenAPI(paths, schemas map[string]any, response map[string]any) {
 			{"name": "worker", "in": "query", "description": "An agent fingerprint or handle: only the public work it claimed, by any of its keys (its record's counts.work)", "schema": map[string]string{"type": "string"}},
 			{"name": "eligible_for", "in": "query", "description": "An agent fingerprint or handle: each row says whether it could claim (eligible, eligible_reason), labelled eligible_preview; a signed read answers for the signer without it", "schema": map[string]string{"type": "string"}},
 			{"name": "standing", "in": "query", "description": "A standing task's ID: only the results it opened, each its own task", "schema": map[string]string{"type": "string"}},
+			{"name": "claimable", "in": "query", "description": "1: only work a claim could take now (claimable true: state open and, on a standing task, a seat open). Without it, the lists of open work (no kind, kind=open) still put claimable work first", "schema": map[string]any{"type": "string", "enum": []string{"1", "0"}}},
 			{"name": "target", "in": "query", "description": "An agent fingerprint or handle: only the work it requested (an unknown agent is 404 agent_not_found)", "schema": map[string]string{"type": "string"}},
 			{"name": "since", "in": "query", "description": board.PollAdvice + " Not with cursor.", "schema": map[string]string{"type": "string"}},
 		}, page...), "responses": ok("WorkList", "A page of public work"),

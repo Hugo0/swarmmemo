@@ -779,7 +779,7 @@ const WorkKindAll = "all"
 // and finished results crowded out the tasks). A list scoped to an agent
 // (target, data worker) or to a standing task (data standing) is that
 // history: every state, results included.
-const WorkListDefault = "Without kind, works.list lists work that is not closed (closed: accepted, cancelled or past its deadline); kind=closed lists closed work, kind=all every state. A standing task's results are listed only with standing=ID, worker or target, where kind omitted lists every state."
+const WorkListDefault = "Without kind, works.list lists work that is not closed (closed: accepted, cancelled or past its deadline); kind=closed lists closed work, kind=all every state. A standing task's results are listed only with standing=ID, worker or target, where kind omitted lists every state. Without kind and with kind=open, work a claim could take now (claimable) comes first."
 
 // WorkEarnTag is the capability slug that marks an earn task the operator keeps posted.
 const WorkEarnTag = "earn"
@@ -809,6 +809,16 @@ const (
 // it the page returns what it holds, has_more true, its cursor after the
 // last row examined.
 var workClaimableScanMax = 500 // a var so a test can lower it
+
+// The phases of a ranked works.list (C625): claimable work first, then the
+// rest. workRankedCursorRE is its cursor: the phase, then the last row's ID
+// (empty when the rest starts from its first row).
+const (
+	workPhaseClaimable = "c"
+	workPhaseRest      = "n"
+)
+
+var workRankedCursorRE = regexp.MustCompile(`^([cn])\.([a-f0-9]{32})?$`)
 
 // earnCursorRE is an earn page's cursor: rank.amount.id of the last row.
 var earnCursorRE = regexp.MustCompile(`^([01])\.([0-9]{1,10})\.([a-f0-9]{32})$`)
@@ -1921,33 +1931,34 @@ type worksListOptions struct {
 	EligibleFor *string `json:"eligible_for"`
 	Worker      *string `json:"worker"`
 	Standing    *string `json:"standing"`
+	Claimable   *bool   `json:"claimable"`
 }
 
-func worksListData(raw string) (eligibleFor, worker, standing string, err error) {
+func worksListData(raw string) (eligibleFor, worker, standing string, claimable bool, err error) {
 	if raw == "" {
-		return "", "", "", nil
+		return "", "", "", false, nil
 	}
 	var d worksListOptions
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if len(raw) > 512 {
-		return "", "", "", problem(400, "invalid_work_data", WorksListDataRule)
+		return "", "", "", false, problem(400, "invalid_work_data", WorksListDataRule)
 	}
 	err = dec.Decode(&d)
 	var te *json.UnmarshalTypeError
 	if quoted, ok := strings.CutPrefix(fmt.Sprint(err), "json: unknown field "); ok {
 		name, _ := strconv.Unquote(quoted)
 		if services.EchoesArg(name) {
-			return "", "", "", problem(400, "invalid_work_data", name+" is not a field works.list data takes. "+WorksListDataRule)
+			return "", "", "", false, problem(400, "invalid_work_data", name+" is not a field works.list data takes. "+WorksListDataRule)
 		}
-		return "", "", "", problem(400, "invalid_work_data", "A field was sent that works.list data does not take. "+WorksListDataRule)
+		return "", "", "", false, problem(400, "invalid_work_data", "A field was sent that works.list data does not take. "+WorksListDataRule)
 	} else if errors.As(err, &te) && dataTakes("works.list", te.Field) {
-		return "", "", "", problem(400, "invalid_work_data", te.Field+" must be "+services.JSONTypeName(te.Type)+". "+WorksListDataRule)
+		return "", "", "", false, problem(400, "invalid_work_data", te.Field+" must be "+services.JSONTypeName(te.Type)+". "+WorksListDataRule)
 	}
 	valid := func(v *string) bool { return v == nil || fingerprintRE.MatchString(*v) || handleRE.MatchString(*v) }
-	if err != nil || dec.More() || d.Schema != 1 || (d.EligibleFor == nil && d.Worker == nil && d.Standing == nil) || !valid(d.EligibleFor) || !valid(d.Worker) ||
+	if err != nil || dec.More() || d.Schema != 1 || (d.EligibleFor == nil && d.Worker == nil && d.Standing == nil && d.Claimable == nil) || !valid(d.EligibleFor) || !valid(d.Worker) ||
 		(d.Standing != nil && !workIDRE.MatchString(*d.Standing)) {
-		return "", "", "", problem(400, "invalid_work_data", WorksListDataRule)
+		return "", "", "", false, problem(400, "invalid_work_data", WorksListDataRule)
 	}
 	if d.EligibleFor != nil {
 		eligibleFor = *d.EligibleFor
@@ -1958,11 +1969,14 @@ func worksListData(raw string) (eligibleFor, worker, standing string, err error)
 	if d.Standing != nil {
 		standing = *d.Standing
 	}
-	return eligibleFor, worker, standing, nil
+	if d.Claimable != nil {
+		claimable = *d.Claimable
+	}
+	return eligibleFor, worker, standing, claimable, nil
 }
 
 // WorksListDataRule is works.list data's shape, the line its refusals end with.
-const WorksListDataRule = `works.list data is {"schema":1,"eligible_for":AGENT,"worker":AGENT,"standing":WORK_ID}, each field optional; AGENT is a key fingerprint or a registered handle, standing a standing task's ID (lists the results it opened, data.standing its seats).`
+const WorksListDataRule = `works.list data is {"schema":1,"eligible_for":AGENT,"worker":AGENT,"standing":WORK_ID,"claimable":true}, each field optional; AGENT is a key fingerprint or a registered handle, standing a standing task's ID (lists the results it opened, data.standing its seats), claimable true lists only work that can be claimed now.`
 
 func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -2036,7 +2050,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	}
 	// Each row answers eligibility for the agent data names, else the signer.
 	// The facts are read once for the page, not per row.
-	eligibleFor, worker, standing, err := worksListData(c.Data)
+	eligibleFor, worker, standing, claimable, err := worksListData(c.Data)
 	if err != nil {
 		return Result{}, err
 	}
@@ -2079,6 +2093,9 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if standing != "" {
 		scopeParts = append(scopeParts, "standing:"+standing)
 	}
+	if claimable {
+		scopeParts = append(scopeParts, "claimable")
+	}
 	// A money-free channel lists no USDC work to do (moneyFreeWork), so its
 	// cursors are its own; an agent's worker record stays whole.
 	moneyFree := MoneyFree(ctx) != "" && worker == ""
@@ -2092,7 +2109,22 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		return Result{}, err
 	}
 	earn := c.Kind == WorkKindEarn
-	if cursor.Page != "" && (earn && !earnCursorRE.MatchString(cursor.Page) || !earn && !workIDRE.MatchString(cursor.Page)) {
+	history := workerAccount != "" || standing != "" || agentAccount != ""
+	// claimableOnly keeps only the rows workClaimable passes: kind rewarded
+	// and earn always (C408), any listing with data claimable (C625).
+	claimableOnly := claimable || c.Kind == WorkKindRewarded || c.Kind == WorkKindEarn
+	// ranked: the discovery listings of open work (no kind, kind open) list
+	// claimable work first (C625). See the scan below.
+	ranked := !claimableOnly && !history && (c.Kind == "" || c.Kind == "open")
+	phase, pageKey := "", cursor.Page
+	if ranked {
+		phase = workPhaseClaimable
+		if m := workRankedCursorRE.FindStringSubmatch(cursor.Page); m != nil {
+			phase, pageKey = m[1], m[2]
+		}
+		// A bare ID (a cursor from before C625) resumes the claimable phase.
+	}
+	if pageKey != "" && (earn && !earnCursorRE.MatchString(pageKey) || !earn && !workIDRE.MatchString(pageKey)) {
 		return Result{}, problem(400, "invalid_cursor", "Invalid work directory cursor.")
 	}
 	where := `e.hidden=0`
@@ -2122,7 +2154,6 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	// standing task's results only in a history view, and closed work only
 	// when kind asks for it. Both are SQL conditions on the ID-ordered scan,
 	// so cursors page them like any other filter.
-	history := workerAccount != "" || standing != "" || agentAccount != ""
 	if !history {
 		where += ` AND w.standing_id=''`
 	}
@@ -2177,20 +2208,34 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	}
 	// A standing task with no seat open now (full, or every seat waiting on a
 	// verdict) can't be claimed, so a worker looking for claimable work
-	// doesn't see it in kind rewarded or earn; it returns when a seat frees,
-	// and every other listing still shows it (telagoebez 27e6f215). Those
-	// kinds read on past the dropped rows, batch by batch, until the page
-	// holds limit works or workClaimableScanMax rows were examined. The
-	// cursor follows the last row examined, so the next page resumes right
-	// after it: nothing is skipped or repeated.
-	claimableOnly := c.Kind == WorkKindRewarded || c.Kind == WorkKindEarn
+	// doesn't see it in kind rewarded or earn, or with data claimable; it
+	// returns when a seat frees, and every other listing still shows it
+	// (telagoebez 27e6f215). Those read on past the dropped rows, batch by
+	// batch, until a row past a full page is one the list keeps, or
+	// workClaimableScanMax rows were examined. The cursor follows the last
+	// row passed, so the next page resumes right after it: nothing is
+	// skipped or repeated, and has_more is true only while a kept row may
+	// follow.
+	//
+	// A ranked listing (C625) is the same scan run twice over the one SQL
+	// order: phase c keeps the claimable rows, then phase n, from the start
+	// again, keeps the rest (a full round with an open next_round among
+	// them). Claimability is read as work.get reads it (seats, pool, day and
+	// deadline), which SQL alone cannot say, so it is decided row by row
+	// and the phase rides in the cursor (c.ID, n.ID): each page resumes in
+	// its phase right after the last row it examined, so while no row's
+	// claimability changes, every row is listed exactly once, claimable
+	// ones first, each group in the kind's own order.
 	works := []Work{}
 	stored := []workRow{} // the stored row of each work kept, for the requester records
-	page, lastKey := cursor.Page, ""
+	page, lastKey := pageKey, ""
 	hasMore, examined := false, 0
 scan:
 	for {
-		cond, condArgs := after(page)
+		cond, condArgs := "", []any(nil)
+		if page != "" {
+			cond, condArgs = after(page)
+		}
 		batchArgs := append(append(append([]any{}, args...), condArgs...), limit+1)
 		rows, err := tx.QueryContext(ctx, `SELECT `+columns+` FROM works w JOIN events e ON e.id=w.id JOIN rooms r ON r.name=e.room WHERE `+where+cond+` ORDER BY `+order+` LIMIT ?`, batchArgs...)
 		if err != nil {
@@ -2214,16 +2259,12 @@ scan:
 			return Result{}, workReadError(err)
 		}
 		for i, w := range batch {
-			if len(works) == limit || examined >= workClaimableScanMax {
+			if examined >= workClaimableScanMax {
 				// A row past the last one examined exists: the page has more.
 				hasMore = true
 				break scan
 			}
 			examined++
-			lastKey = w.ID
-			if earn {
-				lastKey = keys[i]
-			}
 			root, e := visibleWorkRoot(ctx, tx, w.ID, a)
 			if e != nil {
 				return Result{}, workReadError(e)
@@ -2232,16 +2273,33 @@ scan:
 			if e != nil {
 				return Result{}, workReadError(e)
 			}
-			if claimableOnly && !standingSeatOpen(p.Standing) {
-				continue
+			keep := !(claimableOnly && !p.Claimable || ranked && p.Claimable != (phase == workPhaseClaimable))
+			if keep && len(works) == limit {
+				// A row the next page lists exists: the page has more, and
+				// the cursor stays before it.
+				hasMore = true
+				break scan
 			}
-			works = append(works, p)
-			stored = append(stored, w)
+			page = w.ID
+			if earn {
+				page = keys[i]
+			}
+			lastKey = page
+			if ranked {
+				lastKey = phase + "." + page
+			}
+			if keep {
+				works = append(works, p)
+				stored = append(stored, w)
+			}
 		}
 		if len(batch) <= limit {
-			break // the rows ran out
+			// The rows ran out: a ranked listing goes on to the rest.
+			if !ranked || phase != workPhaseClaimable {
+				break
+			}
+			phase, page = workPhaseRest, ""
 		}
-		page = lastKey
 	}
 	// Every row's requester record, in one query for the page.
 	requesters := make([]string, len(stored))

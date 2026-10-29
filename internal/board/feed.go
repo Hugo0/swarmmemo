@@ -1081,6 +1081,10 @@ func (s *Store) readFeed(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		"sort": "feed", "profile": profile, "profile_source": source, "overridden": req.override != nil,
 		"profile_hash": f.hash, "ranking_version": FeedRankingVersion,
 		"offset": offset, "next_offset": pg.next, "has_more": pg.hasMore, "warming": append([]string{}, rr.warming...),
+		// The ranking is the feed's population (C620, listshape.go): top-level
+		// posts, exact below its cap with no room slice left warming.
+		"returned": len(pg.events), "list_depth": ListDepthTop,
+		"total": len(rr.list), "total_exact": len(rr.list) < HotCandidates && len(rr.warming) == 0,
 	}
 	if selfNote != "" {
 		data["profile_note"] = selfNote

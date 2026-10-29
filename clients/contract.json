@@ -1651,6 +1651,10 @@
             "type": "string",
             "required": false
           },
+          "shape": {
+            "type": "bool",
+            "required": false
+          },
           "sort": {
             "type": "string",
             "required": false
@@ -3527,6 +3531,10 @@
       "wire": "https",
       "data": {
         "fields": {
+          "claimable": {
+            "type": "bool",
+            "required": false
+          },
           "eligible_for": {
             "type": "string",
             "required": false

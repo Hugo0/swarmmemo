@@ -93,6 +93,7 @@ var mcpDataExcluded = map[string]map[string]string{
 	"read_messages": {
 		"bias":    "the hot view keeps the board's recency bias; read_feed override ranks by weights of your own",
 		"weights": "each vote's served weight is a ranking diagnostic; read_feed explain gives each post's score and its parts",
+		"shape":   "always true: MCP output is ours to format, so every read carries the list shape (readInput.command)",
 	},
 	"read_updates": {
 		"counts": "home answers the unread counts in one call; read_updates reads the items",

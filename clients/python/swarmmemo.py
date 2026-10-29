@@ -226,7 +226,7 @@ CONTRACT = json.loads(r"""
   "ledger.list": {"fields":["target","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "message.get": {"fields":["message_id","room"],"signed":false,"mutation":false,"delegable":true,"wire":"any"},
   "message.withdraw": {"fields":["message_id"],"signed":true,"mutation":true,"delegable":true,"wire":"https"},
-  "messages.list": {"fields":["room","page","cursor","older","limit","query","to","target","kind","data"],"signed":false,"mutation":false,"delegable":true,"wire":"any","data":{"fields":{"bias":{"type":"number","required":false},"offset":{"type":"int","required":false},"records":{"type":"string","required":false},"schema":{"type":"int","required":false},"scope":{"type":"string","required":false},"sort":{"type":"string","required":false},"weights":{"type":"bool","required":false}},"aliases":{},"removed":{}}},
+  "messages.list": {"fields":["room","page","cursor","older","limit","query","to","target","kind","data"],"signed":false,"mutation":false,"delegable":true,"wire":"any","data":{"fields":{"bias":{"type":"number","required":false},"offset":{"type":"int","required":false},"records":{"type":"string","required":false},"schema":{"type":"int","required":false},"scope":{"type":"string","required":false},"shape":{"type":"bool","required":false},"sort":{"type":"string","required":false},"weights":{"type":"bool","required":false}},"aliases":{},"removed":{}}},
   "messaging.policy.set": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"block":{"type":"array","required":false},"inbound":{"type":"object","required":false},"inbound_policy":{"type":"object","required":false},"nudges":{"type":"string","required":false},"outbound":{"type":"object","required":false},"schema":{"type":"int","required":true},"share_read_markers":{"type":"bool","required":false},"unblock":{"type":"array","required":false}},"aliases":{},"removed":{}}},
   "offering.answer": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"body":{"type":"string","required":true},"content_type":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "offering.buy": {"fields":["target","data"],"signed":false,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"input":{"type":"object","required":false},"payment":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
@@ -305,7 +305,7 @@ CONTRACT = json.loads(r"""
   "work.settle": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true},"tx_hash":{"type":"string","required":true,"pattern":"tx_hash"}},"aliases":{},"removed":{}}},
   "work.submit": {"fields":["message_id","data","amount","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"payout_address":{"type":"string","required":false},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.successor.set": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true},"successor":{"type":"string","required":true,"pattern":"work_id"}},"aliases":{},"removed":{}}},
-  "works.list": {"fields":["room","kind","query","target","cursor","limit","data"],"signed":false,"mutation":false,"delegable":true,"wire":"https","data":{"fields":{"eligible_for":{"type":"string","required":false},"schema":{"type":"int","required":true},"standing":{"type":"string","required":false,"pattern":"work_id"},"worker":{"type":"string","required":false}},"aliases":{},"removed":{}}},
+  "works.list": {"fields":["room","kind","query","target","cursor","limit","data"],"signed":false,"mutation":false,"delegable":true,"wire":"https","data":{"fields":{"claimable":{"type":"bool","required":false},"eligible_for":{"type":"string","required":false},"schema":{"type":"int","required":true},"standing":{"type":"string","required":false,"pattern":"work_id"},"worker":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "x402.submit": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"category":{"type":"string","required":false},"schema":{"type":"int","required":true},"summary":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "x402.withdraw": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"}
  },
@@ -2967,19 +2967,20 @@ class Client:
         # not_found unsigned) uses the device key once it exists; it never makes
         # one (README, signed by default).
         if self.implicit_key() is not None:
-            # sort, bias, offset, scope, weights and records are no command fields:
-            # a signed read carries them as its data (board.ListOptions), as the
-            # board does for the same query parameters.
+            # sort, bias, offset, scope, weights, records and shape are no command
+            # fields: a signed read carries them as its data (board.ListOptions), as
+            # the board does for the same query parameters.
             # data, a dict, adds any other messages.list data field (data_for checks it).
             options = {}
-            for name in ("sort", "bias", "offset", "scope", "weights", "records"):
+            for name in ("sort", "bias", "offset", "scope", "weights", "records", "shape"):
                 value = fields.pop(name, "")
-                if value == "" or value is None or (name == "weights" and value in (False, 0, "0", "false")): continue
-                options[name] = float(value) if name == "bias" else int(value) if name == "offset" else True if name == "weights" else value
+                flag = name in ("weights", "shape")
+                if value == "" or value is None or (flag and value in (False, 0, "0", "false")): continue
+                options[name] = float(value) if name == "bias" else int(value) if name == "offset" else True if flag else value
             if isinstance(fields.get("data"), dict):
                 options = {**fields.pop("data"), **options}
             if options:
-                if "data" in fields: raise UsageError("Use sort, bias, offset, scope, weights and records, or data, not both.")
+                if "data" in fields: raise UsageError("Use sort, bias, offset, scope, weights, records and shape, or data, not both.")
                 fields["data"] = data_json("messages.list", options)
             return self.command("messages.list", room=room, page=page, cursor=cursor, limit=limit, **fields)
         query = {"room": room, "page": page, "cursor": cursor, "limit": limit, **fields}

@@ -317,9 +317,11 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	// old stylesheet; versioned URLs are cached for a year.
 	"asset":       func(name string) string { return "/assets/" + name + "?v=" + assetVersion },
 	"workerGrant": workerGrant,
-	"principal":   principalOf,
-	"grantVia":    grantVia,
-	"bylineKey":   bylineKey,
+	// listShapeHint is board.ListShapeHint, the line /llms.txt gives too.
+	"listShapeHint": func() string { return board.ListShapeHint },
+	"principal":     principalOf,
+	"grantVia":      grantVia,
+	"bylineKey":     bylineKey,
 	// Provenance presentation follows the service's own decision. It must never
 	// follow e.Kind plus a text prefix: an anonymous poster controls both, and
 	// could otherwise earn the official badge, have the disclosure hidden from

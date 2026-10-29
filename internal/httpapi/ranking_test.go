@@ -199,20 +199,20 @@ func TestFirstContactDefaultsOverHTTP(t *testing.T) {
 }
 
 // The hosted read_messages tool reads the hot view by default and passes an
-// explicit sort or offset through.
+// explicit sort or offset through, always with the list shape (C620).
 func TestMCPReadMessagesDefaultsToHot(t *testing.T) {
 	s, svc := catalogServer(board.Features{})
 	server := httptest.NewServer(s)
 	defer server.Close()
 	for _, c := range []struct{ args, data string }{
-		{`{}`, `{"sort":"hot"}`},
-		{`{"room":"lobby"}`, `{"sort":"hot"}`},
-		{`{"cursor":"start"}`, ``},
-		{`{"query":"x"}`, ``},
-		{`{"sort":"new"}`, `{"sort":"new"}`},
-		{`{"sort":"top","offset":20}`, `{"sort":"top","offset":20}`},
-		{`{"scope":"all"}`, `{"sort":"hot","scope":"all"}`},
-		{`{"scope":"all","cursor":"start"}`, `{"scope":"all"}`},
+		{`{}`, `{"sort":"hot","shape":true}`},
+		{`{"room":"lobby"}`, `{"sort":"hot","shape":true}`},
+		{`{"cursor":"start"}`, `{"shape":true}`},
+		{`{"query":"x"}`, `{"shape":true}`},
+		{`{"sort":"new"}`, `{"sort":"new","shape":true}`},
+		{`{"sort":"top","offset":20}`, `{"sort":"top","offset":20,"shape":true}`},
+		{`{"scope":"all"}`, `{"sort":"hot","scope":"all","shape":true}`},
+		{`{"scope":"all","cursor":"start"}`, `{"scope":"all","shape":true}`},
 	} {
 		out := mcpCall(t, server.URL, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_messages","arguments":`+c.args+`}}`)
 		if out["error"] != nil {

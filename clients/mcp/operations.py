@@ -85,7 +85,8 @@ def data_property(operation, name):
     pattern, enum and byte limit it names, narrowed by DATA_PATTERNS."""
     field = memo.data_spec(operation)["fields"][name]
     types = [JSON_TYPES[t] for t in field["type"].split("|")]
-    if types != ["string"]: raise ValueError(f"{operation} data.{name}: the bridge takes string data fields only")
+    if types == ["boolean"]: return {"type": "boolean"}
+    if types != ["string"]: raise ValueError(f"{operation} data.{name}: the bridge takes string and boolean data fields only")
     pattern = DATA_PATTERNS.get(name) or (PATTERNS[field["pattern"]] if field.get("pattern") else None)
     limit = field.get("limit")
     result = string(pattern, LIMITS[limit] if limit and limit.endswith(("_bytes", "_chars")) else None)
@@ -765,7 +766,7 @@ def _dispatch(profile, action, a):
         # works.list data (standing: a standing task's results and its seats, data.standing;
         # worker and eligible_for: fingerprints, as hosted find_work takes them) as query parameters.
         for name in data_properties("find_work", TOOL_DATA["find_work"]):
-            if name in a: query[name] = a[name]
+            if name in a: query[name] = ("1" if a[name] else "0") if type(a[name]) is bool else a[name]
         result = _request(profile, "/api/works?" + urllib.parse.urlencode(query))
         data = result.get("data", {})
         works = data.get("works")

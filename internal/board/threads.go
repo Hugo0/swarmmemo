@@ -187,6 +187,7 @@ type threadRead struct {
 	root                 threadReference
 	cursor               conversationCursor
 	replies, lastReplyAt int64
+	total                int      // every event of the thread, root included (C620)
 	ids                  []string // the page's events, oldest first, at most limit+1
 	limit                int
 	events               []Message
@@ -318,6 +319,8 @@ func (s *Store) readThreads(ctx context.Context, tx *sql.Tx, cs []Command, a act
 			continue
 		}
 		results[i] = Result{Messages: r.events, NextCursor: s.encodeConversationCursor(r.cursor), Data: map[string]any{"root_id": r.root.id, "requested_message_id": cs[i].MessageID, "room": r.root.room, "has_more": r.hasMore, "replies": r.replies, "last_reply_at": r.lastReplyAt}}
+		shapeList(&results[i], ListDepthNested)
+		setListTotal(&results[i], r.total, true)
 	}
 	return results, errs
 }
@@ -381,7 +384,7 @@ func (s *Store) threadPage(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if r.replies, r.lastReplyAt, err = threadReplyStats(ctx, tx, refs); err != nil {
 		return err
 	}
-	r.limit = limitValue(c.Limit)
+	r.limit, r.total = limitValue(c.Limit), len(refs)
 	start := sort.Search(len(refs), func(i int) bool { return refs[i].seq > r.cursor.After })
 	for _, ref := range refs[start:min(start+r.limit+1, len(refs))] {
 		r.ids = append(r.ids, ref.id)
