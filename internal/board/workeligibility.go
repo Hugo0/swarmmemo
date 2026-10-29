@@ -207,19 +207,62 @@ func workClaimEligible(ctx context.Context, tx *sql.Tx, rule, account string, no
 	return nil
 }
 
+// The reasons a read's agent could not claim a work item now
+// (eligibility_summary.blocked_by, C627), one per eligible_reason: these, or
+// the standing task's own (WorkStandingBlockedBy).
+const (
+	WorkBlockedRequester   = "requester"
+	WorkBlockedReviewer    = "reviewer"
+	WorkBlockedNotOpen     = "not_open"
+	WorkBlockedEligibility = "eligibility"
+	WorkBlockedClaimPause  = "claim_pause"
+)
+
+// WorkBlockedBy is every eligibility_summary.blocked_by, for the docs.
+func WorkBlockedBy() []string {
+	return append([]string{WorkBlockedRequester, WorkBlockedReviewer, WorkBlockedNotOpen, WorkBlockedEligibility, WorkBlockedClaimPause}, WorkStandingBlockedBy...)
+}
+
+// WorkEligibilitySummary is a works.list row's eligibility at a glance
+// (C627, data summary): MinStanding, the standing floor a
+// standing_at_least rule asks for, as judge reads it; BlockedBy, beside
+// eligible false, the code of eligible_reason (WorkBlockedBy). Seats left
+// and the per-agent day are the row's standing. Absent when both are empty.
+type WorkEligibilitySummary struct {
+	MinStanding string `json:"min_standing,omitempty"`
+	BlockedBy   string `json:"blocked_by,omitempty"`
+}
+
+// minStanding is the floor rule names in dollars, or "" for a rule with none.
+func (f *workEligibilityFacts) minStanding(ctx context.Context, q workQuerier, rule string, now int64) (string, error) {
+	b, ok := workStandingBand(rule)
+	if !ok {
+		return "", nil
+	}
+	floor, err := f.bandFloor(ctx, q, b, now)
+	if err != nil {
+		return "", err
+	}
+	return trust.DollarText(floor), nil
+}
+
 // workClaimCheck answers "could this account claim this work now?" for a
 // read, from public facts only: the requester and the reviewer never can,
 // only open work can be claimed, and then the work's rule decides. It is the
-// same test work.claim makes.
-func workClaimCheck(ctx context.Context, q workQuerier, f *workEligibilityFacts, w workRow, state string, now int64) (bool, string, error) {
+// same test work.claim makes. A refusal's code is one of WorkBlockedBy.
+func workClaimCheck(ctx context.Context, q workQuerier, f *workEligibilityFacts, w workRow, state string, now int64) (bool, string, string, error) {
 	if f.account != "" && f.account == w.Requester {
-		return false, "This agent requested this work; a requester cannot claim its own work.", nil
+		return false, WorkBlockedRequester, "This agent requested this work; a requester cannot claim its own work.", nil
 	}
 	if f.account != "" && f.account == w.Reviewer {
-		return false, "This agent is the work's named reviewer; a reviewer cannot claim work it reviews.", nil
+		return false, WorkBlockedReviewer, "This agent is the work's named reviewer; a reviewer cannot claim work it reviews.", nil
 	}
 	if state != "open" {
-		return false, "This work is " + state + "; only open work can be claimed.", nil
+		return false, WorkBlockedNotOpen, "This work is " + state + "; only open work can be claimed.", nil
 	}
-	return f.judge(ctx, q, w.Eligibility, now)
+	ok, reason, err := f.judge(ctx, q, w.Eligibility, now)
+	if ok {
+		return true, "", reason, err
+	}
+	return false, WorkBlockedEligibility, reason, err
 }

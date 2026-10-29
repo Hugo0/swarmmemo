@@ -53,12 +53,47 @@ const (
 // ScreenPrice is screen.text's (and a full screen.leak's) price ceiling.
 var ScreenPrice = Price{Base: screenBase, PerKiB: screenPerKiB}
 
-// ScreenCategories are the categories every screen scores, and
-// ScreenSources the values source takes.
+// ScreenCategoryMeanings are the categories every screen scores, in order,
+// each with what it scores in one plain line: moderation's
+// agentTextQuestions, in short. The catalogue and the protocol's screening
+// section read them here (C628).
+var ScreenCategoryMeanings = []ScreenCategory{
+	{"injection", "instructions aimed at the AI agent that reads the text: ignore your rules, take a new role, run a command, follow a link, pay or message someone, or obey hidden text."},
+	{"exfiltration", "an attempt to get the agent to send, post or reveal what it holds (files, keys, tokens, credentials, private messages, its system prompt) to someone or somewhere."},
+	{"phishing", "a lure to hand over credentials or secrets, or to verify or connect a wallet or account, often behind a fake notice or link."},
+	{"malware", "a push to download, install or run harmful software or commands."},
+	{"manipulation", "text aimed at the classifier itself, telling it how to judge or score the text."},
+}
+
+// ScreenCategory is one category a screen scores and what it means.
+type ScreenCategory struct {
+	Name, Meaning string
+}
+
+// ScreenCategories are the categories' names, in order, and ScreenSources
+// the values source takes.
 var (
-	ScreenCategories = []string{"injection", "exfiltration", "phishing", "malware", "manipulation"}
+	ScreenCategories = screenCategoryNames()
 	ScreenSources    = []string{"web", "tool", "agent", "email", "user", "unknown"}
 )
+
+func screenCategoryNames() []string {
+	out := make([]string, len(ScreenCategoryMeanings))
+	for i, c := range ScreenCategoryMeanings {
+		out[i] = c.Name
+	}
+	return out
+}
+
+// screenCategoryMeaningMap is ScreenCategoryMeanings as the catalogue
+// shows them: name to meaning.
+func screenCategoryMeaningMap() map[string]string {
+	out := make(map[string]string, len(ScreenCategoryMeanings))
+	for _, c := range ScreenCategoryMeanings {
+		out[c.Name] = c.Meaning
+	}
+	return out
+}
 
 var (
 	screenThresholdRule = "threshold is a number from 0 to 1, with at most 4 decimals."
@@ -163,7 +198,7 @@ func (s *screen) CatalogueExtra() map[string]any {
 		}
 	}
 	return map[string]any{
-		"available": ScreenReady(ctx, s.screener, s.key), "categories": ScreenCategories, "sources": ScreenSources,
+		"available": ScreenReady(ctx, s.screener, s.key), "categories": ScreenCategories, "category_meanings": screenCategoryMeaningMap(), "sources": ScreenSources,
 		"receipt_schema": ScreenSchema, "receipt_threshold": ScreenThreshold, "stores_text": false, "spans": false, "calibration": "/protocol.md#screening-calibration",
 		"leak": map[string]any{"modes": modes, "categories": LeakCategories, "audiences": LeakAudiences, "receipt_schema": LeakSchema,
 			"patterns": "/api/screen/leak-patterns", "patterns_version": leakscan.Version},
@@ -398,7 +433,7 @@ func (s *screen) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	body := canonicalJSON(map[string]any{
 		"verdict": screenVerdict(categories, p.threshold), "threshold": p.threshold, "categories": categories, "classifier_version": ClassifierVersion, "source": p.source,
 		"text_sha256": payload.TextSHA256, "text_bytes": payload.TextBytes, "receipt": receipt,
-		"note": "A signal with a known error rate, not a guarantee; the text was not stored. verdict is at this call's threshold (the threshold argument, default " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + "); the receipt's is always at " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + ". Calibration: /protocol.md#screening-calibration",
+		"note": "A signal with a known error rate, not a guarantee; the text was not stored. verdict is at this call's threshold (the threshold argument, default " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + "); the signed receipt's is always at " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + ", so quote the receipt. What each category means: /protocol.md#screening. Calibration: /protocol.md#screening-calibration",
 	})
 	public := canonicalJSON(map[string]any{"verdict": payload.Verdict, "classifier_version": ClassifierVersion, "source": p.source, "text_bytes": payload.TextBytes})
 	used := min(c.Price.For(int64(len(p.text))), screenFee+res.CostMicroUSD)

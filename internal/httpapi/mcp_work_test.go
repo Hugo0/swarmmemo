@@ -74,6 +74,10 @@ func TestHostedMCPWorkLifecycle(t *testing.T) {
 	if len(listed) != 1 || listed[0].(map[string]any)["eligible"] != false || !strings.Contains(listed[0].(map[string]any)["eligible_reason"].(string), "reviewer") {
 		t.Fatalf("find_work for the reviewer: %v", listed)
 	}
+	// find_work always carries eligibility_summary: the reason's code (C627).
+	if dig(listed[0].(map[string]any), "eligibility_summary", "blocked_by") != board.WorkBlockedReviewer {
+		t.Fatalf("find_work summary for the reviewer: %v", listed[0])
+	}
 
 	// Result first, as a reply that names no room, then one claim_work.
 	posted := mustTool(t, s, "/mcp", asWorker, "post_message", map[string]any{"reply_to": id, "text": "Three lines: it is about agents."})

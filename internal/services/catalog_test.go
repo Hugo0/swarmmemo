@@ -189,3 +189,17 @@ func TestSizeRefusalsCarryTheValueSent(t *testing.T) {
 }
 
 func second[T any](_ T, err error) error { return err }
+
+// The screen's catalogue says what every category it scores means, from
+// ScreenCategoryMeanings, the list ScreenCategories is derived from (C628).
+func TestScreenCatalogueSaysWhatEachCategoryMeans(t *testing.T) {
+	meanings, _ := newScreen(Deps{}).(*screen).CatalogueExtra()["category_meanings"].(map[string]string)
+	if len(meanings) != len(ScreenCategories) {
+		t.Fatalf("category_meanings %v, categories %v", meanings, ScreenCategories)
+	}
+	for _, c := range ScreenCategories {
+		if m := meanings[c]; m == "" || !strings.HasSuffix(m, ".") {
+			t.Errorf("%s means %q", c, m)
+		}
+	}
+}

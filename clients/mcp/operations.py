@@ -72,6 +72,7 @@ DATA_EXCLUDED = {
     ("post", "review"): "reviews are the parent key's; a scoped worker never signs one",
     ("work.claim", "result_sha256"): "stage_work never reads the result text, so it has nothing to hash; the worker's submit is checked by the requester",
     ("work.submit", "result_sha256"): "stage_work never reads the result text, so it has nothing to hash; the worker's submit is checked by the requester",
+    ("works.list", "summary"): "find_work always asks for eligibility_summary, as hosted find_work does (C627)",
 }
 # Where the bridge is narrower than the board: works.list names agents by
 # fingerprint only here (the bridge never resolves a handle), and a payout
@@ -491,6 +492,14 @@ def _work(profile, work, expected=None):
         if name in work and type(work[name]) is not bool: raise BridgeError("invalid_response")
     if "eligible_reason" in work and (not isinstance(work["eligible_reason"], str) or len(work["eligible_reason"].encode()) > 512): raise BridgeError("invalid_response")
     if "eligible_agent" in work and (not isinstance(work["eligible_agent"], str) or not re.fullmatch(HEX64, work["eligible_agent"])): raise BridgeError("invalid_response")
+    # eligibility_summary (C627, works.list summary): a standing rule's floor in dollars, and
+    # beside eligible false the code of eligible_reason.
+    if "eligibility_summary" in work:
+        summary = work["eligibility_summary"]
+        if (not isinstance(summary, dict) or not summary or set(summary) - {"min_standing", "blocked_by"}
+                or ("min_standing" in summary and (not isinstance(summary["min_standing"], str) or not re.fullmatch(r"\$[0-9][0-9,]{0,20}\.[0-9]{2}", summary["min_standing"])))
+                or ("blocked_by" in summary and (not isinstance(summary["blocked_by"], str) or not re.fullmatch(r"[a-z_]{1,32}", summary["blocked_by"]) or work.get("eligible") is not False))):
+            raise BridgeError("invalid_response")
     # resolved_from names the edited request version a read was given; id is
     # always the work's root. result_sha256 is the submitted result text's.
     if "resolved_from" in work and (not isinstance(work["resolved_from"], str) or not re.fullmatch(HEX32, work["resolved_from"]) or work["resolved_from"] == work.get("id")): raise BridgeError("invalid_response")
@@ -760,7 +769,7 @@ def _dispatch(profile, action, a):
     if a.get("cursor"): query["cursor"] = a["cursor"]
     common = {"public_unsigned": True, "room": profile.room, "untrusted_participant_data": True, "state_is_service_assertion": True}
     if action == "find_work":
-        query.update(room=profile.room)
+        query.update(room=profile.room, summary="1")
         if "query" in a: query["query"] = a["query"]
         if "state" in a: query["kind"] = a["state"]
         # works.list data (standing: a standing task's results and its seats, data.standing;

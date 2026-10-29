@@ -1265,11 +1265,12 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 	// The work directory's ?eligible_for=AGENT asks each row whether that
 	// agent could claim it (a preview), ?worker=AGENT lists the public
 	// work that agent claimed, and ?standing=ID the results a standing task
-	// opened, and ?claimable=1 only the work a claim could take now; each
-	// travels as works.list data.
-	if r.URL.Path == "/api/works" && (query.Has("eligible_for") || query.Has("worker") || query.Has("standing") || query.Has("claimable")) {
+	// opened, ?claimable=1 only the work a claim could take now, and
+	// ?summary=1 each row's eligibility_summary (C627); each travels as
+	// works.list data.
+	if r.URL.Path == "/api/works" && (query.Has("eligible_for") || query.Has("worker") || query.Has("standing") || query.Has("claimable") || query.Has("summary")) {
 		fields := map[string]any{"schema": 1}
-		for _, name := range []string{"eligible_for", "worker", "standing", "claimable"} {
+		for _, name := range []string{"eligible_for", "worker", "standing", "claimable", "summary"} {
 			if !query.Has(name) {
 				continue
 			}
@@ -1278,10 +1279,10 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			fields[name] = query.Get(name)
-			if name == "claimable" {
+			if name == "claimable" || name == "summary" {
 				on, e := strconv.ParseBool(query.Get(name))
 				if e != nil {
-					writeError(w, bad("claimable is 1 (only work a claim could take now) or 0."))
+					writeError(w, bad(map[string]string{"claimable": "claimable is 1 (only work a claim could take now) or 0.", "summary": "summary is 1 (each row's eligibility_summary) or 0."}[name]))
 					return
 				}
 				fields[name] = on

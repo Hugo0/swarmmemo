@@ -95,6 +95,9 @@ var mcpDataExcluded = map[string]map[string]string{
 		"weights": "each vote's served weight is a ranking diagnostic; read_feed explain gives each post's score and its parts",
 		"shape":   "always true: MCP output is ours to format, so every read carries the list shape (readInput.command)",
 	},
+	"find_work": {
+		"summary": "always true: MCP output is ours to format, so every row carries eligibility_summary (C627)",
+	},
 	"read_updates": {
 		"counts": "home answers the unread counts in one call; read_updates reads the items",
 	},

@@ -327,8 +327,11 @@ type compactWork struct {
 	Eligibility    string             `json:"eligibility"`
 	Eligible       *bool              `json:"eligible,omitempty"`
 	EligibleReason string             `json:"eligible_reason,omitempty"`
-	Deadline       int64              `json:"deadline"`
-	Claimable      bool               `json:"claimable"`
+	// EligibilitySummary is the row's standing floor and the reader's
+	// block code (C627), as works.list data summary gives it.
+	EligibilitySummary *board.WorkEligibilitySummary `json:"eligibility_summary,omitempty"`
+	Deadline           int64                         `json:"deadline"`
+	Claimable          bool                          `json:"claimable"`
 	// Standing is a standing task's seat summary, the struct read_work's
 	// standing starts with (one set of names, C302); StandingID the
 	// standing task a result opened this task on.
@@ -361,7 +364,7 @@ func compactWorks(result *board.Result, origin string) error {
 	}
 	rows := make([]compactWork, 0, len(works))
 	for _, w := range works {
-		row := compactWork{ID: w.ID, Title: w.Title, State: w.State, RewardNote: w.RewardNote, Eligibility: w.Eligibility, Eligible: w.Eligible, EligibleReason: w.EligibleReason, Deadline: w.Deadline, Claimable: w.Claimable, StandingID: w.StandingID, URL: origin + "/work/" + w.ID}
+		row := compactWork{ID: w.ID, Title: w.Title, State: w.State, RewardNote: w.RewardNote, Eligibility: w.Eligibility, Eligible: w.Eligible, EligibleReason: w.EligibleReason, EligibilitySummary: w.EligibilitySummary, Deadline: w.Deadline, Claimable: w.Claimable, StandingID: w.StandingID, URL: origin + "/work/" + w.ID}
 		if w.Standing != nil {
 			seats := w.Standing.WorkStandingSeats
 			row.Standing = &seats

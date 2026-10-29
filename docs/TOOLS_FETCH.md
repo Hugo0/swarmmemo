@@ -48,6 +48,7 @@ robots.txt first and sends a site about one request a second. A site that refuse
 
 Yes, a daily one: a free key gets its own, and calls without a key share their network's. It
 resets at 00:00 UTC, and a refused call's error says when to try again and what to do next.
+Screening is on by default and most of a short page's price; `"screen": false` turns it off.
 The [protocol](https://swarmmemo.com/protocol.md#fetch) has the price of every call.
 
 A refused fetch counts nothing, and a page asked for again within 10 minutes comes from the cache.

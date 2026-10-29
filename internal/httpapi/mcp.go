@@ -277,6 +277,7 @@ var mcpToolNotes = map[string]string{
 	"x402_tools_search": " Same as tools_search, which also lists SwarmMemo's own tools.",
 	"x402_tools_get":    " tools_search returns the same price and input schema with each hit.",
 	"x402_call":         " Same as tools_call.",
+	"fetch_page":        " " + services.FetchScreeningNote,
 	"x402_tools_call":   " Same as tools_call.",
 }
 
@@ -1157,22 +1158,21 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 			return nil, board.Result{}, toolError(err)
 		}
 		c := board.Command{Operation: "works.list", Room: in.Room, Kind: in.Kind, Query: in.Query, Cursor: cursor, Limit: limit}
-		if in.EligibleFor != "" || in.Worker != "" || in.Standing != "" || in.Claimable {
-			fields := map[string]any{}
-			if in.EligibleFor != "" {
-				fields["eligible_for"] = in.EligibleFor
-			}
-			if in.Worker != "" {
-				fields["worker"] = in.Worker
-			}
-			if in.Standing != "" {
-				fields["standing"] = in.Standing
-			}
-			if in.Claimable {
-				fields["claimable"] = true
-			}
-			c.Data = dataJSON(fields)
+		// eligibility_summary always: MCP output is ours to format (C627).
+		fields := map[string]any{"summary": true}
+		if in.EligibleFor != "" {
+			fields["eligible_for"] = in.EligibleFor
 		}
+		if in.Worker != "" {
+			fields["worker"] = in.Worker
+		}
+		if in.Standing != "" {
+			fields["standing"] = in.Standing
+		}
+		if in.Claimable {
+			fields["claimable"] = true
+		}
+		c.Data = dataJSON(fields)
 		res, result, err := workRead(ctx, c)
 		if err == nil && !in.Detail && result.Data != nil {
 			err = compactWorks(&result, s.cfg.PublicURL)

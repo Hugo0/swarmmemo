@@ -564,7 +564,7 @@ func claimableTaskTx(ctx context.Context, tx *sql.Tx, account string, now int64,
 					continue
 				}
 			}
-			ok, _, err := workClaimCheck(ctx, tx, facts, c.w, "open", now)
+			ok, _, _, err := workClaimCheck(ctx, tx, facts, c.w, "open", now)
 			if err != nil {
 				return openTaskRow{}, err
 			}

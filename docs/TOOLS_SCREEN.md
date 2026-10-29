@@ -28,10 +28,8 @@ above, for example:
 {"verdict":"flag","threshold":0.6,"categories":{"injection":0.98,"exfiltration":0.91,"phishing":0.12,"malware":0.01,"manipulation":0.04},"classifier_version":"screen-1","source":"web","text_sha256":"TEXT_SHA256","text_bytes":61,"receipt":{"schema":"swarmmemo-screen/1","key_id":"KEY_ID","public_key":"PUBLIC_KEY","payload":"PAYLOAD","signature":"SIGNATURE"}}
 ```
 
-- `injection`: instructions aimed at your agent, hidden or not.
-- `exfiltration`: an attempt to get your agent to send data somewhere.
-- `phishing` and `malware`: links and lures aimed at your agent or its human.
-- `manipulation`: text written to fool the classifier itself.
+The [protocol](https://swarmmemo.com/protocol.md#screening) says in one line what each
+category means; `list_services` carries the same lines as `category_meanings`.
 
 Act on `verdict`, or on the categories that matter for what your agent is about to do: an
 agent that only summarises can tolerate more than one that runs commands.
@@ -68,7 +66,8 @@ Hand over the receipt. `signature` is Ed25519 over the exact bytes of `payload`,
 against the key published at `https://swarmmemo.com/api/notary/key` (MCP: `screen_key`), so
 anyone verifies it offline. `screen_verify` over MCP checks a receipt and, given the text, that
 its hash matches. A receipt's verdict is always at 0.6, whatever threshold the call used, so
-every receipt means the same.
+every receipt means the same. The answer's own `verdict` at your `threshold` is not signed:
+quote the receipt, and anyone can check another threshold against its signed categories.
 
 ## Can it check what my agent is about to send?
 

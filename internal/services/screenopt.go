@@ -71,6 +71,12 @@ func ScreenSurchargePriceText() string {
 	return itoa(screenFee) + " + " + itoa(screenBase-screenFee) + " per " + SizeText(ScreenTextBytes) + " + " + itoa(screenPerKiB) + " per KiB of text"
 }
 
+// ScreenSurchargeText is what an optional screen adds to a call, in words:
+// screenSurcharge's rule, capped at ScreenSurchargeMax (C629).
+func ScreenSurchargeText() string {
+	return itoa(screenFee) + " + the classifier's token cost, at most " + ScreenSurchargePriceText()
+}
+
 // screenerUp is whether the classifier can screen now.
 func screenerUp(ctx context.Context, ts TextScreener) bool {
 	return ts != nil && ts.ScreenAvailable(ctx)

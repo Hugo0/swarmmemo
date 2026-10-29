@@ -3548,6 +3548,10 @@
             "required": false,
             "pattern": "work_id"
           },
+          "summary": {
+            "type": "bool",
+            "required": false
+          },
           "worker": {
             "type": "string",
             "required": false
@@ -4015,6 +4019,7 @@
       ],
       "optional": [
         "attempt_grant_id",
+        "eligibility_summary",
         "eligible",
         "eligible_agent",
         "eligible_preview",

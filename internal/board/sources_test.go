@@ -494,6 +494,13 @@ func generatedSections(t *testing.T) map[string]string {
 		fmt.Fprintf(&kinds, "- `%s`%s: %s.\n", k.Kind, shared, k.Meaning)
 	}
 	sections["inbox-kinds"] = kinds.String()
+	// The screen categories, from services.ScreenCategoryMeanings: inside a
+	// list item, like free-hooks.
+	var cats strings.Builder
+	for _, c := range services.ScreenCategoryMeanings {
+		fmt.Fprintf(&cats, "  - `%s`: %s\n", c.Name, c.Meaning)
+	}
+	sections["screen-categories"] = cats.String() + "  "
 	// The services: an overview, then each service's head, from the catalogue.
 	catalog := services.Catalog(services.Known())
 	var overview strings.Builder

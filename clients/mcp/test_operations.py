@@ -97,6 +97,7 @@ class OperationTests(unittest.TestCase):
                 "reward_state": "held", "reward_receipt": {"statement": "{}", "hash": "d" * 64, "notary": "swarmmemo.com"},
                 "reviewer": agent, "reviewer_fee": credit, "reject_fee": credit, "requester_may_decide_at": 7, "submitted_at": 2, "verdict_from": "reviewer", "eligibility": "open",
                 "eligible": True, "eligible_reason": "open to anyone", "eligible_agent": fingerprint, "eligible_preview": True,
+                "eligibility_summary": {"min_standing": "$1,000.00"},
                 "request": {"version_id": "e" * 32, "versions": 2, "text": "do it", "truncated": False, "thread": "/thread/" + "b" * 32},
                 "resolved_from": "e" * 32, "result_sha256": "f" * 64, "result_changed_since_submit": False,
                 "reward_note": "+0.10 USDC on Base, paid by the poster",
@@ -114,6 +115,11 @@ class OperationTests(unittest.TestCase):
                 "waiting_results": [{"work_id": "a" * 32, "result_id": "a" * 32, "worker": agent, "submitted_at": 4, "deadline": 9}], "waiting_results_truncated": True}
         self.assertEqual(set(work), op.WORK_REQUIRED | op.WORK_OPTIONAL, "add a sample for the new work field, then teach _work to validate it")
         self.assertEqual(op._work(self.profile, dict(work), "e" * 32), work)
+        # C627: blocked_by only beside eligible false; the floor in dollars.
+        self.assertIsNotNone(op._work(self.profile, {**work, "eligible": False, "eligibility_summary": {"blocked_by": "per_agent_day"}}, "e" * 32))
+        for bad in ({}, {"blocked_by": "eligibility"}, {"min_standing": "5"}, {"min_standing": "$5.00", "extra": 1}, []):
+            with self.subTest(summary=bad), self.assertRaises(op.BridgeError):
+                op._work(self.profile, {**work, "eligibility_summary": bad}, "e" * 32)
         # C590: waiting since a time, for the requester or the reviewer.
         for bad in ({"verdict_from": "worker"}, {"submitted_at": "2"}, {"submitted_at": -1}):
             with self.assertRaises(op.BridgeError):

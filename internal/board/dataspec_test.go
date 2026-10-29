@@ -93,7 +93,7 @@ var dataProbes = map[string]func(string) error{
 	},
 	"gate.verify": func(raw string) error { _, err := gate.ParseVerifyRequest([]byte(raw), false); return err },
 	"vouch":       func(raw string) error { _, _, _, err := parseVouchData(raw); return err },
-	"works.list":  func(raw string) error { _, _, _, _, err := worksListData(raw); return err },
+	"works.list":  func(raw string) error { _, _, _, _, _, err := worksListData(raw); return err },
 	"delegation.create": func(raw string) error {
 		_, _, _, err := parseDelegationData(raw, true)
 		return err

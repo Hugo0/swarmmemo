@@ -119,6 +119,10 @@ type Work struct {
 	EligibleReason  string `json:"eligible_reason,omitempty"`
 	EligibleAgent   string `json:"eligible_agent,omitempty"`
 	EligiblePreview bool   `json:"eligible_preview,omitempty"`
+	// EligibilitySummary is, on works.list with data summary (C627), the
+	// row's standing floor and the reader's block code: what an agent needs
+	// to judge a row without work.get.
+	EligibilitySummary *WorkEligibilitySummary `json:"eligibility_summary,omitempty"`
 	// Request is the task itself: the newest version of the root request.
 	Request *WorkRequest `json:"request,omitempty"`
 	// ResolvedFrom is the ID the read named when it was an edited version of
@@ -1749,8 +1753,9 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 			return Work{}, err
 		}
 	}
+	blocked := ""
 	if opt.facts != nil {
-		ok, reason, e := workClaimCheck(ctx, tx, opt.facts, w, p.State, now)
+		ok, code, reason, e := workClaimCheck(ctx, tx, opt.facts, w, p.State, now)
 		if e != nil {
 			return Work{}, e
 		}
@@ -1758,7 +1763,7 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 			// The standing task itself takes no result now (results_until, seats,
 			// pool...): the claim would refuse, so the preview says so too
 			// (kosoyy 36193066, round 7: eligible true on a closed task).
-			ok, reason = false, "Not now on this standing task: "+p.Standing.BlockedNote+"."
+			ok, code, reason = false, p.Standing.BlockedBy, "Not now on this standing task: "+p.Standing.BlockedNote+"."
 		}
 		if ok && p.Standing != nil {
 			// That agent's own seat limit on a standing task (C444).
@@ -1767,7 +1772,7 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 				return Work{}, e
 			}
 			if blocked {
-				ok, reason = false, "Not now on this standing task: "+p.Standing.BlockedNote+"."
+				ok, code, reason = false, p.Standing.BlockedBy, "Not now on this standing task: "+p.Standing.BlockedNote+"."
 			}
 		}
 		if ok && opt.facts.account != "" && w.StandingID == "" {
@@ -1777,10 +1782,20 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 				return Work{}, e
 			}
 			if until > 0 {
-				ok, reason = false, workClaimCooldownText(p.Standing != nil, until)
+				ok, code, reason = false, WorkBlockedClaimPause, workClaimCooldownText(p.Standing != nil, until)
 			}
 		}
 		p.Eligible, p.EligibleReason, p.EligibleAgent, p.EligiblePreview = &ok, reason, opt.agent, opt.preview
+		blocked = code
+	}
+	if opt.summary != nil {
+		floor, e := opt.summary.minStanding(ctx, tx, w.Eligibility, now)
+		if e != nil {
+			return Work{}, e
+		}
+		if floor != "" || blocked != "" {
+			p.EligibilitySummary = &WorkEligibilitySummary{MinStanding: floor, BlockedBy: blocked}
+		}
 	}
 	return p, nil
 }
@@ -1793,6 +1808,9 @@ type workReadOptions struct {
 	facts        *workEligibilityFacts
 	agent        string
 	preview      bool
+	// summary, set by works.list data summary (C627), adds
+	// eligibility_summary; its trust parameters are read once for the page.
+	summary *workEligibilityFacts
 }
 
 // workRequestText is the request at its newest version, cut to limit bytes,
@@ -1932,33 +1950,34 @@ type worksListOptions struct {
 	Worker      *string `json:"worker"`
 	Standing    *string `json:"standing"`
 	Claimable   *bool   `json:"claimable"`
+	Summary     *bool   `json:"summary"`
 }
 
-func worksListData(raw string) (eligibleFor, worker, standing string, claimable bool, err error) {
+func worksListData(raw string) (eligibleFor, worker, standing string, claimable, summary bool, err error) {
 	if raw == "" {
-		return "", "", "", false, nil
+		return "", "", "", false, false, nil
 	}
 	var d worksListOptions
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if len(raw) > 512 {
-		return "", "", "", false, problem(400, "invalid_work_data", WorksListDataRule)
+		return "", "", "", false, false, problem(400, "invalid_work_data", WorksListDataRule)
 	}
 	err = dec.Decode(&d)
 	var te *json.UnmarshalTypeError
 	if quoted, ok := strings.CutPrefix(fmt.Sprint(err), "json: unknown field "); ok {
 		name, _ := strconv.Unquote(quoted)
 		if services.EchoesArg(name) {
-			return "", "", "", false, problem(400, "invalid_work_data", name+" is not a field works.list data takes. "+WorksListDataRule)
+			return "", "", "", false, false, problem(400, "invalid_work_data", name+" is not a field works.list data takes. "+WorksListDataRule)
 		}
-		return "", "", "", false, problem(400, "invalid_work_data", "A field was sent that works.list data does not take. "+WorksListDataRule)
+		return "", "", "", false, false, problem(400, "invalid_work_data", "A field was sent that works.list data does not take. "+WorksListDataRule)
 	} else if errors.As(err, &te) && dataTakes("works.list", te.Field) {
-		return "", "", "", false, problem(400, "invalid_work_data", te.Field+" must be "+services.JSONTypeName(te.Type)+". "+WorksListDataRule)
+		return "", "", "", false, false, problem(400, "invalid_work_data", te.Field+" must be "+services.JSONTypeName(te.Type)+". "+WorksListDataRule)
 	}
 	valid := func(v *string) bool { return v == nil || fingerprintRE.MatchString(*v) || handleRE.MatchString(*v) }
-	if err != nil || dec.More() || d.Schema != 1 || (d.EligibleFor == nil && d.Worker == nil && d.Standing == nil && d.Claimable == nil) || !valid(d.EligibleFor) || !valid(d.Worker) ||
+	if err != nil || dec.More() || d.Schema != 1 || (d.EligibleFor == nil && d.Worker == nil && d.Standing == nil && d.Claimable == nil && d.Summary == nil) || !valid(d.EligibleFor) || !valid(d.Worker) ||
 		(d.Standing != nil && !workIDRE.MatchString(*d.Standing)) {
-		return "", "", "", false, problem(400, "invalid_work_data", WorksListDataRule)
+		return "", "", "", false, false, problem(400, "invalid_work_data", WorksListDataRule)
 	}
 	if d.EligibleFor != nil {
 		eligibleFor = *d.EligibleFor
@@ -1972,11 +1991,14 @@ func worksListData(raw string) (eligibleFor, worker, standing string, claimable 
 	if d.Claimable != nil {
 		claimable = *d.Claimable
 	}
-	return eligibleFor, worker, standing, claimable, nil
+	if d.Summary != nil {
+		summary = *d.Summary
+	}
+	return eligibleFor, worker, standing, claimable, summary, nil
 }
 
 // WorksListDataRule is works.list data's shape, the line its refusals end with.
-const WorksListDataRule = `works.list data is {"schema":1,"eligible_for":AGENT,"worker":AGENT,"standing":WORK_ID,"claimable":true}, each field optional; AGENT is a key fingerprint or a registered handle, standing a standing task's ID (lists the results it opened, data.standing its seats), claimable true lists only work that can be claimed now.`
+const WorksListDataRule = `works.list data is {"schema":1,"eligible_for":AGENT,"worker":AGENT,"standing":WORK_ID,"claimable":true,"summary":true}, each field optional; AGENT is a key fingerprint or a registered handle, standing a standing task's ID (lists the results it opened, data.standing its seats), claimable true lists only work that can be claimed now, summary true adds each row's eligibility_summary.`
 
 func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -2050,7 +2072,7 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	}
 	// Each row answers eligibility for the agent data names, else the signer.
 	// The facts are read once for the page, not per row.
-	eligibleFor, worker, standing, claimable, err := worksListData(c.Data)
+	eligibleFor, worker, standing, claimable, summary, err := worksListData(c.Data)
 	if err != nil {
 		return Result{}, err
 	}
@@ -2068,6 +2090,11 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		return Result{}, err
 	}
 	opt.requestBytes = WorkRequestExcerptMax
+	if summary {
+		// eligibility_summary (C627) is opt-in: shipped bridges check each
+		// row's keys. The floors are read once for the page, with the facts.
+		opt.summary = cmp.Or(opt.facts, &workEligibilityFacts{})
+	}
 	// An agent's own page asks the same listing for the work it is part of, so the
 	// scope has to include the agent: a cursor from one scope must not decode in
 	// another.

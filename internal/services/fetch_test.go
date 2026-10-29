@@ -594,8 +594,19 @@ func TestFetchScreeningIsOptionalAndPriced(t *testing.T) {
 	if get(screened, "call", "cost") != float64(want) {
 		t.Fatalf("the surcharge is what the screen cost plus 5: %v, want %d", get(screened, "call", "cost"), want)
 	}
+	// max_cost and cost, each split into the fetch and the screening (C629).
+	maxCost := get(screened, "call", "max_cost").(float64)
+	if mf, ms := get(res, "max_cost_split", "fetch").(float64), get(res, "max_cost_split", "screening").(float64); mf+ms != maxCost || ms == 0 {
+		t.Fatalf("max_cost_split %v + %v, max_cost %v", mf, ms, maxCost)
+	}
+	if cf, cs := get(res, "cost_split", "fetch"), get(res, "cost_split", "screening"); cf != float64(services.FetchPrice.For(int64(len(text)))) || cs != float64(5+30) {
+		t.Fatalf("cost_split %v + %v", cf, cs)
+	}
 	// Cached with its verdict: screening again costs nothing more.
 	again := r.must("bob", map[string]any{"url": "http://site.test/inject"})
+	if get(again, "result", "cost_split", "screening") != float64(0) {
+		t.Fatalf("a reused verdict's screening cost: %v", get(again, "result", "cost_split"))
+	}
 	if r.jev.calls != 1 || get(again, "result", "screened") != true || get(again, "call", "cost") != float64(services.FetchPrice.For(int64(len(text)))) {
 		t.Fatalf("a cached verdict: calls %d %+v", r.jev.calls, get(again, "call"))
 	}

@@ -102,6 +102,23 @@ const FetchKeepBlob = "blob"
 // screening surcharge comes on top while the answer is screened.
 var FetchPrice = Price{Base: 5, PerKiB: 1}
 
+// fetchExampleBytes is the max_bytes page's example asks for.
+const fetchExampleBytes = 8192
+
+// fetchTextPrice is FetchPrice in words: what an unscreened call costs.
+var fetchTextPrice = FetchPrice.Words() + " of text returned"
+
+// FetchScreeningNote is the screening clause of fetch's price, the one copy
+// the catalogue's price note, /llms-full.txt and the fetch_page MCP tool
+// say (C629): what screening adds, as screenSurcharge charges it, and how
+// to switch it off.
+var FetchScreeningNote = "Screening is on by default and most of a short page's price: " + ScreenSurchargeText() +
+	`. "screen": false turns it off, and the call then costs ` + fetchTextPrice + "."
+
+// FetchPriceLine is fetch.page's advertised price: the text, then screening.
+var FetchPriceLine = fetchTextPrice + ", plus screening. " + FetchScreeningNote +
+	" The free daily allowance covers it; credits apply past it."
+
 // FetchConfig is FETCH_CONFIG: the operator's settings. Without it fetch
 // lists as unavailable and every call is refused before anything is
 // reserved.
@@ -287,7 +304,7 @@ func (f *fetch) Describe() Descriptor {
 		Methods: []Method{
 			{Name: "page", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: fetchArgsMax, Price: FetchPrice,
 				Line:      "Fetch one page's text, with the SHA-256 of the bytes received.",
-				PriceNote: FetchPrice.Words() + " of text returned, plus what screening cost while it screens (at most " + ScreenSurchargePriceText() + "); the quote reserves the most for max_bytes and the rest is refunded; a refused fetch costs nothing. keep: \"blob\" stores the bytes as a file at blob.put's price, charged to your posting allowance (post_bytes: the bytes plus filename, media type and 512)",
+				PriceNote: FetchPriceLine + " The quote reserves the most for max_bytes and the rest is refunded (the catalogue's price_split and the answer's max_cost_split and cost_split show the two parts); a refused fetch costs nothing. keep: \"blob\" stores the bytes as a file at blob.put's price, charged to your posting allowance (post_bytes: the bytes plus filename, media type and 512)",
 				Args: []Arg{
 					{"url", "string", true, "an http or https URL on port 80 or 443, up to " + itoa(FetchURLBytes) + " bytes"},
 					{"max_bytes", "integer", false, fmt.Sprintf("the most text to return, %d to %d; default %d signed. Without a key: up to %s per call (%d, also its default)", FetchTextMin, FetchTextMax, FetchTextDefault, SizeText(FetchAnonymousTextMax), FetchAnonymousTextMax)},
@@ -295,7 +312,7 @@ func (f *fetch) Describe() Descriptor {
 					{"keep", "string", false, `"blob": also store the response bytes as a file (blob.put's limits and price, on your posting allowance) and return its blob_id and URL; signed only, needs room`},
 					{"room", "string", false, "with keep: the room the file is stored in, one you may upload files to (a public room, or a private one you are a member of)"},
 				},
-				Example: json.RawMessage(`{"url":"https://example.com/","max_bytes":8192}`), ExampleMaxCost: FetchPrice.For(8192) + ScreenSurchargeMax(8192),
+				Example: json.RawMessage(`{"url":"https://example.com/","max_bytes":8192}`), ExampleMaxCost: FetchPrice.For(fetchExampleBytes) + ScreenSurchargeMax(fetchExampleBytes),
 				Anonymous: true, AnonymousLabel: "page fetches", AnonymousNote: fmt.Sprintf("without a key: up to %s per call (max_bytes at most %d); signed (or a signed-in MCP connection): up to %s", SizeText(FetchAnonymousTextMax), FetchAnonymousTextMax, SizeText(FetchTextMax)),
 				AnonymousRate: AnonRate{CallerPerMinute: 5, CallerPerDay: 50, AllPerMinute: 60, AllPerDay: 2000}},
 		},
@@ -325,7 +342,11 @@ func (f *fetch) CatalogueExtra() map[string]any {
 	}
 	return map[string]any{"available": f.cfg != nil, "user_agent": FetchUserAgent, "robots_token": "SwarmMemoFetch", "about": "/fetch", "tool_page": "/tools/fetch",
 		"screening": screeningExtra(mode, f.screener),
-		"formats":   []string{"markdown (text/html)", "json (application/json)", "xml (text/xml, application/xml, application/rss+xml, application/atom+xml, any +xml)", "text (text/plain, text/markdown)"}, "javascript": false, "cookies": false, "stores_text": false,
+		// The price in its two parts, before any spend (C629), and the
+		// example's max_cost so split.
+		"price_split": map[string]any{"fetch": fetchTextPrice, "screening": ScreenSurchargeText(), "screen_off": `"screen": false`,
+			"example": map[string]int64{"max_bytes": fetchExampleBytes, "fetch": FetchPrice.For(fetchExampleBytes), "screening": ScreenSurchargeMax(fetchExampleBytes)}},
+		"formats": []string{"markdown (text/html)", "json (application/json)", "xml (text/xml, application/xml, application/rss+xml, application/atom+xml, any +xml)", "text (text/plain, text/markdown)"}, "javascript": false, "cookies": false, "stores_text": false,
 		"raw_sha256": "SHA-256 of the response body as received", "keep": map[string]any{"available": f.blobs != nil, "values": []string{FetchKeepBlob}, "price": "blob.put's, on post_bytes"}}
 }
 
@@ -589,7 +610,8 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 		return Result{}, refusal("upstream_unavailable")
 	}
 	// Screen only what the quote reserved for.
-	screen := c.Quoted > c.Price.For(int64(p.maxBytes))
+	fetchQuoted := min(c.Quoted, c.Price.For(int64(p.maxBytes)))
+	screen := c.Quoted > fetchQuoted
 	key := p.u.String()
 	entry, cached := f.cacheGet(key, c.Now)
 	if !cached {
@@ -623,7 +645,8 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 		kept = &k
 	}
 	text := truncateUTF8(page.Text, p.maxBytes)
-	used := c.Price.For(int64(len(text)))
+	used := min(c.Quoted, c.Price.For(int64(len(text))))
+	fetchUsed := used
 	state := "off"
 	var verdict *TextVerdict
 	screenCharged, screenReused := false, false
@@ -667,8 +690,11 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 		"bytes": len(text), "page_bytes": page.PageBytes, "truncated": len(truncatedBy) > 0, "truncated_by": truncatedBy,
 		"body_limit_bytes": FetchBodyBytes, "text_limit_bytes": p.maxBytes,
 		"fetched_at": page.FetchedAt, "cached": cached, "screened": verdict != nil, "screen": state, "untrusted": true,
-		"cost_note":  fetchCostNote(c.Price, cached, screenCharged, screenReused),
-		"raw_sha256": page.RawSHA256, "raw_bytes": len(page.Raw),
+		"cost_note": fetchCostNote(c.Price, cached, screenCharged, screenReused),
+		// max_cost and cost, each split into the fetch and screening parts.
+		"max_cost_split": map[string]int64{"fetch": fetchQuoted, "screening": c.Quoted - fetchQuoted},
+		"cost_split":     map[string]int64{"fetch": fetchUsed, "screening": used - fetchUsed},
+		"raw_sha256":     page.RawSHA256, "raw_bytes": len(page.Raw),
 		"note": UntrustedNote + " The text is in this first answer only and never stored; fetching again within 10 minutes reads the cache.",
 	}
 	if kept != nil {
