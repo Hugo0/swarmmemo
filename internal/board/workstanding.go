@@ -193,7 +193,8 @@ func WorkStandingSeatNames() []string {
 
 // WorkStanding is a standing root's seats as reads show them: the seat
 // summary, flattened, and the rest. Results is every result it opened;
-// ResultsMax, when set, the accepted and waiting results it takes in all.
+// ResultsMax, when set, the accepted and waiting results it takes in all;
+// OpenedToday the day's results day_max counts (waiting or accepted, C614).
 // USDCOwed and USDCOwedMax, sent when a tier pays USDC, are the USDC owed and
 // not yet settled on its results and the most it may be (seats times the
 // largest tier's): an accept that would pass it pays credits only (C386).
@@ -507,7 +508,14 @@ func (s *Store) createWorkStanding(ctx context.Context, tx *sql.Tx, a actor, w w
 	return s.holdWorkEscrows(ctx, tx, a, w, pool, 0, now)
 }
 
-// standingCounts is a standing root's seats as they stand at now.
+// standingCounts is a standing root's seats as they stand at now. today is
+// the results opened since 00:00 UTC that hold a day_max slot: waiting for
+// a verdict, or accepted (paid or USDC owed, even if hidden since). A
+// rejected, lapsed or hidden waiting result frees its slot at once, so a
+// premature claim cannot block a scarce task for the rest of the day
+// (C614). mineToday is every result the worker opened today, rejected and
+// hidden ones too: per_agent_day is that agent's own allowance, and a
+// rejected claim spends it.
 type standingCounts struct {
 	waiting, owed, accepted, results, today, mineToday, mineWaiting int64
 	mineWaitingID                                                   string
@@ -535,7 +543,7 @@ func errResultsMaxReached(st *workStanding, c standingCounts) error {
 // version (the item's key, its first version, or an edit superseding it):
 // by the operator, the room, or its author's erasure. A hide on any version
 // removes the message (postdata.go), so it is the rule eligibleWorkResult
-// applies to the bound version too. Such a result holds no seat and leaves the day's day_max (it
+// applies to the bound version too. Such a waiting result holds no seat and leaves the day's day_max (it
 // still counts toward its worker's per_agent_day), its seat and reward
 // return on the next claim or sweep (cancelled, reason hidden), and it is
 // left out of the requester's record: the requester cannot read it to judge
@@ -552,12 +560,12 @@ func readStandingCounts(ctx context.Context, tx rowQuerier, id, worker string, n
  count(*) FILTER (WHERE w.state='accepted' AND EXISTS(SELECT 1 FROM work_usdc u WHERE u.work_id=w.id AND u.state='payable')),
  count(*) FILTER (WHERE w.state='accepted'),
  count(*),
- count(*) FILTER (WHERE w.created_at>=? AND NOT `+standingHiddenSQL+`),
+ count(*) FILTER (WHERE w.created_at>=? AND (w.state='accepted' OR (w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`))),
  count(*) FILTER (WHERE w.created_at>=? AND w.worker=?),
  count(*) FILTER (WHERE w.state='submitted' AND w.deadline>? AND w.worker=? AND NOT `+standingHiddenSQL+`),
  coalesce(min(w.id) FILTER (WHERE w.state='submitted' AND w.deadline>? AND w.worker=? AND NOT `+standingHiddenSQL+`),''),
  coalesce(min(w.deadline) FILTER (WHERE w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`),0)
- FROM works w WHERE w.standing_id=?`, now, day, day, worker, now, worker, now, worker, now, id).
+ FROM works w WHERE w.standing_id=?`, now, day, now, day, worker, now, worker, now, worker, now, id).
 		Scan(&c.waiting, &c.owed, &c.accepted, &c.results, &c.today, &c.mineToday, &c.mineWaiting, &c.mineWaitingID, &c.nextVerdict)
 	if err != nil {
 		return c, err

@@ -194,14 +194,15 @@ func TestWorkStandingSeatsAcceptRejectLapse(t *testing.T) {
 		t.Fatalf("after lapse %d held, want 600", held)
 	}
 
-	// day_max: 4 results a day. Today (the lapse's day) has one; three more
-	// agents may open, the fifth is refused.
-	run(t, s, workCommand(s, owner, Command{Operation: "work.reject", MessageID: r4, Amount: 1, Reason: "dup"}))
+	// day_max: 4 results a day, counted while waiting or once accepted
+	// (C614: a rejected one frees its slot). Today (the lapse's day) has
+	// one; three more agents may open, the fifth is refused.
+	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r4, Amount: 1}))
 	for i, k := range []ed25519.PrivateKey{keyFor(174), keyFor(175)} {
 		r, c := standingClaim(t, s, k, id, nil)
 		run(t, s, c)
 		if i == 0 {
-			run(t, s, workCommand(s, owner, Command{Operation: "work.reject", MessageID: r, Amount: 1, Reason: "dup"}))
+			run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r, Amount: 1}))
 		}
 	}
 	_, c := standingClaim(t, s, keyFor(176), id, nil)
@@ -615,6 +616,97 @@ func TestWorkStandingUSDCCapByPayoutAddress(t *testing.T) {
 	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r3, Amount: 1}))
 	if w := getTestWork(t, s, r3); w.RewardUSDC.State != "payable" {
 		t.Fatalf("another wallet: %+v", w.RewardUSDC)
+	}
+}
+
+// C614: a rejected result frees the task's day_max slot at once, so a
+// premature claim on a one-seat task cannot block it until 00:00 UTC; it
+// still spends its worker's per_agent_day, it cannot be accepted after the
+// reject, and an accepted result keeps its slot.
+func TestWorkStandingRejectFreesDaySlot(t *testing.T) {
+	s := rewardStore(t)
+	owner, a, b, c := keyFor(210), keyFor(211), keyFor(212), keyFor(213)
+	requester := keyID(owner)
+	mintCredit(t, s, requester, allowance.Paid, 5000)
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "reward": 300}, 10*86400))
+	if st := standingAt(t, s, id); st.DayMax != 1 || st.PerAgentDay != 1 || st.Open != 1 {
+		t.Fatalf("one-seat task: %+v", st)
+	}
+	refusal := func(c Command) *Error {
+		t.Helper()
+		_, err := s.Execute(testContext, c, "test-origin")
+		var e *Error
+		if !errors.As(err, &e) {
+			t.Fatalf("claim not refused: %v", err)
+		}
+		return e
+	}
+	listed := func() *WorkStanding {
+		t.Helper()
+		got, _ := run(t, s, Command{Operation: "works.list", Data: `{"schema":1,"standing":"` + id + `"}`}).Data["standing"].(*WorkStanding)
+		return got
+	}
+
+	ra, ca := standingClaim(t, s, a, id, nil)
+	run(t, s, ca)
+	if st := standingAt(t, s, id); st.Open != 0 || st.OpenedToday != 1 || st.BlockedBy != StandingBlockedSeats {
+		t.Fatalf("seat taken: %+v", st)
+	}
+	held := creditIn(t, s, requester, "held")
+
+	// The requester rejects the premature claim: the seat, the reward and
+	// the day's slot are free at once, on every read.
+	run(t, s, workCommand(s, owner, Command{Operation: "work.reject", MessageID: ra, Amount: 1, Reason: "not yet at $5"}))
+	st := standingAt(t, s, id)
+	if st.Open != 1 || st.OpenedToday != 0 || st.Submitted != 0 || st.BlockedBy != "" || st.NextOpenAt != 0 {
+		t.Fatalf("after reject: %+v", st)
+	}
+	if l := listed(); l == nil || !reflect.DeepEqual(*l, *st) {
+		t.Fatalf("works.list standing %+v, want work.get's %+v", l, st)
+	}
+	if root := getTestWork(t, s, id); !root.Claimable {
+		t.Fatalf("not claimable after reject: %+v", root.Standing)
+	}
+	if got := creditIn(t, s, requester, "held"); got != held {
+		t.Fatalf("held %d after reject, want %d", got, held)
+	}
+	// A rejected result is terminal: no accept pays it afterwards.
+	fails(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: ra, Amount: 1}), "work_state_conflict")
+
+	// Its worker's own allowance stays spent for the day: A cannot retry,
+	// and its own read says so.
+	_, again := standingClaim(t, s, a, id, nil)
+	if e := refusal(again); e.Code != "seat_limit" || e.Details.(map[string]any)["blocked_by"] != StandingBlockedPerAgentDay {
+		t.Fatalf("A again: %v %#v", e, e.Details)
+	}
+	if w := run(t, s, signed(a, Command{Operation: "work.get", MessageID: id})).Data["work"].(Work); *w.Eligible || w.Standing.BlockedBy != StandingBlockedPerAgentDay {
+		t.Fatalf("A's read: eligible %v %+v", *w.Eligible, w.Standing.WorkStandingSeats)
+	}
+
+	// Another agent claims the same day, and its accept keeps the slot.
+	rb, cb := standingClaim(t, s, b, id, nil)
+	run(t, s, cb)
+	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: rb, Amount: 1}))
+	midnight := testTime - testTime%86400 + 86400
+	st = standingAt(t, s, id)
+	if st.Open != 0 || st.OpenedToday != 1 || st.Paid != 1 || st.BlockedBy != StandingBlockedDayMax || st.NextOpenAt != midnight {
+		t.Fatalf("after accept: %+v", st)
+	}
+	_, cc := standingClaim(t, s, c, id, nil)
+	if e := refusal(cc); e.Code != "seat_limit" || e.Details.(map[string]any)["blocked_by"] != StandingBlockedDayMax || e.NextOpenAt != midnight {
+		t.Fatalf("C after the accept: %v %#v", e, e.Details)
+	}
+	// An accepted result keeps its slot even once hidden: a room that hides
+	// it cannot reopen the day for a second payment.
+	if _, err := s.db.Exec("UPDATE events SET hidden=1,hidden_by='room' WHERE id=?", rb); err != nil {
+		t.Fatal(err)
+	}
+	if st = standingAt(t, s, id); st.OpenedToday != 1 || st.BlockedBy != StandingBlockedDayMax {
+		t.Fatalf("after hiding the accepted result: %+v", st)
+	}
+	if err := s.Integrity(testContext); err != nil {
+		t.Fatal(err)
 	}
 }
 
