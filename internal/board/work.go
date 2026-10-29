@@ -1294,7 +1294,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 				if w.Result, err = bindResult(c.Target); err != nil {
 					return Result{}, err
 				}
-				if seats, err = s.checkStandingSeat(ctx, tx, root, standing, item, now); err != nil {
+				if seats, err = s.checkStandingSeat(ctx, tx, root, standing, w, now); err != nil {
 					return Result{}, err
 				}
 				break

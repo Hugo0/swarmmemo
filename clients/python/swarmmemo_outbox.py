@@ -48,7 +48,8 @@ SAFE_CODES.update({"work_generation_mismatch", "work_state_conflict", "work_fenc
                    "invalid_work_data", "invalid_work_root", "invalid_work_result", "invalid_ttl", "invalid_reason",
                    "invalid_work_reward", "invalid_reward_note", "reject_fee_unavailable", "work_reward_limit", "reviewer_not_found",
                    "reviewer_is_requester", "not_the_reviewer", "not_eligible", "work_result_changed",
-                   "seats_full", "seat_limit", "result_in_use", "standing_needs_result", "results_max_reached"})
+                   "seats_full", "seat_limit", "result_in_use", "standing_needs_result", "results_max_reached",
+                   "duplicate_result"})
 SAFE_CODES.update({"invalid_delegation_context", "delegation_required", "delegation_not_found", "delegation_context_mismatch",
                    "delegation_inactive", "delegation_forbidden", "delegation_scope_mismatch", "delegation_quota_exhausted",
                    "delegation_exists", "delegation_limit", "delegation_already_revoked", "invalid_delegation_data",

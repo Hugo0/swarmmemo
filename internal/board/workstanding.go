@@ -43,7 +43,9 @@ package board
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -637,6 +639,9 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 	if err = s.returnLapsedStanding(ctx, tx, root.ID, now); err != nil {
 		return standingCounts{}, err
 	}
+	if err = checkStandingDuplicate(ctx, tx, root.ID, item, now); err != nil {
+		return standingCounts{}, err
+	}
 	n, err := readStandingCounts(ctx, tx, root.ID, item.Worker, now)
 	if err != nil {
 		return n, err
@@ -673,6 +678,52 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 		return n, errNoSeat(StandingBlockedPool, next, until, now, "its credit pool holds no reward for another result; a reject or an accept that refills the pool opens one sooner", "at the latest, when a waiting result's verdict deadline passes")
 	}
 	return n, nil
+}
+
+// normalizedResultSHA256 is the SHA-256 of a result's text with its
+// whitespace trimmed and every run of it collapsed to one space, and that
+// text's length in bytes: what a duplicate_result compares (C615).
+func normalizedResultSHA256(text string) (string, int) {
+	norm := strings.Join(strings.Fields(text), " ")
+	sum := sha256.Sum256([]byte(norm))
+	return hex.EncodeToString(sum[:]), len(norm)
+}
+
+// checkStandingDuplicate refuses a result whose text repeats, word for
+// word (whitespace aside), an earlier result on the same standing task
+// that still stands: waiting for a verdict (not lapsed, not hidden) or
+// accepted, paid or USDC owed (C615). A rejected, lapsed or hidden result
+// does not count, so someone else may still do that check properly. Any
+// worker's earlier result counts, the claimant's own too. It compares the
+// text, never a notary receipt's hash alone: two honest checks of an
+// unchanged page stamp the same hash. It reads only this task's results, in
+// the claim's transaction; normalising never lengthens a text in bytes, so
+// stored texts shorter than this one's normalised form are skipped in SQL.
+func checkStandingDuplicate(ctx context.Context, tx *sql.Tx, standingID string, item workRow, now int64) error {
+	var text string
+	if err := tx.QueryRowContext(ctx, `SELECT text FROM events WHERE id=?`, item.Result).Scan(&text); err != nil {
+		return err
+	}
+	want, size := normalizedResultSHA256(text)
+	rows, err := tx.QueryContext(ctx, `SELECT w.id,e.text FROM works w JOIN events e ON e.id=w.result_id
+ WHERE w.standing_id=? AND w.id<>? AND length(CAST(e.text AS BLOB))>=?
+ AND (w.state='accepted' OR (w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`))
+ ORDER BY w.created_at,w.id`, standingID, item.ID, size, now)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, earlier string
+		if err = rows.Scan(&id, &earlier); err != nil {
+			return err
+		}
+		if got, _ := normalizedResultSHA256(earlier); got == want {
+			return &Error{Status: 409, Code: "duplicate_result", Message: "This result repeats result " + id + " on this task word for word; post your own check.",
+				Details: map[string]any{"duplicate_of": id}}
+		}
+	}
+	return rows.Err()
 }
 
 // errNoSeat is a claim refused while no seat is open (C585): it says in
@@ -1346,7 +1397,7 @@ func WorkStandingCapabilities() map[string]any {
 		"successor":    map[string]any{"command": WorkSuccessorSet, "data": "successor (the next round's work ID)", "by": "the requester", "successor": "another standing task of the same requester, open, in the same room or a public one; no cycles, at most " + fmt.Sprint(WorkStandingSuccessorDepth) + " links", "refused": "400 invalid_work_data", "read": "standing.successor; while the task is not claimable, standing.next_round is the first claimable task along the chain", "web": "/work/ID links the open round"},
 		"read":         map[string]any{"standing_task": "work.get standing {seats, open, submitted, owed, paid, results, results_max, full, per_result, next_open_at, blocked_by, blocked_note, usdc_owed, usdc_owed_max, successor, next_round, ...} and claimable", "result": "work.get standing_id, and tier once accepted", "list": "/api/works?standing=ID, data.standing the same seats", "yours": fmt.Sprintf("work.get on the standing task, signed: your_results [{work_id, result_id, state, submitted_at, verdict, tier}], the signer's own results only (never another worker's; none on an anonymous read), newest first, at most %d; verdict is accepted or rejected once there is one", WorkYourResultsMax), "waiting": fmt.Sprintf("work.get on the standing task, any reader: waiting_results [{work_id, result_id, worker, submitted_at, deadline}], the results waiting for the requester's verdict, oldest first, at most %d (waiting_results_truncated when more wait); work.accept and work.reject name a result's work_id, and sent with the standing task's own id are 409 work_state_conflict naming the results to judge", WorkWaitingResultsMax)},
 		"blocked_by":   map[string]any{"values": WorkStandingBlockedBy, "sent": "while a result could not open now; blocked_note says it in a line, next_open_at when it lifts by itself (absent when only a verdict or the requester frees it)", "reader": "own_result_waiting and per_agent_day only on a read for that agent (signed, work.get target, works.list data eligible_for), with eligible false; seats stay open to others"},
-		"refusals":     []string{"standing_needs_result", "seats_full", "seat_limit", "result_in_use", "results_max_reached"},
+		"refusals":     []string{"standing_needs_result", "seats_full", "seat_limit", "result_in_use", "results_max_reached", "duplicate_result"},
 		"instructions": "/protocol.md#standing-tasks"}
 }
 
