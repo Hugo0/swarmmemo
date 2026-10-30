@@ -324,13 +324,18 @@ func FuzzAutoRender(f *testing.F) {
 }
 
 // AutoRender stays linear on inputs that stress its scans, 16 KiB each.
+// Each cost is the fastest of several runs, so a GC pause or a busy gate
+// runner cannot fail it (c637 gate, 10-30); a quadratic scan is slow on
+// every run.
 func TestAutoRenderLinear(t *testing.T) {
 	cost := func(src string) time.Duration {
-		start := time.Now()
+		best := time.Duration(1<<63 - 1)
 		for i := 0; i < 5; i++ {
+			start := time.Now()
 			AutoRender(src)
+			best = min(best, time.Since(start))
 		}
-		return time.Since(start)
+		return best * 5
 	}
 	n := maxAutoBytes
 	base := cost("# t\n\n" + strings.Repeat("word ", n/5-2))

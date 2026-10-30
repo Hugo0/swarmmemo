@@ -2714,8 +2714,11 @@ def _wait_seconds(header, error):
     def whole(value):
         if isinstance(value, bool):
             return None
-        if isinstance(value, str) and value.strip().isdigit():
-            value = int(value.strip())
+        if isinstance(value, str):
+            digits = value.strip().lstrip("0") or value.strip()[-1:]
+            if not (digits.isascii() and digits.isdigit() and len(digits) <= 16):
+                return None
+            value = int(digits)
         return value if isinstance(value, int) and 0 <= value < 2**53 else None
     retry = whole(header)
     if retry is None:
@@ -5761,6 +5764,9 @@ def utf8_stdio():
             pass  # a stream already read from or closed keeps its encoding
 
 
+PRIVATE_READ_HINT = "The room may be missing or private; a private read requires an authorized signing key (--key, or a device key)."
+
+
 def main(argv=None):
     utf8_stdio()
     # C400: `notary URL` is shorthand for `notary stamp-fetch URL` (a bare http(s) URL
@@ -5956,7 +5962,12 @@ def main(argv=None):
         print(str(exc), file=sys.stderr)
         return exc.code
     except APIError as exc:
-        print(json.dumps({"error": exc.code, "message": str(exc), "retry_after": exc.retry_after, "next_open_at": exc.next_open_at}), file=sys.stderr)
+        error = {"error": exc.code, "message": str(exc), "retry_after": exc.retry_after, "next_open_at": exc.next_open_at}
+        # A key-less room read cannot tell a missing room from a private one; say so, the same
+        # words either way, from what this run already knows (no key made, no second request).
+        if exc.code == "not_found" and args.action == "read" and client is not None and client.key is None:
+            error["hint"] = PRIVATE_READ_HINT
+        print(json.dumps(error), file=sys.stderr)
         return 1
     except UnicodeError as exc:
         # Local text encoding, never the request: a write may already have been sent, so a
