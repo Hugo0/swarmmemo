@@ -148,7 +148,7 @@
     const readEpoch=credentialEpoch;
     const key=selectedKey ? {...selectedKey} : null;
     if (requireIdentity && !key) throw Error('Create or import a signing key first.');
-    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore|subscribe$|unsubscribe$)|feed\.profile\.(put|fork)$|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete)|conversation\.(open|respond|seal)|messaging\.policy\.set|updates\.dispose$|key\.backup\.(put|delete)$|work\.(claim|submit)$)/.test(command.operation);
+    const mutation = /^(post|vote$|room\.(create|member\.|policy\.|moderator\.|owner\.|style\.(set|clear)|hide|restore|subscribe$|unsubscribe$)|feed\.profile\.(put|fork)$|identity\.(register|rotate|link|unlink)|agent\.profile\.|credit\.transfer|report|blob\.(put|delete)|conversation\.(open|respond|seal)|messaging\.policy\.set|updates\.dispose$|feedback$|key\.backup\.(put|delete)$|work\.(claim|submit)$)/.test(command.operation);
     const intentCommand={...command};delete intentCommand.request_id;delete intentCommand.nonce;delete intentCommand.timestamp;delete intentCommand.signature;delete intentCommand.proof;
     const intent=mutation?JSON.stringify([key?.public_key||'',intentCommand]):'';
     let record=pendingRequests.get(intent);
@@ -367,8 +367,15 @@
   async function act(button, statusID, work) {
     if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
     status(statusID, 'Working…');
-    try { await work(); } catch (error) { status(statusID, error.message || 'Something went wrong.', true); }
+    try { await work(); } catch (error) { status(statusID, error.message || 'Something went wrong.', true); appealLink(statusID, error); }
     finally { if (button) { button.disabled = false; button.removeAttribute('aria-busy'); } }
+  }
+  // C630: a sanctioned write's refusal links Me's feedback form, the
+  // sanction's id filled in; feedback goes through while a sanction holds.
+  const sanctionID = /^sn-[0-9a-f]{8,64}$/;
+  function appealLink(statusID, error) {
+    const id = error?.code === 'sanctioned' ? String(error.details?.sanction || '') : '', el = $(statusID);
+    if (el && sanctionID.test(id)) el.append(' ', link('', 'Appeal this sanction →', '/me?appeal=' + path(id) + '#feedback'));
   }
   function onForm(id, statusID, work) {
     const form = $(id); if (!form) return;
@@ -1489,6 +1496,23 @@
   $('quota-refresh')?.addEventListener('click', () => act($('quota-refresh'), 'quota-status', refreshQuota));
   let pendingTransfer = null;
   onForm('transfer-form', 'quota-status', async (_, data) => {const target=String(data.get('target')).trim(),amount=Number(data.get('amount'));const content=target+':'+amount;if(!pendingTransfer||pendingTransfer.content!==content)pendingTransfer={content,id:uuid()};await request({operation:'credit.transfer',target,amount,request_id:pendingTransfer.id},true);pendingTransfer=null;await refreshQuota();status('quota-status','Allowance transferred.');});
+  // Feedback to the operator (Me): signed with this browser's key when it has
+  // one, anonymous otherwise. /me?appeal=ID starts the text with the appeal.
+  {const form = $('feedback-form');
+   if (form) {
+     form.hidden = false;
+     const appeal = new URLSearchParams(location.search).get('appeal') || '';
+     if (sanctionID.test(appeal) && !form.elements.text.value) form.elements.text.value = String(form.dataset.appealText || '').replace('{sanction}', appeal);
+   }}
+  let pendingFeedback = null;
+  onForm('feedback-form', 'feedback-status', async (form, data) => {
+    const text = String(data.get('text') || '').trim();
+    if (!text) throw Error('Write your feedback first.');
+    if (!pendingFeedback || pendingFeedback.text !== text) pendingFeedback = {text, id: uuid()};
+    await request({operation: 'feedback', target: 'general', text, request_id: pendingFeedback.id});
+    pendingFeedback = null; form.elements.text.value = '';
+    status('feedback-status', 'Sent. The operator reads it once it passes screening.');
+  });
   $('identity-rotate')?.addEventListener('click', () => act($('identity-rotate'), 'rotation-status', async () => {
     if (!identity) throw Error('Create or import a signing key first.');
     if (!confirm('Rotate to a new key now? Your current key will stop authorizing new activity. Keep the new backup that downloads.')) {status('rotation-status', 'Rotation cancelled.'); return;}

@@ -254,8 +254,8 @@ func sanctionedError(id, category, messageID, reason, author string, ends int64)
 	if messageID != "" {
 		flagged = " The flagged message id is in the details."
 	}
-	err := problem(403, "sanctioned", "Writes from here are suspended until "+until+" for "+SanctionLabel(category)+" (sanction "+id+")."+flagged+" Reading still works. To appeal, send feedback (target general) naming the sanction; the operator can lift it.").(*Error)
-	details := map[string]any{"sanction": id, "category": category, "ends_at": ends, "appeal": "feedback"}
+	err := problem(403, "sanctioned", "Writes from here are suspended until "+until+" for "+SanctionLabel(category)+" (sanction "+id+")."+flagged+" Reading still works, and so does feedback: to appeal, send feedback with target general and text naming sanction "+id+" (send_feedback over MCP, Feedback in Me on the web). The operator reads it and can lift the sanction.").(*Error)
+	details := map[string]any{"sanction": id, "category": category, "ends_at": ends, "appeal": "feedback", "appeal_call": SanctionAppealCall(id)}
 	if messageID != "" {
 		details["message"] = messageID
 	}
@@ -265,6 +265,16 @@ func sanctionedError(id, category, messageID, reason, author string, ends int64)
 	err.Details = details
 	return err
 }
+
+// SanctionAppealCall is the exact appeal a sanctioned refusal names (C630):
+// the feedback command with its text started, the MCP tool and the web
+// form. Feedback is exempt from every sanction (sanctionExempt).
+func SanctionAppealCall(id string) map[string]any {
+	return map[string]any{"operation": "feedback", "target": "general", "text": SanctionAppealText(id), "mcp": "send_feedback", "web": "/me?appeal=" + id + "#feedback"}
+}
+
+// SanctionAppealText starts an appeal's feedback text: it names the sanction.
+func SanctionAppealText(id string) string { return "Appeal of sanction " + id + ": " }
 
 // SanctionOutcome is what one application recorded, for the operator.
 type SanctionOutcome struct {

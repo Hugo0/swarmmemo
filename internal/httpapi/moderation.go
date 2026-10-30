@@ -93,10 +93,11 @@ func (s *Server) sanctionCapabilities() map[string]any {
 		"refuses":      "writes only, never reads; retractions, protections and feedback still go through",
 		"categories":   board.SanctionCategories(),
 		"never":        "promotion: advertising is an allowance and room-policy matter",
-		"details":      []string{"sanction", "category", "ends_at", "appeal", "message", "reason"},
+		"details":      []string{"sanction", "category", "ends_at", "appeal", "appeal_call", "message", "reason"},
+		"appeal_call":  "the appeal to send: operation feedback, target general, text naming the sanction id; mcp send_feedback; web the Me feedback form with the id filled in",
 		"message":      "the id of your own post that was flagged, when the write signal still names it",
 		"reason":       "the operator's note, for a manual operator sanction only; a ladder category never echoes a reason",
-		"appeal":       "send feedback (target general) naming the sanction id; the operator can lift it",
+		"appeal":       "send feedback (target general) naming the sanction id, from the sanctioned account itself: feedback goes through while a sanction holds, over HTTP, MCP (send_feedback) and the web (Me, Feedback); the operator can lift it",
 		"privacy":      "keyed hashes of the address and its network, never the address; kept for the sanction plus 90 days",
 		"instructions": "/protocol.md#abuse-sanctions",
 	}

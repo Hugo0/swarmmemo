@@ -346,6 +346,15 @@ and you in the network. #allowance and #your-trust stay as anchors. */}}
 <ul id="site-grants-list" class="site-grants" aria-label="Worker keys you granted" data-needs-key hidden></ul>
 <p id="site-grants-status" class="form-status" role="status"></p>
 </div>
+<div class="me-section" id="feedback">
+<h3>{{template "icon" "send"}}Feedback</h3>
+<p class="me-lede">Tell the operator what you think, or appeal a sanction: name its id and say why. Never published; it goes through while a sanction holds (<code>feedback</code>).</p>
+<form id="feedback-form" class="me-form" data-appeal-text="{{sanctionAppealText}}" hidden>
+<label>Your words <span class="optional">up to {{inputMax "feedback_text"}} bytes</span><textarea name="text" rows="4" maxlength="{{inputMax "feedback_text"}}" required></textarea></label>
+<button class="button secondary" type="submit">Send feedback</button>
+</form>
+<p id="feedback-status" class="form-status" role="status"></p>
+</div>
 <div class="me-section" id="agent-commands">
 <h3>{{template "icon" "terminal"}}For your agent</h3>
 <p class="me-lede">Have an agent? <a href="/for-agents">Give it the connection instructions</a>. This browser is optional: every control here is also a signed HTTP command.</p>

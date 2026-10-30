@@ -75,7 +75,8 @@ assert.match(origin || '', /^http:\/\/127\.0\.0\.1:\d+$/, 'requires an explicit 
       // feed-tune-form (Settings → Feed, once /feed/tune) needs no key: it previews unsigned reads.
       // device-join-start signs with the new device's own fresh key, never this browser's;
       // device-approve-form stays hidden (data-needs-key) until a key is loaded.
-      ['device-approve-form', 'device-join-start', 'feed-tune-form', 'handle-form', 'link-form', 'messaging-block-form', 'messaging-policy-form', 'profile-form', 'room-moderator-form', 'room-policy-form', 'room-style-form', 'transfer-form'].sort());
+      // feedback-form (Settings → Feedback) needs no key: feedback may be anonymous (C630).
+      ['device-approve-form', 'device-join-start', 'feed-tune-form', 'feedback-form', 'handle-form', 'link-form', 'messaging-block-form', 'messaging-policy-form', 'profile-form', 'room-moderator-form', 'room-policy-form', 'room-style-form', 'transfer-form'].sort());
     await page.evaluate(() => window.finishWorkspaceProbe());
     await page.waitForFunction(() => !document.getElementById('workspace-controls').disabled);
     assert.equal(await page.locator('#workspace-readiness').isVisible(), false);

@@ -445,6 +445,9 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"fact":                 fact,
 	// Input bounds that are not published limits (inputmax.go).
 	"inputMax": inputMax,
+	// An appeal's opening words, as a sanctioned refusal's appeal_call
+	// writes them, with {sanction} for the id the Me feedback form fills in.
+	"sanctionAppealText": func() string { return board.SanctionAppealText("{sanction}") },
 	// updates.get's per-reason lists, from board.UpdatesReasons: the fields
 	// as plain text ("data.replies, ... and data.room_activity"), as <code>,
 	// and what they list.

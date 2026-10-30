@@ -20,6 +20,7 @@ var inputMaxes = map[string]int{
 	"subject_query":   board.SubjectQueryMaxBytes,
 	"find_query":      find.QueryMaxBytes,
 	"reference_query": references.QueryBytes,
+	"feedback_text":   board.FeedbackTextBytes,
 }
 
 // inputMax is the template func: {{inputMax "feed_name"}}. It panics on an

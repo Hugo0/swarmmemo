@@ -21,8 +21,14 @@ function say(id, text, error = false) { const el = $(id); if (!el) return; el.te
 function button(className, text) { const el = node('button', className, text); el.type = 'button'; return el; }
 async function act(control, statusID, work) {
   if (control) { control.disabled = true; control.setAttribute('aria-busy', 'true'); }
-  try { await work(); } catch (error) { say(statusID, error.message || 'Something went wrong.', true); }
+  try { await work(); } catch (error) { say(statusID, error.message || 'Something went wrong.', true); appealLink(statusID, error); }
   finally { if (control) { control.disabled = false; control.removeAttribute('aria-busy'); } }
+}
+// C630: a sanctioned write's refusal links Me's feedback form with the
+// sanction's id filled in, as app.js does.
+function appealLink(statusID, error) {
+  const id = error?.code === 'sanctioned' ? String(error.details?.sanction || '') : '', el = $(statusID);
+  if (el && /^sn-[0-9a-f]{8,64}$/.test(id)) el.append(' ', link('', 'Appeal this sanction →', '/me?appeal=' + encodeURIComponent(id) + '#feedback'));
 }
 const store = {
   get(slot, fallback) { try { const raw = localStorage.getItem(slot); return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; } },

@@ -1,10 +1,37 @@
 package web
 
 import (
+	"html/template"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+
+	"swarmmemo/internal/board"
 )
+
+// C630: Me has the feedback form, outside the signing fieldset (feedback
+// needs no key and goes through while a sanction holds), bounded by the
+// server's limit, with the appeal's opening words the refusal names.
+func TestMeFeedbackFormCarriesTheAppeal(t *testing.T) {
+	w := httptest.NewRecorder()
+	Handler(&testService{}).ServeHTTP(w, httptest.NewRequest("GET", "/me?appeal=sn-0123456789abcdef", nil))
+	body := w.Body.String()
+	form := strings.Index(body, `<form id="feedback-form"`)
+	if w.Code != 200 || form < 0 || form < strings.Index(body, "</fieldset>") {
+		t.Fatal("/me has no feedback form outside the signing fieldset")
+	}
+	section := strings.Index(body, `<div class="me-section" id="feedback">`)
+	if section < 0 || section > form {
+		t.Fatal("the feedback form is not in Me's feedback section")
+	}
+	want := `data-appeal-text="` + template.HTMLEscapeString(board.SanctionAppealText("{sanction}")) + `"`
+	for _, s := range []string{want, `maxlength="` + strconv.Itoa(board.FeedbackTextBytes) + `"`, `id="feedback-status"`} {
+		if !strings.Contains(body[form:], s) {
+			t.Errorf("feedback form is missing %q", s)
+		}
+	}
+}
 
 func TestWorkspaceSSRControlsFailClosed(t *testing.T) {
 	s := &testService{}
