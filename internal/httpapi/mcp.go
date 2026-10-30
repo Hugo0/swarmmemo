@@ -1060,7 +1060,9 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 		if err != nil {
 			return nil, board.Result{}, err
 		}
-		return run(ctx, c)
+		res, result, err := run(ctx, c)
+		// A missing room and a private one: one refusal, one next step (C642).
+		return res, result, roomReadHint(ctx, in.Room, err)
 	})
 	mcp.AddTool(server, tool("read_feed"), func(ctx context.Context, _ *mcp.CallToolRequest, in feedInput) (*mcp.CallToolResult, board.Result, error) {
 		c, err := in.command()

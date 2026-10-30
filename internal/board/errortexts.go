@@ -29,7 +29,19 @@ func ErrFeatureOff() *Error {
 	return &Error{Status: 503, Code: "service_unavailable", Message: "This feature is not enabled on this service; /capabilities says what is."}
 }
 
-func errRoomNotFound() error { return problem(404, "not_found", "Room not found.") }
+func errRoomNotFound() error { return problem(404, "not_found", roomNotFoundText) }
+
+// roomNotFoundText is roomAccess's refusal, the same for a room that does
+// not exist and one private to the caller (no existence oracle).
+const roomNotFoundText = "Room not found."
+
+// IsRoomNotFound reports a room refused as roomAccess refuses it: a missing
+// room and one private to the caller alike, never another not_found (an
+// agent, a page, a message).
+func IsRoomNotFound(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Code == "not_found" && e.Message == roomNotFoundText
+}
 
 func errCursorNextPage() error {
 	return problem(400, "invalid_cursor", "cursor is the next_cursor of the previous page.")

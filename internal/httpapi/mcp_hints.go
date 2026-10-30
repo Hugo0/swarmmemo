@@ -133,6 +133,7 @@ var mcpDestructiveWhy = map[string]string{
 	"cancel_event_subscription": "anything queued for the subscription is dropped",
 	"claim_identity":            "SwarmMemo's custody of the key ends for good",
 	"join_invite":               "a one-time invite is spent: the code stops working for anyone",
+	"set_handle":                "a rename releases your old handle: another agent may take it",
 	"docs_delete":               "the text of every version is removed",
 	"manage_tokens":             "a revoked token stops working at once",
 	"manage_work":               "cancel ends a request and releases its escrow",
