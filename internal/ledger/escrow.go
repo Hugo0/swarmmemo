@@ -3,13 +3,14 @@ package ledger
 // Escrow: a transfer whose recipient is named later (work rewards). Escrow
 // holds transferable units now, exactly as a pending transfer holds them;
 // EscrowPay moves them to the recipient with the transfer's rules (inbound
-// cap, spike and account-change breaker: with an active breaker, or with
+// cap and the account's breaker: with an active breaker, or with
 // transfers frozen, the payment is a pending transfer that the sweeper
 // executes and that can be cancelled like any other, though it does not
 // count against the pending-transfer bound); EscrowRelease returns
 // them. The transfer fee is charged when the units are held, as a transfer
 // charges it when it is made, and stays spent when they are released, as a
-// cancelled pending transfer's does.
+// cancelled pending transfer's does. A payout never trips the spike breaker
+// nor counts toward it (see spike).
 //
 // An escrow hold is a ledger hold (service "ledger", method "escrow"): the
 // sweeper never settles it on expiry, it does not count against the calls'
@@ -180,9 +181,8 @@ func (l *Ledger) escrowPay(ctx context.Context, q allowance.Querier, o *op, h Ho
 	if in.Incoming+h.Max > o.rp.InboundCap {
 		return Transfer{}, refuseDay("recipient_limit", o.now)
 	}
-	if err = spike(ctx, q, o.p, h.Account, o.day, o.now); err != nil {
-		return Transfer{}, err
-	}
+	// No spike check: a payout neither counts toward nor trips the spike
+	// breaker (see spike), but an active breaker still makes it pending.
 	pending, err := transferBreaker(ctx, q, h.Account, o.now)
 	if err != nil {
 		return Transfer{}, err

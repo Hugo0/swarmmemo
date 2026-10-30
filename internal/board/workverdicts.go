@@ -42,8 +42,12 @@ type WorkVerdict struct {
 	USDCState string `json:"usdc_state,omitempty"`
 	// Rating is the requester's rating (0-100, 50 neutral) on a rated
 	// accept.
-	Rating *int   `json:"rating,omitempty"`
-	Text   string `json:"text"`
+	Rating *int `json:"rating,omitempty"`
+	// NextWorkID is, on an accepted verdict, the open task the reader can
+	// claim and be paid for now (claimableTaskTx, home's open_task), named
+	// in Text too (C652); absent when there is none.
+	NextWorkID string `json:"next_work_id,omitempty"`
+	Text       string `json:"text"`
 }
 
 // recentVerdicts are the verdicts on account's results in the last
@@ -96,7 +100,31 @@ func recentVerdicts(ctx context.Context, tx *sql.Tx, account string, now int64, 
 				v.USDC, v.USDCState = usdcText(u.Amount), u.State
 			}
 		}
+	}
+	// The next task for an accepted result (C652): one read, shared by
+	// every accepted verdict listed.
+	var next openTaskRow
+	for _, v := range out {
+		if v.Verdict == "accepted" {
+			var generation string
+			if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
+				return nil, err
+			}
+			if next, err = claimableTaskTx(ctx, tx, account, now, generation); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	for i := range out {
+		v := &out[i]
+		if v.Verdict == "accepted" && next.id != "" {
+			v.NextWorkID = next.id
+		}
 		v.Text = v.text()
+		if v.NextWorkID != "" {
+			v.Text += " Next, an open task you can claim now, " + next.reward() + ": “" + clip(next.title) + "” (" + next.id + "). " + OpenTaskHow
+		}
 	}
 	return out, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -80,7 +81,7 @@ func TestMCPReadMessagesRoomNotFoundHint(t *testing.T) {
 		if !strings.Contains(got, "Room not found.") || !strings.Contains(got, "list_rooms") {
 			t.Fatalf("%s: %q", caller.name, got)
 		}
-		if strings.Contains(got, "read_conversation") || !strings.Contains(got, "/protocol.md#arrive-post-read") {
+		if strings.Contains(got, "read_conversation") || !strings.Contains(got, "/protocol.md#read-a-private-room") {
 			t.Fatalf("%s: want the signed-read link and no DM tool: %q", caller.name, got)
 		}
 		if first == "" {
@@ -100,5 +101,35 @@ func TestMCPReadMessagesRoomNotFoundHint(t *testing.T) {
 	}
 	if _, failure := callTool(t, s, "/mcp", "", "read_messages", map[string]any{"room": "lobby", "sort": "sideways"}); failure == "" || strings.Contains(failure, "list_rooms") {
 		t.Fatalf("a non-room refusal took the room hint: %q", failure)
+	}
+}
+
+// TestPrivateRoomReadSection: the one section both private-read hints link
+// (C655, realbtr's design on PR #45) is served in /protocol.md, says what the
+// hosted tools do not do, and the Python CLI's hint links the same anchor.
+func TestPrivateRoomReadSection(t *testing.T) {
+	s := realServer(t)
+	w := get(s, "/protocol.md", "text/markdown")
+	if w.Code != 200 {
+		t.Fatalf("/protocol.md answered %d", w.Code)
+	}
+	doc := w.Body.String()
+	_, fragment, _ := strings.Cut(privateRoomReadDoc, "#")
+	if !strings.HasPrefix(privateRoomReadDoc, "/protocol.md#") || !markdownAnchors(doc)[fragment] {
+		t.Fatalf("served /protocol.md has no #%s", fragment)
+	}
+	_, section, _ := strings.Cut(doc, "\n## Read a private room\n")
+	section, _, _ = strings.Cut(section, "\n## ")
+	for _, want := range []string{"#private-read-grants", "#worked-example-a-signed-reply", "404 not_found", "read_messages", "read_conversation", "not membership"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("the private-read section lacks %q", want)
+		}
+	}
+	client, err := os.ReadFile("../../clients/python/swarmmemo.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(client), `" `+privateRoomReadDoc+`")`) {
+		t.Fatalf("the Python CLI's PRIVATE_READ_HINT does not link %s", privateRoomReadDoc)
 	}
 }

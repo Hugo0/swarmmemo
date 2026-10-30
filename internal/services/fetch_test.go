@@ -2,8 +2,10 @@ package services_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"unicode/utf8"
 	"time"
+	"unicode/utf8"
 
 	"swarmmemo/internal/allowance"
 	"swarmmemo/internal/safenet"
@@ -419,11 +421,11 @@ func TestFetchRefusesWhatItMustNot(t *testing.T) {
 // page body (FetchBodyBytes, every caller) and the text returned (max_bytes).
 func TestFetchTruncationNamesTheCeiling(t *testing.T) {
 	s := newSite(t, false, map[string]http.HandlerFunc{
-		// Body over 256 KiB but a tiny text: the script is dropped, so only
-		// the body cap cut it.
+		// Body over the HTML read cap (2 MiB) but a tiny text: the script
+		// is dropped, so only the body cap cut it.
 		"/bodyonly": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprint(w, "<html><body><p>tiny</p><script>"+strings.Repeat("x", 300<<10)+"</script></body></html>")
+			fmt.Fprint(w, "<html><body><p>tiny</p><script>"+strings.Repeat("x", services.FetchHTMLBodyBytes+(100<<10))+"</script></body></html>")
 		},
 		// Read whole (under 256 KiB) but longer than 96 KiB of text: only the
 		// text cap cut it.
@@ -434,13 +436,13 @@ func TestFetchTruncationNamesTheCeiling(t *testing.T) {
 	})
 	r := newFetchRig(t, s, fetchOpts{})
 
-	// The page body cap: raw_bytes and page_bytes are the 256 KiB ceiling,
+	// The page body cap: raw_bytes and page_bytes are the HTML ceiling,
 	// truncated_by is ["body"], and a bigger max_bytes would not help.
 	body := get(r.must("alice", map[string]any{"url": "http://site.test/bodyonly", "screen": false, "max_bytes": services.FetchTextMax}), "result").(map[string]any)
 	if body["truncated"] != true || !sameStrings(body["truncated_by"], "body") {
 		t.Fatalf("body cap: truncated %v by %v", body["truncated"], body["truncated_by"])
 	}
-	if body["body_limit_bytes"] != float64(services.FetchBodyBytes) || body["raw_bytes"] != float64(services.FetchBodyBytes) || body["page_bytes"] != float64(services.FetchBodyBytes) {
+	if body["body_limit_bytes"] != float64(services.FetchHTMLBodyBytes) || body["raw_bytes"] != float64(services.FetchHTMLBodyBytes) || body["page_bytes"] != float64(services.FetchHTMLBodyBytes) {
 		t.Fatalf("body cap sizes: %+v", body)
 	}
 	if body["text_limit_bytes"] != float64(services.FetchTextMax) {
@@ -732,10 +734,10 @@ func TestFetchOffsetPagesThroughTheText(t *testing.T) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			fmt.Fprint(w, "<html><head><style>"+strings.Repeat("a{b:c}", 20<<10)+"</style></head><body><nav>"+strings.Repeat("<a href=/x>menu</a>", 2000)+"</nav><p>GDP "+strings.Repeat("growth ", 12000)+"end.</p></body></html>")
 		},
-		// The text starts past the body cap: the note says so.
+		// The text starts past the HTML body cap: the note says so.
 		"/late": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprint(w, "<html><head><script>"+strings.Repeat("x", 300<<10)+"</script></head><body><p>late</p></body></html>")
+			fmt.Fprint(w, "<html><head><script>"+strings.Repeat("x", services.FetchHTMLBodyBytes)+"</script></head><body><p>late</p></body></html>")
 		},
 	})
 	r := newFetchRig(t, s, fetchOpts{})
@@ -811,7 +813,7 @@ func TestFetchOffsetPagesThroughTheText(t *testing.T) {
 	}
 	// No text before the body cap: the note says why.
 	text, res = page("carol", noScreen("http://site.test/late"))
-	if text != "" || !strings.Contains(res["note"].(string), "No text in the first 256 KiB of this page") {
+	if text != "" || !strings.Contains(res["note"].(string), "No text in the first 2 MiB of this page") {
 		t.Fatalf("late text: %q %v", text, res["note"])
 	}
 
@@ -843,5 +845,63 @@ func TestFetchOffsetPagesThroughTheText(t *testing.T) {
 	}
 	if _, err = anon(map[string]any{"url": "http://site.test/long", "offset": 16 << 10, "max_bytes": 16384}); code(err) != "invalid_service_data" {
 		t.Fatalf("anonymous cap with offset: %v", err)
+	}
+}
+
+// An HTML page is read past FetchBodyBytes while its text is short, up to
+// FetchHTMLBodyBytes (C653): a page whose inline <head> of styles and
+// scripts runs to ~900 KB (the Atlanta Fed's GDPNow page) returns its body's
+// text. A wordy page stops early, a huge one at the hard cap, and every
+// other type keeps the 256 KiB read. raw_sha256 hashes exactly what was read.
+func TestFetchReadsPastAnInlineHead(t *testing.T) {
+	gdp := "<html><head><style>" + strings.Repeat("a{b:c}", 450<<10/6) + "</style><script>" + strings.Repeat("var x=1;", 450<<10/8) +
+		"</script></head><body><h1>GDPNow</h1><p>The GDPNow model estimate for real GDP growth is 3.1 percent.</p></body></html>"
+	huge := "<html><head><script>" + strings.Repeat("y", 3<<20) + "</script></head><body><p>never reached</p></body></html>"
+	wordy := "<html><body>" + strings.Repeat("<p>words of text here</p>", 1<<20/25) + "</body></html>"
+	plain := strings.Repeat("p", 3<<20)
+	serve := func(ct, doc string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", ct)
+			w.Write([]byte(doc))
+		}
+	}
+	s := newSite(t, false, map[string]http.HandlerFunc{
+		"/gdp":   serve("text/html; charset=utf-8", gdp),
+		"/huge":  serve("text/html; charset=utf-8", huge),
+		"/wordy": serve("text/html", wordy),
+		"/plain": serve("text/plain; charset=utf-8", plain),
+	})
+	r := newFetchRig(t, s, fetchOpts{})
+	hash := func(b string) string { sum := sha256.Sum256([]byte(b)); return hex.EncodeToString(sum[:]) }
+	fetch := func(account, path string) map[string]any {
+		t.Helper()
+		return get(r.must(account, map[string]any{"url": "http://site.test" + path, "screen": false, "max_bytes": services.FetchTextMax}), "result").(map[string]any)
+	}
+
+	res := fetch("alice", "/gdp")
+	if text, _ := res["text"].(string); !strings.Contains(text, "3.1 percent") || res["truncated"] != false {
+		t.Fatalf("gdp: %q %+v", text, res["truncated_by"])
+	}
+	if res["raw_bytes"] != float64(len(gdp)) || res["page_bytes"] != float64(len(gdp)) || res["raw_sha256"] != hash(gdp) || res["body_limit_bytes"] != float64(services.FetchHTMLBodyBytes) {
+		t.Fatalf("gdp sizes: raw %v page %v limit %v", res["raw_bytes"], res["page_bytes"], res["body_limit_bytes"])
+	}
+
+	res = fetch("bob", "/huge")
+	if res["truncated"] != true || !sameStrings(res["truncated_by"], "body") || res["raw_bytes"] != float64(services.FetchHTMLBodyBytes) || res["raw_sha256"] != hash(huge[:services.FetchHTMLBodyBytes]) {
+		t.Fatalf("huge: %+v raw %v", res["truncated_by"], res["raw_bytes"])
+	}
+	if !strings.Contains(res["note"].(string), "No text in the first 2 MiB of this page") {
+		t.Fatalf("huge note: %v", res["note"])
+	}
+
+	// Enough text by 512 KiB: the read stops there, not at the hard cap.
+	res = fetch("carol", "/wordy")
+	if res["truncated"] != true || res["raw_bytes"] != float64(2*services.FetchBodyBytes) || res["text_bytes"].(float64) < services.FetchBodyBytes {
+		t.Fatalf("wordy: raw %v text %v by %v", res["raw_bytes"], res["text_bytes"], res["truncated_by"])
+	}
+
+	res = fetch("dave", "/plain")
+	if res["raw_bytes"] != float64(services.FetchBodyBytes) || res["body_limit_bytes"] != float64(services.FetchBodyBytes) || !sameStrings(res["truncated_by"], "body", "text") || res["raw_sha256"] != hash(plain[:services.FetchBodyBytes]) {
+		t.Fatalf("plain: raw %v limit %v by %v", res["raw_bytes"], res["body_limit_bytes"], res["truncated_by"])
 	}
 }

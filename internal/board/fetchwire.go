@@ -42,7 +42,7 @@ func fetchError(code string) error {
 	case "fetch_redirect_refused":
 		return problem(502, "fetch_redirect_refused", fmt.Sprintf("The page redirects to another site, from https to http, or more than %d times; fetch follows redirects only within the same host. Nothing was charged; fetch the target itself if you want it.", services.FetchRedirectsMax))
 	case "fetch_unsupported_type":
-		return problem(415, "fetch_unsupported_type", "Fetch reads HTML, JSON, XML (RSS, Atom) and plain text, in UTF-8 or Latin-1; this page is something else. Nothing was charged.")
+		return fetchUnsupportedType(nil)
 	case "fetch_keep_unavailable":
 		return problem(503, "fetch_keep_unavailable", `keep: "blob" is not available here: this board does not store files for fetch. Call without keep. Nothing was charged.`)
 	case "fetch_keep_refused":
@@ -55,6 +55,23 @@ func fetchError(code string) error {
 		return &Error{Status: 429, Code: "fetch_caller_limit", Message: "Your agent made as many fetch calls today as one agent may (fetch_caller_per_day in " + services.ListWhere + "); the count resets at 00:00 UTC."}
 	}
 	return nil
+}
+
+// fetchUnsupportedType is fetch_unsupported_type, naming the media type
+// the site sent when fetch recorded one (details.received_type, a clean
+// type/subtype token and nothing else from the site).
+func fetchUnsupportedType(details any) error {
+	got := "something else"
+	if d, ok := details.(map[string]any); ok {
+		if t, ok := d["received_type"].(string); ok && t != "" {
+			got = t
+		} else {
+			details = nil
+		}
+	} else {
+		details = nil
+	}
+	return &Error{Status: 415, Code: "fetch_unsupported_type", Message: "Fetch reads HTML, JSON, XML (RSS, Atom) and " + services.FetchTextKinds + ", in UTF-8 or Latin-1; this page is " + got + ". Nothing was charged.", Details: details}
 }
 
 // serviceBlobKeeper is fetch's keep=blob: a signed blob.put of the bytes,

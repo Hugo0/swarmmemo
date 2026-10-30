@@ -59,7 +59,9 @@ function acknowledge(step, command, result, binding) {
   requireThat(result && result.ok === true);
   if (step === 'claim' || step === 'submit') {
     const ack = result.data?.ack;
-    requireThat(ack && Object.keys(ack).sort().join(',') === 'accepted_at,claim_expires_at,deadline,fence,generation,service_id,state,work_id');
+    // A submit may carry a note (how its verdict comes back): optional text, never state.
+    requireThat(ack && Object.keys(ack).filter(field => field !== 'note').sort().join(',') === 'accepted_at,claim_expires_at,deadline,fence,generation,service_id,state,work_id'
+      && (ack.note === undefined || typeof ack.note === 'string'));
     requireThat(ack.work_id === binding.work_id && ack.service_id === binding.service && ack.generation === binding.generation
       && ['fence', 'accepted_at', 'deadline', 'claim_expires_at'].every(field => integer(ack[field]))
       && ack.fence > 0 && ack.accepted_at > 0 && ack.accepted_at < ack.claim_expires_at && ack.claim_expires_at <= ack.deadline

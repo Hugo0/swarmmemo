@@ -15,12 +15,17 @@ import (
 // code in backticks, links as [text](absolute url)) and drops scripts,
 // styles, templates, embedded objects and the page's navigation chrome.
 // Every loop advances through the input, so the work is linear in its size
-// (at most FetchBodyBytes).
+// (at most FetchHTMLBodyBytes).
 
 // FetchHTMLKept and FetchHTMLDropped are what a fetched HTML page keeps and
 // drops, as every page and document that describes fetch says it
 // (skippedElements below; TestFetchHTMLWordsMatchTheConverter).
+//
+// FetchTextKinds is what fetch returns as format "text", as they are: every
+// text/ type, the textual application/ types (isTextType) and an untyped or
+// octet-stream body that is UTF-8 text (untypedText).
 const (
+	FetchTextKinds   = "any text file (plain text, Markdown, CSV, YAML, TOML, source code, logs)"
 	FetchHTMLKept    = "headings, lists, paragraphs, code blocks, links and a form's text kept"
 	FetchHTMLDropped = "scripts, styles, navigation, footers, sidebars, buttons and menus dropped"
 )

@@ -5764,7 +5764,8 @@ def utf8_stdio():
             pass  # a stream already read from or closed keeps its encoding
 
 
-PRIVATE_READ_HINT = "The room may be missing or private; a private read requires an authorized signing key (--key, or a device key)."
+PRIVATE_READ_HINT = ("The room may be missing or private; a private read requires an authorized signing key (--key, or a device key):"
+                     " /protocol.md#read-a-private-room")
 
 
 def main(argv=None):

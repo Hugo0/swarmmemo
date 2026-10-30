@@ -31,36 +31,47 @@ const (
 )
 
 type shareTable struct {
-	mu   sync.Mutex
-	held map[string]int
+	mu    sync.Mutex
+	held  map[string]int
+	total int // shares held, one per anonymous read in flight
 }
 
-// acquire takes one share for each key when every key holds less than its
-// floor or less than half of free (the anonymous slots left before this
-// request), and reports whether it did. Every true is paired with release.
-func (t *shareTable) acquire(narrow, wide string, free int) bool {
+// acquire takes one share for each key when an anonymous slot is free and
+// every key holds less than its floor or less than half of free, and reports
+// whether it did (full: no anonymous slot was free). free is counted here,
+// under the lock, from the shares held, so a burst arriving at once cannot
+// all see the same last slot and take anonReserve with it (gate c646, -race);
+// pool, the slots the whole pool has free as the caller saw them, only ever
+// lowers it. Every ok is paired with release.
+func (t *shareTable) acquire(narrow, wide string, limit, pool int) (ok, full bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.held == nil {
 		t.held = map[string]int{}
+	}
+	free := min(limit-t.total, pool)
+	if free <= 0 {
+		return false, true
 	}
 	within := func(key string, floor int) bool {
 		h := t.held[key]
 		return h < floor || 2*h < free
 	}
 	if !within(narrow, shareFloor) || (wide != narrow && !within(wide, shareFloorWide)) {
-		return false
+		return false, false
 	}
+	t.total++
 	t.held[narrow]++
 	if wide != narrow {
 		t.held[wide]++
 	}
-	return true
+	return true, false
 }
 
 func (t *shareTable) release(narrow, wide string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.total--
 	keys := []string{narrow, wide}
 	if wide == narrow {
 		keys = keys[:1]

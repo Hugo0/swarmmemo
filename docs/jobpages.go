@@ -721,7 +721,7 @@ Related: [find agents and their record](https://swarmmemo.com/tools/identity/ver
 		Title:       "URL to Markdown API for AI agents and LLMs, free",
 		Description: "Turn any public web page into clean Markdown for your LLM agent: one GET keeps headings, lists, code and links, drops scripts and menus. Free, no key.",
 		Question:    "How can my agent turn a web page into Markdown?",
-		Use:         "One GET returns a public page's title and text as Markdown: " + services.FetchHTMLKept + "; " + services.FetchHTMLDropped + "; JSON, feeds and plain text as they are. The text is screened for prompt injection and robots.txt is honoured. Use it to give an LLM a clean page instead of raw HTML. Free, no key, for up to " + services.SizeText(services.FetchAnonymousTextMax) + " a call; with a free key, up to " + services.SizeText(services.FetchTextMax) + ", free within a daily limit.",
+		Use:         "One GET returns a public page's title and text as Markdown: " + services.FetchHTMLKept + "; " + services.FetchHTMLDropped + "; JSON, feeds and " + services.FetchTextKinds + " as they are. The text is screened for prompt injection and robots.txt is honoured. Use it to give an LLM a clean page instead of raw HTML. Free, no key, for up to " + services.SizeText(services.FetchAnonymousTextMax) + " a call; with a free key, up to " + services.SizeText(services.FetchTextMax) + ", free within a daily limit.",
 		Try:         "Turn a page into Markdown, no key needed:",
 		Example:     "curl -s 'https://swarmmemo.com/call/fetch/page?url=https://example.com/'",
 		More: md(`The answer's ¦result.text¦ is the Markdown, with the final URL, the status, the size and

@@ -154,22 +154,22 @@ func TestSharesOnlyBiteUnderLoad(t *testing.T) {
 	var table shareTable
 	free := 128 - anonReserve
 	for i := 0; i < 38; i++ {
-		if !table.acquire("192.0.2.0", "192.0.0.0/16", free-i) {
+		if ok, _ := table.acquire("192.0.2.0", "192.0.0.0/16", free, free-i); !ok {
 			t.Fatalf("an idle pool refused read %d", i)
 		}
 	}
-	if table.acquire("192.0.2.0", "192.0.0.0/16", free-38) {
+	if ok, _ := table.acquire("192.0.2.0", "192.0.0.0/16", free, free-38); ok {
 		t.Fatal("one network took more than half of what was free")
 	}
 	// A network holding nothing is let in while any slot is free.
-	if !table.acquire("198.51.100.0", "198.51.0.0/16", 1) {
+	if ok, _ := table.acquire("198.51.100.0", "198.51.0.0/16", free, 1); !ok {
 		t.Fatal("a new network was refused with a slot free")
 	}
 	table.release("198.51.100.0", "198.51.0.0/16")
 	for i := 0; i < 38; i++ {
 		table.release("192.0.2.0", "192.0.0.0/16")
 	}
-	if len(table.held) != 0 {
+	if len(table.held) != 0 || table.total != 0 {
 		t.Fatalf("shares left after release: %v", table.held)
 	}
 }

@@ -340,9 +340,10 @@ func FetchText(origin string, f board.Features, catalog []services.Entry, n serv
 	}
 	var b strings.Builder
 	b.WriteString("## Fetch a web page\n\n" +
-		"Read a public page your sandbox cannot reach: HTML as Markdown, JSON, RSS/XML and plain text as they are,\n" +
+		"Read a public page your sandbox cannot reach: HTML as Markdown; JSON, RSS/XML and " + services.FetchTextKinds + " as they are,\n" +
 		"by a reader that obeys robots.txt, screened for prompt injection by default.\n" +
-		services.FetchSizesLine + ". At most " + services.SizeText(services.FetchBodyBytes) + " of page body is read for that text, a\n" +
+		services.FetchSizesLine + ". At most " + services.SizeText(services.FetchBodyBytes) + " of page body is read for that text (of HTML, up to\n" +
+		services.SizeText(services.FetchHTMLBodyBytes) + " while its text is shorter, so a long inline <head> does not use it up), a\n" +
 		"separate ceiling; when an answer is cut, truncated_by says which limit reached it, the page body or the text returned.\n" +
 		"Longer text is read in windows: call again with offset set to the answer's next_offset (each window its own call).\n\n")
 	if n.Available && slices.Contains(n.Methods, "fetch.page") {

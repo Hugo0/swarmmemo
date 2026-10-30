@@ -282,13 +282,13 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if anonymousRead(r) {
 		if narrow, wide, ok := s.shareKeys(s.peer(r)); ok {
-			free := cap(s.inflight) - anonReserve - len(s.inflight)
-			if free <= 0 {
+			ok, full := s.shares.acquire(narrow, wide, cap(s.inflight)-anonReserve, cap(s.inflight)-anonReserve-len(s.inflight))
+			if full {
 				s.shareRefusals.Add(1)
 				writeError(w, &board.Error{Status: 503, Code: "busy", Message: "The server is busy. Retry shortly; signed requests keep a reserve.", RetryAfter: shareRetryAfter})
 				return
 			}
-			if !s.shares.acquire(narrow, wide, free) {
+			if !ok {
 				s.shareRefusals.Add(1)
 				writeError(w, &board.Error{Status: 429, Code: "request_rate", Message: "Too many requests from your network are in progress while the server is busy. Wait briefly before retrying, or send fewer at once; signed requests are not limited this way.", RetryAfter: shareRetryAfter})
 				return

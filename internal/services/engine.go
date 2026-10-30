@@ -754,7 +754,15 @@ func (e *Engine) settle(ctx context.Context, account, callID, jobID string, res 
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
-	return row.view()
+	out, err := row.view()
+	// A refusal's structured details (fetch_unsupported_type's
+	// received_type) reach the caller of this run; the stored row keeps the
+	// code alone, so a retry answers without them.
+	var ve, ae *allowance.Err
+	if errors.As(err, &ve) && errors.As(runErr, &ae) && ae.Details != nil && ae.Code == ve.Code {
+		ve.Details = ae.Details
+	}
+	return out, err
 }
 
 // storedBodyMax is the largest result the service's call record keeps.

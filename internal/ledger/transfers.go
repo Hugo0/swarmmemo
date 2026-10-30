@@ -66,10 +66,24 @@ func transferBreaker(ctx context.Context, q allowance.Querier, account string, n
 	return n > 0, err
 }
 
-// spike trips the breaker when today's outbound transfers, this one included,
-// exceed max(spike_x × the 30-day median, spike_floor).
+// spike trips the breaker when today's plain outbound transfers, this one
+// included, exceed max(spike_x × the 30-day median, spike_floor).
+//
+// Escrow payouts (accepted work rewards, reviewer fees) are left out of both
+// today's count and the median, and EscrowPay never calls spike: a payout
+// releases a hold taken into escrow earlier, on a public work item, and is
+// made on a public verdict on a submitted result. That is not the fast drain
+// through plain transfers the breaker guards a stolen key against; draining
+// that way would take visible work items and a second account to submit to.
+// An active breaker, tripped by plain transfers or another account change,
+// or frozen transfers, still make escrow payouts pending (escrowPay).
+// A payout is a ledger_transfers row whose hold_id is an escrow hold; a
+// plain transfer's hold_id is empty or its own "transfer" hold.
 func spike(ctx context.Context, q allowance.Querier, p *AllowanceParams, account string, day, now int64) error {
-	rows, err := q.QueryContext(ctx, "SELECT created_at/86400,count(*) FROM ledger_transfers WHERE from_account=? AND created_at>=? GROUP BY created_at/86400 LIMIT 31", account, (day-30)*86400)
+	rows, err := q.QueryContext(ctx, `SELECT t.created_at/86400,count(*) FROM ledger_transfers t
+		WHERE t.from_account=? AND t.created_at>=?
+		AND NOT EXISTS (SELECT 1 FROM ledger_holds h WHERE h.id=t.hold_id AND h.service=? AND h.method=?)
+		GROUP BY t.created_at/86400 LIMIT 31`, account, (day-30)*86400, ledgerService, escrowMethod)
 	if err != nil {
 		return err
 	}

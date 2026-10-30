@@ -151,7 +151,7 @@ func FuzzRobots(f *testing.F) {
 // The converter's work is linear in the page: adversarial pages of the
 // largest size a fetch reads convert quickly.
 func TestHTMLToTextIsLinear(t *testing.T) {
-	n := services.FetchBodyBytes
+	n := services.FetchHTMLBodyBytes
 	for name, doc := range map[string]string{
 		"open tags":    strings.Repeat("<p>", n/3),
 		"open links":   strings.Repeat("<a href=x>y", n/11),

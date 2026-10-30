@@ -38,6 +38,7 @@ class PrivateReadHint(unittest.TestCase):
         error, made = self.run_cli(["read", "secret-room"])
         self.assertEqual(error["error"], "not_found")
         self.assertEqual(error["hint"], memo.PRIVATE_READ_HINT)
+        self.assertTrue(error["hint"].endswith("/protocol.md#read-a-private-room"))
         self.assertEqual(set(error) - {"hint"}, {"error", "message", "retry_after", "next_open_at"})
         self.assertNotIn("key.json", made)
 

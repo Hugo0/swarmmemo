@@ -68,8 +68,8 @@ func TestRequesterRecordCountsAndLapse(t *testing.T) {
 		id  string
 	}{{a, paid}, {b, rejected}, {c, cancelled}, {a, lapsed}, {puppet, puppetWork}, {signedPuppet, signedWork}, {q, qWork}, {b, reviewed}, {b, reviewedShort}} {
 		ack := submitResult(t, s, w.key, w.id)
-		if ack.Note != "" {
-			t.Fatalf("a requester with a clean record gets a note: %q", ack.Note)
+		if strings.Contains(ack.Note, "unpaid") || !strings.HasPrefix(ack.Note, "Your result waits for the requester's verdict") {
+			t.Fatalf("a requester with a clean record gets an unpaid warning: %q", ack.Note)
 		}
 		fences[w.id] = ack.Fence
 	}
@@ -160,7 +160,7 @@ func TestRequesterRecordCountsAndLapse(t *testing.T) {
 	// The next worker is warned on submit.
 	next := create(0)
 	ack := submitResult(t, s, c, next)
-	if !strings.Contains(ack.Note, "has left 4 results unpaid") || !strings.Contains(ack.Note, "reviewer") {
+	if !strings.Contains(ack.Note, "has left 4 results unpaid") || !strings.Contains(ack.Note, "reviewer") || !strings.Contains(ack.Note, "unpaid; a work with a reviewer pays on a verdict even if the requester is silent. Your result waits for the requester's verdict: this requester's verdicts take") {
 		t.Fatalf("submit note %q", ack.Note)
 	}
 	if err := s.Integrity(testContext); err != nil {
