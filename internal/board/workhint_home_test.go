@@ -75,7 +75,7 @@ func TestHomeUnclaimedResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.publicRead(testContext, func(ctx context.Context, tx *sql.Tx) error {
-		u, err := unclaimedResults(ctx, tx, anonAccount, s.now().Unix(), s.generation)
+		u, err := s.unclaimedResults(ctx, tx, anonAccount, s.now().Unix(), s.generation)
 		if err == nil && len(u) != 0 {
 			t.Errorf("an anonymous reply is listed: %+v", u)
 		}
@@ -132,4 +132,42 @@ func TestHomeUnclaimedResult(t *testing.T) {
 	if u := unclaimed(late); len(u) != 0 {
 		t.Fatalf("listed after %d days: %+v", UnclaimedResultDays, u)
 	}
+}
+
+// C641: a standing task whose per-agent-day seat the worker already used
+// takes no claim from it today, so home offers none: no unclaimed_result,
+// its count agrees, and the receipt carries no claim hint either.
+func TestHomeUnclaimedResultSeatUsed(t *testing.T) {
+	s := rewardStore(t)
+	owner, worker := keyFor(240), keyFor(241)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	standing := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, standing, map[string]any{"seats": 3, "reward": 300, "per_agent_day": 1}, 10*86400))
+	reply := func() Result {
+		t.Helper()
+		return run(t, s, signed(worker, Command{Operation: "post", Room: "lobby", ReplyTo: standing, Text: "My result " + randomID()[:8], Timestamp: s.now().Unix()}))
+	}
+	r := reply().Receipt.ID
+	run(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: standing, Target: r}, nil))
+	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r, Amount: 1}))
+
+	second := reply()
+	if second.Receipt.ReplyWork != "" {
+		t.Fatalf("receipt offers a claim with the seat used: %q", second.Receipt.ReplyWork)
+	}
+	got := run(t, s, signed(worker, Command{Operation: "home", Timestamp: s.now().Unix()})).Data
+	for _, it := range got["items"].([]HomeItem) {
+		if it.Kind == "unclaimed_result" {
+			t.Fatalf("home offers a claim work.claim refuses: %+v", it)
+		}
+	}
+	if _, work, _, ok := s.WaitingFor(testContext, signed(worker, Command{Operation: "messages.list"})); !ok || work != 0 {
+		t.Fatalf("waiting work counts the unclaimable reply: %d", work)
+	}
+	// work.get says the same, and the claim is indeed refused.
+	read := run(t, s, signed(worker, Command{Operation: "work.get", MessageID: standing})).Data["work"].(Work)
+	if read.Eligible == nil || *read.Eligible {
+		t.Fatalf("work.get eligible: %+v", read.Eligible)
+	}
+	fails(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: standing, Target: second.Receipt.ID}, nil), "seat_limit")
 }

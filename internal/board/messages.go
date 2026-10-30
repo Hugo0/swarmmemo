@@ -373,7 +373,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	// workhint.go).
 	replyWork := ""
 	if c.ReplyTo != "" && data.Supersedes == "" && !forwarded {
-		if replyWork, err = replyWorkHint(ctx, tx, c.ReplyTo, a, now); err != nil {
+		if replyWork, err = s.replyWorkHint(ctx, tx, c.ReplyTo, a, now); err != nil {
 			return Result{}, err
 		}
 	}

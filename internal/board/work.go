@@ -1755,35 +1755,9 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 	}
 	blocked := ""
 	if opt.facts != nil {
-		ok, code, reason, e := workClaimCheck(ctx, tx, opt.facts, w, p.State, now)
+		ok, code, reason, e := s.workEligibleNow(ctx, tx, opt.facts, w, p.State, p.Standing, now)
 		if e != nil {
 			return Work{}, e
-		}
-		if ok && p.Standing != nil && p.Standing.BlockedBy != "" {
-			// The standing task itself takes no result now (results_until, seats,
-			// pool...): the claim would refuse, so the preview says so too
-			// (kosoyy 36193066, round 7: eligible true on a closed task).
-			ok, code, reason = false, p.Standing.BlockedBy, "Not now on this standing task: "+p.Standing.BlockedNote+"."
-		}
-		if ok && p.Standing != nil {
-			// That agent's own seat limit on a standing task (C444).
-			blocked, e := standingReaderBlock(ctx, tx, w.ID, opt.facts.account, p.Standing, now)
-			if e != nil {
-				return Work{}, e
-			}
-			if blocked {
-				ok, code, reason = false, p.Standing.BlockedBy, "Not now on this standing task: "+p.Standing.BlockedNote+"."
-			}
-		}
-		if ok && opt.facts.account != "" && w.StandingID == "" {
-			// The claim cool-down (C580): the same test work.claim makes.
-			until, e := s.workClaimCooldownUntil(ctx, tx, w, p.Standing != nil, opt.facts.account, now)
-			if e != nil {
-				return Work{}, e
-			}
-			if until > 0 {
-				ok, code, reason = false, WorkBlockedClaimPause, workClaimCooldownText(p.Standing != nil, until)
-			}
 		}
 		p.Eligible, p.EligibleReason, p.EligibleAgent, p.EligiblePreview = &ok, reason, opt.agent, opt.preview
 		blocked = code
@@ -2590,4 +2564,45 @@ func workReadError(err error) error {
 		return &Error{Status: 503, Code: "work_read_timeout", Message: "Work read exceeded its two-second query budget; narrow the query or retry.", RetryAfter: 2}
 	}
 	return err
+}
+
+// workEligibleNow answers "could facts.account claim w now?" with the
+// refusal's code and plain reason: the work's own rule (workClaimCheck), a
+// standing task that takes no result now, that account's seat on it (C444)
+// and the claim cool-down (C580). work.get's eligible and home's
+// unclaimed_result (C641) both read it. standing is w's projection
+// (projectWorkStanding), nil for work that is not a standing task; its
+// BlockedBy/BlockedNote are set for the account's own seat when blocked.
+func (s *Store) workEligibleNow(ctx context.Context, tx *sql.Tx, facts *workEligibilityFacts, w workRow, state string, standing *WorkStanding, now int64) (bool, string, string, error) {
+	ok, code, reason, e := workClaimCheck(ctx, tx, facts, w, state, now)
+	if e != nil {
+		return false, "", "", e
+	}
+	if ok && standing != nil && standing.BlockedBy != "" {
+		// The standing task itself takes no result now (results_until, seats,
+		// pool...): the claim would refuse, so the preview says so too
+		// (kosoyy 36193066, round 7: eligible true on a closed task).
+		ok, code, reason = false, standing.BlockedBy, "Not now on this standing task: "+standing.BlockedNote+"."
+	}
+	if ok && standing != nil {
+		// That agent's own seat limit on a standing task (C444).
+		blocked, e := standingReaderBlock(ctx, tx, w.ID, facts.account, standing, now)
+		if e != nil {
+			return false, "", "", e
+		}
+		if blocked {
+			ok, code, reason = false, standing.BlockedBy, "Not now on this standing task: "+standing.BlockedNote+"."
+		}
+	}
+	if ok && facts.account != "" && w.StandingID == "" {
+		// The claim cool-down (C580): the same test work.claim makes.
+		until, e := s.workClaimCooldownUntil(ctx, tx, w, standing != nil, facts.account, now)
+		if e != nil {
+			return false, "", "", e
+		}
+		if until > 0 {
+			ok, code, reason = false, WorkBlockedClaimPause, workClaimCooldownText(standing != nil, until)
+		}
+	}
+	return ok, code, reason, nil
 }

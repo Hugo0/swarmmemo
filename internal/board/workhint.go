@@ -27,7 +27,7 @@ import (
 // replyWorkHint names the open work a fresh reply answers when the poster
 // has no result waiting there: the work's ID, or "" when there is nothing to
 // say. It reads in the post's transaction (never the pool).
-func replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a actor, now int64) (string, error) {
+func (s *Store) replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a actor, now int64) (string, error) {
 	if !workIDRE.MatchString(replyTo) {
 		return "", nil
 	}
@@ -39,7 +39,7 @@ func replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a actor, now
 	if err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
 		return "", err
 	}
-	ok, err := replyWorkClaimable(ctx, tx, id, a.account, a.signed, now, generation)
+	ok, err := s.replyWorkClaimable(ctx, tx, id, a.account, a.signed, now, generation)
 	if err != nil || !ok {
 		return "", err
 	}
@@ -50,10 +50,11 @@ func replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a actor, now
 // unclaimed_result (C618) share: whether a reply by account (signed or not)
 // to work id could be claimed as its result now. Only open work takes a
 // claim, never the requester's own, and a result item on a standing task is
-// not itself claimed; on a standing task, a signed worker whose result there
-// already waits for a verdict hears nothing. It reads in the caller's
+// not itself claimed; a signed worker hears of it only when it is eligible to
+// claim it now (workEligibleNow, what work.get's eligible reads: the work's
+// rule, a standing task's own block, its seat there, the claim cool-down). It reads in the caller's
 // transaction (never the pool).
-func replyWorkClaimable(ctx context.Context, tx *sql.Tx, id, account string, signed bool, now int64, generation string) (bool, error) {
+func (s *Store) replyWorkClaimable(ctx context.Context, tx *sql.Tx, id, account string, signed bool, now int64, generation string) (bool, error) {
 	var requester, standingID, state string
 	var standing bool
 	err := tx.QueryRowContext(ctx, `SELECT w.requester,w.standing_id,`+workEffectiveSQL+`,EXISTS(SELECT 1 FROM work_standing s WHERE s.work_id=w.id) FROM works w WHERE w.id=?`, now, generation, now, id).
@@ -67,16 +68,25 @@ func replyWorkClaimable(ctx context.Context, tx *sql.Tx, id, account string, sig
 	if state != "open" || standingID != "" || (signed && requester == account) {
 		return false, nil
 	}
-	if standing && signed {
-		var waiting bool
-		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM works WHERE standing_id=? AND worker=? AND state='submitted' AND deadline>?)`, id, account, now).Scan(&waiting); err != nil {
+	if !signed {
+		return true, nil
+	}
+	// A signed worker hears only of a claim it could make now: the same
+	// answer work.get's eligible gives it (C641: a standing task whose
+	// per-agent-day seat it already used was offered as a claim that
+	// work.claim refused with seat_limit).
+	w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, id))
+	if err != nil {
+		return false, err
+	}
+	var st *WorkStanding
+	if standing {
+		if st, err = projectWorkStanding(ctx, tx, w, state, now); err != nil {
 			return false, err
 		}
-		if waiting {
-			return false, nil
-		}
 	}
-	return true, nil
+	ok, _, _, err := s.workEligibleNow(ctx, tx, &workEligibilityFacts{account: account}, w, state, st, now)
+	return ok, err
 }
 
 // C618: of 62 signed, substantive replies to open standing tasks in a week,
@@ -102,7 +112,7 @@ type unclaimedResult struct {
 // yet a result) to work it could claim with them now (replyWorkClaimable),
 // with no claim of its own on that work since the reply: the newest first,
 // one per work, at most HomeCountMax. It reads in the caller's transaction.
-func unclaimedResults(ctx context.Context, tx *sql.Tx, account string, now int64, generation string) ([]unclaimedResult, error) {
+func (s *Store) unclaimedResults(ctx context.Context, tx *sql.Tx, account string, now int64, generation string) ([]unclaimedResult, error) {
 	// A reply that opened a standing result is that result (its works row
 	// has the reply's first version's ID); one claimed on ordinary work is
 	// the account's claim since the reply, below.
@@ -152,7 +162,7 @@ func unclaimedResults(ctx context.Context, tx *sql.Tx, account string, now int64
 			return nil, err
 		}
 		seen[id] = true // the newest reply speaks for the work
-		ok, err := replyWorkClaimable(ctx, tx, id, account, true, now, generation)
+		ok, err := s.replyWorkClaimable(ctx, tx, id, account, true, now, generation)
 		if err != nil {
 			return nil, err
 		}

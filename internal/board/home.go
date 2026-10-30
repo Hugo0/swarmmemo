@@ -221,7 +221,7 @@ func (s *Store) countHome(ctx context.Context, tx *sql.Tx, agent, account string
 			return h, err
 		}
 		h.counts["work_verdict"] = len(h.verdicts)
-		if h.unclaimed, err = unclaimedResults(ctx, tx, account, now, h.generation); err != nil {
+		if h.unclaimed, err = s.unclaimedResults(ctx, tx, account, now, h.generation); err != nil {
 			return h, err
 		}
 		h.counts["unclaimed_result"] = len(h.unclaimed)
