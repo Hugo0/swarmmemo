@@ -33,6 +33,9 @@ import (
 // request that started it, so that reader leaving does not fail the others.
 // A response other than 200 goes to the readers that waited for it and is
 // never kept.
+//
+// The mechanism is ResponseCache, which the API's hot anonymous reads use
+// too (httpapi/hotreads.go, C637).
 const (
 	homeCacheTTL    = 10 * time.Second
 	statsCacheTTL   = time.Minute
@@ -40,11 +43,25 @@ const (
 	pageRenderLimit = 20 * time.Second
 )
 
-// pagePolicy is how long one cached page is kept.
+// CachePolicy is how long one cached response is kept.
+type CachePolicy struct {
+	TTL   time.Duration // served as is until this old
+	Stale time.Duration // then, until this old, served while it refreshes; 0: never
+	// Changes, when set, is taken before each render: its channel closing
+	// ends the entry (a committed write, or a narrower signal).
+	Changes func() <-chan struct{}
+	// OwnFailures: a response other than 200 is not given to the readers
+	// that waited for it either; each renders its own. A handler whose
+	// failures depend on the requester (its network's rate, its quota) sets
+	// it, so one reader's refusal never reaches another.
+	OwnFailures bool
+}
+
+// pagePolicy is the page cache's policy of one request.
 type pagePolicy struct {
-	ttl      time.Duration // served as is until this old
-	stale    time.Duration // then, until this old, served while it refreshes; 0: never
-	onChange bool          // a committed write ends the entry
+	ttl      time.Duration
+	stale    time.Duration
+	onChange bool // a committed write ends the entry
 }
 
 // cachedPolicy is the policy of a request the cache may serve, by path and
@@ -68,7 +85,8 @@ type cachedPage struct {
 	header  http.Header
 	body    []byte
 	at      time.Time
-	changed <-chan struct{} // closed by the first write after the render began; nil: none
+	keep    time.Duration   // the policy's longest age (TTL or Stale)
+	changed <-chan struct{} // closed by the first change after the render began; nil: none
 }
 
 // pageFlight is a render in progress; done closes when page is set (nil if
@@ -78,53 +96,51 @@ type pageFlight struct {
 	page *cachedPage
 }
 
-type pageCache struct {
-	next    http.Handler
-	changes func() <-chan struct{}
+// ResponseCache keeps whole responses (status, headers, body) by a key the
+// caller chooses, for a policy's TTL, with one render per key at a time
+// (singleflight) and at most max entries: a full cache first drops what has
+// expired or ended, then its oldest entry. It decides nothing about who may
+// be served from it: the caller serves only requests whose answer is the
+// same for every reader of the key (pageCache below, httpapi/hotreads.go).
+type ResponseCache struct {
 	now     func() time.Time
+	max     int // 0: unbounded (a fixed set of keys)
 	mu      sync.Mutex
 	pages   map[string]*cachedPage
 	flights map[string]*pageFlight
 }
 
-// withPageCache serves next through a page cache when service signals its
-// changes (the board store); any other service is served directly.
-func withPageCache(service board.Service, next http.Handler) http.Handler {
-	notifier, ok := service.(interface{ Changes() <-chan struct{} })
-	if !ok {
-		return next
-	}
-	return newPageCache(next, notifier.Changes, time.Now)
+// NewResponseCache is an empty cache of at most max entries (0: no bound).
+func NewResponseCache(max int, now func() time.Time) *ResponseCache {
+	return &ResponseCache{now: now, max: max, pages: map[string]*cachedPage{}, flights: map[string]*pageFlight{}}
 }
 
-func newPageCache(next http.Handler, changes func() <-chan struct{}, now func() time.Time) *pageCache {
-	return &pageCache{next: next, changes: changes, now: now, pages: map[string]*cachedPage{}, flights: map[string]*pageFlight{}}
+// Len is how many responses are kept.
+func (c *ResponseCache) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.pages)
 }
 
-func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	policy, ok := cachedPolicy(r)
-	if !ok {
-		c.next.ServeHTTP(w, r)
-		return
-	}
-	// The origin is the deployment's (WithOrigin), part of the key all the same.
-	key := requestOrigin(r) + " " + r.URL.Path + "?" + r.URL.RawQuery
+// Serve answers r with key's kept response, or with next's, which it keeps
+// when it is a 200.
+func (c *ResponseCache) Serve(w http.ResponseWriter, r *http.Request, key string, policy CachePolicy, next http.Handler) {
 	c.mu.Lock()
 	page := c.pages[key]
 	if page != nil {
 		switch age := c.now().Sub(page.at); {
-		case age < 0 || policy.onChange && closed(page.changed):
+		case age < 0 || closed(page.changed):
 			page = nil
-		case age < policy.ttl:
-		case age < policy.stale:
-			c.startLocked(key, r) // served stale; a render refreshes it
+		case age < policy.TTL:
+		case age < policy.Stale:
+			c.startLocked(key, r, policy, next) // served stale; a render refreshes it
 		default:
 			page = nil
 		}
 	}
 	var flight *pageFlight
 	if page == nil {
-		flight = c.startLocked(key, r)
+		flight = c.startLocked(key, r, policy, next)
 	}
 	c.mu.Unlock()
 	if flight != nil {
@@ -132,12 +148,16 @@ func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case <-flight.done:
 			page = flight.page
 		case <-r.Context().Done():
+			if policy.OwnFailures {
+				next.ServeHTTP(w, r) // its own answer to its cancellation (a 503 while shutting down)
+			}
 			return
 		}
 	}
-	if page == nil {
-		// The render panicked: this reader gets its own.
-		c.next.ServeHTTP(w, r)
+	if page == nil || policy.OwnFailures && page.status != http.StatusOK {
+		// The render panicked, or failed and failures are each reader's
+		// own: this reader gets its own render.
+		next.ServeHTTP(w, r)
 		return
 	}
 	for name, values := range page.header {
@@ -151,7 +171,7 @@ func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // startLocked returns key's render in progress, or starts one, as a GET of
 // r's page detached from r's cancellation. c.mu is held.
-func (c *pageCache) startLocked(key string, r *http.Request) *pageFlight {
+func (c *ResponseCache) startLocked(key string, r *http.Request, policy CachePolicy, next http.Handler) *pageFlight {
 	if f := c.flights[key]; f != nil {
 		return f
 	}
@@ -171,23 +191,84 @@ func (c *pageCache) startLocked(key string, r *http.Request) *pageFlight {
 			}
 			c.mu.Lock()
 			if page != nil && page.status == http.StatusOK {
-				c.pages[key] = page
+				c.keepLocked(key, page)
 			}
 			delete(c.flights, key)
 			f.page = page
 			c.mu.Unlock()
 			close(f.done)
 		}()
-		changed := c.changes() // before the render: a write during it ends the entry
+		var changed <-chan struct{}
+		if policy.Changes != nil {
+			changed = policy.Changes() // before the render: a change during it ends the entry
+		}
 		at := c.now()
 		rec := &pageRecorder{header: http.Header{}}
-		c.next.ServeHTTP(rec, render)
+		next.ServeHTTP(rec, render)
 		if rec.status == 0 {
 			rec.status = http.StatusOK
 		}
-		page = &cachedPage{status: rec.status, header: rec.header, body: rec.body.Bytes(), at: at, changed: changed}
+		page = &cachedPage{status: rec.status, header: rec.header, body: rec.body.Bytes(), at: at, keep: max(policy.TTL, policy.Stale), changed: changed}
 	}()
 	return f
+}
+
+// keepLocked stores page under key within the bound: when full, what has
+// expired or ended goes first, then the oldest entry. c.mu is held.
+func (c *ResponseCache) keepLocked(key string, page *cachedPage) {
+	if _, ok := c.pages[key]; !ok && c.max > 0 && len(c.pages) >= c.max {
+		now := c.now()
+		oldest := ""
+		for k, p := range c.pages {
+			if age := now.Sub(p.at); age < 0 || age >= p.keep || closed(p.changed) {
+				delete(c.pages, k)
+				continue
+			}
+			if oldest == "" || p.at.Before(c.pages[oldest].at) {
+				oldest = k
+			}
+		}
+		if len(c.pages) >= c.max && oldest != "" {
+			delete(c.pages, oldest)
+		}
+	}
+	c.pages[key] = page
+}
+
+// pageCache is the web pages' ResponseCache: cachedPolicy's requests, keyed
+// by origin, path and query.
+type pageCache struct {
+	next    http.Handler
+	changes func() <-chan struct{}
+	cache   *ResponseCache
+}
+
+// withPageCache serves next through a page cache when service signals its
+// changes (the board store); any other service is served directly.
+func withPageCache(service board.Service, next http.Handler) http.Handler {
+	notifier, ok := service.(interface{ Changes() <-chan struct{} })
+	if !ok {
+		return next
+	}
+	return newPageCache(next, notifier.Changes, time.Now)
+}
+
+func newPageCache(next http.Handler, changes func() <-chan struct{}, now func() time.Time) *pageCache {
+	return &pageCache{next: next, changes: changes, cache: NewResponseCache(0, now)}
+}
+
+func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	p, ok := cachedPolicy(r)
+	if !ok {
+		c.next.ServeHTTP(w, r)
+		return
+	}
+	policy := CachePolicy{TTL: p.ttl, Stale: p.stale}
+	if p.onChange {
+		policy.Changes = c.changes
+	}
+	// The origin is the deployment's (WithOrigin), part of the key all the same.
+	c.cache.Serve(w, r, requestOrigin(r)+" "+r.URL.Path+"?"+r.URL.RawQuery, policy, c.next)
 }
 
 func closed(ch <-chan struct{}) bool {

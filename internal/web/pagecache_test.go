@@ -230,3 +230,47 @@ func TestPageCacheHomeShowsANewPostAtOnce(t *testing.T) {
 		t.Fatal("the cached home page still shows a hidden post")
 	}
 }
+
+// A bounded ResponseCache keeps at most its bound: a full cache drops what
+// has expired first, then its oldest entry, and never a fresh newer one.
+func TestResponseCacheBound(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	var renders atomic.Int64
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		renders.Add(1)
+		fmt.Fprint(w, r.URL.Path)
+	})
+	c := NewResponseCache(3, func() time.Time { return now })
+	serve := func(key string, ttl time.Duration) string {
+		w := httptest.NewRecorder()
+		c.Serve(w, httptest.NewRequest("GET", "/"+key, nil), key, CachePolicy{TTL: ttl}, next)
+		return w.Body.String()
+	}
+	for i, key := range []string{"a", "b", "c"} {
+		serve(key, time.Minute)
+		now = now.Add(time.Duration(i+1) * time.Second)
+	}
+	serve("d", time.Minute) // full: a, the oldest, goes
+	if c.Len() != 3 || renders.Load() != 4 {
+		t.Fatalf("%d kept, %d renders", c.Len(), renders.Load())
+	}
+	if serve("b", time.Minute) != "/b" || renders.Load() != 4 {
+		t.Fatal("b was dropped before a")
+	}
+	if serve("a", time.Minute) != "/a" || renders.Load() != 5 || c.Len() != 3 {
+		t.Fatalf("a was kept past the bound: %d renders, %d kept", renders.Load(), c.Len())
+	}
+	// An expired entry goes before any fresh one.
+	serve("short", time.Second) // replaces the oldest (c)
+	now = now.Add(2 * time.Second)
+	serve("e", time.Minute)
+	if c.Len() != 3 {
+		t.Fatalf("%d kept", c.Len())
+	}
+	before := renders.Load()
+	serve("d", time.Minute)
+	serve("a", time.Minute)
+	if renders.Load() != before {
+		t.Fatal("a fresh entry was dropped while an expired one was kept")
+	}
+}

@@ -84,9 +84,13 @@ type Server struct {
 	requests          atomic.Int64
 	errors            atomic.Int64
 	limiter           *Limiter
+	shares            shareTable   // anonymous reads' network shares of inflight (fairshare.go)
+	shareRefusals     atomic.Int64 // anonymous reads turned away by shares or anonReserve
 	mcpHandler        http.Handler
 	mcpServer         mcpServerCache
 	offerCache        discoveryCache         // the no-key and free credit offers (offers)
+	hot               hotReads               // hot anonymous reads' answers (hotreads.go, C637)
+	hotNow            func() time.Time       // the hot cache's clock; nil is time.Now (tests set it)
 	offeringDirCache  offeringDirectoryCache // the active offerings /openapi.json lists (offeringDirectory)
 	referenceInflight chan struct{}
 	readers           *readerCounter
@@ -276,6 +280,22 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 429, Code: "request_rate", Message: "Too many network requests. Wait briefly before retrying.", RetryAfter: 2})
 		return
 	}
+	if anonymousRead(r) {
+		if narrow, wide, ok := s.shareKeys(s.peer(r)); ok {
+			free := cap(s.inflight) - anonReserve - len(s.inflight)
+			if free <= 0 {
+				s.shareRefusals.Add(1)
+				writeError(w, &board.Error{Status: 503, Code: "busy", Message: "The server is busy. Retry shortly; signed requests keep a reserve.", RetryAfter: shareRetryAfter})
+				return
+			}
+			if !s.shares.acquire(narrow, wide, free) {
+				s.shareRefusals.Add(1)
+				writeError(w, &board.Error{Status: 429, Code: "request_rate", Message: "Too many requests from your network are in progress while the server is busy. Wait briefly before retrying, or send fewer at once; signed requests are not limited this way.", RetryAfter: shareRetryAfter})
+				return
+			}
+			defer s.shares.release(narrow, wide)
+		}
+	}
 	select {
 	case s.inflight <- struct{}{}:
 		defer func() { <-s.inflight }()
@@ -354,7 +374,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			s.countClient(r, "discovery")
 		}
-		jsonResponse(w, 200, s.capabilitiesWith(s.liveCatalog(r)))
+		s.serveCapabilities(w, r) // kept for capabilitiesTTL (hotreads.go)
 		return
 	}
 	if r.URL.Path == "/time" {
@@ -505,7 +525,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/recent" || r.URL.Path == "/rooms" || r.URL.Path == "/who" || r.URL.Path == "/search" || strings.HasPrefix(r.URL.Path, "/e/") || strings.HasPrefix(r.URL.Path, "/r/") || strings.HasPrefix(r.URL.Path, "/inbox/") {
-		s.read(w, r)
+		s.serveRead(w, r) // read, with hot anonymous answers kept (hotreads.go)
 		return
 	}
 	if !readMethod(r) {
@@ -1735,7 +1755,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	fmt.Fprintf(w, "swarmmemo_http_requests_total %d\nswarmmemo_http_errors_total %d\nswarmmemo_http_inflight %d\nswarmmemo_streams %d\n", s.requests.Load(), s.errors.Load(), len(s.inflight), len(s.streams))
+	fmt.Fprintf(w, "swarmmemo_http_requests_total %d\nswarmmemo_http_errors_total %d\nswarmmemo_http_inflight %d\nswarmmemo_http_share_refusals_total %d\nswarmmemo_streams %d\n", s.requests.Load(), s.errors.Load(), len(s.inflight), s.shareRefusals.Load(), len(s.streams))
 	// RFC0012 §3.3: shadow comparisons since start; the rollout gate for
 	// ALLOWANCE_LEDGER=on is zero unexplained ones.
 	if shadow, ok := s.service.(interface {

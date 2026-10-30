@@ -123,5 +123,9 @@ func (p postActuator) HidePromotion(ctx context.Context, subject, detail string)
 	if _, err = tlogCatchUp(ctx, tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	s.signalHidden()
+	return nil
 }

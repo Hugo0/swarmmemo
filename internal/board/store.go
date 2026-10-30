@@ -166,6 +166,8 @@ type Store struct {
 	// the slots updates.get waits take.
 	changes       changeSignal
 	updateWaiters *WaitSlots
+	// C637: the narrow signal of a revised message or agent (Revisions).
+	revisions changeSignal
 	// C61: the inbox entry log's backfill (inbox.go).
 	inboxBackfill inboxBackfillState
 	// RFC 0019: the lab record recomputer and its score cache (reviews_records.go).
@@ -1210,6 +1212,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	if err = s.authorizeDelegation(ctx, tx, cmd, a, now); err != nil {
 		return empty, err
 	}
+	ctx, revised := withRevisionMark(ctx)
 	result, err := s.execute(ctx, tx, cmd, a, now)
 	if err != nil {
 		return empty, err
@@ -1263,6 +1266,10 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	if mutation(cmd.Operation) {
 		s.signalChange() // wakes waiting reads (waiting.go)
 	}
+	agentWrite := mutation(cmd.Operation) && (strings.HasPrefix(cmd.Operation, "agent.") || strings.HasPrefix(cmd.Operation, "identity."))
+	if revised.set || agentWrite || mutation(cmd.Operation) && revisesAgent(cmd.Operation) {
+		s.revisions.signal() // ends cached message and agent answers (Revisions)
+	}
 	s.screenPost(ctx, cmd, a, result) // MODERATION: queue a fresh public post; nothing when off
 	s.screenVerification(ctx, cmd, a, result)
 	if p := result.ratedPost; p != nil {
@@ -1273,7 +1280,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	}
 	// RFC0013 §5.2: a post into a conversation, for its protected readers.
 	s.queueConversationScreen(cmd, result)
-	if strings.HasPrefix(cmd.Operation, "agent.") || strings.HasPrefix(cmd.Operation, "identity.") {
+	if agentWrite {
 		s.dropHotAgents() // the shared hot agent page shows registrations, profiles and links
 	}
 	if mutation(cmd.Operation) {
@@ -1415,6 +1422,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.changeAllowance(ctx, tx, c, a, now)
 	case "ledger.list":
 		return s.readLedger(ctx, tx, c, a, now)
+	case "account.export":
+		return s.exportAccount(ctx, tx, c, a, now)
 	case "services.list", "service.read":
 		return s.readServices(ctx, tx, c, a, now)
 	case "service.call":

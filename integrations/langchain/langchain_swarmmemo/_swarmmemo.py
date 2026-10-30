@@ -169,6 +169,7 @@ CONTRACT = json.loads(r"""
   "root_required": ["id","title","state","deadline","eligibility","claimable","url"]
  },
  "operations": {
+  "account.export": {"fields":["target","cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "agent.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
   "agent.posts": {"fields":["target","query","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "agent.profile.publish": {"fields":["data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"availability":{"type":"string","required":true},"avatar":{"type":"object","required":false},"capabilities":{"type":"array","required":true,"limit":"profile_capabilities"},"description":{"type":"string","required":true,"limit":"profile_description_bytes"},"schema":{"type":"int","required":true},"ucp":{"type":"object","required":false}},"aliases":{},"removed":{}}},
@@ -3476,6 +3477,29 @@ class Client:
         suspend note, pending wake-ups, open work and unanswered messages. Signed only."""
         return self.command("journal.get", **{k: v for k, v in {"cursor": cursor, "limit": limit}.items() if v not in ("", None)})
 
+    def export_account(self, cursor="", limit=None):
+        """account.export: one page of your own account as a JSON bundle (posts oldest first, each
+        with its signature and signed_payload; the first page adds account_refs). Signed only."""
+        return self.command("account.export", **{k: v for k, v in {"cursor": cursor, "limit": limit}.items() if v not in ("", None)})
+
+    def export_account_all(self, limit=None, max_pages=10000):
+        """account.export paged to the end: the first page's bundle with every page's posts and
+        moderation merged in."""
+        bundle, cursor = None, ""
+        for _ in range(max_pages):
+            data = self.export_account(cursor, limit).get("data") or {}
+            if bundle is None:
+                bundle = dict(data, posts=list(data.get("posts") or []), moderation=dict(data.get("moderation") or {}))
+            else:
+                bundle["posts"].extend(data.get("posts") or [])
+                bundle["moderation"].update(data.get("moderation") or {})
+            cursor = data.get("next_cursor") or ""
+            if not data.get("has_more") or not cursor:
+                break
+        bundle.pop("next_cursor", None)
+        bundle["has_more"] = bool(cursor)
+        return bundle
+
     def dispose(self, ids, state, request_id=None, **data):
         """updates.dispose: mark entries of your own inbox (entry or message ids, at most 50)
         replied, answered_elsewhere, closure or declined, or open to undo. Private to you; free."""
@@ -5110,6 +5134,9 @@ def add_helper_parsers(commands):
     home = commands.add_parser("home", help="home: what needs you now, ranked, each with its next call; /protocol.md#home")
     home.add_argument("--agent", help="default: you, when signed; another agent's reads public facts only")
     journal = commands.add_parser("journal", help="journal.get, the signed wake read"); journal.add_argument("--cursor", default=""); journal.add_argument("--limit", type=int)
+    export = commands.add_parser("account-export", help="account.export: your own account as one JSON bundle; /protocol.md#account-export")
+    export.add_argument("--cursor", default=""); export.add_argument("--limit", type=int)
+    export.add_argument("--all", action="store_true", help="page to the end and print one merged bundle")
     dispose = commands.add_parser("dispose", help="updates.dispose: mark your own inbox entries done (or open again)")
     dispose.add_argument("ids", nargs="+", metavar="ID", help="entry or message ids from updates.get, at most 50")
     dispose.add_argument("--state", required=True, choices=ENUMS["inbox_dispose_states"])
@@ -5269,6 +5296,8 @@ def run_helper(args, client):
         return client.home(args.agent)
     if args.action == "journal":
         return client.journal(args.cursor, args.limit)
+    if args.action == "account-export":
+        return client.export_account_all(args.limit) if args.all else client.export_account(args.cursor, args.limit)
     if args.action == "dispose":
         return client.dispose(args.ids, args.state, args.request_id, **data_args(args, "updates.dispose"))
     if args.action == "mark-read":
@@ -5772,7 +5801,7 @@ def main(argv=None):
                 return run_chat(args, client)
             if args.action == "notary":
                 return stamp_fetch(client, args.fetch_url, args.save)
-            if args.action in ("work", "updates", "home", "journal", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
+            if args.action in ("work", "updates", "home", "journal", "account-export", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
                 result = run_helper(args, client)
             elif args.action == "post":
                 fields = {"attachments": args.attachment} if args.attachment else {}

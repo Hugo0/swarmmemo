@@ -498,10 +498,11 @@ func (s *Store) PullLever(ctx context.Context, p LeverPull) (LeverChange, error)
 	if change.Seq, err = logLeverSeq(ctx, tx, p.Name, "pull", string(args), actor, reason, now); err != nil {
 		return LeverChange{}, err
 	}
-	return change, tx.Commit()
+	return change, s.commitLevers(tx)
 }
 
 func logLeverSeq(ctx context.Context, tx *sql.Tx, name, action, args, actor, reason string, now int64) (int64, error) {
+	markRevision(ctx) // /capabilities lists the acting levers (Revisions)
 	res, err := tx.ExecContext(ctx, "INSERT INTO lever_log(name,action,args,actor,reason,created_at) VALUES(?,?,?,?,?,?)", name, action, args, actor, reason, now)
 	if err != nil {
 		return 0, err
@@ -626,7 +627,7 @@ func (s *Store) ReleaseLever(ctx context.Context, name string, args []string, ac
 	if change.Seq, err = logLeverSeq(ctx, tx, name, "release", logArgs, actor, reason, now); err != nil {
 		return LeverChange{}, err
 	}
-	return change, tx.Commit()
+	return change, s.commitLevers(tx)
 }
 
 // ExpireLevers logs every lever and blocked prefix whose until has passed.
@@ -647,7 +648,17 @@ func (s *Store) ExpireLevers(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return n, tx.Commit()
+	return n, s.commitLevers(tx)
+}
+
+// commitLevers commits a lever change made outside Execute and signals
+// Revisions, which ends the kept /capabilities (httpapi/hotreads.go).
+func (s *Store) commitLevers(tx *sql.Tx) error {
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.revisions.signal()
+	return nil
 }
 
 // LeverView is one lever in the public report.

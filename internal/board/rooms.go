@@ -324,6 +324,7 @@ func setHidden(ctx context.Context, tx *sql.Tx, eventID, visibility string, hide
 	if _, err := tx.ExecContext(ctx, "UPDATE events SET hidden=?,reason=?,hidden_by=? WHERE id=?", hide, reason, by, eventID); err != nil {
 		return err
 	}
+	markRevision(ctx)
 	// A hidden message notifies no one: webhook deliveries still queued for
 	// it, or for any of its versions, are dropped (an MCP Events delivery
 	// re-reads the post when it is sent, and updates.get leaves it out of

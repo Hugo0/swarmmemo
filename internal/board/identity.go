@@ -53,6 +53,7 @@ var queryAgentFields = map[string]func(*Command) *string{
 	"work.history":     func(c *Command) *string { return &c.Target },
 	"feed.profile.get": func(c *Command) *string { return &c.Target },
 	"devices.list":     func(c *Command) *string { return &c.Target },
+	"account.export":   func(c *Command) *string { return &c.Target },
 	"messages.list":    func(c *Command) *string { return &c.To },
 }
 

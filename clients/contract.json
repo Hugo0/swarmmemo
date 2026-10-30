@@ -361,6 +361,17 @@
     ]
   },
   "operations": {
+    "account.export": {
+      "fields": [
+        "target",
+        "cursor",
+        "limit"
+      ],
+      "signed": true,
+      "mutation": false,
+      "delegable": false,
+      "wire": "https"
+    },
     "agent.get": {
       "fields": [
         "target"

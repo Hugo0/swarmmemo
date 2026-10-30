@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,29 +25,84 @@ const (
 	UpdatesWaitersMax = 32
 )
 
+// changeSignal is a channel the next signal closes: next takes it, signal
+// closes it and the next call to next makes a new one.
 type changeSignal struct {
 	mu sync.Mutex
 	ch chan struct{}
 }
 
-// Changes returns a channel closed by the next committed write. Take it before
-// a read: a write that commits after the read then still wakes the waiter.
-func (s *Store) Changes() <-chan struct{} {
-	s.changes.mu.Lock()
-	defer s.changes.mu.Unlock()
-	if s.changes.ch == nil {
-		s.changes.ch = make(chan struct{})
+func (c *changeSignal) next() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ch == nil {
+		c.ch = make(chan struct{})
 	}
-	return s.changes.ch
+	return c.ch
 }
 
-func (s *Store) signalChange() {
-	s.changes.mu.Lock()
-	defer s.changes.mu.Unlock()
-	if s.changes.ch != nil {
-		close(s.changes.ch)
-		s.changes.ch = nil
+func (c *changeSignal) signal() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ch != nil {
+		close(c.ch)
+		c.ch = nil
 	}
+}
+
+// Changes returns a channel closed by the next committed write. Take it before
+// a read: a write that commits after the read then still wakes the waiter.
+func (s *Store) Changes() <-chan struct{} { return s.changes.next() }
+
+func (s *Store) signalChange() { s.changes.signal() }
+
+// Revisions returns a channel closed by the next committed change to what an
+// existing message or agent shows anyone, or to the levers /capabilities
+// lists: a hide, restore or withdraw (every setHidden), an edit, an agent,
+// identity, device, hosted or messaging write (revisesAgent), or a lever
+// pulled, released or expired (C637). It is the narrow form of Changes, for
+// the caches of one message, one agent and /capabilities
+// (httpapi/hotreads.go) that ordinary new posts, votes and reads must not
+// empty. Take it before the read, as Changes.
+func (s *Store) Revisions() <-chan struct{} { return s.revisions.next() }
+
+// revisionMark records, for one command, that its transaction revised a
+// message or agent (markRevision); Execute signals Revisions once it commits.
+type revisionMark struct{ set bool }
+
+type revisionMarkKey struct{}
+
+func withRevisionMark(ctx context.Context) (context.Context, *revisionMark) {
+	m := &revisionMark{}
+	return context.WithValue(ctx, revisionMarkKey{}, m), m
+}
+
+// markRevision notes that the transaction under ctx revises an existing
+// message or agent. Outside Execute (Moderate, HidePromotion) there is no
+// mark: those signal Revisions themselves after they commit.
+func markRevision(ctx context.Context) {
+	if m, ok := ctx.Value(revisionMarkKey{}).(*revisionMark); ok {
+		m.set = true
+	}
+}
+
+// revisesAgent reports whether a write of op changes what agent.get shows
+// of its author besides the agent. and identity. writes: its devices, its
+// hosted custody, its messaging policy or its offerings.
+func revisesAgent(op string) bool {
+	for _, prefix := range []string{"device.", "hosted.", "messaging.", "offering.publish", "offering.retire"} {
+		if strings.HasPrefix(op, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// signalHidden is a committed hide or restore outside Execute: it wakes the
+// waiting reads and ends the cached pages, as a write does.
+func (s *Store) signalHidden() {
+	s.signalChange()
+	s.revisions.signal()
 }
 
 // WaitSlots bounds concurrent waiters per network address, per key and in

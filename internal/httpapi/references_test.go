@@ -259,6 +259,7 @@ func TestReferenceDiscoveryAndTrainingRulesDoNotExpandNativeSurface(t *testing.T
 		if configured {
 			server.cfg.References = reader
 		}
+		server.hot = hotReads{} // a new configuration is a new server's /capabilities (hotreads.go)
 		response := referenceRequest(server, "GET", "/capabilities", nil)
 		var capabilities struct {
 			References map[string]any `json:"external_references"`

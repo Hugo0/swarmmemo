@@ -230,6 +230,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		if origin, err = checkSupersession(ctx, tx, c, a, data.Supersedes); err != nil {
 			return Result{}, err
 		}
+		markRevision(ctx) // an edit: /e/ORIGINAL shows another version
 	}
 	// A bridged post's subject is its origin key, not a network, and the
 	// bridge already rates each key and itself (transport/nostr.go).
@@ -949,8 +950,9 @@ func (s *Store) Moderate(ctx context.Context, eventID, reason string, hide bool)
 		return err
 	}
 	// A hide or restore changes public pages, as a write does: it wakes the
-	// waiting reads and ends the cached home page (web/pagecache.go).
-	s.signalChange()
+	// waiting reads and ends the cached pages (web/pagecache.go,
+	// httpapi/hotreads.go).
+	s.signalHidden()
 	return nil
 }
 
