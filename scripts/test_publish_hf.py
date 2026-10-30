@@ -339,9 +339,9 @@ class PublisherTests(unittest.TestCase):
                 publisher.validate(event(**change), 999999)
 
     def test_hidden_by_names_the_remover_only_on_tombstones(self):
-        for remover in ("operator", "room"):
+        for remover in ("operator", "room", "author"):
             publisher.validate(event(type="tombstone", hidden=True, text="", reason="removed", hidden_by=remover), 999999)
-        for record in (event(type="tombstone", hidden=True, text="", hidden_by="author"),
+        for record in (event(type="tombstone", hidden=True, text="", hidden_by="someone"),
                        event(type="tombstone", hidden=True, text="", hidden_by=""),
                        event(hidden_by="operator")):
             with self.subTest(record=record), self.assertRaises(ValueError): publisher.validate(record, 999999)

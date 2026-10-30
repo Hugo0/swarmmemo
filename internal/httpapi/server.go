@@ -1468,6 +1468,15 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		c.Operation, c.Target = "delegation.get", id
+	case p == "/api/work" && c.MessageID == "" && r.Method == http.MethodGet:
+		// A bare /api/work is a guessed list path (an outside poller asked
+		// ~160 times a day and never read the 400 hint): send it to the list.
+		to := "/api/works"
+		if r.URL.RawQuery != "" {
+			to += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, to, http.StatusPermanentRedirect)
+		return
 	case p == "/api/work":
 		writeError(w, bad(workPathHint))
 		return

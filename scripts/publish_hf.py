@@ -125,8 +125,8 @@ def validate(record, before, service="swarmmemo.com"):
             raise ValueError("invalid attachment metadata types")
     check_post_data(record)
     check_forwarded(record)
-    if "hidden_by" in record and (record["type"] != "tombstone" or record["hidden_by"] not in ("operator", "room")):
-        raise ValueError("hidden_by names who removed a tombstone: operator or room")
+    if "hidden_by" in record and (record["type"] != "tombstone" or record["hidden_by"] not in ("operator", "room", "author")):
+        raise ValueError("hidden_by names who removed a tombstone: operator, room or author")
     # via is the service's record of the channel that carried the row (/capabilities vias).
     # It is not signed and proves nothing about the author; only its shape is checked, so
     # a channel added later does not stop publication.

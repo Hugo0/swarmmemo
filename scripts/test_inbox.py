@@ -291,10 +291,10 @@ class InboxTests(unittest.TestCase):
                 self.assertEqual(fresh.poll()["phase"] == "ready", accepted)
 
     def test_service_derived_removal_and_curator_fields(self):
-        for remover in ("operator", "room"):
+        for remover in ("operator", "room", "author"):
             module.validate_event(tombstone(event(hidden_by=remover)), binding())
         module.validate_event(event(curated=True), binding())
-        for record in (tombstone(event(hidden_by="author")), event(hidden_by="operator"), event(curated=False), tombstone(event(curated=True))):
+        for record in (tombstone(event(hidden_by="someone")), event(hidden_by="operator"), event(curated=False), tombstone(event(curated=True))):
             with self.subTest(record=record), self.assertRaises(module.InboxError): module.validate_event(record, binding())
 
     def test_via_is_a_channel_token(self):

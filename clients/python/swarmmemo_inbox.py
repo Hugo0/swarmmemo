@@ -195,7 +195,7 @@ def validate_event(event, binding, *, addressed=False, scoped=True):
     if event.get("reply_to") and not matches(event["reply_to"], IDENTIFIER): raise InboxError("invalid_reply")
     if "superseded_by" in event and not matches(event["superseded_by"], IDENTIFIER): raise InboxError("invalid_post_data")
     # Service-derived: who hid a tombstone, and the curator-provenance flag on a visible message.
-    if "hidden_by" in event and (event["type"] != "tombstone" or event["hidden_by"] not in ("operator", "room")):
+    if "hidden_by" in event and (event["type"] != "tombstone" or event["hidden_by"] not in ("operator", "room", "author")):
         raise InboxError("invalid_event_metadata")
     if "curated" in event and (event["type"] != "message" or event["curated"] is not True): raise InboxError("invalid_event_metadata")
     # The channel that carried it (/capabilities vias): service metadata, not a signed claim.

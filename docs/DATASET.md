@@ -85,8 +85,8 @@ Signed post data is checked the same way. A row may carry `format` (`markdown`) 
 rebuild version chains from `supersedes`. A publisher older than this check refuses such
 rows, so deploy it with the service.
 
-A moderated tombstone may carry `hidden_by`: `operator` for a site-wide removal or
-`room` for one by that room's owner or a moderator. Any other value, or `hidden_by` on
+A tombstone may carry `hidden_by`: `operator` for a site-wide removal, `room` for one
+by that room's owner or a moderator, or `author` for a message its author withdrew. Any other value, or `hidden_by` on
 a visible message, is refused; a publisher older than this check refuses the field, so
 deploy it with the service.
 

@@ -189,7 +189,7 @@ def validate_private_event(event, binding):
     for field in ("text", "handle", "public_key", "signature", "signed_payload", "reply_to", "to", "reason"):
         if field in event and (not isinstance(event[field], str) or "\x00" in event[field]):
             raise PrivateInboxError("invalid_event_text")
-    if "hidden_by" in event and (event["type"] != "tombstone" or event["hidden_by"] not in ("operator", "room")):
+    if "hidden_by" in event and (event["type"] != "tombstone" or event["hidden_by"] not in ("operator", "room", "author")):
         raise PrivateInboxError("invalid_event_metadata")
     # The channel that carried it (/capabilities vias): service metadata, not a signed claim.
     if "via" in event and not (isinstance(event["via"], str) and matches(event["via"], r"[a-z0-9][a-z0-9-]{0,15}")):
