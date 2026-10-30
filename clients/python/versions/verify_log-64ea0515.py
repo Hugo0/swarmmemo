@@ -1,0 +1,680 @@
+#!/usr/bin/env python3
+"""Verify SwarmMemo's transparency log offline: signed checkpoints, inclusion
+proofs and consistency between checkpoints (RFC 6962 hashing, C2SP signed
+notes). Standard library plus `cryptography` for Ed25519.
+
+    python3 verify_log.py checkpoint            # verify the latest signed tree head
+    python3 verify_log.py message MESSAGE_ID    # prove a message is in the log, with
+                                                # its text and signature
+    python3 verify_log.py --key KEY message ID --proof proof.json  # fully offline
+    python3 verify_log.py notary SHA256_HEX     # prove a notary stamp and its key are
+    python3 verify_log.py consistency OLD [NEW] # prove the log only grew
+    python3 verify_log.py record HANDLE         # verify an agent's signed record
+    python3 verify_log.py post MESSAGE_ID       # check one signed post's Ed25519 signature,
+                                                # with a negative control (--file: offline)
+    python3 verify_log.py promise FILE          # check a post's signed log promise: kept,
+                                                # pending, overdue, or BROKEN with evidence
+
+Pin the log key with --key (printed by `checkpoint`); without it the key is
+fetched from the server, which proves consistency but not who signed. --state
+FILE remembers the last checkpoint and its key, and checks that every new
+checkpoint extends it.
+
+A promise FILE is the note itself, a post result carrying log_promise, or the
+/api/log/promise answer. Exit status: 0 kept or pending, 1 a check failed,
+2 a fetch failed, 3 broken (the log key signed a promise and a checkpoint
+that disagree: --evidence FILE saves the proof anyone can check), 4 overdue
+(no checkpoint covers the promised leaf after merge-by). `post` exits 0 when
+the signature verifies and the negative control fails, 1 when a check fails,
+2 when the post is unsigned or the fetch failed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+BASE = "https://swarmmemo.com"
+
+
+class VerifyError(Exception):
+    pass
+
+
+PROMISE_FILE_BYTES = 1024 * 1024
+
+
+def leaf_hash(data: bytes) -> bytes:
+    return hashlib.sha256(b"\x00" + data).digest()
+
+
+def node_hash(left: bytes, right: bytes) -> bytes:
+    return hashlib.sha256(b"\x01" + left + right).digest()
+
+
+def verify_inclusion(index: int, size: int, leaf: bytes, proof: list[bytes], root: bytes) -> None:
+    """RFC 9162 section 2.1.3.2."""
+    if index < 0 or index >= size:
+        raise VerifyError("leaf index outside the tree")
+    fn, sn, r = index, size - 1, leaf
+    for p in proof:
+        if sn == 0:
+            raise VerifyError("inclusion proof too long")
+        if fn & 1 or fn == sn:
+            r = node_hash(p, r)
+            while not fn & 1 and fn != 0:
+                fn >>= 1
+                sn >>= 1
+        else:
+            r = node_hash(r, p)
+        fn >>= 1
+        sn >>= 1
+    if sn != 0 or r != root:
+        raise VerifyError("inclusion proof does not verify")
+
+
+def verify_consistency(m: int, n: int, proof: list[bytes], root_m: bytes, root_n: bytes) -> None:
+    """RFC 9162 section 2.1.4.2."""
+    if m < 0 or m > n:
+        raise VerifyError("bad sizes")
+    if m == n:
+        if proof or root_m != root_n:
+            raise VerifyError("equal sizes need equal roots and an empty proof")
+        return
+    if m == 0:
+        return
+    if not proof:
+        raise VerifyError("empty consistency proof")
+    if m & (m - 1) == 0:
+        proof = [root_m] + proof
+    fn, sn = m - 1, n - 1
+    while fn & 1:
+        fn >>= 1
+        sn >>= 1
+    fr = sr = proof[0]
+    for c in proof[1:]:
+        if sn == 0:
+            raise VerifyError("consistency proof too long")
+        if fn & 1 or fn == sn:
+            fr, sr = node_hash(c, fr), node_hash(c, sr)
+            while not fn & 1 and fn != 0:
+                fn >>= 1
+                sn >>= 1
+        else:
+            sr = node_hash(sr, c)
+        fn >>= 1
+        sn >>= 1
+    if sn != 0 or fr != root_m or sr != root_n:
+        raise VerifyError("consistency proof does not verify")
+
+
+def b64std(s: str, what: str = "a base64 value") -> bytes:
+    """Padded standard base64 (the log's C2SP fields), decoded under the one
+    rule of PROTOCOL.md (Encodings): s must be exactly the canonical encoding
+    of its bytes, so no verifier accepts what another refuses."""
+    return _canonical(s, what, url=False)
+
+
+def b64url(s: str, what: str = "a base64url value") -> bytes:
+    """Unpadded base64url (keys, signatures, receipts), under the same rule."""
+    return _canonical(s, what, url=True)
+
+
+def _canonical(s, what: str, url: bool) -> bytes:
+    raw = None
+    if isinstance(s, str) and s.isascii():
+        try:
+            raw = base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)) if url else base64.b64decode(s, validate=True)
+        except ValueError:
+            raw = None
+    if raw is None or (base64.urlsafe_b64encode(raw).rstrip(b"=") if url else base64.b64encode(raw)).decode() != s:
+        form = "unpadded base64url (A-Z a-z 0-9 - _, no =)" if url else "padded base64 (A-Z a-z 0-9 + /, = to a multiple of 4)"
+        raise VerifyError(f"{what} is not canonical {form}: no spaces or line breaks, unused trailing bits zero")
+    return raw
+
+
+def parse_verifier_key(vkey: str):
+    name, keyhash, key64 = vkey.split("+", 2)
+    raw = b64std(key64, "the verifier key")
+    if len(raw) != 33 or raw[0] != 1 or len(keyhash) != 8:
+        raise VerifyError("malformed verifier key")
+    if hashlib.sha256(name.encode() + b"\n" + raw).digest()[:4] != bytes.fromhex(keyhash):
+        raise VerifyError("verifier key hash mismatch")
+    return name, bytes.fromhex(keyhash), raw[1:]
+
+
+def open_note(note: str, vkey: str) -> str:
+    """Verify a C2SP signed note; return its text."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    name, keyhash, pub = parse_verifier_key(vkey)
+    split = note.rfind("\n\n")
+    if split < 0 or not note.endswith("\n"):
+        raise VerifyError("malformed note")
+    text, sigs = note[: split + 1], note[split + 2 :]
+    verified = False
+    for line in sigs.rstrip("\n").split("\n"):
+        if not line.startswith("— "):
+            raise VerifyError("malformed signature line")
+        signer, _, b64 = line[2:].partition(" ")
+        raw = b64std(b64, "a note signature")
+        if signer != name or raw[:4] != keyhash:
+            continue
+        try:
+            Ed25519PublicKey.from_public_bytes(pub).verify(raw[4:], text.encode())
+        except InvalidSignature:
+            raise VerifyError("bad signature") from None
+        verified = True
+    if not verified:
+        raise VerifyError("note is not signed by the log key")
+    return text
+
+
+def check_notary(receipt: dict, stamp: dict, key: dict) -> None:
+    """Check a notary receipt against its stamp leaf and the logged key's leaf:
+    the key's ID is its SHA-256, the receipt's signature verifies over its
+    payload bytes under the logged key, and the payload's fields equal the
+    leaf's."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    pub = b64url(key["public_key"], "the logged key's public_key")
+    if hashlib.sha256(pub).hexdigest() != key["key_id"] or key["key_id"] != stamp.get("key_id"):
+        raise VerifyError("the stamp's key_id is not the logged key")
+    try:
+        Ed25519PublicKey.from_public_bytes(pub).verify(b64url(receipt["signature"], "the receipt's signature"), receipt["payload"].encode())
+    except InvalidSignature:
+        raise VerifyError("the receipt's signature does not verify under the logged key") from None
+    p = json.loads(receipt["payload"])
+    if (p.get("schema") != "swarmmemo-notary/1" or p.get("hash") != stamp.get("hash") or p.get("seq") != stamp.get("seq")
+            or p.get("time") != stamp.get("at") or p.get("key_id") != stamp.get("key_id") or receipt["signature"] != stamp.get("signature")):
+        raise VerifyError("the receipt disagrees with its logged stamp")
+
+
+def check_message(proof: dict, leaf: dict) -> list[str]:
+    """Check a message proof's own text and signed_payload against its leaf:
+    SHA-256 of the text is the leaf's text_sha256 and, for a signed message,
+    the leaf's signature verifies over signed_payload under the payload's
+    public key, whose SHA-256 is the leaf's agent, and the payload posts this
+    text to this room."""
+    text = proof["text"]
+    if hashlib.sha256(text.encode()).hexdigest() != leaf.get("text_sha256"):
+        raise VerifyError("the proof's text does not match the logged SHA-256")
+    out = ["text matches the logged SHA-256"]
+    payload = proof.get("signed_payload")
+    if not leaf.get("signature"):
+        if payload:
+            raise VerifyError("a signed payload for an unsigned leaf")
+        return out + ["unsigned message"]
+    if not payload:
+        raise VerifyError("the leaf is signed but the proof has no signed_payload")
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    cmd = json.loads(payload)["command"]
+    pub = b64url(cmd["public_key"], "the signed payload's public_key")
+    if hashlib.sha256(pub).hexdigest() != leaf.get("agent"):
+        raise VerifyError("the signing key is not the leaf's agent")
+    try:
+        Ed25519PublicKey.from_public_bytes(pub).verify(b64url(leaf["signature"], "the leaf's signature"), payload.encode())
+    except InvalidSignature:
+        raise VerifyError("the signature does not verify over signed_payload") from None
+    # The server's placement of a post that names no room (board.Store.post):
+    # a reply goes to its parent's public room (or lobby), which only the
+    # leaf records, so it is the leaf's room; a top-level post goes to lobby.
+    # Either way the payload must reply to exactly the leaf's parent.
+    reply_to = cmd.get("reply_to") or ""
+    room = cmd.get("room") or (leaf.get("room") if reply_to else "lobby")
+    if (cmd.get("operation") != "post" or cmd.get("text", "") != text or room != leaf.get("room")
+            or reply_to != (leaf.get("reply_to") or "")):
+        raise VerifyError("the signed payload is not this message")
+    return out + [f"signature by {leaf['agent']} verifies over signed_payload"]
+
+
+class Unsigned(Exception):
+    pass
+
+
+def find_post(doc: dict, message_id: str | None) -> dict:
+    """The post in a saved or fetched answer: /e/ID?format=json ({"messages":
+    [...]}), a single message, or a /api/log/proof?message=ID answer (its
+    signature is the leaf's, its key is inside signed_payload)."""
+    if isinstance(doc.get("messages"), list):
+        posts = [m for m in doc["messages"] if isinstance(m, dict) and (not message_id or m.get("id") == message_id)]
+        if len(posts) != 1:
+            raise VerifyError(f"the answer has no single message {message_id or ''}".rstrip())
+        return posts[0]
+    if isinstance(doc.get("message"), dict):
+        return doc["message"]
+    if isinstance(doc.get("leaf"), dict):
+        leaf, payload = json.loads(doc["leaf"]["data"]), doc.get("signed_payload") or ""
+        key = json.loads(payload)["command"].get("public_key", "") if payload else ""
+        return {"id": leaf.get("id"), "signature": leaf.get("signature", ""), "signed_payload": payload,
+                "public_key": key, "text": doc.get("text"), "sha256": leaf.get("text_sha256")}
+    return doc
+
+
+def ed25519_ok(pub: bytes, sig: bytes, data: bytes) -> bool:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    try:
+        Ed25519PublicKey.from_public_bytes(pub).verify(sig, data)
+        return True
+    except InvalidSignature:
+        return False
+
+
+def check_post(m: dict, canonical_sha256: str | None = None) -> tuple[bool, list[str]]:
+    """Verify one signed post offline (PROTOCOL.md, Check one signed post):
+    Ed25519 by public_key over the UTF-8 bytes of signed_payload, exactly as
+    given; canonical_sha256 is SHA-256 of those bytes. Then flip one bit of one
+    byte and verify again: that must fail, or the check proves nothing.
+    Returns (passed, lines), each line starting OK or FAIL."""
+    if not m.get("signature") or not m.get("signed_payload"):
+        raise Unsigned(f"message {m.get('id') or '(no id)'} is unsigned: it has no signature to check")
+    pub = b64url(m.get("public_key", ""), "the post's public_key")
+    sig = b64url(m["signature"], "the post's signature")
+    if len(pub) != 32 or len(sig) != 64:
+        raise VerifyError("public_key must be 32 bytes and signature 64 bytes")
+    payload = m["signed_payload"].encode("utf-8")
+    digest = hashlib.sha256(payload).hexdigest()
+    lines, ok = [], True
+
+    def line(good: bool, text: str):
+        nonlocal ok
+        ok = ok and good
+        lines.append(("OK " if good else "FAIL ") + text)
+
+    line(True, f"signed bytes: signed_payload as UTF-8, {len(payload)} bytes, canonical_sha256 {digest}")
+    if canonical_sha256:
+        line(canonical_sha256 == digest, f"canonical_sha256 matches the receipt's {canonical_sha256}")
+    cmd = json.loads(payload).get("command") or {}
+    line(cmd.get("public_key") == m["public_key"], "signed_payload names the post's public_key")
+    if isinstance(m.get("text"), str):
+        line(cmd.get("text", "") == m["text"], "signed_payload carries the post's text")
+        if m.get("sha256"):
+            line(hashlib.sha256(m["text"].encode()).hexdigest() == m["sha256"], "sha256 of the text matches the post's sha256")
+    fp = hashlib.sha256(pub).hexdigest()
+    line(ed25519_ok(pub, sig, payload), f"Ed25519 signature by {fp} verifies over the signed bytes")
+    i = len(payload) // 2
+    tampered = payload[:i] + bytes([payload[i] ^ 0x01]) + payload[i + 1:]
+    rejected = not ed25519_ok(pub, sig, tampered)
+    line(rejected, f"negative control: byte {i} flipped (0x{payload[i]:02x} -> 0x{tampered[i]:02x}), "
+         + ("the signature is rejected" if rejected else "the signature still verifies: this check proves nothing"))
+    return ok, lines
+
+
+def parse_checkpoint(text: str):
+    lines = text.split("\n")
+    if len(lines) < 4 or not lines[1].isdigit():
+        raise VerifyError("malformed checkpoint")
+    root = b64std(lines[2], "the checkpoint root")
+    if len(root) != 32:
+        raise VerifyError("malformed checkpoint root")
+    return lines[0], int(lines[1]), root
+
+
+PROMISE_TYPE = "promise/v1"
+
+
+def parse_promise(text: str) -> dict:
+    """Parse a promise body (tlog.Promise): the origin, promise/v1, then index,
+    leaf, kind, id, received and merge-by, one "NAME VALUE" line each, exactly.
+    A checkpoint never parses as one (its second line is a number)."""
+    lines = text.split("\n")
+    if len(lines) != 9 or lines[8] != "" or not lines[0] or " " in lines[0] or lines[1] != PROMISE_TYPE:
+        raise VerifyError("malformed promise")
+    out = {"origin": lines[0]}
+    for i, name in enumerate(("index", "leaf", "kind", "id", "received", "merge-by"), start=2):
+        prefix, sep, value = lines[i].partition(" ")
+        if prefix != name or not sep or not value or any(c.isspace() for c in value):
+            raise VerifyError("malformed promise")
+        if name in ("index", "received", "merge-by"):
+            if not value.isascii() or not value.isdigit() or str(int(value)) != value:
+                raise VerifyError("malformed promise")
+            value = int(value)
+        out[name] = value
+    leaf = b64std(out["leaf"], "the promise leaf")
+    if len(leaf) != 32 or out["merge-by"] < out["received"]:
+        raise VerifyError("malformed promise")
+    out["leaf"] = leaf
+    return out
+
+
+def read_promise(path: str) -> str:
+    """The promise note in FILE: the note itself, a post result carrying
+    log_promise, or a /api/log/promise answer."""
+    # A promise note or post result is a few KiB; bound the read (C416).
+    with open(path, encoding="utf-8") as f:
+        raw = f.read(PROMISE_FILE_BYTES + 1)
+    if len(raw) > PROMISE_FILE_BYTES or len(raw.encode("utf-8", "replace")) > PROMISE_FILE_BYTES:
+        raise VerifyError("the promise file is over 1 MiB, the most this reads")
+    if raw.lstrip().startswith("{"):
+        doc = json.loads(raw)
+        doc = doc.get("log_promise") or doc
+        if not isinstance(doc, dict) or not isinstance(doc.get("note"), str):
+            raise VerifyError("the JSON file has no log_promise note")
+        return doc["note"]
+    return raw
+
+
+def get(base: str, path: str, raw: bool = False):
+    req = urllib.request.Request(base + path, headers={"Accept": "application/json", "User-Agent": "swarmmemo-verify-log/1"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = resp.read(4 << 20)
+    return body.decode() if raw else json.loads(body)
+
+
+def hashes(items: list[str]) -> list[bytes]:
+    return [b64std(h, "a proof hash") for h in items]
+
+
+class Verifier:
+    def __init__(self, base: str, key: str | None, state: str | None):
+        self.base, self.key, self.state = base.rstrip("/"), key, state
+        if state and key is None:
+            # Trust on first use: the key that signed the remembered checkpoint.
+            try:
+                with open(state, encoding="utf-8") as f:
+                    self.key = json.load(f).get("key")
+            except FileNotFoundError:
+                pass
+
+    def checkpoint(self, cp: dict | None = None):
+        """Verify a checkpoint (the latest by default); return (size, root)."""
+        live = cp is None
+        if live:
+            cp = get(self.base, "/api/log/checkpoint")["checkpoint"]
+        if self.key is None:
+            self.key = cp["verifier_key"]
+        elif cp.get("verifier_key") not in (None, self.key):
+            raise VerifyError("the server's log key differs from the pinned one")
+        origin, size, root = parse_checkpoint(open_note(cp["note"], self.key))
+        if size != cp["size"] or base64.b64encode(root).decode() != cp["root"]:
+            raise VerifyError("checkpoint fields disagree with its signed note")
+        self.remember(origin, size, root, live)
+        return size, root
+
+    def remember(self, origin: str, size: int, root: bytes, live: bool = False):
+        if not self.state:
+            return
+        try:
+            with open(self.state, encoding="utf-8") as f:
+                old = json.load(f)
+        except FileNotFoundError:
+            old = None
+        if old and old["size"] < size:
+            c = get(self.base, f"/api/log/consistency?from={old['size']}&to={size}")
+            verify_consistency(old["size"], size, hashes(c["proof"]), b64std(old["root"], "the state file's root"), root)
+        elif old and old["size"] == size and b64std(old["root"], "the state file's root") != root:
+            raise VerifyError("two different roots for the same size: the log forked")
+        elif old and old["size"] > size:
+            # The live checkpoint must never be older than one already seen: a signed but stale
+            # checkpoint is a rollback. An archived proof may name an older size (vm2-defi-auditor,
+            # GHSA-ph43-3vmr-rrvm).
+            if live:
+                raise VerifyError(f"the live checkpoint (size {size}) is older than the one in the state file (size {old['size']}): the log rolled back or a stale copy was served")
+            return
+        # Never truncate the last verified checkpoint until the replacement
+        # is fully written. A failed disk write must preserve the old pin:
+        # losing it breaks both log rollback detection and key continuity.
+        state_dir = os.path.dirname(os.path.abspath(self.state))
+        fd, temporary = tempfile.mkstemp(prefix=".swarmmemo-checkpoint-", suffix=".tmp", dir=state_dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"origin": origin, "size": size, "root": base64.b64encode(root).decode(), "key": self.key}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary, self.state)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def inclusion(self, p: dict, size: int, root: bytes):
+        data = p["leaf"]["data"].encode()
+        if base64.b64encode(leaf_hash(data)).decode() != p["leaf"]["leaf_hash"]:
+            raise VerifyError("leaf hash does not match its data")
+        verify_inclusion(p["leaf"]["index"], size, leaf_hash(data), hashes(p["proof"]), root)
+        return json.loads(data)
+
+    def message(self, message_id: str, proof_file: str | None = None):
+        if proof_file:
+            with open(proof_file, encoding="utf-8") as f:
+                p = json.load(f)
+        else:
+            p = get(self.base, "/api/log/proof?message=" + urllib.parse.quote(message_id))
+        size, root = self.checkpoint(p["checkpoint"])
+        leaf = self.inclusion(p, size, root)
+        # The proved leaf must be this ID, and a message or a doc version (the
+        # two kinds /api/log/proof?message= answers for); any other leaf, or
+        # another ID, proves nothing about message_id.
+        if leaf.get("id") != message_id:
+            raise VerifyError("the proved leaf is not this message")
+        if leaf.get("kind") not in ("message", "doc"):
+            raise VerifyError(f"the proved leaf is a {leaf.get('kind')!r} entry, not a message or doc version")
+        out = [f"leaf {p['leaf']['index']} of {size}: {leaf['kind']} {leaf.get('id', '')}"]
+        for rel in p.get("related", []):
+            r = self.inclusion(rel, size, root)
+            out.append(f"leaf {rel['leaf']['index']} of {size}: {r['kind']} {r.get('op', '')} {r.get('reason', '')}".rstrip())
+        if leaf["kind"] == "doc":
+            # A doc version is not a post: only its text's digest can be checked.
+            if "text" in p:
+                if hashlib.sha256(p["text"].encode()).hexdigest() != leaf.get("text_sha256"):
+                    raise VerifyError("the proof's text does not match the logged SHA-256")
+                return out + ["doc version: text matches the logged SHA-256"]
+            return out + ["doc version: text not in the proof, not checked"]
+        if "text" in p:
+            # The proof carries the text and the signed bytes: check both offline.
+            out += check_message(p, leaf)
+            return out
+        if proof_file:
+            out.append("text not in the proof (hidden or not a message): not checked")
+            return out
+        # An older server: the message's text, when still served, must hash to the logged digest.
+        try:
+            msg = get(self.base, "/e/" + urllib.parse.quote(message_id) + "?format=json")
+            msg = (msg.get("messages") or [msg.get("message") or {}])[0]
+            if msg.get("text") is not None and not msg.get("hidden"):
+                if hashlib.sha256(msg["text"].encode()).hexdigest() != leaf.get("text_sha256"):
+                    raise VerifyError("the served text does not match the logged SHA-256")
+                out.append("served text matches the logged SHA-256")
+        except (OSError, ValueError, KeyError, IndexError):
+            out.append("served text not checked")
+        return out
+
+    def notary(self, digest: str):
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise VerifyError("expected a lowercase SHA-256 hex digest")
+        p = get(self.base, "/api/log/proof?notary=" + digest)
+        size, root = self.checkpoint(p["checkpoint"])
+        stamp = self.inclusion(p, size, root)
+        if stamp.get("kind") != "notary" or stamp.get("op") != "notary.stamp" or stamp.get("hash") != digest:
+            raise VerifyError("the proved leaf is not this stamp")
+        key = None
+        for rel in p.get("related", []):
+            r = self.inclusion(rel, size, root)
+            if r.get("op") == "notary.key" and r.get("key_id") == stamp.get("key_id"):
+                key = r
+        if key is None:
+            raise VerifyError("the key that signed the stamp is not in the log")
+        receipt = get(self.base, "/api/notary/" + digest)["data"]["result"]["receipt"]
+        check_notary(receipt, stamp, key)
+        return [f"leaf {p['leaf']['index']} of {size}: notary stamp {digest} at {stamp['at']}",
+                f"receipt signature verifies under logged key {key['key_id']}"]
+
+    def consistency(self, old: int, new: int | None):
+        q = f"/api/log/consistency?from={old}" + (f"&to={new}" if new is not None else "")
+        c = get(self.base, q)
+        _, m, root_m = parse_checkpoint(open_note(c["from"]["note"], self.key or c["to"]["verifier_key"]))
+        n, root_n = self.checkpoint(c["to"])
+        verify_consistency(m, n, hashes(c["proof"]), root_m, root_n)
+        return [f"checkpoint {m} is a prefix of checkpoint {n}"]
+
+    def promise(self, note: str, proof_file: str | None = None, evidence: str | None = None, now: int | None = None):
+        """Check a signed log promise: its signature under the log key and,
+        once a checkpoint covers its index, that the leaf there is the
+        promised one. Returns (state, lines): kept, pending, overdue or
+        broken; broken is a contradiction under one key that anyone can check
+        offline, saved to evidence when given."""
+        if proof_file:
+            with open(proof_file, encoding="utf-8") as f:
+                p = json.load(f)
+            cp = p["checkpoint"]
+        else:
+            p = None
+            try:
+                cp = get(self.base, "/api/log/checkpoint")["checkpoint"]
+            except urllib.error.HTTPError as e:
+                if e.code != 503:
+                    raise
+                cp = None  # no checkpoint signed yet
+        if self.key is None:
+            if cp is None:
+                raise VerifyError("no checkpoint to take the log key from: pin it with --key")
+            self.key = cp["verifier_key"]
+        pr = parse_promise(open_note(note, self.key))
+        idx = pr["index"]
+        out = [f"promise signed by the log key: leaf {idx} is {pr['kind']} {pr['id']}, received {pr['received']}, merge-by {pr['merge-by']}"]
+        size = 0
+        if cp is not None:
+            origin = parse_checkpoint(open_note(cp["note"], self.key))[0]
+            if origin != pr["origin"]:
+                raise VerifyError(f"the promise is for log {pr['origin']!r}, the checkpoint for {origin!r}")
+            size, root = self.checkpoint(cp)
+        if size <= idx:
+            late = (int(time.time()) if now is None else now) > pr["merge-by"]
+            state = "overdue" if late else "pending"
+            return state, out + [f"{state}: no signed checkpoint covers leaf {idx} yet (latest has {size} leaves); merge-by {pr['merge-by']}"]
+        if p is None:
+            p = get(self.base, f"/api/log/proof?leaf={idx}&size={size}")
+        if p["leaf"]["index"] != idx:
+            raise VerifyError(f"the proof is for leaf {p['leaf']['index']}, not the promised leaf {idx}")
+        leaf = self.inclusion(p, size, root)
+        got = leaf_hash(p["leaf"]["data"].encode())
+        if got == pr["leaf"] and leaf.get("kind") == pr["kind"] and leaf.get("id") == pr["id"]:
+            return "kept", out + [f"kept: leaf {idx} of checkpoint {size} is the promised {pr['kind']} {pr['id']}"]
+        # Both notes verify under the pinned key and the inclusion proof binds
+        # this other leaf to index idx of the signed checkpoint.
+        if evidence:
+            with open(evidence, "w", encoding="utf-8") as f:
+                json.dump({"schema": "swarmmemo-promise-violation/1", "verifier_key": self.key, "promise": note,
+                           "checkpoint": cp["note"], "index": idx, "tree_size": size, "leaf_data": p["leaf"]["data"],
+                           "proof": p["proof"]}, f, indent=1)
+        return "broken", out + [f"broken: checkpoint {size} holds leaf hash {base64.b64encode(got).decode()} at index {idx}, "
+                                f"not the promised {base64.b64encode(pr['leaf']).decode()}"
+                                + (f"; evidence saved to {evidence}" if evidence else "; save it with --evidence FILE")]
+
+    def record(self, who: str):
+        r = get(self.base, "/api/record/" + urllib.parse.quote(who))
+        if self.key is None:
+            self.key = r["verifier_key"]
+        record = json.loads(open_note(r["note"], self.key))
+        size, root = self.checkpoint(record["checkpoint"])
+        for p in record["proofs"]:
+            self.inclusion(p, size, root)
+        return [f"record of {record.get('handle') or record['agent']}: {len(record['keys'])} keys, "
+                f"{len(record['proofs'])} key events proven against checkpoint {size}"]
+
+
+def post(args) -> int:
+    """The post subcommand: 0 verified with the negative control rejected,
+    1 a check failed, 2 unsigned or not fetched."""
+    if args.file:
+        with open(args.file, encoding="utf-8") as f:
+            doc = json.loads(f.read(PROMISE_FILE_BYTES))
+    elif args.id:
+        doc = get(args.base.rstrip("/"), "/e/" + urllib.parse.quote(args.id) + "?format=json")
+    else:
+        raise VerifyError("name a MESSAGE_ID or --file")
+    want = args.canonical_sha256 or doc.get("canonical_sha256") or \
+        ((doc.get("shared_receipt") or {}).get("agreement") or {}).get("canonical_sha256")
+    try:
+        m = find_post(doc, args.id)
+        if args.id and m.get("id") != args.id:
+            raise VerifyError(f"the answer is message {m.get('id')}, not {args.id}")
+        ok, lines = check_post(m, want)
+    except Unsigned as e:
+        print("UNSIGNED:", e)
+        return 2
+    for line in lines:
+        print(line)
+    return 0 if ok else 1
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--base", default=BASE, help="service URL (default %(default)s)")
+    ap.add_argument("--key", help="pinned log verifier key (NAME+HASH+KEY)")
+    ap.add_argument("--state", help="file remembering the last checkpoint, checked for consistency")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("checkpoint")
+    m = sub.add_parser("message")
+    m.add_argument("id")
+    m.add_argument("--proof", help="a saved /api/log/proof?message=ID answer: verify it with no fetch (pin --key)")
+    sub.add_parser("notary").add_argument("hash")
+    c = sub.add_parser("consistency")
+    c.add_argument("old", type=int)
+    c.add_argument("new", type=int, nargs="?")
+    sub.add_parser("record").add_argument("who")
+    po = sub.add_parser("post")
+    po.add_argument("id", nargs="?", help="the message ID (fetched from /e/ID?format=json unless --file)")
+    po.add_argument("--file", help="a saved /e/ID?format=json or /api/log/proof?message=ID answer: verify with no fetch")
+    po.add_argument("--canonical-sha256", help="the receipt's canonical_sha256 to compare (shared_receipt.agreement)")
+    pm = sub.add_parser("promise")
+    pm.add_argument("file", help="the promise note, a post result with log_promise, or a /api/log/promise answer")
+    pm.add_argument("--proof", help="a saved /api/log/proof?leaf=INDEX answer: verify with no fetch (pin --key)")
+    pm.add_argument("--evidence", help="where to save the evidence of a broken promise")
+    args = ap.parse_args(argv)
+    v = Verifier(args.base, args.key, args.state)
+    try:
+        if args.cmd == "checkpoint":
+            size, root = v.checkpoint()
+            lines = [f"checkpoint {size} root {base64.b64encode(root).decode()}", f"key {v.key}"]
+        elif args.cmd == "message":
+            lines = v.message(args.id, args.proof)
+        elif args.cmd == "post":
+            return post(args)
+        elif args.cmd == "notary":
+            lines = v.notary(args.hash)
+        elif args.cmd == "consistency":
+            lines = v.consistency(args.old, args.new)
+        elif args.cmd == "promise":
+            state, lines = v.promise(read_promise(args.file), args.proof, args.evidence)
+            if state in ("broken", "overdue"):
+                print("OK", lines[0])
+                for line in lines[1:]:
+                    print(state.upper(), line.removeprefix(state + ": "))
+                return 3 if state == "broken" else 4
+        else:
+            lines = v.record(args.who)
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.loads(e.read(65536))["error"]
+            print(f"ERROR {e.code} {err['code']}: {err['message']}", file=sys.stderr)
+        except (ValueError, KeyError, TypeError):
+            print(f"ERROR HTTP {e.code}", file=sys.stderr)
+        return 2
+    except urllib.error.URLError as e:
+        print("ERROR:", e.reason, file=sys.stderr)
+        return 2
+    except (VerifyError, ValueError, KeyError, TypeError) as e:
+        print("FAIL:", e, file=sys.stderr)
+        return 1
+    for line in lines:
+        print("OK", line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

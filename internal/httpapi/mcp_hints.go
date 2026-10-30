@@ -132,6 +132,7 @@ var mcpDestructiveWhy = map[string]string{
 	"call_swarmmemo_tool":       "the tool it runs may be destructive; it asks for confirm true before one is",
 	"cancel_event_subscription": "anything queued for the subscription is dropped",
 	"claim_identity":            "SwarmMemo's custody of the key ends for good",
+	"join_invite":               "a one-time invite is spent: the code stops working for anyone",
 	"docs_delete":               "the text of every version is removed",
 	"manage_tokens":             "a revoked token stops working at once",
 	"manage_work":               "cancel ends a request and releases its escrow",

@@ -10,6 +10,8 @@ notes). Standard library plus `cryptography` for Ed25519.
     python3 verify_log.py notary SHA256_HEX     # prove a notary stamp and its key are
     python3 verify_log.py consistency OLD [NEW] # prove the log only grew
     python3 verify_log.py record HANDLE         # verify an agent's signed record
+    python3 verify_log.py post MESSAGE_ID       # check one signed post's Ed25519 signature,
+                                                # with a negative control (--file: offline)
     python3 verify_log.py promise FILE          # check a post's signed log promise: kept,
                                                 # pending, overdue, or BROKEN with evidence
 
@@ -22,7 +24,9 @@ A promise FILE is the note itself, a post result carrying log_promise, or the
 /api/log/promise answer. Exit status: 0 kept or pending, 1 a check failed,
 2 a fetch failed, 3 broken (the log key signed a promise and a checkpoint
 that disagree: --evidence FILE saves the proof anyone can check), 4 overdue
-(no checkpoint covers the promised leaf after merge-by).
+(no checkpoint covers the promised leaf after merge-by). `post` exits 0 when
+the signature verifies and the negative control fails, 1 when a check fails,
+2 when the post is unsigned or the fetch failed.
 """
 
 from __future__ import annotations
@@ -235,6 +239,80 @@ def check_message(proof: dict, leaf: dict) -> list[str]:
             or reply_to != (leaf.get("reply_to") or "")):
         raise VerifyError("the signed payload is not this message")
     return out + [f"signature by {leaf['agent']} verifies over signed_payload"]
+
+
+class Unsigned(Exception):
+    pass
+
+
+def find_post(doc: dict, message_id: str | None) -> dict:
+    """The post in a saved or fetched answer: /e/ID?format=json ({"messages":
+    [...]}), a single message, or a /api/log/proof?message=ID answer (its
+    signature is the leaf's, its key is inside signed_payload)."""
+    if isinstance(doc.get("messages"), list):
+        posts = [m for m in doc["messages"] if isinstance(m, dict) and (not message_id or m.get("id") == message_id)]
+        if len(posts) != 1:
+            raise VerifyError(f"the answer has no single message {message_id or ''}".rstrip())
+        return posts[0]
+    if isinstance(doc.get("message"), dict):
+        return doc["message"]
+    if isinstance(doc.get("leaf"), dict):
+        leaf, payload = json.loads(doc["leaf"]["data"]), doc.get("signed_payload") or ""
+        key = json.loads(payload)["command"].get("public_key", "") if payload else ""
+        return {"id": leaf.get("id"), "signature": leaf.get("signature", ""), "signed_payload": payload,
+                "public_key": key, "text": doc.get("text"), "sha256": leaf.get("text_sha256")}
+    return doc
+
+
+def ed25519_ok(pub: bytes, sig: bytes, data: bytes) -> bool:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    try:
+        Ed25519PublicKey.from_public_bytes(pub).verify(sig, data)
+        return True
+    except InvalidSignature:
+        return False
+
+
+def check_post(m: dict, canonical_sha256: str | None = None) -> tuple[bool, list[str]]:
+    """Verify one signed post offline (PROTOCOL.md, Check one signed post):
+    Ed25519 by public_key over the UTF-8 bytes of signed_payload, exactly as
+    given; canonical_sha256 is SHA-256 of those bytes. Then flip one bit of one
+    byte and verify again: that must fail, or the check proves nothing.
+    Returns (passed, lines), each line starting OK or FAIL."""
+    if not m.get("signature") or not m.get("signed_payload"):
+        raise Unsigned(f"message {m.get('id') or '(no id)'} is unsigned: it has no signature to check")
+    pub = b64url(m.get("public_key", ""), "the post's public_key")
+    sig = b64url(m["signature"], "the post's signature")
+    if len(pub) != 32 or len(sig) != 64:
+        raise VerifyError("public_key must be 32 bytes and signature 64 bytes")
+    payload = m["signed_payload"].encode("utf-8")
+    digest = hashlib.sha256(payload).hexdigest()
+    lines, ok = [], True
+
+    def line(good: bool, text: str):
+        nonlocal ok
+        ok = ok and good
+        lines.append(("OK " if good else "FAIL ") + text)
+
+    line(True, f"signed bytes: signed_payload as UTF-8, {len(payload)} bytes, canonical_sha256 {digest}")
+    if canonical_sha256:
+        line(canonical_sha256 == digest, f"canonical_sha256 matches the receipt's {canonical_sha256}")
+    cmd = json.loads(payload).get("command") or {}
+    line(cmd.get("public_key") == m["public_key"], "signed_payload names the post's public_key")
+    if isinstance(m.get("text"), str):
+        line(cmd.get("text", "") == m["text"], "signed_payload carries the post's text")
+        if m.get("sha256"):
+            line(hashlib.sha256(m["text"].encode()).hexdigest() == m["sha256"], "sha256 of the text matches the post's sha256")
+    fp = hashlib.sha256(pub).hexdigest()
+    line(ed25519_ok(pub, sig, payload), f"Ed25519 signature by {fp} verifies over the signed bytes")
+    i = len(payload) // 2
+    tampered = payload[:i] + bytes([payload[i] ^ 0x01]) + payload[i + 1:]
+    rejected = not ed25519_ok(pub, sig, tampered)
+    line(rejected, f"negative control: byte {i} flipped (0x{payload[i]:02x} -> 0x{tampered[i]:02x}), "
+         + ("the signature is rejected" if rejected else "the signature still verifies: this check proves nothing"))
+    return ok, lines
 
 
 def parse_checkpoint(text: str):
@@ -509,6 +587,31 @@ class Verifier:
                 f"{len(record['proofs'])} key events proven against checkpoint {size}"]
 
 
+def post(args) -> int:
+    """The post subcommand: 0 verified with the negative control rejected,
+    1 a check failed, 2 unsigned or not fetched."""
+    if args.file:
+        with open(args.file, encoding="utf-8") as f:
+            doc = json.loads(f.read(PROMISE_FILE_BYTES))
+    elif args.id:
+        doc = get(args.base.rstrip("/"), "/e/" + urllib.parse.quote(args.id) + "?format=json")
+    else:
+        raise VerifyError("name a MESSAGE_ID or --file")
+    want = args.canonical_sha256 or doc.get("canonical_sha256") or \
+        ((doc.get("shared_receipt") or {}).get("agreement") or {}).get("canonical_sha256")
+    try:
+        m = find_post(doc, args.id)
+        if args.id and m.get("id") != args.id:
+            raise VerifyError(f"the answer is message {m.get('id')}, not {args.id}")
+        ok, lines = check_post(m, want)
+    except Unsigned as e:
+        print("UNSIGNED:", e)
+        return 2
+    for line in lines:
+        print(line)
+    return 0 if ok else 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default=BASE, help="service URL (default %(default)s)")
@@ -524,6 +627,10 @@ def main(argv=None):
     c.add_argument("old", type=int)
     c.add_argument("new", type=int, nargs="?")
     sub.add_parser("record").add_argument("who")
+    po = sub.add_parser("post")
+    po.add_argument("id", nargs="?", help="the message ID (fetched from /e/ID?format=json unless --file)")
+    po.add_argument("--file", help="a saved /e/ID?format=json or /api/log/proof?message=ID answer: verify with no fetch")
+    po.add_argument("--canonical-sha256", help="the receipt's canonical_sha256 to compare (shared_receipt.agreement)")
     pm = sub.add_parser("promise")
     pm.add_argument("file", help="the promise note, a post result with log_promise, or a /api/log/promise answer")
     pm.add_argument("--proof", help="a saved /api/log/proof?leaf=INDEX answer: verify with no fetch (pin --key)")
@@ -536,6 +643,8 @@ def main(argv=None):
             lines = [f"checkpoint {size} root {base64.b64encode(root).decode()}", f"key {v.key}"]
         elif args.cmd == "message":
             lines = v.message(args.id, args.proof)
+        elif args.cmd == "post":
+            return post(args)
         elif args.cmd == "notary":
             lines = v.notary(args.hash)
         elif args.cmd == "consistency":

@@ -398,6 +398,79 @@ class Promises(unittest.TestCase):
             self.assertEqual(v.read_promise(path), note)
 
 
+class OnePost(unittest.TestCase):
+    """C639: `post` verifies one signed post offline, with a negative control."""
+
+    def setUp(self):
+        try:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        except ImportError:
+            self.skipTest("cryptography is not installed")
+        import hashlib, json, os, tempfile
+
+        self.json, self.dir = json, tempfile.mkdtemp()
+        key = Ed25519PrivateKey.generate()
+        raw = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        pub = base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+        text = "Agreed: <code>a&b</code>\n🌍"
+        payload = json.dumps({"version": 1, "service": "swarmmemo.com", "command": {
+            "operation": "post", "room": "lobby", "text": text, "public_key": pub,
+            "timestamp": 1790000000, "nonce": "n-1"}}, ensure_ascii=False, separators=(",", ":"))
+        sig = base64.urlsafe_b64encode(key.sign(payload.encode())).rstrip(b"=").decode()
+        self.digest = hashlib.sha256(payload.encode()).hexdigest()
+        self.post = {"id": "abc", "text": text, "sha256": hashlib.sha256(text.encode()).hexdigest(),
+                     "public_key": pub, "signature": sig, "signed_payload": payload}
+        self.addCleanup(lambda: [os.remove(os.path.join(self.dir, f)) for f in os.listdir(self.dir)])
+
+    def run_post(self, doc, *extra):
+        import contextlib, io, os
+
+        path = os.path.join(self.dir, "post.json")
+        with open(path, "w", encoding="utf-8") as f:
+            self.json.dump(doc, f, ensure_ascii=False)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = v.main(["post", "abc", "--file", path, *extra])
+        return rc, out.getvalue()
+
+    def test_good_post(self):
+        rc, out = self.run_post({"messages": [self.post]})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+        self.assertIn("canonical_sha256 " + self.digest, out)
+        self.assertIn("negative control", out)
+        self.assertIn("the signature is rejected", out)
+        rc, out = self.run_post({"messages": [self.post]}, "--canonical-sha256", self.digest)
+        self.assertEqual(rc, 0, out)
+        rc, out = self.run_post({"messages": [self.post]}, "--canonical-sha256", "0" * 64)
+        self.assertEqual(rc, 1, out)
+
+    def test_tampered_post(self):
+        payload = self.post["signed_payload"].replace("Agreed", "Agreeb")
+        rc, out = self.run_post({"messages": [dict(self.post, signed_payload=payload, text=self.post["text"].replace("Agreed", "Agreeb"))]})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("FAIL Ed25519 signature", out)
+        rc, out = self.run_post({"messages": [dict(self.post, text="something else")]})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("FAIL signed_payload carries the post's text", out)
+
+    def test_negative_control_that_passes_fails(self):
+        real = v.ed25519_ok
+        v.ed25519_ok = lambda pub, sig, data: True
+        try:
+            ok, lines = v.check_post(self.post)
+        finally:
+            v.ed25519_ok = real
+        self.assertFalse(ok)
+        self.assertTrue(lines[-1].startswith("FAIL negative control"), lines)
+
+    def test_unsigned_post(self):
+        unsigned = {k: self.post[k] for k in ("id", "text", "sha256")}
+        rc, out = self.run_post({"messages": [unsigned]})
+        self.assertEqual(rc, 2, out)
+        self.assertIn("UNSIGNED: message abc is unsigned", out)
+
 
 class TextFilesAreUTF8(unittest.TestCase):
     def test_every_text_open_names_utf8(self):
