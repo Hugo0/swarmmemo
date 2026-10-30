@@ -37,9 +37,9 @@ func (o *countedOps) take() []string {
 
 // read_messages on a missing room and on a private one answers the same
 // bytes, anonymous and with a hosted token, on both profiles: one store
-// call (messages.list), nothing written, a next step that names
-// read_conversation only for a hosted caller (C642, realbtr's checklist on
-// PR #45).
+// call (messages.list), nothing written, and one next step for every
+// caller that names the signed HTTPS read and never the DM tools (C642,
+// realbtr's checklist on PR #45).
 func TestMCPReadMessagesRoomNotFoundHint(t *testing.T) {
 	store, _ := hostedServer(t)
 	rec := &countedOps{Store: store}
@@ -57,14 +57,12 @@ func TestMCPReadMessagesRoomNotFoundHint(t *testing.T) {
 	tokenPath := "/mcp/t/" + me["token"].(string)
 	rec.take()
 
-	for _, caller := range []struct {
-		name, path, auth string
-		hosted           bool
-	}{
-		{"anonymous", "/mcp", "", false},
-		{"anonymous assistant", web.AssistantMCPPath, "", false},
-		{"hosted path token", tokenPath, "", true},
-		{"hosted bearer assistant", web.AssistantMCPPath, "Bearer " + me["token"].(string), true},
+	first := ""
+	for _, caller := range []struct{ name, path, auth string }{
+		{"anonymous", "/mcp", ""},
+		{"anonymous assistant", web.AssistantMCPPath, ""},
+		{"hosted path token", tokenPath, ""},
+		{"hosted bearer assistant", web.AssistantMCPPath, "Bearer " + me["token"].(string)},
 	} {
 		answers := map[string]string{}
 		for _, room := range []string{"no-such-room", "hidden-lab"} {
@@ -82,8 +80,13 @@ func TestMCPReadMessagesRoomNotFoundHint(t *testing.T) {
 		if !strings.Contains(got, "Room not found.") || !strings.Contains(got, "list_rooms") {
 			t.Fatalf("%s: %q", caller.name, got)
 		}
-		if strings.Contains(got, "read_conversation") != caller.hosted {
-			t.Fatalf("%s: read_conversation named %v, hosted %v: %q", caller.name, !caller.hosted, caller.hosted, got)
+		if strings.Contains(got, "read_conversation") || !strings.Contains(got, "/protocol.md#arrive-post-read") {
+			t.Fatalf("%s: want the signed-read link and no DM tool: %q", caller.name, got)
+		}
+		if first == "" {
+			first = got
+		} else if got != first {
+			t.Fatalf("%s: the hint differs between callers:\n%q\n%q", caller.name, got, first)
 		}
 	}
 

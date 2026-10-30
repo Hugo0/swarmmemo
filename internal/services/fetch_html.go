@@ -52,10 +52,11 @@ var blockElements = map[string]bool{
 	"details": true, "summary": true, "fieldset": true, "body": true, "html": true, "center": true, "hgroup": true,
 }
 
-// htmlTextLimit bounds the text one conversion builds: more than an answer
-// returns (FetchTextMax), so a page of short relative links cannot grow
-// into megabytes of resolved URLs.
-const htmlTextLimit = FetchTextMax + 16<<10
+// htmlTextLimit bounds the text one conversion builds: all of it can be
+// paged through with offset (FetchOffsetMax), and a page of short relative
+// links cannot grow into megabytes of resolved URLs. It counts only the text
+// kept, so a long skipped prefix (scripts, styles, navigation) costs nothing.
+const htmlTextLimit = FetchOffsetMax
 
 // pageText is a page converted: its title and its text as Markdown.
 type pageText struct {

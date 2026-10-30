@@ -167,7 +167,7 @@ func TestHTMLToTextIsLinear(t *testing.T) {
 	} {
 		start := time.Now()
 		_, text := services.HTMLToTextForTest(doc, "https://site.example/"+strings.Repeat("d", 1900)+"/")
-		if len(text) > services.FetchTextMax+64<<10 {
+		if len(text) > services.FetchOffsetMax+4<<10 { // all of it reachable with offset, never more
 			t.Errorf("%s: %d bytes of text", name, len(text))
 		}
 		if d := time.Since(start); d > 2*time.Second {

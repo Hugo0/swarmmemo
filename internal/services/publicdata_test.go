@@ -1267,3 +1267,57 @@ func FuzzPublicDataParams(f *testing.F) {
 		}
 	})
 }
+
+// TestPublicDataDataSHA256 pins C643 (kosoyy): data_sha256 digests data
+// alone, so it is the same on every fetch of the same rows whatever the
+// call's id and times, and anyone recomputes it with the documented Python
+// recipe.
+func TestPublicDataDataSHA256(t *testing.T) {
+	v := newPDEnv(t, false)
+	t0 := unix("2026-07-12")
+	res1, _, err := v.call(t, "fetch", `{"dataset":"sea_ice_extent","params":{}}`, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2, _, err := v.call(t, "fetch", `{"dataset":"sea_ice_extent","params":{}}`, t0+13*3600) // past the TTL: refetched
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := res1["result"].(map[string]any), res2["result"].(map[string]any)
+	if a["fetched_at"] == b["fetched_at"] || a["cache"] != "miss" || b["cache"] != "miss" {
+		t.Fatalf("want two separate upstream fetches: %v %v / %v %v", a["fetched_at"], a["cache"], b["fetched_at"], b["cache"])
+	}
+	if reflect.DeepEqual(res1, res2) {
+		t.Fatal("the two responses should differ in their per-call fields")
+	}
+	h, _ := a["data_sha256"].(string)
+	if len(h) != 64 || strings.ToLower(h) != h {
+		t.Fatalf("data_sha256: %q", a["data_sha256"])
+	}
+	eq(t, "stable across fetches", b["data_sha256"], h)
+	// Recompute from the response's own data, as an agent would.
+	eq(t, "recomputed from data", services.PDDataSHA256(a["data"]), h)
+	// The catalogue states the recipe.
+	eq(t, "catalogue recipe", services.PublicDataDatasetsForTest(v.cfg)["data_sha256_how"], services.PublicDataSHA256How)
+
+	// The exact Python recipe, on unicode, nested and unsorted keys, control
+	// characters, HTML characters and every float shape:
+	// json.dumps(json.loads(fixture), sort_keys=True, separators=(',',':'), ensure_ascii=False)
+	const fixture = "{\"zeta\":{\"b\":[1,2.5,{\"y\":null,\"x\":true}],\"a\":\"Z\u00fcrich \u2603 \u6771\u4eac \U0001f600\"},\"Alpha\":-0,\"alpha\":0.00001,\"big\":12345678901234567890,\"f\":[1.0,1e16,1.5e300,123456789.125,-0.0001,1e-7,100.0],\"ctl\":\"a\\nb\\t\\\"q\\\" \\\\ \\u0001 \\u001f \\u007f \u2028 <&>\",\"\u00e9\":\"key\",\"\":\"empty\",\"\u03a9\":{\"\u00fc\":1,\"u\":2}}"
+	const python = "{\"\":\"empty\",\"Alpha\":0,\"alpha\":1e-05,\"big\":12345678901234567890,\"ctl\":\"a\\nb\\t\\\"q\\\" \\\\ \\u0001 \\u001f \x7f \u2028 <&>\",\"f\":[1.0,1e+16,1.5e+300,123456789.125,-0.0001,1e-07,100.0],\"zeta\":{\"a\":\"Z\u00fcrich \u2603 \u6771\u4eac \U0001f600\",\"b\":[1,2.5,{\"x\":true,\"y\":null}]},\"\u00e9\":\"key\",\"\u03a9\":{\"u\":2,\"\u00fc\":1}}"
+	const pythonSHA = "d5ca7933b6be2c60bbf61216e7d7c5b39a652bf5259f16d9fc4653443d0f8d37"
+	d := json.NewDecoder(strings.NewReader(fixture))
+	d.UseNumber()
+	var data any
+	if err := d.Decode(&data); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := services.PDDataCanonical(data)
+	if !ok || got != python {
+		t.Fatalf("canonical form:\n got %q\nwant %q", got, python)
+	}
+	eq(t, "python sha", services.PDDataSHA256(data), pythonSHA)
+	// Go values (float64 3 is written 3, which Python reads as an int).
+	got, _ = services.PDDataCanonical(map[string]any{"b": 3.0, "a": []float64{0.1, 1e21, 2.5e-5}})
+	eq(t, "go floats", got, `{"a":[0.1,1e+21,2.5e-05],"b":3}`)
+}

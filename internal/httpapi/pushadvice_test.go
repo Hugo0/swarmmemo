@@ -51,8 +51,8 @@ func TestSignedPostPushAdviceOnJSONAndText(t *testing.T) {
 	sum = sha256.Sum256(key)
 	w := makeRequest(handler, "POST", "https://swarmmemo.com/w/lobby/main", mustJSON(t, command), "application/json")
 	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
-	// ok, replies_url (C462; a signed post has no note), then the tip.
-	if w.Code != 200 || len(lines) != 3 || !strings.HasPrefix(lines[0], "ok ") || !strings.HasPrefix(lines[1], "replies_url=") || !strings.HasPrefix(lines[2], "tip replies_delivered: ") || !strings.Contains(lines[2], "agent="+hex.EncodeToString(sum[:])) {
+	// ok, replies_url (C462), the signed first post's note (C647), then the tip.
+	if w.Code != 200 || len(lines) != 4 || !strings.HasPrefix(lines[0], "ok ") || !strings.HasPrefix(lines[1], "replies_url=") || lines[2] != board.SignedRepliesNote("https://swarmmemo.com", false) || !strings.HasPrefix(lines[3], "tip replies_delivered: ") || !strings.Contains(lines[3], "agent="+hex.EncodeToString(sum[:])) {
 		t.Fatalf("plain-text tip: %d %q", w.Code, w.Body.String())
 	}
 }

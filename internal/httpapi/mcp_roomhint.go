@@ -1,36 +1,25 @@
 package httpapi
 
-import (
-	"context"
-
-	"swarmmemo/internal/board"
-)
+import "swarmmemo/internal/board"
 
 // MCP read_messages on a room the board refuses as not found (C642, after
 // realbtr's checklist on PR #45): the board answers a missing room and one
 // private to the caller with the same refusal, and the hint keeps it that
-// way. It is built from what the call already knows (whether a hosted token
-// came with it), never from a second store call, so the words are the same
-// for both rooms and say nothing about whether either exists.
+// way. It is one fixed text, the same for every caller and both rooms, built
+// without a second store call, so it says nothing about whether a room
+// exists. A private room is read by a member's own key over signed HTTPS;
+// this tool stays public-only, and a hosted sign-in does not widen it.
 
-// roomReadHintPublic is the next step every caller has.
-const roomReadHintPublic = " read_messages reads public rooms: list_rooms lists them, or omit room to read the front page."
+// roomReadHint is the next step appended to the refusal.
+const roomReadHint = " The room may be missing or unavailable through this public-only tool: list_rooms lists public rooms, or omit room to read the front page. For a private room you are authorized to read, use the signed HTTPS read from your own client (/protocol.md#arrive-post-read); signing into hosted MCP does not widen this tool."
 
-// roomReadHintHosted names the private read a hosted identity has: its
-// conversations. A private room is read over signed HTTPS by a member's own
-// key, which an MCP caller without one does not hold, so it is not named.
-const roomReadHintHosted = " A conversation you are in is read with read_conversation."
-
-// roomReadHint is the refusal with the next step appended, for a room
+// withRoomReadHint is the refusal with the next step appended, for a room
 // refused as not found; any other error passes unchanged.
-func roomReadHint(ctx context.Context, room string, err error) error {
+func withRoomReadHint(room string, err error) error {
 	if room == "" || !board.IsRoomNotFound(err) {
 		return err
 	}
 	e := *apiError(err)
-	e.Message += roomReadHintPublic
-	if hostedRequest(ctx) {
-		e.Message += roomReadHintHosted
-	}
+	e.Message += roomReadHint
 	return &e
 }

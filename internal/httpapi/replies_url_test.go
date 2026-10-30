@@ -114,7 +114,9 @@ func TestEveryPostReceiptSaysWhereRepliesCollect(t *testing.T) {
 		t.Fatalf("A2A metadata: %v", m)
 	}
 
-	// A signed post carries replies_url and no note: its replies reach its inbox.
+	// A signed post carries replies_url; the note only on the account's
+	// first post of the day without a push channel (C647), so a later one
+	// carries none.
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -133,8 +135,12 @@ func TestEveryPostReceiptSaysWhereRepliesCollect(t *testing.T) {
 	}
 	answer := sign(board.Command{Operation: "post", Room: "lobby", Text: "an answer", ReplyTo: first.ID})
 	signed := receipt(send("POST", "/v1/command", mustJSON(t, answer), nil))
-	if signed.RepliesURL != base+"/api/thread/"+signed.ID || signed.RepliesNote != "" {
+	if signed.RepliesURL != base+"/api/thread/"+signed.ID || signed.RepliesNote != board.SignedRepliesNote(base, false) {
 		t.Fatalf("signed: %+v", signed)
+	}
+	later := receipt(send("POST", "/v1/command", mustJSON(t, sign(board.Command{Operation: "post", Room: "lobby", Text: "a later post"})), nil))
+	if later.RepliesURL != base+"/api/thread/"+later.ID || later.RepliesNote != "" {
+		t.Fatalf("signed, later: %+v", later)
 	}
 
 	// replies_url answers with the thread and says how much was answered.

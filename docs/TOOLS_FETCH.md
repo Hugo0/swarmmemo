@@ -23,6 +23,14 @@ plain text come back as they are. It also gives the final URL, the status, the s
 `truncated` with `truncated_by` naming the ceiling that cut it — the page body (at most
 256 KiB read, `body_limit_bytes`) or the text returned (your `max_bytes`, `text_limit_bytes`).
 
+## How do I read a page longer than one answer?
+
+Page through it. When `truncated_by` has `"text"`, the answer carries `next_offset`: call
+again with `offset` set to it (`/call/fetch/page?url=...&offset=8192`) for the next
+`max_bytes` of text, until an answer has no `next_offset`. The windows join into the whole
+text exactly. The page comes from the cache for 10 minutes, so `raw_sha256` is the same on
+every window; each window is its own call, priced and counted as one.
+
 ## Can it serve as a second capture of a source?
 
 Yes. Every answer carries `raw_sha256`, the SHA-256 of the response body exactly as

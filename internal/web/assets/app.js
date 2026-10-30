@@ -1794,6 +1794,8 @@
       {const track = node('span', 'receipt-note receipt-log', 'Goes into the public log within 15 min and is anchored to Bitcoin within about 2 h · '); track.append(link('', 'track it', memoPath + '/proof')); statusElement.append(track);}
       // An unsigned post's replies cannot find their way back to an inbox.
       if(!pendingPost.key)statusElement.append(node('span', 'receipt-note', 'Posted anonymously, so replies cannot reach an inbox. Choose “Remember me on this device” under Options to get them next time.'));
+      // C647: a signed post's receipt says how to get its replies back (replies_note, the server's line), with replies_url to keep.
+      if(pendingPost.key&&result.receipt.replies_note&&result.receipt.replies_url){const replies = node('span', 'receipt-note receipt-replies', result.receipt.replies_note + ' replies_url: '); replies.append(link('', result.receipt.replies_url, result.receipt.replies_url)); statusElement.append(replies);}
       // C72: replies others left today on this network's earlier anonymous posts.
       if(result.next?.replies_waiting)statusElement.append(node('span', 'receipt-note receipt-waiting', result.next.replies_waiting));
       const host = inlineHost();

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 	"time"
 
 	"swarmmemo/internal/allowance"
@@ -705,5 +706,142 @@ func TestFetchWithoutAKey(t *testing.T) {
 	if e, _, ok := services.LookupMethod(services.Catalog([]string{"fetch"}), "fetch", "page"); !ok ||
 		!strings.Contains(e.Line, "Without a key: up to 8 KiB per call; signed (or a signed-in MCP connection): up to 96 KiB.") {
 		t.Fatalf("catalogue line: %q", e.Line)
+	}
+}
+
+// offset pages through a text longer than one answer: the windows rejoin
+// into the whole text exactly (multi-byte characters across every
+// boundary), next_offset is absent on the last one, an offset past the end
+// gives empty text, the page is read upstream once and raw_sha256 is the
+// same on every window. Without a key each window is still at most 8 KiB.
+func TestFetchOffsetPagesThroughTheText(t *testing.T) {
+	// 3-byte and 4-byte characters, so 1024- and 8192-byte windows land mid-rune.
+	var b strings.Builder
+	for i := 0; b.Len() < 40<<10; i++ {
+		fmt.Fprintf(&b, "%d€𝄞ä ", i)
+	}
+	whole := b.String()
+	s := newSite(t, false, map[string]http.HandlerFunc{
+		"/long": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Write([]byte(whole))
+		},
+		// A large head of styles before any text: the text budget counts
+		// only kept text, so the body's text is all there.
+		"/fathead": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, "<html><head><style>"+strings.Repeat("a{b:c}", 20<<10)+"</style></head><body><nav>"+strings.Repeat("<a href=/x>menu</a>", 2000)+"</nav><p>GDP "+strings.Repeat("growth ", 12000)+"end.</p></body></html>")
+		},
+		// The text starts past the body cap: the note says so.
+		"/late": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, "<html><head><script>"+strings.Repeat("x", 300<<10)+"</script></head><body><p>late</p></body></html>")
+		},
+	})
+	r := newFetchRig(t, s, fetchOpts{})
+
+	page := func(account string, args map[string]any) (string, map[string]any) {
+		t.Helper()
+		res := get(r.must(account, args), "result").(map[string]any)
+		text, _ := res["text"].(string)
+		return text, res
+	}
+	for _, max := range []int{1024, 8192} {
+		var got strings.Builder
+		offset, sum, calls := 0, "", 0
+		for {
+			text, res := page("alice", map[string]any{"url": "http://site.test/long", "screen": false, "max_bytes": max, "offset": offset})
+			calls++
+			if !utf8.ValidString(text) || len(text) > max || res["offset"] != float64(offset) || res["text_bytes"] != float64(len(whole)) {
+				t.Fatalf("window at %d: %d bytes, %+v", offset, len(text), res)
+			}
+			if sum == "" {
+				sum = res["raw_sha256"].(string)
+			} else if res["raw_sha256"] != sum {
+				t.Fatalf("raw_sha256 changed across windows: %v != %v", res["raw_sha256"], sum)
+			}
+			got.WriteString(text)
+			next, ok := res["next_offset"].(float64)
+			if !ok {
+				if sameStrings(res["truncated_by"], "text") {
+					t.Fatalf("last window still truncated by text: %+v", res)
+				}
+				break
+			}
+			if !sameStrings(res["truncated_by"], "text") || int(next) != offset+len(text) {
+				t.Fatalf("window at %d: next_offset %v, truncated_by %v", offset, next, res["truncated_by"])
+			}
+			offset = int(next)
+		}
+		if got.String() != whole {
+			t.Fatalf("max_bytes %d: reassembled %d bytes, want %d", max, got.Len(), len(whole))
+		}
+		if calls < 2 {
+			t.Fatalf("max_bytes %d: one window", max)
+		}
+	}
+	if n := s.hit("/long"); n != 1 {
+		t.Fatalf("paging fetched upstream %d times", n)
+	}
+
+	// An offset inside a character moves back to its start.
+	text, res := page("bob", map[string]any{"url": "http://site.test/long", "screen": false, "max_bytes": 1024, "offset": 2})
+	if res["offset"] != float64(1) || !strings.HasPrefix(whole[1:], text) {
+		t.Fatalf("mid-rune offset: %v %q", res["offset"], text[:8])
+	}
+	// At or past the end: empty text, no next_offset, not truncated by text.
+	for _, off := range []int{len(whole), len(whole) + 5} {
+		text, res = page("bob", map[string]any{"url": "http://site.test/long", "screen": false, "offset": off})
+		if text != "" || res["bytes"] != float64(0) || res["next_offset"] != nil || res["truncated"] != false {
+			t.Fatalf("offset %d past the end: %q %+v", off, text, res)
+		}
+	}
+	// Out of range is refused before anything runs.
+	if _, err := r.fetch("bob", map[string]any{"url": "http://site.test/long", "offset": services.FetchOffsetMax + 1}); code(err) != "invalid_service_data" {
+		t.Fatalf("offset over the bound: %v", err)
+	}
+	if _, err := r.fetch("bob", map[string]any{"url": "http://site.test/long", "offset": -1}); code(err) != "invalid_service_data" {
+		t.Fatalf("negative offset: %v", err)
+	}
+
+	// A long styled head and a big menu do not use up the text.
+	text, res = page("carol", map[string]any{"url": "http://site.test/fathead", "screen": false, "max_bytes": services.FetchTextMax})
+	if !strings.HasSuffix(text, "end.") || res["next_offset"] != nil || strings.Contains(text, "menu") {
+		t.Fatalf("fat head: %d bytes, ends %q, %+v", len(text), text[max(0, len(text)-16):], res)
+	}
+	// No text before the body cap: the note says why.
+	text, res = page("carol", noScreen("http://site.test/late"))
+	if text != "" || !strings.Contains(res["note"].(string), "No text in the first 256 KiB of this page") {
+		t.Fatalf("late text: %q %v", text, res["note"])
+	}
+
+	// Without a key, offset works and each window is still at most 8 KiB.
+	anon := func(args map[string]any) (map[string]any, error) {
+		raw, _ := json.Marshal(map[string]any{"schema": 1, "method": "page", "args": args, "max_cost": 1 << 20})
+		r.n++
+		tx, _ := r.db.Begin()
+		out, err := r.e.Call(context.Background(), tx, services.Request{Service: "fetch", Data: string(raw), Subject: allowance.Subject{ID: "anon:net1"}, RequestKey: fmt.Sprintf("id:anon-request-%08d", r.n)}, r.now)
+		if err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+		tx.Commit()
+		data, err := out.After()
+		if err != nil {
+			return nil, err
+		}
+		return roundTrip(t, data), nil
+	}
+	got, err := anon(map[string]any{"url": "http://site.test/long", "screen": false, "offset": 16 << 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, _ := get(got, "result", "bytes").(float64)
+	start, _ := get(got, "result", "offset").(float64)
+	if n > services.FetchAnonymousTextMax || n < services.FetchAnonymousTextMax-4 || get(got, "result", "next_offset") != start+n {
+		t.Fatalf("anonymous window: %v bytes from %v, next %v", n, start, get(got, "result", "next_offset"))
+	}
+	if _, err = anon(map[string]any{"url": "http://site.test/long", "offset": 16 << 10, "max_bytes": 16384}); code(err) != "invalid_service_data" {
+		t.Fatalf("anonymous cap with offset: %v", err)
 	}
 }

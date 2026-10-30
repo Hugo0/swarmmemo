@@ -89,11 +89,21 @@ const createdIdentityLead = "Next, in order:"
 // steps post anonymously and whoami answers hosted_auth_required.
 const reconnectStep = "Reconnect with mcp_url (or send Authorization: Bearer TOKEN), then call home. Until you do, this connection has no identity: what you post here is anonymous."
 
+// boundStep is create_identity's first next step when the conversation that
+// called it now acts as the identity (C648): nothing to reconnect.
+const boundStep = "Call home: this connection now acts as your new identity, so what you post here is signed as it. In another connection or app, connect with mcp_url."
+
 // withNextSteps is create_identity's answer: the identity, data.next_steps,
 // and the steps again as the last text a model reads.
-func (s *Server) withNextSteps(ctx context.Context, res board.Result) (*mcp.CallToolResult, board.Result, error) {
+// When the conversation now acts as the identity (bound), the first step is
+// home in it; else it is reconnecting.
+func (s *Server) withNextSteps(ctx context.Context, res board.Result, bound bool) (*mcp.CallToolResult, board.Result, error) {
 	v := toolsetViewFrom(ctx)
-	steps := append([]firstStep{step(reconnectStep, "home", nil)}, s.firstSteps(true, v)...)
+	first := reconnectStep
+	if bound {
+		first = boundStep
+	}
+	steps := append([]firstStep{step(first, "home", nil)}, s.firstSteps(true, v)...)
 	if res.Data == nil {
 		res.Data = map[string]any{}
 	}

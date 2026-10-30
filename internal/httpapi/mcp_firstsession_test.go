@@ -89,7 +89,7 @@ func checkProfileCopy(t *testing.T, s *Server) {
 				t.Errorf("%s tool %s's description names tools %s does not list: %v", path, tool["name"], path, stray)
 			}
 		}
-		texts := []string{createdIdentityLead, reconnectStep, firstRunHomeNote}
+		texts := []string{createdIdentityLead, reconnectStep, boundStep, sessionBoundNote, firstRunHomeNote}
 		for _, identity := range []bool{true, false} {
 			for _, st := range s.firstSteps(identity, nil) {
 				texts = append(texts, st.Text, st.Tool.Name)

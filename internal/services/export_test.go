@@ -203,3 +203,9 @@ func CBCalendarsForTest() []CBCalendarForTest {
 	}
 	return out
 }
+
+// PDDataCanonical and PDDataSHA256 expose public_data's data_sha256 recipe (C643).
+var (
+	PDDataCanonical = pdDataCanonical
+	PDDataSHA256    = pdDataSHA256
+)

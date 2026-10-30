@@ -19,6 +19,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -338,11 +339,17 @@ func searchWords(q string) []string {
 }
 
 // searchScore ranks a tool for words: 3 per word in its name, 1 per word
-// in its title or description (a plural matching its singular).
+// in its title, description or search terms (a plural matching its
+// singular), and 3 more when one search term holds every word: the query
+// is a phrase the product itself says ("link a wallet").
 func searchScore(t *mcp.Tool, words []string) int {
 	name := strings.Split(t.Name, "_")
 	text := strings.ToLower(t.Title + " " + t.Description)
-	score := 0
+	terms := toolSearchTerms()[t.Name]
+	score, phrase := 0, make([]bool, len(terms))
+	for i := range phrase {
+		phrase[i] = true
+	}
 	for _, w := range words {
 		stem := w
 		if len(stem) > 3 && strings.HasSuffix(stem, "s") {
@@ -351,12 +358,36 @@ func searchScore(t *mcp.Tool, words []string) int {
 		if slices.Contains(name, w) || slices.Contains(name, stem) {
 			score += 3
 		}
-		if containsWord(text, stem) {
+		inTerms := false
+		for i, term := range terms {
+			has := containsWord(term, stem)
+			inTerms = inTerms || has
+			phrase[i] = phrase[i] && has
+		}
+		if containsWord(text, stem) || inTerms {
 			score++
 		}
 	}
+	if slices.Contains(phrase, true) {
+		score += 3
+	}
 	return score
 }
+
+// toolSearchTerms are, by tool, the phrases the product says that lead to
+// it beyond its own definition, lowercased, read from their one source: the
+// standing ways' labels ("Link a wallet", which home's standing line and
+// the gate page say) lead to raise_standing, which takes each step, and
+// standing_ways, which lists them (C645).
+var toolSearchTerms = sync.OnceValue(func() map[string][]string {
+	var labels []string
+	for _, way := range board.StandingWayCatalog() {
+		if way.Label != "" {
+			labels = append(labels, strings.ToLower(way.Label))
+		}
+	}
+	return map[string][]string{"raise_standing": labels, "standing_ways": labels}
+})
 
 // containsWord reports whether text has a word starting with w.
 func containsWord(text, w string) bool {

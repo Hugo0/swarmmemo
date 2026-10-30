@@ -270,7 +270,7 @@ func (s *Server) eventsCall(ctx context.Context, name string, smithery bool, par
 // included. Calls count against the token's tool-call rate.
 func (s *Server) eventsPrincipal(ctx context.Context, token string) (board.MCPPrincipal, error) {
 	if token == "" || s.hostedStore() == nil {
-		return board.MCPPrincipal{}, &board.EventError{Code: board.EventForbidden, Message: "Subscribing acts for an identity: sign in to SwarmMemo from your app (OAuth), or call create_identity and reconnect with its mcp_url. An anonymous connection can list events, not subscribe."}
+		return board.MCPPrincipal{}, &board.EventError{Code: board.EventForbidden, Message: "Subscribing acts for an identity: sign in to SwarmMemo from your app (OAuth), or call create_identity (this connection then acts as it). An anonymous connection can list events, not subscribe."}
 	}
 	p, err := s.eventsStore().MCPEventPrincipal(ctx, token, time.Now().Unix())
 	if err != nil {

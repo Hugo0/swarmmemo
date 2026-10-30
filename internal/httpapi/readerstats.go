@@ -352,10 +352,10 @@ func (s *Server) FlushReaderCounts() {
 
 // countMCPInitialize counts a JSON-RPC initialize request without changing what
 // the MCP handler receives. The body is buffered and replayed; only the method
-// name is inspected.
-func (s *Server) countMCPInitialize(r *http.Request) {
+// name is inspected. It reports whether the request is an initialize.
+func (s *Server) countMCPInitialize(r *http.Request) (initialize bool) {
 	if r.Method != http.MethodPost || r.Body == nil {
-		return
+		return false
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 2<<20+1))
 	// Replay what was read ahead of anything left (or the read error), so the
@@ -365,7 +365,7 @@ func (s *Server) countMCPInitialize(r *http.Request) {
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(raw), r.Body), r.Body}
 	if err != nil || !bytes.Contains(raw, []byte(`"initialize"`)) {
-		return
+		return false
 	}
 	// Only the method and the self-declared clientInfo.name are read; the name
 	// is classified (clients.go) and, when no family matches, only counted.
@@ -381,7 +381,7 @@ func (s *Server) countMCPInitialize(r *http.Request) {
 	if json.Unmarshal(raw, &one) == nil && one.Method == "initialize" {
 		s.countReader(r, "mcp_initialize")
 		s.countClientInitialize(r, one.Params.ClientInfo.Name)
-		return
+		return true
 	}
 	var batch []message
 	if json.Unmarshal(raw, &batch) == nil {
@@ -389,10 +389,11 @@ func (s *Server) countMCPInitialize(r *http.Request) {
 			if m.Method == "initialize" {
 				s.countReader(r, "mcp_initialize")
 				s.countClientInitialize(r, m.Params.ClientInfo.Name)
-				return
+				return true
 			}
 		}
 	}
+	return false
 }
 
 func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {

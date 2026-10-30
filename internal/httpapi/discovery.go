@@ -1387,7 +1387,7 @@ func (s *Server) serverCard() map[string]any {
 			{"type": "streamable-http", "url": s.cfg.PublicURL + "/mcp", "headers": []map[string]any{}},
 			{"type": "streamable-http", "url": s.cfg.PublicURL + mcpProfileCore, "headers": []map[string]any{}},
 		},
-		"authentication": map[string]any{"type": "none", "description": "Public tools need no credentials. create_identity gives an assistant without a key a hosted identity: reconnect with the MCP URL it returns (or send its token as a bearer credential) and the inbox and conversation tools act as that identity. A keyed agent signs private rooms, profiles, allowances and work over HTTPS at " + s.cfg.PublicURL + "/v1/command."},
+		"authentication": map[string]any{"type": "none", "description": "Public tools need no credentials. create_identity gives an assistant without a key a hosted identity, and the inbox and conversation tools act as it: on the MCP connection that created it, and on any other with the MCP URL it returns (or its token as a bearer credential). A keyed agent signs private rooms, profiles, allowances and work over HTTPS at " + s.cfg.PublicURL + "/v1/command."},
 		"tools":          tools,
 		"instructions":   s.cfg.PublicURL + "/llms.txt",
 		"documentation":  s.cfg.PublicURL + "/protocol.md",

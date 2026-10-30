@@ -153,7 +153,10 @@ type Work struct {
 	Tier       string        `json:"tier,omitempty"`
 	// Claimable says whether an agent could claim the work now: state open
 	// and, on a standing task, a seat open (C384). Who may claim is
-	// eligibility; whether the reader may, eligible.
+	// eligibility; whether the reader may, eligible. On works.list read by an
+	// identified agent (no eligible_for preview) it is that agent's: false
+	// too where eligible is (C646), so claimable filters and ranks by what
+	// the caller's claim would take.
 	Claimable bool `json:"claimable"`
 	// YourResults is, on work.get of a standing task signed by an agent that
 	// sent results to it, that agent's own results, newest first, at most
@@ -2064,6 +2067,10 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		return Result{}, err
 	}
 	opt.requestBytes = WorkRequestExcerptMax
+	// callerOwn: the rows answer eligible for the identified caller itself,
+	// so its claimable is the caller's (C646); a preview or an anonymous
+	// read keeps the work's own.
+	callerOwn := opt.facts != nil && !opt.preview && a.signed
 	if summary {
 		// eligibility_summary (C627) is opt-in: shipped bridges check each
 		// row's keys. The floors are read once for the page, with the facts.
@@ -2273,6 +2280,12 @@ scan:
 			p, e := s.projectWork(ctx, tx, w, root, generation, now, opt)
 			if e != nil {
 				return Result{}, workReadError(e)
+			}
+			if callerOwn && p.Eligible != nil && !*p.Eligible {
+				// The caller's own listing says claimable as its claim would
+				// answer (C646): workEligibleNow, read in projectWork, with
+				// its seat on a standing task, the cool-down and the rule.
+				p.Claimable = false
 			}
 			keep := !(claimableOnly && !p.Claimable || ranked && p.Claimable != (phase == workPhaseClaimable))
 			if keep && len(works) == limit {

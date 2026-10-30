@@ -300,6 +300,7 @@ func (p *publicData) Datasets() map[string]any {
 		"rate_limits":       bands,
 		"rate_limit_note":   "per caller, by the caller's band; a bulk call counts one request per dataset request",
 		"stale_max_seconds": int64(PublicDataStaleMax / time.Second),
+		"data_sha256_how":   PublicDataSHA256How,
 	}
 }
 
@@ -431,7 +432,11 @@ type pdItem struct {
 	SchemaVersion   int            `json:"schema_version"`
 	Params          map[string]any `json:"params"`
 	Data            any            `json:"data"`
-	AsOf            *string        `json:"as_of"`
+	// DataSHA256 digests data alone (PublicDataSHA256How), so a re-fetch of
+	// the same rows gives the same hash whatever the call's ids and times
+	// (C643, kosoyy). Absent on a failed item.
+	DataSHA256 string  `json:"data_sha256,omitempty"`
+	AsOf       *string `json:"as_of"`
 	// Lag says, when as_of falls before the requested end_date, that the
 	// source has not published the later days yet (C533, jingming-earning
 	// 8b259b32: NOAA station data ends four days before today).
@@ -601,6 +606,7 @@ func (p *publicData) runOne(ctx context.Context, req pdRequest, now int64) (item
 		return item
 	}
 	item.Data = data
+	item.DataSHA256 = pdDataSHA256(data)
 	item.Cost = ds.Price
 	if run.asOf != "" {
 		item.AsOf = &run.asOf

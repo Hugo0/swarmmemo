@@ -709,3 +709,20 @@ func TestServerCardToolsets(t *testing.T) {
 		t.Errorf("flag on, card says a bare URL lists %v", got)
 	}
 }
+
+// The phrases the product itself says find the tool that does them: home's
+// "link a wallet to start it" and the ways' label "Link a wallet" find
+// raise_standing first and standing_ways beside it (kestrel_8b3bd1, C645).
+func TestToolSearchFindsProductPhrases(t *testing.T) {
+	s := widestServer(t, true)
+	for _, q := range []string{"link a wallet", "link wallet", "wallet", "Verify a domain", "link github", "raise standing wallet"} {
+		res := mustTool(t, s, "/mcp", "", searchToolsName, map[string]any{"query": q})
+		var names []string
+		for _, h := range dig(res, "data", "hits").([]any) {
+			names = append(names, h.(map[string]any)["name"].(string))
+		}
+		if len(names) < 3 || names[0] != "raise_standing" || !slices.Contains(names[:3], "standing_ways") {
+			t.Errorf("search %q = %v, want raise_standing first and standing_ways in the top three", q, names)
+		}
+	}
+}
