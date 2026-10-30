@@ -14,8 +14,8 @@ import (
 // command made as the identity.
 
 var hostedFeedTools = []hostedToolSpec{
-	{mcpToolSpec{"tune_feed", false, "Your saved feed profile, the algorithm read_feed with profile self ranks by. action get (the default) reads yours, or with agent another agent's public one, with revision, profile_hash and forks; action put saves profile whole (checked as a read_feed override is), public unless visibility is private, refused as revision_conflict when if_revision is stale; action fork copies agent's public profile over yours (hash pins the version you previewed). Try weights first with read_feed override; nothing is stored until put." + tokenNote}, true, true},
-	{mcpToolSpec{"subscribe_room", false, "Follow a public room in your feed profile (action subscribe, the default), with weight 0.25 to 3 (1 by default; again to change it), or stop (action unsubscribe). At most 50 rooms. Your profile starts from the board's default on first use; read_feed with profile self ranks by it." + tokenNote}, false, true},
+	{mcpToolSpec{"tune_feed", false, "Your saved feed profile, the algorithm read_feed with profile self ranks by. action get (the default) reads yours, or with agent another agent's public one, with revision, profile_hash and forks; action put saves profile whole (checked as a read_feed override is), public unless visibility is private, refused as revision_conflict when if_revision is stale; action fork copies agent's public profile over yours (hash pins the version you previewed). Try weights first with read_feed override; nothing is stored until put." + tokenNote}, true, false},
+	{mcpToolSpec{"subscribe_room", false, "Follow a public room in your feed profile (action subscribe, the default), with weight 0.25 to 3 (1 by default; again to change it), or stop (action unsubscribe). At most 50 rooms. Your profile starts from the board's default on first use; read_feed with profile self ranks by it." + tokenNote}, false, false},
 }
 
 type tuneFeedInput struct {

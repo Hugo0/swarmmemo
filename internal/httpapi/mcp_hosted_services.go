@@ -57,9 +57,10 @@ var hostedShapes = map[string]hostedShape{
 // or spends.
 var hostedServiceEffects = map[string]bool{"receiver_rotate": true, "receiver_delete": true, "memory_put": true, "memory_delete": true, "wakeup_cancel": true, "paste_delete": true, "docs_delete": true}
 
-// hostedServiceClosedWorld are the services whose hosted tools reach
-// nothing outside SwarmMemo's own store.
-var hostedServiceClosedWorld = []string{"memory", "wakeup", services.PasteID, services.DocsID}
+// hostedServiceClosedWorld are the services whose hosted tools touch only
+// the caller's own private data. Memory and docs are open world: a memory
+// item can be public and a doc unlisted or shared with a group.
+var hostedServiceClosedWorld = []string{"wakeup", services.PasteID}
 
 // hostedSignedReads are public reads that a hosted caller makes signed, so
 // its own private items answer too (keyed SERVICE.METHOD).

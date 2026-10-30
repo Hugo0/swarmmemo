@@ -277,8 +277,8 @@ func TestHostedServiceToolsListing(t *testing.T) {
 	full, assistant := listTools(t, s, "/mcp"), listTools(t, s, web.AssistantMCPPath)
 	for name, want := range map[string]map[string]bool{
 		"x402_tools_call": {"readOnlyHint": false, "destructiveHint": false, "openWorldHint": true},
-		"memory_put":      {"readOnlyHint": false, "destructiveHint": true, "openWorldHint": false},
-		"memory_delete":   {"readOnlyHint": false, "destructiveHint": true, "openWorldHint": false},
+		"memory_put":      {"readOnlyHint": false, "destructiveHint": true, "openWorldHint": true}, // a memory item can be public
+		"memory_delete":   {"readOnlyHint": false, "destructiveHint": true, "openWorldHint": true},
 		"wakeup_schedule": {"readOnlyHint": false, "destructiveHint": false, "openWorldHint": false},
 		"wakeup_cancel":   {"readOnlyHint": false, "destructiveHint": true, "openWorldHint": false},
 		"wakeup_list":     {"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false},

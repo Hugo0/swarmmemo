@@ -125,6 +125,9 @@ var mcpWriteEffects = map[string]string{
 // mcpDestructiveWhy say what a destructive tool removes, replaces or
 // revokes.
 var mcpDestructiveWhy = map[string]string{
+	"accept_work":               "the verdict is final and the held reward is paid out; it cannot be taken back",
+	"journal_suspend":           "it replaces your earlier suspend note",
+	"reject_work":               "the attempt is rejected for good and the task reopens to other workers",
 	"accept_request":            "blocking a sender or leaving a conversation ends what you had with it",
 	"call_swarmmemo_tool":       "the tool it runs may be destructive; it asks for confirm true before one is",
 	"cancel_event_subscription": "anything queued for the subscription is dropped",

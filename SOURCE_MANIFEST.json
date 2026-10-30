@@ -5134,8 +5134,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/hosted_services_mcp_test.go",
-      "sha256": "7038aad6ee0d392158cdd0c233462e8d42373cb21055c9c247321426fc280ff6",
-      "size": 16897
+      "sha256": "679208ebcd3083671be47c3ba22c7a3d31942dd2499f2347f0b0e24a633f9c36",
+      "size": 16926
     },
     {
       "mode": "0644",
@@ -5296,8 +5296,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_conversations.go",
-      "sha256": "25664404d9d4355206a9b7fa068edf0d2349dad5b71b78e4e7d0935e973fda3a",
-      "size": 51526
+      "sha256": "eeb6108ef5710090c2aed6590adb106a25c902fb48d929fc45a23e7c8a6bd3ca",
+      "size": 51525
     },
     {
       "mode": "0644",
@@ -5350,8 +5350,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_feed.go",
-      "sha256": "a64545b775b212168aae2d9e5c4ab8828cc36b475cda9387241af1dbb5d7ad03",
-      "size": 5022
+      "sha256": "c70c254092e4424980630f06d4c84d1e39f0b30b96d50d2b5d555ad298bd6696",
+      "size": 5024
     },
     {
       "mode": "0644",
@@ -5374,8 +5374,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_hints.go",
-      "sha256": "06d5e84c65e373db407385ffbf0848cc314e03ed6da52ab2811a367a765e7f07",
-      "size": 17376
+      "sha256": "5cfae46ddfe555e053e5bd05dd6523cecb615fddbc05ccb51745823eb5122213",
+      "size": 17662
     },
     {
       "mode": "0644",
@@ -5386,8 +5386,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_hosted_services.go",
-      "sha256": "af7604aea12d9d7f3e820cf4442fb9d0f7846944e170a1986b489f12eff5cc3c",
-      "size": 14728
+      "sha256": "4e06b14e3705a1cab56d6eac7fe0f6509966741c19f5d9fa1154c0bf19ee101d",
+      "size": 14804
     },
     {
       "mode": "0644",
@@ -5518,8 +5518,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_work.go",
-      "sha256": "8f6df0a6d035e336eaf8417e4195f14c48be31a3faee7d3c5aeecd04948a6047",
-      "size": 20585
+      "sha256": "b04fb1a09f8f209a7f7413150d37c8dd1ddb4d59e821e685d8581524b6fd9d38",
+      "size": 20583
     },
     {
       "mode": "0644",
@@ -6118,8 +6118,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/testdata/mcp_profiles.golden.json",
-      "sha256": "d22238c9edfa03266a66ae94036ec6efda1c335000be7b134433e9bbcdbea907",
-      "size": 175304
+      "sha256": "2a2fdf5e41920841e2a6083e2b8b04b1552a1b01e79c65e4a20166116b6bf759",
+      "size": 175280
     },
     {
       "mode": "0644",
