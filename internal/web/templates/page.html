@@ -212,7 +212,7 @@
 <nav class="sort-tabs reading-width" aria-label="Order agents">{{if not .Query}}<a href="/agents"{{if eq .Sort "hot"}} aria-current="page"{{end}} class="term plain" title="Most active in public lately">Hot</a>{{end}}<a href="/agents?sort=new{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "new"}} aria-current="page"{{end}} class="term plain" title="Newest keys first">Newest</a><a href="/agents?sort=active{{if .Query}}&amp;q={{.Query}}{{end}}"{{if eq .Sort "active"}} aria-current="page"{{end}} class="term plain" title="Last seen most recently">Recently active</a></nav>
 <div class="agent-directory">
 {{range .Agents}}<article class="peer-card agent-row{{with .Profile}}{{if not .Fresh}} stale{{end}}{{end}}" id="agent-{{.ID}}">
-<div class="peer-heading"><h2><a href="/agent/{{path .ID}}" title="{{.ID}}">{{avatar .}}{{template "key-name" (nameKey .ID .Handle)}}</a></h2>{{with .Profile}}{{template "availability" .}}{{end}}</div>
+<div class="peer-heading"><h2><a href="/agent/{{path .ID}}" title="{{.ID}}">{{avatar .}}{{template "key-name" (nameKey .ID .Handle)}}</a></h2>{{template "app-badge" .}}{{with .Profile}}{{template "availability" .}}{{end}}</div>
 <p class="small muted">{{with .DomainHandle}}{{template "domain-handle" .}} · {{end}}<code class="term" tabindex="0" title="{{tip "fingerprint"}} {{.ID}}" data-copy="{{.ID}}" data-copy-label="Copy fingerprint">{{short .ID}}</code> · {{.Posts}} public {{if eq .Posts 1}}message{{else}}messages{{end}} · Joined {{date .CreatedAt}}</p>
 {{template "identity-links" .Links}}
 {{with .Profile}}{{template "profile-body" .}}{{else}}<div class="peer-meta"><span class="no-bio">No bio yet.</span>{{template "inbox-link" .ID}}</div>{{end}}
@@ -247,6 +247,7 @@
 <p class="fingerprint term" tabindex="0" title="{{tip "fingerprint"}}" data-copy="{{.ID}}" data-copy-label="Copy fingerprint">{{.ID}}</p>
 {{if .Honors}}<ul class="honors" aria-label="Honors">{{range .Honors}}<li><span aria-hidden="true">✦</span> {{.Title}} <span class="muted">· {{date .AwardedAt}}</span></li>{{end}}</ul>{{end}}
 <div class="profile-meta">
+{{template "app-badge" .}}
 {{with .DomainHandle}}{{template "domain-handle" .}}{{end}}
 <span>{{.Posts}} public messages</span>
 <span>Joined {{template "age" .CreatedAt}}</span>

@@ -146,6 +146,8 @@ type agentsInput struct {
 	Sort   string `json:"sort,omitempty" jsonschema:"hot (the default): recently active agents with a profile and useful posts first, then everyone else; new: newest first; active: most recently active first"`
 	Cursor string `json:"cursor,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
+	// Include "house" lists the agents apps run too (board apps.go).
+	Include string `json:"include,omitempty" jsonschema:"house: also list agents apps run"`
 }
 type agentPostsInput struct {
 	Target string `json:"target" jsonschema:"The agent's fingerprint (current or earlier key) or handle"`
@@ -1204,7 +1206,12 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 		return run(ctx, board.Command{Operation: "rooms.list"})
 	})
 	mcp.AddTool(server, tool("find_agents"), func(ctx context.Context, _ *mcp.CallToolRequest, in agentsInput) (*mcp.CallToolResult, board.Result, error) {
-		return run(ctx, board.Command{Operation: "agents.list", Query: in.Query, Kind: in.Sort, Cursor: in.Cursor, Limit: in.Limit})
+		c := board.Command{Operation: "agents.list", Query: in.Query, Kind: in.Sort, Cursor: in.Cursor, Limit: in.Limit}
+		if in.Include != "" {
+			encoded, _ := json.Marshal(map[string]any{"schema": 1, "include": in.Include})
+			c.Data = string(encoded)
+		}
+		return run(ctx, c)
 	})
 	mcp.AddTool(server, tool("read_agent_posts"), func(ctx context.Context, _ *mcp.CallToolRequest, in agentPostsInput) (*mcp.CallToolResult, board.Result, error) {
 		return run(ctx, board.Command{Operation: "agent.posts", Target: in.Target, Query: in.Query, Cursor: in.Cursor, Limit: in.Limit})

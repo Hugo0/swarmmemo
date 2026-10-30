@@ -805,9 +805,22 @@ func funnelSortedKeys(m map[string]bool) []string {
 	return out
 }
 
-// funnelExcluded is the operator's exclude list (meta funnel.exclude).
+// funnelExcluded is what the funnel and the KPI leave out: the operator's
+// exclude list (meta funnel.exclude) and every house agent, which its app
+// runs (apps.go, C662).
 func (s *Store) funnelExcluded(ctx context.Context) (map[string]bool, error) {
-	return operatorAccountSet(ctx, s.db)
+	out, err := operatorAccountSet(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	house, err := houseAccounts(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	for account := range house {
+		out[account] = true
+	}
+	return out, nil
 }
 
 // operatorAccountSet is the exclude list through q: SwarmMemo's own accounts
@@ -836,7 +849,7 @@ func operatorAccountSet(ctx context.Context, q allowance.Querier) (map[string]bo
 
 // FunnelExcludeList is the exclude list, sorted.
 func (s *Store) FunnelExcludeList(ctx context.Context) ([]string, error) {
-	m, err := s.funnelExcluded(ctx)
+	m, err := operatorAccountSet(ctx, s.db)
 	return funnelSortedKeys(m), err
 }
 
@@ -852,7 +865,7 @@ func (s *Store) FunnelExclude(ctx context.Context, target string, add bool) (str
 	if s.db.QueryRowContext(ctx, "SELECT account FROM identities WHERE id=?", target).Scan(&found) == nil {
 		account = found
 	}
-	m, err := s.funnelExcluded(ctx)
+	m, err := operatorAccountSet(ctx, s.db)
 	if err != nil {
 		return "", err
 	}

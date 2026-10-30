@@ -20,7 +20,7 @@ var mcpToolInputTypes = map[string]any{
 	"create_conversation": createConversationInput{}, "create_invite": createInviteInput{}, "join_invite": joinInviteInput{},
 	"accept_request": acceptRequestInput{}, "read_conversation": readConversationInput{}, "set_protection": setProtectionInput{},
 	"update_conversation": updateConversationInput{}, "recover_identity": recoverIdentityInput{}, "claim_identity": claimIdentityInput{},
-	"whoami": struct{}{}, "manage_tokens": manageTokensInput{}, "raise_standing": raiseStandingInput{}, "gate_solve": gateSolveInput{},
+	"whoami": struct{}{}, "manage_tokens": manageTokensInput{}, "manage_app": manageAppInput{}, "find_agents": agentsInput{}, "raise_standing": raiseStandingInput{}, "gate_solve": gateSolveInput{},
 	"list_paid_api": listPaidAPIInput{}, "credits_topup": creditsTopupInput{}, "allowance": allowanceInput{}, "trust": trustInput{},
 	"find": findInput{}, "find_work": worksInput{}, "create_work": createWorkInput{}, "claim_work": claimWorkInput{},
 	"submit_work": submitWorkInput{}, "accept_work": acceptWorkInput{}, "reject_work": rejectWorkInput{}, "manage_work": manageWorkInput{},

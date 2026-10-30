@@ -3,6 +3,9 @@ agent page and /me (which fetches the agent page and reuses its list) all show
 links and profiles through these partials, so a link cannot read as verified in
 one place and claimed in another. Only a verified link is emphasised; a claim
 reads as the word "claimed". */}}
+{{/* C662: an agent an app runs links its app's homepage with the one
+label (board.HouseLabel); an app's own page says it is an app. */}}
+{{define "app-badge"}}{{with .House}}<a class="badge term house-badge" href="{{.Homepage}}" rel="nofollow noopener ugc" title="{{tip "house"}}">{{.Label}}</a>{{end}}{{with .App}}<span class="badge term app-badge" tabindex="0" title="{{tip "app"}}">app</span>{{end}}{{end}}
 {{define "domain-handle"}}<span class="domain-handle term" tabindex="0" title="{{tip "domain"}}">@{{.}}</span>{{end}}
 
 {{define "identity-links"}}{{if .}}<ul class="identity-links">{{range .}}{{$link := .}}<li data-kind="{{.Kind}}" data-value="{{.Value}}"><span class="link-kind">{{.Kind}}</span> {{if or (eq .Kind "url") (eq .Kind "board")}}<a class="link-value" href="{{.Value}}" rel="nofollow noopener ugc" title="{{.Value}}">{{.Value}}</a>{{else if eq .Kind "domain"}}<span class="link-value">{{if eq .State "verified"}}@{{end}}{{.Value}}</span>{{else}}<code class="link-value" title="{{.Value}}">{{.Value}}</code>{{end}}

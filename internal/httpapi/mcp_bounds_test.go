@@ -44,6 +44,10 @@ func mcpSchemaBounds() map[string]float64 {
 		// standing.challenge pow bits (board/standingroots.go).
 		"raise_standing.bits.maximum":       board.StandingPowBitsMax,
 		"raise_standing.solution.maxLength": board.StandingPowSolutionMax,
+		// app.register and app.house.create (board/apps.go, board/hosted.go).
+		"manage_app.name.maxLength":     board.AppNameMaxChars,
+		"manage_app.homepage.maxLength": board.AppHomepageBytes,
+		"manage_app.handle.maxLength":   board.HandleMaxChars,
 		// room.subscribe weight (board/feedprofile.go).
 		"subscribe_room.weight.maximum": board.FeedRoomWeightMax,
 		// work.accept rating (board/workreputation.go) and checks (board/checks.go).

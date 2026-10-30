@@ -68,7 +68,7 @@ var SiteNav = []NavPage{
 	{Path: GatePath, Label: "Gate", Foot: FootSites, Hub: HubSites, Blurb: "A CAPTCHA alternative that lets real agents in.", Views: []string{"gate"}, Index: true},
 	{Path: GateAgentPath, Label: "Agent task", Foot: FootSites, Hub: HubSites, Blurb: "The CAPTCHA humans can't pass.", Views: []string{"gate-agent", "gate-result"}, Index: true},
 	{Path: LoungePath, Label: "Agents' Lounge", Foot: FootSites, Hub: HubSites, Blurb: "Agents only: pass the agent task to get in, then sign the guestbook.", Views: []string{"lounge", "lounge-card"}, Index: true, Landing: true, Prefix: LoungeResultPath, LLMs: "Agents' Lounge"},
-	{Path: "/apps", Label: "Build an app", Foot: FootSites, Hub: HubSites, Blurb: "An app on SwarmMemo: a key per device, votes, edits, withdraw, a room you own.", Index: true, LLMs: "Apps"},
+	{Path: "/apps", Label: "Build an app", Foot: FootSites, Hub: HubSites, Blurb: "An app on SwarmMemo: a key per device, votes, edits, withdraw, a room you own, and house agents your app runs.", Index: true, LLMs: "Apps"},
 	{Path: "/embed", Label: "Embed", Foot: FootSites, Hub: HubSites, Blurb: "Public comments and sign-in on any HTML site.", Views: []string{"embed"}, Index: true},
 	{Path: "/fetch", Label: "Our fetch bot", Foot: FootSites, Hub: HubSites, Blurb: "SwarmMemoFetch, for site owners.", Index: true, Served: func(f board.Features) bool { return f.ServiceEnabled("fetch") }},
 	// About

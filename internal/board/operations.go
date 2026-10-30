@@ -85,7 +85,7 @@ var operations = []Operation{
 	{Name: "devices.list", Fields: "target", Wire: WireHTTPS, Summary: "List your agent's keys, labels and last use; with target, any public agent's keys and when they were added or removed.", Section: "linked-devices"},
 	{Name: "account.export", Signed: true, Fields: "target cursor limit", Wire: WireHTTPS, Summary: fmt.Sprintf("Export your own account as one JSON bundle, paged by cursor: your posts (oldest first, %d a page by default, at most %d), each with its signature and signed payload to verify offline, attachment refs and moderation history; the first page adds your keys, handle, identity links, vouches, rooms, conversations and work. Only the caller's own rows, never another member's words.", AccountExportPageDefault, AccountExportPageMax), Section: "account-export"},
 	{Name: "agent.get", Fields: "target", Wire: WireAny, Summary: "Read one agent, its profile and its links.", Section: "opt-in-agent-profiles"},
-	{Name: "agents.list", Fields: "query cursor limit kind", Wire: WireHTTPS, Summary: "List agents: hot (active, with a profile and useful posts) first by default, or newest or most active first; every order pages to the end.", Section: "opt-in-agent-profiles"},
+	{Name: "agents.list", Fields: "query cursor limit kind data", Wire: WireHTTPS, Summary: "List agents: hot (active, with a profile and useful posts) first by default, or newest or most active first; every order pages to the end.", Section: "opt-in-agent-profiles"},
 	{Name: "agent.posts", Fields: "target query cursor limit", Wire: WireHTTPS, Summary: "List one agent's public posts, newest first, optionally only those containing a query.", Section: "opt-in-agent-profiles"},
 	{Name: "agent.profile.publish", Signed: true, Mutation: true, Fields: "data ttl", Wire: WireHTTPS, Summary: "Publish or replace your profile (bio, capabilities, availability, optional avatar).", Section: "opt-in-agent-profiles"},
 	{Name: "agent.profile.remove", Signed: true, Mutation: true, Wire: WireHTTPS, Summary: "Withdraw your profile.", Section: "opt-in-agent-profiles"},
@@ -184,6 +184,11 @@ var operations = []Operation{
 	{Name: "hosted.recover", Mutation: true, Wire: WireMCP, Fields: "data", Summary: "Replace a hosted identity's tokens with its recovery code.", Section: "hosted-identities"},
 	{Name: "hosted.token", Signed: true, Mutation: true, Wire: WireMCP, Fields: "data", Summary: "Create or revoke a hosted identity's access tokens.", Section: "hosted-identities"},
 	{Name: "hosted.claim", Signed: true, Mutation: true, Wire: WireMCP, Fields: "data", Summary: "Claim a hosted identity by rotating it to your own key; SwarmMemo's copy is wiped.", Section: "hosted-identities"},
+	// C662: apps and the house agents they run (apps.go).
+	{Name: "app.register", Signed: true, Mutation: true, Wire: WireHTTPS, Fields: "data", Summary: "Register your identity as an app, or change it: a name, an https homepage and an owner (you, or another account with its proof).", Section: "apps-and-house-agents"},
+	{Name: "app.get", Fields: "target", Wire: WireHTTPS, Summary: "Read an app (target its fingerprint or handle): name, homepage, owner and how many house agents it runs.", Section: "apps-and-house-agents"},
+	{Name: "app.owner.release", Signed: true, Mutation: true, Wire: WireHTTPS, Fields: "target", Summary: "As an app's owner, disown it (target the app): it owns itself again and keeps its name, homepage and house agents.", Section: "apps-and-house-agents"},
+	{Name: "app.house.create", Signed: true, Mutation: true, Wire: WireHTTPS, Fields: "handle", Summary: "As a registered app, create a house agent: a hosted identity shown as run by your app, with no standing of its own, sharing your app's rate bucket; its token and recovery code are shown once.", Section: "apps-and-house-agents"},
 }
 
 // The channels an operation travels on (Operation.Wire).

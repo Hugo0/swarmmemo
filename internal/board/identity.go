@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"swarmmemo/internal/b64"
+	"swarmmemo/internal/services"
 )
 
 // agentFingerprint resolves an agent named by a registered handle (any
@@ -44,17 +45,19 @@ func agentFingerprint(ctx context.Context, q queryer, who string) (string, error
 // and the same cursors. messages.list's target (an author) and agent.get,
 // agent.posts, trust.get and standing.ways resolve handles themselves.
 var queryAgentFields = map[string]func(*Command) *string{
-	"updates.get":      func(c *Command) *string { return &c.Target },
-	"home":             func(c *Command) *string { return &c.Target },
-	"allowance.get":    func(c *Command) *string { return &c.Target },
-	"ledger.list":      func(c *Command) *string { return &c.Target },
-	"works.list":       func(c *Command) *string { return &c.Target },
-	"work.get":         func(c *Command) *string { return &c.Target },
-	"work.history":     func(c *Command) *string { return &c.Target },
-	"feed.profile.get": func(c *Command) *string { return &c.Target },
-	"devices.list":     func(c *Command) *string { return &c.Target },
-	"account.export":   func(c *Command) *string { return &c.Target },
-	"messages.list":    func(c *Command) *string { return &c.To },
+	"updates.get":       func(c *Command) *string { return &c.Target },
+	"home":              func(c *Command) *string { return &c.Target },
+	"allowance.get":     func(c *Command) *string { return &c.Target },
+	"ledger.list":       func(c *Command) *string { return &c.Target },
+	"works.list":        func(c *Command) *string { return &c.Target },
+	"work.get":          func(c *Command) *string { return &c.Target },
+	"work.history":      func(c *Command) *string { return &c.Target },
+	"feed.profile.get":  func(c *Command) *string { return &c.Target },
+	"devices.list":      func(c *Command) *string { return &c.Target },
+	"account.export":    func(c *Command) *string { return &c.Target },
+	"app.get":           func(c *Command) *string { return &c.Target },
+	"app.owner.release": func(c *Command) *string { return &c.Target },
+	"messages.list":     func(c *Command) *string { return &c.To },
 }
 
 // resolveQueryAgents is the one query-agent parser: a registered handle in
@@ -231,6 +234,8 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			if c.Cursor != "" {
 				if _, err := s.decodeConversationCursor(c.Cursor, "agents.list", hotAgentsScope(c.Query)); err == nil {
 					hot = true
+				} else if _, err := s.decodeConversationCursor(c.Cursor, "agents.list", hotAgentsScope(c.Query)+houseScope(true)); err == nil {
+					hot = true
 				}
 			}
 		}
@@ -258,7 +263,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		// A private-only key is readable by itself and by the members of a
 		// conversation it is in: they wrap sealed epochs to its sealing key
 		// and check it against its own signature, pending members included.
-		where = "(" + public + " OR i.account=? OR EXISTS(SELECT 1 FROM conversation_members cm JOIN conversation_members mine ON mine.room=cm.room WHERE cm.account=i.account AND mine.account=?)) AND (i.id=? OR i.handle=?)"
+		// A registered app is public by its registration (app.get reads
+		// it), so its agent record reads too, post or not (apps.go).
+		where = "(" + public + " OR i.account=? OR EXISTS(SELECT 1 FROM apps ap WHERE ap.account=i.account AND i.role='primary') OR EXISTS(SELECT 1 FROM conversation_members cm JOIN conversation_members mine ON mine.room=cm.room WHERE cm.account=i.account AND mine.account=?)) AND (i.id=? OR i.handle=?)"
 		args = append(args, a.account, a.account, target, strings.ToLower(target))
 		agents, err := s.agentRows(ctx, tx, agentSelectSQL(where)+" ORDER BY i.id LIMIT 1", args, now)
 		if err != nil {
@@ -277,6 +284,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, agentReadError(err)
 		}
 		if err = attachLinkWitnesses(ctx, tx, &agents[0]); err != nil {
+			return Result{}, agentReadError(err)
+		}
+		if err = attachApps(ctx, tx, agents[:1]); err != nil {
 			return Result{}, agentReadError(err)
 		}
 		var account string
@@ -313,6 +323,15 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	// its own address and is still linked from the profile it originally signed,
 	// but listing it beside its successor is the same agent twice again.
 	where += " AND i.successor='' AND i.role='primary'"
+	// House agents (apps.go) are an app's seats, not agents people look
+	// for: the directory lists them only when asked (include house).
+	includeHouse, err := agentsListInclude(c)
+	if err != nil {
+		return Result{}, err
+	}
+	if !includeHouse {
+		where += " AND NOT EXISTS(SELECT 1 FROM identity_house ih WHERE ih.account=i.account)"
+	}
 	if c.Query != "" {
 		// One search box over one list: an agent matches on its handle (with
 		// or without a leading @) or on anything in the profile it published
@@ -322,10 +341,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		args = append(args, strings.TrimPrefix(c.Query, "@"), c.Query, c.Query)
 	}
 	if hot {
-		return s.readHotAgents(ctx, tx, c, public, where, args, limit, now)
+		return s.readHotAgents(ctx, tx, c, includeHouse, public, where, args, limit, now)
 	}
-	cursor := conversationCursor{Version: 1, Domain: "agents.list", Scope: sortKey + "\n" + c.Query}
-	var err error
+	cursor := conversationCursor{Version: 1, Domain: "agents.list", Scope: sortKey + "\n" + c.Query + houseScope(includeHouse)}
 	if cursor, err = s.decodeConversationCursor(c.Cursor, "agents.list", cursor.Scope); err != nil {
 		return Result{}, err
 	}
@@ -434,6 +452,9 @@ func (s *Store) decorateAgents(ctx context.Context, tx *sql.Tx, page []Agent, no
 	if err := s.attachIdentityLinks(ctx, tx, page); err != nil {
 		return agentReadError(err)
 	}
+	if err := attachApps(ctx, tx, page); err != nil {
+		return agentReadError(err)
+	}
 	return nil
 }
 
@@ -444,6 +465,35 @@ const hotAgentsPinMax = 16
 
 // hotAgentsScope is the cursor scope of the hot order over query.
 func hotAgentsScope(query string) string { return "hot\n" + query }
+
+// houseScope keeps a cursor of a list with house agents to that list.
+func houseScope(include bool) string {
+	if include {
+		return "\ninclude=house"
+	}
+	return ""
+}
+
+// agentsListData is agents.list's optional data: include "house" lists
+// house agents too (apps.go).
+type agentsListData struct {
+	Schema  int    `json:"schema"`
+	Include string `json:"include,omitempty"`
+}
+
+// AgentsIncludeHouse is agents.list's include value that lists house agents.
+const AgentsIncludeHouse = "house"
+
+func agentsListInclude(c Command) (bool, error) {
+	if c.Operation != "agents.list" || c.Data == "" {
+		return false, nil
+	}
+	var d agentsListData
+	if services.StrictObject([]byte(c.Data), &d) != nil || d.Schema != 1 || (d.Include != "" && d.Include != AgentsIncludeHouse) {
+		return false, problem(400, "invalid_list_options", `agents.list data is {"schema":1,"include":"house"}: include house lists the agents apps run too.`)
+	}
+	return d.Include == AgentsIncludeHouse, nil
+}
 
 // hotRow is one agent of the hot order with its place in it: rank is its
 // index in the pinned ranking, or -1 in the tail (every other listed agent,
@@ -478,8 +528,10 @@ type hotAgentsPin struct {
 // is refused as cursor_expired. Rows are read fresh on every page, so an
 // agent that stops being public drops out. where and args select listed
 // agents (and the search, if any).
-func (s *Store) readHotAgents(ctx context.Context, tx *sql.Tx, c Command, public, where string, args []any, limit int, now int64) (Result, error) {
-	scope := hotAgentsScope(c.Query)
+func (s *Store) readHotAgents(ctx context.Context, tx *sql.Tx, c Command, includeHouse bool, public, where string, args []any, limit int, now int64) (Result, error) {
+	scope := hotAgentsScope(c.Query) + houseScope(includeHouse)
+	// The shared first page is the plain one: no search, no house agents.
+	plain := c.Query == "" && !includeHouse
 	var ids []string
 	var gen int64
 	offset, tailID, tailSeen := 0, "", int64(0)
@@ -489,11 +541,11 @@ func (s *Store) readHotAgents(ctx context.Context, tx *sql.Tx, c Command, public
 		if err != nil {
 			return Result{}, err
 		}
-		if c.Query == "" && first.rows != nil {
+		if plain && first.rows != nil {
 			return s.hotAgentPage(ctx, tx, scope, first.gen, first.rows, limit, now)
 		}
 		ids, gen = first.ids, first.gen
-		if c.Query == "" {
+		if plain {
 			// The unsearched first page is read once for every page size.
 			need = DirectoryPageMax + 1
 		}
@@ -521,11 +573,11 @@ func (s *Store) readHotAgents(ctx context.Context, tx *sql.Tx, c Command, public
 			tailID, tailSeen = cursor.Page, cursor.After
 		}
 	}
-	rows, err := s.hotRows(ctx, tx, where, args, ids, offset, tailID, tailSeen, need, c.Query != "", now)
+	rows, err := s.hotRows(ctx, tx, where, args, ids, offset, tailID, tailSeen, need, !plain, now)
 	if err != nil {
 		return Result{}, err
 	}
-	if c.Cursor == "" && c.Query == "" {
+	if c.Cursor == "" && plain {
 		s.rankMu.Lock()
 		if cur := s.hotAgentsCached; cur != nil && cur.gen == gen && cur.rows == nil {
 			s.hotAgentsCached = &hotAgentsFirst{gen: cur.gen, at: cur.at, ids: cur.ids, rows: rows}

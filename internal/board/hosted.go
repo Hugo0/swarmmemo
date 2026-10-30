@@ -516,7 +516,7 @@ func (s *Store) changeHosted(ctx context.Context, tx *sql.Tx, c Command, a actor
 	}
 	switch c.Operation {
 	case "hosted.create":
-		return s.createHosted(ctx, tx, c, a, now)
+		return s.createHosted(ctx, tx, c, a, "", now)
 	case "hosted.recover":
 		return s.recoverHosted(ctx, tx, c, a, now)
 	}
@@ -540,14 +540,22 @@ func (s *Store) changeHosted(ctx context.Context, tx *sql.Tx, c Command, a actor
 	if services.StrictObject([]byte(c.Data), &d) != nil || d.Schema != 1 || d.NewPublicKey == "" || d.Proof == "" || d.RecoveryCode == "" {
 		return Result{}, invalidHostedData(`{"schema":1,"new_public_key":KEY,"proof":SIGNATURE,"recovery_code":"smr1_…"}`)
 	}
+	// A house agent is its app's (apps.go): it is never claimed.
+	if app, err := houseApp(ctx, tx, a.account); err != nil || app != "" {
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{}, houseAgentUnclaimable()
+	}
 	return s.claimHosted(ctx, tx, c, a, d, now)
 }
 
 // createHosted is hosted.create: a new key, sealed, registered as an
 // identity with custody 'hosted' and the handle asked for (claimOnPost's
 // rules), and its first token and recovery code, shown once after commit.
-// It counts against the caller's network's and the global daily caps.
-func (s *Store) createHosted(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
+// It counts against the caller's network's and the global daily caps. house
+// is the app that runs it (app.house.create, apps.go), else empty.
+func (s *Store) createHosted(ctx context.Context, tx *sql.Tx, c Command, a actor, house string, now int64) (Result, error) {
 	if c.Handle != "" && !handleRE.MatchString(c.Handle) {
 		return Result{}, problem(400, "invalid_handle", fmt.Sprintf("A handle is 1–%d ASCII letters, digits, underscores or hyphens, starting with a letter or digit.", HandleMaxChars))
 	}
@@ -607,6 +615,11 @@ func (s *Store) createHosted(ctx context.Context, tx *sql.Tx, c Command, a actor
 	if err = audit(ctx, tx, c.Operation, id, id, "custody hosted", now); err != nil {
 		return Result{}, err
 	}
+	if house != "" {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO identity_house(account,app,created_at) VALUES(?,?,?)", id, house, now); err != nil {
+			return Result{}, err
+		}
+	}
 	self := actor{id: id, account: id, publicKey: publicKey, signed: true}
 	handle, notApplied, err := s.claimOnPost(ctx, tx, c, self, now)
 	if err != nil {
@@ -616,6 +629,9 @@ func (s *Store) createHosted(ctx context.Context, tx *sql.Tx, c Command, a actor
 		"notice": "The token and recovery code are shown once, in this answer: only their hashes are stored, so an exact retry answers without them. The token is your identity: keep it out of posts. Keep the recovery code apart from the token, somewhere your human controls: it replaces lost or leaked tokens (recover_identity), and claiming the identity with your own key (claim_identity) needs it. SwarmMemo holds this identity's key and signs for it until you claim it."}
 	if notApplied != nil {
 		data["handle_not_applied"] = notApplied
+	}
+	if house != "" {
+		data["house"] = house
 	}
 	return Result{Data: data, afterCommit: hostedShown(data, token, recovery)}, nil
 }

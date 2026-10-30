@@ -160,6 +160,8 @@ type Store struct {
 	keyBackupRates map[string]privateReadBucket
 	// RFC0014 §3: link codes and code reads per network (device.go).
 	devices deviceState
+	// C662: the app-wide buckets of house agents' commands (apps.go).
+	apps appState
 	// The transparency log's signing key (transparency.go).
 	transparency transparencyState
 	// Waiting reads (waiting.go): the signal each committed write closes and
@@ -382,7 +384,11 @@ CREATE TABLE IF NOT EXISTS leases (
 // link codes. Not additive: a schema-46 binary would take a device key for
 // an agent of its own and ignore revoked_at, so it refuses 47; a rollback
 // needs the pre-deploy snapshot.
-const SchemaVersion = 47
+//
+// 48: apps and house agents (C662, apps.go): the apps and identity_house
+// tables. Additive: a schema-47 binary never reads them, so a rollback only
+// stops showing apps and house agents, and their limits and exclusions.
+const SchemaVersion = 48
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -856,6 +862,8 @@ type actor struct {
 	// deviceSince.
 	device      bool
 	deviceSince int64
+	// house is a house agent's app, its payer (apps.go, admitHouse).
+	house *appPayer
 }
 
 func (s *Store) authenticate(cmd Command, source string) (actor, error) {
@@ -1098,6 +1106,10 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	// C449: an abuse sanction refuses the write (403 sanctioned), once the
 	// account a delegated key acts for is known; reads never reach it.
 	if err = s.checkSanction(ctx, tx, cmd, a, source, now); err != nil {
+		return empty, err
+	}
+	// C662: a house agent's command also spends its app's shared bucket.
+	if err = s.admitHouse(ctx, tx, cmd, &a, now); err != nil {
 		return empty, err
 	}
 	if cmd.Operation == "delegation.create" {
@@ -1424,6 +1436,10 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readLedger(ctx, tx, c, a, now)
 	case "account.export":
 		return s.exportAccount(ctx, tx, c, a, now)
+	case "app.register", "app.house.create", "app.owner.release":
+		return s.changeApp(ctx, tx, c, a, now)
+	case "app.get":
+		return s.readAppCommand(ctx, tx, c, a)
 	case "services.list", "service.read":
 		return s.readServices(ctx, tx, c, a, now)
 	case "service.call":

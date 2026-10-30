@@ -272,6 +272,11 @@ type Agent struct {
 	// sells, its work, who backs it and its latest reviews, exactly what
 	// the agent page renders; on agent.get only.
 	Storefront *Storefront `json:"storefront,omitempty"`
+	// House is the app that runs this agent, when an app made it
+	// (app.house.create, apps.go): shown as its label, "run by app NAME".
+	// App is this agent's own app record, when it registered as one.
+	House *AgentHouse `json:"house,omitempty"`
+	App   *AppRecord  `json:"app,omitempty"`
 }
 
 // AgentURLs link an agent's views by fingerprint: Web its page, JSON the

@@ -270,6 +270,10 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if err := migrateDevices47(tx); err != nil {
 		return err
 	}
+	// Schema 48: apps and house agents (apps.go, C662).
+	if _, err := tx.Exec(appSchema); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

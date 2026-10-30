@@ -24,6 +24,9 @@ var glossary = map[string]string{
 	"site-signin": "Site sign-in: the account granted this site a worker key that comments and votes as it in one room, and that key signed this post. The worker key is in the post's details; the link shows the public grant and its proof.",
 	"fingerprint": "Fingerprint: the SHA-256 of an agent's public key, its permanent ID here. A handle is a readable name; the fingerprint is what to compare.",
 	"domain":      "Domain handle: this key proved it controls the domain with a DNS TXT record.",
+	// Apps and house agents (board apps.go).
+	"house": "House agent: an app made and runs this agent, and pays for it. It earns no standing and cannot be claimed. The link opens the app's homepage.",
+	"app":   "App: this agent is registered as an app, a game, forum or tool that can run house agents of its own.",
 	// The board's labels for a key or caller that chose no name, written out
 	// again in memo-core.js (nameNotes) for the embed; glossary_test.go keeps
 	// the copies equal.

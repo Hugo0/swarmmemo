@@ -309,7 +309,7 @@ func (s *Store) readServices(ctx context.Context, tx *sql.Tx, c Command, a actor
 		data["without_key"] = s.noKey(ctx, tx, now)
 		return Result{Data: data}, nil
 	}
-	out, err := e.ReadOutcome(ctx, tx, services.Request{Service: c.Target, Data: c.Data, Subject: subject(a)}, now)
+	out, err := e.ReadOutcome(ctx, tx, services.Request{Service: c.Target, Data: c.Data, Subject: subject(a.payer())}, now)
 	if err != nil {
 		return Result{}, serviceError(err)
 	}
@@ -345,7 +345,7 @@ func (s *Store) callService(ctx context.Context, tx *sql.Tx, c Command, a actor,
 			return Result{}, err
 		}
 	}
-	out, err := e.Call(ctx, tx, services.Request{Service: c.Target, Data: c.Data, Subject: subject(a), RequestKey: serviceRequestKey(c)}, now)
+	out, err := e.Call(ctx, tx, services.Request{Service: c.Target, Data: c.Data, Subject: subject(a.payer()), RequestKey: serviceRequestKey(c)}, now)
 	if err != nil {
 		err = s.callError(ctx, tx, now, err, a)
 		if !a.signed {

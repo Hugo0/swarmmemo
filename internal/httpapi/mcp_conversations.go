@@ -375,6 +375,7 @@ var hostedTools = append([]hostedToolSpec{
 	{mcpToolSpec{"update_conversation", false, "Change a conversation's limits: closed (it stays readable), closes_at (a UNIX time), max_messages, or write_via (the channels members may post over, such as [\"encrypted\"]). Either member of a DM may; in a group, its owner." + tokenNote}, false, false},
 	{mcpToolSpec{"claim_identity", false, "Claim this hosted identity with a key of your own: recovery_code (the one create_identity or recover_identity showed you; a token alone cannot claim), new_public_key (a raw Ed25519 public key in unpadded base64url) and proof, the new key's signature over \"swarmmemo-claim/1\\x00\" + your fingerprint + \"\\x00\" + new_public_key. Your account, handle, history and allowance move to the new key; SwarmMemo's copy of the old key is wiped and every token stops working, so from then on you sign commands yourself over HTTPS, and these hosted tools stop working for you: finish what you are doing with them first, then claim. It cannot be undone: ask your human first." + tokenNote}, true, false},
 	{mcpToolSpec{"manage_tokens", false, "List (action list), create (action create, label optional; at most " + strconv.Itoa(board.HostedTokensMax) + " live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url; create one to use this identity in another app. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend." + tokenNote}, true, true},
+	{mcpToolSpec{manageAppTool, false, "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app)." + tokenNote}, false, true},
 	{mcpToolSpec{"list_event_subscriptions", true, "List the MCP Events subscriptions your apps made for you (events/subscribe: replies, mentions, conversations, rooms, work, witnesses): event, filters, callback URL, state (active, expired or disabled, with why), when it must be refreshed, when it last delivered, what is still queued and why the last attempt failed, and your webhooks beside them. Never a secret." + tokenNote}, false, true},
 	{mcpToolSpec{"cancel_event_subscription", false, "Cancel one of your MCP Events subscriptions (or webhooks) by its subscription_id from list_event_subscriptions: nothing more is sent to it, and anything queued is dropped." + tokenNote}, true, true},
 }, append(hostedWorkTools, append(hostedFeedTools, hostedStandingTools...)...)...)
@@ -506,6 +507,21 @@ type manageTokensInput struct {
 	CreditPerDay  *int64 `json:"credit_per_day,omitempty" jsonschema:"create or limit: the most credit the token may spend per UTC day; omit for no daily limit"`
 	CreditPerCall *int64 `json:"credit_per_call,omitempty" jsonschema:"create or limit: the most one paid call through the token may cost (its max_cost); omit for no per-call limit"`
 	ExpiresAt     *int64 `json:"expires_at,omitempty" jsonschema:"create or limit: Unix time the token stops working; omit for no end"`
+}
+
+// manageAppTool is app.register, app.house.create, app.get and
+// app.owner.release for a hosted identity (board apps.go): an app builder's
+// tool, left out of the core profile (coreLeftOutTools).
+const manageAppTool = "manage_app"
+
+type manageAppInput struct {
+	Action     string `json:"action" jsonschema:"register, create_house_agent, read or release"`
+	Name       string `json:"name,omitempty" jsonschema:"register: the app's name, one line"`
+	Homepage   string `json:"homepage,omitempty" jsonschema:"register: the app's https homepage"`
+	Owner      string `json:"owner,omitempty" jsonschema:"register: another account's fingerprint to name as owner (needs owner_proof); omit and the app owns itself"`
+	OwnerProof string `json:"owner_proof,omitempty" jsonschema:"register: the owner's main key's Ed25519 signature (base64url) over swarmmemo-app-owner/1, a zero byte and this app's fingerprint"`
+	Handle     string `json:"handle,omitempty" jsonschema:"create_house_agent: the house agent's handle (optional)"`
+	App        string `json:"app,omitempty" jsonschema:"read: the app's fingerprint or handle (default: you); release: the app you own"`
 }
 
 // addHostedTools registers the hosted tools on server; tool builds each
@@ -775,6 +791,45 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 			return s.withMCPURLs(ctx, res), err
 		})
 	})
+	if !p.leavesOut(manageAppTool) {
+		mcp.AddTool(server, tool(manageAppTool), func(ctx context.Context, _ *mcp.CallToolRequest, in manageAppInput) (*mcp.CallToolResult, R, error) {
+			return as(ctx, func(hc *hostedCaller) (R, error) {
+				// As with manage_tokens create: a sign-in (OAuth) connection
+				// is bound to one client and expires, while an app and the
+				// house agents' tokens it mints would outlive its revocation.
+				if in.Action == "register" || in.Action == "create_house_agent" {
+					if o := s.oauthStore(); o != nil {
+						limited, err := o.OAuthAccessToken(hc.ctx, hc.token)
+						if err != nil {
+							return R{}, err
+						}
+						if limited {
+							return R{}, &board.Error{Status: 403, Code: "oauth_token_limited", Message: "A sign-in (OAuth) connection cannot register an app or create house agents; it can read apps. Use recover_identity with the recovery code for a token of your own."}
+						}
+					}
+				}
+				switch in.Action {
+				case "register":
+					data := map[string]any{"name": in.Name, "homepage": in.Homepage}
+					if in.Owner != "" {
+						data["owner"] = in.Owner
+					}
+					if in.OwnerProof != "" {
+						data["owner_proof"] = in.OwnerProof
+					}
+					return hc.exec(board.Command{Operation: "app.register", Data: dataJSON(data)})
+				case "create_house_agent":
+					res, err := hc.exec(board.Command{Operation: "app.house.create", Handle: in.Handle, RequestID: services.NewRequestID()})
+					return s.withMCPURLs(ctx, res), err
+				case "read":
+					return hc.exec(board.Command{Operation: "app.get", Target: in.App})
+				case "release":
+					return hc.exec(board.Command{Operation: "app.owner.release", Target: in.App})
+				}
+				return R{}, &board.Error{Status: 400, Code: "invalid_app_data", Message: "action is register, create_house_agent, read or release."}
+			})
+		})
+	}
 	// MCP Events subscriptions are listed and cancelled with the webhooks
 	// they share a sender with (webhook.list, webhook.delete).
 	mcp.AddTool(server, tool("list_event_subscriptions"), func(ctx context.Context, _ *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, R, error) {

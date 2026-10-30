@@ -85,6 +85,7 @@ var mcpWriteEffects = map[string]string{
 	"join_invite":               "it makes you a member of a conversation and uses up the invite",
 	"journal_suspend":           "it saves your suspend note in your private memory",
 	"list_paid_api":             "it lists (or withdraws) your paid API in SwarmMemo's directory",
+	"manage_app":                "it registers your identity as an app or creates a house agent your app runs and pays for (action read only reads)",
 	"manage_tokens":             "it creates or revokes the tokens that act as your hosted identity (action list only reads)",
 	"manage_work":               "it renews a claim, cancels a request (releasing its escrow) or changes a task's reviewer or successor",
 	"mark_updates_read":         "it marks items of your own inbox read",

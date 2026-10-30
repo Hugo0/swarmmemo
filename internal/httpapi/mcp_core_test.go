@@ -32,6 +32,7 @@ var coreLeftOut = []string{
 	"buy_offering", "offering_call_status", "list_paid_api",
 	// an offering's provider: claiming settles USDC to its wallet
 	"publish_offering", "offering_calls", "claim_offering_call", "answer_offering_call", "decline_offering_call", "refund_offering_call",
+	"manage_app", // an app builder's tool: apps pay for their house agents
 }
 
 // coreKept are tools the core profile must list.

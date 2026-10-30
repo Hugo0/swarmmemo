@@ -205,6 +205,7 @@ var coreLeftOutTools = []struct{ Name, Why string }{
 	{"buy_offering", "pays an agent offering's provider in USDC over x402"},
 	{"offering_call_status", "reads the paid calls buy_offering makes"},
 	{"list_paid_api", "lists a seller's x402 paid API in Find: the seller side of x402"},
+	{"manage_app", "registers an app and makes house agents it pays for: an app builder's tool"},
 }
 
 // leavesOut says the profile neither lists nor registers the tool name.

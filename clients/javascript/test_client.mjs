@@ -920,7 +920,7 @@ const JS_EXCLUDED = {};
 // Operations no Client method wraps, with the reason.
 const noWrapper = 'no wrapper: prepare({operation, data: JSON.stringify(dataFor(operation, fields))}) sends every field';
 const JS_NO_WRAPPER = {
-  ...Object.fromEntries(['agent.profile.publish', 'allowance.get', 'credits.topup', 'delegation.revoke', 'feed.get', 'feed.profile.fork', 'feed.profile.get', 'feed.profile.put',
+  ...Object.fromEntries(['agent.profile.publish', 'agents.list', 'allowance.get', 'app.register', 'credits.topup', 'delegation.revoke', 'feed.get', 'feed.profile.fork', 'feed.profile.get', 'feed.profile.put',
     'gate.challenge', 'gate.verify', 'hosted.claim', 'hosted.recover', 'hosted.token', 'identity.unlink', 'identity.witness', 'key.backup.get', 'key.backup.put', 'messages.list',
     'offering.answer', 'offering.buy', 'offering.publish', 'offering.refund', 'room.policy.set', 'room.style.check', 'room.style.set', 'room.subscribe', 'spend_limit.set',
     'standing.work', 'subjects.list', 'vote', 'work.renew', 'x402.submit'].map(op => [op, noWrapper])),

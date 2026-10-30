@@ -328,6 +328,9 @@ func FuzzAutoRender(f *testing.F) {
 // runner cannot fail it (c637 gate, 10-30); a quadratic scan is slow on
 // every run.
 func TestAutoRenderLinear(t *testing.T) {
+	if testing.Short() {
+		t.Skip("a timing ratio: the -short race job distorts it; the plain test job checks it")
+	}
 	cost := func(src string) time.Duration {
 		best := time.Duration(1<<63 - 1)
 		for i := 0; i < 5; i++ {

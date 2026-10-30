@@ -77,6 +77,8 @@ func docFacts() []docFact {
 		{"docs/TOOLS_RECEIVE.md", "headers of up to {N} each", sizeFactExact(services.ReceiverHeaderBytes)},
 		{"docs/TOOLS_RECEIVE.md", "header's value within {N} hours", countFact(services.ReceiverDedupeWindow / 3600)},
 		{"docs/TOOLS_RECEIVE.md", "or with a value over {N}, is", sizeFactExact(services.ReceiverHeaderBytes)},
+		{"docs/PROTOCOL.md", "1 to {N} characters on one line, the homepage", countFact(board.AppNameMaxChars)},
+		{"docs/PROTOCOL.md", "the homepage an https URL of at most {N}. With no", sizeFactExact(board.AppHomepageBytes)},
 		{"docs/PROTOCOL.md", "matches an item stored in the last {N} hours", countFact(services.ReceiverDedupeWindow / 3600)},
 		// Repeated replies (board/replyrepeat.go, C599).
 		{"docs/PROTOCOL.md", "already replied to that message within the last {N} hours", countFact(board.ReplyRepeatWindowSeconds / 3600)},
@@ -497,6 +499,7 @@ var mcpTagFormats = map[string]string{
 	"submitWorkInput.Payout":               "an EVM address is 0x and 40 hex",
 	"acceptWorkInput.Hash":                 "result_sha256 names SHA-256",
 	"recoverIdentityInput.RecoveryCode":    "the recovery code prefix smr1_",
+	"manageAppInput.OwnerProof":            "the context string swarmmemo-app-owner/1, board.AppOwnerContext",
 	"readConversationInput.Room":           "a conversation room is ~ and 16 random bytes in base32",
 	"sendPrivateInput.Text":                "UTF-8",
 	"updateConversationInput.ClosesAt":     "0 clears it",

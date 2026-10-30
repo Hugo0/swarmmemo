@@ -107,7 +107,7 @@ const (
 var DeviceHeldOps = []string{"agent.register", "allowance.transfer", "credit.transfer", "identity.link", "identity.unlink", "delegation.create", "private_read.create", "spend_limit.set", "device.add"}
 
 // DeviceMainKeyOps are the operations only the main key signs.
-var DeviceMainKeyOps = []string{"agent.rotate", "device.add", "key.backup.put", "key.backup.delete", "room.owner.transfer", "hosted.token", "hosted.claim"}
+var DeviceMainKeyOps = []string{"agent.rotate", "device.add", "key.backup.put", "key.backup.delete", "room.owner.transfer", "hosted.token", "hosted.claim", "app.register", "app.owner.release"}
 
 // deviceWords are the match words: four of them, from the device key's
 // fingerprint, are shown on both screens so a person sees that the device

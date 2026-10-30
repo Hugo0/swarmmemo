@@ -127,6 +127,8 @@ var dataProbes = map[string]func(string) error{
 	"hosted.recover":       strictProbe[hostedData](),
 	"hosted.token":         strictProbe[hostedData](),
 	"hosted.claim":         strictProbe[hostedData](),
+	"agents.list":          strictProbe[agentsListData](),
+	"app.register":         strictProbe[appData](),
 }
 
 // Every work.* operation reads its data with parseWorkData.

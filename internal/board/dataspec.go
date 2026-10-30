@@ -477,6 +477,8 @@ var dataSpecs = map[string]DataSpec{
 	"hosted.recover":       structSpec(hostedData{}, "schema!", "recovery_code!").only("schema", "recovery_code"),
 	"hosted.token":         structSpec(hostedData{}, "schema!", "action!").only("schema", "action", "target", "label", "spend_limit"),
 	"hosted.claim":         structSpec(hostedData{}, "schema!", "new_public_key!", "proof!", "recovery_code!").only("schema", "new_public_key", "proof", "recovery_code"),
+	"app.register":         structSpec(appData{}, "schema!", "name!", "homepage!", "owner pattern=fingerprint"),
+	"agents.list":          structSpec(agentsListData{}, "schema!"),
 }
 
 // dataRefusals is the code each operation's own parser refuses its data
@@ -486,6 +488,7 @@ var dataSpecs = map[string]DataSpec{
 var dataRefusals = map[string]string{
 	"post":                  "invalid_post_data",
 	"messages.list":         "invalid_list_options",
+	"agents.list":           "invalid_list_options",
 	"feed.":                 "invalid_feed_profile",
 	"room.subscribe":        "invalid_feed_profile",
 	"vote":                  "invalid_vote",
@@ -516,6 +519,7 @@ var dataRefusals = map[string]string{
 	"conversation.seal":     "invalid_seal",
 	"messaging.policy.set":  "invalid_messaging_policy",
 	"hosted.":               "invalid_hosted_data",
+	"app.":                  "invalid_app_data",
 }
 
 // dataRefusal is operation's entry in dataRefusals.

@@ -71,6 +71,8 @@
   // window, no Web Locks to guard it), the composer still signs, with a key
   // held in this tab only and said so plainly. Never an unasked anonymous post.
   let sessionKey = null;
+  // C660: the notifier follows the key this page signs with, which a first post can mint mid-visit.
+  let notifyFollow = null;
   const isSessionKey = key => !!sessionKey && key?.public_key === sessionKey.public_key;
   function storageUsable() { try { localStorage.getItem(identitySlot); return true; } catch (_) { return false; } }
   const keyKeepable = () => storageUsable() && locksAvailable();
@@ -198,6 +200,7 @@
     if ($('compose-identity')) $('compose-identity').textContent = postingMode==='anonymous' ? 'anonymous' : identity ? label : sessionKey ? 'a key for this tab only (' + sessionKey.fingerprint.slice(0, 12) + ')' : keyKeepable() ? 'a new key on this device' : 'a key for this tab only';
     if ($('compose-tab-key')) $('compose-tab-key').hidden = postingMode==='anonymous' || !!identity || (!sessionKey && keyKeepable());
     document.querySelector('.identity-dot')?.classList.toggle('active', !!identity);
+    notifyFollow?.();
     if ($('identity-active')) {
       $('identity-active').hidden = !identity; $('identity-empty').hidden = !!identity;
       $('identity-fingerprint').textContent = identity?.fingerprint || '';
@@ -2677,7 +2680,11 @@
   // read on a phone is read on the laptop at its next poll.
   const notifySlot = 'swarmmemo.notify.v1', notifyEvery = 60000;
   const notify = (() => {
-    const fp = identity?.fingerprint;
+    // The signer is the kept key, else the tab-only key (C546). A first post
+    // mints one after this page loaded; follow() then starts counting at once,
+    // so a reply to that post shows on the page that wrote it (C660).
+    const signer = () => identity || sessionKey;
+    let fp = signer()?.fingerprint;
     const icon = document.querySelector('link[rel="icon"]'), plainIcon = icon?.getAttribute('href') || '', plainType = icon?.getAttribute('type') || '';
     // The link's type must match what it points at, or a browser may ignore the swap.
     const setIcon = (href, type) => { if (icon.getAttribute('href') === href) return; icon.setAttribute('href', href); if (type) icon.setAttribute('type', type); else icon.removeAttribute('type'); };
@@ -2685,7 +2692,7 @@
     let badgedIcon = '', timer = 0, polling = false, again = false, shown = 0;
     // One state per key, so switching never resets or mixes another key's news;
     // the Me count is the active key's. The pre-switcher shared slot is read once as a fallback.
-    const slot = notifySlot + ':' + fp;
+    let slot = notifySlot + ':' + fp;
     const load = () => { try { const saved = JSON.parse(localStorage.getItem(slot) || localStorage.getItem(notifySlot) || 'null'); return saved?.fp === fp ? saved : null; } catch (_) { return null; } };
     const save = state => { try { localStorage.setItem(slot, JSON.stringify(state)); } catch (_) { /* A convenience: without storage each tab counts alone. */ } };
     const blank = () => ({fp, cursor: '', polled_at: 0, rooms: 0, requests: 0, replies: [], addressed: [], mentions: [], server: false, seen: []});
@@ -2768,7 +2775,7 @@
       for (const key of personal) state[key] = cap((Array.isArray(updates[key]) ? updates[key] : []).filter(id => !waiting.has(id)).reverse());
     }
     async function markRead(data, ids = []) {
-      const result = await request({operation: 'updates.mark_read', target: fp, data: JSON.stringify({schema: 1, ...data}), request_id: uuid()}, true);
+      const result = await request({operation: 'updates.mark_read', target: fp, data: JSON.stringify({schema: 1, ...data}), request_id: uuid()}, true, false, signer());
       const state = load() || blank();
       state.seen = (state.seen || []).filter(id => !ids.includes(id));
       if (result.data?.unread?.updates) fromBoard(state, result.data.unread.updates);
@@ -2798,7 +2805,7 @@
         // The first read only sets the cursor (one item); later ones count what is new since.
         const baseline = !state.cursor;
         // Counts only: ids, reasons and unread counts, never anyone's message text.
-        const result = await request({operation: 'updates.get', target: fp, data: JSON.stringify({schema: 1, counts: true}), ...(baseline ? {limit: 1} : {cursor: state.cursor, limit: 50})}, true);
+        const result = await request({operation: 'updates.get', target: fp, data: JSON.stringify({schema: 1, counts: true}), ...(baseline ? {limit: 1} : {cursor: state.cursor, limit: 50})}, true, false, signer());
         const data = result.data || {}, conversation = new Set(data.conversations || []);
         state = load() || state;
         // The board's read state, whatever the cursor; else what is new since it.
@@ -2816,16 +2823,31 @@
       } finally { polling = false; if (again) { again = false; poll(true); } }
     }
     function schedule() { clearTimeout(timer); timer = setTimeout(() => { poll().finally(schedule); }, notifyEvery); }
-    if (fp) {
+    let started = false;
+    function start() {
+      if (started) return;
+      started = true;
       // Coming back to a tab counts at once; hidden tabs keep polling (browsers slow them to once a minute anyway).
       document.addEventListener('visibilitychange', () => { if (!document.hidden) poll().finally(schedule); });
       window.addEventListener('storage', event => { if (event.key === slot) render(load()); });
+    }
+    if (fp) {
+      start();
       flagNew(load(), true);
       render(load());
       // What an earlier page queued as read and could not send yet.
       if (load()?.seen?.length) seenTimer = setTimeout(flushRead, 600);
       capabilitiesReady.then(() => poll()).finally(schedule);
     }
+    // A key that appears on this page (the first post's, or one imported
+    // here) is counted from now on, without a reload.
+    notifyFollow = () => {
+      const next = signer()?.fingerprint;
+      if (!next || next === fp) return;
+      fp = next; slot = notifySlot + ':' + fp; start();
+      render(load());
+      capabilitiesReady.then(() => poll(true)).finally(schedule);
+    };
     return {
       // A public message addressed to this key, arriving on the open live
       // stream, counts at once, without waiting for the next poll.

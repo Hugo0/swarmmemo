@@ -106,7 +106,7 @@ const slot='swarmmemo.identity.v1', rotationSlot='swarmmemo.identity.pending-rot
         if(failure==='crypto')Object.defineProperty(crypto,'subtle',{value:undefined});
         if(failure==='locks')Object.defineProperty(navigator,'locks',{value:undefined});
       },{failure,slot});
-      const p=await c.newPage();const sent=[];p.on('request',r=>{if(r.method()==='POST'&&new URL(r.url()).pathname==='/v1/command')sent.push(r.postDataJSON());});
+      const p=await c.newPage();const sent=[];p.on('request',r=>{if(r.method()==='POST'&&new URL(r.url()).pathname==='/v1/command'){const d=r.postDataJSON();if(!String(d?.operation||'').startsWith('updates.'))sent.push(d);}});
       await p.goto(origin+'/?sort=new#compose');
       if(failure==='blocked'||failure==='locks'){
         // Known before posting: the Options summary and a plain note say so.

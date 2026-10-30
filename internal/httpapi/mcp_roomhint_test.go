@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -58,25 +60,38 @@ func TestMCPReadMessagesRoomNotFoundHint(t *testing.T) {
 	tokenPath := "/mcp/t/" + me["token"].(string)
 	rec.take()
 
-	first := ""
+	first, firstResult := "", ""
 	for _, caller := range []struct{ name, path, auth string }{
 		{"anonymous", "/mcp", ""},
 		{"anonymous assistant", web.AssistantMCPPath, ""},
 		{"hosted path token", tokenPath, ""},
 		{"hosted bearer assistant", web.AssistantMCPPath, "Bearer " + me["token"].(string)},
 	} {
-		answers := map[string]string{}
+		// The whole tools/call result is compared, not only the text a model
+		// reads first: isError, every content block and the structured error
+		// fields (realbtr's follow-up on PR #45). Only the JSON-RPC id is
+		// transport, and it is outside result.
+		answers, results := map[string]string{}, map[string]string{}
 		for _, room := range []string{"no-such-room", "hidden-lab"} {
-			_, failure := callTool(t, s, caller.path, caller.auth, "read_messages", map[string]any{"room": room})
+			raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "read_messages", "arguments": map[string]any{"room": room}}})
+			out := mcpRequest(t, s, caller.path, caller.auth, string(raw))
 			ops := rec.take()
 			if len(ops) != 1 || ops[0] != "messages.list" {
 				t.Fatalf("%s %s: store calls %v, want one messages.list", caller.name, room, ops)
 			}
-			answers[room] = failure
+			if out["error"] != nil || dig(out, "result", "isError") != true {
+				t.Fatalf("%s %s: want a tool error result, got %v", caller.name, room, out)
+			}
+			content, _ := dig(out, "result", "content").([]any)
+			if len(content) == 0 {
+				t.Fatalf("%s %s: no content: %v", caller.name, room, out)
+			}
+			result, _ := json.Marshal(out["result"])
+			answers[room], results[room] = fmt.Sprint(content[0].(map[string]any)["text"]), string(result)
 		}
 		got := answers["no-such-room"]
-		if got != answers["hidden-lab"] {
-			t.Fatalf("%s: a missing and a private room answer differently:\n%q\n%q", caller.name, got, answers["hidden-lab"])
+		if results["no-such-room"] != results["hidden-lab"] {
+			t.Fatalf("%s: a missing and a private room answer differently:\n%s\n%s", caller.name, results["no-such-room"], results["hidden-lab"])
 		}
 		if !strings.Contains(got, "Room not found.") || !strings.Contains(got, "list_rooms") {
 			t.Fatalf("%s: %q", caller.name, got)
@@ -85,9 +100,9 @@ func TestMCPReadMessagesRoomNotFoundHint(t *testing.T) {
 			t.Fatalf("%s: want the signed-read link and no DM tool: %q", caller.name, got)
 		}
 		if first == "" {
-			first = got
-		} else if got != first {
-			t.Fatalf("%s: the hint differs between callers:\n%q\n%q", caller.name, got, first)
+			first, firstResult = got, results["no-such-room"]
+		} else if got != first || results["no-such-room"] != firstResult {
+			t.Fatalf("%s: the refusal differs between callers:\n%s\n%s", caller.name, results["no-such-room"], firstResult)
 		}
 	}
 

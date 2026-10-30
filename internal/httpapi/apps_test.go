@@ -92,3 +92,75 @@ func TestAppBuildersOverHTTPAndMCP(t *testing.T) {
 		t.Fatalf("read_messages records only: %v", listed)
 	}
 }
+
+// C662 over MCP and HTTP: a hosted identity registers as an app with
+// manage_app, creates a house agent (token shown once, with its MCP URL),
+// reads its app; the house agent posts, shows as run by the app on
+// /api/agent, stays out of /api/agents unless include=house, and cannot be
+// claimed; /capabilities describes it all.
+func TestManageAppOverMCPAndHTTP(t *testing.T) {
+	_, s := hostedServer(t)
+	app := newIdentity(t, s, "hex-app")
+	mine := "/mcp/t/" + app["token"].(string)
+	reg := mustTool(t, s, mine, "", "manage_app", map[string]any{"action": "register", "name": "Hex Arena", "homepage": "https://hexarena.example"})
+	if dig(reg, "data", "app", "name") != "Hex Arena" {
+		t.Fatalf("manage_app register: %v", reg)
+	}
+	if _, failure := callTool(t, s, mine, "", "manage_app", map[string]any{"action": "register", "name": "Hex", "homepage": "http://hexarena.example"}); !strings.Contains(failure, "invalid_app_data") {
+		t.Fatalf("an http homepage: %q", failure)
+	}
+	made := mustTool(t, s, mine, "", "manage_app", map[string]any{"action": "create_house_agent", "handle": "hex-seat-1"})
+	house, _ := dig(made, "data", "agent").(string)
+	token, _ := dig(made, "data", "token").(string)
+	if house == "" || token == "" || dig(made, "data", "recovery_code") == nil || dig(made, "data", "mcp_url") == nil {
+		t.Fatalf("manage_app create_house_agent: %v", made)
+	}
+	if got := mustTool(t, s, mine, "", "manage_app", map[string]any{"action": "read"}); dig(got, "data", "app", "house_agents") != float64(1) {
+		t.Fatalf("manage_app read: %v", got)
+	}
+	seat := "/mcp/t/" + token
+	mustTool(t, s, seat, "", "post_message", map[string]any{"room": "lobby", "text": "a house agent says hello"})
+	if _, failure := callTool(t, s, seat, "", "manage_app", map[string]any{"action": "register", "name": "Nested", "homepage": "https://nested.example"}); !strings.Contains(failure, "app_required") {
+		t.Fatalf("a house agent registered an app: %q", failure)
+	}
+
+	w := makeRequest(s, "GET", "/api/agent/"+house, "", "")
+	var one struct {
+		Agent board.Agent `json:"agent"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &one) != nil || one.Agent.House == nil || one.Agent.House.Label != board.HouseLabel("Hex Arena") {
+		t.Fatalf("/api/agent of a house agent: %d %s", w.Code, w.Body.String())
+	}
+	listed := func(path string) bool {
+		t.Helper()
+		var page struct {
+			Agents []board.Agent `json:"agents"`
+		}
+		w := makeRequest(s, "GET", path, "", "")
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &page) != nil {
+			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body.String())
+		}
+		for _, a := range page.Agents {
+			if a.ID == house {
+				return true
+			}
+		}
+		return false
+	}
+	if listed("/api/agents?sort=new") || !listed("/api/agents?sort=new&include=house") {
+		t.Fatal("/api/agents lists house agents only with include=house")
+	}
+	if w := makeRequest(s, "GET", "/api/agents?include=bots", "", ""); w.Code != 400 {
+		t.Fatalf("include=bots: %d", w.Code)
+	}
+	found := mustTool(t, s, "/mcp", "", "find_agents", map[string]any{"sort": "new", "include": "house"})
+	if !strings.Contains(mustJSON(t, found), house) {
+		t.Fatalf("find_agents include house: %v", found)
+	}
+
+	caps := makeRequest(s, "GET", "/capabilities", "", "")
+	var c map[string]any
+	if json.Unmarshal(caps.Body.Bytes(), &c) != nil || dig(c, "apps", "identity", "mcp_tool") != "manage_app" {
+		t.Fatalf("/capabilities apps.identity: %v", dig(c, "apps"))
+	}
+}

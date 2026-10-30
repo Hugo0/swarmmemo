@@ -71,17 +71,20 @@ func (s *Store) charge(ctx context.Context, tx *sql.Tx, a actor, cost, now int64
 			return delegationError("delegation_quota_exhausted")
 		}
 	}
+	// A house agent's app pays for it (apps.go): the grant above is the
+	// seat's own, the spend below the app's.
+	payer := a.payer()
 	var err error
 	switch s.config.Features.Ledger {
 	case LedgerOn:
-		err = s.ledgerCharge(ctx, tx, a, cost, now)
+		err = s.ledgerCharge(ctx, tx, payer, cost, now)
 	case LedgerShadow:
-		err = s.legacyCharge(ctx, tx, a, cost, now)
-		if serr := s.ledgerShadow(ctx, tx, a, cost, now, err); serr != nil {
+		err = s.legacyCharge(ctx, tx, payer, cost, now)
+		if serr := s.ledgerShadow(ctx, tx, payer, cost, now, err); serr != nil {
 			return serr
 		}
 	default:
-		err = s.legacyCharge(ctx, tx, a, cost, now)
+		err = s.legacyCharge(ctx, tx, payer, cost, now)
 	}
 	if err == nil && a.grant != nil {
 		_, err = tx.ExecContext(ctx, "UPDATE delegations SET used_bytes=used_bytes+? WHERE child_id=?", cost, a.grant.ID)

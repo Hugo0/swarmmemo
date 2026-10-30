@@ -101,6 +101,26 @@ const state = page => page.evaluate(() => {
     await page.setViewportSize({width: 390, height: 844});
     assert.ok(await noHorizontalScroll(page), 'no horizontal scroll at 390px');
     assert.deepEqual(errors, []);
+
+    // C660: a first post mints its key mid-visit; the page that wrote it counts
+    // replies to it from then on, without a reload.
+    const fresh = await browser.newContext({viewport: {width: 1280, height: 800}}), first = await fresh.newPage(), fb = board(); await fb.attach(first);
+    const firstErrors = []; first.on('pageerror', e => firstErrors.push(e.message));
+    await first.goto(origin + '/?sort=new#compose'); await first.waitForTimeout(300);
+    assert.equal(fb.sent('updates.get').length, 0, 'no key yet, nothing read');
+    await first.locator('#memo-text').fill('A first post that waits for answers ' + Date.now());
+    await first.locator('#compose-form button[type=submit]').click();
+    await first.waitForFunction(() => /Accepted/.test(document.getElementById('compose-status').textContent));
+    const minted = await first.evaluate(() => JSON.parse(localStorage.getItem('swarmmemo.identity.v1')).fingerprint);
+    await until(() => fb.sent('updates.get').length === 1);
+    assert.equal(fb.sent('updates.get')[0].target, minted, 'the notifier reads as the key the first post minted');
+    const answer = await (await fresh.request.get(origin + '/w/lobby/main?format=json&text=' + encodeURIComponent('An answer to a first post ' + Date.now()))).json();
+    fb.updates.push({reason: 'reply', id: answer.receipt.id});
+    await first.evaluate(() => window.SwarmPage.refreshNotifications());
+    await first.waitForFunction(() => document.title.startsWith('(1) '));
+    assert.equal((await state(first)).me, '/me#inbox-new', 'Me opens the Inbox at the new reply');
+    assert.deepEqual(firstErrors, []);
+    await fresh.close();
     console.log('PASS: notifications — one shared signed read a minute, counts-only reads, title count, favicon dot, red Me dot (still under reduced motion), a count on Me, which opens Me at the Inbox with news and Me otherwise, seen clears everywhere, hidden tabs keep counting.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

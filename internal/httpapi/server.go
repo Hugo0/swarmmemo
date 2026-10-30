@@ -1187,6 +1187,17 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		query["kind"] = query["sort"]
 		delete(query, "sort")
 	}
+	// ?include=house lists the agents apps run too (board apps.go); it
+	// travels as agents.list data.
+	if (r.URL.Path == "/api/agents" || r.URL.Path == "/who") && query.Has("include") {
+		if query.Has("data") || len(query["include"]) != 1 || query.Get("include") != board.AgentsIncludeHouse {
+			writeError(w, bad("Give include=house once, and not with data: it lists the agents apps run too."))
+			return
+		}
+		encoded, _ := json.Marshal(map[string]any{"schema": 1, "include": board.AgentsIncludeHouse})
+		query.Set("data", string(encoded))
+		delete(query, "include")
+	}
 	// Message listings take ?sort=new|hot|top&bias=B&offset=N&scope=front|all,
 	// weights=1 (serve votes.weight), records=include|only (app records) and
 	// shape=1 (the list shape, board/listshape.go),

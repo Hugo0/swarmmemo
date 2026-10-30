@@ -72,6 +72,9 @@ var mcpArgBounds = map[string]mcpBound{
 	"decline_offering_call.reason": boundLength(board.OfferingDeclineReasonBytes),
 	"journal_suspend.text":         boundLength(board.JournalSuspendBytes),
 	"manage_tokens.label":          boundLength(board.HostedTokenLabelBytes),
+	"manage_app.handle":            boundLength(board.HandleMaxChars),
+	"manage_app.name":              boundLength(board.AppNameMaxChars),
+	"manage_app.homepage":          boundLength(board.AppHomepageBytes),
 	"send_feedback.text":           boundLength(board.FeedbackTextBytes),
 	"raise_standing.solution":      boundLength(board.StandingPowSolutionMax),
 }

@@ -822,7 +822,7 @@ func (s *Store) FunnelReport(ctx context.Context, q FunnelQuery) (*FunnelReport,
 		return nil, err
 	}
 	if s.config.Features.Trust != TrustOff {
-		ops, err := s.funnelExcluded(ctx)
+		ops, err := operatorAccountSet(ctx, s.db)
 		if err != nil {
 			return nil, err
 		}
@@ -1219,6 +1219,10 @@ func (s *Store) FunnelKPIFor(ctx context.Context, days int) (*FunnelKPI, error) 
 	if err != nil {
 		return nil, err
 	}
+	operators, err := operatorAccountSet(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
 	out := &FunnelKPI{WindowDays: days, DailyActive: map[string]int{}, ByAction: map[string]int{}}
 	rows, err := s.db.QueryContext(ctx, "SELECT account,day,acts,organic FROM agent_days WHERE day>? AND day<=? AND acts&?<>0 ORDER BY account,day", today-int64(days), today, int64(VerifiableActs))
 	if err != nil {
@@ -1238,7 +1242,9 @@ func (s *Store) FunnelKPIFor(ctx context.Context, days int) (*FunnelKPI, error) 
 			return nil, err
 		}
 		if excluded[account] {
-			seenExcluded[account] = true
+			if operators[account] {
+				seenExcluded[account] = true // house agents are not the operator's
+			}
 			continue
 		}
 		a := per[account]

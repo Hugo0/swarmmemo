@@ -222,6 +222,26 @@ func (in trustInputs) page(ctx context.Context, fn func(q allowance.Querier) err
 	return trustDB{in.s}.Read(ctx, fn)
 }
 
+// houseFilter wraps emit so no record of a house agent reaches a trust
+// run: a record any of whose accounts is one is dropped, except a post's
+// reply_to_account, which is cleared (the reply is the replier's own).
+func houseFilter(house map[string]bool, emit func(trust.Record) error) func(trust.Record) error {
+	return func(r trust.Record) error {
+		for _, account := range []string{r.Account, r.Voter, r.From, r.To, r.LinkAccount} {
+			if account != "" && house[account] {
+				return nil
+			}
+		}
+		if r.Type != "post" && r.Type != "review" && house[r.Target] {
+			return nil
+		}
+		if house[r.ReplyToAccount] {
+			r.ReplyToAccount = ""
+		}
+		return emit(r)
+	}
+}
+
 // usdCents is micro-USD (a credit, a USDC atomic unit) as cents, rounded
 // down.
 func usdCents(micro int64) int64 { return micro / (CreditsPerUSD / 100) }
@@ -236,6 +256,22 @@ func (in trustInputs) Read(ctx context.Context, asOf int64, p trust.Params, emit
 	meta := trust.Record{Type: "meta", Schema: trust.SnapshotSchema, AsOf: asOf}
 	accounts := map[string]bool{}
 	exists := map[string]bool{}
+	// C662: house agents (apps.go) accrue no standing and give none: every
+	// record of theirs is left out, and a reply to one names no account.
+	var house map[string]bool
+	if err := in.page(ctx, func(q allowance.Querier) error {
+		ok, err := tableExists(ctx, q, "identity_house")
+		if err != nil || !ok {
+			return err
+		}
+		house, err = houseAccounts(ctx, q)
+		return err
+	}); err != nil {
+		return err
+	}
+	if len(house) > 0 {
+		emit = houseFilter(house, emit)
+	}
 	if err := in.page(ctx, func(q allowance.Querier) error {
 		for _, name := range []string{"account_breakers", "ledger_transfers", "allowance_claims", "ledger_entries", "domain_registrations",
 			"service_calls", "x402_payments", "credit_topups", "standing_assessments", "work_usdc", "offering_calls", "trust_penalty_log", "proof_bonds"} {

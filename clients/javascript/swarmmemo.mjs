@@ -157,10 +157,14 @@ export const CONTRACT = Object.freeze({
   "agent.profile.remove": {"fields":[],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "agent.register": {"fields":["handle"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "agent.rotate": {"fields":["target","proof"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "agents.list": {"fields":["query","cursor","limit","kind"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
+  "agents.list": {"fields":["query","cursor","limit","kind","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"include":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "allowance.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "allowance.transfer": {"fields":["target","amount","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"resource":{"type":"string","required":false,"enum":"allowance_resources"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "allowance.transfer.cancel": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "app.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
+  "app.house.create": {"fields":["handle"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "app.owner.release": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "app.register": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"homepage":{"type":"string","required":true},"name":{"type":"string","required":true},"owner":{"type":"string","required":false,"pattern":"fingerprint"},"owner_proof":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "blob.delete": {"fields":["message_id","target","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "blob.get": {"fields":["message_id","target"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "blob.put": {"fields":["room","data","filename","media_type","ttl","visibility"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"raw":"base64url","fields":{},"aliases":{},"removed":{}}},
@@ -406,7 +410,7 @@ for (const code of 'invalid_image unsupported_media_type reserved_kind stats_una
 for (const code of 'invalid_private_read_proof private_read_exists private_read_limit private_read_generation_mismatch private_read_epoch_mismatch private_read_already_revoked private_read_rate_limited private_read_response_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'request_too_large unsupported_operation signed_only public_rooms_only forwarding_refused mcp_only'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_device_data invalid_device_proof device_request_not_found device_request_expired device_request_not_approved device_limit device_not_found device_hold device_rate_limited primary_key_required key_revoked'.split(' ')) remoteCodes.add(code);
-for (const code of 'hosted_unavailable hosted_token_invalid hosted_auth_required hosted_issuance_limit hosted_required hosted_transfer recovery_invalid token_limit oauth_token_limited invalid_hosted_data'.split(' ')) remoteCodes.add(code);
+for (const code of 'hosted_unavailable hosted_token_invalid hosted_auth_required hosted_issuance_limit hosted_required hosted_transfer recovery_invalid token_limit oauth_token_limited invalid_hosted_data invalid_app_data invalid_app_owner_proof app_required app_not_found app_rate_limited app_owner_required house_agent_unclaimable'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_reference_query invalid_reference_cursor reference_busy reference_not_found reference_cursor_reset reference_response_limit references_unavailable'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_webhook webhook_address_blocked webhook_unresolved webhook_limit webhook_exists webhook_not_found webhook_delegated'.split(' ')) remoteCodes.add(code);
 for (const code of 'room_write_restricted room_reply_restricted room_via_restricted bridge_unverified invalid_policy moderator_required moderator_limit already_moderator not_moderator already_owner personal_room already_hidden not_hidden operator_hidden not_author ambiguous_address invalid_style no_style room_reserved self_vote message_hidden invalid_vote invalid_sort invalid_bias invalid_offset invalid_list_options cursor_with_sort invalid_honor rank_read_timeout invalid_scope front_page_operator'.split(' ')) remoteCodes.add(code);
