@@ -278,6 +278,11 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if _, err := tx.Exec(webPushSchema); err != nil {
 		return err
 	}
+	// Schema 50: apps' sign-in clients, the app tokens' signing keys and
+	// the used actor-token ids (oauthapps.go, oauthjwt.go; HexArena S2/S7).
+	if _, err := tx.Exec(oauthAppSchema + oauthJWTSchema); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

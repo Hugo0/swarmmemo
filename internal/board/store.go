@@ -166,6 +166,9 @@ type Store struct {
 	devices deviceState
 	// C662: the app-wide buckets of house agents' commands (apps.go).
 	apps appState
+	// oauthIssuer is the public origin app tokens name as iss (oauthjwt.go),
+	// set once by the HTTP adapter before serving.
+	oauthIssuer atomic.Pointer[string]
 	// C667: the VAPID key and browser push settings (webpush.go).
 	webPush webPushState
 	// The transparency log's signing key (transparency.go).
@@ -399,7 +402,13 @@ CREATE TABLE IF NOT EXISTS leases (
 // web push (webpush.go, C667); a browser is a webhook_subscriptions row.
 // Additive, but a binary before it would take browsers for webhooks: a
 // rollback past 49 disables them first (RUNBOOK "Browser notifications").
-const SchemaVersion = 49
+//
+// 50: Sign in with SwarmMemo for apps (oauthapps.go, oauthjwt.go): the
+// oauth_app_clients, oauth_signing_keys, oauth_assertions_used and
+// oauth_exchanged_revoked tables.
+// Additive: a schema-49 binary never reads them, so a rollback only stops
+// app sign-ins (their JWTs then match no token and are refused).
+const SchemaVersion = 50
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -879,6 +888,9 @@ type actor struct {
 	deviceSince int64
 	// house is a house agent's app, its payer (apps.go, admitHouse).
 	house *appPayer
+	// bearer is what an app's token lets the command do (oauthjwt.go,
+	// authorizeScope); nil for every other command.
+	bearer *bearerGrant
 }
 
 func (s *Store) authenticate(cmd Command, source string) (actor, error) {
@@ -968,6 +980,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	// A money-free channel's refusals (moneyfree.go).
 	if err := moneyPermitted(ctx, cmd); err != nil {
 		return empty, err
+	}
+	if bearerFrom(ctx) != "" && (cmd.PrivateRead != nil || cmd.Delegation != nil) {
+		return empty, insufficientScope(nil) // an app's token carries no other authority
 	}
 	if cmd.PrivateRead != nil && (!validPrivateReadContext(cmd.PrivateRead) || cmd.Delegation != nil) {
 		return empty, privateReadError("invalid_private_read_context")
@@ -1100,10 +1115,21 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 		if err = hostedTokenCredential(ctx, tx, &a); err != nil {
 			return empty, err
 		}
+		// S2: an app's token (bearer JWT) acts only within its scopes, and
+		// what it does carries via app:APP from here on.
+		if ctx, err = s.bearerCredential(ctx, tx, &a, now); err != nil {
+			return empty, err
+		}
+		if err = s.authorizeScope(ctx, tx, cmd, a); err != nil {
+			return empty, err
+		}
 		// A removed device signs nothing; a device's limits (device.go).
 		if err = authorizeDevice(cmd, a, revoked, now); err != nil {
 			return empty, err
 		}
+	}
+	if bearerFrom(ctx) != "" && a.bearer == nil {
+		return empty, invalidToken() // an app's token always signs as its identity
 	}
 	if privateReadControl(cmd.Operation) {
 		result, err := s.privateReadOwner(ctx, tx, cmd, a, successor, now)
@@ -1459,6 +1485,12 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.changeApp(ctx, tx, c, a, now)
 	case "app.get":
 		return s.readAppCommand(ctx, tx, c, a)
+	case "oauth.client.register", "oauth.client.retire":
+		return s.changeOAuthClient(ctx, tx, c, a, now)
+	case "oauth.clients.list":
+		return s.readOAuthClients(ctx, tx, a)
+	case "oauth.connections.list", "oauth.connection.revoke":
+		return s.oauthConnections(ctx, tx, c, a, now)
 	case "services.list", "service.read":
 		return s.readServices(ctx, tx, c, a, now)
 	case "service.call":
@@ -1558,6 +1590,10 @@ func roomAccess(ctx context.Context, tx *sql.Tx, name string, a actor) (Room, er
 }
 
 func audit(ctx context.Context, tx *sql.Tx, op, actor, target, detail string, now int64) error {
+	// What an app did with a person's token says so (S2 provenance).
+	if via := ViaFrom(ctx); strings.HasPrefix(via, appViaPrefix) && !strings.Contains(detail, via) {
+		detail = strings.TrimSpace(detail + " via " + via)
+	}
 	_, err := tx.ExecContext(ctx, "INSERT INTO audit(operation,actor,target,detail,created_at) VALUES(?,?,?,?,?)", op, actor, target, detail, now)
 	return err
 }

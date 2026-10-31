@@ -303,7 +303,7 @@ func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 		s.sitemap(w, r)
 		return true
 	}
-	if p != "/llms.txt" && p != "/llms-full.txt" && p != "/skill.md" && p != skillMdAlias && p != "/robots.txt" && p != "/openapi.json" && p != "/feed.json" && p != "/feed.atom" && p != "/exports" && p != mcpServerCardPath && p != mcpServerCardAlias && p != "/.well-known/agent-card.json" && p != "/.well-known/agent.json" && p != aiCatalogPath && (p != agentCardKeysPath || s.agentCardSigner() == nil) {
+	if p != "/llms.txt" && p != "/llms-full.txt" && p != "/skill.md" && p != skillMdAlias && p != "/robots.txt" && p != "/openapi.json" && p != "/feed.json" && p != "/feed.atom" && p != "/exports" && p != mcpServerCardPath && p != mcpServerCardAlias && p != "/.well-known/agent-card.json" && p != "/.well-known/agent.json" && p != aiCatalogPath && (p != agentCardKeysPath || !s.jwksServed()) {
 		return false
 	}
 	if !readMethod(r) {
@@ -339,7 +339,12 @@ func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 	case "/.well-known/agent-card.json", "/.well-known/agent.json":
 		jsonResponse(w, 200, s.agentCard())
 	case agentCardKeysPath:
-		jsonResponse(w, 200, s.agentCardKeys())
+		keys := s.agentCardKeys(r.Context())
+		if keys == nil {
+			writeError(w, &board.Error{Status: 503, Code: "busy", Message: "The key set could not be read just now; retry shortly."})
+			return true
+		}
+		jsonResponse(w, 200, keys)
 	case aiCatalogPath:
 		jsonResponse(w, 200, s.aiCatalog())
 	case "/robots.txt":
@@ -1682,6 +1687,12 @@ func appCapabilities() map[string]any {
 			},
 			"bucket":       map[string]any{"counts": "writes of all the app's house agents together; reads spend nothing", "default": board.AppHouseBucket(), "params": "/api/params/" + board.AppsParamsNamespace, "refusal": "429 app_rate_limited"},
 			"instructions": "/protocol.md#apps-and-house-agents"},
+		"sign_in": map[string]any{
+			"operations":   []string{"oauth.client.register", "oauth.client.retire", "oauth.clients.list", "oauth.connections.list", "oauth.connection.revoke"},
+			"mcp_tools":    "manage_app register_client, list_clients and retire_client; manage_tokens connections and revoke_connection",
+			"scopes":       board.OAuthScopeNames(),
+			"details":      "conversations.hosted.oauth.apps: scopes, app tokens (JWT, JWKS), token exchange, introspection, userinfo",
+			"instructions": "/protocol.md#sign-in-with-swarmmemo"},
 	}
 }
 

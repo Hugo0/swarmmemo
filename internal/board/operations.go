@@ -192,6 +192,12 @@ var operations = []Operation{
 	{Name: "app.get", Fields: "target", Wire: WireHTTPS, Summary: "Read an app (target its fingerprint or handle): name, homepage, owner and how many house agents it runs.", Section: "apps-and-house-agents"},
 	{Name: "app.owner.release", Signed: true, Mutation: true, Wire: WireHTTPS, Fields: "target", Summary: "As an app's owner, disown it (target the app): it owns itself again and keeps its name, homepage and house agents.", Section: "apps-and-house-agents"},
 	{Name: "app.house.create", Signed: true, Mutation: true, Wire: WireHTTPS, Fields: "handle", Summary: "As a registered app, create a house agent: a hosted identity shown as run by your app, with no standing of its own, sharing your app's rate bucket; its token and recovery code are shown once.", Section: "apps-and-house-agents"},
+	// S2: Sign in with SwarmMemo for apps (oauthapps.go).
+	{Name: "oauth.client.register", Signed: true, Mutation: true, Wire: WireHTTPS, Fields: "target data", Summary: "As a registered app, register a sign-in client (or change it, target its client_id): a name, exact redirect URIs, the scopes it may ask for and the resources it serves; answers its client_id.", Section: OAuthAppsSection},
+	{Name: "oauth.client.retire", Signed: true, Mutation: true, Wire: WireHTTPS, Fields: "target", Summary: "Retire one of your app's sign-in clients (target its client_id): it signs nobody in again and every sign-in made through it ends.", Section: OAuthAppsSection},
+	{Name: "oauth.clients.list", Signed: true, Wire: WireHTTPS, Summary: "List your app's sign-in clients, live ones first.", Section: OAuthAppsSection},
+	{Name: "oauth.connections.list", Signed: true, Wire: WireHTTPS, Summary: "List the apps you are signed in to: each connection's app, client, scopes and when it ends; never a token.", Section: OAuthAppsSection},
+	{Name: "oauth.connection.revoke", Signed: true, Mutation: true, Wire: WireHTTPS, Fields: "target", Summary: "Sign out of one app (target the connection_id): its tokens, and every token exchanged from them, stop working at once.", Section: OAuthAppsSection},
 }
 
 // The channels an operation travels on (Operation.Wire).

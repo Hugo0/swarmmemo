@@ -470,16 +470,17 @@ var dataSpecs = map[string]DataSpec{
 		only("schema", "type", "category", "max_price", "output", "network", "protocol", "door", "parse", "explain"),
 
 	// Conversations and hosted identities.
-	"conversation.open":    structSpec(openData{}, "schema!", "kind!"),
-	"conversation.get":     structSpec(getData{}, "schema!"),
-	"conversation.respond": structSpec(respondData{}, "schema!", "action!"),
-	"conversation.seal":    structSpec(sealRotation{}, "schema!", "member_epoch!", "epoch!", "wraps!"),
-	"messaging.policy.set": structSpec(messagingData{}, "schema!", "inbound_policy object", "inbound object", "outbound object"),
-	"hosted.recover":       structSpec(hostedData{}, "schema!", "recovery_code!").only("schema", "recovery_code"),
-	"hosted.token":         structSpec(hostedData{}, "schema!", "action!").only("schema", "action", "target", "label", "spend_limit"),
-	"hosted.claim":         structSpec(hostedData{}, "schema!", "new_public_key!", "proof!", "recovery_code!").only("schema", "new_public_key", "proof", "recovery_code"),
-	"app.register":         structSpec(appData{}, "schema!", "name!", "homepage!", "owner pattern=fingerprint"),
-	"agents.list":          structSpec(agentsListData{}, "schema!"),
+	"conversation.open":     structSpec(openData{}, "schema!", "kind!"),
+	"conversation.get":      structSpec(getData{}, "schema!"),
+	"conversation.respond":  structSpec(respondData{}, "schema!", "action!"),
+	"conversation.seal":     structSpec(sealRotation{}, "schema!", "member_epoch!", "epoch!", "wraps!"),
+	"messaging.policy.set":  structSpec(messagingData{}, "schema!", "inbound_policy object", "inbound object", "outbound object"),
+	"hosted.recover":        structSpec(hostedData{}, "schema!", "recovery_code!").only("schema", "recovery_code"),
+	"hosted.token":          structSpec(hostedData{}, "schema!", "action!").only("schema", "action", "target", "label", "spend_limit"),
+	"hosted.claim":          structSpec(hostedData{}, "schema!", "new_public_key!", "proof!", "recovery_code!").only("schema", "new_public_key", "proof", "recovery_code"),
+	"app.register":          structSpec(appData{}, "schema!", "name!", "homepage!", "owner pattern=fingerprint"),
+	"oauth.client.register": structSpec(oauthClientData{}, "schema!", "name!", "redirect_uris!", "scopes!"),
+	"agents.list":           structSpec(agentsListData{}, "schema!"),
 }
 
 // dataRefusals is the code each operation's own parser refuses its data
@@ -522,6 +523,7 @@ var dataRefusals = map[string]string{
 	"messaging.policy.set":  "invalid_messaging_policy",
 	"hosted.":               "invalid_hosted_data",
 	"app.":                  "invalid_app_data",
+	"oauth.":                "invalid_client_data",
 }
 
 // dataRefusal is operation's entry in dataRefusals.

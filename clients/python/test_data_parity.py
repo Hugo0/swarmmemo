@@ -158,6 +158,7 @@ ARGUMENTS = {
 # Client.command(op, data=data_json(op, ...)); the reason says why there is no wrapper.
 PY_NO_WRAPPER = {
     "app.register": "an app registers once: MCP manage_app or Client.command with data_json sends it",
+    "oauth.client.register": "an app registers its sign-in clients once: MCP manage_app register_client or Client.command with data_json sends it",
     "agents.list": "its only data field is include=house (an opt-in for app-run agents); Client.command with data_json sends it",
     "push.subscribe": "a browser subscribes itself with its own PushSubscription keys (the Me page); Client.command with data_json sends it",
     **{op: "the chat subcommands drive it (class Chat); Client.command with data_json sends any field"

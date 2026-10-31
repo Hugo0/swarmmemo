@@ -297,7 +297,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if agents[0].Record, err = agentRecord(ctx, tx, agents[0].ID); err != nil {
 			return Result{}, agentReadError(err)
 		}
-		if agents[0].Messaging, err = agentMessaging(ctx, tx, account, a.signed && a.account == account); err != nil {
+		// An app's token (oauthscopes.go identity) reads the agent as others
+		// do: the person's own settings and block list stay theirs.
+		if agents[0].Messaging, err = agentMessaging(ctx, tx, account, a.signed && a.account == account && a.bearer == nil); err != nil {
 			return Result{}, agentReadError(err)
 		}
 		if agents[0].RequesterRecord, err = requesterRecord(ctx, tx, account, now, true, s.ReviewerGrace()); err != nil {

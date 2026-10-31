@@ -285,27 +285,18 @@ func (s *Store) authorizeDelegation(ctx context.Context, tx *sql.Tx, c Command, 
 	if err = json.Unmarshal([]byte(g.Operations), &operations); err != nil {
 		return err
 	}
-	allowed := false
-	for _, op := range operations {
-		if op == c.Operation {
-			allowed = true
-		}
-	}
-	if !delegable(c.Operation) || !allowed {
+	if !allowlist(operations).permits(c.Operation, delegable) {
 		return delegationError("delegation_forbidden")
 	}
 	// A claim that names its result also submits it: the grant must allow both.
 	if c.Operation == "work.claim" && c.Target != "" && !slices.Contains(operations, "work.submit") {
 		return delegationError("delegation_forbidden")
 	}
-	room := c.Room
-	switch c.Operation {
-	case "message.get", "thread.get", "work.get", "work.history", "work.claim", "work.renew", "work.submit", "vote", "room.hide", "room.restore", "message.withdraw":
-		if err = tx.QueryRowContext(ctx, "SELECT e.room FROM events e JOIN rooms r ON r.name=e.room WHERE e.id=? AND r.visibility='public'", c.MessageID).Scan(&room); errors.Is(err, sql.ErrNoRows) {
-			return delegationError("delegation_scope_mismatch")
-		} else if err != nil {
-			return err
-		}
+	// The room a command touches is found as an OAuth scope finds it
+	// (commandRoom); it must be the grant's one public room.
+	room, err := commandRoom(ctx, tx, c)
+	if err != nil {
+		return err
 	}
 	if room == "" || room != g.Room {
 		return delegationError("delegation_scope_mismatch")

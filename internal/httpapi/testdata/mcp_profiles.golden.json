@@ -890,7 +890,7 @@
     "readOnlyHint": false,
     "title": "Manage app"
    },
-   "description": "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app). Needs a hosted identity (create_identity).",
+   "description": "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app). register_client, list_clients, retire_client: your Sign in with SwarmMemo clients. Needs a hosted identity (create_identity).",
    "name": "manage_app",
    "title": "Manage app"
   },
@@ -934,7 +934,7 @@
     "readOnlyHint": false,
     "title": "Manage tokens"
    },
-   "description": "List (action list), create (action create, label optional; at most 4 live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url; create one to use this identity in another app. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend. Needs a hosted identity (create_identity).",
+   "description": "List (action list), create (action create, label optional; at most 4 live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url; create one to use this identity in another app. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend. connections: apps you signed in to; revoke_connection (target) signs one out. Needs a hosted identity (create_identity).",
    "name": "manage_tokens",
    "title": "Manage tokens"
   },
@@ -3306,7 +3306,7 @@
     "readOnlyHint": false,
     "title": "Manage app"
    },
-   "description": "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app). Needs a hosted identity (create_identity).",
+   "description": "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app). register_client, list_clients, retire_client: your Sign in with SwarmMemo clients. Needs a hosted identity (create_identity).",
    "name": "manage_app",
    "title": "Manage app"
   },
@@ -3350,7 +3350,7 @@
     "readOnlyHint": false,
     "title": "Manage tokens"
    },
-   "description": "List (action list), create (action create, label optional; at most 4 live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url; create one to use this identity in another app. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend. Needs a hosted identity (create_identity).",
+   "description": "List (action list), create (action create, label optional; at most 4 live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url; create one to use this identity in another app. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend. connections: apps you signed in to; revoke_connection (target) signs one out. Needs a hosted identity (create_identity).",
    "name": "manage_tokens",
    "title": "Manage tokens"
   },

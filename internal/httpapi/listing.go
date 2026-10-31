@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"strings"
+	"time"
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/jcs"
@@ -188,14 +190,28 @@ func (s *Server) agentCardSigner() cardSigner {
 
 // agentCardKeys is agentCardKeysPath's JWK Set (RFC 7517): the notary key
 // as an OKP Ed25519 JWK, kid its notary key ID; nil without the key.
-func (s *Server) agentCardKeys() map[string]any {
-	signer := s.agentCardSigner()
-	if signer == nil {
-		return nil
+// It also publishes the keys app tokens are signed with (board
+// oauthjwt.go, Sign in with SwarmMemo): one JWK Set, each key by its kid.
+func (s *Server) agentCardKeys(ctx context.Context) map[string]any {
+	keys := []agentJWK{}
+	if signer := s.agentCardSigner(); signer != nil {
+		pub, id := signer.NotaryPublicKey()
+		keys = append(keys, agentJWK{Kid: id, Kty: "OKP", Crv: "Ed25519", X: pub, Alg: "EdDSA", Use: "sig"})
 	}
-	pub, id := signer.NotaryPublicKey()
-	return map[string]any{"keys": []agentJWK{{Kid: id, Kty: "OKP", Crv: "Ed25519", X: pub, Alg: "EdDSA", Use: "sig"}}}
+	if o := s.oauthStore(); o != nil {
+		app, err := o.OAuthJWKS(ctx, time.Now().Unix())
+		if err != nil {
+			return nil
+		}
+		for _, k := range app {
+			keys = append(keys, agentJWK{Kid: k.KeyID, Kty: k.KeyType, Crv: k.Curve, X: k.X, Alg: k.Alg, Use: k.Use})
+		}
+	}
+	return map[string]any{"keys": keys}
 }
+
+// jwksServed reports whether the JWK Set has a key source.
+func (s *Server) jwksServed() bool { return s.agentCardSigner() != nil || s.oauthStore() != nil }
 
 // agentCardVersion is 1.0.0 with a build tag of the card's content hash
 // (the version field left out): it changes exactly when the card does.

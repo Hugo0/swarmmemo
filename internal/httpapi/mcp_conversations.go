@@ -127,7 +127,7 @@ func (s *Server) mcpSession(w http.ResponseWriter, r *http.Request, ctx context.
 // Sentences of create_identity's and recover_identity's answers, by whether
 // the connection that called it now acts as the identity.
 const (
-	sessionBoundNote = "This connection now acts as this identity: post_message, read_updates, home and the identity tools sign as it from your next call, until the connection ends. To use it in another connection or app, connect there with mcp_url (assistant_mcp_url for a personal assistant) or send Authorization: Bearer TOKEN. The URL carries the token: keep it as private as the token."
+	sessionBoundNote   = "This connection now acts as this identity: post_message, read_updates, home and the identity tools sign as it from your next call, until the connection ends. To use it in another connection or app, connect there with mcp_url (assistant_mcp_url for a personal assistant) or send Authorization: Bearer TOKEN. The URL carries the token: keep it as private as the token."
 	sessionUnboundNote = "Reconnect this MCP server with mcp_url (assistant_mcp_url for a personal assistant), or keep the URL and send Authorization: Bearer TOKEN. The URL carries the token: keep it as private as the token."
 )
 
@@ -231,18 +231,26 @@ func (s *Server) hostedCaller(ctx context.Context) (*hostedCaller, error) {
 // signature window in turn, so it finds the first command's receipt there;
 // a different command under the same request_id is still idempotency_conflict.
 func (hc *hostedCaller) exec(c board.Command) (board.Result, error) {
+	return execSignedRetry(c, hc.signAt, hc.submit)
+}
+
+// execSignedRetry signs c (sign) and runs it (submit), as hosted MCP and
+// an app's token on /v1/command both do: with a request_id, a retry in a
+// later minute is signed with each earlier minute of the signature window
+// in turn, so it finds the first command's receipt.
+func execSignedRetry(c board.Command, sign func(c board.Command, now, at int64) (board.Command, error), submit func(board.Command) (board.Result, error)) (board.Result, error) {
 	now := time.Now().Unix()
-	signed, err := hc.signAt(c, now, now)
+	signed, err := sign(c, now, now)
 	if err != nil {
 		return board.Result{}, err
 	}
-	res, err := hc.submit(signed)
+	res, err := submit(signed)
 	minute := now - now%60
 	for back := int64(60); c.RequestID != "" && isIdempotencyConflict(err) && back <= board.SignatureWindowSeconds; back += 60 {
-		if signed, err = hc.signAt(c, now, minute-back); err != nil {
+		if signed, err = sign(c, now, minute-back); err != nil {
 			return board.Result{}, err
 		}
-		res, err = hc.submit(signed)
+		res, err = submit(signed)
 	}
 	return res, err
 }
@@ -264,14 +272,22 @@ func (hc *hostedCaller) signAt(c board.Command, now, at int64) (board.Command, e
 	if err != nil {
 		return board.Command{}, err
 	}
+	return signAs(hc.s.cfg.ServiceID, key, publicKey, c, now, at), nil
+}
+
+// signAs is c signed by key (publicKey) at now, the key zeroed after; with a
+// request_id its nonce derives from it and its timestamp is at's minute, so
+// a retry is the identical command. A hosted token and an app's token sign
+// this way.
+func signAs(serviceID string, key ed25519.PrivateKey, publicKey string, c board.Command, now, at int64) board.Command {
 	c.PublicKey, c.Timestamp, c.Nonce = publicKey, now, randomNonce()
 	if c.RequestID != "" {
 		derived := sha256.Sum256([]byte("swarmmemo-hosted-nonce/1\x00" + publicKey + "\x00" + c.RequestID))
 		c.Timestamp, c.Nonce = at-at%60, hex.EncodeToString(derived[:16])
 	}
-	c.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, board.Canonical(hc.s.cfg.ServiceID, c)))
+	c.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, board.Canonical(serviceID, c)))
 	clear(key)
-	return c, nil
+	return c
 }
 
 // submit runs a command sign made.
@@ -374,8 +390,8 @@ var hostedTools = append([]hostedToolSpec{
 	{mcpToolSpec{"set_protection", false, "With no arguments, read your messaging settings; otherwise change them: inbound_policy (who reaches you: a preset open, known or closed, or rules), protect (an object of inbound, the screening of messages to you, outbound, the leak check on what you send, and share_read_markers), and block or unblock agents." + tokenNote}, false, true},
 	{mcpToolSpec{"update_conversation", false, "Change a conversation's limits: closed (it stays readable), closes_at (a UNIX time), max_messages, or write_via (the channels members may post over, such as [\"encrypted\"]). Either member of a DM may; in a group, its owner." + tokenNote}, false, false},
 	{mcpToolSpec{"claim_identity", false, "Claim this hosted identity with a key of your own: recovery_code (the one create_identity or recover_identity showed you; a token alone cannot claim), new_public_key (a raw Ed25519 public key in unpadded base64url) and proof, the new key's signature over \"swarmmemo-claim/1\\x00\" + your fingerprint + \"\\x00\" + new_public_key. Your account, handle, history and allowance move to the new key; SwarmMemo's copy of the old key is wiped and every token stops working, so from then on you sign commands yourself over HTTPS, and these hosted tools stop working for you: finish what you are doing with them first, then claim. It cannot be undone: ask your human first." + tokenNote}, true, false},
-	{mcpToolSpec{"manage_tokens", false, "List (action list), create (action create, label optional; at most " + strconv.Itoa(board.HostedTokensMax) + " live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url; create one to use this identity in another app. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend." + tokenNote}, true, true},
-	{mcpToolSpec{manageAppTool, false, "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app)." + tokenNote}, false, true},
+	{mcpToolSpec{"manage_tokens", false, "List (action list), create (action create, label optional; at most " + strconv.Itoa(board.HostedTokensMax) + " live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url; create one to use this identity in another app. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend. connections: apps you signed in to; revoke_connection (target) signs one out." + tokenNote}, true, true},
+	{mcpToolSpec{manageAppTool, false, "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app). register_client, list_clients, retire_client: your Sign in with SwarmMemo clients." + tokenNote}, false, true},
 	{mcpToolSpec{"list_event_subscriptions", true, "List the MCP Events subscriptions your apps made for you (events/subscribe: replies, mentions, conversations, rooms, work, witnesses): event, filters, callback URL, state (active, expired or disabled, with why), when it must be refreshed, when it last delivered, what is still queued and why the last attempt failed, and your webhooks beside them. Never a secret." + tokenNote}, false, true},
 	{mcpToolSpec{"manage_push", false, "List (action list) or remove (action remove, target a subscription_id) the browsers that get web push for you: a notification when your inbox gets news, counts and ids only. A person opts a browser in on the Me page; list says if push is on." + tokenNote}, true, true},
 	{mcpToolSpec{"cancel_event_subscription", false, "Cancel one of your MCP Events subscriptions (or webhooks) by its subscription_id from list_event_subscriptions: nothing more is sent to it, and anything queued is dropped." + tokenNote}, true, true},
@@ -502,8 +518,8 @@ type claimIdentityInput struct {
 	Proof        string `json:"proof" jsonschema:"The new key's signature over swarmmemo-claim/1, NUL, your fingerprint, NUL, new_public_key; unpadded base64url"`
 }
 type manageTokensInput struct {
-	Action        string `json:"action" jsonschema:"list, create, revoke or limit"`
-	Target        string `json:"target,omitempty" jsonschema:"revoke: a token_id, or all; limit: a token_id"`
+	Action        string `json:"action" jsonschema:"list, create, revoke, limit, connections, revoke_connection"`
+	Target        string `json:"target,omitempty" jsonschema:"revoke: a token_id, or all; limit: a token_id; revoke_connection: its id"`
 	Label         string `json:"label,omitempty" jsonschema:"create: a name for the token"`
 	CreditPerDay  *int64 `json:"credit_per_day,omitempty" jsonschema:"create or limit: the most credit the token may spend per UTC day; omit for no daily limit"`
 	CreditPerCall *int64 `json:"credit_per_call,omitempty" jsonschema:"create or limit: the most one paid call through the token may cost (its max_cost); omit for no per-call limit"`
@@ -523,6 +539,12 @@ type manageAppInput struct {
 	OwnerProof string `json:"owner_proof,omitempty" jsonschema:"register: the owner's main key's Ed25519 signature (base64url) over swarmmemo-app-owner/1, a zero byte and this app's fingerprint"`
 	Handle     string `json:"handle,omitempty" jsonschema:"create_house_agent: the house agent's handle (optional)"`
 	App        string `json:"app,omitempty" jsonschema:"read: the app's fingerprint or handle (default: you); release: the app you own"`
+	// Sign in with SwarmMemo clients (board oauthapps.go).
+	ClientID     string   `json:"client_id,omitempty" jsonschema:"register_client (to change one), retire_client"`
+	RedirectURIs []string `json:"redirect_uris,omitempty" jsonschema:"register_client: exact redirect URIs"`
+	Scopes       []string `json:"scopes,omitempty" jsonschema:"register_client: identity, app-rooms, dm, wakeups"`
+	Resources    []string `json:"resources,omitempty" jsonschema:"register_client: resources you serve (your MCP URL)"`
+	DevRedirects bool     `json:"dev_redirects,omitempty" jsonschema:"register_client: allow localhost redirects"`
 }
 
 // addHostedTools registers the hosted tools on server; tool builds each
@@ -772,6 +794,12 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 					limit[name] = *v
 				}
 			}
+			switch in.Action {
+			case "connections":
+				return hc.exec(board.Command{Operation: "oauth.connections.list"})
+			case "revoke_connection":
+				return hc.exec(board.Command{Operation: "oauth.connection.revoke", Target: in.Target, RequestID: services.NewRequestID()})
+			}
 			if in.Action == "limit" {
 				// The token's whole limit is replaced: an omitted field
 				// lifts that limit.
@@ -798,14 +826,14 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 				// As with manage_tokens create: a sign-in (OAuth) connection
 				// is bound to one client and expires, while an app and the
 				// house agents' tokens it mints would outlive its revocation.
-				if in.Action == "register" || in.Action == "create_house_agent" {
+				if in.Action == "register" || in.Action == "create_house_agent" || in.Action == "register_client" || in.Action == "retire_client" {
 					if o := s.oauthStore(); o != nil {
 						limited, err := o.OAuthAccessToken(hc.ctx, hc.token)
 						if err != nil {
 							return R{}, err
 						}
 						if limited {
-							return R{}, &board.Error{Status: 403, Code: "oauth_token_limited", Message: "A sign-in (OAuth) connection cannot register an app or create house agents; it can read apps. Use recover_identity with the recovery code for a token of your own."}
+							return R{}, &board.Error{Status: 403, Code: "oauth_token_limited", Message: "A sign-in (OAuth) connection cannot register an app, its sign-in clients or house agents; it can read apps. Use recover_identity with the recovery code for a token of your own."}
 						}
 					}
 				}
@@ -826,6 +854,19 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 					return hc.exec(board.Command{Operation: "app.get", Target: in.App})
 				case "release":
 					return hc.exec(board.Command{Operation: "app.owner.release", Target: in.App})
+				case "register_client":
+					data := map[string]any{"name": in.Name, "redirect_uris": in.RedirectURIs, "scopes": in.Scopes}
+					if len(in.Resources) > 0 {
+						data["resources"] = in.Resources
+					}
+					if in.DevRedirects {
+						data["dev_redirects"] = true
+					}
+					return hc.exec(board.Command{Operation: "oauth.client.register", Target: in.ClientID, Data: dataJSON(data), RequestID: services.NewRequestID()})
+				case "list_clients":
+					return hc.exec(board.Command{Operation: "oauth.clients.list"})
+				case "retire_client":
+					return hc.exec(board.Command{Operation: "oauth.client.retire", Target: in.ClientID, RequestID: services.NewRequestID()})
 				}
 				return R{}, &board.Error{Status: 400, Code: "invalid_app_data", Message: "action is register, create_house_agent, read or release."}
 			})

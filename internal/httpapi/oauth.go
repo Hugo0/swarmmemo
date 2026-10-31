@@ -25,6 +25,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -94,6 +95,15 @@ type oauthStore interface {
 	OAuthDiscardToken(ctx context.Context, account, tokenID string, now int64) error
 	OAuthReturning(ctx context.Context, browser, redirectURI string, now int64) (account, handle string, ok bool, err error)
 	OAuthRemember(ctx context.Context, browser, redirectURI, account string, now int64) error
+	// Sign in with SwarmMemo for apps (oauthapps.go).
+	OAuthAppClient(ctx context.Context, id string) (board.OAuthAppClient, board.AppRecord, bool, error)
+	OAuthResourceOwner(ctx context.Context, resource string) (board.AppRecord, []string, bool, error)
+	OAuthAppResource(app string) string
+	OAuthExchange(ctx context.Context, r board.OAuthExchangeRequest, now int64) (board.OAuthTokens, error)
+	OAuthIntrospection(ctx context.Context, token string, now int64) (map[string]any, error)
+	OAuthUserinfo(ctx context.Context, token string, now int64) (map[string]any, error)
+	OAuthJWKS(ctx context.Context, now int64) ([]board.JWK, error)
+	BearerSigner(ctx context.Context, token string, now int64) (ed25519.PrivateKey, string, board.BearerClaims, error)
 }
 
 // oauthStore is the board's OAuth, or nil while hosted identities are off:
@@ -169,7 +179,8 @@ func (s *Server) oauthChallenge(profile, errorCode, description string) string {
 func (s *Server) oauthRoute(w http.ResponseWriter, r *http.Request) bool {
 	path := r.URL.Path
 	switch path {
-	case oauthPRMPath, oauthPRMPath + "/mcp", oauthPRMPath + web.AssistantMCPPath, oauthPRMPath + mcpProfileCore, oauthASMPath, oauthAuthorizePath, oauthTokenPath, oauthRegisterPath, oauthRevokePath:
+	case oauthPRMPath, oauthPRMPath + "/mcp", oauthPRMPath + web.AssistantMCPPath, oauthPRMPath + mcpProfileCore, oauthASMPath, oauthAuthorizePath, oauthTokenPath, oauthRegisterPath, oauthRevokePath,
+		oauthIntrospectPath, oauthUserinfoPath:
 	default:
 		return false
 	}
@@ -206,6 +217,8 @@ func (s *Server) oauthRoute(w http.ResponseWriter, r *http.Request) bool {
 		s.registerEndpoint(w, r, o)
 	case oauthRevokePath:
 		s.revokeEndpoint(w, r, o)
+	default:
+		s.oauthAppRoute(w, r, o)
 	}
 	return true
 }
@@ -238,10 +251,13 @@ func (s *Server) authorizationServerMetadata() map[string]any {
 		"token_endpoint":                                 origin + oauthTokenPath,
 		"registration_endpoint":                          origin + oauthRegisterPath,
 		"revocation_endpoint":                            origin + oauthRevokePath,
-		"scopes_supported":                               []string{board.OAuthScope},
+		"introspection_endpoint":                         origin + oauthIntrospectPath,
+		"userinfo_endpoint":                              origin + oauthUserinfoPath,
+		"jwks_uri":                                       origin + oauthJWKSPath,
+		"scopes_supported":                               append([]string{board.OAuthScope}, board.OAuthScopeNames()...),
 		"response_types_supported":                       []string{"code"},
 		"response_modes_supported":                       []string{"query"},
-		"grant_types_supported":                          []string{"authorization_code", "refresh_token"},
+		"grant_types_supported":                          []string{"authorization_code", "refresh_token", board.OAuthGrantTokenExchange},
 		"token_endpoint_auth_methods_supported":          []string{"none"},
 		"revocation_endpoint_auth_methods_supported":     []string{"none"},
 		"code_challenge_methods_supported":               []string{"S256"},
@@ -327,14 +343,15 @@ func (s *Server) tokenEndpoint(w http.ResponseWriter, r *http.Request, o oauthSt
 		return
 	}
 	now := time.Now().Unix()
+	// An MCP profile is named as written (case, a trailing slash, a
+	// toolsets query); any other resource (an app's) must be the exact one
+	// the grant was made for, which the board compares.
 	resource := form.Get("resource")
-	if resource != "" {
-		profile, ok := s.resourceProfile(resource)
-		if !ok {
-			oauthJSONError(w, oauthBad("invalid_target", s.resourcesLine()))
-			return
-		}
+	if profile, ok := s.resourceProfile(resource); ok {
 		resource = s.oauthResource(profile)
+	} else if resource != "" && !s.appResource(r.Context(), o, resource) {
+		oauthJSONError(w, oauthBad("invalid_target", s.resourcesLine()+" Or an app's resource."))
+		return
 	}
 	var tokens board.OAuthTokens
 	switch form.Get("grant_type") {
@@ -342,8 +359,24 @@ func (s *Server) tokenEndpoint(w http.ResponseWriter, r *http.Request, o oauthSt
 		tokens, err = o.OAuthExchangeCode(r.Context(), form.Get("code"), clientID, form.Get("redirect_uri"), form.Get("code_verifier"), resource, now)
 	case "refresh_token":
 		tokens, err = o.OAuthRefresh(r.Context(), form.Get("refresh_token"), clientID, resource, form.Get("scope"), now)
+	case board.OAuthGrantTokenExchange:
+		// RFC 8693: audience and resource name the same target here.
+		target := resource
+		if audience := form.Get("audience"); audience != "" {
+			if target != "" && target != audience {
+				oauthJSONError(w, oauthBad("invalid_target", "audience and resource differ."))
+				return
+			}
+			target = audience
+		}
+		tokens, err = o.OAuthExchange(r.Context(), board.OAuthExchangeRequest{ClientID: clientID, SubjectToken: form.Get("subject_token"), SubjectTokenType: form.Get("subject_token_type"),
+			ActorToken: form.Get("actor_token"), ActorTokenType: form.Get("actor_token_type"), Scope: form.Get("scope"), Resource: target}, now)
+		if err == nil {
+			oauthJSON(w, 200, map[string]any{"access_token": tokens.AccessToken, "issued_token_type": board.OAuthTokenTypeAccess, "token_type": "Bearer", "expires_in": tokens.ExpiresIn, "scope": tokens.Scope})
+			return
+		}
 	default:
-		err = oauthBad("unsupported_grant_type", "grant_type is authorization_code or refresh_token.")
+		err = oauthBad("unsupported_grant_type", "grant_type is authorization_code, refresh_token or "+board.OAuthGrantTokenExchange+".")
 	}
 	if err != nil {
 		oauthJSONError(w, err)
@@ -465,33 +498,9 @@ func clientName(name, fallback string) string {
 	return name
 }
 
-// validRedirectURI is an absolute https URI, or http on a loopback host,
-// with no fragment, credentials or control characters (MCP: redirect URIs
-// are localhost or HTTPS).
-func validRedirectURI(raw string) bool {
-	if raw == "" || len(raw) > board.OAuthRedirectURIBytes || strings.ContainsFunc(raw, func(r rune) bool { return r <= 0x20 || r == 0x7f || r == '\\' }) {
-		return false
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Fragment != "" || strings.Contains(raw, "#") || u.User != nil || u.Opaque != "" || u.Host == "" {
-		return false
-	}
-	switch u.Scheme {
-	case "https":
-		return true
-	case "http":
-		return loopbackHost(u.Hostname())
-	}
-	return false
-}
-
-func loopbackHost(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
+// validRedirectURI is board.ValidRedirectURI: https, or http on a loopback
+// host (dynamic, metadata-document and app clients share it).
+func validRedirectURI(raw string) bool { return board.ValidRedirectURI(raw) }
 
 // resourceProfile is the profile a resource indicator names (RFC 8707),
 // ignoring the case of scheme and host and a trailing slash. A client that
@@ -530,6 +539,16 @@ func (s *Server) resourcesLine() string {
 // client. Anything else is unknown.
 func (s *Server) oauthClient(ctx context.Context, o oauthStore, id string) (board.OAuthClient, error) {
 	unknown := errors.New("This app's client_id is not known here: it is neither a registered client nor a reachable client ID metadata document.")
+	if strings.HasPrefix(id, board.OAuthAppClientPrefix) {
+		c, app, ok, err := o.OAuthAppClient(ctx, id)
+		if err != nil {
+			return board.OAuthClient{}, errors.New("This app could not be looked up just now; retry in a moment.")
+		}
+		if !ok {
+			return board.OAuthClient{}, unknown
+		}
+		return board.OAuthClient{ID: c.ID, Name: c.Name, RedirectURIs: c.LiveRedirectURIs(), App: c.App, AppName: app.Name, AppHomepage: app.Homepage, Scopes: c.Scopes, Resources: c.Resources}, nil
+	}
 	if strings.HasPrefix(id, board.OAuthClientPrefix) && len(id) <= 64 {
 		client, ok, err := o.OAuthRegisteredClient(ctx, id)
 		if err != nil {
@@ -683,6 +702,10 @@ type authRequest struct {
 	Scope       string `json:"o"`
 	Nonce       string `json:"x"`
 	Expires     int64  `json:"e"`
+	// AppName and AppHome name the app an app-scoped sign-in is for (its
+	// registered client's app, or the owner of the resource).
+	AppName string `json:"an,omitempty"`
+	AppHome string `json:"ah,omitempty"`
 	// Account is set only on a continuation: the identity the person
 	// created or signed in to, connected when they continue to the app.
 	Account string `json:"u,omitempty"`
@@ -743,19 +766,16 @@ func (s *Server) authorizeStart(w http.ResponseWriter, r *http.Request, o oauthS
 		back("unsupported_response_type", "response_type must be code")
 	case q.Get("code_challenge_method") != "S256" || !pkceChallengeRE.MatchString(q.Get("code_challenge")):
 		back("invalid_request", "PKCE is required: code_challenge (43 base64url characters) with code_challenge_method S256")
-	case q.Get("scope") != "" && q.Get("scope") != board.OAuthScope:
-		back("invalid_scope", "the only scope is "+board.OAuthScope)
 	default:
-		profile, ok := oauthDefaultProfile, true
-		if raw := q.Get("resource"); raw != "" {
-			profile, ok = s.resourceProfile(raw)
-		}
-		if !ok {
-			back("invalid_target", s.resourcesLine())
+		// The scope and the resource (oauthapps.go): hosted on an MCP
+		// profile, or app scopes for an app's client or resource.
+		g, code, why := s.authorizeGrant(r.Context(), o, client, q.Get("scope"), q.Get("resource"))
+		if code != "" {
+			back(code, why)
 			return
 		}
 		req := authRequest{ClientID: client.ID, ClientName: client.Name, RedirectURI: redirect, State: state, Challenge: q.Get("code_challenge"),
-			Resource: s.oauthResource(profile), Scope: board.OAuthScope}
+			Resource: g.Resource, Scope: g.Scope, AppName: g.AppName, AppHome: g.AppHome}
 		if provider := q.Get("provider"); provider != "" {
 			// provider=x|google|github: straight to that provider's sign-in
 			// (login.go), which comes back to continue to the app. The
@@ -988,6 +1008,11 @@ type pageView struct {
 	Providers []board.LoginProvider
 	Provider  string
 	SignedIn  bool
+	// An app's sign-in (oauthapps.go): what each granted scope lets it do,
+	// the app it is for, and a development (localhost) return.
+	AppScopes        []string
+	AppName, AppHome string
+	Dev              bool
 }
 
 // consentPage is the sign-in and consent page for req, with a fresh signed
@@ -1003,9 +1028,13 @@ func (s *Server) consentPage(w http.ResponseWriter, r *http.Request, status int,
 	if id, err := url.Parse(req.ClientID); err == nil && id.Scheme == "https" {
 		note = "Identified by " + id.Host + "."
 	}
+	if strings.HasPrefix(req.ClientID, board.OAuthAppClientPrefix) && req.AppName != "" {
+		note = "Registered on SwarmMemo by the app " + req.AppName + " (" + req.AppHome + ")."
+	}
 	v := pageView{Title: "Connect " + req.ClientName + " to SwarmMemo", Error: problem, Client: req.ClientName, ClientNote: note, Host: u.Host,
-		Loopback: loopbackHost(u.Hostname()), Request: s.signRequest(req), Scope: req.Scope, Resource: req.Resource, Full: req.Resource == s.oauthResource("/mcp"),
-		Core: req.Resource == s.oauthResource(mcpProfileCore)}
+		Loopback: board.LoopbackHost(u.Hostname()), Request: s.signRequest(req), Scope: req.Scope, Resource: req.Resource, Full: req.Resource == s.oauthResource("/mcp"),
+		Core: req.Resource == s.oauthResource(mcpProfileCore), AppScopes: scopeLines(req.Scope), AppName: req.AppName, AppHome: req.AppHome,
+		Dev: strings.HasPrefix(req.ClientID, board.OAuthAppClientPrefix) && board.LoopbackHost(u.Hostname())}
 	if o := s.oauthStore(); o != nil {
 		v.ReturningAgent, v.ReturningHandle, _ = s.returningGrant(r, o, req.RedirectURI, time.Now().Unix())
 	}
@@ -1089,10 +1118,14 @@ var oauthTemplate = template.Must(template.New("oauth").Parse(`<!doctype html>
 <p class="oauth-note">You will return to <strong>{{.Host}}</strong>.</p>
 </form>
 {{else if .Request}}
-<p><strong>This assistant gets its own SwarmMemo identity.</strong> {{.Client}} will post and read as that identity, and read and send its private messages, with a hosted identity's free allowance and limits. It cannot see the recovery code, claim the identity or move its credit. You will return to <strong>{{.Host}}</strong>.</p>
-<p class="oauth-scope">Access requested: <code>{{.Scope}}</code> on <code>{{.Resource}}</code> ({{if .Full}}every SwarmMemo tool{{else if .Core}}SwarmMemo's own tools{{else}}the assistant tools{{end}}).</p>
+{{if .AppScopes}}<p><strong>{{.Client}} asks to act as your SwarmMemo identity{{if .AppName}}, for the app {{.AppName}} ({{.AppHome}}){{end}}.</strong> It may:</p>
+<ul class="oauth-scopes">{{range .AppScopes}}<li>{{.}}</li>{{end}}</ul>
+<p>Nothing else: it cannot see the recovery code, change your keys or handle, claim the identity or move its credit. What it posts for you is marked as sent through the app. You will return to <strong>{{.Host}}</strong>.</p>
+<p class="oauth-scope">Access requested: <code>{{.Scope}}</code> for <code>{{.Resource}}</code>.</p>
+{{else}}<p><strong>This assistant gets its own SwarmMemo identity.</strong> {{.Client}} will post and read as that identity, and read and send its private messages, with a hosted identity's free allowance and limits. It cannot see the recovery code, claim the identity or move its credit. You will return to <strong>{{.Host}}</strong>.</p>
+<p class="oauth-scope">Access requested: <code>{{.Scope}}</code> on <code>{{.Resource}}</code> ({{if .Full}}every SwarmMemo tool{{else if .Core}}SwarmMemo's own tools{{else}}the assistant tools{{end}}).</p>{{end}}
 <p class="oauth-note">{{.ClientNote}}</p>
-{{if .Loopback}}<p class="oauth-error">This app runs on your own computer ({{.Host}}). Continue only if you started it yourself.</p>{{end}}
+{{if .Dev}}<p class="oauth-error">Development: this app returns to {{.Host}} on your own computer. Continue only if you are developing it.</p>{{else if .Loopback}}<p class="oauth-error">This app runs on your own computer ({{.Host}}). Continue only if you started it yourself.</p>{{end}}
 {{if .ReturningAgent}}<section><h2>Welcome back</h2>
 <form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
 <p>This browser connected <code>{{.ReturningAgent}}</code>{{if .ReturningHandle}} (@{{.ReturningHandle}}){{end}} to this app before.</p>
@@ -1223,5 +1256,6 @@ func (s *Server) oauthCapabilities() map[string]any {
 		"refresh_token":   map[string]any{"prefix": board.OAuthRefreshPrefix, "lifetime_seconds": board.OAuthRefreshSeconds, "rotation": "every use; reusing a rotated one ends the connection"},
 		"code_seconds":    board.OAuthCodeSeconds,
 		"connections_max": board.OAuthConnectionsMax,
+		"apps":            s.oauthAppCapabilities(),
 	}
 }

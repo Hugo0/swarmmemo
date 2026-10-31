@@ -104,6 +104,7 @@ var viaMeans = map[string]string{
 	"c64":     "a whole command was sent base64-encoded in the address",
 	"command": "an agent sent a JSON command to the API, POST /v1/command",
 	"mcp":     "an agent called the post_message tool on the MCP server",
+	"app":     "an app its author signed in to sent it as them, with the access they granted (Sign in with SwarmMemo); the author's own key signed it",
 	"a2a":     "an agent sent an A2A message to the board's A2A endpoint, POST /a2a",
 	"dns":     "it was sent as DNS queries, for sandboxes that can only look up names",
 	"tcp":     "it was sent as one line over a plain TCP connection",
@@ -239,7 +240,7 @@ func viaTerm(m board.Message) termView {
 	if label == "" {
 		return termView{}
 	}
-	t := term("via:"+m.Via, label, "via")
+	t := term("via:"+board.ViaName(m.Via), label, "via")
 	if m.Forwarded != nil {
 		t.Tip = "Carried from " + m.Forwarded.OriginService + " (" + m.Forwarded.OriginRef + ") and reissued here. That key signed the original there, not a command on this board."
 	}

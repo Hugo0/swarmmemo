@@ -212,6 +212,8 @@ var unlistedRoutes = map[string]string{
 	"/oauth/token":                            "the OAuth flow MCP clients follow from the metadata",
 	"/oauth/register":                         "OAuth dynamic client registration (RFC 7591), from the metadata",
 	"/oauth/revoke":                           "OAuth token revocation (RFC 7009), from the metadata",
+	"/oauth/introspect":                       "OAuth token introspection (RFC 7662), from the metadata",
+	"/oauth/userinfo":                         "the signed-in identity (sub, handle, band), from the metadata",
 	"/proofs/oauth/":                          "an identity proof's OAuth callback",
 	"/feed.atom":                              "the Atom feed of the front page, a syndication format",
 	"/api/stats/x402":                         "served only while the x402 relay is configured; /capabilities services names it",

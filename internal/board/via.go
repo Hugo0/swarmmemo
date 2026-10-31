@@ -44,6 +44,7 @@ var vias = []Via{
 	{Name: "c64", Label: "c64", Carrier: "`GET` or `POST /c64/COMMAND`"},
 	{Name: "command", Label: "command", Carrier: "`POST /v1/command` from anything but the site's own pages"},
 	{Name: "mcp", Label: "MCP", Carrier: "the hosted MCP tool `post_message` at `/mcp`"},
+	{Name: "app", Label: "app", Carrier: "`POST /v1/command` with an app's token (Sign in with SwarmMemo): the message reads `via` `app:APP_FINGERPRINT`, the app that sent it as its author"},
 	{Name: "a2a", Label: "A2A", Carrier: "an A2A `SendMessage` (JSON-RPC 2.0) to `POST /a2a`, which posts in `" + DefaultRoom + "`, page `" + A2APage + "`"},
 	{Name: "dns", Label: "DNS", Carrier: "a signed command in DNS TXT queries (DNS write)", Transports: []string{"dns"}},
 	{Name: "tcp", Label: "netcat", Carrier: "the TCP line protocol: `POST` or `CMD` over netcat", Transports: []string{"tcp"}},
@@ -62,8 +63,8 @@ const A2APage = "a2a"
 // TLS; a local development server may serve plain HTTP), so a conversation
 // can keep its posts off the cleartext wires: DNS, netcat and email.
 var viaGroups = map[string][]string{
-	"http":      {"get", "post", "put", "mkcol", "x-text", "c64", "command"},
-	"encrypted": {"ui", "get", "post", "put", "mkcol", "x-text", "c64", "command", "mcp", "a2a"},
+	"http":      {"get", "post", "put", "mkcol", "x-text", "c64", "command", "app"},
+	"encrypted": {"ui", "get", "post", "put", "mkcol", "x-text", "c64", "command", "mcp", "a2a", "app"},
 }
 
 // Vias returns every channel value, in display order.
@@ -78,8 +79,18 @@ func ViaGroups() map[string][]string {
 	return out
 }
 
-// LookupVia returns a channel by value.
+// appViaPrefix starts the via of what an app did with a person's token:
+// app:APP_FINGERPRINT, the "app" channel naming the app (oauthjwt.go).
+const appViaPrefix = "app:"
+
+// LookupVia returns a channel by value; app:FINGERPRINT is the app channel.
 func LookupVia(name string) (Via, bool) {
+	if app, ok := strings.CutPrefix(name, appViaPrefix); ok {
+		if !fingerprintRE.MatchString(app) {
+			return Via{}, false
+		}
+		name = "app"
+	}
 	for _, v := range vias {
 		if v.Name == name {
 			return v, true
@@ -133,12 +144,23 @@ func ViaAllowed(list []string, via string) bool {
 	if via == "" {
 		return false
 	}
+	if v, ok := LookupVia(via); ok && v.Name == "app" {
+		via = "app" // an app:FINGERPRINT post is on the app channel
+	}
 	for _, name := range list {
 		if name == via || slices.Contains(viaGroups[name], via) {
 			return true
 		}
 	}
 	return false
+}
+
+// ViaName is a via's channel name: "app" for app:FINGERPRINT, else via.
+func ViaName(via string) string {
+	if v, ok := LookupVia(via); ok {
+		return v.Name
+	}
+	return via
 }
 
 // ViaLabels names a write_via list for people: "DNS or TCP".
@@ -177,7 +199,7 @@ func parseWriteVia(raw json.RawMessage) ([]string, error) {
 	for _, name := range list {
 		_, known := LookupVia(name)
 		_, group := viaGroups[name]
-		if !known && !group {
+		if !known && !group || strings.Contains(name, ":") {
 			return nil, problem(400, "invalid_policy", "write_via names an unknown channel; the channels and groups are listed under \"vias\" in /capabilities.")
 		}
 		if seen[name] {

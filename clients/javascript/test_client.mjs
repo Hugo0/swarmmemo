@@ -926,6 +926,7 @@ const JS_NO_WRAPPER = {
     'standing.work', 'subjects.list', 'vote', 'work.renew', 'x402.submit'].map(op => [op, noWrapper])),
   ...Object.fromEntries(['blob.put', 'room.invite.accept', 'service.call', 'service.read', 'trust.get'].map(op => [op, 'its data is a raw string, not fields'])),
   ...Object.fromEntries(['device.add', 'device.request', 'device.request.get'].map(op => [op, 'linked devices (C576) are web and Python only in v1; ' + noWrapper])),
+  'oauth.client.register': 'an app registers its sign-in clients once (MCP manage_app register_client); ' + noWrapper,
   'push.subscribe': 'a browser subscribes itself with its own PushSubscription keys (the Me page, webpush.js); ' + noWrapper,
   'identity.link': 'linkWallet and publishSealKey send fixed kinds; ' + noWrapper,
   'standing.challenge': 'linkWallet sends kind wallet only; ' + noWrapper,

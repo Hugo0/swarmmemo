@@ -303,6 +303,7 @@ func (s *Store) activityPostsScan(ctx context.Context, a *Activity, hourStart, d
 			rows.Close()
 			return err
 		}
+		via = ViaName(via) // app:FINGERPRINT counts as the app channel
 		nativePost := class < 2 && post
 		for _, sr := range all {
 			i := at(sr, createdAt)

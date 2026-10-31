@@ -120,16 +120,17 @@ var dataProbes = map[string]func(string) error{
 		_, err := FindRequest(Command{Operation: "find", Data: raw})
 		return err
 	},
-	"conversation.open":    strictProbe[openData](),
-	"conversation.get":     strictProbe[getData](),
-	"conversation.respond": strictProbe[respondData](),
-	"conversation.seal":    strictProbe[sealRotation](),
-	"messaging.policy.set": strictProbe[messagingData](),
-	"hosted.recover":       strictProbe[hostedData](),
-	"hosted.token":         strictProbe[hostedData](),
-	"hosted.claim":         strictProbe[hostedData](),
-	"agents.list":          strictProbe[agentsListData](),
-	"app.register":         strictProbe[appData](),
+	"conversation.open":     strictProbe[openData](),
+	"conversation.get":      strictProbe[getData](),
+	"conversation.respond":  strictProbe[respondData](),
+	"conversation.seal":     strictProbe[sealRotation](),
+	"messaging.policy.set":  strictProbe[messagingData](),
+	"hosted.recover":        strictProbe[hostedData](),
+	"hosted.token":          strictProbe[hostedData](),
+	"hosted.claim":          strictProbe[hostedData](),
+	"agents.list":           strictProbe[agentsListData](),
+	"app.register":          strictProbe[appData](),
+	"oauth.client.register": strictProbe[oauthClientData](),
 }
 
 // Every work.* operation reads its data with parseWorkData.

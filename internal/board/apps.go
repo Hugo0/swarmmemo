@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -400,7 +401,29 @@ func cleanHomepage(raw string) (string, bool) {
 			return "", false
 		}
 	}
+	if sharedSuffixHost(u.Hostname()) {
+		return "", false
+	}
 	return raw, true
+}
+
+// sharedHostSuffixes are hosts under which anyone may get a name: shared
+// hosting, and the commonest second-level public suffixes. An app's
+// homepage is never one of them (nor a single-label host), so it claims
+// no one else's resources (oauthapps.go validResource). Without the
+// public suffix list in the module graph this list is short on purpose;
+// domain proof is the follow-up (RUNBOOK "Sign in with SwarmMemo").
+var sharedHostSuffixes = []string{
+	"github.io", "gitlab.io", "vercel.app", "netlify.app", "pages.dev", "workers.dev", "herokuapp.com", "fly.dev", "onrender.com",
+	"web.app", "firebaseapp.com", "azurewebsites.net", "cloudfront.net", "appspot.com", "replit.app", "glitch.me", "ngrok.io", "ngrok-free.app",
+	"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "ne.jp", "or.jp", "com.br", "co.in", "co.za", "com.cn", "com.mx", "com.tr",
+}
+
+// sharedSuffixHost reports a host that is a shared suffix itself, or a
+// single label (a top-level domain, localhost).
+func sharedSuffixHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	return !strings.Contains(host, ".") || slices.Contains(sharedHostSuffixes, host)
 }
 
 // readApp is account's app record, or 404 app_not_found.

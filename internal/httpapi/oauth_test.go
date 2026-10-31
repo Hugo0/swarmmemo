@@ -190,7 +190,7 @@ func TestOAuthMetadata(t *testing.T) {
 	for field, want := range map[string]string{"issuer": "https://swarmmemo.com", "authorization_endpoint": "https://swarmmemo.com/oauth/authorize", "token_endpoint": "https://swarmmemo.com/oauth/token",
 		"registration_endpoint": "https://swarmmemo.com/oauth/register", "revocation_endpoint": "https://swarmmemo.com/oauth/revoke", "code_challenge_methods_supported": "[S256]",
 		"token_endpoint_auth_methods_supported": "[none]", "client_id_metadata_document_supported": "true", "authorization_response_iss_parameter_supported": "true",
-		"grant_types_supported": "[authorization_code refresh_token]", "response_types_supported": "[code]"} {
+		"grant_types_supported": "[authorization_code refresh_token urn:ietf:params:oauth:grant-type:token-exchange]", "jwks_uri": "https://swarmmemo.com/.well-known/jwks.json", "response_types_supported": "[code]"} {
 		if fmt.Sprint(as[field]) != want {
 			t.Errorf("%s = %v, want %s", field, as[field], want)
 		}

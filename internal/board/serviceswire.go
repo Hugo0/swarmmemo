@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -312,6 +313,15 @@ func (s *Store) readServices(ctx context.Context, tx *sql.Tx, c Command, a actor
 	out, err := e.ReadOutcome(ctx, tx, services.Request{Service: c.Target, Data: c.Data, Subject: subject(a.payer())}, now)
 	if err != nil {
 		return Result{}, serviceError(err)
+	}
+	if a.bearer != nil && c.Target == "wakeup" && out.Data != nil {
+		// An app's token sees only wake-ups on its rooms or at a time
+		// (oauthscopes.go wakeups).
+		if raw, ok := out.Data["result"].(json.RawMessage); ok {
+			if out.Data["result"], err = bearerWakeupView(ctx, tx, raw, a.bearer.app); err != nil {
+				return Result{}, err
+			}
+		}
 	}
 	res := Result{Data: out.Data}
 	if after := out.After; after != nil {

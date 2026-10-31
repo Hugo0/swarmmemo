@@ -32,8 +32,9 @@ import (
 )
 
 const (
-	// OAuthScope is the one scope: act as your hosted identity, with exactly
-	// what a hosted token may do.
+	// OAuthScope is the scope of an assistant's sign-in: act as your hosted
+	// identity, with exactly what a hosted token may do. An app's registered
+	// client asks for app scopes instead (oauthscopes.go).
 	OAuthScope = "hosted"
 	// OAuthCodeSeconds is how long an authorization code may be redeemed.
 	// The code is made only when the person leaves the sign-in page for the
@@ -141,6 +142,13 @@ type OAuthClient struct {
 	ID           string   `json:"client_id"`
 	Name         string   `json:"client_name"`
 	RedirectURIs []string `json:"redirect_uris"`
+	// App is set for an app's registered client (oauthapps.go): the app,
+	// its name and homepage, its scope ceiling and the resources it serves.
+	App         string   `json:"app,omitempty"`
+	AppName     string   `json:"app_name,omitempty"`
+	AppHomepage string   `json:"app_homepage,omitempty"`
+	Scopes      []string `json:"scopes,omitempty"`
+	Resources   []string `json:"resources,omitempty"`
 }
 
 // OAuthRegisterClient is dynamic client registration (RFC 7591) of a public
@@ -452,7 +460,7 @@ func (s *Store) newOAuthConnection(ctx context.Context, tx *sql.Tx, account stri
 		return OAuthTokens{}, "", err
 	}
 	family := hex.EncodeToString(familyRaw)
-	access, accessHash, err := hostedSecret(HostedTokenPrefix)
+	access, accessHash, expiresIn, err := s.oauthAccess(ctx, tx, account, family, g.ClientID, g.Resource, g.Scope, now)
 	if err != nil {
 		return OAuthTokens{}, "", err
 	}
@@ -464,13 +472,27 @@ func (s *Store) newOAuthConnection(ctx context.Context, tx *sql.Tx, account stri
 		return OAuthTokens{}, "", err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO oauth_families(family_id,account,client_id,client_name,resource,scope,created_at,access_sha256,access_expires_at,refresh_sha256,refresh_expires_at)
- VALUES(?,?,?,?,?,?,?,?,?,?,?)`, family, account, g.ClientID, g.ClientName, g.Resource, g.Scope, now, accessHash, now+OAuthAccessSeconds, refreshHash, now+OAuthRefreshSeconds); err != nil {
+ VALUES(?,?,?,?,?,?,?,?,?,?,?)`, family, account, g.ClientID, g.ClientName, g.Resource, g.Scope, now, accessHash, now+expiresIn, refreshHash, now+OAuthRefreshSeconds); err != nil {
 		return OAuthTokens{}, "", err
 	}
 	if err = audit(ctx, tx, "oauth.connect", account, account, "token "+hostedTokenID(accessHash), now); err != nil {
 		return OAuthTokens{}, "", err
 	}
-	return OAuthTokens{AccessToken: access, RefreshToken: refresh, ExpiresIn: OAuthAccessSeconds, Scope: g.Scope}, family, nil
+	return OAuthTokens{AccessToken: access, RefreshToken: refresh, ExpiresIn: expiresIn, Scope: g.Scope}, family, nil
+}
+
+// oauthAccess is a connection's next access token: a hosted token (smh1_)
+// for the hosted scope, or for app scopes a JWT (oauthjwt.go) for scope,
+// which may be narrower than the connection's.
+func (s *Store) oauthAccess(ctx context.Context, tx *sql.Tx, account, family, clientID, resource, scope string, now int64) (token, hash string, expiresIn int64, err error) {
+	if scope == OAuthScope {
+		token, hash, err = hostedSecret(HostedTokenPrefix)
+		return token, hash, OAuthAccessSeconds, err
+	}
+	if token, err = s.appAccessToken(ctx, tx, account, family, clientID, resource, scope, now); err != nil {
+		return "", "", 0, err
+	}
+	return token, hostedHash(token), OAuthJWTAccessSeconds, nil
 }
 
 // OAuthRefresh is the refresh_token grant: the refresh token rotates, the
@@ -483,9 +505,6 @@ func (s *Store) OAuthRefresh(ctx context.Context, refresh, clientID, resource, s
 	}
 	if !strings.HasPrefix(refresh, OAuthRefreshPrefix) || !hostedTokenShape(refresh) {
 		return OAuthTokens{}, invalidGrant()
-	}
-	if scope != "" && scope != OAuthScope {
-		return OAuthTokens{}, oauthError("invalid_scope", 400, "The only scope is "+OAuthScope+".")
 	}
 	hash := hostedHash(refresh)
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -521,6 +540,20 @@ func (s *Store) OAuthRefresh(ctx context.Context, refresh, clientID, resource, s
 	if f.revoked != 0 || f.refreshExpires <= now || clientID != f.clientID || (resource != "" && resource != f.resource) {
 		return OAuthTokens{}, invalidGrant()
 	}
+	// A refresh may ask for less than the connection holds, never more; the
+	// connection keeps its scope.
+	accessScope := f.scope
+	if scope != "" {
+		want, ok := ParseOAuthScopes(scope)
+		have, appScoped := ParseOAuthScopes(f.scope)
+		switch {
+		case f.scope == OAuthScope && scope == OAuthScope:
+		case appScoped && ok && scopeSubset(want, have):
+			accessScope = strings.Join(want, " ")
+		default:
+			return OAuthTokens{}, oauthError("invalid_scope", 400, "A refresh may ask for the connection's scope ("+f.scope+") or less, never more.")
+		}
+	}
 	var state string
 	if err = tx.QueryRowContext(ctx, "SELECT state FROM hosted_keys WHERE account=?", f.account).Scan(&state); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return OAuthTokens{}, err
@@ -534,7 +567,7 @@ func (s *Store) OAuthRefresh(ctx context.Context, refresh, clientID, resource, s
 		}
 		return OAuthTokens{}, err
 	}
-	access, accessHash, err := hostedSecret(HostedTokenPrefix)
+	access, accessHash, expiresIn, err := s.oauthAccess(ctx, tx, f.account, f.id, f.clientID, f.resource, accessScope, now)
 	if err != nil {
 		return OAuthTokens{}, err
 	}
@@ -552,13 +585,13 @@ func (s *Store) OAuthRefresh(ctx context.Context, refresh, clientID, resource, s
 		return OAuthTokens{}, err
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE oauth_families SET access_sha256=?,access_expires_at=?,refresh_sha256=?,refresh_expires_at=?,rotated_at=? WHERE family_id=?",
-		accessHash, now+OAuthAccessSeconds, nextHash, now+OAuthRefreshSeconds, now, f.id); err != nil {
+		accessHash, now+expiresIn, nextHash, now+OAuthRefreshSeconds, now, f.id); err != nil {
 		return OAuthTokens{}, err
 	}
 	if err = tx.Commit(); err != nil {
 		return OAuthTokens{}, err
 	}
-	return OAuthTokens{AccessToken: access, RefreshToken: next, ExpiresIn: OAuthAccessSeconds, Scope: f.scope}, nil
+	return OAuthTokens{AccessToken: access, RefreshToken: next, ExpiresIn: expiresIn, Scope: accessScope}, nil
 }
 
 // OAuthRevoke is token revocation (RFC 7009): an access or refresh token of
@@ -566,7 +599,9 @@ func (s *Store) OAuthRefresh(ctx context.Context, refresh, clientID, resource, s
 // Anything else changes nothing; the caller answers 200 either way. A
 // clientID that is given must be the connection's.
 func (s *Store) OAuthRevoke(ctx context.Context, token, clientID string, now int64) error {
-	if !hostedTokenShape(token) || !(strings.HasPrefix(token, HostedTokenPrefix) || strings.HasPrefix(token, OAuthRefreshPrefix)) {
+	// An app's access token is a JWT (oauthjwt.go), kept by its hash as a
+	// hosted token is.
+	if !LooksLikeJWT(token) && (!hostedTokenShape(token) || !(strings.HasPrefix(token, HostedTokenPrefix) || strings.HasPrefix(token, OAuthRefreshPrefix))) {
 		return nil
 	}
 	hash := hostedHash(token)
@@ -579,6 +614,13 @@ func (s *Store) OAuthRevoke(ctx context.Context, token, clientID string, now int
 	err = tx.QueryRowContext(ctx, `SELECT family_id,client_id FROM oauth_families WHERE access_sha256=? OR refresh_sha256=?
  UNION ALL SELECT u.family_id,f.client_id FROM oauth_refresh_used u JOIN oauth_families f ON f.family_id=u.family_id WHERE u.refresh_sha256=? LIMIT 1`, hash, hash, hash).Scan(&family, &owner)
 	if errors.Is(err, sql.ErrNoRows) {
+		// An exchanged app token is no connection's: it is revoked by itself.
+		if LooksLikeJWT(token) {
+			if ok, err := s.revokeExchanged(ctx, tx, token, clientID, now); err != nil || !ok {
+				return err
+			}
+			return tx.Commit()
+		}
 		return nil
 	}
 	if err != nil {

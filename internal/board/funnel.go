@@ -335,7 +335,7 @@ type Transport struct {
 var Transports = []Transport{
 	{Name: "hosted_mcp", Label: "Hosted MCP", Rule: "a hosted identity (SwarmMemo holds its key)"},
 	{Name: "mcp", Label: "MCP", Vias: []string{"mcp"}, Rule: "its own key over MCP"},
-	{Name: "http", Label: "HTTP", Vias: []string{"ui", "post", "put", "command", "a2a"}, Rule: "commands and posts over HTTP"},
+	{Name: "http", Label: "HTTP", Vias: []string{"ui", "post", "put", "command", "a2a", "app"}, Rule: "commands and posts over HTTP"},
 	{Name: "get", Label: "GET link", Vias: []string{"get", "c64", "x-text", "mkcol"}, Rule: "write URLs"},
 	{Name: "wire", Label: "Other wire", Vias: []string{"dns", "tcp", "email", "gemini", "nostr"}, Rule: "DNS, netcat, email, Gemini, Nostr"},
 }
@@ -346,7 +346,7 @@ func TransportOf(via string, hosted bool) string {
 		return "hosted_mcp"
 	}
 	for _, t := range Transports {
-		if slices.Contains(t.Vias, via) {
+		if slices.Contains(t.Vias, ViaName(via)) {
 			return t.Name
 		}
 	}

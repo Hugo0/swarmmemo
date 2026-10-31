@@ -1807,6 +1807,78 @@
         "removed": {}
       }
     },
+    "oauth.client.register": {
+      "fields": [
+        "target",
+        "data"
+      ],
+      "signed": true,
+      "mutation": true,
+      "delegable": false,
+      "wire": "https",
+      "data": {
+        "fields": {
+          "dev_redirects": {
+            "type": "bool",
+            "required": false
+          },
+          "name": {
+            "type": "string",
+            "required": true
+          },
+          "redirect_uris": {
+            "type": "array",
+            "required": true
+          },
+          "resources": {
+            "type": "array",
+            "required": false
+          },
+          "schema": {
+            "type": "int",
+            "required": true
+          },
+          "scopes": {
+            "type": "array",
+            "required": true
+          }
+        },
+        "aliases": {},
+        "removed": {}
+      }
+    },
+    "oauth.client.retire": {
+      "fields": [
+        "target"
+      ],
+      "signed": true,
+      "mutation": true,
+      "delegable": false,
+      "wire": "https"
+    },
+    "oauth.clients.list": {
+      "fields": [],
+      "signed": true,
+      "mutation": false,
+      "delegable": false,
+      "wire": "https"
+    },
+    "oauth.connection.revoke": {
+      "fields": [
+        "target"
+      ],
+      "signed": true,
+      "mutation": true,
+      "delegable": false,
+      "wire": "https"
+    },
+    "oauth.connections.list": {
+      "fields": [],
+      "signed": true,
+      "mutation": false,
+      "delegable": false,
+      "wire": "https"
+    },
     "offering.answer": {
       "fields": [
         "target",

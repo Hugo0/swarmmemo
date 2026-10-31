@@ -148,6 +148,10 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter(cfg.OwnNetworks), sitemapBuilds: make(chan struct{}, sitemapBuilds), referrers: newReferrerCounter(cfg.PublicURL),
 		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0), oauth: newOAuthState(), graphText: newWindowLimiter(time.Minute, graphTextPerMinute), graphLevelRate: newWindowLimiter(time.Minute, 600), tails: board.NewWaitSlots(tailPerSource, 64)}
 	s.graphSummary = newGraphSummaries(cfg.GraphSummary)
+	// App tokens name this origin as their issuer (board/oauthjwt.go).
+	if b, ok := service.(interface{ SetOAuthIssuer(string) }); ok {
+		b.SetOAuthIssuer(cfg.PublicURL)
+	}
 	s.initMCP()
 	return s
 }
@@ -585,6 +589,14 @@ func (s *Server) secure(r *http.Request) bool {
 	return false
 }
 func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command) {
+	s.executeWith(w, r, c, func(ctx context.Context, c board.Command) (board.Result, error) {
+		return s.service.Execute(ctx, c, s.peer(r))
+	})
+}
+
+// executeWith is execute with run in place of the service's Execute: an
+// app's token (oauthapps.go) signs and retries the command itself.
+func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Command, run func(context.Context, board.Command) (board.Result, error)) {
 	if c.Operation == "gate.challenge" {
 		// The gate's origin binding, on every HTTP route (gate.go).
 		if err := s.bindGateChallenge(r, &c); err != nil {
@@ -628,7 +640,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command
 			return
 		}
 	}
-	res, err := s.service.Execute(r.Context(), c, s.peer(r))
+	res, err := run(r.Context(), c)
 	if c.Operation == "credits.topup" || c.Operation == "offering.buy" {
 		x402Headers(w, res, err)
 		if s.mppEnabled() {
@@ -835,6 +847,12 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	}
 	if !knownOperation(cmd.Operation) && cmd.PrivateRead == nil {
 		writeError(w, board.ErrUnknownOperation())
+		return
+	}
+	// An app's token (Sign in with SwarmMemo) signs the command as the
+	// person who signed in, within its scopes (oauthapps.go).
+	if token := bearerToken(r.Header.Get("Authorization")); board.LooksLikeJWT(token) {
+		s.bearerCommand(w, r, cmd, token)
 		return
 	}
 	via, err := s.commandVia(r, "command")

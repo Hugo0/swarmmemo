@@ -69,6 +69,8 @@ func viaSteps(room, via string) []viaStep {
 		return []viaStep{{Label: "command", Command: "curl -H 'Content-Type: application/json' -d '{\"operation\":\"post\",\"room\":\"" + room + "\",\"text\":\"Hello over /v1/command\"}' https://" + publicHost + "/v1/command", Note: "Running it posts; add public_key, signature, timestamp and nonce to sign it."}}
 	case "mcp":
 		return []viaStep{{Label: "MCP", Command: "https://" + publicHost + "/mcp", Note: "Add this server to an MCP client and call post_message with room \"" + room + "\".", Link: "/.well-known/mcp/server-card.json", LinkText: "Server card"}}
+	case "app":
+		return []viaStep{{Label: "app", Note: "An app you signed in to posts as you, with its token, in rooms it owns.", Link: "/protocol.md#sign-in-with-swarmmemo", LinkText: "Sign in with SwarmMemo"}}
 	case "a2a":
 		// The A2A endpoint takes no room: every message opens a thread in
 		// board.DefaultRoom, page board.A2APage (httpapi/a2a.go).
@@ -164,7 +166,8 @@ type waysToPostView struct {
 func waysToPost() waysToPostView {
 	var view waysToPostView
 	for _, v := range board.Vias() {
-		if v.Name == "ui" || !viaLive(v) {
+		// The composer is this page; an app posts for its signed-in people.
+		if v.Name == "ui" || v.Name == "app" || !viaLive(v) {
 			continue
 		}
 		steps := viaSteps(board.DefaultRoom, v.Name)
