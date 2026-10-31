@@ -41,7 +41,6 @@ func TestSignInWithSwarmMemoOverHTTP(t *testing.T) {
 		return res
 	}
 	exec(board.Command{Operation: "app.register", Data: `{"schema":1,"name":"Hex Arena","homepage":"https://app.example"}`, RequestID: "a"})
-	exec(board.Command{Operation: "room.create", Room: "hex-table", RequestID: "r"})
 	client := exec(board.Command{Operation: "oauth.client.register", RequestID: "c",
 		Data: `{"schema":1,"name":"Hex Arena","redirect_uris":["` + testRedirect + `","http://localhost:5173/cb"],"scopes":["identity","app-rooms"],"dev_redirects":true}`}).Data["client"].(board.OAuthAppClient)
 	appFP := client.App
@@ -91,15 +90,21 @@ func TestSignInWithSwarmMemoOverHTTP(t *testing.T) {
 		_ = json.Unmarshal(w.Body.Bytes(), &out)
 		return w.Code, out, w.Header().Get("WWW-Authenticate")
 	}
-	status, out, _ := command(access, `{"operation":"post","room":"hex-table","text":"my move","request_id":"m1"}`)
+	// The app's token opens one of the app's rooms (app/APP/…), its person
+	// a member.
+	table := "app/" + appFP + "/table"
+	if status, out, _ := command(access, `{"operation":"room.create","room":"`+table+`","request_id":"r"}`); status != 200 {
+		t.Fatalf("bearer room.create: %d %v", status, out)
+	}
+	status, out, _ := command(access, `{"operation":"post","room":"`+table+`","text":"my move","request_id":"m1"}`)
 	id, _ := dig(out, "receipt", "id").(string)
 	if status != 200 || id == "" {
 		t.Fatalf("bearer post: %d %v", status, out)
 	}
-	if status, again, _ := command(access, `{"operation":"post","room":"hex-table","text":"my move","request_id":"m1"}`); status != 200 || dig(again, "receipt", "id") != id {
+	if status, again, _ := command(access, `{"operation":"post","room":"`+table+`","text":"my move","request_id":"m1"}`); status != 200 || dig(again, "receipt", "id") != id {
 		t.Fatalf("bearer retry: %d %v", status, again)
 	}
-	got, err := store.Execute(ctx, board.Command{Operation: "message.get", MessageID: id}, "198.51.100.9")
+	got, err := store.Execute(ctx, signedNow(app, board.Command{Operation: "message.get", MessageID: id}), "198.51.100.9")
 	if err != nil || got.Messages[0].Via != "app:"+appFP {
 		t.Fatalf("via: %v %v", got.Messages, err)
 	}
@@ -109,10 +114,10 @@ func TestSignInWithSwarmMemoOverHTTP(t *testing.T) {
 	if status, out, _ := command(access, `{"operation":"hosted.token","data":"{\"schema\":1,\"action\":\"list\"}"}`); status == 200 {
 		t.Fatalf("a token operation through an app token: %v", out)
 	}
-	if status, out, _ := command(access, `{"operation":"room.get","room":"hex-table","public_key":"x"}`); status != 400 || dig(out, "error", "code") != "ambiguous_command" {
+	if status, out, _ := command(access, `{"operation":"room.get","room":"`+table+`","public_key":"x"}`); status != 400 || dig(out, "error", "code") != "ambiguous_command" {
 		t.Fatalf("a signed body with an app token: %d %v", status, out)
 	}
-	if status, _, challenge := command(access[:len(access)-4]+"AAAA", `{"operation":"room.get","room":"hex-table"}`); status != 401 || !strings.Contains(challenge, "invalid_token") {
+	if status, _, challenge := command(access[:len(access)-4]+"AAAA", `{"operation":"room.get","room":"`+table+`"}`); status != 401 || !strings.Contains(challenge, "invalid_token") {
 		t.Fatalf("a forged token: %d %q", status, challenge)
 	}
 	// An app token is not a hosted token: /mcp does not take it.

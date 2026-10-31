@@ -42,3 +42,8 @@ func errGoingAway() *board.Error {
 func errNoSuchNode() *board.Error {
 	return &board.Error{Status: 404, Code: "not_found", Message: "No such node in this generation."}
 }
+
+// errSignInRate is the per-connection limit of an app's token (oauthapps.go, livestream.go).
+func errSignInRate() *board.Error {
+	return &board.Error{Status: 429, Code: "request_rate", Message: "One sign-in makes up to 120 calls a minute; wait briefly before retrying.", RetryAfter: 1}
+}

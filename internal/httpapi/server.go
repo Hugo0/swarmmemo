@@ -124,6 +124,9 @@ type Server struct {
 	// tails bounds the text tail per network address (tail.go); the total
 	// shares streams with /api/stream.
 	tails *board.WaitSlots
+	// lives bounds the authenticated live stream per network address and
+	// per key (livestream.go); its total shares streams too.
+	lives *board.WaitSlots
 }
 
 func New(service board.Service, ui http.Handler, cfg Config) *Server {
@@ -146,7 +149,7 @@ func New(service board.Service, ui http.Handler, cfg Config) *Server {
 	// plain-text permalink trailer does (web.ReplyTrailer).
 	ui = web.WithOrigin(ui, cfg.PublicURL)
 	s := &Server{service: service, ui: ui, cfg: cfg, inflight: make(chan struct{}, 128), streams: make(chan struct{}, 64), referenceInflight: make(chan struct{}, referenceReadConcurrency), limiter: cfg.Limiter, readers: newReaderCounter(cfg.OwnNetworks), sitemapBuilds: make(chan struct{}, sitemapBuilds), referrers: newReferrerCounter(cfg.PublicURL),
-		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0), oauth: newOAuthState(), graphText: newWindowLimiter(time.Minute, graphTextPerMinute), graphLevelRate: newWindowLimiter(time.Minute, 600), tails: board.NewWaitSlots(tailPerSource, 64)}
+		hostedLimiter: NewLimiterRate(hostedBurst, hostedRatePerMinute/60.0), oauth: newOAuthState(), graphText: newWindowLimiter(time.Minute, graphTextPerMinute), graphLevelRate: newWindowLimiter(time.Minute, 600), tails: board.NewWaitSlots(tailPerSource, 64), lives: board.NewWaitSlots(liveStreamsPerSource, liveStreamsTotal)}
 	s.graphSummary = newGraphSummaries(cfg.GraphSummary)
 	// App tokens name this origin as their issuer (board/oauthjwt.go).
 	if b, ok := service.(interface{ SetOAuthIssuer(string) }); ok {
@@ -743,6 +746,12 @@ func WriteText(w io.Writer, res board.Result) {
 		fmt.Fprintf(w, "policy %v write=%s reply=%s closed=%t closes_at=%d max_messages=%d", res.Data["room"], p.Write, p.Reply, p.Closed, p.ClosesAt, p.MaxMessages)
 		if p.TopLevelPerDay > 0 {
 			fmt.Fprintf(w, " top_level_per_day=%d", p.TopLevelPerDay)
+		}
+		if p.SlowModeSeconds > 0 {
+			fmt.Fprintf(w, " slow_mode_seconds=%d", p.SlowModeSeconds)
+		}
+		if p.RevealOnClose {
+			fmt.Fprint(w, " reveal_on_close=true")
 		}
 		if p.Promotion == board.PromotionModerate {
 			fmt.Fprintf(w, " promotion=%s", p.Promotion)
@@ -1615,6 +1624,11 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		methodError(w)
+		return
+	}
+	// With a credential it is the caller's own stream (livestream.go).
+	if liveStreamRequest(r) {
+		s.liveStream(w, r)
 		return
 	}
 	q := r.URL.Query()

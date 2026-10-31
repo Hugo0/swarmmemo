@@ -37,10 +37,14 @@ func newAppTestOn(t *testing.T, s *Store, clientData string) appTestSetup {
 	s.SetOAuthIssuer(appTestIssuer)
 	app := keyFor(181)
 	run(t, s, signed(app, Command{Operation: "app.register", Data: appJSON, RequestID: "app-reg"}))
-	run(t, s, signed(app, Command{Operation: "room.create", Room: "hex-table", RequestID: "app-room"}))
+	run(t, s, signed(app, Command{Operation: "room.create", Room: appTable, RequestID: "app-room"}))
 	r := run(t, s, signed(app, Command{Operation: "oauth.client.register", Data: clientData, RequestID: "client-reg"}))
 	return appTestSetup{s: s, app: app, client: r.Data["client"].(OAuthAppClient)}
 }
+
+// appTable is the test app's (keyFor(181)) room, app/APP/table: every
+// person who signs in (signIn) is its member.
+var appTable = "app/" + keyID(keyFor(181)) + "/table"
 
 const appClientJSON = `{"schema":1,"name":"Hex Arena web","redirect_uris":["https://hexarena.example/cb"],"scopes":["identity","app-rooms","dm"],"resources":["https://hexarena.example/mcp"]}`
 
@@ -50,6 +54,7 @@ func (a appTestSetup) signIn(t *testing.T, clientID, resource, scope string) (st
 	t.Helper()
 	created := createHosted(t, a.s, "test-origin", "")
 	account := created["agent"].(string)
+	run(t, a.s, signedNow(a.s, a.app, Command{Operation: "room.member.add", Room: appTable, Target: account, RequestID: "join-" + account}))
 	g := OAuthGrant{ClientID: clientID, ClientName: "Hex", RedirectURI: "https://hexarena.example/cb", Challenge: PKCEChallenge(oauthTestVerifier), Resource: resource, Scope: scope}
 	code, err := a.s.OAuthIssueCode(testContext, g, account, created["token_id"].(string), testTime)
 	if err != nil {
@@ -174,11 +179,11 @@ func TestAppTokenScopesAndProvenance(t *testing.T) {
 		t.Fatalf("app token: %v %v %+v", header, claims, tokens)
 	}
 	// Allowed: a post in the app's room, marked via app:APP.
-	res, err := bearer(s, tokens.AccessToken, Command{Operation: "post", Room: "hex-table", Text: "my move", RequestID: "p1"})
+	res, err := bearer(s, tokens.AccessToken, Command{Operation: "post", Room: appTable, Text: "my move", RequestID: "p1"})
 	if err != nil {
 		t.Fatalf("post in the app's room: %v", err)
 	}
-	m := run(t, s, Command{Operation: "message.get", MessageID: res.Receipt.ID}).Messages[0]
+	m := run(t, s, signedNow(s, a.app, Command{Operation: "message.get", MessageID: res.Receipt.ID})).Messages[0]
 	if m.Via != "app:"+keyID(a.app) || m.Author != account {
 		t.Fatalf("message via %q author %q", m.Via, m.Author)
 	}
@@ -186,14 +191,14 @@ func TestAppTokenScopesAndProvenance(t *testing.T) {
 		t.Fatalf("agent.get self: %v", err)
 	}
 	// The same post again is the same receipt (request_id).
-	again, err := bearer(s, tokens.AccessToken, Command{Operation: "post", Room: "hex-table", Text: "my move", RequestID: "p1"})
+	again, err := bearer(s, tokens.AccessToken, Command{Operation: "post", Room: appTable, Text: "my move", RequestID: "p1"})
 	if err == nil && again.Receipt.ID != res.Receipt.ID {
 		t.Fatalf("retry made a second post")
 	}
 	// Refused: outside the scopes, and every key or identity operation.
 	for name, c := range map[string]Command{
 		"another room":    {Operation: "post", Room: "lobby", Text: "hi", RequestID: "x1"},
-		"a handle":        {Operation: "post", Room: "hex-table", Text: "hi", Handle: "taken-over", RequestID: "x2"},
+		"a handle":        {Operation: "post", Room: appTable, Text: "hi", Handle: "taken-over", RequestID: "x2"},
 		"another agent":   {Operation: "agent.get", Target: keyID(a.app)},
 		"wake-ups":        {Operation: "service.call", Target: "wakeup", Data: `{"schema":1,"method":"list"}`, RequestID: "x3"},
 		"rotate":          {Operation: "agent.rotate", Target: strings.Repeat("A", 43), RequestID: "x4"},
@@ -216,7 +221,7 @@ func TestAppTokenScopesAndProvenance(t *testing.T) {
 	}
 	// Expiry: past exp the token is refused at the door and in the command.
 	s.now = func() time.Time { return time.Unix(testTime+OAuthJWTAccessSeconds, 0) }
-	if _, err := bearer(s, tokens.AccessToken, Command{Operation: "room.get", Room: "hex-table"}); appErrCode(err) != "invalid_token" {
+	if _, err := bearer(s, tokens.AccessToken, Command{Operation: "room.get", Room: appTable}); appErrCode(err) != "invalid_token" {
 		t.Fatalf("expired token: %s", appErrCode(err))
 	}
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
@@ -229,10 +234,10 @@ func TestAppTokenScopesAndProvenance(t *testing.T) {
 	if err != nil || narrow.Scope != "identity" {
 		t.Fatalf("narrow refresh: %+v %v", narrow, err)
 	}
-	if _, err := bearer(s, tokens.AccessToken, Command{Operation: "room.get", Room: "hex-table"}); appErrCode(err) != "invalid_token" {
+	if _, err := bearer(s, tokens.AccessToken, Command{Operation: "room.get", Room: appTable}); appErrCode(err) != "invalid_token" {
 		t.Fatalf("rotated access token: %s", appErrCode(err))
 	}
-	if _, err := bearer(s, narrow.AccessToken, Command{Operation: "room.get", Room: "hex-table"}); appErrCode(err) != "insufficient_scope" {
+	if _, err := bearer(s, narrow.AccessToken, Command{Operation: "room.get", Room: appTable}); appErrCode(err) != "insufficient_scope" {
 		t.Fatalf("narrowed token in a room: %s", appErrCode(err))
 	}
 	// Userinfo and introspection.
@@ -280,14 +285,14 @@ func TestAppTokenDMScope(t *testing.T) {
 	friend, crowd := keyFor(185), keyFor(186)
 	register(t, s, friend)
 	register(t, s, crowd)
-	run(t, s, signed(a.app, Command{Operation: "room.create", Room: "hex-dm", Visibility: "private", Members: []string{account, keyID(friend)}, RequestID: "dm"}))
-	run(t, s, signed(a.app, Command{Operation: "room.create", Room: "hex-group", Visibility: "private", Members: []string{account, keyID(friend), keyID(crowd)}, RequestID: "grp"}))
-	if _, err := bearer(s, tokens.AccessToken, Command{Operation: "post", Room: "hex-dm", Text: "psst", Visibility: "private", RequestID: "d1"}); err != nil {
+	run(t, s, signed(a.app, Command{Operation: "room.create", Room: appTable + "-dm", Visibility: "private", Members: []string{account, keyID(friend)}, RequestID: "dm"}))
+	run(t, s, signed(a.app, Command{Operation: "room.create", Room: appTable + "-group", Visibility: "private", Members: []string{account, keyID(friend), keyID(crowd)}, RequestID: "grp"}))
+	if _, err := bearer(s, tokens.AccessToken, Command{Operation: "post", Room: appTable + "-dm", Text: "psst", Visibility: "private", RequestID: "d1"}); err != nil {
 		t.Fatalf("dm post: %v", err)
 	}
 	for room, c := range map[string]Command{
-		"three people": {Operation: "post", Room: "hex-group", Text: "hi", Visibility: "private", RequestID: "d2"},
-		"public room":  {Operation: "post", Room: "hex-table", Text: "hi", RequestID: "d3"},
+		"three people": {Operation: "post", Room: appTable + "-group", Text: "hi", Visibility: "private", RequestID: "d2"},
+		"public room":  {Operation: "post", Room: appTable, Text: "hi", RequestID: "d3"},
 	} {
 		if _, err := bearer(s, tokens.AccessToken, c); appErrCode(err) != "insufficient_scope" {
 			t.Errorf("dm scope, %s: %s", room, appErrCode(err))
@@ -305,7 +310,7 @@ func TestTokenExchangeOnlyNarrows(t *testing.T) {
 		t.Fatalf("subject claims %v", claims)
 	}
 	// Not good on SwarmMemo itself: it is for the app's server.
-	if _, err := bearer(s, subject.AccessToken, Command{Operation: "room.get", Room: "hex-table"}); appErrCode(err) != "invalid_token" {
+	if _, err := bearer(s, subject.AccessToken, Command{Operation: "room.get", Room: appTable}); appErrCode(err) != "invalid_token" {
 		t.Fatalf("subject token on SwarmMemo: %s", appErrCode(err))
 	}
 	req := func(actor, scope string) OAuthExchangeRequest {
@@ -354,11 +359,11 @@ func TestTokenExchangeOnlyNarrows(t *testing.T) {
 		t.Fatalf("another app's exchange: %s", appErrCode(err))
 	}
 	// The app posts as the player, and the post says the app relayed it.
-	res, err := bearer(s, got.AccessToken, Command{Operation: "post", Room: "hex-table", Text: "gg", RequestID: "ex1"})
+	res, err := bearer(s, got.AccessToken, Command{Operation: "post", Room: appTable, Text: "gg", RequestID: "ex1"})
 	if err != nil {
 		t.Fatalf("exchanged post: %v", err)
 	}
-	m := run(t, s, Command{Operation: "message.get", MessageID: res.Receipt.ID}).Messages[0]
+	m := run(t, s, signedNow(s, a.app, Command{Operation: "message.get", MessageID: res.Receipt.ID})).Messages[0]
 	if m.Author != account || m.Via != "app:"+keyID(a.app) {
 		t.Fatalf("exchanged post author %s via %s", m.Author, m.Via)
 	}
@@ -370,7 +375,7 @@ func TestTokenExchangeOnlyNarrows(t *testing.T) {
 	if err = s.OAuthRevoke(testContext, subject.RefreshToken, "", testTime); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: "hex-table"}); appErrCode(err) != "invalid_token" {
+	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: appTable}); appErrCode(err) != "invalid_token" {
 		t.Fatalf("exchanged token after its sign-in ended: %s", appErrCode(err))
 	}
 }
@@ -501,11 +506,11 @@ func TestRetiredClientEndsExchangedTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
-	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: "hex-table"}); err != nil {
+	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: appTable}); err != nil {
 		t.Fatalf("exchanged token: %v", err)
 	}
 	run(t, s, signed(a.app, Command{Operation: "oauth.client.retire", Target: a.client.ID, RequestID: "retire"}))
-	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: "hex-table"}); appErrCode(err) != "invalid_token" {
+	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: appTable}); appErrCode(err) != "invalid_token" {
 		t.Fatalf("exchanged token after its client retired: %s", appErrCode(err))
 	}
 	if in, _ := s.OAuthIntrospection(testContext, got.AccessToken, testTime); in["active"] != false {

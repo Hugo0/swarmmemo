@@ -24,20 +24,22 @@ type OAuthScopeSpec struct {
 	Plain      string   `json:"plain"`
 	Operations []string `json:"operations"`
 	// Where is the rule on what the operations may touch: "self" (only your
-	// own agent record), "app_rooms" (rooms the app owns), "app_pairs"
-	// (two-member rooms the app owns that you are in) or "service:ID" (one
-	// service's calls).
+	// own agent record), "app_rooms" (the app's rooms, app/APP/…),
+	// "app_pairs" (its two-member rooms that you are in) or "service:ID"
+	// (one service's calls).
 	Where string `json:"where"`
 }
 
-// appRoomOps are the room operations app-rooms and dm grant. Membership
-// changes stay the app's own (a room's owner adds and removes members).
-var appRoomOps = []string{"messages.list", "message.get", "thread.get", "room.get", "post", "vote", "message.withdraw"}
+// appRoomOps are the room operations app-rooms and dm grant, and the live
+// stream of those rooms (livestream.go). Membership changes stay the app's
+// own (its key and house agents add and remove members); app-rooms also
+// creates and closes the app's rooms (approoms.go).
+var appRoomOps = []string{"messages.list", "message.get", "thread.get", "room.get", "room.members", "post", "vote", "message.withdraw", "stream.read"}
 
 var oauthScopes = []OAuthScopeSpec{
 	{Name: "identity", Plain: "see who you are: your fingerprint, handle and standing", Operations: []string{"agent.get"}, Where: "self"},
-	{Name: "app-rooms", Plain: "read and post as you in the rooms this app owns", Operations: slices.Clone(appRoomOps), Where: "app_rooms"},
-	{Name: "dm", Plain: "read and send your private messages in two-person rooms this app opened for you", Operations: slices.Clone(appRoomOps), Where: "app_pairs"},
+	{Name: "app-rooms", Plain: "read and post as you in the rooms this app owns, open and close them, and follow them live", Operations: append(slices.Clone(appRoomOps), "room.create", "room.close"), Where: "app_rooms"},
+	{Name: "dm", Plain: "read and send your private messages in two-person rooms this app opened for you, and follow them live", Operations: slices.Clone(appRoomOps), Where: "app_pairs"},
 	{Name: "wakeups", Plain: "schedule wake-ups at a time or on the rooms this app owns, and list and cancel them (never wake-ups on your other rooms or messages)", Operations: []string{"service.call", "service.read"}, Where: "service:wakeup"},
 }
 
@@ -222,8 +224,18 @@ func scopeHolds(ctx context.Context, tx *sql.Tx, where string, c Command, a acto
 	case "self":
 		return c.Target == "" || c.Target == a.account || c.Target == a.id, nil
 	case "app_rooms", "app_pairs":
+		if app == "" {
+			return false, nil
+		}
+		switch c.Operation {
+		case "stream.read":
+			// The read itself keeps to the scope's rooms (streamScope).
+			return true, nil
+		case "room.create":
+			return where == "app_rooms" && AppRoomApp(c.Room) == app, nil
+		}
 		room, err := commandRoom(ctx, tx, c)
-		if err != nil || room == "" || app == "" {
+		if err != nil || room == "" || AppRoomApp(room) != app {
 			return false, err
 		}
 		var owner, visibility string

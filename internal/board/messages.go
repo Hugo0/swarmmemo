@@ -55,7 +55,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if c.Handle != "" && !handleRE.MatchString(c.Handle) {
 		return Result{}, problem(400, "invalid_handle", fmt.Sprintf("A handle is 1–%d ASCII letters, digits, underscores or hyphens, starting with a letter or digit.", HandleMaxChars))
 	}
-	if c.To != "" && !fingerprintRE.MatchString(c.To) {
+	if c.To != "" && !fingerprintRE.MatchString(c.To) && !maskAliasRE.MatchString(c.To) {
 		return Result{}, errRecipient()
 	}
 	if len(c.ReplyTo) > 64 {
@@ -138,6 +138,11 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if c.Visibility != "" && c.Visibility != r.Visibility {
 		return Result{}, problem(409, "visibility_mismatch", "Requested visibility does not match the existing room; this request has not been published.")
 	}
+	// C664: in a masked room a member addresses another by alias, which
+	// resolves to that member's key here (approoms.go).
+	if c.To, err = s.maskedRecipient(ctx, tx, r, a, c.To, now); err != nil {
+		return Result{}, err
+	}
 	// App records live in a room a key owns (the app's own, made with
 	// room.create), never in the operator's shared rooms, where unseen
 	// records would only crowd the posts people read.
@@ -217,6 +222,14 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 				return Result{}, err
 			}
 		}
+		// C664: a room's slow mode, scaled by its member count (approoms.go).
+		if err = checkSlowMode(ctx, tx, r, a, false, now); err != nil {
+			return Result{}, err
+		}
+	} else if err = checkSlowMode(ctx, tx, r, a, true, now); err != nil {
+		// Edits keep their own slow-mode clock: a typo fix right after a
+		// post is fine, a stream of edits is not.
+		return Result{}, err
 	}
 	// C599: the same reply to the same message again within the window is
 	// refused before any charge (replyrepeat.go).
@@ -466,6 +479,7 @@ func scanEvent(row scanner) (Message, error) {
 	err := row.Scan(&e.ID, &e.internalSequence, &e.Sequence, &e.Room, &e.Page, &e.Text, &e.Kind, &e.Author, &e.Handle, &e.PublicKey, &e.Signature, &e.SignedPayload, &e.CreatedAt, &e.Hash, &e.ReplyTo, &e.To, &e.Hidden, &e.Reason, &e.Visibility, &e.DelegationID, &e.Format, &e.Supersedes, &e.origin, &e.SupersededBy, &e.HiddenBy, &e.Via, &forward, &e.Custody, &e.AuthorHandle, &account, &principal)
 	e.Forwarded = parseForwarded(forward)
 	e.name(account)
+	e.account = account
 	e.Principal = parsePrincipal(e, principal)
 	e.Via = messageVia(e.Via, e.Forwarded)
 	e.Type = "message"
@@ -530,6 +544,13 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		// The exact match also supports mail addressed before key registration.
 		where = append(where, "(e.recipient=? OR e.recipient IN (SELECT id FROM identities WHERE account=(SELECT account FROM identities WHERE id=?)))")
 		args = append(args, c.To, c.To)
+	}
+	if c.To != "" || c.Target != "" {
+		// Who wrote or was sent a post in a masked room stays its alias
+		// until the room closes: an author or recipient filter never
+		// reaches one (approoms.go).
+		where = append(where, notMaskedRoom)
+		args = append(args, now)
 	}
 	if c.Kind != "" {
 		if !slug.MatchString(c.Kind) {

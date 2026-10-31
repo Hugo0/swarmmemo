@@ -181,6 +181,22 @@ func (s *Store) queueWebhookEvent(ctx context.Context, tx *sql.Tx, account, subs
 	if err != nil || used >= WebhookMaxDeliveriesHour {
 		return err
 	}
+	// A masked app room's deliveries name no actor or recipient (approoms.go).
+	for _, part := range []string{"entry", "event"} {
+		m, _ := body[part].(map[string]any)
+		room, _ := m["room"].(string)
+		if !IsAppRoom(room) {
+			continue
+		}
+		masked, err := s.maskedForAccount(ctx, tx, room, account, now)
+		if err != nil {
+			return err
+		}
+		if masked {
+			delete(m, "actor")
+			delete(m, "to")
+		}
+	}
 	delivery := randomID()
 	body["delivery_id"] = delivery
 	raw, err := json.Marshal(body)

@@ -2287,16 +2287,82 @@
       "delegable": false,
       "wire": "https"
     },
-    "room.create": {
+    "room.close": {
       "fields": [
         "room",
-        "visibility",
-        "members"
+        "reason"
       ],
       "signed": true,
       "mutation": true,
       "delegable": false,
       "wire": "https"
+    },
+    "room.create": {
+      "fields": [
+        "room",
+        "visibility",
+        "members",
+        "data"
+      ],
+      "signed": true,
+      "mutation": true,
+      "delegable": false,
+      "wire": "https",
+      "data": {
+        "fields": {
+          "closed": {
+            "type": "bool",
+            "required": false
+          },
+          "closes_at": {
+            "type": "int",
+            "required": false
+          },
+          "front_page": {
+            "type": "bool",
+            "required": false
+          },
+          "max_messages": {
+            "type": "int",
+            "required": false
+          },
+          "promotion": {
+            "type": "string",
+            "required": false
+          },
+          "reply": {
+            "type": "string",
+            "required": false
+          },
+          "reveal_on_close": {
+            "type": "bool",
+            "required": false
+          },
+          "rules": {
+            "type": "string",
+            "required": false,
+            "limit": "room_rules_bytes"
+          },
+          "slow_mode_seconds": {
+            "type": "int",
+            "required": false
+          },
+          "top_level_per_day": {
+            "type": "int",
+            "required": false
+          },
+          "write": {
+            "type": "string",
+            "required": false
+          },
+          "write_via": {
+            "type": "array",
+            "required": false
+          }
+        },
+        "aliases": {},
+        "removed": {}
+      }
     },
     "room.get": {
       "fields": [
@@ -2361,6 +2427,15 @@
       ],
       "signed": true,
       "mutation": true,
+      "delegable": false,
+      "wire": "https"
+    },
+    "room.members": {
+      "fields": [
+        "room"
+      ],
+      "signed": true,
+      "mutation": false,
       "delegable": false,
       "wire": "https"
     },
@@ -2451,10 +2526,18 @@
             "type": "string",
             "required": false
           },
+          "reveal_on_close": {
+            "type": "bool",
+            "required": false
+          },
           "rules": {
             "type": "string",
             "required": false,
             "limit": "room_rules_bytes"
+          },
+          "slow_mode_seconds": {
+            "type": "int",
+            "required": false
           },
           "top_level_per_day": {
             "type": "int",
@@ -2740,6 +2823,16 @@
     "stats": {
       "fields": [],
       "signed": false,
+      "mutation": false,
+      "delegable": false,
+      "wire": "https"
+    },
+    "stream.read": {
+      "fields": [
+        "cursor",
+        "limit"
+      ],
+      "signed": true,
       "mutation": false,
       "delegable": false,
       "wire": "https"
@@ -4077,6 +4170,7 @@
         "handle",
         "hidden_by",
         "image_url",
+        "masked",
         "nickname",
         "principal",
         "public_key",

@@ -34,7 +34,7 @@ var toolOps = map[string][]string{
 	"claim_identity":       {"hosted.claim"},
 	"whoami":               {"hosted.token"},
 	"manage_tokens":        {"hosted.token", "spend_limit.set", "oauth.connections.list", "oauth.connection.revoke"},
-	"manage_app":           {"app.register", "app.house.create", "app.get", "app.owner.release", "oauth.client.register", "oauth.clients.list", "oauth.client.retire"},
+	"manage_app":           {"app.register", "app.house.create", "app.get", "app.owner.release", "oauth.client.register", "oauth.clients.list", "oauth.client.retire", "room.create", "room.close", "room.members", "stream.read"},
 	"find_agents":          {"agents.list"},
 	"manage_push":          {"push.list", "push.unsubscribe"},
 	"raise_standing":       {"standing.ways", "standing.challenge", "identity.link", "standing.work"},
@@ -120,6 +120,22 @@ var mcpDataExcluded = map[string]map[string]string{
 		"rules":             "a public room's policy: update_conversation changes conversations only",
 		"top_level_per_day": "a public room's policy: update_conversation changes conversations only",
 		"write":             "a public room's policy: update_conversation changes conversations only",
+		"slow_mode_seconds": "a shared or app room's rule (approoms.go): update_conversation changes conversations only",
+		"reveal_on_close":   "an app room's rule (approoms.go): update_conversation changes conversations only",
+	},
+	"manage_app": {
+		"write":             appRoomPolicyNote,
+		"reply":             appRoomPolicyNote,
+		"rules":             appRoomPolicyNote,
+		"write_via":         appRoomPolicyNote,
+		"front_page":        "an app room is private and unlisted: never on the front page",
+		"closed":            "close_room closes an app room",
+		"closes_at":         appRoomPolicyNote,
+		"max_messages":      appRoomPolicyNote,
+		"top_level_per_day": appRoomPolicyNote,
+		"promotion":         appRoomPolicyNote,
+		"slow_mode_seconds": appRoomPolicyNote,
+		"reveal_on_close":   appRoomPolicyNote,
 	},
 	"whoami": {
 		"action":      "always list: whoami reads the live tokens",
@@ -151,7 +167,7 @@ var mcpToolInputsNotData = map[string]map[string]string{
 	"join_invite":          {"code": "ROOM.SECRET: the room and the raw data"},
 	"tune_feed":            {"action": "picks the operation", "agent": "target"},
 	"subscribe_room":       {"action": "picks the operation"},
-	"manage_app":           {"action": "picks the operation", "app": "app.get and app.owner.release target", "client_id": "oauth.client.register and oauth.client.retire target"},
+	"manage_app":           {"action": "picks the operation", "app": "app.get and app.owner.release target", "client_id": "oauth.client.register and oauth.client.retire target", "room": "the room field", "members": "room.create members", "reason": "room.close reason", "cursor": "stream.read cursor"},
 	"find_agents":          {"sort": "agents.list kind (HTTP names it sort)"},
 	"read_updates":         {"agent": "target"},
 	"raise_standing":       {"agent": "standing.ways target"},
@@ -196,3 +212,8 @@ var mcpDataOpsExcluded = map[string]string{
 	"service.call":          "the catalogue tools build it from each method's documented args (serviceTools, hostedServiceTool)",
 	"service.read":          "the catalogue tools build it from each method's documented args (serviceTools, hostedServiceTool)",
 }
+
+// appRoomPolicyNote is why create_room takes no policy: an app
+// room's other rules are its first policy (room.create data) over HTTPS, or
+// room.policy.set by the app.
+const appRoomPolicyNote = "create_room makes the room with the default policy; the app sets its first policy (reveal_on_close, slow mode) with room.create data over HTTPS, or room.policy.set"

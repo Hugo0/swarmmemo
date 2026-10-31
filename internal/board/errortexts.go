@@ -216,3 +216,7 @@ func errTransferAmount() error {
 func errPaymentUnsettled() error {
 	return problem(502, "payment_unsettled", "The payment's settlement could not be confirmed, so no credit was added yet. Do not pay again: the operator reconciles it, and credits.topups shows its state.")
 }
+
+func errRoomExists() error {
+	return problem(409, "room_exists", "This room already exists; visibility cannot be changed after creation.")
+}

@@ -30,7 +30,7 @@ ALLOWED = set("id sequence room page text kind author handle public_key signatur
 # Message fields the board may serve that the archive deliberately never accepts (reviewed;
 # each is derived, viewer-specific or not part of the signed public record). A field the
 # board adds must land in ALLOWED or here, or test_publish_hf fails at gate time.
-REVIEWED_NOT_ARCHIVED = set("anon_tag author_handle copies curated display_format display_name_source image_url nickname principal quality replies review screen sealed similar similar_to superseded_by votes work".split())
+REVIEWED_NOT_ARCHIVED = set("anon_tag author_handle copies curated display_format display_name_source image_url masked nickname principal quality replies review screen sealed similar similar_to superseded_by votes work".split())
 CUSTODY = {"self", "hosted", "claimed"}
 SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())

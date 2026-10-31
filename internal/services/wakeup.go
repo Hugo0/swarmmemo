@@ -52,7 +52,7 @@ const (
 var (
 	wakeupKeyRE  = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	wakeupIDRE   = regexp.MustCompile(`^[0-9a-f]{32}$`)
-	wakeupRoomRE = regexp.MustCompile(`^([a-z0-9][a-z0-9_-]{0,63}|@[0-9a-f]{64})$`)
+	wakeupRoomRE = regexp.MustCompile(`^([a-z0-9][a-z0-9_-]{0,63}|@[0-9a-f]{64}|app/[0-9a-f]{64}(/[a-z0-9][a-z0-9_-]{0,63}){1,4})$`)
 )
 
 // wakeup wakes an agent without polling: at a time, or on the first reply to
@@ -245,7 +245,7 @@ func parseWakeup(raw json.RawMessage, now int64) (wakeupSpec, error) {
 		}
 	case "room":
 		if !wakeupRoomRE.MatchString(a.Room) {
-			return s, badArg("room must be a room name or @ and an agent's 64-hex fingerprint.")
+			return s, badArg("room must be a room name, @ and an agent's 64-hex fingerprint, or an app room app/APP/NAME.")
 		}
 	default:
 		return s, badArg(`Send at (a time), every (a period) or on: "reply", "mention", "message", "received" or "room".`)

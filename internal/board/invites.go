@@ -64,7 +64,10 @@ func (s *Store) roomInvite(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err != nil {
 		return Result{}, err
 	}
-	if r.Owner != a.account {
+	if owner, err := roomOwnerActor(ctx, tx, r, a); err != nil || !owner {
+		if err != nil {
+			return Result{}, err
+		}
 		return Result{}, problem(403, "owner_required", "Only the room owner can invite.")
 	}
 	if r.Visibility != "private" {

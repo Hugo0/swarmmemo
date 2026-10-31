@@ -191,7 +191,7 @@ func (s *Server) bearerCommand(w http.ResponseWriter, r *http.Request, cmd board
 		return
 	}
 	if !s.hostedLimiter.Admit("oauth:" + claims.Session) {
-		writeError(w, &board.Error{Status: 429, Code: "request_rate", Message: "One sign-in makes up to 120 calls a minute; wait briefly before retrying.", RetryAfter: 1})
+		writeError(w, errSignInRate())
 		return
 	}
 	ctx := board.WithBearerToken(board.WithVia(r.Context(), "command"), token)

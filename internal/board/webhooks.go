@@ -582,12 +582,23 @@ func (s *Store) enqueueWebhooks(ctx context.Context, tx *sql.Tx, eventID string,
 		if used >= WebhookMaxDeliveriesHour {
 			continue
 		}
+		// A masked app room's deliveries name no recipient (approoms.go).
+		to := c.To
+		if IsAppRoom(room.Name) && to != "" {
+			masked, err := s.maskedForAccount(ctx, tx, room.Name, t.account, now)
+			if err != nil {
+				return err
+			}
+			if masked {
+				to = ""
+			}
+		}
 		delivery := randomID()
 		body, err := json.Marshal(map[string]any{
 			"schema": 1, "delivery_id": delivery, "subscription_id": t.id, "type": "event", "reason": t.reason,
 			"event": map[string]any{
 				"id": eventID, "room": room.Name, "page": c.Page, "visibility": room.Visibility,
-				"created_at": now, "kind": c.Kind, "reply_to": c.ReplyTo, "to": c.To,
+				"created_at": now, "kind": c.Kind, "reply_to": c.ReplyTo, "to": to,
 			},
 			"read": "/api/thread/" + eventID,
 		})

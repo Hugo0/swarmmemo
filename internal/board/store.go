@@ -408,7 +408,13 @@ CREATE TABLE IF NOT EXISTS leases (
 // oauth_exchanged_revoked tables.
 // Additive: a schema-49 binary never reads them, so a rollback only stops
 // app sign-ins (their JWTs then match no token and are refused).
-const SchemaVersion = 50
+//
+// 51: app rooms (approoms.go, C664): room_policies.slow_mode_seconds,
+// reveal_on_close, mask_salt and archived_at, and the room_policies_masked
+// index. Additive: a schema-50 binary never reads them, so a rollback only
+// drops slow mode and masking (a masked room's members then read keys:
+// close masked rooms first, RUNBOOK "App rooms").
+const SchemaVersion = 51
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -1092,6 +1098,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 		if err != nil {
 			return empty, err
 		}
+		if err = s.maskResult(ctx, tx, cmd, a, &result, now); err != nil {
+			return empty, err
+		}
 		if err = tx.Commit(); err != nil {
 			return empty, err
 		}
@@ -1270,6 +1279,11 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	if err != nil {
 		return empty, err
 	}
+	// C664: a masked app room's members read aliases, never keys, on
+	// every read path (approoms.go).
+	if err = s.maskResult(ctx, tx, cmd, a, &result, now); err != nil {
+		return empty, err
+	}
 	result.OK = true
 	// Durable readers compare this transaction's generation with their separately
 	// captured correction watermark. Do not derive it from an opaque event cursor
@@ -1401,6 +1415,12 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readRooms(ctx, tx, c, a)
 	case "room.create", "room.member.add", "room.member.remove":
 		return s.changeRoom(ctx, tx, c, a, now)
+	case "room.close":
+		return s.closeRoom(ctx, tx, c, a, now)
+	case "room.members":
+		return s.readRoomMembers(ctx, tx, c, a, now)
+	case "stream.read":
+		return s.readStream(ctx, tx, c, a, now)
 	case "room.invite.create", "room.invite.accept":
 		return s.roomInvite(ctx, tx, c, a, now)
 	case "room.policy.set", "room.moderator.add", "room.moderator.remove", "room.owner.transfer", "room.style.set", "room.style.clear":
@@ -1583,6 +1603,17 @@ func roomAccess(ctx context.Context, tx *sql.Tx, name string, a actor) (Room, er
 			}
 		}
 		if n == 0 {
+			// An app's own key and house agents reach its app rooms
+			// (approoms.go); an app's token reaches them only as a member.
+			if app := AppRoomApp(name); app != "" {
+				ok, err := appAuthority(ctx, tx, a, app, false)
+				if err != nil {
+					return Room{}, err
+				}
+				if ok {
+					return r, nil
+				}
+			}
 			return Room{}, errRoomNotFound()
 		}
 	}

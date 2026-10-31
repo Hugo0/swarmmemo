@@ -72,7 +72,7 @@ var conversationRoomRE = regexp.MustCompile(`^~[a-z2-7]{26}$`)
 // "~" + 26 base32 characters. Only slugs can ever be created as global
 // rooms; conversations open only through conversation.open.
 func ValidRoomName(name string) bool {
-	return slug.MatchString(name) || personalRoomRE.MatchString(name) || conversationRoomRE.MatchString(name)
+	return slug.MatchString(name) || personalRoomRE.MatchString(name) || conversationRoomRE.MatchString(name) || appRoomRE.MatchString(name)
 }
 
 // IsConversationRoom reports whether name is in the conversation namespace.
@@ -99,6 +99,10 @@ func PersonalOwner(room string) (string, bool) {
 // (checkTopLevelPerDay; 0 is off). Promotion is "allow" (the default) or
 // "moderate": with moderation on, a public post there that the screen finds
 // is mainly an advertisement is hidden with a public reason (promotion.go).
+// SlowModeSeconds and RevealOnClose are room rules of C664 (approoms.go):
+// the wait between one member's posts, scaled by the member count, and an
+// app room's masked membership; ArchivedAt is when room.close archived the
+// room (0: never).
 type RoomPolicy struct {
 	Write          string   `json:"write"`
 	Reply          string   `json:"reply"`
@@ -110,8 +114,14 @@ type RoomPolicy struct {
 	MaxMessages    int64    `json:"max_messages,omitempty"`
 	TopLevelPerDay int64    `json:"top_level_per_day,omitempty"`
 	Promotion      string   `json:"promotion,omitempty"`
-	UpdatedAt      int64    `json:"updated_at,omitempty"`
-	frontPage      string   // stored: "", "on" or "off"
+	// Opt-in fields (C664): absent unless set, so shipped clients that
+	// refuse extra keys never see them on an ordinary room.
+	SlowModeSeconds int64  `json:"slow_mode_seconds,omitempty"`
+	RevealOnClose   bool   `json:"reveal_on_close,omitempty"`
+	ArchivedAt      int64  `json:"archived_at,omitempty"`
+	UpdatedAt       int64  `json:"updated_at,omitempty"`
+	frontPage       string // stored: "", "on" or "off"
+	maskSalt        string // reveal_on_close's per-room alias key, never served
 }
 
 // ModerationEntry is one public, per-room governance record.
@@ -139,11 +149,11 @@ func defaultPolicy(room string) RoomPolicy {
 	return RoomPolicy{Write: "open", Reply: "anyone", FrontPage: frontPageDefault(room), Promotion: PromotionAllow}
 }
 
-func loadPolicy(ctx context.Context, tx *sql.Tx, room string) (RoomPolicy, error) {
+func loadPolicy(ctx context.Context, tx queryer, room string) (RoomPolicy, error) {
 	p := defaultPolicy(room)
 	var writeVia string
-	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day,promotion FROM room_policies WHERE room=?", room).
-		Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia, &p.frontPage, &p.Closed, &p.ClosesAt, &p.MaxMessages, &p.TopLevelPerDay, &p.Promotion)
+	err := tx.QueryRowContext(ctx, "SELECT write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day,promotion,slow_mode_seconds,reveal_on_close,mask_salt,archived_at FROM room_policies WHERE room=?", room).
+		Scan(&p.Write, &p.Reply, &p.Rules, &p.UpdatedAt, &writeVia, &p.frontPage, &p.Closed, &p.ClosesAt, &p.MaxMessages, &p.TopLevelPerDay, &p.Promotion, &p.SlowModeSeconds, &p.RevealOnClose, &p.maskSalt, &p.ArchivedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
@@ -154,7 +164,7 @@ func loadPolicy(ctx context.Context, tx *sql.Tx, room string) (RoomPolicy, error
 
 // roomClosed reports whether p takes no posts at now.
 func roomClosed(p RoomPolicy, now int64) bool {
-	return p.Closed || (p.ClosesAt > 0 && now >= p.ClosesAt)
+	return p.Closed || p.ArchivedAt > 0 || (p.ClosesAt > 0 && now >= p.ClosesAt)
 }
 
 // checkRoomLimits refuses a post the room's limits do not take: none in a
@@ -167,6 +177,9 @@ func checkRoomLimits(ctx context.Context, tx *sql.Tx, room string, original bool
 		return err
 	}
 	if roomClosed(p, now) {
+		if p.ArchivedAt > 0 {
+			return problem(409, "room_closed", "This room was closed with room.close: it is archived, stays readable and takes no posts and no edits; nothing in it was deleted. This request has not been published.")
+		}
 		return problem(409, "room_closed", "This room is closed: it stays readable but takes no posts and no edits (a closed room is frozen by design); this request has not been published. Its owner (either member of a DM) reopens it with room.policy.set.")
 	}
 	if !original || p.MaxMessages == 0 {
@@ -185,12 +198,22 @@ func checkRoomLimits(ctx context.Context, tx *sql.Tx, room string, original bool
 
 // roomRole is the caller's standing in a room: owner, moderator, member or
 // nothing. Anonymous callers have none. A delegated key acts for its parent.
-func roomRole(ctx context.Context, tx *sql.Tx, r Room, a actor) (string, error) {
+func roomRole(ctx context.Context, tx queryer, r Room, a actor) (string, error) {
 	if !a.signed {
 		return "", nil
 	}
 	if r.Owner != "" && r.Owner == a.account {
 		return "owner", nil
+	}
+	// An app's own key and its house agents own its app rooms (approoms.go).
+	if app := AppRoomApp(r.Name); app != "" {
+		ok, err := appAuthority(ctx, tx, a, app, false)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return "owner", nil
+		}
 	}
 	var moderator, member int
 	if err := tx.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM room_moderators WHERE room=? AND account=?),(SELECT count(*) FROM members WHERE room=? AND account=?)", r.Name, a.account, r.Name, a.account).Scan(&moderator, &member); err != nil {
@@ -285,6 +308,12 @@ func openPersonalRoom(ctx context.Context, tx *sql.Tx, room string, a actor, now
 var roomPolicyColumns = []struct{ name, definition string }{
 	{"top_level_per_day", "INTEGER NOT NULL DEFAULT 0"},
 	{"promotion", "TEXT NOT NULL DEFAULT 'allow'"},
+	// Schema 51 (C664, approoms.go): slow mode, masked membership and its
+	// alias key, and room.close's archive time.
+	{"slow_mode_seconds", "INTEGER NOT NULL DEFAULT 0"},
+	{"reveal_on_close", "INTEGER NOT NULL DEFAULT 0"},
+	{"mask_salt", "TEXT NOT NULL DEFAULT ''"},
+	{"archived_at", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // migrateRoomPolicyColumns adds roomPolicyColumns, keyed on the columns.
@@ -300,7 +329,9 @@ func migrateRoomPolicyColumns(tx *sql.Tx) error {
 			}
 		}
 	}
-	return nil
+	// The masked rooms an author or recipient filter leaves out (approoms.go).
+	_, err := tx.Exec("CREATE INDEX IF NOT EXISTS room_policies_masked ON room_policies(room) WHERE reveal_on_close=1")
+	return err
 }
 
 // migrateHiddenBy adds events.hidden_by, keyed on the column. Every removal
@@ -403,7 +434,16 @@ func (s *Store) changeRoomGovernance(ctx context.Context, tx *sql.Tx, c Command,
 		// (room.member.*, conversation.respond, invites) and so is its owner.
 		return Result{}, problem(409, "conversation_room", "A conversation's room takes room.policy.set (its limits and channels) and room.member.add/remove; moderators, styles and ownership are for shared rooms.")
 	}
-	if (r.Owner == "" || r.Owner != a.account) && !dmMember {
+	appOwner := false
+	if AppRoomApp(r.Name) != "" {
+		if appOwner, err = appAuthority(ctx, tx, a, AppRoomApp(r.Name), false); err != nil {
+			return Result{}, err
+		}
+		if c.Operation == "room.owner.transfer" {
+			return Result{}, problem(409, "owner_required", "An app room belongs to its app (app/APP/…) and is never transferred.")
+		}
+	}
+	if (r.Owner == "" || r.Owner != a.account) && !dmMember && !appOwner {
 		// A moderator may take the room off the front page, and nothing else.
 		role, err := roomRole(ctx, tx, r, a)
 		if err != nil {
@@ -440,13 +480,11 @@ func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, operato
 	case "room.style.set", "room.style.clear":
 		return applyStyle(ctx, tx, c, r, now)
 	case "room.policy.set":
-		p, err := parsePolicy(ctx, tx, r.Name, c.Data, operator)
+		p, err := parsePolicy(ctx, tx, r.Name, c.Data, operator, now)
 		if err != nil {
 			return logEntry{}, Result{}, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day,promotion) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
- ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at,write_via=excluded.write_via,front_page=excluded.front_page,
- closed=excluded.closed,closes_at=excluded.closes_at,max_messages=excluded.max_messages,top_level_per_day=excluded.top_level_per_day,promotion=excluded.promotion`, r.Name, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia), p.frontPage, p.Closed, p.ClosesAt, p.MaxMessages, p.TopLevelPerDay, p.Promotion); err != nil {
+		if err = storePolicy(ctx, tx, r.Name, p, now); err != nil {
 			return logEntry{}, Result{}, err
 		}
 		p.UpdatedAt = now
@@ -506,6 +544,17 @@ func applyGovernance(ctx context.Context, tx *sql.Tx, c Command, r Room, operato
 	return logEntry{}, Result{}, ErrUnknownOperation()
 }
 
+// storePolicy writes p as room's policy row: the one write of every
+// setting (room.policy.set, room.create's first policy, room.close).
+func storePolicy(ctx context.Context, tx *sql.Tx, room string, p RoomPolicy, now int64) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO room_policies(room,write_policy,reply_policy,rules,updated_at,write_via,front_page,closed,closes_at,max_messages,top_level_per_day,promotion,slow_mode_seconds,reveal_on_close,mask_salt,archived_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ ON CONFLICT(room) DO UPDATE SET write_policy=excluded.write_policy,reply_policy=excluded.reply_policy,rules=excluded.rules,updated_at=excluded.updated_at,write_via=excluded.write_via,front_page=excluded.front_page,
+ closed=excluded.closed,closes_at=excluded.closes_at,max_messages=excluded.max_messages,top_level_per_day=excluded.top_level_per_day,promotion=excluded.promotion,
+ slow_mode_seconds=excluded.slow_mode_seconds,reveal_on_close=excluded.reveal_on_close,mask_salt=excluded.mask_salt,archived_at=excluded.archived_at`,
+		room, p.Write, p.Reply, p.Rules, now, encodeWriteVia(p.WriteVia), p.frontPage, p.Closed, p.ClosesAt, p.MaxMessages, p.TopLevelPerDay, p.Promotion, p.SlowModeSeconds, p.RevealOnClose, p.maskSalt, p.ArchivedAt)
+	return err
+}
+
 // roomPolicyData is room.policy.set's data; a nil field is not sent.
 type roomPolicyData struct {
 	Write       *string         `json:"write"`
@@ -518,6 +567,8 @@ type roomPolicyData struct {
 	MaxMessages *int64          `json:"max_messages"`
 	TopLevel    *int64          `json:"top_level_per_day"`
 	Promotion   *string         `json:"promotion"`
+	SlowMode    *int64          `json:"slow_mode_seconds"`
+	Reveal      *bool           `json:"reveal_on_close"`
 }
 
 // decodePolicyData reads room.policy.set data strictly: known fields only,
@@ -526,8 +577,8 @@ func decodePolicyData(data string) (roomPolicyData, error) {
 	var in roomPolicyData
 	decoder := json.NewDecoder(bytes.NewReader([]byte(data)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil && in.FrontPage == nil && in.Closed == nil && in.ClosesAt == nil && in.MaxMessages == nil && in.TopLevel == nil && in.Promotion == nil) {
-		return in, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via", "front_page", "closed", "closes_at", "max_messages", "top_level_per_day", "promotion".`)
+	if err := decoder.Decode(&in); err != nil || decoder.More() || (in.Write == nil && in.Reply == nil && in.Rules == nil && in.WriteVia == nil && in.FrontPage == nil && in.Closed == nil && in.ClosesAt == nil && in.MaxMessages == nil && in.TopLevel == nil && in.Promotion == nil && in.SlowMode == nil && in.Reveal == nil) {
+		return in, problem(400, "invalid_policy", `data must be a JSON object with at least one of "write", "reply", "rules", "write_via", "front_page", "closed", "closes_at", "max_messages", "top_level_per_day", "promotion", "slow_mode_seconds", "reveal_on_close".`)
 	}
 	return in, nil
 }
@@ -538,13 +589,21 @@ func decodePolicyData(data string) (roomPolicyData, error) {
 // operator's authority: false takes the room off (unless the operator already
 // did); true or null put it back to its default, unless the operator took it
 // off; true on a room whose default is off needs the operator.
-func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bool) (RoomPolicy, error) {
+func parsePolicy(ctx context.Context, tx *sql.Tx, room, data string, operator bool, now int64) (RoomPolicy, error) {
 	in, err := decodePolicyData(data)
 	if err != nil {
 		return RoomPolicy{}, err
 	}
 	p, err := loadPolicy(ctx, tx, room)
 	if err != nil {
+		return p, err
+	}
+	// An archived room's policy is final, and so is a masked room's once
+	// it closed: it revealed its members (approoms.go).
+	if p.ArchivedAt > 0 || p.RevealOnClose && roomClosed(p, now) {
+		return p, problem(409, "room_closed", "This room is closed for good (archived, or a masked room that revealed its members); its policy no longer changes. It stays readable and nothing in it was deleted.")
+	}
+	if err = parseAppRoomRules(ctx, tx, room, in, &p); err != nil {
 		return p, err
 	}
 	if in.FrontPage != nil {

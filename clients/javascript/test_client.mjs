@@ -922,7 +922,7 @@ const noWrapper = 'no wrapper: prepare({operation, data: JSON.stringify(dataFor(
 const JS_NO_WRAPPER = {
   ...Object.fromEntries(['agent.profile.publish', 'agents.list', 'allowance.get', 'app.register', 'credits.topup', 'delegation.revoke', 'feed.get', 'feed.profile.fork', 'feed.profile.get', 'feed.profile.put',
     'gate.challenge', 'gate.verify', 'hosted.claim', 'hosted.recover', 'hosted.token', 'identity.unlink', 'identity.witness', 'key.backup.get', 'key.backup.put', 'messages.list',
-    'offering.answer', 'offering.buy', 'offering.publish', 'offering.refund', 'room.policy.set', 'room.style.check', 'room.style.set', 'room.subscribe', 'spend_limit.set',
+    'offering.answer', 'offering.buy', 'offering.publish', 'offering.refund', 'room.create', 'room.policy.set', 'room.style.check', 'room.style.set', 'room.subscribe', 'spend_limit.set',
     'standing.work', 'subjects.list', 'vote', 'work.renew', 'x402.submit'].map(op => [op, noWrapper])),
   ...Object.fromEntries(['blob.put', 'room.invite.accept', 'service.call', 'service.read', 'trust.get'].map(op => [op, 'its data is a raw string, not fields'])),
   ...Object.fromEntries(['device.add', 'device.request', 'device.request.get'].map(op => [op, 'linked devices (C576) are web and Python only in v1; ' + noWrapper])),

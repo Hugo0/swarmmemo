@@ -74,7 +74,7 @@ func matrixBase(f *matrixFixture, op string) (Command, ed25519.PrivateKey) {
 		c.Room, c.Visibility = "newroom", "public"
 	case "room.member.add", "room.member.remove":
 		c.Room, c.Target = "priv", keyID(f.other)
-	case "room.invite.create":
+	case "room.invite.create", "room.members":
 		c.Room = "priv"
 	case "room.invite.accept":
 		c.Room, c.Data = "priv", f.invite
@@ -86,7 +86,7 @@ func matrixBase(f *matrixFixture, op string) (Command, ed25519.PrivateKey) {
 		c.MessageID, c.Reason = f.m2, "reason"
 	case "room.style.set", "room.style.check":
 		c.Room, c.Data = "pub", `{"css":".x{color:red}"}`
-	case "room.style.clear":
+	case "room.style.clear", "room.close":
 		c.Room = "pub"
 	case "agent.register":
 		c.Handle = "h" + randomID()[:8]

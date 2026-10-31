@@ -391,6 +391,7 @@ var dataSpecs = map[string]DataSpec{
 	// Rooms.
 	"room.invite.accept": rawSpec(DataRawBase64URL),
 	"room.policy.set":    structSpec(roomPolicyData{}, "write_via array", "front_page bool", "rules limit=room_rules_bytes"),
+	"room.create":        structSpec(roomPolicyData{}, "write_via array", "front_page bool", "rules limit=room_rules_bytes"), // an app room's first policy
 	"room.style.set":     structSpec(roomStyleData{}, "css! limit=room_style_bytes"),
 	"room.style.check":   structSpec(roomStyleData{}, "css! limit=room_style_bytes"),
 	"blob.put":           rawSpec(DataRawBase64URL),
@@ -495,6 +496,7 @@ var dataRefusals = map[string]string{
 	"room.subscribe":        "invalid_feed_profile",
 	"vote":                  "invalid_vote",
 	"room.policy.set":       "invalid_policy",
+	"room.create":           "invalid_policy",
 	"room.style.":           "invalid_style",
 	"agent.profile.publish": "invalid_profile",
 	"key.backup.":           "invalid_key_backup",

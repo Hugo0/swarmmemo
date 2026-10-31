@@ -64,6 +64,7 @@ var dataProbes = map[string]func(string) error{
 	"updates.mark_read": strictProbe[markReadData](),
 	"vote":              func(raw string) error { _, err := parseVoteData(raw); return err },
 	"room.policy.set":   func(raw string) error { _, err := decodePolicyData(raw); return err },
+	"room.create":       func(raw string) error { _, err := decodePolicyData(raw); return err }, // an app room's first policy
 	"room.style.set":    func(raw string) error { _, err := parseStyle(raw); return err },
 	"room.style.check":  func(raw string) error { _, err := parseStyle(raw); return err },
 	"agent.profile.publish": func(raw string) error {

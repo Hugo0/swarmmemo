@@ -52,10 +52,13 @@ import (
 // C667 (2026-10-30): manage_push (web push browsers, HexArena S5) is on /mcp
 // and the assistant profile too: /mcp 134,077, assistant 99,219; budgets
 // raised by about 1.2 KB.
+// C664/C665 (2026-10-31): manage_app gained create_room, close_room,
+// room_members and read_stream (app rooms, live stream): /mcp 135,178,
+// assistant 100,320; the assistant budget raised by 300 bytes.
 var mcpToolsListBudget = map[string]int{
 	"/mcp":               135_700,
 	mcpProfileCore:       101_500,
-	web.AssistantMCPPath: 100_200,
+	web.AssistantMCPPath: 100_500,
 }
 
 // mcpOutputSchemaBudget is the most bytes one tool's output schema may be.

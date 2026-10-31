@@ -734,10 +734,16 @@ func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err := requireSigned(a); err != nil {
 		return Result{}, err
 	}
-	if c.Operation == "room.create" && !slug.MatchString(c.Room) {
+	if c.Operation == "room.create" && !slug.MatchString(c.Room) && !IsAppRoom(c.Room) {
 		// "@" names belong to keys and "~" names to conversations: a global
 		// room can never enter either namespace.
-		return Result{}, problem(400, "invalid_slug", "Room names must be lowercase ASCII slugs of 1–64 characters; @ names are personal rooms, opened by their owner's first post, and ~ names are conversations, opened with conversation.open.")
+		return Result{}, problem(400, "invalid_slug", "Room names must be lowercase ASCII slugs of 1–64 characters, or an app room app/APP_FINGERPRINT/NAME (1 to 4 slugs after the app); @ names are personal rooms, opened by their owner's first post, and ~ names are conversations, opened with conversation.open.")
+	}
+	if c.Operation == "room.create" && IsAppRoom(c.Room) {
+		return s.createAppRoom(ctx, tx, c, a, now)
+	}
+	if c.Operation == "room.create" && c.Data != "" {
+		return Result{}, problem(400, "invalid_policy", "data on room.create is an app room's first policy (app/APP/…); set another room's policy with room.policy.set.")
 	}
 	if !ValidRoomName(c.Room) {
 		return Result{}, errRoomName()
@@ -764,7 +770,7 @@ func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, err
 		}
 		if exists > 0 {
-			return Result{}, problem(409, "room_exists", "This room already exists; visibility cannot be changed after creation.")
+			return Result{}, errRoomExists()
 		}
 		// RFC0012 §6.5: with NAME_GATE only the proven band creates room names.
 		if err := s.nameGate(ctx, tx, a, now); err != nil {
@@ -801,7 +807,10 @@ func (s *Store) changeRoom(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if err != nil {
 		return Result{}, err
 	}
-	if r.Owner != a.account {
+	if owner, err := roomOwnerActor(ctx, tx, r, a); err != nil || !owner {
+		if err != nil {
+			return Result{}, err
+		}
 		return Result{}, problem(403, "owner_required", "Only the room owner can change membership.")
 	}
 	target, err := lookupAccount(ctx, tx, c.Target)
@@ -939,7 +948,8 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		// The room directory lists shared rooms. Personal rooms are reached
 		// through their owners, at /@ADDRESS and agent.get's personal_room,
 		// and conversations through conversations.list.
-		where += " AND r.name NOT LIKE '@%' AND r.name NOT LIKE '~%'"
+		// App rooms (app/APP/…) are unlisted: their app and room.get reach them.
+		where += " AND r.name NOT LIKE '@%' AND r.name NOT LIKE '~%' AND r.name NOT LIKE 'app/%'"
 		sqlLimit, order = RoomDirectoryScan, "5 DESC, r.name"
 	}
 	// Heat reads each room's window in one bounded pass: its newest
@@ -1021,6 +1031,14 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 		if err = roomDetails(ctx, tx, &r); err != nil {
 			return Result{}, err
 		}
+		if IsAppRoom(r.Name) {
+			// The whole policy, app room rules included (approoms.go).
+			p, err := loadPolicy(ctx, tx, r.Name)
+			if err != nil {
+				return Result{}, err
+			}
+			r.Policy = &p
+		}
 		// Public memberships are administrative metadata, visible only to the owner.
 		if a.grant == nil && (r.Visibility == "private" || r.Owner == a.account) {
 			rows, err := tx.QueryContext(ctx, "SELECT i.id FROM members m JOIN identities i ON i.account=m.account WHERE m.room=? AND i.successor='' AND i.role='primary' ORDER BY i.id", r.Name)
@@ -1038,6 +1056,10 @@ func (s *Store) readRooms(ctx context.Context, tx *sql.Tx, c Command, a actor) (
 			err = rows.Err()
 			rows.Close()
 			if err != nil {
+				return Result{}, err
+			}
+			// A masked room's members are aliases until it closes.
+			if err = s.maskRoomMembers(ctx, tx, &r, a); err != nil {
 				return Result{}, err
 			}
 		}

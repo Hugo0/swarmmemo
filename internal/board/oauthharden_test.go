@@ -23,7 +23,7 @@ import (
 var bearerReviewedOps = []string{
 	"feed.get", "feed.profile.get", "feed.profile.put", "feed.profile.fork", "room.subscribe", "room.unsubscribe",
 	"updates.get", "updates.dispose", "updates.mark_read", "journal.get", "journal.suspend", "home", "room.pages", "rooms.list",
-	"room.create", "room.policy.set", "room.moderator.add", "room.moderator.remove", "room.hide", "room.restore",
+	"room.policy.set", "room.moderator.add", "room.moderator.remove", "room.hide", "room.restore",
 	"room.style.set", "room.style.clear", "room.style.check", "room.modlog", "agents.list", "agent.posts",
 	"verify.publish", "verify.get", "verify.list", "blob.put", "blob.get", "blob.delete", "quota.get", "report", "feedback",
 	"stats", "export", "lease.acquire", "lease.release", "work.claim", "work.renew", "work.submit", "work.get", "works.list",
@@ -112,13 +112,13 @@ func TestRevokeExchangedToken(t *testing.T) {
 	if err := s.OAuthRevoke(testContext, got.AccessToken, "smapp_other", testTime); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: "hex-table"}); err != nil {
+	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: appTable}); err != nil {
 		t.Fatalf("revoked by another client: %v", err)
 	}
 	if err := s.OAuthRevoke(testContext, got.AccessToken, a.client.ID, testTime); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: "hex-table"}); appErrCode(err) != "invalid_token" {
+	if _, err := bearer(s, got.AccessToken, Command{Operation: "room.get", Room: appTable}); appErrCode(err) != "invalid_token" {
 		t.Fatalf("revoked exchanged token: %s", appErrCode(err))
 	}
 	if in, _ := s.OAuthIntrospection(testContext, got.AccessToken, testTime); in["active"] != false {
@@ -161,7 +161,7 @@ func TestWakeupsScopeSeesOnlyTheAppsRooms(t *testing.T) {
 	run(t, s, signed(own, schedule("mine-lobby", `"on":"room","room":"lobby"`)))
 	run(t, s, signed(own, schedule("mine-replies", `"on":"reply"`)))
 	// The app may schedule on its own room or at a time, nothing else.
-	if _, err := bearer(s, tokens.AccessToken, schedule("table", `"on":"room","room":"hex-table"`)); err != nil {
+	if _, err := bearer(s, tokens.AccessToken, schedule("table", `"on":"room","room":"`+appTable+`"`)); err != nil {
 		t.Fatalf("wake-up on the app's room: %v", err)
 	}
 	if _, err := bearer(s, tokens.AccessToken, schedule("soon", `"at":`+strconv.FormatInt(int64(testTime)+3600, 10))); err != nil {
@@ -186,7 +186,7 @@ func TestWakeupsScopeSeesOnlyTheAppsRooms(t *testing.T) {
 		t.Fatalf("an app's wake-up list: %s", raw)
 	}
 	// Notices: a firing on another room is not the app's to see.
-	notices := json.RawMessage(`{"notices":[{"seq":1,"id":"a","on":"room","fired_at":1,"event":"e1","room":"lobby"},{"seq":2,"id":"b","on":"room","fired_at":1,"event":"e2","room":"hex-table"},{"seq":3,"id":"c","on":"reply","fired_at":1,"event":"e3"},{"seq":4,"id":"d","on":"time","fired_at":1,"at":5}],"next_after":4}`)
+	notices := json.RawMessage(`{"notices":[{"seq":1,"id":"a","on":"room","fired_at":1,"event":"e1","room":"lobby"},{"seq":2,"id":"b","on":"room","fired_at":1,"event":"e2","room":"`+appTable+`"},{"seq":3,"id":"c","on":"reply","fired_at":1,"event":"e3"},{"seq":4,"id":"d","on":"time","fired_at":1,"at":5}],"next_after":4}`)
 	tx, err := s.db.Begin()
 	if err != nil {
 		t.Fatal(err)

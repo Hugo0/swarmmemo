@@ -165,7 +165,12 @@ type Message struct {
 	// (lowercase) to that agent's fingerprint, for a page to link
 	// (mentions.go). Set on reads; never serialized: the text is the record.
 	MentionAgents map[string]string `json:"-"`
-	origin        string
+	// Masked is set on a member's read of a masked app room before it
+	// closes (approoms.go): author and to are the room's aliases, and the
+	// key, signature and signed payload are withheld. Absent otherwise.
+	Masked  bool `json:"masked,omitempty"`
+	origin  string
+	account string // the author's continuity account, from scanEvent
 }
 
 // Origin is the first version's ID: the message itself unless it supersedes one.

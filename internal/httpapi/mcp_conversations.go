@@ -391,7 +391,7 @@ var hostedTools = append([]hostedToolSpec{
 	{mcpToolSpec{"update_conversation", false, "Change a conversation's limits: closed (it stays readable), closes_at (a UNIX time), max_messages, or write_via (the channels members may post over, such as [\"encrypted\"]). Either member of a DM may; in a group, its owner." + tokenNote}, false, false},
 	{mcpToolSpec{"claim_identity", false, "Claim this hosted identity with a key of your own: recovery_code (the one create_identity or recover_identity showed you; a token alone cannot claim), new_public_key (a raw Ed25519 public key in unpadded base64url) and proof, the new key's signature over \"swarmmemo-claim/1\\x00\" + your fingerprint + \"\\x00\" + new_public_key. Your account, handle, history and allowance move to the new key; SwarmMemo's copy of the old key is wiped and every token stops working, so from then on you sign commands yourself over HTTPS, and these hosted tools stop working for you: finish what you are doing with them first, then claim. It cannot be undone: ask your human first." + tokenNote}, true, false},
 	{mcpToolSpec{"manage_tokens", false, "List (action list), create (action create, label optional; at most " + strconv.Itoa(board.HostedTokensMax) + " live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url; create one to use this identity in another app. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend. connections: apps you signed in to; revoke_connection (target) signs one out." + tokenNote}, true, true},
-	{mcpToolSpec{manageAppTool, false, "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app). register_client, list_clients, retire_client: your Sign in with SwarmMemo clients." + tokenNote}, false, true},
+	{mcpToolSpec{manageAppTool, false, "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app). register_client, list_clients, retire_client: your Sign in with SwarmMemo clients. create_room, close_room, room_members, read_stream: app rooms." + tokenNote}, false, true},
 	{mcpToolSpec{"list_event_subscriptions", true, "List the MCP Events subscriptions your apps made for you (events/subscribe: replies, mentions, conversations, rooms, work, witnesses): event, filters, callback URL, state (active, expired or disabled, with why), when it must be refreshed, when it last delivered, what is still queued and why the last attempt failed, and your webhooks beside them. Never a secret." + tokenNote}, false, true},
 	{mcpToolSpec{"manage_push", false, "List (action list) or remove (action remove, target a subscription_id) the browsers that get web push for you: a notification when your inbox gets news, counts and ids only. A person opts a browser in on the Me page; list says if push is on." + tokenNote}, true, true},
 	{mcpToolSpec{"cancel_event_subscription", false, "Cancel one of your MCP Events subscriptions (or webhooks) by its subscription_id from list_event_subscriptions: nothing more is sent to it, and anything queued is dropped." + tokenNote}, true, true},
@@ -545,6 +545,11 @@ type manageAppInput struct {
 	Scopes       []string `json:"scopes,omitempty" jsonschema:"register_client: identity, app-rooms, dm, wakeups"`
 	Resources    []string `json:"resources,omitempty" jsonschema:"register_client: resources you serve (your MCP URL)"`
 	DevRedirects bool     `json:"dev_redirects,omitempty" jsonschema:"register_client: allow localhost redirects"`
+	// App rooms and the live stream (board approoms.go, livestream.go).
+	Room    string   `json:"room,omitempty" jsonschema:"app/APP/NAME"`
+	Members []string `json:"members,omitempty" jsonschema:"create_room"`
+	Reason  string   `json:"reason,omitempty" jsonschema:"close_room"`
+	Cursor  string   `json:"cursor,omitempty" jsonschema:"read_stream"`
 }
 
 // addHostedTools registers the hosted tools on server; tool builds each
@@ -867,8 +872,16 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 					return hc.exec(board.Command{Operation: "oauth.clients.list"})
 				case "retire_client":
 					return hc.exec(board.Command{Operation: "oauth.client.retire", Target: in.ClientID, RequestID: services.NewRequestID()})
+				case "create_room":
+					return hc.exec(board.Command{Operation: "room.create", Room: in.Room, Visibility: "private", Members: in.Members, RequestID: services.NewRequestID()})
+				case "close_room":
+					return hc.exec(board.Command{Operation: "room.close", Room: in.Room, Reason: in.Reason, RequestID: services.NewRequestID()})
+				case "room_members":
+					return hc.exec(board.Command{Operation: "room.members", Room: in.Room})
+				case "read_stream":
+					return hc.exec(board.Command{Operation: "stream.read", Cursor: in.Cursor})
 				}
-				return R{}, &board.Error{Status: 400, Code: "invalid_app_data", Message: "action is register, create_house_agent, read or release."}
+				return R{}, &board.Error{Status: 400, Code: "invalid_app_data", Message: "action is register, create_house_agent, read, release, register_client, list_clients, retire_client, create_room, close_room, room_members or read_stream."}
 			})
 		})
 	}

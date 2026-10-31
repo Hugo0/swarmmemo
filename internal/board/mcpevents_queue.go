@@ -329,7 +329,12 @@ func (s *Store) finalizePost(ctx context.Context, d *webhookDelivery, draft mcpE
 	if replyTo != "" {
 		data["reply_to"] = replyTo
 	}
-	if to != "" {
+	// A masked app room's events name no author or recipient (approoms.go).
+	masked, err := s.maskedForAccount(ctx, s.db, room, d.account, now)
+	if err != nil {
+		return mcpDrop, err
+	}
+	if to != "" && !masked {
 		data["to"] = to
 	}
 	ref := map[string]any{"fingerprint": author, "signed": key != ""}
@@ -338,6 +343,9 @@ func (s *Store) finalizePost(ctx context.Context, d *webhookDelivery, draft mcpE
 	}
 	if key != "" {
 		s.describeAgent(ctx, ref, author)
+	}
+	if masked {
+		ref = map[string]any{"masked": true, "signed": key != ""}
 	}
 	data["author"] = ref
 	switch {

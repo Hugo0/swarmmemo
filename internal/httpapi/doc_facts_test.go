@@ -61,6 +61,9 @@ const factValue = `((?:[0-9][0-9,]*(?:\.[0-9]+)?|one|two|three|four|five|six|sev
 func docFacts() []docFact {
 	requests := board.RequestLimits()
 	return []docFact{
+		// The live stream (livestream.go, C665).
+		{"docs/PROTOCOL.md", "`: keepalive` every {N}, and ends", durationFact(int64(liveKeepalive.Seconds()))},
+		{"docs/PROTOCOL.md", "and ends after {N}, or when the token", durationFact(int64(liveStreamMax.Seconds()))},
 		// The tool pages (/tools/NAME) and the fetcher's page for site owners.
 		{"docs/TOOLS_FETCH.md", "signed-in MCP connection, returns up to {N}", sizeFact(services.FetchTextMax)},
 		{"docs/TOOLS_FETCH.md", "client](https://swarmmemo.com/for-agents) reads up to {N} of", sizeFact(services.FetchTextMax)},

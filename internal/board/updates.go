@@ -98,6 +98,12 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		where = append(where, "e.seq>?")
 		args = append(args, seq)
 	}
+	if agent != "" && !own {
+		// Another agent's updates never point into a masked room: they
+		// would tie its alias to its key (approoms.go).
+		where = append(where, notMaskedRoom)
+		args = append(args, now)
+	}
 	if opts.Records != RecordsInclude {
 		where = append(where, notAppRecord)
 	}
