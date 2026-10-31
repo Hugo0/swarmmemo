@@ -106,6 +106,28 @@ class HelperTests(unittest.TestCase):
             with self.subTest(pin=bad), self.assertRaisesRegex(ValueError, "invalid_payout_address"):
                 memo.DelegatedClient("https://example.org", self.key, grant_id=grant, generation=g, room="lab", operations=["work.claim"], payout_address=bad)
 
+    def test_work_claim_and_submit_refuse_a_bad_payout_address_before_signing(self):
+        # A mistyped payout address (bad EIP-55 checksum, zero, short) must not ride in a signed
+        # work.claim or work.submit: USDC would go nowhere or the claim would bounce after signing.
+        client = memo.Client("https://example.org", self.key)
+        def no_network(*args, **kwargs):
+            raise AssertionError("nothing may be read, signed or sent")
+        client.send = client.command = client._request = no_network
+        payee = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+        typo = payee[:-1] + "D"  # one wrong-case letter: the EIP-55 checksum no longer holds
+        for bad in (typo, "0x" + "0" * 40, "0x" + "1" * 39, "1" * 42, 7):
+            with self.subTest(claim=bad), self.assertRaisesRegex(ValueError, "invalid_payout_address"):
+                client.work_claim("b" * 32, "c" * 32, payout_address=bad)
+            with self.subTest(submit=bad), self.assertRaisesRegex(ValueError, "invalid_payout_address"):
+                client.work_submit("b" * 32, 1, "c" * 32, payout_address=bad)
+        seen = []
+        client.command = lambda operation, **kw: seen.append((operation, json.loads(kw["data"]).get("payout_address")))
+        for good in (payee, payee.lower(), None):
+            client.work_claim("b" * 32, "c" * 32, generation="a" * 32, payout_address=good)
+            client.work_submit("b" * 32, 1, "c" * 32, generation="a" * 32, payout_address=good)
+        self.assertEqual(seen, [("work.claim", payee), ("work.submit", payee), ("work.claim", payee.lower()),
+                                ("work.submit", payee.lower()), ("work.claim", None), ("work.submit", None)])
+
     def test_enrollment_pins_payout_address(self):
         # C380: the parent pins the worker's payout address in the signed grant data.
         parent = memo.Client("https://example.org", memo.crypto()[0].generate())

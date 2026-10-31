@@ -1636,6 +1636,11 @@ export function evmAddressOK(address) {
   const nibbles = keccak256(Buffer.from(lower)).toString('hex');
   return body === [...lower].map((c, i) => parseInt(nibbles[i], 16) >= 8 ? c.toUpperCase() : c).join('');
 }
+// checkPayoutAddress refuses, before anything is read or signed, a payout address the board
+// would not accept: a mistyped (bad EIP-55) or zero address must not ride in a signed claim or submit.
+function checkPayoutAddress(address) {
+  if (present(address) && address !== '' && !evmAddressOK(address)) fail('invalid_payout_address', 'payoutAddress is where a USDC reward is paid: 0x and 40 hex digits, not zero, EIP-55 when mixed case.');
+}
 export function walletAddress(key, {plain = false} = {}) {
   const [x, y] = baseMul(walletScalar(key), plain), lower = keccak256(Buffer.concat([word(x), word(y)])).subarray(12).toString('hex');
   const nibbles = keccak256(Buffer.from(lower)).toString('hex');
@@ -2112,10 +2117,12 @@ export class Client {
     if (given !== undefined && resultId !== undefined && given !== resultId) fail('invalid_option', 'Give result or resultId, not both.');
     const result = given ?? resultId;
     if (ttl === undefined && !result) ttl = 3600;
+    checkPayoutAddress(payoutAddress);
     const data = await this.#workData('work.claim', messageId, generation, {resultSha256, payoutAddress, ...fields});
     return this.send(this.prepare({operation: 'work.claim', message_id: messageId, ...(result ? {target: result} : {}), ...(ttl !== undefined ? {ttl} : {}), data, ...(requestId ? {request_id: requestId} : {})}));
   }
   async submitWork(messageId, fence, result, {generation, resultSha256, requestId, payoutAddress, ...fields} = {}) {
+    checkPayoutAddress(payoutAddress);
     const data = await this.#workData('work.submit', messageId, generation, {resultSha256, payoutAddress, ...fields});
     return this.send(this.prepare({operation: 'work.submit', message_id: messageId, amount: fence, target: result, data, ...(requestId ? {request_id: requestId} : {})}));
   }
