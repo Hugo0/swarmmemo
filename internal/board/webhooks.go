@@ -299,7 +299,8 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 		if err := s.charge(ctx, tx, a, SmallCommandCost, now); err != nil {
 			return Result{}, err
 		}
-		res, err := tx.ExecContext(ctx, "DELETE FROM webhook_subscriptions WHERE id=? AND account=?", c.Target, a.account)
+		// A browser's subscription is push.unsubscribe's (webpush.go).
+		res, err := tx.ExecContext(ctx, "DELETE FROM webhook_subscriptions AS s WHERE s.id=? AND s.account=? AND NOT "+isWebPush, c.Target, a.account)
 		if err != nil {
 			return Result{}, err
 		}
@@ -335,7 +336,7 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 	// larger cap so retained history stays bounded. Re-subscribing an expired URL
 	// reuses its row, since (account,url) is unique.
 	var held, expired, sameURL int
-	if err = tx.QueryRowContext(ctx, "SELECT coalesce(sum(CASE WHEN "+webhookExpiredSQL+" THEN 0 ELSE 1 END),0),coalesce(sum(CASE WHEN "+webhookExpiredSQL+" THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN "+webhookExpiredSQL+" AND url=? THEN 1 ELSE 0 END),0) FROM webhook_subscriptions WHERE account=?", u.String(), a.account).Scan(&held, &expired, &sameURL); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT coalesce(sum(CASE WHEN "+webhookExpiredSQL+" THEN 0 ELSE 1 END),0),coalesce(sum(CASE WHEN "+webhookExpiredSQL+" THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN "+webhookExpiredSQL+" AND url=? THEN 1 ELSE 0 END),0) FROM webhook_subscriptions s WHERE account=? AND NOT "+isWebPush, u.String(), a.account).Scan(&held, &expired, &sameURL); err != nil {
 		return Result{}, err
 	}
 	if held >= WebhookMaxPerAccount || (sameURL == 0 && expired >= WebhookMaxExpiredPerAccount) {
@@ -399,8 +400,8 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 	if a.grant != nil {
 		return Result{}, webhookError("webhook_delegated")
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT "+webhookColumns+","+deliveryStatusColumns("webhook_deliveries", "webhook_subscriptions")+
-		",kinds FROM webhook_subscriptions WHERE account=? ORDER BY created_at,id LIMIT ?", a.account, limitValue(c.Limit))
+	rows, err := tx.QueryContext(ctx, "SELECT "+webhookColumns+","+deliveryStatusColumns("webhook_deliveries", "s")+
+		",kinds FROM webhook_subscriptions s WHERE account=? AND NOT "+isWebPush+" ORDER BY created_at,id LIMIT ?", a.account, limitValue(c.Limit))
 	if err != nil {
 		return Result{}, err
 	}
@@ -439,7 +440,7 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 		return Result{}, err
 	}
 	var queued int64
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM webhook_deliveries d JOIN webhook_subscriptions s ON s.id=d.subscription WHERE s.account=?", a.account).Scan(&queued); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM webhook_deliveries d JOIN webhook_subscriptions s ON s.id=d.subscription WHERE s.account=? AND NOT "+isWebPush, a.account).Scan(&queued); err != nil {
 		return Result{}, err
 	}
 	used, err := webhookHourUsed(ctx, tx, a.account, now)

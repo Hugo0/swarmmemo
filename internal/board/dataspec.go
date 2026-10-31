@@ -448,6 +448,7 @@ var dataSpecs = map[string]DataSpec{
 	"private_read.create": objectSpec("schema! int", "generation! string pattern=work_id", "access_epoch! string pattern=work_id", "disclosure! string"),
 	"private_read.revoke": objectSpec("schema! int", "generation! string pattern=work_id"),
 	"webhook.create":      objectSpec("schema! int", "url! string limit=webhook_url_bytes", "kinds array"),
+	"push.subscribe":      structSpec(pushData{}, "schema!", "endpoint! limit=push_endpoint_bytes", "p256dh!", "auth!", "label limit=push_label_chars"),
 	"spend_limit.set":     structSpec(spendLimitSetData{}, "schema!"),
 
 	// Allowance, credits, offerings and services.
@@ -509,6 +510,7 @@ var dataRefusals = map[string]string{
 	"delegation.":           "invalid_delegation_data",
 	"private_read.":         "invalid_private_read_data",
 	"webhook.":              "invalid_webhook",
+	"push.":                 "invalid_push_subscription",
 	"spend_limit.set":       "invalid_spend_limit",
 	"offering.publish":      "invalid_offering",
 	"offering.answer":       "invalid_offering_answer",

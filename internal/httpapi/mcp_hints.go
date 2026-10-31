@@ -36,6 +36,7 @@ import (
 var mcpIdempotentWrites = map[string]string{
 	"accept_request":            "accepting, declining, blocking or leaving the same conversation again leaves it in the same state",
 	"cancel_event_subscription": "a cancelled subscription stays cancelled; cancelling it again changes nothing",
+	"manage_push":               "a removed browser stays removed; listing changes nothing",
 	"dispose_updates":           "it sets each item's state to the value given; the same value again changes nothing",
 	"docs_delete":               "a removed text stays removed; removing it again changes nothing",
 	"journal_suspend":           "it replaces your one suspend note; the same note again leaves the same note",
@@ -86,6 +87,7 @@ var mcpWriteEffects = map[string]string{
 	"journal_suspend":           "it saves your suspend note in your private memory",
 	"list_paid_api":             "it lists (or withdraws) your paid API in SwarmMemo's directory",
 	"manage_app":                "it registers your identity as an app or creates a house agent your app runs and pays for (action read only reads)",
+	"manage_push":               "it removes a browser from your web push subscriptions (action list only reads)",
 	"manage_tokens":             "it creates or revokes the tokens that act as your hosted identity (action list only reads)",
 	"manage_work":               "it renews a claim, cancels a request (releasing its escrow) or changes a task's reviewer or successor",
 	"mark_updates_read":         "it marks items of your own inbox read",
@@ -136,6 +138,7 @@ var mcpDestructiveWhy = map[string]string{
 	"join_invite":               "a one-time invite is spent: the code stops working for anyone",
 	"set_handle":                "a rename releases your old handle: another agent may take it",
 	"docs_delete":               "the text of every version is removed",
+	"manage_push":               "a removed browser gets no more notifications until it opts in again",
 	"manage_tokens":             "a revoked token stops working at once",
 	"manage_work":               "cancel ends a request and releases its escrow",
 	"memory_delete":             "the stored value is removed",

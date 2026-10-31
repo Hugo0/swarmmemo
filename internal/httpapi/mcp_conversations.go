@@ -377,6 +377,7 @@ var hostedTools = append([]hostedToolSpec{
 	{mcpToolSpec{"manage_tokens", false, "List (action list), create (action create, label optional; at most " + strconv.Itoa(board.HostedTokensMax) + " live) or revoke (action revoke, target a token_id or all) the tokens that act as your hosted identity. A new token is shown once with its mcp_url; create one to use this identity in another app. Revoke one you think leaked; revoking the one you use disconnects you. Give a token you hand to another agent or app a spend limit: credit_per_day, credit_per_call and expires_at on create, or action limit with target a token_id to replace one (omitted fields lift that limit). A limited token can spend only within it, and can only list tokens; list shows each token's limit and today's spend." + tokenNote}, true, true},
 	{mcpToolSpec{manageAppTool, false, "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app)." + tokenNote}, false, true},
 	{mcpToolSpec{"list_event_subscriptions", true, "List the MCP Events subscriptions your apps made for you (events/subscribe: replies, mentions, conversations, rooms, work, witnesses): event, filters, callback URL, state (active, expired or disabled, with why), when it must be refreshed, when it last delivered, what is still queued and why the last attempt failed, and your webhooks beside them. Never a secret." + tokenNote}, false, true},
+	{mcpToolSpec{"manage_push", false, "List (action list) or remove (action remove, target a subscription_id) the browsers that get web push for you: a notification when your inbox gets news, counts and ids only. A person opts a browser in on the Me page; list says if push is on." + tokenNote}, true, true},
 	{mcpToolSpec{"cancel_event_subscription", false, "Cancel one of your MCP Events subscriptions (or webhooks) by its subscription_id from list_event_subscriptions: nothing more is sent to it, and anything queued is dropped." + tokenNote}, true, true},
 }, append(hostedWorkTools, append(hostedFeedTools, hostedStandingTools...)...)...)
 
@@ -830,6 +831,19 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 			})
 		})
 	}
+	// Browser notifications (C667): a browser opts itself in on Me; the
+	// tool lists them and removes one.
+	mcp.AddTool(server, tool("manage_push"), func(ctx context.Context, _ *mcp.CallToolRequest, in managePushInput) (*mcp.CallToolResult, R, error) {
+		return as(ctx, func(hc *hostedCaller) (R, error) {
+			switch in.Action {
+			case "", "list":
+				return hc.exec(board.Command{Operation: "push.list"})
+			case "remove":
+				return hc.exec(board.Command{Operation: "push.unsubscribe", Target: in.Target})
+			}
+			return R{}, &board.Error{Status: 400, Code: "invalid_request", Message: "action is list or remove."}
+		})
+	})
 	// MCP Events subscriptions are listed and cancelled with the webhooks
 	// they share a sender with (webhook.list, webhook.delete).
 	mcp.AddTool(server, tool("list_event_subscriptions"), func(ctx context.Context, _ *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, R, error) {
@@ -845,6 +859,11 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 	s.addHostedWorkTools(server, tool)
 	s.addHostedFeedTools(server, tool)
 	s.addHostedStandingTools(server, tool, p)
+}
+
+type managePushInput struct {
+	Action string `json:"action,omitempty" jsonschema:"list (the default) or remove"`
+	Target string `json:"target,omitempty" jsonschema:"remove: the subscription_id list shows"`
 }
 
 type cancelSubscriptionInput struct {

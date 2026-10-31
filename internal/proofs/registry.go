@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -46,7 +47,8 @@ type Config struct {
 }
 
 // ConfigFromEnv reads the configuration from the environment: for each
-// OAuth kind PROOF_KIND_CLIENT_ID and PROOF_KIND_CLIENT_SECRET, then
+// OAuth kind PROOF_KIND_CLIENT_ID and PROOF_KIND_CLIENT_SECRET (GitHub's
+// sign-in app: LOGIN_GITHUB_CLIENT_ID and LOGIN_GITHUB_CLIENT_SECRET), then
 // PROOF_TELEGRAM_BOT_TOKEN, PROOF_TELEGRAM_BOT_NAME, PROOF_FARCASTER_HUB_URL,
 // PROOF_FARCASTER_HUB_KEY, PROOF_ENS_RPC_URL and PROOF_BASE_RPC_URL.
 func ConfigFromEnv(getenv func(string) string) Config {
@@ -64,6 +66,9 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		"discord":     pair(getenv("PROOF_DISCORD_CLIENT_ID"), getenv("PROOF_DISCORD_CLIENT_SECRET")),
 		"reddit":      pair(getenv("PROOF_REDDIT_CLIENT_ID"), getenv("PROOF_REDDIT_CLIENT_SECRET")),
 		"huggingface": pair(getenv("PROOF_HUGGINGFACE_CLIENT_ID"), getenv("PROOF_HUGGINGFACE_CLIENT_SECRET")),
+		// GitHub signs people in only (LoginKinds): its standing way is the
+		// gist statement, which needs no app.
+		"github": pair(getenv("LOGIN_GITHUB_CLIENT_ID"), getenv("LOGIN_GITHUB_CLIENT_SECRET")),
 	}}
 	c.TelegramBotToken = strings.TrimSpace(getenv("PROOF_TELEGRAM_BOT_TOKEN"))
 	c.TelegramBot = strings.TrimPrefix(strings.TrimSpace(getenv("PROOF_TELEGRAM_BOT_NAME")), "@")
@@ -78,7 +83,14 @@ func ConfigFromEnv(getenv func(string) string) Config {
 type Registry struct {
 	order     []string
 	providers map[string]Provider
+	// logins are the sign-in providers (LoginKinds): X and Google are the
+	// proof providers themselves, GitHub its own OAuth app.
+	logins map[string]*OAuth
 }
+
+// LoginKinds are the providers a person can sign in with to create or
+// recover a hosted identity (/login/KIND), in the order pages show them.
+var LoginKinds = []string{"x", "google", "github"}
 
 // New builds the registry.
 func New(c Config) *Registry {
@@ -89,13 +101,22 @@ func New(c Config) *Registry {
 		newReddit(c.OAuth["reddit"], f), newHuggingFace(c.OAuth["huggingface"], f),
 		newFarcaster(c.FarcasterHub, c.FarcasterHubKey, f), newENS(c.ENSRPC, c.BaseRPC, f), newNPM(f), newPyPI(f), newBond(),
 	}
-	r := &Registry{providers: map[string]Provider{}}
+	r := &Registry{providers: map[string]Provider{}, logins: map[string]*OAuth{"github": newGitHubLogin(c.OAuth["github"], f)}}
 	for _, p := range ps {
 		k := p.Spec().Kind
 		r.order = append(r.order, k)
 		r.providers[k] = p
+		if o, ok := p.(*OAuth); ok && slices.Contains(LoginKinds, k) {
+			r.logins[k] = o
+		}
 	}
 	return r
+}
+
+// Login is a sign-in provider (LoginKinds), configured or not.
+func (r *Registry) Login(kind string) (*OAuth, bool) {
+	o, ok := r.logins[kind]
+	return o, ok
 }
 
 // Default is the registry with no credentials: every kind listed, the

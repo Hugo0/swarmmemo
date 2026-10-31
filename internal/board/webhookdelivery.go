@@ -108,6 +108,10 @@ type webhookDelivery struct {
 	// with the replaced secret too while a rotation lasts.
 	mcp      bool
 	previous string
+	// A browser's delivery (web push, webpush.go) is encrypted for its keys
+	// and VAPID signed.
+	webpush      bool
+	p256dh, auth string
 }
 
 // tables are the delivery's queue: webhooks', or MCP Events'.
@@ -122,8 +126,13 @@ func (d *webhookDelivery) tables() (subscriptions, deliveries string) {
 // releases its row by expiry instead of stranding it.
 func (s *Store) claimDelivery(ctx context.Context, now int64) (*webhookDelivery, error) {
 	var d webhookDelivery
+	// Started for web push alone, the sender claims only browsers' rows.
+	only := ""
+	if s.webPushOnly {
+		only = " AND subscription IN (SELECT subscription FROM webpush_keys)"
+	}
 	err := s.db.QueryRowContext(ctx, `UPDATE webhook_deliveries SET leased_until=? WHERE seq=(
- SELECT seq FROM webhook_deliveries WHERE next_at<=? AND leased_until<=? ORDER BY next_at,seq LIMIT 1)
+ SELECT seq FROM webhook_deliveries WHERE next_at<=? AND leased_until<=?`+only+` ORDER BY next_at,seq LIMIT 1)
  RETURNING seq,id,subscription,kind,body,attempts`, now+webhookLeaseSecond, now, now).
 		Scan(&d.seq, &d.id, &d.subscription, &d.kind, &d.body, &d.attempts)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -139,6 +148,14 @@ func (s *Store) claimDelivery(ctx context.Context, now int64) (*webhookDelivery,
 		return nil, err
 	}
 	if err != nil {
+		return nil, err
+	}
+	if d.p256dh, d.auth, d.webpush, err = s.webPushKeysFor(ctx, d.subscription); err != nil {
+		return nil, err
+	}
+	if d.webpush && !s.WebPushEnabled() {
+		// Push is off (no VAPID key): nothing can be sent to a browser.
+		_, err = s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
 		return nil, err
 	}
 	// A pending subscription receives its challenge and nothing else.
@@ -211,24 +228,33 @@ func (s *Store) claimMCPDelivery(ctx context.Context, now int64) (*webhookDelive
 // receiver will keep rejecting, so retrying it is only load on someone else.
 func (s *Store) send(ctx context.Context, d *webhookDelivery, now int64) (ok, permanent bool, echo string, reason string) {
 	body := []byte(d.body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url, bytes.NewReader(body))
-	if err != nil {
+	var req *http.Request
+	var err error
+	if d.webpush {
+		if req, err = s.webPushRequest(ctx, d, now); err != nil {
+			return false, true, "", "web push: the message could not be built"
+		}
+	} else if req, err = http.NewRequestWithContext(ctx, http.MethodPost, d.url, bytes.NewReader(body)); err != nil {
 		return false, true, "", "invalid callback URL"
 	}
-	if d.mcp {
+	switch {
+	case d.webpush:
+		// Encrypted and VAPID signed (webPushRequest).
+	case d.mcp:
 		secrets := []string{d.secret}
 		if d.previous != "" {
 			secrets = append(secrets, d.previous)
 		}
 		setMCPEventHeaders(req.Header, d.id, d.subscription, now, body, secrets...)
-	} else {
+		req.ContentLength = int64(len(body))
+	default:
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "SwarmMemo-Webhook/1")
 		req.Header.Set("X-SwarmMemo-Delivery", d.id)
 		req.Header.Set("X-SwarmMemo-Timestamp", strconv.FormatInt(now, 10))
 		req.Header.Set("X-SwarmMemo-Signature", SignWebhook(d.secret, now, body))
+		req.ContentLength = int64(len(body))
 	}
-	req.ContentLength = int64(len(body))
 	resp, err := s.webhookHTTP().Do(req)
 	if err != nil {
 		return false, false, "", "request failed: " + webhookReason(err)
@@ -341,12 +367,13 @@ func (s *Store) settle(ctx context.Context, d *webhookDelivery, ok, permanent bo
 		}
 		return err
 	}
-	if failures < WebhookDisableFailures && !(d.mcp && reason == mcpGoneReason) {
+	if failures < WebhookDisableFailures && !(d.mcp && reason == mcpGoneReason) && !(d.webpush && pushGone(reason)) {
 		return nil
 	}
 	// Auto-disable records why and stops dialing. Deletion is left to the owner,
 	// who needs to be able to read the reason. An MCP receiver's 410 disables
-	// at once; subscribing again (a refresh) reactivates it.
+	// at once; subscribing again (a refresh) reactivates it. So does a push
+	// service's 404 or 410 for a browser (webpush.go), until it opts in again.
 	_, err := s.db.ExecContext(ctx, "UPDATE "+subscriptions+" SET state='disabled',disabled_at=? WHERE id=? AND state<>'disabled'", now, d.subscription)
 	return err
 }
@@ -359,6 +386,10 @@ func (s *Store) deliverOnce(ctx context.Context) (bool, error) {
 	first, second := s.claimDelivery, s.claimMCPDelivery
 	if s.deliveryTurn.Add(1)%2 == 0 {
 		first, second = second, first
+	}
+	if s.webPushOnly {
+		// Started for web push alone: browsers' rows only, no MCP Events.
+		first, second = s.claimDelivery, func(context.Context, int64) (*webhookDelivery, error) { return nil, nil }
 	}
 	d, err := first(ctx, now)
 	if err == nil && d == nil {
@@ -424,6 +455,17 @@ func (s *Store) StartWebhookDelivery(ctx context.Context, workers int) {
 			}
 		}
 	}()
+}
+
+// StartWebPushDelivery runs the same sender for browsers alone (web push,
+// webpush.go), for a server whose webhook delivery is off: it claims only
+// browsers' deliveries. Nothing runs while push is off.
+func (s *Store) StartWebPushDelivery(ctx context.Context) {
+	if !s.WebPushEnabled() {
+		return
+	}
+	s.webPushOnly = true
+	s.StartWebhookDelivery(ctx, 1)
 }
 
 // StopWebhookDelivery waits for in-flight attempts. Queued rows survive: the

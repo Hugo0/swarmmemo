@@ -73,6 +73,7 @@ type Store struct {
 	cursorBlock        cipher.Block  // the same key, for since cursors (poll.go)
 	topupKey           []byte        // credit top-up quotes' HMAC key (topup.go)
 	proofKey           []byte        // OAuth proofs' PKCE key (proofwire.go)
+	loginMu            sync.Mutex    // one provider sign-in at a time (login.go)
 	offerings          offeringState // agent offerings (offerings.go, RFC 0017)
 	mpp                mppState      // MPP beside x402 (mpp.go, C202b)
 	find               findState     // Find, the intent search (find.go)
@@ -109,6 +110,9 @@ type Store struct {
 	webhookClient   *http.Client
 	webhookPoll     time.Duration
 	webhookInsecure bool
+	// webPushOnly: the sender was started for browsers alone (web push,
+	// webpush.go) while webhook delivery is off.
+	webPushOnly bool
 	// MCP Events (mcpevents.go) share the sender: which queue goes first
 	// alternates, and verification POSTs in flight are bounded.
 	deliveryTurn   atomic.Uint32
@@ -162,6 +166,8 @@ type Store struct {
 	devices deviceState
 	// C662: the app-wide buckets of house agents' commands (apps.go).
 	apps appState
+	// C667: the VAPID key and browser push settings (webpush.go).
+	webPush webPushState
 	// The transparency log's signing key (transparency.go).
 	transparency transparencyState
 	// Waiting reads (waiting.go): the signal each committed write closes and
@@ -388,7 +394,12 @@ CREATE TABLE IF NOT EXISTS leases (
 // 48: apps and house agents (C662, apps.go): the apps and identity_house
 // tables. Additive: a schema-47 binary never reads them, so a rollback only
 // stops showing apps and house agents, and their limits and exclusions.
-const SchemaVersion = 48
+//
+// 49: webpush_keys, the push keys of the browsers an account opted in to
+// web push (webpush.go, C667); a browser is a webhook_subscriptions row.
+// Additive, but a binary before it would take browsers for webhooks: a
+// rollback past 49 disables them first (RUNBOOK "Browser notifications").
+const SchemaVersion = 49
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -542,6 +553,10 @@ func Open(path string, config Config) (*Store, error) {
 		return fail(err)
 	}
 	if err = s.openHosted(); err != nil {
+		return fail(err)
+	}
+	// C667: the web push VAPID key, when WEBPUSH_KEY_FILE names one.
+	if err = s.openWebPush(); err != nil {
 		return fail(err)
 	}
 	// C160: the write signals' HMAC key (signals.go).
@@ -1394,6 +1409,10 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.changeWebhook(ctx, tx, c, a, now)
 	case "webhook.list":
 		return s.readWebhooks(ctx, tx, c, a, now)
+	case "push.subscribe", "push.unsubscribe":
+		return s.changePush(ctx, tx, c, a, now)
+	case "push.list":
+		return s.readPush(ctx, tx, c, a, now)
 	case "identity.link", "identity.unlink":
 		return s.changeIdentityLink(ctx, tx, c, a, now)
 	case "verify.publish":

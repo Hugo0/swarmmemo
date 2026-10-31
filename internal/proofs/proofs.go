@@ -112,9 +112,13 @@ type Inputs map[string]int64
 // Proof is a verified proof: the link's value (the account's stable id, a
 // name or a package), its root, its value inputs and when it was verified.
 type Proof struct {
-	Kind       string `json:"kind"`
-	Value      string `json:"value"`
-	Root       string `json:"root"`
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+	Root  string `json:"root"`
+	// Handle is the account's handle at a sign-in provider that has one
+	// (an X username, a GitHub login): read for sign-in, never stored with
+	// the proof.
+	Handle     string `json:"-"`
 	Inputs     Inputs `json:"inputs"`
 	VerifiedAt int64  `json:"verified_at"`
 }

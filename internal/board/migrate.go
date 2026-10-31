@@ -274,6 +274,10 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if _, err := tx.Exec(appSchema); err != nil {
 		return err
 	}
+	// Schema 49: browsers opted in to web push (webpush.go, C667).
+	if _, err := tx.Exec(webPushSchema); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

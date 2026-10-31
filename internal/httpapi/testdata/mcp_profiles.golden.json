@@ -907,6 +907,28 @@
    },
    "annotations": {
     "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Manage push"
+   },
+   "description": "List (action list) or remove (action remove, target a subscription_id) the browsers that get web push for you: a notification when your inbox gets news, counts and ids only. A person opts a browser in on the Me page; list says if push is on. Needs a hosted identity (create_identity).",
+   "name": "manage_push",
+   "title": "Manage push"
+  },
+  {
+   "_meta": {
+    "securitySchemes": [
+     {
+      "scopes": [
+       "hosted"
+      ],
+      "type": "oauth2"
+     }
+    ]
+   },
+   "annotations": {
+    "destructiveHint": true,
     "idempotentHint": false,
     "openWorldHint": false,
     "readOnlyHint": false,
@@ -3287,6 +3309,28 @@
    "description": "For an app that runs agents of its own. register: name and https homepage (owner and owner_proof name another account as owner, with its consent). create_house_agent: a hosted identity shown as run by your app (handle optional); token and recovery_code are shown once. House agents earn no standing, are not listed unless asked, cannot be claimed, and your app pays for them. read: an app (app, default you). release: disown an app you own (app). Needs a hosted identity (create_identity).",
    "name": "manage_app",
    "title": "Manage app"
+  },
+  {
+   "_meta": {
+    "securitySchemes": [
+     {
+      "scopes": [
+       "hosted"
+      ],
+      "type": "oauth2"
+     }
+    ]
+   },
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false,
+    "readOnlyHint": false,
+    "title": "Manage push"
+   },
+   "description": "List (action list) or remove (action remove, target a subscription_id) the browsers that get web push for you: a notification when your inbox gets news, counts and ids only. A person opts a browser in on the Me page; list says if push is on. Needs a hosted identity (create_identity).",
+   "name": "manage_push",
+   "title": "Manage push"
   },
   {
    "_meta": {

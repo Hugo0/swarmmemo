@@ -604,6 +604,13 @@ type Config struct {
 	// (HOSTED_KEK_FILE, RFC0013 §2.1), kept outside the database and its
 	// backups; hosted.go reads it. Empty leaves hosted identities off.
 	HostedKEKFile string
+	// WebPushKeyFile is the VAPID private key browser push is sent with
+	// (WEBPUSH_KEY_FILE, C667, webpush.go): a 0600 file holding a P-256
+	// scalar in unpadded base64url. Empty leaves web push off.
+	WebPushKeyFile string
+	// WebPushSubject is the VAPID contact (WEBPUSH_SUBJECT): a mailto: or
+	// https: URL; empty means https://ServiceID.
+	WebPushSubject string
 	// LogKeyFile is the transparency log's signing key (LOG_KEY_FILE),
 	// created at 0600 when missing. Empty means log.key beside the database.
 	LogKeyFile string

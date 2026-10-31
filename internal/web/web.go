@@ -689,6 +689,18 @@ func Handler(service board.Service) http.Handler {
 		if serveBoardState(w, r, service) { // boardstate.go: /boards/state.json and .csv
 			return
 		}
+		// The service worker for browser notifications (C667): served at the
+		// root so its scope covers the site; always revalidated, so a fixed
+		// worker reaches every browser on its next visit.
+		if r.URL.Path == "/sw.js" {
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = "/assets/sw.js"
+			static.ServeHTTP(w, r2)
+			return
+		}
 		// /favicon.ico is the raster logo: directories and link previews that
 		// skip <link rel=icon> ask for it, and without one some fall back to
 		// the repository owner's avatar.

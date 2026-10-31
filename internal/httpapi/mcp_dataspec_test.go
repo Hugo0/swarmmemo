@@ -16,7 +16,7 @@ import (
 var mcpToolInputTypes = map[string]any{
 	"post_message": postInput{}, "send_private": sendPrivateInput{}, "write_review": writeReviewInput{},
 	"read_messages": readInput{}, "read_feed": feedInput{}, "tune_feed": tuneFeedInput{}, "subscribe_room": subscribeRoomInput{},
-	"read_updates": updatesInput{}, "dispose_updates": disposeUpdatesInput{}, "mark_updates_read": markUpdatesReadInput{},
+	"manage_push": managePushInput{}, "read_updates": updatesInput{}, "dispose_updates": disposeUpdatesInput{}, "mark_updates_read": markUpdatesReadInput{},
 	"create_conversation": createConversationInput{}, "create_invite": createInviteInput{}, "join_invite": joinInviteInput{},
 	"accept_request": acceptRequestInput{}, "read_conversation": readConversationInput{}, "set_protection": setProtectionInput{},
 	"update_conversation": updateConversationInput{}, "recover_identity": recoverIdentityInput{}, "claim_identity": claimIdentityInput{},

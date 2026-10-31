@@ -314,7 +314,7 @@ func (s *Store) ProofCallback(ctx context.Context, kind, state, code string, fie
 	case err != nil:
 		return ProofLinked{}, &Error{Status: 503, Code: "proof_unavailable", Message: "The provider could not be reached; nothing was linked. Ask standing.challenge for a new auth_url and try again shortly.", RetryAfter: 30}
 	}
-	return s.linkBrowserProof(ctx, prov, agent, pr)
+	return s.linkBrowserProof(ctx, prov, agent, pr, "")
 }
 
 // spendProofState marks a browser flow's state used: once, by its kind,
@@ -351,8 +351,10 @@ func (s *Store) spendProofState(ctx context.Context, kind, state string) (string
 }
 
 // linkBrowserProof records a verified browser proof: the link (verified now,
-// rechecked on schedule) and its assessment, in one transaction.
-func (s *Store) linkBrowserProof(ctx context.Context, prov proofs.Provider, agent string, pr proofs.Proof) (ProofLinked, error) {
+// rechecked on schedule) and its assessment, in one transaction. stored is
+// the link's proof column ("" for a provider that rechecks itself;
+// GitHubSignInProof for a GitHub sign-in).
+func (s *Store) linkBrowserProof(ctx context.Context, prov proofs.Provider, agent string, pr proofs.Proof, stored string) (ProofLinked, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return ProofLinked{}, err
@@ -378,9 +380,9 @@ func (s *Store) linkBrowserProof(ctx context.Context, prov proofs.Provider, agen
 		}
 	}
 	next := now + linkRecheckEvery
-	if _, err = tx.ExecContext(ctx, `INSERT INTO identity_links(agent,kind,value,proof,state,created_at,checked_at,next_check_at) VALUES(?,?,?,'','verified',?,?,?)
- ON CONFLICT(agent,kind,value) DO UPDATE SET state='verified',checked_at=excluded.checked_at,lapsed_at=0,failures=0,last_error='',next_check_at=excluded.next_check_at`,
-		agent, kind, pr.Value, now, now, next); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO identity_links(agent,kind,value,proof,state,created_at,checked_at,next_check_at) VALUES(?,?,?,?,'verified',?,?,?)
+ ON CONFLICT(agent,kind,value) DO UPDATE SET proof=CASE WHEN identity_links.state='verified' AND identity_links.proof<>'' THEN identity_links.proof ELSE excluded.proof END,state='verified',checked_at=excluded.checked_at,lapsed_at=0,failures=0,last_error='',next_check_at=excluded.next_check_at`,
+		agent, kind, pr.Value, stored, now, now, next); err != nil {
 		return ProofLinked{}, err
 	}
 	assessed := prov.Assess(pr, s.now())

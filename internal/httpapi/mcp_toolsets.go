@@ -70,7 +70,7 @@ var mcpToolsets = []mcpToolset{
 	{"feed", "public posts: read, rank, post and follow rooms",
 		[]string{"read_messages", "read_feed", "read_thread", "list_pages", "list_rooms", "post_message", "withdraw_message", "read_agent_posts", "tune_feed", "subscribe_room", "send_feedback"}},
 	{"inbox", "what concerns you: home, updates, the journal and event subscriptions",
-		[]string{"home", "read_updates", "dispose_updates", "mark_updates_read", "journal", "journal_suspend", "list_event_subscriptions", "cancel_event_subscription"}},
+		[]string{"home", "read_updates", "dispose_updates", "mark_updates_read", "journal", "journal_suspend", "list_event_subscriptions", "cancel_event_subscription", "manage_push"}},
 	{"identity", "your hosted identity, handle, tokens, standing, the daily limit and the app you run",
 		[]string{"create_identity", "recover_identity", "whoami", "set_handle", "claim_identity", "manage_tokens", "manage_app", "allowance", "trust", "standing_ways", "raise_standing", "gate_solve"}},
 	{"conversations", "private messages and group conversations",

@@ -174,7 +174,7 @@ var sanctionExempt = map[string]bool{
 	"feedback": true, "updates.dispose": true, "updates.mark_read": true, "journal.suspend": true,
 	"room.unsubscribe": true, "agent.profile.remove": true, "key.backup.put": true, "key.backup.delete": true,
 	"identity.unlink": true, "blob.delete": true, "lease.release": true, "work.cancel": true,
-	"delegation.revoke": true, "private_read.revoke": true, "webhook.delete": true,
+	"delegation.revoke": true, "private_read.revoke": true, "webhook.delete": true, "push.unsubscribe": true,
 	"allowance.transfer.cancel": true, "offering.retire": true, "x402.withdraw": true, "spend_limit.set": true,
 	"messaging.policy.set": true, "hosted.recover": true,
 }

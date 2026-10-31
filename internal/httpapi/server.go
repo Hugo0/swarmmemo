@@ -345,6 +345,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.proofRoute(w, r) // C326: OAuth and Telegram proofs (proofs.go)
 		return
 	}
+	if s.loginRoute(w, r) { // C666: sign in with X, Google or GitHub (login.go)
+		return
+	}
 	if r.URL.Path == "/health" {
 		if !readMethod(r) {
 			methodError(w)

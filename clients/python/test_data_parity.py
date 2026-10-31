@@ -159,6 +159,7 @@ ARGUMENTS = {
 PY_NO_WRAPPER = {
     "app.register": "an app registers once: MCP manage_app or Client.command with data_json sends it",
     "agents.list": "its only data field is include=house (an opt-in for app-run agents); Client.command with data_json sends it",
+    "push.subscribe": "a browser subscribes itself with its own PushSubscription keys (the Me page); Client.command with data_json sends it",
     **{op: "the chat subcommands drive it (class Chat); Client.command with data_json sends any field"
        for op in ("conversation.get", "conversation.open", "conversation.respond", "conversation.seal", "messaging.policy.set")},
     **{op: "its data is a raw string, not fields (blob.put, room.invite.accept: base64url; service.*: a method's args; trust.get: viewer)"

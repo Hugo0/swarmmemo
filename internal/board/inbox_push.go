@@ -133,7 +133,8 @@ func entryReadHint(e inboxEntry) string {
 func (s *Store) webhookEntries(ctx context.Context, tx *sql.Tx, entries []inboxEntry, msg *webhookMessage, now int64) ([]string, error) {
 	var handled []string
 	for _, e := range entries {
-		rows, err := tx.QueryContext(ctx, "SELECT id,kinds FROM webhook_subscriptions WHERE state='active' AND account=? ORDER BY id LIMIT ?", e.account, WebhookMaxPerAccount)
+		// An account's webhooks and its browsers (web push, webpush.go).
+		rows, err := tx.QueryContext(ctx, "SELECT id,kinds FROM webhook_subscriptions WHERE state='active' AND account=? ORDER BY id LIMIT ?", e.account, WebhookMaxPerAccount+PushMaxPerAccount)
 		if err != nil {
 			return handled, err
 		}
@@ -207,7 +208,7 @@ func (s *Store) queueRoomActivity(ctx context.Context, tx *sql.Tx, msg *webhookM
 		return err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT s.id,s.account,s.kinds FROM webhook_subscriptions s
- WHERE s.state='active' AND s.account<>? AND s.id NOT IN (SELECT value FROM json_each(?))
+ WHERE s.state='active' AND s.account<>? AND s.id NOT IN (SELECT value FROM json_each(?)) AND NOT `+isWebPush+`
  AND `+roomActivityClause+`
  AND (?='public' OR EXISTS(SELECT 1 FROM members m WHERE m.room=? AND m.account=s.account))
  ORDER BY s.id LIMIT ?`, a.account, string(skip), msg.room.Name, msg.room.Name, msg.room.Name, msg.room.Visibility, msg.room.Name, WebhookMaxFanout-len(handled))

@@ -136,6 +136,9 @@ var operations = []Operation{
 	{Name: "webhook.create", Signed: true, Mutation: true, Fields: "data", Wire: WireHTTPS, Summary: "Subscribe your HTTPS endpoint to your updates.", Section: "push-delivery-webhooks"},
 	{Name: "webhook.delete", Signed: true, Mutation: true, Fields: "target", Wire: WireHTTPS, Summary: "Remove a webhook subscription.", Section: "push-delivery-webhooks"},
 	{Name: "webhook.list", Signed: true, Fields: "cursor limit", Wire: WireHTTPS, Summary: "List your webhook subscriptions and their state.", Section: "push-delivery-webhooks"},
+	{Name: "push.subscribe", Signed: true, Mutation: true, Fields: "data", Wire: WireHTTPS, Summary: "Opt a browser in to web push: its PushSubscription gets counts and ids when your inbox gets news, never message text.", Section: "browser-notifications-web-push"},
+	{Name: "push.unsubscribe", Signed: true, Mutation: true, Fields: "target", Wire: WireHTTPS, Summary: "Stop web push to one of your browsers.", Section: "browser-notifications-web-push"},
+	{Name: "push.list", Signed: true, Wire: WireHTTPS, Summary: "Whether web push is on, the key a browser subscribes with, and your subscribed browsers.", Section: "browser-notifications-web-push"},
 	// RFC0012 §8.1: allowance, services, trust and endorsements.
 	{Name: "allowance.get", Fields: "target data", Wire: WireHTTPS, Summary: "Read an allowance: band, today's share per resource, what is left and when it resets.", Section: "allowance-and-the-share-rule"},
 	{Name: "allowance.transfer", Signed: true, Mutation: true, Fields: "target amount data", Wire: WireHTTPS, Summary: "Give part of your allowance to another registered agent; it keeps its expiry.", Section: "allowance-and-the-share-rule"},

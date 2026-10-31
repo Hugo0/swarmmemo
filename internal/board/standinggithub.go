@@ -248,6 +248,9 @@ type gistAnswer struct {
 // records the account's assessment: its numeric id (the root, so a rename
 // keeps it), age and public counts, all public.
 func (s *Store) checkGitHubLink(ctx context.Context, fingerprint, login, proof string) linkOutcome {
+	if proof == GitHubSignInProof {
+		return s.checkGitHubSignInLink(ctx, fingerprint, login)
+	}
 	r, ok := decodeLinkRecord(proof)
 	gist, okGist := gistID(r.Proof)
 	if !ok || !okGist || r.Message == "" {
@@ -266,17 +269,48 @@ func (s *Store) checkGitHubLink(ctx context.Context, fingerprint, login, proof s
 	if !gistAuthorizes(g, user.ID, r.Message) {
 		return linkFailed
 	}
+	s.assessGitHubUser(ctx, fingerprint, login, user, "gist", gist)
+	return linkPassed
+}
+
+// assessGitHubUser records a rechecked GitHub link's assessment: the github
+// provider's (internal/proofs: trust.GitHubCents of the age and public
+// counts), rooted at the numeric id, with how the link was proved (by, how).
+func (s *Store) assessGitHubUser(ctx context.Context, fingerprint, login string, user githubUser, by, how string) {
 	now := s.now().Unix()
 	age, created := int64(0), int64(0)
 	if t, err := time.Parse(time.RFC3339, user.CreatedAt); err == nil && t.Unix() < now {
 		age, created = (now-t.Unix())/86400, t.Unix()
 	}
-	// The github provider's assessment (internal/proofs): trust.GitHubCents
-	// of the age and public counts, as before.
 	gh, _ := s.proofRegistry().Get("github")
 	cents := gh.Assess(proofs.Proof{Inputs: proofs.Inputs{"created_at": created, "public_repos": user.PublicRepos, "followers": user.Followers}}, time.Unix(now, 0))
 	_ = s.saveAssessment(ctx, fingerprint, "github", login, "github:"+strconv.FormatInt(user.ID, 10), cents, map[string]any{
 		"source": "api.github.com", "github_id": user.ID, "created_at": user.CreatedAt, "age_days": age,
-		"public_repos": user.PublicRepos, "followers": user.Followers, "gist": gist}, now)
+		"public_repos": user.PublicRepos, "followers": user.Followers, by: how}, now)
+}
+
+// GitHubSignInProof is the stored proof of a GitHub link made by signing in
+// with GitHub (login.go): GitHub itself confirmed the account, so there is
+// no gist to read again.
+const GitHubSignInProof = "github-oauth"
+
+// checkGitHubSignInLink rechecks a link made by signing in with GitHub: the
+// login must still name the account that signed in (the root's numeric id),
+// so a renamed or reused login lapses; the assessment is read again.
+func (s *Store) checkGitHubSignInLink(ctx context.Context, fingerprint, login string) linkOutcome {
+	stored, ok := s.storedProof(ctx, fingerprint, "github", login)
+	if !ok {
+		return linkFailed
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*githubTimeout)
+	defer cancel()
+	user, outcome := s.githubUserOf(ctx, login)
+	if outcome != linkPassed {
+		return outcome
+	}
+	if stored.Root != "github:"+strconv.FormatInt(user.ID, 10) {
+		return linkFailed
+	}
+	s.assessGitHubUser(ctx, fingerprint, login, user, "method", GitHubSignInProof)
 	return linkPassed
 }

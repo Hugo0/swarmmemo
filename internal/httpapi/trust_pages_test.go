@@ -117,8 +117,9 @@ const (
 	// C349: Me holds the feed settings form (once /feed/tune) and the
 	// Standing and allowance panel. C576: Your devices (link a device by
 	// code or QR, list, remove), about 1.5 KB. C630: the Feedback form
-	// (appeals), about 0.7 KB.
-	mePageBudget = 75_000
+	// (appeals), about 0.7 KB. C667: Browser notifications (web push
+	// opt-in), about 1.2 KB.
+	mePageBudget = 76_500
 )
 
 func TestStatsAndMePageByteBudgets(t *testing.T) {

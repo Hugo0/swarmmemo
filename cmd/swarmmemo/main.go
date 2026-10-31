@@ -147,7 +147,7 @@ func operator(command string) error {
 	if command == "x402" && x402VetsTool(os.Args[2:]) {
 		x402 = x402FromEnvironment(features) // the vet reads the tool's live descriptor
 	}
-	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), Features: features, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE"), RawSignalsKeyFile: os.Getenv("RAW_SIGNALS_KEY_FILE"), RawSignalsDBFile: os.Getenv("RAW_SIGNALS_DB_FILE"),
+	store, err := board.Open(path, board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), Features: features, Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), WebPushKeyFile: os.Getenv("WEBPUSH_KEY_FILE"), WebPushSubject: os.Getenv("WEBPUSH_SUBJECT"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE"), RawSignalsKeyFile: os.Getenv("RAW_SIGNALS_KEY_FILE"), RawSignalsDBFile: os.Getenv("RAW_SIGNALS_DB_FILE"),
 		X402: x402, Operator: true, ReadOnly: operatorReadOnly(command, os.Args[2:])})
 	if err != nil {
 		return err
@@ -529,6 +529,18 @@ func serve() error {
 		slog.Info("Webhook delivery enabled", "workers", workers)
 		store.StartWebhookDelivery(ctx, int(workers))
 	}
+	// Browser notifications (C667) ride the webhook sender: with webhook
+	// delivery off, it runs for browsers alone. Without a VAPID key
+	// push.subscribe answers push_unavailable and push.list says why.
+	switch {
+	case !store.WebPushEnabled():
+		slog.Info("Web push off: WEBPUSH_KEY_FILE names no VAPID key, or INBOX_ENTRIES is not read")
+	case os.Getenv("WEBHOOK_DELIVERY") == "true":
+		slog.Info("Web push enabled on the webhook sender")
+	default:
+		slog.Info("Web push enabled; webhook delivery stays off")
+		store.StartWebPushDelivery(ctx)
+	}
 	if e := transports.Start(ctx); e != nil {
 		return e
 	}
@@ -640,7 +652,7 @@ func storeConfigFromEnvironment() (board.Config, string, error) {
 	if e != nil {
 		return board.Config{}, "", e
 	}
-	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReviewerGraceSeconds: grace, WorkLateAcceptSeconds: lateAccept, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, WorkUSDC: workUSDC, Offerings: offeringsFromEnvironment(), OfferingsKeyFile: os.Getenv("OFFERINGS_KEY_FILE"), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE"), RawSignalsKeyFile: os.Getenv("RAW_SIGNALS_KEY_FILE"), RawSignalsDBFile: os.Getenv("RAW_SIGNALS_DB_FILE"),
+	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReviewerGraceSeconds: grace, WorkLateAcceptSeconds: lateAccept, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, WorkUSDC: workUSDC, Offerings: offeringsFromEnvironment(), OfferingsKeyFile: os.Getenv("OFFERINGS_KEY_FILE"), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), WebPushKeyFile: os.Getenv("WEBPUSH_KEY_FILE"), WebPushSubject: os.Getenv("WEBPUSH_SUBJECT"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE"), RawSignalsKeyFile: os.Getenv("RAW_SIGNALS_KEY_FILE"), RawSignalsDBFile: os.Getenv("RAW_SIGNALS_DB_FILE"),
 		Proofs: proofs.New(proofs.ConfigFromEnv(os.Getenv)), PublicURL: publicURL, Bond: bond}, publicURL, nil
 }
 

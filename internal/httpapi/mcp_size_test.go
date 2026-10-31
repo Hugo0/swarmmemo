@@ -49,10 +49,13 @@ import (
 // C662 (2026-10-30): manage_app (app identity and house agents) is on /mcp
 // and the assistant profile (every hosted tool is on both), and find_agents
 // gained include: /mcp 133,191, assistant 98,333; budgets raised by those.
+// C667 (2026-10-30): manage_push (web push browsers, HexArena S5) is on /mcp
+// and the assistant profile too: /mcp 134,077, assistant 99,219; budgets
+// raised by about 1.2 KB.
 var mcpToolsListBudget = map[string]int{
-	"/mcp":               134_500,
+	"/mcp":               135_700,
 	mcpProfileCore:       101_500,
-	web.AssistantMCPPath: 99_000,
+	web.AssistantMCPPath: 100_200,
 }
 
 // mcpOutputSchemaBudget is the most bytes one tool's output schema may be.

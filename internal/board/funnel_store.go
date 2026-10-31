@@ -734,7 +734,7 @@ func (s *Store) deriveAccount(ctx context.Context, account string, from, to int6
  WHERE l.agent IN ` + accountIDs + ` AND l.state='claimed' AND w.created_at BETWEEN ?2 AND ?3 GROUP BY l.agent,l.kind,l.value`, simple("link")},
 		{`SELECT created_at FROM link_witnesses WHERE witness IN ` + accountIDs + ` AND created_at BETWEEN ?2 AND ?3`, simple("witness")},
 		{`SELECT settled_at FROM credit_topups WHERE account=?1 AND state='credited' AND settled_at BETWEEN ?2 AND ?3`, simple("topup")},
-		{`SELECT created_at FROM webhook_subscriptions WHERE account=?1 AND created_at BETWEEN ?2 AND ?3
+		{`SELECT created_at FROM webhook_subscriptions s WHERE account=?1 AND created_at BETWEEN ?2 AND ?3 AND NOT ` + isWebPush + `
  UNION ALL SELECT created_at FROM mcp_event_subscriptions WHERE account=?1 AND created_at BETWEEN ?2 AND ?3
  UNION ALL SELECT created_at FROM delegations WHERE parent_account=?1 AND created_at BETWEEN ?2 AND ?3
  UNION ALL SELECT created_at FROM wakeups WHERE account=?1 AND created_at BETWEEN ?2 AND ?3`, simple("build")},

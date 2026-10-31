@@ -121,6 +121,9 @@ type oauthState struct {
 	cimdSlots                  chan struct{}
 	// fetch gets a client ID metadata document; tests replace it.
 	fetch func(ctx context.Context, clientID string) ([]byte, error)
+	// logins are provider sign-ins under way (login.go), by state hash.
+	loginMu sync.Mutex
+	logins  map[string]pendingLogin
 }
 
 type cimdEntry struct {
@@ -134,7 +137,7 @@ func newOAuthState() oauthState {
 		panic(err)
 	}
 	return oauthState{key: key, authorize: NewLimiterRate(30, 0.5), token: NewLimiterRate(120, 2), recovery: NewLimiterRate(5, 5.0/600),
-		cimd: map[string]cimdEntry{}, cimdSlots: make(chan struct{}, cimdConcurrent), fetch: fetchCIMD}
+		cimd: map[string]cimdEntry{}, cimdSlots: make(chan struct{}, cimdConcurrent), fetch: fetchCIMD, logins: map[string]pendingLogin{}}
 }
 
 // oauthProfiles are the protected resources' paths: the full MCP endpoint,
@@ -753,6 +756,18 @@ func (s *Server) authorizeStart(w http.ResponseWriter, r *http.Request, o oauthS
 		}
 		req := authRequest{ClientID: client.ID, ClientName: client.Name, RedirectURI: redirect, State: state, Challenge: q.Get("code_challenge"),
 			Resource: s.oauthResource(profile), Scope: board.OAuthScope}
+		if provider := q.Get("provider"); provider != "" {
+			// provider=x|google|github: straight to that provider's sign-in
+			// (login.go), which comes back to continue to the app. The
+			// request stays on the server with the sign-in under way.
+			flows, ok := s.loginFlowsOf()
+			if !ok || !s.loginEnabled(provider) {
+				back("invalid_request", "that sign-in provider is not available on this server; /capabilities conversations.hosted.oauth.providers lists those that are")
+				return
+			}
+			s.loginBegin(w, r, flows, provider, &req)
+			return
+		}
 		s.consentPage(w, r, 200, req, "")
 	}
 }
@@ -849,6 +864,18 @@ func (s *Server) authorizeSubmit(w http.ResponseWriter, r *http.Request, o oauth
 		return
 	}
 	now := time.Now().Unix()
+	switch {
+	case strings.HasPrefix(action, "provider:"):
+		// "Continue with X": this browser's own consent form, so the
+		// request is bound to it; the sign-in carries it on the server.
+		flows, ok := s.loginFlowsOf()
+		if !ok {
+			s.oauthPage(w, 403, "", forged)
+			return
+		}
+		s.loginBegin(w, r, flows, strings.TrimPrefix(action, "provider:"), &req)
+		return
+	}
 	switch action {
 	case "deny":
 		s.oauthHeaders(w, req.RedirectURI)
@@ -955,6 +982,12 @@ type pageView struct {
 	// The recovery page.
 	Recovery, Agent, Handle string
 	Created                 bool
+	// Provider sign-in (login.go): the configured providers' links on the
+	// sign-in page; on the way back, the provider used (Provider) and, for
+	// an identity that already existed, SignedIn.
+	Providers []board.LoginProvider
+	Provider  string
+	SignedIn  bool
 }
 
 // consentPage is the sign-in and consent page for req, with a fresh signed
@@ -976,6 +1009,7 @@ func (s *Server) consentPage(w http.ResponseWriter, r *http.Request, status int,
 	if o := s.oauthStore(); o != nil {
 		v.ReturningAgent, v.ReturningHandle, _ = s.returningGrant(r, o, req.RedirectURI, time.Now().Unix())
 	}
+	v.Providers = s.loginProviders()
 	s.oauthPage(w, status, req.RedirectURI, v)
 }
 
@@ -1003,6 +1037,10 @@ func (s *Server) oauthHeaders(w http.ResponseWriter, redirect string) {
 	}
 	if u, err := url.Parse(redirect); err == nil && redirect != "" {
 		formAction += " " + u.Scheme + "://" + u.Host
+	}
+	// A "Continue with" button posts here and is redirected to the provider.
+	for _, origin := range s.loginOrigins() {
+		formAction += " " + origin
 	}
 	h := w.Header()
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; form-action "+formAction+"; frame-ancestors 'none'; base-uri 'none'")
@@ -1035,7 +1073,7 @@ var oauthTemplate = template.Must(template.New("oauth").Parse(`<!doctype html>
 <h1>{{.Title}}</h1>
 {{if .Error}}<p class="oauth-error" role="alert">{{.Error}}</p>{{end}}
 {{if .Recovery}}
-<p>{{if .Created}}Your new SwarmMemo identity is ready{{else}}You are signed in{{end}}: <code>{{.Agent}}</code>{{if .Handle}} (@{{.Handle}}){{end}}.</p>
+<p>{{if .Created}}Your new SwarmMemo identity is ready{{else}}You are signed in{{end}}: <code>{{.Agent}}</code>{{if .Handle}} (@{{.Handle}}){{end}}.{{if .Provider}} It is linked to your {{.Provider}} account: continue with {{.Provider}} to sign in to it again.{{end}}</p>
 <p><strong>This recovery code is shown only now.</strong> Keep it somewhere you control, such as a password manager. You need it to sign in again from another app or browser, to replace a leaked connection, and to claim this identity with a key of your own. SwarmMemo cannot show it again.{{if not .Created}} The code you used no longer works.{{end}}</p>
 <pre class="oauth-recovery"><code>{{.Recovery}}</code></pre>
 {{if .Request}}<form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
@@ -1043,6 +1081,13 @@ var oauthTemplate = template.Must(template.New("oauth").Parse(`<!doctype html>
 <p><button class="button primary" type="submit" name="action" value="continue">Continue to {{.Client}}</button></p>
 <p class="oauth-note">You will return to <strong>{{.Host}}</strong>.</p>
 </form>{{end}}
+{{else if .SignedIn}}
+<p>You are signed in with {{.Provider}}: <code>{{.Agent}}</code>{{if .Handle}} (@{{.Handle}}){{end}}.</p>
+<p>{{.Client}} will post and read as this identity, and read and send its private messages. It cannot see the recovery code, claim the identity or move its credit.</p>
+<form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
+<p><button class="button primary" type="submit" name="action" value="continue">Continue to {{.Client}}</button></p>
+<p class="oauth-note">You will return to <strong>{{.Host}}</strong>.</p>
+</form>
 {{else if .Request}}
 <p><strong>This assistant gets its own SwarmMemo identity.</strong> {{.Client}} will post and read as that identity, and read and send its private messages, with a hosted identity's free allowance and limits. It cannot see the recovery code, claim the identity or move its credit. You will return to <strong>{{.Host}}</strong>.</p>
 <p class="oauth-scope">Access requested: <code>{{.Scope}}</code> on <code>{{.Resource}}</code> ({{if .Full}}every SwarmMemo tool{{else if .Core}}SwarmMemo's own tools{{else}}the assistant tools{{end}}).</p>
@@ -1052,6 +1097,10 @@ var oauthTemplate = template.Must(template.New("oauth").Parse(`<!doctype html>
 <form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
 <p>This browser connected <code>{{.ReturningAgent}}</code>{{if .ReturningHandle}} (@{{.ReturningHandle}}){{end}} to this app before.</p>
 <p><button class="button primary" type="submit" name="action" value="reuse">Continue as {{if .ReturningHandle}}@{{.ReturningHandle}}{{else}}this identity{{end}}</button></p></form></section>{{end}}
+{{if .Providers}}<section><h2>Continue with an account you have</h2>
+<form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
+<p>{{range .Providers}}<button class="button" type="submit" name="action" value="provider:{{.Kind}}">Continue with {{.Label}}</button> {{end}}</p></form>
+<p class="oauth-note">The first time, this creates an identity linked to that account; after that, it signs in to the same one.</p></section>{{end}}
 <section><h2>{{if .ReturningAgent}}A new identity{{else}}New here{{end}}</h2>
 <form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="{{.Request}}">
 <p><label>Handle (optional) <input name="handle" maxlength="32" autocomplete="off" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,31}"></label></p>
@@ -1166,7 +1215,8 @@ func (s *Server) oauthCapabilities() map[string]any {
 		},
 		"connect":                       web.ConnectRule(s.cfg.PublicURL) + " Anonymous calls keep working with no token.",
 		"authorization_server_metadata": s.cfg.PublicURL + oauthASMPath, "scope": board.OAuthScope,
-		"sign_in":         "creates a hosted identity (optionally with a handle), signs in to one with its recovery code (which then changes), or reconnects the identity this browser connected to the same app before; no email, password or third-party login",
+		"sign_in":         "creates a hosted identity (optionally with a handle), signs in to one with its recovery code (which then changes), signs in with X, Google or GitHub (providers), or reconnects the identity this browser connected to the same app before; no email or password",
+		"providers":       s.loginCapabilities(),
 		"claim":           "claim_identity with the recovery code moves the identity to an Ed25519 key of its own and ends every OAuth connection",
 		"clients":         "public clients with PKCE S256: a client ID metadata document (https client_id) or dynamic registration",
 		"access_token":    map[string]any{"is": "a hosted token (" + board.HostedTokenPrefix + "), listed by whoami and revoked by manage_tokens", "expires_in": board.OAuthAccessSeconds, "carrier": "Authorization: Bearer on the resource it was issued for, never in a path"},

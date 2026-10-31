@@ -181,6 +181,7 @@ var unlistedRoutes = map[string]string{
 	"/metrics":                              "operator metrics, bearer-token only",
 	"/openapi.json":                         "this document",
 	"/proofs/":                              "proof bundles, linked from records' proofs_url",
+	"/login/":                               "provider sign-in pages and their callbacks (HTML), documented in /protocol.md#signing-in-with-x-google-or-github",
 	"/r/":                                   "room pages; /api/messages?room= is listed",
 	"/recent":                               "plain-text recent messages; /api/messages is listed",
 	"/references":                           "the references page (HTML); /api/references is listed",

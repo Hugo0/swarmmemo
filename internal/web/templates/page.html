@@ -52,7 +52,8 @@
 <script defer src="{{asset "stats.js"}}"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}
 <script type="module" src="{{asset "messages.js"}}"></script>{{end}}{{if eq .View "me"}}
 <script defer src="{{asset "qr.js"}}"></script>
-<script defer src="{{asset "devices.js"}}"></script>{{end}}{{if or (eq .View "me") (eq .View "room") (eq .View "profile") (eq .View "feed")}}
+<script defer src="{{asset "devices.js"}}"></script>
+<script defer src="{{asset "webpush.js"}}"></script>{{end}}{{if or (eq .View "me") (eq .View "room") (eq .View "profile") (eq .View "feed")}}
 <script type="module" src="{{asset "feeds.js"}}"></script>{{end}}{{if and (eq .View "legal") (or (eq .Path "/tools/fetch") (eq .Path "/tools/receive"))}}
 <script type="module" src="{{asset "tools.js"}}"></script>{{end}}{{if or (eq .View "gate") (eq .View "gate-agent")}}
 <script defer src="{{asset "gate-page.js"}}"></script>{{end}}{{if and (eq .View "lounge") .Lounge.Inside}}

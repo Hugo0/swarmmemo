@@ -57,10 +57,19 @@ type OAuth struct {
 	extra     url.Values
 	creds     OAuthCredentials
 	f         fetcher
-	// profile reads the account's stable id and value inputs with an
-	// access token.
-	profile func(ctx context.Context, f fetcher, token string) (string, Inputs, error)
+	// profile reads the account's stable id, its handle (when the
+	// provider has one) and value inputs with an access token.
+	profile func(ctx context.Context, f fetcher, token string) (account, error)
 	assess  func(in Inputs, now time.Time) int64
+	// valueIsHandle makes the proof's value the account's handle, lowercase
+	// (GitHub's login, as the gist proof stores it), its root still the id.
+	valueIsHandle bool
+}
+
+// account is what a provider's profile read answers.
+type account struct {
+	ID, Handle string
+	Inputs     Inputs
 }
 
 func (o *OAuth) Spec() Spec    { return o.spec }
@@ -89,10 +98,24 @@ func PKCEVerifier(key []byte, state string) string {
 func (o *OAuth) AuthURL(state, verifier, redirect string) string {
 	q := url.Values{"response_type": {"code"}, "client_id": {o.creds.ClientID}, "redirect_uri": {redirect}, "scope": {o.scope},
 		"state": {state}, "code_challenge": {PKCEChallenge(verifier)}, "code_challenge_method": {"S256"}}
+	if o.scope == "" {
+		q.Del("scope")
+	}
 	for k, v := range o.extra {
 		q[k] = v
 	}
 	return o.authURL + "?" + q.Encode()
+}
+
+// AuthOrigin is the scheme and host of the provider's authorization URL:
+// a sign-in form's CSP form-action names it, since browsers apply
+// form-action to the redirect after a post.
+func (o *OAuth) AuthOrigin() string {
+	u, err := url.Parse(o.authURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // Verify exchanges the code (with the PKCE verifier and the same redirect
@@ -124,18 +147,32 @@ func (o *OAuth) Verify(ctx context.Context, e Evidence) (Proof, error) {
 	if tok.AccessToken == "" || (tok.TokenType != "" && !strings.EqualFold(tok.TokenType, "bearer")) {
 		return Proof{}, ErrFailed
 	}
-	id, in, err := o.profile(ctx, o.f, tok.AccessToken)
+	acct, err := o.profile(ctx, o.f, tok.AccessToken)
 	if err != nil {
 		return Proof{}, err
 	}
-	if !accountIDRE.MatchString(id) {
+	if !accountIDRE.MatchString(acct.ID) {
 		return Proof{}, ErrFailed
 	}
-	if in == nil {
-		in = Inputs{}
+	if acct.Inputs == nil {
+		acct.Inputs = Inputs{}
 	}
-	return Proof{Kind: o.spec.Kind, Value: id, Root: o.spec.Kind + ":" + id, Inputs: in, VerifiedAt: e.Now.Unix()}, nil
+	if !handleRE.MatchString(acct.Handle) {
+		acct.Handle = ""
+	}
+	value := acct.ID
+	if o.valueIsHandle {
+		if acct.Handle == "" {
+			return Proof{}, ErrFailed
+		}
+		value = strings.ToLower(acct.Handle)
+	}
+	return Proof{Kind: o.spec.Kind, Value: value, Root: o.spec.Kind + ":" + acct.ID, Handle: acct.Handle, Inputs: acct.Inputs, VerifiedAt: e.Now.Unix()}, nil
 }
+
+// handleRE is a provider handle the board may show or suggest: an X
+// username or a GitHub login (letters, digits, _ and -, at most 39).
+var handleRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$`)
 
 // Recheck keeps the proof: no token is kept, so it re-assesses the stored
 // inputs (the account's age grows).
@@ -164,14 +201,14 @@ func newGoogle(c OAuthCredentials, f fetcher) *OAuth {
 		"a fixed 50: Google tells no account age", "GOOGLE"),
 		authURL: "https://accounts.google.com/o/oauth2/v2/auth", tokenURL: "https://oauth2.googleapis.com/token", scope: "openid",
 		extra: url.Values{"prompt": {"select_account"}}, creds: c, f: f,
-		profile: func(ctx context.Context, f fetcher, token string) (string, Inputs, error) {
+		profile: func(ctx context.Context, f fetcher, token string) (account, error) {
 			var u struct {
 				Sub string `json:"sub"`
 			}
 			if err := f.do(ctx, request{url: "https://openidconnect.googleapis.com/v1/userinfo", header: bearer(token), into: &u, allow4x: true}); err != nil {
-				return "", nil, err
+				return account{}, err
 			}
-			return u.Sub, Inputs{}, nil
+			return account{ID: u.Sub}, nil
 		},
 		assess: func(Inputs, time.Time) int64 { return 50 }}
 }
@@ -181,10 +218,11 @@ func newX(c OAuthCredentials, f fetcher) *OAuth {
 		"account age (up to 100, one-year ramp) + followers (up to 50, saturating at 100)", "X"),
 		authURL: "https://x.com/i/oauth2/authorize", tokenURL: "https://api.x.com/2/oauth2/token", scope: "users.read tweet.read",
 		basicAuth: true, creds: c, f: f,
-		profile: func(ctx context.Context, f fetcher, token string) (string, Inputs, error) {
+		profile: func(ctx context.Context, f fetcher, token string) (account, error) {
 			var u struct {
 				Data struct {
 					ID        string `json:"id"`
+					Username  string `json:"username"`
 					CreatedAt string `json:"created_at"`
 					Metrics   struct {
 						Followers int64 `json:"followers_count"`
@@ -192,9 +230,9 @@ func newX(c OAuthCredentials, f fetcher) *OAuth {
 				} `json:"data"`
 			}
 			if err := f.do(ctx, request{url: "https://api.x.com/2/users/me?user.fields=created_at,public_metrics", header: bearer(token), into: &u, allow4x: true}); err != nil {
-				return "", nil, err
+				return account{}, err
 			}
-			return u.Data.ID, Inputs{"created_at": isoTime(u.Data.CreatedAt), "followers": u.Data.Metrics.Followers}, nil
+			return account{ID: u.Data.ID, Handle: u.Data.Username, Inputs: Inputs{"created_at": isoTime(u.Data.CreatedAt), "followers": u.Data.Metrics.Followers}}, nil
 		},
 		assess: func(in Inputs, now time.Time) int64 {
 			return trust.AccountCents(ageDays(in["created_at"], now), 100, 365, in["followers"], 50, 100)
@@ -219,18 +257,18 @@ func newDiscord(c OAuthCredentials, f fetcher) *OAuth {
 		"account age (up to 100, one-year ramp, from the snowflake id)", "DISCORD"),
 		authURL: "https://discord.com/oauth2/authorize", tokenURL: "https://discord.com/api/oauth2/token", scope: "identify",
 		basicAuth: true, extra: url.Values{"prompt": {"consent"}}, creds: c, f: f,
-		profile: func(ctx context.Context, f fetcher, token string) (string, Inputs, error) {
+		profile: func(ctx context.Context, f fetcher, token string) (account, error) {
 			var u struct {
 				ID string `json:"id"`
 			}
 			if err := f.do(ctx, request{url: "https://discord.com/api/users/@me", header: bearer(token), into: &u, allow4x: true}); err != nil {
-				return "", nil, err
+				return account{}, err
 			}
 			created := SnowflakeTime(u.ID)
 			if created == 0 {
-				return "", nil, ErrFailed
+				return account{}, ErrFailed
 			}
-			return u.ID, Inputs{"created_at": created}, nil
+			return account{ID: u.ID, Inputs: Inputs{"created_at": created}}, nil
 		},
 		assess: func(in Inputs, now time.Time) int64 {
 			return trust.AccountCents(ageDays(in["created_at"], now), 100, 365, 0, 0, 0)
@@ -242,20 +280,20 @@ func newReddit(c OAuthCredentials, f fetcher) *OAuth {
 		"account age (up to 120, one-year ramp) + karma (up to 80, saturating at 1,000)", "REDDIT"),
 		authURL: "https://www.reddit.com/api/v1/authorize", tokenURL: "https://www.reddit.com/api/v1/access_token", scope: "identity",
 		basicAuth: true, extra: url.Values{"duration": {"temporary"}}, creds: c, f: f,
-		profile: func(ctx context.Context, f fetcher, token string) (string, Inputs, error) {
+		profile: func(ctx context.Context, f fetcher, token string) (account, error) {
 			var u struct {
 				ID         string  `json:"id"`
 				CreatedUTC float64 `json:"created_utc"`
 				TotalKarma int64   `json:"total_karma"`
 			}
 			if err := f.do(ctx, request{url: "https://oauth.reddit.com/api/v1/me", header: bearer(token), into: &u, allow4x: true}); err != nil {
-				return "", nil, err
+				return account{}, err
 			}
 			created := int64(0)
 			if u.CreatedUTC > 0 && u.CreatedUTC < math.MaxInt32*4 {
 				created = int64(u.CreatedUTC)
 			}
-			return u.ID, Inputs{"created_at": created, "karma": u.TotalKarma}, nil
+			return account{ID: u.ID, Inputs: Inputs{"created_at": created, "karma": u.TotalKarma}}, nil
 		},
 		assess: func(in Inputs, now time.Time) int64 {
 			return trust.AccountCents(ageDays(in["created_at"], now), 120, 365, in["karma"], 80, 1000)
@@ -270,13 +308,13 @@ func newHuggingFace(c OAuthCredentials, f fetcher) *OAuth {
 		"account age (up to 100, one-year ramp) + followers (up to 50, saturating at 20)", "HUGGINGFACE"),
 		authURL: "https://huggingface.co/oauth/authorize", tokenURL: "https://huggingface.co/oauth/token", scope: "openid profile",
 		basicAuth: true, creds: c, f: f,
-		profile: func(ctx context.Context, f fetcher, token string) (string, Inputs, error) {
+		profile: func(ctx context.Context, f fetcher, token string) (account, error) {
 			var u struct {
 				Sub      string `json:"sub"`
 				Username string `json:"preferred_username"`
 			}
 			if err := f.do(ctx, request{url: "https://huggingface.co/oauth/userinfo", header: bearer(token), into: &u, allow4x: true}); err != nil {
-				return "", nil, err
+				return account{}, err
 			}
 			in := Inputs{}
 			// The public overview gives age and followers; without it the
@@ -288,10 +326,42 @@ func newHuggingFace(c OAuthCredentials, f fetcher) *OAuth {
 			if hfNameRE.MatchString(u.Username) && f.do(ctx, request{url: "https://huggingface.co/api/users/" + url.PathEscape(u.Username) + "/overview", into: &o}) == nil {
 				in["created_at"], in["followers"] = isoTime(o.CreatedAt), o.Followers
 			}
-			return u.Sub, in, nil
+			return account{ID: u.Sub, Inputs: in}, nil
 		},
 		assess: func(in Inputs, now time.Time) int64 {
 			return trust.AccountCents(ageDays(in["created_at"], now), 100, 365, in["followers"], 50, 20)
+		}}
+}
+
+// newGitHubLogin is GitHub as a sign-in provider (an OAuth app, no scope:
+// public profile only). It is not a standing way of its own: GitHub's
+// standing way is the gist statement (existing.go), whose root it shares
+// (github: + the numeric account id), so one GitHub account is one root
+// however it was proved. Its value is the login, as the gist proof's.
+func newGitHubLogin(c OAuthCredentials, f fetcher) *OAuth {
+	return &OAuth{spec: Spec{Kind: "github", Label: "Link GitHub", Proves: "You control a GitHub account; its age and public activity count.", Reveals: "the GitHub login.",
+		Flow: FlowOAuth, Method: "github-oauth", Root: "`github:` + GitHub's numeric account number", Env: []string{"LOGIN_GITHUB_CLIENT_ID", "LOGIN_GITHUB_CLIENT_SECRET"},
+		ChallengeTTL: OAuthTTL, Needs: []string{"github", NeedBrowser}, EffortMinutes: 2},
+		authURL: "https://github.com/login/oauth/authorize", tokenURL: "https://github.com/login/oauth/access_token", scope: "",
+		extra: url.Values{"allow_signup": {"true"}}, creds: c, f: f, valueIsHandle: true,
+		profile: func(ctx context.Context, f fetcher, token string) (account, error) {
+			var u struct {
+				ID          int64  `json:"id"`
+				Login       string `json:"login"`
+				CreatedAt   string `json:"created_at"`
+				PublicRepos int64  `json:"public_repos"`
+				Followers   int64  `json:"followers"`
+			}
+			if err := f.do(ctx, request{url: "https://api.github.com/user", header: bearer(token), into: &u, allow4x: true}); err != nil {
+				return account{}, err
+			}
+			if u.ID <= 0 {
+				return account{}, ErrFailed
+			}
+			return account{ID: strconv.FormatInt(u.ID, 10), Handle: u.Login, Inputs: Inputs{"created_at": isoTime(u.CreatedAt), "public_repos": u.PublicRepos, "followers": u.Followers}}, nil
+		},
+		assess: func(in Inputs, now time.Time) int64 {
+			return trust.GitHubCents(ageDays(in["created_at"], now), in["public_repos"], in["followers"])
 		}}
 }
 
