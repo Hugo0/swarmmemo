@@ -36,6 +36,13 @@ func hostedServer(t testing.TB) (*board.Store, *Server) {
 // server alike.
 func hostedServerWith(t testing.TB, f board.Features) (*board.Store, *Server) {
 	t.Helper()
+	return hostedServerAt(t, filepath.Join(t.TempDir(), "board.sqlite"), f)
+}
+
+// hostedServerAt is hostedServerWith on the database at path, for a test
+// that also reaches the rows directly.
+func hostedServerAt(t testing.TB, path string, f board.Features) (*board.Store, *Server) {
+	t.Helper()
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		t.Fatal(err)
@@ -44,7 +51,7 @@ func hostedServerWith(t testing.TB, f board.Features) (*board.Store, *Server) {
 	if err := os.WriteFile(kek, []byte(base64.RawURLEncoding.EncodeToString(key)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store, err := board.Open(filepath.Join(t.TempDir(), "board.sqlite"), board.Config{ServiceID: "swarmmemo.com", HostedKEKFile: kek, Features: f})
+	store, err := board.Open(path, board.Config{ServiceID: "swarmmemo.com", HostedKEKFile: kek, Features: f})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -263,6 +263,26 @@ const (
 	primaryStep = 186
 )
 
+// TestInferenceSaysTheLogIsPublic: the catalogue's summary, the service
+// line (/llms.txt) and the method line (the MCP tool description) each say
+// plainly that the prompt and answer are public, the method line in its
+// first two sentences (C676).
+func TestInferenceSaysTheLogIsPublic(t *testing.T) {
+	v := newInfEnv(t, [3]int64{10000, 10000, 10000})
+	p, err := services.NewBuiltinRegistry([]string{"inference"}, services.Deps{DB: v.db, Inference: v.cfg}).Lookup("inference")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := p.Describe()
+	const note = "Your prompt and the answer are public in the call log."
+	if services.InferencePublicNote != note || !strings.HasPrefix(d.Summary, note) || !strings.HasSuffix(d.Line, note) {
+		t.Fatalf("summary %q, line %q", d.Summary, d.Line)
+	}
+	if m := d.Methods[0]; m.Line != "One non-streaming chat completion. "+note {
+		t.Fatalf("method line %q", m.Line)
+	}
+}
+
 func TestInferenceSuccess(t *testing.T) {
 	v := newInfEnv(t, [3]int64{10000, 10000, 10000})
 	res, key, err := v.call(t, smallArgs, 1000)
@@ -272,6 +292,10 @@ func TestInferenceSuccess(t *testing.T) {
 	result, _ := res["result"].(map[string]any)
 	if result["output"] != "hello from primary" || result["model"] != "small" || result["upstream"] != "primary" || result["upstream_model"] != "m1" || result["log"] != "public" {
 		t.Fatalf("result: %v", res)
+	}
+	// Every answer says, next to the output, that the call log is public (C676).
+	if result["notice"] != "Your prompt and the answer are public in the call log." {
+		t.Fatalf("the answer's public notice: %v", result["notice"])
 	}
 	msgs, _ := result["messages"].([]any)
 	if len(msgs) != 1 || msgs[0].(map[string]any)["content"] != "hello" {
@@ -414,7 +438,7 @@ func TestInferenceEveryUpstreamFails(t *testing.T) {
 				// Charged up to the quote for what the upstreams may have
 				// billed (security review 1.20, M3); the record says why.
 				result, _ := res["result"].(map[string]any)
-				if err != nil || result["error"] != tc.code || result["output"] != nil {
+				if err != nil || result["error"] != tc.code || result["output"] != nil || result["notice"] != services.InferencePublicNote {
 					t.Fatalf("billed failure: %v %v", res, err)
 				}
 				if r := v.row(t, key); r.state != "done" || r.cost != smallQuote {

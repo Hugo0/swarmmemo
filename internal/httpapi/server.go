@@ -326,7 +326,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, MKCOL, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Text")
+		// Authorization carries an app's bearer token from its own page; no
+		// cookie or ambient credential is ever allowed cross-origin.
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Text, Authorization, Last-Event-ID")
 		w.WriteHeader(204)
 		return
 	}

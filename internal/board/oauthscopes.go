@@ -248,6 +248,15 @@ func scopeHolds(ctx context.Context, tx *sql.Tx, where string, c Command, a acto
 			return false, nil
 		}
 		if where == "app_rooms" {
+			// A message in one of the app's rooms the person is not in is
+			// refused as an unknown one is: the token learns nothing of it
+			// (C670).
+			if slices.Contains(messageRoomOps, c.Operation) {
+				if _, err = roomAccess(ctx, tx, room, a); IsRoomNotFound(err) {
+					return false, nil
+				}
+				return err == nil, err
+			}
 			return true, nil
 		}
 		// Two people besides the app, the room's owner and first member.

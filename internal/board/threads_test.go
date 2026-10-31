@@ -289,7 +289,12 @@ func TestThreadInvalidParentRelationships(t *testing.T) {
 			if _, err := s.db.Exec("UPDATE events SET reply_to=? WHERE id=?", parent, root); err != nil {
 				t.Fatal(err)
 			}
-			fails(t, s, Command{Operation: "thread.get", MessageID: root}, "invalid_thread")
+			// A parent outside the room reads as a missing id (C670).
+			want := "invalid_thread"
+			if scenario == "missing" || scenario == "cross-room" {
+				want = "not_found"
+			}
+			fails(t, s, Command{Operation: "thread.get", MessageID: root}, want)
 		})
 	}
 	s := openTest(t, Config{})

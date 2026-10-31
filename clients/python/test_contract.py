@@ -122,6 +122,11 @@ class MessageContract(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad):
                 memo.check_work({"type": "message", "work": {**mark, "standing": bad}})
         memo.check_work({"type": "message", "work": {k: v for k, v in mark.items() if k != "reward"}})
+        # An open standing task with every seat taken is open and not claimable (exactlane 34209510).
+        memo.check_work({"type": "message", "work": {**mark, "claimable": False}})
+        for bad in ({"state": "accepted", "claimable": True}, {"claimable": "yes"}):
+            with self.assertRaises(ValueError, msg=bad):
+                memo.check_work({"type": "message", "work": {**mark, **bad}})
         # Shaped like #bounties root 6ea0a607: a paid credit-only reward.
         paid_id = "6ea0a607bc8d67295573129bc80ca4d3"
         memo.check_work({"type": "message", "work": {"id": paid_id, "title": "Bounty", "state": "accepted", "deadline": 1788566400, "eligibility": "open",

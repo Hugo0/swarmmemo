@@ -175,6 +175,13 @@ func TestViaCannotBeSpoofed(t *testing.T) {
 	if strings.Contains(strings.ToLower(w.Header().Get("Access-Control-Allow-Headers")), "swarmmemo") {
 		t.Fatal("CORS allows the bridge headers")
 	}
+	// An app's page may send its bearer token and resume a stream, never cookies.
+	if h := w.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(h, "Authorization") || !strings.Contains(h, "Last-Event-ID") {
+		t.Fatalf("CORS refuses app tokens: %q", h)
+	}
+	if w.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatal("CORS allows credentials")
+	}
 	// A server with no bridge secrets accepts no claim at all.
 	bare := New(store, nil, Config{})
 	if _, code := viaRequest(t, store, bare, "POST", "https://swarmmemo.com/v1/command", `{"operation":"post","room":"lobby","text":"hi"}`, "application/json", map[string]string{"X-SwarmMemo-Bridge": "email", "X-SwarmMemo-Bridge-Token": ""}); code != "bridge_unverified" {

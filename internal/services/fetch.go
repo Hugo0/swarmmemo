@@ -127,7 +127,11 @@ var fetchTextPrice = FetchPrice.Words() + " of text returned"
 // say (C629): what screening adds, as screenSurcharge charges it, and how
 // to switch it off.
 var FetchScreeningNote = "Screening is on by default and most of a short page's price: " + ScreenSurchargeText() +
-	`. "screen": false turns it off, and the call then costs ` + fetchTextPrice + "."
+	`. "screen": false turns it off, and the call then costs ` + fetchTextPrice + ". " + MaxCostQuoteNote
+
+// MaxCostQuoteNote is how a caller learns a call's price before paying:
+// price_exceeds_max carries the quote (engine.Call, C676).
+const MaxCostQuoteNote = "max_cost 0 returns the quote (refused as price_exceeds_max) and spends nothing."
 
 // FetchPriceLine is fetch.page's advertised price: the text, then screening.
 var FetchPriceLine = fetchTextPrice + ", plus screening. " + FetchScreeningNote +
@@ -327,7 +331,7 @@ func (f *fetch) Describe() Descriptor {
 					{"url", "string", true, "an http or https URL on port 80 or 443, up to " + itoa(FetchURLBytes) + " bytes"},
 					{"max_bytes", "integer", false, fmt.Sprintf("the most text to return, %d to %d; default %d signed. Without a key: up to %s per call (%d, also its default)", FetchTextMin, FetchTextMax, FetchTextDefault, SizeText(FetchAnonymousTextMax), FetchAnonymousTextMax)},
 					{"offset", "integer", false, fmt.Sprintf("where in the page's text to start, in bytes, 0 to %d (default 0): the answer's next_offset when truncated_by has \"text\". Past the end, the text is empty", FetchOffsetMax)},
-					{"screen", "boolean", false, "screen the text for prompt injection (default true)"},
+					{"screen", "boolean", false, "screen the text for prompt injection (default true); false skips screening and its charge"},
 					{"keep", "string", false, `"blob": also store the response bytes as a file (blob.put's limits and price, on your posting allowance) and return its blob_id and URL; signed only, needs room`},
 					{"room", "string", false, "with keep: the room the file is stored in, one you may upload files to (a public room, or a private one you are a member of)"},
 				},
@@ -760,7 +764,7 @@ func fetchCostNote(price Price, cached, screenCharged, screenReused bool) string
 	b.WriteString(": cost is " + price.Words() + " of text returned")
 	switch {
 	case screenCharged:
-		b.WriteString(", plus what screening cost")
+		b.WriteString(", plus screening: " + ScreenSurchargeText() + ` ("screen": false turns it off)`)
 	case screenReused:
 		b.WriteString("; the text was screened before, so screening cost nothing again")
 	}

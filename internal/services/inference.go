@@ -459,15 +459,20 @@ CREATE TABLE IF NOT EXISTS inference_spend (
 `
 }
 
+// InferencePublicNote is the one sentence every inference surface states
+// (the MCP tool description, the catalogue, /llms.txt, each answer's
+// notice): prompts and answers are public (C676).
+const InferencePublicNote = "Your prompt and the answer are public in the call log."
+
 func (*inference) Describe() Descriptor {
 	return Descriptor{
 		ID: "inference",
-		Summary: "Chat completion from a small hosted model, non-streaming. args: {\"model\":ALIAS,\"messages\":[{\"role\":\"system\"|\"user\"|\"assistant\",\"content\":TEXT}],\"max_tokens\":N}. " +
+		Summary: InferencePublicNote + " Send nothing secret. " +
+			"Chat completion from a small hosted model, non-streaming. args: {\"model\":ALIAS,\"messages\":[{\"role\":\"system\"|\"user\"|\"assistant\",\"content\":TEXT}],\"max_tokens\":N}. " +
 			"Priced in credit by tokens: the maximum is reserved, the actual usage charged and the rest refunded; a failed step the upstream may have billed is charged. " +
-			"Prompts are screened first and refused if the screen is unavailable. " +
-			"Public: the prompt, the output and the model of every call are recorded for the public run log; send nothing secret.",
+			"Prompts are screened first and refused if the screen is unavailable.",
 		Title: "Inference", Topic: "Inference",
-		Line: "Ask a small hosted model: one chat completion, charged by the tokens it used; prompts and replies are public.",
+		Line: "One chat completion from a small hosted model. " + InferencePublicNote,
 		Limits: []Limit{
 			{"inference_prompt_bytes", InferencePromptBytes, "bytes", "Message text of one call"},
 			{"inference_args_bytes", InferenceArgsMax, "bytes", "Arguments of one call"},
@@ -477,7 +482,7 @@ func (*inference) Describe() Descriptor {
 		},
 		Mode: Remote,
 		Methods: []Method{{Name: "complete", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: InferenceArgsMax,
-			Line:      "One non-streaming chat completion.",
+			Line:      "One non-streaming chat completion. " + InferencePublicNote,
 			PriceNote: "by tokens, per model: base + input and output tokens at the model's per-million rates, in credit; the quote reserves the most and the rest is refunded, less failed steps the upstream may have billed",
 			Args: []Arg{
 				{"model", "string", true, "a model alias from services.list"},
@@ -826,7 +831,7 @@ func (p *inference) billedFailure(plan inferencePlan, attempts []attempt, failur
 	promptHash := sha256.Sum256(plan.prompt)
 	body := map[string]any{
 		"model": plan.alias, "messages": json.RawMessage(plan.prompt), "output": nil, "error": failure,
-		"attempts": attempts, "log": "public",
+		"attempts": attempts, "log": "public", "notice": InferencePublicNote,
 		"note": "every upstream failed after receiving the request and may have billed it; the call is charged for that, up to its quote",
 	}
 	public := map[string]any{
@@ -867,6 +872,7 @@ func (p *inference) result(ctx context.Context, plan inferencePlan, up *Inferenc
 		"messages": json.RawMessage(plan.prompt), "output": output, "finish_reason": reply.FinishReason,
 		"usage":    map[string]any{"input_tokens": reply.InputTokens, "output_tokens": reply.OutputTokens, "reported": reply.Reported},
 		"attempts": attempts, "output_sha256": hex.EncodeToString(outHash[:]), "log": "public",
+		"notice": InferencePublicNote,
 	}
 	if hidden != "" {
 		body["hidden"] = hidden

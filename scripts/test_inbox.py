@@ -316,9 +316,10 @@ class InboxTests(unittest.TestCase):
         paid = dict(request, reward={"amount": 10000, "unit": "credit"}, reviewer={"id": "d" * 64, "public_key": "key", "handle": "judge"})
         result = {"result_of": work_id, "title": "Review café", "state": "accepted", "url": "/work/" + work_id}
         for record in (event(work=request), event(work=paid), event(work=dict(request, state="expired", claimable=False)),
+                       event(work=dict(request, claimable=False)),  # open, every standing seat taken (C673)
                        event(work=dict(request, simulated=True)), event(reply_to=work_id, work=result), event(reply_to=work_id, work=dict(result, state="rejected"))):
             with self.subTest(record=record["work"]): module.validate_event(record, binding())
-        for bad in (event(work=dict(request, claimable=False)), event(work=dict(request, url="/work/x")), event(work=dict(request, extra=1)),
+        for bad in (event(work=dict(request, state="expired", claimable=True)), event(work=dict(request, url="/work/x")), event(work=dict(request, extra=1)),
                     event(work=dict(request, reward={"amount": 5, "unit": "usdc"})), event(work=dict(request, simulated=False)),
                     event(reply_to=work_id, work=request), event(work=result), event(reply_to=work_id, work=dict(result, state="open")),
                     event(reply_to=work_id, work=dict(result, id=work_id)), tombstone(event(hidden_by="operator", work=request)), event(work="paid")):

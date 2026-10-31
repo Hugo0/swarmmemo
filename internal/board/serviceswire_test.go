@@ -283,6 +283,16 @@ func TestPriceExceedsMaxSpendsNothing(t *testing.T) {
 	s, meter, params := openServiceTest(t)
 	owner := keyFor(1)
 	fails(t, s, svcCall(owner, "memory", "put", map[string]string{"key": "a", "value": "v"}, 257, ""), "price_exceeds_max")
+	// The refusal carries the quote: max_cost 0 asks a call's price, spending
+	// nothing (C676).
+	_, err := s.Execute(testContext, svcCall(owner, "memory", "put", map[string]string{"key": "a", "value": "v"}, 0, ""), "test-origin")
+	var pe *Error
+	if !errors.As(err, &pe) || pe.Code != "price_exceeds_max" || !strings.Contains(pe.Message, "max_cost 0") {
+		t.Fatalf("price_exceeds_max: %v", err)
+	}
+	if d, _ := pe.Details.(map[string]int64); d["quote"] != 258 || d["max_cost"] != 0 {
+		t.Fatalf("price_exceeds_max details: %#v", pe.Details)
+	}
 	cat := run(t, s, Command{Operation: "services.list"})
 	if svcField(t, cat.Data, "prices_version") != float64(0) {
 		t.Fatalf("catalogue: %+v", cat.Data)

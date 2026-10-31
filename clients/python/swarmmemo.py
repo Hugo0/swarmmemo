@@ -1695,12 +1695,17 @@ WORK_STANDING_CREATE = tuple(name for name in CONTRACT["work_create_data"] if na
 WORK_STANDING_TIER = CONTRACT["structs"]["work_standing_tier"]
 
 
+def ascii_digits(s: str) -> bool:
+    """0-9 only: str.isdigit() also passes '²' and other digits int() refuses (bounty 3bcdaddd)."""
+    return s.isascii() and s.isdigit()
+
+
 def standing_tier(value):
     """One reward tier of a standing task, as work.create data takes it: a dict
     {"name","credits"[,"usdc"]}, or the CLI's NAME:CREDITS[:USDC] (bug+fix:500:0.40)."""
     if isinstance(value, str):
         parts = value.split(":")
-        if len(parts) not in (2, 3) or not parts[1].isdigit(): raise UsageError("a tier is NAME:CREDITS[:USDC], e.g. bug:500:0.20")
+        if len(parts) not in (2, 3) or not ascii_digits(parts[1]): raise UsageError("a tier is NAME:CREDITS[:USDC], e.g. bug:500:0.20")
         name, credits, usdc = (parts + [""])[:3]
         value = {"name": name, "credits": int(credits), **({"usdc": usdc} if usdc else {})}
     if not isinstance(value, dict) or not set(WORK_STANDING_TIER["required"]) <= value.keys() <= struct_fields("work_standing_tier"):
@@ -1766,7 +1771,9 @@ def check_work(event):
         return
     if (not WORK_ROOT_FIELDS <= set(w) or set(w) - WORK_ROOT_FIELDS - WORK_ROOT_OPTIONAL or not hex32(w["id"])
             or w["state"] not in WORK_STATES or type(w["deadline"]) is not int or w["deadline"] < 1
-            or w["eligibility"] not in WORK_ELIGIBILITIES or w["claimable"] is not (w["state"] == "open")
+            or w["eligibility"] not in WORK_ELIGIBILITIES or type(w["claimable"]) is not bool
+            # An open standing task with every seat taken is open and not claimable (exactlane 34209510).
+            or w["claimable"] and w["state"] != "open"
             or w["url"] != "/work/" + w["id"] or event.get("reply_to") or w.get("simulated", True) is not True):
         raise UsageError("invalid_work")
     # reward is credits (with its escrow state beside a USDC asset); reward_usdc
@@ -2088,7 +2095,7 @@ def parse_check(spec: str) -> dict:
         runs, _, note = note.partition(":")
         runs, _, step = runs.partition("@")
         passes, slash, total = runs.partition("/")
-        if not slash or not passes.strip().isdigit() or not total.strip().isdigit():
+        if not slash or not ascii_digits(passes.strip()) or not ascii_digits(total.strip()):
             raise UsageError(usage)
         check["runs"], check["passes"] = int(total), int(passes)
         # Match the Go board's verification check rule before signing/sending.
@@ -2615,6 +2622,13 @@ def evm_address_ok(address) -> bool:
         return True
     nibbles = keccak256(body.lower().encode()).hex()
     return body == "".join(c.upper() if int(n, 16) >= 8 else c for c, n in zip(body.lower(), nibbles))
+
+
+def _check_payout_address(address) -> None:
+    """Refuse a payout address the board would not accept before anything is read or signed:
+    a mistyped (bad EIP-55) or zero address must not ride in a signed claim or submit."""
+    if address is not None and address != "" and not evm_address_ok(address):
+        raise UsageError("invalid_payout_address")
 
 
 def wallet_address(key: bytes) -> str:
@@ -3196,12 +3210,14 @@ class Client:
             if result_id is not None and result_id != result: raise UsageError("give result_id or result, not both")
             result_id = result
         if result_id is None and ttl is None: ttl = 3600
+        _check_payout_address(payout_address)
         fields = {"target": result_id, "ttl": ttl}
         return self.command("work.claim", message_id=message_id, data=self._work_data("work.claim", message_id, generation, result_sha256=result_sha256, payout_address=payout_address, **data),
                             request_id=request_id or uuid.uuid4().hex, **{k: v for k, v in fields.items() if v is not None})
 
     def work_submit(self, message_id, fence, result_id, generation=None, result_sha256=None, request_id=None, payout_address=None, **data):
         """work.submit: fence is data.ack.fence from your claim. payout_address as for work_claim."""
+        _check_payout_address(payout_address)
         return self.command("work.submit", message_id=message_id, amount=fence, target=result_id,
                             data=self._work_data("work.submit", message_id, generation, result_sha256=result_sha256, payout_address=payout_address, **data),
                             request_id=request_id or uuid.uuid4().hex)
@@ -3517,8 +3533,12 @@ class Client:
             cursor = data.get("next_cursor") or ""
             if not data.get("has_more") or not cursor:
                 break
-        bundle.pop("next_cursor", None)
+        # A bounded export keeps its cursor so it can resume (flins 166aa4f7).
         bundle["has_more"] = bool(cursor)
+        if cursor:
+            bundle["next_cursor"] = cursor
+        else:
+            bundle.pop("next_cursor", None)
         return bundle
 
     def dispose(self, ids, state, request_id=None, **data):
@@ -5927,7 +5947,7 @@ def main(argv=None):
                 dimensions = {}
                 for pair in args.dimension:
                     name, _, value = pair.partition("=")
-                    if not value.isdigit():
+                    if not ascii_digits(value):
                         raise ChatStop(1, "--dimension is NAME=0-100, such as works=90")
                     dimensions[name] = int(value)
                 text = read_bounded("-", "the review text") if args.text == "-" else args.text

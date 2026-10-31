@@ -470,8 +470,8 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     [() => signed.claimWork(id, {generation, requestId: 'c-1'}), work({operation: 'work.claim', message_id: id, ttl: 3600, request_id: 'c-1'})],
     [() => signed.claimWork(id, {result: 'r1', generation, resultSha256: 'f'.repeat(64), requestId: 'c-2'}), work({operation: 'work.claim', message_id: id, target: 'r1', request_id: 'c-2'}, `,"result_sha256":"${'f'.repeat(64)}"`)],
     [() => signed.submitWork(id, 3, 'r1', {generation, requestId: 's-1'}), work({operation: 'work.submit', message_id: id, amount: 3, target: 'r1', request_id: 's-1'})],
-    [() => signed.submitWork(id, 3, 'r1', {generation, requestId: 's-2', payoutAddress: '0xabc'}), work({operation: 'work.submit', message_id: id, amount: 3, target: 'r1', request_id: 's-2'}, ',"payout_address":"0xabc"')],
-    [() => signed.claimWork(id, {result: 'r1', generation, requestId: 'c-3', payoutAddress: '0xabc'}), work({operation: 'work.claim', message_id: id, target: 'r1', request_id: 'c-3'}, ',"payout_address":"0xabc"')],
+    [() => signed.submitWork(id, 3, 'r1', {generation, requestId: 's-2', payoutAddress: '0xabababababababababababababababababababab'}), work({operation: 'work.submit', message_id: id, amount: 3, target: 'r1', request_id: 's-2'}, ',"payout_address":"0xabababababababababababababababababababab"')],
+    [() => signed.claimWork(id, {result: 'r1', generation, requestId: 'c-3', payoutAddress: '0xabababababababababababababababababababab'}), work({operation: 'work.claim', message_id: id, target: 'r1', request_id: 'c-3'}, ',"payout_address":"0xabababababababababababababababababababab"')],
     [() => signed.acceptWork(id, 3, {generation, requestId: 'a-1'}), work({operation: 'work.accept', message_id: id, amount: 3, request_id: 'a-1'})],
     [() => signed.acceptWork(id, 3, {generation, tier: 'bug+fix', requestId: 'a-5'}), work({operation: 'work.accept', message_id: id, amount: 3, request_id: 'a-5'}, ',"tier":"bug+fix"')],
     [() => signed.rejectWork(id, 3, 'Breaks the build.', {generation, requestId: 'j-1'}), work({operation: 'work.reject', message_id: id, amount: 3, reason: 'Breaks the build.', request_id: 'j-1'})],
@@ -870,7 +870,7 @@ test('C343: optional real Go board verifies linkWallet in one step', {skip: !pro
 const P = {generation: 'a'.repeat(32), message: 'b'.repeat(32), agent: 'c'.repeat(64), tx: '0x' + 'd'.repeat(64), room: '~' + 'a'.repeat(26)};
 const PATTERN_SAMPLES = {work_id: 'e'.repeat(32), message_id: 'e'.repeat(32), fingerprint: 'f'.repeat(64), tx_hash: P.tx, standing_tier: 'bug'};
 const FIELD_SAMPLES = {checks: [{property: 'tests', state: 'pass'}], tiers: [{name: 'bug', credits: 5}], capabilities: ['review'], ids: [P.message],
-  review: {subject: 'site:https://example.org/', verdict: 'good'}};
+  payout_address: '0x' + 'ab'.repeat(20), review: {subject: 'site:https://example.org/', verdict: 'good'}};
 const camelName = name => name.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 function dataSample(operation, name) {
   const field = CONTRACT.operations[operation].data.fields[name], kind = field.type.split('|')[0];
@@ -1094,6 +1094,20 @@ test('a scoped worker names only the payout address its grant pins (C380)', () =
   for (const bad of ['0x' + '1'.repeat(39), '1'.repeat(42), 7]) assert.throws(() => new DelegatedClient({...options, payoutAddress: bad}), errorCode('invalid_payout_address'));
 });
 
+
+test('claimWork and submitWork refuse a bad payout address before anything is read or signed', async () => {
+  const client = new Client({origin: 'http://127.0.0.1:9', key: fixtureKey}); // nothing listens: any send fails
+  const payee = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
+  const typo = payee.slice(0, -1) + 'D'; // one wrong-case letter: the EIP-55 checksum no longer holds
+  for (const bad of [typo, '0x' + '0'.repeat(40), '0x' + '1'.repeat(39), '1'.repeat(42), 7]) {
+    await assert.rejects(client.claimWork('b'.repeat(32), {result: 'c'.repeat(32), payoutAddress: bad}), errorCode('invalid_payout_address'));
+    await assert.rejects(client.submitWork('b'.repeat(32), 1, 'c'.repeat(32), {payoutAddress: bad}), errorCode('invalid_payout_address'));
+  }
+  for (const good of [payee, payee.toLowerCase(), undefined]) { // accepted, so it reaches the (absent) network
+    await assert.rejects(client.claimWork('b'.repeat(32), {result: 'c'.repeat(32), generation: 'a'.repeat(32), payoutAddress: good}), error => error?.code !== 'invalid_payout_address');
+    await assert.rejects(client.submitWork('b'.repeat(32), 1, 'c'.repeat(32), {generation: 'a'.repeat(32), payoutAddress: good}), error => error?.code !== 'invalid_payout_address');
+  }
+});
 
 // Synthetic fixture-only regression; never opens a user wallet or credential.
 const boundedKeyFixture = '0x' + '42'.repeat(32) + '\n';

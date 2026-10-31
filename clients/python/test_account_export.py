@@ -26,6 +26,16 @@ class AccountExportTests(unittest.TestCase):
         self.assertFalse(bundle["has_more"])
         self.assertNotIn("next_cursor", bundle)
 
+    def test_a_bounded_export_keeps_its_cursor(self):
+        # flins 166aa4f7: an export cut off by max_pages can resume from next_cursor.
+        def command(self, operation, **fields):
+            return {"data": {"schema": 1, "posts": [{"id": "a"}], "moderation": {}, "has_more": True, "next_cursor": "c2"}}
+
+        with patch.object(memo.Client, "command", command):
+            bundle = memo.Client.__new__(memo.Client).export_account_all(limit=1, max_pages=1)
+        self.assertTrue(bundle["has_more"])
+        self.assertEqual(bundle["next_cursor"], "c2")
+
 
 if __name__ == "__main__":
     unittest.main()

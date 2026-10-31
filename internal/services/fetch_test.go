@@ -134,7 +134,13 @@ func newFetchRig(t *testing.T, s *site, o fetchOpts) *fetchRig {
 // fetch is one signed fetch.page call, run to its end (after commit).
 func (r *fetchRig) fetch(account string, args map[string]any) (map[string]any, error) {
 	r.t.Helper()
-	raw, _ := json.Marshal(map[string]any{"schema": 1, "method": "page", "args": args, "max_cost": 1 << 20})
+	return r.fetchMax(account, args, 1<<20)
+}
+
+// fetchMax is fetch with its own max_cost.
+func (r *fetchRig) fetchMax(account string, args map[string]any, maxCost int64) (map[string]any, error) {
+	r.t.Helper()
+	raw, _ := json.Marshal(map[string]any{"schema": 1, "method": "page", "args": args, "max_cost": maxCost})
 	r.n++
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -578,6 +584,35 @@ func TestFetchHostAndCallerLimits(t *testing.T) {
 	c.must("erin", noScreen("http://www.site.test/y"))
 }
 
+// TestFetchQuoteBeforeTheCall: a max_cost below the quote is refused before
+// anything is fetched or spent, and the refusal carries the quote, so
+// max_cost 0 asks a call's price for free; screen: false quotes only the
+// text (C676).
+func TestFetchQuoteBeforeTheCall(t *testing.T) {
+	s := newSite(t, false, nil)
+	r := newFetchRig(t, s, fetchOpts{})
+	for _, tc := range []struct {
+		args map[string]any
+		want int64
+	}{
+		{map[string]any{"url": "http://site.test/q", "max_bytes": 4096}, services.FetchPrice.For(4096) + services.ScreenSurchargeMax(4096)},
+		{map[string]any{"url": "http://site.test/q", "max_bytes": 4096, "screen": false}, services.FetchPrice.For(4096)},
+	} {
+		_, err := r.fetchMax("alice", tc.args, 0)
+		var e *allowance.Err
+		if !errors.As(err, &e) || e.Code != "price_exceeds_max" {
+			t.Fatalf("max_cost 0: %v", err)
+		}
+		d, _ := e.Details.(map[string]int64)
+		if d["quote"] != tc.want || d["max_cost"] != 0 {
+			t.Fatalf("the refusal's quote: %#v, want %d", e.Details, tc.want)
+		}
+	}
+	if s.hit("/q") != 0 {
+		t.Fatal("a quote fetches nothing")
+	}
+}
+
 func TestFetchScreeningIsOptionalAndPriced(t *testing.T) {
 	s := newSite(t, false, map[string]http.HandlerFunc{
 		"/inject": func(w http.ResponseWriter, r *http.Request) {
@@ -613,7 +648,7 @@ func TestFetchScreeningIsOptionalAndPriced(t *testing.T) {
 	if r.jev.calls != 1 || get(again, "result", "screened") != true || get(again, "call", "cost") != float64(services.FetchPrice.For(int64(len(text)))) {
 		t.Fatalf("a cached verdict: calls %d %+v", r.jev.calls, get(again, "call"))
 	}
-	if got := get(screened, "result", "cost_note"); got != "Fetched now: cost is 5 + 1 per KiB of text returned, plus what screening cost. max_cost is only the ceiling reserved for max_bytes; the rest is refunded." {
+	if got := get(screened, "result", "cost_note"); got != `Fetched now: cost is 5 + 1 per KiB of text returned, plus screening: 5 + the classifier's token cost, at most 5 + 105 per 16 KiB + 80 per KiB of text ("screen": false turns it off). max_cost is only the ceiling reserved for max_bytes; the rest is refunded.` {
 		t.Fatalf("screened cost_note: %q", got)
 	}
 	if got := get(again, "result", "cost_note"); got != "Served from the shared cache (a page is kept 10 minutes): cost is 5 + 1 per KiB of text returned; the text was screened before, so screening cost nothing again. max_cost is only the ceiling reserved for max_bytes; the rest is refunded." {

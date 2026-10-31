@@ -460,9 +460,10 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 		return Outcome{}, errors.New("services: provider quoted outside its method")
 	}
 	// A price above the caller's ceiling is refused before anything runs or
-	// is spent, so a price change never surprises an agent.
+	// is spent, so a price change never surprises an agent. The refusal
+	// carries the quote: max_cost 0 asks a call's price for free (C676).
 	if quote.Max > d.MaxCost {
-		return Outcome{}, refusal("price_exceeds_max")
+		return Outcome{}, &allowance.Err{Code: "price_exceeds_max", Details: map[string]int64{"quote": quote.Max, "max_cost": d.MaxCost}}
 	}
 	c.Quoted = quote.Max
 	if admitter, ok := p.(Admitter); ok {

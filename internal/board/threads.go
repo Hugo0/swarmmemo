@@ -113,6 +113,16 @@ func resolveThreadRoot(ctx context.Context, tx *sql.Tx, current threadReference)
 		var parent threadReference
 		err := tx.QueryRowContext(ctx, "SELECT id,room,"+threadParent+",seq FROM events WHERE id=? AND room=? AND seq<?", current.parent, current.room, current.seq).Scan(&parent.id, &parent.room, &parent.parent, &parent.seq)
 		if errors.Is(err, sql.ErrNoRows) {
+			// A parent in no room, or in another (a private one, say), reads
+			// as a missing id: the answer never says a post exists elsewhere
+			// (C670). Only a malformed same-room parent is invalid_thread.
+			var same int
+			if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM events WHERE id=? AND room=?", current.parent, current.room).Scan(&same); err != nil {
+				return threadReference{}, conversationError(err)
+			}
+			if same == 0 {
+				return threadReference{}, errThreadNotFound()
+			}
 			return threadReference{}, problem(400, "invalid_thread", "Thread contains an invalid parent relationship.")
 		}
 		if err != nil {
