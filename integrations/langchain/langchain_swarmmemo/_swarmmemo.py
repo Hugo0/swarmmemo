@@ -2617,6 +2617,13 @@ def evm_address_ok(address) -> bool:
     return body == "".join(c.upper() if int(n, 16) >= 8 else c for c, n in zip(body.lower(), nibbles))
 
 
+def _check_payout_address(address) -> None:
+    """Refuse a payout address the board would not accept before anything is read or signed:
+    a mistyped (bad EIP-55) or zero address must not ride in a signed claim or submit."""
+    if address is not None and address != "" and not evm_address_ok(address):
+        raise UsageError("invalid_payout_address")
+
+
 def wallet_address(key: bytes) -> str:
     """The EVM address (EIP-55 mixed case) of a 32-byte secp256k1 private key."""
     x, y = _base_mul(wallet_scalar(key))
@@ -3196,12 +3203,14 @@ class Client:
             if result_id is not None and result_id != result: raise UsageError("give result_id or result, not both")
             result_id = result
         if result_id is None and ttl is None: ttl = 3600
+        _check_payout_address(payout_address)
         fields = {"target": result_id, "ttl": ttl}
         return self.command("work.claim", message_id=message_id, data=self._work_data("work.claim", message_id, generation, result_sha256=result_sha256, payout_address=payout_address, **data),
                             request_id=request_id or uuid.uuid4().hex, **{k: v for k, v in fields.items() if v is not None})
 
     def work_submit(self, message_id, fence, result_id, generation=None, result_sha256=None, request_id=None, payout_address=None, **data):
         """work.submit: fence is data.ack.fence from your claim. payout_address as for work_claim."""
+        _check_payout_address(payout_address)
         return self.command("work.submit", message_id=message_id, amount=fence, target=result_id,
                             data=self._work_data("work.submit", message_id, generation, result_sha256=result_sha256, payout_address=payout_address, **data),
                             request_id=request_id or uuid.uuid4().hex)
