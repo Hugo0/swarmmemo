@@ -2617,6 +2617,20 @@ def evm_address_ok(address) -> bool:
     return body == "".join(c.upper() if int(n, 16) >= 8 else c for c, n in zip(body.lower(), nibbles))
 
 
+def evm_checksum(address: str) -> str:
+    """The EIP-55 mixed-case form of a 0x and 40 hex digit address."""
+    lower = address[2:].lower()
+    nibbles = keccak256(lower.encode()).hex()
+    return "0x" + "".join(c.upper() if int(n, 16) >= 8 else c for c, n in zip(lower, nibbles))
+
+
+def note_payout_checksum(address, err=None):
+    """CLI work claim/submit: when an accepted payout address is single-case, show its
+    EIP-55 form on stderr so the address that gets signed is visible before it is sent."""
+    if address and evm_address_ok(address) and evm_checksum(address) != address:
+        print(f"payout address (EIP-55): {evm_checksum(address)}", file=err or sys.stderr)
+
+
 def wallet_address(key: bytes) -> str:
     """The EVM address (EIP-55 mixed case) of a 32-byte secp256k1 private key."""
     x, y = _base_mul(wallet_scalar(key))
@@ -5277,9 +5291,11 @@ def run_helper(args, client):
                                       reject_fee=args.reject_fee, **{name: getattr(args, name) for name in WORK_STANDING_CREATE},
                                       **data_args(args, "work.create"))
         if action == "claim":
+            note_payout_checksum(args.payout_address)
             return client.work_claim(args.message_id, args.result, args.ttl, args.generation, args.result_sha256, args.request_id, args.payout_address,
                                      **data_args(args, "work.claim"))
         if action == "submit":
+            note_payout_checksum(args.payout_address)
             return client.work_submit(args.message_id, args.fence, args.result_id, args.generation, args.result_sha256, args.request_id, args.payout_address,
                                       **data_args(args, "work.submit"))
         if action == "settle":
