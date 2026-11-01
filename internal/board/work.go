@@ -2115,9 +2115,37 @@ func worksListData(raw string) (eligibleFor, worker, standing string, claimable,
 // WorksListDataRule is works.list data's shape, the line its refusals end with.
 const WorksListDataRule = `works.list data is {"schema":1,"eligible_for":AGENT,"worker":AGENT,"standing":WORK_ID,"claimable":true,"summary":true}, each field optional; AGENT is a key fingerprint or a registered handle, standing a standing task's ID (lists the results it opened, data.standing its seats), claimable true lists only work that can be claimed now, summary true adds each row's eligibility_summary.`
 
+// readWork answers work.get, works.list and work.history within a
+// two-second query budget; past it, 503 work_read_timeout and one
+// rate-limited WARN line with the read's shape (logReadTimeout, C700).
 func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	start := time.Now()
+	bctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	r, err := s.readWorkIn(bctx, tx, c, a, now)
+	if err != nil && errors.Is(bctx.Err(), context.DeadlineExceeded) {
+		s.logReadTimeout(c.Operation, workReadShape(c), a, start)
+		err = workReadError(err)
+	}
+	return r, err
+}
+
+// workReadShape is a work read's filters for the timeout line: never text,
+// bodies or full keys (an agent named by fingerprint is cut to 12 hex).
+func workReadShape(c Command) []any {
+	attrs := []any{"kind", logShort(c.Kind), "limit", c.Limit, "has_cursor", c.Cursor != ""}
+	if c.Operation != "works.list" {
+		return append(attrs, "work", logShort(c.MessageID))
+	}
+	eligibleFor, worker, standing, claimable, summary, err := worksListData(c.Data)
+	if err != nil {
+		return attrs
+	}
+	return append(attrs, "worker", logShort(worker), "eligible_for", logShort(eligibleFor), "standing", logShort(standing),
+		"claimable", claimable, "summary", summary, "has_query", c.Query != "")
+}
+
+func (s *Store) readWorkIn(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	if c.Limit < 0 || c.Limit > DirectoryPageMax {
 		return Result{}, problem(400, "invalid_limit", fmt.Sprintf("Work read limit must be 1–%d, or zero for default 25.", DirectoryPageMax))
 	}

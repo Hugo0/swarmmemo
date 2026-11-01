@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "68f3ff54e2e578549265146710ad8f9721a810c2554f6a1e58df3b90278d8199",
+  "allowlist_sha256": "b4b811c422e614c0d61506d6d1ace747ff01d4d81ddf3088a21848e83e023576",
   "files": [
     {
       "mode": "0644",
@@ -1480,8 +1480,8 @@
     {
       "mode": "0644",
       "path": "internal/board/agentposts.go",
-      "sha256": "f30309a4e6ca6e0a3591d5e986f23afaca6c3d56ad683bf6ae4d3a82cc7e7789",
-      "size": 5203
+      "sha256": "fa55db24343b6b39c5c42af2fca5e6ef8cd0238c23d96f81bd64a61fdf495d04",
+      "size": 5839
     },
     {
       "mode": "0644",
@@ -3051,6 +3051,18 @@
     },
     {
       "mode": "0644",
+      "path": "internal/board/readtimeout.go",
+      "sha256": "59267f2fdcdccbc43c38c00e2de2ffa1de91a448510479b8e563e926eca8bce3",
+      "size": 1958
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/readtimeout_test.go",
+      "sha256": "e7a9c0f2c6d539cdabcf92a80a605f1c104bae6efdfeb3fa324d8bac2f199522",
+      "size": 3134
+    },
+    {
+      "mode": "0644",
       "path": "internal/board/receiver_erase_test.go",
       "sha256": "ce6ddb66c460163bc25ec20a3c0d714bd94c67312dc25c2676a0f2f37006e46e",
       "size": 3954
@@ -3580,8 +3592,8 @@
     {
       "mode": "0644",
       "path": "internal/board/store.go",
-      "sha256": "f1df6950faa50e1af19df2b5c660bb2564a94ba2c881972ee371fc25b523ab23",
-      "size": 66470
+      "sha256": "6240f7f9e080ba88b019e7b4b3c5cafe47ba86ddf801ce73ee2e46753ad547d8",
+      "size": 66566
     },
     {
       "mode": "0644",
@@ -4210,8 +4222,8 @@
     {
       "mode": "0644",
       "path": "internal/board/work.go",
-      "sha256": "3584a5c057d781b7a48936dc7c940351a50c5fccd0aefcae1ed97838f853d41d",
-      "size": 116732
+      "sha256": "a3504173df91729dd9bfe04580970c302326d5c81edd0c5e105ba9c4a94984d5",
+      "size": 117972
     },
     {
       "mode": "0644",
@@ -9616,7 +9628,7 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "619eb141c53abcbb18de637a8b237ff7e003d6c5f0560da04e54a20bb106444b",
+      "sha256": "45043753728916bce11c874d6e580318f324800db550759586fed18fdb1440df",
       "size": 51643
     },
     {
@@ -9628,7 +9640,7 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist_history.json",
-      "sha256": "6a1cb5a1c6db0b0de1034bffced8af74972bd1434c8898e4be4781e300c57e19",
+      "sha256": "cb84d6ccab68f39aa4b337485f5a1b1972a3b5424ee832cc316d45c7ae7daf24",
       "size": 3893
     },
     {

@@ -66,6 +66,7 @@ type Store struct {
 	// funnel flush reads it to pay invite rewards, so it never reads config,
 	// which some tests change while a flush is pending (race detector).
 	inviteLedgerOn     bool
+	readTimeouts       readTimeoutLog // C700: the 2 s read budget's WARN line (readtimeout.go)
 	db                 *sql.DB
 	config             Config
 	generation         string
@@ -1440,7 +1441,7 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 	case "agent.get", "agents.list":
 		return s.readAgents(ctx, tx, c, a, now)
 	case "agent.posts":
-		return s.readAgentPosts(ctx, tx, c, now)
+		return s.readAgentPosts(ctx, tx, c, a, now)
 	case "agent.profile.publish", "agent.profile.remove":
 		return s.changeProfile(ctx, tx, c, a, now)
 	case "work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel", "work.reviewer.set", "work.successor.set", "work.settle", "work.promise", "work.reveal":

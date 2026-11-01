@@ -25,9 +25,22 @@ const agentPostsWhere = "e.account=? AND e.hidden=0 AND e.recipient='' AND r.vis
 // public is not found, as with agent.get. query narrows to posts whose text
 // contains it. The cursor is sealed and bound to the account and the query.
 // The walk reads the author index (events_author) newest first.
-func (s *Store) readAgentPosts(ctx context.Context, tx *sql.Tx, c Command, now int64) (Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+// Past the two-second budget it answers 503 agent_posts_timeout and logs
+// one rate-limited WARN line with the read's shape (logReadTimeout, C700).
+func (s *Store) readAgentPosts(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
+	start := time.Now()
+	bctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	r, err := s.readAgentPostsIn(bctx, tx, c, now)
+	if err != nil && errors.Is(bctx.Err(), context.DeadlineExceeded) {
+		s.logReadTimeout(c.Operation, []any{"target", logShort(strings.TrimPrefix(c.Target, "@")), "limit", c.Limit,
+			"has_cursor", c.Cursor != "", "has_query", c.Query != ""}, a, start)
+		err = agentPostsError(err)
+	}
+	return r, err
+}
+
+func (s *Store) readAgentPostsIn(ctx context.Context, tx *sql.Tx, c Command, now int64) (Result, error) {
 	// An out-of-range limit was refused before this read (readLimitRange).
 	if c.Target == "" || len(c.Target) > 128 || !utf8.ValidString(c.Target) {
 		return Result{}, problem(400, "invalid_agent", "Name the agent by its fingerprint or handle: target=AGENT.")
