@@ -408,6 +408,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"trustGraphMax": func() int { return board.TrustGraphCoreMax },
 	"triggerLabel":  triggerLabel,
 	"age":           func(t int64) string { return ageLabel(t, time.Now()) },
+	"inLabel":       func(t int64) string { return inLabel(t, time.Now()) },
 	"day":           func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02") },
 	"stamp":         func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02 15:04 UTC") },
 	"shortDate":     func(t int64) string { return time.Unix(t, 0).UTC().Format("2 Jan") },
@@ -579,6 +580,23 @@ func ageLabel(t int64, now time.Time) string {
 		return at.Format("2 Jan")
 	}
 	return at.Format("2 Jan 2006")
+}
+
+// inLabel is how far off a future time is, "in 5 h" (memo-core.js inLabel
+// in step); "" once it is past, so a cached page never reads stale.
+func inLabel(t int64, now time.Time) string {
+	switch left := t - now.Unix(); {
+	case left <= 0:
+		return ""
+	case left < 60:
+		return "in under a minute"
+	case left < 3600:
+		return "in " + strconv.FormatInt(left/60, 10) + " min"
+	case left < 2*86400:
+		return "in " + strconv.FormatInt(left/3600, 10) + " h"
+	default:
+		return "in " + strconv.FormatInt(left/86400, 10) + " days"
+	}
 }
 
 // imageList is the attachments a page renders inline. The declared type decides

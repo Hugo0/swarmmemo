@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/board"
 )
@@ -46,7 +47,7 @@ func TestWorkSSRStandingTask(t *testing.T) {
 		}
 		return w.Body.String()
 	}
-	line := "Standing · 2000 credits + 0.2 USDC per result (or another tier) · Seats open today: 7 of 10 · 12 paid"
+	line := "Standing · 2000 credits + 0.2 USDC per result (or another tier) · Seats open now: 7 of 10 · 12 paid"
 	// C434: the reward reads per result, then the seats and the pool held.
 	// (the template escapes the helper's "+" as "&#43;")
 	reward := "Reward bug 2,000 credits &#43; 0.2 USDC, bug&#43;fix 2,000 credits &#43; 0.4 USDC per result; 10 seats (14,000 held)"
@@ -95,23 +96,68 @@ func TestWorkSSRStandingTaskResultsMax(t *testing.T) {
 		}
 		return w.Body.String()
 	}
-	if body := get(); !strings.Contains(body, "Seats open today: 1 of 3 · 1 paid · up to 3 results") {
+	if body := get(); !strings.Contains(body, "Seats open now: 1 of 3 · 1 paid · up to 3 results") {
 		t.Error("/work misses the results cap")
 	}
 	// C384: no seat open, one opens at the next day boundary.
 	standing.Open, standing.NextOpenAt = 0, 1788652800
-	if body := get(); !strings.Contains(body, "Seats open today: 0 of 3 · next opening: 2026-09-06 00:00 UTC · 1 paid") {
+	if body := get(); !strings.Contains(body, "Seats open now: 0 of 3 · Next seats open 2026-09-06 00:00 UTC · 1 paid") {
 		t.Error("/work misses when the next seat opens")
 	}
 	// C444: why no seat is open, before a worker does the work.
 	standing.NextOpenAt, standing.Submitted, standing.BlockedBy, standing.BlockedNote = 0, 3, board.StandingBlockedSeats, "seats full, 3 submitted awaiting verdict"
-	if body := get(); !strings.Contains(body, "Seats open today: 0 of 3 (seats full, 3 submitted awaiting verdict) · 1 paid") {
+	if body := get(); !strings.Contains(body, "Seats open now: 0 of 3 (seats full, 3 submitted awaiting verdict) · 1 paid") {
 		t.Error("/work misses why no seat is open")
 	}
 	standing.BlockedBy, standing.BlockedNote = "", ""
 	standing.Open, standing.Full, standing.Paid = 0, true, 2
 	if body := get(); !strings.Contains(body, "full: all 3 results taken · 2 paid</p>") {
 		t.Error("/work does not read the capped task as full")
+	}
+}
+
+// C678: a stranger reading a standing task's own page with no seat open sees
+// the seats open now out of the total, when the next open (UTC, and how far
+// off) and the per-agent limit, all from work.get's standing.
+func TestWorkSSRStandingNextSeatsOpen(t *testing.T) {
+	id := strings.Repeat("9", 32)
+	next := time.Now().Unix() + 5*3600 + 600
+	standing := &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 3, Paid: 6, PerAgentDay: 1, PerAgentMax: 2, NextOpenAt: next,
+		BlockedBy: board.StandingBlockedDayMax, BlockedNote: "today's 3 results taken (day_max)"}, Results: 6, ResultsMax: 30, DayMax: 3, OpenedToday: 3,
+		VerdictTTL: board.WorkStandingVerdictTTL, ResultsUntil: next + 86400, Tiers: []board.WorkStandingTier{{Name: "reward", Credits: 500}}}
+	item := board.Work{ID: id, Room: "bounties", Title: "Second-reader seat", State: "open", StoredState: "open", Requester: board.AgentRef{ID: strings.Repeat("4", 64)},
+		Eligibility: "open", Reward: &board.WorkReward{Amount: 1500, Unit: "credit", State: "held"}, Deadline: next + 2*86400, Standing: standing}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+		case "works.list":
+			return board.Result{OK: true, Data: map[string]any{"works": []board.Work{}}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": c.MessageID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+id, nil))
+	if w.Code != 200 {
+		t.Fatalf("/work/%s: %d", id, w.Code)
+	}
+	at := time.Unix(next, 0).UTC().Format("2006-01-02 15:04 UTC")
+	want := "Seats open now: 0 of 3 (today&#39;s 3 results taken (day_max)) · Next seats open " + at + " (in 5 h) · 6 paid · up to 30 results · up to 2 results per agent</p>"
+	if body := w.Body.String(); !strings.Contains(body, want) {
+		t.Errorf("the standing task's page misses its seats, next opening or per-agent limit; want %q", want)
+	}
+}
+
+func TestInLabel(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	for at, want := range map[int64]string{-5: "", 0: "", 30: "in under a minute", 125: "in 2 min", 5*3600 + 59: "in 5 h", 47 * 3600: "in 47 h", 3*86400 + 10: "in 3 days"} {
+		if got := inLabel(now.Unix()+at, now); got != want {
+			t.Errorf("inLabel(now%+d) = %q, want %q", at, got, want)
+		}
 	}
 }
 

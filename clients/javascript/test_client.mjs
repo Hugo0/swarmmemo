@@ -550,7 +550,7 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     if (name === 'tier') (options.tiers ??= []).push(value);
     else options[name] = name.startsWith('usdc') ? value : Number(value);
   }
-  assert.deepEqual([...WORK_STANDING_CREATE], ['day_max', 'per_agent_day', 'results_max', 'seats', 'tiers', 'usdc_day_max', 'usdc_per_agent_day']);
+  assert.deepEqual([...WORK_STANDING_CREATE], ['day_max', 'per_agent_day', 'per_agent_max', 'results_max', 'seats', 'tiers', 'usdc_day_max', 'usdc_per_agent_day']);
   assert.equal(JSON.stringify(workCreateData({title: standing.title, capabilities: standing.capabilities, generation: standing.generation, ...options})), standing.data);
   for (const tier of standing.tiers_refused) assert.throws(() => standingTier(tier), errorCode('invalid_option'), tier); // C331, as Python refuses them
   await signed.createWork(id, {title: standing.title, capabilities: standing.capabilities, generation: standing.generation, ttl: 864000, requestId: 'w-1', ...options});
@@ -561,7 +561,8 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
   assert.deepEqual(requests.map(r => r.path === '/v1/command' ? r.body.operation : r.path), ['/api/changes?after=-1', 'agent.get', 'work.create']);
   assert.equal(requests[2].body.data, `{"schema":1,"generation":"${generation}","title":"Review","capabilities":[],"reward":300,"reviewer":"${agent}","reviewer_fee":20}`); requests.length = 0;
   for (const bad of [{seats: 0, reward: 5}, {dayMax: 3}, {seats: 2, perAgentDay: 3}, {seats: 2, tiers: ['a:1', 'b:1', 'c:1', 'd:1']}, {seats: 2, tiers: ['Bad:1']}, {seats: 2, tiers: ['bug:0']}, {seats: 2, tiers: ['bug']}, {seats: 2, nonsense: 1},
-    {seats: 2, resultsMax: 1}, {seats: 2, resultsMax: CONTRACT.limits.work_standing_results_maximum + 1}, {seats: 2, resultsMax: '3'}, {resultsMax: 3}])
+    {seats: 2, resultsMax: 1}, {seats: 2, resultsMax: CONTRACT.limits.work_standing_results_maximum + 1}, {seats: 2, resultsMax: '3'}, {resultsMax: 3},
+    {seats: 2, perAgentMax: 0}, {seats: 2, resultsMax: 3, perAgentMax: 4}, {perAgentMax: 1}])
     assert.throws(() => workCreateData({title: 't', generation: 'g', ...bad}), errorCode('invalid_option'), JSON.stringify(bad));
   assert.equal(requests.length, 0);
   // work.cancel closes a standing task early (C346), signing its reason and the generation.
@@ -911,7 +912,7 @@ const JS_WRAPPERS = {
 const JS_ARGUMENTS = {
   'work.accept review': () => ({rating: 80}), 'find type': v => ({types: v}),
   'work.create per_agent_day': v => ({seats: 2, perAgentDay: v}), 'work.create day_max': v => ({seats: 2, dayMax: v}),
-  'work.create results_max': v => ({seats: 2, resultsMax: v}), 'work.create tiers': v => ({seats: 2, tiers: v}),
+  'work.create results_max': v => ({seats: 2, resultsMax: v}), 'work.create per_agent_max': v => ({seats: 2, perAgentMax: v}), 'work.create tiers': v => ({seats: 2, tiers: v}),
   'work.create usdc_per_agent_day': v => ({seats: 2, reward: 5, usdcPerAgentDay: v}), 'work.create usdc_day_max': v => ({seats: 2, reward: 5, usdcDayMax: v}),
   'updates.mark_read all': () => ({all: true}),
 };

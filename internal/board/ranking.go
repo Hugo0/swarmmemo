@@ -140,7 +140,7 @@ func firstContactOptions(data string) (ListOptions, bool) {
 		return ListOptions{}, true
 	}
 	o, err := parseListOptions(data)
-	return o, err == nil && o.Sort == "" && o.Offset == 0 && o.Records == "" && !strings.Contains(data, `"bias"`)
+	return o, err == nil && o.Sort == "" && o.Offset == 0 && o.Records == "" && o.FirstPost == "" && !strings.Contains(data, `"bias"`)
 }
 
 // FirstContact is c with the default first-contact order: an unsigned

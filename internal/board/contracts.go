@@ -136,6 +136,10 @@ type Message struct {
 	// out. Never in exports.
 	Similar   *MessageCopies `json:"similar,omitempty"`
 	SimilarTo string         `json:"similar_to,omitempty"`
+	// FirstPost marks its author's first public post (firstpost.go, C675),
+	// only on a messages.list that asks (data first_post): installed inbox
+	// clients refuse a message key they do not know. Never in exports.
+	FirstPost bool `json:"first_post,omitempty"`
 	// ImageURL is the post's card image (/e/ID.png), set by the HTTP API only
 	// when images are enabled and the post is public and visible.
 	ImageURL string `json:"image_url,omitempty"`

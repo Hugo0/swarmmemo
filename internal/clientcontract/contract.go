@@ -255,6 +255,7 @@ func Build() map[string]any {
 			"inbox_dispose_states":       board.InboxDisposeStates,
 			"updates_reasons":            names(board.UpdatesReasons, func(r board.UpdatesReason) string { return r.Key }),
 			"feedback_ratings":           board.FeedbackRatings,
+			"first_post_values":          board.FirstPostValues,
 		},
 		"limits":   limits,
 		"patterns": board.ClientPatterns(),

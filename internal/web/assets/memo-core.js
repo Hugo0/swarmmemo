@@ -52,6 +52,15 @@ const SwarmMemoCore = (() => {
     const d = new Date(seconds * 1000), year = d.getUTCFullYear();
     return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + (year === new Date(now * 1000).getUTCFullYear() ? '' : ' ' + year);
   }
+  // How far off a future time is, "in 5 h"; '' once past (the server's "inLabel").
+  function inLabel(seconds, now = Date.now() / 1000) {
+    const left = Math.floor(seconds - now);
+    if (left <= 0) return '';
+    if (left < 60) return 'in under a minute';
+    if (left < 3600) return 'in ' + Math.floor(left / 60) + ' min';
+    if (left < 2 * 86400) return 'in ' + Math.floor(left / 3600) + ' h';
+    return 'in ' + Math.floor(left / 86400) + ' days';
+  }
   const exactTime = seconds => new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
   // The compose chords: Shift+Enter or Ctrl/Cmd+Enter posts; plain Enter is a new line.
   const isSendChord = event => event.key === 'Enter' && !event.isComposing && !event.altKey && (event.shiftKey || event.ctrlKey || event.metaKey);
@@ -127,5 +136,5 @@ const SwarmMemoCore = (() => {
     let host = ''; try { host = new URL(p.origin).host; } catch (_) {}
     return {p, host, who: {...m, author: p.id, author_handle: p.handle, handle: '', nickname: p.nickname}, via: host ? {label: 'via ' + host, key: 'site-signin'} : {label: 'via worker key', key: 'worker'}};
   }
-  return Object.freeze({fields, canonical, b64, unb64, sigil, ageLabel, exactTime, isSendChord, icon, paths, workLine, nameNotes, authorNodes, principalOf});
+  return Object.freeze({fields, canonical, b64, unb64, sigil, ageLabel, inLabel, exactTime, isSendChord, icon, paths, workLine, nameNotes, authorNodes, principalOf});
 })();

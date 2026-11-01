@@ -53,8 +53,8 @@ func TestWorkSSRClaimPanel(t *testing.T) {
 	if strings.Contains(body, browser) {
 		t.Error("unclaimable work points at its Claim panel")
 	}
-	if !strings.Contains(body, strings.Replace(panel, "%s", "false", 1)) || !strings.Contains(body, "Seats open today: 0 of 2 · next opening: 2026-09-11 00:00 UTC") {
-		t.Error("a full standing task's page misses its unclaimable panel or the seats open today and the next opening (C585)")
+	if !strings.Contains(body, strings.Replace(panel, "%s", "false", 1)) || !strings.Contains(body, "Seats open now: 0 of 2 · Next seats open 2026-09-11 00:00 UTC") {
+		t.Error("a full standing task's page misses its unclaimable panel or the seats open now and when the next open (C585)")
 	}
 	// The directory has no panel: claims are made on the work's own page.
 	if body := get("/work"); strings.Contains(body, `class="work-act"`) {

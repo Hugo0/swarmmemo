@@ -55,10 +55,13 @@ import (
 // C664/C665 (2026-10-31): manage_app gained create_room, close_room,
 // room_members and read_stream (app rooms, live stream): /mcp 135,178,
 // assistant 100,320; the assistant budget raised by 300 bytes.
+// C672/C675 (2026-10-31): create_work per_agent_max and read_messages
+// first_post: /mcp 135,448, assistant 100,590; the assistant budget raised
+// by 300 bytes.
 var mcpToolsListBudget = map[string]int{
 	"/mcp":               135_700,
 	mcpProfileCore:       101_500,
-	web.AssistantMCPPath: 100_500,
+	web.AssistantMCPPath: 100_800,
 }
 
 // mcpOutputSchemaBudget is the most bytes one tool's output schema may be.

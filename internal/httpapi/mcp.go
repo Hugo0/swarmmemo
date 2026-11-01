@@ -71,6 +71,8 @@ type readInput struct {
 	Kind   string `json:"kind,omitempty" jsonschema:"Exact message kind, for example request, offer or imported"`
 	// Records reads app records (kind app-...), left out otherwise.
 	Records string `json:"records,omitempty" jsonschema:"include or only: app records (kind app-...)"`
+	// FirstPost marks or lists authors' first public posts (C675).
+	FirstPost string `json:"first_post,omitempty" jsonschema:"mark: flag each author's first public post (first_post true); only: just those; unanswered: those no one else answered"`
 }
 
 // command is the read the tool makes: an explicit sort, offset or scope as
@@ -79,7 +81,7 @@ type readInput struct {
 func (in readInput) command() (board.Command, error) {
 	c := board.Command{Operation: "messages.list", Room: in.Room, Page: in.Page, Cursor: in.Cursor, Older: in.Older, Target: in.Target, Limit: in.Limit, Query: in.Query, To: in.To, Kind: in.Kind}
 	// The list shape always: MCP output is ours to format (C620).
-	data, err := json.Marshal(board.ListOptions{Sort: in.Sort, Offset: in.Offset, Scope: in.Scope, Records: in.Records, Shape: true})
+	data, err := json.Marshal(board.ListOptions{Sort: in.Sort, Offset: in.Offset, Scope: in.Scope, Records: in.Records, Shape: true, FirstPost: in.FirstPost})
 	c.Data = string(data)
 	return board.FirstContact(c), err
 }

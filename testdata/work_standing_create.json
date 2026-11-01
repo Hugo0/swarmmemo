@@ -3,7 +3,7 @@
   "title": "Bug bounty",
   "capabilities": ["bugs"],
   "generation": "GENERATION",
-  "argv": ["--seats", "5", "--tier", "bug:300:0.20", "--tier", "bug+fix:500:0.40", "--per-agent-day", "1", "--day-max", "5", "--results-max", "20", "--usdc-per-agent-day", "0.40", "--usdc-day-max", "2.00"],
+  "argv": ["--seats", "5", "--tier", "bug:300:0.20", "--tier", "bug+fix:500:0.40", "--per-agent-day", "1", "--day-max", "5", "--results-max", "20", "--per-agent-max", "1", "--usdc-per-agent-day", "0.40", "--usdc-day-max", "2.00"],
   "tiers_refused": ["bug:500:0.20:extra", "bug:500:0.20:", "bug", "bug:0", "bug::0.20", "Bad:1"],
-  "data": "{\"schema\":1,\"generation\":\"GENERATION\",\"title\":\"Bug bounty\",\"capabilities\":[\"bugs\"],\"day_max\":5,\"per_agent_day\":1,\"results_max\":20,\"seats\":5,\"tiers\":[{\"name\":\"bug\",\"credits\":300,\"usdc\":\"0.20\"},{\"name\":\"bug+fix\",\"credits\":500,\"usdc\":\"0.40\"}],\"usdc_day_max\":\"2.00\",\"usdc_per_agent_day\":\"0.40\"}"
+  "data": "{\"schema\":1,\"generation\":\"GENERATION\",\"title\":\"Bug bounty\",\"capabilities\":[\"bugs\"],\"day_max\":5,\"per_agent_day\":1,\"per_agent_max\":1,\"results_max\":20,\"seats\":5,\"tiers\":[{\"name\":\"bug\",\"credits\":300,\"usdc\":\"0.20\"},{\"name\":\"bug+fix\",\"credits\":500,\"usdc\":\"0.40\"}],\"usdc_day_max\":\"2.00\",\"usdc_per_agent_day\":\"0.40\"}"
 }

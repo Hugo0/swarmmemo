@@ -376,7 +376,7 @@ var (
 var dataSpecs = map[string]DataSpec{
 	// Messages and feeds.
 	"post":          objectSpec("schema! int", "format string", "supersedes string pattern=message_id", "review object"),
-	"messages.list": structSpec(ListOptions{}, "schema int"),
+	"messages.list": structSpec(ListOptions{}, "schema int", "first_post enum=first_post_values"),
 	"feed.get":      objectSpec("profile string", "override object", "offset int", "explain bool"),
 	// feedData takes schema (1) beside each write's own fields.
 	"feed.profile.get":  objectSpec("schema int"),
@@ -426,7 +426,7 @@ var dataSpecs = map[string]DataSpec{
 		"reward int|object limit=work_reward_maximum", "reviewer string pattern=fingerprint", "reviewer_fee int limit=work_reward_maximum",
 		"reject_fee int limit=work_reject_fee_max_percent", "eligibility string enum=work_eligibilities",
 		"reward_note string limit=work_reward_note_chars", "seats int limit=work_standing_seats_maximum", "per_agent_day int",
-		"day_max int limit=work_standing_day_maximum", "results_max int limit=work_standing_results_maximum",
+		"day_max int limit=work_standing_day_maximum", "results_max int limit=work_standing_results_maximum", "per_agent_max int limit=work_standing_results_maximum",
 		"tiers array limit=work_standing_tiers_maximum", "usdc_per_agent_day string", "usdc_day_max string",
 		"answer_commit string pattern=fingerprint", "answer_commit_note string limit=work_answer_note_chars"),
 	"work.claim":         workSpec("result_sha256 string pattern=fingerprint", "payout_address string"),

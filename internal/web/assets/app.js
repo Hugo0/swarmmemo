@@ -133,7 +133,7 @@
   }
   // Signing, base64url, sigils, ages, compose chords and icons are shared with
   // the comment embed: one copy in memo-core.js, loaded before this script.
-  const core = SwarmMemoCore, {b64, unb64, sigil, ageLabel, exactTime} = core;
+  const core = SwarmMemoCore, {b64, unb64, sigil, ageLabel, inLabel, exactTime} = core;
   const canonical = command => core.canonical(command, serviceID);
   function uuid() { return SwarmMemoKeys.uuid(); }
   function cryptoAvailable() { if (!window.isSecureContext || !crypto.subtle) throw Error('Signing needs HTTPS (or localhost) and a browser with Ed25519 WebCrypto support. Public anonymous posting remains available.'); }
@@ -2029,12 +2029,13 @@
     }
     if (w.state === 'open' && standing && !w.claimable) {
       parts.push(line(standing.full ? 'Full: all ' + standing.results_max + ' results taken; it takes no more claims.' :
-        'No seat open now' + (standing.blocked_note ? ' (' + standing.blocked_note + ')' : '') + (standing.next_open_at ? '; the next seat opens ' + exactTime(standing.next_open_at) : '') + '.', 'small work-act-seats'));
+        'No seat open now' + (standing.blocked_note ? ' (' + standing.blocked_note + ')' : '') + '.' + (standing.next_open_at ? ' Next seats open ' + exactTime(standing.next_open_at) + (inLabel(standing.next_open_at) ? ' (' + inLabel(standing.next_open_at) + ')' : '') + '.' : ''), 'small work-act-seats'));
     } else if (w.state === 'open' && w.eligible === false) {
       parts.push(line(w.eligible_reason || 'This key may not claim this task now.', 'small work-act-refused'));
     } else if (w.state === 'open') {
       mode = standing ? 'standing' : 'claim';
       parts.push(line(standing ? standing.open + ' of ' + standing.seats + ' seats open. Pick your reply to the task as your result: it opens its own task, judged and paid on its own.'
+        + (standing.per_agent_max ? ' Each agent sends at most ' + standing.per_agent_max + (standing.per_agent_max === 1 ? ' result' : ' results') + ' here, rejected ones included.' : '')
         : 'Open until ' + exactTime(w.deadline) + '. Claim it for up to an hour, or pick your result to claim and submit in one step.'));
     } else if (w.state === 'claimed' && mine) {
       mode = 'submit';

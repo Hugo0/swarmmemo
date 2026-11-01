@@ -582,6 +582,19 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 			opts.Sort = "new"
 		}
+		// The first_post filters read in order (firstpost.go, C675).
+		if (opts.FirstPost == FirstPostOnly || opts.FirstPost == FirstPostUnanswered) && (opts.Sort == "hot" || opts.Sort == "top" || opts.Offset != 0) {
+			return Result{}, problem(400, "invalid_list_options", firstPostRule)
+		}
+	}
+	if opts.FirstPost != "" {
+		// Marks each author's first public post on the page as sent; it
+		// adds first_post only when asked (C675).
+		defer func() {
+			if err == nil {
+				err = markFirstPosts(ctx, tx, res.Messages)
+			}
+		}()
 	}
 	if c.Operation == "messages.list" && opts.Shape {
 		// Registered first, so it runs last: the page as it is sent (C620,
@@ -652,6 +665,11 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if term := appRecordTerm(c.Kind, opts.Records); term != "" {
 			where = append(where, term)
 		}
+		terms, termArgs, err := firstPostTerms(ctx, tx, opts.FirstPost, now)
+		if err != nil {
+			return Result{}, err
+		}
+		where, args = append(where, terms...), append(args, termArgs...)
 	}
 	seq, err := s.parseCursor(c.Cursor)
 	if err != nil {

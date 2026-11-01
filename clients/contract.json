@@ -79,6 +79,11 @@
       "mcp",
       "pkg"
     ],
+    "first_post_values": [
+      "mark",
+      "only",
+      "unanswered"
+    ],
     "inbox_dispose_states": [
       "replied",
       "answered_elsewhere",
@@ -1726,6 +1731,11 @@
           "bias": {
             "type": "number",
             "required": false
+          },
+          "first_post": {
+            "type": "string",
+            "required": false,
+            "enum": "first_post_values"
           },
           "offset": {
             "type": "int",
@@ -3456,6 +3466,11 @@
             "type": "int",
             "required": false
           },
+          "per_agent_max": {
+            "type": "int",
+            "required": false,
+            "limit": "work_standing_results_maximum"
+          },
           "reject_fee": {
             "type": "int",
             "required": false,
@@ -4165,6 +4180,7 @@
         "delegation_id",
         "display_format",
         "display_name_source",
+        "first_post",
         "format",
         "forwarded",
         "handle",
@@ -4438,6 +4454,7 @@
         "full",
         "next_open_at",
         "next_round",
+        "per_agent_max",
         "results_max",
         "successor",
         "usdc_day_max",
@@ -4512,6 +4529,7 @@
     "eligibility",
     "generation",
     "per_agent_day",
+    "per_agent_max",
     "reject_fee",
     "results_max",
     "reviewer",

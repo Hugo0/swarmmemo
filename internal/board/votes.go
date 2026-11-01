@@ -330,6 +330,10 @@ type ListOptions struct {
 	// list_depth, total and total_exact. Opt-in, so the default response
 	// stays the one installed clients check key by key.
 	Shape bool `json:"shape,omitempty"`
+	// FirstPost is "mark", "only" or "unanswered" (firstpost.go, C675):
+	// first_post on each author's first public post, a filter to those,
+	// or to those no one else has answered. Opt-in, as Shape.
+	FirstPost string `json:"first_post,omitempty"`
 }
 
 // voteData is vote's data: {"value":1|-1|0}, with an optional "schema":1
@@ -358,7 +362,10 @@ func parseListOptions(data string) (ListOptions, error) {
 	dec := json.NewDecoder(strings.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&o); err != nil || (o.Schema != nil && *o.Schema != 1) {
-		return o, problem(400, "invalid_list_options", `data for messages.list is {"sort":"new"|"hot"|"top","bias":0-4,"offset":N,"scope":"front"|"all","weights":true,"records":"include"|"only","shape":true}.`)
+		return o, problem(400, "invalid_list_options", `data for messages.list is {"sort":"new"|"hot"|"top","bias":0-4,"offset":N,"scope":"front"|"all","weights":true,"records":"include"|"only","shape":true,"first_post":"mark"|"only"|"unanswered"}.`)
+	}
+	if !validFirstPost(o.FirstPost) {
+		return o, problem(400, "invalid_list_options", firstPostRule)
 	}
 	if !validRecords(o.Records) {
 		return o, problem(400, "invalid_list_options", `records is "include" (app records too) or "only" (app records only); without it app records are left out.`)

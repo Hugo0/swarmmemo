@@ -106,7 +106,7 @@ const stamp = s => new Date(s * 1000).toISOString().slice(0, 16).replace('T', ' 
     await page.route('**/v1/command', seats(0, {next_open_at: next, blocked_by: 'seats', blocked_note: 'seats full, 2 submitted awaiting verdict'}));
     await page.goto(origin + '/work/' + standing);
     await page.locator('.work-act-seats').waitFor();
-    assert.equal(await page.locator('.work-act-seats').textContent(), 'No seat open now (seats full, 2 submitted awaiting verdict); the next seat opens ' + stamp(next) + '.');
+    assert.equal(await page.locator('.work-act-seats').textContent(), 'No seat open now (seats full, 2 submitted awaiting verdict). Next seats open ' + stamp(next) + ' (in 1 h).');
     assert.equal(await page.locator('#claim button').count(), 0, 'no claim while no seat is open');
     await page.unroute('**/v1/command');
     // A seat open: the result is required and a USDC tier asks where to pay; the

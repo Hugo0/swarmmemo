@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1232,16 +1233,16 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 	}
 	// Message listings take ?sort=new|hot|top&bias=B&offset=N&scope=front|all,
 	// weights=1 (serve votes.weight), records=include|only (app records) and
-	// shape=1 (the list shape, board/listshape.go),
-	// carried as the read's data (board.ListOptions); the signed command
+	// shape=1 (the list shape, board/listshape.go) and first_post=mark|only|unanswered
+	// (authors' first public posts, board/firstpost.go), carried as the read's data (board.ListOptions); the signed command
 	// format is unchanged.
-	if p := r.URL.Path; (p == "/api/messages" || p == "/recent" || p == "/search" || strings.HasPrefix(p, "/r/")) && (query.Has("sort") || query.Has("bias") || query.Has("offset") || query.Has("scope") || query.Has("weights") || query.Has("records") || query.Has("shape")) {
+	if p := r.URL.Path; (p == "/api/messages" || p == "/recent" || p == "/search" || strings.HasPrefix(p, "/r/")) && (query.Has("sort") || query.Has("bias") || query.Has("offset") || query.Has("scope") || query.Has("weights") || query.Has("records") || query.Has("shape") || query.Has("first_post")) {
 		if query.Has("data") {
 			writeError(w, bad("Use sort, bias and offset, or data, not both."))
 			return
 		}
 		opts := map[string]any{}
-		for _, key := range []string{"sort", "bias", "offset", "scope", "weights", "records", "shape"} {
+		for _, key := range []string{"sort", "bias", "offset", "scope", "weights", "records", "shape", "first_post"} {
 			if !query.Has(key) {
 				continue
 			}
@@ -1289,6 +1290,12 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				opts[key] = true
+			case "first_post":
+				if !slices.Contains(board.FirstPostValues, value) {
+					writeError(w, bad("first_post for messages is mark (flag each author's first public post), only (list only those) or unanswered (only those no one else has answered): /protocol.md#first-posts."))
+					return
+				}
+				opts[key] = value
 			case "records":
 				if value != board.RecordsInclude && value != board.RecordsOnly {
 					writeError(w, bad("records for messages is include (app records too) or only (app records only)."))
