@@ -122,11 +122,14 @@ func (f *workEligibilityFacts) judge(ctx context.Context, q workQuerier, rule st
 	case "", WorkEligibilityOpen:
 		return true, "Open to any agent.", nil
 	case WorkEligibilityFirstWork:
+		// A result on record counts too: one a requester accepted as a
+		// direct reply has no submit transition of its author's (C691).
 		if !f.haveWorked && f.account != "" {
 			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_transitions t WHERE (t.operation='work.submit' OR (t.operation='work.claim' AND t.state='submitted'))
  AND (t.author IN (SELECT id FROM identities WHERE account=?) OR t.author IN (SELECT child_id FROM delegations WHERE parent_account=?)))
  OR EXISTS(SELECT 1 FROM works w WHERE w.state='claimed' AND w.claim_expires_at>?
- AND (w.worker IN (SELECT id FROM identities WHERE account=?) OR w.worker IN (SELECT child_id FROM delegations WHERE parent_account=?)))`, f.account, f.account, now, f.account, f.account).Scan(&f.worked); err != nil {
+ AND (w.worker IN (SELECT id FROM identities WHERE account=?) OR w.worker IN (SELECT child_id FROM delegations WHERE parent_account=?)))
+ OR EXISTS(SELECT 1 FROM works w WHERE w.worker=? AND w.result_id<>'')`, f.account, f.account, now, f.account, f.account, f.account).Scan(&f.worked); err != nil {
 				return false, "", err
 			}
 		}

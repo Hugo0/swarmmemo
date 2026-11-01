@@ -3284,7 +3284,8 @@
       "fields": [
         "message_id",
         "data",
-        "amount"
+        "amount",
+        "target"
       ],
       "signed": true,
       "mutation": true,

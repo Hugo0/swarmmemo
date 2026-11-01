@@ -395,6 +395,18 @@ class OperationTests(unittest.TestCase):
         for item in bad:
             with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
 
+    def test_reply_accept_signs_target_and_no_fence(self):
+        # C691: an accept of a direct reply names it (target) and signs no amount; its fence is the claim's.
+        def transition(extra_command):
+            command = op.memo.sign({"operation": "work.accept", "message_id": "b" * 32, "data": json.dumps({"schema": 1, "generation": "a" * 32}), **extra_command}, self.key)
+            return {"sequence": 2, "operation": "work.accept", "author": hashlib.sha256(op.memo.unb64(self.public)).hexdigest(),
+                    "public_key": self.public, "signature": command["signature"], "signed_payload": op.memo.canonical(command).decode(),
+                    "accepted_at": int(time.time()), "fence": 1, "generation": "a" * 32, "state": "accepted"}
+        for item in (transition({"target": "c" * 32}), transition({"amount": 1})):
+            with self.subTest(item=item): self.assertEqual(op._transition(self.profile, item, "b" * 32), item)
+        for item in (transition({"target": "c" * 32, "amount": 1}), transition({"target": "nope"}), transition({"amount": 2})):
+            with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
+
     def test_reviewer_change_is_validated(self):
         def transition(data, extra, state="claimed"):
             command = op.memo.sign({"operation": "work.reviewer.set", "message_id": "b" * 32, "data": json.dumps(data)}, self.key)

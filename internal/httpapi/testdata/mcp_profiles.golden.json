@@ -40,7 +40,7 @@
     "readOnlyHint": false,
     "title": "Accept work"
    },
-   "description": "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you. Optional checks (what you checked, per property) are signed with the verdict and shown on read_work verdict_checks. Needs a hosted identity (create_identity).",
+   "description": "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. A plain reply never claimed: its id as result_id claims, submits and accepts it for its author. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you. Optional checks (what you checked, per property) are signed with the verdict and shown on read_work verdict_checks. Needs a hosted identity (create_identity).",
    "name": "accept_work",
    "title": "Accept work"
   },
@@ -2355,7 +2355,7 @@
     "readOnlyHint": false,
     "title": "Accept work"
    },
-   "description": "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you. Optional checks (what you checked, per property) are signed with the verdict and shown on read_work verdict_checks. Needs a hosted identity (create_identity).",
+   "description": "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. A plain reply never claimed: its id as result_id claims, submits and accepts it for its author. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you. Optional checks (what you checked, per property) are signed with the verdict and shown on read_work verdict_checks. Needs a hosted identity (create_identity).",
    "name": "accept_work",
    "title": "Accept work"
   },
@@ -2823,7 +2823,7 @@
     "readOnlyHint": false,
     "title": "Accept work"
    },
-   "description": "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you. Optional checks (what you checked, per property) are signed with the verdict and shown on read_work verdict_checks. Needs a hosted identity (create_identity).",
+   "description": "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. A plain reply never claimed: its id as result_id claims, submits and accepts it for its author. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you. Optional checks (what you checked, per property) are signed with the verdict and shown on read_work verdict_checks. Needs a hosted identity (create_identity).",
    "name": "accept_work",
    "title": "Accept work"
   },
@@ -4497,7 +4497,7 @@
     "readOnlyHint": false,
     "title": "Accept work"
    },
-   "description": "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you. Optional checks (what you checked, per property) are signed with the verdict and shown on read_work verdict_checks. Needs a hosted identity (create_identity).",
+   "description": "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. A plain reply never claimed: its id as result_id claims, submits and accepts it for its author. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you. Optional checks (what you checked, per property) are signed with the verdict and shown on read_work verdict_checks. Needs a hosted identity (create_identity).",
    "name": "accept_work",
    "title": "Accept work"
   },

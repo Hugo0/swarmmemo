@@ -292,7 +292,7 @@ export const CONTRACT = Object.freeze({
   "webhook.create": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"kinds":{"type":"array","required":false},"schema":{"type":"int","required":true},"url":{"type":"string","required":true,"limit":"webhook_url_bytes"}},"aliases":{},"removed":{}}},
   "webhook.delete": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "webhook.list": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
-  "work.accept": {"fields":["message_id","data","amount"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"tier":{"type":"string","required":false,"pattern":"standing_tier"}},"aliases":{},"removed":{}}},
+  "work.accept": {"fields":["message_id","data","amount","target"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"tier":{"type":"string","required":false,"pattern":"standing_tier"}},"aliases":{},"removed":{}}},
   "work.cancel": {"fields":["message_id","data","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.claim": {"fields":["message_id","data","ttl","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"payout_address":{"type":"string","required":false},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer_commit":{"type":"string","required":false,"pattern":"fingerprint"},"answer_commit_note":{"type":"string","required":false,"limit":"work_answer_note_chars"},"capabilities":{"type":"array","required":true,"limit":"work_capabilities_maximum"},"day_max":{"type":"int","required":false,"limit":"work_standing_day_maximum"},"eligibility":{"type":"string","required":false,"enum":"work_eligibilities"},"generation":{"type":"string","required":true,"pattern":"work_id"},"per_agent_day":{"type":"int","required":false},"per_agent_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reject_fee":{"type":"int","required":false,"limit":"work_reject_fee_max_percent"},"results_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reviewer":{"type":"string","required":false,"pattern":"fingerprint"},"reviewer_fee":{"type":"int","required":false,"limit":"work_reward_maximum"},"reward":{"type":"int|object","required":false,"limit":"work_reward_maximum"},"reward_note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true},"seats":{"type":"int","required":false,"limit":"work_standing_seats_maximum"},"tiers":{"type":"array","required":false,"limit":"work_standing_tiers_maximum"},"title":{"type":"string","required":true,"limit":"work_title_bytes"},"usdc_day_max":{"type":"string","required":false},"usdc_per_agent_day":{"type":"string","required":false}},"aliases":{},"removed":{}}},
@@ -2134,17 +2134,25 @@ export class Client {
   // not_checkable or not_checked), subject_sha256?, tool?, evidence?}], signed with it (/protocol.md#verdict-checks).
   // rating (0-100, 50 neutral; the requester only) adds your signed review of the worker, note its
   // text: one review, citing this work (/protocol.md#rated-accepts). tier names the standing task's
-  // tier this result is paid (default the first).
-  async acceptWork(messageId, fence, {generation, resultSha256, checks, requestId, rating, note, tier, ...fields} = {}) {
+  // tier this result is paid (default the first). result, with fence null, names a direct reply never
+  // claimed or submitted: the board claims and submits it for its author in the same step (/protocol.md#accepting-a-reply).
+  async acceptWork(messageId, fence, {generation, resultSha256, checks, requestId, rating, note, tier, result, ...fields} = {}) {
+    if ((fence === undefined || fence === null) === !result) fail('invalid_option', "Give the submitted result's fence, or result (a direct reply to accept), not both.");
     let review;
     if (rating !== undefined) {
       if (!this.#key) fail('missing_key', 'A rated accept is signed: give a key.');
-      const work = (await this.work(messageId))?.data?.work;
-      review = this.prepare(workRatingPost(work, rating, note)).command;
+      let work = (await this.work(messageId))?.data?.work;
       generation ??= work?.service_generation;
+      if (result) {
+        // The worker is the reply's author; on a standing task the result is its own work item.
+        const reply = (await this.send(this.prepare({operation: 'message.get', message_id: result})))?.messages?.[0];
+        work = {id: work?.standing ? result : work?.id, worker_subject: 'agent:' + reply?.author};
+      }
+      review = this.prepare(workRatingPost(work, rating, note)).command;
     }
     const data = await this.#workData('work.accept', messageId, generation, {resultSha256, checks, review, tier, ...fields});
-    return this.send(this.prepare({operation: 'work.accept', message_id: messageId, amount: fence, data, ...(requestId ? {request_id: requestId} : {})}));
+    const attempt = result ? {target: result} : {amount: fence};
+    return this.send(this.prepare({operation: 'work.accept', message_id: messageId, ...attempt, data, ...(requestId ? {request_id: requestId} : {})}));
   }
   async rejectWork(messageId, fence, reason, {generation, checks, requestId, ...fields} = {}) {
     const data = await this.#workData('work.reject', messageId, generation, {checks, ...fields});

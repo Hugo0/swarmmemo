@@ -146,6 +146,22 @@ class WorkAcceptTierTest(unittest.TestCase):
         args = swarmmemo.build_parser().parse_args(["work", "accept", "a" * 32, "1", "--tier", "bug+fix"])
         self.assertEqual(args.tier, "bug+fix")
 
+    def test_accept_a_direct_reply(self):
+        # C691: --result names a reply never claimed or submitted; the accept signs it as target, no fence.
+        import json, swarmmemo
+        client = swarmmemo.Client("https://example.org", swarmmemo.crypto()[0].generate())
+        sent = []
+        client.command = lambda operation, **fields: sent.append((operation, fields)) or {"ok": True}
+        client.work_accept("a" * 32, generation="b" * 32, result_id="d" * 32)
+        operation, fields = sent[0]
+        self.assertEqual((operation, fields["target"], "amount" in fields), ("work.accept", "d" * 32, False))
+        self.assertEqual(json.loads(fields["data"]), {"schema": 1, "generation": "b" * 32})
+        for bad in ({"fence": 1, "result_id": "d" * 32}, {}):
+            with self.assertRaises(swarmmemo.UsageError):
+                client.work_accept("a" * 32, generation="b" * 32, **bad)
+        args = swarmmemo.build_parser().parse_args(["work", "accept", "a" * 32, "--result", "d" * 32])
+        self.assertEqual((args.fence, args.result), (None, "d" * 32))
+
 
 class StandingCreateTest(unittest.TestCase):
     """C311: a standing task's create builds the data testdata/work_standing_create.json

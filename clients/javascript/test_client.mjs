@@ -474,6 +474,7 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     [() => signed.claimWork(id, {result: 'r1', generation, requestId: 'c-3', payoutAddress: '0xabababababababababababababababababababab'}), work({operation: 'work.claim', message_id: id, target: 'r1', request_id: 'c-3'}, ',"payout_address":"0xabababababababababababababababababababab"')],
     [() => signed.acceptWork(id, 3, {generation, requestId: 'a-1'}), work({operation: 'work.accept', message_id: id, amount: 3, request_id: 'a-1'})],
     [() => signed.acceptWork(id, 3, {generation, tier: 'bug+fix', requestId: 'a-5'}), work({operation: 'work.accept', message_id: id, amount: 3, request_id: 'a-5'}, ',"tier":"bug+fix"')],
+    [() => signed.acceptWork(id, null, {generation, result: 'r1', requestId: 'a-6'}), work({operation: 'work.accept', message_id: id, target: 'r1', request_id: 'a-6'})],
     [() => signed.rejectWork(id, 3, 'Breaks the build.', {generation, requestId: 'j-1'}), work({operation: 'work.reject', message_id: id, amount: 3, reason: 'Breaks the build.', request_id: 'j-1'})],
     [() => signed.acceptWork(id, 3, {generation, resultSha256: 'f'.repeat(64), checks: [{property: 'integrity', state: 'pass', subject_sha256: 'a'.repeat(64)}, {property: 'conformance', state: 'not_checked'}], requestId: 'a-3'}), work({operation: 'work.accept', message_id: id, amount: 3, request_id: 'a-3'}, `,"result_sha256":"${'f'.repeat(64)}","checks":[{"property":"integrity","state":"pass","subject_sha256":"${'a'.repeat(64)}"},{"property":"conformance","state":"not_checked"}]`)],
     [() => signed.rejectWork(id, 3, 'Fails conformance.', {generation, checks: [{property: 'conformance', state: 'fail', evidence: 'https://example.org/run/1'}], requestId: 'j-2'}), work({operation: 'work.reject', message_id: id, amount: 3, reason: 'Fails conformance.', request_id: 'j-2'}, ',"checks":[{"property":"conformance","state":"fail","evidence":"https://example.org/run/1"}]')],
@@ -591,6 +592,8 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
   await assert.rejects(signed.acceptWork(id, 3, {rating: 101}), errorCode('invalid_option')); requests.length = 0;
   await assert.rejects(anonymous.acceptWork(id, 3, {rating: 50}), errorCode('missing_key'));
   await assert.rejects(signed.acceptWork(id, 3, {generation, tier: 'Bug Fix'}), errorCode('invalid_option')); requests.length = 0;
+  await assert.rejects(signed.acceptWork(id, 3, {generation, result: 'r1'}), errorCode('invalid_option'));
+  await assert.rejects(signed.acceptWork(id, null, {generation}), errorCode('invalid_option')); requests.length = 0;
   // /call: unsigned POST, args as the body's fields, with max_cost and request_id.
   await signed.callUrl('fetch', 'page', {url: 'https://example.com/'}, {maxCost: 8, requestId: 'r'.repeat(16)});
   assert.deepEqual(requests.shift(), {path: '/call/fetch/page', body: {url: 'https://example.com/', max_cost: 8, request_id: 'r'.repeat(16)}});

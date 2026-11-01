@@ -175,6 +175,14 @@ func errTopupUnavailable() error {
 	return problem(404, "topup_unavailable", "Credit top-ups are not enabled on this server; see /capabilities.")
 }
 
+func errWorkGenerationStale() error {
+	return problem(409, "work_generation_mismatch", "The signed generation is stale; inspect current work before explicitly preparing a new transition.")
+}
+
+func errWorkStateNotAllowed() error {
+	return problem(409, "work_state_conflict", "This transition is not allowed in the current effective state.")
+}
+
 func errRequesterOnly() error {
 	return problem(403, "work_forbidden", "Only the requester's continuous account may perform this transition.")
 }

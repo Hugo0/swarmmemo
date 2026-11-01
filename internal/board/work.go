@@ -462,6 +462,8 @@ func invalidWorkField(operation, name string) error {
 		msg = name + " is not a field " + operation + " data takes; did you mean ttl? It goes beside data, not in it."
 	} else if want == "target" && (operation == "work.claim" || operation == "work.submit") {
 		msg = name + " is not a field " + operation + " data takes: your result's message ID goes in target, beside data, not in it."
+	} else if want == "target" && operation == "work.accept" {
+		msg = name + " is not a field " + operation + " data takes: a direct reply to accept goes in target, beside data, not in it; a submitted result needs no ID, only its fence (amount)."
 	} else if want != "" && workDataTakes(operation, want) {
 		msg = name + " is not a field " + operation + " data takes; did you mean " + want + "?"
 	}
@@ -963,6 +965,20 @@ func eligibleWorkResult(ctx context.Context, tx *sql.Tx, id string, w workRow, r
 }
 
 func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
+	if c.Operation == "work.accept" && c.Target != "" {
+		// An accept that names a direct reply claims, submits and accepts
+		// it for the reply's author in one step (C691, workreply.go).
+		return s.acceptReply(ctx, tx, c, a, now)
+	}
+	return s.workStep(ctx, tx, c, a, now, false)
+}
+
+// workStep is one work transition. With forReply it is the claim or submit
+// an accept of a direct reply runs for the reply's author (acceptReply): every
+// check and money move of that transition, but no charge, no transition of
+// its own (the requester's signed accept that follows is the record), no
+// events and no queue: a standing task with no seat open refuses it.
+func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64, forReply bool) (Result, error) {
 	if err := requireSigned(a); err != nil {
 		return Result{}, err
 	}
@@ -994,7 +1010,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, err
 	}
 	if d.Generation != generation {
-		return Result{}, problem(409, "work_generation_mismatch", "The signed generation is stale; inspect current work before explicitly preparing a new transition.")
+		return Result{}, errWorkGenerationStale()
 	}
 	if c.Operation == "work.reject" || c.Operation == "work.cancel" {
 		if strings.TrimSpace(c.Reason) == "" || len(c.Reason) > ReasonBytes || !utf8.ValidString(c.Reason) || strings.ContainsRune(c.Reason, 0) {
@@ -1166,7 +1182,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 					return Result{}, problem(409, "work_state_conflict", "This is a standing task: it is never claimed itself and stays open for other seats. Your result is submitted by work.claim with target, your reply's ID, which opens it as its own work item; work.get on this task lists yours under your_results.")
 				}
 			}
-			return Result{}, problem(409, "work_state_conflict", "This transition is not allowed in the current effective state.")
+			return Result{}, errWorkStateNotAllowed()
 		}
 		if standing, err = loadWorkStanding(ctx, tx, w.ID); err != nil {
 			return Result{}, err
@@ -1348,6 +1364,10 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 					if !errors.As(err, &queued) {
 						return Result{}, err
 					}
+					if forReply {
+						// Accepted now or not at all: no seat, no accept.
+						return Result{}, queued.refusal
+					}
 					if err = s.queueStandingResult(ctx, tx, root, standing, &w, d); err != nil {
 						return Result{}, err
 					}
@@ -1447,10 +1467,12 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			w.Updated = now
 		}
 	}
-	if err = s.charge(ctx, tx, a, int64(len(a.canonical))+512, now); err != nil {
-		return Result{}, err
+	if !forReply {
+		if err = s.charge(ctx, tx, a, int64(len(a.canonical))+512, now); err != nil {
+			return Result{}, err
+		}
+		w.Sequence++
 	}
-	w.Sequence++
 	_, err = tx.ExecContext(ctx, `INSERT INTO works(id,requester,title,capabilities,state,generation,created_at,updated_at,deadline,fence,worker,claim_expires_at,result_id,history_seq,reviewer,eligibility,standing_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,generation=excluded.generation,updated_at=excluded.updated_at,fence=excluded.fence,worker=excluded.worker,claim_expires_at=excluded.claim_expires_at,result_id=excluded.result_id,history_seq=excluded.history_seq,reviewer=excluded.reviewer`, w.ID, w.Requester, w.Title, w.Caps, w.State, w.Generation, w.Created, w.Updated, w.Deadline, w.Fence, w.Worker, w.ClaimExpires, w.Result, w.Sequence, w.Reviewer, w.Eligibility, w.StandingID)
 	if err != nil {
 		return Result{}, err
@@ -1488,6 +1510,18 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 		}
 		err = s.setWorkPayTo(ctx, tx, c.Operation, w, d, w.State == "submitted")
+		if forReply {
+			var e *Error
+			if errors.As(err, &e) && e.Code == "payout_address_required" {
+				// The author signed no payout address and links no
+				// wallet: none is invented; credits only (acceptReply).
+				err = voidWorkUSDC(ctx, tx, w.ID, WorkUSDCNoPayoutAddress, now)
+			}
+			if err != nil {
+				return Result{}, err
+			}
+			return Result{Data: ResultData(WorkAckData{Ack: WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence}})}, nil
+		}
 	case WorkSettle:
 		err = s.settleWorkUSDC(ctx, tx, w, d, now)
 	case WorkPromise:

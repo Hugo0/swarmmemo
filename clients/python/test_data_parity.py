@@ -313,6 +313,9 @@ CLI_COMMANDS = {
     "updates.get": ["updates", "--cursor", "c1"],
     "updates.dispose": ["dispose", MESSAGE, "--state", memo.ENUMS["inbox_dispose_states"][0]],
     "updates.mark_read": ["mark-read", MESSAGE],
+    "offering.publish": ["offering", "publish", "oracle", "--title", "t", "--price", "0.01", "--pay-to", "0x" + "1" * 40],
+    "offering.answer": ["offering", "answer", "oc_" + "0" * 32, "body"],
+    "offering.refund": ["offering", "refund", "oc_" + "0" * 32, TX],
     "standing.challenge": None, "delegation.create": None,
 }
 # A field the subcommand sends from its own arguments (the base command line), or under
@@ -339,6 +342,8 @@ CLI_ARGUMENTS = {
     ("work.reviewer.set", "reviewer"): None, ("work.successor.set", "successor"): None, ("work.reveal", "answer"): None, ("work.reveal", "salt"): None, ("work.settle", "tx_hash"): None, ("work.promise", "amount_usdc"): None,
     ("updates.get", "wait"): ["--wait", "5"], ("updates.dispose", "ids"): None, ("updates.dispose", "state"): None,
     ("updates.mark_read", "ids"): None, ("updates.mark_read", "all"): ["--all"],
+    ("offering.publish", "name"): None, ("offering.publish", "title"): None, ("offering.publish", "price"): None, ("offering.publish", "pay_to"): None,
+    ("offering.publish", "screen_answer"): ["--no-screen-answer"], ("offering.answer", "body"): None, ("offering.refund", "tx_hash"): None,
 }
 # A field the CLI does not send for an operation it has a subcommand for, with the reason.
 CLI_EXCLUDED = {
@@ -352,9 +357,7 @@ CLI_NO_COMMAND = {
     **{op: reason for op, reason in PY_NO_WRAPPER.items()},
     "standing.challenge": "link-wallet sends kind wallet only; the command subcommand sends any other",
     "delegation.create": "worker enrollment is the Python API's prepare_enrollment; the command subcommand sends it",
-    "offering.publish": "no subcommand: the command subcommand sends any operation's data",
-    "offering.answer": "no subcommand: the command subcommand sends any operation's data",
-    "offering.refund": "no subcommand: the command subcommand sends any operation's data",
+    "offering.buy": "paid with an x402 PAYMENT-SIGNATURE this client does not sign; any x402 client buys at POST /@HANDLE/NAME",
 }
 
 

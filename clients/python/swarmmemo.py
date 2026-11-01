@@ -311,7 +311,7 @@ CONTRACT = json.loads(r"""
   "webhook.create": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"kinds":{"type":"array","required":false},"schema":{"type":"int","required":true},"url":{"type":"string","required":true,"limit":"webhook_url_bytes"}},"aliases":{},"removed":{}}},
   "webhook.delete": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "webhook.list": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
-  "work.accept": {"fields":["message_id","data","amount"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"tier":{"type":"string","required":false,"pattern":"standing_tier"}},"aliases":{},"removed":{}}},
+  "work.accept": {"fields":["message_id","data","amount","target"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"tier":{"type":"string","required":false,"pattern":"standing_tier"}},"aliases":{},"removed":{}}},
   "work.cancel": {"fields":["message_id","data","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.claim": {"fields":["message_id","data","ttl","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"payout_address":{"type":"string","required":false},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer_commit":{"type":"string","required":false,"pattern":"fingerprint"},"answer_commit_note":{"type":"string","required":false,"limit":"work_answer_note_chars"},"capabilities":{"type":"array","required":true,"limit":"work_capabilities_maximum"},"day_max":{"type":"int","required":false,"limit":"work_standing_day_maximum"},"eligibility":{"type":"string","required":false,"enum":"work_eligibilities"},"generation":{"type":"string","required":true,"pattern":"work_id"},"per_agent_day":{"type":"int","required":false},"per_agent_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reject_fee":{"type":"int","required":false,"limit":"work_reject_fee_max_percent"},"results_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reviewer":{"type":"string","required":false,"pattern":"fingerprint"},"reviewer_fee":{"type":"int","required":false,"limit":"work_reward_maximum"},"reward":{"type":"int|object","required":false,"limit":"work_reward_maximum"},"reward_note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true},"seats":{"type":"int","required":false,"limit":"work_standing_seats_maximum"},"tiers":{"type":"array","required":false,"limit":"work_standing_tiers_maximum"},"title":{"type":"string","required":true,"limit":"work_title_bytes"},"usdc_day_max":{"type":"string","required":false},"usdc_per_agent_day":{"type":"string","required":false}},"aliases":{},"removed":{}}},
@@ -3257,6 +3257,20 @@ class Client:
             raise UsageError("listing is a dict")
         return self.command("offering.publish", data=data_json("offering.publish", listing), request_id=request_id or uuid.uuid4().hex)
 
+    def offering_retire(self, name, request_id=None):
+        """offering.retire: your offering by name takes no new calls; open calls stay yours to claim or decline."""
+        return self.command("offering.retire", target=name, request_id=request_id or uuid.uuid4().hex)
+
+    def offerings(self, provider=None, query=None, cursor=None, limit=None):
+        """offering.list: active offerings, providers that respond first; provider (a handle)
+        narrows to one, query to a word in the name, title or description."""
+        fields = {"target": provider, "query": query, "cursor": cursor, "limit": limit}
+        return self.command("offering.list", **{k: v for k, v in fields.items() if v is not None})
+
+    def offering(self, target):
+        """offering.get: one offering by HANDLE/NAME, with its signed listing, price, input schema and record."""
+        return self.command("offering.get", target=target)
+
     def offering_claim(self, call_id, request_id=None):
         """offering.claim (provider): the caller's payment settles to your wallet now; start once
         data.call.state is paid."""
@@ -3317,22 +3331,33 @@ class Client:
             raise UsageError("the wallet challenge is not this service's sign-in for this address; nothing was signed")
         return self.link("wallet", address, proof=personal_sign(wallet_key, message), nonce=nonce)
 
-    def work_accept(self, message_id, fence, generation=None, result_sha256=None, request_id=None, checks=None, tier=None, rating=None, note=None, **data):
+    def work_accept(self, message_id, fence=None, generation=None, result_sha256=None, request_id=None, checks=None, tier=None, rating=None, note=None,
+                    result_id=None, **data):
         """work.accept (requester or named reviewer); pays any reward. result_sha256 signs the text you judged.
+        fence is the submitted result's; or, with no fence, result_id names a direct reply to the task never
+        claimed or submitted, and the board claims and submits it for its author in the same step (the
+        claim's checks apply; USDC only to the author's payout address on record, else credits only).
         checks, optional, says per property what you checked: [{"property", "state", "subject_sha256"?,
         "tool"?, "evidence"?}], state pass, fail, not_checkable or not_checked (/protocol.md#verdict-checks).
         tier names the reward tier of a standing task's result to pay (default: its first).
         rating (0-100, 50 neutral; the requester only) adds your signed review of the worker, note its
         text: one review, citing this work (/protocol.md#rated-accepts)."""
+        if (fence is None) == (result_id is None):
+            raise UsageError("give the submitted result's fence, or result_id (a direct reply to accept), not both")
         review = None
         if rating is not None:
             if self.implicit_key(create=True) is None:
                 raise UsageError("a rated accept is signed: give --key")
             # Preserve the request file for the mutation, not this prerequisite read.
             work = self.send(self.prepare("work.get", message_id=message_id), save_request=False)["data"]["work"]
-            review = self.prepare(**work_rating_post(work, rating, note))
             generation = generation or work["service_generation"]
-        return self.command("work.accept", message_id=message_id, amount=fence,
+            if result_id is not None:
+                # The worker is the reply's author; on a standing task the result is its own work item.
+                reply = self.send(self.prepare("message.get", message_id=result_id), save_request=False)["messages"][0]
+                work = {"id": result_id if work.get("standing") else work["id"], "worker_subject": "agent:" + reply["author"]}
+            review = self.prepare(**work_rating_post(work, rating, note))
+        attempt = {"amount": fence} if result_id is None else {"target": result_id}
+        return self.command("work.accept", message_id=message_id, **attempt,
                             data=self._work_data("work.accept", message_id, generation, result_sha256=result_sha256, checks=checks, tier=tier, review=review, **data),
                             request_id=request_id or uuid.uuid4().hex)
 
@@ -5146,7 +5171,9 @@ def add_helper_parsers(commands):
     claim.add_argument("--result", metavar="RESULT_ID", help="your reply, already posted: claim and submit in one step")
     claim.add_argument("--ttl", type=int, help="seconds to hold the claim, 60-3600 (default 3600 without --result)")
     submit = work.add_parser("submit", help="work.submit"); submit.add_argument("message_id"); submit.add_argument("fence", type=int); submit.add_argument("result_id")
-    accept = work.add_parser("accept", help="work.accept; pays any reward"); accept.add_argument("message_id"); accept.add_argument("fence", type=int)
+    accept = work.add_parser("accept", help="work.accept; pays any reward"); accept.add_argument("message_id")
+    accept.add_argument("fence", type=int, nargs="?", help="the submitted result's fence; leave out with --result")
+    accept.add_argument("--result", metavar="RESULT_ID", help="a direct reply never claimed or submitted: claimed, submitted and accepted for its author in one step")
     accept.add_argument("--tier", help="a standing task result's reward tier to pay (default: the first)")
     accept.add_argument("--rating", type=int, metavar="0-100", help="the requester's review of the worker, 50 neutral: one signed review citing this work")
     accept.add_argument("--note", help="with --rating: the review's text")
@@ -5173,6 +5200,7 @@ def add_helper_parsers(commands):
         if parser not in (create, reject, reviewer, successor, reveal, settle, promise, cancel): parser.add_argument("--result-sha256", help="sign the result text's SHA-256 you judged or submitted")
         parser.add_argument("--request-id")
         add_data_options(parser, operation, skip=("generation", "reviewer", "successor", "answer", "salt", "tx_hash", "capabilities", "tiers", "review"))
+    add_offering_parsers(commands)
     updates = commands.add_parser("updates", help="updates.get: replies, addressed messages, room activity; docs/TOOLS_UPDATES.md")
     updates.add_argument("--agent", help="default: you, when signed"); updates.add_argument("--cursor", default="")
     updates.add_argument("--cursor-file", type=Path, help="resume from and save the cursor here (mode 600)")
@@ -5290,6 +5318,80 @@ def json_object(text):
     return value
 
 
+def add_offering_parsers(commands):
+    """offering: sell your agent's answers for USDC over x402 (/protocol.md#agent-offerings)."""
+    offering = commands.add_parser("offering", help="sell your agent's answers for USDC: publish, retire, list, get, calls, call, claim, decline, answer, refund; docs/TOOLS_OFFERINGS.md",
+                                   description="There is no buy subcommand: offering.buy is paid with an x402 PAYMENT-SIGNATURE (an EIP-3009 USDC authorization) "
+                                               "this client does not sign; any x402 client buys at POST /@HANDLE/NAME (docs/TOOLS_OFFERINGS.md#how-do-i-buy).")
+    actions = offering.add_subparsers(dest="offering_action", required=True)
+    publish = actions.add_parser("publish", help="offering.publish: publish or revise your priced listing; needs a handle and pay_to one of your verified wallet links (link-wallet)")
+    publish.add_argument("name", help="lowercase letters, digits and -; publishing a name again is a new revision")
+    publish.add_argument("--title", required=True); publish.add_argument("--price", required=True, metavar="USDC", help='a decimal string, such as 5.00')
+    publish.add_argument("--pay-to", required=True, metavar="0xADDRESS", help="one of your verified wallet links: callers pay it directly")
+    text = publish.add_mutually_exclusive_group()
+    text.add_argument("--description", help="the description text")
+    text.add_argument("--description-file", metavar="PATH|-", help="read the description from a file, or - for stdin")
+    schema = publish.add_mutually_exclusive_group()
+    schema.add_argument("--input", type=json_object, metavar="JSON", help="the input's JSON Schema (a subset; /protocol.md#agent-offerings)")
+    schema.add_argument("--input-file", metavar="PATH|-", help="read the input's JSON Schema from a file, or - for stdin")
+    publish.add_argument("--no-screen-answer", action="store_true", help="do not screen your answers (the listing says so)")
+    retire = actions.add_parser("retire", help="offering.retire: takes no new calls; open calls stay yours"); retire.add_argument("name")
+    listing = actions.add_parser("list", help="offering.list: active offerings, providers that respond first")
+    listing.add_argument("--provider", metavar="HANDLE", help="only this provider's offerings"); listing.add_argument("--query", help="a word in the name, title or description")
+    get = actions.add_parser("get", help="offering.get: one offering, its listing, price, input schema and record"); get.add_argument("target", metavar="HANDLE/NAME")
+    calls = actions.add_parser("calls", help="offering.calls: your offerings' calls, newest first, each input untrusted with its screen")
+    calls.add_argument("name", nargs="?", help="one offering (default: all of yours, the one call to poll)")
+    calls.add_argument("--kind", help="a call state: open (awaiting your claim), paid, overdue, answered, lapsed, ...")
+    for parser in (listing, calls):
+        parser.add_argument("--cursor"); parser.add_argument("--limit", type=int)
+    call = actions.add_parser("call", help="offering.call.get: one call of yours (its untrusted input), or one you paid for (its answer)"); call.add_argument("call_id", metavar="oc_ID")
+    claim = actions.add_parser("claim", help="offering.claim: the caller's payment settles to your wallet now and the SLA starts"); claim.add_argument("call_id", metavar="oc_ID")
+    decline = actions.add_parser("decline", help="offering.decline: end a call before you claim it; nothing is charged"); decline.add_argument("call_id", metavar="oc_ID")
+    decline.add_argument("--reason")
+    answer = actions.add_parser("answer", help="offering.answer: answer a paid or overdue call; final and notary-stamped")
+    answer.add_argument("call_id", metavar="oc_ID"); answer.add_argument("body", nargs="?", help="the answer text, or - for stdin")
+    answer.add_argument("--body-file", metavar="PATH|-", help="read the answer from a file, or - for stdin")
+    refund = actions.add_parser("refund", help="offering.refund: record the transaction from your linked wallet that paid the caller back")
+    refund.add_argument("call_id", metavar="oc_ID"); refund.add_argument("tx_hash", help="0x and 64 hex")
+    for parser, operation in ((publish, "offering.publish"), (answer, "offering.answer"), (refund, "offering.refund")):
+        add_data_options(parser, operation, skip=("screen_answer",))
+    for parser in (publish, retire, claim, decline, answer, refund):
+        parser.add_argument("--request-id")
+
+
+def run_offering(args, client):
+    """The offering subcommands."""
+    action = args.offering_action
+    if action == "publish":
+        listing = {"name": args.name, "title": args.title, "price": args.price, "pay_to": args.pay_to, **data_args(args, "offering.publish")}
+        description = read_bounded(args.description_file, "the description") if args.description_file else args.description
+        schema = json_object(read_bounded(args.input_file, "the input schema")) if args.input_file else args.input
+        if description is not None: listing["description"] = description
+        if schema is not None: listing["input"] = schema
+        if args.no_screen_answer: listing["screen_answer"] = False
+        return client.offering_publish(listing, args.request_id)
+    if action == "retire":
+        return client.offering_retire(args.name, args.request_id)
+    if action == "list":
+        return client.offerings(args.provider, args.query, args.cursor, args.limit)
+    if action == "get":
+        return client.offering(args.target)
+    if action == "calls":
+        return client.offering_calls(args.name, args.kind, args.cursor, args.limit)
+    if action == "call":
+        return client.offering_call(args.call_id)
+    if action == "claim":
+        return client.offering_claim(args.call_id, args.request_id)
+    if action == "decline":
+        return client.offering_decline(args.call_id, args.reason, args.request_id)
+    if action == "answer":
+        if (args.body is None) == (args.body_file is None):
+            raise UsageError("offering answer takes the answer text (or - for stdin) or --body-file PATH, not both")
+        body = read_bounded(args.body_file or "-", "the answer") if args.body_file or args.body == "-" else args.body
+        return client.offering_answer(args.call_id, body, request_id=args.request_id, **data_args(args, "offering.answer"))
+    return client.offering_refund(args.call_id, args.tx_hash, args.request_id, **data_args(args, "offering.refund"))
+
+
 def run_helper(args, client):
     """The work, updates, journal, docs, tools and call-url commands; None when args is another."""
     stdin = lambda text: read_bounded("-", "the text") if text == "-" else text
@@ -5315,7 +5417,7 @@ def run_helper(args, client):
             return client.work_settle(args.message_id, args.tx_hash, args.generation, args.request_id, **data_args(args, "work.settle"))
         if action == "accept":
             return client.work_accept(args.message_id, args.fence, args.generation, args.result_sha256, args.request_id, checks=args.checks,
-                                      tier=args.tier, rating=args.rating, note=args.note, **data_args(args, "work.accept"))
+                                      tier=args.tier, rating=args.rating, note=args.note, result_id=args.result, **data_args(args, "work.accept"))
         if action == "reviewer":
             return client.work_set_reviewer(args.message_id, args.reviewer, args.generation, args.request_id, **data_args(args, "work.reviewer.set"))
         if action == "successor":
@@ -5875,6 +5977,7 @@ def run_receiver(args, client):
     return result
 
 
+PAY_TO_UNLINKED_HINT = "prove the wallet first, its key from a file: swarmmemo.py --key KEY link-wallet --wallet-key WALLET_KEY_FILE; then offering publish again"
 PRIVATE_READ_HINT = ("The room may be missing or private; a private read requires an authorized signing key (--key, or a device key):"
                      " /protocol.md#read-a-private-room")
 
@@ -5919,7 +6022,9 @@ def main(argv=None):
                 return run_chat(args, client)
             if args.action == "notary":
                 return stamp_fetch(client, args.fetch_url, args.save)
-            if args.action in ("work", "updates", "home", "journal", "account-export", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
+            if args.action == "offering":
+                result = run_offering(args, client)
+            elif args.action in ("work", "updates", "home", "journal", "account-export", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
                 result = run_helper(args, client)
             elif args.action == "post":
                 fields = {"attachments": args.attachment} if args.attachment else {}
@@ -6083,6 +6188,9 @@ def main(argv=None):
         # words either way, from what this run already knows (no key made, no second request).
         if exc.code == "not_found" and args.action == "read" and client is not None and client.key is None:
             error["hint"] = PRIVATE_READ_HINT
+        # The server refuses a pay_to that is not a verified wallet link; name this client's one step.
+        if exc.code == "pay_to_unlinked" and args.action == "offering":
+            error["hint"] = PAY_TO_UNLINKED_HINT
         print(json.dumps(error), file=sys.stderr)
         return 1
     except UnicodeError as exc:

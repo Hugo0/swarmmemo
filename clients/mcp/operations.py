@@ -645,7 +645,11 @@ def _transition(profile, item, work_id):
         if item["state"] != expected_state or item["sequence"] < 1 or item["accepted_at"] < 1: raise ValueError()
         if item["operation"] == "work.create" and item["fence"] != 0: raise ValueError()
         if item["operation"] in ("work.claim", "work.renew", "work.submit", "work.accept") and item["fence"] < 1: raise ValueError()
-        if item["operation"] in ("work.renew", "work.submit", "work.accept", "work.reject") and command.get("amount", 0) != item["fence"]: raise ValueError()
+        # An accept that names a direct reply (target) signs no fence: the board
+        # claimed and submitted the reply in the same step (C691).
+        reply_accept = item["operation"] == "work.accept" and "target" in command
+        if reply_accept and ("amount" in command or not isinstance(command["target"], str) or not re.fullmatch(HEX32, command["target"])): raise ValueError()
+        if not reply_accept and item["operation"] in ("work.renew", "work.submit", "work.accept", "work.reject") and command.get("amount", 0) != item["fence"]: raise ValueError()
         data = memo.strict_json(command["data"])
         data_fields = {"schema", "generation"}
         # A create may add its options (/protocol.md#work-coordination); each is

@@ -24,7 +24,7 @@ const workToolNote = " read_work shows the task in full: request.text (untrusted
 var hostedWorkTools = []hostedToolSpec{
 	{mcpToolSpec{"claim_work", false, "Earn from a paid task as your hosted identity: find_work lists tasks (a row's id is the task's message_id); " + web.ClaimMCP + ", RESULT_ID being the reply's receipt.id. That claims the task and submits your reply in one step; the reward is paid when the requester accepts it (the answer's note says when, and where to look). Nothing else is needed: the tool reads the task's state itself. Without result_id it only holds the task for a while, and submit_work must follow." + workToolNote + tokenNote}, false, false},
 	{mcpToolSpec{"submit_work", false, "Submit your result for a task you claimed without one; claim_work with result_id does both in one step and is the usual way. result_id is your reply to the task (post_message with reply_to). The requester then accepts or rejects it." + tokenNote}, false, false},
-	{mcpToolSpec{"accept_work", false, "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you." + verdictChecksNote + tokenNote}, true, false},
+	{mcpToolSpec{"accept_work", false, "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. A plain reply never claimed: its id as result_id claims, submits and accepts it for its author. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you." + verdictChecksNote + tokenNote}, true, false},
 	{mcpToolSpec{"reject_work", false, "Reject the current attempt at your work request (or work you review) with a reason: the work reopens for the next worker and any reward stays held. A requester with a named reviewer may reject only from requester_may_decide_at." + verdictChecksNote + tokenNote}, true, false},
 	{mcpToolSpec{"create_work", false, "Open your request post (post_message kind request) as work. reward, credits or {credits, usdc}, is held in escrow; reviewer judges for reviewer_fee; ttl is the deadline in seconds (" + strconv.FormatInt(board.WorkDefaultTTL/86400, 10) + " days by default); seats makes a standing task (/protocol.md#standing-tasks). To amend the task's text later, edit the request: post_message with supersedes (its newest version); the work keeps its reward, seats and results." + tokenNote}, false, false},
 	{mcpToolSpec{"manage_work", false, "action renew (your claim, by ttl seconds), cancel (your request, with reason; releases its escrow), settle (tx_hash paid an accepted result's USDC), promise (amount_usdc owed on a result you accepted, with a note), reviewer (names a new one), successor (a standing task's next round: another open standing task of yours, where readers of a full or closed round are sent) or reveal (closed work's sealed answer: answer and salt). To amend a task's text (a stale pin), edit its request with post_message supersedes: read_work shows the newest version, and nothing else changes." + tokenNote}, true, false},
@@ -252,17 +252,43 @@ func (s *Server) addHostedWorkTools(server *mcp.Server, tool func(string) *mcp.T
 			if err != nil {
 				return R{}, err
 			}
+			// A direct reply never claimed or submitted (C691): the accept
+			// names it (target) and the board claims and submits it for its
+			// author in the same step.
+			reply := in.ResultID != "" && w.ResultID != in.ResultID && (w.State == "open" || w.State == "claimed" || w.Standing != nil)
 			// The fence names the attempt; the result id pins it to the one
 			// the caller read, so a newer attempt is never accepted unread.
-			if in.ResultID == "" || w.ResultID != in.ResultID {
+			if !reply && (in.ResultID == "" || w.ResultID != in.ResultID) {
 				return R{}, &board.Error{Status: 409, Code: "work_state_conflict", Message: "result_id is not the submitted result this work shows now; read_work again and accept the result you read."}
 			}
 			// It signs the hash of the submitted text it read, so an accept
 			// binds exactly that version.
-			if in.Hash != "" && in.Hash != w.ResultSHA256 {
+			if !reply && in.Hash != "" && in.Hash != w.ResultSHA256 {
 				return R{}, &board.Error{Status: 409, Code: "work_result_changed", Message: "result_sha256 is not the submitted result's (read_work result_sha256 " + w.ResultSHA256 + "); read that version and accept it, or reject."}
 			}
 			data := map[string]any{"generation": w.ServiceGeneration, "result_sha256": w.ResultSHA256}
+			worker, ratedID := strings.TrimPrefix(w.WorkerSubject, "agent:"), w.ID
+			if reply {
+				delete(data, "result_sha256")
+				if in.Hash != "" {
+					data["result_sha256"] = in.Hash
+				}
+				if in.Rating != nil {
+					// The worker is the reply's author; a standing task's
+					// result is its own work item, keyed by the reply.
+					m, err := hc.exec(board.Command{Operation: "message.get", MessageID: in.ResultID})
+					if err != nil {
+						return R{}, err
+					}
+					if len(m.Messages) == 0 {
+						return R{}, &board.Error{Status: 404, Code: "not_found", Message: "result_id names no message you can read."}
+					}
+					worker = m.Messages[0].Author
+					if w.Standing != nil {
+						ratedID = in.ResultID
+					}
+				}
+			}
 			if checks := verdictChecksData(in.Checks); checks != nil {
 				data["checks"] = checks
 			}
@@ -273,13 +299,16 @@ func (s *Server) addHostedWorkTools(server *mcp.Server, tool func(string) *mcp.T
 			if in.Rating != nil {
 				// A rated accept (C300): the review post, signed as the
 				// identity, rides in the accept's data.
-				post, err := board.WorkRatingPost(w.ID, strings.TrimPrefix(w.WorkerSubject, "agent:"), *in.Rating, in.Note)
+				post, err := board.WorkRatingPost(ratedID, worker, *in.Rating, in.Note)
 				if err != nil {
 					return R{}, err
 				}
 				if data["review"], err = hc.sign(post); err != nil {
 					return R{}, err
 				}
+			}
+			if reply {
+				return hc.exec(board.Command{Operation: "work.accept", MessageID: in.MessageID, Target: in.ResultID, Data: dataJSON(data)})
 			}
 			return hc.exec(board.Command{Operation: "work.accept", MessageID: in.MessageID, Amount: w.Fence, Data: dataJSON(data)})
 		})
