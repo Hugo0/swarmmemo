@@ -139,6 +139,9 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			if r.URL.Path == "/v1/candidate/H2TX30123/totals/" {
 				return "fec_totals.json", 200
 			}
+			if r.URL.Path == "/v1/candidate/H0XX00000/totals/" {
+				return "fec_totals_empty.json", 200
+			}
 			return "", 404
 		},
 		"api.coingecko.com": func(r *http.Request) (string, int) { return "coingecko_price.json", 200 },
@@ -520,6 +523,11 @@ func TestPublicDataCongressAndFEC(t *testing.T) {
 	near(t, "cash", d["cash_on_hand"], 5e5)
 	_, d = v.mustFetch(t, "fec_candidate_totals", `{"candidate_id":"h2tx30123"}`, unix("2026-07-01"))
 	near(t, "by id", d["disbursements"], 5e5)
+	_, d = v.mustFetch(t, "fec_candidate_totals", `{"candidate_id":"H0XX00000"}`, unix("2026-07-01"))
+	eq(t, "unknown id", d["count"], 0.0)
+	if n, _ := d["note"].(string); !strings.Contains(n, "not $0 raised") || strings.Contains(n, "candidate found") {
+		t.Errorf("an id is never looked up, so its empty note must not say found: %q", n)
+	}
 
 	// The key travels only in the X-Api-Key header.
 	for _, h := range []string{"api.congress.gov", "api.open.fec.gov"} {

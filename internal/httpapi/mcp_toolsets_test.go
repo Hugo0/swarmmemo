@@ -438,9 +438,9 @@ func toolCallBody(name string, args map[string]any) string {
 	return string(raw)
 }
 
-// call_swarmmemo_tool never reaches a tool already listed, one the profile
-// does not register or list, itself, or anything on /mcp/core or on an
-// unfiltered list; a destructive tool needs confirm; the target's schema,
+// call_swarmmemo_tool never reaches a tool the profile does not register or
+// list, itself, or anything on /mcp/core; a tool already listed runs as if
+// called by name; a destructive tool needs confirm; the target's schema,
 // sign-in and refusals apply as if it were called by name; the counter
 // records the target as dispatched.
 func TestDispatcherBoundaries(t *testing.T) {
@@ -452,7 +452,6 @@ func TestDispatcherBoundaries(t *testing.T) {
 			t.Errorf("%s call_swarmmemo_tool %v: %v, want refusal %s", path, args, dig(out, "result"), code)
 		}
 	}
-	refused("/mcp", map[string]any{"name": "home"}, "tool_listed")
 	refused("/mcp", map[string]any{"name": "no_such_tool"}, "unknown_tool")
 	refused("/mcp", map[string]any{"name": "paste_create"}, "unknown_tool") // a hidden alias: callable by name, never dispatched
 	refused(web.AssistantMCPPath, map[string]any{"name": "x402_tools_call"}, "unknown_tool")
@@ -464,22 +463,29 @@ func TestDispatcherBoundaries(t *testing.T) {
 	refused("/mcp", map[string]any{"name": "read_feed", "extra": true}, "invalid_request")
 	refused("/mcp", map[string]any{"name": "claim_identity", "arguments": map[string]any{}}, "confirm_required")
 	refused("/mcp", map[string]any{"name": "cancel_event_subscription", "arguments": map[string]any{"subscription_id": "x"}}, "confirm_required")
-	// A tool the list has is refused through the call tool even when its
-	// toolset is named.
-	refused("/mcp?toolsets=feed", map[string]any{"name": "read_feed"}, "tool_listed")
+	// The pair itself and a tool the profile does not register stay refused
+	// on an unfiltered list too (C687).
+	refused("/mcp?toolsets=all", map[string]any{"name": callToolName}, "invalid_request")
+	refused("/mcp?toolsets=all", map[string]any{"name": "paste_create"}, "unknown_tool")
+	refused(web.AssistantMCPPath+"?toolsets=all", map[string]any{"name": "x402_tools_call"}, "unknown_tool")
+	refused("/mcp?toolsets=all", map[string]any{"name": "claim_identity", "arguments": map[string]any{}}, "confirm_required")
+	// A tool the list has runs through the call tool as if called by name
+	// (C687: it used to be refused as tool_listed).
+	for _, c := range []struct{ path, name string }{{"/mcp", "home"}, {"/mcp?toolsets=feed", "read_feed"}} {
+		direct, errText := callTool(t, s, c.path, "", c.name, map[string]any{})
+		via, viaErr := callTool(t, s, c.path, "", callToolName, map[string]any{"name": c.name})
+		if errText != "" || viaErr != "" || direct["ok"] != true || via["ok"] != true {
+			t.Errorf("%s %s through call_swarmmemo_tool: %v %s (direct %v %s)", c.path, c.name, via, viaErr, direct, errText)
+		}
+	}
 
-	// /mcp/core has no meta pair; an unfiltered list does not offer it, in
-	// the SDK's own words for a tool it does not know (the unknown-tool hint
-	// then adds a pointer that depends on the name, so match the opening).
-	for _, c := range []struct {
-		h    http.Handler
-		path string
-	}{{s, mcpProfileCore}, {s, "/mcp?toolsets=all"}, {withToolsetsFlag(s, false), "/mcp"}, {withToolsetsFlag(s, false), web.AssistantMCPPath}} {
-		for _, name := range metaTools {
-			got := rpcError(t, c.h, c.path, toolCallBody(name, map[string]any{"name": "read_feed"}))
-			if !strings.HasPrefix(got, `unknown tool "`+name+`"`) {
-				t.Errorf("%s %s: %q, want the unknown-tool error", c.path, name, got)
-			}
+	// /mcp/core has no meta pair, in the SDK's own words for a tool it does
+	// not know (the unknown-tool hint then adds a pointer that depends on
+	// the name, so match the opening).
+	for _, name := range metaTools {
+		got := rpcError(t, s, mcpProfileCore, toolCallBody(name, map[string]any{"name": "read_feed"}))
+		if !strings.HasPrefix(got, `unknown tool "`+name+`"`) {
+			t.Errorf("%s %s: %q, want the unknown-tool error", mcpProfileCore, name, got)
 		}
 	}
 
@@ -723,6 +729,48 @@ func TestToolSearchFindsProductPhrases(t *testing.T) {
 		}
 		if len(names) < 3 || names[0] != "raise_standing" || !slices.Contains(names[:3], "standing_ways") {
 			t.Errorf("search %q = %v, want raise_standing first and standing_ways in the top three", q, names)
+		}
+	}
+}
+
+// C687: every list of /mcp and /mcp/assistant, ?toolsets=all and the flag
+// off too, carries the meta pair, and both answer: an agent that learned
+// search_swarmmemo_tools keeps it after adding ?toolsets=all, and the
+// reverse. The call tool runs a listed tool through its real handler.
+func TestMetaPairOnEveryList(t *testing.T) {
+	on := widestServer(t, true)
+	off := withToolsetsFlag(on, false)
+	for _, c := range []struct {
+		h    *Server
+		path string
+	}{{on, "/mcp"}, {on, "/mcp?toolsets=all"}, {on, "/mcp?toolsets=all,feed"}, {off, "/mcp"},
+		{on, web.AssistantMCPPath}, {on, web.AssistantMCPPath + "?toolsets=all"}, {off, web.AssistantMCPPath}} {
+		names := listedNames(t, c.h, c.path)
+		for _, name := range metaTools {
+			if !slices.Contains(names, name) {
+				t.Errorf("%s does not list %s", c.path, name)
+			}
+		}
+		found, errText := callTool(t, c.h, c.path, "", searchToolsName, map[string]any{"query": "timestamp a text"})
+		if errText != "" || found["ok"] != true {
+			t.Errorf("%s search_swarmmemo_tools: %v %s", c.path, found, errText)
+		}
+		via, errText := callTool(t, c.h, c.path, "", callToolName, map[string]any{"name": "read_messages", "arguments": map[string]any{"limit": 2}})
+		if errText != "" || via["ok"] != true {
+			t.Errorf("%s call_swarmmemo_tool read_messages: %v %s", c.path, via, errText)
+		}
+	}
+	// Unfiltered, the call tool takes any name: every tool it calls is in
+	// the list already, so the schema repeats none of them.
+	var listed struct {
+		Result struct {
+			Tools []map[string]any `json:"tools"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(toolsList(t, on, "/mcp?toolsets=all"), &listed)
+	for _, tool := range listed.Result.Tools {
+		if tool["name"] == callToolName && dig(tool, "inputSchema", "properties", "name", "enum") != nil {
+			t.Errorf("?toolsets=all call_swarmmemo_tool repeats the list as an enum")
 		}
 	}
 }

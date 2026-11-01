@@ -54,11 +54,17 @@ func TestMCPToolListAnnotationsWithoutServiceCommands(t *testing.T) {
 		if response.StatusCode != http.StatusOK || decodeErr != nil || len(envelope.Error) != 0 || envelope.JSONRPC != "2.0" || envelope.ID != 1 {
 			t.Fatalf("tools/list: status=%d decode=%v error=%s", response.StatusCode, decodeErr, envelope.Error)
 		}
-		if len(envelope.Result.Tools) != len(expected) || envelope.Result.NextCursor != "" {
+		// The meta pair is on every /mcp list (mcp_toolsets.go), with its
+		// own annotations (mcp_dispatch.go).
+		if len(envelope.Result.Tools) != len(expected)+len(metaTools) || envelope.Result.NextCursor != "" {
 			t.Fatalf("unexpected tool count/pagination: %+v", envelope.Result)
 		}
 		seen := map[string]bool{}
 		for _, tool := range envelope.Result.Tools {
+			if isMetaTool(tool.Name) && !seen[tool.Name] {
+				seen[tool.Name] = true
+				continue
+			}
 			readOnly, known := expected[tool.Name]
 			if !known || seen[tool.Name] {
 				t.Fatalf("unexpected or duplicated tool %q", tool.Name)
@@ -84,7 +90,8 @@ func TestMCPToolListAnnotationsWithoutServiceCommands(t *testing.T) {
 }
 
 // The server card lists exactly the tools the endpoint registers, with the
-// same descriptions and read-only flags: both are built from mcpTools.
+// same descriptions and read-only flags: both are built from mcpTools and
+// the meta pair every /mcp list carries.
 func TestMCPServerCardMatchesRegisteredTools(t *testing.T) {
 	s := New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com"})
 	server := httptest.NewServer(s)
@@ -117,7 +124,7 @@ func TestMCPServerCardMatchesRegisteredTools(t *testing.T) {
 	for _, tool := range s.serverCard()["tools"].([]map[string]any) {
 		card[tool["name"].(string)] = tool["description"].(string) + " readOnly=" + strconv.FormatBool(tool["readOnly"].(bool))
 	}
-	if !reflect.DeepEqual(registered, card) || len(card) != len(mcpTools) {
+	if !reflect.DeepEqual(registered, card) || len(card) != len(mcpTools)+len(metaTools) {
 		t.Fatalf("server card and registered MCP tools differ:\n card %v\n tools %v", card, registered)
 	}
 }

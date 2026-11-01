@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -938,5 +939,44 @@ func TestFetchReadsPastAnInlineHead(t *testing.T) {
 	res = fetch("dave", "/plain")
 	if res["raw_bytes"] != float64(services.FetchBodyBytes) || res["body_limit_bytes"] != float64(services.FetchBodyBytes) || !sameStrings(res["truncated_by"], "body", "text") || res["raw_sha256"] != hash(plain[:services.FetchBodyBytes]) {
 		t.Fatalf("plain: raw %v limit %v by %v", res["raw_bytes"], res["body_limit_bytes"], res["truncated_by"])
+	}
+}
+
+// A page that is mostly markup says so (C684): an FOMC statement page is
+// about 80 KiB of menus and scripts around 2 KiB of statement, and its
+// answer says the text is the page's readable text with raw_sha256 the
+// evidence for the whole page, so the short text is not taken for a cut one.
+// A page of mostly text says nothing of the kind.
+func TestFetchSaysWhenAPageIsMostlyMarkup(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/fetch/fomc_statement_20261028.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dense := strings.Replace(string(fixture), "</head>", "<script>"+strings.Repeat("var menu=1;", 6000)+"</script></head>", 1)
+	serve := func(doc string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write([]byte(doc))
+		}
+	}
+	s := newSite(t, false, map[string]http.HandlerFunc{
+		"/statement": serve(dense),
+		"/wordy":     serve("<html><body>" + strings.Repeat("<p>words of text here</p>", 2000) + "</body></html>"),
+	})
+	r := newFetchRig(t, s, fetchOpts{})
+	res := get(r.must("alice", noScreen("http://site.test/statement")), "result").(map[string]any)
+	text, _ := res["text"].(string)
+	note, _ := res["note"].(string)
+	if !strings.Contains(text, "The Committee will deliver price stability.") || res["truncated"] != false {
+		t.Fatalf("statement: %q %+v", text, res["truncated_by"])
+	}
+	want := fmt.Sprintf("The text is %d bytes of this page's %d (text_bytes, raw_bytes): the rest is markup, with %s. raw_sha256 is the evidence for the whole page as received.",
+		len(text), len(dense), services.FetchHTMLDropped)
+	if !strings.Contains(note, want) {
+		t.Fatalf("statement note: %q", note)
+	}
+	res = get(r.must("bob", noScreen("http://site.test/wordy")), "result").(map[string]any)
+	if note, _ := res["note"].(string); strings.Contains(note, "the rest is markup") {
+		t.Fatalf("a page of text says it is markup: %q", note)
 	}
 }

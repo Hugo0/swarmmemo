@@ -58,10 +58,14 @@ import (
 // C672/C675 (2026-10-31): create_work per_agent_max and read_messages
 // first_post: /mcp 135,448, assistant 100,590; the assistant budget raised
 // by 300 bytes.
+// C687 (2026-11-01): the unfiltered lists (?toolsets=all, the flag off)
+// carry the search and call pair as every filtered list does, about 2.5 KB
+// (the call tool's schema has no enum there): /mcp 138,153, assistant
+// 103,122; budgets raised by that.
 var mcpToolsListBudget = map[string]int{
-	"/mcp":               135_700,
+	"/mcp":               138_400,
 	mcpProfileCore:       101_500,
-	web.AssistantMCPPath: 100_800,
+	web.AssistantMCPPath: 103_400,
 }
 
 // mcpOutputSchemaBudget is the most bytes one tool's output schema may be.

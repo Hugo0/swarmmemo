@@ -244,6 +244,9 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 	for _, tool := range append(append([]mcpToolSpec(nil), mcpTools...), mcpRFC0012Tools...) {
 		fixed[tool.Name] = true
 	}
+	for _, name := range metaTools {
+		fixed[name] = true
+	}
 	var generated []string
 	for _, name := range card {
 		if !fixed[name] {

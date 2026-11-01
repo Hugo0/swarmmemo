@@ -117,8 +117,8 @@ type Features struct {
 	// MCPToolsets is MCP_TOOLSETS (package T, httpapi/mcp_toolsets.go):
 	// /mcp and /mcp/assistant list the default toolset (about twenty tools
 	// and the search_swarmmemo_tools / call_swarmmemo_tool pair) unless the
-	// URL names toolsets (?toolsets=all lists every tool). Every registered
-	// tool stays callable either way. Off, the default, a URL without
+	// URL names toolsets (?toolsets=all lists every tool, the pair too). Every
+	// registered tool stays callable either way. Off, the default, a URL without
 	// ?toolsets lists every tool, as before; ?toolsets= works either way.
 	MCPToolsets bool
 }

@@ -2906,7 +2906,8 @@ class Client:
         except urllib.error.HTTPError as exc:
             raw_error = b""
             try:
-                raw_error = exc.read(64 * 1024)
+                try: raw_error = exc.read(64 * 1024)
+                finally: exc.close()  # an error kept by the caller must not keep its socket open
                 error = json.loads(raw_error)
                 error = error.get("error", error)
                 if not isinstance(error, dict):
@@ -4530,10 +4531,11 @@ class Chat:
         """Each file encrypted as the protocol's sealed files are (swarmmemo-sealed-file/1)
         and uploaded as sealed.bin: the "files" entries the sealed message carries."""
         if not attached: return []
-        seal, entries = seal_module(), []
-        for path, content in attached:
+        for path, content in attached:  # every size first: a later refusal must not follow an upload
             if len(content) > ATTACHMENT_BYTES - 28:
                 raise ChatStop(1, f"{path.name}: a sealed file is at most {ATTACHMENT_BYTES - 28} bytes (1 MiB less its nonce and tag); nothing was sent")
+        seal, entries = seal_module(), []
+        for path, content in attached:
             blob, entry = seal.encrypt_file(content)
             res = self.request("blob.put", room=room, data=b64(blob), filename="sealed.bin", media_type="application/octet-stream")
             entries.append({"blob": res["data"]["blob"]["id"], **entry, "name": path.name})

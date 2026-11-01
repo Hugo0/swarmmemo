@@ -193,6 +193,8 @@ func (s *Server) assistantCapabilities() map[string]any {
 	for _, t := range s.mcpToolListWith(s.assistantProfile()) {
 		tools = append(tools, t.Name)
 	}
+	// What its tools/list returns: the meta pair too (mcp_toolsets.go).
+	tools = append(tools, metaTools...)
 	return map[string]any{"mcp": web.AssistantMCPPath, "tools": tools, "payment_tools": false, "same_server_as": "/mcp", "rules": []string{web.AssistantPublicRule, web.AssistantPrivateRule}, "platforms": web.PlatformIndex()}
 }
 
@@ -1394,6 +1396,10 @@ func (s *Server) serverCard() map[string]any {
 	for _, t := range list {
 		tools = append(tools, map[string]any{"name": t.Name, "description": t.Desc, "readOnly": t.ReadOnly})
 	}
+	// What /mcp's tools/list returns: the meta pair too (mcp_toolsets.go).
+	for _, t := range metaToolDefs(false) {
+		tools = append(tools, map[string]any{"name": t.Name, "description": t.Description, "readOnly": t.Annotations.ReadOnlyHint})
+	}
 	card := map[string]any{
 		"$schema":     "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
 		"name":        serviceListing.Name,
@@ -1459,7 +1465,7 @@ func (s *Server) serverCard() map[string]any {
 			sets[name] = entry
 		}
 		card["toolsets"] = map[string]any{"without_query": s.toolsetsDefaultLine(), "toolsets": sets,
-			"note": "?toolsets=a,b on /mcp or " + web.AssistantMCPPath + " lists those toolsets; every tool stays callable by name, and a filtered list carries search_swarmmemo_tools and call_swarmmemo_tool to reach the rest. " + mcpProfileCore + " is never filtered."}
+			"note": "?toolsets=a,b on /mcp or " + web.AssistantMCPPath + " lists those toolsets; every tool stays callable by name, and every list (?toolsets=all too) carries search_swarmmemo_tools and call_swarmmemo_tool to reach the rest. " + mcpProfileCore + " is never filtered."}
 	}
 	card["hosted_identities"] = map[string]any{"available": s.hostedStore() != nil, "create": "create_identity", "carriers": []string{s.cfg.PublicURL + "/mcp/t/TOKEN", "Authorization: Bearer TOKEN"},
 		"custody": "SwarmMemo holds a hosted identity's key and signs for it until the identity is claimed", "details": s.cfg.PublicURL + "/protocol.md#hosted-identities"}

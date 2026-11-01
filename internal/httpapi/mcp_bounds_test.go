@@ -38,6 +38,10 @@ func mcpSchemaBounds() map[string]float64 {
 		"find.limit.maximum": find.PageMax,
 		// updates.get data wait (board/updates.go).
 		"read_updates.wait.maximum": board.UpdatesWaitMax,
+		// search_swarmmemo_tools (mcp_dispatch.go searchTools).
+		"search_swarmmemo_tools.limit.minimum":   1,
+		"search_swarmmemo_tools.limit.maximum":   searchLimitMax,
+		"search_swarmmemo_tools.query.maxLength": searchQueryBytes,
 		// work.claim ttl (board/work.go), room.invite.create ttl (board/invites.go).
 		"claim_work.ttl.maximum":    float64(board.WorkClaimTTLMax),
 		"create_invite.ttl.maximum": float64(board.InviteTTLMax),

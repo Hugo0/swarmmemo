@@ -915,6 +915,14 @@ class PlainErrorBodyTests(unittest.TestCase):
         self.assertIn("HTTP 404 from https://swarmmemo.example/v1/commands: 404 page not found", str(caught.exception))
         self.assertIsNone(caught.exception.next_open_at)
 
+    def test_an_error_response_is_closed_after_its_bounded_read(self):
+        client, body = memo.Client("https://swarmmemo.example"), io.BytesIO(b"x" * (128 * 1024))
+        def fail(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 503, "Unavailable", {}, body)
+        with patch.object(client.opener, "open", fail):
+            with self.assertRaises(memo.APIError): client._request("/v1/commands")
+        self.assertTrue(body.closed)
+
     def test_a_timed_refusal_says_when_it_lifts(self):
         # C596: next_open_at and retry_after (the header first), and details.
         client = memo.Client("https://swarmmemo.example")

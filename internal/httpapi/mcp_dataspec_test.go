@@ -36,6 +36,8 @@ var mcpToolsWithoutData = []string{
 	"create_identity", "set_handle", "journal", "journal_suspend", "list_conversations", "list_event_subscriptions", "cancel_event_subscription",
 	"find_offerings", "read_offering", "offering_call_status", "offering_calls", "claim_offering_call", "decline_offering_call",
 	"resolve_subject", "read_subject", "withdraw_message",
+	// The meta pair (mcp_dispatch.go): the toolsets middleware answers it.
+	searchToolsName, callToolName,
 }
 
 // toolInputs are the json names of a tool's input struct.

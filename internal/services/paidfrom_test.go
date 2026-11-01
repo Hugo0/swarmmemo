@@ -2,6 +2,8 @@ package services_test
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"swarmmemo/internal/allowance"
@@ -62,6 +64,15 @@ func TestCallPaidFromNamesTheBucket(t *testing.T) {
 		}
 		return rec.PaidFrom, rec.Cost
 	}
+	// C685: credits_spent and allowance_left come with paid_from.
+	spent := func(d map[string]any) (int64, int64) {
+		t.Helper()
+		rec := d["call"].(services.CallRecord)
+		if rec.CreditsSpent == nil || rec.AllowanceLeft == nil {
+			t.Fatalf("call without credits_spent/allowance_left: %+v", rec)
+		}
+		return *rec.CreditsSpent, *rec.AllowanceLeft
+	}
 	status := func(s allowance.Subject, d map[string]any) string {
 		t.Helper()
 		id := d["call"].(services.CallRecord).ID
@@ -77,9 +88,20 @@ func TestCallPaidFromNamesTheBucket(t *testing.T) {
 
 	free := allowance.Subject{ID: "acct-free", KeyID: "k1", Signed: true}
 	for _, data := range []string{local, remote} {
+		before, err := l.Balance(ctx, db, free, allowance.Credit, now)
+		if err != nil {
+			t.Fatal(err)
+		}
 		d := call(free, data)
-		if pf, cost := paidFrom(d); pf != services.PaidFromFreeAllowance || cost <= 0 {
+		pf, cost := paidFrom(d)
+		if pf != services.PaidFromFreeAllowance || cost <= 0 {
 			t.Fatalf("a call met from the free allowance: paid_from %q, cost %d", pf, cost)
+		}
+		if cs, left := spent(d); cs != 0 || left != before.ByBucket[allowance.Free]-cost {
+			t.Fatalf("free call: credits_spent %d allowance_left %d, want 0 and %d", cs, left, before.ByBucket[allowance.Free]-cost)
+		}
+		if raw, _ := json.Marshal(d["call"]); !strings.Contains(string(raw), `"credits_spent":0,`) || !strings.Contains(string(raw), `"allowance_left":`) {
+			t.Fatalf("call JSON drops a zero credits_spent: %s", raw)
 		}
 		if data == remote {
 			if pf := status(free, d); pf != services.PaidFromFreeAllowance {
@@ -103,8 +125,12 @@ func TestCallPaidFromNamesTheBucket(t *testing.T) {
 	}
 	for _, data := range []string{local, remote} {
 		d := call(bought, data)
-		if pf, cost := paidFrom(d); pf != services.PaidFromCredits || cost <= 0 {
+		pf, cost := paidFrom(d)
+		if pf != services.PaidFromCredits || cost <= 0 {
 			t.Fatalf("a call paid with bought credit: paid_from %q, cost %d", pf, cost)
+		}
+		if cs, left := spent(d); cs != cost || left != 0 {
+			t.Fatalf("bought call: credits_spent %d allowance_left %d, want %d and 0", cs, left, cost)
 		}
 		if data == remote {
 			if pf := status(bought, d); pf != services.PaidFromCredits {

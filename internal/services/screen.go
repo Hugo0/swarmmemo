@@ -433,7 +433,7 @@ func (s *screen) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	body := canonicalJSON(map[string]any{
 		"verdict": screenVerdict(categories, p.threshold), "threshold": p.threshold, "categories": categories, "classifier_version": ClassifierVersion, "source": p.source,
 		"text_sha256": payload.TextSHA256, "text_bytes": payload.TextBytes, "receipt": receipt,
-		"note": "A signal with a known error rate, not a guarantee; the text was not stored. verdict is at this call's threshold (the threshold argument, default " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + "); the signed receipt's is always at " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + ", so quote the receipt. What each category means: /protocol.md#screening. Calibration: /protocol.md#screening-calibration",
+		"note": "A signal with a known error rate, not a guarantee; the text was not stored. verdict uses your threshold (default " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + "), but the signed receipt is always issued at threshold " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + ", so quote the receipt. What each category means: /protocol.md#screening. Calibration: /protocol.md#screening-calibration",
 	})
 	public := canonicalJSON(map[string]any{"verdict": payload.Verdict, "classifier_version": ClassifierVersion, "source": p.source, "text_bytes": payload.TextBytes})
 	used := min(c.Price.For(int64(len(p.text))), screenFee+res.CostMicroUSD)

@@ -1221,6 +1221,9 @@ func securitySchemes(name string) []map[string]any {
 		return []map[string]any{noauth}
 	case "buy_offering", "offering_call_status":
 		return []map[string]any{noauth, oauth}
+	case searchToolsName, callToolName:
+		// Worst case: the call tool may reach a tool that takes sign-in.
+		return []map[string]any{noauth, oauth}
 	}
 	if isHostedSignedRead(name) || isHostedSignedCall(name) {
 		return []map[string]any{noauth, oauth}

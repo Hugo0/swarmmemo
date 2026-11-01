@@ -730,7 +730,7 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 		"max_cost_split": map[string]int64{"fetch": fetchQuoted, "screening": c.Quoted - fetchQuoted},
 		"cost_split":     map[string]int64{"fetch": fetchUsed, "screening": used - fetchUsed},
 		"raw_sha256":     page.RawSHA256, "raw_bytes": len(page.Raw),
-		"note": UntrustedNote + " The text is in this first answer only and never stored; fetching again within 10 minutes reads the cache." + fetchEmptyNote(page, len(text), start),
+		"note": UntrustedNote + " The text is in this first answer only and never stored; fetching again within 10 minutes reads the cache." + fetchEmptyNote(page, len(text), start) + fetchShortTextNote(page, start),
 	}
 	if next > 0 {
 		body["next_offset"] = next
@@ -894,6 +894,18 @@ func fetchEmptyNote(page *fetchedPage, n, start int) string {
 		return " No text in the first " + SizeText(int64(page.BodyLimit)) + " of this page (body_limit_bytes): its text starts later, or it is built by JavaScript, which fetch does not run."
 	}
 	return " No text in this page: it is likely built by JavaScript, which fetch does not run."
+}
+
+// fetchShortTextNote says, when an HTML page's text is under 5% of its
+// bytes, that this is the page's readable text and the rest was markup, so
+// a short answer is not read as a cut one (C684: an 81 KiB FOMC statement
+// page is 2 KiB of statement).
+func fetchShortTextNote(page *fetchedPage, start int) string {
+	if start > 0 || page.Format != "markdown" || page.Truncated || len(page.Text) == 0 || len(page.Raw) < 16<<10 || len(page.Text)*20 >= len(page.Raw) {
+		return ""
+	}
+	return fmt.Sprintf(" The text is %d bytes of this page's %d (text_bytes, raw_bytes): the rest is markup, with %s. raw_sha256 is the evidence for the whole page as received.",
+		len(page.Text), len(page.Raw), FetchHTMLDropped)
 }
 
 // retrieve reads u's page, honouring robots.txt and the host bounds at

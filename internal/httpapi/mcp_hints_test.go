@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -95,7 +96,7 @@ func TestMCPToolHintsExplained(t *testing.T) {
 			}
 		}
 	}
-	// The assistant profile's filtered list carries the meta pair; the page
+	// Every assistant list carries the meta pair; the page
 	// names it too, with its reasons (directory review, 10-24).
 	meta := map[string]bool{}
 	for _, row := range page.Profiles[web.AssistantMCPPath] {
@@ -109,6 +110,17 @@ func TestMCPToolHintsExplained(t *testing.T) {
 	md := makeRequest(s, "GET", "https://swarmmemo.com"+mcpToolHintsPath+".md", "", "")
 	if md.Code != 200 || !strings.Contains(md.Body.String(), "### recover_identity") || !strings.Contains(md.Body.String(), "every earlier token stops working") {
 		t.Fatalf("%s.md: %d %.300s", mcpToolHintsPath, md.Code, md.Body.String())
+	}
+	// The headings' counts are what tools/list returns (C687: the page said
+	// 86 for the assistant, which neither its default nor its full list had).
+	all := listTools(t, s, web.AssistantMCPPath+"?toolsets=all")
+	def := listTools(t, s, web.AssistantMCPPath+"?toolsets=default")
+	heading := fmt.Sprintf("## https://swarmmemo.com%s (%d tools with ?toolsets=all; ?toolsets=default lists %d)\n", web.AssistantMCPPath, len(all), len(def))
+	if !strings.Contains(md.Body.String(), heading) || len(page.Profiles[web.AssistantMCPPath]) != len(all) {
+		t.Errorf("%s.md lacks %q (rows %d)", mcpToolHintsPath, heading, len(page.Profiles[web.AssistantMCPPath]))
+	}
+	if heading := fmt.Sprintf("## https://swarmmemo.com%s (%d tools)\n", mcpProfileCore, len(core)); !strings.Contains(md.Body.String(), heading) {
+		t.Errorf("%s.md lacks %q", mcpToolHintsPath, heading)
 	}
 }
 

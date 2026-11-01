@@ -47,6 +47,23 @@ func skips(name string, attrs map[string]string) bool {
 	return skippedElements[name] || strings.EqualFold(strings.TrimSpace(attrs["role"]), "navigation")
 }
 
+// chromeElements are the page chrome among skippedElements (and so is any
+// role="navigation" element): they hold menus and links, never the page's
+// main content, so a <main> or role="main" opened inside one ends it
+// (isMainContent). Scripts, templates and embedded objects never end early,
+// nor does a menu with one of them inside.
+var chromeElements = map[string]bool{"nav": true, "footer": true, "aside": true}
+
+// inertElements hold content a reader is never shown (a template, the
+// fallback of an embedded object), so a menu holding one ends only at its
+// own closing tag.
+var inertElements = map[string]bool{"template": true, "iframe": true, "object": true, "embed": true, "canvas": true, "video": true, "audio": true, "svg": true, "math": true}
+
+// isMainContent says whether an opened element is the page's main content.
+func isMainContent(name string, attrs map[string]string) bool {
+	return name == "main" || strings.EqualFold(strings.TrimSpace(attrs["role"]), "main")
+}
+
 // rawTextElements hold text up to their own closing tag, never markup.
 var rawTextElements = map[string]bool{"script": true, "style": true, "textarea": true, "title": true, "xmp": true, "noscript": true, "template": false}
 
@@ -74,8 +91,9 @@ type pageText struct {
 func htmlToText(doc string, base *url.URL) pageText {
 	w := &mdWriter{base: base}
 	var title strings.Builder
-	skip := 0      // depth inside skipped elements
-	skipName := "" // the outermost skipped element
+	skip := 0           // depth inside skipped elements
+	skipName := ""      // the outermost skipped element
+	skipChrome := false // it is page chrome: navigation, a footer, a sidebar
 	i := 0
 	for i < len(doc) && w.b.Len() < htmlTextLimit {
 		lt := strings.IndexByte(doc[i:], '<')
@@ -137,7 +155,7 @@ func htmlToText(doc string, base *url.URL) pageText {
 				if name == skipName {
 					skip--
 					if skip == 0 {
-						skipName = ""
+						skipName, skipChrome = "", false
 					}
 				}
 				continue
@@ -168,13 +186,25 @@ func htmlToText(doc string, base *url.URL) pageText {
 			continue
 		}
 		if skip > 0 {
+			if skipChrome && !selfClosing && isMainContent(name, attrs) {
+				// A menu left open (a missing </div> or </nav>) never
+				// swallows the page's main content: the menu ends here.
+				skip, skipName, skipChrome = 0, "", false
+				w.open(name, attrs)
+				continue
+			}
+			if inertElements[name] {
+				// A template, object or the like inside the menu: what it
+				// holds is never shown, so the menu runs to its own end.
+				skipChrome = false
+			}
 			if name == skipName && !selfClosing && !voidElements[name] {
 				skip++
 			}
 			continue
 		}
 		if skips(name, attrs) && !selfClosing && !voidElements[name] {
-			skip, skipName = 1, name
+			skip, skipName, skipChrome = 1, name, chromeElements[name] || !skippedElements[name]
 			continue
 		}
 		w.open(name, attrs)

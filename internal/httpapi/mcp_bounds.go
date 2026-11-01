@@ -77,6 +77,9 @@ var mcpArgBounds = map[string]mcpBound{
 	"manage_app.homepage":          boundLength(board.AppHomepageBytes),
 	"send_feedback.text":           boundLength(board.FeedbackTextBytes),
 	"raise_standing.solution":      boundLength(board.StandingPowSolutionMax),
+	// The meta pair's search (mcp_dispatch.go searchTools refuses past them).
+	"search_swarmmemo_tools.limit": boundRange(1, searchLimitMax),
+	"search_swarmmemo_tools.query": boundLength(searchQueryBytes),
 }
 
 // boundToolSchemas adds mcpArgBounds to the input schemas tools/list

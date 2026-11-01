@@ -54,6 +54,31 @@ const (
 	PaidFromCredits       = "credits"
 )
 
+// charged sets a finished call's paid_from, credits_spent and allowance_left
+// (C516, C685) from the bucket mix that paid it: every service's answer
+// goes through here. byBucket nil means the ledger cannot say, and all three
+// stay absent; an empty map is a call that cost nothing. allowance_left is
+// the free daily allowance s has left in the call's resource now.
+func (e *Engine) charged(ctx context.Context, q allowance.Querier, s allowance.Subject, rec *CallRecord, byBucket map[allowance.Bucket]int64, now int64) {
+	if byBucket == nil {
+		return
+	}
+	rec.PaidFrom = paidFrom(byBucket)
+	var spent int64
+	for b, n := range byBucket {
+		if n > 0 && b != allowance.Free {
+			spent += n
+		}
+	}
+	rec.CreditsSpent = &spent
+	if bl, ok := e.cfg.Meter.(balancer); ok {
+		if bal, err := bl.Balance(ctx, q, s, allowance.Resource(rec.Resource), now); err == nil {
+			left := max(0, bal.ByBucket[allowance.Free])
+			rec.AllowanceLeft = &left
+		}
+	}
+}
+
 // paidFrom is a charge's paid_from from its bucket mix; "" when unknown.
 func paidFrom(byBucket map[allowance.Bucket]int64) string {
 	if byBucket == nil {
@@ -206,6 +231,12 @@ type CallRecord struct {
 	// PaidFrom is what paid Cost: PaidFromFreeAllowance or PaidFromCredits;
 	// absent while running, failed or when the ledger cannot say.
 	PaidFrom string `json:"paid_from,omitempty"`
+	// CreditsSpent is the part of Cost that granted, earned or bought credit
+	// paid: 0 when the free daily allowance covered it all. AllowanceLeft is
+	// the free daily allowance left in Resource after the call. Both are
+	// absent when PaidFrom is.
+	CreditsSpent  *int64 `json:"credits_spent,omitempty"`
+	AllowanceLeft *int64 `json:"allowance_left,omitempty"`
 	// RequestID is an unsigned call's request_id, its retry key; the board
 	// sets it on the answer (a random one when the caller gave none).
 	RequestID string `json:"request_id,omitempty"`
@@ -509,15 +540,16 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 			res.Used = MinWriteUnits
 		}
 		var receipt map[string]any
-		rec.PaidFrom = PaidFromFreeAllowance // nothing charged
+		by := map[allowance.Bucket]int64{} // nothing charged
 		if res.Used > 0 {
 			r, err := e.cfg.Meter.Spend(ctx, tx, req.Subject, quote.Resource, res.Used, ref, now)
 			if err != nil {
 				return Outcome{}, err
 			}
 			receipt = receiptData(r)
-			rec.PaidFrom = paidFrom(r.ByBucket)
+			by = r.ByBucket
 		}
+		e.charged(ctx, tx, req.Subject, &rec, by, now)
 		rec.Cost, rec.FinishedAt = res.Used, now
 		if err = e.insertCall(ctx, tx, req, c, rec, "", publicOf(res.Public), 0); err != nil {
 			return Outcome{}, err
@@ -698,7 +730,7 @@ func (e *Engine) settle(ctx context.Context, account, callID, jobID string, res 
 		return nil, err
 	}
 	defer tx.Rollback()
-	row, err := e.loadCall(ctx, tx, account, callID)
+	row, err := e.loadCall(ctx, tx, allowance.Subject{ID: account}, callID)
 	if err != nil {
 		return nil, err
 	}
@@ -749,7 +781,7 @@ func (e *Engine) settle(ctx context.Context, account, callID, jobID string, res 
 			return nil, err
 		}
 	}
-	if row, err = e.loadCall(ctx, tx, account, callID); err != nil {
+	if row, err = e.loadCall(ctx, tx, allowance.Subject{ID: account}, callID); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -787,14 +819,14 @@ type callRow struct {
 
 // loadCall is a call as stored, with its paid_from: a settled hold's from
 // the ledger, a local call's when it cost nothing.
-func (e *Engine) loadCall(ctx context.Context, q allowance.Querier, account, id string) (callRow, error) {
-	r, err := loadCall(ctx, q, account, id)
+func (e *Engine) loadCall(ctx context.Context, q allowance.Querier, s allowance.Subject, id string) (callRow, error) {
+	r, err := loadCall(ctx, q, s.ID, id)
 	if err != nil || (r.rec.State != "done" && r.rec.State != "unknown") {
 		return r, err
 	}
 	if r.holdID == "" {
 		if r.rec.Cost == 0 {
-			r.rec.PaidFrom = PaidFromFreeAllowance
+			e.charged(ctx, q, s, &r.rec, map[allowance.Bucket]int64{}, e.cfg.Now())
 		}
 		return r, nil
 	}
@@ -806,7 +838,7 @@ func (e *Engine) loadCall(ctx context.Context, q allowance.Querier, account, id 
 	if err != nil || !ok {
 		return r, err
 	}
-	r.rec.PaidFrom = paidFrom(by)
+	e.charged(ctx, q, s, &r.rec, by, e.cfg.Now())
 	return r, nil
 }
 
@@ -870,7 +902,7 @@ func (e *Engine) Retry(ctx context.Context, q allowance.Querier, account string,
 	if state != "running" || id == "" {
 		return stored, nil
 	}
-	row, err := e.loadCall(ctx, q, account, id)
+	row, err := e.loadCall(ctx, q, allowance.Subject{ID: account}, id)
 	if err != nil {
 		return nil, err
 	}
@@ -975,7 +1007,7 @@ func (e *Engine) status(ctx context.Context, q allowance.Querier, req Request, d
 	if !callIDRE.MatchString(args.Call) {
 		return nil, badArg("call is the call's id from its receipt: 32 lowercase hex digits.")
 	}
-	row, err := e.loadCall(ctx, q, req.Subject.ID, args.Call)
+	row, err := e.loadCall(ctx, q, req.Subject, args.Call)
 	if err != nil {
 		return nil, err
 	}

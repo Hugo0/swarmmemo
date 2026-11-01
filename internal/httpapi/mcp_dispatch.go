@@ -7,8 +7,11 @@ package httpapi
 // to the tool it names before the rest of the chain sees it, so the SDK's
 // schema validation, sign-in (oauthToolMeta, the hosted token), the
 // structured refusals, the limits and the real handler all apply as if the
-// client had called that tool. It never reaches a tool its profile does not
-// register and list, never one already listed, and never itself.
+// client had called that tool. Every list of the profile, filtered or
+// ?toolsets=all, carries the pair (C687). The call tool reaches any tool the
+// profile registers and lists unfiltered, one already in the list too (the
+// same path as calling it by name); never a tool its profile does not
+// register and list, a hidden alias, or the pair itself (no recursion).
 
 import (
 	"bytes"
@@ -23,7 +26,6 @@ import (
 	"unicode"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"swarmmemo/internal/board"
@@ -55,10 +57,9 @@ func toolsetViewFrom(ctx context.Context) *toolsetView {
 }
 
 // dispatchNote is where call_swarmmemo_tool tells the call counter
-// (countMCPTools) which tool it called, or that the pair is not offered.
+// (countMCPTools) which tool it called.
 type dispatchNote struct {
-	target  string
-	unknown bool
+	target string
 }
 
 func dispatchNoteFrom(ctx context.Context) *dispatchNote {
@@ -92,12 +93,12 @@ func (s *Server) toolsetsMiddleware(info *toolsetInfo) mcp.Middleware {
 			switch method {
 			case "tools/list":
 				res, err := next(ctx, method, req)
-				if r, ok := res.(*mcp.ListToolsResult); ok && err == nil && v.filtered() {
+				if r, ok := res.(*mcp.ListToolsResult); ok && err == nil {
 					r.Tools = slices.Clone(r.Tools)
 					for i, t := range r.Tools {
 						if t.Name == callToolName {
 							copied := *t
-							copied.InputSchema = callToolSchema(v.dispatch)
+							copied.InputSchema = callToolSchema(v.callNames())
 							r.Tools[i] = &copied
 						}
 					}
@@ -118,14 +119,6 @@ func (s *Server) toolsetsMiddleware(info *toolsetInfo) mcp.Middleware {
 				call, ok := req.(*mcp.CallToolRequest)
 				if !ok || call.Params == nil || !isMetaTool(call.Params.Name) {
 					break
-				}
-				if !v.filtered() {
-					// Unfiltered, the pair is not offered: the SDK's answer
-					// to a tool it does not know, word for word.
-					if n := dispatchNoteFrom(ctx); n != nil {
-						n.unknown = true
-					}
-					return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: fmt.Sprintf("unknown tool %q", call.Params.Name)}
 				}
 				if call.Params.Name == searchToolsName {
 					return s.searchTools(ctx, v, call, next)
@@ -202,9 +195,7 @@ func (s *Server) dispatchTool(ctx context.Context, v *toolsetView, call *mcp.Cal
 		return metaToolRefusal("invalid_request", "name is required: the tool to call (search_swarmmemo_tools finds it)."), nil
 	case isMetaTool(in.Name):
 		return metaToolRefusal("invalid_request", in.Name+" is called directly, never through call_swarmmemo_tool."), nil
-	case v.isListed(in.Name):
-		return metaToolRefusal("tool_listed", in.Name+" is in your tool list: call it directly."), nil
-	case !v.dispatchable(in.Name):
+	case !v.callable(in.Name):
 		return metaToolRefusal("unknown_tool", fmt.Sprintf("There is no tool %q on this connection. search_swarmmemo_tools finds tools by what they do.", truncateName(in.Name))), nil
 	case v.info.destructive[in.Name] && !in.Confirm:
 		return metaToolRefusal("confirm_required", in.Name+" is destructive: it may lose access or cannot be undone. Ask your human, then call again with confirm true."), nil
@@ -449,22 +440,22 @@ func (s *Server) toolsetIndex(v *toolsetView) []map[string]any {
 // tool that writes, reaches outside and destroys, so it says so.
 const (
 	searchToolsDesc = "Find any tool on this connection by what it should do, including the many your list leaves out: query in words (\"timestamp a text\", \"private messages\", \"wake me on a reply\"), or toolset by name. Each hit has the tool's description, input schema and annotations, listed (whether your list has it), call (how to call it) and toolset_url (a URL that lists its toolset). Without query or toolset: every toolset with its tools."
-	callToolDesc    = "Call a tool of this connection that your list leaves out: name (search_swarmmemo_tools finds it and its input), arguments (the tool's own input) and confirm. It runs exactly as the tool itself, with its checks, sign-in and limits, and answers as it does. A tool marked destructive needs confirm true: ask your human first. Tools named in descriptions or answers that are not in your list are called this way; a tool in your list is called directly."
+	callToolDesc    = "Call any tool of this connection by name, above all one your list leaves out: name (search_swarmmemo_tools finds it and its input), arguments (the tool's own input) and confirm. It runs exactly as the tool itself, with its checks, sign-in and limits, and answers as it does. A tool marked destructive needs confirm true: ask your human first. Tools named in descriptions or answers that are not in your list are called this way; a tool in your list can also be called directly."
 )
 
 func searchToolsSchema() *jsonschema.Schema {
-	one, ten, max := float64(1), float64(searchLimitMax), searchQueryBytes
+	// Its bounds are mcpArgBounds' (boundToolSchemas adds them to the list).
 	return &jsonschema.Schema{Type: "object", AdditionalProperties: &jsonschema.Schema{Not: &jsonschema.Schema{}}, Properties: map[string]*jsonschema.Schema{
-		"query":   {Type: "string", MaxLength: &max, Description: "What the tool should do, in words"},
+		"query":   {Type: "string", Description: "What the tool should do, in words"},
 		"toolset": {Type: "string", Description: "A toolset's name: its tools in full"},
-		"limit":   {Type: "integer", Minimum: &one, Maximum: &ten, Description: fmt.Sprintf("Hits to return; default %d", searchLimitDefault)},
+		"limit":   {Type: "integer", Description: fmt.Sprintf("Hits to return; default %d", searchLimitDefault)},
 	}}
 }
 
 // callToolSchema is call_swarmmemo_tool's input: name is one of names
-// (the tools this list leaves out) when given, any string at registration.
+// (toolsetView.callNames) when given, any string at registration.
 func callToolSchema(names []string) *jsonschema.Schema {
-	name := &jsonschema.Schema{Type: "string", Description: "The tool to call: a tool of this connection not in your list"}
+	name := &jsonschema.Schema{Type: "string", Description: "The tool to call: a tool of this connection, usually one not in your list"}
 	if names != nil {
 		for _, n := range names {
 			name.Enum = append(name.Enum, n)
@@ -477,19 +468,19 @@ func callToolSchema(names []string) *jsonschema.Schema {
 	}}
 }
 
-// addMetaTools registers the meta pair on a filtered profile's server. Its
+// addMetaTools registers the meta pair on a toolsets profile's server. Its
 // calls never reach these handlers: toolsetsMiddleware answers them.
 func (s *Server) addMetaTools(server *mcp.Server, signIn bool) {
 	for _, t := range metaToolDefs(signIn) {
 		name := t.Name
 		server.AddTool(t, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return metaToolRefusal("unknown_tool", name+" is answered only while a list is filtered."), nil
+			return metaToolRefusal("unknown_tool", name+" is answered by the toolsets middleware only."), nil
 		})
 	}
 }
 
-// metaToolDefs is the meta pair as a filtered list shows it; /mcp-tool-hints
-// reads the same definitions.
+// metaToolDefs is the meta pair as every list of a toolsets profile shows
+// it.
 func metaToolDefs(signIn bool) []*mcp.Tool {
 	destructive, closed, open := true, false, true
 	out := []*mcp.Tool{}
@@ -503,8 +494,7 @@ func metaToolDefs(signIn bool) []*mcp.Tool {
 		t.Annotations.Title = t.Title
 		t.OutputSchema = resultOutputSchema
 		if signIn {
-			// Worst case: the call may reach a tool that takes sign-in.
-			t.Meta = mcp.Meta{"securitySchemes": []map[string]any{{"type": "noauth"}, {"type": "oauth2", "scopes": []string{board.OAuthScope}}}}
+			t.Meta = mcp.Meta{"securitySchemes": securitySchemes(t.Name)}
 		}
 		out = append(out, t)
 	}

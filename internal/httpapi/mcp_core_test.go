@@ -119,7 +119,9 @@ func TestCoreProfileTools(t *testing.T) {
 		}
 	}
 	for name := range full {
-		if core[name] == nil {
+		// The meta pair is the toolsets' (mcp_toolsets.go): /mcp/core never
+		// has it.
+		if core[name] == nil && !isMetaTool(name) {
 			leftOut = append(leftOut, name)
 		}
 	}
@@ -218,7 +220,7 @@ func TestCoreDescription(t *testing.T) {
 	s := pinServer(t)
 	used := map[string]bool{}
 	for _, tool := range profileToolList(t, s, "/mcp") {
-		if s.coreProfile().leavesOut(tool["name"].(string)) {
+		if s.coreProfile().leavesOut(tool["name"].(string)) || isMetaTool(tool["name"].(string)) {
 			continue // not listed there: its description is /mcp's alone
 		}
 		desc := tool["description"].(string)

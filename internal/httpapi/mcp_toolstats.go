@@ -127,7 +127,7 @@ func (s *Server) countMCPTools(profile string, registered map[string]bool) mcp.M
 			res, err := next(ctx, method, req)
 			if isCall {
 				name := board.MCPToolOther
-				if call.Params != nil && counted[call.Params.Name] && !note.unknown {
+				if call.Params != nil && counted[call.Params.Name] {
 					name = call.Params.Name
 				}
 				// A call through call_swarmmemo_tool is the tool it called,

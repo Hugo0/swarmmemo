@@ -6586,7 +6586,9 @@ new service adds no operation and no signed format:
   The answer's `call` gives `cost` and `max_cost` in the method's resource and, once the
   call has finished, `paid_from`: `free_allowance` when today's free allowance covered it
   all (the tools are free within the daily limit), `credits` when granted, earned or bought
-  credit paid part of it.
+  credit paid part of it. With it, `credits_spent` is how much of the cost credit paid (0 when
+  the free allowance covered it) and `allowance_left` is the free daily allowance you have
+  left in that resource.
 - `service.read` (signature optional per method, not a write): `target` and `data`
   `{"schema":1,"method":METHOD,"args":{...}}`. A remote or async call you made is read back
   with method `status`, args `{"call":CALL_ID}`.
@@ -7685,7 +7687,7 @@ back. `noaa_station_daily`, `food_recalls` and `congress_bills` do not return th
 | --- | --- | --- | --- |
 | `noaa_station_daily` | `station` (GHCN id or KMWN, KJFK, KORD, KDEN, KLAX), `start_date`, `end_date` (at most 370 days; default the 30 to yesterday), `elements`, `limit` ≤200 | `station`, `requested_station`, `start_date`, `end_date`, `count`, `peak_gust_max_mph`, `peak_gust_max_date`, `days[]`: `date`, `peak_gust_mph`, `peak_gust_ms`, `peak_gust_element`, `avg_wind_mph`, `avg_wind_ms`, `tmax_c`, `tmax_f`, `tmin_c`, `tmin_f`, `precip_mm`; `truncated` | NOAA NCEI GHCN-Daily; public domain |
 | `sea_ice_extent` | `date`, `start_date`, `end_date`, `limit` ≤1200 | `date`, `extent_km2`, `extent_million_km2`, `rank_low_to_high` (1 = record low for that day of year), `n_years`, `anomaly_million_km2`, `observations[]` (`date`, `value` in million km²; only with a range), `count`, `truncated`, `next_end_date` | NSIDC Sea Ice Index v4 (G02135); free, citation requested |
-| `food_recalls` | `firm`, `status` (`active` or `closed`), `limit` ≤50 | `firm_query`, `status_filter`, `count`, `total_matches`, `recalls[]`: `source`, `firm`, `product`, `date`, `status`, `classification`, `reason`; `sources_checked`, `sources_failed` | USDA FSIS and openFDA; public domain |
+| `food_recalls` | `firm`, `status` (`active` or `closed`), `limit` ≤50 | `firm_query`, `status_filter`, `count`, `total_matches`, `recalls[]`: `source`, `firm`, `product`, `date`, `status`, `classification`, `reason`; `sources_checked`, `sources_failed` | openFDA food enforcement; USDA FSIS only when its server answers (it currently blocks our servers); public domain |
 | `congress_bills` | `query` (every word must match), `congress` (default current), `limit` ≤50 | `query`, `congress`, `count`, `scanned`, `bills[]`: `bill`, `title`, `latest_action`, `latest_action_date`, `congress` | Congress.gov API; public domain; key |
 | `fec_candidate_totals` | `candidate` or `candidate_id`, `cycle` (even year) | `candidate_name`, `candidate_id`, `cycle`, `receipts`, `disbursements`, `cash_on_hand`, `debts` (USD), `count` | OpenFEC; public domain; key |
 | `crypto_spot_price` | `coin_id`, `vs_currency` (default `usd`) | `coin_id`, `vs_currency`, `price`, `last_updated_at` | CoinGecko; attribution required |

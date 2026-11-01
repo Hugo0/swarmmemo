@@ -704,7 +704,7 @@ type recallsData struct {
 var dsRecalls = &pdDataset{
 	ID: "food_recalls", SchemaVersion: 1,
 	Title:       "US food recalls",
-	Description: "US food recalls for a company: USDA FSIS (meat, poultry, egg products) and FDA openFDA food enforcement, matched by firm name, with status, class, product, reason and date.",
+	Description: "US food recalls for a company from FDA openFDA food enforcement, matched by firm name, with status, class, product, reason and date. USDA FSIS (meat, poultry, egg products) is included only when its server answers us; it currently blocks our servers, so sources_failed lists FSIS.",
 	Output:      "data: firm_query, status_filter, count, total_matches, recalls[] (newest first: source, firm, product, date, status, classification, reason), sources_checked, sources_failed",
 	Params: []pdParam{
 		{Name: "firm", Kind: "string", Required: true, MaxLen: 100, Pattern: pdWordRE, Norm: pdTrim, Doc: "recalling company name, matched as a substring (FSIS) and a phrase (openFDA)"},
@@ -732,7 +732,7 @@ var dsRecalls = &pdDataset{
 		if raw, err := r.fetch(ctx, pdFetch{Key: "fsis", TTL: time.Hour, Host: fsisHost, Path: "/fsis/api/recall/v/1", MaxBytes: 32 << 20,
 			Timeout: 40 * time.Second, Stream: streamFSIS}); err != nil {
 			out.SourcesFailed = append(out.SourcesFailed, "FSIS")
-			notes = append(notes, "FSIS (USDA meat and poultry) recalls not checked: the endpoint did not answer; that coverage is missing.")
+			notes = append(notes, "FSIS (USDA meat, poultry, egg products) recalls not checked: the FSIS server did not answer us (it currently blocks our servers); that coverage is missing.")
 		} else {
 			list, err := unmarshalCached[[]fsisRecall](raw)
 			if err != nil {
@@ -1090,6 +1090,9 @@ var dsFECTotals = &pdDataset{
 		}
 		if !t.Found {
 			out.Note = "candidate found but no finance totals for that cycle"
+			if p.Has("candidate_id") { // an id is not looked up: no totals can also mean no such candidate
+				out.Note = "FEC has no finance totals for this candidate_id and cycle; count 0 is not $0 raised, and an id with a typo answers the same"
+			}
 			return out, nil
 		}
 		out.Count, out.Cycle, out.Receipts, out.Disbursements, out.CashOnHand, out.Debts = 1, t.Cycle, t.Receipts, t.Disbursements, t.CashOnHand, t.Debts

@@ -10,11 +10,13 @@ package httpapi
 // mcpToolsets is the one table. ?toolsets=a,b on /mcp or /mcp/assistant
 // lists those toolsets (a stateless filter per request; the OAuth audience
 // comes from the path only); MCP_TOOLSETS (board.Features.MCPToolsets) makes
-// the default toolset what a URL without the query lists. While a list is
-// filtered, search_swarmmemo_tools finds any registered tool and
-// call_swarmmemo_tool calls one the list leaves out, through the real
-// tool's handler, schema, sign-in and limits (mcp_dispatch.go). /mcp/core
-// is never filtered and has neither. The server card, the instructions and
+// the default toolset what a URL without the query lists. Every list of
+// /mcp and /mcp/assistant, filtered or ?toolsets=all, carries the meta pair
+// (C687: an agent that learned one route must not break on the other):
+// search_swarmmemo_tools finds any registered tool and call_swarmmemo_tool
+// calls any tool the profile lists unfiltered, listed here or not, through
+// the real tool's handler, schema, sign-in and limits (mcp_dispatch.go).
+// /mcp/core is never filtered and has neither. The server card, the instructions and
 // the hints are derived from the table (TestToolsetsDecided holds every
 // registered tool of every profile to some toolset).
 
@@ -54,7 +56,7 @@ const (
 	callToolName    = "call_swarmmemo_tool"
 )
 
-// metaTools are the pair a filtered list always carries.
+// metaTools are the pair every list of a toolsets profile carries.
 var metaTools = []string{searchToolsName, callToolName}
 
 func isMetaTool(name string) bool { return slices.Contains(metaTools, name) }
@@ -228,7 +230,8 @@ func parseToolsets(values []string, info *toolsetInfo) (*toolsetSelection, error
 }
 
 // toolsetView is one request's list: unfiltered (nil, or a selection of
-// all), or the selected toolsets' tools and the meta pair.
+// all: every tool), or the selected toolsets' tools; both with the meta
+// pair.
 type toolsetView struct {
 	info     *toolsetInfo
 	sel      *toolsetSelection
@@ -261,13 +264,32 @@ func (v *toolsetView) filtered() bool { return v != nil && v.listed != nil }
 // isListed reports whether name is in this request's tools/list.
 func (v *toolsetView) isListed(name string) bool {
 	if !v.filtered() {
-		return v != nil && v.info != nil && v.info.listedAll[name]
+		return v != nil && v.info != nil && (v.info.listedAll[name] || isMetaTool(name))
 	}
 	return v.listed[name]
 }
 
-// dispatchable reports whether call_swarmmemo_tool calls name: a tool the
-// profile lists without toolsets that this request's list leaves out.
+// callable reports whether call_swarmmemo_tool calls name: any tool the
+// profile lists without toolsets, in this request's list or not (never the
+// meta pair, a hidden alias or a tool the profile does not register).
+func (v *toolsetView) callable(name string) bool {
+	return v != nil && v.info != nil && v.info.listedAll[name] && !isMetaTool(name)
+}
+
+// callNames is the names call_swarmmemo_tool's schema offers on this list:
+// the tools it leaves out when filtered; nil (any name, as registered) when
+// unfiltered, where every name it calls is in the list already and an enum
+// would only repeat it (the list's byte budget).
+func (v *toolsetView) callNames() []string {
+	if v.filtered() {
+		return v.dispatch
+	}
+	return nil
+}
+
+// dispatchable reports whether name is reached only through
+// call_swarmmemo_tool: a tool the profile lists without toolsets that this
+// request's list leaves out.
 func (v *toolsetView) dispatchable(name string) bool {
 	return v.filtered() && v.info.listedAll[name] && !v.listed[name]
 }

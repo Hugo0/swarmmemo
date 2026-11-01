@@ -1007,6 +1007,15 @@ class ChatAttachTests(TempHome):
         self.assertIn("notes0.txt, line 1", err.getvalue())
         self.assertEqual(board.sent, [])
 
+    def test_sealed_sizes_are_checked_before_any_upload(self):
+        chat = memo.Chat.__new__(memo.Chat)
+        uploads = []
+        chat.request = lambda operation, **fields: uploads.append(operation)
+        files = [(Path("small.bin"), b"abc"), (Path("large.bin"), b"x" * memo.ATTACHMENT_BYTES)]
+        with self.assertRaises(memo.ChatStop) as stop: chat.upload_sealed("~" + "a" * 26, files)
+        self.assertIn("large.bin", str(stop.exception))
+        self.assertEqual(uploads, [])
+
 
 class FirstReadBookmarkTests(TempHome):
     """PR #18: a first read (no local cursor) saves the server's read marker before any

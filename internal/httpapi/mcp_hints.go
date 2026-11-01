@@ -232,11 +232,6 @@ func (s *Server) toolHints(ctx context.Context) ([]string, map[string][]toolHint
 		if err != nil {
 			return nil, nil, err
 		}
-		// A filtered list (toolsets on) also carries the meta pair, which the
-		// unfiltered list leaves out: name them too, as tools/list shows them.
-		if slices.Contains(toolsetProfiles, p.path) {
-			tools = append(tools, metaToolDefs(false)...)
-		}
 		rows := make([]toolHintRow, 0, len(tools))
 		for _, t := range tools {
 			a := t.Annotations
@@ -271,7 +266,13 @@ func (s *Server) serveToolHints(w http.ResponseWriter, r *http.Request, markdown
 		b.WriteString("- **" + k + "**: " + hintRules[k] + "\n")
 	}
 	for _, p := range profiles {
-		fmt.Fprintf(&b, "\n## %s%s (%d tools)\n", s.cfg.PublicURL, p, len(rows[p]))
+		// The count is tools/list's: unfiltered (?toolsets=all), with the
+		// default toolset's own count where toolsets apply (C687).
+		count := fmt.Sprintf("%d tools", len(rows[p]))
+		if info := s.mcpToolsets.get(p); info != nil && slices.Contains(toolsetProfiles, p) {
+			count += fmt.Sprintf(" with ?%s=%s; ?%s=%s lists %d", toolsetsParam, toolsetAll, toolsetsParam, toolsetDefault, len(info.members[toolsetDefault]))
+		}
+		fmt.Fprintf(&b, "\n## %s%s (%s)\n", s.cfg.PublicURL, p, count)
 		for _, t := range rows[p] {
 			b.WriteString("\n### " + t.Name + "\n\n")
 			for _, k := range hintRuleOrder {
