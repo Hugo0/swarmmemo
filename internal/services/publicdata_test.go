@@ -458,6 +458,9 @@ func TestPublicDataRecalls(t *testing.T) {
 	v := newPDEnv(t, false)
 	item, d := v.mustFetch(t, "food_recalls", `{"firm":"Synear"}`, unix("2026-07-20"))
 	eq(t, "count", d["count"], 1.0)
+	if _, ok := d["partial"]; ok {
+		t.Errorf("every source answered: no partial: %v", d["partial"])
+	}
 	eq(t, "source", at(d, "recalls", 0, "source"), "FSIS (USDA)")
 	eq(t, "firm", at(d, "recalls", 0, "firm"), "Synear Foods USA LLC")
 	eq(t, "status", at(d, "recalls", 0, "status"), "Active")
@@ -486,16 +489,22 @@ func TestPublicDataRecalls(t *testing.T) {
 	item, d = v2.mustFetch(t, "food_recalls", `{"firm":"Reser"}`, unix("2026-07-20"))
 	eq(t, "fda still served", d["count"], 1.0)
 	eq(t, "failed", d["sources_failed"], []any{"FSIS"})
+	eq(t, "partial", d["partial"], true)
+	// A zero from the sources that answered is partial, not a true zero.
+	_, d = v2.mustFetch(t, "food_recalls", `{"firm":"Synear"}`, unix("2026-07-20"))
+	eq(t, "partial zero", d["count"], 0.0)
+	eq(t, "partial zero total", d["total_matches"], 0.0)
+	eq(t, "partial zero flagged", d["partial"], true)
 	if !strings.Contains(d["note"].(string), "FSIS") {
 		t.Errorf("note must name the missing source: %v", d["note"])
 	}
 	if at(item, "sources", 0, "cache") != "error" {
 		t.Errorf("the failed source is listed: %v", item["sources"])
 	}
-	// Both failing is a failure, refunded.
+	// Both failing is a failure, refunded: no item reads count 0.
 	v2.fakes["api.fda.gov"].set("500")
-	if _, err := v2.fetch(t, "food_recalls", `{"firm":"Nobody"}`, unix("2026-07-20")); code(err) != "upstream_busy" {
-		t.Errorf("every source down: %v", err)
+	if it, err := v2.fetch(t, "food_recalls", `{"firm":"Nobody"}`, unix("2026-07-20")); code(err) != "upstream_busy" || it != nil {
+		t.Errorf("every source down: %v %v", it, err)
 	}
 }
 
@@ -823,6 +832,10 @@ func TestPublicDataNowcasts(t *testing.T) {
 	_, d = k2.mustFetch(t, "us_nowcasts", `{"measure":"gdp"}`, now)
 	eq(t, "only gdpnow", len(d["nowcasts"].([]any)), 1)
 	eq(t, "error named", at(d, "source_errors", 0, "source"), "NY Fed Staff Nowcast")
+	eq(t, "partial", d["partial"], true)
+	if _, d = k.mustFetch(t, "us_nowcasts", `{"measure":"inflation"}`, now); d["partial"] != nil {
+		t.Errorf("every source answered: no partial: %v", d["partial"])
+	}
 }
 
 // --- the framework ---------------------------------------------------------------

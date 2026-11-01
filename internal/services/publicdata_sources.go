@@ -561,6 +561,7 @@ var dsSeaIce = &pdDataset{
 	Licence: "free to use; citation requested", Attribution: "NSIDC Sea Ice Index, Version 4 (G02135), National Snow and Ice Data Center, Boulder, Colorado",
 	TermsURL: "https://nsidc.org/data/g02135/versions/4", TermsStatus: "citation requested; verify before production",
 	TTL: 12 * time.Hour, Price: 1,
+	NotFetchable: true, // noaadata.apps.nsidc.org robots.txt: Disallow: / (C699)
 }
 
 // --- US food recalls: FSIS and openFDA --------------------------------------
@@ -695,6 +696,7 @@ type recallsData struct {
 	StatusFilter   string      `json:"status_filter"`
 	Count          int         `json:"count"`
 	TotalMatches   int         `json:"total_matches"`
+	Partial        bool        `json:"partial,omitempty"` // a source failed: count covers sources_checked only
 	Recalls        []recallRow `json:"recalls"`
 	SourcesChecked []string    `json:"sources_checked"`
 	SourcesFailed  []string    `json:"sources_failed"`
@@ -705,7 +707,7 @@ var dsRecalls = &pdDataset{
 	ID: "food_recalls", SchemaVersion: 1,
 	Title:       "US food recalls",
 	Description: "US food recalls for a company from FDA openFDA food enforcement, matched by firm name, with status, class, product, reason and date. USDA FSIS (meat, poultry, egg products) is included only when its server answers us; it currently blocks our servers, so sources_failed lists FSIS.",
-	Output:      "data: firm_query, status_filter, count, total_matches, recalls[] (newest first: source, firm, product, date, status, classification, reason), sources_checked, sources_failed",
+	Output:      "data: firm_query, status_filter, count, total_matches, partial (true when a source failed: the counts cover sources_checked only), recalls[] (newest first: source, firm, product, date, status, classification, reason), sources_checked, sources_failed",
 	Params: []pdParam{
 		{Name: "firm", Kind: "string", Required: true, MaxLen: 100, Pattern: pdWordRE, Norm: pdTrim, Doc: "recalling company name, matched as a substring (FSIS) and a phrase (openFDA)"},
 		{Name: "status", Kind: "enum", Enum: []string{"active", "closed"}, Doc: "active (FDA: Ongoing) or closed (Completed, Terminated); default both",
@@ -785,6 +787,7 @@ var dsRecalls = &pdDataset{
 		}
 		sort.SliceStable(all, func(i, j int) bool { return deref(all[i].Date) > deref(all[j].Date) })
 		out.TotalMatches = len(all)
+		out.Partial = len(out.SourcesFailed) > 0
 		out.Recalls = all[:min(len(all), int(intOr(p, "limit", 10)))]
 		out.Count = len(out.Recalls)
 		if len(out.Recalls) > 0 && out.Recalls[0].Date != nil {

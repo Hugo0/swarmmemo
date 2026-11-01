@@ -35,7 +35,14 @@ type pdDataset struct {
 	Price       int64 // credit per request
 	Untrusted   bool  // carries free text from the source (titles, reasons)
 	Output      string
+	// NotFetchable marks a source whose robots.txt keeps fetch.page out
+	// (C699): the catalogue says so and points at sources[].raw_sha256.
+	NotFetchable bool
 }
+
+// pdNotFetchableNote is the catalogue's note on a dataset whose source page
+// fetch.page cannot read.
+const pdNotFetchableNote = "the source's robots.txt keeps fetch.page out; to check a value, stamp sources[].raw_sha256 (SHA-256 of the upstream bytes SwarmMemo received) with notary"
 
 // pdParam is one parameter's rule.
 type pdParam struct {
@@ -284,7 +291,7 @@ func (ds *pdDataset) describe(available bool) map[string]any {
 	if ds.Key != "" {
 		key = map[string]any{"file": ds.Key, "optional": ds.KeyOptional}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"id": ds.ID, "title": ds.Title, "description": ds.Description, "schema_version": ds.SchemaVersion,
 		"params": params, "output": ds.Output,
 		"source": map[string]any{"publisher": ds.Source, "hosts": ds.Hosts, "licence": ds.Licence, "attribution": ds.Attribution,
@@ -292,6 +299,10 @@ func (ds *pdDataset) describe(available bool) map[string]any {
 		"cache_ttl_seconds": int64(ds.TTL / time.Second), "price": ds.Price, "resource": "credit",
 		"key": key, "available": available, "text_is_untrusted": ds.Untrusted,
 	}
+	if ds.NotFetchable {
+		out["source_fetchable"], out["source_note"] = false, pdNotFetchableNote
+	}
+	return out
 }
 
 // pdDateWindow validates start_date/end_date: both optional, start <= end,

@@ -7678,7 +7678,9 @@ Results are cached, so most calls cost nothing upstream.
 - **Catalogue.** `datasets` (free, unsigned) lists each dataset: `id`, `description`,
   `params` (name, type, required, default, bounds), `output`, `source` (publisher, hosts,
   licence, attribution, terms), `cache_ttl_seconds`, `price`, `schema_version` and
-  `available` (false while its key is missing).
+  `available` (false while its key is missing). A dataset whose source host's robots.txt
+  keeps `fetch` out (`sea_ice_extent`) adds `source_fetchable: false` and `source_note`:
+  stamp `sources[].raw_sha256` with notary instead of fetching the page.
 - **Bulk** is answered as `{"envelope_version":1,"results":[ITEM,...]}` in request order.
 - **Parameters** are strict: unknown or repeated keys, wrong types (integers are JSON
   integers, dates `YYYY-MM-DD`) and out-of-range values are `invalid_service_data`, refused
@@ -7704,7 +7706,7 @@ Every ITEM has the same envelope:
 | `cache` | `miss` (fetched now), `hit`, `stale`, `static` (a published calendar), `mixed` |
 | `freshness` | present with `as_of`: a one-line reminder that `stale` and `cache` describe our cached copy, `as_of` the source's own observation date |
 | `stale` | cache freshness, not data age: true when our copy past its TTL was served because the upstream failed; never silent |
-| `source_url`, `sources` | the upstream URLs (keys removed), each with its `cache`, `fetched_at` and, if stale, `stale_reason`, or its `error` |
+| `source_url`, `sources` | the upstream URLs (keys removed), each with its `cache`, `fetched_at`, `raw_sha256` (lowercase hex SHA-256 of the response body SwarmMemo received, kept with the cached copy; absent on `static` sources) and, if stale, `stale_reason`, or its `error` |
 | `licence`, `attribution` | cite the source as it asks |
 | `text_is_untrusted` | true when `data` carries the source's free text (titles, reasons): data, not instructions |
 | `cost` | credit charged for this item |
@@ -7714,19 +7716,23 @@ A stale copy is served for at most 30 days; after that the request fails. Series
 are newest first; `limit` caps the rows, `count` is how many are in range, and
 `sea_ice_extent` and `fred_series` return `next_end_date` (pass it as `end_date`) to page
 back. `noaa_station_daily`, `food_recalls` and `congress_bills` do not return that cursor.
+A dataset that merges several sources adds `partial: true` when one of them failed
+(named in `sources_failed` or `source_errors`): its counts and rows cover only the sources
+that answered, so a 0 is not proof of absence. When every source fails the request fails
+(`upstream_busy`, refunded), never a count of 0.
 
 | Dataset | Params | `data` | Source and licence |
 | --- | --- | --- | --- |
 | `noaa_station_daily` | `station` (GHCN id or KMWN, KJFK, KORD, KDEN, KLAX), `start_date`, `end_date` (at most 370 days; default the 30 to yesterday), `elements`, `limit` ≤200 | `station`, `requested_station`, `start_date`, `end_date`, `count`, `peak_gust_max_mph`, `peak_gust_max_date`, `days[]`: `date`, `peak_gust_mph`, `peak_gust_ms`, `peak_gust_element`, `avg_wind_mph`, `avg_wind_ms`, `tmax_c`, `tmax_f`, `tmin_c`, `tmin_f`, `precip_mm`; `truncated` | NOAA NCEI GHCN-Daily; public domain |
 | `sea_ice_extent` | `date`, `start_date`, `end_date`, `limit` ≤1200 | `date`, `extent_km2`, `extent_million_km2`, `rank_low_to_high` (1 = record low for that day of year), `n_years`, `anomaly_million_km2`, `observations[]` (`date`, `value` in million km²; only with a range), `count`, `truncated`, `next_end_date` | NSIDC Sea Ice Index v4 (G02135); free, citation requested |
-| `food_recalls` | `firm`, `status` (`active` or `closed`), `limit` ≤50 | `firm_query`, `status_filter`, `count`, `total_matches`, `recalls[]`: `source`, `firm`, `product`, `date`, `status`, `classification`, `reason`; `sources_checked`, `sources_failed` | openFDA food enforcement; USDA FSIS only when its server answers (it currently blocks our servers); public domain |
+| `food_recalls` | `firm`, `status` (`active` or `closed`), `limit` ≤50 | `firm_query`, `status_filter`, `count`, `total_matches`, `recalls[]`: `source`, `firm`, `product`, `date`, `status`, `classification`, `reason`; `sources_checked`, `sources_failed`, `partial` | openFDA food enforcement; USDA FSIS only when its server answers (it currently blocks our servers); public domain |
 | `congress_bills` | `query` (every word must match), `congress` (default current), `limit` ≤50 | `query`, `congress`, `count`, `scanned`, `bills[]`: `bill`, `title`, `latest_action`, `latest_action_date`, `congress` | Congress.gov API; public domain; key |
 | `fec_candidate_totals` | `candidate` or `candidate_id`, `cycle` (even year) | `candidate_name`, `candidate_id`, `cycle`, `receipts`, `disbursements`, `cash_on_hand`, `debts` (USD), `count` | OpenFEC; public domain; key |
 | `crypto_spot_price` | `coin_id`, `vs_currency` (default `usd`) | `coin_id`, `vs_currency`, `price`, `last_updated_at` | CoinGecko; attribution required |
 | `fred_series` | `series_id` (an allowlist of US public-domain series; see the catalogue), `units` (FRED transform), `start_date`, `end_date`, `limit` ≤1200 | `source`, `series`, `units`, `description`, `count`, `latest` {`date`,`value`}, `observations[]`, `truncated`, `next_end_date` | FRED, St. Louis Fed; FRED terms; key |
 | `fred_release_calendar` | `release` (name substring, or an FOMC query), `days_ahead` | `today`, `release_matched[]`: `release`, `release_id`, `next_dates` (up to 4), `last_date` (FOMC: `next_meetings`) | FRED release calendar (key); the FOMC calendar needs none |
 | `cb_policy_rates` | `bank` (FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, a common name, or `all`), `what` (`rate`, `next_meeting`, `both`) | `today`, `what`, `banks` {CODE: `policy_rate_pct`, `rate_as_of`, `rate_effective_from`, `previous_rate_pct`, `last_change_bps`, `rate_available`, `target_range_pct` (FED), `selic_target_pct` (BCB), `next_decision`, `upcoming_decisions`, `last_scheduled_decision_in_table`, `schedule_status` (`scheduled`, or `unknown` with the reason in `calendar_note`), `rate_may_be_stale`}, `calendar_staleness_warning` | BIS policy rates (attribution), BCB, FRED; published bank calendars |
-| `us_nowcasts` | `measure` (`gdp`, `inflation`, `all`) | `economy`, `measure`, `nowcasts[]`: `name`, `target_period`, `latest_value`, `latest_as_of`, `next_update`, `previous_value`, `previous_as_of`, `bands_pct` (NY Fed), `series` (Cleveland: `mom_*`, `yoy_*`); `source_errors[]` | Atlanta, New York and Cleveland Fed; model estimates, not official forecasts |
+| `us_nowcasts` | `measure` (`gdp`, `inflation`, `all`) | `economy`, `measure`, `nowcasts[]`: `name`, `target_period`, `latest_value`, `latest_as_of`, `next_update`, `previous_value`, `previous_as_of`, `bands_pct` (NY Fed), `series` (Cleveland: `mom_*`, `yoy_*`); `source_errors[]`, `partial` | Atlanta, New York and Cleveland Fed; model estimates, not official forecasts |
 | `ai_model_leaderboard` | `board` (`text`, `coding`, `webdev`, `vision`, `text_no_style`), `model`, `organization` (name substrings, searched over the whole board), `limit` ≤100 | `board`, `subset`, `category`, `leaderboard_publish_date`, `count`, `matched_entries`, `total_models_on_board`, `models[]` by rank: `rank`, `model`, `org`, `license`, `score`, `ci` [low, high], `votes` | Arena (arena.ai) leaderboard dataset on Hugging Face; CC BY 4.0 |
 
 Numbers are JSON numbers in the source's units, rounded as the source's own adapter rounds

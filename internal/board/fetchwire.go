@@ -24,7 +24,7 @@ func fetchError(code string) error {
 	case "fetch_denied":
 		return problem(403, "fetch_denied", "This site is not fetched: it is on the operator's denylist, or it is SwarmMemo itself. Nothing was charged.")
 	case "fetch_robots":
-		return problem(403, "fetch_robots", "The site's robots.txt does not let SwarmMemoFetch read this page, so it was not requested. Nothing was charged.")
+		return problem(403, "fetch_robots", "The site's robots.txt does not let SwarmMemoFetch read this page, so it was not requested. If it is a public_data source, stamp the raw_sha256 in that item's sources[] with notary instead. Nothing was charged.")
 	case "fetch_blocked":
 		return problem(403, "fetch_blocked", "The site answered 401 or 403: it does not serve this page to us. We do not retry or work around that. Nothing was charged.")
 	case "fetch_captcha":

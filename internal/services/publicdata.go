@@ -1,9 +1,12 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -470,9 +473,13 @@ type pdSourceRec struct {
 	ExpiresAt   *string `json:"expires_at,omitempty"`
 	Stale       bool    `json:"stale"`
 	StaleReason string  `json:"stale_reason,omitempty"`
-	Error       string  `json:"error,omitempty"`
-	fetched     int64
-	expires     int64
+	// RawSHA256 is the lowercase hex SHA-256 of the upstream response body
+	// as SwarmMemo received it (C699): evidence a caller can stamp with
+	// notary when the source itself cannot be fetched (robots.txt).
+	RawSHA256 string `json:"raw_sha256,omitempty"`
+	Error     string `json:"error,omitempty"`
+	fetched   int64
+	expires   int64
 }
 
 // pdErr is an item's failure: Code is the refusal a single fetch returns
@@ -720,8 +727,36 @@ func (f pdFetch) publicURL() string {
 
 type pdCacheRow struct {
 	body             []byte
+	rawSHA256        string
 	url              string
 	fetched, expires int64
+}
+
+// pdCacheEnvelope is how a cached body carries its raw_sha256 without a new
+// column: {"pd_body":BODY,"pd_raw_sha256":HEX}. Rows written before C699 are
+// the bare body and read back with no hash.
+type pdCacheEnvelope struct {
+	Body      json.RawMessage `json:"pd_body"`
+	RawSHA256 string          `json:"pd_raw_sha256"`
+}
+
+const pdCacheEnvelopePrefix = `{"pd_body":`
+
+func pdCacheEncode(row pdCacheRow) string {
+	if row.rawSHA256 == "" {
+		return string(row.body)
+	}
+	return pdCacheEnvelopePrefix + string(row.body) + `,"pd_raw_sha256":"` + row.rawSHA256 + `"}`
+}
+
+func pdCacheDecode(stored []byte) (body []byte, rawSHA256 string) {
+	if bytes.HasPrefix(stored, []byte(pdCacheEnvelopePrefix)) {
+		var e pdCacheEnvelope
+		if json.Unmarshal(stored, &e) == nil && len(e.Body) > 0 {
+			return e.Body, e.RawSHA256
+		}
+	}
+	return stored, ""
 }
 
 // fetch returns the normalised document f names: from the cache while it is
@@ -739,18 +774,18 @@ func (r *pdRun) fetch(ctx context.Context, f pdFetch) (json.RawMessage, error) {
 	defer lock.Unlock()
 	row, found := r.p.cacheGet(ctx, r.ds.ID, f.Key)
 	if found && r.now < row.expires {
-		r.record(pdSourceRec{URL: row.url, Cache: "hit", FetchedAt: pdTime(row.fetched), ExpiresAt: pdTime(row.expires), fetched: row.fetched, expires: row.expires})
+		r.record(pdSourceRec{URL: row.url, Cache: "hit", FetchedAt: pdTime(row.fetched), ExpiresAt: pdTime(row.expires), RawSHA256: row.rawSHA256, fetched: row.fetched, expires: row.expires})
 		return row.body, nil
 	}
-	body, err := r.p.download(ctx, r, f)
+	body, rawSHA256, err := r.p.download(ctx, r, f)
 	if err == nil {
 		ttl := int64(f.TTL / time.Second)
 		if ttl < 1 {
 			ttl = 1
 		}
-		row = pdCacheRow{body: body, url: f.publicURL(), fetched: r.now, expires: r.now + ttl}
+		row = pdCacheRow{body: body, rawSHA256: rawSHA256, url: f.publicURL(), fetched: r.now, expires: r.now + ttl}
 		r.p.cachePut(r.ds.ID, f.Key, row)
-		r.record(pdSourceRec{URL: row.url, Cache: "miss", FetchedAt: pdTime(row.fetched), ExpiresAt: pdTime(row.expires), fetched: row.fetched, expires: row.expires})
+		r.record(pdSourceRec{URL: row.url, Cache: "miss", FetchedAt: pdTime(row.fetched), ExpiresAt: pdTime(row.expires), RawSHA256: row.rawSHA256, fetched: row.fetched, expires: row.expires})
 		return body, nil
 	}
 	var pe *pdErr
@@ -758,7 +793,7 @@ func (r *pdRun) fetch(ctx context.Context, f pdFetch) (json.RawMessage, error) {
 		pe = pdFail("upstream_failed", "internal")
 	}
 	if found && r.now-row.fetched <= int64(PublicDataStaleMax/time.Second) {
-		r.record(pdSourceRec{URL: row.url, Cache: "stale", FetchedAt: pdTime(row.fetched), ExpiresAt: pdTime(row.expires), Stale: true,
+		r.record(pdSourceRec{URL: row.url, Cache: "stale", FetchedAt: pdTime(row.fetched), ExpiresAt: pdTime(row.expires), Stale: true, RawSHA256: row.rawSHA256,
 			StaleReason: "upstream " + pe.Reason + "; serving the copy fetched at fetched_at, past its TTL", fetched: row.fetched, expires: row.expires})
 		return row.body, nil
 	}
@@ -774,7 +809,7 @@ func (p *publicData) cacheGet(ctx context.Context, dataset, key string) (pdCache
 	if err != nil {
 		return row, false
 	}
-	row.body = []byte(body)
+	row.body, row.rawSHA256 = pdCacheDecode([]byte(body))
 	return row, json.Valid(row.body)
 }
 
@@ -806,7 +841,7 @@ func (p *publicData) cachePut(dataset, key string, row pdCacheRow) {
 	}
 	_, _ = p.db.ExecContext(ctx, `INSERT INTO public_data_cache(dataset,key,body,source_url,fetched_at,expires_at) VALUES(?,?,?,?,?,?)
  ON CONFLICT(dataset,key) DO UPDATE SET body=excluded.body, source_url=excluded.source_url, fetched_at=excluded.fetched_at, expires_at=excluded.expires_at`,
-		dataset, key, string(row.body), row.url, row.fetched, row.expires)
+		dataset, key, pdCacheEncode(row), row.url, row.fetched, row.expires)
 }
 
 // politeness takes one request from an upstream's own budget, shared by
@@ -844,14 +879,16 @@ func (c *cappedReader) Read(b []byte) (int, error) {
 	return n, err
 }
 
-// download makes one upstream request and normalises its body.
-func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (json.RawMessage, error) {
+// download makes one upstream request and normalises its body; rawSHA256
+// is the SHA-256 of the response body as received ("" for a 404 read as no
+// match).
+func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (_ json.RawMessage, rawSHA256 string, _ error) {
 	group := pdHostGroup[f.Host]
 	if group == "" {
 		group = f.Host
 	}
 	if !p.politeness(group, r.now) {
-		return nil, pdFail("upstream_busy", "upstream_budget")
+		return nil, "", pdFail("upstream_busy", "upstream_budget")
 	}
 	max := f.MaxBytes
 	if max <= 0 {
@@ -867,7 +904,7 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (json.Ra
 	}
 	if f.KeyParam != "" {
 		if r.key == "" {
-			return nil, pdFail("upstream_unavailable", "key_missing")
+			return nil, "", pdFail("upstream_unavailable", "key_missing")
 		}
 		q.Set(f.KeyParam, r.key)
 	}
@@ -883,7 +920,7 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (json.Ra
 	defer cancel()
 	req, err := http.NewRequestWithContext(stepCtx, http.MethodGet, target, nil)
 	if err != nil {
-		return nil, pdFail("upstream_failed", "request")
+		return nil, "", pdFail("upstream_failed", "request")
 	}
 	req.Header.Set("User-Agent", publicDataUserAgent)
 	accept := f.Accept
@@ -893,7 +930,7 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (json.Ra
 	req.Header.Set("Accept", accept)
 	if f.KeyHeader != "" {
 		if r.key == "" {
-			return nil, pdFail("upstream_unavailable", "key_missing")
+			return nil, "", pdFail("upstream_unavailable", "key_missing")
 		}
 		req.Header.Set(f.KeyHeader, r.key)
 	}
@@ -903,13 +940,13 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (json.Ra
 		// failure ever leaves this function.
 		switch {
 		case errors.Is(err, errNotCatalogueHost):
-			return nil, pdFail("upstream_failed", "host_not_in_catalogue")
+			return nil, "", pdFail("upstream_failed", "host_not_in_catalogue")
 		case errors.Is(err, safenet.ErrBlocked), errors.Is(err, safenet.ErrUnresolved):
-			return nil, pdFail("upstream_busy", "network")
+			return nil, "", pdFail("upstream_busy", "network")
 		case errors.Is(err, context.DeadlineExceeded) || stepCtx.Err() != nil:
-			return nil, pdFail("upstream_busy", "timeout")
+			return nil, "", pdFail("upstream_busy", "timeout")
 		}
-		return nil, pdFail("upstream_busy", "network")
+		return nil, "", pdFail("upstream_busy", "network")
 	}
 	defer resp.Body.Close()
 	s := resp.StatusCode
@@ -917,25 +954,33 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (json.Ra
 	case s == 404 && f.NotFound404:
 		v, err := f.parse(nil)
 		if err != nil {
-			return nil, pdFail("upstream_failed", "malformed")
+			return nil, "", pdFail("upstream_failed", "malformed")
 		}
-		return canonicalJSON(v), nil
+		return canonicalJSON(v), "", nil
 	case s >= 300 && s < 400:
-		return nil, pdFail("upstream_failed", "redirect_refused")
+		return nil, "", pdFail("upstream_failed", "redirect_refused")
 	case s == 429:
-		return nil, pdFail("upstream_busy", "http_429")
+		return nil, "", pdFail("upstream_busy", "http_429")
 	case s >= 500:
-		return nil, pdFail("upstream_busy", "http_"+strconv.Itoa(s))
+		return nil, "", pdFail("upstream_busy", "http_"+strconv.Itoa(s))
 	case s < 200 || s >= 300:
-		return nil, pdFail("upstream_failed", "http_"+strconv.Itoa(s))
+		return nil, "", pdFail("upstream_failed", "http_"+strconv.Itoa(s))
 	}
 	if resp.ContentLength > max {
-		return nil, pdFail("upstream_failed", "oversized")
+		return nil, "", pdFail("upstream_failed", "oversized")
 	}
-	body := &cappedReader{r: resp.Body, n: max}
+	digest := sha256.New()
+	body := io.TeeReader(&cappedReader{r: resp.Body, n: max}, digest)
 	var v any
 	if f.Stream != nil {
 		v, err = f.Stream(body)
+		// The hash covers the whole body, also what the parser left unread;
+		// a tail that fails to read leaves the answer good but unhashed.
+		if err == nil {
+			if _, derr := io.Copy(io.Discard, body); derr != nil {
+				digest = nil
+			}
+		}
 	} else {
 		var raw []byte
 		raw, err = io.ReadAll(body)
@@ -945,17 +990,20 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (json.Ra
 	}
 	switch {
 	case errors.Is(err, errOversized):
-		return nil, pdFail("upstream_failed", "oversized")
+		return nil, "", pdFail("upstream_failed", "oversized")
 	case err != nil && stepCtx.Err() != nil:
-		return nil, pdFail("upstream_busy", "timeout")
+		return nil, "", pdFail("upstream_busy", "timeout")
 	case err != nil:
-		return nil, pdFail("upstream_failed", "malformed")
+		return nil, "", pdFail("upstream_failed", "malformed")
 	}
 	out := canonicalJSON(v)
 	if len(out) > publicDataCacheEntryMax {
-		return nil, pdFail("upstream_failed", "oversized")
+		return nil, "", pdFail("upstream_failed", "oversized")
 	}
-	return out, nil
+	if digest == nil {
+		return out, "", nil
+	}
+	return out, hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 func (f pdFetch) parse(raw []byte) (any, error) {

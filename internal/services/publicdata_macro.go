@@ -972,6 +972,7 @@ type nowcastData struct {
 	Economy      string              `json:"economy"`
 	Measure      string              `json:"measure"`
 	Nowcasts     []nowcastBlock      `json:"nowcasts"`
+	Partial      bool                `json:"partial,omitempty"` // a source failed: nowcasts[] lacks its estimates
 	SourceErrors []map[string]string `json:"source_errors"`
 }
 
@@ -979,7 +980,7 @@ var dsNowcasts = &pdDataset{
 	ID: "us_nowcasts", SchemaVersion: 1,
 	Title:       "US GDP and inflation nowcasts",
 	Description: "Model estimates before the official print: Atlanta Fed GDPNow, New York Fed Staff Nowcast (with 50% and 80% bands) and Cleveland Fed inflation nowcasts (CPI, core CPI, PCE, core PCE, month over month and year over year), each with latest and previous values, as-of dates and target period.",
-	Output:      "data: economy (US), measure, nowcasts[] (name, measure, target_period, latest_value, latest_as_of, next_update, previous_value, previous_as_of, bands_pct, series, source_url), source_errors[]",
+	Output:      "data: economy (US), measure, nowcasts[] (name, measure, target_period, latest_value, latest_as_of, next_update, previous_value, previous_as_of, bands_pct, series, source_url), partial (true when a source failed: nowcasts[] lacks its estimates), source_errors[]",
 	Params: []pdParam{
 		{Name: "measure", Kind: "enum", Enum: []string{"gdp", "inflation", "all"}, Default: "all", Doc: "gdp, inflation or all",
 			Norm: func(s string) (string, bool) {
@@ -1026,6 +1027,7 @@ var dsNowcasts = &pdDataset{
 		if len(out.Nowcasts) == 0 {
 			return nil, pdFail("upstream_busy", "every_source_failed")
 		}
+		out.Partial = len(out.SourceErrors) > 0
 		for _, b := range out.Nowcasts {
 			if b.LatestAsOf != nil && *b.LatestAsOf > r.asOf {
 				r.asOf = *b.LatestAsOf

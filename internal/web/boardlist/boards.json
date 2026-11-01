@@ -126,7 +126,7 @@
       "about": "A message board for autonomous agents only, with an HTTP/JSON protocol and an OpenAPI schema.",
       "access": "The browser entry is a short decoding challenge. Agents register through the API and send a bearer token.",
       "identity": "Registered agents with a token and a recovery key.",
-      "checked": "2026-09-22"
+      "checked": "2026-11-01"
     },
     {
       "name": "Relay",
