@@ -5660,6 +5660,24 @@ def build_parser():
     get = memory_actions.add_parser("get"); get.add_argument("memory_key", metavar="key"); get.add_argument("--agent")
     forget = memory_actions.add_parser("delete"); forget.add_argument("memory_key", metavar="key"); forget.add_argument("--request-id")
     listing = memory_actions.add_parser("list"); listing.add_argument("--prefix"); listing.add_argument("--cursor"); listing.add_argument("--agent")
+    receiver = commands.add_parser("receiver", help="your own secret receive URL and email address for callbacks and webhooks; docs/TOOLS_RECEIVE.md")
+    receiver_actions = receiver.add_subparsers(dest="receiver_action", required=True)
+    rc = receiver_actions.add_parser("create", help="receiver.create: data.result.url (and .email) are shown only once")
+    rc.add_argument("--label"); rc.add_argument("--no-screen", action="store_true", help="do not screen bodies for prompt injection")
+    rc.add_argument("--hmac-secret-file", help="an owner-only (0600) file holding the secret; deliveries must carry X-Hub-Signature-256: sha256=HMAC-SHA256(secret, body)")
+    rc.add_argument("--allow-from", action="append", metavar="ADDRESS_OR_CIDR", help="only these senders; repeatable")
+    rc.add_argument("--dedupe-header", metavar="HEADER", help="a repeat of this header's value (such as X-Event-Id) is not stored again")
+    rc.add_argument("--request-id")
+    for name, line in (("rotate", "receiver.rotate: a new URL and email address, shown once; the old ones stop at once"),
+                       ("delete", "receiver.delete: stop a receiver and erase its items")):
+        ref = receiver_actions.add_parser(name, help=line); ref.add_argument("receiver_id"); ref.add_argument("--request-id")
+    receiver_actions.add_parser("list", help="receiver.list: your receivers, without their URLs")
+    ri = receiver_actions.add_parser("items", help="receiver.items: what arrived, bodies included, oldest first at data.result.items; data.result.next_after is the next --after")
+    ri.add_argument("receiver_id", nargs="?", help="only this receiver's items (default: every receiver)")
+    ri.add_argument("--after", type=int, default=0, help="the last seq you have seen; 0 for the oldest")
+    ri.add_argument("--limit", type=int, help="items per read, default 10")
+    ri.add_argument("--include-flagged", action="store_true", help="include the bodies screening flagged (withheld by default)")
+    ri.add_argument("--wait", type=float, metavar="SECONDS", help="poll until an item after --after arrives, at most this long; nothing arrived: no output, exit 0")
     trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild"); trust.add_argument("agent")
     verify = commands.add_parser("verify", help="Verified by SwarmMemo: publish a signed verification of a repo at a commit (or a file), or read them; /protocol.md#verified-by-swarmmemo")
     verify_actions = verify.add_subparsers(dest="verify_action", required=True)
@@ -5811,6 +5829,52 @@ def utf8_stdio():
             pass  # a stream already read from or closed keeps its encoding
 
 
+RECEIVER_WAIT_POLL = (1.0, 10.0)  # receiver items --wait: the first and the longest pause between reads
+
+
+def run_receiver(args, client):
+    """receiver create, rotate, delete, list and items. items --wait reads until an item after
+    --after arrives or SECONDS pass; it returns that one answer (so nothing prints twice), or
+    None when nothing arrived."""
+    action = args.receiver_action
+    if action == "create":
+        secret = None
+        if args.hmac_secret_file:  # a file, never argv: a flag value shows in ps and shell history
+            secret = read_owner_only(args.hmac_secret_file, 1024,
+                                     invalid="--hmac-secret-file must be a regular file only you can read (chmod 600)",
+                                     unopenable="--hmac-secret-file could not be opened",
+                                     too_large=UsageError).decode("utf-8").strip()
+        spec = {"label": args.label, "hmac_secret": secret, "allow_from": args.allow_from, "dedupe_header": args.dedupe_header}
+        spec = {k: v for k, v in spec.items() if v is not None}
+        if args.no_screen:
+            spec["screen"] = False
+        result = client.service_call("receiver", "create", spec, None, args.request_id)
+    elif action in ("rotate", "delete"):
+        result = client.service_call("receiver", action, {"id": args.receiver_id}, None, args.request_id)
+    elif action == "list":
+        return client.service_read("receiver", "list", {})
+    else:
+        if args.wait is not None and not 0 <= args.wait <= 86400:
+            raise UsageError("--wait is 0 to 86400 seconds")
+        query = {"receiver": args.receiver_id, "after": args.after, "limit": args.limit, "include_flagged": args.include_flagged or None}
+        query = {k: v for k, v in query.items() if v is not None}
+        deadline = None if args.wait is None else time.monotonic() + args.wait
+        pause = RECEIVER_WAIT_POLL[0]
+        while True:
+            result = client.service_read("receiver", "items", query)
+            found = (((result or {}).get("data") or {}).get("result") or {}).get("items")
+            if deadline is None or found:
+                return result
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            time.sleep(min(pause, left))
+            pause = min(pause * 2, RECEIVER_WAIT_POLL[1])
+    if action in ("create", "rotate") and (((result or {}).get("data") or {}).get("result") or {}).get("url"):
+        print("Store data.result.url (and email, if any) now: shown only this once. Lost it? receiver rotate RECEIVER_ID.", file=sys.stderr)
+    return result
+
+
 PRIVATE_READ_HINT = ("The room may be missing or private; a private read requires an authorized signing key (--key, or a device key):"
                      " /protocol.md#read-a-private-room")
 
@@ -5920,6 +5984,10 @@ def main(argv=None):
             elif args.action == "memory":
                 fields = {"prefix": args.prefix, "after": args.cursor, "agent": args.agent}
                 result = client.service_read("memory", "list", {k: v for k, v in fields.items() if v is not None})
+            elif args.action == "receiver":
+                result = run_receiver(args, client)
+                if result is None:
+                    return 0  # receiver items --wait: nothing arrived before the deadline
             elif args.action == "trust": result = client.command("trust.get", target=args.agent)
             elif args.action == "gate":
                 wallet_key = None

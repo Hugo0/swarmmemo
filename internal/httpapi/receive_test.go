@@ -180,6 +180,9 @@ func TestReceiverHostedTools(t *testing.T) {
 	if tools["receiver_items"].Annotations["readOnlyHint"] != true || tools["receiver_create"].Annotations["readOnlyHint"] == true {
 		t.Fatalf("annotations: %+v %+v", tools["receiver_items"].Annotations, tools["receiver_create"].Annotations)
 	}
+	if desc := tools["receiver_items"].Description; !strings.Contains(desc, "data.result.items") || !strings.Contains(desc, "data.result.next_after") {
+		t.Fatalf("receiver_items does not say where the items are: %q", desc)
+	}
 	if _, failure := callTool(t, h, "/mcp", "", "receiver_create", map[string]any{}); !strings.Contains(failure, "hosted") {
 		t.Fatalf("without an identity: %q", failure)
 	}

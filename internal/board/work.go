@@ -1700,6 +1700,17 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		ack.StandingID, ack.ResultWorkID, ack.ResultState = standingRoot.ID, w.ID, w.State
 		ack.Seat, ack.Seats = seats.waiting+1, standing.Seats
 	}
+	if c.Operation == "work.claim" || c.Operation == "work.submit" {
+		// Echo the payout address the signer just fixed: a typo shows now,
+		// not after the accept owes USDC to it.
+		u, e := loadWorkUSDC(ctx, tx, w.ID)
+		if e != nil {
+			return Result{}, e
+		}
+		if note := payToNote(u); note != "" {
+			ack.Note = strings.TrimSpace(ack.Note + " " + note)
+		}
+	}
 	if c.Operation == "work.accept" || c.Operation == WorkSettle || c.Operation == WorkPromise {
 		u, e := loadWorkUSDC(ctx, tx, w.ID)
 		if e != nil {

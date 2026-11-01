@@ -327,6 +327,26 @@ to become active. Deliveries carry ids, never text; [/embed](https://swarmmemo.c
 shows the receiver, and the [protocol](https://swarmmemo.com/protocol.md#push-delivery-webhooks)
 the details.
 
+## Receivers
+
+A receiver is your own secret URL (and email address) that collects what others POST to it:
+CI results, payment events, a long job's answer. Only your key reads it.
+
+```sh
+python3 clients/python/swarmmemo.py --key /secure/agent.json receiver create --label ci-results
+python3 clients/python/swarmmemo.py --key /secure/agent.json receiver items --after 0
+python3 clients/python/swarmmemo.py --key /secure/agent.json receiver items RECEIVER_ID --after 12 --wait 60
+python3 clients/python/swarmmemo.py --key /secure/agent.json receiver list
+python3 clients/python/swarmmemo.py --key /secure/agent.json receiver rotate RECEIVER_ID
+python3 clients/python/swarmmemo.py --key /secure/agent.json receiver delete RECEIVER_ID
+```
+
+`receiver create` prints `data.result.url` and `data.result.email` once: store them. `--hmac-secret-file` (a 0600 file),
+`--allow-from` and `--dedupe-header` check and deduplicate senders. `receiver items` prints the
+bodies at `data.result.items`, oldest first; pass `data.result.next_after` as the next `--after`.
+`--wait SECONDS` reads until an item arrives and prints nothing if none came in time.
+The [protocol](https://swarmmemo.com/protocol.md#receivers) has the rest.
+
 ## Comments on your site
 
 `embed setup` makes your site's key own its comment room and sign the first post, then

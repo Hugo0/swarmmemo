@@ -216,3 +216,65 @@ func TestMaskedRoomReadProbe(t *testing.T) {
 		}
 	}
 }
+
+// Masking is decided per room, for the reader's standing in that room,
+// never by "is the reader in some app room": a key in no app room at all
+// (a member the app removed, a key with no standing there) reads every Data
+// value naming a masked room masked, as a member does; the app (the owner)
+// reads it in full, and a value naming any other room is left as it is
+// (C671). A private read grant never reaches an app room: private_read
+// takes a slug room only.
+func TestMaskedRoomDataMaskedForReaderInNoAppRoom(t *testing.T) {
+	r := newAppRooms(t)
+	s := r.s
+	room := r.room("granted")
+	run(t, s, signed(r.app, Command{Operation: "room.create", Room: room, Members: []string{keyID(r.alice), keyID(r.bob), keyID(r.carol)}, Data: `{"reveal_on_close":true}`, RequestID: "c"}))
+	post := run(t, s, signed(r.bob, Command{Operation: "post", Room: room, Text: "a villager", RequestID: "b1"}))
+	reader := keyFor(194)
+	fails(t, s, privateReadEnrollCommand(s, r.app, reader, room), "invalid_private_read_data")
+	run(t, s, signedNow(s, r.app, Command{Operation: "room.member.remove", Room: room, Target: keyID(r.alice), RequestID: "rm"}))
+	for _, k := range []string{keyID(reader), keyID(r.alice)} {
+		var inAppRoom bool
+		if err := s.db.QueryRow("SELECT EXISTS(SELECT 1 FROM members WHERE account=? AND room LIKE 'app/%')", k).Scan(&inAppRoom); err != nil || inAppRoom {
+			t.Fatalf("%s is in an app room (%v, %v)", k, inAppRoom, err)
+		}
+	}
+	full := run(t, s, signed(r.app, Command{Operation: "message.get", MessageID: post.Receipt.ID})).Messages[0]
+	// Data values naming the room: a journal item and a message list.
+	read := func(a actor) string {
+		t.Helper()
+		res := &Result{Data: map[string]any{
+			"unanswered": []map[string]any{{"id": full.ID, "room": room, "author": keyID(r.bob), "author_handle": "bobby"}},
+			"messages":   []Message{full},
+			"plain":      map[string]any{"room": "lobby", "author": keyID(r.bob)},
+		}}
+		tx, err := s.db.BeginTx(testContext, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if err = s.maskResult(testContext, tx, Command{Operation: "journal.get"}, a, res, s.now().Unix()); err != nil {
+			t.Fatal(err)
+		}
+		return mustJSON(t, res.Data)
+	}
+	plain := `"plain":{"author":"` + keyID(r.bob) + `","room":"lobby"}`
+	for name, a := range map[string]actor{
+		"no standing":    {signed: true, id: keyID(reader), account: keyID(reader)},
+		"removed member": {signed: true, id: keyID(r.alice), account: keyID(r.alice)},
+		"member":         {signed: true, id: keyID(r.carol), account: keyID(r.carol)},
+	} {
+		raw := read(a)
+		for _, secret := range []string{pubOf(r.bob), `"bobby"`, `"author":"` + keyID(r.bob) + `","author_handle"`, `"author":"` + keyID(r.bob) + `","room":"` + room} {
+			if strings.Contains(raw, secret) {
+				t.Errorf("%s reads %q unmasked: %s", name, secret, raw)
+			}
+		}
+		if !strings.Contains(raw, plain) {
+			t.Errorf("%s: another room's value changed: %s", name, raw)
+		}
+	}
+	if raw := read(actor{signed: true, id: keyID(r.app), account: keyID(r.app)}); !strings.Contains(raw, `"bobby"`) || !strings.Contains(raw, pubOf(r.bob)) || strings.Contains(raw, MaskAliasPrefix) || !strings.Contains(raw, plain) {
+		t.Errorf("the app reads masked: %s", raw)
+	}
+}

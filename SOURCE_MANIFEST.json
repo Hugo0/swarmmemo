@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "fe9efc460b8966a163c52f41bbe8c191bcf2ffe6a7de56100068137a818cf2dd",
+  "allowlist_sha256": "3294602efef76b4006607a387cd87e8e7ff7f89ab00633af89dbe1d5ec58d1d9",
   "files": [
     {
       "mode": "0644",
@@ -202,8 +202,8 @@
     {
       "mode": "0644",
       "path": "clients/python/README.md",
-      "sha256": "fe5fc7528b395abe0a9bed20e6137bdb3b371db9a1d7db9795e21f2c4c47d1a8",
-      "size": 31583
+      "sha256": "6e1d86cac31511b564646f40202036ec95194d9abe935e0204b93941596d3a86",
+      "size": 32794
     },
     {
       "mode": "0644",
@@ -220,8 +220,8 @@
     {
       "mode": "0644",
       "path": "clients/python/swarmmemo.py",
-      "sha256": "7a6a522219791d93ab7d21b0a3f28430839a623581c6c1141dea5696f192abf2",
-      "size": 380200
+      "sha256": "7a3cfe308ce7c396912903bc3859006b5529fc9a26eb9045387a391484c88860",
+      "size": 385238
     },
     {
       "mode": "0644",
@@ -378,6 +378,12 @@
       "path": "clients/python/test_private_transport.py",
       "sha256": "5905a5b1f04a81641c02c74eab393595b3d0218b6c4ca5d78509fd5d80fb7244",
       "size": 30074
+    },
+    {
+      "mode": "0644",
+      "path": "clients/python/test_receiver.py",
+      "sha256": "668ed982c00616c469bea493cd6cbd4856210fa44ab7295a2dbe2ace3248188f",
+      "size": 6011
     },
     {
       "mode": "0644",
@@ -1030,8 +1036,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_RECEIVE.md",
-      "sha256": "2453c707c5ca633f162a964aefa594eeebe4f1a28c27730747144afce80531ee",
-      "size": 4006
+      "sha256": "3b8ef6c51a1937493431d2c4c8a6da1981796cf4deb2b979c7bc7de4f644227f",
+      "size": 4321
     },
     {
       "mode": "0644",
@@ -1120,8 +1126,8 @@
     {
       "mode": "0644",
       "path": "docs/jobpages.go",
-      "sha256": "e6aafcc7808f77395dae25a7d9733a1a20a9b27c37aa74cdd1a0580c68f4d25c",
-      "size": 50626
+      "sha256": "7bc7cfe2b580bdeabda4e588534df7c719dbe2057298f220b745067703c61376",
+      "size": 50612
     },
     {
       "mode": "0644",
@@ -1252,8 +1258,8 @@
     {
       "mode": "0644",
       "path": "integrations/agno/agno_swarmmemo/_swarmmemo.py",
-      "sha256": "7a6a522219791d93ab7d21b0a3f28430839a623581c6c1141dea5696f192abf2",
-      "size": 380200
+      "sha256": "7a3cfe308ce7c396912903bc3859006b5529fc9a26eb9045387a391484c88860",
+      "size": 385238
     },
     {
       "mode": "0644",
@@ -1312,8 +1318,8 @@
     {
       "mode": "0644",
       "path": "integrations/crewai/crewai_swarmmemo/_swarmmemo.py",
-      "sha256": "7a6a522219791d93ab7d21b0a3f28430839a623581c6c1141dea5696f192abf2",
-      "size": 380200
+      "sha256": "7a3cfe308ce7c396912903bc3859006b5529fc9a26eb9045387a391484c88860",
+      "size": 385238
     },
     {
       "mode": "0644",
@@ -1372,8 +1378,8 @@
     {
       "mode": "0644",
       "path": "integrations/langchain/langchain_swarmmemo/_swarmmemo.py",
-      "sha256": "7a6a522219791d93ab7d21b0a3f28430839a623581c6c1141dea5696f192abf2",
-      "size": 380200
+      "sha256": "7a3cfe308ce7c396912903bc3859006b5529fc9a26eb9045387a391484c88860",
+      "size": 385238
     },
     {
       "mode": "0644",
@@ -1522,14 +1528,14 @@
     {
       "mode": "0644",
       "path": "internal/board/approoms.go",
-      "sha256": "2a7d123e18924e518f9466299663eb01143a25f8a62e6a9b3c9b7bd05543d8aa",
-      "size": 25066
+      "sha256": "e59f05611677a8e9d9736d4ca3fdf1bafab87e56da2c726139b01549c96f2a37",
+      "size": 25375
     },
     {
       "mode": "0644",
       "path": "internal/board/approoms_security_test.go",
-      "sha256": "6871034f85e4750c20436c7b605791e77e8e23edb30ed5a4d9d665de95a69d05",
-      "size": 11551
+      "sha256": "f165371dac5f6bbebf05131ef18701c3f55e3f243a61a03d57cb1bd059f3d38c",
+      "size": 14781
     },
     {
       "mode": "0644",
@@ -4168,8 +4174,8 @@
     {
       "mode": "0644",
       "path": "internal/board/work.go",
-      "sha256": "813e398c99f4a3bc32b16525f4d4288480e9af6554962ac0208d877993e46a02",
-      "size": 113924
+      "sha256": "f091bc624596e665a077a6f8a3f1ada5317f53ef7cf62e57ecd1e089a9c51def",
+      "size": 114285
     },
     {
       "mode": "0644",
@@ -4330,8 +4336,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workpromise.go",
-      "sha256": "233d367fc2ca54bc40f78d9deb8b8f0bd71757d8a212e6dad7225a443a1b5412",
-      "size": 8142
+      "sha256": "269146e12f9bb64ff7483831a94f20d410524c04add5661155eaee47621daab6",
+      "size": 8830
     },
     {
       "mode": "0644",
@@ -4528,8 +4534,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workusdc_test.go",
-      "sha256": "446ca7d8b4c2c9f81e0984c60d51568f35881be69d6d354553903c838b01fca7",
-      "size": 21796
+      "sha256": "45159c7a9dabc80217d355d52241e194f9c2aa7836832534185bd30f47ae0115",
+      "size": 22189
     },
     {
       "mode": "0644",
@@ -5554,8 +5560,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp.go",
-      "sha256": "7ce5179c06af692fae819bdb08f86f9af06b4cc37994f3c855194963f7d2c5d7",
-      "size": 75325
+      "sha256": "d8a2679c4b11d071f2e747a55e17896ba177979c40bfc0c940b958c004b1b202",
+      "size": 75442
     },
     {
       "mode": "0644",
@@ -6148,8 +6154,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/receive_test.go",
-      "sha256": "6c1da7e6cfda8ac8bd50ddd7ad408fd9b946b618034332c1ffd53a89790cfa68",
-      "size": 15308
+      "sha256": "a18c805acb22cceed2d06a8d913143c35a2025d2f7843abe119957fcd12dc8c4",
+      "size": 15532
     },
     {
       "mode": "0644",
@@ -6430,8 +6436,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/testdata/mcp_profiles.golden.json",
-      "sha256": "d0f3b00fdd12fbe394c5b8914f74fc8c6d6233c6be8b68c84af15a6783cf7c48",
-      "size": 183471
+      "sha256": "67d22d6e45f9544d3353961551935f08928cb15f1412d5b2a47a35c7f15ce38a",
+      "size": 183562
     },
     {
       "mode": "0644",

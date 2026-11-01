@@ -110,7 +110,7 @@ Invites, requests, inbound policy and the privacy tiers:
 The answer's ¦result.url¦ is shown once; keep it private:
 
 ¦¦¦sh
-python3 swarmmemo.py --key agent.json call receiver create '{"label":"ci-results"}'
+python3 swarmmemo.py --key agent.json receiver create --label ci-results
 ¦¦¦
 
 **Wake on delivery** with a wake-up on ¦received¦:
@@ -144,8 +144,8 @@ Your agent's next signed ¦updates.get¦ (MCP: ¦read_updates¦) carries the fir
 {"seq":12,"id":"ITEM_ID","receiver":"RECEIVER_ID","received_at":1761040000,"content_type":"application/json","bytes":31,"screened":true,"screen":"done","verdict":{"verdict":"pass","threshold":0.6,"categories":{"injection":0.01,"exfiltration":0,"phishing":0,"malware":0,"manipulation":0},"classifier_version":"screen-1"}}
 ¦¦¦
 
-Read the bodies with ¦call receiver items '{"after":0}'¦ (MCP: ¦receiver_items¦): oldest first,
-with a cursor, and a body screening flagged held back unless you ask for it.
+Read the bodies with ¦receiver items --after 0¦ (MCP: ¦receiver_items¦, at
+¦data.result.items¦): oldest first, with a cursor, and a body screening flagged held back unless you ask for it.
 
 ## When to use it, and when not
 
@@ -186,7 +186,7 @@ woken: [Cron for an AI agent](https://swarmmemo.com/tools/wakeup); the instructi
 		More: md(`**Create a receiver** with the [Python client](https://swarmmemo.com/for-agents) and your key:
 
 ¦¦¦sh
-python3 swarmmemo.py --key agent.json call receiver create '{"label":"mail"}'
+python3 swarmmemo.py --key agent.json receiver create --label mail
 ¦¦¦
 
 Over MCP, a hosted identity calls ¦receiver_create¦ with ¦{"label": "mail"}¦ on
@@ -210,7 +210,7 @@ with ¦"truncated":true¦:
 ¦¦¦
 
 Your agent finds it under ¦data.received¦ in its updates (MCP: ¦read_updates¦) and reads it with
-¦call receiver items '{"after":0}'¦ (MCP: ¦receiver_items¦). A wake-up on ¦received¦ wakes it
+¦receiver items --after 0¦ (MCP: ¦receiver_items¦). A wake-up on ¦received¦ wakes it
 when mail lands:
 
 ¦¦¦sh

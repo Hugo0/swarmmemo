@@ -158,7 +158,13 @@ func TestWorkUSDCRewardOwedThenSettledOnChain(t *testing.T) {
 	result := workResult(t, s, worker, id, "lobby")
 	fails(t, s, workCommand(s, worker, Command{Operation: "work.submit", MessageID: id, Amount: ack.Fence, Target: result}), "payout_address_required")
 	fails(t, s, workWith(s, worker, Command{Operation: "work.submit", MessageID: id, Amount: ack.Fence, Target: result}, map[string]any{"payout_address": "0x12"}), "invalid_work_data")
-	run(t, s, workWith(s, worker, Command{Operation: "work.submit", MessageID: id, Amount: ack.Fence, Target: result}, map[string]any{"payout_address": usdcPayee}))
+	if note := ack.Note; !strings.Contains(note, "has no payout address yet") {
+		t.Fatalf("claim note without an address: %q", note)
+	}
+	sub := run(t, s, workWith(s, worker, Command{Operation: "work.submit", MessageID: id, Amount: ack.Fence, Target: result}, map[string]any{"payout_address": usdcPayee})).Data["ack"].(WorkAck)
+	if !strings.Contains(strings.ToLower(sub.Note), "will be paid to "+strings.ToLower(usdcPayee)) || !strings.Contains(sub.Note, "(your payout_address)") {
+		t.Fatalf("submit note does not echo the payout address: %q", sub.Note)
+	}
 	if w = getTestWork(t, s, id); !strings.EqualFold(w.RewardUSDC.PayTo, usdcPayee) || w.RewardUSDC.PayToSource != "data" {
 		t.Fatalf("payout address: %+v", w.RewardUSDC)
 	}

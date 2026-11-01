@@ -118,6 +118,22 @@ func promiseNote(u *usdcRow) string {
 	return services.FormatUSDC(u.Amount) + " USDC is now owed to " + to + " on " + u.Network + ": pay it, then send work.settle with the transaction's tx_hash. Until then it reads owed, not paid."
 }
 
+// payToNote says where a claimed or submitted task's USDC reward will be
+// paid, so the worker checks the address before anything is owed to it.
+func payToNote(u *usdcRow) string {
+	if u == nil || u.State != "promised" {
+		return ""
+	}
+	if u.PayTo == "" {
+		return "The " + services.FormatUSDC(u.Amount) + " USDC reward has no payout address yet: submit names payout_address, or uses your linked wallet."
+	}
+	from := "your payout_address"
+	if u.PayToSource == "wallet_link" {
+		from = "your linked wallet"
+	}
+	return "The " + services.FormatUSDC(u.Amount) + " USDC reward will be paid to " + u.PayTo + " on " + u.Network + " (" + from + "); check it now, it is fixed once accepted."
+}
+
 // WorkResultMoney is what one accepted result was paid or is owed:
 // Credits paid on accept, and its USDC, owed or paid.
 type WorkResultMoney struct {

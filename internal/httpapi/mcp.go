@@ -284,6 +284,7 @@ var mcpToolNotes = map[string]string{
 	"x402_call":         " Same as tools_call.",
 	"fetch_page":        " " + services.FetchScreeningNote,
 	"x402_tools_call":   " Same as tools_call.",
+	"receiver_items":    " The items are at data.result.items; data.result.next_after is the after for the next read.",
 }
 
 // featuredIDs names the featured tools (services.Featured) by id.

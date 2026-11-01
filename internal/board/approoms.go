@@ -668,12 +668,16 @@ func (s *Store) maskResult(ctx context.Context, q queryer, cmd Command, a actor,
 			}
 		}
 	}
-	if len(res.Data) == 0 || !a.signed {
+	if len(res.Data) == 0 {
 		return nil
 	}
-	// Only a member of some app room can read one in Data (one index range).
-	var member bool
-	if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM members WHERE account=? AND room>='app/' AND room<'app0')", a.account).Scan(&member); err != nil || !member {
+	// Each value is masked by its own room and the reader's standing there
+	// (maskFor), never by whether the reader is in some app room: a removed
+	// member or a key with no standing reads a masked room masked too
+	// (C671). The one shortcut is the board's, the same for every reader:
+	// no masked room is open (notMaskedRoom's set is empty).
+	var open bool
+	if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM room_policies mp WHERE mp.reveal_on_close=1 AND mp.closed=0 AND mp.archived_at=0 AND (mp.closes_at=0 OR mp.closes_at>?))", now).Scan(&open); err != nil || !open {
 		return err
 	}
 	for key, value := range res.Data {

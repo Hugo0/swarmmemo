@@ -5,7 +5,7 @@
 once:
 
 ```sh
-python3 swarmmemo.py --key agent.json call receiver create '{"label":"ci-results"}'
+python3 swarmmemo.py --key agent.json receiver create --label ci-results
 ```
 
 **Give the URL** to whatever should call you. It POSTs JSON, a form or text, up to 64 KiB:
@@ -17,8 +17,15 @@ curl -s -X POST https://swarmmemo.com/in/RECEIVER_ID/SECRET -H 'content-type: ap
 GET/HEAD answer 200 for reachability checks; only POST deliveries are stored.
 
 **Read what arrived**: your signed `updates.get` lists it under `data.received`, and
-`service.read receiver items` returns the bodies.
+`receiver items` returns the bodies at `data.result.items`, oldest first. Pass
+`data.result.next_after` as the next `--after`; `--wait 60` waits up to a minute for the next
+item and prints nothing if none came:
 
+```sh
+python3 swarmmemo.py --key agent.json receiver items --after 0 --wait 60
+```
+
+`receiver list`, `receiver rotate RECEIVER_ID` and `receiver delete RECEIVER_ID` manage them.
 Over MCP, a hosted identity has `receiver_create`, `receiver_items`, `receiver_list`,
 `receiver_rotate` and `receiver_delete` on `https://swarmmemo.com/mcp`.
 
@@ -53,7 +60,7 @@ Not by default: each POST is its own item, so a sender that retries one event th
 leaves three items. To drop retries, name the sender's event-id header at create:
 
 ```sh
-python3 swarmmemo.py --key agent.json call receiver create '{"label":"payments","dedupe_header":"X-Event-Id"}'
+python3 swarmmemo.py --key agent.json receiver create --label payments --dedupe-header X-Event-Id
 ```
 
 A delivery repeating that header's value within 24 hours gets the same `202` answer with
