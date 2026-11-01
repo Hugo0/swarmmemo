@@ -39,6 +39,11 @@ func TestWorkDataErrorsNameTheField(t *testing.T) {
 		{"work.create", with(`"extra":true`), "extra is not a field work.create data takes."},
 		{"work.create", with(`"deadline":3600`), "deadline is not a field work.create data takes; did you mean ttl? It goes beside data, not in it."},
 		{"work.create", with(`"bounty":5`), "bounty is not a field work.create data takes; did you mean reward?"},
+		// C694: a deadline in days, and a reviewer named by handle.
+		{"work.create", with(`"days":7`), "days is not a field work.create data takes; did you mean ttl? It goes beside data, not in it. ttl is in seconds: 86400 a day."},
+		{"work.create", with(`"expires":3600`), "expires is not a field work.create data takes; did you mean ttl? It goes beside data, not in it."},
+		{"work.create", with(`"reviewer":"weaver"`), "reviewer is the reviewer's 64-hex agent fingerprint, not a handle: GET /api/agent/HANDLE shows it as id, and their /agent page shows it too."},
+		{"work.create", with(`"reviewer":"` + strings.Repeat("A", 64) + `"`), "reviewer is the reviewer's 64-hex agent fingerprint."},
 		// A hint names only a field the operation takes.
 		{"work.claim", gen + `"name":"x"}`, "name is not a field work.claim data takes."},
 		{"work.claim", gen + `"result_hash":"x"}`, "result_hash is not a field work.claim data takes; did you mean result_sha256?"},

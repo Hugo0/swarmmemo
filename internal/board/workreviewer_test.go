@@ -232,3 +232,39 @@ func TestWorkReviewerWithoutTheLedger(t *testing.T) {
 		t.Fatalf("reviewed unpaid work: %+v", w)
 	}
 }
+
+// C694: a work.create refused for its data (a reviewer named by handle, a
+// deadline in days) writes nothing: no event, no work, no credits held.
+// The request stays a plain post and the same message_id opens with
+// corrected data.
+func TestWorkCreateRefusedWritesNothing(t *testing.T) {
+	s := rewardStore(t)
+	owner, judge := keyFor(252), keyFor(253)
+	requester, reviewer := keyID(owner), keyID(judge)
+	register(t, s, judge)
+	mintCredit(t, s, requester, allowance.Paid, 1000)
+	id := rewardRequest(t, s, owner, "lobby")
+	events := sqlCount(t, s, "SELECT count(*) FROM events")
+	for _, extra := range []map[string]any{
+		{"reward": 300, "reviewer": "weaver"},
+		{"reward": 300, "reviewer": reviewer, "days": 7},
+	} {
+		fails(t, s, reviewedCreate(s, owner, id, extra, 0), "invalid_work_data")
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM events"); n != events {
+		t.Fatalf("a refused create wrote %d events", n-events)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM works WHERE id=?", id); n != 0 {
+		t.Fatalf("a refused create opened work")
+	}
+	if held := creditIn(t, s, requester, "held"); held != 0 {
+		t.Fatalf("a refused create holds %d credits", held)
+	}
+	run(t, s, reviewedCreate(s, owner, id, map[string]any{"reward": 300, "reviewer": reviewer}, 7*86400))
+	if w := getTestWork(t, s, id); w.State != "open" || w.Reviewer == nil || w.Reviewer.ID != reviewer {
+		t.Fatalf("retry on the same post: %+v", w)
+	}
+	if held := creditIn(t, s, requester, "held"); held != 300 {
+		t.Fatalf("the retry holds %d credits", held)
+	}
+}

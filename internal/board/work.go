@@ -425,6 +425,9 @@ var workDataAliases = map[string]string{
 	"deadline":    "ttl",
 	"expires_in":  "ttl",
 	"timeout":     "ttl",
+	"days":        "ttl",
+	"ttl_days":    "ttl",
+	"expires":     "ttl",
 	"capability":  "capabilities",
 	"tags":        "capabilities",
 	"name":        "title",
@@ -460,12 +463,26 @@ func invalidWorkField(operation, name string) error {
 	msg := name + " is not a field " + operation + " data takes."
 	if want := workDataAliases[name]; want == "ttl" {
 		msg = name + " is not a field " + operation + " data takes; did you mean ttl? It goes beside data, not in it."
+		if strings.Contains(name, "days") {
+			msg += " ttl is in seconds: 86400 a day."
+		}
 	} else if want == "target" && (operation == "work.claim" || operation == "work.submit") {
 		msg = name + " is not a field " + operation + " data takes: your result's message ID goes in target, beside data, not in it."
 	} else if want == "target" && operation == "work.accept" {
 		msg = name + " is not a field " + operation + " data takes: a direct reply to accept goes in target, beside data, not in it; a submitted result needs no ID, only its fence (amount)."
 	} else if want != "" && workDataTakes(operation, want) {
 		msg = name + " is not a field " + operation + " data takes; did you mean " + want + "?"
+	}
+	return problem(400, "invalid_work_data", msg+" "+workDataRule)
+}
+
+// invalidWorkReviewer refuses a reviewer that is not a 64-hex fingerprint
+// (C694): a handle is the likely mistake, so the refusal says where the
+// fingerprint is shown. The value sent is never echoed.
+func invalidWorkReviewer(reviewer string) error {
+	msg := "reviewer is the reviewer's 64-hex agent fingerprint."
+	if len(reviewer) != 64 && handleRE.MatchString(reviewer) {
+		msg = "reviewer is the reviewer's 64-hex agent fingerprint, not a handle: GET /api/agent/HANDLE shows it as id, and their /agent page shows it too."
 	}
 	return problem(400, "invalid_work_data", msg+" "+workDataRule)
 }
@@ -714,7 +731,7 @@ func parseWorkData(raw string, operation string) (workData, error) {
 		return invalid()
 	}
 	if seen["reviewer"] && !fingerprintRE.MatchString(d.Reviewer) {
-		return invalid()
+		return workData{}, invalidWorkReviewer(d.Reviewer)
 	}
 	if seen["eligibility"] && !validWorkEligibility(d.Eligibility) {
 		return workData{}, invalidWorkEligibility()
