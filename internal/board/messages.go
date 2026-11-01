@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -516,6 +517,10 @@ func limitValue(n int) int {
 	return n
 }
 
+// eventsPageHook, set only by tests, sees each chronological page query
+// readEvents runs, to check its plan.
+var eventsPageHook func(query, shape string, args []any)
+
 func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (res Result, err error) {
 	if c.Operation == "export" {
 		return s.export(ctx, tx, c, now)
@@ -542,8 +547,15 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		// Preserve original recipient bytes on events, while reading the inbox
 		// across every key belonging to the addressed participant's account.
 		// The exact match also supports mail addressed before key registration.
-		where = append(where, "(e.recipient=? OR e.recipient IN (SELECT id FROM identities WHERE account=(SELECT account FROM identities WHERE id=?)))")
-		args = append(args, c.To, c.To)
+		// The keys are resolved first: one key is an ordered walk of
+		// events_recipient, where an OR or IN subquery sorts the whole inbox
+		// (C688).
+		ids, err := resolveStrings(ctx, tx, "SELECT id FROM identities WHERE account=(SELECT account FROM identities WHERE id=?) AND id<>?", c.To, c.To)
+		if err != nil {
+			return Result{}, err
+		}
+		term, termArgs := inTerm("e.recipient", append([]string{c.To}, ids...))
+		where, args = append(where, term), append(args, termArgs...)
 	}
 	if c.To != "" || c.Target != "" {
 		// Who wrote or was sent a post in a masked room stays its alias
@@ -563,11 +575,19 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		// An author's posts across its key history: target is any of its
 		// fingerprints, or its handle.
 		handle := strings.ToLower(strings.TrimPrefix(c.Target, "@"))
-		where = append(where, "e.account IN (SELECT account FROM identities WHERE id=? OR (?<>'' AND handle=?))")
-		args = append(args, c.Target, handle, handle)
+		// Resolved first, as the recipient above: one account walks
+		// events_author in order instead of sorting every post (C688).
+		accounts, err := resolveStrings(ctx, tx, "SELECT DISTINCT account FROM identities WHERE id=? OR (?<>'' AND handle=?)", c.Target, handle, handle)
+		if err != nil {
+			return Result{}, err
+		}
+		term, termArgs := inTerm("e.account", accounts)
+		where, args = append(where, term), append(args, termArgs...)
 	}
 	if c.Query != "" {
-		where = append(where, "e.hidden=0 AND instr(lower(e.text),lower(?))>0")
+		// The text test first: hidden is stored after the payload, so a
+		// search scan reads it only for the rows that match (C688).
+		where = append(where, "instr(lower(e.text),lower(?))>0 AND e.hidden=0")
 		args = append(args, c.Query)
 	}
 	var opts ListOptions
@@ -734,7 +754,12 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	limit := limitValue(c.Limit)
 	args = append(args, limit)
-	rows, err := tx.QueryContext(ctx, "SELECT "+eventColumns+" FROM events e JOIN rooms r ON r.name=e.room WHERE "+strings.Join(where, " AND ")+" ORDER BY e.seq "+order+" LIMIT ?", args...)
+	query := "SELECT " + eventColumns + " FROM events e JOIN rooms r ON r.name=e.room WHERE " + strings.Join(where, " AND ") + " ORDER BY e.seq " + order + " LIMIT ?"
+	if eventsPageHook != nil {
+		eventsPageHook(query, whereShape(where, order), args)
+	}
+	started := time.Now()
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return Result{}, err
 	}
@@ -751,6 +776,7 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		return Result{}, err
 	}
 	rows.Close()
+	logSlowRead(c.Operation, where, order, time.Since(started))
 	res, err = s.finishPage(ctx, tx, c, events, order, limit, seq, now, opts.Sort == "new" && c.Cursor == "")
 	if err == nil {
 		err = s.screenConversationMessages(ctx, tx, a, res.Messages)

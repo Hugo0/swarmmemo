@@ -706,7 +706,7 @@ func (s *Store) openStandingSeat(ctx context.Context, tx *sql.Tx, c Command, a a
 	var id string
 	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN origin<>'' THEN origin ELSE id END FROM events WHERE id=?`, c.Target).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !workIDRE.MatchString(id)) {
-		return workRow{}, problem(400, "invalid_work_result", "Result must be a visible signed direct reply to the standing task, in its room, by your account.")
+		return workRow{}, problem(400, "invalid_work_result", "Result must be a visible signed direct reply to the standing task ("+root.ID+"), in its room, by your account: reply to "+root.ID+" and send that reply's ID.")
 	}
 	if err != nil {
 		return workRow{}, err

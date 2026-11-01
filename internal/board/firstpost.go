@@ -52,8 +52,9 @@ const firstPostCandidateSQL = `e.account<>'' AND e.public_key<>'' AND e.origin='
  AND e.kind NOT IN ('simulation','imported') AND ` + notAppRecord
 
 // firstPostEarlierSQL is true when e's author made a qualifying public post
-// before e: one probe of events_author.
-const firstPostEarlierSQL = `EXISTS(SELECT 1 FROM events p JOIN rooms pr ON pr.name=p.room WHERE p.account=e.account AND p.seq<e.seq
+// before e: one probe of events_author, named, since the planner otherwise
+// walks events_recipient over every earlier public post (C688).
+const firstPostEarlierSQL = `EXISTS(SELECT 1 FROM events p INDEXED BY events_author JOIN rooms pr ON pr.name=p.room WHERE p.account=e.account AND p.seq<e.seq
  AND p.public_key<>'' AND p.origin='' AND p.hidden=0 AND p.recipient='' AND pr.visibility='public'
  AND p.kind NOT IN ('simulation','imported') AND substr(p.kind,1,4)<>'` + AppRecordPrefix + `')`
 

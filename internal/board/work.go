@@ -1300,7 +1300,11 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 				return e
 			}
 			if !eligible {
-				return problem(400, "invalid_work_result", "Result must be a visible signed direct reply to the work's request, in its room ("+root.Room+"), by the current worker account.")
+				to := w.ID
+				if w.StandingID != "" {
+					to = w.StandingID
+				}
+				return problem(400, "invalid_work_result", "Result must be a visible signed direct reply to the work's request ("+to+"), in its room ("+root.Room+"), by the current worker account. A post elsewhere, a cross-post included, is not a result: reply to "+to+" in "+root.Room+" and send that reply's ID.")
 			}
 			return nil
 		}

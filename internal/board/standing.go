@@ -28,9 +28,10 @@ import (
 // standingCache holds the current trust parameters, read at most once a
 // minute, and again after "params set trust".
 type standingCache struct {
-	mu sync.Mutex
-	at int64
-	p  *trust.Params
+	mu    sync.Mutex
+	at    int64
+	p     *trust.Params
+	epoch int64 // bumped by forgetParams: a read begun before it never stores
 }
 
 const standingParamsTTL = 60
@@ -38,9 +39,11 @@ const standingParamsTTL = 60
 func (t *trustState) forgetParams() {
 	t.params.mu.Lock()
 	t.params.at, t.params.p = 0, nil
+	t.params.epoch++
 	t.params.mu.Unlock()
 	t.weights.mu.Lock()
 	t.weights.m, t.weights.at = nil, 0
+	t.weights.epoch++
 	t.weights.mu.Unlock()
 }
 
@@ -52,6 +55,7 @@ type voteWeightCache struct {
 	gen      int64
 	run      int64
 	version  int64
+	epoch    int64            // bumped by forgetParams, as standingCache's
 	m        map[string]int64 // post → Σ value × v(s), ppm
 	accounts map[string]int64 // voter → v(s), ppm
 }
@@ -60,15 +64,25 @@ type voteWeightCache struct {
 func (s *Store) trustParamsAt(ctx context.Context, q allowance.Querier, now int64) (trust.Params, error) {
 	c := &s.trust.params
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.p != nil && now-c.at < standingParamsTTL && now >= c.at {
-		return *c.p, nil
+		p := *c.p
+		c.mu.Unlock()
+		return p, nil
 	}
+	epoch := c.epoch
+	c.mu.Unlock()
+	// The read runs without the lock: q may be the pool while another
+	// caller holds the one connection in a tx and waits here for the lock
+	// (find rebuild vs a front-page read deadlocked prod, 11-01 04:09Z).
 	p, err := trustParams(ctx, q, now)
 	if err != nil {
 		return trust.Params{}, err
 	}
-	c.p, c.at = &p, now
+	c.mu.Lock()
+	if c.epoch == epoch && (c.p == nil || now >= c.at) {
+		c.p, c.at = &p, now
+	}
+	c.mu.Unlock()
 	return p, nil
 }
 
@@ -192,10 +206,15 @@ func (s *Store) voteWeightMaps(ctx context.Context, q allowance.Querier, now int
 	c := &s.trust.weights
 	gen := s.trust.voteGen.Load()
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.m != nil && c.run == run.ID && c.version == p.Version && c.gen == gen && now >= c.at && now-c.at < standingParamsTTL {
-		return c.m, c.accounts, nil
+		posts, accounts = c.m, c.accounts
+		c.mu.Unlock()
+		return posts, accounts, nil
 	}
+	epoch := c.epoch
+	c.mu.Unlock()
+	// Computed without the lock, as in trustParamsAt: a caller on the pool
+	// must never hold it while a tx holder waits for it.
 	rows, err := q.QueryContext(ctx, "SELECT account,collateral FROM trust_scores WHERE run_id=? AND collateral>=?", run.ID, max(1, p.VFloorCents))
 	if err != nil {
 		return nil, nil, err
@@ -234,6 +253,10 @@ func (s *Store) voteWeightMaps(ctx context.Context, q allowance.Querier, now int
 			return nil, nil, err
 		}
 	}
-	c.m, c.accounts, c.at, c.gen, c.run, c.version = m, weights, now, gen, run.ID, p.Version
+	c.mu.Lock()
+	if c.epoch == epoch && (c.m == nil || now >= c.at) {
+		c.m, c.accounts, c.at, c.gen, c.run, c.version = m, weights, now, gen, run.ID, p.Version
+	}
+	c.mu.Unlock()
 	return m, weights, nil
 }

@@ -347,6 +347,10 @@ func TestWorkResultsAuthorityAndTerminalRecovery(t *testing.T) {
 	for _, target := range []string{wrongAuthor, anonymous, wrongParent, deepReply, wrongRoom, "", strings.Repeat("f", 32)} {
 		fails(t, s, workCommand(s, worker, Command{Operation: "work.submit", MessageID: id, Amount: 1, Target: target}), "invalid_work_result")
 	}
+	// The refusal names the post to reply to, so a cross-posted result is easy to fix.
+	if _, err := s.Execute(testContext, workCommand(s, worker, Command{Operation: "work.submit", MessageID: id, Amount: 1, Target: wrongRoom}), "test-origin"); err == nil || !strings.Contains(err.Error(), "reply to "+id) {
+		t.Fatalf("wrong-room refusal does not name the request: %v", err)
+	}
 	fails(t, s, workCommand(s, stranger, Command{Operation: "work.submit", MessageID: id, Amount: 1, Target: result}), "work_forbidden")
 	run(t, s, workCommand(s, worker, Command{Operation: "work.submit", MessageID: id, Amount: 1, Target: result}))
 	fails(t, s, workCommand(s, worker, Command{Operation: "work.accept", MessageID: id, Amount: 1}), "work_forbidden")
