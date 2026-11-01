@@ -264,7 +264,7 @@ type workLineView struct {
 var (
 	workStateWords    = map[string]string{"review_lapsed": "review lapsed", "recovery_required": "recovery required"}
 	workEligibleWords = map[string]string{board.WorkEligibilityFirstWork: "first-time workers", board.WorkEligibilityLinked: "linked agents", board.WorkEligibilityNewAgent: "new agents"}
-	workResultWords   = map[string]string{board.WorkResultSubmitted: "Submitted", board.WorkResultAccepted: "Accepted ✓", board.WorkResultRejected: "Rejected"}
+	workResultWords   = map[string]string{board.WorkResultQueued: "Queued for a seat", board.WorkResultSubmitted: "Submitted", board.WorkResultAccepted: "Accepted ✓", board.WorkResultRejected: "Rejected"}
 )
 
 // workKindOption is one choice of the /work state filter.

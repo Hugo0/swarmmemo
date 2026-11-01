@@ -627,6 +627,9 @@ type transparencyState struct {
 	// mergeDelay is the merge delay new promises carry, in seconds
 	// (logpromise.go); zero until StartTransparency sets it.
 	mergeDelay atomic.Int64
+	// checkpointEvery is the signing interval in seconds, for the next
+	// checkpoint's due time; zero until StartTransparency sets it.
+	checkpointEvery atomic.Int64
 }
 
 // openTransparency loads the log key (LOG_KEY_FILE, default log.key beside
@@ -807,9 +810,11 @@ func (s *Store) ReadLogProof(ctx context.Context, index int64, message string, s
 	}
 	var out LogInclusion
 	if message == "" {
-		out, err = s.inclusion(ctx, index, cp)
+		if out, err = s.inclusion(ctx, index, cp); err != nil && size < 0 && index >= cp.Size {
+			err = s.pendingLeaf(ctx, index, cp, "", err)
+		}
 	} else {
-		out, err = s.refProof(ctx, message, cp, nil, problem(404, "not_logged", "That message is not in the latest checkpoint: it is private, unknown, or newer than the checkpoint (signed every 15 minutes by default)."))
+		out, err = s.refProof(ctx, message, cp, size < 0, nil, notLogged("That message", cp, size))
 	}
 	if out, err = s.withAnchor(ctx)(out, err); err != nil || out.Leaf.Kind != "message" {
 		return out, err
@@ -869,7 +874,7 @@ func (s *Store) ReadNotaryProof(ctx context.Context, hash string, size int64) (L
 			len(notaryKeyRef), notaryKeyRef, cp.Size).Scan(&ref); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return LogInclusion{}, err
 		}
-		return s.withAnchor(ctx)(s.refProof(ctx, ref, cp, nil, problem(404, "not_logged", "The notary key is not in the latest checkpoint: the notary is off here, or its key is newer than the checkpoint (signed every 15 minutes by default).")))
+		return s.withAnchor(ctx)(s.refProof(ctx, ref, cp, size < 0, nil, notLogged("The notary key (the notary may be off here)", cp, size)))
 	}
 	keyLeaf := func(data string) string {
 		var l logLeaf
@@ -878,13 +883,80 @@ func (s *Store) ReadNotaryProof(ctx context.Context, hash string, size int64) (L
 		}
 		return notaryKeyRef + l.KeyID
 	}
-	return s.withAnchor(ctx)(s.refProof(ctx, notaryStampRef+hash, cp, keyLeaf, problem(404, "not_logged", "No notary receipt for that hash is in the latest checkpoint: it is unknown, or newer than the checkpoint (signed every 15 minutes by default).")))
+	return s.withAnchor(ctx)(s.refProof(ctx, notaryStampRef+hash, cp, size < 0, keyLeaf, notLogged("A notary receipt for that hash", cp, size)))
+}
+
+// notLogged is the 404 for a ref with no leaf in the checkpoint asked for:
+// unknown or not public (a logged leaf after the latest checkpoint is
+// pendingLeaf's 409 instead), or, against a named size, outside it.
+func notLogged(what string, cp LogCheckpoint, size int64) error {
+	if size >= 0 {
+		return problem(404, "not_logged", fmt.Sprintf("%s is not in the checkpoint of %d leaves (leaves 0 to %d); drop size= to prove it against the latest, or name a later checkpoint.", what, cp.Size, cp.Size-1))
+	}
+	return problem(404, "not_logged", what+" is not in the log: it is unknown or not public (private rooms and conversations are never logged).")
+}
+
+// LogPendingLeaf is not_in_checkpoint_yet's details: the leaf is in the log
+// after the latest signed checkpoint, which covers leaves 0 to
+// checkpoint_size-1; the next checkpoint is due by next_checkpoint_by (Unix
+// seconds) and promise is a post's log promise.
+type LogPendingLeaf struct {
+	LeafIndex        int64  `json:"leaf_index"`
+	CheckpointSize   int64  `json:"checkpoint_size"`
+	CheckpointAt     int64  `json:"checkpoint_at"`
+	NextCheckpointBy int64  `json:"next_checkpoint_by"`
+	Promise          string `json:"promise,omitempty"`
+}
+
+// pendingLeaf turns a miss against the latest checkpoint into 409
+// not_in_checkpoint_yet when the leaf (index, or ref's first leaf when ref is
+// set) is in the log after it; otherwise it returns notFound.
+func (s *Store) pendingLeaf(ctx context.Context, index int64, cp LogCheckpoint, ref string, notFound error) error {
+	if ref != "" {
+		if err := s.db.QueryRowContext(ctx, "SELECT coalesce(min(idx),-1) FROM tlog_leaves WHERE ref=? AND ref<>''", ref).Scan(&index); err != nil {
+			return err
+		}
+	} else {
+		var size int64
+		if err := s.db.QueryRowContext(ctx, "SELECT coalesce(max(idx)+1,0) FROM tlog_leaves").Scan(&size); err != nil {
+			return err
+		}
+		if index >= size {
+			return notFound
+		}
+	}
+	if index < cp.Size {
+		return notFound
+	}
+	every := s.transparency.checkpointEvery.Load()
+	if every <= 0 {
+		every = int64(CheckpointEveryDefault / time.Second)
+	}
+	// Checkpoints are signed on a fixed tick, so the next is the first tick
+	// after now counted from the latest's (a restart only brings it closer).
+	now := s.now().Unix()
+	next := cp.CreatedAt + every
+	if now >= next {
+		next += ((now-next)/every + 1) * every
+	}
+	wait := max(next-now, 1)
+	d := LogPendingLeaf{LeafIndex: index, CheckpointSize: cp.Size, CheckpointAt: cp.CreatedAt, NextCheckpointBy: next}
+	var kind, id string
+	if err := s.db.QueryRowContext(ctx, "SELECT kind,ref FROM tlog_leaves WHERE idx=?", index).Scan(&kind, &id); err != nil {
+		return err
+	}
+	if kind == "message" && eventIDRE.MatchString(id) {
+		d.Promise = LogPromisePath + "?message=" + id
+	}
+	return &Error{Status: 409, Code: "not_in_checkpoint_yet", RetryAfter: int(wait), Details: d,
+		Message: fmt.Sprintf("Leaf %d is in the log but not in a signed checkpoint yet: the latest covers leaves 0 to %d. The next checkpoint is due within %d seconds; retry then.", index, cp.Size-1, wait)}
 }
 
 // refProof proves the first leaf with ref against cp, with the later leaves
 // of the same ref as related, then the leaves of also(first leaf's data)'s
-// ref when also is set.
-func (s *Store) refProof(ctx context.Context, ref string, cp LogCheckpoint, also func(string) string, notFound error) (LogInclusion, error) {
+// ref when also is set. latest marks cp as the latest checkpoint, against
+// which a leaf after it is pendingLeaf's 409.
+func (s *Store) refProof(ctx context.Context, ref string, cp LogCheckpoint, latest bool, also func(string) string, notFound error) (LogInclusion, error) {
 	if ref == "" {
 		return LogInclusion{}, notFound
 	}
@@ -893,6 +965,9 @@ func (s *Store) refProof(ctx context.Context, ref string, cp LogCheckpoint, also
 		return LogInclusion{}, err
 	}
 	if len(found) == 0 {
+		if latest {
+			return LogInclusion{}, s.pendingLeaf(ctx, -1, cp, ref, notFound)
+		}
 		return LogInclusion{}, notFound
 	}
 	out, err := s.inclusion(ctx, found[0], cp)
@@ -1158,6 +1233,7 @@ func (s *Store) StartTransparency(ctx context.Context, cfg TransparencyConfig) {
 		cfg.MergeDelay = 2 * cfg.CheckpointEvery
 	}
 	s.transparency.mergeDelay.Store(int64(max(cfg.MergeDelay/time.Second, 1)))
+	s.transparency.checkpointEvery.Store(int64(max(cfg.CheckpointEvery/time.Second, 1)))
 	if cfg.OTS == nil && len(cfg.Calendars) > 0 {
 		cfg.OTS = &ots.Client{Calendars: cfg.Calendars, Explorer: ots.DefaultExplorer}
 	}

@@ -202,12 +202,14 @@
       "expired",
       "review_lapsed",
       "recovery_required",
+      "queued",
       "rewarded",
       "earn",
       "closed",
       "all"
     ],
     "work_result_states": [
+      "queued",
       "submitted",
       "accepted",
       "rejected"
@@ -227,7 +229,8 @@
       "cancelled",
       "expired",
       "review_lapsed",
-      "recovery_required"
+      "recovery_required",
+      "queued"
     ],
     "work_transition_fallbacks": [
       "reviewer_silent"
@@ -4356,6 +4359,7 @@
         "eligible_preview",
         "eligible_reason",
         "known_answer",
+        "next_open_at",
         "reject_fee",
         "request",
         "requester_may_decide_at",
@@ -4397,6 +4401,7 @@
         "work_id"
       ],
       "optional": [
+        "next_open_at",
         "note",
         "resolved_from",
         "result_sha256",
@@ -4455,6 +4460,7 @@
         "next_open_at",
         "next_round",
         "per_agent_max",
+        "queued",
         "results_max",
         "successor",
         "usdc_day_max",

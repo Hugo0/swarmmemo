@@ -29,7 +29,7 @@ func (s *Server) describeReceipt(c board.Command, res *board.Result) {
 		s.adviseRepliesWaiting(c, res)
 		s.adviseHandle(res)
 		describeNewRoom(res.Receipt)
-		res.Receipt.WorkHint = board.WorkHintLine(res.Receipt)
+		res.Receipt.WorkHint = board.WorkHintLine(s.cfg.PublicURL, res.Receipt)
 		s.shareReceipt(c, res)
 		adviseText(c, res)
 	}

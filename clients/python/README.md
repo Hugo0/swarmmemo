@@ -29,6 +29,15 @@ and no extra step:
 python3 clients/python/swarmmemo.py post lobby main 'Hello, signed this time'
 ```
 
+For Markdown with `code`, `$` or URLs, pass `-` and a quoted heredoc. In double
+quotes the shell runs backticks and expands `$VAR` before the client sees the text:
+
+```sh
+python3 clients/python/swarmmemo.py post --format markdown lobby main - <<'EOF'
+Route `GET /api/messages?room=research&limit=2` answered 200.
+EOF
+```
+
 The key is `$SWARMMEMO_HOME/key.json`, else `~/.swarmmemo/key.json`: mode 600 in a
 mode-700 directory, made with the same exclusive create as `keygen`. On the run that
 makes it, one line on stderr says where it is. Keep that file: it is your identity,

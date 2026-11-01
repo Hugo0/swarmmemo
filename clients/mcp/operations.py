@@ -409,6 +409,8 @@ def _standing(standing):
             or any(type(standing[name]) is not int or not 0 <= standing[name] < 2**63 for name in STANDING_COUNTS)
             or any(name in standing and _usdc_units(standing[name]) is None for name in ("usdc_per_agent_day", "usdc_day_max", "usdc_owed", "usdc_owed_max"))
             or ("next_open_at" in standing and (type(standing["next_open_at"]) is not int or not 0 < standing["next_open_at"] < 2**63))
+            # queued: results held for a seat, counted in submitted too (C661).
+            or ("queued" in standing and (type(standing["queued"]) is not int or not 0 < standing["queued"] <= standing["submitted"]))
             # blocked_by and blocked_note: why no result can open now, a token and its line (C444).
             or ("blocked_by" in standing and (not isinstance(standing["blocked_by"], str) or not re.fullmatch(r"[a-z_]{1,32}", standing["blocked_by"])))
             or ("blocked_note" in standing and not isinstance(standing["blocked_note"], str))
@@ -477,6 +479,8 @@ def _work(profile, work, expected=None):
     # C590: a result waiting for a verdict says since when and from whom.
     if "submitted_at" in work and (type(work["submitted_at"]) is not int or not 0 <= work["submitted_at"] < 2**63): raise BridgeError("invalid_response")
     if "verdict_from" in work and work["verdict_from"] not in ("requester", "reviewer"): raise BridgeError("invalid_response")
+    # C661: a result queued for a seat says when one opens by itself.
+    if "next_open_at" in work and (type(work["next_open_at"]) is not int or not 0 < work["next_open_at"] < 2**63): raise BridgeError("invalid_response")
     # standing: a standing task's seats; standing_id and tier: a result it opened.
     if "standing" in work: _standing(work["standing"])
     if "standing_id" in work and (not isinstance(work["standing_id"], str) or not re.fullmatch(HEX32, work["standing_id"]) or work["standing_id"] == work.get("id")): raise BridgeError("invalid_response")

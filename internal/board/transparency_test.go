@@ -602,3 +602,89 @@ func TestAnchorBlockTime(t *testing.T) {
 		t.Fatalf("anchors list: %+v", list[0])
 	}
 }
+
+// C679 (Skitter c304/c310): a public post whose leaf is right after the latest
+// checkpoint (leaf 11696, checkpoint of 11696 leaves, so leaves 0..11695) was
+// a plain 404 not_logged, the same answer as an unknown or private ID, though
+// its message seq (8780) was far below the checkpoint size. A logged leaf
+// the latest checkpoint does not cover yet is 409 not_in_checkpoint_yet with
+// its leaf index and when the next checkpoint is due; a proof against a named
+// checkpoint (size=N) stays byte for byte the same once it is signed.
+func TestProofOfLeafAfterTheCheckpointSaysWhenToRetry(t *testing.T) {
+	s := openTest(t, Config{})
+	steppingClock(s)
+	buildHistory(t, s)
+	if _, err := s.SignCheckpoint(testContext); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.ReadLogCheckpoint(testContext, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := run(t, s, Command{Operation: "post", Room: "lobby", Text: "posted after the checkpoint"})
+	id := res.Receipt.ID
+	if res.LogPromise == nil || res.LogPromise.Index != first.Size {
+		t.Fatalf("the post's leaf should be the first after the checkpoint: %+v", res.LogPromise)
+	}
+	pending := func(what string, err error) {
+		t.Helper()
+		var e *Error
+		if !errors.As(err, &e) || e.Status != 409 || e.Code != "not_in_checkpoint_yet" {
+			t.Fatalf("%s: want 409 not_in_checkpoint_yet, got %v", what, err)
+		}
+		d, ok := e.Details.(LogPendingLeaf)
+		if !ok || d.LeafIndex != first.Size || d.CheckpointSize != first.Size || d.NextCheckpointBy <= first.CreatedAt {
+			t.Fatalf("%s: details %+v", what, e.Details)
+		}
+		if e.RetryAfter < 1 || int64(e.RetryAfter) > int64(CheckpointEveryDefault.Seconds()) {
+			t.Fatalf("%s: retry_after %d", what, e.RetryAfter)
+		}
+		if !strings.Contains(e.Message, "retry") {
+			t.Fatalf("%s: the message should say to retry: %q", what, e.Message)
+		}
+	}
+	_, err = s.ReadLogProof(testContext, -1, id, -1)
+	pending("message", err)
+	_, err = s.ReadLogProof(testContext, first.Size, "", -1)
+	pending("leaf", err)
+	// Against a named checkpoint that will never hold it, still not_logged.
+	var e *Error
+	if _, err = s.ReadLogProof(testContext, -1, id, first.Size); !errors.As(err, &e) || e.Code != "not_logged" {
+		t.Fatalf("size=%d: %v", first.Size, err)
+	}
+	// An ID with no leaf at all stays a plain not_logged.
+	if _, err = s.ReadLogProof(testContext, -1, strings.Repeat("ab", 16), -1); !errors.As(err, &e) || e.Status != 404 || e.Code != "not_logged" {
+		t.Fatalf("unknown id: %v", err)
+	}
+
+	// The next checkpoint takes it in; the quoted form names that checkpoint.
+	if _, err = s.SignCheckpoint(testContext); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.ReadLogCheckpoint(testContext, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted, err := s.ReadLogProof(testContext, -1, id, second.Size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyInclusion(t, s, quoted, verifyCheckpoint(t, s, second))
+	var leaf logLeaf
+	if json.Unmarshal([]byte(quoted.Leaf.Data), &leaf) != nil || leaf.Seq < 1 || leaf.Seq >= first.Size || quoted.Leaf.Index != first.Size {
+		t.Fatalf("as in the report, the message seq is below the checkpoint size and the leaf is not: %s", quoted.Leaf.Data)
+	}
+	for i := range 3 {
+		run(t, s, Command{Operation: "post", Room: "lobby", Text: "later " + string(rune('a'+i))})
+	}
+	if _, err = s.SignCheckpoint(testContext); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.ReadLogProof(testContext, -1, id, second.Size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Checkpoint.Note != quoted.Checkpoint.Note || strings.Join(again.Proof, ",") != strings.Join(quoted.Proof, ",") {
+		t.Fatal("a proof against a named checkpoint changed after the log grew")
+	}
+}

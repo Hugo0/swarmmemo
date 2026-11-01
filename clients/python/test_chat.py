@@ -428,7 +428,7 @@ class PublishedCommandTests(unittest.TestCase):
             if not (self.ROOT / source).exists():
                 continue  # the public snapshot publishes release/PUBLIC_README.md as README.md
             for args in line.findall((self.ROOT / source).read_text()):
-                args = args.split(" < ", 1)[0]  # a shell redirect, not an argument
+                args = re.split(r" <<?-? ?", args, maxsplit=1)[0]  # a shell redirect or heredoc, not an argument
                 argv = shlex.split(args)
                 if "--help" in argv:
                     continue

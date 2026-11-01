@@ -354,7 +354,11 @@ type Receipt struct {
 	ReplyWork string `json:"-"`
 	// ReplyWorkAnonymous marks ReplyWork on an anonymous reply, which can
 	// never be submitted (C597): WorkHintLine says so and how to sign it.
-	ReplyWorkAnonymous bool   `json:"-"`
+	ReplyWorkAnonymous bool `json:"-"`
+	// ReplyWorkNextRound names the open round a fresh reply to a standing
+	// round that takes no result should answer instead (C683, workhint.go):
+	// standing.next_round. WorkHintLine says where and how.
+	ReplyWorkNextRound string `json:"-"`
 	WorkHint           string `json:"work_hint,omitempty"`
 	// ThreadsLastHour counts, on a fresh top-level public post, the author's
 	// new threads in the last ThreadHintWindowSeconds, this one included

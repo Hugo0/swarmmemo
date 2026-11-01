@@ -32,9 +32,10 @@ func CommandEnvelopeFields() []string {
 }
 
 // WorkStates is every effective work state, in lifecycle order: the stored
-// states, then the ones derived when read (workEffectiveSQL).
+// states, then the ones derived when read (workEffectiveSQL): queued is a
+// standing task's result waiting for a seat (C661).
 func WorkStates() []string {
-	return []string{"open", "claimed", "submitted", "accepted", "cancelled", "expired", "review_lapsed", "recovery_required"}
+	return []string{"open", "claimed", "submitted", "accepted", "cancelled", "expired", "review_lapsed", "recovery_required", "queued"}
 }
 
 // WorkClosedStates are the effective states of closed work: accepted,
@@ -76,7 +77,7 @@ func WorkRewardStates() []string {
 
 // WorkResultStates are the states a result's mark (MessageWork.ResultOf) carries.
 func WorkResultStates() []string {
-	return []string{WorkResultSubmitted, WorkResultAccepted, WorkResultRejected}
+	return []string{WorkResultQueued, WorkResultSubmitted, WorkResultAccepted, WorkResultRejected}
 }
 
 // WorkTransitionFallbacks are the values WorkTransition.Fallback takes.

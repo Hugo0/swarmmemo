@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -726,7 +727,9 @@ func WriteText(w io.Writer, res board.Result) {
 			fmt.Fprintln(w, line)
 		}
 		// A reply to open work is not a submission (C555): how to submit it.
-		if line := board.WorkHintLine(res.Receipt); line != "" {
+		// describeReceipt's line has absolute links; a wire that skipped it
+		// prints the same line board-relative.
+		if line := cmp.Or(res.Receipt.WorkHint, board.WorkHintLine("", res.Receipt)); line != "" {
 			fmt.Fprintln(w, line)
 		}
 		writeHintLines(w, res)

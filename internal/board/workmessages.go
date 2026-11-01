@@ -28,7 +28,7 @@ import (
 // and Simulated; on a standing task, Standing, its terms per result
 // (C434). On a reply that a worker submitted as
 // the result: ResultOf (the work's ID) and State, one of submitted,
-// accepted or rejected. Title and URL (the work's page) are on both.
+// accepted or rejected, or on a standing task queued (C661). Title and URL (the work's page) are on both.
 type MessageWork struct {
 	ID          string             `json:"id,omitempty"`
 	ResultOf    string             `json:"result_of,omitempty"`
@@ -78,6 +78,9 @@ const (
 	WorkResultSubmitted = "submitted"
 	WorkResultAccepted  = "accepted"
 	WorkResultRejected  = "rejected"
+	// WorkResultQueued marks a standing task's result queued for a seat
+	// (C661): it opens, submitted, when one does.
+	WorkResultQueued = "queued"
 )
 
 // workEffectiveInlineSQL is workEffectiveSQL reading the service generation
@@ -224,6 +227,8 @@ func attachWork(ctx context.Context, q workRowsQuerier, events []Message, now in
 			// the result it is, rejected once its reject ended it.
 			state := WorkResultSubmitted
 			switch m.stored {
+			case "open":
+				state = WorkResultQueued
 			case "accepted":
 				state = WorkResultAccepted
 			case "cancelled":

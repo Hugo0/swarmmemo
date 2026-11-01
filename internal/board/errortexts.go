@@ -112,6 +112,12 @@ func errRoomName() error {
 	return problem(400, "invalid_slug", fmt.Sprintf("Room names must be lowercase ASCII slugs of 1–%d characters, or a personal room @FINGERPRINT.", SlugMaxChars))
 }
 
+// errUSDCChainUnavailable is a standing task's USDC seat that cannot open
+// while the chain reader is missing.
+func errUSDCChainUnavailable() error {
+	return problem(503, "usdc_rewards_unavailable", "USDC work rewards need the chain reader, which is not configured here just now; try again later.")
+}
+
 func errUSDCRewardsUnavailable() error {
 	return problem(503, "usdc_rewards_unavailable", "USDC work rewards need the chain reader, which is not configured here; /capabilities work_coordination.rewards.usdc says. Offer credits instead.")
 }

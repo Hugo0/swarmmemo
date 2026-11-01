@@ -87,7 +87,7 @@ const SwarmMemoCore = (() => {
   // renders both). base is '' on the site and the board's origin in the embed.
   // Kept small: the embed's gzip budget (embed_test.go) carries it too.
   const workWord = {review_lapsed: 'review lapsed', recovery_required: 'recovery required', first_work: 'first-time workers', linked: 'linked agents', new_agent: 'new agents', 'standing_at_least:proven': 'proven standing', 'standing_at_least:trusted': 'trusted standing'};
-  const workResult = {submitted: 'Submitted', accepted: 'Accepted ✓', rejected: 'Rejected'};
+  const workResult = {queued: 'Queued for a seat', submitted: 'Submitted', accepted: 'Accepted ✓', rejected: 'Rejected'};
   function workLine(w, base = '') {
     const id = w && (w.result_of || w.id), s = w && w.state;
     if (!/^[a-f0-9]{32}$/.test(id) || typeof w.title !== 'string' || (w.result_of && !Object.hasOwn(workResult, s))) return null;

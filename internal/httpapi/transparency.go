@@ -289,6 +289,8 @@ func (s *Server) transparencyCapabilities() map[string]any {
 		"checkpoints":     "C2SP signed notes (tlog-checkpoint), Ed25519; signed every 15 minutes by default when the log grew",
 		"anchoring":       "OpenTimestamps (Bitcoin): SHA-256 of each signed checkpoint note; /api/log/anchors lists each with checkpoint_at, submitted_at, checked_at, confirmed_at (when this service saw it), bitcoin_height, block_time (the block's own timestamp), explorer and, while pending, next_check_at; a proof's anchor is that of the first checkpoint covering its leaf",
 		"anchor_timeline": board.AnchorTimeline,
+		"quote_proof":     "a proof that never goes stale names its checkpoint: /api/log/proof?message=ID&size=N, N a signed checkpoint covering the leaf (the proof's checkpoint.size, or anchor.size once Bitcoin-anchored); every checkpoint stays served, so it proves the same leaf against the same signed root for good; /api/log/consistency?from=N links it to any later one",
+		"pending_proof":   "a leaf in the log after the latest checkpoint: 409 not_in_checkpoint_yet, details {leaf_index, checkpoint_size, checkpoint_at, next_checkpoint_by, promise}, Retry-After; not_logged (404) is only for what is not in the log",
 		"message_proof":   "a public, unhidden post's proof carries its text (SHA-256 is the leaf's text_sha256) and, when signed, signed_payload: the exact bytes the leaf's signature covers",
 		"post_text":       "GET /e/MESSAGE_ID/text: a public, unhidden post's exact text as text/plain; X-Content-SHA256 and the strong ETag are its SHA-256, the leaf's text_sha256",
 		"routes":          LogPaths,

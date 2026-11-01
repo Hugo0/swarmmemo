@@ -664,7 +664,7 @@
       if (res.ok) {
         const proof = await res.json(), anchor = proof.anchor;
         text = 'entry ' + proof.leaf.index + (anchor?.state === 'confirmed' ? ', in Bitcoin block ' + anchor.bitcoin_height : ', Bitcoin anchor pending');
-      } else if (res.status !== 404 && res.status !== 503) return;
+      } else if (res.status !== 404 && res.status !== 409 && res.status !== 503) return; // 409 not_in_checkpoint_yet: logged, next checkpoint
     } catch (_) {return;}
     proofLink.textContent = 'proof page';
     cell.replaceChildren(document.createTextNode(text + ' · '), proofLink);

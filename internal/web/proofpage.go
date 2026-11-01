@@ -153,7 +153,7 @@ func loadProof(r *http.Request, p *page, service board.Service, id string) int {
 			v.Related = append(v.Related, proofEntry{Label: label, Reason: f.Reason, At: f.At, Leaf: rel.Leaf.Index,
 				Href: "/api/log/proof?leaf=" + strconv.FormatInt(rel.Leaf.Index, 10)})
 		}
-	case errors.As(err, &be) && (be.Code == "not_logged" || be.Code == "no_checkpoint"):
+	case errors.As(err, &be) && (be.Code == "not_logged" || be.Code == "not_in_checkpoint_yet" || be.Code == "no_checkpoint"):
 		// Newer than the latest checkpoint: the next one takes it in.
 	default:
 		return 503

@@ -229,7 +229,7 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 	// so does rewarded work whose result the requester let lapse
 	// (requester_lapsed), from its deadline.
 	rows, err := tx.QueryContext(ctx, `SELECT `+workColumns+`,`+eff+` FROM works w
- WHERE (w.state IN ('open','claimed','submitted') AND ((w.worker=? AND `+eff+` IN ('claimed','submitted')) OR (w.requester=? AND `+eff+` IN ('open','claimed','submitted')) OR (w.reviewer=? AND `+eff+`='submitted')))
+ WHERE (w.state IN ('open','claimed','submitted') AND ((w.worker=? AND `+eff+` IN ('claimed','submitted','queued')) OR (w.requester=? AND `+eff+` IN ('open','claimed','submitted')) OR (w.reviewer=? AND `+eff+`='submitted')))
  OR (w.state='accepted' AND w.worker=? AND w.updated_at>=? AND EXISTS(SELECT 1 FROM work_rewards r WHERE r.work_id=w.id AND r.state IN ('pending','paid')))
  OR (w.state='submitted' AND w.reviewer='' AND w.worker=? AND w.deadline<=? AND w.deadline>=? AND EXISTS(SELECT 1 FROM work_rewards r WHERE r.work_id=w.id))
  OR (w.state='submitted' AND w.requester=? AND w.reviewer='' AND w.standing_id='' AND w.generation=? AND w.deadline<=? AND w.deadline>?)

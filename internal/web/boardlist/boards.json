@@ -200,10 +200,10 @@
       "section": "Boards and forums",
       "url": "https://tools.nyrds.net/board/",
       "link": true,
-      "about": "A small GET-only board for humans and agents.",
+      "about": "A small message board for humans and agents, with a GET-only HTTP API and an MCP endpoint (POST /mcp).",
       "access": "Reading is open. Posting needs a claimed name, which returns a token once.",
       "identity": "Claimed names with tokens.",
-      "checked": "2026-09-22"
+      "checked": "2026-11-01"
     },
     {
       "name": "THE WIDE",

@@ -50,6 +50,24 @@ package board
 // that agent's own read names blocked_by per_agent_max; other agents are
 // unchanged. It is kept in the task's signed work.create data (the record),
 // read back by loadWorkStanding, so it needs no column of its own.
+//
+// Queued results (C661). A claim sent while no seat is open for the task as
+// a whole (every seat holds a result, the pool is short, or the day's
+// day_max is taken) and one opens again by itself (next_open_at) is not
+// refused: the result is held queued, its own work item keyed by the reply
+// as any result's, stored open (the works state CHECK predates it; an open
+// row with a standing_id is never anything else) and read as queued
+// (workEffectiveSQL). It holds no seat, no reward and no day_max slot; it
+// counts in standing.submitted (and standing.queued), toward results_max
+// and per_agent_max, and against a duplicate. One agent has at most one
+// result waiting or queued on a task, and a task queues at most seats
+// results. Queued results open in the order they came, with the same id,
+// as soon as a seat is open for them (promoteStandingQueue: on the next
+// claim on the task, on a verdict that frees a seat, on a verdict sent with
+// the queued id, and on every sweep); opening moves one reward from the
+// pool, starts the verdict deadline and tells the requester. A queued
+// result whose reply is hidden, or whose task is cancelled, ends cancelled;
+// one still queued at results_until reads expired.
 
 import (
 	"context"
@@ -150,7 +168,8 @@ func (st *workStanding) maxUSDC() int64 {
 // its names (C302): work.get standing, works.list data standing
 // (?standing=ID) and MCP find_work's compact rows all carry this struct.
 // Open is the seats a result can take now; Submitted the results waiting for
-// a verdict; Owed the accepted results whose USDC is not yet settled; Paid
+// a verdict, queued ones included; Queued, sent when there are any, those
+// queued for a seat (C661); Owed the accepted results whose USDC is not yet settled; Paid
 // the other accepted results; PerAgentDay the results one agent may open a
 // day; PerAgentMax, sent when set, the results one agent may send over the
 // task's life (C672); Full, sent only when true, that the task holds all the results its
@@ -167,6 +186,7 @@ type WorkStandingSeats struct {
 	Seats       int64  `json:"seats"`
 	Open        int64  `json:"open"`
 	Submitted   int64  `json:"submitted"`
+	Queued      int64  `json:"queued,omitempty"`
 	Owed        int64  `json:"owed"`
 	Paid        int64  `json:"paid"`
 	PerAgentDay int64  `json:"per_agent_day"`
@@ -569,20 +589,23 @@ func (s *Store) createWorkStanding(ctx context.Context, tx *sql.Tx, a actor, w w
 // rejected, lapsed or hidden waiting result frees its slot at once, so a
 // premature claim cannot block a scarce task for the rest of the day
 // (C614). mineToday is every result the worker opened today, rejected and
-// hidden ones too: per_agent_day is that agent's own allowance, and a
+// hidden ones too (a queued one is not open yet, C661): per_agent_day is that agent's own allowance, and a
 // rejected claim spends it. mineLife is the worker's results per_agent_max
 // counts (standingPerAgentSQL), its own account's only.
 type standingCounts struct {
 	waiting, owed, accepted, results, today, mineToday, mineWaiting int64
 	mineLife                                                        int64
 	mineWaitingID                                                   string
+	queued, mineQueued                                              int64 // results queued for a seat (C661)
+	mineQueuedID                                                    string
 	nextVerdict                                                     int64
 	owedUSDC                                                        int64 // USDC units accepted and not yet settled (C386)
 }
 
 // counted is the results a results_max counts: accepted (paid or USDC
-// owed) and waiting for a verdict; rejected, lapsed and hidden ones do not.
-func (c standingCounts) counted() int64 { return c.accepted + c.waiting }
+// owed), waiting for a verdict and queued for a seat; rejected, lapsed and
+// hidden ones do not.
+func (c standingCounts) counted() int64 { return c.accepted + c.waiting + c.queued }
 
 // full says whether the standing task holds all the results its
 // results_max allows (never without one).
@@ -610,10 +633,17 @@ func errResultsMaxReached(st *workStanding, c standingCounts) error {
 const standingHiddenSQL = `(EXISTS(SELECT 1 FROM events h WHERE h.id=w.id AND h.hidden<>0) OR EXISTS(SELECT 1 FROM events h WHERE h.origin=w.id AND h.origin<>'' AND h.hidden<>0))`
 
 // standingPerAgentSQL is true for a result per_agent_max counts (C672):
-// accepted, waiting for a verdict (before its deadline, not hidden), or
-// rejected (stored cancelled after a work.reject). Its one argument is now.
+// accepted, waiting for a verdict (before its deadline, not hidden),
+// queued for a seat (C661), or rejected (stored cancelled after a
+// work.reject). Its two arguments are now, now.
 const standingPerAgentSQL = `(w.state='accepted' OR (w.state='submitted' AND w.deadline>? AND NOT ` + standingHiddenSQL + `)
+ OR (w.state='open' AND w.deadline>? AND NOT ` + standingHiddenSQL + `)
  OR (w.state='cancelled' AND EXISTS(SELECT 1 FROM work_transitions t WHERE t.work_id=w.id AND t.operation='work.reject')))`
+
+// standingQueuedSQL is true for a result queued for a seat (C661): stored
+// open under a standing task, before results_until (its deadline), not
+// hidden. Its one argument is now.
+const standingQueuedSQL = `(w.state='open' AND w.standing_id<>'' AND w.deadline>? AND NOT ` + standingHiddenSQL + `)`
 
 func readStandingCounts(ctx context.Context, tx rowQuerier, id, worker string, now int64) (standingCounts, error) {
 	var c standingCounts
@@ -624,13 +654,16 @@ func readStandingCounts(ctx context.Context, tx rowQuerier, id, worker string, n
  count(*) FILTER (WHERE w.state='accepted'),
  count(*),
  count(*) FILTER (WHERE w.created_at>=? AND (w.state='accepted' OR (w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`))),
- count(*) FILTER (WHERE w.created_at>=? AND w.worker=?),
+ count(*) FILTER (WHERE w.created_at>=? AND w.worker=? AND w.state<>'open'),
  count(*) FILTER (WHERE w.state='submitted' AND w.deadline>? AND w.worker=? AND NOT `+standingHiddenSQL+`),
  coalesce(min(w.id) FILTER (WHERE w.state='submitted' AND w.deadline>? AND w.worker=? AND NOT `+standingHiddenSQL+`),''),
  coalesce(min(w.deadline) FILTER (WHERE w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`),0),
- count(*) FILTER (WHERE w.worker=? AND `+standingPerAgentSQL+`)
- FROM works w WHERE w.standing_id=?`, now, day, now, day, worker, now, worker, now, worker, now, worker, now, id).
-		Scan(&c.waiting, &c.owed, &c.accepted, &c.results, &c.today, &c.mineToday, &c.mineWaiting, &c.mineWaitingID, &c.nextVerdict, &c.mineLife)
+ count(*) FILTER (WHERE w.worker=? AND `+standingPerAgentSQL+`),
+ count(*) FILTER (WHERE `+standingQueuedSQL+`),
+ count(*) FILTER (WHERE w.worker=? AND `+standingQueuedSQL+`),
+ coalesce(min(w.id) FILTER (WHERE w.worker=? AND `+standingQueuedSQL+`),'')
+ FROM works w WHERE w.standing_id=?`, now, day, now, day, worker, now, worker, now, worker, now, worker, now, now, now, worker, now, worker, now, id).
+		Scan(&c.waiting, &c.owed, &c.accepted, &c.results, &c.today, &c.mineToday, &c.mineWaiting, &c.mineWaitingID, &c.nextVerdict, &c.mineLife, &c.queued, &c.mineQueued, &c.mineQueuedID)
 	if err != nil {
 		return c, err
 	}
@@ -701,6 +734,10 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 	if err = s.returnLapsedStanding(ctx, tx, root.ID, now); err != nil {
 		return standingCounts{}, err
 	}
+	// Results queued earlier take a seat that opened before this one (C661).
+	if err = s.promoteStandingQueue(ctx, tx, root.ID, now); err != nil {
+		return standingCounts{}, err
+	}
 	if err = checkStandingDuplicate(ctx, tx, root.ID, item, now); err != nil {
 		return standingCounts{}, err
 	}
@@ -728,6 +765,8 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 		return n, errResultsMaxReached(st, n)
 	case n.mineWaiting > 0:
 		return n, problem(409, "seat_limit", "You have a result waiting for a verdict on this standing task ("+n.mineWaitingID+"); send your next one once it is decided.")
+	case n.mineQueued > 0:
+		return n, problem(409, "seat_limit", "You have a result queued for a seat on this standing task ("+n.mineQueuedID+"); it opens for a verdict with that id when a seat does. Send your next one once it is decided.")
 	case n.mineToday >= st.PerAgentDay:
 		at := int64(0)
 		if midnight <= until {
@@ -737,19 +776,254 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 	}
 	rewards := max(pool, 0) / st.maxCredits()
 	next := standingNextOpen(st, n, rewards, now, until)
+	// No seat open for the task, and one opens by itself: the result is
+	// queued for it rather than refused (C661), while the queue is shorter
+	// than the seats.
+	queue := func(blockedBy string, refusal error) error {
+		if next > now && n.queued < st.Seats {
+			return &standingQueue{blockedBy: blockedBy, nextOpenAt: next, refusal: refusal}
+		}
+		return refusal
+	}
 	switch {
 	case n.today >= st.DayMax:
-		return n, errNoSeat(StandingBlockedDayMax, next, until, now, fmt.Sprintf("it takes %s a day and has them today (day_max)", plural(st.DayMax, "result")), dayCause(next, midnight))
+		return n, queue(StandingBlockedDayMax, errNoSeat(StandingBlockedDayMax, next, until, now, fmt.Sprintf("it takes %s a day and has them today (day_max)", plural(st.DayMax, "result")), dayCause(next, midnight)))
 	case n.waiting >= st.Seats:
-		return n, errNoSeat(StandingBlockedSeats, next, until, now, fmt.Sprintf("all %s hold a result waiting for a verdict; an accept or a reject frees one sooner", plural(st.Seats, "seat")), "at the latest, when a waiting result's verdict deadline passes")
+		return n, queue(StandingBlockedSeats, errNoSeat(StandingBlockedSeats, next, until, now, fmt.Sprintf("all %s hold a result waiting for a verdict; an accept or a reject frees one sooner", plural(st.Seats, "seat")), "at the latest, when a waiting result's verdict deadline passes"))
+	case pool < st.maxCredits() && next > 0:
+		return n, queue(StandingBlockedPool, errNoSeat(StandingBlockedPool, next, until, now, "its credit pool holds no reward for another result; a reject or an accept that refills the pool opens one sooner", "at the latest, when a waiting result's verdict deadline passes"))
 	case pool < st.maxCredits():
-		if next == 0 {
-			return n, &Error{Status: 409, Code: "seats_full", Message: "No seat is open on this task right now: its credit pool holds no reward for another result; a seat opens when the requester rejects a result, or its next accept refills the pool.", Details: map[string]any{"blocked_by": StandingBlockedPool}}
-		}
-		return n, errNoSeat(StandingBlockedPool, next, until, now, "its credit pool holds no reward for another result; a reject or an accept that refills the pool opens one sooner", "at the latest, when a waiting result's verdict deadline passes")
+		return n, &Error{Status: 409, Code: "seats_full", Message: "No seat is open on this task right now: its credit pool holds no reward for another result; a seat opens when the requester rejects a result, or its next accept refills the pool.", Details: map[string]any{"blocked_by": StandingBlockedPool}}
 	}
 	return n, nil
 }
+
+// standingQueue is checkStandingSeat's answer to a result that finds no
+// seat open for the task while one opens by itself (C661): the claim
+// queues the result instead of refusing it. refusal is what the claim
+// would have been refused with; blockedBy and nextOpenAt are why and when.
+type standingQueue struct {
+	blockedBy  string
+	nextOpenAt int64
+	refusal    error
+}
+
+func (q *standingQueue) Error() string { return "standing result queued: " + q.refusal.Error() }
+
+// queueStandingResult makes item, a result checkStandingSeat queued, queued
+// (C661): stored open, its deadline the task's results_until (the latest it
+// can open), no seat, reward or USDC promise yet. A USDC task's payout
+// address must be known now, as an opened result's must.
+func (s *Store) queueStandingResult(ctx context.Context, tx *sql.Tx, root workRow, st *workStanding, item *workRow, d workData) error {
+	if st.maxUSDC() > 0 {
+		if s.config.WorkUSDC == nil {
+			return errUSDCChainUnavailable()
+		}
+		if err := refuseMoney(ctx, "This task's USDC reward"); err != nil {
+			return err
+		}
+		if d.PayoutAddress == "" {
+			address, err := workPayoutAddress(ctx, tx, item.Worker)
+			if err != nil {
+				return err
+			}
+			if address == "" {
+				return payoutAddressRequired()
+			}
+		}
+	}
+	item.State = "open"
+	item.Deadline = root.Deadline - st.VerdictTTL
+	return nil
+}
+
+// standingQueueNote is the acknowledgement's note on a queued result.
+func standingQueueNote(st *workStanding, q *standingQueue, item workRow) string {
+	why := map[string]string{
+		StandingBlockedSeats:  fmt.Sprintf("all %s hold a result waiting for a verdict", plural(st.Seats, "seat")),
+		StandingBlockedPool:   "its credit pool holds no reward for another result",
+		StandingBlockedDayMax: fmt.Sprintf("it has taken its %s today (day_max)", plural(st.DayMax, "result")),
+	}[q.blockedBy]
+	return fmt.Sprintf("Your result is queued (work_id %s, state queued): no seat is open on this standing task right now (%s). It is held, not lost, and counts in standing.submitted; it opens for the requester's verdict with this same id when a seat opens for it, at the earliest %s (next_open_at), in the order results were queued. Nothing more to send: work.get %s reads queued until then, submitted after. If no seat opens for it by %s it expires.",
+		item.ID, why, time.Unix(q.nextOpenAt, 0).UTC().Format(time.RFC3339), item.ID, time.Unix(item.Deadline, 0).UTC().Format(time.RFC3339))
+}
+
+// standingQueuedNextOpen is a queued result's next_open_at on its own
+// reads: when a seat on its standing task opens by itself, or 0.
+func standingQueuedNextOpen(ctx context.Context, tx rowQuerier, standingID string, now int64) (int64, error) {
+	var deadline int64
+	if err := tx.QueryRowContext(ctx, `SELECT deadline FROM works WHERE id=?`, standingID).Scan(&deadline); err != nil {
+		return 0, err
+	}
+	p, err := projectWorkStandingSeats(ctx, tx, workRow{ID: standingID, Deadline: deadline}, "open", now)
+	if err != nil || p == nil {
+		return 0, err
+	}
+	return p.NextOpenAt, nil
+}
+
+// WorkStandingQueueSweepMax bounds the standing tasks one sweep opens
+// queued results on (promoteStandingQueues).
+const WorkStandingQueueSweepMax = 64
+
+// promoteStandingQueues is the sweeper's step (C661): queued results open on
+// every standing task where a seat is open for them.
+func (s *Store) promoteStandingQueues(ctx context.Context, tx *sql.Tx, now int64) (int, error) {
+	ids, err := stringColumn(ctx, tx, `SELECT DISTINCT w.standing_id FROM works w WHERE w.standing_id<>'' AND w.state='open' AND w.deadline>? ORDER BY w.standing_id LIMIT ?`, now, WorkStandingQueueSweepMax)
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if err = s.promoteStandingQueue(ctx, tx, id, now); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
+}
+
+// promoteStandingQueue opens the results queued on standing task id, oldest
+// first, while a seat is open for them (C661): the task's own limits
+// (day_max, seats, pool) hold the rest of the queue, the agent's own (a
+// result waiting, per_agent_day) pass over that one result. An opened
+// result is stored submitted with the same id, opened now (its verdict
+// deadline and its day_max slot count from now), funded from the pool as a
+// claim funds it, and its parties are told as of that claim. A queued
+// result whose reply is hidden, or whose task is cancelled, ends cancelled;
+// one the task's results_until overtook is left to read expired.
+func (s *Store) promoteStandingQueue(ctx context.Context, tx *sql.Tx, id string, now int64) error {
+	queued, err := stringColumn(ctx, tx, `SELECT w.id FROM works w WHERE w.standing_id=? AND w.state='open' AND w.deadline>? ORDER BY w.created_at,w.id LIMIT ?`, id, now, WorkStandingSeatsMax)
+	if err != nil || len(queued) == 0 {
+		return err
+	}
+	root, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, id))
+	if err != nil {
+		return err
+	}
+	st, err := loadWorkStanding(ctx, tx, id)
+	if err != nil || st == nil {
+		return err
+	}
+	if root.State == "cancelled" {
+		_, err = tx.ExecContext(ctx, `UPDATE works SET state='cancelled',updated_at=? WHERE standing_id=? AND state='open'`, now, id)
+		return err
+	}
+	if root.State != "open" || now > root.Deadline-st.VerdictTTL {
+		return nil
+	}
+	var generation string
+	if err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
+		return err
+	}
+	if err = s.returnLapsedStanding(ctx, tx, id, now); err != nil {
+		return err
+	}
+	for _, qid := range queued {
+		item, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, qid))
+		if err != nil {
+			return err
+		}
+		var hidden bool
+		if err = tx.QueryRowContext(ctx, `SELECT `+standingHiddenSQL+` FROM works w WHERE w.id=?`, qid).Scan(&hidden); err != nil {
+			return err
+		}
+		if hidden {
+			if _, err = tx.ExecContext(ctx, `UPDATE works SET state='cancelled',updated_at=? WHERE id=? AND state='open'`, now, qid); err != nil {
+				return err
+			}
+			continue
+		}
+		n, err := readStandingCounts(ctx, tx, id, item.Worker, now)
+		if err != nil {
+			return err
+		}
+		_, pool, err := standingPool(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if n.today >= st.DayMax || n.waiting >= st.Seats || pool < st.maxCredits() {
+			return nil // the task's own limit: the rest of the queue waits too
+		}
+		if n.mineWaiting > 0 || n.mineToday >= st.PerAgentDay {
+			continue // this agent's own limit: the next queued result goes first
+		}
+		held, err := s.openQueuedStandingResult(ctx, tx, root, st, item, generation, now)
+		if err != nil || held {
+			return err
+		}
+	}
+	return nil
+}
+
+// openQueuedStandingResult opens one queued result (promoteStandingQueue):
+// stored submitted, funded from the pool, its USDC payout address the one
+// its claim named (else the worker's linked wallet), and its parties told
+// as of a claim that opened it. held is true when it stays queued because
+// opening it failed for now (USDC rewards unavailable here just now): the
+// queue then waits. A result that can no longer be paid as it stands (no
+// payout address) ends cancelled, nothing taken from the pool.
+func (s *Store) openQueuedStandingResult(ctx context.Context, tx *sql.Tx, root workRow, st *workStanding, item workRow, generation string, now int64) (held bool, err error) {
+	item.State, item.Created, item.Updated, item.Deadline, item.Generation = "submitted", now, now, now+st.VerdictTTL, generation
+	var raw, author string
+	if err = tx.QueryRowContext(ctx, `SELECT coalesce(json_extract(payload,'$.command.data'),''),author FROM work_transitions WHERE work_id=? AND operation='work.claim' ORDER BY sequence DESC LIMIT 1`, item.ID).Scan(&raw, &author); err != nil {
+		return false, err
+	}
+	var d workData
+	if raw != "" {
+		d, _ = parseWorkData(raw, "work.claim")
+	}
+	if _, err = tx.ExecContext(ctx, "SAVEPOINT standing_queue"); err != nil {
+		return false, err
+	}
+	open := func() error {
+		if _, e := tx.ExecContext(ctx, `UPDATE works SET state='submitted',created_at=?,updated_at=?,deadline=?,generation=? WHERE id=? AND state='open'`, now, now, item.Deadline, generation, item.ID); e != nil {
+			return e
+		}
+		// The claim is now the submission it was held as: the history, the
+		// records and the stats read its state (unsigned, the server's).
+		if _, e := tx.ExecContext(ctx, `UPDATE work_transitions SET state='submitted' WHERE work_id=? AND operation='work.claim' AND state='queued'`, item.ID); e != nil {
+			return e
+		}
+		if e := s.fundStandingSeat(ctx, tx, root, st, item, now); e != nil {
+			return e
+		}
+		return s.setWorkPayTo(ctx, tx, "work.claim", item, d, true)
+	}
+	if e := open(); e != nil {
+		var refused *Error
+		if !errors.As(e, &refused) {
+			return false, e
+		}
+		if _, err = tx.ExecContext(ctx, "ROLLBACK TO standing_queue; RELEASE standing_queue"); err != nil {
+			return false, err
+		}
+		if refused.Status >= 500 {
+			return true, nil
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE works SET state='cancelled',updated_at=? WHERE id=? AND state='open'", now, item.ID)
+		return false, err
+	}
+	if _, err = tx.ExecContext(ctx, "RELEASE standing_queue"); err != nil {
+		return false, err
+	}
+	var room string
+	if err = tx.QueryRowContext(ctx, `SELECT room FROM events WHERE id=?`, root.ID).Scan(&room); err != nil {
+		return false, err
+	}
+	reward := st.maxCredits()
+	a := actor{id: author, account: item.Worker, signed: true}
+	if err = s.enqueueMCPWorkEvents(ctx, tx, "work.claim", item, workRoot{Room: room}, item.Worker, reward, "", a, now); err != nil {
+		return false, err
+	}
+	entries, err := s.recordInbox(ctx, tx, workInboxSource("work.claim", item, room, item.Worker, a, now))
+	if err != nil {
+		return false, err
+	}
+	if s.inboxRead(ctx) {
+		err = s.pushWork(ctx, tx, "work.claim", item, workRoot{Room: room}, item.Worker, reward, a, entries, now)
+	}
+	return false, err
+}
+
 
 // WorkStandingLinkedWorkersMax bounds the other workers on one standing
 // task whose link to a claimant per_agent_max checks (C672).
@@ -765,7 +1039,7 @@ func (s *Store) standingLinkedResults(ctx context.Context, tx *sql.Tx, id, accou
 		return own, nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT w.worker,count(*) FROM works w WHERE w.standing_id=? AND w.worker<>? AND w.worker<>'' AND `+standingPerAgentSQL+`
- GROUP BY w.worker ORDER BY max(w.created_at) DESC LIMIT ?`, id, account, now, WorkStandingLinkedWorkersMax)
+ GROUP BY w.worker ORDER BY max(w.created_at) DESC LIMIT ?`, id, account, now, now, WorkStandingLinkedWorkersMax)
 	if err != nil {
 		return 0, err
 	}
@@ -824,8 +1098,8 @@ func normalizedResultSHA256(text string) (string, int) {
 
 // checkStandingDuplicate refuses a result whose text repeats, word for
 // word (whitespace aside), an earlier result on the same standing task
-// that still stands: waiting for a verdict (not lapsed, not hidden) or
-// accepted, paid or USDC owed (C615). A rejected, lapsed or hidden result
+// that still stands: waiting for a verdict (not lapsed, not hidden),
+// queued for a seat (C661) or accepted, paid or USDC owed (C615). A rejected, lapsed or hidden result
 // does not count, so someone else may still do that check properly. Any
 // worker's earlier result counts, the claimant's own too. It compares the
 // text, never a notary receipt's hash alone: two honest checks of an
@@ -840,8 +1114,8 @@ func checkStandingDuplicate(ctx context.Context, tx *sql.Tx, standingID string, 
 	want, size := normalizedResultSHA256(text)
 	rows, err := tx.QueryContext(ctx, `SELECT w.id,e.text FROM works w JOIN events e ON e.id=w.result_id
  WHERE w.standing_id=? AND w.id<>? AND length(CAST(e.text AS BLOB))>=?
- AND (w.state='accepted' OR (w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`))
- ORDER BY w.created_at,w.id`, standingID, item.ID, size, now)
+ AND (w.state='accepted' OR (w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`) OR `+standingQueuedSQL+`)
+ ORDER BY w.created_at,w.id`, standingID, item.ID, size, now, now)
 	if err != nil {
 		return err
 	}
@@ -924,7 +1198,7 @@ func (s *Store) fundStandingSeat(ctx context.Context, tx *sql.Tx, root workRow, 
 	if u := st.maxUSDC(); u > 0 {
 		c := s.config.WorkUSDC
 		if c == nil {
-			return problem(503, "usdc_rewards_unavailable", "USDC work rewards need the chain reader, which is not configured here just now; try again later.")
+			return errUSDCChainUnavailable()
 		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO work_usdc(work_id,requester,amount,network,asset,state,created_at) VALUES(?,?,?,?,?,'promised',?)", item.ID, root.Requester, u, c.Network, c.Asset.String(), now); err != nil {
 			return err
@@ -1365,7 +1639,7 @@ func projectWorkStandingSeats(ctx context.Context, tx rowQuerier, w workRow, eff
 	if err != nil {
 		return nil, err
 	}
-	p := &WorkStanding{WorkStandingSeats: WorkStandingSeats{Seats: st.Seats, Submitted: n.waiting, Owed: n.owed, Paid: n.accepted - n.owed, PerAgentDay: st.PerAgentDay, PerAgentMax: st.PerAgentMax, Full: st.full(n)}, Results: n.results, ResultsMax: st.ResultsMax, DayMax: st.DayMax,
+	p := &WorkStanding{WorkStandingSeats: WorkStandingSeats{Seats: st.Seats, Submitted: n.waiting + n.queued, Queued: n.queued, Owed: n.owed, Paid: n.accepted - n.owed, PerAgentDay: st.PerAgentDay, PerAgentMax: st.PerAgentMax, Full: st.full(n)}, Results: n.results, ResultsMax: st.ResultsMax, DayMax: st.DayMax,
 		OpenedToday: n.today, Tiers: st.Tiers, VerdictTTL: st.VerdictTTL, ResultsUntil: w.Deadline - st.VerdictTTL}
 	if st.USDCPerAgentDay > 0 {
 		p.USDCPerAgentDay = services.FormatUSDC(st.USDCPerAgentDay)
@@ -1381,8 +1655,9 @@ func projectWorkStandingSeats(ctx context.Context, tx rowQuerier, w workRow, eff
 	}
 	rewards := (pool + lapsed) / st.maxCredits()
 	if effective == "open" && now <= p.ResultsUntil && pool >= 0 && n.today < st.DayMax && !p.Full {
-		// Also bounded by what the day still allows (day_max, checkStandingSeat).
-		p.Open = max(0, min(st.Seats-n.waiting, rewards, st.DayMax-n.today))
+		// Also bounded by what the day still allows (day_max, checkStandingSeat);
+		// results queued for a seat take the next ones (C661).
+		p.Open = max(0, min(st.Seats-n.waiting, rewards, st.DayMax-n.today)-n.queued)
 		if st.ResultsMax > 0 {
 			p.Open = min(p.Open, st.ResultsMax-n.counted())
 		}
@@ -1412,6 +1687,15 @@ func standingBlockedBy(st *workStanding, n standingCounts, rewards, now, until i
 	case n.today >= st.DayMax:
 		return StandingBlockedDayMax
 	}
+	// Else what results queued for a seat take next (C661).
+	switch {
+	case st.Seats-n.waiting-n.queued <= 0:
+		return StandingBlockedSeats
+	case rewards-n.queued < 1:
+		return StandingBlockedPool
+	case n.today+n.queued >= st.DayMax:
+		return StandingBlockedDayMax
+	}
 	return ""
 }
 
@@ -1425,6 +1709,9 @@ func (p *WorkStanding) blockedNote() string {
 	case StandingBlockedDayMax:
 		return fmt.Sprintf("today's %s taken (day_max)", plural(p.DayMax, "result"))
 	case StandingBlockedSeats:
+		if p.Queued > 0 {
+			return fmt.Sprintf("seats full, %d submitted awaiting verdict (%d of them queued for a seat)", p.Submitted, p.Queued)
+		}
 		return fmt.Sprintf("seats full, %d submitted awaiting verdict", p.Submitted)
 	case StandingBlockedPool:
 		return "the credit pool holds no reward for another result until a reject or the next accept"
@@ -1481,12 +1768,14 @@ func standingReaderBlock(ctx context.Context, q rowQuerier, id, account string, 
 // 00:00 UTC; seats held by results waiting for a verdict, or a pool short
 // of a reward, free when the first waiting result lapses at its verdict
 // deadline (a verdict may free one sooner). USDC owed holds no seat (C386).
+// Results queued for a seat (C661) take the next seats, rewards and day_max
+// slots first.
 func standingNextOpen(st *workStanding, n standingCounts, rewards, now, until int64) int64 {
 	var at int64
-	if n.today >= st.DayMax {
+	if n.today+n.queued >= st.DayMax {
 		at = now - now%86400 + 86400
 	}
-	if st.Seats-n.waiting <= 0 || rewards < 1 {
+	if st.Seats-n.waiting-n.queued <= 0 || rewards-n.queued < 1 {
 		if n.nextVerdict == 0 {
 			return 0
 		}
@@ -1531,12 +1820,13 @@ func WorkStandingCapabilities() map[string]any {
 		"tiers":       map[string]any{"field": "work.create data tiers", "max": WorkStandingTiersMax, "shape": `{"name":"bug","credits":N,"usdc":"0.20"}`, "credits": "required in every tier", "default": "reward makes one tier named " + WorkStandingTierFirst, "accept": "work.accept data tier names one; default the first"},
 		"usdc_caps":   map[string]any{"fields": []string{"usdc_per_agent_day", "usdc_day_max"}, "counted": "USDC owed or paid on this standing task's results accepted that UTC day; usdc_per_agent_day by worker account and by payout address", "owed_max": "always on: USDC owed and not yet settled on this standing task's results may not pass seats times the largest tier's USDC (standing.usdc_owed, standing.usdc_owed_max); work.settle lowers it", "over_cap": "the result is still accepted and paid in credits only; the acknowledgement says so"},
 		"seats":       "a seat holds a result waiting for a verdict; an accept (USDC paid or owed), a reject or a lapse frees it",
-		"claim":       "work.claim with target RESULT_ID on the standing task opens a task whose id is RESULT_ID (the reply's first version), state submitted; the standing task itself stays open for other seats. The acknowledgement says where the result went: result_work_id, result_state (submitted: awaiting the requester's verdict), standing_id, and seat of seats",
+		"claim":       "work.claim with target RESULT_ID on the standing task opens a task whose id is RESULT_ID (the reply's first version), state submitted; the standing task itself stays open for other seats. The acknowledgement says where the result went: result_work_id, result_state (submitted: awaiting the requester's verdict; queued: held for a seat), standing_id, and seat of seats",
+		"queue":       map[string]any{"when": "a claim while no seat is open for the task (" + StandingBlockedSeats + ", " + StandingBlockedPool + ", " + StandingBlockedDayMax + ") and one opens by itself (next_open_at)", "state": "queued (stored open): acknowledgement state and result_state queued with next_open_at; work.get RESULT_ID state queued with next_open_at; the reply's mark queued", "counts": "standing.submitted and standing.queued, results_max, per_agent_max and the duplicate check; no seat, reward or day_max slot", "opens": "oldest first, with the same id, state submitted, its verdict deadline from then, when a seat is open for it: on the next claim, a verdict that frees a seat, a verdict sent with its id, or the sweep", "bounds": "one result waiting or queued per agent (seat_limit); at most seats queued per task, then the claim is refused", "ends": "cancelled when its reply is hidden or the task is cancelled; expired if still queued at results_until"},
 		"pool":        "the largest tier's credits times seats, held at create; each result takes one reward from it, a reject or lapse returns it, an accept's next reward refills it from the requester's credits",
 		"verdict_ttl": WorkStandingVerdictTTL, "verdict": "each result has its own deadline, verdict_ttl after it opens; undecided by then it counts as unpaid_lapsed and its seat returns",
 		"results_until": "the standing task's deadline minus verdict_ttl", "reject": "terminal for that task (stored cancelled); the seat reopens", "cancel": "only the standing task itself, not a result: work.cancel on it stops new results at once (the requester's way to close it early); results already waiting are still judged",
 		"successor":    map[string]any{"command": WorkSuccessorSet, "data": "successor (the next round's work ID)", "by": "the requester", "successor": "another standing task of the same requester, open, in the same room or a public one; no cycles, at most " + fmt.Sprint(WorkStandingSuccessorDepth) + " links", "refused": "400 invalid_work_data", "read": "standing.successor; while the task is not claimable, standing.next_round is the first claimable task along the chain", "web": "/work/ID links the open round"},
-		"read":         map[string]any{"standing_task": "work.get standing {seats, open, submitted, owed, paid, results, results_max, full, per_result, next_open_at, blocked_by, blocked_note, usdc_owed, usdc_owed_max, successor, next_round, ...} and claimable", "result": "work.get standing_id, and tier once accepted", "list": "/api/works?standing=ID, data.standing the same seats", "yours": fmt.Sprintf("work.get on the standing task, signed: your_results [{work_id, result_id, state, submitted_at, verdict, tier}], the signer's own results only (never another worker's; none on an anonymous read), newest first, at most %d; verdict is accepted or rejected once there is one", WorkYourResultsMax), "waiting": fmt.Sprintf("work.get on the standing task, any reader: waiting_results [{work_id, result_id, worker, submitted_at, deadline}], the results waiting for the requester's verdict, oldest first, at most %d (waiting_results_truncated when more wait); work.accept and work.reject name a result's work_id, and sent with the standing task's own id are 409 work_state_conflict naming the results to judge", WorkWaitingResultsMax)},
+		"read":         map[string]any{"standing_task": "work.get standing {seats, open, submitted, queued, owed, paid, results, results_max, full, per_result, next_open_at, blocked_by, blocked_note, usdc_owed, usdc_owed_max, successor, next_round, ...} and claimable", "result": "work.get standing_id, and tier once accepted", "list": "/api/works?standing=ID, data.standing the same seats", "yours": fmt.Sprintf("work.get on the standing task, signed: your_results [{work_id, result_id, state, submitted_at, verdict, tier}], the signer's own results only (never another worker's; none on an anonymous read), newest first, at most %d; verdict is accepted or rejected once there is one", WorkYourResultsMax), "waiting": fmt.Sprintf("work.get on the standing task, any reader: waiting_results [{work_id, result_id, worker, submitted_at, deadline}], the results waiting for the requester's verdict, oldest first, at most %d (waiting_results_truncated when more wait); work.accept and work.reject name a result's work_id, and sent with the standing task's own id are 409 work_state_conflict naming the results to judge", WorkWaitingResultsMax)},
 		"blocked_by":   map[string]any{"values": WorkStandingBlockedBy, "sent": "while a result could not open now; blocked_note says it in a line, next_open_at when it lifts by itself (absent when only a verdict or the requester frees it)", "reader": "own_result_waiting and per_agent_day only on a read for that agent (signed, work.get target, works.list data eligible_for), with eligible false; seats stay open to others"},
 		"refusals":     []string{"standing_needs_result", "seats_full", "seat_limit", "result_in_use", "results_max_reached", "duplicate_result"},
 		"instructions": "/protocol.md#standing-tasks"}

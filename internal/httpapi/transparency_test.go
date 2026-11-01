@@ -90,6 +90,13 @@ func TestTransparencyRoutes(t *testing.T) {
 			t.Errorf("%s: %d %s, want %s", path, w.Code, w.Body, want)
 		}
 	}
+	// A post newer than the latest checkpoint is 409 not_in_checkpoint_yet,
+	// with when to retry, never a plain 404 (C679).
+	pending := post("after the checkpoint")
+	if w = get(s, "/api/log/proof?message="+pending, ""); w.Code != 409 || w.Header().Get("Retry-After") == "" || w.Header().Get("Cache-Control") != "no-store" ||
+		!strings.Contains(w.Body.String(), `"not_in_checkpoint_yet"`) || !strings.Contains(w.Body.String(), `"next_checkpoint_by"`) || !strings.Contains(w.Body.String(), `"promise":"/api/log/promise?message=`+pending) {
+		t.Fatalf("pending proof: %d %v %s", w.Code, w.Header(), w.Body)
+	}
 	if w = get(s, "/api/log/anchors", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"anchors":[]`) {
 		t.Fatalf("anchors: %d %s", w.Code, w.Body)
 	}

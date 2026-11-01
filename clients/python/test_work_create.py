@@ -119,7 +119,7 @@ class WorkListKindsTest(unittest.TestCase):
         for kind in swarmmemo.WORK_LIST_KINDS:
             with self.subTest(kind=kind):
                 self.assertEqual(parser.parse_args(["work", "list", "--kind", kind]).kind, kind)
-        self.assertEqual(len(swarmmemo.WORK_LIST_KINDS), 12)
+        self.assertEqual(len(swarmmemo.WORK_LIST_KINDS), 13)
 
 
 class ReviewRelationshipsTest(unittest.TestCase):

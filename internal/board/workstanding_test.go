@@ -122,8 +122,11 @@ func TestWorkStandingSeatsAcceptRejectLapse(t *testing.T) {
 
 	r2, claim2 := standingClaim(t, s, w2, id, nil)
 	run(t, s, claim2)
-	_, claim3 := standingClaim(t, s, w3, id, nil)
-	fails(t, s, claim3, "seats_full")
+	// Every seat taken: the next result is queued, not refused (C661).
+	r3, claim3 := standingClaim(t, s, w3, id, nil)
+	if ack := run(t, s, claim3).Data["ack"].(WorkAck); ack.State != "queued" || ack.ResultState != "queued" || ack.WorkID != r3 {
+		t.Fatalf("queued ack: %+v", ack)
+	}
 
 	// Accept pays the tier from the result's escrow and refills the pool.
 	requesterBefore := creditIn(t, s, requester, "remaining")
@@ -145,11 +148,13 @@ func TestWorkStandingSeatsAcceptRejectLapse(t *testing.T) {
 	if w := getTestWork(t, s, r2); w.Tier != WorkStandingTierFirst || w.Reward.State != "paid" || w.Reward.Receipt == nil {
 		t.Fatalf("accepted result: %+v %+v", w, w.Reward)
 	}
-	if st = standingAt(t, s, id); st.Submitted != 1 || st.Paid != 1 || st.Open != 1 || st.Results != 2 {
+	// The accept freed a seat: the queued result took it, with its own id.
+	if st = standingAt(t, s, id); st.Submitted != 2 || st.Queued != 0 || st.Paid != 1 || st.Open != 0 || st.Results != 3 {
 		t.Fatalf("after accept: %+v", st)
 	}
-	r3, claim3 := standingClaim(t, s, w3, id, nil)
-	run(t, s, claim3)
+	if w := getTestWork(t, s, r3); w.State != "submitted" {
+		t.Fatalf("queued result after the accept reads %q", w.State)
+	}
 
 	// Reject is terminal and returns the seat and the reward to the pool.
 	fails(t, s, workCommand(s, owner, Command{Operation: "work.cancel", MessageID: r1, Reason: "no"}), "work_state_conflict")
@@ -207,23 +212,18 @@ func TestWorkStandingSeatsAcceptRejectLapse(t *testing.T) {
 	}
 	_, c := standingClaim(t, s, keyFor(176), id, nil)
 	run(t, s, c)
-	_, c = standingClaim(t, s, keyFor(177), id, nil)
-	// C585: the refusal says when the next seat opens, in words and in
-	// details, and the public reads (work.get, works.list) carry the same.
-	// Both seats also hold a result opened today, so the next one opens
-	// past the day's reset, at the first of their verdict deadlines.
+	queuedID, c := standingClaim(t, s, keyFor(177), id, nil)
+	// C585: the answer says when the next seat opens, and the public reads
+	// (work.get, works.list) carry the same. Both seats also hold a result
+	// opened today, so the next one opens past the day's reset, at the
+	// first of their verdict deadlines. C661: the result is queued for it.
 	now := int64(testTime + WorkStandingVerdictTTL + 60) // atTime above
 	next := now + WorkStandingVerdictTTL
-	_, err := s.Execute(testContext, c, "test-origin")
-	var refused *Error
-	want := "No seat is open on this task right now; the next one opens at " + time.Unix(next, 0).UTC().Format(time.RFC3339) + " (daily limit, then a waiting result's verdict deadline): it takes 4 results a day and has them today (day_max)."
-	if !errors.As(err, &refused) || refused.Code != "seat_limit" || refused.Message != want || refused.RetryAfter != int(next-now) || refused.NextOpenAt != next {
-		t.Fatalf("day_max refusal: %v, want %q", err, want)
+	ack = run(t, s, c).Data["ack"].(WorkAck)
+	if ack.State != "queued" || ack.WorkID != queuedID || ack.NextOpenAt != next || !strings.Contains(ack.Note, time.Unix(next, 0).UTC().Format(time.RFC3339)) || !strings.Contains(ack.Note, "day_max") {
+		t.Fatalf("day_max queue: %+v", ack)
 	}
-	if d, _ := refused.Details.(map[string]any); d["next_open_at"] != next || d["blocked_by"] != StandingBlockedDayMax {
-		t.Fatalf("day_max refusal details: %#v", refused.Details)
-	}
-	if st = standingAt(t, s, id); st.OpenedToday != 4 || st.Open != 0 || st.NextOpenAt != next || st.BlockedBy != StandingBlockedSeats {
+	if st = standingAt(t, s, id); st.OpenedToday != 4 || st.Open != 0 || st.NextOpenAt != next || st.BlockedBy != StandingBlockedSeats || st.Queued != 1 || st.Submitted != 3 {
 		t.Fatalf("day max: %+v", st)
 	}
 	openList := run(t, s, Command{Operation: "works.list", Kind: "open"})
@@ -242,12 +242,12 @@ func TestWorkStandingSeatsAcceptRejectLapse(t *testing.T) {
 	if got := totalCredit(t, s); got != supply-2 {
 		t.Fatalf("supply %d -> %d", supply, got)
 	}
-	if n := sqlCount(t, s, "SELECT count(*) FROM works WHERE standing_id=?", id); n != 7 {
-		t.Fatalf("%d results opened, want 7", n)
+	if n := sqlCount(t, s, "SELECT count(*) FROM works WHERE standing_id=?", id); n != 8 {
+		t.Fatalf("%d results opened or queued, want 8", n)
 	}
 	listPage := run(t, s, Command{Operation: "works.list", Data: `{"schema":1,"standing":"` + id + `"}`, Limit: 2})
 	listed := run(t, s, Command{Operation: "works.list", Data: `{"schema":1,"standing":"` + id + `"}`}).Data["works"].([]Work)
-	if len(listed) != 7 {
+	if len(listed) != 8 {
 		t.Fatalf("works.list standing lists %d", len(listed))
 	}
 	// C302: the list carries the standing task's seats, the very object
@@ -270,6 +270,10 @@ func TestWorkStandingSeatsAcceptRejectLapse(t *testing.T) {
 	}
 	if w := getTestWork(t, s, id); w.Reward.State != "released" || w.Standing.Open != 0 {
 		t.Fatalf("cancelled standing task: %+v %+v", w.Reward, w.Standing)
+	}
+	// A result queued on it never opens (C661).
+	if w := getTestWork(t, s, queuedID); w.State != "cancelled" {
+		t.Fatalf("queued result on a cancelled task reads %q", w.State)
 	}
 }
 
@@ -451,27 +455,32 @@ func TestWorkStandingSeatRace(t *testing.T) {
 		_, cmds[i] = standingClaim(t, s, keyFor(byte(196+i)), id, nil)
 	}
 	errs := make([]error, len(cmds))
+	results := make([]Result, len(cmds))
 	var wg sync.WaitGroup
 	for k := range cmds {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[k] = s.Execute(testContext, cmds[k], "test-origin")
+			results[k], errs[k] = s.Execute(testContext, cmds[k], "test-origin")
 		}()
 	}
 	wg.Wait()
-	won := 0
-	for _, err := range errs {
+	// One opens; one is queued for the seat (the queue holds seats
+	// results, C661); the rest are refused.
+	won, queued := 0, 0
+	for k, err := range errs {
 		var e *Error
 		switch {
+		case err == nil && results[k].Data["ack"].(WorkAck).State == "queued":
+			queued++
 		case err == nil:
 			won++
 		case !errors.As(err, &e) || e.Code != "seats_full":
 			t.Fatalf("a losing claim: %v", err)
 		}
 	}
-	if won != 1 || sqlCount(t, s, "SELECT count(*) FROM works WHERE standing_id=?", id) != 1 || creditIn(t, s, requester, "held") != 200 {
-		t.Fatalf("%d claims won; held %d", won, creditIn(t, s, requester, "held"))
+	if won != 1 || queued != 1 || sqlCount(t, s, "SELECT count(*) FROM works WHERE standing_id=?", id) != 2 || creditIn(t, s, requester, "held") != 200 {
+		t.Fatalf("%d claims won, %d queued; held %d", won, queued, creditIn(t, s, requester, "held"))
 	}
 	if err := s.Integrity(testContext); err != nil {
 		t.Fatal(err)
@@ -693,9 +702,10 @@ func TestWorkStandingRejectFreesDaySlot(t *testing.T) {
 	if st.Open != 0 || st.OpenedToday != 1 || st.Paid != 1 || st.BlockedBy != StandingBlockedDayMax || st.NextOpenAt != midnight {
 		t.Fatalf("after accept: %+v", st)
 	}
-	_, cc := standingClaim(t, s, c, id, nil)
-	if e := refusal(cc); e.Code != "seat_limit" || e.Details.(map[string]any)["blocked_by"] != StandingBlockedDayMax || e.NextOpenAt != midnight {
-		t.Fatalf("C after the accept: %v %#v", e, e.Details)
+	// C's result is queued for the day's next slot, not refused (C661).
+	rc, cc := standingClaim(t, s, c, id, nil)
+	if ack := run(t, s, cc).Data["ack"].(WorkAck); ack.State != "queued" || ack.NextOpenAt != midnight || ack.WorkID != rc {
+		t.Fatalf("C after the accept: %+v", ack)
 	}
 	// An accepted result keeps its slot even once hidden: a room that hides
 	// it cannot reopen the day for a second payment.
@@ -739,8 +749,9 @@ func TestWorkStandingHiddenResultFreesSeat(t *testing.T) {
 	run(t, s, c1)
 	r2, c2 := standingClaim(t, s, w2, id, nil)
 	run(t, s, c2)
-	_, c3 := standingClaim(t, s, w3, id, nil)
-	fails(t, s, c3, "seats_full")
+	if st := standingAt(t, s, id); st.Open != 0 || st.BlockedBy != StandingBlockedSeats {
+		t.Fatalf("seats taken: %+v", st)
+	}
 
 	// The spam result is hidden: its seat and day slot are free at once.
 	hide(r1)

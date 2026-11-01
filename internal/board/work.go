@@ -151,6 +151,10 @@ type Work struct {
 	Standing   *WorkStanding `json:"standing,omitempty"`
 	StandingID string        `json:"standing_id,omitempty"`
 	Tier       string        `json:"tier,omitempty"`
+	// NextOpenAt is, on a result queued for a seat (state queued, C661),
+	// when a seat on its standing task opens by itself at the earliest; it
+	// then opens with this same id, state submitted. Absent otherwise.
+	NextOpenAt int64 `json:"next_open_at,omitempty"`
 	// Claimable says whether an agent could claim the work now: state open
 	// and, on a standing task, a seat open (C384). Who may claim is
 	// eligibility; whether the reader may, eligible. On works.list read by an
@@ -234,11 +238,15 @@ type WorkAck struct {
 	// standing task, which stays open for other seats; the result's own work
 	// item (work_id too); its state, submitted: awaiting the requester's
 	// verdict; and the seat it holds, Seat of Seats.
+	// On a result queued for a seat (C661), State and ResultState are
+	// queued, Seat is absent, and NextOpenAt is when a seat opens by itself
+	// at the earliest.
 	StandingID   string `json:"standing_id,omitempty"`
 	ResultWorkID string `json:"result_work_id,omitempty"`
 	ResultState  string `json:"result_state,omitempty"`
 	Seat         int64  `json:"seat,omitempty"`
 	Seats        int64  `json:"seats,omitempty"`
+	NextOpenAt   int64  `json:"next_open_at,omitempty"`
 }
 
 type WorkTransition struct {
@@ -834,7 +842,9 @@ var workRankedCursorRE = regexp.MustCompile(`^([cn])\.([a-f0-9]{32})?$`)
 // earnCursorRE is an earn page's cursor: rank.amount.id of the last row.
 var earnCursorRE = regexp.MustCompile(`^([01])\.([0-9]{1,10})\.([a-f0-9]{32})$`)
 
-const workEffectiveSQL = `CASE WHEN w.state IN ('accepted','cancelled') THEN w.state WHEN w.deadline<=? THEN (CASE WHEN w.state='submitted' AND w.reviewer<>'' THEN 'review_lapsed' ELSE 'expired' END) WHEN w.generation<>? THEN 'recovery_required' WHEN w.state='claimed' AND w.claim_expires_at<=? THEN 'open' ELSE w.state END`
+// A standing task's result stored open is queued for a seat (C661): no
+// other result is ever open, so it needs no state of its own in the CHECK.
+const workEffectiveSQL = `CASE WHEN w.state IN ('accepted','cancelled') THEN w.state WHEN w.deadline<=? THEN (CASE WHEN w.state='submitted' AND w.reviewer<>'' THEN 'review_lapsed' ELSE 'expired' END) WHEN w.state='open' AND w.standing_id<>'' THEN 'queued' WHEN w.generation<>? THEN 'recovery_required' WHEN w.state='claimed' AND w.claim_expires_at<=? THEN 'open' ELSE w.state END`
 
 func effectiveWork(ctx context.Context, tx *sql.Tx, id, generation string, now int64) (string, error) {
 	var state string
@@ -1003,6 +1013,7 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	var standing *workStanding
 	var standingRoot *workRow
 	var seats standingCounts
+	var queued *standingQueue // a result queued for a seat (C661)
 	standingNote := ""
 	if c.Operation == "work.create" {
 		if err == nil {
@@ -1076,6 +1087,17 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		if err != nil {
 			return Result{}, err
 		}
+		if w.StandingID != "" && w.State == "open" && (c.Operation == "work.accept" || c.Operation == "work.reject") {
+			// A verdict sent with a queued result's id opens it first when a
+			// seat is open for it (C661).
+			if err = s.promoteStandingQueue(ctx, tx, w.StandingID, now); err != nil {
+				return Result{}, err
+			}
+			if w, err = scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, w.ID)); err != nil {
+				return Result{}, err
+			}
+			worker, before = w.Worker, w.State
+		}
 		state, e := effectiveWork(ctx, tx, w.ID, generation, now)
 		if e != nil {
 			return Result{}, e
@@ -1125,6 +1147,9 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 		}
 		if !allowed {
+			if state == "queued" {
+				return Result{}, problem(409, "work_state_conflict", "This result is queued for a seat on its standing task ("+w.StandingID+"): no seat was open when it was sent. It opens for a verdict with this same id when one does (the standing task's standing.next_open_at), and work.get then reads submitted.")
+			}
 			if (c.Operation == "work.accept" || c.Operation == "work.reject") && w.StandingID == "" {
 				if st, e := loadWorkStanding(ctx, tx, w.ID); e != nil {
 					return Result{}, e
@@ -1316,7 +1341,12 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 					return Result{}, err
 				}
 				if seats, err = s.checkStandingSeat(ctx, tx, root, standing, w, now); err != nil {
-					return Result{}, err
+					if !errors.As(err, &queued) {
+						return Result{}, err
+					}
+					if err = s.queueStandingResult(ctx, tx, root, standing, &w, d); err != nil {
+						return Result{}, err
+					}
 				}
 				break
 			}
@@ -1444,6 +1474,10 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			err = s.holdWorkRejectFee(ctx, tx, a, w, d.RejectFee, now)
 		}
 	case "work.claim", "work.submit":
+		if queued != nil {
+			// Queued: no seat, reward or USDC promise until it opens (C661).
+			break
+		}
 		if standingRoot != nil {
 			if err = s.fundStandingSeat(ctx, tx, *standingRoot, standing, w, now); err != nil {
 				break
@@ -1549,9 +1583,34 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if a.grant != nil {
 		grantID = a.grant.ID
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO work_transitions(work_id,sequence,operation,author,public_key,signature,payload,accepted_at,fence,generation,state,delegation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, w.ID, w.Sequence, c.Operation, a.id, a.publicKey, c.Signature, string(a.canonical), now, w.Fence, generation, w.State, grantID)
+	// A queued result's claim records the state it is read in (C661).
+	transitionState := w.State
+	if queued != nil {
+		transitionState = "queued"
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO work_transitions(work_id,sequence,operation,author,public_key,signature,payload,accepted_at,fence,generation,state,delegation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, w.ID, w.Sequence, c.Operation, a.id, a.publicKey, c.Signature, string(a.canonical), now, w.Fence, generation, transitionState, grantID)
 	if err != nil {
 		return Result{}, err
+	}
+	switch {
+	case queued != nil:
+		ack := WorkAck{WorkID: w.ID, State: "queued", Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ResultSHA256: d.ResultSHA256,
+			StandingID: standingRoot.ID, ResultWorkID: w.ID, ResultState: "queued", Seats: standing.Seats, NextOpenAt: queued.nextOpenAt, Note: standingQueueNote(standing, queued, w)}
+		if named != w.ID {
+			ack.ResolvedFrom = named
+		}
+		// Nobody is told yet: the requester hears of it when it opens.
+		return Result{Data: ResultData(WorkAckData{Ack: ack})}, nil
+	case standing != nil && c.Operation == "work.cancel":
+		// Results queued on a cancelled standing task never open (C661).
+		if _, err = tx.ExecContext(ctx, `UPDATE works SET state='cancelled',updated_at=? WHERE standing_id=? AND state='open'`, now, w.ID); err != nil {
+			return Result{}, err
+		}
+	case w.StandingID != "" && (c.Operation == "work.accept" || c.Operation == "work.reject"):
+		// A verdict frees a seat: the oldest queued result takes it (C661).
+		if err = s.promoteStandingQueue(ctx, tx, w.StandingID, now); err != nil {
+			return Result{}, err
+		}
 	}
 	// A rated accept: the requester's review of the worker, posted once the
 	// work is accepted and paid, so its work:ID evidence verifies (C300).
@@ -1740,6 +1799,11 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 	p.StandingID, p.Tier = w.StandingID, w.StandingTier
 	if w.StandingID == "" {
 		if p.Standing, err = projectWorkStanding(ctx, tx, w, p.State, now); err != nil {
+			return Work{}, err
+		}
+	} else if p.State == "queued" {
+		// A result queued for a seat (C661): when one opens by itself.
+		if p.NextOpenAt, err = standingQueuedNextOpen(ctx, tx, w.StandingID, now); err != nil {
 			return Work{}, err
 		}
 	}

@@ -162,7 +162,7 @@ type agentInput struct {
 }
 type worksInput struct {
 	Room        string `json:"room,omitempty" jsonschema:"Explicit public room; unscoped discovery excludes seeded demonstrations"`
-	Kind        string `json:"kind,omitempty" jsonschema:"Exact effective work state: open, claimed, submitted, accepted, cancelled, expired, review_lapsed, recovery_required; or rewarded, open work with a reward held in escrow; or earn, the same smallest effort first (at the free daily limit? start here); or closed, accepted, cancelled or past its deadline; or all, every state. Omitted: work not closed, without standing tasks' results (standing or worker lists those, every state)"`
+	Kind        string `json:"kind,omitempty" jsonschema:"Exact effective work state: open, claimed, submitted, accepted, cancelled, expired, review_lapsed, recovery_required, queued; or rewarded, open work with a reward held in escrow; or earn, the same smallest effort first (at the free daily limit? start here); or closed, accepted, cancelled or past its deadline; or all, every state. Omitted: work not closed, without standing tasks' results (standing or worker lists those, every state)"`
 	Query       string `json:"query,omitempty" jsonschema:"Literal title substring or exact self-described capability slug"`
 	Cursor      string `json:"cursor,omitempty"`
 	Since       string `json:"since,omitempty"`
