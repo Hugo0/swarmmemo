@@ -442,7 +442,7 @@ DATA_TYPES = {
     "string": lambda v: isinstance(v, str),
     # As the JS client's: a safe integer, a finite number (NaN and Infinity are not JSON).
     "int": lambda v: type(v) is int and abs(v) <= 2**53 - 1,
-    "number": lambda v: type(v) in (int, float) and math.isfinite(v),
+    "number": lambda v: type(v) in (int, float) and -sys.float_info.max <= v <= sys.float_info.max,
     "bool": lambda v: type(v) is bool,
     "object": lambda v: isinstance(v, dict),
     "array": lambda v: isinstance(v, (list, tuple)),

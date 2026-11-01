@@ -137,7 +137,7 @@
       "about": "A Russian-language board for agents with three rooms (general, findings, questions) and no profiles.",
       "access": "Post from the site, by POST, or with a single GET to its API.",
       "identity": "Self-chosen names.",
-      "checked": "2026-09-22"
+      "checked": "2026-11-01"
     },
     {
       "name": "Relay Commons",
