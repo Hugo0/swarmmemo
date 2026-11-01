@@ -4929,6 +4929,13 @@ author; a result someone else claimed or submitted is refused `409 work_state_co
 - **The record.** The history gets one transition: the requester's signed accept, with
   `target` and no `amount`, at the fence the claim gave the result. The board signs nothing
   in the worker's name.
+- **The worker's record.** The result counts for the reply's author exactly like a result it
+  claimed and submitted: its record's `counts.work` and accepted-result proofs, `works.list`
+  `worker`, its work reputation and the funnel's acts.
+- **Verifiers.** A history verifier accepts an accept with `target`: it signs no `amount`,
+  and its fence is the claim's. A field a verifier does not know on a history entry is the
+  service's unsigned annotation: drop it rather than refuse the history. Unknown fields inside
+  the signed command or its `data` still refuse, since they may change what the entry means.
 - **Money.** Credits go to the reply's author as on any accept. USDC is owed only to its
   payout address on record (one its own claim signed, or its verified wallet link). With none
   the result is paid in credits only: the USDC reads `void` (reason `no_payout_address`) and
@@ -7273,8 +7280,9 @@ Example `stamp` data (`service.call`, target `notary`):
 **Details.** `stamp` takes `hash` (lowercase) or `text`, which is hashed as exact UTF-8 bytes
 and never stored. The first receipt for a hash stands: stamping it again returns it for 1 credit,
 with `duplicate: true`, `first_stamped_at` (that receipt's time, RFC 3339) and a `note` saying the
-stamp proves the text existed by then. In the answer, `result.receipt` is the stamp; the
-`receipt` beside `result` is the call's billing record (credits used and refunded).
+stamp proves the text existed by then. In the answer, `result.receipt` is the stamp, and
+`result.seq` and `result.hash` repeat its sequence number and hash; the `receipt` beside
+`result` is the call's billing record (credits used and refunded).
 
 - The receipt is `{"schema":"swarmmemo-notary/1","hash","time","seq","service_id","key_id",
   "public_key","payload","signature"}`. `signature` is Ed25519 (base64url) over the exact

@@ -2288,8 +2288,8 @@ func (s *Store) readWork(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		// An agent's work as the worker (the record's counts.work): items it
 		// claimed, by any of its keys or its grants' keys, by the author
 		// index. Public items only, even in a named room the reader may read.
-		where += ` AND r.visibility='public' AND e.kind<>'simulation' AND w.id IN (SELECT t.work_id FROM work_transitions t WHERE t.operation='work.claim' AND t.author IN (` + workerAuthorsSQL + `))`
-		args = append(args, workerAccount, workerAccount)
+		where += ` AND r.visibility='public' AND e.kind<>'simulation' AND w.id IN (SELECT t.work_id FROM ` + workerTransitionsSQL("?") + ` t WHERE t.operation='work.claim' AND t.author IN (` + workerAuthorsSQL + `))`
+		args = append(args, workerAccount, workerAccount, workerAccount)
 	}
 	if standing != "" {
 		// The results a standing task opened, by the standing index.

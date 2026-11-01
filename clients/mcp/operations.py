@@ -609,7 +609,13 @@ def _transition(profile, item, work_id):
     # WorkTransition (Inner Ozma 29b5fbe9).
     optional = WORK_TRANSITION_OPTIONAL
     fields = WORK_TRANSITION_REQUIRED | optional
-    if not isinstance(item, dict) or set(item) - fields or not fields - optional <= item.keys(): raise BridgeError("invalid_response")
+    if not isinstance(item, dict) or not fields - optional <= item.keys(): raise BridgeError("invalid_response")
+    # A field this bridge does not know is the service's unsigned annotation
+    # beside the signed command: dropped, never passed on, so a newer service
+    # does not break an older bridge (C692). The signed command and its data
+    # stay strict: an unknown signed field may change what the entry means
+    # (as target did for an accept's fence, C691).
+    item = {key: value for key, value in item.items() if key in fields}
     if "fallback" in item and item["fallback"] not in ENUMS["work_transition_fallbacks"]: raise BridgeError("invalid_response")
     if "note" in item and (not isinstance(item["note"], str) or not 0 < len(item["note"].encode()) <= 512 or "\n" in item["note"]): raise BridgeError("invalid_response")
     for name in ("sequence", "accepted_at", "fence"):

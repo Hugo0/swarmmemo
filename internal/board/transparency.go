@@ -1583,7 +1583,7 @@ var recordWorkSQL = `SELECT
  (SELECT count(*) FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room WHERE w.requester=? AND w.state='accepted' AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0),
  ` + requesterResultsSQL(workRejectedSQL) + `,
  ` + requesterResultsSQL(workUnjudgedSQL) + `
- FROM work_transitions t JOIN events e ON e.id=t.work_id JOIN rooms rm ON rm.name=e.room JOIN works w ON w.id=t.work_id
+ FROM ` + workerTransitionsSQL("?") + ` t JOIN events e ON e.id=t.work_id JOIN rooms rm ON rm.name=e.room JOIN works w ON w.id=t.work_id
  LEFT JOIN work_transitions v ON v.work_id=t.work_id AND v.sequence=t.sequence+1
  WHERE t.operation IN ('work.claim','work.submit') AND t.author IN (` + workerAuthorsSQL + `)
  AND rm.visibility='public' AND e.kind<>'simulation' AND e.hidden=0`
@@ -1600,9 +1600,10 @@ const (
 // recordWorkArgs are recordWorkSQL's arguments in the statement's order:
 // now (the worker's unjudged); the account as the requester (posted,
 // accepted, rejected), the account and now (unjudged); then the account
-// twice (its keys and its grants' child keys).
+// three times (its direct replies accepted as results, its keys and its
+// grants' child keys).
 func recordWorkArgs(now int64, account string) []any {
-	return []any{now, account, account, account, account, now, account, account}
+	return []any{now, account, account, account, account, now, account, account, account}
 }
 
 // requesterResultsSQL counts the results submitted to an account's public,
@@ -1922,10 +1923,10 @@ func (s *Store) decodeRecordProofsCursor(raw, account string) (recordProofsCurso
 // submits its keys or grants signed (work_transitions_author), each one's
 // next transition, the accept, and its item, by the primary keys. An
 // accepted item is final, so its result_id is the result accepted.
-// Arguments: the cursor's accepted_at twice and work id, the account
-// twice, the limit.
-const recordAcceptedSQL = `SELECT w.id,w.result_id,v.accepted_at
- FROM work_transitions t JOIN events e ON e.id=t.work_id JOIN rooms rm ON rm.name=e.room JOIN works w ON w.id=t.work_id
+// Arguments: the account (its direct replies accepted as results), the
+// cursor's accepted_at twice and work id, the account twice, the limit.
+var recordAcceptedSQL = `SELECT w.id,w.result_id,v.accepted_at
+ FROM ` + workerTransitionsSQL("?") + ` t JOIN events e ON e.id=t.work_id JOIN rooms rm ON rm.name=e.room JOIN works w ON w.id=t.work_id
  JOIN work_transitions v ON v.work_id=t.work_id AND v.sequence=t.sequence+1
  WHERE (v.accepted_at<? OR (v.accepted_at=? AND w.id<?))
  AND t.operation IN ('work.claim','work.submit') AND t.state='submitted' AND v.operation='work.accept'
@@ -1963,7 +1964,7 @@ func (s *Store) ReadRecordProofs(ctx context.Context, who, cursor string, limit 
 	if err = s.db.QueryRowContext(ctx, "SELECT id FROM identities WHERE account=? ORDER BY role='primary' DESC,successor='' DESC,created_at DESC,id DESC LIMIT 1", account).Scan(&out.Agent); err != nil {
 		return RecordProofs{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, recordAcceptedSQL, after.At, after.At, after.Work, account, account, limit+1)
+	rows, err := s.db.QueryContext(ctx, recordAcceptedSQL, account, after.At, after.At, after.Work, account, account, limit+1)
 	if err != nil {
 		return RecordProofs{}, err
 	}

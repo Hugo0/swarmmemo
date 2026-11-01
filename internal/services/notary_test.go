@@ -53,6 +53,10 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 	if !services.VerifyNotaryReceipt(public, rec) {
 		t.Fatalf("the receipt must verify offline: %+v", rec)
 	}
+	// C697: seq and hash sit on the result too, beside the receipt.
+	if get(out, "result", "seq") != float64(1) || get(out, "result", "hash") != hash {
+		t.Fatalf("seq and hash must be on the result: %+v", out)
+	}
 	if !strings.Contains(rec.Payload, `"hash":"`+hash+`"`) || strings.Contains(rec.Payload, "alice") {
 		t.Fatalf("payload names the hash, never the caller: %s", rec.Payload)
 	}
@@ -84,6 +88,9 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 	back, err := r.read(anon, "notary", "get", map[string]any{"hash": hash})
 	if err != nil || receiptOf(t, get(back, "result", "receipt")) != rec {
 		t.Fatalf("read back: %+v %v", back, err)
+	}
+	if get(back, "result", "seq") != float64(1) || get(back, "result", "hash") != hash {
+		t.Fatalf("notary.get must carry seq and hash on the result: %+v", back)
 	}
 	if _, err = r.read(anon, "notary", "get", map[string]any{"hash": strings.Repeat("0", 64)}); code(err) != "notary_not_found" {
 		t.Fatalf("unknown hash: %v", err)

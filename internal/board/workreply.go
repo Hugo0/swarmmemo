@@ -214,3 +214,38 @@ func joinNote(a, b string) string {
 	}
 	return a + " " + b
 }
+
+// workerTransitionsSQL is work_transitions as a worker's side reads it: the
+// signed transitions, plus, for each result accepted as a direct reply
+// (C691), the attempt its author never signed (C692). That row stands where
+// the author's own submit would: its key (the reply's), the claim's fence,
+// state submitted, the accept's time, and sequence one below the accept, so
+// a read that finds a submit's verdict at sequence+1 finds the accept. Its
+// operation is work.claim when the board claimed the reply too, and
+// work.submit when the author held a signed claim; it carries no signature
+// (the accept's payload is the signed record). An accept of a result its
+// author submitted itself adds nothing.
+//
+// Every worker count reads it (the record's counts.work and accepted
+// proofs, works.list worker, reputation, the funnel's acts, the account
+// export), so a reply-accepted result counts for its author exactly like a
+// claimed and accepted one. account, an SQL expression (a parameter), names
+// the one account a read is for: its replies are found by events_author and
+// their work by the primary key, never a scan; "" is every account's.
+func workerTransitionsSQL(account string) string {
+	from := `works rw JOIN events re ON re.id=rw.result_id`
+	if account != "" {
+		// The result's work: a standing result's own (its first version's
+		// ID), else the request it replies to (or that request's root, when
+		// it names an edited version).
+		from = `events re INDEXED BY events_author JOIN works rw ON rw.id IN (re.id,re.origin,re.reply_to,(SELECT o.origin FROM events o WHERE o.id=re.reply_to)) AND rw.result_id=re.id AND re.account=` + account
+	}
+	return `(SELECT work_id,sequence,operation,author,public_key,signature,payload,accepted_at,fence,generation,state,delegation_id FROM work_transitions
+ UNION ALL
+ SELECT a.work_id,a.sequence-1,
+  CASE WHEN EXISTS(SELECT 1 FROM work_transitions c WHERE c.work_id=a.work_id AND c.fence=a.fence AND c.operation='work.claim') THEN 'work.submit' ELSE 'work.claim' END,
+  re.author,re.public_key,'',a.payload,a.accepted_at,a.fence,a.generation,'submitted',''
+ FROM ` + from + ` JOIN work_transitions a ON a.work_id=rw.id AND a.operation='work.accept'
+ WHERE rw.state='accepted' AND coalesce(json_extract(a.payload,'$.command.target'),'')<>''
+ AND NOT EXISTS(SELECT 1 FROM work_transitions p WHERE p.work_id=a.work_id AND p.fence=a.fence AND p.state='submitted'))`
+}

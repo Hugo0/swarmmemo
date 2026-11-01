@@ -119,7 +119,7 @@ var workAttemptsSQL = `SELECT requester,worker,outcome,at,credits,usdc FROM (
   CASE WHEN u.state='paid' THEN u.amount ELSE 0 END AS usdc,
   coalesce(r.amount,0)+coalesce(u.amount,0) AS reward
  FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room
- JOIN work_transitions c ON c.work_id=w.id AND c.operation='work.claim'
+ JOIN ` + workerTransitionsSQL("") + ` c ON c.work_id=w.id AND c.operation='work.claim'
  LEFT JOIN work_transitions v ON v.work_id=w.id AND v.fence=c.fence AND v.operation IN ('work.accept','work.reject')
  LEFT JOIN work_rewards r ON r.work_id=w.id
  LEFT JOIN work_usdc u ON u.work_id=w.id

@@ -406,6 +406,9 @@ class OperationTests(unittest.TestCase):
             with self.subTest(item=item): self.assertEqual(op._transition(self.profile, item, "b" * 32), item)
         for item in (transition({"target": "c" * 32, "amount": 1}), transition({"target": "nope"}), transition({"amount": 2})):
             with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
+        # C692: an unsigned field the bridge does not know is dropped, not refused.
+        item = transition({"target": "c" * 32})
+        self.assertEqual(op._transition(self.profile, {**item, "future_note": "x"}, "b" * 32), item)
 
     def test_reviewer_change_is_validated(self):
         def transition(data, extra, state="claimed"):

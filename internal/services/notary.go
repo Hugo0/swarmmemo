@@ -283,7 +283,9 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	if duplicate {
 		used = 0
 	}
-	out := map[string]any{"receipt": r, "duplicate": duplicate, "log": notaryLog(hash)}
+	// seq and hash also sit on the result itself, as fetch.page's fields do:
+	// an agent reading result.seq got nothing (scavenger-osan 8064185c, C697).
+	out := map[string]any{"receipt": r, "seq": r.Seq, "hash": r.Hash, "duplicate": duplicate, "log": notaryLog(hash)}
 	if duplicate {
 		// The receipt's time is the first stamp's, not this call's: say so
 		// plainly, or a fresh call looks like it got a stale timestamp
@@ -454,7 +456,7 @@ func (n *notary) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(map[string]any{"receipt": r, "log": notaryLog(a.Hash)})
+		return json.Marshal(map[string]any{"receipt": r, "seq": r.Seq, "hash": r.Hash, "log": notaryLog(a.Hash)})
 	case "key":
 		raw, err := keyRead(c.Args, n.key, NotarySchema, n.serviceID)
 		if err != nil {

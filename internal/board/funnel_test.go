@@ -825,7 +825,10 @@ func TestFunnelLookupsIndexed(t *testing.T) {
 	for q, lines := range plans {
 		plan := strings.Join(lines, "\n")
 		for _, l := range lines {
-			if strings.HasPrefix(l, "SCAN ") && l != "SCAN CONSTANT ROW" && !strings.HasPrefix(l, "SCAN json_each") {
+			// SCAN t reads the co-routine of the account's own transitions
+			// (workerTransitionsSQL), each branch by an index.
+			coroutine := l == "SCAN t" && strings.Contains(plan, "CO-ROUTINE t")
+			if strings.HasPrefix(l, "SCAN ") && l != "SCAN CONSTANT ROW" && !strings.HasPrefix(l, "SCAN json_each") && !coroutine {
 				t.Errorf("a per-account funnel lookup scans a table (%s):\n%s\nplan:\n%s", l, q, plan)
 			}
 		}

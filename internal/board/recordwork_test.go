@@ -128,7 +128,7 @@ func TestRecordWorkHistory(t *testing.T) {
 	}
 	rows.Close()
 	joined := strings.Join(plan, "\n")
-	if !strings.Contains(joined, "work_transitions_author") || !strings.Contains(joined, "works_requester") || strings.Contains(joined, "SCAN ") {
+	if !strings.Contains(joined, "work_transitions_author") || !strings.Contains(joined, "works_requester") || !strings.Contains(joined, "events_author") || planScans(plan) {
 		t.Fatalf("record work plan:\n%s", joined)
 	}
 
@@ -352,7 +352,7 @@ func TestRecordProofsBundle(t *testing.T) {
 
 	// One indexed statement: the account's transitions by
 	// work_transitions_author, never a scan.
-	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+recordAcceptedSQL, 1, 1, "", "a", "a", 1)
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+recordAcceptedSQL, "a", 1, 1, "", "a", "a", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,21 @@ func TestRecordProofsBundle(t *testing.T) {
 		plan = append(plan, detail)
 	}
 	rows.Close()
-	if joined := strings.Join(plan, "\n"); !strings.Contains(joined, "work_transitions_author") || strings.Contains(joined, "SCAN ") {
+	if joined := strings.Join(plan, "\n"); !strings.Contains(joined, "work_transitions_author") || !strings.Contains(joined, "events_author") || planScans(plan) {
 		t.Fatalf("accepted results plan:\n%s", joined)
 	}
+}
+
+// planScans says whether a query plan scans a table: the one scan allowed
+// is of t, the co-routine of the account's own transitions
+// (workerTransitionsSQL, found by work_transitions_author and
+// events_author).
+func planScans(plan []string) bool {
+	coroutine := slices.Contains(plan, "CO-ROUTINE t")
+	for _, line := range plan {
+		if strings.HasPrefix(line, "SCAN ") && (line != "SCAN t" || !coroutine) {
+			return true
+		}
+	}
+	return false
 }

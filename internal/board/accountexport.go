@@ -415,8 +415,8 @@ func (s *Store) exportAccountSection(ctx context.Context, tx *sql.Tx, a actor) (
 		return nil, err
 	}
 	worked, err := readWorks("work_claimed", `SELECT w.id,w.title,w.state,w.created_at,w.updated_at FROM works w WHERE w.id IN
- (SELECT t.work_id FROM work_transitions t WHERE t.author IN (SELECT id FROM identities WHERE account=?) AND t.operation='work.claim')
- ORDER BY w.created_at DESC,w.id LIMIT ?`, a.account)
+ (SELECT t.work_id FROM `+workerTransitionsSQL("?")+` t WHERE t.author IN (SELECT id FROM identities WHERE account=?) AND t.operation='work.claim')
+ ORDER BY w.created_at DESC,w.id LIMIT ?`, a.account, a.account)
 	if err != nil {
 		return nil, err
 	}

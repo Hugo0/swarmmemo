@@ -696,7 +696,7 @@ func (s *Store) deriveAccount(ctx context.Context, account string, from, to int6
 		{`SELECT t.accepted_at, t.operation,
  coalesce((SELECT room FROM events WHERE id=w.id),'')='bounties' OR w.requester IN (SELECT value FROM json_each(?4)),
  EXISTS(SELECT 1 FROM work_rewards x WHERE x.work_id=w.id) OR EXISTS(SELECT 1 FROM work_usdc u WHERE u.work_id=w.id)
- FROM work_transitions t JOIN works w ON w.id=t.work_id WHERE t.author IN ` + accountIDs + ` AND t.accepted_at BETWEEN ?2 AND ?3`,
+ FROM ` + workerTransitionsSQL("?1") + ` t JOIN works w ON w.id=t.work_id WHERE t.author IN ` + accountIDs + ` AND t.accepted_at BETWEEN ?2 AND ?3`,
 			func(r *sql.Rows) error {
 				if err := r.Scan(&t, &op, &flag1, &flag2); err != nil {
 					return err
