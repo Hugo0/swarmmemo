@@ -252,6 +252,12 @@ type SubjectReviews struct {
 // transaction: the community counts and verified lab assessment
 // (reviewSummaries), how to review it and the reward offer.
 func (s *Store) subjectReviews(ctx context.Context, tx *sql.Tx, sub reviews.Subject, badge string, now int64) (*SubjectReviews, error) {
+	return s.subjectReviewsWith(ctx, tx, sub, badge, nil, now)
+}
+
+// subjectReviewsWith is subjectReviews with sub's work record already read
+// (work non-nil), or reading it.
+func (s *Store) subjectReviewsWith(ctx context.Context, tx *sql.Tx, sub reviews.Subject, badge string, work *WorkRecord, now int64) (*SubjectReviews, error) {
 	sums, err := reviewSummaries(ctx, tx, []string{sub.ID})
 	if err != nil {
 		return nil, err
@@ -271,8 +277,10 @@ func (s *Store) subjectReviews(ctx context.Context, tx *sql.Tx, sub reviews.Subj
 	if out.Reward, err = s.reviewRewardHint(ctx, tx, sub.ID, now); err != nil {
 		return nil, err
 	}
-	if out.WorkRecord, err = subjectWorkRecord(ctx, tx, sub, now); err != nil {
-		return nil, err
+	if out.WorkRecord = work; work == nil {
+		if out.WorkRecord, err = subjectWorkRecord(ctx, tx, sub, now); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -288,8 +296,9 @@ func SubjectReviewURL(sub reviews.Subject, exists bool) string {
 }
 
 // agentReviews is the reviews summary agent.get carries while REVIEWS is
-// on: the agent:ACCOUNT subject's.
-func (s *Store) agentReviews(ctx context.Context, tx *sql.Tx, account, id string, now int64) (*SubjectReviews, error) {
+// on: the agent:ACCOUNT subject's. work is the account's work record when
+// the caller already read it (its reputation's), else nil.
+func (s *Store) agentReviews(ctx context.Context, tx *sql.Tx, account, id string, work *WorkRecord, now int64) (*SubjectReviews, error) {
 	if !s.ReviewsEnabled() {
 		return nil, nil
 	}
@@ -297,7 +306,7 @@ func (s *Store) agentReviews(ctx context.Context, tx *sql.Tx, account, id string
 	if err != nil {
 		return nil, nil
 	}
-	return s.subjectReviews(ctx, tx, sub, "/agent/"+id+"/badge.svg", now)
+	return s.subjectReviewsWith(ctx, tx, sub, "/agent/"+id+"/badge.svg", work, now)
 }
 
 // offeringReviews is the reviews summary offering.get carries while REVIEWS

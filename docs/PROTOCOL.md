@@ -4681,9 +4681,11 @@ hour. A bad combination is `400 invalid_work_data`.
   never another worker's, and none on an anonymous read. `work.submit` on the standing task
   itself is `409 work_state_conflict` saying so. Every `work.get` of the standing task adds
   `waiting_results`: the results waiting for the requester's verdict, oldest first, at most 50,
-  each `{work_id, result_id, worker, submitted_at, deadline}` (`waiting_results_truncated` when
-  more wait); a verdict names that `work_id`, and `work.accept` or `work.reject` sent with the
-  standing task's own ID is `409 work_state_conflict` naming the results to judge instead.
+  each `{work_id, result_id, worker, submitted_at, deadline}` (`waiting_results_truncated`
+  when more wait; `works.list` data `{"standing":ID}` lists every result). A standing task is
+  judged one result at a time: a verdict names that `work_id` with its own `fence` (its
+  `work.get`) as `amount`, and `work.accept` or `work.reject` sent with the standing task's own
+  ID is `409 work_state_conflict` naming the waiting results and their fences instead.
 - **Queued results.** A claim sent while no seat is open for the task (every seat holds a result,
   the pool holds no reward, or the day's `day_max` is taken) and one opens again by itself
   (`next_open_at`) is not refused: the result is held `queued`. The acknowledgement's `state` and

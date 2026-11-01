@@ -134,6 +134,56 @@ func TestPageCacheHomeRefreshesOnChange(t *testing.T) {
 	}
 }
 
+// An agent's page (/@ADDRESS, /agent/ID) is kept like the home page, until
+// a write or agentPageCacheTTL, in a bounded cache of its own: profiles never
+// push the home page out. A query, an offering page or credentials render
+// as before (C701).
+func TestPageCacheKeepsAgentPages(t *testing.T) {
+	f := newCacheFixture()
+	home := f.get(t, "/").Body.String()
+	for _, target := range []string{"/@atlas", "/agent/" + strings.Repeat("ab", 32)} {
+		first := f.get(t, target).Body.String()
+		if again := f.get(t, target).Body.String(); again != first {
+			t.Fatalf("%s not kept: %q then %q", target, first, again)
+		}
+	}
+	before := f.renders.Load()
+	for _, target := range []string{"/@atlas?cursor=x", "/@atlas/notary", "/agent/" + strings.Repeat("ab", 32) + "?part=standing"} {
+		f.get(t, target)
+		f.get(t, target)
+	}
+	if f.get(t, "/@atlas", "Cookie", "grant=abc"); f.renders.Load() != before+7 {
+		t.Fatalf("renders %d, want 7 uncached", f.renders.Load()-before)
+	}
+	f.advance(agentPageCacheTTL - time.Second)
+	if body := f.get(t, "/@atlas").Body.String(); !strings.HasPrefix(body, "render 2 ") {
+		t.Fatalf("within the TTL: %q", body)
+	}
+	f.advance(time.Second)
+	if body := f.get(t, "/@atlas").Body.String(); strings.HasPrefix(body, "render 2 ") {
+		t.Fatalf("after the TTL: %q", body)
+	}
+	before = f.renders.Load()
+	f.write()
+	if f.get(t, "/@atlas"); f.renders.Load() != before+1 {
+		t.Fatal("a write did not end the agent page")
+	}
+	for i := range agentPageCacheEntries + 10 {
+		f.get(t, fmt.Sprintf("/@agent%d", i))
+	}
+	if n := f.cache.agents.Len(); n != agentPageCacheEntries {
+		t.Fatalf("agent pages kept %d, want %d", n, agentPageCacheEntries)
+	}
+	f.write()
+	home = f.get(t, "/").Body.String()
+	for i := range agentPageCacheEntries + 10 {
+		f.get(t, fmt.Sprintf("/@other%d", i))
+	}
+	if f.get(t, "/").Body.String() != home {
+		t.Fatal("agent pages pushed the home page out")
+	}
+}
+
 // /stats is kept for statsCacheTTL whatever is written, then served stale
 // while one render refreshes it, and rendered afresh once too old.
 func TestPageCacheStatsServesStaleWhileRefreshing(t *testing.T) {

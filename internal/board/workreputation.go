@@ -106,7 +106,10 @@ func (side *WorkRecordSide) add(outcome string, at, credits, usdc int64) {
 // workAttemptsSQL is every claim on public rewarded work, with its outcome
 // (accepted, rejected, expired or "" while open or undecided), the verdict's
 // time, the paid reward by unit, and (filtered on) the reward's face value. Arguments: now twice, then the minimum
-// reward; workRecords adds the account filter at %s.
+// reward; workRecords adds the account filter at the two %s: the first
+// (workAccountsSQL) keeps the work items the accounts could be on, so a
+// profile's read never computes every claim on the board (C701), the second
+// is the exact filter on requester and worker.
 var workAttemptsSQL = `SELECT requester,worker,outcome,at,credits,usdc FROM (
  SELECT w.requester AS requester,w.reviewer AS reviewer,` + transitionAccountSQL("c") + ` AS worker,
   CASE WHEN v.operation='work.accept' THEN 'accepted' WHEN v.operation='work.reject' THEN 'rejected'
@@ -123,7 +126,7 @@ var workAttemptsSQL = `SELECT requester,worker,outcome,at,credits,usdc FROM (
  LEFT JOIN work_transitions v ON v.work_id=w.id AND v.fence=c.fence AND v.operation IN ('work.accept','work.reject')
  LEFT JOIN work_rewards r ON r.work_id=w.id
  LEFT JOIN work_usdc u ON u.work_id=w.id
- WHERE ` + workPublicSQL + `) x
+ WHERE ` + workPublicSQL + `%s) x
  WHERE outcome<>'' AND worker<>'' AND worker<>requester AND reward>=?%s
  AND NOT ` + workLinkedSQL("x.requester", "x.worker") + `
  AND NOT (x.reviewer<>'' AND (x.worker=x.reviewer OR ` + workOwnKeySQL("x.reviewer", "x.worker") + `))
@@ -132,6 +135,19 @@ var workAttemptsSQL = `SELECT requester,worker,outcome,at,credits,usdc FROM (
   WHERE c1.account=x.requester AND t1.root=t2.root)
  AND NOT (x.requester IN (SELECT value FROM json_each(coalesce((SELECT value FROM meta WHERE key='` + metaFunnelExclude + `'),'[]')))
   AND x.worker IN (SELECT value FROM json_each(coalesce((SELECT value FROM meta WHERE key='` + metaFunnelExclude + `'),'[]'))))`
+
+// workAccountsSQL keeps (over the claims c) the work items the accounts named at
+// marks (four times in the arguments) could be on as requester or as worker:
+// a worker is the account of a claim's key or its grant's parent
+// (transitionAccountSQL), or a standing result's author's
+// (workerTransitionsSQL). It is wider than the exact filter, never
+// narrower, and only spares workAttemptsSQL every other item's claims.
+func workAccountsSQL(marks string) string {
+	return ` AND c.work_id IN (SELECT id FROM works WHERE requester IN (` + marks + `)
+  UNION SELECT t.work_id FROM identities k JOIN work_transitions t ON t.author=k.id WHERE k.account IN (` + marks + `)
+  UNION SELECT t.work_id FROM delegations d JOIN work_transitions t ON t.delegation_id=d.child_id WHERE d.parent_account IN (` + marks + `)
+  UNION SELECT rw.id FROM ` + workResultsFromSQL + ` WHERE re.account IN (` + marks + `))`
+}
 
 // workOwnKeySQL is true when a key of account a and a key of account b are
 // linked either way: one names the other as its own (an ed25519 identity
@@ -172,8 +188,8 @@ func workRecords(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, accounts []string, now int64) (map[string]*WorkRecord, error) {
 	out := map[string]*WorkRecord{}
-	args := []any{now, now, int64(WorkRecordMinMicroUSD)}
-	filter := ""
+	args := []any{now, now}
+	prefilter, filter := "", ""
 	if accounts != nil {
 		var named []any
 		for _, a := range accounts {
@@ -187,10 +203,16 @@ func workRecords(ctx context.Context, q interface {
 			return out, nil
 		}
 		marks := placeholders(len(named))
+		prefilter = workAccountsSQL(marks)
 		filter = " AND (x.requester IN (" + marks + ") OR x.worker IN (" + marks + "))"
-		args = append(append(args, named...), named...)
+		for range 4 {
+			args = append(args, named...)
+		}
+		args = append(append(append(args, int64(WorkRecordMinMicroUSD)), named...), named...)
+	} else {
+		args = append(args, int64(WorkRecordMinMicroUSD))
 	}
-	rows, err := q.QueryContext(ctx, fmt.Sprintf(workAttemptsSQL, filter), args...)
+	rows, err := q.QueryContext(ctx, fmt.Sprintf(workAttemptsSQL, prefilter, filter), args...)
 	if err != nil {
 		return nil, err
 	}

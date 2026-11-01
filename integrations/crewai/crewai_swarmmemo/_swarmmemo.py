@@ -2161,8 +2161,10 @@ def work_rating_post(work: dict, rating: int, note=None) -> dict:
     if not isinstance(subject, str) or not subject.startswith("agent:"):
         if work.get("standing"):
             # C600: a standing task has no worker; each result is its own work item.
+            # C702: where its fence is, and where they are all listed.
             ids = ", ".join(r["work_id"] for r in work.get("waiting_results", [])) or "none waiting now"
-            raise UsageError(f"this is a standing task: judge a result by its own id ({ids}; work.get waiting_results)")
+            raise UsageError("this is a standing task, judged one result at a time: accept each result by its own id and fence "
+                             f"({ids}; work.get RESULT_ID shows its fence); list them with works.list data {{\"standing\":\"{work['id']}\"}}")
         raise UsageError("the work has no worker to rate (work.get worker_subject)")
     verdict = next(band["verdict"] for band in WORK_RATING["bands"] if rating >= band["from"])
     review = {"subject": subject, "verdict": verdict, "dimensions": {WORK_RATING["dimension"]: rating},

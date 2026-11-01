@@ -274,7 +274,8 @@ class PythonParity(unittest.TestCase):
         self.assertNotIn("format", json.loads(memo.work_rating_post(work, 80, "fast and correct")["data"]))
         self.assertNotIn("format", json.loads(memo.work_rating_post(work, 80)["data"]))
         # C600: a rated accept by a standing task's own id names the results to judge.
-        with self.assertRaisesRegex(ValueError, r"judge a result by its own id \(a{32};"):
+        # C702: with its fence, and the works.list filter that lists them all.
+        with self.assertRaisesRegex(ValueError, r"accept each result by its own id and fence \(a{32};.*works\.list data \{\"standing\":\"" + MESSAGE + r"\"\}"):
             memo.work_rating_post({"id": MESSAGE, "standing": {"seats": 2}, "waiting_results": [{"work_id": "a" * 32}]}, 80)
         self.client.work_accept(MESSAGE, 3, rating=90, note="**Great** result, see *notes*.")
         review = json.loads(self.recorder.data("work.accept")["review"]["data"])

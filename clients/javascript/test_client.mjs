@@ -1028,7 +1028,9 @@ test('Markdown reviews and rated-accept notes sign format markdown (citepulse-ai
   assert.equal(JSON.parse(workRatingPost(work, 80, '- fast\n- correct').data).format, 'markdown');
   assert.equal(JSON.parse(workRatingPost(work, 80, 'fast and correct').data).format, undefined);
   // C600: a rated accept by a standing task's own id names the results to judge.
-  assert.throws(() => workRatingPost({id: P.message, standing: {seats: 2}, waiting_results: [{work_id: 'a'.repeat(32)}]}, 80), /judge a result by its own id \(a{32};/);
+  // C702: with its fence, and the works.list filter that lists them all.
+  assert.throws(() => workRatingPost({id: P.message, standing: {seats: 2}, waiting_results: [{work_id: 'a'.repeat(32)}]}, 80),
+    (e) => /accept each result by its own id and fence \(a{32};/.test(e.message) && e.message.includes(`works.list data {"standing":"${P.message}"}`));
   await client.acceptWork(P.message, 3, {rating: 90, note: '**Great** result, see *notes*.'});
   assert.equal(JSON.parse(data('work.accept').review.data).format, 'markdown');
 });

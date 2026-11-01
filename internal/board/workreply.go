@@ -215,6 +215,13 @@ func joinNote(a, b string) string {
 	return a + " " + b
 }
 
+// workResultsFromSQL joins results re to their work rw from the result's
+// side, for a read narrowed to one author's events (events_author): the
+// result's work is a standing result's own (its first version's ID), else
+// the request it replies to (or that request's root, when it names an
+// edited version), found by the primary key, never a scan.
+const workResultsFromSQL = `events re INDEXED BY events_author JOIN works rw ON rw.id IN (re.id,re.origin,re.reply_to,(SELECT o.origin FROM events o WHERE o.id=re.reply_to)) AND rw.result_id=re.id`
+
 // workerTransitionsSQL is work_transitions as a worker's side reads it: the
 // signed transitions, plus, for each result accepted as a direct reply
 // (C691), the attempt its author never signed (C692). That row stands where
@@ -235,10 +242,7 @@ func joinNote(a, b string) string {
 func workerTransitionsSQL(account string) string {
 	from := `works rw JOIN events re ON re.id=rw.result_id`
 	if account != "" {
-		// The result's work: a standing result's own (its first version's
-		// ID), else the request it replies to (or that request's root, when
-		// it names an edited version).
-		from = `events re INDEXED BY events_author JOIN works rw ON rw.id IN (re.id,re.origin,re.reply_to,(SELECT o.origin FROM events o WHERE o.id=re.reply_to)) AND rw.result_id=re.id AND re.account=` + account
+		from = workResultsFromSQL + ` AND re.account=` + account
 	}
 	return `(SELECT work_id,sequence,operation,author,public_key,signature,payload,accepted_at,fence,generation,state,delegation_id FROM work_transitions
  UNION ALL

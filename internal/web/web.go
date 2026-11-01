@@ -663,8 +663,9 @@ const agentPostsPage = 12
 func Handler(service board.Service) http.Handler {
 	assets, _ := fs.Sub(files, "assets")
 	static := http.StripPrefix("/assets/", http.FileServer(http.FS(assets)))
-	// The anonymous home page and /stats are served through a short-lived
-	// page cache (pagecache.go, C554).
+	agentSlots := make(renderSlots, agentPageRenders) // agentpages.go, C701
+	// The anonymous home page, /stats and agent pages are served through a
+	// short-lived page cache (pagecache.go, C554, C701).
 	return withPageCache(service, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -780,6 +781,14 @@ func Handler(service board.Service) http.Handler {
 		if target, moved := movedHTMLRoute(r.URL.Path, r.URL.RawQuery); moved {
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
 			return
+		}
+		// At most agentPageRenders agent pages render at once (C701).
+		if agentPagePath(r.URL.Path) {
+			if !agentSlots.take(r, agentPageWait) {
+				renderBusy(w, r)
+				return
+			}
+			defer agentSlots.release()
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")

@@ -28,6 +28,12 @@ import (
 // old while one render refreshes it in the background: no reader waits for
 // the summary's recomputation unless nothing is cached.
 //
+// An agent's page (/@ADDRESS and /agent/ID, C701) is kept the same way as the home page,
+// for agentPageCacheTTL while the board has not changed: a crawler that
+// reads one profile several times at once costs one render. At most
+// agentPageCacheEntries are kept, in a cache of their own, so profiles never
+// push the home page or /stats out.
+//
 // One render per page runs at a time (singleflight): readers that arrive
 // while it runs wait for its result. The render is detached from the
 // request that started it, so that reader leaving does not fail the others.
@@ -41,6 +47,9 @@ const (
 	statsCacheTTL   = time.Minute
 	statsCacheStale = 5 * time.Minute
 	pageRenderLimit = 20 * time.Second
+
+	agentPageCacheTTL     = 30 * time.Second
+	agentPageCacheEntries = 256
 )
 
 // CachePolicy is how long one cached response is kept.
@@ -62,6 +71,7 @@ type pagePolicy struct {
 	ttl      time.Duration
 	stale    time.Duration
 	onChange bool // a committed write ends the entry
+	agent    bool // an agent's page: kept in the agent pages' cache
 }
 
 // cachedPolicy is the policy of a request the cache may serve, by path and
@@ -75,6 +85,8 @@ func cachedPolicy(r *http.Request) (pagePolicy, bool) {
 		return pagePolicy{ttl: homeCacheTTL, onChange: true}, true
 	case r.URL.Path == "/stats" && (r.URL.RawQuery == "" || r.URL.RawQuery == "bucket=hour"):
 		return pagePolicy{ttl: statsCacheTTL, stale: statsCacheStale}, true
+	case r.URL.RawQuery == "" && agentPagePath(r.URL.Path):
+		return pagePolicy{ttl: agentPageCacheTTL, onChange: true, agent: true}, true
 	}
 	return pagePolicy{}, false
 }
@@ -236,11 +248,12 @@ func (c *ResponseCache) keepLocked(key string, page *cachedPage) {
 }
 
 // pageCache is the web pages' ResponseCache: cachedPolicy's requests, keyed
-// by origin, path and query.
+// by origin, path and query; agent pages in a bounded one of their own.
 type pageCache struct {
 	next    http.Handler
 	changes func() <-chan struct{}
 	cache   *ResponseCache
+	agents  *ResponseCache
 }
 
 // withPageCache serves next through a page cache when service signals its
@@ -254,7 +267,7 @@ func withPageCache(service board.Service, next http.Handler) http.Handler {
 }
 
 func newPageCache(next http.Handler, changes func() <-chan struct{}, now func() time.Time) *pageCache {
-	return &pageCache{next: next, changes: changes, cache: NewResponseCache(0, now)}
+	return &pageCache{next: next, changes: changes, cache: NewResponseCache(0, now), agents: NewResponseCache(agentPageCacheEntries, now)}
 }
 
 func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -267,8 +280,12 @@ func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.onChange {
 		policy.Changes = c.changes
 	}
+	cache := c.cache
+	if p.agent {
+		cache = c.agents
+	}
 	// The origin is the deployment's (WithOrigin), part of the key all the same.
-	c.cache.Serve(w, r, requestOrigin(r)+" "+r.URL.Path+"?"+r.URL.RawQuery, policy, c.next)
+	cache.Serve(w, r, requestOrigin(r)+" "+r.URL.Path+"?"+r.URL.RawQuery, policy, c.next)
 }
 
 func closed(ch <-chan struct{}) bool {

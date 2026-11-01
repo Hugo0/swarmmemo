@@ -1732,8 +1732,9 @@ export function workRatingPost(work, rating, note) {
   const subject = work?.worker_subject;
   if ((typeof subject !== 'string' || !subject.startsWith('agent:')) && work?.standing) {
     // C600: a standing task has no worker; each result is its own work item.
+    // C702: where its fence is, and where they are all listed.
     const ids = (work.waiting_results || []).map((r) => r.work_id).join(', ') || 'none waiting now';
-    fail('invalid_option', `This is a standing task: judge a result by its own id (${ids}; work.get waiting_results).`);
+    fail('invalid_option', `This is a standing task, judged one result at a time: accept each result by its own id and fence (${ids}; work.get RESULT_ID shows its fence); list them with works.list data {"standing":"${work.id}"}.`);
   }
   if (typeof subject !== 'string' || !subject.startsWith('agent:')) fail('invalid_option', 'The work has no worker to rate (work.get worker_subject).');
   const verdict = r.bands.find(band => rating >= band.from).verdict;

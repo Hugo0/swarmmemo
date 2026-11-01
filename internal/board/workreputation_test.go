@@ -208,6 +208,23 @@ func TestWorkRecordAndRatedAccept(t *testing.T) {
 			t.Errorf("%s is counted: %+v", name, r)
 		}
 	}
+	// One account's read (narrowed to its own work, C701) is exactly its
+	// line of the board-wide read, and empty for an account left out.
+	empty := &WorkRecord{AsWorker: WorkRecordSide{PaidUSDC: "0"}, AsRequester: WorkRecordSide{PaidUSDC: "0"}}
+	for _, k := range []ed25519.PrivateKey{puppet, rootmate, op1, op2} {
+		if one, err := workRecords(testContext, s.db, []string{keyID(k)}, s.now().Unix()); err != nil || !reflect.DeepEqual(one[keyID(k)], empty) {
+			t.Errorf("%s alone %+v (%v), want empty", keyID(k)[:12], one[keyID(k)], err)
+		}
+	}
+	for account, want := range records {
+		one, err := workRecords(testContext, s.db, []string{account}, s.now().Unix())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(one[account], want) {
+			t.Errorf("%s alone %+v, board-wide %+v", account[:12], one[account], want)
+		}
+	}
 
 	// Every surface shows the one function's numbers.
 	want := w1Rec
