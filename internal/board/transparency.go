@@ -804,17 +804,33 @@ func (s *Store) checkpointFor(ctx context.Context, size int64) (LogCheckpoint, e
 // ReadLogProof is the inclusion proof of leaf index (or, when message is set,
 // of that message's leaf) against the checkpoint of size (latest when < 0).
 func (s *Store) ReadLogProof(ctx context.Context, index int64, message string, size int64) (LogInclusion, error) {
+	return s.readLogProof(ctx, index, message, size, true)
+}
+
+// ReadLogPlace is ReadLogProof without the audit paths: the same leaf,
+// checkpoint, anchor, related leaves and attached text, with Proof (and each
+// related Proof) left nil. A page that tells a leaf's place in the log
+// (/e/ID/proof, an agent page's first entry) shows none of the path's
+// hashes, and computing one is some 2*log2(size) reads on the store's one
+// connection (C726: a crawler's /e/ID/proof pages queued every other request
+// behind tlog.InclusionProof). The JSON proof stays /api/log/proof's.
+func (s *Store) ReadLogPlace(ctx context.Context, index int64, message string, size int64) (LogInclusion, error) {
+	return s.readLogProof(ctx, index, message, size, false)
+}
+
+// readLogProof is ReadLogProof, with the audit paths only when withPath.
+func (s *Store) readLogProof(ctx context.Context, index int64, message string, size int64, withPath bool) (LogInclusion, error) {
 	cp, err := s.checkpointFor(ctx, size)
 	if err != nil {
 		return LogInclusion{}, err
 	}
 	var out LogInclusion
 	if message == "" {
-		if out, err = s.inclusion(ctx, index, cp); err != nil && size < 0 && index >= cp.Size {
+		if out, err = s.inclusion(ctx, index, cp, withPath); err != nil && size < 0 && index >= cp.Size {
 			err = s.pendingLeaf(ctx, index, cp, "", err)
 		}
 	} else {
-		out, err = s.refProof(ctx, message, cp, size < 0, nil, notLogged("That message", cp, size))
+		out, err = s.refProof(ctx, message, cp, size < 0, nil, notLogged("That message", cp, size), withPath)
 	}
 	if out, err = s.withAnchor(ctx)(out, err); err != nil || out.Leaf.Kind != "message" {
 		return out, err
@@ -874,7 +890,7 @@ func (s *Store) ReadNotaryProof(ctx context.Context, hash string, size int64) (L
 			len(notaryKeyRef), notaryKeyRef, cp.Size).Scan(&ref); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return LogInclusion{}, err
 		}
-		return s.withAnchor(ctx)(s.refProof(ctx, ref, cp, size < 0, nil, notLogged("The notary key (the notary may be off here)", cp, size)))
+		return s.withAnchor(ctx)(s.refProof(ctx, ref, cp, size < 0, nil, notLogged("The notary key (the notary may be off here)", cp, size), true))
 	}
 	keyLeaf := func(data string) string {
 		var l logLeaf
@@ -883,7 +899,7 @@ func (s *Store) ReadNotaryProof(ctx context.Context, hash string, size int64) (L
 		}
 		return notaryKeyRef + l.KeyID
 	}
-	return s.withAnchor(ctx)(s.refProof(ctx, notaryStampRef+hash, cp, size < 0, keyLeaf, notLogged("A notary receipt for that hash", cp, size)))
+	return s.withAnchor(ctx)(s.refProof(ctx, notaryStampRef+hash, cp, size < 0, keyLeaf, notLogged("A notary receipt for that hash", cp, size), true))
 }
 
 // notLogged is the 404 for a ref with no leaf in the checkpoint asked for:
@@ -956,7 +972,7 @@ func (s *Store) pendingLeaf(ctx context.Context, index int64, cp LogCheckpoint, 
 // of the same ref as related, then the leaves of also(first leaf's data)'s
 // ref when also is set. latest marks cp as the latest checkpoint, against
 // which a leaf after it is pendingLeaf's 409.
-func (s *Store) refProof(ctx context.Context, ref string, cp LogCheckpoint, latest bool, also func(string) string, notFound error) (LogInclusion, error) {
+func (s *Store) refProof(ctx context.Context, ref string, cp LogCheckpoint, latest bool, also func(string) string, notFound error, withPath bool) (LogInclusion, error) {
 	if ref == "" {
 		return LogInclusion{}, notFound
 	}
@@ -970,7 +986,7 @@ func (s *Store) refProof(ctx context.Context, ref string, cp LogCheckpoint, late
 		}
 		return LogInclusion{}, notFound
 	}
-	out, err := s.inclusion(ctx, found[0], cp)
+	out, err := s.inclusion(ctx, found[0], cp, withPath)
 	if err != nil {
 		return out, err
 	}
@@ -985,7 +1001,7 @@ func (s *Store) refProof(ctx context.Context, ref string, cp LogCheckpoint, late
 		}
 	}
 	for _, i := range related {
-		r, err := s.inclusion(ctx, i, cp)
+		r, err := s.inclusion(ctx, i, cp, withPath)
 		if err != nil {
 			return out, err
 		}
@@ -1015,7 +1031,9 @@ func (s *Store) refLeaves(ctx context.Context, ref string, size int64) ([]int64,
 	return found, rows.Err()
 }
 
-func (s *Store) inclusion(ctx context.Context, index int64, cp LogCheckpoint) (LogInclusion, error) {
+// inclusion is leaf index proven against cp; without withPath, Proof is nil
+// (ReadLogPlace).
+func (s *Store) inclusion(ctx context.Context, index int64, cp LogCheckpoint, withPath bool) (LogInclusion, error) {
 	if index < 0 || index >= cp.Size {
 		return LogInclusion{}, problem(404, "not_found", fmt.Sprintf("Leaf %d is not in the checkpoint of %d leaves.", index, cp.Size))
 	}
@@ -1023,11 +1041,16 @@ func (s *Store) inclusion(ctx context.Context, index int64, cp LogCheckpoint) (L
 	if err := s.db.QueryRowContext(ctx, "SELECT kind,data FROM tlog_leaves WHERE idx=?", index).Scan(&kind, &data); err != nil {
 		return LogInclusion{}, err
 	}
+	out := LogInclusion{Leaf: newLogEntry(index, kind, data), TreeSize: cp.Size, Checkpoint: cp}
+	if !withPath {
+		return out, nil
+	}
 	proof, err := tlog.InclusionProof(index, cp.Size, txHashReader(ctx, s.db))
 	if err != nil {
 		return LogInclusion{}, err
 	}
-	return LogInclusion{Leaf: newLogEntry(index, kind, data), TreeSize: cp.Size, Proof: encodeHashes(proof), Checkpoint: cp}, nil
+	out.Proof = encodeHashes(proof)
+	return out, nil
 }
 
 // LogConsistency proves the checkpoint of size From is a prefix of the one of
@@ -1778,7 +1801,7 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 		events = events[len(events)-recordProofsMax:]
 	}
 	for _, idx := range events {
-		p, err := s.inclusion(ctx, idx, cp)
+		p, err := s.inclusion(ctx, idx, cp, true)
 		if err != nil {
 			return SignedRecord{}, err
 		}

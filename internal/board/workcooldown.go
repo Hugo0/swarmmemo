@@ -92,8 +92,9 @@ func (s *Store) workClaimCooldownUntil(ctx context.Context, q workQuerier, links
 // cost the same queries for one row or a whole page; nothing changes them
 // inside one transaction.
 type claimLinks struct {
-	burst *BurstResult // nil: not read yet
-	peers map[claimPeers]map[string]bool
+	burst      *BurstResult // nil: not read yet
+	peers      map[claimPeers]map[string]bool
+	identities map[[2]string]bool // pairs linked, or not, by an ed25519 identity link (linked)
 }
 
 type claimPeers struct {
@@ -127,6 +128,28 @@ func (l *claimLinks) siblings(ctx context.Context, s *Store, q workQuerier, a, b
 		l.peers[key] = peers
 	}
 	return peers[b], nil
+}
+
+// linked reports whether a and b are linked keys, as a standing task's
+// per-agent limits count them (C672, C707): siblings, or an ed25519
+// identity link either way (workLinkedSQL). Each pair is read once.
+func (l *claimLinks) linked(ctx context.Context, s *Store, q workQuerier, a, b string, from int64) (bool, error) {
+	if ok, err := l.siblings(ctx, s, q, a, b, from); ok || err != nil {
+		return ok, err
+	}
+	pair := [2]string{a, b}
+	ok, seen := l.identities[pair]
+	if seen {
+		return ok, nil
+	}
+	if err := q.QueryRowContext(ctx, `SELECT `+workLinkedSQL("?1", "?2")+` OR `+workLinkedSQL("?2", "?1"), a, b).Scan(&ok); err != nil {
+		return false, err
+	}
+	if l.identities == nil {
+		l.identities = map[[2]string]bool{}
+	}
+	l.identities[pair] = ok
+	return ok, nil
 }
 
 // workClaimCooldownText is the refusal's plain message.

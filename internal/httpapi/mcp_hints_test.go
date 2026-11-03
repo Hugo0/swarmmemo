@@ -24,9 +24,6 @@ func TestMCPToolHintsExplained(t *testing.T) {
 			if !a["readOnlyHint"] && mcpWriteEffects[name] == "" && name != callToolName {
 				t.Errorf("%s %s writes but mcpWriteEffects does not say what it changes", path, name)
 			}
-			if a["destructiveHint"] && mcpDestructiveWhy[name] == "" {
-				t.Errorf("%s %s is destructive but mcpDestructiveWhy does not say what it removes", path, name)
-			}
 			if !a["readOnlyHint"] && a["idempotentHint"] != (mcpIdempotentWrites[name] != "") {
 				t.Errorf("%s %s idempotentHint %v disagrees with mcpIdempotentWrites", path, name, a["idempotentHint"])
 			}
@@ -42,7 +39,7 @@ func TestMCPToolHintsExplained(t *testing.T) {
 			}
 		}
 	}
-	for _, table := range []map[string]string{mcpWriteEffects, mcpDestructiveWhy, mcpIdempotentWrites} {
+	for _, table := range []map[string]string{mcpWriteEffects, mcpIdempotentWrites} {
 		for name := range table {
 			// A tool behind a feature this server leaves off (reviews, top-ups,
 			// inbox entries, the toolsets entry) is still a defined tool.

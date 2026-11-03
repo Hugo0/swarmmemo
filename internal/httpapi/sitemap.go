@@ -37,6 +37,13 @@ const (
 // sitemapURLsPerFile is a variable only so a test can page a small board.
 var sitemapURLsPerFile = 40000
 
+// sitemapFresh is how long a built file is served as is (C726): a build
+// reads every listed room, subject, record and thread root on the store's
+// one connection, and a sitemap changes little within the hour, so a crawl
+// that asks again and again costs one build per file per sitemapFresh. A
+// variable only so a test can watch a new post arrive.
+var sitemapFresh = 10 * time.Minute
+
 var sitemapFile = regexp.MustCompile(`^/sitemap-([1-9][0-9]?)\.xml$`)
 
 type sitemapStore interface {
@@ -102,10 +109,18 @@ type sitemapCopy struct {
 	at   time.Time
 }
 
-// sitemap builds the requested file; when a build fails (the database was
-// busy past the read timeout) it serves the last good copy of that file
-// instead of a 503, so crawlers rarely see an error.
+// sitemap serves the requested file's copy while it is sitemapFresh, else
+// builds it; when a build fails (the database was busy past the read
+// timeout) it serves the last good copy of that file instead of a 503, so
+// crawlers rarely see an error.
 func (s *Server) sitemap(w http.ResponseWriter, r *http.Request) {
+	if cached, found := s.sitemaps.Load(r.URL.Path); found && time.Since(cached.(sitemapCopy).at) < sitemapFresh {
+		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+		if r.Method != http.MethodHead {
+			_, _ = w.Write(cached.(sitemapCopy).body)
+		}
+		return
+	}
 	rec := &sitemapRecorder{header: http.Header{}}
 	s.buildSitemap(rec, r)
 	ok := rec.status == 0 || rec.status == http.StatusOK

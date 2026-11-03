@@ -24,9 +24,11 @@ import (
 // slug never equals it.
 const proofSuffix = "proof"
 
-// logProofReader is the store's message proof, the one /api/log/proof serves.
+// logProofReader is the store's message proof, the one /api/log/proof
+// serves, without its audit path (board.Store.ReadLogPlace, C726): the page
+// names the leaf, its checkpoint and its anchor, never the path's hashes.
 type logProofReader interface {
-	ReadLogProof(ctx context.Context, index int64, message string, size int64) (board.LogInclusion, error)
+	ReadLogPlace(ctx context.Context, index int64, message string, size int64) (board.LogInclusion, error)
 }
 
 // proofView is /e/ID/proof.
@@ -104,7 +106,7 @@ func loadProof(r *http.Request, p *page, service board.Service, id string) int {
 	if m.Hidden || v.Title == "" {
 		v.Title = "Removed message"
 	}
-	proof, err := logs.ReadLogProof(r.Context(), -1, id, -1)
+	proof, err := logs.ReadLogPlace(r.Context(), -1, id, -1)
 	var be *board.Error
 	switch {
 	case err == nil:
@@ -118,7 +120,7 @@ func loadProof(r *http.Request, p *page, service board.Service, id string) int {
 				v.Explorer = a.Explorer
 			}
 			if a.Size != latest {
-				at, err := logs.ReadLogProof(r.Context(), -1, id, a.Size)
+				at, err := logs.ReadLogPlace(r.Context(), -1, id, a.Size)
 				if err != nil {
 					return 503
 				}
@@ -185,7 +187,7 @@ func recordPage(ctx context.Context, service board.Service, rec *board.AgentReco
 	if rec == nil || !ok {
 		return ""
 	}
-	proof, err := logs.ReadLogProof(ctx, rec.FirstLeaf, "", -1)
+	proof, err := logs.ReadLogPlace(ctx, rec.FirstLeaf, "", -1)
 	var f leafFields
 	if err != nil || json.Unmarshal([]byte(proof.Leaf.Data), &f) != nil || f.Kind != "message" || !validMessageID(f.ID) {
 		return ""

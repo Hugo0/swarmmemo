@@ -92,8 +92,9 @@ func (*notary) Describe() Descriptor {
 				// Per network as well as for every network together, so one
 				// network cannot hold the shared windows (security review 1.21, M2).
 				AnonymousRate: AnonRate{CallerPerMinute: 10, CallerPerDay: 200, AllPerMinute: 120, AllPerDay: 20000}},
-			{Name: "get", ArgsMax: 256, Line: "Read the receipt for a hash; also GET /api/notary/HASH. Its log proof: GET /api/log/proof?notary=HASH.",
-				Args: []Arg{{"hash", "string", true, "a lowercase SHA-256 hex digest"}}, Example: json.RawMessage(`{"hash":"SHA256_HEX"}`)},
+			{Name: "get", ArgsMax: 256, Line: "Read a receipt by hash or seq; also GET /api/notary/HASH or /api/notary?seq=N. Log proof: GET /api/log/proof?notary=HASH.",
+				Args:    []Arg{{"hash", "string", false, "a lowercase SHA-256 hex digest"}, {"seq", "integer", false, "or its seq"}},
+				Example: json.RawMessage(`{"hash":"SHA256_HEX"}`)},
 			{Name: "key", ArgsMax: 64, Line: "The notary's public key; also GET /api/notary/key. Its log proof: GET /api/log/proof?notary=key."},
 		},
 	}
@@ -415,9 +416,20 @@ func NotaryKeyID(key ed25519.PrivateKey) string {
 // readReceipt is the stored receipt for hash. The public key is the one the
 // key ID names: the notary's (there is one key per board).
 func readReceipt(ctx context.Context, q allowance.Querier, hash string, key ed25519.PrivateKey) (NotaryReceipt, error) {
-	r := NotaryReceipt{Schema: NotarySchema, Hash: hash}
-	err := q.QueryRowContext(ctx, "SELECT seq,time,key_id,payload,signature FROM notary_receipts WHERE hash=?", hash).
-		Scan(&r.Seq, &r.Time, &r.KeyID, &r.Payload, &r.Signature)
+	return readReceiptWhere(ctx, q, "hash=?", hash, key)
+}
+
+// readReceiptBySeq is the stored receipt with sequence number seq.
+func readReceiptBySeq(ctx context.Context, q allowance.Querier, seq int64, key ed25519.PrivateKey) (NotaryReceipt, error) {
+	return readReceiptWhere(ctx, q, "seq=?", seq, key)
+}
+
+// readReceiptWhere is the one receipt that cond (a constant, "hash=?" or
+// "seq=?") selects with arg.
+func readReceiptWhere(ctx context.Context, q allowance.Querier, cond string, arg any, key ed25519.PrivateKey) (NotaryReceipt, error) {
+	r := NotaryReceipt{Schema: NotarySchema}
+	err := q.QueryRowContext(ctx, "SELECT seq,hash,time,key_id,payload,signature FROM notary_receipts WHERE "+cond, arg).
+		Scan(&r.Seq, &r.Hash, &r.Time, &r.KeyID, &r.Payload, &r.Signature)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, errNoReceipt
 	}
@@ -436,27 +448,27 @@ func readReceipt(ctx context.Context, q allowance.Querier, hash string, key ed25
 func (n *notary) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawMessage, error) {
 	switch c.Method {
 	case "get":
-		var a struct {
-			Hash string `json:"hash"`
-		}
+		var a notaryGetArgs
 		if err := StrictObject(c.Args, &a); err != nil {
 			return nil, err
 		}
-		if !notaryHashRE.MatchString(a.Hash) {
+		switch {
+		case a.Hash == "" && a.Seq == nil:
+			return nil, badArg("Give hash (a SHA-256: 64 lowercase hex digits), seq (a receipt's sequence number), or both.")
+		case a.Hash != "" && !notaryHashRE.MatchString(a.Hash):
 			return nil, badArg(notaryHashRule)
+		case a.Seq != nil && *a.Seq < 1:
+			return nil, badArg(NotarySeqRule)
 		}
 		key, err := n.signingKey()
 		if err != nil {
 			return nil, err
 		}
-		r, err := readReceipt(ctx, q, a.Hash, key)
-		if errors.Is(err, errNoReceipt) {
-			return nil, refusal("notary_not_found")
-		}
+		r, err := notaryGet(ctx, q, a, key)
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(map[string]any{"receipt": r, "seq": r.Seq, "hash": r.Hash, "log": notaryLog(a.Hash)})
+		return json.Marshal(map[string]any{"receipt": r, "seq": r.Seq, "hash": r.Hash, "log": notaryLog(r.Hash)})
 	case "key":
 		raw, err := keyRead(c.Args, n.key, NotarySchema, n.serviceID)
 		if err != nil {
@@ -470,6 +482,56 @@ func (n *notary) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 		return json.Marshal(out)
 	}
 	return nil, noSuchMethod(c.Method)
+}
+
+// NotarySeqRule is the refusal text for a seq that is not a receipt number.
+const NotarySeqRule = "seq must be a whole number of 1 or more."
+
+// notaryGetArgs are notary.get's arguments: a hash, a seq, or both.
+type notaryGetArgs struct {
+	Hash string `json:"hash"`
+	Seq  *int64 `json:"seq"`
+}
+
+// NotaryNotFound is a notary_not_found refusal's details: what was asked
+// (Hash, Seq) and, for a seq that stamps another hash, the hash it does
+// stamp (SeqHash) and the asked hash's own receipt seq, if it has one
+// (HashSeq). The board's message names them, so an agent holding a wrong
+// hash and a right seq finds the receipt (C713).
+type NotaryNotFound struct {
+	Hash    string `json:"hash,omitempty"`
+	Seq     int64  `json:"seq,omitempty"`
+	SeqHash string `json:"seq_hash,omitempty"`
+	HashSeq int64  `json:"hash_seq,omitempty"`
+}
+
+// notaryGet is notary.get's receipt: by seq when one is given (and then it
+// must stamp the hash, if one is given too), else by hash.
+func notaryGet(ctx context.Context, q allowance.Querier, a notaryGetArgs, key ed25519.PrivateKey) (NotaryReceipt, error) {
+	notFound := func(d NotaryNotFound) error { return &allowance.Err{Code: "notary_not_found", Details: d} }
+	if a.Seq == nil {
+		r, err := readReceipt(ctx, q, a.Hash, key)
+		if errors.Is(err, errNoReceipt) {
+			return r, notFound(NotaryNotFound{Hash: a.Hash})
+		}
+		return r, err
+	}
+	r, err := readReceiptBySeq(ctx, q, *a.Seq, key)
+	if errors.Is(err, errNoReceipt) {
+		return r, notFound(NotaryNotFound{Hash: a.Hash, Seq: *a.Seq})
+	}
+	if err != nil || a.Hash == "" || r.Hash == a.Hash {
+		return r, err
+	}
+	d := NotaryNotFound{Hash: a.Hash, Seq: *a.Seq, SeqHash: r.Hash}
+	own, err := readReceipt(ctx, q, a.Hash, key)
+	switch {
+	case err == nil:
+		d.HashSeq = own.Seq
+	case !errors.Is(err, errNoReceipt):
+		return r, err
+	}
+	return r, notFound(d)
 }
 
 // keyRead answers a receipt service's "key" read: the public key that signs

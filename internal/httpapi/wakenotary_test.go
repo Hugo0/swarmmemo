@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -161,8 +162,26 @@ func TestNotaryOverEveryWire(t *testing.T) {
 			t.Errorf("%s: %d %s", bad, w.Code, w.Body.String())
 		}
 	}
-	if w = makeRequest(h, "GET", "https://swarmmemo.com/api/notary/"+strings.Repeat("1", 64), "", ""); w.Code != 404 || !strings.Contains(w.Body.String(), "notary_not_found") {
+	if w = makeRequest(h, "GET", "https://swarmmemo.com/api/notary/"+strings.Repeat("1", 64), "", ""); w.Code != 404 || !strings.Contains(w.Body.String(), "notary_not_found") || !strings.Contains(w.Body.String(), "/api/notary?seq=N") {
 		t.Fatalf("unknown hash: %d %s", w.Code, w.Body.String())
+	}
+	// C713: by seq, and by seq with a hash it does not stamp.
+	bySeq := "https://swarmmemo.com/api/notary?seq=" + strconv.FormatInt(second.Seq, 10)
+	if w = makeRequest(h, "GET", bySeq, "", ""); w.Code != 200 || receipt(dig(decodeResult(t, w.Body.Bytes()), "data", "result", "receipt")) != second {
+		t.Fatalf("GET by seq: %d %s", w.Code, w.Body.String())
+	}
+	if w = makeRequest(h, "GET", "https://swarmmemo.com/api/notary/"+hash+"?seq="+strconv.FormatInt(first.Seq, 10), "", ""); w.Code != 200 {
+		t.Fatalf("GET by hash and its seq: %d %s", w.Code, w.Body.String())
+	}
+	w = makeRequest(h, "GET", "https://swarmmemo.com/api/notary/"+strings.Repeat("1", 64)+"?seq="+strconv.FormatInt(first.Seq, 10), "", "")
+	if w.Code != 404 || !strings.Contains(w.Body.String(), "notary_not_found") || !strings.Contains(w.Body.String(), "stamps hash "+hash) ||
+		dig(decodeResult(t, w.Body.Bytes()), "error", "details", "seq_hash") != hash {
+		t.Fatalf("GET by a hash the seq does not stamp: %d %s", w.Code, w.Body.String())
+	}
+	for _, bad := range []string{"/api/notary", "/api/notary?seq=0", "/api/notary?seq=x", "/api/notary?seq=1&seq=2", "/api/notary?seq=1&x=1", "/api/notary/key?seq=1"} {
+		if w = makeRequest(h, "GET", "https://swarmmemo.com"+bad, "", ""); w.Code != 400 {
+			t.Errorf("%s: %d %s", bad, w.Code, w.Body.String())
+		}
 	}
 	got := postCommand(t, h, board.Command{Operation: "service.read", Target: "notary", Data: serviceArgs("get", map[string]any{"hash": second.Hash}, -1)})
 	if receipt(dig(got, "data", "result", "receipt")) != second {
@@ -176,7 +195,7 @@ func TestNotaryOverEveryWire(t *testing.T) {
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "test"}, nil)
 	mcp.AddTool(server, &mcp.Tool{Name: "notary_get"}, func(ctx context.Context, _ *mcp.CallToolRequest, in notaryGetInput) (*mcp.CallToolResult, board.Result, error) {
-		result, err := store.Execute(mcpVia(ctx), notaryCommand(in.Hash), "")
+		result, err := store.Execute(mcpVia(ctx), notaryCommand(in.Hash, nil), "")
 		return nil, result, err
 	})
 	serverSide, clientSide := mcp.NewInMemoryTransports()

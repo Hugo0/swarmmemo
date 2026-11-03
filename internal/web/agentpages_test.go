@@ -12,17 +12,22 @@ import (
 	"swarmmemo/internal/board"
 )
 
-// gatedAgentService answers agent.get only when its gate opens, counting
-// the reads in flight; every other command answers at once.
+// gatedAgentService answers agent.get (or op, when set) only when its gate
+// opens, counting the reads in flight; every other command answers at once.
 type gatedAgentService struct {
 	gate     chan struct{}
+	op       string
 	inflight atomic.Int64
 	most     atomic.Int64
 	reads    atomic.Int64
 }
 
 func (s *gatedAgentService) Execute(_ context.Context, c board.Command, _ string) (board.Result, error) {
-	if c.Operation != "agent.get" {
+	op := s.op
+	if op == "" {
+		op = "agent.get"
+	}
+	if c.Operation != op {
 		return board.Result{OK: true}, nil
 	}
 	s.reads.Add(1)
@@ -35,13 +40,17 @@ func (s *gatedAgentService) Execute(_ context.Context, c board.Command, _ string
 		}
 	}
 	<-s.gate
+	if op == "thread.get" {
+		m := board.Message{ID: c.MessageID, Room: board.DefaultRoom, Page: board.DefaultPage, Text: "hello", Visibility: "public", Type: "message"}
+		return board.Result{OK: true, Messages: []board.Message{m}, Data: map[string]any{"root_id": c.MessageID}}, nil
+	}
 	return board.Result{OK: true, Agent: &board.Agent{ID: c.Target}}, nil
 }
 func (*gatedAgentService) Moderate(context.Context, string, string, bool) error { return nil }
 func (*gatedAgentService) Close() error                                         { return nil }
 
 // At most agentPageRenders agent pages render at once (C701): one past the
-// cap waits up to agentPageWait, then is answered 503 busy with Retry-After
+// cap waits up to renderWait, then is answered 503 busy with Retry-After
 // and never reads the store; one that finds a turn within the wait renders.
 // Other pages are never held by it.
 func TestAgentPageRendersAreCapped(t *testing.T) {
@@ -76,8 +85,8 @@ func TestAgentPageRendersAreCapped(t *testing.T) {
 	if busy.Code != 503 || busy.Header().Get("Retry-After") != "5" || !strings.Contains(busy.Body.String(), "This page is busy.") || !strings.Contains(busy.Body.String(), "noindex") {
 		t.Fatalf("past the cap: %d %v %q", busy.Code, busy.Header(), busy.Body.String())
 	}
-	if waited := time.Since(start); waited < agentPageWait {
-		t.Fatalf("answered busy after %v, before waiting %v", waited, agentPageWait)
+	if waited := time.Since(start); waited < renderWait {
+		t.Fatalf("answered busy after %v, before waiting %v", waited, renderWait)
 	}
 	if s.reads.Load() != agentPageRenders {
 		t.Fatalf("store reads %d, want %d", s.reads.Load(), agentPageRenders)

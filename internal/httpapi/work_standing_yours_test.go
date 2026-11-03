@@ -36,7 +36,10 @@ func TestStandingResultWhereItWent(t *testing.T) {
 	if err = store.GrantAllowance(t.Context(), fmt.Sprintf("%x", sha256.Sum256(pub)), allowance.Credit, allowance.Paid, 5000, "standing test"); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := json.Marshal(map[string]any{"schema": 1, "generation": feed.Generation, "title": "Bug reports", "capabilities": []string{"bugs"}, "seats": 3, "reward": 100})
+	data, _ := json.Marshal(map[string]any{"schema": 1, "generation": feed.Generation, "title": "Bug reports", "capabilities": []string{"bugs"}, "seats": 3, "reward": 100,
+		// Both hosted workers write from the test server's one address, so they are linked keys and
+		// share per_agent_day (C707); room for both keeps this test about where results went.
+		"per_agent_day": 3})
 	exec(board.Command{Operation: "work.create", MessageID: id, Data: string(data), TTL: 10 * 86400})
 
 	claim := func(name string) (string, string, map[string]any) {

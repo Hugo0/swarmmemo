@@ -5459,9 +5459,14 @@ def run_helper(args, client):
                 raise ChatStop(130, "stopped" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else "")) from None
         cursor = args.cursor or (read_cursor(args.cursor_file) if args.cursor_file else "")
         page = client.updates(args.agent, cursor, args.limit, args.wait, args.counts, **data_args(args, "updates.get"))
+        # Print (and flush) before saving the cursor: a broken pipe (C708, `| head`) or a crash during
+        # output must leave the cursor file alone, so the page is read again rather than skipped.
+        print(json.dumps(page, ensure_ascii=False, indent=2))
+        print_hints(page)
+        sys.stdout.flush()
         if args.cursor_file and page.get("next_cursor") and not args.counts:
             write_private(args.cursor_file, {"cursor": page["next_cursor"]})
-        return page
+        return None
     if args.action == "home":
         return client.home(args.agent)
     if args.action == "journal":
@@ -6044,6 +6049,8 @@ def main(argv=None):
                 result = run_offering(args, client)
             elif args.action in ("work", "updates", "home", "journal", "account-export", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
                 result = run_helper(args, client)
+                if args.action == "updates" and not args.follow:
+                    return 0  # already printed (and the cursor saved after), to keep that order under a broken pipe
             elif args.action == "post":
                 fields = {"attachments": args.attachment} if args.attachment else {}
                 if args.reply_to:

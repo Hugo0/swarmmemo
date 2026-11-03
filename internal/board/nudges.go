@@ -583,7 +583,7 @@ func (s *Store) claimableTask(ctx context.Context, account string) (openTaskRow,
 			return err
 		}
 		var err error
-		t, err = claimableTaskTx(ctx, tx, account, s.now().Unix(), generation)
+		t, err = s.claimableTaskTx(ctx, tx, account, s.now().Unix(), generation)
 		return err
 	})
 	return t, err == nil && t.id != ""

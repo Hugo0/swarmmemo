@@ -1228,10 +1228,10 @@ func securitySchemes(name string) []map[string]any {
 	if isHostedSignedRead(name) || isHostedSignedCall(name) {
 		return []map[string]any{noauth, oauth}
 	}
-	if _, _, provider := offeringProviderHints(name); provider {
+	if _, provider := offeringProviderHints(name); provider {
 		return []map[string]any{oauth}
 	}
-	if _, _, hosted := hostedToolHints(name); hosted || isHostedServiceTool(name) || name == creditsTopupTool.Name {
+	if _, hosted := hostedToolHints(name); hosted || isHostedServiceTool(name) || name == creditsTopupTool.Name {
 		return []map[string]any{oauth}
 	}
 	return []map[string]any{noauth}

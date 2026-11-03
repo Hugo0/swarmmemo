@@ -16,9 +16,7 @@ import (
 var argShapes = map[string]any{
 	"memory.put": memoryPut{}, "memory.delete": memoryKeyArgs{}, "memory.get": memoryKeyArgs{}, "memory.list": memoryListArgs{},
 	"wakeup.schedule": wakeupScheduleArgs{}, "wakeup.cancel": wakeupRef{}, "wakeup.list": struct{}{}, "wakeup.notices": wakeupNoticesArgs{},
-	"notary.stamp": notaryStampArgs{}, "notary.get": struct {
-		Hash string `json:"hash"`
-	}{}, "notary.key": struct{}{},
+	"notary.stamp": notaryStampArgs{}, "notary.get": notaryGetArgs{}, "notary.key": struct{}{},
 	"screen.text": screenArgs{}, "screen.leak": leakArgs{}, "screen.key": struct{}{}, "screen.verify": screenVerifyArgs{},
 	"inference.complete": inferenceArgs{},
 	"x402.call":          x402Args{}, "x402.resources": x402SearchArgs{}, "x402.tools_search": bundlerSearchArgs{}, "x402.tools_get": bundlerToolArgs{},

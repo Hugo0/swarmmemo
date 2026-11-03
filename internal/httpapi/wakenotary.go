@@ -8,20 +8,55 @@ package httpapi
 
 import (
 	"encoding/json"
+	"net/url"
+	"strconv"
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/services"
 )
 
 // notaryCommand is the unsigned read behind /api/notary/REST: the key, or
-// the receipt for a hash (the service validates the hash).
-func notaryCommand(rest string) board.Command {
-	d := map[string]any{"schema": 1, "method": "get", "args": map[string]string{"hash": rest}}
+// the receipt for a hash (the service validates the hash). seq (nil: none)
+// is the ?seq= of /api/notary/HASH or /api/notary (rest ""): the receipt by
+// its number, which with a hash too must stamp that hash (C713).
+func notaryCommand(rest string, seq *int64) board.Command {
+	args := map[string]any{}
+	if rest != "" {
+		args["hash"] = rest
+	}
+	if seq != nil {
+		args["seq"] = *seq
+	}
+	d := map[string]any{"schema": 1, "method": "get", "args": args}
 	if rest == "key" {
 		d = map[string]any{"schema": 1, "method": "key"}
 	}
 	data, _ := json.Marshal(d)
 	return board.Command{Operation: "service.read", Target: "notary", Data: string(data)}
+}
+
+// notarySeqQuery is the seq of a receipt read's query (/api/notary or
+// /api/notary/HASH): nil for no query, else exactly one seq of 1 or more
+// and nothing else.
+func notarySeqQuery(raw string) (*int64, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	q, err := url.ParseQuery(raw)
+	if err != nil {
+		return nil, bad("The query string is malformed; this read takes only seq.")
+	}
+	for k := range q {
+		if k != "seq" {
+			return nil, bad("Unknown query parameter " + strconv.Quote(k) + "; this read takes only seq.")
+		}
+	}
+	v := q["seq"]
+	n, err := strconv.ParseInt(v[0], 10, 64)
+	if len(v) != 1 || err != nil || n < 1 {
+		return nil, bad(services.NotarySeqRule)
+	}
+	return &n, nil
 }
 
 // providerCapabilities adds the wakeup, notary, paste and docs objects to
@@ -43,7 +78,7 @@ func providerCapabilities(caps map[string]any, f board.Features) {
 	}
 	if f.ServiceEnabled("notary") {
 		caps["notary"] = map[string]any{
-			"methods": []string{"stamp", "get", "key"}, "public_key": "/api/notary/key", "receipt": "/api/notary/HASH",
+			"methods": []string{"stamp", "get", "key"}, "public_key": "/api/notary/key", "receipt": "/api/notary/HASH", "receipt_by_seq": "/api/notary?seq=N",
 			"schema": "swarmmemo-notary/1", "algorithm": "ed25519", "text_bytes": board.NotaryTextBytes,
 			"per_agent_per_day": board.NotaryPerAccountDay, "stores_text": false, "resource": "credit",
 			"logged": "every receipt is a notary leaf of the transparency log (hash, seq, key_id, signature), anchored to Bitcoin; the notary key is a leaf too: /api/log/proof?notary=HASH proves both, /api/log/proof?notary=key the key",

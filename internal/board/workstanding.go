@@ -46,7 +46,9 @@ package board
 // (one result per agent means one try); lapsed and hidden ones do not
 // count. It counts the account's own results and those of the keys the
 // claim cool-down's link signals tie to it (claimLinks.siblings) or an ed25519
-// identity link names. Reached, a claim is 409 per_agent_max_reached and
+// identity link names; per_agent_day counts that linked-key group too, and
+// every preview reads the claim's own count (standingAgentUsed, C707).
+// Reached, a claim is 409 per_agent_max_reached and
 // that agent's own read names blocked_by per_agent_max; other agents are
 // unchanged. It is kept in the task's signed work.create data (the record),
 // read back by loadWorkStanding, so it needs no column of its own.
@@ -588,18 +590,18 @@ func (s *Store) createWorkStanding(ctx context.Context, tx *sql.Tx, a actor, w w
 // a verdict, or accepted (paid or USDC owed, even if hidden since). A
 // rejected, lapsed or hidden waiting result frees its slot at once, so a
 // premature claim cannot block a scarce task for the rest of the day
-// (C614). mineToday is every result the worker opened today, rejected and
-// hidden ones too (a queued one is not open yet, C661): per_agent_day is that agent's own allowance, and a
-// rejected claim spends it. mineLife is the worker's results per_agent_max
-// counts (standingPerAgentSQL), its own account's only.
+// (C614). The per-agent limits (per_agent_day, per_agent_max) are not read
+// here: they count the worker's linked-key group (standingAgentUsed);
+// mineLife is that per_agent_max count, set by checkStandingSeat for the
+// acknowledgement's note.
 type standingCounts struct {
-	waiting, owed, accepted, results, today, mineToday, mineWaiting int64
-	mineLife                                                        int64
-	mineWaitingID                                                   string
-	queued, mineQueued                                              int64 // results queued for a seat (C661)
-	mineQueuedID                                                    string
-	nextVerdict                                                     int64
-	owedUSDC                                                        int64 // USDC units accepted and not yet settled (C386)
+	waiting, owed, accepted, results, today, mineWaiting int64
+	mineLife                                             int64
+	mineWaitingID                                        string
+	queued, mineQueued                                   int64 // results queued for a seat (C661)
+	mineQueuedID                                         string
+	nextVerdict                                          int64
+	owedUSDC                                             int64 // USDC units accepted and not yet settled (C386)
 }
 
 // counted is the results a results_max counts: accepted (paid or USDC
@@ -654,16 +656,14 @@ func readStandingCounts(ctx context.Context, tx rowQuerier, id, worker string, n
  count(*) FILTER (WHERE w.state='accepted'),
  count(*),
  count(*) FILTER (WHERE w.created_at>=? AND (w.state='accepted' OR (w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`))),
- count(*) FILTER (WHERE w.created_at>=? AND w.worker=? AND w.state<>'open'),
  count(*) FILTER (WHERE w.state='submitted' AND w.deadline>? AND w.worker=? AND NOT `+standingHiddenSQL+`),
  coalesce(min(w.id) FILTER (WHERE w.state='submitted' AND w.deadline>? AND w.worker=? AND NOT `+standingHiddenSQL+`),''),
  coalesce(min(w.deadline) FILTER (WHERE w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`),0),
- count(*) FILTER (WHERE w.worker=? AND `+standingPerAgentSQL+`),
  count(*) FILTER (WHERE `+standingQueuedSQL+`),
  count(*) FILTER (WHERE w.worker=? AND `+standingQueuedSQL+`),
  coalesce(min(w.id) FILTER (WHERE w.worker=? AND `+standingQueuedSQL+`),'')
- FROM works w WHERE w.standing_id=?`, now, day, now, day, worker, now, worker, now, worker, now, worker, now, now, now, worker, now, worker, now, id).
-		Scan(&c.waiting, &c.owed, &c.accepted, &c.results, &c.today, &c.mineToday, &c.mineWaiting, &c.mineWaitingID, &c.nextVerdict, &c.mineLife, &c.queued, &c.mineQueued, &c.mineQueuedID)
+ FROM works w WHERE w.standing_id=?`, now, day, now, now, worker, now, worker, now, now, worker, now, worker, now, id).
+		Scan(&c.waiting, &c.owed, &c.accepted, &c.results, &c.today, &c.mineWaiting, &c.mineWaitingID, &c.nextVerdict, &c.queued, &c.mineQueued, &c.mineQueuedID)
 	if err != nil {
 		return c, err
 	}
@@ -751,14 +751,13 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 	}
 	until := root.Deadline - st.VerdictTTL
 	midnight := now - now%86400 + 86400
-	if st.PerAgentMax > 0 {
-		sent, err := s.standingLinkedResults(ctx, tx, root.ID, item.Worker, n.mineLife, st.PerAgentMax, now)
-		if err != nil {
-			return n, err
-		}
-		if sent >= st.PerAgentMax {
-			return n, errPerAgentMaxReached(st, sent)
-		}
+	used, err := s.standingAgentUsed(ctx, tx, nil, root.ID, item.Worker, st.PerAgentDay, st.PerAgentMax, now)
+	if err != nil {
+		return n, err
+	}
+	n.mineLife = used.life
+	if st.PerAgentMax > 0 && used.life >= st.PerAgentMax {
+		return n, errPerAgentMaxReached(st, used.life)
 	}
 	switch {
 	case st.full(n):
@@ -767,12 +766,12 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 		return n, problem(409, "seat_limit", "You have a result waiting for a verdict on this standing task ("+n.mineWaitingID+"); send your next one once it is decided.")
 	case n.mineQueued > 0:
 		return n, problem(409, "seat_limit", "You have a result queued for a seat on this standing task ("+n.mineQueuedID+"); it opens for a verdict with that id when a seat does. Send your next one once it is decided.")
-	case n.mineToday >= st.PerAgentDay:
+	case used.today >= st.PerAgentDay:
 		at := int64(0)
 		if midnight <= until {
 			at = midnight
 		}
-		return n, errNoSeat(StandingBlockedPerAgentDay, at, until, now, fmt.Sprintf("you have your %s today (per_agent_day)", plural(st.PerAgentDay, "result")), "your daily limit")
+		return n, errNoSeat(StandingBlockedPerAgentDay, at, until, now, perAgentDayWhy(st.PerAgentDay, used.today), "your daily limit")
 	}
 	rewards := max(pool, 0) / st.maxCredits()
 	next := standingNextOpen(st, n, rewards, now, until)
@@ -943,8 +942,15 @@ func (s *Store) promoteStandingQueue(ctx context.Context, tx *sql.Tx, id string,
 		if n.today >= st.DayMax || n.waiting >= st.Seats || pool < st.maxCredits() {
 			return nil // the task's own limit: the rest of the queue waits too
 		}
-		if n.mineWaiting > 0 || n.mineToday >= st.PerAgentDay {
+		if n.mineWaiting > 0 {
 			continue // this agent's own limit: the next queued result goes first
+		}
+		used, err := s.standingAgentUsed(ctx, tx, nil, id, item.Worker, st.PerAgentDay, 0, now)
+		if err != nil {
+			return err
+		}
+		if used.today >= st.PerAgentDay {
+			continue // its linked-key group's per_agent_day (C707)
 		}
 		held, err := s.openQueuedStandingResult(ctx, tx, root, st, item, generation, now)
 		if err != nil || held {
@@ -1024,68 +1030,104 @@ func (s *Store) openQueuedStandingResult(ctx context.Context, tx *sql.Tx, root w
 	return false, err
 }
 
-
 // WorkStandingLinkedWorkersMax bounds the other workers on one standing
-// task whose link to a claimant per_agent_max checks (C672).
+// task whose link to a claimant the per-agent limits check (C672, C707).
 const WorkStandingLinkedWorkersMax = 200
 
-// standingLinkedResults is the results per_agent_max counts for account on
-// standing task id: own, its account's (standingCounts.mineLife), plus those
-// of the other workers on the task linked to it, by the claim cool-down's
-// link signals (claimLinks.siblings) or an ed25519 identity link either way. It
-// stops counting at limit.
-func (s *Store) standingLinkedResults(ctx context.Context, tx *sql.Tx, id, account string, own, limit, now int64) (int64, error) {
-	if own >= limit {
-		return own, nil
+// standingAgentUse is what one agent has used of a standing task's
+// per-agent limits (standingAgentUsed). life is what per_agent_max counts
+// and today what per_agent_day counts, both over the agent's linked-key
+// group; waiting and waitingID are its own account's result waiting for a
+// verdict, if any.
+type standingAgentUse struct {
+	life, today, waiting int64
+	waitingID            string
+}
+
+// standingAgentUsed is the one count both per-agent limits of standing
+// task id read, for the claim (checkStandingSeat, promoteStandingQueue) and
+// for every preview of it (standingReaderBlock): account's own results and
+// those of the other workers on the task linked to it (claimLinks.linked:
+// the claim cool-down's link signals or an ed25519 identity link either
+// way), so linked keys share one per_agent_day and one per_agent_max
+// (C707). life counts standingPerAgentSQL's results; today every result
+// opened since 00:00 UTC, rejected and hidden ones too (a queued one is not
+// open yet, C661). It reads one grouped query, own row first, then the
+// WorkStandingLinkedWorkersMax most recent other workers, and stops once
+// both limits are reached (perMax 0 is no cap). links holds what a page
+// has read for account already (nil reads them for this call alone).
+func (s *Store) standingAgentUsed(ctx context.Context, q workQuerier, links *claimLinks, id, account string, perDay, perMax, now int64) (standingAgentUse, error) {
+	var u standingAgentUse
+	if account == "" {
+		return u, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT w.worker,count(*) FROM works w WHERE w.standing_id=? AND w.worker<>? AND w.worker<>'' AND `+standingPerAgentSQL+`
- GROUP BY w.worker ORDER BY max(w.created_at) DESC LIMIT ?`, id, account, now, now, WorkStandingLinkedWorkersMax)
+	day := now - now%86400
+	rows, err := q.QueryContext(ctx, `SELECT w.worker,
+ count(*) FILTER (WHERE `+standingPerAgentSQL+`) AS life,
+ count(*) FILTER (WHERE w.created_at>=? AND w.state<>'open') AS today,
+ count(*) FILTER (WHERE w.worker=? AND w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`),
+ coalesce(min(w.id) FILTER (WHERE w.worker=? AND w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`),'')
+ FROM works w WHERE w.standing_id=? AND w.worker<>''
+ GROUP BY w.worker HAVING w.worker=? OR life>0 OR today>0
+ ORDER BY w.worker=? DESC, max(w.created_at) DESC LIMIT ?`,
+		now, now, day, account, now, account, now, id, account, account, WorkStandingLinkedWorkersMax+1)
 	if err != nil {
-		return 0, err
+		return u, err
 	}
 	type worker struct {
-		account string
-		results int64
+		account     string
+		life, today int64
 	}
 	var others []worker
 	for rows.Next() {
 		var o worker
-		if err = rows.Scan(&o.account, &o.results); err != nil {
+		var waiting int64
+		var waitingID string
+		if err = rows.Scan(&o.account, &o.life, &o.today, &waiting, &waitingID); err != nil {
 			rows.Close()
-			return 0, err
+			return u, err
+		}
+		if o.account == account {
+			u.life, u.today, u.waiting, u.waitingID = o.life, o.today, waiting, waitingID
+			continue
 		}
 		others = append(others, o)
 	}
 	if err = closeRows(rows); err != nil {
-		return 0, err
+		return u, err
 	}
-	sent := own
-	links := &claimLinks{}
+	reached := func() bool { return (perMax == 0 || u.life >= perMax) && u.today >= perDay }
+	if links == nil {
+		links = &claimLinks{}
+	}
 	for _, o := range others {
-		linked, err := links.siblings(ctx, s, tx, account, o.account, now-WorkClaimCooldownWindow)
-		if err != nil {
-			return 0, err
+		if reached() {
+			break
 		}
-		if !linked {
-			if err = tx.QueryRowContext(ctx, `SELECT `+workLinkedSQL("?1", "?2")+` OR `+workLinkedSQL("?2", "?1"), account, o.account).Scan(&linked); err != nil {
-				return 0, err
-			}
+		linked, err := links.linked(ctx, s, q, account, o.account, now-WorkClaimCooldownWindow)
+		if err != nil {
+			return u, err
 		}
 		if linked {
-			if sent += o.results; sent >= limit {
-				break
-			}
+			u.life += o.life
+			u.today += o.today
 		}
 	}
-	return sent, nil
+	return u, nil
 }
 
 // errPerAgentMaxReached is a claim by an agent that sent all the results a
 // standing task's per_agent_max allows it (C672): final for that agent,
 // so no retry_after; it says where to look instead.
 func errPerAgentMaxReached(st *workStanding, sent int64) error {
-	return &Error{Status: 409, Code: "per_agent_max_reached", Message: fmt.Sprintf("This standing task takes %s per agent (per_agent_max), counting keys linked to yours, and you have sent %d (accepted, waiting or rejected), so it takes no more from you. Find other open work with find_work over MCP or works.list kind=earn, or watch standing.next_round for the requester's next round.",
+	return &Error{Status: 409, Code: "per_agent_max_reached", Message: fmt.Sprintf("This standing task takes %s per agent (per_agent_max), and keys linked to yours share that limit: together you have sent %d (accepted, waiting or rejected), so it takes no more from you. Find other open work with find_work over MCP or works.list kind=earn, or watch standing.next_round for the requester's next round.",
 		plural(st.PerAgentMax, "result"), sent), Details: map[string]any{"blocked_by": StandingBlockedPerAgentMax, "per_agent_max": st.PerAgentMax, "sent": sent}}
+}
+
+// perAgentDayWhy is why a claim past per_agent_day is refused: the limit,
+// and that keys linked to the claimant's share it (C707).
+func perAgentDayWhy(perDay, sent int64) string {
+	return fmt.Sprintf("it takes %s per agent a day (per_agent_day), and keys linked to yours share that limit: together you have sent %d today", plural(perDay, "result"), sent)
 }
 
 // normalizedResultSHA256 is the SHA-256 of a result's text with its
@@ -1724,37 +1766,41 @@ func (p *WorkStanding) blockedNote() string {
 	case StandingBlockedOwnResult:
 		return "your result awaits its verdict; send the next once it is decided"
 	case StandingBlockedPerAgentDay:
-		return fmt.Sprintf("your %s today taken (per_agent_day)", plural(p.PerAgentDay, "result"))
+		return fmt.Sprintf("your %s today taken (per_agent_day, shared with keys linked to yours)", plural(p.PerAgentDay, "result"))
 	case StandingBlockedPerAgentMax:
-		return fmt.Sprintf("you sent the %s per agent it takes (per_agent_max)", plural(p.PerAgentMax, "result"))
+		return fmt.Sprintf("you sent the %s per agent it takes (per_agent_max, shared with keys linked to yours)", plural(p.PerAgentMax, "result"))
 	}
 	return ""
 }
 
 // standingReaderBlock adds the reading agent's own limit to a standing
 // task's seats while one is open: a result of its own waiting for a verdict,
-// or its per_agent_day spent (checkStandingSeat's seat_limit), with when
-// that lifts by itself. It says whether one applies.
-func standingReaderBlock(ctx context.Context, q rowQuerier, id, account string, p *WorkStanding, now int64) (bool, error) {
+// or its per_agent_day or per_agent_max spent (checkStandingSeat's
+// seat_limit and per_agent_max_reached), with when that lifts by itself.
+// Both limits are the claim's own count (standingAgentUsed), so linked keys
+// share them here too (C707). links holds what a page has read for
+// account already (nil reads them for this call alone). It says whether
+// one applies.
+func (s *Store) standingReaderBlock(ctx context.Context, q workQuerier, links *claimLinks, id, account string, p *WorkStanding, now int64) (bool, error) {
 	if p.Open == 0 || account == "" {
 		return false, nil
 	}
-	n, err := readStandingCounts(ctx, q, id, account, now)
+	u, err := s.standingAgentUsed(ctx, q, links, id, account, p.PerAgentDay, p.PerAgentMax, now)
 	if err != nil {
 		return false, err
 	}
 	var at int64
 	switch {
-	case p.PerAgentMax > 0 && n.mineLife >= p.PerAgentMax:
+	case p.PerAgentMax > 0 && u.life >= p.PerAgentMax:
 		// Final for this agent: nothing lifts it (C672).
 		p.BlockedBy = StandingBlockedPerAgentMax
-	case n.mineWaiting > 0:
+	case u.waiting > 0:
 		// It frees at that result's verdict, or by its verdict deadline.
 		p.BlockedBy = StandingBlockedOwnResult
-		if err = q.QueryRowContext(ctx, `SELECT deadline FROM works WHERE id=?`, n.mineWaitingID).Scan(&at); err != nil {
+		if err = q.QueryRowContext(ctx, `SELECT deadline FROM works WHERE id=?`, u.waitingID).Scan(&at); err != nil {
 			return false, err
 		}
-	case n.mineToday >= p.PerAgentDay:
+	case u.today >= p.PerAgentDay:
 		p.BlockedBy = StandingBlockedPerAgentDay
 		at = now - now%86400 + 86400
 	default:

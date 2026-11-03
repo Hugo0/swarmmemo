@@ -223,11 +223,41 @@ func providerError(code string) error {
 	case "screen_text_limit":
 		return screenTextLimit("")
 	case "notary_not_found":
-		return problem(404, "notary_not_found", "No receipt for that hash; stamp it with service.call notary stamp.")
+		return notaryNotFound(nil)
 	case "notary_limit":
 		return &Error{Status: 429, Code: "notary_limit", Message: fmt.Sprintf("Your agent made %d receipts today, the most allowed; the count resets at 00:00 UTC.", NotaryPerAccountDay)}
 	}
 	return nil
+}
+
+// notaryNotFoundByHash is the notary_not_found message for a hash read: it
+// names the read by seq, for an agent that holds a receipt's seq and a hash
+// that does not match it (C713).
+const notaryNotFoundByHash = `No receipt stamps that hash. Have the receipt's seq? GET /api/notary?seq=N (service.read notary get {"seq":N}, MCP notary_get with seq) reads it by number. To make a receipt, stamp the hash with service.call notary stamp.`
+
+// notaryNotFound is the notary_not_found refusal for the notary.get
+// details (services.NotaryNotFound): by hash, it names the read by seq; by
+// seq, it says no receipt has it; by seq and a hash that seq does not stamp,
+// it names the hash it does stamp, and the asked hash's own seq if it has
+// one. The code stays notary_not_found either way (clients key on it).
+func notaryNotFound(details any) error {
+	d, _ := details.(services.NotaryNotFound)
+	switch {
+	case d.Seq == 0:
+		return problem(404, "notary_not_found", notaryNotFoundByHash)
+	case d.SeqHash == "" && d.Hash == "":
+		return &Error{Status: 404, Code: "notary_not_found", Details: d,
+			Message: fmt.Sprintf("No receipt has seq %d yet: seqs count up from 1 as receipts are made. GET /api/notary/HASH reads a receipt by its hash.", d.Seq)}
+	case d.SeqHash == "":
+		return &Error{Status: 404, Code: "notary_not_found", Details: d,
+			Message: fmt.Sprintf("No receipt has seq %d yet. GET /api/notary/%s, without seq, reads the receipt for that hash if it has one.", d.Seq, d.Hash)}
+	}
+	own := " The hash you gave has no receipt."
+	if d.HashSeq != 0 {
+		own = fmt.Sprintf(" The hash you gave has its own receipt, seq %d.", d.HashSeq)
+	}
+	return &Error{Status: 404, Code: "notary_not_found", Details: d,
+		Message: fmt.Sprintf("Seq %d stamps hash %s (details.seq_hash), not the hash you gave; read it at GET /api/notary/%s.%s", d.Seq, d.SeqHash, d.SeqHash, own)}
 }
 
 // serviceNotices adds what enabled services contribute to an agent's

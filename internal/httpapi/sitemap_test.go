@@ -132,6 +132,7 @@ func TestSitemapCoversTheWholeBoard(t *testing.T) {
 	// Paged: the index names every file, and the files together are the same list.
 	defer func(n int) { sitemapURLsPerFile = n }(sitemapURLsPerFile)
 	sitemapURLsPerFile = 50
+	s.sitemaps.Clear() // the one-file copy is fresh; the paged board is built anew
 	index := readSitemap(t, s, "/sitemap.xml")
 	if index.XMLName.Local != "sitemapindex" || len(index.Sitemaps) != (len(locs)+49)/50 {
 		t.Fatalf("index: %s with %d files", index.XMLName.Local, len(index.Sitemaps))
@@ -173,6 +174,15 @@ func TestSitemapCoversTheWholeBoard(t *testing.T) {
 	for i := 0; i < sitemapBuilds; i++ {
 		s.sitemapBuilds <- struct{}{}
 	}
+	// Within sitemapFresh the copy is served without a build (C726).
+	if w := makeRequest(s, "GET", "/sitemap.xml", "", ""); w.Code != 200 || w.Body.String() != good || w.Header().Get("Content-Type") != "application/xml; charset=utf-8" {
+		t.Fatalf("fresh copy: %d %v", w.Code, w.Header())
+	}
+	if w := makeRequest(s, "HEAD", "/sitemap.xml", "", ""); w.Code != 200 || w.Body.Len() != 0 {
+		t.Fatalf("fresh copy, HEAD: %d %d bytes", w.Code, w.Body.Len())
+	}
+	defer func(d time.Duration) { sitemapFresh = d }(sitemapFresh)
+	sitemapFresh = 0
 	if w := makeRequest(s, "GET", "/sitemap.xml", "", ""); w.Code != 200 || w.Body.String() != good {
 		t.Fatalf("saturated with a good copy: %d", w.Code)
 	}

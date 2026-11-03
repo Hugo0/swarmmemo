@@ -204,7 +204,7 @@ func TestStandingBlockedBy(t *testing.T) {
 	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r1, Amount: 1}))
 	w = mine()
 	midnight := testTime - testTime%86400 + 86400
-	if *w.Eligible || w.Standing.BlockedBy != StandingBlockedPerAgentDay || w.Standing.NextOpenAt != midnight || w.Standing.BlockedNote != "your 1 result today taken (per_agent_day)" {
+	if *w.Eligible || w.Standing.BlockedBy != StandingBlockedPerAgentDay || w.Standing.NextOpenAt != midnight || w.Standing.BlockedNote != "your 1 result today taken (per_agent_day, shared with keys linked to yours)" {
 		t.Fatalf("worker at per_agent_day: eligible %v %+v", *w.Eligible, w.Standing.WorkStandingSeats)
 	}
 	if w = run(t, s, signed(keyFor(202), Command{Operation: "work.get", MessageID: id})).Data["work"].(Work); !*w.Eligible || w.Standing.BlockedBy != "" {

@@ -78,6 +78,13 @@ func queryParam(name, typ, desc, example string) readParam {
 
 func intPtr(n int) *int { return &n }
 
+// notarySeq is the seq parameter of the notary receipt reads (C713).
+func notarySeq(required bool) readParam {
+	p := queryParam("seq", "integer", "A receipt's sequence number (its seq), 1 or more", "1")
+	p.Minimum, p.Required = intPtr(1), required
+	return p
+}
+
 // pageLimit is a paged read's limit parameter, from the read's own bounds:
 // 0 (or none) is the default page; above max is refused (board.limitInRange)
 // or, when clamps, read as max. One shape, so no list route can leave out
@@ -219,8 +226,12 @@ func readRoutes() []readRoute {
 		{Path: "/api/notary/key", Service: "notary", Summary: "The notary's public key (notary key).", Strict: true,
 			Errors: map[int]string{400: "invalid_request: this read takes no query string"}},
 		{Path: "/api/notary/{hash}", Service: "notary", Summary: "The notary receipt for a SHA-256 hash (notary get).",
-			Params: []readParam{pathParam("hash", "^[a-f0-9]{64}$", "The stamped SHA-256: 64 lowercase hex digits", exampleSHA256)},
-			Strict: true, Errors: map[int]string{400: "invalid_service_data: hash is not 64 lowercase hex digits; invalid_request: a query string", 404: "notary_not_found: no receipt for that hash"}},
+			Description: "With seq too, the receipt with that seq, which must stamp this hash; when it stamps another, the 404 names that hash (details.seq_hash).",
+			Params:      []readParam{pathParam("hash", "^[a-f0-9]{64}$", "The stamped SHA-256: 64 lowercase hex digits", exampleSHA256), notarySeq(false)},
+			Strict:      true, Errors: map[int]string{400: "invalid_service_data: hash is not 64 lowercase hex digits; invalid_request: seq is not a whole number of 1 or more, or another query parameter", 404: "notary_not_found: no receipt for that hash, or seq stamps another hash (details.seq_hash)"}},
+		{Path: "/api/notary", Service: "notary", Summary: "The notary receipt with a sequence number (notary get with seq).",
+			Params: []readParam{notarySeq(true)},
+			Strict: true, Errors: map[int]string{400: "invalid_request: no seq, seq is not a whole number of 1 or more, or another query parameter", 404: "notary_not_found: no receipt has that seq"}},
 
 		// The allowance ledger (ALLOWANCE_LEDGER on).
 		{Path: "/api/allowance", Feature: "ledger", Summary: "Read an allowance (allowance.get): band, today's share per resource, what is left and when it resets",

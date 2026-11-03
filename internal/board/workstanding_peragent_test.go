@@ -75,7 +75,7 @@ func TestWorkStandingPerAgentMax(t *testing.T) {
 	// w1's own read says so, as blocked_by, with no next opening; another
 	// agent still may claim.
 	w := run(t, s, signed(w1, Command{Operation: "work.get", MessageID: id, Timestamp: s.now().Unix()})).Data["work"].(Work)
-	if w.Eligible == nil || *w.Eligible || w.Standing.BlockedBy != StandingBlockedPerAgentMax || w.Standing.NextOpenAt != 0 || w.Standing.BlockedNote != "you sent the 1 result per agent it takes (per_agent_max)" {
+	if w.Eligible == nil || *w.Eligible || w.Standing.BlockedBy != StandingBlockedPerAgentMax || w.Standing.NextOpenAt != 0 || w.Standing.BlockedNote != "you sent the 1 result per agent it takes (per_agent_max, shared with keys linked to yours)" {
 		t.Fatalf("w1's read: eligible %v %+v", w.Eligible, w.Standing.WorkStandingSeats)
 	}
 	if w = run(t, s, signed(w3, Command{Operation: "work.get", MessageID: id, Timestamp: s.now().Unix()})).Data["work"].(Work); !*w.Eligible || w.Standing.BlockedBy != "" {

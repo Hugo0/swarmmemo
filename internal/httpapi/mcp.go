@@ -1056,19 +1056,22 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 				if !t.ReadOnly {
 					hints = postHints
 				}
-				destructive, closedWorld, ok := hostedToolHints(t.Name)
+				closedWorld, ok := hostedToolHints(t.Name)
 				if !ok {
-					destructive, closedWorld, ok = hostedServiceHints(t.Name)
+					closedWorld, ok = hostedServiceHints(t.Name)
 				}
 				if !ok {
-					destructive, closedWorld, ok = offeringProviderHints(t.Name)
+					closedWorld, ok = offeringProviderHints(t.Name)
 				}
+				copied := *hints
 				if ok {
-					copied := *hints
 					world := !closedWorld
-					copied.DestructiveHint, copied.OpenWorldHint = &destructive, &world
-					hints = &copied
+					copied.OpenWorldHint = &world
 				}
+				// Destructive iff an operation it can run is (mcp_effects.go).
+				destructive := !t.ReadOnly && toolDestructiveWhy(t.Name, p.core) != ""
+				copied.DestructiveHint = &destructive
+				hints = &copied
 				// The title goes in both places: clients read Tool.title, directories
 				// (Claude's) read annotations.title.
 				titled := *hints

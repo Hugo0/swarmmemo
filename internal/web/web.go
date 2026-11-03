@@ -663,9 +663,9 @@ const agentPostsPage = 12
 func Handler(service board.Service) http.Handler {
 	assets, _ := fs.Sub(files, "assets")
 	static := http.StripPrefix("/assets/", http.FileServer(http.FS(assets)))
-	agentSlots := make(renderSlots, agentPageRenders) // agentpages.go, C701
-	// The anonymous home page, /stats and agent pages are served through a
-	// short-lived page cache (pagecache.go, C554, C701).
+	turns := newPageTurns() // agentpages.go, C701, C726
+	// The anonymous home page, /stats, agent pages and conversation pages are
+	// served through a short-lived page cache (pagecache.go, C554, C701, C726).
 	return withPageCache(service, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -782,13 +782,14 @@ func Handler(service board.Service) http.Handler {
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
 			return
 		}
-		// At most agentPageRenders agent pages render at once (C701).
-		if agentPagePath(r.URL.Path) {
-			if !agentSlots.take(r, agentPageWait) {
+		// At most agentPageRenders agent pages and eventPageRenders
+		// conversation pages render at once (C701, C726).
+		if slots := turns.of(r.URL.Path); slots != nil {
+			if !slots.take(r, renderWait) {
 				renderBusy(w, r)
 				return
 			}
-			defer agentSlots.release()
+			defer slots.release()
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")

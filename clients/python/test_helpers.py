@@ -721,6 +721,49 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(self.recorder.sent.pop(), ("/call/fetch/page", {"url": "https://example.com/", "max_cost": 8}))
         self.assertEqual(self.recorder.sent, [])
 
+    def test_updates_cursor_file_kept_on_broken_pipe(self):
+        # Bug bounty 9ce50603 (C708): one-shot `updates --cursor-file` used to save next_cursor
+        # before printing the page, so a broken pipe (`| head`) or a crash while writing stdout
+        # lost that page for good. The cursor file must stay exactly as it was.
+        class BrokenStdout:
+            def write(self, data): raise BrokenPipeError()
+            def flush(self): raise BrokenPipeError()
+
+        with tempfile.TemporaryDirectory() as folder, patch.object(memo, "load_key", return_value=self.key):
+            path = Path(folder) / "cursor.json"
+            path.write_text(json.dumps({"cursor": "c0"}))
+            with contextlib.redirect_stdout(BrokenStdout()), contextlib.redirect_stderr(io.StringIO()):
+                code = memo.main(["--key", "KEY.json", "updates", "--cursor-file", str(path), "--wait", "25"])
+            self.assertEqual(code, 1)
+            self.assertEqual(json.loads(path.read_text()), {"cursor": "c0"})  # unchanged: the page was never delivered
+
+    def test_updates_cursor_file_saved_after_output(self):
+        # A normal run prints the page (and flushes stdout) before the cursor file is saved.
+        events = []
+        real_print = print
+
+        def tracking_print(*a, **k):
+            events.append("print")
+            return real_print(*a, **k)
+
+        orig_write_private = memo.write_private
+
+        def tracking_write(p, value):
+            events.append("save")
+            return orig_write_private(p, value)
+
+        with tempfile.TemporaryDirectory() as folder, patch.object(memo, "load_key", return_value=self.key):
+            path = Path(folder) / "cursor.json"
+            path.write_text(json.dumps({"cursor": "c0"}))
+            with patch.object(memo, "write_private", side_effect=tracking_write), \
+                    patch("builtins.print", side_effect=tracking_print), contextlib.redirect_stdout(io.StringIO()):
+                code = memo.main(["--key", "KEY.json", "updates", "--cursor-file", str(path), "--wait", "25"])
+            self.assertEqual(code, 0)
+            self.assertIn("print", events)
+            self.assertIn("save", events)
+            self.assertLess(events.index("print"), events.index("save"))
+            self.assertEqual(json.loads(path.read_text()), {"cursor": "c01"})
+
     def test_cli_webhook(self):
         def run(*argv, answer=None):
             def request(client, path, body=None):

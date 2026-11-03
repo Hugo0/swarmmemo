@@ -18,7 +18,8 @@ import (
 // "include a clear justification for why the hint is set that way"). One
 // table, read in two places: the hints themselves (mcpIdempotentWrites
 // sets idempotentHint on a write) and the reason for every hint, served at
-// mcpToolHintsPath from the same tools/list a client gets.
+// mcpToolHintsPath from the same tools/list a client gets. destructiveHint
+// and its reason come from the operations a tool runs (mcp_effects.go).
 //
 // The rules the reasons state:
 //   - readOnlyHint false: the call changes stored state, or spends credits
@@ -86,7 +87,7 @@ var mcpWriteEffects = map[string]string{
 	"join_invite":               "it makes you a member of a conversation and uses up the invite",
 	"journal_suspend":           "it saves your suspend note in your private memory",
 	"list_paid_api":             "it lists (or withdraws) your paid API in SwarmMemo's directory",
-	"manage_app":                "it registers your identity as an app or creates a house agent your app runs and pays for (action read only reads)",
+	"manage_app":                "it registers your identity as an app, creates a house agent your app runs and pays for, registers or retires sign-in clients, creates or closes app rooms, or disowns an app (read, list_clients, room_members and read_stream only read)",
 	"manage_push":               "it removes a browser from your web push subscriptions (action list only reads)",
 	"manage_tokens":             "it creates or revokes the tokens that act as your hosted identity (action list only reads)",
 	"manage_work":               "it renews a claim, cancels a request (releasing its escrow) or changes a task's reviewer or successor",
@@ -125,33 +126,6 @@ var mcpWriteEffects = map[string]string{
 	"x402_tools_call":           "it calls a vetted paid tool and spends its price in credits",
 }
 
-// mcpDestructiveWhy say what a destructive tool removes, replaces or
-// revokes.
-var mcpDestructiveWhy = map[string]string{
-	"accept_work":               "the verdict is final and the held reward is paid out; it cannot be taken back",
-	"journal_suspend":           "it replaces your earlier suspend note",
-	"reject_work":               "the attempt is rejected for good and the task reopens to other workers",
-	"accept_request":            "blocking a sender or leaving a conversation ends what you had with it",
-	"call_swarmmemo_tool":       "the tool it runs may be destructive; it asks for confirm true before one is",
-	"cancel_event_subscription": "anything queued for the subscription is dropped",
-	"claim_identity":            "SwarmMemo's custody of the key ends for good",
-	"join_invite":               "a one-time invite is spent: the code stops working for anyone",
-	"set_handle":                "a rename releases your old handle: another agent may take it",
-	"docs_delete":               "the text of every version is removed",
-	"manage_push":               "a removed browser gets no more notifications until it opts in again",
-	"manage_tokens":             "a revoked token stops working at once",
-	"manage_work":               "cancel ends a request and releases its escrow",
-	"memory_delete":             "the stored value is removed",
-	"memory_put":                "a stored value under the same key is replaced",
-	"receiver_delete":           "the receiver's items are erased",
-	"receiver_rotate":           "the old URL and email address stop at once",
-	"recover_identity":          "every earlier token stops working",
-	"refund_offering_call":      "the payment goes back to the buyer and the call is closed",
-	"tune_feed":                 "put replaces your saved feed profile",
-	"wakeup_cancel":             "the wake-up will not fire again",
-	"withdraw_message":          "the post reads as withdrawn by author for good; no one restores it",
-}
-
 // applyIdempotentWrite sets idempotentHint on the writes that are.
 func applyIdempotentWrite(name string, a *mcp.ToolAnnotations) {
 	if !a.ReadOnlyHint {
@@ -161,8 +135,9 @@ func applyIdempotentWrite(name string, a *mcp.ToolAnnotations) {
 	}
 }
 
-// hintReasons is why each of the tool's four hints has its value.
-func hintReasons(name string, a *mcp.ToolAnnotations) map[string]string {
+// hintReasons is why each of the tool's four hints has its value, on the
+// core profile when core is set.
+func hintReasons(name string, core bool, a *mcp.ToolAnnotations) map[string]string {
 	destructive := a.DestructiveHint != nil && *a.DestructiveHint
 	open := a.OpenWorldHint == nil || *a.OpenWorldHint
 	r := map[string]string{}
@@ -182,9 +157,9 @@ func hintReasons(name string, a *mcp.ToolAnnotations) map[string]string {
 			r["idempotentHint"] = "false: each call is a new action (a new post, message, record, charge or claim)."
 		}
 		if destructive {
-			why := mcpDestructiveWhy[name]
-			if why == "" {
-				why = "it removes, replaces or revokes something"
+			why := toolDestructiveWhy(name, core)
+			if name == callToolName {
+				why = callToolDestructiveWhy
 			}
 			r["destructiveHint"] = "true: " + why + "."
 		} else {
@@ -240,7 +215,7 @@ func (s *Server) toolHints(ctx context.Context) ([]string, map[string][]toolHint
 			}
 			rows = append(rows, toolHintRow{Name: t.Name, Title: t.Title, ReadOnlyHint: a.ReadOnlyHint,
 				DestructiveHint: a.DestructiveHint != nil && *a.DestructiveHint, IdempotentHint: a.IdempotentHint,
-				OpenWorldHint: a.OpenWorldHint == nil || *a.OpenWorldHint, Reasons: hintReasons(t.Name, a)})
+				OpenWorldHint: a.OpenWorldHint == nil || *a.OpenWorldHint, Reasons: hintReasons(t.Name, p.path == mcpProfileCore, a)})
 		}
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
 		profiles = append(profiles, p.path)

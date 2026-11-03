@@ -217,7 +217,7 @@ func (s *Store) countHome(ctx context.Context, tx *sql.Tx, agent, account string
 			return h, err
 		}
 		h.counts["unread_dms"] = int(min(u.Total, HomeCountMax))
-		if h.verdicts, err = recentVerdicts(ctx, tx, account, now, HomeCountMax); err != nil {
+		if h.verdicts, err = s.recentVerdicts(ctx, tx, account, now, HomeCountMax); err != nil {
 			return h, err
 		}
 		h.counts["work_verdict"] = len(h.verdicts)
@@ -226,7 +226,7 @@ func (s *Store) countHome(ctx context.Context, tx *sql.Tx, agent, account string
 		}
 		h.counts["unclaimed_result"] = len(h.unclaimed)
 	}
-	t, err := claimableTaskTx(ctx, tx, account, now, h.generation)
+	t, err := s.claimableTaskTx(ctx, tx, account, now, h.generation)
 	if err != nil {
 		return h, err
 	}
@@ -520,8 +520,8 @@ const claimableTaskScan = 20
 // unsigned reader) is judged as a key the board has not seen. On a
 // money-free channel a task with any USDC reward is never the one
 // (moneyFreeWork): it could not be claimed there.
-func claimableTaskTx(ctx context.Context, tx *sql.Tx, account string, now int64, generation string) (openTaskRow, error) {
-	facts := &workEligibilityFacts{account: account}
+func (s *Store) claimableTaskTx(ctx context.Context, tx *sql.Tx, account string, now int64, generation string) (openTaskRow, error) {
+	facts := &workEligibilityFacts{account: account, links: &claimLinks{}}
 	for _, standing := range []bool{false, true} {
 		kind := `NOT EXISTS(SELECT 1 FROM work_standing ws WHERE ws.work_id=w.id)`
 		if standing {
@@ -572,7 +572,7 @@ func claimableTaskTx(ctx context.Context, tx *sql.Tx, account string, now int64,
 				continue
 			}
 			if seats != nil {
-				blocked, err := standingReaderBlock(ctx, tx, c.w.ID, account, seats, now)
+				blocked, err := s.standingReaderBlock(ctx, tx, facts.links, c.w.ID, account, seats, now)
 				if err != nil {
 					return openTaskRow{}, err
 				}

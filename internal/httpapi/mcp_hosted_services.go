@@ -52,11 +52,6 @@ var hostedShapes = map[string]hostedShape{
 	},
 }
 
-// hostedServiceEffects are the hosted service tools that replace or remove
-// what the identity stored (destructive); every other one only adds, reads
-// or spends.
-var hostedServiceEffects = map[string]bool{"receiver_rotate": true, "receiver_delete": true, "memory_put": true, "memory_delete": true, "wakeup_cancel": true, "paste_delete": true, "docs_delete": true}
-
 // hostedServiceClosedWorld are the services whose hosted tools touch only
 // the caller's own private data. Memory and docs are open world: a memory
 // item can be public and a doc unlisted or shared with a group.
@@ -121,7 +116,7 @@ func hostedServiceTools(catalog []services.Entry) []serviceTool {
 // isHostedServiceTool reports whether name is one of hostedServiceTools for
 // any built-in service, enabled or not (sign-in's security schemes).
 func isHostedServiceTool(name string) bool {
-	_, _, ok := hostedServiceHints(name)
+	_, ok := hostedServiceHints(name)
 	return ok
 }
 
@@ -138,15 +133,16 @@ func isHostedSignedRead(name string) bool {
 	return false
 }
 
-// hostedServiceHints are a hosted service tool's destructive and closed-world
-// hints; ok is false for any other tool.
-func hostedServiceHints(name string) (destructive, closedWorld, ok bool) {
+// hostedServiceHints is a hosted service tool's closed-world hint; ok is
+// false for any other tool. Whether it is destructive comes from its
+// method (mcp_effects.go).
+func hostedServiceHints(name string) (closedWorld, ok bool) {
 	for _, t := range hostedServiceTools(services.Catalog(hostedServices)) {
 		if t.spec.Name == name {
-			return hostedServiceEffects[name], slices.Contains(hostedServiceClosedWorld, t.entry.ID), true
+			return slices.Contains(hostedServiceClosedWorld, t.entry.ID), true
 		}
 	}
-	return false, false, false
+	return false, false
 }
 
 // hostedCallSchema is a hosted write's input: its arguments plus max_cost,

@@ -93,6 +93,7 @@ type Server struct {
 	offerCache        discoveryCache         // the no-key and free credit offers (offers)
 	hot               hotReads               // hot anonymous reads' answers (hotreads.go, C637)
 	hotNow            func() time.Time       // the hot cache's clock; nil is time.Now (tests set it)
+	healthMemo        healthMemo             // the last good storage check (health.go, C726)
 	offeringDirCache  offeringDirectoryCache // the active offerings /openapi.json lists (offeringDirectory)
 	referenceInflight chan struct{}
 	readers           *readerCounter
@@ -305,6 +306,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			defer s.shares.release(narrow, wide)
 		}
 	}
+	if r.URL.Path == "/health" && readMethod(r) {
+		s.health(w, r) // before the request pool, from memory (health.go, C726)
+		return
+	}
 	select {
 	case s.inflight <- struct{}{}:
 		defer func() { <-s.inflight }()
@@ -359,21 +364,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.loginRoute(w, r) { // C666: sign in with X, Google or GitHub (login.go)
 		return
 	}
-	if r.URL.Path == "/health" {
-		if !readMethod(r) {
-			methodError(w)
-			return
-		}
-		if checker, ok := s.service.(interface{ Health(context.Context) error }); ok {
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			err := checker.Health(ctx)
-			cancel()
-			if err != nil {
-				writeError(w, &board.Error{Status: 503, Code: "storage_unavailable", Message: "Storage is unavailable."})
-				return
-			}
-		}
-		jsonResponse(w, 200, map[string]any{"ok": true, "version": s.cfg.Version})
+	if r.URL.Path == "/health" { // a GET or HEAD was answered before the pool
+		methodError(w)
 		return
 	}
 	if r.URL.Path == "/metrics" {

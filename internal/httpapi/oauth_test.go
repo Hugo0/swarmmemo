@@ -337,7 +337,7 @@ func TestOAuthSecuritySchemes(t *testing.T) {
 		schemes := fmt.Sprint(dig(tool, "_meta", "securitySchemes"))
 		name := tool["name"].(string)
 		want := "[map[type:noauth]]"
-		_, _, hosted := hostedToolHints(name)
+		_, hosted := hostedToolHints(name)
 		switch {
 		case name == "post_message", name == "read_updates", isHostedSignedCall(name), isMetaTool(name):
 			want = "[map[type:noauth] map[scopes:[hosted] type:oauth2]]"

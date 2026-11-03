@@ -78,8 +78,24 @@ func (s *Server) servicesRoute(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 		c = memoryGetCommand(agent, key)
-	case strings.HasPrefix(p, "/api/notary/") && s.cfg.Features.ServiceEnabled("notary"):
-		c = notaryCommand(strings.TrimPrefix(p, "/api/notary/"))
+	case (p == "/api/notary" || strings.HasPrefix(p, "/api/notary/") && p != "/api/notary/key") && s.cfg.Features.ServiceEnabled("notary"):
+		// A receipt by hash, by seq (?seq=N, C713), or by both.
+		if !readMethod(r) {
+			methodError(w)
+			return true
+		}
+		seq, err := notarySeqQuery(r.URL.RawQuery)
+		if err == nil && p == "/api/notary" && seq == nil {
+			err = bad("Read a notary receipt by its seq at /api/notary?seq=N, or by its hash at /api/notary/HASH.")
+		}
+		if err != nil {
+			writeError(w, err)
+			return true
+		}
+		s.execute(w, r, notaryCommand(strings.TrimPrefix(strings.TrimPrefix(p, "/api/notary"), "/"), seq))
+		return true
+	case p == "/api/notary/key" && s.cfg.Features.ServiceEnabled("notary"):
+		c = notaryCommand("key", nil)
 	default:
 		return false
 	}

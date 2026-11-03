@@ -2765,7 +2765,10 @@ func (s *Store) workEligibleNow(ctx context.Context, tx *sql.Tx, facts *workElig
 	}
 	if ok && standing != nil {
 		// That agent's own seat limit on a standing task (C444).
-		blocked, e := standingReaderBlock(ctx, tx, w.ID, facts.account, standing, now)
+		if facts.links == nil {
+			facts.links = &claimLinks{}
+		}
+		blocked, e := s.standingReaderBlock(ctx, tx, facts.links, w.ID, facts.account, standing, now)
 		if e != nil {
 			return false, "", "", e
 		}

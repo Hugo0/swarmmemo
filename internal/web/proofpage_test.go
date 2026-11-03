@@ -43,8 +43,8 @@ type confirmedStore struct {
 	blockTime int64
 }
 
-func (s confirmedStore) ReadLogProof(ctx context.Context, index int64, message string, size int64) (board.LogInclusion, error) {
-	p, err := s.Store.ReadLogProof(ctx, index, message, size)
+func (s confirmedStore) ReadLogPlace(ctx context.Context, index int64, message string, size int64) (board.LogInclusion, error) {
+	p, err := s.Store.ReadLogPlace(ctx, index, message, size)
 	if err == nil {
 		p.Anchor = &board.LogAnchor{Size: p.Checkpoint.Size, State: "confirmed", BitcoinHeight: 912345, CheckpointAt: p.Checkpoint.CreatedAt,
 			SubmittedAt: p.Checkpoint.CreatedAt, ConfirmedAt: p.Checkpoint.CreatedAt + 4500, Calendars: []string{"a", "b", "c"},

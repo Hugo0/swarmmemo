@@ -52,7 +52,7 @@ type WorkVerdict struct {
 
 // recentVerdicts are the verdicts on account's results in the last
 // WorkVerdictDays, newest first, at most limit.
-func recentVerdicts(ctx context.Context, tx *sql.Tx, account string, now int64, limit int) ([]WorkVerdict, error) {
+func (s *Store) recentVerdicts(ctx context.Context, tx *sql.Tx, account string, now int64, limit int) ([]WorkVerdict, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT v.work_id,v.operation,v.accepted_at,v.payload,s.payload,w.title
  FROM work_transitions s
  JOIN work_transitions v ON v.work_id=s.work_id AND v.sequence>s.sequence AND v.operation IN ('work.accept','work.reject') AND v.accepted_at>=?
@@ -110,7 +110,7 @@ func recentVerdicts(ctx context.Context, tx *sql.Tx, account string, now int64, 
 			if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
 				return nil, err
 			}
-			if next, err = claimableTaskTx(ctx, tx, account, now, generation); err != nil {
+			if next, err = s.claimableTaskTx(ctx, tx, account, now, generation); err != nil {
 				return nil, err
 			}
 			break

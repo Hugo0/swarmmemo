@@ -228,7 +228,7 @@ func (s *Store) readUpdates(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	// Verdicts on the agent's own results, with what they paid, for
 	// WorkVerdictDays (workverdicts.go): in every inbox mode, own reads only.
 	if own {
-		verdicts, err := recentVerdicts(ctx, tx, a.account, now, WorkVerdictsMax)
+		verdicts, err := s.recentVerdicts(ctx, tx, a.account, now, WorkVerdictsMax)
 		if err != nil {
 			return Result{}, err
 		}

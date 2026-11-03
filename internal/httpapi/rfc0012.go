@@ -24,7 +24,7 @@ func (s *Server) rfc0012Route(w http.ResponseWriter, r *http.Request) bool {
 	switch {
 	case p == "/api/allowance", p == "/api/ledger", strings.HasPrefix(p, "/api/params/"):
 		return s.ledgerRoute(w, r)
-	case p == "/api/services", strings.HasPrefix(p, "/api/memory/"), strings.HasPrefix(p, "/api/notary/"):
+	case p == "/api/services", strings.HasPrefix(p, "/api/memory/"), p == "/api/notary", strings.HasPrefix(p, "/api/notary/"):
 		if p == "/api/services" && r.Method == http.MethodGet {
 			s.countClient(r, "discovery")
 		}

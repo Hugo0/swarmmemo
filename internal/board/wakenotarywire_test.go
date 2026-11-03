@@ -267,3 +267,59 @@ func TestNotaryEndToEnd(t *testing.T) {
 		t.Fatalf("notary_limit: %v", err)
 	}
 }
+
+// C713: a brief cited a receipt's seq with the wrong hash. A hash not
+// found names the read by seq; a seq reads its receipt; a seq with a hash
+// it does not stamp names the hash it does stamp. The code stays
+// notary_not_found.
+func TestNotaryGetBySeq(t *testing.T) {
+	s := openWakeTest(t, "notary")
+	agent := keyFor(1)
+	stampOf := func(text, id string) (string, float64) {
+		out := run(t, s, svcCall(agent, "notary", "stamp", map[string]any{"text": text}, 1, id))
+		return svcField(t, out.Data, "result", "hash").(string), svcField(t, out.Data, "result", "seq").(float64)
+	}
+	h1, seq1 := stampOf("first plan", "s1")
+	h2, seq2 := stampOf("second plan", "s2")
+	refusal := func(args map[string]any) *Error {
+		t.Helper()
+		_, err := s.Execute(testContext, svcRead(nil, "notary", "get", args), "test-origin")
+		var e *Error
+		if !errors.As(err, &e) || e.Code != "notary_not_found" || e.Status != 404 {
+			t.Fatalf("%v: %v, want 404 notary_not_found", args, err)
+		}
+		return e
+	}
+
+	// Not found by hash: the message names the read by seq.
+	unknown := strings.Repeat("b7", 32)
+	if e := refusal(map[string]any{"hash": unknown}); !strings.Contains(e.Message, "/api/notary?seq=N") || !strings.Contains(e.Message, `{"seq":N}`) {
+		t.Fatalf("by hash: %q", e.Message)
+	}
+	// By seq alone: the receipt.
+	back := run(t, s, svcRead(nil, "notary", "get", map[string]any{"seq": seq2}))
+	if svcField(t, back.Data, "result", "hash") != h2 || svcField(t, back.Data, "result", "receipt", "hash") != h2 ||
+		svcField(t, back.Data, "result", "log", "proof") != "/api/log/proof?notary="+h2 {
+		t.Fatalf("by seq: %+v", back.Data)
+	}
+	// Seq and the hash it stamps: the receipt.
+	if back = run(t, s, svcRead(nil, "notary", "get", map[string]any{"seq": seq1, "hash": h1})); svcField(t, back.Data, "result", "seq") != seq1 {
+		t.Fatalf("seq and its hash: %+v", back.Data)
+	}
+	// Seq with a hash it does not stamp: names the real one.
+	e := refusal(map[string]any{"seq": seq1, "hash": unknown})
+	d, _ := e.Details.(services.NotaryNotFound)
+	if !strings.Contains(e.Message, "stamps hash "+h1) || !strings.Contains(e.Message, "/api/notary/"+h1) || !strings.Contains(e.Message, "has no receipt") || d.SeqHash != h1 || d.HashSeq != 0 {
+		t.Fatalf("mismatch: %q %+v", e.Message, e.Details)
+	}
+	// ... and the given hash's own seq when it has one.
+	if e = refusal(map[string]any{"seq": seq1, "hash": h2}); !strings.Contains(e.Message, h1) || !strings.Contains(e.Message, "its own receipt, seq 2") {
+		t.Fatalf("mismatch, hash stamped elsewhere: %q", e.Message)
+	}
+	// A seq nobody has yet.
+	if e = refusal(map[string]any{"seq": 99}); !strings.Contains(e.Message, "No receipt has seq 99") {
+		t.Fatalf("unknown seq: %q", e.Message)
+	}
+	fails(t, s, svcRead(nil, "notary", "get", map[string]any{"seq": 0}), "invalid_service_data")
+	fails(t, s, svcRead(nil, "notary", "get", map[string]any{}), "invalid_service_data")
+}

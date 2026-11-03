@@ -34,6 +34,17 @@ import (
 // agentPageCacheEntries are kept, in a cache of their own, so profiles never
 // push the home page or /stats out.
 //
+// A conversation page (/e/ID, /e/ID/SLUG, /e/ID/proof, /e/ID/history, C726)
+// is kept the same way, by path and its whole query (a cursor, a reply or
+// to prefill: the same for every reader of that address), for
+// eventPageCacheTTL while the board has not changed, at most
+// eventPageCacheEntries in a cache of their own. Nothing on it is the
+// reader's: the page reads the board as web-public-read and carries no CSRF
+// token or nonce (the CSP is the server's fixed one), and, as for every
+// kept page, a request with a Cookie or Authorization header is never served
+// from the cache or fills it. A crawl of many conversations is bounded by
+// eventPageRenders (agentpages.go), not by this cache.
+//
 // One render per page runs at a time (singleflight): readers that arrive
 // while it runs wait for its result. The render is detached from the
 // request that started it, so that reader leaving does not fail the others.
@@ -50,6 +61,9 @@ const (
 
 	agentPageCacheTTL     = 30 * time.Second
 	agentPageCacheEntries = 256
+
+	eventPageCacheTTL     = 30 * time.Second
+	eventPageCacheEntries = 512
 )
 
 // CachePolicy is how long one cached response is kept.
@@ -72,6 +86,7 @@ type pagePolicy struct {
 	stale    time.Duration
 	onChange bool // a committed write ends the entry
 	agent    bool // an agent's page: kept in the agent pages' cache
+	event    bool // a conversation page: kept in the conversation pages' cache
 }
 
 // cachedPolicy is the policy of a request the cache may serve, by path and
@@ -87,6 +102,8 @@ func cachedPolicy(r *http.Request) (pagePolicy, bool) {
 		return pagePolicy{ttl: statsCacheTTL, stale: statsCacheStale}, true
 	case r.URL.RawQuery == "" && agentPagePath(r.URL.Path):
 		return pagePolicy{ttl: agentPageCacheTTL, onChange: true, agent: true}, true
+	case eventPagePath(r.URL.Path):
+		return pagePolicy{ttl: eventPageCacheTTL, onChange: true, event: true}, true
 	}
 	return pagePolicy{}, false
 }
@@ -248,12 +265,14 @@ func (c *ResponseCache) keepLocked(key string, page *cachedPage) {
 }
 
 // pageCache is the web pages' ResponseCache: cachedPolicy's requests, keyed
-// by origin, path and query; agent pages in a bounded one of their own.
+// by origin, path and query; agent pages and conversation pages each in a
+// bounded one of their own.
 type pageCache struct {
 	next    http.Handler
 	changes func() <-chan struct{}
 	cache   *ResponseCache
 	agents  *ResponseCache
+	events  *ResponseCache
 }
 
 // withPageCache serves next through a page cache when service signals its
@@ -267,7 +286,8 @@ func withPageCache(service board.Service, next http.Handler) http.Handler {
 }
 
 func newPageCache(next http.Handler, changes func() <-chan struct{}, now func() time.Time) *pageCache {
-	return &pageCache{next: next, changes: changes, cache: NewResponseCache(0, now), agents: NewResponseCache(agentPageCacheEntries, now)}
+	return &pageCache{next: next, changes: changes, cache: NewResponseCache(0, now), agents: NewResponseCache(agentPageCacheEntries, now),
+		events: NewResponseCache(eventPageCacheEntries, now)}
 }
 
 func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -281,8 +301,11 @@ func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		policy.Changes = c.changes
 	}
 	cache := c.cache
-	if p.agent {
+	switch {
+	case p.agent:
 		cache = c.agents
+	case p.event:
+		cache = c.events
 	}
 	// The origin is the deployment's (WithOrigin), part of the key all the same.
 	cache.Serve(w, r, requestOrigin(r)+" "+r.URL.Path+"?"+r.URL.RawQuery, policy, c.next)

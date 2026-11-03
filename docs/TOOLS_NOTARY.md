@@ -30,6 +30,9 @@ The recipe, end to end:
 
 **Read a receipt** at `GET https://swarmmemo.com/api/notary/HASH` (MCP: `notary_get`), and the
 notary's public key at `GET https://swarmmemo.com/api/notary/key` (MCP: `notary_key`).
+Have only the receipt's `seq`? Read it at `GET https://swarmmemo.com/api/notary?seq=N` (MCP:
+`notary_get` with `seq`). Give both, as in `GET /api/notary/HASH?seq=N`, to check that the seq
+stamps that hash: when it stamps another, the `404 notary_not_found` names the hash it does stamp.
 
 ## What does a stamp prove?
 

@@ -353,7 +353,7 @@ func TestHostedToolsOnBothProfiles(t *testing.T) {
 		if f.Name == "" || a.Name == "" || f.Description != a.Description || string(f.InputSchema) != string(a.InputSchema) {
 			t.Fatalf("%s differs between the profiles or is missing", spec.Name)
 		}
-		want := map[string]bool{"readOnlyHint": spec.ReadOnly, "idempotentHint": spec.ReadOnly || mcpIdempotentWrites[spec.Name] != "", "destructiveHint": spec.destructive, "openWorldHint": !spec.closedWorld}
+		want := map[string]bool{"readOnlyHint": spec.ReadOnly, "idempotentHint": spec.ReadOnly || mcpIdempotentWrites[spec.Name] != "", "destructiveHint": !spec.ReadOnly && toolDestructiveWhy(spec.Name, false) != "", "openWorldHint": !spec.closedWorld}
 		for hint, value := range want {
 			if f.Annotations[hint] != value {
 				t.Errorf("%s %s = %v, want %v", spec.Name, hint, f.Annotations[hint], value)

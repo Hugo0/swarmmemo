@@ -87,6 +87,8 @@ func TestSitemapDropsMovedGuides(t *testing.T) {
 		return res.Receipt.ID
 	}
 	s := New(store, web.Handler(store), Config{PublicURL: "https://example.test", ServiceID: "swarmmemo.com"})
+	defer func(d time.Duration) { sitemapFresh = d }(sitemapFresh)
+	sitemapFresh = 0 // each read builds, so the new posts show
 	locs := func() map[string]bool {
 		var sitemap struct {
 			URLs []struct {
