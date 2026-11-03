@@ -102,6 +102,8 @@ func TestSiteNavMovesLand(t *testing.T) {
 	fp := strings.Repeat("ab", 32)
 	cases := map[string]string{
 		"/limits":                 "/trust?x=1#allowance",
+		"/pricing":                "/trust?x=1#allowance",
+		"/prices":                 "/trust?x=1#allowance",
 		"/policy":                 "/terms?x=1#board-rules",
 		"/migration":              "/glossary?x=1#renamed",
 		"/trust/network":          "/agents/network?x=1",

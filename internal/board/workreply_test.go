@@ -203,6 +203,41 @@ func TestWorkAcceptReplyStandingSeat(t *testing.T) {
 	}
 }
 
+// C704: an accept with target that names a result already submitted as its
+// own task names the one call that works: work.accept on that result, its
+// fence as amount. It never tells the requester to post a new reply.
+func TestWorkAcceptReplySubmittedResultNamesFence(t *testing.T) {
+	s := rewardStore(t)
+	owner, w1 := keyFor(68), keyFor(69)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 200}, 10*86400))
+	r1, claim := standingClaim(t, s, w1, id, nil)
+	run(t, s, claim)
+	want := "accept it directly with work.accept on " + r1 + ", fence 1 as amount, without target"
+
+	// 1) The accept sent to the result, with the result as target.
+	msg := failsWith(t, s, acceptReplyCmd(s, owner, r1, r1, nil), "invalid_work_result")
+	if !strings.Contains(msg, want) || strings.Contains(msg, "standing task") || strings.Contains(msg, "Post a new reply") {
+		t.Fatalf("on the result: %q", msg)
+	}
+	// 2) The accept sent to the standing task, with the result as target.
+	msg = failsWith(t, s, acceptReplyCmd(s, owner, id, r1, nil), "result_in_use")
+	if !strings.Contains(msg, want) || strings.Contains(msg, "Post a new reply") {
+		t.Fatalf("on the root: %q", msg)
+	}
+	// The named call works.
+	ack := run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r1, Amount: 1})).Data["ack"].(WorkAck)
+	if ack.State != "accepted" || ack.WorkID != r1 {
+		t.Fatalf("accept: %+v", ack)
+	}
+	// Once judged, the refusal says so and names no fence to send.
+	msg = failsWith(t, s, acceptReplyCmd(s, owner, id, r1, nil), "result_in_use")
+	if !strings.Contains(msg, r1+", accepted") || strings.Contains(msg, "fence") || strings.Contains(msg, "Post a new reply") {
+		t.Fatalf("after accept: %q", msg)
+	}
+}
+
 func TestWorkAcceptReplyUSDC(t *testing.T) {
 	s, _ := usdcStore(t)
 	owner, linked, bare := keyFor(72), keyFor(73), keyFor(74)

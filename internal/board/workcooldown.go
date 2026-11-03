@@ -139,12 +139,33 @@ func workClaimCooldownText(standing bool, until int64) string {
 		what, time.Unix(until, 0).UTC().Format(time.RFC3339), WorkClaimCooldownRejects, WorkClaimCooldownWindow/86400, WorkClaimCooldown/3600)
 }
 
+// workClaimCooldownReplyText is the same refusal worded for the requester
+// (or reviewer) whose accept of a direct reply (C691) ran the claim for the
+// reply's author: the pause is the author's, not the decider's (C706). It
+// still holds there: the defence against an account and a linked one
+// recycling rejected results must not depend on who sends the claim, and a
+// reply has no verdict without one, so the way on is the same accept once
+// the pause ends.
+func workClaimCooldownReplyText(standing bool, until int64) string {
+	what := "this task"
+	if standing {
+		what = "this standing task"
+	}
+	at := time.Unix(until, 0).UTC().Format(time.RFC3339)
+	return fmt.Sprintf("The reply's author is paused on %s until %s: %d or more of its results on it (from its account or keys linked to it) were rejected in the last %d days, so the board cannot claim this reply for it until %d hours after the latest rejection. Your account is not paused. The reply stays as it is: send the same accept after %s.",
+		what, at, WorkClaimCooldownRejects, WorkClaimCooldownWindow/86400, WorkClaimCooldown/3600, at)
+}
+
 // refuseClaimCooldown is work.claim's 403 not_eligible while the cool-down
-// holds.
-func (s *Store) refuseClaimCooldown(ctx context.Context, q workQuerier, w workRow, standing bool, account string, now int64) error {
+// holds. forReply is the claim an accept of a direct reply runs for the
+// reply's author: the same code, worded for the requester.
+func (s *Store) refuseClaimCooldown(ctx context.Context, q workQuerier, w workRow, standing bool, account string, now int64, forReply bool) error {
 	until, err := s.workClaimCooldownUntil(ctx, q, nil, w, standing, account, now)
 	if err != nil || until == 0 {
 		return err
+	}
+	if forReply {
+		return problem(403, "not_eligible", workClaimCooldownReplyText(standing, until))
 	}
 	return problem(403, "not_eligible", workClaimCooldownText(standing, until))
 }

@@ -59,7 +59,7 @@ var SiteNav = []NavPage{
 	{Path: "/swarmchasing", Label: "Research: Swarmchasing", Foot: FootLearn, Views: []string{"graph"}, Index: true, Landing: true, Moved: []string{"/graph", "/graph/*"}},
 	{Path: BoardStatePath, Label: "State of agent boards", Foot: FootLearn, Views: []string{"boards-state"}, Index: true, Landing: true, LLMs: "State of agent boards"},
 	// Trust and record
-	{Path: "/trust", Label: "Trust and allowance", Foot: FootTrust, Views: []string{"trust"}, Index: true, Landing: true, LLMs: "Trust and allowance", Moved: []string{"/limits"}},
+	{Path: "/trust", Label: "Trust and allowance", Foot: FootTrust, Views: []string{"trust"}, Index: true, Landing: true, LLMs: "Trust and allowance", Moved: []string{"/limits", "/pricing", "/prices"}},
 	{Path: "/trust-model", Label: "Trust model", Foot: FootTrust, Index: true},
 	{Path: "/trust/penalties", Label: "Penalty log", Foot: FootTrust, Views: []string{"penalties"}, Served: func(f board.Features) bool { return f.Trust != board.TrustOff }},
 	{Path: "/verify", Label: "Verify the record", Foot: FootTrust, Index: true, Landing: true},
@@ -510,6 +510,8 @@ func movedHTMLRoute(path, rawQuery string) (string, bool) {
 // by "NEWPATH<OLDPATH".
 var movedFragment = map[string]string{
 	"/trust</limits":       "#allowance",
+	"/trust</pricing":      "#allowance", // C705: the first path a budgeting agent guesses
+	"/trust</prices":       "#allowance",
 	"/glossary</migration": "#renamed",
 	"/terms</policy":       "#board-rules",
 }

@@ -1231,7 +1231,7 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 			if err = workClaimEligible(ctx, tx, w.Eligibility, a.account, now); err != nil {
 				return Result{}, err
 			}
-			if err = s.refuseClaimCooldown(ctx, tx, w, standing != nil, a.account, now); err != nil {
+			if err = s.refuseClaimCooldown(ctx, tx, w, standing != nil, a.account, now, forReply); err != nil {
 				return Result{}, err
 			}
 		case "work.renew", "work.submit":

@@ -46,6 +46,34 @@ func invalidReplyResult(to, room string) error {
 	return problem(400, "invalid_work_result", "target must be a visible signed direct reply to the work's request ("+to+"), in its room ("+room+"), by another agent: that reply is the result you accept.")
 }
 
+// ownResultAccept is the refusal text of an accept with target that names
+// a result which is already its own work item, on a standing task (C704):
+// the one call that works is work.accept on that item with its fence.
+func ownResultAccept(w workRow) string {
+	if w.State == "submitted" {
+		return fmt.Sprintf("This result is already its own task (%s): accept it directly with work.accept on %s, fence %d as amount, without target.", w.ID, w.ID, w.Fence)
+	}
+	return fmt.Sprintf("This result is already its own task (%s, %s): work.get %s shows it; an accept with target takes no result that already opened a task.", w.ID, w.State, w.ID)
+}
+
+// ownResultRow is the work item reply (or the message it edits) already
+// opened on standing task root, if any.
+func ownResultRow(ctx context.Context, tx *sql.Tx, reply, root string) (workRow, bool, error) {
+	var id string
+	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN origin<>'' THEN origin ELSE id END FROM events WHERE id=?`, reply).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workRow{}, false, nil
+	}
+	if err != nil {
+		return workRow{}, false, err
+	}
+	w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=? AND standing_id=?`, id, root))
+	if errors.Is(err, sql.ErrNoRows) {
+		return workRow{}, false, nil
+	}
+	return w, err == nil, err
+}
+
 // acceptReply is work.accept with target (C691): see the file comment.
 func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	if err := requireSigned(a); err != nil {
@@ -74,7 +102,7 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		return Result{}, err
 	}
 	if w.StandingID != "" {
-		return Result{}, problem(400, "invalid_work_result", "target names a reply to the task itself: send this accept to the standing task ("+w.StandingID+"), or accept this result without target, with its fence.")
+		return Result{}, problem(400, "invalid_work_result", ownResultAccept(w))
 	}
 	// The decider, as for any accept: the named reviewer, else the requester.
 	if w.Reviewer != "" && a.account != w.Reviewer {
@@ -101,6 +129,15 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	state, err := effectiveWork(ctx, tx, w.ID, generation, now)
 	if err != nil {
 		return Result{}, err
+	}
+	if standing != nil {
+		// A reply that already opened its own task is accepted there, by
+		// its id and fence, not again through the standing task (C704).
+		if own, ok, err := ownResultRow(ctx, tx, c.Target, w.ID); err != nil {
+			return Result{}, err
+		} else if ok {
+			return Result{}, problem(409, "result_in_use", ownResultAccept(own))
+		}
 	}
 	worker := actor{id: author.id, account: author.account, publicKey: author.publicKey, signed: true}
 	step := func(op string, fence int64) (WorkAck, error) {
