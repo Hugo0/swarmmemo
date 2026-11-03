@@ -269,8 +269,15 @@ func (s *Server) countReferrer(r *http.Request) {
 	if visit != "" {
 		keys = append(keys, visit)
 	}
-	if key := refKey(r); key != "" {
-		keys = append(keys, key)
+	ref := refKey(r)
+	if ref != "" {
+		keys = append(keys, ref)
+		if network == "" {
+			prefix, own := s.networkPrefix(s.peer(r))
+			if !own {
+				network = prefix
+			}
+		}
 	}
 	if family := userAgentFamily(r.Header.Get("User-Agent")); family != "" {
 		keys = append(keys, "agent:"+family)
@@ -291,6 +298,14 @@ func (s *Server) countReferrer(r *http.Request) {
 				continue
 			}
 			c.day(day).add(key, 1)
+		}
+		// A venue's distinct visitors (C729): its first visit from each
+		// network today, by the day's salted in-memory hash; only the number
+		// is ever stored. The operator's own networks are left out.
+		if ref != "" && network != "" {
+			if visitor := "refvisitor:" + ref[len("ref:"):]; c.firstFromNetwork(day, visitor, network) {
+				c.day(day).add(visitor, 1)
+			}
 		}
 		if now.Sub(c.lastFlush) < c.interval {
 			return false
@@ -360,6 +375,11 @@ func (d *referrerDay) add(key string, n int64) {
 			key = "ref-other"
 		case strings.HasPrefix(key, "ref:"):
 			d.refs++
+		case strings.HasPrefix(key, "refvisitor:"):
+			// Kept by name only while its venue is (counted first).
+			if _, named := d.counts["ref:"+key[len("refvisitor:"):]]; !named {
+				key = "refvisitor-other"
+			}
 		case strings.HasPrefix(key, "fetch:"):
 			family, _, _ := strings.Cut(key[len("fetch:"):], ":")
 			if d.fetches == nil {

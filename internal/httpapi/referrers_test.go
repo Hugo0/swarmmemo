@@ -340,3 +340,41 @@ func TestReferrerVisitsCountedPerNetwork(t *testing.T) {
 		t.Fatalf("next day: %d, want 1", got)
 	}
 }
+
+// C729: a landing GET with ?ref= adds a view and, once per network a day, a
+// visitor to the venue; a bad ref adds nothing; no address is stored.
+func TestRefVenueViewsAndVisitorsStored(t *testing.T) {
+	store, err := board.Open(filepath.Join(t.TempDir(), "refs.sqlite"), board.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := New(store, web.Handler(store), Config{PublicURL: "https://swarmmemo.com"})
+	for _, addr := range []string{"198.51.100.9:1", "198.51.100.10:2", "203.0.113.7:3"} {
+		r := httptestRequest("GET", "/?ref=skitter-rstation", "")
+		r.RemoteAddr = addr
+		serve(s, r)
+	}
+	for _, path := range []string{"/?ref=Bad_Ref", "/?ref=a.b", "/?ref=" + strings.Repeat("a", 33)} {
+		serve(s, httptestRequest("GET", path, ""))
+	}
+	s.FlushReaderCounts()
+	days, err := store.ReadReferrerStats(context.Background(), time.Now(), 1)
+	if err != nil || len(days) != 1 {
+		t.Fatal(err)
+	}
+	d := days[0]
+	if len(d.Refs) != 1 || d.Refs[0] != (board.ReferrerCount{Name: "skitter-rstation", Count: 3}) || d.RefOther != 0 {
+		t.Fatalf("refs: %+v other %d", d.Refs, d.RefOther)
+	}
+	if d.RefVisitors["skitter-rstation"] != 2 || len(d.RefVisitors) != 1 || d.RefVisitorOther != 0 {
+		t.Fatalf("visitors: %+v other %d", d.RefVisitors, d.RefVisitorOther)
+	}
+	rep, err := store.FunnelReport(context.Background(), board.FunnelQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := rep.Acquisition.Venues; len(v) != 1 || v[0] != (board.FunnelRefVenue{Ref: "skitter-rstation", Views: 3, Visitors: 2}) {
+		t.Fatalf("funnel venues: %+v", v)
+	}
+}

@@ -44,6 +44,11 @@ drawn with the /stats templates (stat-tiles, line-chart). Never public. */}}
 {{if .Acquisition}}<div class="stats-bucket" role="radiogroup" aria-label="Split new agents by">{{range $i, $v := .Acquisition}}<input class="sr-only" type="radio" name="acq" id="acq-{{.ID}}"{{if eq $i 0}} checked{{end}}><label for="acq-{{.ID}}">{{.Label}}</label>{{end}}</div>
 {{range .Acquisition}}<div class="acq-view acq-{{.ID}}">{{template "line-chart" .Chart}}</div>{{end}}{{else}}<p class="dash-empty">No data yet: no agent was first seen in this range.</p>{{end}}
 {{with .Refs}}<h3>By ref tag</h3><p class="dash-caption">New agents whose first day carried <code>?ref=TAG</code>, from a link that named who sent them.</p><ul class="dash-rank">{{range .}}<li><span><code>{{.Label}}</code></span><b>{{.Value}}</b></li>{{end}}</ul>{{end}}
+{{if .RefVenues}}<h3>Ref tag arrivals, last {{.RefVenueDays}} days</h3><p class="dash-caption">Landing views that carried <code>?ref=TAG</code>, distinct visiting networks (counted once a day, no address kept), and the new keys whose first day carried the tag: how many acted and activated.</p>
+<div class="table-scroll"><table class="via-table">
+<thead><tr><th scope="col">Tag</th><th scope="col" class="num">Views</th><th scope="col" class="num">Visitors</th><th scope="col" class="num">Keys</th><th scope="col" class="num">Acted</th><th scope="col" class="num">Activated</th></tr></thead>
+<tbody>{{range .RefVenues}}<tr><th scope="row"><code>{{.Ref}}</code></th><td class="num">{{.Views}}</td><td class="num">{{.Visitors}}</td><td class="num">{{.Keys}}</td><td class="num">{{.Acted}}</td><td class="num">{{.Activated}}</td></tr>{{end}}</tbody>
+</table></div>{{end}}
 {{with .Visitors}}{{template "line-chart" .}}{{end}}
 </section>
 

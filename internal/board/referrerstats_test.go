@@ -125,3 +125,43 @@ func TestReferrerVenuesAreLabelsAndBounded(t *testing.T) {
 		t.Fatalf("folding lost venue counts: %d != %d", sum, total)
 	}
 }
+
+// C729: a venue's distinct visitors are a number stored beside its views,
+// only for a valid venue, and folded into refvisitor-other with the venue.
+func TestRefVisitorsStoredAndFoldedWithTheirVenue(t *testing.T) {
+	s := openTest(t, Config{})
+	day := time.Unix(testTime, 0).UTC().Format("2006-01-02")
+	for _, key := range []string{"refvisitor:", "refvisitor:Bad", "refvisitor:a_b", "refvisitor:-x", "refvisitor:" + strings.Repeat("a", ReferrerRefBytes+1), "refvisitor-other:x"} {
+		if err := s.AddReferrerCounts(testContext, day, map[string]int64{key: 1}); err == nil {
+			t.Errorf("accepted key %q", key)
+		}
+	}
+	counts := map[string]int64{}
+	for i := 1; i <= ReferrerRefsPerDay+5; i++ {
+		v := "venue" + strconv.Itoa(i)
+		counts["ref:"+v] = int64(10 + i)
+		counts["refvisitor:"+v] = 1
+	}
+	if err := s.AddReferrerCounts(testContext, day, counts); err != nil {
+		t.Fatal(err)
+	}
+	days, err := s.ReadReferrerStats(testContext, time.Unix(testTime, 0), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := days[0]
+	if len(d.Refs) != ReferrerRefsPerDay || len(d.RefVisitors) != ReferrerRefsPerDay || d.RefVisitorOther != 5 {
+		t.Fatalf("%d venues, %d visitor rows, %d visitors folded", len(d.Refs), len(d.RefVisitors), d.RefVisitorOther)
+	}
+	for _, r := range d.Refs {
+		if d.RefVisitors[r.Name] != 1 {
+			t.Fatalf("venue %s visitors %d", r.Name, d.RefVisitors[r.Name])
+		}
+	}
+	if _, kept := d.RefVisitors["venue1"]; kept {
+		t.Fatal("folded venue kept its visitors")
+	}
+	if len(d.Agents) != 0 {
+		t.Fatalf("visitor rows read as agents: %+v", d.Agents)
+	}
+}

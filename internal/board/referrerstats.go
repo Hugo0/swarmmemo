@@ -21,6 +21,8 @@ import (
 //	referrer:YYYY-MM-DD:agent:FAMILY  requests from a known crawler or agent family
 //	referrer:YYYY-MM-DD:ref:VENUE     landing-page visits that carried ?ref=VENUE
 //	referrer:YYYY-MM-DD:ref-other     ?ref= venues past the day's named ones
+//	referrer:YYYY-MM-DD:refvisitor:VENUE  distinct visiting networks among VENUE's visits (C729)
+//	referrer:YYYY-MM-DD:refvisitor-other  the same for venues past the day's named ones
 //	referrer:YYYY-MM-DD:fetch:FAMILY:PATH  landing-page GET/HEADs by a user-initiated assistant fetcher (C451)
 //	referrer:YYYY-MM-DD:fetch-other:FAMILY that family's landing fetches past its named paths
 //
@@ -34,6 +36,13 @@ import (
 // smallest are folded into other, asset-other and ref-other. These counts are
 // for the operator only (swarmmemo stats referrers) and are never served over
 // HTTP.
+//
+// A refvisitor row is a number only: the caller counts a network once per
+// venue per day with a salted hash it holds in memory for that day and never
+// stores (no IP, prefix or hash reaches the database). A venue's refvisitor
+// row is kept only while its ref row is: when a venue folds into ref-other
+// its visitors fold into refvisitor-other, an over-count there since one
+// network may have visited several folded venues.
 //
 // The fetch rows answer "which pages do assistants fetch for their users?":
 // FAMILY is one of AssistantFetchFamilies, the fetchers an assistant sends
@@ -114,8 +123,10 @@ func ValidReferrerRef(ref string) bool {
 
 func validReferrerKey(key string) bool {
 	switch {
-	case key == "other", key == "ref-other", key == "asset-other":
+	case key == "other", key == "ref-other", key == "asset-other", key == "refvisitor-other":
 		return true
+	case strings.HasPrefix(key, "refvisitor:"):
+		return ValidReferrerRef(key[len("refvisitor:"):])
 	case strings.HasPrefix(key, "host:"):
 		return ValidReferrerHost(key[len("host:"):])
 	case strings.HasPrefix(key, "asset:"):
@@ -195,6 +206,9 @@ func (s *Store) AddReferrerCounts(ctx context.Context, day string, counts map[st
 			return err
 		}
 	}
+	if err = foldRefVisitors(ctx, tx, prefix); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -211,6 +225,22 @@ func foldReferrers(ctx context.Context, tx *sql.Tx, prefix, kind, into string, k
 		return err
 	}
 	return addCounter(ctx, tx, prefix+into, folded)
+}
+
+// foldRefVisitors folds every refvisitor:VENUE counter of the day at prefix
+// whose ref:VENUE counter is gone (folded into ref-other) into
+// refvisitor-other, so the kept visitor rows never outnumber the kept venues.
+func foldRefVisitors(ctx context.Context, tx *sql.Tx, prefix string) error {
+	const orphan = `scope>? AND scope<? AND NOT EXISTS (SELECT 1 FROM counters r WHERE r.scope=?||substr(counters.scope,?))`
+	args := []any{prefix + "refvisitor:", prefix + "refvisitor;", prefix + "ref:", len(prefix+"refvisitor:") + 1}
+	var folded int64
+	if err := tx.QueryRowContext(ctx, `SELECT coalesce(sum(value),0) FROM counters WHERE `+orphan, args...).Scan(&folded); err != nil || folded == 0 {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM counters WHERE `+orphan, args...); err != nil {
+		return err
+	}
+	return addCounter(ctx, tx, prefix+"refvisitor-other", folded)
 }
 
 // ReferrerCount is one name and its count.
@@ -232,6 +262,10 @@ type ReferrerDay struct {
 	Agents     []ReferrerCount
 	Refs       []ReferrerCount
 	RefOther   int64
+	// RefVisitors is the distinct visiting networks per venue in Refs (by
+	// name; a venue with none is absent), RefVisitorOther those of RefOther.
+	RefVisitors     map[string]int64
+	RefVisitorOther int64
 	// Assistants are the landing pages each assistant fetch family read
 	// that day, in AssistantFetchFamilies order, families with none left out.
 	Assistants []AssistantFetches
@@ -308,6 +342,13 @@ func (s *Store) ReadReferrerStats(ctx context.Context, end time.Time, days int) 
 			out[i].AssetOther += value
 		case key == "ref-other":
 			out[i].RefOther += value
+		case key == "refvisitor-other":
+			out[i].RefVisitorOther += value
+		case strings.HasPrefix(key, "refvisitor:"):
+			if out[i].RefVisitors == nil {
+				out[i].RefVisitors = map[string]int64{}
+			}
+			out[i].RefVisitors[key[len("refvisitor:"):]] = value
 		case strings.HasPrefix(key, "host:"):
 			out[i].Hosts = append(out[i].Hosts, ReferrerCount{key[len("host:"):], value})
 		case strings.HasPrefix(key, "asset:"):

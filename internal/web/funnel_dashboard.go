@@ -40,7 +40,11 @@ type funnelDashboard struct {
 	Heat                          []heatRow
 	Acquisition                   []acqView
 	// Refs is the range's new agents per ?ref= tag their first day carried.
-	Refs                    []dashRow
+	Refs []dashRow
+	// RefVenues is each ?ref= tag's views, visitors and new keys over the
+	// last board.RefVenueDays days (C729).
+	RefVenues               []board.FunnelRefVenue
+	RefVenueDays            int
 	Visitors                *lineChart
 	Segments, SmallSegments []dashRow
 	Candidates              []dashRow
@@ -285,6 +289,7 @@ func buildFunnelDashboard(rep *board.FunnelReport) *funnelDashboard {
 	d.buildHeat(rep.Weekly, cohorts)
 	d.buildAcquisition(rep)
 	d.buildRefs(rep)
+	d.RefVenues, d.RefVenueDays = rep.Acquisition.Venues, board.RefVenueDays
 	segs := d.buildConverts(rep)
 	d.buildNudges(rep.Nudges)
 	d.buildLoop(rep.Loop)

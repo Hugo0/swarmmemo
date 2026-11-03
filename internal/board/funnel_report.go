@@ -186,6 +186,88 @@ type FunnelAcquisition struct {
 	Weeks   []FunnelNewWeek  `json:"weeks"`
 	Readers []FunnelReadDay  `json:"readers"`
 	Totals  map[string]Count `json:"totals"`
+	// Venues is each ?ref= venue of the RefVenueDays days ending the range
+	// (C729): landing views and distinct visiting networks
+	// (referrerstats.go), and the new agents whose first day carried it,
+	// how many acted and how many activated. Most views first.
+	Venues []FunnelRefVenue `json:"ref_venues"`
+}
+
+// RefVenueDays is the window of FunnelAcquisition.Venues.
+const RefVenueDays = 7
+
+// FunnelRefVenue is one ?ref= venue's arrivals and what came of them.
+// Ref "_other" is the views and visitors of venues folded past
+// ReferrerRefsPerDay.
+type FunnelRefVenue struct {
+	Ref       string `json:"ref"`
+	Views     int64  `json:"views"`
+	Visitors  int64  `json:"visitors"`
+	Keys      int    `json:"keys"`
+	Acted     int    `json:"acted"`
+	Activated int    `json:"activated"`
+}
+
+// RefVenueOther is the FunnelRefVenue.Ref of folded venues.
+const RefVenueOther = "_other"
+
+// refVenues is FunnelAcquisition.Venues for the RefVenueDays days ending
+// to: views from the referrer counters, keys from rows.
+func (s *Store) refVenues(ctx context.Context, rows []FunnelRow, to int64, activatedAt func(FunnelRow) int64) ([]FunnelRefVenue, error) {
+	stats, err := s.ReadReferrerStats(ctx, time.Unix(to, 0), RefVenueDays)
+	if err != nil {
+		return nil, err
+	}
+	by := map[string]*FunnelRefVenue{}
+	venue := func(ref string) *FunnelRefVenue {
+		v := by[ref]
+		if v == nil {
+			v = &FunnelRefVenue{Ref: ref}
+			by[ref] = v
+		}
+		return v
+	}
+	for _, d := range stats {
+		for _, r := range d.Refs {
+			v := venue(r.Name)
+			v.Views += r.Count
+			v.Visitors += d.RefVisitors[r.Name]
+		}
+		if d.RefOther > 0 || d.RefVisitorOther > 0 {
+			v := venue(RefVenueOther)
+			v.Views += d.RefOther
+			v.Visitors += d.RefVisitorOther
+		}
+	}
+	from := (to/86400 - RefVenueDays + 1) * 86400
+	for _, r := range rows {
+		if r.EntryRef == "" || r.EntryRef == GateRef || r.FirstSeen < from || r.FirstSeen > to {
+			continue
+		}
+		v := venue(r.EntryRef)
+		v.Keys++
+		if r.FirstActAt > 0 {
+			v.Acted++
+		}
+		if activatedAt(r) > 0 {
+			v.Activated++
+		}
+	}
+	out := make([]FunnelRefVenue, 0, len(by))
+	for _, v := range by {
+		out = append(out, *v)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Views != b.Views {
+			return a.Views > b.Views
+		}
+		if a.Keys != b.Keys {
+			return a.Keys > b.Keys
+		}
+		return a.Ref < b.Ref
+	})
+	return out, nil
 }
 
 // Count is a tally by value.
@@ -513,6 +595,10 @@ func (s *Store) FunnelReport(ctx context.Context, q FunnelQuery) (*FunnelReport,
 			visitors += rd.Visitors
 			rep.Acquisition.Readers = append(rep.Acquisition.Readers, rd)
 		}
+	}
+
+	if rep.Acquisition.Venues, err = s.refVenues(ctx, all, q.To, activatedAt); err != nil {
+		return nil, err
 	}
 
 	// 2. Funnel steps and cohorts.

@@ -332,3 +332,17 @@ func TestFunnelDashboardRetiredNudge(t *testing.T) {
 		}
 	}
 }
+
+// C729: the acquisition section tables each ?ref= tag's views, visitors and
+// new keys of the last 7 days.
+func TestFunnelDashboardRefVenues(t *testing.T) {
+	rep := funnelFixture()
+	if page := renderFunnel(t, rep); strings.Contains(page, "Ref tag arrivals") {
+		t.Fatal("venue table drawn with no venues")
+	}
+	rep.Acquisition.Venues = []board.FunnelRefVenue{{Ref: "skitter-rstation", Views: 41, Visitors: 17, Keys: 3, Acted: 2, Activated: 1}}
+	page := renderFunnel(t, rep)
+	if !strings.Contains(page, "Ref tag arrivals") || !strings.Contains(page, `<th scope="row"><code>skitter-rstation</code></th><td class="num">41</td><td class="num">17</td><td class="num">3</td><td class="num">2</td><td class="num">1</td>`) {
+		t.Fatal("venue row missing")
+	}
+}

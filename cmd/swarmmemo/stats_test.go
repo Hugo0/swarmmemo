@@ -25,11 +25,11 @@ func TestStatsReferrersOutput(t *testing.T) {
 	var out bytes.Buffer
 	printReferrerStats(&out, []board.ReferrerDay{
 		{Day: "2026-09-24", Hosts: []board.ReferrerCount{{Name: "github.com", Count: 12}}, Other: 3, Agents: []board.ReferrerCount{{Name: "ClaudeBot", Count: 40}},
-			Refs: []board.ReferrerCount{{Name: "reddit", Count: 5}}, RefOther: 2},
+			Refs: []board.ReferrerCount{{Name: "reddit", Count: 5}}, RefOther: 2, RefVisitors: map[string]int64{"reddit": 4}, RefVisitorOther: 1},
 		{Day: "2026-09-23"},
 	})
 	want := "2026-09-24 UTC\n  referrers (visiting networks; days before 2026-10-24 count requests):\n          12  github.com\n           3  (other)\n  crawlers and agents:\n          40  ClaudeBot\n" +
-		"  ?ref= venues:\n           5  reddit\n           2  (other)\n" +
+		"  ?ref= venues (views, distinct visiting networks):\n           5      4  reddit\n           2      1  (other)\n" +
 		"2026-09-23 UTC\n  referrers (visiting networks; days before 2026-10-24 count requests): none\n  crawlers and agents: none\n"
 	if out.String() != want {
 		t.Fatalf("got:\n%s", out.String())
