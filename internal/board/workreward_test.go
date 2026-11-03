@@ -22,7 +22,7 @@ func rewardConfig() Config {
 	return Config{Features: Features{Services: []string{"notary", "memory"}, Ledger: LedgerOn}}
 }
 
-func setRewardParams(t *testing.T, s *Store) {
+func setRewardParams(t testing.TB, s *Store) {
 	t.Helper()
 	p := s.allowanceDefaults()
 	rp := p.Resources[allowance.Credit]
@@ -46,7 +46,7 @@ func rewardStore(t *testing.T) *Store {
 
 // mintCredit gives account units of credit in bucket b (a top-up's paid
 // credit, or granted credit that decays).
-func mintCredit(t *testing.T, s *Store, account string, b allowance.Bucket, units int64) {
+func mintCredit(t testing.TB, s *Store, account string, b allowance.Bucket, units int64) {
 	t.Helper()
 	tx, err := s.db.BeginTx(testContext, nil)
 	if err != nil {

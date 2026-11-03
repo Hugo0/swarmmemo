@@ -113,8 +113,13 @@ func TestCoreProfileTools(t *testing.T) {
 				t.Errorf("%s %s = %v, /mcp's %v", name, field, tool[field], f[field])
 			}
 		}
-		// list_services names the hosted services of its own catalogue.
-		if want := coreDescription(f["description"].(string)); desc != want && name != "list_services" {
+		// list_services names the hosted services of its own catalogue; a
+		// narrowing with its own description (coreNarrowing desc) has it.
+		want := f["description"].(string)
+		if n := coreNarrowingOf(name); n != nil && n.desc != "" {
+			want = n.desc
+		}
+		if want = coreDescription(want); desc != want && name != "list_services" {
 			t.Errorf("%s description %q, want %q", name, desc, want)
 		}
 	}

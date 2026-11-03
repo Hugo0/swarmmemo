@@ -85,7 +85,7 @@ func TestCoreProfileMoneyToolsAndSchemas(t *testing.T) {
 		}
 	}
 	// The paid choices are gone from what the arguments say.
-	for _, c := range []struct{ tool, arg, word string }{{"manage_work", "action", "settle"}, {"raise_standing", "action", "refund"}, {"create_work", "tiers", "usdc"}} {
+	for _, c := range []struct{ tool, arg, word string }{{"manage_work", "action", "settle"}, {"manage_work", "action", "promise"}, {"raise_standing", "action", "refund"}, {"create_work", "tiers", "usdc"}} {
 		if strings.Contains(fmt.Sprint(dig(schemaProperty(core[c.tool], c.arg), "description")), c.word) {
 			t.Errorf("the core profile's %s %s still offers %s", c.tool, c.arg, c.word)
 		}
@@ -93,6 +93,48 @@ func TestCoreProfileMoneyToolsAndSchemas(t *testing.T) {
 			t.Errorf("/mcp's %s %s no longer offers %s", c.tool, c.arg, c.word)
 		}
 	}
+	// manage_work's description names no action the board refuses here,
+	// and every action it names (and its action argument lists) is one the
+	// core profile takes: all from manageWorkActions (C721).
+	desc := core["manage_work"]["description"].(string)
+	for _, a := range manageWorkActions {
+		money := board.MoneyOperation(a.operation) != ""
+		if named := strings.Contains(desc, a.name+" ("); named == money {
+			t.Errorf("the core profile's manage_work description names %s %v, its command moves money %v: %q", a.name, named, money, desc)
+		}
+		if !strings.Contains(full["manage_work"]["description"].(string), a.name+" (") {
+			t.Errorf("/mcp's manage_work description no longer names %s", a.name)
+		}
+		for _, arg := range a.args {
+			if money && schemaProperty(core["manage_work"], arg) != nil && !slices.ContainsFunc(coreManageWorkActions(), func(k manageWorkAction) bool { return slices.Contains(k.args, arg) }) {
+				t.Errorf("the core profile's manage_work takes %s, which only %s reads", arg, a.name)
+			}
+		}
+	}
+	if !strings.Contains(desc, "reveal (") || schemaProperty(core["manage_work"], "answer") == nil {
+		t.Errorf("the core profile's manage_work lost reveal, which moves no money: %q", desc)
+	}
+	// Every action a core argument lists is one the profile takes: no
+	// narrowing refuses it, nor the board as money.
+	for _, n := range coreNarrowed {
+		listed, ok := n.restate["action"]
+		if !ok {
+			continue
+		}
+		for _, action := range regexp.MustCompile(`, | or `).Split(listed, -1) {
+			action = strings.TrimSuffix(action, " (the default)")
+			if what := n.refuse(map[string]any{"action": action}); what != "" {
+				t.Errorf("the core profile's %s lists action %s but refuses it: %s", n.tool, action, what)
+			}
+			if n.tool == "manage_work" {
+				i := slices.IndexFunc(manageWorkActions, func(a manageWorkAction) bool { return a.name == action })
+				if i < 0 || board.MoneyOperation(manageWorkActions[i].operation) != "" {
+					t.Errorf("the core profile's manage_work lists action %q, which it does not take", action)
+				}
+			}
+		}
+	}
+
 	// A second list is the same: the narrowing never changes the schemas
 	// the server registered (they are shared by every request).
 	again := toolSchemas(t, s, mcpProfileCore)
@@ -116,8 +158,9 @@ func TestCoreProfileMoneyToolsAndSchemas(t *testing.T) {
 }
 
 // coreMoneyWordRE are the words of paying: no core description or argument
-// says one except in coreMoneyMentions.
-var coreMoneyWordRE = regexp.MustCompile(`(?i)\b(pay|pays|paying|payment|payments|payout|payouts|usdc|x402|mpp|wallets?|settle|settles|settled|settlement|tx_hash|top[- ]?ups?|buy|buying|bought|bonds?|crypto|purchase)\b`)
+// says one except in coreMoneyMentions; usdc inside a name (amount_usdc)
+// counts.
+var coreMoneyWordRE = regexp.MustCompile(`(?i)\b(pay|pays|paying|payment|payments|payout|payouts|\w*usdc\w*|x402|mpp|wallets?|settle|settles|settled|settlement|tx_hash|top[- ]?ups?|buy|buying|bought|bonds?|crypto|purchase)\b`)
 
 // coreMoneyMentions are the legitimate mentions: what a thing is or where
 // it is, never a direction to pay. Each must still occur (no stale entry).
@@ -246,7 +289,9 @@ func TestCoreProfileRefusesMoney(t *testing.T) {
 		{"create_work", work(usdc, map[string]any{"seats": 2, "tiers": []any{map[string]any{"name": "ok", "credits": 1, "usdc": "0.10"}}}), "A USDC tier reward"},
 		{"create_work", work(usdc, map[string]any{"seats": 2, "reward": 1, "usdc_day_max": "1.00"}), "The usdc_day_max argument of create_work"},
 		{"create_work", work(usdc, map[string]any{"seats": 2, "reward": 1, "usdc_per_agent_day": "1.00"}), "The usdc_per_agent_day argument of create_work"},
-		{"manage_work", map[string]any{"message_id": usdc, "action": "settle"}, "Settling a USDC payout"},
+		{"manage_work", map[string]any{"message_id": usdc, "action": "settle"}, board.MoneyOperation(board.WorkSettle)},
+		{"manage_work", map[string]any{"message_id": usdc, "action": "promise"}, board.MoneyOperation(board.WorkPromise)},
+		{"manage_work", map[string]any{"message_id": usdc, "action": "promise", "amount_usdc": "0.10"}, "The amount_usdc argument of manage_work"},
 		{"manage_work", map[string]any{"message_id": usdc, "action": "settle", "tx_hash": "0x" + strings.Repeat("c", 64)}, "The tx_hash argument of manage_work"},
 		{"claim_work", map[string]any{"message_id": usdc, "payout_address": "0x00000000000000000000000000000000000000aa"}, "The payout_address argument of claim_work"},
 		{"submit_work", map[string]any{"message_id": usdc, "result_id": usdc, "payout_address": "0x00000000000000000000000000000000000000aa"}, "The payout_address argument of submit_work"},
@@ -262,6 +307,13 @@ func TestCoreProfileRefusesMoney(t *testing.T) {
 	// Credits are not money: credit work runs on the core profile as on /mcp.
 	if a := mustTool(t, s, mcpProfileCore, asRequester, "create_work", work(credits, map[string]any{"ttl": 86400})); dig(a, "data", "ack", "state") != "open" {
 		t.Fatalf("create_work on the core profile: %v", a)
+	}
+	// Every action the core manage_work names runs there: the work may
+	// refuse it (wrong state), never as money.
+	for _, a := range coreManageWorkActions() {
+		if _, failure := callTool(t, s, mcpProfileCore, asRequester, "manage_work", map[string]any{"message_id": credits, "action": a.name}); strings.Contains(failure, "unsupported_operation") {
+			t.Errorf("manage_work %s on the core profile is refused as money: %q", a.name, failure)
+		}
 	}
 
 	// /mcp is unchanged: the same USDC reward is created there.

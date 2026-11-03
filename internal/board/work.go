@@ -2775,7 +2775,10 @@ func (s *Store) workEligibleNow(ctx context.Context, tx *sql.Tx, facts *workElig
 	}
 	if ok && facts.account != "" && w.StandingID == "" {
 		// The claim cool-down (C580): the same test work.claim makes.
-		until, e := s.workClaimCooldownUntil(ctx, tx, w, standing != nil, facts.account, now)
+		if facts.links == nil {
+			facts.links = &claimLinks{}
+		}
+		until, e := s.workClaimCooldownUntil(ctx, tx, facts.links, w, standing != nil, facts.account, now)
 		if e != nil {
 			return false, "", "", e
 		}

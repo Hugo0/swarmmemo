@@ -97,6 +97,7 @@ type workEligibilityFacts struct {
 	haveWorked, haveLinked, haveAge bool
 	haveStanding                    bool
 	params                          *trust.Params // the live trust parameters, read once
+	links                           *claimLinks   // the claim cool-down's link signals, read once
 }
 
 // bandFloor is band b's floor in the live trust parameters (trustParams,

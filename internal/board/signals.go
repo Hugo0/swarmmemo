@@ -747,37 +747,40 @@ func signalSet(m map[string]bool) []string {
 // from, by the operator links' rule (operatorlinks.go): the write signals'
 // network hash under the current key, only writes from the writer's own
 // address, and a network that carried at most SignalLinkGroupMax signed
-// accounts (more is shared infrastructure and links no one).
+// accounts (more is shared infrastructure and links no one). b is a signed
+// account.
 func (s *Store) sharedNetwork(ctx context.Context, tx workQuerier, a, b string, from int64) (bool, error) {
-	if s.signals.id == "" {
-		return false, nil
+	peers, err := s.networkPeers(ctx, tx, a, from)
+	return peers[b], err
+}
+
+// networkPeers is every signed account that shares a network with a since
+// from by sharedNetwork's rule (a itself too, when it wrote from one): a's
+// networks, and each one's signed accounts while they are at most
+// SignalLinkGroupMax. A page that tests a against many accounts reads it
+// once (claimLinks).
+func (s *Store) networkPeers(ctx context.Context, tx workQuerier, a string, from int64) (map[string]bool, error) {
+	peers := map[string]bool{}
+	if s.signals.id == "" || a == "" {
+		return peers, nil
 	}
 	relayed := "'" + strings.Join(signalRelayedVias, "','") + "'"
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT x.ip_hash_24 FROM write_signals x WHERE x.account=?1 AND x.created_at>=?3 AND x.hash_key=?4 AND x.ip_hash_24<>'' AND x.via NOT IN (`+relayed+`)
- AND EXISTS(SELECT 1 FROM write_signals y WHERE y.ip_hash_24=x.ip_hash_24 AND y.created_at>=?3 AND y.account=?2 AND y.hash_key=?4 AND y.via NOT IN (`+relayed+`))`, a, b, from, s.signals.id)
+	nets, err := stringColumn(ctx, tx, `SELECT DISTINCT ip_hash_24 FROM write_signals WHERE account=? AND created_at>=? AND hash_key=? AND ip_hash_24<>'' AND via NOT IN (`+relayed+`)`, a, from, s.signals.id)
 	if err != nil {
-		return false, err
-	}
-	var nets []string
-	for rows.Next() {
-		var n string
-		if err = rows.Scan(&n); err != nil {
-			rows.Close()
-			return false, err
-		}
-		nets = append(nets, n)
-	}
-	if err = closeRows(rows); err != nil {
-		return false, err
+		return nil, err
 	}
 	for _, n := range nets {
-		var accounts int64
-		if err = tx.QueryRowContext(ctx, `SELECT count(DISTINCT account) FROM write_signals WHERE ip_hash_24=? AND created_at>=? AND hash_key=? AND account<>'' AND via NOT IN (`+relayed+`)`, n, from, s.signals.id).Scan(&accounts); err != nil {
-			return false, err
+		// One past the cap tells a shared network without reading all of it.
+		accounts, err := stringColumn(ctx, tx, `SELECT DISTINCT account FROM write_signals WHERE ip_hash_24=? AND created_at>=? AND hash_key=? AND account<>'' AND via NOT IN (`+relayed+`) LIMIT ?`, n, from, s.signals.id, SignalLinkGroupMax+1)
+		if err != nil {
+			return nil, err
 		}
-		if accounts <= SignalLinkGroupMax {
-			return true, nil
+		if len(accounts) > SignalLinkGroupMax {
+			continue
+		}
+		for _, account := range accounts {
+			peers[account] = true
 		}
 	}
-	return false, nil
+	return peers, nil
 }

@@ -337,28 +337,43 @@ func orEmpty(ok bool, v string) string {
 // sameBurstCluster reports whether a and b are members of one burst cluster
 // (the funnel's stored detector result, meta funnel.burst).
 func sameBurstCluster(ctx context.Context, tx workQuerier, a, b string) (bool, error) {
-	var raw string
-	err := tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key=?", metaFunnelBurst).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
+	res, err := storedBurst(ctx, tx)
 	if err != nil {
 		return false, err
 	}
+	return res.sameCluster(a, b), nil
+}
+
+// storedBurst is the burst detector's stored result (meta funnel.burst),
+// empty when none is stored.
+func storedBurst(ctx context.Context, tx workQuerier) (*BurstResult, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key=?", metaFunnelBurst).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &BurstResult{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	var res BurstResult
 	if err = json.Unmarshal([]byte(raw), &res); err != nil {
-		return false, fmt.Errorf("meta %s: %w", metaFunnelBurst, err)
+		return nil, fmt.Errorf("meta %s: %w", metaFunnelBurst, err)
 	}
+	return &res, nil
+}
+
+// sameCluster reports whether a and b are members of one cluster.
+func (res *BurstResult) sameCluster(a, b string) bool {
 	for _, c := range res.Clusters {
 		var hasA, hasB bool
 		for _, m := range c.Members {
 			hasA, hasB = hasA || m.Account == a, hasB || m.Account == b
 		}
 		if hasA && hasB {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 // InviteReward is one reward an inviter was paid, as allowance.get and

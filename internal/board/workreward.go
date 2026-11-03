@@ -452,7 +452,8 @@ func (s *Store) settleWorkEscrows(ctx context.Context, tx *sql.Tx, table string,
 	return n, nil
 }
 
-func stringColumn(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
+// stringColumn is a one-column query's text values.
+func stringColumn(ctx context.Context, tx workQuerier, query string, args ...any) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

@@ -45,7 +45,7 @@ package board
 // sends over the task's life: accepted, waiting for a verdict, or rejected
 // (one result per agent means one try); lapsed and hidden ones do not
 // count. It counts the account's own results and those of the keys the
-// claim cool-down's link signals tie to it (claimSiblings) or an ed25519
+// claim cool-down's link signals tie to it (claimLinks.siblings) or an ed25519
 // identity link names. Reached, a claim is 409 per_agent_max_reached and
 // that agent's own read names blocked_by per_agent_max; other agents are
 // unchanged. It is kept in the task's signed work.create data (the record),
@@ -1032,7 +1032,7 @@ const WorkStandingLinkedWorkersMax = 200
 // standingLinkedResults is the results per_agent_max counts for account on
 // standing task id: own, its account's (standingCounts.mineLife), plus those
 // of the other workers on the task linked to it, by the claim cool-down's
-// link signals (claimSiblings) or an ed25519 identity link either way. It
+// link signals (claimLinks.siblings) or an ed25519 identity link either way. It
 // stops counting at limit.
 func (s *Store) standingLinkedResults(ctx context.Context, tx *sql.Tx, id, account string, own, limit, now int64) (int64, error) {
 	if own >= limit {
@@ -1060,8 +1060,9 @@ func (s *Store) standingLinkedResults(ctx context.Context, tx *sql.Tx, id, accou
 		return 0, err
 	}
 	sent := own
+	links := &claimLinks{}
 	for _, o := range others {
-		linked, err := s.claimSiblings(ctx, tx, account, o.account, now-WorkClaimCooldownWindow)
+		linked, err := links.siblings(ctx, s, tx, account, o.account, now-WorkClaimCooldownWindow)
 		if err != nil {
 			return 0, err
 		}

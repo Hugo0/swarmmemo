@@ -63,6 +63,11 @@ var moneyOperations = map[string]string{
 	WorkPromise:       "work.promise (owing a USDC payout)",
 }
 
+// MoneyOperation is what a money-free channel's refusal of operation names
+// (moneyOperations), "" when the operation itself moves no money: an
+// adapter lists on such a channel only what it is not refused.
+func MoneyOperation(operation string) string { return moneyOperations[operation] }
+
 // moneyPermitted refuses, on a money-free channel, an operation that moves
 // money: one of moneyOperations, or a bond (standing.challenge kind bond,
 // any action: its deposit, refund and settlement are USDC). Work with a

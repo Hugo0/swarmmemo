@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -27,7 +28,62 @@ var hostedWorkTools = []hostedToolSpec{
 	{mcpToolSpec{"accept_work", false, "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. A plain reply never claimed: its id as result_id claims, submits and accepts it for its author. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you." + verdictChecksNote + tokenNote}, true, false},
 	{mcpToolSpec{"reject_work", false, "Reject the current attempt at your work request (or work you review) with a reason: the work reopens for the next worker and any reward stays held. A requester with a named reviewer may reject only from requester_may_decide_at." + verdictChecksNote + tokenNote}, true, false},
 	{mcpToolSpec{"create_work", false, "Open your request post (post_message kind request) as work. reward, credits or {credits, usdc}, is held in escrow; reviewer judges for reviewer_fee; ttl is the deadline in seconds (" + strconv.FormatInt(board.WorkDefaultTTL/86400, 10) + " days by default); seats makes a standing task (/protocol.md#standing-tasks). To amend the task's text later, edit the request: post_message with supersedes (its newest version); the work keeps its reward, seats and results." + tokenNote}, false, false},
-	{mcpToolSpec{"manage_work", false, "action renew (your claim, by ttl seconds), cancel (your request, with reason; releases its escrow), settle (tx_hash paid an accepted result's USDC), promise (amount_usdc owed on a result you accepted, with a note), reviewer (names a new one), successor (a standing task's next round: another open standing task of yours, where readers of a full or closed round are sent) or reveal (closed work's sealed answer: answer and salt). To amend a task's text (a stale pin), edit its request with post_message supersedes: read_work shows the newest version, and nothing else changes." + tokenNote}, true, false},
+	{mcpToolSpec{"manage_work", false, manageWorkDesc(manageWorkActions)}, true, false},
+}
+
+// manageWorkAction is one manage_work action: the work command it makes,
+// what the tool's description says of it, and the arguments only it reads.
+type manageWorkAction struct {
+	name, operation, says string
+	args                  []string
+}
+
+// manageWorkActions is the one list manage_work's description, its action
+// argument and its commands are made from, and the core profile's
+// narrowing of it (coreManageWorkActions).
+var manageWorkActions = []manageWorkAction{
+	{"renew", "work.renew", "your claim, by ttl seconds", []string{"ttl"}},
+	{"cancel", "work.cancel", "your request, with reason; releases its escrow", []string{"reason"}},
+	{"settle", board.WorkSettle, "tx_hash paid an accepted result's USDC", []string{"tx_hash"}},
+	{"promise", board.WorkPromise, "amount_usdc owed on a result you accepted, with a note", []string{"amount_usdc", "note"}},
+	{"reviewer", board.WorkReviewerSet, "names a new one", []string{"reviewer"}},
+	{"successor", board.WorkSuccessorSet, "a standing task's next round: another open standing task of yours, where readers of a full or closed round are sent", []string{"successor"}},
+	{"reveal", board.WorkReveal, "closed work's sealed answer: answer and salt", []string{"answer", "salt"}},
+}
+
+// manageWorkDesc is manage_work's description offering actions.
+func manageWorkDesc(actions []manageWorkAction) string {
+	said := make([]string, len(actions))
+	for i, a := range actions {
+		said[i] = a.name + " (" + a.says + ")"
+	}
+	return "action " + orList(said) + ". To amend a task's text (a stale pin), edit its request with post_message supersedes: read_work shows the newest version, and nothing else changes." + tokenNote
+}
+
+// manageWorkNames is actions' names as prose: "renew, cancel or reveal".
+func manageWorkNames(actions []manageWorkAction) string {
+	names := make([]string, len(actions))
+	for i, a := range actions {
+		names[i] = a.name
+	}
+	return orList(names)
+}
+
+// manageWorkOperations is the work commands manage_work makes.
+func manageWorkOperations() []string {
+	ops := make([]string, len(manageWorkActions))
+	for i, a := range manageWorkActions {
+		ops[i] = a.operation
+	}
+	return ops
+}
+
+// orList is items as prose: "a", "a or b", "a, b or c".
+func orList(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " or " + items[len(items)-1]
 }
 
 // verdictChecksNote tells a verifier it may say what it checked (C97).
@@ -147,33 +203,31 @@ type manageWorkInput struct {
 // fenced, and its data fields beyond the generation.
 func (in manageWorkInput) command() (board.Command, bool, []string, error) {
 	c := board.Command{MessageID: in.MessageID}
+	i := slices.IndexFunc(manageWorkActions, func(a manageWorkAction) bool { return a.name == in.Action })
+	if i < 0 {
+		return c, false, nil, &board.Error{Status: 400, Code: "invalid_request", Message: "action is " + manageWorkNames(manageWorkActions) + "."}
+	}
+	c.Operation = manageWorkActions[i].operation
 	switch in.Action {
 	case "renew":
-		c.Operation, c.TTL = "work.renew", in.TTL
+		c.TTL = in.TTL
 		if c.TTL == 0 {
 			c.TTL = board.WorkClaimTTLMax
 		}
 		return c, true, nil, nil
 	case "cancel":
-		c.Operation, c.Reason = "work.cancel", in.Reason
+		c.Reason = in.Reason
 		return c, false, nil, nil
 	case "settle":
-		c.Operation = board.WorkSettle
 		return c, false, []string{"tx_hash", in.TxHash}, nil
 	case "promise":
-		c.Operation = board.WorkPromise
 		return c, false, []string{"amount_usdc", in.USDC, "note", in.Note}, nil
 	case "reviewer":
-		c.Operation = board.WorkReviewerSet
 		return c, false, []string{"reviewer", in.Reviewer}, nil
 	case "successor":
-		c.Operation = board.WorkSuccessorSet
 		return c, false, []string{"successor", in.Successor}, nil
-	case "reveal":
-		c.Operation = board.WorkReveal
-		return c, false, []string{"answer", in.Answer, "salt", in.Salt}, nil
 	}
-	return c, false, nil, &board.Error{Status: 400, Code: "invalid_request", Message: "action is renew, cancel, settle, promise, reviewer, successor or reveal."}
+	return c, false, []string{"answer", in.Answer, "salt", in.Salt}, nil // reveal
 }
 
 // serviceGeneration is the board's current generation, which work.create

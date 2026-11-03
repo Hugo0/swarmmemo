@@ -30,8 +30,10 @@ const workClaimCooldownSQL = `SELECT %s, r.accepted_at FROM work_transitions r
 
 // workClaimCooldownUntil is when account may claim w again, or 0 when it
 // may now. On a standing task w is the task itself: its rejected results
-// are the items it opened (standing_id, state cancelled).
-func (s *Store) workClaimCooldownUntil(ctx context.Context, q workQuerier, w workRow, standing bool, account string, now int64) (int64, error) {
+// are the items it opened (standing_id, state cancelled). links holds the
+// link signals a page has read for account already (nil reads them for
+// this call alone).
+func (s *Store) workClaimCooldownUntil(ctx context.Context, q workQuerier, links *claimLinks, w workRow, standing bool, account string, now int64) (int64, error) {
 	from := now - WorkClaimCooldownWindow
 	items := "?1"
 	if standing {
@@ -57,21 +59,22 @@ func (s *Store) workClaimCooldownUntil(ctx context.Context, q workQuerier, w wor
 	if err = closeRows(rows); err != nil || len(rejects) < WorkClaimCooldownRejects {
 		return 0, err
 	}
-	linked := map[string]bool{account: true}
-	checked := map[string]bool{account: true}
+	if links == nil {
+		links = &claimLinks{}
+	}
 	var count int
 	var last int64
 	for _, r := range rejects {
 		if r.account == "" {
 			continue
 		}
-		if !checked[r.account] {
-			checked[r.account] = true
-			if linked[r.account], err = s.claimSiblings(ctx, q, account, r.account, from); err != nil {
+		linked := r.account == account
+		if !linked {
+			if linked, err = links.siblings(ctx, s, q, account, r.account, from); err != nil {
 				return 0, err
 			}
 		}
-		if linked[r.account] {
+		if linked {
 			count++
 			last = max(last, r.at)
 		}
@@ -82,13 +85,48 @@ func (s *Store) workClaimCooldownUntil(ctx context.Context, q workQuerier, w wor
 	return last + WorkClaimCooldown, nil
 }
 
-// claimSiblings reports whether the existing link signals tie a and b: one
-// burst cluster, or one network both wrote from since from.
-func (s *Store) claimSiblings(ctx context.Context, q workQuerier, a, b string, from int64) (bool, error) {
-	if same, err := sameBurstCluster(ctx, q, a, b); err != nil || same {
-		return same, err
+// claimLinks are the claim cool-down's link signals (siblings) one
+// read has loaded: the stored burst clusters, parsed once, and each
+// account's network peers since a time. A page of work rows judged for one
+// caller shares them (workEligibilityFacts), so the same caller's links
+// cost the same queries for one row or a whole page; nothing changes them
+// inside one transaction.
+type claimLinks struct {
+	burst *BurstResult // nil: not read yet
+	peers map[claimPeers]map[string]bool
+}
+
+type claimPeers struct {
+	account string
+	from    int64
+}
+
+// siblings reports whether the existing link signals tie a and b: one
+// burst cluster, or one network both wrote from since from (sharedNetwork).
+func (l *claimLinks) siblings(ctx context.Context, s *Store, q workQuerier, a, b string, from int64) (bool, error) {
+	if l.burst == nil {
+		res, err := storedBurst(ctx, q)
+		if err != nil {
+			return false, err
+		}
+		l.burst = res
 	}
-	return s.sharedNetwork(ctx, q, a, b, from)
+	if l.burst.sameCluster(a, b) {
+		return true, nil
+	}
+	key := claimPeers{a, from}
+	peers, ok := l.peers[key]
+	if !ok {
+		var err error
+		if peers, err = s.networkPeers(ctx, q, a, from); err != nil {
+			return false, err
+		}
+		if l.peers == nil {
+			l.peers = map[claimPeers]map[string]bool{}
+		}
+		l.peers[key] = peers
+	}
+	return peers[b], nil
 }
 
 // workClaimCooldownText is the refusal's plain message.
@@ -104,7 +142,7 @@ func workClaimCooldownText(standing bool, until int64) string {
 // refuseClaimCooldown is work.claim's 403 not_eligible while the cool-down
 // holds.
 func (s *Store) refuseClaimCooldown(ctx context.Context, q workQuerier, w workRow, standing bool, account string, now int64) error {
-	until, err := s.workClaimCooldownUntil(ctx, q, w, standing, account, now)
+	until, err := s.workClaimCooldownUntil(ctx, q, nil, w, standing, account, now)
 	if err != nil || until == 0 {
 		return err
 	}

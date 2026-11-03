@@ -94,7 +94,6 @@ var coreRewrites = []struct{ from, to string }{
 	{" (its subject; review a call you paid with write_review, evidence call:oc_ID)", " (its subject)"},
 	{" kind bond: usdc (402, an x402 quote), then payment; action refund returns it.", " A bond, paid in USDC, is on /mcp."},
 	{"reward, credits or {credits, usdc}, is held in escrow", "reward, in credits, is held in escrow"},
-	{", settle (tx_hash paid an accepted result's USDC)", ""},
 }
 
 // coreSafety is the Safety paragraph of the core profile's instructions:
@@ -218,7 +217,8 @@ func (p mcpProfile) leavesOut(name string) bool {
 // refused on a call (a client may send what a schema leaves out); refuse
 // finds a money value among the other arguments (what its refusal names,
 // "" for none); restate gives arguments descriptions without the paid
-// choices. The board refuses the same commands on this profile
+// choices, and desc, when set, is the tool's description in place of
+// /mcp's. The board refuses the same commands on this profile
 // (board.WithoutMoney), so a narrowing missed here is still refused there.
 type coreNarrowing struct {
 	tool    string
@@ -226,6 +226,7 @@ type coreNarrowing struct {
 	args    []string
 	refuse  func(args map[string]any) string
 	restate map[string]string
+	desc    string
 }
 
 // coreNarrowed are the core profile's narrowings, one per tool.
@@ -252,16 +253,50 @@ var coreNarrowed = []coreNarrowing{
 			return ""
 		},
 		restate: map[string]string{"reward": "Whole credits, held in escrow until a result is accepted", "tiers": "Up to 3 {name, credits}"}},
-	{tool: "manage_work", why: "settle records a USDC payout (tx_hash)", args: []string{"tx_hash"},
-		refuse: func(a map[string]any) string {
-			if a["action"] == "settle" {
-				return "Settling a USDC payout"
-			}
-			return ""
-		},
-		restate: map[string]string{"action": "renew, cancel, reviewer or successor"}},
+	coreManageWork(),
 	{tool: "claim_work", why: "payout_address is where a USDC reward is paid", args: []string{"payout_address"}},
 	{tool: "submit_work", why: "payout_address is where a USDC reward is paid", args: []string{"payout_address"}},
+}
+
+// coreManageWorkActions are manage_work's actions on the core profile:
+// those whose command the board does not refuse as money
+// (board.MoneyOperation). reveal opens a closed work's sealed answer and
+// stays.
+func coreManageWorkActions() []manageWorkAction {
+	return slices.DeleteFunc(slices.Clone(manageWorkActions), func(a manageWorkAction) bool { return board.MoneyOperation(a.operation) != "" })
+}
+
+// coreManageWork is the core profile's narrowing of manage_work, made from
+// manageWorkActions: the money actions are refused with the board's words,
+// the arguments only they read are out, and the description and the
+// action argument name the other actions only.
+func coreManageWork() coreNarrowing {
+	kept := coreManageWorkActions()
+	keeps := func(arg string) bool {
+		return slices.ContainsFunc(kept, func(a manageWorkAction) bool { return slices.Contains(a.args, arg) })
+	}
+	var whys, args []string
+	refused := map[string]string{}
+	for _, a := range manageWorkActions {
+		what := board.MoneyOperation(a.operation)
+		if what == "" {
+			continue
+		}
+		refused[a.name] = what
+		whys = append(whys, a.name+" is "+what)
+		for _, arg := range a.args {
+			if !keeps(arg) {
+				args = append(args, arg)
+			}
+		}
+	}
+	return coreNarrowing{tool: "manage_work", why: strings.Join(whys, "; "), args: args,
+		refuse: func(a map[string]any) string {
+			name, _ := a["action"].(string)
+			return refused[name]
+		},
+		restate: map[string]string{"action": manageWorkNames(kept)},
+		desc:    manageWorkDesc(kept)}
 }
 
 // carriesUSDC says a reward or tier object names a USDC amount.

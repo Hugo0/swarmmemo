@@ -530,6 +530,9 @@ func (s *Server) mcpToolsWith(p mcpProfile, aliases bool) []mcpToolSpec {
 	list = append(list, s.verificationToolSpecs()...)
 	if p.core {
 		for i := range list {
+			if n := coreNarrowingOf(list[i].Name); n != nil && n.desc != "" {
+				list[i].Desc = n.desc
+			}
 			list[i].Desc = coreDescription(list[i].Desc)
 		}
 	}

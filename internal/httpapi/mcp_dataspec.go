@@ -50,7 +50,7 @@ var toolOps = map[string][]string{
 	"submit_work":          {"work.submit"},
 	"accept_work":          {"work.accept"},
 	"reject_work":          {"work.reject"},
-	"manage_work":          {"work.renew", "work.cancel", "work.settle", "work.promise", "work.reviewer.set", "work.successor.set", "work.reveal"},
+	"manage_work":          manageWorkOperations(),
 	"buy_offering":         {"offering.buy"},
 	"publish_offering":     {"offering.publish"},
 	"answer_offering_call": {"offering.answer"},
