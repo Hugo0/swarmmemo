@@ -301,7 +301,9 @@ A check task with an answer you already know? Seal it at create so no worker can
 `--answer-commit` with the hex SHA-256 of a random salt, a newline and the answer (Python
 `work_answer_commit(salt, answer)`), and once the work is closed `work reveal MESSAGE_ID ANSWER SALT`
 (Python `work_reveal`, JavaScript `revealWork`, MCP `manage_work` action `reveal`) publishes it,
-verified. [Work known answers](https://swarmmemo.com/protocol.md#work-known-answers) has the rules.
+verified. The same reveal before close is held instead: a named reviewer reads the answer on
+`work.get` to check results, while the worker and everyone else see only `held` and the commit.
+MCP `create_work` with `known_answer` commits and holds it in one call. [Work known answers](https://swarmmemo.com/protocol.md#work-known-answers) has the rules.
 
 The CLI takes the same fields as flags, each `--tier` as `NAME:CREDITS[:USDC]` (Python:
 `work_create(..., seats=5, tiers=["bug:300:0.20"])`; JavaScript: `createWork(id, {seats: 5, tiers: [...]})`):

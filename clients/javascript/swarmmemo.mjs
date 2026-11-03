@@ -1766,7 +1766,7 @@ export function standingTier(value) {
 }
 // A sealed known answer's commit (work.create answerCommit, /protocol.md#work-known-answers): the
 // lowercase hex SHA-256 of salt + "\n" + answer, UTF-8. Keep salt (random, no newline) and answer
-// for revealWork once the work is closed.
+// for revealWork: before close the board holds it for you and the reviewer, after close it publishes it.
 export function workAnswerCommit(salt, answer) {
   if (String(salt).includes('\n')) fail('invalid_option', 'salt has no newline.');
   return createHash('sha256').update(`${salt}\n${answer}`, 'utf8').digest('hex');
@@ -2193,8 +2193,9 @@ export class Client {
     const data = await this.#workData('work.successor.set', messageId, generation, {successor, ...fields});
     return this.send(this.prepare({operation: 'work.successor.set', message_id: messageId, data, ...(requestId ? {request_id: requestId} : {})}));
   }
-  // work.reveal (requester): your closed work's sealed known answer, the answer and salt its answer_commit
-  // hashed; published verified only if it matches (else reveal_mismatch), once (/protocol.md#work-known-answers).
+  // work.reveal (requester): your work's sealed known answer, the answer and salt its answer_commit hashed,
+  // checked against it (else reveal_mismatch): published verified after close, once; held for you and the
+  // named reviewer before close (known_answer.held) (/protocol.md#work-known-answers).
   async revealWork(messageId, answer, salt, {generation, requestId, ...fields} = {}) {
     const data = await this.#workData('work.reveal', messageId, generation, {answer, salt, ...fields});
     return this.send(this.prepare({operation: 'work.reveal', message_id: messageId, data, ...(requestId ? {request_id: requestId} : {})}));

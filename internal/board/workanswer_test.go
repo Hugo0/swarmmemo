@@ -62,12 +62,18 @@ func TestWorkKnownAnswerSealRevealVerify(t *testing.T) {
 		t.Fatalf("work without a commit reads %+v", plain.KnownAnswer)
 	}
 
-	// Before close: refused, even with the right values.
-	fails(t, s, revealCommand(s, owner, id, testAnswer, testSalt), "work_state_conflict")
+	// Before close: wrong values refused, the right ones held, not
+	// published (C734, workheldanswer_test.go has the readers).
+	fails(t, s, revealCommand(s, owner, id, "43", testSalt), "reveal_mismatch")
+	if ack := run(t, s, revealCommand(s, owner, id, testAnswer, testSalt)).Data["ack"].(WorkAck); !strings.HasPrefix(ack.Note, "Held, not published") {
+		t.Fatalf("hold ack %+v", ack)
+	}
 	run(t, s, workCommand(s, worker, Command{Operation: "work.claim", MessageID: id, TTL: 600}))
 	result := workResult(t, s, worker, id, "lobby")
 	run(t, s, workCommand(s, worker, Command{Operation: "work.submit", MessageID: id, Amount: 1, Target: result}))
-	fails(t, s, revealCommand(s, owner, id, testAnswer, testSalt), "work_state_conflict")
+	if ack := run(t, s, revealCommand(s, owner, id, testAnswer, testSalt)).Data["ack"].(WorkAck); !strings.HasPrefix(ack.Note, "Already held") {
+		t.Fatalf("second hold ack %+v", ack)
+	}
 	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: id, Amount: 1}))
 
 	// After close: not the requester's, wrong values, malformed data.
@@ -98,7 +104,7 @@ func TestWorkKnownAnswerSealRevealVerify(t *testing.T) {
 		t.Fatalf("the reveal changed the work: %+v", w)
 	}
 	b, _ := json.Marshal(w)
-	if !strings.Contains(string(b), `"known_answer":{"commit":"`+commit+`","note":"the integer N","state":"revealed","answer":"42"`) {
+	if !strings.Contains(string(b), `"known_answer":{"commit":"`+commit+`","note":"the integer N","state":"revealed","held":true,"answer":"42"`) {
 		t.Fatalf("work JSON %s", b)
 	}
 
@@ -133,7 +139,9 @@ func TestWorkKnownAnswerAfterCancelAndExpiry(t *testing.T) {
 	c := noteCreate(s, owner, expiring, map[string]any{"answer_commit": commit})
 	c.TTL = 120
 	run(t, s, signed(owner, c))
-	fails(t, s, revealCommand(s, owner, expiring, testAnswer, testSalt), "work_state_conflict")
+	if ack := run(t, s, revealCommand(s, owner, expiring, testAnswer, testSalt)).Data["ack"].(WorkAck); !strings.HasPrefix(ack.Note, "Held") {
+		t.Fatalf("open work's reveal is held: %+v", ack)
+	}
 	s.now = func() time.Time { return time.Unix(testTime+121, 0) }
 	run(t, s, revealCommand(s, owner, expiring, testAnswer, testSalt))
 

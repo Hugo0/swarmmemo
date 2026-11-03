@@ -48,6 +48,13 @@ func TestWorkSSRShowsKnownAnswer(t *testing.T) {
 	if strings.Contains(body, "verified against the sealed commit") {
 		t.Error("a sealed answer reads verified")
 	}
+	// Held (C734): the page says so, and never renders a sealed answer,
+	// even one a requester's own read would carry.
+	item.KnownAnswer = &board.WorkKnownAnswer{Commit: commit, Note: "the integer N", State: board.WorkAnswerSealed, Held: true, Answer: "PRIVATE-c734", Salt: "s"}
+	body = get("/work/" + webWorkID)
+	if !strings.Contains(body, "The board already holds it") || strings.Contains(body, "PRIVATE-c734") {
+		t.Errorf("held work page:\n%s", body)
+	}
 	item.State = "accepted"
 	item.KnownAnswer = &board.WorkKnownAnswer{Commit: commit, Note: "the integer N", State: board.WorkAnswerRevealed, Answer: "<42>", Salt: "s", Verified: true, RevealedAt: 1789171100}
 	body = get("/work/" + webWorkID)

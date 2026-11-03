@@ -575,8 +575,12 @@ func TestHostedMCPWorkKnownAnswer(t *testing.T) {
 	if k := known(); k == nil || k["commit"] != commit || k["state"] != board.WorkAnswerSealed || k["answer"] != nil {
 		t.Fatalf("sealed known_answer %v", k)
 	}
-	if _, failure := callTool(t, s, "/mcp", as, "manage_work", map[string]any{"message_id": id, "action": "reveal", "answer": answer, "salt": salt}); !strings.Contains(failure, "work_state_conflict") {
-		t.Fatalf("reveal before close: %q", failure)
+	// Before close a reveal is held (C734): the anonymous read still sees the commit only.
+	if note, _ := dig(mustTool(t, s, "/mcp", as, "manage_work", map[string]any{"message_id": id, "action": "reveal", "answer": answer, "salt": salt}), "data", "ack", "note").(string); !strings.HasPrefix(note, "Held") {
+		t.Fatalf("reveal before close: %q", note)
+	}
+	if k := known(); k["held"] != true || k["answer"] != nil || k["salt"] != nil {
+		t.Fatalf("held known_answer, anonymous %v", k)
 	}
 	mustTool(t, s, "/mcp", as, "manage_work", map[string]any{"message_id": id, "action": "cancel", "reason": "Closed."})
 	if _, failure := callTool(t, s, "/mcp", as, "manage_work", map[string]any{"message_id": id, "action": "reveal", "answer": "1730", "salt": salt}); !strings.Contains(failure, "reveal_mismatch") {
@@ -585,6 +589,55 @@ func TestHostedMCPWorkKnownAnswer(t *testing.T) {
 	mustTool(t, s, "/mcp", as, "manage_work", map[string]any{"message_id": id, "action": "reveal", "answer": answer, "salt": salt})
 	if k := known(); k["state"] != board.WorkAnswerRevealed || k["answer"] != answer || k["verified"] != true {
 		t.Fatalf("revealed known_answer %v", k)
+	}
+}
+
+// create_work known_answer (C734): the board picks the salt, commits and
+// holds it; read_work shows it to the requester, never to the worker or an
+// anonymous reader, and no public read carries it.
+func TestHostedMCPCreateWorkHeldAnswer(t *testing.T) {
+	_, s := hostedServer(t)
+	requester := newIdentity(t, s, "held-poster")
+	worker := newIdentity(t, s, "held-worker")
+	as, asWorker := "Bearer "+requester["token"].(string), "Bearer "+worker["token"].(string)
+	secret := "fields: a=1 b=2 PRIVATE-c734-mcp"
+	id := mustTool(t, s, "/mcp", as, "post_message", map[string]any{"room": "gigs", "kind": "request", "text": "Derive the fields from the dataset."})["receipt"].(map[string]any)["id"].(string)
+	if _, failure := callTool(t, s, "/mcp", as, "create_work", map[string]any{"message_id": id, "title": "Derive", "capabilities": []any{"data"}, "known_answer": secret, "answer_commit": strings.Repeat("a", 64)}); !strings.Contains(failure, "not both") {
+		t.Fatalf("known_answer with answer_commit: %q", failure)
+	}
+	created := mustTool(t, s, "/mcp", as, "create_work", map[string]any{"message_id": id, "title": "Derive", "capabilities": []any{"data"}, "known_answer": secret})
+	if note, _ := dig(created, "data", "ack", "note").(string); !strings.Contains(note, "known_answer: Held") || strings.Contains(note, secret) {
+		t.Fatalf("create note %q", note)
+	}
+	read := func(auth string) map[string]any {
+		k, _ := dig(mustTool(t, s, "/mcp", auth, "read_work", map[string]any{"message_id": id}), "data", "work", "known_answer").(map[string]any)
+		return k
+	}
+	mine := read(as)
+	if mine["held"] != true || mine["answer"] != secret || mine["state"] != board.WorkAnswerSealed {
+		t.Fatalf("requester reads %v", mine)
+	}
+	salt, _ := mine["salt"].(string)
+	if board.WorkAnswerCommit(salt, secret) != mine["commit"] {
+		t.Fatalf("commit %v is not sha256(salt, answer)", mine["commit"])
+	}
+	for name, auth := range map[string]string{"anonymous": "", "worker": asWorker} {
+		if k := read(auth); k["held"] != true || k["answer"] != nil || k["salt"] != nil || k["commit"] != mine["commit"] {
+			t.Fatalf("%s reads %v", name, k)
+		}
+	}
+	for _, call := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"read_work_history", map[string]any{"message_id": id}},
+		{"find_work", map[string]any{"detail": true}},
+		{"read_thread", map[string]any{"message_id": id}},
+	} {
+		b, _ := json.Marshal(mustTool(t, s, "/mcp", asWorker, call.tool, call.args))
+		if strings.Contains(string(b), "PRIVATE-c734") || strings.Contains(string(b), salt) {
+			t.Fatalf("%s carries the held answer: %s", call.tool, b)
+		}
 	}
 }
 

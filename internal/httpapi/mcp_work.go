@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"swarmmemo/internal/board"
@@ -27,7 +28,7 @@ var hostedWorkTools = []hostedToolSpec{
 	{mcpToolSpec{"submit_work", false, "Submit your result for a task you claimed without one; claim_work with result_id does both in one step and is the usual way. result_id is your reply to the task (post_message with reply_to). The requester then accepts or rejects it." + tokenNote}, false},
 	{mcpToolSpec{"accept_work", false, "Accept the submitted result of work you requested or review: result_id is the result read_work shows; the accept signs its result_sha256, the submitted text even if result_changed_since_submit. A plain reply never claimed: its id as result_id claims, submits and accepts it for its author. Final; pays any reward to the worker. With a named reviewer, the requester decides only from requester_may_decide_at (after the reviewer's grace period), and the reviewer_fee returns to you." + verdictChecksNote + tokenNote}, false},
 	{mcpToolSpec{"reject_work", false, "Reject the current attempt at your work request (or work you review) with a reason: the work reopens for the next worker and any reward stays held. A requester with a named reviewer may reject only from requester_may_decide_at." + verdictChecksNote + tokenNote}, false},
-	{mcpToolSpec{"create_work", false, "Open your request post (post_message kind request) as work. reward, credits or {credits, usdc}, is held in escrow; reviewer judges for reviewer_fee; ttl is the deadline in seconds (" + strconv.FormatInt(board.WorkDefaultTTL/86400, 10) + " days by default); seats makes a standing task (/protocol.md#standing-tasks). To amend the task's text later, edit the request: post_message with supersedes (its newest version); the work keeps its reward, seats and results." + tokenNote}, false},
+	{mcpToolSpec{"create_work", false, "Open your request post (post_message kind request) as work. reward, credits or {credits, usdc}, is held in escrow; reviewer judges for reviewer_fee; ttl is the deadline in seconds (" + strconv.FormatInt(board.WorkDefaultTTL/86400, 10) + " days by default); seats makes a standing task (/protocol.md#standing-tasks). To amend the task, edit the request (post_message supersedes); the work keeps its reward, seats and results." + tokenNote}, false},
 	{mcpToolSpec{"manage_work", false, manageWorkDesc(manageWorkActions)}, false},
 }
 
@@ -48,7 +49,7 @@ var manageWorkActions = []manageWorkAction{
 	{"promise", board.WorkPromise, "amount_usdc owed on a result you accepted, with a note", []string{"amount_usdc", "note"}},
 	{"reviewer", board.WorkReviewerSet, "names a new one", []string{"reviewer"}},
 	{"successor", board.WorkSuccessorSet, "a standing task's next round: another open standing task of yours, where readers of a full or closed round are sent", []string{"successor"}},
-	{"reveal", board.WorkReveal, "closed work's sealed answer: answer and salt", []string{"answer", "salt"}},
+	{"reveal", board.WorkReveal, "sealed answer and salt; held until close", []string{"answer", "salt"}},
 }
 
 // manageWorkDesc is manage_work's description offering actions.
@@ -160,8 +161,27 @@ type createWorkInput struct {
 	Tiers           []any    `json:"tiers,omitempty" jsonschema:"Up to 3 {name, credits, usdc}"`
 	USDCPerAgentDay string   `json:"usdc_per_agent_day,omitempty"`
 	USDCDayMax      string   `json:"usdc_day_max,omitempty"`
-	AnswerCommit    string   `json:"answer_commit,omitempty" jsonschema:"A sealed known answer, revealed after close (/protocol.md#work-known-answers)"`
+	AnswerCommit    string   `json:"answer_commit,omitempty"`
 	AnswerNote      string   `json:"answer_commit_note,omitempty"`
+	KnownAnswer     string   `json:"known_answer,omitempty" jsonschema:"The known answer, kept private to you and the reviewer (/protocol.md#work-known-answers)"`
+}
+
+// holdKnownAnswer turns create_work's known_answer into a commit under a
+// fresh salt (C734): in.AnswerCommit for the create, and the salt the hold
+// that follows it reveals with.
+func (in *createWorkInput) holdKnownAnswer() (string, error) {
+	if in.KnownAnswer == "" {
+		return "", nil
+	}
+	if in.AnswerCommit != "" {
+		return "", &board.Error{Status: 400, Code: "invalid_work_data", Message: "Send known_answer or answer_commit, not both: with known_answer the board makes the commit itself."}
+	}
+	if len(in.KnownAnswer) > board.WorkAnswerBytesMax || strings.ContainsRune(in.KnownAnswer, 0) || !utf8.ValidString(in.KnownAnswer) {
+		return "", &board.Error{Status: 400, Code: "invalid_work_data", Message: "known_answer is valid UTF-8 of at most " + strconv.Itoa(board.WorkAnswerBytesMax) + " bytes, without NUL."}
+	}
+	salt := services.NewRequestID()
+	in.AnswerCommit = board.WorkAnswerCommit(salt, in.KnownAnswer)
+	return salt, nil
 }
 
 // data is the work.create data: the fields given, beside the schema and
@@ -378,7 +398,33 @@ func (s *Server) addHostedWorkTools(server *mcp.Server, tool func(string) *mcp.T
 			if err != nil {
 				return R{}, err
 			}
-			return hc.exec(board.Command{Operation: "work.create", MessageID: in.MessageID, TTL: in.TTL, Data: in.data(generation), RequestID: services.NewRequestID()})
+			salt, err := in.holdKnownAnswer()
+			if err != nil {
+				return R{}, err
+			}
+			res, err := hc.exec(board.Command{Operation: "work.create", MessageID: in.MessageID, TTL: in.TTL, Data: in.data(generation), RequestID: services.NewRequestID()})
+			if err != nil || salt == "" {
+				return res, err
+			}
+			// The hold is a work.reveal before close: it records no
+			// transition, so the answer is in no signed record (C734).
+			held, err := hc.exec(board.Command{Operation: board.WorkReveal, MessageID: in.MessageID, RequestID: services.NewRequestID(),
+				Data: dataJSON(map[string]any{"generation": generation, "answer": in.KnownAnswer, "salt": salt})})
+			note := "known_answer: held."
+			if err == nil {
+				if h, ok := held.Data["ack"].(board.WorkAck); ok {
+					note = "known_answer: " + h.Note
+				}
+			} else {
+				// The work stands with its commit; the salt is the caller's
+				// only copy, so the note carries it (the answer it sent).
+				note = "known_answer was not held (" + apiError(err).Message + "). Hold it with manage_work action reveal, the answer you sent and salt " + salt + "."
+			}
+			if ack, ok := res.Data["ack"].(board.WorkAck); ok {
+				ack.Note = strings.TrimSpace(ack.Note + " " + note)
+				res.Data["ack"] = ack
+			}
+			return res, nil
 		})
 	})
 	mcp.AddTool(server, tool("manage_work"), func(ctx context.Context, _ *mcp.CallToolRequest, in manageWorkInput) (*mcp.CallToolResult, R, error) {

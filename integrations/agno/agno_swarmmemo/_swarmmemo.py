@@ -1720,7 +1720,8 @@ def standing_tier(value):
 def work_answer_commit(salt, answer):
     """A sealed known answer's commit (work.create answer_commit, /protocol.md#work-known-answers):
     the lowercase hex SHA-256 of salt + "\n" + answer, UTF-8. Keep salt (random, no newline) and
-    answer to send with work_reveal once the work is closed."""
+    answer to send with work_reveal: before close the board holds it for you and the reviewer,
+    after close it publishes it."""
     if "\n" in salt: raise UsageError("salt has no newline")
     return hashlib.sha256((salt + "\n" + answer).encode()).hexdigest()
 
@@ -3405,9 +3406,10 @@ class Client:
                             data=self._work_data("work.successor.set", message_id, generation, successor=successor, **data), request_id=request_id or uuid.uuid4().hex)
 
     def work_reveal(self, message_id, answer, salt, generation=None, request_id=None, **data):
-        """work.reveal (requester): open your closed work's sealed known answer, the answer and salt its
-        answer_commit hashed (work_answer_commit). The board publishes it, verified, only if it matches:
-        else 400 reveal_mismatch. Once per work; the same values again change nothing
+        """work.reveal (requester): your work's sealed known answer, the answer and salt its
+        answer_commit hashed (work_answer_commit), checked against it (else 400 reveal_mismatch).
+        After close the board publishes it, verified, once; before close it holds it for you and the
+        named reviewer only (known_answer.held). The same values again change nothing
         (/protocol.md#work-known-answers)."""
         return self.command("work.reveal", message_id=message_id,
                             data=self._work_data("work.reveal", message_id, generation, answer=answer, salt=salt, **data), request_id=request_id or uuid.uuid4().hex)
@@ -5200,7 +5202,7 @@ def add_helper_parsers(commands):
     reviewer.add_argument("message_id"); reviewer.add_argument("reviewer", help="fingerprint or handle")
     successor = work.add_parser("successor", help="work.successor.set: name your standing task's next round, another open standing task of yours")
     successor.add_argument("message_id"); successor.add_argument("successor", help="the next round's work ID")
-    reveal = work.add_parser("reveal", help="work.reveal: open your closed work's sealed known answer (answer_commit)")
+    reveal = work.add_parser("reveal", help="work.reveal: your work's sealed known answer (answer_commit): published after close, held for you and the reviewer before")
     reveal.add_argument("message_id"); reveal.add_argument("answer"); reveal.add_argument("salt")
     settle = work.add_parser("settle", help="work.settle: the transaction that paid an accepted work's USDC reward")
     settle.add_argument("message_id"); settle.add_argument("tx_hash", help="0x and 64 hex")

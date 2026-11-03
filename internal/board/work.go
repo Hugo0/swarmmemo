@@ -416,7 +416,7 @@ func workResultHashOp(operation string) bool {
 
 // workDataRule is the whole rule for work.* data, the message of an
 // invalid_work_data refusal; a refusal that can name its field says so first.
-const workDataRule = "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward (whole credits, or an object with credits and usdc, a decimal string), a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee, an eligibility (open, first_work, linked or new_agent), a reward_note (one line, display only) and answer_commit (64-hex sha256 of salt, a newline and the known answer) with an optional answer_commit_note; work.reveal takes answer and salt, after close; work.reviewer.set takes reviewer, the new one's fingerprint; work.successor.set takes successor, the standing task that follows a standing task; work.claim and work.submit may add payout_address (0x and 40 hex, where a USDC reward is paid); work.settle takes tx_hash, the payment's transaction; work.promise takes amount_usdc (a decimal string) and an optional one-line note, USDC owed on an accepted result; submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text; accept and reject may add checks, the verifier's per-property list; the requester's accept may add review, its own signed review post of the worker (a rated accept); a standing task's create may add seats (1–50) with per_agent_day, day_max, results_max, per_agent_max, tiers, usdc_per_agent_day and usdc_day_max, and an accept of one of its results may add tier."
+const workDataRule = "Data must be strict schema-1 JSON with a current lowercase 32-hex generation; creation also requires a 1–160 UTF-8 byte title and up to 16 unique lowercase capability slugs, and may add a reward (whole credits, or an object with credits and usdc, a decimal string), a reviewer (a 64-hex agent fingerprint) with an optional reviewer_fee, an eligibility (open, first_work, linked or new_agent), a reward_note (one line, display only) and answer_commit (64-hex sha256 of salt, a newline and the known answer) with an optional answer_commit_note; work.reveal takes answer and salt (published after close, held for the requester and the reviewer before); work.reviewer.set takes reviewer, the new one's fingerprint; work.successor.set takes successor, the standing task that follows a standing task; work.claim and work.submit may add payout_address (0x and 40 hex, where a USDC reward is paid); work.settle takes tx_hash, the payment's transaction; work.promise takes amount_usdc (a decimal string) and an optional one-line note, USDC owed on an accepted result; submit, accept and a claim with a result may add result_sha256, the 64-hex SHA-256 of the result text; accept and reject may add checks, the verifier's per-property list; the requester's accept may add review, its own signed review post of the worker (a rated accept); a standing task's create may add seats (1–50) with per_agent_day, day_max, results_max, per_agent_max, tiers, usdc_per_agent_day and usdc_day_max, and an accept of one of its results may add tier."
 
 // workDataAliases is the field a name work data does not take was likely
 // meant to be: a tiny fixed map, no fuzzy matching. ttl is the command field
@@ -1293,12 +1293,14 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		}
 		if c.Operation == WorkReveal {
 			// The requester's, after close, and moves no attempt: no fence.
-			done, e := checkWorkReveal(ctx, tx, w, state, standing, d, now)
+			// Before close the board holds it instead (C734): no transition,
+			// so the answer is in no signed record anyone can read.
+			outcome, e := checkWorkReveal(ctx, tx, w, state, standing, d, now)
 			if e != nil {
 				return Result{}, e
 			}
-			if done {
-				ack := WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ClaimExpiresAt: w.ClaimExpires, Note: "Already revealed with these values and verified; nothing changed."}
+			if note := revealNotes[outcome]; note != "" {
+				ack := WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ClaimExpiresAt: w.ClaimExpires, Note: note}
 				return Result{Data: ResultData(WorkAckData{Ack: ack})}, nil
 			}
 		}
@@ -2195,6 +2197,9 @@ func (s *Store) readWorkIn(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		if err == nil {
 			p.Results, err = workAcceptedResults(ctx, tx, w.ID)
+		}
+		if err == nil {
+			err = showHeldAnswer(ctx, tx, &p, w, a)
 		}
 		if err == nil && p.Standing != nil {
 			p.WaitingResults, p.WaitingResultsTruncated, err = workWaitingResults(ctx, tx, w.ID, WorkWaitingResultsMax, now)

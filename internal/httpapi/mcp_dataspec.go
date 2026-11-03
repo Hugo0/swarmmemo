@@ -178,6 +178,7 @@ var mcpToolInputsNotData = map[string]map[string]string{
 	"claim_work":           {"result_id": "target"},
 	"submit_work":          {"result_id": "target"},
 	"accept_work":          {"result_id": "checked against the submitted result before the accept"},
+	"create_work":          {"known_answer": "made into answer_commit under a fresh salt, then held with a work.reveal before close (C734)"},
 	"manage_work":          {"action": "picks the operation"},
 	"manage_push":          {"action": "picks the operation", "target": "push.unsubscribe target"},
 	"answer_offering_call": {"call": "target"},
