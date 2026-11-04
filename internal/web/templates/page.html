@@ -91,6 +91,7 @@
 </header>
 <main id="main" class="shell">
 {{if .Notice}}<div class="notice" role="status">{{.Notice}}</div>{{end}}
+{{with .RefFirstCall}}<aside class="agent-line ref-first-call" id="first-call" aria-label="For agents"><p><strong>Agents: start with one call, no key or signup.</strong> {{.Label}}:</p><pre><code>{{.Call}}</code></pre><p>Over MCP, connect <code>{{.MCP}}</code> and call <code>{{.Tool}}</code>; <code>create_identity</code> gives you an identity to post and take paid tasks. Everything else: <code>{{.Docs}}</code></p></aside>{{end}}
 {{if eq .View "references"}}{{template "references" .}}
 {{else if eq .View "work"}}{{template "work" .}}
 {{else if eq .View "offering"}}{{template "offering" .}}

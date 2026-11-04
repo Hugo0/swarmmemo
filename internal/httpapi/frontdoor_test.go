@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"html"
 	"net/url"
 	"slices"
 	"strings"
@@ -118,5 +119,40 @@ func TestFrontDoorLeadsEverySurface(t *testing.T) {
 	n := len(a2aSkillIDs())
 	if skills[n-1]["id"] != "earn" || skills[n]["id"] != "one-call-tools" || !strings.HasPrefix(card["description"].(string), web.Tagline+" "+web.ShortDescription+" "+web.FrontDoorLine) {
 		t.Errorf("the A2A card does not lead with the doors: %v %v", skills[n-1]["id"], skills[n]["id"])
+	}
+}
+
+// A page a ref link landed on (C730) leads with one call an agent runs as
+// written, with no key: the send-to-agent block's tool call, then the same
+// over MCP. A page without a ref, or with a bad one, does not; a deployment
+// without calls without a key shows no call it cannot take.
+func TestRefLandingLeadsWithFirstCall(t *testing.T) {
+	f := board.Features{Services: services.Known(), Ledger: board.LedgerOn, Trust: board.TrustOn, VoteRecords: true}
+	svc := noKeyCatalog{&catalogService{features: f}}
+	s := New(svc, web.Handler(svc), Config{Features: f, PublicURL: "https://swarmmemo.com"})
+	call := web.FirstToolCall("https://swarmmemo.com")
+	get(s, "/", "text/html") // the page cache keeps "/": a ref landing is not served from it
+	for _, path := range []string{"/for-agents?ref=skitter-colony", "/tools/work?ref=skitter-colony", "/?ref=skitter-colony"} {
+		w := get(s, path, "text/html")
+		body := html.UnescapeString(w.Body.String())
+		at, main := strings.Index(body, `id="first-call"`), strings.Index(body, `<main id="main"`)
+		if w.Code != 200 || at < 0 || at < main || !strings.Contains(body, "<pre><code>"+call+"</code></pre>") ||
+			!strings.Contains(body, "<code>https://swarmmemo.com/mcp</code> and call <code>notary_stamp</code>") {
+			t.Errorf("%s: %d, no first call at the top of main", path, w.Code)
+			continue
+		}
+		if h1 := strings.Index(body, "<h1"); h1 >= 0 && h1 < at {
+			t.Errorf("%s: the first call is not the first thing in main", path)
+		}
+	}
+	for _, path := range []string{"/for-agents", "/for-agents?ref=Bad%20Venue", "/for-agents?ref=a&ref=b", "/api/works?ref=skitter-colony"} {
+		if body := get(s, path, "text/html").Body.String(); strings.Contains(body, `id="first-call"`) {
+			t.Errorf("%s shows the ref first call", path)
+		}
+	}
+	plain := &catalogService{features: f}
+	off := New(plain, web.Handler(plain), Config{Features: f, PublicURL: "https://swarmmemo.com"})
+	if body := get(off, "/for-agents?ref=skitter-colony", "text/html").Body.String(); strings.Contains(body, `id="first-call"`) {
+		t.Error("a deployment without calls without a key shows the first call")
 	}
 }

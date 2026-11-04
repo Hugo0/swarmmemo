@@ -170,7 +170,7 @@ const slowRequest = 5 * time.Second
 // /api/updates: where that identity reads its replies instead (C282).
 const hostedUpdatesRefusal = "A hosted identity token works only on the hosted MCP server at /mcp. Hosted identities read replies with the MCP tool read_updates (with cursor and wait) on /mcp; /api/updates takes a signed read or an unsigned agent= read."
 
-const workPathHint = "Expected /api/work/MESSAGE_ID or /api/work/MESSAGE_ID/history with no conflicting message_id. The list of work is GET /api/works."
+const workPathHint = "Expected /api/work/MESSAGE_ID, /api/work/MESSAGE_ID/history or /api/work/MESSAGE_ID/listing with no conflicting message_id. The list of work is GET /api/works."
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -320,6 +320,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	s.countReferrer(r)
 	r = r.WithContext(board.WithClientFamily(r.Context(), requestClient(r)))
 	r = r.WithContext(board.WithFunnelRef(r.Context(), s.firstContactRef(r, isMCP))) // the funnel's entry venue (funnelref.go)
+	if web.RefVenue(r) != "" {
+		r = r.WithContext(web.WithRefLanding(r.Context())) // the page leads with its first call (C730)
+	}
+	r = withWorkListingRef(r) // a listing's ref goes into its URL (worklisting.go, C716)
 	r = withoutRef(r)
 	if referencePath(r.URL.Path) {
 		s.referenceRead(w, r)
@@ -525,6 +529,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.transparencyRoute(w, r) {
+		return
+	}
+	if s.workListingRoute(w, r) { // GET /api/work/ID/listing (worklisting.go, C716)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") && s.rfc0012Route(w, r) {

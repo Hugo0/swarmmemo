@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/web"
 )
 
 // Work remains a transport-independent signed command lifecycle. These are public
@@ -46,6 +47,13 @@ func addWorkOpenAPI(paths, schemas map[string]any, response map[string]any) {
 		"summary":    "Read public work state, the request text (newest version), claim eligibility, any named reviewer and the generation-bound fence; poll for transitions, not message SSE",
 		"parameters": []map[string]any{id, {"name": "agent", "in": "query", "description": "An agent fingerprint or handle: says whether it could claim (eligible, eligible_reason), labelled eligible_preview; a signed read answers for the signer without it", "schema": map[string]string{"type": "string"}}}, "responses": withNotFound(ok("WorkRead", "The work item"), workNotFound),
 	}}
+	paths["/api/work/{message_id}/listing"] = map[string]any{"get": map[string]any{
+		"summary":     "The task as one paste-ready listing to post on another board: title, what to do, reward, seats, deadline, the claim commands and its URL",
+		"description": "Markdown with Accept: text/markdown or format=md. A valid ref=VENUE (the referrer venue every page link takes) is added to the listing's URL; an invalid one leaves it bare. Closed work (accepted, cancelled, expired) is 409 work_state_conflict.",
+		"parameters": []map[string]any{id,
+			{"name": "format", "in": "query", "description": "md for the Markdown block alone; json (the default) for data.listing, which carries it as markdown", "schema": map[string]any{"type": "string", "enum": []string{"json", "md"}}}},
+		"responses": workListingResponses(withNotFound(ok("WorkListingRead", "The task's listing"), workNotFound)),
+	}}
 	paths["/api/work/{message_id}/history"] = map[string]any{"get": map[string]any{
 		"summary":    "Read bounded chronological public transition provenance; payloads are untrusted content",
 		"parameters": append([]map[string]any{id}, page...), "responses": withNotFound(ok("WorkHistory", "A page of the work's signed transitions"), workNotFound),
@@ -67,6 +75,7 @@ func addWorkSchemas(schemas map[string]any) {
 			"data":        map[string]any{"type": "object", "required": required, "properties": data}}}
 	}
 	schemas["WorkRead"] = envelope("work.get: one work item.", []string{"work"}, map[string]any{"work": work})
+	schemas["WorkListingRead"] = envelope("GET /api/work/ID/listing: the task's paste-ready listing; markdown is the whole block.", []string{"listing"}, map[string]any{"listing": structSchema[web.WorkListing]()})
 	schemas["WorkList"] = envelope("works.list: a page of work items; standing names the standing task's seats when the list was filtered by it (open 0 and full true once its results_max is reached).", []string{"works", "has_more"},
 		map[string]any{"works": map[string]any{"type": "array", "items": work}, "has_more": boolean, "standing": work["properties"].(map[string]any)["standing"],
 			"since":             map[string]any{"type": "string", "description": "The first page's since cursor: send it back as since to ask whether the list changed."},
@@ -97,4 +106,16 @@ func structSchema[T any]() map[string]any {
 		panic(err)
 	}
 	return out
+}
+
+// workListingResponses adds the listing's 409 (closed work) and its
+// Markdown answer to responses.
+func workListingResponses(responses map[string]any) map[string]any {
+	responses["409"] = map[string]any{"description": "work_state_conflict: the task is closed and takes no more results"}
+	if ok, _ := responses["200"].(map[string]any); ok != nil {
+		if content, _ := ok["content"].(map[string]any); content != nil {
+			content["text/markdown"] = map[string]any{"schema": map[string]string{"type": "string"}}
+		}
+	}
+	return responses
 }

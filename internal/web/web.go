@@ -185,6 +185,8 @@ type page struct {
 	// OneCall is the front door's one-call tools (frontdoor.go) that take
 	// a call without a key today; /for-agents lists them.
 	OneCall []OneCallView
+	// RefFirstCall leads a page a ref link landed on (reffirstcall.go).
+	RefFirstCall *refFirstCall
 	// Platform is a /for page's platform (platforms.go); Platforms lists them
 	// all on /for-agents.
 	Platform  *platformView
@@ -1355,6 +1357,9 @@ func Handler(service board.Service) http.Handler {
 			applyRoomStyle(w, r, service, &p)
 		}
 		finishMetadata(&p, status)
+		if status == 200 {
+			p.RefFirstCall = refFirstCallFor(r, service)
+		}
 		if status == 200 && p.View == "verification" {
 			// A record never changes; only its verifier's standing moves.
 			w.Header().Set("Cache-Control", VerifyPageCacheControl)

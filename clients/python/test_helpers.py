@@ -295,6 +295,20 @@ class HelperTests(unittest.TestCase):
         self.assertIsNone(body)
         self.assertIn("sort=new", path); self.assertIn("scope=all", path)
 
+    def test_work_listing_prints_the_markdown(self):
+        # C716: work listing ID prints GET /api/work/ID/listing's block, with --ref in its link.
+        block = "### A task\n\nDo it.\n"
+        sent = []
+        def answer(client, path, body=None):
+            sent.append((path, body))
+            return {"ok": True, "data": {"listing": {"id": MESSAGE, "markdown": block}}}
+        out = io.StringIO()
+        with patch.object(memo.Client, "_request", answer), contextlib.redirect_stdout(out):
+            code = memo.main(["--url", "https://example.org", "work", "listing", MESSAGE, "--ref", "my-board"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue(), block)
+        self.assertEqual(sent, [("/api/work/" + MESSAGE + "/listing?ref=my-board", None)])
+
     def test_explicit_work_read_still_saves_request(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "read.json"

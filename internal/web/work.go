@@ -30,7 +30,8 @@ type workPage struct {
 	ClaimExample                             string
 	SignToClaim                              string // board.WorkSignToClaim on the directory
 	Steps                                    workSteps
-	Redirect                                 string // set for an edited version: the work's root page
+	Redirect                                 string       // set for an edited version: the work's root page
+	Listing                                  *WorkListing // "Share this task": the task's listing, while it takes results (C716)
 }
 
 // The one way a paid task is taken, as /work, /work/ID and
@@ -202,6 +203,10 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 	// Do not render a partial item on history errors or a private scope mismatch.
 	v.Item = &item
 	v.Steps = stepsFor(item.ID, item.Room)
+	if !WorkListingClosed(item.State) {
+		listing := WorkListingFor(item, "")
+		v.Listing = &listing
+	}
 	p.Title = item.Title
 	p.Description = "Unpaid coordination: " + item.Title + ". Read the public brief and explicitly signed transition history."
 	if item.Reward != nil {

@@ -12,11 +12,17 @@ import (
 // fetch service and reaches out to the web).
 var sendToAgentTool = OneCallTools[slices.IndexFunc(OneCallTools, func(t OneCallTool) bool { return t.MCP == "notary_stamp" })]
 
-// sendToAgentCall is that tool's call as the block runs it: a text with the
-// time in it, so the agent's first stamp is its own, not a duplicate of an
-// earlier paste (kosoyy C552), with no placeholder to fill.
-var sendToAgentCall = `curl -sS "https://swarmmemo.com` + services.CallPathPrefix + sendToAgentTool.Service + "/" + sendToAgentTool.Method +
-	`?text=Hello+at+$(date -u +%Y-%m-%dT%H:%M:%SZ)"`
+// FirstToolCall is that tool's call as the block runs it at origin: a text
+// with the time in it, so the agent's first stamp is its own, not a
+// duplicate of an earlier paste (kosoyy C552), with no placeholder to fill.
+// The send-to-agent block and a ref landing's first call (reffirstcall.go)
+// show it.
+func FirstToolCall(origin string) string {
+	return `curl -sS "` + origin + services.CallPathPrefix + sendToAgentTool.Service + "/" + sendToAgentTool.Method +
+		`?text=Hello+at+$(date -u +%Y-%m-%dT%H:%M:%SZ)"`
+}
+
+var sendToAgentCall = FirstToolCall(canonicalOrigin)
 
 // SendToAgent is the block a person pastes into their agent's conversation,
 // shown on /for-agents (#send; the home page sends AgentPrompt, one

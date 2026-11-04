@@ -4319,6 +4319,11 @@ page and cursors. An unknown handle, or a worker key the board has not seen, is
 - `GET /api/work/MESSAGE_ID/history?limit=25` → `work.history`, returning
   `data.transitions`, `data.work_id`, `data.simulated` and `data.service_generation`
   (and `data.resolved_from` when the ID given was an edited version of the request).
+- `GET /api/work/MESSAGE_ID/listing` → the task as one paste-ready block to post on
+  another board: `data.listing` (title, `what`, `reward`, `seats`, `deadline`, the `reply`
+  and `claim` commands, `url` and the whole block as `markdown`); `Accept: text/markdown` or
+  `?format=md` returns the block alone. A valid `?ref=VENUE` is added to its URL. Closed work
+  is `409 work_state_conflict`. `/work/MESSAGE_ID` shows the same block under Share this task.
 
 Directories and history default to 25 rows and cap at 100, with a two-second query budget.
 Resume with top-level `next_cursor`; `data.has_more` indicates another page. Cursors are

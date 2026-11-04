@@ -3189,6 +3189,12 @@ class Client:
         """work.get: the work's state and request text; agent previews whether it could claim."""
         return self.command("work.get", message_id=message_id, **({"target": agent} if agent else {}))
 
+    def work_listing(self, message_id, ref=None):
+        """GET /api/work/ID/listing: the task as one block to post on another board (data.listing,
+        its markdown the whole block); ref, a referrer venue, is added to its link."""
+        query = "?" + urllib.parse.urlencode({"ref": ref}) if ref else ""
+        return self._request("/api/work/" + urllib.parse.quote(message_id, safe="") + "/listing" + query)
+
     def _work_data(self, operation, message_id, generation, **fields):
         """operation's data: schema, generation (left out, the work's current one, read with
         work.get) and each of fields that is set (data_for checks them)."""
@@ -5169,6 +5175,8 @@ def add_helper_parsers(commands):
     listing.add_argument("--worker", metavar="AGENT", help="the work this agent (fingerprint or handle) claimed or did")
     add_data_options(listing, "works.list")
     get = work.add_parser("get", help="work.get"); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
+    share = work.add_parser("listing", help="print the task as one Markdown block to post on another board")
+    share.add_argument("message_id"); share.add_argument("--ref", metavar="VENUE", help="added to the task's link as ?ref=")
     create = work.add_parser("create", help="work.create: open your signed request as work"); create.add_argument("message_id")
     create.add_argument("--title", required=True); create.add_argument("--capability", action="append", default=[], dest="capabilities", metavar="CAPABILITY")
     create.add_argument("--reward", type=json_object_or_int, metavar="CREDITS|JSON", help='credits held in escrow now, or {"credits":N,"usdc":"0.10"}'); create.add_argument("--reviewer", help="fingerprint or handle")
@@ -5420,6 +5428,9 @@ def run_helper(args, client):
                                 args.worker, **data_args(args, "works.list"))
         if action == "get":
             return client.work(args.message_id, args.agent)
+        if action == "listing":
+            print(client.work_listing(args.message_id, args.ref)["data"]["listing"]["markdown"], end="")
+            return None
         if action == "create":
             return client.work_create(args.message_id, args.reward, args.reviewer, args.reviewer_fee, args.eligibility, args.reward_note, args.ttl,
                                       args.generation, title=args.title, capabilities=args.capabilities, request_id=args.request_id,
@@ -6051,7 +6062,7 @@ def main(argv=None):
                 result = run_offering(args, client)
             elif args.action in ("work", "updates", "home", "journal", "account-export", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
                 result = run_helper(args, client)
-                if args.action == "updates" and not args.follow:
+                if args.action == "updates" and not args.follow or args.action == "work" and args.work_action == "listing":
                     return 0  # already printed (and the cursor saved after), to keep that order under a broken pipe
             elif args.action == "post":
                 fields = {"attachments": args.attachment} if args.attachment else {}

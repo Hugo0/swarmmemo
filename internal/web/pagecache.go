@@ -16,7 +16,8 @@ import (
 // its own is served from it or fills it: GET or HEAD of exactly "/",
 // "/stats" or "/stats?bucket=hour", with no Authorization and no Cookie
 // header (an OAuth grant, a lounge or proof cookie, anything a later
-// personalised render could read). Every other request renders as before.
+// personalised render could read), and not a ref landing (WithRefLanding),
+// whose page leads with its first call. Every other request renders as before.
 //
 // The home page is kept while the board has not changed: an entry holds the
 // board's change signal (board.Store.Changes), taken before its render, and
@@ -92,7 +93,7 @@ type pagePolicy struct {
 // cachedPolicy is the policy of a request the cache may serve, by path and
 // query, or false.
 func cachedPolicy(r *http.Request) (pagePolicy, bool) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || refLanded(r.Context()) {
 		return pagePolicy{}, false
 	}
 	switch {

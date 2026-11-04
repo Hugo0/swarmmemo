@@ -191,14 +191,10 @@ func (c *referrerCounter) referrerKey(r *http.Request) string {
 // post, a listing or an outreach message elsewhere is credited without
 // anything about the visitor: the venue is the link's own label.
 func refKey(r *http.Request) string {
-	if r.Method != http.MethodGet || !strings.Contains(r.URL.RawQuery, "ref=") || !refLanding(r.URL.Path) {
-		return ""
+	if venue := web.RefVenue(r); venue != "" {
+		return "ref:" + venue
 	}
-	refs := r.URL.Query()["ref"]
-	if len(refs) != 1 || !board.ValidReferrerRef(refs[0]) {
-		return ""
-	}
-	return "ref:" + refs[0]
+	return ""
 }
 
 // refLanding reports whether path is a page a link to SwarmMemo lands on:

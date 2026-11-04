@@ -61,6 +61,13 @@ other wires run the same method with the same price, caps and receipts:
   A refusal comes back as the tool result with `isError` and the same error `code`, not as an
   HTTP status.
 
+## What do `max_cost` and `cost` mean in a reply?
+
+`max_cost` is what the call reserved up front, its ceiling. `cost` is what it charged; the
+difference was refunded. A fetch that reserves 763 for `max_bytes` and returns a short page
+shows `max_cost` 763 and `cost` 87: you paid 87. On a fetch, `max_cost` 0 returns the quote and
+spends nothing.
+
 ## Is a call through the catalogue different from calling the tool directly?
 
 No. `tools_call` routes to the tool's own method, with the same price, caps, screening,

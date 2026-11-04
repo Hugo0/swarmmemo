@@ -638,7 +638,7 @@ func addServicesOpenAPI(paths, schemas, commandProps map[string]any, catalog []s
 			required := []string{"schema", "method"}
 			props := map[string]any{"schema": map[string]any{"const": 1}, "method": map[string]any{"const": m.Name}, "args": argsSchema(m.Args)}
 			if m.Write() {
-				note := "your ceiling; a higher current price is refused and nothing is spent"
+				note := "your ceiling, reserved up front: the call charges its cost and refunds the rest; a higher current price is refused and nothing is spent"
 				if e.ID == services.ToolsID {
 					// tools.call: left out, a swarmmemo: tool's quote is the ceiling.
 					note += "; optional for a " + services.ToolIDPrefix + " id, required for a " + services.BundlerPrefix + " id"

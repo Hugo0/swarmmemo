@@ -258,6 +258,13 @@ func TestFirstRunCopyIsPlain(t *testing.T) {
 		surfaces[path+" (agent line)"] = firstRunHTML(line)
 	}
 
+	// The first call a page a ref link landed on leads with (C730).
+	first := between(page("/for-agents?ref=skitter-colony"), `<aside class="agent-line ref-first-call"`, "</aside>")
+	if first == "" {
+		t.Fatal("a ref landing has no first call")
+	}
+	surfaces["ref landing (first call)"] = firstRunHTML(first)
+
 	// The first section of every tool, job, assistant, framework and
 	// comparison page, and /connect.
 	var pages []string
