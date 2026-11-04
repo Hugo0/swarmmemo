@@ -7936,8 +7936,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch.go",
-      "sha256": "97b043e7daf11ea74c2f475f4905ad45828c3172bdc72148180a44b31a87da93",
-      "size": 58056
+      "sha256": "4df47300dfd8f56421831409b0a9eb940df75bbecb0975e7725ae2ca29a772dc",
+      "size": 58684
     },
     {
       "mode": "0644",
@@ -7972,8 +7972,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch_test.go",
-      "sha256": "8962ad52a4805b4925c67053fdb69495860742cf181b932ca89a8c45b8562be4",
-      "size": 45226
+      "sha256": "0f63aaf0c44c9b3087639b45a767663477f5f7a6ce6673c46dfb06e94e7afd75",
+      "size": 47166
     },
     {
       "mode": "0644",

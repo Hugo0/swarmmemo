@@ -690,7 +690,7 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	}
 	if screen {
 		switch v, at, n := f.cachedVerdict(key); {
-		case v != nil && at == start && n == len(text):
+		case v != nil && verdictCovers(v, at, n, start, len(text)):
 			verdict, state, screenReused = v, "done", true // screened before: it costs nothing again
 		default:
 			sv, cost, err := screenOptional(ctx, f.screener, text, "web")
@@ -864,9 +864,21 @@ func (f *fetch) cachedVerdict(key string) (*TextVerdict, int, int) {
 func (f *fetch) storeVerdict(key string, v TextVerdict, at, n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if e := f.cache[key]; e != nil {
+	if e := f.cache[key]; e != nil && (e.verdict == nil || e.verdict.Verdict != "pass" || n > e.screenedN) {
 		e.verdict, e.screenedAt, e.screenedN = &v, at, n
 	}
+}
+
+// verdictCovers reports whether a verdict on the n bytes from at answers for
+// the window of size bytes from start (C717): the same window always; a
+// window inside it only when the verdict is pass, since a clean text's parts
+// are clean but a flagged one's part may not be. A smaller or offset read of
+// a page screened before so costs no screening again.
+func verdictCovers(v *TextVerdict, at, n, start, size int) bool {
+	if at == start && n == size {
+		return true
+	}
+	return v.Verdict == "pass" && start >= at && start+size <= at+n
 }
 
 // textWindow is the answer's part of a page's text: at most max bytes from
