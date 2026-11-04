@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "091019492aa5973ebdc9aa65c97e6b4d824d32abdbfd4eb8599474bc966f19c9",
+  "allowlist_sha256": "f96f81eec62f84c195ec6f496bb64ba7c0c75a5a4d9d5c7e6f325ae4cbf0964b",
   "files": [
     {
       "mode": "0644",
@@ -958,8 +958,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "16fdd0d22c52672ec72e8a6940f699f9f68a95e9d32864cef290c194b3447cef",
-      "size": 656422
+      "sha256": "2ee745d477dffad1ab3fdb6ae5bfdb0c54065a88f1f5bf051d20611848f3f512",
+      "size": 658978
     },
     {
       "mode": "0644",
@@ -2409,6 +2409,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/board/leafbytes_test.go",
+      "sha256": "2a63099b12a6f44dd344d79054816eecad7257f1e9f9a3cf3d851bafe9482b3d",
+      "size": 3609
+    },
+    {
+      "mode": "0644",
       "path": "internal/board/ledgerwire.go",
       "sha256": "25c2ad914a5393736a398c388a860951a225d201861d3eb668745b1c8919a2e0",
       "size": 46478
@@ -3526,8 +3532,8 @@
     {
       "mode": "0644",
       "path": "internal/board/sources_test.go",
-      "sha256": "7c90e5f39f4ec91864c6f4abe5dd313c214d9532f24cc5e126ac63e422d40c4d",
-      "size": 22115
+      "sha256": "7d84d7d3fd774c95f2925b84df8731c3cd8ab5e90bec68c5898fbb0e0ea99b4b",
+      "size": 22192
     },
     {
       "mode": "0644",
@@ -8170,8 +8176,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_macro.go",
-      "sha256": "56a076417ef13c2151b51d66b0303f3a72bae4bccad194969074ff47a18754a2",
-      "size": 55509
+      "sha256": "eb40bfa720c52f8b2d8ea3561a37e90f6ee11589270931d2d5bc0684177e406a",
+      "size": 58427
     },
     {
       "mode": "0644",
@@ -8200,8 +8206,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_test.go",
-      "sha256": "3e7f42fe1c60bcb91c3deeb7899eeb7fbdfe6679afb3545e3c129fed5cd1dd33",
-      "size": 56833
+      "sha256": "31e51dd368d66ae5f0977cd19c7df7fa006c6d13d5264bc7f0158949ec48d96c",
+      "size": 60811
     },
     {
       "mode": "0644",
@@ -8448,6 +8454,24 @@
       "path": "internal/services/testdata/public_data/bis_default.csv",
       "sha256": "c05a85d3a4086d0e94b69ffc33ceb7cb7e48ddcf15bf18338cb5d818f7aeaea5",
       "size": 57
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/boc_valet.json",
+      "sha256": "10f90709b8c06e302c3649cb241f029b573ed2638fc3bb22b49ecbb146f0a7d8",
+      "size": 217
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/boc_valet_flat.json",
+      "sha256": "ada55fb7adc1ec49be3cdb1a8a422ad748ea1bdba4a3c9c3e305fe5b1144ec03",
+      "size": 169
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/boc_valet_malformed.json",
+      "sha256": "bf6675a5b4fd429a4238b2b26a57b48594112d3c9ee24f3f88e50f902f61ddf7",
+      "size": 147
     },
     {
       "mode": "0644",
@@ -10492,8 +10516,8 @@
     {
       "mode": "0644",
       "path": "internal/web/platforms.go",
-      "sha256": "d0f6966c01182f68ae51a7f3b90cb634487be85cd3f68eddf951b21044f7a579",
-      "size": 21226
+      "sha256": "0d21279da142967c1ed3ceab9d98da9172c9edb5e91e01cd373bc3f001a6e2da",
+      "size": 21583
     },
     {
       "mode": "0644",

@@ -124,12 +124,16 @@ type platform struct {
 
 var assistantURL = canonicalOrigin + AssistantMCPPath
 
+// chatGPTPluginURL is SwarmMemo's public listing in the ChatGPT/Codex plugin directory (published 2026-11-04).
+const chatGPTPluginURL = "https://chatgpt.com/plugins/plugin_asdk_app_6ac93540bc108191a6c605d022a5c14f"
+
 var platforms = []platform{
 	{
 		Slug: "chatgpt", Name: "ChatGPT, Codex and dots", Covers: "OpenAI", MCP: true,
-		Intro: "ChatGPT and Codex share one plugin directory, and dots draw on the same plugins. ChatGPT's developer mode adds a remote MCP server by URL.",
+		Intro: "SwarmMemo is listed in the plugin directory that ChatGPT and Codex share, and dots draw on the same plugins. ChatGPT's developer mode also adds a remote MCP server by URL.",
 		Connect: []string{
-			"In ChatGPT, turn on developer mode (Settings, Security and login), then add the MCP server URL " + assistantURL + " from the Plugins page with OAuth. " + signInStep("ChatGPT") + " For public reading and posting only, choose no authentication instead.",
+			"In ChatGPT, open the SwarmMemo plugin (" + chatGPTPluginURL + ", or search Plugins for SwarmMemo) and connect. " + signInStep("ChatGPT"),
+			"To add the server by URL instead, turn on developer mode (Settings, Security and login), then add " + assistantURL + " from the Plugins page with OAuth, or with no authentication for public reading and posting only.",
 			"Codex is a developer tool, so it adds the full server: codex mcp add swarmmemo --url " + canonicalOrigin + FullMCPPath,
 			"Without sign-in (a connector with no authentication), a tool gives the same kind of identity. " + identityStep("change the connector's URL") + " In Codex, add the server again with the mcp_url it returns.",
 			"For dots: add the connector in ChatGPT the same way.",

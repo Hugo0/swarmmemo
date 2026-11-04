@@ -179,7 +179,19 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			}
 			return "bis_default.csv", 200
 		},
-		"api.bcb.gov.br":     func(r *http.Request) (string, int) { return "bcb_selic.json", 200 },
+		"api.bcb.gov.br": func(r *http.Request) (string, int) { return "bcb_selic.json", 200 },
+		"www.bankofcanada.ca": func(r *http.Request) (string, int) {
+			if r.URL.Path != "/valet/observations/V39079/json" {
+				return "", 404
+			}
+			v.mu.Lock()
+			fail, file := v.bocFail, v.bocFile
+			v.mu.Unlock()
+			if fail {
+				return "", 500
+			}
+			return file, 200
+		},
 		"www.atlantafed.org": func(r *http.Request) (string, int) { return "gdpnow_card.html", 200 },
 		"www.newyorkfed.org": func(r *http.Request) (string, int) {
 			name := strings.TrimPrefix(r.URL.Path, "/medialibrary/Research/Interactives/Data/NowCast/data/")
@@ -230,11 +242,13 @@ type pdEnv struct {
 	mu       sync.Mutex
 	noaaFile string
 	bisFail  map[string]bool
+	bocFail  bool
+	bocFile  string
 }
 
 func newPDEnv(t *testing.T, keys bool) *pdEnv {
 	t.Helper()
-	v := &pdEnv{db: openDB(t), meter: servicestest.NewMeter(1 << 20), fakes: map[string]*pdFake{}, noaaFile: "noaa_mwn.json", bisFail: map[string]bool{}}
+	v := &pdEnv{db: openDB(t), meter: servicestest.NewMeter(1 << 20), fakes: map[string]*pdFake{}, noaaFile: "noaa_mwn.json", bisFail: map[string]bool{}, bocFile: "boc_valet.json"}
 	v.keyDir = t.TempDir()
 	if keys {
 		for _, name := range []string{services.KeyAPIDataGov, services.KeyFRED} {
@@ -677,6 +691,87 @@ func TestPublicDataCBPolicy(t *testing.T) {
 	eq(t, "boj rate gone", at(d, "banks", "BOJ", "rate_available"), false)
 	eq(t, "boj calendar kept", at(d, "banks", "BOJ", "next_decision"), "2026-09-18")
 	near(t, "ecb unharmed", at(d, "banks", "ECB", "policy_rate_pct"), 2.25)
+}
+
+// TestPublicDataCBPolicyBOC covers the live Bank of Canada Valet source
+// (C723): it overrides the BIS series (which lags a fresh decision), falls
+// back to BIS on a Valet failure, detects the last change over the recent
+// window (or says there was none), and rejects a malformed Valet body.
+func TestPublicDataCBPolicyBOC(t *testing.T) {
+	now := unix("2026-10-30")
+
+	// Live Valet value wins over BIS (bis_default.csv: 2.25 as of
+	// 2026-08-12, no prior row to diff against).
+	v := newPDEnv(t, false)
+	_, d := v.mustFetch(t, "cb_policy_rates", `{"bank":"BOC","what":"rate"}`, now)
+	boc := at(d, "banks", "BOC")
+	near(t, "boc rate", at(boc, "policy_rate_pct"), 2.0)
+	eq(t, "boc as_of", at(boc, "rate_as_of"), "2026-10-29")
+	eq(t, "boc effective", at(boc, "rate_effective_from"), "2026-10-28")
+	near(t, "boc previous", at(boc, "previous_rate_pct"), 2.25)
+	near(t, "boc bps", at(boc, "last_change_bps"), -25.0)
+	eq(t, "boc change note empty", at(boc, "last_change_note"), nil)
+	eq(t, "boc available", at(boc, "rate_available"), true)
+	if src, _ := at(boc, "rate_source").(string); !strings.Contains(src, "Valet") {
+		t.Errorf("boc rate_source %v", src)
+	}
+	eq(t, "boc not stale", at(boc, "rate_may_be_stale"), false)
+	hosts := v.fakes["www.bankofcanada.ca"]
+	if hosts.count() != 1 {
+		t.Fatalf("boc hits = %d", hosts.count())
+	}
+	urls, _ := hosts.seen()
+	if !strings.Contains(urls[0], "/valet/observations/V39079/json") || !strings.Contains(urls[0], "recent=400") {
+		t.Errorf("boc request %s", urls[0])
+	}
+
+	// No change in the recent window: previous_rate_pct stays nil and the
+	// note says so, but the live value (and its as_of) still wins over BIS.
+	v2 := newPDEnv(t, false)
+	v2.mu.Lock()
+	v2.bocFile = "boc_valet_flat.json"
+	v2.mu.Unlock()
+	_, d = v2.mustFetch(t, "cb_policy_rates", `{"bank":"BOC","what":"rate"}`, now)
+	boc = at(d, "banks", "BOC")
+	near(t, "flat rate", at(boc, "policy_rate_pct"), 2.25)
+	eq(t, "flat as_of", at(boc, "rate_as_of"), "2026-10-15")
+	eq(t, "flat previous nil", at(boc, "previous_rate_pct"), nil)
+	if note, _ := at(boc, "last_change_note").(string); !strings.Contains(note, "unchanged") {
+		t.Errorf("flat last_change_note %v", note)
+	}
+
+	// A malformed Valet body (non-numeric value, missing date, missing
+	// value object) leaves no usable observation on this, the first ever
+	// request (so there is no stale cached copy to fall back on):
+	// parseBOCValet rejects it, and cbRate falls back to whatever BIS
+	// already filled.
+	v3 := newPDEnv(t, false)
+	v3.mu.Lock()
+	v3.bocFile = "boc_valet_malformed.json"
+	v3.mu.Unlock()
+	_, d = v3.mustFetch(t, "cb_policy_rates", `{"bank":"BOC","what":"rate"}`, now)
+	boc = at(d, "banks", "BOC")
+	near(t, "malformed falls back to BIS", at(boc, "policy_rate_pct"), 2.25)
+	eq(t, "malformed as_of is BIS", at(boc, "rate_as_of"), "2026-08-12")
+	if src, _ := at(boc, "rate_source").(string); !strings.Contains(src, "BIS") {
+		t.Errorf("malformed rate_source %v", src)
+	}
+
+	// A Valet fetch failure (e.g. a 500) on the first ever request also
+	// falls back to BIS, with BIS's own staleness logic intact (2026-08-12
+	// predates the 2026-09-02 and 2026-10-28 scheduled decisions).
+	v4 := newPDEnv(t, false)
+	v4.mu.Lock()
+	v4.bocFail = true
+	v4.mu.Unlock()
+	_, d = v4.mustFetch(t, "cb_policy_rates", `{"bank":"BOC","what":"rate"}`, now)
+	boc = at(d, "banks", "BOC")
+	near(t, "fallback rate", at(boc, "policy_rate_pct"), 2.25)
+	eq(t, "fallback as_of", at(boc, "rate_as_of"), "2026-08-12")
+	if src, _ := at(boc, "rate_source").(string); !strings.Contains(src, "BIS") {
+		t.Errorf("fallback rate_source %v", src)
+	}
+	eq(t, "fallback stale", at(boc, "rate_may_be_stale"), true)
 }
 
 // cbCalendarHorizonDays is how far ahead every listed bank must have a

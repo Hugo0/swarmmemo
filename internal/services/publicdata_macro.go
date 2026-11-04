@@ -335,11 +335,15 @@ func fomcSchedule(today, cutoff string) releaseRow {
 const (
 	bisHost             = "stats.bis.org"
 	bcbHost             = "api.bcb.gov.br"
+	bankofcanadaHost    = "www.bankofcanada.ca"
 	cbHistoryObs        = 260
+	bocRecentObs        = 400
 	cbMaxUpcoming       = 4
 	cbCalendarValidThru = "2027-12-31"
 	cbEffectiveLagDays  = 10
 	bisRateSource       = "BIS daily central bank policy rates (stats.bis.org, WS_CBPOL)"
+	bocSeriesID         = "V39079"
+	bocRateSource       = "Bank of Canada Valet API, series V39079 (target for the overnight rate, www.bankofcanada.ca)"
 )
 
 type cbBank struct {
@@ -559,6 +563,39 @@ func parseBCB(raw []byte) (any, error) {
 	return out, nil
 }
 
+// parseBOCValet reads a Bank of Canada Valet /valet/observations/<series>/json
+// response ({"observations":[{"d":"YYYY-MM-DD","V39079":{"v":"2.25"}},...]})
+// into a pdSeries, oldest first. Observations with a missing or non-numeric
+// value, or a missing date, are dropped defensively.
+func parseBOCValet(raw []byte) (any, error) {
+	var body struct {
+		Observations []map[string]any `json:"observations"`
+	}
+	if err := decodeJSON(raw, &body); err != nil {
+		return nil, err
+	}
+	points := map[string]float64{}
+	for _, o := range body.Observations {
+		d, _ := o["d"].(string)
+		if d == "" {
+			continue
+		}
+		sub, ok := o[bocSeriesID].(map[string]any)
+		if !ok {
+			continue
+		}
+		v := pyFloat(sub["v"])
+		if v == nil {
+			continue
+		}
+		points[d] = *v
+	}
+	if len(points) == 0 {
+		return nil, errors.New("no " + bocSeriesID + " observations")
+	}
+	return seriesFromPoints(points), nil
+}
+
 type fredLatest struct {
 	Value *float64 `json:"value"`
 	Date  *string  `json:"date"`
@@ -623,7 +660,7 @@ type cbData struct {
 var dsCBPolicy = &pdDataset{
 	ID: "cb_policy_rates", SchemaVersion: 1,
 	Title:       "Central-bank policy rates and decision dates",
-	Description: "A central bank's policy rate (BIS, with the date and size of its last change; the Fed's target range from FRED; Brazil's Selic target from the BCB) and its next scheduled decision dates. Covers FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, or all.",
+	Description: "A central bank's policy rate (BIS, with the date and size of its last change; the Fed's target range from FRED; Brazil's Selic target from the BCB; Canada's target from the Bank of Canada Valet API) and its next scheduled decision dates. Covers FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, or all.",
 	Output:      "data: today, what, banks {CODE: {bank, policy_rate_pct, rate_as_of, rate_effective_from, previous_rate_pct, last_change_bps, target_range_pct, selic_target_pct, next_decision, upcoming_decisions, last_scheduled_decision_in_table, calendar_source, schedule_status (scheduled, or unknown with the reason in calendar_note), rate_available, rate_may_be_stale, ...}} (one entry, or every bank for all), calendar_staleness_warning",
 	Params: []pdParam{
 		{Name: "bank", Kind: "string", Required: true, MaxLen: 64, Pattern: pdWordRE, Norm: pdTrim, Doc: "FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, a common name (Brazil, Copom, FOMC), or all"},
@@ -658,10 +695,11 @@ var dsCBPolicy = &pdDataset{
 		}
 		return out, nil
 	},
-	Source:  "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); each bank's published calendar",
-	Hosts:   []string{bisHost, bcbHost, fredHost},
-	Licence: "BIS statistics: free reuse with attribution; BCB open data; FRED terms for the target range", Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED",
-	TermsURL: "https://www.bis.org/terms_statistics.htm", TermsStatus: "verify before production (BIS, BCB terms; calendars need a yearly refresh)",
+	Source:      "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); Bank of Canada Valet API (series V39079); each bank's published calendar",
+	Hosts:       []string{bisHost, bcbHost, fredHost, bankofcanadaHost},
+	Licence:     "BIS statistics: free reuse with attribution; BCB open data; FRED terms for the target range; Bank of Canada Valet: terms at https://www.bankofcanada.ca/terms/ — free reuse with attribution",
+	Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED; Bank of Canada Valet API",
+	TermsURL:    "https://www.bis.org/terms_statistics.htm", TermsStatus: "verify before production (BIS, BCB, Bank of Canada Valet terms; calendars need a yearly refresh)",
 	Key: KeyFRED, KeyOptional: true, TTL: time.Hour, Price: 1,
 }
 
@@ -803,6 +841,37 @@ func cbRate(ctx context.Context, r *pdRun, b cbBank, row *cbRow) string {
 		if v.ValidThrough > today.Format("2006-01-02") {
 			return v.ValidThrough
 		}
+	case "BOC":
+		// Live Bank of Canada Valet value wins over the BIS series above,
+		// which can lag a fresh decision (WS_CBPOL rate_as_of trailed the
+		// 2026-10-28 cut by days). On any Valet failure, fall through and
+		// keep whatever BIS already filled, with its existing stale logic.
+		raw, err := r.fetch(ctx, pdFetch{Key: "boc_valet", TTL: time.Hour, Host: bankofcanadaHost, Path: "/valet/observations/" + bocSeriesID + "/json",
+			Query: url.Values{"recent": {strconv.Itoa(bocRecentObs)}}, MaxBytes: 1 << 20, Parse: parseBOCValet})
+		if err != nil {
+			return ""
+		}
+		s, err := unmarshalCached[pdSeries](raw)
+		if err != nil || len(s.D) == 0 {
+			return ""
+		}
+		n := len(s.D)
+		row.PolicyRatePct, row.RateAsOf = fptr(s.V[n-1]), sptr(s.D[n-1])
+		row.RateName, row.RateSource = b.RateName, bocRateSource
+		row.RateEffectiveFrom, row.PreviousRatePct, row.LastChangeBps, row.LastChangeNote = nil, nil, nil, ""
+		for i := 1; i < n; i++ {
+			if s.V[i] != s.V[i-1] {
+				row.RateEffectiveFrom, row.PreviousRatePct = sptr(s.D[i]), fptr(s.V[i-1])
+			}
+		}
+		if row.PreviousRatePct != nil {
+			row.LastChangeBps = fptr(pyRound((s.V[n-1]-*row.PreviousRatePct)*100, 1))
+		} else {
+			row.LastChangeNote = "policy rate unchanged across the last " + strconv.Itoa(n) + " Valet observations; the last move predates the window"
+		}
+		row.RateNote = "policy_rate_pct is the Bank of Canada Valet series V39079 value as of rate_as_of (live; overrides the BIS series above, which can lag a fresh decision)"
+		t := true
+		row.RateAvailable = &t
 	}
 	return ""
 }

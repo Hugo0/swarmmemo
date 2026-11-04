@@ -482,6 +482,7 @@ func generatedSections(t *testing.T) map[string]string {
 		"data-fields":       dataFieldsProtocolSection(), // dataspec_test.go
 		// Inside its list item, like free-hooks.
 		"anchor-timeline": anchorTimelineProtocolSection(),
+		"leaf-bytes":      leafBytesProtocolSection(), // leafbytes_test.go (C743)
 		// Inside a list item: indented, and the end marker keeps its indent.
 		"free-hooks": wrapList("  ", free, "  ") + "  "}
 	// The inbox entry kinds, from InboxKindList.
