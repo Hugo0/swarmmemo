@@ -751,6 +751,10 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	return Result{Body: canonicalJSON(body), Used: used, Public: public, Once: canonicalJSON(once)}, nil
 }
 
+// FetchQuoteHint tells a caller, after its first paid fetch, how to know the
+// price before the next one (C738).
+const FetchQuoteHint = "max_cost 0 returns a call's quote and spends nothing."
+
 // fetchCostNote says in plain words why this answer cost what it did:
 // fetched now or read from the shared cache, whether screening was charged
 // or reused, and that max_cost was only the ceiling the quote reserved.
@@ -768,7 +772,7 @@ func fetchCostNote(price Price, cached, screenCharged, screenReused bool) string
 	case screenReused:
 		b.WriteString("; the text was screened before, so screening cost nothing again")
 	}
-	b.WriteString(". max_cost is only the ceiling reserved for max_bytes; the rest is refunded.")
+	b.WriteString(". max_cost is only the ceiling reserved for max_bytes; the rest is refunded. " + FetchQuoteHint)
 	return b.String()
 }
 
