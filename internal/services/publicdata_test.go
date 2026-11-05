@@ -450,11 +450,18 @@ func TestPublicDataSeaIce(t *testing.T) {
 	eq(t, "n_years", d["n_years"], 3.0)
 	eq(t, "rank", d["rank_low_to_high"], 1.0)
 	near(t, "anomaly", d["anomaly_million_km2"], -0.385)
-	eq(t, "no series without a range", len(d["observations"].([]any)), 0)
 
+	// C754: a default call (no window) fills observations with the latest
+	// days beside the latest-day snapshot, never an empty list.
 	item, d := v.mustFetch(t, "sea_ice_extent", `{}`, unix("2026-07-12"))
 	eq(t, "latest", d["date"], "2026-07-10")
 	eq(t, "as_of", item["as_of"], "2026-07-10")
+	if obs, _ := d["observations"].([]any); len(obs) == 0 || at(d, "observations", 0, "date") != "2026-07-10" {
+		t.Errorf("default call: observations %v, want the latest days newest first", d["observations"])
+	}
+	if d["count"] == 0.0 {
+		t.Errorf("default call: count 0")
+	}
 
 	_, d = v.mustFetch(t, "sea_ice_extent", `{"start_date":"2026-07-07","end_date":"2026-07-09","limit":2}`, unix("2026-07-12"))
 	eq(t, "window", d["observations"], []any{map[string]any{"date": "2026-07-09", "value": 8.19}, map[string]any{"date": "2026-07-08", "value": 8.254}})

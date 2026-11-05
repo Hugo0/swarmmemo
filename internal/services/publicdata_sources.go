@@ -192,7 +192,7 @@ func dateParam(name, doc string) pdParam {
 func limitParam(def, max int64, paging bool) pdParam {
 	doc := "most rows returned, newest first"
 	if paging {
-		doc += "; next_end_date pages back when passed as end_date"
+		doc += "; fills observations[] with the latest rows when start_date/end_date are unset; next_end_date pages back when passed as end_date"
 	}
 	return pdParam{Name: "limit", Kind: "int", Min: 1, Max: max, Default: strconv.FormatInt(def, 10),
 		Doc: doc}
@@ -498,7 +498,7 @@ var dsSeaIce = &pdDataset{
 	ID: "sea_ice_extent", SchemaVersion: 1,
 	Title:       "Arctic sea-ice extent",
 	Description: "NSIDC Sea Ice Index daily Arctic extent: a day's extent, its rank among the same day in every year (1 = record low) and its anomaly against that day's mean; optionally the series over a date range.",
-	Output:      "data: series_id, units (million km2), averaging, date, extent_km2, extent_million_km2, rank_low_to_high, n_years, anomaly_million_km2, observations[] (newest first: date, value; only with start_date or end_date), count, truncated, next_end_date",
+	Output:      "data: series_id, units (million km2), averaging, date, extent_km2, extent_million_km2, rank_low_to_high, n_years, anomaly_million_km2, observations[] (newest first: date, value; the latest limit days unless start_date/end_date narrow it), count, truncated, next_end_date",
 	Params: []pdParam{
 		dateParam("date", "the day to rank; default the latest available"),
 		dateParam("start_date", "series from this day (inclusive)"),
@@ -551,10 +551,8 @@ var dsSeaIce = &pdDataset{
 			out.Date, out.ExtentKM2, out.ExtentMillionKM2, out.RankLowToHigh, out.NYears = sptr(s.D[idx]), &km2, fptr(value), &rank, n
 			out.AnomalyMillionKM2 = fptr(pyRound(value-sum/float64(n), 3))
 		}
-		if p.Has("start_date") || p.Has("end_date") {
-			out.Observations, out.Count, out.NextEndDate = s.window(p.Str("start_date"), p.Str("end_date"), int(intOr(p, "limit", 366)))
-			out.Truncated = out.NextEndDate != nil
-		}
+		out.Observations, out.Count, out.NextEndDate = s.window(p.Str("start_date"), p.Str("end_date"), int(intOr(p, "limit", 366)))
+		out.Truncated = out.NextEndDate != nil
 		return out, nil
 	},
 	Source: "National Snow and Ice Data Center (NSIDC), Sea Ice Index v4 (G02135)", Hosts: []string{nsidcHost},
