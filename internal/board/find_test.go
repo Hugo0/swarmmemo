@@ -39,6 +39,9 @@ func TestFindOnTheBoard(t *testing.T) {
 	run(t, s, reviewPost(t, lab, apiURI, labFields, ""))
 	recompute(t, s)
 	labVerdict, labGrade, labLower := reviews.LabVerdicts[labFields["verdict"].(string)], labFields["grade"].(string), labFields["band"].([]int)[0]
+	if labGrade == "" {
+		t.Fatal("the lab record stores no grade")
+	}
 	// A site one account reviewed: not listed, never indexed.
 	run(t, s, reviewPost(t, alice, "site:https://weather-unlisted.example.com/", map[string]any{}, ""))
 
@@ -63,7 +66,9 @@ func TestFindOnTheBoard(t *testing.T) {
 	}
 	api := byID[reviewSubjectOf(t, apiURI).URI()]
 	if api.Type != find.TypeService || api.Kind != find.KindX402 || api.Lab == nil || api.Lab.Verdict != labVerdict || *api.Lab.Lower != labLower ||
-		!strings.Contains(api.Why, "lab grade "+labGrade+" ("+labVerdict+")") || !strings.Contains(api.Why, "not in SwarmMemo's catalogue") {
+		// good is unmeasured (no paid call): the stored grade shows as no grade (C752)
+		api.Lab.Grade != "" || api.Lab.GradeNote != "no grade (good not measured)" ||
+		!strings.Contains(api.Why, "lab: "+labVerdict+", no grade (good not measured)") || !strings.Contains(api.Why, "not in SwarmMemo's catalogue") {
 		t.Fatalf("x402 hit %+v %+v", api, api.Explain)
 	}
 	// A reviewed endpoint outside the catalogue keeps its protocol family, so

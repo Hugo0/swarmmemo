@@ -380,3 +380,22 @@ func TestToolSubjects(t *testing.T) {
 		t.Fatal(TypesText())
 	}
 }
+
+// C752: a lab grade shows only while every dimension is measured; else no
+// letter and a marker naming the unmeasured dimensions.
+func TestShowGrade(t *testing.T) {
+	all := map[string]int{"works": 91, "as_described": 88, "safe": 90, "good": 85}
+	if g := ShowGrade("B", all); g.Grade != "B" || g.Note != "" || g.Unmeasured != nil {
+		t.Fatalf("all measured: %+v", g)
+	}
+	noGood := map[string]int{"works": 71, "as_described": 67, "safe": 77}
+	if g := ShowGrade("D", noGood); g.Grade != "" || g.Note != "no grade (good not measured)" || len(g.Unmeasured) != 1 || g.Unmeasured[0] != "good" {
+		t.Fatalf("good unmeasured: %+v", g)
+	}
+	if g := ShowGrade("F", map[string]int{"works": 50}); g.Note != "no grade (as_described, safe, good not measured)" {
+		t.Fatalf("three unmeasured: %+v", g)
+	}
+	if g := ShowGrade("", noGood); g.Grade != "" || g.Note != "" || g.Unmeasured != nil {
+		t.Fatalf("no stored grade shows nothing: %+v", g)
+	}
+}

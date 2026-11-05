@@ -164,10 +164,13 @@ type Quality struct {
 	State     string
 	StateNote string
 	// The newest lab assessment: its verdict word (proceed, caution, avoid,
-	// down, unverified), grade and band's lower edge (-1: none).
-	LabVerdict string
-	LabGrade   string
-	LabLower   int
+	// down, unverified), grade as shown and band's lower edge (-1: none).
+	// LabGrade is "" while a dimension is unmeasured, and LabGradeNote then
+	// says "no grade (good not measured)" (reviews.ShowGrade).
+	LabVerdict   string
+	LabGrade     string
+	LabGradeNote string
+	LabLower     int
 	// The community reviews: their count, the core's aggregate verdict mean
 	// (Bayesian, 0 to 1) and the weight behind it; Reviews 0 means none, and
 	// a zero weight (no reviewer's review counts yet) leaves the mean the
@@ -294,7 +297,10 @@ type Hit struct {
 type LabMark struct {
 	Verdict string `json:"verdict"`
 	Grade   string `json:"grade,omitempty"`
-	Lower   *int   `json:"band_lower,omitempty"`
+	// GradeNote stands in for Grade while a dimension is unmeasured:
+	// "no grade (good not measured)".
+	GradeNote string `json:"grade_note,omitempty"`
+	Lower     *int   `json:"band_lower,omitempty"`
 }
 
 // Reviews is the community reviews' summary, as a result shows it.

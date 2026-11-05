@@ -89,6 +89,17 @@ func labRecord(t *testing.T, s *Store, key ed25519.PrivateKey, obs []byte) map[s
 	if len(want.Flags) > 0 {
 		f["flags"] = want.Flags
 	}
+	// The scorer's dimensions, na ones left out (as the lab writes them):
+	// a grade shows only while every one is measured (C752).
+	dims := map[string]int{}
+	for _, d := range want.Dimensions {
+		if !d.NA {
+			dims[d.ID] = d.Score
+		}
+	}
+	if len(dims) > 0 {
+		f["dimensions"] = dims
+	}
 	return f
 }
 
@@ -151,7 +162,8 @@ func TestReviewLabRecordAfterCommit(t *testing.T) {
 		t.Fatalf("recomputed record %+v", e)
 	}
 	sums, err := reviewSummaries(testContext, s.db, []string{sub.ID})
-	if err != nil || sums[sub.ID].Lab["grade"] != fields["grade"] || sums[sub.ID].Reviews != 1 {
+	// good is unmeasured (no paid call): the summary shows no letter, the card keeps the stored one (C752)
+	if err != nil || sums[sub.ID].Lab["grade"] != nil || sums[sub.ID].Lab["grade_note"] != "no grade (good not measured)" || card.Grade != fields["grade"] || card.ShownGrade != "" || sums[sub.ID].Reviews != 1 {
 		t.Fatalf("summary %+v (%v)", sums, err)
 	}
 	if l := run(t, s, Command{Operation: "subjects.list"}).Data["subjects"].([]SubjectListing); len(l) != 1 || l[0].Lab != fields["verdict"] {

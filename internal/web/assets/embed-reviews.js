@@ -58,7 +58,7 @@ export default async function reviews({core, el, root, attr, origin}) {
   counts.textContent = n === 0 ? 'No community reviews yet. Be the first.' : n + (n === 1 ? ' review' : ' reviews') + ' from ' + accounts + (accounts === 1 ? ' account' : ' accounts') + '.';
   const lab = data.lab;
   if (lab && typeof lab === 'object') {
-    const parts = [lab.grade, Number.isInteger(lab.score) ? String(lab.score) : '', lab.lab_verdict || lab.verdict].filter(x => typeof x === 'string' && x);
+    const parts = [lab.shown_grade || lab.grade_note, Number.isInteger(lab.score) ? String(lab.score) : '', lab.lab_verdict || lab.verdict].filter(x => typeof x === 'string' && x);
     header.append(el('p', 'Lab assessment: ' + parts.join(' · ') + '. A measurement by one lab, kept apart from the reviews.', 'muted'));
   }
   for (const r of (Array.isArray(data.reviews) ? data.reviews : []).slice(0, limit)) {

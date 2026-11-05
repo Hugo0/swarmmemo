@@ -499,7 +499,7 @@ func findAlso(sub reviews.Subject, quality map[string]subjectQuality, seen map[s
 		}
 		a := find.Also{Type: sib.Type, SubjectID: sib.ID, ReviewURL: "/s/" + sib.ID}
 		if q.LabVerdict != "" {
-			a.Lab = &find.LabMark{Verdict: q.LabVerdict, Grade: q.LabGrade}
+			a.Lab = &find.LabMark{Verdict: q.LabVerdict, Grade: q.LabGrade, GradeNote: q.LabGradeNote}
 			if q.LabLower >= 0 {
 				lower := q.LabLower
 				a.Lab.Lower = &lower
@@ -820,10 +820,12 @@ func (s *Store) findQuality(ctx context.Context, now int64) (map[string]subjectQ
 		}
 		var verdict, grade string
 		var lo int
-		err = tx.QueryRowContext(ctx, "SELECT r.verdict,r.grade,r.band_lo FROM reviews r JOIN events e ON e.id=r.event_id WHERE r.subject=? AND r.current=1 AND e.hidden=0 AND r.relationship='lab' AND "+aboutCurrentVersion+" AND "+labVerified+" ORDER BY r.created_at DESC, r.event_id DESC LIMIT 1", id).Scan(&verdict, &grade, &lo)
+		var dims [4]int
+		err = tx.QueryRowContext(ctx, "SELECT r.verdict,r.grade,r.band_lo,r.works,r.as_described,r.safe,r.good FROM reviews r JOIN events e ON e.id=r.event_id WHERE r.subject=? AND r.current=1 AND e.hidden=0 AND r.relationship='lab' AND "+aboutCurrentVersion+" AND "+labVerified+" ORDER BY r.created_at DESC, r.event_id DESC LIMIT 1", id).Scan(&verdict, &grade, &lo, &dims[0], &dims[1], &dims[2], &dims[3])
 		switch {
 		case err == nil:
-			q.LabVerdict, q.LabGrade = reviews.LabVerdicts[verdict], grade
+			g := reviews.ShowGrade(grade, dimensionsOf(dims))
+			q.LabVerdict, q.LabGrade, q.LabGradeNote = reviews.LabVerdicts[verdict], g.Grade, g.Note
 			if lo >= 0 {
 				q.LabLower = lo
 			}

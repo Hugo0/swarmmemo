@@ -65,8 +65,11 @@ func toneOf(verdict string) string {
 func badgeFrom(data map[string]any) badgeFacts {
 	if lab, ok := data["lab"].(board.ReviewCard); ok {
 		var parts, spoken []string
-		if lab.Grade != "" {
-			parts, spoken = append(parts, lab.Grade), append(spoken, "grade "+lab.Grade)
+		switch g := lab.GradeShown(); {
+		case g.Grade != "":
+			parts, spoken = append(parts, g.Grade), append(spoken, "grade "+g.Grade)
+		case g.Note != "":
+			parts, spoken = append(parts, reviews.NoGrade+" ·"), append(spoken, g.Note)
 		}
 		if lab.Score != nil {
 			parts, spoken = append(parts, strconv.Itoa(*lab.Score)), append(spoken, "score "+strconv.Itoa(*lab.Score))

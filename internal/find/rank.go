@@ -278,7 +278,7 @@ func (s scored) hit(explain bool) Hit {
 		}
 	}
 	if q := d.Quality; q.HasLab() {
-		h.Lab = &LabMark{Verdict: q.LabVerdict, Grade: q.LabGrade}
+		h.Lab = &LabMark{Verdict: q.LabVerdict, Grade: q.LabGrade, GradeNote: q.LabGradeNote}
 		if q.LabLower >= 0 {
 			lower := q.LabLower
 			h.Lab.Lower = &lower
@@ -346,6 +346,8 @@ func (s scored) why() string {
 	switch {
 	case q.HasLab() && q.LabGrade != "":
 		parts = append(parts, fmt.Sprintf("lab grade %s (%s)", q.LabGrade, q.LabVerdict))
+	case q.HasLab() && q.LabGradeNote != "":
+		parts = append(parts, fmt.Sprintf("lab: %s, %s", q.LabVerdict, q.LabGradeNote))
 	case q.HasLab():
 		parts = append(parts, "lab: "+q.LabVerdict)
 	}

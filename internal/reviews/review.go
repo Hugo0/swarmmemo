@@ -80,6 +80,42 @@ func UniversalVerdict(lab string) string {
 // Dimensions are the four universal dimensions, each 0-100.
 var Dimensions = []string{"works", "as_described", "safe", "good"}
 
+// NoGrade is what shows in place of a lab assessment's letter grade while a
+// dimension is unmeasured (GLOSSARY "no grade").
+const NoGrade = "no grade"
+
+// GradeShown is the grade every surface shows for a lab assessment, derived
+// from the grade and dimensions it stores (C752). The stored grade stays the
+// record (the recompute compares it); a page or summary shows a letter only
+// when every universal dimension was measured. A dimension the scorer left na
+// (good needs a paid call) is absent from the stored dimensions; the headline
+// then rests on unmeasured checks held at the prior, and the band's low edge,
+// which the letter comes from, says little. Then Grade is "", Unmeasured
+// names those dimensions and Note says "no grade (good not measured)".
+type GradeShown struct {
+	Grade      string
+	Note       string
+	Unmeasured []string
+}
+
+// ShowGrade derives GradeShown from a lab assessment's stored grade and
+// dimensions; no stored grade shows nothing.
+func ShowGrade(grade string, dims map[string]int) GradeShown {
+	if grade == "" {
+		return GradeShown{}
+	}
+	var missing []string
+	for _, d := range Dimensions {
+		if _, ok := dims[d]; !ok {
+			missing = append(missing, d)
+		}
+	}
+	if len(missing) == 0 {
+		return GradeShown{Grade: grade}
+	}
+	return GradeShown{Note: NoGrade + " (" + strings.Join(missing, ", ") + " not measured)", Unmeasured: missing}
+}
+
 // Relationships a reviewer declares. The service may raise one (owner,
 // affiliate, paid), never lower it. lab is a run of a rubric; outside_source
 // republishes another rater's public figure and is open only to the

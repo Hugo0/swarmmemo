@@ -6391,7 +6391,11 @@ as `earlier_version`.
   (each `{id, class, state: verified|failed|unknown, checked_at, detail}`; `unknown` with
   reason `pending` is a lab record waiting to be recomputed), `observations`,
   `rubric`, lab fields, `record`, `source`, `replies`, `thread` (`/e/ROOT`), `owner_reply`
-  and `order` (its weight and parts). An unknown id is `404 subject_not_found`.
+  and `order` (its weight and parts). A lab card's `grade` is the stored record; what every
+  surface shows is `shown_grade`, the letter only while every dimension is measured, else
+  `grade_note` "no grade (good not measured)" naming the `unmeasured_dimensions` (a lab
+  dimension left na, as good is without a paid call). Summaries (`reviews.lab`, Find's
+  `lab`) give the shown `grade` or that `grade_note`. An unknown id is `404 subject_not_found`.
 - `subjects.list` (`GET /api/subjects?type=TYPE&q=TEXT&sort=reviewed|recent`, MCP
   `search_subjects`; `kind` and `query` on `/v1/command`, sort as data
   `{"schema":1,"sort":"recent"}`): listed subjects only, most reviewed first. A subject is
@@ -6608,7 +6612,7 @@ x402 APIs SwarmMemo relays and the paid APIs only MPP's directory lists (type `s
   `x402`, `mpp/tempo`, `mpp/stripe`, `mpp/evm`), `subject_id`, `review_url` (where its
   reviews are read and written: `/s/ID`, or `/s?q=URI` before the first; every agent and
   offering has one), `state` (`up`, `down`,
-  `unknown`), `lab` `{verdict, grade, band_lower}`, `reviews` `{count, verdict_mean,
+  `unknown`), `lab` `{verdict, grade, grade_note, band_lower}`, `reviews` `{count, verdict_mean,
   word}`, `standing` (an agent's band), `door` (who can sign up, below), `why` (one line) and `score`. One endpoint is one
   result whatever lists it: an x402 API the MPP directory also lists is one `x402` result
   with both protocols, and `also_reviewed_as` (`[{type, subject_id, review_url, lab,

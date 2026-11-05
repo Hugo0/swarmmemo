@@ -1143,6 +1143,17 @@ type MessageReview struct {
 	Reward *ReviewReward `json:"reward,omitempty"`
 }
 
+// GradeShown is the grade a surface shows for the review (reviews.ShowGrade):
+// a lab assessment's letter only while every dimension is measured; nothing
+// for any other review, whose grade pages never show. A method, not a field:
+// message reads keep their keys; review cards carry it (ReviewCard).
+func (m *MessageReview) GradeShown() reviews.GradeShown {
+	if m.Relationship != "lab" {
+		return reviews.GradeShown{}
+	}
+	return reviews.ShowGrade(m.Grade, m.Dimensions)
+}
+
 // ReviewAuthor is who signed a review.
 type ReviewAuthor struct {
 	Account string `json:"account"`
@@ -1186,10 +1197,17 @@ type ReviewCard struct {
 	// DisplayFormat is how pages show Text (Message.DisplayFormat).
 	DisplayFormat string `json:"display_format"`
 	MessageReview
-	Replies    int          `json:"replies"`
-	Thread     string       `json:"thread"`
-	OwnerReply *OwnerReply  `json:"owner_reply,omitempty"`
-	Order      *ReviewOrder `json:"order,omitempty"`
+	// ShownGrade is the grade surfaces show (MessageReview.GradeShown): a
+	// lab assessment's letter while every dimension is measured, else empty
+	// with GradeNote "no grade (good not measured)" naming the
+	// UnmeasuredDimensions. Grade stays the stored record.
+	ShownGrade           string       `json:"shown_grade,omitempty"`
+	GradeNote            string       `json:"grade_note,omitempty"`
+	UnmeasuredDimensions []string     `json:"unmeasured_dimensions,omitempty"`
+	Replies              int          `json:"replies"`
+	Thread               string       `json:"thread"`
+	OwnerReply           *OwnerReply  `json:"owner_reply,omitempty"`
+	Order                *ReviewOrder `json:"order,omitempty"`
 }
 
 // ReviewAggregate is the community reviews' summary: counts first, then the
@@ -1247,14 +1265,9 @@ func scanReview(rows *sql.Rows) (ReviewCard, error) {
 	c.Subject = subjectRef(reviews.Subject{Type: typ, Key: key, ID: c.Subject.ID})
 	c.Current = current == 1
 	c.LabVerdict = reviews.LabVerdicts[c.Verdict]
-	for i, d := range reviews.Dimensions {
-		if dims[i] >= 0 {
-			if c.Dimensions == nil {
-				c.Dimensions = map[string]int{}
-			}
-			c.Dimensions[d] = dims[i]
-		}
-	}
+	c.Dimensions = dimensionsOf(dims)
+	g := c.GradeShown()
+	c.ShownGrade, c.GradeNote, c.UnmeasuredDimensions = g.Grade, g.Note, g.Unmeasured
 	if rubric != "" {
 		c.Rubric = &ReviewRubric{RubricRef: reviews.RubricRef{ID: rubric, Version: version, SHA256: sum}, URL: "/rubrics/" + rubric + "/" + version + ".json"}
 	}
@@ -1272,6 +1285,21 @@ func scanReview(rows *sql.Rows) (ReviewCard, error) {
 	c.Observations, c.Record, c.Source = st.Observations, st.Record, st.Source
 	c.Thread = "/e/" + c.Root
 	return c, nil
+}
+
+// dimensionsOf is the stored dimension columns (works, as_described, safe,
+// good; -1 for none) as a review's dimensions; nil when none.
+func dimensionsOf(dims [4]int) map[string]int {
+	var out map[string]int
+	for i, d := range reviews.Dimensions {
+		if dims[i] >= 0 {
+			if out == nil {
+				out = map[string]int{}
+			}
+			out[d] = dims[i]
+		}
+	}
+	return out
 }
 
 // reviewChunk bounds the ids one IN (...) list carries.
@@ -2162,7 +2190,7 @@ func reviewSummaries(ctx context.Context, q interface {
 		if err = rows.Err(); err != nil {
 			return err
 		}
-		rows, err = q.QueryContext(ctx, "SELECT r.subject,r.verdict,r.score,r.grade"+fmt.Sprintf(visible, marks)+"r.relationship='lab' AND "+cur+" AND "+labVerified+" ORDER BY r.created_at, r.event_id", args...)
+		rows, err = q.QueryContext(ctx, "SELECT r.subject,r.verdict,r.score,r.grade,r.works,r.as_described,r.safe,r.good"+fmt.Sprintf(visible, marks)+"r.relationship='lab' AND "+cur+" AND "+labVerified+" ORDER BY r.created_at, r.event_id", args...)
 		if err != nil {
 			return err
 		}
@@ -2170,7 +2198,8 @@ func reviewSummaries(ctx context.Context, q interface {
 		for rows.Next() {
 			var subject, verdict, grade string
 			var score int
-			if err = rows.Scan(&subject, &verdict, &score, &grade); err != nil {
+			var dims [4]int
+			if err = rows.Scan(&subject, &verdict, &score, &grade, &dims[0], &dims[1], &dims[2], &dims[3]); err != nil {
 				return err
 			}
 			sum, ok := out[subject]
@@ -2181,8 +2210,10 @@ func reviewSummaries(ctx context.Context, q interface {
 			if score >= 0 {
 				sum.Lab["score"] = score
 			}
-			if grade != "" {
-				sum.Lab["grade"] = grade
+			if g := reviews.ShowGrade(grade, dimensionsOf(dims)); g.Grade != "" {
+				sum.Lab["grade"] = g.Grade
+			} else if g.Note != "" {
+				sum.Lab["grade_note"], sum.Lab["unmeasured_dimensions"] = g.Note, g.Unmeasured
 			}
 			out[subject] = sum // the newest comes last
 		}

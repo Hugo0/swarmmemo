@@ -60,14 +60,16 @@ type reviewFacts struct {
 	Lab, Recomputed bool
 	Score           *int
 	Band            []int
-	Grade           string
-	Flags           []string
-	Dims            []dimFact
-	Evidence        []evidenceFact
-	Rubric          *board.ReviewRubric
-	Record          *evidenceFact
-	Source          *reviews.Source
-	Observations    int
+	// Grade is the grade shown (MessageReview.GradeShown); NoGrade stands in
+	// for it while a dimension is unmeasured.
+	Grade, NoGrade string
+	Flags          []string
+	Dims           []dimFact
+	Evidence       []evidenceFact
+	Rubric         *board.ReviewRubric
+	Record         *evidenceFact
+	Source         *reviews.Source
+	Observations   int
 	// VersionNote labels a review of an earlier version of an offering.
 	VersionNote string
 }
@@ -99,7 +101,7 @@ func reviewFactsOf(v any) *reviewFacts {
 		return nil
 	}
 	f := &reviewFacts{Verdict: m.Verdict, LabVerdict: m.LabVerdict, Relationship: m.Relationship, Raised: m.RelationshipRaised, Lab: m.Relationship == "lab",
-		Score: m.Score, Band: m.Band, Grade: m.Grade, Flags: m.Flags, Rubric: m.Rubric, Source: m.Source, Observations: len(m.Observations)}
+		Score: m.Score, Band: m.Band, Grade: m.GradeShown().Grade, NoGrade: m.GradeShown().Note, Flags: m.Flags, Rubric: m.Rubric, Source: m.Source, Observations: len(m.Observations)}
 	if m.EarlierVersion {
 		f.VersionNote = m.VersionNote
 	}

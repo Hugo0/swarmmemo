@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
@@ -179,5 +180,49 @@ func TestSubjectAggregateRatingCountsEvidenceOnly(t *testing.T) {
 	v.Aggregate.WithEvidence = map[string]int{}
 	if _, ok := subjectLD(v)["aggregateRating"]; ok {
 		t.Fatal("a rating without evidence-backed reviews")
+	}
+}
+
+// C752: a lab assessment whose good dimension is unmeasured shows no letter
+// on the badge, the subject page or its card, and the API card says why.
+func TestNoGradeWhileGoodUnmeasured(t *testing.T) {
+	score := 62
+	card := func(dims map[string]int) board.ReviewCard {
+		return board.ReviewCard{MessageReview: board.MessageReview{Verdict: "mixed", LabVerdict: "caution", Relationship: "lab", Score: &score, Band: []int{40, 80}, Grade: "F", Dimensions: dims}}
+	}
+	b := badgeFrom(map[string]any{"lab": card(map[string]int{"works": 71, "as_described": 67, "safe": 77})})
+	if strings.Contains(b.Value, "F") || !strings.HasPrefix(b.Value, "no grade · 62") || strings.Contains(b.Spoken, "grade F") || !strings.Contains(b.Spoken, "no grade (good not measured)") {
+		t.Fatalf("badge with good unmeasured: %+v", b)
+	}
+	if b := badgeFrom(map[string]any{"lab": card(map[string]int{"works": 71, "as_described": 67, "safe": 77, "good": 60})}); !strings.HasPrefix(b.Value, "F 62") {
+		t.Fatalf("badge with every dimension measured: %+v", b)
+	}
+
+	f := newReviewFixture(t, true)
+	lab := reviewKey(5)
+	f.exec(lab, board.Command{Operation: "agent.register"})
+	account := sha256.Sum256(lab.Public().(ed25519.PublicKey))
+	params, _ := json.Marshal(map[string]any{"schema": 1, "accounts": []string{hex.EncodeToString(account[:])}})
+	if _, err := f.store.SetAllowanceParams(context.Background(), board.LabsParamsNamespace, params, "test lab", 0); err != nil {
+		t.Fatal(err)
+	}
+	rb := reviews.LookupRubric("x402-endpoint", "")
+	uri := "x402:GET https://api.example.com/v1/nograde"
+	id := f.review(lab, uri, "Lab run.", map[string]any{"verdict": "mixed", "relationship": "lab", "rubric": map[string]any{"id": rb.ID, "version": rb.Version, "sha256": rb.SHA256},
+		"dimensions": map[string]int{"works": 71, "as_described": 67, "safe": 77}, "score": 62, "band": []int{40, 80}, "grade": "F"})
+	sub, _ := reviews.Resolve(uri, reviews.Options{})
+	for _, path := range []string{"/s/" + sub.ID, "/e/" + id} {
+		page := f.get(path).Body.String()
+		if !strings.Contains(page, "no grade (good not measured)") || strings.Contains(page, `class="review-score">F `) {
+			t.Fatalf("%s shows a letter while good is unmeasured: %s", path, page)
+		}
+	}
+	res, err := f.store.Execute(context.Background(), board.Command{Operation: "subject.get", Target: sub.ID}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := res.Data["lab_runs"].([]board.ReviewCard)
+	if len(runs) != 1 || runs[0].Grade != "F" || runs[0].ShownGrade != "" || runs[0].GradeNote != "no grade (good not measured)" || len(runs[0].UnmeasuredDimensions) != 1 {
+		t.Fatalf("API card: %+v", runs)
 	}
 }
