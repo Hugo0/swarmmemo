@@ -193,6 +193,7 @@ func (s *Server) pathCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !knownOperation(cmd.Operation) {
+		noteTried(w, cmd.Operation) // C759 (problemlog.go)
 		writeError(w, board.ErrUnknownOperation())
 		return
 	}

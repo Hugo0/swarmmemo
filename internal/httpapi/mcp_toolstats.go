@@ -148,7 +148,11 @@ func (s *Server) countMCPTools(profile string, registered map[string]bool) mcp.M
 					if be := mcpToolError(r, err); be != nil {
 						status = be.Status
 					}
-					logMCPProblem(ctx, name, code, status) // C757 (problemlog.go)
+					tried, served := "", true
+					if call.Params != nil {
+						tried, served = call.Params.Name, registered[call.Params.Name]
+					}
+					logMCPProblem(ctx, name, tried, code, status, served) // C757, C759 (problemlog.go)
 				}
 				s.countMCPTool(ctx, profile, name, code, dispatched)
 			}

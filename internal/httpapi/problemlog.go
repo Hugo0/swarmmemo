@@ -15,11 +15,16 @@ import (
 // ends in a problem (4xx/5xx) on POST /v1/command, a /call/ (or /c64/)
 // route or an MCP tool call writes one server-log line (journald):
 //
-//	command_problem op=OP code=CODE status=N via=command|call|mcp actor=HEX8|anon [suppressed=N]
+//	command_problem op=OP [tried=NAME] code=CODE status=N|unknown via=command|call|mcp actor=HEX8|anon [suppressed=N]
 //
 // Only names from fixed tables (the operation, the problem code), the
 // status and a short hash of the signer: never text, payloads, message
-// ids, IPs, tokens or headers. Per (op, code) at most one line per
+// ids, IPs, tokens or headers. C759: beside op=unknown (an operation
+// /v1/command does not have) or op=other (an MCP tool this server does not
+// serve), tried= is the name the caller sent when it is a short token
+// (problemTried), so the log shows which names agents guess. An MCP tool
+// we do not serve is status=404 code=unknown_tool; an MCP failure with no
+// status is status=unknown. Per (op, code, tried) at most one line per
 // problemLogEvery; the lines held back are counted into the next one.
 // Nothing reaches a response, a route or the database.
 
@@ -28,7 +33,7 @@ const (
 	problemLogKeys  = 1024 // bound on the limiter's table
 )
 
-type problemKey struct{ op, code string }
+type problemKey struct{ op, code, tried string }
 
 type problemSlot struct {
 	last       time.Time
@@ -89,6 +94,27 @@ func problemName(s string) string {
 	return s
 }
 
+// problemTried is an attempted operation or tool name kept for tried=:
+// ASCII-case-folded, then a token of ^[a-z0-9][a-z0-9._-]{0,47}$, else ""
+// (absent). Never text, ids, IPs or headers: none of them fits.
+func problemTried(s string) string {
+	if s == "" || len(s) > 48 {
+		return ""
+	}
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+			b[i] = c
+		}
+		alnum := c >= 'a' && c <= 'z' || c >= '0' && c <= '9'
+		if !alnum && (i == 0 || c != '.' && c != '_' && c != '-') {
+			return ""
+		}
+	}
+	return string(b)
+}
+
 // problemActor is the first 8 hex digits of sha256(id), or "anon".
 func problemActor(id string) string {
 	if id == "" {
@@ -99,25 +125,42 @@ func problemActor(id string) string {
 }
 
 // commandProblemLine is the log line (see the comment at the top).
-func commandProblemLine(op, code string, status int, via, actor string, suppressed int) string {
-	line := "command_problem op=" + problemName(op) + " code=" + problemName(code) + " status=" + strconv.Itoa(status) + " via=" + problemName(via) + " actor=" + actor
+// status 0 is "unknown"; tried is written only beside op=unknown or other.
+func commandProblemLine(op, tried, code string, status int, via, actor string, suppressed int) string {
+	op = problemName(op)
+	line := "command_problem op=" + op
+	if tried = problemTried(tried); tried != "" && (op == "unknown" || op == "other") {
+		line += " tried=" + tried
+	}
+	st := "unknown"
+	if status > 0 {
+		st = strconv.Itoa(status)
+	}
+	line += " code=" + problemName(code) + " status=" + st + " via=" + problemName(via) + " actor=" + actor
 	if suppressed > 0 {
 		line += " suppressed=" + strconv.Itoa(suppressed)
 	}
 	return line
 }
 
+// problemLogWrite writes one line (tests capture it).
+var problemLogWrite = func(line string) { slog.Info(line) }
+
 // logCommandProblem writes the line for one failed command, rate-limited.
-func logCommandProblem(op, code string, status int, via, actorID string) {
-	if status < 400 {
+// status is 4xx/5xx, or 0 when the failure carried none (MCP only).
+func logCommandProblem(op, tried, code string, status int, via, actorID string) {
+	if status != 0 && status < 400 {
 		return
 	}
 	op, code = problemName(op), problemName(code)
-	ok, suppressed := commandProblems.admit(problemKey{op, code}, time.Now())
+	if tried = problemTried(tried); op != "unknown" && op != "other" {
+		tried = ""
+	}
+	ok, suppressed := commandProblems.admit(problemKey{op, code, tried}, time.Now())
 	if !ok {
 		return
 	}
-	slog.Info(commandProblemLine(op, code, status, via, problemActor(actorID), suppressed))
+	problemLogWrite(commandProblemLine(op, tried, code, status, via, problemActor(actorID), suppressed))
 }
 
 // problemRecorder wraps the response of a /v1/command or /call/ request:
@@ -127,6 +170,7 @@ func logCommandProblem(op, code string, status int, via, actorID string) {
 type problemRecorder struct {
 	http.ResponseWriter
 	via, op, actor string
+	tried          string // the unknown operation sent (noteTried)
 	code           string
 	status         int
 }
@@ -145,7 +189,7 @@ func (p *problemRecorder) flush() {
 		if op == "" {
 			op = "unknown"
 		}
-		logCommandProblem(op, p.code, p.status, p.via, p.actor)
+		logCommandProblem(op, p.tried, p.code, p.status, p.via, p.actor)
 	}
 }
 
@@ -184,6 +228,14 @@ func noteCommand(w http.ResponseWriter, op, actor string) {
 	}
 }
 
+// noteTried keeps the operation name a request sent that no table has
+// (logged as tried= when it is a short token).
+func noteTried(w http.ResponseWriter, op string) {
+	if p := findProblemRecorder(w); p != nil {
+		p.tried = op
+	}
+}
+
 // withProblemLog runs h with a recorder that logs its problem, if any.
 func withProblemLog(w http.ResponseWriter, r *http.Request, via string, h func(http.ResponseWriter, *http.Request)) {
 	p := &problemRecorder{ResponseWriter: w, via: via}
@@ -192,9 +244,16 @@ func withProblemLog(w http.ResponseWriter, r *http.Request, via string, h func(h
 }
 
 // logMCPProblem is the MCP side: one failed tool call (countMCPTools).
-func logMCPProblem(ctx context.Context, tool, code string, status int) {
-	if status < 400 || status > 599 {
-		status = 500
+// tool is the counted name (board.MCPToolOther for one we do not serve),
+// tried the name the call sent. A tool we do not serve is 404
+// unknown_tool, not a server error; a failure with no status (or none in
+// 4xx/5xx) is status=unknown rather than a claimed 500.
+func logMCPProblem(ctx context.Context, tool, tried, code string, status int, served bool) {
+	if !served {
+		code, status = "unknown_tool", 404
 	}
-	logCommandProblem(tool, code, status, "mcp", resolvedHostedAccount(ctx))
+	if status < 400 || status > 599 {
+		status = 0
+	}
+	logCommandProblem(tool, tried, code, status, "mcp", resolvedHostedAccount(ctx))
 }

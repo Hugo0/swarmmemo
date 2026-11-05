@@ -871,6 +871,7 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !knownOperation(cmd.Operation) && cmd.PrivateRead == nil {
+		noteTried(w, cmd.Operation) // C759 (problemlog.go)
 		writeError(w, board.ErrUnknownOperation())
 		return
 	}
