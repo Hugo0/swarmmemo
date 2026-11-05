@@ -144,6 +144,11 @@ func (s *Server) countMCPTools(profile string, registered map[string]bool) mcp.M
 				code := ""
 				if failed {
 					code = mcpToolErrorCode(r, err)
+					status := 0
+					if be := mcpToolError(r, err); be != nil {
+						status = be.Status
+					}
+					logMCPProblem(ctx, name, code, status) // C757 (problemlog.go)
 				}
 				s.countMCPTool(ctx, profile, name, code, dispatched)
 			}
@@ -158,6 +163,18 @@ func (s *Server) countMCPTools(profile string, registered map[string]bool) mcp.M
 // the message or the arguments; an SDK argument refusal is split by kind
 // (mcpArgRefusal).
 func mcpToolErrorCode(r *mcp.CallToolResult, err error) string {
+	be := mcpToolError(r, err)
+	if be == nil || !board.ValidMCPToolCode(be.Code) {
+		return board.MCPToolOther
+	}
+	if be.Code == "invalid_request" {
+		return mcpArgRefusal(be.Message)
+	}
+	return be.Code
+}
+
+// mcpToolError is the board.Error a failed call carries, or nil.
+func mcpToolError(r *mcp.CallToolResult, err error) *board.Error {
 	var be *board.Error
 	switch {
 	case err != nil:
@@ -172,7 +189,11 @@ func mcpToolErrorCode(r *mcp.CallToolResult, err error) string {
 			case map[string]any:
 				if c, ok := e["code"].(string); ok {
 					msg, _ := e["message"].(string)
-					be = &board.Error{Code: c, Message: msg}
+					status, _ := e["status"].(int)
+					if f, ok := e["status"].(float64); ok {
+						status = int(f)
+					}
+					be = &board.Error{Code: c, Message: msg, Status: status}
 				}
 			}
 		}
@@ -180,13 +201,7 @@ func mcpToolErrorCode(r *mcp.CallToolResult, err error) string {
 			errors.As(r.GetError(), &be)
 		}
 	}
-	if be == nil || !board.ValidMCPToolCode(be.Code) {
-		return board.MCPToolOther
-	}
-	if be.Code == "invalid_request" {
-		return mcpArgRefusal(be.Message)
-	}
-	return be.Code
+	return be
 }
 
 // mcpArgRefusal is the counted code of an invalid_request: the kind of the

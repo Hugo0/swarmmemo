@@ -492,11 +492,11 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/c64/") {
-		s.pathCommand(w, r)
+		withProblemLog(w, r, "command", s.pathCommand) // C757 (problemlog.go)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
-		s.callRoute(w, r)
+		withProblemLog(w, r, "call", s.callRoute)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, DocRawPathPrefix) {
@@ -512,7 +512,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/v1/command" {
-		s.command(w, r)
+		withProblemLog(w, r, "command", s.command) // C757 (problemlog.go)
 		return
 	}
 	if r.URL.Path == a2aPath {
@@ -611,6 +611,9 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, c board.Command
 // executeWith is execute with run in place of the service's Execute: an
 // app's token (oauthapps.go) signs and retries the command itself.
 func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Command, run func(context.Context, board.Command) (board.Result, error)) {
+	if p := findProblemRecorder(w); p != nil && p.op == "" {
+		noteCommand(w, c.Operation, c.PublicKey) // C757: a known operation by now
+	}
 	if c.Operation == "gate.challenge" {
 		// The gate's origin binding, on every HTTP route (gate.go).
 		if err := s.bindGateChallenge(r, &c); err != nil {
@@ -870,6 +873,9 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	if !knownOperation(cmd.Operation) && cmd.PrivateRead == nil {
 		writeError(w, board.ErrUnknownOperation())
 		return
+	}
+	if knownOperation(cmd.Operation) {
+		noteCommand(w, cmd.Operation, cmd.PublicKey) // C757 (problemlog.go)
 	}
 	// An app's token (Sign in with SwarmMemo) signs the command as the
 	// person who signed in, within its scopes (oauthapps.go).
@@ -1952,6 +1958,7 @@ func writeErrorNext(w http.ResponseWriter, e error, next *board.Next) {
 	if status < 400 || status > 599 {
 		status = 500
 	}
+	noteProblem(w, be.Code, status) // C757 (problemlog.go)
 	body := map[string]any{"ok": false, "error": be}
 	if next != nil {
 		body["next"] = next

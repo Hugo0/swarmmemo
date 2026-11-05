@@ -196,6 +196,7 @@ func (s *Server) pathCommand(w http.ResponseWriter, r *http.Request) {
 		writeError(w, board.ErrUnknownOperation())
 		return
 	}
+	noteCommand(w, cmd.Operation, cmd.PublicKey) // C757 (problemlog.go)
 	via, err := s.commandVia(r, "c64")
 	if err != nil {
 		writeError(w, err)

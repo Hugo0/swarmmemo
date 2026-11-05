@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "42f38ca00dc82ce96b570931ca7f32afb317343811f5522b53b66ae0baf97415",
+  "allowlist_sha256": "b4b48683ce01da04e54f0f99a96967b16d0a58d30ae562f29139077309c4ead2",
   "files": [
     {
       "mode": "0644",
@@ -5218,8 +5218,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/encoding.go",
-      "sha256": "4c28a9dfae0d378dac93d524ea45aa92218b5fddb0bc01ce54b0bac66d2e1d06",
-      "size": 6093
+      "sha256": "97a7076e4d14c7e6226cd4f1ef5e0b57914bbb1ffc013bbc791f20ae96da8a21",
+      "size": 6163
     },
     {
       "mode": "0644",
@@ -5920,8 +5920,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_toolstats.go",
-      "sha256": "b20e5aa23c9d8a371e1535439152131e08812a9855ba35418770a7b70b60dbf0",
-      "size": 13445
+      "sha256": "acfa3ebee81e740d859d620625bee433d4eae32a2a73d78ebba98c48fb857a0e",
+      "size": 13911
     },
     {
       "mode": "0644",
@@ -6174,6 +6174,18 @@
       "path": "internal/httpapi/private_read_test.go",
       "sha256": "8cbf5c0720c236a462cf835340a3746f21dbfd357767851468a12c39531cb646",
       "size": 5524
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/problemlog.go",
+      "sha256": "f1755faca121cce8933dd0a534cd7afbd1cf9f74c977cb07862f345a84a6bd50",
+      "size": 5669
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/problemlog_test.go",
+      "sha256": "f20af08bbc29fad883a2313814356ee7634b25da4a717b85631c1d65006f5ac7",
+      "size": 2786
     },
     {
       "mode": "0644",
@@ -6472,8 +6484,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "15107d967d087105f31f48df2e351083ec9b25dfe41fe7f671fc8ca6e8f923e3",
-      "size": 71191
+      "sha256": "9c5e8f2ce4251596b9d091c6dad992da69076ccbefe4bb1e535b653744c1f8e6",
+      "size": 71622
     },
     {
       "mode": "0644",
@@ -6484,8 +6496,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/services.go",
-      "sha256": "07b2c19d07d9d318149893d997f54aef28a4c306afc21a73cf4009a220d3c66a",
-      "size": 31137
+      "sha256": "bba7fb06618c9749449a3d66a794aeb99379ad89cce950c7ccbd0003c7c4e55c",
+      "size": 31220
     },
     {
       "mode": "0644",

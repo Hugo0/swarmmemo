@@ -157,6 +157,7 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 		s.writeCallError(w, board.ServiceRefusal(services.UnknownTarget(s.staticCatalog(), id, name)))
 		return
 	}
+	noteCommand(w, e.ID+"."+m.Name, "") // C757: catalogue names only (problemlog.go)
 	fields := r.URL.Query()
 	if r.Body != nil && (r.ContentLength != 0 || len(r.TransferEncoding) > 0) {
 		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
