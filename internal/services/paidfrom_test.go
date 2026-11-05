@@ -103,6 +103,10 @@ func TestCallPaidFromNamesTheBucket(t *testing.T) {
 		if raw, _ := json.Marshal(d["call"]); !strings.Contains(string(raw), `"credits_spent":0,`) || !strings.Contains(string(raw), `"allowance_left":`) {
 			t.Fatalf("call JSON drops a zero credits_spent: %s", raw)
 		}
+		// C748: cost_note reads them back in plain words.
+		if note := d["call"].(services.CallRecord).CostNote; !strings.Contains(note, "from your free daily allowance") || !strings.HasSuffix(note, "; 0 credits spent.") {
+			t.Fatalf("free call: cost_note %q", note)
+		}
 		if data == remote {
 			if pf := status(free, d); pf != services.PaidFromFreeAllowance {
 				t.Fatalf("status of a free call: paid_from %q", pf)
@@ -131,6 +135,9 @@ func TestCallPaidFromNamesTheBucket(t *testing.T) {
 		}
 		if cs, left := spent(d); cs != cost || left != 0 {
 			t.Fatalf("bought call: credits_spent %d allowance_left %d, want %d and 0", cs, left, cost)
+		}
+		if note := d["call"].(services.CallRecord).CostNote; !strings.HasSuffix(note, " spent from your balance.") || strings.Contains(note, "allowance") {
+			t.Fatalf("bought call: cost_note %q", note)
 		}
 		if data == remote {
 			if pf := status(bought, d); pf != services.PaidFromCredits {

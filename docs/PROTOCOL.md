@@ -6693,7 +6693,8 @@ new service adds no operation and no signed format:
   all (the tools are free within the daily limit), `credits` when granted, earned or bought
   credit paid part of it. With it, `credits_spent` is how much of the cost credit paid (0 when
   the free allowance covered it) and `allowance_left` is the free daily allowance you have
-  left in that resource.
+  left in that resource. `cost_note` reads them as one plain sentence: what the call
+  used, from your free daily allowance or your balance, and how many credits it spent.
 - `service.read` (signature optional per method, not a write): `target` and `data`
   `{"schema":1,"method":METHOD,"args":{...}}`. A remote or async call you made is read back
   with method `status`, args `{"call":CALL_ID}`.

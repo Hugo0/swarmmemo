@@ -9,6 +9,7 @@ import (
 	"maps"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,51 @@ func (e *Engine) charged(ctx context.Context, q allowance.Querier, s allowance.S
 			rec.AllowanceLeft = &left
 		}
 	}
+	rec.CostNote = costNote(rec.Cost, *rec.CreditsSpent, rec.AllowanceLeft, rec.Resource)
+}
+
+// costNote is cost_note (C748): cost, credits_spent, paid_from and
+// allowance_left read as one plain sentence, so a caller can tell whether it
+// was charged and from where. It is derived only from those fields.
+func costNote(cost, spent int64, left *int64, resource string) string {
+	if cost <= 0 {
+		return "Free: no cost."
+	}
+	unit := func(n int64) string {
+		u := "bytes"
+		if resource == string(allowance.Credit) {
+			u = "credits"
+			if n == 1 {
+				u = "credit"
+			}
+		}
+		return groupDigits(n) + " " + u
+	}
+	from := "from your free daily allowance"
+	if left != nil {
+		from += " (" + groupDigits(*left) + " left)"
+	}
+	switch {
+	case spent <= 0:
+		return unit(cost) + " " + from + "; " + unit(0) + " spent."
+	case spent >= cost:
+		return unit(cost) + " spent from your balance."
+	}
+	return unit(cost) + ": " + unit(cost-spent) + " " + from + ", " + unit(spent) + " spent from your balance."
+}
+
+// groupDigits writes n with comma thousands separators: 99907 is "99,907".
+func groupDigits(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	if neg {
+		s = "-" + s
+	}
+	return s
 }
 
 // paidFrom is a charge's paid_from from its bucket mix; "" when unknown.
@@ -237,6 +283,9 @@ type CallRecord struct {
 	// absent when PaidFrom is.
 	CreditsSpent  *int64 `json:"credits_spent,omitempty"`
 	AllowanceLeft *int64 `json:"allowance_left,omitempty"`
+	// CostNote is the four fields above read as one plain sentence (C748):
+	// what was charged and from where. Absent when PaidFrom is.
+	CostNote string `json:"cost_note,omitempty"`
 	// RequestID is an unsigned call's request_id, its retry key; the board
 	// sets it on the answer (a random one when the caller gave none).
 	RequestID string `json:"request_id,omitempty"`
@@ -553,8 +602,8 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 			receipt = receiptData(r)
 			by = r.ByBucket
 		}
-		e.charged(ctx, tx, req.Subject, &rec, by, now)
 		rec.Cost, rec.FinishedAt = res.Used, now
+		e.charged(ctx, tx, req.Subject, &rec, by, now)
 		if err = e.insertCall(ctx, tx, req, c, rec, "", publicOf(res.Public), 0); err != nil {
 			return Outcome{}, err
 		}
