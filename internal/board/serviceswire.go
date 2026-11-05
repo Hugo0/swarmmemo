@@ -712,7 +712,11 @@ func serviceErrorWords(err error) error {
 		return fetchUnsupportedType(e.Details)
 	}
 	if e.Code == "price_exceeds_max" && e.Details != nil {
-		return &Error{Status: 409, Code: e.Code, Message: "The call costs up to details.quote, above your max_cost, and nothing was spent. Retry with max_cost of at least details.quote; max_cost 0 asks the price of any call this way.", Details: e.Details}
+		msg := "The call costs up to details.quote, above your max_cost, and nothing was spent. Retry with max_cost of at least details.quote; max_cost 0 asks the price of any call this way."
+		if d, ok := e.Details.(map[string]int64); ok && d["quote_screening"] > 0 {
+			msg += ` details.quote_screening of it is screening; "screen": false (or &screen=false on /call) turns screening off.`
+		}
+		return &Error{Status: 409, Code: e.Code, Message: msg, Details: e.Details}
 	}
 	if e.Code == "doc_conflict" {
 		return &Error{Status: 409, Code: "doc_conflict", Message: "Someone wrote this doc since your base_version. details.current is the doc as it stands: read it with docs.read, merge, and write again with its version as base_version. Nothing was stored or charged.", Details: e.Details}

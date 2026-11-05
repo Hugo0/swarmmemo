@@ -593,11 +593,11 @@ func TestFetchQuoteBeforeTheCall(t *testing.T) {
 	s := newSite(t, false, nil)
 	r := newFetchRig(t, s, fetchOpts{})
 	for _, tc := range []struct {
-		args map[string]any
-		want int64
+		args       map[string]any
+		want, scrn int64
 	}{
-		{map[string]any{"url": "http://site.test/q", "max_bytes": 4096}, services.FetchPrice.For(4096) + services.ScreenSurchargeMax(4096)},
-		{map[string]any{"url": "http://site.test/q", "max_bytes": 4096, "screen": false}, services.FetchPrice.For(4096)},
+		{map[string]any{"url": "http://site.test/q", "max_bytes": 4096}, services.FetchPrice.For(4096) + services.ScreenSurchargeMax(4096), services.ScreenSurchargeMax(4096)},
+		{map[string]any{"url": "http://site.test/q", "max_bytes": 4096, "screen": false}, services.FetchPrice.For(4096), 0},
 	} {
 		_, err := r.fetchMax("alice", tc.args, 0)
 		var e *allowance.Err
@@ -607,6 +607,11 @@ func TestFetchQuoteBeforeTheCall(t *testing.T) {
 		d, _ := e.Details.(map[string]int64)
 		if d["quote"] != tc.want || d["max_cost"] != 0 {
 			t.Fatalf("the refusal's quote: %#v, want %d", e.Details, tc.want)
+		}
+		// C746: the split in flat keys; screening is 0, not absent, off.
+		scrn, ok := d["quote_screening"]
+		if !ok || scrn != tc.scrn || d["quote_fetch"] != services.FetchPrice.For(4096) || d["quote_fetch"]+scrn != d["quote"] {
+			t.Fatalf("the refusal's split: %#v, want screening %d", e.Details, tc.scrn)
 		}
 	}
 	if s.hit("/q") != 0 {

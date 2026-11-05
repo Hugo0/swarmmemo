@@ -494,7 +494,11 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 	// is spent, so a price change never surprises an agent. The refusal
 	// carries the quote: max_cost 0 asks a call's price for free (C676).
 	if quote.Max > d.MaxCost {
-		return Outcome{}, &allowance.Err{Code: "price_exceeds_max", Details: map[string]int64{"quote": quote.Max, "max_cost": d.MaxCost}}
+		details := map[string]int64{"quote": quote.Max, "max_cost": d.MaxCost}
+		for name, part := range quote.Split {
+			details["quote_"+name] = part
+		}
+		return Outcome{}, &allowance.Err{Code: "price_exceeds_max", Details: details}
 	}
 	c.Quoted = quote.Max
 	if admitter, ok := p.(Admitter); ok {

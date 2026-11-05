@@ -303,3 +303,30 @@ func TestBuiltinsListedAndKnown(t *testing.T) {
 		t.Fatal("a provider's own tables must join Schema")
 	}
 }
+
+// splitProbe quotes in two named parts.
+type splitProbe struct{ probe }
+
+func (splitProbe) Quote(c services.Call) (services.Quote, error) {
+	return services.Quote{Resource: allowance.Credit, Max: 3, Split: map[string]int64{"work": 1, "screening": 2}}, nil
+}
+
+// TestQuoteSplitInRefusal: a quote with a Split carries each part as a flat
+// quote_<name> detail beside quote and max_cost (C746).
+func TestQuoteSplitInRefusal(t *testing.T) {
+	db := openDB(t)
+	reg := services.NewRegistry([]string{"probe"})
+	reg.Register(splitProbe{})
+	e := services.NewEngine(services.Config{DB: db, Registry: reg, Meter: servicestest.NewMeter(100), Now: func() int64 { return 1000 }})
+	tx, _ := db.Begin()
+	defer tx.Rollback()
+	_, err := e.Call(context.Background(), tx, services.Request{Service: "probe", Data: `{"schema":1,"method":"ping","max_cost":0}`, Subject: allowance.Subject{ID: "acct", KeyID: "k", Signed: true}, RequestKey: "id:1"}, 1000)
+	var ae *allowance.Err
+	if !errors.As(err, &ae) || ae.Code != "price_exceeds_max" {
+		t.Fatalf("max_cost 0: %v", err)
+	}
+	d, _ := ae.Details.(map[string]int64)
+	if len(d) != 4 || d["quote"] != 3 || d["max_cost"] != 0 || d["quote_work"] != 1 || d["quote_screening"] != 2 {
+		t.Fatalf("details: %#v", ae.Details)
+	}
+}

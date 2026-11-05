@@ -180,6 +180,9 @@ type Call struct {
 type Quote struct {
 	Resource allowance.Resource
 	Max      int64 // the most this call can cost
+	// Split names the parts of Max (fetch.page: fetch and screening); nil
+	// for none. A price_exceeds_max refusal carries each as quote_<name>.
+	Split map[string]int64
 }
 
 type Result struct {

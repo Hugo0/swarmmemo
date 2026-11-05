@@ -293,6 +293,15 @@ func TestPriceExceedsMaxSpendsNothing(t *testing.T) {
 	if d, _ := pe.Details.(map[string]int64); d["quote"] != 258 || d["max_cost"] != 0 {
 		t.Fatalf("price_exceeds_max details: %#v", pe.Details)
 	}
+	if strings.Contains(pe.Message, "screening") {
+		t.Fatalf("an unscreened quote names no screening: %s", pe.Message)
+	}
+	// C746: a quote with a screening part says how to switch it off.
+	var se *Error
+	if !errors.As(serviceError(&allowance.Err{Code: "price_exceeds_max", Details: map[string]int64{"quote": 763, "max_cost": 0, "quote_fetch": 13, "quote_screening": 750}}), &se) ||
+		!strings.Contains(se.Message, `details.quote_screening of it is screening; "screen": false (or &screen=false on /call) turns screening off.`) {
+		t.Fatalf("screening hint: %+v", se)
+	}
 	cat := run(t, s, Command{Operation: "services.list"})
 	if svcField(t, cat.Data, "prices_version") != float64(0) {
 		t.Fatalf("catalogue: %+v", cat.Data)

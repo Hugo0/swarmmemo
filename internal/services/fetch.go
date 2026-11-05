@@ -531,11 +531,13 @@ func (f *fetch) Quote(c Call) (Quote, error) {
 	if p.keep && f.blobs == nil {
 		return Quote{}, refusal("fetch_keep_unavailable")
 	}
-	max := c.Price.For(int64(p.maxBytes))
+	fetchMax, screenMax := c.Price.For(int64(p.maxBytes)), int64(0)
 	if f.wants(p) {
-		max += ScreenSurchargeMax(p.maxBytes)
+		screenMax = ScreenSurchargeMax(p.maxBytes)
 	}
-	return Quote{Resource: allowance.Credit, Max: max}, nil
+	// The same two parts the answer's max_cost_split reports; screening is
+	// 0 (not absent) when the call does not screen.
+	return Quote{Resource: allowance.Credit, Max: fetchMax + screenMax, Split: map[string]int64{"fetch": fetchMax, "screening": screenMax}}, nil
 }
 
 // Admit refuses, before anything is reserved, a host the operator denied
