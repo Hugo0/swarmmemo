@@ -257,6 +257,14 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	// Not on /call/: a call without a key spends the caller's network's
 	// credit, so no other site may read its answer (execute also drops it
 	// from every unsigned service.call answer).
+	if clean, ok := mcpPathWithStrayPunct(r.URL.Path); ok {
+		// Copying the URL out of a sentence ("add …/mcp/assistant: no sign-in…")
+		// can carry the punctuation along; 308 keeps the method and body.
+		u := *r.URL
+		u.Path, u.RawPath = clean, ""
+		http.Redirect(w, r, u.RequestURI(), http.StatusPermanentRedirect)
+		return
+	}
 	_, _, isMCP := mcpPath(r.URL.Path)
 	if !isMCP && !strings.HasPrefix(r.URL.Path, "/admin/") && !strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")

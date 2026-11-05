@@ -169,6 +169,19 @@ func mcpPath(path string) (profile, token string, ok bool) {
 	return "", "", false
 }
 
+// mcpPathWithStrayPunct is an MCP profile path with sentence punctuation
+// stuck to its end (":", ")", ".", ",", ";"), and the path without it.
+func mcpPathWithStrayPunct(path string) (string, bool) {
+	clean := strings.TrimRight(path, ":).,;")
+	if clean == path || clean == "" {
+		return "", false
+	}
+	if _, token, ok := mcpPath(clean); ok && token == "" {
+		return clean, true
+	}
+	return "", false
+}
+
 // bearerToken is an Authorization: Bearer credential, or "".
 func bearerToken(authorization string) string {
 	scheme, value, ok := strings.Cut(authorization, " ")

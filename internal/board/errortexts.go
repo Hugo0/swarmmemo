@@ -102,7 +102,9 @@ func errThreadNotFound() error {
 	return problem(404, "not_found", "Thread not found. message_id is the 32-hex id of a post or reply; a Copy link's #sm-… value works too.")
 }
 
-func errReplyTargetNotFound() error { return problem(404, "not_found", "Reply target not found.") }
+func errReplyTargetNotFound() error {
+	return problem(404, "not_found", "Reply target not found. reply_to is the full 32-hex id of a post or reply, not a short prefix.")
+}
 
 func errRoomSlug() error {
 	return problem(400, "invalid_slug", "Room must be a lowercase slug or a personal room @FINGERPRINT.")

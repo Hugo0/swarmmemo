@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "a6ac2957da1e3314a3bc1068bafbf0fcfda7b8d6e6ea6902229b36d811edf777",
+  "allowlist_sha256": "42f38ca00dc82ce96b570931ca7f32afb317343811f5522b53b66ae0baf97415",
   "files": [
     {
       "mode": "0644",
@@ -1882,8 +1882,8 @@
     {
       "mode": "0644",
       "path": "internal/board/errortexts.go",
-      "sha256": "ef64ca5194214987ab4043fc81e870e01ae9ee394c21b77fd5849149b79467d9",
-      "size": 9922
+      "sha256": "c891c5f9591ec02737fb2d08c440d9ce97074944070ef05c58784bf718b39cde",
+      "size": 9994
     },
     {
       "mode": "0644",
@@ -5698,8 +5698,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_conversations.go",
-      "sha256": "f06aedb66b57b7a082bcb7b7af0e831e57a66abbec3c8fdc6eed4c1239191db4",
-      "size": 63447
+      "sha256": "d95e2c5127ac8c7437a666f9693fd4341a03b48413c06b80c2e9d3b56c279939",
+      "size": 63851
     },
     {
       "mode": "0644",
@@ -5886,6 +5886,12 @@
       "path": "internal/httpapi/mcp_stdio.go",
       "sha256": "c2132a956eac9a2e013b9b5aa3189928d5c2916d589ba5e04883cb417cd0e15b",
       "size": 2066
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/mcp_stray_punct_test.go",
+      "sha256": "bd12782e663dd5d5e9cdb1c6b85cc24e6dc1bc648de4988b68ee67794069751d",
+      "size": 1542
     },
     {
       "mode": "0644",
@@ -6466,8 +6472,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "fe37c9a4192ffada24853e361d5db3101b1e94a83ba623b17abeab2f14b3df7f",
-      "size": 70859
+      "sha256": "15107d967d087105f31f48df2e351083ec9b25dfe41fe7f671fc8ca6e8f923e3",
+      "size": 71191
     },
     {
       "mode": "0644",
