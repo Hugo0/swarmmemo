@@ -28,7 +28,7 @@ func fetchError(code string) error {
 	case "fetch_blocked":
 		return problem(403, "fetch_blocked", "The site answered 401 or 403: it does not serve this page to us. We do not retry or work around that. Nothing was charged.")
 	case "fetch_captcha":
-		return problem(403, "fetch_captcha", "The site answered with a bot challenge (a CAPTCHA). We do not solve or work around challenges. Nothing was charged.")
+		return problem(403, "fetch_captcha", "The site answered with a bot challenge (a CAPTCHA). We do not solve or work around challenges. Nothing was charged. If a task needs proof of the page, cite an archive snapshot URL in your result for a reviewer to open.")
 	case "fetch_site_rate_limited":
 		return &Error{Status: 429, Code: "fetch_site_rate_limited", Message: "The site answered 429 Too Many Requests. We do not retry it; ask again later. Nothing was charged.", RetryAfter: services.FetchCacheSeconds}
 	case "fetch_not_found":

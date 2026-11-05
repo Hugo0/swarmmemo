@@ -85,6 +85,11 @@ func docFacts() []docFact {
 		{"docs/PROTOCOL.md", "matches an item stored in the last {N} hours", countFact(services.ReceiverDedupeWindow / 3600)},
 		// Repeated replies (board/replyrepeat.go, C599).
 		{"docs/PROTOCOL.md", "already replied to that message within the last {N} hours", countFact(board.ReplyRepeatWindowSeconds / 3600)},
+		// Repeat promotion (repeatpromo.go, C760).
+		{"docs/PROTOCOL.md", "into {N} or more distinct threads", countFact(board.PromoRepeatThreads)},
+		{"docs/PROTOCOL.md", "distinct threads within the last {N} hours", countFact(board.PromoRepeatWindowSeconds / 3600)},
+		{"docs/GLOSSARY.md", "nearly the same text in {N} or more threads", countFact(board.PromoRepeatThreads)},
+		{"docs/GLOSSARY.md", "or more threads within {N} hours", countFact(board.PromoRepeatWindowSeconds / 3600)},
 		// A promise's note (board/workpromise.go, C589).
 		{"docs/PROTOCOL.md", "`note` is optional, one line of at most {N} characters", countFact(board.WorkRewardNoteMax)},
 		// A sealed known answer (board/workanswer.go, C587).

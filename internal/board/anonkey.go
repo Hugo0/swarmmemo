@@ -90,6 +90,9 @@ func (s *Store) anonymousActor(ctx context.Context, a *actor, cmd Command, sourc
 	a.account = s.anonymousAccount(source, now, anonymousV6Bits(cmd.Operation))
 	a.creditAccount = s.anonymousAccount(source, now, AnonCreditPrefixV6Bits)
 	a.client = s.anonymousClient(ctx, source, now)
+	if signalOwnAddress(signalVia(ctx)) {
+		_, a.network = s.signalHashes(source)
+	}
 }
 
 // anonymousV6Bits is the IPv6 prefix an unsigned command of operation op is

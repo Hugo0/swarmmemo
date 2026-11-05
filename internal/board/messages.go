@@ -238,6 +238,13 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		if err = checkRepeatReply(ctx, tx, c.Room, c.ReplyTo, a, c.Text, now); err != nil {
 			return Result{}, err
 		}
+		// C760: one network's near-duplicate anonymous replies across
+		// threads (repeatpromo.go), also before any charge.
+		if !isConversation {
+			if err = s.checkRepeatPromotion(ctx, tx, a, c.Text, now); err != nil {
+				return Result{}, err
+			}
+		}
 	}
 	origin := ""
 	if data.Supersedes != "" {

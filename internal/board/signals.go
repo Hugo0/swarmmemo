@@ -784,3 +784,39 @@ func (s *Store) networkPeers(ctx context.Context, tx workQuerier, a string, from
 	}
 	return peers, nil
 }
+
+// networkReply is one anonymous public reply a network's write signal names
+// (repeatpromo.go): its place in its thread, text and write time.
+type networkReply struct {
+	ref  threadReference
+	text string
+	at   int64
+}
+
+// networkAnonymousReplies is up to limit of the unsigned replies in public
+// rooms written from network hash net (under the current signals key, from
+// the writer's own address) since from, newest first. It reads inside tx
+// (never the pool), through write_signals_net; the hash never leaves here.
+func (s *Store) networkAnonymousReplies(ctx context.Context, tx *sql.Tx, net string, from int64, limit int) ([]networkReply, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT w.via,e.id,e.room,e.reply_to,e.text,e.seq,w.created_at FROM write_signals w
+JOIN events e ON e.id=w.object_id JOIN rooms r ON r.name=e.room
+WHERE w.ip_hash_24=? AND w.hash_key=? AND w.created_at>? AND w.operation='post' AND w.signer=''
+ AND e.reply_to<>'' AND e.public_key='' AND r.visibility='public'
+ORDER BY w.created_at DESC LIMIT ?`, net, s.signals.id, from, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []networkReply
+	for rows.Next() {
+		var via string
+		var r networkReply
+		if err = rows.Scan(&via, &r.ref.id, &r.ref.room, &r.ref.parent, &r.text, &r.ref.seq, &r.at); err != nil {
+			return nil, err
+		}
+		if signalOwnAddress(via) {
+			out = append(out, r)
+		}
+	}
+	return out, rows.Err()
+}

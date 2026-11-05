@@ -18,7 +18,7 @@ var WaitCodes = []string{
 	"anonymous_post_rate", "bond_cooling", "challenge_rate", "duplicate_reply", "feedback_rate",
 	"fetch_caller_limit", "fetch_host_busy", "fetch_host_limit", "global_quota_exhausted", "hold_limit",
 	"hosted_issuance_limit", "key_backup_rate_limited", "notary_limit", "offering_publish_limit", "paste_limit",
-	"quota_exhausted", "receiver_quota_exhausted", "recipient_limit", "request_limit", "request_rate",
+	"quota_exhausted", "receiver_quota_exhausted", "recipient_limit", "repeat_promotion", "request_limit", "request_rate",
 	"review_daily_limit", "seat_limit", "seats_full", "spend_limit", "top_level_daily_limit",
 	"topup_board_daily_limit", "topup_daily_limit", "verification_limit", "witness_limit", "x402_cap_reached",
 	"x402_listing_limit", "x402_response_too_large",

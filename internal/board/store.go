@@ -881,6 +881,7 @@ type actor struct {
 	operation              string // the command's operation, for the ledger's journal
 	client                 string // anonymous only: Subject.Client (RFC0012 §6.2)
 	creditAccount          string // anonymous only: the pseudonym of its credit share (the IPv6 /48)
+	network                string // anonymous only, from its own address: the write signals' keyed hash of its /24 or /48 (repeatpromo.go)
 	canonical              []byte
 	requestNamespace       string
 	grant                  *delegationRow
