@@ -65,6 +65,16 @@ func TestCallRouteWithoutAKey(t *testing.T) {
 	if code != 200 || dig(body, "data", "call", "state") != "done" || dig(body, "data", "call", "cost") != float64(1) || dig(body, "data", "result", "receipt", "hash") == nil {
 		t.Fatalf("GET call: %d %s", code, raw)
 	}
+	// C750: the result echoes the length of the text stamped, so a GET text
+	// cut short at an unencoded & shows it.
+	if dig(body, "data", "result", "bytes") != float64(len("plan & notes")) {
+		t.Fatalf("GET call result.bytes: %s", raw)
+	}
+	// The tool description says where the hash and the proof are: the
+	// notary's own line, not a copy.
+	if d := mcpToolDescription(t, s, "notary_stamp"); !strings.Contains(d, services.NotaryStampAnswer) {
+		t.Fatalf("notary_stamp description: %s", d)
+	}
 	// The same URL again (a prefetch, a retry) is the same call, not a new charge.
 	_, again, _ := get(stamp)
 	if dig(again, "data", "call", "id") != dig(body, "data", "call", "id") {

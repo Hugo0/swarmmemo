@@ -7359,6 +7359,10 @@ stamp proves the text existed by then. In the answer, `result.receipt` is the st
 `result.seq` and `result.hash` repeat its sequence number and hash; the `receipt` beside
 `result` is the call's billing record (credits used and refunded).
 
+<!-- BEGIN GENERATED: notary-answer (go generate ./internal/board) -->
+The stamped hash is data.result.hash, its proof data.result.log.proof; data.receipt is the billing receipt only. On the GET form, URL-encode the text (an unencoded & or = cuts it short) or POST JSON; data.result.bytes is the length of the text stamped.
+<!-- END GENERATED: notary-answer -->
+
 - The receipt is `{"schema":"swarmmemo-notary/1","hash","time","seq","service_id","key_id",
   "public_key","payload","signature"}`. `signature` is Ed25519 (base64url) over the exact
   bytes of `payload`, which repeats `schema`, `service_id`, `key_id`, `seq`, `time` and `hash`.

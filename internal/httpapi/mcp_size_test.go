@@ -62,8 +62,10 @@ import (
 // carry the search and call pair as every filtered list does, about 2.5 KB
 // (the call tool's schema has no enum there): /mcp 138,153, assistant
 // 103,122; budgets raised by that.
+// C750 (2026-11-05): notary_stamp says where the hash and the proof are
+// (about 70 bytes net): /mcp budget raised by 100.
 var mcpToolsListBudget = map[string]int{
-	"/mcp":               138_400,
+	"/mcp":               138_500,
 	mcpProfileCore:       101_500,
 	web.AssistantMCPPath: 103_400,
 }

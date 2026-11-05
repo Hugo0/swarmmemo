@@ -115,6 +115,11 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 	if get(out, "result", "duplicate") != false || get(out, "result", "first_stamped_at") != nil {
 		t.Fatalf("a new stamp names a first stamp: %+v", out)
 	}
+	// C750: the result says how many bytes of text were stamped, so a text
+	// cut short by an unencoded & on the GET form shows; a hash has none.
+	if get(out, "result", "bytes") != float64(len(text)) || get(again, "result", "bytes") != nil {
+		t.Fatalf("result.bytes: text %+v, hash %+v", get(out, "result", "bytes"), get(again, "result", "bytes"))
+	}
 	sum := sha256.Sum256([]byte(text))
 	textRec := receiptOf(t, get(out, "result", "receipt"))
 	if textRec.Hash != hex.EncodeToString(sum[:]) || textRec.Seq != 2 || !services.VerifyNotaryReceipt(public, textRec) {

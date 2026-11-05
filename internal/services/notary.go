@@ -34,6 +34,16 @@ const (
 
 var notaryHashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// NotaryStampAnswer says where a stamp's answer keeps what callers look
+// for (C750): one line, in the stamp method's Line (the MCP tool
+// description and the catalogue) and in the protocol's notary section.
+const NotaryStampAnswer = "The stamped hash is data.result.hash, its proof data.result.log.proof; data.receipt is the billing receipt only."
+
+// NotaryStampGET warns about the GET form, where the text rides in the URL:
+// result.bytes is the length of the text that was stamped. It stays out of
+// the MCP description (MCP never uses the GET form), which has a size budget.
+const NotaryStampGET = "On the GET form, URL-encode the text (an unencoded & or = cuts it short) or POST JSON; data.result.bytes is the length of the text stamped."
+
 // notaryHashRule is the refusal text for a hash argument notaryHashRE refuses.
 const notaryHashRule = "hash must be a SHA-256: 64 lowercase hex digits."
 
@@ -85,7 +95,7 @@ func (*notary) Describe() Descriptor {
 		Mode: Local,
 		Methods: []Method{
 			{Name: "stamp", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: notaryArgsMax, Price: Price{Base: 1},
-				Line:      "Get a signed receipt (result.receipt; the outer receipt is billing) for a hash or text; a repeat returns the first.",
+				Line:      "Get a signed receipt for a hash or text; a repeat returns the first. " + NotaryStampAnswer,
 				Args:      []Arg{{"hash", "string", false, "a lowercase SHA-256 hex digest"}, {"text", "string", false, "or up to " + SizeText(NotaryTextBytes) + " of text, hashed and never stored"}},
 				Example:   json.RawMessage(`{"text":"Plan for YYYY-MM-DD by YOUR_NAME: ship the catalogue."}`),
 				Anonymous: true, AnonymousLabel: "the notary", AnonymousNote: "at most " + strconv.Itoa(NotaryPerAnonymousDay) + " new receipts a day per network",
@@ -108,23 +118,30 @@ type notaryStampArgs struct {
 // parseStamp returns the hash a stamp asks for: the given lowercase hex
 // SHA-256, or the SHA-256 of the text's exact UTF-8 bytes. Exactly one.
 func parseStamp(raw json.RawMessage) (string, error) {
+	hash, _, err := parseStampText(raw)
+	return hash, err
+}
+
+// parseStampText is parseStamp with the length of the text hashed, or -1
+// for a hash argument.
+func parseStampText(raw json.RawMessage) (string, int, error) {
 	var a notaryStampArgs
 	if err := StrictObject(raw, &a); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	switch {
 	case a.Text != nil && a.Hash == "":
 		if len(*a.Text) > NotaryTextBytes {
-			return "", tooLarge("invalid_service_data", len(*a.Text), NotaryTextBytes)
+			return "", 0, tooLarge("invalid_service_data", len(*a.Text), NotaryTextBytes)
 		}
 		sum := sha256.Sum256([]byte(*a.Text))
-		return hex.EncodeToString(sum[:]), nil
+		return hex.EncodeToString(sum[:]), len(*a.Text), nil
 	case a.Text == nil && notaryHashRE.MatchString(a.Hash):
-		return a.Hash, nil
+		return a.Hash, -1, nil
 	case a.Text == nil && a.Hash != "":
-		return "", badArg(notaryHashRule)
+		return "", 0, badArg(notaryHashRule)
 	}
-	return "", badArg("Give exactly one of hash (a SHA-256: 64 lowercase hex digits) or text.")
+	return "", 0, badArg("Give exactly one of hash (a SHA-256: 64 lowercase hex digits) or text.")
 }
 
 func (n *notary) Quote(c Call) (Quote, error) {
@@ -267,7 +284,7 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	if c.Method != "stamp" {
 		return Result{}, noSuchMethod(c.Method)
 	}
-	hash, err := parseStamp(c.Args)
+	hash, textBytes, err := parseStampText(c.Args)
 	if err != nil {
 		return Result{}, err
 	}
@@ -287,6 +304,11 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	// seq and hash also sit on the result itself, as fetch.page's fields do:
 	// an agent reading result.seq got nothing (scavenger-osan 8064185c, C697).
 	out := map[string]any{"receipt": r, "seq": r.Seq, "hash": r.Hash, "duplicate": duplicate, "log": notaryLog(hash)}
+	if textBytes >= 0 {
+		// The length of the text stamped: on the GET form an unencoded & or
+		// = cuts the text short without a word, and this shows it (C750).
+		out["bytes"] = textBytes
+	}
 	if duplicate {
 		// The receipt's time is the first stamp's, not this call's: say so
 		// plainly, or a fresh call looks like it got a stale timestamp

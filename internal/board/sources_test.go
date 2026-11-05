@@ -502,6 +502,9 @@ func generatedSections(t *testing.T) map[string]string {
 		fmt.Fprintf(&cats, "  - `%s`: %s\n", c.Name, c.Meaning)
 	}
 	sections["screen-categories"] = cats.String() + "  "
+	// Where a stamp's answer keeps the hash and the proof (C750): the same
+	// line the notary_stamp tool description carries.
+	sections["notary-answer"] = services.NotaryStampAnswer + " " + services.NotaryStampGET + "\n"
 	// The services: an overview, then each service's head, from the catalogue.
 	catalog := services.Catalog(services.Known())
 	var overview strings.Builder

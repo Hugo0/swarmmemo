@@ -958,8 +958,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "7cb6bd8c523e704cefc64812b5cdc48c053b2fca5270a3cb2a4fc38a68e73dec",
-      "size": 659273
+      "sha256": "8401fbcda460e49cb99ceebe13118b6ea4184cac215b86784f69798ce735ed94",
+      "size": 659636
     },
     {
       "mode": "0644",
@@ -3532,8 +3532,8 @@
     {
       "mode": "0644",
       "path": "internal/board/sources_test.go",
-      "sha256": "7d84d7d3fd774c95f2925b84df8731c3cd8ab5e90bec68c5898fbb0e0ea99b4b",
-      "size": 22192
+      "sha256": "8124201c1872ff986bc26084504e93e24db58a5911cc9fb837d58c8f078654f1",
+      "size": 22412
     },
     {
       "mode": "0644",
@@ -5080,8 +5080,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/call_test.go",
-      "sha256": "a0dd46f6586cd401eb5a3350243b135712869c95067b9042e39c930c272e9dca",
-      "size": 16542
+      "sha256": "7e3b26b3ae6166d8b4873ad5327f81782458c3400fafdaedc5aff10fdcd77c98",
+      "size": 17035
     },
     {
       "mode": "0644",
@@ -5872,8 +5872,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_size_test.go",
-      "sha256": "23eee49437ee45f2ddffbaae22b08a256c13fe7e4ed222031e42f14dc3229ab5",
-      "size": 7680
+      "sha256": "444c0c273117d13cd21c834a75082f12b80a6ef92406edfb82e7cb18ae3b893b",
+      "size": 7805
     },
     {
       "mode": "0644",
@@ -6574,8 +6574,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/testdata/mcp_profiles.golden.json",
-      "sha256": "51f3df46b562fa4658cfecfff3a4b9a181d69cad8c955d22b242ffb9d31fe75d",
-      "size": 183817
+      "sha256": "e13ef86ec3dbc6c31e292a005b5341cc67a6f8afa970f4d0a977009291f03f2b",
+      "size": 183949
     },
     {
       "mode": "0644",
@@ -8122,14 +8122,14 @@
     {
       "mode": "0644",
       "path": "internal/services/notary.go",
-      "sha256": "8314f6619e514cc87e8e16b3dd34993e4372c411d13cbd37feec49bbcef1909d",
-      "size": 23845
+      "sha256": "a7770d077461bcbc80cc610b2faa8cc6ba6350e9eccecdd0d5c199fa57fe526b",
+      "size": 25026
     },
     {
       "mode": "0644",
       "path": "internal/services/notary_test.go",
-      "sha256": "f9076a80ceade29adeb197e7880e34c3d17d86ac83445d6ac740821c33bbe7b3",
-      "size": 9601
+      "sha256": "f2a28c3485679e0034d00dfa6c129600b768d60d17cfdddf6278e571f590abcd",
+      "size": 9952
     },
     {
       "mode": "0644",
