@@ -618,8 +618,12 @@ func (p *publicData) runOne(ctx context.Context, req pdRequest, now int64) (item
 	if run.asOf != "" {
 		item.AsOf = &run.asOf
 		item.Freshness = pdFreshness
-		if end, _ := item.Params["end_date"].(string); len(end) == 10 && len(run.asOf) >= 10 && run.asOf[:10] < end {
-			lag := "The source has published data up to " + run.asOf[:10] + ", before the requested end_date " + end + ": later days are not out yet (not an error)."
+		published := run.asOf
+		if run.published != "" {
+			published = run.published
+		}
+		if end, _ := item.Params["end_date"].(string); len(end) == 10 && len(published) >= 10 && published[:10] < end {
+			lag := "The source has published data up to " + published[:10] + ", before the requested end_date " + end + ": later days are not out yet (not an error)."
 			item.Lag = &lag
 		}
 	}
@@ -672,13 +676,16 @@ func pdTime(unix int64) *string {
 
 // pdRun is one dataset request in flight.
 type pdRun struct {
-	p       *publicData
-	ds      *pdDataset
-	now     int64
-	key     string
-	asOf    string
-	mu      sync.Mutex
-	sources []pdSourceRec
+	p    *publicData
+	ds   *pdDataset
+	now  int64
+	key  string
+	asOf string
+	// published is the source's own newest day when as_of is narrowed to a
+	// window (C767); lag compares it, not as_of, with end_date.
+	published string
+	mu        sync.Mutex
+	sources   []pdSourceRec
 }
 
 func (r *pdRun) today() time.Time {

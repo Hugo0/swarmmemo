@@ -64,6 +64,7 @@ type pdParam struct {
 type pdParams struct {
 	vals    map[string]any
 	derived map[string]string // resolved values that are not parameters (a station alias's id)
+	bad     string            // the parameter Validate refused, if one alone is at fault
 }
 
 func (p *pdParams) Str(name string) string {
@@ -82,6 +83,14 @@ func (p *pdParams) Int(name string) (int64, bool) {
 }
 
 func (p *pdParams) Set(name string, v any) { p.vals[name] = v }
+
+// reject records name as the one parameter a Validate refuses (a
+// well-formed value it does not take), so the refusal names it and its rule;
+// it returns false.
+func (p *pdParams) reject(name string) bool {
+	p.bad = name
+	return false
+}
 
 // echo is the parameters as resolved (defaults filled), for the response.
 func (p *pdParams) echo() map[string]any {
@@ -138,7 +147,7 @@ func (ds *pdDataset) parseParams(raw json.RawMessage, now int64) (*pdParams, err
 		}
 		val, ok := spec.parse(v)
 		if !ok {
-			return nil, badArg("params." + spec.Name + " " + spec.rule() + "; public_data.datasets documents " + ds.ID + "'s parameters.")
+			return nil, badArg(ds.paramRefusal(spec))
 		}
 		p.vals[name] = val
 	}
@@ -148,9 +157,17 @@ func (ds *pdDataset) parseParams(raw json.RawMessage, now int64) (*pdParams, err
 		}
 	}
 	if ds.Validate != nil && !ds.Validate(p, time.Unix(now, 0).UTC().Truncate(24*time.Hour)) {
+		if spec := ds.param(p.bad); spec != nil {
+			return nil, badArg(ds.paramRefusal(spec))
+		}
 		return nil, badArg("These params do not fit together for " + ds.ID + " (a date range, or a combination its parameters' docs rule out); public_data.datasets documents them.")
 	}
 	return p, nil
+}
+
+// paramRefusal names spec and its rule, never the value sent.
+func (ds *pdDataset) paramRefusal(spec *pdParam) string {
+	return "params." + spec.Name + " " + spec.rule() + "; public_data.datasets documents " + ds.ID + "'s parameters."
 }
 
 func (ds *pdDataset) param(name string) *pdParam {
@@ -202,6 +219,9 @@ func (spec *pdParam) rule() string {
 	max := spec.MaxLen
 	if max == 0 {
 		max = publicDataStringMax
+	}
+	if spec.Doc != "" {
+		return "is printable text of at most " + itoa(int64(max)) + " bytes: " + spec.Doc
 	}
 	return "is printable text of at most " + itoa(int64(max)) + " bytes in the form its doc gives"
 }

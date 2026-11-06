@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -469,6 +470,28 @@ func TestPublicDataSeaIce(t *testing.T) {
 	eq(t, "next page", d["next_end_date"], "2026-07-07")
 	eq(t, "truncated", d["truncated"], true)
 
+	// C767: a window's headline and as_of are its newest day, not the
+	// series' latest; lag only when the source has not published end_date.
+	item, d = v.mustFetch(t, "sea_ice_extent", `{"start_date":"2026-07-07","end_date":"2026-07-09"}`, unix("2026-07-12"))
+	eq(t, "window headline", d["date"], "2026-07-09")
+	eq(t, "window km2", d["extent_km2"], 8190000.0)
+	eq(t, "window as_of", item["as_of"], "2026-07-09")
+	if _, ok := item["lag"]; ok {
+		t.Errorf("the source has published past end_date: no lag: %v", item["lag"])
+	}
+	item, d = v.mustFetch(t, "sea_ice_extent", `{"end_date":"2025-12-31"}`, unix("2026-07-12"))
+	eq(t, "end-only headline", d["date"], "2025-07-10")
+	eq(t, "end-only as_of", item["as_of"], "2025-07-10")
+	item, _ = v.mustFetch(t, "sea_ice_extent", `{"start_date":"2026-07-08","end_date":"2026-07-20"}`, unix("2026-07-21"))
+	eq(t, "open window as_of", item["as_of"], "2026-07-10")
+	if l, _ := item["lag"].(string); !strings.Contains(l, "2026-07-10") {
+		t.Errorf("end_date after the latest day keeps lag: %v", item["lag"])
+	}
+	item, d = v.mustFetch(t, "sea_ice_extent", `{"start_date":"2025-08-01","end_date":"2025-12-31"}`, unix("2026-07-12"))
+	if d["date"] != nil || d["extent_km2"] != nil || item["as_of"] != nil || d["note"] == nil {
+		t.Errorf("an empty window has no headline and no as_of: %v %v", d, item["as_of"])
+	}
+
 	_, d = v.mustFetch(t, "sea_ice_extent", `{"date":"2026-01-01"}`, unix("2026-07-12"))
 	if d["extent_km2"] != nil || !strings.Contains(d["note"].(string), "2026-01-01") {
 		t.Errorf("a missing day is null with a note: %v", d)
@@ -586,6 +609,13 @@ func TestPublicDataCryptoAndFRED(t *testing.T) {
 	}
 	_, d = v.mustFetch(t, "fred_series", `{"series_id":"GDPC1","start_date":"2026-02-01"}`, unix("2026-09-20"))
 	eq(t, "range", d["count"], 1.0)
+	// C767: as_of follows the window, like latest.
+	item, d = v.mustFetch(t, "fred_series", `{"series_id":"GDPC1","end_date":"2026-03-31"}`, unix("2026-09-20"))
+	eq(t, "window latest", d["latest"], map[string]any{"date": "2026-01-01", "value": 3.1})
+	eq(t, "window as_of", item["as_of"], "2026-01-01")
+	if _, ok := item["lag"]; ok {
+		t.Errorf("FRED has published past end_date: no lag: %v", item["lag"])
+	}
 	urls, _ := v.fakes["api.stlouisfed.org"].seen()
 	if !strings.Contains(urls[0], "units=pca") || !strings.Contains(urls[0], "series_id=GDPC1") {
 		t.Errorf("FRED request %s", urls[0])
@@ -1056,6 +1086,26 @@ func TestPublicDataParamValidation(t *testing.T) {
 			t.Errorf("%s: %v", b, err)
 		}
 	}
+	// C764: a well-formed value a dataset does not take names that argument
+	// and its rule, never the date-range fallback.
+	for _, c := range []struct{ args, param, rule string }{
+		{`{"dataset":"cb_policy_rates","params":{"bank":"XXX"}}`, "params.bank", "FED, ECB"},
+		{`{"dataset":"noaa_station_daily","params":{"station":"KMWN","elements":"XXXX"}}`, "params.elements", "comma-separated subset of WSFG"},
+		{`{"dataset":"noaa_station_daily","params":{"station":"KMWN","elements":"WSFG,WSFG"}}`, "params.elements", "each at most once"},
+		{`{"dataset":"noaa_station_daily","params":{"station":"ZZZ9"}}`, "params.station", "GHCN id"},
+		{`{"dataset":"fred_series","params":{"series_id":"SP500"}}`, "params.series_id", "allowlisted"},
+	} {
+		_, _, err := services.PublicDataParseForTest("fetch", json.RawMessage(c.args), now)
+		msg := pdRefusal(err)
+		if !strings.Contains(msg, c.param) || !strings.Contains(msg, c.rule) ||
+			strings.Contains(msg, "date range") || strings.Contains(msg, "XXX") || strings.Contains(msg, "ZZZ9") {
+			t.Errorf("%s: %v, want %s and its rule", c.args, err, c.param)
+		}
+	}
+	// A real cross-parameter fault keeps the combination refusal.
+	if _, _, err := services.PublicDataParseForTest("fetch", json.RawMessage(`{"dataset":"sea_ice_extent","params":{"start_date":"2026-07-02","end_date":"2026-07-01"}}`), now); !strings.Contains(pdRefusal(err), "do not fit together") {
+		t.Errorf("reversed window: %v", err)
+	}
 	for _, b := range []string{`{"requests":[]}`, `{"requests":[` + strings.Repeat(`{"dataset":"sea_ice_extent"},`, 10) + `{"dataset":"sea_ice_extent"}]}`} {
 		if _, _, err := services.PublicDataParseForTest("bulk", json.RawMessage(b), now); code(err) != "invalid_service_data" {
 			t.Errorf("bulk %s: %v", b[:20], err)
@@ -1443,4 +1493,13 @@ func TestPublicDataDataSHA256(t *testing.T) {
 	// Go values (float64 3 is written 3, which Python reads as an int).
 	got, _ = services.PDDataCanonical(map[string]any{"b": 3.0, "a": []float64{0.1, 1e21, 2.5e-5}})
 	eq(t, "go floats", got, `{"a":[0.1,1e+21,2.5e-05],"b":3}`)
+}
+
+// pdRefusal is an invalid_service_data refusal's message ("" for anything else).
+func pdRefusal(err error) string {
+	var e *allowance.Err
+	if !errors.As(err, &e) || e.Code != "invalid_service_data" {
+		return ""
+	}
+	return e.Message
 }

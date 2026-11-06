@@ -119,7 +119,7 @@ var dsFREDSeries = &pdDataset{
 	Validate: func(p *pdParams, _ time.Time) bool {
 		s, ok := fredSeries[p.Str("series_id")]
 		if !ok {
-			return false
+			return p.reject("series_id")
 		}
 		if !p.Has("units") {
 			p.Set("units", s.units)
@@ -144,9 +144,7 @@ var dsFREDSeries = &pdDataset{
 		if len(out.Observations) > 0 {
 			out.Latest = &out.Observations[0]
 		}
-		if len(s.D) > 0 {
-			r.asOf = s.D[len(s.D)-1]
-		}
+		s.dateWindow(r, p)
 		return out, nil
 	},
 	Source: "Federal Reserve Bank of St. Louis, FRED", Hosts: []string{fredHost},
@@ -670,7 +668,7 @@ var dsCBPolicy = &pdDataset{
 	Validate: func(p *pdParams, _ time.Time) bool {
 		code, ok := resolveBank(p.Str("bank"))
 		if !ok {
-			return false
+			return p.reject("bank")
 		}
 		p.derived["bank"] = code
 		if !p.Has("what") {

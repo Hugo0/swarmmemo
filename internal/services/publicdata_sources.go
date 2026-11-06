@@ -163,6 +163,33 @@ func (s pdSeries) window(start, end string, limit int) (obs []pdObs, count int, 
 	return obs, count, nextEnd
 }
 
+// newest is the index of the newest observation within [start, end] (either
+// may be ""), or -1 when none is in range.
+func (s pdSeries) newest(start, end string) int {
+	i := len(s.D)
+	if end != "" {
+		i = sort.Search(len(s.D), func(k int) bool { return s.D[k] > end })
+	}
+	if i == 0 || (start != "" && s.D[i-1] < start) {
+		return -1
+	}
+	return i - 1
+}
+
+// dateWindow sets r's as_of to the newest observation within the request's
+// window (C767: never a day after end_date) and the series' own newest day as
+// what the source has published; it returns the in-window index, or -1.
+func (s pdSeries) dateWindow(r *pdRun, p *pdParams) int {
+	i := s.newest(p.Str("start_date"), p.Str("end_date"))
+	if i >= 0 {
+		r.asOf = s.D[i]
+	}
+	if len(s.D) > 0 {
+		r.published = s.D[len(s.D)-1]
+	}
+	return i
+}
+
 // seriesFromPoints sorts points by date; a repeated date keeps its last
 // value (an upsert, as Pythia's table does).
 func seriesFromPoints(points map[string]float64) pdSeries {
@@ -331,7 +358,7 @@ var dsNOAAStation = &pdDataset{
 		dateParam("start_date", "first day; default end_date minus 29 days"),
 		dateParam("end_date", "last day; default yesterday (UTC)"),
 		{Name: "elements", Kind: "string", Pattern: regexp.MustCompile(`^[A-Z0-9]{4}(,[A-Z0-9]{4}){0,6}$`), Norm: pdUpper,
-			Default: noaaDefaultTy, Doc: "comma-separated subset of " + noaaDefaultTy},
+			Default: noaaDefaultTy, Doc: "comma-separated subset of " + noaaDefaultTy + ", each at most once"},
 		limitParam(31, 200, false),
 	},
 	Validate: func(p *pdParams, today time.Time) bool {
@@ -341,14 +368,14 @@ var dsNOAAStation = &pdDataset{
 			id = key
 		}
 		if id == "" {
-			return false
+			return p.reject("station")
 		}
 		p.derived["station_id"] = id
 		if p.Has("elements") {
 			seen := map[string]bool{}
 			for _, e := range strings.Split(p.Str("elements"), ",") {
 				if seen[e] || !contains(noaaElements, e) {
-					return false
+					return p.reject("elements")
 				}
 				seen[e] = true
 			}
@@ -517,13 +544,14 @@ var dsSeaIce = &pdDataset{
 			return nil, err
 		}
 		out := seaIceData{SeriesID: "N_seaice_extent", Units: "million km2", Averaging: seaIceAveraging, Observations: []pdObs{}}
-		if len(s.D) > 0 {
-			r.asOf = s.D[len(s.D)-1]
-		}
+		// The headline is the day asked for, else the newest day in the
+		// window (C767), as as_of is.
+		idx := s.dateWindow(r, p)
 		date := p.Str("date")
-		idx := -1
-		if date == "" && len(s.D) > 0 {
-			idx = len(s.D) - 1
+		if date == "" {
+			if idx < 0 {
+				out.Note = "no sea-ice observation between start_date and end_date"
+			}
 		} else {
 			idx = sort.SearchStrings(s.D, date)
 			if idx >= len(s.D) || s.D[idx] != date {
@@ -531,7 +559,9 @@ var dsSeaIce = &pdDataset{
 			}
 		}
 		if idx < 0 {
-			out.Note = "no sea-ice observation for " + date
+			if date != "" {
+				out.Note = "no sea-ice observation for " + date
+			}
 		} else {
 			value := s.V[idx]
 			mmdd := s.D[idx][5:10]

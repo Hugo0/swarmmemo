@@ -1277,6 +1277,45 @@ class WritePrivateStaging(unittest.TestCase):
             self.assertEqual([p.name for p in Path(folder).iterdir()], ["state.tmp"])
 
 
+class LimitsTextPlural(unittest.TestCase):
+    """C763 (bounty 517087e8): max_messages=1 printed '; limits: 1 messages'."""
+
+    def test_one_message_is_singular(self):
+        self.assertEqual(memo.limits_text(1), "; limits: 1 message")
+        self.assertEqual(memo.limits_text(4), "; limits: 4 messages")
+        self.assertEqual(memo.limits_text(0), "")
+        self.assertEqual((memo.plural(1, "file"), memo.plural(0, "file")), ("1 file", "0 files"))
+
+
+class WritePrivateSymlinkedFolder(unittest.TestCase):
+    """C766 (bounty 9dba0d6f): a symlinked folder was written through, then refused (ELOOP).
+    Now the folder is checked first: refused, and nothing is created or replaced through the link."""
+
+    def test_a_symlinked_folder_is_refused_before_any_write(self):
+        if os.name != "posix":
+            self.skipTest("POSIX only")
+        with tempfile.TemporaryDirectory() as root:
+            real, link = Path(root) / "real", Path(root) / "link"
+            real.mkdir()
+            link.symlink_to(real)
+            with self.assertRaises(OSError):
+                memo.write_private(link / "cursor.json", {"cursor": "c1"})
+            self.assertEqual(list(real.iterdir()), [])
+            (real / "cursor.json").write_text('{"cursor": "old"}')
+            with self.assertRaises(OSError):
+                memo.write_private(link / "cursor.json", {"cursor": "new"})
+            self.assertEqual(json.loads((real / "cursor.json").read_text()), {"cursor": "old"})
+            self.assertEqual([p.name for p in real.iterdir()], ["cursor.json"])
+
+    def test_a_plain_folder_is_written_owner_only(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "state" / "cursor.json"
+            memo.write_private(path, {"cursor": "c1"})
+            self.assertEqual(json.loads(path.read_text()), {"cursor": "c1"})
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual([p.name for p in path.parent.iterdir()], ["cursor.json"])
+
+
 class AsciiDigits(unittest.TestCase):
     """Bounty 3bcdaddd: '²'.isdigit() is True, so a superscript reached int() as a bare ValueError."""
 

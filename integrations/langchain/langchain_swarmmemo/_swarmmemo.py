@@ -4137,26 +4137,55 @@ def write_private(path: Path, value):
     """Write JSON readable only by its owner (mode 600, folder 700), atomically, through a unique
     staging file in the same folder: never a fixed NAME.tmp, which may be the user's own file (PR #17)."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # A fixed stem.tmp can already be a user's file (and coincides with path
-    # itself if its suffix is .tmp). Use a unique same-directory staging file.
-    fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".tmp", dir=path.parent)
+    data = json.dumps(value, ensure_ascii=False, indent=1).encode("utf-8")
+    if not (os.name == "posix" and hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd):
+        return _write_private_plain(path, data)
+    # C766: open (and so check) the folder first, refusing a symlinked one, then
+    # write, replace and sync relative to that descriptor: the folder checked is
+    # the folder written, and a refusal means nothing was saved through a link.
+    directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    temporary = None
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=1)
+        # A fixed stem.tmp can already be a user's file (and coincides with path
+        # itself if its suffix is .tmp). Use a unique same-directory staging file.
+        for _ in range(100):
+            name = "." + path.name + "." + os.urandom(8).hex() + ".tmp"
+            try:
+                fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=directory_fd)
+            except FileExistsError:
+                continue
+            temporary = name
+            break
+        else:
+            raise FileExistsError(f"no free staging name in {path.parent}")
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        os.replace(temporary, path.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        temporary = None
         # Sync the directory entry after the file contents. Without this a
         # successful return can precede a lost/old cursor or seal-key name on
         # sudden power loss even though the temporary file was fsync'ed.
-        if os.name == "posix" and hasattr(os, "O_DIRECTORY"):
-            directory_fd = os.open(
-                path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
-            )
+        os.fsync(directory_fd)
+    finally:
+        if temporary is not None:
             try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+                os.unlink(temporary, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        os.close(directory_fd)
+
+
+def _write_private_plain(path: Path, data: bytes):
+    """write_private where descriptor-relative calls are missing (Windows)."""
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
     finally:
         try:
             os.unlink(temporary)
@@ -4285,9 +4314,14 @@ def when(ts):
     return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ts))
 
 
+def plural(count, noun):
+    """'1 message', '2 messages': the one place a count and its noun are joined."""
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
 def limits_text(max_messages=0, closes_at=0):
     """A conversation's limits, as the tail of a status line."""
-    parts = ([f"{max_messages} messages"] if max_messages else []) + ([f"until {when(closes_at)}"] if closes_at else [])
+    parts = ([plural(max_messages, "message")] if max_messages else []) + ([f"until {when(closes_at)}"] if closes_at else [])
     return "; limits: " + ", ".join(parts) if parts else ""
 
 
@@ -4572,7 +4606,7 @@ class Chat:
                    for path, content in attached]
             receipt = self.request("post", room=room, text=text, visibility="private", **({"attachments": ids} if ids else {}))["receipt"]
         save_chat(state)
-        shared = f" with {len(attached)} file{'s' if len(attached) != 1 else ''}" if attached else ""
+        shared = " with " + plural(len(attached), "file") if attached else ""
         self.say(f"sent {receipt['id']}{shared}; {CHAT_TIERS['sealed' if sealed else 'private']}")
         return 0
 
