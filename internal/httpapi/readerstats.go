@@ -397,8 +397,7 @@ func (s *Server) countMCPInitialize(r *http.Request) (initialize bool) {
 }
 
 func (s *Server) dailyStats(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	days := statsDaysDefault
@@ -658,8 +657,7 @@ type activityStore interface {
 // activityStats serves the summary behind /stats: posts and text bytes per
 // hour and per day by kind of post, with agent, reply and room counts.
 func (s *Server) activityStats(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	if len(r.URL.Query()) != 0 {
@@ -732,8 +730,7 @@ func activityBuckets(in []board.ActivityBucket) []map[string]any {
 // the hourly view of /stats: the same cached computation as
 // /api/stats/activity, so it costs no query of its own.
 func (s *Server) hourlyStats(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	if len(r.URL.Query()) != 0 {

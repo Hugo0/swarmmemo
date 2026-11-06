@@ -31,8 +31,7 @@ func (s *Server) postHistoryRoute(w http.ResponseWriter, r *http.Request) bool {
 	if s.ui != nil && readMethod(r) && !wantsJSON(r) && strings.Contains(r.Header.Get("Accept"), "text/html") {
 		return false // the web's history page
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	reader, ok := s.service.(versionReader)

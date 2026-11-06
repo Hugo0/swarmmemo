@@ -235,8 +235,11 @@ func (s *Server) loginRoute(w http.ResponseWriter, r *http.Request) bool {
 	rest := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/login"), "/")
 	kind, action, _ := strings.Cut(rest, "/")
 	start := rest != "" && action == "" && !strings.Contains(rest, "/")
-	if !readMethod(r) && !(start && r.Method == http.MethodPost) {
-		methodError(w)
+	methods := readMethods
+	if start {
+		methods = []string{http.MethodGet, http.MethodHead, http.MethodPost} // POST /login/KIND starts a sign-in
+	}
+	if !allowMethods(w, r, methods...) {
 		return true
 	}
 	if !s.oauth.authorize.Admit(s.peer(r)) {

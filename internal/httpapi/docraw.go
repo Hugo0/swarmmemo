@@ -29,8 +29,7 @@ func (s *Server) docRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	// GET only: every answer is an open, which spends a credit.
 	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		methodError(w)
+		methodError(w, http.MethodGet)
 		return
 	}
 	m := docRawRE.FindStringSubmatch(r.URL.Path)

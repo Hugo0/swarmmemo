@@ -123,8 +123,7 @@ type a2aGetParams struct {
 }
 
 func (s *Server) a2a(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		methodError(w)
+	if !allowMethods(w, r, http.MethodPost) {
 		return
 	}
 	reply := func(id json.RawMessage, result any, e *a2aError) {

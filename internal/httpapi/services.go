@@ -38,8 +38,7 @@ func (s *Server) x402StatsRoute(w http.ResponseWriter, r *http.Request) bool {
 	if !ok || !s.cfg.Features.ServiceEnabled("x402") {
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	days, ok := queryInt(r.URL.Query(), "days", board.X402StatsDays, 90, "days")
@@ -80,8 +79,7 @@ func (s *Server) servicesRoute(w http.ResponseWriter, r *http.Request) bool {
 		c = memoryGetCommand(agent, key)
 	case (p == "/api/notary" || strings.HasPrefix(p, "/api/notary/") && p != "/api/notary/key") && s.cfg.Features.ServiceEnabled("notary"):
 		// A receipt by hash, by seq (?seq=N, C713), or by both.
-		if !readMethod(r) {
-			methodError(w)
+		if !allowMethods(w, r, readMethods...) {
 			return true
 		}
 		seq, err := notarySeqQuery(r.URL.RawQuery)
@@ -99,8 +97,7 @@ func (s *Server) servicesRoute(w http.ResponseWriter, r *http.Request) bool {
 	default:
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	if r.URL.RawQuery != "" {
@@ -127,8 +124,7 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 		s.writeCallError(w, &board.Error{Status: 404, Code: "not_found", Message: "No service runs here; /capabilities says what does."})
 		return
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		methodError(w)
+	if !allowMethods(w, r, http.MethodGet, http.MethodPost) {
 		return
 	}
 	// A call spends the caller's network share, so no other site's page may

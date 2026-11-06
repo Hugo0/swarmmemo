@@ -137,6 +137,16 @@ class ScannerTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(memo.ChatStop):
                 memo.check_chat_setting("outbound.actions", bad)
 
+    def test_categories_refuse_plainly(self):
+        """C769: a nested or non-string category is a plain refusal naming
+        inbound.categories and its rule, never an uncaught TypeError."""
+        memo.check_chat_setting("inbound.categories", ["injection", "phishing"])
+        for bad in ([["injection"]], [{"a": 1}], ["injection", ["phishing"]], [], ["injection", "injection"], ["nope"], "injection"):
+            with self.subTest(bad=bad), self.assertRaises(memo.ChatStop) as stop:
+                memo.check_chat_setting("inbound.categories", bad)
+            self.assertIn("inbound.categories", str(stop.exception))
+            self.assertIn("distinct screen categories, each one of injection,", str(stop.exception))
+
 
 class LeakscanParityTests(unittest.TestCase):
     """The scan is internal/leakscan's: the same list, the same findings at the

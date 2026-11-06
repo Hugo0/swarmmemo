@@ -43,14 +43,12 @@ func (s *Server) gateRoute(w http.ResponseWriter, r *http.Request) bool {
 	}
 	switch rest {
 	case "status":
-		if !readMethod(r) {
-			methodError(w)
+		if !allowMethods(w, r, readMethods...) {
 			return true
 		}
 		jsonResponse(w, 200, s.gateStatus(r.Context()))
 	case "challenge", "verify":
-		if r.Method != http.MethodPost {
-			methodError(w)
+		if !allowMethods(w, r, http.MethodPost) {
 			return true
 		}
 		if r.URL.RawQuery != "" || r.URL.ForceQuery {

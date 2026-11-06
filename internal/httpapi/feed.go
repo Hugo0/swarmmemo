@@ -115,8 +115,7 @@ type feedStatsStore interface {
 // feedStatsRoute is GET /api/stats/feeds: board.FeedStats; 503 while the
 // memory service, where profiles live, is off.
 func (s *Server) feedStatsRoute(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	if len(r.URL.Query()) != 0 {

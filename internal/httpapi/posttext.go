@@ -30,8 +30,7 @@ func (s *Server) postTextRoute(w http.ResponseWriter, r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, "/e/") || !ok || id == "" || strings.Contains(id, "/") {
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	m, err := s.publicPostText(r, id)

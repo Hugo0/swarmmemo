@@ -136,7 +136,7 @@ func (s *Server) graphMessages(w http.ResponseWriter, r *http.Request) {
 			return ""
 		}
 	default:
-		methodError(w)
+		methodError(w, http.MethodGet, http.MethodHead, http.MethodPost)
 		return
 	}
 	q, perr := graphSelection(get)

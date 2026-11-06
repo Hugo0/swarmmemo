@@ -344,7 +344,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, MKCOL, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", strings.Join(crossOriginMethods, ", "))
 		// Authorization carries an app's bearer token from its own page; no
 		// cookie or ambient credential is ever allowed cross-origin.
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Text, Authorization, Last-Event-ID")
@@ -352,7 +352,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodTrace || r.Method == http.MethodConnect {
-		methodError(w)
+		methodError(w, crossOriginMethods...)
 		return
 	}
 	if !isMCP && strings.HasPrefix(bearerToken(r.Header.Get("Authorization")), board.HostedTokenPrefix) {
@@ -377,7 +377,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/health" { // a GET or HEAD was answered before the pool
-		methodError(w)
+		methodError(w, readMethods...)
 		return
 	}
 	if r.URL.Path == "/metrics" {
@@ -385,8 +385,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/capabilities" {
-		if !readMethod(r) {
-			methodError(w)
+		if !allowMethods(w, r, readMethods...) {
 			return
 		}
 		if r.Method == http.MethodGet {
@@ -396,8 +395,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/time" {
-		if !readMethod(r) {
-			methodError(w)
+		if !allowMethods(w, r, readMethods...) {
 			return
 		}
 		jsonResponse(w, 200, map[string]any{"unix": time.Now().Unix(), "utc": time.Now().UTC().Format(time.RFC3339)})
@@ -549,8 +547,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveRead(w, r) // read, with hot anonymous answers kept (hotreads.go)
 		return
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	if s.ui != nil {
@@ -853,8 +850,7 @@ func screenedText(e board.Message) string {
 }
 
 func (s *Server) command(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		methodError(w)
+	if !allowMethods(w, r, http.MethodPost) {
 		return
 	}
 	// This adapter has exactly one command source. Never silently discard a
@@ -942,8 +938,11 @@ func knownOperation(op string) bool { return board.KnownOperation(op) }
 
 func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != "MKCOL" {
-		methodError(w)
+	methods := writeMethods
+	if strings.HasPrefix(r.URL.Path, "/v1/events/") {
+		methods = []string{http.MethodPut} // PUT /v1/events/REQUEST_ID
+	}
+	if !allowMethods(w, r, methods...) {
 		return
 	}
 	cmd, err := queryCommand(r.URL.Query())
@@ -957,8 +956,8 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 	var pathText string
 	var pathPayload bool
 	if strings.HasPrefix(path, "v1/events/") {
-		if r.Method != http.MethodPut || len(parts) != 3 || parts[2] == "" {
-			methodError(w)
+		if len(parts) != 3 || parts[2] == "" {
+			methodError(w, methods...)
 			return
 		}
 		if cmd.RequestID != "" && cmd.RequestID != parts[2] {
@@ -1222,8 +1221,7 @@ func queryCommand(q url.Values) (board.Command, error) {
 	return c, nil
 }
 func (s *Server) read(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	query := r.URL.Query()
@@ -1608,8 +1606,7 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 	s.execute(w, r, c)
 }
 func (s *Server) export(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	if r.URL.Query().Has("stream") && s.exportStream(w, r) {
@@ -1648,8 +1645,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		methodError(w)
+	if !allowMethods(w, r, http.MethodGet) {
 		return
 	}
 	// With a credential it is the caller's own stream (livestream.go).
@@ -1827,8 +1823,7 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]bool{"ok": true})
 }
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	if !net.ParseIP(s.peer(r)).IsLoopback() {
@@ -1862,7 +1857,30 @@ func urlTooLargeHint(path string) string {
 	return "Ask in smaller chunks."
 }
 
-func readMethod(r *http.Request) bool { return r.Method == "GET" || r.Method == "HEAD" }
+// readMethods are the methods of a read: a route that serves only these
+// gates on them with allowMethods, so its 405 Allow lists them.
+var readMethods = []string{http.MethodGet, http.MethodHead}
+
+// writeMethods are the methods the write paths (/w/, /w64/) serve, and with
+// OPTIONS the methods a cross-origin page may send (crossOriginMethods).
+var writeMethods = []string{http.MethodGet, http.MethodPost, http.MethodPut, "MKCOL"}
+
+// crossOriginMethods is the preflight's Access-Control-Allow-Methods, and the
+// Allow of a TRACE or CONNECT, refused before any route is chosen.
+var crossOriginMethods = append(slices.Clip(writeMethods), http.MethodOptions)
+
+func readMethod(r *http.Request) bool { return slices.Contains(readMethods, r.Method) }
+
+// allowMethods reports whether r's method is one the route serves. If it is
+// not, it answers the 405 whose Allow lists exactly those methods (RFC 9110
+// 15.5.6): the list a route gates on is the list it advertises.
+func allowMethods(w http.ResponseWriter, r *http.Request, methods ...string) bool {
+	if slices.Contains(methods, r.Method) {
+		return true
+	}
+	methodError(w, methods...)
+	return false
+}
 
 // pageLinkQuery is a link only the HTML pages print: a room page's Reply
 // control (/r/ROOM/PAGE?reply=ID#compose) and a thread's collapse and
@@ -1880,8 +1898,11 @@ func wantsJSON(r *http.Request) bool {
 func bad(msg string) *board.Error {
 	return &board.Error{Status: 400, Code: "invalid_request", Message: msg}
 }
-func methodError(w http.ResponseWriter) {
-	w.Header().Set("Allow", "GET, POST, PUT, MKCOL, OPTIONS")
+
+// methodError is the 405 of a route that serves only the allow methods; most
+// routes reach it through allowMethods.
+func methodError(w http.ResponseWriter, allow ...string) {
+	w.Header().Set("Allow", strings.Join(allow, ", "))
 	writeError(w, &board.Error{Status: 405, Code: "method_not_allowed", Message: "This method is not supported here. HEAD and OPTIONS never publish messages."})
 }
 

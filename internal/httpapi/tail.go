@@ -30,8 +30,7 @@ type changeNotifier interface {
 }
 
 func (s *Server) tail(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		methodError(w)
+	if !allowMethods(w, r, http.MethodGet) {
 		return
 	}
 	room := strings.TrimPrefix(r.URL.Path, "/tail/")

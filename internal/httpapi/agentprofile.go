@@ -118,8 +118,7 @@ func (s *Server) agentProfileRoute(w http.ResponseWriter, r *http.Request) bool 
 		}
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	w.Header().Add("Vary", "Accept")

@@ -34,8 +34,7 @@ func (s *Server) funnelAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if !ok || r.URL.Path != "/admin/funnel" {
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	q := r.URL.Query()

@@ -134,8 +134,7 @@ func (s *Server) oauthAppRoute(w http.ResponseWriter, r *http.Request, o oauthSt
 		}
 		oauthJSON(w, 200, out)
 	case oauthUserinfoPath:
-		if r.Method != http.MethodGet && r.Method != http.MethodPost {
-			methodError(w)
+		if !allowMethods(w, r, http.MethodGet, http.MethodPost) {
 			return true
 		}
 		out, err := o.OAuthUserinfo(r.Context(), bearerToken(r.Header.Get("Authorization")), now)

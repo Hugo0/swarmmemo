@@ -3945,12 +3945,16 @@ def check_chat_setting(key, value):
         "outbound.extra_patterns": patterns, "outbound.allow_patterns": patterns,
         "inbound.mode": lambda v: v in ("withhold", "warn", "off"),
         "inbound.threshold": lambda v: type(v) in (int, float) and 0.05 <= v <= 0.95,
-        "inbound.categories": lambda v: isinstance(v, list) and v and len(set(v)) == len(v) and all(c in SCREEN_CATEGORIES for c in v),
+        # Element types first: set() of a nested list raises TypeError (C769).
+        "inbound.categories": lambda v: isinstance(v, list) and v and all(isinstance(c, str) for c in v) and len(set(v)) == len(v) and all(c in SCREEN_CATEGORIES for c in v),
         "inbound.fail_closed": lambda v: type(v) is bool,
         "inbound.remote_screen_rooms": lambda v: isinstance(v, list) and all(isinstance(r, str) and CONVERSATION_ROOM.fullmatch(r) for r in v),
     }
     if key not in rules: raise ChatStop(1, f"unknown chat setting {key}; see docs/MESSAGES.md")
-    if not rules[key](value): raise ChatStop(1, f"invalid value for {key}: {value!r}; see docs/MESSAGES.md")
+    takes = {"inbound.categories": "a non-empty list of distinct screen categories, each one of " + ", ".join(SCREEN_CATEGORIES)}
+    if not rules[key](value):
+        rule = f"; it takes {takes[key]}" if key in takes else ""
+        raise ChatStop(1, f"invalid value for {key}: {value!r}{rule}; see docs/MESSAGES.md")
 
 
 def chat_home() -> Path:

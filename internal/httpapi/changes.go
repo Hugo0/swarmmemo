@@ -20,8 +20,7 @@ type generationPublicUpdater interface {
 var generationPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 func (s *Server) changes(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	q := r.URL.Query()

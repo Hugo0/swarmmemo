@@ -47,8 +47,7 @@ func (s *Server) moderationStatsRoute(w http.ResponseWriter, r *http.Request) bo
 	if e == nil {
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	days, ok := queryInt(r.URL.Query(), "days", 7, moderation.StatsDaysMax, "days")
@@ -136,8 +135,7 @@ func (s *Server) moderationAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if e == nil || !strings.HasPrefix(r.URL.Path, "/admin/moderation/") {
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	q := r.URL.Query()

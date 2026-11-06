@@ -170,9 +170,10 @@ func mcpPath(path string) (profile, token string, ok bool) {
 }
 
 // mcpPathWithStrayPunct is an MCP profile path with sentence punctuation
-// stuck to its end (":", ")", ".", ",", ";"), and the path without it.
+// (":", ")", ".", ",", ";") or a trailing "/" stuck to its end, and the path
+// without it.
 func mcpPathWithStrayPunct(path string) (string, bool) {
-	clean := strings.TrimRight(path, ":).,;")
+	clean := strings.TrimRight(path, ":).,;/")
 	if clean == path || clean == "" {
 		return "", false
 	}

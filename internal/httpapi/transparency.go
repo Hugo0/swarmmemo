@@ -102,8 +102,7 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		writeError(w, errTransparencyOff())
 		return true
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	ctx := r.Context()

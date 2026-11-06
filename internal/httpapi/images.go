@@ -32,8 +32,7 @@ func (s *Server) imageRoute(w http.ResponseWriter, r *http.Request) bool {
 	if !render && !((strings.HasPrefix(p, "/e/") || strings.HasPrefix(p, "/r/")) && strings.HasSuffix(p, ".png")) {
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	if r.URL.RawQuery != "" || r.URL.ForceQuery {

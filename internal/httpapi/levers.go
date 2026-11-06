@@ -24,8 +24,7 @@ func (s *Server) leversRoute(w http.ResponseWriter, r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	if len(r.URL.Query()) > 0 {

@@ -47,8 +47,7 @@ func (s *Server) workListingRoute(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	id := strings.TrimSuffix(strings.TrimPrefix(p, "/api/work/"), workListingSuffix)
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	query := r.URL.Query()

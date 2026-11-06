@@ -21,8 +21,7 @@ func (s *Server) allowanceStatsRoute(w http.ResponseWriter, r *http.Request) boo
 	if f.Ledger == board.LedgerOff && f.Trust == board.TrustOff {
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	days := web.AllowanceStatsDaysDefault

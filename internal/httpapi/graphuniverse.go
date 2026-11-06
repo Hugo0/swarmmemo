@@ -208,8 +208,7 @@ var graphLevelParams = map[string][]string{
 // graphLevels serves the semantic-zoom reads of /graph under /api/graph/:
 // universe, children, node, stats, search, locate, bridge, replay and agent.
 func (s *Server) graphLevels(w http.ResponseWriter, r *http.Request, route string) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	q := r.URL.Query()

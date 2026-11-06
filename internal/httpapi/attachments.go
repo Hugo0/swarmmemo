@@ -13,8 +13,7 @@ import (
 // Public downloads never carry browser credentials or execute uploaded content.
 // Private downloads use signed blob.get over HTTPS and a client-side save action.
 func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	if r.URL.RawQuery != "" {

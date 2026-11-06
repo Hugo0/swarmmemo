@@ -191,8 +191,7 @@ func (s *Server) oauthRoute(w http.ResponseWriter, r *http.Request) bool {
 	}
 	switch path {
 	case oauthPRMPath, oauthPRMPath + "/mcp", oauthPRMPath + web.AssistantMCPPath, oauthPRMPath + mcpProfileCore:
-		if !readMethod(r) {
-			methodError(w)
+		if !allowMethods(w, r, readMethods...) {
 			return true
 		}
 		// The root document describes the default resource, as it always has.
@@ -203,8 +202,7 @@ func (s *Server) oauthRoute(w http.ResponseWriter, r *http.Request) bool {
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 		jsonResponse(w, 200, s.protectedResourceMetadata(profile))
 	case oauthASMPath:
-		if !readMethod(r) {
-			methodError(w)
+		if !allowMethods(w, r, readMethods...) {
 			return true
 		}
 		w.Header().Set("Cache-Control", "public, max-age=3600")
@@ -411,8 +409,7 @@ func (s *Server) revokeEndpoint(w http.ResponseWriter, r *http.Request, o oauthS
 // registerEndpoint is POST /oauth/register: a public client with its
 // redirect URIs and name.
 func (s *Server) registerEndpoint(w http.ResponseWriter, r *http.Request, o oauthStore) {
-	if r.Method != http.MethodPost {
-		methodError(w)
+	if !allowMethods(w, r, http.MethodPost) {
 		return
 	}
 	if !s.oauth.authorize.Admit("register:" + s.peer(r)) {
@@ -728,7 +725,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, o oauthStore)
 	case http.MethodPost:
 		s.authorizeSubmit(w, r, o)
 	default:
-		methodError(w)
+		methodError(w, http.MethodGet, http.MethodHead, http.MethodPost)
 	}
 }
 

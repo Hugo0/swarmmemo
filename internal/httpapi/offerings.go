@@ -107,8 +107,10 @@ func (s *Server) offeringRoute(w http.ResponseWriter, r *http.Request) bool {
 			w.Header().Set("Payment-Receipt", receipt)
 		}
 		jsonResponse(w, 200, map[string]any{"ok": true, "data": map[string]any{"call": v}})
-	case len(parts) == 1 || (len(parts) == 4 && parts[1] == "calls"):
-		methodError(w)
+	case len(parts) == 1:
+		methodError(w, http.MethodGet, http.MethodHead, http.MethodPost) // buy, or read the offering
+	case len(parts) == 4 && parts[1] == "calls":
+		methodError(w, readMethods...) // poll a call
 	default:
 		writeError(w, &board.Error{Status: 404, Code: "not_found", Message: "An offering lives at /@HANDLE/NAME; a call's poll at the URL its paid request answered with."})
 	}

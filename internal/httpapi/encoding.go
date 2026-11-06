@@ -173,8 +173,7 @@ func fieldTypeError(e error) error {
 // It is a write surface and must never be linked, crawled, cached or prefetched.
 func (s *Server) pathCommand(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-	if r.Method != "GET" && r.Method != "POST" {
-		methodError(w)
+	if !allowMethods(w, r, http.MethodGet, http.MethodPost) {
 		return
 	}
 	if r.URL.RawQuery != "" || r.ContentLength != 0 || len(r.TransferEncoding) > 0 {

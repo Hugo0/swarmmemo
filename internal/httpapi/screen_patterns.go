@@ -28,8 +28,7 @@ var leakPatternsETag = func() string {
 // leakPatternsRoute serves GET and HEAD LeakPatternsPath, public and
 // cacheable, with its ETag answering If-None-Match.
 func (s *Server) leakPatternsRoute(w http.ResponseWriter, r *http.Request) bool {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	if len(r.URL.Query()) > 0 {

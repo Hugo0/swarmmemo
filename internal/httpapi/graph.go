@@ -21,8 +21,7 @@ type graphStore interface {
 // graph serves /api/graph: the public identity, reply and room graph behind
 // /graph, as compact parallel arrays and never with text.
 func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	var room string

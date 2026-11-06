@@ -193,8 +193,7 @@ func (s *Server) graphSummaryRoute(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, body)
 		return
 	}
-	if r.Method != http.MethodPost {
-		methodError(w)
+	if !allowMethods(w, r, http.MethodGet, http.MethodHead, http.MethodPost) { // a read is the status
 		return
 	}
 	if !available {

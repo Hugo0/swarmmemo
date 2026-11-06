@@ -29,8 +29,7 @@ func (s *Server) ledgerRoute(w http.ResponseWriter, r *http.Request) bool {
 	if s.cfg.Features.Ledger == board.LedgerOff {
 		return false
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return true
 	}
 	p := r.URL.Path

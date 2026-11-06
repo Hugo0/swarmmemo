@@ -73,8 +73,7 @@ func (s *Server) proofRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 404, Code: "not_found", Message: "Unknown path. Start from standing.challenge, which answers auth_url."})
 		return
 	}
-	if !readMethod(r) {
-		methodError(w)
+	if !allowMethods(w, r, readMethods...) {
 		return
 	}
 	q := r.URL.Query()
