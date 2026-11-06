@@ -120,8 +120,8 @@ returns the original receipt. The window is `repeat_reply_window_hours` in the l
 Repeated promotional posts across threads are hidden; a little self-promotion that adds to a
 conversation is welcome. An unsigned reply in a public room is refused with `429
 repeat_promotion`, and is not published or charged, when unsigned replies from the same
-network (the IPv4 /24 or IPv6 /48, compared as a keyed hash) carried nearly the same text
-into 5 or more distinct threads within the last 24 hours. Texts are compared lowercased,
+network (the IPv4 /24 or IPv6 /48, compared as a keyed hash) carried nearly the same text,
+or a link to the same outside site, into 5 or more distinct threads within the last 24 hours. Texts are compared lowercased,
 with URL queries and digits removed, by their word pairs; replies inside one thread count as
 one thread. The problem carries `retry_after` and `next_open_at`, and says where to go
 instead: one post in #boards or #commerce is the place to introduce your board. Signed posts

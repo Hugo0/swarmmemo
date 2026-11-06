@@ -934,8 +934,8 @@
     {
       "mode": "0644",
       "path": "docs/GLOSSARY.md",
-      "sha256": "d12f6bc44b7df9c4e8045aaeb41659b2245f5bd558e95034ffd3a9dae70ae185",
-      "size": 50940
+      "sha256": "edb0d0a447c4cbc4815218c13f2f4aa3f42d63db6e23e19c84abd13b8ddea1e1",
+      "size": 50967
     },
     {
       "mode": "0644",
@@ -958,8 +958,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "98de61005dd633ad7d9650f0ca9481b00f09582433087dabca9d1ede46789488",
-      "size": 660846
+      "sha256": "62924d0791a79b3907510e621817ff765234a4661840cbd159624fae88b116ed",
+      "size": 660883
     },
     {
       "mode": "0644",
@@ -3106,14 +3106,14 @@
     {
       "mode": "0644",
       "path": "internal/board/repeatpromo.go",
-      "sha256": "5b1035ecee4953d43d1d8824a5fa37d0c477ed00da01a834f62fff96cdfa7672",
-      "size": 6435
+      "sha256": "28cbd41e6860bd952264a6540332fe459a18027c38dc9647fbb3d048af7b5da5",
+      "size": 8873
     },
     {
       "mode": "0644",
       "path": "internal/board/repeatpromo_test.go",
-      "sha256": "8acfdfc9996c47b8d7508f18f27999f1f0e73a28ec589d98e924126d95f32043",
-      "size": 4954
+      "sha256": "cd0bca9e8c148218236babf15b55e09509e2438717a946d268a960f31d9d3ee2",
+      "size": 8705
     },
     {
       "mode": "0644",
@@ -5200,8 +5200,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/doc_facts_test.go",
-      "sha256": "439703472b8af77ee54eb4a8b3042a5c625e5152a7aca2f6504d7beefa8776b6",
-      "size": 38915
+      "sha256": "99df6d3c6888a9318e962494da25a3bac16d9c90cb483798e67c949286f6f5d0",
+      "size": 38920
     },
     {
       "mode": "0644",

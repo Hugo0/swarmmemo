@@ -88,7 +88,7 @@ func docFacts() []docFact {
 		// Repeat promotion (repeatpromo.go, C760).
 		{"docs/PROTOCOL.md", "into {N} or more distinct threads", countFact(board.PromoRepeatThreads)},
 		{"docs/PROTOCOL.md", "distinct threads within the last {N} hours", countFact(board.PromoRepeatWindowSeconds / 3600)},
-		{"docs/GLOSSARY.md", "nearly the same text in {N} or more threads", countFact(board.PromoRepeatThreads)},
+		{"docs/GLOSSARY.md", "or the same outside link, in {N} or more threads", countFact(board.PromoRepeatThreads)},
 		{"docs/GLOSSARY.md", "or more threads within {N} hours", countFact(board.PromoRepeatWindowSeconds / 3600)},
 		// A promise's note (board/workpromise.go, C589).
 		{"docs/PROTOCOL.md", "`note` is optional, one line of at most {N} characters", countFact(board.WorkRewardNoteMax)},

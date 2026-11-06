@@ -102,12 +102,90 @@ func TestRepeatPromotionOneThreadCountsOnce(t *testing.T) {
 }
 
 func TestPromoTextSimilar(t *testing.T) {
-	a := promoShingles(promoText("Join AgentHaven: https://agenthaven.example/join?ref=12 — 100 agents already!"))
-	b := promoShingles(promoText("join   agenthaven https://agenthaven.example/join?ref=99 - 250 agents already"))
+	a := newPromoPrint("Join AgentHaven: https://agenthaven.example/join?ref=12 — 100 agents already!", "")
+	b := newPromoPrint("join   agenthaven http://agenthaven.example/join?ref=99 - 250 agents already", "")
 	if !promoSimilar(a, b) {
 		t.Fatalf("rewording not similar: %v %v", a, b)
 	}
-	if c := promoShingles(promoText("I benchmarked SQLite under load and WAL helped a lot.")); promoSimilar(a, c) {
+	if c := newPromoPrint("I benchmarked SQLite under load and WAL helped a lot.", ""); promoSimilar(a, c) {
 		t.Fatal("unrelated texts similar")
+	}
+	// Different words, one outside host: one campaign (C762).
+	if d := newPromoPrint("Tired of slow boards? Our place is faster: https://WWW.AgentHaven.Example.:8443/x", ""); !promoSimilar(a, d) {
+		t.Fatalf("same host not similar: %v", d.hosts)
+	}
+	// Shared hosts and the board's own never make a campaign.
+	for _, link := range []string{"https://github.com/a/b", "https://en.wikipedia.org/wiki/X", "https://swarmmemo.com/r/lobby", "https://board.test/r/lobby"} {
+		p := newPromoPrint("totally different words here "+link, "board.test")
+		q := newPromoPrint("nothing alike at all, see "+link+"/other", "board.test")
+		if len(p.hosts) != 0 || promoSimilar(p, q) {
+			t.Fatalf("%s: shared host counted: %v", link, p.hosts)
+		}
+	}
+}
+
+// Reworded ads that link one outside host count as one campaign (C762);
+// honest replies that all link a big shared host do not.
+func TestRepeatPromotionSameHost(t *testing.T) {
+	s := openTest(t, Config{})
+	base := time.Unix(testTime, 0)
+	s.now = func() time.Time { return base }
+	asker := keyFor(124)
+	var threads []string
+	for i := range 12 {
+		threads = append(threads, postAs(t, s, asker, Command{Room: "lobby", Text: fmt.Sprintf("Thread %d: what are you building?", i), RequestID: fmt.Sprintf("t%d", i)}))
+	}
+	ctx := WithVia(context.Background(), "command")
+	seq := 0
+	reply := func(key byte, source, parent, text string) error {
+		t.Helper()
+		seq++
+		c := Command{Operation: "post", Room: "lobby", ReplyTo: parent, Text: text, RequestID: fmt.Sprintf("r%d", seq)}
+		s.now = func() time.Time { return base.Add(time.Duration(seq) * time.Minute) }
+		if key != 0 {
+			c.Timestamp = s.now().Unix()
+			c = signed(keyFor(key), c)
+		}
+		_, err := s.Execute(ctx, c, source)
+		return err
+	}
+	ads := []string{
+		"Great question about memory. We wrote up our approach at https://agenthaven.example/memory",
+		"Interesting thread! Plenty of builders compare notes on http://www.agenthaven.example/threads/42 daily.",
+		"I had the same trouble with rate limits; a fix is described at https://AgentHaven.example./faq#limits",
+		"Love this. Anyone curious can browse examples: https://agenthaven.example:443/examples?src=board",
+		"Benchmarks like these get discussed weekly over on https://agenthaven.example/bench too.",
+		"Signing keys confused me as well, until reading https://agenthaven.example/keys carefully.",
+	}
+	for i := range PromoRepeatThreads {
+		if err := reply(0, fmt.Sprintf("198.51.100.%d", 10+i), threads[i], ads[i]); err != nil {
+			t.Fatalf("ad %d: %v", i, err)
+		}
+	}
+	var e *Error
+	if err := reply(0, "198.51.100.77", threads[5], ads[5]); !errors.As(err, &e) || e.Code != "repeat_promotion" {
+		t.Fatalf("sixth reworded ad: want repeat_promotion, got %v", err)
+	}
+	// The same host from another /24: its own count.
+	if err := reply(0, "203.0.113.9", threads[5], ads[5]); err != nil {
+		t.Fatalf("other network: %v", err)
+	}
+	// Sharing the host but signed: published.
+	if err := reply(125, "198.51.100.12", threads[6], "Our docs cover this at https://agenthaven.example/docs in depth."); err != nil {
+		t.Fatalf("signed: %v", err)
+	}
+	// Honest replies from another /24, all linking github.com: published.
+	honest := []string{
+		"The repo https://github.com/foo/bar has a decent SQLite wrapper.",
+		"See https://github.com/acme/agent-kit/issues/12 for the same crash.",
+		"I forked https://github.com/x/y and added retries, works now.",
+		"Docs live at https://github.com/org/docs/blob/main/README.md if useful.",
+		"Benchmarks: https://github.com/bench/results show WAL is fine.",
+		"My notes: https://gist.github.com/me/abc and https://github.com/me/tools.",
+	}
+	for i, text := range honest {
+		if err := reply(0, fmt.Sprintf("192.0.2.%d", 10+i), threads[6+i], text); err != nil {
+			t.Fatalf("honest %d: %v", i, err)
+		}
 	}
 }
