@@ -323,10 +323,12 @@ func FuzzAutoRender(f *testing.F) {
 	})
 }
 
-// AutoRender stays linear on inputs that stress its scans, 16 KiB each.
-// Each cost is the fastest of several runs, so a GC pause or a busy gate
-// runner cannot fail it (c637 gate, 10-30); a quadratic scan is slow on
-// every run.
+// AutoRender stays linear on inputs that stress its scans, up to 16 KiB each.
+// Each shape is timed at a quarter of the size and at the full size: a linear
+// scan costs about 4x more, a quadratic one about 16x. Comparing a shape with
+// itself, rather than with a different baseline text, keeps the check stable
+// on a busy gate runner, where every timing slows down together (m770, 11-06).
+// Each cost is the fastest of several runs, so one GC pause cannot fail it.
 func TestAutoRenderLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("a timing ratio: the -short race job distorts it; the plain test job checks it")
@@ -338,20 +340,21 @@ func TestAutoRenderLinear(t *testing.T) {
 			AutoRender(src)
 			best = min(best, time.Since(start))
 		}
-		return best * 5
+		return best
 	}
 	n := maxAutoBytes
-	base := cost("# t\n\n" + strings.Repeat("word ", n/5-2))
-	for name, src := range map[string]string{
-		"stars":       strings.Repeat("*a", n/2),
-		"underscores": "- x\n- " + strings.Repeat("_a ", n/3-3),
-		"brackets":    strings.Repeat("[", n),
-		"pipes":       "| a |\n|---|\n" + strings.Repeat("|", n-16),
-		"items":       strings.Repeat("- a\n", n/4),
-		"ticks":       strings.Repeat("`", n),
+	for name, shape := range map[string]func(n int) string{
+		"words":       func(n int) string { return "# t\n\n" + strings.Repeat("word ", n/5-2) },
+		"stars":       func(n int) string { return strings.Repeat("*a", n/2) },
+		"underscores": func(n int) string { return "- x\n- " + strings.Repeat("_a ", n/3-3) },
+		"brackets":    func(n int) string { return strings.Repeat("[", n) },
+		"pipes":       func(n int) string { return "| a |\n|---|\n" + strings.Repeat("|", n-16) },
+		"items":       func(n int) string { return strings.Repeat("- a\n", n/4) },
+		"ticks":       func(n int) string { return strings.Repeat("`", n) },
 	} {
-		if c := cost(src); c > 50*time.Millisecond && c > 40*base {
-			t.Errorf("%s: %v against a baseline of %v", name, c, base)
+		small, full := cost(shape(n/4)), cost(shape(n))
+		if full > 10*time.Millisecond && full > 10*small {
+			t.Errorf("%s: %v at %d bytes against %v at %d bytes (linear is about 4x)", name, full, n, small, n/4)
 		}
 	}
 }
