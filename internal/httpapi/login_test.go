@@ -185,7 +185,7 @@ var (
 
 func TestLoginWithProviders(t *testing.T) {
 	p := newFakeProvider(t)
-	_, s := loginServer(t, p)
+	store, s := loginServer(t, p)
 	b := &browser{s: s, cookies: map[string]string{}}
 
 	// Only the providers set up are shown, on /login and in /capabilities.
@@ -199,6 +199,17 @@ func TestLoginWithProviders(t *testing.T) {
 	if !strings.Contains(enabled, "kind:x") || !strings.Contains(enabled, "kind:github") || strings.Contains(enabled, "google") ||
 		!strings.Contains(enabled, "redirect_uri:https://swarmmemo.com/login/x/callback") {
 		t.Fatalf("capabilities providers: %s", enabled)
+	}
+	// Me links to /login, naming only the providers set up (C786); a server
+	// with hosted identities but no provider shows no link.
+	site := New(store, web.Handler(store), Config{PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com", Features: board.Features{Trust: board.TrustOn}})
+	if me := get(site, "/me", "text/html").Body.String(); !strings.Contains(me, `href="/login">Sign in with X or GitHub</a>`) {
+		t.Fatalf("/me has no sign-in link: %s", between(me, `id="identity-empty"`, "</div>"))
+	}
+	plainStore, _ := hostedServer(t)
+	plain := New(plainStore, web.Handler(plainStore), Config{PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com"})
+	if me := get(plain, "/me", "text/html"); me.Code != 200 || !strings.Contains(me.Body.String(), `id="identity-empty"`) || strings.Contains(me.Body.String(), `href="/login"`) {
+		t.Fatalf("/me with no provider set up: %d", me.Code)
 	}
 	// A provider not set up is refused cleanly; an unknown one is not found.
 	if w := b.get("/login/google"); w.Code != 404 || !strings.Contains(w.Body.String(), "not set up on this server") {
@@ -437,4 +448,42 @@ func FuzzLoginRoute(f *testing.F) {
 			t.Fatalf("%s redirects to %s", target, loc)
 		}
 	})
+}
+
+// Sign-ins under way are bounded per network and in all (C786): a flood
+// from one network drops only its own oldest, and a full table drops the
+// oldest of all, so another browser's start still lands and finishes.
+func TestLoginPendingBounded(t *testing.T) {
+	p := newFakeProvider(t)
+	_, s := loginServer(t, p)
+	now := int64(1_000_000)
+	s.loginPut("victim", pendingLogin{kind: "x", expires: now + 600, network: "198.51.100.7"}, now)
+	for i := range 3 * loginPendingPerNetwork {
+		s.loginPut(fmt.Sprint("flood", i), pendingLogin{kind: "x", expires: now + 600 + int64(i), network: "2001:db8::/64"}, now)
+	}
+	if n := len(s.oauth.logins); n != 1+loginPendingPerNetwork {
+		t.Fatalf("pending after a one-network flood: %d", n)
+	}
+	if _, ok := s.loginTake(fmt.Sprint("flood", 3*loginPendingPerNetwork-1), now); !ok {
+		t.Fatal("the flooding network's newest start was dropped")
+	}
+	if _, ok := s.loginTake("flood0", now); ok {
+		t.Fatal("the flooding network's oldest start was kept")
+	}
+	// A full table of many networks drops the oldest, never the newest.
+	for i := range loginPendingMax {
+		s.loginPut(fmt.Sprint("many", i), pendingLogin{kind: "x", expires: now + 1000 + int64(i), network: fmt.Sprint("net", i)}, now)
+	}
+	if n := len(s.oauth.logins); n != loginPendingMax {
+		t.Fatalf("pending when full: %d", n)
+	}
+	s.loginPut("late", pendingLogin{kind: "x", expires: now + 5000, network: "203.0.113.9"}, now)
+	if _, ok := s.loginTake("late", now); !ok {
+		t.Fatal("a start into a full table was refused")
+	}
+	// Expired ones are dropped as new ones come in, and never spent.
+	s.loginPut("old", pendingLogin{kind: "x", expires: now + 1, network: "192.0.2.1"}, now)
+	if _, ok := s.loginTake("old", now+2); ok {
+		t.Fatal("an expired sign-in was spent")
+	}
 }

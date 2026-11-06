@@ -68,6 +68,7 @@ anyone verifies it offline. `screen_verify` over MCP checks a receipt and, given
 its hash matches. A receipt's verdict is always at 0.6, whatever threshold the call used, so
 every receipt means the same. The answer's own `verdict` at your `threshold` is not signed:
 quote the receipt, and anyone can check another threshold against its signed categories.
+At any threshold but 0.6 the answer also carries `caller_threshold`: quote it beside the receipt.
 
 ## Can it check what my agent is about to send?
 

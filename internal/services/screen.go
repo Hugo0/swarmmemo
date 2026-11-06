@@ -366,6 +366,16 @@ func (t TextScreen) categories() (map[string]float64, bool) {
 	return out, true
 }
 
+// withCallerThreshold adds caller_threshold beside the receipt when the
+// call chose a threshold other than the receipt's fixed ScreenThreshold, so
+// whoever quotes the receipt with it sees which threshold the caller acted
+// at (C785). Absent at the default: answers at 0.6 keep their keys.
+func withCallerThreshold(answer map[string]any, threshold float64) {
+	if threshold != ScreenThreshold {
+		answer["caller_threshold"] = threshold
+	}
+}
+
 // screenVerdict is flag when any category is at or above threshold.
 func screenVerdict(categories map[string]float64, threshold float64) string {
 	for _, v := range categories {
@@ -430,11 +440,13 @@ func (s *screen) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	}
 	signed, signature := signPayload(s.key, payload)
 	receipt := ScreenReceipt{Schema: ScreenSchema, KeyID: payload.KeyID, PublicKey: base64.RawURLEncoding.EncodeToString(pub), Payload: signed, Signature: signature}
-	body := canonicalJSON(map[string]any{
+	answer := map[string]any{
 		"verdict": screenVerdict(categories, p.threshold), "threshold": p.threshold, "categories": categories, "classifier_version": ClassifierVersion, "source": p.source,
 		"text_sha256": payload.TextSHA256, "text_bytes": payload.TextBytes, "receipt": receipt,
 		"note": "A signal with a known error rate, not a guarantee; the text was not stored. verdict uses your threshold (default " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + "), but the signed receipt is always issued at threshold " + strconv.FormatFloat(ScreenThreshold, 'f', -1, 64) + ", so quote the receipt. What each category means: /protocol.md#screening. Calibration: /protocol.md#screening-calibration",
-	})
+	}
+	withCallerThreshold(answer, p.threshold)
+	body := canonicalJSON(answer)
 	public := canonicalJSON(map[string]any{"verdict": payload.Verdict, "classifier_version": ClassifierVersion, "source": p.source, "text_bytes": payload.TextBytes})
 	used := min(c.Price.For(int64(len(p.text))), screenFee+res.CostMicroUSD)
 	return Result{Body: body, Public: public, Used: used}, nil

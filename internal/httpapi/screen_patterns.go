@@ -99,6 +99,7 @@ func addLeakOpenAPI(paths, schemas map[string]any) {
 	schemas["LeakResult"] = map[string]any{"type": "object", "description": "service.call screen.leak's result.", "required": []string{"verdict", "findings", "categories", "text_sha256", "text_bytes", "receipt"}, "properties": map[string]any{
 		"verdict":            map[string]any{"type": "string", "enum": []string{"pass", leakscan.Warn, leakscan.Hold}, "description": "hold when a finding, or a category at or above threshold, holds by the pattern list's actions; warn when all only warn; pass when there are none"},
 		"threshold":          map[string]string{"type": "number"},
+		"caller_threshold":   map[string]any{"type": "number", "description": "the threshold you sent, beside the receipt's fixed " + strconv.FormatFloat(services.ScreenThreshold, 'f', -1, 64) + "; only when it differs"},
 		"mode":               map[string]any{"type": "string", "enum": services.LeakModes},
 		"audience":           map[string]any{"type": "string", "enum": services.LeakAudiences},
 		"findings":           map[string]any{"type": "array", "items": finding},

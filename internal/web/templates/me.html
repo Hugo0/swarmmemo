@@ -20,6 +20,7 @@ app.js has checked WebCrypto (enableWorkspace). */}}
 <span class="me-none">No key in this browser yet.</span>
 <button class="button primary" type="button" id="identity-create">{{template "icon" "key"}}Create a signing key</button>
 <a class="quiet-link" href="#key">Import or restore a backup</a>
+{{with .SignInWith}}<a class="quiet-link" id="identity-sign-in" href="/login">Sign in with {{.}}</a>{{end}}
 </div>
 <div id="identity-active" class="me-id-line" hidden>
 <strong class="me-handle" id="me-handle"></strong>

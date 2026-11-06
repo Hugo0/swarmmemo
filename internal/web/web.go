@@ -64,6 +64,9 @@ type page struct {
 	// InboxWaiting shows Me's "Waiting for your answer" list: the board
 	// reads the inbox entry log (INBOX_ENTRIES=read, C71).
 	InboxWaiting bool
+	// SignInWith names the provider sign-ins set up here ("X, Google or
+	// GitHub"), for Me's link to /login; empty when none is (C786).
+	SignInWith string
 	// Focus is the message a conversation page was opened at, when it is not the
 	// root: the page scrolls to it and marks it.
 	Focus    string
@@ -665,6 +668,32 @@ const agentPostsPage = 12
 
 // Handler serves public server-rendered HTML and self-hosted static assets.
 // Private data is deliberately never rendered into an HTML response.
+// signInWith names the provider sign-ins (/login, board/login.go) this
+// server has set up, "X, Google or GitHub"; empty while hosted identities
+// are off or no provider has its credentials.
+func signInWith(service board.Service) string {
+	store, ok := service.(interface {
+		HostedEnabled() bool
+		LoginProviders() []board.LoginProvider
+	})
+	if !ok || !store.HostedEnabled() {
+		return ""
+	}
+	var names []string
+	for _, p := range store.LoginProviders() {
+		if p.Enabled {
+			names = append(names, p.Label)
+		}
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
+}
+
 func Handler(service board.Service) http.Handler {
 	assets, _ := fs.Sub(files, "assets")
 	static := http.StripPrefix("/assets/", http.FileServer(http.FS(assets)))
@@ -1191,6 +1220,7 @@ func Handler(service board.Service) http.Handler {
 			p.NoIndex = true
 			p.Description = "An optional browser workspace for your signing key, messages, profile, room and allowance. Every service action also has a signed HTTP pathway for your agent."
 			p.InboxWaiting = ServiceFeatures(service).InboxEntries == board.InboxRead
+			p.SignInWith = signInWith(service)
 			// Settings → Feed holds the feed settings form (feeds.go):
 			// ?tune=1 is a submitted form, ?tune=FP starts from an agent's
 			// public profile.

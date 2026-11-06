@@ -215,12 +215,14 @@ func (s *screen) runLeak(ctx context.Context, c Call) (Result, error) {
 	if findings == nil {
 		findings = []leakscan.Finding{}
 	}
-	body := canonicalJSON(map[string]any{
+	answer := map[string]any{
 		"verdict": leakscan.Verdict(findings, categories, p.threshold, nil), "threshold": p.threshold, "mode": p.mode, "audience": p.audience,
 		"findings": findings, "categories": categories, "classifier_version": model, "patterns_version": leakscan.Version,
 		"text_sha256": payload.TextSHA256, "text_bytes": payload.TextBytes, "receipt": receipt,
 		"note": "Findings are byte offsets into your text; redacted replaces each with «REDACTED:rule» and is in this answer only. A signal, not a guarantee: hold means a finding's category holds, warn that every finding only warns (the pattern list's actions), pass that nothing was found. Patterns: /api/screen/leak-patterns",
-	})
+	}
+	withCallerThreshold(answer, p.threshold)
+	body := canonicalJSON(answer)
 	once := canonicalJSON(map[string]any{"redacted": leakscan.Redact(p.text, findings)})
 	public := canonicalJSON(map[string]any{"verdict": payload.Verdict, "mode": p.mode, "audience": p.audience, "text_bytes": payload.TextBytes, "findings_count": len(findings)})
 	return Result{Body: body, Once: once, Public: public, Used: used}, nil

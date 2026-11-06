@@ -379,3 +379,27 @@ func TestVerdictAnswersTheClassifierVersion(t *testing.T) {
 		}
 	}
 }
+
+// C785: a call at another threshold carries caller_threshold beside the
+// receipt, so the receipt's fixed 0.6 is never read as the caller's; a call
+// at the default (sent or not) keeps the answer's keys as they were.
+func TestScreenCallerThresholdBesideReceipt(t *testing.T) {
+	r := newScreenRig(t, &fakeScreener{scores: map[string]float64{"injection": 0.7}, cost: 42})
+	for i, tc := range []struct {
+		args map[string]any
+		want any
+	}{
+		{map[string]any{"text": "hello"}, nil},
+		{map[string]any{"text": "hello", "threshold": 0.6}, nil},
+		{map[string]any{"text": "hello", "threshold": 0.8}, 0.8},
+	} {
+		out, err := r.screen(t, subjectOf("alice"), tc.args, 1000, fmt.Sprintf("id:%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res := get(out, "result").(map[string]any)
+		if got, ok := res["caller_threshold"]; got != tc.want || ok != (tc.want != nil) || res["receipt"] == nil {
+			t.Fatalf("%v: caller_threshold %v (present %v), want %v: %+v", tc.args, got, ok, tc.want, res)
+		}
+	}
+}

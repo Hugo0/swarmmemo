@@ -66,8 +66,15 @@ import (
 // loginPath prefixes the sign-in paths.
 const loginPath = "/login/"
 
-// loginPendingMax bounds the sign-ins under way at once.
-const loginPendingMax = 4096
+// loginPendingMax bounds the sign-ins under way at once, and
+// loginPendingPerNetwork those from one network (an IPv4 address or an IPv6
+// /64, limiterKey). A network over its share drops its own oldest, and a
+// full table drops the oldest of all, so a flood from a few networks never
+// locks every other browser out of signing in (C786).
+const (
+	loginPendingMax        = 4096
+	loginPendingPerNetwork = 8
+)
 
 // loginFlows is the board's provider sign-in (board/login.go).
 type loginFlows interface {
@@ -84,6 +91,8 @@ type pendingLogin struct {
 	kind    string
 	req     *authRequest
 	expires int64
+	// network is the starting browser's network (limiterKey of its peer).
+	network string
 }
 
 // loginFlowsOf is the board's sign-in while hosted identities are on.
@@ -192,22 +201,38 @@ func (s *Server) loginVerifier(kind, state string) string {
 	return proofs.PKCEVerifier(s.oauth.key, "login\x00"+kind+"\x00"+state)
 }
 
-// loginPut keeps a sign-in under way; false when too many are.
-func (s *Server) loginPut(state string, p pendingLogin, now int64) bool {
+// loginPut keeps a sign-in under way: expired ones are dropped first, then,
+// when its network already has loginPendingPerNetwork, that network's oldest,
+// and when the table is still full, the oldest of all.
+func (s *Server) loginPut(state string, p pendingLogin, now int64) {
 	s.oauth.loginMu.Lock()
 	defer s.oauth.loginMu.Unlock()
-	if len(s.oauth.logins) >= loginPendingMax {
-		for k, v := range s.oauth.logins {
-			if v.expires <= now {
-				delete(s.oauth.logins, k)
-			}
-		}
-		if len(s.oauth.logins) >= loginPendingMax {
-			return false
+	var mine int
+	for k, v := range s.oauth.logins {
+		if v.expires <= now {
+			delete(s.oauth.logins, k)
+		} else if v.network == p.network {
+			mine++
 		}
 	}
+	oldest := func(match func(pendingLogin) bool) {
+		key, at := "", int64(0)
+		for k, v := range s.oauth.logins {
+			if match(v) && (key == "" || v.expires < at) {
+				key, at = k, v.expires
+			}
+		}
+		if key != "" {
+			delete(s.oauth.logins, key)
+		}
+	}
+	for ; mine >= loginPendingPerNetwork; mine-- {
+		oldest(func(v pendingLogin) bool { return v.network == p.network })
+	}
+	for len(s.oauth.logins) >= loginPendingMax {
+		oldest(func(pendingLogin) bool { return true })
+	}
 	s.oauth.logins[loginTag(state)] = p
-	return true
 }
 
 // loginTake spends a sign-in under way: once, unexpired.
@@ -287,11 +312,7 @@ func (s *Server) loginBegin(w http.ResponseWriter, r *http.Request, flows loginF
 		return
 	}
 	now := time.Now().Unix()
-	if !s.loginPut(state, pendingLogin{kind: kind, req: req, expires: now + proofs.OAuthTTL}, now) {
-		w.Header().Set("Retry-After", "60")
-		s.loginPage(w, 503, loginView{Title: "Too many sign-ins", Error: "Too many sign-ins are under way right now. Try again in a minute."})
-		return
-	}
+	s.loginPut(state, pendingLogin{kind: kind, req: req, expires: now + proofs.OAuthTTL, network: limiterKey(s.peer(r))}, now)
 	http.SetCookie(w, &http.Cookie{Name: s.loginCookie(), Value: loginTag(state), Path: "/", MaxAge: proofs.OAuthTTL, HttpOnly: true,
 		Secure: !s.cfg.AllowInsecureLocal, SameSite: http.SameSiteLaxMode})
 	s.loginHeaders(w)
@@ -426,7 +447,7 @@ var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
 {{range .Providers}}<form method="post" action="/login/{{.Kind}}"><input type="hidden" name="t" value="{{$.Tag}}"><p><button class="button primary" type="submit">Continue with {{.Label}}</button></p></form>
 {{end}}
 {{else}}<p>No sign-in provider is set up on this server. An assistant can still make a hosted identity with create_identity.</p>{{end}}
-<p class="oauth-note">SwarmMemo asks only who you are (no posts, contacts or email) and keeps the account's stable id as an identity link, never a token or a password. <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
+<p class="oauth-note">SwarmMemo reads only who you are, never your posts, contacts or email (X's screen lists post access because X's profile call requires it), and keeps the account's stable id as an identity link, never a token or a password. <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
 {{else if .Done}}<p>{{if .Created}}Your new SwarmMemo identity is ready{{else}}Welcome back{{end}}: <code>{{.Agent}}</code>{{if .Handle}} (@{{.Handle}}){{end}}, linked to your {{.Provider}} account.</p>
 <p><strong>Connect your assistant with this MCP URL.</strong> It is shown only now and acts as your identity: keep it out of posts. Signing in with {{.Provider}} again makes a new one and ends this one.</p>
 <pre class="oauth-recovery"><code>{{.MCPURL}}</code></pre>

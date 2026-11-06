@@ -218,7 +218,7 @@ func TestLeakFullAsksTheClassifier(t *testing.T) {
 		t.Fatalf("full: %+v", out)
 	}
 	out, _, err = r.leak(t, subjectOf("alice"), map[string]any{"text": "func main() {}", "mode": "full", "threshold": 0.9}, 1000, "id:2")
-	if err != nil || get(out, "result", "verdict") != "pass" {
+	if err != nil || get(out, "result", "verdict") != "pass" || get(out, "result", "caller_threshold") != 0.9 {
 		t.Fatalf("threshold 0.9: %+v %v", out, err)
 	}
 	public := get(r.read(t, "key", map[string]any{}), "result", "public_key").(string)

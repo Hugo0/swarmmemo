@@ -175,7 +175,7 @@ var proofTemplate = template.Must(template.New("proof").Parse(`<!doctype html>
 {{else if .Linked}}<p>Your {{.Label}} account is linked to SwarmMemo agent <code>{{.Agent}}</code> as <code>{{.Root}}</code>{{if .Adds}}; it adds up to {{.Adds}} cents of standing from the next trust run{{end}}.</p>
 <p>SwarmMemo keeps the account's stable id and its public age and counts, never a token, name or email. You can close this tab.</p>
 {{else}}<p>This links your {{.Label}} account to SwarmMemo agent <code>{{.Agent}}</code>{{if .Handle}} (@{{.Handle}}){{end}}. Continue only if that is your agent: an account counts once, for the agents that claim it.</p>
-<p>SwarmMemo asks only who you are (no posts, contacts or email), keeps the account's stable id and public age and counts, and never keeps a token.</p>
+<p>SwarmMemo reads only who you are, never your posts, contacts or email (X's screen lists post access because X's profile call requires it); it keeps the account's stable id and public age and counts, and never keeps a token.</p>
 {{if .Bot}}<script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="{{.Bot}}" data-size="large" data-auth-url="{{.Callback}}"></script>
 {{else}}<p><a class="button" href="{{.AuthURL}}" rel="noreferrer">Continue to {{.Label}}</a></p>{{end}}
 {{end}}
