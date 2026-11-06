@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -380,7 +381,9 @@ func TestWorkStandingTiersAndUSDCCaps(t *testing.T) {
 	run(t, s, c2)
 
 	// bug+fix: 500 credits and 0.40 USDC owed.
-	run(t, s, workWith(s, owner, Command{Operation: "work.accept", MessageID: r1, Amount: 1}, map[string]any{"tier": "bug+fix"}))
+	if owedRes := run(t, s, workWith(s, owner, Command{Operation: "work.accept", MessageID: r1, Amount: 1}, map[string]any{"tier": "bug+fix"})); owedRes.Next != nil && len(owedRes.Next.Hints) > 0 {
+		t.Fatalf("an accept that owes USDC has hints: %+v", owedRes.Next.Hints)
+	}
 	if w := getTestWork(t, s, r1); w.Tier != "bug+fix" || w.Reward.Amount != 500 || w.RewardUSDC.State != "payable" || w.RewardUSDC.Amount != "0.4" {
 		t.Fatalf("bug+fix: %+v %+v", w.Reward, w.RewardUSDC)
 	}
@@ -393,9 +396,21 @@ func TestWorkStandingTiersAndUSDCCaps(t *testing.T) {
 
 	// The default tier (bug): 0.20 more would pass the 0.50 day cap, so the
 	// result is paid in credits only, and the excess credits return.
-	acked := run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r2, Amount: 1})).Data["ack"].(WorkAck)
-	if !strings.Contains(acked.Note, "paid in credits only: 300 credits") || !strings.Contains(acked.Note, "no USDC is owed") {
+	cappedRes := run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r2, Amount: 1}))
+	acked := cappedRes.Data["ack"].(WorkAck)
+	if !strings.Contains(acked.Note, "paid in credits only: 300 credits") || !strings.Contains(acked.Note, "no USDC is owed") || !strings.Contains(acked.Note, "resets at 00:00 UTC") {
 		t.Fatalf("capped note: %q", acked.Note)
+	}
+	// C771: the requester is told at accept time, as a usdc_cap hint, with
+	// when the daily cap resets.
+	if n := cappedRes.Next; n == nil || len(n.Hints) != 1 || n.Hints[0].Code != "usdc_cap" || !strings.Contains(n.Hints[0].Message, "No USDC is owed") || !strings.Contains(n.Hints[0].Message, "resets at 00:00 UTC") {
+		t.Fatalf("capped hints: %+v", cappedRes.Next)
+	}
+	if shown := NudgesShown(cappedRes.Next); !slices.Contains(shown, "usdc_cap") {
+		t.Fatalf("usdc_cap not a shown notice: %v", shown)
+	}
+	if USDCVoidWords(WorkUSDCCapReason) == "" {
+		t.Fatal("usdc_cap has no plain words")
 	}
 	w := getTestWork(t, s, r2)
 	if w.Tier != "bug" || w.Reward.Amount != 300 || w.Reward.State != "paid" || w.Reward.Receipt == nil || w.RewardUSDC.State != "void" || w.RewardUSDC.Reason != "usdc_cap" {

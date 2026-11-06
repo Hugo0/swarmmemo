@@ -325,6 +325,13 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &board.Error{Status: 503, Code: "busy", Message: "The server is busy. Retry shortly."})
 		return
 	}
+	if clean, ok := s.apiPathWithTrailingSlash(r); ok {
+		// The same 308 as an MCP path's stray "/" (C772): the query is kept.
+		u := *r.URL
+		u.Path, u.RawPath = clean, ""
+		http.Redirect(w, r, u.RequestURI(), http.StatusPermanentRedirect)
+		return
+	}
 	s.countReferrer(r)
 	r = r.WithContext(board.WithClientFamily(r.Context(), requestClient(r)))
 	r = r.WithContext(board.WithFunnelRef(r.Context(), s.firstContactRef(r, isMCP))) // the funnel's entry venue (funnelref.go)
@@ -1600,7 +1607,7 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		c.Operation = "messages.list"
 		c.To = id
 	default:
-		http.NotFound(w, r)
+		writeError(w, apiNotFound())
 		return
 	}
 	s.execute(w, r, c)
@@ -1890,6 +1897,29 @@ func allowMethods(w http.ResponseWriter, r *http.Request, methods ...string) boo
 func pageLinkQuery(r *http.Request) bool {
 	q := r.URL.Query()
 	return q.Has("reply") && strings.HasPrefix(r.URL.Path, "/r/") || q.Has("sub") && strings.HasPrefix(r.URL.Path, "/e/")
+}
+
+// apiNotFound is the 404 of an /api/ path no route serves: the JSON error
+// envelope, never the mux's text/plain "404 page not found" (C772).
+func apiNotFound() *board.Error {
+	return &board.Error{Status: 404, Code: "not_found", Message: "No such API path; /openapi.json lists the routes."}
+}
+
+// apiPathWithTrailingSlash is a GET or HEAD of an exact /api route
+// (/openapi.json lists it) with a trailing "/", and the route's path. The
+// route table is read only for such a request, after the request pool.
+func (s *Server) apiPathWithTrailingSlash(r *http.Request) (string, bool) {
+	path := r.URL.Path
+	if !readMethod(r) || !strings.HasPrefix(path, "/api/") || !strings.HasSuffix(path, "/") {
+		return "", false
+	}
+	clean := strings.TrimRight(path, "/")
+	paths, _ := s.openapi()["paths"].(map[string]any)
+	route, _ := paths[clean].(map[string]any)
+	if _, get := route["get"]; !get {
+		return "", false
+	}
+	return clean, true
 }
 
 func wantsJSON(r *http.Request) bool {

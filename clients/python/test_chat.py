@@ -629,9 +629,14 @@ class LiveChatTests(unittest.TestCase):
     def test_a_conversation_end_to_end(self):
         out = self.ok("alice", "new", "--title", "flaky test", "--max-messages", "4", "--ttl-hours", "24", "--invite")
         self.assertRegex(out, r"opened ~[a-z2-7]{26}; private: members and the SwarmMemo server can read this; limits: 4 messages, until ")
-        line = re.search(r"python3 swarmmemo\.py --url \S+ --key YOUR_KEY\.json chat join (~[a-z2-7]{26}\.\S+)", out)
+        line = re.search(r"^ *(python3 swarmmemo\.py .*chat join .*)$", out, re.M)
         self.assertIsNotNone(line, out)
-        room = line.group(1).rpartition(".")[0]
+        argv = shlex.split(line.group(1))
+        self.assertEqual(argv[:3] + argv[4:8], ["python3", "swarmmemo.py", "--url", "--key", "YOUR_KEY.json", "chat", "join"], line.group(1))
+        self.assertRegex(argv[8], r"^~[a-z2-7]{26}\.\S+$")
+        self.assertIn(" '~", line.group(1))  # quoted, so zsh pastes it without named-directory expansion
+        invite = argv[8]
+        room = invite.rpartition(".")[0]
         # The scan holds a secret, and nothing is sent.
         repro = self.work / "alice" / "repro.md"
         repro.write_text("## Repro\nWEBHOOK_SECRET=whsec_4f8a9b2c1d\n`go test ./x` fails\nAWS key " + FAKE_AWS + "\n")
@@ -644,7 +649,7 @@ class LiveChatTests(unittest.TestCase):
         self.ok("alice", "send", room, str(repro))
 
         # This board has no screening, so the joiner fails closed...
-        code, out, err = self.cli("bob", "join", line.group(1))
+        code, out, err = self.cli("bob", "join", invite)
         self.assertEqual(code, 4, out + err)
         self.assertIn("limits: 4 messages", out)
         self.assertIn(memo.CHAT_FRAME, out)
@@ -656,7 +661,7 @@ class LiveChatTests(unittest.TestCase):
         self.assertIn("flaky test", out, "a title is the first message")
         self.assertIn("withheld earlier", out)
         # A member running the line again changes nothing.
-        self.ok("bob", "join", line.group(1), "--inbound-mode", "off")
+        self.ok("bob", "join", invite, "--inbound-mode", "off")
 
         # The room holds 4 messages: the title, the repro and two more.
         self.ok("bob", "send", room, "-", stdin="Try GOFLAGS=-count=1; the cache hides it.")
@@ -838,7 +843,7 @@ class LiveChatTests(unittest.TestCase):
         self.assertIn("to key epoch 2", out)
         self.assertIn("the plan, for bob", self.ok("bob", "read", room))
         # Carol joins: a new epoch she can read, and nothing from before.
-        code = re.search(r"chat join (\S+)", self.ok("alice", "invite", room, "--for", self.fp("carol"))).group(1)
+        code = shlex.split(re.search(r"(python3 swarmmemo\.py .*chat join .*)", self.ok("alice", "invite", room, "--for", self.fp("carol"))).group(1))[-1]
         out = self.ok("carol", "join", code)
         self.assertIn("sealed: only its members can read this", out)
         self.assertIn("[this sealed message cannot be opened here", out)

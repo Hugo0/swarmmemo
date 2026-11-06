@@ -196,6 +196,13 @@ func TestNudgeCodesRegistered(t *testing.T) {
 			t.Errorf("hint %s has no NudgeCodes row", m[1])
 		}
 	}
+	// The hint codes the store sets: an accept whose USDC a cap voided (C771).
+	for _, h := range []*Hint{usdcCapHint("")} {
+		hints[h.Code] = true
+		if _, ok := LookupNudge(h.Code); !ok {
+			t.Errorf("hint %s has no NudgeCodes row", h.Code)
+		}
+	}
 	notices := 0
 	for _, n := range NudgeCodes {
 		if n.Kind != NudgeNotice {
@@ -207,7 +214,7 @@ func TestNudgeCodesRegistered(t *testing.T) {
 		}
 	}
 	// NudgesShown reads each notice; the tip is the engine's to log.
-	next := &Next{Nudge: &NudgeShown{Code: "first_work"}, RepliesWaiting: "x", HandleNotApplied: &HandleNotApplied{}, Hints: []Hint{{Code: "literal_newline_escapes"}, {Code: "looks_like_markdown"}, {Code: "many_threads"}}, WaitNeedsCursor: "x"}
+	next := &Next{Nudge: &NudgeShown{Code: "first_work"}, RepliesWaiting: "x", HandleNotApplied: &HandleNotApplied{}, Hints: []Hint{{Code: "literal_newline_escapes"}, {Code: "looks_like_markdown"}, {Code: "many_threads"}, {Code: WorkUSDCCapReason}}, WaitNeedsCursor: "x"}
 	if got := NudgesShown(next); len(got) != notices {
 		t.Fatalf("NudgesShown = %v", got)
 	}

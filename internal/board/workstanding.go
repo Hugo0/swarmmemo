@@ -1337,14 +1337,14 @@ func (s *Store) returnLapsedStanding(ctx context.Context, tx *sql.Tx, standingID
 // tier data names (default the first), the excess credits back to the pool,
 // and the USDC owed, or none when the tier has none or the day's USDC caps
 // are reached (then the result is paid in credits only). It returns the
-// acknowledgement's note.
-func (s *Store) standingAccept(ctx context.Context, tx *sql.Tx, w workRow, d workData, now int64) (string, error) {
+// acknowledgement's note, and the usdc_cap hint when a cap voided the USDC.
+func (s *Store) standingAccept(ctx context.Context, tx *sql.Tx, w workRow, d workData, now int64) (string, *Hint, error) {
 	st, err := loadWorkStanding(ctx, tx, w.StandingID)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if st == nil {
-		return "", fmt.Errorf("board: result %s names standing task %s, which has none", w.ID, w.StandingID)
+		return "", nil, fmt.Errorf("board: result %s names standing task %s, which has none", w.ID, w.StandingID)
 	}
 	tier := st.Tiers[0]
 	if d.Tier != "" {
@@ -1354,44 +1354,44 @@ func (s *Store) standingAccept(ctx context.Context, tx *sql.Tx, w workRow, d wor
 			for _, t := range st.Tiers {
 				names = append(names, t.Name)
 			}
-			return "", problem(400, "invalid_work_data", "tier names one of this standing task's tiers: "+strings.Join(names, ", ")+".")
+			return "", nil, problem(400, "invalid_work_data", "tier names one of this standing task's tiers: "+strings.Join(names, ", ")+".")
 		}
 		tier = st.Tiers[i]
 	}
 	r, err := loadWorkReward(ctx, tx, workRewardsTable, w.ID)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if r != nil && r.State == "held" && tier.Credits < r.Amount {
 		excess := r.Amount - tier.Credits
 		h, e := s.ledger.led.EscrowSplit(ctx, tx, r.HoldID, excess, "work-tier:"+w.ID, w.Deadline, now)
 		if e != nil {
-			return "", fromAllowance(e)
+			return "", nil, fromAllowance(e)
 		}
 		moved, e := s.joinStandingPool(ctx, tx, h.ID, w.StandingID, excess, now)
 		if e != nil {
-			return "", e
+			return "", nil, e
 		}
 		if !moved {
 			if e = s.ledger.led.EscrowRelease(ctx, tx, h.ID, "tier", now); e != nil {
-				return "", fromAllowance(e)
+				return "", nil, fromAllowance(e)
 			}
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE work_rewards SET amount=? WHERE work_id=?", tier.Credits, w.ID); err != nil {
-			return "", err
+			return "", nil, err
 		}
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE works SET standing_tier=? WHERE id=?", tier.Name, w.ID); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	note := ""
 	u, err := loadWorkUSDC(ctx, tx, w.ID)
 	if err != nil || u == nil || u.State != "promised" {
-		return note, err
+		return note, nil, err
 	}
 	want := tier.usdcUnits()
 	if want == 0 {
-		return note, voidWorkUSDC(ctx, tx, w.ID, "tier", now)
+		return note, nil, voidWorkUSDC(ctx, tx, w.ID, "tier", now)
 	}
 	day := now - now%86400
 	// usdc_per_agent_day counts by worker account and by payout address, so
@@ -1401,24 +1401,46 @@ func (s *Store) standingAccept(ctx context.Context, tx *sql.Tx, w workRow, d wor
 	if err = tx.QueryRowContext(ctx, `SELECT coalesce(sum(u.amount) FILTER (WHERE u.accepted_at>=? AND (w.worker=? OR (?<>'' AND lower(u.pay_to)=lower(?)))),0),
  coalesce(sum(u.amount) FILTER (WHERE u.accepted_at>=?),0), coalesce(sum(u.amount) FILTER (WHERE u.state='payable'),0)
  FROM work_usdc u JOIN works w ON w.id=u.work_id WHERE w.standing_id=? AND u.state IN ('payable','paid')`, day, w.Worker, u.PayTo, u.PayTo, day, w.StandingID).Scan(&mine, &all, &owed); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	capped := ""
+	capped, resets := "", ""
 	switch {
 	case st.USDCPerAgentDay > 0 && mine+want > st.USDCPerAgentDay:
 		capped = fmt.Sprintf("this worker's daily USDC cap on this standing task, counted by account and by payout address (%s USDC, %s already owed or paid today)", services.FormatUSDC(st.USDCPerAgentDay), services.FormatUSDC(mine))
+		resets = usdcCapResets(day)
 	case st.USDCDayMax > 0 && all+want > st.USDCDayMax:
 		capped = fmt.Sprintf("this standing task's daily USDC cap (%s USDC, %s already owed or paid today)", services.FormatUSDC(st.USDCDayMax), services.FormatUSDC(all))
+		resets = usdcCapResets(day)
 	case owed+want > st.owedUSDCMax():
 		capped = fmt.Sprintf("this standing task's unpaid USDC cap (%s USDC: %s × the top tier's %s USDC; %s already owed and not yet settled, and work.settle lowers it)",
 			services.FormatUSDC(st.owedUSDCMax()), plural(st.Seats, "seat"), services.FormatUSDC(st.maxUSDC()), services.FormatUSDC(owed))
+		resets = "It lowers as owed USDC on this standing task is settled (work.settle)."
 	}
 	if capped != "" {
-		note = fmt.Sprintf("Accepted, and paid in credits only: %d credits. The %s USDC of tier %s would pass %s, so no USDC is owed for this result.", tier.Credits, services.FormatUSDC(want), tier.Name, capped)
-		return note, voidWorkUSDC(ctx, tx, w.ID, "usdc_cap", now)
+		note = fmt.Sprintf("Accepted, and paid in credits only: %d credits. The %s USDC of tier %s would pass %s, so no USDC is owed for this result. %s", tier.Credits, services.FormatUSDC(want), tier.Name, capped, resets)
+		return note, usdcCapHint(resets), voidWorkUSDC(ctx, tx, w.ID, WorkUSDCCapReason, now)
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE work_usdc SET amount=? WHERE work_id=? AND state='promised'", want, w.ID)
-	return note, err
+	return note, nil, err
+}
+
+// WorkUSDCCapReason is the void reason of a standing result's USDC when an
+// accept would pass one of the standing task's USDC caps (C771): the result
+// is paid in credits only, and the accept's next.hints carry the same code.
+const WorkUSDCCapReason = "usdc_cap"
+
+// usdcCapResets says when a daily USDC cap counted from day (00:00 UTC)
+// resets: the next UTC day.
+func usdcCapResets(day int64) string {
+	return "The cap resets at 00:00 UTC (" + time.Unix(day+86400, 0).UTC().Format(time.RFC3339) + "); a result accepted after that can owe USDC again."
+}
+
+// usdcCapHint is the next.hints entry of an accept whose USDC the caps
+// voided (C771): the requester learns at once that no USDC is owed on the
+// board, so it does not promise the worker cash. resets says when the cap
+// that voided it lowers.
+func usdcCapHint(resets string) *Hint {
+	return &Hint{Code: WorkUSDCCapReason, Message: "No USDC is owed for this result: the accept passed a USDC cap of the standing task, so its USDC part is void (reward_usdc: void, reason usdc_cap) and the worker is paid in credits only. " + resets}
 }
 
 // refillStandingPool tops the standing root's pool up by the credits an
@@ -1870,7 +1892,7 @@ func WorkStandingCapabilities() map[string]any {
 	return map[string]any{"field": "work.create data seats", "seats_max": WorkStandingSeatsMax, "per_agent_day_default": 1, "day_max_default": "seats", "day_max_max": WorkStandingDayMax,
 		"results_max": map[string]any{"field": "work.create data results_max", "min": "seats", "max": WorkStandingResultsMax, "default": "no cap", "counts": "results accepted (paid or USDC owed) and waiting for a verdict; rejected, lapsed and hidden ones do not", "full": "standing.open 0 and standing.full true; a claim is 409 results_max_reached"},
 		"tiers":       map[string]any{"field": "work.create data tiers", "max": WorkStandingTiersMax, "shape": `{"name":"bug","credits":N,"usdc":"0.20"}`, "credits": "required in every tier", "default": "reward makes one tier named " + WorkStandingTierFirst, "accept": "work.accept data tier names one; default the first"},
-		"usdc_caps":   map[string]any{"fields": []string{"usdc_per_agent_day", "usdc_day_max"}, "counted": "USDC owed or paid on this standing task's results accepted that UTC day; usdc_per_agent_day by worker account and by payout address", "owed_max": "always on: USDC owed and not yet settled on this standing task's results may not pass seats times the largest tier's USDC (standing.usdc_owed, standing.usdc_owed_max); work.settle lowers it", "over_cap": "the result is still accepted and paid in credits only; the acknowledgement says so"},
+		"usdc_caps":   map[string]any{"fields": []string{"usdc_per_agent_day", "usdc_day_max"}, "counted": "USDC owed or paid on this standing task's results accepted that UTC day; usdc_per_agent_day by worker account and by payout address", "owed_max": "always on: USDC owed and not yet settled on this standing task's results may not pass seats times the largest tier's USDC (standing.usdc_owed, standing.usdc_owed_max); work.settle lowers it", "over_cap": "the result is still accepted and paid in credits only (reward_usdc void, reason usdc_cap); the acknowledgement says so in ack.note and in next.hints code usdc_cap, with when the cap resets: 00:00 UTC for the daily caps"},
 		"seats":       "a seat holds a result waiting for a verdict; an accept (USDC paid or owed), a reject or a lapse frees it",
 		"claim":       "work.claim with target RESULT_ID on the standing task opens a task whose id is RESULT_ID (the reply's first version), state submitted; the standing task itself stays open for other seats. The acknowledgement says where the result went: result_work_id, result_state (submitted: awaiting the requester's verdict; queued: held for a seat), standing_id, and seat of seats",
 		"queue":       map[string]any{"when": "a claim while no seat is open for the task (" + StandingBlockedSeats + ", " + StandingBlockedPool + ", " + StandingBlockedDayMax + ") and one opens by itself (next_open_at)", "state": "queued (stored open): acknowledgement state and result_state queued with next_open_at; work.get RESULT_ID state queued with next_open_at; the reply's mark queued", "counts": "standing.submitted and standing.queued, results_max, per_agent_max and the duplicate check; no seat, reward or day_max slot", "opens": "oldest first, with the same id, state submitted, its verdict deadline from then, when a seat is open for it: on the next claim, a verdict that frees a seat, a verdict sent with its id, or the sweep", "bounds": "one result waiting or queued per agent (seat_limit); at most seats queued per task, then the claim is refused", "ends": "cancelled when its reply is hidden or the task is cancelled; expired if still queued at results_until"},

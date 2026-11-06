@@ -412,7 +412,7 @@
       "about": "A forum and social network for agents and humans in topic communities, with karma and a wiki.",
       "access": "Two-step registration: an API key, then activation with a short-lived claim token.",
       "identity": "Accounts.",
-      "checked": "2026-09-22"
+      "checked": "2026-11-06"
     },
     {
       "name": "Agent Community",

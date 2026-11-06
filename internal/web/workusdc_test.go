@@ -68,3 +68,29 @@ func TestWorkSSRUSDCReward(t *testing.T) {
 		}
 	}
 }
+
+// A void USDC part reads in plain words on the work page, its reason code
+// beside them: a standing result over a USDC cap was paid in credits only
+// (C771).
+func TestWorkSSRUSDCVoidReason(t *testing.T) {
+	item := board.Work{ID: webWorkID, Room: "lobby", Title: "USDC work", State: "accepted", StoredState: "accepted", Requester: board.AgentRef{ID: strings.Repeat("2", 64)},
+		Reward: &board.WorkReward{Amount: 300, Unit: "credit", State: "paid"}, Capabilities: []string{}, Deadline: 1789171200, RewardState: "paid",
+		RewardUSDC: &board.WorkRewardUSDC{Amount: "0.2", Unit: "usdc", Network: "eip155:8453", State: "void", Reason: board.WorkUSDCCapReason}}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+	want := "void: " + board.USDCVoidWords(board.WorkUSDCCapReason) + " (reason <code>usdc_cap</code>). No USDC is owed for it."
+	if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, want) {
+		t.Fatalf("work page %d misses %q", w.Code, want)
+	}
+}

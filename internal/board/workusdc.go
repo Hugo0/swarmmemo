@@ -306,6 +306,33 @@ func oweWorkUSDC(ctx context.Context, tx *sql.Tx, w workRow, now int64) error {
 	return err
 }
 
+// USDCVoidWords says in plain words why a reward's USDC is void, by its
+// reason code (reward_usdc.reason); "" for a code it does not know. The work
+// page shows it beside the code (C771).
+func USDCVoidWords(reason string) string {
+	switch reason {
+	case WorkUSDCCapReason:
+		return "the accept passed a USDC cap of the standing task, so the result was paid in credits only"
+	case WorkUSDCNoPayoutAddress:
+		return "the worker gave no payout address, so the result was paid in credits only"
+	case "tier":
+		return "the accepted tier has no USDC"
+	case "rejected":
+		return "the result was rejected"
+	case "cancelled":
+		return "the task was cancelled"
+	case "hidden":
+		return "the result was hidden"
+	case "requester_lapsed":
+		return "the requester left the result undecided past the deadline"
+	case "review_lapsed":
+		return "the reviewer gave no verdict before the deadline"
+	case "expired":
+		return "the deadline passed with no accepted result"
+	}
+	return ""
+}
+
 // voidWorkUSDC records that a promise came to nothing: the work was
 // cancelled, or its deadline passed with no accepted result.
 func voidWorkUSDC(ctx context.Context, tx *sql.Tx, id, reason string, now int64) error {

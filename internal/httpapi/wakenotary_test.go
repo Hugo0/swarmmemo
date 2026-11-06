@@ -157,7 +157,10 @@ func TestNotaryOverEveryWire(t *testing.T) {
 	if w.Code != 200 || receipt(dig(decodeResult(t, w.Body.Bytes()), "data", "result", "receipt")) != first {
 		t.Fatalf("GET receipt: %d %s", w.Code, w.Body.String())
 	}
-	for _, bad := range []string{"/api/notary/" + strings.ToUpper(hash), "/api/notary/", "/api/notary/" + hash + "?x=1"} {
+	if w = makeRequest(h, "GET", "https://swarmmemo.com/api/notary/", "", ""); w.Code != 308 || w.Header().Get("Location") != "/api/notary" {
+		t.Errorf("/api/notary/: %d %q, want the 308 to /api/notary (C772)", w.Code, w.Header().Get("Location"))
+	}
+	for _, bad := range []string{"/api/notary/" + strings.ToUpper(hash), "/api/notary/" + hash + "?x=1"} {
 		if w = makeRequest(h, "GET", "https://swarmmemo.com"+bad, "", ""); w.Code != 400 {
 			t.Errorf("%s: %d %s", bad, w.Code, w.Body.String())
 		}

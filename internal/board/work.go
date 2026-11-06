@@ -1048,6 +1048,7 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	var seats standingCounts
 	var queued *standingQueue // a result queued for a seat (C661)
 	standingNote := ""
+	var usdcCapped *Hint // the accept's USDC passed a standing cap (C771)
 	if c.Operation == "work.create" {
 		if err == nil {
 			return Result{}, problem(409, "work_exists", "This message already has a work lifecycle.")
@@ -1551,7 +1552,7 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		switch {
 		case c.Operation == "work.accept" && w.StandingID != "":
 			// The tier the verdict names, and the USDC caps, first.
-			if standingNote, err = s.standingAccept(ctx, tx, w, d, now); err == nil {
+			if standingNote, usdcCapped, err = s.standingAccept(ctx, tx, w, d, now); err == nil {
 				err = oweWorkUSDC(ctx, tx, w, now)
 			}
 		case c.Operation == "work.accept":
@@ -1788,7 +1789,11 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if c.Operation == WorkReveal {
 		ack.Note = "Answer revealed and verified against the sealed commit; work.get shows it under known_answer."
 	}
-	return Result{Data: ResultData(WorkAckData{Ack: ack, Review: rated}), ratedPost: ratedPost}, nil
+	res := Result{Data: ResultData(WorkAckData{Ack: ack, Review: rated}), ratedPost: ratedPost}
+	if usdcCapped != nil {
+		res.hints = []Hint{*usdcCapped}
+	}
+	return res, nil
 }
 
 func currentWorkIdentity(ctx context.Context, tx *sql.Tx, account string) (AgentRef, error) {

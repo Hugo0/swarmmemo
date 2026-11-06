@@ -1315,6 +1315,12 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	if err = s.allowanceNote(ctx, tx, a, &result, now); err != nil {
 		return empty, err
 	}
+	if len(result.hints) > 0 {
+		if result.Next == nil {
+			result.Next = &Next{}
+		}
+		result.Next.Hints = append(result.Next.Hints, result.hints...)
+	}
 	// The transparency log appends this write's public events in its own
 	// transaction (transparency.go).
 	if mutation(cmd.Operation) {

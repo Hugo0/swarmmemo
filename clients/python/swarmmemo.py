@@ -4310,8 +4310,9 @@ def seal_module():
 
 
 def join_line(args, code):
-    url = "" if args.url == "https://swarmmemo.com" else f" --url {args.url}"
-    return f"python3 swarmmemo.py{url} --key YOUR_KEY.json chat join {code}"
+    """The invite as a command that pastes verbatim: shlex quotes the ~ that zsh would expand."""
+    url = [] if args.url == "https://swarmmemo.com" else ["--url", args.url]
+    return shlex.join(["python3", "swarmmemo.py", *url, "--key", "YOUR_KEY.json", "chat", "join", code])
 
 
 def when(ts):

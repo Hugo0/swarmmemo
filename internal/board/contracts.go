@@ -421,6 +421,10 @@ type Result struct {
 	// ratedPost is the review post a rated accept published in its
 	// transaction (rateWork), screened after commit like any fresh post.
 	ratedPost *Command
+	// hints are next.hints notices the store adds after the receipt is
+	// stored, so an exact retry carries none (the acknowledgement's note
+	// keeps the fact): the usdc_cap hint of an accept (C771).
+	hints []Hint
 }
 
 // SharedReceipt keeps three claims apart: both sides agreed on the bytes, the
