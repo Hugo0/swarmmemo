@@ -2,10 +2,12 @@ package board
 
 import (
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/find"
 	"swarmmemo/internal/judge"
@@ -351,5 +353,71 @@ func TestOwnRootExclusionIsOneRule(t *testing.T) {
 	}
 	if after := reputationJSON(t, readReputation(t, s, account)); after != reputationJSON(t, rep) {
 		t.Fatalf("hiding own-root reviews moved the reputation:\n%s\n%s", reputationJSON(t, rep), after)
+	}
+}
+
+// C782: the reputation's work accepts read their workers as one json_each
+// set. A one-account IN (?) let SQLite run publicAccountSQL(w.worker) once
+// per work_transitions row before the works join, a walk of all of an
+// account's events per row when it has no public post (agent.get of a
+// sealed-room member past its budget). The read finds the same acts, for
+// one worker and for several, and its plan checks the worker only after
+// the works row.
+func TestReputationWorkerAcceptsSet(t *testing.T) {
+	s := openTest(t, Config{Features: Features{Trust: TrustOn}})
+	key, worker, other := keyFor(70), keyFor(71), keyFor(72)
+	s.now = func() time.Time { return time.Unix(testTime-3*86400, 0) }
+	postAs(t, s, key, Command{Room: "lobby", Text: "hello", RequestID: "t-hello"})
+	postAs(t, s, worker, Command{Room: "lobby", Text: "for hire", RequestID: "t-hire"})
+	item := createTestWork(t, s, key, "lobby", "request", 0)
+	run(t, s, workCommand(s, key, Command{Operation: "work.accept", MessageID: item, Amount: claimAndSubmit(t, s, worker, item, "lobby")}))
+	s.now = func() time.Time { return time.Unix(testTime, 0) }
+	acts := func(workers ...string) []string {
+		raw, _ := json.Marshal(workers)
+		var got []string
+		if err := scanAll(testContext, s.db, workerAcceptActsSQL, []any{string(raw)}, func(r *sql.Rows) error {
+			var requester, w string
+			var at int64
+			err := r.Scan(&requester, &w, &at)
+			got = append(got, requester+">"+w)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	want := []string{keyID(key) + ">" + keyID(worker)}
+	if got := acts(keyID(worker)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("one worker: %v", got)
+	}
+	if got := acts(keyID(other), keyID(worker)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("two workers: %v", got)
+	}
+	if got := acts(keyID(other)); len(got) != 0 {
+		t.Fatalf("a worker with no accepts: %v", got)
+	}
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+workerAcceptActsSQL, `["`+keyID(other)+`"]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	works, subquery := -1, -1
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err = rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if parent == 0 && works < 0 && strings.HasPrefix(detail, "SEARCH w ") {
+			works = len(plan)
+		}
+		if parent == 0 && subquery < 0 && strings.HasPrefix(detail, "CORRELATED SCALAR SUBQUERY") {
+			subquery = len(plan)
+		}
+		plan = append(plan, detail)
+	}
+	if works < 0 || subquery < works {
+		t.Fatalf("the public checks run before the works join: %s", strings.Join(plan, "; "))
 	}
 }

@@ -306,6 +306,15 @@ func scanAll(ctx context.Context, q querier, query string, args []any, scan func
 	return closeRows(rows)
 }
 
+// workerAcceptActsSQL reads the work accepts of the workers in a JSON
+// array (one argument). The set is json_each, not IN (?,...): a
+// one-account IN is an equality SQLite propagates into
+// publicAccountSQL(w.worker) and then runs once per work_transitions row,
+// before the works join narrows them; for an account with no public post
+// that walks all its events per row (C782: 0.73 s on prod for one
+// sealed-room member, agent.get past its two-second budget).
+var workerAcceptActsSQL = workAcceptActsSQL("ia.account,w.worker,t.accepted_at", " AND w.worker IN (SELECT value FROM json_each(?))")
+
 // judgementCandidate is one act that is a judgement of agent:TARGET
 // (RFC 0020 §1); ok false is a withdrawal (a vouch taken back), which
 // closes its root's judgement.
@@ -359,7 +368,8 @@ func (s *Store) reputations(ctx context.Context, tx *sql.Tx, accounts []string, 
 		}); err != nil {
 			return err
 		}
-		return scanAll(ctx, tx, workAcceptActsSQL("ia.account,w.worker,t.accepted_at", " AND w.worker IN ("+marks+")"), args, func(r *sql.Rows) error {
+		workers, _ := json.Marshal(args)
+		return scanAll(ctx, tx, workerAcceptActsSQL, []any{string(workers)}, func(r *sql.Rows) error {
 			var requester, worker string
 			var at int64
 			if err := r.Scan(&requester, &worker, &at); err != nil {

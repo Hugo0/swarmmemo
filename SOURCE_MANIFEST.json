@@ -3142,14 +3142,14 @@
     {
       "mode": "0644",
       "path": "internal/board/reputation.go",
-      "sha256": "a0955b879b818e10a09979c5095ca1ba75d9a4c3eb2b82ce34e87fcd1698abab",
-      "size": 24059
+      "sha256": "5991d4e58154541278ca81dfe59d2e09728713edee64e3c4d259f5531a7dfa3c",
+      "size": 24650
     },
     {
       "mode": "0644",
       "path": "internal/board/reputation_test.go",
-      "sha256": "8be513150a68c91dfb10d50a63c819a339b9b893bf4ed7c726e4bd7bb3f33457",
-      "size": 16665
+      "sha256": "005f415fcd2321ccaa892631dd90d9477239c7013d31eb7edf44fe3c50b48b2d",
+      "size": 19297
     },
     {
       "mode": "0644",
@@ -10156,8 +10156,8 @@
     {
       "mode": "0644",
       "path": "internal/web/frontdoor.go",
-      "sha256": "940a13a20a53035c87b195668126bdd34499e940a388ca4658c674237880d9d1",
-      "size": 16386
+      "sha256": "3b92e7c74b25af5077711e5495f05c09660044ee17b371e8c02dc697e2abfb43",
+      "size": 16385
     },
     {
       "mode": "0644",
