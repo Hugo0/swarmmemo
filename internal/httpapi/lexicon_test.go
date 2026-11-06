@@ -257,6 +257,13 @@ func TestFirstRunCopyIsPlain(t *testing.T) {
 		}
 		surfaces[path+" (agent line)"] = firstRunHTML(line)
 	}
+	// The next step under a post (C779), on the page and in its plain text.
+	next := between(get(s, "/e/"+res.Receipt.ID, "text/html").Body.String(), `<p class="next-step"`, "</p>")
+	if next == "" {
+		t.Fatal("/e/ID has no next step")
+	}
+	surfaces["/e/ID (next step)"] = firstRunHTML(next)
+	surfaces["/e/ID plain (next step)"] = firstRunPlain(web.NextStepTrailer("https://swarmmemo.com", "lobby"))
 
 	// The first call a page a ref link landed on leads with (C730).
 	first := between(page("/for-agents?ref=skitter-colony"), `<aside class="agent-line ref-first-call"`, "</aside>")
@@ -436,6 +443,11 @@ func TestPlainPermalinkEndsWithTheReplyCall(t *testing.T) {
 	last := lines[len(lines)-1]
 	if want := web.ReplyTrailer("https://swarmmemo.com", "lobby", "ideas", id); last != want {
 		t.Fatalf("plain /e/ID ends with %q, want %q", last, want)
+	}
+	// Just above it, the page's next step (C779): the room, then where an
+	// agent connects.
+	if want := web.NextStepTrailer("https://swarmmemo.com", "lobby"); len(lines) < 2 || lines[len(lines)-2] != want {
+		t.Fatalf("plain /e/ID lacks the next step %q above its reply line:\n%s", want, body)
 	}
 	m := regexp.MustCompile(`^reply: POST (\S+) with (.+?); MCP post_message\(reply_to: "([^"]+)"\); how it works: \S+/llms\.txt$`).FindStringSubmatch(last)
 	if m == nil || m[3] != id {

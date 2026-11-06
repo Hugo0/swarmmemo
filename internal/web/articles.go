@@ -292,6 +292,11 @@ func loadEventPage(w http.ResponseWriter, r *http.Request, p *page, service boar
 		}
 	}
 	p.Messages, p.Edits = collapseVersions(r.Context(), service, res.Messages)
+	for _, m := range p.Messages {
+		if (m.ID == requested || m.Origin() == requested) && !m.Hidden {
+			p.NextStep = eventNextStep(requestOrigin(r), m.Room)
+		}
+	}
 	p.ClaimWork = claimReplies(p.Messages)
 	if hasMore(res) {
 		p.Cursor = res.NextCursor

@@ -3,10 +3,12 @@ package httpapi
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,19 +47,122 @@ type mcpToolStatsStore interface {
 	AddMCPToolStats(context.Context, string, map[string]int64, map[string]int64, map[string]*board.ReaderSketch) error
 }
 
+// mcpIdentityStatsStore stores the keyless identity counts (C778).
+type mcpIdentityStatsStore interface {
+	AddMCPIdentityStats(context.Context, string, map[string]int64) error
+}
+
+// Keyless identity creation (C778, board/mcpidentitystats.go): a tools/call
+// that carries no hosted token (no path or bearer token, no bound session)
+// is a keyless caller's. Its create_identity calls are counted, and those
+// that succeed under the tool the same caller called just before. The
+// caller is its MCP session when it sent one this server minted, else its
+// network prefix and User-Agent (as distinct callers are told apart), held
+// as 16 hex of HMAC-SHA256 under a process-only key with its last tool and
+// family: at most mcpKeylessMax callers, a further one counted as overflow
+// until a sweep frees room. A caller idle mcpKeylessIdle without an
+// identity is counted under its last tool (lastbefore_none) on the day of
+// that call. Callers still followed at shutdown are dropped, not counted.
+// Calls from OwnNetworks are not followed or counted.
+const (
+	mcpKeylessMax   = 10000
+	mcpKeylessIdle  = 30 * time.Minute
+	mcpKeylessSweep = time.Minute
+	mcpCreateTool   = "create_identity"
+)
+
+type keylessCaller struct {
+	family, tool string
+	seen         time.Time
+}
+
 type mcpToolCounter struct {
 	mu        sync.Mutex
 	pending   map[string]map[string]int64               // UTC day -> board.MCPToolKey -> count
 	codes     map[string]map[string]int64               // UTC day -> board.MCPToolCodeKey -> failed calls
 	sketches  map[string]map[string]*board.ReaderSketch // UTC day -> board.MCPToolDistinctKey -> callers
 	salt      readerSalt
+	identity  map[string]map[string]int64 // UTC day -> board.MCPIdentityKey and kin -> count
+	keyless   map[string]*keylessCaller   // keyless caller id -> its last call
+	keylessID []byte                      // the caller ids' HMAC key, memory only
+	lastSweep time.Time
 	lastFlush time.Time
 	flushing  atomic.Bool
 	flushMu   sync.Mutex
 }
 
 func newMCPToolCounter() *mcpToolCounter {
-	return &mcpToolCounter{pending: map[string]map[string]int64{}, codes: map[string]map[string]int64{}, sketches: map[string]map[string]*board.ReaderSketch{}}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	return &mcpToolCounter{pending: map[string]map[string]int64{}, codes: map[string]map[string]int64{}, sketches: map[string]map[string]*board.ReaderSketch{},
+		identity: map[string]map[string]int64{}, keyless: map[string]*keylessCaller{}, keylessID: key}
+}
+
+// keylessCallerID is the id a keyless caller is followed under: its MCP
+// session's when it has one, else its network prefix and User-Agent.
+func (c *mcpToolCounter) keylessCallerID(session, prefix, userAgent string) string {
+	mac := hmac.New(sha256.New, c.keylessID)
+	if session != "" {
+		mac.Write([]byte("s\x00" + session))
+	} else {
+		mac.Write([]byte("h\x00" + prefix + "\x00" + userAgent))
+	}
+	return hex.EncodeToString(mac.Sum(nil))[:16]
+}
+
+// addIdentity counts one under key on day. c.mu is held.
+func (c *mcpToolCounter) addIdentity(day, key string) {
+	counts := c.identity[day]
+	if counts == nil {
+		counts = map[string]int64{}
+		c.identity[day] = counts
+	}
+	if _, held := counts[key]; held || len(counts) < mcpToolKeysMax {
+		counts[key]++
+	}
+}
+
+// countKeyless follows one keyless call of tool (C778). c.mu is held.
+func (c *mcpToolCounter) countKeyless(now time.Time, day, profile, family, tool, id string, failed bool) {
+	c.sweepKeyless(now)
+	if tool == mcpCreateTool {
+		c.addIdentity(day, board.MCPIdentityKey(profile, family, "calls"))
+		if !failed {
+			c.addIdentity(day, board.MCPIdentityKey(profile, family, "created"))
+			before := board.MCPIdentityFirst
+			if e := c.keyless[id]; e != nil {
+				before = e.tool
+				delete(c.keyless, id)
+			}
+			c.addIdentity(day, board.MCPLastBeforeIdentityKey(family, before))
+			return
+		}
+	}
+	e := c.keyless[id]
+	if e == nil {
+		if len(c.keyless) >= mcpKeylessMax {
+			c.addIdentity(day, board.MCPLastBeforeOverflowKey)
+			return
+		}
+		e = &keylessCaller{}
+		c.keyless[id] = e
+	}
+	e.family, e.tool, e.seen = family, tool, now
+}
+
+// sweepKeyless counts and forgets the keyless callers idle mcpKeylessIdle,
+// at most every mcpKeylessSweep. c.mu is held.
+func (c *mcpToolCounter) sweepKeyless(now time.Time) {
+	if now.Sub(c.lastSweep) < mcpKeylessSweep {
+		return
+	}
+	c.lastSweep = now
+	for id, e := range c.keyless {
+		if now.Sub(e.seen) >= mcpKeylessIdle {
+			c.addIdentity(e.seen.UTC().Format("2006-01-02"), board.MCPLastBeforeNoneKey(e.family, e.tool))
+			delete(c.keyless, id)
+		}
+	}
 }
 
 // mcpToolProfile is the counters' name of a profile.
@@ -246,6 +351,12 @@ func (s *Server) countMCPTool(ctx context.Context, profile, tool, code string, d
 	prefix, own := s.networkPrefix(peer)
 	account := resolvedHostedAccount(ctx)
 	userAgent := board.RequestSignalsFrom(ctx).UserAgent
+	hostedToken, _ := ctx.Value(hostedTokenKey{}).(string)
+	keylessID := ""
+	if hostedToken == "" && account == "" && !own {
+		session, _ := ctx.Value(mcpSessionKey{}).(string)
+		keylessID = c.keylessCallerID(session, prefix, userAgent)
+	}
 	now := s.readers.now()
 	day := now.UTC().Format("2006-01-02")
 	due := func() bool {
@@ -268,6 +379,9 @@ func (s *Server) countMCPTool(ctx context.Context, profile, tool, code string, d
 		if failed {
 			add(board.MCPToolKey(profile, tool, family, "errors"))
 			c.addCode(day, profile, tool, code)
+		}
+		if keylessID != "" {
+			c.countKeyless(now, day, profile, family, tool, keylessID, failed)
 		}
 		if !own {
 			if salt := c.salt.get(day, now); salt != nil {
@@ -360,9 +474,19 @@ func (c *mcpToolCounter) flush(store mcpToolStatsStore) {
 	c.flushMu.Lock()
 	defer c.flushMu.Unlock()
 	c.mu.Lock()
-	batch, codeBatch, sketchBatch := c.pending, c.codes, c.sketches
-	c.pending, c.codes, c.sketches = map[string]map[string]int64{}, map[string]map[string]int64{}, map[string]map[string]*board.ReaderSketch{}
+	batch, codeBatch, sketchBatch, identityBatch := c.pending, c.codes, c.sketches, c.identity
+	c.pending, c.codes, c.sketches, c.identity = map[string]map[string]int64{}, map[string]map[string]int64{}, map[string]map[string]*board.ReaderSketch{}, map[string]map[string]int64{}
 	c.mu.Unlock()
+	if is, ok := store.(mcpIdentityStatsStore); ok {
+		for day, counts := range identityBatch {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := is.AddMCPIdentityStats(ctx, day, counts)
+			cancel()
+			if err != nil {
+				c.requeueIdentity(day, counts)
+			}
+		}
+	}
 	days := map[string]bool{}
 	for day := range batch {
 		days[day] = true
@@ -434,6 +558,25 @@ func (c *mcpToolCounter) requeue(day string, counts, codes map[string]int64, ske
 			delete(c.codes, oldest)
 			delete(c.sketches, oldest)
 		}
+	}
+}
+
+// requeueIdentity puts a day's unwritten identity counts back, keeping only
+// the most recent readerMaxPendingDay days.
+func (c *mcpToolCounter) requeueIdentity(day string, counts map[string]int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	target := c.identity[day]
+	if target == nil {
+		target = map[string]int64{}
+		c.identity[day] = target
+	}
+	for k, n := range counts {
+		target[k] += n
+	}
+	for keys := keysOf(c.identity); len(keys) > readerMaxPendingDay; keys = keysOf(c.identity) {
+		slices.Sort(keys)
+		delete(c.identity, keys[0])
 	}
 }
 

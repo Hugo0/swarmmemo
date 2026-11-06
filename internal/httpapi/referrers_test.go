@@ -370,11 +370,79 @@ func TestRefVenueViewsAndVisitorsStored(t *testing.T) {
 	if d.RefVisitors["skitter-rstation"] != 2 || len(d.RefVisitors) != 1 || d.RefVisitorOther != 0 {
 		t.Fatalf("visitors: %+v other %d", d.RefVisitors, d.RefVisitorOther)
 	}
+	if a := d.RefAgents["skitter-rstation"]; len(a) != 1 || a[0] != (board.ReferrerCount{Name: board.RefAgentNone, Count: 3}) || len(d.RefAgents) != 1 {
+		t.Fatalf("families: %+v", d.RefAgents)
+	}
 	rep, err := store.FunnelReport(context.Background(), board.FunnelQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if v := rep.Acquisition.Venues; len(v) != 1 || v[0] != (board.FunnelRefVenue{Ref: "skitter-rstation", Views: 3, Visitors: 2}) {
 		t.Fatalf("funnel venues: %+v", v)
+	}
+}
+
+// C777: each ?ref= view also counts its User-Agent family per venue, none
+// when no family is known, so the families sum to the views; like the view
+// it is not deduped per network and is counted from the operator's own
+// networks too, which only the visitor count leaves out.
+func TestRefAgentFamiliesSumToViews(t *testing.T) {
+	own, _ := ParseOwnNetworks("203.0.113.0/24")
+	s := New(&fakeService{}, nil, Config{OwnNetworks: own})
+	for _, tc := range []struct{ addr, ua string }{
+		{"198.51.100.9:1", "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)"},
+		{"198.51.100.9:2", "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)"},
+		{"192.0.2.10:3", "Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0"},
+		{"203.0.113.7:4", "curl/8.5.0"}, // operator's own network
+	} {
+		r := httptestRequest("GET", "/?ref=skitter-allagents", "")
+		r.RemoteAddr = tc.addr
+		r.Header.Set("User-Agent", tc.ua)
+		s.countReferrer(r)
+	}
+	r := httptestRequest("GET", "/", "") // no ref: no refagent
+	r.Header.Set("User-Agent", "curl/8.5.0")
+	s.countReferrer(r)
+	s.referrers.mu.Lock()
+	defer s.referrers.mu.Unlock()
+	var counts map[string]int64
+	for _, d := range s.referrers.pending {
+		counts = d.counts
+	}
+	for key, want := range map[string]int64{
+		"ref:skitter-allagents": 4, "refvisitor:skitter-allagents": 2,
+		"refagent:skitter-allagents:Discordbot": 2, "refagent:skitter-allagents:none": 1, "refagent:skitter-allagents:curl": 1,
+		"agent:curl": 2, "agent:Discordbot": 2,
+	} {
+		if counts[key] != want {
+			t.Errorf("%s = %d, want %d (%v)", key, counts[key], want, counts)
+		}
+	}
+	var refagents int
+	for key := range counts {
+		if strings.HasPrefix(key, "refagent") {
+			refagents++
+		}
+		if strings.Contains(key, "Mozilla") || strings.Contains(key, "Firefox") {
+			t.Errorf("raw User-Agent stored: %s", key)
+		}
+	}
+	if refagents != 3 {
+		t.Errorf("refagent keys: %v", counts)
+	}
+}
+
+// C777: a venue past the day's held ones counts as ref-other, and its
+// families as refagent-other.
+func TestRefAgentFoldsWithItsVenue(t *testing.T) {
+	d := &referrerDay{counts: map[string]int64{}}
+	for i := 0; i < referrerPendingRefs; i++ {
+		d.add("ref:v"+strconv.Itoa(i), 1)
+	}
+	d.add("ref:late", 1)
+	d.add(refAgentKey("ref:late", "Slackbot"), 1)
+	d.add(refAgentKey("ref:v0", ""), 1)
+	if d.counts["ref-other"] != 1 || d.counts["refagent-other"] != 1 || d.counts["refagent:v0:none"] != 1 {
+		t.Fatalf("counts: ref-other %d refagent-other %d v0 none %d", d.counts["ref-other"], d.counts["refagent-other"], d.counts["refagent:v0:none"])
 	}
 }

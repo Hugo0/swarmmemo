@@ -23,6 +23,8 @@ import (
 //	referrer:YYYY-MM-DD:ref-other     ?ref= venues past the day's named ones
 //	referrer:YYYY-MM-DD:refvisitor:VENUE  distinct visiting networks among VENUE's visits (C729)
 //	referrer:YYYY-MM-DD:refvisitor-other  the same for venues past the day's named ones
+//	referrer:YYYY-MM-DD:refagent:VENUE:FAMILY  VENUE's views by User-Agent family, FAMILY "none" when unknown (C777)
+//	referrer:YYYY-MM-DD:refagent-other  the same for venues past the day's named ones
 //	referrer:YYYY-MM-DD:fetch:FAMILY:PATH  landing-page GET/HEADs by a user-initiated assistant fetcher (C451)
 //	referrer:YYYY-MM-DD:fetch-other:FAMILY that family's landing fetches past its named paths
 //
@@ -42,7 +44,9 @@ import (
 // stores (no IP, prefix or hash reaches the database). A venue's refvisitor
 // row is kept only while its ref row is: when a venue folds into ref-other
 // its visitors fold into refvisitor-other, an over-count there since one
-// network may have visited several folded venues.
+// network may have visited several folded venues. A venue's refagent rows
+// (its views by family, summing to them) fold the same way into
+// refagent-other.
 //
 // The fetch rows answer "which pages do assistants fetch for their users?":
 // FAMILY is one of AssistantFetchFamilies, the fetchers an assistant sends
@@ -121,10 +125,26 @@ func ValidReferrerRef(ref string) bool {
 	return len(ref) <= ReferrerRefBytes && referrerRef.MatchString(ref)
 }
 
+// RefAgentNone is the refagent family of a view whose User-Agent names none
+// of UserAgentFamilies (C777).
+const RefAgentNone = "none"
+
+func isUserAgentFamily(family string) bool {
+	for _, f := range UserAgentFamilies {
+		if f == family {
+			return true
+		}
+	}
+	return false
+}
+
 func validReferrerKey(key string) bool {
 	switch {
-	case key == "other", key == "ref-other", key == "asset-other", key == "refvisitor-other":
+	case key == "other", key == "ref-other", key == "asset-other", key == "refvisitor-other", key == "refagent-other":
 		return true
+	case strings.HasPrefix(key, "refagent:"):
+		venue, family, ok := strings.Cut(key[len("refagent:"):], ":")
+		return ok && ValidReferrerRef(venue) && (family == RefAgentNone || isUserAgentFamily(family))
 	case strings.HasPrefix(key, "refvisitor:"):
 		return ValidReferrerRef(key[len("refvisitor:"):])
 	case strings.HasPrefix(key, "host:"):
@@ -134,11 +154,7 @@ func validReferrerKey(key string) bool {
 	case strings.HasPrefix(key, "ref:"):
 		return ValidReferrerRef(key[len("ref:"):])
 	case strings.HasPrefix(key, "agent:"):
-		for _, family := range UserAgentFamilies {
-			if key[len("agent:"):] == family {
-				return true
-			}
-		}
+		return isUserAgentFamily(key[len("agent:"):])
 	case strings.HasPrefix(key, "fetch:"):
 		family, path, ok := strings.Cut(key[len("fetch:"):], ":")
 		return ok && IsAssistantFetchFamily(family) && ValidAssistantPath(path)
@@ -153,7 +169,8 @@ func validReferrerKey(key string) bool {
 // venues of that day, folding the rest into other and ref-other, and the
 // AssistantPathsPerDay largest paths of each assistant family it touched,
 // folding the rest into fetch-other:FAMILY. Keys are "host:DOMAIN",
-// "asset:DOMAIN", "agent:FAMILY", "ref:VENUE", "fetch:FAMILY:PATH",
+// "asset:DOMAIN", "agent:FAMILY", "ref:VENUE", "refvisitor:VENUE",
+// "refagent:VENUE:FAMILY", "fetch:FAMILY:PATH",
 // "other", "asset-other", "ref-other" or "fetch-other:FAMILY". It runs in
 // its own transaction on the store's one connection, from the background
 // flush only: nothing else may hold a transaction around it.
@@ -209,6 +226,9 @@ func (s *Store) AddReferrerCounts(ctx context.Context, day string, counts map[st
 	if err = foldRefVisitors(ctx, tx, prefix); err != nil {
 		return err
 	}
+	if err = foldRefAgents(ctx, tx, prefix); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -243,6 +263,22 @@ func foldRefVisitors(ctx context.Context, tx *sql.Tx, prefix string) error {
 	return addCounter(ctx, tx, prefix+"refvisitor-other", folded)
 }
 
+// foldRefAgents folds every refagent:VENUE:FAMILY counter of the day at
+// prefix whose ref:VENUE counter is gone into refagent-other (C777).
+func foldRefAgents(ctx context.Context, tx *sql.Tx, prefix string) error {
+	const orphan = `scope>? AND scope<? AND NOT EXISTS (SELECT 1 FROM counters r WHERE r.scope=?||substr(counters.scope,?,instr(substr(counters.scope,?),':')-1))`
+	start := len(prefix+"refagent:") + 1
+	args := []any{prefix + "refagent:", prefix + "refagent;", prefix + "ref:", start, start}
+	var folded int64
+	if err := tx.QueryRowContext(ctx, `SELECT coalesce(sum(value),0) FROM counters WHERE `+orphan, args...).Scan(&folded); err != nil || folded == 0 {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM counters WHERE `+orphan, args...); err != nil {
+		return err
+	}
+	return addCounter(ctx, tx, prefix+"refagent-other", folded)
+}
+
 // ReferrerCount is one name and its count.
 type ReferrerCount struct {
 	Name  string
@@ -266,6 +302,10 @@ type ReferrerDay struct {
 	// name; a venue with none is absent), RefVisitorOther those of RefOther.
 	RefVisitors     map[string]int64
 	RefVisitorOther int64
+	// RefAgents is each venue's views by User-Agent family (RefAgentNone
+	// for none known), largest first; RefAgentOther those of RefOther (C777).
+	RefAgents     map[string][]ReferrerCount
+	RefAgentOther int64
 	// Assistants are the landing pages each assistant fetch family read
 	// that day, in AssistantFetchFamilies order, families with none left out.
 	Assistants []AssistantFetches
@@ -344,6 +384,14 @@ func (s *Store) ReadReferrerStats(ctx context.Context, end time.Time, days int) 
 			out[i].RefOther += value
 		case key == "refvisitor-other":
 			out[i].RefVisitorOther += value
+		case key == "refagent-other":
+			out[i].RefAgentOther += value
+		case strings.HasPrefix(key, "refagent:"):
+			venue, family, _ := strings.Cut(key[len("refagent:"):], ":")
+			if out[i].RefAgents == nil {
+				out[i].RefAgents = map[string][]ReferrerCount{}
+			}
+			out[i].RefAgents[venue] = append(out[i].RefAgents[venue], ReferrerCount{family, value})
 		case strings.HasPrefix(key, "refvisitor:"):
 			if out[i].RefVisitors == nil {
 				out[i].RefVisitors = map[string]int64{}
@@ -370,6 +418,9 @@ func (s *Store) ReadReferrerStats(ctx context.Context, end time.Time, days int) 
 			}
 		}
 		for _, list := range [][]ReferrerCount{out[i].Hosts, out[i].Assets, out[i].Agents, out[i].Refs} {
+			sortReferrerCounts(list)
+		}
+		for _, list := range out[i].RefAgents {
 			sortReferrerCounts(list)
 		}
 	}

@@ -322,3 +322,116 @@ func TestMCPToolStdioNotCounted(t *testing.T) {
 		t.Fatalf("stdio call counted: %+v", w.Tools)
 	}
 }
+
+// C778: keyless create_identity calls are counted by profile and family,
+// a created identity under the tool its caller called just before (or
+// "none" first), a keyless caller idle without one under its last tool; a
+// caller with a token is not keyless, and no caller id is stored.
+func TestMCPKeylessIdentityCounted(t *testing.T) {
+	dir := t.TempDir()
+	store, s := hostedServerAt(t, filepath.Join(dir, "board.sqlite"), board.Features{})
+	s.readers.interval = time.Hour // only the explicit flush writes
+	clock := time.Now()
+	s.readers.now = func() time.Time { return clock }
+	call := func(path, addr, ua, authorization, name, args string) string {
+		t.Helper()
+		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":` + args + `}}`
+		r := httptest.NewRequest("POST", "https://swarmmemo.com"+path, strings.NewReader(body))
+		r.RemoteAddr = addr + ":5555"
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Accept", "application/json, text/event-stream")
+		r.Header.Set("User-Agent", ua)
+		if authorization != "" {
+			r.Header.Set("Authorization", authorization)
+		}
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("%s %s: %d %s", path, name, w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+	const openai, claude = "openai-mcp/1.0.0", "Claude-User/1.0"
+	ap := web.AssistantMCPPath
+	// A reads the feed, fails a thread, then creates an identity.
+	call(ap, "203.0.113.10", openai, "", "read_feed", `{}`)
+	call(ap, "203.0.113.10", openai, "", "read_thread", `{"message_id":"nope"}`)
+	created := call(ap, "203.0.113.10", openai, "", "create_identity", `{}`)
+	token := ""
+	if i := strings.Index(created, board.HostedTokenPrefix); i >= 0 {
+		token = created[i:]
+		token = token[:strings.IndexAny(token, `"\`)]
+	}
+	if token == "" {
+		t.Fatalf("create_identity: %s", created)
+	}
+	// With its token A is no longer keyless: these change nothing.
+	call(ap, "203.0.113.10", openai, "Bearer "+token, "read_feed", `{}`)
+	call(ap, "203.0.113.10", openai, "Bearer "+token, "create_identity", `{}`)
+	// B creates one first thing, on /mcp.
+	call("/mcp", "198.51.100.40", openai, "", "create_identity", `{}`)
+	// C reads and goes; D (claude) lists rooms and stays.
+	call(ap, "192.0.2.7", openai, "", "read_feed", `{}`)
+	clock = clock.Add(31 * time.Minute)
+	call(ap, "192.0.2.99", claude, "", "list_rooms", `{}`)
+
+	s.FlushReaderCounts()
+	w, err := store.MCPIdentityStats(context.Background(), clock, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// D (claude) is still followed: nothing of it is counted yet.
+	if len(w.Families) != 1 || w.Overflow != 0 || w.Skipped != 0 {
+		t.Fatalf("window: %+v", w)
+	}
+	o := w.Families[0]
+	if o.Family != "openai" || o.Calls != 2 || o.Created != 2 || o.Profiles["assistant"] != 1 || o.Profiles["mcp"] != 1 {
+		t.Fatalf("openai: %+v", o)
+	}
+	if fmt.Sprint(o.LastBefore) != "[{none 1} {read_thread 1}]" || fmt.Sprint(o.LastNone) != "[{read_feed 1}]" {
+		t.Fatalf("openai last tools: %v / %v", o.LastBefore, o.LastNone)
+	}
+	// Stored: only fixed keys, no address, User-Agent or caller id.
+	db, err := sql.Open("sqlite", filepath.Join(dir, "board.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT scope FROM counters WHERE scope LIKE 'mcp_identity%' OR scope LIKE 'mcp_lastbefore%'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, k[:strings.IndexByte(k, ':')]+k[strings.IndexByte(k, ':')+11:])
+	}
+	if want := "[mcp_identity:assistant:openai:calls mcp_identity:assistant:openai:created mcp_identity:mcp:openai:calls mcp_identity:mcp:openai:created mcp_lastbefore_identity:openai:none mcp_lastbefore_identity:openai:read_thread mcp_lastbefore_none:openai:read_feed]"; fmt.Sprint(keys) != want {
+		t.Fatalf("stored keys %v", keys)
+	}
+}
+
+// C778: past mcpKeylessMax followed callers a new one is counted as
+// overflow, and a sweep makes room again.
+func TestMCPKeylessCallersBounded(t *testing.T) {
+	c := newMCPToolCounter()
+	now := time.Now()
+	day := now.UTC().Format("2006-01-02")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := 0; i < mcpKeylessMax+3; i++ {
+		c.countKeyless(now, day, "assistant", "openai", "read_feed", fmt.Sprint(i), false)
+	}
+	if len(c.keyless) != mcpKeylessMax || c.identity[day][board.MCPLastBeforeOverflowKey] != 3 {
+		t.Fatalf("held %d, overflow %d", len(c.keyless), c.identity[day][board.MCPLastBeforeOverflowKey])
+	}
+	later := now.Add(mcpKeylessIdle)
+	c.countKeyless(later, day, "assistant", "openai", "home", "new", false)
+	if len(c.keyless) != 1 || c.identity[day][board.MCPLastBeforeNoneKey("openai", "read_feed")] != mcpKeylessMax {
+		t.Fatalf("after sweep: held %d, none %v", len(c.keyless), c.identity[day])
+	}
+}

@@ -165,3 +165,43 @@ func TestRefVisitorsStoredAndFoldedWithTheirVenue(t *testing.T) {
 		t.Fatalf("visitor rows read as agents: %+v", d.Agents)
 	}
 }
+
+// C777: a venue's views by User-Agent family are stored only for a valid
+// venue and a known family (or none), read per venue, and folded into
+// refagent-other with the venue.
+func TestRefAgentsStoredAndFoldedWithTheirVenue(t *testing.T) {
+	s := openTest(t, Config{})
+	day := time.Unix(testTime, 0).UTC().Format("2006-01-02")
+	for _, key := range []string{"refagent:", "refagent:v", "refagent:v:", "refagent:v:Mozilla", "refagent:Bad:none", "refagent::none", "refagent-other:x"} {
+		if err := s.AddReferrerCounts(testContext, day, map[string]int64{key: 1}); err == nil {
+			t.Errorf("accepted key %q", key)
+		}
+	}
+	counts := map[string]int64{}
+	for i := 1; i <= ReferrerRefsPerDay+5; i++ {
+		v := "venue" + strconv.Itoa(i)
+		counts["ref:"+v] = int64(10 + i)
+		counts["refagent:"+v+":Discordbot"] = int64(7 + i)
+		counts["refagent:"+v+":none"] = 3
+	}
+	if err := s.AddReferrerCounts(testContext, day, counts); err != nil {
+		t.Fatal(err)
+	}
+	days, err := s.ReadReferrerStats(testContext, time.Unix(testTime, 0), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := days[0]
+	if len(d.RefAgents) != ReferrerRefsPerDay || d.RefAgentOther != 5*3+(8+9+10+11+12) {
+		t.Fatalf("%d venues with families, %d folded", len(d.RefAgents), d.RefAgentOther)
+	}
+	for _, r := range d.Refs {
+		fam := d.RefAgents[r.Name]
+		if len(fam) != 2 || fam[0].Name != "Discordbot" || fam[1] != (ReferrerCount{RefAgentNone, 3}) || fam[0].Count+fam[1].Count != r.Count {
+			t.Fatalf("venue %s families %+v of %d views", r.Name, fam, r.Count)
+		}
+	}
+	if len(d.Agents) != 0 {
+		t.Fatalf("refagent rows read as agents: %+v", d.Agents)
+	}
+}

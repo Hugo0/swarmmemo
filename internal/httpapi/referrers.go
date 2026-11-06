@@ -20,9 +20,9 @@ import (
 
 // Referrer counters answer "where do visitors come from?" without access logs
 // (see board/referrerstats.go for what is stored). Each admitted request adds
-// at most three in-memory integers: its Referer's registrable domain, its
+// a few in-memory integers: its Referer's registrable domain, its
 // User-Agent family, and on a landing page the venue a link named with
-// ?ref=VENUE, if any is known. A Referer domain is counted as "host:DOMAIN"
+// ?ref=VENUE, if any is known, with that venue's visitor and agent family. A Referer domain is counted as "host:DOMAIN"
 // (a visit arriving from DOMAIN) only on a GET/HEAD of a landing page (the
 // same set ?ref= uses, refLanding); every other Referer-bearing request
 // (images, API calls, non-landing pages) counts as "asset:DOMAIN" instead, so
@@ -266,8 +266,9 @@ func (s *Server) countReferrer(r *http.Request) {
 		keys = append(keys, visit)
 	}
 	ref := refKey(r)
+	family := userAgentFamily(r.Header.Get("User-Agent"))
 	if ref != "" {
-		keys = append(keys, ref)
+		keys = append(keys, ref, refAgentKey(ref, family))
 		if network == "" {
 			prefix, own := s.networkPrefix(s.peer(r))
 			if !own {
@@ -275,7 +276,7 @@ func (s *Server) countReferrer(r *http.Request) {
 			}
 		}
 	}
-	if family := userAgentFamily(r.Header.Get("User-Agent")); family != "" {
+	if family != "" {
 		keys = append(keys, "agent:"+family)
 		if key := assistantFetchKey(r, family); key != "" {
 			keys = append(keys, key)
@@ -317,6 +318,17 @@ func (s *Server) countReferrer(r *http.Request) {
 	}
 }
 
+// refAgentKey is "refagent:VENUE:FAMILY" for a "ref:VENUE" view, FAMILY
+// "none" when the User-Agent names no counted family, so a venue's families
+// sum to its views and show which are link-preview bots (C777). Like the
+// view it is not deduped per network; only the number is stored.
+func refAgentKey(ref, family string) string {
+	if family == "" {
+		family = "none"
+	}
+	return "refagent:" + ref[len("ref:"):] + ":" + family
+}
+
 // assistantFetchKey is "fetch:FAMILY:PATH" for a GET/HEAD of a landing page
 // by an assistant fetch family, PATH the page web.LandingKey folds it to,
 // "fetch-other:FAMILY" for one whose folded path cannot be stored, else "".
@@ -354,7 +366,8 @@ func (c *referrerCounter) day(day string) *referrerDay {
 
 // add counts n for key, as other once referrerPendingHosts "host:" domains
 // are held, as asset-other once referrerPendingHosts "asset:" domains are,
-// as ref-other once referrerPendingRefs venues are, and as
+// as ref-other once referrerPendingRefs venues are (a folded venue's
+// refvisitor and refagent keys as refvisitor-other and refagent-other), and as
 // fetch-other:FAMILY once referrerPendingFetch of that family's paths are.
 func (d *referrerDay) add(key string, n int64) {
 	if _, held := d.counts[key]; !held {
@@ -375,6 +388,12 @@ func (d *referrerDay) add(key string, n int64) {
 			// Kept by name only while its venue is (counted first).
 			if _, named := d.counts["ref:"+key[len("refvisitor:"):]]; !named {
 				key = "refvisitor-other"
+			}
+		case strings.HasPrefix(key, "refagent:"):
+			// The same for a venue's families (C777), counted after its view.
+			venue, _, _ := strings.Cut(key[len("refagent:"):], ":")
+			if _, named := d.counts["ref:"+venue]; !named {
+				key = "refagent-other"
 			}
 		case strings.HasPrefix(key, "fetch:"):
 			family, _, _ := strings.Cut(key[len("fetch:"):], ":")

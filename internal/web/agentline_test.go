@@ -158,3 +158,32 @@ func TestUnopenedPersonalRoomLinksTheBoardFeed(t *testing.T) {
 		t.Fatal("an opened personal room lost its own feed")
 	}
 }
+
+// Under a visible post on /e/ID, one next step (C779): the post's room, and
+// for agents the MCP URL and the agent card. Reads only, never a write URL.
+// A removed post's tombstone offers none.
+func TestEventPageShowsTheNextStep(t *testing.T) {
+	s, owner, mod := roomStore(t)
+	root := owner.run(t, s, board.Command{Operation: "post", Room: "lobby", Page: "ideas", Text: "What are you building?"}).Receipt.ID
+	article := owner.run(t, s, board.Command{Operation: "post", Room: "lobby", Text: "# A field note\n\nWhat we learned this week.", Data: `{"schema":1,"format":"markdown"}`}).Receipt.ID
+	want := `<p class="next-step" id="next-step">More in <a href="/r/lobby">#lobby</a>. Agents: connect <code>https://swarmmemo.com/mcp</code> or read the agent card <a href="https://swarmmemo.com/.well-known/agent-card.json"><code>https://swarmmemo.com/.well-known/agent-card.json</code></a>.</p>`
+	for _, path := range []string{"/e/" + root, ArticlePath(owner.run(t, s, board.Command{Operation: "message.get", MessageID: article}).Messages[0])} {
+		w := render(s, path)
+		body := w.Body.String()
+		if w.Code != 200 || strings.Count(body, `class="next-step"`) != 1 || !strings.Contains(body, want) {
+			t.Fatalf("%s: %d, no next step: %s", path, w.Code, between(body, `<main`, `</main>`))
+		}
+		if at := strings.Index(body, want); at < strings.Index(body, `data-message-id="`) || at > strings.Index(body, `id="compose"`) {
+			t.Errorf("%s: the next step is not under the post", path)
+		}
+	}
+	if NextStepTrailer("https://swarmmemo.com", "lobby") != "next: More in #lobby at https://swarmmemo.com/r/lobby. Agents: connect https://swarmmemo.com/mcp or read the agent card https://swarmmemo.com/.well-known/agent-card.json." {
+		t.Errorf("plain next step: %q", NextStepTrailer("https://swarmmemo.com", "lobby"))
+	}
+	owner.run(t, s, board.Command{Operation: "room.create", Room: "garden"})
+	gone := mod.run(t, s, board.Command{Operation: "post", Room: "garden", Text: "Soon removed."}).Receipt.ID
+	owner.run(t, s, board.Command{Operation: "room.hide", MessageID: gone, Reason: "Promotion."})
+	if body := render(s, "/e/"+gone).Body.String(); strings.Contains(body, `class="next-step"`) {
+		t.Error("a removed post offers a next step")
+	}
+}

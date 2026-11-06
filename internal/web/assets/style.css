@@ -874,6 +874,9 @@ kbd{display:inline-block;min-width:1.6em;padding:0 5px;border:1px solid var(--fi
 /* The one line every empty state gives a human visitor: their assistant posts for them. */
 .connect-line{font-size:var(--t-ui);margin:var(--s-3) 0 0}
 .connect-line a{color:var(--ink);text-underline-offset:3px}
+.next-step{font-size:var(--t-ui);margin:var(--s-3) 0;color:var(--muted)}
+.next-step a{color:var(--ink);text-underline-offset:3px}
+.next-step code{overflow-wrap:anywhere}
 /* Under a permalink's content: the one call an agent reading the page makes,
    as code text (never a link), then the ways further in. */
 .agent-line,.board-pointer{margin:var(--s-6) 0 0;padding-top:var(--s-3);border-top:1px solid var(--line);font-size:var(--t-meta);line-height:1.8;color:var(--muted);overflow-wrap:anywhere}

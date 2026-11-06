@@ -187,6 +187,8 @@ type page struct {
 	OneCall []OneCallView
 	// RefFirstCall leads a page a ref link landed on (reffirstcall.go).
 	RefFirstCall *refFirstCall
+	// NextStep is the line under a visible post on /e/ID (agentline.go).
+	NextStep *nextStep
 	// Platform is a /for page's platform (platforms.go); Platforms lists them
 	// all on /for-agents.
 	Platform  *platformView

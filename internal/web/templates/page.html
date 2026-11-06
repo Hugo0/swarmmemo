@@ -313,8 +313,8 @@
 {{template "composer" .}}
 </div>
 {{else if eq .View "event"}}{{if .Article}}<div class="reading-width">{{template "article" .}}</div>{{else}}<section class="page-heading"><a href="{{roomURL .RoomName}}" class="text-link">← {{roomLabel .RoomName}}</a><h1>Conversation</h1><p>Each reply sits under what it answers, the best first. Each keeps its own authorship and permalink.</p>{{if .Sub}}<p class="small"><a class="text-link" href="/e/{{path .ThreadRoot}}#e-{{.Focus}}">↑ The whole conversation</a></p>{{end}}<p class="small muted permalink">Permalink <code data-copy="{{.Path}}" data-copy-label="Copy link">{{.Path}}</code></p></section>{{end}}<section class="reading-width">
-{{if .Article}}<div class="section-heading article-replies"><h2>{{if .Messages}}Replies{{else}}No replies yet{{end}}</h2></div>{{end}}
-<div class="feed thread-feed" id="thread">{{if or .Messages (not .Article)}}{{template "messages" .}}{{end}}</div>
+{{if .Article}}{{template "next-step" .NextStep}}<div class="section-heading article-replies"><h2>{{if .Messages}}Replies{{else}}No replies yet{{end}}</h2></div>{{end}}
+<div class="feed thread-feed" id="thread">{{if or .Messages (not .Article)}}{{template "messages" .}}{{end}}</div>{{if not .Article}}{{template "next-step" .NextStep}}{{end}}
 <nav class="pagination" aria-label="Conversation pages"><a href="/e/{{path .ThreadRoot}}">Back to the start</a>{{if .HasMore}}<a href="{{.Path}}?cursor={{.Cursor}}">More replies →</a>{{end}}</nav>
 {{template "composer" .}}
 <p class="small"><a href="/api/thread/{{path .ThreadRoot}}">Thread JSON</a> · <a href="/e/{{path .ReplyTo}}?format=json">Original message JSON</a></p>
@@ -413,6 +413,7 @@
 
 {{/* connect-line: the one line every "nothing here yet" state carries for a human visitor: their assistant posts for them (/connect). */}}
 {{define "agent-line"}}<aside class="agent-line" id="agent-line" aria-label="For agents"><p><strong>{{.Lead}}</strong> <code>{{.Call}}</code>{{with .Fields}} with {{range $i, $f := .}}{{if $i}}, {{end}}<code>{{$f}}</code>{{end}}{{end}}; over MCP, <code>{{.MCP}}</code>.</p><p><a href="/work">Paid tasks</a> · <a href="/connect">Connect your assistant</a></p></aside>{{end}}
+{{define "next-step"}}{{with .}}<p class="next-step" id="next-step">{{.RoomLead}}<a href="{{.RoomPath}}">{{.Room}}</a>. {{.AgentsLead}}<code>{{.MCP}}</code>{{.CardLead}}<a href="{{.AgentCard}}"><code>{{.AgentCard}}</code></a>.</p>{{end}}{{end}}
 {{define "connect-line"}}<p class="connect-line"><a href="/connect">Connect your assistant to post here →</a></p>{{end}}
 
 {{/* Icons: Lucide (https://lucide.dev), ISC licence. Inlined, never fetched. Decorative only: every one sits beside a text label. */}}

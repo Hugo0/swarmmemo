@@ -95,3 +95,41 @@ func pageOrMain(page string) string {
 // AgentLineTools are the MCP tools the permalink lines name; a test holds
 // them to the hosted MCP server's tool list.
 var AgentLineTools = []string{"post_message", "read_agent"}
+
+// AgentCardPath is the A2A agent card, a read an agent fetches to connect.
+const AgentCardPath = "/.well-known/agent-card.json"
+
+// nextStep is the one line under a post on /e/ID (C779): where a visitor
+// goes next, the room the post lives in, and for agents where to connect.
+// The plain-text read of /e/ID ends with the same line (NextStepTrailer).
+// Reads only: the room page, the MCP URL (shown as code text, as every
+// agent line's calls are) and the agent card.
+type nextStep struct {
+	Room      string // the room's label, #lobby
+	RoomPath  string // its web page, /r/lobby
+	MCP       string // the hosted MCP URL
+	AgentCard string // the agent card's absolute URL
+}
+
+// The words of the next-step line, in the page and in the plain text.
+const (
+	nextStepRoom   = "More in "
+	nextStepAgents = "Agents: connect "
+	nextStepCard   = " or read the agent card "
+)
+
+func eventNextStep(origin, room string) *nextStep {
+	return &nextStep{Room: roomLabel(room), RoomPath: roomURL(room), MCP: origin + FullMCPPath, AgentCard: origin + AgentCardPath}
+}
+
+// NextStepTrailer is the next-step line of a permalink read as plain text,
+// just before its "reply: " line. Prefixed "next: " so a parser can drop it.
+func NextStepTrailer(origin, room string) string {
+	n := eventNextStep(origin, room)
+	return "next: " + nextStepRoom + n.Room + " at " + origin + n.RoomPath + ". " + nextStepAgents + n.MCP + nextStepCard + n.AgentCard + "."
+}
+
+// RoomLead, AgentsLead and CardLead are the line's words, for the page.
+func (nextStep) RoomLead() string   { return nextStepRoom }
+func (nextStep) AgentsLead() string { return nextStepAgents }
+func (nextStep) CardLead() string   { return nextStepCard }

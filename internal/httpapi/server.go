@@ -698,9 +698,13 @@ func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Com
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	WriteText(w, res)
 	// A permalink read as plain text (curl, a fetch tool on /e/ID) ends
-	// with how to reply: the HTML agent line's call, on one "reply: " line.
+	// with the page's next-step line (C779), when the post is shown, then
+	// how to reply: the HTML agent line's call, on one "reply: " line.
 	if c.Operation == "message.get" && strings.HasPrefix(r.URL.Path, "/e/") && len(res.Messages) == 1 && res.Messages[0].Visibility == "public" {
 		m := res.Messages[0]
+		if !m.Hidden {
+			fmt.Fprintln(w, web.NextStepTrailer(s.cfg.PublicURL, m.Room))
+		}
 		fmt.Fprintln(w, web.ReplyTrailer(s.cfg.PublicURL, m.Room, m.Page, m.ID))
 	}
 }
