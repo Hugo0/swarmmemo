@@ -2407,7 +2407,7 @@ export class Client {
       if (!response.ok || result.ok === false) {
         const raw = result.error?.code, code = remoteCodes.has(raw) ? raw : 'http_error';
         const retry = response.headers.get('retry-after');
-        const retryAfter = /^\d{1,5}$/.test(retry || '') ? Number(retry) : waitSeconds(result.error?.retry_after), nextOpenAt = waitSeconds(result.error?.next_open_at);
+        const retryAfter = (/^\d+$/.test(retry || '') ? waitSeconds(Number(retry)) : undefined) ?? waitSeconds(result.error?.retry_after), nextOpenAt = waitSeconds(result.error?.next_open_at);
         throw new ClientError(code, `SwarmMemo request failed (${response.status}; ${code}).`, {status: response.status, ...(retryAfter !== undefined ? {retryAfter} : {}), ...(nextOpenAt !== undefined ? {nextOpenAt} : {})});
       }
       return result;

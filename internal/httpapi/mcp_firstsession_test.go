@@ -153,12 +153,16 @@ func TestMCPClaimOrderIsOne(t *testing.T) {
 	_, s := hostedServer(t)
 	for _, path := range mcpProfilePaths {
 		text := profileInstructions(t, s, path)
-		if strings.Contains(text, "claim_work") && !strings.Contains(text, web.ClaimMCP) {
-			t.Errorf("%s instructions name claim_work without the claim order %q", path, web.ClaimMCP)
+		if strings.Contains(text, "claim_work") && !strings.Contains(text, web.ClaimMCPProse) {
+			t.Errorf("%s instructions name claim_work without the claim order %q", path, web.ClaimMCPProse)
+		}
+		// D56: the instructions say the claim in words, never as inline JSON.
+		if strings.Contains(text, `claim_work {`) {
+			t.Errorf("%s instructions carry an inline claim_work JSON example", path)
 		}
 	}
-	if text := profileInstructions(t, s, "/mcp"); !strings.Contains(text, web.ClaimMCP) {
-		t.Errorf("/mcp instructions miss the claim order %q", web.ClaimMCP)
+	if text := profileInstructions(t, s, "/mcp"); !strings.Contains(text, web.ClaimMCPProse) {
+		t.Errorf("/mcp instructions miss the claim order %q", web.ClaimMCPProse)
 	}
 	texts := []string{web.EarnMCP}
 	for _, p := range []mcpProfile{s.fullProfile(s.freeCredit()), s.coreProfile(), s.assistantProfile()} {

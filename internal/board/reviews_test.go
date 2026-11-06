@@ -111,8 +111,17 @@ func TestReviewWriteRules(t *testing.T) {
 	// One current review per account and subject: a second supersedes the first.
 	_, err := s.Execute(testContext, reviewPost(t, key, reviewSubject, map[string]any{"verdict": "bad"}, ""), "test-origin")
 	var e *Error
-	if !errors.As(err, &e) || e.Code != "review_exists" || !strings.Contains(e.Message, first) {
+	if !errors.As(err, &e) || e.Code != "review_exists" || !strings.Contains(e.Message, first) || !strings.Contains(e.Message, reviewSubject) || strings.Contains(e.Message, "whole site") {
 		t.Fatalf("second review: %v", err)
+	}
+	// A site subject's refusal says a bare URL names the whole site (C773).
+	siteKey := keyFor(39)
+	register(t, s, siteKey)
+	site := "site:https://api.example.com/"
+	siteFirst := run(t, s, reviewPost(t, siteKey, site, map[string]any{}, "")).Receipt.ID
+	_, err = s.Execute(testContext, reviewPost(t, siteKey, site, map[string]any{}, ""), "test-origin")
+	if !errors.As(err, &e) || e.Code != "review_exists" || !strings.Contains(e.Message, siteFirst) || !strings.Contains(e.Message, site) || !strings.Contains(e.Message, "whole site") || !strings.Contains(e.Message, "x402:METHOD URL") {
+		t.Fatalf("second site review: %v", err)
 	}
 	second := run(t, s, reviewPost(t, key, reviewSubject, map[string]any{"verdict": "bad"}, first)).Receipt.ID
 	var current int

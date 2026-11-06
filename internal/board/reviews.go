@@ -292,7 +292,13 @@ func (s *Store) checkReview(ctx context.Context, tx *sql.Tx, c Command, a actor,
 			return nil, err
 		}
 		if !stuck || d.Supersedes != "" {
-			return nil, &Error{Status: 409, Code: "review_exists", Message: fmt.Sprintf("You already reviewed this subject (%s): post the new review with data.supersedes %q, so history is kept and the newest counts.", p.previous, p.previous), Details: map[string]any{"current_review": p.previous}}
+			msg := fmt.Sprintf("You already reviewed this subject (%s, review %s): post the new review with data.supersedes %q, so history is kept and the newest counts.", r.Subject.URI(), p.previous, p.previous)
+			if r.Subject.Type == reviews.TypeSite {
+				// A bare URL resolves to its site, whatever its path
+				// (siteKey), so two services on one host share it (C773).
+				msg += " A site subject is the whole site, whatever path its URL had; review one service as x402:METHOD URL or mcp:URL."
+			}
+			return nil, &Error{Status: 409, Code: "review_exists", Message: msg, Details: map[string]any{"current_review": p.previous}}
 		}
 	}
 	// A rotated key cannot supersede its predecessor's post; its new review

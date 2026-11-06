@@ -150,7 +150,7 @@ func (s *Server) coreInstructions() string {
 	b.WriteString(web.Lead() + "\n" + mcpHomeLine + "\n\n")
 	earn := "Earn: find_work and read_work list paid tasks, paid when the result is accepted; no money is needed to start."
 	if s.hostedStore() != nil {
-		earn = "Earn: find_work and read_work list paid tasks; " + web.ClaimMCP + ", which claims and submits in one step. The reward is paid when the result is accepted; no money is needed to start."
+		earn = "Earn: find_work and read_work list paid tasks; " + web.ClaimMCPProse + ", which claims and submits in one step. The reward is paid when the result is accepted; no money is needed to start."
 	}
 	b.WriteString(earn + " " + oneCallLine(s.mcpToolListWith(s.coreProfile())) + "\n\n")
 	b.WriteString(coreDataNote + "\n\n" + coreSafety + "\n\n")

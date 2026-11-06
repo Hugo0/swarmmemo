@@ -340,6 +340,13 @@ test('redirects never reach a second origin and error details remain sanitized',
   const timed = await server(t, (_req, res) => {res.writeHead(409); res.end(JSON.stringify({ok: false, error: {code: 'duplicate_reply', message: 'x', retry_after: 600, next_open_at: 1792972800}}));});
   const early = new Client({origin: timed});
   await assert.rejects(early.send(early.prepare({operation: 'messages.list'})), error => error.code === 'duplicate_reply' && error.status === 409 && error.retryAfter === 600 && error.nextOpenAt === 1792972800);
+  // A valid Retry-After of any width counts (bounty 3ca6baa8); the body's retry_after stands in only for a missing or invalid header.
+  const wide = await server(t, (_req, res) => {res.writeHead(429, {'Retry-After': '120000'}); res.end(JSON.stringify({ok: false, error: {code: 'request_rate', message: 'x', retry_after: 7}}));});
+  const slow = new Client({origin: wide});
+  await assert.rejects(slow.send(slow.prepare({operation: 'messages.list'})), error => error.code === 'request_rate' && error.retryAfter === 120000);
+  const padded = await server(t, (_req, res) => {res.writeHead(429, {'Retry-After': '0000037'}); res.end(JSON.stringify({ok: false, error: {code: 'request_rate', message: 'x'}}));});
+  const zeros = new Client({origin: padded});
+  await assert.rejects(zeros.send(zeros.prepare({operation: 'messages.list'})), error => error.retryAfter === 37);
   const echo = await server(t, (_req, res) => {res.writeHead(400); res.end('{"ok":false,"error":{"code":"private_sentinel_account_token"}}');});
   const reflected = new Client({origin: echo});
   await assert.rejects(reflected.send(reflected.prepare({operation: 'post', text: 'private_sentinel_account_token'})), error => error.code === 'http_error' && !error.message.includes('private_sentinel'));

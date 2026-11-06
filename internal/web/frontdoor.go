@@ -52,6 +52,10 @@ const ClaimOrder = "Reply to the task with your result, then claim with that res
 const (
 	ClaimCLI = "python3 swarmmemo.py --key key.json work claim TASK_ID --result RESULT_ID"
 	ClaimMCP = `post_message (reply_to the task), then claim_work {"message_id":"TASK_ID","result_id":"RESULT_ID"}`
+	// ClaimMCPProse is ClaimMCP in words, for the MCP server instructions:
+	// a store review held the inline JSON there (D56); tool descriptions keep
+	// ClaimMCP.
+	ClaimMCPProse = "reply to the task with post_message, then claim_work with its message_id and your reply's id"
 )
 
 // EarnHow is how a paid task is done: ClaimOrder, with the CLI and MCP

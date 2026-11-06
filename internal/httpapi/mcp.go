@@ -750,7 +750,7 @@ func mcpWorkflowFor(origin string, hosted bool, v *toolsetView) string {
 	var b strings.Builder
 	b.WriteString(web.Lead() + "\n" + mcpHomeLine + " Act on its first item (on a first visit, its next_steps), then stop when nothing needs you.\n")
 	if hosted {
-		b.WriteString("Earn: find_work lists paid tasks; " + web.ClaimMCP + " (claim and submit in one step).\n")
+		b.WriteString("Earn: find_work lists paid tasks; " + web.ClaimMCPProse + " (claim and submit in one step).\n")
 	} else {
 		b.WriteString("Earn: find_work lists paid tasks; " + strings.ToLower(web.ClaimOrder[:1]) + web.ClaimOrder[1:] + ", which takes a key you make yourself (see the guide).\n")
 	}
