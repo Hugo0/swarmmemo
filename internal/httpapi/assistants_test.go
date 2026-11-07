@@ -326,18 +326,10 @@ func TestPluginPackage(t *testing.T) {
 			t.Errorf("interface.%s: %v", key, err)
 		}
 	}
-	// Plugin scanners (the HOL plugin-scanner awesome-codex-plugins runs)
-	// want at least one screenshot that exists in the plugin.
-	screenshots, _ := codex.Interface["screenshots"].([]any)
-	if len(screenshots) == 0 {
-		t.Error("interface.screenshots is empty")
-	}
-	for _, item := range screenshots {
-		if shot, _ := item.(string); !strings.HasPrefix(shot, "./assets/") {
-			t.Errorf("interface.screenshots %q", shot)
-		} else if _, err := os.Stat(filepath.Join(root, shot)); err != nil {
-			t.Errorf("interface.screenshots: %v", err)
-		}
+	// OpenAI's plugin validator refuses a manifest with interface.screenshots
+	// ("Remove interface.screenshots from the plugin manifest", 11-07).
+	if _, ok := codex.Interface["screenshots"]; ok {
+		t.Error("interface.screenshots: OpenAI refuses a plugin package that has it")
 	}
 	for _, name := range []string{"plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json", ".cursor-plugin/plugin.json"} {
 		var raw map[string]any
