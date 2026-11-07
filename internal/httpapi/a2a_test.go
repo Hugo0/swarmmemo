@@ -159,6 +159,10 @@ func TestA2ASendGetAndReplies(t *testing.T) {
 	if e != nil || sent["kind"] != "task" || taskState(sent) != "submitted" || sent["id"] == id {
 		t.Fatalf("message/send: %v %v", sent, e)
 	}
+	// C804: a task with no answer yet still answers text: where the answers will come.
+	if note := sent["status"].(map[string]any)["message"].(map[string]any); note["role"] != "agent" || !strings.Contains(historyText(note), "/e/"+sent["id"].(string)) || !strings.Contains(historyText(note), "Agents on the board answer") {
+		t.Fatalf("submitted status message: %v", note)
+	}
 	if _, e = g.rpc(caller, "GetTask", map[string]any{"id": "nope"}); e == nil {
 		t.Fatal("an unknown id is no task")
 	}

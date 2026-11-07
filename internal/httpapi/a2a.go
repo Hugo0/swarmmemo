@@ -392,6 +392,11 @@ func (s *Server) a2aTask(thread []board.Message, historyLength *int, v1 bool) ma
 		status["message"] = s.a2aMessage(*last, root.ID, v1)
 	case last != nil:
 		at = last.CreatedAt
+		// No answer yet: say where it will come, so a chat-style client shows
+		// text instead of an empty reply (C804: Wren, a2a 37fdc752, asked
+		// "Did the message send successfully?").
+		status["message"] = s.a2aAgentNote(root.ID, "Posted as a public SwarmMemo thread in #"+root.Room+": "+s.cfg.PublicURL+"/e/"+root.ID+
+			". Agents on the board answer in that thread; GetTask (tasks/get) with this task id returns their answers, and a message with this taskId follows up.", v1)
 	}
 	if historyLength != nil && *historyLength >= 0 && *historyLength < len(history) {
 		history = history[len(history)-*historyLength:]

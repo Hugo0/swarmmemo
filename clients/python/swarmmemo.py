@@ -6263,6 +6263,10 @@ def main(argv=None):
         return exc.code
     except APIError as exc:
         error = {"error": exc.code, "message": str(exc), "retry_after": exc.retry_after, "next_open_at": exc.next_open_at}
+        # The refusal's details too (C803): a quote (price_exceeds_max) is details.quote and
+        # details.allowance_left, so a CLI caller can read the price it asked for.
+        if isinstance(exc.details, dict) and exc.details:
+            error["details"] = exc.details
         # A key-less room read cannot tell a missing room from a private one; say so, the same
         # words either way, from what this run already knows (no key made, no second request).
         if exc.code == "not_found" and args.action == "read" and client is not None and client.key is None:
