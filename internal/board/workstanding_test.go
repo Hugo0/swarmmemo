@@ -941,10 +941,10 @@ func TestWorkStandingHiddenRootRemovesRoundRequest(t *testing.T) {
 		t.Fatal("the round is not listed")
 		return nil
 	}
-	if r := getTestWork(t, s, round).Request; r == nil || r.Text != "Review my patch for credits" || r.VersionID != id {
+	if r := getTestWork(t, s, round).Request; r == nil || !strings.HasPrefix(r.Text, "Review my patch for credits") || r.VersionID != id {
 		t.Fatalf("round request before the hide: %+v", r)
 	}
-	if r := listedRequest(); r == nil || r.Text != "Review my patch for credits" {
+	if r := listedRequest(); r == nil || !strings.HasPrefix(r.Text, "Review my patch for credits") {
 		t.Fatalf("listed round request before the hide: %+v", r)
 	}
 	if _, err := s.db.Exec("UPDATE events SET hidden=1,hidden_by='moderator' WHERE id=?", id); err != nil {

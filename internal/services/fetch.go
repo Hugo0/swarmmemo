@@ -102,7 +102,7 @@ const (
 	fetchCacheEntries   = 2048
 	fetchRobotsEntries  = 1024 // at most 32 KiB of rules each: 32 MiB in all
 	fetchSlotEntries    = 8192
-	fetchArgsMax        = FetchURLBytes + 288 + fetchRoomBytes
+	fetchArgsMax        = FetchURLBytes + 288 + fetchRoomBytes + 16 + JSONEscape*FetchFieldBytes
 	fetchRoomBytes      = 128
 	fetchConfigBytes    = 64 << 10
 	fetchDenyMax        = 10000
@@ -334,6 +334,7 @@ func (f *fetch) Describe() Descriptor {
 					{"screen", "boolean", false, "screen the text for prompt injection (default true); false skips screening and its charge"},
 					{"keep", "string", false, `"blob": also store the response bytes as a file (blob.put's limits and price, on your posting allowance) and return its blob_id and URL; signed only, needs room`},
 					{"room", "string", false, "with keep: the room the file is stored in, one you may upload files to (a public room, or a private one you are a member of)"},
+					{"field", "string", false, "JSON pointer (RFC 6901), e.g. \"/data/rate\": adds field_value (canonical JSON, up to " + SizeText(FetchFieldValueBytes) + ") and field_sha256, its hash to stamp; no extra charge"},
 				},
 				Example: json.RawMessage(`{"url":"https://example.com/","max_bytes":8192}`), ExampleMaxCost: FetchPrice.For(fetchExampleBytes) + ScreenSurchargeMax(fetchExampleBytes),
 				Anonymous: true, AnonymousLabel: "page fetches", AnonymousNote: fmt.Sprintf("without a key: up to %s per call (max_bytes at most %d); signed (or a signed-in MCP connection): up to %s", SizeText(FetchAnonymousTextMax), FetchAnonymousTextMax, SizeText(FetchTextMax)),
@@ -380,6 +381,7 @@ type fetchArgs struct {
 	Screen   *bool           `json:"screen"`
 	Keep     string          `json:"keep"`
 	Room     string          `json:"room"`
+	Field    string          `json:"field"`
 }
 
 type fetchPlan struct {
@@ -390,6 +392,8 @@ type fetchPlan struct {
 	screen   *bool
 	keep     bool   // keep=blob
 	room     string // keep's room
+	field    string   // field: a JSON pointer ("" without one)
+	tokens   []string // field's reference tokens, unescaped
 }
 
 // FetchSizesLine is how much text a fetch returns, without a key and signed:
@@ -437,6 +441,13 @@ func parseFetch(raw json.RawMessage) (fetchPlan, error) {
 		return p, &allowance.Err{Code: "invalid_service_data", Message: `keep takes one value, "blob".`}
 	case a.Room != "":
 		return p, &allowance.Err{Code: "invalid_service_data", Message: `room goes with keep: "blob" only.`}
+	}
+	if a.Field != "" {
+		t, err := parseFetchField(a.Field)
+		if err != nil {
+			return p, err
+		}
+		p.field, p.tokens = a.Field, t
 	}
 	if a.MaxBytes != nil {
 		n, ok := Integer(a.MaxBytes, FetchTextMax)
@@ -673,6 +684,14 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 		return Result{}, &allowance.Err{Code: entry.errCode, Details: entry.errDetail}
 	}
 	page := entry.page
+	// field is resolved before anything is kept, so a field refusal
+	// stores nothing and costs nothing.
+	var fieldValue []byte
+	if p.field != "" {
+		if fieldValue, err = fetchFieldValue(page.Raw, page.Format, p.field, p.tokens); err != nil {
+			return Result{}, err
+		}
+	}
 	var kept *KeptBlob
 	if p.keep {
 		k, err := f.keep(ctx, c, p, page)
@@ -736,6 +755,9 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	}
 	if next > 0 {
 		body["next_offset"] = next
+	}
+	if fieldValue != nil {
+		body["field"], body["field_value"], body["field_sha256"] = p.field, json.RawMessage(fieldValue), sha256Of(fieldValue)
 	}
 	if kept != nil {
 		body["blob_id"] = kept.ID

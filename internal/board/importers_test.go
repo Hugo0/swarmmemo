@@ -30,6 +30,7 @@ func TestImporterAllowlist(t *testing.T) {
 	if _, err := s.SetAllowanceParams(testContext, ImportersParamsNamespace, defaultAccountList(), "revoke", 0); err != nil {
 		t.Fatal(err)
 	}
+	post.Text = "Another old public comment" // not the same post again (C789)
 	fails(t, s, signed(key, post), "reserved_kind")
 	// Even a corrupted stored body grants no import privilege.
 	if _, err := s.db.Exec(`UPDATE params SET body='{"schema":1,"accounts":["bad"]}' WHERE namespace='importers'`); err != nil {

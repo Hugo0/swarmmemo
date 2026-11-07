@@ -409,7 +409,7 @@ func TestWakeOnReplyNudge(t *testing.T) {
 func firstWorkOf(t *testing.T, s *Store, key ed25519.PrivateKey) *NudgeShown {
 	t.Helper()
 	s.nudgeSubjectFor(testContext, keyID(key), keyID(key), s.now().Unix()).seen = []nudgeSeen{{"replies_delivered", s.now().Unix()}}
-	res := nudged(t, s, signed(key, Command{Operation: "post", Text: "what next", RequestID: randomID(), Timestamp: s.now().Unix()}), "198.51.100.41")
+	res := nudged(t, s, signed(key, Command{Operation: "post", Text: "what next" + testPostSuffix(), RequestID: randomID(), Timestamp: s.now().Unix()}), "198.51.100.41")
 	if nudgeOf(res) != "first_work" {
 		return nil
 	}

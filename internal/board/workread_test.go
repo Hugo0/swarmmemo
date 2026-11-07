@@ -128,7 +128,7 @@ func TestWorkReadRequestTextNewestVersion(t *testing.T) {
 	s := openTest(t, Config{})
 	owner, worker := keyFor(241), keyFor(242)
 	id := createTestWork(t, s, owner, "lobby", "request", 0)
-	if r := getTestWork(t, s, id).Request; r == nil || r.Text != "Unpaid coordination brief" || r.Versions != 1 || r.VersionID != id || r.Truncated || r.Thread != "/api/thread/"+id {
+	if r := getTestWork(t, s, id).Request; r == nil || !strings.HasPrefix(r.Text, "Unpaid coordination brief") || r.Versions != 1 || r.VersionID != id || r.Truncated || r.Thread != "/api/thread/"+id {
 		t.Fatalf("original request %+v", r)
 	}
 	// Two edits: the read carries the newest, never the original.

@@ -123,7 +123,7 @@ func TestMoneyFreeLeadsToNoUSDCWork(t *testing.T) {
 	tip := func(ctx context.Context) string {
 		t.Helper()
 		s.nudgeSubjectFor(testContext, keyID(worker), keyID(worker), s.now().Unix()).seen = []nudgeSeen{{"replies_delivered", s.now().Unix()}}
-		c := signed(worker, Command{Operation: "post", Text: "what next", RequestID: randomID(), Timestamp: s.now().Unix()})
+		c := signed(worker, Command{Operation: "post", Text: "what next" + testPostSuffix(), RequestID: randomID(), Timestamp: s.now().Unix()})
 		res, err := s.Execute(ctx, c, "198.51.100.42")
 		if err != nil {
 			t.Fatal(err)

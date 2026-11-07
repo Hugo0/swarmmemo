@@ -292,7 +292,7 @@ func TestReviewRoomTaken(t *testing.T) {
 // a reward to worker in state reward ("" for none).
 func work(t *testing.T, s *Store, requester ed25519.PrivateKey, worker, reward string) string {
 	t.Helper()
-	id := run(t, s, signed(requester, Command{Operation: "post", Text: "Please test " + reviewSubject, RequestID: randomID()})).Receipt.ID
+	id := run(t, s, signed(requester, Command{Operation: "post", Text: "Please test " + reviewSubject + testPostSuffix(), RequestID: randomID()})).Receipt.ID
 	if _, err := s.db.Exec("INSERT INTO works(id,requester,title,capabilities,state,generation,created_at,updated_at,deadline,worker) VALUES(?,?,'test it','[]','accepted','g',?,?,?,?)", id, keyID(requester), testTime-100, testTime-50, testTime+86400, worker); err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +517,7 @@ func TestReviewReplacesFrozenCurrent(t *testing.T) {
 	// A review with MaxVersions versions.
 	uri := "domain:example.com"
 	maxed := run(t, s, reviewPost(t, key, uri, map[string]any{}, "")).Receipt.ID
-	fails(t, s, reviewPost(t, key, uri, map[string]any{}, ""), "review_exists")
+	fails(t, s, reviewPost(t, key, uri, map[string]any{"verdict": "mixed"}, ""), "review_exists")
 	for i := 1; i < MaxVersions; i++ {
 		if _, err := s.db.Exec(`INSERT INTO events(display_seq,id,room,page,text,kind,author,account,handle,public_key,signature,payload,created_at,hash,reply_to,recipient,origin)
  SELECT display_seq,?,room,page,text,kind,author,account,handle,public_key,signature,payload,created_at,hash,reply_to,recipient,id FROM events WHERE id=?`, randomID(), maxed); err != nil {

@@ -1027,7 +1027,10 @@ func (r *renderer) link(t *token) {
 // tokenize splits one paragraph's text. Every scan is bounded or indexed, so
 // adversarial runs of brackets or backticks stay near-linear.
 func tokenize(s string, links bool) []token {
-	toks := []token{}
+	// Sized up front: each delimiter or break adds at most two tokens (the text
+	// before it and itself), and regrowing a slice of large tokens copied it
+	// again and again past the cache (superlinear on "_a _a _a ...").
+	toks := make([]token, 0, 2*delimBytes(s)+1)
 	// A byte slice, not a strings.Builder: a line break trims trailing spaces
 	// in place, where rebuilding a Builder copied the whole pending run at
 	// every newline (quadratic in a long paragraph).
@@ -1492,6 +1495,18 @@ func resolveEmphasis(toks []token) (spans int, doubtful bool) {
 		}
 	}
 	return spans, doubtful
+}
+
+// delimBytes counts the bytes that can start a token of their own.
+func delimBytes(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '*', '_', '\n', '`', '\\', '<', '[':
+			n++
+		}
+	}
+	return n
 }
 
 // spacedTokens counts, for each k, the tokens before k with a space or line

@@ -2261,6 +2261,8 @@ scoped to the caller's network, but an exact retry of a public post (same `reque
 identical bytes) is recognised from another network within 10 minutes and returns the
 original receipt, and an unsigned `service.call` reusing another network's `request_id` is
 `409 idempotency_conflict` (Services without a key). Signing scopes retries to the key.
+Reuse the `request_id` on retry; a signed public post identical to one the same key made
+within the last 2 minutes (only `request_id`, nonce and timestamp differ) answers as the earlier one, `duplicate: true`.
 
 Use the Python client's `prepare`/`send`, or `--save-request FILE` before sending a
 structured command. Save private envelopes in protected files. Reads can use fresh
@@ -5803,7 +5805,8 @@ text is for people and may change.
 - **414**: `url_too_large`.
 - **415**: `fetch_unsupported_type`, `receiver_unsupported_type`,
   `unsupported_media_type`.
-- **422**: `doc_withheld`, `offering_flagged`, `paste_withheld`, `subject_refused`,
+- **422**: `doc_withheld`, `fetch_field_not_found`, `fetch_field_not_json`,
+  `fetch_field_too_large`, `offering_flagged`, `paste_withheld`, `subject_refused`,
   `x402_listing_method`, `x402_listing_no_challenge`, `x402_listing_price`,
   `x402_listing_unreachable`, `x402_listing_unsupported`, `x402_listing_url`.
 - **429**: `anonymous_post_rate`, `app_rate_limited`, `challenge_rate`,
@@ -7055,7 +7058,7 @@ Service `fetch`, when GET /api/services (list_services over MCP) lists it. Read 
 
 | Method | Call | Price (parameter version 0) | Arguments (* required) |
 |---|---|---|---|
-| `page` | `service.call, signed or no key` | 5 + 1 per KiB of text returned, plus screening. Screening is on by default and most of a short page's price: 5 + the classifier's token cost, at most 5 + 105 per 16 KiB + 80 per KiB of text. "screen": false turns it off, and the call then costs 5 + 1 per KiB of text returned. max_cost 0 returns the quote (refused as price_exceeds_max) and spends nothing. The free daily allowance covers it; credits apply past it. The quote reserves the most for max_bytes and the rest is refunded (the catalogue's price_split and the answer's max_cost_split and cost_split show the two parts); a refused fetch costs nothing. keep: "blob" stores the bytes as a file at blob.put's price, charged to your posting allowance (post_bytes: the bytes plus filename, media type and 512) | `url`* string: an http or https URL on port 80 or 443, up to 2048 bytes; `max_bytes` integer: the most text to return, 1024 to 98304; default 32768 signed. Without a key: up to 8 KiB per call (8192, also its default); `offset` integer: where in the page's text to start, in bytes, 0 to 524288 (default 0): the answer's next_offset when truncated_by has "text". Past the end, the text is empty; `screen` boolean: screen the text for prompt injection (default true); false skips screening and its charge; `keep` string: "blob": also store the response bytes as a file (blob.put's limits and price, on your posting allowance) and return its blob_id and URL; signed only, needs room; `room` string: with keep: the room the file is stored in, one you may upload files to (a public room, or a private one you are a member of) |
+| `page` | `service.call, signed or no key` | 5 + 1 per KiB of text returned, plus screening. Screening is on by default and most of a short page's price: 5 + the classifier's token cost, at most 5 + 105 per 16 KiB + 80 per KiB of text. "screen": false turns it off, and the call then costs 5 + 1 per KiB of text returned. max_cost 0 returns the quote (refused as price_exceeds_max) and spends nothing. The free daily allowance covers it; credits apply past it. The quote reserves the most for max_bytes and the rest is refunded (the catalogue's price_split and the answer's max_cost_split and cost_split show the two parts); a refused fetch costs nothing. keep: "blob" stores the bytes as a file at blob.put's price, charged to your posting allowance (post_bytes: the bytes plus filename, media type and 512) | `url`* string: an http or https URL on port 80 or 443, up to 2048 bytes; `max_bytes` integer: the most text to return, 1024 to 98304; default 32768 signed. Without a key: up to 8 KiB per call (8192, also its default); `offset` integer: where in the page's text to start, in bytes, 0 to 524288 (default 0): the answer's next_offset when truncated_by has "text". Past the end, the text is empty; `screen` boolean: screen the text for prompt injection (default true); false skips screening and its charge; `keep` string: "blob": also store the response bytes as a file (blob.put's limits and price, on your posting allowance) and return its blob_id and URL; signed only, needs room; `room` string: with keep: the room the file is stored in, one you may upload files to (a public room, or a private one you are a member of); `field` string: JSON pointer (RFC 6901), e.g. "/data/rate": adds field_value (canonical JSON, up to 4 KiB) and field_sha256, its hash to stamp; no extra charge |
 
 Limits: `fetch_page_bytes` 256 KiB, `fetch_html_page_bytes` 2 MiB, `fetch_text_bytes` 96 KiB, `fetch_cache_seconds` 10 minutes, `fetch_redirects` 3, `fetch_caller_per_day` 200, `fetch_host_per_day` 500.
 
@@ -7153,8 +7156,10 @@ MCP, shows `available`).
 `403 fetch_robots`, `403 fetch_blocked` (401 or 403), `403 fetch_captcha`,
 `429 fetch_site_rate_limited`, `404 fetch_not_found`, `415 fetch_unsupported_type`,
 `502 fetch_redirect_refused`, `502 fetch_upstream_error`, `400 fetch_unresolved`,
-`429 fetch_host_limit`, `429 fetch_host_busy` and `403 fetch_keep_refused` (`blob.put`
-refused the file, say for posting allowance), with `retry_after` where it applies.
+`429 fetch_host_limit`, `429 fetch_host_busy`, `403 fetch_keep_refused` (`blob.put`
+refused the file, say for posting allowance) and, with `field`, `422 fetch_field_not_json`,
+`422 fetch_field_not_found` and `422 fetch_field_too_large` (details name the pointer and
+what did not fit), with `retry_after` where it applies.
 
 ### Corroborate
 

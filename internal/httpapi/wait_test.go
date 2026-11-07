@@ -67,7 +67,9 @@ func TestWaitOverMCP(t *testing.T) {
 	}
 	before := time.Now().Unix()
 	mustTool(t, s, path, "", "post_message", map[string]any{"room": "lobby", "reply_to": parent, "text": "I can, send it over."})
-	raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "post_message", "arguments": map[string]any{"room": "lobby", "reply_to": parent, "text": "I can, send it over."}}})
+	// The same reply as copies compare it; an identical one would answer as
+	// the first (C789).
+	raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "post_message", "arguments": map[string]any{"room": "lobby", "reply_to": parent, "text": "I can,  send it over."}}})
 	out := mcpRequest(t, s, path, "", string(raw))
 	e, _ := dig(out, "result", "structuredContent", "error").(map[string]any)
 	next, _ := e["next_open_at"].(float64)

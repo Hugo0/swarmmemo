@@ -681,10 +681,10 @@ func parseFDA(raw []byte) (any, error) {
 // clip is Pythia's _clip: None when empty, else stripped and cut to limit
 // code points with an ellipsis.
 func clip(text string, limit int) *string {
-	if text == "" {
+	t := strings.TrimSpace(text)
+	if t == "" {
 		return nil
 	}
-	t := strings.TrimSpace(text)
 	if r := []rune(t); len(r) > limit {
 		t = string(r[:limit-1]) + "…"
 	}

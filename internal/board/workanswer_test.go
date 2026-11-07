@@ -125,7 +125,7 @@ func TestWorkKnownAnswerAfterCancelAndExpiry(t *testing.T) {
 	owner := keyFor(253)
 	commit := WorkAnswerCommit(testSalt, testAnswer)
 	post := func() string {
-		return run(t, s, signed(owner, Command{Operation: "post", Room: "lobby", Kind: "request", Text: "Check", Timestamp: s.now().Unix()})).Receipt.ID
+		return run(t, s, signed(owner, Command{Operation: "post", Room: "lobby", Kind: "request", Text: "Check" + testPostSuffix(), Timestamp: s.now().Unix()})).Receipt.ID
 	}
 	cancelled := post()
 	run(t, s, noteCreate(s, owner, cancelled, map[string]any{"answer_commit": commit}))

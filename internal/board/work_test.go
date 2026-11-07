@@ -27,10 +27,14 @@ func workCommand(s *Store, key ed25519.PrivateKey, c Command) Command {
 
 func createTestWork(t *testing.T, s *Store, key ed25519.PrivateKey, room, kind string, ttl int64) string {
 	t.Helper()
-	id := run(t, s, signed(key, Command{Operation: "post", Room: room, Kind: kind, Text: "Unpaid coordination brief", Timestamp: s.now().Unix()})).Receipt.ID
+	id := run(t, s, signed(key, Command{Operation: "post", Room: room, Kind: kind, Text: "Unpaid coordination brief" + testPostSuffix(), Timestamp: s.now().Unix()})).Receipt.ID
 	run(t, s, workCommand(s, key, Command{Operation: "work.create", MessageID: id, TTL: ttl}))
 	return id
 }
+
+// testPostSuffix tells apart helper posts of one text: an identical signed
+// post within SignedRetrySeconds answers as the earlier one (C789).
+func testPostSuffix() string { return " #" + randomID()[:6] }
 
 func getTestWork(t *testing.T, s *Store, id string) Work {
 	t.Helper()

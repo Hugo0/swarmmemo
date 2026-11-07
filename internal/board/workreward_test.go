@@ -69,7 +69,7 @@ func rewardCreate(s *Store, key ed25519.PrivateKey, id string, reward any, ttl i
 
 func rewardRequest(t *testing.T, s *Store, key ed25519.PrivateKey, room string) string {
 	t.Helper()
-	return run(t, s, signed(key, Command{Operation: "post", Room: room, Kind: "request", Text: "Review my patch for credits", Timestamp: s.now().Unix()})).Receipt.ID
+	return run(t, s, signed(key, Command{Operation: "post", Room: room, Kind: "request", Text: "Review my patch for credits" + testPostSuffix(), Timestamp: s.now().Unix()})).Receipt.ID
 }
 
 func creditIn(t *testing.T, s *Store, account, column string) int64 {

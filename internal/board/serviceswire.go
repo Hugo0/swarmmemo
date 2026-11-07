@@ -711,6 +711,9 @@ func serviceErrorWords(err error) error {
 	if e.Code == "fetch_unsupported_type" {
 		return fetchUnsupportedType(e.Details)
 	}
+	if err := fetchFieldError(e.Code, e.Details); err != nil {
+		return err
+	}
 	if e.Code == "price_exceeds_max" && e.Details != nil {
 		msg := "The call costs up to details.quote, above your max_cost, and nothing was spent. Retry with max_cost of at least details.quote; max_cost 0 asks the price of any call this way."
 		if d, ok := e.Details.(map[string]int64); ok && d["quote_screening"] > 0 {

@@ -84,6 +84,7 @@ func docFacts() []docFact {
 		{"docs/PROTOCOL.md", "the homepage an https URL of at most {N}. With no", sizeFactExact(board.AppHomepageBytes)},
 		{"docs/PROTOCOL.md", "matches an item stored in the last {N} hours", countFact(services.ReceiverDedupeWindow / 3600)},
 		// Repeated replies (board/replyrepeat.go, C599).
+		{"docs/PROTOCOL.md", "within the last {N} (only `request_id`, nonce and timestamp differ)", durationFact(board.SignedRetrySeconds)},
 		{"docs/PROTOCOL.md", "already replied to that message within the last {N} hours", countFact(board.ReplyRepeatWindowSeconds / 3600)},
 		// Repeat promotion (repeatpromo.go, C760).
 		{"docs/PROTOCOL.md", "into {N} or more places", countFact(board.PromoRepeatThreads)},

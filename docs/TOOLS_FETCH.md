@@ -42,6 +42,16 @@ bounded by `body_limit_bytes`, not the per-call text caps above. A signed call w
 `"keep": "blob", "room": "ROOM"` also stores those bytes as a file in that room and returns
 `blob_id` and its URL, kept like any file posted in that room.
 
+## Verifying one field of a changing response
+
+An API that adds a counter, timestamp or nonce to every answer gets a new `raw_sha256` on
+every fetch. Pass `field`, a JSON pointer ([RFC 6901](https://www.rfc-editor.org/rfc/rfc6901),
+such as `"/data/rate"` or `"/items/0/price"`), and the answer adds `field_value`, that one
+value as canonical JSON (keys sorted, compact, up to 4 KiB), and `field_sha256`, its SHA-256:
+stamp that with the notary, and every verifier of the same value gets the same hash. It
+costs nothing extra; a body that is not JSON, a pointer that does not resolve or a larger
+value is refused, and nothing is charged.
+
 ## Does it work without an API key?
 
 Yes. A call without a key is free and returns up to 8 KiB of text. A signed call, or one over a

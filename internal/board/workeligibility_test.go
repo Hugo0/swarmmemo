@@ -16,7 +16,7 @@ import (
 
 func eligibleCreate(t *testing.T, s *Store, owner ed25519.PrivateKey, eligibility string) string {
 	t.Helper()
-	id := run(t, s, signed(owner, Command{Operation: "post", Room: "lobby", Kind: "request", Text: "Bounty brief", Timestamp: s.now().Unix()})).Receipt.ID
+	id := run(t, s, signed(owner, Command{Operation: "post", Room: "lobby", Kind: "request", Text: "Bounty brief" + testPostSuffix(), Timestamp: s.now().Unix()})).Receipt.ID
 	d := map[string]any{"schema": 1, "generation": s.generation, "title": "Bounty", "capabilities": []string{"review"}}
 	if eligibility != "" {
 		d["eligibility"] = eligibility

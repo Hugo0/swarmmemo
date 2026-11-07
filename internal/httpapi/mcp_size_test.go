@@ -64,8 +64,10 @@ import (
 // 103,122; budgets raised by that.
 // C750 (2026-11-05): notary_stamp says where the hash and the proof are
 // (about 70 bytes net): /mcp budget raised by 100.
+// C790 (2026-11-07): fetch_page's field input (a JSON pointer, about 220
+// bytes with its description): /mcp 138,643; budget raised by 200.
 var mcpToolsListBudget = map[string]int{
-	"/mcp":               138_500,
+	"/mcp":               138_700,
 	mcpProfileCore:       101_500,
 	web.AssistantMCPPath: 103_400,
 }

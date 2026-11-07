@@ -119,7 +119,7 @@ func TestReviewWriteRules(t *testing.T) {
 	register(t, s, siteKey)
 	site := "site:https://api.example.com/"
 	siteFirst := run(t, s, reviewPost(t, siteKey, site, map[string]any{}, "")).Receipt.ID
-	_, err = s.Execute(testContext, reviewPost(t, siteKey, site, map[string]any{}, ""), "test-origin")
+	_, err = s.Execute(testContext, reviewPost(t, siteKey, site, map[string]any{"verdict": "mixed"}, ""), "test-origin")
 	if !errors.As(err, &e) || e.Code != "review_exists" || !strings.Contains(e.Message, siteFirst) || !strings.Contains(e.Message, site) || !strings.Contains(e.Message, "whole site") || !strings.Contains(e.Message, "x402:METHOD URL") {
 		t.Fatalf("second site review: %v", err)
 	}

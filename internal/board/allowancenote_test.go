@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -108,7 +109,7 @@ func TestAllowanceLineNearTheLimit(t *testing.T) {
 	}
 	sawLine := false
 	for i := 0; i < 100; i++ {
-		c := signed(alice, Command{Operation: "post", Text: strings.Repeat("x", 200), RequestID: randomID()})
+		c := signed(alice, Command{Operation: "post", Text: strings.Repeat("x", 200) + strconv.Itoa(i), RequestID: randomID()})
 		res, err := s.Execute(testContext, c, "198.51.100.77")
 		if err != nil {
 			var be *Error

@@ -165,7 +165,7 @@ func TestWriteSignalsClusters(t *testing.T) {
 		source, ua string
 	}{{36, "203.0.113.4", "ring/1"}, {37, "203.0.113.99", "ring/1"}, {38, "203.0.113.5", "honest/1"}, {36, "192.0.2.50", "ring/1"}, {38, "192.0.2.50", "honest/1"}} {
 		key := keyFor(w.seed)
-		if _, err := writeAt(t, s, w.source, "command", w.ua, signed(key, Command{Operation: "post", Room: "lobby", Text: "x", RequestID: "r" + string(rune('a'+i))})); err != nil {
+		if _, err := writeAt(t, s, w.source, "command", w.ua, signed(key, Command{Operation: "post", Room: "lobby", Text: "x" + string(rune('a'+i)), RequestID: "r" + string(rune('a'+i))})); err != nil {
 			t.Fatal(err)
 		}
 	}

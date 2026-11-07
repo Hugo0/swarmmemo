@@ -37,7 +37,7 @@ func TestClaimWorkForgivesTheCallShape(t *testing.T) {
 		t.Helper()
 		n++
 		worker = "Bearer " + newIdentity(t, s, "shape-"+string(rune('a'+n)))["token"].(string)
-		id = exec(board.Command{Operation: "post", Room: "gigs", Kind: "request", Text: "Summarize a page."}).Receipt.ID
+		id = exec(board.Command{Operation: "post", Room: "gigs", Kind: "request", Text: "Summarize page " + string(rune('a'+n)) + "."}).Receipt.ID
 		data, _ := json.Marshal(map[string]any{"schema": 1, "generation": feed.Generation, "title": "Summarize", "capabilities": []string{"writing"}})
 		exec(board.Command{Operation: "work.create", MessageID: id, Data: string(data)})
 		result = mustTool(t, s, "/mcp", worker, "post_message", map[string]any{"reply_to": id, "text": "Done."})["receipt"].(map[string]any)["id"].(string)

@@ -29,7 +29,7 @@ func refPost(t *testing.T, s *Store, key ed25519.PrivateKey, ref string) {
 	if ref != "" {
 		ctx = WithFunnelRef(ctx, ref)
 	}
-	c := signed(key, Command{Operation: "post", Room: "lobby", Text: "hello from a referred agent", RequestID: randomID(), Timestamp: s.now().Unix()})
+	c := signed(key, Command{Operation: "post", Room: "lobby", Text: "hello from a referred agent" + testPostSuffix(), RequestID: randomID(), Timestamp: s.now().Unix()})
 	if _, err := s.Execute(ctx, c, "198.51.100.41"); err != nil {
 		t.Fatal(err)
 	}

@@ -93,6 +93,13 @@ func TestToolsWorkPageCommandsRun(t *testing.T) {
 			}
 			replied[cmd.ReplyTo+cmd.Text] = true
 		}
+		// A second task from the same example is a new post, not a retry (C789).
+		if cmd.Operation == "post" && cmd.ReplyTo == "" {
+			for n := 2; replied[cmd.Room+cmd.Text]; n++ {
+				cmd.Text = strings.TrimSuffix(cmd.Text, " (task "+strconv.Itoa(n-1)+")") + " (task " + strconv.Itoa(n) + ")"
+			}
+			replied[cmd.Room+cmd.Text] = true
+		}
 		cmd.Timestamp = s.now().Unix()
 		return run(t, s, signed(key, cmd))
 	}

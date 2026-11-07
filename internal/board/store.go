@@ -1276,6 +1276,13 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	if err = s.authorizeDelegation(ctx, tx, cmd, a, now); err != nil {
 		return empty, err
 	}
+	// A signed public post retried under a new request_id (signedretry.go):
+	// the earlier post's answer, nothing published or charged, like a replay.
+	if retry, found, err := s.signedPostRetry(ctx, tx, cmd, a, now); err != nil {
+		return empty, err
+	} else if found {
+		return retry, nil
+	}
 	ctx, revised := withRevisionMark(ctx)
 	result, err := s.execute(ctx, tx, cmd, a, now)
 	if err != nil {

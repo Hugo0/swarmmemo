@@ -43,6 +43,8 @@ func fetchError(code string) error {
 		return problem(502, "fetch_redirect_refused", fmt.Sprintf("The page redirects to another site, from https to http, or more than %d times; fetch follows redirects only within the same host. Nothing was charged; fetch the target itself if you want it.", services.FetchRedirectsMax))
 	case "fetch_unsupported_type":
 		return fetchUnsupportedType(nil)
+	case "fetch_field_not_json", "fetch_field_not_found", "fetch_field_too_large":
+		return fetchFieldError(code, nil)
 	case "fetch_keep_unavailable":
 		return problem(503, "fetch_keep_unavailable", `keep: "blob" is not available here: this board does not store files for fetch. Call without keep. Nothing was charged.`)
 	case "fetch_keep_refused":
@@ -72,6 +74,24 @@ func fetchUnsupportedType(details any) error {
 		details = nil
 	}
 	return &Error{Status: 415, Code: "fetch_unsupported_type", Message: "Fetch reads HTML, JSON, XML (RSS, Atom) and " + services.FetchTextKinds + ", in UTF-8 or Latin-1; this page is " + got + ". Nothing was charged.", Details: details}
+}
+
+// fetchFieldError is field's refusals (C790), with the details the run
+// recorded (the pointer, the page's format, where it stopped resolving,
+// the value's size) when this answer is the run's own.
+func fetchFieldError(code string, details any) error {
+	if _, ok := details.(map[string]any); !ok {
+		details = nil
+	}
+	switch code {
+	case "fetch_field_not_json":
+		return &Error{Status: 422, Code: "fetch_field_not_json", Message: "field selects a value in a JSON body, and this page's body (details.format) is not one JSON value. Call without field: raw_sha256 is the evidence for the whole page. Nothing was charged.", Details: details}
+	case "fetch_field_not_found":
+		return &Error{Status: 422, Code: "fetch_field_not_found", Message: "field does not resolve in this JSON body: nothing is at details.missing_at. An object key is matched exactly (~1 for / and ~0 for ~ in a key), an array index is 0, 1, ...; fetch without field to see the body. Nothing was charged.", Details: details}
+	case "fetch_field_too_large":
+		return &Error{Status: 422, Code: "fetch_field_too_large", Message: fmt.Sprintf("field's value is over the %s field_value carries (details.value_bytes): point at a smaller value, one key or array item inside it. Nothing was charged.", services.SizeText(services.FetchFieldValueBytes)), Details: details}
+	}
+	return nil
 }
 
 // serviceBlobKeeper is fetch's keep=blob: a signed blob.put of the bytes,

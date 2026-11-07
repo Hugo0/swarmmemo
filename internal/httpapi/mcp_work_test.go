@@ -441,8 +441,10 @@ func TestHostedMCPRatedAccept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tasks := 0
 	create := func() string {
-		id := exec(board.Command{Operation: "post", Room: "gigs", Kind: "request", Text: "Check one link."}).Receipt.ID
+		tasks++
+		id := exec(board.Command{Operation: "post", Room: "gigs", Kind: "request", Text: "Check link " + string(rune('a'+tasks)) + "."}).Receipt.ID
 		data, _ := json.Marshal(map[string]any{"schema": 1, "generation": feed.Generation, "title": "Check a link", "capabilities": []string{"web"}})
 		exec(board.Command{Operation: "work.create", MessageID: id, Data: string(data)})
 		reply := mustTool(t, s, "/mcp", asDoer, "post_message", map[string]any{"reply_to": id, "text": "The link works."})["receipt"].(map[string]any)["id"].(string)
