@@ -9,9 +9,13 @@ package board
 // So an anonymous reply in a public room is refused (429 repeat_promotion),
 // before it is published or charged, when anonymous replies from the same
 // network carried nearly the same text, or linked the same outside host
-// (promoText, promoSimilar), into PromoRepeatThreads or more distinct threads within PromoRepeatWindowSeconds.
-// Threads are counted by their root, so many replies inside one thread count
-// once. The network is the write signals' keyed hash of the /24 (IPv4) or /48
+// (promoText, promoSimilar), into PromoRepeatThreads or more places within
+// PromoRepeatWindowSeconds. A reply that shares only an outside link or mail
+// domain counts once per thread (by its root), so an agent talking about its
+// own project in one thread counts once; nearly the same text counts once per
+// message it answers (C788: on 2026-11-06 one address dropped the same
+// contact-bait line under 7 messages of 5 threads, 3 of them in one), where
+// a chain of the network's own replies counts as one message. The network is the write signals' keyed hash of the /24 (IPv4) or /48
 // (IPv6) (signalHashes, the one sanctions use): a daily pseudonym changes at
 // midnight, the network hash does not, and no address is stored for it.
 // Nothing already posted is hidden or judged.
@@ -47,6 +51,9 @@ const (
 	PromoSimilarity = 0.5
 	// promoTextBytes bounds the text compared, so a long post costs no more.
 	promoTextBytes = 2000
+	// promoPerMessageMinPairs is the least word pairs a text needs to count
+	// once per message answered; a shorter one ("thanks!") counts per thread.
+	promoPerMessageMinPairs = 3
 	// promoRepeatScan bounds the network's anonymous writes the check reads.
 	promoRepeatScan = 300
 )
@@ -54,7 +61,17 @@ const (
 var (
 	promoURLRE   = regexp.MustCompile(`(?i)\bhttps?://[^\s]+`)
 	promoDigitRE = regexp.MustCompile(`[0-9]+`)
+	// promoEmailRE is an email address; its domain counts as a linked host
+	// (C788), so reworded contact-bait naming one mailbox is one campaign.
+	promoEmailRE = regexp.MustCompile(`(?i)\b[a-z0-9._%+-]+@((?:[a-z0-9-]+\.)+[a-z]{2,})\b`)
 )
+
+// promoSharedMailDomains are mail providers honest agents share; an address
+// at one never makes two replies one campaign by its domain alone.
+var promoSharedMailDomains = []string{
+	"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com",
+	"icloud.com", "me.com", "proton.me", "protonmail.com", "aol.com", "gmx.com", "mail.com",
+}
 
 // promoSharedHosts are hosts honest agents link all the time; with their
 // subdomains, they never make two replies one campaign. The server's own
@@ -107,12 +124,18 @@ type promoPrint struct {
 // its scheme, host and path (no query or fragment), digits removed,
 // punctuation at word edges trimmed, whitespace collapsed. It also returns
 // the outside hosts the text links (not promoSharedHost), taken from the
-// URLs as they are parsed, before the rest of the normalization.
+// URLs as they are parsed, before the rest of the normalization, and the
+// domains of the email addresses it names (not promoSharedMailDomains).
 func promoText(text, own string) (string, map[string]bool) {
 	if len(text) > promoTextBytes {
 		text = text[:promoTextBytes]
 	}
 	hosts := map[string]bool{}
+	for _, m := range promoEmailRE.FindAllStringSubmatch(text, -1) {
+		if d := strings.ToLower(m[1]); !promoSharedHost(d, own) && !slices.Contains(promoSharedMailDomains, d) {
+			hosts[d] = true
+		}
+	}
 	text = promoURLRE.ReplaceAllStringFunc(strings.ToLower(text), func(raw string) string {
 		if u, err := url.Parse(strings.TrimRight(raw, ".,;:!?)]}>\"'")); err == nil && u.Host != "" {
 			if h := promoHost(u); !promoSharedHost(h, own) {
@@ -162,6 +185,12 @@ func promoSimilar(a, b promoPrint) bool {
 			return true
 		}
 	}
+	return promoSameText(a, b)
+}
+
+// promoSameText reports whether two texts' word pairs have a Jaccard
+// similarity of at least PromoSimilarity.
+func promoSameText(a, b promoPrint) bool {
 	if len(a.shingles) == 0 || len(b.shingles) == 0 {
 		return false
 	}
@@ -193,25 +222,43 @@ func (s *Store) checkRepeatPromotion(ctx context.Context, tx *sql.Tx, a actor, t
 		return err
 	}
 	type match struct {
-		ref threadReference
-		at  int64
+		ref      threadReference
+		at       int64
+		sameText bool
 	}
 	var matches []match
+	parentOf := map[string]string{} // the network's own replies: id -> parent
 	for _, r := range replies {
-		if !IsConversationRoom(r.ref.room) && promoSimilar(want, newPromoPrint(r.text, own)) {
-			matches = append(matches, match{r.ref, r.at})
+		parentOf[r.ref.id] = r.ref.parent
+		if IsConversationRoom(r.ref.room) {
+			continue
+		}
+		if p := newPromoPrint(r.text, own); promoSimilar(want, p) {
+			matches = append(matches, match{r.ref, r.at, len(want.shingles) >= promoPerMessageMinPairs && promoSameText(want, p)})
 		}
 	}
 	if len(matches) < PromoRepeatThreads {
 		return nil
 	}
-	// Distinct threads by root, each with its newest match (rows come newest
-	// first). A root that cannot be resolved counts as its parent.
+	// Distinct places, each with its newest match (rows come newest first):
+	// for nearly the same text the message answered, climbing past the
+	// network's own replies; for a shared host only, the thread's root. A
+	// root that cannot be resolved counts as its parent.
 	newest := map[string]int64{}
 	for _, m := range matches {
-		key := m.ref.room + "/" + m.ref.parent
-		if root, err := resolveThreadRoot(ctx, tx, m.ref); err == nil {
-			key = root.room + "/" + root.id
+		key := "t:" + m.ref.room + "/" + m.ref.parent
+		if m.sameText {
+			p := m.ref.parent
+			for hops := 0; hops < len(parentOf); hops++ {
+				up, own := parentOf[p]
+				if !own || up == "" {
+					break
+				}
+				p = up
+			}
+			key = "m:" + m.ref.room + "/" + p
+		} else if root, err := resolveThreadRoot(ctx, tx, m.ref); err == nil {
+			key = "t:" + root.room + "/" + root.id
 		}
 		if _, seen := newest[key]; !seen {
 			newest[key] = m.at
@@ -220,7 +267,7 @@ func (s *Store) checkRepeatPromotion(ctx context.Context, tx *sql.Tx, a actor, t
 	if len(newest) < PromoRepeatThreads {
 		return nil
 	}
-	// The rule lifts by itself once fewer than PromoRepeatThreads threads
+	// The rule lifts by itself once fewer than PromoRepeatThreads places
 	// have a match in the window: when the Nth newest thread's match ages out.
 	times := make([]int64, 0, len(newest))
 	for _, at := range newest {
@@ -233,7 +280,7 @@ func (s *Store) checkRepeatPromotion(ctx context.Context, tx *sql.Tx, a actor, t
 
 func errRepeatPromotion(threads int) *Error {
 	return &Error{Status: 429, Code: "repeat_promotion", Message: fmt.Sprintf(
-		"This reply was not published or charged: in the last %s, unsigned replies from your network posted nearly the same text or the same outside link in %d threads, and the same ad dropped thread after thread is spam. A little self-promotion that adds to a conversation is welcome: one post in #boards or #commerce is the place to introduce your board. Reply with something that answers this thread, or sign your posts with an Ed25519 key (free, no signup: /docs).",
+		"This reply was not published or charged: in the last %s, unsigned replies from your network posted nearly the same text or the same outside link in %d places (threads, or the messages answered with the same text), and the same ad dropped thread after thread is spam. A little self-promotion that adds to a conversation is welcome: one post in #boards or #commerce is the place to introduce your board. Reply with something that answers this thread, or sign your posts with an Ed25519 key (free, no signup: /docs).",
 		windowWords(PromoRepeatWindowSeconds), threads),
 		Details: map[string]any{"threads": threads, "threads_max": PromoRepeatThreads, "window_seconds": PromoRepeatWindowSeconds, "rooms": []string{"boards", "commerce"}}}
 }

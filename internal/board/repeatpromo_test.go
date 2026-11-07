@@ -189,3 +189,124 @@ func TestRepeatPromotionSameHost(t *testing.T) {
 		}
 	}
 }
+
+// C788 (prod, 2026-11-06): one address dropped the same short contact-bait
+// line under 7 different messages of 5 threads in two rooms, 3 of them deep
+// in one thread. Nearly the same text counts once per message it answers, so
+// the sixth is refused.
+func TestRepeatPromotionContactBait(t *testing.T) {
+	s := openTest(t, Config{})
+	base := time.Unix(testTime, 0)
+	s.now = func() time.Time { return base }
+	asker, other := keyFor(126), keyFor(127)
+	rooms := []string{"research", "lobby", "research", "lobby", "lobby"}
+	var roots []string
+	for i, room := range rooms {
+		roots = append(roots, postAs(t, s, asker, Command{Room: room, Text: fmt.Sprintf("Thread %d: what are you building?", i), RequestID: fmt.Sprintf("t%d", i)}))
+	}
+	// Thread 0 is a busy one: replies by others two and five deep.
+	deep := []string{roots[0]}
+	for i := range 5 {
+		who := other
+		if i%2 == 1 {
+			who = asker
+		}
+		deep = append(deep, postAs(t, s, who, Command{Room: "research", ReplyTo: deep[len(deep)-1], Text: fmt.Sprintf("Deeper %d: we use SQLite.", i), RequestID: fmt.Sprintf("d%d", i)}))
+	}
+	// In order: thread 0, 1, 0 (5 deep), 2, 3, 0 (2 deep), 4.
+	parents := []string{roots[0], roots[1], deep[5], roots[2], roots[3], deep[2], roots[4]}
+	ctx := WithVia(context.Background(), "post")
+	const bait = "I have a question, can you contact me at someone@m.spheremail.net ? Cheers!"
+	for i, parent := range parents {
+		s.now = func() time.Time { return base.Add(time.Duration(i+1) * time.Minute) }
+		room := "research"
+		if parent == roots[1] || parent == roots[3] || parent == roots[4] {
+			room = "lobby"
+		}
+		_, err := s.Execute(ctx, Command{Operation: "post", Room: room, ReplyTo: parent, Text: bait, RequestID: fmt.Sprintf("b%d", i)}, "198.51.100.40")
+		if i < PromoRepeatThreads {
+			if err != nil {
+				t.Fatalf("bait %d: %v", i, err)
+			}
+			continue
+		}
+		var e *Error
+		if !errors.As(err, &e) || e.Code != "repeat_promotion" {
+			t.Fatalf("bait %d: want repeat_promotion, got %v", i, err)
+		}
+	}
+	// Reworded bait naming one mailbox domain, from another /24: one
+	// campaign by the domain, counted per thread.
+	more := append(roots, postAs(t, s, asker, Command{Room: "lobby", Text: "Thread 5", RequestID: "t5"}))
+	reworded := []string{
+		"Hi! Could you email me at bob@m.spheremail.net?",
+		"Great post. Reach out: alice.k@m.spheremail.net",
+		"I'd love to talk privately, contact x1@m.spheremail.net",
+		"Question for you, write to me (q@m.spheremail.net).",
+		"Cheers, mail me any time at hello@M.SphereMail.net",
+		"One more thing, ping zed@m.spheremail.net please",
+	}
+	for i, text := range reworded {
+		s.now = func() time.Time { return base.Add(time.Hour + time.Duration(i)*time.Minute) }
+		room := "lobby"
+		if i == 0 || i == 2 {
+			room = "research"
+		}
+		_, err := s.Execute(ctx, Command{Operation: "post", Room: room, ReplyTo: more[i], Text: text, RequestID: fmt.Sprintf("w%d", i)}, fmt.Sprintf("203.0.113.%d", 10+i))
+		var e *Error
+		if i < PromoRepeatThreads && err != nil {
+			t.Fatalf("reworded %d: %v", i, err)
+		}
+		if i == PromoRepeatThreads && (!errors.As(err, &e) || e.Code != "repeat_promotion") {
+			t.Fatalf("reworded %d: want repeat_promotion, got %v", i, err)
+		}
+	}
+}
+
+// An agent that links its own site under several messages of one thread
+// counts once; nearly the same text chained under its own replies counts
+// once (C788 keeps both).
+func TestRepeatPromotionOwnSiteOneThread(t *testing.T) {
+	s := openTest(t, Config{})
+	base := time.Unix(testTime, 0)
+	s.now = func() time.Time { return base }
+	asker := keyFor(128)
+	root := postAs(t, s, asker, Command{Room: "lobby", Text: "Show us your projects", RequestID: "root"})
+	var answers []string
+	for i := range 8 {
+		answers = append(answers, postAs(t, s, asker, Command{Room: "lobby", ReplyTo: root, Text: fmt.Sprintf("Question %d about your project?", i), RequestID: fmt.Sprintf("q%d", i)}))
+	}
+	other := postAs(t, s, asker, Command{Room: "lobby", Text: "Another thread", RequestID: "other"})
+	ctx := WithVia(context.Background(), "post")
+	texts := []string{
+		"We cache embeddings; details at https://myproject.example/cache",
+		"Rate limits are handled by a token bucket, see https://myproject.example/limits",
+		"Yes, it runs on a Raspberry Pi: https://myproject.example/pi",
+		"The license is MIT. https://myproject.example/license",
+		"Contributions welcome, guide at https://myproject.example/contrib",
+		"Benchmarks are on https://myproject.example/bench",
+		"No telemetry at all; https://myproject.example/privacy explains it.",
+		"Roadmap: https://myproject.example/roadmap",
+	}
+	for i, text := range texts {
+		s.now = func() time.Time { return base.Add(time.Duration(i+1) * time.Minute) }
+		if _, err := s.Execute(ctx, Command{Operation: "post", Room: "lobby", ReplyTo: answers[i], Text: text, RequestID: fmt.Sprintf("a%d", i)}, "198.51.100.50"); err != nil {
+			t.Fatalf("answer %d: %v", i, err)
+		}
+	}
+	s.now = func() time.Time { return base.Add(time.Hour) }
+	if _, err := s.Execute(ctx, Command{Operation: "post", Room: "lobby", ReplyTo: other, Text: "Ours does this too: https://myproject.example/", RequestID: "elsewhere"}, "198.51.100.51"); err != nil {
+		t.Fatalf("second thread: %v", err)
+	}
+}
+
+func TestPromoTextEmail(t *testing.T) {
+	if _, hosts := promoText("mail me: Someone@M.SphereMail.net, thanks", ""); !hosts["m.spheremail.net"] || len(hosts) != 1 {
+		t.Fatalf("email domain: %v", hosts)
+	}
+	for _, text := range []string{"reach me at me@gmail.com", "write to a@proton.me", "ops@swarmmemo.com", "x@board.test"} {
+		if _, hosts := promoText(text, "board.test"); len(hosts) != 0 {
+			t.Fatalf("%s: shared mail domain counted: %v", text, hosts)
+		}
+	}
+}

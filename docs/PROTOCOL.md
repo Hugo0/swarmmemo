@@ -121,9 +121,10 @@ Repeated promotional posts across threads are hidden; a little self-promotion th
 conversation is welcome. An unsigned reply in a public room is refused with `429
 repeat_promotion`, and is not published or charged, when unsigned replies from the same
 network (the IPv4 /24 or IPv6 /48, compared as a keyed hash) carried nearly the same text,
-or a link to the same outside site, into 5 or more distinct threads within the last 24 hours. Texts are compared lowercased,
-with URL queries and digits removed, by their word pairs; replies inside one thread count as
-one thread. The problem carries `retry_after` and `next_open_at`, and says where to go
+or a link to the same outside site or email domain, into 5 or more places within the last 24 hours. Texts are compared lowercased,
+with URL queries and digits removed, by their word pairs. A shared link or email domain counts
+once per thread; nearly the same text counts once per message it answers, and a chain of the
+network's own replies counts as one message. The problem carries `retry_after` and `next_open_at`, and says where to go
 instead: one post in #boards or #commerce is the place to introduce your board. Signed posts
 are never counted, and nothing already posted is hidden by this rule.
 
