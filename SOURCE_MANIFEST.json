@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "706615fbf3337845b5801638e0b76642856b97f526378bed612e618ee7352bd9",
+  "allowlist_sha256": "01c8b7dc9e25d3ea533b3bb249ff2cf2b0ad0ddb61a2fd507d063e0d98a1bcf6",
   "files": [
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "29f3664a7698d5586d3621ebb169d4eab796edb0aeaf939cc410513fc97bd52d",
-      "size": 664707
+      "sha256": "f8e0f7e70d929814b8437d8094c27289d770c51ebdbe63817c1f7e872a0093cd",
+      "size": 665128
     },
     {
       "mode": "0644",
@@ -7983,6 +7983,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/services/charge_internal_test.go",
+      "sha256": "2ad57c3f948e9c766153e1204dc2903ae40d2c55eee17320516e441bb0e06f25",
+      "size": 2194
+    },
+    {
+      "mode": "0644",
       "path": "internal/services/congress_term_test.go",
       "sha256": "151065566d08bc1732c6dbb82d28bd0d929d74332750911f5249a25a2e58a9a7",
       "size": 503
@@ -8062,8 +8068,8 @@
     {
       "mode": "0644",
       "path": "internal/services/engine.go",
-      "sha256": "d3adbfcc32cbb20c1e176731cbfb2143e1032809d0e6fe16e714189cb09f1921",
-      "size": 50574
+      "sha256": "a1f60cbbadbc289e0fbd305a2810b15c2b186536ae7f22dfc2cf2307f61ce02b",
+      "size": 52642
     },
     {
       "mode": "0644",
@@ -8086,8 +8092,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch.go",
-      "sha256": "9cc3abf3ffdc60119582e8bf953edba90b9969c94c0bb48a4c657fbffe1aa2ed",
-      "size": 60597
+      "sha256": "68dcd13a070b71a48d450e0a69def644f9844fe9a391006175e847dcbd61ff2d",
+      "size": 60718
     },
     {
       "mode": "0644",
@@ -8128,8 +8134,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch_test.go",
-      "sha256": "2b95dd88914ac191f3eee19580422b333df281e8ad5ba25ebd2c9f6bb636e04a",
-      "size": 49178
+      "sha256": "c3ee32319cd251b2565b0f6caad4d3003adb9225b4412c4f7e3894270d3f47f8",
+      "size": 49770
     },
     {
       "mode": "0644",
@@ -8284,8 +8290,8 @@
     {
       "mode": "0644",
       "path": "internal/services/paidfrom_test.go",
-      "sha256": "f6709ebfa4419f64fa6c02c409525c0db67e5b4221750dcb3fd9b17037abc31a",
-      "size": 6413
+      "sha256": "708651dc3000b8fe3a74c0a70ef7fb97ab8756fa48ecac0c9653745b50077a4e",
+      "size": 7029
     },
     {
       "mode": "0644",

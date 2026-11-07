@@ -757,6 +757,9 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	if next > 0 {
 		body["next_offset"] = next
 	}
+	if f.cfg.screen == ScreenForced {
+		body["screen_forced"] = true // call.charge then has no without_screening (C815)
+	}
 	if fieldValue != nil {
 		body["field"], body["field_value"], body["field_sha256"] = p.field, json.RawMessage(fieldValue), sha256Of(fieldValue)
 	}

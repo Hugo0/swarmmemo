@@ -108,6 +108,10 @@ func TestCallPaidFromNamesTheBucket(t *testing.T) {
 		if note := d["call"].(services.CallRecord).CostNote; !strings.Contains(note, "from your free daily allowance") || !strings.HasSuffix(note, "; 0 credits spent.") {
 			t.Fatalf("free call: cost_note %q", note)
 		}
+		// C815: charge carries the same charge as one object.
+		if ch := d["call"].(services.CallRecord).Charge; ch == nil || ch.Total != cost || ch.From != services.PaidFromFreeAllowance || ch.Resource != "credit" || ch.AllowanceLeft == nil || *ch.AllowanceLeft != before.ByBucket[allowance.Free]-cost || ch.Parts != nil || ch.WithoutScreening != nil {
+			t.Fatalf("free call: charge %+v", ch)
+		}
 		if data == remote {
 			if pf := status(free, d); pf != services.PaidFromFreeAllowance {
 				t.Fatalf("status of a free call: paid_from %q", pf)
@@ -139,6 +143,9 @@ func TestCallPaidFromNamesTheBucket(t *testing.T) {
 		}
 		if note := d["call"].(services.CallRecord).CostNote; !strings.HasSuffix(note, " spent from your balance.") || strings.Contains(note, "allowance") {
 			t.Fatalf("bought call: cost_note %q", note)
+		}
+		if ch := d["call"].(services.CallRecord).Charge; ch == nil || ch.Total != cost || ch.From != services.PaidFromCredits || ch.AllowanceLeft == nil || *ch.AllowanceLeft != 0 {
+			t.Fatalf("bought call: charge %+v", ch)
 		}
 		if data == remote {
 			if pf := status(bought, d); pf != services.PaidFromCredits {

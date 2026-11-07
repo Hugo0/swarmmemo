@@ -286,9 +286,67 @@ type CallRecord struct {
 	// CostNote is the four fields above read as one plain sentence (C748):
 	// what was charged and from where. Absent when PaidFrom is.
 	CostNote string `json:"cost_note,omitempty"`
+	// Charge is the same charge as one structured object (C815); absent
+	// when PaidFrom is.
+	Charge *Charge `json:"charge,omitempty"`
 	// RequestID is an unsigned call's request_id, its retry key; the board
 	// sets it on the answer (a random one when the caller gave none).
 	RequestID string `json:"request_id,omitempty"`
+}
+
+// Charge is a finished call's charge in one object (C815), derived only
+// from fields the answer already carries: Total is cost, From is paid_from,
+// Parts is the result's cost_split (they sum to Total; absent when the
+// method is not priced in parts), WithoutScreening is the price had optional
+// screening been off (absent when none was charged or the operator forces
+// it: the result's screen_forced), AllowanceLeft is
+// allowance_left.
+type Charge struct {
+	Total            int64        `json:"total"`
+	Resource         string       `json:"resource"`
+	From             string       `json:"from"`
+	Parts            []ChargePart `json:"parts,omitempty"`
+	WithoutScreening *int64       `json:"without_screening,omitempty"`
+	AllowanceLeft    *int64       `json:"allowance_left,omitempty"`
+}
+
+// ChargePart is one named part of a Charge's Total.
+type ChargePart struct {
+	Name   string `json:"name"`
+	Amount int64  `json:"amount"`
+}
+
+// chargeOf is rec's Charge, its parts read from body's cost_split; nil
+// while rec.PaidFrom is unknown. A split that does not sum to the cost is
+// left out rather than reported wrong.
+func chargeOf(rec CallRecord, body json.RawMessage) *Charge {
+	if rec.PaidFrom == "" {
+		return nil
+	}
+	c := &Charge{Total: rec.Cost, Resource: rec.Resource, From: rec.PaidFrom, AllowanceLeft: rec.AllowanceLeft}
+	var b struct {
+		Split  map[string]int64 `json:"cost_split"`
+		Forced bool             `json:"screen_forced"`
+	}
+	if len(body) == 0 || json.Unmarshal(body, &b) != nil || len(b.Split) == 0 {
+		return c
+	}
+	var sum int64
+	for _, name := range slices.Sorted(maps.Keys(b.Split)) {
+		if n := b.Split[name]; n > 0 {
+			c.Parts = append(c.Parts, ChargePart{Name: name, Amount: n})
+			sum += n
+		}
+	}
+	if sum != rec.Cost {
+		c.Parts = nil
+		return c
+	}
+	if n := b.Split["screening"]; n > 0 && !b.Forced {
+		w := rec.Cost - n
+		c.WithoutScreening = &w
+	}
+	return c
 }
 
 func receiptData(r ledger.Receipt) map[string]any {
@@ -296,6 +354,7 @@ func receiptData(r ledger.Receipt) map[string]any {
 }
 
 func callData(service, method string, rec CallRecord, body json.RawMessage, receipt map[string]any) map[string]any {
+	rec.Charge = chargeOf(rec, body)
 	d := map[string]any{"service": service, "method": method, "call": rec}
 	if len(body) > 0 {
 		d["result"] = body

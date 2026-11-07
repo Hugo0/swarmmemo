@@ -6738,6 +6738,11 @@ new service adds no operation and no signed format:
   the free allowance covered it) and `allowance_left` is the free daily allowance you have
   left in that resource. `cost_note` reads them as one plain sentence: what the call
   used, from your free daily allowance or your balance, and how many credits it spent.
+  `charge` carries the same as one object: `total` (the cost), `resource`, `from` (as
+  `paid_from`), `parts` (`[{name, amount}]` summing to `total`, for a call priced in parts
+  such as `fetch.page`'s `fetch` and `screening`), `without_screening` (the price with
+  `"screen": false`, when screening was charged and optional) and `allowance_left`; a field
+  is left out when unknown.
 - `service.read` (signature optional per method, not a write): `target` and `data`
   `{"schema":1,"method":METHOD,"args":{...}}`. A remote or async call you made is read back
   with method `status`, args `{"call":CALL_ID}`.
@@ -7147,7 +7152,7 @@ MCP, shows `available`).
   reserves the most for `max_bytes` and the rest is refunded: `max_cost` is that ceiling, not
   the expected price. Before a call, the catalogue's `price_split` gives both parts and the
   example's ceiling split; `result.max_cost_split` and `result.cost_split` split `max_cost`
-  and `cost` into `fetch` and `screening`, and `result.cost_note` says in words what this
+  and `cost` into `fetch` and `screening` (`call.charge.parts` lists the same), and `result.cost_note` says in words what this
   answer cost (fetched now or from the shared cache, screening charged or reused). A
   refused fetch costs nothing. The operator may turn screening
   off or force it (`screen` in `FETCH_CONFIG`). Every answer says whether its text was

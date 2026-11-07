@@ -685,6 +685,13 @@ func TestFetchScreeningIsOptionalAndPriced(t *testing.T) {
 	if cf, cs := get(res, "cost_split", "fetch"), get(res, "cost_split", "screening"); cf != float64(services.FetchPrice.For(int64(len(text)))) || cs != float64(5+30) {
 		t.Fatalf("cost_split %v + %v", cf, cs)
 	}
+	// C815: call.charge's parts are cost_split and sum to cost;
+	// without_screening is the fetch part, the price with "screen": false.
+	if ch := get(screened, "call", "charge").(map[string]any); ch["total"] != get(screened, "call", "cost") || ch["from"] != "free_allowance" || ch["resource"] != "credit" ||
+		fmt.Sprint(ch["parts"]) != fmt.Sprintf("[map[amount:%v name:fetch] map[amount:%v name:screening]]", get(res, "cost_split", "fetch"), get(res, "cost_split", "screening")) ||
+		ch["without_screening"] != get(res, "cost_split", "fetch") {
+		t.Fatalf("screened call.charge: %+v", ch)
+	}
 	// Cached with its verdict: screening again costs nothing more.
 	again := r.must("bob", map[string]any{"url": "http://site.test/inject"})
 	if get(again, "result", "cost_split", "screening") != float64(0) {
