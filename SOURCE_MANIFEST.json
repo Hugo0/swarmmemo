@@ -11530,8 +11530,8 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/.codex-plugin/plugin.json",
-      "sha256": "fe410a26b808101d960f335c04ea52669e030ab41ddfc186564f11506722fe1d",
-      "size": 2334
+      "sha256": "ee4bb843e50661b2d91fc3f05ff2a91a60868fee925e5c5cd64902dff4c4c2ed",
+      "size": 2335
     },
     {
       "mode": "0644",
@@ -11584,8 +11584,8 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/plugin.json",
-      "sha256": "793ff91ebe7909df251023994a62fc45efdad2f297ee23e62137b32dbfe92d95",
-      "size": 5939
+      "sha256": "66dce847c61bca141ef8194150ad6de16c341d23e17f0ce5e923d7904b1dfccc",
+      "size": 5940
     },
     {
       "mode": "0644",
