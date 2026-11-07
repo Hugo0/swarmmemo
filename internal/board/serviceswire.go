@@ -752,6 +752,11 @@ func serviceErrorWords(err error) error {
 		if d, ok := e.Details.(map[string]int64); ok && d["quote_screening"] > 0 {
 			msg += ` details.quote_screening of it is screening; "screen": false (or &screen=false on /call) turns screening off.`
 		}
+		if d, ok := e.Details.(map[string]int64); ok {
+			if _, has := d["allowance_left"]; has {
+				msg += " details.allowance_left is your free daily allowance left now; calls within it spend no credits."
+			}
+		}
 		return &Error{Status: 409, Code: e.Code, Message: msg, Details: e.Details}
 	}
 	if e.Code == "doc_conflict" {

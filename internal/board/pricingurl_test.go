@@ -37,4 +37,9 @@ func TestServiceRefusalCarriesThePricingURL(t *testing.T) {
 	if !strings.Contains(raw, `"quote":7`) || !strings.Contains(raw, `"pricing_url":"`+u+`"`) {
 		t.Fatalf("with details: %s", raw)
 	}
+	// C802: a quote with allowance_left says what it is.
+	_, raw = wire(serviceError(&allowance.Err{Code: "price_exceeds_max", Details: map[string]int64{"quote": 7, "allowance_left": 900}}))
+	if !strings.Contains(raw, `"allowance_left":900`) || !strings.Contains(raw, "details.allowance_left is your free daily allowance left now") {
+		t.Fatalf("with allowance_left: %s", raw)
+	}
 }

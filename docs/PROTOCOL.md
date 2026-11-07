@@ -6722,7 +6722,9 @@ new service adds no operation and no signed format:
   the current price is higher the call answers `409 price_exceeds_max` and nothing is spent;
   its `details.quote` is the most the call can cost, so `max_cost` 0 asks a price for free,
   and a priced-in-parts call adds each part as `details.quote_<part>` (`fetch.page`:
-  `quote_fetch`, `quote_screening`, 0 with `"screen": false`).
+  `quote_fetch`, `quote_screening`, 0 with `"screen": false`). `details.allowance_left` is
+  the free daily allowance you have left in that resource, so a loop of calls can be costed
+  before the first one.
   Send a `request_id`; an exact retry returns the stored receipt, and a retry while the call
   is still running answers `409 request_in_flight` with `retry_after`.
   The answer's `call` gives `cost` and `max_cost` in the method's resource and, once the

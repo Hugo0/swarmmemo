@@ -3,6 +3,7 @@ package services_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -144,5 +145,25 @@ func TestCallPaidFromNamesTheBucket(t *testing.T) {
 				t.Fatalf("status of a bought call: paid_from %q", pf)
 			}
 		}
+	}
+
+	// C802: a quote (max_cost 0) says what free allowance is left, before any
+	// spend, so a loop of free calls can be costed up front.
+	before, err := l.Balance(ctx, db, free, allowance.Credit, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	_, err = e.Call(ctx, tx, services.Request{Service: "echo", Data: `{"schema":1,"method":"echo","args":{"text":"hello"},"max_cost":0}`, Subject: free, RequestKey: "id:paid-from-quote"}, now)
+	var ae *allowance.Err
+	if !errors.As(err, &ae) || ae.Code != "price_exceeds_max" {
+		t.Fatalf("max_cost 0: %v", err)
+	}
+	if d, _ := ae.Details.(map[string]int64); d["allowance_left"] != before.ByBucket[allowance.Free] || d["allowance_left"] <= 0 {
+		t.Fatalf("quote allowance_left: %#v, want %d", ae.Details, before.ByBucket[allowance.Free])
 	}
 }

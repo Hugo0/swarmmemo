@@ -547,6 +547,13 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 		for name, part := range quote.Split {
 			details["quote_"+name] = part
 		}
+		// The free allowance left too (C802), so a caller can cost a loop of
+		// calls before the first spend instead of learning it after.
+		if bl, ok := e.cfg.Meter.(balancer); ok {
+			if bal, err := bl.Balance(ctx, tx, req.Subject, quote.Resource, now); err == nil {
+				details["allowance_left"] = max(0, bal.ByBucket[allowance.Free])
+			}
+		}
 		return Outcome{}, &allowance.Err{Code: "price_exceeds_max", Details: details}
 	}
 	c.Quoted = quote.Max

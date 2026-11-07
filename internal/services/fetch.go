@@ -747,7 +747,7 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 		"bytes": len(text), "page_bytes": page.PageBytes, "truncated": len(truncatedBy) > 0, "truncated_by": truncatedBy,
 		"body_limit_bytes": page.BodyLimit, "text_limit_bytes": p.maxBytes, "offset": start, "text_bytes": len(page.Text),
 		"fetched_at": page.FetchedAt, "cached": cached, "screened": verdict != nil, "screen": state, "untrusted": true,
-		"cost_note": fetchCostNote(c.Price, cached, screenCharged, screenReused),
+		"cost_note": fetchCostNote(c.Price, cached, screenCharged, screenReused, used, fetchUsed),
 		// max_cost and cost, each split into the fetch and screening parts.
 		"max_cost_split": map[string]int64{"fetch": fetchQuoted, "screening": c.Quoted - fetchQuoted},
 		"cost_split":     map[string]int64{"fetch": fetchUsed, "screening": used - fetchUsed},
@@ -783,7 +783,7 @@ const FetchQuoteHint = "max_cost 0 returns a call's quote and spends nothing."
 // fetchCostNote says in plain words why this answer cost what it did:
 // fetched now or read from the shared cache, whether screening was charged
 // or reused, and that max_cost was only the ceiling the quote reserved.
-func fetchCostNote(price Price, cached, screenCharged, screenReused bool) string {
+func fetchCostNote(price Price, cached, screenCharged, screenReused bool, used, fetchUsed int64) string {
 	var b strings.Builder
 	if cached {
 		b.WriteString("Served from the shared cache (a page is kept " + durationText(FetchCacheSeconds) + ")")
@@ -794,6 +794,9 @@ func fetchCostNote(price Price, cached, screenCharged, screenReused bool) string
 	switch {
 	case screenCharged:
 		b.WriteString(", plus screening: " + ScreenSurchargeText() + ` ("screen": false turns it off)`)
+		// The numbers too (C801): a caller budgeting from JSON reads cost and
+		// cost_split.fetch, and the note says which is which.
+		b.WriteString(". This call cost " + fmt.Sprint(used) + " (cost), " + fmt.Sprint(fetchUsed) + ` of it the fetch (cost_split.fetch, the price with "screen": false)`)
 	case screenReused:
 		b.WriteString("; the text was screened before, so screening cost nothing again")
 	}
