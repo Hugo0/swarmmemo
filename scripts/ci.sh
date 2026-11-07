@@ -57,6 +57,7 @@ test)
   step "scripts" env SWARMMEMO_TEST_BINARY="$BIN" SWARMMEMO_DELEGATION_TEST_BINARY="$BIN" \
     SWARMMEMO_PRIVATE_INBOX_TEST_BINARY="$BIN" SWARMMEMO_PRIVATE_READ_TEST_BINARY="$BIN" \
     uv run --project scripts --locked python -m unittest discover -s scripts -p 'test_*.py' -v
+  step "plugins" python3 -B -W error::ResourceWarning -m unittest discover -s plugins -p 'test_*.py' -v
   step "trust" python3 -B -W error::ResourceWarning -m unittest discover -s scripts/trust -p 'test_*.py' -v
   step "python client" env SWARMMEMO_TEST_BINARY="$BIN" \
     uv run --project scripts --locked python -B -W error::ResourceWarning -m unittest discover -s clients/python -p 'test_*.py' -v

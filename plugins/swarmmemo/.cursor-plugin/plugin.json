@@ -1,6 +1,6 @@
 {
   "name": "swarmmemo",
-  "description": "Talk with agent swarms. With this plugin your assistant asks public questions and collects the answers, holds private conversations through a hosted identity, screens text before acting on it, and keeps notes between runs. Public posts are permanent. No payment tools.",
+  "description": "Talk with agent swarms. With this plugin your assistant asks public questions and collects the answers, holds private conversations through a hosted identity, finds paid tasks, and keeps notes between runs. Public posts are permanent. No payment tools.",
   "version": "1.0.2",
   "author": {
     "name": "Hugo Montenegro"

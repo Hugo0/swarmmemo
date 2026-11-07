@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "01c8b7dc9e25d3ea533b3bb249ff2cf2b0ad0ddb61a2fd507d063e0d98a1bcf6",
+  "allowlist_sha256": "102a2cb619db90b8b8cd16711b98ffbc80f32f5753e6a802c62c29f5d0541b56",
   "files": [
     {
       "mode": "0644",
@@ -5134,8 +5134,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/assistants_test.go",
-      "sha256": "35bc857761130f622d3969a8d6bbfa163f01009a72fd73f6272f0381e06c8185",
-      "size": 26819
+      "sha256": "852afae33a5c9b660f433f80beb1746347fbd34400e2b929daae471193371dba",
+      "size": 28680
     },
     {
       "mode": "0644",
@@ -11505,6 +11505,12 @@
     },
     {
       "mode": "0644",
+      "path": "plugins/openai_package.py",
+      "sha256": "1ebd4e7bf2f012b1de4b6d7347f0375118b511a9a6ce89b360d18fa22f9423f3",
+      "size": 2437
+    },
+    {
+      "mode": "0644",
       "path": "plugins/public.go",
       "sha256": "5b21dd4b45d7a824168d0782b89a7dd7e691d5bd9099c2549940f44b8d301055",
       "size": 950
@@ -11512,8 +11518,8 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/.claude-plugin/plugin.json",
-      "sha256": "aacb425080ad54f5a7729a8d89ba134b602aece663d2c3779030e238a1650366",
-      "size": 1035
+      "sha256": "2802b9d780880bde9ec07976fdd195422b380a41eb75c287ebfc1367012a1f09",
+      "size": 1019
     },
     {
       "mode": "0644",
@@ -11524,8 +11530,8 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/.codex-plugin/plugin.json",
-      "sha256": "eac406768e90e88b18dcbe0afb778bf010f4277abe9c23e129b8b9e4ab5979ac",
-      "size": 2540
+      "sha256": "fe410a26b808101d960f335c04ea52669e030ab41ddfc186564f11506722fe1d",
+      "size": 2334
     },
     {
       "mode": "0644",
@@ -11536,8 +11542,8 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/.cursor-plugin/plugin.json",
-      "sha256": "42d6f66a554579169ef8863ac06f13bade6651874bf30c9847640ca92b57ff09",
-      "size": 651
+      "sha256": "6a930128e137a02f3318e8616e22139a972aa2c04f0acdc1d3c4300ba26afcb3",
+      "size": 635
     },
     {
       "mode": "0644",
@@ -11548,8 +11554,8 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/README.md",
-      "sha256": "10b848255880fc7c8e32b6e1d383b080b7882c66f477dc79a36275ff9ca13365",
-      "size": 4383
+      "sha256": "5ff63d8ac07c52c2961813aa17f1036a3e86e85fa2c6926775135b3a68c42c98",
+      "size": 4569
     },
     {
       "mode": "0644",
@@ -11578,8 +11584,8 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/plugin.json",
-      "sha256": "bb9ca9cf10e1bfa434680b34a1767d6c6951c1ba607fa2f4f152365834a95e2c",
-      "size": 6144
+      "sha256": "793ff91ebe7909df251023994a62fc45efdad2f297ee23e62137b32dbfe92d95",
+      "size": 5939
     },
     {
       "mode": "0644",
@@ -11610,6 +11616,12 @@
       "path": "plugins/swarmmemo/skills/use-swarmmemo/SKILL.md",
       "sha256": "1ad7cfd3a7d8b183542efe04f0b0d73242f8e85825b9d57550e0dbc5e8579e2d",
       "size": 3091
+    },
+    {
+      "mode": "0644",
+      "path": "plugins/test_openai_package.py",
+      "sha256": "e4007c5fd1cbd3679f623052e99cc4e8a713a48fadf960c1cd11e325450f0409",
+      "size": 2365
     },
     {
       "mode": "0644",
@@ -12286,8 +12298,8 @@
     {
       "mode": "0755",
       "path": "scripts/ci.sh",
-      "sha256": "05706ccb5d4d27a25caeb5b2471461ee3dbc020ff5540c261350590682534b25",
-      "size": 3205
+      "sha256": "756b4780fd8637de784694fbb07632aaf3eb2db19bf3c8f2519e8bf5f2b01be9",
+      "size": 3309
     },
     {
       "mode": "0644",

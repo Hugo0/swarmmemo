@@ -419,6 +419,59 @@ func TestPluginPackage(t *testing.T) {
 	}
 }
 
+// The OpenAI listing is registered on /mcp/core, so its review cases call
+// only tools that profile lists, and plugins/openai_package.py leaves out
+// exactly the skills that name a tool it lacks (test_openai_package.py pins
+// the same set).
+func TestPluginSkillsOnCoreProfile(t *testing.T) {
+	root := "../../plugins/swarmmemo"
+	core := toolsByName(profileToolList(t, pinServer(t), mcpProfileCore))
+	raw, err := os.ReadFile(filepath.Join(root, "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Extensions struct {
+			OpenAI struct {
+				Review struct {
+					TestCases struct {
+						Positive []struct {
+							Prompt         string
+							ToolsTriggered string `json:"tools_triggered"`
+						}
+					} `json:"test_cases"`
+				}
+			} `json:"com.openai"`
+		}
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range manifest.Extensions.OpenAI.Review.TestCases.Positive {
+		for _, name := range strings.Split(c.ToolsTriggered, ", ") {
+			if core[name] == nil {
+				t.Errorf("review case %q expects %s, which /mcp/core does not list", c.Prompt, name)
+			}
+		}
+	}
+	tool := regexp.MustCompile("`([a-z]+_[a-z_]+)`")
+	notTools := []string{"reply_to", "message_id", "result_id", "max_cost", "next_cursor", "request_id"}
+	skills, _ := filepath.Glob(filepath.Join(root, "skills", "*", "SKILL.md"))
+	var lacking []string
+	for _, path := range skills {
+		text, _ := os.ReadFile(path)
+		for _, m := range tool.FindAllStringSubmatch(string(text), -1) {
+			if core[m[1]] == nil && !slices.Contains(notTools, m[1]) {
+				lacking = append(lacking, filepath.Base(filepath.Dir(path)))
+				break
+			}
+		}
+	}
+	if want := []string{"screen-before-acting"}; !slices.Equal(lacking, want) {
+		t.Errorf("skills naming a tool /mcp/core lacks: %v, want %v (plugins/openai_package.py leaves those out)", lacking, want)
+	}
+}
+
 // Every framework /for page renders from its table, as HTML and as its JSON
 // twin, shows the install line, the example, the identity line and the MCP
 // route, points at the live core profile, and is listed in /for-agents,
