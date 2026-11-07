@@ -561,6 +561,9 @@ type Error struct {
 	// actionable, such as seal_members_mismatch's current members and keys
 	// (RFC0013 §6). Never secrets, never another account's private state.
 	Details any `json:"details,omitempty"`
+	// floodNetwork is the network a repeat_flood refusal holds once its
+	// transaction has rolled back (postflood.go); never sent.
+	floodNetwork string
 }
 
 func (e *Error) Error() string { return e.Message }

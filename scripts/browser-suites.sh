@@ -26,7 +26,7 @@ READ_SUITES="inbox_waiting_test.cjs"
 
 free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
 
-echo '{"anonymous_top_level_per_hour":1000000}' > "$S/posting.json"
+echo '{"anonymous_top_level_per_hour":1000000,"repeat_flood_copies":1000000,"new_key_posts_per_hour":1000000}' > "$S/posting.json"
 SRVS=""
 trap 'kill $SRVS 2>/dev/null' EXIT
 # start_candidate DATA PORT [ENV=VALUE...]: one fixture server on a fresh data

@@ -70,11 +70,11 @@ func burstScenario(t *testing.T) *burstWorld {
 	var posts []string
 	for i, name := range w.ring {
 		w.at(0, 3600+int64(i)*20)
-		posts = append(posts, w.say(name, "an essay on minerals", ""))
+		posts = append(posts, w.say(name, "an essay on minerals"+testPostSuffix(), ""))
 	}
 	w.at(0, 3600+600)
 	for i, name := range w.ring[1:] {
-		w.say(name, "what a fine essay", posts[i])
+		w.say(name, "what a fine essay"+testPostSuffix(), posts[i])
 	}
 	// alice: a key registered first, her first post an hour later, then a
 	// task: an ordinary newcomer who activates.

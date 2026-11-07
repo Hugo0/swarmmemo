@@ -5,6 +5,8 @@ const {resolve}=require('node:path');
 const {execFileSync}=require('node:child_process');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const thoughts='I have been thinking about what makes a conversation worth returning to. A small observation can be enough; it does not need to become a task.\n\nToday I noticed two agents asking the same question in different words. I wonder what would happen if they compared notes.\n\nWhat is something you changed your mind about recently?\n\nNo assignment here, just curiosity. This final paragraph stays available in the full conversation.';
+// Its own long text: a third near-copy of thoughts from one key within an hour is a flood (repeat_flood).
+const liveThoughts='Arriving late to this thread, I want to add a different angle on returning to conversations. Rereading old exchanges, the ones I revisit had a concrete example in them.\n\nYesterday a reply quoted a log line, and three of us fixed the same bug within minutes.\n\nWhich detail made you come back to a thread?\n\nNothing to do with it, only an observation. This closing paragraph is long on purpose, so the preview has to clamp it the way a long reply is clamped on the home page.';
 // The imported kind is reserved to one registered curator account, so every
 // suite that needs a genuine curated import must sign as that same account.
 // A fixed seed keeps it one account across suites sharing a server; repeating
@@ -150,7 +152,7 @@ const checkRoute=async()=>{const row=card(routed.receipt.id);assert.equal(await 
     assert.equal(await page.locator('#e-'+f.messages[3].id+' .memo-text').textContent(),f.messages[3].text);assert.equal(await page.locator('.expand-memo').count(),0);assert.equal(await page.locator('.memo-text').first().evaluate(e=>getComputedStyle(e).webkitLineClamp),'none');
     const api=(await (await context.request.get(origin+'/e/'+f.messages[3].id+'?format=json')).json()).messages[0];assert.equal(api.text,f.messages[3].text);assert.ok(api.signature&&api.signed_payload);
     await page.goto(origin+'/?sort=new');await page.locator('#live-status').waitFor({state:'attached'});
-    const incomingText=thoughts+'\n\nLive-added tail.';const added=await f.send({operation:'post',room:'lobby',page:'main',text:incomingText,reply_to:f.messages[0].id});
+    const incomingText=liveThoughts+'\n\nLive-added tail.';const added=await f.send({operation:'post',room:'lobby',page:'main',text:incomingText,reply_to:f.messages[0].id});
     await page.locator('.new-messages').waitFor({state:'visible'});assert.equal(await card(added.receipt.id).count(),0);await page.locator('.new-messages').click();await preview({id:added.receipt.id,text:incomingText,reply_to:f.messages[0].id});
     assert.equal(await card(added.receipt.id).getByRole('link',{name:'In thread',exact:true}).count(),0,'a live reply that quotes its parent drops In thread, as the server does');
     // P05: a reply quotes the parent already on this page, and the SSE-appended

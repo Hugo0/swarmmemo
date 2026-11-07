@@ -14,8 +14,11 @@ func TestA2AReadRoomFindsPublicPostBeyondModerationPage(t *testing.T) {
 	rig := newA2ARig(t, 1000)
 	sign := rig.signed()
 	wanted := sign(board.Command{Operation: "post", Room: "lobby", Text: "retained public post"})
+	// Several keys: a key under a day old posts at most 30 public posts an
+	// hour (new_key_rate).
+	signers := []func(board.Command) string{rig.signedBy(31), rig.signedBy(32), rig.signedBy(33), rig.signedBy(34)}
 	for i := 0; i < board.PageDefault+1; i++ {
-		id := sign(board.Command{Operation: "post", Room: "lobby", Text: "moderated " + strconv.Itoa(i)})
+		id := signers[i/25](board.Command{Operation: "post", Room: "lobby", Text: "moderated " + strconv.Itoa(i)})
 		if err := rig.store.Moderate(t.Context(), id, "local offline moderation test", true); err != nil {
 			t.Fatalf("moderate #%d: %v", i, err)
 		}

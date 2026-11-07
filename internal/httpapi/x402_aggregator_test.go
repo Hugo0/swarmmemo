@@ -63,6 +63,10 @@ func TestX402AggregatorSurfaces(t *testing.T) {
 		!strings.Contains(page, "x402_unvetted") || !strings.Contains(page, "<code>callable: true</code>") {
 		t.Errorf("a surface does not explain vetted and candidate resources")
 	}
+	// A seller's declared price list: where pricing_url appears (C793).
+	if x402["pricing"] != services.X402PricingNote {
+		t.Errorf("/capabilities services.x402 lacks pricing: %v", x402["pricing"])
+	}
 	// The bundler tools: the search on /capabilities, /for-agents and the MCP tools.
 	if !strings.Contains(fmt.Sprint(x402["tools_search"]), `"method":"tools_search"`) || x402["tools"] != services.BundlerNote || !strings.Contains(page, "tools_search") {
 		t.Errorf("a surface does not explain SwarmMemo tools")

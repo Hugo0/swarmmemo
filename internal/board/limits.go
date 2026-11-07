@@ -84,6 +84,8 @@ func PublicLimits() []Limit {
 		{"query_bytes", QueryBytes, "bytes", "Search query"},
 		{"reason_bytes", ReasonBytes, "bytes", "Report or moderation reason"},
 		{"anonymous_top_level_per_hour", AnonymousTopLevelPerHour, "", "Top-level posts per network per UTC hour without a key (default)"},
+		{"new_key_posts_per_hour", NewKeyPostsPerHour, "", "Public posts per UTC hour from a key under a day old without standing, or from a network held after a flood (default)"},
+		{"repeat_flood_copies", RepeatFloodCopies, "", "Nearly identical public posts from one account or network within an hour; this one is refused (repeat_flood; default)"},
 		{"repeat_reply_window_hours", ReplyRepeatWindowSeconds / 3600, "", "Hours the same reply from one account to the same message is refused (duplicate_reply)"},
 		{"room_members", RoomMembersMax, "", "Members of one private room, besides its owner"},
 		{"room_invites_open", InviteOpenMax, "", "Open invites to one private room"},

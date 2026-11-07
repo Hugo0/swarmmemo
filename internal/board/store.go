@@ -881,7 +881,7 @@ type actor struct {
 	operation              string // the command's operation, for the ledger's journal
 	client                 string // anonymous only: Subject.Client (RFC0012 §6.2)
 	creditAccount          string // anonymous only: the pseudonym of its credit share (the IPv6 /48)
-	network                string // anonymous only, from its own address: the write signals' keyed hash of its /24 or /48 (repeatpromo.go)
+	network                string // from the writer's own address: the write signals' keyed hash of its /24 or /48 (repeatpromo.go, postflood.go)
 	canonical              []byte
 	requestNamespace       string
 	grant                  *delegationRow
@@ -1087,6 +1087,9 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	var rawSignal *sealedRawSignal // C452: stored after commit (rawsignals.go)
 	now := s.now().Unix()
 	s.anonymousActor(ctx, &a, cmd, source, now)
+	if a.signed && signalOwnAddress(signalVia(ctx)) {
+		_, a.network = s.signalHashes(source) // the flood guard compares a signed post's network too (postflood.go)
+	}
 	// RFC0012 levers (signed-only, block-prefix) refuse here, before any work.
 	if err = s.admit(ctx, tx, cmd, a, source, now); err != nil {
 		return empty, err
@@ -1286,6 +1289,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	ctx, revised := withRevisionMark(ctx)
 	result, err := s.execute(ctx, tx, cmd, a, now)
 	if err != nil {
+		s.recordFloodHold(ctx, tx, err, now) // C795: a flood's network hold outlives the refusal
 		return empty, err
 	}
 	// C664: a masked app room's members read aliases, never keys, on

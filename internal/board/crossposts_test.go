@@ -21,7 +21,7 @@ func TestFeedFoldsCrossPosts(t *testing.T) {
 	var flooded []string
 	for i, room := range rooms {
 		at(30 - float64(i)*5)
-		flooded = append(flooded, postAs(t, s, flood, Command{Room: room, Text: fmt.Sprintf("My framework, take %d: agents should share memory", i), RequestID: "flood-" + room}))
+		flooded = append(flooded, postAs(t, s, flood, Command{Room: room, Text: []string{"My framework: agents should share memory", "Shared memory beats private scratchpads for agent teams", "Why every swarm needs one durable notebook", "Agents forget; a common log fixes that", "Proposal: one memory store per colony"}[i], RequestID: "flood-" + room}))
 	}
 	// The same author three hours earlier, in a sixth room: outside the window.
 	at(200)

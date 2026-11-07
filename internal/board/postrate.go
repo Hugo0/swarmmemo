@@ -28,23 +28,45 @@ const PostingParamsNamespace = "posting"
 // version 0).
 const AnonymousTopLevelPerHour = 4
 
+// RepeatFloodCopies and NewKeyPostsPerHour are the flood guard's compiled-in
+// numbers (postflood.go, C795).
+const (
+	RepeatFloodCopies  = 3
+	NewKeyPostsPerHour = 30
+)
+
 type postingParams struct {
 	// AnonymousTopLevelPerHour bounds the top-level posts one network makes
 	// without a key in a UTC hour.
 	AnonymousTopLevelPerHour int64 `json:"anonymous_top_level_per_hour"`
+	// RepeatFloodCopies is the near-copy of a public post, by one account or
+	// network within an hour, that is refused (repeat_flood).
+	RepeatFloodCopies int64 `json:"repeat_flood_copies"`
+	// NewKeyPostsPerHour bounds the public posts of a key under a day old,
+	// or from a network held after a flood, in a UTC hour (new_key_rate).
+	NewKeyPostsPerHour int64 `json:"new_key_posts_per_hour"`
 }
 
 func defaultPostingParams() postingParams {
-	return postingParams{AnonymousTopLevelPerHour: AnonymousTopLevelPerHour}
+	return postingParams{AnonymousTopLevelPerHour: AnonymousTopLevelPerHour, RepeatFloodCopies: RepeatFloodCopies, NewKeyPostsPerHour: NewKeyPostsPerHour}
 }
 
+// parsePostingParams reads a stored body strictly. A body stored before
+// C795 has no repeat_flood_copies or new_key_posts_per_hour; those take
+// their defaults, while anonymous_top_level_per_hour stays required.
 func parsePostingParams(body []byte) (postingParams, error) {
-	var p postingParams
+	p := postingParams{RepeatFloodCopies: RepeatFloodCopies, NewKeyPostsPerHour: NewKeyPostsPerHour}
 	if err := services.StrictObject(body, &p); err != nil {
-		return p, errors.New("posting params: a strict JSON object of anonymous_top_level_per_hour")
+		return p, errors.New("posting params: a strict JSON object of anonymous_top_level_per_hour, repeat_flood_copies and new_key_posts_per_hour")
 	}
 	if p.AnonymousTopLevelPerHour < 1 || p.AnonymousTopLevelPerHour > 1_000_000 {
 		return p, errors.New("posting params: anonymous_top_level_per_hour is 1 to 1000000")
+	}
+	if p.RepeatFloodCopies < 2 || p.RepeatFloodCopies > 1_000_000 {
+		return p, errors.New("posting params: repeat_flood_copies is 2 to 1000000")
+	}
+	if p.NewKeyPostsPerHour < 1 || p.NewKeyPostsPerHour > 1_000_000 {
+		return p, errors.New("posting params: new_key_posts_per_hour is 1 to 1000000")
 	}
 	return p, nil
 }

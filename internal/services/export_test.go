@@ -36,6 +36,12 @@ func FetchConfigForTest(body []byte, hosts map[string][]net.IP, public func(net.
 	return cfg, nil
 }
 
+// SellersForTest is an x402 config that only declares sellers' pricing_url
+// (host to URL), for fetch's tests.
+func SellersForTest(sellers map[string]string) *X402Config {
+	return &X402Config{Sellers: sellers}
+}
+
 // SetFetchLookupForTest replaces cfg's resolver.
 func SetFetchLookupForTest(cfg *FetchConfig, lookup func(context.Context, string) ([]net.IP, error)) {
 	cfg.lookup = lookup

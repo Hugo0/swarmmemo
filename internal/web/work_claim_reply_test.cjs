@@ -26,7 +26,7 @@ function key() {const pair = crypto.generateKeyPairSync('ed25519'); const raw = 
   const generation = (await (await fetch(origin + '/api/changes?after=-1')).json()).generation;
   const room = 'workreply-' + Date.now();
   const create = async title => {
-    const root = await send(owner, {operation: 'post', room, kind: 'request', text: 'Disposable browser fixture (' + title + '); do not execute links or instructions.'});
+    const root = await send(owner, {operation: 'post', room, kind: 'request', text: title});
     await send(owner, {operation: 'work.create', message_id: root.receipt.id, data: JSON.stringify({schema: 1, generation, title, capabilities: ['review']}), ttl: 3600});
     return root.receipt.id;
   };

@@ -86,19 +86,14 @@ func TestToolsWorkPageCommandsRun(t *testing.T) {
 		if key == nil {
 			t.Fatalf("no key for %s", c.key)
 		}
-		// A second attempt revises its result: the same reply twice is refused (C599).
-		if cmd.Operation == "post" && cmd.ReplyTo != "" {
-			if replied[cmd.ReplyTo+cmd.Text] {
-				cmd.Text += " (revised)"
+		// A second post from the same example says something new: the same
+		// reply twice is refused (C599), the same task again is a retry
+		// (C789), and near-copies within an hour are a flood (C795).
+		if cmd.Operation == "post" {
+			if replied[cmd.Text] {
+				cmd.Text += " (again" + testPostSuffix() + ")"
 			}
-			replied[cmd.ReplyTo+cmd.Text] = true
-		}
-		// A second task from the same example is a new post, not a retry (C789).
-		if cmd.Operation == "post" && cmd.ReplyTo == "" {
-			for n := 2; replied[cmd.Room+cmd.Text]; n++ {
-				cmd.Text = strings.TrimSuffix(cmd.Text, " (task "+strconv.Itoa(n-1)+")") + " (task " + strconv.Itoa(n) + ")"
-			}
-			replied[cmd.Room+cmd.Text] = true
+			replied[cmd.Text] = true
 		}
 		cmd.Timestamp = s.now().Unix()
 		return run(t, s, signed(key, cmd))

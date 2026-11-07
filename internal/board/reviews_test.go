@@ -47,7 +47,7 @@ func reviewPost(t *testing.T, key ed25519.PrivateKey, uri string, fields map[str
 		d["supersedes"] = supersedes
 	}
 	raw, _ := json.Marshal(d)
-	return signed(key, Command{Operation: "post", Room: ReviewsRoom, Page: reviewSubjectOf(t, uri).ID, Kind: "review", Text: "It answered every call I paid for.", Data: string(raw), RequestID: randomID()})
+	return signed(key, Command{Operation: "post", Room: ReviewsRoom, Page: reviewSubjectOf(t, uri).ID, Kind: "review", Text: "It answered every call I paid for." + testPostSuffix(), Data: string(raw), RequestID: randomID()})
 }
 
 func readSubjectData(t *testing.T, s *Store, target string) map[string]any {

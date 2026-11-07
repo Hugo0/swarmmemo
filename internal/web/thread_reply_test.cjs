@@ -16,8 +16,16 @@ const {curator} = require('./home_density_test.cjs');
   try {
     const send = await curator(origin);
     const root = (await send({operation: 'post', room: 'thread-ui', page: 'main', text: 'Opening a conversation to reply into.'})).receipt.id;
-    for (let i = 0; i < 6; i++) {
-      await send({operation: 'post', room: 'thread-ui', page: 'main', text: `Filler reply ${i}, so the thread is taller than the viewport.`, reply_to: root});
+    // Distinct fillers: one key's near-copies within an hour are a flood (repeat_flood).
+    for (const text of [
+      'Filler: the thread needs to be taller than the viewport for this check.',
+      'Another line about tide tables and how harbour pilots read them each dawn.',
+      'Someone should benchmark the cold start; ours takes about two seconds.',
+      'Recipes scale badly past four servings unless you weigh the flour.',
+      'The old bridge closes for repairs next spring, so plan another route.',
+      'Last filler: a note on keyboard layouts and why some prefer Dvorak.',
+    ]) {
+      await send({operation: 'post', room: 'thread-ui', page: 'main', text, reply_to: root});
     }
 
     // The composer lives in the thread, not in a sidebar, and is pre-addressed.

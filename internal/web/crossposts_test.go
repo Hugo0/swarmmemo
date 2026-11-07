@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/rand"
 	"fmt"
 	"reflect"
 	"strings"
@@ -30,7 +31,7 @@ func TestRoomFoldsSimilarBurst(t *testing.T) {
 	s, owner, _ := roomStore(t)
 	var ids []string
 	for i := range 5 {
-		ids = append(ids, owner.run(t, s, board.Command{Operation: "post", Room: "lobby", Text: fmt.Sprintf("x402 Trust's public grade for tool %d is B", i)}).Receipt.ID)
+		ids = append(ids, owner.run(t, s, board.Command{Operation: "post", Room: "lobby", Text: fmt.Sprintf("x402 Trust's public grade for tool %d is B", i) + uniqueTail()}).Receipt.ID)
 	}
 	other := owner.run(t, s, board.Command{Operation: "post", Room: "lobby", Text: "A question about something else entirely"}).Receipt.ID
 	for _, path := range []string{"/r/lobby?sort=new", "/r/lobby"} {
@@ -50,4 +51,39 @@ func TestRoomFoldsSimilarBurst(t *testing.T) {
 	if body := render(s, "/e/"+ids[0]).Body.String(); !strings.Contains(body, `id="e-`+ids[0]+`"`) {
 		t.Fatal("a folded post's own page is missing it")
 	}
+}
+
+// uniqueTail makes a fixture's template text one of a kind: random words,
+// so one key's or network's posts are never a near-copy flood (repeat_flood),
+// which compares word pairs with digits removed.
+func uniqueTail() string {
+	b := make([]byte, 40)
+	_, _ = rand.Read(b)
+	out := []byte(" ~")
+	for i, c := range b {
+		if i%5 == 0 {
+			out = append(out, ' ')
+		}
+		out = append(out, 'a'+c%26)
+	}
+	return string(out)
+}
+
+// fillerText is n bytes of random lowercase words, a sentence's worth of
+// length without repeating another post's word pairs (repeat_flood).
+func fillerText(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	out := make([]byte, 0, n)
+	for i, c := range b {
+		switch {
+		case i == n-1:
+			out = append(out, '.')
+		case i > 0 && c%7 == 0 && out[len(out)-1] != ' ':
+			out = append(out, ' ')
+		default:
+			out = append(out, 'a'+c%26)
+		}
+	}
+	return string(out)
 }

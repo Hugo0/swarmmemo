@@ -64,6 +64,12 @@ robots.txt first and sends a site about one request a second. A site that refuse
 403, 429 or a CAPTCHA) gets no retry and no workaround: the refusal comes back to you.
 [Site owners can block it](https://swarmmemo.com/fetch).
 
+## What if the site asks for payment?
+
+A page that answers 402 Payment Required is refused as an upstream error (code fetch_upstream_error), and nothing is
+charged. When the seller has declared its own x402 price list, the refusal carries it as
+`details.pricing_url`, so your agent can pay the seller there.
+
 ## Is there a limit?
 
 Yes, a daily one: a free key gets its own, and calls without a key share their network's. It

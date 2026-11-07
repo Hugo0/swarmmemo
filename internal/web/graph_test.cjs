@@ -391,11 +391,38 @@ async function locateIn(page, handle, key) {
     // Touch: a tap on empty space closes the sheet; a tap a few pixels off an agent opens it.
     await wait(1200);
     const target = await phone.evaluate((fp) => { const s = window.__swarmgraph; const id = s.find((n) => n.key === fp)[0]; return {id, at: s.screen([id])[0]}; }, b.fingerprint);
-    const empty = await phone.evaluate(() => { const s = window.__swarmgraph, st = document.getElementById('graph-stage').getBoundingClientRect(); for (let y = 60; y < st.height - 20; y += 9) for (let x = 12; x < st.width - 12; x += 9) if (s.pick(x, y) === null) return [x, y]; return null; });
-    assert.ok(empty, 'some empty space to tap');
+    // Under load the fly-in to the agent can still be under way: wait for the
+    // camera to settle, then look for empty space. Close up on a busy agent its
+    // message dots can fill the whole stage: then pinch out a little and look again.
+    const findEmpty = () => phone.evaluate(() => { const s = window.__swarmgraph, st = document.getElementById('graph-stage').getBoundingClientRect(); for (let y = 60; y < st.height - 20; y += 9) for (let x = 12; x < st.width - 12; x += 9) if (s.pick(x, y) === null) return [x, y]; return null; });
+    // pinchAt(out): a two-finger pinch centred on the agent, so it stays put;
+    // fingers apart zoom in, together zoom out. The tap tests below undo each pinch out.
+    const pinchAt = async (out) => {
+      const box = await phone.locator('#graph-canvas canvas').boundingBox();
+      const [ax, ay] = await phone.evaluate((fp) => { const s = window.__swarmgraph; return s.screen([s.find((n) => n.key === fp)[0]])[0]; }, b.fingerprint);
+      const px = box.x + ax, py = box.y + ay;
+      const pinch = await phone.context().newCDPSession(phone), at = (k) => out ? 30 + k * 20 : 150 - k * 20;
+      await pinch.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x: px - at(0), y: py, id: 1}, {x: px + at(0), y: py, id: 2}]});
+      for (let k = 1; k <= 6; k++) await pinch.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [{x: px - at(k), y: py, id: 1}, {x: px + at(k), y: py, id: 2}]});
+      await pinch.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
+      await pinch.detach();
+      await wait(500);
+      for (let j = 0; j < 40 && (await phone.evaluate(() => window.__swarmgraph.camera())).moving; j++) await wait(250);
+    };
+    let empty = null, pinchedOut = 0;
+    for (let i = 0; i < 6 && !empty; i++) {
+      for (let j = 0; j < 40 && (await phone.evaluate(() => window.__swarmgraph.camera())).moving; j++) await wait(250);
+      empty = await findEmpty();
+      if (empty || i === 5) break;
+      await pinchAt(false);
+      pinchedOut++;
+    }
+    assert.ok(empty, 'some empty space to tap: ' + JSON.stringify(empty || await phone.evaluate(() => ({cam: window.__swarmgraph.camera(), draw: window.__swarmgraph.draw(), centre: window.__swarmgraph.pick(195, 200)}))));
     let canvasBox = await phone.locator('#graph-canvas canvas').boundingBox();
     await phone.touchscreen.tap(canvasBox.x + empty[0], canvasBox.y + empty[1]);
     await phone.waitForFunction(() => document.getElementById('graph-panel').hidden, null, {timeout: 5000});
+    // Back to the close-up, where the agent's own disc is big enough to hit 9px off.
+    for (; pinchedOut > 0; pinchedOut--) await pinchAt(true);
     await wait(800);
     // Under load the map can still settle (or a universe refresh can land)
     // between reading the agent's position and the tap: re-read and retap.

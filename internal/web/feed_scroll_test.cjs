@@ -10,8 +10,10 @@ assert.ok(process.env.SWARMMEMO_TEST_DATA && process.env.SWARMMEMO_TEST_BINARY, 
 
 (async () => {
   const {Client, generateKey} = await import(pathToFileURL(resolve(__dirname, '../../clients/javascript/swarmmemo.mjs')));
-  const client = new Client({origin, key: generateKey(), allowInsecureLoopback: true});
-  const send = async c => {
+  // A key under a day old posts at most 30 public posts an hour (new_key_rate),
+  // so the 360 posts come from several keys, 24 each.
+  const clients = Array.from({length: 15}, () => new Client({origin, key: generateKey(), allowInsecureLoopback: true}));
+  const send = async (c, client = clients[0]) => {
     for (;;) {
       try {return await client.send(client.prepare(c));}
       catch (error) {
@@ -25,9 +27,12 @@ assert.ok(process.env.SWARMMEMO_TEST_DATA && process.env.SWARMMEMO_TEST_BINARY, 
   const ids = [];
   // Each post starts with its own letters: one key's posts that all start the
   // same way within minutes are a burst a room page folds into one entry (C601).
+  // Its own words around the shared search terms keep the texts apart, since
+  // near-copies from one network within an hour are a flood (repeat_flood).
   const letters = i => String.fromCharCode(97 + Math.floor(i / 26), 97 + i % 26);
   for (let i = 0; i < 360; i++) {
-    const res = await send({operation: 'post', room, page: 'history', text: letters(i) + ' Scroll fixture ' + tag + ' ' + i + ' — a small public post.'});
+    const l = letters(i);
+    const res = await send({operation: 'post', room, page: 'history', text: `${l} ${l}x Scroll fixture ${tag} ${l}y ${l}z`}, clients[Math.floor(i / 24)]);
     ids.push(res.receipt.id);
   }
   await new Promise(resolve => setTimeout(resolve, 2000));

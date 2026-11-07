@@ -144,6 +144,9 @@ type X402Config struct {
 	// itself (bundler.go).
 	Bundlers []Bundler
 	Signer   X402Signer
+	// Sellers are the allowlist file's sellers: each host's declared
+	// pricing_url, its own x402 price list (pricing.go).
+	Sellers map[string]string
 	// rootCAs replaces the system roots, and testDial the board's dialer
 	// (tests only: UseTestUpstream).
 	rootCAs  *x509.CertPool
@@ -590,6 +593,8 @@ func (x *x402) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 		// denied after x402DenyAfter such outcomes.
 		x.autoDeny(p.res, c.Now)
 		return x.unanswered(c, p, pay, errCodeOf(err)), nil
+	case err != nil && x402PricedRefusal(err):
+		return Result{}, withPricingURL(err, x.cfg.PricingURL(p.res.URL))
 	case err != nil:
 		return Result{}, err
 	case receipt == nil: // free today, or nothing delivered: no tool part
@@ -1210,6 +1215,9 @@ func (x *x402) mppEntryJSON(e *MPPEntry, subject string, summaries map[string]an
 		"summary_status": e.summaryStatus, "text_is_untrusted": true, "intent": e.Intent, "currency": e.Currency, "network": e.Network,
 		"pinned": false, "vetted": false, "callable": false, "reason": e.Reason(x.cfg.Network),
 	}
+	if u := x.cfg.PricingURL(e.URL); u != "" {
+		entry["pricing_url"] = u
+	}
 	if e.Price >= 0 {
 		entry["price"] = formatUnits(e.Price, 6)
 	} else {
@@ -1278,6 +1286,9 @@ func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 		if r.Open {
 			entry["text_is_untrusted"], entry["summary_status"] = true, r.summaryStatus
 		}
+		if u := x.cfg.PricingURL(r.URL); u != "" {
+			entry["pricing_url"] = u
+		}
 		if proof := r.Proof(); proof != "" {
 			// Its owner listed it (x402.submit), proven by a domain or wallet link.
 			entry["source"], entry["proof"] = "submitted", proof
@@ -1327,6 +1338,9 @@ func (x *x402) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 	}
 	if page.next != "" {
 		body["next_cursor"] = page.next
+	}
+	if len(x.cfg.Sellers) > 0 {
+		body["pricing"] = X402PricingNote
 	}
 	return canonicalJSON(body), nil
 }
@@ -1439,6 +1453,8 @@ type x402AllowlistFile struct {
 	} `json:"resources"`
 	// Deny is what the open catalogue never imports (x402_catalogue.go).
 	Deny *x402DenyFile `json:"deny"`
+	// Sellers declare a host's own price list, pricing_url (pricing.go).
+	Sellers []x402SellerFile `json:"sellers"`
 }
 
 var (
@@ -1707,6 +1723,9 @@ func (c *X402Config) parseAllowlist(raw []byte, readFile func(string) ([]byte, e
 			return bad("summary or source (too long)")
 		}
 		c.Resources = append(c.Resources, res)
+	}
+	if err := c.parseSellers(f.Sellers); err != nil {
+		return err
 	}
 	return c.parseDeny(f.Deny, readFile)
 }

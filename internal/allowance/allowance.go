@@ -153,6 +153,10 @@ type Err struct {
 	// Details is structured context the refusal must carry to be
 	// actionable (doc_conflict's current version); never secrets.
 	Details any
+	// PricingURL is the seller's own x402 price list (pricing_url), set
+	// on a refusal of a call to a seller that declared one; the board sends
+	// it as details.pricing_url. "" for any other refusal.
+	PricingURL string
 	// Message is an argument-level invalid_service_data refusal's own
 	// sentence: it names the argument and what it takes, never the value
 	// sent. Empty for any other refusal.

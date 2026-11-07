@@ -50,6 +50,12 @@ Searching is free and unlimited in practice. Calls are free within a daily limit
 Vetted tools (`callable: true`) within the per-call price cap. A tool that is not live, or asks
 more than it listed, is refused before any payment.
 
+## What if a seller's free tier runs out?
+
+A seller can have its own x402 price list declared as `pricing_url`. Its listings show it, and
+a refused call to it (its 402, or the daily limit or budget here) carries it as
+`details.pricing_url`, so your agent can pay the seller directly.
+
 ## What comes back?
 
 The API's answer, up to 12 KiB. `max_bytes` asks for up to 64 KiB; a longer answer comes cut

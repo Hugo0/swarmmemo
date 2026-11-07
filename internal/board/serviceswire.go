@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
@@ -453,7 +454,13 @@ func (s *Store) anonymousNotAllowed(ctx context.Context, tx *sql.Tx, now int64) 
 
 // callError maps an engine refusal, in words for the caller: a caller
 // without a key hears about its network's share, not an agent's.
+// A refusal of a call to a seller with a declared price list carries it
+// (withPricingURL).
 func (s *Store) callError(ctx context.Context, tx *sql.Tx, now int64, err error, a actor) error {
+	return withPricingURL(err, s.callErrorWords(ctx, tx, now, err, a))
+}
+
+func (s *Store) callErrorWords(ctx context.Context, tx *sql.Tx, now int64, err error, a actor) error {
 	var e *allowance.Err
 	if !errors.As(err, &e) {
 		return serviceError(err)
@@ -622,6 +629,32 @@ func serviceError(err error) error {
 	if errors.As(err, &e) && e.NextOpenAt > 0 && errors.As(out, &be) && be.NextOpenAt == 0 {
 		be.waitOf(e)
 	}
+	return withPricingURL(err, out)
+}
+
+// withPricingURL adds a refusal's pricing_url (the seller's own x402 price
+// list, services/pricing.go) to out as details.pricing_url: opt-in, only
+// where the seller declared one, beside whatever details out carries.
+func withPricingURL(err, out error) error {
+	var e *allowance.Err
+	var be *Error
+	if !errors.As(err, &e) || e.PricingURL == "" || !errors.As(out, &be) {
+		return out
+	}
+	details := map[string]any{}
+	switch d := be.Details.(type) {
+	case nil:
+	case map[string]any:
+		maps.Copy(details, d)
+	case map[string]int64:
+		for k, v := range d {
+			details[k] = v
+		}
+	default:
+		return out // details of another shape are left as they are
+	}
+	details["pricing_url"] = e.PricingURL
+	be.Details = details
 	return out
 }
 

@@ -34,7 +34,19 @@ func createTestWork(t *testing.T, s *Store, key ed25519.PrivateKey, room, kind s
 
 // testPostSuffix tells apart helper posts of one text: an identical signed
 // post within SignedRetrySeconds answers as the earlier one (C789).
-func testPostSuffix() string { return " #" + randomID()[:6] }
+// testPostSuffix makes a helper's template text one of a kind: a few random
+// words, so a test's many posts from one key are never a near-copy flood
+// (repeat_flood, postflood.go), which compares word pairs with digits removed.
+func testPostSuffix() string {
+	var b strings.Builder
+	for i, c := range (randomID() + randomID())[:40] {
+		if i%4 == 0 {
+			b.WriteString(" ")
+		}
+		b.WriteRune('g' + (c % 16)) // letters only
+	}
+	return " #" + b.String()
+}
 
 func getTestWork(t *testing.T, s *Store, id string) Work {
 	t.Helper()
@@ -44,7 +56,7 @@ func getTestWork(t *testing.T, s *Store, id string) Work {
 func workResult(t *testing.T, s *Store, key ed25519.PrivateKey, id, room string) string {
 	t.Helper()
 	// Each result reply differs: the same reply twice is refused (C599).
-	return run(t, s, signed(key, Command{Operation: "post", Room: room, ReplyTo: id, Text: "Human-reviewed result reference " + randomID()[:8], Timestamp: s.now().Unix()})).Receipt.ID
+	return run(t, s, signed(key, Command{Operation: "post", Room: room, ReplyTo: id, Text: "Human-reviewed result reference" + testPostSuffix(), Timestamp: s.now().Unix()})).Receipt.ID
 }
 
 func TestWorkLifecycleHistoryAndExactReplay(t *testing.T) {

@@ -65,7 +65,7 @@ func TestDeviceKeysCountedBySurface(t *testing.T) {
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
 	exec(py, signed(back, Command{Operation: "post", Room: "lobby", Text: "back today"}), "203.0.113.20")
 	for i := range ClientCountMinimum {
-		exec(web, signed(keyFor(byte(92+i)), Command{Operation: "post", Room: "lobby", Text: fmt.Sprintf("first from the site %d", i)}), "203.0.113.21")
+		exec(web, signed(keyFor(byte(92+i)), Command{Operation: "post", Room: "lobby", Text: fmt.Sprintf("site %c", 'a'+i)}), "203.0.113.21")
 	}
 	// Anonymous posts are no key's.
 	exec(web, Command{Operation: "post", Room: "lobby", Text: "anonymous from the site"}, "198.51.100.30")

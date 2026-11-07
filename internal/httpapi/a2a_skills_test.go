@@ -155,8 +155,11 @@ func TestAgentCardA2ASkills(t *testing.T) {
 }
 
 // signedPoster signs commands with one fixed key against the rig's store.
-func (g *a2aRig) signed() func(board.Command) string {
-	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, 32))
+func (g *a2aRig) signed() func(board.Command) string { return g.signedBy(7) }
+
+// signedBy is signed with the key of seed byte b.
+func (g *a2aRig) signedBy(b byte) func(board.Command) string {
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{b}, 32))
 	n := 0
 	return func(c board.Command) string {
 		g.t.Helper()

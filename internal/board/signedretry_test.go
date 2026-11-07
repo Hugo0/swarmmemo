@@ -25,7 +25,7 @@ func TestSignedPostRetryNewRequestID(t *testing.T) {
 	quota := func() int64 {
 		return sqlCount(t, s, "SELECT coalesce(sum(used),0) FROM quota WHERE actor=?", keyID(key))
 	}
-	text := "Reviewed the fetch tool: fast and correct."
+	text := "Fetch: fast, correct." // short: the flood guard never compares it
 	first := post(Command{Room: "lobby", Text: text, RequestID: "first"})
 	used := quota()
 

@@ -101,7 +101,8 @@ type fetchOpts struct {
 	public func(net.IP) error
 	tls    *tls.Config
 	budget int64
-	slow   bool // keep the production spacing of one request a second
+	slow   bool                 // keep the production spacing of one request a second
+	x402   *services.X402Config // the declared sellers' pricing_url
 }
 
 func newFetchRig(t *testing.T, s *site, o fetchOpts) *fetchRig {
@@ -126,7 +127,7 @@ func newFetchRig(t *testing.T, s *site, o fetchOpts) *fetchRig {
 		services.SetFetchIntervalForTest(cfg, 10*time.Millisecond)
 	}
 	r := &fetchRig{t: t, db: openDB(t), meter: servicestest.NewMeter(o.budget), jev: &fakeScreener{cost: 30}, now: wakeT0}
-	reg := services.NewBuiltinRegistry([]string{"fetch"}, services.Deps{DB: r.db, Fetch: cfg, TextScreener: r.jev, ServiceID: "swarmmemo.com"})
+	reg := services.NewBuiltinRegistry([]string{"fetch"}, services.Deps{DB: r.db, Fetch: cfg, TextScreener: r.jev, ServiceID: "swarmmemo.com", X402: o.x402})
 	r.e = services.NewEngine(services.Config{DB: r.db, Registry: reg, Meter: r.meter, Now: func() int64 { return r.now }})
 	t.Cleanup(r.e.Stop)
 	return r
@@ -1021,5 +1022,37 @@ func TestFetchSaysWhenAPageIsMostlyMarkup(t *testing.T) {
 	res = get(r.must("bob", noScreen("http://site.test/wordy")), "result").(map[string]any)
 	if note, _ := res["note"].(string); strings.Contains(note, "the rest is markup") {
 		t.Fatalf("a page of text says it is markup: %q", note)
+	}
+}
+
+func TestFetchA402CarriesTheSellersPricingURL(t *testing.T) {
+	s := newSite(t, false, map[string]http.HandlerFunc{
+		"/company": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			fmt.Fprint(w, `{"error":"free preview used up"}`)
+		},
+	})
+	const pricing = "https://site.test/x402/prices"
+	r := newFetchRig(t, s, fetchOpts{x402: services.SellersForTest(map[string]string{"site.test": pricing})})
+	codeOf := func(err error) (string, string) {
+		var e *allowance.Err
+		if errors.As(err, &e) {
+			return e.Code, e.PricingURL
+		}
+		return "", ""
+	}
+	_, err := r.fetch("acct-1", noScreen("http://site.test/company"))
+	if code, got := codeOf(err); code != "fetch_upstream_error" || got != pricing {
+		t.Fatalf("declared host's 402: %v %q", err, got)
+	}
+	// Another host answering 402 has none declared, and carries none.
+	_, err = r.fetch("acct-1", noScreen("http://other.test/company"))
+	if code, got := codeOf(err); code != "fetch_upstream_error" || got != "" {
+		t.Fatalf("undeclared host's 402: %v %q", err, got)
+	}
+	// A declared host's page that answers is read as before.
+	if out := r.must("acct-1", noScreen("http://site.test/open")); out["result"] == nil || strings.Contains(fmt.Sprint(out), "pricing_url") {
+		t.Fatalf("a page that answers: %v", out)
 	}
 }

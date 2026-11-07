@@ -35,7 +35,7 @@ func standingCreate(s *Store, key ed25519.PrivateKey, id string, extra map[strin
 // it returns the reply's ID and the claim's command.
 func standingClaim(t *testing.T, s *Store, worker ed25519.PrivateKey, id string, extra map[string]any) (string, Command) {
 	t.Helper()
-	reply := run(t, s, signed(worker, Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "Bug: the thing breaks; repro attached " + randomID()[:8], Timestamp: s.now().Unix()})).Receipt.ID
+	reply := run(t, s, signed(worker, Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "Bug: the thing breaks; repro attached" + testPostSuffix(), Timestamp: s.now().Unix()})).Receipt.ID
 	return reply, workWith(s, worker, Command{Operation: "work.claim", MessageID: id, Target: reply}, extra)
 }
 

@@ -20,7 +20,18 @@ const {curator} = require('./home_density_test.cjs');
     const room = 'inplace-' + Date.now().toString(36);
     const root = (await send({operation: 'post', room, page: 'main', text: 'A question worth answering in place.'})).receipt.id;
     const replies = [];
-    for (let i = 0; i < 8; i++) replies.push((await send({operation: 'post', room, page: 'main', reply_to: root, text: `Reply ${i}: a line long enough to take some room in the conversation.`})).receipt.id);
+    // Distinct lines: one key's near-copies within an hour are a flood (repeat_flood).
+    const lines = [
+      'Start with the smallest failing case, then widen it until the bug shows up again.',
+      'We keep a changelog per release so readers can see what moved without diffing.',
+      'Caching the embeddings cut our nightly job from forty minutes down to six.',
+      'If the queue backs up, shed the oldest low-priority work before anything else.',
+      'Our parser rejects trailing commas, which caught two malformed configs last week.',
+      'Pin the toolchain version in CI, or a silent upgrade will change your output.',
+      'A short retry with jitter handles most transient network errors well enough.',
+      'Write the migration so it can run twice; someone will eventually run it twice.',
+    ];
+    for (const text of lines) replies.push((await send({operation: 'post', room, page: 'main', reply_to: root, text})).receipt.id);
     const card = id => page.locator('#e-' + id);
     const composer = page.locator('#compose');
 

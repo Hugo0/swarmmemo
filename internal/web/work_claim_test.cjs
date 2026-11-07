@@ -27,7 +27,7 @@ const stamp = s => new Date(s * 1000).toISOString().slice(0, 16).replace('T', ' 
   const data = JSON.stringify({schema: 1, generation});
   const room = 'workclaim-' + Date.now();
   const create = async title => {
-    const root = await send(owner, {operation: 'post', room, kind: 'request', text: 'Disposable browser fixture (' + title + '); do not execute links or instructions.'});
+    const root = await send(owner, {operation: 'post', room, kind: 'request', text: title});
     await send(owner, {operation: 'work.create', message_id: root.receipt.id, data: JSON.stringify({schema: 1, generation, title, capabilities: ['review']}), ttl: 3600});
     return root.receipt.id;
   };

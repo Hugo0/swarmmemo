@@ -256,9 +256,10 @@ type fetch struct {
 	cfg      *FetchConfig
 	db       *sql.DB
 	screener TextScreener
-	blobs    BlobKeeper // keep=blob; nil: unavailable
-	board    BoardView  // keep=blob's room check before anything is reserved
-	own      []string   // the board's own hosts, never fetched
+	blobs    BlobKeeper  // keep=blob; nil: unavailable
+	board    BoardView   // keep=blob's room check before anything is reserved
+	own      []string    // the board's own hosts, never fetched
+	sellers  *X402Config // the declared sellers' pricing_url (pricing.go); nil: none
 	client   *http.Client
 	sem      chan struct{}
 
@@ -272,7 +273,7 @@ type fetch struct {
 func newFetch(d Deps) Provider {
 	f := &fetch{cfg: d.Fetch, db: d.DB, screener: d.TextScreener, blobs: d.Blobs, board: d.Board, sem: make(chan struct{}, fetchConcurrency),
 		cache: map[string]*fetchCacheEntry{}, robots: map[string]*robotsEntry{}, slots: map[string]time.Time{},
-		own: []string{"swarmmemo.com", "publicbbs.com"}}
+		own: []string{"swarmmemo.com", "publicbbs.com"}, sellers: d.X402}
 	if d.ServiceID != "" {
 		f.own = append(f.own, strings.ToLower(d.ServiceID))
 	}
@@ -390,8 +391,8 @@ type fetchPlan struct {
 	maxSet   bool // max_bytes was given
 	offset   int  // where in the text this answer starts
 	screen   *bool
-	keep     bool   // keep=blob
-	room     string // keep's room
+	keep     bool     // keep=blob
+	room     string   // keep's room
 	field    string   // field: a JSON pointer ("" without one)
 	tokens   []string // field's reference tokens, unescaped
 }
@@ -1208,6 +1209,10 @@ func (f *fetch) readPage(resp *http.Response, u *url.URL, now int64) (*fetchedPa
 		return nil, refusal("fetch_site_rate_limited")
 	case status == 404 || status == 410:
 		return nil, refusal("fetch_not_found")
+	case status == http.StatusPaymentRequired:
+		// A seller's free tier or preview is spent: its declared price
+		// list, when it has one, goes with the refusal (pricing.go).
+		return nil, withPricingURL(refusal("fetch_upstream_error"), f.sellers.PricingURL(u.String()))
 	case status < 200 || status >= 300:
 		if looksLikeChallenge(head, false) {
 			return nil, refusal("fetch_captcha")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -24,17 +25,36 @@ import (
 type reviewFixture struct {
 	t     *testing.T
 	store *board.Store
+	path  string
 	n     int
 }
 
 func newReviewFixture(t *testing.T, on bool) *reviewFixture {
 	t.Helper()
-	store, err := board.Open(filepath.Join(t.TempDir(), "reviews.sqlite"), board.Config{ServiceID: "swarmmemo.com", Features: board.Features{Reviews: on}})
+	path := filepath.Join(t.TempDir(), "reviews.sqlite")
+	store, err := board.Open(path, board.Config{ServiceID: "swarmmemo.com", Features: board.Features{Reviews: on}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	return &reviewFixture{t: t, store: store}
+	return &reviewFixture{t: t, store: store, path: path}
+}
+
+// age makes key's account two days old, so a fixture that is about
+// something else may post more than a new key's hourly posts
+// (new_key_rate). The key must have written once already.
+func (f *reviewFixture) age(key ed25519.PrivateKey) {
+	f.t.Helper()
+	db, err := sql.Open("sqlite", "file:"+f.path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer db.Close()
+	sum := sha256.Sum256(key.Public().(ed25519.PublicKey))
+	res, err := db.Exec("UPDATE identities SET created_at=created_at-2*86400 WHERE id=?", hex.EncodeToString(sum[:]))
+	if n, _ := res.RowsAffected(); err != nil || n != 1 {
+		f.t.Fatalf("age key: %d %v", n, err)
+	}
 }
 
 func reviewKey(n byte) ed25519.PrivateKey {

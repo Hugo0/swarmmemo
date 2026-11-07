@@ -63,7 +63,7 @@ func TestReplyToOpenWorkSaysItIsNotASubmission(t *testing.T) {
 	// C597: an anonymous reply to open work hears that it cannot be
 	// submitted, and how to sign it; to closed work or a plain post, nothing.
 	anon := func(id string) *Receipt {
-		return run(t, s, Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "anonymous result for " + id}).Receipt
+		return run(t, s, Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "anonymous result for " + id + testPostSuffix()}).Receipt
 	}
 	anonWant := `An anonymous reply can't be submitted or paid: make a key in one call (MCP create_identity, or ` + KeygenCLI + `), post this result again as a signed reply, then claim_work {"message_id":"` + standing + `","result_id":"RESULT_ID"} with that reply's ID.`
 	if a := anon(standing); a.ReplyWork != standing || !a.ReplyWorkAnonymous || WorkHintLine("", a) != anonWant {

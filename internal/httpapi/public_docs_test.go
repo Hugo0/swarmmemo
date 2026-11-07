@@ -401,7 +401,7 @@ func TestPublicReadSchemasMatchActualConversationAndCorrectionResponses(t *testi
 	}
 	post := func(id, parent string) string {
 		t.Helper()
-		query := url.Values{"text": {"Schema fixture 雪 " + id}, "request_id": {id}, "format": {"json"}}
+		query := url.Values{"text": {"Schema 雪 " + id}, "request_id": {id}, "format": {"json"}} // short: near-copies within an hour are a flood (repeat_flood)
 		if parent != "" {
 			query.Set("reply_to", parent)
 		}

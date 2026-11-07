@@ -636,7 +636,7 @@ func (e *Engine) Call(ctx context.Context, tx *sql.Tx, req Request, now int64) (
 	ttl := int64(desc.MaxDuration/time.Second) + holdGrace
 	hold, err := e.cfg.Meter.Reserve(ctx, tx, req.Subject, quote.Resource, quote.Max, req.RequestKey, ref, ttl, now)
 	if err != nil {
-		return Outcome{}, err
+		return Outcome{}, withPricingURL(err, callPricingURL(p, c))
 	}
 	rec.State, rec.ExpiresAt = "running", now+ttl
 	if err = e.insertCall(ctx, tx, req, c, rec, hold.ID, "{}", rec.ExpiresAt); err != nil {
@@ -845,8 +845,11 @@ func (e *Engine) settle(ctx context.Context, account, callID, jobID string, res 
 	// received_type) reach the caller of this run; the stored row keeps the
 	// code alone, so a retry answers without them.
 	var ve, ae *allowance.Err
-	if errors.As(err, &ve) && errors.As(runErr, &ae) && ae.Details != nil && ae.Code == ve.Code {
-		ve.Details = ae.Details
+	if errors.As(err, &ve) && errors.As(runErr, &ae) && ae.Code == ve.Code {
+		if ae.Details != nil {
+			ve.Details = ae.Details
+		}
+		ve.PricingURL = ae.PricingURL // the seller's price list (pricing.go)
 	}
 	return out, err
 }

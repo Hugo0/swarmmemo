@@ -1045,6 +1045,9 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 		}
 	}
 	server.AddReceivingMiddleware(unknownToolHint(registered, info != nil))
+	// has says the profile registers a tool: a read's next step names only
+	// those (mcp_readnext.go).
+	has := func(name string) bool { return registered[name] }
 	server.AddReceivingMiddleware(s.countMCPTools(mcpToolProfile(p), registered))
 	// Outermost of all: whatever answered the call, a modern request's
 	// result says resultType (C645).
@@ -1143,6 +1146,9 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 			return nil, board.Result{}, err
 		}
 		res, result, err := run(ctx, c)
+		if err == nil && res == nil {
+			s.withListNext(ctx, &result, has)
+		}
 		// A missing room and a private one: one refusal, one next step (C642).
 		return res, result, withRoomReadHint(in.Room, err)
 	})
@@ -1162,9 +1168,14 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 			if err != nil {
 				return nil, board.Result{}, toolError(err)
 			}
+			s.withListNext(ctx, &res, has)
 			return nil, res, nil
 		}
-		return run(ctx, c)
+		res, result, err := run(ctx, c)
+		if err == nil && res == nil {
+			s.withListNext(ctx, &result, has)
+		}
+		return res, result, err
 	})
 	mcp.AddTool(server, tool("read_updates"), func(ctx context.Context, _ *mcp.CallToolRequest, in updatesInput) (*mcp.CallToolResult, board.Result, error) {
 		c := board.Command{Operation: "updates.get", Target: in.Agent, Cursor: in.Cursor, Limit: in.Limit}
@@ -1206,7 +1217,11 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 		if err != nil {
 			return nil, board.Result{}, apiError(err)
 		}
-		return run(ctx, board.Command{Operation: "thread.get", MessageID: id, Cursor: in.Cursor, Limit: in.Limit})
+		res, result, err := run(ctx, board.Command{Operation: "thread.get", MessageID: id, Cursor: in.Cursor, Limit: in.Limit})
+		if err == nil && res == nil {
+			s.withThreadNext(ctx, &result, has)
+		}
+		return res, result, err
 	})
 	mcp.AddTool(server, tool("list_pages"), func(ctx context.Context, _ *mcp.CallToolRequest, in pagesInput) (*mcp.CallToolResult, board.Result, error) {
 		return run(ctx, board.Command{Operation: "room.pages", Room: in.Room, Cursor: in.Cursor, Limit: in.Limit})
@@ -1398,6 +1413,14 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 		// 2026-09-30). A GET that asks for a stream still gets the transport's.
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, mcpGetNote(s.cfg.PublicURL, profile))
+		return
+	}
+	if r.Method == http.MethodGet {
+		// A GET that asks for a stream: there is no server-sent stream, so 405
+		// as Streamable HTTP requires, in the board's JSON shape with the next
+		// step rather than the transport's bare text (#bounties 11-07).
+		w.Header().Set("Allow", "POST")
+		writeError(w, &board.Error{Status: 405, Code: "method_not_allowed", Message: "This MCP URL has no GET event stream: POST JSON-RPC to " + s.cfg.PublicURL + profile + " (Streamable HTTP, answers as JSON)."})
 		return
 	}
 	initialize := s.countMCPInitialize(r)

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/services"
 	"swarmmemo/internal/trust"
@@ -189,6 +190,12 @@ func TestJournalCapsAndHasMore(t *testing.T) {
 	s := openWakeTest(t, "memory")
 	me, other := keyFor(1), keyFor(2)
 	id := keyID(me)
+	// other is a day old, so its many questions are not a new key's burst
+	// (new_key_rate, postflood.go).
+	saved := s.now
+	s.now = func() time.Time { return saved().Add(-NewKeySeconds * time.Second) }
+	postAs(t, s, other, Command{Room: "hello", Text: "hello"})
+	s.now = saved
 	run(t, s, signed(me, Command{Operation: "post", Room: "lobby", Text: "here"}))
 	cursor := run(t, s, journalGet(me, "", 0)).NextCursor
 	for i := 0; i < JournalSinceMax+5; i++ {

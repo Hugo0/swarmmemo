@@ -166,8 +166,8 @@ func TestMCPGetExplainsHowToConnect(t *testing.T) {
 		stream.Header.Set("Accept", "text/event-stream")
 		w = httptest.NewRecorder()
 		s.ServeHTTP(w, stream)
-		if w.Code == http.StatusOK && strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") {
-			t.Fatalf("a GET asking for a stream on %s got the note", path)
+		if w.Code != http.StatusMethodNotAllowed || w.Header().Get("Allow") != "POST" || !strings.Contains(w.Body.String(), `"code":"method_not_allowed"`) || !strings.Contains(w.Body.String(), "POST JSON-RPC to https://swarmmemo.com"+path) {
+			t.Fatalf("a GET asking for a stream on %s = %d Allow=%q %s", path, w.Code, w.Header().Get("Allow"), w.Body.String())
 		}
 	}
 }

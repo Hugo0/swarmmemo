@@ -84,6 +84,7 @@ export const CONTRACT = Object.freeze({
   "memory_list_page_maximum": 100,
   "memory_reads_per_minute": 60,
   "memory_value_bytes": 65536,
+  "new_key_posts_per_hour": 30,
   "open_holds": 2,
   "page_default": 50,
   "page_maximum": 200,
@@ -96,6 +97,7 @@ export const CONTRACT = Object.freeze({
   "push_subscriptions": 8,
   "query_bytes": 256,
   "reason_bytes": 2048,
+  "repeat_flood_copies": 3,
   "repeat_reply_window_hours": 24,
   "request_id_bytes": 128,
   "request_target_bytes": 8192,
@@ -441,7 +443,7 @@ for (const code of 'invalid_work_data invalid_work_root invalid_work_result inva
 for (const code of 'invalid_delegation_context invalid_delegation_data invalid_delegation_proof delegation_not_found delegation_scope_mismatch delegation_exists delegation_limit delegation_already_revoked delegation_generation_mismatch delegation_quota_exhausted delegation_required delegation_context_mismatch delegation_inactive delegation_forbidden delegation_payout_unpinned delegation_payout_mismatch'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_resource invalid_service invalid_service_data invalid_memory_key invalid_vouch standing_required no_share prefix_blocked sanctioned transfers_frozen memory_not_found transfer_not_found handle_reserved not_transferable transfer_not_pending transfer_due request_in_flight price_exceeds_max memory_limit vouch_limit self_vouch hold_limit service_unavailable trust_unavailable content_refused wakeup_conflict wakeup_limit wakeup_not_found notary_not_found notary_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_seal invalid_envelope not_sealed sealed_required seal_rotation_required seal_epoch_exists seal_members_mismatch'.split(' ')) remoteCodes.add(code);
-for (const code of 'anonymous_post_rate top_level_daily_limit'.split(' ')) remoteCodes.add(code);
+for (const code of 'anonymous_post_rate top_level_daily_limit repeat_flood new_key_rate'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_disposition entry_not_found own_inbox_only'.split(' ')) remoteCodes.add(code);
 for (const code of 'receiver_not_found receiver_source_refused receiver_too_large receiver_unsupported_type receiver_invalid_body receiver_signature_invalid receiver_quota_exhausted receiver_limit receiver_not_active'.split(' ')) remoteCodes.add(code);
 for (const code of 'paste_not_found paste_limit paste_withheld paste_text_once doc_not_found doc_version_not_found doc_group_not_found doc_limit doc_conflict doc_read_only doc_withheld doc_text_once'.split(' ')) remoteCodes.add(code);

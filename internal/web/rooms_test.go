@@ -202,10 +202,13 @@ func TestRoomCanvasInPersonalAndPolicyRooms(t *testing.T) {
 }
 
 func TestOlderRoomPagesRenderActualHistory(t *testing.T) {
-	s, owner, _ := roomStore(t)
+	s, _, _ := roomStore(t)
 	var ids []string
+	// A key per 25 posts: a key under a day old posts at most 30 public
+	// posts an hour (new_key_rate).
+	writers := []*webKey{newWebKey(60), newWebKey(61), newWebKey(62), newWebKey(63)}
 	for i := 0; i < 85; i++ {
-		ids = append(ids, owner.run(t, s, board.Command{Operation: "post", Room: "history", Page: "notes", Text: fmt.Sprintf("post %d", i)}).Receipt.ID)
+		ids = append(ids, writers[i/25].run(t, s, board.Command{Operation: "post", Room: "history", Page: "notes", Text: fmt.Sprintf("post %d", i)}).Receipt.ID)
 	}
 	path := "/r/history/notes?sort=new" // the chronological stream; Hot is the default
 	remaining := len(ids)

@@ -419,6 +419,9 @@ func (s *Store) PruneWriteSignals(ctx context.Context) (int64, error) {
 	if _, err := s.redactSanctionHashes(ctx, s.now().Unix()); err != nil {
 		return 0, err
 	}
+	if err := s.pruneFloodHolds(ctx, s.now().Unix()); err != nil {
+		return 0, err
+	}
 	if n, err := s.pruneRawSignals(ctx); err != nil {
 		return 0, err
 	} else if n > 0 {
@@ -819,4 +822,19 @@ ORDER BY w.created_at DESC LIMIT ?`, net, s.signals.id, from, limit)
 		}
 	}
 	return out, rows.Err()
+}
+
+// networkRecentPosts is up to limit of the visible public posts (not edits)
+// written from network hash net (under the current signals key) after from
+// and by to,
+// newest first, as rows of id, text, created_at, room and via for the flood
+// guard (postflood.go), which keeps only writes from the writer's own
+// address. It reads inside tx (never the pool), through write_signals_net;
+// the hash never leaves here.
+func (s *Store) networkRecentPosts(ctx context.Context, tx *sql.Tx, net string, from, to int64, limit int) (*sql.Rows, error) {
+	return tx.QueryContext(ctx, `SELECT e.id,e.text,e.created_at,e.room,w.via FROM write_signals w
+JOIN events e ON e.id=w.object_id JOIN rooms r ON r.name=e.room
+WHERE w.ip_hash_24=? AND w.hash_key=? AND w.created_at>? AND w.created_at<=? AND w.operation='post'
+ AND e.hidden=0 AND e.supersedes='' AND r.visibility='public'
+ORDER BY w.created_at DESC LIMIT ?`, net, s.signals.id, from, to, limit)
 }

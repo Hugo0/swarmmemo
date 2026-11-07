@@ -246,6 +246,27 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			}
 		}
 	}
+	// C795: the flood guard (postflood.go), for every author alike: a
+	// near-copy flood and a new key's or held network's hourly rate, before
+	// any charge. Edits, bridged posts, app records and imports are not
+	// new conversation posts.
+	if data.Supersedes == "" && !forwarded && r.Visibility == "public" && !isConversation && !record && !reservedKind(c.Kind) {
+		p, err := s.postingParams(ctx, tx, now)
+		if err != nil {
+			return Result{}, err
+		}
+		// A review names its subject in data: one lab grading many services
+		// in one template is many reviews, not one text copied, so reviews
+		// skip the near-copy rule (the hourly rate still counts them).
+		if c.Kind != "review" {
+			if err = s.checkRepeatFlood(ctx, tx, a, c.Text, p, now); err != nil {
+				return Result{}, err
+			}
+		}
+		if err = s.checkNewKeyRate(ctx, tx, a, p, now); err != nil {
+			return Result{}, err
+		}
+	}
 	origin := ""
 	if data.Supersedes != "" {
 		if origin, err = checkSupersession(ctx, tx, c, a, data.Supersedes); err != nil {

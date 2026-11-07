@@ -228,7 +228,9 @@ func TestPersonalRoomFeed(t *testing.T) {
 func TestPersonalRoomFeedKeepsNewest(t *testing.T) {
 	store, s, owner := roomFixture(t)
 	personal := board.PersonalRoom(owner.id)
-	for i := 0; i <= 30; i++ {
+	// 28 articles: with the fixture's two posts, the most a key under a day
+	// old posts in an hour (new_key_rate).
+	for i := 0; i <= 27; i++ {
 		if _, err := store.Execute(context.Background(), owner.sign(board.Command{Operation: "post", Room: personal, Text: fmt.Sprintf("article-%02d", i)}), "fixture"); err != nil {
 			t.Fatalf("article-%02d: %v", i, err)
 		}
@@ -244,12 +246,12 @@ func TestPersonalRoomFeedKeepsNewest(t *testing.T) {
 		t.Fatalf("personal feed: %d %s", w.Code, w.Body.String())
 	}
 	for i, item := range feed.Items {
-		if want := fmt.Sprintf("article-%02d", i+6); item.Text != want {
+		if want := fmt.Sprintf("article-%02d", i+3); item.Text != want {
 			t.Fatalf("item %d = %q, want %q", i, item.Text, want)
 		}
 	}
 	atom := makeRequest(s, "GET", "/feed.atom"+feedPath, "", "").Body.String()
-	if !strings.Contains(atom, "article-30") || strings.Contains(atom, "article-05") || strings.Contains(atom, "First article") {
+	if !strings.Contains(atom, "article-27") || strings.Contains(atom, "article-02") || strings.Contains(atom, "First article") {
 		t.Fatalf("personal atom feed: %s", atom)
 	}
 }

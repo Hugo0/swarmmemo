@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -47,13 +48,15 @@ func TestSitemapCoversTheWholeBoard(t *testing.T) {
 	}
 	defer store.Close()
 	key := ed25519.NewKeyFromSeed(make([]byte, 32))
+	signer := key
 	n := 0
 	post := func(c board.Command) string {
 		t.Helper()
 		n++
-		c.PublicKey = base64.RawURLEncoding.EncodeToString(key.Public().(ed25519.PublicKey))
+		k := signer
+		c.PublicKey = base64.RawURLEncoding.EncodeToString(k.Public().(ed25519.PublicKey))
 		c.Timestamp, c.Nonce = time.Now().Unix(), "n"+strconv.Itoa(n)
-		c.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, board.Canonical("swarmmemo.com", c)))
+		c.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(k, board.Canonical("swarmmemo.com", c)))
 		res, err := store.Execute(context.Background(), c, "test")
 		if err != nil {
 			t.Fatalf("%s: %v", c.Operation, err)
@@ -65,9 +68,13 @@ func TestSitemapCoversTheWholeBoard(t *testing.T) {
 	}
 	var roots []string
 	for i := 0; i < 130; i++ { // more than the old window of 100 messages
+		// A new key per 24 posts: a key under a day old posts at most 30
+		// public posts an hour (new_key_rate).
+		signer = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{byte(i/12 + 1)}, 32))
 		roots = append(roots, post(board.Command{Operation: "post", Room: "lobby", Text: "root " + strconv.Itoa(i)}))
 		post(board.Command{Operation: "post", Room: "lobby", Text: "reply", ReplyTo: roots[i]})
 	}
+	signer = key
 	article := post(board.Command{Operation: "post", Room: "guides", Text: "# A guide & more\n\nBody.", Data: `{"schema":1,"format":"markdown"}`})
 	hidden := post(board.Command{Operation: "post", Room: "research", Text: "to be hidden"})
 	if err := store.Moderate(context.Background(), hidden, "test", true); err != nil {

@@ -35,11 +35,13 @@ func seededAgentPage(t *testing.T) (*reviewFixture, string) {
 	}
 	f.exec(agent, board.Command{Operation: "agent.profile.publish", Data: `{"schema":1,"description":"Reviews small Go changes and answers questions about SQLite migrations.","capabilities":["go","code-review","sqlite"],"availability":"available"}`})
 	fp := f.exec(agent, board.Command{Operation: "agent.get", Target: "steadyagent"}).Agent.ID
+	f.age(agent) // an established agent: 60 posts are more than a new key's hour
 	var last string
 	for i := range 60 {
 		c := board.Command{Operation: "post", Room: "lobby", Text: fmt.Sprintf("Post %d: checked the migration on a copy of the database, the index rebuild took four seconds and the queries afterwards use it. Next I will look at the vacuum schedule and report back here with numbers.", i)}
+		c.Text = c.Text[:9] + fillerText(len(c.Text)-9) // as long, but its own words: never a near-copy flood (repeat_flood)
 		if i%5 == 0 {
-			c.Kind, c.Text = "markdown", fmt.Sprintf("## Notes %d\n\n- one finding\n- another finding with `code`\n\nSee the thread for detail.", i)
+			c.Kind, c.Text = "markdown", fmt.Sprintf("## Notes %d\n\n- one finding\n- another finding with `code`\n\nSee the thread for detail.", i) + uniqueTail()
 		}
 		if i%7 == 3 {
 			c.ReplyTo = last
@@ -134,10 +136,10 @@ func TestHomePageByteBudget(t *testing.T) {
 	replies := []int{1, 3, 3, 1, 0, 1, 0, 2, 1, 0, 5, 0, 1, 2, 2, 3, 0}
 	text := "Checked the migration on a copy of the database: the index rebuild took four seconds and the queries afterwards use it. The vacuum schedule is next; I will report back here with numbers, and with the one query that still scans the whole table, so anyone running the same schema can compare. Notes and the exact commands are in the thread."
 	for i := range 40 {
-		root := f.exec(keys[i%10], board.Command{Operation: "post", Room: []string{"lobby", "research", "commerce"}[i%3], Text: fmt.Sprintf("Post %d. %s", i, text)}).Receipt.ID
+		root := f.exec(keys[i%10], board.Command{Operation: "post", Room: []string{"lobby", "research", "commerce"}[i%3], Text: fmt.Sprintf("Post %d. ", i) + fillerText(len(text))}).Receipt.ID
 		parent := root
 		for j := range replies[i%len(replies)] {
-			parent = f.exec(keys[(i+j+1)%10], board.Command{Operation: "post", Room: []string{"lobby", "research", "commerce"}[i%3], ReplyTo: parent, Text: fmt.Sprintf("Reply %d to post %d. %s", j, i, text[:200])}).Receipt.ID
+			parent = f.exec(keys[(i+j+1)%10], board.Command{Operation: "post", Room: []string{"lobby", "research", "commerce"}[i%3], ReplyTo: parent, Text: fmt.Sprintf("Reply %d to post %d. ", j, i) + fillerText(200)}).Receipt.ID
 		}
 		if i%2 == 0 {
 			f.exec(keys[(i+5)%10], board.Command{Operation: "vote", MessageID: root, Data: `{"value":1}`})

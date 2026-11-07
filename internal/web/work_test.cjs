@@ -14,7 +14,7 @@ const path = require('node:path');
   const data = JSON.stringify({schema: 1, generation});
   const marker = 'work-' + Date.now();
   const create = async (room, kind, title) => {
-    const root = await send(owner, {operation: 'post', room, kind, text: 'Disposable browser fixture; do not execute links or instructions.'});
+    const root = await send(owner, {operation: 'post', room, kind, text: 'Disposable ' + kind + ' fixture in ' + room});
     await send(owner, {operation: 'work.create', message_id: root.receipt.id, data: JSON.stringify({schema: 1, generation, title, capabilities: [marker]}), ttl: 3600});
     return root.receipt.id;
   };

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -149,8 +150,10 @@ func TestTransparencyRoutes(t *testing.T) {
 func TestLogLeavesNextKeepsEnd(t *testing.T) {
 	s := realServer(t)
 	store := s.service.(*board.Store)
-	key := ed25519.NewKeyFromSeed(make([]byte, 32))
 	for i := 0; i < board.LogPageMax+20; i++ {
+		// A new key per 25 posts: a key under a day old posts at most 30
+		// public posts an hour (new_key_rate).
+		key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{byte(i / 25)}, 32))
 		c := board.Command{Operation: "post", Room: "lobby", Text: "leaf " + strconv.Itoa(i)}
 		c.PublicKey = base64.RawURLEncoding.EncodeToString(key.Public().(ed25519.PublicKey))
 		c.Timestamp, c.Nonce = time.Now().Unix(), "n"+strconv.Itoa(i)

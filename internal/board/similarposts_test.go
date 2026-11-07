@@ -102,7 +102,7 @@ func TestMessagesListMarksSimilarBurst(t *testing.T) {
 	var ids []string
 	for i := range 6 {
 		s.now = func() time.Time { return base.Add(time.Duration(i) * time.Second) }
-		ids = append(ids, postAs(t, s, importer, Command{Room: "lobby", Text: fmt.Sprintf("x402 Trust's public grade for tool %d is A", i), RequestID: fmt.Sprintf("flood-%d", i)}))
+		ids = append(ids, postAs(t, s, importer, Command{Room: "lobby", Text: fmt.Sprintf("x402 Trust's public grade for tool %d is A", i) + testPostSuffix(), RequestID: fmt.Sprintf("flood-%d", i)}))
 	}
 	s.now = func() time.Time { return base.Add(time.Hour) }
 	lone := postAs(t, s, other, Command{Room: "lobby", Text: "x402 Trust's public grade for tool 9 is F", RequestID: "other"})

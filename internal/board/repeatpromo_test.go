@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// floodSpacing spaces one network's near-copies so no hour holds
+// RepeatFloodCopies of them (the flood guard, postflood.go): these tests are
+// about the day-long promotion count.
+const floodSpacing = 31 * time.Minute
+
 func TestRepeatPromotionHeld(t *testing.T) {
 	s := openTest(t, Config{})
 	base := time.Unix(testTime, 0)
@@ -18,7 +23,7 @@ func TestRepeatPromotionHeld(t *testing.T) {
 	asker := keyFor(121)
 	var threads []string
 	for i := range 9 {
-		threads = append(threads, postAs(t, s, asker, Command{Room: "lobby", Text: fmt.Sprintf("Thread %d: what are you building?", i), RequestID: fmt.Sprintf("t%d", i)}))
+		threads = append(threads, postAs(t, s, asker, Command{Room: "lobby", Text: fmt.Sprintf("Thread %d: building what?", i), RequestID: fmt.Sprintf("t%d", i)}))
 	}
 	ctx := WithVia(context.Background(), "command")
 	seq := 0
@@ -26,11 +31,11 @@ func TestRepeatPromotionHeld(t *testing.T) {
 		t.Helper()
 		seq++
 		c := Command{Operation: "post", Room: "lobby", ReplyTo: parent, Text: text, RequestID: fmt.Sprintf("r%d", seq)}
+		s.now = func() time.Time { return base.Add(time.Duration(seq) * floodSpacing) }
 		if key != 0 {
 			c.Timestamp = s.now().Unix()
 			c = signed(keyFor(key), c)
 		}
-		s.now = func() time.Time { return base.Add(time.Duration(seq) * time.Minute) }
 		_, err := s.Execute(ctx, c, source)
 		return err
 	}
@@ -50,7 +55,7 @@ func TestRepeatPromotionHeld(t *testing.T) {
 	if !errors.As(err, &e) || e.Code != "repeat_promotion" || e.Status != 429 {
 		t.Fatalf("sixth thread: want 429 repeat_promotion, got %v", err)
 	}
-	if !strings.Contains(e.Message, "#boards or #commerce") || !strings.Contains(e.Message, "not published") || e.RetryAfter <= 0 || e.NextOpenAt != base.Unix()+60+PromoRepeatWindowSeconds {
+	if !strings.Contains(e.Message, "#boards or #commerce") || !strings.Contains(e.Message, "not published") || e.RetryAfter <= 0 || e.NextOpenAt != base.Add(floodSpacing).Unix()+PromoRepeatWindowSeconds {
 		t.Fatalf("problem: %+v", e)
 	}
 	var n int
@@ -71,7 +76,7 @@ func TestRepeatPromotionHeld(t *testing.T) {
 	}
 	// After the window the network may post it again.
 	s.now = func() time.Time { return base.Add(time.Duration(PromoRepeatWindowSeconds)*time.Second + time.Hour) }
-	seq = int((time.Duration(PromoRepeatWindowSeconds)*time.Second + time.Hour) / time.Minute)
+	seq = int((time.Duration(PromoRepeatWindowSeconds)*time.Second + time.Hour) / floodSpacing)
 	if err = reply(0, "198.51.100.10", threads[7], ad(10)); err != nil {
 		t.Fatalf("after the window: %v", err)
 	}
@@ -88,14 +93,14 @@ func TestRepeatPromotionOneThreadCountsOnce(t *testing.T) {
 	ctx := WithVia(context.Background(), "command")
 	parent := root
 	for i := range 2 * PromoRepeatThreads {
-		s.now = func() time.Time { return base.Add(time.Duration(i+1) * time.Minute) }
+		s.now = func() time.Time { return base.Add(time.Duration(i+1) * floodSpacing) }
 		res, err := s.Execute(ctx, Command{Operation: "post", Room: "lobby", ReplyTo: parent, Text: fmt.Sprintf("Visit https://agenthaven.example/?p=%d for the forum, update %d", i, i), RequestID: fmt.Sprintf("o%d", i)}, "198.51.100.20")
 		if err != nil {
 			t.Fatalf("reply %d in one thread: %v", i, err)
 		}
 		parent = res.Receipt.ID // a chain: every reply has a different parent, one root
 	}
-	s.now = func() time.Time { return base.Add(time.Hour) }
+	s.now = func() time.Time { return base.Add(time.Duration(2*PromoRepeatThreads+1) * floodSpacing) }
 	if _, err := s.Execute(ctx, Command{Operation: "post", Room: "lobby", ReplyTo: other, Text: "Visit https://agenthaven.example/ for the forum, update", RequestID: "o-other"}, "198.51.100.21"); err != nil {
 		t.Fatalf("second thread: %v", err)
 	}
@@ -133,7 +138,7 @@ func TestRepeatPromotionSameHost(t *testing.T) {
 	asker := keyFor(124)
 	var threads []string
 	for i := range 12 {
-		threads = append(threads, postAs(t, s, asker, Command{Room: "lobby", Text: fmt.Sprintf("Thread %d: what are you building?", i), RequestID: fmt.Sprintf("t%d", i)}))
+		threads = append(threads, postAs(t, s, asker, Command{Room: "lobby", Text: fmt.Sprintf("Thread %d: building what?", i), RequestID: fmt.Sprintf("t%d", i)}))
 	}
 	ctx := WithVia(context.Background(), "command")
 	seq := 0
@@ -202,7 +207,7 @@ func TestRepeatPromotionContactBait(t *testing.T) {
 	rooms := []string{"research", "lobby", "research", "lobby", "lobby"}
 	var roots []string
 	for i, room := range rooms {
-		roots = append(roots, postAs(t, s, asker, Command{Room: room, Text: fmt.Sprintf("Thread %d: what are you building?", i), RequestID: fmt.Sprintf("t%d", i)}))
+		roots = append(roots, postAs(t, s, asker, Command{Room: room, Text: fmt.Sprintf("Thread %d: building what?", i), RequestID: fmt.Sprintf("t%d", i)}))
 	}
 	// Thread 0 is a busy one: replies by others two and five deep.
 	deep := []string{roots[0]}
@@ -211,14 +216,14 @@ func TestRepeatPromotionContactBait(t *testing.T) {
 		if i%2 == 1 {
 			who = asker
 		}
-		deep = append(deep, postAs(t, s, who, Command{Room: "research", ReplyTo: deep[len(deep)-1], Text: fmt.Sprintf("Deeper %d: we use SQLite.", i), RequestID: fmt.Sprintf("d%d", i)}))
+		deep = append(deep, postAs(t, s, who, Command{Room: "research", ReplyTo: deep[len(deep)-1], Text: fmt.Sprintf("Deeper %d: SQLite.", i), RequestID: fmt.Sprintf("d%d", i)}))
 	}
 	// In order: thread 0, 1, 0 (5 deep), 2, 3, 0 (2 deep), 4.
 	parents := []string{roots[0], roots[1], deep[5], roots[2], roots[3], deep[2], roots[4]}
 	ctx := WithVia(context.Background(), "post")
 	const bait = "I have a question, can you contact me at someone@m.spheremail.net ? Cheers!"
 	for i, parent := range parents {
-		s.now = func() time.Time { return base.Add(time.Duration(i+1) * time.Minute) }
+		s.now = func() time.Time { return base.Add(time.Duration(i+1) * floodSpacing) }
 		room := "research"
 		if parent == roots[1] || parent == roots[3] || parent == roots[4] {
 			room = "lobby"
@@ -247,7 +252,9 @@ func TestRepeatPromotionContactBait(t *testing.T) {
 		"One more thing, ping zed@m.spheremail.net please",
 	}
 	for i, text := range reworded {
-		s.now = func() time.Time { return base.Add(time.Hour + time.Duration(i)*time.Minute) }
+		s.now = func() time.Time {
+			return base.Add(time.Duration(len(parents)+1)*floodSpacing + time.Duration(i)*time.Minute)
+		}
 		room := "lobby"
 		if i == 0 || i == 2 {
 			room = "research"
@@ -274,7 +281,7 @@ func TestRepeatPromotionOwnSiteOneThread(t *testing.T) {
 	root := postAs(t, s, asker, Command{Room: "lobby", Text: "Show us your projects", RequestID: "root"})
 	var answers []string
 	for i := range 8 {
-		answers = append(answers, postAs(t, s, asker, Command{Room: "lobby", ReplyTo: root, Text: fmt.Sprintf("Question %d about your project?", i), RequestID: fmt.Sprintf("q%d", i)}))
+		answers = append(answers, postAs(t, s, asker, Command{Room: "lobby", ReplyTo: root, Text: fmt.Sprintf("Question %d: yours?", i), RequestID: fmt.Sprintf("q%d", i)}))
 	}
 	other := postAs(t, s, asker, Command{Room: "lobby", Text: "Another thread", RequestID: "other"})
 	ctx := WithVia(context.Background(), "post")

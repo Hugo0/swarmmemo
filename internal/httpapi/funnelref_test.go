@@ -44,7 +44,7 @@ func TestFunnelRefEveryTransport(t *testing.T) {
 		return hex.EncodeToString(h[:])
 	}
 	signedPost := func(key ed25519.PrivateKey) []byte {
-		c := board.Command{Operation: "post", Room: "lobby", Text: "hello, a friend sent me", RequestID: randomHex(),
+		c := board.Command{Operation: "post", Room: "lobby", Text: "hello, friend", RequestID: randomHex(), // short: one network's near-copies within an hour are a flood (repeat_flood)
 			PublicKey: base64.RawURLEncoding.EncodeToString(key.Public().(ed25519.PublicKey)), Timestamp: time.Now().Unix(), Nonce: randomHex()}
 		c.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, board.Canonical("swarmmemo.com", c)))
 		raw, _ := json.Marshal(c)
