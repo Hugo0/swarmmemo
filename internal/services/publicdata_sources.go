@@ -557,6 +557,11 @@ var dsSeaIce = &pdDataset{
 			if idx >= len(s.D) || s.D[idx] != date {
 				idx = -1
 			}
+			// as_of is the headline's day, not the window's newest.
+			r.asOf = ""
+			if idx >= 0 {
+				r.asOf = s.D[idx]
+			}
 		}
 		if idx < 0 {
 			if date != "" {
@@ -791,8 +796,18 @@ var dsRecalls = &pdDataset{
 				all = append(all, row)
 			}
 		}
-		if raw, err := r.fetch(ctx, pdFetch{Key: "fda:" + strings.ToLower(firm), TTL: time.Hour, Host: fdaHost, Path: "/food/enforcement.json",
-			Query: url.Values{"search": {`recalling_firm:"` + firm + `"`}, "limit": {strconv.Itoa(fdaLimit)}}, NotFound404: true, MaxBytes: 2 << 20, Parse: parseFDA}); err != nil {
+		// openFDA answers fdaLimit rows of a firm's history: the status goes
+		// into the search and the newest come first, so an active recall is
+		// never cut off behind older closed ones (agent 97d8ce0a).
+		search := `recalling_firm:"` + firm + `"`
+		switch status {
+		case "active":
+			search += ` AND status:"Ongoing"`
+		case "closed":
+			search += ` AND (status:"Completed" OR status:"Terminated")`
+		}
+		if raw, err := r.fetch(ctx, pdFetch{Key: "fda:" + status + ":" + strings.ToLower(firm), TTL: time.Hour, Host: fdaHost, Path: "/food/enforcement.json",
+			Query: url.Values{"search": {search}, "sort": {"recall_initiation_date:desc"}, "limit": {strconv.Itoa(fdaLimit)}}, NotFound404: true, MaxBytes: 2 << 20, Parse: parseFDA}); err != nil {
 			out.SourcesFailed = append(out.SourcesFailed, "openFDA")
 			notes = append(notes, "openFDA food-enforcement query failed.")
 		} else {

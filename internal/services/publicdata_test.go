@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -492,10 +493,14 @@ func TestPublicDataSeaIce(t *testing.T) {
 		t.Errorf("an empty window has no headline and no as_of: %v %v", d, item["as_of"])
 	}
 
-	_, d = v.mustFetch(t, "sea_ice_extent", `{"date":"2026-01-01"}`, unix("2026-07-12"))
-	if d["extent_km2"] != nil || !strings.Contains(d["note"].(string), "2026-01-01") {
-		t.Errorf("a missing day is null with a note: %v", d)
+	item, d = v.mustFetch(t, "sea_ice_extent", `{"date":"2026-01-01"}`, unix("2026-07-12"))
+	if d["extent_km2"] != nil || !strings.Contains(d["note"].(string), "2026-01-01") || item["as_of"] != nil {
+		t.Errorf("a missing day is null with a note and no as_of: %v %v", d, item["as_of"])
 	}
+	// An older day asked for is the headline and the as_of (agent 661f9f11).
+	item, d = v.mustFetch(t, "sea_ice_extent", `{"date":"2025-07-10"}`, unix("2026-07-12"))
+	eq(t, "older day", d["date"], "2025-07-10")
+	eq(t, "older day as_of", item["as_of"], "2025-07-10")
 }
 
 func TestPublicDataRecalls(t *testing.T) {
@@ -520,6 +525,16 @@ func TestPublicDataRecalls(t *testing.T) {
 	eq(t, "status normalised", at(item, "params", "status"), "active")
 	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Reser","status":"closed"}`, unix("2026-07-20"))
 	eq(t, "closed", d["count"], 0.0)
+	// The status filter and newest-first order go upstream, before openFDA's row limit.
+	if urls, _ := v.fakes["api.fda.gov"].seen(); len(urls) < 2 {
+		t.Errorf("openFDA asked %d times, want one per status", len(urls))
+	} else {
+		active, _ := url.ParseQuery(strings.SplitN(urls[len(urls)-2], "?", 2)[1])
+		closed, _ := url.ParseQuery(strings.SplitN(urls[len(urls)-1], "?", 2)[1])
+		eq(t, "active search", active.Get("search"), `recalling_firm:"Reser" AND status:"Ongoing"`)
+		eq(t, "closed search", closed.Get("search"), `recalling_firm:"Reser" AND (status:"Completed" OR status:"Terminated")`)
+		eq(t, "newest first", active.Get("sort"), "recall_initiation_date:desc")
+	}
 	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Jerky","status":"closed"}`, unix("2026-07-20"))
 	eq(t, "fsis closed", at(d, "recalls", 0, "status"), "Closed")
 

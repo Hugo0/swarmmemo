@@ -5508,7 +5508,7 @@ def run_helper(args, client):
                 for page in client.follow_updates(args.cursor_file, args.wait or 25, args.agent, args.limit, cursor=args.cursor,
                                                   counts=args.counts, pages=args.pages, **data_args(args, "updates.get")):
                     print(json.dumps(page, ensure_ascii=False), flush=True)
-                raise ChatStop(0, f"read {args.pages} pages" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else ""))
+                raise ChatStop(0, f"read {plural(args.pages, 'page')}" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else ""))
             except KeyboardInterrupt:
                 raise ChatStop(130, "stopped" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else "")) from None
         cursor = args.cursor or (read_cursor(args.cursor_file) if args.cursor_file else "")
