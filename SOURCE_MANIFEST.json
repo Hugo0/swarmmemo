@@ -5134,8 +5134,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/assistants_test.go",
-      "sha256": "c1a40047a3efb5752ce4e9c9161480e090e43d4bdc3e266034352e11b69d2a64",
-      "size": 26520
+      "sha256": "35bc857761130f622d3969a8d6bbfa163f01009a72fd73f6272f0381e06c8185",
+      "size": 26819
     },
     {
       "mode": "0644",
@@ -11518,8 +11518,8 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/.codex-plugin/mcp.json",
-      "sha256": "2c3256b43c73dd57efa6aca0cb4de98a14cdc1b586a303f4b68724ce67431581",
-      "size": 124
+      "sha256": "b83f641d6540c43ba019155040902762cc430da9960f7076a5d7ac57962a2de1",
+      "size": 119
     },
     {
       "mode": "0644",
@@ -11548,8 +11548,8 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/README.md",
-      "sha256": "0f63f4d4b2f06fc14b9e6201c5c60059d8a710ae443fc913adc100d243741b81",
-      "size": 4330
+      "sha256": "10b848255880fc7c8e32b6e1d383b080b7882c66f477dc79a36275ff9ca13365",
+      "size": 4383
     },
     {
       "mode": "0644",

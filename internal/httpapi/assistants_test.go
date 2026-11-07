@@ -294,7 +294,8 @@ func TestPluginPackage(t *testing.T) {
 	// Codex reads extensions.com.openai in plugin.json; .codex-plugin is its
 	// fallback, and the one awesome-codex-plugins mirrors (with the files its
 	// skills, mcpServers and interface fields name, LICENSE, SECURITY.md and
-	// .codexignore). Same metadata and listing, same server, no hooks.
+	// .codexignore). Same metadata and listing, no hooks; its server is the
+	// directory profile (below).
 	var codex struct {
 		Name, Version, Description string
 		License, Repository        string
@@ -307,7 +308,10 @@ func TestPluginPackage(t *testing.T) {
 	if codex.Name != portable.Name || codex.Version != claude.Version || codex.Description != claude.Description || codex.License != "Apache-2.0" || codex.Repository != "https://github.com/Hugo0/swarmmemo" || codex.Skills != "./skills/" {
 		t.Errorf(".codex-plugin/plugin.json disagrees with the other manifests: %+v", codex)
 	}
-	if got := codexMCP.MCPServers["swarmmemo"]; len(codexMCP.MCPServers) != 1 || got.URL != url || got.Type != "http" {
+	// The OpenAI app directory reads this manifest, and its app is registered on
+	// the directory profile /mcp/core; an upload with another URL is refused
+	// ("Changing the MCP URL of an existing app is not supported", 11-07).
+	if got := codexMCP.MCPServers["swarmmemo"]; len(codexMCP.MCPServers) != 1 || got.URL != "https://swarmmemo.com"+web.CoreMCPPath || got.Type != "http" {
 		t.Errorf("%s: %+v", codex.MCPServers, codexMCP.MCPServers)
 	}
 	var portableInterface struct {
