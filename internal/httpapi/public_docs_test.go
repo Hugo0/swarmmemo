@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 
 	publicdocs "swarmmemo/docs"
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/proofs"
 	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
 )
@@ -160,6 +162,43 @@ const llmsLeanBytes = 8_950
 // run 50-180 lines).
 const llmsLeanLines = 160
 
+// signInCatalog is the test catalogue with a board's hosted identities,
+// OAuth and login providers beside it: the prod shape for /llms.txt.
+type signInCatalog struct {
+	noKeyCatalog
+	hostedStore
+	oauthStore
+	loginFlows
+}
+
+// oauthLLMSServer serves the catalogue for f with OAuth sign-in and every
+// login provider set up, as prod does.
+func oauthLLMSServer(t *testing.T, f board.Features) *Server {
+	t.Helper()
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	kek := filepath.Join(t.TempDir(), "hosted-kek")
+	if err := os.WriteFile(kek, []byte(base64.RawURLEncoding.EncodeToString(key)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	creds := map[string]proofs.OAuthCredentials{}
+	for _, kind := range proofs.LoginKinds {
+		creds[kind] = proofs.OAuthCredentials{ClientID: kind + "id", ClientSecret: kind + "secret"}
+	}
+	store, err := board.Open(filepath.Join(t.TempDir(), "board.sqlite"), board.Config{ServiceID: "swarmmemo.com", HostedKEKFile: kek,
+		Proofs: proofs.New(proofs.Config{OAuth: creds}), PublicURL: "https://swarmmemo.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	svc := signInCatalog{noKeyCatalog{&catalogService{features: f}}, store, store, store}
+	s := New(svc, web.Handler(svc), Config{Features: f, PublicURL: "https://swarmmemo.com"})
+	if len(s.loginProviders()) != len(proofs.LoginKinds) {
+		t.Fatalf("login providers set up: %v", s.loginProviders())
+	}
+	return s
+}
+
 // /llms.txt is lean and links out; every per-tool and per-method detail is
 // in /llms-full.txt, which starts with it.
 func TestLLMSTxtLeadsWithFirstCallsAndStaysLean(t *testing.T) {
@@ -173,6 +212,26 @@ func TestLLMSTxtLeadsWithFirstCallsAndStaysLean(t *testing.T) {
 	}
 	if !strings.HasPrefix(full, llms) {
 		t.Error("/llms-full.txt does not start with /llms.txt")
+	}
+	// Prod offers OAuth sign-in with X, Google and GitHub; the budget holds
+	// with it on, the providers' detail in /llms-full.txt only (C811).
+	signIn := oauthLLMSServer(t, f)
+	llmsIn := makeRequest(signIn, "GET", "/llms.txt", "", "").Body.String()
+	fullIn := makeRequest(signIn, "GET", "/llms-full.txt", "", "").Body.String()
+	t.Logf("/llms.txt: %d bytes, %d with sign-in on", len(llms), len(llmsIn))
+	if len(llmsIn) > llmsLeanBytes || strings.Count(llmsIn, "\n") > llmsLeanLines {
+		t.Errorf("/llms.txt with sign-in on is %d bytes and %d lines, over its %d/%d budget: move detail to /llms-full.txt", len(llmsIn), strings.Count(llmsIn, "\n"), llmsLeanBytes, llmsLeanLines)
+	}
+	if !strings.HasPrefix(fullIn, llmsIn) || !strings.Contains(llmsIn, "\n"+llmsSignInPointer+"\n") {
+		t.Error("/llms.txt with sign-in on lacks the sign-in pointer, or /llms-full.txt does not start with it")
+	}
+	for _, want := range []string{"\n## Sign in\n", web.ConnectRuleSignIn, "sign in with X, Google, GitHub at https://swarmmemo.com/login"} {
+		if strings.Contains(llmsIn, want) || !strings.Contains(fullIn, want) {
+			t.Errorf("%q belongs in /llms-full.txt only", want)
+		}
+	}
+	if strings.Contains(llms, llmsSignInPointer) || strings.Contains(full, "\n## Sign in\n") {
+		t.Error("a server without sign-in points to it")
 	}
 	for _, c := range web.CanDoLines(f, services.Catalog(f.Services)) {
 		if !strings.Contains(llms, "- "+c.Name+": "+c.Line+" https://swarmmemo.com"+c.Link+"\n") {

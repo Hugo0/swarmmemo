@@ -902,7 +902,7 @@ type workRoot struct{ Room, Account, Author, Kind, Parent, PublicKey, Signature 
 func visibleWorkRoot(ctx context.Context, tx *sql.Tx, id string, a actor) (workRoot, error) {
 	var root workRoot
 	if !workIDRE.MatchString(id) {
-		return root, problem(400, "invalid_message_id", "A message ID is 32 lowercase hexadecimal characters; the reads GET /api/work/ID and MCP read_work also take a unique prefix of at least 8 hex characters.")
+		return root, problem(400, "invalid_message_id", "A message ID is 32 lowercase hexadecimal characters, or a unique prefix of at least 8 of them for a public work read.")
 	}
 	err := tx.QueryRowContext(ctx, `SELECT room,account,author,kind,reply_to,public_key,signature FROM events WHERE id=? AND hidden=0`, id).Scan(&root.Room, &root.Account, &root.Author, &root.Kind, &root.Parent, &root.PublicKey, &root.Signature)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -931,6 +931,47 @@ func workNotFound() error { return problem(404, "not_found", "Work not found.") 
 // and room. Anything else is returned unchanged and is then read or refused
 // as itself: a hidden version, a message with work of its own, or one that is
 // no version at all. Two indexed point reads.
+// workIDFromPrefix is the full ID a signed work read's unique prefix names
+// (8-31 hex, as listings and agents quote it; C813), resolved over public
+// posts exactly as the GET /api/work/ID read resolves one, or "" when id is
+// no prefix. No match is not_found; several are ambiguous_id naming them.
+func workIDFromPrefix(ctx context.Context, tx *sql.Tx, id string) (string, error) {
+	if !IDPrefixRE.MatchString(id) || len(id) < IDPrefixMin {
+		return "", nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e JOIN rooms r ON r.name=e.room
+ WHERE e.id>=? AND e.id<? AND r.visibility='public' AND e.hidden=0 ORDER BY e.id LIMIT ?`, id, id+"g", IDPrefixCandidates+1)
+	if err != nil {
+		return "", workReadError(err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var full string
+		if err := rows.Scan(&full); err != nil {
+			return "", workReadError(err)
+		}
+		ids = append(ids, full)
+	}
+	if err := rows.Err(); err != nil {
+		return "", workReadError(err)
+	}
+	switch {
+	case len(ids) == 0:
+		return "", &Error{Status: 404, Code: "not_found", Message: "No public message ID starts with " + id + "."}
+	case len(ids) > 1:
+		shown := ids[:min(len(ids), IDPrefixCandidates)]
+		more := len(ids) > IDPrefixCandidates
+		message := "Several public messages have IDs starting with " + id + ": " + strings.Join(shown, ", ")
+		if more {
+			message += " and more"
+		}
+		return "", &Error{Status: 409, Code: "ambiguous_id", Message: message + ". Use more characters or the full 32-character ID.",
+			Details: map[string]any{"prefix": id, "candidates": shown, "more": more}}
+	}
+	return ids[0], nil
+}
+
 func resolveWorkID(ctx context.Context, tx *sql.Tx, id string) (string, error) {
 	if !workIDRE.MatchString(id) {
 		return id, nil
@@ -2192,6 +2233,11 @@ func (s *Store) readWorkIn(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	if c.Operation != "works.list" {
 		named := c.MessageID
+		if full, err := workIDFromPrefix(ctx, tx, named); err != nil {
+			return Result{}, err
+		} else if full != "" {
+			c.MessageID, named = full, full
+		}
 		id, err := resolveWorkID(ctx, tx, named)
 		if err != nil {
 			return Result{}, workReadError(err)

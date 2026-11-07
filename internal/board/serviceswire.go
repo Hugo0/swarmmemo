@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"maps"
+	"regexp"
 	"strings"
 	"time"
 
@@ -506,10 +507,35 @@ func (s *Store) logUnsignedCall(ctx context.Context, c Command, a actor, state s
 		if errors.As(err, &be) {
 			code = be.Code
 		}
-		slog.Info("Service call without a key refused", append(attrs, "code", code)...)
+		slog.Info("Service call without a key refused", append(attrs, "code", code, "reason", refusalShape(err))...)
 		return
 	}
 	slog.Info("Service call without a key", append(attrs, "state", state)...)
+}
+
+var (
+	quotedValue = regexp.MustCompile("\"[^\"]*\"|`[^`]*`|'[^']*'")
+	bareAddress = regexp.MustCompile(`\S*(://|@)\S*`)
+)
+
+// refusalShape is a refusal's first clause with every quoted value blanked
+// ("Dataset \"_\" is not in the catalogue"), so the daily review can see which
+// mistake keyless callers make without logging what they sent.
+func refusalShape(err error) string {
+	m := err.Error()
+	var be *Error
+	if errors.As(err, &be) {
+		m = be.Message
+	}
+	m = bareAddress.ReplaceAllString(quotedValue.ReplaceAllString(m, `"_"`), "_")
+	if i := strings.IndexAny(m, ":;("); i >= 0 {
+		m = m[:i]
+	}
+	m = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(m), "."))
+	if len(m) > 80 {
+		m = m[:80]
+	}
+	return m
 }
 
 // noKey is services.list's without_key: what an agent without a key can

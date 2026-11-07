@@ -218,8 +218,11 @@ func TestOAuthMetadata(t *testing.T) {
 		a2a["security"] != nil || a2a["securityRequirements"] != nil {
 		t.Fatalf("A2A card security: %v %v", a2a["securitySchemes"], a2a["security"])
 	}
-	if llms := oauthDo(s, "GET", "/llms.txt", "", "", nil).Body.String(); !strings.Contains(llms, "/protocol.md#signing-in-with-oauth") {
-		t.Fatal("llms.txt does not mention sign-in")
+	if llms := oauthDo(s, "GET", "/llms.txt", "", "", nil).Body.String(); !strings.Contains(llms, llmsSignInPointer) {
+		t.Fatal("llms.txt does not point to sign-in")
+	}
+	if full := oauthDo(s, "GET", "/llms-full.txt", "", "", nil).Body.String(); !strings.Contains(full, "/protocol.md#signing-in-with-oauth") {
+		t.Fatal("llms-full.txt does not say how to sign in")
 	}
 	initialized := mcpRequest(t, s, web.AssistantMCPPath, "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`)
 	if !strings.Contains(fmt.Sprint(dig(initialized, "result", "instructions")), "do not call create_identity") {
@@ -774,8 +777,11 @@ func TestOAuthFullMCPEndToEnd(t *testing.T) {
 		fmt.Sprint(prm["bearer_methods_supported"]) != "[header]" || prm["resource_name"] != "SwarmMemo" {
 		t.Fatalf("/mcp resource metadata: %d %s", w.Code, w.Body.String())
 	}
-	if llms := oauthDo(s, "GET", "/llms.txt", "", "", nil).Body.String(); !strings.Contains(llms, web.ConnectRuleSignIn+" How: https://swarmmemo.com/protocol.md#signing-in-with-oauth") {
-		t.Fatal("llms.txt lacks the sign-in line of the connect rule")
+	if llms := oauthDo(s, "GET", "/llms.txt", "", "", nil).Body.String(); !strings.Contains(llms, "\n"+llmsSignInPointer+"\n") {
+		t.Fatal("llms.txt lacks the sign-in pointer")
+	}
+	if full := oauthDo(s, "GET", "/llms-full.txt", "", "", nil).Body.String(); !strings.Contains(full, web.ConnectRuleSignIn+" How: https://swarmmemo.com/protocol.md#signing-in-with-oauth") {
+		t.Fatal("llms-full.txt lacks the sign-in line of the connect rule")
 	}
 	var card map[string]any
 	_ = json.Unmarshal(oauthDo(s, "GET", "/.well-known/mcp/server-card.json", "", "", nil).Body.Bytes(), &card)
