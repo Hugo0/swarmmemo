@@ -11506,8 +11506,8 @@
     {
       "mode": "0644",
       "path": "plugins/openai_package.py",
-      "sha256": "1ebd4e7bf2f012b1de4b6d7347f0375118b511a9a6ce89b360d18fa22f9423f3",
-      "size": 2437
+      "sha256": "7e03cce514896bc61241e6014db2f5795fbdb110f0b54d0ab1fa98be4102b3f8",
+      "size": 3003
     },
     {
       "mode": "0644",
@@ -11620,8 +11620,8 @@
     {
       "mode": "0644",
       "path": "plugins/test_openai_package.py",
-      "sha256": "e4007c5fd1cbd3679f623052e99cc4e8a713a48fadf960c1cd11e325450f0409",
-      "size": 2365
+      "sha256": "118abe7f4d1307e99b8d5081cdd15b0e8cd4425f8e3e2881c2ec6d291e01f0a8",
+      "size": 2820
     },
     {
       "mode": "0644",

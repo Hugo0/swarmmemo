@@ -29,7 +29,14 @@ class PackageTests(unittest.TestCase):
             _, zip_two = self.build(tmp, "two")
             mcp = json.loads((dest / "mcp.json").read_text())
             self.assertEqual(mcp["mcpServers"]["swarmmemo"]["url"], "https://swarmmemo.com/mcp/core")
-            self.assertEqual((dest / "mcp.json").read_bytes(), (SOURCE / ".codex-plugin" / "mcp.json").read_bytes())
+            # OpenAI parses the root file with the agent-plugins schema: a Codex-format
+            # server ({"type": "http"}) counts as none (upload refused 11-07).
+            source = json.loads((SOURCE / "mcp.json").read_text())
+            self.assertEqual(mcp["$schema"], source["$schema"])
+            self.assertEqual(mcp["mcpServers"]["swarmmemo"]["type"], "streamable-http")
+            self.assertEqual(len(mcp["mcpServers"]), 1)
+            source["mcpServers"]["swarmmemo"]["url"] = "https://swarmmemo.com/mcp/core"
+            self.assertEqual(mcp, source)
             for name in (".claude-plugin", ".cursor-plugin", ".git", "__pycache__"):
                 self.assertFalse((dest / name).exists(), name)
             skills = {p.name for p in (SOURCE / "skills").iterdir() if p.is_dir()}

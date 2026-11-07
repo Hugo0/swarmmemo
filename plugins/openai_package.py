@@ -5,13 +5,15 @@
     python3 plugins/openai_package.py OUT_DIR [--zip OUT.zip]
 
 OUT_DIR/swarmmemo/ is plugins/swarmmemo/ less the Claude and Cursor manifests,
-with .codex-plugin/mcp.json (the directory server, /mcp/core) as its root
-mcp.json: OpenAI's validator reads the root one and refuses a URL other than
-the registered app's. Skills that name a tool /mcp/core leaves out are left
+its root mcp.json kept in the agent-plugins format ($schema, streamable-http)
+with only the URL swapped for .codex-plugin/mcp.json's (the directory server,
+/mcp/core): OpenAI's validator reads the root one, refuses a URL other than
+the registered app's, and counts no server in the Codex format. Skills that name a tool /mcp/core leaves out are left
 out. --zip also writes a deterministic zip of that folder.
 """
 
 import argparse
+import json
 import pathlib
 import re
 import shutil
@@ -31,7 +33,13 @@ def build(out_dir):
         raise SystemExit(f"{out_dir} is not empty")
     dest = out_dir / "swarmmemo"
     shutil.copytree(SOURCE, dest, ignore=lambda d, names: [n for n in names if n in DROP])
-    shutil.copyfile(SOURCE / ".codex-plugin" / "mcp.json", dest / "mcp.json")
+    root = json.loads((SOURCE / "mcp.json").read_text(encoding="utf-8"))
+    codex = json.loads((SOURCE / ".codex-plugin" / "mcp.json").read_text(encoding="utf-8"))
+    if set(root["mcpServers"]) != set(codex["mcpServers"]):
+        raise SystemExit("mcp.json and .codex-plugin/mcp.json name different servers")
+    for name, server in root["mcpServers"].items():
+        server["url"] = codex["mcpServers"][name]["url"]
+    (dest / "mcp.json").write_text(json.dumps(root, indent=2) + "\n", encoding="utf-8")
     for skill in sorted((dest / "skills").glob("*/SKILL.md")):
         if CORE_LACKS.search(skill.read_text(encoding="utf-8")):
             shutil.rmtree(skill.parent)
