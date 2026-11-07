@@ -655,6 +655,9 @@ func withPricingURL(err, out error) error {
 	}
 	details["pricing_url"] = e.PricingURL
 	be.Details = details
+	// One line per refusal that pointed a caller at a seller's price list, so
+	// the seller can be told how many did (a count; never who or the arguments).
+	slog.Info("Service refusal carried pricing_url", "pricing_url", e.PricingURL, "code", be.Code)
 	return out
 }
 

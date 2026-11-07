@@ -188,15 +188,16 @@ func TestWorkSilentReviewerDeadlineStillLapses(t *testing.T) {
 	// A deadline 4 days out: the fallback opens after 3, then the deadline lapses it.
 	id := rewardRequest(t, s, owner, "lobby")
 	run(t, s, reviewedCreate(s, owner, id, map[string]any{"reward": 300, "reviewer": reviewer, "reviewer_fee": 20}, 4*86400))
-	// A deadline under 3 days away: the requester never gains the verdict.
+	// A deadline within the reviewer's 12-hour reserve: the requester never
+	// gains the verdict.
 	short := rewardRequest(t, s, owner, "lobby")
-	run(t, s, reviewedCreate(s, owner, short, map[string]any{"reward": 100, "reviewer": reviewer}, 2*86400))
+	run(t, s, reviewedCreate(s, owner, short, map[string]any{"reward": 100, "reviewer": reviewer}, ReviewerFallbackReserve))
 	fence := claimAndSubmit(t, s, worker, id, "lobby")
 	shortFence := claimAndSubmit(t, s, worker, short, "lobby")
 	if w := getTestWork(t, s, short); w.State != "submitted" || w.RequesterMayDecideAt != 0 {
 		t.Fatalf("short work: %s requester_may_decide_at %d", w.State, w.RequesterMayDecideAt)
 	}
-	atTime(s, start+2*86400-60)
+	atTime(s, start+ReviewerFallbackReserve-60)
 	msg := failsWith(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: short, Amount: shortFence}), "not_the_reviewer")
 	if strings.Contains(msg, "silent") {
 		t.Fatalf("a deadline inside the window still offers the fallback: %s", msg)
@@ -236,5 +237,62 @@ func TestWorkCreateWrongKindSaysWhich(t *testing.T) {
 	}
 	if want := "work.create needs a signed root post of kind request; this post is an offer. Post the task again with kind request (CLI: post --kind request)."; e.Message != want {
 		t.Fatalf("message %q", e.Message)
+	}
+}
+
+// A deadline under the grace after the submit (C810, seen live 11-07): the
+// requester may decide in a silent reviewer's place 12 hours before the
+// deadline, so the result does not lapse unjudged.
+func TestWorkSilentReviewerNearDeadline(t *testing.T) {
+	s := rewardStore(t)
+	owner, worker, judge := keyFor(244), keyFor(245), keyFor(246)
+	requester, payee, reviewer := keyID(owner), keyID(worker), keyID(judge)
+	register(t, s, judge)
+	mintCredit(t, s, requester, allowance.Paid, 1000)
+	start := s.now().Unix()
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, reviewedCreate(s, owner, id, map[string]any{"reward": 300, "reviewer": reviewer, "reviewer_fee": 20}, 2*86400))
+	fence := claimAndSubmit(t, s, worker, id, "lobby")
+	submitted := s.now().Unix()
+	w := getTestWork(t, s, id)
+	at := w.Deadline - ReviewerFallbackReserve
+	if w.Deadline != start+2*86400 || at <= submitted+ReviewerFallbackReserve || at >= submitted+ReviewerGraceDefault {
+		t.Fatalf("setup: submitted %d deadline %d", submitted, w.Deadline)
+	}
+	if w.RequesterMayDecideAt != at {
+		t.Fatalf("requester_may_decide_at %d, want %d", w.RequesterMayDecideAt, at)
+	}
+	atTime(s, at-1)
+	msg := failsWith(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: id, Amount: fence}), "not_the_reviewer")
+	if !strings.Contains(msg, time.Unix(at, 0).UTC().Format(time.RFC3339)) {
+		t.Fatalf("the refusal does not say when: %s", msg)
+	}
+	atTime(s, at)
+	b, _, _ := journalOf(t, run(t, s, signed(owner, Command{Operation: "journal.get", Timestamp: s.now().Unix()})))
+	if items := path(t, b, "open_work", "work", "items").([]any); len(items) != 1 || !strings.Contains(path(t, items[0], "next").(string), "silent") {
+		t.Fatalf("requester's open_work: %v", items)
+	}
+	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: id, Amount: fence}))
+	w = getTestWork(t, s, id)
+	if w.State != "accepted" || creditIn(t, s, payee, "remaining") != 300 || w.ReviewerFee.Reason != WorkFallbackReviewerSilent {
+		t.Fatalf("after the fallback: %s fee %+v", w.State, w.ReviewerFee)
+	}
+	if err := s.Integrity(testContext); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReviewerFallbackAt(t *testing.T) {
+	const h = int64(3600)
+	for _, c := range []struct{ submit, deadline, grace, want int64 }{
+		{0, 96 * h, 72 * h, 72 * h}, // plenty of room: the grace
+		{0, 48 * h, 72 * h, 36 * h}, // the last 12 hours go to the requester
+		{0, 20 * h, 72 * h, 12 * h}, // the reviewer keeps at least 12 hours
+		{0, 12 * h, 72 * h, 0},      // no room before the deadline
+		{0, 48 * h, h, h},           // a short grace still wins
+	} {
+		if got := reviewerFallbackAt(c.submit, c.deadline, c.grace); got != c.want {
+			t.Fatalf("%+v: got %d", c, got)
+		}
 	}
 }

@@ -284,6 +284,7 @@ func withJobs(path string, src []byte) []byte {
 				all = append(all, j)
 			}
 		}
+		src = bytes.Replace(src, []byte(firstStepMarker+"\n"), []byte(FirstStep("https://swarmmemo.com")), 1)
 		return bytes.Replace(src, []byte(jobLinksMarker+"\n"), []byte(jobLinks(all)), 1)
 	}
 	if more := JobsFor(path); len(more) > 0 {

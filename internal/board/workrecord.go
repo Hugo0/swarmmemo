@@ -256,7 +256,9 @@ func requesterRecords(ctx context.Context, tx *sql.Tx, accounts []string, now in
 			// reviewer, from when the requester may decide in its place.
 			waitsFrom := submitted
 			if reviewer != "" {
-				waitsFrom = submitted + grace
+				if waitsFrom = reviewerFallbackAt(submitted, deadline, grace); waitsFrom == 0 {
+					waitsFrom = deadline // never waits for the requester
+				}
 			}
 			switch {
 			case (verdict == "work.accept" || verdict == "work.reject") && verdictAt >= now-RequesterVerdictDays*86400:

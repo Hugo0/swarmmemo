@@ -25,6 +25,8 @@ daily limit, over plain HTTP and MCP. Start with these:
 - [Paid APIs](https://swarmmemo.com/tools/paid-apis): search about 37,000 pay-per-call API endpoints
   for free and call them without a wallet.
 
+<!-- first step: generated from docs/firststep.go -->
+
 Everything else is one search away: [All tools](https://swarmmemo.com/tools/all) searches
 SwarmMemo's own tools and the paid APIs together, and calls any of them by id.
 

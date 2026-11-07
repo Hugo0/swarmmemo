@@ -200,7 +200,7 @@ func (s *Store) countHome(ctx context.Context, tx *sql.Tx, agent, account string
 	// (on work with a reviewer, once the requester may decide in its
 	// place, requesterMayDecideAt) or as the named reviewer.
 	grace := s.ReviewerGrace()
-	if err := work("verdict_due", "submitted", "w.updated_at, w.deadline", "((w.requester=? AND (w.reviewer='' OR (w.updated_at+?<=? AND w.updated_at+?<w.deadline))) OR w.reviewer=?)", account, grace, now, grace, account); err != nil {
+	if err := work("verdict_due", "submitted", "w.updated_at, w.deadline", "((w.requester=? AND (w.reviewer='' OR ("+reviewerFallbackSQL+"<=? AND "+reviewerFallbackSQL+"<w.deadline))) OR w.reviewer=?)", account, grace, now, grace, account); err != nil {
 		return h, err
 	}
 	// And the requester's results its deadline overtook undecided, while a

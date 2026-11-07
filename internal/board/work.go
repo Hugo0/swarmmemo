@@ -95,7 +95,8 @@ type Work struct {
 	RejectFee *WorkRejectFee `json:"reject_fee,omitempty"`
 	// RequesterMayDecideAt is when, on a submitted result its reviewer has
 	// left undecided, the requester may accept or reject in the reviewer's
-	// place: the reviewer grace (REVIEWER_GRACE) after the submit. Set only
+	// place: the reviewer grace (REVIEWER_GRACE) after the submit, shorter
+	// near the deadline (reviewerFallbackAt). Set only
 	// while submitted and only when that comes before the deadline.
 	RequesterMayDecideAt int64 `json:"requester_may_decide_at,omitempty"`
 	// SubmittedAt and VerdictFrom are on a result waiting for a verdict
@@ -303,6 +304,12 @@ type WorkVerdictChecks struct {
 // The reviewer can decide until the requester does.
 const ReviewerGraceDefault int64 = 72 * 3600
 
+// ReviewerFallbackReserve shortens the grace when the deadline is near
+// (C810): a named reviewer always gets at least this long after the submit,
+// and the requester, when there is room, the last this long before the
+// deadline to decide in a silent reviewer's place: 12 hours.
+const ReviewerFallbackReserve int64 = 12 * 3600
+
 // WorkClaimTTLMin and WorkClaimTTLMax bound a claim's (or renewal's) ttl,
 // which must also end before the work's deadline.
 const (
@@ -360,11 +367,30 @@ const (
 // While the stored state is submitted, updated_at is the submit's time:
 // no transition but a verdict changes a submitted work's row.
 func requesterMayDecideAt(w workRow, grace int64) int64 {
-	if w.Reviewer == "" || w.State != "submitted" || w.Updated+grace >= w.Deadline {
+	if w.Reviewer == "" || w.State != "submitted" {
 		return 0
 	}
-	return w.Updated + grace
+	return reviewerFallbackAt(w.Updated, w.Deadline, grace)
 }
+
+// reviewerFallbackAt is when the requester may decide in a silent
+// reviewer's place on a result submitted at submit (C810): the grace after
+// the submit, or earlier when the deadline is near, so the reviewer gets at
+// least ReviewerFallbackReserve and the requester the last
+// ReviewerFallbackReserve before the deadline. 0 when that time is not
+// before the deadline. reviewerFallbackSQL is the same rule in SQL.
+func reviewerFallbackAt(submit, deadline, grace int64) int64 {
+	at := min(submit+grace, max(submit+ReviewerFallbackReserve, deadline-ReviewerFallbackReserve))
+	if at >= deadline {
+		return 0
+	}
+	return at
+}
+
+// reviewerFallbackSQL is reviewerFallbackAt over a work row aliased w with
+// the grace as its one parameter: min(updated_at+?, max(updated_at+R,
+// deadline-R)). The caller still checks that it is before w.deadline.
+var reviewerFallbackSQL = fmt.Sprintf("min(w.updated_at+?, max(w.updated_at+%d, w.deadline-%d))", ReviewerFallbackReserve, ReviewerFallbackReserve)
 
 type workData struct {
 	Schema            int
@@ -1262,7 +1288,7 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 					return Result{}, reviewerError("not_the_reviewer")
 				}
 				if now < at {
-					return Result{}, problem(403, "not_the_reviewer", fmt.Sprintf("This work names a reviewer, who decides first. If it stays silent until %s (%s after the submit), you may accept or reject in its place, before the deadline.", time.Unix(at, 0).UTC().Format(time.RFC3339), reviewerGraceText(grace)))
+					return Result{}, problem(403, "not_the_reviewer", fmt.Sprintf("This work names a reviewer, who decides first. If it stays silent until %s (%s after the submit), you may accept or reject in its place, before the deadline.", time.Unix(at, 0).UTC().Format(time.RFC3339), reviewerGraceText(at-w.Updated)))
 				}
 				fallback, verdict = true, false
 			}

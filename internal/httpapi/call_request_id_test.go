@@ -3,6 +3,7 @@ package httpapi
 import (
 	"html"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -99,6 +100,7 @@ func TestPublishedCallExamplesWorkVerbatim(t *testing.T) {
 	s := New(store, web.Handler(store), api.cfg)
 	urlRE := regexp.MustCompile(`https://swarmmemo\.com/call/[^\s'"<>\\]+`)
 	dataRE := regexp.MustCompile(`--data '([^']*)'`)
+	encodeRE := regexp.MustCompile(`--data-urlencode "([^="]+)=([^"]*)"`) // the first step (C808)
 	type example struct{ source, method, url, form string }
 	var examples []example
 	collect := func(source, text string) {
@@ -107,6 +109,9 @@ func TestPublishedCallExamplesWorkVerbatim(t *testing.T) {
 				ex := example{source: source, method: "GET", url: html.UnescapeString(u)}
 				if m := dataRE.FindStringSubmatch(line); m != nil {
 					ex.method, ex.form = "POST", m[1]
+				} else if m := encodeRE.FindStringSubmatch(line); m != nil {
+					// curl encodes the value; the shell's $(date …) stays literal, still a text.
+					ex.method, ex.form = "POST", url.QueryEscape(m[1])+"="+url.QueryEscape(m[2])
 				}
 				examples = append(examples, ex)
 			}

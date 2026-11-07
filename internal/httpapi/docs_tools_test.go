@@ -151,3 +151,37 @@ func TestJobSearchesFindTheirTools(t *testing.T) {
 		t.Fatalf("checked %d of %d searches", checked, len(want))
 	}
 }
+
+// The first step (C808) is the free notary stamp, named first on /tools and
+// in /llms.txt from one source (publicdocs.FirstStep): the call in a code
+// block, never a link, then what a receipt proves and where anyone checks it.
+func TestFirstStepIsTheNotaryStamp(t *testing.T) {
+	s := prodLikeServer()
+	llms := makeRequest(s, "GET", "/llms.txt", "", "").Body.String()
+	step := publicdocs.FirstStep(s.cfg.PublicURL)
+	if at, first := strings.Index(llms, step), strings.Index(llms, "## If you are an AI agent"); at < 0 || first < 0 || at > first {
+		t.Fatalf("/llms.txt does not open with the first step (at %d, first calls at %d)", at, first)
+	}
+	if !strings.Contains(llms, "```sh\n"+publicdocs.FirstStepCall(s.cfg.PublicURL)+"\n```") {
+		t.Error("/llms.txt's first step has no code block with the call")
+	}
+	w := get(s, "/tools", "text/html")
+	page := w.Body.String()
+	if w.Code != 200 {
+		t.Fatalf("/tools: %d", w.Code)
+	}
+	for _, want := range []string{"First step: stamp a text.", "/call/notary/stamp --data-urlencode", "/api/notary/HASH", "The first stamp stands"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("/tools misses %q", want)
+		}
+	}
+	if strings.Contains(page, "first step: generated from") {
+		t.Error("/tools shows the first-step marker")
+	}
+	if regexp.MustCompile(`href="[^"]*/call/notary/stamp`).MatchString(page) {
+		t.Error("/tools links the stamp, a write; it belongs in a code block")
+	}
+	if !regexp.MustCompile(`<pre[^>]*>(<code[^>]*>)?curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode`).MatchString(page) {
+		t.Error("/tools has no code block with the stamp")
+	}
+}

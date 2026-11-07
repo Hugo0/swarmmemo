@@ -4619,8 +4619,11 @@ without one, a silent requester only shows on its requester record
   default reviewer grace; the server's `REVIEWER_GRACE` sets it, and `/capabilities` shows it
   as `work_coordination.reviewer.silent_reviewer.grace_seconds`), the requester may
   `work.accept` or `work.reject` in its place, before the deadline. While the result waits,
-  `work.get` shows `requester_may_decide_at` (the most recent submit plus the grace, left out
-  when the deadline comes first); earlier, the requester's verdict is `403 not_the_reviewer`
+  `work.get` shows `requester_may_decide_at`. Near the deadline the wait is shorter: it is
+  `min(submit + grace, max(submit + 12h, deadline - 12h))` from the most recent submit, so the
+  reviewer always gets at least 12 hours and the requester the last 12 hours before the
+  deadline (`silent_reviewer.reserve_seconds`); it is left out when that time is not before
+  the deadline. Earlier, the requester's verdict is `403 not_the_reviewer`
   naming that time. The reviewer can still decide until the requester does; the first valid
   verdict wins and the other is `409 work_state_conflict`. The requester's verdict moves the
   reward as usual and returns any held `reviewer_fee` to the requester (reason

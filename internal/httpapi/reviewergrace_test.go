@@ -27,7 +27,7 @@ func TestCapabilitiesShowReviewerGrace(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	g := grace(New(store, nil, Config{}))
-	if g["grace_seconds"] != float64(7200) || g["grace_default_seconds"] != float64(board.ReviewerGraceDefault) || g["history"] == nil {
+	if g["grace_seconds"] != float64(7200) || g["grace_default_seconds"] != float64(board.ReviewerGraceDefault) || g["reserve_seconds"] != float64(board.ReviewerFallbackReserve) || g["history"] == nil {
 		t.Fatalf("configured grace: %v", g)
 	}
 }

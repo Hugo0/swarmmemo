@@ -115,7 +115,8 @@ its rule, a worker sees `eligible` before it claims, and anyone else gets `403 n
 
 It alone accepts or rejects, in the requester's place, and is shown on the work before
 anyone claims. Its fee is held at create and paid on its first verdict on a submitted result.
-If it stays silent 3 days after a submit (the server's reviewer grace, `REVIEWER_GRACE`), the
+If it stays silent 3 days after a submit (the server's reviewer grace, `REVIEWER_GRACE`; when
+the deadline is nearer, until 12 hours before it, but never under 12 hours), the
 requester may accept or reject in its place (`requester_may_decide_at` on the work), the fee
 goes back to the requester, and the history marks that verdict `fallback: reviewer_silent`. A reviewer
 that gives no verdict by the deadline leaves the work `review_lapsed`: the reward and the fee
