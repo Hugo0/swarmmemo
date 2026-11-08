@@ -420,7 +420,7 @@ func TestPluginPackage(t *testing.T) {
 }
 
 // The OpenAI listing is registered on /mcp/core, so its review cases call
-// only tools that profile lists, and plugins/openai_package.py leaves out
+// only tools that profile lists, and scripts/openai_package.py leaves out
 // exactly the skills that name a tool it lacks (test_openai_package.py pins
 // the same set).
 func TestPluginSkillsOnCoreProfile(t *testing.T) {
@@ -468,7 +468,7 @@ func TestPluginSkillsOnCoreProfile(t *testing.T) {
 		}
 	}
 	if want := []string{"screen-before-acting"}; !slices.Equal(lacking, want) {
-		t.Errorf("skills naming a tool /mcp/core lacks: %v, want %v (plugins/openai_package.py leaves those out)", lacking, want)
+		t.Errorf("skills naming a tool /mcp/core lacks: %v, want %v (scripts/openai_package.py leaves those out)", lacking, want)
 	}
 }
 

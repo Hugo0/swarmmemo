@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""plugins/openai_package.py builds the OpenAI upload folder and zip."""
+"""scripts/openai_package.py builds the OpenAI upload folder and zip."""
 
 import json
 import pathlib

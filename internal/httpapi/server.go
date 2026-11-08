@@ -520,6 +520,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		withProblemLog(w, r, "command", s.command) // C757 (problemlog.go)
 		return
 	}
+	if openAIProbePath(r.URL.Path) {
+		writeError(w, errOpenAIProbe)
+		return
+	}
 	if r.URL.Path == a2aPath {
 		s.a2a(w, r) // a2a.go: the A2A JSON-RPC binding (C456)
 		return
@@ -1902,6 +1906,15 @@ func pageLinkQuery(r *http.Request) bool {
 	q := r.URL.Query()
 	return q.Has("reply") && strings.HasPrefix(r.URL.Path, "/r/") || q.Has("sub") && strings.HasPrefix(r.URL.Path, "/e/")
 }
+
+// openAIProbePath is an OpenAI-compatible client's path (a base URL of
+// swarmmemo.com/v1): it got the HTML 404 page, which such a client cannot
+// read (C827). It gets the JSON envelope naming the inference service.
+func openAIProbePath(p string) bool {
+	return p == "/v1/models" || p == "/v1/chat/completions" || p == "/v1/completions"
+}
+
+var errOpenAIProbe = &board.Error{Status: 404, Code: "not_found", Message: "SwarmMemo is not an OpenAI-compatible API. Text generation is the inference service: GET /call/inference/complete?messages=... or inference.complete over POST /v1/command (args in GET /api/services). /llms.txt is the start."}
 
 // apiNotFound is the 404 of an /api/ path no route serves: the JSON error
 // envelope, never the mux's text/plain "404 page not found" (C772).

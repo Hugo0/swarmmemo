@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "99c67b4a404f8a795e126fdf6f3d1d6a060e7c1ef42858df13bef11bc1042390",
+  "allowlist_sha256": "6c0e8cd3a1525b6b4533c3ce10824d9d567f6a46eb73ffd7a45d37b3b3d84731",
   "files": [
     {
       "mode": "0644",
@@ -4528,8 +4528,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workrecord.go",
-      "sha256": "3439bd54b8cdd19ea8cd3f0a45222a23e1c263c228a4ab77203dcd4cae4a6e65",
-      "size": 14384
+      "sha256": "45edaf89583a9d66d8331f8bc815c464f9c85771c3c09afdc8b696b32778d445",
+      "size": 14427
     },
     {
       "mode": "0644",
@@ -5146,7 +5146,7 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/assistants_test.go",
-      "sha256": "852afae33a5c9b660f433f80beb1746347fbd34400e2b929daae471193371dba",
+      "sha256": "8121ecba561787304c86049174e0eacca4fe7c4da6b388ab26bba562b3a9dfaa",
       "size": 28680
     },
     {
@@ -6214,8 +6214,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/openapidrift_test.go",
-      "sha256": "5142f1b9697e81b87708324cce2b22fd90c9599e1cf5e8bca1e7606179315662",
-      "size": 17049
+      "sha256": "d10fe71b36fe41a15b4dfb91413e21aa0ff63c08de060f67422823e3f77f247b",
+      "size": 17430
     },
     {
       "mode": "0644",
@@ -6604,8 +6604,14 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "64c6c1b988c10665c36d3d06c062d4b44338e6ff51f1403dbdb01f7e95722791",
-      "size": 74312
+      "sha256": "2e0024c4defb39d23ec90ae0657842a616253a825048f5980134a6cf8919abe6",
+      "size": 75036
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/server_openaiprobe_test.go",
+      "sha256": "f8f3051f1feae8d9b634ce778ee1cadc3a79a3ac9fda94dcea93fee1e73d5629",
+      "size": 841
     },
     {
       "mode": "0644",
@@ -11517,12 +11523,6 @@
     },
     {
       "mode": "0644",
-      "path": "plugins/openai_package.py",
-      "sha256": "7e03cce514896bc61241e6014db2f5795fbdb110f0b54d0ab1fa98be4102b3f8",
-      "size": 3003
-    },
-    {
-      "mode": "0644",
       "path": "plugins/public.go",
       "sha256": "5b21dd4b45d7a824168d0782b89a7dd7e691d5bd9099c2549940f44b8d301055",
       "size": 950
@@ -11566,7 +11566,7 @@
     {
       "mode": "0644",
       "path": "plugins/swarmmemo/README.md",
-      "sha256": "5ff63d8ac07c52c2961813aa17f1036a3e86e85fa2c6926775135b3a68c42c98",
+      "sha256": "32074fe2fa26410c96e35beed9eceedc27da0005d2fbcc0ad5070ddfe9cc9c84",
       "size": 4569
     },
     {
@@ -11628,12 +11628,6 @@
       "path": "plugins/swarmmemo/skills/use-swarmmemo/SKILL.md",
       "sha256": "1ad7cfd3a7d8b183542efe04f0b0d73242f8e85825b9d57550e0dbc5e8579e2d",
       "size": 3091
-    },
-    {
-      "mode": "0644",
-      "path": "plugins/test_openai_package.py",
-      "sha256": "118abe7f4d1307e99b8d5081cdd15b0e8cd4425f8e3e2881c2ec6d291e01f0a8",
-      "size": 2820
     },
     {
       "mode": "0644",
@@ -12310,8 +12304,8 @@
     {
       "mode": "0755",
       "path": "scripts/ci.sh",
-      "sha256": "756b4780fd8637de784694fbb07632aaf3eb2db19bf3c8f2519e8bf5f2b01be9",
-      "size": 3309
+      "sha256": "05706ccb5d4d27a25caeb5b2471461ee3dbc020ff5540c261350590682534b25",
+      "size": 3205
     },
     {
       "mode": "0644",
@@ -12342,6 +12336,12 @@
       "path": "scripts/graph_synthetic.py",
       "sha256": "3f3475cbe971c54262352fbebebd9b4f6e8e7fb87cc31692aaf90d4495bb9e13",
       "size": 2066
+    },
+    {
+      "mode": "0644",
+      "path": "scripts/openai_package.py",
+      "sha256": "00498522ce66a0b75b19f502a6e870440864cf5a3f0431c41509944f02b34247",
+      "size": 3019
     },
     {
       "mode": "0644",
@@ -12402,6 +12402,12 @@
       "path": "scripts/test_live.py",
       "sha256": "58af2023e903317223849714d57a76dc8c926056da370d6a5c06fd40ecf333f8",
       "size": 7996
+    },
+    {
+      "mode": "0644",
+      "path": "scripts/test_openai_package.py",
+      "sha256": "01dcaf1eea02b3c62e74dda164b36efa9fbb1814f8166da107c51feca0db0c07",
+      "size": 2820
     },
     {
       "mode": "0644",

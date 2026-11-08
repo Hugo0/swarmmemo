@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Build the OpenAI plugin upload folder from plugins/swarmmemo.
 
-    python3 plugins/openai_package.py OUT_DIR [--zip OUT.zip]
+    python3 scripts/openai_package.py OUT_DIR [--zip OUT.zip]
 
 OUT_DIR/swarmmemo/ is plugins/swarmmemo/ less the Claude and Cursor manifests,
 its root mcp.json kept in the agent-plugins format ($schema, streamable-http)
@@ -20,7 +20,7 @@ import shutil
 import sys
 import zipfile
 
-SOURCE = pathlib.Path(__file__).resolve().parent / "swarmmemo"
+SOURCE = pathlib.Path(__file__).resolve().parents[1] / "plugins" / "swarmmemo"
 DROP = {".claude-plugin", ".cursor-plugin", ".git", "__pycache__"}
 # Tools /mcp/core does not list (internal/httpapi/mcp_core.go coreExcluded).
 CORE_LACKS = re.compile(r"\b(screen_[a-z_]+|public_data_[a-z_]+|fetch_page|tools_search|tools_call|x402_[a-z_]+|inference_complete|corroborate_resolve)\b")
