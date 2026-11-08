@@ -69,6 +69,9 @@ type DataField struct {
 	// Items is an array's entry when each is an object of its own fields
 	// (a checks list's check), in this same shape.
 	Items *Data `json:"items,omitempty"`
+	// Of names the operation whose data an object field holds, checked as
+	// that operation's data is (a request post's work).
+	Of string `json:"of,omitempty"`
 }
 
 // dataOf is op's data spec for the contract, or nil when it takes no data.
@@ -90,7 +93,7 @@ func dataFromSpec(spec board.DataSpec) *Data {
 		case f.AliasOf != "":
 			d.Aliases[f.Name] = f.AliasOf
 		default:
-			field := DataField{Type: f.Type, Required: f.Required, Enum: f.Enum, Pattern: f.Pattern, Limit: f.Limit}
+			field := DataField{Type: f.Type, Required: f.Required, Enum: f.Enum, Pattern: f.Pattern, Limit: f.Limit, Of: f.Of}
 			if f.Items != nil {
 				field.Items = dataFromSpec(*f.Items)
 			}

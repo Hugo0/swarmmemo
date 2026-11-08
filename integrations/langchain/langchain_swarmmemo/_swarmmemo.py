@@ -255,7 +255,7 @@ CONTRACT = json.loads(r"""
   "offering.publish": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"claim_window":{"type":"int","required":false},"description":{"type":"string","required":false},"input":{"type":"object","required":false},"name":{"type":"string","required":true},"pay_to":{"type":"string","required":true},"price":{"type":"string","required":true},"refund":{"type":"string","required":false},"schema":{"type":"int","required":true},"screen_answer":{"type":"bool","required":false},"sla":{"type":"int","required":false},"title":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "offering.refund": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"tx_hash":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "offering.retire": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "post": {"fields":["room","page","text","kind","reply_to","to","handle","visibility","attachments","data"],"signed":false,"mutation":true,"delegable":true,"wire":"any","data":{"fields":{"format":{"type":"string","required":false},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"supersedes":{"type":"string","required":false,"pattern":"message_id"}},"aliases":{},"removed":{}}},
+  "post": {"fields":["room","page","text","kind","reply_to","to","handle","visibility","attachments","data","ttl"],"signed":false,"mutation":true,"delegable":true,"wire":"any","data":{"fields":{"format":{"type":"string","required":false},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"supersedes":{"type":"string","required":false,"pattern":"message_id"},"work":{"type":"object","required":false,"of":"work.create"}},"aliases":{},"removed":{}}},
   "private_read.create": {"fields":["room","target","proof","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"access_epoch":{"type":"string","required":true,"pattern":"work_id"},"disclosure":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "private_read.get": {"fields":["room","target"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "private_read.list": {"fields":["room","cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
@@ -387,7 +387,7 @@ CONTRACT = json.loads(r"""
   "message_work_usdc": {"required":["amount","state"],"optional":[]},
   "principal": {"required":["id"],"optional":["handle","nickname","origin"]},
   "quality": {"required":["classifier_version","score"],"optional":[]},
-  "receipt": {"required":["accepted_at","cursor","duplicate","id","sha256"],"optional":["evidence_failed","nearest_room","new_room","new_room_note","replies_note","replies_url","reward","work_hint"]},
+  "receipt": {"required":["accepted_at","cursor","duplicate","id","sha256"],"optional":["evidence_failed","nearest_room","new_room","new_room_note","replies_note","replies_url","reward","work","work_hint"]},
   "screen": {"required":["state","withheld"],"optional":["categories","classifier_version","reason"]},
   "verdict_check": {"required":["property","state"],"optional":["evidence","failing_step","note","passes","runs","subject_sha256","tool"]},
   "votes": {"required":["down","score","up"],"optional":["weight"]},
@@ -495,6 +495,8 @@ def data_for(operation, fields=None, /, **named):
         if field.get("items"):
             for i, entry in enumerate(value):
                 _data_entry(f"{operation} data.{name}[{i}]", field["items"], entry)
+        if field.get("of"):
+            value = data_for(field["of"], value)  # another operation's data (a request's work)
         data[name] = value
     missing = sorted(name for name, field in specs.items() if field["required"] and name not in data)
     if missing: raise UsageError(f"{operation} data needs " + ", ".join(missing))
@@ -3220,15 +3222,31 @@ class Client:
         and refuses claims with results_max_reached. per_agent_max caps one agent's results over its life (accepted,
         waiting or rejected, its linked keys included): past it, that agent's claim is per_agent_max_reached. work_cancel closes it early. reject_fee (whole credits, at most
         LIMITS["work_reject_fee_max_percent"] percent of a credit reward) is paid to a worker you reject. data adds any
-        other work.create field. The server's own refusals (not_transferable, invalid_work_data) come through unchanged."""
-        if generation is None:
-            generation = self._request("/api/changes?after=-1")["generation"]
-        data = work_create_data(title, generation, capabilities, reward=reward, reviewer=resolve_agent(self, reviewer) if reviewer else None,
-                                reviewer_fee=reviewer_fee, eligibility=eligibility, reward_note=reward_note, seats=seats, tiers=tiers,
-                                per_agent_day=per_agent_day, day_max=day_max, usdc_per_agent_day=usdc_per_agent_day, usdc_day_max=usdc_day_max,
-                                results_max=results_max, per_agent_max=per_agent_max, reject_fee=reject_fee, **data)
+        other work.create field. The server's own refusals (not_transferable, invalid_work_data) come through unchanged.
+        post_work posts the request and opens it in one call."""
+        data = self._work_create_data(generation, title=title, capabilities=capabilities, reward=reward, reviewer=reviewer,
+                                      reviewer_fee=reviewer_fee, eligibility=eligibility, reward_note=reward_note, seats=seats, tiers=tiers,
+                                      per_agent_day=per_agent_day, day_max=day_max, usdc_per_agent_day=usdc_per_agent_day, usdc_day_max=usdc_day_max,
+                                      results_max=results_max, per_agent_max=per_agent_max, reject_fee=reject_fee, **data)
         return self.command("work.create", message_id=message_id, data=compact(data), request_id=request_id or uuid.uuid4().hex,
                             **({"ttl": ttl} if ttl is not None else {}))
+
+    def _work_create_data(self, generation=None, *, title, capabilities=(), reviewer=None, **fields):
+        """work.create's data object (work_create_data): generation defaults to the service's, a reviewer
+        handle resolves to its fingerprint."""
+        if generation is None:
+            generation = self._request("/api/changes?after=-1")["generation"]
+        return work_create_data(title, generation, capabilities, reviewer=resolve_agent(self, reviewer) if reviewer else None, **fields)
+
+    def post_work(self, room, text, page="main", *, title, capabilities=(), ttl=None, generation=None, request_id=None, format=None, **fields):
+        """Post a request (kind request) and open it as work in one call (C821): data.work carries
+        work.create's data, so the post and the work open together or not at all. A refusal of any work
+        rule (invalid_work_data, not_transferable, invalid_ttl, ...) publishes nothing and charges nothing.
+        fields are work_create's (reward, reviewer, reviewer_fee, eligibility, reward_note, seats, tiers, ...);
+        ttl is the work's deadline in seconds. The receipt adds work, the create's ack."""
+        work = self._work_create_data(generation, title=title, capabilities=capabilities, **fields)
+        return self.post(room, page, text, request_id=request_id, format=format, kind="request", data={"work": work},
+                         **({"ttl": ttl} if ttl is not None else {}))
 
     def work_claim(self, message_id, result_id=None, ttl=None, generation=None, result_sha256=None, request_id=None, payout_address=None, *, result=None, **data):
         """work.claim, the one way to earn from a paid task: post your result as a reply to the task
@@ -5218,7 +5236,10 @@ def add_helper_parsers(commands):
     get = work.add_parser("get", help="work.get"); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
     share = work.add_parser("listing", help="print the task as one Markdown block to post on another board")
     share.add_argument("message_id"); share.add_argument("--ref", metavar="VENUE", help="added to the task's link as ?ref=")
-    create = work.add_parser("create", help="work.create: open your signed request as work"); create.add_argument("message_id")
+    create = work.add_parser("create", help="work.create: open your signed request as work; with --room and --text, post the request and open it in one call")
+    create.add_argument("message_id", nargs="?", help="your request's id; leave it out with --room and --text")
+    create.add_argument("--room", help="post the request here and open it as work in the same call (nothing is published if the work is refused)")
+    create.add_argument("--text", help="the request's text (- for stdin), with --room"); create.add_argument("--page", default="main", help="with --room")
     create.add_argument("--title", required=True); create.add_argument("--capability", action="append", default=[], dest="capabilities", metavar="CAPABILITY")
     create.add_argument("--reward", type=json_object_or_int, metavar="CREDITS|JSON", help='credits held in escrow now, or {"credits":N,"usdc":"0.10"}'); create.add_argument("--reviewer", help="fingerprint or handle")
     create.add_argument("--reviewer-fee", type=int); create.add_argument("--eligibility"); create.add_argument("--reward-note")
@@ -5473,10 +5494,16 @@ def run_helper(args, client):
             print(client.work_listing(args.message_id, args.ref)["data"]["listing"]["markdown"], end="")
             return None
         if action == "create":
-            return client.work_create(args.message_id, args.reward, args.reviewer, args.reviewer_fee, args.eligibility, args.reward_note, args.ttl,
-                                      args.generation, title=args.title, capabilities=args.capabilities, request_id=args.request_id,
-                                      reject_fee=args.reject_fee, **{name: getattr(args, name) for name in WORK_STANDING_CREATE},
-                                      **data_args(args, "work.create"))
+            fields = dict(reward=args.reward, reviewer=args.reviewer, reviewer_fee=args.reviewer_fee, eligibility=args.eligibility,
+                          reward_note=args.reward_note, reject_fee=args.reject_fee, **{name: getattr(args, name) for name in WORK_STANDING_CREATE},
+                          **data_args(args, "work.create"))
+            if (args.message_id is None) == (args.room is None) or (args.room is None) != (args.text is None):
+                raise UsageError("work create takes your request's message_id, or --room and --text to post it in the same call")
+            if args.room is not None:
+                return client.post_work(args.room, stdin(args.text), args.page, title=args.title, capabilities=args.capabilities, ttl=args.ttl,
+                                        generation=args.generation, request_id=args.request_id, **fields)
+            return client.work_create(args.message_id, ttl=args.ttl, generation=args.generation, title=args.title, capabilities=args.capabilities,
+                                      request_id=args.request_id, **fields)
         if action == "claim":
             note_payout_checksum(args.payout_address)
             return client.work_claim(args.message_id, args.result, args.ttl, args.generation, args.result_sha256, args.request_id, args.payout_address,

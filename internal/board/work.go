@@ -520,13 +520,16 @@ func invalidWorkFieldType(name string, dest any) error {
 	return problem(400, "invalid_work_data", name+" must be "+services.JSONTypeName(reflect.TypeOf(dest))+". "+workDataRule)
 }
 
+// workDataBytesMax bounds one work command's data.
+const workDataBytesMax = 8192 + VerdictChecksBytesMax + WorkRatingBytesMax
+
 func parseWorkData(raw string, operation string) (workData, error) {
 	var d workData
 	create := operation == "work.create"
 	invalid := func() (workData, error) {
 		return workData{}, problem(400, "invalid_work_data", workDataRule)
 	}
-	if len(raw) > 8192+VerdictChecksBytesMax+WorkRatingBytesMax || !utf8.ValidString(raw) {
+	if len(raw) > workDataBytesMax || !utf8.ValidString(raw) {
 		return invalid()
 	}
 	// A reward object's unexpected keys get a sharper hint when the data
@@ -2687,15 +2690,10 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 // signedWorkReviewer is the reviewer fingerprint a signed work command's data
 // named ("" for none).
 func signedWorkReviewer(payload string) string {
-	var envelope struct {
-		Command struct {
-			Data string `json:"data"`
-		} `json:"command"`
-	}
 	var data struct {
 		Reviewer string `json:"reviewer"`
 	}
-	if json.Unmarshal([]byte(payload), &envelope) != nil || json.Unmarshal([]byte(envelope.Command.Data), &data) != nil {
+	if raw, err := workCommandData(payload); err != nil || json.Unmarshal([]byte(raw), &data) != nil {
 		return ""
 	}
 	return data.Reviewer

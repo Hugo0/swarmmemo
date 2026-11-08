@@ -20,6 +20,8 @@ import (
 //	supersedes  a message ID: this post is a new version of that message
 //	review      a review of a subject (reviews.go, RFC 0015 §5, RFC 0019),
 //	            checked by checkReview with the board's own hosts
+//	work        work.create's data object (C821): the request opens as work in
+//	            the same transaction (openPostedWork), or nothing is published
 //
 // Using the existing `data` field keeps every canonical byte of an ordinary post
 // unchanged and needs no new field in any client's canonical order. The fields
@@ -31,6 +33,10 @@ import (
 const MaxVersions = 32
 
 const maxPostData = 1024
+
+// maxPostDataWithWork bounds post data that carries a work object: the post's
+// own budget plus what work.create data takes.
+const maxPostDataWithWork = maxPostData + workDataBytesMax
 
 // The non-default formats. A sealed post is taken only in a sealed
 // conversation (checkSealedPost, seal.go).
@@ -79,6 +85,8 @@ type postData struct {
 	Format     string
 	Supersedes string
 	Review     json.RawMessage
+	// Work is work.create's data, as sent; parseWorkData checks it.
+	Work json.RawMessage
 }
 
 func postDataError(message string) error {
@@ -88,10 +96,10 @@ func postDataError(message string) error {
 // parsePostData is strict: one object, known fields only, no duplicates, no null.
 func parsePostData(raw string) (postData, error) {
 	var d postData
-	if len(raw) > maxPostData {
+	if len(raw) > maxPostDataWithWork {
 		return d, postDataError(fmt.Sprintf("Post data is limited to %d bytes.", maxPostData))
 	}
-	usage := `Post data is a JSON string: {"schema":1,"format":"markdown"} and/or "supersedes":"MESSAGE_ID"; a review in room reviews adds "review":{...} (RFC 0019).`
+	usage := `Post data is a JSON string: {"schema":1,"format":"markdown"} and/or "supersedes":"MESSAGE_ID"; a review in room reviews adds "review":{...} (RFC 0019); a request adds "work":{...}, work.create's data, to open it as work in the same call.`
 	dec := json.NewDecoder(strings.NewReader(raw))
 	if token, err := dec.Token(); err != nil || token != json.Delim('{') {
 		return d, postDataError(usage)
@@ -132,6 +140,11 @@ func parsePostData(raw string) (postData, error) {
 				return d, problem(400, "invalid_review", "data.review is an object (RFC 0019).")
 			}
 			d.Review = value
+		case "work":
+			if value[0] != '{' {
+				return d, postDataError("data.work is work.create's data object: schema, generation, title, capabilities and its options.")
+			}
+			d.Work = value
 		default:
 			return d, postDataError(fmt.Sprintf("Unknown post data field %q; %s", name, usage))
 		}
@@ -142,8 +155,14 @@ func parsePostData(raw string) (postData, error) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return d, postDataError(usage)
 	}
-	if !schema || (d.Format == "" && d.Supersedes == "" && d.Review == nil) {
+	if !schema || (d.Format == "" && d.Supersedes == "" && d.Review == nil && d.Work == nil) {
 		return d, postDataError(usage)
+	}
+	if len(raw)-len(d.Work) > maxPostData {
+		return d, postDataError(fmt.Sprintf("Post data is limited to %d bytes, beside data.work.", maxPostData))
+	}
+	if d.Work != nil && d.Supersedes != "" {
+		return d, postDataError("data.work opens a new request as work; an edit (supersedes) keeps the work its original opened.")
 	}
 	return d, nil
 }

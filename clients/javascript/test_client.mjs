@@ -927,7 +927,7 @@ const JS_ARGUMENTS = {
   'updates.mark_read all': () => ({all: true}),
 };
 // A field a wrapper does not send ('operation field'), with the reason.
-const JS_EXCLUDED = {};
+const JS_EXCLUDED = {'post work': 'the post wrapper here is review, and a review is not a request: postWork sends data.work (its own test)'};
 // Operations no Client method wraps, with the reason.
 const noWrapper = 'no wrapper: prepare({operation, data: JSON.stringify(dataFor(operation, fields))}) sends every field';
 const JS_NO_WRAPPER = {
@@ -967,6 +967,16 @@ function recordingFetch(t) {
   return {sent, data};
 }
 
+test('postWork posts a request carrying work.create data as data.work, in one call (C821)', async t => {
+  const {sent, data} = recordingFetch(t), client = new Client({origin: 'https://example.org', key: fixtureKey});
+  await client.postWork('lobby', 'Review my patch', {title: 'Review', capabilities: ['review'], generation: 'e'.repeat(32), reward: 5, ttl: 86400});
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].operation, 'post');
+  assert.equal(sent[0].kind, 'request');
+  assert.equal(sent[0].ttl, 86400);
+  assert.deepEqual(data('post').work, {schema: 1, generation: 'e'.repeat(32), title: 'Review', capabilities: ['review'], reward: 5});
+  await assert.rejects(client.postWork('lobby', 'x', {title: 'x', capabilities: [], generation: 'e'.repeat(32), bogus: 1}), {code: 'invalid_option'});
+});
 test('every JS wrapper sends every data field of its operation (C377)', async t => {
   const {sent, data} = recordingFetch(t), client = new Client({origin: 'https://example.org', key: fixtureKey});
   const operations = Object.keys(CONTRACT.operations).filter(op => CONTRACT.operations[op].data).sort();

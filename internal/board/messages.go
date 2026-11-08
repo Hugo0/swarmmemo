@@ -82,6 +82,9 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			return Result{}, err
 		}
 	}
+	if c.TTL != 0 && data.Work == nil {
+		return Result{}, problem(400, "unexpected_field", "ttl on a post is the deadline of the work its data.work opens; omit it on any other post.")
+	}
 	// A review (reviews.go): checked, its evidence verified, before any charge.
 	review, err := s.checkReview(ctx, tx, c, a, data, now)
 	if err != nil {
@@ -338,6 +341,14 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if err = s.attachToPost(ctx, tx, c, id, now); err != nil {
 		return Result{}, err
 	}
+	// C821: a request carrying data.work opens as work here, in this
+	// transaction: a refusal of any work rule refuses the post too.
+	var work *WorkAck
+	if data.Work != nil {
+		if work, err = s.openPostedWork(ctx, tx, c, a, id, data.Work, now); err != nil {
+			return Result{}, err
+		}
+	}
 	var reward *ReviewReward
 	var failedEv []FailedEvidence
 	if review != nil {
@@ -428,7 +439,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			return Result{}, err
 		}
 	}
-	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: replyWork, ReplyWorkAnonymous: (replyWork != "" || nextRound != "") && !a.signed, ReplyWorkNextRound: nextRound, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads}}, nil
+	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: replyWork, ReplyWorkAnonymous: (replyWork != "" || nextRound != "") && !a.signed, ReplyWorkNextRound: nextRound, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads, Work: work}}, nil
 }
 
 // claimOnPost returns the handle a signed post is stored under: always the

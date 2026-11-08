@@ -70,6 +70,7 @@ DATA_EXCLUDED = {
     ("post", "format"): "a scoped worker stages plain public posts; Markdown and sealed formats are the parent key's",
     ("post", "supersedes"): "editing a post is the parent key's; a scoped worker only adds posts",
     ("post", "review"): "reviews are the parent key's; a scoped worker never signs one",
+    ("post", "work"): "opening work is the parent key's; work.create is not delegable to a scoped worker",
     ("work.claim", "result_sha256"): "stage_work never reads the result text, so it has nothing to hash; the worker's submit is checked by the requester",
     ("work.submit", "result_sha256"): "stage_work never reads the result text, so it has nothing to hash; the worker's submit is checked by the requester",
     ("works.list", "summary"): "find_work always asks for eligibility_summary, as hosted find_work does (C627)",
@@ -625,18 +626,22 @@ def _transition(profile, item, work_id):
         envelope = strict_json(item["signed_payload"])
         if set(envelope) != {"version", "service", "command"} or envelope["service"] != profile.service_id: raise ValueError()
         command = envelope["command"]
+        # A request posted with data.work (C821) signed the post that opened it:
+        # the create's record is that post, its work object the create's data.
+        posted = item["operation"] == "work.create" and command.get("operation") == "post"
         if (item["signed_payload"].encode() != memo.canonical(command, profile.service_id)
                 or envelope["version"] != (2 if "delegation" in command else 1)
-                or command.get("operation") != item["operation"] or item["operation"] not in WORK_TRANSITION_OPERATIONS
+                or command.get("operation") != ("post" if posted else item["operation"]) or item["operation"] not in WORK_TRANSITION_OPERATIONS
                 or command.get("public_key") != item["public_key"]): raise ValueError()
         # A command may name an edited version of the request; the service
         # says so (resolved_from) and the work is still this one.
         if "resolved_from" in item and (not isinstance(item["resolved_from"], str) or not re.fullmatch(HEX32, item["resolved_from"]) or item["resolved_from"] == work_id): raise ValueError()
-        if command.get("message_id") != work_id and command.get("message_id") != item.get("resolved_from"): raise ValueError()
-        allowed_fields = COMMAND_ENVELOPE | set(memo.CONTRACT["operations"][item["operation"]]["fields"])
+        if posted and ("message_id" in command or "reply_to" in command or command.get("kind") not in ("request", "simulation")): raise ValueError()
+        if not posted and command.get("message_id") != work_id and command.get("message_id") != item.get("resolved_from"): raise ValueError()
+        allowed_fields = COMMAND_ENVELOPE | set(memo.CONTRACT["operations"][command["operation"]]["fields"])
         if set(command) - allowed_fields: raise ValueError()
         for field, value in command.items():
-            if field == "delegation": continue
+            if field == "delegation" or posted and field == "attachments": continue
             if field in ("timestamp", "ttl", "amount"):
                 if type(value) is not int or not 0 <= value < 2**63: raise ValueError()
             elif not isinstance(value, str) or "\x00" in value: raise ValueError()
@@ -657,6 +662,7 @@ def _transition(profile, item, work_id):
         if reply_accept and ("amount" in command or not isinstance(command["target"], str) or not re.fullmatch(HEX32, command["target"])): raise ValueError()
         if not reply_accept and item["operation"] in ("work.renew", "work.submit", "work.accept", "work.reject") and command.get("amount", 0) != item["fence"]: raise ValueError()
         data = memo.strict_json(command["data"])
+        if posted: data = data.get("work") if isinstance(data, dict) else None
         data_fields = {"schema", "generation"}
         # A create may add its options (/protocol.md#work-coordination); each is
         # checked as the server checks it.

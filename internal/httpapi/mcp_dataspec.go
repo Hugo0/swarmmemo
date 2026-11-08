@@ -82,6 +82,7 @@ var mcpDataExcluded = map[string]map[string]string{
 	"post_message": {
 		"format": "the server decides from markdown.AutoRender for hosted identities (postData); an anonymous post carries no data",
 		"review": "a review is a post in room reviews with its own checks: write_review builds it",
+		"work":   "create_work opens a posted request as work; the hosted tools keep their reviewed shape (C821 one-call post is for keys)",
 	},
 	"send_private": {
 		"format":     "left out, the board renders text that is lossless Markdown (DisplayFormatOf), as a signed post's format markdown would",
@@ -89,9 +90,11 @@ var mcpDataExcluded = map[string]map[string]string{
 		"review":     "a review is public, in room reviews: write_review",
 		"kind":       "conversation.open kind is dm, the pair with to; the kind input is the post's",
 		"sealed":     "a sealed conversation needs every member's own key, which a hosted identity does not hold (sealedNote)",
+		"work":       "work opens on a public request (create_work), never on a private message",
 	},
 	"write_review": {
 		"format": "a review's text is shown as the review page renders it; the board renders lossless Markdown on its own (DisplayFormatOf)",
+		"work":   "a review is not a request: work opens on a request (create_work)",
 	},
 	"read_messages": {
 		"bias":    "the hot view keeps the board's recency bias; read_feed override ranks by weights of your own",

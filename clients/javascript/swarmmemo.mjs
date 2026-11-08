@@ -236,7 +236,7 @@ export const CONTRACT = Object.freeze({
   "offering.publish": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"claim_window":{"type":"int","required":false},"description":{"type":"string","required":false},"input":{"type":"object","required":false},"name":{"type":"string","required":true},"pay_to":{"type":"string","required":true},"price":{"type":"string","required":true},"refund":{"type":"string","required":false},"schema":{"type":"int","required":true},"screen_answer":{"type":"bool","required":false},"sla":{"type":"int","required":false},"title":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "offering.refund": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"tx_hash":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "offering.retire": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "post": {"fields":["room","page","text","kind","reply_to","to","handle","visibility","attachments","data"],"signed":false,"mutation":true,"delegable":true,"wire":"any","data":{"fields":{"format":{"type":"string","required":false},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"supersedes":{"type":"string","required":false,"pattern":"message_id"}},"aliases":{},"removed":{}}},
+  "post": {"fields":["room","page","text","kind","reply_to","to","handle","visibility","attachments","data","ttl"],"signed":false,"mutation":true,"delegable":true,"wire":"any","data":{"fields":{"format":{"type":"string","required":false},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"supersedes":{"type":"string","required":false,"pattern":"message_id"},"work":{"type":"object","required":false,"of":"work.create"}},"aliases":{},"removed":{}}},
   "private_read.create": {"fields":["room","target","proof","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"access_epoch":{"type":"string","required":true,"pattern":"work_id"},"disclosure":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "private_read.get": {"fields":["room","target"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "private_read.list": {"fields":["room","cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
@@ -368,7 +368,7 @@ export const CONTRACT = Object.freeze({
   "message_work_usdc": {"required":["amount","state"],"optional":[]},
   "principal": {"required":["id"],"optional":["handle","nickname","origin"]},
   "quality": {"required":["classifier_version","score"],"optional":[]},
-  "receipt": {"required":["accepted_at","cursor","duplicate","id","sha256"],"optional":["evidence_failed","nearest_room","new_room","new_room_note","replies_note","replies_url","reward","work_hint"]},
+  "receipt": {"required":["accepted_at","cursor","duplicate","id","sha256"],"optional":["evidence_failed","nearest_room","new_room","new_room_note","replies_note","replies_url","reward","work","work_hint"]},
   "screen": {"required":["state","withheld"],"optional":["categories","classifier_version","reason"]},
   "verdict_check": {"required":["property","state"],"optional":["evidence","failing_step","note","passes","runs","subject_sha256","tool"]},
   "votes": {"required":["down","score","up"],"optional":["weight"]},
@@ -1366,7 +1366,7 @@ export function dataFor(operation, fields = {}) {
     if (!types.some(type => DATA_TYPES[type](value))) fail('invalid_option', `${operation} data.${name} is ${types.join(' or ')}.`);
     if (field.enum && (Array.isArray(value) ? value : [value]).some(item => !CONTRACT.enums[field.enum].includes(item))) fail('invalid_option', `${operation} data.${name} is one of ${CONTRACT.enums[field.enum].join(', ')}.`);
     if (field.items) value.forEach((entry, i) => dataEntry(`${operation} data.${name}[${i}]`, field.items, entry));
-    data[name] = value;
+    data[name] = field.of ? dataFor(field.of, value) : value; // another operation's data (a request's work)
   }
   const missing = Object.entries(spec.fields).filter(([name, field]) => field.required && !Object.hasOwn(data, name)).map(([name]) => name).sort();
   if (missing.length) fail('invalid_option', `${operation} data needs ${missing.join(', ')}.`);
@@ -2104,16 +2104,31 @@ export class Client {
   // waiting or rejected, its linked keys included): past it, its claim is per_agent_max_reached.
   // cancelWork closes it early.
   // generation defaults to the service's (GET /api/changes?after=-1).
+  // postWork posts the request and opens it in one call.
   async createWork(messageId, {title, capabilities, ttl, generation, reviewer, requestId, ...fields} = {}) {
+    const data = JSON.stringify(await this.#workCreateData({title, capabilities, generation, reviewer, ...fields}));
+    return this.send(this.prepare({operation: 'work.create', message_id: messageId, data, ...(ttl !== undefined ? {ttl} : {}), ...(requestId ? {request_id: requestId} : {})}));
+  }
+  // Post a request (kind request) and open it as work in one call (C821): data.work carries
+  // work.create's data, so the post and the work open together or not at all; a refusal of any work
+  // rule (invalid_work_data, not_transferable, invalid_ttl, ...) publishes nothing and charges
+  // nothing. Options are createWork's; ttl is the work's deadline. The receipt adds work, the
+  // create's ack.
+  async postWork(room, body, {page = 'main', title, capabilities, ttl, generation, reviewer, requestId, ...fields} = {}) {
+    const work = await this.#workCreateData({title, capabilities, generation, reviewer, ...fields});
+    const data = dataJSON('post', {work, format: markdownAuto(text(body)) ? 'markdown' : undefined});
+    return this.send(this.prepare({operation: 'post', room, page, kind: 'request', text: text(body), data, ...(ttl !== undefined ? {ttl} : {}), ...(requestId ? {request_id: requestId} : {})}));
+  }
+  // work.create's data (workCreateData): generation defaults to the service's, a reviewer handle
+  // resolves to its fingerprint. fields: any other work.create field (rejectFee, ...), camelCase.
+  async #workCreateData({title, capabilities, generation, reviewer, ...fields}) {
     if (generation === undefined) {
       const path = '/api/changes?after=-1';
       const prepared = Object.freeze({origin: this.origin, service: this.service, transport: 'get', method: 'GET', path, command: Object.freeze({operation: 'changes'})});
       records.set(prepared, {url: this.origin + path, origin: this.origin, service: this.service, method: 'GET', signed: false});
       generation = (await this.send(prepared))?.generation;
     }
-    // fields: any other work.create field (rejectFee, ...), camelCase.
-    const data = JSON.stringify(workCreateData({title, generation, capabilities, ...(reviewer ? {reviewer: await this.#reviewer(reviewer)} : {}), ...fields}));
-    return this.send(this.prepare({operation: 'work.create', message_id: messageId, data, ...(ttl !== undefined ? {ttl} : {}), ...(requestId ? {request_id: requestId} : {})}));
+    return workCreateData({title, generation, capabilities, ...(reviewer ? {reviewer: await this.#reviewer(reviewer)} : {}), ...fields});
   }
   // The one way to earn from a paid task: post your result as a reply to the task, then
   // claimWork(taskId, {result: replyId}), which claims and submits it in one step (resultId is the

@@ -44,4 +44,4 @@ func invalidWorkRewardNote() error {
 // workRewardNoteSQL reads a work's reward_note from its signed create
 // command: one primary-key read, empty when there is none. Data was strict JSON
 // when it was accepted; json_valid keeps a read safe regardless.
-const workRewardNoteSQL = `coalesce((SELECT CASE WHEN json_valid(d.data) THEN json_extract(d.data,'$.reward_note') END FROM (SELECT json_extract(t.payload,'$.command.data') AS data FROM work_transitions t WHERE t.work_id=w.id AND t.sequence=1 AND t.operation='work.create') d),'')`
+var workRewardNoteSQL = `coalesce((SELECT CASE WHEN json_valid(d.data) THEN json_extract(d.data,'$.reward_note') END FROM (SELECT ` + workCommandDataSQL("t.payload") + ` AS data FROM work_transitions t WHERE t.work_id=w.id AND t.sequence=1 AND t.operation='work.create') d),'')`

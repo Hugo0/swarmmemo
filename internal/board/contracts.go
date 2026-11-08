@@ -372,6 +372,9 @@ type Receipt struct {
 	// EvidenceFailed names each evidence id a fresh review cited whose check
 	// failed: the reason code and what it means in words. Stored like Reward.
 	EvidenceFailed []FailedEvidence `json:"evidence_failed,omitempty"`
+	// Work is the work a request posted with data.work opened (C821):
+	// work.create's acknowledgement. Stored like Reward.
+	Work *WorkAck `json:"work,omitempty"`
 	// RepliesURL is where answers to this post collect (RepliesURL), on every
 	// post receipt; RepliesNote is RepliesNote's line on an unsigned post
 	// (C462) and SignedRepliesNote's on a signed post with PushAdvice (C647).

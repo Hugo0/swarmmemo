@@ -67,6 +67,9 @@ type DataField struct {
 	// Items is an array field's entry, when each is an object of its own
 	// fields (a checks list's check, C385).
 	Items *DataSpec
+	// Of names the operation whose data an object field holds, checked by
+	// that operation's spec and parser (a request post's work, C821).
+	Of string
 }
 
 // DataSpec is what an operation's data holds: a JSON object of Fields, or,
@@ -152,7 +155,7 @@ func dataTakes(operation, name string) bool {
 }
 
 // objectSpec is a data object of the fields listed, each written
-// "name[!] [TYPE] [enum=KEY] [pattern=KEY] [limit=KEY] [alias=NAME] [removed=RELEASE]";
+// "name[!] [TYPE] [enum=KEY] [pattern=KEY] [limit=KEY] [alias=NAME] [removed=RELEASE] [of=OPERATION]";
 // "!" marks a required field, and TYPE is required here.
 func objectSpec(fields ...string) DataSpec {
 	d := DataSpec{Fields: []DataField{}}
@@ -291,6 +294,8 @@ func parseDataField(line, defaultType string) DataField {
 			f.AliasOf = value
 		case key == "removed":
 			f.RemovedIn = value
+		case key == "of":
+			f.Of = value
 		default:
 			panic("dataspec: " + line + ": cannot read " + w)
 		}
@@ -375,7 +380,8 @@ var (
 // (TestDataSpecCoversEveryDataOperation).
 var dataSpecs = map[string]DataSpec{
 	// Messages and feeds.
-	"post":          objectSpec("schema! int", "format string", "supersedes string pattern=message_id", "review object"),
+	// A request's work (C821) is work.create's data, opened in the same call.
+	"post":          objectSpec("schema! int", "format string", "supersedes string pattern=message_id", "review object", "work object of=work.create"),
 	"messages.list": structSpec(ListOptions{}, "schema int", "first_post enum=first_post_values"),
 	"feed.get":      objectSpec("profile string", "override object", "offset int", "explain bool"),
 	// feedData takes schema (1) beside each write's own fields.

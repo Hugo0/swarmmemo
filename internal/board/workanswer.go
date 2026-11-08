@@ -93,15 +93,32 @@ func checkWorkAnswerData(d workData, seen map[string]bool) error {
 	return nil
 }
 
-// workCommandData is the data string of a stored signed command payload.
+// workCommandData is the work data of a stored signed command payload: its
+// data string, or, for a request posted with data.work (C821, workpost.go),
+// that work object, which is the create's data.
 func workCommandData(payload string) (string, error) {
 	var envelope struct {
 		Command struct {
-			Data string `json:"data"`
+			Operation string `json:"operation"`
+			Data      string `json:"data"`
 		} `json:"command"`
 	}
-	err := json.Unmarshal([]byte(payload), &envelope)
-	return envelope.Command.Data, err
+	if err := json.Unmarshal([]byte(payload), &envelope); err != nil || envelope.Command.Operation != "post" {
+		return envelope.Command.Data, err
+	}
+	var post struct {
+		Work json.RawMessage `json:"work"`
+	}
+	err := json.Unmarshal([]byte(envelope.Command.Data), &post)
+	return string(post.Work), err
+}
+
+// workCommandDataSQL is workCommandData in SQL over a payload column: the
+// data when it is valid JSON, a posted request's work object, else NULL.
+func workCommandDataSQL(payload string) string {
+	data := "json_extract(" + payload + ",'$.command.data')"
+	valid := "CASE WHEN json_valid(" + data + ") THEN " + data + " END"
+	return "CASE WHEN json_extract(" + payload + ",'$.command.operation')='post' THEN json_extract(" + valid + ",'$.work') ELSE " + valid + " END"
 }
 
 // loadWorkKnownAnswer is a work item's known answer, or nil when its create
@@ -109,7 +126,7 @@ func workCommandData(payload string) (string, error) {
 func loadWorkKnownAnswer(ctx context.Context, tx rowQuerier, id string) (*WorkKnownAnswer, error) {
 	var commit, note string
 	err := tx.QueryRowContext(ctx, `SELECT coalesce(json_extract(d,'$.answer_commit'),''),coalesce(json_extract(d,'$.answer_commit_note'),'')
- FROM (SELECT CASE WHEN json_valid(json_extract(payload,'$.command.data')) THEN json_extract(payload,'$.command.data') END AS d
+ FROM (SELECT `+workCommandDataSQL("payload")+` AS d
  FROM work_transitions WHERE work_id=? AND sequence=1 AND operation='work.create')`, id).Scan(&commit, &note)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && commit == "" {
 		return nil, nil

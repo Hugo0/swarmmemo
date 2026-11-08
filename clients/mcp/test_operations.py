@@ -357,6 +357,22 @@ class OperationTests(unittest.TestCase):
         for item in bad:
             with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
 
+    def test_transition_of_a_request_posted_with_work(self):
+        # C821: the create's record is the post that carried data.work.
+        def transition(fields, work):
+            command = op.memo.sign({"operation": "post", "room": "bounties", "text": "Do it", "kind": "request", "ttl": 3600,
+                                    "data": json.dumps({"schema": 1, "work": work}), **fields}, self.key)
+            return {"sequence": 1, "operation": "work.create", "author": hashlib.sha256(op.memo.unb64(self.public)).hexdigest(),
+                    "public_key": self.public, "signature": command["signature"], "signed_payload": op.memo.canonical(command).decode(),
+                    "accepted_at": int(time.time()), "fence": 0, "generation": "a" * 32, "state": "open"}
+        work = {"schema": 1, "generation": "a" * 32, "title": "Do it", "capabilities": ["code"], "reward": 5}
+        good = transition({}, work)
+        self.assertEqual(op._transition(self.profile, good, "b" * 32), good)
+        bad = [transition({"message_id": "b" * 32}, work), transition({"kind": "note"}, work), transition({"reply_to": "c" * 32}, work),
+               transition({}, {**work, "extra": 1}), transition({}, {"schema": 1, "generation": "a" * 32})]
+        for item in bad:
+            with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
+
     def test_transition_through_an_edited_version_and_a_signed_result_hash(self):
         def transition(message_id, data, extra, operation="work.submit", state="submitted"):
             fields = {"operation": operation, "message_id": message_id, "target": "c" * 32, "data": json.dumps(data), "delegation": self.profile.delegation}

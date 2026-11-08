@@ -374,6 +374,9 @@ func dataFieldsProtocolSection() string {
 			if f.Items != nil {
 				notes = append(notes, fmt.Sprintf("each `%s` entry: %s; optional %s", f.Name, code(f.Items.Names(true)), code(f.Items.Optional())))
 			}
+			if of, ok := LookupOperation(f.Of); ok {
+				notes = append(notes, fmt.Sprintf("`%s` is [`%s`](#%s)'s data", f.Name, of.Name, of.Section))
+			}
 		}
 		for _, f := range spec.Fields {
 			switch {

@@ -2118,7 +2118,8 @@
         "handle",
         "visibility",
         "attachments",
-        "data"
+        "data",
+        "ttl"
       ],
       "signed": false,
       "mutation": true,
@@ -2142,6 +2143,11 @@
             "type": "string",
             "required": false,
             "pattern": "message_id"
+          },
+          "work": {
+            "type": "object",
+            "required": false,
+            "of": "work.create"
           }
         },
         "aliases": {},
@@ -4296,6 +4302,7 @@
         "replies_note",
         "replies_url",
         "reward",
+        "work",
         "work_hint"
       ]
     },

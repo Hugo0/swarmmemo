@@ -546,15 +546,10 @@ func standingPerAgentMax(ctx context.Context, tx rowQuerier, id string) (int64, 
 	if err != nil {
 		return 0, err
 	}
-	var envelope struct {
-		Command struct {
-			Data string `json:"data"`
-		} `json:"command"`
-	}
 	var data struct {
 		PerAgentMax int64 `json:"per_agent_max"`
 	}
-	if json.Unmarshal([]byte(payload), &envelope) != nil || json.Unmarshal([]byte(envelope.Command.Data), &data) != nil {
+	if raw, err := workCommandData(payload); err != nil || json.Unmarshal([]byte(raw), &data) != nil {
 		return 0, fmt.Errorf("board: standing task %s has unreadable create data", id)
 	}
 	return data.PerAgentMax, nil

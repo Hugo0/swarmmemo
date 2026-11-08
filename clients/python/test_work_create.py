@@ -110,6 +110,27 @@ class LiveWorkCreateTests(unittest.TestCase):
             self.read(message_id)
         self.assertEqual(missing.exception.code, 404)
 
+    def test_post_work_opens_in_one_call_or_publishes_nothing(self):
+        # C821: the post and the create are one transaction.
+        api = self.api("requester")
+        with self.assertRaises(memo.APIError) as raised:  # no transferable credit: nothing posted
+            api.post_work("lobby", "Paid in one call", title="Paid", capabilities=["code-review"], reward=300)
+        self.assertEqual(raised.exception.code, "not_transferable")
+        with urllib.request.urlopen(f"{self.origin}/api/messages?room=lobby", timeout=5) as response:
+            self.assertNotIn("Paid in one call", response.read().decode())
+        self.grant("requester", 1000)
+        posted = api.post_work("lobby", "Paid in one call", title="Paid", capabilities=["code-review"], reward=300, ttl=86400)
+        receipt = posted["receipt"]
+        self.assertEqual((receipt["work"]["work_id"], receipt["work"]["state"]), (receipt["id"], "open"))
+        work = self.read(receipt["id"])
+        self.assertEqual((work["state"], work["reward"]["amount"], work["reward"]["state"]), ("open", 300, "held"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = memo.main(["--url", self.origin, "--key", str(self.keys["requester"]), "work", "create", "--room", "lobby", "--text", "Write a haiku",
+                              "--title", "Write a haiku", "--capability", "writing"])
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn('"work"', out.getvalue())
+
 
 class WorkListKindsTest(unittest.TestCase):
     def test_cli_takes_every_kind_the_server_lists(self):

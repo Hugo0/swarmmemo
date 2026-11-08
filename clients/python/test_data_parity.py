@@ -30,6 +30,7 @@ FIELD_SAMPLES = {
     "ids": [MESSAGE],
     "payout_address": "0x" + "ab" * 20,
     "review": {"subject": "site:https://example.org/", "verdict": "good"},
+    "work": {"schema": 1, "generation": "e" * 32, "title": "x1", "capabilities": ["review"]},
 }
 DATA_OPERATIONS = sorted(name for name, op in memo.CONTRACT["operations"].items() if op.get("data") is not None)
 
