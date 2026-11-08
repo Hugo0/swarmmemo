@@ -17,13 +17,50 @@ import (
 // transfers stay bounded at eight, and the refusal names that bound.
 
 func (h *harness) creditTransfer(from allowance.Subject, to string, amount int64, key string) (Transfer, error) {
+	return h.creditTransferLasting(from, to, amount, false, key)
+}
+
+func (h *harness) creditTransferLasting(from allowance.Subject, to string, amount int64, lasting bool, key string) (Transfer, error) {
 	var t Transfer
 	err := h.do(func(q *sql.Tx) error {
 		var err error
-		t, err = h.l.Transfer(ctx, q, from, to, allowance.Credit, amount, key, h.now)
+		t, err = h.l.Transfer(ctx, q, from, to, allowance.Credit, amount, lasting, key, h.now)
 		return err
 	})
 	return t, err
+}
+
+// TestLastingTransferMovesOnlyCreditThatOutlastsTheDay (C819): by default a
+// transfer drains free daily credit first, which expires at midnight in the
+// recipient's hands too; with lasting only lots that outlive the current UTC
+// day move, and too few of them is not_transferable.
+func TestLastingTransferMovesOnlyCreditThatOutlastsTheDay(t *testing.T) {
+	h := newHarness(t, escrowParams())
+	alice := signedSubject("alice")
+	h.mintCredit("alice", allowance.Granted, 300)
+	tr, err := h.creditTransfer(alice, "bob", 2, "plain")
+	if err != nil || tr.ByBucket[allowance.Free] != 2 || tr.ExpiresAt == 0 || tr.ExpiresAt > (h.now/86400+1)*86400 {
+		t.Fatalf("the default moves free credit first and says when it expires: %+v %v", tr, err)
+	}
+	if tr, err = h.creditTransferLasting(alice, "carol", 200, true, "lasting"); err != nil || tr.ByBucket[allowance.Granted] != 200 || len(tr.ByBucket) != 1 || tr.ExpiresAt != 0 {
+		t.Fatalf("lasting moves only granted credit: %+v %v", tr, err)
+	}
+	if n := h.count("SELECT count(*) FROM ledger_lots WHERE account='carol' AND (bucket='free' OR expires_at<>0)"); n != 0 {
+		t.Fatalf("carol got %d lots that expire", n)
+	}
+	if got := h.creditOf("carol", "granted"); got != 200 {
+		t.Fatalf("carol holds %d granted", got)
+	}
+	// 100 granted left plus free credit (less the 3 fee): enough in all,
+	// too few that last.
+	free := h.creditOf("alice", "free")
+	if free < 5 {
+		t.Fatalf("alice has %d free credit left", free)
+	}
+	if _, err = h.creditTransferLasting(alice, "carol", 100+free-3, true, "too-much"); code(err) != "not_transferable" {
+		t.Fatalf("free never counts toward lasting: %v", err)
+	}
+	checkInvariants(t, h.db, h.p)
 }
 
 func TestEscrowPaymentsSkipThePendingTransferBound(t *testing.T) {

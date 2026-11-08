@@ -453,8 +453,9 @@ func transferKey(c Command) string {
 // ledgerTransfer is credit.transfer (legacy result fields) and
 // allowance.transfer under ALLOWANCE_LEDGER=on. credit.transfer is the
 // pre-ledger name, kept for old callers: it moves post_bytes, never the
-// credit resource (C365).
-func (s *Store) ledgerTransfer(ctx context.Context, tx *sql.Tx, c Command, a actor, r allowance.Resource, now int64) (Result, error) {
+// credit resource (C365). lasting moves only units that outlive the current
+// UTC day (C819).
+func (s *Store) ledgerTransfer(ctx context.Context, tx *sql.Tx, c Command, a actor, r allowance.Resource, lasting bool, now int64) (Result, error) {
 	legacy := c.Operation == "credit.transfer"
 	if legacy && (c.Amount <= 0 || c.Amount > s.config.GlobalDailyBytes) {
 		return Result{}, errTransferAmount()
@@ -466,9 +467,12 @@ func (s *Store) ledgerTransfer(ctx context.Context, tx *sql.Tx, c Command, a act
 	if target == a.account {
 		return Result{}, allowanceError("self_transfer")
 	}
-	t, err := s.ledger.led.Transfer(ctx, tx, subject(a), target, r, c.Amount, transferKey(c), now)
+	t, err := s.ledger.led.Transfer(ctx, tx, subject(a), target, r, c.Amount, lasting, transferKey(c), now)
 	if err != nil {
 		var e *allowance.Err
+		if lasting && errors.As(err, &e) && e.Code == "not_transferable" {
+			return Result{}, errTransferNotLasting()
+		}
 		if legacy && errors.As(err, &e) {
 			switch e.Code {
 			case "quota_exhausted":
@@ -541,7 +545,7 @@ func (s *Store) shadowedTransfer(ctx context.Context, tx *sql.Tx, c Command, a a
 // ALLOWANCE_LEDGER=shadow (the legacy path decided; legacy is its refusal).
 func (s *Store) shadowTransfer(ctx context.Context, tx *sql.Tx, c Command, a actor, target string, now int64, legacy error) error {
 	return s.shadow(ctx, tx, a, c.Operation, c.Amount, now, legacy, func() error {
-		_, err := s.ledger.led.Transfer(ctx, tx, subject(a), target, allowance.PostBytes, c.Amount, transferKey(c), now)
+		_, err := s.ledger.led.Transfer(ctx, tx, subject(a), target, allowance.PostBytes, c.Amount, false, transferKey(c), now)
 		return err
 	})
 }
@@ -654,6 +658,7 @@ type schemaOnlyData struct {
 type allowanceTransferData struct {
 	Schema   int    `json:"schema"`
 	Resource string `json:"resource"`
+	Lasting  bool   `json:"lasting"` // move only units that outlive the current UTC day
 }
 
 // readAllowance is allowance.get: the band and standing, today's share per
@@ -744,22 +749,23 @@ func (s *Store) changeAllowance(ctx context.Context, tx *sql.Tx, c Command, a ac
 		}
 		return Result{Data: map[string]any{"schema": 1, "transfer": map[string]any{"id": t.ID, "state": t.State, "resource": string(t.Resource), "amount": t.Amount, "cancelled_by": a.id}}}, nil
 	}
-	r := allowance.PostBytes
+	r, lasting := allowance.PostBytes, false
 	if c.Data != "" {
 		var d allowanceTransferData
 		dec := json.NewDecoder(strings.NewReader(c.Data))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&d); err != nil || d.Schema != 1 || dec.More() {
-			return Result{}, problem(400, "invalid_request", `allowance.transfer data, when given, is {"schema":1,"resource":RESOURCE}.`)
+			return Result{}, problem(400, "invalid_request", `allowance.transfer data, when given, is {"schema":1,"resource":RESOURCE,"lasting":BOOL}.`)
 		}
 		if d.Resource != "" {
 			r = allowance.Resource(d.Resource)
 		}
+		lasting = d.Lasting
 		if _, ok := ledger.KnownResources[r]; !ok {
 			return Result{}, allowanceError("invalid_resource")
 		}
 	}
-	return s.ledgerTransfer(ctx, tx, c, a, r, now)
+	return s.ledgerTransfer(ctx, tx, c, a, r, lasting, now)
 }
 
 // readLedger is ledger.list: the public journal, newest first, optionally

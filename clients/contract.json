@@ -533,6 +533,10 @@
       "wire": "https",
       "data": {
         "fields": {
+          "lasting": {
+            "type": "bool",
+            "required": false
+          },
           "resource": {
             "type": "string",
             "required": false,

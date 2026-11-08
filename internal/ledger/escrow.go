@@ -101,8 +101,7 @@ func (l *Ledger) escrow(ctx context.Context, q allowance.Querier, o *op, from al
 		return err
 	}
 	o.capOwn(lots, c)
-	lasting := func(x lot) bool { return o.p.transferable(x) && (x.ExpiresAt == 0 || x.ExpiresAt > h.ExpiresAt) }
-	parts, got := plan(lots, h.Max, lasting)
+	parts, got := plan(lots, h.Max, o.p.outlasting(h.ExpiresAt))
 	if got < h.Max {
 		if _, all := plan(lots, h.Max, nil); all >= h.Max {
 			return refuse("not_transferable")

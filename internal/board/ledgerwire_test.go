@@ -121,8 +121,12 @@ func TestLedgerOnEndToEnd(t *testing.T) {
 		t.Fatalf("credit.transfer %v", tr)
 	}
 	at := run(t, s, signed(alice, Command{Operation: "allowance.transfer", Target: keyID(bob), Amount: 10, Data: `{"schema":1,"resource":"post_bytes"}`})).Data
-	if at["transfer"].(map[string]any)["state"] != "done" {
+	if tt := at["transfer"].(map[string]any); tt["state"] != "done" || tt["by_bucket"].(map[string]int64)["free"] != 10 || tt["expires_at"].(int64) == 0 {
 		t.Fatalf("allowance.transfer %v", at)
+	}
+	// C819: lasting moves only units that outlast today; alice holds free ones only.
+	if msg := failsWith(t, s, signed(alice, Command{Operation: "allowance.transfer", Target: keyID(bob), Amount: 10, Data: `{"schema":1,"resource":"post_bytes","lasting":true}`}), "not_transferable"); !strings.Contains(msg, "outlast today") {
+		t.Fatalf("lasting refusal %q", msg)
 	}
 	fails(t, s, signed(alice, Command{Operation: "allowance.transfer", Target: keyID(bob), Amount: 10, Data: `{"schema":1,"resource":"gold"}`}), "invalid_resource")
 	fails(t, s, signed(alice, Command{Operation: "allowance.transfer", Target: keyID(alice), Amount: 10}), "self_transfer")

@@ -150,6 +150,12 @@ func errWorkRewardNotTransferable() error {
 	return problem(409, "not_transferable", "Your credits that last are too few for this reward and its fee: a reward is held until the task's deadline, and free daily credits expire at the end of their day, so they cannot fund one. Rewards come from earned credits (do a small paid task: "+EarnURL+"), bought or granted ones; allowance.get shows yours by bucket. Or post the task without a reward: that is free.")
 }
 
+// errTransferNotLasting is not_transferable on allowance.transfer with
+// lasting: free daily credits end with their day, so they never count.
+func errTransferNotLasting() error {
+	return problem(409, "not_transferable", "Your credits that outlast today are too few for this amount and its fee: lasting moves only those (earned, bought or granted), never free daily credits. allowance.get shows yours by bucket.")
+}
+
 // errVerdictRecipientLimit is recipient_limit on a verdict that pays: the
 // payee's daily incoming credit is full, and the verdict changed nothing.
 func errVerdictRecipientLimit() error {

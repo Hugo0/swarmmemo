@@ -123,11 +123,20 @@ func (p *AllowanceParams) transferable(x lot) bool {
 	return true
 }
 
+// outlasting accepts the transferable lots that do not expire by at (0
+// never expires): an escrow holds them to its deadline, a lasting transfer
+// moves only those that outlive the current UTC day.
+func (p *AllowanceParams) outlasting(at int64) func(lot) bool {
+	return func(x lot) bool { return p.transferable(x) && (x.ExpiresAt == 0 || x.ExpiresAt > at) }
+}
+
 // Transfer moves units between two signed accounts (§2.4). The fixed fee is
 // spent, not moved; the recipient's inbound per day is capped; with an
 // active breaker the transfer is pending, its lots held, until execute_at.
+// With lasting, only lots that outlive the current UTC day move (C819): a
+// gift meant to fund a reward is not free daily credit that ends tonight.
 // requestKey makes it idempotent: the same key returns the same transfer.
-func (l *Ledger) Transfer(ctx context.Context, q allowance.Querier, from allowance.Subject, to string, r allowance.Resource, amount int64, requestKey string, now int64) (Transfer, error) {
+func (l *Ledger) Transfer(ctx context.Context, q allowance.Querier, from allowance.Subject, to string, r allowance.Resource, amount int64, lasting bool, requestKey string, now int64) (Transfer, error) {
 	if !from.Signed || from.ID == "" || to == "" || requestKey == "" {
 		return Transfer{}, errors.New("ledger: a transfer needs a signed sender, a recipient and a request key")
 	}
@@ -148,7 +157,7 @@ func (l *Ledger) Transfer(ctx context.Context, q allowance.Querier, from allowan
 	if o.lv.FreezeTransfers {
 		return Transfer{}, refuse("transfers_frozen")
 	}
-	t, refusal := l.transfer(ctx, q, o, from, to, amount, id, requestKey)
+	t, refusal := l.transfer(ctx, q, o, from, to, amount, lasting, id, requestKey)
 	if refusal != nil && !isRefusal(refusal) {
 		return Transfer{}, refusal
 	}
@@ -158,7 +167,7 @@ func (l *Ledger) Transfer(ctx context.Context, q allowance.Querier, from allowan
 	return t, refusal
 }
 
-func (l *Ledger) transfer(ctx context.Context, q allowance.Querier, o *op, from allowance.Subject, to string, amount int64, id, requestKey string) (Transfer, error) {
+func (l *Ledger) transfer(ctx context.Context, q allowance.Querier, o *op, from allowance.Subject, to string, amount int64, lasting bool, id, requestKey string) (Transfer, error) {
 	if err := l.sweepOwn(ctx, q, o, from.ID); err != nil {
 		return Transfer{}, err
 	}
@@ -182,7 +191,11 @@ func (l *Ledger) transfer(ctx context.Context, q allowance.Querier, o *op, from 
 	o.capOwn(lots, c)
 	// Moving units draws nothing: the recipient's spend of a moved free lot
 	// draws from the slices by the lot's origin.
-	parts, got := plan(lots, amount, o.p.transferable)
+	ok := o.p.transferable
+	if lasting {
+		ok = o.p.outlasting((o.day + 1) * 86400)
+	}
+	parts, got := plan(lots, amount, ok)
 	if got < amount {
 		if _, all := plan(lots, amount, nil); all >= amount {
 			return Transfer{}, refuse("not_transferable")

@@ -139,7 +139,7 @@ func (s *Store) transfer(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		if err := requireSigned(a); err != nil {
 			return Result{}, err
 		}
-		return s.ledgerTransfer(ctx, tx, c, a, allowance.PostBytes, now)
+		return s.ledgerTransfer(ctx, tx, c, a, allowance.PostBytes, false, now)
 	case LedgerShadow:
 		return s.shadowedTransfer(ctx, tx, c, a, now)
 	}

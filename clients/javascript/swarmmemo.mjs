@@ -165,7 +165,7 @@ export const CONTRACT = Object.freeze({
   "agent.rotate": {"fields":["target","proof"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "agents.list": {"fields":["query","cursor","limit","kind","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"include":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "allowance.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
-  "allowance.transfer": {"fields":["target","amount","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"resource":{"type":"string","required":false,"enum":"allowance_resources"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "allowance.transfer": {"fields":["target","amount","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"lasting":{"type":"bool","required":false},"resource":{"type":"string","required":false,"enum":"allowance_resources"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "allowance.transfer.cancel": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "app.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "app.house.create": {"fields":["handle"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},

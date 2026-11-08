@@ -211,7 +211,7 @@ func TestSpendLimitTransfers(t *testing.T) {
 		var t Transfer
 		err := h.do(func(q *sql.Tx) error {
 			var err error
-			t, err = h.l.Transfer(ctx, q, key, "friend", allowance.Credit, amount, k, h.now)
+			t, err = h.l.Transfer(ctx, q, key, "friend", allowance.Credit, amount, false, k, h.now)
 			return err
 		})
 		return t, err

@@ -771,7 +771,7 @@ func (s *Store) releasePostage(ctx context.Context, tx *sql.Tx, m memberRow, kee
 		return err
 	}
 	sender := allowance.Subject{ID: m.AddedBy, Signed: true, Hosted: hosted}
-	_, err = s.ledger.led.Transfer(ctx, tx, sender, m.Account, allowance.Credit, h.Max, "postage:"+m.Room+":"+m.Account, now)
+	_, err = s.ledger.led.Transfer(ctx, tx, sender, m.Account, allowance.Credit, h.Max, false, "postage:"+m.Room+":"+m.Account, now)
 	var refused *allowance.Err
 	if errors.As(err, &refused) {
 		return nil

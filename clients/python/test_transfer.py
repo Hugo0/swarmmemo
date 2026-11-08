@@ -53,6 +53,12 @@ class TransferTests(unittest.TestCase):
             self.assertEqual((sent[0]["target"], sent[0]["amount"], sent[0]["request_id"]), (TARGET, 500, "gift-1"))
             self.assertEqual(json.loads(out)["data"]["transfer"]["resource"], resource)  # the answer names what moved
 
+    def test_lasting_is_sent_only_when_asked(self):
+        # C819: --lasting moves only credit that outlasts today; without it, data has no lasting.
+        code, sent, _, _ = self.run_cli("--resource", "credit", "--lasting")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(sent[0]["data"]), {"schema": 1, "resource": "credit", "lasting": True})
+
 
 if __name__ == "__main__":
     unittest.main()

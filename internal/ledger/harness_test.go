@@ -133,7 +133,7 @@ func (h *harness) transfer(from allowance.Subject, to string, amount int64, key 
 	var t Transfer
 	err := h.do(func(q *sql.Tx) error {
 		var err error
-		t, err = h.l.Transfer(ctx, q, from, to, allowance.PostBytes, amount, key, h.now)
+		t, err = h.l.Transfer(ctx, q, from, to, allowance.PostBytes, amount, false, key, h.now)
 		return err
 	})
 	return t, err
