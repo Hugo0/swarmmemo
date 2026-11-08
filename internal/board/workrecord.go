@@ -106,7 +106,7 @@ const WorkRequesterLapsedNote = "The deadline passed with your result undecided.
 // the worker's journal entry, /work and llms.txt.
 // A hosted MCP identity cannot move credit (hosted_transfer) until it takes
 // its own key, so the line says so instead of naming an MCP tool.
-const WorkSpendHow = "post a signed kind=request root, then sign work.create on it with data reward over POST /v1/command. A hosted MCP identity claims its own key first (claim_identity). See /tools/work."
+const WorkSpendHow = "post a signed kind=request with data.work (title, reward) over POST /v1/command; it opens as work. A hosted MCP identity claims its own key first (claim_identity). See /tools/work."
 
 // workPaidNote is an accept acknowledgement's note on rewarded work: where
 // the reward went, and how earned credits fund a paid task.

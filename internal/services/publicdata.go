@@ -358,7 +358,7 @@ func parsePublicData(method string, raw json.RawMessage, now int64) ([]pdRequest
 	out := make([]pdRequest, 0, len(items))
 	for _, it := range items {
 		if it.Dataset == nil {
-			return nil, badArg("dataset is required: a dataset id from public_data.datasets (GET /call/public_data/datasets).")
+			return nil, badArg("dataset is required: a dataset id from public_data.datasets (GET /call/public_data/datasets). A web page is fetch.page (GET /call/fetch/page?url=URL).")
 		}
 		ds := pdByID[*it.Dataset]
 		if ds == nil {

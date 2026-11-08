@@ -123,7 +123,7 @@ func TestArgRefusalsNameTheArgument(t *testing.T) {
 		{"public_data no dataset", func() error {
 			_, err := parsePublicData("fetch", json.RawMessage(`{}`), 1_790_000_000)
 			return err
-		}, []string{"dataset is required"}},
+		}, []string{"dataset is required", "/call/fetch/page?url="}},
 		{"screen bad threshold", func() error {
 			_, err := parseScreen(json.RawMessage(`{"text":"hello","source":"web","threshold":2}`))
 			return err

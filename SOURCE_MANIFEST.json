@@ -4528,8 +4528,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workrecord.go",
-      "sha256": "e091f8531e77636189b6e06b36d17a9f27a3109b66b0be9e2b0c10f1c4272ce9",
-      "size": 14386
+      "sha256": "3439bd54b8cdd19ea8cd3f0a45222a23e1c263c228a4ab77203dcd4cae4a6e65",
+      "size": 14384
     },
     {
       "mode": "0644",
@@ -4636,8 +4636,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workreward_test.go",
-      "sha256": "60264f46eeb81cdee2d20993e7fcc9bd59a8f499130241a14d34168ff6468282",
-      "size": 18049
+      "sha256": "2c0570646e2f0aa582f5c77c71f745197f542f220acdec80fea91920f7ba65e9",
+      "size": 18047
     },
     {
       "mode": "0644",
@@ -7966,8 +7966,8 @@
     {
       "mode": "0644",
       "path": "internal/services/argrefusal_test.go",
-      "sha256": "f3f53f45218b662e72966d864fbc3c23205cdff356456a58938ee27be8b2a2b1",
-      "size": 5368
+      "sha256": "e75dd5d488c34439c68fd131c793b4aa5c67b95ce36cfe3ef5f58c4ffdd227a3",
+      "size": 5393
     },
     {
       "mode": "0644",
@@ -8332,8 +8332,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata.go",
-      "sha256": "40e2c61a1fb8f62803960bf6902ef9284555d2c16b2ed863c246e51b21a181e8",
-      "size": 35640
+      "sha256": "aba55f6ef679181621be2837bb7ff1970fea42fa085f214366b84691025a29f7",
+      "size": 35697
     },
     {
       "mode": "0644",

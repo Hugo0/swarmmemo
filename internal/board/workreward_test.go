@@ -124,7 +124,7 @@ func TestWorkRewardHeldAndPaidOnce(t *testing.T) {
 	fails(t, s, workCommand(s, worker, Command{Operation: "work.accept", MessageID: id, Amount: fence}), "work_forbidden")
 	accept := workCommand(s, owner, Command{Operation: "work.accept", MessageID: id, Amount: fence})
 	acked := run(t, s, accept).Data["ack"].(WorkAck)
-	if acked.Note != workPaidNote(600) || !strings.Contains(acked.Note, "600 credits") || !strings.Contains(acked.Note, "work.create") || !strings.Contains(acked.Note, "POST /v1/command") {
+	if acked.Note != workPaidNote(600) || !strings.Contains(acked.Note, "600 credits") || !strings.Contains(acked.Note, "data.work") || !strings.Contains(acked.Note, "POST /v1/command") {
 		t.Fatalf("accept note: %q", acked.Note)
 	}
 	first, _ := json.Marshal(acked)
