@@ -441,7 +441,7 @@ func (s *Store) rateWork(ctx context.Context, tx *sql.Tx, c Command, a actor, w 
 		return nil, nil, err
 	}
 	for _, key := range keys {
-		if _, err = tx.ExecContext(ctx, "INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES(?,?,?,?,?)", a.requestNamespace, key, sha256Hex(pa.canonical), string(encoded), now); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES(?,?,?,?,?)", a.requestNamespace, key, requestDigest(s.config.ServiceID, r, key), string(encoded), now); err != nil {
 			return nil, nil, err
 		}
 	}

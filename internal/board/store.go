@@ -61,6 +61,27 @@ func Canonical(serviceID string, cmd Command) []byte {
 	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'})
 }
 
+// requestDigest is the digest a requests row keeps under its key. A nonce key
+// covers the whole signed command, as replay protection always has. A
+// request_id key leaves out each signing's freshness (timestamp and nonce;
+// Canonical already drops signature and proof), so a client that re-signs the
+// same command under the same request_id finds its receipt (C820). The
+// namespace is the account and the public key stays in the digest, so only
+// the same signer matches.
+func requestDigest(serviceID string, cmd Command, key string) string {
+	if strings.HasPrefix(key, "id:") {
+		cmd.Timestamp, cmd.Nonce = 0, ""
+	}
+	return sha256Hex(Canonical(serviceID, cmd))
+}
+
+// sameRequest reports whether a stored requests digest belongs to cmd. Rows
+// written before C820 digested the full command under request_id keys too, so
+// that digest still matches.
+func sameRequest(stored, serviceID string, cmd Command, key string) bool {
+	return stored == requestDigest(serviceID, cmd, key) || stored == sha256Hex(Canonical(serviceID, cmd))
+}
+
 type Store struct {
 	// inviteLedgerOn is Features.Ledger == LedgerOn as opened: the background
 	// funnel flush reads it to pay invite rewards, so it never reads config,
@@ -1172,7 +1193,6 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 			return empty, err
 		}
 	}
-	digest := sha256Hex(a.canonical)
 	keys := []string{}
 	if mutation(cmd.Operation) {
 		if cmd.RequestID != "" {
@@ -1199,7 +1219,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 				}
 			}
 			if err == nil {
-				if digest != storedDigest {
+				if !sameRequest(storedDigest, s.config.ServiceID, cmd, key) {
 					return empty, problem(409, "idempotency_conflict", "This request ID or nonce already belongs to a different command; use a new identifier.")
 				}
 				var result Result
@@ -1243,7 +1263,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 		// An anonymous public post's exact retry from another network
 		// (anonretry.go): the original receipt, nothing published or charged.
 		if cmd.RequestID != "" {
-			retry, found, err := s.anonymousCrossNetworkRetry(ctx, tx, cmd, a, "id:"+cmd.RequestID, digest, now)
+			retry, found, err := s.anonymousCrossNetworkRetry(ctx, tx, cmd, a, "id:"+cmd.RequestID, now)
 			if err != nil {
 				return empty, err
 			}
@@ -1312,7 +1332,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 			return empty, err
 		}
 		for _, key := range keys {
-			if _, err = tx.ExecContext(ctx, "INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES(?,?,?,?,?)", a.requestNamespace, key, digest, string(encoded), now); err != nil {
+			if _, err = tx.ExecContext(ctx, "INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES(?,?,?,?,?)", a.requestNamespace, key, requestDigest(s.config.ServiceID, cmd, key), string(encoded), now); err != nil {
 				return empty, err
 			}
 		}

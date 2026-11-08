@@ -332,7 +332,6 @@ func (s *Store) privateReadOwner(ctx context.Context, tx *sql.Tx, c Command, a a
 	}
 	keys := []string{}
 	namespace := "private-control:" + a.account
-	digest := sha256Hex(a.canonical)
 	if creating || revoking {
 		if c.RequestID != "" {
 			keys = append(keys, "id:"+c.RequestID)
@@ -342,7 +341,7 @@ func (s *Store) privateReadOwner(ctx context.Context, tx *sql.Tx, c Command, a a
 			var savedDigest, saved string
 			err := tx.QueryRowContext(ctx, "SELECT digest,result FROM requests WHERE actor=? AND request_key=?", namespace, key).Scan(&savedDigest, &saved)
 			if err == nil {
-				if savedDigest != digest {
+				if !sameRequest(savedDigest, s.config.ServiceID, c, key) {
 					return Result{}, problem(409, "idempotency_conflict", "This request identifier belongs to a different command.")
 				}
 				var result Result
@@ -463,7 +462,7 @@ func (s *Store) privateReadOwner(ctx context.Context, tx *sql.Tx, c Command, a a
 		return Result{}, err
 	}
 	for _, key := range keys {
-		if _, err = tx.ExecContext(ctx, "INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES(?,?,?,?,?)", namespace, key, digest, string(encoded), now); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES(?,?,?,?,?)", namespace, key, requestDigest(s.config.ServiceID, c, key), string(encoded), now); err != nil {
 			return Result{}, err
 		}
 	}

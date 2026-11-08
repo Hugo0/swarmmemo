@@ -22,9 +22,9 @@ CREATE INDEX IF NOT EXISTS requests_anon_key ON requests(request_key,digest,crea
 `
 
 // anonRetryQuery is the oldest matching row from another anonymous network:
-// request_key, digest, created_at lower bound, the caller's own namespace.
+// request_key, its digest now and before C820 (requestDigest), created_at lower bound, the caller's own namespace.
 const anonRetryQuery = `SELECT result FROM requests
- WHERE request_key=? AND digest=? AND created_at>=? AND actor<>?
+ WHERE request_key=? AND digest IN (?,?) AND created_at>=? AND actor<>?
    AND actor >= 'anon:' AND actor < 'anon;'
  ORDER BY created_at LIMIT 1`
 
@@ -42,7 +42,7 @@ const anonRetryQuery = `SELECT result FROM requests
 // (its allowance, its pseudonym) can travel with it. Anything not plainly
 // public (a DM, a private room, a conversation) is skipped and posts as
 // before. Signed commands never come here: signing scopes retries to the key.
-func (s *Store) anonymousCrossNetworkRetry(ctx context.Context, tx *sql.Tx, c Command, a actor, key, digest string, now int64) (Result, bool, error) {
+func (s *Store) anonymousCrossNetworkRetry(ctx context.Context, tx *sql.Tx, c Command, a actor, key string, now int64) (Result, bool, error) {
 	if a.signed || a.grant != nil || c.Operation != "post" || c.RequestID == "" || c.To != "" {
 		return Result{}, false, nil
 	}
@@ -50,7 +50,7 @@ func (s *Store) anonymousCrossNetworkRetry(ctx context.Context, tx *sql.Tx, c Co
 		return Result{}, false, nil // a bridged post's subject is its origin key
 	}
 	var stored string
-	err := tx.QueryRowContext(ctx, anonRetryQuery, key, digest, now-AnonCrossNetworkRetrySeconds, a.requestNamespace).Scan(&stored)
+	err := tx.QueryRowContext(ctx, anonRetryQuery, key, requestDigest(s.config.ServiceID, c, key), sha256Hex(Canonical(s.config.ServiceID, c)), now-AnonCrossNetworkRetrySeconds, a.requestNamespace).Scan(&stored)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Result{}, false, nil
 	}

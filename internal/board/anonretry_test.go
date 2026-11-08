@@ -128,7 +128,7 @@ func TestAnonCrossNetworkRetryLeavesDirectAlone(t *testing.T) {
 // The lookup uses its partial index, never a table scan.
 func TestAnonCrossNetworkRetryUsesIndex(t *testing.T) {
 	s := openTest(t, Config{})
-	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+anonRetryQuery, "id:x", "d", 0, "anon:x")
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+anonRetryQuery, "id:x", "d", "e", 0, "anon:x")
 	if err != nil {
 		t.Fatal(err)
 	}

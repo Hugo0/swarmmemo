@@ -164,6 +164,49 @@ func TestDurableIdempotencyAndConflict(t *testing.T) {
 	}
 }
 
+// C820: a client re-running the same command signs a fresh timestamp and
+// nonce; under the same request_id it still gets the first receipt, nothing
+// spent twice. Different content under that request_id, or a nonce reused for
+// a different command, stays a conflict.
+func TestRequestIDRetryWithFreshEnvelope(t *testing.T) {
+	s := openTest(t, Config{})
+	key := keyFor(3)
+	first := signed(key, Command{Operation: "post", Text: "once", RequestID: "re-signed"})
+	r := run(t, s, first)
+	quota := run(t, s, signed(key, Command{Operation: "quota.get"})).Data["used_bytes"]
+	s.now = func() time.Time { return time.Unix(testTime+60, 0) }
+	again := run(t, s, signed(key, Command{Operation: "post", Text: "once", RequestID: "re-signed", Timestamp: testTime + 60}))
+	if !again.Receipt.Duplicate || again.Receipt.ID != r.Receipt.ID {
+		t.Fatalf("re-signed retry: %+v vs %+v", again.Receipt, r.Receipt)
+	}
+	if q := run(t, s, signed(key, Command{Operation: "quota.get", Timestamp: testTime + 60})).Data["used_bytes"]; q != quota {
+		t.Fatalf("retry spent quota: %v != %v", q, quota)
+	}
+	fails(t, s, signed(key, Command{Operation: "post", Text: "other", RequestID: "re-signed", Timestamp: testTime + 60}), "idempotency_conflict")
+	fails(t, s, signed(key, Command{Operation: "post", Text: "other", RequestID: "new-id", Timestamp: testTime + 60, Nonce: first.Nonce}), "idempotency_conflict")
+	// The nonce key still covers the whole envelope: the same command and
+	// nonce at another timestamp is a conflict, as before C820.
+	fails(t, s, signed(key, Command{Operation: "post", Text: "once", Timestamp: testTime + 60, Nonce: first.Nonce}), "idempotency_conflict")
+	// Another key under the same request_id is its own namespace: a new post.
+	other := run(t, s, signed(keyFor(4), Command{Operation: "post", Text: "once", RequestID: "re-signed", Timestamp: testTime + 60}))
+	if other.Receipt.Duplicate || other.Receipt.ID == r.Receipt.ID {
+		t.Fatal("another key's request_id matched")
+	}
+	// A row stored before C820 kept the full command's digest under its
+	// request_id: the exact envelope still finds it.
+	res, err := s.db.Exec("UPDATE requests SET digest=? WHERE request_key='id:re-signed' AND digest=?", sha256Hex(Canonical(s.config.ServiceID, first)), requestDigest(s.config.ServiceID, first, "id:re-signed"))
+	if n, _ := res.RowsAffected(); err != nil || n != 1 {
+		t.Fatalf("legacy row: %v, %d rows", err, n)
+	}
+	if legacy := run(t, s, first); !legacy.Receipt.Duplicate || legacy.Receipt.ID != r.Receipt.ID {
+		t.Fatal("pre-C820 row stopped matching")
+	}
+	fails(t, s, signed(key, Command{Operation: "post", Text: "other", RequestID: "re-signed", Timestamp: testTime + 60}), "idempotency_conflict")
+	if n := len(run(t, s, Command{Operation: "messages.list"}).Messages); n != 2 {
+		t.Fatalf("%d posts, want 2", n)
+	}
+}
+
 func TestSignatureBindingAndAnonymousDuplicates(t *testing.T) {
 	s := openTest(t, Config{})
 	key := keyFor(2)
