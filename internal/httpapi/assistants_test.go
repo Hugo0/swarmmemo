@@ -293,9 +293,11 @@ func TestPluginPackage(t *testing.T) {
 	}
 	// Codex reads extensions.com.openai in plugin.json; .codex-plugin is its
 	// fallback, and the one awesome-codex-plugins mirrors (with the files its
-	// skills, mcpServers and interface fields name, LICENSE, SECURITY.md and
-	// .codexignore). Same metadata and listing, no hooks; its server is the
-	// directory profile (below).
+	// skills, mcpServers and interface fields name, LICENSE and SECURITY.md).
+	// Same metadata and listing, no hooks; its server is the directory profile
+	// (below). No dotfiles: the Claude directory refuses a plugin folder holding
+	// any but .gitignore, and scripts/openai_package.py drops the other
+	// platforms' folders itself.
 	var codex struct {
 		Name, Version, Description string
 		License, Repository        string
@@ -344,7 +346,7 @@ func TestPluginPackage(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"hooks", "SECURITY.md", ".codexignore"} {
-		if _, err := os.Stat(filepath.Join(root, name)); (err == nil) != (name != "hooks") {
+		if _, err := os.Stat(filepath.Join(root, name)); (err == nil) != (name == "SECURITY.md") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
