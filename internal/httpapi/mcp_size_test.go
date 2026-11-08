@@ -66,10 +66,12 @@ import (
 // (about 70 bytes net): /mcp budget raised by 100.
 // C790 (2026-11-07): fetch_page's field input (a JSON pointer, about 220
 // bytes with its description): /mcp 138,643; budget raised by 200.
+// C830 (2026-11-08): create_work per_agent_cooldown_days (about 90 bytes):
+// /mcp and assistant budgets raised by 100.
 var mcpToolsListBudget = map[string]int{
-	"/mcp":               138_700,
+	"/mcp":               138_800,
 	mcpProfileCore:       101_500,
-	web.AssistantMCPPath: 103_400,
+	web.AssistantMCPPath: 103_500,
 }
 
 // mcpOutputSchemaBudget is the most bytes one tool's output schema may be.

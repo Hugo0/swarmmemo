@@ -309,7 +309,7 @@ WORK_REQUIRED = frozenset(memo.CONTRACT["structs"]["work"]["required"])
 WORK_OPTIONAL = frozenset(memo.CONTRACT["structs"]["work"]["optional"])
 # A standing task's read (Go WorkStanding): its seats as counts, its limits,
 # its tiers, optional daily USDC caps, optional results_max with full (C346)
-# and optional per_agent_max (C672).
+# optional per_agent_max (C672) and per_agent_cooldown_days (C830).
 STANDING_COUNTS = frozenset(memo.CONTRACT["structs"]["work_standing"]["required"]) - {"tiers"}
 STANDING_OPTIONAL = frozenset(memo.CONTRACT["structs"]["work_standing"]["optional"])
 STANDING_TIER = PATTERNS["standing_tier"]
@@ -377,6 +377,7 @@ def _valid_create_options(data):
         if "day_max" in data and not whole(data["day_max"], 1, LIMITS["work_standing_day_maximum"]): return False
         if "results_max" in data and not whole(data["results_max"], seats, LIMITS["work_standing_results_maximum"]): return False
         if "per_agent_max" in data and not whole(data["per_agent_max"], 1, data.get("results_max", LIMITS["work_standing_results_maximum"])): return False
+        if "per_agent_cooldown_days" in data and not whole(data["per_agent_cooldown_days"], 1, LIMITS["work_standing_cooldown_days_maximum"]): return False
         if ("reward" in data) == ("tiers" in data): return False
         usdc = []
         if "reward" in data:
@@ -407,6 +408,8 @@ def _standing(standing):
     if (not isinstance(standing, dict) or set(standing) - STANDING_COUNTS - STANDING_OPTIONAL - {"tiers"} or not STANDING_COUNTS <= standing.keys()
             or standing.get("full", True) is not True
             or any(name in standing and (type(standing[name]) is not int or not 1 <= standing[name] <= LIMITS["work_standing_results_maximum"]) for name in ("results_max", "per_agent_max"))
+            or ("per_agent_cooldown_days" in standing and (type(standing["per_agent_cooldown_days"]) is not int
+                                                           or not 1 <= standing["per_agent_cooldown_days"] <= LIMITS["work_standing_cooldown_days_maximum"]))
             or any(type(standing[name]) is not int or not 0 <= standing[name] < 2**63 for name in STANDING_COUNTS)
             or any(name in standing and _usdc_units(standing[name]) is None for name in ("usdc_per_agent_day", "usdc_day_max", "usdc_owed", "usdc_owed_max"))
             or ("next_open_at" in standing and (type(standing["next_open_at"]) is not int or not 0 < standing["next_open_at"] < 2**63))

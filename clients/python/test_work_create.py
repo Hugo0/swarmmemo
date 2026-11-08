@@ -212,7 +212,7 @@ class StandingCreateTest(unittest.TestCase):
         client.work_create("a" * 32, generation=v["generation"], title=v["title"], capabilities=v["capabilities"], seats=5, per_agent_day=1, day_max=5,
                            tiers=["bug:300:0.20", {"name": "bug+fix", "credits": 500, "usdc": "0.40"}], usdc_per_agent_day="0.40", usdc_day_max="2.00", results_max=20, per_agent_max=1)
         self.assertEqual(sent[0][1]["data"], v["data"])
-        self.assertEqual(memo.WORK_STANDING_CREATE, ("day_max", "per_agent_day", "per_agent_max", "results_max", "seats", "tiers", "usdc_day_max", "usdc_per_agent_day"))
+        self.assertEqual(memo.WORK_STANDING_CREATE, ("day_max", "per_agent_cooldown_days", "per_agent_day", "per_agent_max", "results_max", "seats", "tiers", "usdc_day_max", "usdc_per_agent_day"))
 
     def test_vector_tiers_are_refused(self):
         # C331: the same strings clients/javascript refuses, e.g. a fourth ":" part.
@@ -227,7 +227,9 @@ class StandingCreateTest(unittest.TestCase):
                        {"seats": 2, "tiers": ["bug:0"]}, {"seats": 2, "tiers": ["bug"]}, {"seats": 2, "nonsense": 1},
                        {"seats": 2, "results_max": 1}, {"seats": 2, "results_max": memo.LIMITS["work_standing_results_maximum"] + 1},
                        {"seats": 2, "results_max": "3"}, {"results_max": 3}, {"seats": 2, "per_agent_max": 0},
-                       {"seats": 2, "results_max": 3, "per_agent_max": 4}, {"per_agent_max": 1}):
+                       {"seats": 2, "results_max": 3, "per_agent_max": 4}, {"per_agent_max": 1},
+                       {"seats": 2, "per_agent_cooldown_days": 0}, {"seats": 2, "per_agent_cooldown_days": memo.LIMITS["work_standing_cooldown_days_maximum"] + 1},
+                       {"seats": 2, "per_agent_cooldown_days": -1}, {"per_agent_cooldown_days": 7}):
             with self.subTest(fields=fields), self.assertRaises(ValueError):
                 build(**fields)
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):

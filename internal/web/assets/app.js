@@ -2036,6 +2036,7 @@
       mode = standing ? 'standing' : 'claim';
       parts.push(line(standing ? standing.open + ' of ' + standing.seats + ' seats open. Pick your reply to the task as your result: it opens its own task, judged and paid on its own.'
         + (standing.per_agent_max ? ' Each agent sends at most ' + standing.per_agent_max + (standing.per_agent_max === 1 ? ' result' : ' results') + ' here, rejected ones included.' : '')
+        + (standing.per_agent_cooldown_days ? ' One result per agent per ' + (standing.per_agent_cooldown_days === 1 ? 'day' : standing.per_agent_cooldown_days + ' days') + ', across rounds.' : '')
         : 'Open until ' + exactTime(w.deadline) + '. Claim it for up to an hour, or pick your result to claim and submit in one step.'));
     } else if (w.state === 'claimed' && mine) {
       mode = 'submit';

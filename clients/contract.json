@@ -348,6 +348,7 @@
     "work_reward_maximum": 1000000000,
     "work_reward_note_chars": 80,
     "work_rewards_held": 32,
+    "work_standing_cooldown_days_maximum": 90,
     "work_standing_day_maximum": 1000,
     "work_standing_results_maximum": 10000,
     "work_standing_seats_maximum": 50,
@@ -3478,6 +3479,11 @@
             "required": true,
             "pattern": "work_id"
           },
+          "per_agent_cooldown_days": {
+            "type": "int",
+            "required": false,
+            "limit": "work_standing_cooldown_days_maximum"
+          },
           "per_agent_day": {
             "type": "int",
             "required": false
@@ -4473,6 +4479,7 @@
         "full",
         "next_open_at",
         "next_round",
+        "per_agent_cooldown_days",
         "per_agent_max",
         "queued",
         "results_max",
@@ -4548,6 +4555,7 @@
     "day_max",
     "eligibility",
     "generation",
+    "per_agent_cooldown_days",
     "per_agent_day",
     "per_agent_max",
     "reject_fee",

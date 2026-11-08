@@ -143,27 +143,28 @@ type rejectWorkInput struct {
 // createWorkInput is work.create's data, field for field (C377), with the
 // request and its deadline beside it.
 type createWorkInput struct {
-	MessageID       string   `json:"message_id"`
-	Title           string   `json:"title"`
-	Capabilities    []string `json:"capabilities" jsonschema:"Up to 16 lowercase slugs"`
-	Reward          any      `json:"reward,omitempty"`
-	Reviewer        string   `json:"reviewer,omitempty"`
-	ReviewerFee     int64    `json:"reviewer_fee,omitempty"`
-	RejectFee       int64    `json:"reject_fee,omitempty" jsonschema:"Credits for a rejected result"`
-	Eligibility     string   `json:"eligibility,omitempty" jsonschema:"open, first_work, linked or new_agent"`
-	RewardNote      string   `json:"reward_note,omitempty"`
-	TTL             int64    `json:"ttl,omitempty"`
-	Seats           int64    `json:"seats,omitempty"`
-	PerAgentDay     int64    `json:"per_agent_day,omitempty"`
-	DayMax          int64    `json:"day_max,omitempty"`
-	ResultsMax      int64    `json:"results_max,omitempty"`
-	PerAgentMax     int64    `json:"per_agent_max,omitempty" jsonschema:"Results one agent may send in all, rejected included"`
-	Tiers           []any    `json:"tiers,omitempty" jsonschema:"Up to 3 {name, credits, usdc}"`
-	USDCPerAgentDay string   `json:"usdc_per_agent_day,omitempty"`
-	USDCDayMax      string   `json:"usdc_day_max,omitempty"`
-	AnswerCommit    string   `json:"answer_commit,omitempty"`
-	AnswerNote      string   `json:"answer_commit_note,omitempty"`
-	KnownAnswer     string   `json:"known_answer,omitempty" jsonschema:"The known answer, kept private to you and the reviewer (/protocol.md#work-known-answers)"`
+	MessageID            string   `json:"message_id"`
+	Title                string   `json:"title"`
+	Capabilities         []string `json:"capabilities" jsonschema:"Up to 16 lowercase slugs"`
+	Reward               any      `json:"reward,omitempty"`
+	Reviewer             string   `json:"reviewer,omitempty"`
+	ReviewerFee          int64    `json:"reviewer_fee,omitempty"`
+	RejectFee            int64    `json:"reject_fee,omitempty" jsonschema:"Credits for a rejected result"`
+	Eligibility          string   `json:"eligibility,omitempty" jsonschema:"open, first_work, linked or new_agent"`
+	RewardNote           string   `json:"reward_note,omitempty"`
+	TTL                  int64    `json:"ttl,omitempty"`
+	Seats                int64    `json:"seats,omitempty"`
+	PerAgentDay          int64    `json:"per_agent_day,omitempty"`
+	DayMax               int64    `json:"day_max,omitempty"`
+	ResultsMax           int64    `json:"results_max,omitempty"`
+	PerAgentMax          int64    `json:"per_agent_max,omitempty" jsonschema:"Results one agent may send in all, rejected included"`
+	PerAgentCooldownDays int64    `json:"per_agent_cooldown_days,omitempty" jsonschema:"Days between one agent's results, across rounds"`
+	Tiers                []any    `json:"tiers,omitempty" jsonschema:"Up to 3 {name, credits, usdc}"`
+	USDCPerAgentDay      string   `json:"usdc_per_agent_day,omitempty"`
+	USDCDayMax           string   `json:"usdc_day_max,omitempty"`
+	AnswerCommit         string   `json:"answer_commit,omitempty"`
+	AnswerNote           string   `json:"answer_commit_note,omitempty"`
+	KnownAnswer          string   `json:"known_answer,omitempty" jsonschema:"The known answer, kept private to you and the reviewer (/protocol.md#work-known-answers)"`
 }
 
 // holdKnownAnswer turns create_work's known_answer into a commit under a
@@ -193,7 +194,7 @@ func (in createWorkInput) data(generation string) string {
 	}
 	for name, v := range map[string]any{"reward": in.Reward, "reviewer": in.Reviewer, "reviewer_fee": in.ReviewerFee, "reject_fee": in.RejectFee,
 		"eligibility": in.Eligibility, "reward_note": in.RewardNote, "seats": in.Seats, "per_agent_day": in.PerAgentDay, "day_max": in.DayMax,
-		"results_max": in.ResultsMax, "per_agent_max": in.PerAgentMax, "usdc_per_agent_day": in.USDCPerAgentDay, "usdc_day_max": in.USDCDayMax,
+		"results_max": in.ResultsMax, "per_agent_max": in.PerAgentMax, "per_agent_cooldown_days": in.PerAgentCooldownDays, "usdc_per_agent_day": in.USDCPerAgentDay, "usdc_day_max": in.USDCDayMax,
 		"answer_commit": in.AnswerCommit, "answer_commit_note": in.AnswerNote} {
 		if v != nil && v != "" && v != int64(0) {
 			d[name] = v

@@ -85,7 +85,7 @@ func TestPostedWorkOpensInOneCall(t *testing.T) {
 
 	// A standing task's signed create data is read back from the post.
 	st := run(t, s, postWork(s, owner, "Find bugs", map[string]any{"seats": 2, "tiers": tiers, "per_agent_max": 3, "reward_note": "thanks"}, 0))
-	if max, err := standingPerAgentMax(testContext, s.db, st.Receipt.ID); err != nil || max != 3 {
+	if max, _, err := standingCreateLimits(testContext, s.db, st.Receipt.ID); err != nil || max != 3 {
 		t.Fatalf("per_agent_max %d %v", max, err)
 	}
 	if got := getTestWork(t, s, st.Receipt.ID); got.RewardNote != "thanks" {

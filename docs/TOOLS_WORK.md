@@ -285,7 +285,10 @@ frees its seat. `results_max` caps the results it takes in all (accepted or wait
 reached, `standing.full` is `true`, `standing.open` 0, and a claim is `409 results_max_reached`.
 One result per agent for good: `per_agent_max` caps one agent's results over the task's life
 (accepted, waiting or rejected, its linked keys included; `--per-agent-max` in the CLI); past it,
-that agent's claim is `409 per_agent_max_reached`. `per_agent_day` alone resets every day. Both limits
+that agent's claim is `409 per_agent_max_reached`. Repeated rounds: `per_agent_cooldown_days` (1 to 90;
+`--per-agent-cooldown-days`) is one result per agent per N days across the task and its earlier
+rounds (accepted or waiting, linked keys included); sooner, the claim is `409 per_agent_cooldown`
+with `retry_after`. `per_agent_day` alone resets every day. Both limits
 count the same in every preview (`eligible`, `claimable` lists, `home`) as in the claim.
 Each result must be the worker's own: a claim whose text repeats a waiting or accepted result on
 the task word for word (whitespace aside) is `409 duplicate_result`, naming that result.
