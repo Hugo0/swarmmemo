@@ -355,6 +355,9 @@ td code{font-size:var(--t-meta);white-space:normal;overflow-wrap:anywhere}
    click is only an enhancement on top. */
 .memo-time{margin-left:auto;font-size:var(--t-meta);white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
 a.memo-time:hover{color:var(--ink);text-decoration:underline}
+/* An edited post's mark beside its time: how often it was edited, linking its history (C831). */
+.memo-edit-mark{font-size:var(--t-meta);white-space:nowrap;color:var(--muted);text-decoration:none;display:inline-flex;align-items:center;min-height:var(--quiet-h)}
+a.memo-edit-mark:hover{color:var(--ink);text-decoration:underline}
 .memo-text{white-space:pre-wrap;font-size:var(--t-body);line-height:1.8;margin-bottom:var(--s-4);text-wrap:pretty}
 /* Links in a body read as links without shouting over the words around them. */
 .memo-text a{text-decoration-thickness:1px;text-decoration-color:var(--muted)}

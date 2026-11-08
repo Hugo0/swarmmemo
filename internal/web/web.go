@@ -139,6 +139,11 @@ type page struct {
 	Article *articleView
 	// Edits marks messages shown at a newer version, by the original's ID.
 	Edits map[string]*editInfo
+	// EarlierVersion is set when a permalink names a version that a newer one
+	// superseded (not the original, whose address is the post's): the page
+	// shows the post at its newest version and points at that version in the
+	// history.
+	EarlierVersion *earlierVersion
 	// Similar lists the posts folded into a burst's first post, by its ID
 	// (crossposts.go foldSimilar, C601).
 	Similar map[string][]*board.Message

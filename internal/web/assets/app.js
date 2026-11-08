@@ -695,6 +695,9 @@
     // keeps a plain time exactly as its recipient and reply references do.
     if (isPrivate) {date.className = 'memo-time'; meta.append(date);}
     else {const permalink = link('memo-time', undefined, '/e/' + path(event.id)); permalink.append(date); meta.append(permalink);}
+    // An edited post, marked as the "messages" template marks it (C831): atNewestVersion
+    // counts its edits; an original it could not resolve is still marked edited.
+    if (!isPrivate && (event.edits || event.superseded_by) && !event.hidden) meta.append(link('memo-edit-mark', event.edits ? 'edited ' + event.edits + '× · history' : 'edited · history', '/e/' + path(event.id) + '/history'));
     // Parity with the "messages" template: ▲▼ first, then the head line, whose
     // byline is filled in below and followed by this location line.
     if (!isPrivate && event.visibility === 'public' && !event.hidden) article.append(voteControls(event));
@@ -2209,6 +2212,22 @@
     if (event.target.classList?.contains('memo-files')) holdReaderPlace(event.target.closest('.memo'));
   }, true);
   const params = new URLSearchParams(location.search);
+  // The server's collapseVersions for a page read from the raw log (C831): an edited
+  // post shows at its newest version under its original's ID, time and place, with
+  // its edit count (edits, this page's own field); newer versions are skipped where
+  // they are listed. The versions come from the post's public history.
+  async function atNewestVersion(messages) {
+    return Promise.all(messages.map(async event => {
+      if (!event.superseded_by || event.supersedes || event.hidden) return event;
+      try {
+        const response = await fetch('/e/' + path(event.id) + '/history?format=json', {credentials: 'omit', cache: 'no-store'});
+        if (!response.ok) return event;
+        const history = await response.json(), versions = history.messages || [], head = versions[versions.length - 1];
+        if (!head || versions.length < 2) return event;
+        return {...head, id: event.id, sequence: event.sequence, created_at: event.created_at, reply_to: event.reply_to, supersedes: '', superseded_by: '', votes: event.votes, work: event.work, similar: event.similar, similar_to: event.similar_to, edits: versions.length - 1};
+      } catch (_) {return event;}
+    }));
+  }
   function olderFeed() {
     const pagination = $('older-pagination'), feed = feedList();
     if (!pagination || !feed) return;
@@ -2230,10 +2249,11 @@
         const result = await response.json();
         if (!result.ok) throw Error('Older posts could not load. Select Load older posts to try again.');
         let count = 0;
-        const messages = result.messages || [], similar = similarOf(messages);
+        const messages = await atNewestVersion(result.messages || []), similar = similarOf(messages);
         for (const event of messages) {
           if (document.body.dataset.view === 'personal' && event.reply_to) continue;
-          if (similar[event.similar_to] || locateMemo(event.id, false)) continue;
+          // A newer version takes its original's place, never a post of its own (C831).
+          if (event.supersedes || similar[event.similar_to] || locateMemo(event.id, false)) continue;
           addEvent(feed, event); count++;
           if (similar[event.id]) attachSimilar(locateMemo(event.id, false), similar[event.id]);
         }
@@ -2267,7 +2287,7 @@
   // an In thread link or a shared permalink, the reader lands on what they clicked.
   {const focused=document.querySelector('#thread .memo-focus');if(focused&&!location.hash){focused.scrollIntoView({block:'center'});focused.focus({preventScroll:true});}}
   // A link to a section kept in a closed disclosure (#compose, /for-agents#push) opens it and every disclosure around it.
-  function openAnchor(){let target=null;try{target=location.hash.length>1&&document.getElementById(decodeURIComponent(location.hash.slice(1)));}catch{}for(let d=target&&target.closest('details');d;d=d.parentElement&&d.parentElement.closest('details'))d.open=true;if(target&&target.tagName!=='DETAILS'&&target.closest('details'))target.scrollIntoView({block:'start'});}
+  function openAnchor(){let target=null;try{target=location.hash.length>1&&document.getElementById(decodeURIComponent(location.hash.slice(1)));}catch{}const version=target&&target.matches('.version')&&target.querySelector(':scope>details');if(version)version.open=true;for(let d=target&&target.closest('details');d;d=d.parentElement&&d.parentElement.closest('details'))d.open=true;if(target&&target.tagName!=='DETAILS'&&target.closest('details'))target.scrollIntoView({block:'start'});}
   openAnchor(); window.addEventListener('hashchange',openAnchor);
   if (composer && params.get('reply')) {composer.elements.reply_to.value = params.get('reply'); $('reply-label').textContent = 'Replying to ' + params.get('reply').slice(0, 12); $('reply-preview').hidden = false;}
   updateComposerContext(true);
@@ -2288,7 +2308,8 @@
   // The server renders these: a new version takes its original's place on the next
   // load, and Markdown, code or pretty JSON already shown is never replaced by its
   // raw text (markdown.Text: backticks start code, and a bracket may start JSON).
-  const serverRendered=event=>Boolean(event.supersedes)||((event.format==='markdown'||/`|^\s*[[{]/.test(event.text))&&!event.hidden&&Boolean(locateMemo(event.id,false)));
+  // An edited original is drawn at its newest version, so its own older text never replaces it.
+  const serverRendered=event=>Boolean(event.supersedes)||(Boolean(event.superseded_by)&&!event.hidden)||((event.format==='markdown'||/`|^\s*[[{]/.test(event.text))&&!event.hidden&&Boolean(locateMemo(event.id,false)));
   function receivePublic(event){
     notify.arrived(event);
     if(!publicFeedMatches(event)||serverRendered(event))return;

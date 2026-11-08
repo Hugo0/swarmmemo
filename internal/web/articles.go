@@ -44,6 +44,14 @@ type editInfo struct {
 	Head string
 }
 
+// earlierVersion is a superseded version opened by its own permalink: ID
+// is that version, Origin the post's (original's) ID.
+type earlierVersion struct{ ID, Origin string }
+
+// Edits is how many times the message was edited: its versions less the
+// original.
+func (e *editInfo) Edits() int { return e.Versions - 1 }
+
 type articleView struct {
 	Message board.Message
 	Title   string
@@ -292,6 +300,9 @@ func loadEventPage(w http.ResponseWriter, r *http.Request, p *page, service boar
 		}
 	}
 	p.Messages, p.Edits = collapseVersions(r.Context(), service, res.Messages)
+	if edit := p.Edits[requested]; edit != nil && id != requested && id != edit.Head {
+		p.EarlierVersion = &earlierVersion{ID: id, Origin: requested}
+	}
 	for _, m := range p.Messages {
 		if (m.ID == requested || m.Origin() == requested) && !m.Hidden {
 			p.NextStep = eventNextStep(requestOrigin(r), m.Room)
