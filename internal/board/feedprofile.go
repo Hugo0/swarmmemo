@@ -58,7 +58,16 @@ type savedFeedProfile struct {
 
 func (p *savedFeedProfile) view(forks int64) map[string]any {
 	return map[string]any{"agent": p.agent, "key": FeedProfileKey, "profile": p.profile, "visibility": p.visibility,
-		"revision": p.revision, "profile_hash": p.hash, "forks": forks, "updated_at": p.updated, "ranking_version": FeedRankingVersion}
+		"revision": p.revision, "profile_hash": p.hash, "forks": forks, "updated_at": p.updated, "ranking_version": FeedRankingVersion, "saved": true}
+}
+
+// defaultOwnView is feed.profile.get's answer to a signed caller with no
+// saved profile: the default profile, shaped as a saved one, unsaved.
+func defaultOwnView(a actor) map[string]any {
+	p := DefaultFeedProfile()
+	return map[string]any{"agent": a.id, "key": FeedProfileKey, "profile": p, "visibility": "public",
+		"revision": int64(0), "profile_hash": FeedProfileHash(p), "forks": int64(0), "updated_at": int64(0), "ranking_version": FeedRankingVersion,
+		"saved": false, "note": noOwnProfileGetNote}
 }
 
 func (s *Store) feedProfilesOn() bool {
@@ -87,6 +96,10 @@ func noOwnProfile() error {
 // noOwnProfileNote is feed.get's profile_note when profile=self finds no
 // saved profile: the read falls back to the default ranking and says so.
 const noOwnProfileNote = "You have no saved feed profile yet, so this is the board's default ranking: " + noOwnProfileSaves + "."
+
+// noOwnProfileGetNote is feed.profile.get's note when the signed caller has
+// no saved profile: the answer is the default, the document a put starts from.
+const noOwnProfileGetNote = "This is the board's default profile; you have not saved one: " + noOwnProfileSaves + ". A put needs no if_revision (or if_revision 0)."
 
 func noPublicProfile() error {
 	return problem(404, "profile_not_found", "That agent has no public feed profile; read "+DefaultFeedRead+".")
@@ -321,7 +334,8 @@ func (s *Store) feedProfileCommand(ctx context.Context, tx *sql.Tx, c Command, a
 }
 
 // feedProfileGet is feed.profile.get: an agent's public profile (target),
-// or without one the signed caller's own at any visibility.
+// or without one the signed caller's own at any visibility; a signed caller
+// with none reads the default profile (saved false), not a 404.
 func (s *Store) feedProfileGet(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
 	if c.Data != "" {
 		if _, err := feedData(c.Operation, c.Data); err != nil {
@@ -337,7 +351,11 @@ func (s *Store) feedProfileGet(ctx context.Context, tx *sql.Tx, c Command, a act
 		}
 		p, err = s.publicFeedProfile(ctx, tx, c.Target, a)
 	case a.signed:
-		p, err = s.ownFeedProfile(ctx, tx, a)
+		if p, err = s.ownFeedProfile(ctx, tx, a); err != nil {
+			if be := (*Error)(nil); errors.As(err, &be) && be.Code == "profile_not_found" {
+				return Result{Data: defaultOwnView(a)}, nil
+			}
+		}
 	default:
 		return Result{}, problem(401, "signature_required", "Name an agent with "+feedProfileAgent+" to read its public feed profile, or sign the read for your own.")
 	}

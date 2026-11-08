@@ -253,7 +253,7 @@ func TestFeedProfileErasure(t *testing.T) {
 	me := keyFor(71)
 	run(t, s, signed(me, Command{Operation: "room.subscribe", Room: "research"}))
 	run(t, s, svcCall(me, "memory", "delete", map[string]any{"key": FeedProfileKey}, 1<<20, ""))
-	fails(t, s, signed(me, Command{Operation: "feed.profile.get"}), "profile_not_found")
+	unsavedDefault(t, s, me)
 	fails(t, s, Command{Operation: "feed.profile.get", Target: keyID(me)}, "profile_not_found")
 	selfDefault(t, s, me)
 	var n int
@@ -315,4 +315,43 @@ func selfDefault(t *testing.T, s *Store, key ed25519.PrivateKey) {
 	}
 	fails(t, s, feedCmd("feed.get", own), "profile_not_found")
 	fails(t, s, signed(key, feedCmd("feed.get", `{"profile":"`+keyID(key)+`@sha256:`+strings.Repeat("0", 64)+`"}`)), "profile_not_found")
+}
+
+// unsavedDefault: a signed feed.profile.get of your own with nothing saved
+// answers the default profile, shaped as a saved one, with saved false.
+func unsavedDefault(t *testing.T, s *Store, key ed25519.PrivateKey) {
+	t.Helper()
+	res := run(t, s, signed(key, Command{Operation: "feed.profile.get"}))
+	d := res.Data
+	p, _ := d["profile"].(FeedProfile)
+	if d["saved"] != false || d["revision"] != int64(0) || d["visibility"] != "public" || d["agent"] != keyID(key) || d["key"] != FeedProfileKey ||
+		d["profile_hash"] != FeedProfileHash(DefaultFeedProfile()) || FeedProfileHash(p) != FeedProfileHash(DefaultFeedProfile()) ||
+		d["forks"] != int64(0) || d["updated_at"] != int64(0) || d["ranking_version"] != FeedRankingVersion || d["note"] != noOwnProfileGetNote {
+		t.Fatalf("own get without a profile: %v", d)
+	}
+}
+
+// A signed read of your own profile before saving one is the default
+// profile (saved false), which a put at if_revision 0 then saves.
+func TestFeedProfileOwnGetBeforeSave(t *testing.T) {
+	s := openWakeTest(t, "memory")
+	seedFeed(t, s)
+	me, other := keyFor(71), keyFor(73)
+	unsavedDefault(t, s, me)
+	if !strings.Contains(noOwnProfileGetNote, "if_revision 0") {
+		t.Fatalf("note: %s", noOwnProfileGetNote)
+	}
+	run(t, s, signed(me, feedCmd("feed.profile.put", `{"profile":{"weights":{"votes":2}},"if_revision":0}`)))
+	got := run(t, s, signed(me, Command{Operation: "feed.profile.get"})).Data
+	if got["saved"] != true || got["revision"] != int64(1) || got["note"] != nil {
+		t.Fatalf("own get after put: %v", got)
+	}
+	// Put with no if_revision works on a fresh account too.
+	unsavedDefault(t, s, other)
+	run(t, s, signed(other, feedCmd("feed.profile.put", `{"profile":{}}`)))
+	// Naming an agent without a profile is still 404, signed or not.
+	fails(t, s, Command{Operation: "feed.profile.get", Target: keyID(keyFor(99))}, "profile_not_found")
+	fails(t, s, signed(me, Command{Operation: "feed.profile.get", Target: keyID(keyFor(99))}), "profile_not_found")
+	// feed.get profile=self with nothing saved still falls back to the default.
+	selfDefault(t, s, keyFor(74))
 }

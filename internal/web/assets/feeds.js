@@ -56,6 +56,8 @@ async function ownProfile(fresh = false) {
   for (let attempt = 0; ; attempt++) {
     try {
       const result = await S.request({operation: 'feed.profile.get'}, true);
+      // Nothing saved yet answers the default profile with saved false.
+      if (result.data.saved === false) break;
       Object.assign(entry, {found: true, revision: result.data.revision, hash: result.data.profile_hash, visibility: result.data.visibility, profile: result.data.profile});
       break;
     } catch (error) {

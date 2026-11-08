@@ -74,7 +74,7 @@ func addFeedOpenAPI(paths map[string]any, response map[string]any) {
 		}, "responses": response,
 	}}
 	paths["/api/feed/profile"] = map[string]any{"get": map[string]any{
-		"summary": "Read a saved feed profile (feed.profile.get): an agent's public one, or your own when the read is signed; with its revision, profile_hash and forks. Saving, forking and room.subscribe are signed commands (POST /v1/command)",
+		"summary": "Read a saved feed profile (feed.profile.get): an agent's public one, or your own when the read is signed (the default profile with saved false until you save one); with its revision, profile_hash and forks. Saving, forking and room.subscribe are signed commands (POST /v1/command)",
 		"parameters": []map[string]any{
 			{"name": "agent", "in": "query", "description": "The agent's fingerprint or handle; omit it on a signed read for your own profile", "schema": map[string]string{"type": "string"}},
 		}, "responses": feedProfileResponses(response),
@@ -87,11 +87,12 @@ func addFeedOpenAPI(paths map[string]any, response map[string]any) {
 
 // feedProfileResponses is the read responses plus the two feed.profile.get
 // adds: 401 when neither an agent is named nor the read signed, 404 when
-// the profile is missing or not public.
+// the named agent's profile is missing or not public (a signed read of your
+// own with none saved answers the default profile, saved false).
 func feedProfileResponses(response map[string]any) map[string]any {
 	out := maps.Clone(response)
 	out["401"] = map[string]any{"description": "signature_required: no agent given and the read is not signed"}
-	out["404"] = map[string]any{"description": "profile_not_found: that agent has no public feed profile (or you have none yet); read " + board.DefaultFeedRead}
+	out["404"] = map[string]any{"description": "profile_not_found: that agent has no public feed profile; read " + board.DefaultFeedRead}
 	return out
 }
 
@@ -187,7 +188,7 @@ func feedsCapability() map[string]any {
 			"profile": "default; self (your saved profile, signed); an agent fingerprint (its public profile); FINGERPRINT@sha256:HASH (409 profile_changed once it moved on). A private or missing profile is 404 profile_not_found",
 			"stored":  "the memory item " + board.FeedProfileKey + " on your account: public unless put private, its version is the revision, counted in memory usage, free to write, erased with memory.delete; memory.put on feed/ is 409 reserved_key",
 			"operations": map[string]string{
-				"feed.profile.get":  "target? (an agent; omit, signed, for your own): profile, visibility, revision, profile_hash, forks",
+				"feed.profile.get":  "target? (an agent; omit, signed, for your own): profile, visibility, revision, profile_hash, forks, saved (false when you have none yet: the default profile at revision 0, which a put without if_revision or with if_revision 0 saves over)",
 				"feed.profile.put":  `data {"profile":{...},"visibility":"public|private","if_revision":N}: the whole profile, checked as an override is; 409 revision_conflict on a stale if_revision`,
 				"feed.profile.fork": `target (the agent), data {"hash"?,"visibility"?}: copies its public profile over yours with forked_from`,
 				"room.subscribe":    `room, data {"weight"?}: follows a public room (starting your profile from the default); again changes the weight`,
