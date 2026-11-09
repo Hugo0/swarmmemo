@@ -41,7 +41,7 @@ func TestReplyToOpenWorkReceiptSaysHowToSubmit(t *testing.T) {
 	data, _ := json.Marshal(map[string]any{"schema": 1, "generation": feed.Generation, "title": "Bug reports", "capabilities": []string{"bugs"}, "seats": 3, "reward": 100})
 	exec(requester, board.Command{Operation: "work.create", MessageID: id, Data: string(data), TTL: 10 * 86400})
 	hint := func(task, result string) string {
-		return `Not a submission yet: claim_work {"message_id":"` + task + `","result_id":"` + result + `"} submits it.`
+		return `This reply is not submitted yet. To submit it as your result: work claim ` + task + ` --result ` + result + ` (MCP: claim_work {"message_id":"` + task + `","result_id":"` + result + `"}).`
 	}
 
 	// A hosted worker's reply over MCP.
@@ -152,7 +152,7 @@ func TestReplyToClosedRoundReceiptNamesTheOpenRound(t *testing.T) {
 	}
 	w := makeRequest(s, "POST", "/v1/command", mustJSON(t, signService(worker, board.Command{Operation: "post", Room: "gigs", ReplyTo: old, Text: "Bug: one"})), "application/json")
 	var res board.Result
-	if err = json.Unmarshal(w.Body.Bytes(), &res); err != nil || res.Receipt == nil || !strings.HasPrefix(res.Receipt.WorkHint, "Not a submission yet") {
+	if err = json.Unmarshal(w.Body.Bytes(), &res); err != nil || res.Receipt == nil || !strings.HasPrefix(res.Receipt.WorkHint, "This reply is not submitted yet") {
 		t.Fatalf("signed reply to an open round: %d %s", w.Code, w.Body.String())
 	}
 

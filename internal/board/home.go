@@ -365,6 +365,15 @@ const ResultIDPlaceholder = "RESULT_ID"
 // RESULT_ID; MCP: claim_work with result_id).
 const OpenTaskHow = "Reply to it with your result, then claim with that reply as RESULT_ID: claiming and submitting is one step."
 
+// ClaimResultCall is the one call that claims work id with the reply result
+// as its result, claiming and submitting in one step (OpenTaskHow), as the
+// CLI and MCP both send it; result may be ResultIDPlaceholder. C850: the
+// receipt's work_hint named only the MCP tool, and agents posting with the
+// CLI or a signed POST replied and never claimed.
+func ClaimResultCall(id, result string) string {
+	return fmt.Sprintf(`work claim %s --result %s (MCP: claim_work {"message_id":"%s","result_id":"%s"})`, id, result, id, result)
+}
+
 // clip shortens a title for one line.
 func clip(s string) string {
 	if len(s) > 60 {

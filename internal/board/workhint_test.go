@@ -24,7 +24,7 @@ func TestReplyToOpenWorkSaysItIsNotASubmission(t *testing.T) {
 	standing := rewardRequest(t, s, owner, "lobby")
 	run(t, s, standingCreate(s, owner, standing, map[string]any{"seats": 2, "reward": 300}, 10*86400))
 	r := reply(worker, standing)
-	want := `Not a submission yet: claim_work {"message_id":"` + standing + `","result_id":"` + r.ID + `"} submits it.`
+	want := `This reply is not submitted yet. To submit it as your result: work claim ` + standing + ` --result ` + r.ID + ` (MCP: claim_work {"message_id":"` + standing + `","result_id":"` + r.ID + `"}).`
 	if r.ReplyWork != standing || WorkHintLine("", r) != want {
 		t.Fatalf("reply to a standing task: work %q line %q", r.ReplyWork, WorkHintLine("", r))
 	}
@@ -55,6 +55,16 @@ func TestReplyToOpenWorkSaysItIsNotASubmission(t *testing.T) {
 		t.Fatal("a reply to claimed work is told to claim it")
 	}
 
+	// C850: closed work (cancelled) says nothing either.
+	closed := createTestWork(t, s, owner, "lobby", "request", 0)
+	if r := reply(other, closed); r.ReplyWork != closed {
+		t.Fatal("a reply to open work is not told")
+	}
+	run(t, s, workCommand(s, owner, Command{Operation: "work.cancel", MessageID: closed, Reason: "done elsewhere"}))
+	if r := reply(other, closed); r.ReplyWork != "" || WorkHintLine("", r) != "" {
+		t.Fatalf("a reply to cancelled work is told: %q", WorkHintLine("", r))
+	}
+
 	// A reply to a post with no work says nothing.
 	note := run(t, s, signed(owner, Command{Operation: "post", Room: "lobby", Text: "just a note", Timestamp: s.now().Unix()})).Receipt.ID
 	if r7 := reply(worker, note); r7.ReplyWork != "" {
@@ -65,7 +75,7 @@ func TestReplyToOpenWorkSaysItIsNotASubmission(t *testing.T) {
 	anon := func(id string) *Receipt {
 		return run(t, s, Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "anonymous result for " + id + testPostSuffix()}).Receipt
 	}
-	anonWant := `An anonymous reply can't be submitted or paid: make a key in one call (MCP create_identity, or ` + KeygenCLI + `), post this result again as a signed reply, then claim_work {"message_id":"` + standing + `","result_id":"RESULT_ID"} with that reply's ID.`
+	anonWant := `An anonymous reply can't be submitted or paid: make a key in one call (MCP create_identity, or ` + KeygenCLI + `), post this result again as a signed reply, then work claim ` + standing + ` --result RESULT_ID (MCP: claim_work {"message_id":"` + standing + `","result_id":"RESULT_ID"}) with that reply's ID.`
 	if a := anon(standing); a.ReplyWork != standing || !a.ReplyWorkAnonymous || WorkHintLine("", a) != anonWant {
 		t.Fatalf("an anonymous reply to open work: %q", WorkHintLine("", a))
 	}
@@ -108,13 +118,13 @@ func TestReplyToClosedRoundNamesTheOpenRound(t *testing.T) {
 	}
 
 	// Open round, signed: the usual claim line, no next round.
-	if r := signedReply(worker, old); r.ReplyWorkNextRound != "" || r.ReplyWork != old || !strings.HasPrefix(WorkHintLine("", r), "Not a submission yet") {
+	if r := signedReply(worker, old); r.ReplyWorkNextRound != "" || r.ReplyWork != old || !strings.HasPrefix(WorkHintLine("", r), "This reply is not submitted yet") {
 		t.Fatalf("signed reply to an open round: next %q line %q", r.ReplyWorkNextRound, WorkHintLine("", r))
 	}
 
 	run(t, s, workCommand(s, owner, Command{Operation: "work.cancel", MessageID: old, Reason: "next round"}))
 	base := "https://board.example"
-	claim := `claim_work {"message_id":"` + next + `","result_id":"RESULT_ID"} with that reply's ID.`
+	claim := `work claim ` + next + ` --result RESULT_ID (MCP: claim_work {"message_id":"` + next + `","result_id":"RESULT_ID"}) with that reply's ID.`
 	r := signedReply(worker, old)
 	want := `This round takes no more results: the open round is ` + next + ` (` + base + `/work/` + next + `). Post your result there as a reply, then ` + claim
 	if r.ReplyWork != "" || r.ReplyWorkNextRound != next || r.ReplyWorkAnonymous || WorkHintLine(base, r) != want {

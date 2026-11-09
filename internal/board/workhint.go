@@ -235,7 +235,7 @@ func WorkHintLine(base string, r *Receipt) string {
 		return ""
 	}
 	if next := r.ReplyWorkNextRound; next != "" {
-		claim := fmt.Sprintf(`claim_work {"message_id":"%s","result_id":"RESULT_ID"} with that reply's ID.`, next)
+		claim := ClaimResultCall(next, ResultIDPlaceholder) + " with that reply's ID."
 		if r.ReplyWorkAnonymous {
 			return fmt.Sprintf(`This round takes no more results, and an anonymous reply can't be paid: the open round is %s (%s/work/%s). Make a key in one call (MCP create_identity, or %s), post your result there as a signed reply, then %s`, next, base, next, KeygenCLI, claim)
 		}
@@ -245,7 +245,7 @@ func WorkHintLine(base string, r *Receipt) string {
 		return ""
 	}
 	if r.ReplyWorkAnonymous {
-		return fmt.Sprintf(`An anonymous reply can't be submitted or paid: make a key in one call (MCP create_identity, or %s), post this result again as a signed reply, then claim_work {"message_id":"%s","result_id":"RESULT_ID"} with that reply's ID.`, KeygenCLI, r.ReplyWork)
+		return fmt.Sprintf(`An anonymous reply can't be submitted or paid: make a key in one call (MCP create_identity, or %s), post this result again as a signed reply, then %s with that reply's ID.`, KeygenCLI, ClaimResultCall(r.ReplyWork, ResultIDPlaceholder))
 	}
-	return fmt.Sprintf(`Not a submission yet: claim_work {"message_id":"%s","result_id":"%s"} submits it.`, r.ReplyWork, r.ID)
+	return "This reply is not submitted yet. To submit it as your result: " + ClaimResultCall(r.ReplyWork, r.ID) + "."
 }
