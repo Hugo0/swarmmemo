@@ -20,7 +20,7 @@ import (
 func fetchError(code string) error {
 	switch code {
 	case "fetch_invalid_url":
-		return problem(400, "fetch_invalid_url", "Fetch takes an http or https URL on port 80 or 443, without credentials, of up to "+strconv.Itoa(services.FetchURLBytes)+" bytes (an internationalised host name as punycode, xn--). Nothing was charged.")
+		return fetchInvalidURL("")
 	case "fetch_denied":
 		return problem(403, "fetch_denied", "This site is not fetched: it is on the operator's denylist, or it is SwarmMemo itself. Nothing was charged.")
 	case "fetch_robots":
@@ -57,6 +57,16 @@ func fetchError(code string) error {
 		return &Error{Status: 429, Code: "fetch_caller_limit", Message: "Your agent made as many fetch calls today as one agent may (fetch_caller_per_day in " + services.ListWhere + "); the count resets at 00:00 UTC."}
 	}
 	return nil
+}
+
+// fetchInvalidURL is fetch_invalid_url; placeholder is the engine's sentence
+// naming an unfilled placeholder sent as the url (C837), or "".
+func fetchInvalidURL(placeholder string) error {
+	msg := "Fetch takes an http or https URL on port 80 or 443, without credentials, of up to " + strconv.Itoa(services.FetchURLBytes) + " bytes (an internationalised host name as punycode, xn--)."
+	if placeholder != "" {
+		msg += " " + placeholder
+	}
+	return problem(400, "fetch_invalid_url", msg+" Nothing was charged.")
 }
 
 // fetchUnsupportedType is fetch_unsupported_type, naming the media type

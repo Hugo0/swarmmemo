@@ -236,6 +236,20 @@ func TestFetchCallRoute(t *testing.T) {
 	if w.Code != 400 || !strings.Contains(w.Body.String(), `"fetch_address_blocked"`) {
 		t.Fatalf("private address: %d %s", w.Code, w.Body.String())
 	}
+	// C837: a placeholder copied from an example is named, same code and status.
+	for _, placeholder := range []string{"SOURCE_URL", "%7BURL%7D", "%20%3CPAGE_URL%3E%20"} {
+		w = makeRequest(h, "GET", "https://swarmmemo.com/call/fetch/page?url="+placeholder, "", "")
+		var got struct {
+			Error struct{ Code, Message string } `json:"error"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &got)
+		if w.Code != 400 || got.Error.Code != "fetch_invalid_url" || !strings.Contains(got.Error.Message, "looks like a placeholder from an example: put the page's real https address there.") || !strings.HasSuffix(got.Error.Message, "Nothing was charged.") {
+			t.Fatalf("placeholder %s: %d %s", placeholder, w.Code, w.Body.String())
+		}
+	}
+	if w = makeRequest(h, "GET", "https://swarmmemo.com/call/fetch/page?url=ftp://example.com/", "", ""); w.Code != 400 || strings.Contains(w.Body.String(), "placeholder") {
+		t.Fatalf("not a placeholder: %d %s", w.Code, w.Body.String())
+	}
 	if w = makeRequest(h, "GET", "https://swarmmemo.com/call/fetch/page?url=https://example.com/&max_bytes=65536", "", ""); w.Code != 400 {
 		t.Fatalf("more than 8 KiB without a key: %d %s", w.Code, w.Body.String())
 	}

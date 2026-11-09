@@ -159,7 +159,9 @@ type Err struct {
 	PricingURL string
 	// Message is an argument-level invalid_service_data refusal's own
 	// sentence: it names the argument and what it takes, never the value
-	// sent. Empty for any other refusal.
+	// sent. On fetch_invalid_url it is the sentence naming an unfilled
+	// placeholder sent as the url (C837; a bare upper-case token, never
+	// free text). Empty for any other refusal.
 	Message string
 }
 

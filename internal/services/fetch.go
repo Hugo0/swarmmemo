@@ -472,10 +472,19 @@ func parseFetch(raw json.RawMessage) (fetchPlan, error) {
 	return p, nil
 }
 
+// FetchPlaceholderSentence is the sentence fetch_invalid_url adds when the
+// url sent is an unfilled placeholder p (Placeholder).
+func FetchPlaceholderSentence(p string) string {
+	return "`" + p + "` looks like a placeholder from an example: put the page's real https address there."
+}
+
 // parseFetchURL accepts only a plain http or https URL on port 80 or 443,
 // without credentials; the fragment is dropped and the host lowercased.
 func parseFetchURL(raw string) (*url.URL, error) {
 	bad := refusal("fetch_invalid_url")
+	if p := Placeholder(raw); p != "" {
+		bad = &allowance.Err{Code: "fetch_invalid_url", Message: FetchPlaceholderSentence(p)}
+	}
 	if raw == "" || len(raw) > FetchURLBytes || !utf8.ValidString(raw) || strings.ContainsAny(raw, " \t\r\n\x00\\") {
 		return nil, bad
 	}

@@ -196,8 +196,9 @@ func TestNudgeCodesRegistered(t *testing.T) {
 			t.Errorf("hint %s has no NudgeCodes row", m[1])
 		}
 	}
-	// The hint codes the store sets: an accept whose USDC a cap voided (C771).
-	for _, h := range []*Hint{usdcCapHint("")} {
+	// The hint codes the store sets: an accept whose USDC a cap voided
+	// (C771), a notary stamp of a placeholder (C837).
+	for _, h := range []*Hint{usdcCapHint(""), placeholderTextHint(Command{Target: "notary", Data: `{"schema":1,"method":"stamp","args":{"text":"SOURCE_URL"},"max_cost":1}`})} {
 		hints[h.Code] = true
 		if _, ok := LookupNudge(h.Code); !ok {
 			t.Errorf("hint %s has no NudgeCodes row", h.Code)
@@ -214,7 +215,7 @@ func TestNudgeCodesRegistered(t *testing.T) {
 		}
 	}
 	// NudgesShown reads each notice; the tip is the engine's to log.
-	next := &Next{Nudge: &NudgeShown{Code: "first_work"}, RepliesWaiting: "x", HandleNotApplied: &HandleNotApplied{}, Hints: []Hint{{Code: "literal_newline_escapes"}, {Code: "looks_like_markdown"}, {Code: "many_threads"}, {Code: WorkUSDCCapReason}}, WaitNeedsCursor: "x"}
+	next := &Next{Nudge: &NudgeShown{Code: "first_work"}, RepliesWaiting: "x", HandleNotApplied: &HandleNotApplied{}, Hints: []Hint{{Code: "literal_newline_escapes"}, {Code: "looks_like_markdown"}, {Code: "many_threads"}, {Code: WorkUSDCCapReason}, {Code: PlaceholderTextHint}}, WaitNeedsCursor: "x"}
 	if got := NudgesShown(next); len(got) != notices {
 		t.Fatalf("NudgesShown = %v", got)
 	}
@@ -1263,5 +1264,22 @@ func TestFunnelWeeklyAndSegments(t *testing.T) {
 		if int64(perDim[dim]) != rep.Steps[1].Count {
 			t.Fatalf("dimension %s covers %d of %d", dim, perDim[dim], rep.Steps[1].Count)
 		}
+	}
+}
+
+// placeholder_text is said only of a notary stamp whose text is a
+// placeholder (C837).
+func TestPlaceholderTextHint(t *testing.T) {
+	for data, want := range map[string]bool{
+		`{"schema":1,"method":"stamp","args":{"text":"SHA256_OF_THE_PAGE_TEXT"},"max_cost":1}`:          true,
+		`{"schema":1,"method":"stamp","args":{"text":"the page text"},"max_cost":1}`:                    false,
+		`{"schema":1,"method":"stamp","args":{"hash":"` + strings.Repeat("ab", 32) + `"},"max_cost":1}`: false,
+	} {
+		if got := placeholderTextHint(Command{Target: "notary", Data: data}) != nil; got != want {
+			t.Errorf("%s: hint %v, want %v", data, got, want)
+		}
+	}
+	if placeholderTextHint(Command{Target: "memory", Data: `{"schema":1,"method":"stamp","args":{"text":"SOURCE_URL"},"max_cost":1}`}) != nil {
+		t.Error("a hint on another service")
 	}
 }

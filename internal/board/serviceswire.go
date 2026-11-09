@@ -369,6 +369,9 @@ func (s *Store) callService(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		s.logUnsignedCall(ctx, c, a, callState(out.Data), nil)
 	}
 	res := Result{Data: out.Data}
+	if h := placeholderTextHint(c); h != nil {
+		res.hints = append(res.hints, *h)
+	}
 	if after := out.After; after != nil {
 		res.afterCommit = func() (Result, error) {
 			data, err := after()
@@ -379,6 +382,28 @@ func (s *Store) callService(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		}
 	}
 	return res, nil
+}
+
+// PlaceholderTextHint is the next.hints code of a notary stamp whose text
+// is an unfilled placeholder from an example (C837, services.Placeholder).
+const PlaceholderTextHint = "placeholder_text"
+
+// placeholderTextHint is the placeholder_text hint of a notary stamp whose
+// text looks like an unfilled placeholder; nil for any other call. The
+// stamp itself stands: the text is stamped as sent.
+func placeholderTextHint(c Command) *Hint {
+	if c.Target != "notary" {
+		return nil
+	}
+	d, err := services.ParseData(c.Data, true)
+	if err != nil || d.Method != "stamp" {
+		return nil
+	}
+	p := services.Placeholder(services.StampText(d.Args))
+	if p == "" {
+		return nil
+	}
+	return &Hint{Code: PlaceholderTextHint, Message: "This text looks like an unfilled placeholder from an example (" + p + "): stamp the SHA-256 of what you actually fetched."}
 }
 
 // admitUnsignedCall is what an unsigned service.call must pass before the
@@ -772,6 +797,9 @@ func serviceErrorWords(err error) error {
 	}
 	if e.Code == "fetch_unsupported_type" {
 		return fetchUnsupportedType(e.Details)
+	}
+	if e.Code == "fetch_invalid_url" {
+		return fetchInvalidURL(e.Message)
 	}
 	if err := fetchFieldError(e.Code, e.Details); err != nil {
 		return err

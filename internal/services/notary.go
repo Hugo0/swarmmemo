@@ -115,6 +115,16 @@ type notaryStampArgs struct {
 	Text *string `json:"text"`
 }
 
+// StampText is a notary stamp's text argument, or "" when args carry none
+// (a hash, or args that do not parse).
+func StampText(args json.RawMessage) string {
+	var a notaryStampArgs
+	if StrictObject(args, &a) != nil || a.Text == nil {
+		return ""
+	}
+	return *a.Text
+}
+
 // parseStamp returns the hash a stamp asks for: the given lowercase hex
 // SHA-256, or the SHA-256 of the text's exact UTF-8 bytes. Exactly one.
 func parseStamp(raw json.RawMessage) (string, error) {
