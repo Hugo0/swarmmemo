@@ -18,7 +18,7 @@ import (
 
 func TestCommandProblemLineFormat(t *testing.T) {
 	key := "ed25519:" + strings.Repeat("ab", 32)
-	line := commandProblemLine("message.get", "", "not_found", 404, "command", problemActor(key), 0)
+	line := commandProblemLine("message.get", "", "not_found", 404, "command", problemActor(key), "", 0)
 	want := regexp.MustCompile(`^command_problem op=message\.get code=not_found status=404 via=command actor=[0-9a-f]{8}$`)
 	if !want.MatchString(line) {
 		t.Fatalf("line = %q", line)
@@ -26,13 +26,13 @@ func TestCommandProblemLineFormat(t *testing.T) {
 	if strings.Contains(line, key) || strings.Contains(line, "ab"+"abab") {
 		t.Fatalf("line carries the key: %q", line)
 	}
-	if got := commandProblemLine("post", "", "rate_limited", 429, "mcp", problemActor(""), 3); got != "command_problem op=post code=rate_limited status=429 via=mcp actor=anon suppressed=3" {
+	if got := commandProblemLine("post", "", "rate_limited", 429, "mcp", problemActor(""), "", 3); got != "command_problem op=post code=rate_limited status=429 via=mcp actor=anon suppressed=3" {
 		t.Fatalf("line = %q", got)
 	}
 	// Anything that is not a short fixed-table token (text, an IP, a
 	// header value) never reaches the line.
 	for _, bad := range []string{"hello world", "203.0.113.7:443", "Bearer abc", "a=b", strings.Repeat("x", 65), "Ünï"} {
-		line := commandProblemLine(bad, bad, bad, 400, bad, "anon", 0)
+		line := commandProblemLine(bad, bad, bad, 400, bad, "anon", "", 0)
 		if strings.Contains(line, bad) || strings.Contains(line, "203.0.113") {
 			t.Fatalf("line keeps %q: %q", bad, line)
 		}
@@ -131,12 +131,12 @@ func TestCommandProblemTried(t *testing.T) {
 		if got := problemTried(in); got != want {
 			t.Errorf("problemTried(%q) = %q, want %q", in, got, want)
 		}
-		line := commandProblemLine("unknown", in, "unknown_operation", 400, "command", "anon", 0)
+		line := commandProblemLine("unknown", in, "unknown_operation", 400, "command", "anon", "", 0)
 		if want == "" && strings.Contains(line, "tried=") {
 			t.Errorf("line keeps %q: %q", in, line)
 		}
 	}
-	if line := commandProblemLine("post", "post", "conflict", 409, "command", "anon", 0); strings.Contains(line, "tried=") {
+	if line := commandProblemLine("post", "post", "conflict", 409, "command", "anon", "", 0); strings.Contains(line, "tried=") {
 		t.Fatalf("tried beside a known op: %q", line)
 	}
 	// /v1/command with an unknown operation notes what it tried.
@@ -168,5 +168,24 @@ func TestCommandProblemLimiterTriedBounded(t *testing.T) {
 	}
 	if len(l.slots) > problemLogKeys {
 		t.Fatalf("table %d > %d", len(l.slots), problemLogKeys)
+	}
+}
+
+// C836: a work.* operation's line names the work hashed (work=HEX8), never
+// the id itself; any other operation's line has no work=.
+func TestCommandProblemWorkHash(t *testing.T) {
+	id := "0123456789abcdef0123456789abcdef"
+	lines := captureProblemLines(t, func() {
+		logCommandProblem("work.claim", "", "seats_full_c836", 409, "command", "", id)
+		logCommandProblem("message.get", "", "not_found_c836", 404, "command", "", id)
+		logCommandProblem("work.claim", "", "work_none_c836", 409, "command", "", "")
+	})
+	want := []string{
+		"command_problem op=work.claim code=seats_full_c836 status=409 via=command actor=anon work=" + problemActor(id),
+		"command_problem op=message.get code=not_found_c836 status=404 via=command actor=anon",
+		"command_problem op=work.claim code=work_none_c836 status=409 via=command actor=anon",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") || strings.Contains(strings.Join(lines, ""), id) {
+		t.Fatalf("lines =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 }

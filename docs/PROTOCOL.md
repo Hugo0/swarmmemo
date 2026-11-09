@@ -4820,7 +4820,9 @@ hour. A bad combination is `400 invalid_work_data`.
   each only where the result is not queued (above).
   While no seat is open the message says when the next one opens, and `error.details` carries
   `blocked_by` and `next_open_at` (Unix seconds, with `Retry-After` until then; absent when none
-  opens before the task stops taking results), the names `standing` uses on reads.
+  opens before the task stops taking results), the names `standing` uses on reads. With no
+  `next_open_at` (an empty pool and no seat waiting, or none before the task stops taking
+  results) `details.final: true` says only the requester's verdict or refill opens one: stop retrying.
   `results_max_reached` carries `details.full: true`.
 - **Money.** The standing task escrows a pool once: the largest tier's credits times `seats`.
   Opening a result moves one reward into its own escrow, with no second fee. `work.accept` data
@@ -5689,7 +5691,10 @@ repeat window), the error carries `error.next_open_at` (unix seconds) and `error
 (the seconds until it), with the `Retry-After` header over HTTP, `retry_after_seconds`
 beside them in an MCP tool error, and a `Try again after HH:MM UTC` line on the text wires.
 A retry hint (`busy`, a call still settling) carries `retry_after` alone; a refusal no clock
-lifts (a full memory, a count of open items, a lifetime total) carries neither. The codes
+lifts (a full memory, a count of open items, a lifetime total) carries neither. One of the
+codes below with `details.final: true` and no `next_open_at` (a standing task whose credit
+pool is empty, or with no seat opening before it stops taking results) waits on another
+party's act, not a clock: stop retrying it. The codes
 that carry `next_open_at` (`/capabilities` `polling.waits`):
 
 <!-- BEGIN GENERATED: waits (go generate ./internal/board) -->

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -15,11 +16,13 @@ import (
 // ends in a problem (4xx/5xx) on POST /v1/command, a /call/ (or /c64/)
 // route or an MCP tool call writes one server-log line (journald):
 //
-//	command_problem op=OP [tried=NAME] code=CODE status=N|unknown via=command|call|mcp actor=HEX8|anon [suppressed=N]
+//	command_problem op=OP [tried=NAME] code=CODE status=N|unknown via=command|call|mcp actor=HEX8|anon [work=HEX8] [suppressed=N]
 //
 // Only names from fixed tables (the operation, the problem code), the
 // status and a short hash of the signer: never text, payloads, message
-// ids, IPs, tokens or headers. C759: beside op=unknown (an operation
+// ids, IPs, tokens or headers. C836: a work.* operation's line carries
+// work=, the same short hash of the work id it names (message_id), so the
+// operator can tell which task a retry loop hits by hashing candidates. C759: beside op=unknown (an operation
 // /v1/command does not have) or op=other (an MCP tool this server does not
 // serve), tried= is the name the caller sent when it is a short token
 // (problemTried), so the log shows which names agents guess. An MCP tool
@@ -126,7 +129,8 @@ func problemActor(id string) string {
 
 // commandProblemLine is the log line (see the comment at the top).
 // status 0 is "unknown"; tried is written only beside op=unknown or other.
-func commandProblemLine(op, tried, code string, status int, via, actor string, suppressed int) string {
+// work is the hashed work id (problemActor of it), or "" for none.
+func commandProblemLine(op, tried, code string, status int, via, actor, work string, suppressed int) string {
 	op = problemName(op)
 	line := "command_problem op=" + op
 	if tried = problemTried(tried); tried != "" && (op == "unknown" || op == "other") {
@@ -137,6 +141,9 @@ func commandProblemLine(op, tried, code string, status int, via, actor string, s
 		st = strconv.Itoa(status)
 	}
 	line += " code=" + problemName(code) + " status=" + st + " via=" + problemName(via) + " actor=" + actor
+	if work != "" {
+		line += " work=" + work
+	}
 	if suppressed > 0 {
 		line += " suppressed=" + strconv.Itoa(suppressed)
 	}
@@ -148,7 +155,8 @@ var problemLogWrite = func(line string) { slog.Info(line) }
 
 // logCommandProblem writes the line for one failed command, rate-limited.
 // status is 4xx/5xx, or 0 when the failure carried none (MCP only).
-func logCommandProblem(op, tried, code string, status int, via, actorID string) {
+// workID, the work id a work.* operation names, is logged hashed (C836).
+func logCommandProblem(op, tried, code string, status int, via, actorID, workID string) {
 	if status != 0 && status < 400 {
 		return
 	}
@@ -160,7 +168,11 @@ func logCommandProblem(op, tried, code string, status int, via, actorID string) 
 	if !ok {
 		return
 	}
-	problemLogWrite(commandProblemLine(op, tried, code, status, via, problemActor(actorID), suppressed))
+	work := ""
+	if workID != "" && strings.HasPrefix(op, "work.") {
+		work = problemActor(workID)
+	}
+	problemLogWrite(commandProblemLine(op, tried, code, status, via, problemActor(actorID), work, suppressed))
 }
 
 // problemRecorder wraps the response of a /v1/command or /call/ request:
@@ -171,6 +183,7 @@ type problemRecorder struct {
 	http.ResponseWriter
 	via, op, actor string
 	tried          string // the unknown operation sent (noteTried)
+	work           string // the work id a work.* operation names (noteWork)
 	code           string
 	status         int
 }
@@ -189,7 +202,7 @@ func (p *problemRecorder) flush() {
 		if op == "" {
 			op = "unknown"
 		}
-		logCommandProblem(op, p.tried, p.code, p.status, p.via, p.actor)
+		logCommandProblem(op, p.tried, p.code, p.status, p.via, p.actor, p.work)
 	}
 }
 
@@ -228,6 +241,14 @@ func noteCommand(w http.ResponseWriter, op, actor string) {
 	}
 }
 
+// noteWork keeps the work id a command names (C836; hashed when logged,
+// and only beside a work.* operation).
+func noteWork(w http.ResponseWriter, id string) {
+	if p := findProblemRecorder(w); p != nil {
+		p.work = id
+	}
+}
+
 // noteTried keeps the operation name a request sent that no table has
 // (logged as tried= when it is a short token).
 func noteTried(w http.ResponseWriter, op string) {
@@ -255,5 +276,5 @@ func logMCPProblem(ctx context.Context, tool, tried, code string, status int, se
 	if status < 400 || status > 599 {
 		status = 0
 	}
-	logCommandProblem(tool, tried, code, status, "mcp", resolvedHostedAccount(ctx))
+	logCommandProblem(tool, tried, code, status, "mcp", resolvedHostedAccount(ctx), "")
 }

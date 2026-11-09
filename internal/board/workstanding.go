@@ -825,7 +825,9 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 	case pool < st.maxCredits() && next > 0:
 		return n, queue(StandingBlockedPool, errNoSeat(StandingBlockedPool, next, until, now, "its credit pool holds no reward for another result; a reject or an accept that refills the pool opens one sooner", "at the latest, when a waiting result's verdict deadline passes"))
 	case pool < st.maxCredits():
-		return n, &Error{Status: 409, Code: "seats_full", Message: "No seat is open on this task right now: its credit pool holds no reward for another result; a seat opens when the requester rejects a result, or its next accept refills the pool.", Details: map[string]any{"blocked_by": StandingBlockedPool}}
+		// No seat opens by itself (C836): only the requester's verdict
+		// does, so the refusal is final for polling, not a wait.
+		return n, &Error{Status: 409, Code: "seats_full", Message: "No seat is open on this task right now: its credit pool holds no reward for another result; a seat opens when the requester rejects a result, or its next accept refills the pool.", Details: map[string]any{"blocked_by": StandingBlockedPool, "final": true}}
 	}
 	return n, nil
 }
@@ -1363,6 +1365,7 @@ func errNoSeat(blockedBy string, at, until, now int64, why, cause string) error 
 		e.until(at, now)
 		e.Message = fmt.Sprintf("%s; the next one opens at %s (%s): %s.", lead, time.Unix(at, 0).UTC().Format(time.RFC3339), cause, why)
 	} else {
+		details["final"] = true // C836: no clock lifts it (wait.go)
 		e.Message = fmt.Sprintf("%s, and none opens again before it stops taking results at %s: %s.", lead, time.Unix(until, 0).UTC().Format(time.RFC3339), why)
 	}
 	return e

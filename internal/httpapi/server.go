@@ -622,6 +622,9 @@ func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Com
 	if p := findProblemRecorder(w); p != nil && p.op == "" {
 		noteCommand(w, c.Operation, c.PublicKey) // C757: a known operation by now
 	}
+	if strings.HasPrefix(c.Operation, "work.") {
+		noteWork(w, c.MessageID) // C836: which task a refused claim names
+	}
 	if c.Operation == "gate.challenge" {
 		// The gate's origin binding, on every HTTP route (gate.go).
 		if err := s.bindGateChallenge(r, &c); err != nil {

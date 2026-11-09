@@ -7,7 +7,10 @@ package board
 // seconds) and retry_after (the seconds until it), and the HTTP answer the
 // Retry-After header. A retry hint (busy, a provider still settling) has
 // retry_after only; a refusal no clock lifts (a full memory, a count of open
-// items, a total) has neither.
+// items, a total) has neither. C836: a wait code's refusal that no clock
+// lifts (a standing task whose pool is empty, or with no seat opening before
+// it stops taking results) says so with details.final true: polling it is a
+// loop, only someone else's act (the requester's verdict) lifts it.
 
 import "swarmmemo/internal/allowance"
 
@@ -46,5 +49,6 @@ func waitCapabilities() map[string]any {
 		"fields": "error.next_open_at (unix seconds) and error.retry_after (seconds until it), the Retry-After header over HTTP, retry_after_seconds beside them in an MCP tool error, a \"Try again after HH:MM UTC\" line on the text wires",
 		"codes":  WaitCodes,
 		"when":   "only where the board computes when the refusal lifts by itself; a retry hint carries retry_after alone, and a refusal no clock lifts neither",
+		"final":  "error.details.final true on one of these codes: no clock lifts this refusal (only another party's act does); stop retrying it",
 	}
 }
