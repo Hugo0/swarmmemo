@@ -221,6 +221,18 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			}
 			return file, 200
 		},
+		"www.rba.gov.au": func(r *http.Request) (string, int) {
+			if r.URL.Path != "/statistics/cash-rate/" {
+				return "", 404
+			}
+			v.mu.Lock()
+			fail, file := v.rbaFail, v.rbaFile
+			v.mu.Unlock()
+			if fail {
+				return "", 500
+			}
+			return file, 200
+		},
 		"www.atlantafed.org": func(r *http.Request) (string, int) { return "gdpnow_card.html", 200 },
 		"www.newyorkfed.org": func(r *http.Request) (string, int) {
 			name := strings.TrimPrefix(r.URL.Path, "/medialibrary/Research/Interactives/Data/NowCast/data/")
@@ -277,12 +289,14 @@ type pdEnv struct {
 	boeFile  string
 	ecbFail  bool
 	ecbFile  string
+	rbaFail  bool
+	rbaFile  string
 }
 
 func newPDEnv(t *testing.T, keys bool) *pdEnv {
 	t.Helper()
 	v := &pdEnv{db: openDB(t), meter: servicestest.NewMeter(1 << 20), fakes: map[string]*pdFake{}, noaaFile: "noaa_mwn.json", bisFail: map[string]bool{}, bocFile: "boc_valet.json", boeFile: "boe_bank_rate.html",
-		ecbFile: "ecb_key_rates.html"}
+		ecbFile: "ecb_key_rates.html", rbaFile: "rba_cash_rate.html"}
 	v.keyDir = t.TempDir()
 	if keys {
 		for _, name := range []string{services.KeyAPIDataGov, services.KeyFRED} {
@@ -1056,6 +1070,99 @@ func TestPublicDataCBPolicyECB(t *testing.T) {
 	v.mustFetch(t, "cb_policy_rates", `{"bank":"ECB","what":"rate"}`, unix("2026-08-15"))
 	if n := v.fakes["www.ecb.europa.eu"].count(); n != 0 {
 		t.Errorf("ecb read without a missed decision: %d", n)
+	}
+}
+
+// TestPublicDataCBPolicyRBA covers the RBA's own cash rate table (C848),
+// read like the ECB table: only when a scheduled decision may be
+// unreflected in BIS (bis_AU.csv: 4.35 as of 2026-08-06, before the
+// 2026-08-11, 2026-09-29 and 2026-11-03 board dates). The table lists
+// holds as well as moves, with the day after each meeting as the effective
+// date; its newest row by date gives the cash rate target, and the walk
+// back to the previous level gives the last change.
+func TestPublicDataCBPolicyRBA(t *testing.T) {
+	oct, nov := unix("2026-10-01"), unix("2026-11-09")
+	withPage := func(file string, fail bool, now int64) (*pdEnv, map[string]any) {
+		v := newPDEnv(t, false)
+		v.mu.Lock()
+		v.rbaFile, v.rbaFail = file, fail
+		v.mu.Unlock()
+		_, d := v.mustFetch(t, "cb_policy_rates", `{"bank":"RBA","what":"rate"}`, now)
+		return v, at(d, "banks", "RBA").(map[string]any)
+	}
+	keepsBIS := func(name string, rba map[string]any) {
+		t.Helper()
+		near(t, name+" rate", at(rba, "policy_rate_pct"), 4.35)
+		eq(t, name+" as_of", at(rba, "rate_as_of"), "2026-08-06")
+		if src, _ := at(rba, "rate_source").(string); !strings.Contains(src, "BIS") {
+			t.Errorf("%s rate_source %v", name, src)
+		}
+		if note, _ := at(rba, "rate_note").(string); !strings.Contains(note, "BIS series") {
+			t.Errorf("%s rate_note %v", name, note)
+		}
+		eq(t, name+" stale", at(rba, "rate_may_be_stale"), true)
+		if r, _ := at(rba, "rate_stale_reason").(string); !strings.Contains(r, "2026-08-11") {
+			t.Errorf("%s stale reason %v", name, r)
+		}
+	}
+	raised := func(name string, rba map[string]any) {
+		t.Helper()
+		near(t, name+" rate", at(rba, "policy_rate_pct"), 4.85)
+		eq(t, name+" as_of", at(rba, "rate_as_of"), "2026-11-04")
+		eq(t, name+" effective", at(rba, "rate_effective_from"), "2026-11-04")
+		near(t, name+" previous", at(rba, "previous_rate_pct"), 4.6)
+		near(t, name+" bps", at(rba, "last_change_bps"), 25.0)
+		eq(t, name+" no change note", at(rba, "last_change_note"), nil)
+		eq(t, name+" not stale", at(rba, "rate_may_be_stale"), false)
+		eq(t, name+" no stale reason", at(rba, "rate_stale_reason"), nil)
+		if src, _ := at(rba, "rate_source").(string); !strings.Contains(src, "https://www.rba.gov.au/statistics/cash-rate/") {
+			t.Errorf("%s rate_source %v", name, src)
+		}
+		if note, _ := at(rba, "rate_note").(string); !strings.Contains(note, "RBA's own cash rate target") {
+			t.Errorf("%s rate_note %v", name, note)
+		}
+	}
+
+	// A newer level on the official table wins, with the last move taken
+	// from the table (BIS missed two hikes); the decisions it reflects are
+	// no longer missed. Commented-out markup and 1990s rows (no documents
+	// cell) are read without error.
+	v, rba := withPage("rba_cash_rate.html", false, nov)
+	raised("raised", rba)
+	if n := v.fakes["www.rba.gov.au"].count(); n != 1 {
+		t.Fatalf("rba hits = %d", n)
+	}
+	// The newest row is found by date, not position.
+	_, rba = withPage("rba_cash_rate_unordered.html", false, nov)
+	raised("unordered", rba)
+
+	// A hold after a move BIS missed keeps the move's date and size: the
+	// level took effect on 2026-09-30, the hold only moves as_of.
+	_, rba = withPage("rba_cash_rate_hold.html", false, nov)
+	near(t, "hold rate", at(rba, "policy_rate_pct"), 4.6)
+	eq(t, "hold as_of", at(rba, "rate_as_of"), "2026-11-04")
+	eq(t, "hold effective", at(rba, "rate_effective_from"), "2026-09-30")
+	near(t, "hold previous", at(rba, "previous_rate_pct"), 4.35)
+	near(t, "hold bps", at(rba, "last_change_bps"), 25.0)
+	eq(t, "hold not stale", at(rba, "rate_may_be_stale"), false)
+
+	// A table no newer than BIS, a malformed newest target, a failed fetch
+	// and a table dated after today all keep the BIS answer and its
+	// staleness.
+	_, rba = withPage("rba_cash_rate_old.html", false, oct)
+	keepsBIS("old page", rba)
+	_, rba = withPage("rba_cash_rate_malformed.html", false, nov)
+	keepsBIS("malformed page", rba)
+	_, rba = withPage("", true, nov)
+	keepsBIS("failed fetch", rba)
+	_, rba = withPage("rba_cash_rate.html", false, oct)
+	keepsBIS("not yet effective", rba)
+
+	// No scheduled decision after rate_as_of: the page is never read.
+	v = newPDEnv(t, false)
+	v.mustFetch(t, "cb_policy_rates", `{"bank":"RBA","what":"rate"}`, unix("2026-08-08"))
+	if n := v.fakes["www.rba.gov.au"].count(); n != 0 {
+		t.Errorf("rba read without a missed decision: %d", n)
 	}
 }
 

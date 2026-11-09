@@ -2504,6 +2504,8 @@
   // convention) post through requestSubmit, which is the same submit event, busy
   // state, receipt and failure handling as pressing Post. Plain Enter is a
   // new line, always.
+  // Say so beside Post, where inline replies carry it too (the composer moves).
+  composer?.querySelector('.compose-actions')?.append(core.sendHint());
   composer?.elements.text.addEventListener('keydown', event => {
     if (!core.isSendChord(event)) return;
     event.preventDefault();

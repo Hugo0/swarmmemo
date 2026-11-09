@@ -53,6 +53,7 @@ var pdUpstreamLimits = map[string]pdLimit{
 	"api.bcb.gov.br":          {20, 2000},
 	"www.bankofengland.co.uk": {10, 1000},
 	"www.ecb.europa.eu":       {10, 1000},
+	"www.rba.gov.au":          {10, 1000},
 	"www.atlantafed.org":      {10, 1000},
 	"www.newyorkfed.org":      {10, 1000},
 	"www.clevelandfed.org":    {6, 500},

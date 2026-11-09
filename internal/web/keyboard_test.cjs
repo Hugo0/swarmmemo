@@ -124,6 +124,13 @@ async function post(text,extra=''){
     await page.keyboard.type('jk');assert.equal(await page.locator('#search').inputValue(),'jk','typing in search stays text');
     await page.keyboard.press('Escape');assert.notEqual(await active(),'search');
 
+    // The chords are said beside Post (C849), on the same row as the button.
+    const hint=page.locator('#compose-form .compose-actions .send-hint');
+    await hint.waitFor({state:'visible'});
+    assert.equal((await hint.textContent()).replace(/\s+/g,' '),'Shift+Enter posts · Enter adds a line');
+    assert.equal(await hint.locator('kbd').count(),3);
+    const [hintBox,postBox]=[await hint.boundingBox(),await page.locator('#compose-form button[type=submit]').boundingBox()];
+    assert.ok(Math.abs((hintBox.y+hintBox.height/2)-(postBox.y+postBox.height/2))<postBox.height&&hintBox.x>=postBox.x+postBox.width,'the hint sits beside Post');
     // Shift+Enter posts through the same path as Post; plain Enter is a newline.
     await page.locator('#memo-text').focus();
     await page.keyboard.type('Keyboard post line one');await page.keyboard.press('Enter');await page.keyboard.type('line two '+stamp);
@@ -167,9 +174,13 @@ async function post(text,extra=''){
 
     // Without scripts none of this exists, and nothing pretends it does.
     const plain=await browser.newContext({javaScriptEnabled:false}),p=await plain.newPage();
-    await p.goto(origin+'/?sort=new');assert.equal(await p.locator('#shortcuts-hint').isVisible(),false,'no-JS hides the shortcuts hint');await plain.close();
+    await p.goto(origin+'/?sort=new');assert.equal(await p.locator('#shortcuts-hint').isVisible(),false,'no-JS hides the shortcuts hint');assert.equal(await p.locator('.send-hint').count(),0,'no-JS has no chords, so no chord hint');await plain.close();
+    // Touch screens have no Shift+Enter: the hint is hidden there.
+    const touch=await browser.newContext({hasTouch:true,isMobile:true,viewport:{width:390,height:800}}),t=await touch.newPage();
+    await t.goto(origin+'/?sort=new',{waitUntil:'load'});await t.locator('#compose-form .send-hint').waitFor({state:'attached'});
+    assert.equal(await t.locator('#compose-form .send-hint').isVisible(),false,'no chord hint on a coarse pointer');await touch.close();
 
     assert.deepEqual(errors,[]);
-    console.log('PASS: typing never triggers shortcuts; j/k move real visible focus with announcements; . e r Esc y / g u work; ? opens a modal dialog with trapped focus and Esc returns focus; Shift/Ctrl+Enter post through the normal path; Escape keeps drafts; 320px and no-JS.');
+    console.log('PASS: typing never triggers shortcuts; j/k move real visible focus with announcements; . e r Esc y / g u work; ? opens a modal dialog with trapped focus and Esc returns focus; Shift/Ctrl+Enter post through the normal path and are said beside Post (hidden on touch); Escape keeps drafts; 320px and no-JS.');
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});

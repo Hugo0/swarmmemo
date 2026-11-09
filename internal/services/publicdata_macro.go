@@ -348,6 +348,9 @@ const (
 	ecbHost             = "www.ecb.europa.eu"
 	ecbKeyRatesPath     = "/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html"
 	ecbRateSource       = "ECB's own key interest rates page (https://" + ecbHost + ecbKeyRatesPath + "); BIS WS_CBPOL had not yet caught up with the latest decision"
+	rbaHost             = "www.rba.gov.au"
+	rbaCashRatePath     = "/statistics/cash-rate/"
+	rbaRateSource       = "RBA's own cash rate target table (https://" + rbaHost + rbaCashRatePath + "); BIS WS_CBPOL had not yet caught up with the latest decision"
 )
 
 type cbBank struct {
@@ -703,10 +706,10 @@ var dsCBPolicy = &pdDataset{
 		}
 		return out, nil
 	},
-	Source:      "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); Bank of Canada Valet API (series V39079); the Bank of England's Bank Rate page and the ECB's key interest rates page when BIS lags a decision; each bank's published calendar",
-	Hosts:       []string{bisHost, bcbHost, fredHost, bankofcanadaHost, boeHost, ecbHost},
+	Source:      "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); Bank of Canada Valet API (series V39079); the Bank of England's Bank Rate page, the ECB's key interest rates page and the RBA's cash rate table when BIS lags a decision; each bank's published calendar",
+	Hosts:       []string{bisHost, bcbHost, fredHost, bankofcanadaHost, boeHost, ecbHost, rbaHost},
 	Licence:     "BIS statistics: free reuse with attribution; BCB open data; FRED terms for the target range; Bank of Canada Valet: terms at https://www.bankofcanada.ca/terms/ — free reuse with attribution",
-	Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED; Bank of Canada Valet API; Bank of England; European Central Bank",
+	Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED; Bank of Canada Valet API; Bank of England; European Central Bank; Reserve Bank of Australia",
 	TermsURL:    "https://www.bis.org/terms_statistics.htm", TermsStatus: "verify before production (BIS, BCB, Bank of Canada Valet terms; calendars need a yearly refresh)",
 	Key: KeyFRED, KeyOptional: true, TTL: time.Hour, Price: 1,
 }
@@ -895,10 +898,15 @@ func cbRate(ctx context.Context, r *pdRun, b cbBank, row *cbRow) string {
 }
 
 // cbOfficialRate is a bank's own current-rate page, normalised: the level
-// and the date the page says it was published (the decision day).
+// and the date the page says it was published (the decision day). A page
+// that also lists holds sets From (the first date of the current level) and
+// Previous (the level before it), so a hold after a move BIS missed is not
+// mistaken for the move.
 type cbOfficialRate struct {
-	Rate float64 `json:"rate"`
-	Date string  `json:"date"`
+	Rate     float64  `json:"rate"`
+	Date     string   `json:"date"`
+	From     string   `json:"from,omitempty"`
+	Previous *float64 `json:"previous,omitempty"`
 }
 
 var (
@@ -942,6 +950,8 @@ var cbOfficialPages = map[string]cbOfficialPage{
 		Note: "policy_rate_pct is the Bank of England's own current Bank Rate, published on rate_as_of (live; overrides the BIS series, which lagged the latest decision)"},
 	"ECB": {Host: ecbHost, Path: ecbKeyRatesPath, Key: "ecb_key_rates", Source: ecbRateSource, Parse: parseECBKeyRates,
 		Note: "policy_rate_pct is the ECB's own deposit facility rate, in effect from rate_as_of (live; overrides the BIS series, which lagged the latest decision)"},
+	"RBA": {Host: rbaHost, Path: rbaCashRatePath, Key: "rba_cash_rate", Source: rbaRateSource, Parse: parseRBACashRate,
+		Note: "policy_rate_pct is the RBA's own cash rate target, in effect from rate_as_of (live; overrides the BIS series, which lagged the latest decision)"},
 }
 
 // cbOfficial overrides the BIS level with the bank's own page when that
@@ -963,8 +973,12 @@ func cbOfficial(ctx context.Context, r *pdRun, pg cbOfficialPage, row *cbRow, to
 		return
 	}
 	bis := *row.PolicyRatePct
-	if bps := pyRound((p.Rate-bis)*100, 1); bps != 0 {
-		row.RateEffectiveFrom, row.PreviousRatePct, row.LastChangeBps, row.LastChangeNote = sptr(p.Date), fptr(bis), fptr(bps), ""
+	if pyRound((p.Rate-bis)*100, 1) != 0 {
+		from, prev := p.Date, bis
+		if p.From != "" && p.Previous != nil && p.From <= p.Date {
+			from, prev = p.From, *p.Previous
+		}
+		row.RateEffectiveFrom, row.PreviousRatePct, row.LastChangeBps, row.LastChangeNote = sptr(from), fptr(prev), fptr(pyRound((p.Rate-prev)*100, 1)), ""
 	}
 	row.PolicyRatePct, row.RateAsOf, row.RateSource = fptr(p.Rate), sptr(p.Date), pg.Source
 	row.RateNote = pg.Note
@@ -1037,6 +1051,81 @@ func parseECBKeyRates(raw []byte) (any, error) {
 	}
 	if best.Date == "" {
 		return nil, errors.New("ECB key interest rates table has no rows")
+	}
+	return best, nil
+}
+
+var (
+	rbaCommentRE = regexp.MustCompile(`(?s)<!--.*?-->`)
+	rbaRowThRE   = regexp.MustCompile(`(?s)<th[^>]{0,200}>(.*?)</th>`)
+	rbaDateRE    = regexp.MustCompile(`^[0-9]{1,2} [A-Z][a-z]{2} (?:19|20)[0-9]{2}$`)
+	rbaRateRE    = regexp.MustCompile(`^[0-9]{1,2}\.[0-9]{1,4}$`)
+)
+
+// parseRBACashRate reads the RBA's cash rate table (untrusted HTML, capped
+// by the fetch). Each row is "D Mon YYYY" effective date (a th), change,
+// cash rate target, related documents (missing on some 1990s rows); the
+// table lists holds as well as moves, newest first, back to 1990 (where
+// some targets are ranges). The
+// answer is the target of the newest row by date, whatever the row order,
+// with the first date of that level and the level before it, walking back
+// only as far as the previous level. An unrecognised date, an unrecognised
+// or out-of-range newest target, or no rows is an error, so the caller
+// keeps the BIS answer.
+func parseRBACashRate(raw []byte) (any, error) {
+	html := string(raw)
+	i := strings.Index(html, "<tbody>")
+	j := strings.Index(html, "</tbody>")
+	if i < 0 || j < i {
+		return nil, errors.New("RBA cash rate page layout not recognised")
+	}
+	type rbaRow struct{ date, rate string }
+	var rows []rbaRow
+	for _, m := range ecbRowRE.FindAllStringSubmatch(rbaCommentRE.ReplaceAllString(html[i:j], ""), -1) {
+		th := rbaRowThRE.FindStringSubmatch(m[1])
+		cells := ecbCellRE.FindAllStringSubmatch(m[1], -1)
+		if th == nil || len(cells) < 2 || len(cells) > 3 {
+			return nil, errors.New("RBA cash rate table: unrecognised row")
+		}
+		text := func(v string) string {
+			v = strings.NewReplacer("&nbsp;", " ", "\u00a0", " ").Replace(ecbTagRE.ReplaceAllString(v, ""))
+			return strings.Join(strings.Fields(v), " ")
+		}
+		d := text(th[1])
+		if !rbaDateRE.MatchString(d) {
+			return nil, errors.New("RBA cash rate table: unrecognised date cell")
+		}
+		t, err := time.Parse("2 Jan 2006", d)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, rbaRow{date: t.Format("2006-01-02"), rate: text(cells[1][1])})
+	}
+	if len(rows) == 0 {
+		return nil, errors.New("RBA cash rate table has no rows")
+	}
+	sort.SliceStable(rows, func(a, b int) bool { return rows[a].date > rows[b].date })
+	rate := func(v string) (float64, bool) {
+		if !rbaRateRE.MatchString(v) {
+			return 0, false
+		}
+		f, err := strconv.ParseFloat(v, 64)
+		return f, err == nil && f >= 0 && f <= 25
+	}
+	f, ok := rate(rows[0].rate)
+	if !ok {
+		return nil, errors.New("RBA cash rate target not recognised or out of range")
+	}
+	best := cbOfficialRate{Rate: f, Date: rows[0].date}
+	for k := 1; k < len(rows); k++ {
+		g, ok := rate(rows[k].rate)
+		if !ok {
+			break
+		}
+		if pyRound((g-f)*100, 1) != 0 {
+			best.From, best.Previous = rows[k-1].date, fptr(g)
+			break
+		}
 	}
 	return best, nil
 }

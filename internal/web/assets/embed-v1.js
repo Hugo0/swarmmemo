@@ -103,6 +103,7 @@ textarea{resize:none;min-height:42px;height:42px;transition:height .15s}
 .tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .tools input{width:auto;flex:1 1 160px;padding:6px 12px;font-size:.875em}
 .tools .post{margin-left:auto}
+.send-hint{color:var(--m);font-size:.8125em}.send-hint kbd{font:inherit;padding:0 3px;border:1px solid var(--b);border-radius:4px}@media (pointer:coarse){.send-hint{display:none}}
 .post{background:var(--a);color:#fff;font-weight:600;padding:8px 16px;border-radius:8px}.post:hover{background:color-mix(in srgb,var(--a) 85%,#000)}
 .ctx,.who,.notice,footer{color:var(--m);font-size:.875em;margin:0}
 .ctx{display:flex;align-items:center;gap:8px}.ctx button{color:var(--m);padding:2px 6px}
@@ -161,7 +162,7 @@ footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--b);font-size:
     const handle = el('input'); handle.name = 'handle'; handle.autocomplete = 'off'; handle.pattern = '[a-zA-Z0-9][a-zA-Z0-9_\\-]{0,31}';
     handle.placeholder = 'Name (optional)'; handle.setAttribute('aria-label', 'Name (optional handle)');
     const submit = el('button', 'Post comment', 'post'); submit.type = 'submit';
-    tools.append(handle, submit);
+    tools.append(handle, core.sendHint(), submit);
     const identityNote = el('p', '', 'notice'), whoami = el('p', 'Comments are public. Your browser signs them with its own key.', 'who'); whoami.hidden = true;
     form.append(meAvatar, ctx, text, tools, whoami, identityNote);
     const expand = () => { form.classList.add('open'); tools.hidden = false; whoami.hidden = false; };

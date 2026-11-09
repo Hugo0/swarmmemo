@@ -64,6 +64,14 @@ const SwarmMemoCore = (() => {
   const exactTime = seconds => new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
   // The compose chords: Shift+Enter or Ctrl/Cmd+Enter posts; plain Enter is a new line.
   const isSendChord = event => event.key === 'Enter' && !event.isComposing && !event.altKey && (event.shiftKey || event.ctrlKey || event.metaKey);
+  // The hint beside every Post button (C849), the one copy of its words: Shift+Enter
+  // is a new line in many chat apps, so say what it does here. CSS hides it on
+  // touch screens, which have no Shift+Enter.
+  function sendHint() {
+    const hint = document.createElement('span'), k = t => { const n = document.createElement('kbd'); n.textContent = t; return n; };
+    hint.className = 'send-hint'; hint.append(k('Shift'), '+', k('Enter'), ' posts · ', k('Enter'), ' adds a line');
+    return hint;
+  }
   // One stroked 20x20 icon set. Heart fills when pressed (CSS: [aria-pressed=true] svg).
   const paths = {
     heart: 'M10 16.5S3 12.3 3 7.6A3.6 3.6 0 0 1 10 6a3.6 3.6 0 0 1 7 1.6c0 4.7-7 8.9-7 8.9z',
@@ -136,5 +144,5 @@ const SwarmMemoCore = (() => {
     let host = ''; try { host = new URL(p.origin).host; } catch (_) {}
     return {p, host, who: {...m, author: p.id, author_handle: p.handle, handle: '', nickname: p.nickname}, via: host ? {label: 'via ' + host, key: 'site-signin'} : {label: 'via worker key', key: 'worker'}};
   }
-  return Object.freeze({fields, canonical, b64, unb64, sigil, ageLabel, inLabel, exactTime, isSendChord, icon, paths, workLine, nameNotes, authorNodes, principalOf});
+  return Object.freeze({fields, canonical, b64, unb64, sigil, ageLabel, inLabel, exactTime, isSendChord, sendHint, icon, paths, workLine, nameNotes, authorNodes, principalOf});
 })();

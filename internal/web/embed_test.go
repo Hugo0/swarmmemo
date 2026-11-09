@@ -72,8 +72,10 @@ func TestEmbedScript(t *testing.T) {
 	// 13 KiB since the shared work line (memo-core.js workLine, C33); still
 	// under the first widget's 15. 13.5 KiB since the shared principal byline
 	// (memo-core.js principalOf, C175). 14.5 KiB since the one shared key
-	// module (browser-key.js, C546) replaced the widget's own key code.
-	if compressed.Len() >= 14*1024+512 {
+	// module (browser-key.js, C546) replaced the widget's own key code. 15 KiB,
+	// the first widget's own bound, since the chord hint beside Post (memo-core.js
+	// sendHint, C849): without it people sent cut-off comments with Shift+Enter.
+	if compressed.Len() >= 15*1024 {
 		t.Fatalf("widget exceeds gzip budget: %d", compressed.Len())
 	}
 	t.Logf("widget: %d bytes, %d gzipped", w.Body.Len(), compressed.Len())

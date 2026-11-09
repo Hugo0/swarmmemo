@@ -531,6 +531,8 @@ a.memo-edit-mark:hover{color:var(--ink);text-decoration:underline}
 /* The action belongs with the message box, above options most readers never open. */
 .compose-actions{display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap;margin:var(--s-3) 0 var(--s-4)}
 .compose-actions .button{min-width:180px}
+.send-hint{font-size:var(--t-meta);color:var(--muted)}.send-hint kbd{font-size:inherit;color:var(--muted)}
+@media (pointer:coarse){.send-hint{display:none}}
 .composer-block>.form-status{margin:var(--s-2) 0 var(--s-4)}
 /* A posted message confirms itself where the reader is already looking. */
 .compose-posted{animation:compose-posted 1s ease-out}

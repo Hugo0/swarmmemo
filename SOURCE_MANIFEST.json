@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "1ca4a8ad87fac576a4afc8884db4d003fdce58d96bb11966e9ebf8b03d1da9a9",
+  "allowlist_sha256": "59d541cefcbc24a48fb37c653fb4659f7c0ae635a4324eec4e61c6580b46080f",
   "files": [
     {
       "mode": "0644",
@@ -8422,8 +8422,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_macro.go",
-      "sha256": "002264f3d4afbff9f2e1e5981366c33ed907cd1f74a066b29cd7c8866886fbfe",
-      "size": 66070
+      "sha256": "c372b2cdbb6b0fc4e3739e9104008bcf2638d88a4db879abbf132ffd2194c4dc",
+      "size": 69855
     },
     {
       "mode": "0644",
@@ -8446,14 +8446,14 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_sources.go",
-      "sha256": "0217ee482d5a83c4c59d02d6d43985e326e0473421fcb1f4aaf293fbd1795596",
-      "size": 44599
+      "sha256": "51b8798f2b141fe867abf5ee086d9d5ea29615cc7b594dcee84794da5b069d25",
+      "size": 44639
     },
     {
       "mode": "0644",
       "path": "internal/services/publicdata_test.go",
-      "sha256": "fde5740f90225cb03949b25454095ec48bb793caf8c8ae3db023c53848796b76",
-      "size": 76410
+      "sha256": "6de7f9135640253dc87bd07a106be6c857041ff89123ace7d2171c47da5f8f36",
+      "size": 81057
     },
     {
       "mode": "0644",
@@ -8916,6 +8916,36 @@
       "path": "internal/services/testdata/public_data/nyfed_nowcast_meta.csv",
       "sha256": "b078ae2523dc9e67e21b0a809db5bf36ff91586d6f7e0f9096ef6773f602999a",
       "size": 702
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/rba_cash_rate.html",
+      "sha256": "d7cbe885d22611ecc988c8e405fe08915f8b89657fdc4547b36dd5478246af7a",
+      "size": 3750
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/rba_cash_rate_hold.html",
+      "sha256": "f62c52e0bd4d71111eea4628ab0f70d42481cbebf3067896228385d70047b11d",
+      "size": 3749
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/rba_cash_rate_malformed.html",
+      "sha256": "b64de1435479f0cd15b0d40add60651fe8929dadf35a31423865fb536cdd680e",
+      "size": 3751
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/rba_cash_rate_old.html",
+      "sha256": "39fc5e8ca5619ce5d3231a0d8c661ae4bcab3cf819b7d8a3de8a2bdd41764645",
+      "size": 2478
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/rba_cash_rate_unordered.html",
+      "sha256": "f9a91f74da6e2d913898d967f7a5cd3b0f9a914aa707f653afec280644d6b337",
+      "size": 3750
     },
     {
       "mode": "0644",
@@ -9700,8 +9730,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/app.js",
-      "sha256": "aefe8931c53686b7e486a5a59d774d67e7bc24d9e3c66303f9f477dc9b027368",
-      "size": 242695
+      "sha256": "8808a65852ca33dfe0cbe5e212a53fdd18c36a5e41d032898fb9ed38b20e03e2",
+      "size": 242848
     },
     {
       "mode": "0644",
@@ -9760,8 +9790,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/embed-v1.js",
-      "sha256": "1d78617bb26fd1de986a3e245cb871c568c1d5ba26958badcbee09ccc2a551b6",
-      "size": 36640
+      "sha256": "5e7f5e98cddb4f7ad38c8db75db18da75dcdef7e85408a5a5c3ed7dcfa68df90",
+      "size": 36837
     },
     {
       "mode": "0644",
@@ -9934,8 +9964,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/memo-core.js",
-      "sha256": "eb706479f504c2f8a7db52da1b32402d2d2ffa20a5132464ad1e4f542ecc2741",
-      "size": 11194
+      "sha256": "4b4ffd3dbd5ec312bc54bcce1402db34bd02e7614d743e8a156b26490f654ef3",
+      "size": 11713
     },
     {
       "mode": "0644",
@@ -9964,8 +9994,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/style.css",
-      "sha256": "08bec7a4d32aa603b19582914d5948d3b03eae6dc8e99c5c2a89971132a1e5f5",
-      "size": 157871
+      "sha256": "d83f28aaa9407ae2c6c6e958b88fae48738bec94628049c3141c07226eef36f0",
+      "size": 158028
     },
     {
       "mode": "0644",
@@ -10288,8 +10318,8 @@
     {
       "mode": "0644",
       "path": "internal/web/embed_test.go",
-      "sha256": "f53bd70cf9d9fd021e0e126ba08a126f34ef28302aaf9e77eb94a9923beb33c3",
-      "size": 3864
+      "sha256": "7b8b069664d7720edb29d3f3ce3d1d3dc88cdd36e572860a10330afca220f1d1",
+      "size": 4028
     },
     {
       "mode": "0644",
@@ -10588,8 +10618,8 @@
     {
       "mode": "0644",
       "path": "internal/web/keyboard_test.cjs",
-      "sha256": "1bc5c9f46cb80fa34c24d0f37fa02be88c3828b00058de4a70c93d0496b33254",
-      "size": 14588
+      "sha256": "0f5fd0733baeb79e080c3b6a7ac09ca4eb9e08095081aca34fcf14326a06c031",
+      "size": 15835
     },
     {
       "mode": "0644",
