@@ -798,6 +798,9 @@ func serviceErrorWords(err error) error {
 	if e.Code == "fetch_unsupported_type" {
 		return fetchUnsupportedType(e.Details)
 	}
+	if e.Code == "fetch_robots" {
+		return fetchRobots(e.Details)
+	}
 	if e.Code == "fetch_invalid_url" {
 		return fetchInvalidURL(e.Message)
 	}

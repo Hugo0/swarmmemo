@@ -108,23 +108,56 @@ func parseRobots(body string, agent string) robotsRules {
 // allowed reports whether path (with its query, starting with "/") may be
 // fetched.
 func (r robotsRules) allowed(path string) bool {
+	ok, _ := r.decide(path)
+	return ok
+}
+
+// decide is allowed, with the robots.txt line that decided a refusal
+// ("Disallow: /data/", sanitised by robotsLine); "" when no rule did (the
+// file could not be read, so everything is disallowed) or path is allowed.
+func (r robotsRules) decide(path string) (bool, string) {
 	if r.disallowAll {
-		return false
+		return false, ""
 	}
 	if path == "" {
 		path = "/"
 	}
 	best, allow := -1, true
+	var by robotsRule
 	for _, rule := range r.rules {
 		if !robotsMatch(rule.pattern, path) {
 			continue
 		}
 		n := len(rule.pattern)
 		if n > best || (n == best && rule.allow) {
-			best, allow = n, rule.allow
+			best, allow, by = n, rule.allow, rule
 		}
 	}
-	return allow
+	if allow {
+		return true, ""
+	}
+	return false, robotsLine(by.pattern)
+}
+
+// robotsLineBytes bounds the robots.txt line a fetch_robots refusal names.
+const robotsLineBytes = 80
+
+// robotsLine is the Disallow line for pattern as a refusal may quote it:
+// printable ASCII only, without backticks (it is quoted in them), at most
+// robotsLineBytes bytes, cut with "..." when longer.
+func robotsLine(pattern string) string {
+	var b strings.Builder
+	b.WriteString("Disallow: ")
+	for i := 0; i < len(pattern); i++ {
+		if c := pattern[i]; c >= 0x20 && c < 0x7f && c != '`' {
+			b.WriteByte(c)
+		}
+	}
+	line := b.String()
+	if len(line) > robotsLineBytes {
+		line = line[:robotsLineBytes-3] + "..."
+	}
+	return line
 }
 
 // robotsMatch matches a rule's pattern from the start of path: "*" is any

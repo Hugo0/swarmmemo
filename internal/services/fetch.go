@@ -977,12 +977,12 @@ func (f *fetch) retrieve(ctx context.Context, u *url.URL, now int64) (*fetchedPa
 		if err := f.denied(ctx, q, current.Hostname()); err != nil {
 			return nil, err
 		}
-		allowed, err := f.robotsAllow(ctx, current, now)
+		allowed, line, err := f.robotsAllow(ctx, current, now)
 		if err != nil {
 			return nil, err
 		}
 		if !allowed {
-			return nil, refusal("fetch_robots")
+			return nil, robotsRefusal(line, current.Hostname())
 		}
 		resp, err := f.get(ctx, current, now)
 		if err != nil {
@@ -1133,7 +1133,7 @@ func (f *fetch) countHost(ctx context.Context, host string, now int64) error {
 // caching the origin's robots.txt first: a 4xx means no rules, and an
 // unreachable file (5xx, a network failure, a redirect off the host) means
 // everything is disallowed.
-func (f *fetch) robotsAllow(ctx context.Context, u *url.URL, now int64) (bool, error) {
+func (f *fetch) robotsAllow(ctx context.Context, u *url.URL, now int64) (bool, string, error) {
 	origin := u.Scheme + "://" + u.Host
 	f.mu.Lock()
 	e := f.robots[origin]
@@ -1141,7 +1141,7 @@ func (f *fetch) robotsAllow(ctx context.Context, u *url.URL, now int64) (bool, e
 	if e == nil || now >= e.expires {
 		rules, err := f.readRobots(ctx, u, now)
 		if err != nil {
-			return false, err
+			return false, "", err
 		}
 		e = &robotsEntry{rules: rules, expires: now + FetchRobotsSeconds}
 		f.mu.Lock()
@@ -1162,7 +1162,41 @@ func (f *fetch) robotsAllow(ctx context.Context, u *url.URL, now int64) (bool, e
 	if u.RawQuery != "" {
 		path += "?" + u.RawQuery
 	}
-	return e.rules.allowed(path), nil
+	ok, line := e.rules.decide(path)
+	return ok, line, nil
+}
+
+// robotsRefusal is fetch_robots, carrying for the board's message (never
+// as response keys) the robots.txt line that matched (robots_line, from
+// robotsLine; absent when the file could not be read) and the public_data
+// datasets that read host (datasets, PublicDataDatasetsForHost).
+func robotsRefusal(line, host string) error {
+	d := map[string]any{}
+	if line != "" {
+		d["robots_line"] = line
+	}
+	if ids := PublicDataDatasetsForHost(host); len(ids) > 0 {
+		d["datasets"] = ids
+	}
+	if len(d) == 0 {
+		return refusal("fetch_robots")
+	}
+	return &allowance.Err{Code: "fetch_robots", Details: d}
+}
+
+// PublicDataDatasetsForHost is the ids of the public_data datasets whose
+// Hosts include host (case-insensitive), in catalogue order.
+func PublicDataDatasetsForHost(host string) []string {
+	var out []string
+	for _, ds := range pdCatalogue {
+		for _, h := range ds.Hosts {
+			if strings.EqualFold(h, host) {
+				out = append(out, ds.ID)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func (f *fetch) readRobots(ctx context.Context, u *url.URL, now int64) (robotsRules, error) {

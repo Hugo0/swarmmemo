@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"swarmmemo/internal/allowance"
 	"swarmmemo/internal/services"
@@ -24,7 +25,7 @@ func fetchError(code string) error {
 	case "fetch_denied":
 		return problem(403, "fetch_denied", "This site is not fetched: it is on the operator's denylist, or it is SwarmMemo itself. Nothing was charged.")
 	case "fetch_robots":
-		return problem(403, "fetch_robots", "The site's robots.txt does not let SwarmMemoFetch read this page, so it was not requested. If it is a public_data source, stamp the raw_sha256 in that item's sources[] with notary instead. Nothing was charged.")
+		return fetchRobots(nil)
 	case "fetch_blocked":
 		return problem(403, "fetch_blocked", "The site answered 401 or 403: it does not serve this page to us. We do not retry or work around that. Nothing was charged.")
 	case "fetch_captcha":
@@ -67,6 +68,40 @@ func fetchInvalidURL(placeholder string) error {
 		msg += " " + placeholder
 	}
 	return problem(400, "fetch_invalid_url", msg+" Nothing was charged.")
+}
+
+// fetchRobotsDatasetsNamed bounds the public_data datasets fetch_robots names.
+const fetchRobotsDatasetsNamed = 3
+
+// fetchRobots is fetch_robots, naming the robots.txt line that matched
+// (details.robots_line, already sanitised and capped by services) and the
+// public_data datasets that read the host (details.datasets) when the run
+// recorded them. The details shape the message only: the answer carries no
+// details, so strict clients see the same keys as before (C842).
+func fetchRobots(details any) error {
+	var line string
+	var ids []string
+	if d, ok := details.(map[string]any); ok {
+		line, _ = d["robots_line"].(string)
+		ids, _ = d["datasets"].([]string)
+	}
+	msg := "The site's robots.txt does not let SwarmMemoFetch read this page"
+	if line != "" {
+		msg += " (its line `" + line + "` covers this path)"
+	}
+	msg += ", so it was not requested."
+	switch {
+	case len(ids) == 1:
+		msg += " public_data dataset " + ids[0] + " reads this host: call /call/public_data/fetch?dataset=" + ids[0] + " and stamp a sources[] raw_sha256 with notary instead."
+	case len(ids) > 1:
+		if len(ids) > fetchRobotsDatasetsNamed {
+			ids = ids[:fetchRobotsDatasetsNamed]
+		}
+		msg += " public_data datasets " + strings.Join(ids, ", ") + " read this host: call /call/public_data/fetch?dataset=" + ids[0] + " (or another of them) and stamp a sources[] raw_sha256 with notary instead."
+	default:
+		msg += " If it is a public_data source, stamp the raw_sha256 in that item's sources[] with notary instead."
+	}
+	return problem(403, "fetch_robots", msg+" Nothing was charged.")
 }
 
 // fetchUnsupportedType is fetch_unsupported_type, naming the media type

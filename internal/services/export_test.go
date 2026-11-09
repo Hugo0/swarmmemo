@@ -65,6 +65,12 @@ func RobotsAllowedForTest(body, path string) bool {
 	return parseRobots(body, FetchRobotsToken).allowed(path)
 }
 
+// RobotsDecideForTest is RobotsAllowedForTest with the robots.txt line
+// that decided a refusal, as fetch_robots names it.
+func RobotsDecideForTest(body, path string) (bool, string) {
+	return parseRobots(body, FetchRobotsToken).decide(path)
+}
+
 // QuoteForTest runs a built-in provider's argument parser and quote (memory
 // put and delete, echo) on args, for the data fuzz target.
 func QuoteForTest(method string, args json.RawMessage) (Quote, error) {
