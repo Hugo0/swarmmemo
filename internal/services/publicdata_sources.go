@@ -661,16 +661,32 @@ type fdaRecall struct {
 	Date           string  `json:"date"`
 }
 
+// fdaPage is one openFDA answer: its rows and meta.last_updated, the day
+// the enforcement feed was last refreshed (it lags FDA's own announcements
+// by days to weeks), empty when openFDA gave no meta (its 404 carries none).
+type fdaPage struct {
+	LastUpdated string      `json:"last_updated,omitempty"`
+	Recalls     []fdaRecall `json:"recalls"`
+}
+
 func parseFDA(raw []byte) (any, error) {
-	out := []fdaRecall{}
+	out := fdaPage{Recalls: []fdaRecall{}}
 	if raw == nil {
 		return out, nil // openFDA's 404: no match
 	}
 	var body struct {
+		Meta struct {
+			LastUpdated string `json:"last_updated"`
+		} `json:"meta"`
 		Results []map[string]any `json:"results"`
 	}
 	if err := decodeJSON(raw, &body); err != nil {
 		return nil, err
+	}
+	if d := strings.TrimSpace(body.Meta.LastUpdated); d != "" {
+		if _, err := time.Parse("2006-01-02", d); err == nil {
+			out.LastUpdated = d
+		}
 	}
 	for _, r := range body.Results {
 		rec := fdaRecall{Product: pyStr(r["product_description"]), Reason: pyStr(r["reason_for_recall"]), Status: pyStr(r["status"]),
@@ -678,7 +694,7 @@ func parseFDA(raw []byte) (any, error) {
 		if s, ok := r["recalling_firm"].(string); ok {
 			rec.Firm = &s
 		}
-		out = append(out, rec)
+		out.Recalls = append(out.Recalls, rec)
 	}
 	return out, nil
 }
@@ -806,17 +822,31 @@ var dsRecalls = &pdDataset{
 		case "closed":
 			search += ` AND (status:"Completed" OR status:"Terminated")`
 		}
-		if raw, err := r.fetch(ctx, pdFetch{Key: "fda:" + status + ":" + strings.ToLower(firm), TTL: time.Hour, Host: fdaHost, Path: "/food/enforcement.json",
+		// The cache key's fda2 prefix keeps rows cached as a bare list
+		// (before fdaPage) from being read as a page.
+		fdaUpdated := ""
+		if raw, err := r.fetch(ctx, pdFetch{Key: "fda2:" + status + ":" + strings.ToLower(firm), TTL: time.Hour, Host: fdaHost, Path: "/food/enforcement.json",
 			Query: url.Values{"search": {search}, "sort": {"recall_initiation_date:desc"}, "limit": {strconv.Itoa(fdaLimit)}}, NotFound404: true, MaxBytes: 2 << 20, Parse: parseFDA}); err != nil {
 			out.SourcesFailed = append(out.SourcesFailed, "openFDA")
 			notes = append(notes, "openFDA food-enforcement query failed.")
 		} else {
-			list, err := unmarshalCached[[]fdaRecall](raw)
+			page, err := unmarshalCached[fdaPage](raw)
 			if err != nil {
 				return nil, err
 			}
 			out.SourcesChecked = append(out.SourcesChecked, "openFDA")
-			for _, rec := range list {
+			fdaUpdated = page.LastUpdated
+			if fdaUpdated == "" {
+				// openFDA's no-match 404 carries no meta: one feed-wide row
+				// says how fresh the feed is (cached for every firm).
+				if mraw, err := r.fetch(ctx, pdFetch{Key: "fda2:meta", TTL: time.Hour, Host: fdaHost, Path: "/food/enforcement.json",
+					Query: url.Values{"limit": {"1"}}, MaxBytes: 1 << 20, Parse: parseFDA}); err == nil {
+					if meta, err := unmarshalCached[fdaPage](mraw); err == nil {
+						fdaUpdated = meta.LastUpdated
+					}
+				}
+			}
+			for _, rec := range page.Recalls {
 				st := strings.ToLower(rec.Status)
 				if (status == "active" && st != "ongoing") || (status == "closed" && st != "completed" && st != "terminated") {
 					continue
@@ -833,11 +863,20 @@ var dsRecalls = &pdDataset{
 		out.Partial = len(out.SourcesFailed) > 0
 		out.Recalls = all[:min(len(all), int(intOr(p, "limit", 10)))]
 		out.Count = len(out.Recalls)
+		// as_of is the newer of the newest recall and openFDA's own
+		// last_updated, so a lagging feed shows instead of a null.
 		if len(out.Recalls) > 0 && out.Recalls[0].Date != nil {
 			r.asOf = *out.Recalls[0].Date
 		}
+		if fdaUpdated > r.asOf {
+			r.asOf = fdaUpdated
+		}
 		if len(all) == 0 {
-			notes = append([]string{"no recalls matching this firm in the sources checked; absence means something only for those sources"}, notes...)
+			none := "no recalls matching this firm in the sources checked; absence means something only for those sources"
+			if fdaUpdated != "" {
+				none += ". openFDA's enforcement feed was last updated " + fdaUpdated + "; recalls announced since then are not in it yet."
+			}
+			notes = append([]string{none}, notes...)
 		}
 		out.Note = strings.Join(notes, " ")
 		return out, nil

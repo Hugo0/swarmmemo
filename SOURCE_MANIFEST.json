@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "76898f7836c6f353324acf3f7efa5193b5c791c23dfb0618bb8fefa7e03b081d",
+  "allowlist_sha256": "9eb8a4e6e1acf297e6df7dcf0aaa345cbc0cd2f2d04a83356478386163c645d8",
   "files": [
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "84a572b484d05204fc609c86e6c403bcc2d8a55a7163ec5ab6796d46b4193b02",
-      "size": 668301
+      "sha256": "e35bd4452834fc5a9bdb606bb85938f099407709b9ef5dc8ab4e9272bb50d966",
+      "size": 668453
     },
     {
       "mode": "0644",
@@ -8416,14 +8416,14 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_sources.go",
-      "sha256": "e2e79d1fa2e442b855bbd8fcd19680a7fd96aa30516c0dff8601b8ccf096a2b1",
-      "size": 42900
+      "sha256": "ee4f26e641fd4c5efa6c58bf513348b62f9ae26aa06104d836a41d10f3edce78",
+      "size": 44519
     },
     {
       "mode": "0644",
       "path": "internal/services/publicdata_test.go",
-      "sha256": "93bf62903584e592a7d3c6eddc6aa5cb703f4674fe60cf9811f3041c468fb749",
-      "size": 65591
+      "sha256": "c18ebd558c050c99a8f6a29c25d0385457a493042037e166516d12326dba808b",
+      "size": 67205
     },
     {
       "mode": "0644",
@@ -8716,8 +8716,14 @@
     {
       "mode": "0644",
       "path": "internal/services/testdata/public_data/fda_enforcement.json",
-      "sha256": "3d7a292ab55dd7cc929ddeb88c9a07f2d1ffa4fc89d2c2997396a2b92d5cc7aa",
-      "size": 350
+      "sha256": "aadbfe1e8f7ee5afc42533c72c165660b77de25e1000dc3d51530e776a64da4c",
+      "size": 382
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/fda_meta.json",
+      "sha256": "2b07a0761d8f4f3ce16bc1d4c7e9fae7ba393f13c853b369cc77b60cc8c10d99",
+      "size": 454
     },
     {
       "mode": "0644",

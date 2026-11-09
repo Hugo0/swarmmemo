@@ -1,0 +1,21 @@
+{
+ "meta": {
+  "disclaimer": "Do not rely on openFDA to make decisions regarding medical care.",
+  "last_updated": "2026-07-14",
+  "results": {
+   "skip": 0,
+   "limit": 1,
+   "total": 28761
+  }
+ },
+ "results": [
+  {
+   "recalling_firm": "Example Foods Inc.",
+   "product_description": "Granola bars",
+   "reason_for_recall": "Undeclared peanuts",
+   "status": "Ongoing",
+   "classification": "Class II",
+   "recall_initiation_date": "20260709"
+  }
+ ]
+}

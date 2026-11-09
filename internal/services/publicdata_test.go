@@ -123,6 +123,9 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			if strings.Contains(strings.ToLower(r.URL.Query().Get("search")), `recalling_firm:"reser`) {
 				return "fda_enforcement.json", 200
 			}
+			if q := r.URL.Query(); q.Get("search") == "" && q.Get("limit") == "1" {
+				return "fda_meta.json", 200 // the feed-wide row: meta.last_updated
+			}
 			return "fda_not_found.json", 404
 		},
 		"api.congress.gov": func(r *http.Request) (string, int) {
@@ -535,6 +538,17 @@ func TestPublicDataRecalls(t *testing.T) {
 		eq(t, "closed search", closed.Get("search"), `recalling_firm:"Reser" AND (status:"Completed" OR status:"Terminated")`)
 		eq(t, "newest first", active.Get("sort"), "recall_initiation_date:desc")
 	}
+	// as_of is openFDA's meta.last_updated when newer than the newest row,
+	// and an empty answer says how far the feed lags (C838).
+	item, d = v.mustFetch(t, "food_recalls", `{"firm":"Reser","status":"ongoing"}`, unix("2026-07-20"))
+	eq(t, "as_of from openFDA meta", item["as_of"], "2026-07-15")
+	item, d = v.mustFetch(t, "food_recalls", `{"firm":"Synear"}`, unix("2026-07-20"))
+	eq(t, "as_of newest row", item["as_of"], "2026-07-18")
+	item, d = v.mustFetch(t, "food_recalls", `{"firm":"Nobody"}`, unix("2026-07-20"))
+	eq(t, "nobody count", d["count"], 0.0)
+	eq(t, "as_of from feed meta on a 404", item["as_of"], "2026-07-14")
+	eq(t, "lag note", d["note"], "no recalls matching this firm in the sources checked; absence means something only for those sources. "+
+		"openFDA's enforcement feed was last updated 2026-07-14; recalls announced since then are not in it yet.")
 	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Jerky","status":"closed"}`, unix("2026-07-20"))
 	eq(t, "fsis closed", at(d, "recalls", 0, "status"), "Closed")
 
@@ -542,6 +556,15 @@ func TestPublicDataRecalls(t *testing.T) {
 	if n := v.fakes["www.fsis.usda.gov"].count(); n != 1 {
 		t.Errorf("FSIS fetched %d times, want 1", n)
 	}
+	// No openFDA meta: as_of stays null and the note has no lag clause.
+	v3 := newPDEnv(t, false)
+	v3.fakes["api.fda.gov"].route = func(r *http.Request) (string, int) { return "fda_not_found.json", 404 }
+	item, d = v3.mustFetch(t, "food_recalls", `{"firm":"Nobody"}`, unix("2026-07-20"))
+	eq(t, "no meta count", d["count"], 0.0)
+	eq(t, "no meta as_of", item["as_of"], nil)
+	eq(t, "no meta note", d["note"], "no recalls matching this firm in the sources checked; absence means something only for those sources")
+	eq(t, "no meta still checked", d["sources_checked"], []any{"FSIS", "openFDA"})
+
 	// FSIS refusing us still answers from openFDA, saying what is missing.
 	v2 := newPDEnv(t, false)
 	v2.fakes["www.fsis.usda.gov"].set("403")
