@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "146137d9133a1a28ce52d0f80c2e015484e714baaa604499fa4841ec221e5a77",
+  "allowlist_sha256": "1ca4a8ad87fac576a4afc8884db4d003fdce58d96bb11966e9ebf8b03d1da9a9",
   "files": [
     {
       "mode": "0644",
@@ -220,8 +220,8 @@
     {
       "mode": "0644",
       "path": "clients/python/swarmmemo.py",
-      "sha256": "6f1e1611e4a9c3eeeaa6527e148692d2f45ea403c462297fb9f7f80233b8e72c",
-      "size": 403162
+      "sha256": "e93ea592c052e624f1c0dcdeb2a146ac3142b0c4e4c1be2ee93c1adff3890926",
+      "size": 403229
     },
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "168b1a27120d0857d822c6df8e727955dcec20cd2413c09e7025971a6060438b",
-      "size": 668690
+      "sha256": "610e3f5db458f341da72a9e8e05a9f498c57141007f3dfbf1ecec38671855d43",
+      "size": 668854
     },
     {
       "mode": "0644",
@@ -1288,8 +1288,8 @@
     {
       "mode": "0644",
       "path": "integrations/agno/agno_swarmmemo/_swarmmemo.py",
-      "sha256": "6f1e1611e4a9c3eeeaa6527e148692d2f45ea403c462297fb9f7f80233b8e72c",
-      "size": 403162
+      "sha256": "e93ea592c052e624f1c0dcdeb2a146ac3142b0c4e4c1be2ee93c1adff3890926",
+      "size": 403229
     },
     {
       "mode": "0644",
@@ -1348,8 +1348,8 @@
     {
       "mode": "0644",
       "path": "integrations/crewai/crewai_swarmmemo/_swarmmemo.py",
-      "sha256": "6f1e1611e4a9c3eeeaa6527e148692d2f45ea403c462297fb9f7f80233b8e72c",
-      "size": 403162
+      "sha256": "e93ea592c052e624f1c0dcdeb2a146ac3142b0c4e4c1be2ee93c1adff3890926",
+      "size": 403229
     },
     {
       "mode": "0644",
@@ -1408,8 +1408,8 @@
     {
       "mode": "0644",
       "path": "integrations/langchain/langchain_swarmmemo/_swarmmemo.py",
-      "sha256": "6f1e1611e4a9c3eeeaa6527e148692d2f45ea403c462297fb9f7f80233b8e72c",
-      "size": 403162
+      "sha256": "e93ea592c052e624f1c0dcdeb2a146ac3142b0c4e4c1be2ee93c1adff3890926",
+      "size": 403229
     },
     {
       "mode": "0644",
@@ -1894,8 +1894,8 @@
     {
       "mode": "0644",
       "path": "internal/board/errortexts.go",
-      "sha256": "5ebd261a854e4864a395efdf602e8c19884c7d3563b32fb248cd5b125bd2b357",
-      "size": 10412
+      "sha256": "9ee8b959a3a524de7d70bc2b087445ce1fdbc339eeec739e2cce1dbada252e72",
+      "size": 10937
     },
     {
       "mode": "0644",
@@ -2230,8 +2230,8 @@
     {
       "mode": "0644",
       "path": "internal/board/identity.go",
-      "sha256": "a312686f936a6edd59a8d557219a713890eb8e4fbdd8810ea9a9c8b72527864d",
-      "size": 45753
+      "sha256": "252ba0ea82ca6cc408ba608551e7eb8095038d55e32cb311f22ff91652507e67",
+      "size": 46215
     },
     {
       "mode": "0644",
@@ -3328,8 +3328,8 @@
     {
       "mode": "0644",
       "path": "internal/board/rooms.go",
-      "sha256": "3a6d3dba0dcc9cff650563a3c5b948a4ddf8a795c61dc85b60d4e1a9771d274d",
-      "size": 45045
+      "sha256": "40ac577f9b545f8e70cbfd5e6fa1b0b781616e9310aca79aafce0340f28056ed",
+      "size": 45303
     },
     {
       "mode": "0644",
@@ -5116,8 +5116,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/agentprofile.go",
-      "sha256": "9a73f064f873de0d4874af208309f28d63d87445f1f7997fe592685a78b3211a",
-      "size": 6269
+      "sha256": "1a2cdc2284130a74cb63edfaf5c6888a8c16a600aad4bbe55adb9925057d634f",
+      "size": 6602
     },
     {
       "mode": "0644",
@@ -5574,6 +5574,12 @@
       "path": "internal/httpapi/guides_test.go",
       "sha256": "eed4a3594230de1b9bc17d2ca4443dd2b8db0c0be355a785f93cd940fc976879",
       "size": 11341
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/handle_noprofile_test.go",
+      "sha256": "768f37ea26cdec19252bd40922285eb653858c526facf3052d687414ad212d7d",
+      "size": 2833
     },
     {
       "mode": "0644",
@@ -8416,8 +8422,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_macro.go",
-      "sha256": "56f452ffa2f61e93cccc6cf3eb5597ca2bb3e8dd85de0b1ed2bb70b77a895675",
-      "size": 62105
+      "sha256": "002264f3d4afbff9f2e1e5981366c33ed907cd1f74a066b29cd7c8866886fbfe",
+      "size": 66070
     },
     {
       "mode": "0644",
@@ -8440,14 +8446,14 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_sources.go",
-      "sha256": "85b5350fc9d1cd8aff47f168c4f05e4a55323429822c3e6dd24f0d936ec42998",
-      "size": 44559
+      "sha256": "0217ee482d5a83c4c59d02d6d43985e326e0473421fcb1f4aaf293fbd1795596",
+      "size": 44599
     },
     {
       "mode": "0644",
       "path": "internal/services/publicdata_test.go",
-      "sha256": "ba9d08957f387899cd9ef7be20e27b9e097ed4c9b0779ebc205c10c9e7082e7d",
-      "size": 71233
+      "sha256": "fde5740f90225cb03949b25454095ec48bb793caf8c8ae3db023c53848796b76",
+      "size": 76410
     },
     {
       "mode": "0644",
@@ -8760,6 +8766,36 @@
       "path": "internal/services/testdata/public_data/congress_bills.json",
       "sha256": "b6f77286b7c53dd54ead63e99ded687be3c41979c3f647f65b2c144ea4c91e14",
       "size": 960
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/ecb_key_rates.html",
+      "sha256": "7897adf71ca1d5ddb73df278bffdd185f7a620330ab71bac6cf2a9ebde3fc14d",
+      "size": 11263
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/ecb_key_rates_hold.html",
+      "sha256": "ac2eb4e233ea074cf618c267b54a6b0d697045a83211e10601f80dac3859837c",
+      "size": 11263
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/ecb_key_rates_malformed.html",
+      "sha256": "88fa015c0a16a850877184f6771696eab76afcd0d182b52ab46991674cb032a9",
+      "size": 11269
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/ecb_key_rates_old.html",
+      "sha256": "275878232852ad84394f6b652720a5a260a61ddc9d27efa6dd1005baf11c1ebd",
+      "size": 10909
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/ecb_key_rates_unordered.html",
+      "sha256": "ed690cfeca917dfff1b3398ad3e87c0987e27a32dd845a2c059f84eaacde76bc",
+      "size": 11248
     },
     {
       "mode": "0644",
@@ -10936,8 +10972,8 @@
     {
       "mode": "0644",
       "path": "internal/web/rooms.go",
-      "sha256": "1275478aa85ceafd025f5d4732e805884d04f2c95b823cf429788a87dbc9144c",
-      "size": 14151
+      "sha256": "3147dbadd69b11bce109c220a61a4995145de6402d1d5a0ea05ad82db7d01c18",
+      "size": 14476
     },
     {
       "mode": "0644",

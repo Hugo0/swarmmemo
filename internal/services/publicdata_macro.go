@@ -345,6 +345,9 @@ const (
 	boeHost             = "www.bankofengland.co.uk"
 	boeBankRatePath     = "/monetary-policy/the-interest-rate-bank-rate"
 	boeRateSource       = "Bank of England's own Bank Rate page (https://" + boeHost + boeBankRatePath + "); BIS WS_CBPOL had not yet caught up with the latest decision"
+	ecbHost             = "www.ecb.europa.eu"
+	ecbKeyRatesPath     = "/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html"
+	ecbRateSource       = "ECB's own key interest rates page (https://" + ecbHost + ecbKeyRatesPath + "); BIS WS_CBPOL had not yet caught up with the latest decision"
 )
 
 type cbBank struct {
@@ -700,10 +703,10 @@ var dsCBPolicy = &pdDataset{
 		}
 		return out, nil
 	},
-	Source:      "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); Bank of Canada Valet API (series V39079); the Bank of England's Bank Rate page when BIS lags a decision; each bank's published calendar",
-	Hosts:       []string{bisHost, bcbHost, fredHost, bankofcanadaHost, boeHost},
+	Source:      "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); Bank of Canada Valet API (series V39079); the Bank of England's Bank Rate page and the ECB's key interest rates page when BIS lags a decision; each bank's published calendar",
+	Hosts:       []string{bisHost, bcbHost, fredHost, bankofcanadaHost, boeHost, ecbHost},
 	Licence:     "BIS statistics: free reuse with attribution; BCB open data; FRED terms for the target range; Bank of Canada Valet: terms at https://www.bankofcanada.ca/terms/ — free reuse with attribution",
-	Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED; Bank of Canada Valet API; Bank of England",
+	Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED; Bank of Canada Valet API; Bank of England; European Central Bank",
 	TermsURL:    "https://www.bis.org/terms_statistics.htm", TermsStatus: "verify before production (BIS, BCB, Bank of Canada Valet terms; calendars need a yearly refresh)",
 	Key: KeyFRED, KeyOptional: true, TTL: time.Hour, Price: 1,
 }
@@ -761,10 +764,10 @@ func cbBankRow(ctx context.Context, r *pdRun, b cbBank, what, today string) *cbR
 	}
 	if row.RateAsOf != nil && what != "next_meeting" {
 		// BIS can trail a fresh decision by days; when a scheduled decision
-		// may be unreflected, the bank's own page (BOE) can confirm the
-		// current level first. Any failure keeps the BIS answer as is.
-		if b.Code == "BOE" && len(possiblyUnreflected(b, *row.RateAsOf, deref(row.RateEffectiveFrom), today)) > 0 {
-			cbOfficialBOE(ctx, r, row, today)
+		// may be unreflected, the bank's own page (cbOfficialPages) can
+		// confirm the current level first. Any failure keeps the BIS answer.
+		if pg, ok := cbOfficialPages[b.Code]; ok && len(possiblyUnreflected(b, *row.RateAsOf, deref(row.RateEffectiveFrom), today)) > 0 {
+			cbOfficial(ctx, r, pg, row, today)
 		}
 		effective := deref(row.RateEffectiveFrom)
 		if row.officialFrom > effective {
@@ -924,17 +927,34 @@ func parseBOEBankRate(raw []byte) (any, error) {
 	return cbOfficialRate{Rate: f, Date: t.Format("2006-01-02")}, nil
 }
 
-// cbOfficialBOE overrides the BIS level with the Bank of England's own page
-// when that page is dated after rate_as_of (and not after today). A changed
-// level takes effect on the page date, with the BIS level as the previous
-// one; an unchanged level only moves rate_as_of forward. On any failure the
-// row is left exactly as BIS filled it.
-func cbOfficialBOE(ctx context.Context, r *pdRun, row *cbRow, today string) {
+// cbOfficialPage is one bank's own current-rate page: where it lives, the
+// fetch cache key, the rate_source and rate_note it sets when it wins, and
+// the parser that reads it into a cbOfficialRate.
+type cbOfficialPage struct {
+	Host, Path, Key, Source, Note string
+	Parse                         func([]byte) (any, error)
+}
+
+// cbOfficialPages are the banks whose own page can confirm a decision BIS
+// has not caught up with yet, by bank code.
+var cbOfficialPages = map[string]cbOfficialPage{
+	"BOE": {Host: boeHost, Path: boeBankRatePath, Key: "boe_bank_rate", Source: boeRateSource, Parse: parseBOEBankRate,
+		Note: "policy_rate_pct is the Bank of England's own current Bank Rate, published on rate_as_of (live; overrides the BIS series, which lagged the latest decision)"},
+	"ECB": {Host: ecbHost, Path: ecbKeyRatesPath, Key: "ecb_key_rates", Source: ecbRateSource, Parse: parseECBKeyRates,
+		Note: "policy_rate_pct is the ECB's own deposit facility rate, in effect from rate_as_of (live; overrides the BIS series, which lagged the latest decision)"},
+}
+
+// cbOfficial overrides the BIS level with the bank's own page when that
+// page is dated after rate_as_of (and not after today). A changed level
+// takes effect on the page date, with the BIS level as the previous one; an
+// unchanged level only moves rate_as_of forward. On any failure the row is
+// left exactly as BIS filled it.
+func cbOfficial(ctx context.Context, r *pdRun, pg cbOfficialPage, row *cbRow, today string) {
 	if row.PolicyRatePct == nil || row.RateAsOf == nil {
 		return
 	}
-	raw, err := r.fetch(ctx, pdFetch{Key: "boe_bank_rate", TTL: time.Hour, Host: boeHost, Path: boeBankRatePath, Accept: "text/html",
-		MaxBytes: 1 << 20, Parse: parseBOEBankRate})
+	raw, err := r.fetch(ctx, pdFetch{Key: pg.Key, TTL: time.Hour, Host: pg.Host, Path: pg.Path, Accept: "text/html",
+		MaxBytes: 1 << 20, Parse: pg.Parse})
 	if err != nil {
 		return
 	}
@@ -946,9 +966,79 @@ func cbOfficialBOE(ctx context.Context, r *pdRun, row *cbRow, today string) {
 	if bps := pyRound((p.Rate-bis)*100, 1); bps != 0 {
 		row.RateEffectiveFrom, row.PreviousRatePct, row.LastChangeBps, row.LastChangeNote = sptr(p.Date), fptr(bis), fptr(bps), ""
 	}
-	row.PolicyRatePct, row.RateAsOf, row.RateSource = fptr(p.Rate), sptr(p.Date), boeRateSource
-	row.RateNote = "policy_rate_pct is the Bank of England's own current Bank Rate, published on rate_as_of (live; overrides the BIS series, which lagged the latest decision)"
+	row.PolicyRatePct, row.RateAsOf, row.RateSource = fptr(p.Rate), sptr(p.Date), pg.Source
+	row.RateNote = pg.Note
 	row.officialFrom = p.Date
+}
+
+var (
+	ecbRowRE  = regexp.MustCompile(`(?s)<tr[^>]{0,200}>(.*?)</tr>`)
+	ecbCellRE = regexp.MustCompile(`(?s)<td[^>]{0,200}>(.*?)</td>`)
+	ecbSupRE  = regexp.MustCompile(`(?s)<sup[^>]{0,80}>[^<]{0,40}</sup>`)
+	ecbTagRE  = regexp.MustCompile(`<[^>]{0,200}>`)
+	ecbYearRE = regexp.MustCompile(`^(?:19|20)[0-9]{2}$`)
+	ecbDayRE  = regexp.MustCompile(`^([0-9]{1,2}) ([A-Z][a-z]{2})[a-z]{0,6}\.?$`)
+	ecbRateRE = regexp.MustCompile(`^-?[0-9]{1,2}\.[0-9]{1,4}$`)
+)
+
+// parseECBKeyRates reads the ECB's key interest rates table (untrusted
+// HTML, capped by the fetch). Each row is year (only on some rows: it is
+// carried down), "DD Mon." effective date, deposit facility, MRO fixed
+// rate, MRO minimum bid, marginal lending. The answer is the deposit
+// facility rate (the series BIS WS_CBPOL serves for the euro area) of the
+// newest row by date, whatever the row order. Anything unrecognised is an
+// error, so the caller keeps the BIS answer.
+func parseECBKeyRates(raw []byte) (any, error) {
+	html := string(raw)
+	i := strings.Index(html, "<tbody>")
+	j := strings.Index(html, "</tbody>")
+	if i < 0 || j < i {
+		return nil, errors.New("ECB key interest rates page layout not recognised")
+	}
+	var best cbOfficialRate
+	year := ""
+	for _, m := range ecbRowRE.FindAllStringSubmatch(html[i:j], -1) {
+		cells := ecbCellRE.FindAllStringSubmatch(m[1], -1)
+		if len(cells) != 6 {
+			continue
+		}
+		text := make([]string, len(cells))
+		for k, c := range cells {
+			v := ecbTagRE.ReplaceAllString(ecbSupRE.ReplaceAllString(c[1], ""), "")
+			v = strings.NewReplacer("&nbsp;", " ", "\u00a0", " ", "\u2212", "-", "&minus;", "-").Replace(v)
+			text[k] = strings.Join(strings.Fields(v), " ")
+		}
+		if ecbYearRE.MatchString(text[0]) {
+			year = text[0]
+		} else if text[0] != "" {
+			return nil, errors.New("ECB key interest rates: unrecognised year cell")
+		}
+		d := ecbDayRE.FindStringSubmatch(text[1])
+		if d == nil {
+			return nil, errors.New("ECB key interest rates: unrecognised date cell")
+		}
+		if year == "" {
+			return nil, errors.New("ECB key interest rates: date row before any year")
+		}
+		t, err := time.Parse("2 Jan 2006", d[1]+" "+d[2]+" "+year)
+		if err != nil {
+			return nil, err
+		}
+		if !ecbRateRE.MatchString(text[2]) {
+			return nil, errors.New("ECB deposit facility rate not recognised")
+		}
+		f, err := strconv.ParseFloat(text[2], 64)
+		if err != nil || f < -1 || f > 25 {
+			return nil, errors.New("ECB deposit facility rate out of range")
+		}
+		if date := t.Format("2006-01-02"); date > best.Date {
+			best = cbOfficialRate{Rate: f, Date: date}
+		}
+	}
+	if best.Date == "" {
+		return nil, errors.New("ECB key interest rates table has no rows")
+	}
+	return best, nil
 }
 
 // possiblyUnreflected lists scheduled decisions up to today that the rate

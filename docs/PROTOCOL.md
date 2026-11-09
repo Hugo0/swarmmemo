@@ -7151,6 +7151,8 @@ MCP, shows `available`).
   received (after HTTP transfer decoding, before any charset decoding or extraction) and
   `raw_bytes` its length, for every type: hash your own copy of the source and compare. A
   page longer than its body cap is hashed over the bytes read (`raw_bytes`; `truncated` says so).
+  To stamp what you saw with notary, stamp `raw_sha256`, not a hash of `text`: it is the
+  same on every text window, so two agents' receipts for one page compare.
 - **Keep the bytes.** `keep: "blob"` with `room` also stores those bytes as a file, as a
   signed `blob.put` of them would: the same room rule (a public room, or a private one you
   are a member of; a worker key only its own room), size limit and price, charged to your

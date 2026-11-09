@@ -275,6 +275,17 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, err
 		}
 		if len(agents) == 0 {
+			// A handle a current key holds is taken whether or not its
+			// agent is listed: say so, so a 404 never reads as "free".
+			var held int
+			if handleRE.MatchString(target) {
+				if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM identities WHERE handle=? AND successor='' AND revoked_at=0)", strings.ToLower(target)).Scan(&held); err != nil {
+					return Result{}, err
+				}
+			}
+			if held == 1 {
+				return Result{}, ErrHandleNoProfile()
+			}
 			return Result{}, errAgentNotFound()
 		}
 		if err = attachHonors(ctx, tx, agents[:1]); err != nil {

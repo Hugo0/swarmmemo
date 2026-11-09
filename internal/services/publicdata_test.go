@@ -209,6 +209,18 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			}
 			return file, 200
 		},
+		"www.ecb.europa.eu": func(r *http.Request) (string, int) {
+			if r.URL.Path != "/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html" {
+				return "", 404
+			}
+			v.mu.Lock()
+			fail, file := v.ecbFail, v.ecbFile
+			v.mu.Unlock()
+			if fail {
+				return "", 500
+			}
+			return file, 200
+		},
 		"www.atlantafed.org": func(r *http.Request) (string, int) { return "gdpnow_card.html", 200 },
 		"www.newyorkfed.org": func(r *http.Request) (string, int) {
 			name := strings.TrimPrefix(r.URL.Path, "/medialibrary/Research/Interactives/Data/NowCast/data/")
@@ -263,11 +275,14 @@ type pdEnv struct {
 	bocFile  string
 	boeFail  bool
 	boeFile  string
+	ecbFail  bool
+	ecbFile  string
 }
 
 func newPDEnv(t *testing.T, keys bool) *pdEnv {
 	t.Helper()
-	v := &pdEnv{db: openDB(t), meter: servicestest.NewMeter(1 << 20), fakes: map[string]*pdFake{}, noaaFile: "noaa_mwn.json", bisFail: map[string]bool{}, bocFile: "boc_valet.json", boeFile: "boe_bank_rate.html"}
+	v := &pdEnv{db: openDB(t), meter: servicestest.NewMeter(1 << 20), fakes: map[string]*pdFake{}, noaaFile: "noaa_mwn.json", bisFail: map[string]bool{}, bocFile: "boc_valet.json", boeFile: "boe_bank_rate.html",
+		ecbFile: "ecb_key_rates.html"}
 	v.keyDir = t.TempDir()
 	if keys {
 		for _, name := range []string{services.KeyAPIDataGov, services.KeyFRED} {
@@ -940,6 +955,107 @@ func TestPublicDataCBPolicyBOE(t *testing.T) {
 	v.mustFetch(t, "cb_policy_rates", `{"bank":"BOE","what":"rate"}`, unix("2026-08-25"))
 	if n := v.fakes["www.bankofengland.co.uk"].count(); n != 0 {
 		t.Errorf("boe read without a missed decision: %d", n)
+	}
+}
+
+// TestPublicDataCBPolicyECB covers the ECB's own key interest rates table
+// (C845), read like the Bank of England page: only when a scheduled
+// decision may be unreflected in BIS (bis_XM.csv: 2.25 as of 2026-08-12,
+// before the 2026-09-10 and 2026-10-29 Governing Council dates). The table
+// lists changes with their effective dates (the 2026-09-10 hike took effect
+// on 2026-09-16); its newest row by date gives the deposit facility rate.
+func TestPublicDataCBPolicyECB(t *testing.T) {
+	oct, nov := unix("2026-10-01"), unix("2026-11-09")
+	withPage := func(file string, fail bool, now int64) (*pdEnv, map[string]any) {
+		v := newPDEnv(t, false)
+		v.mu.Lock()
+		v.ecbFile, v.ecbFail = file, fail
+		v.mu.Unlock()
+		_, d := v.mustFetch(t, "cb_policy_rates", `{"bank":"ECB","what":"rate"}`, now)
+		return v, at(d, "banks", "ECB").(map[string]any)
+	}
+	keepsBIS := func(name string, ecb map[string]any) {
+		t.Helper()
+		near(t, name+" rate", at(ecb, "policy_rate_pct"), 2.25)
+		eq(t, name+" as_of", at(ecb, "rate_as_of"), "2026-08-12")
+		eq(t, name+" effective", at(ecb, "rate_effective_from"), "2026-06-17")
+		near(t, name+" previous", at(ecb, "previous_rate_pct"), 2.0)
+		near(t, name+" bps", at(ecb, "last_change_bps"), 25.0)
+		if src, _ := at(ecb, "rate_source").(string); !strings.Contains(src, "BIS") {
+			t.Errorf("%s rate_source %v", name, src)
+		}
+		eq(t, name+" stale", at(ecb, "rate_may_be_stale"), true)
+		if r, _ := at(ecb, "rate_stale_reason").(string); !strings.Contains(r, "2026-09-10") {
+			t.Errorf("%s stale reason %v", name, r)
+		}
+	}
+	raised := func(name string, ecb map[string]any) {
+		t.Helper()
+		near(t, name+" rate", at(ecb, "policy_rate_pct"), 2.5)
+		eq(t, name+" as_of", at(ecb, "rate_as_of"), "2026-09-16")
+		eq(t, name+" effective", at(ecb, "rate_effective_from"), "2026-09-16")
+		near(t, name+" previous", at(ecb, "previous_rate_pct"), 2.25)
+		near(t, name+" bps", at(ecb, "last_change_bps"), 25.0)
+		eq(t, name+" no change note", at(ecb, "last_change_note"), nil)
+		if src, _ := at(ecb, "rate_source").(string); !strings.Contains(src, "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html") {
+			t.Errorf("%s rate_source %v", name, src)
+		}
+	}
+
+	// A newer level on the official table wins; the decision it reflects
+	// is no longer missed.
+	v, ecb := withPage("ecb_key_rates.html", false, oct)
+	raised("raised", ecb)
+	eq(t, "raised not stale", at(ecb, "rate_may_be_stale"), false)
+	eq(t, "raised no stale reason", at(ecb, "rate_stale_reason"), nil)
+	if n := v.fakes["www.ecb.europa.eu"].count(); n != 1 {
+		t.Fatalf("ecb hits = %d", n)
+	}
+	for k := range ecb {
+		if k == "officialFrom" || k == "official_from" {
+			t.Errorf("unexported field leaked as %s", k)
+		}
+	}
+	// The newest row is found by date, not position, with the year
+	// carried down from an earlier row.
+	_, ecb = withPage("ecb_key_rates_unordered.html", false, oct)
+	raised("unordered", ecb)
+	eq(t, "unordered not stale", at(ecb, "rate_may_be_stale"), false)
+	// A later decision the table lists no change for stays possibly
+	// unreflected: the table only records changes.
+	_, ecb = withPage("ecb_key_rates.html", false, nov)
+	raised("later decision", ecb)
+	eq(t, "later decision stale", at(ecb, "rate_may_be_stale"), true)
+	if r, _ := at(ecb, "rate_stale_reason").(string); !strings.Contains(r, "2026-10-29") || strings.Contains(r, "2026-09-10") {
+		t.Errorf("later decision stale reason %v", r)
+	}
+
+	// An unchanged level dated after BIS confirms it: as_of moves, the
+	// last change stays BIS's, and the decision counts as reflected.
+	_, ecb = withPage("ecb_key_rates_hold.html", false, oct)
+	near(t, "hold rate", at(ecb, "policy_rate_pct"), 2.25)
+	eq(t, "hold as_of", at(ecb, "rate_as_of"), "2026-09-16")
+	eq(t, "hold effective", at(ecb, "rate_effective_from"), "2026-06-17")
+	near(t, "hold previous", at(ecb, "previous_rate_pct"), 2.0)
+	near(t, "hold bps", at(ecb, "last_change_bps"), 25.0)
+	eq(t, "hold not stale", at(ecb, "rate_may_be_stale"), false)
+
+	// A table no newer than BIS, a malformed table, a failed fetch and a
+	// table dated after today all keep the BIS answer and its staleness.
+	_, ecb = withPage("ecb_key_rates_old.html", false, oct)
+	keepsBIS("old page", ecb)
+	_, ecb = withPage("ecb_key_rates_malformed.html", false, oct)
+	keepsBIS("malformed page", ecb)
+	_, ecb = withPage("", true, oct)
+	keepsBIS("failed fetch", ecb)
+	_, ecb = withPage("ecb_key_rates.html", false, unix("2026-09-15"))
+	keepsBIS("not yet effective", ecb)
+
+	// No scheduled decision after rate_as_of: the page is never read.
+	v = newPDEnv(t, false)
+	v.mustFetch(t, "cb_policy_rates", `{"bank":"ECB","what":"rate"}`, unix("2026-08-15"))
+	if n := v.fakes["www.ecb.europa.eu"].count(); n != 0 {
+		t.Errorf("ecb read without a missed decision: %d", n)
 	}
 }
 

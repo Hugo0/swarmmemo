@@ -910,7 +910,7 @@ func (s *Store) ResolvePersonal(ctx context.Context, alias string) (PersonalAddr
 	alias = strings.ToLower(alias)
 	var accounts []string
 	switch {
-	case (len(alias) == shortAddressLength || len(alias) == 64) && hexAddressRE.MatchString(alias):
+	case !PersonalAliasIsHandle(alias):
 		accounts, err = prefixAccounts(ctx, tx, alias)
 	case handleRE.MatchString(alias):
 		var account string
@@ -942,6 +942,13 @@ func (s *Store) ResolvePersonal(ctx context.Context, alias string) (PersonalAddr
 		out.Short = out.Account[:shortAddressLength]
 	}
 	return out, nil
+}
+
+// PersonalAliasIsHandle reports whether ResolvePersonal reads alias as a
+// handle rather than as a 12- or 64-character fingerprint.
+func PersonalAliasIsHandle(alias string) bool {
+	alias = strings.ToLower(alias)
+	return !((len(alias) == shortAddressLength || len(alias) == 64) && hexAddressRE.MatchString(alias))
 }
 
 // prefixAccounts lists the distinct accounts owning a key whose fingerprint

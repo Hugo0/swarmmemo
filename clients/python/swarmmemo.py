@@ -5891,7 +5891,7 @@ def build_parser():
     ri.add_argument("--limit", type=int, help="items per read, default 10")
     ri.add_argument("--include-flagged", action="store_true", help="include the bodies screening flagged (withheld by default)")
     ri.add_argument("--wait", type=float, metavar="SECONDS", help="poll until an item after --after arrives, at most this long; nothing arrived: no output, exit 0")
-    trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild"); trust.add_argument("agent")
+    trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild; omit AGENT for your own"); trust.add_argument("agent", nargs="?")
     verify = commands.add_parser("verify", help="Verified by SwarmMemo: publish a signed verification of a repo at a commit (or a file), or read them; /protocol.md#verified-by-swarmmemo")
     verify_actions = verify.add_subparsers(dest="verify_action", required=True)
     vp = verify_actions.add_parser("publish", help="verify.publish, signed: public at /v/ID with a README badge",
@@ -6206,7 +6206,7 @@ def main(argv=None):
                 result = run_receiver(args, client)
                 if result is None:
                     return 0  # receiver items --wait: nothing arrived before the deadline
-            elif args.action == "trust": result = client.command("trust.get", target=args.agent)
+            elif args.action == "trust": result = client.command("trust.get", **({"target": args.agent} if args.agent else {}))
             elif args.action == "gate":
                 wallet_key = None
                 if args.wallet_key:

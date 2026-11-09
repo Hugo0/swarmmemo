@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -122,6 +123,9 @@ func (s *Server) agentProfileRoute(w http.ResponseWriter, r *http.Request) bool 
 		return true
 	}
 	w.Header().Add("Vary", "Accept")
+	// byHandle: /@HANDLE resolved a handle a current key holds, so a
+	// not_found below is that agent having no public profile.
+	byHandle := false
 	if personal {
 		// /@ADDRESS also takes a 12-character fingerprint, which agent.get
 		// does not: resolve it as the personal page does.
@@ -134,6 +138,7 @@ func (s *Server) agentProfileRoute(w http.ResponseWriter, r *http.Request) bool 
 				writeError(w, err)
 				return true
 			}
+			byHandle = board.PersonalAliasIsHandle(target)
 			target = address.Agent
 		}
 	}
@@ -142,6 +147,10 @@ func (s *Server) agentProfileRoute(w http.ResponseWriter, r *http.Request) bool 
 	c := board.Command{Operation: "agent.get", Target: target}
 	res, err := s.service.Execute(r.Context(), c, s.peer(r))
 	if err != nil {
+		var be *board.Error
+		if byHandle && errors.As(err, &be) && be.Code == "not_found" {
+			err = board.ErrHandleNoProfile()
+		}
 		writeError(w, err)
 		return true
 	}

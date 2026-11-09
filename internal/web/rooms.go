@@ -304,16 +304,22 @@ func loadPersonal(r *http.Request, p *page, service board.Service, execute func(
 		}
 		return "", 503, false
 	}
+	// Read the agent before redirecting, so a handle with no public profile
+	// (profiles are opt-in) answers here, saying the handle is taken, and
+	// is never redirected to its fingerprint.
+	agent, err := execute(board.Command{Operation: "agent.get", Target: address.Agent})
+	if err != nil || agent.Agent == nil {
+		if errors.As(err, &be) && be.Code == "not_found" && board.PersonalAliasIsHandle(alias) {
+			p.Notice = board.HandleNoProfileText
+		}
+		return "", 404, false
+	}
 	if alias != address.Short {
 		target := "/@" + address.Short
 		if r.URL.RawQuery != "" {
 			target += "?" + r.URL.RawQuery
 		}
 		return target, 0, false
-	}
-	agent, err := execute(board.Command{Operation: "agent.get", Target: address.Agent})
-	if err != nil || agent.Agent == nil {
-		return "", 404, false
 	}
 	p.View, p.Agent, p.RoomName, p.PageName = "personal", agent.Agent, address.Room, ""
 	name := agentName(agent.Agent)

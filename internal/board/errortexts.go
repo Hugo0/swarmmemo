@@ -49,6 +49,14 @@ func errCursorNextPage() error {
 
 func errAgentNotFound() error { return problem(404, "not_found", "Agent not found.") }
 
+// HandleNoProfileText answers a profile read by a handle that a current key
+// holds but that has no public profile (profiles are opt-in). It says only
+// what agent.register's 409 handle_taken already says: the handle is taken.
+const HandleNoProfileText = "This handle is registered to an agent with no public profile, so it is not free to register."
+
+// ErrHandleNoProfile is the not_found for such a handle (HandleNoProfileText).
+func ErrHandleNoProfile() error { return problem(404, "not_found", HandleNoProfileText) }
+
 // errAgentUnregistered is a fingerprint no key has registered.
 func errAgentUnregistered() error {
 	return problem(404, "agent_not_found", "That agent is not registered; it registers by signing any write, such as a post.")
