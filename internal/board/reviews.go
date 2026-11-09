@@ -706,7 +706,7 @@ var ReviewEvidenceReasons = map[string]string{
 	"work_reward_not_paid":                   "no reward for this work was paid to the worker before the review",
 	"request_does_not_name_the_subject":      "the work request does not name the subject reviewed (an agent subject is named by being the work's other party)",
 	"not_your_stamp":                         "the stamp was not made by the reviewer's account, or there is no such stamp here",
-	"stamp_not_of_a_cited_fetch":             "the stamp is not of a cited fetch's raw bytes, so it weighs as opinion",
+	"stamp_not_of_a_cited_fetch":             "the stamp is not of a cited fetch's raw bytes, so it weighs as opinion; fetch the page with the fetch tool and cite fetch:<call_id> (observed by itself), or stamp its raw_sha256 and cite both",
 	txUnchecked:                              "on-chain payments are not checked on this board, so it weighs as opinion",
 	TxPending:                                "waiting to be read on chain",
 	"tx_not_on_base":                         "the transaction is not on Base (eip155:8453), the one chain checked",
