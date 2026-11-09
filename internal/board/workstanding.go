@@ -281,6 +281,9 @@ type WorkStanding struct {
 	// WorkStandingSuccessorDepth links on.
 	Successor string `json:"successor,omitempty"`
 	NextRound string `json:"next_round,omitempty"`
+	// spent: open, and no seat opens again by itself (standingSpent), the
+	// claim's final refusal; never sent (C840).
+	spent bool
 }
 
 // WorkStandingSuccessorDepth bounds a successor chain: a successor whose
@@ -387,16 +390,12 @@ func standingNextRound(ctx context.Context, tx *sql.Tx, next string, now int64) 
 		if err != nil {
 			return "", err
 		}
-		var hidden bool
-		if err = tx.QueryRowContext(ctx, `SELECT hidden FROM events WHERE id=?`, at).Scan(&hidden); err != nil {
-			return "", err
-		}
-		state, err := effectiveWork(ctx, tx, at, generation, now)
+		open, err := standingRoundOpen(ctx, tx, at, generation, now)
 		if err != nil {
 			return "", err
 		}
-		if !hidden && state == "open" {
-			p, err := projectWorkStandingSeats(ctx, tx, w, state, now)
+		if open {
+			p, err := projectWorkStandingSeats(ctx, tx, w, "open", now)
 			if err != nil {
 				return "", err
 			}
@@ -409,6 +408,28 @@ func standingNextRound(ctx context.Context, tx *sql.Tx, next string, now int64) 
 		}
 	}
 	return "", nil
+}
+
+// standingRoundOpen says work id is shown and its effective state is open.
+func standingRoundOpen(ctx context.Context, tx *sql.Tx, id, generation string, now int64) (bool, error) {
+	var hidden bool
+	if err := tx.QueryRowContext(ctx, `SELECT hidden FROM events WHERE id=?`, id).Scan(&hidden); errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	state, err := effectiveWork(ctx, tx, id, generation, now)
+	return err == nil && !hidden && state == "open", err
+}
+
+// standingSuperseded says discovery leaves round p out (C840): it seats no
+// one now nor by itself (spent), and the successor its requester named is
+// open, so the successor is listed in its place. work.get still shows it.
+func standingSuperseded(ctx context.Context, tx *sql.Tx, p *WorkStanding, generation string, now int64) (bool, error) {
+	if p == nil || !p.spent || p.Successor == "" {
+		return false, nil
+	}
+	return standingRoundOpen(ctx, tx, p.Successor, generation, now)
 }
 
 func invalidStanding(msg string) error {
@@ -822,14 +843,29 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 		return n, queue(StandingBlockedDayMax, errNoSeat(StandingBlockedDayMax, next, until, now, fmt.Sprintf("it takes %s a day and has them today (day_max)", plural(st.DayMax, "result")), dayCause(next, midnight)))
 	case n.waiting >= st.Seats:
 		return n, queue(StandingBlockedSeats, errNoSeat(StandingBlockedSeats, next, until, now, fmt.Sprintf("all %s hold a result waiting for a verdict; an accept or a reject frees one sooner", plural(st.Seats, "seat")), "at the latest, when a waiting result's verdict deadline passes"))
-	case pool < st.maxCredits() && next > 0:
-		return n, queue(StandingBlockedPool, errNoSeat(StandingBlockedPool, next, until, now, "its credit pool holds no reward for another result; a reject or an accept that refills the pool opens one sooner", "at the latest, when a waiting result's verdict deadline passes"))
-	case pool < st.maxCredits():
+	case standingPoolFinal(st, n, pool, now, until):
 		// No seat opens by itself (C836): only the requester's verdict
 		// does, so the refusal is final for polling, not a wait.
 		return n, &Error{Status: 409, Code: "seats_full", Message: "No seat is open on this task right now: its credit pool holds no reward for another result; a seat opens when the requester rejects a result, or its next accept refills the pool.", Details: map[string]any{"blocked_by": StandingBlockedPool, "final": true}}
+	case pool < st.maxCredits():
+		return n, queue(StandingBlockedPool, errNoSeat(StandingBlockedPool, next, until, now, "its credit pool holds no reward for another result; a reject or an accept that refills the pool opens one sooner", "at the latest, when a waiting result's verdict deadline passes"))
 	}
 	return n, nil
+}
+
+// standingPoolFinal says the pool holds no reward for another result and
+// no seat opens by itself (no verdict pending before until): the claim's
+// final seats_full (C836).
+func standingPoolFinal(st *workStanding, n standingCounts, pool, now, until int64) bool {
+	return pool < st.maxCredits() && standingNextOpen(st, n, max(pool, 0)/st.maxCredits(), now, until) == 0
+}
+
+// standingSpent says an open standing task seats no one now nor later by
+// itself: full (results_max, as a claim answers results_max_reached) or a
+// final short pool (standingPoolFinal). Discovery leaves such a round out
+// while its successor is open (C840).
+func standingSpent(st *workStanding, n standingCounts, pool, now, until int64) bool {
+	return st.full(n) || standingPoolFinal(st, n, pool, now, until)
 }
 
 // standingQueue is checkStandingSeat's answer to a result that finds no
@@ -1900,6 +1936,7 @@ func projectWorkStandingSeats(ctx context.Context, tx rowQuerier, w workRow, eff
 			p.Open = min(p.Open, st.ResultsMax-n.counted())
 		}
 	}
+	p.spent = effective == "open" && p.Open == 0 && standingSpent(st, n, pool+max(lapsed, 0), now, p.ResultsUntil)
 	if p.Open == 0 && effective == "open" && pool >= 0 {
 		if !p.Full {
 			p.NextOpenAt = standingNextOpen(st, n, rewards, now, p.ResultsUntil)

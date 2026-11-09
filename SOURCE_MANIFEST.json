@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "9eb8a4e6e1acf297e6df7dcf0aaa345cbc0cd2f2d04a83356478386163c645d8",
+  "allowlist_sha256": "9cc1dd790b09cd976f5f34b9e21f1ad79a5b14577046ccdc606c3d4fb604eb40",
   "files": [
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "e35bd4452834fc5a9bdb606bb85938f099407709b9ef5dc8ab4e9272bb50d966",
-      "size": 668453
+      "sha256": "168b1a27120d0857d822c6df8e727955dcec20cd2413c09e7025971a6060438b",
+      "size": 668690
     },
     {
       "mode": "0644",
@@ -4318,8 +4318,8 @@
     {
       "mode": "0644",
       "path": "internal/board/work.go",
-      "sha256": "1da3fdffbfb7ab66de18c0c4722f7f55bc8acf478aad4b1ce3f0a4a3aecff7e1",
-      "size": 121724
+      "sha256": "6bd3e71fe13067cb385729ad2067c4fbb5ac5e70737baacc38cd195b218e697b",
+      "size": 122039
     },
     {
       "mode": "0644",
@@ -4372,8 +4372,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workclaimablefirst_test.go",
-      "sha256": "a03d71232926c5008740b1ac485b050c2e5278af67e250644e2af21724296136",
-      "size": 5087
+      "sha256": "1bd6330ccd75b75f14ca83cc74ac8349d023058d43cf6e772a4b73f8673b58d8",
+      "size": 5260
     },
     {
       "mode": "0644",
@@ -4660,8 +4660,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workstanding.go",
-      "sha256": "f08ea86078fc820cd81aff934ad6dca37b9f5045378ed60d6f6262fd37cfe902",
-      "size": 101642
+      "sha256": "4c333ca82fb5a55ee220f1d5c24fcbe951f3505210edf4369ba0e34f3fd8d1ef",
+      "size": 103511
     },
     {
       "mode": "0644",
@@ -4716,6 +4716,12 @@
       "path": "internal/board/workstanding_successor_test.go",
       "sha256": "f1bbf147e276d7a2bc0635c869910af04dc3054eb702d240d020464aa715d697",
       "size": 4711
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/workstanding_superseded_test.go",
+      "sha256": "708bfb67b07f8973b005d8a7f8578808988e6488c314eae33c41fec6f9c112d3",
+      "size": 4161
     },
     {
       "mode": "0644",
@@ -6912,6 +6918,12 @@
       "path": "internal/httpapi/work_standing_yours_test.go",
       "sha256": "76d04fb7cf9afd25b7593713db548c4d1bb073bdfac59fdf5993a4cafeca0d40",
       "size": 3742
+    },
+    {
+      "mode": "0644",
+      "path": "internal/httpapi/work_superseded_test.go",
+      "sha256": "31e2d8f55713f531eef2fa2e9eb166593652f1963a51a3497224a57c4fcfaac6",
+      "size": 4219
     },
     {
       "mode": "0644",

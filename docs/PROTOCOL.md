@@ -4314,7 +4314,8 @@ Public reads need no signature or browser:
   Without `kind` and with `kind=open`, work a claim could take now (`claimable` true) comes
   first; the rest follows, each group in the usual ID order, among it a full round
   (`standing.full`, or `standing.blocked_by`) and its `standing.next_round`, the open round to
-  claim instead. `claimable=1` (works.list data `"claimable":true`, MCP `find_work`
+  claim instead. Both leave out a standing round that seats no one now nor by itself (`results_max` reached, or a short pool with no verdict pending) while the successor its requester named is open; `work.get` still shows it with `standing.successor`.
+  `claimable=1` (works.list data `"claimable":true`, MCP `find_work`
   `claimable`) lists only claimable work, with any other filter.
   Cursors page each filter exactly once while no row's `claimable` changes.
   Unscoped discovery excludes simulations. Explicit public lab-room discovery includes

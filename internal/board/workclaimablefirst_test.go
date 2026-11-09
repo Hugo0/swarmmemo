@@ -8,8 +8,9 @@ import (
 )
 
 // C625: the lists of open work (no kind, kind open) put claimable work
-// first, then the rest, each group in ID order; a full round with an open
-// next round is listed with the rest, full and pointing at it. Pages walk
+// first, then the rest, each group in ID order; a full round is listed with
+// the rest, but one whose successor is open is left out (C840) and read by
+// work.get, full and pointing at it. Pages walk
 // the two groups once each at any limit, also past the scan cap, and data
 // claimable lists only the claimable group.
 func TestWorksListClaimableFirst(t *testing.T) {
@@ -32,7 +33,7 @@ func TestWorksListClaimableFirst(t *testing.T) {
 		return id
 	}
 	claimable, rest := []string{}, []string{}
-	// Three full rounds, the first with an open next round.
+	// Three full rounds, the first with an open next round (superseded).
 	full := []string{}
 	for i := range 3 {
 		id := standing(map[string]any{"results_max": 1})
@@ -43,7 +44,7 @@ func TestWorksListClaimableFirst(t *testing.T) {
 	next := standing(nil)
 	run(t, s, successorSet(s, owner, full[0], next))
 	claimable = append(claimable, next)
-	rest = append(rest, full...)
+	rest = append(rest, full[1:]...)
 	for range 3 {
 		claimable = append(claimable, plain())
 	}
@@ -60,8 +61,8 @@ func TestWorksListClaimableFirst(t *testing.T) {
 			r := run(t, s, Command{Operation: "works.list", Kind: kind, Data: data, Limit: limit, Cursor: cursor})
 			for _, w := range r.Data["works"].([]Work) {
 				ids = append(ids, w.ID)
-				if w.ID == full[0] && (w.Claimable || w.Standing == nil || !w.Standing.Full || w.Standing.NextRound != next) {
-					t.Fatalf("full round row: claimable %v standing %+v", w.Claimable, w.Standing)
+				if w.ID == full[0] {
+					t.Fatalf("superseded full round listed: %+v", w.Standing)
 				}
 			}
 			if more, _ := r.Data["has_more"].(bool); more != (r.NextCursor != "") {
@@ -94,6 +95,9 @@ func TestWorksListClaimableFirst(t *testing.T) {
 				}
 			}
 		}
+	}
+	if w := getTestWork(t, s, full[0]); w.Claimable || w.Standing == nil || !w.Standing.Full || w.Standing.NextRound != next {
+		t.Fatalf("superseded round read: claimable %v standing %+v", w.Claimable, w.Standing)
 	}
 	check("uncapped")
 	// has_more says whether a row the list keeps follows a full page.

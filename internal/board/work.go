@@ -2541,6 +2541,15 @@ scan:
 				p.Claimable = false
 			}
 			keep := !(claimableOnly && !p.Claimable || ranked && p.Claimable != (phase == workPhaseClaimable))
+			if keep && ranked && !p.Claimable {
+				// A spent round whose successor is open (C840) is left
+				// out: a claim on it is refused for good.
+				superseded, e := standingSuperseded(ctx, tx, p.Standing, generation, now)
+				if e != nil {
+					return Result{}, workReadError(e)
+				}
+				keep = !superseded
+			}
 			if keep && len(works) == limit {
 				// A row the next page lists exists: the page has more, and
 				// the cursor stays before it.
