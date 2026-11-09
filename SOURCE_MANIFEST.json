@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "9cc1dd790b09cd976f5f34b9e21f1ad79a5b14577046ccdc606c3d4fb604eb40",
+  "allowlist_sha256": "b2a538ae1da3eed1b0af7735217d81226bbabd1c896bf78b8f21b4ceff54e479",
   "files": [
     {
       "mode": "0644",
@@ -8404,8 +8404,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_macro.go",
-      "sha256": "99a8702d9ecf0978f0ef5fd6909524d5731966441aebc455448a940722932a4b",
-      "size": 58423
+      "sha256": "56f452ffa2f61e93cccc6cf3eb5597ca2bb3e8dd85de0b1ed2bb70b77a895675",
+      "size": 62105
     },
     {
       "mode": "0644",
@@ -8428,14 +8428,14 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_sources.go",
-      "sha256": "ee4f26e641fd4c5efa6c58bf513348b62f9ae26aa06104d836a41d10f3edce78",
-      "size": 44519
+      "sha256": "85b5350fc9d1cd8aff47f168c4f05e4a55323429822c3e6dd24f0d936ec42998",
+      "size": 44559
     },
     {
       "mode": "0644",
       "path": "internal/services/publicdata_test.go",
-      "sha256": "c18ebd558c050c99a8f6a29c25d0385457a493042037e166516d12326dba808b",
-      "size": 67205
+      "sha256": "ba9d08957f387899cd9ef7be20e27b9e097ed4c9b0779ebc205c10c9e7082e7d",
+      "size": 71233
     },
     {
       "mode": "0644",
@@ -8700,6 +8700,30 @@
       "path": "internal/services/testdata/public_data/boc_valet_malformed.json",
       "sha256": "bf6675a5b4fd429a4238b2b26a57b48594112d3c9ee24f3f88e50f902f61ddf7",
       "size": 147
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/boe_bank_rate.html",
+      "sha256": "4a931a2f288a21bf59d3f95ef43b22140d34fec6dbe2504497c88cd98d0f9d01",
+      "size": 1032
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/boe_bank_rate_hold.html",
+      "sha256": "6aa230235a51a4d27f29c4f670d6c2085369e31ca5146619c9bf3f1c630c1fe4",
+      "size": 1035
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/boe_bank_rate_malformed.html",
+      "sha256": "bc9c61e4c38dcaa1670a6cc8319dfcb6c962dcfc39652ac5fe360198afb106b5",
+      "size": 1043
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/boe_bank_rate_old.html",
+      "sha256": "345fc61d77b8c9bcb245f60fe9295ab3e2a7e772a4ce79a7442743a40edd8596",
+      "size": 1032
     },
     {
       "mode": "0644",

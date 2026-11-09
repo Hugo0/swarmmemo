@@ -197,6 +197,18 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			}
 			return file, 200
 		},
+		"www.bankofengland.co.uk": func(r *http.Request) (string, int) {
+			if r.URL.Path != "/monetary-policy/the-interest-rate-bank-rate" {
+				return "", 404
+			}
+			v.mu.Lock()
+			fail, file := v.boeFail, v.boeFile
+			v.mu.Unlock()
+			if fail {
+				return "", 500
+			}
+			return file, 200
+		},
 		"www.atlantafed.org": func(r *http.Request) (string, int) { return "gdpnow_card.html", 200 },
 		"www.newyorkfed.org": func(r *http.Request) (string, int) {
 			name := strings.TrimPrefix(r.URL.Path, "/medialibrary/Research/Interactives/Data/NowCast/data/")
@@ -249,11 +261,13 @@ type pdEnv struct {
 	bisFail  map[string]bool
 	bocFail  bool
 	bocFile  string
+	boeFail  bool
+	boeFile  string
 }
 
 func newPDEnv(t *testing.T, keys bool) *pdEnv {
 	t.Helper()
-	v := &pdEnv{db: openDB(t), meter: servicestest.NewMeter(1 << 20), fakes: map[string]*pdFake{}, noaaFile: "noaa_mwn.json", bisFail: map[string]bool{}, bocFile: "boc_valet.json"}
+	v := &pdEnv{db: openDB(t), meter: servicestest.NewMeter(1 << 20), fakes: map[string]*pdFake{}, noaaFile: "noaa_mwn.json", bisFail: map[string]bool{}, bocFile: "boc_valet.json", boeFile: "boe_bank_rate.html"}
 	v.keyDir = t.TempDir()
 	if keys {
 		for _, name := range []string{services.KeyAPIDataGov, services.KeyFRED} {
@@ -847,6 +861,86 @@ func TestPublicDataCBPolicyBOC(t *testing.T) {
 		t.Errorf("fallback rate_source %v", src)
 	}
 	eq(t, "fallback stale", at(boc, "rate_may_be_stale"), true)
+}
+
+// TestPublicDataCBPolicyBOE covers the Bank of England's own Bank Rate page
+// (C841): read only when a scheduled decision may be unreflected in BIS
+// (bis_GB.csv: 3.75 as of 2026-08-24, before the 2026-09-17 and 2026-11-05
+// MPC dates); a newer level overrides BIS, an unchanged one only confirms
+// it, and an older page, a malformed page or a failure keeps BIS as is.
+func TestPublicDataCBPolicyBOE(t *testing.T) {
+	now := unix("2026-11-09")
+	withPage := func(file string, fail bool) (*pdEnv, map[string]any) {
+		v := newPDEnv(t, false)
+		v.mu.Lock()
+		v.boeFile, v.boeFail = file, fail
+		v.mu.Unlock()
+		_, d := v.mustFetch(t, "cb_policy_rates", `{"bank":"BOE","what":"rate"}`, now)
+		return v, at(d, "banks", "BOE").(map[string]any)
+	}
+	keepsBIS := func(name string, boe map[string]any) {
+		t.Helper()
+		near(t, name+" rate", at(boe, "policy_rate_pct"), 3.75)
+		eq(t, name+" as_of", at(boe, "rate_as_of"), "2026-08-24")
+		eq(t, name+" effective", at(boe, "rate_effective_from"), "2026-06-03")
+		near(t, name+" previous", at(boe, "previous_rate_pct"), 4.0)
+		near(t, name+" bps", at(boe, "last_change_bps"), -25.0)
+		if src, _ := at(boe, "rate_source").(string); !strings.Contains(src, "BIS") {
+			t.Errorf("%s rate_source %v", name, src)
+		}
+		eq(t, name+" stale", at(boe, "rate_may_be_stale"), true)
+		if r, _ := at(boe, "rate_stale_reason").(string); !strings.Contains(r, "2026-11-05") {
+			t.Errorf("%s stale reason %v", name, r)
+		}
+	}
+
+	// A newer level on the official page wins.
+	v, boe := withPage("boe_bank_rate.html", false)
+	near(t, "raised rate", at(boe, "policy_rate_pct"), 4.0)
+	eq(t, "raised as_of", at(boe, "rate_as_of"), "2026-11-05")
+	eq(t, "raised effective", at(boe, "rate_effective_from"), "2026-11-05")
+	near(t, "raised previous", at(boe, "previous_rate_pct"), 3.75)
+	near(t, "raised bps", at(boe, "last_change_bps"), 25.0)
+	eq(t, "raised no change note", at(boe, "last_change_note"), nil)
+	if src, _ := at(boe, "rate_source").(string); !strings.Contains(src, "https://www.bankofengland.co.uk/monetary-policy/the-interest-rate-bank-rate") {
+		t.Errorf("raised rate_source %v", src)
+	}
+	eq(t, "raised not stale", at(boe, "rate_may_be_stale"), false)
+	eq(t, "raised no stale reason", at(boe, "rate_stale_reason"), nil)
+	if n := v.fakes["www.bankofengland.co.uk"].count(); n != 1 {
+		t.Fatalf("boe hits = %d", n)
+	}
+	for k := range boe {
+		if k == "officialFrom" || k == "official_from" {
+			t.Errorf("unexported field leaked as %s", k)
+		}
+	}
+
+	// An unchanged level dated after BIS confirms it: as_of moves, the
+	// last change stays BIS's, and the decision counts as reflected.
+	_, boe = withPage("boe_bank_rate_hold.html", false)
+	near(t, "hold rate", at(boe, "policy_rate_pct"), 3.75)
+	eq(t, "hold as_of", at(boe, "rate_as_of"), "2026-11-05")
+	eq(t, "hold effective", at(boe, "rate_effective_from"), "2026-06-03")
+	near(t, "hold previous", at(boe, "previous_rate_pct"), 4.0)
+	near(t, "hold bps", at(boe, "last_change_bps"), -25.0)
+	eq(t, "hold not stale", at(boe, "rate_may_be_stale"), false)
+
+	// A page no newer than BIS, a malformed page and a failed fetch all
+	// keep the BIS answer and its staleness.
+	_, boe = withPage("boe_bank_rate_old.html", false)
+	keepsBIS("old page", boe)
+	_, boe = withPage("boe_bank_rate_malformed.html", false)
+	keepsBIS("malformed page", boe)
+	_, boe = withPage("", true)
+	keepsBIS("failed fetch", boe)
+
+	// No scheduled decision after rate_as_of: the page is never read.
+	v = newPDEnv(t, false)
+	v.mustFetch(t, "cb_policy_rates", `{"bank":"BOE","what":"rate"}`, unix("2026-08-25"))
+	if n := v.fakes["www.bankofengland.co.uk"].count(); n != 0 {
+		t.Errorf("boe read without a missed decision: %d", n)
+	}
 }
 
 // cbCalendarHorizonDays is how far ahead every listed bank must have a

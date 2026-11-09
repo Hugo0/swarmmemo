@@ -342,6 +342,9 @@ const (
 	bisRateSource       = "BIS daily central bank policy rates (stats.bis.org, WS_CBPOL)"
 	bocSeriesID         = "V39079"
 	bocRateSource       = "Bank of Canada Valet API, series V39079 (target for the overnight rate, www.bankofcanada.ca)"
+	boeHost             = "www.bankofengland.co.uk"
+	boeBankRatePath     = "/monetary-policy/the-interest-rate-bank-rate"
+	boeRateSource       = "Bank of England's own Bank Rate page (https://" + boeHost + boeBankRatePath + "); BIS WS_CBPOL had not yet caught up with the latest decision"
 )
 
 type cbBank struct {
@@ -646,6 +649,10 @@ type cbRow struct {
 	RateMayBeStale        bool      `json:"rate_may_be_stale"`
 	RateStaleReason       string    `json:"rate_stale_reason,omitempty"`
 	hasCalendar           bool
+	// officialFrom is the date the bank's own page confirms the current
+	// level from (unexported: never a response key); decisions on or
+	// before it are reflected even when the level did not change.
+	officialFrom string
 }
 
 type cbData struct {
@@ -693,10 +700,10 @@ var dsCBPolicy = &pdDataset{
 		}
 		return out, nil
 	},
-	Source:      "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); Bank of Canada Valet API (series V39079); each bank's published calendar",
-	Hosts:       []string{bisHost, bcbHost, fredHost, bankofcanadaHost},
+	Source:      "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); Bank of Canada Valet API (series V39079); the Bank of England's Bank Rate page when BIS lags a decision; each bank's published calendar",
+	Hosts:       []string{bisHost, bcbHost, fredHost, bankofcanadaHost, boeHost},
 	Licence:     "BIS statistics: free reuse with attribution; BCB open data; FRED terms for the target range; Bank of Canada Valet: terms at https://www.bankofcanada.ca/terms/ — free reuse with attribution",
-	Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED; Bank of Canada Valet API",
+	Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED; Bank of Canada Valet API; Bank of England",
 	TermsURL:    "https://www.bis.org/terms_statistics.htm", TermsStatus: "verify before production (BIS, BCB, Bank of Canada Valet terms; calendars need a yearly refresh)",
 	Key: KeyFRED, KeyOptional: true, TTL: time.Hour, Price: 1,
 }
@@ -753,7 +760,17 @@ func cbBankRow(ctx context.Context, r *pdRun, b cbBank, what, today string) *cbR
 		}
 	}
 	if row.RateAsOf != nil && what != "next_meeting" {
-		if missed := possiblyUnreflected(b, *row.RateAsOf, deref(row.RateEffectiveFrom), today); len(missed) > 0 {
+		// BIS can trail a fresh decision by days; when a scheduled decision
+		// may be unreflected, the bank's own page (BOE) can confirm the
+		// current level first. Any failure keeps the BIS answer as is.
+		if b.Code == "BOE" && len(possiblyUnreflected(b, *row.RateAsOf, deref(row.RateEffectiveFrom), today)) > 0 {
+			cbOfficialBOE(ctx, r, row, today)
+		}
+		effective := deref(row.RateEffectiveFrom)
+		if row.officialFrom > effective {
+			effective = row.officialFrom
+		}
+		if missed := possiblyUnreflected(b, *row.RateAsOf, effective, today); len(missed) > 0 {
 			row.RateMayBeStale = true
 			row.RateStaleReason = "scheduled decision(s) " + strings.Join(missed, ", ") + " fall after, or within " + strconv.Itoa(cbEffectiveLagDays) +
 				" days before, rate_as_of " + *row.RateAsOf + " with no level change since; this rate may not reflect them"
@@ -872,6 +889,66 @@ func cbRate(ctx context.Context, r *pdRun, b cbBank, row *cbRow) string {
 		row.RateAvailable = &t
 	}
 	return ""
+}
+
+// cbOfficialRate is a bank's own current-rate page, normalised: the level
+// and the date the page says it was published (the decision day).
+type cbOfficialRate struct {
+	Rate float64 `json:"rate"`
+	Date string  `json:"date"`
+}
+
+var (
+	boeRateRE      = regexp.MustCompile(`Current Bank Rate\s*<span[^>]{0,80}class="stat-figure"[^>]{0,80}>\s*([0-9]{1,2}(?:\.[0-9]{1,4})?)\s*%\s*</span>`)
+	boePublishedRE = regexp.MustCompile(`Published on\s+([0-9]{1,2} [A-Z][a-z]{2,8} [0-9]{4})\b`)
+)
+
+// parseBOEBankRate reads the Bank of England's Bank Rate page (untrusted
+// HTML, capped by the fetch): the "Current Bank Rate" figure and the
+// "Published on" date. Anything unrecognised is an error, so the caller
+// keeps the BIS answer.
+func parseBOEBankRate(raw []byte) (any, error) {
+	html := string(raw)
+	m, d := boeRateRE.FindStringSubmatch(html), boePublishedRE.FindStringSubmatch(html)
+	if m == nil || d == nil {
+		return nil, errors.New("Bank of England Bank Rate page layout not recognised")
+	}
+	f, err := strconv.ParseFloat(m[1], 64)
+	if err != nil || f < 0 || f > 25 {
+		return nil, errors.New("Bank of England Bank Rate out of range")
+	}
+	t, err := time.Parse("2 January 2006", d[1])
+	if err != nil {
+		return nil, err
+	}
+	return cbOfficialRate{Rate: f, Date: t.Format("2006-01-02")}, nil
+}
+
+// cbOfficialBOE overrides the BIS level with the Bank of England's own page
+// when that page is dated after rate_as_of (and not after today). A changed
+// level takes effect on the page date, with the BIS level as the previous
+// one; an unchanged level only moves rate_as_of forward. On any failure the
+// row is left exactly as BIS filled it.
+func cbOfficialBOE(ctx context.Context, r *pdRun, row *cbRow, today string) {
+	if row.PolicyRatePct == nil || row.RateAsOf == nil {
+		return
+	}
+	raw, err := r.fetch(ctx, pdFetch{Key: "boe_bank_rate", TTL: time.Hour, Host: boeHost, Path: boeBankRatePath, Accept: "text/html",
+		MaxBytes: 1 << 20, Parse: parseBOEBankRate})
+	if err != nil {
+		return
+	}
+	p, err := unmarshalCached[cbOfficialRate](raw)
+	if err != nil || p.Date == "" || p.Date <= *row.RateAsOf || p.Date > today {
+		return
+	}
+	bis := *row.PolicyRatePct
+	if bps := pyRound((p.Rate-bis)*100, 1); bps != 0 {
+		row.RateEffectiveFrom, row.PreviousRatePct, row.LastChangeBps, row.LastChangeNote = sptr(p.Date), fptr(bis), fptr(bps), ""
+	}
+	row.PolicyRatePct, row.RateAsOf, row.RateSource = fptr(p.Rate), sptr(p.Date), boeRateSource
+	row.RateNote = "policy_rate_pct is the Bank of England's own current Bank Rate, published on rate_as_of (live; overrides the BIS series, which lagged the latest decision)"
+	row.officialFrom = p.Date
 }
 
 // possiblyUnreflected lists scheduled decisions up to today that the rate
