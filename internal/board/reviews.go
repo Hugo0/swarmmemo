@@ -1540,11 +1540,18 @@ func offsetCursor(cursor string) (int, error) {
 	return n, nil
 }
 
-func pageLimit(limit, def, max int) int {
-	if limit <= 0 {
-		return def
+// pageLimit reads a review-family page limit: zero is the default page and
+// one above max is read as max, but a negative limit is refused rather than
+// quietly served the default page (eddie_makemoney, API QA 11-09:
+// /api/subjects?limit=-1 answered 20 subjects).
+func pageLimit(name string, limit, def, max int) (int, error) {
+	if limit < 0 {
+		return 0, problem(400, "invalid_limit", fmt.Sprintf("%s limit must be 1–%d (more reads %d), or zero for the default.", name, max, max))
 	}
-	return min(limit, max)
+	if limit == 0 {
+		return def, nil
+	}
+	return min(limit, max), nil
 }
 
 func (s *Store) readSubject(ctx context.Context, tx *sql.Tx, c Command, now int64) (Result, error) {
@@ -1570,7 +1577,10 @@ func (s *Store) readSubject(ctx context.Context, tx *sql.Tx, c Command, now int6
 	if err != nil {
 		return Result{}, err
 	}
-	limit := pageLimit(c.Limit, ReviewPageDefault, ReviewPageMax)
+	limit, err := pageLimit("Review list", c.Limit, ReviewPageDefault, ReviewPageMax)
+	if err != nil {
+		return Result{}, err
+	}
 	info, err := subjectInfo(ctx, tx, sub)
 	if err != nil {
 		return Result{}, err
@@ -2099,7 +2109,10 @@ func (s *Store) listSubjects(ctx context.Context, tx *sql.Tx, c Command) (Result
 	if err != nil {
 		return Result{}, err
 	}
-	limit := pageLimit(c.Limit, SubjectsPageDefault, SubjectsPageMax)
+	limit, err := pageLimit("Subject list", c.Limit, SubjectsPageDefault, SubjectsPageMax)
+	if err != nil {
+		return Result{}, err
+	}
 	order := "n DESC, last DESC, s.id"
 	if sortBy == "recent" {
 		order = "last DESC, s.id"

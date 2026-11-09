@@ -425,6 +425,8 @@ func TestSubjectReads(t *testing.T) {
 	fails(t, s, Command{Operation: "subject.resolve", Target: "nonsense"}, "invalid_subject")
 	fails(t, s, Command{Operation: "subjects.list", Kind: "planet"}, "invalid_kind")
 	fails(t, s, Command{Operation: "subjects.list", Cursor: "x"}, "invalid_cursor")
+	fails(t, s, Command{Operation: "subjects.list", Limit: -1}, "invalid_limit")
+	fails(t, s, Command{Operation: "verify.list", Limit: -1}, "invalid_limit")
 	fails(t, s, Command{Operation: "subjects.list", Data: `{"schema":1,"sort":"score"}`}, "invalid_request")
 	// One review lists nothing yet; a second account lists it.
 	key1, key2 := keyFor(60), keyFor(61)

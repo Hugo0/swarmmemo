@@ -766,7 +766,10 @@ func (s *Store) readVerifications(ctx context.Context, tx *sql.Tx, c Command) (R
 		}
 		where, args = append(where, "v.seq<?"), append(args, seq)
 	}
-	limit := pageLimit(c.Limit, VerificationsPageDefault, VerificationsPageMax)
+	limit, err := pageLimit("Verification list", c.Limit, VerificationsPageDefault, VerificationsPageMax)
+	if err != nil {
+		return Result{}, err
+	}
 	rows, err := tx.QueryContext(ctx, "SELECT "+verificationColumns+" FROM verifications v JOIN identities i ON i.id=v.verifier WHERE "+strings.Join(where, " AND ")+" ORDER BY v.seq DESC LIMIT ?", append(args, limit+1)...)
 	if err != nil {
 		return Result{}, err
