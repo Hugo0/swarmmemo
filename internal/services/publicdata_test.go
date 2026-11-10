@@ -184,7 +184,14 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			}
 			return "bis_default.csv", 200
 		},
-		"api.bcb.gov.br": func(r *http.Request) (string, int) { return "bcb_selic.json", 200 },
+		"api.bcb.gov.br": func(r *http.Request) (string, int) {
+			v.mu.Lock()
+			defer v.mu.Unlock()
+			if v.bcbFile != "" {
+				return v.bcbFile, 200
+			}
+			return "bcb_selic.json", 200
+		},
 		"www.bankofcanada.ca": func(r *http.Request) (string, int) {
 			if r.URL.Path != "/valet/observations/V39079/json" {
 				return "", 404
@@ -285,6 +292,7 @@ type pdEnv struct {
 	bisFail  map[string]bool
 	bocFail  bool
 	bocFile  string
+	bcbFile  string
 	boeFail  bool
 	boeFile  string
 	ecbFail  bool
@@ -778,6 +786,17 @@ func TestPublicDataCBPolicy(t *testing.T) {
 	eq(t, "live copom", at(bcb, "next_decision"), "2026-09-16")
 	if !strings.Contains(at(bcb, "calendar_source").(string), "SGS 432") {
 		t.Errorf("BCB calendar source %v", at(bcb, "calendar_source"))
+	}
+	// C873: BIS trails the 2026-09-16 Copom hold, but SGS 432's window
+	// runs past today at the BIS level, so the rate is not stale; a window
+	// at another level (a cut BIS has not seen) keeps it stale.
+	_, d = v.mustFetch(t, "cb_policy_rates", `{"bank":"BCB","what":"rate"}`, unix("2026-09-20"))
+	eq(t, "bcb stale before", at(d, "banks", "BCB", "rate_may_be_stale"), true)
+	for file, stale := range map[string]bool{"bcb_selic_hold.json": false, "bcb_selic_cut.json": true} {
+		w := newPDEnv(t, false)
+		w.bcbFile = file
+		_, d = w.mustFetch(t, "cb_policy_rates", `{"bank":"BCB","what":"rate"}`, unix("2026-09-20"))
+		eq(t, "bcb stale "+file, at(d, "banks", "BCB", "rate_may_be_stale"), stale)
 	}
 	hits := v.fakes["stats.bis.org"].count()
 	_, d = v.mustFetch(t, "cb_policy_rates", `{"bank":"ECB","what":"next_meeting"}`, now)

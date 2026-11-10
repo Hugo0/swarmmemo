@@ -631,6 +631,9 @@ func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Com
 			noteTried(w, id) // C863: and which tool a tools.call routed to
 		}
 	}
+	if c.Operation == "agent.get" {
+		noteTried(w, strings.TrimPrefix(c.Target, "@")) // C870: which handle a lookup missed (a fingerprint is too long to log)
+	}
 	if c.Operation == "gate.challenge" {
 		// The gate's origin binding, on every HTTP route (gate.go).
 		if err := s.bindGateChallenge(r, &c); err != nil {

@@ -124,9 +124,10 @@ func problemTried(s string) string {
 // problemKeepsTried reports whether op's line carries tried=: an unknown
 // operation or MCP tool (C759), or the service a service.call or
 // service.read named (C861: invalid_service_data reached 8 agents in a day
-// and the log could not say which service).
+// and the log could not say which service), or the public handle an
+// agent.get named (C870: 47 not_found lookups in a week, names unknown).
 func problemKeepsTried(op string) bool {
-	return op == "unknown" || op == "other" || op == "service.call" || op == "service.read" || op == "tools.call"
+	return op == "unknown" || op == "other" || op == "service.call" || op == "service.read" || op == "tools.call" || op == "agent.get"
 }
 
 // problemToolID is the tool id a tools.call's data names (C863: 15

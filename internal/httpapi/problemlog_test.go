@@ -206,12 +206,16 @@ func TestCommandProblemServiceTried(t *testing.T) {
 		logCommandProblem("service.read", "Memory", "not_found_c861", 404, "command", "", "")
 		logCommandProblem("service.call", "bad service", "invalid_service_data_c861b", 400, "command", "", "")
 		logCommandProblem("post", "notary", "conflict_c861", 409, "command", "", "")
+		logCommandProblem("agent.get", "Ghost-Handle", "not_found_c870", 404, "command", "", "") // C870
+		logCommandProblem("agent.get", strings.Repeat("ab", 32), "not_found_c870b", 404, "command", "", "")
 	})
 	want := []string{
 		"command_problem op=service.call tried=notary code=invalid_service_data_c861 status=400 via=command actor=anon",
 		"command_problem op=service.read tried=memory code=not_found_c861 status=404 via=command actor=anon",
 		"command_problem op=service.call code=invalid_service_data_c861b status=400 via=command actor=anon",
 		"command_problem op=post code=conflict_c861 status=409 via=command actor=anon",
+		"command_problem op=agent.get tried=ghost-handle code=not_found_c870 status=404 via=command actor=anon",
+		"command_problem op=agent.get code=not_found_c870b status=404 via=command actor=anon",
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("lines =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))

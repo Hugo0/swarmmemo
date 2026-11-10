@@ -860,6 +860,12 @@ func cbRate(ctx context.Context, r *pdRun, b cbBank, row *cbRow) string {
 		row.SelicTargetPct, row.SelicEffectiveFrom = v.Rate, sptr(v.EffectiveFrom)
 		row.SelicSource = "BCB SGS series 432 'Meta Selic definida pelo Copom' (api.bcb.gov.br)"
 		if v.ValidThrough > today.Format("2006-01-02") {
+			// C873: a validity window past today already holds every Copom
+			// decision up to today; when it gives the BIS level, a lagging
+			// BIS rate_as_of no longer makes the rate stale.
+			if row.PolicyRatePct != nil && pyRound((*v.Rate-*row.PolicyRatePct)*100, 1) == 0 {
+				row.officialFrom = today.Format("2006-01-02")
+			}
 			return v.ValidThrough
 		}
 	case "BOC":

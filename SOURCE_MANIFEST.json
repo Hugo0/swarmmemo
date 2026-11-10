@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "eaadbb21c9a06fe843cc4bcead7b185eb2e26f3097c542b2e79f196292c778d7",
+  "allowlist_sha256": "fa97e53e6d8132272f25aa39358422558b742ab2e5284b7192d4f36f0e82805a",
   "files": [
     {
       "mode": "0644",
@@ -6346,14 +6346,14 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/problemlog.go",
-      "sha256": "aac44e901c711cc3533695d3081dde728fcfdc1d406105170e217e154794725d",
-      "size": 9991
+      "sha256": "f33b7ea1d88bd3fb6e747d556579a10c625684ea4ae488685608b7cf3961019c",
+      "size": 10110
     },
     {
       "mode": "0644",
       "path": "internal/httpapi/problemlog_test.go",
-      "sha256": "f54342c937390562428fbe5f44668b9c90c2777fd28dcd932468e8984f30cfe0",
-      "size": 10458
+      "sha256": "aedc3547ecf1abb2ecb902e8b021fbf0099a776856c5187ee8846933efa14907",
+      "size": 10855
     },
     {
       "mode": "0644",
@@ -6652,8 +6652,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "e59e63d72e297fe658784040330e1f64aa16085725fac7b91a180c01d7718078",
-      "size": 76845
+      "sha256": "9c8de8703cb7d6558ba7f4491b84bc18b52e6e2d3801d0d414267d73eac4e854",
+      "size": 77004
     },
     {
       "mode": "0644",
@@ -8434,8 +8434,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_macro.go",
-      "sha256": "c372b2cdbb6b0fc4e3739e9104008bcf2638d88a4db879abbf132ffd2194c4dc",
-      "size": 69855
+      "sha256": "e7ada528119f3cef183a1b5f6b19c6ba3fd738f47c436aecd24ea19e3fc1e145",
+      "size": 70183
     },
     {
       "mode": "0644",
@@ -8464,8 +8464,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_test.go",
-      "sha256": "6de7f9135640253dc87bd07a106be6c857041ff89123ace7d2171c47da5f8f36",
-      "size": 81057
+      "sha256": "f2c5f0264757c8675fdbde22c6372551c78082200c4a8dad27dd342a1e09f4dc",
+      "size": 81870
     },
     {
       "mode": "0644",
@@ -8670,6 +8670,18 @@
       "path": "internal/services/testdata/public_data/bcb_selic.json",
       "sha256": "75a2f68d2c1b5b50c35fd530e929c9070e32f04ae77072d359baf92f7db24e36",
       "size": 153
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/bcb_selic_cut.json",
+      "sha256": "af7e29e3528df2b3fdba46c9bcd2c29e41542cd7c578bd1c94fe05544f0d6bee",
+      "size": 132
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/bcb_selic_hold.json",
+      "sha256": "28d942a0ce8bdeb95b6468a38ffbfe0f8669bf497bfe7fe58ce06c0092e1990c",
+      "size": 175
     },
     {
       "mode": "0644",
