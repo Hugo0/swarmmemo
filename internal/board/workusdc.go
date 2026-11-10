@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS work_usdc (
  block INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, accepted_at INTEGER NOT NULL DEFAULT 0,
  settled_at INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '',
  statement TEXT NOT NULL DEFAULT '', receipt_hash TEXT NOT NULL DEFAULT '');
-CREATE UNIQUE INDEX IF NOT EXISTS work_usdc_tx ON work_usdc(tx_hash) WHERE tx_hash<>'';
+CREATE INDEX IF NOT EXISTS work_usdc_tx ON work_usdc(tx_hash) WHERE tx_hash<>'';
 CREATE INDEX IF NOT EXISTS work_usdc_open ON work_usdc(state,work_id) WHERE state IN ('promised','payable');
 CREATE INDEX IF NOT EXISTS work_usdc_requester ON work_usdc(requester,state);
 `
@@ -436,7 +436,7 @@ func (s *Store) settleWorkUSDC(ctx context.Context, tx *sql.Tx, w workRow, d wor
 		return err
 	}
 	pay, err := s.checkUSDCPayment(ctx, tx, usdcOwed{command: WorkSettle, txHash: d.TxHash, network: r.Network, asset: r.Asset, payTo: r.PayTo, amount: r.Amount,
-		notBefore: r.Created, senders: linked, payee: "the worker", payeeAddress: "the worker's payout address", before: "this work was created",
+		notBefore: r.Created, combineRequester: r.Requester, senders: linked, payee: "the worker", payeeAddress: "the worker's payout address", before: "this work was created",
 		unlinked: "Pay from a linked wallet (or link this one first: standing.challenge kind wallet, then identity.link), then settle."})
 	if err != nil {
 		return err
@@ -456,10 +456,17 @@ func (s *Store) settleWorkUSDC(ctx context.Context, tx *sql.Tx, w workRow, d wor
 // usdcOwed is one owed USDC payment a settlement must match: work USDC
 // (work.settle) or a bond refund (standing.challenge kind bond, action
 // settle, proofbond.go). One rail: the same chain read, the same checks,
-// one transaction settling one item across both.
+// one transaction settling one item across both, except that one combined
+// transfer may settle several work items of one requester and one payee
+// (combineRequester, C862).
 type usdcOwed struct {
 	command, txHash, network, asset, payTo string
 	amount, notBefore                      int64
+	// combineRequester, set by work.settle only, lets a hash that already
+	// settled work USDC settle this item too when every item it settled is
+	// this requester's, paid to the same address, network and asset, and
+	// the transfer covers all of them plus this one (combinedSettleFits).
+	combineRequester string
 	// senders are the addresses that may pay; empty accepts any sender,
 	// noted sender_unlinked.
 	senders map[services.EVMAddress]bool
@@ -477,7 +484,8 @@ type usdcPaid struct {
 // checkUSDCPayment checks what preflightSettle read on chain against an
 // owed payment: mined, confirmed, a transfer of the token to the payee from
 // an allowed sender of at least the amount, after the debt arose, and a
-// transaction no other item was settled with.
+// transaction no other item was settled with (for work.settle: or only
+// items it also covers, combinedSettleFits).
 func (s *Store) checkUSDCPayment(ctx context.Context, tx *sql.Tx, o usdcOwed) (usdcPaid, error) {
 	obs, _ := ctx.Value(settleObservationKey{}).(*settleObservation)
 	if obs == nil || obs.txHash != o.txHash {
@@ -533,14 +541,43 @@ func (s *Store) checkUSDCPayment(ctx context.Context, tx *sql.Tx, o usdcOwed) (u
 	if err != nil {
 		return usdcPaid{}, err
 	}
+	if used && o.combineRequester != "" {
+		if used, err = combinedSettleFits(ctx, tx, o, paid); err != nil {
+			return usdcPaid{}, err
+		}
+		used = !used
+	}
 	if used {
-		return usdcPaid{}, problem(409, "settle_tx_used", "That transaction already settled another item; one transaction settles one item.")
+		return usdcPaid{}, problem(409, "settle_tx_used", "That transaction already settled another item it does not also cover; one transaction settles one item, or several work items of one requester paid to the same address when it pays their sum.")
 	}
 	amount := paid.String()
 	if paid.IsInt64() {
 		amount = services.FormatUSDC(paid.Int64())
 	}
 	return usdcPaid{payer: payer, amount: amount, note: note, block: t.Block}, nil
+}
+
+// combinedSettleFits reports whether an already used hash may also settle
+// o (C862): it settled only work USDC (no bond, bond refund, offering call
+// or call refund), all of it o's requester's, to o's address, network and
+// asset, and paid (the verified transfers to that address) covers those
+// items' amounts plus o's.
+func combinedSettleFits(ctx context.Context, tx *sql.Tx, o usdcOwed, paid *big.Int) (bool, error) {
+	var other, mismatch, n int
+	var sum int64
+	err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM proof_bonds WHERE tx_hash=? AND tx_hash<>'')+(SELECT count(*) FROM proof_bonds WHERE refund_tx_hash=? AND refund_tx_hash<>'')
+ +(SELECT count(*) FROM offering_calls WHERE tx_hash=? AND tx_hash<>'')+(SELECT count(*) FROM offering_calls WHERE refund_tx=? AND refund_tx<>''),
+ (SELECT count(*) FROM work_usdc WHERE tx_hash=? AND tx_hash<>'' AND (requester<>? OR lower(pay_to)<>lower(?) OR network<>? OR asset<>?)),
+ (SELECT count(*) FROM work_usdc WHERE tx_hash=? AND tx_hash<>''),
+ (SELECT coalesce(sum(amount),0) FROM work_usdc WHERE tx_hash=? AND tx_hash<>'')`,
+		o.txHash, o.txHash, o.txHash, o.txHash,
+		o.txHash, o.combineRequester, o.payTo, o.network, o.asset,
+		o.txHash, o.txHash).Scan(&other, &mismatch, &n, &sum)
+	if err != nil || other > 0 || mismatch > 0 || n == 0 {
+		return false, err
+	}
+	need := new(big.Int).Add(big.NewInt(sum), big.NewInt(o.amount))
+	return paid.Cmp(need) >= 0, nil
 }
 
 // requesterWallets is the set of verified wallet links of account's keys.
@@ -710,7 +747,7 @@ func (s *Store) WorkUSDCCapabilities() map[string]any {
 		"minimum": services.FormatUSDC(WorkUSDCMin), "maximum": services.FormatUSDC(WorkUSDCMax), "decimals": 6,
 		"custody": "none: the payer pays the worker directly; the board verifies", "states": WorkUSDCStates(),
 		"payout_address": "work.claim or work.submit data payout_address, else the worker's verified wallet link; fixed at submit",
-		"settle":         map[string]any{"command": WorkSettle, "by": "the requester", "after": "work.accept", "data": "tx_hash", "checks": []string{"status success", "confirmations", "token transfer to the payout address", "amount at least owed", "mined after the work was created", "hash never used before", "sent from one of the requester's verified wallet links when it has any (else accepted with note sender_unlinked)"}},
+		"settle":         map[string]any{"command": WorkSettle, "by": "the requester", "after": "work.accept", "data": "tx_hash", "checks": []string{"status success", "confirmations", "token transfer to the payout address", "amount at least owed", "mined after the work was created", "hash never used before (or only by this requester's other work paid to the same address, network and asset, when the transfer covers their sum)", "sent from one of the requester's verified wallet links when it has any (else accepted with note sender_unlinked)"}},
 		"promise":        map[string]any{"command": WorkPromise, "by": "the requester", "on": "an accepted result (a standing task's: the result's own work item)", "data": "amount_usdc (decimal string), note (optional, one line)", "then": "payable, owed to the worker's payout address; work.settle pays it"},
 		"result_money":   "work.get results[].money: credits_paid, usdc {state owed|paid, amount, since, tx_hash, tx_url, paid_at, note}",
 		"reward_state":   WorkRewardStates(),
@@ -736,8 +773,9 @@ func rewardStateOf(credit *WorkReward, usdc *WorkRewardUSDC) string {
 // settlingTxUsed reports whether hash already settled or refunded anything here: a work
 // reward, a bond or its refund, an offering call's payment or its refund. Every path that
 // records a settling transaction asks this one question, so one transaction settles one
-// item whatever the order (round 6, newbotlabor). The <>” terms keep the partial unique
-// indexes usable.
+// item whatever the order (round 6, newbotlabor); work.settle alone may then still combine
+// items of one requester and payee (combinedSettleFits, C862). The <>” terms keep the
+// partial indexes usable.
 func settlingTxUsed(ctx context.Context, tx *sql.Tx, hash string) (bool, error) {
 	var used int
 	err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM work_usdc WHERE tx_hash=? AND tx_hash<>'')

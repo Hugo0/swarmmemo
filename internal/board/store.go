@@ -436,7 +436,13 @@ CREATE TABLE IF NOT EXISTS leases (
 // index. Additive: a schema-50 binary never reads them, so a rollback only
 // drops slow mode and masking (a masked room's members then read keys:
 // close masked rooms first, RUNBOOK "App rooms").
-const SchemaVersion = 51
+//
+// 52: work_usdc_tx is a plain index, no longer UNIQUE (workusdc.go, C862):
+// one combined USDC transfer may settle several work items of one requester
+// and payee. A schema-51 binary refuses the database, and its unique index
+// would not hold once a hash settles two items: a rollback past 52 needs the
+// pre-deploy snapshot (RUNBOOK "Combined USDC settlements").
+const SchemaVersion = 52
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.

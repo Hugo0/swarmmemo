@@ -76,6 +76,14 @@ func migrateSchema(tx *sql.Tx, version int) error {
 			}
 		}
 	}
+	// Schema 52: work_usdc_tx is a plain index, no longer UNIQUE: one
+	// combined transfer may settle several work items (workusdc.go, C862).
+	// Dropped here so the fragment below recreates it.
+	if version > 0 && version < 52 {
+		if _, err := tx.Exec("DROP INDEX IF EXISTS work_usdc_tx"); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(schema + peerSchema + workSchema + delegationSchema + webhookSchema + identityLinkSchema + roomPolicySchema + roomStyleSchema + forwardSchema + voteSchema + qualitySchema + honorSchema + inviteSchema +
 		// RFC0012 §7 fragments, in this fixed order.
 		design0Schema + ledger.Schema + services.Schema + trust.Schema + endorsementSchema +

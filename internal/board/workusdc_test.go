@@ -247,7 +247,7 @@ func TestWorkUSDCRewardOwedThenSettledOnChain(t *testing.T) {
 	}
 	fails(t, s, settle(s, owner, id, txHash(8)), "work_already_paid")
 
-	// One transaction settles one item.
+	// A transaction covering only the first item does not settle a second (C862).
 	id2 := rewardRequest(t, s, owner, "lobby")
 	run(t, s, rewardCreate(s, owner, id2, map[string]any{"usdc": "0.10"}, 0))
 	f2 := run(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: id2, TTL: 600}, map[string]any{"payout_address": usdcPayee})).Data["ack"].(WorkAck).Fence
@@ -427,4 +427,75 @@ func TestWorkUSDCSettleRecordsItsOwnShare(t *testing.T) {
 	if w.RewardUSDC.State != "paid" || w.RewardUSDC.PaidAmount != "0.1" || w.RewardUSDC.Reason != "sender_unlinked" {
 		t.Fatalf("over-paying transaction: %+v", w.RewardUSDC)
 	}
+}
+
+// C862: one combined transfer settles several accepted items of one
+// requester and payee when it covers their sum; anything else is still
+// settle_tx_used.
+func TestWorkUSDCCombinedSettle(t *testing.T) {
+	s, chain := usdcStore(t)
+	owner, worker := keyFor(170), keyFor(171)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 1000)
+	accepted := func(payTo string) string {
+		t.Helper()
+		id := rewardRequest(t, s, owner, "lobby")
+		run(t, s, rewardCreate(s, owner, id, map[string]any{"usdc": "0.10"}, 0))
+		f := run(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: id, TTL: 600}, map[string]any{"payout_address": payTo})).Data["ack"].(WorkAck).Fence
+		r := workResult(t, s, worker, id, "lobby")
+		run(t, s, workCommand(s, worker, Command{Operation: "work.submit", MessageID: id, Amount: f, Target: r}))
+		run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: id, Amount: f}))
+		return id
+	}
+	paid := func(id, hash string) {
+		t.Helper()
+		if w := getTestWork(t, s, id); w.RewardState != WorkRewardPaid || w.RewardUSDC.TxHash != hash || w.RewardUSDC.PaidAmount != "0.1" {
+			t.Fatalf("%s: %q %+v", id, w.RewardState, w.RewardUSDC)
+		}
+	}
+	a, b := accepted(usdcPayee), accepted(usdcPayee)
+	c, d := accepted(usdcPayee), accepted(usdcPayee)
+	e, f := accepted(usdcPayee), accepted(usdcOther)
+	g, h := accepted(usdcPayee), accepted(usdcPayee)
+	asset := usdcAsset(s)
+	add := func(n int, logs ...map[string]any) {
+		chain.add(txHash(n), fakeTx{status: "0x1", block: chain.head - 14, blockTime: testTime + 100, logs: logs})
+	}
+	add(20, transferLog(asset, usdcOther, usdcPayee, 120_000), transferLog(asset, usdcOther, usdcPayee, 80_000))
+	add(21, transferLog(asset, usdcOther, usdcPayee, 150_000))
+	add(22, transferLog(asset, usdcOther, usdcPayee, 300_000), transferLog(asset, usdcOther, usdcOther, 300_000))
+	add(23, transferLog(asset, usdcOther, usdcPayee, 300_000))
+	add(24, transferLog(asset, usdcOther, usdcPayee, 300_000))
+
+	// The sum is covered: both items settle with one hash, each its own share.
+	run(t, s, settle(s, owner, a, txHash(20)))
+	run(t, s, settle(s, owner, b, txHash(20)))
+	paid(a, txHash(20))
+	paid(b, txHash(20))
+	run(t, s, settle(s, owner, b, txHash(20))) // a retry changes nothing
+
+	// The transfer covers one item only: the second is refused.
+	run(t, s, settle(s, owner, c, txHash(21)))
+	fails(t, s, settle(s, owner, d, txHash(21)), "settle_tx_used")
+
+	// Another pay_to is refused, though the transfer pays it too.
+	run(t, s, settle(s, owner, e, txHash(22)))
+	fails(t, s, settle(s, owner, f, txHash(22)), "settle_tx_used")
+
+	// A hash a bond used never settles work, alone or combined.
+	run(t, s, settle(s, owner, g, txHash(23)))
+	for _, hash := range []string{txHash(23), txHash(24)} {
+		if _, err := s.db.Exec(`INSERT INTO proof_bonds(id,account,agent,amount,network,asset,pay_to,payer,auth_nonce,valid_before,state,tx_hash,created_at)
+ VALUES(?,'acct','agent',1,'n','a','p','q',?,0,'held',?,0)`, "bond-"+hash, "nonce-"+hash, hash); err != nil {
+			t.Fatal(err)
+		}
+		fails(t, s, settle(s, owner, h, hash), "settle_tx_used")
+	}
+	for _, id := range []string{d, f, h} {
+		if w := getTestWork(t, s, id); w.RewardState != WorkRewardPayable || w.RewardUSDC.TxHash != "" {
+			t.Fatalf("refused %s changed: %q %+v", id, w.RewardState, w.RewardUSDC)
+		}
+	}
+	paid(c, txHash(21))
+	paid(e, txHash(22))
+	paid(g, txHash(23))
 }

@@ -4542,7 +4542,11 @@ USDC: the requester pays the worker directly, then proves it.
   configured token to the payout address (`409 settle_wrong_recipient`) adding up to at
   least the amount owed (`409 settle_amount_short`); it was mined after the work was created
   (`409 settle_tx_before_work`); and no item was settled with it before
-  (`409 settle_tx_used`). When the requester has verified `wallet` identity links, only
+  (`409 settle_tx_used`), unless one combined transfer pays several of your accepted items:
+  a hash that settled only your work USDC, to the same `pay_to`, network and asset, settles
+  the next item too when the transfer to that address covers all of them plus this one.
+  Each item still needs its own `work.settle` and records its own amount; a hash a bond, bond
+  refund or offering call used is never reused. When the requester has verified `wallet` identity links, only
   transfers sent from one of them count (`409 settle_sender_unlinked` when none is); without
   any, any sender is accepted and the settlement says so: `reward_usdc.reason` and the
   receipt's USDC asset `note` are `sender_unlinked`. Then `reward_usdc` is `paid` with

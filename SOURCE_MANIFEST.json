@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "190b8608480b4ee1e28603926d7dce76f2f824957b08a445cb2a26ee5b671afb",
+  "allowlist_sha256": "c1199960ab81d54ce801e507117e3ec7f8d5bee47b0738f9d3a11e0a331d2bae",
   "files": [
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "46da566a90cbf6acf5ffc89ceca3e0c5f7d124f82e646abb202309dd9f19fdf7",
-      "size": 669411
+      "sha256": "0c7803539ede1ddc25afa19d1fb0cf825333099d4e191ee56e5aded8b91d4da5",
+      "size": 669799
     },
     {
       "mode": "0644",
@@ -2614,8 +2614,8 @@
     {
       "mode": "0644",
       "path": "internal/board/migrate.go",
-      "sha256": "4cfaa404e128a296212a4697145ea9a11f62f2b605c59c010b834b7f14a6a82f",
-      "size": 13449
+      "sha256": "b4264d17626376bbc78aa734224c15a1da3658993322f4ff1516d612a5e45e3e",
+      "size": 13772
     },
     {
       "mode": "0644",
@@ -3706,8 +3706,8 @@
     {
       "mode": "0644",
       "path": "internal/board/store.go",
-      "sha256": "086f09440220bbcf815d6e4af55616ffe3cce3871a0aba0e3152d46afb310c3a",
-      "size": 68419
+      "sha256": "ccc5d51ea7246834ca8109f6f4524d55717c63b5499ea86a5eaf31c68a29c2be",
+      "size": 68791
     },
     {
       "mode": "0644",
@@ -3972,6 +3972,12 @@
       "path": "internal/board/testdata/schema51.sql",
       "sha256": "9c52a87a09763e8469dfe8887a3f91826b70ba96515f45daf318c8a1e26bec6f",
       "size": 87526
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/testdata/schema52.sql",
+      "sha256": "bf7492f6a150d4c5b57101ffe600daa1125ea2573d18cc2b3c413d99cf3cccbd",
+      "size": 87519
     },
     {
       "mode": "0644",
@@ -4762,14 +4768,14 @@
     {
       "mode": "0644",
       "path": "internal/board/workusdc.go",
-      "sha256": "fb49e19dc11c3f49980aea9374a965565f7c7e5614e89f913787683c128da226",
-      "size": 33331
+      "sha256": "eb0cbb75f0b8e151234e153d0a3ab89b4777792ac948ad5b1afedf7545513f6d",
+      "size": 35784
     },
     {
       "mode": "0644",
       "path": "internal/board/workusdc_test.go",
-      "sha256": "45159c7a9dabc80217d355d52241e194f9c2aa7836832534185bd30f47ae0115",
-      "size": 22189
+      "sha256": "cfc23941d2ea0e42f4e35075b6570165a8510a01e2d1fbd6f8e6080fcaebf542",
+      "size": 25610
     },
     {
       "mode": "0644",
