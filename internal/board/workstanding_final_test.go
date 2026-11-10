@@ -2,6 +2,7 @@ package board
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"swarmmemo/internal/allowance"
@@ -77,5 +78,32 @@ func TestStandingResultsMaxAllAcceptedBeatsEmptyPool(t *testing.T) {
 	}
 	if d, _ := e.Details.(map[string]any); d["full"] != true || d["blocked_by"] != StandingBlockedResultsMax || e.NextOpenAt != 0 {
 		t.Fatalf("results_max details: %#v", e.Details)
+	}
+}
+
+// C860: a drained round whose requester set a successor names it in the
+// final refusal, message and details, so a worker claims the next round
+// instead of retrying this one.
+func TestStandingPoolEmptyNamesSuccessor(t *testing.T) {
+	s := rewardStore(t)
+	owner, w1 := keyFor(246), keyFor(247)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 10000)
+	round1 := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, round1, map[string]any{"seats": 2, "reward": 200, "day_max": 10}, 10*86400))
+	round2 := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, round2, map[string]any{"seats": 2, "reward": 200, "day_max": 10}, 10*86400))
+	run(t, s, successorSet(s, owner, round1, round2))
+	if _, err := s.db.Exec("UPDATE work_rewards SET amount=0 WHERE work_id=?", round1); err != nil {
+		t.Fatal(err)
+	}
+	_, c := standingClaim(t, s, w1, round1, nil)
+	_, err := s.Execute(testContext, c, "test-origin")
+	var e *Error
+	if !errors.As(err, &e) || e.Code != "seats_full" {
+		t.Fatalf("claim on a drained round: %v", err)
+	}
+	d, _ := e.Details.(map[string]any)
+	if d["final"] != true || d["successor"] != round2 || !strings.Contains(e.Message, "opened the next round "+round2) {
+		t.Fatalf("drained round refusal: %q details %#v", e.Message, e.Details)
 	}
 }

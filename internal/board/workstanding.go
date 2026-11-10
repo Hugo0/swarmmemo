@@ -846,7 +846,17 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 	case standingPoolFinal(st, n, pool, now, until):
 		// No seat opens by itself (C836): only the requester's verdict
 		// does, so the refusal is final for polling, not a wait.
-		return n, &Error{Status: 409, Code: "seats_full", Message: "No seat is open on this task right now: its credit pool holds no reward for another result; a seat opens when the requester rejects a result, or its next accept refills the pool.", Details: map[string]any{"blocked_by": StandingBlockedPool, "final": true}}
+		details := map[string]any{"blocked_by": StandingBlockedPool, "final": true}
+		e := &Error{Status: 409, Code: "seats_full", Message: "No seat is open on this task right now: its credit pool holds no reward for another result; a seat opens when the requester rejects a result, or its next accept refills the pool.", Details: details}
+		// C860: a drained round whose requester named its next round says
+		// where to claim instead (one agent retried 146 times in a day).
+		if next, err := standingSuccessor(ctx, tx, root.ID); err != nil {
+			return n, err
+		} else if next != "" {
+			e.Message = "No seat is open on this round: its credit pool holds no reward for another result, and its requester opened the next round " + next + ". Claim there (work.get " + next + " shows its seats)."
+			details["successor"] = next
+		}
+		return n, e
 	case pool < st.maxCredits():
 		return n, queue(StandingBlockedPool, errNoSeat(StandingBlockedPool, next, until, now, "its credit pool holds no reward for another result; a reject or an accept that refills the pool opens one sooner", "at the latest, when a waiting result's verdict deadline passes"))
 	}
