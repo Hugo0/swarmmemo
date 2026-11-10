@@ -1274,7 +1274,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	}
 	if a.signed {
 		if cmd.Timestamp < now-SignatureWindowSeconds || cmd.Timestamp > now+SignatureWindowSeconds {
-			return empty, problem(401, "stale_signature", "New signed commands must be within five minutes of server time; exact successful mutation retries may reuse their original envelope.")
+			return empty, staleSignature(cmd.Timestamp, now, " Exact successful mutation retries may reuse their original envelope.")
 		}
 		if successor != "" {
 			// The one exception (RFC0012 §2.4): a key rotated away may cancel a

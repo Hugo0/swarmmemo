@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"swarmmemo/internal/board"
 )
 
 // C757: the operator's private view of failed commands. A command that
@@ -299,8 +301,14 @@ func logMCPProblem(ctx context.Context, tool, tried, code string, status int, se
 	if !served {
 		code, status = "unknown_tool", 404
 	}
+	if code == "unknown_tool" {
+		tool = board.MCPToolOther // C867: also one call_swarmmemo_tool was asked for
+	}
 	if status < 400 || status > 599 {
 		status = 0
 	}
+	// C867: clients namespace tool names (swarmmemo:home, swarmmemo/home);
+	// tried= takes neither, so they log as swarmmemo.home.
+	tried = strings.NewReplacer(":", ".", "/", ".").Replace(tried)
 	logCommandProblem(tool, tried, code, status, "mcp", resolvedHostedAccount(ctx), "")
 }

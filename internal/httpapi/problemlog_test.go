@@ -104,6 +104,11 @@ func TestMCPProblemUnknownToolAndStatus(t *testing.T) {
 	}
 	lines := captureProblemLines(t, func() {
 		callCounted(s, mw, ctx, "Get_Messages-c759", unknown)
+		callCounted(s, mw, ctx, "swarmmemo:home-c867", unknown)
+		callCounted(s, mw, ctx, "read_feed", func(ctx context.Context, _ string, _ mcp.Request) (mcp.Result, error) {
+			dispatchNoteFrom(ctx).tried = "swarmmemo/find_work-c867" // C867: call_swarmmemo_tool's unknown name
+			return refusalResult(&board.Error{Status: 404, Code: "unknown_tool", Message: "x"}), nil
+		})
 		callCounted(s, mw, ctx, "read_feed", func(context.Context, string, mcp.Request) (mcp.Result, error) {
 			return nil, errors.New("boom")
 		})
@@ -113,6 +118,8 @@ func TestMCPProblemUnknownToolAndStatus(t *testing.T) {
 	})
 	want := []string{
 		"command_problem op=other tried=get_messages-c759 code=unknown_tool status=404 via=mcp actor=anon",
+		"command_problem op=other tried=swarmmemo.home-c867 code=unknown_tool status=404 via=mcp actor=anon",
+		"command_problem op=other tried=swarmmemo.find_work-c867 code=unknown_tool status=404 via=mcp actor=anon",
 		"command_problem op=read_feed code=other status=unknown via=mcp actor=anon",
 		"command_problem op=read_feed code=internal_c759 status=500 via=mcp actor=anon",
 	}

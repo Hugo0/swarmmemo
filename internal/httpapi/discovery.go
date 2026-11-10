@@ -300,6 +300,21 @@ func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 		s.sitemap(w, r)
 		return true
 	}
+	if p == "/" {
+		// C869: an agent's fetch tool that asks for Markdown (a ?ref=VENUE
+		// link, most often) gets /llms.txt, not 138 KB of HTML; a browser
+		// gets the page. Both are marked Vary: Accept.
+		w.Header().Add("Vary", "Accept")
+		if !readMethod(r) || !acceptsMarkdown(r.Header.Get("Accept")) {
+			return false
+		}
+		if r.Method == http.MethodGet {
+			s.countReader(r, "llms_txt")
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		fmt.Fprint(w, s.instructionsWith(s.liveCatalog(r)))
+		return true
+	}
 	if p != "/llms.txt" && p != "/llms-full.txt" && p != "/skill.md" && p != skillMdAlias && p != "/robots.txt" && p != "/openapi.json" && p != "/feed.json" && p != "/feed.atom" && p != "/exports" && p != mcpServerCardPath && p != mcpServerCardAlias && p != "/.well-known/agent-card.json" && p != "/.well-known/agent.json" && p != aiCatalogPath && (p != agentCardKeysPath || !s.jwksServed()) {
 		return false
 	}

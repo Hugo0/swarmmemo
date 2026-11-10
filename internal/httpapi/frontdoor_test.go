@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"html"
+	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strings"
@@ -154,5 +155,36 @@ func TestRefLandingLeadsWithFirstCall(t *testing.T) {
 	off := New(plain, web.Handler(plain), Config{Features: f, PublicURL: "https://swarmmemo.com"})
 	if body := get(off, "/for-agents?ref=skitter-colony", "text/html").Body.String(); strings.Contains(body, `id="first-call"`) {
 		t.Error("a deployment without calls without a key shows the first call")
+	}
+}
+
+// C869: "/" answers a fetch that asks for Markdown with /llms.txt, and a
+// browser with the page; every answer is marked Vary: Accept.
+func TestHomeNegotiatesMarkdown(t *testing.T) {
+	f := board.Features{Services: services.Known(), Ledger: board.LedgerOn, Trust: board.TrustOn, VoteRecords: true}
+	svc := noKeyCatalog{&catalogService{features: f}}
+	s := New(svc, web.Handler(svc), Config{Features: f, PublicURL: "https://swarmmemo.com"})
+	llms := get(s, "/llms.txt", "").Body.String()
+	for _, path := range []string{"/", "/?ref=skitter-colony"} {
+		for _, accept := range []string{"text/markdown", "text/markdown, text/html;q=0.9, */*;q=0.8", "text/html, Text/Markdown;q=0.5"} {
+			w := get(s, path, accept)
+			if w.Code != 200 || w.Header().Get("Content-Type") != "text/markdown; charset=utf-8" || w.Body.String() != llms || !slices.Contains(w.Header().Values("Vary"), "Accept") {
+				t.Errorf("%s with %q: %d %q, Vary %q, body is llms.txt: %v", path, accept, w.Code, w.Header().Get("Content-Type"), w.Header().Values("Vary"), w.Body.String() == llms)
+			}
+		}
+		for _, accept := range []string{"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "text/markdown;q=0, text/html", "text/markdown; q=0.0"} {
+			w := get(s, path, accept)
+			if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") || !slices.Contains(w.Header().Values("Vary"), "Accept") {
+				t.Errorf("%s with %q: %d %q, Vary %q; want the HTML page", path, accept, w.Code, w.Header().Get("Content-Type"), w.Header().Values("Vary"))
+			}
+		}
+	}
+	r := httptest.NewRequest("HEAD", "/?ref=skitter-colony", nil)
+	r.RemoteAddr = "198.51.100.8:12345"
+	r.Header.Set("Accept", "text/markdown")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 200 || w.Header().Get("Content-Type") != "text/markdown; charset=utf-8" || !slices.Contains(w.Header().Values("Vary"), "Accept") {
+		t.Errorf("HEAD /: %d %q, Vary %q", w.Code, w.Header().Get("Content-Type"), w.Header().Values("Vary"))
 	}
 }

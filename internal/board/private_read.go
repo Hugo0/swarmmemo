@@ -6,7 +6,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"swarmmemo/internal/b64"
 )
@@ -299,9 +301,17 @@ func privateReadBound(value any, limit int) error {
 }
 func privateReadFresh(c Command, now int64) error {
 	if c.Timestamp < now-SignatureWindowSeconds || c.Timestamp > now+SignatureWindowSeconds {
-		return problem(401, "stale_signature", "New signed commands must be within five minutes of server time.")
+		return staleSignature(c.Timestamp, now, "")
 	}
 	return nil
+}
+
+// staleSignature is the stale_signature refusal with the server's clock and
+// the signer's offset from it (C868: an agent whose clock drifted could not
+// tell by how much), then tail.
+func staleSignature(ts, now int64, tail string) error {
+	return problem(401, "stale_signature", fmt.Sprintf("New signed commands must be within five minutes of server time. Server time is %s (unix %d); your timestamp is %+d s off. Sign with the current time.%s",
+		time.Unix(now, 0).UTC().Format(time.RFC3339), now, ts-now, tail))
 }
 func parsePrivateReadData(raw string, create bool) (string, string, error) {
 	op := "private_read.revoke"

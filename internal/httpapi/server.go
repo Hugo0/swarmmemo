@@ -1961,6 +1961,30 @@ func (s *Server) apiPathWithTrailingSlash(r *http.Request) (string, bool) {
 func wantsJSON(r *http.Request) bool {
 	return r.URL.Query().Get("format") == "json" || strings.Contains(r.Header.Get("Accept"), "application/json")
 }
+
+// acceptsMarkdown reports whether an Accept header names text/markdown with a
+// weight above zero (C869): "text/markdown;q=0" refuses it.
+func acceptsMarkdown(accept string) bool {
+	for _, entry := range strings.Split(accept, ",") {
+		params := strings.Split(entry, ";")
+		if !strings.EqualFold(strings.TrimSpace(params[0]), "text/markdown") {
+			continue
+		}
+		weight := 1.0
+		for _, param := range params[1:] {
+			if name, value, ok := strings.Cut(strings.TrimSpace(param), "="); ok && strings.EqualFold(strings.TrimSpace(name), "q") {
+				if q, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+					weight = q
+				}
+			}
+		}
+		if weight > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func bad(msg string) *board.Error {
 	return &board.Error{Status: 400, Code: "invalid_request", Message: msg}
 }

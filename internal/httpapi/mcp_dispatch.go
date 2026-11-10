@@ -60,6 +60,7 @@ func toolsetViewFrom(ctx context.Context) *toolsetView {
 // (countMCPTools) which tool it called.
 type dispatchNote struct {
 	target string
+	tried  string // C867: the name an unknown_tool dispatch sent, for tried=
 }
 
 func dispatchNoteFrom(ctx context.Context) *dispatchNote {
@@ -196,6 +197,9 @@ func (s *Server) dispatchTool(ctx context.Context, v *toolsetView, call *mcp.Cal
 	case isMetaTool(in.Name):
 		return metaToolRefusal("invalid_request", in.Name+" is called directly, never through call_swarmmemo_tool."), nil
 	case !v.callable(in.Name):
+		if n := dispatchNoteFrom(ctx); n != nil {
+			n.tried = in.Name
+		}
 		return metaToolRefusal("unknown_tool", fmt.Sprintf("There is no tool %q on this connection. search_swarmmemo_tools finds tools by what they do.", truncateName(in.Name))), nil
 	case v.info.destructive[in.Name] && !in.Confirm:
 		return metaToolRefusal("confirm_required", in.Name+" is destructive: it may lose access or cannot be undone. Ask your human, then call again with confirm true."), nil

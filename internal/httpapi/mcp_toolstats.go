@@ -257,6 +257,9 @@ func (s *Server) countMCPTools(profile string, registered map[string]bool) mcp.M
 					if call.Params != nil {
 						tried, served = call.Params.Name, registered[call.Params.Name]
 					}
+					if note.tried != "" {
+						tried = note.tried // C867: the name call_swarmmemo_tool was asked for
+					}
 					logMCPProblem(ctx, name, tried, code, status, served) // C757, C759 (problemlog.go)
 				}
 				s.countMCPTool(ctx, profile, name, code, dispatched)
