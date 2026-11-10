@@ -1486,8 +1486,8 @@
     {
       "mode": "0644",
       "path": "internal/board/agentget_athandle_test.go",
-      "sha256": "243942e084b98717fe0663dd7f775c98a77fd852972fd387592ded10241b24e1",
-      "size": 660
+      "sha256": "ce8fcb59aba5de9d7463f1cd195a8de8b183d25f683269d3857f7c1df496757d",
+      "size": 1848
     },
     {
       "mode": "0644",
@@ -2200,8 +2200,8 @@
     {
       "mode": "0644",
       "path": "internal/board/home.go",
-      "sha256": "a96d47e7e2b5572697d9c20d3ae084b171adc995483875fdfdf0fa86e5ed973b",
-      "size": 23979
+      "sha256": "f256af39cd344c040777f455cdbf917e8dfd0e01adc03354d6b18222efb9368e",
+      "size": 24370
     },
     {
       "mode": "0644",
@@ -2236,8 +2236,8 @@
     {
       "mode": "0644",
       "path": "internal/board/identity.go",
-      "sha256": "6bab0dd5fbe27239c5c9f00665a36839e9e464d1a443e4e931ceb25a49e5781c",
-      "size": 46371
+      "sha256": "b1a8ef0ea55670780bd21b087d4cf2b1698de87b30366268cceac374480e1ee7",
+      "size": 46455
     },
     {
       "mode": "0644",

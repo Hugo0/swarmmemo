@@ -113,13 +113,20 @@ type homeWork struct {
 // (target empty or one of its own keys), else target, read publicly.
 func homeAgent(ctx context.Context, tx *sql.Tx, c Command, a actor) (agent, account string, own bool, err error) {
 	if c.Target != "" && !fingerprintRE.MatchString(c.Target) {
-		return "", "", false, errQueryAgent()
+		// A handle (or @handle) names the agent too, as errQueryAgent
+		// says (C865: home agent=HANDLE answered invalid_agent).
+		if !handleRE.MatchString(strings.TrimPrefix(c.Target, "@")) {
+			return "", "", false, errQueryAgent()
+		}
+		if c.Target, err = agentFingerprint(ctx, tx, c.Target); err != nil {
+			return "", "", false, err
+		}
 	}
 	if a.signed && a.grant == nil && (c.Target == "" || c.Target == a.id) {
 		return a.id, a.account, true, nil
 	}
 	if c.Target == "" {
-		return "", "", false, problem(400, "invalid_request", "home needs agent=FINGERPRINT, or a signed read for your own.")
+		return "", "", false, problem(400, "invalid_request", "home is one agent's summary: sign the read with your key for your own, or name another agent with agent= (its handle or fingerprint) for its public home.")
 	}
 	account, err = inboxAccount(ctx, tx, c.Target)
 	if err != nil {

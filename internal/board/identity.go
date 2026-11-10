@@ -19,10 +19,11 @@ import (
 )
 
 // agentFingerprint resolves an agent named by a registered handle (any
-// case) or a key fingerprint to the fingerprint: a fingerprint as given, a
+// case, "@" optional) or a key fingerprint to the fingerprint: a fingerprint as given, a
 // handle to the key that holds it, as /api/record reads it. An unknown
 // handle is 404 agent_not_found; anything else is 400 invalid_agent.
 func agentFingerprint(ctx context.Context, q queryer, who string) (string, error) {
+	who = strings.TrimPrefix(who, "@") // "@handle" is the handle (C864)
 	switch {
 	case fingerprintRE.MatchString(who):
 		return who, nil
