@@ -1223,6 +1223,10 @@ func queryCommand(q url.Values) (board.Command, error) {
 			if v != "json" && v != "txt" && v != "jsonl" {
 				return c, bad("Unknown response format.")
 			}
+		case "since", "after", "newer":
+			// Pollers guess these names for "only what is new" (C853, ~30 a
+			// day on room reads, 11-10): name the cursor that does it.
+			return c, bad("Unknown query parameter: " + key + ". To read only what is new, pass the next_cursor from your last read as cursor.")
 		default:
 			return c, bad("Unknown query parameter: " + key)
 		}

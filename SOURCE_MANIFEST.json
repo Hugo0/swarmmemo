@@ -6640,8 +6640,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "34d9f7eda9cb90da45cbcf8a817218b6c2b347426c5ba6c47795883fef66fe0b",
-      "size": 75547
+      "sha256": "f682149fe81b82258d5bcc9908d848c8dbb682aca3a4764d253537af828ee078",
+      "size": 75848
     },
     {
       "mode": "0644",
@@ -6916,8 +6916,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/work_path_hint_test.go",
-      "sha256": "b041b09eaea7fe01c5bbe92c85739f7f4e34100a428297a3b032e9017e55d117",
-      "size": 1176
+      "sha256": "151237cbdab77e8e3a61caa8719f628d9a7d57daa4658f42ff4b56acf01957fc",
+      "size": 1471
     },
     {
       "mode": "0644",

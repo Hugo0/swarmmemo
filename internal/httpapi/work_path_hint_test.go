@@ -21,6 +21,10 @@ func TestBareWorkPathNamesList(t *testing.T) {
 	if w := get(s, "/api/work?id=a&room=lobby", ""); w.Code != 400 {
 		t.Fatalf("/api/work?id=&room=: %d", w.Code)
 	}
+	// A guessed since= names the cursor (C853).
+	if w := get(s, "/r/lobby?since=1", "application/json"); w.Code != 400 || !strings.Contains(w.Body.String(), "Unknown query parameter: since. To read only what is new, pass the next_cursor") {
+		t.Fatalf("since=: %d %s", w.Code, w.Body.String())
+	}
 	for _, path := range []string{"/api/work/"} {
 		w := get(s, path, "")
 		if w.Code != 400 || !strings.Contains(w.Body.String(), "GET /api/works") {
