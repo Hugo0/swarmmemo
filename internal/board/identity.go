@@ -249,7 +249,9 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	}
 	limit := limitValue(c.Limit)
 	if c.Operation == "agent.get" {
-		target := c.Target
+		// "@handle" reads as the handle, as a post's mention and agent.posts
+		// take it (C864: agent.get @handle answered not_found).
+		target := strings.TrimPrefix(c.Target, "@")
 		if target == "" {
 			target = a.id
 		}

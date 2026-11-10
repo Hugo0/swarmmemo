@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -118,6 +119,31 @@ func problemTried(s string) string {
 	return string(b)
 }
 
+// problemKeepsTried reports whether op's line carries tried=: an unknown
+// operation or MCP tool (C759), or the service a service.call or
+// service.read named (C861: invalid_service_data reached 8 agents in a day
+// and the log could not say which service).
+func problemKeepsTried(op string) bool {
+	return op == "unknown" || op == "other" || op == "service.call" || op == "service.read" || op == "tools.call"
+}
+
+// problemToolID is the tool id a tools.call's data names (C863: 15
+// global_quota_exhausted and 9 invalid_service_data tools.call refusals in
+// half a day, and the log could not say which tool), or "" when unreadable.
+func problemToolID(data string) string {
+	var env struct {
+		Args struct {
+			ID string `json:"id"`
+		} `json:"args"`
+	}
+	if json.Unmarshal([]byte(data), &env) != nil {
+		return ""
+	}
+	// tried= takes no ':' (it keeps host:port out), so swarmmemo:fetch.page
+	// logs as swarmmemo.fetch.page.
+	return strings.ReplaceAll(env.Args.ID, ":", ".")
+}
+
 // problemActor is the first 8 hex digits of sha256(id), or "anon".
 func problemActor(id string) string {
 	if id == "" {
@@ -128,12 +154,12 @@ func problemActor(id string) string {
 }
 
 // commandProblemLine is the log line (see the comment at the top).
-// status 0 is "unknown"; tried is written only beside op=unknown or other.
+// status 0 is "unknown"; tried is written only where problemKeepsTried(op).
 // work is the hashed work id (problemActor of it), or "" for none.
 func commandProblemLine(op, tried, code string, status int, via, actor, work string, suppressed int) string {
 	op = problemName(op)
 	line := "command_problem op=" + op
-	if tried = problemTried(tried); tried != "" && (op == "unknown" || op == "other") {
+	if tried = problemTried(tried); tried != "" && problemKeepsTried(op) {
 		line += " tried=" + tried
 	}
 	st := "unknown"
@@ -161,7 +187,7 @@ func logCommandProblem(op, tried, code string, status int, via, actorID, workID 
 		return
 	}
 	op, code = problemName(op), problemName(code)
-	if tried = problemTried(tried); op != "unknown" && op != "other" {
+	if tried = problemTried(tried); !problemKeepsTried(op) {
 		tried = ""
 	}
 	ok, suppressed := commandProblems.admit(problemKey{op, code, tried}, time.Now())

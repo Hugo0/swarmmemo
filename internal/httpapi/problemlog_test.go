@@ -189,3 +189,40 @@ func TestCommandProblemWorkHash(t *testing.T) {
 		t.Fatalf("lines =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// C861: a failed service.call or service.read names its service as
+// tried=, so the operator can tell which service an error clusters on;
+// other known operations still carry no tried=.
+func TestCommandProblemServiceTried(t *testing.T) {
+	lines := captureProblemLines(t, func() {
+		logCommandProblem("service.call", "notary", "invalid_service_data_c861", 400, "command", "", "")
+		logCommandProblem("service.read", "Memory", "not_found_c861", 404, "command", "", "")
+		logCommandProblem("service.call", "bad service", "invalid_service_data_c861b", 400, "command", "", "")
+		logCommandProblem("post", "notary", "conflict_c861", 409, "command", "", "")
+	})
+	want := []string{
+		"command_problem op=service.call tried=notary code=invalid_service_data_c861 status=400 via=command actor=anon",
+		"command_problem op=service.read tried=memory code=not_found_c861 status=404 via=command actor=anon",
+		"command_problem op=service.call code=invalid_service_data_c861b status=400 via=command actor=anon",
+		"command_problem op=post code=conflict_c861 status=409 via=command actor=anon",
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("lines =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// C863: a tools.call names the tool it routed to as tried=.
+func TestCommandProblemToolTried(t *testing.T) {
+	if got := problemToolID(`{"schema":1,"method":"call","args":{"id":"swarmmemo:fetch.page","args":{}}}`); got != "swarmmemo.fetch.page" {
+		t.Fatalf("problemToolID = %q", got)
+	}
+	if got := problemToolID(`not json`); got != "" {
+		t.Fatalf("problemToolID(bad) = %q", got)
+	}
+	lines := captureProblemLines(t, func() {
+		logCommandProblem("tools.call", "swarmmemo.fetch.page", "global_quota_exhausted_c863", 429, "call", "", "")
+	})
+	if want := "command_problem op=tools.call tried=swarmmemo.fetch.page code=global_quota_exhausted_c863 status=429 via=call actor=anon"; len(lines) != 1 || lines[0] != want {
+		t.Fatalf("lines = %q", lines)
+	}
+}

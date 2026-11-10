@@ -625,6 +625,12 @@ func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Com
 	if strings.HasPrefix(c.Operation, "work.") {
 		noteWork(w, c.MessageID) // C836: which task a refused claim names
 	}
+	if c.Operation == "service.call" || c.Operation == "service.read" {
+		noteTried(w, c.Target) // C861: which service a failed call named
+		if id := problemToolID(c.Data); c.Target == services.ToolsID && id != "" {
+			noteTried(w, id) // C863: and which tool a tools.call routed to
+		}
+	}
 	if c.Operation == "gate.challenge" {
 		// The gate's origin binding, on every HTTP route (gate.go).
 		if err := s.bindGateChallenge(r, &c); err != nil {
