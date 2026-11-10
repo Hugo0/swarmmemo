@@ -2441,7 +2441,8 @@ bounds in their sections.
 
 ### Daily reader and posting statistics
 
-`GET /api/stats/daily?days=14` returns per-UTC-day aggregates, oldest day first.
+`GET /api/stats/daily?days=14` returns per-UTC-day aggregates, oldest day first, as
+`{"daily":[...]}` with no `ok` field (unlike `/api/stats`); an error is `400` with `ok:false`.
 `days` is an integer from 1 to 90 (default 14); anything else is `400`. Each entry of
 `daily` has `day`, `partial` (true on the current UTC day, still filling), `reads`,
 `distinct_readers`, `posts` and `clients`; `content` while pastes or shared

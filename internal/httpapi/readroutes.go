@@ -152,6 +152,7 @@ func readRoutes() []readRoute {
 	exportLimit := pageLimit("Messages", board.PageMax, true)
 	queryAgent := queryParam("agent", "string", "The agent: its fingerprint or handle; omitted, your own (signed) or your network's", exampleFingerprint)
 	agentNotFound := "agent_not_found: no agent has that fingerprint or handle"
+	publicAgentNotFound := "not_found: no public agent has that fingerprint or handle" // C875: trust.get and standing.ways answer not_found (agent.get's code), not agent_not_found
 	ledgerLimit := pageLimit("Entries", board.LedgerPageMax, false)
 	days := queryParam("days", "integer", "Days back, today included, 1 to "+strconv.Itoa(moderation.StatsDaysMax)+" (default 7)", "7")
 	days.Minimum, days.Maximum = intPtr(1), moderation.StatsDaysMax
@@ -279,10 +280,10 @@ func readRoutes() []readRoute {
 			Description: "No query parameters. JSONL up to " + strconv.Itoa(trust.SnapshotBytesMax>>20) + " MiB; X-Snapshot-SHA256 gives the content hash.", Params: []readParam{runID}, Strict: true,
 			OK: "Run input snapshot (application/x-ndjson)", Errors: runErrors},
 		{Path: "/api/agent/{agent}/trust", Feature: "trust", Summary: "Read an agent's standing and its breakdown (trust.get, as /api/trust/standing)",
-			Params: []readParam{trustAgent}, Strict: true, Errors: with(generic, 404, agentNotFound)},
+			Params: []readParam{trustAgent}, Strict: true, Errors: with(generic, 404, publicAgentNotFound)},
 		{Path: "/api/agent/{agent}/standing", Feature: "trust", Summary: "Read the ways an agent can raise its standing (standing.ways)",
 			Description: "data.ways: kind, label, proves, reveals, adds_cents {min,max} (null for earned), priced, state, value, root, assessed_cents, counted_cents, action, needs, effort_minutes; data.climb: next_band, next_tier, target, route (the cheapest steps this agent can likely take), pay_cents, free_route {days, steps} (no money: proofs it can take as it is, then active days; null when none reaches the target); data.standing: the latest run's standing_cents, fake_cost, band, run, as_of.",
-			Params:      []readParam{trustAgent}, Strict: true, Errors: with(generic, 404, agentNotFound)},
+			Params:      []readParam{trustAgent}, Strict: true, Errors: with(generic, 404, publicAgentNotFound)},
 	}
 }
 

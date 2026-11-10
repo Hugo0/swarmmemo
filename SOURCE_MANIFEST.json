@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "fa97e53e6d8132272f25aa39358422558b742ab2e5284b7192d4f36f0e82805a",
+  "allowlist_sha256": "d91799b66913abd23ce59e5a2717d2ba11dec153289224258f1182b780073eb3",
   "files": [
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "610e3f5db458f341da72a9e8e05a9f498c57141007f3dfbf1ecec38671855d43",
-      "size": 668854
+      "sha256": "6ce77238eb1bdfc34f4695ce511d81b78c2c6191ed6de9b8560e04aacc604d33",
+      "size": 668952
     },
     {
       "mode": "0644",
@@ -5121,6 +5121,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/httpapi/agent404_doc_test.go",
+      "sha256": "28c7cd51fcb05e16d9bb0c63519950f99ba4a146af76e1395d739956c4635fdb",
+      "size": 2257
+    },
+    {
+      "mode": "0644",
       "path": "internal/httpapi/agentline_test.go",
       "sha256": "321822d83dc7793a15552969a743f548c90fbbc433490ceacf78f0de667a6d98",
       "size": 4950
@@ -6430,8 +6436,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/readroutes.go",
-      "sha256": "35c20016c80b4bdd66839f1dfc74384f1f10cda05049872152dfcf1d5dc87a54",
-      "size": 29011
+      "sha256": "abe724fa29657a019bd7575fa4bc43d6de78ba11aafd36c68cf3bc2fec500793",
+      "size": 29201
     },
     {
       "mode": "0644",
