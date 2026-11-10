@@ -217,6 +217,12 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			return file, 200
 		},
 		"www.ecb.europa.eu": func(r *http.Request) (string, int) {
+			switch r.URL.Path {
+			case "/stats/eurofxref/eurofxref-daily.xml":
+				return "ecb_fx_daily.xml", 200
+			case "/stats/eurofxref/eurofxref-hist-90d.xml":
+				return "ecb_fx_hist90d.xml", 200
+			}
 			if r.URL.Path != "/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html" {
 				return "", 404
 			}
@@ -708,6 +714,85 @@ func TestPublicDataCryptoAndFRED(t *testing.T) {
 	urls, _ := v.fakes["api.stlouisfed.org"].seen()
 	if !strings.Contains(urls[0], "units=pca") || !strings.Contains(urls[0], "series_id=GDPC1") {
 		t.Errorf("FRED request %s", urls[0])
+	}
+}
+
+// C876: ECB reference rates, EUR legs and derived cross rates.
+func TestPublicDataFXRates(t *testing.T) {
+	v := newPDEnv(t, false)
+	monday := unix("2026-09-21")
+	item, d := v.mustFetch(t, "fx_rates", `{}`, monday)
+	eq(t, "base", d["base"], "EUR")
+	eq(t, "rate_date", d["rate_date"], "2026-09-18")
+	eq(t, "as_of", item["as_of"], "2026-09-18")
+	eq(t, "count", d["count"], 4.0)
+	eq(t, "currencies", []any{at(d, "rates", 0, "currency"), at(d, "rates", 1, "currency"), at(d, "rates", 2, "currency"), at(d, "rates", 3, "currency")},
+		[]any{"CHF", "GBP", "JPY", "USD"})
+	near(t, "usd", at(d, "rates", 3, "rate"), 1.125)
+	eq(t, "row date", at(d, "rates", 3, "rate_date"), "2026-09-18")
+	eq(t, "not derived", at(d, "rates", 3, "derived"), false)
+	eq(t, "weekend not stale", d["rate_may_be_stale"], false)
+	if !strings.Contains(item["attribution"].(string), "European Central Bank") || !strings.HasSuffix(item["source_url"].(string), "/stats/eurofxref/eurofxref-daily.xml") {
+		t.Errorf("attribution %v source %v", item["attribution"], item["source_url"])
+	}
+
+	// A cross base divides the EUR legs and is marked derived.
+	_, d = v.mustFetch(t, "fx_rates", `{"base":"usd","symbols":"eur, jpy,CHF"}`, monday)
+	eq(t, "cross base", d["base"], "USD")
+	eq(t, "cross count", d["count"], 3.0)
+	eq(t, "cross order", at(d, "rates", 0, "currency"), "EUR")
+	near(t, "usd->eur", at(d, "rates", 0, "rate"), 0.888889)
+	near(t, "usd->jpy", at(d, "rates", 1, "rate"), 147.022)
+	near(t, "usd->chf", at(d, "rates", 2, "rate"), 0.833333)
+	eq(t, "derived", at(d, "rates", 1, "derived"), true)
+
+	// A symbol the ECB did not publish that day is listed, not an error.
+	_, d = v.mustFetch(t, "fx_rates", `{"symbols":"USD,ZAR"}`, monday)
+	eq(t, "filtered", d["count"], 1.0)
+	eq(t, "missing", d["missing"], []any{"ZAR"})
+	_, d = v.mustFetch(t, "fx_rates", `{"base":"ZAR"}`, monday)
+	eq(t, "no base leg", d["count"], 0.0)
+	if !strings.Contains(d["note"].(string), "ZAR") {
+		t.Errorf("note %v", d["note"])
+	}
+
+	// A date without rates answers the latest earlier day from the 90-day file.
+	item, d = v.mustFetch(t, "fx_rates", `{"date":"2026-09-13","symbols":"USD"}`, monday)
+	eq(t, "fallback", d["rate_date"], "2026-09-11")
+	eq(t, "requested", d["requested_date"], "2026-09-13")
+	near(t, "fallback usd", at(d, "rates", 0, "rate"), 1.1)
+	if !strings.Contains(d["date_note"].(string), "2026-09-11") || !strings.HasSuffix(item["source_url"].(string), "eurofxref-hist-90d.xml") {
+		t.Errorf("date_note %v source %v", d["date_note"], item["source_url"])
+	}
+	_, d = v.mustFetch(t, "fx_rates", `{"date":"2026-09-17"}`, monday)
+	eq(t, "exact day", d["rate_date"], "2026-09-17")
+	if _, ok := d["date_note"]; ok {
+		t.Errorf("an exact day has no date_note: %v", d["date_note"])
+	}
+	_, d = v.mustFetch(t, "fx_rates", `{"date":"2026-09-01"}`, monday)
+	eq(t, "before the file", d["rate_date"], nil)
+	eq(t, "before the file rows", d["count"], 0.0)
+
+	// Stale: rate_date more than 4 days before today.
+	_, d = v.mustFetch(t, "fx_rates", `{}`, unix("2026-09-24"))
+	eq(t, "stale", d["rate_may_be_stale"], true)
+	if !strings.Contains(d["rate_stale_reason"].(string), "2026-09-18") {
+		t.Errorf("reason %v", d["rate_stale_reason"])
+	}
+
+	// Unknown currencies and out-of-window dates are refused before any charge.
+	for _, c := range []struct{ args, param string }{
+		{`{"base":"XYZ"}`, "params.base"},
+		{`{"symbols":"USD,XYZ"}`, "params.symbols"},
+		{`{"symbols":"USD,usd"}`, "params.symbols"},
+		{`{"symbols":"US"}`, "params.symbols"},
+		{`{"date":"2026-05-01"}`, "params.date"},
+		{`{"date":"2026-09-22"}`, "params.date"},
+	} {
+		_, _, err := services.PublicDataParseForTest("fetch", json.RawMessage(`{"dataset":"fx_rates","params":`+c.args+`}`), monday)
+		if code(err) != "invalid_service_data" || !strings.Contains(pdRefusal(err), c.param) || strings.Contains(pdRefusal(err), "XYZ") {
+			t.Errorf("%s: %v", c.args, err)
+		}
 	}
 }
 
@@ -1680,7 +1765,7 @@ func TestPublicDataCatalogue(t *testing.T) {
 	v := newPDEnv(t, false)
 	cat := services.PublicDataDatasetsForTest(v.cfg)
 	list := cat["datasets"].([]any)
-	if len(list) != 11 {
+	if len(list) != 12 {
 		t.Fatalf("%d datasets", len(list))
 	}
 	avail := map[string]bool{}
@@ -1713,7 +1798,7 @@ func TestPublicDataCatalogue(t *testing.T) {
 		}
 	}
 	for id, want := range map[string]bool{"sea_ice_extent": true, "congress_bills": false, "fec_candidate_totals": false, "fred_series": false,
-		"fred_release_calendar": true, "cb_policy_rates": true, "us_nowcasts": true} {
+		"fred_release_calendar": true, "cb_policy_rates": true, "us_nowcasts": true, "fx_rates": true} {
 		if avail[id] != want {
 			t.Errorf("%s available %v, want %v", id, avail[id], want)
 		}
@@ -1739,7 +1824,7 @@ func TestPublicDataCatalogue(t *testing.T) {
 	}
 	c, _ := v.e.Catalogue(context.Background(), v.db, 1000)
 	raw, _ = json.Marshal(c)
-	if !strings.Contains(string(raw), `"datasets_available":8`) {
+	if !strings.Contains(string(raw), `"datasets_available":9`) {
 		t.Errorf("services.list: %s", raw)
 	}
 }
@@ -1783,6 +1868,7 @@ func FuzzPublicDataParams(f *testing.F) {
 		`{"dataset":"cb_policy_rates","params":{"bank":"the Bank of England (BoE)","what":"policy rate"}}`,
 		`{"dataset":"us_nowcasts","params":{"measure":"prices"}}`,
 		`{"dataset":"ai_model_leaderboard","params":{"board":"code","model":"claude opus","organization":"anthropic","limit":5}}`,
+		`{"dataset":"fx_rates","params":{"base":"usd","symbols":"eur, jpy","date":"2026-09-11"}}`,
 		`{"requests":[{"dataset":"sea_ice_extent"},{"dataset":"us_nowcasts"}]}`,
 	} {
 		f.Add(s, s[2] == 'r')

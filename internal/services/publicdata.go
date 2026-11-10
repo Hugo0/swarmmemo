@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS public_data_cache (
 func (*publicData) Describe() Descriptor {
 	return Descriptor{
 		ID: "public_data",
-		Summary: "Public datasets from fixed upstreams (NOAA, NSIDC, FSIS, openFDA, Congress.gov, FEC, CoinGecko, FRED, BIS, BCB, Federal Reserve nowcasts, Arena), normalised, versioned and cached. " +
+		Summary: "Public datasets from fixed upstreams (NOAA, NSIDC, FSIS, openFDA, Congress.gov, FEC, CoinGecko, FRED, BIS, BCB, ECB, Federal Reserve nowcasts, Arena), normalised, versioned and cached. " +
 			"service.read method datasets lists the catalogue; fetch args: {\"dataset\":ID,\"params\":{...}}; bulk args: {\"requests\":[{\"dataset\":ID,\"params\":{...}},...]} (at most " + itoa(PublicDataBulkMax) + ").",
 		Title: "Public data", Topic: "Search and data",
 		Line: "Fetch public datasets (weather, sea ice, recalls, bills, election finance, prices, rates, nowcasts, AI rankings) from official sources, normalised and cached.",

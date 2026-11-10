@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "d91799b66913abd23ce59e5a2717d2ba11dec153289224258f1182b780073eb3",
+  "allowlist_sha256": "190b8608480b4ee1e28603926d7dce76f2f824957b08a445cb2a26ee5b671afb",
   "files": [
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "6ce77238eb1bdfc34f4695ce511d81b78c2c6191ed6de9b8560e04aacc604d33",
-      "size": 668952
+      "sha256": "46da566a90cbf6acf5ffc89ceca3e0c5f7d124f82e646abb202309dd9f19fdf7",
+      "size": 669411
     },
     {
       "mode": "0644",
@@ -3022,8 +3022,8 @@
     {
       "mode": "0644",
       "path": "internal/board/publicdatawire_test.go",
-      "sha256": "d6325ee8a949e16895e1240873b2b92c46956286a961c7bd452421cea721e47c",
-      "size": 2874
+      "sha256": "26d74d794f1bd49db417293ed11d4bf3b0e4355916d33396279687d53908e6ae",
+      "size": 2964
     },
     {
       "mode": "0644",
@@ -8416,8 +8416,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata.go",
-      "sha256": "aba55f6ef679181621be2837bb7ff1970fea42fa085f214366b84691025a29f7",
-      "size": 35697
+      "sha256": "be50e1b235c0ab5e6e6ccdd1fcf008ccab9897f5b9d98da88cba9bda097e887d",
+      "size": 35702
     },
     {
       "mode": "0644",
@@ -8436,6 +8436,12 @@
       "path": "internal/services/publicdata_digest.go",
       "sha256": "36a7915de9a7bed47547c2b9383ed84044f9fe946d100918f4af0a2d42a255e9",
       "size": 4909
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/publicdata_fx.go",
+      "sha256": "d6a46522ec42c009df895d48bd421eff31b3155c584dce5f72dee182929d410d",
+      "size": 8715
     },
     {
       "mode": "0644",
@@ -8464,14 +8470,14 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_sources.go",
-      "sha256": "51b8798f2b141fe867abf5ee086d9d5ea29615cc7b594dcee84794da5b069d25",
-      "size": 44639
+      "sha256": "e2b4498fe5601d33fd393e5e95af5cd8c26b0534ff4b12739cd90660244aa851",
+      "size": 44650
     },
     {
       "mode": "0644",
       "path": "internal/services/publicdata_test.go",
-      "sha256": "f2c5f0264757c8675fdbde22c6372551c78082200c4a8dad27dd342a1e09f4dc",
-      "size": 81870
+      "sha256": "c521dcce13b6fabe76860bf364fa97c97e93d3c7e44cf8c2cdbe66bed19f69ce",
+      "size": 86060
     },
     {
       "mode": "0644",
@@ -8796,6 +8802,18 @@
       "path": "internal/services/testdata/public_data/congress_bills.json",
       "sha256": "b6f77286b7c53dd54ead63e99ded687be3c41979c3f647f65b2c144ea4c91e14",
       "size": 960
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/ecb_fx_daily.xml",
+      "sha256": "7705bbc34a6f7a152a8ea89eb8faaca7a65426ee51d25f4eb4431f4e14d65ed3",
+      "size": 538
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/ecb_fx_hist90d.xml",
+      "sha256": "f837fedc69e0c11307ab4e4d3c56362ed93d9939d4d2ee90ec7cbab7456042d7",
+      "size": 934
     },
     {
       "mode": "0644",
@@ -10096,8 +10114,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "1a1aab2a078fcdc1ef7210aeef645ef863795b6e49896f57e344b273598671ca",
-      "size": 52878
+      "sha256": "87eeb0ee16276e35d59e8ed9c01d98ec7b881667b95c651d64fddd76bbd76232",
+      "size": 54513
     },
     {
       "mode": "0644",
@@ -10108,8 +10126,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist_history.json",
-      "sha256": "7c6c21a2874c47827ad13892481933f55c1ab271d28d1de66ac651fb98ed244d",
-      "size": 4503
+      "sha256": "e3bfde6dbc2223a1910a44147e332bdbc08ee525faaa25a122f5413a2a9cfe54",
+      "size": 4625
     },
     {
       "mode": "0644",

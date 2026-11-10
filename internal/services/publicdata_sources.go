@@ -22,7 +22,7 @@ import (
 
 var pdCatalogue = []*pdDataset{
 	dsNOAAStation, dsSeaIce, dsRecalls, dsCongressBills, dsFECTotals, dsCryptoPrice,
-	dsFREDSeries, dsFREDReleases, dsCBPolicy, dsNowcasts, dsArenaLeaderboard,
+	dsFREDSeries, dsFREDReleases, dsCBPolicy, dsNowcasts, dsArenaLeaderboard, dsFXRates,
 }
 
 var pdByID = func() map[string]*pdDataset {
