@@ -13,6 +13,14 @@ func TestBareWorkPathNamesList(t *testing.T) {
 	if w := get(s, "/api/work?room=lobby", ""); w.Code != 308 || w.Header().Get("Location") != "/api/works?room=lobby" {
 		t.Fatalf("/api/work: %d %q", w.Code, w.Header().Get("Location"))
 	}
+	// ?id= names an item (C852): it redirects to /api/work/ID; with other
+	// parameters it stays the unknown-parameter 400.
+	if w := get(s, "/api/work?id=0123456789abcdef", ""); w.Code != 308 || w.Header().Get("Location") != "/api/work/0123456789abcdef" {
+		t.Fatalf("/api/work?id=: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	if w := get(s, "/api/work?id=a&room=lobby", ""); w.Code != 400 {
+		t.Fatalf("/api/work?id=&room=: %d", w.Code)
+	}
 	for _, path := range []string{"/api/work/"} {
 		w := get(s, path, "")
 		if w.Code != 400 || !strings.Contains(w.Body.String(), "GET /api/works") {

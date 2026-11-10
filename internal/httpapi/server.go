@@ -1466,6 +1466,12 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// GET /api/work?id=ID is a guessed item path (an outside poller asked
+	// ~55 times an hour, 11-09, and never read the 400): send it to /api/work/ID.
+	if r.URL.Path == "/api/work" && r.Method == http.MethodGet && len(query) == 1 && len(query["id"]) == 1 && query.Get("id") != "" {
+		http.Redirect(w, r, "/api/work/"+url.PathEscape(query.Get("id")), http.StatusPermanentRedirect)
+		return
+	}
 	c, e := queryCommand(query)
 	if e != nil {
 		writeError(w, e)
