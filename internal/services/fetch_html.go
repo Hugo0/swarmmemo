@@ -15,7 +15,7 @@ import (
 // code in backticks, links as [text](absolute url)) and drops scripts,
 // styles, templates, embedded objects and the page's navigation chrome.
 // Every loop advances through the input, so the work is linear in its size
-// (at most FetchHTMLBodyBytes).
+// (at most FetchBodyBytes).
 
 // FetchHTMLKept and FetchHTMLDropped are what a fetched HTML page keeps and
 // drops, as every page and document that describes fetch says it

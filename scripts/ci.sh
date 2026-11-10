@@ -45,7 +45,8 @@ race)
   # this runs with -short: the large-fixture tests (every operation's
   # authority matrix, floods of tens of thousands of rows, scale timings)
   # skip here and run in full, with their unscaled time bounds, in "test".
-  step "go test -race -short" go test -race -short -timeout 30m ./...
+  # internal/board alone takes ~29 min under -race (m848 timed out at 30m).
+  step "go test -race -short" go test -race -short -timeout 50m ./...
   ;;
 test)
   step "go test" go test -timeout 20m ./...

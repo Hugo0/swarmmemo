@@ -68,10 +68,13 @@ import (
 // bytes with its description): /mcp 138,643; budget raised by 200.
 // C830 (2026-11-08): create_work per_agent_cooldown_days (about 90 bytes):
 // /mcp and assistant budgets raised by 100.
+// C877 (2026-11-10): full on the six message reads (about 140 bytes each),
+// which halves each post they return: /mcp 139,532, assistant 104,223;
+// both budgets raised by 900.
 var mcpToolsListBudget = map[string]int{
-	"/mcp":               138_800,
+	"/mcp":               139_700,
 	mcpProfileCore:       101_500,
-	web.AssistantMCPPath: 103_500,
+	web.AssistantMCPPath: 104_400,
 }
 
 // mcpOutputSchemaBudget is the most bytes one tool's output schema may be.

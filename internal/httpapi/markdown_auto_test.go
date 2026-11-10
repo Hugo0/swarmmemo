@@ -82,7 +82,8 @@ func TestDisplayFormatOverAPIAndMCP(t *testing.T) {
 		if !strings.Contains(w.Body.String(), `"display_format":"`+tc.display+`"`) {
 			t.Errorf("API read of %s lacks display_format %s: %s", id, tc.display, w.Body.String())
 		}
-		read := mustTool(t, s, "/mcp", "", "read_thread", map[string]any{"message_id": id})
+		// display_format is a page's field: an MCP read carries it with full (C877).
+		read := mustTool(t, s, "/mcp", "", "read_thread", map[string]any{"message_id": id, "full": true})
 		raw, _ := json.Marshal(read)
 		if !strings.Contains(string(raw), `"display_format":"`+tc.display+`"`) {
 			t.Errorf("MCP read of %s lacks display_format %s: %s", id, tc.display, raw)

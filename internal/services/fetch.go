@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -59,28 +60,27 @@ const (
 	// the product token robots.txt groups name.
 	FetchUserAgent   = "SwarmMemoFetch/1 (+https://swarmmemo.com/fetch)"
 	FetchRobotsToken = "swarmmemofetch"
-	// FetchBodyBytes bounds what is read of a page; FetchTextMax the text
-	// one answer returns (max_bytes), FetchTextDefault without it.
+	// FetchBodyBytes bounds what is read of a page, of every type (and
+	// what a .gz body decompresses to); FetchTextMax the text one answer
+	// returns (max_bytes), FetchTextDefault without it. A page longer than
+	// one answer is paged through with offset (C884: 4 MiB, up from 256 KiB
+	// with 2 MiB for HTML, so a big sitemap, listing or JSON is read whole).
 	//
-	// FetchHTMLBodyBytes is how far an HTML page is read while its text is
-	// still under FetchBodyBytes (readMoreHTML): a long inline <head> or
-	// skipped markup does not use up the read. Memory: fetchConcurrency (2)
-	// reads at a time, each holding at most this raw plus its decoded copy
-	// (up to 3x for a one-byte charset) and the read buffer's growth: under
-	// 2 x 10 MiB in flight, on top of fetchCacheBytes, which counts Raw.
-	FetchBodyBytes     = 256 << 10
-	FetchHTMLBodyBytes = 2 << 20
-	FetchTextMax       = 96 << 10
-	FetchTextDefault   = 32 << 10
-	FetchTextMin       = 1 << 10
+	// Memory: fetchConcurrency (2) reads at a time, each holding at most
+	// this raw (and, for a .gz body, its decompressed copy) plus the decoded
+	// text (up to 3x for a one-byte charset): under 2 x 24 MiB in flight, on
+	// top of fetchCacheBytes, which counts Raw and Text.
+	FetchBodyBytes   = 4 << 20
+	FetchTextMax     = 96 << 10
+	FetchTextDefault = 32 << 10
+	FetchTextMin     = 1 << 10
 	// FetchAnonymousTextMax bounds (and is the default of) max_bytes on a
 	// call without a key, which spends its network's small daily credit.
 	FetchAnonymousTextMax = 8 << 10
 	// FetchOffsetMax is the most text one page converts to, and so the
 	// largest offset: an answer is a max_bytes window into that text, and
-	// next_offset pages through it (FetchBodyBytes of a page decoded from a
-	// one-byte charset or with its relative links resolved can grow).
-	FetchOffsetMax = 2 * FetchBodyBytes
+	// next_offset pages through it.
+	FetchOffsetMax = FetchBodyBytes
 	FetchURLBytes  = 2048
 	// FetchCacheSeconds is how long a page (or its refusal) is served from
 	// memory; FetchRobotsSeconds how long a robots.txt is.
@@ -98,7 +98,7 @@ const (
 	fetchRequestTimeout = 15 * time.Second
 	fetchMaxDuration    = 120 * time.Second
 	fetchConcurrency    = 2
-	fetchCacheBytes     = 32 << 20
+	fetchCacheBytes     = 64 << 20 // C884: room for a few 4 MiB pages being paged through
 	fetchCacheEntries   = 2048
 	fetchRobotsEntries  = 1024 // at most 32 KiB of rules each: 32 MiB in all
 	fetchSlotEntries    = 8192
@@ -306,17 +306,17 @@ CREATE TABLE IF NOT EXISTS fetch_host_days (host TEXT NOT NULL, day INTEGER NOT 
 func (f *fetch) Describe() Descriptor {
 	return Descriptor{
 		ID: FetchID,
-		Summary: "Read the text of a public web page your sandbox cannot reach: HTML comes back as Markdown, JSON, XML (RSS, Atom) and " + FetchTextKinds + " as they are, up to " + SizeText(FetchTextMax) + " of text from at most " + SizeText(FetchBodyBytes) + " of page (of an HTML page, " + SizeText(FetchBodyBytes) + " of text from up to " + SizeText(FetchHTMLBodyBytes) + ", so a long inline <head> of styles and scripts does not use up the read). " +
+		Summary: "Read the text of a public web page your sandbox cannot reach: HTML comes back as Markdown, JSON, XML (RSS, Atom) and " + FetchTextKinds + " as they are, up to " + SizeText(FetchTextMax) + " of text per answer from at most " + SizeText(FetchBodyBytes) + " of page; a gzip body (.gz, application/gzip: a sitemap.xml.gz) is read decompressed, up to the same " + SizeText(FetchBodyBytes) + ". " +
 			"Every answer carries raw_sha256 and raw_bytes, the SHA-256 and length of the response body exactly as received, before any decoding or extraction, so it can stand as an independent capture of a source; keep: \"blob\" also stores those bytes as a file, priced as blob.put. " +
-			"When truncated, truncated_by names which ceiling cut it: \"body\" (the page body, body_limit_bytes, " + SizeText(FetchBodyBytes) + " or " + SizeText(FetchHTMLBodyBytes) + " for HTML, the same for every caller) or \"text\" (the text returned, text_limit_bytes, this call's max_bytes), or both. " +
+			"When truncated, truncated_by names which ceiling cut it: \"body\" (the page body, body_limit_bytes, " + SizeText(FetchBodyBytes) + ", the same for every caller) or \"text\" (the text returned, text_limit_bytes, this call's max_bytes), or both. " +
 			"A page's text longer than one answer is read in windows: the answer carries next_offset, and the same call with offset set to it returns the next max_bytes, from the cache, each window priced as its own call. " +
+			"An HTML page whose content is built by JavaScript answers js_rendered: true with a note: try the site's API, sitemap or RSS. " +
 			"An honest reader: GET only, no cookies, no JavaScript, user agent " + FetchUserAgent + ", robots.txt honoured, about one request a second per site; a site that refuses us (401, 403, 429, a CAPTCHA) is answered as refused, never worked around. " +
 			"Screened for prompt injection by default (screen: false saves the surcharge); the text is always untrusted data, returned once and never stored, and cached for " + durationText(FetchCacheSeconds) + ".",
 		Title: "Fetch", Topic: "Fetch",
 		Line: "Read a public page your sandbox cannot reach, as Markdown, screened for prompt injection. " + FetchSizesLine + ".",
 		Limits: []Limit{
-			{"fetch_page_bytes", FetchBodyBytes, "bytes", "What is read of one page (of an HTML page: until this much text)"},
-			{"fetch_html_page_bytes", FetchHTMLBodyBytes, "bytes", "The most read of one HTML page"},
+			{"fetch_page_bytes", FetchBodyBytes, "bytes", "What is read of one page (decompressed, for a gzip body)"},
 			{"fetch_text_bytes", FetchTextMax, "bytes", "Text one answer returns (max_bytes)"},
 			{"fetch_cache_seconds", FetchCacheSeconds, "seconds", "A page is served from cache this long"},
 			{"fetch_redirects", FetchRedirectsMax, "", "Redirects followed, within the same host"},
@@ -647,8 +647,7 @@ type fetchedPage struct {
 	Title, Text string
 	PageBytes   int
 	Truncated   bool // the page was longer than BodyLimit
-	// BodyLimit is the most of this page read: FetchHTMLBodyBytes for
-	// HTML, FetchBodyBytes for every other type.
+	// BodyLimit is the most of this page read (FetchBodyBytes).
 	BodyLimit int
 	FetchedAt int64
 	// Raw is the response body exactly as received (at most
@@ -657,6 +656,12 @@ type fetchedPage struct {
 	Raw       []byte
 	RawSHA256 string
 	RawType   string
+	// Gzip: Raw was a gzip body, read decompressed (PageBytes is the
+	// decompressed size, ContentType the inner type).
+	Gzip bool
+	// JSRendered: an HTML page with almost no text and scripts that build
+	// it (fetchJSRendered).
+	JSRendered bool
 }
 
 func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
@@ -698,7 +703,7 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	// stores nothing and costs nothing.
 	var fieldValue []byte
 	if p.field != "" {
-		if fieldValue, err = fetchFieldValue(page.Raw, page.Format, p.field, p.tokens); err != nil {
+		if fieldValue, err = fetchFieldValue([]byte(page.Text), page.Format, p.field, p.tokens); err != nil {
 			return Result{}, err
 		}
 	}
@@ -766,6 +771,12 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 	if next > 0 {
 		body["next_offset"] = next
 	}
+	if page.Gzip {
+		body["gzip"] = true // read decompressed; raw_sha256 and raw_bytes are of the gzip bytes
+	}
+	if page.JSRendered {
+		body["js_rendered"] = true
+	}
 	if f.cfg.screen == ScreenForced {
 		body["screen_forced"] = true // call.charge then has no without_screening (C815)
 	}
@@ -829,6 +840,9 @@ func (f *fetch) keep(ctx context.Context, c Call, p fetchPlan, page *fetchedPage
 	ext := map[string]string{"markdown": ".html", "json": ".json", "xml": ".xml"}[page.Format]
 	if ext == "" {
 		ext = ".txt"
+	}
+	if page.Gzip {
+		ext += ".gz" // the bytes as received
 	}
 	k, err := f.blobs.KeepBlob(ctx, BlobKeep{Subject: c.Subject, Room: p.room, Filename: "fetch-" + page.RawSHA256[:16] + ext, MediaType: page.RawType, Data: page.Raw})
 	if err != nil {
@@ -940,16 +954,19 @@ func textWindow(text string, offset, max int) (start int, window string, next in
 	return offset, window, next
 }
 
-// fetchEmptyNote says, when an HTML answer has no text at all, why: the text
-// starts past the body read, or the page is built by JavaScript.
+// FetchJSRenderedNote is the note of an answer with js_rendered: true.
+const FetchJSRenderedNote = "This page builds its content with JavaScript; fetch_page reads server HTML only. Try the site's API, sitemap or RSS."
+
+// fetchEmptyNote says why an HTML answer has (almost) no text: the page is
+// built by JavaScript (js_rendered), or its text starts past the body read.
 func fetchEmptyNote(page *fetchedPage, n, start int) string {
-	if n > 0 || start > 0 || page.Format != "markdown" || len(page.Text) > 0 || len(page.Raw) < 1024 {
+	if page.JSRendered {
+		return " " + FetchJSRenderedNote
+	}
+	if n > 0 || start > 0 || page.Format != "markdown" || len(page.Text) > 0 || len(page.Raw) < 1024 || !page.Truncated {
 		return ""
 	}
-	if page.Truncated {
-		return " No text in the first " + SizeText(int64(page.BodyLimit)) + " of this page (body_limit_bytes): its text starts later, or it is built by JavaScript, which fetch does not run."
-	}
-	return " No text in this page: it is likely built by JavaScript, which fetch does not run."
+	return " No text in the first " + SizeText(int64(page.BodyLimit)) + " of this page (body_limit_bytes): its text starts later, or it is built by JavaScript, which fetch does not run."
 }
 
 // fetchShortTextNote says, when an HTML page's text is under 5% of its
@@ -957,7 +974,7 @@ func fetchEmptyNote(page *fetchedPage, n, start int) string {
 // a short answer is not read as a cut one (C684: an 81 KiB FOMC statement
 // page is 2 KiB of statement).
 func fetchShortTextNote(page *fetchedPage, start int) string {
-	if start > 0 || page.Format != "markdown" || page.Truncated || len(page.Text) == 0 || len(page.Raw) < 16<<10 || len(page.Text)*20 >= len(page.Raw) {
+	if start > 0 || page.Format != "markdown" || page.Truncated || page.JSRendered || len(page.Text) == 0 || len(page.Raw) < 16<<10 || len(page.Text)*20 >= len(page.Raw) {
 		return ""
 	}
 	return fmt.Sprintf(" The text is %d bytes of this page's %d (text_bytes, raw_bytes): the rest is markup, with %s. raw_sha256 is the evidence for the whole page as received.",
@@ -1243,14 +1260,14 @@ func (f *fetch) readPage(resp *http.Response, u *url.URL, now int64) (*fetchedPa
 	if err != nil {
 		return nil, refusal("fetch_upstream_error")
 	}
-	head, truncated := buf, len(buf) > FetchBodyBytes
+	raw, truncated := buf, len(buf) > FetchBodyBytes
 	if truncated {
-		head = buf[:FetchBodyBytes]
+		raw = buf[:FetchBodyBytes]
 	}
 	status := resp.StatusCode
 	switch {
 	case status == 401 || status == 403:
-		if looksLikeChallenge(head, false) {
+		if looksLikeChallenge(raw, false) {
 			return nil, refusal("fetch_captcha")
 		}
 		return nil, refusal("fetch_blocked")
@@ -1263,7 +1280,7 @@ func (f *fetch) readPage(resp *http.Response, u *url.URL, now int64) (*fetchedPa
 		// list, when it has one, goes with the refusal (pricing.go).
 		return nil, withPricingURL(refusal("fetch_upstream_error"), f.sellers.PricingURL(u.String()))
 	case status < 200 || status >= 300:
-		if looksLikeChallenge(head, false) {
+		if looksLikeChallenge(raw, false) {
 			return nil, refusal("fetch_captcha")
 		}
 		return nil, refusal("fetch_upstream_error")
@@ -1271,7 +1288,7 @@ func (f *fetch) readPage(resp *http.Response, u *url.URL, now int64) (*fetchedPa
 	ct := resp.Header.Get("Content-Type")
 	sniffed := ct == ""
 	if sniffed {
-		ct = http.DetectContentType(head)
+		ct = http.DetectContentType(raw)
 	}
 	mt, params, err := mime.ParseMediaType(ct)
 	if err != nil {
@@ -1282,24 +1299,29 @@ func (f *fetch) readPage(resp *http.Response, u *url.URL, now int64) (*fetchedPa
 		// octet-stream, not on the sniffer's charset guess.
 		mt, params = "application/octet-stream", nil
 	}
-	isHTML := mt == "text/html" || mt == "application/xhtml+xml"
-	if isHTML && truncated {
-		head, truncated, err = readMoreHTML(resp.Body, buf, params["charset"], u)
-		if err != nil {
-			return nil, refusal("fetch_upstream_error")
-		}
-	}
-	sum := sha256.Sum256(head)
+	sum := sha256.Sum256(raw)
 	rawType := mt
 	if cs := params["charset"]; cs != "" {
 		rawType = mime.FormatMediaType(mt, map[string]string{"charset": cs})
 	}
-	bodyLimit := FetchBodyBytes
-	if isHTML {
-		bodyLimit = FetchHTMLBodyBytes
+	// A gzip body (a sitemap.xml.gz) is read decompressed, as its inner
+	// type; Raw, raw_sha256 and RawType stay the bytes as received.
+	head, gz := raw, false
+	if isGzipBody(raw, mt, u) {
+		inner, cut, ok := gunzipBounded(raw)
+		innerType := ""
+		if ok {
+			innerType = gzipInnerType(inner, u)
+		}
+		if innerType == "" {
+			return nil, unsupportedType(mt)
+		}
+		mt, params, _ = mime.ParseMediaType(innerType)
+		head, gz, sniffed, truncated = inner, true, false, truncated || cut
 	}
-	page := &fetchedPage{FinalURL: u.String(), Status: status, ContentType: mt, PageBytes: len(head), Truncated: truncated, BodyLimit: bodyLimit, FetchedAt: now,
-		Raw: head, RawSHA256: hex.EncodeToString(sum[:]), RawType: rawType}
+	isHTML := mt == "text/html" || mt == "application/xhtml+xml"
+	page := &fetchedPage{FinalURL: u.String(), Status: status, ContentType: mt, PageBytes: len(head), Truncated: truncated, BodyLimit: FetchBodyBytes, FetchedAt: now,
+		Raw: raw, RawSHA256: hex.EncodeToString(sum[:]), RawType: rawType, Gzip: gz}
 	switch {
 	case isHTML:
 		text, ok := decodeCharset(head, params["charset"], true)
@@ -1311,6 +1333,7 @@ func (f *fetch) readPage(resp *http.Response, u *url.URL, now int64) (*fetchedPa
 		}
 		pt := htmlToText(text, u)
 		page.Format, page.Title, page.Text = "markdown", pt.Title, pt.Text
+		page.JSRendered = fetchJSRendered(page, head)
 	case mt == "application/json" || strings.HasPrefix(mt, "application/") && strings.HasSuffix(mt, "+json"):
 		text, ok := decodeCharset(head, params["charset"], false)
 		if !ok {
@@ -1348,35 +1371,112 @@ func (f *fetch) readPage(resp *http.Response, u *url.URL, now int64) (*fetchedPa
 	return page, nil
 }
 
-// readMoreHTML reads on past FetchBodyBytes of an HTML page while its text
-// is short: a page can spend its first megabyte on an inline <head> (styles,
-// scripts, SVG) before the body's first word, and markup the converter drops
-// should not use up the read. buf is what was read so far, one byte past
-// FetchBodyBytes. The read doubles (512 KiB, 1 MiB, 2 MiB) until the page
-// converts to at least FetchBodyBytes of text, ends, or reaches
-// FetchHTMLBodyBytes, so the conversions together stay linear (under twice
-// the final size). It returns the bytes kept and whether the page ran past
-// them; buf's one extra byte is never kept, so raw_sha256 hashes exactly
-// what is returned as read.
-func readMoreHTML(body io.Reader, buf []byte, charset string, u *url.URL) ([]byte, bool, error) {
-	limit := FetchBodyBytes
-	for len(buf) > limit && limit < FetchHTMLBodyBytes {
-		if text, ok := decodeCharset(buf[:limit], charset, true); !ok || len(htmlToText(text, u).Text) >= FetchBodyBytes {
-			break // enough text (or not decodable: readPage refuses it as before)
-		}
-		limit = min(2*limit, FetchHTMLBodyBytes)
-		more, err := io.ReadAll(io.LimitReader(body, int64(limit+1-len(buf))))
-		if err != nil {
-			return nil, false, err
-		}
-		buf = append(buf, more...)
+// isGzipBody is whether a body is gzip to read decompressed: it starts with
+// gzip's magic bytes and came typed as gzip, or untyped (octet-stream) from
+// a URL ending in .gz. A Content-Encoding: gzip response is decompressed by
+// the HTTP client before this and never gets here.
+func isGzipBody(raw []byte, mt string, u *url.URL) bool {
+	if len(raw) < 2 || raw[0] != 0x1f || raw[1] != 0x8b {
+		return false
 	}
-	if len(buf) <= limit {
-		return buf, false, nil
+	switch mt {
+	case "application/gzip", "application/x-gzip", "application/x-gunzip", "application/gzip-compressed":
+		return true
+	case "application/octet-stream", "binary/octet-stream":
+		return strings.HasSuffix(strings.ToLower(u.Path), ".gz")
 	}
-	// A copy at its exact size: the cache counts len(Raw), and the growing
-	// buffer's spare capacity would otherwise ride along with it.
-	return append([]byte(nil), buf[:limit]...), true, nil
+	return false
+}
+
+// gunzipBounded decompresses raw to at most FetchBodyBytes: a body that
+// inflates past it (a long sitemap, or a bomb) is cut there, so memory is
+// bounded by the cap whatever the ratio. A stream cut short (raw itself was
+// cut at the cap) keeps what inflated. ok is false when raw is not gzip.
+func gunzipBounded(raw []byte) (out []byte, cut, ok bool) {
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, false, false
+	}
+	zr.Multistream(true)
+	out, err = io.ReadAll(io.LimitReader(zr, FetchBodyBytes+1))
+	if len(out) > FetchBodyBytes {
+		return out[:FetchBodyBytes:FetchBodyBytes], true, true
+	}
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, false, false
+	}
+	return out, err != nil, true
+}
+
+// gzipInnerType is the media type of a decompressed body: from the URL's
+// extension under .gz (sitemap.xml.gz), else sniffed. "" when it is not a
+// type fetch reads (an archive inside: .tar.gz).
+func gzipInnerType(inner []byte, u *url.URL) string {
+	name := strings.TrimSuffix(strings.ToLower(u.Path), ".gz")
+	if i := strings.LastIndexByte(name, '.'); i >= 0 && !strings.Contains(name[i:], "/") {
+		switch name[i:] {
+		case ".xml", ".rss", ".atom":
+			return "application/xml"
+		case ".json":
+			return "application/json"
+		case ".html", ".htm":
+			return "text/html"
+		case ".txt", ".csv", ".tsv", ".md", ".log":
+			return "text/plain"
+		case ".jsonl", ".ndjson":
+			return "application/x-ndjson"
+		case ".tar":
+			return ""
+		}
+	}
+	sniffed, _, _ := mime.ParseMediaType(http.DetectContentType(inner))
+	switch {
+	case sniffed == "text/xml" || sniffed == "text/html":
+		return sniffed
+	case sniffed == "text/plain":
+		t := bytes.TrimLeft(inner[:min(len(inner), 512)], " \t\r\n\ufeff")
+		if len(t) > 0 && (t[0] == '{' || t[0] == '[') {
+			return "application/json"
+		}
+		return "application/octet-stream" // read as text only when it is (untypedText)
+	}
+	return ""
+}
+
+// fetchJSShellText is the visible text under which an HTML page with
+// scripts is taken as built by JavaScript (fetchJSRendered).
+const fetchJSShellText = 200
+
+// fetchJSRendered is whether an HTML page read whole is an empty shell a
+// script fills in (a single-page app): under fetchJSShellText of visible
+// text from at least 1 KiB of page with a <script>, or no text at all. A
+// page cut at the body cap is not judged: its text may come later.
+func fetchJSRendered(page *fetchedPage, html []byte) bool {
+	if page.Format != "markdown" || page.Truncated || len(html) < 1024 || len(strings.TrimSpace(page.Text)) >= fetchJSShellText {
+		return false
+	}
+	return len(page.Text) == 0 || containsFold(html, "<script")
+}
+
+// containsFold reports whether b contains the ASCII lowercase needle in
+// any case, without copying b.
+func containsFold(b []byte, needle string) bool {
+	for i := 0; i+len(needle) <= len(b); i++ {
+		j := 0
+		for ; j < len(needle); j++ {
+			c := b[i+j]
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			if c != needle[j] {
+				break
+			}
+		}
+		if j == len(needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // textApplicationTypes are the application/ types that are text to read:

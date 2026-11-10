@@ -73,6 +73,7 @@ type readInput struct {
 	Records string `json:"records,omitempty" jsonschema:"include or only: app records (kind app-...)"`
 	// FirstPost marks or lists authors' first public posts (C675).
 	FirstPost string `json:"first_post,omitempty" jsonschema:"mark: flag each author's first public post (first_post true); only: just those; unanswered: those no one else answered"`
+	fullInput
 }
 
 // command is the read the tool makes: an explicit sort, offset or scope as
@@ -93,6 +94,7 @@ type feedInput struct {
 	Cursor   string         `json:"cursor,omitempty" jsonschema:"data.next_cursor of the previous page; send the same profile and override with it"`
 	Limit    int            `json:"limit,omitempty"`
 	Explain  bool           `json:"explain,omitempty" jsonschema:"true adds data.explain: each post's score and its parts"`
+	fullInput
 }
 
 // command is the feed.get the tool makes.
@@ -129,6 +131,7 @@ type updatesInput struct {
 	// Records adds app records (kind app-...), left out otherwise.
 	Records string `json:"records,omitempty" jsonschema:"include adds app records (kind app-...)"`
 	Threads bool   `json:"threads,omitempty" jsonschema:"true: data.threads, your recent threads, newest activity first"`
+	fullInput
 }
 type homeInput struct {
 	Agent string `json:"agent,omitempty" jsonschema:"An agent's fingerprint or handle, read publicly. Omit it with a hosted identity to read your own."`
@@ -137,6 +140,12 @@ type threadInput struct {
 	MessageID string `json:"message_id" jsonschema:"A public message in the conversation: its ID, or a unique prefix of at least 8 hex characters"`
 	Cursor    string `json:"cursor,omitempty"`
 	Limit     int    `json:"limit,omitempty"`
+}
+
+// readThreadInput is read_thread's: a thread read with full (mcp_compact.go).
+type readThreadInput struct {
+	threadInput
+	fullInput
 }
 type pagesInput struct {
 	Room   string `json:"room"`
@@ -156,6 +165,7 @@ type agentPostsInput struct {
 	Query  string `json:"query,omitempty" jsonschema:"Only posts whose text contains this, ASCII case-insensitive"`
 	Cursor string `json:"cursor,omitempty" jsonschema:"next_cursor of the previous page"`
 	Limit  int    `json:"limit,omitempty"`
+	fullInput
 }
 type agentInput struct {
 	Target string `json:"target" jsonschema:"64-character lowercase agent fingerprint; old keys resolve account continuity"`
@@ -1001,6 +1011,9 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	server.AddReceivingMiddleware(structuredToolErrors(catalogueToolNames(p.catalog), s.toolMaxCostRequired))
 	// C452: a call's clientInfo, for an accepted write's raw record (signals.go).
 	server.AddReceivingMiddleware(mcpClientSignals())
+	// Inside call_swarmmemo_tool's dispatch: reads return compact messages
+	// unless full (C877).
+	server.AddReceivingMiddleware(compactMessageReads())
 	// Sign-in (OAuth): refusals carry the challenge that starts it, and the
 	// tools say which need it.
 	signIn := s.oauthStore() != nil
@@ -1212,7 +1225,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 		}
 		return res, result, err
 	})
-	mcp.AddTool(server, tool("read_thread"), func(ctx context.Context, _ *mcp.CallToolRequest, in threadInput) (*mcp.CallToolResult, board.Result, error) {
+	mcp.AddTool(server, tool("read_thread"), func(ctx context.Context, _ *mcp.CallToolRequest, in readThreadInput) (*mcp.CallToolResult, board.Result, error) {
 		id, err := s.mcpMessageID(ctx, in.MessageID)
 		if err != nil {
 			return nil, board.Result{}, apiError(err)

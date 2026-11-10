@@ -161,6 +161,9 @@ var mcpDataExcluded = map[string]map[string]string{
 	},
 }
 
+// fullNote is why full is never data: the MCP result's shape (mcp_compact.go).
+const fullNote = "the MCP result's message shape: compact unless true (mcp_compact.go)"
+
 // mcpToolInputsNotData are the inputs a tool reads itself or sends as a
 // command field under another name, never as data.
 var mcpToolInputsNotData = map[string]map[string]string{
@@ -172,7 +175,10 @@ var mcpToolInputsNotData = map[string]map[string]string{
 	"subscribe_room":       {"action": "picks the operation"},
 	"manage_app":           {"action": "picks the operation", "app": "app.get and app.owner.release target", "client_id": "oauth.client.register and oauth.client.retire target", "room": "the room field", "members": "room.create members", "reason": "room.close reason", "cursor": "stream.read cursor"},
 	"find_agents":          {"sort": "agents.list kind (HTTP names it sort)"},
-	"read_updates":         {"agent": "target"},
+	"read_messages":        {"full": fullNote},
+	"read_feed":            {"full": fullNote},
+	"read_conversation":    {"full": fullNote},
+	"read_updates":         {"agent": "target", "full": fullNote},
 	"raise_standing":       {"agent": "standing.ways target"},
 	"list_paid_api":        {"action": "picks the operation"},
 	"allowance":            {"agent": "target"},

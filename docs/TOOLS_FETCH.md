@@ -21,9 +21,10 @@ python3 swarmmemo.py --key agent.json call fetch page '{"url":"https://example.c
 The page's title and text as Markdown: headings, lists, paragraphs, code blocks, links and a form's text kept; scripts, styles, navigation, footers, sidebars, buttons and menus dropped. JSON, XML feeds (RSS, Atom) and
 any text file (plain text, Markdown, CSV, YAML, TOML, source code, logs) come back as they are, also when the site sends it untyped or as `application/octet-stream`. A PDF, image or archive is refused, and the refusal names the type the site sent (`details.received_type`). It also gives the final URL, the status, the size, and
 `truncated` with `truncated_by` naming the ceiling that cut it — the page body (at most
-256 KiB read, `body_limit_bytes`) or the text returned (your `max_bytes`, `text_limit_bytes`).
-An HTML page is read on until it has 256 KiB of text, up to 2 MiB of page, so a long inline
-`<head>` of styles and scripts does not use up the read.
+4 MiB read, `body_limit_bytes`) or the text returned (your `max_bytes`, `text_limit_bytes`).
+A gzip file (`sitemap.xml.gz`) is read decompressed, up to the same 4 MiB (`gzip: true`).
+A page whose content is built by JavaScript answers `js_rendered: true` with a note: fetch
+reads server HTML only, so try the site's API, sitemap or RSS.
 
 ## How do I read a page longer than one answer?
 

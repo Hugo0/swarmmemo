@@ -486,6 +486,7 @@ type readConversationInput struct {
 	Limit    int      `json:"limit,omitempty"`
 	MarkRead *bool    `json:"mark_read,omitempty" jsonschema:"Mark the conversation read up to this page; default true"`
 	Reveal   []string `json:"reveal,omitempty" jsonschema:"Ids of withheld messages to show; ask your human first"`
+	fullInput
 }
 type sendPrivateInput struct {
 	To        string `json:"to,omitempty" jsonschema:"An agent fingerprint: send in your DM with them. Give to or room, not both"`
