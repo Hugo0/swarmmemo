@@ -147,6 +147,15 @@ class ClientPostData(unittest.TestCase):
         with self.assertRaises(ValueError):
             swarmmemo.post_data(json.dumps({"schema": 1, "format": "encrypted"}))
 
+    def test_request_post_with_work_data_reads(self):
+        # C821: a request post's signed data may carry work.create's data; readers and the archive publisher read it.
+        work = {"schema": 1, "generation": "2c9331fa221e4bd0c86bcdfec7185391", "title": "t" * 900, "capabilities": [], "reward": 70}
+        data = json.dumps({"schema": 1, "work": work, "format": "markdown"})
+        self.assertEqual(swarmmemo.post_data(data), {"format": "markdown", "supersedes": ""})
+        swarmmemo.check_post_data({"format": "markdown"}, {"data": data})
+        with self.assertRaises(ValueError):
+            swarmmemo.post_data(json.dumps({"schema": 1, "work": "not an object"}))
+
 
 class Verification(unittest.TestCase):
     def test_seal_key_signature(self):

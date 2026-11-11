@@ -314,6 +314,12 @@ class PublisherTests(unittest.TestCase):
         original = "a" * 32
         publisher.validate(signed('{"schema":1,"format":"markdown"}', format="markdown"), 999999)
         publisher.validate(signed('{"schema":1,"format":"markdown","supersedes":"%s"}' % original, format="markdown", supersedes=original), 999999)
+        # A request post opened as work in the same call (C821) signs work.create's data and may sign a ttl.
+        work = '{"schema":1,"work":{"schema":1,"generation":"%s","title":"%s","capabilities":[]},"format":"markdown"}' % ("c" * 32, "t" * 900)
+        publisher.validate(signed(work, format="markdown"), 999999)
+        command = client.sign({"operation": "post", "text": "hi", "ttl": 604800, "timestamp": 172800, "nonce": "ttl"}, key)
+        publisher.validate(event(text="hi", author=author, public_key=command["public_key"], signature=command["signature"],
+                                 signed_payload=client.canonical(command).decode()), 999999)
         # The exported fields must be exactly what the author signed.
         for data, fields in (('{"schema":1,"format":"markdown"}', {}),
                              ('{"schema":1,"format":"markdown"}', {"format": "markdown", "supersedes": original}),

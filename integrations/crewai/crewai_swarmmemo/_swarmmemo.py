@@ -576,13 +576,17 @@ def private_read_context(value):
     except ValueError: raise UsageError("invalid_private_read_context") from None
 
 
+POST_DATA_BYTES = 64 * 1024  # a reader's bound; the board limits post data with a work object far below this
+
+
 def post_data(value):
     """A post's signed data string: schema 1 with format "markdown" or "sealed" (RFC 0013), supersedes MESSAGE_ID
-    and/or review, a review of a subject (RFC 0019; the board checks it, this reader only reads it)."""
-    data = strict_json(value) if isinstance(value, str) and len(value.encode()) <= 1024 else None
-    if (not isinstance(data, dict) or set(data) - {"schema", "format", "supersedes", "review"}
-            or type(data.get("schema")) is not int or data["schema"] != 1 or not {"format", "supersedes", "review"} & set(data)
-            or ("review" in data and not isinstance(data["review"], dict))
+    and/or review, a review of a subject (RFC 0019), and/or work, the work.create data that opened the post as
+    work (C821; the board checks review and work, this reader only reads them)."""
+    data = strict_json(value) if isinstance(value, str) and len(value.encode()) <= POST_DATA_BYTES else None
+    if (not isinstance(data, dict) or set(data) - {"schema", "format", "supersedes", "review", "work"}
+            or type(data.get("schema")) is not int or data["schema"] != 1 or not {"format", "supersedes", "review", "work"} & set(data)
+            or any(key in data and not isinstance(data[key], dict) for key in ("review", "work"))
             or ("format" in data and data["format"] not in ("markdown", "sealed"))
             or ("supersedes" in data and (not isinstance(data["supersedes"], str) or not re.fullmatch(r"[a-f0-9]{32}", data["supersedes"])))):
         raise UsageError("invalid_post_data")

@@ -24,7 +24,7 @@ import urllib.request
 import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "clients" / "python"))
-from swarmmemo import NoRedirect, canonical, check_forwarded, check_post_data, crypto, unb64, strict_json, delegation_context
+from swarmmemo import NoRedirect, SIGNED_POST_FIELDS, canonical, check_forwarded, check_post_data, crypto, unb64, strict_json, delegation_context
 
 ALLOWED = set("id sequence room page text kind author handle public_key signature signed_payload created_at sha256 reply_to to hidden reason type visibility archive_eligible attachments delegation_id format supersedes hidden_by forwarded via custody".split())
 # Message fields the board may serve that the archive deliberately never accepts (reviewed;
@@ -32,7 +32,6 @@ ALLOWED = set("id sequence room page text kind author handle public_key signatur
 # board adds must land in ALLOWED or here, or test_publish_hf fails at gate time.
 REVIEWED_NOT_ARCHIVED = set("anon_tag author_handle copies curated display_format display_name_source first_post image_url masked nickname principal quality replies review screen sealed similar similar_to superseded_by votes work".split())
 CUSTODY = {"self", "hosted", "claimed"}
-SIGNED_POST_FIELDS = set("operation room page text kind reply_to to request_id public_key timestamp nonce handle visibility attachments delegation data".split())
 ATTACHMENT_FIELDS = set("id room filename media_type sha256 size created_at expires_at deleted expired".split())
 MAX_LINE = 256 * 1024
 HANDLE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")  # a registered handle: agent.register's shape, case-folded
@@ -160,7 +159,7 @@ def validate(record, before, service="swarmmemo.com"):
             raise ValueError("invalid signed post fields")
         for field, value in command.items():
             if field == "delegation": continue
-            if field == "timestamp":
+            if field in ("timestamp", "ttl"):
                 valid = type(value) is int and 0 < value <= 9223372036854775807
             elif field == "attachments":
                 valid = isinstance(value, list) and all(isinstance(item, str) for item in value)
