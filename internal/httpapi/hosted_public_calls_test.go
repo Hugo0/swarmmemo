@@ -9,6 +9,7 @@ package httpapi
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,6 +25,7 @@ import (
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/ledger"
 	"swarmmemo/internal/services"
+	"swarmmemo/internal/web"
 )
 
 // publicCallPage is the stub site's page: well over the 8 KiB a call
@@ -162,5 +165,57 @@ func TestPublicCallToolsDescribeSigning(t *testing.T) {
 	}
 	if isHostedSignedCall("x402_call") || isHostedSignedCall("notary_get") {
 		t.Error("only the public call tools sign")
+	}
+}
+
+// C885: the assistant profile never lists fetch_page (its listed tools are
+// what directories reviewed), and an assistant asked to read a page finds
+// it with search_swarmmemo_tools and calls it through call_swarmmemo_tool;
+// /mcp lists it in its default toolset.
+func TestAssistantReachesFetchPage(t *testing.T) {
+	s := hostedPublicCallServer(t, 1_000_000)
+	for _, path := range []string{web.AssistantMCPPath, web.AssistantMCPPath + "?toolsets=default", web.AssistantMCPPath + "?toolsets=all"} {
+		if _, listed := listTools(t, s, path)["fetch_page"]; listed {
+			t.Errorf("%s lists fetch_page", path)
+		}
+	}
+	if _, listed := listTools(t, s, "/mcp")["fetch_page"]; !listed {
+		t.Error("/mcp does not list fetch_page")
+	}
+	if names := listedNames(t, withToolsetsFlag(s, true), "/mcp"); !slices.Contains(names, "fetch_page") {
+		t.Errorf("/mcp's default list leaves out fetch_page: %v", names)
+	}
+	for _, path := range []string{web.AssistantMCPPath, web.AssistantMCPPath + "?toolsets=default"} {
+		found := mustTool(t, s, path, "", searchToolsName, map[string]any{"query": "fetch a web page"})
+		hits, _ := dig(found, "data", "hits").([]any)
+		if len(hits) == 0 {
+			t.Fatalf("%s: search finds nothing: %v", path, found)
+		}
+		first := hits[0].(map[string]any)
+		if first["name"] != "fetch_page" || first["listed"] != false || dig(first, "call", "name") != callToolName || first["toolset_url"] != nil {
+			t.Errorf("%s: first hit %v, want fetch_page through call_swarmmemo_tool", path, first)
+		}
+		got := mustTool(t, s, path, "", callToolName, map[string]any{"name": "fetch_page", "arguments": map[string]any{"url": "http://site.example/assistant"}})
+		if text, _ := dig(got, "data", "result", "text").(string); dig(got, "data", "call", "state") != "done" || !strings.Contains(text, "A line of page text.") {
+			t.Fatalf("%s: call_swarmmemo_tool fetch_page: %v", path, got)
+		}
+	}
+	// A filtered list's call tool offers it by name.
+	var listed struct {
+		Result struct {
+			Tools []map[string]any `json:"tools"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(toolsList(t, s, web.AssistantMCPPath+"?toolsets=default"), &listed)
+	for _, tool := range listed.Result.Tools {
+		if tool["name"] == callToolName {
+			if enum, _ := dig(tool, "inputSchema", "properties", "name", "enum").([]any); !slices.Contains(enum, any("fetch_page")) {
+				t.Errorf("call_swarmmemo_tool's names leave out fetch_page: %v", enum)
+			}
+		}
+	}
+	// The instructions stay the reviewed profile's.
+	if strings.Contains(s.assistantInstructions(), "fetch_page") {
+		t.Error("assistant instructions name fetch_page")
 	}
 }

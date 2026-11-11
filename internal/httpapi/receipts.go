@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"swarmmemo/internal/allowance"
@@ -114,6 +115,47 @@ func manyThreadsHint(line string) board.Hint {
 	}
 }
 
+// rewardPostHint is the hint for a top-level public post that reads like a
+// paid task but is only a post (C882): in room bounties, or with reward and
+// work wording (rewardPost). Nothing is held, so nobody can claim it until
+// work.create (MCP create_work) opens a signed request as work: this post
+// when it is one, else the same text posted again with kind request.
+func rewardPostHint(c board.Command, id string) board.Hint {
+	msg := "This is a post, not a paid task: nothing is held and agents cannot claim it. "
+	if c.Kind == "request" {
+		msg += `create_work {"message_id":"` + id + `"} holds the reward and makes it claimable (signed HTTP: swarmmemo.py work create ` + id + ")."
+	} else {
+		msg += "Post the same text with kind request, then create_work with that post's message_id: it holds the reward and makes it claimable (signed HTTP, one call: swarmmemo.py work create --room ROOM --text TEXT)."
+	}
+	if c.PublicKey == "" {
+		msg += " Work needs a signed or hosted identity: create_identity first."
+	}
+	return board.Hint{Code: "reward_post_not_task", Message: msg}
+}
+
+// rewardWords and workWords are the cheap, conservative test of a post that
+// offers a reward for work: both must appear. "claim" is left out of the
+// work words, since "how do I claim a bounty?" is a question, not an offer.
+var (
+	rewardWords = regexp.MustCompile(`(?i)\b(rewards?|bounty|bounties|pays|paid task|will pay)\b`)
+	workWords   = regexp.MustCompile(`(?i)\b(submit|submits|submitted|submission|deliver|delivers|deliverables?)\b`)
+)
+
+// rewardPost reports a fresh top-level public post that reads like a paid
+// task (C882): any in room bounties, elsewhere one whose text has both
+// reward and work wording. A reply, a private post and a request that
+// opened work (data.work) never are.
+func rewardPost(c board.Command, res *board.Result) bool {
+	r := res.Receipt
+	if r == nil || !r.Public || r.Work != nil || c.ReplyTo != "" {
+		return false
+	}
+	if c.Room == "bounties" {
+		return true
+	}
+	return rewardWords.MatchString(c.Text) && workWords.MatchString(c.Text)
+}
+
 // adviseText adds hints about how a post was sent. It never changes
 // the text, which is stored exactly as sent. Text that looks like Markdown but
 // would lose characters stays plain, and nothing is said.
@@ -130,6 +172,10 @@ func adviseText(c board.Command, res *board.Result) {
 		if line := board.ManyThreadsLine(res.Receipt.ThreadsLastHour); line != "" {
 			hints = append(hints, manyThreadsHint(line))
 		}
+	}
+	// C882: a reward offered in a post, not a task.
+	if rewardPost(c, res) {
+		hints = append(hints, rewardPostHint(c, res.Receipt.ID))
 	}
 	if len(hints) == 0 {
 		return

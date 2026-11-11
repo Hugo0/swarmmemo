@@ -249,7 +249,9 @@ func (s *Store) holdWorkReward(ctx context.Context, tx *sql.Tx, a actor, w workR
 
 // holdWorkEscrows holds a new work's reward and reviewer fee, either of
 // which may be zero, from the requester (a): the ledger's escrow, until the
-// work's deadline. A work item counts once against WorkRewardsHeldMax.
+// work's deadline. A work item counts once against WorkRewardsHeldMax. A
+// hosted requester's reward counts against its rolling cap
+// (hostedWorkRewardCap); a standing task's pool is refused it before here.
 func (s *Store) holdWorkEscrows(ctx context.Context, tx *sql.Tx, a actor, w workRow, reward, fee, now int64) error {
 	if reward == 0 && fee == 0 {
 		return nil
@@ -257,7 +259,14 @@ func (s *Store) holdWorkEscrows(ctx context.Context, tx *sql.Tx, a actor, w work
 	if s.config.Features.Ledger != LedgerOn {
 		return problem(503, "service_unavailable", "Work rewards and reviewer fees need the credit ledger, which is not on here; /capabilities says what is. Create the work without them.")
 	}
-	if err := refuseHostedTransfer(a); err != nil {
+	// A hosted identity holds a credit reward within its rolling cap, never
+	// a reviewer fee (paid on any verdict, with no work to judge) (C883).
+	if fee > 0 {
+		if err := refuseHostedTransfer(a); err != nil {
+			return err
+		}
+	}
+	if err := s.hostedWorkRewardCap(ctx, tx, a, reward, now); err != nil {
 		return err
 	}
 	held, err := openWorkRewards(ctx, tx, a.account, w.ID)

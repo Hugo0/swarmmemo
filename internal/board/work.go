@@ -1676,6 +1676,13 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 				}
 				r.Reviewer, r.DecidedBy = identity.ID, a.id
 			}
+			// A hosted requester's reward is never paid to a worker linked
+			// to it (C883).
+			if r != nil && r.State == "held" {
+				if err = s.refuseHostedSelfDealing(ctx, tx, r.Requester, w.Worker, now); err != nil {
+					return Result{}, err
+				}
+			}
 			if err = s.payWorkRewardSplit(ctx, tx, r, &w, now); err == nil && verdict {
 				err = s.payWorkReward(ctx, tx, f, w.Reviewer, "", now)
 			}

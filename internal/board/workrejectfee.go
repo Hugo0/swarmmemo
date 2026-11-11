@@ -81,6 +81,10 @@ func (s *Store) holdWorkRejectFee(ctx context.Context, tx *sql.Tx, a actor, w wo
 	if fee == 0 {
 		return nil
 	}
+	// Paid on a reject, so a hosted identity cannot hold one (C883).
+	if err := refuseHostedTransfer(a); err != nil {
+		return err
+	}
 	if _, _, err := s.ledger.led.Escrow(ctx, tx, subject(a), allowance.Credit, fee, workRejectFeeKey+w.ID, w.Deadline, now); err != nil {
 		return fromAllowance(err)
 	}

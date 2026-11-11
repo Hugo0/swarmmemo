@@ -730,10 +730,19 @@ func exampleArgs(args []toolArg) map[string]any {
 
 // rank is the hits best first, at most limit: SwarmMemo's own tools whose
 // keywords the query names, then its own tools that match every word, then
-// the catalogue in its own order, then partial matches. A stable sort keeps
-// the catalogue's order among equals.
+// the catalogue in its own order, then partial matches; a hit that is not
+// callable (callable false: an unvetted paid API, a tool down here) after
+// every one that is (C885). A stable sort keeps the catalogue's order
+// among equals.
 func rankTools(hits []toolHit, limit int) []any {
+	callable := func(h toolHit) bool { c, _ := h.entry["callable"].(bool); return c }
 	slices.SortStableFunc(hits, func(a, b toolHit) int {
+		switch ca, cb := callable(a), callable(b); {
+		case ca && !cb:
+			return -1
+		case cb && !ca:
+			return 1
+		}
 		switch {
 		case a.score > b.score:
 			return -1

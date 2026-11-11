@@ -102,7 +102,7 @@ func TestHostedIdentityActsInItsSession(t *testing.T) {
 	created := mustSessionTool(t, s, "/mcp", one, "create_identity", map[string]any{"handle": "session-helper"})
 	data := created["data"].(map[string]any)
 	token, publicKey, agent := data["token"].(string), data["public_key"].(string), data["agent"].(string)
-	if data["session"] != "bound" || data["connect"] != sessionBoundNote || dig(data, "next_steps").([]any)[0].(map[string]any)["text"] != boundStep {
+	if data["session"] != "bound" || data["bound"] != true || data["reason"] != nil || data["connect"] != sessionBoundNote || dig(data, "next_steps").([]any)[0].(map[string]any)["text"] != boundStep {
 		t.Fatalf("create_identity in a session: %v", data)
 	}
 
@@ -192,6 +192,64 @@ func TestHostedIdentityActsInItsSession(t *testing.T) {
 		if strings.Contains(logs.String(), secret) {
 			t.Fatalf("a session secret reached the log:\n%s", logs.String())
 		}
+	}
+}
+
+// C878: create_identity on a connection that did not keep the MCP session
+// says first that the identity is not active there, with data.bound=false
+// and why, logs it without a secret, and hosted_auth_required on that
+// connection then points at the mcp_url.
+func TestCreateIdentityUnboundSaysSoFirst(t *testing.T) {
+	var lines []string
+	old := problemLogWrite
+	problemLogWrite = func(line string) { lines = append(lines, line) }
+	defer func() { problemLogWrite = old }()
+	commandProblems = problemLimiter{}
+	_, s := hostedServer(t)
+
+	// Before any identity: the base message leads with the state.
+	if _, failure := sessionTool(t, s, "/mcp", "", "whoami", map[string]any{}); !strings.HasPrefix(failure, "401 hosted_auth_required: This connection has no identity yet.") || !strings.Contains(failure, "mcp_url") || strings.Contains(failure, "You created") {
+		t.Fatalf("whoami before create_identity: %q", failure)
+	}
+	for name, sid := range map[string]string{"no_session_id": "", "session_not_minted": "default"} {
+		raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "create_identity", "arguments": map[string]any{}}})
+		out, _ := sessionPost(t, s, "/mcp", sid, string(raw))
+		content, _ := dig(out, "result", "content").([]any)
+		if len(content) != 3 || dig(content[0], "text") != unboundLead {
+			t.Fatalf("%s: first text: %v", name, content)
+		}
+		data, _ := dig(out, "result", "structuredContent", "data").(map[string]any)
+		if data["bound"] != false || data["reason"] != name || data["session"] != nil {
+			t.Fatalf("%s: data %v", name, data)
+		}
+		token := data["token"].(string)
+		var got string
+		for _, l := range lines {
+			if strings.Contains(l, "reason="+name) {
+				got = l
+			}
+			if strings.Contains(l, token) || sid != "" && strings.Contains(l, sid) {
+				t.Fatalf("a secret reached the log: %q", l)
+			}
+		}
+		want := "command_problem op=create_identity code=identity_unbound status=200 via=mcp actor=" + problemActor(data["agent"].(string)) + " reason=" + name
+		if got != want {
+			t.Fatalf("%s: log %q, want %q (all %v)", name, got, want, lines)
+		}
+	}
+	// Then hosted_auth_required on this connection says it made one.
+	if _, failure := sessionTool(t, s, "/mcp", "", "whoami", map[string]any{}); !strings.HasSuffix(failure, unboundCreatedNote[1:]) {
+		t.Fatalf("whoami after an unbound create_identity: %q", failure)
+	}
+	// Another network does not hear it.
+	r := httptest.NewRequest("POST", "https://swarmmemo.com/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"whoami","arguments":{}}}`))
+	r.RemoteAddr = "203.0.113.7:4000"
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if body := w.Body.String(); !strings.Contains(body, "hosted_auth_required") || strings.Contains(body, "You created") {
+		t.Fatalf("another network: %s", body)
 	}
 }
 

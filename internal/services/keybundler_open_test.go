@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1296,5 +1297,29 @@ func TestBundlerCallableVia(t *testing.T) {
 	}
 	if found != 2 {
 		t.Fatalf("unified tools search: %d hits with callable_via, want 2", found)
+	}
+}
+
+// C885: a hit that is not callable (an unvetted paid API) ranks after
+// every callable one, an own partial match included; among equals the
+// catalogue's order holds.
+func TestRankToolsCallableFirst(t *testing.T) {
+	hit := func(id string, callable bool, score float64) toolHit {
+		return toolHit{entry: map[string]any{"id": id, "callable": callable}, score: score}
+	}
+	got := rankTools([]toolHit{
+		hit("tool:similarweb", false, 0.99), hit("tool:weather", true, 0.98), hit("tool:ahrefs", false, 0.97),
+		hit("swarmmemo:notary.stamp", true, 0.5), hit("swarmmemo:fetch.page", true, 1.5),
+	}, 10)
+	var ids []string
+	for _, e := range got {
+		ids = append(ids, e.(map[string]any)["id"].(string))
+	}
+	want := []string{"swarmmemo:fetch.page", "tool:weather", "swarmmemo:notary.stamp", "tool:similarweb", "tool:ahrefs"}
+	if !slices.Equal(ids, want) {
+		t.Errorf("ranked %v, want %v", ids, want)
+	}
+	if got := rankTools([]toolHit{hit("tool:similarweb", false, 0.99), hit("tool:weather", true, 0.5)}, 1); got[0].(map[string]any)["id"] != "tool:weather" {
+		t.Errorf("a limit of one keeps %v, want the callable hit", got)
 	}
 }

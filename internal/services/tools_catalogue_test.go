@@ -128,11 +128,29 @@ func TestToolsSearchMixesBothKinds(t *testing.T) {
 			t.Errorf("the search names %q: %s", vendor, raw)
 		}
 	}
-	// Ranked: the paid APIs in their own order ahead of a partial match of
-	// SwarmMemo's own; a full match of SwarmMemo's own ahead of them all.
+	// Ranked: the callable paid APIs in their own order ahead of a partial
+	// match of SwarmMemo's own, and every hit that is not callable after
+	// all of them (C885); a full match of SwarmMemo's own ahead of them all.
 	list := toolEntries(page)
-	if list[0]["kind"] != "catalogue" || list[len(list)-1]["id"] != "swarmmemo:notary.stamp" {
-		t.Fatalf("ranking: first %v, last %v", list[0]["id"], list[len(list)-1]["id"])
+	if list[0]["kind"] != "catalogue" {
+		t.Fatalf("ranking: first %v", list[0]["id"])
+	}
+	notary, uncallable := -1, -1
+	for i, e := range list {
+		if e["id"] == "swarmmemo:notary.stamp" {
+			notary = i
+		}
+		if e["callable"] == false && uncallable < 0 {
+			uncallable = i
+		}
+	}
+	if notary < 0 || uncallable <= notary {
+		t.Fatalf("ranking: notary.stamp at %d, first uncallable at %d: %v", notary, uncallable, list)
+	}
+	for _, e := range list[uncallable:] {
+		if e["callable"] != false {
+			t.Fatalf("a callable hit %v ranks after an uncallable one", e["id"])
+		}
 	}
 	page, _ = h.toolsSearch(`{"query":"notary stamp"}`)
 	if first := toolEntries(page)[0]; first["id"] != "swarmmemo:notary.stamp" {

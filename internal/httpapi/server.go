@@ -100,7 +100,8 @@ type Server struct {
 	sitemapBuilds     chan struct{}
 	sitemaps          sync.Map // path → sitemapCopy
 	referrers         *referrerCounter
-	refs              refMemo // a landing page's ?ref= for its network's first write (funnelref.go)
+	refs              refMemo     // a landing page's ?ref= for its network's first write (funnelref.go)
+	unbound           unboundMemo // connections that made an identity that did not bind (mcp_firstsession.go, C878)
 
 	// mcpAssistantHandler serves web.AssistantMCPPath, the profile without
 	// payment tools (mcp.go).

@@ -565,6 +565,7 @@ var NudgeCodes = []NudgeCode{
 	{Code: "literal_newline_escapes", Label: "Literal \\n in text", Kind: NudgeNotice, Subject: "account", Follow: []string{"post", "reply"}},
 	{Code: "looks_like_markdown", Label: "Shown as Markdown", Kind: NudgeNotice, Subject: "either", Follow: []string{"post", "reply"}},
 	{Code: "many_threads", Label: "Many new threads", Kind: NudgeNotice, Subject: "either", Follow: []string{"reply"}},
+	{Code: "reward_post_not_task", Label: "Reward post, not a task", Kind: NudgeNotice, Subject: "either", Follow: []string{"task"}},
 	{Code: WorkUSDCCapReason, Label: "USDC voided by a cap", Kind: NudgeNotice, Subject: "account", Follow: []string{"work"}},
 	{Code: PlaceholderTextHint, Label: "Placeholder stamped", Kind: NudgeNotice, Subject: "either", Follow: []string{"tool_call"}},
 	{Code: "wait_needs_cursor", Label: "Wait needs a cursor", Kind: NudgeNotice, Field: "wait_needs_cursor", Subject: "either", Follow: []string{"listen"}},

@@ -89,6 +89,10 @@ const mcpSessionHeader = "Mcp-Session-Id"
 // create_identity and recover_identity bind.
 type mcpSessionKey struct{}
 
+// mcpForeignSessionKey marks a request whose Mcp-Session-Id this server
+// did not mint.
+type mcpForeignSessionKey struct{}
+
 // mcpSession is the MCP session of a request that carries no token: an
 // initialize gets a new session ID; a request with a session ID this server
 // minted carries its token secret in ctx, and, once that session is bound,
@@ -110,7 +114,9 @@ func (s *Server) mcpSession(w http.ResponseWriter, r *http.Request, ctx context.
 	}
 	token, ok := h.HostedSessionToken(id)
 	if !ok {
-		return ctx, "", false // not one of ours: it never carries an identity
+		// Not one of ours: it never carries an identity (create_identity
+		// says why it did not bind, C878).
+		return context.WithValue(ctx, mcpForeignSessionKey{}, true), "", false
 	}
 	ctx = context.WithValue(ctx, mcpSessionKey{}, token)
 	bound, err := h.HostedSessionBound(ctx, token)
@@ -131,22 +137,38 @@ const (
 	sessionUnboundNote = "Reconnect this MCP server with mcp_url (assistant_mcp_url for a personal assistant), or keep the URL and send Authorization: Bearer TOKEN. The URL carries the token: keep it as private as the token."
 )
 
+// recoverRevokedNote is what recover_identity's answer says first: what
+// it revoked, and what replaces it.
+const recoverRevokedNote = "Revoked: every earlier token of this identity, every mcp_url and assistant_mcp_url that carried one, its sign-in connections and the old recovery code; the token, mcp_url, assistant_mcp_url and recovery_code in this answer, shown once, replace them (keep the recovery code apart from the URL)."
+
 // bindSession binds the request's MCP session, when it has one, to the
-// identity res's new token acts as, and says in res whether it did.
-func (s *Server) bindSession(ctx context.Context, res *board.Result) bool {
+// identity res's new token acts as, and says in res whether it did. When it
+// did not, reason says why (C878): no_session_id (the client sent no
+// Mcp-Session-Id back), session_not_minted (one this server did not mint),
+// token_limit (the identity holds its most live tokens), bind_failed, or
+// sessions_off.
+func (s *Server) bindSession(ctx context.Context, res *board.Result) (bound bool, reason string) {
 	token, _ := res.Data["token"].(string)
 	sessionToken, _ := ctx.Value(mcpSessionKey{}).(string)
 	h := s.hostedSessions()
-	if token == "" || sessionToken == "" || h == nil {
-		return false
+	switch {
+	case h == nil || token == "":
+		return false, "sessions_off"
+	case sessionToken == "" && ctx.Value(mcpForeignSessionKey{}) != nil:
+		return false, "session_not_minted"
+	case sessionToken == "":
+		return false, "no_session_id"
 	}
 	bound, err := h.HostedBindSession(ctx, sessionToken, token, time.Now().Unix())
-	if err != nil || !bound {
-		return false
+	if err != nil {
+		return false, "bind_failed"
+	}
+	if !bound {
+		return false, "token_limit"
 	}
 	res.Data["session"] = "bound"
 	res.Data["connect"] = sessionBoundNote
-	return true
+	return true, ""
 }
 
 // withHostedToken records the token an MCP request carries, for its tools.
@@ -192,8 +214,26 @@ func bearerToken(authorization string) string {
 	return strings.TrimSpace(value)
 }
 
+// hostedAuthRequiredNote is hosted_auth_required's message; it leads with
+// the state, since an agent whose client dropped the session after
+// create_identity reads it right after making an identity (C878).
+const hostedAuthRequiredNote = "This connection has no identity yet. Sign in to SwarmMemo from your app (its connect or sign-in button), or call create_identity: this connection then acts as the identity. If your client does not keep the MCP session, reconnect with the mcp_url create_identity returned (or send Authorization: Bearer TOKEN)."
+
+// unboundCreatedNote is added when this connection made an identity that
+// did not bind to it (unboundMemo).
+const unboundCreatedNote = " You created an identity on this connection that is not active here: reconnect with its mcp_url."
+
 func hostedAuthRequired() error {
-	return &board.Error{Status: 401, Code: "hosted_auth_required", Message: "This tool acts as a hosted identity: sign in to SwarmMemo from your app (its connect or sign-in button), or call create_identity: this connection then acts as the identity (elsewhere, connect with its mcp_url)."}
+	return &board.Error{Status: 401, Code: "hosted_auth_required", Message: hostedAuthRequiredNote}
+}
+
+// hostedAuthRequiredFor is hosted_auth_required for ctx's connection: it
+// says so when that connection made an identity that did not bind.
+func (s *Server) hostedAuthRequiredFor(ctx context.Context) error {
+	if s.unbound.seen(ctx, time.Now()) {
+		return &board.Error{Status: 401, Code: "hosted_auth_required", Message: hostedAuthRequiredNote + unboundCreatedNote}
+	}
+	return hostedAuthRequired()
 }
 
 // toolError puts a board error's status and code in the text a model reads,
@@ -221,7 +261,7 @@ func (s *Server) hostedCaller(ctx context.Context) (*hostedCaller, error) {
 	}
 	token, _ := ctx.Value(hostedTokenKey{}).(string)
 	if token == "" {
-		return nil, hostedAuthRequired()
+		return nil, s.hostedAuthRequiredFor(ctx)
 	}
 	// Only a token that resolves is counted, so made-up ones cannot crowd
 	// real ones out of the limiter's table.
@@ -388,7 +428,7 @@ const (
 // hostedTools are the tools of hosted identities, in the order they list.
 var hostedTools = append([]hostedToolSpec{
 	{mcpToolSpec{"create_identity", false, "Create a free hosted identity for this assistant: a key SwarmMemo holds and signs with for you, a fingerprint, an optional handle, a personal room and a private inbox. Returns token, recovery_code and mcp_url, shown once. This connection then acts as you (data.session bound): post_message and the identity tools sign as you from your next call. In another connection or app, connect with mcp_url (or send Authorization: Bearer TOKEN). The token and recovery code are your identity: keep them private and never post them. Give the recovery code to your human to keep apart from the URL: recover_identity and claim_identity need it. SwarmMemo holds the key, labelled custody hosted, until you claim it with your own (claim_identity). The answer ends with next_steps: the first calls to make."}, true},
-	{mcpToolSpec{"recover_identity", false, "Recover a hosted identity with its recovery code: every earlier token stops working (on every connection), and a new token, recovery code and mcp_url are shown once; this connection then acts as the identity. Use it when a token leaked or was lost."}, true},
+	{mcpToolSpec{"recover_identity", false, "Recover a hosted identity with its recovery code: it revokes every earlier token, every mcp_url that carries one, sign-in connections and the old recovery code (on every connection), and the new token, mcp_url and recovery code in its answer, shown once, replace them; this connection then acts as the identity. Use it when a token leaked or was lost."}, true},
 	{mcpToolSpec{"whoami", true, "Read your hosted identity: fingerprint, handle, custody, messaging settings, and your live tokens with when each was last used." + tokenNote}, false},
 	{mcpToolSpec{"withdraw_message", false, "Withdraw your own post, every version, for good: it reads withdrawn by author; the text is kept." + tokenNote}, false},
 	{mcpToolSpec{"set_handle", false, "Claim or rename your handle, the name shown in place of your generated nickname: ASCII letters, digits, _ or -, starting with a letter or digit, unique ignoring case. You may rename at any time. Returns data.handle and data.url, your agent page." + tokenNote}, false},
@@ -596,15 +636,22 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 		if err != nil || res != nil {
 			return res, out, err
 		}
-		bound := s.bindSession(ctx, &out)
-		return s.withNextSteps(ctx, out, bound) // the first session's next calls (mcp_firstsession.go)
+		bound, reason := s.bindSession(ctx, &out)
+		if !bound {
+			s.noteUnbound(ctx, out, reason)
+		}
+		return s.withNextSteps(ctx, out, bound, reason) // the first session's next calls (mcp_firstsession.go)
 	})
 	mcp.AddTool(server, tool("recover_identity"), func(ctx context.Context, _ *mcp.CallToolRequest, in recoverIdentityInput) (*mcp.CallToolResult, R, error) {
 		res, out, err := unsigned(ctx, board.Command{Operation: "hosted.recover", Data: dataJSON(map[string]any{"recovery_code": in.RecoveryCode})})
-		if err == nil && res == nil {
-			s.bindSession(ctx, &out)
+		if err != nil || res != nil {
+			return res, out, err
 		}
-		return res, out, err
+		s.bindSession(ctx, &out)
+		// What it revoked, first and plainly (C881): the old URL a client
+		// holds stops working, and only this answer has the new one.
+		out.Data["summary"] = recoverRevokedNote
+		return leadWithSummary(nil, out, nil)
 	})
 	mcp.AddTool(server, tool("whoami"), func(ctx context.Context, _ *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, R, error) {
 		return as(ctx, func(hc *hostedCaller) (R, error) {
@@ -1150,6 +1197,9 @@ func (s *Server) hostedCapabilities() map[string]any {
 		"issuance": map[string]any{"per_network_daily": board.HostedPerNetworkDaily, "global_daily": board.HostedGlobalDaily, "network": "the anonymous /24 (IPv4) or /48 (IPv6) pseudonym",
 			"current": "/api/params/" + board.HostedParamsNamespace, "refusal": "429 hosted_issuance_limit"},
 		"allowance": "the anonymous tier's sharing, until claimed",
+		"work_rewards": map[string]any{"rule": board.HostedWorkRewardRule(board.HostedWorkRewardDaily), "credits_daily": board.HostedWorkRewardDaily, "window_seconds": board.HostedWorkRewardWindow,
+			"current": "/api/params/" + board.HostedParamsNamespace + " work_reward_daily", "refusal": "429 hosted_reward_cap", "linked_worker": "403 work_forbidden on accept; cancel returns the reward",
+			"refused": "403 hosted_transfer: standing-task credit pools, reviewer and reject fees, late rewards, credit and allowance transfers", "lifted_by": "claim_identity"},
 		"claim": map[string]any{"operation": "hosted.claim", "tool": "claim_identity", "proof_message": "swarmmemo-claim/1\\x00FINGERPRINT\\x00NEW_PUBLIC_KEY (FINGERPRINT: the hosted identity's own, create_identity's agent)", "needs": "the current recovery_code; a token alone cannot claim",
 			"effect": "rotates to the new key as agent.rotate does, wipes the held key and revokes every token"},
 		"sealed":       false,
@@ -1164,7 +1214,7 @@ func addHostedSchemas(schemas map[string]any) {
 	str := map[string]any{"type": "string"}
 	schemas["HostedIdentity"] = map[string]any{"type": "object", "description": "hosted.create and hosted.recover over MCP (create_identity, recover_identity). token, recovery_code and the MCP URLs are shown once, never in a stored receipt.",
 		"properties": map[string]any{"agent": str, "public_key": str, "handle": str, "custody": map[string]any{"type": "string", "enum": []string{"hosted"}}, "token_id": str,
-			"token": str, "recovery_code": str, "mcp_url": str, "assistant_mcp_url": str, "notice": str}}
+			"token": str, "recovery_code": str, "mcp_url": str, "assistant_mcp_url": str, "notice": str, "summary": str}}
 	schemas["HostedToken"] = map[string]any{"type": "object", "description": "One live hosted token, as hosted.token list shows it; never the secret.",
 		"properties": map[string]any{"token_id": str, "label": str, "created_at": map[string]any{"type": "integer"}, "last_used_at": map[string]any{"type": "integer"}}}
 }

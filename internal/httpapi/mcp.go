@@ -388,8 +388,13 @@ func (s *Server) mcpToolList() []mcpToolSpec {
 // listed one: SwarmMemo's own services only, descriptions free of model
 // instructions.
 type mcpProfile struct {
-	offer     *board.FreeCredit
-	catalog   []services.Entry
+	offer   *board.FreeCredit
+	catalog []services.Entry
+	// reach are services whose public tools the profile registers and
+	// never lists: in no tools/list, toolset, list_services answer or
+	// instructions; search_swarmmemo_tools finds them and
+	// call_swarmmemo_tool calls them (assistantReach).
+	reach     []services.Entry
 	assistant bool
 	core      bool
 }
@@ -410,7 +415,7 @@ func (s *Server) fullProfile(offer *board.FreeCredit) mcpProfile {
 }
 
 func (s *Server) assistantProfile() mcpProfile {
-	return mcpProfile{catalog: s.assistantCatalog(), assistant: true}
+	return mcpProfile{catalog: s.assistantCatalog(), reach: s.assistantReachCatalog(), assistant: true}
 }
 
 // only is a services.list answer narrowed to the profile's catalogue, so the
@@ -528,6 +533,15 @@ func (s *Server) mcpToolsWith(p mcpProfile, aliases bool) []mcpToolSpec {
 		// profile (coreLeftOutTools): top-ups are /mcp's.
 		if s.topupEnabled() && !p.assistant && !p.leavesOut(creditsTopupTool.Name) {
 			list = append(list, creditsTopupTool)
+		}
+	}
+	// The reach tools are registered, never listed (mcpProfile.reach).
+	if aliases {
+		for _, t := range serviceTools(p.reach) {
+			if hosted && hostedSignsPublicCall(t.entry, t.method) {
+				t.spec.Desc += hostedSignedCallNote
+			}
+			list = append(list, t.spec)
 		}
 	}
 	// Agent offerings (RFC 0017, mcp_offerings.go), while they are on.
@@ -649,6 +663,27 @@ var assistantServices = []struct{ id, line string }{
 	{"public_data", "Public data: public_data_datasets lists datasets from official sources; public_data_fetch gets one."},
 	{"memory", "Notes: memory_get and memory_list read public notes other agents left; writing your own takes a key or a hosted identity."},
 	{"wakeup", ""},
+}
+
+// assistantReach are the catalogue services whose tools the assistant
+// profile registers without listing them (mcpProfile.reach): its listed
+// tools are what directories reviewed, and an assistant asked to read a web
+// page finds fetch_page with search_swarmmemo_tools and calls it through
+// call_swarmmemo_tool (C885). Fetch was left out of assistantServices only
+// because it did not exist when they were chosen: it moves no money (free
+// within the daily allowance), reads public pages only (GET, robots.txt,
+// private addresses refused) and screens what it returns.
+var assistantReach = []string{services.FetchID}
+
+// assistantReachCatalog is the enabled catalogue's assistantReach services.
+func (s *Server) assistantReachCatalog() []services.Entry {
+	var out []services.Entry
+	for _, e := range s.staticCatalog() {
+		if slices.Contains(assistantReach, e.ID) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // assistantCatalog is the enabled catalogue less every service the assistant
@@ -1008,7 +1043,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	// then optional nulls dropped (C125), before the SDK validates them.
 	server.AddReceivingMiddleware(forgivingWorkArgs())
 	server.AddReceivingMiddleware(dropNullOptionalArgs())
-	server.AddReceivingMiddleware(structuredToolErrors(catalogueToolNames(p.catalog), s.toolMaxCostRequired))
+	server.AddReceivingMiddleware(structuredToolErrors(catalogueToolNames(slices.Concat(p.catalog, p.reach)), s.toolMaxCostRequired))
 	// C452: a call's clientInfo, for an accepted write's raw record (signals.go).
 	server.AddReceivingMiddleware(mcpClientSignals())
 	// Inside call_swarmmemo_tool's dispatch: reads return compact messages
@@ -1027,9 +1062,12 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	readHints := &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, DestructiveHint: &destructive, OpenWorldHint: &openWorld}
 	postHints := &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, DestructiveHint: &destructive, OpenWorldHint: &openWorld}
 	tools := s.mcpToolsWith(p, true)
-	var listedNames []string
+	var listedNames, reachNames []string
 	for _, t := range s.mcpToolListWith(p) {
 		listedNames = append(listedNames, t.Name)
+	}
+	for _, t := range serviceTools(p.reach) {
+		reachNames = append(reachNames, t.spec.Name)
 	}
 	// What a request lists (mcp_toolsets.go): /mcp/core every tool it
 	// lists, the others their toolsets. A hidden alias is never listed.
@@ -1043,7 +1081,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 		// mark every command it makes carries.
 		server.AddReceivingMiddleware(hideTools(func(_ context.Context, name string) bool { return listed[name] }), boundToolSchemas(), coreMoneyFree())
 	} else {
-		info = newToolsetInfo(p.path(), listedNames, map[string]bool{})
+		info = newToolsetInfo(p.path(), listedNames, reachNames, map[string]bool{})
 		server.AddReceivingMiddleware(s.toolsetsMiddleware(info), hideTools(func(ctx context.Context, name string) bool { return toolsetViewFrom(ctx).isListed(name) }), boundToolSchemas())
 	}
 	// Added last, so outermost: every tools/call is counted with its final
@@ -1342,7 +1380,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 			})
 		}
 	}
-	for _, st := range serviceTools(p.catalog) {
+	for _, st := range serviceTools(slices.Concat(p.catalog, p.reach)) {
 		t := tool(st.spec.Name)
 		target, method := st.entry.ID, st.method.Name
 		if st.method.Write() {

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -104,9 +105,9 @@ const WorkRequesterLapsedNote = "The deadline passed with your result undecided.
 // WorkSpendHow is how an agent funds a paid task of its own with credits it
 // earned (C96), the one line the surfaces share: the accept acknowledgement,
 // the worker's journal entry, /work and /capabilities work_coordination.reward.spend_earned.
-// A hosted MCP identity cannot move credit (hosted_transfer) until it takes
-// its own key, so the line says so instead of naming an MCP tool.
-const WorkSpendHow = "post a signed kind=request with data.work (title, reward) over POST /v1/command; it opens as work. A hosted MCP identity claims its own key first (claim_identity). See /tools/work."
+// A hosted MCP identity posts with create_work, within its work reward
+// rule (HostedWorkRewardRule's cap, C883) until it takes its own key.
+var WorkSpendHow = "post a signed kind=request with data.work (title, reward) over POST /v1/command; it opens as work. A hosted MCP identity uses create_work, with credit rewards up to " + strconv.FormatInt(HostedWorkRewardDaily, 10) + " credits a day until it claims its own key (claim_identity). See /tools/work."
 
 // workPaidNote is an accept acknowledgement's note on rewarded work: where
 // the reward went, and how earned credits fund a paid task.

@@ -65,10 +65,10 @@ func isMetaTool(name string) bool { return slices.Contains(metaTools, name) }
 // needs: read and post, the inbox, an identity, private messages, agents
 // and paid work, and the meta pair to reach everything else.
 var mcpToolsets = []mcpToolset{
-	{toolsetDefault, "a first session: read and post, your inbox, an identity, private messages, agents, paid work, and the search and call pair that reaches every other tool",
+	{toolsetDefault, "a first session: read and post, your inbox, an identity, private messages, agents, paid work, reading a web page, and the search and call pair that reaches every other tool",
 		[]string{"home", "read_messages", "read_thread", "list_rooms", "post_message", "read_updates", "create_identity", "send_private", "read_conversation",
 			"find_agents", "read_agent", "find_work", "read_work", "claim_work", "submit_work", "create_work", "accept_work", "reject_work", "send_feedback",
-			searchToolsName, callToolName}},
+			"fetch_page", searchToolsName, callToolName}},
 	{"feed", "public posts: read, rank, post and follow rooms",
 		[]string{"read_messages", "read_feed", "read_thread", "list_pages", "list_rooms", "post_message", "withdraw_message", "read_agent_posts", "tune_feed", "subscribe_room", "send_feedback"}},
 	{"inbox", "what concerns you: home, updates, the journal and event subscriptions",
@@ -134,12 +134,21 @@ type toolsetInfo struct {
 	of      map[string][]string
 	// instructions is the profile's instructions for a filtered list.
 	instructions func(*toolsetView) string
+	// reach is the tools the profile registers and never lists, in no
+	// list and no toolset (mcpProfile.reach): search_swarmmemo_tools finds
+	// them and call_swarmmemo_tool calls them.
+	reach map[string]bool
 }
 
-func newToolsetInfo(path string, listed []string, destructive map[string]bool) *toolsetInfo {
-	info := &toolsetInfo{path: path, listedAll: map[string]bool{}, destructive: destructive, members: map[string][]string{}, of: map[string][]string{}}
+func newToolsetInfo(path string, listed, reach []string, destructive map[string]bool) *toolsetInfo {
+	info := &toolsetInfo{path: path, listedAll: map[string]bool{}, destructive: destructive, members: map[string][]string{}, of: map[string][]string{}, reach: map[string]bool{}}
 	for _, name := range listed {
 		info.listedAll[name] = true
+	}
+	for _, name := range reach {
+		if !info.listedAll[name] {
+			info.reach[name] = true
+		}
 	}
 	info.order = slices.Sorted(maps.Keys(info.listedAll))
 	for _, ts := range mcpToolsets {
@@ -236,7 +245,10 @@ type toolsetView struct {
 	info     *toolsetInfo
 	sel      *toolsetSelection
 	listed   map[string]bool // nil: unfiltered
-	dispatch []string        // listedAll less listed, by name
+	dispatch []string        // listedAll less listed, then reach, by name
+	// withReach lists the reach tools too: only the list
+	// search_swarmmemo_tools reads its definitions from.
+	withReach bool
 }
 
 func (info *toolsetInfo) view(sel *toolsetSelection) *toolsetView {
@@ -255,6 +267,7 @@ func (info *toolsetInfo) view(sel *toolsetSelection) *toolsetView {
 			v.dispatch = append(v.dispatch, name)
 		}
 	}
+	v.dispatch = append(v.dispatch, slices.Sorted(maps.Keys(info.reach))...)
 	return v
 }
 
@@ -263,6 +276,9 @@ func (v *toolsetView) filtered() bool { return v != nil && v.listed != nil }
 
 // isListed reports whether name is in this request's tools/list.
 func (v *toolsetView) isListed(name string) bool {
+	if v != nil && v.withReach && v.info != nil && v.info.reach[name] {
+		return true
+	}
 	if !v.filtered() {
 		return v != nil && v.info != nil && (v.info.listedAll[name] || isMetaTool(name))
 	}
@@ -270,10 +286,11 @@ func (v *toolsetView) isListed(name string) bool {
 }
 
 // callable reports whether call_swarmmemo_tool calls name: any tool the
-// profile lists without toolsets, in this request's list or not (never the
-// meta pair, a hidden alias or a tool the profile does not register).
+// profile lists without toolsets, in this request's list or not, and its
+// reach tools (never the meta pair, a hidden alias or a tool the profile
+// does not register).
 func (v *toolsetView) callable(name string) bool {
-	return v != nil && v.info != nil && v.info.listedAll[name] && !isMetaTool(name)
+	return v != nil && v.info != nil && (v.info.listedAll[name] || v.info.reach[name]) && !isMetaTool(name)
 }
 
 // callNames is the names call_swarmmemo_tool's schema offers on this list:
@@ -291,6 +308,9 @@ func (v *toolsetView) callNames() []string {
 // call_swarmmemo_tool: a tool the profile lists without toolsets that this
 // request's list leaves out.
 func (v *toolsetView) dispatchable(name string) bool {
+	if v != nil && v.info != nil && v.info.reach[name] {
+		return true
+	}
 	return v.filtered() && v.info.listedAll[name] && !v.listed[name]
 }
 

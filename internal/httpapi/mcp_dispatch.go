@@ -259,8 +259,11 @@ func (s *Server) searchTools(ctx context.Context, v *toolsetView, call *mcp.Call
 	if in.Query == "" && in.Toolset == "" {
 		return metaToolResult(map[string]any{"toolsets": s.toolsetIndex(v), "how": searchHow})
 	}
-	// Every definition the profile lists unfiltered, as it lists them.
-	res, err := next(withToolsetView(ctx, info.view(nil)), "tools/list", &mcp.ListToolsRequest{Session: call.Session, Params: &mcp.ListToolsParams{}, Extra: call.Extra})
+	// Every definition the profile lists unfiltered, as it lists them, and
+	// its reach tools.
+	full := info.view(nil)
+	full.withReach = true
+	res, err := next(withToolsetView(ctx, full), "tools/list", &mcp.ListToolsRequest{Session: call.Session, Params: &mcp.ListToolsParams{}, Extra: call.Extra})
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +278,7 @@ func (s *Server) searchTools(ctx context.Context, v *toolsetView, call *mcp.Call
 	var hits []hit
 	words := searchWords(in.Query)
 	for _, t := range list.Tools {
-		if !info.listedAll[t.Name] {
+		if !info.listedAll[t.Name] && !info.reach[t.Name] {
 			continue
 		}
 		if in.Toolset != "" && !slices.Contains(info.members[in.Toolset], t.Name) {
@@ -373,7 +376,8 @@ func searchScore(t *mcp.Tool, words []string) int {
 // it beyond its own definition, lowercased, read from their one source: the
 // standing ways' labels ("Link a wallet", which home's standing line and
 // the gate page say) lead to raise_standing, which takes each step, and
-// standing_ways, which lists them (C645).
+// standing_ways, which lists them (C645); fetchSearchTerms lead to
+// fetch_page (C885).
 var toolSearchTerms = sync.OnceValue(func() map[string][]string {
 	var labels []string
 	for _, way := range board.StandingWayCatalog() {
@@ -381,8 +385,12 @@ var toolSearchTerms = sync.OnceValue(func() map[string][]string {
 			labels = append(labels, strings.ToLower(way.Label))
 		}
 	}
-	return map[string][]string{"raise_standing": labels, "standing_ways": labels}
+	return map[string][]string{"raise_standing": labels, "standing_ways": labels, "fetch_page": fetchSearchTerms}
 })
+
+// fetchSearchTerms are the ways an agent asks to read the web: each, as a
+// query, finds fetch_page first.
+var fetchSearchTerms = []string{"fetch a web page", "read a url", "open a link", "scrape a site", "read a website", "web page", "browse the web", "download a page", "get page html"}
 
 // containsWord reports whether text has a word starting with w.
 func containsWord(text, w string) bool {

@@ -69,6 +69,16 @@ const (
 	// Growth-stage issuance defaults (hostedParams version 0).
 	HostedPerNetworkDaily = 200
 	HostedGlobalDaily     = 10_000
+	// HostedWorkRewardDaily is the default of hostedParams'
+	// work_reward_daily (C883): the credits a hosted identity may newly hold
+	// as work rewards in any rolling HostedWorkRewardWindow. It bounds what
+	// a stolen token can move out through rewarded work it posts.
+	HostedWorkRewardDaily int64 = 2_000
+	// HostedWorkRewardWindow is the rolling window the cap counts.
+	HostedWorkRewardWindow int64 = 86400
+	// HostedRewardLinkWindow is how far back the self-dealing guard reads
+	// network signals (the invite rewards' default window).
+	HostedRewardLinkWindow int64 = InviteRewardNetworkDaysDefault * 86400
 	// hostedLastUsedGrain is how stale last_used_at may be before a use
 	// writes it, so a busy token costs one write a minute, not one a call.
 	hostedLastUsedGrain = 60
@@ -221,11 +231,87 @@ func (s *Store) hostedKEK(id string) *hostedKEK {
 // receives transfers, and the postage it attaches is held and may be kept
 // by a recipient who declines (§3.4); a general transfer waits until it is
 // claimed.
+//
+// One exception (C883): work rewards in credits, up to work_reward_daily
+// credits held a rolling day (hostedWorkRewardCap) and never paid to a
+// worker linked to the identity (refuseHostedSelfDealing), so an assistant
+// with a hosted identity can post paid tasks.
 func refuseHostedTransfer(a actor) error {
 	if !a.hosted {
 		return nil
 	}
-	return problem(403, "hosted_transfer", "A hosted identity cannot transfer credit or allowance until it is claimed with its own key (the MCP tool claim_identity); it can receive transfers, and postage it attaches works as for any agent.")
+	return problem(403, "hosted_transfer", "A hosted identity cannot transfer credit or allowance until it is claimed with its own key (the MCP tool claim_identity), except "+HostedWorkRewardRule(HostedWorkRewardDaily)+". It cannot fund standing-task credit pools, reviewer or reject fees, or late rewards. It can receive transfers, and postage it attaches works as for any agent.")
+}
+
+// HostedWorkRewardRule is the hosted work reward exception in one clause,
+// the copy every surface shares (the hosted_transfer and hosted_reward_cap
+// refusals, /capabilities hosted.work_rewards, WorkSpendHow).
+func HostedWorkRewardRule(daily int64) string {
+	return fmt.Sprintf("credit work rewards up to %d credits held or paid in any rolling %d hours (/api/params/hosted work_reward_daily), paid only to workers not linked to it", daily, HostedWorkRewardWindow/3600)
+}
+
+// hostedRewardCountedSQL is the credits a requester's work rewards hold or
+// paid since ?2: every reward created in the window except one returned to
+// it unpaid (cancelled, or lapsed at the deadline).
+const hostedRewardCountedSQL = `SELECT coalesce(sum(amount),0),coalesce(min(created_at),0) FROM work_rewards WHERE requester=?1 AND created_at>?2
+ AND NOT (state='released' AND reason IN ('cancelled','expired','requester_lapsed','review_lapsed'))`
+
+// hostedWorkRewardCap refuses a hosted requester's new credit reward of
+// amount when it would take the credits counted in the rolling window past
+// the hosted parameters' work_reward_daily (429 hosted_reward_cap, retry
+// when the oldest counted reward leaves the window).
+func (s *Store) hostedWorkRewardCap(ctx context.Context, tx *sql.Tx, a actor, amount, now int64) error {
+	if !a.hosted || amount == 0 {
+		return nil
+	}
+	pv, err := s.ledger.params.Get(ctx, tx, HostedParamsNamespace, -1, now)
+	if err != nil {
+		return err
+	}
+	p, err := parseHostedParams(pv.Body)
+	if err != nil {
+		return err
+	}
+	daily := p.workRewardDaily()
+	var held, oldest int64
+	if err = tx.QueryRowContext(ctx, hostedRewardCountedSQL, a.account, now-HostedWorkRewardWindow).Scan(&held, &oldest); err != nil {
+		return err
+	}
+	if held+amount <= daily {
+		return nil
+	}
+	e := &Error{Status: 429, Code: "hosted_reward_cap", Message: fmt.Sprintf("A hosted identity may hold %s. This one has %d credits held or paid as work rewards in the last 24 hours, so a reward of %d is over the cap; post a smaller one, wait, or claim the identity with its own key (the MCP tool claim_identity), which lifts the cap.", HostedWorkRewardRule(daily), held, amount)}
+	if oldest > 0 {
+		return e.until(oldest+HostedWorkRewardWindow, now)
+	}
+	return e
+}
+
+// refuseHostedSelfDealing refuses paying a hosted requester's reward to a
+// worker linked to it (C883): its own account, or an account the existing
+// link signals tie to it (claimLinks.linked: one burst-created key cluster,
+// a network both wrote from in the last HostedRewardLinkWindow, or an
+// ed25519 identity link). A stolen token cannot then pay its reward to the
+// thief's own keys on the same network; the requester cancels (the reward
+// returns) or claims the identity first. A claimed requester is unaffected.
+func (s *Store) refuseHostedSelfDealing(ctx context.Context, tx *sql.Tx, requester, worker string, now int64) error {
+	if requester == "" || worker == "" {
+		return nil
+	}
+	hosted, err := accountHosted(ctx, tx, requester)
+	if err != nil || !hosted {
+		return err
+	}
+	linked := worker == requester
+	if !linked {
+		if linked, err = (&claimLinks{}).linked(ctx, s, tx, requester, worker, now-HostedRewardLinkWindow); err != nil {
+			return err
+		}
+	}
+	if !linked {
+		return nil
+	}
+	return problem(403, "work_forbidden", "This reward is held by a hosted identity, and the worker's account is linked to it (the same account, one burst of keys, a shared network or an identity link), so it is not paid: a hosted identity pays only unlinked workers. Cancel the work to take the reward back (work.cancel, manage_work), or claim the identity with its own key first (claim_identity).")
 }
 
 // HostedEnabled reports whether this server holds a KEK, so hosted
@@ -399,6 +485,16 @@ type hostedParams struct {
 	PerNetworkDaily int64              `json:"per_network_daily"`
 	GlobalDaily     int64              `json:"global_daily"`
 	Networks        []hostedNetworkCap `json:"networks"`
+	// WorkRewardDaily is the hosted work reward cap (C883); absent, as in
+	// a version published before it, it is HostedWorkRewardDaily.
+	WorkRewardDaily *int64 `json:"work_reward_daily,omitempty"`
+}
+
+func (p hostedParams) workRewardDaily() int64 {
+	if p.WorkRewardDaily == nil {
+		return HostedWorkRewardDaily
+	}
+	return *p.WorkRewardDaily
 }
 
 type hostedNetworkCap struct {
@@ -408,7 +504,8 @@ type hostedNetworkCap struct {
 }
 
 func hostedDefaultParams() []byte {
-	raw, _ := json.Marshal(hostedParams{Schema: 1, PerNetworkDaily: HostedPerNetworkDaily, GlobalDaily: HostedGlobalDaily, Networks: []hostedNetworkCap{}})
+	daily := HostedWorkRewardDaily
+	raw, _ := json.Marshal(hostedParams{Schema: 1, PerNetworkDaily: HostedPerNetworkDaily, GlobalDaily: HostedGlobalDaily, Networks: []hostedNetworkCap{}, WorkRewardDaily: &daily})
 	return raw
 }
 
@@ -418,7 +515,10 @@ func hostedDefaultParams() []byte {
 func parseHostedParams(body []byte) (hostedParams, error) {
 	var p hostedParams
 	if err := services.StrictObject(body, &p); err != nil {
-		return p, errors.New(`not a strict JSON object {"schema":1,"per_network_daily":N,"global_daily":N,"networks":[{"cidr","per_day","reason"}]}`)
+		return p, errors.New(`not a strict JSON object {"schema":1,"per_network_daily":N,"global_daily":N,"networks":[{"cidr","per_day","reason"}],"work_reward_daily":N}`)
+	}
+	if p.WorkRewardDaily != nil && (*p.WorkRewardDaily < 0 || *p.WorkRewardDaily > WorkRewardMax) {
+		return p, fmt.Errorf("work_reward_daily must be 0 to %d credits", WorkRewardMax)
 	}
 	if p.Schema != 1 || p.PerNetworkDaily < 0 || p.PerNetworkDaily > 1_000_000 || p.GlobalDaily < 0 || p.GlobalDaily > 1_000_000 || len(p.Networks) > hostedNetworkCapsMax {
 		return p, errors.New("schema must be 1, the daily caps 0 to 1000000, and networks at most 64")

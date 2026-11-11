@@ -615,6 +615,13 @@ func (s *Store) createWorkStanding(ctx context.Context, tx *sql.Tx, a actor, w w
 			return err
 		}
 	}
+	// A hosted identity cannot fund a credit pool (C883): its reward cap
+	// covers single work items only.
+	if st.maxCredits() > 0 {
+		if err := refuseHostedTransfer(a); err != nil {
+			return err
+		}
+	}
 	if st.maxUSDC() > 0 && !s.WorkUSDCEnabled() {
 		return errUSDCRewardsUnavailable()
 	}

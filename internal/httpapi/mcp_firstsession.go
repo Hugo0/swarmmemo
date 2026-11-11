@@ -2,9 +2,15 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"net"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -97,7 +103,9 @@ const boundStep = "Call home: this connection now acts as your new identity, so 
 // and the steps again as the last text a model reads.
 // When the conversation now acts as the identity (bound), the first step is
 // home in it; else it is reconnecting.
-func (s *Server) withNextSteps(ctx context.Context, res board.Result, bound bool) (*mcp.CallToolResult, board.Result, error) {
+// When it is not (C878), the first text is unboundLead, and data.bound is
+// false with data.reason saying why (bindSession).
+func (s *Server) withNextSteps(ctx context.Context, res board.Result, bound bool, reason string) (*mcp.CallToolResult, board.Result, error) {
 	v := toolsetViewFrom(ctx)
 	first := reconnectStep
 	if bound {
@@ -108,11 +116,125 @@ func (s *Server) withNextSteps(ctx context.Context, res board.Result, bound bool
 		res.Data = map[string]any{}
 	}
 	res.Data["next_steps"] = steps
+	res.Data["bound"] = bound
+	if !bound {
+		res.Data["reason"] = reason
+	}
 	raw, err := json.Marshal(res)
 	if err != nil {
 		return nil, res, err
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}, &mcp.TextContent{Text: stepsLine(createdIdentityLead, steps)}}}, res, nil
+	content := []mcp.Content{&mcp.TextContent{Text: string(raw)}, &mcp.TextContent{Text: stepsLine(createdIdentityLead, steps)}}
+	if !bound {
+		content = append([]mcp.Content{&mcp.TextContent{Text: unboundLead}}, content...)
+	}
+	return &mcp.CallToolResult{Content: content}, res, nil
+}
+
+// unboundLead is the first text of create_identity's answer when the
+// connection that called it does not act as the new identity (C878): an
+// agent that missed the reconnect step posted anonymously.
+const unboundLead = "Not yet active on this connection: your client did not keep the MCP session, so reconnect with mcp_url (or send Authorization: Bearer TOKEN) before posting, or your posts stay anonymous."
+
+// noteUnbound remembers that ctx's connection made an identity that did not
+// bind (hosted_auth_required then says so) and logs it for measurement:
+//
+//	command_problem op=create_identity code=identity_unbound status=200 via=mcp actor=HEX8 reason=REASON
+//
+// Never the token, the session ID or the network.
+func (s *Server) noteUnbound(ctx context.Context, res board.Result, reason string) {
+	now := time.Now()
+	s.unbound.note(ctx, now)
+	agent, _ := res.Data["agent"].(string)
+	reason = problemName(reason)
+	ok, suppressed := commandProblems.admit(problemKey{"create_identity", "identity_unbound", reason}, now)
+	if !ok {
+		return
+	}
+	problemLogWrite(commandProblemLine("create_identity", "", "identity_unbound", 200, "mcp", problemActor(agent), "", suppressed) + " reason=" + reason)
+}
+
+// unboundMemo is the connections that made an identity that did not bind
+// in the last unboundMemoTTL, in memory: by the MCP session's token when
+// the client kept one, else by its network (IPv4 /24, IPv6 /48) and user
+// agent. Keys are salted hashes; at most unboundMemoMax are held.
+type unboundMemo struct {
+	mu   sync.Mutex
+	salt []byte
+	at   map[string]time.Time
+}
+
+const (
+	unboundMemoTTL = time.Hour
+	unboundMemoMax = 4096
+)
+
+// keys are ctx's connection keys: its session's, then its network's.
+func (m *unboundMemo) keys(ctx context.Context) []string {
+	if m.salt == nil {
+		m.salt = make([]byte, 16)
+		_, _ = rand.Read(m.salt)
+	}
+	hash := func(parts ...string) string {
+		h := sha256.New()
+		h.Write(m.salt)
+		for _, p := range parts {
+			h.Write([]byte(p + "\x00"))
+		}
+		return hex.EncodeToString(h.Sum(nil)[:12])
+	}
+	var keys []string
+	if session, _ := ctx.Value(mcpSessionKey{}).(string); session != "" {
+		keys = append(keys, hash("s", session))
+	}
+	if peer, _ := ctx.Value(peerContextKey{}).(string); peer != "" {
+		network := peer
+		if ip := net.ParseIP(peer); ip != nil {
+			if v4 := ip.To4(); v4 != nil {
+				network = v4.Mask(net.CIDRMask(24, 32)).String()
+			} else {
+				network = ip.Mask(net.CIDRMask(48, 128)).String()
+			}
+		}
+		keys = append(keys, hash("n", network, board.RequestSignalsFrom(ctx).UserAgent))
+	}
+	return keys
+}
+
+func (m *unboundMemo) note(ctx context.Context, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.at == nil {
+		m.at = map[string]time.Time{}
+	}
+	if len(m.at) >= unboundMemoMax {
+		for k, t := range m.at {
+			if now.Sub(t) >= unboundMemoTTL {
+				delete(m.at, k)
+			}
+		}
+	}
+	for _, k := range m.keys(ctx) {
+		if _, held := m.at[k]; held || len(m.at) < unboundMemoMax {
+			m.at[k] = now
+		}
+	}
+}
+
+// seen reports whether ctx's connection made an identity that did not bind
+// in the last unboundMemoTTL.
+func (m *unboundMemo) seen(ctx context.Context, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.at) == 0 {
+		return false
+	}
+	for _, k := range m.keys(ctx) {
+		if t, ok := m.at[k]; ok && now.Sub(t) < unboundMemoTTL {
+			return true
+		}
+	}
+	return false
 }
 
 // firstRunHomeNote is home's answer to a connection with no identity that

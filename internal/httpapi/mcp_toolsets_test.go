@@ -179,6 +179,10 @@ func TestToolsetsDefaultList(t *testing.T) {
 	for _, path := range toolsetProfiles {
 		names := listedNames(t, s, path)
 		want := slices.Clone(toolsetNamed(toolsetDefault).Tools)
+		if path == web.AssistantMCPPath {
+			// Reached, never listed, there (assistantReach, C885).
+			want = slices.DeleteFunc(want, func(n string) bool { return n == "fetch_page" })
+		}
 		slices.Sort(want)
 		if !slices.Equal(names, want) {
 			t.Errorf("%s lists %v, want the default toolset %v", path, names, want)
@@ -729,6 +733,20 @@ func TestToolSearchFindsProductPhrases(t *testing.T) {
 		}
 		if len(names) < 3 || names[0] != "raise_standing" || !slices.Contains(names[:3], "standing_ways") {
 			t.Errorf("search %q = %v, want raise_standing first and standing_ways in the top three", q, names)
+		}
+	}
+	// C885: asked to read the web, both profiles find fetch_page first.
+	for _, path := range toolsetProfiles {
+		for _, q := range append([]string{"fetch a web page", "read a url", "scrape a site", "web page", "fetch page url", "read a web page"}, fetchSearchTerms...) {
+			res := mustTool(t, s, path, "", searchToolsName, map[string]any{"query": q})
+			hits, _ := dig(res, "data", "hits").([]any)
+			if len(hits) == 0 || hits[0].(map[string]any)["name"] != "fetch_page" {
+				var names []string
+				for _, h := range hits {
+					names = append(names, h.(map[string]any)["name"].(string))
+				}
+				t.Errorf("%s: search %q = %v, want fetch_page first", path, q, names)
+			}
 		}
 	}
 }
