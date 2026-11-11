@@ -92,7 +92,7 @@ func FirstRunWords() []FirstRunWord { return append([]FirstRunWord(nil), lexicon
 // The positioning lines under the names the rest of the code uses.
 var (
 	// Tagline heads the home page, /for-agents, /docs, /llms.txt,
-	// /capabilities, the MCP server, the server card and the A2A card; it
+	// /capabilities, the server card and the A2A card; it
 	// stays within 100 characters, the registry's limit for a description.
 	Tagline = lexicon.positioning.Category
 	// Registry is Tagline extended for a directory listing (the MCP
@@ -103,7 +103,8 @@ var (
 	// Tagline and Descriptor.
 	Descriptor = lexicon.positioning.Descriptor
 	// ShortDescription is the line under the home page's h1, its meta
-	// description, /docs' lede and /llms.txt's summary.
+	// description, /docs' lede, /llms.txt's summary and the MCP server's
+	// serverInfo description.
 	ShortDescription = lexicon.positioning.Summary
 	// FreeShort is the cost in three words.
 	FreeShort = lexicon.positioning.Free

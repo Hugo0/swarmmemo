@@ -34,7 +34,7 @@ func TestReplyToOpenWorkSaysItIsNotASubmission(t *testing.T) {
 	}
 	// Once its result waits, a further reply says nothing.
 	run(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: standing, Target: r.ID}, nil))
-	if r2 := reply(worker, standing); r2.ReplyWork != "" {
+	if r2 := reply(worker, standing); r2.ReplyWork != "" || WorkHintLine("", r2) != "" {
 		t.Fatalf("a worker with a result waiting is told again: %q", WorkHintLine("", r2))
 	}
 	// Another agent still hears it; the requester never does.
@@ -145,5 +145,69 @@ func TestReplyToClosedRoundNamesTheOpenRound(t *testing.T) {
 	}
 	if a := anon(old); WorkHintLine("", a) != "" {
 		t.Fatalf("no open round, anonymous still told: %q", WorkHintLine("", a))
+	}
+}
+
+// C900: a signed reply to an open standing task that takes no result from
+// its author now (its per_agent_day used, the day's day_max taken) hears
+// that it is not submitted, why (work.get's eligible reason), and the claim
+// to send once a seat opens; a claimable reply keeps the C555 line, the
+// requester hears nothing, and an anonymous reply keeps its C597 line.
+func TestReplyToBlockedStandingTaskSaysWhy(t *testing.T) {
+	s := rewardStore(t)
+	owner, worker, other := keyFor(245), keyFor(246), keyFor(247)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	reply := func(key ed25519.PrivateKey, id string) *Receipt {
+		t.Helper()
+		return run(t, s, signed(key, Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "My result " + randomID()[:8], Timestamp: s.now().Unix()})).Receipt
+	}
+	blockedLine := func(id string, r *Receipt, note string) string {
+		return "This reply is not submitted: Not now on this standing task: " + note + ". If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(id, r.ID) + "."
+	}
+
+	// (1) per_agent_day used.
+	perDay := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, perDay, map[string]any{"seats": 3, "reward": 300, "per_agent_day": 1}, 10*86400))
+	first := reply(worker, perDay)
+	run(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: perDay, Target: first.ID}, nil))
+	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: first.ID, Amount: 1}))
+	r := reply(worker, perDay)
+	if want := blockedLine(perDay, r, "your 1 result today taken (per_agent_day, shared with keys linked to yours)"); r.ReplyWork != "" || WorkHintLine("", r) != want {
+		t.Fatalf("per_agent_day used: work %q line %q", r.ReplyWork, WorkHintLine("", r))
+	}
+	// The same reason work.get's eligible gives.
+	read := run(t, s, signed(worker, Command{Operation: "work.get", MessageID: perDay})).Data["work"].(Work)
+	if read.Eligible == nil || *read.Eligible || !strings.Contains(WorkHintLine("", r), read.EligibleReason) {
+		t.Fatalf("work.get disagrees: %+v %q", read.Eligible, read.EligibleReason)
+	}
+	// (3) Another worker can claim: the C555 line.
+	if c := reply(other, perDay); c.ReplyWork != perDay || c.ReplyWorkBlocked != "" || !strings.HasPrefix(WorkHintLine("", c), "This reply is not submitted yet. To submit it as your result: ") {
+		t.Fatalf("a claimable reply: %q", WorkHintLine("", c))
+	}
+
+	// (2) day_max taken.
+	dayMax := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, dayMax, map[string]any{"seats": 3, "reward": 300, "day_max": 1}, 10*86400))
+	taken := reply(worker, dayMax)
+	run(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: dayMax, Target: taken.ID}, nil))
+	r = reply(other, dayMax)
+	if want := blockedLine(dayMax, r, "today's 1 result taken (day_max)"); r.ReplyWork != "" || WorkHintLine("", r) != want {
+		t.Fatalf("day_max taken: work %q line %q", r.ReplyWork, WorkHintLine("", r))
+	}
+	// (4) The requester's own reply hears nothing.
+	if o := reply(owner, dayMax); WorkHintLine("", o) != "" {
+		t.Fatalf("the requester is told: %q", WorkHintLine("", o))
+	}
+	// (5) An anonymous reply keeps its C597 line.
+	a := run(t, s, Command{Operation: "post", Room: "lobby", ReplyTo: dayMax, Text: "anonymous result " + randomID()[:8]}).Receipt
+	if a.ReplyWork != dayMax || !a.ReplyWorkAnonymous || a.ReplyWorkBlocked != "" || !strings.HasPrefix(WorkHintLine("", a), "An anonymous reply can't be submitted or paid") {
+		t.Fatalf("an anonymous reply to a full task: %q", WorkHintLine("", a))
+	}
+	// Home's unclaimed_result stays claimable-now only.
+	got := run(t, s, signed(other, Command{Operation: "home", Timestamp: s.now().Unix()})).Data
+	for _, it := range got["items"].([]HomeItem) {
+		if it.Kind == "unclaimed_result" && it.Call["message_id"] == dayMax {
+			t.Fatalf("home offers a blocked reply: %+v", it)
+		}
 	}
 }

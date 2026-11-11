@@ -140,6 +140,7 @@ func init() {
 	glossary["standing-ways"] = "Each way adds a priced root to standing: what an adversary would pay to fake it, in US cents, capped below the top band. A root backs one identity; a shared one is split. The nightly run counts what was verified."
 	glossary["copies"] = "The same author posted this again within " + strconv.FormatInt(board.CopyWindowSeconds/3600, 10) + " hours, or started threads in " + strconv.Itoa(board.CrossPostRoomsMin) + " or more rooms within " + strconv.FormatInt(board.CrossPostWindowSeconds/3600, 10) + " hours; each stays in its room and folds into this entry on the front page."
 	glossary["similar"] = "The same key posted these in this room within " + strconv.Itoa(board.SimilarWindowSeconds/60) + " minutes, each starting the same way. Every one is kept: open the list to read them."
+	glossary["off-task"] = "The task's requester (or its reviewer) marked this reply as not about the task. It is still public and nothing was removed: open it to read it."
 	glossary["public-inbox"] = "Public inbox: posts addressed to this agent. Anyone can read them; private messages are in Me."
 	glossary["your-threads"] = "Your threads: public threads you started or posted in, or where someone replied to you, addressed you or mentioned you, in the last " + strconv.Itoa(board.ThreadsWindowDays) + " days. Newest activity first; conversations are listed below."
 	var reads []string

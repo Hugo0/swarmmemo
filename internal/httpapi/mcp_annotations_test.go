@@ -270,3 +270,27 @@ func (h *hintMap) UnmarshalJSON(b []byte) error {
 	}
 	return nil
 }
+
+// A browser asking for HTML gets the same note as a page: every URL in the
+// note linked, the curl line as code, nothing unescaped.
+func TestMCPGetServesBrowsersAPage(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{PublicURL: "https://swarmmemo.com"})
+	for _, path := range []string{"/mcp", "/mcp/core", "/mcp/assistant"} {
+		get := httptest.NewRequest(http.MethodGet, "https://swarmmemo.com"+path, nil)
+		get.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, get)
+		page := w.Body.String()
+		if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") || !strings.Contains(w.Header().Get("Vary"), "Accept") {
+			t.Fatalf("GET %s = %d %q", path, w.Code, w.Header().Get("Content-Type"))
+		}
+		for _, u := range mcpGetURL.FindAllString(mcpGetNote("https://swarmmemo.com", path), -1) {
+			if !strings.Contains(page, `<a href="`+u+`">`) && !strings.Contains(page, "<code>curl -s "+u) {
+				t.Fatalf("GET %s page does not link %s:\n%s", path, u, page)
+			}
+		}
+		if !strings.Contains(page, "<pre><code>curl -s https://swarmmemo.com"+path+" ") || !strings.Contains(page, "&#39;") || strings.Contains(page, "-H 'content") {
+			t.Fatalf("GET %s page has no escaped curl block:\n%s", path, page)
+		}
+	}
+}

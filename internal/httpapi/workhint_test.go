@@ -17,7 +17,8 @@ import (
 // standing task is not a submission. Over MCP (a hosted post_message) and a
 // signed POST /v1/command its receipt carries work_hint, how to submit it;
 // the plain-text receipt prints the line; once the poster's result waits,
-// it is not said again.
+// it is not said again. A reply a standing task takes no result from now
+// hears why (C900).
 func TestReplyToOpenWorkReceiptSaysHowToSubmit(t *testing.T) {
 	store, s := hostedServerWith(t, board.Features{Ledger: board.LedgerOn})
 	requester := ed25519.NewKeyFromSeed(make([]byte, 32))
@@ -101,6 +102,25 @@ func TestReplyToOpenWorkReceiptSaysHowToSubmit(t *testing.T) {
 	plain := makeRequest(s, "POST", "/v1/command", mustJSON(t, board.Command{Operation: "post", Room: "gigs", ReplyTo: reply, Text: "a plain anonymous reply"}), "application/json")
 	if strings.Contains(plain.Body.String(), "work_hint") {
 		t.Fatalf("anonymous reply to a result is told: %s", plain.Body.String())
+	}
+
+	// C900: a signed reply to a standing task whose day_max is taken hears
+	// over MCP that it is not submitted, and why; the plain text says so too.
+	full := exec(requester, board.Command{Operation: "post", Room: "gigs", Kind: "request", Text: "One report a day."}).Receipt.ID
+	data, _ = json.Marshal(map[string]any{"schema": 1, "generation": feed.Generation, "title": "Daily report", "capabilities": []string{"bugs"}, "seats": 3, "reward": 100, "day_max": 1})
+	exec(requester, board.Command{Operation: "work.create", MessageID: full, Data: string(data), TTL: 10 * 86400})
+	taken := mustTool(t, s, "/mcp", auth, "post_message", map[string]any{"reply_to": full, "kind": "result", "text": "Today's report"})["receipt"].(map[string]any)["id"].(string)
+	mustTool(t, s, "/mcp", auth, "claim_work", map[string]any{"message_id": full, "result_id": taken})
+	late := newIdentity(t, s, "workhint-late")
+	blocked := mustTool(t, s, "/mcp", "Bearer "+late["token"].(string), "post_message", map[string]any{"reply_to": full, "kind": "result", "text": "Another report"})["receipt"].(map[string]any)
+	blockedHint := "This reply is not submitted: Not now on this standing task: today's 1 result taken (day_max). If a seat opens before the task stops taking results, submit it with " + board.ClaimResultCall(full, blocked["id"].(string)) + "."
+	if blocked["work_hint"] != blockedHint {
+		t.Fatalf("blocked MCP receipt work_hint %v", blocked["work_hint"])
+	}
+	text.Reset()
+	WriteText(&text, board.Result{Receipt: &board.Receipt{ID: blocked["id"].(string), ReplyWorkBlocked: "Not now on this standing task: today's 1 result taken (day_max).", ReplyWorkBlockedID: full}})
+	if !strings.Contains(text.String(), "\n"+blockedHint+"\n") {
+		t.Fatalf("blocked text receipt: %q", text.String())
 	}
 }
 

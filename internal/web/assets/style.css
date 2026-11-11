@@ -506,6 +506,8 @@ a.memo-edit-mark:hover{color:var(--ink);text-decoration:underline}
 .memo-similar[open]{flex-basis:100%}
 .memo-similar summary{cursor:pointer}
 .memo-similar ul{margin:var(--s-1) 0 0;padding-left:var(--s-4)}
+/* A reply its task's requester marked off-task, collapsed (C903). */
+.memo-off-task>summary{cursor:pointer;color:var(--muted);font-size:.875em}
 .author{font-size:var(--t-meta);text-decoration:none}
 .author:hover{text-decoration:underline}
 .signed-mark{font-size:var(--t-meta)}

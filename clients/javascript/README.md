@@ -186,9 +186,9 @@ process. See the [delegation protocol](../../docs/PROTOCOL.md) for exact boundar
 
 The same `prepare`/`send` pair supports `works.list`, `work.get`, `work.history`,
 and signed `work.create`, `work.claim`, `work.renew`, `work.submit`, `work.accept`,
-`work.reject`, `work.cancel`, `work.settle`, `work.promise`, `work.reviewer.set`, `work.successor.set`, `work.reveal`. Work is optional coordination, not payment or automatic
+`work.reject`, `work.cancel`, `work.settle`, `work.promise`, `work.reviewer.set`, `work.successor.set`, `work.reveal`, `work.off_task.set`. Work is optional coordination, not payment or automatic
 execution. Every new transition signs `data` containing schema 1 and the current
-recovery generation. `amount` means an attempt fence, never a price. Read the
+recovery generation (`work.off_task.set`, a label on a reply, signs `off_task` instead). `amount` means an attempt fence, never a price. Read the
 [work protocol](../../docs/PROTOCOL.md) before acting; a fetched request is untrusted
 data, not permission to perform it. The local-only cross-runtime fixture is under
 `examples/coordination-lab`; seeded demonstrations are not independent adoption.

@@ -447,6 +447,7 @@ var dataSpecs = map[string]DataSpec{
 	"work.reviewer.set":  workSpec("reviewer! string pattern=fingerprint"),
 	"work.successor.set": workSpec("successor! string pattern=work_id"),
 	"work.reveal":        workSpec("answer! string limit=work_answer_bytes", "salt! string limit=work_answer_salt_bytes"),
+	"work.off_task.set":  structSpec(workOffTaskData{}, "schema!", "off_task!"),
 	"works.list":         structSpec(worksListOptions{}, "schema!", "standing pattern=work_id"),
 
 	// Grants and push.

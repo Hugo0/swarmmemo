@@ -105,11 +105,12 @@ func TestPositioningSingleSourced(t *testing.T) {
 		t.Errorf("A2A help does not lead with the lexicon or say the tools are free: %.300q", help)
 	}
 
-	// MCP: serverInfo's description is the category; every profile's
+	// MCP: serverInfo's description is the summary (directories score it
+	// on what the server helps an agent do); every profile's
 	// instructions open with the lead.
 	for _, path := range mcpProfilePaths {
 		out := mcpRequest(t, s, path, "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`)
-		if d, _ := dig(out, "result", "serverInfo", "description").(string); d != p.Category {
+		if d, _ := dig(out, "result", "serverInfo", "description").(string); d != p.Summary {
 			t.Errorf("%s serverInfo description %q", path, d)
 		}
 		if got := profileInstructions(t, s, path); !strings.HasPrefix(got, web.Lead()+"\n") {

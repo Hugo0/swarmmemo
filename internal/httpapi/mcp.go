@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"maps"
 	"net/http"
@@ -766,6 +767,42 @@ func mcpGetNote(origin, path string) string {
 		"No MCP? Everything also works over plain HTTP: " + origin + "/llms.txt\n"
 }
 
+// mcpGetURL finds the links in the note: an https URL, without the
+// sentence's closing punctuation.
+var mcpGetURL = regexp.MustCompile(`https://[^\s'"<>]*[^\s'"<>.,:;)]`)
+
+// mcpGetPage is mcpGetNote as an HTML page, for a browser: the same text,
+// its URLs linked and its curl line as code.
+func mcpGetPage(origin, path string) string {
+	title, body, _ := strings.Cut(mcpGetNote(origin, path), "\n\n")
+	var b strings.Builder
+	b.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SwarmMemo MCP server</title>`)
+	b.WriteString(`<meta name="description" content="` + html.EscapeString(web.ShortDescription) + `">`)
+	b.WriteString(`<style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 16px}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:.75rem;border:1px solid #8884;border-radius:6px}a{overflow-wrap:anywhere}</style></head><body>`)
+	b.WriteString("<h1>" + mcpGetLinks(title) + "</h1><p>" + html.EscapeString(web.ShortDescription) + "</p>")
+	for _, para := range strings.Split(strings.TrimSpace(body), "\n\n") {
+		if lead, code, ok := strings.Cut(para, "\ncurl "); ok {
+			b.WriteString("<p>" + html.EscapeString(lead) + "</p><pre><code>" + html.EscapeString("curl "+code) + "</code></pre>")
+			continue
+		}
+		b.WriteString("<p>" + strings.ReplaceAll(mcpGetLinks(para), "\n", "<br>") + "</p>")
+	}
+	b.WriteString("</body></html>\n")
+	return b.String()
+}
+
+// mcpGetLinks escapes text and links its URLs.
+func mcpGetLinks(text string) string {
+	var b strings.Builder
+	last := 0
+	for _, m := range mcpGetURL.FindAllStringIndex(text, -1) {
+		u := html.EscapeString(text[m[0]:m[1]])
+		b.WriteString(html.EscapeString(text[last:m[0]]) + `<a href="` + u + `">` + u + "</a>")
+		last = m[1]
+	}
+	return b.String() + html.EscapeString(text[last:])
+}
+
 // mcpHomeLine is the first line of the workflow. Several hosts never show a
 // model the initialize instructions (claude.ai drops them), so the home and
 // read_updates tool descriptions start with it too.
@@ -1034,7 +1071,7 @@ func mcpImplementation(origin, version string) *mcp.Implementation {
 	for _, ic := range serviceIcons(origin) {
 		icons = append(icons, mcp.Icon{Source: ic["src"].(string), MIMEType: ic["mimeType"].(string), Sizes: ic["sizes"].([]string)})
 	}
-	return &mcp.Implementation{Name: "swarmmemo", Title: "SwarmMemo", Description: web.Tagline, Version: version, WebsiteURL: origin, Icons: icons}
+	return &mcp.Implementation{Name: "swarmmemo", Title: "SwarmMemo", Description: web.ShortDescription, Version: version, WebsiteURL: origin, Icons: icons}
 }
 
 func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
@@ -1468,6 +1505,14 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 		// A browser, a web tool or an agent following a docs link: say how to
 		// connect instead of the transport's bare 405 (first-contact report,
 		// 2026-09-30). A GET that asks for a stream still gets the transport's.
+		// A browser asking for HTML gets the same note as a page (directory
+		// checkers look for setup instructions at the MCP URL).
+		w.Header().Add("Vary", "Accept")
+		if strings.Contains(r.Header.Get("Accept"), "text/html") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, mcpGetPage(s.cfg.PublicURL, profile))
+			return
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, mcpGetNote(s.cfg.PublicURL, profile))
 		return

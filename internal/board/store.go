@@ -1496,6 +1496,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.changeProfile(ctx, tx, c, a, now)
 	case "work.create", "work.claim", "work.renew", "work.submit", "work.accept", "work.reject", "work.cancel", "work.reviewer.set", "work.successor.set", "work.settle", "work.promise", "work.reveal":
 		return s.changeWork(ctx, tx, c, a, now)
+	case "work.off_task.set":
+		return s.setWorkOffTask(ctx, tx, c, a, now)
 	case "work.get", "works.list", "work.history":
 		return s.readWork(ctx, tx, c, a, now)
 	case "delegation.create", "delegation.revoke":

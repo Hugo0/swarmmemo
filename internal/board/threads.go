@@ -328,6 +328,11 @@ func (s *Store) readThreads(ctx context.Context, tx *sql.Tx, cs []Command, a act
 		if errs[i] = r.err; r.err != nil {
 			continue
 		}
+		// A task's thread marks the replies set aside as off-task (C903).
+		if err := attachOffTask(ctx, tx, r.root.id, r.events); err != nil {
+			errs[i] = conversationError(err)
+			continue
+		}
 		results[i] = Result{Messages: r.events, NextCursor: s.encodeConversationCursor(r.cursor), Data: map[string]any{"root_id": r.root.id, "requested_message_id": cs[i].MessageID, "room": r.root.room, "has_more": r.hasMore, "replies": r.replies, "last_reply_at": r.lastReplyAt}}
 		shapeList(&results[i], ListDepthNested)
 		setListTotal(&results[i], r.total, true)

@@ -912,6 +912,7 @@ const JS_WRAPPERS = {
   'work.reviewer.set': [(c, o) => c.setWorkReviewer(P.message, P.agent, {generation: P.generation, ...o}), ['generation', 'reviewer']],
   'work.successor.set': [(c, o) => c.setWorkSuccessor(P.message, P.message, {generation: P.generation, ...o}), ['generation', 'successor']],
   'work.reveal': [(c, o) => c.revealWork(P.message, '42', 's', {generation: P.generation, ...o}), ['generation', 'answer', 'salt']],
+  'work.off_task.set': [(c, o) => c.setWorkOffTask(P.message, P.message, o), ['off_task']],
   'work.promise': [(c, o) => c.promiseWork(P.message, '0.10', {generation: P.generation, ...o}), ['generation', 'amount_usdc']],
   'updates.get': [(c, o) => c.updates({cursor: 'c1', ...o}), []],
   'updates.dispose': [(c, o) => c.dispose([P.message], 'replied', o), ['ids', 'state']],

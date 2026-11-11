@@ -423,11 +423,12 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		}
 	}
 	// C555: a signed reply to open work is not a submission; the receipt
-	// says how to submit it, and an anonymous one that it cannot be (C597,
+	// says how to submit it, an anonymous one that it cannot be (C597), and
+	// one a standing task takes no result from now why not (C900,
 	// workhint.go).
-	replyWork, nextRound := "", ""
+	var rh replyHint
 	if c.ReplyTo != "" && data.Supersedes == "" && !forwarded {
-		if replyWork, nextRound, err = s.replyWorkHint(ctx, tx, c.ReplyTo, a, now); err != nil {
+		if rh, err = s.replyWorkHint(ctx, tx, c.ReplyTo, a, now); err != nil {
 			return Result{}, err
 		}
 	}
@@ -440,7 +441,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			return Result{}, err
 		}
 	}
-	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: replyWork, ReplyWorkAnonymous: (replyWork != "" || nextRound != "") && !a.signed, ReplyWorkNextRound: nextRound, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads, Work: work}, hints: workHints}, nil
+	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: rh.work, ReplyWorkAnonymous: (rh.work != "" || rh.next != "") && !a.signed, ReplyWorkNextRound: rh.next, ReplyWorkBlocked: rh.blocked, ReplyWorkBlockedID: rh.blockedWork, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads, Work: work}, hints: workHints}, nil
 }
 
 // claimOnPost returns the handle a signed post is stored under: always the

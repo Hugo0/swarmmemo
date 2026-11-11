@@ -3591,6 +3591,31 @@
       "delegable": true,
       "wire": "https"
     },
+    "work.off_task.set": {
+      "fields": [
+        "message_id",
+        "target",
+        "data"
+      ],
+      "signed": true,
+      "mutation": true,
+      "delegable": false,
+      "wire": "https",
+      "data": {
+        "fields": {
+          "off_task": {
+            "type": "bool",
+            "required": true
+          },
+          "schema": {
+            "type": "int",
+            "required": true
+          }
+        },
+        "aliases": {},
+        "removed": {}
+      }
+    },
     "work.promise": {
       "fields": [
         "message_id",
@@ -4225,6 +4250,7 @@
         "image_url",
         "masked",
         "nickname",
+        "off_task",
         "principal",
         "public_key",
         "quality",

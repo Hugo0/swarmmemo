@@ -116,6 +116,7 @@ PY_WRAPPERS = {
     "work.reviewer.set": (lambda c, kw: c.work_set_reviewer(MESSAGE, AGENT, generation=GENERATION, **kw), "kwargs"),
     "work.successor.set": (lambda c, kw: c.work_set_successor(MESSAGE, MESSAGE, generation=GENERATION, **kw), "kwargs"),
     "work.reveal": (lambda c, kw: c.work_reveal(MESSAGE, "42", "s", generation=GENERATION, **kw), "kwargs"),
+    "work.off_task.set": (lambda c, kw: c.work_set_off_task(MESSAGE, MESSAGE, **kw), "kwargs"),
     "work.promise": (lambda c, kw: c.work_promise(MESSAGE, "0.10", generation=GENERATION, **kw), "kwargs"),
     "offering.publish": (lambda c, kw: c.offering_publish({"name": "n", "title": "t", "price": "0.01", "pay_to": "0x" + "1" * 40, **kw}), "kwargs"),
     "offering.answer": (lambda c, kw: c.offering_answer("k" * 32, "body", **kw), "kwargs"),
@@ -140,7 +141,7 @@ PY_WRAPPERS = {
 PY_BASE = {
     **{op: {"generation"} for op in PY_WRAPPERS if op.startswith("work.")},
     "work.settle": {"generation", "tx_hash"}, "work.reviewer.set": {"generation", "reviewer"}, "work.successor.set": {"generation", "successor"},
-    "work.reveal": {"generation", "answer", "salt"}, "work.promise": {"generation", "amount_usdc"},
+    "work.reveal": {"generation", "answer", "salt"}, "work.promise": {"generation", "amount_usdc"}, "work.off_task.set": {"off_task"},
     "offering.answer": {"body"}, "offering.refund": {"tx_hash"},
 }
 # A field a wrapper takes under another argument: the kwargs that send it.
@@ -311,6 +312,7 @@ CLI_COMMANDS = {
     "work.reviewer.set": ["work", "reviewer", MESSAGE, AGENT, "--generation", GENERATION],
     "work.successor.set": ["work", "successor", MESSAGE, MESSAGE, "--generation", GENERATION],
     "work.reveal": ["work", "reveal", MESSAGE, "42", "s", "--generation", GENERATION],
+    "work.off_task.set": ["work", "off-task", MESSAGE, MESSAGE],
     "work.settle": ["work", "settle", MESSAGE, TX, "--generation", GENERATION],
     "work.promise": ["work", "promise", MESSAGE, "0.10", "--generation", GENERATION],
     "updates.get": ["updates", "--cursor", "c1"],
@@ -344,6 +346,7 @@ CLI_ARGUMENTS = {
     ("work.create", "reviewer_fee"): ["--reviewer", AGENT, "--reviewer-fee", "2"],
     ("work.accept", "review"): ["--rating", "80"],
     ("work.reviewer.set", "reviewer"): None, ("work.successor.set", "successor"): None, ("work.reveal", "answer"): None, ("work.reveal", "salt"): None, ("work.settle", "tx_hash"): None, ("work.promise", "amount_usdc"): None,
+    ("work.off_task.set", "off_task"): None,
     ("updates.get", "wait"): ["--wait", "5"], ("updates.dispose", "ids"): None, ("updates.dispose", "state"): None,
     ("updates.mark_read", "ids"): None, ("updates.mark_read", "all"): ["--all"],
     ("offering.publish", "name"): None, ("offering.publish", "title"): None, ("offering.publish", "price"): None, ("offering.publish", "pay_to"): None,

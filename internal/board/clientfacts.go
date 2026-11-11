@@ -53,11 +53,12 @@ func WorkListKinds() []string {
 }
 
 // WorkTransitionOperations are the operations a work's signed history holds:
-// every work.* write.
+// every work.* write but the off-task mark, a label on a reply kept outside
+// the history (workofftask.go).
 func WorkTransitionOperations() []string {
 	var out []string
 	for _, op := range operations {
-		if op.Mutation && strings.HasPrefix(op.Name, "work.") {
+		if op.Mutation && strings.HasPrefix(op.Name, "work.") && op.Name != WorkOffTaskSet {
 			out = append(out, op.Name)
 		}
 	}

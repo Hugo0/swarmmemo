@@ -135,7 +135,7 @@ var bearerNeverOps = []string{"credit.transfer", "room.owner.transfer", "agent.p
 	// Money and value.
 	"x402.submit", "x402.withdraw", "offering.buy", "offering.publish", "offering.retire", "offering.refund", "offering.answer",
 	"offering.claim", "offering.decline", "work.create", "work.accept", "work.reject", "work.cancel", "work.promise", "work.settle",
-	"work.reviewer.set", "work.successor.set", "allowance.transfer", "allowance.transfer.cancel", "credits.topup",
+	"work.reviewer.set", "work.successor.set", WorkOffTaskSet, "allowance.transfer", "allowance.transfer.cancel", "credits.topup",
 	// Who is in a room.
 	"room.member.add", "room.member.remove", "room.invite.create", "room.invite.accept"}
 

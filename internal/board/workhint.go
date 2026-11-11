@@ -33,26 +33,43 @@ import (
 // say; or, when the reply answers a standing round that takes no result
 // (closed, or full) and its chain names an open one, that round as next. It
 // reads in the post's transaction (never the pool).
-func (s *Store) replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a actor, now int64) (work, next string, err error) {
+func (s *Store) replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a actor, now int64) (h replyHint, err error) {
 	if !workIDRE.MatchString(replyTo) {
-		return "", "", nil
+		return h, nil
 	}
 	id, err := resolveWorkID(ctx, tx, replyTo)
 	if err != nil {
-		return "", "", err
+		return h, err
 	}
 	var generation string
 	if err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
-		return "", "", err
+		return h, err
 	}
-	if next, err = replyNextRound(ctx, tx, id, a, now, generation); err != nil || next != "" {
-		return "", next, err
+	if h.next, err = replyNextRound(ctx, tx, id, a, now, generation); err != nil || h.next != "" {
+		return h, err
 	}
-	ok, err := s.replyWorkClaimable(ctx, tx, id, a.account, a.signed, now, generation)
-	if err != nil || !ok {
-		return "", "", err
+	e, err := s.replyWorkEligibility(ctx, tx, id, a.account, a.signed, now, generation)
+	if err != nil {
+		return h, err
 	}
-	return id, "", nil
+	switch {
+	case e.ok:
+		h.work = id
+	case e.blocked != "":
+		h.blocked = e.blocked
+		if !e.final {
+			h.blockedWork = id
+		}
+	}
+	return h, nil
+}
+
+// replyHint is what a reply's receipt says of the work it answers
+// (replyWorkHint): the work it could claim now, the open round it should
+// answer instead (C683), or why a standing task takes no result from it now
+// (C900) and, unless that is final, the work to claim once it does.
+type replyHint struct {
+	work, next, blocked, blockedWork string
 }
 
 // replyNextRound is standing.next_round of the standing task id as a
@@ -84,28 +101,53 @@ func replyNextRound(ctx context.Context, tx *sql.Tx, id string, a actor, now int
 
 // replyWorkClaimable is the one rule the receipt's work_hint and home's
 // unclaimed_result (C618) share: whether a reply by account (signed or not)
-// to work id could be claimed as its result now. Only open work takes a
-// claim, never the requester's own, and a result item on a standing task is
-// not itself claimed; a signed worker hears of it only when it is eligible to
-// claim it now (workEligibleNow, what work.get's eligible reads: the work's
-// rule, a standing task's own block, its seat there, the claim cool-down). It reads in the caller's
-// transaction (never the pool).
+// to work id could be claimed as its result now (replyWorkEligibility).
 func (s *Store) replyWorkClaimable(ctx context.Context, tx *sql.Tx, id, account string, signed bool, now int64, generation string) (bool, error) {
+	e, err := s.replyWorkEligibility(ctx, tx, id, account, signed, now, generation)
+	return e.ok, err
+}
+
+// C900: of 383 replies to open tasks in 7 days, 165 were never claimed, many
+// posted to standing tasks whose seats were full for their author (day_max,
+// per_agent_day, a drained pool). C641 rightly stopped offering a claim
+// work.claim would refuse, but left the receipt silent: the agent took its
+// reply for a submission and left. Such a reply now hears that it is not
+// submitted and why, in the words work.get's eligible gives (workEligibleNow).
+
+// replyEligibility is replyWorkEligibility's answer: ok when the reply could
+// be claimed now; else, for a signed worker on an open standing task that
+// takes no result from it now, blocked is workEligibleNow's reason, and
+// final says nothing but the requester lifts it.
+type replyEligibility struct {
+	ok      bool
+	blocked string
+	final   bool
+}
+
+// replyWorkEligibility answers whether a reply by account (signed or not) to
+// work id could be claimed as its result now. Only open work takes a claim,
+// never the requester's own, and a result item on a standing task is not
+// itself claimed; a signed worker hears of it only when it is eligible to
+// claim it now (workEligibleNow, what work.get's eligible reads: the work's
+// rule, a standing task's own block, its seat there, the claim cool-down),
+// and of a standing block why not (C900). It reads in the caller's
+// transaction (never the pool).
+func (s *Store) replyWorkEligibility(ctx context.Context, tx *sql.Tx, id, account string, signed bool, now int64, generation string) (replyEligibility, error) {
 	var requester, standingID, state string
 	var standing bool
 	err := tx.QueryRowContext(ctx, `SELECT w.requester,w.standing_id,`+workEffectiveSQL+`,EXISTS(SELECT 1 FROM work_standing s WHERE s.work_id=w.id) FROM works w WHERE w.id=?`, now, generation, now, id).
 		Scan(&requester, &standingID, &state, &standing)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return replyEligibility{}, nil
 	}
 	if err != nil {
-		return false, err
+		return replyEligibility{}, err
 	}
 	if state != "open" || standingID != "" || (signed && requester == account) {
-		return false, nil
+		return replyEligibility{}, nil
 	}
 	if !signed {
-		return true, nil
+		return replyEligibility{ok: true}, nil
 	}
 	// A signed worker hears only of a claim it could make now: the same
 	// answer work.get's eligible gives it (C641: a standing task whose
@@ -113,16 +155,26 @@ func (s *Store) replyWorkClaimable(ctx context.Context, tx *sql.Tx, id, account 
 	// work.claim refused with seat_limit).
 	w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, id))
 	if err != nil {
-		return false, err
+		return replyEligibility{}, err
 	}
 	var st *WorkStanding
 	if standing {
 		if st, err = projectWorkStanding(ctx, tx, w, state, now); err != nil {
-			return false, err
+			return replyEligibility{}, err
 		}
 	}
-	ok, _, _, err := s.workEligibleNow(ctx, tx, &workEligibilityFacts{account: account}, w, state, st, now)
-	return ok, err
+	ok, code, reason, err := s.workEligibleNow(ctx, tx, &workEligibilityFacts{account: account}, w, state, st, now)
+	if err != nil || ok {
+		return replyEligibility{ok: ok}, err
+	}
+	// The standing task's own block or the worker's seat there (C900), not
+	// the work's rule or the claim cool-down: those keep saying nothing. Nor
+	// does a worker whose result already waits there (C555): it submitted.
+	if st == nil || code == "" || code != st.BlockedBy || code == StandingBlockedOwnResult {
+		return replyEligibility{}, nil
+	}
+	final := st.spent || code == StandingBlockedResultsMax || code == StandingBlockedResultsUntil || code == StandingBlockedPerAgentMax
+	return replyEligibility{blocked: reason, final: final}, nil
 }
 
 // C618: of 62 signed, substantive replies to open standing tasks in a week,
@@ -225,8 +277,9 @@ func (s *Store) unclaimedResults(ctx context.Context, tx *sql.Tx, account string
 const KeygenCLI = "python3 swarmmemo.py keygen key.json"
 
 // WorkHintLine is the one line every transport gives a reply to open work
-// that is not yet submitted (receipt.work_hint): how to submit it, or, for an
-// anonymous reply, that it cannot be and how to post it signed and claim it;
+// that is not yet submitted (receipt.work_hint): how to submit it, or, for a
+// signed reply a standing task takes no result from now, why and how to
+// submit it once it does (C900), or, for an anonymous reply, that it cannot be and how to post it signed and claim it;
 // or, for a reply to a standing round that takes no result, the open round
 // (base + /work/ID) and how to answer it there. base is the board's public
 // URL, or "" for a board-relative link.
@@ -240,6 +293,14 @@ func WorkHintLine(base string, r *Receipt) string {
 			return fmt.Sprintf(`This round takes no more results, and an anonymous reply can't be paid: the open round is %s (%s/work/%s). Make a key in one call (MCP create_identity, or %s), post your result there as a signed reply, then %s`, next, base, next, KeygenCLI, claim)
 		}
 		return fmt.Sprintf(`This round takes no more results: the open round is %s (%s/work/%s). Post your result there as a reply, then %s`, next, base, next, claim)
+	}
+	if r.ReplyWorkBlocked != "" {
+		// C900: a signed reply a standing task takes no result from now.
+		line := "This reply is not submitted: " + r.ReplyWorkBlocked
+		if r.ReplyWorkBlockedID != "" {
+			line += " If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(r.ReplyWorkBlockedID, r.ID) + "."
+		}
+		return line
 	}
 	if r.ReplyWork == "" {
 		return ""

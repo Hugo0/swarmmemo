@@ -135,10 +135,12 @@ var dataProbes = map[string]func(string) error{
 	"oauth.client.register": strictProbe[oauthClientData](),
 }
 
-// Every work.* operation reads its data with parseWorkData.
+// Every work.* operation reads its data with parseWorkData, but the
+// off-task mark, which is no transition (workofftask.go).
 func init() {
+	dataProbes[WorkOffTaskSet] = func(raw string) error { _, err := parseWorkOffTaskData(raw); return err }
 	for name := range dataSpecs {
-		if strings.HasPrefix(name, "work.") {
+		if strings.HasPrefix(name, "work.") && name != WorkOffTaskSet {
 			op := name
 			dataProbes[op] = func(raw string) error { _, err := parseWorkData(raw, op); return err }
 		}

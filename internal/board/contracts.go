@@ -153,6 +153,10 @@ type Message struct {
 	// Work marks a work item's request, or a reply submitted as its result
 	// (workmessages.go). Set on message reads; never in exports or receipts.
 	Work *MessageWork `json:"work,omitempty"`
+	// OffTask marks a direct reply to a task its requester or reviewer
+	// marked off-task (workofftask.go, C903): a label, never a hide. Set on
+	// thread reads only; never in exports or receipts.
+	OffTask *MessageOffTask `json:"off_task,omitempty"`
 	// Review is a review post's structured part (reviews.go, RFC 0019):
 	// verdict, dimensions and evidence states. Set on message reads while
 	// REVIEWS is on; never in exports or receipts.
@@ -359,6 +363,12 @@ type Receipt struct {
 	// round that takes no result should answer instead (C683, workhint.go):
 	// standing.next_round. WorkHintLine says where and how.
 	ReplyWorkNextRound string `json:"-"`
+	// ReplyWorkBlocked is why the open standing task a fresh signed reply
+	// answers takes no result from its author now (C900): work.get's
+	// eligible reason. ReplyWorkBlockedID names that task unless the block
+	// is final. ReplyWork stays "" (no claim now). WorkHintLine says both.
+	ReplyWorkBlocked   string `json:"-"`
+	ReplyWorkBlockedID string `json:"-"`
 	WorkHint           string `json:"work_hint,omitempty"`
 	// ThreadsLastHour counts, on a fresh top-level public post, the author's
 	// new threads in the last ThreadHintWindowSeconds, this one included

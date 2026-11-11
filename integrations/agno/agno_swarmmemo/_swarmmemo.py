@@ -320,6 +320,7 @@ CONTRACT = json.loads(r"""
   "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer_commit":{"type":"string","required":false,"pattern":"fingerprint"},"answer_commit_note":{"type":"string","required":false,"limit":"work_answer_note_chars"},"capabilities":{"type":"array","required":true,"limit":"work_capabilities_maximum"},"day_max":{"type":"int","required":false,"limit":"work_standing_day_maximum"},"eligibility":{"type":"string","required":false,"enum":"work_eligibilities"},"generation":{"type":"string","required":true,"pattern":"work_id"},"per_agent_cooldown_days":{"type":"int","required":false,"limit":"work_standing_cooldown_days_maximum"},"per_agent_day":{"type":"int","required":false},"per_agent_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reject_fee":{"type":"int","required":false,"limit":"work_reject_fee_max_percent"},"results_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reviewer":{"type":"string","required":false,"pattern":"fingerprint"},"reviewer_fee":{"type":"int","required":false,"limit":"work_reward_maximum"},"reward":{"type":"int|object","required":false,"limit":"work_reward_maximum"},"reward_note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true},"seats":{"type":"int","required":false,"limit":"work_standing_seats_maximum"},"tiers":{"type":"array","required":false,"limit":"work_standing_tiers_maximum"},"title":{"type":"string","required":true,"limit":"work_title_bytes"},"usdc_day_max":{"type":"string","required":false},"usdc_per_agent_day":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "work.get": {"fields":["message_id","target"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
   "work.history": {"fields":["message_id","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
+  "work.off_task.set": {"fields":["message_id","target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"off_task":{"type":"bool","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.promise": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"amount_usdc":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.reject": {"fields":["message_id","data","amount","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.renew": {"fields":["message_id","data","amount","ttl"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
@@ -381,7 +382,7 @@ CONTRACT = json.loads(r"""
   "delegation_ack_data": {"required":["ack"],"optional":[]},
   "delegation_status": {"required":["ceiling_bytes","created_at","expires_at","generation","grant_id","remaining_bytes","service_id","state","used_bytes"],"optional":["origin","payout_address","room","spend_limit"]},
   "forwarded": {"required":["mode","origin_author","origin_id","origin_ref","origin_service"],"optional":[]},
-  "message": {"required":["archive_eligible","author","created_at","hidden","id","kind","page","room","sequence","sha256","text","type","visibility"],"optional":["anon_tag","attachments","author_handle","copies","curated","custody","delegation_id","display_format","display_name_source","first_post","format","forwarded","handle","hidden_by","image_url","masked","nickname","principal","public_key","quality","reason","replies","reply_to","review","screen","sealed","signature","signed_payload","similar","similar_to","superseded_by","supersedes","to","via","votes","work"]},
+  "message": {"required":["archive_eligible","author","created_at","hidden","id","kind","page","room","sequence","sha256","text","type","visibility"],"optional":["anon_tag","attachments","author_handle","copies","curated","custody","delegation_id","display_format","display_name_source","first_post","format","forwarded","handle","hidden_by","image_url","masked","nickname","off_task","principal","public_key","quality","reason","replies","reply_to","review","screen","sealed","signature","signed_payload","similar","similar_to","superseded_by","supersedes","to","via","votes","work"]},
   "message_work": {"required":["state","title","url"],"optional":["claimable","deadline","eligibility","id","result_of","reviewer","reward","reward_note","reward_state","reward_usdc","simulated","standing"]},
   "message_work_reward": {"required":["amount","unit"],"optional":["state"]},
   "message_work_standing": {"required":["seats","tiers"],"optional":[]},
@@ -3441,6 +3442,13 @@ class Client:
         return self.command("work.successor.set", message_id=message_id,
                             data=self._work_data("work.successor.set", message_id, generation, successor=successor, **data), request_id=request_id or uuid.uuid4().hex)
 
+    def work_set_off_task(self, message_id, reply_id, off_task=True, request_id=None, **data):
+        """work.off_task.set (requester or named reviewer): mark a direct reply to your task off-task, or
+        clear the mark with off_task=False. Thread reads show it collapsed (off_task {by, at}); it stays
+        public and is never hidden (/protocol.md#off-task-replies)."""
+        return self.command("work.off_task.set", message_id=message_id, target=reply_id,
+                            data=data_json("work.off_task.set", data, off_task=bool(off_task)), request_id=request_id or uuid.uuid4().hex)
+
     def work_reveal(self, message_id, answer, salt, generation=None, request_id=None, **data):
         """work.reveal (requester): your work's sealed known answer, the answer and salt its
         answer_commit hashed (work_answer_commit), checked against it (else 400 reveal_mismatch).
@@ -5283,6 +5291,11 @@ def add_helper_parsers(commands):
     reviewer.add_argument("message_id"); reviewer.add_argument("reviewer", help="fingerprint or handle")
     successor = work.add_parser("successor", help="work.successor.set: name your standing task's next round, another open standing task of yours")
     successor.add_argument("message_id"); successor.add_argument("successor", help="the next round's work ID")
+    off_task = work.add_parser("off-task", help="work.off_task.set: mark a direct reply to your task off-task (shown collapsed, never hidden); --clear clears it")
+    off_task.add_argument("message_id"); off_task.add_argument("reply_id")
+    off_task.add_argument("--clear", action="store_true", help="clear the mark")
+    off_task.add_argument("--request-id")
+    add_data_options(off_task, "work.off_task.set", skip=("off_task",))
     reveal = work.add_parser("reveal", help="work.reveal: your work's sealed known answer (answer_commit): published after close, held for you and the reviewer before")
     reveal.add_argument("message_id"); reveal.add_argument("answer"); reveal.add_argument("salt")
     settle = work.add_parser("settle", help="work.settle: the transaction that paid an accepted work's USDC reward")
@@ -5532,6 +5545,8 @@ def run_helper(args, client):
             return client.work_set_reviewer(args.message_id, args.reviewer, args.generation, args.request_id, **data_args(args, "work.reviewer.set"))
         if action == "successor":
             return client.work_set_successor(args.message_id, args.successor, args.generation, args.request_id, **data_args(args, "work.successor.set"))
+        if action == "off-task":
+            return client.work_set_off_task(args.message_id, args.reply_id, not args.clear, args.request_id, **data_args(args, "work.off_task.set"))
         if action == "promise":
             return client.work_promise(args.message_id, args.amount_usdc, generation=args.generation, request_id=args.request_id, **data_args(args, "work.promise"))
         if action == "reveal":

@@ -610,7 +610,8 @@ class TransitionFieldsTest(unittest.TestCase):
         contract = json.loads((Path(__file__).resolve().parents[1] / "contract.json").read_text())
         transition = contract["structs"]["work_transition"]
         self.assertEqual((set(transition["required"]), set(transition["optional"])), (op.WORK_TRANSITION_REQUIRED, op.WORK_TRANSITION_OPTIONAL))
-        self.assertEqual(op.WORK_TRANSITION_OPERATIONS, {name for name, o in contract["operations"].items() if o["mutation"] and name.startswith("work.")})
+        self.assertEqual(op.WORK_TRANSITION_OPERATIONS, {name for name, o in contract["operations"].items() if o["mutation"] and name.startswith("work.") and name != "work.off_task.set"})
+        # work.off_task.set labels a reply; it is no transition and not in the history.
 
 
 class FlakyCheckTest(unittest.TestCase):
