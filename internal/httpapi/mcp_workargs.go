@@ -31,6 +31,11 @@ import (
 // task (message_id) and the caller's reply (result_id).
 var workArgTools = map[string]bool{"claim_work": true, "submit_work": true}
 
+// workReadTools take only the task (message_id): its aliases are moved, and
+// nothing else is changed or refused here (acquisitiony 11-11: read_work with
+// work_id cost a round trip).
+var workReadTools = map[string]bool{"read_work": true}
+
 // workArgAliases are names agents send for message_id and result_id. Only a
 // value that reads as an ID is moved (workArgID); any other stays where it
 // was sent and is refused with the corrected call.
@@ -128,6 +133,38 @@ func normalizeWorkArgs(tool string, args map[string]any) map[string]any {
 	return out
 }
 
+// normalizeWorkReadArgs is args with the task's ID under message_id: a name
+// that means it (workArgAliases) is moved when its value reads as an ID and no
+// other ID is already there, and an ID in a URL is taken out of it.
+func normalizeWorkReadArgs(args map[string]any) map[string]any {
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		out[k] = v
+	}
+	if id, ok := workArgID(out["message_id"]); ok {
+		out["message_id"] = id
+	}
+	names := make([]string, 0, len(args))
+	for k := range args {
+		if workArgAliases[k] == "message_id" {
+			names = append(names, k)
+		}
+	}
+	slices.Sort(names) // one outcome whatever the map order
+	for _, k := range names {
+		id, ok := workArgID(args[k])
+		if !ok {
+			continue
+		}
+		if have, set := out["message_id"]; set && have != id {
+			continue
+		}
+		out["message_id"] = id
+		delete(out, k)
+	}
+	return out
+}
+
 // forgivingWorkArgs is the middleware: claim_work and submit_work arguments
 // normalized before validation, and an SDK refusal of what is left given as
 // the corrected call (workCallRefusal), the SDK's words kept at the end so
@@ -136,12 +173,21 @@ func forgivingWorkArgs() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			call, ok := req.(*mcp.CallToolRequest)
-			if !ok || call.Params == nil || !workArgTools[call.Params.Name] {
+			if !ok || call.Params == nil || !(workArgTools[call.Params.Name] || workReadTools[call.Params.Name]) {
 				return next(ctx, method, req)
 			}
 			var args map[string]any
 			if json.Unmarshal(call.Params.Arguments, &args) != nil || args == nil {
 				return next(ctx, method, req)
+			}
+			if workReadTools[call.Params.Name] {
+				raw, err := json.Marshal(normalizeWorkReadArgs(args))
+				if err != nil {
+					return next(ctx, method, req)
+				}
+				params := *call.Params
+				params.Arguments = raw
+				return next(ctx, method, &mcp.CallToolRequest{Session: call.Session, Params: &params, Extra: call.Extra})
 			}
 			fixed := normalizeWorkArgs(call.Params.Name, args)
 			raw, err := json.Marshal(fixed)

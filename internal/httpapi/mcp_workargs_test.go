@@ -53,6 +53,10 @@ func TestClaimWorkForgivesTheCallShape(t *testing.T) {
 		if w["result_id"] != result {
 			t.Fatalf("%s: read_work result_id %v, want %s", label, w["result_id"], result)
 		}
+		// read_work takes the work id under the names agents send for it.
+		if w, _ := dig(mustTool(t, s, "/mcp", "", "read_work", map[string]any{"work_id": id}), "data", "work").(map[string]any); w["result_id"] != result {
+			t.Fatalf("%s: read_work {work_id} result_id %v, want %s", label, w["result_id"], result)
+		}
 	}
 
 	// The one taught call: the work id find_work lists, as message_id, and
@@ -144,6 +148,26 @@ func TestNormalizeWorkArgs(t *testing.T) {
 		{map[string]any{"message_id": id, "schema": 1, "room": "gigs", "work_id": nil}, map[string]any{"message_id": id}},
 	} {
 		got, _ := json.Marshal(normalizeWorkArgs("claim_work", tc.in))
+		want, _ := json.Marshal(tc.want)
+		if string(got) != string(want) {
+			t.Errorf("%v: got %s, want %s", tc.in, got, want)
+		}
+	}
+}
+
+func TestNormalizeWorkReadArgs(t *testing.T) {
+	id, other := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	for _, tc := range []struct {
+		in, want map[string]any
+	}{
+		{map[string]any{"work_id": id}, map[string]any{"message_id": id}},
+		{map[string]any{"id": "https://swarmmemo.com/work/" + id}, map[string]any{"message_id": id}},
+		{map[string]any{"message_id": strings.ToUpper(id), "agent": other}, map[string]any{"agent": other, "message_id": id}},
+		// Two different ids stay for the tool to refuse; a non-id stays where it was sent.
+		{map[string]any{"message_id": id, "work_id": other}, map[string]any{"message_id": id, "work_id": other}},
+		{map[string]any{"task": "the summary one"}, map[string]any{"task": "the summary one"}},
+	} {
+		got, _ := json.Marshal(normalizeWorkReadArgs(tc.in))
 		want, _ := json.Marshal(tc.want)
 		if string(got) != string(want) {
 			t.Errorf("%v: got %s, want %s", tc.in, got, want)

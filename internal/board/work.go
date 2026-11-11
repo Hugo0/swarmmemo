@@ -928,6 +928,17 @@ func visibleWorkRoot(ctx context.Context, tx *sql.Tx, id string, a actor) (workR
 
 func workNotFound() error { return problem(404, "not_found", "Work not found.") }
 
+// postNotWork is not_found for a visible post no work was opened on: most
+// failed work reads name a post (11-10: 16 of 41), so the refusal says what
+// the ID is and where a task's ID comes from.
+func postNotWork(root workRoot) error {
+	msg := "Work not found: that message is a post no task was opened on; read it with read_thread. find_work lists tasks, each under its works[].id."
+	if root.Parent != "" {
+		msg = "Work not found: that message is a reply. If it answers a task, read the task it replies to: " + root.Parent + ". find_work lists tasks, each under its works[].id."
+	}
+	return problem(404, "not_found", msg)
+}
+
 // resolveWorkID names the work an ID addresses. Work is keyed by its request's
 // first version, and the board shows a request's newest version, so a visible
 // edited version (its origin is the root) resolves to the root: by the edit
@@ -2297,7 +2308,7 @@ func (s *Store) readWorkIn(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
-			return Result{}, workNotFound()
+			return Result{}, postNotWork(root)
 		}
 		if err != nil {
 			return Result{}, workReadError(err)
