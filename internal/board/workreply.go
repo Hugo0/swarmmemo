@@ -130,13 +130,24 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	if err != nil {
 		return Result{}, err
 	}
+	// A reply that already opened its own task is accepted there, not
+	// opened again through the standing task (C704). Submitted, the accept
+	// goes to that item with its fence in this same step (C909); in any
+	// other state the refusal says where it stands.
+	var own *workRow
 	if standing != nil {
-		// A reply that already opened its own task is accepted there, by
-		// its id and fence, not again through the standing task (C704).
-		if own, ok, err := ownResultRow(ctx, tx, c.Target, w.ID); err != nil {
+		if row, ok, err := ownResultRow(ctx, tx, c.Target, w.ID); err != nil {
 			return Result{}, err
 		} else if ok {
-			return Result{}, problem(409, "result_in_use", ownResultAccept(own))
+			ownState, err := effectiveWork(ctx, tx, row.ID, generation, now)
+			if err != nil {
+				return Result{}, err
+			}
+			if ownState != "submitted" {
+				row.State = ownState
+				return Result{}, problem(409, "result_in_use", ownResultAccept(row))
+			}
+			own = &row
 		}
 	}
 	worker := actor{id: author.id, account: author.account, publicKey: author.publicKey, signed: true}
@@ -151,6 +162,8 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	var item WorkAck
 	how := "the board claimed and submitted it for its author in this step"
 	switch {
+	case own != nil:
+		item, how = WorkAck{WorkID: own.ID, State: "submitted", Fence: own.Fence}, "it was already submitted as its own task ("+own.ID+"), accepted there"
 	case standing != nil || state == "open":
 		item, err = step("work.claim", 0)
 	case state == "claimed" && w.Worker == author.account:

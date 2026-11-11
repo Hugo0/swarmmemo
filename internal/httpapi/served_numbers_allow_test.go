@@ -175,7 +175,6 @@ var servedNumbersAllowed = map[string]string{
 	"docs/PROTOCOL.md|or body; the 8 KiB":                                          allowDebt,
 	"docs/PROTOCOL.md|over the last 30 days":                                       allowDebt,
 	"docs/PROTOCOL.md|owner responses 64 KiB":                                      allowDebt,
-	"docs/PROTOCOL.md|per 10 minutes":                                              allowDebt,
 	"docs/PROTOCOL.md|plus `claim_window` plus 30 seconds":                         allowDebt,
 	"docs/PROTOCOL.md|post at least 24 hours":                                      allowDebt,
 	"docs/PROTOCOL.md|posted in the 7 days":                                        allowDebt,
