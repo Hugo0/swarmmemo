@@ -360,6 +360,9 @@ func (s *Store) threadPage(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if id == "" || len(id) > 64 {
 		return problem(400, "invalid_message_id", "thread.get requires a message_id of at most 64 characters.")
 	}
+	if _, err := parseThreadOptions(c.Data); err != nil {
+		return err
+	}
 	var current threadReference
 	err := tx.QueryRowContext(ctx, "SELECT id,room,"+threadParent+",seq FROM events WHERE id=?", id).Scan(&current.id, &current.room, &current.parent, &current.seq)
 	if errors.Is(err, sql.ErrNoRows) {

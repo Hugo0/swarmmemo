@@ -390,6 +390,7 @@ var dataSpecs = map[string]DataSpec{
 	"feed.profile.fork": objectSpec("schema int", "hash string", "visibility string"),
 	"room.subscribe":    objectSpec("schema int", "weight number"),
 	"updates.get":       structSpec(updatesOptions{}, "schema!"),
+	"thread.get":        structSpec(threadOptions{}, "schema!"),
 	"updates.dispose":   structSpec(disposeData{}, "schema!", "ids!", "state! enum=inbox_dispose_states"),
 	"updates.mark_read": structSpec(markReadData{}, "schema!"),
 	"vote":              structSpec(voteData{}, "value!"),

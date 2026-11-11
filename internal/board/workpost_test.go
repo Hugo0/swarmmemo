@@ -24,6 +24,8 @@ func postWork(s *Store, key ed25519.PrivateKey, text string, work map[string]any
 
 func TestPostedWorkOpensInOneCall(t *testing.T) {
 	s := rewardStore(t)
+	// The unsponsored refusal (worksponsor_test.go covers sponsorship).
+	setSponsorParams(t, s, `{"schema":1,"task_reward_max":0,"task_daily_per_identity":1,"task_daily_total":2000}`)
 	owner := keyFor(182)
 	requester := keyID(owner)
 	nothing := func(what string) {

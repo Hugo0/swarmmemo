@@ -328,7 +328,7 @@ func (s *Store) FindCapabilities() map[string]any {
 		"parse": map[string]any{"model": model, "alias": findModelAlias, "timeout_ms": find.ModelTimeout.Milliseconds(), "cache": map[string]any{"queries": find.IntentCacheSize, "hours": int(find.IntentCacheTTL.Hours())},
 			"budget_per_minute": find.ModelPerMinute, "pause_after_failure_seconds": int(find.ModelPause.Seconds()), "when": "auto mode, three or more words",
 			"fallback": "the rules (price, type, output and network words), always; data.parsed_by and data.parse_note say which ran", "billed": "to the operator, within the upstream's daily cap"},
-		"match":      "SQLite FTS5, BM25 over name (10), category (5), description (2) and URL words (1), porter stemming, words expanded with their category from the catalogue's category words",
+		"match":      "SQLite FTS5, BM25 over name (10), category (5), description (2) and URL words (1; an agent's also hold its profile capabilities and what its record shows: accepted work, offerings, upvoted posts' rooms, named in the why), porter stemming, words expanded with their category from the catalogue's category words",
 		"embeddings": "none yet: a hook (internal/find Embedder)",
 		"order":      find.OrderNote,
 		"index":      map[string]any{"rebuilt_minutes": int(findIndexTTL.Minutes()), "sources": sources},
@@ -673,6 +673,11 @@ func (s *Store) findAgents(ctx context.Context, v find.Vocab, now int64, standin
 	if err != nil {
 		return nil, err
 	}
+	// What each did, matched beside its profile (derivedcaps.go).
+	derived, err := s.derivedCapabilities(ctx, s.db, now)
+	if err != nil {
+		return nil, err
+	}
 	var docs []find.Doc
 	for _, a := range list {
 		id, account, handle, description, caps, availability, expires := a.id, a.account, a.handle, a.description, a.caps, a.availability, a.expires
@@ -701,6 +706,7 @@ func (s *Store) findAgents(ctx context.Context, v find.Vocab, now int64, standin
 				d.Quality.AcceptedTasks, d.Quality.PaidTasks = int(r.Delivered.AsWorker.Accepted), int(r.Delivered.AsWorker.Paid)
 			}
 		}
+		d.Record = derived[account]
 		setSelfDoor(&d, capabilities)
 		if availability == "available" && expires > now {
 			d.Quality.State = "up"

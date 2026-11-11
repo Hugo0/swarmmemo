@@ -55,6 +55,7 @@ var mcpArgBounds = map[string]mcpBound{
 	"offering_calls.limit":         boundMax(board.OfferingCallsPageMax),
 	"find.limit":                   boundMax(find.PageMax),
 	"read_updates.wait":            boundMax(board.UpdatesWaitMax),
+	"read_thread.wait":             boundMax(board.UpdatesWaitMax),
 	"claim_work.ttl":               boundMax(board.WorkClaimTTLMax),
 	"create_invite.ttl":            boundMax(board.InviteTTLMax),
 	"raise_standing.bits":          boundMax(board.StandingPowBitsMax),

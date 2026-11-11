@@ -166,3 +166,40 @@ func TestFetchFlagsJavaScriptShells(t *testing.T) {
 		}
 	}
 }
+
+// C889: a shell whose text is mostly a loading placeholder, or a sliver of
+// a large page, is js_rendered too; a short page or an article that merely
+// mentions loading is not. Fixtures only, no network.
+func TestFetchFlagsPlaceholderShells(t *testing.T) {
+	nav := `<div class="menu"><a href="/">Home</a> <a href="/buy">Buy a business</a> <a href="/sell">Sell a business</a> <a href="/valuation">Free valuation</a> <a href="/learn">Learn</a> <a href="/login">Log in</a> <a href="/signup">Sign up</a> Over 400,000 businesses bought and sold. Join the marketplace for online businesses today.</div>`
+	footer := `<div class="bottom">Copyright 2026 Example Marketplace Pty Ltd. All rights reserved. Terms of service. Privacy policy. Contact us.</div>`
+	failed := `<!doctype html><html><head><title>Listing</title><script src="/bundle.js"></script></head><body>` + nav +
+		`<div class="error">Content failed to load. Please refresh the page.</div>` + footer + `<script>` + strings.Repeat("var a=1;", 200) + `</script></body></html>`
+	sliver := `<!doctype html><html><head><script>window.__DATA__=` + strings.Repeat(`{"key":"value"},`, 15000) + `0</script></head><body>` + nav + nav + footer + `</body></html>`
+	mentions := `<html><head><script>track()</script></head><body><h1>Why pages fail</h1><p>` + strings.Repeat("A page that shows loading... forever has a bug in its bundle, and the fix is to ship server HTML. ", 12) + `</p></body></html>`
+	plain := `<html><head><script>track()</script></head><body>` + nav + `<p>` + strings.Repeat("A short static note with real words. ", 6) + `</p>` + footer + `</body></html>`
+	serve := func(doc string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, doc)
+		}
+	}
+	s := newSite(t, false, map[string]http.HandlerFunc{"/failed": serve(failed), "/sliver": serve(sliver), "/mentions": serve(mentions), "/plain": serve(plain)})
+	r := newFetchRig(t, s, fetchOpts{})
+	for _, path := range []string{"/failed", "/sliver"} {
+		res := get(r.must("alice", noScreen("http://site.test"+path)), "result").(map[string]any)
+		if res["js_rendered"] != true || !strings.Contains(res["note"].(string), services.FetchJSRenderedNote) {
+			t.Fatalf("%s not flagged: %v %v", path, res["js_rendered"], res["note"])
+		}
+		// Past the old 200-byte rule: the new ones flag it.
+		if n := len(strings.TrimSpace(res["text"].(string))); n < 200 {
+			t.Fatalf("%s: text of %d bytes tests the old rule", path, n)
+		}
+	}
+	for _, path := range []string{"/mentions", "/plain"} {
+		res := get(r.must("alice", noScreen("http://site.test"+path)), "result").(map[string]any)
+		if _, ok := res["js_rendered"]; ok {
+			t.Fatalf("%s flagged: %v", path, res["note"])
+		}
+	}
+}

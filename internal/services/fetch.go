@@ -599,6 +599,10 @@ func (f *fetch) Admit(ctx context.Context, q allowance.Querier, c Call) error {
 	return nil
 }
 
+// FetchDeniedSelf is the details of fetch_denied on one of the board's own
+// hosts, which the board words as "read it with SwarmMemo's own tools".
+const FetchDeniedSelf = "swarmmemo"
+
 // denied refuses the board's own hosts, the configured ones and the
 // operator's denylist, each with its subdomains.
 func (f *fetch) denied(ctx context.Context, q allowance.Querier, host string) error {
@@ -608,7 +612,9 @@ func (f *fetch) denied(ctx context.Context, q allowance.Querier, host string) er
 		suffixes = append(suffixes, h)
 		for _, d := range f.own {
 			if h == d {
-				return refusal("fetch_denied")
+				// SwarmMemo itself: the refusal says to read it with its
+				// own read tools (C889).
+				return &allowance.Err{Code: "fetch_denied", Details: FetchDeniedSelf}
 			}
 		}
 		if f.cfg != nil {
@@ -1448,15 +1454,52 @@ func gzipInnerType(inner []byte, u *url.URL) string {
 const fetchJSShellText = 200
 
 // fetchJSRendered is whether an HTML page read whole is an empty shell a
-// script fills in (a single-page app): under fetchJSShellText of visible
-// text from at least 1 KiB of page with a <script>, or no text at all. A
-// page cut at the body cap is not judged: its text may come later.
+// script fills in (a single-page app): no text at all, or, from at least
+// 1 KiB of page with a <script>, under fetchJSShellText of visible text, or
+// (C889) under fetchJSShellTextMax of text that is either a sliver of a large
+// page (under 0.5% of 64 KiB or more) or short enough to be little more than
+// a loading placeholder ("content failed to load", "enable JavaScript",
+// "loading..."). A page cut at the body cap is not judged: its text may come
+// later.
 func fetchJSRendered(page *fetchedPage, html []byte) bool {
-	if page.Format != "markdown" || page.Truncated || len(html) < 1024 || len(strings.TrimSpace(page.Text)) >= fetchJSShellText {
+	if page.Format != "markdown" || page.Truncated || len(html) < 1024 {
 		return false
 	}
-	return len(page.Text) == 0 || containsFold(html, "<script")
+	text := strings.TrimSpace(page.Text)
+	switch {
+	case len(text) == 0:
+		return true
+	case len(text) >= fetchJSShellTextMax || !containsFold(html, "<script"):
+		return false
+	case len(text) < fetchJSShellText:
+		return true
+	case len(html) >= 64<<10 && len(text)*200 < len(html):
+		return true
+	}
+	if len(text) >= fetchJSPlaceholderText {
+		return false
+	}
+	lower := strings.ToLower(text)
+	for _, p := range fetchJSPlaceholders {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
 }
+
+// fetchJSShellTextMax is the visible text at or above which a page is never
+// taken as a script shell; fetchJSPlaceholderText the text under which a
+// loading placeholder marks one (fetchJSRendered).
+const (
+	fetchJSShellTextMax    = 1000
+	fetchJSPlaceholderText = 600
+)
+
+// fetchJSPlaceholders are what a script shell shows in place of its content,
+// lower case.
+var fetchJSPlaceholders = []string{"failed to load", "enable javascript", "javascript is required", "requires javascript",
+	"javascript is disabled", "turn on javascript", "loading...", "loading\u2026"}
 
 // containsFold reports whether b contains the ASCII lowercase needle in
 // any case, without copying b.

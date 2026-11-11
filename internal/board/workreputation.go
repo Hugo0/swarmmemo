@@ -110,8 +110,16 @@ func (side *WorkRecordSide) add(outcome string, at, credits, usdc int64) {
 // (workAccountsSQL) keeps the work items the accounts could be on, so a
 // profile's read never computes every claim on the board (C701), the second
 // is the exact filter on requester and worker.
-var workAttemptsSQL = `SELECT requester,worker,outcome,at,credits,usdc FROM (
- SELECT w.requester AS requester,w.reviewer AS reviewer,` + transitionAccountSQL("c") + ` AS worker,
+var workAttemptsSQL = `SELECT requester,worker,outcome,at,credits,usdc FROM (` + workAttemptsFromSQL
+
+// workAcceptedSQL is workAttemptsSQL's accepted claims as (worker, work
+// item): the same filters, so derived capabilities (derivedcaps.go) count
+// exactly the work a work record counts. Same arguments and %s slots.
+var workAcceptedSQL = `SELECT worker,work_id FROM (` + workAttemptsFromSQL + ` AND outcome='accepted'`
+
+// workAttemptsFromSQL is the body both read.
+var workAttemptsFromSQL = `
+ SELECT w.id AS work_id,w.requester AS requester,w.reviewer AS reviewer,` + transitionAccountSQL("c") + ` AS worker,
   CASE WHEN v.operation='work.accept' THEN 'accepted' WHEN v.operation='work.reject' THEN 'rejected'
    WHEN NOT EXISTS(SELECT 1 FROM work_transitions s WHERE s.work_id=w.id AND s.fence=c.fence AND s.state='submitted')
     AND (EXISTS(SELECT 1 FROM work_transitions n WHERE n.work_id=w.id AND n.sequence>c.sequence AND n.operation='work.claim')

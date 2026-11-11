@@ -38,6 +38,7 @@ func mcpSchemaBounds() map[string]float64 {
 		"find.limit.maximum": find.PageMax,
 		// updates.get data wait (board/updates.go).
 		"read_updates.wait.maximum": board.UpdatesWaitMax,
+		"read_thread.wait.maximum":  board.UpdatesWaitMax,
 		// search_swarmmemo_tools (mcp_dispatch.go searchTools).
 		"search_swarmmemo_tools.limit.minimum":   1,
 		"search_swarmmemo_tools.limit.maximum":   searchLimitMax,

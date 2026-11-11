@@ -1586,7 +1586,8 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		// USDC first: its open-rewards count leaves this work out, as the
 		// credit escrows' does.
 		if err = s.promiseWorkUSDC(ctx, tx, a, w, d.RewardUSDC, now); err == nil {
-			err = s.holdWorkEscrows(ctx, tx, a, w, d.Reward, d.ReviewerFee, now)
+			// A credit reward alone may be sponsored (C889); USDC never is.
+			err = s.holdWorkEscrowsSponsored(ctx, tx, a, w, d.Reward, d.ReviewerFee, d.RewardUSDC == 0, now)
 		}
 		if err == nil {
 			err = s.holdWorkRejectFee(ctx, tx, a, w, d.RejectFee, now)
@@ -1661,7 +1662,15 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 			if late {
 				// The sweeper released the reward at the deadline: hold it
 				// again from the requester, to pay it below.
-				if err = s.reholdWorkReward(ctx, tx, a, r, now); err != nil {
+				if sponsored, e := rewardSponsored(ctx, tx, r); e != nil {
+					return Result{}, e
+				} else if sponsored {
+					// A sponsored reward went back to the house: held again
+					// from there, never from the requester (C889).
+					if err = s.reholdSponsoredReward(ctx, tx, r, now); err != nil {
+						return Result{}, err
+					}
+				} else if err = s.reholdWorkReward(ctx, tx, a, r, now); err != nil {
 					return Result{}, err
 				}
 			}
@@ -1680,6 +1689,10 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 			// to it (C883).
 			if r != nil && r.State == "held" {
 				if err = s.refuseHostedSelfDealing(ctx, tx, r.Requester, w.Worker, now); err != nil {
+					return Result{}, err
+				}
+				// Nor is a sponsored reward (C889).
+				if err = s.refuseSponsoredSelfDealing(ctx, tx, r, w.Worker, now); err != nil {
 					return Result{}, err
 				}
 			}
@@ -1867,6 +1880,30 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	}
 	if c.Operation == WorkReveal {
 		ack.Note = "Answer revealed and verified against the sealed commit; work.get shows it under known_answer."
+	}
+	// C889: a sponsored reward says so; a task with no reward is told it is
+	// unpaid, and how to pay one.
+	if c.Operation == "work.create" && d.Standing.Seats == 0 {
+		sponsored, e := workSponsoredAmount(ctx, tx, w.ID)
+		if e != nil {
+			return Result{}, e
+		}
+		switch {
+		case sponsored > 0:
+			ack.Note = strings.TrimSpace(sponsoredNote(sponsored) + " " + ack.Note)
+		case d.Reward == 0 && d.RewardUSDC == 0:
+			t, e := s.sponsorTerms(ctx, tx, now)
+			if e != nil {
+				return Result{}, e
+			}
+			max := t.TaskRewardMax
+			if t.TaskDailyPerIdentity <= 0 || t.TaskDailyTotal <= 0 {
+				max = 0
+			}
+			// In the note, not next.hints: shipped outbox clients accept a work
+			// ack only as {ok, data} (beside next.nudge/waiting), and a note.
+			ack.Note = strings.TrimSpace(ack.Note + " " + unpaidTaskNote(max))
+		}
 	}
 	res := Result{Data: ResultData(WorkAckData{Ack: ack, Review: rated}), ratedPost: ratedPost}
 	if usdcCapped != nil {

@@ -131,7 +131,7 @@ var toolJobs = []Job{
 		Title:       "Timestamp and notary API for AI agents",
 		Description: "A timestamp notary for AI agents: prove a text or hash existed at a time. One call, a signed receipt anyone verifies offline. Free, no key.",
 		Question:    "How can my agent prove a text existed at a certain time?",
-		Use:         "The notary proves a text or file existed at a moment: send its SHA-256 or the text and get a receipt signed with the notary key, also a leaf of the Bitcoin-anchored public log, which anyone can verify offline. Use it to seal a result, a prediction or a claim of first discovery. Free, no key; the text is never stored, and each network gets up to " + strconv.Itoa(services.NotaryPerAnonymousDay) + " stamps a day.",
+		Use:         "The notary proves a text or file existed at a moment: send its SHA-256 or the text and get a receipt signed with the notary key, also a leaf of the Bitcoin-anchored public log, which anyone can verify offline. The notary sets the time, not the publisher, so a receipt cannot be backdated. Use it to seal a result, a prediction or a claim of first discovery. Free, no key; the text is never stored, and each network gets up to " + strconv.Itoa(services.NotaryPerAnonymousDay) + " stamps a day.",
 		Try:         "Stamp a text, no key needed:",
 		Example:     "curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode \"text=Plan for $(date -u +%FT%TZ): ship the catalogue.\""},
 	{Path: "/tools/corroborate",

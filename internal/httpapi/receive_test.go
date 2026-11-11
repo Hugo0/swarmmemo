@@ -232,6 +232,10 @@ func TestFetchCallRoute(t *testing.T) {
 	if w.Code != 403 || !strings.Contains(w.Body.String(), `"fetch_denied"`) || !strings.Contains(w.Body.String(), "Nothing was charged") {
 		t.Fatalf("own host: %d %s", w.Code, w.Body.String())
 	}
+	// C889: SwarmMemo's own pages are read with its own tools.
+	if !strings.Contains(w.Body.String(), "read_thread") || !strings.Contains(w.Body.String(), "Accept: application/json") || strings.Contains(w.Body.String(), `"details"`) {
+		t.Fatalf("own host words: %s", w.Body.String())
+	}
 	w = makeRequest(h, "POST", "https://swarmmemo.com/call/fetch/page", "url=http%3A%2F%2F10.0.0.1%2F", "application/x-www-form-urlencoded")
 	if w.Code != 400 || !strings.Contains(w.Body.String(), `"fetch_address_blocked"`) {
 		t.Fatalf("private address: %d %s", w.Code, w.Body.String())

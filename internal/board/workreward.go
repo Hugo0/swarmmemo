@@ -35,6 +35,7 @@ import (
 	"fmt"
 
 	"swarmmemo/internal/allowance"
+	"swarmmemo/internal/ledger"
 	"swarmmemo/internal/services"
 )
 
@@ -253,6 +254,13 @@ func (s *Store) holdWorkReward(ctx context.Context, tx *sql.Tx, a actor, w workR
 // hosted requester's reward counts against its rolling cap
 // (hostedWorkRewardCap); a standing task's pool is refused it before here.
 func (s *Store) holdWorkEscrows(ctx context.Context, tx *sql.Tx, a actor, w workRow, reward, fee, now int64) error {
+	return s.holdWorkEscrowsSponsored(ctx, tx, a, w, reward, fee, false, now)
+}
+
+// holdWorkEscrowsSponsored is holdWorkEscrows; with sponsorable (a plain
+// work.create with no USDC), a credit reward the requester's lasting credits
+// cannot back may be sponsored by the house (worksponsor.go, C889).
+func (s *Store) holdWorkEscrowsSponsored(ctx context.Context, tx *sql.Tx, a actor, w workRow, reward, fee int64, sponsorable bool, now int64) error {
 	if reward == 0 && fee == 0 {
 		return nil
 	}
@@ -283,7 +291,14 @@ func (s *Store) holdWorkEscrows(ctx context.Context, tx *sql.Tx, a actor, w work
 		if e.amount == 0 {
 			continue
 		}
-		h, charged, err := s.ledger.led.Escrow(ctx, tx, subject(a), allowance.Credit, e.amount, e.key+w.ID, w.Deadline, now)
+		var h ledger.Hold
+		var charged int64
+		var err error
+		if sponsorable && e.table == workRewardsTable {
+			h, charged, err = s.holdSponsorable(ctx, tx, a, w, e.amount, now)
+		} else {
+			h, charged, err = s.ledger.led.Escrow(ctx, tx, subject(a), allowance.Credit, e.amount, e.key+w.ID, w.Deadline, now)
+		}
 		if err != nil {
 			return fromAllowance(err)
 		}

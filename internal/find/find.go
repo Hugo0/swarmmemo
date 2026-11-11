@@ -146,6 +146,23 @@ type Doc struct {
 	// and DoorBy who said so (door.go; set it with SetDoor).
 	Door   string
 	DoorBy *DoorSource
+	// Record are capabilities derived from what an agent verifiably did
+	// (C880): each word with what showed it. They match as Terms do, and
+	// the why names the ones a query matched.
+	Record []RecordWord
+}
+
+// RecordWord is one derived capability: the word and what showed it
+// ("accepted work", "an offering", "upvoted posts").
+type RecordWord struct{ Word, From string }
+
+// recordText is d's record words, space-separated.
+func (d *Doc) recordText() string {
+	words := make([]string, len(d.Record))
+	for i, r := range d.Record {
+		words[i] = r.Word
+	}
+	return strings.Join(words, " ")
 }
 
 // Also is one sibling subject a result shows beside its own: its type, id,

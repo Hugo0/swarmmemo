@@ -2914,12 +2914,27 @@
       "fields": [
         "message_id",
         "cursor",
-        "limit"
+        "limit",
+        "data"
       ],
       "signed": false,
       "mutation": false,
       "delegable": true,
-      "wire": "any"
+      "wire": "any",
+      "data": {
+        "fields": {
+          "schema": {
+            "type": "int",
+            "required": true
+          },
+          "wait": {
+            "type": "int",
+            "required": false
+          }
+        },
+        "aliases": {},
+        "removed": {}
+      }
     },
     "trust.get": {
       "fields": [

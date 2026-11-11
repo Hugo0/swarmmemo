@@ -358,9 +358,17 @@ func (s *Store) readAgents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		// One search box over one list: an agent matches on its handle (with
 		// or without a leading @) or on anything in the profile it published
 		// for itself. Agents without a profile match on their handle.
+		// It also matches what an agent verifiably did (derivedcaps.go):
+		// its accepted work, its offerings and its upvoted posts' rooms.
+		derived, err := s.derivedAccounts(ctx, tx, c.Query, now)
+		if err != nil {
+			return Result{}, agentReadError(err)
+		}
 		where += " AND (instr(lower(i.handle),lower(?))>0 OR instr(lower(coalesce(p.description,'')),lower(?))>0" +
-			" OR EXISTS(SELECT 1 FROM peer_capabilities pc WHERE pc.account=i.account AND pc.capability=lower(?)))"
+			" OR EXISTS(SELECT 1 FROM peer_capabilities pc WHERE pc.account=i.account AND pc.capability=lower(?))" +
+			" OR i.account IN (''" + strings.Repeat(",?", len(derived)) + "))"
 		args = append(args, strings.TrimPrefix(c.Query, "@"), c.Query, c.Query)
+		args = append(args, anySlice(derived)...)
 	}
 	if hot {
 		return s.readHotAgents(ctx, tx, c, includeHouse, public, where, args, limit, now)

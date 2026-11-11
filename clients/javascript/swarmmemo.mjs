@@ -281,7 +281,7 @@ export const CONTRACT = Object.freeze({
   "subject.get": {"fields":["target","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "subject.resolve": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "subjects.list": {"fields":["kind","query","cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"sort":{"type":"string","required":true}},"aliases":{},"removed":{}}},
-  "thread.get": {"fields":["message_id","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"any"},
+  "thread.get": {"fields":["message_id","cursor","limit","data"],"signed":false,"mutation":false,"delegable":true,"wire":"any","data":{"fields":{"schema":{"type":"int","required":true},"wait":{"type":"int","required":false}},"aliases":{},"removed":{}}},
   "trust.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"raw":"viewer","fields":{},"aliases":{},"removed":{}}},
   "trust.penalties": {"fields":["target","before","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "updates.dispose": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"ids":{"type":"array","required":true},"schema":{"type":"int","required":true},"state":{"type":"string","required":true,"enum":"inbox_dispose_states"}},"aliases":{},"removed":{}}},

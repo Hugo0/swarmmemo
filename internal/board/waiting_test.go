@@ -196,3 +196,86 @@ func TestWaitSlotsServerCap(t *testing.T) {
 		t.Fatal("released slots must leave nothing behind")
 	}
 }
+
+// thread.get with a wait (C880): held until a newer visible post lands in
+// the thread, empty at the timeout, never ended by a hidden reply or by
+// activity elsewhere, and capped and refused as updates.get's waits are.
+func TestWaitingThreadRead(t *testing.T) {
+	s := openTest(t, updatesConfig())
+	root := run(t, s, Command{Operation: "post", Room: "lobby", Text: "A question."}).Receipt.ID
+	saved := run(t, s, Command{Operation: "thread.get", MessageID: root}).NextCursor
+	// wait=0 is today's read: at once, nothing new.
+	start := time.Now()
+	if res := run(t, s, Command{Operation: "thread.get", MessageID: root, Cursor: saved, Data: waitData(0)}); len(res.Messages) != 0 || time.Since(start) > 2*time.Second {
+		t.Fatalf("wait 0 must answer at once: %+v", res.Messages)
+	}
+	// A timed-out wait is an empty answer, as a caught-up read is.
+	start = time.Now()
+	res := run(t, s, Command{Operation: "thread.get", MessageID: root, Cursor: saved, Data: waitData(1)})
+	if len(res.Messages) != 0 || res.NextCursor == "" || time.Since(start) < time.Second {
+		t.Fatalf("a timed-out thread wait must be empty, after its wait: %+v", res)
+	}
+	if res.Next != nil && res.Next.WaitNeedsCursor != "" {
+		t.Fatalf("a wait held with a cursor must not carry wait_needs_cursor: %+v", res.Next)
+	}
+	if s.updateWaiters.Held() != 0 {
+		t.Fatal("a finished wait kept its slot")
+	}
+	// A hidden reply (a payload-free tombstone in the read) and activity
+	// elsewhere do not end the wait; a visible reply does.
+	hidden := run(t, s, signed(keyFor(5), Command{Operation: "post", Room: "lobby", Text: "Spam reply.", ReplyTo: root})).Receipt.ID
+	if err := s.Moderate(testContext, hidden, "test removal", true); err != nil {
+		t.Fatal(err)
+	}
+	start = time.Now()
+	done := waitIn(testContext, s, Command{Operation: "thread.get", MessageID: root, Cursor: saved, Data: waitData(UpdatesWaitMax)}, "198.51.100.9")
+	untilHeld(t, s, 1)
+	run(t, s, Command{Operation: "post", Room: "lobby", Text: "Another topic."})
+	select {
+	case got := <-done:
+		t.Fatalf("a hidden reply or activity elsewhere ended the wait: %+v %v", got.res.Messages, got.err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	answer := run(t, s, Command{Operation: "post", Room: "lobby", Text: "The answer.", ReplyTo: root}).Receipt.ID
+	select {
+	case got := <-done:
+		if got.err != nil || len(got.res.Messages) == 0 || got.res.Messages[len(got.res.Messages)-1].ID != answer {
+			t.Fatalf("the waiting thread read must return the new reply: %+v %v", got.res.Messages, got.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the waiting thread read did not wake on a reply")
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Fatal("the waiting thread read ran to its timeout")
+	}
+	untilHeld(t, s, 0)
+	// Without a cursor the first answer stands at once, with the notice.
+	start = time.Now()
+	if res = run(t, s, Command{Operation: "thread.get", MessageID: root, Data: waitData(5)}); len(res.Messages) == 0 || time.Since(start) > 2*time.Second || res.Next == nil || res.Next.WaitNeedsCursor == "" {
+		t.Fatalf("a thread wait with no cursor must answer at once with wait_needs_cursor: %+v", res.Next)
+	}
+	latest := res.NextCursor
+	// The per-address cap is the one updates.get's waits use, shared with them.
+	read := Command{Operation: "thread.get", MessageID: root, Cursor: latest, Data: waitData(UpdatesWaitMax)}
+	updates := Command{Operation: "updates.get", Cursor: run(t, s, Command{Operation: "updates.get", Limit: 200}).NextCursor, Data: waitData(UpdatesWaitMax)}
+	ctx, cancel := context.WithCancel(testContext)
+	defer cancel()
+	a := waitIn(ctx, s, read, "198.51.100.10")
+	b := waitIn(ctx, s, updates, "198.51.100.10")
+	untilHeld(t, s, 2)
+	if _, err := s.Execute(testContext, read, "198.51.100.10"); !isCode(err, "request_rate") {
+		t.Fatalf("a third waiting read from one address must be refused, got %v", err)
+	}
+	cancel()
+	for _, ch := range []<-chan waitAnswer{a, b} {
+		if got := <-ch; got.err != nil || len(got.res.Messages) != 0 {
+			t.Fatalf("a cancelled wait must answer empty: %+v %v", got.res.Messages, got.err)
+		}
+	}
+	untilHeld(t, s, 0)
+	for _, data := range []string{waitData(UpdatesWaitMax + 1), waitData(-1), `{"schema":1,"wait":"5"}`, `{"schema":1,"counts":true}`} {
+		if _, err := s.Execute(testContext, Command{Operation: "thread.get", MessageID: root, Cursor: latest, Data: data}, "test-origin"); !isCode(err, "invalid_request") {
+			t.Fatalf("%s: want invalid_request, got %v", data, err)
+		}
+	}
+}

@@ -76,8 +76,9 @@ func (s *Store) readAgentPostsIn(ctx context.Context, tx *sql.Tx, c Command, now
 		args = append(args, cursor.After)
 	}
 	if c.Query != "" {
-		where += " AND instr(lower(e.text),lower(?))>0"
-		args = append(args, c.Query)
+		term, termArgs := searchClause(c.Query)
+		where += " AND " + term
+		args = append(args, termArgs...)
 	}
 	limit := limitValue(c.Limit)
 	args = append(args, limit+1)

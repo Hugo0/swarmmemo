@@ -172,7 +172,7 @@ PY_NO_WRAPPER = {
        for op in ("agent.profile.publish", "allowance.get", "credits.topup", "delegation.revoke", "feed.get", "feed.profile.fork",
                   "feed.profile.get", "feed.profile.put", "hosted.claim", "hosted.recover", "hosted.token", "identity.unlink",
                   "key.backup.get", "key.backup.put", "offering.buy", "room.create", "room.policy.set", "room.style.check", "room.style.set",
-                  "room.subscribe", "spend_limit.set", "standing.work", "subjects.list", "work.renew")},
+                  "room.subscribe", "spend_limit.set", "standing.work", "subjects.list", "thread.get", "work.renew")},
     "standing.challenge": "link_wallet sends kind wallet only; other proof kinds and bonds go through Client.command with data_json",
     **{op: "device_request, device_request_get and device_approve send its whole data from their own arguments (the device subcommands); Client.command with data_json sends any field"
        for op in ("device.request", "device.request.get", "device.add")},

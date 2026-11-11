@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -10,7 +11,8 @@ import (
 )
 
 // Waiting reads: updates.get with data {"schema":1,"wait":SECONDS} holds the
-// read until something new concerns the caller, or the wait runs out, and the
+// read until something new concerns the caller, or the wait runs out (and
+// thread.get with the same data until a newer post is in the thread), and the
 // live text tail (httpapi) follows a public room. Both wake on Changes, which
 // every committed write closes, so a waiter never polls SQLite on a timer and
 // never holds a transaction while it waits.
@@ -189,11 +191,36 @@ func waitAddress(source string) string {
 // next.wait_needs_cursor (C317), rather than left to spin on a silent 0.2s
 // answer.
 func (s *Store) waitUpdates(ctx context.Context, cmd Command, source string, wait int) (Result, error) {
-	changed := s.Changes()
 	// Under INBOX_ENTRIES=read, taken before each read: a commit that
 	// moves neither the newest message nor the agent's newest entry cannot
 	// change a caught-up answer, so it does not re-run the read.
-	mark := s.inboxMarkFor(ctx, cmd)
+	return s.waitRead(ctx, cmd, source, wait, s.inboxMarkFor, caughtUp)
+}
+
+// waitThread answers thread.get with a wait (C880) as waitUpdates answers
+// updates.get: with a cursor and no newer visible post in the thread, the
+// read is held until one arrives or the wait ends, with the same slots,
+// caps and timed-out answer. A hidden reply reads as a payload-free
+// tombstone, which is nothing to wake for: only a visible post ends the wait.
+func (s *Store) waitThread(ctx context.Context, cmd Command, source string, wait int) (Result, error) {
+	noMark := func(context.Context, Command) inboxMark { return inboxMark{} }
+	return s.waitRead(ctx, cmd, source, wait, noMark, func(_ Command, res Result) bool {
+		for _, m := range res.Messages {
+			if !m.Hidden {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// waitRead is a waiting read: the ordinary read first, then, while caught
+// says its answer has nothing new, the same read again after each committed
+// write (skipped while markFor's mark has not moved) until one has or the
+// wait ends. Nothing holds a transaction or a connection while it waits.
+func (s *Store) waitRead(ctx context.Context, cmd Command, source string, wait int, markFor func(context.Context, Command) inboxMark, caught func(Command, Result) bool) (Result, error) {
+	changed := s.Changes()
+	mark := markFor(ctx, cmd)
 	res, err := s.executeCommand(ctx, cmd, source)
 	if err != nil {
 		return res, err
@@ -202,7 +229,7 @@ func (s *Store) waitUpdates(ctx context.Context, cmd Command, source string, wai
 		noteWaitNeedsCursor(&res)
 		return res, nil
 	}
-	if !caughtUp(cmd, res) {
+	if !caught(cmd, res) {
 		return res, nil
 	}
 	release, full := s.updateWaiters.Acquire(source, cmd.PublicKey)
@@ -235,7 +262,7 @@ func (s *Store) waitUpdates(ctx context.Context, cmd Command, source string, wai
 		case <-changed:
 		}
 		changed = s.Changes()
-		now := s.inboxMarkFor(ctx, cmd)
+		now := markFor(ctx, cmd)
 		if mark.ok && now == mark {
 			continue
 		}
@@ -244,7 +271,7 @@ func (s *Store) waitUpdates(ctx context.Context, cmd Command, source string, wai
 		if err != nil && ctx.Err() != nil {
 			return res, nil // ended mid re-read: the caught-up answer stands
 		}
-		if err != nil || !caughtUp(cmd, next) {
+		if err != nil || !caught(cmd, next) {
 			return next, err
 		}
 		res = next
@@ -267,4 +294,25 @@ func noteWaitNeedsCursor(res *Result) {
 		res.Next = &Next{}
 	}
 	res.Next.WaitNeedsCursor = waitNeedsCursorNote
+}
+
+// threadOptions is thread.get's optional data (C880): {"schema":1} with,
+// optionally, "wait":SECONDS (at most UpdatesWaitMax) to hold a read with a
+// cursor until a newer visible post arrives in the thread (waitThread).
+type threadOptions struct {
+	Schema int `json:"schema"`
+	Wait   int `json:"wait"`
+}
+
+func parseThreadOptions(raw string) (threadOptions, error) {
+	var o threadOptions
+	if raw == "" {
+		return o, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&o); err != nil || dec.More() || o.Schema != 1 || o.Wait < 0 || o.Wait > UpdatesWaitMax {
+		return o, problem(400, "invalid_request", fmt.Sprintf(`thread.get data is optional; when given it is {"schema":1} with, optionally, "wait":SECONDS (at most %d) to hold a read with a cursor until a newer post arrives, and nothing else.`, UpdatesWaitMax))
+	}
+	return o, nil
 }

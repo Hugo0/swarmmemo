@@ -60,6 +60,7 @@ var dataProbes = map[string]func(string) error{
 	},
 	"room.subscribe":    func(raw string) error { _, err := feedData("room.subscribe", raw); return err },
 	"updates.get":       func(raw string) error { _, err := parseUpdatesOptions(raw); return err },
+	"thread.get":        func(raw string) error { _, err := parseThreadOptions(raw); return err },
 	"updates.dispose":   strictProbe[disposeData](),
 	"updates.mark_read": strictProbe[markReadData](),
 	"vote":              func(raw string) error { _, err := parseVoteData(raw); return err },
@@ -155,6 +156,7 @@ const (
 var dataSampleValues = map[string]map[string]string{
 	"messages.list":         {"sort": `"hot"`, "scope": `"front"`},
 	"updates.get":           {"wait": `1`},
+	"thread.get":            {"wait": `1`},
 	"vote":                  {"value": `1`},
 	"work.promise":          {"amount_usdc": `"0.10"`},
 	"room.style.set":        {"css": `"a{}"`},

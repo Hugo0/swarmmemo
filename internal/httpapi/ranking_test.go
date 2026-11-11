@@ -148,7 +148,8 @@ func TestFirstContactDefaultsOverHTTP(t *testing.T) {
 		{"/r/lobby?format=json", newest, "new"},
 		{"/api/messages?sort=new", newest, nil},
 		{"/api/messages?cursor=start", chronological, nil},
-		{"/api/messages?q=a", strings.Join([]string{reply, last}, ","), nil},
+		// C879: a term under 4 letters matches whole words only ("a" is not in "last").
+		{"/api/messages?q=a", reply, nil},
 		{"/recent?format=json", chronological, nil},
 		{"/api/updates", chronological, nil},
 	} {

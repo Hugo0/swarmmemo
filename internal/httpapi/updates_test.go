@@ -235,3 +235,82 @@ func TestDirectoryDiscoveryEndpointsExist(t *testing.T) {
 		}
 	}
 }
+
+// C880: GET /api/thread/ID?cursor=…&wait=SECONDS and MCP read_thread wait
+// hold a caught-up thread read until a reply lands, answer empty when the
+// wait runs out, and refuse a wait past board.UpdatesWaitMax.
+func TestThreadWaitOverHTTPAndMCP(t *testing.T) {
+	store, err := board.Open(filepath.Join(t.TempDir(), "thread-wait.db"), board.Config{ServiceID: "swarmmemo.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	s := New(store, nil, Config{ServiceID: "swarmmemo.com", PublicURL: "https://swarmmemo.com"})
+	ctx := t.Context()
+	posted, err := store.Execute(ctx, board.Command{Operation: "post", Room: "lobby", Text: "Anyone know?"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := posted.Receipt.ID
+	read := func(query string) (int, map[string]any) {
+		w := makeRequest(s, "GET", "/api/thread/"+root+query, "", "")
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+	code, body := read("")
+	cursor, _ := body["next_cursor"].(string)
+	if code != 200 || cursor == "" {
+		t.Fatalf("thread read: %d %v", code, body)
+	}
+	// Timed out: 200, no new posts, after the wait.
+	start := time.Now()
+	code, body = read("?wait=1&cursor=" + url.QueryEscape(cursor))
+	if msgs, _ := body["messages"].([]any); code != 200 || len(msgs) != 0 || time.Since(start) < time.Second {
+		t.Fatalf("a timed-out thread wait: %d %v after %v", code, body["messages"], time.Since(start))
+	}
+	// wait=0 is today's read, at once.
+	start = time.Now()
+	if code, _ = read("?wait=0&cursor=" + url.QueryEscape(cursor)); code != 200 || time.Since(start) > 2*time.Second {
+		t.Fatalf("wait=0: %d after %v", code, time.Since(start))
+	}
+	for _, bad := range []string{"?wait=26&cursor=" + url.QueryEscape(cursor), "?wait=x", "?wait=1&wait=2"} {
+		if code, body = read(bad); code != 400 {
+			t.Fatalf("%s: want 400, got %d %v", bad, code, body)
+		}
+	}
+	// A reply posted while the read waits ends it with that reply.
+	replyWhenHeld := func(text string) <-chan string {
+		id := make(chan string, 1)
+		go func() {
+			for deadline := time.Now().Add(5 * time.Second); store.WaitingReads() == 0 && time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			}
+			res, err := store.Execute(ctx, board.Command{Operation: "post", Room: "lobby", Text: text, ReplyTo: root}, "test")
+			if err != nil {
+				id <- "error: " + err.Error()
+				return
+			}
+			id <- res.Receipt.ID
+		}()
+		return id
+	}
+	reply := replyWhenHeld("An answer.")
+	start = time.Now()
+	code, body = read("?wait=25&cursor=" + url.QueryEscape(cursor))
+	want := <-reply
+	msgs, _ := body["messages"].([]any)
+	if code != 200 || len(msgs) != 1 || msgs[0].(map[string]any)["id"] != want || time.Since(start) > 10*time.Second {
+		t.Fatalf("the waiting thread read must return the reply %s: %d %v", want, code, body["messages"])
+	}
+	cursor, _ = body["next_cursor"].(string)
+	// MCP: the same hold, and the wait input is bounded like read_updates'.
+	reply = replyWhenHeld("A second answer.")
+	result := mustTool(t, s, "/mcp", "", "read_thread", map[string]any{"message_id": root, "cursor": cursor, "wait": 25})
+	want = <-reply
+	if got, _ := result["messages"].([]any); len(got) != 1 || got[0].(map[string]any)["id"] != want {
+		t.Fatalf("MCP read_thread wait must return the reply %s: %v", want, result["messages"])
+	}
+	if _, failure := callTool(t, s, "/mcp", "", "read_thread", map[string]any{"message_id": root, "cursor": cursor, "wait": board.UpdatesWaitMax + 1}); failure == "" {
+		t.Fatal("MCP read_thread must refuse a wait past the maximum")
+	}
+}

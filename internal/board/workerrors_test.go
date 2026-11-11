@@ -16,6 +16,8 @@ import (
 // submitted and when to send it again.
 func TestWorkAndReplyRefusalsSayWhatToDo(t *testing.T) {
 	s := rewardStore(t)
+	// The unsponsored refusal (worksponsor_test.go covers sponsorship).
+	setSponsorParams(t, s, `{"schema":1,"task_reward_max":0,"task_daily_per_identity":1,"task_daily_total":2000}`)
 	owner, worker := keyFor(160), keyFor(161)
 	run(t, s, signed(owner, Command{Operation: "agent.register"}))
 	run(t, s, signed(worker, Command{Operation: "agent.register"}))

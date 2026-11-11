@@ -344,8 +344,9 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	// C821: a request carrying data.work opens as work here, in this
 	// transaction: a refusal of any work rule refuses the post too.
 	var work *WorkAck
+	var workHints []Hint
 	if data.Work != nil {
-		if work, err = s.openPostedWork(ctx, tx, c, a, id, data.Work, now); err != nil {
+		if work, workHints, err = s.openPostedWork(ctx, tx, c, a, id, data.Work, now); err != nil {
 			return Result{}, err
 		}
 	}
@@ -439,7 +440,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			return Result{}, err
 		}
 	}
-	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: replyWork, ReplyWorkAnonymous: (replyWork != "" || nextRound != "") && !a.signed, ReplyWorkNextRound: nextRound, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads, Work: work}}, nil
+	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: replyWork, ReplyWorkAnonymous: (replyWork != "" || nextRound != "") && !a.signed, ReplyWorkNextRound: nextRound, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads, Work: work}, hints: workHints}, nil
 }
 
 // claimOnPost returns the handle a signed post is stored under: always the
@@ -624,10 +625,12 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		where, args = append(where, term), append(args, termArgs...)
 	}
 	if c.Query != "" {
-		// The text test first: hidden is stored after the payload, so a
-		// search scan reads it only for the rows that match (C688).
-		where = append(where, "instr(lower(e.text),lower(?))>0 AND e.hidden=0")
-		args = append(args, c.Query)
+		// Stemmed terms (search.go, C879). The text test first: hidden is
+		// stored after the payload, so a search scan reads it only for the
+		// rows that match (C688).
+		term, termArgs := searchClause(c.Query)
+		where = append(where, term+" AND e.hidden=0")
+		args = append(args, termArgs...)
 	}
 	var opts ListOptions
 	if c.Operation == "messages.list" && c.Data != "" {
@@ -786,6 +789,11 @@ func (s *Store) readEvents(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, err
 		}
 		return Result{Messages: events, NextCursor: s.cursor(e.internalSequence), Data: map[string]any{"has_more": false}}, nil
+	}
+	if searchRanked(c, opts) {
+		// A search with no order reads by relevance, then merit (search.go).
+		res, err = s.readSearch(ctx, tx, c, a, opts, where, args, now)
+		return res, err
 	}
 	order := "DESC"
 	if c.Cursor != "" {

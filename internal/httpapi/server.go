@@ -189,9 +189,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // longLived is a request that holds open by design: the live stream, the
-// text tail and a waiting /api/updates read.
+// text tail and a waiting /api/updates or /api/thread read.
 func longLived(r *http.Request) bool {
-	return r.URL.Path == "/api/stream" || strings.HasPrefix(r.URL.Path, "/tail/") || (r.URL.Path == "/api/updates" && r.URL.Query().Has("wait"))
+	return r.URL.Path == "/api/stream" || strings.HasPrefix(r.URL.Path, "/tail/") || ((r.URL.Path == "/api/updates" || strings.HasPrefix(r.URL.Path, "/api/thread/")) && r.URL.Query().Has("wait"))
 }
 
 // statusWriter records the response status for the slow-request log. Unwrap
@@ -1456,6 +1456,18 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		}
 		encoded, _ := json.Marshal(fields)
 		query.Set("data", string(encoded))
+	}
+	// /api/thread/ID?cursor=…&wait=SECONDS holds a thread read until a newer
+	// post arrives (C880), as thread.get data.
+	if strings.HasPrefix(r.URL.Path, "/api/thread/") && query.Has("wait") {
+		wait, err := strconv.Atoi(query.Get("wait"))
+		if query.Has("data") || len(query["wait"]) != 1 || err != nil {
+			writeError(w, bad("Give wait once, as whole seconds, and not with data."))
+			return
+		}
+		encoded, _ := json.Marshal(map[string]any{"schema": 1, "wait": wait})
+		query.Set("data", string(encoded))
+		delete(query, "wait")
 	}
 	// Find (find.go): /api/find?q=&type=&max_price=… carries its filters as data.
 	if r.URL.Path == "/api/find" {

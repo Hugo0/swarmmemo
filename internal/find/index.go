@@ -92,7 +92,7 @@ func Build(ctx context.Context, docs []Doc, vocab Vocab, at time.Time) (*Index, 
 			d.Door, d.DoorBy = "", nil
 		}
 		ix.docs = append(ix.docs, d)
-		row := []any{len(ix.docs), d.Name, d.Category, d.Description, d.Terms, d.Type, d.Price, d.Output, d.Network, protocolFamilies(d.Protocols), d.Door}
+		row := []any{len(ix.docs), d.Name, d.Category, d.Description, strings.TrimSpace(d.Terms + " " + d.recordText()), d.Type, d.Price, d.Output, d.Network, protocolFamilies(d.Protocols), d.Door}
 		if _, err = stmt.ExecContext(ctx, row...); err == nil {
 			_, err = tri.ExecContext(ctx, row...)
 		}

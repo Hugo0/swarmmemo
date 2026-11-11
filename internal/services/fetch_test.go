@@ -577,8 +577,17 @@ func TestFetchHostAndCallerLimits(t *testing.T) {
 	if err := services.FetchDeny(context.Background(), c.db, "site.test", "abuse report", c.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.fetch("erin", noScreen("http://www.site.test/y")); code(err) != "fetch_denied" || s.hit("/y") != 0 {
+	_, err := c.fetch("erin", noScreen("http://www.site.test/y"))
+	if code(err) != "fetch_denied" || s.hit("/y") != 0 {
 		t.Fatalf("denylist: %v", err)
+	}
+	// C889: only the board's own hosts are marked as itself.
+	var denied *allowance.Err
+	if errors.As(err, &denied) && denied.Details == services.FetchDeniedSelf {
+		t.Fatal("a denylisted host was refused as SwarmMemo itself")
+	}
+	if _, err = c.fetch("erin", noScreen("https://swarmmemo.com/w/lobby")); !errors.As(err, &denied) || denied.Details != services.FetchDeniedSelf {
+		t.Fatalf("own host: %v", err)
 	}
 	if ok, err := services.FetchAllow(context.Background(), c.db, "site.test"); !ok || err != nil {
 		t.Fatalf("allow: %v %v", ok, err)

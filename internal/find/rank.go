@@ -153,7 +153,7 @@ func (ix *Index) rank(cands []match, words []string, door, signup bool) []scored
 // matchedWords are the words d matches (a word, its stem-like prefix or a
 // category it stands for) and the fields they are in.
 func matchedWords(d *Doc, words []string, v Vocab) ([]string, []string) {
-	fields := []struct{ name, text string }{{"name", d.Name}, {"category", d.Category}, {"description", d.Description}, {"url", d.Terms}}
+	fields := []struct{ name, text string }{{"name", d.Name}, {"category", d.Category}, {"description", d.Description}, {"url", d.Terms}, {"record", d.recordText()}}
 	var matched, in []string
 	for _, w := range words {
 		probe := w
@@ -178,7 +178,7 @@ func matchedWords(d *Doc, words []string, v Vocab) ([]string, []string) {
 			matched = append(matched, w)
 		}
 	}
-	order := []string{"name", "category", "description", "url"}
+	order := []string{"name", "category", "description", "url", "record"}
 	slices.SortFunc(in, func(a, b string) int { return slices.Index(order, a) - slices.Index(order, b) })
 	return matched, in
 }
@@ -364,6 +364,9 @@ func (s scored) why() string {
 	if q.AcceptedTasks > 0 {
 		parts = append(parts, Delivered(q.AcceptedTasks, q.PaidTasks))
 	}
+	if w := d.recordWhy(s.matched); w != "" {
+		parts = append(parts, w)
+	}
 	if w := doorWhy(d, s.now); w != "" {
 		parts = append(parts, w)
 	}
@@ -394,4 +397,32 @@ func Delivered(accepted, paid int) string {
 // SwarmMemo" badge shows.
 func ReviewWord(mean, weight float64) string {
 	return reviewWord(Quality{ReviewMean: mean, ReviewWeight: weight})
+}
+
+// recordWhy is the why line's record part for the matched query words: up
+// to three derived capabilities they found, each with what showed it
+// ("shown by its record: research (accepted work), scraping (an
+// offering)"). The match line names self-declared words already.
+func (d *Doc) recordWhy(matched []string) string {
+	var out []string
+	for _, r := range d.Record {
+		w := strings.ToLower(r.Word)
+		for _, m := range matched {
+			probe := m
+			if p := []rune(m); len(p) > 5 {
+				probe = string(p[:5])
+			}
+			if strings.Contains(w, probe) {
+				out = append(out, r.Word+" ("+r.From+")")
+				break
+			}
+		}
+		if len(out) == 3 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return "shown by its record: " + strings.Join(out, ", ")
 }

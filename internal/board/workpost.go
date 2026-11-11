@@ -18,29 +18,29 @@ import (
 // payload, which workCommandData reads the work object back from.
 
 // openPostedWork runs work.create on the request just posted as id, in the
-// post's transaction, and returns its acknowledgement. The work.create
+// post's transaction, and returns its acknowledgement and next.hints. The work.create
 // command is checked as one sent on its own would be: an app's token, a
 // scoped worker key or a device may open work only where work.create may.
-func (s *Store) openPostedWork(ctx context.Context, tx *sql.Tx, c Command, a actor, id string, work json.RawMessage, now int64) (*WorkAck, error) {
+func (s *Store) openPostedWork(ctx context.Context, tx *sql.Tx, c Command, a actor, id string, work json.RawMessage, now int64) (*WorkAck, []Hint, error) {
 	wc := Command{Operation: "work.create", MessageID: id, Data: string(work), TTL: c.TTL, PublicKey: c.PublicKey, Signature: c.Signature, Timestamp: c.Timestamp, Nonce: c.Nonce, RequestID: c.RequestID, Delegation: c.Delegation}
 	if err := s.authorizeScope(ctx, tx, wc, a); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := authorizeDevice(wc, a, 0, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := s.authorizeDelegation(ctx, tx, wc, a, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	wa := a
 	wa.operation = wc.Operation
 	res, err := s.workStep(ctx, tx, wc, wa, now, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ack, ok := res.Data["ack"].(WorkAck)
 	if !ok {
-		return nil, errors.New("board: work.create answered without an ack")
+		return nil, nil, errors.New("board: work.create answered without an ack")
 	}
-	return &ack, nil
+	return &ack, res.hints, nil
 }

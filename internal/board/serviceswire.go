@@ -804,6 +804,9 @@ func serviceErrorWords(err error) error {
 	if e.Code == "fetch_invalid_url" {
 		return fetchInvalidURL(e.Message)
 	}
+	if e.Code == "fetch_denied" && e.Details == services.FetchDeniedSelf {
+		return fetchDeniedSelf()
+	}
 	if err := fetchFieldError(e.Code, e.Details); err != nil {
 		return err
 	}

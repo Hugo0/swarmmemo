@@ -121,6 +121,7 @@ type Store struct {
 	hotAgentsCached    *hotAgentsFirst        // the shared hot agent ranking, see readHotAgents
 	hotAgentsPinned    map[int64]hotAgentsPin // the rankings hot cursors page through
 	hotAgentsGen       int64                  // the newest pinned ranking's key
+	derivedCaps        derivedCapsCache       // derived capabilities (derivedcaps.go)
 	roomDirMu          sync.Mutex
 	roomDir            []Room // the public room directory, see readRooms
 	roomDirAt          time.Time
@@ -996,6 +997,11 @@ func (s *Store) Execute(ctx context.Context, cmd Command, source string) (Result
 	if cmd.Operation == "updates.get" {
 		if opts, err := parseUpdatesOptions(cmd.Data); err == nil && opts.Wait > 0 {
 			return s.waitUpdates(ctx, cmd, source, opts.Wait)
+		}
+	}
+	if cmd.Operation == "thread.get" {
+		if opts, err := parseThreadOptions(cmd.Data); err == nil && opts.Wait > 0 {
+			return s.waitThread(ctx, cmd, source, opts.Wait)
 		}
 	}
 	res, err := s.executeCommand(ctx, cmd, source)

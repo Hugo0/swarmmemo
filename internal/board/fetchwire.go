@@ -60,6 +60,12 @@ func fetchError(code string) error {
 	return nil
 }
 
+// fetchDeniedSelf is fetch_denied on SwarmMemo's own pages (C889): they are
+// read with SwarmMemo's own tools, not fetched.
+func fetchDeniedSelf() error {
+	return problem(403, "fetch_denied", "This is SwarmMemo itself, which fetch does not read. Read SwarmMemo pages with its own read tools instead: read_messages for a room, read_thread for a post and its replies, read_work for a task (over HTTP: the message URL with Accept: application/json). Nothing was charged.")
+}
+
 // fetchInvalidURL is fetch_invalid_url; placeholder is the engine's sentence
 // naming an unfilled placeholder sent as the url (C837), or "".
 func fetchInvalidURL(placeholder string) error {

@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "29a2553754310552b5a4b8467daa45563ca2bad0e66080771c57342ba5a35039",
+  "allowlist_sha256": "60550a1a8ed940ad0643fd65898702b2df0a947f7dbe0f4063d8b5dc741cc7b8",
   "files": [
     {
       "mode": "0644",
@@ -70,8 +70,8 @@
     {
       "mode": "0644",
       "path": "clients/contract.json",
-      "sha256": "7acb3a8cdb95b0e7e19e2673e12875538c322269504361e63cc14b1b7455e3b9",
-      "size": 96795
+      "sha256": "a656673db4234a7d56d3de9d91ee0c96427402cc0f18e7e74f2c49ea65588d6f",
+      "size": 97092
     },
     {
       "mode": "0644",
@@ -82,14 +82,14 @@
     {
       "mode": "0644",
       "path": "clients/javascript/swarmmemo.mjs",
-      "sha256": "9f9b03a5ce1f8df48e710f4fc936ebe0b76cbe806746ee79ed91971194e20a87",
-      "size": 201062
+      "sha256": "ef4ec2ed7f99445c6bafb2e764495ac80dcbc0a769a4092d6bd09185043a336a",
+      "size": 201194
     },
     {
       "mode": "0644",
       "path": "clients/javascript/test_client.mjs",
-      "sha256": "dfb780bb4a5cb7300cf30c6e03ddabddedfa9d50ee15beff75e038a62791f532",
-      "size": 116251
+      "sha256": "613713d70f52067d9aa6d91e09cdb19aabdea47f83454af83c8d13f67d46924b",
+      "size": 116265
     },
     {
       "mode": "0644",
@@ -220,8 +220,8 @@
     {
       "mode": "0644",
       "path": "clients/python/swarmmemo.py",
-      "sha256": "fb61c5eb817d4aff19ac9ce618ffb577f3cd69c460ad5ab4a4eb970853558f2a",
-      "size": 404334
+      "sha256": "1626887e7ffe0c1476f273e7390f543a41c090331d4f4ca9cb2f90992ce14e3c",
+      "size": 404466
     },
     {
       "mode": "0644",
@@ -298,8 +298,8 @@
     {
       "mode": "0644",
       "path": "clients/python/test_data_parity.py",
-      "sha256": "e8fb7e373a2a616957ac6523e3d0a86b9becc3ccc1e7254b314a65a83ce22d5a",
-      "size": 32077
+      "sha256": "66334ac39b1412644d5b4ab0d97d060743045f509e117a901cdf4d652fc90d4c",
+      "size": 32091
     },
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "9db5da1ab655210ccb9e260584f191160c51003edf054917d13ff25987fb05b6",
-      "size": 671734
+      "sha256": "33d57a598fab1231477c7ef9e84160457c14c7212cf169e7c8586af8763ba910",
+      "size": 673786
     },
     {
       "mode": "0644",
@@ -1162,8 +1162,8 @@
     {
       "mode": "0644",
       "path": "docs/jobs.go",
-      "sha256": "a5ad125addc21dc8a0ca007313a5bde270680562c0c167e6a9c56298a097c57e",
-      "size": 24210
+      "sha256": "309db8b1ab01817452362489024a61dbd99189d488fe4fb3e2e9562cb1fe7482",
+      "size": 24289
     },
     {
       "mode": "0644",
@@ -1288,8 +1288,8 @@
     {
       "mode": "0644",
       "path": "integrations/agno/agno_swarmmemo/_swarmmemo.py",
-      "sha256": "fb61c5eb817d4aff19ac9ce618ffb577f3cd69c460ad5ab4a4eb970853558f2a",
-      "size": 404334
+      "sha256": "1626887e7ffe0c1476f273e7390f543a41c090331d4f4ca9cb2f90992ce14e3c",
+      "size": 404466
     },
     {
       "mode": "0644",
@@ -1348,8 +1348,8 @@
     {
       "mode": "0644",
       "path": "integrations/crewai/crewai_swarmmemo/_swarmmemo.py",
-      "sha256": "fb61c5eb817d4aff19ac9ce618ffb577f3cd69c460ad5ab4a4eb970853558f2a",
-      "size": 404334
+      "sha256": "1626887e7ffe0c1476f273e7390f543a41c090331d4f4ca9cb2f90992ce14e3c",
+      "size": 404466
     },
     {
       "mode": "0644",
@@ -1408,8 +1408,8 @@
     {
       "mode": "0644",
       "path": "integrations/langchain/langchain_swarmmemo/_swarmmemo.py",
-      "sha256": "fb61c5eb817d4aff19ac9ce618ffb577f3cd69c460ad5ab4a4eb970853558f2a",
-      "size": 404334
+      "sha256": "1626887e7ffe0c1476f273e7390f543a41c090331d4f4ca9cb2f90992ce14e3c",
+      "size": 404466
     },
     {
       "mode": "0644",
@@ -1498,8 +1498,8 @@
     {
       "mode": "0644",
       "path": "internal/board/agentposts.go",
-      "sha256": "fa55db24343b6b39c5c42af2fca5e6ef8cd0238c23d96f81bd64a61fdf495d04",
-      "size": 5839
+      "sha256": "a1e4dc9de6be4172be1cea176d8490761caba2b5795f2bb1e5a84da7746ca36d",
+      "size": 5861
     },
     {
       "mode": "0644",
@@ -1786,14 +1786,14 @@
     {
       "mode": "0644",
       "path": "internal/board/dataspec.go",
-      "sha256": "8a87c6ac78a01d7a293370a0a3d90855fbac185bd724a49f945b80b59718a26a",
-      "size": 25564
+      "sha256": "4ecde247d67a2cb11b4e93e203b65433f7b7594f6aa421b01517213cd63d2a4c",
+      "size": 25626
     },
     {
       "mode": "0644",
       "path": "internal/board/dataspec_test.go",
-      "sha256": "36d66bd61cb31ccd220aa670c2a3a4884f2c9a66a2aab1a3dc74a2d51dab850c",
-      "size": 16425
+      "sha256": "6b39f877e1d3d83eddb387e83aa525e41122ad2d3cc45873dcd543d908e43f1b",
+      "size": 16562
     },
     {
       "mode": "0644",
@@ -1836,6 +1836,18 @@
       "path": "internal/board/delegation_test.go",
       "sha256": "70b1ba0ddbdb94ea8a984268559a8afee532c2d4b9fd8d1e65f911350f6e0bd8",
       "size": 32773
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/derivedcaps.go",
+      "sha256": "7178e263509b9faa0af593cdaa719c2d11c6987adcb4d78882239df97c192b7d",
+      "size": 8157
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/derivedcaps_test.go",
+      "sha256": "137870483e60fa878372486607744743bdfb19249a220566c33cd9c306ecdeca",
+      "size": 3753
     },
     {
       "mode": "0644",
@@ -1900,8 +1912,8 @@
     {
       "mode": "0644",
       "path": "internal/board/errortexts.go",
-      "sha256": "9ee8b959a3a524de7d70bc2b087445ce1fdbc339eeec739e2cce1dbada252e72",
-      "size": 10937
+      "sha256": "9e9e46fff6122f538a9412e8ca7eb9286e5594bf13b0662c8e9f835ec5147f6f",
+      "size": 10959
     },
     {
       "mode": "0644",
@@ -2014,14 +2026,14 @@
     {
       "mode": "0644",
       "path": "internal/board/fetchwire.go",
-      "sha256": "62fdd5bc70c3fff8c705126d68da162df4a13e9fa9bbe7060d301c43b6c37f1c",
-      "size": 11026
+      "sha256": "1cf9538b33bcd8fac8207458117949e0aff7387682380b703031f4524285267d",
+      "size": 11501
     },
     {
       "mode": "0644",
       "path": "internal/board/find.go",
-      "sha256": "b3b94ace06ea1b107d9f507299ee5ed7c2c73a7ea89f015fec000d699ef76451",
-      "size": 31840
+      "sha256": "3a5392924d3e6e352a7a18e56b5f10cea5d80d5ff48d21d97ff2f953baab7dee",
+      "size": 32166
     },
     {
       "mode": "0644",
@@ -2242,8 +2254,8 @@
     {
       "mode": "0644",
       "path": "internal/board/identity.go",
-      "sha256": "b1a8ef0ea55670780bd21b087d4cf2b1698de87b30366268cceac374480e1ee7",
-      "size": 46455
+      "sha256": "9fddae7b44f92067c1544c8054f3e79803f019486897f8db03a839c15cccc392",
+      "size": 46827
     },
     {
       "mode": "0644",
@@ -2608,8 +2620,8 @@
     {
       "mode": "0644",
       "path": "internal/board/messages.go",
-      "sha256": "29e320f6f6a4ca88242c5014d8c6a59db7d102afffbf0d2672ca4c1cffee465f",
-      "size": 49940
+      "sha256": "0506700973f1dc800ddb1a911338287aa315c5eaca2f40c9411e553593999ccf",
+      "size": 50235
     },
     {
       "mode": "0644",
@@ -2854,8 +2866,8 @@
     {
       "mode": "0644",
       "path": "internal/board/operations.go",
-      "sha256": "ed301327b063a242e54b0793c5abdfcc9bae2851d985a7f0ca7c47574f592887",
-      "size": 45546
+      "sha256": "c5afa17a0a8b92b1389ca8c89065e2a6515dba5b13edd91152f53ff8d9aea74f",
+      "size": 45611
     },
     {
       "mode": "0644",
@@ -3501,6 +3513,18 @@
     },
     {
       "mode": "0644",
+      "path": "internal/board/search.go",
+      "sha256": "b5be4d89c3e265380cc4ad363d817fdfbc953a876395ffd22a99a94215627ab7",
+      "size": 11125
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/search_test.go",
+      "sha256": "9a8fd298c25529e85d74d4c1d980b2fb5dee418d4498e5c12519d774c9594c8e",
+      "size": 4826
+    },
+    {
+      "mode": "0644",
       "path": "internal/board/seasoning.go",
       "sha256": "9dc25ec49dc60601606be3a9c34b5408389150eb4a77d3a536e8f0d18dd75723",
       "size": 2289
@@ -3544,8 +3568,8 @@
     {
       "mode": "0644",
       "path": "internal/board/serviceswire.go",
-      "sha256": "aaed24e9c1d6e7134732f2259c31b6c13bee24fc07866306f88badf974d9dcd9",
-      "size": 35988
+      "sha256": "e41dfe0896d57f3323c07bda83cf9cfc78c4ad5c67b910b30c6e21a37218313e",
+      "size": 36090
     },
     {
       "mode": "0644",
@@ -3712,8 +3736,8 @@
     {
       "mode": "0644",
       "path": "internal/board/store.go",
-      "sha256": "ccc5d51ea7246834ca8109f6f4524d55717c63b5499ea86a5eaf31c68a29c2be",
-      "size": 68791
+      "sha256": "1f827376409744bce8ec1320854c7436f2f27f1619f5bea5749de75c66dc7b60",
+      "size": 69048
     },
     {
       "mode": "0644",
@@ -3994,8 +4018,8 @@
     {
       "mode": "0644",
       "path": "internal/board/threads.go",
-      "sha256": "181399ef7e5ad2cc34200ebd32e449aefb13fa8e25fb0c6e3fa8365b5124d81a",
-      "size": 22341
+      "sha256": "26d9af1d68dd445e03bfeea2c39c519f623f7d8a95fb0214a02f975f5f65dab4",
+      "size": 22412
     },
     {
       "mode": "0644",
@@ -4258,14 +4282,14 @@
     {
       "mode": "0644",
       "path": "internal/board/waiting.go",
-      "sha256": "e23e4740ce722c80fa905f1df8bd26152c46510baf96fd94594858e18e7ab621",
-      "size": 9038
+      "sha256": "40ba607961319d88af3c1652c15c42fd41a971cf4aafe335796c4e3fa29c0e68",
+      "size": 11300
     },
     {
       "mode": "0644",
       "path": "internal/board/waiting_test.go",
-      "sha256": "d3d038bbef83abde97875882917d9fa76ca8d7e5e27e2d17ca6826a9694d639c",
-      "size": 8179
+      "sha256": "b1a537df65e02f23dd3e5c8d97cc96f7c2384e3649bedf10a8a453d25f487f03",
+      "size": 12641
     },
     {
       "mode": "0644",
@@ -4348,8 +4372,8 @@
     {
       "mode": "0644",
       "path": "internal/board/work.go",
-      "sha256": "ebe0cacb7d82afb3ee20b69deaa9667b01d65d2e33d77848cbe54200e4d4c2f7",
-      "size": 122291
+      "sha256": "35b91f8ea5f7533152bef06ce5ec217612164dc1e313299119d01f16beb397af",
+      "size": 123701
     },
     {
       "mode": "0644",
@@ -4456,8 +4480,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workerrors_test.go",
-      "sha256": "34372c67a9bdf8583b83f7522b465d08bf97ca6e0f43f3745234b98732efa24f",
-      "size": 3934
+      "sha256": "0052e3d0b252ca3bcdbb211b4dc35d70fadb5fa99fc24f700c4c505a40b3ce32",
+      "size": 4116
     },
     {
       "mode": "0644",
@@ -4528,14 +4552,14 @@
     {
       "mode": "0644",
       "path": "internal/board/workpost.go",
-      "sha256": "c6d68171d4281a573be9fb73e8bbb13ad2b381dc26fd9cde66bfdcefe018b486",
-      "size": 1934
+      "sha256": "226dba1a385cd685a108adedca1c4608f84a6bc1b0dae4b6462f342dc95e54c4",
+      "size": 1993
     },
     {
       "mode": "0644",
       "path": "internal/board/workpost_test.go",
-      "sha256": "712c91dcc7f104d87d926df4fb730d6db07971e10577496cdbfaa88f5578cd58",
-      "size": 4557
+      "sha256": "4f5e978b285818098409063bb186daaadc3f837c16474b5267dece3e0bb1e2e2",
+      "size": 4739
     },
     {
       "mode": "0644",
@@ -4600,8 +4624,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workreputation.go",
-      "sha256": "b29cd62a45baa5cd255bf258bb098aa68bca938ca8dc4ed8f81dd9fb2313cb7b",
-      "size": 24267
+      "sha256": "b460078e12fc598ee4421a4bffcd814c7b27333b1bdf731fb3dc2db7f8d1a4f7",
+      "size": 24704
     },
     {
       "mode": "0644",
@@ -4654,8 +4678,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workreward.go",
-      "sha256": "5daf73a9e0be2d7de72d52f1b8ffcdb1dd287e79d8e594cd5f65117cba700b99",
-      "size": 22320
+      "sha256": "ece03c2e5ec8f8cb62e22dd5fae006c29a0b601ad2c67dd2272ad4bb9cdc43b8",
+      "size": 22988
     },
     {
       "mode": "0644",
@@ -4686,6 +4710,18 @@
       "path": "internal/board/workslist_claimable_caller_test.go",
       "sha256": "173c3d3ac8e7dc1ed35f071b7fa492611422bfded3e4dd1d4523b5fe00ca3769",
       "size": 4953
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/worksponsor.go",
+      "sha256": "16b7bf9a7e7ba2987fee289ffbf30ab4fcf1819aa479348cc0601d928561e690",
+      "size": 13730
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/worksponsor_test.go",
+      "sha256": "a902be9c5868414882ec21214f7f34fd2136d0e8e48b5fd457dffff4da8bf93c",
+      "size": 8610
     },
     {
       "mode": "0644",
@@ -4948,8 +4984,8 @@
     {
       "mode": "0644",
       "path": "internal/find/find.go",
-      "sha256": "c2470df8923702c3fc2f2938359d921e557f74d3e74dd40878392b79b74aaeaf",
-      "size": 16676
+      "sha256": "d1fc986f964c15aa88149fef1a57db62931b4ecc39970d33a0618b7d01cc64d4",
+      "size": 17267
     },
     {
       "mode": "0644",
@@ -4960,8 +4996,8 @@
     {
       "mode": "0644",
       "path": "internal/find/index.go",
-      "sha256": "df4110a04f1bc2bc313f3bb10d6767b91dcb1ba4c9b1a8b4254dc2e571be62f3",
-      "size": 10473
+      "sha256": "5ceb526223bfa9742669aa95ed04b567b8959ab379a4f0bc1d3946c29a3752ff",
+      "size": 10515
     },
     {
       "mode": "0644",
@@ -4996,8 +5032,8 @@
     {
       "mode": "0644",
       "path": "internal/find/rank.go",
-      "sha256": "0191b16d3897941c0f382c6b006e97897d18e350d913b6b3cd8ddc0a7e091313",
-      "size": 12407
+      "sha256": "baa5f70b0661e40a04fd3c5fcf91dbeee8574a8717b683fca6d8d495b9387e21",
+      "size": 13267
     },
     {
       "mode": "0644",
@@ -5338,8 +5374,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "33a3bf496045b48040820ad42e35d571e53bd9b64e1c17769998d2257e73f2e1",
-      "size": 168709
+      "sha256": "d9a611df8099b58bcf3162ea547249b5f749184f0d7fffc59461b2f3ac3f5701",
+      "size": 169181
     },
     {
       "mode": "0644",
@@ -5842,8 +5878,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp.go",
-      "sha256": "3791c8d8c19f30ed5720c907807dcb14db63ddb328b26fcd320188c252c89777",
-      "size": 78642
+      "sha256": "830be20480de622d58c8c2f39eafb7090c443a332f0057669083a69d0922bb01",
+      "size": 78820
     },
     {
       "mode": "0644",
@@ -5854,14 +5890,14 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_bounds.go",
-      "sha256": "5ba02973cba0e2710753b66fb0ce101dd19fc9f9f8cd69b9f0761158177972f0",
-      "size": 5699
+      "sha256": "656b56968ec4d118804dea030b24d7c15d4af4984aaa0e8b226e2097a520f88e",
+      "size": 5764
     },
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_bounds_test.go",
-      "sha256": "0366ecc1bf5f3674f85ee30730848f1a8d58bc400f45ea9b4851b2ef527a6111",
-      "size": 8439
+      "sha256": "f4ed90b3a82650c517fba03a33422dbc65023adf5a4b34714350f8018232178f",
+      "size": 8492
     },
     {
       "mode": "0644",
@@ -5878,8 +5914,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_conversations.go",
-      "sha256": "6e5d0a34274f1bea394e066cfcb0ebb048432853038fb3fd51279c94e6782acb",
-      "size": 67015
+      "sha256": "4a5369c4484ad01fabd319e7b81dce925c32950130b8bac54866e280bb6c6d52",
+      "size": 67052
     },
     {
       "mode": "0644",
@@ -5902,14 +5938,14 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_dataspec.go",
-      "sha256": "3373104342c61a78120a16c9589134161ac70e8f53eebbe6b1a2dcbe3f5d6e6a",
-      "size": 15476
+      "sha256": "7f364d630c4480e44d8ec61b882fbb7b7b70c05ab4e7264741537a30075bc758",
+      "size": 15562
     },
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_dataspec_test.go",
-      "sha256": "a65c4d6983cd47a3cd37b5512bfb7f7694dc70113da0dfd40c759a4b58bb6013",
-      "size": 10870
+      "sha256": "b5c674edf82bf0385432a9a8ec3e10f7427cc1c6447c0cefd0886dbab583a5cc",
+      "size": 10904
     },
     {
       "mode": "0644",
@@ -6424,8 +6460,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/ranking_test.go",
-      "sha256": "f63e091349ce8fc9373176926dcf16c5ad844ef31dc888a7357627bd4dac9819",
-      "size": 12423
+      "sha256": "3170cf4bcb61bd412331eeed843557aefea8f7948d67cc188cccd556210c65c1",
+      "size": 12471
     },
     {
       "mode": "0644",
@@ -6508,8 +6544,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/receive_test.go",
-      "sha256": "faf248f38206ca4740a1ba18fc9f6a45e58f2707c19ac425077e6677fd9c7a9e",
-      "size": 16490
+      "sha256": "7672c6545fdf3d0d62e1b9d32b4f4f890871cb07705a9db83bc25066c1b504f7",
+      "size": 16776
     },
     {
       "mode": "0644",
@@ -6688,8 +6724,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "ab23229b5c51025546d69878a17c6100ddda8b8fd2b8607735868e3465593d59",
-      "size": 77122
+      "sha256": "f3c8716a7a0ae3d115af0998e11727858504c7adcb19594067a03cf50d783b5f",
+      "size": 77724
     },
     {
       "mode": "0644",
@@ -6802,8 +6838,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/testdata/mcp_profiles.golden.json",
-      "sha256": "382e8e63a6463a51abf45bdf3fcdf6dac6a3377d8356c697f30bc3f6b05d1eb4",
-      "size": 185243
+      "sha256": "13e577852fc1c675168a8ddfe85bcd02c1d9b3a9abeaa0929496ac6edf8f4a0d",
+      "size": 185303
     },
     {
       "mode": "0644",
@@ -6892,8 +6928,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/updates_test.go",
-      "sha256": "f43782b82e11a541bd4b41daa2522faadfe4abbc7e51c865132e85d3ef75af1a",
-      "size": 10318
+      "sha256": "61909615e0c31671b1c7c10eff2d30bbae3b6d3e58d0cc4fb079a3f291e01133",
+      "size": 13874
     },
     {
       "mode": "0644",
@@ -7110,6 +7146,12 @@
       "path": "internal/ledger/escrow.go",
       "sha256": "c236376cd376060966cbb43f7063dbb1d985e8171c2c5384a4fc99eb1ec60bcc",
       "size": 12810
+    },
+    {
+      "mode": "0644",
+      "path": "internal/ledger/escrow_house.go",
+      "sha256": "9ea9eb71653f8bfd9bc1101c7440398bbd0c60933ad5687b165862fdf1c11d54",
+      "size": 3864
     },
     {
       "mode": "0644",
@@ -8200,8 +8242,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch.go",
-      "sha256": "c56f1fea182dc7829c6b26b6787392a5cbc1805d6ec16829b9417c047640b083",
-      "size": 65228
+      "sha256": "4976d09bf6b2fd1bf62196d89dfc1a4752fae4bf7283ac51ecb96c3841423238",
+      "size": 66751
     },
     {
       "mode": "0644",
@@ -8224,8 +8266,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch_large_test.go",
-      "sha256": "f2de777798281af22ac582e87ba5122e9519b89b13bd8d3d37a6013141096163",
-      "size": 7079
+      "sha256": "7fe7674f8f53da914bd69bf4f7f01445ed99a407f5cab2c18e821f343d53b325",
+      "size": 9859
     },
     {
       "mode": "0644",
@@ -8254,8 +8296,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch_test.go",
-      "sha256": "099c836715d0f05c3ef0dfa9089ca44d49ce464a34700fe41cf032cc77d33465",
-      "size": 50094
+      "sha256": "de63d9f26a30191ae1b22b626fb89472a8a617412a5f43f9d7229a4e302a9f34",
+      "size": 50503
     },
     {
       "mode": "0644",
