@@ -512,6 +512,7 @@ type seaIceData struct {
 	RankLowToHigh     *int     `json:"rank_low_to_high"`
 	NYears            int      `json:"n_years"`
 	AnomalyMillionKM2 *float64 `json:"anomaly_million_km2"`
+	AnomalyBaseline   string   `json:"anomaly_baseline"`
 	Observations      []pdObs  `json:"observations"`
 	Count             int      `json:"count"`
 	Truncated         bool     `json:"truncated"`
@@ -524,11 +525,16 @@ type seaIceData struct {
 // v4 user guide 3.3.4; checked against the daily CSV by vtoroy-hermes, 10-20).
 const seaIceAveraging = "none: each day's own extent from the daily file, not the 5-day trailing mean NSIDC's charts show"
 
+// seaIceBaseline names what anomaly_million_km2 is measured against: the
+// same calendar day in every year of the file, the asked year included, not
+// NSIDC's 1981-2010 climatology (asked in #research 855b334f, 11-11).
+const seaIceBaseline = "mean of the same calendar day over all n_years in the file, this year included; not NSIDC's 1981-2010 median or mean"
+
 var dsSeaIce = &pdDataset{
 	ID: "sea_ice_extent", SchemaVersion: 1,
 	Title:       "Arctic sea-ice extent",
-	Description: "NSIDC Sea Ice Index daily Arctic extent: a day's extent, its rank among the same day in every year (1 = record low) and its anomaly against that day's mean; optionally the series over a date range.",
-	Output:      "data: series_id, units (million km2), averaging, date, extent_km2, extent_million_km2, rank_low_to_high, n_years, anomaly_million_km2, observations[] (newest first: date, value; the latest limit days unless start_date/end_date narrow it), count, truncated, next_end_date",
+	Description: "NSIDC Sea Ice Index daily Arctic extent: a day's extent, its rank among the same day in every year (1 = record low) and its anomaly against that day's mean over every year in the file (anomaly_baseline; not a 1981-2010 climatology); optionally the series over a date range.",
+	Output:      "data: series_id, units (million km2), averaging, date, extent_km2, extent_million_km2, rank_low_to_high, n_years, anomaly_million_km2, anomaly_baseline, observations[] (newest first: date, value; the latest limit days unless start_date/end_date narrow it), count, truncated, next_end_date",
 	Params: []pdParam{
 		dateParam("date", "the day to rank; default the latest available"),
 		dateParam("start_date", "series from this day (inclusive)"),
@@ -546,7 +552,7 @@ var dsSeaIce = &pdDataset{
 		if err != nil {
 			return nil, err
 		}
-		out := seaIceData{SeriesID: "N_seaice_extent", Units: "million km2", Averaging: seaIceAveraging, Observations: []pdObs{}}
+		out := seaIceData{SeriesID: "N_seaice_extent", Units: "million km2", Averaging: seaIceAveraging, AnomalyBaseline: seaIceBaseline, Observations: []pdObs{}}
 		// The headline is the day asked for, else the newest day in the
 		// window (C767), as as_of is.
 		idx := s.dateWindow(r, p)

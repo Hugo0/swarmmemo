@@ -512,6 +512,9 @@ func TestPublicDataSeaIce(t *testing.T) {
 	eq(t, "n_years", d["n_years"], 3.0)
 	eq(t, "rank", d["rank_low_to_high"], 1.0)
 	near(t, "anomaly", d["anomaly_million_km2"], -0.385)
+	if b, _ := d["anomaly_baseline"].(string); !strings.Contains(b, "this year included") {
+		t.Fatalf("anomaly_baseline must name the baseline, got %q", b)
+	}
 
 	// C754: a default call (no window) fills observations with the latest
 	// days beside the latest-day snapshot, never an empty list.

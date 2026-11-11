@@ -203,9 +203,10 @@ func TestWorkAcceptReplyStandingSeat(t *testing.T) {
 	}
 }
 
-// C704: an accept with target that names a result already submitted as its
-// own task names the one call that works: work.accept on that result, its
-// fence as amount. It never tells the requester to post a new reply.
+// C704, C909: an accept with target that names a result already submitted
+// as its own task is refused on that result (naming the one call that
+// works), and accepted in one step on the standing task. It never tells the
+// requester to post a new reply.
 func TestWorkAcceptReplySubmittedResultNamesFence(t *testing.T) {
 	s := rewardStore(t)
 	owner, w1 := keyFor(68), keyFor(69)
@@ -221,15 +222,14 @@ func TestWorkAcceptReplySubmittedResultNamesFence(t *testing.T) {
 	if !strings.Contains(msg, want) || strings.Contains(msg, "standing task") || strings.Contains(msg, "Post a new reply") {
 		t.Fatalf("on the result: %q", msg)
 	}
-	// 2) The accept sent to the standing task, with the result as target.
-	msg = failsWith(t, s, acceptReplyCmd(s, owner, id, r1, nil), "result_in_use")
-	if !strings.Contains(msg, want) || strings.Contains(msg, "Post a new reply") {
-		t.Fatalf("on the root: %q", msg)
+	// 2) The accept sent to the standing task, with the result as target:
+	// the submitted result item is accepted in this same step (C909).
+	ack := run(t, s, acceptReplyCmd(s, owner, id, r1, nil)).Data["ack"].(WorkAck)
+	if ack.State != "accepted" || ack.WorkID != r1 || ack.Fence != 1 || !strings.Contains(ack.Note, "already submitted as its own task") {
+		t.Fatalf("on the root: %+v", ack)
 	}
-	// The named call works.
-	ack := run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r1, Amount: 1})).Data["ack"].(WorkAck)
-	if ack.State != "accepted" || ack.WorkID != r1 {
-		t.Fatalf("accept: %+v", ack)
+	if w := getTestWork(t, s, id); w.State != "open" {
+		t.Fatalf("root: %+v", w)
 	}
 	// Once judged, the refusal says so and names no fence to send.
 	msg = failsWith(t, s, acceptReplyCmd(s, owner, id, r1, nil), "result_in_use")

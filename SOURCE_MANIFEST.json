@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "888f28bb81f33d6a8d78a2aa7b4da85537b7994940d61f7eacd769d7f753aef4",
-      "size": 675794
+      "sha256": "0598807300041ec1f745000d92e37a5b3c138c9f895659f3860bf9ac3e3fc705",
+      "size": 675842
     },
     {
       "mode": "0644",
@@ -1078,8 +1078,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_UPDATES.md",
-      "sha256": "aa1a923b5ba1819bdcbd666a02326786dbbc2b521c3d8a967b1d61934dbd984f",
-      "size": 4750
+      "sha256": "0bc485834b39c0e2e39a70d2d84aa0dfe96f12ab2368065af0376ac56b9bf43e",
+      "size": 5208
     },
     {
       "mode": "0644",
@@ -4618,14 +4618,14 @@
     {
       "mode": "0644",
       "path": "internal/board/workreply.go",
-      "sha256": "d851127c0f47bc1fcab1cfb01be903f764344f588420dd7307d24d956caa7a61",
-      "size": 12907
+      "sha256": "0f3e3fad9c4e8bee1e06e1d0b8d6ab74d44d6a67137cb50d5124cc59d426655f",
+      "size": 13412
     },
     {
       "mode": "0644",
       "path": "internal/board/workreply_test.go",
-      "sha256": "3283198fe391ab486d012355c10e14613700757c9d7169786a2a00c794ccf08c",
-      "size": 17434
+      "sha256": "8eb3685e37dab12931cee406fb6767a635b416930473ff1820b81f6934f84e7c",
+      "size": 17443
     },
     {
       "mode": "0644",
@@ -5386,8 +5386,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "48634ba1bd0b63c7cee2619e39c126e01f889d066dc1229ad215c649f4c33efc",
-      "size": 169840
+      "sha256": "8c212d25f23c268d1dab5b40a52412d735bb137462efb28fdb1ff30a3f71dd96",
+      "size": 169809
     },
     {
       "mode": "0644",
@@ -8566,14 +8566,14 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_sources.go",
-      "sha256": "e2b4498fe5601d33fd393e5e95af5cd8c26b0534ff4b12739cd90660244aa851",
-      "size": 44650
+      "sha256": "191a3f91840f746d45ee92f43a034437456e193e1c7026463423a32e6b8a6b6a",
+      "size": 45196
     },
     {
       "mode": "0644",
       "path": "internal/services/publicdata_test.go",
-      "sha256": "c521dcce13b6fabe76860bf364fa97c97e93d3c7e44cf8c2cdbe66bed19f69ce",
-      "size": 86060
+      "sha256": "60c2498a5d0528b5bd5a332e6a14b0719b3a1a4b2d76e7cfcfef6efd44772f39",
+      "size": 86217
     },
     {
       "mode": "0644",
@@ -10210,8 +10210,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "e1b614d70f84bca8d18a6cb24e386e0471e279ececef8bc0a307f27c9a68ce5f",
-      "size": 54703
+      "sha256": "0bdcc419431eb2e43575d78d99c4d22f6f1f4cfe4647d16704b890b2e47b09eb",
+      "size": 54755
     },
     {
       "mode": "0644",
@@ -10582,8 +10582,8 @@
     {
       "mode": "0644",
       "path": "internal/web/frontdoor.go",
-      "sha256": "3b92e7c74b25af5077711e5495f05c09660044ee17b371e8c02dc697e2abfb43",
-      "size": 16385
+      "sha256": "bda779a4dd7faec08e64e5398ccd5cc4238aa10826c7d094eb74d871c48c6871",
+      "size": 16462
     },
     {
       "mode": "0644",

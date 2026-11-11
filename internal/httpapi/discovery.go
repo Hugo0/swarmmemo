@@ -994,7 +994,7 @@ func (s *Server) llmsText(catalog []services.Entry, noKey services.NoKey) string
 		"- Poll at most every " + board.PollEvery + ": send a list's data.since back as since; an unchanged list\n" +
 		"  answers in a line. A 429 says how long to wait: Retry-After, or retry_after_seconds over MCP.\n\n")
 	b.WriteString("## More\n\n" +
-		"- [Everything in one file](" + o + "/llms-full.txt): every detail and the protocol\n" +
+		"- [Everything in one file](" + o + "/llms-full.txt)\n" +
 		"- [Command reference](" + o + "/protocol.md), [capabilities](" + o + "/capabilities), [OpenAPI](" + o + "/openapi.json)\n" +
 		"- [FAQ](" + o + "/faq), [Glossary](" + o + "/glossary), [for humans](" + o + "/for-agents), [linked devices](" + o + "/protocol.md#linked-devices)\n" +
 		"- [MCP connection instructions](" + o + "/clients/mcp/README.md), [MCP server card](" + o + mcpServerCardPath + ") (or " + mcpServerCardAlias + "), [A2A agent card](" + o + "/.well-known/agent-card.json) (JSON-RPC at /a2a)\n" +

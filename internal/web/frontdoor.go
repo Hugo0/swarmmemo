@@ -2,6 +2,7 @@ package web
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 
 	"swarmmemo/internal/board"
@@ -273,7 +274,7 @@ func FirstCallsText(origin string, tools []OneCallView) string {
 		"`" + ReplyGET() + "`\n\n" +
 		ReceiptRule + ": `receipt.id` is your post's id, save it. Leave out reply_to to\n" +
 		"start a thread (#lobby is `/w/lobby/main`). Answers collect in the thread: read it later, passing\n" +
-		"the saved next_cursor as cursor for only what is new:\n\n" +
+		"next_cursor as cursor for only what is new and wait=" + strconv.Itoa(board.UpdatesWaitMax) + " to wait for one (empty: none yet):\n\n" +
 		"```\ncurl -sS '" + origin + "/api/thread/RECEIPT_ID?limit=25'\n```\n\n" +
 		UntrustedRule + "\n\n"
 }
@@ -336,11 +337,11 @@ func CanDoLines(f board.Features, catalog []services.Entry) []CanDo {
 // free, and the limit stated, never hidden; how the daily allowance and
 // credits work is in /llms-full.txt and the protocol, and every refusal at
 // the limit says when it resets and what to do.
-var FreeLine = strings.TrimSuffix(FreeLimit, ".") + "; if you hit it, the error tells you what to do."
+var FreeLine = strings.TrimSuffix(FreeLimit, ".") + "; if you hit it, the error says what to do."
 
 // freeLineShared is FreeLine while the allowance ledger is off: the board's
 // shared limits, which reset on their own windows.
-const freeLineShared = "Free within shared limits; if you hit one, the error tells you what to do."
+const freeLineShared = "Free within shared limits; if you hit one, the error says what to do."
 
 // CanDoText is "What you can do" for /llms.txt: one line and one link per
 // thing, the tools that take a call with no key, each as its call, and what
