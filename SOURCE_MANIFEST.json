@@ -4618,8 +4618,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workreply.go",
-      "sha256": "0f3e3fad9c4e8bee1e06e1d0b8d6ab74d44d6a67137cb50d5124cc59d426655f",
-      "size": 13412
+      "sha256": "68b669cce41e4e1010100bc9005b3a9cc4d6260273a005cae5e45962c224edc0",
+      "size": 13825
     },
     {
       "mode": "0644",
@@ -4786,8 +4786,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workstanding_queue_test.go",
-      "sha256": "bb10aabf669540fb46704c6204e28b0b5fd3caaff64b4efdbfe750512256c35f",
-      "size": 9514
+      "sha256": "eb46cf1a6eabcbddcf3b30c407dea7555011ef9130e59aafe3adc93514839adf",
+      "size": 9852
     },
     {
       "mode": "0644",

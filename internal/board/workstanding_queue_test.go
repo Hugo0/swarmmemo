@@ -59,6 +59,11 @@ func TestWorkStandingQueuedResultOpensOnVerdict(t *testing.T) {
 	if msg := failsWith(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r2, Amount: 1}), "work_state_conflict"); !strings.Contains(msg, "queued") {
 		t.Fatalf("accept of a queued result: %s", msg)
 	}
+	// C931: accept with target on the queued item itself names the state
+	// every read shows (queued), not the stored one, as the root path does.
+	if msg := failsWith(t, s, acceptReplyCmd(s, owner, r2, r2, nil), "invalid_work_result"); !strings.Contains(msg, r2+", queued)") {
+		t.Fatalf("accept with target on a queued item: %s", msg)
+	}
 	fails(t, s, workWith(s, w2, Command{Operation: "work.claim", MessageID: id, Target: r2}, nil), "result_in_use")
 	_, again := standingClaim(t, s, w2, id, nil)
 	if msg := failsWith(t, s, again, "seat_limit"); !strings.Contains(msg, "queued") {

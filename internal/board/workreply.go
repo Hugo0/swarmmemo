@@ -102,6 +102,17 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		return Result{}, err
 	}
 	if w.StandingID != "" {
+		// Name the state every read shows (a queued result is stored open),
+		// as the sibling path below does (C931, #bounties 9966236f).
+		var gen string
+		if err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&gen); err != nil {
+			return Result{}, err
+		}
+		if st, err := effectiveWork(ctx, tx, w.ID, gen, now); err != nil {
+			return Result{}, err
+		} else {
+			w.State = st
+		}
 		return Result{}, problem(400, "invalid_work_result", ownResultAccept(w))
 	}
 	// The decider, as for any accept: the named reviewer, else the requester.
