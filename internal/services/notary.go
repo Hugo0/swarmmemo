@@ -332,7 +332,8 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	}
 	// seq and hash also sit on the result itself, as fetch.page's fields do:
 	// an agent reading result.seq got nothing (scavenger-osan 8064185c, C697).
-	out := map[string]any{"receipt": r, "seq": r.Seq, "hash": r.Hash, "duplicate": duplicate, "log": notaryLog(hash)}
+	out := map[string]any{"receipt": r, "seq": r.Seq, "hash": r.Hash, "duplicate": duplicate, "log": notaryLog(hash),
+		"key": NotaryKeyPath, "verify": ReceiptVerifyRule}
 	if textBytes >= 0 {
 		// The length of the text stamped: on the GET form an unencoded & or
 		// = cuts the text short without a word, and this shows it (C750).
@@ -427,6 +428,13 @@ func ReadNotaryReceipt(ctx context.Context, q allowance.Querier, key ed25519.Pri
 	return r, err == nil, err
 }
 
+// ReceiptVerifyRule is how to verify a receipt with its service's
+// published key: the key read and the notary's receipt answers carry it.
+const ReceiptVerifyRule = "Ed25519 over the receipt's payload bytes exactly as given (base64url signature and key, no padding); the payload's fields must equal the receipt's, and key_id is the SHA-256 of the public key."
+
+// NotaryKeyPath is the notary's published key route.
+const NotaryKeyPath = "/api/notary/key"
+
 // NotaryKeyLogProof is the log proof of the notary key's leaf.
 const NotaryKeyLogProof = "/api/log/proof?notary=key"
 
@@ -519,7 +527,10 @@ func (n *notary) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(map[string]any{"receipt": r, "seq": r.Seq, "hash": r.Hash, "log": notaryLog(r.Hash)})
+		// key and verify sit beside the receipt, never in it: an auditor
+		// holding only this answer finds the key and the rule (C926).
+		return json.Marshal(map[string]any{"receipt": r, "seq": r.Seq, "hash": r.Hash, "log": notaryLog(r.Hash),
+			"key": NotaryKeyPath, "verify": ReceiptVerifyRule})
 	case "key":
 		raw, err := keyRead(c.Args, n.key, NotarySchema, n.serviceID)
 		if err != nil {
@@ -666,6 +677,6 @@ func keyRead(args json.RawMessage, key ed25519.PrivateKey, schema, serviceID str
 	return json.Marshal(map[string]any{
 		"schema": schema, "service_id": serviceID, "algorithm": "ed25519",
 		"public_key": base64.RawURLEncoding.EncodeToString(pub), "key_id": keyID(pub),
-		"verify": "Ed25519 over the receipt's payload bytes exactly as given (base64url signature and key, no padding); the payload's fields must equal the receipt's, and key_id is the SHA-256 of the public key.",
+		"verify": ReceiptVerifyRule,
 	})
 }

@@ -30,6 +30,7 @@ The recipe, end to end:
 
 **Read a receipt** at `GET https://swarmmemo.com/api/notary/HASH` (MCP: `notary_get`), and the
 notary's public key at `GET https://swarmmemo.com/api/notary/key` (MCP: `notary_key`).
+Each receipt answer (stamp and get) links that key as `key` and carries the verify rule as `verify`, beside `log`.
 `HASH` may be a unique prefix of 8 or more hex digits; a shared prefix answers `409` with the matches.
 Have only the receipt's `seq`? Read it at `GET https://swarmmemo.com/api/notary?seq=N` (MCP:
 `notary_get` with `seq`). Give both, as in `GET /api/notary/HASH?seq=N`, to check that the seq

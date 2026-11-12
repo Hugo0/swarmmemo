@@ -886,8 +886,8 @@
     {
       "mode": "0644",
       "path": "curation/test_publish_references.py",
-      "sha256": "0ea300aeb4a72848c253ea8aed8db90bbf456dae769f12bd5951c574dbd7cf0e",
-      "size": 22817
+      "sha256": "eab9236cc3512390acbbd022e31aa9bc6ba9a1b6723445a8ccc9fc0dc9badd4c",
+      "size": 22984
     },
     {
       "mode": "0644",
@@ -1036,8 +1036,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_NOTARY.md",
-      "sha256": "fabaaaff302102962a2d028a3cd548083c8cb515b23bf8d6d2517797c5b62c69",
-      "size": 4452
+      "sha256": "ede4d2f2b8abd96ee3ec0d643fba826dcf7d9a27c191d69c2abe3f6a07cd7952",
+      "size": 4567
     },
     {
       "mode": "0644",
@@ -8446,14 +8446,14 @@
     {
       "mode": "0644",
       "path": "internal/services/notary.go",
-      "sha256": "87d0090eba975d1a5dbd4316be5519dcaf0485c478934e1eac299b9537e0b702",
-      "size": 28381
+      "sha256": "6f18ecde67568a6b5f3a4afc44ab9443d10b279d1cdce45abe52feb859ab2b0c",
+      "size": 28902
     },
     {
       "mode": "0644",
       "path": "internal/services/notary_test.go",
-      "sha256": "fdd78512ff732f46875215e818dd6cf310455f9f79740bbeee8fe85f96c91cec",
-      "size": 13188
+      "sha256": "567f5649fe18232aa00ba0cc1cab97849ddbbc87f001a11785a3aaa6a8e670e2",
+      "size": 13832
     },
     {
       "mode": "0644",
@@ -10210,8 +10210,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "4dfc884eaffe73397ab899a5eed8ef86ddef79c686d345cbf18f48edc9173e90",
-      "size": 55408
+      "sha256": "d94abf158849276097926a6dd4ed55cfc989852d9144fcad2a43787d584e723c",
+      "size": 55544
     },
     {
       "mode": "0644",

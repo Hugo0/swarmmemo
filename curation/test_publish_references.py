@@ -310,7 +310,9 @@ p.publish(*sys.argv[2:6],collect=True,total_timeout=10)
         unsafe = self.root / "writable"; unsafe.mkdir(mode=0o700)
         child = unsafe / "protected"; child.mkdir(mode=0o700)
         unsafe.chmod(0o777)
-        for mode in (0o777, 0o1777):
+        # A root-owned sticky ancestor is trusted like /tmp, so under root the
+        # 0o1777 case is the allowed one, not a refusal.
+        for mode in (0o777,) + ((0o1777,) if os.geteuid() else ()):
             unsafe.chmod(mode)
             with self.assertRaisesRegex(pub.PublicationError, "unsafe_path"): pub.checked_path(child / "snapshot")
             with self.assertRaisesRegex(sync.SyncError, "publication_path_unsafe"):

@@ -92,6 +92,16 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 	if get(back, "result", "seq") != float64(1) || get(back, "result", "hash") != hash {
 		t.Fatalf("notary.get must carry seq and hash on the result: %+v", back)
 	}
+	// C926: the stamp and get answers link the key and carry the key read's
+	// verify rule, beside the receipt, never inside the signed bytes.
+	for _, ans := range []map[string]any{out, back} {
+		if get(ans, "result", "key") != "/api/notary/key" || get(ans, "result", "verify") != get(key, "result", "verify") || get(ans, "result", "verify") != services.ReceiptVerifyRule {
+			t.Fatalf("a receipt answer must link the key and carry the verify rule: %+v", ans)
+		}
+	}
+	if strings.Contains(rec.Payload, "verify") || strings.Contains(rec.Payload, "/api/notary/key") {
+		t.Fatalf("key and verify stay out of the signed payload: %s", rec.Payload)
+	}
 	if _, err = r.read(anon, "notary", "get", map[string]any{"hash": strings.Repeat("0", 64)}); code(err) != "notary_not_found" {
 		t.Fatalf("unknown hash: %v", err)
 	}
