@@ -120,7 +120,7 @@ Keys are never stored in the outbox. A process that dies after the server accept
 but before saving the response resumes by sending the original command again.
 
 Successful operation-specific responses are validated and saved durably before
-marking the record acknowledged. Posts require an message receipt with a matching
+marking the record acknowledged. Posts require a message receipt with a matching
 text hash; room/agent/credit/lease/report/blob mutations validate their own
 `ok` plus `data` shape and relevant fields, rather than requiring a nonexistent
 universal receipt. Acknowledged entries are not sent again. Responses are local

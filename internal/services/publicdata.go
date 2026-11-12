@@ -618,14 +618,16 @@ func (p *publicData) runOne(ctx context.Context, req pdRequest, now int64) (item
 	if run.asOf != "" {
 		item.AsOf = &run.asOf
 		item.Freshness = pdFreshness
-		published := run.asOf
-		if run.published != "" {
-			published = run.published
-		}
-		if end, _ := item.Params["end_date"].(string); len(end) == 10 && len(published) >= 10 && published[:10] < end {
-			lag := "The source has published data up to " + published[:10] + ", before the requested end_date " + end + ": later days are not out yet (not an error)."
-			item.Lag = &lag
-		}
+	}
+	// Lag also covers a window wholly newer than the source: as_of is then
+	// empty (nothing in the window) but the source's last date is still known.
+	published := run.asOf
+	if run.published != "" {
+		published = run.published
+	}
+	if end, _ := item.Params["end_date"].(string); len(end) == 10 && len(published) >= 10 && published[:10] < end {
+		lag := "The source has published data up to " + published[:10] + ", before the requested end_date " + end + ": later days are not out yet (not an error)."
+		item.Lag = &lag
 	}
 	var fetched, expires int64
 	kinds := map[string]bool{}

@@ -138,7 +138,7 @@ func (s *Store) setWorkOffTask(ctx context.Context, tx *sql.Tx, c Command, a act
 	if origin != "" {
 		first = origin
 	}
-	if result, e := workReplyIsResult(ctx, tx, w, first); e != nil {
+	if result, e := workReplyIsResult(ctx, tx, w, first, now); e != nil {
 		return Result{}, e
 	} else if result {
 		return Result{}, problem(409, "work_state_conflict", "This reply was submitted as a result of the task; a result is accepted or rejected, never marked off-task.")
@@ -180,8 +180,8 @@ func (s *Store) setWorkOffTask(ctx context.Context, tx *sql.Tx, c Command, a act
 
 // workReplyIsResult reports whether the reply (by its first version) was
 // submitted as a result of w: the result w holds while submitted or
-// accepted, or one a standing task opened for it.
-func workReplyIsResult(ctx context.Context, tx *sql.Tx, w workRow, first string) (bool, error) {
+// accepted, or one a standing task opened or queued for it.
+func workReplyIsResult(ctx context.Context, tx *sql.Tx, w workRow, first string, now int64) (bool, error) {
 	if w.Result != "" && (w.State == "submitted" || w.State == "accepted") {
 		var resultFirst string
 		if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN origin<>'' THEN origin ELSE id END FROM events WHERE id=?`, w.Result).Scan(&resultFirst); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -191,8 +191,9 @@ func workReplyIsResult(ctx context.Context, tx *sql.Tx, w workRow, first string)
 			return true, nil
 		}
 	}
+	// A queued result is stored open (C661); standingQueuedSQL says which.
 	var standing bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM works r JOIN events e ON e.id=r.id WHERE r.standing_id=? AND r.state IN ('submitted','accepted','queued') AND (e.id=? OR e.origin=?))`, w.ID, first, first).Scan(&standing)
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM works w JOIN events e ON e.id=w.id WHERE w.standing_id=? AND (w.state IN ('submitted','accepted') OR `+standingQueuedSQL+`) AND (e.id=? OR e.origin=?))`, w.ID, now, first, first).Scan(&standing)
 	return standing, err
 }
 

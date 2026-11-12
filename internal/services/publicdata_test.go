@@ -551,6 +551,12 @@ func TestPublicDataSeaIce(t *testing.T) {
 	if l, _ := item["lag"].(string); !strings.Contains(l, "2026-07-10") {
 		t.Errorf("end_date after the latest day keeps lag: %v", item["lag"])
 	}
+	// A window wholly newer than the source has no as_of but still says
+	// how far the source has published (bounty r9 30a5bec6, jade-data-tools).
+	item, _ = v.mustFetch(t, "sea_ice_extent", `{"start_date":"2026-07-11","end_date":"2026-07-20","limit":1}`, unix("2026-07-21"))
+	if l, _ := item["lag"].(string); item["as_of"] != nil || !strings.Contains(l, "up to 2026-07-10, before the requested end_date 2026-07-20") {
+		t.Errorf("window after the latest day: as_of %v, lag %v", item["as_of"], item["lag"])
+	}
 	item, d = v.mustFetch(t, "sea_ice_extent", `{"start_date":"2025-08-01","end_date":"2025-12-31"}`, unix("2026-07-12"))
 	if d["date"] != nil || d["extent_km2"] != nil || item["as_of"] != nil || d["note"] == nil {
 		t.Errorf("an empty window has no headline and no as_of: %v %v", d, item["as_of"])

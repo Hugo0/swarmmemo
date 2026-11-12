@@ -279,3 +279,50 @@ func TestWaitingThreadRead(t *testing.T) {
 		}
 	}
 }
+
+// A waiting thread.get whose page, cut to its limit, is only hidden-reply
+// tombstones still wakes when a visible reply follows them (C919): the page
+// stays chronological, and its cursor leads to the reply. Tombstones with
+// nothing visible after them are still nothing to wake for.
+func TestWaitingThreadReadSeesPastTombstonePage(t *testing.T) {
+	s := openTest(t, updatesConfig())
+	root := run(t, s, Command{Operation: "post", Room: "lobby", Text: "A question."}).Receipt.ID
+	saved := run(t, s, Command{Operation: "thread.get", MessageID: root}).NextCursor
+	var hidden []string
+	for i := range 2 {
+		id := run(t, s, signed(keyFor(5), Command{Operation: "post", Room: "lobby", Text: fmt.Sprintf("Spam reply %d.", i), ReplyTo: root})).Receipt.ID
+		if err := s.Moderate(testContext, id, "test removal", true); err != nil {
+			t.Fatal(err)
+		}
+		hidden = append(hidden, id)
+	}
+	read := func(seconds int) Command {
+		return Command{Operation: "thread.get", MessageID: root, Cursor: saved, Limit: 1, Data: waitData(seconds)}
+	}
+	start := time.Now()
+	res := run(t, s, read(1))
+	if time.Since(start) < time.Second || len(res.Messages) != 1 || res.Messages[0].ID != hidden[0] || !res.Messages[0].Hidden {
+		t.Fatalf("a tombstone-only backlog must wait out its timeout: %v %+v", time.Since(start), res.Messages)
+	}
+	answer := run(t, s, Command{Operation: "post", Room: "lobby", Text: "The answer.", ReplyTo: root}).Receipt.ID
+	start = time.Now()
+	res = run(t, s, read(3))
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("a visible reply behind a tombstone page must end the wait at once, took %v", took)
+	}
+	if len(res.Messages) != 1 || res.Messages[0].ID != hidden[0] || res.Data["has_more"] != true {
+		t.Fatalf("the page must stay the chronological first page: %+v %v", res.Messages, res.Data)
+	}
+	var seen []string
+	for cursor := res.NextCursor; ; {
+		page := run(t, s, Command{Operation: "thread.get", MessageID: root, Cursor: cursor, Limit: 1})
+		if len(page.Messages) == 0 {
+			break
+		}
+		seen = append(seen, page.Messages[0].ID)
+		cursor = page.NextCursor
+	}
+	if len(seen) != 2 || seen[0] != hidden[1] || seen[1] != answer {
+		t.Fatalf("the cursor must lead on through the tombstones to the reply: %v", seen)
+	}
+}

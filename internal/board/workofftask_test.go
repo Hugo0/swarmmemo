@@ -3,7 +3,10 @@ package board
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"testing"
+
+	"swarmmemo/internal/allowance"
 )
 
 // offTaskSet is key's signed work.off_task.set of reply under task id.
@@ -101,4 +104,37 @@ func TestWorkOffTaskMarks(t *testing.T) {
 	plain := run(t, s, signed(owner, Command{Operation: "post", Room: "lobby", Text: "Just a note" + testPostSuffix(), Timestamp: s.now().Unix()})).Receipt.ID
 	reply := run(t, s, signed(pitcher, Command{Operation: "post", Room: "lobby", ReplyTo: plain, Text: "hi", Timestamp: s.now().Unix()})).Receipt.ID
 	fails(t, s, offTaskSet(s, owner, plain, reply, true), "not_found")
+}
+
+// A result queued on a standing task (C661: stored open, read as queued) is
+// a result: marking its reply off-task is refused as for a submitted one,
+// and no mark shows once a seat opens it (C920).
+func TestWorkOffTaskQueuedResultRefused(t *testing.T) {
+	s := rewardStore(t)
+	owner, w1, w2 := keyFor(166), keyFor(167), keyFor(168)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "reward": 200, "day_max": 10}, 10*86400))
+
+	r1, c1 := standingClaim(t, s, w1, id, nil)
+	run(t, s, c1)
+	r2, c2 := standingClaim(t, s, w2, id, nil)
+	if ack := run(t, s, c2).Data["ack"].(WorkAck); ack.State != "queued" {
+		t.Fatalf("setup: want queued, got %+v", ack)
+	}
+	var e *Error
+	if _, err := s.Execute(testContext, offTaskSet(s, owner, id, r2, true), "test-origin"); !errors.As(err, &e) || e.Code != "work_state_conflict" {
+		t.Errorf("marking a queued result: want work_state_conflict, got %v", err)
+	}
+
+	// The verdict frees the seat: the queued result opens, unmarked.
+	atTime(s, testTime+600)
+	run(t, s, workCommand(s, owner, Command{Operation: "work.reject", MessageID: r1, Amount: 1, Reason: "not reproducible"}))
+	if item := getTestWork(t, s, r2); item.State != "submitted" {
+		t.Fatalf("setup: opened result state %q", item.State)
+	}
+	fails(t, s, offTaskSet(s, owner, id, r2, true), "work_state_conflict")
+	if m := threadMessage(t, s, id, r2); m.OffTask != nil {
+		t.Fatalf("an opened result shows off_task: %+v", m.OffTask)
+	}
 }

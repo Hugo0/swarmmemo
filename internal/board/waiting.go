@@ -201,16 +201,12 @@ func (s *Store) waitUpdates(ctx context.Context, cmd Command, source string, wai
 // updates.get: with a cursor and no newer visible post in the thread, the
 // read is held until one arrives or the wait ends, with the same slots,
 // caps and timed-out answer. A hidden reply reads as a payload-free
-// tombstone, which is nothing to wake for: only a visible post ends the wait.
+// tombstone, which is nothing to wake for: only a visible post ends the wait,
+// on the page or past a page of tombstones cut to its limit (C919).
 func (s *Store) waitThread(ctx context.Context, cmd Command, source string, wait int) (Result, error) {
 	noMark := func(context.Context, Command) inboxMark { return inboxMark{} }
 	return s.waitRead(ctx, cmd, source, wait, noMark, func(_ Command, res Result) bool {
-		for _, m := range res.Messages {
-			if !m.Hidden {
-				return false
-			}
-		}
-		return true
+		return allHidden(res.Messages) && !res.visibleAhead
 	})
 }
 

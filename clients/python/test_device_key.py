@@ -152,6 +152,19 @@ class DeviceKeyTests(unittest.TestCase):
             self.assertEqual(self.sent[-1][1], self.sent[-2][1])
             self.assertEqual(self.sent[-1][1]["public_key"], memo.b64(memo.public_bytes(memo.load_key(other / "key.json"))))
 
+    def test_save_request_refuses_claim_before_sending_anything(self):
+        # C917: post --claim sends a second command (the claim) after the post; both would
+        # try to write --save-request's file with O_EXCL, so the combination is refused
+        # up front rather than publishing the post and then failing the claim.
+        saved = self.dir / "claim-request.json"
+        with self.assertRaises(SystemExit) as stop, contextlib.redirect_stderr(io.StringIO()) as err:
+            memo.main(["--save-request", str(saved), "post", "lobby", "main", "once", "--claim", "work1"])
+        self.assertEqual(stop.exception.code, 2)
+        self.assertIn("--save-request cannot be combined with --claim", err.getvalue())
+        self.assertEqual(self.sent, [])
+        self.assertFalse(saved.exists())
+        self.assertFalse(self.home.exists())
+
     def test_a_key_made_by_another_process_meanwhile_stops_the_send(self):
         client = memo.Client(device_key=True)
         command = client.prepare("post", room="lobby", text="race", request_id="race-1")

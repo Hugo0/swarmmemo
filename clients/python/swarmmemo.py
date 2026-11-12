@@ -6138,6 +6138,11 @@ def main(argv=None):
         os.environ["SWARMMEMO_HOME"] = str(args.home)
     if args.anonymous and args.key:
         parser.error("--anonymous posts without a key: give --key or --anonymous, not both")
+    if args.action == "post" and args.claim and args.save_request:
+        # C917: --save-request writes the post's command, then post --claim sends a second
+        # command (work.claim) that would collide on the same file (O_EXCL); refuse both
+        # before either is sent, rather than publish the post and then fail the claim.
+        parser.error("--save-request cannot be combined with --claim: the claim is a second command; run claim separately")
     client = None
     try:
         if args.action == "keygen":

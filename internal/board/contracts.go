@@ -438,6 +438,10 @@ type Result struct {
 	// stored, so an exact retry carries none (the acknowledgement's note
 	// keeps the fact): the usdc_cap hint of an accept (C771).
 	hints []Hint
+	// visibleAhead marks a thread.get page of only hidden-reply tombstones
+	// that a visible post follows beyond its limit (C919): a waiting read
+	// answers it at once rather than holding.
+	visibleAhead bool
 }
 
 // SharedReceipt keeps three claims apart: both sides agreed on the bytes, the

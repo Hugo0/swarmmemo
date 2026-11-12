@@ -197,8 +197,9 @@ type threadRead struct {
 	root                 threadReference
 	cursor               conversationCursor
 	replies, lastReplyAt int64
-	total                int      // every event of the thread, root included (C620)
-	ids                  []string // the page's events, oldest first, at most limit+1
+	total                int               // every event of the thread, root included (C620)
+	refs                 []threadReference // the thread, oldest first (threadReferences)
+	ids                  []string          // the page's events, oldest first, at most limit+1
 	limit                int
 	events               []Message
 	hasMore              bool
@@ -334,6 +335,16 @@ func (s *Store) readThreads(ctx context.Context, tx *sql.Tx, cs []Command, a act
 			continue
 		}
 		results[i] = Result{Messages: r.events, NextCursor: s.encodeConversationCursor(r.cursor), Data: map[string]any{"root_id": r.root.id, "requested_message_id": cs[i].MessageID, "room": r.root.room, "has_more": r.hasMore, "replies": r.replies, "last_reply_at": r.lastReplyAt}}
+		// A page of only tombstones with more after it: does a visible post
+		// follow (C919)? A waiting read wakes for it, though the page cut to
+		// its limit does not show it yet.
+		if r.hasMore && len(r.events) > 0 && allHidden(r.events) {
+			var err error
+			if results[i].visibleAhead, err = visibleAfter(ctx, tx, r.refs, r.cursor.After); err != nil {
+				results[i], errs[i] = Result{}, err
+				continue
+			}
+		}
 		shapeList(&results[i], ListDepthNested)
 		setListTotal(&results[i], r.total, true)
 	}
@@ -402,7 +413,7 @@ func (s *Store) threadPage(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 	if r.replies, r.lastReplyAt, err = threadReplyStats(ctx, tx, refs); err != nil {
 		return err
 	}
-	r.limit, r.total = limitValue(c.Limit), len(refs)
+	r.limit, r.total, r.refs = limitValue(c.Limit), len(refs), refs
 	start := sort.Search(len(refs), func(i int) bool { return refs[i].seq > r.cursor.After })
 	for _, ref := range refs[start:min(start+r.limit+1, len(refs))] {
 		r.ids = append(r.ids, ref.id)
@@ -463,6 +474,40 @@ func threadReplyStats(ctx context.Context, tx *sql.Tx, refs []threadReference) (
 		last = max(last, at)
 	}
 	return replies, last, nil
+}
+
+// allHidden reports whether every message is a hidden post's tombstone.
+func allHidden(messages []Message) bool {
+	for _, m := range messages {
+		if !m.Hidden {
+			return false
+		}
+	}
+	return true
+}
+
+// visibleAfter reports whether any of the thread's refs after seq is a
+// visible (not hidden) event, read by primary key in bounded chunks as
+// threadReplyStats reads them.
+func visibleAfter(ctx context.Context, tx *sql.Tx, refs []threadReference, seq int64) (bool, error) {
+	const chunk = 500
+	start := sort.Search(len(refs), func(i int) bool { return refs[i].seq > seq })
+	for ; start < len(refs); start += chunk {
+		end := min(start+chunk, len(refs))
+		ids := make([]any, 0, end-start)
+		for _, ref := range refs[start:end] {
+			ids = append(ids, ref.id)
+		}
+		var found bool
+		err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM events WHERE id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+") AND hidden=0)", ids...).Scan(&found)
+		if err != nil {
+			return false, conversationError(err)
+		}
+		if found {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // replyCountWalkMax bounds the whole batched reply-count walk — every root on
