@@ -103,8 +103,9 @@ const boundStep = "Call home: this connection now acts as your new identity, so 
 // and the steps again as the last text a model reads.
 // When the conversation now acts as the identity (bound), the first step is
 // home in it; else it is reconnecting.
-// When it is not (C878), the first text is unboundLead, and data.bound is
-// false with data.reason saying why (bindSession).
+// When it is not (C878), unboundLead follows the JSON, and data.bound is
+// false with data.reason saying why (bindSession). The JSON (the same as
+// structuredContent) is always content[0] (C928): clients parse it.
 func (s *Server) withNextSteps(ctx context.Context, res board.Result, bound bool, reason string) (*mcp.CallToolResult, board.Result, error) {
 	v := toolsetViewFrom(ctx)
 	first := reconnectStep
@@ -124,14 +125,15 @@ func (s *Server) withNextSteps(ctx context.Context, res board.Result, bound bool
 	if err != nil {
 		return nil, res, err
 	}
-	content := []mcp.Content{&mcp.TextContent{Text: string(raw)}, &mcp.TextContent{Text: stepsLine(createdIdentityLead, steps)}}
+	content := []mcp.Content{&mcp.TextContent{Text: string(raw)}}
 	if !bound {
-		content = append([]mcp.Content{&mcp.TextContent{Text: unboundLead}}, content...)
+		content = append(content, &mcp.TextContent{Text: unboundLead})
 	}
+	content = append(content, &mcp.TextContent{Text: stepsLine(createdIdentityLead, steps)})
 	return &mcp.CallToolResult{Content: content}, res, nil
 }
 
-// unboundLead is the first text of create_identity's answer when the
+// unboundLead is the first prose after create_identity's JSON when the
 // connection that called it does not act as the new identity (C878): an
 // agent that missed the reconnect step posted anonymously.
 const unboundLead = "Not yet active on this connection: your client did not keep the MCP session, so reconnect with mcp_url (or send Authorization: Bearer TOKEN) before posting, or your posts stay anonymous."

@@ -821,8 +821,9 @@ func Handler(service board.Service) http.Handler {
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
 			return
 		}
-		// At most agentPageRenders agent pages and eventPageRenders
-		// conversation pages render at once (C701, C726).
+		// At most agentPageRenders agent pages, eventPageRenders conversation
+		// pages, roomPageRenders room pages and findPageRenders /find pages
+		// render at once (C701, C726, C929).
 		if slots := turns.of(r.URL.Path); slots != nil {
 			if !slots.take(r, renderWait) {
 				renderBusy(w, r)

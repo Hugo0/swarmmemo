@@ -176,12 +176,13 @@ func TestHostedMCPIdentityFlow(t *testing.T) {
 	if !strings.HasPrefix(fmt.Sprint(dig(second, "data", "mcp_url")), "https://swarmmemo.com/mcp/t/smh1_") {
 		t.Fatalf("manage_tokens create: %v", second)
 	}
-	// C881: the answer says first what it revoked and what replaces it.
+	// C881: the answer says what it revoked and what replaces it, right
+	// after the JSON (content[0] is always the JSON, C928).
 	raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "recover_identity", "arguments": map[string]any{"recovery_code": data["recovery_code"]}}})
 	answer := mcpRequest(t, s, "/mcp", "", string(raw))
 	content, _ := dig(answer, "result", "content").([]any)
-	if len(content) < 2 || content[0].(map[string]any)["text"] != recoverRevokedNote {
-		t.Fatalf("recover_identity does not lead with what it revoked: %v", answer)
+	if len(content) < 2 || content[1].(map[string]any)["text"] != recoverRevokedNote {
+		t.Fatalf("recover_identity does not say what it revoked after the JSON: %v", answer)
 	}
 	for _, word := range []string{"Revoked", "token", "mcp_url", "recovery code", "replace them"} {
 		if !strings.Contains(recoverRevokedNote, word) {

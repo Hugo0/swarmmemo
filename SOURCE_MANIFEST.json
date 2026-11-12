@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "baebb045a528e55a27dfb222ec2c85ddec19db9b4c0ff7224cb351e4d2abf6c0",
+  "allowlist_sha256": "fe87a3125284f8ea79c13682c89476c6625c58b7e8d24432bb010f6e4bab639c",
   "files": [
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "e44cebb54b7c2589473bd0b8a9d405073550c6af6078cd45658c005f635b69e7",
-      "size": 676025
+      "sha256": "aab4222b31eab814ad93b4b0c9db5bae7118279df4ecbbdfcaf2aea448e4c16f",
+      "size": 676233
     },
     {
       "mode": "0644",
@@ -5680,8 +5680,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/hosted_mcp_test.go",
-      "sha256": "144e3294db0850fca55eae3ec51c7fd2fdaa58be75b49cc64d7b616833da2575",
-      "size": 32454
+      "sha256": "e7708647309e0b923bac63d53b99f52d4e38fd929b8601fdabf92002a2bf38c2",
+      "size": 32521
     },
     {
       "mode": "0644",
@@ -5710,8 +5710,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/hosted_session_test.go",
-      "sha256": "299b9ba2e37537500d671811b4c5a228189f2b055f4d34fcbec3d12973a9d548",
-      "size": 12296
+      "sha256": "1de6575ebc8f9e639e8437ed14d1e3d23b5a4bdd018d905d846351f3233ac532",
+      "size": 12300
     },
     {
       "mode": "0644",
@@ -5890,8 +5890,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp.go",
-      "sha256": "5cfb67fef413a46bc7eb9bfd84e45f92e09a3b3f539236cddd7f451508de0051",
-      "size": 81126
+      "sha256": "f68499b407a95ad49f70f75ba2de0294469e1685cef548c8fbf0165f48c4232b",
+      "size": 81278
     },
     {
       "mode": "0644",
@@ -5925,9 +5925,15 @@
     },
     {
       "mode": "0644",
+      "path": "internal/httpapi/mcp_content_order_test.go",
+      "sha256": "09f357aee51220568c789786b4b61c3a8e3b198224dd46b2156c574908a9d6b0",
+      "size": 2343
+    },
+    {
+      "mode": "0644",
       "path": "internal/httpapi/mcp_conversations.go",
-      "sha256": "4a5369c4484ad01fabd319e7b81dce925c32950130b8bac54866e280bb6c6d52",
-      "size": 67052
+      "sha256": "d1344c68085b2c8dbf5f76f0f58ac2d6fd962da0d991b38fd2f3c5422f832bd9",
+      "size": 67070
     },
     {
       "mode": "0644",
@@ -5998,14 +6004,14 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_firstsession.go",
-      "sha256": "f0e229737dfcfefaa18f89b0d0131bd78a1170dec6706b924cab3402d68231f7",
-      "size": 10161
+      "sha256": "b7ba1d8f218b486f42d219d2dd385a421c65fcec0f27c49d853871a270494f32",
+      "size": 10262
     },
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_firstsession_test.go",
-      "sha256": "cd99070d5720a72e7cb9a049d6099f078fc7c6129e5f89f58ab47c2f0339d5ed",
-      "size": 7594
+      "sha256": "6f8a34bfb603aa606d576d561ed1764a563a6b2c3e4e156139096fed825c3d8c",
+      "size": 7573
     },
     {
       "mode": "0644",
@@ -6178,8 +6184,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/mcp_trust_summary_test.go",
-      "sha256": "f5b0b3fd078dc23dcb9aee64d45af9858dd196411d80ec68f36a6a69582feca0",
-      "size": 1489
+      "sha256": "240acb6b81ff5080def1697a0a2157258702af831fd6225e8ffafc7660673a1e",
+      "size": 1498
     },
     {
       "mode": "0644",
@@ -9808,14 +9814,14 @@
     {
       "mode": "0644",
       "path": "internal/web/agentpages.go",
-      "sha256": "aa3e007a3b7bc9e7e130f6f4990d899851b84073927ecfab0c258721d706500b",
-      "size": 3719
+      "sha256": "9d72283f70045f02b724421ef17d8403fdf8e38ef779e95076ee981548f0646c",
+      "size": 4900
     },
     {
       "mode": "0644",
       "path": "internal/web/agentpages_test.go",
-      "sha256": "bebe6538fc91a4375f0a189411392fc104f5b71351fb12f6b65025c6ecf518ff",
-      "size": 3975
+      "sha256": "21e40dac2c65ddade833279cf072a1fe037ff1e12dec1cd221e769d5dd7bed0f",
+      "size": 6376
     },
     {
       "mode": "0644",
@@ -11704,8 +11710,8 @@
     {
       "mode": "0644",
       "path": "internal/web/web.go",
-      "sha256": "b84ccf37d21f96e15e138fd8f819c9188f4801bdec563f8c779580ea2695bbb9",
-      "size": 61449
+      "sha256": "2134150dff6ff6c62580d3e8f5ed0786e6d065b228ebd193fdbe615fa480eab3",
+      "size": 61517
     },
     {
       "mode": "0644",

@@ -648,7 +648,7 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 			return res, out, err
 		}
 		s.bindSession(ctx, &out)
-		// What it revoked, first and plainly (C881): the old URL a client
+		// What it revoked, plainly, right after the JSON (C881, C928): the old URL a client
 		// holds stops working, and only this answer has the new one.
 		out.Data["summary"] = recoverRevokedNote
 		return leadWithSummary(nil, out, nil)

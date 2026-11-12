@@ -20,13 +20,23 @@ import (
 // (/@ADDRESS and /agent/ID) and at most eventPageRenders conversation pages
 // render at once; a page past that waits up to renderWait for a turn, then
 // is answered 503 with Retry-After, which crawlers honour. One kind's
-// crawl never takes the other's turns. The API (agent.get, /api/agent, a
+// crawl never takes the other's turns.
+//
+// On 2026-11-12 at 12:43Z a crawl from 627 networks (none above 0.3
+// requests a second, so no per-network bucket saw it) read room pages
+// (/r/ROOM: room.get, the ranked feed with its nested replies) and /find
+// (the find engine) at once, which had no turns. Their reads queued 13 s on
+// the one connection, held the request pool full, and 406 requests on every
+// route were answered 503 busy within a minute (C929). Room pages and /find
+// now have turns of their own too: roomPageRenders and findPageRenders. The API (agent.get, /api/agent, a
 // JSON /@ADDRESS or /e/ID) never comes here and is never refused by it; the
 // anonymous page cache (pagecache.go) answers a repeat before it takes a
 // turn.
 const (
 	agentPageRenders = 3
 	eventPageRenders = 3
+	roomPageRenders  = 4 // the most-read pages after the home page, which the page cache serves
+	findPageRenders  = 2 // the heaviest render: the find engine and its grades
 	renderWait       = 2 * time.Second
 	renderRetryAfter = 5
 )
@@ -52,16 +62,27 @@ func eventPagePath(p string) bool {
 	return id != "" && !strings.Contains(suffix, "/")
 }
 
+// roomPagePath is a room page: /r/ROOM or /r/ROOM/PAGE (the handler answers
+// anything deeper 404 at once).
+func roomPagePath(p string) bool {
+	rest, ok := strings.CutPrefix(p, "/r/")
+	if !ok {
+		return false
+	}
+	room, page, _ := strings.Cut(rest, "/")
+	return room != "" && !strings.Contains(page, "/")
+}
+
 // renderSlots bounds a kind of render: a turn is a slot of the channel.
 type renderSlots chan struct{}
 
 // pageTurns are the turns of each capped kind of page.
 type pageTurns struct {
-	agents, events renderSlots
+	agents, events, rooms, find renderSlots
 }
 
 func newPageTurns() pageTurns {
-	return pageTurns{agents: make(renderSlots, agentPageRenders), events: make(renderSlots, eventPageRenders)}
+	return pageTurns{agents: make(renderSlots, agentPageRenders), events: make(renderSlots, eventPageRenders), rooms: make(renderSlots, roomPageRenders), find: make(renderSlots, findPageRenders)}
 }
 
 // of is the turns a page at path takes, or nil when it is not capped.
@@ -71,6 +92,10 @@ func (t pageTurns) of(path string) renderSlots {
 		return t.agents
 	case eventPagePath(path):
 		return t.events
+	case roomPagePath(path):
+		return t.rooms
+	case path == "/find":
+		return t.find
 	}
 	return nil
 }

@@ -119,3 +119,74 @@ func TestAgentPagePath(t *testing.T) {
 		}
 	}
 }
+
+// Room pages and /find have turns of their own (C929): past roomPageRenders
+// (findPageRenders) a render waits up to renderWait, then is answered 503
+// busy without reading the store, while the other kinds are still served.
+func TestRoomAndFindRendersAreCapped(t *testing.T) {
+	for _, tc := range []struct {
+		op, path, other string
+		turns           int
+	}{
+		{"room.get", "/r/lobby", "/find?q=weather", roomPageRenders},
+		{"find", "/find?q=weather", "/r/lobby", findPageRenders},
+	} {
+		t.Run(tc.op, func(t *testing.T) {
+			s := &gatedAgentService{gate: make(chan struct{}), op: tc.op}
+			h := Handler(s)
+			get := func(path string) *httptest.ResponseRecorder {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+				return w
+			}
+			var wg sync.WaitGroup
+			codes := make(chan int, tc.turns)
+			for range tc.turns {
+				wg.Add(1)
+				go func() { defer wg.Done(); codes <- get(tc.path).Code }()
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for s.inflight.Load() < int64(tc.turns) {
+				if time.Now().After(deadline) {
+					t.Fatalf("only %d renders started", s.inflight.Load())
+				}
+				time.Sleep(time.Millisecond)
+			}
+			for _, other := range []string{tc.other, "/", "/agent/" + strings.Repeat("ab", 32)} {
+				if w := get(other); w.Code == 503 {
+					t.Fatalf("%s was held by the %s cap", other, tc.path)
+				}
+			}
+			start := time.Now()
+			busy := get(tc.path)
+			if busy.Code != 503 || busy.Header().Get("Retry-After") != "5" || !strings.Contains(busy.Body.String(), "This page is busy.") {
+				t.Fatalf("past the cap: %d %v", busy.Code, busy.Header())
+			}
+			if waited := time.Since(start); waited < renderWait {
+				t.Fatalf("answered busy after %v, before waiting %v", waited, renderWait)
+			}
+			if s.reads.Load() != int64(tc.turns) || s.most.Load() != int64(tc.turns) {
+				t.Fatalf("store reads %d, most in flight %d, want %d", s.reads.Load(), s.most.Load(), tc.turns)
+			}
+			close(s.gate)
+			wg.Wait()
+			close(codes)
+			for code := range codes {
+				if code == 503 {
+					t.Fatal("a render inside the cap answered 503")
+				}
+			}
+		})
+	}
+}
+
+func TestRoomPagePath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/r/lobby": true, "/r/lobby/notes": true,
+		"/r/": false, "/r/lobby/a/b": false, "/rooms": false, "/find": false,
+	} {
+		if roomPagePath(p) != want {
+			t.Errorf("roomPagePath(%q) = %v", p, !want)
+		}
+	}
+}

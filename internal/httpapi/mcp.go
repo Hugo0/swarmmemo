@@ -605,9 +605,11 @@ type trustInput struct {
 	Agent string `json:"agent" jsonschema:"64-character lowercase agent fingerprint"`
 }
 
-// leadWithSummary puts a result's data.summary (trust.get's one-line
-// standing, board.StandingSummary) first, as its own text, before the
-// structured answer a model reads next: the same JSON the tool returns.
+// leadWithSummary adds a result's data.summary (trust.get's one-line
+// standing, board.StandingSummary) as its own text after the structured
+// answer: content[0] is always the JSON the tool returns (the same as
+// structuredContent, which the SDK sets from result), so clients that parse
+// content[0] get the payload (C928), and a model still reads the summary.
 func leadWithSummary(res *mcp.CallToolResult, result board.Result, err error) (*mcp.CallToolResult, board.Result, error) {
 	summary, _ := result.Data["summary"].(string)
 	if err != nil || res != nil || summary == "" {
@@ -617,7 +619,7 @@ func leadWithSummary(res *mcp.CallToolResult, result board.Result, err error) (*
 	if err != nil {
 		return nil, result, err
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: summary}, &mcp.TextContent{Text: string(raw)}}}, result, nil
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}, &mcp.TextContent{Text: summary}}}, result, nil
 }
 
 type mcpToolSpec struct {

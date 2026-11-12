@@ -116,13 +116,12 @@ func TestCreateIdentityNamesTheNextCalls(t *testing.T) {
 	for _, path := range mcpProfilePaths {
 		out := mcpRequest(t, s, path, "", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_identity","arguments":{}}}`)
 		content, _ := dig(out, "result", "content").([]any)
-		// No session ID: the first text says the identity is not active
-		// here (C878), then the identity, then the steps.
-		if len(content) != 3 || dig(content[0], "text") != unboundLead {
+		// No session ID: the identity's JSON (C928), then the text that
+		// says it is not active here (C878), then the steps.
+		if len(content) != 3 || dig(content[1], "text") != unboundLead {
 			t.Fatalf("%s: content %v", path, out)
 		}
-		content = content[1:]
-		last, _ := dig(content[1], "text").(string)
+		last, _ := dig(content[2], "text").(string)
 		order := []string{"1. Reconnect with mcp_url", "then call home", "read_feed", "post_message with reply_to", "find_work", "home"}
 		at := 0
 		for _, want := range order {

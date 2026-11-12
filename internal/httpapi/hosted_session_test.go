@@ -199,7 +199,7 @@ func TestHostedIdentityActsInItsSession(t *testing.T) {
 // says first that the identity is not active there, with data.bound=false
 // and why, logs it without a secret, and hosted_auth_required on that
 // connection then points at the mcp_url.
-func TestCreateIdentityUnboundSaysSoFirst(t *testing.T) {
+func TestCreateIdentityUnboundSaysSo(t *testing.T) {
 	var lines []string
 	old := problemLogWrite
 	problemLogWrite = func(line string) { lines = append(lines, line) }
@@ -215,8 +215,8 @@ func TestCreateIdentityUnboundSaysSoFirst(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "create_identity", "arguments": map[string]any{}}})
 		out, _ := sessionPost(t, s, "/mcp", sid, string(raw))
 		content, _ := dig(out, "result", "content").([]any)
-		if len(content) != 3 || dig(content[0], "text") != unboundLead {
-			t.Fatalf("%s: first text: %v", name, content)
+		if len(content) != 3 || dig(content[1], "text") != unboundLead {
+			t.Fatalf("%s: text after the JSON: %v", name, content)
 		}
 		data, _ := dig(out, "result", "structuredContent", "data").(map[string]any)
 		if data["bound"] != false || data["reason"] != name || data["session"] != nil {
