@@ -234,3 +234,64 @@ func trailingBitsTwin(s string) string {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 	return s[:len(s)-1] + string(alphabet[strings.IndexByte(alphabet, s[len(s)-1])|1])
 }
+
+// TestNotaryGetByPrefix: notary.get reads a receipt by a hash prefix of 8 to
+// 63 hex digits, either case, when exactly one stamped hash starts with it
+// (C912: an outside relay cited a receipt by 8 hex).
+func TestNotaryGetByPrefix(t *testing.T) {
+	r := newWakeRig(t)
+	anon := allowance.Subject{ID: "anon:x"}
+	unique := "0123abcd" + strings.Repeat("1", 56)
+	twinA := "deadbeef" + strings.Repeat("a", 56)
+	twinB := "deadbeef" + strings.Repeat("b", 56)
+	for _, h := range []string{unique, twinA, twinB} {
+		r.mustCall("alice", "notary", "stamp", map[string]any{"hash": h}, 1)
+	}
+	full, err := r.read(anon, "notary", "get", map[string]any{"hash": unique})
+	if err != nil || get(full, "result", "hash") != unique {
+		t.Fatalf("full hash: %+v %v", full, err)
+	}
+	for _, p := range []string{unique[:8], "0123ABCD", unique[:63], strings.ToUpper(unique[:20])} {
+		out, err := r.read(anon, "notary", "get", map[string]any{"hash": p})
+		if err != nil {
+			t.Fatalf("prefix %s: %v", p, err)
+		}
+		if got, want := receiptOf(t, get(out, "result", "receipt")), receiptOf(t, get(full, "result", "receipt")); got != want || get(out, "result", "hash") != unique {
+			t.Fatalf("prefix %s answered %+v, not the full hash's receipt", p, out)
+		}
+	}
+	// With seq too, the seq's receipt must stamp a hash with the prefix.
+	if out, err := r.read(anon, "notary", "get", map[string]any{"hash": unique[:8], "seq": 1}); err != nil || get(out, "result", "hash") != unique {
+		t.Fatalf("prefix with its seq: %+v %v", out, err)
+	}
+	if _, err := r.read(anon, "notary", "get", map[string]any{"hash": unique[:8], "seq": 2}); code(err) != "notary_not_found" {
+		t.Fatalf("prefix with another hash's seq: %v", err)
+	}
+	// No stamped hash starts with it: the full hash's not-found.
+	if _, err := r.read(anon, "notary", "get", map[string]any{"hash": "99999999"}); code(err) != "notary_not_found" {
+		t.Fatalf("no match: %v", err)
+	}
+	// Two do: notary_ambiguous naming both full hashes.
+	_, err = r.read(anon, "notary", "get", map[string]any{"hash": "DEADBEEF"})
+	var e *allowance.Err
+	if !errors.As(err, &e) || e.Code != "notary_ambiguous" {
+		t.Fatalf("ambiguous: %v", err)
+	}
+	if d, ok := e.Details.(services.NotaryAmbiguous); !ok || d.Prefix != "deadbeef" || len(d.Candidates) != 2 || d.Candidates[0] != twinA || d.Candidates[1] != twinB || d.More {
+		t.Fatalf("ambiguous details: %+v", e.Details)
+	}
+	if out, err := r.read(anon, "notary", "get", map[string]any{"hash": twinB[:9]}); err != nil || get(out, "result", "hash") != twinB {
+		t.Fatalf("one more character resolves: %+v %v", out, err)
+	}
+	// Too short or not hex: the hash rule, which names the prefix form.
+	for _, bad := range []string{unique[:7], "0123abcz", "deadbeef-"} {
+		_, err := r.read(anon, "notary", "get", map[string]any{"hash": bad})
+		if e := (*allowance.Err)(nil); code(err) != "invalid_service_data" || !errors.As(err, &e) || !strings.Contains(e.Message, "prefix of one of at least 8 hex digits") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	// A 64-digit hash keeps today's rule: lowercase only, not a prefix.
+	if _, err := r.read(anon, "notary", "get", map[string]any{"hash": strings.ToUpper(unique)}); code(err) != "invalid_service_data" {
+		t.Errorf("uppercase full hash: %v", err)
+	}
+}

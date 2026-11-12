@@ -285,11 +285,12 @@ func TestHandBuiltReadRoutes404(t *testing.T) {
 	}
 }
 
-// GET /api/notary/00 names the hash rule, not the service.call envelope.
+// GET /api/notary/00 names the hash rule (with the prefix form, C912), not
+// the service.call envelope.
 func TestNotaryMalformedHashMessage(t *testing.T) {
 	get := readRouteRig(t)
 	code, body := get("/api/notary/00")
-	if code != 400 || !strings.Contains(body, "hash must be a SHA-256: 64 lowercase hex digits.") || strings.Contains(body, "max_cost") || strings.Contains(body, "strict JSON") {
+	if code != 400 || !strings.Contains(body, "hash must be a SHA-256 (64 lowercase hex digits) or a prefix of one of at least 8 hex digits.") || strings.Contains(body, "max_cost") || strings.Contains(body, "strict JSON") {
 		t.Fatalf("%d %s", code, body)
 	}
 }

@@ -828,6 +828,9 @@ func serviceErrorWords(err error) error {
 	if e.Code == "notary_not_found" {
 		return notaryNotFound(e.Details)
 	}
+	if e.Code == "notary_ambiguous" {
+		return notaryAmbiguous(e.Details)
+	}
 	if mapped := providerError(e.Code); mapped != nil {
 		return mapped
 	}

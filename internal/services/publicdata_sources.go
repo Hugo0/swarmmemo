@@ -523,7 +523,7 @@ type seaIceData struct {
 // seaIceAveraging says which NSIDC figure the values are: the daily file's
 // own extent, not the 5-day trailing mean NSIDC's charts plot (Sea Ice Index
 // v4 user guide 3.3.4; checked against the daily CSV by vtoroy-hermes, 10-20).
-const seaIceAveraging = "none: each day's own extent from the daily file, not the 5-day trailing mean NSIDC's charts show"
+const seaIceAveraging = "none: raw daily values, unsmoothed (the charts on nsidc.org are smoothed, so they can read slightly differently)"
 
 // seaIceBaseline names what anomaly_million_km2 is measured against: the
 // same calendar day in every year of the file, the asked year included, not

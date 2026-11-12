@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -233,5 +234,44 @@ func TestNotaryRouteDeclinesWhileOff(t *testing.T) {
 	caps := decodeResult(t, makeRequest(h, "GET", "https://swarmmemo.com/capabilities", "", "").Body.Bytes())
 	if dig(caps, "services", "notary") != nil || dig(caps, "services", "wakeup") != nil {
 		t.Fatalf("capabilities list only enabled services: %+v", caps["services"])
+	}
+}
+
+// TestNotaryGetByHashPrefix: GET /api/notary/PREFIX reads the receipt of
+// the one stamped hash an 8-63 hex prefix starts; none is the full hash's
+// 404, several a 409 ambiguous_id naming them, and under 8 hex the 400
+// says a prefix works (C912).
+func TestNotaryGetByHashPrefix(t *testing.T) {
+	_, h := openWakeNotaryStore(t)
+	key, _ := wireKey(3)
+	twinA, twinB := "deadbeef"+strings.Repeat("a", 56), "deadbeef"+strings.Repeat("b", 56)
+	sum := sha256.Sum256([]byte("contract v1"))
+	hash := hex.EncodeToString(sum[:])
+	for i, args := range []map[string]any{{"text": "contract v1"}, {"hash": twinA}, {"hash": twinB}} {
+		postCommand(t, h, signService(key, board.Command{Operation: "service.call", Target: "notary", Data: serviceArgs("stamp", args, 1), RequestID: "stamp-" + strconv.Itoa(i)}))
+	}
+	w := makeRequest(h, "GET", "https://swarmmemo.com/api/notary/"+hash, "", "")
+	if w.Code != 200 {
+		t.Fatalf("full hash: %d %s", w.Code, w.Body.String())
+	}
+	want := dig(decodeResult(t, w.Body.Bytes()), "data", "result")
+	for _, p := range []string{hash[:8], strings.ToUpper(hash[:12]), hash[:63]} {
+		w = makeRequest(h, "GET", "https://swarmmemo.com/api/notary/"+p, "", "")
+		if got := dig(decodeResult(t, w.Body.Bytes()), "data", "result"); w.Code != 200 || !reflect.DeepEqual(got, want) {
+			t.Fatalf("prefix %s: %d %s", p, w.Code, w.Body.String())
+		}
+	}
+	if w = makeRequest(h, "GET", "https://swarmmemo.com/api/notary/99999999", "", ""); w.Code != 404 || !strings.Contains(w.Body.String(), "notary_not_found") {
+		t.Fatalf("no match: %d %s", w.Code, w.Body.String())
+	}
+	w = makeRequest(h, "GET", "https://swarmmemo.com/api/notary/deadbeef", "", "")
+	body := w.Body.String()
+	if w.Code != 409 || !strings.Contains(body, "ambiguous_id") || !strings.Contains(body, twinA) || !strings.Contains(body, twinB) || !strings.Contains(body, "more characters") {
+		t.Fatalf("ambiguous: %d %s", w.Code, body)
+	}
+	for _, bad := range []string{hash[:7], "deadbeeg"} {
+		if w = makeRequest(h, "GET", "https://swarmmemo.com/api/notary/"+bad, "", ""); w.Code != 400 || !strings.Contains(w.Body.String(), "at least 8 hex digits") {
+			t.Errorf("%s: %d %s", bad, w.Code, w.Body.String())
+		}
 	}
 }

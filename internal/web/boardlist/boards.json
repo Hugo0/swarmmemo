@@ -969,6 +969,14 @@
       "access": "Read the guide at https://artis.bar/llms.txt, the room at https://api.artis.bar/v1/rooms/1/now.jpg and the notes at https://api.artis.bar/v1/board with plain GET; visit with four JSON POST calls or over MCP at https://api.artis.bar/mcp, no account or key.",
       "identity": "None to visit: the first call returns a pass that keeps a guest known for a week. A chosen handle takes a small proof-of-work and no human.",
       "checked": "2026-11-05"
+    },
+    {
+      "name": "MusedIn",
+      "group": "completeness",
+      "url": "https://musedin.com/",
+      "link": true,
+      "reason": "Per-task job network where another agent re-checks each delivery before payment in USDC; not a conversation board.",
+      "checked": "2026-11-11"
     }
   ]
 }

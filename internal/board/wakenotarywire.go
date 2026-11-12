@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -258,6 +259,20 @@ func notaryNotFound(details any) error {
 	}
 	return &Error{Status: 404, Code: "notary_not_found", Details: d,
 		Message: fmt.Sprintf("Seq %d stamps hash %s (details.seq_hash), not the hash you gave; read it at GET /api/notary/%s.%s", d.Seq, d.SeqHash, d.SeqHash, own)}
+}
+
+// notaryAmbiguous is the 409 ambiguous_id for a notary.get hash prefix that
+// several stamped hashes start (C912): it names up to
+// services.NotaryPrefixCandidates of them, in the shape a message ID
+// prefix's ambiguous_id has (details prefix, candidates, more).
+func notaryAmbiguous(details any) error {
+	d, _ := details.(services.NotaryAmbiguous)
+	message := "Several notary receipts stamp hashes starting with " + d.Prefix + ": " + strings.Join(d.Candidates, ", ")
+	if d.More {
+		message += " and more"
+	}
+	return &Error{Status: 409, Code: "ambiguous_id", Message: message + ". Send more characters of the hash, or all 64.",
+		Details: map[string]any{"prefix": d.Prefix, "candidates": d.Candidates, "more": d.More}}
 }
 
 // serviceNotices adds what enabled services contribute to an agent's

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"swarmmemo/internal/allowance"
@@ -46,6 +47,24 @@ const NotaryStampGET = "On the GET form, URL-encode the text (an unencoded & or 
 
 // notaryHashRule is the refusal text for a hash argument notaryHashRE refuses.
 const notaryHashRule = "hash must be a SHA-256: 64 lowercase hex digits."
+
+// notaryPrefixRE is a hash prefix notary.get resolves to the one stamped
+// hash it starts (C912): at least NotaryPrefixMin hex digits, either case,
+// short of a full hash. An outside relay that cites a receipt by 8 hex can
+// then be followed.
+var notaryPrefixRE = regexp.MustCompile(`^[0-9a-fA-F]{8,63}$`)
+
+const (
+	// NotaryPrefixMin is the shortest hash prefix notary.get resolves.
+	NotaryPrefixMin = 8
+	// NotaryPrefixCandidates is how many full hashes an ambiguous
+	// prefix's refusal names.
+	NotaryPrefixCandidates = 5
+)
+
+// notaryGetHashRule is notary.get's refusal text for a hash that is neither
+// a SHA-256 nor a prefix of one it resolves.
+const notaryGetHashRule = "hash must be a SHA-256 (64 lowercase hex digits) or a prefix of one of at least 8 hex digits."
 
 // notary signs timestamps: an agent submits a SHA-256 hash, or text for the
 // notary to hash, and gets a receipt signed with the notary key. Anyone can
@@ -486,9 +505,9 @@ func (n *notary) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 		}
 		switch {
 		case a.Hash == "" && a.Seq == nil:
-			return nil, badArg("Give hash (a SHA-256: 64 lowercase hex digits), seq (a receipt's sequence number), or both.")
-		case a.Hash != "" && !notaryHashRE.MatchString(a.Hash):
-			return nil, badArg(notaryHashRule)
+			return nil, badArg("Give hash (a SHA-256: 64 lowercase hex digits, or a prefix of at least 8), seq (a receipt's sequence number), or both.")
+		case a.Hash != "" && !notaryHashRE.MatchString(a.Hash) && !notaryPrefixRE.MatchString(a.Hash):
+			return nil, badArg(notaryGetHashRule)
 		case a.Seq != nil && *a.Seq < 1:
 			return nil, badArg(NotarySeqRule)
 		}
@@ -537,10 +556,64 @@ type NotaryNotFound struct {
 	HashSeq int64  `json:"hash_seq,omitempty"`
 }
 
+// NotaryAmbiguous is a notary_ambiguous refusal's details (C912): the hash
+// prefix asked, the first NotaryPrefixCandidates stamped hashes it starts
+// (in order), and whether more do.
+type NotaryAmbiguous struct {
+	Prefix     string   `json:"prefix"`
+	Candidates []string `json:"candidates"`
+	More       bool     `json:"more"`
+}
+
+// notaryHashFromPrefix is the one stamped hash that starts with prefix
+// (lowercase hex, 8-63 digits), by a range scan of the hash column's unique
+// index. None is notary_not_found; several are notary_ambiguous.
+func notaryHashFromPrefix(ctx context.Context, q allowance.Querier, prefix string) (string, error) {
+	rows, err := q.QueryContext(ctx, "SELECT hash FROM notary_receipts WHERE hash>=? AND hash<? ORDER BY hash LIMIT ?",
+		prefix, prefix+"g", NotaryPrefixCandidates+1)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var hashes []string
+	for rows.Next() {
+		var h string
+		if err = rows.Scan(&h); err != nil {
+			return "", err
+		}
+		hashes = append(hashes, h)
+	}
+	if err = rows.Err(); err != nil {
+		return "", err
+	}
+	switch {
+	case len(hashes) == 0:
+		return "", &allowance.Err{Code: "notary_not_found", Details: NotaryNotFound{Hash: prefix}}
+	case len(hashes) > 1:
+		return "", &allowance.Err{Code: "notary_ambiguous", Details: NotaryAmbiguous{Prefix: prefix,
+			Candidates: hashes[:min(len(hashes), NotaryPrefixCandidates)], More: len(hashes) > NotaryPrefixCandidates}}
+	}
+	return hashes[0], nil
+}
+
 // notaryGet is notary.get's receipt: by seq when one is given (and then it
-// must stamp the hash, if one is given too), else by hash.
+// must stamp the hash, if one is given too), else by hash. A hash prefix
+// reads as the one stamped hash it starts (C912); with seq, the seq's
+// receipt must stamp a hash with that prefix.
 func notaryGet(ctx context.Context, q allowance.Querier, a notaryGetArgs, key ed25519.PrivateKey) (NotaryReceipt, error) {
 	notFound := func(d NotaryNotFound) error { return &allowance.Err{Code: "notary_not_found", Details: d} }
+	prefix := ""
+	if a.Hash != "" && !notaryHashRE.MatchString(a.Hash) {
+		prefix = strings.ToLower(a.Hash)
+		a.Hash = prefix
+		if a.Seq == nil {
+			full, err := notaryHashFromPrefix(ctx, q, prefix)
+			if err != nil {
+				return NotaryReceipt{}, err
+			}
+			a.Hash = full
+		}
+	}
 	if a.Seq == nil {
 		r, err := readReceipt(ctx, q, a.Hash, key)
 		if errors.Is(err, errNoReceipt) {
@@ -552,11 +625,24 @@ func notaryGet(ctx context.Context, q allowance.Querier, a notaryGetArgs, key ed
 	if errors.Is(err, errNoReceipt) {
 		return r, notFound(NotaryNotFound{Hash: a.Hash, Seq: *a.Seq})
 	}
-	if err != nil || a.Hash == "" || r.Hash == a.Hash {
+	if err != nil || a.Hash == "" || r.Hash == a.Hash || prefix != "" && strings.HasPrefix(r.Hash, prefix) {
 		return r, err
 	}
 	d := NotaryNotFound{Hash: a.Hash, Seq: *a.Seq, SeqHash: r.Hash}
-	own, err := readReceipt(ctx, q, a.Hash, key)
+	ownHash := a.Hash
+	if prefix != "" {
+		// The prefix's own receipt is named only when it is unique.
+		full, err := notaryHashFromPrefix(ctx, q, prefix)
+		var e *allowance.Err
+		if err != nil && !errors.As(err, &e) {
+			return r, err
+		}
+		if err != nil {
+			return r, notFound(d)
+		}
+		ownHash = full
+	}
+	own, err := readReceipt(ctx, q, ownHash, key)
 	switch {
 	case err == nil:
 		d.HashSeq = own.Seq

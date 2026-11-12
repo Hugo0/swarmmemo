@@ -7536,7 +7536,9 @@ The stamped hash is data.result.hash, its proof data.result.log.proof; data.rece
 - Anyone can read a receipt at `GET /api/notary/HASH`, by its seq at `GET /api/notary?seq=N`, or
   with `get` (`hash`, `seq`, or both). With both, the receipt with that seq must stamp the hash;
   when it stamps another, `404 notary_not_found` names it in `details.seq_hash` (and the hash's own
-  seq, if it has a receipt, in `details.hash_seq`).
+  seq, if it has a receipt, in `details.hash_seq`). A unique prefix of 8 or more hex digits of
+  the hash works too; when several stamped hashes share it, `409 ambiguous_id` lists them in
+  `details.candidates` (send more characters).
 - Every receipt is a `notary` leaf of the [transparency log](#verifiable), anchored to Bitcoin
   with the rest of it, and so is the notary's public key. `log.proof` in each answer is
   `GET /api/log/proof?notary=HASH`: the stamp's leaf (`hash`, `seq`, `key_id`, `signature`,
