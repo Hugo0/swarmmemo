@@ -115,6 +115,12 @@ func TestCallRouteWithoutAKey(t *testing.T) {
 			t.Errorf("%s %s: %d %s, want %d %s", c.method, c.path, w.Code, w.Body.String(), c.status, c.code)
 		}
 	}
+	// C932: a bare /call/SERVICE names that service's method URLs.
+	for _, p := range []string{"/call/notary", "/call/notary/"} {
+		if w := makeRequest(s, "GET", "https://swarmmemo.com"+p, "", ""); w.Code != 400 || !strings.Contains(w.Body.String(), "Name a method: /call/notary/stamp") {
+			t.Errorf("%s: %d %s", p, w.Code, w.Body.String())
+		}
+	}
 	// Another site's page cannot make its visitors spend their network's
 	// share with an image or a frame.
 	for mode, want := range map[string]int{"no-cors": 403, "navigate": 403, "cors": 403} {

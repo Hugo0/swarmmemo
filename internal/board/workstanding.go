@@ -843,6 +843,12 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 		if next > now && n.queued < st.Seats {
 			return &standingQueue{blockedBy: blockedBy, nextOpenAt: next, refusal: refusal}
 		}
+		// C933: a full queue is not final: the queued results open first,
+		// and a seat for a new one frees as the requester judges them.
+		if n.queued >= st.Seats && now < until {
+			return &Error{Status: 409, Code: "seats_full", Details: map[string]any{"blocked_by": blockedBy, "queued": n.queued},
+				Message: fmt.Sprintf("No seat is open on this task right now, and its queue is full (%s queued for %s): they open first, and a seat for a new result frees as the requester judges them. Read work.get standing (open, queued) before sending again.", plural(n.queued, "result"), plural(st.Seats, "seat"))}
+		}
 		return refusal
 	}
 	switch {

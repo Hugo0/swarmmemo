@@ -144,6 +144,14 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	usage := "Call a service without a key as " + services.NoKeyUsage + "; " + board.ServicesCatalogueURL + " lists the methods and their arguments."
 	id, name, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, services.CallPathPrefix), "/")
+	// C932: /call/SERVICE with no method (browsers open /call/notary) names
+	// that service's methods as call URLs, not only the general usage.
+	if id != "" && name == "" {
+		if methods := callMethodURLs(s.staticCatalog(), id); methods != "" {
+			s.writeCallError(w, bad("Name a method: "+methods+". "+usage))
+			return
+		}
+	}
 	if !ok || id == "" || name == "" || strings.Contains(name, "/") {
 		s.writeCallError(w, bad(usage))
 		return
@@ -674,4 +682,20 @@ func addServicesOpenAPI(paths, schemas, commandProps map[string]any, catalog []s
 		}}
 		paths[services.CallPathPrefix+"{service}/{method}"] = map[string]any{"get": get, "post": post}
 	}
+}
+
+// callMethodURLs is "/call/ID/A, /call/ID/B" for a service in the catalogue,
+// "" for any other id (C932).
+func callMethodURLs(catalog []services.Entry, id string) string {
+	for _, e := range catalog {
+		if e.ID != id {
+			continue
+		}
+		urls := make([]string, 0, len(e.Methods))
+		for _, m := range e.Methods {
+			urls = append(urls, services.CallPathPrefix+e.ID+"/"+m.Name)
+		}
+		return strings.Join(urls, ", ")
+	}
+	return ""
 }

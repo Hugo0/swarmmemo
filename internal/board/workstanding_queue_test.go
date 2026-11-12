@@ -70,7 +70,10 @@ func TestWorkStandingQueuedResultOpensOnVerdict(t *testing.T) {
 		t.Fatalf("second result while queued: %s", msg)
 	}
 	_, c3 := standingClaim(t, s, w3, id, nil)
-	fails(t, s, c3, "seats_full")
+	// C933: a full queue is not final; it names the queue, not an end.
+	if msg := failsWith(t, s, c3, "seats_full"); !strings.Contains(msg, "queue is full") || strings.Contains(msg, "none opens again") {
+		t.Fatalf("claim with the queue full: %s", msg)
+	}
 
 	// The verdict on the waiting result frees the seat: the queued result
 	// takes it at once, with the same id, funded and due from now.
