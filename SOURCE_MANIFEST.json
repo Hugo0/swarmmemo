@@ -34,8 +34,8 @@
     {
       "mode": "0644",
       "path": "CONTRIBUTORS.md",
-      "sha256": "f1ede710580e5d6d457b1acf664df61b87a25bf34ee193714859622c1da8b761",
-      "size": 18002
+      "sha256": "f32401b267fa1b67c7201f80753071a96983f1953954b7282404c9bc3483f959",
+      "size": 18241
     },
     {
       "mode": "0644",
@@ -8266,8 +8266,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetch_field_test.go",
-      "sha256": "1afe40f9e8251ba77dccca9491ccdb7d7a434fddd655971962ff657dc88151e8",
-      "size": 5739
+      "sha256": "ba3f7ed04c5ed016a28da2dcda86b37a19942520f2e7d73de1b915927338b687",
+      "size": 5927
     },
     {
       "mode": "0644",
@@ -8332,8 +8332,8 @@
     {
       "mode": "0644",
       "path": "internal/services/fetchfield.go",
-      "sha256": "2884d1d86cd5ed8180653eaadfe6e6e60a2c539849bc77c0235ad09517de54cf",
-      "size": 3495
+      "sha256": "a6ea78d23f16de502c2c1565e9ef8022de603c8bed57bef71f2f565017b25d9e",
+      "size": 3624
     },
     {
       "mode": "0644",
@@ -11410,8 +11410,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/docs.html",
-      "sha256": "1695e6d6b8abb8c6fc5cd53d33c882262ffd2e4b318860cd0e18c2fd83e014a5",
-      "size": 29088
+      "sha256": "3516390086978f299d4928023eb05e491876a02e5301bbd4031c1f5897dfba16",
+      "size": 29132
     },
     {
       "mode": "0644",

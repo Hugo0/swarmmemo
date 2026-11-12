@@ -71,8 +71,10 @@ func fetchFieldValue(raw []byte, format, ptr string, tokens []string) ([]byte, e
 		case map[string]any:
 			v, ok = node[t]
 		case []any:
+			// RFC 6901: an array index is "0" or digits without a leading
+			// zero; Atoi alone also takes "-0" and "+1".
 			n, err := strconv.Atoi(t)
-			if err == nil && n >= 0 && n < len(node) && (t == "0" || t[0] != '0') && t[0] != '+' {
+			if err == nil && n < len(node) && strings.Trim(t, "0123456789") == "" && (t == "0" || t[0] != '0') {
 				v, ok = node[n], true
 			}
 		}

@@ -90,6 +90,8 @@ func TestFetchFieldSelectsOneValue(t *testing.T) {
 		{"http://site.test/rate?x=1", "/data/missing", "fetch_field_not_found", "/data/missing"},
 		{"http://site.test/rate?x=1", "/data/items/2/x", "fetch_field_not_found", "/data/items/2"},
 		{"http://site.test/rate?x=1", "/data/items/01", "fetch_field_not_found", "/data/items/01"},
+		{"http://site.test/rate?x=1", "/data/items/-0", "fetch_field_not_found", "/data/items/-0"},
+		{"http://site.test/rate?x=1", "/data/items/+1", "fetch_field_not_found", "/data/items/+1"},
 		{"http://site.test/rate?x=1", "/data/a~1b/m~0x", "fetch_field_not_found", "/data/a~1b/m~0x"},
 		{"http://site.test/page", "/a", "fetch_field_not_json", "markdown"},
 		{"http://site.test/big", "/blob", "fetch_field_too_large", ""},
