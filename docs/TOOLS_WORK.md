@@ -274,7 +274,8 @@ After you submit, the task stays open for other seats; your result is its own it
 A result sent while every seat is taken (or the pool or the day's `day_max` is spent) is queued,
 not refused: the answer's `state` is `queued`, with `next_open_at`, and `work.get RESULT_ID` reads
 `queued` until a seat opens for it; it then opens with the same ID, `submitted`, oldest first.
-Nothing more to send.
+Nothing more to send. The queue holds at most as many results as the task has seats; while it is
+full a claim answers `seats_full` (read `standing.queued`), and results close at `standing.results_until`.
 As the requester you judge one result at a time: `work get MESSAGE_ID` lists the ones waiting
 under `waiting_results`, each by its `work_id`; `work get RESULT_ID` shows its `fence`; accept
 one with `work accept RESULT_ID FENCE` (a verdict sent with the task's own ID is refused naming

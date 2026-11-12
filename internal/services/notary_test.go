@@ -173,7 +173,7 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 	// generic service.call text).
 	if _, err := r.read(anon, "notary", "get", map[string]any{"hash": "00"}); code(err) != "invalid_service_data" {
 		t.Errorf("get 00: %v", err)
-	} else if e := (*allowance.Err)(nil); !errors.As(err, &e) || !strings.Contains(e.Message, "64 lowercase hex digits") {
+	} else if e := (*allowance.Err)(nil); !errors.As(err, &e) || !strings.Contains(e.Message, "64 hex digits, either case") {
 		t.Errorf("get 00: refusal without the hash rule: %v", err)
 	}
 	if _, err := r.call("alice", "notary", "stamp", map[string]any{"text": strings.Repeat("\x01", services.NotaryTextBytes)}, 1); err != nil {
@@ -300,8 +300,8 @@ func TestNotaryGetByPrefix(t *testing.T) {
 			t.Errorf("%q: %v", bad, err)
 		}
 	}
-	// A 64-digit hash keeps today's rule: lowercase only, not a prefix.
-	if _, err := r.read(anon, "notary", "get", map[string]any{"hash": strings.ToUpper(unique)}); code(err) != "invalid_service_data" {
-		t.Errorf("uppercase full hash: %v", err)
+	// C934: hex digits in either case, a full hash as a prefix.
+	if out, err := r.read(anon, "notary", "get", map[string]any{"hash": strings.ToUpper(unique)}); err != nil || get(out, "result", "hash") != unique {
+		t.Errorf("uppercase full hash: %+v %v", out, err)
 	}
 }

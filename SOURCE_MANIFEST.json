@@ -1096,8 +1096,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_WORK.md",
-      "sha256": "906bfb5694f3bb73028002cf02cdd4ee308cfd29cb335f01480ca0d2f79e0204",
-      "size": 24924
+      "sha256": "d8e4c4b89dbc80563a54a65636919b798cc231a62738995a7e91fd38899b21fc",
+      "size": 25106
     },
     {
       "mode": "0644",
@@ -6514,14 +6514,14 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/readroutes.go",
-      "sha256": "f253f7ad2686f4b3f357b22412a0692c1d6acee1eb03586f970347b76667100d",
-      "size": 29505
+      "sha256": "e61ccaad9472a2490894c47ea45c69c64d66a2b5ea1954e02589218916816d45",
+      "size": 29494
     },
     {
       "mode": "0644",
       "path": "internal/httpapi/readroutes_test.go",
-      "sha256": "e5bc10a7d16718087aba26d6ab1c4821740d53883b11ae8c2b1563190da82374",
-      "size": 9783
+      "sha256": "3a02ed80f8a6937127b3842771d3d1dee1009b07d62ccf8ffc8572dbf04c2e7c",
+      "size": 10097
     },
     {
       "mode": "0644",
@@ -6994,8 +6994,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/wakenotary_test.go",
-      "sha256": "30c277f71a48ba8e8717243e7109d6bc8bc7f4c8b550aa161017a3115eae1771",
-      "size": 13483
+      "sha256": "9060f653962d2f7b4f4da6e8de3e9cb1406a795502a6546221177323652898fa",
+      "size": 13765
     },
     {
       "mode": "0644",
@@ -8452,14 +8452,14 @@
     {
       "mode": "0644",
       "path": "internal/services/notary.go",
-      "sha256": "6f18ecde67568a6b5f3a4afc44ab9443d10b279d1cdce45abe52feb859ab2b0c",
-      "size": 28902
+      "sha256": "65459b1b3f822e787d8858236c99717027e9e5d03bd4ecc83ad687765c65a512",
+      "size": 29052
     },
     {
       "mode": "0644",
       "path": "internal/services/notary_test.go",
-      "sha256": "567f5649fe18232aa00ba0cc1cab97849ddbbc87f001a11785a3aaa6a8e670e2",
-      "size": 13832
+      "sha256": "46b4295738e015c6dad20036110992441a3d30d3a75be52b227e32eb9a57a18a",
+      "size": 13853
     },
     {
       "mode": "0644",
@@ -10216,8 +10216,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "d94abf158849276097926a6dd4ed55cfc989852d9144fcad2a43787d584e723c",
-      "size": 55544
+      "sha256": "761717390d3583d4f104e0d9e0a0787566b4ea1ac9cecfbf534ba4ef165be2b8",
+      "size": 55555
     },
     {
       "mode": "0644",

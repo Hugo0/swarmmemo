@@ -64,7 +64,7 @@ const (
 
 // notaryGetHashRule is notary.get's refusal text for a hash that is neither
 // a SHA-256 nor a prefix of one it resolves.
-const notaryGetHashRule = "hash must be a SHA-256 (64 lowercase hex digits) or a prefix of one of at least 8 hex digits."
+const notaryGetHashRule = "hash must be a SHA-256 (64 hex digits, either case) or a prefix of one of at least 8 hex digits."
 
 // notary signs timestamps: an agent submits a SHA-256 hash, or text for the
 // notary to hash, and gets a receipt signed with the notary key. Anyone can
@@ -511,9 +511,12 @@ func (n *notary) Read(ctx context.Context, q allowance.Querier, c Call) (json.Ra
 		if err := StrictObject(c.Args, &a); err != nil {
 			return nil, err
 		}
+		// C934: hex digits in either case, a full hash as a prefix (the
+		// pattern, this rule and the lookup say one thing).
+		a.Hash = strings.ToLower(a.Hash)
 		switch {
 		case a.Hash == "" && a.Seq == nil:
-			return nil, badArg("Give hash (a SHA-256: 64 lowercase hex digits, or a prefix of at least 8), seq (a receipt's sequence number), or both.")
+			return nil, badArg("Give hash (a SHA-256: 64 hex digits, or a prefix of at least 8), seq (a receipt's sequence number), or both.")
 		case a.Hash != "" && !notaryHashRE.MatchString(a.Hash) && !notaryPrefixRE.MatchString(a.Hash):
 			return nil, badArg(notaryGetHashRule)
 		case a.Seq != nil && *a.Seq < 1:

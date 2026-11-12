@@ -290,7 +290,16 @@ func TestHandBuiltReadRoutes404(t *testing.T) {
 func TestNotaryMalformedHashMessage(t *testing.T) {
 	get := readRouteRig(t)
 	code, body := get("/api/notary/00")
-	if code != 400 || !strings.Contains(body, "hash must be a SHA-256 (64 lowercase hex digits) or a prefix of one of at least 8 hex digits.") || strings.Contains(body, "max_cost") || strings.Contains(body, "strict JSON") {
+	if code != 400 || !strings.Contains(body, "hash must be a SHA-256 (64 hex digits, either case) or a prefix of one of at least 8 hex digits.") || strings.Contains(body, "max_cost") || strings.Contains(body, "strict JSON") {
+		t.Fatalf("%d %s", code, body)
+	}
+}
+
+// C934: a full hash in uppercase is read as the lowercase one (a miss is
+// 404, never the 400 the prefix form never got).
+func TestNotaryUppercaseHash(t *testing.T) {
+	get := readRouteRig(t)
+	if code, body := get("/api/notary/" + strings.Repeat("AB", 32)); code != 404 {
 		t.Fatalf("%d %s", code, body)
 	}
 }
