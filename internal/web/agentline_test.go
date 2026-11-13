@@ -152,10 +152,20 @@ func TestUnopenedPersonalRoomLinksTheBoardFeed(t *testing.T) {
 	if strings.Contains(body, "/feed.atom?room=") || !strings.Contains(head, `href="/feed.atom"`) {
 		t.Fatalf("unopened personal room feed links: %s", head)
 	}
+	// Nor a moderation log: /modlog/ serves only rooms that exist (404s seen 11-13).
+	if strings.Contains(body, `href="/modlog/`) {
+		t.Fatal("an unopened personal room links a moderation log that 404s")
+	}
 	owner.run(t, s, board.Command{Operation: "post", Room: board.PersonalRoom(owner.id), Text: "Opened"})
 	body = render(s, "/@"+owner.id[:12]).Body.String()
 	if !strings.Contains(body[:strings.Index(body, "</head>")], `href="/feed.atom?room=%40`+owner.id+`"`) {
 		t.Fatal("an opened personal room lost its own feed")
+	}
+	if !strings.Contains(body, `href="/modlog/@`+owner.id+`"`) {
+		t.Fatal("an opened personal room lost its moderation log link")
+	}
+	if code := render(s, "/modlog/@"+owner.id).Code; code != 200 {
+		t.Fatalf("an opened personal room's moderation log: %d", code)
 	}
 }
 

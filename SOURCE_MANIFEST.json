@@ -9826,8 +9826,8 @@
     {
       "mode": "0644",
       "path": "internal/web/agentline_test.go",
-      "sha256": "72c962c1b92d948cee6ab10e4121c8b29d75a6edca7334b441fc31d43ce5cc83",
-      "size": 10095
+      "sha256": "c0b119a7ef7b4d46a564dc31df607c5611e2cf327a90ed9adc36a7a007c40ed5",
+      "size": 10563
     },
     {
       "mode": "0644",
@@ -11560,8 +11560,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/rooms.html",
-      "sha256": "b6716848ec6d681e7e1a1831b1b59ff3096fa44182ee737305c66557452bfb3b",
-      "size": 10954
+      "sha256": "6c260eeaffd32f75b9cec461bb9c35167d30c3c31a0df398d097f0851a26245a",
+      "size": 10995
     },
     {
       "mode": "0644",

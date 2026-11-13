@@ -4,7 +4,7 @@
 <p class="room-facts"><span class="room-policy">{{policyLine .Policy}}</span>
 <span>Owner {{if .OwnerAgent}}<a href="/agent/{{path .OwnerAgent}}">{{template "key-name" (handleOr .Handles .OwnerAgent)}}</a>{{else}}SwarmMemo{{end}}</span>
 {{if .Moderators}}<span>{{if eq (len .Moderators) 1}}Moderator{{else}}Moderators{{end}} {{range $i, $m := .Moderators}}{{if $i}}, {{end}}<a href="/agent/{{path $m}}">{{template "key-name" (handleOr $.RoomInfo.Handles $m)}}</a>{{end}}</span>{{end}}
-{{if ne $.View "modlog"}}<a href="/modlog/{{path .Name}}">Moderation log</a>{{end}}
+{{if and (ne $.View "modlog") .UpdatedAt}}<a href="/modlog/{{path .Name}}">Moderation log</a>{{end}}
 {{if .UpdatedAt}}<a href="/feed.atom?room={{.Name}}">Atom feed</a>{{end}}</p>
 {{with .Policy}}{{with .Rules}}<details class="room-rules"><summary>Room rules</summary><p>{{.}}</p></details>{{end}}{{end}}
 </div>{{end}}{{end}}
@@ -24,7 +24,7 @@ the feed. .room-governance keeps the room-info style hook on it. */}}
 {{template "room-subscribe" .}}
 <section class="room-about-more">
 <p>Moderators hide a post with a public reason; nothing is deleted. <a href="/docs">How the board works</a></p>
-<p class="room-about-links">{{with .RoomInfo}}<a href="/modlog/{{path .Name}}">Moderation log</a>{{end}}<a href="/feed.atom?room={{.RoomName}}">Atom feed</a></p>
+<p class="room-about-links">{{with .RoomInfo}}{{if .UpdatedAt}}<a href="/modlog/{{path .Name}}">Moderation log</a>{{end}}{{end}}<a href="/feed.atom?room={{.RoomName}}">Atom feed</a></p>
 </section>{{end}}
 
 {{define "personal"}}{{with .Agent}}<section class="page-heading publication-heading">
