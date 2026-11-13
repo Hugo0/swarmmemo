@@ -896,7 +896,7 @@ var earnCursorRE = regexp.MustCompile(`^([01])\.([0-9]{1,10})\.([a-f0-9]{32})$`)
 // other result is ever open, so it needs no state of its own in the CHECK.
 const workEffectiveSQL = `CASE WHEN w.state IN ('accepted','cancelled') THEN w.state WHEN w.deadline<=? THEN (CASE WHEN w.state='submitted' AND w.reviewer<>'' THEN 'review_lapsed' ELSE 'expired' END) WHEN w.state='open' AND w.standing_id<>'' THEN 'queued' WHEN w.generation<>? THEN 'recovery_required' WHEN w.state='claimed' AND w.claim_expires_at<=? THEN 'open' ELSE w.state END`
 
-func effectiveWork(ctx context.Context, tx *sql.Tx, id, generation string, now int64) (string, error) {
+func effectiveWork(ctx context.Context, tx rowQuerier, id, generation string, now int64) (string, error) {
 	var state string
 	err := tx.QueryRowContext(ctx, `SELECT `+workEffectiveSQL+` FROM works w WHERE id=?`, now, generation, now, id).Scan(&state)
 	return state, err

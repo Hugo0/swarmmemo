@@ -1,6 +1,8 @@
 package web
 
 import (
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"swarmmemo/internal/board"
@@ -46,5 +48,56 @@ func TestWorkLineStandingReward(t *testing.T) {
 	}
 	if got := standingReward(nil, held); got != "" {
 		t.Errorf("standingReward without standing = %q", got)
+	}
+}
+
+// C938: a full standing round's line on the post page and the feed says
+// it is full and links its next round; one with neither says nothing.
+func TestWorkLineStandingNextRound(t *testing.T) {
+	no := false
+	id, next := webWorkID, strings.Repeat("b", 32)
+	note := "Full: all 10 results taken. The next round is bbbbbbbb."
+	mark := board.MessageWork{ID: id, Title: "API QA round 3", State: "open", Deadline: 1, Eligibility: "open", Claimable: &no, URL: "/work/" + id,
+		Standing: &board.MessageWorkStanding{Seats: 3, Tiers: []board.WorkStandingTier{{Name: board.WorkStandingTierFirst, Credits: 150}}}}
+	plain := mark
+	full := mark
+	full.NextRound, full.NextNote = next, note
+	if got := workLine(board.Message{Work: &full}); got == nil || got.Next != note || got.NextHref != "/e/bbbbbbbb" {
+		t.Fatalf("full round: %+v", got)
+	}
+	if got := workLine(board.Message{Work: &plain}); got == nil || got.Next != "" || got.NextHref != "" {
+		t.Fatalf("a round with neither: %+v", got)
+	}
+	serve := func(w board.MessageWork, path string) string {
+		request := board.Message{ID: id, Sequence: 1, Room: "bounties", Page: "main", Kind: "request", Text: "Results are taken until 2026-11-18.", Visibility: "public", Type: "message", Work: &w}
+		feed := func(c board.Command) (board.Result, error) {
+			switch c.Operation {
+			case "messages.list", "thread.get":
+				return board.Result{OK: true, Messages: []board.Message{request}, Data: map[string]any{"root_id": id}}, nil
+			case "room.get":
+				return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+			}
+			return board.Result{OK: true}, nil
+		}
+		rec := httptest.NewRecorder()
+		Handler(&testService{execute: feed}).ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d", path, rec.Code)
+		}
+		return rec.Body.String()
+	}
+	want := `<a class="work-next" href="/e/bbbbbbbb">` + note + `</a></p>`
+	for _, path := range []string{"/e/" + id, "/r/bounties?sort=new"} {
+		if body := serve(full, path); !strings.Contains(body, want) {
+			t.Errorf("%s: no forward line %q", path, want)
+		}
+		if body := serve(plain, path); strings.Contains(body, "work-next") {
+			t.Errorf("%s: a round with neither shows a forward line", path)
+		}
+	}
+	alone := mark
+	alone.NextNote = "Full: all 10 results taken."
+	if body := serve(alone, "/e/"+id); !strings.Contains(body, `<span class="work-next">Full: all 10 results taken.</span></p>`) {
+		t.Error("a full round without a next round does not say it is full")
 	}
 }

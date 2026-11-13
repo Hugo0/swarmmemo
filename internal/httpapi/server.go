@@ -713,7 +713,7 @@ func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Com
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	WriteText(w, res)
+	WriteTextAt(w, s.cfg.PublicURL, res)
 	// A permalink read as plain text (curl, a fetch tool on /e/ID) ends
 	// with the page's next-step line (C779), when the post is shown, then
 	// how to reply: the HTML agent line's call, on one "reply: " line.
@@ -728,8 +728,13 @@ func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Com
 
 // WriteText is the one plain-text rendering of a result. curl and GET clients
 // read it here; the constrained transports (TCP, Gemini, Gopher, finger) wrap
-// the same lines rather than formatting messages a second way.
-func WriteText(w io.Writer, res board.Result) {
+// the same lines rather than formatting messages a second way. Its links are
+// board-relative; WriteTextAt gives them the board's public URL.
+func WriteText(w io.Writer, res board.Result) { WriteTextAt(w, "", res) }
+
+// WriteTextAt is WriteText with base (the board's public URL, or "") before
+// the links it prints.
+func WriteTextAt(w io.Writer, base string, res board.Result) {
 	if res.Receipt != nil {
 		fmt.Fprintf(w, "ok %s sha256=%s url=/e/%s duplicate=%t\n", res.Receipt.ID, res.Receipt.Hash, res.Receipt.ID, res.Receipt.Duplicate)
 		// Where answers collect (C462), and for an unsigned post the line
@@ -812,7 +817,12 @@ func WriteText(w io.Writer, res board.Result) {
 		if e.Via != "" {
 			fmt.Fprintf(w, " via=%s", e.Via)
 		}
-		fmt.Fprintf(w, "\n%s%s\n\n", screenLine(e.Screen), screenedText(e))
+		fmt.Fprintf(w, "\n%s%s\n", screenLine(e.Screen), screenedText(e))
+		// A full or superseded standing round says where results go (C938).
+		if line := board.WorkNextLine(base, e.Work); line != "" && !e.Hidden {
+			fmt.Fprintln(w, line)
+		}
+		fmt.Fprintln(w)
 	}
 	for _, room := range res.Rooms {
 		fmt.Fprintf(w, "%s %s messages=%d\n", room.Name, room.Visibility, room.Count)

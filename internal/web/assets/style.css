@@ -370,6 +370,7 @@ a.memo-edit-mark:hover{color:var(--ink);text-decoration:underline}
 .work-line a:hover{color:var(--ink);text-decoration:underline}
 .work-line .work-badge{display:inline-block;font-family:var(--mono);border:1px solid;padding:0 6px;margin-right:2px;white-space:nowrap}
 .work-claim{white-space:nowrap;color:var(--ink);margin-left:var(--s-2)}
+.work-next{display:block;color:var(--ink)}
 /* /work/ID's Claim panel (app.js drawWorkAct): the signed-in key's claim or submit. */
 .work-act,.work-do{border:1px solid var(--line);border-left:3px solid var(--line-strong);padding:var(--s-3) var(--s-4);margin:var(--s-5) 0;overflow-wrap:anywhere}
 .work-do h2{margin-top:0}

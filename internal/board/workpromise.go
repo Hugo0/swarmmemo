@@ -70,6 +70,18 @@ func (s *Store) promiseWorkResult(ctx context.Context, tx *sql.Tx, a actor, w wo
 	if err != nil {
 		return err
 	}
+	// A new owed line counts toward the requester's open rewards, as a USDC
+	// reward at create does: a requester that does not pay cannot keep
+	// promising. A standing task's results are bounded by its seats.
+	if w.StandingID == "" && (r == nil || r.State == "void") {
+		held, err := openWorkRewards(ctx, tx, a.account, w.ID)
+		if err != nil {
+			return err
+		}
+		if held >= WorkRewardsHeldMax {
+			return problem(409, "work_reward_limit", fmt.Sprintf("You have %d rewarded work items open or owing USDC already, the most at once; settle or cancel one first.", WorkRewardsHeldMax))
+		}
+	}
 	payTo, source := "", ""
 	if r != nil && r.Worker == w.Worker && r.PayTo != "" {
 		payTo, source = r.PayTo, r.PayToSource

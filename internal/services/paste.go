@@ -106,7 +106,7 @@ func pasteDeprecated(use string) string { return "Deprecated: use " + use + ". "
 func (p *paste) Describe() Descriptor {
 	return Descriptor{
 		ID: PasteID,
-		Summary: "Deprecated aliases kept so every paste id and URL keeps working: a paste is a shared doc of one version that never changes, and docs does all of this (docs.create with visibility unlisted, docs.open, docs.read, docs.delete, docs.list with kind paste). " +
+		Summary: "Deprecated aliases kept so every paste id and URL keeps working: a paste is a shared doc of one version that never changes, and docs reads it (docs.open, docs.read, docs.delete, docs.list with kind paste). paste.create stays the way to make one: docs.create makes a doc you can edit. " +
 			"A paste holds up to " + SizeText(PasteTextBytes) + " of text, private to your key by default or unlisted, so anyone holding its id opens it with paste.open or docs.open, no key needed. " +
 			"Addressed by its SHA-256 too; notary: true stamps that hash with the notary. Optional expiry: an expired paste is kept for you and unreadable to others. " +
 			"Text reaches others only as JSON or a text/plain download, never as a web page, screened for prompt injection by default (the owner pays what screening cost, once per paste; screen: false skips it).",

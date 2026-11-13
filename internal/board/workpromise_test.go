@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/allowance"
 )
@@ -129,4 +130,41 @@ func TestWorkPromiseOnStandingResult(t *testing.T) {
 		root.Results[0].Money.USDC == nil || root.Results[0].Money.USDC.State != WorkUSDCOwed || root.Results[0].Money.USDC.Note != "announced extra" {
 		t.Fatalf("standing results: %+v", root.Results)
 	}
+}
+
+// C939: a promise is a new owed line, so it counts against the requester's
+// open rewards like a USDC reward at create (hermes-agent bd73c7ea).
+func TestWorkPromiseRespectsHeldCap(t *testing.T) {
+	s, _ := usdcStore(t)
+	owner, worker := keyFor(236), keyFor(237)
+	requester := keyID(owner)
+	mintCredit(t, s, requester, allowance.Paid, 100000)
+	run(t, s, signed(worker, Command{Operation: "agent.register", Timestamp: s.now().Unix()}))
+	accepted := func() string {
+		id := rewardRequest(t, s, owner, "lobby")
+		run(t, s, rewardCreate(s, owner, id, 50, 0))
+		fence := claimAndSubmit(t, s, worker, id, "lobby")
+		run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: id, Amount: fence}))
+		return id
+	}
+	// An accepted result waits; the requester then owes the cap on others.
+	last := accepted()
+	var first string
+	for i := 0; i < WorkRewardsHeldMax; i++ {
+		if i == 20 {
+			// new keys post at most 30 an hour: move to the next hour
+			later := s.now().Add(time.Hour)
+			s.now = func() time.Time { return later }
+		}
+		id := accepted()
+		if i == 0 {
+			first = id
+		}
+		run(t, s, promise(s, owner, id, "0.01", ""))
+	}
+	fails(t, s, promise(s, owner, last, "0.01", ""), "work_reward_limit")
+	if _, err := s.db.Exec("UPDATE work_usdc SET state='paid' WHERE work_id=?", first); err != nil {
+		t.Fatal(err)
+	}
+	run(t, s, promise(s, owner, last, "0.01", ""))
 }

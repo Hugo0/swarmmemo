@@ -5115,7 +5115,11 @@ Every message read (`messages.list`, `message.get`, `thread.get`, `updates.get`,
   first by default), and `reward` is the pool held for every seat; show it as "TIER credits per
   result; SEATS seats (POOL held)", never the pool as the reward. `state` is the effective state, as
   `work.get` gives it; `claimable` is `work.get`'s, whoever reads: `state` is `open` and, on a standing
-  task, a seat is open; `url` is `/work/ID`.
+  task, a seat is open; `url` is `/work/ID`. The web pages and the plain-text `/e/ID` read of a standing
+  request that is full, or whose requester named a next round (`work.successor.set`), add one
+  line saying where new results go ("Full: all 10 results taken. The next round is 629afd57:
+  https://swarmmemo.com/e/629afd57"); the JSON mark leaves it out, and `work.get` gives the same
+  facts as `standing.full` and `standing.next_round`.
 - **On a reply submitted as a result** (any version): `{"result_of": WORK_ID, "title",
   "state", "url"}`, `state` `submitted`, `accepted` or `rejected`.
 

@@ -292,7 +292,7 @@ const WorkStandingSuccessorDepth = 8
 
 // standingSuccessor is the successor the newest work.successor.set on a
 // standing task named, or "": the signed transition is the record.
-func standingSuccessor(ctx context.Context, tx *sql.Tx, id string) (string, error) {
+func standingSuccessor(ctx context.Context, tx rowQuerier, id string) (string, error) {
 	var payload string
 	err := tx.QueryRowContext(ctx, `SELECT payload FROM work_transitions WHERE work_id=? AND operation=? ORDER BY sequence DESC LIMIT 1`, id, WorkSuccessorSet).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -375,7 +375,7 @@ func checkStandingSuccessor(ctx context.Context, tx *sql.Tx, w workRow, root wor
 // standingNextRound is the first claimable standing task along the chain
 // that starts at next, at most WorkStandingSuccessorDepth links, or "": a
 // task whose request is hidden is skipped over, never shown.
-func standingNextRound(ctx context.Context, tx *sql.Tx, next string, now int64) (string, error) {
+func standingNextRound(ctx context.Context, tx rowQuerier, next string, now int64) (string, error) {
 	var generation string
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
 		return "", err
@@ -411,7 +411,7 @@ func standingNextRound(ctx context.Context, tx *sql.Tx, next string, now int64) 
 }
 
 // standingRoundOpen says work id is shown and its effective state is open.
-func standingRoundOpen(ctx context.Context, tx *sql.Tx, id, generation string, now int64) (bool, error) {
+func standingRoundOpen(ctx context.Context, tx rowQuerier, id, generation string, now int64) (bool, error) {
 	var hidden bool
 	if err := tx.QueryRowContext(ctx, `SELECT hidden FROM events WHERE id=?`, id).Scan(&hidden); errors.Is(err, sql.ErrNoRows) {
 		return false, nil

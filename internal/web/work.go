@@ -260,9 +260,13 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 // (Href); Claim adds a pointer to how to claim, never a write link. Class
 // carries the state for color, which the words always say too. Kept in step
 // with workLine in assets/memo-core.js (work_line_test.cjs renders both).
+// Next is a standing round's forward line (C938), server-rendered only (the
+// JSON mark leaves it out, so memo-core.js draws none), linking to
+// its next round (NextHref) when one is open.
 type workLineView struct {
 	Href, Class, Badge, Detail string
 	Claim                      bool
+	Next, NextHref             string
 }
 
 // The words the line uses for states, eligibility rules and result marks.
@@ -363,6 +367,7 @@ func workLine(m board.Message) *workLineView {
 	parts = append(parts, "eligible: "+wordFor(workEligibleWords, eligible))
 	v.Detail = " · " + strings.Join(parts, " · ")
 	v.Claim = w.Claimable != nil && *w.Claimable
+	v.Next, v.NextHref = w.NextNote, board.WorkNextHref("", w)
 	return v
 }
 

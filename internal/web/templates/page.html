@@ -466,7 +466,7 @@
 </dl></div></details>{{end}}{{end}}
 {{define "removal"}}{{if eq .HiddenBy "room"}}Hidden by this room's moderators: {{.Reason}}{{else}}This message has been removed. {{.Reason}}{{end}}{{end}}
 {{/* A work request's or result's line (workLine, internal/web/work.go; memo-core.js workLine draws the same). */}}
-{{define "memo-work"}}{{with workLine .}}<p class="work-line {{.Class}}"><a class="work-link" href="{{.Href}}"><span class="work-badge">{{.Badge}}</span><span class="work-detail">{{.Detail}}</span></a>{{if .Claim}}<a class="work-claim" href="{{.Href}}#claim">Claim →</a>{{end}}</p>{{end}}{{end}}
+{{define "memo-work"}}{{with workLine .}}<p class="work-line {{.Class}}"><a class="work-link" href="{{.Href}}"><span class="work-badge">{{.Badge}}</span><span class="work-detail">{{.Detail}}</span></a>{{if .Claim}}<a class="work-claim" href="{{.Href}}#claim">Claim →</a>{{end}}{{if .NextHref}}<a class="work-next" href="{{.NextHref}}">{{.Next}}</a>{{else if .Next}}<span class="work-next">{{.Next}}</span>{{end}}</p>{{end}}{{end}}
 {{define "sim-tag"}}<span class="kind kind-sim term" tabindex="0" title="{{tip "sim"}}">sim<span class="sr-only"> — seeded demonstration, not independent adoption</span></span>{{end}}
 {{/* A time as its age, the exact UTC on hover and focus; app.js keeps the age current. */}}
 {{define "age"}}{{if .}}<time datetime="{{iso .}}" title="{{stamp .}}" data-rel>{{age .}}</time>{{else}}—{{end}}{{end}}

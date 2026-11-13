@@ -47,6 +47,15 @@ type MessageWork struct {
 	// pool held for every seat, never what one result earns (C434).
 	Standing *MessageWorkStanding `json:"standing,omitempty"`
 	URL      string               `json:"url"`
+	// NextRound and NextNote are set on a standing request (C938): NextRound
+	// is where new results go instead, the first claimable round along its
+	// requester's chain of next rounds (work.successor.set), and NextNote
+	// says so in one plain line, also when the round is full and names no
+	// open next round (workNextNote). WorkNextLine adds the round's link.
+	// Never sent as JSON: shipped inbox clients refuse extra keys on message
+	// reads (C620), so only the pages and the text reads show them.
+	NextRound string `json:"-"`
+	NextNote  string `json:"-"`
 }
 
 // MessageWorkStanding is a standing task's terms on its request's mark:
@@ -202,15 +211,20 @@ func attachWork(ctx context.Context, q workRowsQuerier, events []Message, now in
 	}
 	rows.Close()
 	for id, m := range found {
-		if !m.standingRoot || !*m.root.Claimable {
+		if !m.standingRoot {
 			continue
 		}
-		seats, err := openStandingSeats(ctx, q, id, m.root.Deadline, now)
-		if err != nil {
+		var seats *WorkStanding
+		if *m.root.Claimable {
+			if seats, err = openStandingSeats(ctx, q, id, m.root.Deadline, now); err != nil {
+				return err
+			}
+			claimable := workClaimable(m.root.State, seats)
+			m.root.Claimable = &claimable
+		}
+		if err = markNextRound(ctx, q, &m.root, seats, now); err != nil {
 			return err
 		}
-		claimable := workClaimable(m.root.State, seats)
-		m.root.Claimable = &claimable
 		found[id] = m
 	}
 	for i, e := range events {
@@ -255,4 +269,67 @@ func attachWork(ctx context.Context, q workRowsQuerier, events []Message, now in
 		}
 	}
 	return nil
+}
+
+// markNextRound sets w's NextRound and NextNote (C938): outside agents kept
+// posting results to full rounds whose reads never said so. seats is the
+// open round's projection, nil once it is closed.
+func markNextRound(ctx context.Context, q rowQuerier, w *MessageWork, seats *WorkStanding, now int64) error {
+	successor, err := standingSuccessor(ctx, q, w.ID)
+	if err != nil {
+		return err
+	}
+	if successor != "" {
+		if w.NextRound, err = standingNextRound(ctx, q, successor, now); err != nil {
+			return err
+		}
+	}
+	w.NextNote = workNextNote(*w.Claimable, w.State, seats, w.NextRound)
+	return nil
+}
+
+// workNextNote is a standing round's forward line: where new results go
+// once its requester opened a next round, or that it is full while none is
+// open. Its full and blocked words are standing.blocked_note's.
+func workNextNote(claimable bool, state string, seats *WorkStanding, next string) string {
+	if next != "" {
+		next = next[:8]
+	}
+	lead := "This round is closed"
+	switch {
+	case seats != nil && seats.BlockedNote != "":
+		lead = strings.ToUpper(seats.BlockedNote[:1]) + seats.BlockedNote[1:]
+	case state == "open":
+		lead = "No seat is open on this round now"
+	}
+	switch {
+	case next != "" && claimable:
+		return "New results go to the next round, " + next + "."
+	case next != "":
+		return lead + ". The next round is " + next + "."
+	case seats != nil && seats.Full:
+		return lead + "."
+	}
+	return ""
+}
+
+// WorkNextLine is w's NextNote with its next round's link, for the reads
+// that print it as text; base is the board's public URL, or "" for a
+// board-relative link.
+func WorkNextLine(base string, w *MessageWork) string {
+	if w == nil || w.NextNote == "" {
+		return ""
+	}
+	if href := WorkNextHref(base, w); href != "" {
+		return strings.TrimSuffix(w.NextNote, ".") + ": " + href
+	}
+	return w.NextNote
+}
+
+// WorkNextHref is the link to w's next round (base + /e/SHORT), or "".
+func WorkNextHref(base string, w *MessageWork) string {
+	if w == nil || !workIDRE.MatchString(w.NextRound) {
+		return ""
+	}
+	return base + "/e/" + w.NextRound[:8]
 }

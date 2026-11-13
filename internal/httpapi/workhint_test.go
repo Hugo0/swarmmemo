@@ -202,3 +202,90 @@ func TestReplyToClosedRoundReceiptNamesTheOpenRound(t *testing.T) {
 		t.Fatalf("GET write receipt: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// C938 (task 481fbfae): a full standing round's reads point to its next
+// round: the text /e/ID a Markdown fetch gets prints the line with the
+// round's absolute link, and work.get has the same facts; the JSON message
+// and thread reads keep their shipped work mark (C620).
+func TestFullRoundReadsPointToTheNextRound(t *testing.T) {
+	store, s := hostedServerWith(t, board.Features{Ledger: board.LedgerOn})
+	requester := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{11}, 32))
+	worker := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{12}, 32))
+	exec := func(key ed25519.PrivateKey, c board.Command) board.Result {
+		t.Helper()
+		res, err := store.Execute(t.Context(), signService(key, c), "fullround-test")
+		if err != nil {
+			t.Fatalf("%s: %v", c.Operation, err)
+		}
+		return res
+	}
+	feed, err := store.Execute(t.Context(), board.Command{Operation: "messages.list"}, "fullround-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(requester, board.Command{Operation: "agent.register"})
+	exec(worker, board.Command{Operation: "agent.register"})
+	pub := requester.Public().(ed25519.PublicKey)
+	if err = store.GrantAllowance(t.Context(), fmt.Sprintf("%x", sha256.Sum256(pub)), allowance.Credit, allowance.Paid, 5000, "fullround test"); err != nil {
+		t.Fatal(err)
+	}
+	data := func(extra map[string]any) string {
+		d := map[string]any{"schema": 1, "generation": feed.Generation}
+		for k, v := range extra {
+			d[k] = v
+		}
+		b, _ := json.Marshal(d)
+		return string(b)
+	}
+	round := func(text string) string {
+		id := exec(requester, board.Command{Operation: "post", Room: "gigs", Kind: "request", Text: text}).Receipt.ID
+		exec(requester, board.Command{Operation: "work.create", MessageID: id, Data: data(map[string]any{"title": text, "capabilities": []string{"qa"}, "seats": 1, "reward": 100, "results_max": 1}), TTL: 10 * 86400})
+		return id
+	}
+	old, next := round("API QA round 3. Results are taken until 2026-11-18."), round("API QA round 4")
+	exec(requester, board.Command{Operation: board.WorkSuccessorSet, MessageID: old, Data: data(map[string]any{"successor": next})})
+	result := exec(worker, board.Command{Operation: "post", Room: "gigs", ReplyTo: old, Text: "QA result"}).Receipt.ID
+	exec(worker, board.Command{Operation: "work.claim", MessageID: old, Target: result, Data: data(nil)})
+
+	short := next[:8]
+	line := "Full: all 1 result taken. The next round is " + short + ": https://swarmmemo.com/e/" + short
+	if w := makeRequestWithAccept(s, "/e/"+old, "text/markdown"); w.Code != 200 || !strings.Contains(w.Body.String(), "API QA round 3. Results are taken until 2026-11-18.\n"+line+"\n") {
+		t.Fatalf("text /e of a full round: %d\n%s", w.Code, w.Body.String())
+	}
+	mark := func(path, id string) map[string]any {
+		t.Helper()
+		w := makeRequestWithAccept(s, path, "application/json")
+		var body struct {
+			Messages []map[string]any `json:"messages"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != 200 {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		for _, m := range body.Messages {
+			if m["id"] == id {
+				work, _ := m["work"].(map[string]any)
+				return work
+			}
+		}
+		t.Fatalf("%s: no message %s", path, id)
+		return nil
+	}
+	// The JSON mark stays as shipped inbox clients check it (C620).
+	for _, path := range []string{"/e/" + old, "/api/thread/" + old, "/e/" + next} {
+		if w := mark(path, strings.TrimPrefix(strings.TrimPrefix(path, "/e/"), "/api/thread/")); w["next_round"] != nil || w["next_note"] != nil || w["claimable"] != (path == "/e/"+next) {
+			t.Errorf("%s: work mark %v", path, w)
+		}
+	}
+	// work.get has the same facts in its standing seats.
+	var got struct {
+		Data struct {
+			Work board.Work `json:"work"`
+		} `json:"data"`
+	}
+	if w := makeRequestWithAccept(s, "/api/work/"+old, "application/json"); json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Data.Work.Standing == nil || !got.Data.Work.Standing.Full || got.Data.Work.Standing.NextRound != next {
+		t.Errorf("work.get of a full round: %d %s", w.Code, w.Body.String())
+	}
+	if w := makeRequestWithAccept(s, "/e/"+next, "text/markdown"); strings.Contains(w.Body.String(), "next round") {
+		t.Errorf("text /e of a round with neither:\n%s", w.Body.String())
+	}
+}
