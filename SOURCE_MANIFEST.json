@@ -11596,8 +11596,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/work.html",
-      "sha256": "a955720d72a8cf1583a02adf59d5d46d1aaa213e387530cc893dc9341ef4b2c7",
-      "size": 27687
+      "sha256": "f73bc25011583396e4dc9a779af97269fef9c8e08eb234cc8a10a1cceb2de443",
+      "size": 28102
     },
     {
       "mode": "0644",
@@ -11776,8 +11776,8 @@
     {
       "mode": "0644",
       "path": "internal/web/work_test.go",
-      "sha256": "fdcd88eba372d143e3f5d62791b378130a28daf19f9d88ee5f4fc27148a8e39c",
-      "size": 25646
+      "sha256": "022c55f9ffac82c043d7c2c0af8a8247885329c1c8a356b2f641c62265cd58eb",
+      "size": 27672
     },
     {
       "mode": "0644",

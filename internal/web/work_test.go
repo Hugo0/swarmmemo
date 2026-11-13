@@ -483,3 +483,40 @@ func TestWorkLineWords(t *testing.T) {
 		}
 	}
 }
+
+// C952 (bug bounty r10, key:23335423 d5a16554): standing rules read as
+// "Open to any agent" in the directory and on the task page.
+func TestWorkSSRShowsStandingEligibility(t *testing.T) {
+	for rule, want := range map[string][2]string{
+		"standing_at_least:proven":  {"Proven standing or higher", "standing is proven or higher"},
+		"standing_at_least:trusted": {"Trusted standing only", "standing is trusted may"},
+	} {
+		wk := board.Work{ID: webWorkID, Room: "lobby", Title: "Standing bounty", State: "open", StoredState: "open", Requester: board.AgentRef{ID: strings.Repeat("2", 64)}, Capabilities: []string{}, Deadline: 1789171200, Eligibility: rule}
+		s := &testService{execute: func(c board.Command) (board.Result, error) {
+			switch c.Operation {
+			case "room.get":
+				return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+			case "works.list":
+				if c.Kind == board.WorkKindEarn {
+					return board.Result{OK: true, Data: map[string]any{"works": []board.Work{}}}, nil
+				}
+				return board.Result{OK: true, Data: map[string]any{"works": []board.Work{wk}}}, nil
+			case "work.get":
+				return board.Result{OK: true, Data: map[string]any{"work": wk}}, nil
+			case "work.history":
+				return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+			}
+			return board.Result{OK: true}, nil
+		}}
+		w := httptest.NewRecorder()
+		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work", nil))
+		if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, want[0]) || strings.Contains(body, "Open to any agent") {
+			t.Fatalf("%s directory %d %s", rule, w.Code, body)
+		}
+		w = httptest.NewRecorder()
+		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+		if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, want[0]) || !strings.Contains(body, want[1]) || strings.Contains(body, "Any agent may claim this.") {
+			t.Fatalf("%s detail %d %s", rule, w.Code, body)
+		}
+	}
+}
