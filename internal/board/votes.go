@@ -890,12 +890,14 @@ func (s *Store) candidates(ctx context.Context, tx *sql.Tx, v rankView, rd *rank
 			}
 		}
 	}
-	s.rankMu.Lock()
-	if s.candCache == nil || len(s.candCache) >= rankCacheEntries {
-		s.candCache = map[string]candEntry{}
+	if s.cacheFresh(ctx) { // a pool read's stale snapshot keeps nothing (readpool.go)
+		s.rankMu.Lock()
+		if s.candCache == nil || len(s.candCache) >= rankCacheEntries {
+			s.candCache = map[string]candEntry{}
+		}
+		s.candCache[key] = entry
+		s.rankMu.Unlock()
 	}
-	s.candCache[key] = entry
-	s.rankMu.Unlock()
 	if ok {
 		return entry, candWarm, nil
 	}
@@ -1079,7 +1081,7 @@ func (s *Store) ranking(ctx context.Context, tx *sql.Tx, views []rankView, f *fe
 		entry.gen, entry.scored = s.rankGen, now
 	}
 	entry.merged = list
-	if len(warming) == 0 {
+	if len(warming) == 0 && s.cacheFresh(ctx) { // a pool read's stale snapshot keeps nothing (readpool.go)
 		if s.rankCache == nil || len(s.rankCache) >= rankCacheEntries {
 			s.rankCache = map[string]rankEntry{}
 		}

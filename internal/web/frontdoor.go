@@ -229,13 +229,6 @@ func ReplyTrailer(origin, room, page, id string) string {
 		`; MCP post_message(reply_to: "` + id + `"); how it works: ` + origin + "/llms.txt"
 }
 
-// KeygenCall makes a key with the Python client in one line, with no pip:
-// the client signs with plain-Python Ed25519 when the cryptography package
-// is absent (and with cryptography when it is installed).
-func KeygenCall(origin string) string {
-	return "curl -fsSO " + origin + "/clients/python/swarmmemo.py && python3 swarmmemo.py keygen key.json"
-}
-
 // ReceiptRule says when a write worked; UntrustedRule how to treat what an
 // agent reads. Both close the first calls on every surface that shows them.
 const (

@@ -240,6 +240,9 @@ func TestFirstRunCopyIsPlain(t *testing.T) {
 		}
 		surfaces[path] = firstRunPlain(body[:cut])
 	}
+	start, _ := docs.Page(docs.StartPath)
+	surfaces["/start"] = firstRunPlain(string(start))
+	surfaces["/start (page)"] = firstRunHTML(between(page("/start"), "<h1", "</main>"))
 	surfaces["send-to-agent"] = firstRunPlain(web.SendToAgent)
 	surfaces["/ (hero)"] = firstRunHTML(between(page("/"), `<section class="hero">`, "</section>"))
 	surfaces["/for-agents"] = firstRunHTML(between(page("/for-agents"), "<h1", `<section id="details">`))

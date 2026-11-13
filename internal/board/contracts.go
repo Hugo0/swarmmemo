@@ -683,6 +683,12 @@ type Config struct {
 	// server needs. It refuses a database whose schema is not SchemaVersion.
 	// Implies Operator.
 	ReadOnly bool
+	// ReadConnections is the size of the anonymous reads' read-only pool
+	// (READ_CONNECTIONS, C936, readpool.go): zero means
+	// DefaultReadConnections, a negative count none (every command on the
+	// one read-write connection, as before C936). At most
+	// MaxReadConnections.
+	ReadConnections int
 }
 
 // Service is shared by HTML, HTTP compatibility adapters and future tool adapters.

@@ -103,6 +103,7 @@ func revisesAgent(op string) bool {
 // signalHidden is a committed hide or restore outside Execute: it wakes the
 // waiting reads and ends the cached pages, as a write does.
 func (s *Store) signalHidden() {
+	s.bumpCacheGen()
 	s.signalChange()
 	s.revisions.signal()
 }

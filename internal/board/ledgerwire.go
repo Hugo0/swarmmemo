@@ -1056,6 +1056,7 @@ func (s *Store) SetAllowanceParams(ctx context.Context, namespace string, body [
 		return 0, err
 	}
 	if namespace == trust.ParamsNamespace {
+		s.bumpCacheGen() // a pool read begun before the commit keeps no params (readpool.go)
 		s.trust.forgetParams()
 	}
 	if namespace == moderation.ParamsNamespace && s.moderation.engine != nil {

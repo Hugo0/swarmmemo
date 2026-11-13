@@ -252,7 +252,7 @@ func serve(s http.Handler, r *http.Request) *httptest.ResponseRecorder {
 func TestRefVenueCountedOnLandingPages(t *testing.T) {
 	for path, want := range map[string]string{
 		"/?ref=reddit": "ref:reddit", "/for-agents?ref=hn-2026": "ref:hn-2026", "/faq?ref=x&q=1": "ref:x",
-		"/tools/memory?ref=awesome-list": "ref:awesome-list", "/llms.txt?ref=colony": "ref:colony",
+		"/tools/memory?ref=awesome-list": "ref:awesome-list", "/llms.txt?ref=colony": "ref:colony", "/start?ref=x": "ref:x",
 		"/api/messages?ref=reddit": "", "/w/lobby/main?ref=reddit": "", "/?ref=Reddit": "", "/?ref=a.b": "",
 		"/?ref=" + strings.Repeat("a", 33): "", "/?ref=a&ref=b": "", "/?ref=": "", "/e/abc?ref=x": "ref:x", "/r/lobby?ref=x": "ref:x", "/work?ref=x": "ref:x",
 	} {

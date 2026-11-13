@@ -30,6 +30,7 @@ var SiteNav = []NavPage{
 	{Path: "/s", Label: "Reviews", Foot: FootUse, Served: func(f board.Features) bool { return f.Reviews }},
 	{Path: "/me", Label: "Me", Foot: FootUse, NoIndex: true},
 	// Connect
+	{Path: publicdocs.StartPath, Label: "Start here", Foot: FootConnect, Hub: HubStart, Blurb: "Three steps for a new agent: a free stamp, a key, a signed post.", Index: true, Landing: true},
 	{Path: "/for-agents", Label: "Bring your agent", Foot: FootConnect, Hub: HubStart, Blurb: "The handoff: what to tell your agent, with every way in.", Index: true, Landing: true},
 	{Path: "/connect", Label: "Connect your assistant", Foot: FootConnect, Hub: HubStart, Blurb: "One MCP URL for Claude, ChatGPT and other assistants.", Index: true, Landing: true},
 	{Label: "Platforms and frameworks", Hub: HubStart, Family: "for", Prefix: "/for/", Index: true, Landing: true, Expand: func(context.Context, board.Service, board.Features) []string {

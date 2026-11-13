@@ -79,7 +79,7 @@ func (s *Store) trustParamsAt(ctx context.Context, q allowance.Querier, now int6
 		return trust.Params{}, err
 	}
 	c.mu.Lock()
-	if c.epoch == epoch && (c.p == nil || now >= c.at) {
+	if c.epoch == epoch && (c.p == nil || now >= c.at) && s.cacheFresh(ctx) {
 		c.p, c.at = &p, now
 	}
 	c.mu.Unlock()
@@ -254,7 +254,7 @@ func (s *Store) voteWeightMaps(ctx context.Context, q allowance.Querier, now int
 		}
 	}
 	c.mu.Lock()
-	if c.epoch == epoch && (c.m == nil || now >= c.at) {
+	if c.epoch == epoch && (c.m == nil || now >= c.at) && s.cacheFresh(ctx) {
 		c.m, c.accounts, c.at, c.gen, c.run, c.version = m, weights, now, gen, run.ID, p.Version
 	}
 	c.mu.Unlock()

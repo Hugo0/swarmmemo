@@ -89,6 +89,8 @@ type Store struct {
 	inviteLedgerOn     bool
 	readTimeouts       readTimeoutLog // C700: the 2 s read budget's WARN line (readtimeout.go)
 	db                 *sql.DB
+	readDB             *sql.DB       // C936: the anonymous reads' read-only pool, nil when off (readpool.go)
+	cacheGen           atomic.Uint64 // C936: bumped by each committed change (readpool.go)
 	config             Config
 	generation         string
 	cursorCipher       cipher.AEAD
@@ -577,6 +579,18 @@ func Open(path string, config Config) (*Store, error) {
 	if err != nil {
 		return fail(err)
 	}
+	// C936: the read pool, once the schema is current (readpool.go). The
+	// operator CLI beside the live server keeps its one connection.
+	var readDB *sql.DB
+	if !config.Operator {
+		if readDB, err = openReadPool(path, readConnections(config.ReadConnections)); err != nil {
+			return fail(err)
+		}
+	}
+	if readDB != nil {
+		inner := fail
+		fail = func(err error) (*Store, error) { _ = readDB.Close(); return inner(err) }
+	}
 	if config.NotaryKeyFile == "" && path != ":memory:" {
 		config.NotaryKeyFile = filepath.Join(filepath.Dir(path), services.NotaryKeyFileName)
 	}
@@ -584,7 +598,7 @@ func Open(path string, config Config) (*Store, error) {
 	config.Features.Topup = config.Topup != nil && config.Features.Ledger == LedgerOn
 	// Agent offerings are on exactly when configured (RFC 0017).
 	config.Features.Offerings = config.Offerings != nil
-	s := &Store{db: db, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), activityGate: make(chan struct{}, 1), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}, updateWaiters: NewWaitSlots(UpdatesWaitersPerSource, UpdatesWaitersMax), mcpVerifySlots: make(chan struct{}, MCPEventVerifyConcurrency), reviewRecords: reviewRecordState{wake: make(chan struct{}, 1)}}
+	s := &Store{db: db, readDB: readDB, config: config, now: time.Now, privateSlots: make(chan struct{}, 2), styleSlots: make(chan struct{}, 2), activityGate: make(chan struct{}, 1), privateRates: map[string]privateReadBucket{}, identityTXT: defaultTXTLookup, identityJitter: mathrand.Float64, identityRates: map[string]privateReadBucket{}, updateWaiters: NewWaitSlots(UpdatesWaitersPerSource, UpdatesWaitersMax), mcpVerifySlots: make(chan struct{}, MCPEventVerifyConcurrency), reviewRecords: reviewRecordState{wake: make(chan struct{}, 1)}}
 	s.inviteLedgerOn = config.Features.Ledger == LedgerOn
 	if err = db.QueryRow("SELECT value FROM meta WHERE key='generation'").Scan(&s.generation); err != nil {
 		return fail(err)
@@ -751,6 +765,9 @@ func (s *Store) Close() error {
 	}
 	if s.rawSignals.db != nil {
 		_ = s.rawSignals.db.Close()
+	}
+	if s.readDB != nil {
+		_ = s.readDB.Close()
 	}
 	return s.db.Close()
 }
@@ -1112,7 +1129,14 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	if cmd.Operation == "device.request" || cmd.Operation == "device.request.get" {
 		ctx = context.WithValue(ctx, deviceSourceKey{}, source) // link codes are counted per network (device.go)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	// C936: an anonymous public read runs on the read pool (readpool.go);
+	// everything else on the one read-write connection.
+	var tx *sql.Tx
+	if s.usesReadPool(ctx, cmd, a) {
+		ctx, tx, err = s.beginPoolRead(ctx)
+	} else {
+		tx, err = s.db.BeginTx(ctx, nil)
+	}
 	if err != nil {
 		return empty, err
 	}
@@ -1382,6 +1406,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	}
 	s.storeRawSignal(ctx, rawSignal) // C452 (rawsignals.go); nil for a read
 	if mutation(cmd.Operation) {
+		s.bumpCacheGen() // before the signals: a pool read begun before this commit keeps no cache (readpool.go)
 		s.signalChange() // wakes waiting reads (waiting.go)
 	}
 	agentWrite := mutation(cmd.Operation) && (strings.HasPrefix(cmd.Operation, "agent.") || strings.HasPrefix(cmd.Operation, "identity."))

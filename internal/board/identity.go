@@ -607,7 +607,7 @@ func (s *Store) readHotAgents(ctx context.Context, tx *sql.Tx, c Command, includ
 	if err != nil {
 		return Result{}, err
 	}
-	if c.Cursor == "" && plain {
+	if c.Cursor == "" && plain && s.cacheFresh(ctx) {
 		s.rankMu.Lock()
 		if cur := s.hotAgentsCached; cur != nil && cur.gen == gen && cur.rows == nil {
 			s.hotAgentsCached = &hotAgentsFirst{gen: cur.gen, at: cur.at, ids: cur.ids, rows: rows}
@@ -658,7 +658,9 @@ func (s *Store) hotAgentsRanking(ctx context.Context, tx *sql.Tx, public string,
 	}
 	s.hotAgentsPinned[gen] = hotAgentsPin{at: clock, ids: ids}
 	first := &hotAgentsFirst{gen: gen, at: clock, ids: ids}
-	s.hotAgentsCached = first
+	if s.cacheFresh(ctx) {
+		s.hotAgentsCached = first // a pool read's stale snapshot is pinned for its cursors, never shared (readpool.go)
+	}
 	return first, nil
 }
 
@@ -747,6 +749,7 @@ func (s *Store) hotAgentPage(ctx context.Context, tx *sql.Tx, scope string, gen 
 // dropHotAgents forgets the shared hot ranking; the pinned ones stay for
 // their cursors.
 func (s *Store) dropHotAgents() {
+	s.bumpCacheGen()
 	s.rankMu.Lock()
 	s.hotAgentsCached = nil
 	s.rankMu.Unlock()

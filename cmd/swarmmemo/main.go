@@ -652,8 +652,30 @@ func storeConfigFromEnvironment() (board.Config, string, error) {
 	if e != nil {
 		return board.Config{}, "", e
 	}
-	return board.Config{ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReviewerGraceSeconds: grace, WorkLateAcceptSeconds: lateAccept, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, WorkUSDC: workUSDC, Offerings: offeringsFromEnvironment(), OfferingsKeyFile: os.Getenv("OFFERINGS_KEY_FILE"), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), WebPushKeyFile: os.Getenv("WEBPUSH_KEY_FILE"), WebPushSubject: os.Getenv("WEBPUSH_SUBJECT"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE"), RawSignalsKeyFile: os.Getenv("RAW_SIGNALS_KEY_FILE"), RawSignalsDBFile: os.Getenv("RAW_SIGNALS_DB_FILE"),
+	readConns, e := readConnectionsFromEnvironment()
+	if e != nil {
+		return board.Config{}, "", e
+	}
+	return board.Config{ReadConnections: readConns, ServiceID: env("SERVICE_ID", "swarmmemo.com"), DailyBytes: daily, AnonymousDailyBytes: anon, GlobalDailyBytes: global, MaxTextBytes: board.TextBytes, ArchiveDelaySeconds: archiveDelay, ReviewerGraceSeconds: grace, WorkLateAcceptSeconds: lateAccept, ReservedDomains: reserved, Features: features, X402: x402FromEnvironment(features), Topup: topup, WorkUSDC: workUSDC, Offerings: offeringsFromEnvironment(), OfferingsKeyFile: os.Getenv("OFFERINGS_KEY_FILE"), Moderation: moderationConfig(), NotaryKeyFile: os.Getenv("NOTARY_KEY_FILE"), HostedKEKFile: os.Getenv("HOSTED_KEK_FILE"), WebPushKeyFile: os.Getenv("WEBPUSH_KEY_FILE"), WebPushSubject: os.Getenv("WEBPUSH_SUBJECT"), LogKeyFile: os.Getenv("LOG_KEY_FILE"), SignalsKeyFile: os.Getenv("SIGNALS_KEY_FILE"), RawSignalsKeyFile: os.Getenv("RAW_SIGNALS_KEY_FILE"), RawSignalsDBFile: os.Getenv("RAW_SIGNALS_DB_FILE"),
 		Proofs: proofs.New(proofs.ConfigFromEnv(os.Getenv)), PublicURL: publicURL, Bond: bond}, publicURL, nil
+}
+
+// readConnectionsFromEnvironment is READ_CONNECTIONS, the anonymous reads'
+// read-only pool (C936): unset means board.DefaultReadConnections, 0 turns
+// the pool off (every command on the one read-write connection), at most
+// board.MaxReadConnections. board.Config reads a negative count as off.
+func readConnectionsFromEnvironment() (int, error) {
+	n, e := number("READ_CONNECTIONS", board.DefaultReadConnections)
+	if e != nil {
+		return 0, e
+	}
+	if n > board.MaxReadConnections {
+		return 0, fmt.Errorf("READ_CONNECTIONS must be 0-%d", board.MaxReadConnections)
+	}
+	if n == 0 {
+		return -1, nil
+	}
+	return int(n), nil
 }
 
 // bondFromEnvironment reads the standing bond's range and cooling period:

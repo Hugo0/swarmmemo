@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	publicdocs "swarmmemo/docs"
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/gate"
 	"swarmmemo/internal/markdown"
@@ -1396,7 +1397,7 @@ func Handler(service board.Service) http.Handler {
 			applyRoomStyle(w, r, service, &p)
 		}
 		finishMetadata(&p, status)
-		if status == 200 {
+		if status == 200 && r.URL.Path != publicdocs.StartPath { // /start is its own first call (C937)
 			p.RefFirstCall = refFirstCallFor(r, service)
 		}
 		if status == 200 && p.View == "verification" {

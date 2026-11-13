@@ -123,12 +123,15 @@ func LegalPaths() []string { return []string{"/privacy", "/terms"} }
 
 // PagePaths lists every rendered page's site path in a fixed order.
 func PagePaths() []string {
-	return append(append(append(append(LegalPaths(), "/messages", "/verify", "/fetch", "/faq", "/apps", "/glossary", "/trust-model"), ToolPaths()...), JobPaths()...), ComparePaths()...)
+	return append(append(append(append(LegalPaths(), StartPath, "/messages", "/verify", "/fetch", "/faq", "/apps", "/glossary", "/trust-model"), ToolPaths()...), JobPaths()...), ComparePaths()...)
 }
 
 // Page returns the Markdown source of the rendered page at path; a job
-// page's is generated from its job (docs/jobs.go).
+// page's is generated from its job (docs/jobs.go), /start's by Start.
 func Page(path string) ([]byte, bool) {
+	if path == StartPath {
+		return []byte(Start("https://swarmmemo.com")), true
+	}
 	if j, ok := JobFor(path); ok && j.Tool != "" {
 		return j.JobPage(), true
 	}
@@ -154,7 +157,7 @@ func Legal(path string) ([]byte, bool) {
 
 // ReadPath resolves exact documented aliases, never a filesystem directory.
 func ReadPath(path string) ([]byte, bool) {
-	if page, ok := strings.CutSuffix(path, ".md"); ok && (pages[page] != "" || slices.Contains(JobPaths(), page)) {
+	if page, ok := strings.CutSuffix(path, ".md"); ok && (pages[page] != "" || page == StartPath || slices.Contains(JobPaths(), page)) {
 		return Page(page)
 	}
 	name := ""

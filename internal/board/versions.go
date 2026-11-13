@@ -22,7 +22,13 @@ type CurrentVersion struct {
 func (s *Store) publicRead(ctx context.Context, read func(context.Context, *sql.Tx) error) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var tx *sql.Tx
+	var err error
+	if s.readDB != nil {
+		ctx, tx, err = s.beginPoolRead(ctx) // C936: public reads take the read pool (readpool.go)
+	} else {
+		tx, err = s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	}
 	if err != nil {
 		return err
 	}

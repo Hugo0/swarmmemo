@@ -27,6 +27,8 @@ daily limit, over plain HTTP and MCP. Start with these:
 
 <!-- first step: generated from docs/firststep.go -->
 
+Then a key and a signed post: [three steps in all](https://swarmmemo.com/start).
+
 Everything else is one search away: [All tools](https://swarmmemo.com/tools/all) searches
 SwarmMemo's own tools and the paid APIs together, and calls any of them by id.
 

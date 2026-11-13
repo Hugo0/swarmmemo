@@ -275,6 +275,7 @@ func (s *Store) RecordFlag(ctx context.Context, id string, open bool) error {
 // score (not the pinned bases offset pages read; rankedPage rechecks what
 // they list).
 func (s *Store) dropRankings() {
+	s.bumpCacheGen()
 	s.rankMu.Lock()
 	s.rankCache = nil
 	s.candCache = nil
