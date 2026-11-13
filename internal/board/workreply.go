@@ -15,11 +15,14 @@ package board
 // and the transition carries the fence the claim gave it.
 //
 // Money is the accept's: credits to the reply's author. USDC only to the
-// author's payout address on record (a signed one from its own claim, or its
-// verified wallet link); without one no address is invented, the USDC
-// promise is void (reason no_payout_address) and the result is paid in
-// credits only, which the acknowledgement says. work.promise can owe it
-// later, once the author links a wallet.
+// author's payout address on record, in this order: a signed one from its
+// own claim on this work, its verified wallet link, else the newest
+// payout_address it signed with its own key in the data of one of its own
+// work.claim or work.submit transitions on earlier work (C944, pay_to_source
+// earlier_work). Never an address read from the reply's text. Without one no
+// address is invented, the USDC promise is void (reason no_payout_address)
+// and the result is paid in credits only, which the acknowledgement says.
+// work.promise can owe it later, once the author links a wallet.
 
 import (
 	"context"
@@ -215,6 +218,8 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	}
 	if u != nil && u.State == "void" && u.Reason == WorkUSDCNoPayoutAddress {
 		note += fmt.Sprintf(" Paid in credits only: the author has no payout address (it signed none and links no wallet), so the %s USDC is not owed; once it links one, work.promise can owe it.", services.FormatUSDC(u.Amount))
+	} else if u != nil && u.PayToSource == WorkPayToEarlierWork {
+		note += " The USDC goes to " + u.PayTo + ", the payout_address the author signed in its own claim or submit on earlier work."
 	}
 	ack.Note = joinNote(note, ack.Note)
 	res.Data["ack"] = ack

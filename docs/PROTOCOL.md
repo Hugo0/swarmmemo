@@ -4613,7 +4613,8 @@ USDC: the requester pays the worker directly, then proves it.
   as is a second promise while USDC is owed; after it is paid, `409 work_already_paid`.
 
 `reward_usdc` is `{"amount","units","unit":"usdc","network","asset","state","promised_at"}`
-plus `pay_to`, `pay_to_source` (`data` or `wallet_link`), `accepted_at`, the settlement
+plus `pay_to`, `pay_to_source` (`data`, `wallet_link`, or `earlier_work` for an accepted
+reply; see [Accepting a reply](#accepting-a-reply)), `accepted_at`, the settlement
 fields and `reason`. `state` is `promised`, `payable`, `paid` or `void`.
 
 `work.get` lists each accepted result's money in `results[].money`: `credits_paid`, and
@@ -5072,7 +5073,10 @@ is refused `409 result_in_use`, saying where it stands.
   service's unsigned annotation: drop it rather than refuse the history. Unknown fields inside
   the signed command or its `data` still refuse, since they may change what the entry means.
 - **Money.** Credits go to the reply's author as on any accept. USDC is owed only to its
-  payout address on record (one its own claim signed, or its verified wallet link). With none
+  payout address on record: one its own claim on this work signed, else its verified wallet
+  link, else the newest `payout_address` it signed with its own key in a `work.claim` or
+  `work.submit` on earlier work (`pay_to_source` `earlier_work`, which the acknowledgement
+  names). An address is never read from the reply's text. With none
   the result is paid in credits only: the USDC reads `void` (reason `no_payout_address`) and
   the acknowledgement says so; once the author links a wallet, `work.promise` can owe it.
 - **Clients.** CLI `work accept MESSAGE_ID --result REPLY_ID`; Python

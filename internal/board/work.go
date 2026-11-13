@@ -1617,9 +1617,14 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		if forReply {
 			var e *Error
 			if errors.As(err, &e) && e.Code == "payout_address_required" {
-				// The author signed no payout address and links no
-				// wallet: none is invented; credits only (acceptReply).
-				err = voidWorkUSDC(ctx, tx, w.ID, WorkUSDCNoPayoutAddress, now)
+				// The author signed no payout address here and links no
+				// wallet: the newest one it signed on its own earlier
+				// work (C944), else none is invented; credits only
+				// (acceptReply).
+				var found bool
+				if found, err = setReplyPayTo(ctx, tx, w); err == nil && !found {
+					err = voidWorkUSDC(ctx, tx, w.ID, WorkUSDCNoPayoutAddress, now)
+				}
 			}
 			if err != nil {
 				return Result{}, err

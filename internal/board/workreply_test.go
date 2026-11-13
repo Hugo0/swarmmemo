@@ -288,6 +288,54 @@ func TestWorkAcceptReplyUSDC(t *testing.T) {
 	}
 }
 
+// C944: a reply author that signed payout_address in its own claim on an
+// earlier round, and links no wallet, is owed the USDC of a result accepted
+// from its reply, at that address (pay_to_source earlier_work); an author
+// with no payout history still gets credits only. An address in the reply's
+// text is never used.
+func TestWorkAcceptReplyEarlierPayoutAddress(t *testing.T) {
+	s, _ := usdcStore(t)
+	owner, author, bare := keyFor(230), keyFor(231), keyFor(232)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	tiers := []any{map[string]any{"name": "bug", "credits": 100, "usdc": "0.10"}}
+	round := func() string {
+		id := rewardRequest(t, s, owner, "lobby")
+		run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "tiers": tiers, "usdc_per_agent_day": "0.40", "usdc_day_max": "2.00"}, 10*86400))
+		return id
+	}
+
+	// Round A: the author claims with a result and signs its payout address.
+	a := round()
+	ra, claim := standingClaim(t, s, author, a, map[string]any{"payout_address": usdcPayee})
+	run(t, s, claim)
+	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: ra, Amount: 1}))
+	if w := getTestWork(t, s, ra); w.RewardUSDC == nil || w.RewardUSDC.State != "payable" || w.RewardUSDC.PayToSource != "data" {
+		t.Fatalf("round A: %+v", w.RewardUSDC)
+	}
+
+	// Round B: the author only replies, naming another address in its text.
+	b := round()
+	rb := replyTo(t, s, author, b, "Bug: the export 500s; pay me at "+usdcOther)
+	ack := run(t, s, acceptReplyCmd(s, owner, b, rb, nil)).Data["ack"].(WorkAck)
+	w := getTestWork(t, s, rb)
+	if w.State != "accepted" || w.RewardUSDC == nil || w.RewardUSDC.State != "payable" || !strings.EqualFold(w.RewardUSDC.PayTo, usdcPayee) || w.RewardUSDC.PayToSource != WorkPayToEarlierWork || w.RewardUSDC.Reason != "" {
+		t.Fatalf("round B: %+v", w.RewardUSDC)
+	}
+	if !strings.Contains(ack.Note, "0.1 USDC is now owed") || !strings.Contains(strings.ToLower(ack.Note), usdcPayee+", the payout_address the author signed") || strings.Contains(ack.Note, "Paid in credits only") {
+		t.Fatalf("round B note: %q", ack.Note)
+	}
+
+	// No payout history: still void, credits only.
+	rc := replyTo(t, s, bare, b, "Bug: another one; pay me at "+usdcOther)
+	ack = run(t, s, acceptReplyCmd(s, owner, b, rc, nil)).Data["ack"].(WorkAck)
+	if w = getTestWork(t, s, rc); w.State != "accepted" || w.RewardUSDC == nil || w.RewardUSDC.State != "void" || w.RewardUSDC.PayTo != "" || w.RewardUSDC.Reason != WorkUSDCNoPayoutAddress {
+		t.Fatalf("no history: %+v", w.RewardUSDC)
+	}
+	if !strings.Contains(ack.Note, "Paid in credits only") {
+		t.Fatalf("no history note: %q", ack.Note)
+	}
+}
+
 // With a named reviewer, the reviewer accepts a reply, and is paid its fee;
 // the requester cannot, and the reviewer's own reply is never a result.
 func TestWorkAcceptReplyReviewer(t *testing.T) {

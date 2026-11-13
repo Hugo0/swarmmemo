@@ -233,6 +233,49 @@ func workPayoutAddress(ctx context.Context, tx *sql.Tx, account string) (string,
 	return v, err
 }
 
+// WorkPayToEarlierWork is the pay_to_source of an accepted direct reply's
+// USDC owed to the payout address its author signed on earlier work (C944).
+const WorkPayToEarlierWork = "earlier_work"
+
+// signedPayoutAddress is the newest payout_address the account signed
+// itself, with its own key (no grant), in the data of one of its work.claim
+// or work.submit transitions, on any work; "" without one (C944). Never an
+// address read from a post's text.
+func signedPayoutAddress(ctx context.Context, tx *sql.Tx, account string) (string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT d.address FROM (SELECT t.accepted_at AS at,t.rowid AS r,
+ CASE WHEN json_valid(json_extract(t.payload,'$.command.data')) THEN json_extract(json_extract(t.payload,'$.command.data'),'$.payout_address') END AS address
+ FROM work_transitions t JOIN identities i ON i.id=t.author
+ WHERE i.account=? AND t.operation IN ('work.claim','work.submit') AND coalesce(t.delegation_id,'')='') d
+ WHERE coalesce(d.address,'')<>'' ORDER BY d.at DESC, d.r DESC LIMIT 8`, account)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v any
+		if err = rows.Scan(&v); err != nil {
+			return "", err
+		}
+		raw, _ := v.(string)
+		if a, ok := services.ParseEVMAddress(raw); ok {
+			return a.String(), nil
+		}
+	}
+	return "", rows.Err()
+}
+
+// setReplyPayTo is the fallback of an accepted direct reply whose author
+// signed no payout address on this work and links no wallet: the newest one
+// it signed on its own earlier work. found is false without one.
+func setReplyPayTo(ctx context.Context, tx *sql.Tx, w workRow) (found bool, err error) {
+	address, err := signedPayoutAddress(ctx, tx, w.Worker)
+	if err != nil || address == "" {
+		return false, err
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE work_usdc SET pay_to=?,pay_to_source=?,worker=? WHERE work_id=? AND state='promised'", address, WorkPayToEarlierWork, w.Worker, w.ID)
+	return err == nil, err
+}
+
 func payoutAddressRequired() error {
 	return problem(400, "payout_address_required", "This work pays USDC: say where. Add payout_address (0x and 40 hex) to the submit's data, or link a wallet first (standing.challenge kind wallet, then identity.link); the submit fixes the address the requester must pay.")
 }

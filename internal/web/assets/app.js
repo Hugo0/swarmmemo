@@ -2047,7 +2047,8 @@
     } else if (w.state === 'submitted' && mine) {
       parts.push(line('Your result is submitted and waits for a verdict.'));
     } else if (!parts.length) { el.hidden = true; return; }
-    $('claim-heading').textContent = mode === 'submit' ? 'Submit your result' : !mode && yours ? 'Your result' : 'Claim';
+    const heading = mode === 'submit' ? 'Submit your result' : !mode && yours ? 'Your result' : 'Claim';
+    if (!mode) $('claim-heading').textContent = heading;
     if (mode) {
       // This key's own replies to the task: the result is one of them, or a new one.
       let replies = [];
@@ -2056,6 +2057,8 @@
         replies = (posts.messages || []).filter(m => m.reply_to === id && !m.superseded_by && !m.hidden && !m.work?.result_of);
       } catch (error) { if (error.code !== 'not_found') throw error; }
       if (epoch !== el.workEpoch) return;
+      // The heading changes with the form it names, never before the replies load.
+      $('claim-heading').textContent = heading;
       const form = node('form', 'work-act-form'), select = node('select'), text = node('textarea'), pick = node('label', '', 'Your result');
       select.name = 'result';
       if (mode === 'claim') select.append(new Option('No result yet: claim for up to an hour', ''));
