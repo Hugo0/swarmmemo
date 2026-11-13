@@ -376,6 +376,18 @@ func checkStandingSuccessor(ctx context.Context, tx *sql.Tx, w workRow, root wor
 // that starts at next, at most WorkStandingSuccessorDepth links, or "": a
 // task whose request is hidden is skipped over, never shown.
 func standingNextRound(ctx context.Context, tx rowQuerier, next string, now int64) (string, error) {
+	return standingChainRound(ctx, tx, next, now, true)
+}
+
+// standingOpenRound is standingNextRound without the open seat: the first
+// open round along the chain, also while its seats are all taken for now.
+// A full round's forward line names it, so a worker waits for its next seat
+// there instead of posting results to a round that takes none (C943).
+func standingOpenRound(ctx context.Context, tx rowQuerier, next string, now int64) (string, error) {
+	return standingChainRound(ctx, tx, next, now, false)
+}
+
+func standingChainRound(ctx context.Context, tx rowQuerier, next string, now int64, seat bool) (string, error) {
 	var generation string
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
 		return "", err
@@ -399,7 +411,7 @@ func standingNextRound(ctx context.Context, tx rowQuerier, next string, now int6
 			if err != nil {
 				return "", err
 			}
-			if p != nil && p.Open > 0 {
+			if p != nil && (p.Open > 0 || !seat && !p.Full) {
 				return at, nil
 			}
 		}

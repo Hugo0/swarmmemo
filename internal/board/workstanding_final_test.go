@@ -149,6 +149,15 @@ func TestStandingMarkPointsToNextRound(t *testing.T) {
 	if w := mark(round2); w.NextRound != "" || w.NextNote != "" {
 		t.Fatalf("the next round itself: %+v", w)
 	}
+	// The next round's seats all taken for now (C943): the full round still
+	// names it, where the worker waits for its next seat.
+	_, c3 := standingClaim(t, s, w1, round2, nil)
+	run(t, s, c3)
+	_, c4 := standingClaim(t, s, w2, round2, nil)
+	run(t, s, c4)
+	if w := mark(round1); w.NextRound != round2 || w.NextNote != want {
+		t.Fatalf("a full round whose next round has no open seat: %+v", w)
+	}
 	// Full with no open next round: it says so, with no link.
 	if _, err := s.db.Exec("DELETE FROM work_transitions WHERE work_id=? AND operation=?", round1, WorkSuccessorSet); err != nil {
 		t.Fatal(err)
