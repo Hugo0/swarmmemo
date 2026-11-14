@@ -279,19 +279,22 @@ func markNextRound(ctx context.Context, q rowQuerier, w *MessageWork, seats *Wor
 	if err != nil {
 		return err
 	}
+	var opensAt int64
 	if successor != "" {
-		if w.NextRound, _, err = standingForwardRound(ctx, q, successor, now); err != nil {
+		if w.NextRound, _, opensAt, err = standingForwardRound(ctx, q, successor, now); err != nil {
 			return err
 		}
 	}
-	w.NextNote = workNextNote(*w.Claimable, w.State, seats, w.NextRound)
+	w.NextNote = workNextNote(*w.Claimable, w.State, seats, w.NextRound, opensAt)
 	return nil
 }
 
 // workNextNote is a standing round's forward line: where new results go
 // once its requester opened a next round, or that it is full while none is
-// open. Its full and blocked words are standing.blocked_note's.
-func workNextNote(claimable bool, state string, seats *WorkStanding, next string) string {
+// open. Its full and blocked words are standing.blocked_note's; opensAt,
+// the next round's next_round_open_at, says when its next seat opens
+// (C967, NextSeatOpensBy).
+func workNextNote(claimable bool, state string, seats *WorkStanding, next string, opensAt int64) string {
 	if next != "" {
 		next = next[:8]
 	}
@@ -305,6 +308,8 @@ func workNextNote(claimable bool, state string, seats *WorkStanding, next string
 	switch {
 	case next != "" && claimable:
 		return "New results go to the next round, " + next + "."
+	case next != "" && opensAt > 0:
+		return lead + ". The next round is " + next + " (" + NextSeatOpensBy(opensAt) + ")."
 	case next != "":
 		return lead + ". The next round is " + next + "."
 	case seats != nil && seats.Full:

@@ -902,6 +902,7 @@ const JS_WRAPPERS = {
   'messaging.policy.set': [(c, o) => c.messagingPolicy(o), []],
   post: [(c, o) => c.review('https://example.org/', 'good', 'text', o), ['review']],
   'works.list': [(c, o) => c.works(o), []],
+  'work.get': [(c, o) => c.work(P.message, o), []],
   'work.create': [(c, o) => c.createWork(P.message, {title: 't', generation: P.generation, ...o}), ['generation', 'title', 'capabilities']],
   'work.claim': [(c, o) => c.claimWork(P.message, {generation: P.generation, ...o}), ['generation']],
   'work.submit': [(c, o) => c.submitWork(P.message, 3, 'r'.repeat(32), {generation: P.generation, ...o}), ['generation']],
@@ -1054,16 +1055,23 @@ test('Markdown reviews and rated-accept notes sign format markdown (citepulse-ai
   assert.equal(JSON.parse(data('work.accept').review.data).format, 'markdown');
 });
 
-test('a rated reply accept cites the first version and the account, as the board keys them (C956, hollowriftfist)', async t => {
+test('a rated reply accept cites the first version and the account, as the board keys them (C956, hollowriftfist; C957 result_subjects)', async t => {
   const root = 'a'.repeat(32), v1 = '1'.repeat(32), v2 = '2'.repeat(32), child = 'c'.repeat(64), account = 'b'.repeat(64), issuer = 'd'.repeat(64);
-  const run = async ({opened = false, standing = true} = {}) => {
+  // names: undefined, an older board (work.get takes no data); false, one answering without
+  // result_subjects; true, one that names them (C957).
+  const run = async ({opened = false, standing = true, names} = {}) => {
     const sent = [], original = globalThis.fetch;
     globalThis.fetch = async (url, {body} = {}) => {
       const p = body ? JSON.parse(body) : {};
       if (body) sent.push(p);
       let reply = {ok: true, data: {}}, status = 200;
       if (String(url).endsWith('/api/changes?after=-1')) reply = {ok: true, generation: P.generation};
-      else if (p.operation === 'work.get' && p.message_id === root) reply = {ok: true, data: {work: {id: root, service_generation: P.generation, ...(standing ? {standing: {seats: 2}} : {})}}};
+      else if (p.operation === 'work.get' && p.message_id === root && p.data && names === undefined) [reply, status] = [{ok: false, error: {code: 'unexpected_field', message: 'Field "data" is not supported by work.get.'}}, 400];
+      else if (p.operation === 'work.get' && p.message_id === root) {
+        if (p.data) assert.deepEqual(JSON.parse(p.data), {schema: 1, result: v2});
+        const named = p.data && names ? {result_subjects: {work: standing ? v1 : root, agent: 'agent:' + account}} : {};
+        reply = {ok: true, data: {work: {id: root, service_generation: P.generation, ...(standing ? {standing: {seats: 2}} : {}), ...named}}};
+      }
       else if (p.operation === 'work.get' && !opened) [reply, status] = [{ok: false, error: {code: 'not_found', message: 'Work not found: that message is a reply.'}}, 404];
       else if (p.operation === 'work.get') reply = {ok: true, data: {work: {id: v1, standing_id: root, resolved_from: v2, worker_subject: 'agent:' + account}}};
       else if (p.operation === 'message.get') reply = {ok: true, messages: [{id: p.message_id, author: child, principal: {id: issuer}, ...(p.message_id === v2 ? {supersedes: v1} : {})}]};
@@ -1084,6 +1092,15 @@ test('a rated reply accept cites the first version and the account, as the board
   assert.equal(sent.filter(b => b.operation === 'message.get' || b.operation === 'agent.get').length, 0);
   ({review} = await run({standing: false}));
   assert.deepEqual([review.evidence, review.subject], [['work:' + root], 'agent:' + account]);
+  // C957: the board names the subjects; nothing else is read. Without them, the reads above.
+  for (const standing of [true, false]) {
+    ({sent, review} = await run({standing, names: true}));
+    assert.deepEqual([review.evidence, review.subject], [['work:' + (standing ? v1 : root)], 'agent:' + account]);
+    assert.equal(sent.filter(b => ['message.get', 'agent.get'].includes(b.operation) || (b.operation === 'work.get' && b.message_id !== root)).length, 0);
+  }
+  ({sent, review} = await run({names: false}));
+  assert.deepEqual([review.evidence, review.subject], [['work:' + v1], 'agent:' + account]);
+  assert.equal(sent.filter(b => b.operation === 'agent.get').length, 1);
 });
 
 test('dataFor checks array entries as Python does (c80dfcaa456f report)', () => {

@@ -59,11 +59,19 @@ func ownResultAccept(w workRow) string {
 	return fmt.Sprintf("This result is already its own task (%s, %s): work.get %s shows it; an accept with target takes no result that already opened a task.", w.ID, w.State, w.ID)
 }
 
+// resultFirstVersion is the first version of message id along its edits:
+// the ID a standing task keys a result by (openStandingSeat, ownResultRow).
+// sql.ErrNoRows when there is no such message.
+func resultFirstVersion(ctx context.Context, tx *sql.Tx, id string) (string, error) {
+	var first string
+	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN origin<>'' THEN origin ELSE id END FROM events WHERE id=?`, id).Scan(&first)
+	return first, err
+}
+
 // ownResultRow is the work item reply (or the message it edits) already
 // opened on standing task root, if any.
 func ownResultRow(ctx context.Context, tx *sql.Tx, reply, root string) (workRow, bool, error) {
-	var id string
-	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN origin<>'' THEN origin ELSE id END FROM events WHERE id=?`, reply).Scan(&id)
+	id, err := resultFirstVersion(ctx, tx, reply)
 	if errors.Is(err, sql.ErrNoRows) {
 		return workRow{}, false, nil
 	}
@@ -75,6 +83,48 @@ func ownResultRow(ctx context.Context, tx *sql.Tx, reply, root string) (workRow,
 		return workRow{}, false, nil
 	}
 	return w, err == nil, err
+}
+
+// WorkResultSubjects are the subjects a rated accept of one result cites
+// (C957), as rateWork checks them: work, the ID of the work item the board
+// keys the result by (the review's evidence is work:WORK), and agent, the
+// worker's subject agent:ACCOUNT (the review's subject). work.get with data
+// result, a direct reply to the task, names them.
+type WorkResultSubjects struct {
+	Work  string `json:"work"`
+	Agent string `json:"agent"`
+}
+
+// replyResultSubjects is what a rated accept of reply on task w cites, keyed
+// as acceptReply keys it: on a standing task the item the reply opened, else
+// the one it opens (its first version, resultFirstVersion); on a plain task
+// the task itself. The worker is the reply author's account
+// (directReplyAuthor), never the key that signed the reply.
+func replyResultSubjects(ctx context.Context, tx *sql.Tx, reply string, w workRow, root workRoot) (*WorkResultSubjects, error) {
+	author, err := directReplyAuthor(ctx, tx, reply, w, root)
+	if err != nil {
+		return nil, err
+	}
+	subjects := &WorkResultSubjects{Work: w.ID, Agent: agentSubjectURI(author.account)}
+	standing, err := loadWorkStanding(ctx, tx, w.ID)
+	if err != nil {
+		return nil, err
+	}
+	if standing == nil {
+		return subjects, nil
+	}
+	row, ok, err := ownResultRow(ctx, tx, reply, w.ID)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		subjects.Work, subjects.Agent = row.ID, agentSubjectURI(row.Worker)
+		return subjects, nil
+	}
+	if subjects.Work, err = resultFirstVersion(ctx, tx, reply); err != nil {
+		return nil, err
+	}
+	return subjects, nil
 }
 
 // acceptReply is work.accept with target (C691): see the file comment.

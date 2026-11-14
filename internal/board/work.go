@@ -168,6 +168,10 @@ type Work struct {
 	// WorkYourResultsMax (C481): the standing task stays open for other
 	// seats, and each result is its own work item. Never anyone else's.
 	YourResults []WorkYourResult `json:"your_results,omitempty"`
+	// ResultSubjects is, on work.get with data result (C957), the work item
+	// and worker a rated accept of that reply cites (replyResultSubjects).
+	// Opt-in: absent from every other read.
+	ResultSubjects *WorkResultSubjects `json:"result_subjects,omitempty"`
 	// WaitingResults is, on work.get of a standing task, the results
 	// waiting for the requester's verdict, oldest first, at most
 	// WorkWaitingResultsMax (C600): each is judged by its own work_id, never
@@ -2207,6 +2211,27 @@ type worksListOptions struct {
 	Summary     *bool   `json:"summary"`
 }
 
+// WorkGetDataRule is work.get's data (C957).
+const WorkGetDataRule = `work.get data is {"schema":1,"result":REPLY_ID}: result, a direct reply to the task, adds result_subjects {work, agent}, the work item and worker a rated accept of that reply cites (its review's evidence work:WORK and subject AGENT).`
+
+// workGetOptions is work.get's data.
+type workGetOptions struct {
+	Schema int     `json:"schema"`
+	Result *string `json:"result"`
+}
+
+// workGetData is the reply work.get data names as result; "" without data.
+func workGetData(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	var d workGetOptions
+	if len(raw) > 512 || services.StrictObject([]byte(raw), &d) != nil || d.Schema != 1 || d.Result == nil || !workIDRE.MatchString(*d.Result) {
+		return "", problem(400, "invalid_work_data", WorkGetDataRule)
+	}
+	return *d.Result, nil
+}
+
 func worksListData(raw string) (eligibleFor, worker, standing string, claimable, summary bool, err error) {
 	if raw == "" {
 		return "", "", "", false, false, nil
@@ -2325,6 +2350,10 @@ func (s *Store) readWorkIn(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			}
 			return r, err
 		}
+		result, err := workGetData(c.Data)
+		if err != nil {
+			return Result{}, err
+		}
 		opt, err := workEligibilitySubject(ctx, tx, c.Target, a)
 		if err != nil {
 			return Result{}, err
@@ -2348,6 +2377,9 @@ func (s *Store) readWorkIn(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		if err == nil && p.Standing != nil && a.signed && a.account != "" {
 			p.YourResults, err = workYourResults(ctx, tx, w.ID, a.account, generation, now)
+		}
+		if err == nil && result != "" {
+			p.ResultSubjects, err = replyResultSubjects(ctx, tx, result, w, root)
 		}
 		if named != id {
 			p.ResolvedFrom = named

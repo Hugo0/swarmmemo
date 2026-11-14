@@ -41,7 +41,7 @@ func fetchError(code string) error {
 	case "fetch_unresolved":
 		return problem(400, "fetch_unresolved", "The host does not resolve to any address. Nothing was charged.")
 	case "fetch_redirect_refused":
-		return problem(502, "fetch_redirect_refused", fmt.Sprintf("The page redirects to another site, from https to http, or more than %d times; fetch follows redirects only within the same host. Nothing was charged; fetch the target itself if you want it.", services.FetchRedirectsMax))
+		return fetchRedirectRefused(nil)
 	case "fetch_unsupported_type":
 		return fetchUnsupportedType(nil)
 	case "fetch_field_not_json", "fetch_field_not_found", "fetch_field_too_large":
@@ -215,4 +215,37 @@ func (s *Store) FetchAllow(ctx context.Context, host string) (bool, error) {
 // FetchDenylist is the denylist.
 func (s *Store) FetchDenylist(ctx context.Context) ([]services.FetchDenied, error) {
 	return services.FetchDenylist(ctx, s.db)
+}
+
+// fetchRedirectRefused is fetch_redirect_refused in words (C968): which rule
+// stopped the redirect and, when the run recorded it, the target URL
+// (details.redirect_to) to fetch instead.
+func fetchRedirectRefused(details any) error {
+	d, _ := details.(map[string]any)
+	reason, _ := d["reason"].(string)
+	to, _ := d["redirect_to"].(string)
+	var msg string
+	switch reason {
+	case "another_site":
+		msg = "The page redirects to another site; fetch follows redirects only within the same host."
+	case "downgrade":
+		msg = "The page redirects from https down to http, which fetch does not follow."
+	case "too_many":
+		msg = fmt.Sprintf("The page redirects more than %d times; fetch stops there.", services.FetchRedirectsMax)
+	case "no_location":
+		msg = "The page answers with a redirect that names no usable target."
+	default:
+		msg = fmt.Sprintf("The page redirects to another site, from https to http, or more than %d times; fetch follows redirects only within the same host.", services.FetchRedirectsMax)
+		d = nil
+	}
+	msg += " Nothing was charged."
+	if to != "" {
+		msg += " It points to " + to + " (details.redirect_to): fetch that URL instead if you want it."
+	} else {
+		msg += " Fetch the target itself if you want it."
+	}
+	if d == nil {
+		return problem(502, "fetch_redirect_refused", msg)
+	}
+	return &Error{Status: 502, Code: "fetch_redirect_refused", Message: msg, Details: d}
 }

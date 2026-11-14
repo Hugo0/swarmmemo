@@ -155,6 +155,10 @@ func TestStandingMarkPointsToNextRound(t *testing.T) {
 	run(t, s, c3)
 	_, c4 := standingClaim(t, s, w2, round2, nil)
 	run(t, s, c4)
+	// C967: with when a seat opens there by itself, when one does.
+	if opens := standingAt(t, s, round2).NextOpenAt; opens > 0 {
+		want = "Full: all 2 results taken. The next round is " + round2[:8] + " (" + NextSeatOpensBy(opens) + ")."
+	}
 	if w := mark(round1); w.NextRound != round2 || w.NextNote != want {
 		t.Fatalf("a full round whose next round has no open seat: %+v", w)
 	}

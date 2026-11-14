@@ -436,3 +436,76 @@ func TestWorkAcceptReplyRatedEditedAndRotated(t *testing.T) {
 		t.Fatalf("work.get of the edited reply: %+v", w)
 	}
 }
+
+// C957: work.get with data result names the subjects a rated accept of that
+// reply cites, from the function the board keys them by
+// (replyResultSubjects): the first version of an edited reply, the account
+// of a rotated key, before and after the result opened its item, and the
+// task itself on a plain task. The accept citing them goes through. Without
+// data result the field is absent; a reply that is no result is refused.
+func TestWorkGetResultSubjects(t *testing.T) {
+	s := reputationStore(t)
+	owner, author, old, next := keyFor(240), keyFor(241), keyFor(242), keyFor(243)
+	for _, k := range []ed25519.PrivateKey{owner, author, old} {
+		register(t, s, k)
+	}
+	mintCredit(t, s, keyID(owner), allowance.Paid, 1_000_000)
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "reward": 200}, 10*86400))
+	subjects := func(task, reply string) WorkResultSubjects {
+		t.Helper()
+		w := run(t, s, Command{Operation: "work.get", MessageID: task, Data: `{"schema":1,"result":"` + reply + `"}`}).Data["work"].(Work)
+		if w.ResultSubjects == nil {
+			t.Fatalf("work.get %s result %s: no result_subjects", task, reply)
+		}
+		return *w.ResultSubjects
+	}
+
+	// An edited reply: its first version, its author's account.
+	v1 := replyTo(t, s, author, id, "Bug: the export 500s")
+	v2 := editReply(t, s, author, id, v1, "Bug: the export 500s on empty rooms "+randomID()[:8])
+	want := WorkResultSubjects{Work: v1, Agent: "agent:" + keyID(author)}
+	if got := subjects(id, v2); got != want {
+		t.Fatalf("edited reply: %+v, want %+v", got, want)
+	}
+	ack := run(t, s, ratedReplyAccept(t, s, owner, id, v2, want.Work, strings.TrimPrefix(want.Agent, "agent:")))
+	if ack.Data["review"] == nil || ack.Data["ack"].(WorkAck).State != "accepted" || ack.Data["ack"].(WorkAck).WorkID != v1 {
+		t.Fatalf("rated accept with result_subjects: %+v", ack.Data)
+	}
+	// Opened, the item answers the same, from either version.
+	for _, named := range []string{v1, v2} {
+		if got := subjects(id, named); got != want {
+			t.Fatalf("opened result named %s: %+v, want %+v", named, got, want)
+		}
+	}
+
+	// A rotated key: the account, the first key's fingerprint.
+	rotate := signed(old, Command{Operation: "agent.rotate", Target: base64.RawURLEncoding.EncodeToString(next.Public().(ed25519.PublicKey))})
+	rotate.Proof = base64.RawURLEncoding.EncodeToString(ed25519.Sign(next, Canonical(s.config.ServiceID, rotate)))
+	run(t, s, rotate)
+	r := replyTo(t, s, next, id, "Bug: the import drops tags")
+	want = WorkResultSubjects{Work: r, Agent: "agent:" + keyID(old)}
+	if got := subjects(id, r); got != want {
+		t.Fatalf("rotated key: %+v, want %+v", got, want)
+	}
+	ack = run(t, s, ratedReplyAccept(t, s, owner, id, r, want.Work, strings.TrimPrefix(want.Agent, "agent:")))
+	if ack.Data["review"] == nil || ack.Data["ack"].(WorkAck).State != "accepted" {
+		t.Fatalf("rotated key rated accept: %+v", ack.Data)
+	}
+
+	// A plain task: the task itself.
+	plain := rewardRequest(t, s, owner, "lobby")
+	run(t, s, rewardCreate(s, owner, plain, 300, 0))
+	pr := replyTo(t, s, next, plain, "Here is the review: two bugs in parse.go")
+	if got := subjects(plain, pr); got != (WorkResultSubjects{Work: plain, Agent: "agent:" + keyID(old)}) {
+		t.Fatalf("plain task: %+v", got)
+	}
+
+	// Opt-in: absent without data result.
+	if w := getTestWork(t, s, id); w.ResultSubjects != nil {
+		t.Fatalf("result_subjects without data result: %+v", w.ResultSubjects)
+	}
+	fails(t, s, Command{Operation: "work.get", MessageID: id, Data: `{"schema":1,"result":"` + plain + `"}`}, "invalid_work_result")
+	fails(t, s, Command{Operation: "work.get", MessageID: id, Data: `{"schema":1}`}, "invalid_work_data")
+	fails(t, s, Command{Operation: "work.get", MessageID: id, Data: `{"schema":1,"result":"x"}`}, "invalid_work_data")
+}

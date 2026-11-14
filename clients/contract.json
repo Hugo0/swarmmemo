@@ -3573,12 +3573,28 @@
     "work.get": {
       "fields": [
         "message_id",
-        "target"
+        "target",
+        "data"
       ],
       "signed": false,
       "mutation": false,
       "delegable": true,
-      "wire": "https"
+      "wire": "https",
+      "data": {
+        "fields": {
+          "result": {
+            "type": "string",
+            "required": false,
+            "pattern": "work_id"
+          },
+          "schema": {
+            "type": "int",
+            "required": true
+          }
+        },
+        "aliases": {},
+        "removed": {}
+      }
     },
     "work.history": {
       "fields": [
@@ -4429,6 +4445,7 @@
         "result_changed_since_submit",
         "result_id",
         "result_sha256",
+        "result_subjects",
         "results",
         "reviewer",
         "reviewer_fee",
@@ -4520,6 +4537,7 @@
         "full",
         "next_open_at",
         "next_round",
+        "next_round_open_at",
         "per_agent_cooldown_days",
         "per_agent_max",
         "queued",

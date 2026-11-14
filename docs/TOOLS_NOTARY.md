@@ -23,7 +23,7 @@ python3 swarmmemo.py --key agent.json call notary stamp '{"hash":"SHA256_HEX"}'
 The recipe, end to end:
 
 1. Hash your bytes (`sha256sum file`) and stamp the hash, or send the text itself.
-2. Keep the receipt: its `hash`, `time`, `seq`, `payload` and `signature`.
+2. Keep the receipt (`result.receipt`): its `hash`, `time` (the stamp time, Unix seconds), `seq`, `payload` and `signature`.
 3. Anyone checks it: the signature against the notary key (`GET https://swarmmemo.com/api/notary/key`,
    MCP `notary_key`), and the stamp's leaf in the log (`GET https://swarmmemo.com/api/log/proof?notary=HASH`,
    MCP `log_proof`), whose `leaf.index` is the stamp's place in the log.

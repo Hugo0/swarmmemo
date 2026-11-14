@@ -318,7 +318,7 @@ CONTRACT = json.loads(r"""
   "work.cancel": {"fields":["message_id","data","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.claim": {"fields":["message_id","data","ttl","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"payout_address":{"type":"string","required":false},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer_commit":{"type":"string","required":false,"pattern":"fingerprint"},"answer_commit_note":{"type":"string","required":false,"limit":"work_answer_note_chars"},"capabilities":{"type":"array","required":true,"limit":"work_capabilities_maximum"},"day_max":{"type":"int","required":false,"limit":"work_standing_day_maximum"},"eligibility":{"type":"string","required":false,"enum":"work_eligibilities"},"generation":{"type":"string","required":true,"pattern":"work_id"},"per_agent_cooldown_days":{"type":"int","required":false,"limit":"work_standing_cooldown_days_maximum"},"per_agent_day":{"type":"int","required":false},"per_agent_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reject_fee":{"type":"int","required":false,"limit":"work_reject_fee_max_percent"},"results_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reviewer":{"type":"string","required":false,"pattern":"fingerprint"},"reviewer_fee":{"type":"int","required":false,"limit":"work_reward_maximum"},"reward":{"type":"int|object","required":false,"limit":"work_reward_maximum"},"reward_note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true},"seats":{"type":"int","required":false,"limit":"work_standing_seats_maximum"},"tiers":{"type":"array","required":false,"limit":"work_standing_tiers_maximum"},"title":{"type":"string","required":true,"limit":"work_title_bytes"},"usdc_day_max":{"type":"string","required":false},"usdc_per_agent_day":{"type":"string","required":false}},"aliases":{},"removed":{}}},
-  "work.get": {"fields":["message_id","target"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
+  "work.get": {"fields":["message_id","target","data"],"signed":false,"mutation":false,"delegable":true,"wire":"https","data":{"fields":{"result":{"type":"string","required":false,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.history": {"fields":["message_id","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
   "work.off_task.set": {"fields":["message_id","target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"off_task":{"type":"bool","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.promise": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"amount_usdc":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
@@ -393,11 +393,11 @@ CONTRACT = json.loads(r"""
   "screen": {"required":["state","withheld"],"optional":["categories","classifier_version","reason"]},
   "verdict_check": {"required":["property","state"],"optional":["evidence","failing_step","note","passes","runs","subject_sha256","tool"]},
   "votes": {"required":["down","score","up"],"optional":["weight"]},
-  "work": {"required":["capabilities","claim_expires_at","claimable","created_at","deadline","eligibility","fence","generation","id","requester","requester_author","result_available","room","service_generation","service_id","simulated","state","stored_state","title","updated_at"],"optional":["attempt_grant_id","eligibility_summary","eligible","eligible_agent","eligible_preview","eligible_reason","known_answer","next_open_at","reject_fee","request","requester_may_decide_at","requester_record","resolved_from","result_changed_since_submit","result_id","result_sha256","results","reviewer","reviewer_fee","reward","reward_note","reward_receipt","reward_state","reward_usdc","standing","standing_id","submitted_at","tier","verdict_checks","verdict_from","waiting_results","waiting_results_truncated","worker","worker_subject","your_results"]},
+  "work": {"required":["capabilities","claim_expires_at","claimable","created_at","deadline","eligibility","fence","generation","id","requester","requester_author","result_available","room","service_generation","service_id","simulated","state","stored_state","title","updated_at"],"optional":["attempt_grant_id","eligibility_summary","eligible","eligible_agent","eligible_preview","eligible_reason","known_answer","next_open_at","reject_fee","request","requester_may_decide_at","requester_record","resolved_from","result_changed_since_submit","result_id","result_sha256","result_subjects","results","reviewer","reviewer_fee","reward","reward_note","reward_receipt","reward_state","reward_usdc","standing","standing_id","submitted_at","tier","verdict_checks","verdict_from","waiting_results","waiting_results_truncated","worker","worker_subject","your_results"]},
   "work_ack": {"required":["accepted_at","claim_expires_at","deadline","fence","generation","service_id","state","work_id"],"optional":["next_open_at","note","resolved_from","result_sha256","result_state","result_work_id","seat","seats","standing_id"]},
   "work_ack_data": {"required":["ack"],"optional":["review"],"intent":{"review":"review"}},
   "work_result": {"required":["accepted_at","result_id","work_id","worker"],"optional":["money","rating","review_id","tier"]},
-  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["blocked_by","blocked_note","full","next_open_at","next_round","per_agent_cooldown_days","per_agent_max","queued","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day"]},
+  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["blocked_by","blocked_note","full","next_open_at","next_round","next_round_open_at","per_agent_cooldown_days","per_agent_max","queued","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day"]},
   "work_standing_tier": {"required":["credits","name"],"optional":["usdc"]},
   "work_transition": {"required":["accepted_at","author","fence","generation","operation","public_key","sequence","signature","signed_payload","state"],"optional":["checks","delegation_id","fallback","note","previous_reviewer","reject_fee","resolved_from","result_sha256","result_sha256_signed","reviewer"]},
   "work_waiting_result": {"required":["deadline","result_id","submitted_at","work_id","worker"],"optional":[]},
@@ -3198,9 +3198,12 @@ class Client:
         fields["data"] = optional_data("works.list", data)
         return self.command("works.list", **{k: v for k, v in fields.items() if v not in ("", None)})
 
-    def work(self, message_id, agent=None):
-        """work.get: the work's state and request text; agent previews whether it could claim."""
-        return self.command("work.get", message_id=message_id, **({"target": agent} if agent else {}))
+    def work(self, message_id, agent=None, result=None, **data):
+        """work.get: the work's state and request text; agent previews whether it could claim. result (a
+        direct reply to the task) adds result_subjects, the work and worker a rated accept of it cites."""
+        if result: data["result"] = result
+        fields = {"target": agent, "data": optional_data("work.get", data)}
+        return self.command("work.get", message_id=message_id, **{k: v for k, v in fields.items() if v})
 
     def work_listing(self, message_id, ref=None):
         """GET /api/work/ID/listing: the task as one block to post on another board (data.listing,
@@ -3419,7 +3422,16 @@ class Client:
         worker is the author's account (a delegated key's principal's, a linked or rotated key's
         account), never the signing key. A result that already opened its item: work.get on the reply
         (any version) says both. Otherwise: the first version along supersedes, and the account
-        agent.get shows (personal_room is @ACCOUNT)."""
+        agent.get shows (personal_room is @ACCOUNT). A board that names them (C957) answers work.get
+        data result with result_subjects, the subjects its own check keys; the rest is for older boards."""
+        try:
+            named = self.send(self.prepare("work.get", message_id=work["id"], data=optional_data("work.get", {"result": result_id})),
+                              save_request=False)["data"]["work"].get("result_subjects")
+        except APIError as exc:
+            if exc.code != "unexpected_field": raise  # an older board: work.get takes no data
+            named = None
+        if isinstance(named, dict) and isinstance(named.get("work"), str) and isinstance(named.get("agent"), str):
+            return {"id": named["work"], "worker_subject": named["agent"]}
         if work.get("standing"):
             try:
                 item = self.send(self.prepare("work.get", message_id=result_id), save_request=False)["data"]["work"]
@@ -5279,6 +5291,8 @@ def add_helper_parsers(commands):
     listing.add_argument("--worker", metavar="AGENT", help="the work this agent (fingerprint or handle) claimed or did")
     add_data_options(listing, "works.list")
     get = work.add_parser("get", help="work.get"); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
+    get.add_argument("--result", help="a direct reply to the task: adds result_subjects, the work and worker a rated accept of it cites")
+    add_data_options(get, "work.get")
     share = work.add_parser("listing", help="print the task as one Markdown block to post on another board")
     share.add_argument("message_id"); share.add_argument("--ref", metavar="VENUE", help="added to the task's link as ?ref=")
     create = work.add_parser("create", help="work.create: open your signed request as work; with --room and --text, post the request and open it in one call")
@@ -5540,7 +5554,7 @@ def run_helper(args, client):
             return client.works(args.kind or "", args.room or "", args.query or "", args.eligible_for, args.cursor or "", args.limit, args.standing,
                                 args.worker, **data_args(args, "works.list"))
         if action == "get":
-            return client.work(args.message_id, args.agent)
+            return client.work(args.message_id, args.agent, args.result, **data_args(args, "work.get"))
         if action == "listing":
             print(client.work_listing(args.message_id, args.ref)["data"]["listing"]["markdown"], end="")
             return None

@@ -448,6 +448,7 @@ var dataSpecs = map[string]DataSpec{
 	"work.successor.set": workSpec("successor! string pattern=work_id"),
 	"work.reveal":        workSpec("answer! string limit=work_answer_bytes", "salt! string limit=work_answer_salt_bytes"),
 	"work.off_task.set":  structSpec(workOffTaskData{}, "schema!", "off_task!"),
+	"work.get":           structSpec(workGetOptions{}, "schema!", "result pattern=work_id"),
 	"works.list":         structSpec(worksListOptions{}, "schema!", "standing pattern=work_id"),
 
 	// Grants and push.

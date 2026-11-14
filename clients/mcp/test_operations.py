@@ -108,6 +108,7 @@ class OperationTests(unittest.TestCase):
                              "tiers": [{"name": "bug", "credits": 2000, "usdc": "0.2"}, {"name": "bug+fix", "credits": 2000}], "usdc_day_max": "2", "usdc_owed": "0.4", "usdc_owed_max": "2",
                              "verdict_ttl": 259200, "results_until": 9, "results_max": 20},
                 "standing_id": "9" * 32, "tier": "bug+fix", "worker_subject": "agent:" + "8" * 64,
+                "result_subjects": {"work": "c" * 32, "agent": "agent:" + "8" * 64},
                 "results": [{"result_id": "c" * 32, "work_id": "c" * 32, "worker": agent, "tier": "bug+fix", "rating": 77, "review_id": "d" * 32, "accepted_at": 5,
                              "money": {"credits_paid": 2000, "usdc": {"state": "paid", "amount": "0.1", "pay_to": "0x" + "a" * 40, "tx_hash": "0x" + "ab" * 32,
                                        "tx_url": "https://basescan.org/tx/0x" + "ab" * 32, "paid_at": 6, "note": "announced extra"}}}],
@@ -115,6 +116,11 @@ class OperationTests(unittest.TestCase):
                 "waiting_results": [{"work_id": "a" * 32, "result_id": "a" * 32, "worker": agent, "submitted_at": 4, "deadline": 9}], "waiting_results_truncated": True}
         self.assertEqual(set(work), op.WORK_REQUIRED | op.WORK_OPTIONAL, "add a sample for the new work field, then teach _work to validate it")
         self.assertEqual(op._work(self.profile, dict(work), "e" * 32), work)
+        # C957: the subjects a rated accept of a reply signs: an item id and an agent: URI.
+        for bad in ({}, {"work": "c" * 32}, {"work": "x", "agent": work["result_subjects"]["agent"]},
+                    {"work": "c" * 32, "agent": "8" * 64}, {**work["result_subjects"], "extra": 1}, []):
+            with self.subTest(result_subjects=bad), self.assertRaises(op.BridgeError):
+                op._work(self.profile, {**work, "result_subjects": bad}, "e" * 32)
         # C627: blocked_by only beside eligible false; the floor in dollars.
         self.assertIsNotNone(op._work(self.profile, {**work, "eligible": False, "eligibility_summary": {"blocked_by": "per_agent_day"}}, "e" * 32))
         for bad in ({}, {"blocked_by": "eligibility"}, {"min_standing": "5"}, {"min_standing": "$5.00", "extra": 1}, []):
@@ -235,7 +241,11 @@ class OperationTests(unittest.TestCase):
             # C391: the next round, a work ID; next_round only beside successor.
             answer["data"]["standing"] = {**seats, "open": 0, "successor": "e" * 32, "next_round": "f" * 32}
             self.assertEqual(op.dispatch(self.profile, "find_work", {"standing": "c" * 32})["standing"]["next_round"], "f" * 32)
-            for bad in ({"successor": "E" * 32}, {"next_round": "f" * 32}, {"successor": "e" * 32, "next_round": 7}):
+            # C967: when the next round's next seat opens, a unix time beside next_round.
+            answer["data"]["standing"] = {**seats, "open": 0, "successor": "e" * 32, "next_round": "f" * 32, "next_round_open_at": 1792972800}
+            self.assertEqual(op.dispatch(self.profile, "find_work", {"standing": "c" * 32})["standing"]["next_round_open_at"], 1792972800)
+            for bad in ({"successor": "E" * 32}, {"next_round": "f" * 32}, {"successor": "e" * 32, "next_round": 7},
+                        {"successor": "e" * 32, "next_round_open_at": 1792972800}, {"successor": "e" * 32, "next_round": "f" * 32, "next_round_open_at": "1792972800"}):
                 answer["data"]["standing"] = {**seats, **bad}
                 with self.subTest(bad=bad), self.assertRaisesRegex(BridgeError, "invalid_response"):
                     op.dispatch(self.profile, "find_work", {"standing": "c" * 32})

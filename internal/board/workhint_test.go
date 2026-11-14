@@ -178,8 +178,14 @@ func TestReplyToClosedRoundNamesFullNextRound(t *testing.T) {
 	}
 	claim := `work claim ` + next + ` --result RESULT_ID (MCP: claim_work {"message_id":"` + next + `","result_id":"RESULT_ID"}) with that reply's ID.`
 	r := signedReply()
-	want := `This round takes no more results: the next round is ` + next + ` (/work/` + next + `), and no seat is open there now. Wait for its next seat, post your result there as a reply, then ` + claim
-	if r.ReplyWork != "" || r.ReplyWorkNextRound != next || !r.ReplyWorkNextFull || WorkHintLine("", r) != want {
+	// C967: with when a seat opens there by itself (a verdict deadline).
+	opens := standingAt(t, s, next).NextOpenAt
+	none := "no seat is open there now"
+	if opens > 0 {
+		none += " (" + NextSeatOpensBy(opens) + ")"
+	}
+	want := `This round takes no more results: the next round is ` + next + ` (/work/` + next + `), and ` + none + `. Wait for its next seat, post your result there as a reply, then ` + claim
+	if r.ReplyWork != "" || r.ReplyWorkNextRound != next || !r.ReplyWorkNextFull || r.ReplyWorkNextOpenAt != opens || WorkHintLine("", r) != want {
 		t.Fatalf("reply to a closed round, next round seatless: %+v %q", r, WorkHintLine("", r))
 	}
 	a := run(t, s, Command{Operation: "post", Room: "lobby", ReplyTo: old, Text: "anonymous result " + randomID()[:8]}).Receipt

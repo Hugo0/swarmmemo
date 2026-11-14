@@ -197,6 +197,12 @@ func TestWorkSSRStandingNextRound(t *testing.T) {
 	if body := get(); !strings.Contains(body, `<strong>This round is closed</strong> — the open round is <a href="/work/`+nextID+`">`) {
 		t.Error("a closed round does not link the open round")
 	}
+	// C967: and when that round's next seat opens, when it has none now.
+	standing.NextRoundOpenAt = 1789084800
+	if body := get(); !strings.Contains(body, `">`+nextID[:12]+`</a> (next seat opens by 2026-09-11 00:00 UTC).</p>`) {
+		t.Error("the open round's next seat time is missing")
+	}
+	standing.NextRoundOpenAt = 0
 	standing.NextRound = ""
 	if body := get(); strings.Contains(body, "the open round is") {
 		t.Error("a round with no claimable successor links one")

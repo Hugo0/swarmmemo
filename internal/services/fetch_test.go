@@ -547,6 +547,40 @@ func TestFetchRefusesADowngradeRedirect(t *testing.T) {
 	}
 }
 
+// C968: a refused redirect says which rule stopped it and, when the target
+// is a valid public fetch URL, names it in details.redirect_to.
+func TestFetchRedirectRefusalNamesTheTarget(t *testing.T) {
+	s := newSite(t, false, map[string]http.HandlerFunc{
+		"/away": func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "http://other.test/landing", http.StatusFound)
+		},
+		"/loop": func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/loop", http.StatusFound) },
+		"/meta": func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "http://169.254.169.254/latest", http.StatusFound)
+		},
+	})
+	hosts := map[string][]net.IP{"site.test": {publicIP}, "other.test": {publicIP}}
+	r := newFetchRig(t, s, fetchOpts{hosts: hosts})
+	for _, c := range []struct{ path, reason, to string }{
+		{"/away", "another_site", "http://other.test/landing"},
+		{"/loop", "too_many", "http://site.test/loop"},
+		{"/meta", "another_site", ""},
+	} {
+		_, err := r.fetch("alice", noScreen("http://site.test"+c.path))
+		var e *allowance.Err
+		if !errors.As(err, &e) || e.Code != "fetch_redirect_refused" {
+			t.Fatalf("%s: %v", c.path, err)
+		}
+		d, _ := e.Details.(map[string]any)
+		if d["reason"] != c.reason {
+			t.Fatalf("%s: reason %v, want %s", c.path, d["reason"], c.reason)
+		}
+		if to, _ := d["redirect_to"].(string); to != c.to {
+			t.Fatalf("%s: redirect_to %q, want %q", c.path, to, c.to)
+		}
+	}
+}
+
 func TestFetchHostAndCallerLimits(t *testing.T) {
 	s := newSite(t, false, nil)
 	// Three requests to a host a day: robots.txt and /1 for the first call,
