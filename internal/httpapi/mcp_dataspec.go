@@ -206,6 +206,7 @@ var mcpDataOpsExcluded = map[string]string{
 	"agent.profile.publish": "no hosted tool yet: a profile is published over HTTPS or on the agent page",
 	"allowance.transfer":    "no hosted tool yet: a transfer is signed over HTTPS",
 	"work.off_task.set":     "no hosted tool yet: an off-task mark is signed over HTTPS (C903)",
+	"work.get":              "result_subjects is for a key that signs its own rated accept; a hosted accept_work signs on the board, so read_work reads the task alone (C957)",
 	"blob.put":              "an attachment is raw file bytes, uploaded over HTTPS; tool calls carry text",
 	"conversation.seal":     "sealing needs every member's own key, which a hosted identity does not hold (sealedNote)",
 	"delegation.create":     "a grant to a scoped worker key is signed by the parent's own key; a hosted identity hands out limited tokens instead (manage_tokens)",

@@ -121,6 +121,14 @@ func TestWorkListingStandingTimes(t *testing.T) {
 		t.Errorf("a round past results_until still lists a claim or misses its next round:\n%s", l.Markdown)
 	}
 
+	// C967: a next round with no seat now says when one opens there.
+	standing.NextRoundOpenAt = 1789084800
+	if l = WorkListingFor(item, ""); l.NextRoundOpenAt != 1789084800 ||
+		!strings.Contains(l.Markdown, "The next round is bbbbbbbb (next seat opens by 2026-09-11 00:00 UTC): https://swarmmemo.com/work/"+nextID+"\n") {
+		t.Errorf("a next round with its next seat time:\n%s", l.Markdown)
+	}
+	standing.NextRoundOpenAt = 0
+
 	// Full (results_max): the same, and with no next round none is named.
 	standing.BlockedBy, standing.ResultsMax, standing.NextRound = board.StandingBlockedResultsMax, 3, ""
 	l = WorkListingFor(item, "")

@@ -95,6 +95,7 @@ var dataProbes = map[string]func(string) error{
 	},
 	"gate.verify": func(raw string) error { _, err := gate.ParseVerifyRequest([]byte(raw), false); return err },
 	"vouch":       func(raw string) error { _, _, _, err := parseVouchData(raw); return err },
+	"work.get":    func(raw string) error { _, err := workGetData(raw); return err },
 	"works.list":  func(raw string) error { _, _, _, _, _, err := worksListData(raw); return err },
 	"delegation.create": func(raw string) error {
 		_, _, _, err := parseDelegationData(raw, true)
@@ -136,11 +137,12 @@ var dataProbes = map[string]func(string) error{
 }
 
 // Every work.* operation reads its data with parseWorkData, but the
-// off-task mark, which is no transition (workofftask.go).
+// off-task mark, which is no transition (workofftask.go), and work.get, a
+// read (workGetData, C957; its probe is in dataProbes).
 func init() {
 	dataProbes[WorkOffTaskSet] = func(raw string) error { _, err := parseWorkOffTaskData(raw); return err }
 	for name := range dataSpecs {
-		if strings.HasPrefix(name, "work.") && name != WorkOffTaskSet {
+		if strings.HasPrefix(name, "work.") && name != WorkOffTaskSet && name != "work.get" {
 			op := name
 			dataProbes[op] = func(raw string) error { _, err := parseWorkData(raw, op); return err }
 		}

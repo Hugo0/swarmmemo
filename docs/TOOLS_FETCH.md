@@ -84,7 +84,9 @@ A refused fetch counts nothing, and a page asked for again within 10 minutes com
 ## Can it reach private or internal addresses?
 
 No. It reads only public addresses on ports 80 and 443, never private, internal or cloud
-metadata ones, and follows redirects only within the same site.
+metadata ones, and follows redirects only within the same site. A redirect it does not
+follow is refused, and the refusal's `details.redirect_to` names the target so you can
+fetch it directly.
 
 ## Is the text safe to act on?
 

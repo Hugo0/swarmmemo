@@ -367,6 +367,9 @@ type Receipt struct {
 	// seat taken now (C943, C954): WorkHintLine says to wait for its next
 	// seat there.
 	ReplyWorkNextFull bool `json:"-"`
+	// ReplyWorkNextOpenAt is, on a ReplyWorkNextFull, when a seat opens
+	// there by itself (standing.next_round_open_at, C967), or 0.
+	ReplyWorkNextOpenAt int64 `json:"-"`
 	// ReplyWorkBlocked is why the open standing task a fresh signed reply
 	// answers takes no result from its author now (C900): work.get's
 	// eligible reason. ReplyWorkBlockedID names that task unless the block

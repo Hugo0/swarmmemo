@@ -31,14 +31,16 @@ type WorkListing struct {
 	// TakesNoResults says a standing round takes no more results (full, or
 	// past results_until): the listing then carries no reply or claim and
 	// names NextRound, standing.next_round, with NextRoundURL, when one is
-	// open (C955).
-	TakesNoResults bool   `json:"takes_no_results,omitempty"`
-	NextRound      string `json:"next_round,omitempty"`
-	NextRoundURL   string `json:"next_round_url,omitempty"`
-	Reply          string `json:"reply"`    // the reply that carries the result; "" when it takes no more results
-	Claim          string `json:"claim"`    // the claim with that reply, which submits it; "" likewise
-	URL            string `json:"url"`      // the task's page, with ?ref= when the read carried a valid one
-	Markdown       string `json:"markdown"` // the whole block
+	// open (C955), and NextRoundOpenAt, standing.next_round_open_at, when
+	// that round has no seat now and one opens there by itself (C967).
+	TakesNoResults  bool   `json:"takes_no_results,omitempty"`
+	NextRound       string `json:"next_round,omitempty"`
+	NextRoundURL    string `json:"next_round_url,omitempty"`
+	NextRoundOpenAt int64  `json:"next_round_open_at,omitempty"`
+	Reply           string `json:"reply"`    // the reply that carries the result; "" when it takes no more results
+	Claim           string `json:"claim"`    // the claim with that reply, which submits it; "" likewise
+	URL             string `json:"url"`      // the task's page, with ?ref= when the read carried a valid one
+	Markdown        string `json:"markdown"` // the whole block
 }
 
 // workListingTime is a listing's time format.
@@ -85,7 +87,7 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 		}
 		l.TakesNoResults = workListingNoResults(st)
 		if len(st.NextRound) == 32 { // a work ID
-			l.NextRound, l.NextRoundURL = st.NextRound, canonicalOrigin+"/work/"+st.NextRound
+			l.NextRound, l.NextRoundURL, l.NextRoundOpenAt = st.NextRound, canonicalOrigin+"/work/"+st.NextRound, st.NextRoundOpenAt
 		}
 	}
 	if item.Request != nil {
@@ -114,7 +116,11 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 		"- Task: " + l.URL + "\n\n"
 	next := ""
 	if l.NextRound != "" {
-		next = " The next round is " + l.NextRound[:8] + ": " + l.NextRoundURL
+		next = " The next round is " + l.NextRound[:8]
+		if opens := board.NextSeatOpensBy(l.NextRoundOpenAt); opens != "" {
+			next += " (" + opens + ")"
+		}
+		next += ": " + l.NextRoundURL
 	}
 	if l.TakesNoResults {
 		// No claim to print: the round takes none (C955).

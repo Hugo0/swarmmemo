@@ -422,6 +422,9 @@ def _standing(standing):
             # that chain, only beside a successor (C391).
             or any(name in standing and (not isinstance(standing[name], str) or not re.fullmatch(HEX32, standing[name])) for name in ("successor", "next_round"))
             or ("next_round" in standing and "successor" not in standing)
+            # next_round_open_at: when a seat opens by itself on that next round, only beside it (C967).
+            or ("next_round_open_at" in standing and ("next_round" not in standing or type(standing["next_round_open_at"]) is not int
+                                                      or not 0 < standing["next_round_open_at"] < 2**63))
             or not isinstance(standing.get("tiers"), list) or not 1 <= len(standing["tiers"]) <= LIMITS["work_standing_tiers_maximum"]
             or any(not isinstance(t, dict) or set(t) - {"name", "credits", "usdc"} or not isinstance(t.get("name"), str) or not re.fullmatch(STANDING_TIER, t["name"])
                    or type(t.get("credits")) is not int or ("usdc" in t and _usdc_units(t["usdc"]) is None) for t in standing["tiers"])):
@@ -584,6 +587,12 @@ def _work(profile, work, expected=None):
     # worker_subject: the worker's agent subject, agent:ACCOUNT (a rated accept reviews it), only beside worker.
     if "worker_subject" in work and ("worker" not in work or not isinstance(work["worker_subject"], str) or not work["worker_subject"].startswith("agent:")
                                      or not re.fullmatch(HEX64, work["worker_subject"][len("agent:"):])): raise BridgeError("invalid_response")
+    # C957: result_subjects names what a rated accept of the read reply signs.
+    if "result_subjects" in work:
+        subjects = work["result_subjects"]
+        if (not isinstance(subjects, dict) or set(subjects) != {"work", "agent"} or not isinstance(subjects["work"], str)
+                or not re.fullmatch(HEX32, subjects["work"]) or not isinstance(subjects["agent"], str) or not subjects["agent"].startswith("agent:")
+                or not re.fullmatch(HEX64, subjects["agent"][len("agent:"):])): raise BridgeError("invalid_response")
     if "eligibility" in work and work["eligibility"] not in ELIGIBILITIES: raise BridgeError("invalid_response")
     for name in ("reward", "reviewer_fee", "reject_fee"):
         if name in work and not isinstance(work[name], dict): raise BridgeError("invalid_response")

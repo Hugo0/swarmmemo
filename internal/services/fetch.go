@@ -1017,7 +1017,7 @@ func (f *fetch) retrieve(ctx context.Context, u *url.URL, now int64) (*fetchedPa
 			resp.Body.Close()
 			next, err := redirectTarget(current, loc)
 			if err != nil || hop >= FetchRedirectsMax {
-				return nil, refusal("fetch_redirect_refused")
+				return nil, redirectRefusal(current, loc, err, hop)
 			}
 			current = next
 			continue
@@ -1025,6 +1025,44 @@ func (f *fetch) retrieve(ctx context.Context, u *url.URL, now int64) (*fetchedPa
 		defer resp.Body.Close()
 		return f.readPage(resp, current, now)
 	}
+}
+
+// redirectRefusal is fetch_redirect_refused with what the caller needs to
+// fetch the target itself (C968): details.reason (another_site, downgrade,
+// too_many or no_location) and details.redirect_to, the absolute target, only
+// when it is itself a valid fetch URL and not a non-public IP literal (so a
+// private or malformed address is never echoed back).
+func redirectRefusal(from *url.URL, loc string, err error, hop int) error {
+	reason := "too_many"
+	if err != nil {
+		switch err.Error() {
+		case "another site":
+			reason = "another_site"
+		case "downgrade":
+			reason = "downgrade"
+		default:
+			reason = "no_location"
+			// A target fetch cannot use at all (a private address, a bad
+			// scheme) on another host is still another site (gate m895).
+			if ref, perr := url.Parse(loc); loc != "" && perr == nil {
+				strip := func(h string) string { return strings.TrimPrefix(strings.ToLower(h), "www.") }
+				if h := from.ResolveReference(ref).Hostname(); h != "" && strip(h) != strip(from.Hostname()) {
+					reason = "another_site"
+				}
+			}
+		}
+	}
+	d := map[string]any{"reason": reason}
+	if loc != "" && len(loc) <= FetchURLBytes {
+		if ref, perr := url.Parse(loc); perr == nil {
+			if next, perr := parseFetchURL(from.ResolveReference(ref).String()); perr == nil {
+				if ip := net.ParseIP(next.Hostname()); ip == nil || safenet.PublicIP(ip) == nil {
+					d["redirect_to"] = next.String()
+				}
+			}
+		}
+	}
+	return &allowance.Err{Code: "fetch_redirect_refused", Details: d}
 }
 
 // redirectTarget is a redirect's target when fetch may follow it: a valid

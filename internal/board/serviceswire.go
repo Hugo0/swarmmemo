@@ -801,6 +801,9 @@ func serviceErrorWords(err error) error {
 	if e.Code == "fetch_robots" {
 		return fetchRobots(e.Details)
 	}
+	if e.Code == "fetch_redirect_refused" {
+		return fetchRedirectRefused(e.Details)
+	}
 	if e.Code == "fetch_invalid_url" {
 		return fetchInvalidURL(e.Message)
 	}

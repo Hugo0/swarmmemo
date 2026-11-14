@@ -277,10 +277,16 @@ type WorkStanding struct {
 	ResultsUntil    int64              `json:"results_until"`
 	// Successor is the standing task the requester named as the next round
 	// (work.successor.set, C391); NextRound, sent only while this task is
-	// not claimable, the first claimable task along that chain, at most
-	// WorkStandingSuccessorDepth links on.
-	Successor string `json:"successor,omitempty"`
-	NextRound string `json:"next_round,omitempty"`
+	// not claimable, the first claimable task along that chain, else the
+	// first open one waiting for its next seat (C964), at most
+	// WorkStandingSuccessorDepth links on. NextRoundOpenAt, sent only while
+	// NextRound has no seat open now, is that round's own next_open_at: when
+	// a seat opens there by itself (C967: workers polled for it). Absent
+	// when nothing but the requester opens one (a verdict may open one
+	// sooner).
+	Successor       string `json:"successor,omitempty"`
+	NextRound       string `json:"next_round,omitempty"`
+	NextRoundOpenAt int64  `json:"next_round_open_at,omitempty"`
 	// spent: open, and no seat opens again by itself (standingSpent), the
 	// claim's final refusal; never sent (C840).
 	spent bool
@@ -376,14 +382,15 @@ func checkStandingSuccessor(ctx context.Context, tx *sql.Tx, w workRow, root wor
 // that starts at next, at most WorkStandingSuccessorDepth links, or "": a
 // task whose request is hidden is skipped over, never shown.
 func standingNextRound(ctx context.Context, tx rowQuerier, next string, now int64) (string, error) {
-	return standingChainRound(ctx, tx, next, now, true)
+	round, _, err := standingChainRound(ctx, tx, next, now, true)
+	return round, err
 }
 
 // standingOpenRound is standingNextRound without the open seat: the first
 // open round along the chain, also while its seats are all taken for now.
 // A full round's forward line names it, so a worker waits for its next seat
 // there instead of posting results to a round that takes none (C943).
-func standingOpenRound(ctx context.Context, tx rowQuerier, next string, now int64) (string, error) {
+func standingOpenRound(ctx context.Context, tx rowQuerier, next string, now int64) (string, int64, error) {
 	return standingChainRound(ctx, tx, next, now, false)
 }
 
@@ -391,51 +398,66 @@ func standingOpenRound(ctx context.Context, tx rowQuerier, next string, now int6
 // successor sends workers to, the one rule its mark (markNextRound) and a
 // reply's receipt (replyNextRound) share: the first claimable round along
 // the chain, with seat true; else the first open one whose seats are all
-// taken for now (C943, C954), with seat false; else "".
-func standingForwardRound(ctx context.Context, q rowQuerier, successor string, now int64) (round string, seat bool, err error) {
+// taken for now (C943, C954), with seat false and opensAt its next_open_at,
+// when a seat opens there by itself (C967; 0 when none does); else "".
+func standingForwardRound(ctx context.Context, q rowQuerier, successor string, now int64) (round string, seat bool, opensAt int64, err error) {
 	if round, err = standingNextRound(ctx, q, successor, now); err != nil || round != "" {
-		return round, round != "", err
+		return round, round != "", 0, err
 	}
-	round, err = standingOpenRound(ctx, q, successor, now)
-	return round, false, err
+	round, opensAt, err = standingOpenRound(ctx, q, successor, now)
+	return round, false, opensAt, err
 }
 
-func standingChainRound(ctx context.Context, tx rowQuerier, next string, now int64, seat bool) (string, error) {
+// NextSeatOpensBy is a next round's next_round_open_at as the copy says it
+// (C967), "next seat opens by 2006-01-02 15:04 UTC", or "" for 0: the one
+// wording the receipt, the mark, the listing and /work/ID share.
+func NextSeatOpensBy(at int64) string {
+	if at <= 0 {
+		return ""
+	}
+	return "next seat opens by " + time.Unix(at, 0).UTC().Format("2006-01-02 15:04 UTC")
+}
+
+// standingChainRound is the first round along the chain from next that
+// has a seat open now (or, with seat false, one that opens again by
+// itself), with its next_open_at while it has no seat open now.
+func standingChainRound(ctx context.Context, tx rowQuerier, next string, now int64, seat bool) (string, int64, error) {
 	var generation string
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	seen := map[string]bool{}
 	for at := next; at != "" && !seen[at] && len(seen) < WorkStandingSuccessorDepth; {
 		seen[at] = true
 		w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, at))
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", nil
+			return "", 0, nil
 		}
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
 		open, err := standingRoundOpen(ctx, tx, at, generation, now)
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
 		if open {
 			p, err := projectWorkStandingSeats(ctx, tx, w, "open", now)
 			if err != nil {
-				return "", err
+				return "", 0, err
 			}
 			// C960 (hollowriftfist, bug bounty r10 17d42479): without a seat,
 			// a round counts only while one can still open there by itself:
 			// not full, not spent (pool final), not past results_until.
 			if p != nil && (p.Open > 0 || !seat && !p.Full && !p.spent && now <= p.ResultsUntil) {
-				return at, nil
+				// next_open_at is set only while no seat is open (C967).
+				return at, p.NextOpenAt, nil
 			}
 		}
 		if at, err = standingSuccessor(ctx, tx, at); err != nil {
-			return "", err
+			return "", 0, err
 		}
 	}
-	return "", nil
+	return "", 0, nil
 }
 
 // standingRoundOpen says work id is shown and its effective state is open.
@@ -849,8 +871,7 @@ func (s *Store) openStandingSeat(ctx context.Context, tx *sql.Tx, c Command, a a
 	if now > root.Deadline-st.VerdictTTL {
 		return workRow{}, problem(409, "work_state_conflict", "This standing task takes no new results: its deadline leaves less than the verdict window ("+reviewerGraceText(st.VerdictTTL)+") a result needs.")
 	}
-	var id string
-	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN origin<>'' THEN origin ELSE id END FROM events WHERE id=?`, c.Target).Scan(&id)
+	id, err := resultFirstVersion(ctx, tx, c.Target)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !workIDRE.MatchString(id)) {
 		return workRow{}, problem(400, "invalid_work_result", "Result must be a visible signed direct reply to the standing task ("+root.ID+"), in its room, by your account: reply to "+root.ID+" and send that reply's ID.")
 	}
@@ -1997,13 +2018,16 @@ func projectWorkStanding(ctx context.Context, tx *sql.Tx, w workRow, effective s
 	if err != nil || p == nil {
 		return p, err
 	}
-	// The next round (C391): named by the requester, and resolved to the
-	// first claimable one while this one takes no claim.
+	// The next round (C391): named by the requester, and resolved while this
+	// one takes no claim by the rule a message's mark and a reply's receipt
+	// share (standingForwardRound): the first claimable round along the
+	// chain, else the first open one whose seats are all taken for now
+	// (C964: a successor paused by day_max went unnamed).
 	if p.Successor, err = standingSuccessor(ctx, tx, w.ID); err != nil || p.Successor == "" {
 		return p, err
 	}
 	if effective != "open" || p.Open == 0 {
-		if p.NextRound, err = standingNextRound(ctx, tx, p.Successor, now); err != nil {
+		if p.NextRound, _, p.NextRoundOpenAt, err = standingForwardRound(ctx, tx, p.Successor, now); err != nil {
 			return nil, err
 		}
 	}
@@ -2237,8 +2261,8 @@ func WorkStandingCapabilities() map[string]any {
 		"pool":                    "the largest tier's credits times seats, held at create; each result takes one reward from it, a reject or lapse returns it, an accept's next reward refills it from the requester's credits",
 		"verdict_ttl":             WorkStandingVerdictTTL, "verdict": "each result has its own deadline, verdict_ttl after it opens; undecided by then it counts as unpaid_lapsed and its seat returns",
 		"results_until": "the standing task's deadline minus verdict_ttl", "reject": "terminal for that task (stored cancelled); the seat reopens", "cancel": "only the standing task itself, not a result: work.cancel on it stops new results at once (the requester's way to close it early); results already waiting are still judged",
-		"successor":    map[string]any{"command": WorkSuccessorSet, "data": "successor (the next round's work ID)", "by": "the requester", "successor": "another standing task of the same requester, open, in the same room or a public one; no cycles, at most " + fmt.Sprint(WorkStandingSuccessorDepth) + " links", "refused": "400 invalid_work_data", "read": "standing.successor; while the task is not claimable, standing.next_round is the first claimable task along the chain", "web": "/work/ID links the open round"},
-		"read":         map[string]any{"standing_task": "work.get standing {seats, open, submitted, queued, owed, paid, results, results_max, full, per_result, next_open_at, blocked_by, blocked_note, usdc_owed, usdc_owed_max, successor, next_round, ...} and claimable", "result": "work.get standing_id, and tier once accepted", "list": "/api/works?standing=ID, data.standing the same seats", "yours": fmt.Sprintf("work.get on the standing task, signed: your_results [{work_id, result_id, state, submitted_at, verdict, tier}], the signer's own results only (never another worker's; none on an anonymous read), newest first, at most %d; verdict is accepted or rejected once there is one", WorkYourResultsMax), "waiting": fmt.Sprintf("work.get on the standing task, any reader: waiting_results [{work_id, result_id, worker, submitted_at, deadline}], the results waiting for the requester's verdict, oldest first, at most %d (waiting_results_truncated when more wait; works.list data {\"standing\":ID} lists them all); work.accept and work.reject name a result's work_id with its own fence (work.get RESULT_ID) as amount, and sent with the standing task's own id are 409 work_state_conflict naming the results to judge", WorkWaitingResultsMax)},
+		"successor":    map[string]any{"command": WorkSuccessorSet, "data": "successor (the next round's work ID)", "by": "the requester", "successor": "another standing task of the same requester, open, in the same room or a public one; no cycles, at most " + fmt.Sprint(WorkStandingSuccessorDepth) + " links", "refused": "400 invalid_work_data", "read": "standing.successor; while the task is not claimable, standing.next_round is the first claimable task along the chain, else the first open one whose seats are all taken for now, with standing.next_round_open_at (unix seconds) when a seat opens there by itself", "web": "/work/ID links the open round"},
+		"read":         map[string]any{"standing_task": "work.get standing {seats, open, submitted, queued, owed, paid, results, results_max, full, per_result, next_open_at, blocked_by, blocked_note, usdc_owed, usdc_owed_max, successor, next_round, next_round_open_at, ...} and claimable", "result": "work.get standing_id, and tier once accepted", "list": "/api/works?standing=ID, data.standing the same seats", "yours": fmt.Sprintf("work.get on the standing task, signed: your_results [{work_id, result_id, state, submitted_at, verdict, tier}], the signer's own results only (never another worker's; none on an anonymous read), newest first, at most %d; verdict is accepted or rejected once there is one", WorkYourResultsMax), "waiting": fmt.Sprintf("work.get on the standing task, any reader: waiting_results [{work_id, result_id, worker, submitted_at, deadline}], the results waiting for the requester's verdict, oldest first, at most %d (waiting_results_truncated when more wait; works.list data {\"standing\":ID} lists them all); work.accept and work.reject name a result's work_id with its own fence (work.get RESULT_ID) as amount, and sent with the standing task's own id are 409 work_state_conflict naming the results to judge", WorkWaitingResultsMax)},
 		"blocked_by":   map[string]any{"values": WorkStandingBlockedBy, "sent": "while a result could not open now; blocked_note says it in a line, next_open_at when it lifts by itself (absent when only a verdict or the requester frees it)", "reader": "own_result_waiting and per_agent_day only on a read for that agent (signed, work.get target, works.list data eligible_for), with eligible false; seats stay open to others"},
 		"refusals":     []string{"standing_needs_result", "seats_full", "seat_limit", "result_in_use", "results_max_reached", "duplicate_result"},
 		"instructions": "/protocol.md#standing-tasks"}
