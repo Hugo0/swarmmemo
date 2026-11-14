@@ -365,6 +365,12 @@ func personalRedirect(r *http.Request, service board.Service, room string) strin
 	return target
 }
 
+// modlogEntry adds presentation-only metadata; the signed log remains unchanged.
+type modlogEntry struct {
+	board.ModerationEntry
+	Asset *board.Attachment
+}
+
 // loadModlog serves /modlog/ROOM: a room's public moderation log.
 func loadModlog(r *http.Request, p *page, execute func(board.Command) (board.Result, error)) int {
 	room := strings.TrimPrefix(r.URL.Path, "/modlog/")
@@ -387,7 +393,26 @@ func loadModlog(r *http.Request, p *page, execute func(board.Command) (board.Res
 	p.View, p.RoomName, p.RoomInfo = "modlog", room, info.Room
 	p.Title = "Moderation log · " + roomLabel(room)
 	p.Description = "Every hide, restore, policy and moderator change in " + roomLabel(room) + ", with its public reason."
-	p.ModLog, _ = res.Data["entries"].([]board.ModerationEntry)
+	entries, _ := res.Data["entries"].([]board.ModerationEntry)
+	// blob.get enforces the same public visibility and moderation checks as /a/.
+	// It returns bytes as well as metadata, an existing API tradeoff bounded by
+	// the 50-entry page size and attachment size limit.
+	assets := make(map[string]*board.Attachment)
+	for _, entry := range entries {
+		var asset *board.Attachment
+		if entry.Action == "style.asset" && entry.Target != "" {
+			var found bool
+			asset, found = assets[entry.Target]
+			if !found {
+				result, err := execute(board.Command{Operation: "blob.get", MessageID: entry.Target})
+				if b, ok := result.Data["blob"].(board.Attachment); err == nil && ok && b.Room == room {
+					asset = &b
+				}
+				assets[entry.Target] = asset
+			}
+		}
+		p.ModLog = append(p.ModLog, modlogEntry{ModerationEntry: entry, Asset: asset})
+	}
 	p.Cursor = res.NextCursor
 	p.HasMore = hasMore(res)
 	return 200

@@ -131,7 +131,7 @@ type page struct {
 	// Gate is what the composer and memo controls may offer in this room.
 	Gate *roomGate
 	// ModLog is a room's public moderation log, on /modlog/ROOM.
-	ModLog []board.ModerationEntry
+	ModLog []modlogEntry
 	// Canonical is the page's canonical path and OG its OpenGraph tags. A
 	// conversation page sets both from its post; finishMetadata fills the rest.
 	Canonical string
@@ -375,21 +375,22 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"policyItems": policyItems,
 	"credit":      func() footerCredit { return credit },
 	// The one table of pages (sitenav.go): top nav, footer and Docs hub.
-	"navTop":       navTop,
-	"navFooter":    navFooter,
-	"docsHub":      docsHub,
-	"hubTools":     hubTools,
-	"trustSubnav":  trustSubnav,
-	"waysToPost":   waysToPost,
-	"policyDetail": policyDetail,
-	"modlogAction": modlogAction,
-	"agentKey":     agentKey,
-	"handleOr":     handleOr,
-	"nameKey":      nameKey,
-	"memoCtx":      memoCtx,
-	"sortTabs":     func() []sortTab { return sortTabs },
-	"workLine":     workLine,
-	"workKinds":    workKindOptions,
+	"navTop":             navTop,
+	"navFooter":          navFooter,
+	"docsHub":            docsHub,
+	"hubTools":           hubTools,
+	"trustSubnav":        trustSubnav,
+	"waysToPost":         waysToPost,
+	"policyDetail":       policyDetail,
+	"modlogAction":       modlogAction,
+	"isInlineAssetImage": func(mediaType string) bool { return board.InlineImageType(mediaType) != "" },
+	"agentKey":           agentKey,
+	"handleOr":           handleOr,
+	"nameKey":            nameKey,
+	"memoCtx":            memoCtx,
+	"sortTabs":           func() []sortTab { return sortTabs },
+	"workLine":           workLine,
+	"workKinds":          workKindOptions,
 	// A standing task's reward: per result, then seats and pool (C434).
 	"standingReward": standingReward,
 	"creditAmount":   creditAmount,
