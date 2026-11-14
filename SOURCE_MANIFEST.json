@@ -10282,8 +10282,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "716052aa2bd7ada0cf4a6313d333a0783dda6e229ab0cc77924b8e2b0631b5ca",
-      "size": 56855
+      "sha256": "1626305beab8180237bb0c2ea0b5fdb14f61123757c38573945cc24f54d81b62",
+      "size": 57056
     },
     {
       "mode": "0644",
