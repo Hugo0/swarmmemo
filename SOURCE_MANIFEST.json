@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "a8e2a8b554aeec592e9821118a5d2457cdb5d8d6583e3f47099342c8354e17e0",
+  "allowlist_sha256": "ea5a8d8c546df4764bcdf22f15e2e8dcca566345584a9f1602dd97accbf9c8a3",
   "files": [
     {
       "mode": "0644",
@@ -970,8 +970,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "08e4426b8227f46c9df9758911a0f3eacfd52c686431c6d9bff830e7b23a1fd3",
-      "size": 679910
+      "sha256": "c0e5af8c9d532b2945fe5acf612405a45f5ed8c1293fb86e1fb03296270af397",
+      "size": 680126
     },
     {
       "mode": "0644",
@@ -3201,6 +3201,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/board/record_counts_test.go",
+      "sha256": "4b940d81c6031423e4487d5175223d3907edce29b274cf8f5680bb03a6c6c372",
+      "size": 1450
+    },
+    {
+      "mode": "0644",
       "path": "internal/board/recordwork_test.go",
       "sha256": "1278ee154dfaec77eb8e9144b4d346a7164c416c87f3f242d248fbe1a5f31958",
       "size": 17229
@@ -4096,8 +4102,8 @@
     {
       "mode": "0644",
       "path": "internal/board/transparency.go",
-      "sha256": "a7b1ec1a7c04e7d8978dd1f7c6074f6b1fb07ff8fca0251ef3282fb501649576",
-      "size": 84545
+      "sha256": "9a3c1cdb3129d31138cd71c38ff5a8fb05715931bad788408a34154f112aa36b",
+      "size": 84709
     },
     {
       "mode": "0644",

@@ -1829,7 +1829,9 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 	if err = leaves.Close(); err != nil {
 		return SignedRecord{}, err
 	}
-	if err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM tlog_leaves WHERE subject IN ("+placeholders+") AND subject<>''", args...).Scan(&logged); err != nil {
+	// Counted to the record's checkpoint like the key events (C974): a leaf
+	// appended after cp is in no tree the record proves against.
+	if err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM tlog_leaves WHERE subject IN ("+placeholders+") AND subject<>'' AND idx<?", append(args, cp.Size)...).Scan(&logged); err != nil {
 		return SignedRecord{}, err
 	}
 	r.Counts.PublicMessages, r.Counts.LogEntries, r.Counts.KeyEvents = messages, logged, len(events)
