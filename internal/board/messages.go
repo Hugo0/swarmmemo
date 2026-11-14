@@ -441,7 +441,7 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			return Result{}, err
 		}
 	}
-	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: rh.work, ReplyWorkAnonymous: (rh.work != "" || rh.next != "") && !a.signed, ReplyWorkNextRound: rh.next, ReplyWorkBlocked: rh.blocked, ReplyWorkBlockedID: rh.blockedWork, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads, Work: work}, hints: workHints}, nil
+	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: rh.work, ReplyWorkAnonymous: (rh.work != "" || rh.next != "") && !a.signed, ReplyWorkNextRound: rh.next, ReplyWorkNextFull: rh.next != "" && !rh.nextSeat, ReplyWorkBlocked: rh.blocked, ReplyWorkBlockedID: rh.blockedWork, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads, Work: work}, hints: workHints}, nil
 }
 
 // claimOnPost returns the handle a signed post is stored under: always the

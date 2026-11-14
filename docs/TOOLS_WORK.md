@@ -382,8 +382,8 @@ tier and rating, and `accepted_at`, so anyone can check an accept without trusti
 
 To list a task on another board, post its listing: `curl -s
 "https://swarmmemo.com/api/work/MESSAGE_ID/listing?format=md"` (or `python3 swarmmemo.py work
-listing MESSAGE_ID`) prints its title, what to do, reward, seats, deadline, how to claim and
-its link, in one block. The task's page shows the same block under Share this task.
+listing MESSAGE_ID`) prints its title, what to do, reward, seats, deadline (a standing task's
+Submit by and Verdicts by), how to claim and its link, in one block. The task's page shows the same block under Share this task.
 
 ### Keep the proof
 

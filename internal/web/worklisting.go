@@ -24,10 +24,33 @@ type WorkListing struct {
 	SeatsOpen  int64  `json:"seats_open"`  // of them, open now
 	Deadline   int64  `json:"deadline"`    // Unix seconds
 	DeadlineAt string `json:"deadline_at"` // the same, "2006-01-02 15:04 UTC"
-	Reply      string `json:"reply"`       // the reply that carries the result
-	Claim      string `json:"claim"`       // the claim with that reply, which submits it
-	URL        string `json:"url"`         // the task's page, with ?ref= when the read carried a valid one
-	Markdown   string `json:"markdown"`    // the whole block
+	// ResultsUntil is, on a standing task, standing.results_until: the time
+	// to submit by (C955). Its deadline is the verdict deadline, after it.
+	ResultsUntil   int64  `json:"results_until,omitempty"`
+	ResultsUntilAt string `json:"results_until_at,omitempty"`
+	// TakesNoResults says a standing round takes no more results (full, or
+	// past results_until): the listing then carries no reply or claim and
+	// names NextRound, standing.next_round, with NextRoundURL, when one is
+	// open (C955).
+	TakesNoResults bool   `json:"takes_no_results,omitempty"`
+	NextRound      string `json:"next_round,omitempty"`
+	NextRoundURL   string `json:"next_round_url,omitempty"`
+	Reply          string `json:"reply"`    // the reply that carries the result; "" when it takes no more results
+	Claim          string `json:"claim"`    // the claim with that reply, which submits it; "" likewise
+	URL            string `json:"url"`      // the task's page, with ?ref= when the read carried a valid one
+	Markdown       string `json:"markdown"` // the whole block
+}
+
+// workListingTime is a listing's time format.
+func workListingTime(at int64) string {
+	return time.Unix(at, 0).UTC().Format("2006-01-02 15:04 UTC")
+}
+
+// workListingNoResults says whether a standing round takes no more results
+// at all (standing.blocked_by results_max or results_until), not merely no
+// seat for now.
+func workListingNoResults(st *board.WorkStanding) bool {
+	return st != nil && (st.BlockedBy == board.StandingBlockedResultsMax || st.BlockedBy == board.StandingBlockedResultsUntil)
 }
 
 // workListingWhatMax is how much of the request text a listing carries:
@@ -49,13 +72,21 @@ func WorkListingClosed(state string) bool {
 // leaves the URL bare.
 func WorkListingFor(item board.Work, ref string) WorkListing {
 	l := WorkListing{ID: item.ID, Title: item.Title, Deadline: item.Deadline,
-		DeadlineAt: time.Unix(item.Deadline, 0).UTC().Format("2006-01-02 15:04 UTC"),
+		DeadlineAt: workListingTime(item.Deadline),
 		Reward:     workListingReward(item), Seats: 1, URL: canonicalOrigin + "/work/" + item.ID}
 	if item.State == "open" {
 		l.SeatsOpen = 1
 	}
-	if st := item.Standing; st != nil {
+	st := item.Standing
+	if st != nil {
 		l.Seats, l.SeatsOpen = st.Seats, st.Open
+		if st.ResultsUntil > 0 {
+			l.ResultsUntil, l.ResultsUntilAt = st.ResultsUntil, workListingTime(st.ResultsUntil)
+		}
+		l.TakesNoResults = workListingNoResults(st)
+		if len(st.NextRound) == 32 { // a work ID
+			l.NextRound, l.NextRoundURL = st.NextRound, canonicalOrigin+"/work/"+st.NextRound
+		}
 	}
 	if item.Request != nil {
 		l.What = workListingWhat(item.Request.Text)
@@ -66,18 +97,40 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 	if ref != "" && board.ValidReferrerRef(ref) {
 		l.URL += "?ref=" + url.QueryEscape(ref)
 	}
-	steps := stepsFor(item.ID, item.Room)
-	l.Reply, l.Claim = steps.Reply, steps.Claim
 	seats := strconv.FormatInt(l.Seats, 10)
 	if l.Seats != 1 {
 		seats += " (" + strconv.FormatInt(l.SeatsOpen, 10) + " open)"
 	}
+	// A standing round's deadline is its verdicts' (results_until plus the
+	// verdict window): results are due by results_until (C955).
+	times := "- Deadline: " + l.DeadlineAt + "\n"
+	if l.ResultsUntilAt != "" {
+		times = "- Submit by: " + l.ResultsUntilAt + "\n- Verdicts by: " + l.DeadlineAt + "\n"
+	}
 	l.Markdown = "### " + l.Title + "\n\n" + l.What + "\n\n" +
 		"- Reward: " + l.Reward + "\n" +
 		"- Seats: " + seats + "\n" +
-		"- Deadline: " + l.DeadlineAt + "\n" +
-		"- Task: " + l.URL + "\n\n" +
-		ClaimOrder + " (the reward is paid when the requester accepts it):\n\n" +
+		times +
+		"- Task: " + l.URL + "\n\n"
+	next := ""
+	if l.NextRound != "" {
+		next = " The next round is " + l.NextRound[:8] + ": " + l.NextRoundURL
+	}
+	if l.TakesNoResults {
+		// No claim to print: the round takes none (C955).
+		why := "results were due by " + l.ResultsUntilAt
+		if st.BlockedBy == board.StandingBlockedResultsMax {
+			why = "all " + strconv.FormatInt(st.ResultsMax, 10) + " results are taken"
+		}
+		l.Markdown += "This round takes no more results: " + why + "." + next + "\n"
+		return l
+	}
+	steps := stepsFor(item.ID, item.Room)
+	l.Reply, l.Claim = steps.Reply, steps.Claim
+	if st != nil && st.Open == 0 && st.BlockedNote != "" {
+		l.Markdown += "No seat is open on this round now (" + st.BlockedNote + ")." + next + "\n\n"
+	}
+	l.Markdown += ClaimOrder + " (the reward is paid when the requester accepts it):\n\n" +
 		"```\n" + l.Reply + "\n" + l.Claim + "\n```\n"
 	return l
 }

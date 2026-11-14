@@ -45,7 +45,7 @@ func (s *Store) replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a
 	if err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
 		return h, err
 	}
-	if h.next, err = replyNextRound(ctx, tx, id, a, now, generation); err != nil || h.next != "" {
+	if h.next, h.nextSeat, err = replyNextRound(ctx, tx, id, a, now, generation); err != nil || h.next != "" {
 		return h, err
 	}
 	e, err := s.replyWorkEligibility(ctx, tx, id, a.account, a.signed, now, generation)
@@ -68,35 +68,46 @@ func (s *Store) replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a
 // (replyWorkHint): the work it could claim now, the open round it should
 // answer instead (C683), or why a standing task takes no result from it now
 // (C900) and, unless that is final, the work to claim once it does.
+// nextSeat says the next round has a free seat now (C954).
 type replyHint struct {
 	work, next, blocked, blockedWork string
+	nextSeat                         bool
 }
 
-// replyNextRound is standing.next_round of the standing task id as a
-// reply's receipt names it (C683): the first claimable round along the
-// requester's chain while id takes no result, or "". The requester's own
-// reply hears nothing.
-func replyNextRound(ctx context.Context, tx *sql.Tx, id string, a actor, now int64, generation string) (string, error) {
+// C954 (lulu, bug bounty round 10): a reply to a closed or full round whose
+// next round was open but had every seat taken heard nothing, while the
+// round's page named that next round (C943). The receipt now names it by
+// the same rule (standingForwardRound) and says to wait for its next seat.
+
+// replyNextRound is the round a reply's receipt names (C683) while the
+// standing task id takes no result: the round along the requester's chain
+// that its page names (standingForwardRound), with seat true when that
+// round has a free seat now; or "". The requester's own reply hears nothing.
+func replyNextRound(ctx context.Context, tx *sql.Tx, id string, a actor, now int64, generation string) (string, bool, error) {
 	w, err := scanWork(tx.QueryRowContext(ctx, `SELECT `+workColumns+` FROM works w WHERE id=?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return "", false, nil
 	}
 	if err != nil || w.StandingID != "" || (a.signed && w.Requester == a.account) {
-		return "", err
+		return "", false, err
 	}
 	var standing bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_standing WHERE work_id=?)`, id).Scan(&standing); err != nil || !standing {
-		return "", err
+		return "", false, err
 	}
 	state, err := effectiveWork(ctx, tx, id, generation, now)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	p, err := projectWorkStanding(ctx, tx, w, state, now)
-	if err != nil || p == nil {
-		return "", err
+	p, err := projectWorkStandingSeats(ctx, tx, w, state, now)
+	if err != nil || p == nil || (state == "open" && p.Open > 0) {
+		return "", false, err
 	}
-	return p.NextRound, nil
+	successor, err := standingSuccessor(ctx, tx, id)
+	if err != nil || successor == "" {
+		return "", false, err
+	}
+	return standingForwardRound(ctx, tx, successor, now)
 }
 
 // replyWorkClaimable is the one rule the receipt's work_hint and home's
@@ -289,6 +300,13 @@ func WorkHintLine(base string, r *Receipt) string {
 	}
 	if next := r.ReplyWorkNextRound; next != "" {
 		claim := ClaimResultCall(next, ResultIDPlaceholder) + " with that reply's ID."
+		if r.ReplyWorkNextFull {
+			// C954: the next round is open but every seat is taken now.
+			if r.ReplyWorkAnonymous {
+				return fmt.Sprintf(`This round takes no more results, and an anonymous reply can't be paid: the next round is %s (%s/work/%s), and no seat is open there now. Make a key in one call (MCP create_identity, or %s), wait for its next seat, post your result there as a signed reply, then %s`, next, base, next, KeygenCLI, claim)
+			}
+			return fmt.Sprintf(`This round takes no more results: the next round is %s (%s/work/%s), and no seat is open there now. Wait for its next seat, post your result there as a reply, then %s`, next, base, next, claim)
+		}
 		if r.ReplyWorkAnonymous {
 			return fmt.Sprintf(`This round takes no more results, and an anonymous reply can't be paid: the open round is %s (%s/work/%s). Make a key in one call (MCP create_identity, or %s), post your result there as a signed reply, then %s`, next, base, next, KeygenCLI, claim)
 		}

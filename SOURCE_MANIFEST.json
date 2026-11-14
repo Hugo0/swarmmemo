@@ -940,8 +940,8 @@
     {
       "mode": "0644",
       "path": "docs/GLOSSARY.md",
-      "sha256": "49bd66973a7ba4ac99aa15a3fc207ec3d9a1c199cac8e5194a01a504a13ca7ee",
-      "size": 52526
+      "sha256": "7a42e1fa25d6d7d57acecedc0d2f931b9e639130d1a13ad9610023e99504351c",
+      "size": 52586
     },
     {
       "mode": "0644",
@@ -964,8 +964,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "0863bfff12221d543a130667141ef7f4caac094a9905add39bc44d3f59c5cf36",
-      "size": 677212
+      "sha256": "103f2dfa0cafe25179bfebcb61bc00b81aca29ca43527c375770b640d22acc53",
+      "size": 677597
     },
     {
       "mode": "0644",
@@ -1096,8 +1096,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_WORK.md",
-      "sha256": "d8e4c4b89dbc80563a54a65636919b798cc231a62738995a7e91fd38899b21fc",
-      "size": 25106
+      "sha256": "4430255c0d1c004f9cecb690191a6e1af9dfe39fb15d90ff329931ca86b6a626",
+      "size": 25152
     },
     {
       "mode": "0644",
@@ -1708,8 +1708,8 @@
     {
       "mode": "0644",
       "path": "internal/board/contracts.go",
-      "sha256": "0b05b8de7ff47de9567980b1039dd3cf74148d3e708f360b9603308884f39ebc",
-      "size": 36298
+      "sha256": "8cc7908ab16009a338aa00dabbabf55733e6ba389dd38ff775e8f64da2af2d47",
+      "size": 36494
     },
     {
       "mode": "0644",
@@ -2626,8 +2626,8 @@
     {
       "mode": "0644",
       "path": "internal/board/messages.go",
-      "sha256": "58421c8822bff7c12bbf84844728c10db4847d27c1c90ae3055c550def4444a1",
-      "size": 50326
+      "sha256": "46033d621f9dec7ba0c3bc446cb852c6a4956d50d7affbff32e77f9e6b459c01",
+      "size": 50376
     },
     {
       "mode": "0644",
@@ -4510,8 +4510,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workhint.go",
-      "sha256": "9288de6c49a0f5101254ec670fa67dd4d7e147542c06fdd1877bf7b814833582",
-      "size": 13751
+      "sha256": "67c432e82d0d6b94374c047c76aa09bf37689df2c1786f1de5b924b624adda0d",
+      "size": 15116
     },
     {
       "mode": "0644",
@@ -4522,8 +4522,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workhint_test.go",
-      "sha256": "c239f1c46958ec440a7ca7f4ad3a3104afa71c58ed16b437caa97517f8a83c0c",
-      "size": 11774
+      "sha256": "4ff950d66ab6a32d37e4aa891f373d963d33a47a2faaec1c01e6297b222754d8",
+      "size": 14640
     },
     {
       "mode": "0644",
@@ -4546,8 +4546,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workmessages.go",
-      "sha256": "7486e6ab5630c446b61a9132ff01d9a1ce65292346711b250dc82d408f2b1644",
-      "size": 12956
+      "sha256": "5f3d41b304b7a26781fe40df53a1fef217ff5440ab69aa46ad527d8e2248be26",
+      "size": 12832
     },
     {
       "mode": "0644",
@@ -4756,8 +4756,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workstanding.go",
-      "sha256": "bec65212ca7e69c0eae5bc2ef71b4ddc6f913b68e75a011827a52d80a38216ae",
-      "size": 105497
+      "sha256": "8ced400b70b006201e9cee41c7b0406e9fc6ec36a913fd4bb5c010b8bc76ba50",
+      "size": 106189
     },
     {
       "mode": "0644",
@@ -10240,8 +10240,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "88dfe593359f2de7099d6cabb42a3813819105e495d6326df4130580bdbce2e3",
-      "size": 56480
+      "sha256": "1cd26ea44585d1cca36370cc34cc0afa7b46e340b10fb125d12ff28c745e0826",
+      "size": 56569
     },
     {
       "mode": "0644",
@@ -11806,14 +11806,14 @@
     {
       "mode": "0644",
       "path": "internal/web/worklisting.go",
-      "sha256": "9576e65ece4c748c4d17bcbc23b816e2b24f27b938e66b2df86ee5fcd59c7c1f",
-      "size": 4528
+      "sha256": "87ad26640eacec586ac12f40cda757ba4304311ec20a76fd089b9d0f8b481dd3",
+      "size": 6919
     },
     {
       "mode": "0644",
       "path": "internal/web/worklisting_test.go",
-      "sha256": "38a9bcc040bd06d15d2c67c29360eba8e57ffe128af05c0ec113e91b57d427d1",
-      "size": 3409
+      "sha256": "94d7da4cb6692220343b5c91e8a9b543c43a9dfb226774077a0a94ee98eff3cc",
+      "size": 7104
     },
     {
       "mode": "0644",

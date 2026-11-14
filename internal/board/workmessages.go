@@ -280,13 +280,8 @@ func markNextRound(ctx context.Context, q rowQuerier, w *MessageWork, seats *Wor
 		return err
 	}
 	if successor != "" {
-		if w.NextRound, err = standingNextRound(ctx, q, successor, now); err != nil {
+		if w.NextRound, _, err = standingForwardRound(ctx, q, successor, now); err != nil {
 			return err
-		}
-		if w.NextRound == "" {
-			if w.NextRound, err = standingOpenRound(ctx, q, successor, now); err != nil {
-				return err
-			}
 		}
 	}
 	w.NextNote = workNextNote(*w.Claimable, w.State, seats, w.NextRound)

@@ -148,6 +148,54 @@ func TestReplyToClosedRoundNamesTheOpenRound(t *testing.T) {
 	}
 }
 
+// C954 (lulu, bug bounty round 10): a reply to a closed round whose next
+// round is open with every seat taken names that round, as its page does
+// (C943), and says to wait for its next seat there; once a seat opens there,
+// the C683 line comes back.
+func TestReplyToClosedRoundNamesFullNextRound(t *testing.T) {
+	s := rewardStore(t)
+	owner, worker, w1, w2 := keyFor(245), keyFor(246), keyFor(247), keyFor(248)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 10000)
+	round := func() string {
+		id := rewardRequest(t, s, owner, "lobby")
+		run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 100, "day_max": 10}, 10*86400))
+		return id
+	}
+	old, next := round(), round()
+	run(t, s, successorSet(s, owner, old, next))
+	run(t, s, workCommand(s, owner, Command{Operation: "work.cancel", MessageID: old, Reason: "next round"}))
+	r1, c1 := standingClaim(t, s, w1, next, nil)
+	run(t, s, c1)
+	_, c2 := standingClaim(t, s, w2, next, nil)
+	run(t, s, c2)
+	if st := standingAt(t, s, next); st.Open != 0 || st.Full {
+		t.Fatalf("next round not open with all seats taken: %+v", st)
+	}
+	signedReply := func() *Receipt {
+		t.Helper()
+		return run(t, s, signed(worker, Command{Operation: "post", Room: "lobby", ReplyTo: old, Text: "result " + randomID()[:8], Timestamp: s.now().Unix()})).Receipt
+	}
+	claim := `work claim ` + next + ` --result RESULT_ID (MCP: claim_work {"message_id":"` + next + `","result_id":"RESULT_ID"}) with that reply's ID.`
+	r := signedReply()
+	want := `This round takes no more results: the next round is ` + next + ` (/work/` + next + `), and no seat is open there now. Wait for its next seat, post your result there as a reply, then ` + claim
+	if r.ReplyWork != "" || r.ReplyWorkNextRound != next || !r.ReplyWorkNextFull || WorkHintLine("", r) != want {
+		t.Fatalf("reply to a closed round, next round seatless: %+v %q", r, WorkHintLine("", r))
+	}
+	a := run(t, s, Command{Operation: "post", Room: "lobby", ReplyTo: old, Text: "anonymous result " + randomID()[:8]}).Receipt
+	if a.ReplyWorkNextRound != next || !a.ReplyWorkNextFull || !a.ReplyWorkAnonymous || !strings.Contains(WorkHintLine("", a), "no seat is open there now") {
+		t.Fatalf("anonymous reply, next round seatless: %q", WorkHintLine("", a))
+	}
+	// The page names the same round (C943).
+	if got := run(t, s, Command{Operation: "message.get", MessageID: old}).Messages; len(got) != 1 || got[0].Work == nil || got[0].Work.NextRound != next {
+		t.Fatalf("page and receipt disagree: %+v", got)
+	}
+	// A seat opens there: the C683 line.
+	run(t, s, workCommand(s, owner, Command{Operation: "work.reject", MessageID: r1, Amount: 1, Reason: "not it"}))
+	if r := signedReply(); r.ReplyWorkNextRound != next || r.ReplyWorkNextFull || !strings.Contains(WorkHintLine("", r), "the open round is "+next) {
+		t.Fatalf("reply once a seat opens: %+v %q", r, WorkHintLine("", r))
+	}
+}
+
 // C900: a signed reply to an open standing task that takes no result from
 // its author now (its per_agent_day used, the day's day_max taken) hears
 // that it is not submitted, why (work.get's eligible reason), and the claim

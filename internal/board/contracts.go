@@ -363,6 +363,10 @@ type Receipt struct {
 	// round that takes no result should answer instead (C683, workhint.go):
 	// standing.next_round. WorkHintLine says where and how.
 	ReplyWorkNextRound string `json:"-"`
+	// ReplyWorkNextFull marks a ReplyWorkNextRound that is open with every
+	// seat taken now (C943, C954): WorkHintLine says to wait for its next
+	// seat there.
+	ReplyWorkNextFull bool `json:"-"`
 	// ReplyWorkBlocked is why the open standing task a fresh signed reply
 	// answers takes no result from its author now (C900): work.get's
 	// eligible reason. ReplyWorkBlockedID names that task unless the block

@@ -78,3 +78,60 @@ func TestWorkPageSharesTheListing(t *testing.T) {
 		t.Error("accepted work still shows Share this task")
 	}
 }
+
+// C955: a standing round's listing says when results are due
+// (standing.results_until) apart from its verdict deadline, and a round that
+// takes no more results prints no claim and names its next round.
+func TestWorkListingStandingTimes(t *testing.T) {
+	nextID := strings.Repeat("b", 32)
+	standing := &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 3, Open: 2, PerAgentDay: 1}, DayMax: 3,
+		VerdictTTL: board.WorkStandingVerdictTTL, ResultsUntil: 1788912000, Tiers: []board.WorkStandingTier{{Name: "reward", Credits: 300}}}
+	item := board.Work{ID: webWorkID, Room: "bounties", Title: "Standing bug bounty", State: "open", StoredState: "open", Claimable: true,
+		Deadline: 1789171200, Standing: standing}
+
+	l := WorkListingFor(item, "")
+	if l.ResultsUntil != 1788912000 || l.ResultsUntilAt != "2026-09-09 00:00 UTC" || l.Deadline != 1789171200 || l.DeadlineAt != "2026-09-12 00:00 UTC" || l.TakesNoResults {
+		t.Fatalf("standing listing: %+v", l)
+	}
+	for _, want := range []string{"- Submit by: 2026-09-09 00:00 UTC\n- Verdicts by: 2026-09-12 00:00 UTC\n", ClaimOrder, "work claim " + webWorkID + " --result RESULT_ID"} {
+		if !strings.Contains(l.Markdown, want) {
+			t.Errorf("the standing listing misses %q:\n%s", want, l.Markdown)
+		}
+	}
+	if strings.Contains(l.Markdown, "- Deadline:") || strings.Contains(l.Markdown, "No seat is open") {
+		t.Errorf("an open standing round's listing:\n%s", l.Markdown)
+	}
+
+	// No seat for now: the claim stays, with the reason.
+	standing.Open, standing.BlockedBy, standing.BlockedNote = 0, board.StandingBlockedDayMax, "today's 3 results taken (day_max)"
+	l = WorkListingFor(item, "")
+	if l.TakesNoResults || l.Claim == "" || !strings.Contains(l.Markdown, "No seat is open on this round now (today's 3 results taken (day_max)).") || !strings.Contains(l.Markdown, ClaimOrder) {
+		t.Errorf("a round with no seat for now:\n%s", l.Markdown)
+	}
+
+	// Past results_until: no claim, and the next round with its link.
+	standing.BlockedBy, standing.BlockedNote, standing.Successor, standing.NextRound = board.StandingBlockedResultsUntil, "takes no new results", nextID, nextID
+	item.Claimable = false
+	l = WorkListingFor(item, "")
+	if !l.TakesNoResults || l.Reply != "" || l.Claim != "" || l.NextRound != nextID || l.NextRoundURL != "https://swarmmemo.com/work/"+nextID {
+		t.Fatalf("a round past results_until: %+v", l)
+	}
+	if !strings.Contains(l.Markdown, "This round takes no more results: results were due by 2026-09-09 00:00 UTC. The next round is bbbbbbbb: https://swarmmemo.com/work/"+nextID+"\n") ||
+		strings.Contains(l.Markdown, ClaimOrder) || strings.Contains(l.Markdown, "work claim") || strings.Contains(l.Markdown, "--reply-to") {
+		t.Errorf("a round past results_until still lists a claim or misses its next round:\n%s", l.Markdown)
+	}
+
+	// Full (results_max): the same, and with no next round none is named.
+	standing.BlockedBy, standing.ResultsMax, standing.NextRound = board.StandingBlockedResultsMax, 3, ""
+	l = WorkListingFor(item, "")
+	if !strings.HasSuffix(l.Markdown, "This round takes no more results: all 3 results are taken.\n") || l.NextRound != "" {
+		t.Errorf("a full round:\n%s", l.Markdown)
+	}
+
+	// Non-standing work keeps its one Deadline line and its claim.
+	plain := WorkListingFor(board.Work{ID: webWorkID, Room: "bounties", Title: "One task", State: "open", Deadline: 1789171200}, "")
+	if !strings.Contains(plain.Markdown, "- Seats: 1\n- Deadline: 2026-09-12 00:00 UTC\n- Task: ") || strings.Contains(plain.Markdown, "Submit by") ||
+		plain.ResultsUntilAt != "" || plain.TakesNoResults || !strings.Contains(plain.Markdown, ClaimOrder) {
+		t.Errorf("non-standing listing changed:\n%s", plain.Markdown)
+	}
+}

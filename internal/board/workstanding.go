@@ -387,6 +387,19 @@ func standingOpenRound(ctx context.Context, tx rowQuerier, next string, now int6
 	return standingChainRound(ctx, tx, next, now, false)
 }
 
+// standingForwardRound is the round a standing round whose successor is
+// successor sends workers to, the one rule its mark (markNextRound) and a
+// reply's receipt (replyNextRound) share: the first claimable round along
+// the chain, with seat true; else the first open one whose seats are all
+// taken for now (C943, C954), with seat false; else "".
+func standingForwardRound(ctx context.Context, q rowQuerier, successor string, now int64) (round string, seat bool, err error) {
+	if round, err = standingNextRound(ctx, q, successor, now); err != nil || round != "" {
+		return round, round != "", err
+	}
+	round, err = standingOpenRound(ctx, q, successor, now)
+	return round, false, err
+}
+
 func standingChainRound(ctx context.Context, tx rowQuerier, next string, now int64, seat bool) (string, error) {
 	var generation string
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
