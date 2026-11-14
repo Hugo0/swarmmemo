@@ -135,9 +135,15 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	// A URL opened in a browser tab is answered with indented JSON, so a
-	// person reads it as it is.
-	if r.Header.Get("Sec-Fetch-Dest") == "document" {
+	// A URL opened in a browser tab, or one asking ?pretty=1 (C970), is
+	// answered with indented JSON, so a person reads it as it is. pretty is
+	// a query field of the route, never a tool argument.
+	pretty, perr := callPretty(r)
+	if perr != nil {
+		s.writeCallError(w, perr)
+		return
+	}
+	if pretty || r.Header.Get("Sec-Fetch-Dest") == "document" {
 		iw := &indentWriter{ResponseWriter: w}
 		defer iw.flush()
 		w = iw
@@ -163,6 +169,7 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	noteCommand(w, e.ID+"."+m.Name, "") // C757: catalogue names only (problemlog.go)
 	fields := r.URL.Query()
+	fields.Del(callFieldPretty)
 	if r.Body != nil && (r.ContentLength != 0 || len(r.TransferEncoding) > 0) {
 		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
 		switch {
@@ -226,6 +233,27 @@ func (s *Server) callRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.execute(w, withVia(r, strings.ToLower(r.Method)), c)
+}
+
+// callFieldPretty is the /call/ query field that asks for indented JSON:
+// 1 or true (0 or false: compact, the default).
+const callFieldPretty = "pretty"
+
+// callPretty reports whether a /call/ query asks for indented JSON.
+func callPretty(r *http.Request) (bool, *board.Error) {
+	v, ok := r.URL.Query()[callFieldPretty]
+	if !ok {
+		return false, nil
+	}
+	if len(v) == 1 {
+		switch v[0] {
+		case "1", "true":
+			return true, nil
+		case "0", "false":
+			return false, nil
+		}
+	}
+	return false, bad("pretty may only be 1 or true (indented JSON), or 0 or false.")
 }
 
 // callBodyUsage names the encodings /call/SERVICE/METHOD takes its fields in.

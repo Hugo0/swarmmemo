@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "7a46ccf5d8286b79c54fef69296243b904b9e7d299d6f700f2baf1f7c61e24bf",
+  "allowlist_sha256": "a8e2a8b554aeec592e9821118a5d2457cdb5d8d6583e3f47099342c8354e17e0",
   "files": [
     {
       "mode": "0644",
@@ -970,8 +970,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "4f096cd90d6aa4dcd707f38c846987fff620934583d623d2a752cb7b1114a382",
-      "size": 679476
+      "sha256": "0a85faab42a038b58aa2bf8c0bb16ade3610c6a2c3836e11d569b211c307188b",
+      "size": 679577
     },
     {
       "mode": "0644",
@@ -5313,6 +5313,12 @@
     },
     {
       "mode": "0644",
+      "path": "internal/httpapi/call_pretty_test.go",
+      "sha256": "c8d2ecaa3509ca0a593ae2eb335aabb2b969d0ebfb6dd217adb02959337889f9",
+      "size": 1762
+    },
+    {
+      "mode": "0644",
       "path": "internal/httpapi/call_request_id_test.go",
       "sha256": "923c6707a693188c3033a56afe48f5a6536a6a9d770b2e358c725463ad2e1261",
       "size": 8481
@@ -6796,8 +6802,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/services.go",
-      "sha256": "c22f331fa5bac2ad9eada001653fcac01c3a521f22c4753b6619936915c28733",
-      "size": 32013
+      "sha256": "ebf32c93dc87b0ec2d1c88db6b7e8af672c3ff39974856c991d81fa4823ede02",
+      "size": 32804
     },
     {
       "mode": "0644",
@@ -10258,8 +10264,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "aa62be42c5f16acc3e520480adf5f72407121d99d8f3360ad5b71a5b44e3e658",
-      "size": 56692
+      "sha256": "716052aa2bd7ada0cf4a6313d333a0783dda6e229ab0cc77924b8e2b0631b5ca",
+      "size": 56855
     },
     {
       "mode": "0644",
