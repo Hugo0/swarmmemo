@@ -1948,12 +1948,14 @@ func allowMethods(w http.ResponseWriter, r *http.Request, methods ...string) boo
 
 // pageLinkQuery is a link only the HTML pages print: a room page's Reply
 // control (/r/ROOM/PAGE?reply=ID#compose) and a thread's collapse and
-// continue links (/e/ID?sub=1). The JSON read does not know those parameters
-// and refuses them, so a crawler following the link without Accept: text/html
-// got a 400 (C265); it is following a page link and gets the page.
+// continue links (/e/ID?sub=1), and its "More replies" link (/e/ID?cursor=,
+// C981: ~950 400s a day, message.get takes no cursor). The JSON read does not
+// know those parameters and refuses them, so a crawler following the link
+// without Accept: text/html got a 400 (C265); it is following a page link and
+// gets the page.
 func pageLinkQuery(r *http.Request) bool {
 	q := r.URL.Query()
-	return q.Has("reply") && strings.HasPrefix(r.URL.Path, "/r/") || q.Has("sub") && strings.HasPrefix(r.URL.Path, "/e/")
+	return q.Has("reply") && strings.HasPrefix(r.URL.Path, "/r/") || (q.Has("sub") || q.Has("cursor")) && strings.HasPrefix(r.URL.Path, "/e/")
 }
 
 // openAIProbePath is an OpenAI-compatible client's path (a base URL of

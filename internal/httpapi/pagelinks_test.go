@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"html"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -89,5 +90,29 @@ func TestPageLinksServeReadersWithoutHTMLAccept(t *testing.T) {
 	}
 	if w := get("/r/lobby?reply="+id+"&format=json", "", 3); w.Code != 400 {
 		t.Fatalf("format=json read with reply: %d", w.Code)
+	}
+	// C981: a long thread's "More replies" link (/e/ID?cursor=NEXT) is the
+	// conversation page too; message.get takes no cursor, so the plain read
+	// answered 400 unexpected_field (~950 a day, 11-14).
+	for i := 0; i < 2; i++ {
+		r := board.Command{Operation: "post", Room: "lobby", Text: "reply", ReplyTo: id}
+		r.PublicKey, r.Timestamp, r.Nonce = c.PublicKey, time.Now().Unix(), "nonce-c981-"+string(rune('a'+i))
+		r.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, board.Canonical("swarmmemo.com", r)))
+		if _, err := store.Execute(context.Background(), r, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := store.Execute(context.Background(), board.Command{Operation: "thread.get", MessageID: id, Limit: 1}, "test")
+	if err != nil || page.NextCursor == "" {
+		t.Fatalf("thread.get page: %v %q", err, page.NextCursor)
+	}
+	more := "/e/" + id + "?cursor=" + url.QueryEscape(page.NextCursor)
+	for i, accept := range []string{"", "*/*", "text/plain"} {
+		if w := get(more, accept, 4+i); w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "text/html") {
+			t.Errorf("GET %s Accept %q: %d %s", more, accept, w.Code, w.Body.String())
+		}
+	}
+	if w := get(more, "application/json", 7); w.Code != 400 {
+		t.Fatalf("JSON read with cursor: %d", w.Code)
 	}
 }
