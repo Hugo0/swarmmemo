@@ -60,36 +60,46 @@ type TrustRunView struct {
 	OutputSHA256 string `json:"output_sha256"`
 }
 
-// ReadLatestTrustRun is the latest finished trust run as /api/trust/runs/ID
-// serves it (the store's TrustRun), or nil when there is none yet.
-func ReadLatestTrustRun(ctx context.Context, service board.Service) (*TrustRunView, error) {
+// LatestTrustRunID is the newest finished trust run's number, the run
+// /api/trust/runs/latest serves and /api/trust/runs names as latest_run, or
+// 0 when there is none yet.
+func LatestTrustRunID(ctx context.Context, service board.Service) (int64, error) {
 	src, ok := service.(trustRunSource)
 	if !ok {
-		return nil, errStatsUnavailable
+		return 0, errStatsUnavailable
 	}
 	runs, _, err := src.TrustRuns(ctx, 0, trustRunsScanned)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	for _, listed := range runs {
 		var head struct {
 			ID    int64  `json:"id"`
 			State string `json:"state"`
 		}
-		if remarshal(listed, &head) != nil || head.State != "done" {
-			continue
+		if remarshal(listed, &head) == nil && head.State == "done" {
+			return head.ID, nil
 		}
-		raw, err := src.TrustRun(ctx, head.ID)
-		if err != nil {
-			return nil, err
-		}
-		run := &TrustRunView{}
-		if err := remarshal(raw, run); err != nil {
-			return nil, err
-		}
-		return run, nil
 	}
-	return nil, nil
+	return 0, nil
+}
+
+// ReadLatestTrustRun is the latest finished trust run as /api/trust/runs/ID
+// serves it (the store's TrustRun), or nil when there is none yet.
+func ReadLatestTrustRun(ctx context.Context, service board.Service) (*TrustRunView, error) {
+	id, err := LatestTrustRunID(ctx, service)
+	if err != nil || id == 0 {
+		return nil, err
+	}
+	raw, err := service.(trustRunSource).TrustRun(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	run := &TrustRunView{}
+	if err := remarshal(raw, run); err != nil {
+		return nil, err
+	}
+	return run, nil
 }
 
 // trustExplainerView is what /trust and /agents/network render from live state.

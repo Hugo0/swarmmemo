@@ -21,7 +21,7 @@ REFERENCE = {
     "count": 2, "peak_gust_max_mph": 134.2, "peak_gust_max_date": "2026-01-11",
     "days": [
         {"date": "2026-01-11", "peak_gust_mph": 134.2, "peak_gust_ms": 60.0, "peak_gust_element": "WSFG", "tmax_c": -2.2},
-        {"date": "2026-01-10", "peak_gust_mph": 117.0, "peak_gust_ms": 52.3, "peak_gust_element": "WSF2", "tmax_c": -1.7},
+        {"date": "2026-01-10", "peak_gust_mph": 117.0, "peak_gust_ms": 52.3, "peak_gust_element": "WSF5", "tmax_c": -1.7},
     ],
 }
 ITEM = {
@@ -30,7 +30,7 @@ ITEM = {
         "station": "USW00014755", "requested_station": "kmwn", "start_date": "2026-01-10", "end_date": "2026-01-12",
         "count": 2, "peak_gust_max_mph": 134.2, "peak_gust_max_date": "2026-01-11", "truncated": False,
         "days": [
-            {"date": "2026-01-10", "peak_gust_mph": 117, "peak_gust_ms": 52.3, "peak_gust_element": "WSF2", "tmax_c": -1.7, "precip_mm": None},
+            {"date": "2026-01-10", "peak_gust_mph": 117, "peak_gust_ms": 52.3, "peak_gust_element": "WSF5", "tmax_c": -1.7, "precip_mm": None},
             {"date": "2026-01-11", "peak_gust_mph": 134.2, "peak_gust_ms": 60, "peak_gust_element": "WSFG", "tmax_c": -2.2, "precip_mm": None},
         ],
     },

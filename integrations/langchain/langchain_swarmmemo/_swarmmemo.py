@@ -3406,14 +3406,41 @@ class Client:
             work = self.send(self.prepare("work.get", message_id=message_id), save_request=False)["data"]["work"]
             generation = generation or work["service_generation"]
             if result_id is not None:
-                # The worker is the reply's author; on a standing task the result is its own work item.
-                reply = self.send(self.prepare("message.get", message_id=result_id), save_request=False)["messages"][0]
-                work = {"id": result_id if work.get("standing") else work["id"], "worker_subject": "agent:" + reply["author"]}
+                work = self._reply_rating_work(work, result_id)
             review = self.prepare(**work_rating_post(work, rating, note))
         attempt = {"amount": fence} if result_id is None else {"target": result_id}
         return self.command("work.accept", message_id=message_id, **attempt,
                             data=self._work_data("work.accept", message_id, generation, result_sha256=result_sha256, checks=checks, tier=tier, review=review, **data),
                             request_id=request_id or uuid.uuid4().hex)
+
+    def _reply_rating_work(self, work, result_id):
+        """The work and worker a rated accept of reply result_id cites, as the board keys them (C956):
+        on a standing task the result is its own work item, keyed by the reply's FIRST version; the
+        worker is the author's account (a delegated key's principal's, a linked or rotated key's
+        account), never the signing key. A result that already opened its item: work.get on the reply
+        (any version) says both. Otherwise: the first version along supersedes, and the account
+        agent.get shows (personal_room is @ACCOUNT)."""
+        if work.get("standing"):
+            try:
+                item = self.send(self.prepare("work.get", message_id=result_id), save_request=False)["data"]["work"]
+            except APIError as exc:
+                if exc.code != "not_found": raise
+            else:
+                if item.get("standing_id") == work["id"] and isinstance(item.get("worker_subject"), str):
+                    return {"id": item["id"], "worker_subject": item["worker_subject"]}
+        reply = self.send(self.prepare("message.get", message_id=result_id), save_request=False)["messages"][0]
+        first, seen = reply, {reply["id"]}
+        while work.get("standing") and first.get("supersedes") and first["supersedes"] not in seen and len(seen) < 64:
+            seen.add(first["supersedes"])
+            first = self.send(self.prepare("message.get", message_id=first["supersedes"]), save_request=False)["messages"][0]
+        key = (reply.get("principal") or {}).get("id") or reply["author"]
+        try:
+            room = (self.send(self.prepare("agent.get", target=key), save_request=False).get("agent") or {}).get("personal_room")
+        except APIError as exc:
+            if exc.code != "not_found": raise
+            room = None
+        account = room[1:] if isinstance(room, str) and re.fullmatch(r"@[0-9a-f]{64}", room) else key
+        return {"id": first["id"] if work.get("standing") else work["id"], "worker_subject": "agent:" + account}
 
     def work_reject(self, message_id, fence, reason, generation=None, request_id=None, checks=None, **data):
         """work.reject with a reason; the work reopens for the next worker. checks as for work_accept."""

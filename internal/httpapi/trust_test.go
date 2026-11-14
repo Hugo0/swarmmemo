@@ -48,6 +48,14 @@ func TestTrustRoutesOn(t *testing.T) {
 	if w := tlsCommand(s, signedLinkCommand(key, "agent.register", "", 0)); w.Code != 200 {
 		t.Fatalf("register: %d %s", w.Code, w.Body.String())
 	}
+	// Before any run finishes, latest is a 404 and the list names no
+	// latest_run (C962).
+	if w := makeRequest(s, "GET", "/api/trust/runs/latest", "", ""); w.Code != 404 || !strings.Contains(w.Body.String(), `"not_found"`) {
+		t.Fatalf("latest before any run: %d %s", w.Code, w.Body.String())
+	}
+	if w := makeRequest(s, "GET", "/api/trust/runs", "", ""); w.Code != 200 || strings.Contains(w.Body.String(), "latest_run") {
+		t.Fatalf("runs before any run: %d %s", w.Code, w.Body.String())
+	}
 	if _, err = store.RunTrust(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -116,6 +124,22 @@ func TestTrustRoutesOn(t *testing.T) {
 	}
 	if w = makeRequest(s, "GET", "/api/trust/runs/2", "", ""); w.Code != 404 {
 		t.Fatalf("missing run: %d %s", w.Code, w.Body.String())
+	}
+	// C962: the list names the newest finished run, and latest reads it
+	// exactly as its number does (the run and its snapshot).
+	if w = makeRequest(s, "GET", "/api/trust/runs", "", ""); !strings.Contains(w.Body.String(), `"latest_run":1`) {
+		t.Fatalf("runs lacks latest_run: %s", w.Body.String())
+	}
+	for _, sub := range []string{"", "/snapshot"} {
+		byNumber, latest := makeRequest(s, "GET", "/api/trust/runs/1"+sub, "", ""), makeRequest(s, "GET", "/api/trust/runs/latest"+sub, "", "")
+		if latest.Code != 200 || latest.Body.String() != byNumber.Body.String() {
+			t.Fatalf("latest%s: %d %s, run 1 is %d", sub, latest.Code, latest.Body.String(), byNumber.Code)
+		}
+	}
+	for _, path := range []string{"/api/trust/runs/abc", "/api/trust/runs/latest?x=1", "/api/trust/runs/0/snapshot", "/api/trust/runs/newest"} {
+		if w = makeRequest(s, "GET", path, "", ""); w.Code != 400 || !strings.Contains(w.Body.String(), "a run number from /api/trust/runs") || !strings.Contains(w.Body.String(), "or latest") {
+			t.Errorf("%s: %d %s", path, w.Code, w.Body.String())
+		}
 	}
 	// The run's input snapshot is published, and recomputing it gives the
 	// run's output_sha256: in Go, and with the independent recompute.py.
@@ -223,7 +247,7 @@ func TestTrustRoutesOn(t *testing.T) {
 		Trust map[string]any `json:"trust"`
 	}
 	if err = json.Unmarshal(w.Body.Bytes(), &caps); err != nil || caps.Trust["mode"] != "on" || caps.Trust["boolean"] != false || caps.Trust["penalties"] != "/api/trust/penalties" ||
-		caps.Trust["standing_url"] != "/api/trust/standing?agent=AGENT&viewer=AGENT" {
+		caps.Trust["standing_url"] != "/api/trust/standing?agent=AGENT&viewer=AGENT" || caps.Trust["run_latest"] != "/api/trust/runs/latest" {
 		t.Fatalf("capabilities trust: %+v", caps.Trust)
 	}
 }

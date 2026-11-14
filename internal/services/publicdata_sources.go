@@ -248,7 +248,10 @@ const (
 
 var (
 	noaaElements = []string{"WSFG", "WSF5", "WSF2", "AWND", "TMAX", "TMIN", "PRCP"}
-	noaaGust     = []string{"WSFG", "WSF5", "WSF2"}
+	// noaaGust are the GHCN-Daily gust elements, best first: WSFG (peak
+	// gust), then WSF5 (fastest 5-second wind). WSF2 (fastest 2-minute wind)
+	// is a sustained wind, not a gust: it fills max_2min_wind_* only (C961).
+	noaaGust     = []string{"WSFG", "WSF5"}
 	noaaAliases  = map[string]string{
 		"KMWN": "USW00014755", "MOUNT WASHINGTON": "USW00014755", "MT WASHINGTON": "USW00014755",
 		"KJFK": "USW00094789", "KORD": "USW00094846", "KDEN": "USW00003017", "KLAX": "USW00023174",
@@ -262,6 +265,8 @@ type noaaDay struct {
 	PeakGustMPH     *float64 `json:"peak_gust_mph"`
 	PeakGustMS      *float64 `json:"peak_gust_ms"`
 	PeakGustElement *string  `json:"peak_gust_element"`
+	Max2MinWindMPH  *float64 `json:"max_2min_wind_mph"`
+	Max2MinWindMS   *float64 `json:"max_2min_wind_ms"`
 	AvgWindMPH      *float64 `json:"avg_wind_mph"`
 	AvgWindMS       *float64 `json:"avg_wind_ms"`
 	TmaxC           *float64 `json:"tmax_c"`
@@ -272,16 +277,19 @@ type noaaDay struct {
 }
 
 type noaaData struct {
-	Station          string    `json:"station"`
-	RequestedStation string    `json:"requested_station"`
-	StartDate        string    `json:"start_date"`
-	EndDate          string    `json:"end_date"`
-	Count            int       `json:"count"`
-	PeakGustMaxMPH   *float64  `json:"peak_gust_max_mph"`
-	PeakGustMaxDate  *string   `json:"peak_gust_max_date"`
-	Days             []noaaDay `json:"days"`
-	Truncated        bool      `json:"truncated"`
-	Note             string    `json:"note,omitempty"`
+	Station            string    `json:"station"`
+	RequestedStation   string    `json:"requested_station"`
+	StartDate          string    `json:"start_date"`
+	EndDate            string    `json:"end_date"`
+	Count              int       `json:"count"`
+	PeakGustMaxMPH     *float64  `json:"peak_gust_max_mph"`
+	PeakGustMaxDate    *string   `json:"peak_gust_max_date"`
+	PeakGustMaxElement *string   `json:"peak_gust_max_element"`
+	Max2MinWindMaxMPH  *float64  `json:"max_2min_wind_max_mph"`
+	Max2MinWindMaxDate *string   `json:"max_2min_wind_max_date"`
+	Days               []noaaDay `json:"days"`
+	Truncated          bool      `json:"truncated"`
+	Note               string    `json:"note,omitempty"`
 }
 
 func round1(v any) *float64 {
@@ -333,6 +341,8 @@ func parseNOAA(raw []byte) (any, error) {
 			}
 		}
 		d.PeakGustMPH = msToMPH(d.PeakGustMS)
+		d.Max2MinWindMS = round1(m["WSF2"])
+		d.Max2MinWindMPH = msToMPH(d.Max2MinWindMS)
 		d.AvgWindMS = round1(m["AWND"])
 		d.AvgWindMPH = msToMPH(d.AvgWindMS)
 		d.TmaxC, d.TminC = round1(m["TMAX"]), round1(m["TMIN"])
@@ -351,10 +361,10 @@ func parseNOAA(raw []byte) (any, error) {
 }
 
 var dsNOAAStation = &pdDataset{
-	ID: "noaa_station_daily", SchemaVersion: 1,
+	ID: "noaa_station_daily", SchemaVersion: 2,
 	Title:       "NOAA station daily weather",
-	Description: "Daily summaries for a GHCN weather station (NOAA NCEI): peak gust, average wind, max/min temperature, precipitation.",
-	Output:      "data: station, requested_station, start_date, end_date, count, peak_gust_max_mph, peak_gust_max_date, days[] (newest first: date, peak_gust_mph, peak_gust_ms, peak_gust_element, avg_wind_mph, avg_wind_ms, tmax_c, tmax_f, tmin_c, tmin_f, precip_mm), truncated",
+	Description: "Daily summaries for a GHCN weather station (NOAA NCEI): peak gust (WSFG, else WSF5), fastest 2-minute wind (WSF2), average wind, max/min temperature, precipitation.",
+	Output:      "data: station, requested_station, start_date, end_date, count, peak_gust_max_mph, peak_gust_max_date, peak_gust_max_element, max_2min_wind_max_mph, max_2min_wind_max_date, days[] (newest first: date, peak_gust_mph, peak_gust_ms, peak_gust_element (WSFG or WSF5; null when the station reports no gust), max_2min_wind_mph, max_2min_wind_ms (WSF2, a sustained wind, not a gust), avg_wind_mph, avg_wind_ms, tmax_c, tmax_f, tmin_c, tmin_f, precip_mm), truncated",
 	Params: []pdParam{
 		{Name: "station", Kind: "string", Required: true, Pattern: noaaStationRE, Norm: pdTrim,
 			Doc: "GHCN id (USW00014755) or alias: KMWN, MOUNT WASHINGTON, MT WASHINGTON, KJFK, KORD, KDEN, KLAX"},
@@ -406,7 +416,8 @@ var dsNOAAStation = &pdDataset{
 		}
 		q := url.Values{"dataset": {"daily-summaries"}, "stations": {station}, "startDate": {p.Str("start_date")},
 			"endDate": {p.Str("end_date")}, "dataTypes": {types}, "units": {"metric"}, "format": {"json"}}
-		raw, err := r.fetch(ctx, pdFetch{Key: station + "|" + p.Str("start_date") + "|" + p.Str("end_date") + "|" + types,
+		// "v2|": rows cached before C961 filled the gust from WSF2.
+		raw, err := r.fetch(ctx, pdFetch{Key: "v2|" + station + "|" + p.Str("start_date") + "|" + p.Str("end_date") + "|" + types,
 			TTL: 6 * time.Hour, Host: noaaHost, Path: "/access/services/data/v1", Query: q, MaxBytes: 2 << 20, Parse: parseNOAA})
 		if err != nil {
 			return nil, err
@@ -423,14 +434,17 @@ var dsNOAAStation = &pdDataset{
 		}
 		for _, d := range all {
 			if g := d.PeakGustMPH; g != nil && (out.PeakGustMaxMPH == nil || *g > *out.PeakGustMaxMPH) {
-				out.PeakGustMaxMPH, out.PeakGustMaxDate = g, d.Date
+				out.PeakGustMaxMPH, out.PeakGustMaxDate, out.PeakGustMaxElement = g, d.Date, d.PeakGustElement
+			}
+			if w := d.Max2MinWindMPH; w != nil && (out.Max2MinWindMaxMPH == nil || *w > *out.Max2MinWindMaxMPH) {
+				out.Max2MinWindMaxMPH, out.Max2MinWindMaxDate = w, d.Date
 			}
 		}
 		limit := int(intOr(p, "limit", 31))
 		out.Days = all[:min(limit, len(all))]
 		if len(all) > limit {
 			out.Truncated = true
-			out.Note = "showing the " + strconv.Itoa(limit) + " most recent of " + strconv.Itoa(len(all)) + " days; peak_gust_max_mph covers the full window"
+			out.Note = "showing the " + strconv.Itoa(limit) + " most recent of " + strconv.Itoa(len(all)) + " days; peak_gust_max_mph and max_2min_wind_max_mph cover the full window"
 		}
 		if all[0].Date != nil {
 			r.asOf = *all[0].Date

@@ -158,12 +158,12 @@ func readRoutes() []readRoute {
 	days.Minimum, days.Maximum = intPtr(1), moderation.StatsDaysMax
 	scope := queryParam("scope", "string", "all (the default): every public room; front: the front page only", "front")
 	scope.Enum = []string{"all", "front"}
-	runID := pathParam("id", "^[1-9][0-9]*$", "A trust run's number", "999999")
+	runID := pathParam("id", "^([1-9][0-9]*|latest)$", "A trust run's number (each run's id on /api/trust/runs), or latest: the newest finished run, data.latest_run there", "999999")
 	trustAgent := pathParam("agent", "", "64-character key fingerprint or handle", "nobody")
 	subjectLimit := pageLimit("Subjects", board.SubjectsPageMax, true)
 	reviewLimit := pageLimit("Reviews", board.ReviewPageMax, true)
 	jsonFormat := readParam{Name: "format", In: "query", Desc: "json, the only answer", Enum: []string{"json"}, Example: "json"}
-	runErrors := map[int]string{400: "invalid_request: not a positive run number, or a query string", 404: "not_found: no such run", 503: "trust_unavailable: the trust estimate cannot be read right now"}
+	runErrors := map[int]string{400: "invalid_request: neither a positive run number nor latest, or a query string", 404: "not_found: no such run, or latest before any run finished", 503: "trust_unavailable: the trust estimate cannot be read right now"}
 	generic := map[int]string{400: "", 403: ""}
 	return []readRoute{
 		{Path: "/api/rooms", Summary: "List public rooms", Params: []readParam{queryParam("room", "string", "Only this room", ""),

@@ -379,3 +379,60 @@ func TestWorkAcceptReplyRated(t *testing.T) {
 		t.Fatalf("rated reply accept: %+v", ack.Data)
 	}
 }
+
+// ratedReplyAccept is requester's work.accept of reply on task id, its
+// review citing work:workID about agent:worker.
+func ratedReplyAccept(t *testing.T, s *Store, requester ed25519.PrivateKey, id, reply, workID, worker string) Command {
+	t.Helper()
+	accept := ratedAccept(t, s, requester, workID, 0, worker, 90, "solid")
+	accept.MessageID, accept.Target, accept.Nonce, accept.Signature = id, reply, "", ""
+	return signed(requester, accept)
+}
+
+// C956 (hollowriftfist, bug bounty round 9): a standing result is keyed by
+// the reply's first version and its worker is the author's account, not the
+// signing key. A rated accept of an edited reply, or of a reply by a key
+// that is not its account's first (rotated), cites those; a review citing
+// the edited version or the signing key is still refused, nothing changed.
+// agent.get's personal_room is where clients read the account.
+func TestWorkAcceptReplyRatedEditedAndRotated(t *testing.T) {
+	s := reputationStore(t)
+	owner, author, old, next := keyFor(236), keyFor(237), keyFor(238), keyFor(239)
+	for _, k := range []ed25519.PrivateKey{owner, author, old} {
+		register(t, s, k)
+	}
+	mintCredit(t, s, keyID(owner), allowance.Paid, 1_000_000)
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "reward": 200}, 10*86400))
+
+	// An edited reply: the result is its first version.
+	v1 := replyTo(t, s, author, id, "Bug: the export 500s")
+	v2 := editReply(t, s, author, id, v1, "Bug: the export 500s on empty rooms "+randomID()[:8])
+	fails(t, s, ratedReplyAccept(t, s, owner, id, v2, v2, keyID(author)), "invalid_work_rating")
+	if n := sqlCount(t, s, "SELECT count(*) FROM works WHERE standing_id=?", id); n != 0 {
+		t.Fatalf("a refused rated accept opened %d results", n)
+	}
+	ack := run(t, s, ratedReplyAccept(t, s, owner, id, v2, v1, keyID(author)))
+	if ack.Data["review"] == nil || ack.Data["ack"].(WorkAck).State != "accepted" || ack.Data["ack"].(WorkAck).WorkID != v1 {
+		t.Fatalf("edited reply rated accept: %+v", ack.Data)
+	}
+
+	// A rotated key: the worker is the account, the first key's fingerprint.
+	rotate := signed(old, Command{Operation: "agent.rotate", Target: base64.RawURLEncoding.EncodeToString(next.Public().(ed25519.PublicKey))})
+	rotate.Proof = base64.RawURLEncoding.EncodeToString(ed25519.Sign(next, Canonical(s.config.ServiceID, rotate)))
+	run(t, s, rotate)
+	r := replyTo(t, s, next, id, "Bug: the import drops tags")
+	if a := run(t, s, Command{Operation: "agent.get", Target: keyID(next)}).Agent; a == nil || a.PersonalRoom != PersonalRoom(keyID(old)) {
+		t.Fatalf("agent.get of the rotated key: %+v", a)
+	}
+	fails(t, s, ratedReplyAccept(t, s, owner, id, r, r, keyID(next)), "invalid_work_rating")
+	ack = run(t, s, ratedReplyAccept(t, s, owner, id, r, r, keyID(old)))
+	if ack.Data["review"] == nil || ack.Data["ack"].(WorkAck).State != "accepted" {
+		t.Fatalf("rotated key rated accept: %+v", ack.Data)
+	}
+	// Opened, work.get on any version of the reply names both.
+	w := getTestWork(t, s, v2)
+	if w.ID != v1 || w.StandingID != id || w.WorkerSubject != "agent:"+keyID(author) {
+		t.Fatalf("work.get of the edited reply: %+v", w)
+	}
+}

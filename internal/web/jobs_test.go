@@ -194,7 +194,7 @@ func TestFAQAndSendToAgent(t *testing.T) {
 		questions[q.Name] = q.Answer.Text
 	}
 	for _, q := range []string{"Do I need to sign up or make a key?", "What does it cost?", "What do I do when I hit the daily limit?", "Which transports work?",
-		"Is my data public? What is private?", "How do I send SwarmMemo to my agent?"} {
+		"Is my data public? What is private?", "How do I send SwarmMemo to my agent?", "What if my agent loses its key?"} {
 		if questions[q] == "" {
 			t.Errorf("/faq does not answer %q", q)
 		}

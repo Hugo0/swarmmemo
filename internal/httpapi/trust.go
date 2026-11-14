@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/web"
 )
 
 // trustSnapshotStore serves a run's input snapshot (TrustSnapshot).
@@ -116,15 +117,23 @@ func (s *Server) trustRoute(w http.ResponseWriter, r *http.Request) bool {
 			writeError(w, err)
 			return true
 		}
+		latest, err := web.LatestTrustRunID(r.Context(), s.service)
+		if err != nil {
+			writeError(w, err)
+			return true
+		}
 		data := map[string]any{"runs": list}
 		if next > 0 {
 			data["next_before"] = next
 		}
+		if latest > 0 {
+			data["latest_run"] = latest // C962: the run /api/trust/runs/latest serves
+		}
 		jsonResponse(w, 200, map[string]any{"ok": true, "data": data})
 	case strings.HasSuffix(p, "/snapshot"): // /api/trust/runs/ID/snapshot
-		id, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(p, "/api/trust/runs/"), "/snapshot"), 10, 64)
-		if err != nil || id <= 0 || len(r.URL.RawQuery) > 0 {
-			writeError(w, bad("Expected /api/trust/runs/ID/snapshot, a positive run number, with no query."))
+		id, err := s.trustRunID(r, strings.TrimSuffix(strings.TrimPrefix(p, "/api/trust/runs/"), "/snapshot"), "/snapshot")
+		if err != nil {
+			writeError(w, err)
 			return true
 		}
 		snaps, ok := s.service.(trustSnapshotStore)
@@ -147,9 +156,9 @@ func (s *Server) trustRoute(w http.ResponseWriter, r *http.Request) bool {
 			_, _ = io.Copy(w, body) // streamed; bounded by the stored size
 		}
 	default: // /api/trust/runs/ID
-		id, err := strconv.ParseInt(strings.TrimPrefix(p, "/api/trust/runs/"), 10, 64)
-		if err != nil || id <= 0 || len(r.URL.RawQuery) > 0 {
-			writeError(w, bad("Expected /api/trust/runs/ID, a positive run number, with no query."))
+		id, err := s.trustRunID(r, strings.TrimPrefix(p, "/api/trust/runs/"), "")
+		if err != nil {
+			writeError(w, err)
 			return true
 		}
 		run, err := store.TrustRun(r.Context(), id)
@@ -160,6 +169,24 @@ func (s *Server) trustRoute(w http.ResponseWriter, r *http.Request) bool {
 		jsonResponse(w, 200, map[string]any{"ok": true, "data": run})
 	}
 	return true
+}
+
+// trustRunID reads the ID of /api/trust/runs/ID[suffix]: a positive run
+// number, or latest, the newest finished run (data.latest_run on
+// /api/trust/runs; 404 before any). No query string (C962).
+func (s *Server) trustRunID(r *http.Request, raw, suffix string) (int64, error) {
+	if len(r.URL.RawQuery) == 0 && raw == "latest" {
+		id, err := web.LatestTrustRunID(r.Context(), s.service)
+		if err == nil && id == 0 {
+			err = &board.Error{Status: 404, Code: "not_found", Message: "No trust run has finished yet; /api/trust/runs lists the runs so far."}
+		}
+		return id, err
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 || len(r.URL.RawQuery) > 0 {
+		return 0, bad("Expected /api/trust/runs/ID" + suffix + " with no query, where ID is a run number from /api/trust/runs (each run's id; data.latest_run is the newest finished one) or latest.")
+	}
+	return id, nil
 }
 
 // trustGraph serves GET /api/trust/graph?limit=N: the public trust network
@@ -320,6 +347,7 @@ func (s *Server) trustCapabilities() map[string]any {
 		"evidence":                    "/api/trust/evidence",
 		"runs":                        "/api/trust/runs",
 		"run":                         "/api/trust/runs/ID",
+		"run_latest":                  "/api/trust/runs/latest",
 		"snapshot":                    "/api/trust/runs/ID/snapshot",
 		"graph":                       map[string]any{"url": "/api/trust/graph", "parameters": []string{"limit"}, "limit_default": board.TrustGraphCoreDefault, "limit_maximum": board.TrustGraphCoreMax, "nodes_maximum": board.TrustGraphCoreMax * board.TrustGraphNodesPerCore, "edges_maximum": board.TrustGraphEdgesMax, "edge_kinds": board.TrustGraphEdgeKinds, "page": "/trust/network", "scope": "the top limit public accounts by standing in the latest run and their neighbours; edges are vouches, accepted work, verified witnesses and verified key links; never votes, replies, DMs or private rooms"},
 		"layer":                       trustLayerCapability,
@@ -400,7 +428,7 @@ func (s *Server) addTrustOpenAPI(paths, response map[string]any) {
 	} {
 		paths[list.path] = map[string]any{"get": map[string]any{
 			"summary":     list.summary,
-			"description": "Newest first; pass data.next_before as before to read the next page.",
+			"description": "Newest first; pass data.next_before as before to read the next page. data.latest_run is the newest finished run's id (absent before any), the run /api/trust/runs/latest reads.",
 			"parameters": []map[string]any{
 				{"name": "before", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1}},
 				{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": list.max, "default": list.page}},

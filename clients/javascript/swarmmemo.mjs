@@ -2159,6 +2159,34 @@ export class Client {
   // text: one review, citing this work (/protocol.md#rated-accepts). tier names the standing task's
   // tier this result is paid (default the first). result, with fence null, names a direct reply never
   // claimed or submitted: the board claims and submits it for its author in the same step (/protocol.md#accepting-a-reply).
+  // The work and worker a rated accept of reply result cites, as the board keys them (C956): on a
+  // standing task the result is its own work item, keyed by the reply's FIRST version; the worker is
+  // the author's account (a delegated key's principal's, a linked or rotated key's account), never
+  // the signing key. A result that already opened its item: work.get on the reply (any version) says
+  // both. Otherwise: the first version along supersedes, and the account agent.get shows
+  // (personal_room is @ACCOUNT).
+  async #replyRatingWork(work, result) {
+    const read = async (operation, fields) => {
+      try { return await this.send(this.prepare({operation, ...fields})); } catch (e) { if (e?.code === 'not_found') return null; throw e; }
+    };
+    const standing = Boolean(work?.standing);
+    if (standing) {
+      const item = (await read('work.get', {message_id: result}))?.data?.work;
+      if (item && item.standing_id === work.id && typeof item.worker_subject === 'string') return {id: item.id, worker_subject: item.worker_subject};
+    }
+    const message = async (id) => (await this.send(this.prepare({operation: 'message.get', message_id: id})))?.messages?.[0];
+    const reply = await message(result);
+    let first = reply;
+    const seen = new Set([reply?.id]);
+    while (standing && first?.supersedes && !seen.has(first.supersedes) && seen.size < 64) {
+      seen.add(first.supersedes);
+      first = await message(first.supersedes);
+    }
+    const key = reply?.principal?.id || reply?.author;
+    const room = (await read('agent.get', {target: key}))?.agent?.personal_room;
+    const account = typeof room === 'string' && /^@[0-9a-f]{64}$/.test(room) ? room.slice(1) : key;
+    return {id: standing ? first?.id : work?.id, worker_subject: 'agent:' + account};
+  }
   async acceptWork(messageId, fence, {generation, resultSha256, checks, requestId, rating, note, tier, result, ...fields} = {}) {
     if ((fence === undefined || fence === null) === !result) fail('invalid_option', "Give the submitted result's fence, or result (a direct reply to accept), not both.");
     let review;
@@ -2166,11 +2194,7 @@ export class Client {
       if (!this.#key) fail('missing_key', 'A rated accept is signed: give a key.');
       let work = (await this.work(messageId))?.data?.work;
       generation ??= work?.service_generation;
-      if (result) {
-        // The worker is the reply's author; on a standing task the result is its own work item.
-        const reply = (await this.send(this.prepare({operation: 'message.get', message_id: result})))?.messages?.[0];
-        work = {id: work?.standing ? result : work?.id, worker_subject: 'agent:' + reply?.author};
-      }
+      if (result) work = await this.#replyRatingWork(work, result);
       review = this.prepare(workRatingPost(work, rating, note)).command;
     }
     const data = await this.#workData('work.accept', messageId, generation, {resultSha256, checks, review, tier, ...fields});

@@ -424,7 +424,10 @@ func standingChainRound(ctx context.Context, tx rowQuerier, next string, now int
 			if err != nil {
 				return "", err
 			}
-			if p != nil && (p.Open > 0 || !seat && !p.Full) {
+			// C960 (hollowriftfist, bug bounty r10 17d42479): without a seat,
+			// a round counts only while one can still open there by itself:
+			// not full, not spent (pool final), not past results_until.
+			if p != nil && (p.Open > 0 || !seat && !p.Full && !p.spent && now <= p.ResultsUntil) {
 				return at, nil
 			}
 		}
@@ -501,22 +504,35 @@ func parseWorkStandingTiers(raw json.RawMessage) ([]WorkStandingTier, error) {
 	return out, nil
 }
 
+// workStandingFields are the work.create data fields that make a standing
+// task together with seats: each one needs seats beside it.
+var workStandingFields = []string{"per_agent_day", "day_max", "results_max", "per_agent_max", "per_agent_cooldown_days", "tiers", "usdc_per_agent_day", "usdc_day_max"}
+
+// workStandingNeedsSeatsText is the refusal of standing fields sent without
+// seats (C959): it names the ones sent and every field that needs seats.
+func workStandingNeedsSeatsText(sent []string) string {
+	return fmt.Sprintf("You sent %s without seats. These standing-task fields each need seats (1 to %d, the results paid at once) in the same work data: %s. Add seats beside them, or drop them for a one-result task.",
+		listText(sent, false), WorkStandingSeatsMax, listText(workStandingFields, false))
+}
+
 // checkWorkStandingData checks a create's standing fields together, and
 // fills their defaults.
 func checkWorkStandingData(d *workData, seen map[string]bool) error {
-	set := false
-	for _, name := range []string{"seats", "per_agent_day", "day_max", "results_max", "per_agent_max", "per_agent_cooldown_days", "tiers", "usdc_per_agent_day", "usdc_day_max"} {
-		set = set || seen[name]
+	var sent []string
+	for _, name := range workStandingFields {
+		if seen[name] {
+			sent = append(sent, name)
+		}
 	}
-	if !set {
+	if len(sent) == 0 && !seen["seats"] {
 		return nil
 	}
 	st := &d.Standing
 	if !seen["seats"] {
-		return invalidStanding("per_agent_day, day_max, results_max, per_agent_max, per_agent_cooldown_days, tiers and the USDC caps go with seats.")
+		return invalidStanding(workStandingNeedsSeatsText(sent))
 	}
 	if st.Seats < 1 || st.Seats > WorkStandingSeatsMax {
-		return invalidStanding("seats is 1 to 50.")
+		return invalidStanding(fmt.Sprintf("seats is 1 to %d.", WorkStandingSeatsMax))
 	}
 	if seen["reviewer"] || seen["reviewer_fee"] || seen["reject_fee"] {
 		return invalidStanding("A standing task takes no reviewer, reviewer_fee or reject_fee: the requester judges each result.")
@@ -659,7 +675,60 @@ func (s *Store) createWorkStanding(ctx context.Context, tx *sql.Tx, a actor, w w
 		st.ID, st.Seats, st.PerAgentDay, st.DayMax, st.ResultsMax, string(tiers), st.USDCPerAgentDay, st.USDCDayMax, st.VerdictTTL); err != nil {
 		return err
 	}
-	return s.holdWorkEscrows(ctx, tx, a, w, pool, 0, now)
+	// C959: what the requester holds, read before the hold (a refused hold
+	// has charged its fee by then), for the numbers of a refusal.
+	var have, free int64
+	if s.config.Features.Ledger == LedgerOn {
+		b, err := s.ledger.led.Balance(ctx, tx, subject(a), allowance.Credit, now)
+		if err != nil {
+			return err
+		}
+		have, free = b.Remaining, b.ByBucket[allowance.Free]
+	}
+	err := s.holdWorkEscrows(ctx, tx, a, w, pool, 0, now)
+	var e *Error
+	if !errors.As(err, &e) || e.Code != "not_transferable" && e.Code != "quota_exhausted" {
+		return err
+	}
+	p, _, perr := s.ledger.led.Params(ctx, tx, now)
+	if perr != nil {
+		return perr
+	}
+	var fee int64
+	if rp := p.Resources[allowance.Credit]; rp != nil {
+		fee = rp.TransferFee
+	}
+	base := e.Message
+	if e.Code == "not_transferable" {
+		base = errWorkRewardNotTransferable().(*Error).Message
+	}
+	e.Message = standingPoolShortText(st.maxCredits(), st.Seats, fee, have, free, len(st.Tiers) > 1) + base
+	return e
+}
+
+// standingPoolPrefix starts a standing create's refusal for want of credits
+// (C959); workPaymentError leaves such a message as it is.
+const standingPoolPrefix = "A standing task's reward is per result"
+
+func standingPoolRefusal(e *Error) bool {
+	return strings.HasPrefix(e.Message, standingPoolPrefix)
+}
+
+// standingPoolShortText says why a standing create's pool was refused: the
+// reward is per result and work.create holds it once per seat, with the
+// numbers the hold compared (per x seats, the fee) and what the requester
+// has, free daily credits (which cannot fund a held reward) apart.
+func standingPoolShortText(per, seats, fee, have, free int64, tiers bool) string {
+	lead := standingPoolPrefix
+	if tiers {
+		lead += fmt.Sprintf(" (the largest tier's %d credits)", per)
+	}
+	feeText := ""
+	if fee > 0 {
+		feeText = fmt.Sprintf(" plus the transfer fee of %d", fee)
+	}
+	return fmt.Sprintf("%s, and seats multiply it: work.create holds %d x %d = %d credits%s, and you have %d credits now, %d of them free daily credits. Lower the reward or seats, or add lasting credits. ",
+		lead, per, seats, per*seats, feeText, have, free)
 }
 
 // standingCounts is a standing root's seats as they stand at now. today is

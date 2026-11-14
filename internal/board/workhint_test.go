@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/allowance"
 )
@@ -193,6 +194,38 @@ func TestReplyToClosedRoundNamesFullNextRound(t *testing.T) {
 	run(t, s, workCommand(s, owner, Command{Operation: "work.reject", MessageID: r1, Amount: 1, Reason: "not it"}))
 	if r := signedReply(); r.ReplyWorkNextRound != next || r.ReplyWorkNextFull || !strings.Contains(WorkHintLine("", r), "the open round is "+next) {
 		t.Fatalf("reply once a seat opens: %+v %q", r, WorkHintLine("", r))
+	}
+}
+
+// C960 (hollowriftfist, bug bounty r10 17d42479): the seatless fallback
+// named a round past its results_until (still open until its deadline,
+// taking no results) and stopped there, before a live round after it.
+func TestReplyNextRoundSkipsRoundPastResultsUntil(t *testing.T) {
+	s := rewardStore(t)
+	owner, worker, w1, w2 := keyFor(249), keyFor(250), keyFor(251), keyFor(252)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 20000)
+	round := func(ttl int64) string {
+		id := rewardRequest(t, s, owner, "lobby")
+		run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 100, "day_max": 10}, ttl))
+		return id
+	}
+	old, next, later := round(10*86400), round(10*86400), round(30*86400)
+	run(t, s, successorSet(s, owner, old, next))
+	run(t, s, successorSet(s, owner, next, later))
+	run(t, s, workCommand(s, owner, Command{Operation: "work.cancel", MessageID: old, Reason: "next round"}))
+	_, c1 := standingClaim(t, s, w1, next, nil)
+	run(t, s, c1)
+	_, c2 := standingClaim(t, s, w2, next, nil)
+	run(t, s, c2)
+	st := standingAt(t, s, next)
+	base := s.now().Unix()
+	s.now = func() time.Time { return time.Unix(st.ResultsUntil+3600, 0) }
+	if s.now().Unix() <= base {
+		t.Fatalf("clock did not move past results_until %d", st.ResultsUntil)
+	}
+	r := run(t, s, signed(worker, Command{Operation: "post", Room: "lobby", ReplyTo: old, Text: "late result " + randomID()[:8], Timestamp: s.now().Unix()})).Receipt
+	if r.ReplyWorkNextRound != later {
+		t.Fatalf("reply named %q, want the live round %s after %s (past results_until)", r.ReplyWorkNextRound, later, next)
 	}
 }
 

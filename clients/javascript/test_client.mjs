@@ -1054,6 +1054,38 @@ test('Markdown reviews and rated-accept notes sign format markdown (citepulse-ai
   assert.equal(JSON.parse(data('work.accept').review.data).format, 'markdown');
 });
 
+test('a rated reply accept cites the first version and the account, as the board keys them (C956, hollowriftfist)', async t => {
+  const root = 'a'.repeat(32), v1 = '1'.repeat(32), v2 = '2'.repeat(32), child = 'c'.repeat(64), account = 'b'.repeat(64), issuer = 'd'.repeat(64);
+  const run = async ({opened = false, standing = true} = {}) => {
+    const sent = [], original = globalThis.fetch;
+    globalThis.fetch = async (url, {body} = {}) => {
+      const p = body ? JSON.parse(body) : {};
+      if (body) sent.push(p);
+      let reply = {ok: true, data: {}}, status = 200;
+      if (String(url).endsWith('/api/changes?after=-1')) reply = {ok: true, generation: P.generation};
+      else if (p.operation === 'work.get' && p.message_id === root) reply = {ok: true, data: {work: {id: root, service_generation: P.generation, ...(standing ? {standing: {seats: 2}} : {})}}};
+      else if (p.operation === 'work.get' && !opened) [reply, status] = [{ok: false, error: {code: 'not_found', message: 'Work not found: that message is a reply.'}}, 404];
+      else if (p.operation === 'work.get') reply = {ok: true, data: {work: {id: v1, standing_id: root, resolved_from: v2, worker_subject: 'agent:' + account}}};
+      else if (p.operation === 'message.get') reply = {ok: true, messages: [{id: p.message_id, author: child, principal: {id: issuer}, ...(p.message_id === v2 ? {supersedes: v1} : {})}]};
+      else if (p.operation === 'agent.get') reply = {ok: true, agent: {id: p.target, personal_room: '@' + account}};
+      return new Response(JSON.stringify(reply), {status, headers: {'Content-Type': 'application/json'}});
+    };
+    try {
+      await new Client({origin: 'https://example.org', key: fixtureKey}).acceptWork(root, null, {result: v2, rating: 90});
+    } finally { globalThis.fetch = original; }
+    const post = JSON.parse(sent.findLast(b => b.operation === 'work.accept').data).review;
+    return {sent, post, review: JSON.parse(post.data).review};
+  };
+  let {sent, post, review} = await run();
+  assert.deepEqual([review.evidence, review.subject, post.page], [['work:' + v1], 'agent:' + account, agentSubjectID(account)]);
+  assert.deepEqual(sent.filter(b => b.operation === 'agent.get').map(b => b.target), [issuer]);
+  ({sent, review} = await run({opened: true}));
+  assert.deepEqual([review.evidence, review.subject], [['work:' + v1], 'agent:' + account]);
+  assert.equal(sent.filter(b => b.operation === 'message.get' || b.operation === 'agent.get').length, 0);
+  ({review} = await run({standing: false}));
+  assert.deepEqual([review.evidence, review.subject], [['work:' + root], 'agent:' + account]);
+});
+
 test('dataFor checks array entries as Python does (c80dfcaa456f report)', () => {
   const base = {command: 'go test ./...', environment: 'linux', limits: 'none', output_sha256: 'a'.repeat(64), repo: 'https://github.com/a/b', commit: 'b'.repeat(40)};
   for (const bad of [[{}], [{property: 'x', state: 'bogus'}], [{property: 123, state: 'pass'}], [{property: 'x', state: 'pass', passes: 'three'}], [{property: 'x', state: 'pass', zzz: 1}], ['x']]) {

@@ -451,9 +451,14 @@ func TestPublicDataNOAAStation(t *testing.T) {
 	eq(t, "count", d["count"], 3.0)
 	eq(t, "order", []any{at(d, "days", 0, "date"), at(d, "days", 1, "date"), at(d, "days", 2, "date")}, []any{"2026-01-12", "2026-01-11", "2026-01-10"})
 	d10 := at(d, "days", 2)
-	eq(t, "d10 element", at(d10, "peak_gust_element"), "WSF2")
-	near(t, "d10 gust ms", at(d10, "peak_gust_ms"), 52.3)
-	near(t, "d10 gust mph", at(d10, "peak_gust_mph"), 117.0)
+	// Only WSF2 on 01-10: a 2-minute wind, never called a gust (C961).
+	for _, k := range []string{"peak_gust_element", "peak_gust_ms", "peak_gust_mph"} {
+		if v, ok := d10.(map[string]any)[k]; !ok || v != nil {
+			t.Errorf("d10 %s = %v (present %v), want null", k, v, ok)
+		}
+	}
+	near(t, "d10 2min ms", at(d10, "max_2min_wind_ms"), 52.3)
+	near(t, "d10 2min mph", at(d10, "max_2min_wind_mph"), 117.0)
 	near(t, "d10 avg ms", at(d10, "avg_wind_ms"), 23.8)
 	near(t, "d10 avg mph", at(d10, "avg_wind_mph"), 53.2)
 	near(t, "d10 tmax c", at(d10, "tmax_c"), -1.7)
@@ -462,9 +467,13 @@ func TestPublicDataNOAAStation(t *testing.T) {
 	near(t, "d10 precip", at(d10, "precip_mm"), 1.5)
 	eq(t, "d11 element", at(d, "days", 1, "peak_gust_element"), "WSFG")
 	near(t, "d11 gust", at(d, "days", 1, "peak_gust_ms"), 60.0)
+	near(t, "d11 2min", at(d, "days", 1, "max_2min_wind_ms"), 43.8)
 	eq(t, "max date", d["peak_gust_max_date"], "2026-01-11")
 	near(t, "max mph", d["peak_gust_max_mph"], 134.2)
-	eq(t, "schema", item["schema_version"], 1.0)
+	eq(t, "max element", d["peak_gust_max_element"], "WSFG")
+	near(t, "2min max mph", d["max_2min_wind_max_mph"], 117.0)
+	eq(t, "2min max date", d["max_2min_wind_max_date"], "2026-01-10")
+	eq(t, "schema", item["schema_version"], 2.0)
 	eq(t, "as_of", item["as_of"], "2026-01-12")
 	if _, ok := item["lag"]; ok {
 		t.Fatalf("lag on data that reaches the requested end: %v", item["lag"])

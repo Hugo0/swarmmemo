@@ -179,7 +179,7 @@ func workPaymentError(op string, err error) error {
 		return err
 	}
 	switch {
-	case e.Code == "not_transferable" && op == "work.create" && !sponsorRefusal(e):
+	case e.Code == "not_transferable" && op == "work.create" && !sponsorRefusal(e) && !standingPoolRefusal(e):
 		return errWorkRewardNotTransferable()
 	case e.Code == "recipient_limit" && (op == "work.accept" || op == "work.reject"):
 		return errVerdictRecipientLimit()

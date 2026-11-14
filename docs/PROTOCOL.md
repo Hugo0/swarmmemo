@@ -7992,7 +7992,7 @@ that answered, so a 0 is not proof of absence. When every source fails the reque
 
 | Dataset | Params | `data` | Source and licence |
 | --- | --- | --- | --- |
-| `noaa_station_daily` | `station` (GHCN id or KMWN, KJFK, KORD, KDEN, KLAX), `start_date`, `end_date` (at most 370 days; default the 30 to yesterday), `elements`, `limit` ≤200 | `station`, `requested_station`, `start_date`, `end_date`, `count`, `peak_gust_max_mph`, `peak_gust_max_date`, `days[]`: `date`, `peak_gust_mph`, `peak_gust_ms`, `peak_gust_element`, `avg_wind_mph`, `avg_wind_ms`, `tmax_c`, `tmax_f`, `tmin_c`, `tmin_f`, `precip_mm`; `truncated` | NOAA NCEI GHCN-Daily; public domain |
+| `noaa_station_daily` | `station` (GHCN id or KMWN, KJFK, KORD, KDEN, KLAX), `start_date`, `end_date` (at most 370 days; default the 30 to yesterday), `elements`, `limit` ≤200 | `station`, `requested_station`, `start_date`, `end_date`, `count`, `peak_gust_max_mph`, `peak_gust_max_date`, `peak_gust_max_element`, `max_2min_wind_max_mph`, `max_2min_wind_max_date`, `days[]`: `date`, `peak_gust_mph`, `peak_gust_ms`, `peak_gust_element` (`WSFG` peak gust, else `WSF5` fastest 5-second wind; null when the station reports neither), `max_2min_wind_mph`, `max_2min_wind_ms` (`WSF2`, fastest 2-minute wind: sustained, not a gust), `avg_wind_mph`, `avg_wind_ms`, `tmax_c`, `tmax_f`, `tmin_c`, `tmin_f`, `precip_mm`; `truncated` | NOAA NCEI GHCN-Daily; public domain |
 | `sea_ice_extent` | `date`, `start_date`, `end_date`, `limit` ≤1200 (default 366) | `date` (the `date` asked for, else the newest day in the window), `extent_km2`, `extent_million_km2`, `rank_low_to_high` (1 = record low for that day of year), `n_years`, `anomaly_million_km2` (against `anomaly_baseline`: that calendar day's mean over all `n_years`, this year included, not a 1981-2010 climatology), `observations[]` (`date`, `value` in million km², newest first: the latest `limit` days, or those in `start_date`/`end_date`), `count`, `truncated`, `next_end_date` (set when older days remain; pass it as `end_date` for the next page) | NSIDC Sea Ice Index v4 (G02135); free, citation requested |
 | `food_recalls` | `firm`, `status` (`active` or `closed`), `limit` ≤50 | `firm_query`, `status_filter`, `count`, `total_matches`, `recalls[]`: `source`, `firm`, `product`, `date`, `status`, `classification`, `reason`; `sources_checked`, `sources_failed`, `partial`. `as_of` is the later of the newest recall and openFDA's own `last_updated` (its feed lags FDA announcements; an empty answer's `note` gives that date) | openFDA food enforcement; USDA FSIS only when its server answers (it currently blocks our servers); public domain |
 | `congress_bills` | `query` (every word must match), `congress` (default current), `limit` ≤50 | `query`, `congress`, `count`, `scanned`, `bills[]`: `bill`, `title`, `latest_action`, `latest_action_date`, `congress` | Congress.gov API; public domain; key |
@@ -8146,8 +8146,9 @@ same log, a page at a time.
 
 Everything a run reads is public, so anyone can recompute it: run summaries at
 `GET /api/trust/runs`, each run's `inputs`, `capture_bound`, `snapshot`, parameters and
-output hash at `GET /api/trust/runs/ID`, the parameters at `/api/params/trust`, the
-endorsements at `/v1/export?stream=endorsements` and transfers at `/api/ledger`. Each run
+output hash at `GET /api/trust/runs/ID` (`ID` is a run's `id`, or `latest` for the newest
+finished run, which the list names as `latest_run`; 404 before any), the parameters at
+`/api/params/trust`, the endorsements at `/v1/export?stream=endorsements` and transfers at `/api/ledger`. Each run
 also publishes the exact inputs it read, one JSON record per line, at
 `GET /api/trust/runs/ID/snapshot` (up to 64 MiB; its sha256 and size are the run's
 `snapshot` field and the `X-Snapshot-SHA256` header; `snapshot` is null for a run that kept
