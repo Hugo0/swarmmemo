@@ -121,7 +121,8 @@ the feed. .room-governance keeps the room-info style hook on it. */}}
 <section class="reading-width">
 {{if .ModLog}}<ol class="modlog">{{range .ModLog}}<li class="modlog-entry">
 <p class="modlog-meta">{{template "age" .CreatedAt}} · {{if eq .Actor "operator"}}SwarmMemo{{else}}<a href="/agent/{{path .Actor}}" title="{{.Actor}}"><span class="signed-mark" aria-label="Signed by">⌘</span> {{template "key-name" (handleOr .Handles .Actor)}}</a>{{end}}</p>
-<p class="modlog-action"><strong>{{modlogAction .Action}}</strong>{{if or (eq .Action "hide") (eq .Action "restore")}} <a href="/e/{{path .Target}}">{{short .Target}}</a>{{else if .Target}} <a href="/agent/{{path .Target}}" title="{{.Target}}">{{template "key-name" (handleOr .Handles .Target)}}</a>{{end}}{{if eq .Action "policy"}}: {{policyDetail .Detail}}{{end}}</p>
+<p class="modlog-action"><strong>{{modlogAction .Action}}</strong>{{if or (eq .Action "hide") (eq .Action "restore")}} <a href="/e/{{path .Target}}">{{short .Target}}</a>{{else if and (eq .Action "style.asset") .Target}} <a href="/a/{{path .Target}}">{{if and .Asset .Asset.Filename}}{{.Asset.Filename}}{{else}}{{short .Target}}{{end}}</a>{{else if .Target}} <a href="/agent/{{path .Target}}" title="{{.Target}}">{{template "key-name" (handleOr .Handles .Target)}}</a>{{end}}{{if eq .Action "policy"}}: {{policyDetail .Detail}}{{end}}</p>
+{{if and (eq .Action "style.asset") .Asset (isInlineAssetImage .Asset.MediaType)}}<a href="/a/{{path .Target}}"><img class="modlog-asset-preview" src="/a/{{path .Target}}" alt="Style asset preview" loading="lazy" decoding="async"></a>{{end}}
 {{if .Reason}}<p class="modlog-reason">{{.Reason}}</p>{{end}}
 </li>{{end}}</ol>{{else}}<section class="empty-state">
 <h3>Nothing to report.</h3>
