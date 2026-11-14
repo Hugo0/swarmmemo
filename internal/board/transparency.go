@@ -772,8 +772,35 @@ type LogInclusion struct {
 	SignedPayload string  `json:"signed_payload,omitempty"`
 	// Anchor is the Bitcoin anchor of the first checkpoint covering the leaf
 	// (pending, then confirmed with its block), so the leaf's time bracket
-	// and its lag are visible; prove against it with size=anchor.size.
+	// and its lag are visible; prove against it with size=anchor.size. Nil
+	// here before one exists; Answer turns that into {"state":"none"}.
 	Anchor *LogAnchor `json:"anchor,omitempty"`
+}
+
+// AnchorNone is a proof answer's anchor state while no checkpoint covering
+// its leaf has been submitted to OpenTimestamps: the proof rests on the log's
+// signature alone, with nothing on Bitcoin yet.
+const AnchorNone = "none"
+
+// MarshalJSON writes an AnchorNone anchor as {"state":"none"}: no size,
+// digest or timeline exist for it. Every other anchor is written as is.
+func (a LogAnchor) MarshalJSON() ([]byte, error) {
+	if a.State == AnchorNone {
+		return []byte(`{"state":"` + AnchorNone + `"}`), nil
+	}
+	type plain LogAnchor
+	return json.Marshal(plain(a))
+}
+
+// Answer is p as /api/log/proof and log_proof answer it: Anchor is always
+// set, {"state":"none"} until a checkpoint covering the leaf is submitted to
+// OpenTimestamps, so a 200 never reads as Bitcoin-settled by omission.
+// "confirmed" comes only from the anchors table (as /api/log/anchors).
+func (p LogInclusion) Answer() LogInclusion {
+	if p.Anchor == nil {
+		p.Anchor = &LogAnchor{State: AnchorNone}
+	}
+	return p
 }
 
 // withAnchor sets a proof's Anchor (top-level proofs only).
@@ -965,7 +992,20 @@ func (s *Store) pendingLeaf(ctx context.Context, index int64, cp LogCheckpoint, 
 		d.Promise = LogPromisePath + "?message=" + id
 	}
 	return &Error{Status: 409, Code: "not_in_checkpoint_yet", RetryAfter: int(wait), Details: d,
-		Message: fmt.Sprintf("Leaf %d is in the log but not in a signed checkpoint yet: the latest covers leaves 0 to %d. The next checkpoint is due within %d seconds; retry then.", index, cp.Size-1, wait)}
+		Message: fmt.Sprintf("Leaf %d is not covered by a signed checkpoint (tree head) yet: it is in the log, but the latest checkpoint covers leaves 0 to %d. Checkpoints are signed every %s; retry after the next one, due within %d seconds (Retry-After).", index, cp.Size-1, everyText(every), wait)}
+}
+
+// everyText says a checkpoint interval in seconds plainly ("15 minutes").
+func everyText(every int64) string {
+	switch {
+	case every == 60:
+		return "minute"
+	case every%60 == 0:
+		return strconv.FormatInt(every/60, 10) + " minutes"
+	case every == 1:
+		return "second"
+	}
+	return strconv.FormatInt(every, 10) + " seconds"
 }
 
 // refProof proves the first leaf with ref against cp, with the later leaves
@@ -2017,6 +2057,7 @@ func (s *Store) ReadRecordProofs(ctx context.Context, who, cursor string, limit 
 		if err != nil {
 			return RecordProofs{}, err
 		}
+		proof = proof.Answer()
 		p.LeafIndex, p.Proof = &proof.Leaf.Index, &proof
 	}
 	return out, nil

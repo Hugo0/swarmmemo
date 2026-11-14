@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -639,8 +640,9 @@ func TestProofOfLeafAfterTheCheckpointSaysWhenToRetry(t *testing.T) {
 		if e.RetryAfter < 1 || int64(e.RetryAfter) > int64(CheckpointEveryDefault.Seconds()) {
 			t.Fatalf("%s: retry_after %d", what, e.RetryAfter)
 		}
-		if !strings.Contains(e.Message, "retry") {
-			t.Fatalf("%s: the message should say to retry: %q", what, e.Message)
+		if !strings.Contains(e.Message, "not covered by a signed checkpoint (tree head) yet") ||
+			!strings.Contains(e.Message, "signed every 15 minutes; retry after the next one") {
+			t.Fatalf("%s: the message should say the leaf is not covered yet and when to retry: %q", what, e.Message)
 		}
 	}
 	_, err = s.ReadLogProof(testContext, -1, id, -1)
@@ -686,5 +688,78 @@ func TestProofOfLeafAfterTheCheckpointSaysWhenToRetry(t *testing.T) {
 	}
 	if again.Checkpoint.Note != quoted.Checkpoint.Note || strings.Join(again.Proof, ",") != strings.Join(quoted.Proof, ",") {
 		t.Fatal("a proof against a named checkpoint changed after the log grew")
+	}
+}
+
+// C972: an outside agent read a 200 proof as Bitcoin-settled while the only
+// confirmed anchor was below its leaf and the covering one did not exist yet.
+// A proof answer always carries anchor: none, then pending, then confirmed
+// with its bitcoin_height, as the anchors table says and never otherwise.
+func TestProofAnswerAnchorState(t *testing.T) {
+	s := openTest(t, Config{})
+	steppingClock(s)
+	buildHistory(t, s)
+	if _, err := s.SignCheckpoint(testContext); err != nil {
+		t.Fatal(err)
+	}
+	below, err := s.ReadLogCheckpoint(testContext, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(t, s, Command{Operation: "post", Room: "lobby", Text: "after the confirmed anchor"})
+	if _, err := s.SignCheckpoint(testContext); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := s.ReadLogCheckpoint(testContext, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := cp.Size - 1
+	if last < below.Size || below.Size < 1 {
+		t.Fatalf("checkpoints %d then %d", below.Size, cp.Size)
+	}
+	anchor := func(leaf int64) (*LogAnchor, string) {
+		t.Helper()
+		p, err := s.ReadLogProof(testContext, leaf, "", -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := json.Marshal(p.Answer())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			Anchor json.RawMessage `json:"anchor"`
+		}
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatal(err)
+		}
+		return p.Answer().Anchor, string(out.Anchor)
+	}
+	if a, raw := anchor(last); a.State != AnchorNone || raw != `{"state":"none"}` {
+		t.Fatalf("no anchor yet: %+v %s", a, raw)
+	}
+	// A confirmed anchor below the leaf does not cover it.
+	if _, err := s.db.Exec("INSERT INTO tlog_anchors(size,digest,ots,state,bitcoin_height,calendars,submitted_at,checked_at) VALUES(?,'d',x'00','confirmed',975755,'',?,?)", below.Size, testTime, testTime+3600); err != nil {
+		t.Fatal(err)
+	}
+	if a, raw := anchor(last); a.State != AnchorNone || raw != `{"state":"none"}` {
+		t.Fatalf("a confirmed anchor below the leaf: %+v %s", a, raw)
+	}
+	if a, _ := anchor(0); a.State != "confirmed" || a.BitcoinHeight != 975755 || a.Size != below.Size {
+		t.Fatalf("leaf 0 under the confirmed anchor: %+v", a)
+	}
+	if _, err := s.db.Exec("INSERT INTO tlog_anchors(size,digest,ots,state,calendars,submitted_at) VALUES(?,'d',x'00','pending','',?)", cp.Size, testTime+10); err != nil {
+		t.Fatal(err)
+	}
+	a, raw := anchor(last)
+	if a.State != "pending" || a.Size != cp.Size || strings.Contains(raw, "bitcoin_height") || !strings.Contains(raw, `"size":`+strconv.FormatInt(cp.Size, 10)) {
+		t.Fatalf("pending: %+v %s", a, raw)
+	}
+	if _, err := s.db.Exec("UPDATE tlog_anchors SET state='confirmed',bitcoin_height=975760,checked_at=? WHERE size=?", testTime+4000, cp.Size); err != nil {
+		t.Fatal(err)
+	}
+	if a, raw = anchor(last); a.State != "confirmed" || a.BitcoinHeight != 975760 || !strings.Contains(raw, `"bitcoin_height":975760`) {
+		t.Fatalf("confirmed: %+v %s", a, raw)
 	}
 }

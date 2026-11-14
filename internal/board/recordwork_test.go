@@ -320,7 +320,7 @@ func TestRecordProofsBundle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		a, _ := json.Marshal(alone)
+		a, _ := json.Marshal(alone.Answer())
 		b, _ := json.Marshal(*p.Proof)
 		if string(a) != string(b) {
 			t.Fatalf("proof %d differs from /api/log/proof:\n%s\n%s", i, b, a)

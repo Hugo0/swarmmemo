@@ -166,7 +166,7 @@
     {
       "mode": "0644",
       "path": "clients/mcp/uv.lock",
-      "sha256": "183d3a63be74f4e3ec0cb9bf5a5c46df4c847ba5d8e196c56ad9dffdcf4f7d16",
+      "sha256": "194c89c3405b681b88cd43a12fe12dbede1925a5b700b1c6845b895e2fec7053",
       "size": 136820
     },
     {
@@ -970,8 +970,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "0a85faab42a038b58aa2bf8c0bb16ade3610c6a2c3836e11d569b211c307188b",
-      "size": 679577
+      "sha256": "08e4426b8227f46c9df9758911a0f3eacfd52c686431c6d9bff830e7b23a1fd3",
+      "size": 679910
     },
     {
       "mode": "0644",
@@ -1090,8 +1090,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_VERIFY.md",
-      "sha256": "fd61ba76c4d70419aecfab00775e783697b3b337fbc4b4ca01130dbc09f853bd",
-      "size": 3409
+      "sha256": "480a9600560c188849a92ada4f14c9617c8c39464631a15cf332b8cc5cf4676f",
+      "size": 3538
     },
     {
       "mode": "0644",
@@ -2572,8 +2572,8 @@
     {
       "mode": "0644",
       "path": "internal/board/logpromise.go",
-      "sha256": "98d414ef083f2d84192bfb73bd71dd0131ca4acdfb271a252d8b89b78aec2bbd",
-      "size": 9045
+      "sha256": "9048266e16b051d9bbb6639018fb7d083e04a0373802ddd01acd4a966a9b4799",
+      "size": 9069
     },
     {
       "mode": "0644",
@@ -3202,8 +3202,8 @@
     {
       "mode": "0644",
       "path": "internal/board/recordwork_test.go",
-      "sha256": "ec3bdb0a759d361bf5a2c33c6a3add713a63d29fae029d033cf7d2a137ad14d8",
-      "size": 17220
+      "sha256": "1278ee154dfaec77eb8e9144b4d346a7164c416c87f3f242d248fbe1a5f31958",
+      "size": 17229
     },
     {
       "mode": "0644",
@@ -4096,14 +4096,14 @@
     {
       "mode": "0644",
       "path": "internal/board/transparency.go",
-      "sha256": "f76e19278909a692b78180ddbd2beaee267b64d6c630ace73019427b6ccd3011",
-      "size": 83033
+      "sha256": "a7b1ec1a7c04e7d8978dd1f7c6074f6b1fb07ff8fca0251ef3282fb501649576",
+      "size": 84545
     },
     {
       "mode": "0644",
       "path": "internal/board/transparency_test.go",
-      "sha256": "b85c064add439663bd845ed945780fbc160e09f1e57285a32e47f5200e39cf7a",
-      "size": 27420
+      "sha256": "8578e6233ed29e72669c36b2b28f7181b19039e7d89a870fc97baaba36ca3da5",
+      "size": 30471
     },
     {
       "mode": "0644",
@@ -5248,8 +5248,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/anchor_timeline_test.go",
-      "sha256": "58d787219ce69080fed3698c0651f95b60ddb308eb3634360715f892bf8c5e34",
-      "size": 2784
+      "sha256": "484c320190da204448eea59b94eb536081759fac87085d47cd4542003a7274e2",
+      "size": 3104
     },
     {
       "mode": "0644",
@@ -6940,8 +6940,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/transparency.go",
-      "sha256": "d8e0cff5e8343df465f66c535dcc275931bad1bf77346bcc43911594e4f7f943",
-      "size": 19898
+      "sha256": "9eb3de0c94ea9cdf60cd63fef1466246b76183cd13e6b692c2166198e7787641",
+      "size": 20060
     },
     {
       "mode": "0644",

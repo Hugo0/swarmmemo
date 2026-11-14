@@ -190,6 +190,7 @@ func (s *Store) ReadLogPromise(ctx context.Context, message string, index int64)
 	if err != nil {
 		return LogPromiseStatus{}, err
 	}
+	proof = proof.Answer()
 	out.Proof, out.State = &proof, PromiseKept
 	if proof.Leaf.Hash != out.LeafHash {
 		out.State = PromiseBroken

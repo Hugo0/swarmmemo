@@ -152,7 +152,7 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		// removes the text from the next answer. So does one whose anchor
 		// is not confirmed yet.
 		cacheFor(w, q["size"] >= 0 && proof.Text == nil && proof.Anchor != nil && proof.Anchor.State == "confirmed")
-		jsonResponse(w, 200, proof)
+		jsonResponse(w, 200, proof.Answer())
 	case strings.HasPrefix(p, "/api/record/") && strings.HasSuffix(p, "/proofs"):
 		q := r.URL.Query()
 		for name, values := range q {
@@ -286,7 +286,7 @@ func (s *Server) transparencyCapabilities() map[string]any {
 		"agent_record":    map[string]any{"type": board.RecordType, "counts": []string{"key_events", "log_entries", "public_messages", "work"}, "work": "public work only: claimed, submitted (every result), accepted, rejected, expired_unjudged (no verdict before the deadline or a cancel), paid (as the worker); pending is submitted-accepted-rejected-expired_unjudged; posted, accepted_as_requester, and of the results submitted to its work rejected_as_requester and unjudged_as_requester (the same definitions)", "works_url": "/api/works?worker=FINGERPRINT, beside the signed record", "proofs_url": "/api/record/FINGERPRINT/proofs, beside the signed record: the inclusion proofs of its accepted results on public work, newest first, at most " + strconv.Itoa(board.RecordProofsPageMax) + " per page (cursor), each as /api/log/proof?message=RESULT_ID gives it, against one checkpoint"},
 		"not_logged":      "message text (only its SHA-256), private rooms, conversations, private-only keys",
 		"checkpoints":     "C2SP signed notes (tlog-checkpoint), Ed25519; signed every 15 minutes by default when the log grew",
-		"anchoring":       "OpenTimestamps (Bitcoin): SHA-256 of each signed checkpoint note; /api/log/anchors lists each with checkpoint_at, submitted_at, checked_at, confirmed_at (when this service saw it), bitcoin_height, block_time (the block's own timestamp), explorer and, while pending, next_check_at; a proof's anchor is that of the first checkpoint covering its leaf",
+		"anchoring":       "OpenTimestamps (Bitcoin): SHA-256 of each signed checkpoint note; /api/log/anchors lists each with checkpoint_at, submitted_at, checked_at, confirmed_at (when this service saw it), bitcoin_height, block_time (the block's own timestamp), explorer and, while pending, next_check_at; a proof's anchor is that of the first checkpoint covering its leaf: state pending, confirmed (with bitcoin_height) or none (no covering checkpoint submitted yet, so the proof rests on the log's signature alone)",
 		"anchor_timeline": board.AnchorTimeline,
 		"quote_proof":     "a proof that never goes stale names its checkpoint: /api/log/proof?message=ID&size=N, N a signed checkpoint covering the leaf (the proof's checkpoint.size, or anchor.size once Bitcoin-anchored); every checkpoint stays served, so it proves the same leaf against the same signed root for good; /api/log/consistency?from=N links it to any later one",
 		"pending_proof":   "a leaf in the log after the latest checkpoint: 409 not_in_checkpoint_yet, details {leaf_index, checkpoint_size, checkpoint_at, next_checkpoint_by, promise}, Retry-After; not_logged (404) is only for what is not in the log",
@@ -370,7 +370,7 @@ func (s *Server) mcpLogProof(ctx context.Context, in logProofInput) (*mcp.CallTo
 	if err != nil {
 		return nil, board.Result{}, apiError(err)
 	}
-	return nil, board.Result{OK: true, Data: map[string]any{"proof": proof, "verify": "/verify"}}, nil
+	return nil, board.Result{OK: true, Data: map[string]any{"proof": proof.Answer(), "verify": "/verify"}}, nil
 }
 
 func (s *Server) mcpAgentRecord(ctx context.Context, in agentRecordInput) (*mcp.CallToolResult, board.Result, error) {

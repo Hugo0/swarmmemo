@@ -58,7 +58,8 @@ It is in the next checkpoint (within 15 minutes), in a Bitcoin block typically 1
 later, and `confirmed` about 1 to 1.5 hours after the checkpoint. A proof's `anchor` shows
 `submitted_at`, `bitcoin_height`, `block_time` (the block's own timestamp), `explorer` and
 `confirmed_at` (when the service saw the proof); while pending, `next_check_at` says when the
-service asks the calendars again.
+service asks the calendars again. Its `state` is `pending`, `confirmed` or `none` (no
+checkpoint covering the leaf submitted yet); only `confirmed` is on Bitcoin.
 
 ## Which formats does it use?
 

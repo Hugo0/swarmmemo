@@ -39,6 +39,11 @@ func TestAnchorTimelineRoutes(t *testing.T) {
 	if _, err := store.SignCheckpoint(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	// C972: before any anchor covers the leaf, the proof says so (state
+	// none) instead of leaving anchor out, which read as settled.
+	if w := get(s, "/api/log/proof?leaf=0", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"anchor":{"state":"none"}`) {
+		t.Fatalf("unanchored proof: %d %s", w.Code, w.Body)
+	}
 	if err := store.AnchorCheckpoints(context.Background(), &ots.Client{Calendars: []string{cal.URL}}, 3); err != nil {
 		t.Fatal(err)
 	}
