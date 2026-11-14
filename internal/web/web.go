@@ -131,7 +131,7 @@ type page struct {
 	// Gate is what the composer and memo controls may offer in this room.
 	Gate *roomGate
 	// ModLog is a room's public moderation log, on /modlog/ROOM.
-	ModLog []board.ModerationEntry
+	ModLog []modlogEntry
 	// Canonical is the page's canonical path and OG its OpenGraph tags. A
 	// conversation page sets both from its post; finishMetadata fills the rest.
 	Canonical string
@@ -383,6 +383,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"waysToPost":   waysToPost,
 	"policyDetail": policyDetail,
 	"modlogAction": modlogAction,
+	"inlineImage":  func(mediaType string) bool { return board.InlineImageType(mediaType) != "" },
 	"agentKey":     agentKey,
 	"handleOr":     handleOr,
 	"nameKey":      nameKey,
@@ -1041,7 +1042,7 @@ func Handler(service board.Service) http.Handler {
 		case ServiceFeatures(service).Reviews && strings.HasPrefix(r.URL.Path, "/rubrics/"):
 			status = loadRubric(r, &p)
 		case strings.HasPrefix(r.URL.Path, "/modlog/"):
-			if status = loadModlog(r, &p, execute); status != 200 {
+			if status = loadModlog(r, &p, service, execute); status != 200 {
 				p.View = "missing"
 			}
 		case r.URL.Path == "/agents":

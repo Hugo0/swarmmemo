@@ -140,11 +140,9 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	if b.Deleted || blobExpired(b.ExpiresAt, now) {
 		return Result{}, problem(410, "attachment_gone", "This attachment was deleted, or the ttl its uploader set has passed.")
 	}
-	var total, visible int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(CASE WHEN e.hidden=0 THEN 1 ELSE 0 END),0) FROM event_attachments ea JOIN events e ON e.id=ea.event_id WHERE ea.blob_id=?", id).Scan(&total, &visible); err != nil {
+	if hidden, err := blobHiddenOnly(ctx, tx, id); err != nil {
 		return Result{}, err
-	}
-	if total > 0 && visible == 0 {
+	} else if hidden {
 		return Result{}, errAttachmentNotFound()
 	}
 	var data []byte
@@ -152,6 +150,16 @@ func (s *Store) blob(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 		return Result{}, err
 	}
 	return Result{Data: map[string]any{"blob": b, "data": base64.RawURLEncoding.EncodeToString(data)}}, nil
+}
+
+// blobHiddenOnly reports that every post naming the blob is hidden: such a
+// file is withheld like its posts. A blob no post names is not hidden.
+func blobHiddenOnly(ctx context.Context, q rowQuerier, id string) (bool, error) {
+	var refs, visible int
+	if err := q.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(CASE WHEN e.hidden=0 THEN 1 ELSE 0 END),0) FROM event_attachments ea JOIN events e ON e.id=ea.event_id WHERE ea.blob_id=?", id).Scan(&refs, &visible); err != nil {
+		return false, err
+	}
+	return refs > 0 && visible == 0, nil
 }
 
 func (s *Store) attachToPost(ctx context.Context, tx *sql.Tx, c Command, eventID string, now int64) error {
@@ -175,11 +183,9 @@ func (s *Store) attachToPost(ctx context.Context, tx *sql.Tx, c Command, eventID
 			return problem(410, "attachment_gone", "An attachment was deleted or expired; upload a new copy.")
 		}
 		// A hidden-only reference cannot be republished to circumvent moderation.
-		var refs, visible int
-		if err = tx.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(CASE WHEN e.hidden=0 THEN 1 ELSE 0 END),0) FROM event_attachments ea JOIN events e ON e.id=ea.event_id WHERE ea.blob_id=?", id).Scan(&refs, &visible); err != nil {
+		if hidden, err := blobHiddenOnly(ctx, tx, id); err != nil {
 			return err
-		}
-		if refs > 0 && visible == 0 {
+		} else if hidden {
 			return errAttachmentNotInRoom()
 		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO event_attachments(event_id,blob_id,position) VALUES(?,?,?)", eventID, id, position); err != nil {

@@ -1195,6 +1195,7 @@ code.link-value{font-size:var(--t-meta)}
 .modlog-meta a{color:var(--ink-2)}
 .modlog-action{font-size:var(--t-ui);margin-bottom:var(--s-1);overflow-wrap:anywhere}
 .modlog-reason{font-size:var(--t-ui);color:var(--ink-2);white-space:pre-line;overflow-wrap:anywhere;margin:0}
+.modlog-asset{object-fit:contain;border:1px solid var(--line)}
 
 /* ---------- responsive ---------- */
 @media(max-width:850px){

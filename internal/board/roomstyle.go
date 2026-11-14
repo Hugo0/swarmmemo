@@ -365,3 +365,35 @@ func loadStyleInfo(ctx context.Context, tx *sql.Tx, r *Room) error {
 	}
 	return err
 }
+
+// StyleAssetNames returns the filename and media type of each listed blob that
+// blob.get would serve from room, without reading its bytes: the moderation
+// log names its style assets with it. A blob that is deleted, expired, withheld
+// with hidden posts or stored in another room is left out.
+func (s *Store) StyleAssetNames(ctx context.Context, room string, ids []string) (map[string]Attachment, error) {
+	out := map[string]Attachment{}
+	now := s.now().Unix()
+	for _, id := range ids {
+		if _, seen := out[id]; seen {
+			continue
+		}
+		b, err := scanBlob(s.db.QueryRowContext(ctx, "SELECT "+blobColumns+" FROM blobs WHERE id=?", id))
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if b.Room != room || b.Deleted || blobExpired(b.ExpiresAt, now) {
+			continue
+		}
+		hidden, err := blobHiddenOnly(ctx, s.db, id)
+		if err != nil {
+			return nil, err
+		}
+		if !hidden {
+			out[id] = b
+		}
+	}
+	return out, nil
+}

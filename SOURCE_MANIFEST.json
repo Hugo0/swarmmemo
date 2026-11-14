@@ -34,8 +34,8 @@
     {
       "mode": "0644",
       "path": "CONTRIBUTORS.md",
-      "sha256": "cc89f008d9796aa19692c37e24a2af42dabcda1a6436e08db696d8d40bc7a61e",
-      "size": 18434
+      "sha256": "855dd02ab2fc170537f814dc2c738621f59468ab1fca0e6c628030414ff8a5e4",
+      "size": 18501
     },
     {
       "mode": "0644",
@@ -1648,8 +1648,8 @@
     {
       "mode": "0644",
       "path": "internal/board/blobs.go",
-      "sha256": "4a3c17c1522b780b1373798a5edc2780071ecb5dc0bd42256bea44c4032c302b",
-      "size": 11250
+      "sha256": "530f314900a32486703f388da08b142ee04296c56dd4bd37ea360a32f5f5f104",
+      "size": 11382
     },
     {
       "mode": "0644",
@@ -3400,8 +3400,8 @@
     {
       "mode": "0644",
       "path": "internal/board/roomstyle.go",
-      "sha256": "2b4ef60c72165c16188c432f537e43c52bb0bda7b679eb163a9bb73ae8e2a675",
-      "size": 14839
+      "sha256": "6aef5e5ee542dcb33f25a3e55aa37c932f3f5facc28df61dfce2d7eed4fb72f2",
+      "size": 15802
     },
     {
       "mode": "0644",
@@ -10192,8 +10192,8 @@
     {
       "mode": "0644",
       "path": "internal/web/assets/style.css",
-      "sha256": "95f5a5f90584b8921477424de6404d48f60b254a2151db94dbd8b7dcbb0bce88",
-      "size": 158216
+      "sha256": "a13266d81101baafef1363c957073f8eec1f6cf5839b3a7218bafd2838fcc33a",
+      "size": 158279
     },
     {
       "mode": "0644",
@@ -10984,8 +10984,8 @@
     {
       "mode": "0644",
       "path": "internal/web/modlog_style_asset_test.go",
-      "sha256": "78b086155a8cb192a41c0834436024d62f18f9d1f5acc4e11cf912efa5722e42",
-      "size": 1133
+      "sha256": "c83ebb925e0c7342904fe28dd67766ba680f29410455e0cd32ff067844374717",
+      "size": 4715
     },
     {
       "mode": "0644",
@@ -11206,8 +11206,8 @@
     {
       "mode": "0644",
       "path": "internal/web/rooms.go",
-      "sha256": "3147dbadd69b11bce109c220a61a4995145de6402d1d5a0ea05ad82db7d01c18",
-      "size": 14476
+      "sha256": "259af4e07253873fdcd40af73f2b7fb1eea9a556552f0c64e9a15bbd98dcb244",
+      "size": 15939
     },
     {
       "mode": "0644",
@@ -11590,8 +11590,8 @@
     {
       "mode": "0644",
       "path": "internal/web/templates/rooms.html",
-      "sha256": "720c316fc174b7457183df240f4ae70908455cfaea26d1a55ef697256ab4e1f7",
-      "size": 11083
+      "sha256": "966e8219d469adb80c08936616a9e4277d7129469039e0633f18f2997e288832",
+      "size": 11380
     },
     {
       "mode": "0644",
@@ -11764,8 +11764,8 @@
     {
       "mode": "0644",
       "path": "internal/web/web.go",
-      "sha256": "859da96d69c3353bafbb377c102b375610ee595b919c63b30b3dc39bac27a003",
-      "size": 61664
+      "sha256": "c29898d0bf9ff2d7d8c2895049d1bb4232d4d93790dc99425ffccaf50876f855",
+      "size": 61759
     },
     {
       "mode": "0644",

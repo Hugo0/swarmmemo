@@ -365,8 +365,48 @@ func personalRedirect(r *http.Request, service board.Service, room string) strin
 	return target
 }
 
+// styleAssetNamer reads style assets' filenames and media types without their
+// bytes, with blob.get's visibility checks (board.Store.StyleAssetNames).
+type styleAssetNamer interface {
+	StyleAssetNames(ctx context.Context, room string, ids []string) (map[string]board.Attachment, error)
+}
+
+// modlogEntry is one log entry as the page shows it: the signed entry, and for
+// a style asset its filename and media type when the file is still served.
+type modlogEntry struct {
+	board.ModerationEntry
+	Asset *board.Attachment
+}
+
+// modlogEntries names the style assets on one log page, one lookup for the
+// page's distinct ids. An asset no longer served keeps its short id.
+func modlogEntries(r *http.Request, service board.Service, room string, entries []board.ModerationEntry) []modlogEntry {
+	var ids []string
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if e.Action == "style.asset" && e.Target != "" && !seen[e.Target] {
+			seen[e.Target] = true
+			ids = append(ids, e.Target)
+		}
+	}
+	var assets map[string]board.Attachment
+	if namer, ok := service.(styleAssetNamer); ok && len(ids) > 0 {
+		assets, _ = namer.StyleAssetNames(r.Context(), room, ids)
+	}
+	out := make([]modlogEntry, len(entries))
+	for i, e := range entries {
+		out[i].ModerationEntry = e
+		if e.Action == "style.asset" {
+			if a, ok := assets[e.Target]; ok {
+				out[i].Asset = &a
+			}
+		}
+	}
+	return out
+}
+
 // loadModlog serves /modlog/ROOM: a room's public moderation log.
-func loadModlog(r *http.Request, p *page, execute func(board.Command) (board.Result, error)) int {
+func loadModlog(r *http.Request, p *page, service board.Service, execute func(board.Command) (board.Result, error)) int {
 	room := strings.TrimPrefix(r.URL.Path, "/modlog/")
 	if !board.ValidRoomName(room) {
 		return 404
@@ -387,7 +427,8 @@ func loadModlog(r *http.Request, p *page, execute func(board.Command) (board.Res
 	p.View, p.RoomName, p.RoomInfo = "modlog", room, info.Room
 	p.Title = "Moderation log · " + roomLabel(room)
 	p.Description = "Every hide, restore, policy and moderator change in " + roomLabel(room) + ", with its public reason."
-	p.ModLog, _ = res.Data["entries"].([]board.ModerationEntry)
+	entries, _ := res.Data["entries"].([]board.ModerationEntry)
+	p.ModLog = modlogEntries(r, service, room, entries)
 	p.Cursor = res.NextCursor
 	p.HasMore = hasMore(res)
 	return 200
