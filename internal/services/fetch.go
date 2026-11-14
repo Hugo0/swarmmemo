@@ -822,7 +822,7 @@ func fetchCostNote(price Price, cached, screenCharged, screenReused bool, used, 
 	b.WriteString(": cost is " + price.Words() + " of text returned")
 	switch {
 	case screenCharged:
-		b.WriteString(", plus screening: " + ScreenSurchargeText() + ` ("screen": false turns it off)`)
+		b.WriteString(", plus screening: " + ScreenSurchargeText() + ` ("screen": false turns it off; screen=false on a /call/ URL)`)
 		// The numbers too (C801): a caller budgeting from JSON reads cost and
 		// cost_split.fetch, and the note says which is which.
 		b.WriteString(". This call cost " + fmt.Sprint(used) + " (cost), " + fmt.Sprint(fetchUsed) + ` of it the fetch (cost_split.fetch, the price with "screen": false)`)

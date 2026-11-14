@@ -1089,6 +1089,7 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 	// Inside call_swarmmemo_tool's dispatch: reads return compact messages
 	// unless full (C877).
 	server.AddReceivingMiddleware(compactMessageReads())
+	server.AddReceivingMiddleware(leadCallResults()) // C977: a call answer leads with its result
 	// Sign-in (OAuth): refusals carry the challenge that starts it, and the
 	// tools say which need it.
 	signIn := s.oauthStore() != nil

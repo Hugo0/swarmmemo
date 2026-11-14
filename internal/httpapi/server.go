@@ -709,6 +709,10 @@ func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Com
 		s.addImageURLs(&res)
 	}
 	if wantsJSON(r) || strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/v1/command" || strings.HasPrefix(r.URL.Path, "/v1/gate/") {
+		if isCallAnswer(r) {
+			callAnswerResponse(w, 200, res) // led by the tool's result (C977)
+			return
+		}
 		jsonResponse(w, 200, res)
 		return
 	}
