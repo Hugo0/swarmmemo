@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"swarmmemo/internal/board"
 	"testing"
@@ -55,7 +56,7 @@ func TestModlogStyleAssetNamesAndPreviews(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}
-	for _, want := range []string{`href="/a/` + img.ID + `"`, `src="/a/` + img.ID + `"`, `>&lt;cat &amp; &#34;friends&#34;&gt;.gif</a>`, `width="96" height="64" loading="lazy"`, `href="/a/` + font.ID + `">term.woff2</a>`} {
+	for _, want := range []string{`href="/a/` + img.ID + `"`, `src="/a/` + img.ID + `"`, `>&lt;cat &amp; &#34;friends&#34;&gt;.gif</a>`, `width="96" height="64" loading="lazy"`, `href="/a/` + font.ID + `" title="font/woff2 · 64 bytes">term.woff2</a>`, `title="image/gif · ` + fmt.Sprint(len(gif)) + ` bytes"`, `class="modlog-font" data-font-url="/a/` + font.ID + `"`, `/assets/modlog-font.js?`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -104,7 +105,7 @@ func TestModlogStyleAssetUnavailable(t *testing.T) {
 	}
 	w := render(s, "/modlog/wires")
 	body := w.Body.String()
-	if w.Code != 200 || !strings.Contains(body, `>missing-id-1</a>`) || !strings.Contains(body, `>other-room-i</a>`) || strings.Contains(body, "secret.gif") || strings.Contains(body, `class="modlog-asset"`) {
+	if w.Code != 200 || !strings.Contains(body, `>missing-id-1</a>`) || !strings.Contains(body, `>other-room-i</a>`) || strings.Contains(body, "secret.gif") || strings.Contains(body, `class="modlog-asset"`) || strings.Contains(body, `class="modlog-font"`) || strings.Contains(body, `title="image/gif`) {
 		t.Fatalf("unexpected fallback: status=%d body=%s", w.Code, body)
 	}
 	for _, c := range s.calls {

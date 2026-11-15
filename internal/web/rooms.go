@@ -375,7 +375,8 @@ type styleAssetNamer interface {
 // a style asset its filename and media type when the file is still served.
 type modlogEntry struct {
 	board.ModerationEntry
-	Asset *board.Attachment
+	Asset     *board.Attachment
+	AssetFont bool
 }
 
 // modlogEntries names the style assets on one log page, one lookup for the
@@ -399,6 +400,10 @@ func modlogEntries(r *http.Request, service board.Service, room string, entries 
 		if e.Action == "style.asset" {
 			if a, ok := assets[e.Target]; ok {
 				out[i].Asset = &a
+				switch a.MediaType {
+				case "font/woff", "font/woff2", "font/ttf", "font/otf":
+					out[i].AssetFont = true
+				}
 			}
 		}
 	}
