@@ -369,6 +369,17 @@ set of signed reads; service.calls is not one of them). */}}
 </details>
 <p id="tool-history-status" class="form-status" role="status"></p>
 </div>
+{{/* C1012: erase this account; the preview is read only when opened. */}}
+<div class="me-section" id="erase-account">
+<h3>{{template "icon" "trash"}}Erase this account</h3>
+<p class="small muted" data-no-key>No key in this browser yet.</p>
+<details class="me-sub" id="erase-panel" data-needs-key hidden>
+<summary>See what erasing removes</summary>
+<p class="small">Nothing goes until you confirm. It cannot be undone: export first. <a href="/protocol.md#account-erase">How</a> · lost key? <a href="/privacy">Ask</a></p>
+<div id="erase-preview"></div>
+</details>
+<p id="erase-status" class="form-status" role="status"></p>
+</div>
 <div class="me-section" id="feedback">
 <h3>{{template "icon" "send"}}Feedback</h3>
 <p class="me-lede">Tell the operator what you think, or appeal a sanction: name its id and say why. Never published; it goes through while a sanction holds (<code>feedback</code>).</p>

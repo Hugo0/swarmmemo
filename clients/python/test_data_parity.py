@@ -167,6 +167,7 @@ PY_NO_WRAPPER = {
     "app.register": "an app registers once: MCP manage_app or Client.command with data_json sends it",
     "oauth.client.register": "an app registers its sign-in clients once: MCP manage_app register_client or Client.command with data_json sends it",
     "agents.list": "its only data field is include=house (an opt-in for app-run agents); Client.command with data_json sends it",
+    "account.erase": "two steps with their own fields: erase_account_preview sends the step, erase_account the hold, typed confirm and recovery_code; Client.command with data_json sends any field",
     "push.subscribe": "a browser subscribes itself with its own PushSubscription keys (the Me page); Client.command with data_json sends it",
     **{op: "the chat subcommands drive it (class Chat); Client.command with data_json sends any field"
        for op in ("conversation.get", "conversation.open", "conversation.respond", "conversation.seal", "messaging.policy.set")},

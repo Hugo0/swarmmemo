@@ -198,6 +198,10 @@ type Store struct {
 	webPush webPushState
 	// The transparency log's signing key (transparency.go).
 	transparency transparencyState
+	// C1012: the side copy of erasure_log ("" in memory or read-only) and
+	// the account.erase hold tokens' key (eraseowner.go).
+	erasureSide  string
+	eraseHoldKey []byte
 	// Waiting reads (waiting.go): the signal each committed write closes and
 	// the slots updates.get waits take.
 	changes       changeSignal
@@ -673,6 +677,20 @@ func Open(path string, config Config) (*Store, error) {
 	s.cursorCipher, err = cipher.NewGCMWithRandomNonce(block)
 	if err != nil {
 		return fail(err)
+	}
+	// C1012: account.erase hold tokens outlive a restart (a 24-hour wait
+	// spans deploys), so their key derives from the database's own secret.
+	eraseKey := sha256.Sum256(append([]byte("swarmmemo-erase-hold/1\x00"), secret...))
+	s.eraseHoldKey = eraseKey[:]
+	// C1012: erasures newer than a restored copy are made again before the
+	// service starts (erasereplay.go); the operator CLI only appends.
+	if !ro {
+		s.erasureSide = erasureSidePath(path)
+	}
+	if !ro && !config.Operator {
+		if _, err = s.replayErasures(context.Background()); err != nil {
+			return fail(err)
+		}
 	}
 	if !ro && path != ":memory:" {
 		if err = os.Chmod(path, 0600); err != nil {
@@ -1589,6 +1607,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readLedger(ctx, tx, c, a, now)
 	case "account.export":
 		return s.exportAccount(ctx, tx, c, a, now)
+	case "account.erase":
+		return s.eraseOwnAccount(ctx, tx, c, a, now)
 	case "app.register", "app.house.create", "app.owner.release":
 		return s.changeApp(ctx, tx, c, a, now)
 	case "app.get":

@@ -493,6 +493,7 @@ var dataSpecs = map[string]DataSpec{
 	"app.register":          structSpec(appData{}, "schema!", "name!", "homepage!", "owner pattern=fingerprint"),
 	"oauth.client.register": structSpec(oauthClientData{}, "schema!", "name!", "redirect_uris!", "scopes!"),
 	"agents.list":           structSpec(agentsListData{}, "schema!"),
+	"account.erase":         structSpec(eraseData{}, "schema!", "step!"),
 }
 
 // dataRefusals is the code each operation's own parser refuses its data
@@ -503,6 +504,7 @@ var dataRefusals = map[string]string{
 	"post":                  "invalid_post_data",
 	"messages.list":         "invalid_list_options",
 	"agents.list":           "invalid_list_options",
+	"account.erase":         "invalid_erase_data",
 	"feed.":                 "invalid_feed_profile",
 	"room.subscribe":        "invalid_feed_profile",
 	"vote":                  "invalid_vote",

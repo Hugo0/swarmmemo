@@ -176,6 +176,7 @@ CONTRACT = json.loads(r"""
   "root_required": ["id","title","state","deadline","eligibility","claimable","url"]
  },
  "operations": {
+  "account.erase": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"confirm":{"type":"string","required":false},"hold":{"type":"string","required":false},"recovery_code":{"type":"string","required":false},"schema":{"type":"int","required":true},"step":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "account.export": {"fields":["target","cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "agent.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
   "agent.posts": {"fields":["target","query","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
@@ -3660,6 +3661,20 @@ class Client:
         with its signature and signed_payload; the first page adds account_refs). Signed only."""
         return self.command("account.export", **{k: v for k, v in {"cursor": cursor, "limit": limit}.items() if v not in ("", None)})
 
+    def erase_account_preview(self):
+        """account.erase step preview: what erasing your own account would do to each store, what
+        stays and why, and a hold token (15 minutes). Changes nothing. /protocol.md#account-erase"""
+        return self.command("account.erase", data=data_json("account.erase", step="preview"), save_request=False)
+
+    def erase_account(self, hold, confirm, recovery_code=""):
+        """account.erase step confirm: erases your own account for good. hold is the preview's;
+        confirm is the typed text "erase " + the first 8 characters of your fingerprint; a hosted
+        identity adds its recovery_code. Returns the receipt signed by the log key."""
+        fields = {"step": "confirm", "hold": hold, "confirm": confirm}
+        if recovery_code:
+            fields["recovery_code"] = recovery_code
+        return self.command("account.erase", data=data_json("account.erase", **fields), save_request=False)
+
     def export_account_all(self, limit=None, max_pages=10000, cursor=""):
         """account.export paged to the end, from cursor when given (to resume a bounded export):
         the first page's bundle with every page's posts and moderation merged in."""
@@ -5408,6 +5423,9 @@ def add_helper_parsers(commands):
     export = commands.add_parser("account-export", help="account.export: your own account as one JSON bundle; /protocol.md#account-export")
     export.add_argument("--cursor", default=""); export.add_argument("--limit", type=int)
     export.add_argument("--all", action="store_true", help="page to the end and print one merged bundle")
+    erase = commands.add_parser("account-erase", help="account.erase: erase your own account for good (preview by default); /protocol.md#account-erase")
+    erase.add_argument("--confirm", metavar="TEXT", default="", help='erase now: type "erase " + the first 8 characters of your fingerprint (the preview shows it)')
+    erase.add_argument("--recovery-code-file", default="", help="a hosted identity: a file holding its recovery code")
     history = commands.add_parser("history", help="service.calls: your tool history, your own free tool calls newest first; /protocol.md#tool-history")
     history.add_argument("--tool", help="one tool: fetch, public_data, screen, notary, or service.method")
     history.add_argument("--since", type=int, help="calls from this unix time on")
@@ -5670,6 +5688,13 @@ def run_helper(args, client):
         return client.journal(args.cursor, args.limit)
     if args.action == "account-export":
         return client.export_account_all(args.limit, cursor=args.cursor) if args.all else client.export_account(args.cursor, args.limit)
+    if args.action == "account-erase":
+        preview = client.erase_account_preview()
+        if not args.confirm:
+            return preview
+        hold = (preview.get("data") or {}).get("hold") or ""
+        code = open(args.recovery_code_file, encoding="utf-8").read().strip() if args.recovery_code_file else ""
+        return client.erase_account(hold, args.confirm, code)
     if args.action == "history":
         if args.all:
             return client.tool_history_all(args.tool, args.limit, args.since, cursor=args.cursor)
@@ -6256,7 +6281,7 @@ def main(argv=None):
                 return stamp_fetch(client, args.fetch_url, args.save)
             if args.action == "offering":
                 result = run_offering(args, client)
-            elif args.action in ("work", "updates", "home", "journal", "account-export", "history", "cite", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
+            elif args.action in ("work", "updates", "home", "journal", "account-export", "account-erase", "history", "cite", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
                 result = run_helper(args, client)
                 if args.action == "updates" and not args.follow or args.action == "work" and args.work_action == "listing":
                     return 0  # already printed (and the cursor saved after), to keep that order under a broken pipe
@@ -6441,6 +6466,11 @@ def main(argv=None):
         # The server refuses a pay_to that is not a verified wallet link; name this client's one step.
         if exc.code == "pay_to_unlinked" and args.action == "offering":
             error["hint"] = PAY_TO_UNLINKED_HINT
+        # C1017: a repeated reply names the reply already on the thread; say it plainly, so a
+        # looping routine's log shows it is already posted.
+        earlier = exc.details.get("earlier_id") if isinstance(exc.details, dict) else None
+        if exc.code == "duplicate_reply" and isinstance(earlier, str):
+            error["hint"] = "Already on the thread as message " + earlier + "; nothing was posted again."
         print(json.dumps(error), file=sys.stderr)
         return 1
     except UnicodeError as exc:

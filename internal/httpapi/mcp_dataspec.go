@@ -200,6 +200,7 @@ var mcpToolInputsNotData = map[string]map[string]string{
 // mcpDataOpsExcluded are the operations with data that no tool in toolOps
 // sends, each with its reason.
 var mcpDataOpsExcluded = map[string]string{
+	"account.erase":         "no MCP tool while the OpenAI instructions review is open: the owner erases on Me or with a signed HTTPS command (C1012)",
 	"device.request":        "linked devices are for keys of their own: a hosted identity links none and takes another token (manage_tokens)",
 	"device.request.get":    "linked devices are for keys of their own: a hosted identity links none and takes another token (manage_tokens)",
 	"device.add":            "linked devices are for keys of their own: a hosted identity links none and takes another token (manage_tokens)",

@@ -134,6 +134,7 @@ var dataProbes = map[string]func(string) error{
 	"hosted.token":          strictProbe[hostedData](),
 	"hosted.claim":          strictProbe[hostedData](),
 	"agents.list":           strictProbe[agentsListData](),
+	"account.erase":         func(raw string) error { _, err := parseEraseData(raw); return err },
 	"app.register":          strictProbe[appData](),
 	"oauth.client.register": strictProbe[oauthClientData](),
 }

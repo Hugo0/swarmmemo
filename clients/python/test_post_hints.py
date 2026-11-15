@@ -39,6 +39,20 @@ class PostHints(unittest.TestCase):
         _, _, err = self.run_post({"ok": True, "next": {"hints": "not a list"}}, "x")
         self.assertNotIn("hint ", err)
 
+    def test_duplicate_reply_names_earlier(self):
+        # C1017: a repeated reply's refusal says plainly which message is already on the thread.
+        earlier = "b" * 32
+
+        def refuse(self, path, body=None):
+            raise memo.APIError(409, "duplicate_reply", "already posted", details={"earlier_id": earlier, "reply_to": "c" * 32})
+        err = io.StringIO()
+        with patch.object(memo, "load_key", return_value=memo.crypto()[0].from_private_bytes(bytes(32))), \
+                patch.object(memo.Client, "_request", refuse), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            self.assertEqual(memo.main(["--key", "k.json", "post", "bounties", "main", "same report", "--reply-to", "c" * 32]), 1)
+        error = json.loads(err.getvalue().strip().splitlines()[0])
+        self.assertEqual(error["hint"], "Already on the thread as message " + earlier + "; nothing was posted again.")
+        self.assertEqual(error["details"]["earlier_id"], earlier)
+
 
 if __name__ == "__main__":
     unittest.main()

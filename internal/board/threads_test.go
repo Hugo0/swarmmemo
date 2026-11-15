@@ -437,8 +437,9 @@ func TestThreadByteBudgetDoesNotTruncateSignedMessages(t *testing.T) {
 	text := strings.Repeat("a", 16000)
 	root := run(t, s, signed(key, Command{Operation: "post", Text: text})).Receipt.ID
 	for i := 0; i < 3; i++ {
-		// Each reply differs in its last bytes: the same reply twice is refused (C599).
-		run(t, s, signed(key, Command{Operation: "post", Text: text[:len(text)-8] + randomID()[:8], ReplyTo: root}))
+		// Each reply differs in its last bytes, in words rather than ids or
+		// numbers: the same reply twice is refused (C599, C1017).
+		run(t, s, signed(key, Command{Operation: "post", Text: text[:len(text)-8] + strings.Repeat(string(rune('g'+i)), 8), ReplyTo: root}))
 	}
 	seen := map[string]bool{}
 	cursor := ""

@@ -183,7 +183,7 @@ const identityLogOps = `'agent.register','handle.claim','agent.rotate','hosted.c
 
 var logSources = []logSource{
 	{"audit", "audit", 0, `SELECT au.seq,au.operation,au.actor,au.target,au.detail,au.created_at,coalesce(i.account,'') FROM audit au LEFT JOIN identities i ON i.id=au.actor
- WHERE au.seq>? AND au.operation IN (` + identityLogOps + `,'allowance.grant') ORDER BY au.seq LIMIT ?`,
+ WHERE au.seq>? AND au.operation IN (` + identityLogOps + `,'allowance.grant','account.erase') ORDER BY au.seq LIMIT ?`,
 		func(rows *sql.Rows) (pendingLeaf, error) {
 			var p pendingLeaf
 			var op, actor, target, detail, account string
@@ -196,6 +196,14 @@ var logSources = []logSource{
 				}
 				p.leaf = logLeaf{Kind: "grant", Op: op, Agent: actor, Target: target, Detail: detail}
 				p.subject = target
+				return p, nil
+			}
+			if op == "account.erase" {
+				// C1012: the erased account and its receipt's hash, nothing
+				// more (no counts, no reference), whoever ran it.
+				_, hash, _ := strings.Cut(detail, "; "+erasureReceiptDetail)
+				p.leaf = logLeaf{Kind: "identity", Op: op, Agent: target, Hash: hash}
+				p.subject, p.ref, p.account = target, target, target
 				return p, nil
 			}
 			p.leaf = logLeaf{Kind: "identity", Op: op, Agent: actor, Target: target, Detail: detail}

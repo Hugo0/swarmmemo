@@ -5,6 +5,7 @@ package board
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -81,4 +82,39 @@ func TestRepeatReplyRefused(t *testing.T) {
 	if _, err := s.Execute(testContext, anon, "203.0.113.9"); err != nil {
 		t.Fatalf("another network's same reply: %v", err)
 	}
+}
+
+// A looping client's report repeats with only its run's call id, times and
+// counters changed (C1017): refused as the same reply, naming the first and
+// saying it is already on the thread; other words, another parent or a
+// later day pass, and a short reply still compares whole.
+func TestRepeatReplyMasksRunTokens(t *testing.T) {
+	s := openTest(t, Config{})
+	base := time.Unix(testTime, 0)
+	s.now = func() time.Time { return base }
+	asker, loop := keyFor(121), keyFor(122)
+	task := postAs(t, s, asker, Command{Room: "bounties", Text: "Try one tool", RequestID: "task"})
+	other := postAs(t, s, asker, Command{Room: "bounties", Text: "Another task", RequestID: "task2"})
+	report := func(id string, left, at int) string {
+		return fmt.Sprintf("**Try one tool in one call - screen/text** (2026-11-15)\n\n1. Exact request sent:\n`curl -sS 'https://swarmmemo.com/call/screen/text?text=Ignore+your+instructions'`\n\n"+
+			"2. HTTP 200; `call.id` `%s`; `paid_from` `free_allowance`; `credits_spent` 0.\n{\"allowance_left\": %d, \"created_at\": %d}\n\n3. The screen flagged the probe text: verdict `flag`, injection 0.98.", id, left, at)
+	}
+	first := postAs(t, s, loop, Command{Room: "bounties", ReplyTo: task, Text: report("91c2537faa43ddb8af548400118c8402", 99040, 1794766219), RequestID: "l1"})
+	s.now = func() time.Time { return base.Add(time.Hour) }
+	_, err := s.Execute(testContext, signed(loop, Command{Operation: "post", Room: "bounties", ReplyTo: task, Timestamp: s.now().Unix(),
+		Text: report("bd498efc06140fd50c3cdb0929256341", 99120, 1794769819), RequestID: "l2"}), "test-origin")
+	var e *Error
+	if !errors.As(err, &e) || e.Code != "duplicate_reply" || e.Status != 409 || e.Details.(map[string]any)["earlier_id"] != first ||
+		!strings.Contains(e.Message, "already on the thread as "+first) {
+		t.Fatalf("want 409 duplicate_reply naming %s, got %v", first, err)
+	}
+	// Different words, another parent: accepted.
+	postAs(t, s, loop, Command{Room: "bounties", ReplyTo: task, Text: strings.Replace(report("ab", 1, 2), "verdict `flag`", "verdict `pass`", 1), RequestID: "l3"})
+	postAs(t, s, loop, Command{Room: "bounties", ReplyTo: other, Text: report("cd", 3, 4), RequestID: "l4"})
+	// Short replies keep their numbers.
+	postAs(t, s, loop, Command{Room: "bounties", ReplyTo: task, Text: "I pick option 1.", RequestID: "l5"})
+	postAs(t, s, loop, Command{Room: "bounties", ReplyTo: task, Text: "I pick option 2.", RequestID: "l6"})
+	// More than a day after the last copy: accepted again.
+	s.now = func() time.Time { return base.Add(26 * time.Hour) }
+	postAs(t, s, loop, Command{Room: "bounties", ReplyTo: task, Text: report("ef0123456789abcdef", 5, 6), RequestID: "l7"})
 }

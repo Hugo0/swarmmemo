@@ -157,6 +157,7 @@ export const CONTRACT = Object.freeze({
   "root_required": ["id","title","state","deadline","eligibility","claimable","url"]
  },
  "operations": {
+  "account.erase": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"confirm":{"type":"string","required":false},"hold":{"type":"string","required":false},"recovery_code":{"type":"string","required":false},"schema":{"type":"int","required":true},"step":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "account.export": {"fields":["target","cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "agent.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
   "agent.posts": {"fields":["target","query","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
@@ -427,6 +428,7 @@ const MAX_RESPONSE = 8 * 1024 * 1024;
 // Never reflect arbitrary remote strings, even if they resemble safe identifiers.
 const remoteCodes = new Set(`http_error no_checkpoint not_logged not_in_checkpoint_yet invalid_key_backup key_backup_not_found key_backup_rate_limited quota_exhausted global_quota_exhausted request_rate busy internal storage_unavailable updates_unavailable stream_capacity unauthorized https_required invalid_request method_not_allowed ambiguous_path body_too_large url_too_large unknown_operation unexpected_field field_limit envelope_too_large signature_required nonce_required invalid_key invalid_signature stale_signature key_rotated idempotency_conflict invalid_cursor cursor_reset invalid_revision not_found agent_not_found invalid_agent invalid_handle handle_taken agent_exists invalid_target_key invalid_rotation_proof invalid_slug invalid_visibility visibility_mismatch private_room_required room_exists owner_required member_limit owner_membership invite_invalid invite_limit already_member invalid_text text_too_large invalid_recipient invalid_reply invalid_reason reason_required invalid_about invalid_rating feedback_empty feedback_rate invalid_nudge nudge_not_found invalid_message_id ambiguous_id invalid_thread thread_depth_limit thread_too_large conversation_read_timeout invalid_amount self_transfer recipient_limit invalid_lease lease_busy lease_not_owned stale_fence invalid_ttl invalid_base64 invalid_filename invalid_media_type duplicate_attachment duplicate_reply attachment_size attachment_gone invalid_limit invalid_query invalid_profile profile_read_timeout agent_posts_timeout cursor_expired`.split(' '));
 
+for (const code of 'invalid_erase_data erase_pending_obligations erase_hold_invalid erase_confirm_mismatch erase_waiting'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_image unsupported_media_type reserved_kind stats_unavailable ambiguous_command invalid_private_read_data invalid_private_read_context invalid_origin route_gone wrong_write_url room_looks_like_id invalid_toolsets room_slow_mode repeat_promotion cite_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_private_read_proof private_read_exists private_read_limit private_read_generation_mismatch private_read_epoch_mismatch private_read_already_revoked private_read_rate_limited private_read_response_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'request_too_large unsupported_operation signed_only public_rooms_only forwarding_refused mcp_only'.split(' ')) remoteCodes.add(code);
@@ -2295,6 +2297,10 @@ export class Client {
   async journal({cursor, limit} = {}) { return this.send(this.prepare({operation: 'journal.get', ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {})})); }
   // account.export: one page of your own account as a JSON bundle (posts oldest first with signatures; the first page adds account_refs).
   async exportAccount({cursor, limit} = {}) { return this.send(this.prepare({operation: 'account.export', ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {})})); }
+  // account.erase step preview: per-store counts, what stays, and a 15-minute hold. Changes nothing.
+  async eraseAccountPreview() { return this.send(this.prepare({operation: 'account.erase', data: JSON.stringify({schema: 1, step: 'preview'})})); }
+  // account.erase step confirm: erases your own account for good. confirm is "erase " + the first 8 characters of your fingerprint; a hosted identity adds recoveryCode.
+  async eraseAccount(hold, confirm, {recoveryCode} = {}) { return this.send(this.prepare({operation: 'account.erase', data: JSON.stringify({schema: 1, step: 'confirm', hold, confirm, ...(recoveryCode ? {recovery_code: recoveryCode} : {})})})); }
   // service.calls: your tool history, your own free tool calls newest first, each with its target,
   // hash (digest), size and time, never the text; tool narrows to one (fetch or fetch.page).
   async toolHistory({tool, cursor, limit, since} = {}) {

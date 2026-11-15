@@ -72,5 +72,6 @@ func operatorErase(ctx context.Context, store *board.Store, args []string, out i
 	}
 	receipt, _ := json.MarshalIndent(r, "", "  ")
 	fmt.Fprintf(out, "Receipt (sha256 %s, recorded in erasure_log):\n%s\n", r.ReceiptHash, receipt)
+	fmt.Fprintf(out, "Signed by the log key (an account.erase leaf in the transparency log once serve catches up):\n%s", r.Signed)
 	return nil
 }

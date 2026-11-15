@@ -842,6 +842,10 @@ ORDER BY w.created_at DESC LIMIT ?`, net, s.signals.id, from, to, limit)
 // eraseWriteSignals is owner erasure's step for the write signals (erase.go,
 // C1012): the account's rows go, except those of an object held as evidence,
 // and none while the account is under an active sanction.
+// eraseSignalCount is whether an erasure count is the write records' own,
+// which an account.erase hold does not bind (eraseowner.go).
+func eraseSignalCount(c EraseCount) bool { return c.Store == "write_signals" }
+
 func eraseWriteSignals(ctx context.Context, tx *sql.Tx, account string, keep EraseEvidence) (EraseCount, error) {
 	c := EraseCount{Store: "write_signals", Action: "removed"}
 	if keep.Sanctioned {

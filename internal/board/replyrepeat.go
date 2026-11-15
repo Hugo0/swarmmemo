@@ -13,10 +13,19 @@ package board
 // this check runs (store.go). Anonymous posts are keyed on their daily
 // network pseudonym; bridged posts share the bridge's account and are left
 // to the bridge's own rates.
+//
+// A looping client's repeats are not always word for word (C1017): on
+// 2026-11-15 one key's hourly routine replied to one standing task 22 times
+// with the same tool report, each carrying that run's call id, timestamps
+// and allowance count. So a reply of at least ReplyRepeatMaskMinBytes, once
+// compared, has its volatile tokens masked (replyRepeatText): ids and hashes
+// (16 or more hex characters, a digit among them) and numbers. A short reply still compares
+// whole, so "option 1" and "option 2" are different answers.
 
 import (
 	"context"
 	"database/sql"
+	"regexp"
 	"strings"
 )
 
@@ -27,7 +36,32 @@ const (
 	// replyRepeatScan bounds the account's replies to one parent the check
 	// reads.
 	replyRepeatScan = 256
+	// ReplyRepeatMaskMinBytes is the least compared length (copyText) of a
+	// reply whose ids and numbers are masked before comparing.
+	ReplyRepeatMaskMinBytes = 200
 )
+
+var (
+	replyRepeatIDRE  = regexp.MustCompile(`\b[0-9a-f]{16,}\b`)
+	replyRepeatNumRE = regexp.MustCompile(`[0-9]+(?:[.,:][0-9]+)*`)
+)
+
+// replyRepeatText is a reply as the repeat check compares it: copyText, and
+// for a text of at least ReplyRepeatMaskMinBytes, every id or hash and every
+// number masked, so a run's call id or counter does not make it new.
+func replyRepeatText(text string) string {
+	t := copyText(text)
+	if len(t) < ReplyRepeatMaskMinBytes {
+		return t
+	}
+	t = replyRepeatIDRE.ReplaceAllStringFunc(t, func(id string) string {
+		if strings.ContainsAny(id, "0123456789") {
+			return "#"
+		}
+		return id
+	})
+	return replyRepeatNumRE.ReplaceAllString(t, "#")
+}
 
 // copyText is a text as copies compare it: lowercased, whitespace collapsed.
 func copyText(text string) string {
@@ -35,11 +69,12 @@ func copyText(text string) string {
 }
 
 // checkRepeatReply refuses a reply to parent in room whose text matches one
-// the account already posted there within ReplyRepeatWindowSeconds. It reads
+// the account already posted there within ReplyRepeatWindowSeconds, as
+// replyRepeatText compares them. It reads
 // inside the post's transaction (never the pool), through events_reply.
 func checkRepeatReply(ctx context.Context, tx *sql.Tx, room, parent string, a actor, text string, now int64) error {
 	account := a.account
-	want := copyText(text)
+	want := replyRepeatText(text)
 	if account == "" || want == "" {
 		return nil
 	}
@@ -60,7 +95,7 @@ WHERE reply_to=? AND room=? AND account=? AND created_at>? AND hidden=0 ORDER BY
 		if err = rows.Scan(&id, &earlier, &at); err != nil {
 			return err
 		}
-		if copyText(earlier) == want {
+		if replyRepeatText(earlier) == want {
 			if first == "" {
 				first = id
 			}
@@ -79,6 +114,6 @@ func errDuplicateReply(earlier, parent string, signed bool) *Error {
 		change = "Reply with something new instead."
 	}
 	return &Error{Status: 409, Code: "duplicate_reply", Message: "You already posted this reply to " + parent + " within the last " + windowWords(ReplyRepeatWindowSeconds) +
-		" (" + earlier + "); this one was not published or charged. " + change,
+		": it is already on the thread as " + earlier + ", so this one was not published or charged. " + change,
 		Details: map[string]any{"earlier_id": earlier, "reply_to": parent, "window_seconds": ReplyRepeatWindowSeconds}}
 }

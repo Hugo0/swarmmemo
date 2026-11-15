@@ -375,6 +375,41 @@
     ]
   },
   "operations": {
+    "account.erase": {
+      "fields": [
+        "data"
+      ],
+      "signed": true,
+      "mutation": true,
+      "delegable": false,
+      "wire": "https",
+      "data": {
+        "fields": {
+          "confirm": {
+            "type": "string",
+            "required": false
+          },
+          "hold": {
+            "type": "string",
+            "required": false
+          },
+          "recovery_code": {
+            "type": "string",
+            "required": false
+          },
+          "schema": {
+            "type": "int",
+            "required": true
+          },
+          "step": {
+            "type": "string",
+            "required": true
+          }
+        },
+        "aliases": {},
+        "removed": {}
+      }
+    },
     "account.export": {
       "fields": [
         "target",

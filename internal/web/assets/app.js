@@ -306,6 +306,41 @@
     enhanceCopy(host);
   }
   $('tool-history-panel')?.addEventListener('toggle', event => { if (event.target.open) void loadToolHistory(); });
+  // Me, Settings: erase this account (account.erase, C1012). The preview runs
+  // only when its panel is opened, never on a visit; the confirm needs the
+  // typed text and the preview's hold, and a hosted identity's recovery code.
+  async function loadErasePreview() {
+    const host = $('erase-preview');
+    if (!host || !identity) return;
+    host.replaceChildren();
+    let p;
+    try { p = (await request({operation: 'account.erase', data: JSON.stringify({schema: 1, step: 'preview'}), request_id: uuid()}, true)).data || {}; }
+    catch (error) { status('erase-status', error.message, true); return; }
+    const table = node('table', 'erase-counts'), body = node('tbody');
+    for (const c of (p.counts || []).filter(c => c.rows > 0)) { const row = node('tr'); row.append(node('td', '', c.store), node('td', '', String(c.rows)), node('td', '', c.action)); body.append(row); }
+    table.append(body);
+    const kept = node('ul', 'small'); kept.append(...(p.kept || []).map(k => node('li', '', 'Stays: ' + k)));
+    const form = node('form', 'me-form'), label = node('label', '', 'Type '), input = node('input'), button = node('button', 'button secondary', 'Erase this account');
+    label.append(node('code', '', p.confirm_text || ''), ' to confirm', input);
+    input.name = 'confirm'; input.autocomplete = 'off'; input.spellcheck = false; button.type = 'submit'; button.disabled = true;
+    form.append(label);
+    let code;
+    if (p.recovery_code_required) { const l = node('label', '', 'Recovery code'); code = node('input'); code.type = 'password'; code.autocomplete = 'off'; l.append(code); form.append(l); }
+    form.append(button);
+    input.addEventListener('input', () => { button.disabled = input.value.trim() !== p.confirm_text; });
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      void act(button, 'erase-status', async () => {
+        const fields = {schema: 1, step: 'confirm', hold: p.hold, confirm: input.value.trim(), ...(code ? {recovery_code: code.value.trim()} : {})};
+        const done = (await request({operation: 'account.erase', data: JSON.stringify(fields), request_id: uuid()}, true)).data || {};
+        host.replaceChildren();
+        status('erase-status', 'Erased. Receipt SHA-256 ' + done.receipt_sha256 + ' (an account.erase entry in the transparency log). This key signs nothing more; remove it from this browser when you are done.');
+      });
+    });
+    host.append(table, kept, form);
+    status('erase-status', p.confirm_after > Date.now() / 1000 ? 'Your key changed recently, so the erasure opens at ' + new Date(p.confirm_after * 1000).toLocaleString() + '.' : 'Preview ready. Nothing is erased yet.');
+  }
+  $('erase-panel')?.addEventListener('toggle', event => { if (event.target.open) void loadErasePreview(); });
   // The keys kept in this browser, on Me: the active one marked, the others one
   // click from signing. Switching reloads the page so every count and read
   // belongs to the new key; it is refused while a request is unresolved.

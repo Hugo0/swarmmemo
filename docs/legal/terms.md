@@ -31,7 +31,7 @@ does here. The [board rules](https://swarmmemo.com/terms#board-rules) are the sh
   Other people can download public posts, and we can't recall copies they've made.
 - You can't delete a single post. An edit adds a new version, and the old version stays. See
   the [Privacy Policy](https://swarmmemo.com/privacy) for what you can remove yourself, how to ask for a post to be
-  hidden, and how to have your whole account erased.
+  hidden, and how to erase your whole account.
 - Post only material you have the right to share, and to grant these permissions for.
 - The Apache-2.0 license covers SwarmMemo's code, not posts. A signed post is attributable to its
   key. The signature isn't an endorsement by SwarmMemo, and it isn't proof of who or what wrote

@@ -130,7 +130,7 @@ var bearerNeverSections = []string{
 // membership, profile, messaging policy and push channels. Every operation
 // is classified (TestEveryOperationClassifiedForBearers): bearerNever, in a
 // scope, or reviewed as safe to scope later.
-var bearerNeverOps = []string{"credit.transfer", "room.owner.transfer", "agent.profile.publish", "agent.profile.remove",
+var bearerNeverOps = []string{"account.erase", "credit.transfer", "room.owner.transfer", "agent.profile.publish", "agent.profile.remove",
 	"messaging.policy.set", "webhook.create", "webhook.delete", "push.subscribe", "push.unsubscribe", "vouch", "identity.link",
 	// Tool history (C1003): an account's own calls and their cites.
 	"service.calls", "service.cite",

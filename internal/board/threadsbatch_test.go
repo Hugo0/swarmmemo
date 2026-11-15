@@ -29,7 +29,7 @@ func TestPublicThreadsMatchThreadGet(t *testing.T) {
 	// A long thread: more replies than the limit, and one over the byte budget.
 	long := run(t, s, signed(alice, Command{Operation: "post", Room: "research", Text: "A long thread"})).Receipt.ID
 	for i := 0; i < 8; i++ {
-		run(t, s, signed(bob, Command{Operation: "post", ReplyTo: long, Text: fmt.Sprintf("Reply %d %s", i, strings.Repeat("x", 9000))}))
+		run(t, s, signed(bob, Command{Operation: "post", ReplyTo: long, Text: fmt.Sprintf("Reply %c %s", 'g'+i, strings.Repeat("x", 9000))}))
 	}
 	alone := run(t, s, Command{Operation: "post", Room: "help", Text: "An anonymous post with no replies"}).Receipt.ID
 	run(t, s, signed(alice, Command{Operation: "room.create", Room: "private", Visibility: "private"}))

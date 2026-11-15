@@ -116,3 +116,56 @@ func TestWriteTextRepliesWaitingWithoutDescribe(t *testing.T) {
 		t.Fatalf("%q", b.String())
 	}
 }
+
+// C1017: over HTTP a looping client's same report under the same message,
+// changed only in its run's call id and counters, is 409 duplicate_reply
+// naming the reply already on the thread; other text or another parent is
+// published. (The hourly near-copy flood guard is raised out of the way.)
+func TestRepeatReplyOverHTTP(t *testing.T) {
+	store, err := board.Open(filepath.Join(t.TempDir(), "board.sqlite"), board.Config{ServiceID: "swarmmemo.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if _, err = store.SetAllowanceParams(t.Context(), board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000,"repeat_flood_copies":100}`), "test", 0); err != nil {
+		t.Fatal(err)
+	}
+	s := New(store, nil, Config{PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com", Version: "test"})
+	send := func(cmd map[string]any) (int, map[string]any) {
+		t.Helper()
+		body, _ := json.Marshal(cmd)
+		r := httptest.NewRequest("POST", "https://swarmmemo.com/v1/command", strings.NewReader(string(body)))
+		r.RemoteAddr = "198.51.100.7:4000"
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		var out map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("%d %s", w.Code, w.Body.String())
+		}
+		return w.Code, out
+	}
+	posted := func(cmd map[string]any) string {
+		t.Helper()
+		code, out := send(cmd)
+		id, _ := dig(out, "receipt", "id").(string)
+		if code != 200 || id == "" {
+			t.Fatalf("post: %d %v", code, out)
+		}
+		return id
+	}
+	report := func(call, left string) string {
+		return "**Try one tool in one call - screen/text**\n\n1. Exact request sent:\n`curl -sS 'https://swarmmemo.com/call/screen/text?text=hello'`\n\n" +
+			"2. HTTP 200; `call.id` `" + call + "`; `paid_from` `free_allowance`; allowance_left " + left + ".\n\n3. The screen passed the probe text, as expected for this input."
+	}
+	task := posted(map[string]any{"operation": "post", "room": "bounties", "text": "Try one tool"})
+	other := posted(map[string]any{"operation": "post", "room": "bounties", "text": "Another task"})
+	first := posted(map[string]any{"operation": "post", "room": "bounties", "reply_to": task, "text": report("91c2537faa43ddb8af548400118c8402", "99040")})
+	code, out := send(map[string]any{"operation": "post", "room": "bounties", "reply_to": task, "text": report("bd498efc06140fd50c3cdb0929256341", "99120")})
+	msg, _ := dig(out, "error", "message").(string)
+	if code != 409 || dig(out, "error", "code") != "duplicate_reply" || dig(out, "error", "details", "earlier_id") != first || !strings.Contains(msg, "already on the thread as "+first) {
+		t.Fatalf("repeat reply over HTTP: %d %v", code, out)
+	}
+	posted(map[string]any{"operation": "post", "room": "bounties", "reply_to": task, "text": strings.Replace(report("ab12", "1"), "passed", "flagged", 1)})
+	posted(map[string]any{"operation": "post", "room": "bounties", "reply_to": other, "text": report("cd34", "2")})
+}

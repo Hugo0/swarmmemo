@@ -72,10 +72,13 @@ type ErasureReceipt struct {
 	Backups     string       `json:"backups"`
 	DryRun      bool         `json:"-"`
 	ReceiptHash string       `json:"-"`
+	// Signed is the log key's signed statement of the receipt's hash
+	// (signErasure), once recorded.
+	Signed string `json:"-"`
 }
 
 // ErasureBackupsNote is the receipt's line on copies outside the live database.
-const ErasureBackupsNote = "Backups keep the erased data until they age out (about 30 days); a restored copy is erased again from erasure_log. The web server's access log has no account field and rolls over."
+const ErasureBackupsNote = "Backups keep the erased data until they age out (about 30 days); a restored copy is erased again at start from the side copy of erasure_log. The web server's access log has no account field and rolls over."
 
 // eraseRefRE is an operator's request reference: no personal data, just an id.
 var eraseRefRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
@@ -301,49 +304,105 @@ func (s *Store) OperatorEraseAccount(ctx context.Context, account, reference str
 	if len(blocking) > 0 {
 		return r, fmt.Errorf("erase refused: the account has %s; settle or cancel them first", strings.Join(blocking, ", "))
 	}
-	now := s.now().Unix()
-	r.ErasedAt = now
-	keep, err := eraseEvidence(ctx, tx, account, now)
+	run, err := s.eraseRun(ctx, tx, r, s.now().Unix())
 	if err != nil {
-		return r, err
+		return run.receipt, err
 	}
-	digests, err := eraseLinkDigests(ctx, tx, account)
-	if err != nil {
-		return r, err
+	if !confirm {
+		return run.receipt, nil // the deferred rollback undoes the dry run
 	}
-	if r.Counts, err = EraseAccount(ctx, tx, account, now, keep); err != nil {
-		return r, err
+	if err = s.recordErasure(ctx, tx, &run, "operator", "on the owner's request"); err != nil {
+		return run.receipt, err
+	}
+	if err = tx.Commit(); err != nil {
+		return run.receipt, err
+	}
+	return run.receipt, s.afterErasure(ctx, run)
+}
+
+// erasureRun is one erasure in its transaction: the receipt, and what the
+// steps after the commit need.
+type erasureRun struct {
+	receipt ErasureReceipt
+	ids     []string
+	keep    EraseEvidence
+	digests []string
+}
+
+// eraseRun erases r.Account in tx at now (EraseAccount) and fills r's
+// counts, raw-record counts and hash. The caller has checked the account and
+// its obligations; it commits, or rolls back for a dry run or a preview.
+func (s *Store) eraseRun(ctx context.Context, tx *sql.Tx, r ErasureReceipt, now int64) (erasureRun, error) {
+	run := erasureRun{receipt: r}
+	run.receipt.ErasedAt = now
+	var err error
+	if run.keep, err = eraseEvidence(ctx, tx, r.Account, now); err != nil {
+		return run, err
+	}
+	if run.digests, err = eraseLinkDigests(ctx, tx, r.Account); err != nil {
+		return run, err
+	}
+	if run.receipt.Counts, err = EraseAccount(ctx, tx, r.Account, now, run.keep); err != nil {
+		return run, err
 	}
 	// The raw records are in their own database (another file and
 	// connection): counted here, erased after the commit.
-	ids, err := eraseIDs(ctx, tx, account)
-	if err != nil {
-		return r, err
+	if run.ids, err = eraseIDs(ctx, tx, r.Account); err != nil {
+		return run, err
 	}
-	if r.RawErased, r.RawHeld, err = s.rawEraseCounts(ctx, ids, keep); err != nil {
-		return r, err
+	if run.receipt.RawErased, run.receipt.RawHeld, err = s.rawEraseCounts(ctx, run.ids, run.keep); err != nil {
+		return run, err
 	}
-	receipt, _ := json.Marshal(r)
-	r.ReceiptHash = sha256Hex(receipt)
-	if !confirm {
-		return r, nil // the deferred rollback undoes the dry run
-	}
-	linkJSON, _ := json.Marshal(digests)
+	receipt, _ := json.Marshal(run.receipt)
+	run.receipt.ReceiptHash = sha256Hex(receipt)
+	return run, nil
+}
+
+// recordErasure writes run's erasure_log row and its audit row, which the
+// transparency log takes as an account.erase leaf carrying the receipt's
+// hash and nothing else (transparency.go), and signs the receipt with the
+// log key. by is the audit actor, how says who asked.
+func (s *Store) recordErasure(ctx context.Context, tx *sql.Tx, run *erasureRun, by, how string) error {
+	r := &run.receipt
+	linkJSON, _ := json.Marshal(run.digests)
 	countJSON, _ := json.Marshal(r.Counts)
-	if _, err = tx.ExecContext(ctx, "INSERT INTO erasure_log(account,erased_at,reference,counts,link_digests,raw_held,receipt_sha256) VALUES(?,?,?,?,?,?,?)",
-		account, now, reference, string(countJSON), string(linkJSON), r.RawHeld, r.ReceiptHash); err != nil {
-		return r, err
+	if _, err := tx.ExecContext(ctx, "INSERT INTO erasure_log(account,erased_at,reference,counts,link_digests,raw_held,receipt_sha256) VALUES(?,?,?,?,?,?,?)",
+		r.Account, r.ErasedAt, r.Reference, string(countJSON), string(linkJSON), r.RawHeld, r.ReceiptHash); err != nil {
+		return err
 	}
-	if err = audit(ctx, tx, "account.erase", "operator", account, "erased on the owner's request; receipt "+r.ReceiptHash, now); err != nil {
-		return r, err
+	if err := audit(ctx, tx, "account.erase", by, r.Account, "erased "+how+"; "+erasureReceiptDetail+r.ReceiptHash, r.ErasedAt); err != nil {
+		return err
 	}
-	if err = tx.Commit(); err != nil {
-		return r, err
+	signed, err := s.signErasure(*r)
+	r.Signed = signed
+	return err
+}
+
+// erasureReceiptDetail precedes the receipt hash in an account.erase audit
+// row; the log leaf reads the hash after it.
+const erasureReceiptDetail = "receipt "
+
+// ErasureReceiptNote is the first line of a signed erasure receipt, after
+// the log's origin.
+const ErasureReceiptNote = "erasure receipt"
+
+// signErasure is the receipt's signed statement: a C2SP note by the log key
+// (/api/log/keys) naming the account, the time and the receipt's SHA-256.
+func (s *Store) signErasure(r ErasureReceipt) (string, error) {
+	return s.transparency.signer.Sign(fmt.Sprintf("%s %s\naccount %s\nerased_at %d\nreceipt_sha256 %s\n", s.transparency.origin, ErasureReceiptNote, r.Account, r.ErasedAt, r.ReceiptHash))
+}
+
+// afterErasure is what follows an erasure's commit: the raw write records
+// (their own database) and the side copy of erasure_log a restore replays.
+func (s *Store) afterErasure(ctx context.Context, run erasureRun) error {
+	side := s.appendErasureSide(erasureSideFromRun(run))
+	if err := s.rawErase(ctx, run.ids, run.keep); err != nil {
+		return fmt.Errorf("the account is erased, but its raw write records are not (run the erase again): %w", err)
 	}
-	if err = s.rawErase(ctx, ids, keep); err != nil {
-		return r, fmt.Errorf("the account is erased, but its raw write records are not (run the erase again): %w", err)
+	if side != nil {
+		return fmt.Errorf("the account is erased, but its side copy of erasure_log is not written (the next start writes it): %w", side)
 	}
-	return r, nil
+	return nil
 }
 
 // ErasureLogEntry is one erasure_log row.
