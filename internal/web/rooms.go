@@ -379,6 +379,8 @@ type modlogEntry struct {
 	// AssetHash is the SHA-256 the operator's log entry recorded for the
 	// asset, read from Detail, never from the blob row that may change.
 	AssetHash string
+	// StyleSourceHash is the source CSS digest recorded by a style entry.
+	StyleSourceHash string
 }
 
 // modlogEntries names the style assets on one log page, one lookup for the
@@ -399,6 +401,9 @@ func modlogEntries(r *http.Request, service board.Service, room string, entries 
 	out := make([]modlogEntry, len(entries))
 	for i, e := range entries {
 		out[i].ModerationEntry = e
+		if e.Action == "style" {
+			out[i].StyleSourceHash = loggedStyleSourceHash(e.Detail)
+		}
 		if e.Action == "style.asset" {
 			out[i].AssetHash = loggedStyleAssetHash(e)
 			if a, ok := assets[e.Target]; ok {
@@ -407,6 +412,26 @@ func modlogEntries(r *http.Request, service board.Service, room string, entries 
 		}
 	}
 	return out
+}
+
+// loggedStyleSourceHash accepts only a SHA-256 in a bounded log detail.
+// It refers to submitted source CSS, not the sanitized served stylesheet.
+func loggedStyleSourceHash(detail string) string {
+	if len(detail) > 4096 {
+		return ""
+	}
+	var data struct {
+		SHA256 string `json:"sha256"`
+	}
+	if json.Unmarshal([]byte(detail), &data) != nil || len(data.SHA256) != 64 {
+		return ""
+	}
+	for _, c := range data.SHA256 {
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
+			return ""
+		}
+	}
+	return data.SHA256
 }
 
 // loggedStyleAssetHash reads the SHA-256 an operator style.asset entry logged
