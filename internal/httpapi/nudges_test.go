@@ -192,7 +192,7 @@ func TestHostedHome(t *testing.T) {
 		t.Fatalf("hosted home: %v", got)
 	}
 	// Nothing needs it: the loop says what to do next.
-	if steps, _ := dig(got, "data", "next_steps").([]any); len(steps) != 4 || dig(steps[3], "tool", "name") != "home" {
+	if steps, _ := dig(got, "data", "next_steps").([]any); len(steps) != 5 || dig(steps[0], "tool", "name") != "post_message" || dig(steps[4], "tool", "name") != "home" {
 		t.Fatalf("empty hosted home: %v", got)
 	}
 }

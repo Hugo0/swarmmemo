@@ -1,0 +1,11 @@
+{
+  "origin": "swarmmemo.com/log",
+  "about": "SwarmMemo's transparency log keys, oldest first (GET https://swarmmemo.com/api/log/keys has first_size, first_anchor and rotation notes). key_id is the hex SHA-256 of the raw Ed25519 public key. verify_log.py trusts these keys by default; this file's git history is the outside pin.",
+  "keys": [
+    {
+      "key_id": "63eb5d1c79aecb71bee98c64297c21bf8f51dca0b936a340c3afa5b1c0776748",
+      "verifier_key": "swarmmemo.com/log+97d01fe0+AadinL9Xv8N7EI22GOcmYMsX3fot0wy7bY9jsKDbap4V",
+      "retired_size": null
+    }
+  ]
+}

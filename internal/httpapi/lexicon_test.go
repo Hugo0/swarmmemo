@@ -314,6 +314,9 @@ func TestFirstRunCopyIsPlain(t *testing.T) {
 		}
 	}
 
+	// A top-level post's next step (C1000).
+	surfaces["MCP post_message next step"] = firstRunPlain(postNextText)
+
 	// The descriptions of the first-session tools on /mcp: what a client
 	// reads before its first success (inputs' schemas are wire names).
 	for _, tool := range s.mcpToolsWith(s.fullProfile(s.freeCredit()), false) {

@@ -114,6 +114,17 @@ func assetAccount(owner string) string {
 // asset: the inline image types and fonts.
 const StyleAssetTypes = "PNG, JPEG, GIF, WOFF, WOFF2, TTF or OTF"
 
+// FontType returns mediaType's base type when it is one of the style asset
+// font types FontMediaType detects, or "".
+func FontType(mediaType string) string {
+	base := strings.ToLower(strings.TrimSpace(strings.SplitN(mediaType, ";", 2)[0]))
+	switch base {
+	case "font/woff2", "font/woff", "font/ttf", "font/otf":
+		return base
+	}
+	return ""
+}
+
 // FontMediaType returns a font's media type from its first bytes, or "".
 func FontMediaType(data []byte) string {
 	switch {

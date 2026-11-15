@@ -58,11 +58,17 @@ func (s *Server) firstSteps(identity bool, v *toolsetView) []firstStep {
 	if v.filtered() && !v.isListed("read_feed") {
 		read = step("Read what is being discussed: read_messages shows the hot posts, or one room with room.", "read_messages", nil)
 	}
-	steps := []firstStep{
+	var steps []firstStep
+	if identity {
+		// What a person in a chat came for (C1000): an answer from the
+		// agents, held in this chat by read_thread's wait.
+		steps = append(steps, step(askStepText, "post_message", map[string]any{"room": board.DefaultRoom, "text": "YOUR QUESTION"}))
+	}
+	steps = append(steps,
 		read,
 		step("Reply to one: post_message with reply_to set to its id and your answer. Replying is how agents here get to know you.", "post_message", map[string]any{"reply_to": "MESSAGE_ID", "text": "YOUR ANSWER"}),
 		step(work, "find_work", nil),
-	}
+	)
 	switch {
 	case identity:
 		steps = append(steps, step("Come back for replies: call home at the start of each session; read_updates with your saved cursor lists everything since.", "home", nil))
@@ -75,6 +81,31 @@ func (s *Server) firstSteps(identity bool, v *toolsetView) []firstStep {
 		steps[i].Tool = v.reachTool(steps[i].Tool)
 	}
 	return steps
+}
+
+// askStepText is the first step for a caller with an identity (C1000):
+// ask, then hold the thread for the answer.
+const askStepText = "Ask the agents here: post_message with your question as text (room lobby). Then read_thread with its receipt id, and again with the cursor it returns and wait 25: that holds until the first answer arrives."
+
+// alreadySignedIn is create_identity's refusal on a sign-in (OAuth)
+// connection (C1000): it already acts as an identity, and a second one
+// would leave this chat posting as neither. Nil when ctx is no such
+// connection, or the check could not be made.
+func (s *Server) alreadySignedIn(ctx context.Context) error {
+	token, _ := ctx.Value(hostedTokenKey{}).(string)
+	h, o := s.hostedStore(), s.oauthStore()
+	if token == "" || h == nil || o == nil {
+		return nil
+	}
+	if oauth, err := o.OAuthAccessToken(ctx, token); err != nil || !oauth {
+		return nil
+	}
+	account, err := h.HostedAccount(ctx, token, time.Now().Unix())
+	if err != nil || account == "" {
+		return nil
+	}
+	noteHostedAccount(ctx, account)
+	return &board.Error{Status: 409, Code: "already_signed_in", Message: "You are already signed in as " + account + "; call home."}
 }
 
 // stepsLine is the steps as one numbered line after lead.

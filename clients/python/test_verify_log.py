@@ -486,5 +486,104 @@ class TextFilesAreUTF8(unittest.TestCase):
                     self.assertIn("encoding", [k.arg for k in node.keywords], f"open() at line {node.lineno} has no encoding")
 
 
+class LogKeys(unittest.TestCase):
+    """verify_log keys (C983) against a history built here: a genesis key
+    and one rotation, signed by the old and the new key as tlog.SignRotation
+    signs it."""
+
+    ORIGIN = "swarmmemo.com/log"
+
+    def setUp(self):
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        except ImportError:
+            self.skipTest("cryptography is not installed")
+        import hashlib
+        import tempfile
+
+        self.dir = tempfile.mkdtemp()
+        self.keys = []
+        for _ in range(3):
+            sk = Ed25519PrivateKey.generate()
+            pub = sk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+            kh = hashlib.sha256(self.ORIGIN.encode() + b"\n\x01" + pub).digest()[:4]
+            vkey = self.ORIGIN + "+" + kh.hex() + "+" + base64.b64encode(b"\x01" + pub).decode()
+            self.keys.append({"sk": sk, "kh": kh, "vkey": vkey, "id": hashlib.sha256(pub).hexdigest()})
+
+    def sig(self, k: dict, text: str) -> str:
+        return "— " + self.ORIGIN + " " + base64.b64encode(k["kh"] + k["sk"].sign(text.encode())).decode() + "\n"
+
+    def rotation(self, old: dict, new: dict, at: int, signers=None) -> str:
+        text = f"{self.ORIGIN}\n{v.ROTATION_TYPE}\nfrom {old['id']}\nto {new['vkey']}\nat {at}\n"
+        return text + "\n" + "".join(self.sig(k, text) for k in (signers or (old, new)))
+
+    def history(self, note: str | None = None) -> dict:
+        a, b = self.keys[0], self.keys[1]
+        return {"current_key_id": b["id"], "keys": [
+            {"key_id": a["id"], "verifier_key": a["vkey"], "first_size": 3, "first_at": 1, "first_anchor": None, "retired_size": 10, "rotation_note": None},
+            {"key_id": b["id"], "verifier_key": b["vkey"], "first_size": 10, "first_at": 2, "first_anchor": None, "retired_size": None,
+             "rotation_note": note if note is not None else self.rotation(a, b, 10)}]}
+
+    def walk(self, doc: dict, key=None, base="http://127.0.0.1:9"):
+        import json
+        import os
+        path = os.path.join(self.dir, "keys.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        return v.Verifier(base, key, None).keys(path)
+
+    def test_genesis_and_rotation(self):
+        lines = self.walk(self.history())
+        self.assertIn("genesis", lines[0])
+        self.assertTrue(any("signed by both keys" in line for line in lines), lines)
+        self.assertIn(self.keys[1]["id"], lines[-1])
+        # Pinned by the old key, by key_id or in full: the walk reaches the new one.
+        self.walk(self.history(), key=self.keys[0]["vkey"])
+        self.walk(self.history(), key=self.keys[0]["id"])
+
+    def test_forged_rotation_is_refused(self):
+        a, b, c = self.keys
+        for note in (self.rotation(a, b, 10, signers=(b,)),   # the new key alone
+                     self.rotation(a, b, 10, signers=(a,)),   # the old key alone
+                     self.rotation(a, b, 11),                 # another size
+                     self.rotation(c, b, 10, signers=(c, b))):  # retires another key
+            with self.assertRaises(v.VerifyError):
+                self.walk(self.history(note))
+        doc = self.history()
+        doc["keys"][1]["key_id"] = c["id"]
+        with self.assertRaises(v.VerifyError):
+            self.walk(doc)
+
+    def test_pin_mismatch_is_refused(self):
+        with self.assertRaises(v.VerifyError):
+            self.walk(self.history(), key=self.keys[2]["vkey"])
+        with self.assertRaises(v.VerifyError):
+            self.walk(self.history(), key=self.keys[2]["id"])
+        # Against swarmmemo.com the default pin is PINNED_LOG_KEYS, not on this history.
+        with self.assertRaises(v.VerifyError):
+            self.walk(self.history(), base=v.BASE)
+
+    def test_default_pin_refuses_another_key(self):
+        ver = v.Verifier(v.BASE, None, None)
+        with self.assertRaises(v.VerifyError):
+            ver.adopt(self.keys[0]["vkey"])
+        ver.adopt(v.PINNED_LOG_KEYS[0]["verifier_key"])
+        pinned = v.Verifier("http://127.0.0.1:9", self.keys[0]["id"], None)
+        with self.assertRaises(v.VerifyError):
+            pinned.adopt(self.keys[1]["vkey"])
+        pinned.adopt(self.keys[0]["vkey"])
+
+    def test_pinned_keys_are_log_keys_json(self):
+        # PINNED_LOG_KEYS is frozen into each pinned version of verify_log.py,
+        # so it is a copy of the committed log_keys.json; they must agree.
+        import json
+        import pathlib
+        doc = json.loads((pathlib.Path(v.__file__).parent / "log_keys.json").read_text(encoding="utf-8"))
+        self.assertEqual(doc["keys"], v.PINNED_LOG_KEYS)
+        for k in doc["keys"]:
+            self.assertEqual(v.key_id_of(k["verifier_key"]), k["key_id"])
+
+
 if __name__ == "__main__":
     unittest.main()

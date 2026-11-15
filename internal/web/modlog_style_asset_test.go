@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"swarmmemo/internal/board"
 	"testing"
@@ -30,8 +31,9 @@ func TestModlogStyleAssetLinksAttachment(t *testing.T) {
 	t.Logf("asset %s rendered with the correct attachment route", a.ID)
 }
 
-// The log names each style asset by its filename, escaped, and previews an
-// inline image at a fixed size, lazily; a font keeps a plain link (PR #52).
+// The log names each style asset by its filename, escaped, with its media type
+// and size, and previews an inline image at a fixed size, lazily (PR #52); a
+// font gets a text sample that modlog-font.js sets in it on view (PR #54).
 func TestModlogStyleAssetNamesAndPreviews(t *testing.T) {
 	s, owner, _ := roomStore(t)
 	owner.run(t, s, board.Command{Operation: "post", Room: "wires", Text: "opens room"})
@@ -55,13 +57,13 @@ func TestModlogStyleAssetNamesAndPreviews(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}
-	for _, want := range []string{`href="/a/` + img.ID + `"`, `src="/a/` + img.ID + `"`, `>&lt;cat &amp; &#34;friends&#34;&gt;.gif</a>`, `width="96" height="64" loading="lazy"`, `href="/a/` + font.ID + `">term.woff2</a>`} {
+	for _, want := range []string{`href="/a/` + img.ID + `"`, `src="/a/` + img.ID + `"`, `>&lt;cat &amp; &#34;friends&#34;&gt;.gif</a>`, `width="96" height="64" loading="lazy"`, `href="/a/` + font.ID + `">term.woff2</a> · font/woff2 · 64 bytes`, `.gif</a> · image/gif · ` + strconv.Itoa(len(gif)) + ` bytes`, `<p class="modlog-font" data-font-url="/a/` + font.ID + `">`, `/assets/modlog-font.js?v=`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if strings.Contains(body, `src="/a/`+font.ID+`"`) || strings.Contains(body, `<cat`) {
-		t.Error("font previewed, or filename not escaped")
+	if strings.Contains(body, `src="/a/`+font.ID+`"`) || strings.Contains(body, `data-font-url="/a/`+img.ID+`"`) || strings.Contains(body, `<cat`) {
+		t.Error("font previewed as an image, image sampled as a font, or filename not escaped")
 	}
 	// Names come from the room's own blobs only, and a missing id has none.
 	names, err := s.StyleAssetNames(ctx, "wires", []string{img.ID, img.ID, other.ID, "missing-id-123456"})
@@ -104,12 +106,68 @@ func TestModlogStyleAssetUnavailable(t *testing.T) {
 	}
 	w := render(s, "/modlog/wires")
 	body := w.Body.String()
-	if w.Code != 200 || !strings.Contains(body, `>missing-id-1</a>`) || !strings.Contains(body, `>other-room-i</a>`) || strings.Contains(body, "secret.gif") || strings.Contains(body, `class="modlog-asset"`) {
+	if w.Code != 200 || !strings.Contains(body, `>missing-id-1</a>`) || !strings.Contains(body, `>other-room-i</a>`) || strings.Contains(body, "secret.gif") || strings.Contains(body, "image/gif") || strings.Contains(body, `class="modlog-asset"`) || strings.Contains(body, `class="modlog-font"`) {
 		t.Fatalf("unexpected fallback: status=%d body=%s", w.Code, body)
 	}
 	for _, c := range s.calls {
 		if c.Operation == "blob.get" {
 			t.Fatal("the log page downloaded an asset to name it")
 		}
+	}
+}
+
+// Against the real store: an asset whose every post is hidden loses its name,
+// metadata, preview and sample until a post is restored, and keeps a short-id
+// link meanwhile (PR #54).
+func TestModlogStyleAssetFollowsVisibility(t *testing.T) {
+	s, owner, _ := roomStore(t)
+	owner.run(t, s, board.Command{Operation: "post", Room: "wires", Text: "open room"})
+	ctx := context.Background()
+	font, err := s.OperatorAsset(ctx, "wires", "secret-face.woff2", append([]byte("wOF2"), make([]byte, 60)...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(text string) string {
+		return owner.run(t, s, board.Command{Operation: "post", Room: "wires", Text: text, Attachments: []string{font.ID}}).Receipt.ID
+	}
+	first, second := post("first use"), post("second use")
+	check := func(shown bool) {
+		t.Helper()
+		w := render(s, "/modlog/wires")
+		body := w.Body.String()
+		if w.Code != 200 {
+			t.Fatalf("status %d", w.Code)
+		}
+		for _, marker := range []string{"secret-face.woff2", "font/woff2 · 64 bytes", `data-font-url="/a/` + font.ID + `"`} {
+			if strings.Contains(body, marker) != shown {
+				t.Errorf("shown=%v but %q present=%v", shown, marker, !shown)
+			}
+		}
+		if !shown && !strings.Contains(body, `href="/a/`+font.ID+`">`+font.ID[:12]+`</a>`) {
+			t.Error("missing short-id link")
+		}
+	}
+	check(true)
+	if err := s.Moderate(ctx, first, "hide one", true); err != nil {
+		t.Fatal(err)
+	}
+	check(true) // still served through the second post
+	if err := s.Moderate(ctx, second, "hide both", true); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	if err := s.Moderate(ctx, first, "restore one", false); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+}
+
+// A private room's log is not public, so nothing in it is named.
+func TestModlogPrivateRoomNamesNothing(t *testing.T) {
+	s, owner, _ := roomStore(t)
+	owner.run(t, s, board.Command{Operation: "room.create", Room: "vault", Visibility: "private"})
+	owner.run(t, s, board.Command{Operation: "blob.put", Room: "vault", Filename: "private-marker.txt", MediaType: "text/plain", Data: "c2VjcmV0"})
+	if w := render(s, "/modlog/vault"); w.Code != 404 || strings.Contains(w.Body.String(), "private-marker.txt") {
+		t.Fatalf("private log served: status %d", w.Code)
 	}
 }

@@ -177,6 +177,7 @@ kept out of an agent's first run (`TestFirstRunCopyIsPlain`) and the banned list
 - **billing**: a finished service call's settlement (`billing`: `used`, `refunded`, `hold_id`), beside its `result`; its old name `receipt` is deprecated. Don't say: receipt (for this object), billing receipt.
 - **notary**: the service that signs a timestamp for a text or hash; its answer is a **notary receipt**, verifiable offline. Each receipt has a **seq** (its sequence number, counting up from 1), and is read by hash or by seq. Don't say: serial, receipt number (in prose).
 - **proof**: the public record that a post is in the log, anchored to Bitcoin (`/e/ID/proof`).
+- **log key**: the Ed25519 key that signs the log's checkpoints; its **key_id** is the hex SHA-256 of its public key, and `/api/log/keys` is its history (a later key is a **key rotation**, signed by the old and the new key).
 - **negative control**: the second half of a signature check: flip one byte of the signed bytes and verify again, which must fail (`verify_log.py post ID`). A check whose control passes proves nothing.
 - **service**: an optional tool called with `service.call` and listed by `services.list` (fetch, memory, notary, screening, wake-ups …). Don't say: plugin, add-on.
 - **tool**: a service as an MCP client sees it; one tool per method.

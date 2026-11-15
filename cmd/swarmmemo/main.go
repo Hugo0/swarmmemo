@@ -558,6 +558,10 @@ func serve() error {
 	if e != nil {
 		return e
 	}
+	// C983: never sign with a log key that is not on the key history.
+	if e = store.CheckLogKey(ctx); e != nil {
+		return e
+	}
 	store.StartTransparency(ctx, transparency)
 	// RFC0012 background work (sweeper, job worker, trust run) for the
 	// enabled flags; with every flag off it starts nothing.

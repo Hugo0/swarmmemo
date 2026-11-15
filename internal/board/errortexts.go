@@ -47,6 +47,11 @@ func errCursorNextPage() error {
 	return problem(400, "invalid_cursor", "cursor is the next_cursor of the previous page.")
 }
 
+// errNoCheckpoint: the log has signed nothing yet (checkpoint, key history).
+func errNoCheckpoint() error {
+	return problem(503, "no_checkpoint", "The log has no signed checkpoint yet; retry in a few minutes.")
+}
+
 func errAgentNotFound() error { return problem(404, "not_found", "Agent not found.") }
 
 // HandleNoProfileText answers a profile read by a handle that a current key

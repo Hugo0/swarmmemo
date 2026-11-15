@@ -18,6 +18,7 @@ import (
 
 	publicclients "swarmmemo/clients"
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/tlog"
 )
 
 // transparencyReader is the store side of the routes.
@@ -32,7 +33,9 @@ type transparencyReader interface {
 	ReadLogRecord(ctx context.Context, who string) (board.SignedRecord, error)
 	ReadRecordProofs(ctx context.Context, who, cursor string, limit int) (board.RecordProofs, error)
 	ReadLogPromise(ctx context.Context, message string, index int64) (board.LogPromiseStatus, error)
+	ReadLogKeys(ctx context.Context) ([]board.LogKey, error)
 	LogVerifierKey() string
+	LogKeyID() string
 }
 
 // LogPaths are the routes, for /capabilities and the docs.
@@ -45,6 +48,7 @@ var LogPaths = map[string]string{
 	"consistency": "/api/log/consistency?from=SIZE&to=SIZE",
 	"leaves":      "/api/log/leaves?start=0&end=256",
 	"anchors":     "/api/log/anchors",
+	"keys":        board.LogKeysPath,
 	"record":      "/api/record/HANDLE_OR_FINGERPRINT",
 	"proofs":      "/api/record/HANDLE_OR_FINGERPRINT/proofs",
 	"verifier":    "/clients/python/verify_log.py",
@@ -120,10 +124,21 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 		cacheFor(w, q["size"] >= 0)
 		if strings.HasSuffix(p, "/note") {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("X-Log-Key-ID", cp.KeyID)
 			_, _ = w.Write([]byte(cp.Note))
 			return true
 		}
-		jsonResponse(w, 200, map[string]any{"checkpoint": cp, "verify": s.cfg.PublicURL + "/verify"})
+		jsonResponse(w, 200, map[string]any{"checkpoint": cp, "keys_url": board.LogKeysPath, "verify": s.cfg.PublicURL + "/verify"})
+	case p == board.LogKeysPath:
+		if _, err := logQuery(r); err != nil {
+			return fail(err)
+		}
+		keys, err := store.ReadLogKeys(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		cacheFor(w, false)
+		jsonResponse(w, 200, s.logKeysAnswer(keys, store.LogKeyID()))
 	case p == "/api/log/proof":
 		q, err := logQuery(r, "leaf", "message", "notary", "size")
 		if err != nil {
@@ -239,7 +254,7 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 			return fail(err)
 		}
 		cacheFor(w, false)
-		jsonResponse(w, 200, map[string]any{"anchors": anchors, "rows_digest": board.AnchorRowsDigest(anchors), "digest": "SHA-256 of the signed checkpoint note", "verify": "ots verify -d DIGEST FILE.ots", "timeline": board.AnchorTimeline})
+		jsonResponse(w, 200, map[string]any{"anchors": anchors, "rows_digest": board.AnchorRowsDigest(anchors), "keys_url": board.LogKeysPath, "digest": "SHA-256 of the signed checkpoint note", "verify": "ots verify -d DIGEST FILE.ots", "timeline": board.AnchorTimeline})
 	case strings.HasPrefix(p, "/api/log/anchors/") && strings.HasSuffix(p, ".ots"):
 		size, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(p, "/api/log/anchors/"), ".ots"), 10, 64)
 		if err != nil || size < 0 {
@@ -269,10 +284,10 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 			_, _ = w.Write([]byte(rec.Note))
 			return true
 		}
-		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent), "proofs_url": s.proofsURL(rec.Record.Agent),
+		jsonResponse(w, 200, map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "key_id": store.LogKeyID(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent), "proofs_url": s.proofsURL(rec.Record.Agent),
 			"how": "The note is signed by the log key; its text is this record's exact JSON. Each proof verifies against record.checkpoint."})
 	default:
-		return fail(&board.Error{Status: 404, Code: "not_found", Message: "Log routes: " + strings.Join([]string{LogPaths["checkpoint"], LogPaths["note"], LogPaths["proof"], LogPaths["promise"], LogPaths["consistency"], LogPaths["leaves"], LogPaths["anchors"], LogPaths["record"], LogPaths["proofs"]}, ", ") + "."})
+		return fail(&board.Error{Status: 404, Code: "not_found", Message: "Log routes: " + strings.Join([]string{LogPaths["checkpoint"], LogPaths["note"], LogPaths["proof"], LogPaths["promise"], LogPaths["consistency"], LogPaths["leaves"], LogPaths["anchors"], LogPaths["keys"], LogPaths["record"], LogPaths["proofs"]}, ", ") + "."})
 	}
 	return true
 }
@@ -299,6 +314,7 @@ func (s *Server) transparencyCapabilities() map[string]any {
 	}
 	if store, ok := s.service.(transparencyReader); ok {
 		caps["verifier_key"] = store.LogVerifierKey()
+		caps["key_id"] = store.LogKeyID()
 	}
 	return caps
 }
@@ -382,7 +398,7 @@ func (s *Server) mcpAgentRecord(ctx context.Context, in agentRecordInput) (*mcp.
 	if err != nil {
 		return nil, board.Result{}, apiError(err)
 	}
-	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent), "proofs_url": s.proofsURL(rec.Record.Agent)}}, nil
+	return nil, board.Result{OK: true, Data: map[string]any{"record": rec.Record, "note": rec.Note, "verifier_key": store.LogVerifierKey(), "key_id": store.LogKeyID(), "urls": s.agentURLs(rec.Record.Agent, rec.Agent), "works_url": s.worksURL(rec.Record.Agent), "proofs_url": s.proofsURL(rec.Record.Agent)}}, nil
 }
 
 // worksURL lists the public work an agent claimed, the items its record's
@@ -402,7 +418,7 @@ func (s *Server) proofsURL(id string) string {
 // bundle, the log key its checkpoint is signed with, and how to check one
 // proof with no server.
 func (s *Server) recordProofsAnswer(b board.RecordProofs, key string) map[string]any {
-	out := map[string]any{"agent": b.Agent, "checkpoint": b.Checkpoint, "verifier_key": key, "proofs": b.Proofs, "has_more": b.HasMore,
+	out := map[string]any{"agent": b.Agent, "checkpoint": b.Checkpoint, "verifier_key": key, "key_id": logKeyID(key), "proofs": b.Proofs, "has_more": b.HasMore,
 		"verify": "Save one proofs[].proof as FILE, then: python3 verify_log.py --key VERIFIER_KEY message RESULT_ID --proof FILE (" + strings.TrimRight(s.cfg.PublicURL, "/") + LogPaths["verifier"] + "); it needs no server."}
 	if b.NextCursor != "" {
 		out["next_cursor"] = b.NextCursor
@@ -421,4 +437,29 @@ func (s *Server) agentURLs(id string, rec *board.AgentRecord) *board.AgentURLs {
 		u.Proof = base + rec.ProofURL
 	}
 	return u
+}
+
+// LogKeysRepoFile is the committed copy of the log key history (C983): the
+// outside pin, in the public repository's history.
+const LogKeysRepoFile = "clients/python/log_keys.json"
+
+// logKeysAnswer is GET /api/log/keys: the history, the running key, the
+// rotation note format and where the keys are pinned outside this server.
+func (s *Server) logKeysAnswer(keys []board.LogKey, current string) map[string]any {
+	base := strings.TrimRight(s.cfg.PublicURL, "/")
+	return map[string]any{"keys": keys, "current_key_id": current,
+		"key_id":       "lowercase hex SHA-256 of the raw 32-byte Ed25519 public key",
+		"first_anchor": "the earliest Bitcoin anchor of a checkpoint the key signed: SHA-256 of that note (note_url) is in block bitcoin_height (ots verify -d DIGEST FILE.ots), so the key existed and signed by then",
+		"rotation":     "a later key's rotation_note is a C2SP signed note, text ORIGIN\\nkey-rotation/v1\\nfrom OLD_KEY_ID\\nto NEW_VERIFIER_KEY\\nat SIZE\\n, signed by the old and the new key, and is on the log",
+		"pins": []map[string]string{
+			{"where": "public repository", "url": "https://github.com/Hugo0/swarmmemo/blob/main/" + LogKeysRepoFile},
+			{"where": "verify_log.py (each pinned version keeps the keys it trusts)", "url": base + LogPaths["verifier_manifest"]},
+		},
+		"verify": "python3 verify_log.py keys (" + base + LogPaths["verifier"] + ")"}
+}
+
+// logKeyID is a verifier key's key_id ("" when malformed).
+func logKeyID(vkey string) string {
+	id, _ := tlog.VerifierKeyID(vkey)
+	return id
 }

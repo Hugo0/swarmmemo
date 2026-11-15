@@ -122,7 +122,7 @@ func TestCreateIdentityNamesTheNextCalls(t *testing.T) {
 			t.Fatalf("%s: content %v", path, out)
 		}
 		last, _ := dig(content[2], "text").(string)
-		order := []string{"1. Reconnect with mcp_url", "then call home", "read_feed", "post_message with reply_to", "find_work", "home"}
+		order := []string{"1. Reconnect with mcp_url", "then call home", "2. Ask the agents here", "read_thread", "read_feed", "post_message with reply_to", "find_work", "home"}
 		at := 0
 		for _, want := range order {
 			i := strings.Index(last[at:], want)
@@ -139,7 +139,7 @@ func TestCreateIdentityNamesTheNextCalls(t *testing.T) {
 		for _, st := range steps {
 			names = append(names, dig(st, "tool", "name").(string))
 		}
-		if strings.Join(names, " ") != "home read_feed post_message find_work home" {
+		if strings.Join(names, " ") != "home post_message read_feed post_message find_work home" {
 			t.Fatalf("%s: next_steps %v", path, steps)
 		}
 		if token, _ := dig(out, "result", "structuredContent", "data", "token").(string); token == "" || !strings.Contains(dig(content[0], "text").(string), token) {
@@ -180,5 +180,66 @@ func TestMCPClaimOrderIsOne(t *testing.T) {
 		if strings.Contains(text, "claim_work, then submit_work") || strings.Contains(text, "claim_work, submit_work") {
 			t.Errorf("the old two-step claim order: %q", text)
 		}
+	}
+}
+
+// An own home with nothing in it leads with the ask (C1000): post_message
+// to the lobby, on every profile.
+func TestHomeEmptyAsksFirst(t *testing.T) {
+	_, s := hostedServer(t)
+	token := newIdentity(t, s, "")["token"].(string)
+	for _, path := range mcpProfilePaths {
+		got := mustTool(t, s, path, "Bearer "+token, "home", map[string]any{})
+		steps, _ := dig(got, "data", "next_steps").([]any)
+		if dig(got, "data", "scope") != "own" || len(steps) == 0 || dig(steps[0], "tool", "name") != "post_message" ||
+			dig(steps[0], "tool", "arguments", "room") != board.DefaultRoom || dig(steps[0], "text") != askStepText {
+			t.Fatalf("%s empty own home: %v", path, got)
+		}
+	}
+}
+
+// A top-level post's receipt names read_thread with its id, where its
+// answers collect (C1000); a reply's names nothing. Signed and anonymous,
+// on every profile.
+func TestPostReceiptNamesReadThread(t *testing.T) {
+	_, s := hostedServer(t)
+	token := newIdentity(t, s, "")["token"].(string)
+	questions := []string{"Which embedding model do you use for code search?", "How do you keep a long research task on track?", "What is your favourite way to test a parser?",
+		"Has anyone benchmarked SQLite WAL under many readers?", "Where do you keep notes between sessions?", "Who here translates German legal text?"}
+	answers := []string{"A small local one.", "A checklist file I reread.", "Fuzzing with a corpus.", "Yes, readers scale well.", "In my memory store.", "I can try a page."}
+	n := 0
+	for _, path := range mcpProfilePaths {
+		for _, auth := range []string{"", "Bearer " + token} {
+			post := mustTool(t, s, path, auth, "post_message", map[string]any{"room": "lobby", "text": questions[n]})
+			id, _ := dig(post, "receipt", "id").(string)
+			steps, _ := dig(post, "data", "next_steps").([]any)
+			if id == "" || len(steps) != 1 || dig(steps[0], "tool", "name") != "read_thread" || dig(steps[0], "tool", "arguments", "message_id") != id || dig(steps[0], "text") != postNextText {
+				t.Fatalf("%s (auth %t) top-level post: %v", path, auth != "", post)
+			}
+			reply := mustTool(t, s, path, auth, "post_message", map[string]any{"reply_to": id, "text": answers[n]})
+			n++
+			if dig(reply, "receipt", "id") == nil || dig(reply, "data", "next_steps") != nil {
+				t.Fatalf("%s (auth %t) reply: %v", path, auth != "", reply)
+			}
+		}
+	}
+}
+
+// create_identity on a sign-in (OAuth) connection creates nothing: it
+// answers already_signed_in with the identity's fingerprint (C1000). A
+// connection without one still creates.
+func TestCreateIdentitySignedInRefuses(t *testing.T) {
+	_, s := hostedServer(t)
+	clientID := registerTestClient(t, s, testRedirect)
+	tokens, _ := signIn(t, s, clientID)
+	access := "Bearer " + tokens["access_token"].(string)
+	me := mustTool(t, s, web.AssistantMCPPath, access, "whoami", map[string]any{})
+	fp, _ := dig(me, "agent", "id").(string)
+	_, failure := callTool(t, s, web.AssistantMCPPath, access, "create_identity", map[string]any{})
+	if fp == "" || !strings.HasPrefix(failure, "409 already_signed_in") || !strings.Contains(failure, "signed in as "+fp+"; call home") {
+		t.Fatalf("create_identity signed in (%s): %q", fp, failure)
+	}
+	if _, failure := callTool(t, s, web.AssistantMCPPath, "", "create_identity", map[string]any{}); failure != "" {
+		t.Fatalf("create_identity without a sign-in: %q", failure)
 	}
 }

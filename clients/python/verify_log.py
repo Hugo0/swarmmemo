@@ -14,9 +14,14 @@ notes). Standard library plus `cryptography` for Ed25519.
                                                 # with a negative control (--file: offline)
     python3 verify_log.py promise FILE          # check a post's signed log promise: kept,
                                                 # pending, overdue, or BROKEN with evidence
+    python3 verify_log.py keys [--file FILE]    # walk the log key history: key_ids, rotation
+                                                # notes, each key's first Bitcoin anchor
 
-Pin the log key with --key (printed by `checkpoint`); without it the key is
-fetched from the server, which proves consistency but not who signed. --state
+Against swarmmemo.com the log key must be one of PINNED_LOG_KEYS below (the
+public repository's clients/python/log_keys.json, frozen into each pinned
+version of this file). --key pins one key (NAME+HASH+KEY, printed by
+`checkpoint`, or its 64-hex key_id); against another server without --key the
+key is fetched from it, which proves consistency but not who signed. --state
 FILE remembers the last checkpoint and its key, and checks that every new
 checkpoint extends it.
 
@@ -44,6 +49,13 @@ import urllib.parse
 import urllib.request
 
 BASE = "https://swarmmemo.com"
+
+# The log keys this file trusts against BASE by default (C983): a copy of
+# clients/python/log_keys.json, so each pinned version keeps the keys it trusts.
+PINNED_LOG_KEYS = [
+    {"key_id": "63eb5d1c79aecb71bee98c64297c21bf8f51dca0b936a340c3afa5b1c0776748",
+     "verifier_key": "swarmmemo.com/log+97d01fe0+AadinL9Xv8N7EI22GOcmYMsX3fot0wy7bY9jsKDbap4V", "retired_size": None},
+]
 
 
 class VerifyError(Exception):
@@ -326,6 +338,33 @@ def parse_checkpoint(text: str):
 
 
 PROMISE_TYPE = "promise/v1"
+ROTATION_TYPE = "key-rotation/v1"
+
+
+def key_id_of(vkey: str) -> str:
+    """A log key's key_id: hex SHA-256 of its raw Ed25519 public key."""
+    return hashlib.sha256(parse_verifier_key(vkey)[2]).hexdigest()
+
+
+def is_key_id(s: str) -> bool:
+    return len(s) == 64 and all(c in "0123456789abcdef" for c in s)
+
+
+def parse_rotation(text: str) -> dict:
+    """Parse a key-rotation body (tlog.Rotation): origin, key-rotation/v1,
+    from KEY_ID, to VERIFIER_KEY, at SIZE; nothing else."""
+    lines = text.split("\n")
+    if len(lines) != 6 or lines[5] != "" or lines[1] != ROTATION_TYPE:
+        raise VerifyError("malformed key rotation")
+    fields = {}
+    for line, name in zip(lines[2:5], ("from", "to", "at")):
+        if not line.startswith(name + " "):
+            raise VerifyError("malformed key rotation")
+        fields[name] = line[len(name) + 1:]
+    if not is_key_id(fields["from"]) or not fields["at"].isdigit() or str(int(fields["at"])) != fields["at"]:
+        raise VerifyError("malformed key rotation")
+    parse_verifier_key(fields["to"])
+    return {"origin": lines[0], "from": fields["from"], "to": fields["to"], "at": int(fields["at"])}
 
 
 def parse_promise(text: str) -> dict:
@@ -383,13 +422,36 @@ def hashes(items: list[str]) -> list[bytes]:
 class Verifier:
     def __init__(self, base: str, key: str | None, state: str | None):
         self.base, self.key, self.state = base.rstrip("/"), key, state
-        if state and key is None:
+        # --key KEY_ID pins a key by its key_id; against BASE with no --key,
+        # the key must be one of PINNED_LOG_KEYS.
+        self.key_id = None
+        if key is not None and is_key_id(key):
+            self.key_id, self.key = key, None
+        self.trusted = None
+        if key is None and self.base == BASE:
+            self.trusted = {k["verifier_key"] for k in PINNED_LOG_KEYS}
+        if state and self.key is None:
             # Trust on first use: the key that signed the remembered checkpoint.
             try:
                 with open(state, encoding="utf-8") as f:
                     self.key = json.load(f).get("key")
             except FileNotFoundError:
                 pass
+            # A remembered key this file does not pin is taken afresh.
+            if self.trusted is not None and self.key not in self.trusted:
+                self.key = None
+            if self.key_id is not None and self.key is not None and key_id_of(self.key) != self.key_id:
+                self.key = None
+
+    def adopt(self, vkey: str):
+        """Take a log key the server named when none is pinned in full: it
+        must match --key KEY_ID, or be one of PINNED_LOG_KEYS against BASE."""
+        if self.key_id is not None and key_id_of(vkey) != self.key_id:
+            raise VerifyError(f"the server's log key {key_id_of(vkey)} is not the pinned key_id {self.key_id}")
+        if self.trusted is not None and vkey not in self.trusted:
+            raise VerifyError("the server's log key is not one this verifier pins (PINNED_LOG_KEYS); "
+                              "check GET /api/log/keys and the public log_keys.json, then pass --key")
+        self.key = vkey
 
     def checkpoint(self, cp: dict | None = None):
         """Verify a checkpoint (the latest by default); return (size, root)."""
@@ -397,7 +459,7 @@ class Verifier:
         if live:
             cp = get(self.base, "/api/log/checkpoint")["checkpoint"]
         if self.key is None:
-            self.key = cp["verifier_key"]
+            self.adopt(cp["verifier_key"])
         elif cp.get("verifier_key") not in (None, self.key):
             raise VerifyError("the server's log key differs from the pinned one")
         origin, size, root = parse_checkpoint(open_note(cp["note"], self.key))
@@ -516,7 +578,9 @@ class Verifier:
     def consistency(self, old: int, new: int | None):
         q = f"/api/log/consistency?from={old}" + (f"&to={new}" if new is not None else "")
         c = get(self.base, q)
-        _, m, root_m = parse_checkpoint(open_note(c["from"]["note"], self.key or c["to"]["verifier_key"]))
+        if self.key is None:
+            self.adopt(c["to"]["verifier_key"])
+        _, m, root_m = parse_checkpoint(open_note(c["from"]["note"], self.key))
         n, root_n = self.checkpoint(c["to"])
         verify_consistency(m, n, hashes(c["proof"]), root_m, root_n)
         return [f"checkpoint {m} is a prefix of checkpoint {n}"]
@@ -542,7 +606,7 @@ class Verifier:
         if self.key is None:
             if cp is None:
                 raise VerifyError("no checkpoint to take the log key from: pin it with --key")
-            self.key = cp["verifier_key"]
+            self.adopt(cp["verifier_key"])
         pr = parse_promise(open_note(note, self.key))
         idx = pr["index"]
         out = [f"promise signed by the log key: leaf {idx} is {pr['kind']} {pr['id']}, received {pr['received']}, merge-by {pr['merge-by']}"]
@@ -578,13 +642,81 @@ class Verifier:
     def record(self, who: str):
         r = get(self.base, "/api/record/" + urllib.parse.quote(who))
         if self.key is None:
-            self.key = r["verifier_key"]
+            self.adopt(r["verifier_key"])
         record = json.loads(open_note(r["note"], self.key))
         size, root = self.checkpoint(record["checkpoint"])
         for p in record["proofs"]:
             self.inclusion(p, size, root)
         return [f"record of {record.get('handle') or record['agent']}: {len(record['keys'])} keys, "
                 f"{len(record['proofs'])} key events proven against checkpoint {size}"]
+
+    def keys(self, file: str | None = None):
+        """Walk the log key history (GET /api/log/keys, or a saved answer):
+        each key_id is SHA-256 of its key; each later key's rotation note is
+        signed by the key it retires and by itself, and names it; each first
+        anchor's digest is SHA-256 of a checkpoint note that key signed. The
+        pinned keys must be on the history."""
+        if file:
+            with open(file, encoding="utf-8") as f:
+                doc = json.loads(f.read(PROMISE_FILE_BYTES))
+        else:
+            doc = get(self.base, "/api/log/keys")
+        entries = doc.get("keys") or []
+        if not entries:
+            raise VerifyError("the key history is empty")
+        out, prev = [], None
+        for i, k in enumerate(entries):
+            vkey, kid = k["verifier_key"], k["key_id"]
+            name = parse_verifier_key(vkey)[0]
+            if key_id_of(vkey) != kid:
+                raise VerifyError(f"key {i}: key_id is not SHA-256 of its public key")
+            if prev is None:
+                if k.get("rotation_note") is not None:
+                    raise VerifyError("the first key carries a rotation note")
+                how = "genesis"
+            else:
+                note = k.get("rotation_note")
+                if not note:
+                    raise VerifyError(f"key {i} ({kid}) has no rotation note signed by key {i - 1}")
+                r = parse_rotation(open_note(note, prev["verifier_key"]))
+                open_note(note, vkey)  # the new key signs its own rotation too
+                if r["from"] != prev["key_id"] or r["to"] != vkey or r["origin"] != name:
+                    raise VerifyError(f"key {i}: the rotation note names other keys")
+                if r["at"] != k["first_size"] or prev.get("retired_size") != r["at"]:
+                    raise VerifyError(f"key {i}: the rotation is at size {r['at']}, the history says {k['first_size']} (retired {prev.get('retired_size')})")
+                how = f"rotated from {prev['key_id'][:16]}… at size {r['at']}, signed by both keys"
+            out.append(f"key {i} {kid}: {how}")
+            out += self.first_anchor(k, fetch=not file)
+            prev = k
+        listed = {k["verifier_key"]: k for k in entries}
+        if self.key is not None and self.key not in listed:
+            raise VerifyError("the pinned --key is not on the key history")
+        if self.key_id is not None and self.key_id not in {k["key_id"] for k in entries}:
+            raise VerifyError("the pinned key_id is not on the key history")
+        for vkey in sorted(self.trusted or ()):
+            if vkey not in listed:
+                raise VerifyError(f"pinned key {key_id_of(vkey)} (PINNED_LOG_KEYS) is not on the key history")
+        current = entries[-1]
+        if current.get("retired_size") is not None:
+            raise VerifyError("the newest key is retired, with no key after it")
+        if doc.get("current_key_id") not in (None, current["key_id"]):
+            raise VerifyError("current_key_id is not the newest key on the history")
+        self.key = self.key or current["verifier_key"]
+        return out + [f"current key {current['key_id']} ({current['verifier_key']})"]
+
+    def first_anchor(self, k: dict, fetch: bool) -> list[str]:
+        a = k.get("first_anchor")
+        if not a:
+            return [f"  no Bitcoin anchor yet (first checkpoint {k['first_size']})"]
+        where = f"block {a['bitcoin_height']}" if a.get("bitcoin_height") else a["state"]
+        if not fetch:
+            return [f"  first anchor: checkpoint {a['size']} ({where}); not fetched, so its note is not checked"]
+        note = get(self.base, a.get("note_url") or f"/api/log/checkpoint/note?size={a['size']}", raw=True)
+        _, size, _ = parse_checkpoint(open_note(note, k["verifier_key"]))
+        if size != a["size"] or hashlib.sha256(note.encode()).hexdigest() != a["digest"]:
+            raise VerifyError(f"first anchor of {k['key_id']}: the digest is not SHA-256 of that key's checkpoint {a['size']}")
+        line = f"  first anchored: checkpoint {a['size']}, signed by this key, SHA-256 {a['digest']} in {where}"
+        return [line, f"  check on Bitcoin: ots verify -d {a['digest']} FILE.ots ({self.base}{a.get('ots_url', '')})"]
 
 
 def post(args) -> int:
@@ -615,7 +747,7 @@ def post(args) -> int:
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default=BASE, help="service URL (default %(default)s)")
-    ap.add_argument("--key", help="pinned log verifier key (NAME+HASH+KEY)")
+    ap.add_argument("--key", help="pinned log verifier key (NAME+HASH+KEY) or its key_id (64 hex)")
     ap.add_argument("--state", help="file remembering the last checkpoint, checked for consistency")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("checkpoint")
@@ -635,6 +767,7 @@ def main(argv=None):
     pm.add_argument("file", help="the promise note, a post result with log_promise, or a /api/log/promise answer")
     pm.add_argument("--proof", help="a saved /api/log/proof?leaf=INDEX answer: verify with no fetch (pin --key)")
     pm.add_argument("--evidence", help="where to save the evidence of a broken promise")
+    sub.add_parser("keys").add_argument("--file", help="a saved /api/log/keys answer: walk it with no fetch")
     args = ap.parse_args(argv)
     v = Verifier(args.base, args.key, args.state)
     try:
@@ -649,6 +782,8 @@ def main(argv=None):
             lines = v.notary(args.hash)
         elif args.cmd == "consistency":
             lines = v.consistency(args.old, args.new)
+        elif args.cmd == "keys":
+            lines = v.keys(args.file)
         elif args.cmd == "promise":
             state, lines = v.promise(read_promise(args.file), args.proof, args.evidence)
             if state in ("broken", "overdue"):

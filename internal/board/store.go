@@ -445,7 +445,12 @@ CREATE TABLE IF NOT EXISTS leases (
 // and payee. A schema-51 binary refuses the database, and its unique index
 // would not hold once a hash settles two items: a rollback past 52 needs the
 // pre-deploy snapshot (RUNBOOK "Combined USDC settlements").
-const SchemaVersion = 52
+//
+// 53: tlog_keys, the log key's history (logkeys.go, C983), seeded at open
+// from the running key. Additive: a schema-52 binary never reads it, but
+// refuses a schema-53 database, so a rollback past 53 needs the pre-deploy
+// snapshot (RUNBOOK "Log key history").
+const SchemaVersion = 53
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.

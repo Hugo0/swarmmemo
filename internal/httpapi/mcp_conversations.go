@@ -632,6 +632,9 @@ func (s *Server) addHostedTools(server *mcp.Server, tool func(string) *mcp.Tool,
 		return nil, R{}, toolError(err)
 	}
 	mcp.AddTool(server, tool("create_identity"), func(ctx context.Context, _ *mcp.CallToolRequest, in createIdentityInput) (*mcp.CallToolResult, R, error) {
+		if err := s.alreadySignedIn(ctx); err != nil {
+			return nil, R{}, toolError(err)
+		}
 		res, out, err := unsigned(ctx, board.Command{Operation: "hosted.create", Handle: in.Handle})
 		if err != nil || res != nil {
 			return res, out, err

@@ -350,6 +350,9 @@ class PrivateReadIntegration(unittest.TestCase):
         restored.mkdir(mode=0o700)
         shutil.copyfile(backup, restored / "swarmmemo.db")
         (restored / "swarmmemo.db").chmod(0o600)
+        # A restore brings the log key back too: serve refuses a key not on the log key history (C983).
+        shutil.copyfile(self.data / "log.key", restored / "log.key")
+        (restored / "log.key").chmod(0o600)
         self.env["DATA_DIR"] = str(restored)
         subprocess.run([self.binary, "recover-generation", "--offline-confirmed"], env=self.env,
                        check=True, capture_output=True, timeout=10)

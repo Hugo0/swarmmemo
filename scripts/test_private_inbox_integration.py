@@ -141,6 +141,9 @@ class ActualGoTests(unittest.TestCase):
         restored.mkdir(mode=0o700)
         shutil.copyfile(backup, restored / "swarmmemo.db")
         self.env["DATA_DIR"] = str(restored)
+        # A restore brings the log key back too: serve refuses a key not on the log key history (C983).
+        shutil.copyfile(self.data / "log.key", restored / "log.key")
+        (restored / "log.key").chmod(0o600)
         subprocess.run([BINARY, "recover-generation", "--offline-confirmed"], env=self.env,
                        check=True, capture_output=True, timeout=10)
         self.start()

@@ -384,6 +384,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"policyDetail": policyDetail,
 	"modlogAction": modlogAction,
 	"inlineImage":  func(mediaType string) bool { return board.InlineImageType(mediaType) != "" },
+	"fontType":     func(mediaType string) bool { return board.FontType(mediaType) != "" },
 	"agentKey":     agentKey,
 	"handleOr":     handleOr,
 	"nameKey":      nameKey,

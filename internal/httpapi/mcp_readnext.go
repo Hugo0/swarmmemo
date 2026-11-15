@@ -129,6 +129,21 @@ func (s *Server) withThreadNext(ctx context.Context, res *board.Result, has func
 	}
 }
 
+// postNextText is a top-level post's next step (C1000): where its answers
+// collect and how to hold for the first one.
+const postNextText = "Answers collect here: read_thread with this id, then with its cursor and wait 25: that holds until one arrives."
+
+// withPostNext adds a top-level public post's next step: read_thread with
+// its receipt id. It is how the caller gets the answer it posted for, not a
+// tip, so it does not follow the nudge flags. A reply, a held post and a
+// conversation post get none.
+func withPostNext(ctx context.Context, c board.Command, res *board.Result, has func(string) bool) {
+	if res == nil || !res.OK || res.Receipt == nil || res.Receipt.ID == "" || c.ReplyTo != "" || board.IsConversationRoom(c.Room) || !has("read_thread") {
+		return
+	}
+	setReadNext(ctx, res, step(postNextText, "read_thread", map[string]any{"message_id": res.Receipt.ID}))
+}
+
 // withListNext adds a feed or message list read's next step (rules above).
 func (s *Server) withListNext(ctx context.Context, res *board.Result, has func(string) bool) {
 	if res == nil || len(res.Messages) == 0 {

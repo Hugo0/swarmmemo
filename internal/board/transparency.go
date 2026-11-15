@@ -630,6 +630,9 @@ type transparencyState struct {
 	// checkpointEvery is the signing interval in seconds, for the next
 	// checkpoint's due time; zero until StartTransparency sets it.
 	checkpointEvery atomic.Int64
+	// keys is the log key history (logkeys.go), oldest first.
+	keysMu sync.RWMutex
+	keys   []logKeyRow
 }
 
 // openTransparency loads the log key (LOG_KEY_FILE, default log.key beside
@@ -656,28 +659,38 @@ func (s *Store) openTransparency(path string) error {
 		return err
 	}
 	s.transparency.origin = s.config.ServiceID + "/log"
-	s.transparency.signer, err = tlog.NewNoteSigner(s.transparency.origin, key)
-	return err
+	if s.transparency.signer, err = tlog.NewNoteSigner(s.transparency.origin, key); err != nil {
+		return err
+	}
+	return s.openLogKeys()
 }
 
 // LogCheckpoint is a signed tree head.
 type LogCheckpoint struct {
-	Origin      string `json:"origin"`
-	Size        int64  `json:"size"`
-	Root        string `json:"root"`
-	RootHex     string `json:"root_hex"`
-	CreatedAt   int64  `json:"created_at"`
-	Note        string `json:"note"`
+	Origin    string `json:"origin"`
+	Size      int64  `json:"size"`
+	Root      string `json:"root"`
+	RootHex   string `json:"root_hex"`
+	CreatedAt int64  `json:"created_at"`
+	Note      string `json:"note"`
+	// VerifierKey, PublicKey and KeyID are the log key that signed this
+	// checkpoint's note (/api/log/keys has the history, C983).
 	VerifierKey string `json:"verifier_key"`
 	PublicKey   string `json:"public_key"`
+	KeyID       string `json:"key_id,omitempty"`
 }
 
 // LogVerifierKey is the C2SP verifier key of the log ("NAME+HASH+KEY").
 func (s *Store) LogVerifierKey() string { return s.transparency.signer.VerifierKey() }
 
 func (s *Store) checkpointFrom(size, createdAt int64, root []byte, note string) LogCheckpoint {
+	keyID, vkey := s.logKeyFor(size)
+	var public string
+	if _, pub, err := tlog.ParseVerifierKey(vkey); err == nil {
+		public = base64.RawURLEncoding.EncodeToString(pub)
+	}
 	return LogCheckpoint{Origin: s.transparency.origin, Size: size, Root: base64.StdEncoding.EncodeToString(root), RootHex: hex.EncodeToString(root),
-		CreatedAt: createdAt, Note: note, VerifierKey: s.transparency.signer.VerifierKey(), PublicKey: base64.RawURLEncoding.EncodeToString(s.transparency.signer.PublicKey())}
+		CreatedAt: createdAt, Note: note, VerifierKey: vkey, PublicKey: public, KeyID: keyID}
 }
 
 // SignCheckpoint catches the log up and signs a new checkpoint if the tree
@@ -704,6 +717,11 @@ func (s *Store) SignCheckpoint(ctx context.Context) (bool, error) {
 	if count > 0 && size == last {
 		return false, tx.Commit()
 	}
+	// C983: only a key on the key history signs (the first checkpoint puts
+	// the running key on an empty one).
+	if err = s.ensureLogKey(ctx, tx, size); err != nil {
+		return false, err
+	}
 	root, err := tlog.TreeHash(size, txHashReader(ctx, tx))
 	if err != nil {
 		return false, err
@@ -715,7 +733,13 @@ func (s *Store) SignCheckpoint(ctx context.Context) (bool, error) {
 	if _, err = tx.ExecContext(ctx, "INSERT INTO tlog_checkpoints(size,root,note,created_at) VALUES(?,?,?,?)", size, root[:], note, s.now().Unix()); err != nil {
 		return false, err
 	}
-	return true, tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return false, err
+	}
+	if count == 0 {
+		return true, s.loadLogKeys(ctx)
+	}
+	return true, nil
 }
 
 // ReadLogCheckpoint returns the checkpoint of exactly size leaves, or the
@@ -731,7 +755,7 @@ func (s *Store) ReadLogCheckpoint(ctx context.Context, size int64) (LogCheckpoin
 	latest := size < 0
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(&size, &root, &note, &created)
 	if errors.Is(err, sql.ErrNoRows) && latest {
-		return LogCheckpoint{}, problem(503, "no_checkpoint", "The log has no signed checkpoint yet; retry in a few minutes.")
+		return LogCheckpoint{}, errNoCheckpoint()
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return LogCheckpoint{}, problem(404, "not_found", "No checkpoint of that size; GET /api/log/checkpoint is the latest.")
@@ -1173,6 +1197,8 @@ type LogAnchor struct {
 	NextCheckAt   int64    `json:"next_check_at,omitempty"`
 	OTS           string   `json:"ots"`
 	Note          string   `json:"note"`
+	// KeyID is the log key that signed the checkpoint (C983).
+	KeyID string `json:"key_id,omitempty"`
 }
 
 // blockTimeKey prefixes the meta rows that hold a Bitcoin block's timestamp
@@ -1228,6 +1254,7 @@ func (s *Store) ReadLogAnchors(ctx context.Context, before int64, limit int) ([]
 		if err != nil {
 			return nil, err
 		}
+		a.KeyID, _ = s.logKeyFor(a.Size)
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -1267,6 +1294,7 @@ func (s *Store) leafAnchor(ctx context.Context, index int64) (*LogAnchor, error)
 	if err != nil {
 		return nil, err
 	}
+	a.KeyID, _ = s.logKeyFor(a.Size)
 	return &a, nil
 }
 

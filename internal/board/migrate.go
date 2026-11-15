@@ -291,6 +291,10 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if _, err := tx.Exec(oauthAppSchema + oauthJWTSchema); err != nil {
 		return err
 	}
+	// Schema 53: the log key's history (logkeys.go, C983); seeded at open.
+	if _, err := tx.Exec(tlogKeySchema); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

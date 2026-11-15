@@ -354,3 +354,56 @@ func TestStyleAttachmentWithoutTTL(t *testing.T) {
 		t.Fatalf("ttl-less attachment refused: %v %v", ok, err)
 	}
 }
+
+// StyleAssetNames names exactly the room's blobs that blob.get serves, without
+// reading bytes: a blob whose every post is hidden, a deleted or expired one,
+// another room's and a private room's are left out, and a restored post brings
+// its name back (the moderation log's metadata, PR #54).
+func TestStyleAssetNamesTrackBlobGet(t *testing.T) {
+	s := openTest(t, Config{})
+	owner := keyFor(201)
+	run(t, s, signed(owner, Command{Operation: "room.create", Room: "gallery"}))
+	run(t, s, signed(owner, Command{Operation: "room.create", Room: "vault", Visibility: "private"}))
+	run(t, s, Command{Operation: "post", Room: "elsewhere", Text: "open"})
+	unposted := upload(t, s, owner, "gallery", "unposted", 0)
+	hidden := upload(t, s, owner, "gallery", "hidden", 0)
+	mixed := upload(t, s, owner, "gallery", "mixed", 0)
+	deleted := upload(t, s, owner, "gallery", "deleted", 0)
+	expired := upload(t, s, owner, "gallery", "expired", 1)
+	other := upload(t, s, owner, "elsewhere", "other", 0)
+	private := upload(t, s, owner, "vault", "private", 0)
+	post := func(a Attachment, text string) string {
+		return run(t, s, signed(owner, Command{Operation: "post", Room: "gallery", Text: text, Attachments: []string{a.ID}})).Receipt.ID
+	}
+	hiddenPost := post(hidden, "uses hidden")
+	mixedHidden := post(mixed, "uses mixed, hidden")
+	post(mixed, "uses mixed, shown")
+	run(t, s, signed(owner, Command{Operation: "room.hide", MessageID: hiddenPost, Reason: "test"}))
+	run(t, s, signed(owner, Command{Operation: "room.hide", MessageID: mixedHidden, Reason: "test"}))
+	run(t, s, signed(owner, Command{Operation: "blob.delete", MessageID: deleted.ID}))
+	s.now = func() time.Time { return time.Unix(testTime+2, 0) }
+
+	names, err := s.StyleAssetNames(testContext, "gallery", []string{unposted.ID, hidden.ID, mixed.ID, deleted.ID, expired.ID, other.ID, private.ID, "missing", mixed.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 {
+		t.Fatalf("named %d blobs, want 2: %+v", len(names), names)
+	}
+	for _, a := range []Attachment{unposted, mixed} {
+		if got := names[a.ID]; got.Filename != a.Filename || got.MediaType != a.MediaType || got.Size != a.Size {
+			t.Errorf("%s named %+v, want %+v", a.ID, got, a)
+		}
+		run(t, s, Command{Operation: "blob.get", MessageID: a.ID})
+	}
+	fails(t, s, Command{Operation: "blob.get", MessageID: hidden.ID}, "not_found")
+	fails(t, s, Command{Operation: "blob.get", MessageID: deleted.ID}, "attachment_gone")
+	fails(t, s, Command{Operation: "blob.get", MessageID: expired.ID}, "attachment_gone")
+	fails(t, s, Command{Operation: "blob.get", MessageID: private.ID}, "not_found")
+	run(t, s, Command{Operation: "blob.get", MessageID: other.ID}) // served, but not gallery's to name
+
+	run(t, s, signed(owner, Command{Operation: "room.restore", MessageID: hiddenPost, Reason: "restored"}))
+	if names, err = s.StyleAssetNames(testContext, "gallery", []string{hidden.ID}); err != nil || names[hidden.ID].ID != hidden.ID {
+		t.Fatalf("restored blob unnamed: %+v, %v", names, err)
+	}
+}

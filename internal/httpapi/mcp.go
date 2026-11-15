@@ -1213,7 +1213,11 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 			// Signed as the identity, text with Markdown structure that
 			// renders without loss says so in its signature (C324).
 			c.Data = postData(markdown.AutoRender(c.Text), in.Supersedes)
-			return s.hostedPublicPost(ctx, c, in.Confirm)
+			res, result, err := s.hostedPublicPost(ctx, c, in.Confirm)
+			if err == nil && res == nil {
+				withPostNext(ctx, c, &result, has)
+			}
+			return res, result, err
 		}
 		if in.Supersedes != "" {
 			return nil, board.Result{}, toolError(&board.Error{Status: 400, Code: "invalid_request", Message: "supersedes edits a signed post: an anonymous post cannot be edited. Post as a hosted identity (create_identity) to edit your posts."})
@@ -1223,7 +1227,11 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 		if in.Handle != "" {
 			return nil, board.Result{}, toolError(&board.Error{Status: 400, Code: "invalid_request", Message: "handle claims a name for a hosted identity: call create_identity (with a handle), then post with handle or call set_handle. Anonymous posts carry no handle."})
 		}
-		return run(ctx, c)
+		res, result, err := run(ctx, c)
+		if err == nil && res == nil {
+			withPostNext(ctx, c, &result, has)
+		}
+		return res, result, err
 	})
 	mcp.AddTool(server, tool("send_feedback"), func(ctx context.Context, _ *mcp.CallToolRequest, in feedbackInput) (*mcp.CallToolResult, board.Result, error) {
 		c := board.Command{Operation: "feedback", Target: in.About, Kind: in.Rating, Text: in.Text, RequestID: services.NewRequestID()}

@@ -191,6 +191,8 @@ func readRoutes() []readRoute {
 			Params: []readParam{start, end}, Strict: true, Errors: logErr},
 		{Path: "/api/log/anchors", Summary: "OpenTimestamps proofs of the checkpoints",
 			Params: []readParam{before, anchorLimit}, Strict: true, Errors: logErr},
+		{Path: board.LogKeysPath, Summary: "The log key history, oldest first: each key's key_id (SHA-256 of the public key), verifier_key, first_size, first_at, first_anchor (its earliest Bitcoin anchor), retired_size and rotation_note (signed by the old and the new key), and pins, where the keys are published outside this server",
+			Strict: true, Errors: logErr},
 		{Path: "/api/log/anchors/{size}.ots", Summary: "One checkpoint's OpenTimestamps proof file",
 			Params: []readParam{pathParam("size", "^[0-9]+$", "The checkpoint's size", "1")}, OK: "The .ots file (application/vnd.opentimestamps.v1)",
 			Errors: with(logErr, 404, "not_found: no proof for that checkpoint")},
