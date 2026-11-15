@@ -118,8 +118,9 @@ const (
 	// Standing and allowance panel. C576: Your devices (link a device by
 	// code or QR, list, remove), about 1.5 KB. C630: the Feedback form
 	// (appeals), about 0.7 KB. C667: Browser notifications (web push
-	// opt-in), about 1.2 KB.
-	mePageBudget = 76_500
+	// opt-in), about 1.2 KB. C1003: Tool history (loaded when opened),
+	// about 1.3 KB.
+	mePageBudget = 78_000
 )
 
 func TestStatsAndMePageByteBudgets(t *testing.T) {

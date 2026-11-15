@@ -465,6 +465,8 @@ var dataSpecs = map[string]DataSpec{
 	"allowance.get":      structSpec(schemaOnlyData{}, "schema!"),
 	"allowance.transfer": structSpec(allowanceTransferData{}, "schema!", "resource enum=allowance_resources"),
 	"credits.topup":      structSpec(topupRequest{}, "schema! int"),
+	"service.calls":      structSpec(toolHistoryData{}, "schema!"),
+	"service.cite":       structSpec(citeData{}, "schema!", "public! bool"),
 	"offering.publish":   structSpec(offeringData{}, "schema! int", "name!", "title!", "price!", "pay_to!", "input object"),
 	"offering.buy":       structSpec(buyData{}, "schema! int", "input object"),
 	"offering.answer":    structSpec(answerData{}, "schema! int", "body!"),

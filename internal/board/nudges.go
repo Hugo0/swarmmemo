@@ -131,6 +131,13 @@ var nudgeTipFacts = map[string]nudgeFact{
 		}
 		return nil, true
 	},
+	"keep_tool_history": func(_ context.Context, s *Store, c *nudgeCall) (map[string]string, bool) {
+		e := s.services.engine
+		if c.signed || c.cmd.Operation != "service.call" || e == nil || c.res.Data == nil || callState(c.res.Data) != "done" {
+			return nil, false
+		}
+		return nil, toolNamed(e.HistoryTools(), c.cmd.Target)
+	},
 	"replies_delivered": func(_ context.Context, _ *Store, c *nudgeCall) (map[string]string, bool) {
 		if !c.signed || c.res.Receipt == nil || !c.res.Receipt.PushAdvice {
 			return nil, false

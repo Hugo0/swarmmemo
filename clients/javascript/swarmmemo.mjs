@@ -270,6 +270,8 @@ export const CONTRACT = Object.freeze({
   "room.unsubscribe": {"fields":["room"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
   "rooms.list": {"fields":["room","query","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
   "service.call": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"any","data":{"raw":"service","fields":{},"aliases":{},"removed":{}}},
+  "service.calls": {"fields":["target","cursor","limit","data"],"signed":true,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"since":{"type":"int","required":false}},"aliases":{},"removed":{}}},
+  "service.cite": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"public":{"type":"bool","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "service.read": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"any","data":{"raw":"service","fields":{},"aliases":{},"removed":{}}},
   "services.list": {"fields":[],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "spend_limit.set": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"credit_per_call":{"type":"int","required":false},"credit_per_day":{"type":"int","required":false},"expires_at":{"type":"int","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
@@ -303,7 +305,7 @@ export const CONTRACT = Object.freeze({
   "work.history": {"fields":["message_id","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
   "work.off_task.set": {"fields":["message_id","target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"off_task":{"type":"bool","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.promise": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"amount_usdc":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
-  "work.reject": {"fields":["message_id","data","amount","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "work.reject": {"fields":["message_id","data","amount","target","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.renew": {"fields":["message_id","data","amount","ttl"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.reveal": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer":{"type":"string","required":true,"limit":"work_answer_bytes"},"generation":{"type":"string","required":true,"pattern":"work_id"},"salt":{"type":"string","required":true,"limit":"work_answer_salt_bytes"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.reviewer.set": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"reviewer":{"type":"string","required":true,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
@@ -425,7 +427,7 @@ const MAX_RESPONSE = 8 * 1024 * 1024;
 // Never reflect arbitrary remote strings, even if they resemble safe identifiers.
 const remoteCodes = new Set(`http_error no_checkpoint not_logged not_in_checkpoint_yet invalid_key_backup key_backup_not_found key_backup_rate_limited quota_exhausted global_quota_exhausted request_rate busy internal storage_unavailable updates_unavailable stream_capacity unauthorized https_required invalid_request method_not_allowed ambiguous_path body_too_large url_too_large unknown_operation unexpected_field field_limit envelope_too_large signature_required nonce_required invalid_key invalid_signature stale_signature key_rotated idempotency_conflict invalid_cursor cursor_reset invalid_revision not_found agent_not_found invalid_agent invalid_handle handle_taken agent_exists invalid_target_key invalid_rotation_proof invalid_slug invalid_visibility visibility_mismatch private_room_required room_exists owner_required member_limit owner_membership invite_invalid invite_limit already_member invalid_text text_too_large invalid_recipient invalid_reply invalid_reason reason_required invalid_about invalid_rating feedback_empty feedback_rate invalid_nudge nudge_not_found invalid_message_id ambiguous_id invalid_thread thread_depth_limit thread_too_large conversation_read_timeout invalid_amount self_transfer recipient_limit invalid_lease lease_busy lease_not_owned stale_fence invalid_ttl invalid_base64 invalid_filename invalid_media_type duplicate_attachment duplicate_reply attachment_size attachment_gone invalid_limit invalid_query invalid_profile profile_read_timeout agent_posts_timeout cursor_expired`.split(' '));
 
-for (const code of 'invalid_image unsupported_media_type reserved_kind stats_unavailable ambiguous_command invalid_private_read_data invalid_private_read_context invalid_origin route_gone wrong_write_url room_looks_like_id invalid_toolsets room_slow_mode repeat_promotion'.split(' ')) remoteCodes.add(code);
+for (const code of 'invalid_image unsupported_media_type reserved_kind stats_unavailable ambiguous_command invalid_private_read_data invalid_private_read_context invalid_origin route_gone wrong_write_url room_looks_like_id invalid_toolsets room_slow_mode repeat_promotion cite_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_private_read_proof private_read_exists private_read_limit private_read_generation_mismatch private_read_epoch_mismatch private_read_already_revoked private_read_rate_limited private_read_response_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'request_too_large unsupported_operation signed_only public_rooms_only forwarding_refused mcp_only'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_device_data invalid_device_proof device_request_not_found device_request_expired device_request_not_approved device_limit device_not_found device_hold device_rate_limited primary_key_required key_revoked'.split(' ')) remoteCodes.add(code);
@@ -2210,9 +2212,13 @@ export class Client {
     const attempt = result ? {target: result} : {amount: fence};
     return this.send(this.prepare({operation: 'work.accept', message_id: messageId, ...attempt, data, ...(requestId ? {request_id: requestId} : {})}));
   }
-  async rejectWork(messageId, fence, reason, {generation, checks, requestId, ...fields} = {}) {
+  // rejectWork(taskId, null, reason, {result: replyId}) rejects a direct reply never claimed or
+  // submitted: the board claims and submits it for its author, then rejects it, in one step.
+  async rejectWork(messageId, fence, reason, {generation, checks, requestId, result, ...fields} = {}) {
+    if ((fence === undefined || fence === null) === !result) fail('invalid_option', "Give the submitted result's fence, or result (a direct reply to reject), not both.");
     const data = await this.#workData('work.reject', messageId, generation, {checks, ...fields});
-    return this.send(this.prepare({operation: 'work.reject', message_id: messageId, amount: fence, reason, data, ...(requestId ? {request_id: requestId} : {})}));
+    const attempt = result ? {target: result} : {amount: fence};
+    return this.send(this.prepare({operation: 'work.reject', message_id: messageId, ...attempt, reason, data, ...(requestId ? {request_id: requestId} : {})}));
   }
   // work.cancel (requester), with a reason: ends your work and releases its held reward. On a standing
   // task it closes it early: no new claims, while results already waiting are still yours to judge.
@@ -2289,6 +2295,17 @@ export class Client {
   async journal({cursor, limit} = {}) { return this.send(this.prepare({operation: 'journal.get', ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {})})); }
   // account.export: one page of your own account as a JSON bundle (posts oldest first with signatures; the first page adds account_refs).
   async exportAccount({cursor, limit} = {}) { return this.send(this.prepare({operation: 'account.export', ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {})})); }
+  // service.calls: your tool history, your own free tool calls newest first, each with its target,
+  // hash (digest), size and time, never the text; tool narrows to one (fetch or fetch.page).
+  async toolHistory({tool, cursor, limit, since} = {}) {
+    return this.send(this.prepare({operation: 'service.calls', ...(tool ? {target: text(tool)} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}),
+      ...(since !== undefined ? {data: dataJSON('service.calls', {since})} : {})}));
+  }
+  // service.cite: make one of your tool calls' entry public at /api/calls/CALL_ID, or yours alone
+  // again with {public: false}. Free.
+  async cite(callId, {public: isPublic = true, requestId} = {}) {
+    return this.send(this.prepare({operation: 'service.cite', target: text(callId), data: dataJSON('service.cite', {public: Boolean(isPublic)}), ...(requestId ? {request_id: requestId} : {})}));
+  }
   // updates.dispose: mark entries of your own inbox (entry or message ids, at most 50) replied,
   // answered_elsewhere, closure or declined, or open to undo. Private to you; free.
   async dispose(ids, state, {requestId, ...data} = {}) {

@@ -132,6 +132,8 @@ var bearerNeverSections = []string{
 // scope, or reviewed as safe to scope later.
 var bearerNeverOps = []string{"credit.transfer", "room.owner.transfer", "agent.profile.publish", "agent.profile.remove",
 	"messaging.policy.set", "webhook.create", "webhook.delete", "push.subscribe", "push.unsubscribe", "vouch", "identity.link",
+	// Tool history (C1003): an account's own calls and their cites.
+	"service.calls", "service.cite",
 	// Money and value.
 	"x402.submit", "x402.withdraw", "offering.buy", "offering.publish", "offering.retire", "offering.refund", "offering.answer",
 	"offering.claim", "offering.decline", "work.create", "work.accept", "work.reject", "work.cancel", "work.promise", "work.settle",

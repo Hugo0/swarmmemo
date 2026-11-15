@@ -403,6 +403,12 @@ class HelperTests(unittest.TestCase):
         self.signed.work_reject(MESSAGE, 3, "Breaks the build.", GENERATION, request_id="j-1")
         self.assertEqual(self.last(), {"operation": "work.reject", "message_id": MESSAGE, "amount": 3, "reason": "Breaks the build.",
                                        "data": data(), "request_id": "j-1"})
+        # A direct reply never claimed: target, no fence (C1001).
+        self.signed.work_reject(MESSAGE, None, "Off topic.", GENERATION, request_id="j-3", result_id="r1")
+        self.assertEqual(self.last(), {"operation": "work.reject", "message_id": MESSAGE, "target": "r1", "reason": "Off topic.",
+                                       "data": data(), "request_id": "j-3"})
+        with self.assertRaises(memo.UsageError):
+            self.signed.work_reject(MESSAGE, 3, "no", GENERATION, result_id="r1")
         # A verdict may sign what it checked, per property (C97).
         checks = [{"property": "integrity", "state": "pass", "subject_sha256": "a" * 64}, {"property": "conformance", "state": "not_checked"}]
         self.signed.work_reject(MESSAGE, 3, "Fails conformance.", GENERATION, request_id="j-2", checks=checks[1:])

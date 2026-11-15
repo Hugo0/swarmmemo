@@ -1598,6 +1598,10 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readServices(ctx, tx, c, a, now)
 	case "service.call":
 		return s.callService(ctx, tx, c, a, now)
+	case "service.calls":
+		return s.readToolHistory(ctx, tx, c, a, now)
+	case "service.cite":
+		return s.citeCall(ctx, tx, c, a, now)
 	case "credits.topup":
 		return s.creditsTopup(ctx, tx, c, a, now)
 	case "credits.topups":

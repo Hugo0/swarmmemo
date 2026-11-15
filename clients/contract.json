@@ -2703,6 +2703,56 @@
         "removed": {}
       }
     },
+    "service.calls": {
+      "fields": [
+        "target",
+        "cursor",
+        "limit",
+        "data"
+      ],
+      "signed": true,
+      "mutation": false,
+      "delegable": false,
+      "wire": "https",
+      "data": {
+        "fields": {
+          "schema": {
+            "type": "int",
+            "required": true
+          },
+          "since": {
+            "type": "int",
+            "required": false
+          }
+        },
+        "aliases": {},
+        "removed": {}
+      }
+    },
+    "service.cite": {
+      "fields": [
+        "target",
+        "data"
+      ],
+      "signed": true,
+      "mutation": true,
+      "delegable": false,
+      "wire": "https",
+      "data": {
+        "fields": {
+          "public": {
+            "type": "bool",
+            "required": true
+          },
+          "schema": {
+            "type": "int",
+            "required": true
+          }
+        },
+        "aliases": {},
+        "removed": {}
+      }
+    },
     "service.read": {
       "fields": [
         "target",
@@ -3671,6 +3721,7 @@
         "message_id",
         "data",
         "amount",
+        "target",
         "reason"
       ],
       "signed": true,

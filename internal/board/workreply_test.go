@@ -509,3 +509,55 @@ func TestWorkGetResultSubjects(t *testing.T) {
 	fails(t, s, Command{Operation: "work.get", MessageID: id, Data: `{"schema":1}`}, "invalid_work_data")
 	fails(t, s, Command{Operation: "work.get", MessageID: id, Data: `{"schema":1,"result":"x"}`}, "invalid_work_data")
 }
+
+// C1001: work.reject with target rejects a direct reply never claimed or
+// submitted, with accept's rules: the same decider and reply checks, no
+// fence, a reason; on a standing task the seat and reward go back to it and
+// the reply no longer waits for a verdict; on a plain task the work reopens.
+func TestWorkRejectReply(t *testing.T) {
+	s := rewardStore(t)
+	owner, w1, outsider := keyFor(72), keyFor(73), keyFor(74)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 200}, 10*86400))
+	reply := replyTo(t, s, w1, id, "Bug: the export button")
+	reject := func(key ed25519.PrivateKey, task, target, reason string, amount int64) Command {
+		return workWith(s, key, Command{Operation: "work.reject", MessageID: task, Target: target, Reason: reason, Amount: amount}, nil)
+	}
+
+	fails(t, s, reject(owner, id, reply, "off topic", 1), "work_fence_mismatch")
+	fails(t, s, reject(owner, id, reply, "", 0), "invalid_reason")
+	fails(t, s, reject(outsider, id, reply, "off topic", 0), "work_forbidden")
+	fails(t, s, reject(owner, id, randomID(), "off topic", 0), "invalid_work_result")
+
+	ack := run(t, s, reject(owner, id, reply, "not reproducible", 0)).Data["ack"].(WorkAck)
+	if ack.State != "cancelled" || ack.WorkID != reply || ack.Fence != 1 || !strings.Contains(ack.Note, "Rejected reply "+reply) {
+		t.Fatalf("reject ack: %+v", ack)
+	}
+	if w := getTestWork(t, s, reply); w.State != "cancelled" || w.StandingID != id || w.Reward.State != "released" || w.Reward.Reason != "rejected" {
+		t.Fatalf("rejected reply: %+v %+v", w, w.Reward)
+	}
+	if st := standingAt(t, s, id); st.Open != 2 {
+		t.Fatalf("seats after the reject: %+v", st)
+	}
+	trs := run(t, s, Command{Operation: "work.history", MessageID: reply}).Data["transitions"].([]WorkTransition)
+	if len(trs) != 1 || trs[0].Operation != "work.reject" || trs[0].Fence != 1 || trs[0].Author != keyID(owner) {
+		t.Fatalf("history: %+v", trs)
+	}
+	// Judged: neither verdict takes it again.
+	if msg := failsWith(t, s, reject(owner, id, reply, "again", 0), "result_in_use"); !strings.Contains(msg, "a reject with target") {
+		t.Fatalf("again: %q", msg)
+	}
+	fails(t, s, acceptReplyCmd(s, owner, id, reply, nil), "result_in_use")
+
+	// A plain task reopens for the next worker.
+	plain := rewardRequest(t, s, owner, "lobby")
+	run(t, s, rewardCreate(s, owner, plain, 300, 0))
+	r2 := replyTo(t, s, w1, plain, "My answer")
+	if ack := run(t, s, reject(owner, plain, r2, "wrong file", 0)).Data["ack"].(WorkAck); ack.State != "open" {
+		t.Fatalf("plain reject ack: %+v", ack)
+	}
+	if w := getTestWork(t, s, plain); w.State != "open" || w.Reward.State != "held" {
+		t.Fatalf("plain work: %+v", w)
+	}
+}

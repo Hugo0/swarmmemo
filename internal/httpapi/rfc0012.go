@@ -31,6 +31,8 @@ func (s *Server) rfc0012Route(w http.ResponseWriter, r *http.Request) bool {
 		return s.servicesRoute(w, r)
 	case strings.HasPrefix(p, "/api/agent/") && (strings.HasSuffix(p, "/trust") || strings.HasSuffix(p, "/standing")), p == "/api/trust/runs", strings.HasPrefix(p, "/api/trust/runs/"), p == "/api/trust/evidence", p == "/api/trust/penalties", p == "/api/trust/standing", p == "/api/trust/graph", p == "/api/trust/layer":
 		return s.trustRoute(w, r)
+	case strings.HasPrefix(p, board.CitedPath): // services.go: a cited tool call (C1003)
+		return s.citedCallRoute(w, r)
 	case p == "/api/levers":
 		return s.leversRoute(w, r)
 	case p == "/api/stats/allowance":

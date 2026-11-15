@@ -60,6 +60,44 @@ func (s *Server) x402StatsRoute(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+type citedCallReader interface {
+	CitedCall(ctx context.Context, id string) (map[string]any, bool, error)
+}
+
+// citedCallRoute serves GET /api/calls/ID: one tool call its agent cited
+// (service.cite), its entry and who made it, never the content. Every
+// other id, cited no longer or never, is the same 404.
+func (s *Server) citedCallRoute(w http.ResponseWriter, r *http.Request) bool {
+	store, ok := s.service.(citedCallReader)
+	if !ok || len(s.cfg.Features.Services) == 0 {
+		return false
+	}
+	if !allowMethods(w, r, readMethods...) {
+		return true
+	}
+	if r.URL.RawQuery != "" {
+		writeError(w, bad("This read takes no query string."))
+		return true
+	}
+	id := strings.TrimPrefix(r.URL.Path, board.CitedPath)
+	if !services.HistoryIDValid(id) || strings.HasPrefix(id, services.HistoryNotaryPrefix) {
+		writeError(w, bad("A cited call is read at /api/calls/CALL_ID, the 32 hex digits of its call_id; a notary receipt is public at /api/notary/HASH."))
+		return true
+	}
+	out, found, err := store.CitedCall(r.Context(), id)
+	if err != nil {
+		writeError(w, &board.Error{Status: 503, Code: "storage_unavailable", Message: "Cited calls are temporarily unavailable."})
+		return true
+	}
+	if !found {
+		writeError(w, &board.Error{Status: 404, Code: "not_found", Message: "No cited tool call has that ID: it was never cited, or its agent uncited it."})
+		return true
+	}
+	out["ok"] = true
+	jsonResponse(w, 200, out)
+	return true
+}
+
 // servicesRoute serves GET /api/services and /api/memory/AGENT/KEY; false
 // leaves the request to today's handling.
 func (s *Server) servicesRoute(w http.ResponseWriter, r *http.Request) bool {

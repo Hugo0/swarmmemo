@@ -23,12 +23,20 @@ package board
 // address is invented, the USDC promise is void (reason no_payout_address)
 // and the result is paid in credits only, which the acknowledgement says.
 // work.promise can owe it later, once the author links a wallet.
+//
+// work.reject with target (C1001) is the same step with the requester's
+// signed reject in place of the accept: the board claims (and submits) the
+// reply for its author with the same checks, then the reject judges it as
+// any reject of a submitted result does (a standing task's seat and reward
+// go back to it; a plain task reopens; any reject_fee is paid as usual).
+// The reply then has its verdict and no longer waits for one.
 
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"swarmmemo/internal/services"
 )
@@ -40,6 +48,17 @@ const WorkUSDCNoPayoutAddress = "no_payout_address"
 // WorkAcceptReply is how the docs and hints name the step.
 const WorkAcceptReply = "work.accept with target, a direct reply's ID, accepts that reply as the result: the board claims and submits it for its author in the same step, with the checks a claim makes; no fence (amount)."
 
+// WorkRejectReply is the reject's counterpart (C1001).
+const WorkRejectReply = "work.reject with target, a direct reply's ID, and a reason rejects that reply as a result: the board claims and submits it for its author in the same step, with the checks a claim makes, then rejects it; no fence (amount)."
+
+// verdictVerb is accept or reject: the verb a verdict with target's texts use.
+func verdictVerb(operation string) string {
+	if operation == "work.reject" {
+		return "reject"
+	}
+	return "accept"
+}
+
 // replyAuthor is the author of a reply an accept names.
 type replyAuthor struct {
 	id, account, publicKey string
@@ -49,14 +68,22 @@ func invalidReplyResult(to, room string) error {
 	return problem(400, "invalid_work_result", "target must be a visible signed direct reply to the work's request ("+to+"), in its room ("+room+"), by another agent: that reply is the result you accept.")
 }
 
-// ownResultAccept is the refusal text of an accept with target that names
+// ownResultVerdict is the refusal text of a verdict with target that names
 // a result which is already its own work item, on a standing task (C704):
-// the one call that works is work.accept on that item with its fence.
-func ownResultAccept(w workRow) string {
+// the one call that works is the verdict on that item with its fence.
+func ownResultVerdict(w workRow, operation string) string {
+	verb := verdictVerb(operation)
 	if w.State == "submitted" {
-		return fmt.Sprintf("This result is already its own task (%s): accept it directly with work.accept on %s, fence %d as amount, without target.", w.ID, w.ID, w.Fence)
+		return fmt.Sprintf("This result is already its own task (%s): %s it directly with %s on %s, fence %d as amount, without target.", w.ID, verb, operation, w.ID, w.Fence)
 	}
-	return fmt.Sprintf("This result is already its own task (%s, %s): work.get %s shows it; an accept with target takes no result that already opened a task.", w.ID, w.State, w.ID)
+	return fmt.Sprintf("This result is already its own task (%s, %s): work.get %s shows it; %s with target takes no result that already opened a task.", w.ID, w.State, w.ID, article(verb)+verb)
+}
+
+func article(word string) string {
+	if word != "" && strings.ContainsRune("aeiou", rune(word[0])) {
+		return "an "
+	}
+	return "a "
 }
 
 // resultFirstVersion is the first version of message id along its edits:
@@ -96,7 +123,7 @@ type WorkResultSubjects struct {
 }
 
 // replyResultSubjects is what a rated accept of reply on task w cites, keyed
-// as acceptReply keys it: on a standing task the item the reply opened, else
+// as verdictReply keys it: on a standing task the item the reply opened, else
 // the one it opens (its first version, resultFirstVersion); on a plain task
 // the task itself. The worker is the reply author's account
 // (directReplyAuthor), never the key that signed the reply.
@@ -127,8 +154,10 @@ func replyResultSubjects(ctx context.Context, tx *sql.Tx, reply string, w workRo
 	return subjects, nil
 }
 
-// acceptReply is work.accept with target (C691): see the file comment.
-func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
+// verdictReply is work.accept (C691) or work.reject (C1001) with target:
+// see the file comment.
+func (s *Store) verdictReply(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
+	verb := verdictVerb(c.Operation)
 	if err := requireSigned(a); err != nil {
 		return Result{}, err
 	}
@@ -137,7 +166,7 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		return Result{}, err
 	}
 	if c.Amount != 0 {
-		return Result{}, problem(409, "work_fence_mismatch", "An accept that names a reply (target) takes no fence: leave amount out; the reply is the attempt it accepts. To accept a result already submitted, send amount, its fence, without target.")
+		return Result{}, problem(409, "work_fence_mismatch", strings.ToUpper(article(verb)[:1])+article(verb)[1:]+verb+" that names a reply (target) takes no fence: leave amount out; the reply is the attempt it "+verb+"s. To "+verb+" a result already submitted, send amount, its fence, without target.")
 	}
 	id, err := resolveWorkID(ctx, tx, c.MessageID)
 	if err != nil {
@@ -166,9 +195,9 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		} else {
 			w.State = st
 		}
-		return Result{}, problem(400, "invalid_work_result", ownResultAccept(w))
+		return Result{}, problem(400, "invalid_work_result", ownResultVerdict(w, c.Operation))
 	}
-	// The decider, as for any accept: the named reviewer, else the requester.
+	// The decider, as for any verdict: the named reviewer, else the requester.
 	if w.Reviewer != "" && a.account != w.Reviewer {
 		return Result{}, reviewerError("not_the_reviewer")
 	}
@@ -209,7 +238,7 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 			}
 			if ownState != "submitted" {
 				row.State = ownState
-				return Result{}, problem(409, "result_in_use", ownResultAccept(row))
+				return Result{}, problem(409, "result_in_use", ownResultVerdict(row, c.Operation))
 			}
 			own = &row
 		}
@@ -227,7 +256,7 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	how := "the board claimed and submitted it for its author in this step"
 	switch {
 	case own != nil:
-		item, how = WorkAck{WorkID: own.ID, State: "submitted", Fence: own.Fence}, "it was already submitted as its own task ("+own.ID+"), accepted there"
+		item, how = WorkAck{WorkID: own.ID, State: "submitted", Fence: own.Fence}, "it was already submitted as its own task ("+own.ID+"), "+verb+"ed there"
 	case standing != nil || state == "open":
 		item, err = step("work.claim", 0)
 	case state == "claimed" && w.Worker == author.account:
@@ -235,24 +264,24 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 		item, err = step("work.submit", w.Fence)
 		how = "the board submitted it for its author, who held the claim, in this step"
 	case state == "submitted" && w.Worker == author.account && sameResult(ctx, tx, c.Target, w.Result):
-		// Already submitted: the accept is the ordinary one.
+		// Already submitted: the verdict is the ordinary one.
 		item, how = WorkAck{WorkID: w.ID, State: w.State, Fence: w.Fence}, "it was already submitted"
 	case state == "claimed" || state == "submitted":
-		return Result{}, problem(409, "work_state_conflict", "This work is held by another attempt ("+state+"): accept or reject that one; a reply is accepted while the work is open, or by the claim holder's own reply.")
+		return Result{}, problem(409, "work_state_conflict", "This work is held by another attempt ("+state+"): accept or reject that one; a reply is "+verb+"ed while the work is open, or by the claim holder's own reply.")
 	default:
 		return Result{}, errWorkStateNotAllowed()
 	}
 	if err != nil {
 		return Result{}, err
 	}
-	// The requester's own signed accept, as sent: the fence is the one the
+	// The requester's own signed verdict, as sent: the fence is the one the
 	// claim gave the result, and its transition is the step's record.
-	accept := c
-	accept.Amount = item.Fence
+	verdict := c
+	verdict.Amount = item.Fence
 	if item.WorkID != w.ID {
-		accept.MessageID = item.WorkID
+		verdict.MessageID = item.WorkID
 	}
-	res, err := s.workStep(ctx, tx, accept, a, now, false)
+	res, err := s.workStep(ctx, tx, verdict, a, now, false)
 	if err != nil {
 		return Result{}, err
 	}
@@ -260,6 +289,11 @@ func (s *Store) acceptReply(ctx context.Context, tx *sql.Tx, c Command, a actor,
 	who := author.id
 	if identity, e := currentWorkIdentity(ctx, tx, author.account); e == nil && identity.Handle != "" {
 		who = "@" + identity.Handle
+	}
+	if c.Operation == "work.reject" {
+		ack.Note = joinNote("Rejected reply "+c.Target+" by "+who+" as a result; "+how+".", ack.Note)
+		res.Data["ack"] = ack
+		return res, nil
 	}
 	note := "Accepted reply " + c.Target + " by " + who + " as the result; " + how + "."
 	u, err := loadWorkUSDC(ctx, tx, item.WorkID)

@@ -244,6 +244,11 @@ func docFacts() []docFact {
 		{"docs/PROTOCOL.md", "`reviewer_fee`, whole credits from 1 to {N}, is held", countFact(board.WorkRewardMax)},
 		{"docs/PROTOCOL.md", "counts once toward the {N} rewards held per requester", countFact(board.WorkRewardsHeldMax)},
 		{"docs/PROTOCOL.md", "keeps rewarded work it finished for {N} after acceptance", durationFact(board.JournalPaidWorkDays * 86400)},
+		// Tool history (C1003).
+		{"docs/PROTOCOL.md", "An entry older than {N} answers", durationFact(services.HistoryStaleDays * 86400)},
+		{"docs/PROTOCOL.md", "At most {N} cites and uncites a", countFact(board.CitesPerDay)},
+		{"docs/PROTOCOL.md", "and {N} cited calls at once", commaFact(board.CitedMax)},
+		{"docs/PROTOCOL.md", "to calls from that time; `limit` 1 to {N}", countFact(services.HistoryPageMax)},
 		{"docs/PROTOCOL.md", "`limit` is posts per page ({N} by default,", countFact(board.AccountExportPageDefault)},
 		{"docs/PROTOCOL.md", "by default, 1 to {N}); a page is also cut", countFact(board.AccountExportPageMax)},
 		{"docs/PROTOCOL.md", "a page is also cut at {N} of posts", sizeFact(board.AccountExportPageBytes)},

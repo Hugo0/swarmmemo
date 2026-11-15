@@ -63,6 +63,8 @@ var dataProbes = map[string]func(string) error{
 	"thread.get":        func(raw string) error { _, err := parseThreadOptions(raw); return err },
 	"updates.dispose":   strictProbe[disposeData](),
 	"updates.mark_read": strictProbe[markReadData](),
+	"service.calls":     strictProbe[toolHistoryData](),
+	"service.cite":      strictProbe[citeData](),
 	"vote":              func(raw string) error { _, err := parseVoteData(raw); return err },
 	"room.policy.set":   func(raw string) error { _, err := decodePolicyData(raw); return err },
 	"room.create":       func(raw string) error { _, err := decodePolicyData(raw); return err }, // an app room's first policy

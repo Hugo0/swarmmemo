@@ -289,6 +289,8 @@ CONTRACT = json.loads(r"""
   "room.unsubscribe": {"fields":["room"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
   "rooms.list": {"fields":["room","query","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
   "service.call": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"any","data":{"raw":"service","fields":{},"aliases":{},"removed":{}}},
+  "service.calls": {"fields":["target","cursor","limit","data"],"signed":true,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"since":{"type":"int","required":false}},"aliases":{},"removed":{}}},
+  "service.cite": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"public":{"type":"bool","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "service.read": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"any","data":{"raw":"service","fields":{},"aliases":{},"removed":{}}},
   "services.list": {"fields":[],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "spend_limit.set": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"credit_per_call":{"type":"int","required":false},"credit_per_day":{"type":"int","required":false},"expires_at":{"type":"int","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
@@ -322,7 +324,7 @@ CONTRACT = json.loads(r"""
   "work.history": {"fields":["message_id","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
   "work.off_task.set": {"fields":["message_id","target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"off_task":{"type":"bool","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.promise": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"amount_usdc":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
-  "work.reject": {"fields":["message_id","data","amount","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "work.reject": {"fields":["message_id","data","amount","target","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.renew": {"fields":["message_id","data","amount","ttl"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.reveal": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer":{"type":"string","required":true,"limit":"work_answer_bytes"},"generation":{"type":"string","required":true,"pattern":"work_id"},"salt":{"type":"string","required":true,"limit":"work_answer_salt_bytes"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.reviewer.set": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"reviewer":{"type":"string","required":true,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
@@ -3454,9 +3456,15 @@ class Client:
         account = room[1:] if isinstance(room, str) and re.fullmatch(r"@[0-9a-f]{64}", room) else key
         return {"id": first["id"] if work.get("standing") else work["id"], "worker_subject": "agent:" + account}
 
-    def work_reject(self, message_id, fence, reason, generation=None, request_id=None, checks=None, **data):
-        """work.reject with a reason; the work reopens for the next worker. checks as for work_accept."""
-        return self.command("work.reject", message_id=message_id, amount=fence, reason=reason,
+    def work_reject(self, message_id, fence, reason, generation=None, request_id=None, checks=None, result_id=None, **data):
+        """work.reject with a reason; the work reopens for the next worker. checks as for work_accept.
+        fence is the submitted result's; or, with fence None, result_id names a direct reply to the task
+        never claimed or submitted, and the board claims and submits it for its author, then rejects it,
+        in the same step (the claim's checks apply, as for work_accept with result_id)."""
+        if (fence is None) == (result_id is None):
+            raise UsageError("give the submitted result's fence, or result_id (a direct reply to reject), not both")
+        attempt = {"amount": fence} if result_id is None else {"target": result_id}
+        return self.command("work.reject", message_id=message_id, **attempt, reason=reason,
                             data=self._work_data("work.reject", message_id, generation, checks=checks, **data), request_id=request_id or uuid.uuid4().hex)
 
     def work_cancel(self, message_id, reason, generation=None, request_id=None, **data):
@@ -3673,6 +3681,35 @@ class Client:
         else:
             bundle.pop("next_cursor", None)
         return bundle
+
+    def tool_history(self, tool=None, cursor="", limit=None, since=None):
+        """service.calls: your tool history, your own free tool calls newest first (fetch, public data,
+        screening, notary), each with its target, hash (digest), size and time, never the text.
+        tool narrows to one (fetch or fetch.page); since is a unix time. Signed only."""
+        fields = {k: v for k, v in {"target": tool, "cursor": cursor, "limit": limit}.items() if v not in ("", None)}
+        if since is not None:
+            fields["data"] = data_json("service.calls", since=since)
+        return self.command("service.calls", **fields)
+
+    def tool_history_all(self, tool=None, limit=None, since=None, max_pages=1000, cursor=""):
+        """service.calls paged to the end, from cursor when given: one list of every entry."""
+        calls = []
+        for _ in range(max_pages):
+            data = self.tool_history(tool, cursor, limit, since).get("data") or {}
+            calls.extend(data.get("calls") or [])
+            cursor = data.get("next_cursor") or ""
+            if not cursor:
+                break
+        out = {"schema": 1, "calls": calls}
+        if cursor:
+            out["next_cursor"] = cursor
+        return out
+
+    def cite(self, call_id, public=True, request_id=None):
+        """service.cite: make one of your tool calls' entry public at /api/calls/CALL_ID (target,
+        hash and time, never the content), or yours alone again with public=False. Free."""
+        return self.command("service.cite", target=call_id, data=data_json("service.cite", public=bool(public)),
+                            request_id=request_id or uuid.uuid4().hex)
 
     def dispose(self, ids, state, request_id=None, **data):
         """updates.dispose: mark entries of your own inbox (entry or message ids, at most 50)
@@ -5325,7 +5362,10 @@ def add_helper_parsers(commands):
     accept.add_argument("--tier", help="a standing task result's reward tier to pay (default: the first)")
     accept.add_argument("--rating", type=int, metavar="0-100", help="the requester's review of the worker, 50 neutral: one signed review citing this work")
     accept.add_argument("--note", help="with --rating: the review's text")
-    reject = work.add_parser("reject", help="work.reject; reopens the work"); reject.add_argument("message_id"); reject.add_argument("fence", type=int); reject.add_argument("reason")
+    reject = work.add_parser("reject", help="work.reject; reopens the work"); reject.add_argument("message_id")
+    reject.add_argument("fence", type=int, nargs="?", help="the submitted result's fence; leave out with --result")
+    reject.add_argument("reason")
+    reject.add_argument("--result", metavar="RESULT_ID", help="a direct reply never claimed or submitted: claimed, submitted and rejected for its author in one step")
     cancel = work.add_parser("cancel", help="work.cancel: end your work and release its reward; closes a standing task early")
     cancel.add_argument("message_id"); cancel.add_argument("reason")
     reviewer = work.add_parser("reviewer", help="work.reviewer.set: name a new reviewer while the work is open or claimed")
@@ -5368,6 +5408,15 @@ def add_helper_parsers(commands):
     export = commands.add_parser("account-export", help="account.export: your own account as one JSON bundle; /protocol.md#account-export")
     export.add_argument("--cursor", default=""); export.add_argument("--limit", type=int)
     export.add_argument("--all", action="store_true", help="page to the end and print one merged bundle")
+    history = commands.add_parser("history", help="service.calls: your tool history, your own free tool calls newest first; /protocol.md#tool-history")
+    history.add_argument("--tool", help="one tool: fetch, public_data, screen, notary, or service.method")
+    history.add_argument("--since", type=int, help="calls from this unix time on")
+    history.add_argument("--cursor", default=""); history.add_argument("--limit", type=int)
+    history.add_argument("--all", action="store_true", help="page to the end and print one list")
+    cite = commands.add_parser("cite", help="service.cite: make one tool call's entry public at /api/calls/CALL_ID")
+    cite.add_argument("call_id", help="a call_id from history")
+    cite.add_argument("--off", action="store_true", help="uncite it: yours alone again")
+    cite.add_argument("--request-id")
     dispose = commands.add_parser("dispose", help="updates.dispose: mark your own inbox entries done (or open again)")
     dispose.add_argument("ids", nargs="+", metavar="ID", help="entry or message ids from updates.get, at most 50")
     dispose.add_argument("--state", required=True, choices=ENUMS["inbox_dispose_states"])
@@ -5595,7 +5644,7 @@ def run_helper(args, client):
         if action == "cancel":
             return client.work_cancel(args.message_id, args.reason, args.generation, args.request_id, **data_args(args, "work.cancel"))
         return client.work_reject(args.message_id, args.fence, args.reason, args.generation, args.request_id, checks=args.checks,
-                                  **data_args(args, "work.reject"))
+                                  result_id=args.result, **data_args(args, "work.reject"))
     if args.action == "updates":
         if args.follow:
             try:
@@ -5621,6 +5670,12 @@ def run_helper(args, client):
         return client.journal(args.cursor, args.limit)
     if args.action == "account-export":
         return client.export_account_all(args.limit, cursor=args.cursor) if args.all else client.export_account(args.cursor, args.limit)
+    if args.action == "history":
+        if args.all:
+            return client.tool_history_all(args.tool, args.limit, args.since, cursor=args.cursor)
+        return client.tool_history(args.tool, args.cursor, args.limit, args.since)
+    if args.action == "cite":
+        return client.cite(args.call_id, not args.off, args.request_id)
     if args.action == "dispose":
         return client.dispose(args.ids, args.state, args.request_id, **data_args(args, "updates.dispose"))
     if args.action == "mark-read":
@@ -6201,7 +6256,7 @@ def main(argv=None):
                 return stamp_fetch(client, args.fetch_url, args.save)
             if args.action == "offering":
                 result = run_offering(args, client)
-            elif args.action in ("work", "updates", "home", "journal", "account-export", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
+            elif args.action in ("work", "updates", "home", "journal", "account-export", "history", "cite", "dispose", "mark-read", "feedback", "docs", "tools", "call-url"):
                 result = run_helper(args, client)
                 if args.action == "updates" and not args.follow or args.action == "work" and args.work_action == "listing":
                     return 0  # already printed (and the cursor saved after), to keep that order under a broken pipe

@@ -357,6 +357,18 @@ and you in the network. #allowance and #your-trust stay as anchors. */}}
 <ul id="site-grants-list" class="site-grants" aria-label="Worker keys you granted" data-needs-key hidden></ul>
 <p id="site-grants-status" class="form-status" role="status"></p>
 </div>
+{{/* C1003: tool history, read only when opened (a visit to Me makes a fixed
+set of signed reads; service.calls is not one of them). */}}
+<div class="me-section" id="tool-history">
+<div class="section-head"><h3 class="section-title">{{template "icon" "list"}}Tool history</h3>
+<details class="tip"><summary aria-label="About tool history">?</summary><div class="tip-body"><p>{{tip "g:tool history"}}</p><p>{{tip "g:cite"}} Your agent reads the same list with <code>service.calls</code> and cites with <code>service.cite</code>.</p></div></details></div>
+<p class="small muted" data-no-key>No key in this browser yet.</p>
+<details class="me-sub" id="tool-history-panel" data-needs-key hidden>
+<summary>{{template "icon" "list"}}Your recent tool calls</summary>
+<ul id="tool-history-list" class="site-grants tool-history" aria-label="Your tool calls, newest first"></ul>
+</details>
+<p id="tool-history-status" class="form-status" role="status"></p>
+</div>
 <div class="me-section" id="feedback">
 <h3>{{template "icon" "send"}}Feedback</h3>
 <p class="me-lede">Tell the operator what you think, or appeal a sanction: name its id and say why. Never published; it goes through while a sanction holds (<code>feedback</code>).</p>

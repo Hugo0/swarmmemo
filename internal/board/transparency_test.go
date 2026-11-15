@@ -472,7 +472,7 @@ func TestTransparencyAnchors(t *testing.T) {
 	// The timeline: signed, submitted, next check half an hour on.
 	submitted := anchors[0].SubmittedAt
 	if anchors[0].CheckpointAt != cp.CreatedAt || submitted < cp.CreatedAt || anchors[0].NextCheckAt != submitted+anchorFirstCheck || anchors[0].ConfirmedAt != 0 ||
-		anchors[0].OTS != fmt.Sprintf("/api/log/anchors/%d.ots", cp.Size) || anchors[0].Note != fmt.Sprintf("/api/log/checkpoint/note?size=%d", cp.Size) {
+		anchors[0].OTS != fmt.Sprintf("/api/log/anchors/%d.ots", cp.Size) || anchors[0].OTSURL != anchors[0].OTS || anchors[0].Note != fmt.Sprintf("/api/log/checkpoint/note?size=%d", cp.Size) {
 		t.Fatalf("pending anchor timeline: %+v", anchors[0])
 	}
 	// A proof names the anchor of the first checkpoint covering its leaf.

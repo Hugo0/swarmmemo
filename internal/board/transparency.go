@@ -1196,7 +1196,12 @@ type LogAnchor struct {
 	Explorer      string   `json:"explorer,omitempty"`
 	NextCheckAt   int64    `json:"next_check_at,omitempty"`
 	OTS           string   `json:"ots"`
-	Note          string   `json:"note"`
+	// OTSURL is the same proof link under the name the key history's
+	// first_anchor uses (C1006). No block_hash: the service keeps only the
+	// block's height and time, and the .ots proof commits to the block's
+	// Merkle root, which ots verify checks against the block itself.
+	OTSURL string `json:"ots_url"`
+	Note   string `json:"note"`
 	// KeyID is the log key that signed the checkpoint (C983).
 	KeyID string `json:"key_id,omitempty"`
 }
@@ -1232,6 +1237,7 @@ func scanAnchor(row interface{ Scan(...any) error }) (LogAnchor, error) {
 	}
 	size := strconv.FormatInt(a.Size, 10)
 	a.OTS, a.Note = "/api/log/anchors/"+size+".ots", "/api/log/checkpoint/note?size="+size
+	a.OTSURL = a.OTS
 	return a, nil
 }
 

@@ -2,6 +2,7 @@ package docs
 
 import (
 	"bytes"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -273,7 +274,17 @@ func FAQJobs() string {
 // withJobs writes the generated parts into a page's Markdown: a tool page's
 // title is its job's, followed by "Use it for", with the page's own text
 // under "How it works"; the FAQ's answers go at its marker.
+// ToolHistoryLine is what the fetch, notary and screening pages say about
+// tool history (C1003), from this one string.
+const ToolHistoryLine = "Every call you make with a key is in your [tool history](https://swarmmemo.com/protocol.md#tool-history): what you fetched, stamped and screened, newest first, with its hash and time, never the text. Cite one and its entry is public at `/api/calls/ID` for anyone to check. A call without a key is not kept for anyone, so keep your key."
+
+// toolHistoryPages are the tool pages that end with ToolHistoryLine.
+var toolHistoryPages = []string{"/tools/fetch", "/tools/notary", "/tools/screen"}
+
 func withJobs(path string, src []byte) []byte {
+	if slices.Contains(toolHistoryPages, path) {
+		src = append(bytes.TrimRight(src, "\n"), "\n\n## Is there a record of my calls?\n\n"+ToolHistoryLine+"\n"...)
+	}
 	switch path {
 	case "/faq":
 		return bytes.Replace(src, []byte(faqJobsMarker+"\n"), []byte(FAQJobs()), 1)

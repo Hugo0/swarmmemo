@@ -270,6 +270,42 @@
       return row;
     }) : [node('li', 'small muted', 'No sites or worker keys yet. Sign in to a site\'s comment section with SwarmMemo and it shows here.')]));
   }
+  // Me, Settings: tool history (service.calls), read only when its panel is
+  // opened, never on a visit; each entry with its hash to copy and a Cite
+  // switch (service.cite) that makes it public at /api/calls/ID.
+  const toolLabels = {fetch: 'Fetch', public_data: 'Public data', screen: 'Screening', notary: 'Notary'};
+  let historyEpoch = 0;
+  async function loadToolHistory() {
+    const host = $('tool-history-list'), epoch = ++historyEpoch;
+    if (!host || !identity) return;
+    let calls, staleDays;
+    try { const data = (await request({operation: 'service.calls'}, true)).data || {}; calls = data.calls || []; staleDays = data.stale_after_days; }
+    catch (error) { if (epoch === historyEpoch) status('tool-history-status', error.message, true); return; }
+    if (epoch !== historyEpoch) return;
+    host.replaceChildren(...(calls.length ? calls.map(c => {
+      const row = node('li'), what = node('span'), tool = String(c.tool || '').split('.')[0];
+      what.append(node('strong', '', toolLabels[tool] || tool), ' ', node('span', '', String(c.target || '').slice(0, 120)));
+      if (c.digest) { const hash = node('code', '', String(c.digest).slice(0, 12)); hash.dataset.copy = c.digest; hash.dataset.copyLabel = 'Copy hash'; hash.title = c.digest; what.append(' ', hash); }
+      what.append(' · ', timeElement(c.at, 'small muted'));
+      if (c.stale) what.append(node('span', 'small muted', ' · older than ' + staleDays + ' days: it may have changed since'));
+      row.append(what);
+      if (c.cited && c.url) row.append(' ', link('quiet-link', 'public link', c.url));
+      if (!String(c.call_id).startsWith('notary:')) {
+        const cite = node('button', 'quiet-button', c.cited ? 'Uncite' : 'Cite'); cite.type = 'button';
+        cite.setAttribute('aria-pressed', c.cited ? 'true' : 'false');
+        cite.title = terms['g:cite'] || 'Make this entry public at /api/calls/ID: its target, hash and time, never the content.';
+        cite.addEventListener('click', () => act(cite, 'tool-history-status', async () => {
+          await request({operation: 'service.cite', target: c.call_id, data: JSON.stringify({schema: 1, public: !c.cited}), request_id: uuid()}, true);
+          status('tool-history-status', c.cited ? 'Uncited: that entry is yours alone again.' : 'Cited: its entry is public at ' + location.origin + '/api/calls/' + c.call_id);
+          void loadToolHistory();
+        }));
+        row.append(' ', cite);
+      }
+      return row;
+    }) : [node('li', 'small muted', 'No tool calls yet. Every free tool call you make with this key shows here: fetch, public data, screening and notary.')]));
+    enhanceCopy(host);
+  }
+  $('tool-history-panel')?.addEventListener('toggle', event => { if (event.target.open) void loadToolHistory(); });
   // The keys kept in this browser, on Me: the active one marked, the others one
   // click from signing. Switching reloads the page so every count and read
   // belongs to the new key; it is refused while a request is unresolved.

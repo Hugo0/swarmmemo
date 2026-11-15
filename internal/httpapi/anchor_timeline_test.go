@@ -57,7 +57,7 @@ func TestAnchorTimelineRoutes(t *testing.T) {
 	}
 	a := list.Anchors[0]
 	if a.State != "pending" || a.CheckpointAt == 0 || a.SubmittedAt < a.CheckpointAt || a.NextCheckAt <= a.SubmittedAt || a.ConfirmedAt != 0 ||
-		!strings.HasSuffix(a.OTS, ".ots") || !strings.Contains(a.Note, "size=") {
+		!strings.HasSuffix(a.OTS, ".ots") || a.OTSURL != a.OTS || !strings.Contains(a.Note, "size=") {
 		t.Fatalf("anchor: %+v", a)
 	}
 	w = get(s, "/api/log/proof?leaf=0&size="+itoa(a.Size), "")

@@ -1069,16 +1069,17 @@ func eligibleWorkResult(ctx context.Context, tx *sql.Tx, id string, w workRow, r
 }
 
 func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64) (Result, error) {
-	if c.Operation == "work.accept" && c.Target != "" {
-		// An accept that names a direct reply claims, submits and accepts
-		// it for the reply's author in one step (C691, workreply.go).
-		return s.acceptReply(ctx, tx, c, a, now)
+	if (c.Operation == "work.accept" || c.Operation == "work.reject") && c.Target != "" {
+		// A verdict that names a direct reply claims and submits it for the
+		// reply's author, then judges it, in one step (C691, C1001,
+		// workreply.go).
+		return s.verdictReply(ctx, tx, c, a, now)
 	}
 	return s.workStep(ctx, tx, c, a, now, false)
 }
 
 // workStep is one work transition. With forReply it is the claim or submit
-// an accept of a direct reply runs for the reply's author (acceptReply): every
+// an accept or reject of a direct reply runs for the reply's author (verdictReply): every
 // check and money move of that transition, but no charge, no transition of
 // its own (the requester's signed accept that follows is the record), no
 // events and no queue: a standing task with no seat open refuses it.
@@ -1624,7 +1625,7 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 				// The author signed no payout address here and links no
 				// wallet: the newest one it signed on its own earlier
 				// work (C944), else none is invented; credits only
-				// (acceptReply).
+				// (verdictReply).
 				var found bool
 				if found, err = setReplyPayTo(ctx, tx, w); err == nil && !found {
 					err = voidWorkUSDC(ctx, tx, w.ID, WorkUSDCNoPayoutAddress, now)

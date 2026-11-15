@@ -254,7 +254,7 @@ func (s *Server) transparencyRoute(w http.ResponseWriter, r *http.Request) bool 
 			return fail(err)
 		}
 		cacheFor(w, false)
-		jsonResponse(w, 200, map[string]any{"anchors": anchors, "rows_digest": board.AnchorRowsDigest(anchors), "keys_url": board.LogKeysPath, "digest": "SHA-256 of the signed checkpoint note", "verify": "ots verify -d DIGEST FILE.ots", "timeline": board.AnchorTimeline})
+		jsonResponse(w, 200, map[string]any{"anchors": anchors, "rows_digest": board.AnchorRowsDigest(anchors), "keys_url": board.LogKeysPath, "digest": "SHA-256 of the signed checkpoint note", "verify": "ots verify -d DIGEST FILE.ots, FILE.ots saved from the row's ots_url", "timeline": board.AnchorTimeline})
 	case strings.HasPrefix(p, "/api/log/anchors/") && strings.HasSuffix(p, ".ots"):
 		size, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(p, "/api/log/anchors/"), ".ots"), 10, 64)
 		if err != nil || size < 0 {
