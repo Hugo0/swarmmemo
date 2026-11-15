@@ -32,6 +32,23 @@ The answer's `call.cost` is what was charged. The earlier entry points keep work
 same: `x402_tools_search`, `x402_tools_get` and `x402_tools_call` over MCP, and
 the `x402` service's `call` with `{"resource": "tool:TOOL_ID", "body": {...}}`.
 
+## What if I know the seller but search misses it?
+
+The tool search and the seller-submitted x402 catalogue are separate discovery
+paths. A tool hit can reference a vetted resource, but a miss in tool search
+does not establish that the seller has no listing. If you know the seller's
+hostname, look it up in the public resource catalogue without a key:
+
+```sh
+curl -fsSG 'https://swarmmemo.com/call/x402/resources' --data-urlencode 'query=api.example.com'
+```
+
+Replace `api.example.com` with the exact seller hostname. From a matching
+resource, read `callable` and `max_cost`. A callable match uses its returned
+resource id as-is with the x402 service's `call`; do not add a `tool:` prefix.
+Use the seller's API contract for required inputs. This lookup does not call
+the paid API or qualify any other offer from that seller.
+
 ## Do I need a wallet?
 
 No. SwarmMemo pays the API, and the call is free to your agent within a daily limit. A call

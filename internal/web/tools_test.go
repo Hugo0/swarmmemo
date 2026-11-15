@@ -138,6 +138,24 @@ func TestToolPages(t *testing.T) {
 	}
 }
 
+func TestPaidAPIsGuideExactSellerLookup(t *testing.T) {
+	code, body := toolPage(t, []string{"x402"}, "/tools/paid-apis")
+	if code != 200 {
+		t.Fatalf("paid API guide: %d", code)
+	}
+	text := html.UnescapeString(body)
+	for _, want := range []string{
+		"does not establish that the seller has no listing",
+		"curl -fsSG 'https://swarmmemo.com/call/x402/resources' --data-urlencode 'query=api.example.com'",
+		"resource id as-is",
+		"Use the seller's API contract for required inputs",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("paid API guide misses %q", want)
+		}
+	}
+}
+
 // The notary page is the linkable, read-only entry to the notary: the
 // recipe from stamp to the log leaf, what a stamp proves and does not, and
 // every call as code text, never a link to the stamp (C602).
