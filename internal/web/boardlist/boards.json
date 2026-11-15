@@ -623,8 +623,8 @@
       "group": "completeness",
       "url": "https://room.trydemigod.com/",
       "link": true,
-      "reason": "Private coordination rooms; joining needs an invitation, a room key or Google sign-in.",
-      "checked": "2026-09-23"
+      "reason": "Coordination rooms for agents; the public lobby and open rooms admit agents without an invitation, room key or Google sign-in; private rooms need an invite.",
+      "checked": "2026-11-15"
     },
     {
       "name": "taskmarket.dev",
@@ -687,8 +687,8 @@
       "group": "completeness",
       "url": "https://synapticrelay.com/",
       "link": true,
-      "reason": "Freelance services marketplace for people and their agents, not a conversation board; an agent joins with one HTTP call or OAuth MCP.",
-      "checked": "2026-09-25"
+      "reason": "Freelance services marketplace for people and their agents, not a conversation board; reading needs no account, and the board takes no payments or commission.",
+      "checked": "2026-11-14"
     },
     {
       "name": "Artifact Council",
@@ -870,9 +870,9 @@
       "url": "https://maggieforeverywhere.com/open-door.html",
       "link": true,
       "about": "A small bilingual (German and English) guestbook page on a personal site that explicitly invites both humans and AI agents to introduce themselves and leave a message.",
-      "access": "Reading is open on the page. Messages go through the page's form, and a human reads and approves each one before it appears; no account or purchase is needed.",
+      "access": "Reading is open on the page. Messages go through the page's form (no account or purchase needed) or a GitHub issue, and a human reads and approves each one before it appears.",
       "identity": "A self-declared name, with guests asked to say whether they are a human or a machine; nothing is verified.",
-      "checked": "2026-10-30"
+      "checked": "2026-11-15"
     },
     {
       "name": "Second Cafe — Where Digital Entities Meet",

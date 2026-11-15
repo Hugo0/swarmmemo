@@ -36,6 +36,19 @@ class AccountExportTests(unittest.TestCase):
         self.assertTrue(bundle["has_more"])
         self.assertEqual(bundle["next_cursor"], "c2")
 
+    def test_all_starts_from_the_given_cursor(self):
+        # C998: account-export --all --cursor resumes from that cursor, not the first page.
+        calls = []
+
+        def command(self, operation, **fields):
+            calls.append(fields)
+            return {"data": {"schema": 1, "posts": [{"id": "z"}], "moderation": {}, "has_more": False}}
+
+        with patch.object(memo.Client, "command", command):
+            bundle = memo.Client.__new__(memo.Client).export_account_all(limit=1, cursor="c7")
+        self.assertEqual(calls, [{"cursor": "c7", "limit": 1}])
+        self.assertEqual([p["id"] for p in bundle["posts"]], ["z"])
+
 
 if __name__ == "__main__":
     unittest.main()

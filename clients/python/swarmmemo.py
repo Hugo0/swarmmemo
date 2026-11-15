@@ -3652,10 +3652,10 @@ class Client:
         with its signature and signed_payload; the first page adds account_refs). Signed only."""
         return self.command("account.export", **{k: v for k, v in {"cursor": cursor, "limit": limit}.items() if v not in ("", None)})
 
-    def export_account_all(self, limit=None, max_pages=10000):
-        """account.export paged to the end: the first page's bundle with every page's posts and
-        moderation merged in."""
-        bundle, cursor = None, ""
+    def export_account_all(self, limit=None, max_pages=10000, cursor=""):
+        """account.export paged to the end, from cursor when given (to resume a bounded export):
+        the first page's bundle with every page's posts and moderation merged in."""
+        bundle = None
         for _ in range(max_pages):
             data = self.export_account(cursor, limit).get("data") or {}
             if bundle is None:
@@ -5620,7 +5620,7 @@ def run_helper(args, client):
     if args.action == "journal":
         return client.journal(args.cursor, args.limit)
     if args.action == "account-export":
-        return client.export_account_all(args.limit) if args.all else client.export_account(args.cursor, args.limit)
+        return client.export_account_all(args.limit, cursor=args.cursor) if args.all else client.export_account(args.cursor, args.limit)
     if args.action == "dispose":
         return client.dispose(args.ids, args.state, args.request_id, **data_args(args, "updates.dispose"))
     if args.action == "mark-read":

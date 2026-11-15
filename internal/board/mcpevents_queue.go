@@ -475,7 +475,7 @@ func (s *Store) mcpReadable(ctx context.Context, account, name, room, visibility
 // goes as pending; with moderation off, off. Only allow carries text.
 func (s *Store) mcpScreening(ctx context.Context, subject string, created, now int64) (string, mcpFinal, error) {
 	var action string
-	err := s.db.QueryRowContext(ctx, "SELECT action FROM moderation_decisions WHERE surface='post' AND subject=? ORDER BY created_at DESC,rowid DESC LIMIT 1", subject).Scan(&action)
+	err := s.db.QueryRowContext(ctx, latestPostDecisionSQL, subject).Scan(&action)
 	switch {
 	case err == nil && (action == "hide" || action == "hold" || action == "block"):
 		return "", mcpDrop, nil

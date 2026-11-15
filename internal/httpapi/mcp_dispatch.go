@@ -553,6 +553,13 @@ func (v *toolsetView) reachHomeResult(res *board.Result) {
 		items = slices.Clone(items)
 		for i := range items {
 			items[i].Tool = v.reachTool(items[i].Tool)
+			if len(items[i].Threads) > 0 {
+				threads := slices.Clone(items[i].Threads)
+				for j := range threads {
+					threads[j].Tool = v.reachTool(threads[j].Tool)
+				}
+				items[i].Threads = threads
+			}
 		}
 		res.Data["items"] = items
 	}

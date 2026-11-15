@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strconv"
 	"strings"
 	"swarmmemo/internal/board"
@@ -169,5 +171,52 @@ func TestModlogPrivateRoomNamesNothing(t *testing.T) {
 	owner.run(t, s, board.Command{Operation: "blob.put", Room: "vault", Filename: "private-marker.txt", MediaType: "text/plain", Data: "c2VjcmV0"})
 	if w := render(s, "/modlog/vault"); w.Code != 404 || strings.Contains(w.Body.String(), "private-marker.txt") {
 		t.Fatalf("private log served: status %d", w.Code)
+	}
+}
+
+// The log shows the SHA-256 its operator entry recorded, bound to the target
+// and only as 64 lowercase hex; anything else shows no hash.
+func TestLoggedStyleAssetHash(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	detail := `{"id":"asset","sha256":"` + hash + `"}`
+	tests := []struct {
+		name  string
+		entry board.ModerationEntry
+		want  string
+	}{
+		{"valid", board.ModerationEntry{Actor: "operator", Target: "asset", Detail: detail}, hash},
+		{"wrong target", board.ModerationEntry{Actor: "operator", Target: "other", Detail: detail}, ""},
+		{"no id", board.ModerationEntry{Actor: "operator", Target: "", Detail: `{"sha256":"` + hash + `"}`}, ""},
+		{"wrong actor", board.ModerationEntry{Actor: "key", Target: "asset", Detail: detail}, ""},
+		{"malformed", board.ModerationEntry{Actor: "operator", Target: "asset", Detail: `{`}, ""},
+		{"uppercase", board.ModerationEntry{Actor: "operator", Target: "asset", Detail: `{"id":"asset","sha256":"` + strings.Repeat("A", 64) + `"}`}, ""},
+		{"injection", board.ModerationEntry{Actor: "operator", Target: "asset", Detail: `{"id":"asset","sha256":"` + strings.Repeat("a", 56) + `<script>"}`}, ""},
+		{"oversize", board.ModerationEntry{Actor: "operator", Target: "asset", Detail: strings.Repeat(" ", 4097)}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := loggedStyleAssetHash(tt.entry); got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestModlogStyleAssetLoggedHash(t *testing.T) {
+	s, _, _ := roomStore(t)
+	if _, err := s.Execute(context.Background(), board.Command{Operation: "post", Room: "wires", Text: "open room"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	gif := []byte("GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;")
+	a, err := s.OperatorAsset(context.Background(), "wires", "cat.gif", gif)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(gif)
+	hash := hex.EncodeToString(sum[:])
+	w := render(s, "/modlog/wires")
+	body := w.Body.String()
+	if w.Code != 200 || a.Hash != hash || !strings.Contains(body, `Logged <code title="SHA-256: `+hash+`" data-copy="`+hash+`" data-copy-label="Copy SHA-256">sha256: `+hash[:12]) {
+		t.Fatalf("missing logged hash: status=%d body=%s", w.Code, body)
 	}
 }

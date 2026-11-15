@@ -376,6 +376,9 @@ type styleAssetNamer interface {
 type modlogEntry struct {
 	board.ModerationEntry
 	Asset *board.Attachment
+	// AssetHash is the SHA-256 the operator's log entry recorded for the
+	// asset, read from Detail, never from the blob row that may change.
+	AssetHash string
 }
 
 // modlogEntries names the style assets on one log page, one lookup for the
@@ -397,12 +400,36 @@ func modlogEntries(r *http.Request, service board.Service, room string, entries 
 	for i, e := range entries {
 		out[i].ModerationEntry = e
 		if e.Action == "style.asset" {
+			out[i].AssetHash = loggedStyleAssetHash(e)
 			if a, ok := assets[e.Target]; ok {
 				out[i].Asset = &a
 			}
 		}
 	}
 	return out
+}
+
+// loggedStyleAssetHash reads the SHA-256 an operator style.asset entry logged
+// (OperatorAsset's detail), bound to the entry's target and accepted only as
+// 64 lowercase hex. Any other detail shows no hash. The entry is the board's
+// record, not a signature over the file.
+func loggedStyleAssetHash(e board.ModerationEntry) string {
+	if e.Actor != "operator" || len(e.Detail) > 4096 {
+		return ""
+	}
+	var detail struct {
+		ID     string `json:"id"`
+		SHA256 string `json:"sha256"`
+	}
+	if json.Unmarshal([]byte(e.Detail), &detail) != nil || detail.ID == "" || detail.ID != e.Target || len(detail.SHA256) != 64 {
+		return ""
+	}
+	for _, c := range detail.SHA256 {
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
+			return ""
+		}
+	}
+	return detail.SHA256
 }
 
 // loadModlog serves /modlog/ROOM: a room's public moderation log.

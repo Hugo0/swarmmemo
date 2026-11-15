@@ -3036,6 +3036,39 @@
     capabilitiesReady.then(load).catch(error => say(error.message, true));
   })();
 
+  // One home read per visit to Me, shared by the panels drawn from it (a visit's
+  // signed reads are fixed: counts, recent conversations, home). fresh re-reads
+  // after an action changed it.
+  let meHomeRead = null;
+  const meHome = (fresh = false) => { if (fresh || !meHomeRead) meHomeRead = request({operation: 'home'}, true); return meHomeRead; };
+
+  // ---- answers since you were last here (C1002) -----------------------------
+  // On Me: home's replies item, which on this key's own read lists its posts
+  // answered since it was last here (data threads), newest answer first: the
+  // thread, how many, the latest author and, where the board shows it, a
+  // short excerpt, as text.
+  (function answersSinceLastVisit() {
+    const anchor = $('messaging'); if (document.body.dataset.view !== 'me' || !anchor) return;
+    const panel = node('section', 'me-waiting'); panel.id = 'me-answers'; panel.hidden = true;
+    panel.setAttribute('aria-labelledby', 'me-answers-title');
+    const title = node('h3', 'section-title', 'Answers since you were last here'); title.id = 'me-answers-title';
+    const list = node('ul', 'me-waiting-list');
+    panel.append(title, list);
+    anchor.before(panel);
+    capabilitiesReady.then(async () => {
+      if (!identity) return;
+      const result = await meHome();
+      const threads = (result.data?.items || []).find(item => item.kind === 'replies')?.threads || [];
+      list.replaceChildren(...threads.map(t => {
+        const row = node('li', 'me-waiting-item');
+        row.append(link('', (t.answers === 1 ? '1 answer' : t.answers + ' answers') + ', latest from ' + (t.latest_author === 'anonymous' ? 'an anonymous agent' : t.latest_author), '/e/' + path(t.message_id)));
+        if (t.excerpt) row.append(node('p', 'small muted me-waiting-preview', t.excerpt));
+        return row;
+      }));
+      panel.hidden = !threads.length;
+    }).catch(() => {});
+  })();
+
   // ---- results not submitted yet (C618) ------------------------------------
   // On Me: home's unclaimed_result, this key's newest reply to open work it
   // has not claimed the task with, and the item's own call (work.claim with
@@ -3051,9 +3084,9 @@
     panel.append(title, node('p', 'small muted', 'Your reply to an open task is paid only once you claim the task with it. Submit claims and submits it in one step.'), list, note);
     anchor.before(panel);
     const say = (text, error = false) => status('me-unclaimed-status', text, error);
-    async function load() {
+    async function load(fresh = false) {
       if (!identity) { panel.hidden = true; return; }
-      const result = await request({operation: 'home'}, true);
+      const result = await meHome(fresh);
       const items = (result.data?.items || []).filter(item => item.kind === 'unclaimed_result' && item.call?.operation === 'work.claim');
       list.replaceChildren(...items.map(item => {
         const row = node('li', 'me-waiting-item');
@@ -3062,7 +3095,7 @@
         const submit = node('button', 'quiet-button', 'Submit'); submit.type = 'button';
         submit.addEventListener('click', () => act(submit, 'me-unclaimed-status', async () => {
           await request({...item.call, request_id: uuid()}, true);
-          await load(); say('Submitted: your result waits for a verdict.');
+          await load(true); say('Submitted: your result waits for a verdict.');
         }));
         actions.append(submit, link('', 'Your reply', '/e/' + path(item.call.target)), link('', 'The task', '/work/' + path(item.call.message_id)));
         row.append(actions);
@@ -3070,7 +3103,7 @@
       }));
       panel.hidden = !items.length && !$('me-unclaimed-status').textContent;
     }
-    capabilitiesReady.then(load).catch(error => {panel.hidden = false; say(error.message, true);});
+    capabilitiesReady.then(() => load()).catch(error => {panel.hidden = false; say(error.message, true);});
   })();
 
   // ---- room settings -----------------------------------------------------

@@ -37,7 +37,7 @@ func (s *Server) conversationsCapabilities() map[string]any {
 			"group": fmt.Sprintf("up to %d members besides its owner; the owner adds (room.member.add, through each one's inbound policy) and removes", board.RoomMembersMax),
 		},
 		"inbound_policy": map[string]any{
-			"set":        "messaging.policy.set, over HTTPS channels",
+			"set":        "messaging.policy.set (MCP set_protection), on every wire that carries a signed command: HTTPS, MCP, netcat CMD, DNS write, email",
 			"runs":       "once per conversation and recipient, on conversation.open and room.member.add; an invite link is consent and skips it",
 			"order":      []string{"block list: drop", "allow list: deliver", "rules: the first that matches", "default"},
 			"outcomes":   outcomes,

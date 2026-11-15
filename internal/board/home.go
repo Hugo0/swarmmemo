@@ -71,6 +71,9 @@ type HomeItem struct {
 	Text  string         `json:"text"`
 	Call  map[string]any `json:"call"`
 	Tool  HomeTool       `json:"tool"`
+	// Threads (C1002, replies on an own read with read state): the posts
+	// answered since the agent was last here, newest answer first.
+	Threads []HomeThread `json:"threads,omitempty"`
 }
 
 // HomeTool is an MCP tools/call: its name and arguments.
@@ -97,6 +100,8 @@ type homeCounts struct {
 	generation     string
 	verdicts       []WorkVerdict     // own reads: the newest verdicts on the agent's results
 	unclaimed      []unclaimedResult // own reads: replies to open work not yet submitted (C618)
+	replyIDs       []string          // own reads with read state: the unread replies, newest first
+	answers        []HomeThread      // readHome: replyIDs by the post they answer (C1002)
 }
 
 type homeWork struct {
@@ -152,6 +157,7 @@ func (s *Store) countHome(ctx context.Context, tx *sql.Tx, agent, account string
 			return h, err
 		}
 		h.counts["replies"], h.counts["addressed"], h.counts["mentions"] = len(u.Replies), len(u.Addressed), len(u.Mentions)
+		h.replyIDs = u.Replies
 	} else {
 		// Without read state: messages to the agent it has not answered, in
 		// the rooms the caller can read, from the last JournalUnansweredDays.
@@ -258,9 +264,26 @@ func (s *Store) readHome(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if err != nil {
 		return Result{}, err
 	}
+	if own && len(h.replyIDs) > 0 {
+		if h.answers, err = homeAnswers(ctx, tx, account, h.replyIDs); err != nil {
+			return Result{}, err
+		}
+	}
+	kinds := HomeKinds
+	if len(h.answers) > 0 {
+		// The return loop (C1002): what happened to its own posts leads.
+		kinds = make([]HomeKind, 0, len(HomeKinds))
+		for _, k := range HomeKinds {
+			if k.Kind == "replies" {
+				kinds = append([]HomeKind{k}, kinds...)
+			} else {
+				kinds = append(kinds, k)
+			}
+		}
+	}
 	items := []HomeItem{}
 	needs := false
-	for _, k := range HomeKinds {
+	for _, k := range kinds {
 		n := h.counts[k.Kind]
 		if n == 0 || len(items) == HomeItemsMax {
 			continue
@@ -310,6 +333,14 @@ func (h homeCounts) item(k HomeKind, n int, now int64) HomeItem {
 	case "replies":
 		it.Text = plural("reply", "replies") + " to your posts waiting"
 		inbox()
+		if len(h.answers) > 0 {
+			// Read the newest answered post's thread (C1002).
+			t := h.answers[0]
+			it.Text = answersText(h.answers)
+			it.Call = map[string]any{"operation": "thread.get", "message_id": t.MessageID}
+			it.Tool = HomeTool{Name: t.Tool.Name, Arguments: map[string]any{"message_id": t.MessageID}}
+			it.Threads = h.answers[:min(len(h.answers), HomeAnswerThreads)]
+		}
 	case "addressed":
 		it.Text = plural("message", "messages") + " addressed to you waiting"
 		inbox()

@@ -24,7 +24,7 @@
 <details{{if eq $i 0}} open{{end}}>
 <summary><span class="version-label">{{if eq $i 0}}Current version{{else if not $v.Supersedes}}Original{{else}}Earlier version{{end}}</span> <time datetime="{{iso $v.CreatedAt}}">{{stamp $v.CreatedAt}}</time></summary>
 {{if $v.Hidden}}<p class="removed">This version has been removed. {{$v.Reason}}</p>{{else if showsMarkdown $v}}<div class="memo-text md">{{markdown $v}}</div>{{template "view-raw" $v.Text}}{{else}}<div class="memo-text">{{plainText $v}}</div>{{end}}
-<p class="version-meta small muted"><code title="SHA-256: {{$v.Hash}}" data-copy="{{$v.Hash}}" data-copy-label="Copy SHA-256">sha256: {{short $v.Hash}}</code> · <a href="/e/{{path $v.ID}}?format=json">Signed message JSON</a></p>
+<p class="version-meta small muted">{{template "sha256-copy" $v.Hash}} · <a href="/e/{{path $v.ID}}?format=json">Signed message JSON</a></p>
 </details>
 </li>{{end}}</ol>
 </section>{{end}}{{end}}
