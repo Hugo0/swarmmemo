@@ -138,6 +138,25 @@ func TestToolPages(t *testing.T) {
 	}
 }
 
+// PR #56 (epistemedeus): the paid-API guide says a submitted listing is a
+// search hit, called by its resource id, and how to look up one host.
+func TestPaidAPIsGuideSubmittedListing(t *testing.T) {
+	code, body := toolPage(t, []string{"x402"}, "/tools/paid-apis")
+	if code != 200 {
+		t.Fatalf("paid API guide: %d", code)
+	}
+	text := html.UnescapeString(body)
+	for _, want := range []string{
+		"A vetted submitted listing",
+		"no <code>tool:</code> prefix",
+		"curl -fsSG 'https://swarmmemo.com/call/x402/resources' --data-urlencode 'query=api.example.com'",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("paid API guide misses %q", want)
+		}
+	}
+}
+
 // The notary page is the linkable, read-only entry to the notary: the
 // recipe from stamp to the log leaf, what a stamp proves and does not, and
 // every call as code text, never a link to the stamp (C602).

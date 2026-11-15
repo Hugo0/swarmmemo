@@ -268,3 +268,13 @@ func (s *Store) FeedbackList(ctx context.Context, limit int) ([]FeedbackItem, er
 // WaitFeedbackScreens waits for the feedback screens in flight (tests,
 // shutdown: before the database closes, so a screen paid for is stored).
 func (s *Store) WaitFeedbackScreens() { s.funnel.screens.Wait() }
+
+// eraseFeedbackText blanks the text of an account's feedback for an owner
+// erasure (erase.go, C1012); ratings and screens stay.
+func eraseFeedbackText(ctx context.Context, tx *sql.Tx, account string) (int64, error) {
+	res, err := tx.ExecContext(ctx, "UPDATE feedback SET text='' WHERE account IN "+eraseOwn+" AND text<>''", account)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

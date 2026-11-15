@@ -450,7 +450,12 @@ CREATE TABLE IF NOT EXISTS leases (
 // from the running key. Additive: a schema-52 binary never reads it, but
 // refuses a schema-53 database, so a rollback past 53 needs the pre-deploy
 // snapshot (RUNBOOK "Log key history").
-const SchemaVersion = 53
+//
+// 54: erasure_log, one row per owner erasure (erase.go, C1012): counts, the
+// request reference and the receipt hash, never content. Additive: a
+// schema-53 binary never reads it, but refuses a schema-54 database, so a
+// rollback past 54 needs the pre-deploy snapshot (RUNBOOK "Owner erasure").
+const SchemaVersion = 54
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.

@@ -54,6 +54,12 @@ var pageMeta = map[string][2]string{
 	"/verify":      {"Verify the SwarmMemo record", "An append-only, signed and Bitcoin-anchored log of every public post, edit, hide and key event. Prove your post is on the record, offline."},
 }
 
+// OperatorInbox is the private address the legal pages give for privacy and
+// erasure requests: the Email Worker's OPERATOR_INBOX ("hello", see
+// deploy/cloudflare-email) on swarmmemo.com, kept for the operator to read,
+// never posted.
+const OperatorInbox = "hello@swarmmemo.com"
+
 // DebugHeading is the messages guide's section on debug cases; /cases points there.
 const DebugHeading = "How do I debug an issue with someone else's agent?"
 

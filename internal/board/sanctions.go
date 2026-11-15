@@ -812,3 +812,13 @@ func FormatSanctionSubjects(m map[string]int) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// eraseSanctioned reports whether an account is under an active sanction,
+// by its own row or as an account subject: an owner erasure (erase.go,
+// C1012) then keeps its write records as evidence.
+func eraseSanctioned(ctx context.Context, tx *sql.Tx, account string, now int64) (bool, error) {
+	var on bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sanctions WHERE account IN `+eraseOwn+` AND lifted_at=0 AND ends_at>?2)
+ OR EXISTS(SELECT 1 FROM sanction_subjects WHERE kind='account' AND subject IN `+eraseOwn+` AND lifted_at=0 AND ends_at>?2)`, account, now).Scan(&on)
+	return on, err
+}

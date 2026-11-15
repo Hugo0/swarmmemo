@@ -96,8 +96,10 @@ func TestLegalPagesRenderFromTheirMarkdownSource(t *testing.T) {
 		}
 		for _, invented := range []string{"@swarmmemo.com", "mailto:"} {
 			if invented == "@swarmmemo.com" {
-				// The only address on these pages is the room-posting form ROOM@.
+				// The only addresses on these pages are the room-posting form
+				// ROOM@ and the operator's private inbox (OperatorInbox).
 				body = strings.ReplaceAll(body, "ROOM@swarmmemo.com", "")
+				body = strings.ReplaceAll(body, OperatorInbox, "")
 			}
 			if strings.Contains(body, invented) {
 				t.Errorf("%s names a contact address (%s) that does not exist", tc.path, invented)

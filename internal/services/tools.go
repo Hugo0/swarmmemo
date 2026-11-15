@@ -458,8 +458,8 @@ func catalogueTools(raw json.RawMessage) ([]toolHit, bool) {
 	}
 	out := make([]toolHit, 0, len(page.Hits))
 	for i, h := range page.Hits {
-		if !IsToolID(h.ID) {
-			continue
+		if !IsToolID(h.ID) && len(h.CallableVia) == 0 {
+			continue // a submitted resource's hit (C1013) has callable_via
 		}
 		price := map[string]any{"resource": string(allowance.Credit), "rule": "the API's own price plus a small margin, charged when its answer arrives", "max_cost": h.MaxCost, "max_cost_required": true}
 		if h.Cost != nil {

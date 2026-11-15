@@ -122,12 +122,13 @@ func run() error {
 		"feed",               // feed.go
 		"signals",            // signals.go
 		"sanction",           // sanction.go
+		"erase",              // erase.go (C1012 owner erasure)
 		"funnel", "feedback", // funnel.go
 		"offering", // offerings.go
 		"bonds":    // topup.go (C326 standing bonds)
 		return operator(command)
 	default:
-		return errors.New("usage: swarmmemo [serve|mcp-stdio [--profile core|assistant|full]|version|keygen FILE|nostr keygen FILE|canonical|rubric score RUBRIC OBSERVATIONS|rubric validate RUBRIC|backup FILE|integrity|reports|moderate ID hide/restore REASON [--sanction CATEGORY]|sanction apply|manual|lift|list|ladder|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers|assistants|identity [--days N]|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|topup check|topup unknown|topup resolve ID credit TXHASH|topup resolve ID fail|bonds|bonds resolve ID held TXHASH|bonds resolve ID fail|offering unknown|offering resolve ID paid TXHASH|offering resolve ID fail|moderation|receiver revoke ID REASON|inbox parity [AGENTS [CURSOR_BACK]]|doc hide ID REASON|paste hide ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist|signals account FINGERPRINT|signals message ID|signals cluster [--days N] [--min N]|signals raw message ID|signals raw account FINGERPRINT [--days N]|funnel [--days N] [--split X] [--organic] [--json|--html FILE]|funnel kpi [--days N] [--json]|funnel backfill [--since YYYY-MM-DD]|funnel recompute|funnel exclude add|rm|list|feedback list [--limit N]|feed replay [--profile FILE] [--against FILE] [--at TIME] [--top N]]")
+		return errors.New("usage: swarmmemo [serve|mcp-stdio [--profile core|assistant|full]|version|keygen FILE|nostr keygen FILE|canonical|rubric score RUBRIC OBSERVATIONS|rubric validate RUBRIC|backup FILE|integrity|reports|moderate ID hide/restore REASON [--sanction CATEGORY]|sanction apply|manual|lift|list|ladder|room ROOM policy JSON|room ROOM moderator add/remove AGENT|room ROOM owner AGENT|room ROOM style set FILE|room ROOM asset put FILE|recover-generation --offline-confirmed|stats referrers|assistants|identity [--days N]|params|allowance|lever|trust|x402 keygen FILE|x402 check|x402 import FILE|x402 vet ID|x402 unvet ID|topup check|topup unknown|topup resolve ID credit TXHASH|topup resolve ID fail|bonds|bonds resolve ID held TXHASH|bonds resolve ID fail|offering unknown|offering resolve ID paid TXHASH|offering resolve ID fail|moderation|receiver revoke ID REASON|inbox parity [AGENTS [CURSOR_BACK]]|doc hide ID REASON|paste hide ID REASON|fetch deny HOST REASON|fetch allow HOST|fetch denylist|signals account FINGERPRINT|signals message ID|signals cluster [--days N] [--min N]|signals raw message ID|signals raw account FINGERPRINT [--days N]|erase account FINGERPRINT [--reason REF] [--confirm]|erase log|funnel [--days N] [--split X] [--organic] [--json|--html FILE]|funnel kpi [--days N] [--json]|funnel backfill [--since YYYY-MM-DD]|funnel recompute|funnel exclude add|rm|list|feedback list [--limit N]|feed replay [--profile FILE] [--against FILE] [--at TIME] [--top N]]")
 	}
 }
 
@@ -184,6 +185,8 @@ func operator(command string) error {
 		return operatorSignals(ctx, store, os.Args[2:], os.Stdout)
 	case "sanction":
 		return operatorSanction(ctx, store, os.Args[2:], os.Stdout)
+	case "erase":
+		return operatorErase(ctx, store, os.Args[2:], os.Stdout)
 	case "funnel":
 		return operatorFunnel(ctx, store, os.Args[2:], os.Stdout)
 	case "feedback":
@@ -301,6 +304,8 @@ func operatorReadOnly(command string, args []string) bool {
 		}
 	case "sanction":
 		return sub == "list" || sub == "ladder"
+	case "erase":
+		return sub == "log" // a dry run rolls back a read-write transaction
 	case "fetch":
 		return sub == "denylist"
 	case "signals":

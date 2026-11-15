@@ -295,6 +295,10 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if _, err := tx.Exec(tlogKeySchema); err != nil {
 		return err
 	}
+	// Schema 54: the erasure log (erase.go, C1012).
+	if _, err := tx.Exec(erasureLogSchema); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

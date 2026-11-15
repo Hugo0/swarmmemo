@@ -24,7 +24,7 @@ var readOnlyCommands = [][]string{
 	{"funnel"}, {"funnel", "--days", "7"}, {"funnel", "--json"}, {"funnel", "kpi"}, {"funnel", "mcp-tools"}, {"funnel", "exclude", "list"},
 	{"feedback", "list"}, {"params", "show", "allowance"},
 	{"moderation", "queue"}, {"moderation", "show", "absent"}, {"moderation", "log"}, {"moderation", "stats"}, {"moderation", "alerts"}, {"moderation", "spend"}, {"moderation", "policy"},
-	{"sanction", "list"}, {"sanction", "ladder"}, {"fetch", "denylist"},
+	{"sanction", "list"}, {"sanction", "ladder"}, {"erase", "log"}, {"fetch", "denylist"},
 	{"signals", "cluster"}, {"signals", "account", strings.Repeat("ab", 32)}, {"signals", "message", "absent"},
 	{"feed", "replay"}, {"offering", "unknown"}, {"topup", "unknown"}, {"bonds"}, {"room", "lobby", "asset", "list"},
 }
@@ -45,7 +45,7 @@ func TestOperatorReadsOpenReadOnly(t *testing.T) {
 		{"integrity"},
 		{"params", "set", "allowance", "f.json"}, {"moderate", "ID", "hide", "spam"}, {"room", "lobby", "policy", "{}"}, {"room", "lobby", "asset", "put", "f"},
 		{"funnel", "backfill"}, {"funnel", "recompute"}, {"funnel", "exclude", "add", "x"}, {"moderation", "approve", "x"}, {"moderation", "quality-backfill"},
-		{"lever", "list"}, {"trust", "show", "x"}, {"maintenance"}, {"backup", "f"}, {"sanction", "apply"}, {"offering", "resolve", "x", "fail"}, {"bonds", "resolve", "x", "fail"},
+		{"lever", "list"}, {"trust", "show", "x"}, {"maintenance"}, {"backup", "f"}, {"sanction", "apply"}, {"erase", "account", "x"}, {"erase", "account", "x", "--confirm"}, {"offering", "resolve", "x", "fail"}, {"bonds", "resolve", "x", "fail"},
 		{"recover-generation", "--offline-confirmed"}, {"fetch", "deny", "h", "r"}, {"feedback"},
 	} {
 		if operatorReadOnly(c[0], c[1:]) {

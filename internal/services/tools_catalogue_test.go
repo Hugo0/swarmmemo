@@ -355,3 +355,64 @@ func TestSchemaArgs(t *testing.T) {
 		}
 	}
 }
+
+// C1013 (issue #53): a vetted, callable submitted resource is a hit of its
+// own in tools search and x402 tools_search, found by its host, path or
+// summary, first when the query names its host, with callable_via; an
+// unvetted, gambling or over-price one, or a crawled one, is not.
+func TestToolsSearchFindsSubmittedResource(t *testing.T) {
+	h, api := newBundlerHarnessWith(t, "", "", []string{"docs"}, Deps{})
+	api.hits = `[{"id":"` + toolOK + `","title":"Weather","description":"Weather for a city","payment":{"price_hint":"0.001"}}]`
+	m, _ := h.engine.Registry().Lookup("x402")
+	x := m.(*x402)
+	payTo, _ := ParseEVMAddress(testPayTo)
+	const desk = "agents-samedaydesk-com-api-quote-0000000000000001"
+	s := &x402Snapshot{byID: map[string]*X402Resource{}, stats: map[string]callStats{}, categories: map[string]int{}}
+	for _, r := range []*X402Resource{
+		{ID: desk, URL: "https://agents.samedaydesk.com/api/quote", Summary: "Same-day desk quote", Vetted: true, Source: submittedSource(ProofDomain, "acct1")},
+		{ID: "agents-samedaydesk-com-api-raw-0000000000000002", URL: "https://agents.samedaydesk.com/api/raw", Summary: "Unvetted", Source: submittedSource(ProofDomain, "acct1")},
+		{ID: "agents-samedaydesk-com-api-bet-0000000000000003", URL: "https://agents.samedaydesk.com/api/bet", Category: "gambling", Vetted: true, Source: submittedSource(ProofDomain, "acct1")},
+		{ID: "agents-samedaydesk-com-api-dear-0000000000000004", URL: "https://agents.samedaydesk.com/api/dear", Vetted: true, MaxAmount: 10_000_000, Source: submittedSource(ProofDomain, "acct1")},
+		{ID: "agents-samedaydesk-com-api-crawled-0000000000000005", URL: "https://agents.samedaydesk.com/api/crawled", Vetted: true, Source: "bazaar 2026-11-01"},
+	} {
+		r.PayTo, r.Bundler, r.Open, r.Method = payTo, X402Bundler, true, "POST"
+		if r.MaxAmount == 0 {
+			r.MaxAmount = 1000
+		}
+		r.summaryStatus = summaryScreened
+		indexResource(r)
+		s.byID[r.ID], s.open = r, append(s.open, r)
+	}
+	x.cat.snap.Store(s)
+	for _, query := range []string{"agents.samedaydesk.com", "https://agents.samedaydesk.com/", "samedaydesk quote", "api/quote"} {
+		page, err := h.bundlerRead(testSubject, "tools_search", `{"query":"`+query+`"}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hits := hitsByID(page)
+		hit := hits[desk]
+		via, _ := hit["callable_via"].(map[string]any)
+		if via["resource"] != desk || via["method"] != "call" || hit["callable"] != true || hit["vetted"] != true || hit["source"] != "submitted" {
+			t.Fatalf("%q: %v", query, page["hits"])
+		}
+		if len(hits) != 2 {
+			t.Fatalf("%q: only the vetted, callable submitted resource joins the tool: %v", query, page["hits"])
+		}
+		first := page["hits"].([]any)[0].(map[string]any)["id"]
+		if byHost := strings.Contains(query, "agents.samedaydesk.com"); byHost != (first == desk) {
+			t.Fatalf("%q: first hit %v", query, first)
+		}
+	}
+	// The unified tools search lists it, kind catalogue, without a tool: example.
+	page, raw := h.toolsSearch(`{"query":"agents.samedaydesk.com","kind":"catalogue"}`)
+	list := toolEntries(page)
+	if len(list) == 0 || list[0]["id"] != desk || list[0]["kind"] != "catalogue" || list[0]["callable"] != true || list[0]["callable_via"] == nil || list[0]["example"] != nil {
+		t.Fatalf("tools search by host: %s", raw)
+	}
+	// Unvetted, it is found by x402 resources only.
+	s.byID[desk].Vetted = false
+	page, err := h.bundlerRead(testSubject, "tools_search", `{"query":"agents.samedaydesk.com"}`)
+	if err != nil || hitsByID(page)[desk] != nil {
+		t.Fatalf("an unvetted resource: %v %v", page["hits"], err)
+	}
+}

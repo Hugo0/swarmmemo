@@ -838,3 +838,27 @@ WHERE w.ip_hash_24=? AND w.hash_key=? AND w.created_at>? AND w.created_at<=? AND
  AND e.hidden=0 AND e.supersedes='' AND r.visibility='public'
 ORDER BY w.created_at DESC LIMIT ?`, net, s.signals.id, from, to, limit)
 }
+
+// eraseWriteSignals is owner erasure's step for the write signals (erase.go,
+// C1012): the account's rows go, except those of an object held as evidence,
+// and none while the account is under an active sanction.
+func eraseWriteSignals(ctx context.Context, tx *sql.Tx, account string, keep EraseEvidence) (EraseCount, error) {
+	c := EraseCount{Store: "write_signals", Action: "removed"}
+	if keep.Sanctioned {
+		c.Action = "kept: the account is under an active sanction"
+		return c, nil
+	}
+	query, args := "DELETE FROM write_signals WHERE account IN "+eraseOwn, []any{account}
+	if len(keep.Objects) > 0 {
+		query += " AND object_id NOT IN (" + numberedParams(len(keep.Objects), 2) + ")"
+		for _, o := range keep.Objects {
+			args = append(args, o)
+		}
+	}
+	res, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return c, err
+	}
+	c.Rows, _ = res.RowsAffected()
+	return c, nil
+}

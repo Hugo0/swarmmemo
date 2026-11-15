@@ -683,6 +683,10 @@ func mainKeyID(ctx context.Context, tx *sql.Tx, a actor) (string, error) {
 // device signs nothing, the main key's own operations refuse a device, and a
 // new device waits out its hold.
 func authorizeDevice(c Command, a actor, revoked, now int64) error {
+	if revoked != 0 && !a.device {
+		// Only an owner erasure revokes a main key (erase.go, C1012).
+		return problem(401, "key_revoked", "This account was erased by its owner and its keys sign nothing more. A new key starts a new account.")
+	}
 	if revoked != 0 {
 		return problem(401, "key_revoked", "This device was removed from its account and signs nothing more. Link it again from the main key.")
 	}

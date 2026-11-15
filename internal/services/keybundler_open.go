@@ -800,6 +800,15 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 			later = append(later, e)
 		}
 	}
+	// C1013: vetted, callable submitted resources that match the query are
+	// hits of their own (unless a hit above is already bought through one):
+	// one that names its host first, the rest after the callable tools.
+	taken := map[string]bool{}
+	for _, r := range via {
+		taken[r.ID] = true
+	}
+	named, matched := x.submittedMatches(s, taken, price)
+	hits = append(append(named, hits...), matched...)
 	callable := len(hits)
 	hits = append(hits, later...)
 	out := map[string]any{
@@ -812,6 +821,73 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 		out["price_note"] = bundlerListedNote
 	}
 	return canonicalJSON(out), nil
+}
+
+// submittedHitsMax bounds the submitted resources one tools_search lists.
+const submittedHitsMax = 5
+
+// submittedViaNote says how a submitted resource's hit is called.
+const submittedViaNote = "a submitted listing: call it as service.call x402 call with this resource (no tool: prefix); query and body say what it takes."
+
+// submittedMatches are the vetted, callable submitted catalogue resources
+// (x402.submit) that every word of one of s's queries names (in the id,
+// host, URL path, category or summary), not in taken: within s's
+// max_price, HTTPS, neither denied nor adult or gambling, at most
+// submittedHitsMax. named are those whose host or domain a query names, the
+// rest are other. Each is a hit with callable_via, the C566 shape. The
+// catalogue is the in-memory snapshot: no database.
+func (x *x402) submittedMatches(s bundlerSearch, taken map[string]bool, price Price) (named, other []any) {
+	angles := make([][]string, 0, len(s.queries))
+	for _, q := range s.queries {
+		var words []string
+		for _, w := range strings.Fields(q) {
+			if len(w) >= 3 && !toolsStopWords[w] {
+				words = append(words, w)
+			}
+		}
+		if len(words) > 0 {
+			angles = append(angles, words)
+		}
+	}
+	if len(angles) == 0 {
+		return nil, nil
+	}
+	x.vettedEndpoints(func(r *X402Resource) {
+		m := min(r.MaxAmount, x.cfg.PerCall)
+		if len(named)+len(other) >= submittedHitsMax || taken[r.ID] || r.Proof() == "" || !r.Open || !strings.HasPrefix(r.canon, "https://") ||
+			neverVetted(r.Category) || x.fr.denied(r.Category, r.host) || usdMicroOf(m, x.cfg.Decimals) > s.maxPrice {
+			return
+		}
+		text := r.text + " " + strings.ToLower(r.canon)
+		hit, byHost := false, false
+		for _, words := range angles {
+			if !slices.ContainsFunc(words, func(w string) bool { return !strings.Contains(text, w) }) {
+				hit = true
+				byHost = byHost || slices.ContainsFunc(words, func(w string) bool {
+					w = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(w, "https://"), "http://"), "/")
+					return w == r.host || (r.domain != "" && w == r.domain)
+				})
+			}
+		}
+		if !hit {
+			return
+		}
+		taken[r.ID] = true
+		query := r.Query
+		if query == nil {
+			query = []string{}
+		}
+		e := map[string]any{"id": r.ID, "title": strings.TrimPrefix(r.canon, "https://"), "description": r.servedSummary(), "summary_status": r.summaryStatus,
+			"category": r.Category, "vetted": true, "callable": true, "source": "submitted", "proof": r.Proof(),
+			"method": r.Method, "query": query, "body": r.Body, "max_price": formatUnits(m, x.cfg.Decimals), "max_cost": price.For(m),
+			"callable_via": map[string]any{"method": "call", "resource": r.ID, "note": submittedViaNote}}
+		if byHost {
+			named = append(named, e)
+		} else {
+			other = append(other, e)
+		}
+	})
+	return named, other
 }
 
 // catalogueViaNote says which index each of a hit's flags comes from.
