@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"swarmmemo/internal/board"
 	"testing"
@@ -55,7 +56,7 @@ func TestModlogStyleAssetNamesAndPreviews(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}
-	for _, want := range []string{`href="/a/` + img.ID + `"`, `src="/a/` + img.ID + `"`, `>&lt;cat &amp; &#34;friends&#34;&gt;.gif</a>`, `width="96" height="64" loading="lazy"`, `href="/a/` + font.ID + `">term.woff2</a>`} {
+	for _, want := range []string{`href="/a/` + img.ID + `"`, `src="/a/` + img.ID + `"`, `>&lt;cat &amp; &#34;friends&#34;&gt;.gif</a>`, `width="96" height="64" loading="lazy"`, `href="/a/` + font.ID + `" title="font/woff2 · 64 bytes">term.woff2</a>`, `title="image/gif · ` + fmt.Sprint(len(gif)) + ` bytes"`, `class="modlog-font" data-font-url="/a/` + font.ID + `"`, `/assets/app.js?`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -104,12 +105,70 @@ func TestModlogStyleAssetUnavailable(t *testing.T) {
 	}
 	w := render(s, "/modlog/wires")
 	body := w.Body.String()
-	if w.Code != 200 || !strings.Contains(body, `>missing-id-1</a>`) || !strings.Contains(body, `>other-room-i</a>`) || strings.Contains(body, "secret.gif") || strings.Contains(body, `class="modlog-asset"`) {
+	if w.Code != 200 || !strings.Contains(body, `>missing-id-1</a>`) || !strings.Contains(body, `>other-room-i</a>`) || strings.Contains(body, "secret.gif") || strings.Contains(body, `class="modlog-asset"`) || strings.Contains(body, `class="modlog-font"`) || strings.Contains(body, `title="image/gif`) {
 		t.Fatalf("unexpected fallback: status=%d body=%s", w.Code, body)
 	}
 	for _, c := range s.calls {
 		if c.Operation == "blob.get" {
 			t.Fatal("the log page downloaded an asset to name it")
 		}
+	}
+}
+
+// Exercise real store lookups and the rendered HTML, not a fake namer: hiding
+// the only reference must remove all metadata and preview until restored.
+func TestModlogAssetMetadataVisibility(t *testing.T) {
+	s, owner, _ := roomStore(t)
+	owner.run(t, s, board.Command{Operation: "post", Room: "wires", Text: "open room"})
+	gif := []byte("GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;")
+	asset, err := s.OperatorAsset(context.Background(), "wires", "visibility-secret.gif", gif)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(text string) string {
+		return owner.run(t, s, board.Command{Operation: "post", Room: "wires", Text: text, Attachments: []string{asset.ID}}).Receipt.ID
+	}
+	first := post("first reference")
+	second := post("second reference")
+	check := func(wantMetadata bool) {
+		t.Helper()
+		w := render(s, "/modlog/wires")
+		if w.Code != 200 {
+			t.Fatalf("modlog status %d: %s", w.Code, w.Body.String())
+		}
+		body := w.Body.String()
+		for _, marker := range []string{"visibility-secret.gif", `title="image/gif ·`, `src="/a/` + asset.ID + `"`} {
+			if strings.Contains(body, marker) != wantMetadata {
+				t.Errorf("metadata=%v: marker %q in body=%v", wantMetadata, marker, strings.Contains(body, marker))
+			}
+		}
+		if !wantMetadata && !strings.Contains(body, `href="/a/`+asset.ID+`">`+asset.ID[:12]+`</a>`) {
+			t.Error("missing short-ID fallback")
+		}
+	}
+	check(true)
+	if err := s.Moderate(context.Background(), first, "hide first", true); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	if err := s.Moderate(context.Background(), second, "hide second", true); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	if err := s.Moderate(context.Background(), first, "restore first", false); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+}
+
+// A private room must not expose its log (or asset names) through the public
+// HTML route, even when a real private attachment exists.
+func TestModlogPrivateAssetMetadataNotPublic(t *testing.T) {
+	s, owner, _ := roomStore(t)
+	owner.run(t, s, board.Command{Operation: "room.create", Room: "vault", Visibility: "private"})
+	owner.run(t, s, board.Command{Operation: "blob.put", Room: "vault", Filename: "private-marker.txt", MediaType: "text/plain", Data: "c2VjcmV0"})
+	w := render(s, "/modlog/vault")
+	if w.Code != 404 || strings.Contains(w.Body.String(), "private-marker.txt") {
+		t.Fatalf("private log exposed: status %d body %s", w.Code, w.Body.String())
 	}
 }
