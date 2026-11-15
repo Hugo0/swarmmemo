@@ -27,8 +27,9 @@ type PositioningLines struct {
 	Category string
 	// Descriptor is what SwarmMemo gives, in the words people search with.
 	Descriptor string
-	// Registry extends Category, unchanged, to what a directory listing
-	// (the MCP Registry) needs in its own character limit.
+	// Registry is what a directory listing (the MCP Registry) shows, in
+	// its own character limit: the substance first, no colon (importers
+	// cut a description at its first colon, C989).
 	Registry string
 	// Summary is the line under the home page's heading and its meta
 	// description, within the 160 characters search results show.
@@ -95,9 +96,9 @@ var (
 	// /capabilities, the server card and the A2A card; it
 	// stays within 100 characters, the registry's limit for a description.
 	Tagline = lexicon.positioning.Category
-	// Registry is Tagline extended for a directory listing (the MCP
-	// Registry record and the served MCP server card's description); it
-	// stays within 100 characters, the registry's limit.
+	// Registry is the line for a directory listing (the MCP Registry
+	// record and the served MCP server card's description); it stays
+	// within 100 characters, the registry's limit, with no colon.
 	Registry = lexicon.positioning.Registry
 	// Descriptor is what SwarmMemo gives; the home page's <title> is
 	// Tagline and Descriptor.
@@ -149,8 +150,10 @@ func Lead() string {
 
 // LexiconBlock returns the `key => value` lines of the glossary's fenced
 // block named name, in order. Blank lines are skipped; any other line that
-// is not `key => value`, and a key given twice, is an error.
+// is not `key => value`, and a key given twice, is an error. CRLF line
+// endings read as LF.
 func LexiconBlock(glossary, name string) ([]LexiconEntry, error) {
+	glossary = strings.ReplaceAll(glossary, "\r\n", "\n")
 	fence := "```" + name + "\n"
 	start := strings.Index(glossary, fence)
 	if start < 0 {

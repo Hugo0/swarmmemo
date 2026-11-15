@@ -3,6 +3,7 @@
 package docs
 
 import (
+	"bytes"
 	"embed"
 	"slices"
 	"strings"
@@ -105,10 +106,12 @@ func ToolLine(path string) string {
 }
 
 // Glossary returns docs/GLOSSARY.md, the one word per concept; its banned
-// list is checked against every served surface (internal/httpapi).
+// list is checked against every served surface (internal/httpapi). Line
+// endings are LF whatever the checkout wrote (a Windows CRLF clone included),
+// so every reader parses one form.
 func Glossary() []byte {
 	raw, _ := public.ReadFile("GLOSSARY.md")
-	return raw
+	return bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 }
 
 // TrustModel returns docs/TRUST_MODEL.md, the one statement of the trust

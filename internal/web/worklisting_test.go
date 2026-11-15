@@ -136,10 +136,27 @@ func TestWorkListingStandingTimes(t *testing.T) {
 		t.Errorf("a full round:\n%s", l.Markdown)
 	}
 
+	// C988: a cash tier's claim carries the payout address, with the
+	// verified-wallet alternative; a credits-only listing has neither.
+	if strings.Contains(l.Markdown, "--payout-address") {
+		t.Errorf("a credits-only listing asks for a payout address:\n%s", l.Markdown)
+	}
+	standing.BlockedBy, standing.BlockedNote, standing.Open = "", "", 2
+	standing.Tiers = []board.WorkStandingTier{{Name: "minor", Credits: 100}, {Name: "bug", Credits: 300, USDC: "0.05"}}
+	l = WorkListingFor(item, "")
+	if !strings.HasSuffix(l.Claim, "work claim "+webWorkID+" --result RESULT_ID --payout-address YOUR_WALLET_ADDRESS") ||
+		!strings.Contains(l.Markdown, l.Claim+"\n```\nIt pays USDC: put your wallet address (0x and 40 hex) for YOUR_WALLET_ADDRESS, or link your wallet first (python3 swarmmemo.py --key key.json link-wallet --wallet-key wallet.key) and drop the flag.\n") {
+		t.Errorf("a cash standing listing:\n%s", l.Markdown)
+	}
+
 	// Non-standing work keeps its one Deadline line and its claim.
 	plain := WorkListingFor(board.Work{ID: webWorkID, Room: "bounties", Title: "One task", State: "open", Deadline: 1789171200}, "")
 	if !strings.Contains(plain.Markdown, "- Seats: 1\n- Deadline: 2026-09-12 00:00 UTC\n- Task: ") || strings.Contains(plain.Markdown, "Submit by") ||
 		plain.ResultsUntilAt != "" || plain.TakesNoResults || !strings.Contains(plain.Markdown, ClaimOrder) {
 		t.Errorf("non-standing listing changed:\n%s", plain.Markdown)
+	}
+	if cash := WorkListingFor(board.Work{ID: webWorkID, Room: "bounties", Title: "One task", State: "open", Deadline: 1789171200,
+		RewardUSDC: &board.WorkRewardUSDC{Amount: "0.10"}}, ""); !strings.Contains(cash.Claim, "--payout-address YOUR_WALLET_ADDRESS") || !strings.Contains(cash.Markdown, "It pays USDC:") {
+		t.Errorf("a USDC task's listing:\n%s", cash.Markdown)
 	}
 }

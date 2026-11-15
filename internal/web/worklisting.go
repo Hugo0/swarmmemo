@@ -133,12 +133,44 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 	}
 	steps := stepsFor(item.ID, item.Room)
 	l.Reply, l.Claim = steps.Reply, steps.Claim
+	// A USDC reward is paid to the claim's payout address or the worker's
+	// linked wallet; with neither the claim is 400 payout_address_required
+	// (C988), so the listing says so.
+	payout := ""
+	if workListingPaysUSDC(item) {
+		l.Claim += " --payout-address " + workListingPayoutPlaceholder
+		payout = "It pays USDC: put your wallet address (0x and 40 hex) for " + workListingPayoutPlaceholder +
+			", or link your wallet first (" + workListingLinkWallet + ") and drop the flag.\n"
+	}
 	if st != nil && st.Open == 0 && st.BlockedNote != "" {
 		l.Markdown += "No seat is open on this round now (" + st.BlockedNote + ")." + next + "\n\n"
 	}
 	l.Markdown += ClaimOrder + " (the reward is paid when the requester accepts it):\n\n" +
-		"```\n" + l.Reply + "\n" + l.Claim + "\n```\n"
+		"```\n" + l.Reply + "\n" + l.Claim + "\n```\n" + payout
 	return l
+}
+
+// workListingPayoutPlaceholder is the claim's payout address to fill in;
+// workListingLinkWallet links a wallet instead, once (for-agents#link-wallet).
+const (
+	workListingPayoutPlaceholder = "YOUR_WALLET_ADDRESS"
+	workListingLinkWallet        = "python3 swarmmemo.py --key key.json link-wallet --wallet-key wallet.key"
+)
+
+// workListingPaysUSDC says whether item pays USDC: a USDC reward, or a
+// standing tier with one.
+func workListingPaysUSDC(item board.Work) bool {
+	if item.RewardUSDC != nil {
+		return true
+	}
+	if item.Standing != nil {
+		for _, t := range item.Standing.Tiers {
+			if t.USDC != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // workListingWhat is text as one paragraph: whitespace runs become one

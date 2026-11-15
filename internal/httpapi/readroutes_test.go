@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/trust"
 )
 
 // readRouteFeatures turns on every feature a read route of the table
@@ -301,5 +303,67 @@ func TestNotaryUppercaseHash(t *testing.T) {
 	get := readRouteRig(t)
 	if code, body := get("/api/notary/" + strings.Repeat("AB", 32)); code != 404 {
 		t.Fatalf("%d %s", code, body)
+	}
+}
+
+// TestStandingRouteDescribesServedShape (C984): the standing route's
+// description names every field a ways[] entry and data.standing can carry,
+// and names no ways field the struct lacks, with the omitempty ones marked
+// conditional ("only").
+func TestStandingRouteDescribesServedShape(t *testing.T) {
+	var desc string
+	for _, rt := range readRoutes() {
+		if rt.Path == "/api/agent/{agent}/standing" {
+			desc = rt.Description
+		}
+	}
+	ways, rest, ok := strings.Cut(desc, "data.climb:")
+	_, standing, ok2 := strings.Cut(rest, "data.standing:")
+	if !ok || !ok2 {
+		t.Fatalf("description lost its sections: %q", desc)
+	}
+	tags := func(v any) (all []string, omit map[string]bool) {
+		omit = map[string]bool{}
+		rt := reflect.TypeOf(v)
+		for i := 0; i < rt.NumField(); i++ {
+			name, opts, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
+			if name == "" || name == "-" {
+				continue
+			}
+			all = append(all, name)
+			omit[name] = strings.Contains(opts, "omitempty")
+		}
+		return all, omit
+	}
+	words := func(s string) map[string]bool {
+		out := map[string]bool{}
+		for _, w := range strings.FieldsFunc(s, func(r rune) bool { return !(r == '_' || r >= 'a' && r <= 'z') }) {
+			out[w] = true
+		}
+		return out
+	}
+	wayTags, omit := tags(board.StandingWay{})
+	inWays := words(ways)
+	for _, name := range wayTags {
+		if !inWays[name] {
+			t.Errorf("ways description omits served field %q", name)
+		}
+		if omit[name] && name != "status" && !slices.ContainsFunc(strings.Split(ways, ";"), func(c string) bool {
+			return words(c)[name] && words(c)["only"]
+		}) {
+			t.Errorf("ways description does not say when %q appears", name)
+		}
+	}
+	for _, name := range []string{"value", "root", "assessed_cents", "counted_cents", "adds_cents", "effort_minutes"} {
+		if !slices.Contains(wayTags, name) {
+			t.Errorf("ways description names %q, which StandingWay does not serve", name)
+		}
+	}
+	viewTags, _ := tags(trust.StandingView{})
+	inStanding := words(standing)
+	for _, name := range viewTags {
+		if !inStanding[name] {
+			t.Errorf("standing description omits served field %q", name)
+		}
 	}
 }

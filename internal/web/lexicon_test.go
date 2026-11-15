@@ -29,6 +29,11 @@ func TestLexiconBlocksParse(t *testing.T) {
 	if len(p.Category) > 100 {
 		t.Errorf("category is %d characters; the MCP Registry takes 100", len(p.Category))
 	}
+	// C989: importers cut a description at its first colon, so the
+	// registry line has none, within the registry's 100 characters.
+	if len(p.Registry) > 100 || strings.Contains(p.Registry, ":") {
+		t.Errorf("registry %q: at most 100 characters and no colon", p.Registry)
+	}
 	if len(p.Summary) > 160 {
 		t.Errorf("summary is %d characters; search results show 160", len(p.Summary))
 	}
@@ -52,6 +57,15 @@ func TestLexiconBlocksParse(t *testing.T) {
 		if !found {
 			t.Errorf("first-run block lost %q", w)
 		}
+	}
+
+	// A CRLF checkout (Windows) parses the same.
+	crlf := strings.ReplaceAll(glossary, "\n", "\r\n")
+	if cp, err := parsePositioning(crlf); err != nil || cp != p {
+		t.Errorf("a CRLF glossary: %v, %+v", err, cp)
+	}
+	if cw, err := parseFirstRun(crlf); err != nil || len(cw) != len(words) || cw[0] != words[0] {
+		t.Errorf("a CRLF glossary's first-run block: %v", err)
 	}
 
 	// The parser refuses what it cannot read.
