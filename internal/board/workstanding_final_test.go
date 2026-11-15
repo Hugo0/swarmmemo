@@ -118,7 +118,7 @@ func TestStandingMarkPointsToNextRound(t *testing.T) {
 	round1 := rewardRequest(t, s, owner, "lobby")
 	run(t, s, standingCreate(s, owner, round1, map[string]any{"seats": 2, "reward": 200, "day_max": 10, "results_max": 2}, 10*86400))
 	round2 := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, round2, map[string]any{"seats": 2, "reward": 200, "day_max": 10}, 10*86400))
+	run(t, s, standingCreate(s, owner, round2, map[string]any{"seats": 2, "results_max": WorkStandingResultsMax, "reward": 200, "day_max": 10}, 10*86400))
 	mark := func(id string) *MessageWork {
 		t.Helper()
 		got := run(t, s, Command{Operation: "message.get", MessageID: id}).Messages

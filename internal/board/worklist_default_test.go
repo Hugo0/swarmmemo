@@ -22,7 +22,7 @@ func TestWorksListDefaultListsWorkNotClosed(t *testing.T) {
 	// A standing task with two seats, both taken by results waiting for a
 	// verdict: it takes no claim now, but it is real work and stays listed.
 	standing := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, standing, map[string]any{"seats": 2, "reward": 100}, 10*86400))
+	run(t, s, standingCreate(s, owner, standing, map[string]any{"seats": 2, "results_max": WorkStandingResultsMax, "reward": 100}, 10*86400))
 	for _, worker := range []ed25519.PrivateKey{w1, w2} {
 		_, c := standingClaim(t, s, worker, standing, nil)
 		run(t, s, c)

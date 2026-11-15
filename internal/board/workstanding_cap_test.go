@@ -122,14 +122,19 @@ func TestWorkStandingResultsMax(t *testing.T) {
 	}
 }
 
-// A standing task without results_max reads as before C346: no results_max
-// and no full on the wire, so older clients that check its keys still pass.
+// A standing task created with no cap (before results_max defaulted to
+// seats, C994) reads as before C346 while it names no successor: no
+// results_max and no full on the wire, so older clients that check its keys
+// still pass.
 func TestWorkStandingNoResultsMaxUnchanged(t *testing.T) {
 	s := rewardStore(t)
 	owner := keyFor(236)
 	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
 	id := rewardRequest(t, s, owner, "lobby")
 	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "reward": 300, "day_max": 10}, 10*86400))
+	if _, err := s.db.Exec("UPDATE work_standing SET results_max=0 WHERE work_id=?", id); err != nil {
+		t.Fatal(err)
+	}
 	for i := range 3 {
 		r, c := standingClaim(t, s, keyFor(byte(237+i)), id, nil)
 		run(t, s, c)

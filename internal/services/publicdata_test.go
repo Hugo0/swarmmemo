@@ -246,6 +246,18 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			}
 			return file, 200
 		},
+		"www.boi.org.il": func(r *http.Request) (string, int) {
+			if r.URL.Path != "/PublicApi/GetInterest" {
+				return "", 404
+			}
+			v.mu.Lock()
+			fail, file := v.boiFail, v.boiFile
+			v.mu.Unlock()
+			if fail {
+				return "", 500
+			}
+			return file, 200
+		},
 		"www.atlantafed.org": func(r *http.Request) (string, int) { return "gdpnow_card.html", 200 },
 		"www.newyorkfed.org": func(r *http.Request) (string, int) {
 			name := strings.TrimPrefix(r.URL.Path, "/medialibrary/Research/Interactives/Data/NowCast/data/")
@@ -305,12 +317,14 @@ type pdEnv struct {
 	ecbFile  string
 	rbaFail  bool
 	rbaFile  string
+	boiFail  bool
+	boiFile  string
 }
 
 func newPDEnv(t *testing.T, keys bool) *pdEnv {
 	t.Helper()
 	v := &pdEnv{db: openDB(t), meter: servicestest.NewMeter(1 << 20), fakes: map[string]*pdFake{}, noaaFile: "noaa_mwn.json", bisFail: map[string]bool{}, bocFile: "boc_valet.json", boeFile: "boe_bank_rate.html",
-		ecbFile: "ecb_key_rates.html", rbaFile: "rba_cash_rate.html"}
+		ecbFile: "ecb_key_rates.html", rbaFile: "rba_cash_rate.html", boiFile: "boi_interest.json"}
 	v.keyDir = t.TempDir()
 	if keys {
 		for _, name := range []string{services.KeyAPIDataGov, services.KeyFRED} {
@@ -1288,6 +1302,91 @@ func TestPublicDataCBPolicyRBA(t *testing.T) {
 	}
 }
 
+// TestPublicDataCBBOI pins the Bank of Israel's GetInterest (C995): its
+// future nextInterestDate becomes next_decision; a past date, a failed or
+// malformed read keep the unknown schedule; its rate wins over a different
+// or older BIS value without an invented change date.
+func TestPublicDataCBBOI(t *testing.T) {
+	nov := unix("2026-11-15")
+	get := func(file string, fail bool, what string) (*pdEnv, map[string]any) {
+		t.Helper()
+		v := newPDEnv(t, false)
+		v.boiFile, v.boiFail = file, fail
+		_, d := v.mustFetch(t, "cb_policy_rates", `{"bank":"Bank of Israel","what":"`+what+`"}`, nov)
+		return v, at(d, "banks", "BOI").(map[string]any)
+	}
+	unknown := func(name string, boi map[string]any) {
+		t.Helper()
+		eq(t, name+" status", at(boi, "schedule_status"), "unknown")
+		eq(t, name+" next", at(boi, "next_decision"), nil)
+		if note, _ := at(boi, "calendar_note").(string); !strings.Contains(note, "could not be read") {
+			t.Errorf("%s calendar_note %v", name, note)
+		}
+	}
+	keepsBIS := func(name string, boi map[string]any) {
+		t.Helper()
+		near(t, name+" rate", at(boi, "policy_rate_pct"), 2.25)
+		eq(t, name+" as_of", at(boi, "rate_as_of"), "2026-08-12")
+		eq(t, name+" source", at(boi, "rate_source"), "BIS daily central bank policy rates (stats.bis.org, WS_CBPOL)")
+		eq(t, name+" stale", at(boi, "rate_may_be_stale"), true)
+	}
+	official := func(name string, boi map[string]any, rate float64) {
+		t.Helper()
+		near(t, name+" rate", at(boi, "policy_rate_pct"), rate)
+		eq(t, name+" as_of", at(boi, "rate_as_of"), "2026-11-01")
+		eq(t, name+" not stale", at(boi, "rate_may_be_stale"), false)
+		if src, _ := at(boi, "rate_source").(string); !strings.Contains(src, "https://www.boi.org.il/PublicApi/GetInterest") {
+			t.Errorf("%s rate_source %v", name, src)
+		}
+	}
+
+	// A future date is the next decision; a different level wins with no
+	// change date or size.
+	v, boi := get("boi_interest.json", false, "both")
+	eq(t, "status", at(boi, "schedule_status"), "scheduled")
+	eq(t, "next", at(boi, "next_decision"), "2026-11-23")
+	eq(t, "upcoming", at(boi, "upcoming_decisions"), []any{"2026-11-23"})
+	if src, _ := at(boi, "calendar_source").(string); !strings.Contains(src, "GetInterest nextInterestDate") {
+		t.Errorf("calendar_source %v", src)
+	}
+	eq(t, "no note", at(boi, "calendar_note"), nil)
+	official("changed", boi, 3.25)
+	eq(t, "no effective", at(boi, "rate_effective_from"), nil)
+	eq(t, "no previous", at(boi, "previous_rate_pct"), nil)
+	eq(t, "no bps", at(boi, "last_change_bps"), nil)
+	if note, _ := at(boi, "last_change_note").(string); !strings.Contains(note, "2.25% as of 2026-08-12") || !strings.Contains(note, "no change date") {
+		t.Errorf("last_change_note %v", note)
+	}
+	if n := v.fakes["www.boi.org.il"].count(); n != 1 {
+		t.Errorf("boi hits = %d, want one read for rate and schedule", n)
+	}
+
+	// next_meeting reads it too (the static table has no date left).
+	_, boi = get("boi_interest.json", false, "next_meeting")
+	eq(t, "next_meeting next", at(boi, "next_decision"), "2026-11-23")
+	eq(t, "next_meeting no rate", at(boi, "policy_rate_pct"), nil)
+
+	// The same level, published after BIS, only moves rate_as_of forward.
+	_, boi = get("boi_interest_same.json", false, "both")
+	official("same", boi, 2.25)
+	if note, _ := at(boi, "last_change_note").(string); !strings.Contains(note, "unchanged across") {
+		t.Errorf("same last_change_note %v", note)
+	}
+
+	// A past date keeps the schedule unknown (the rate still updates).
+	_, boi = get("boi_interest_past.json", false, "both")
+	unknown("past", boi)
+	official("past", boi, 3.25)
+
+	// A failed or malformed read keeps BIS and the unknown schedule.
+	_, boi = get("", true, "both")
+	unknown("failed", boi)
+	keepsBIS("failed", boi)
+	_, boi = get("boi_interest_malformed.json", false, "both")
+	unknown("malformed", boi)
+	keepsBIS("malformed", boi)
+}
+
 // cbCalendarHorizonDays is how far ahead every listed bank must have a
 // scheduled decision: the next one at a fixed date, and the table's last
 // one against the real clock (so the lists are refreshed before they run
@@ -1304,7 +1403,9 @@ func TestPublicDataCBCalendarCoverage(t *testing.T) {
 	_, d := v.mustFetch(t, "cb_policy_rates", `{"bank":"all","what":"next_meeting"}`, unix(ref))
 	for _, b := range services.CBCalendarsForTest() {
 		row := at(d, "banks", b.Code)
-		if b.ScheduleUnknown != "" {
+		// A bank with a live next date (BOI) is scheduled when it reads,
+		// and otherwise unknown with its reason.
+		if b.ScheduleUnknown != "" && at(row, "schedule_status") != "scheduled" {
 			eq(t, b.Code+" status", at(row, "schedule_status"), "unknown")
 			eq(t, b.Code+" note", at(row, "calendar_note"), b.ScheduleUnknown)
 			eq(t, b.Code+" no next", at(row, "next_decision"), nil)

@@ -18,7 +18,7 @@ func TestWorkStandingQueuedResultOpensOnVerdict(t *testing.T) {
 	requester := keyID(owner)
 	mintCredit(t, s, requester, allowance.Paid, 5000)
 	id := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "reward": 200, "day_max": 10}, 10*86400))
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "results_max": WorkStandingResultsMax, "reward": 200, "day_max": 10}, 10*86400))
 
 	r1, c1 := standingClaim(t, s, w1, id, nil)
 	run(t, s, c1)
@@ -120,7 +120,7 @@ func TestWorkStandingQueuedResultOpensAtNextOpen(t *testing.T) {
 	owner, w1, w2, w3 := keyFor(255), keyFor(1), keyFor(2), keyFor(3)
 	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
 	id := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "reward": 100, "day_max": 10}, 20*86400))
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "results_max": WorkStandingResultsMax, "reward": 100, "day_max": 10}, 20*86400))
 
 	r1, c1 := standingClaim(t, s, w1, id, nil)
 	run(t, s, c1)

@@ -161,12 +161,15 @@ type workStandingData struct {
 type workStanding struct {
 	ID                          string
 	Seats, PerAgentDay, DayMax  int64
-	ResultsMax                  int64 // 0: no cap (C346)
+	ResultsMax                  int64 // 0: no cap (C346); seats once a successor is named (C994)
 	PerAgentMax                 int64 // 0: no cap (C672)
 	PerAgentCooldownDays        int64 // 0: off (C830)
 	Tiers                       []WorkStandingTier
 	USDCPerAgentDay, USDCDayMax int64
 	VerdictTTL                  int64
+	// Superseded is the successor whose link capped a task created without
+	// results_max at its seats (C994), else "".
+	Superseded string
 }
 
 // maxCredits is the largest tier's credits: what one seat holds.
@@ -290,6 +293,8 @@ type WorkStanding struct {
 	// spent: open, and no seat opens again by itself (standingSpent), the
 	// claim's final refusal; never sent (C840).
 	spent bool
+	// superseded is workStanding.Superseded, for blocked_note (C994).
+	superseded string
 }
 
 // WorkStandingSuccessorDepth bounds a successor chain: a successor whose
@@ -487,7 +492,7 @@ func invalidStanding(msg string) error {
 }
 
 // WorkStandingRule is a standing create's data, the line its refusals end with.
-const WorkStandingRule = `A standing task is work.create data seats (1–50) with a reward that has credits, or tiers (1–3 of {"name":"bug","credits":N,"usdc":"0.20"}, each with credits); optional per_agent_day (default 1, at most seats), day_max (default seats, at most 1000), results_max (results accepted or waiting over its life, seats to 10000; default no cap), per_agent_max (results one agent may send over its life, accepted, waiting or rejected, its linked keys included; 1 to results_max or 10000; default no cap), per_agent_cooldown_days (one result per agent per N days across this task and its earlier rounds, accepted or waiting, its linked keys included; 1 to 90; default off), and usdc_per_agent_day and usdc_day_max (decimal USDC strings, each at least every tier's USDC). No reviewer, reviewer_fee or reject_fee.`
+const WorkStandingRule = `A standing task is work.create data seats (1–50) with a reward that has credits, or tiers (1–3 of {"name":"bug","credits":N,"usdc":"0.20"}, each with credits); optional per_agent_day (default 1, at most seats), day_max (default seats, at most 1000), results_max (results accepted or waiting over its life, seats to 10000; default seats), per_agent_max (results one agent may send over its life, accepted, waiting or rejected, its linked keys included; 1 to results_max or 10000; default no cap), per_agent_cooldown_days (one result per agent per N days across this task and its earlier rounds, accepted or waiting, its linked keys included; 1 to 90; default off), and usdc_per_agent_day and usdc_day_max (decimal USDC strings, each at least every tier's USDC). No reviewer, reviewer_fee or reject_fee.`
 
 // parseWorkStandingTiers reads data tiers.
 func parseWorkStandingTiers(raw json.RawMessage) ([]WorkStandingTier, error) {
@@ -572,6 +577,11 @@ func checkWorkStandingData(d *workData, seen map[string]bool) error {
 	if seen["results_max"] && (st.ResultsMax < st.Seats || st.ResultsMax > WorkStandingResultsMax) {
 		return invalidStanding(fmt.Sprintf("results_max is seats to %d.", WorkStandingResultsMax))
 	}
+	// C994: without one, a standing task takes seats results in all, the
+	// ones its pool holds: an accept no longer re-opens a paid seat.
+	if !seen["results_max"] {
+		st.ResultsMax = st.Seats
+	}
 	if seen["per_agent_max"] {
 		top := int64(WorkStandingResultsMax)
 		if seen["results_max"] {
@@ -642,6 +652,19 @@ func loadWorkStanding(ctx context.Context, tx rowQuerier, id string) (*workStand
 	}
 	if st.PerAgentMax, st.PerAgentCooldownDays, err = standingCreateLimits(ctx, tx, id); err != nil {
 		return nil, err
+	}
+	// C994: a task created with no cap (before results_max defaulted to
+	// seats) whose requester names its next round takes seats results in
+	// all, as if created with results_max seats: the round stops re-opening
+	// paid seats beside its successor. Results already waiting or queued
+	// keep their verdict; seats the pool funded still take results.
+	if st.ResultsMax == 0 {
+		if st.Superseded, err = standingSuccessor(ctx, tx, id); err != nil {
+			return nil, err
+		}
+		if st.Superseded != "" {
+			st.ResultsMax = st.Seats
+		}
 	}
 	return &st, nil
 }
@@ -785,6 +808,10 @@ func (st *workStanding) full(c standingCounts) bool {
 
 // errResultsMaxReached is a claim on a full standing task (C346).
 func errResultsMaxReached(st *workStanding, c standingCounts) error {
+	if st.Superseded != "" {
+		return &Error{Status: 409, Code: "results_max_reached", Message: fmt.Sprintf("This round is closed: its requester opened the next round %s, and this round has taken the %s its seats hold (%d accepted, %d waiting for a verdict), so it takes no more claims. Claim there (work.get %s shows its seats).",
+			st.Superseded, plural(st.Seats, "result"), c.accepted, c.waiting, st.Superseded), Details: map[string]any{"full": true, "blocked_by": StandingBlockedResultsMax, "successor": st.Superseded}}
+	}
 	return &Error{Status: 409, Code: "results_max_reached", Message: fmt.Sprintf("This standing task is full: it takes %s in all (results_max) and holds %d accepted and %d waiting for a verdict, so it takes no more claims. A place opens only if the requester rejects a waiting result or one lapses undecided.",
 		plural(st.ResultsMax, "result"), c.accepted, c.waiting), Details: map[string]any{"full": true, "blocked_by": StandingBlockedResultsMax}}
 }
@@ -1793,9 +1820,26 @@ func (s *Store) refillStandingPool(ctx context.Context, tx *sql.Tx, a actor, w w
 	if amount <= 0 {
 		return "", nil
 	}
-	pool, _, err := standingPool(ctx, tx, w.StandingID)
+	pool, held, err := standingPool(ctx, tx, w.StandingID)
 	if err != nil || pool == nil || pool.State != "held" {
 		return "", err
+	}
+	// C994: a capped task's pool is topped up only to the rewards its
+	// remaining results can still take (the results_max not yet accepted
+	// or waiting; queued ones still need theirs): a refill past that would
+	// re-open a seat the cap has closed.
+	st, err := loadWorkStanding(ctx, tx, w.StandingID)
+	if err != nil || st == nil {
+		return "", err
+	}
+	if st.ResultsMax > 0 {
+		n, err := readStandingCounts(ctx, tx, w.StandingID, "", now)
+		if err != nil {
+			return "", err
+		}
+		if amount = min(amount, max(0, st.ResultsMax-n.accepted-n.waiting)*st.maxCredits()-held); amount <= 0 {
+			return "", nil
+		}
 	}
 	var deadline int64
 	if err = tx.QueryRowContext(ctx, "SELECT deadline FROM works WHERE id=?", w.StandingID).Scan(&deadline); err != nil {
@@ -2054,7 +2098,7 @@ func projectWorkStandingSeats(ctx context.Context, tx rowQuerier, w workRow, eff
 	if err != nil {
 		return nil, err
 	}
-	p := &WorkStanding{WorkStandingSeats: WorkStandingSeats{Seats: st.Seats, Submitted: n.waiting + n.queued, Queued: n.queued, Owed: n.owed, Paid: n.accepted - n.owed, PerAgentDay: st.PerAgentDay, PerAgentMax: st.PerAgentMax, PerAgentCooldownDays: st.PerAgentCooldownDays, Full: st.full(n)}, Results: n.results, ResultsMax: st.ResultsMax, DayMax: st.DayMax,
+	p := &WorkStanding{WorkStandingSeats: WorkStandingSeats{Seats: st.Seats, Submitted: n.waiting + n.queued, Queued: n.queued, Owed: n.owed, Paid: n.accepted - n.owed, PerAgentDay: st.PerAgentDay, PerAgentMax: st.PerAgentMax, PerAgentCooldownDays: st.PerAgentCooldownDays, Full: st.full(n)}, Results: n.results, ResultsMax: st.ResultsMax, DayMax: st.DayMax, superseded: st.Superseded,
 		OpenedToday: n.today, Tiers: st.Tiers, VerdictTTL: st.VerdictTTL, ResultsUntil: w.Deadline - st.VerdictTTL}
 	if st.USDCPerAgentDay > 0 {
 		p.USDCPerAgentDay = services.FormatUSDC(st.USDCPerAgentDay)
@@ -2119,6 +2163,9 @@ func standingBlockedBy(st *workStanding, n standingCounts, rewards, now, until i
 func (p *WorkStanding) blockedNote() string {
 	switch p.BlockedBy {
 	case StandingBlockedResultsMax:
+		if p.superseded != "" {
+			return fmt.Sprintf("closed: the %s its seats hold are taken and its requester opened the next round %s", plural(p.Seats, "result"), p.superseded)
+		}
 		return fmt.Sprintf("full: all %s taken", plural(p.ResultsMax, "result"))
 	case StandingBlockedResultsUntil:
 		return "takes no new results: its deadline leaves less than the verdict window"
@@ -2251,7 +2298,7 @@ func standingSummary(ctx context.Context, tx *sql.Tx, id, generation string, a a
 // WorkStandingCapabilities is /capabilities work_coordination.standing.
 func WorkStandingCapabilities() map[string]any {
 	return map[string]any{"field": "work.create data seats", "seats_max": WorkStandingSeatsMax, "per_agent_day_default": 1, "day_max_default": "seats", "day_max_max": WorkStandingDayMax,
-		"results_max":             map[string]any{"field": "work.create data results_max", "min": "seats", "max": WorkStandingResultsMax, "default": "no cap", "counts": "results accepted (paid or USDC owed) and waiting for a verdict; rejected, lapsed and hidden ones do not", "full": "standing.open 0 and standing.full true; a claim is 409 results_max_reached"},
+		"results_max":             map[string]any{"field": "work.create data results_max", "min": "seats", "max": WorkStandingResultsMax, "default": "seats (C994; an older task created with no cap takes seats results in all once work.successor.set names its next round)", "counts": "results accepted (paid or USDC owed) and waiting for a verdict; rejected, lapsed and hidden ones do not", "full": "standing.open 0 and standing.full true; a claim is 409 results_max_reached"},
 		"per_agent_cooldown_days": map[string]any{"field": "work.create data per_agent_cooldown_days", "min": 1, "max": WorkStandingCooldownDaysMax, "default": "off", "counts": "the agent's results, with its linked keys', submitted in the last N days on this task or an earlier round (tasks whose successor names it, at most " + fmt.Sprint(WorkStandingCooldownRounds) + " back): accepted, waiting or queued; rejected, lapsed and hidden waiting ones do not", "refused": "409 per_agent_cooldown with retry_after and next_open_at; the agent's own read shows blocked_by " + StandingBlockedCooldown},
 		"tiers":                   map[string]any{"field": "work.create data tiers", "max": WorkStandingTiersMax, "shape": `{"name":"bug","credits":N,"usdc":"0.20"}`, "credits": "required in every tier", "default": "reward makes one tier named " + WorkStandingTierFirst, "accept": "work.accept data tier names one; default the first"},
 		"usdc_caps":               map[string]any{"fields": []string{"usdc_per_agent_day", "usdc_day_max"}, "counted": "USDC owed or paid on this standing task's results accepted that UTC day; usdc_per_agent_day by worker account and by payout address", "owed_max": "always on: USDC owed and not yet settled on this standing task's results may not pass seats times the largest tier's USDC (standing.usdc_owed, standing.usdc_owed_max); work.settle lowers it", "over_cap": "the result is still accepted and paid in credits only (reward_usdc void, reason usdc_cap); the acknowledgement says so in ack.note and in next.hints code usdc_cap, with when the cap resets: 00:00 UTC for the daily caps"},

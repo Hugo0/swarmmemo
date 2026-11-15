@@ -54,6 +54,7 @@ var pdUpstreamLimits = map[string]pdLimit{
 	"www.bankofengland.co.uk": {10, 1000},
 	"www.ecb.europa.eu":       {10, 1000},
 	"www.rba.gov.au":          {10, 1000},
+	"www.boi.org.il":          {10, 1000},
 	"www.atlantafed.org":      {10, 1000},
 	"www.newyorkfed.org":      {10, 1000},
 	"www.clevelandfed.org":    {6, 500},
@@ -251,8 +252,8 @@ var (
 	// noaaGust are the GHCN-Daily gust elements, best first: WSFG (peak
 	// gust), then WSF5 (fastest 5-second wind). WSF2 (fastest 2-minute wind)
 	// is a sustained wind, not a gust: it fills max_2min_wind_* only (C961).
-	noaaGust     = []string{"WSFG", "WSF5"}
-	noaaAliases  = map[string]string{
+	noaaGust    = []string{"WSFG", "WSF5"}
+	noaaAliases = map[string]string{
 		"KMWN": "USW00014755", "MOUNT WASHINGTON": "USW00014755", "MT WASHINGTON": "USW00014755",
 		"KJFK": "USW00094789", "KORD": "USW00094846", "KDEN": "USW00003017", "KLAX": "USW00023174",
 	}

@@ -77,7 +77,7 @@ func TestWorkStandingSeatsAcceptRejectLapse(t *testing.T) {
 		t.Fatalf("refused creates left %d works", n)
 	}
 
-	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 300, "day_max": 4}, ttl))
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "results_max": WorkStandingResultsMax, "reward": 300, "day_max": 4}, ttl))
 	supply := totalCredit(t, s)
 	if held := creditIn(t, s, requester, "held"); held != 600 {
 		t.Fatalf("the pool holds %d, want 600", held)
@@ -354,7 +354,7 @@ func TestWorkStandingTiersAndUSDCCaps(t *testing.T) {
 	id := rewardRequest(t, s, owner, "lobby")
 	tiers := []any{map[string]any{"name": "bug", "credits": 300, "usdc": "0.20"}, map[string]any{"name": "bug+fix", "credits": 500, "usdc": "0.40"}}
 	fails(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "tiers": tiers, "usdc_per_agent_day": "0.30"}, 10*86400), "invalid_work_data")
-	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "tiers": tiers, "usdc_per_agent_day": "0.40", "usdc_day_max": "0.50"}, 10*86400))
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "results_max": WorkStandingResultsMax, "tiers": tiers, "usdc_per_agent_day": "0.40", "usdc_day_max": "0.50"}, 10*86400))
 	if held := creditIn(t, s, requester, "held"); held != 1500 {
 		t.Fatalf("pool %d, want 1500", held)
 	}
@@ -464,7 +464,7 @@ func TestWorkStandingSeatRace(t *testing.T) {
 	requester := keyID(owner)
 	mintCredit(t, s, requester, allowance.Paid, 3000)
 	id := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "reward": 200, "day_max": 10}, 10*86400))
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "results_max": WorkStandingResultsMax, "reward": 200, "day_max": 10}, 10*86400))
 	cmds := make([]Command, 4)
 	for i := range cmds {
 		_, cmds[i] = standingClaim(t, s, keyFor(byte(196+i)), id, nil)
@@ -653,7 +653,7 @@ func TestWorkStandingRejectFreesDaySlot(t *testing.T) {
 	requester := keyID(owner)
 	mintCredit(t, s, requester, allowance.Paid, 5000)
 	id := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "reward": 300}, 10*86400))
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "results_max": WorkStandingResultsMax, "reward": 300}, 10*86400))
 	if st := standingAt(t, s, id); st.DayMax != 1 || st.PerAgentDay != 1 || st.Open != 1 {
 		t.Fatalf("one-seat task: %+v", st)
 	}
@@ -745,7 +745,7 @@ func TestWorkStandingHiddenResultFreesSeat(t *testing.T) {
 	requester := keyID(owner)
 	mintCredit(t, s, requester, allowance.Paid, 5000)
 	id := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 300, "day_max": 3}, 10*86400))
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "results_max": WorkStandingResultsMax, "reward": 300, "day_max": 3}, 10*86400))
 	hide := func(id string) {
 		t.Helper()
 		if _, err := s.db.Exec("UPDATE events SET hidden=1,hidden_by='room' WHERE id=?", id); err != nil {
@@ -864,7 +864,7 @@ func TestWorkStandingOwedUSDCFreesSeatAndCaps(t *testing.T) {
 	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
 	id := rewardRequest(t, s, owner, "lobby")
 	tiers := []any{map[string]any{"name": "bug", "credits": 100, "usdc": "0.40"}}
-	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "tiers": tiers, "day_max": 10}, 10*86400))
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "results_max": WorkStandingResultsMax, "tiers": tiers, "day_max": 10}, 10*86400))
 	if st := standingAt(t, s, id); st.USDCOwed != "0" || st.USDCOwedMax != "0.8" || st.Open != 2 {
 		t.Fatalf("fresh: %+v", st)
 	}

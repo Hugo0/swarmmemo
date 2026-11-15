@@ -159,7 +159,7 @@ func TestReplyToClosedRoundNamesFullNextRound(t *testing.T) {
 	mintCredit(t, s, keyID(owner), allowance.Paid, 10000)
 	round := func() string {
 		id := rewardRequest(t, s, owner, "lobby")
-		run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 100, "day_max": 10}, 10*86400))
+		run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "results_max": WorkStandingResultsMax, "reward": 100, "day_max": 10}, 10*86400))
 		return id
 	}
 	old, next := round(), round()
@@ -212,7 +212,7 @@ func TestReplyNextRoundSkipsRoundPastResultsUntil(t *testing.T) {
 	mintCredit(t, s, keyID(owner), allowance.Paid, 20000)
 	round := func(ttl int64) string {
 		id := rewardRequest(t, s, owner, "lobby")
-		run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 100, "day_max": 10}, ttl))
+		run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "results_max": WorkStandingResultsMax, "reward": 100, "day_max": 10}, ttl))
 		return id
 	}
 	old, next, later := round(10*86400), round(10*86400), round(30*86400)

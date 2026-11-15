@@ -19,7 +19,7 @@ func TestWorkClaimableAndStandingNextOpen(t *testing.T) {
 
 	// A standing task with a seat open: claimable, no next_open_at.
 	daily := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, daily, map[string]any{"seats": 3, "reward": 150, "day_max": 2}, ttl))
+	run(t, s, standingCreate(s, owner, daily, map[string]any{"seats": 3, "results_max": WorkStandingResultsMax, "reward": 150, "day_max": 2}, ttl))
 	w := getTestWork(t, s, daily)
 	// open is bounded by what the day still allows: 3 seats but day_max 2 (0c0a7cd64724's report).
 	if !w.Claimable || w.Standing.Open != 2 || w.Standing.NextOpenAt != 0 || w.Standing.PerResult != 150 || w.Reward.Amount != 450 {
@@ -42,7 +42,7 @@ func TestWorkClaimableAndStandingNextOpen(t *testing.T) {
 
 	// Every seat holds a waiting result: the first verdict deadline frees one.
 	full := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, full, map[string]any{"seats": 2, "reward": 150, "day_max": 5}, ttl))
+	run(t, s, standingCreate(s, owner, full, map[string]any{"seats": 2, "results_max": WorkStandingResultsMax, "reward": 150, "day_max": 5}, ttl))
 	for _, k := range []int{193, 194} {
 		_, c := standingClaim(t, s, keyFor(byte(k)), full, nil)
 		run(t, s, c)
@@ -171,7 +171,7 @@ func TestStandingBlockedBy(t *testing.T) {
 	// Seats held by results whose verdict deadline falls after
 	// results_until: no next_open_at, but blocked_by says why.
 	late := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, late, map[string]any{"seats": 1, "reward": 150}, WorkStandingVerdictTTL+3600))
+	run(t, s, standingCreate(s, owner, late, map[string]any{"seats": 1, "results_max": WorkStandingResultsMax, "reward": 150}, WorkStandingVerdictTTL+3600))
 	_, c := standingClaim(t, s, keyFor(201), late, nil)
 	run(t, s, c)
 	st := standingAt(t, s, late)
@@ -187,7 +187,7 @@ func TestStandingBlockedBy(t *testing.T) {
 	// A task with seats open: none blocked for an anonymous read; the
 	// worker's own read names its waiting result, then its per_agent_day.
 	id := rewardRequest(t, s, owner, "lobby")
-	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "reward": 150, "day_max": 5}, 10*86400))
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "results_max": WorkStandingResultsMax, "reward": 150, "day_max": 5}, 10*86400))
 	r1, c := standingClaim(t, s, worker, id, nil)
 	run(t, s, c)
 	mine := func() Work {

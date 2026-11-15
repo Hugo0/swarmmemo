@@ -351,6 +351,11 @@ const (
 	rbaHost             = "www.rba.gov.au"
 	rbaCashRatePath     = "/statistics/cash-rate/"
 	rbaRateSource       = "RBA's own cash rate target table (https://" + rbaHost + rbaCashRatePath + "); BIS WS_CBPOL had not yet caught up with the latest decision"
+	boiHost             = "www.boi.org.il"
+	boiInterestPath     = "/PublicApi/GetInterest"
+	boiInterestURL      = "https://" + boiHost + boiInterestPath
+	boiRateSource       = "Bank of Israel's own PublicApi GetInterest (" + boiInterestURL + "); BIS WS_CBPOL had not yet caught up with it"
+	boiCalendarSource   = "Bank of Israel PublicApi GetInterest nextInterestDate (live, " + boiInterestURL + ")"
 )
 
 type cbBank struct {
@@ -400,8 +405,8 @@ var cbBanks = func() []cbBank {
 			CalendarSource: "Bank of Canada interest-rate announcement schedule (2027 published July 2026), www.bankofcanada.ca"},
 		{Code: "BOI", Name: "Bank of Israel", Area: "IL", RateName: "Bank of Israel interest rate",
 			Decisions: []string{"2026-09-01"}, CalendarSource: "Bank of Israel monetary committee schedule, www.boi.org.il",
-			ScheduleUnknown: "the Bank of Israel's forward decision schedule could not be verified from its own site, so no future date is listed; " +
-				"the next decision date is unknown here: check www.boi.org.il (each decision's press release names the next one)"},
+			ScheduleUnknown: "the Bank of Israel's next decision date could not be read from its own PublicApi (" + boiInterestURL + ") just now, " +
+				"so no future date is listed; check www.boi.org.il (each decision's press release names the next one)"},
 	}
 }()
 
@@ -671,11 +676,11 @@ type cbData struct {
 var dsCBPolicy = &pdDataset{
 	ID: "cb_policy_rates", SchemaVersion: 1,
 	Title:       "Central-bank policy rates and decision dates",
-	Description: "A central bank's policy rate (BIS, with the date and size of its last change; the Fed's target range from FRED; Brazil's Selic target from the BCB; Canada's target from the Bank of Canada Valet API) and its next scheduled decision dates. Covers FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, or all.",
+	Description: "A central bank's policy rate (BIS, with the date and size of its last change; the Fed's target range from FRED; Brazil's Selic target from the BCB; Canada's target from the Bank of Canada Valet API; Israel's rate and next decision date from the Bank of Israel's PublicApi) and its next scheduled decision dates. Covers FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, or all.",
 	Output:      "data: today, what, banks {CODE: {bank, policy_rate_pct, rate_as_of, rate_effective_from, previous_rate_pct, last_change_bps, target_range_pct, selic_target_pct, next_decision, upcoming_decisions, last_scheduled_decision_in_table, calendar_source, schedule_status (scheduled, or unknown with the reason in calendar_note), rate_available, rate_may_be_stale, ...}} (one entry, or every bank for all), calendar_staleness_warning",
 	Params: []pdParam{
 		{Name: "bank", Kind: "string", Required: true, MaxLen: 64, Pattern: pdWordRE, Norm: pdTrim, Doc: "FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, a common name (Brazil, Copom, FOMC), or all"},
-		{Name: "what", Kind: "enum", Enum: []string{"rate", "next_meeting", "both"}, Default: "both", Doc: "rate, next_meeting (no upstream request) or both",
+		{Name: "what", Kind: "enum", Enum: []string{"rate", "next_meeting", "both"}, Default: "both", Doc: "rate, next_meeting (no upstream request, except the Bank of Israel's live next date) or both",
 			Norm: resolveWhat},
 	},
 	Validate: func(p *pdParams, _ time.Time) bool {
@@ -706,10 +711,10 @@ var dsCBPolicy = &pdDataset{
 		}
 		return out, nil
 	},
-	Source:      "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); Bank of Canada Valet API (series V39079); the Bank of England's Bank Rate page, the ECB's key interest rates page and the RBA's cash rate table when BIS lags a decision; each bank's published calendar",
-	Hosts:       []string{bisHost, bcbHost, fredHost, bankofcanadaHost, boeHost, ecbHost, rbaHost},
+	Source:      "Bank for International Settlements (policy rates); Banco Central do Brasil (SGS 432); FRED (Fed target range); Bank of Canada Valet API (series V39079); the Bank of England's Bank Rate page, the ECB's key interest rates page and the RBA's cash rate table when BIS lags a decision; the Bank of Israel PublicApi (GetInterest: current rate and next decision date); each bank's published calendar",
+	Hosts:       []string{bisHost, bcbHost, fredHost, bankofcanadaHost, boeHost, ecbHost, rbaHost, boiHost},
 	Licence:     "BIS statistics: free reuse with attribution; BCB open data; FRED terms for the target range; Bank of Canada Valet: terms at https://www.bankofcanada.ca/terms/ — free reuse with attribution",
-	Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED; Bank of Canada Valet API; Bank of England; European Central Bank; Reserve Bank of Australia",
+	Attribution: "BIS central bank policy rates (WS_CBPOL); Banco Central do Brasil; FRED; Bank of Canada Valet API; Bank of England; European Central Bank; Reserve Bank of Australia; Bank of Israel",
 	TermsURL:    "https://www.bis.org/terms_statistics.htm", TermsStatus: "verify before production (BIS, BCB, Bank of Canada Valet terms; calendars need a yearly refresh)",
 	Key: KeyFRED, KeyOptional: true, TTL: time.Hour, Price: 1,
 }
@@ -719,6 +724,13 @@ func cbBankRow(ctx context.Context, r *pdRun, b cbBank, what, today string) *cbR
 	var liveNext string
 	if what != "next_meeting" {
 		liveNext = cbRate(ctx, r, b, row)
+	}
+	// C995: the Bank of Israel publishes its current rate and next decision
+	// date as JSON; one cached read serves both. next_meeting reads it only
+	// when the static table has no date left.
+	var boi *boiInterest
+	if b.Code == "BOI" && (what != "next_meeting" || len(b.Decisions) == 0 || b.Decisions[len(b.Decisions)-1] < today) {
+		boi = cbBOIInterest(ctx, r, today)
 	}
 	if what != "rate" {
 		row.hasCalendar = true
@@ -740,6 +752,9 @@ func cbBankRow(ctx context.Context, r *pdRun, b cbBank, what, today string) *cbR
 		row.CalendarSource = b.CalendarSource
 		row.ScheduleStatus = "scheduled"
 		switch {
+		case len(upcoming) == 0 && boi != nil && boi.Next >= today:
+			row.NextDecision, row.UpcomingDecisions = sptr(boi.Next), []string{boi.Next}
+			row.CalendarSource = boiCalendarSource
 		case len(upcoming) == 0 && b.ScheduleUnknown != "":
 			row.ScheduleStatus, row.CalendarNote = "unknown", b.ScheduleUnknown
 		case len(upcoming) == 0:
@@ -764,6 +779,9 @@ func cbBankRow(ctx context.Context, r *pdRun, b cbBank, what, today string) *cbR
 			row.ScheduleStatus = "scheduled"
 			row.CalendarSource = "BCB SGS 432 forward validity window (live, api.bcb.gov.br); " + b.CalendarSource
 		}
+	}
+	if boi != nil && what != "next_meeting" {
+		cbBOIRate(b, boi, row)
 	}
 	if row.RateAsOf != nil && what != "next_meeting" {
 		// BIS can trail a fresh decision by days; when a scheduled decision
@@ -901,6 +919,94 @@ func cbRate(ctx context.Context, r *pdRun, b cbBank, row *cbRow) string {
 		row.RateAvailable = &t
 	}
 	return ""
+}
+
+// boiInterest is the Bank of Israel's GetInterest answer, normalised: the
+// current rate, the day it was last published and the next decision day
+// (empty when the endpoint gives none).
+type boiInterest struct {
+	Rate      float64 `json:"rate"`
+	Published string  `json:"published"`
+	Next      string  `json:"next,omitempty"`
+}
+
+// parseBOIInterest reads GetInterest ({"currentInterest":3.25,
+// "nextInterestDate":"2026-11-23T00:00:00Z","lastPublishedDate":
+// "2026-11-01T13:25:16.64Z"}): the rate and the publish date are required,
+// the next date may be null; anything malformed is an error, so the caller
+// keeps the BIS answer and the unknown schedule.
+func parseBOIInterest(raw []byte) (any, error) {
+	var body struct {
+		Current   *float64 `json:"currentInterest"`
+		Next      *string  `json:"nextInterestDate"`
+		Published *string  `json:"lastPublishedDate"`
+	}
+	if err := decodeJSON(raw, &body); err != nil {
+		return nil, err
+	}
+	if body.Current == nil || body.Published == nil {
+		return nil, errors.New("Bank of Israel GetInterest: missing currentInterest or lastPublishedDate")
+	}
+	f := *body.Current
+	if math.IsNaN(f) || f < 0 || f > 25 {
+		return nil, errors.New("Bank of Israel GetInterest: currentInterest out of range")
+	}
+	day := func(s string) (string, error) {
+		t, err := time.Parse(time.RFC3339Nano, s)
+		if err != nil {
+			return "", errors.New("Bank of Israel GetInterest: bad date")
+		}
+		return t.UTC().Format("2006-01-02"), nil
+	}
+	out := boiInterest{Rate: f}
+	var err error
+	if out.Published, err = day(*body.Published); err != nil {
+		return nil, err
+	}
+	if body.Next != nil {
+		if out.Next, err = day(*body.Next); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// cbBOIInterest reads the Bank of Israel's GetInterest; nil on any failure
+// or a publish date after today.
+func cbBOIInterest(ctx context.Context, r *pdRun, today string) *boiInterest {
+	raw, err := r.fetch(ctx, pdFetch{Key: "boi_interest", TTL: time.Hour, Host: boiHost, Path: boiInterestPath, Accept: "application/json",
+		MaxBytes: 64 << 10, Parse: parseBOIInterest})
+	if err != nil {
+		return nil
+	}
+	v, err := unmarshalCached[boiInterest](raw)
+	if err != nil || v.Published == "" || v.Published > today {
+		return nil
+	}
+	return &v
+}
+
+// cbBOIRate serves the Bank of Israel's own rate when BIS has none, gives
+// another level, or is older than the bank's last publication. GetInterest
+// gives no change date, so a changed level drops the BIS last-change fields
+// rather than guess them.
+func cbBOIRate(b cbBank, boi *boiInterest, row *cbRow) {
+	switch {
+	case row.PolicyRatePct == nil || row.RateAsOf == nil:
+		row.LastChangeNote = "the Bank of Israel's GetInterest gives no change date, so the date and size of the last move are not listed"
+	case pyRound((boi.Rate-*row.PolicyRatePct)*100, 1) != 0:
+		row.LastChangeNote = "the BIS series gave " + strconv.FormatFloat(*row.PolicyRatePct, 'f', -1, 64) + "% as of " + *row.RateAsOf +
+			"; the Bank of Israel's GetInterest gives no change date, so the date and size of the last move are not listed"
+		row.RateEffectiveFrom, row.PreviousRatePct, row.LastChangeBps = nil, nil, nil
+	case boi.Published > *row.RateAsOf:
+	default:
+		return
+	}
+	t := true
+	row.PolicyRatePct, row.RateAsOf, row.RateAvailable = fptr(boi.Rate), sptr(boi.Published), &t
+	row.RateName, row.RateSource = b.RateName, boiRateSource
+	row.RateNote = "policy_rate_pct is the Bank of Israel's own current interest rate, last published on rate_as_of (live; overrides the BIS series, which can lag)"
+	row.officialFrom = boi.Published
 }
 
 // cbOfficialRate is a bank's own current-rate page, normalised: the level
