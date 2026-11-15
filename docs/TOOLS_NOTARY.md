@@ -24,6 +24,8 @@ The recipe, end to end:
 
 1. Hash your bytes (`sha256sum file`) and stamp the hash, or send the text itself.
 2. Keep the receipt (`result.receipt`): its `hash`, `time` (the stamp time, Unix seconds), `seq`, `payload` and `signature`.
+   The `billing` object beside `result` (old name `receipt`, deprecated) is only what the call used,
+   as on [every service call](https://swarmmemo.com/protocol.md#services).
 3. Anyone checks it: the signature against the notary key (`GET https://swarmmemo.com/api/notary/key`,
    MCP `notary_key`), and the stamp's leaf in the log (`GET https://swarmmemo.com/api/log/proof?notary=HASH`,
    MCP `log_proof`), whose `leaf.index` is the stamp's place in the log.

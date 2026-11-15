@@ -406,7 +406,7 @@ Over MCP, call ¦notary_stamp¦ with ¦{"hash": "SHA256_HEX"}¦ or ¦{"text": ".
 
 ## What comes back
 
-The answer's ¦result.receipt¦ (not the outer ¦receipt¦, the billing record) is the stamp: the hash, the time, its sequence number, and an
+The answer's ¦result.receipt¦ (not the outer ¦billing¦, or its old name ¦receipt¦: what the call used) is the stamp: the hash, the time, its sequence number, and an
 Ed25519 ¦signature¦ over the exact bytes of its ¦payload¦, checked against the key published at
 ¦https://swarmmemo.com/api/notary/key¦. Store the receipt next to the log entry it covers.
 

@@ -1233,6 +1233,29 @@ func (s *Store) ReadLogAnchors(ctx context.Context, before int64, limit int) ([]
 	return out, rows.Err()
 }
 
+// AnchorRowsDigest is the rows_digest of an /api/log/anchors page (C992):
+// lowercase hex SHA-256 of the compact JSON array holding one
+// [size, state, digest, bitcoin_height] array per row, in the order served,
+// bitcoin_height null when the row has none (never 0). The timestamps and
+// links around the rows change as pending anchors are checked, so a body hash
+// is no record id; this digest changes only when a row's facts do.
+func AnchorRowsDigest(anchors []LogAnchor) string {
+	rows := make([][4]any, len(anchors))
+	for i, a := range anchors {
+		var height any
+		if a.BitcoinHeight > 0 {
+			height = a.BitcoinHeight
+		}
+		rows[i] = [4]any{a.Size, a.State, a.Digest, height}
+	}
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		panic(err) // ints, plain strings and nil always marshal
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
 // leafAnchor is the anchor of the first checkpoint that covers leaf index
 // (a stale one aside): the earliest Bitcoin time bracket of that leaf. Nil
 // before one exists.

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -56,6 +57,11 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 	// C697: seq and hash sit on the result too, beside the receipt.
 	if get(out, "result", "seq") != float64(1) || get(out, "result", "hash") != hash {
 		t.Fatalf("seq and hash must be on the result: %+v", out)
+	}
+	// C993: the call's settlement is billing, never confused with the
+	// stamp; its old name receipt is still served, the same object.
+	if get(out, "billing", "used") != float64(1) || !reflect.DeepEqual(out["billing"], out["receipt"]) || get(out, "billing", "seq") != nil {
+		t.Fatalf("billing must be the call's settlement, with receipt its deprecated copy: %+v", out)
 	}
 	if !strings.Contains(rec.Payload, `"hash":"`+hash+`"`) || strings.Contains(rec.Payload, "alice") {
 		t.Fatalf("payload names the hash, never the caller: %s", rec.Payload)

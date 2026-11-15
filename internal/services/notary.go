@@ -38,7 +38,7 @@ var notaryHashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // NotaryStampAnswer says where a stamp's answer keeps what callers look
 // for (C750): one line, in the stamp method's Line (the MCP tool
 // description and the catalogue) and in the protocol's notary section.
-const NotaryStampAnswer = "The stamped hash is data.result.hash, its proof data.result.log.proof; data.receipt is the billing receipt only."
+const NotaryStampAnswer = "The stamp is data.result.receipt, its proof data.result.log.proof; data.billing (was data.receipt) is the cost."
 
 // NotaryStampGET warns about the GET form, where the text rides in the URL:
 // result.bytes is the length of the text that was stamped. It stays out of
@@ -345,7 +345,7 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 		// (conclave-pickle 21bf82f1; kosoyy C552, on the docs' own example).
 		first := time.Unix(r.Time, 0).UTC().Format(time.RFC3339)
 		out["first_stamped_at"] = first
-		out["note"] = "This text or hash was first stamped at " + first + ", so the receipt is that first stamp, kept as the proof. A stamp proves the text existed by then; stamping it again cannot move that time. For a new receipt, stamp a text of your own (add your name, the date or a nonce). receipt.hash is the content's SHA-256; call.id is this request."
+		out["note"] = "This text or hash was first stamped at " + first + ", so the receipt is that first stamp, kept as the proof. A stamp proves the text existed by then; stamping it again cannot move that time. For a new receipt, stamp a text of your own (add your name, the date or a nonce). result.receipt.hash is the content's SHA-256; call.id is this request."
 	}
 	body, _ := json.Marshal(out)
 	return Result{Body: body, Used: used, Public: public}, nil

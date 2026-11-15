@@ -360,6 +360,11 @@ func callData(service, method string, rec CallRecord, body json.RawMessage, rece
 		d["result"] = body
 	}
 	if receipt != nil {
+		// billing is what the call used and refunded. Its old name,
+		// receipt, is kept for a compatibility window (deprecated): beside
+		// result.receipt, a signed service's own receipt, two objects
+		// named receipt cost an agent time (C993).
+		d["billing"] = receipt
 		d["receipt"] = receipt
 	}
 	if rec.State == "running" {

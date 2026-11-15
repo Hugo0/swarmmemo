@@ -98,7 +98,8 @@ func TestTransparencyRoutes(t *testing.T) {
 		!strings.Contains(w.Body.String(), `"not_in_checkpoint_yet"`) || !strings.Contains(w.Body.String(), `"next_checkpoint_by"`) || !strings.Contains(w.Body.String(), `"promise":"/api/log/promise?message=`+pending) {
 		t.Fatalf("pending proof: %d %v %s", w.Code, w.Header(), w.Body)
 	}
-	if w = get(s, "/api/log/anchors", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"anchors":[]`) {
+	if w = get(s, "/api/log/anchors", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"anchors":[]`) ||
+		!strings.Contains(w.Body.String(), `"rows_digest":"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"`) {
 		t.Fatalf("anchors: %d %s", w.Code, w.Body)
 	}
 	for path, code := range map[string]int{

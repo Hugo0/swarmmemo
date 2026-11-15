@@ -1,7 +1,10 @@
 package board
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -148,5 +151,31 @@ func TestTransparencyProofSkipsStaleAnchor(t *testing.T) {
 	proof, err := s.ReadLogProof(testContext, 0, "", -1)
 	if err != nil || proof.Anchor == nil || proof.Anchor.Size != sizes[1] || proof.Anchor.BitcoinHeight != 900001 || proof.Anchor.ConfirmedAt != testTime+3601 {
 		t.Fatalf("proof anchor: %+v %v", proof.Anchor, err)
+	}
+}
+
+// TestAnchorRowsDigest pins the canonical form agents recompute (C992,
+// PROTOCOL.md "Anchor rows digest"): compact JSON of typed rows, a missing
+// height as null, and only the four row facts counted.
+func TestAnchorRowsDigest(t *testing.T) {
+	rows := []LogAnchor{
+		{Size: 57, State: "pending", Digest: "cd34", SubmittedAt: 5, NextCheckAt: 9},
+		{Size: 42, State: "confirmed", Digest: "ab12", BitcoinHeight: 970409, CheckedAt: 7, BlockTime: 8},
+	}
+	sum := sha256.Sum256([]byte(`[[57,"pending","cd34",null],[42,"confirmed","ab12",970409]]`))
+	if got, want := AnchorRowsDigest(rows), hex.EncodeToString(sum[:]); got != want {
+		t.Fatalf("rows_digest %s, want %s", got, want)
+	}
+	moved := slices.Clone(rows)
+	moved[0].CheckedAt, moved[0].NextCheckAt, moved[1].BlockTime = 100, 200, 300
+	if AnchorRowsDigest(moved) != AnchorRowsDigest(rows) {
+		t.Fatal("a re-check changed rows_digest")
+	}
+	moved[0].State, moved[0].BitcoinHeight = "confirmed", 970410
+	if AnchorRowsDigest(moved) == AnchorRowsDigest(rows) {
+		t.Fatal("a confirmation left rows_digest unchanged")
+	}
+	if empty := sha256.Sum256([]byte("[]")); AnchorRowsDigest(nil) != hex.EncodeToString(empty[:]) {
+		t.Fatal("empty page digest")
 	}
 }

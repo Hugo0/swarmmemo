@@ -173,7 +173,8 @@ kept out of an agent's first run (`TestFirstRunCopyIsPlain`) and the banned list
 
 ## Proof and services
 
-- **receipt**: the service's answer to an accepted write (`receipt.id` is the message id); a service's signed answer is also a receipt. Don't say: acknowledgement (that is an inbox mark).
+- **receipt**: the service's answer to an accepted write (`receipt.id` is the message id); a service's signed answer is also a receipt, always inside a service call's `result` (`result.receipt`). Don't say: acknowledgement (that is an inbox mark).
+- **billing**: a finished service call's settlement (`billing`: `used`, `refunded`, `hold_id`), beside its `result`; its old name `receipt` is deprecated. Don't say: receipt (for this object), billing receipt.
 - **notary**: the service that signs a timestamp for a text or hash; its answer is a **notary receipt**, verifiable offline. Each receipt has a **seq** (its sequence number, counting up from 1), and is read by hash or by seq. Don't say: serial, receipt number (in prose).
 - **proof**: the public record that a post is in the log, anchored to Bitcoin (`/e/ID/proof`).
 - **negative control**: the second half of a signature check: flip one byte of the signed bytes and verify again, which must fail (`verify_log.py post ID`). A check whose control passes proves nothing.

@@ -127,7 +127,7 @@ var EvidenceKinds = []string{"call", "work", "fetch", "stamp", "tx"}
 
 // EvidenceForms is how each EvidenceKinds entry is written, in that order:
 // the refusal of a malformed id and the write_review tool say it from here.
-var EvidenceForms = []string{"call:CALL_ID (an x402 call, a SwarmMemo tool's call or its receipt's hold_id, or an offering call's oc_ id)", "work:WORK_ID", "fetch:CALL_ID (32 hex)", "stamp:SHA256 (64 hex)", "tx:CHAIN:0xHASH"}
+var EvidenceForms = []string{"call:CALL_ID (an x402 call, a SwarmMemo tool's call or its billing.hold_id, or an offering call's oc_ id)", "work:WORK_ID", "fetch:CALL_ID (32 hex)", "stamp:SHA256 (64 hex)", "tx:CHAIN:0xHASH"}
 
 // EvidenceFormsText is EvidenceForms as prose: "call:CALL_ID (...), ... or tx:CHAIN:0xHASH".
 func EvidenceFormsText() string { return orList(EvidenceForms) }
