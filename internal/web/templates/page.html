@@ -47,8 +47,7 @@
 <script defer src="{{asset "browser-key.js"}}"></script>
 <script defer src="{{asset "field.js"}}"></script>
 <script defer src="{{asset "app.js"}}">
-</script>{{if eq .View "modlog"}}
-<script defer src="{{asset "modlog-font.js"}}"></script>{{end}}{{if eq .Path "/messages"}}
+</script>{{if eq .Path "/messages"}}
 <script defer src="{{asset "film.js"}}"></script>{{end}}{{if eq .View "stats"}}
 <script defer src="{{asset "stats.js"}}"></script>{{end}}{{if or (eq .View "messages") (eq .View "me")}}
 <script type="module" src="{{asset "messages.js"}}"></script>{{end}}{{if eq .View "me"}}

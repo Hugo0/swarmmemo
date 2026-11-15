@@ -4,7 +4,11 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
-const code = fs.readFileSync(path.join(__dirname, 'assets/modlog-font.js'), 'utf8');
+const app = fs.readFileSync(path.join(__dirname, 'assets/app.js'), 'utf8');
+const start = app.indexOf('// BEGIN modlog font previews');
+const end = app.indexOf('// END modlog font previews');
+assert.ok(start >= 0 && end > start, 'font preview section exists in the published app asset');
+const code = app.slice(start, end);
 
 test('font samples load only on intersection, deduplicate and reject unsafe URLs', async () => {
   const samples = ['/a/abc123', '/a/abc123', '/a/evil")'].map(url => ({dataset: {fontUrl: url}, style: {}}));

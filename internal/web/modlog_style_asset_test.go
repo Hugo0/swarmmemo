@@ -56,7 +56,7 @@ func TestModlogStyleAssetNamesAndPreviews(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status %d", w.Code)
 	}
-	for _, want := range []string{`href="/a/` + img.ID + `"`, `src="/a/` + img.ID + `"`, `>&lt;cat &amp; &#34;friends&#34;&gt;.gif</a>`, `width="96" height="64" loading="lazy"`, `href="/a/` + font.ID + `" title="font/woff2 · 64 bytes">term.woff2</a>`, `title="image/gif · ` + fmt.Sprint(len(gif)) + ` bytes"`, `class="modlog-font" data-font-url="/a/` + font.ID + `"`, `/assets/modlog-font.js?`} {
+	for _, want := range []string{`href="/a/` + img.ID + `"`, `src="/a/` + img.ID + `"`, `>&lt;cat &amp; &#34;friends&#34;&gt;.gif</a>`, `width="96" height="64" loading="lazy"`, `href="/a/` + font.ID + `" title="font/woff2 · 64 bytes">term.woff2</a>`, `title="image/gif · ` + fmt.Sprint(len(gif)) + ` bytes"`, `class="modlog-font" data-font-url="/a/` + font.ID + `"`, `/assets/app.js?`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
 		}
