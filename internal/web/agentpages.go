@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,6 +40,21 @@ const (
 	findPageRenders  = 2 // the heaviest render: the find engine and its grades
 	renderWait       = 2 * time.Second
 	renderRetryAfter = 5
+
+	// WaitersPerTurn bounds the readers that wait for a kind's turns: past
+	// turns*WaitersPerTurn waiting, the next is answered busy at once
+	// (C991). A waiter holds a slot of the server's request pool for up to
+	// renderWait; on 2026-11-15 at 02:35:55Z a fetch from 1380 networks
+	// (1357 page loads in five seconds, none above a few per network, so no
+	// network share saw it) filled the pool with waiters, and every
+	// anonymous read on every route, a static file or an agent's
+	// /api/messages poll included, was answered 503 busy for some 15 s. With
+	// the bound the capped kinds hold at most (turns of every kind) *
+	// (1+WaitersPerTurn) slots and the rest of the pool stays free for the
+	// rest of the site. A turn frees every few hundred milliseconds, so a
+	// reader past that many waiters would not have got one within
+	// renderWait anyway.
+	WaitersPerTurn = 3
 )
 
 // agentPagePath is an agent page: /@ADDRESS (not an offering's
@@ -73,20 +89,59 @@ func roomPagePath(p string) bool {
 	return room != "" && !strings.Contains(page, "/")
 }
 
-// renderSlots bounds a kind of render: a turn is a slot of the channel.
-type renderSlots chan struct{}
+// Turns bounds a kind of work (a page render here, an anonymous agent read
+// in httpapi/hotreads.go): at most its size run at once, and at most
+// size*WaitersPerTurn wait for one.
+type Turns struct {
+	slots   chan struct{}
+	waiting atomic.Int64
+	most    int64 // waiters allowed
+}
+
+// NewTurns is n turns with n*WaitersPerTurn places to wait.
+func NewTurns(n int) *Turns {
+	return &Turns{slots: make(chan struct{}, n), most: int64(n * WaitersPerTurn)}
+}
+
+// Take waits up to wait for a turn and reports whether it got one; every
+// true is paired with Release. A reader that leaves stops waiting, and one
+// that finds every place to wait taken is refused at once.
+func (t *Turns) Take(r *http.Request, wait time.Duration) bool {
+	select {
+	case t.slots <- struct{}{}:
+		return true
+	default:
+	}
+	if t.waiting.Add(1) > t.most {
+		t.waiting.Add(-1)
+		return false
+	}
+	defer t.waiting.Add(-1)
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case t.slots <- struct{}{}:
+		return true
+	case <-timer.C:
+	case <-r.Context().Done():
+	}
+	return false
+}
+
+// Release ends a turn Take gave.
+func (t *Turns) Release() { <-t.slots }
 
 // pageTurns are the turns of each capped kind of page.
 type pageTurns struct {
-	agents, events, rooms, find renderSlots
+	agents, events, rooms, find *Turns
 }
 
 func newPageTurns() pageTurns {
-	return pageTurns{agents: make(renderSlots, agentPageRenders), events: make(renderSlots, eventPageRenders), rooms: make(renderSlots, roomPageRenders), find: make(renderSlots, findPageRenders)}
+	return pageTurns{agents: NewTurns(agentPageRenders), events: NewTurns(eventPageRenders), rooms: NewTurns(roomPageRenders), find: NewTurns(findPageRenders)}
 }
 
 // of is the turns a page at path takes, or nil when it is not capped.
-func (t pageTurns) of(path string) renderSlots {
+func (t pageTurns) of(path string) *Turns {
 	switch {
 	case agentPagePath(path):
 		return t.agents
@@ -99,27 +154,6 @@ func (t pageTurns) of(path string) renderSlots {
 	}
 	return nil
 }
-
-// take waits up to wait for a turn and reports whether it got one; every
-// true is paired with release. A reader that leaves stops waiting.
-func (s renderSlots) take(r *http.Request, wait time.Duration) bool {
-	select {
-	case s <- struct{}{}:
-		return true
-	default:
-	}
-	t := time.NewTimer(wait)
-	defer t.Stop()
-	select {
-	case s <- struct{}{}:
-		return true
-	case <-t.C:
-	case <-r.Context().Done():
-	}
-	return false
-}
-
-func (s renderSlots) release() { <-s }
 
 // renderBusy answers a page that found no turn: 503, Retry-After, noindex.
 func renderBusy(w http.ResponseWriter, r *http.Request) {

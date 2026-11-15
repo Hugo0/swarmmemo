@@ -65,7 +65,7 @@ const (
 type hotReads struct {
 	once   sync.Once
 	cache  *web.ResponseCache
-	agents chan struct{} // agentReadTurns
+	agents *web.Turns // agentReadTurns, at most agentReadTurns*web.WaitersPerTurn waiting (C991)
 }
 
 func (s *Server) hotCache() *web.ResponseCache {
@@ -75,7 +75,7 @@ func (s *Server) hotCache() *web.ResponseCache {
 			now = time.Now
 		}
 		s.hot.cache = web.NewResponseCache(hotReadEntries, now)
-		s.hot.agents = make(chan struct{}, agentReadTurns)
+		s.hot.agents = web.NewTurns(agentReadTurns)
 	})
 	return s.hot.cache
 }
@@ -104,24 +104,16 @@ func anonymousList(r *http.Request) bool {
 
 // agentTurn runs next for an agent answer the cache does not hold, on one
 // of agentReadTurns turns, or answers 503 busy when none frees within
-// agentReadWait.
+// agentReadWait or every place to wait for one is taken (web.Turns).
 func (s *Server) agentTurn(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.hotCache()
-		t := time.NewTimer(agentReadWait)
-		defer t.Stop()
-		took := false
-		select {
-		case s.hot.agents <- struct{}{}:
-			took = true
-		case <-t.C:
-		case <-r.Context().Done(): // never an empty 200 a cache could keep: the same refusal
-		}
-		if !took {
+		// A reader that leaves stops waiting: never an empty 200 a cache could keep, the same refusal.
+		if !s.hot.agents.Take(r, agentReadWait) {
 			writeError(w, &board.Error{Status: 503, Code: "busy", Message: "Many agents are being read at once. Retry shortly; signed requests are not limited this way.", RetryAfter: agentReadRetryAfter})
 			return
 		}
-		defer func() { <-s.hot.agents }()
+		defer s.hot.agents.Release()
 		next(w, r)
 	}
 }

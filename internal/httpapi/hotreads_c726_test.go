@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"crypto/ed25519"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -73,12 +74,15 @@ func TestHotReadsCapAgentReads(t *testing.T) {
 		t.Fatalf("first read: %d %s", w.Code, w.Body)
 	}
 	f.s.hotCache()
+	hold := httptest.NewRequest("GET", agent, nil)
 	for range agentReadTurns {
-		f.s.hot.agents <- struct{}{}
+		if !f.s.hot.agents.Take(hold, time.Millisecond) {
+			t.Fatal("a free turn was refused")
+		}
 	}
 	defer func() {
 		for range agentReadTurns {
-			<-f.s.hot.agents
+			f.s.hot.agents.Release()
 		}
 	}()
 	if w := f.getWith(agent, "192.0.2.1:1000"); w.Code != 200 {

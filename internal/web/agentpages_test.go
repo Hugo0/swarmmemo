@@ -190,3 +190,112 @@ func TestRoomPagePath(t *testing.T) {
 		}
 	}
 }
+
+// A kind's turns keep at most turns*WaitersPerTurn readers waiting (C991):
+// the next one is refused at once instead of holding a slot of the request
+// pool for renderWait, and a place to wait frees when a waiter leaves.
+func TestTurnsBoundTheirWaiters(t *testing.T) {
+	turns := NewTurns(2)
+	r := httptest.NewRequest("GET", "/", nil)
+	for range 2 {
+		if !turns.Take(r, time.Millisecond) {
+			t.Fatal("a free turn was refused")
+		}
+	}
+	waiters := 2 * WaitersPerTurn
+	got := make(chan bool, waiters)
+	for range waiters {
+		go func() { got <- turns.Take(r, 5*time.Second) }()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for turns.waiting.Load() < int64(waiters) {
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d waiting", turns.waiting.Load())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	start := time.Now()
+	if turns.Take(r, 5*time.Second) {
+		t.Fatal("a reader past every place to wait got a turn")
+	}
+	if waited := time.Since(start); waited > time.Second {
+		t.Fatalf("refused after %v, want at once", waited)
+	}
+	if turns.waiting.Load() != int64(waiters) {
+		t.Fatalf("a refused reader left %d waiting", turns.waiting.Load())
+	}
+	// Every waiter gets a turn as turns free.
+	for range waiters {
+		turns.Release()
+		if !<-got {
+			t.Fatal("a waiter was refused while turns freed")
+		}
+	}
+	if turns.waiting.Load() != 0 {
+		t.Fatalf("%d still waiting", turns.waiting.Load())
+	}
+	// A reader that leaves frees its place.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if turns.Take(r.WithContext(ctx), 5*time.Second) || turns.waiting.Load() != 0 {
+		t.Fatalf("a reader that left: waiting %d", turns.waiting.Load())
+	}
+}
+
+// Through the handler (C991): with every agent page turn taken and every
+// place to wait for one held, the next agent page is answered busy at once
+// without reading the store, and other pages are still served.
+func TestAgentPageWaitersAreBounded(t *testing.T) {
+	s := &gatedAgentService{gate: make(chan struct{})}
+	h := Handler(s)
+	get := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		return w
+	}
+	id := func(i int) string {
+		return "/agent/" + strings.Repeat("0", 60) + strings.Repeat(string("0123456789abcdef"[i%16]), 4)
+	}
+	held := agentPageRenders * (1 + WaitersPerTurn)
+	var wg sync.WaitGroup
+	codes := make(chan int, held)
+	for i := range held {
+		wg.Add(1)
+		go func() { defer wg.Done(); codes <- get(id(i)).Code }()
+		if i == agentPageRenders-1 {
+			deadline := time.Now().Add(5 * time.Second)
+			for s.inflight.Load() < agentPageRenders {
+				if time.Now().After(deadline) {
+					t.Fatalf("only %d renders started", s.inflight.Load())
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}
+	}
+	// The waiters hold their places for renderWait; well inside it the next
+	// page is refused at once.
+	time.Sleep(renderWait / 5)
+	start := time.Now()
+	busy := get(id(held))
+	if waited := time.Since(start); busy.Code != 503 || waited > renderWait/2 {
+		t.Fatalf("past every place to wait: %d after %v", busy.Code, waited)
+	}
+	if busy.Header().Get("Retry-After") != "5" || s.reads.Load() != agentPageRenders {
+		t.Fatalf("refused page: %v, store reads %d", busy.Header(), s.reads.Load())
+	}
+	if w := get("/r/lobby"); w.Code == 503 {
+		t.Fatal("a room page was held by the agent page waiters")
+	}
+	close(s.gate)
+	wg.Wait()
+	close(codes)
+	ok := 0
+	for code := range codes {
+		if code == 200 {
+			ok++
+		}
+	}
+	if ok < agentPageRenders {
+		t.Fatalf("only %d of the held pages rendered", ok)
+	}
+}

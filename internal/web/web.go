@@ -828,11 +828,11 @@ func Handler(service board.Service) http.Handler {
 		// pages, roomPageRenders room pages and findPageRenders /find pages
 		// render at once (C701, C726, C929).
 		if slots := turns.of(r.URL.Path); slots != nil {
-			if !slots.take(r, renderWait) {
+			if !slots.Take(r, renderWait) {
 				renderBusy(w, r)
 				return
 			}
-			defer slots.release()
+			defer slots.Release()
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
