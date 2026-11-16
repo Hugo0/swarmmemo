@@ -1268,6 +1268,21 @@ test('PR #17: saving the cursor never touches a fixed NAME.tmp, which may be the
   assert.deepEqual((await readdir(dir)).sort(), ['cursor.json', 'cursor.json.tmp']);
 });
 
+test('C1042: followUpdates with counts leaves the saved cursor alone, as the Python client does', async t => {
+  const dir = await temp(t), cursorFile = join(dir, 'cursor.json');
+  const file = await open(cursorFile, 'w', 0o600);
+  try {await file.writeFile(JSON.stringify({cursor: 'saved'}) + '\n');} finally {await file.close();}
+  const seen = [];
+  class Offline extends Client {async updates(options = {}) {seen.push(options); return {ok: true, counts: {unread: 1}, next_cursor: 'n' + seen.length};}}
+  const pages = new Offline().followUpdates({cursorFile, counts: true});
+  try {for (let i = 0; i < 3; i++) await pages.next();} finally {await pages.return();}
+  assert.deepEqual(seen.map(o => [o.cursor, o.counts]), [['saved', true], ['n1', true], ['n2', true]]);
+  assert.deepEqual(JSON.parse(await readFile(cursorFile, 'utf8')), {cursor: 'saved'});
+  const plain = new Offline().followUpdates({cursorFile});
+  try {await plain.next(); await plain.next();} finally {await plain.return();}
+  assert.equal(JSON.parse(await readFile(cursorFile, 'utf8')).cursor, 'n4');
+});
+
 test('C484: evmAddressOK refuses the zero address and a bad EIP-55 checksum', async () => {
   const {evmAddressOK} = await import('./swarmmemo.mjs');
   const good = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';

@@ -129,6 +129,20 @@ func TestWorkListingStandingTimes(t *testing.T) {
 	}
 	standing.NextRoundOpenAt = 0
 
+	// C1041: a final short pool (work.get's spent round) takes no claim
+	// either: the claim would be a final seats_full. Its next round is named.
+	standing.BlockedBy, standing.BlockedNote, standing.Spent = board.StandingBlockedPool, "the credit pool holds no reward for another result until a reject or the next accept", true
+	l = WorkListingFor(item, "")
+	if !l.TakesNoResults || l.Reply != "" || l.Claim != "" || strings.Contains(l.Markdown, ClaimOrder) || strings.Contains(l.Markdown, "work claim") ||
+		!strings.HasSuffix(l.Markdown, "No seat is open on this round, and none opens by itself: its credit pool holds no reward for another result (a seat opens only if the requester rejects a result or refills the pool). The next round is bbbbbbbb: https://swarmmemo.com/work/"+nextID+"\n") {
+		t.Errorf("a spent pool_short round still lists a claim:\n%s", l.Markdown)
+	}
+	// A short pool that refills by itself (a verdict due) keeps the claim: it queues.
+	standing.Spent = false
+	if l = WorkListingFor(item, ""); l.TakesNoResults || l.Claim == "" || !strings.Contains(l.Markdown, "No seat is open on this round now (the credit pool holds") {
+		t.Errorf("a pool_short round with a seat to come:\n%s", l.Markdown)
+	}
+
 	// Full (results_max): the same, and with no next round none is named.
 	standing.BlockedBy, standing.ResultsMax, standing.NextRound = board.StandingBlockedResultsMax, 3, ""
 	l = WorkListingFor(item, "")

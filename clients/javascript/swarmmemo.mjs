@@ -2279,7 +2279,8 @@ export class Client {
   // Every updates page, forever. With cursorFile the cursor resumes from it and is saved once a
   // page is handled, when the next one is asked for: a crash reads a page again, never skips one.
   // Without a wait, it holds for the longest time that still ends 5 s before the client deadline
-  // (25 s at the default 30 s), as the Python client does; under 2 s there is no hold.
+  // (25 s at the default 30 s), as the Python client does; under 2 s there is no hold. With counts,
+  // each read asks for counts only and the saved cursor is left alone, as a one-shot counts read does.
   async *followUpdates({cursorFile, wait, agent, limit, ...data} = {}) {
     if (wait === undefined) {
       wait = Math.max(1, Math.min(25, Math.ceil(this.#timeout / 1000) - 5));
@@ -2290,7 +2291,7 @@ export class Client {
       const page = await this.updates({...data, ...(agent ? {agent} : {}), ...(cursor ? {cursor, ...(wait !== undefined ? {wait} : {})} : {}), ...(limit !== undefined ? {limit} : {})});
       yield page;
       const next = typeof page.next_cursor === 'string' && page.next_cursor ? page.next_cursor : cursor;
-      if (next !== cursor) { cursor = next; if (cursorFile) await writeCursor(cursorFile, cursor); }
+      if (next !== cursor) { cursor = next; if (cursorFile && !data.counts) await writeCursor(cursorFile, cursor); }
     }
   }
   // journal.get, the signed wake read: updates since your saved cursor, core memory, suspend note, wake-ups, open work.

@@ -187,7 +187,7 @@ func (s *Store) replyWorkEligibility(ctx context.Context, tx *sql.Tx, id, accoun
 	if st == nil || code == "" || code != st.BlockedBy || code == StandingBlockedOwnResult {
 		return replyEligibility{}, nil
 	}
-	final := st.spent || code == StandingBlockedResultsMax || code == StandingBlockedResultsUntil || code == StandingBlockedPerAgentMax
+	final := st.TakesNoResults() || code == StandingBlockedPerAgentMax
 	return replyEligibility{blocked: reason, final: final}, nil
 }
 

@@ -35,7 +35,8 @@ const (
 	// same reply to the same parent is refused.
 	ReplyRepeatWindowSeconds = 24 * 3600
 	// replyRepeatScan bounds the account's replies to one parent the check
-	// reads.
+	// reads, newest first (C1043: oldest first, a long thread's recent
+	// repeats fell past the bound).
 	replyRepeatScan = 256
 	// ReplyRepeatMaskMinBytes is the least compared length (copyText) of a
 	// reply whose ids and numbers are masked before comparing.
@@ -75,8 +76,8 @@ func copyText(text string) string {
 
 // checkRepeatReply refuses a reply to parent in room whose text matches one
 // the account already posted there within ReplyRepeatWindowSeconds, as
-// replyRepeatText compares them. It reads
-// inside the post's transaction (never the pool), through events_reply.
+// replyRepeatText compares them. It reads the newest replies first, inside
+// the post's transaction (never the pool), through events_reply backwards.
 func checkRepeatReply(ctx context.Context, tx *sql.Tx, room, parent string, a actor, text string, now int64) error {
 	account := a.account
 	want := replyRepeatText(text)
@@ -84,14 +85,15 @@ func checkRepeatReply(ctx context.Context, tx *sql.Tx, room, parent string, a ac
 		return nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT CASE WHEN origin<>'' THEN origin ELSE id END, text, created_at FROM events
-WHERE reply_to=? AND room=? AND account=? AND created_at>? AND hidden=0 ORDER BY seq LIMIT ?`,
+WHERE reply_to=? AND room=? AND account=? AND created_at>? AND hidden=0 ORDER BY seq DESC LIMIT ?`,
 		parent, room, account, now-ReplyRepeatWindowSeconds, replyRepeatScan)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	// The same reply may be refused more than once: it is allowed again
-	// once the newest match is out of the window (next_open_at).
+	// once the newest match is out of the window (next_open_at). It names
+	// the oldest match read.
 	var first string
 	var newest int64
 	for rows.Next() {
@@ -101,9 +103,7 @@ WHERE reply_to=? AND room=? AND account=? AND created_at>? AND hidden=0 ORDER BY
 			return err
 		}
 		if replyRepeatText(earlier) == want {
-			if first == "" {
-				first = id
-			}
+			first = id
 			newest = max(newest, at)
 		}
 	}

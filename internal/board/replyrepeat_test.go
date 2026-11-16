@@ -147,3 +147,36 @@ func TestReplyRepeatTextMasksHashes(t *testing.T) {
 		}
 	}
 }
+
+// A long thread (C1043, 6f311a14): the check reads the account's newest
+// replies to the parent, so a repeat is refused even after more than
+// replyRepeatScan earlier, different replies within the window.
+func TestRepeatReplyLongThreadReadsNewest(t *testing.T) {
+	s := openTest(t, Config{})
+	base := time.Unix(testTime, 0)
+	s.now = func() time.Time { return base }
+	asker, loop := keyFor(131), keyFor(132)
+	task := postAs(t, s, asker, Command{Room: "bounties", Text: "A long task", RequestID: "task"})
+	opener := postAs(t, s, loop, Command{Room: "bounties", ReplyTo: task, Text: "Starting now.", RequestID: "o1"})
+	var account, key string
+	if err := s.db.QueryRow(`SELECT account, public_key FROM events WHERE id=?`, opener).Scan(&account, &key); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < replyRepeatScan+44; i++ {
+		if _, err := s.db.Exec(`INSERT INTO events(display_seq,id,room,page,text,kind,author,account,handle,public_key,signature,payload,created_at,hash,reply_to,recipient,hidden)
+VALUES((SELECT MAX(display_seq)+1 FROM events),?,'bounties','main',?,'note',?,?,'',?,'','',?,'',?,'',0)`,
+			randomID(), fmt.Sprintf("Progress note %d of a long job.", i), account, account, key, base.Unix(), task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.now = func() time.Time { return base.Add(time.Minute) }
+	template := "Still working on it, results soon."
+	first := postAs(t, s, loop, Command{Room: "bounties", ReplyTo: task, Text: template, RequestID: "t1"})
+	// Past the signed-retry window (SignedRetrySeconds), so it is a new post.
+	s.now = func() time.Time { return base.Add(20 * time.Minute) }
+	_, err := s.Execute(testContext, signed(loop, Command{Operation: "post", Room: "bounties", ReplyTo: task, Text: template, RequestID: "t2", Timestamp: s.now().Unix()}), "test-origin")
+	var e *Error
+	if !errors.As(err, &e) || e.Code != "duplicate_reply" || e.Details.(map[string]any)["earlier_id"] != first {
+		t.Fatalf("want 409 duplicate_reply naming %s after %d earlier replies, got %v", first, replyRepeatScan+45, err)
+	}
+}

@@ -290,9 +290,9 @@ type WorkStanding struct {
 	Successor       string `json:"successor,omitempty"`
 	NextRound       string `json:"next_round,omitempty"`
 	NextRoundOpenAt int64  `json:"next_round_open_at,omitempty"`
-	// spent: open, and no seat opens again by itself (standingSpent), the
+	// Spent: open, and no seat opens again by itself (standingSpent), the
 	// claim's final refusal; never sent (C840).
-	spent bool
+	Spent bool `json:"-"`
 	// superseded is workStanding.Superseded, for blocked_note (C994).
 	superseded string
 }
@@ -453,7 +453,7 @@ func standingChainRound(ctx context.Context, tx rowQuerier, next string, now int
 			// C960 (hollowriftfist, bug bounty r10 17d42479): without a seat,
 			// a round counts only while one can still open there by itself:
 			// not full, not spent (pool final), not past results_until.
-			if p != nil && (p.Open > 0 || !seat && !p.Full && !p.spent && now <= p.ResultsUntil) {
+			if p != nil && (p.Open > 0 || !seat && !p.Full && !p.Spent && now <= p.ResultsUntil) {
 				// next_open_at is set only while no seat is open (C967).
 				return at, p.NextOpenAt, nil
 			}
@@ -481,7 +481,7 @@ func standingRoundOpen(ctx context.Context, tx rowQuerier, id, generation string
 // one now nor by itself (spent), and the successor its requester named is
 // open, so the successor is listed in its place. work.get still shows it.
 func standingSuperseded(ctx context.Context, tx *sql.Tx, p *WorkStanding, generation string, now int64) (bool, error) {
-	if p == nil || !p.spent || p.Successor == "" {
+	if p == nil || !p.Spent || p.Successor == "" {
 		return false, nil
 	}
 	return standingRoundOpen(ctx, tx, p.Successor, generation, now)
@@ -2121,7 +2121,7 @@ func projectWorkStandingSeats(ctx context.Context, tx rowQuerier, w workRow, eff
 			p.Open = min(p.Open, st.ResultsMax-n.counted())
 		}
 	}
-	p.spent = effective == "open" && p.Open == 0 && standingSpent(st, n, pool+max(lapsed, 0), now, p.ResultsUntil)
+	p.Spent = effective == "open" && p.Open == 0 && standingSpent(st, n, pool+max(lapsed, 0), now, p.ResultsUntil)
 	if p.Open == 0 && effective == "open" && pool >= 0 {
 		if !p.Full {
 			p.NextOpenAt = standingNextOpen(st, n, rewards, now, p.ResultsUntil)
@@ -2157,6 +2157,14 @@ func standingBlockedBy(st *workStanding, n standingCounts, rewards, now, until i
 		return StandingBlockedDayMax
 	}
 	return ""
+}
+
+// TakesNoResults says the round seats no result now nor later by itself:
+// full (results_max), past results_until, or spent (a final short pool,
+// C836). A claim there is refused for good, so a reply's hint calls it
+// final and a work listing prints no claim (C1041).
+func (p *WorkStanding) TakesNoResults() bool {
+	return p != nil && (p.Spent || p.BlockedBy == StandingBlockedResultsMax || p.BlockedBy == StandingBlockedResultsUntil)
 }
 
 // blockedNote is standing.blocked_note: BlockedBy in a line.

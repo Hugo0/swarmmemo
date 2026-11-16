@@ -2809,6 +2809,16 @@ class UsageError(ValueError):
     limits, never a URL, a path or key material, so the CLI prints it."""
 
 
+# C1043: --save-request keeps ONE command in a new file (O_EXCL); a read paged to the end sends
+# one command per page, so the second page could not save. Refuse before the first is sent.
+PAGED_SAVE_REQUEST = "--save-request saves one command; {} sends one per page: drop --all and page with --cursor, or drop --save-request"
+
+
+def refuse_paged_save_request(client, what):
+    if getattr(client, "save_request", None):
+        raise UsageError(PAGED_SAVE_REQUEST.format(what))
+
+
 class OriginError(ValueError):
     """A base URL that is not a usable origin. Its message never contains the URL."""
 
@@ -3682,6 +3692,7 @@ class Client:
     def export_account_all(self, limit=None, max_pages=10000, cursor=""):
         """account.export paged to the end, from cursor when given (to resume a bounded export):
         the first page's bundle with every page's posts and moderation merged in."""
+        refuse_paged_save_request(self, "account-export --all")
         bundle = None
         for _ in range(max_pages):
             data = self.export_account(cursor, limit).get("data") or {}
@@ -3712,6 +3723,7 @@ class Client:
 
     def tool_history_all(self, tool=None, limit=None, since=None, max_pages=1000, cursor=""):
         """service.calls paged to the end, from cursor when given: one list of every entry."""
+        refuse_paged_save_request(self, "history --all")
         calls = []
         for _ in range(max_pages):
             data = self.tool_history(tool, cursor, limit, since).get("data") or {}
@@ -4332,6 +4344,91 @@ def _write_private_plain(path: Path, data: bytes):
 
 def read_private(path: Path, default):
     return json.loads(read_bounded(path, "a local state file", STATE_BYTES)) if path.exists() else default
+
+
+# C1040: account-erase keeps each preview's hold in $SWARMMEMO_HOME/erase-holds.json,
+# {ACCOUNT: {"hold", "confirm_after", "hold_expires"}}, so a confirm sends the held token
+# instead of previewing again: a key changed in the last 7 days opens its hold only 24 hours
+# after the preview, and a fresh preview would start that wait over.
+def erase_holds_path() -> Path:
+    return chat_home() / "erase-holds.json"
+
+
+def erase_holds(now=None):
+    """The saved holds that have not expired."""
+    now = int(time.time()) if now is None else now
+    try:
+        saved = read_private(erase_holds_path(), {})
+    except (OSError, ValueError, UsageError):
+        return {}
+    if not isinstance(saved, dict):
+        return {}
+    return {account: held for account, held in saved.items() if isinstance(held, dict)
+            and isinstance(held.get("hold"), str) and isinstance(held.get("hold_expires"), int) and held["hold_expires"] > now}
+
+
+def erase_hold_save(preview, now=None):
+    """Keep preview's hold, unless a saved one for the account opens sooner (a later preview
+    must not restart the wait); returns the hold kept."""
+    data = (preview or {}).get("data") or {}
+    account, hold = data.get("account"), data.get("hold")
+    if not isinstance(account, str) or not isinstance(hold, str) or not hold:
+        return None
+    holds = erase_holds(now)
+    held = holds.get(account)
+    fresh = {"hold": hold, "confirm_after": int(data.get("confirm_after") or 0), "hold_expires": int(data.get("hold_expires") or 0)}
+    if held is None or int(held.get("confirm_after") or 0) > fresh["confirm_after"]:
+        holds[account] = held = fresh
+        write_private(erase_holds_path(), holds)
+    return held
+
+
+def erase_hold_for(confirm, now=None):
+    """The saved (account, hold) the confirm text names: "erase " + the account's first 8
+    characters, as the server checks it; (None, None) when none is saved."""
+    prefix = confirm[len("erase "):] if confirm.startswith("erase ") else ""
+    if not prefix:
+        return None, None
+    for account, held in erase_holds(now).items():
+        if account.startswith(prefix):
+            return account, held
+    return None, None
+
+
+def erase_hold_drop(account):
+    holds = erase_holds()
+    if holds.pop(account, None) is not None:
+        write_private(erase_holds_path(), holds)
+
+
+def run_account_erase(args, client):
+    """account-erase: a preview (its hold saved), or a confirm with --hold, else the saved hold,
+    else a fresh preview's hold when it confirms now. A preview whose hold opens later is
+    returned as is, with when to run the same command again (C1040)."""
+    code = open(args.recovery_code_file, encoding="utf-8").read().strip() if args.recovery_code_file else ""
+    account, held = (None, None) if args.hold else erase_hold_for(args.confirm)
+    hold = args.hold or (held or {}).get("hold", "")
+    if not args.confirm or not hold:
+        preview = client.erase_account_preview()
+        held = erase_hold_save(preview)
+        account = ((preview or {}).get("data") or {}).get("account")
+        opens = int((held or {}).get("confirm_after") or 0)
+        if held and opens > int(time.time()):
+            when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(opens))
+            print(f"account-erase: this account's erasure opens at {when}; its hold is saved in {erase_holds_path()}: "
+                  "run the same --confirm command then (another preview does not restart the wait).", file=sys.stderr)
+        if not args.confirm or (held and opens > int(time.time())):
+            return preview
+        hold = (held or {}).get("hold") or ""
+    try:
+        result = client.erase_account(hold, args.confirm, code)
+    except APIError as error:
+        if error.code == "erase_hold_invalid" and account and not args.hold:
+            erase_hold_drop(account)  # dead: the next run previews again
+        raise
+    if account:
+        erase_hold_drop(account)
+    return result
 
 
 # The updates cursor file, shared with the JavaScript client: {"cursor": STRING}.
@@ -5429,6 +5526,7 @@ def add_helper_parsers(commands):
     export.add_argument("--all", action="store_true", help="page to the end and print one merged bundle")
     erase = commands.add_parser("account-erase", help="account.erase: erase your own account for good (preview by default); /protocol.md#account-erase")
     erase.add_argument("--confirm", metavar="TEXT", default="", help='erase now: type "erase " + the first 8 characters of your fingerprint (the preview shows it)')
+    erase.add_argument("--hold", metavar="TOKEN", default="", help="with --confirm: the preview's hold token (default: the one the last preview saved in $SWARMMEMO_HOME/erase-holds.json)")
     erase.add_argument("--recovery-code-file", default="", help="a hosted identity: a file holding its recovery code")
     history = commands.add_parser("history", help="service.calls: your tool history, your own free tool calls newest first; /protocol.md#tool-history")
     history.add_argument("--tool", help="one tool: fetch, public_data, screen, notary, or service.method")
@@ -5693,12 +5791,7 @@ def run_helper(args, client):
     if args.action == "account-export":
         return client.export_account_all(args.limit, cursor=args.cursor) if args.all else client.export_account(args.cursor, args.limit)
     if args.action == "account-erase":
-        preview = client.erase_account_preview()
-        if not args.confirm:
-            return preview
-        hold = (preview.get("data") or {}).get("hold") or ""
-        code = open(args.recovery_code_file, encoding="utf-8").read().strip() if args.recovery_code_file else ""
-        return client.erase_account(hold, args.confirm, code)
+        return run_account_erase(args, client)
     if args.action == "history":
         if args.all:
             return client.tool_history_all(args.tool, args.limit, args.since, cursor=args.cursor)
@@ -6268,6 +6361,8 @@ def main(argv=None):
         # command (work.claim) that would collide on the same file (O_EXCL); refuse both
         # before either is sent, rather than publish the post and then fail the claim.
         parser.error("--save-request cannot be combined with --claim: the claim is a second command; run claim separately")
+    if args.action in ("history", "account-export") and getattr(args, "all", False) and args.save_request:
+        parser.error(PAGED_SAVE_REQUEST.format(args.action + " --all"))
     client = None
     try:
         if args.action == "keygen":

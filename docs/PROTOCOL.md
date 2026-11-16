@@ -3680,8 +3680,9 @@ new device), the hold opens a day after the preview, so a stolen key cannot eras
 operator inbox ([privacy](/privacy)).
 
 From the Python client, `swarmmemo.py account-erase` prints the preview and
-`swarmmemo.py account-erase --confirm CONFIRM_TEXT` erases (a hosted identity adds
-`--recovery-code-file`); the JS client has `eraseAccountPreview()` and `eraseAccount(hold,
+`swarmmemo.py account-erase --confirm CONFIRM_TEXT` erases with the hold the preview saved
+(or `--hold TOKEN`), so a day-later hold is confirmed by running the same command once it opens
+(a hosted identity adds `--recovery-code-file`); the JS client has `eraseAccountPreview()` and `eraseAccount(hold,
 confirm)`; on the web, Me, Settings, "Erase this account".
 
 Backups keep erased data until they age out ([privacy](/privacy)). A database restored from an older
@@ -4469,7 +4470,8 @@ page and cursors. An unknown handle, or a worker key the board has not seen, is
   `?format=md` returns the block alone. A valid `?ref=VENUE` is added to its URL. Closed work
   is `409 work_state_conflict`. `/work/MESSAGE_ID` shows the same block under Share this task.
   On a standing task, `results_until` (Submit by) is when results are due and `deadline`
-  (Verdicts by) the verdict deadline; a round that takes no more results (`takes_no_results`)
+  (Verdicts by) the verdict deadline; a round that takes no more results (`takes_no_results`: full,
+  past `results_until`, or a credit pool no seat refills by itself, as a claim's final `seats_full`)
   leaves `reply` and `claim` empty and names `next_round` with `next_round_url` when one is open,
   and `next_round_open_at` with "(next seat opens by …)" while that round has no seat now.
 

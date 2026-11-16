@@ -34,6 +34,10 @@ func TestStandingPoolEmptyIsFinal(t *testing.T) {
 	if n := sqlCount(t, s, "SELECT count(*) FROM works WHERE standing_id=?", id); n != 0 {
 		t.Fatalf("a final refusal queued or opened a result: %d", n)
 	}
+	// C1041: work.get says the same, so a listing prints no claim.
+	if w := getTestWork(t, s, id); w.Standing == nil || w.Standing.BlockedBy != StandingBlockedPool || !w.Standing.TakesNoResults() {
+		t.Fatalf("work.get on a final short pool: %+v", w.Standing)
+	}
 }
 
 // C836: a refusal that names when the next seat opens is a wait, never

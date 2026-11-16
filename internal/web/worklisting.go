@@ -28,8 +28,9 @@ type WorkListing struct {
 	// to submit by (C955). Its deadline is the verdict deadline, after it.
 	ResultsUntil   int64  `json:"results_until,omitempty"`
 	ResultsUntilAt string `json:"results_until_at,omitempty"`
-	// TakesNoResults says a standing round takes no more results (full, or
-	// past results_until): the listing then carries no reply or claim and
+	// TakesNoResults says a standing round takes no more results (full,
+	// past results_until, or a final short pool, C1041: work.get's
+	// WorkStanding.TakesNoResults): the listing then carries no reply or claim and
 	// names NextRound, standing.next_round, with NextRoundURL, when one is
 	// open (C955), and NextRoundOpenAt, standing.next_round_open_at, when
 	// that round has no seat now and one opens there by itself (C967).
@@ -46,13 +47,6 @@ type WorkListing struct {
 // workListingTime is a listing's time format.
 func workListingTime(at int64) string {
 	return time.Unix(at, 0).UTC().Format("2006-01-02 15:04 UTC")
-}
-
-// workListingNoResults says whether a standing round takes no more results
-// at all (standing.blocked_by results_max or results_until), not merely no
-// seat for now.
-func workListingNoResults(st *board.WorkStanding) bool {
-	return st != nil && (st.BlockedBy == board.StandingBlockedResultsMax || st.BlockedBy == board.StandingBlockedResultsUntil)
 }
 
 // workListingWhatMax is how much of the request text a listing carries:
@@ -85,7 +79,7 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 		if st.ResultsUntil > 0 {
 			l.ResultsUntil, l.ResultsUntilAt = st.ResultsUntil, workListingTime(st.ResultsUntil)
 		}
-		l.TakesNoResults = workListingNoResults(st)
+		l.TakesNoResults = st.TakesNoResults()
 		if len(st.NextRound) == 32 { // a work ID
 			l.NextRound, l.NextRoundURL, l.NextRoundOpenAt = st.NextRound, canonicalOrigin+"/work/"+st.NextRound, st.NextRoundOpenAt
 		}
@@ -124,11 +118,16 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 	}
 	if l.TakesNoResults {
 		// No claim to print: the round takes none (C955).
-		why := "results were due by " + l.ResultsUntilAt
-		if st.BlockedBy == board.StandingBlockedResultsMax {
-			why = "all " + strconv.FormatInt(st.ResultsMax, 10) + " results are taken"
+		line := "This round takes no more results: results were due by " + l.ResultsUntilAt + "."
+		switch {
+		case st.BlockedBy == board.StandingBlockedResultsMax:
+			line = "This round takes no more results: all " + strconv.FormatInt(st.ResultsMax, 10) + " results are taken."
+		case st.BlockedBy != board.StandingBlockedResultsUntil:
+			// Spent (C1041): a final short pool, as a claim's final
+			// seats_full says; only the requester opens a seat again.
+			line = "No seat is open on this round, and none opens by itself: its credit pool holds no reward for another result (a seat opens only if the requester rejects a result or refills the pool)."
 		}
-		l.Markdown += "This round takes no more results: " + why + "." + next + "\n"
+		l.Markdown += line + next + "\n"
 		return l
 	}
 	steps := stepsFor(item.ID, item.Room)
