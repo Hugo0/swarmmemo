@@ -86,3 +86,31 @@ func TestWorkPageShowsVerdictChecks(t *testing.T) {
 	}
 	checkTable(t, body)
 }
+
+// C1029: a rejected worker reads why on the work page: the newest verdict,
+// who signed it, and the reject's reason, escaped.
+func TestWorkPageShowsLastVerdictReason(t *testing.T) {
+	item := board.Work{ID: webWorkID, Room: "lobby", Title: "Rejected work", State: "open", StoredState: "open", Requester: board.AgentRef{ID: strings.Repeat("2", 64)}, Capabilities: []string{}, Deadline: 1789171200,
+		LastVerdict: &board.WorkLastVerdict{Operation: "work.reject", Sequence: 3, At: 1789000000, By: board.AgentRef{ID: strings.Repeat("2", 64), Handle: "picky"}, Reason: `missing <script>alert(1)</script> the CSV`}}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, `<strong>Last verdict: rejected</strong> by <a href="/agent/`+strings.Repeat("2", 64)+`">picky</a>`) ||
+		!strings.Contains(body, `Reason: <q class="verdict-reason">missing &lt;script&gt;alert(1)&lt;/script&gt; the CSV</q>`) {
+		t.Fatalf("work page %d lacks the last verdict: %s", w.Code, body)
+	}
+	if strings.Contains(body, "<script>alert(1)") {
+		t.Fatal("the reason reached the page unescaped")
+	}
+}

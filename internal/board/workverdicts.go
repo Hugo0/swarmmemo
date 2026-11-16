@@ -43,6 +43,9 @@ type WorkVerdict struct {
 	// Rating is the requester's rating (0-100, 50 neutral) on a rated
 	// accept.
 	Rating *int `json:"rating,omitempty"`
+	// Reason is, on a rejected verdict, the reason the reject signed
+	// (C1029): the requester's own words, public in work.history too.
+	Reason string `json:"reason,omitempty"`
 	// NextWorkID is, on an accepted verdict, the open task the reader can
 	// claim and be paid for now (claimableTaskTx, home's open_task), named
 	// in Text too (C652); absent when there is none.
@@ -76,6 +79,8 @@ func (s *Store) recentVerdicts(ctx context.Context, tx *sql.Tx, account string, 
 		v.ResultID = payloadCommand(submitPayload).Target
 		if op == "work.accept" {
 			v.Rating = acceptRating(payloadCommand(verdictPayload))
+		} else {
+			v.Reason = payloadCommand(verdictPayload).Reason
 		}
 		out = append(out, v)
 	}
@@ -133,7 +138,11 @@ func (s *Store) recentVerdicts(ctx context.Context, tx *sql.Tx, account string, 
 // credits paid, rated 80/100."
 func (v WorkVerdict) text() string {
 	if v.Verdict != "accepted" {
-		return "Your result on “" + clip(v.Title) + "” was rejected."
+		text := "Your result on “" + clip(v.Title) + "” was rejected."
+		if reason := verdictReasonLine(v.Reason); reason != "" {
+			text += " Reason: “" + reason + "”."
+		}
+		return text
 	}
 	var parts []string
 	switch v.RewardState {
@@ -157,6 +166,20 @@ func (v WorkVerdict) text() string {
 	}
 	return text + "."
 }
+
+// verdictReasonLine is a reject's reason on one line, cut to
+// VerdictReasonLineMax bytes for a one-line text; the field keeps it whole.
+func verdictReasonLine(reason string) string {
+	reason = strings.Join(strings.Fields(reason), " ")
+	if len(reason) > VerdictReasonLineMax {
+		return truncateUTF8(reason, VerdictReasonLineMax) + "…"
+	}
+	return reason
+}
+
+// VerdictReasonLineMax bounds a reject's reason in a one-line text (home's
+// work_verdict, updates.get data.verdicts[].text).
+const VerdictReasonLineMax = 200
 
 // payloadCommand is the command a work transition's stored payload (the
 // canonical signed bytes) carries; the zero command if it does not parse.

@@ -4522,6 +4522,7 @@
         "eligible_preview",
         "eligible_reason",
         "known_answer",
+        "last_verdict",
         "next_open_at",
         "reject_fee",
         "request",

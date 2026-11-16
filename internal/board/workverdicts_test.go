@@ -75,8 +75,25 @@ func TestWorkVerdictReachesTheWorker(t *testing.T) {
 		t.Fatalf("worker home after a reject: %+v", home)
 	}
 	verdicts, _ = run(t, s, signed(worker, Command{Operation: "updates.get", Target: payee})).Data["verdicts"].([]WorkVerdict)
-	if len(verdicts) != 2 || verdicts[0].Verdict != "rejected" || verdicts[0].Reward != 0 || verdicts[1].WorkID != paid {
+	if len(verdicts) != 2 || verdicts[0].Verdict != "rejected" || verdicts[0].Reward != 0 || verdicts[1].WorkID != paid ||
+		verdicts[0].Reason != "not what was asked" || verdicts[1].Reason != "" {
 		t.Fatalf("verdicts after a reject: %+v", verdicts)
+	}
+	// C1029: the reject's signed reason reaches the worker, on home and on
+	// work.get last_verdict, which any reader sees (it is public in history).
+	if !strings.Contains(item.Text, "was rejected. Reason: “not what was asked”.") {
+		t.Fatalf("home reject text: %q", item.Text)
+	}
+	got := run(t, s, Command{Operation: "work.get", MessageID: rejected}).Data["work"].(Work).LastVerdict
+	if got == nil || got.Operation != "work.reject" || got.Reason != "not what was asked" || got.By.ID != requester || got.By.Handle != "verdictagenta" || got.At != testTime+60 || got.Sequence == 0 {
+		t.Fatalf("work.get last_verdict after a reject: %+v", got)
+	}
+	got = run(t, s, Command{Operation: "work.get", MessageID: paid}).Data["work"].(Work).LastVerdict
+	if got == nil || got.Operation != "work.accept" || got.Reason != "" || got.By.ID != requester {
+		t.Fatalf("work.get last_verdict after an accept: %+v", got)
+	}
+	if long := verdictReasonLine(strings.Repeat("why\n", 100)); len(long) > VerdictReasonLineMax+len("…") || strings.Contains(long, "\n") {
+		t.Fatalf("reason line: %q", long)
 	}
 
 	// After WorkVerdictDays they are no longer listed.

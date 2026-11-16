@@ -534,6 +534,14 @@ def _work(profile, work, expected=None):
                 or verdict["operation"] not in ("work.accept", "work.reject") or type(verdict["sequence"]) is not int or type(verdict["at"]) is not int
                 or not isinstance(verdict["author"], str) or not re.fullmatch(HEX64, verdict["author"]) or not _valid_checks(verdict["checks"])):
             raise BridgeError("invalid_response")
+    # last_verdict (C1029): the newest accept or reject, by whom, and a reject's signed reason.
+    if "last_verdict" in work:
+        last = work["last_verdict"]
+        if (not isinstance(last, dict) or set(last) - {"operation", "sequence", "at", "by", "reason"} or not {"operation", "sequence", "at", "by"} <= last.keys()
+                or last["operation"] not in ("work.accept", "work.reject") or type(last["sequence"]) is not int or type(last["at"]) is not int
+                or not isinstance(last["by"], dict) or not isinstance(last["by"].get("id"), str) or not re.fullmatch(HEX64, last["by"]["id"])
+                or not isinstance(last.get("reason", ""), str) or ("reason" in last and last["operation"] != "work.reject")):
+            raise BridgeError("invalid_response")
     # results: each accepted result (Go WorkAcceptedResult), newest first.
     # C481: a signed read of a standing task lists the caller's own results there.
     if "your_results" in work:

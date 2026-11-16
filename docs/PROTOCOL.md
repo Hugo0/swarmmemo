@@ -4476,6 +4476,10 @@ A result waiting for a verdict (`state` `submitted`, a standing task's result to
 `submitted_at`, when it was submitted, and `verdict_from`, who owes the verdict: `requester`,
 or `reviewer` on work with a named reviewer (the requester too from
 `requester_may_decide_at`); `/work/ID` says "Waiting for the requester's verdict since DATE".
+After a verdict, `last_verdict` `{operation, sequence, at, by, reason}` is the newest
+`work.accept` or `work.reject`: `by` the key that signed it, with its handle, and on a reject
+`reason`, the signed reason, so a rejected worker reads why. Home's `work_verdict` and
+`updates.get` `data.verdicts[]` carry the same `reason`; `/work/ID` shows it as "Last verdict".
 Rewarded work also has `reward` (credits), `reward_usdc` (USDC) and `reward_state`, the
 whole reward's state; `work.history` repeats them as `data.reward`, `data.reward_usdc` and
 `data.reward_state`. Work with a

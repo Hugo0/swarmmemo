@@ -141,6 +141,10 @@ type Work struct {
 	// VerdictChecks is the newest accept or reject that carried a signed
 	// checks list (C97), on work.get only.
 	VerdictChecks *WorkVerdictChecks `json:"verdict_checks,omitempty"`
+	// LastVerdict is the newest accept or reject of a result on the work
+	// item (C1029), on work.get only: so a worker whose result was rejected
+	// reads why. Absent before any verdict.
+	LastVerdict *WorkLastVerdict `json:"last_verdict,omitempty"`
 	// Results is the work's accepted results (workresults.go), newest
 	// accept first, at most WorkResultsMax, on work.get only: its own
 	// accepted result, or each one a standing task accepted. Absent when
@@ -299,6 +303,18 @@ type WorkVerdictChecks struct {
 	Author    string         `json:"author"`
 	At        int64          `json:"at"`
 	Checks    []VerdictCheck `json:"checks"`
+}
+
+// WorkLastVerdict is the newest verdict on a work item: which (work.accept
+// or work.reject), its sequence in work.history (where its signed command
+// is), when, the key that signed it (by, with its handle), and a reject's
+// signed reason, the requester's or reviewer's own words.
+type WorkLastVerdict struct {
+	Operation string   `json:"operation"`
+	Sequence  int64    `json:"sequence"`
+	At        int64    `json:"at"`
+	By        AgentRef `json:"by"`
+	Reason    string   `json:"reason,omitempty"`
 }
 
 // ReviewerGraceDefault is how long, by default, a named reviewer may leave
@@ -2368,6 +2384,9 @@ func (s *Store) readWorkIn(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			p.VerdictChecks, err = workVerdictChecks(ctx, tx, w.ID)
 		}
 		if err == nil {
+			p.LastVerdict, err = workLastVerdict(ctx, tx, w.ID)
+		}
+		if err == nil {
 			p.Results, err = workAcceptedResults(ctx, tx, w.ID)
 		}
 		if err == nil {
@@ -2920,6 +2939,27 @@ func workVerdictChecks(ctx context.Context, tx *sql.Tx, id string) (*WorkVerdict
 		}
 	}
 	return nil, rows.Err()
+}
+
+// workLastVerdict is the newest work.accept or work.reject on work id, or
+// nil. The signer's handle is its own, else its account's primary key's.
+func workLastVerdict(ctx context.Context, tx *sql.Tx, id string) (*WorkLastVerdict, error) {
+	var v WorkLastVerdict
+	var payload string
+	err := tx.QueryRowContext(ctx, `SELECT t.sequence,t.operation,t.accepted_at,t.payload,t.author,t.public_key,
+ coalesce(nullif(i.handle,''),(SELECT p.handle FROM identities p WHERE p.account=i.account AND p.successor='' AND p.role='primary'),'')
+ FROM work_transitions t LEFT JOIN identities i ON i.id=t.author
+ WHERE t.work_id=? AND t.operation IN ('work.accept','work.reject') ORDER BY t.sequence DESC LIMIT 1`, id).Scan(&v.Sequence, &v.Operation, &v.At, &payload, &v.By.ID, &v.By.PublicKey, &v.By.Handle)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if v.Operation == "work.reject" {
+		v.Reason = payloadCommand(payload).Reason
+	}
+	return &v, nil
 }
 
 func workReadError(err error) error {
