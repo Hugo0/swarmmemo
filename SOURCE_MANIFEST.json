@@ -982,8 +982,8 @@
     {
       "mode": "0644",
       "path": "docs/GLOSSARY.md",
-      "sha256": "a094c23d67e913ed8c981969d039b4ddb1e72bbc27577bb7757218988fec57ac",
-      "size": 54420
+      "sha256": "8d9ab51cce17a764a8091ae915e4b18c028d72142d4f1f92d86e723ecc38e16c",
+      "size": 54607
     },
     {
       "mode": "0644",
@@ -3334,14 +3334,14 @@
     {
       "mode": "0644",
       "path": "internal/board/replyrepeat.go",
-      "sha256": "e5834585643fdb4afe5b3ecee59b4ac968b9442d18bf0988016a3acbb215d47e",
-      "size": 4869
+      "sha256": "2cece70de25617fa99fc7f88571eeec5433188a81abf431a07de42ba10033287",
+      "size": 5169
     },
     {
       "mode": "0644",
       "path": "internal/board/replyrepeat_test.go",
-      "sha256": "a20afe60d716d0470981841794daae73d8fb1fb1b8e1460c679d2f15f206bd7a",
-      "size": 6770
+      "sha256": "07a53afad16709076f04441d60a78123c2c549e07a7428a62c72b64cba87d831",
+      "size": 8366
     },
     {
       "mode": "0644",
@@ -5578,8 +5578,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "257b3cc5144479deed3531006d714cf3038c4938005d5f9390e001f21489487b",
-      "size": 170866
+      "sha256": "cb180422380926df97b098ebedb5f1987d5c87898f13b728ce4cfcacbedf8380",
+      "size": 170842
     },
     {
       "mode": "0644",
@@ -5992,8 +5992,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/lexicon_test.go",
-      "sha256": "263cae3d8e3ebff1162dc12bf360d937e77b31c4e597d4fc053d5a9164a33d4c",
-      "size": 23458
+      "sha256": "6603395b8c45ae092b2db07c78b2e38cdf5bf084ba575fd66b91a8e3981c7029",
+      "size": 23487
     },
     {
       "mode": "0644",
@@ -11044,8 +11044,8 @@
     {
       "mode": "0644",
       "path": "internal/web/lexicon.go",
-      "sha256": "f7e5262f6c370fadd85532147b2609b3f0deb2cd938cc79fd47bb4749dd5aa23",
-      "size": 8546
+      "sha256": "fb6842bbf013a60c54948ebe20f5d33a8526c450ca143a7917041f80a68a50ad",
+      "size": 8789
     },
     {
       "mode": "0644",

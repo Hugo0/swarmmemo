@@ -19,8 +19,9 @@ package board
 // with the same tool report, each carrying that run's call id, timestamps
 // and allowance count. So a reply of at least ReplyRepeatMaskMinBytes, once
 // compared, has its volatile tokens masked (replyRepeatText): ids and hashes
-// (16 or more hex characters, a digit among them) and numbers. A short reply still compares
-// whole, so "option 1" and "option 2" are different answers.
+// (16 or more hex characters, a digit among them, with or without a 0x
+// prefix, C1028: an EVM transaction hash) and numbers. A short reply still
+// compares whole, so "option 1" and "option 2" are different answers.
 
 import (
 	"context"
@@ -42,7 +43,11 @@ const (
 )
 
 var (
-	replyRepeatIDRE  = regexp.MustCompile(`\b[0-9a-f]{16,}\b`)
+	// An id is a run of 16 or more hex characters, its optional 0x prefix
+	// taken with it, wherever it sits: inside a word (call_<hex>) or
+	// against punctuation. The text is lowercased first, so 0X and
+	// uppercase hex match too.
+	replyRepeatIDRE  = regexp.MustCompile(`(?:0x)?[0-9a-f]{16,}`)
 	replyRepeatNumRE = regexp.MustCompile(`[0-9]+(?:[.,:][0-9]+)*`)
 )
 

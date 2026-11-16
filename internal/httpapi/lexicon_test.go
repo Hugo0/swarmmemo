@@ -78,8 +78,8 @@ func TestPositioningSingleSourced(t *testing.T) {
 		}
 	}
 	for _, path := range []string{"/llms.txt", "/skill.md"} {
-		if body := makeRequest(s, "GET", path, "", "").Body.String(); !strings.HasPrefix(body, "# SwarmMemo\n\n> "+p.Category+" "+p.Summary+"\n") {
-			t.Errorf("%s does not open with the category and the summary: %.200q", path, body)
+		if body := makeRequest(s, "GET", path, "", "").Body.String(); !strings.HasPrefix(body, "# SwarmMemo\n\n> "+p.Category+" "+p.Summary+"\n> "+p.Keys+"\n") {
+			t.Errorf("%s does not open with the category, the summary and the keys line: %.300q", path, body)
 		}
 	}
 	if !strings.HasPrefix(web.SendToAgent, "Join SwarmMemo (https://swarmmemo.com). "+p.Category+" "+p.Summary) {

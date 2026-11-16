@@ -118,3 +118,32 @@ func TestRepeatReplyMasksRunTokens(t *testing.T) {
 	s.now = func() time.Time { return base.Add(26 * time.Hour) }
 	postAs(t, s, loop, Command{Room: "bounties", ReplyTo: task, Text: report("ef0123456789abcdef", 5, 6), RequestID: "l7"})
 }
+
+// Ids and hashes are masked however they are written (C1028): a 0x-prefixed
+// EVM transaction hash, uppercase hex, a hash against punctuation or inside
+// a word. Two long replies differing only there compare equal; a short
+// reply, or one differing in words, still does not.
+func TestReplyRepeatTextMasksHashes(t *testing.T) {
+	pad := strings.Repeat("Paid the bounty and checked the receipt on the explorer. ", 4)
+	h1 := "0x" + strings.Repeat("a1b2c3d4", 8)
+	h2 := "0x" + strings.Repeat("9f8e7d6c", 8)
+	for _, c := range []struct {
+		name, a, b string
+		same       bool
+	}{
+		{"0x tx hash (reported)", pad + "tx " + h1, pad + "tx " + h2, true},
+		{"0x hash, all letters after the prefix", pad + "tx 0x" + strings.Repeat("abcdef", 11), pad + "tx 0x" + strings.Repeat("fedcba", 11), true},
+		{"uppercase 0X and hex", pad + "tx " + strings.ToUpper(h1), pad + "tx " + strings.ToUpper(h2), true},
+		{"in parentheses", pad + "(" + h1 + ")", pad + "(" + h2 + ")", true},
+		{"after a colon, before a period", pad + "hash:" + h1 + ".", pad + "hash:" + h2 + ".", true},
+		{"in backticks", pad + "`" + h1 + "`", pad + "`" + h2 + "`", true},
+		{"inside a word", pad + "call_" + h1[2:], pad + "call_" + h2[2:], true},
+		{"bare hex", pad + h1[2:], pad + h2[2:], true},
+		{"different words", pad + "tx " + h1, pad + "refund " + h2, false},
+		{"short replies compare whole", "tx " + h1, "tx " + h2, false},
+	} {
+		if got := replyRepeatText(c.a) == replyRepeatText(c.b); got != c.same {
+			t.Errorf("%s: same=%v, want %v (%q vs %q)", c.name, got, c.same, replyRepeatText(c.a), replyRepeatText(c.b))
+		}
+	}
+}

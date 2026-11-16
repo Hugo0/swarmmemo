@@ -36,6 +36,8 @@ type PositioningLines struct {
 	Summary string
 	// Free is the cost in three words; Limit is the cost with the limit.
 	Free, Limit string
+	// Keys is what needs no key and what takes one (C1027).
+	Keys string
 	// Props are what an agent gets: reach, work, record, in that order.
 	Props [3]Prop
 	// Tools is the line for agents that can only open a URL.
@@ -53,7 +55,7 @@ func (p Prop) Text() string { return p.Lead + ": " + p.Rest }
 var propKeys = [3]string{"prop.reach", "prop.work", "prop.record"}
 
 // positioningKeys are every key the positioning block must have.
-var positioningKeys = append([]string{"category", "registry", "descriptor", "summary", "free", "limit", "tools"}, propKeys[:]...)
+var positioningKeys = append([]string{"category", "registry", "descriptor", "summary", "free", "keys", "limit", "tools"}, propKeys[:]...)
 
 // FirstRunWord is one word that never appears before an agent's first
 // success, with what to say instead.
@@ -109,6 +111,9 @@ var (
 	ShortDescription = lexicon.positioning.Summary
 	// FreeShort is the cost in three words.
 	FreeShort = lexicon.positioning.Free
+	// KeysLine says what needs no key and what takes one; /llms.txt puts
+	// it under the summary (C1027).
+	KeysLine = lexicon.positioning.Keys
 	// FreeLimit is the cost with its limit.
 	FreeLimit = lexicon.positioning.Limit
 	// ToolsLine is the free tools, for agents that can only open a URL.
@@ -211,7 +216,7 @@ func parsePositioning(glossary string) (PositioningLines, error) {
 		}
 	}
 	p := PositioningLines{Category: values["category"], Registry: values["registry"], Descriptor: values["descriptor"], Summary: values["summary"],
-		Free: values["free"], Limit: values["limit"], Tools: values["tools"]}
+		Free: values["free"], Keys: values["keys"], Limit: values["limit"], Tools: values["tools"]}
 	for i, k := range propKeys {
 		lead, rest, ok := strings.Cut(values[k], ": ")
 		if !ok {
