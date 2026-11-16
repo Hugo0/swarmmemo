@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"swarmmemo/internal/board"
@@ -218,5 +219,59 @@ func TestModlogStyleAssetLoggedHash(t *testing.T) {
 	body := w.Body.String()
 	if w.Code != 200 || a.Hash != hash || !strings.Contains(body, `Logged <code title="SHA-256: `+hash+`" data-copy="`+hash+`" data-copy-label="Copy SHA-256">sha256: `+hash[:12]) {
 		t.Fatalf("missing logged hash: status=%d body=%s", w.Code, body)
+	}
+}
+
+func TestLoggedStyleSourceHash(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	for _, tt := range []struct{ name, detail, want string }{
+		{"valid", `{"sha256":"` + hash + `","bytes":22}`, hash},
+		{"asset detail", `{"id":"asset","sha256":"` + hash + `"}`, ""},
+		{"uppercase", `{"sha256":"` + strings.Repeat("A", 64) + `"}`, ""},
+		{"short", `{"sha256":"` + strings.Repeat("a", 63) + `"}`, ""},
+		{"injection", `{"sha256":"` + strings.Repeat("a", 56) + `<script>"}`, ""},
+		{"malformed", `{`, ""},
+		{"empty", `{}`, ""},
+		{"oversize", strings.Repeat(" ", 4097), ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := loggedStyleSourceHash(board.ModerationEntry{Action: "style", Detail: tt.detail}); got != tt.want {
+				t.Fatalf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestModlogStyleSourceHash: a style entry shows the logged source CSS hash,
+// which differs from the served (sanitized, scoped) stylesheet's, and keeps it
+// after the style is cleared.
+func TestModlogStyleSourceHash(t *testing.T) {
+	s, _, _ := roomStore(t)
+	ctx := context.Background()
+	if _, err := s.Execute(ctx, board.Command{Operation: "post", Room: "wires", Text: "open room"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	source := ":scope { color: red; }"
+	data, _ := json.Marshal(map[string]string{"css": source})
+	res, err := s.OperatorRoom(ctx, board.Command{Operation: "room.style.set", Room: "wires", Data: string(data)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet, _ := res.Data["stylesheet"].(string)
+	served := get(t, s, sheet, "swarmmemo.com")
+	sum := sha256.Sum256([]byte(source))
+	hash := hex.EncodeToString(sum[:])
+	if served.Code != 200 || sha256.Sum256(served.Body.Bytes()) == sum {
+		t.Fatalf("served %q: status %d, or its digest equals the source's", sheet, served.Code)
+	}
+	want := `Logged source CSS <code title="SHA-256: ` + hash + `" data-copy="` + hash + `" data-copy-label="Copy SHA-256">sha256: ` + hash[:12]
+	if w := render(s, "/modlog/wires"); w.Code != 200 || !strings.Contains(w.Body.String(), want) {
+		t.Fatalf("missing logged source hash: status=%d", w.Code)
+	}
+	if _, err := s.OperatorRoom(ctx, board.Command{Operation: "room.style.clear", Room: "wires"}); err != nil {
+		t.Fatal(err)
+	}
+	if after := render(s, "/modlog/wires").Body.String(); strings.Count(after, "Logged source CSS") != 1 || !strings.Contains(after, want) {
+		t.Fatal("cleared style lost or duplicated its logged source hash")
 	}
 }

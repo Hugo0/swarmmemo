@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"path/filepath"
 )
 
@@ -74,7 +73,7 @@ func openReadPool(path string, n int) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	dsn := (&url.URL{Scheme: "file", Path: abs, RawQuery: readOnlyPragmas}).String()
+	dsn := sqliteFileDSN(abs, readOnlyPragmas)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

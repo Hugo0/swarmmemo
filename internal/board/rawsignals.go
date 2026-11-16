@@ -179,7 +179,7 @@ func openRawSignalsDB(dbFile string, readOnly bool) (*sql.DB, error) {
 			}
 			pragmas = readOnlyPragmas
 		}
-		dsn = (&url.URL{Scheme: "file", Path: abs, RawQuery: pragmas}).String()
+		dsn = sqliteFileDSN(abs, pragmas)
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

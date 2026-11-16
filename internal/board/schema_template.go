@@ -3,7 +3,6 @@ package board
 import (
 	"database/sql"
 	"errors"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -55,7 +54,7 @@ func buildSchemaTemplate() (data []byte, err error) {
 	}
 	defer os.RemoveAll(dir)
 	path := filepath.Join(dir, "template.sqlite")
-	db, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: path, RawQuery: connPragmas}).String())
+	db, err := sql.Open("sqlite", sqliteFileDSN(path, connPragmas))
 	if err != nil {
 		return nil, err
 	}

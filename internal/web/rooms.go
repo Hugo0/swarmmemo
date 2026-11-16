@@ -379,6 +379,9 @@ type modlogEntry struct {
 	// AssetHash is the SHA-256 the operator's log entry recorded for the
 	// asset, read from Detail, never from the blob row that may change.
 	AssetHash string
+	// StyleSourceHash is the SHA-256 a style entry recorded for the room's
+	// source CSS, not for the sanitized stylesheet the room serves.
+	StyleSourceHash string
 }
 
 // modlogEntries names the style assets on one log page, one lookup for the
@@ -399,6 +402,9 @@ func modlogEntries(r *http.Request, service board.Service, room string, entries 
 	out := make([]modlogEntry, len(entries))
 	for i, e := range entries {
 		out[i].ModerationEntry = e
+		if e.Action == "style" {
+			out[i].StyleSourceHash = loggedStyleSourceHash(e)
+		}
 		if e.Action == "style.asset" {
 			out[i].AssetHash = loggedStyleAssetHash(e)
 			if a, ok := assets[e.Target]; ok {
@@ -410,26 +416,47 @@ func modlogEntries(r *http.Request, service board.Service, room string, entries 
 }
 
 // loggedStyleAssetHash reads the SHA-256 an operator style.asset entry logged
-// (OperatorAsset's detail), bound to the entry's target and accepted only as
-// 64 lowercase hex. Any other detail shows no hash. The entry is the board's
-// record, not a signature over the file.
+// (OperatorAsset's detail), bound to the entry's target. Any other detail
+// shows no hash. The entry is the board's record, not a signature over the
+// file.
 func loggedStyleAssetHash(e board.ModerationEntry) string {
-	if e.Actor != "operator" || len(e.Detail) > 4096 {
+	id, hash := loggedDetailHash(e.Detail)
+	if e.Actor != "operator" || id == "" || id != e.Target {
 		return ""
 	}
-	var detail struct {
+	return hash
+}
+
+// loggedStyleSourceHash reads the SHA-256 of the source CSS a style entry
+// logged (applyStyle's detail, written by the board for owner and operator
+// alike). The detail names no id: the entry itself is the binding.
+func loggedStyleSourceHash(e board.ModerationEntry) string {
+	id, hash := loggedDetailHash(e.Detail)
+	if id != "" {
+		return ""
+	}
+	return hash
+}
+
+// loggedDetailHash is the one parser of a style log detail: its id and its
+// sha256, the hash accepted only as 64 lowercase hex from a bounded detail.
+func loggedDetailHash(detail string) (id, hash string) {
+	if len(detail) > 4096 {
+		return "", ""
+	}
+	var d struct {
 		ID     string `json:"id"`
 		SHA256 string `json:"sha256"`
 	}
-	if json.Unmarshal([]byte(e.Detail), &detail) != nil || detail.ID == "" || detail.ID != e.Target || len(detail.SHA256) != 64 {
-		return ""
+	if json.Unmarshal([]byte(detail), &d) != nil || len(d.SHA256) != 64 {
+		return "", ""
 	}
-	for _, c := range detail.SHA256 {
+	for _, c := range d.SHA256 {
 		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
-			return ""
+			return "", ""
 		}
 	}
-	return detail.SHA256
+	return d.ID, d.SHA256
 }
 
 // loadModlog serves /modlog/ROOM: a room's public moderation log.

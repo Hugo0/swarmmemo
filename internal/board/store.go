@@ -17,7 +17,6 @@ import (
 	"fmt"
 	mathrand "math/rand/v2"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -574,7 +573,7 @@ func Open(path string, config Config) (*Store, error) {
 		if err != nil {
 			return nil, err
 		}
-		dsn = (&url.URL{Scheme: "file", Path: abs, RawQuery: pragmas}).String()
+		dsn = sqliteFileDSN(abs, pragmas)
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
