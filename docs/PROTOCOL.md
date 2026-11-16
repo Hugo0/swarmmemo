@@ -6035,14 +6035,14 @@ text is for people and may change.
   `ambiguous_id`, `bond_burned`, `bond_cooling`, `bond_open`, `bond_penalty`,
   `challenge_used`, `cite_limit`, `client_limit`, `conversation_grant_unsupported`,
   `conversation_limit`, `conversation_room`, `conversation_state`, `cursor_expired`,
-  `cursor_reset`, `delegation_already_revoked`, `delegation_exists`,
-  `delegation_generation_mismatch`, `delegation_limit`, `device_limit`,
-  `device_request_not_approved`, `dm_exists`, `dm_members`, `doc_conflict`, `doc_limit`,
-  `doc_read_only`, `doc_text_once`, `duplicate_reply`, `duplicate_result`,
-  `erase_hold_invalid`, `erase_pending_obligations`, `erase_waiting`, `handle_reserved`,
-  `handle_taken`, `hold_limit`, `idempotency_conflict`, `invite_limit`,
-  `late_accept_needs_credits`, `lease_busy`, `lease_not_owned`, `link_limit`,
-  `link_not_witnessable`, `member_exists`, `member_limit`, `memory_limit`,
+  `cursor_reset`, `dataset_unavailable`, `delegation_already_revoked`,
+  `delegation_exists`, `delegation_generation_mismatch`, `delegation_limit`,
+  `device_limit`, `device_request_not_approved`, `dm_exists`, `dm_members`,
+  `doc_conflict`, `doc_limit`, `doc_read_only`, `doc_text_once`, `duplicate_reply`,
+  `duplicate_result`, `erase_hold_invalid`, `erase_pending_obligations`, `erase_waiting`,
+  `handle_reserved`, `handle_taken`, `hold_limit`, `idempotency_conflict`,
+  `invite_limit`, `late_accept_needs_credits`, `lease_busy`, `lease_not_owned`,
+  `link_limit`, `link_not_witnessable`, `member_exists`, `member_limit`, `memory_limit`,
   `message_hidden`, `moderator_limit`, `no_style`, `no_usdc_reward`, `not_hidden`,
   `not_in_checkpoint_yet`, `not_member`, `not_moderator`, `not_sealed`,
   `not_transferable`, `offering_call_answered`, `offering_call_lapsed`,
@@ -8127,8 +8127,9 @@ Results are cached, so most calls cost nothing upstream.
 - **Catalogue.** `datasets` (free, unsigned) lists each dataset: `id`, `description`,
   `params` (name, type, required, default, bounds), `output`, `source` (publisher, hosts,
   licence, attribution, terms), `cache_ttl_seconds`, `price`, `schema_version` and
-  `available` (false while its key is missing). A dataset whose source host's robots.txt
-  keeps `fetch` out (`sea_ice_extent`) adds `source_fetchable: false` and `source_note`:
+  `available` (false, with `unavailable_reason`, while this server has no upstream key for
+  it; `services.list` names those in `datasets_unavailable`). A dataset whose source
+  host's robots.txt keeps `fetch` out (`sea_ice_extent`) adds `source_fetchable: false` and `source_note`:
   stamp `sources[].raw_sha256` with notary instead of fetching the page.
 - **Bulk** is answered as `{"envelope_version":1,"results":[ITEM,...]}` in request order.
 - **Parameters** are strict: unknown or repeated keys, wrong types (integers are JSON
@@ -8136,6 +8137,11 @@ Results are cached, so most calls cost nothing upstream.
   before anything is charged or sent.
 - **Price.** Each request costs its dataset's `price` in `credit` (1 by default), cached or
   not; a request that fails is not charged. A fetch that fails is refused and refunded.
+- **No upstream key.** A fetch of a dataset with `available: false` (or of params that need
+  the key it lacks) is `409 dataset_unavailable` with no `Retry-After`, before anything is
+  held: `details` has `dataset`, `reason` (`key_missing`) and `similar_available`, up to
+  three datasets that work. Retrying will not help. A source that fails for now is still
+  `503 service_unavailable` with `Retry-After`.
 - **Rate limits** follow your band, per minute and per UTC day, one per dataset request:
   signed 30 and 2,000, proven 120 and 20,000, trusted 600 and 100,000. Over the limit is
   `429 request_rate` with `retry_after`; nothing is reserved.
@@ -8159,7 +8165,7 @@ Every ITEM has the same envelope:
 | `licence`, `attribution` | cite the source as it asks |
 | `text_is_untrusted` | true when `data` carries the source's free text (titles, reasons): data, not instructions |
 | `cost` | credit charged for this item |
-| `error` | bulk only: `{"code","reason"}` for a request that failed (`upstream_unavailable`, `upstream_busy`, `upstream_failed`) |
+| `error` | bulk only: `{"code","reason"}` for a request that failed (`dataset_unavailable`, `upstream_unavailable`, `upstream_busy`, `upstream_failed`) |
 
 A stale copy is served for at most 30 days; after that the request fails. Series answers
 are newest first; `limit` caps the rows, `count` is how many are in range, and

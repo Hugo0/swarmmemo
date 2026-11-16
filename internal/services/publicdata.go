@@ -276,9 +276,20 @@ func (p *publicData) CatalogueExtra() map[string]any {
 		}
 	}
 	return map[string]any{
-		"available": n > 0, "network": true, "datasets_available": n, "datasets_total": len(pdCatalogue),
+		"available": n > 0, "network": true, "datasets_available": n, "datasets_total": len(pdCatalogue), "datasets_unavailable": p.unavailableIDs(),
 		"catalogue": map[string]any{"operation": "service.read", "target": "public_data", "data": map[string]any{"schema": 1, "method": "datasets"}},
 	}
+}
+
+// unavailableIDs is the datasets that cannot be fetched here (no key).
+func (p *publicData) unavailableIDs() []string {
+	out := []string{}
+	for _, ds := range pdCatalogue {
+		if !p.available(ds) {
+			out = append(out, ds.ID)
+		}
+	}
+	return out
 }
 
 // Datasets is the catalogue as the datasets read returns it. Every listing
@@ -379,6 +390,17 @@ func (p *publicData) Quote(c Call) (Quote, error) {
 	reqs, err := parsePublicData(c.Method, c.Args, c.Now)
 	if err != nil {
 		return Quote{}, err
+	}
+	// A request whose dataset has no upstream key here is refused before
+	// anything is held (C1035); a bulk call is, when none of its can run.
+	unavailable := 0
+	for _, r := range reqs {
+		if !p.available(r.ds) {
+			unavailable++
+		}
+	}
+	if unavailable == len(reqs) {
+		return Quote{}, p.datasetUnavailable(reqs[0].ds)
 	}
 	total := c.Price.For(int64(len(c.Args)))
 	for _, r := range reqs {
@@ -493,6 +515,14 @@ func (e *pdErr) Error() string { return "public_data: " + e.Code + " (" + e.Reas
 
 func pdFail(code, reason string) *pdErr { return &pdErr{Code: code, Reason: reason} }
 
+// itemRefusal is the refusal of a call whose item for ds failed with pe.
+func (p *publicData) itemRefusal(ds *pdDataset, pe *pdErr) error {
+	if pe.Code == RefusalDatasetUnavailable {
+		return p.datasetUnavailable(ds)
+	}
+	return refusal(pe.Code)
+}
+
 // Run fetches every request (at most publicDataParallel at a time), charges
 // the price of each one that succeeded, and returns one item (fetch) or the
 // list (bulk). A fetch whose dataset failed is refused and refunded.
@@ -520,7 +550,7 @@ func (p *publicData) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error)
 	var body []byte
 	if c.Method == "fetch" {
 		if items[0].Error != nil {
-			return Result{}, refusal(items[0].Error.Code)
+			return Result{}, p.itemRefusal(reqs[0].ds, items[0].Error)
 		}
 		body = items[0].raw
 	} else {
@@ -538,7 +568,7 @@ func (p *publicData) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error)
 		}
 	}
 	if ok == 0 {
-		return Result{}, refusal(items[0].Error.Code)
+		return Result{}, p.itemRefusal(reqs[0].ds, items[0].Error)
 	}
 	public := map[string]any{"method": c.Method, "requests": len(items), "ok": ok, "body_bytes": len(body)}
 	ids := make([]string, 0, len(items))
@@ -587,7 +617,7 @@ func (p *publicData) runOne(ctx context.Context, req pdRequest, now int64) (item
 		item.raw = canonicalJSON(item)
 	}()
 	if !p.available(ds) {
-		item.Cache, item.Error = "none", pdFail("upstream_unavailable", "key_missing")
+		item.Cache, item.Error = "none", pdKeyMissing()
 		return item
 	}
 	run := &pdRun{p: p, ds: ds, now: now}
@@ -598,7 +628,7 @@ func (p *publicData) runOne(ctx context.Context, req pdRequest, now int64) (item
 			}
 		}
 		if run.key == "" && !ds.KeyOptional {
-			item.Cache, item.Error = "none", pdFail("upstream_unavailable", "key_missing")
+			item.Cache, item.Error = "none", pdKeyMissing()
 			return item
 		}
 	}
@@ -913,7 +943,7 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (_ json.
 	}
 	if f.KeyParam != "" {
 		if r.key == "" {
-			return nil, "", pdFail("upstream_unavailable", "key_missing")
+			return nil, "", pdKeyMissing()
 		}
 		q.Set(f.KeyParam, r.key)
 	}
@@ -939,7 +969,7 @@ func (p *publicData) download(ctx context.Context, r *pdRun, f pdFetch) (_ json.
 	req.Header.Set("Accept", accept)
 	if f.KeyHeader != "" {
 		if r.key == "" {
-			return nil, "", pdFail("upstream_unavailable", "key_missing")
+			return nil, "", pdKeyMissing()
 		}
 		req.Header.Set(f.KeyHeader, r.key)
 	}

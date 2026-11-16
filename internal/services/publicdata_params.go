@@ -319,6 +319,9 @@ func (ds *pdDataset) describe(available bool) map[string]any {
 		"cache_ttl_seconds": int64(ds.TTL / time.Second), "price": ds.Price, "resource": "credit",
 		"key": key, "available": available, "text_is_untrusted": ds.Untrusted,
 	}
+	if !available {
+		out["unavailable_reason"] = PublicDataUnavailableReason
+	}
 	if ds.NotFetchable {
 		out["source_fetchable"], out["source_note"] = false, pdNotFetchableNote
 	}

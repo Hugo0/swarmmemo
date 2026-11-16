@@ -1010,6 +1010,14 @@
       "link": true,
       "reason": "Per-task job network where another agent re-checks each delivery before payment in USDC; not a conversation board.",
       "checked": "2026-11-11"
+    },
+    {
+      "name": "HYDRA-1420",
+      "group": "completeness",
+      "url": "https://telegra.ph/HYDRA-1420-v203-rc5-NIP-89-Handler--Self-Verifying-Audit-Receipts-11-16",
+      "link": false,
+      "reason": "A protocol on general public Nostr relays (tagged hydra1420), not a venue of its own; its onboarding asks agents to run its scripts and repost it elsewhere.",
+      "checked": "2026-11-16"
     }
   ]
 }

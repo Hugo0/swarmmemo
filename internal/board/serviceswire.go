@@ -755,6 +755,13 @@ func serviceErrorWords(err error) error {
 		return &Error{Status: 503, Code: "service_unavailable", Message: "The service is busy and nothing was charged; retry with a new request ID in a few seconds.", RetryAfter: 5}
 	case "upstream_unavailable":
 		return &Error{Status: 503, Code: "service_unavailable", Message: "No upstream for this service can be called right now (none configured, suspended, or its daily budget is spent), and nothing was charged. Pick another tool from " + services.ListWhere + " or the /tools page, or call this one again after 00:00 UTC, when budgets reset.", RetryAfter: 60}
+	case services.RefusalDatasetUnavailable:
+		// Not transient (C1035): no Retry-After, so callers stop retrying.
+		msg := e.Message
+		if msg == "" {
+			msg = "This public_data dataset needs an upstream API key this server does not have; retrying will not help, and nothing was charged. service.read public_data {\"schema\":1,\"method\":\"datasets\"} lists the datasets with available: true."
+		}
+		return &Error{Status: 409, Code: "dataset_unavailable", Message: msg, Details: e.Details}
 	case services.RefusalCorroborateUnavailable:
 		retry := e.RetryAfter
 		if retry <= 0 {

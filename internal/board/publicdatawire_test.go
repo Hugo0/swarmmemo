@@ -1,6 +1,7 @@
 package board
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -42,10 +43,15 @@ func TestPublicDataWiring(t *testing.T) {
 		t.Fatalf("datasets read: %+v", read.Data)
 	}
 	args := map[string]any{"dataset": "congress_bills", "params": map[string]any{"query": "shutdown"}}
-	fails(t, s, svcCall(keyFor(1), "public_data", "fetch", args, 100, "pd-1"), "service_unavailable")
+	// No upstream key here: 409 dataset_unavailable, no Retry-After, nothing held (C1035).
+	_, err = s.Execute(testContext, svcCall(keyFor(1), "public_data", "fetch", args, 100, "pd-1"), "test-origin")
+	var be *Error
+	if !errors.As(err, &be) || be.Status != 409 || be.Code != "dataset_unavailable" || be.RetryAfter != 0 || !strings.Contains(be.Message, "congress_bills") {
+		t.Fatalf("want 409 dataset_unavailable without retry_after, got %+v", err)
+	}
 	for _, e := range svcSpends(t, s, meter) {
-		if e.Kind == "hold" && e.State != "refunded" {
-			t.Fatalf("nothing may be charged: %+v", e)
+		if e.Kind == "hold" {
+			t.Fatalf("nothing may be held: %+v", e)
 		}
 	}
 	// Its per-caller limits follow the board's one standing, not the

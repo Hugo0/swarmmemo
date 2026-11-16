@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -859,7 +860,7 @@ func TestPublicDataReleaseCalendar(t *testing.T) {
 	if k.fakes["api.stlouisfed.org"].count() != 0 {
 		t.Error("the FOMC path must not reach FRED")
 	}
-	if _, err := k.fetch(t, "fred_release_calendar", `{}`, now); code(err) != "upstream_unavailable" {
+	if _, err := k.fetch(t, "fred_release_calendar", `{}`, now); code(err) != services.RefusalDatasetUnavailable {
 		t.Errorf("FRED releases without a key: %v", err)
 	}
 }
@@ -1858,7 +1859,8 @@ func TestPublicDataBulkAndPricing(t *testing.T) {
 	results := at(res, "result", "results").([]any)
 	eq(t, "items", len(results), 3)
 	eq(t, "ok", at(results[0], "error"), nil)
-	eq(t, "unavailable without its key", at(results[2], "error", "code"), "upstream_unavailable")
+	eq(t, "unavailable without its key", at(results[2], "error", "code"), services.RefusalDatasetUnavailable)
+	eq(t, "unavailable reason", at(results[2], "error", "reason"), "key_missing")
 	eq(t, "bulk envelope", at(res, "result", "envelope_version"), 1.0)
 	// Charged per successful item: two of three.
 	if h := pdHold(t, v, key); h.MaxUnits != 3 || h.Units != 2 || h.State != "committed" {
@@ -1870,13 +1872,42 @@ func TestPublicDataBulkAndPricing(t *testing.T) {
 	if err = row.Scan(&cost, &public); err != nil || cost != 2 || !strings.Contains(public, `"ok":2`) {
 		t.Errorf("record: %d %s %v", cost, public, err)
 	}
-	// A fetch of an unavailable dataset is refused and refunded.
-	_, key, err = v.call(t, "fetch", `{"dataset":"congress_bills","params":{"query":"x"}}`, now)
-	if code(err) != "upstream_unavailable" {
+	// A fetch of a dataset with no upstream key here is refused before
+	// anything is held, and the refusal is not one to retry (C1035).
+	before, _ := v.meter.Entries(context.Background(), v.db)
+	_, _, err = v.call(t, "fetch", `{"dataset":"fred_series","params":{"series_id":"GDPC1"}}`, now)
+	var e *allowance.Err
+	if !errorsAs(err, &e) || e.Code != services.RefusalDatasetUnavailable {
 		t.Fatalf("no key: %v", err)
 	}
-	if h := pdHold(t, v, key); h.State != "refunded" {
-		t.Errorf("refund: %+v", h)
+	if e.RetryAfter != 0 || e.NextOpenAt != 0 {
+		t.Errorf("a missing key is not transient: retry_after %d, next_open_at %d", e.RetryAfter, e.NextOpenAt)
+	}
+	for _, want := range []string{"fred_series", "no upstream API key", "retrying will not help", "Similar datasets that work: "} {
+		if !strings.Contains(e.Message, want) {
+			t.Errorf("message lacks %q: %s", want, e.Message)
+		}
+	}
+	d := e.Details.(map[string]any)
+	alt := d["similar_available"].([]string)
+	eq(t, "dataset", d["dataset"], "fred_series")
+	if len(alt) != 3 || alt[0] == "fred_series" || slices.Contains(alt, "congress_bills") || slices.Contains(alt, "fec_candidate_totals") {
+		t.Errorf("similar_available %v: three working datasets", alt)
+	}
+	if !slices.Contains(alt, "fred_release_calendar") {
+		t.Errorf("similar_available %v: a dataset on the same host comes first", alt)
+	}
+	if after, _ := v.meter.Entries(context.Background(), v.db); len(after) != len(before) {
+		t.Error("a dataset_unavailable fetch holds nothing")
+	}
+	// A bulk call none of whose requests can run is refused the same way.
+	if _, _, err = v.call(t, "bulk", `{"requests":[{"dataset":"congress_bills","params":{"query":"x"}}]}`, now); code(err) != services.RefusalDatasetUnavailable {
+		t.Errorf("bulk, no key: %v", err)
+	}
+	// A transient upstream failure is still upstream_busy (503 with Retry-After).
+	v.fakes["api.coingecko.com"].set("500")
+	if _, err = v.fetch(t, "crypto_spot_price", `{"coin_id":"dogecoin"}`, now); code(err) != "upstream_busy" {
+		t.Errorf("transient failure: %v", err)
 	}
 }
 
@@ -1922,6 +1953,14 @@ func TestPublicDataCatalogue(t *testing.T) {
 			t.Errorf("%s available %v, want %v", id, avail[id], want)
 		}
 	}
+	// An unavailable dataset says why, from the same check (C1035).
+	for _, e := range list {
+		m := e.(map[string]any)
+		reason, has := m["unavailable_reason"]
+		if has == m["available"].(bool) || (has && reason != services.PublicDataUnavailableReason) {
+			t.Errorf("%s: available %v, unavailable_reason %v", m["id"], m["available"], reason)
+		}
+	}
 	// The read is the same function.
 	tx, _ := v.db.Begin()
 	defer tx.Rollback()
@@ -1943,7 +1982,7 @@ func TestPublicDataCatalogue(t *testing.T) {
 	}
 	c, _ := v.e.Catalogue(context.Background(), v.db, 1000)
 	raw, _ = json.Marshal(c)
-	if !strings.Contains(string(raw), `"datasets_available":9`) {
+	if !strings.Contains(string(raw), `"datasets_available":9`) || !strings.Contains(string(raw), `"datasets_unavailable":["congress_bills","fec_candidate_totals","fred_series"]`) {
 		t.Errorf("services.list: %s", raw)
 	}
 }

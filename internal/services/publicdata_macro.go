@@ -221,7 +221,7 @@ var dsFREDReleases = &pdDataset{
 			}
 		}
 		if r.key == "" {
-			return nil, pdFail("upstream_unavailable", "key_missing")
+			return nil, pdKeyMissing()
 		}
 		targets := fredHeadline
 		if release != "" {

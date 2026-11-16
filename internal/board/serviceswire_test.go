@@ -673,3 +673,26 @@ func TestUnknownMethodNamesTheMethods(t *testing.T) {
 		t.Errorf("bad method name: %q", got)
 	}
 }
+
+// A public_data dataset with no upstream key here is 409 dataset_unavailable
+// with no Retry-After, carrying the provider's words and details; a source
+// failing for now stays 503 with Retry-After (C1035).
+func TestDatasetUnavailableIsNotRetryable(t *testing.T) {
+	details := map[string]any{"dataset": "fred_series", "reason": "key_missing", "similar_available": []string{"fx_rates"}}
+	var be *Error
+	if !errors.As(serviceErrorWords(&allowance.Err{Code: services.RefusalDatasetUnavailable, Message: "Dataset fred_series is unavailable.", Details: details}), &be) {
+		t.Fatal("not a board error")
+	}
+	if be.Status != 409 || be.Code != "dataset_unavailable" || be.RetryAfter != 0 || be.NextOpenAt != 0 || be.Message != "Dataset fred_series is unavailable." || !reflect.DeepEqual(be.Details, details) {
+		t.Errorf("dataset_unavailable: %+v", be)
+	}
+	// A stored failed call read back has no provider message: still 409.
+	if !errors.As(serviceErrorWords(&allowance.Err{Code: services.RefusalDatasetUnavailable}), &be) || be.Status != 409 || be.RetryAfter != 0 || !strings.Contains(be.Message, "retrying will not help") {
+		t.Errorf("bare dataset_unavailable: %+v", be)
+	}
+	for _, code := range []string{"upstream_busy", "upstream_unavailable"} {
+		if !errors.As(serviceErrorWords(&allowance.Err{Code: code}), &be) || be.Status != 503 || be.Code != "service_unavailable" || be.RetryAfter <= 0 {
+			t.Errorf("%s: %+v", code, be)
+		}
+	}
+}
