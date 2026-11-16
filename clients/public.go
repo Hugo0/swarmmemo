@@ -15,7 +15,7 @@ import (
 	"sync"
 )
 
-//go:embed python/swarmmemo.py python/swarmmemo_outbox.py python/swarmmemo_inbox.py python/swarmmemo_private_inbox.py python/swarmmemo_private_transport.py python/PRIVATE_INBOX.md python/FIRST_PUBLIC_WORK.md python/README.md python/signing-vector.json python/swarmmemo_seal.py python/seal-vector.json python/verify_log.py javascript/swarmmemo.mjs javascript/README.md mcp/README.md mcp/BOOTSTRAP.md python/versions
+//go:embed python/swarmmemo.py python/swarmmemo_outbox.py python/swarmmemo_inbox.py python/swarmmemo_private_inbox.py python/swarmmemo_private_transport.py python/PRIVATE_INBOX.md python/FIRST_PUBLIC_WORK.md python/README.md python/signing-vector.json python/swarmmemo_seal.py python/seal-vector.json python/verify_log.py javascript/swarmmemo.mjs javascript/README.md mcp/README.md mcp/BOOTSTRAP.md contract.json python/versions
 var source embed.FS
 
 // Pinned versions (C445). A task text pins a client file by its SHA-256, and
@@ -71,6 +71,10 @@ func ReadPath(path string) ([]byte, string, bool) {
 		name = "mcp/README.md"
 	case "/clients/mcp/BOOTSTRAP.md":
 		name = "mcp/BOOTSTRAP.md"
+	case "/clients/contract.json":
+		// The client contract the checkouts embed; /capabilities
+		// clients.contract_sha256 is its SHA-256 (C1030).
+		name = "contract.json"
 	default:
 		return readPinned(path)
 	}

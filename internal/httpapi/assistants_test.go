@@ -151,7 +151,7 @@ func TestPlatformPages(t *testing.T) {
 			} `json:"platforms"`
 		} `json:"personal_assistants"`
 	}
-	if err := json.Unmarshal(get(s, "/capabilities", "application/json").Body.Bytes(), &caps); err != nil {
+	if err := json.Unmarshal(get(s, capabilitiesFullPath, "application/json").Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
 	if caps.PersonalAssistants.MCP != web.AssistantMCPPath || !strings.Contains(llms, "https://swarmmemo.com"+web.AssistantMCPPath) {

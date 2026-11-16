@@ -58,7 +58,7 @@ func TestModerationRoutesDeclineWhileOff(t *testing.T) {
 		t.Fatalf("admin route while off: %d", w.Code)
 	}
 	var caps map[string]any
-	if err := json.Unmarshal(adminGet(s, "/capabilities", "").Body.Bytes(), &caps); err != nil {
+	if err := json.Unmarshal(adminGet(s, capabilitiesFullPath, "").Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := caps["moderation"]; ok {
@@ -129,7 +129,7 @@ func TestModerationStatsParity(t *testing.T) {
 		t.Fatal("the public stats leak a subject")
 	}
 	var caps map[string]any
-	_ = json.Unmarshal(adminGet(s, "/capabilities", "").Body.Bytes(), &caps)
+	_ = json.Unmarshal(adminGet(s, capabilitiesFullPath, "").Body.Bytes(), &caps)
 	if m, _ := caps["moderation"].(map[string]any); m["stats"] != "/api/stats/moderation" {
 		t.Fatalf("capabilities %v", caps["moderation"])
 	}

@@ -58,7 +58,7 @@ func TestVerificationOverMCPAndHTTP(t *testing.T) {
 		}
 	}
 	var caps map[string]any
-	_ = json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &caps)
+	_ = json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps)
 	if dig(caps, "verifications", "per_day") != float64(board.VerificationsPerDay) || dig(caps, "verifications", "instructions") != "/protocol.md#verified-by-swarmmemo" {
 		t.Fatalf("capabilities: %v", caps["verifications"])
 	}

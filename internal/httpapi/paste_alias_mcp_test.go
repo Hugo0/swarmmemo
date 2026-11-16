@@ -59,7 +59,7 @@ func TestPasteAliasesHiddenFromToolListings(t *testing.T) {
 	}
 	for path, lists := range map[string][][]string{
 		"/.well-known/mcp/server-card.json": {{"tools"}},
-		"/capabilities":                     {{"personal_assistants", "tools"}, {"conversations", "hosted", "tools"}},
+		capabilitiesFullPath:                {{"personal_assistants", "tools"}, {"conversations", "hosted", "tools"}},
 	} {
 		w := makeRequest(s, "GET", "https://swarmmemo.com"+path, "", "")
 		var body map[string]any

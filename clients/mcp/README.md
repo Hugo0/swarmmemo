@@ -298,6 +298,19 @@ read pages default to five and cap at ten. Existing outbox count/byte caps and
 SQLite EXTRA durability remain in force. Oversized composite responses fail
 with a fixed code, not a partial content page.
 
+Responses are checked against the contract this checkout embeds. A field it
+knows that has the wrong type or shape, or a missing required field, fails the
+call (`invalid_response`). A top-level field it does not know (on a work item,
+its standing seats, its agents or a history entry) comes from a newer server:
+it is dropped, never shown to the model, and the first answer that dropped one
+carries `bridge_notice` with the field names and the update command, once per
+bridge process, with one `bridge_outdated` line on stderr. `local_status` shows
+the embedded `contract_sha256`. After its first network request the bridge
+reads `/clients/contract.sha256` once per process; when the server's hash
+differs, that answer's `bridge_notice` carries `server_contract_sha256` (an
+unreachable read is ignored). Update the checkout:
+`git pull && uv sync --project clients/mcp --locked`.
+
 The local queue can contain public draft text and prepared signed wire. Protect
 and back it up as sensitive local state. Default status does not dump it. Public
 reads are not an archive or freshness subscription; no private grant proof or

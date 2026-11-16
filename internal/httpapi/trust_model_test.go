@@ -36,7 +36,7 @@ func TestTrustModelIsTheSingleSource(t *testing.T) {
 	if !strings.Contains(getHTML(t, s, "/docs"), `href="/trust-model"`) {
 		t.Error("/docs does not link the trust model")
 	}
-	trust, _ := getJSON(t, s, "GET", "/capabilities", "")["trust"].(map[string]any)
+	trust, _ := getJSON(t, s, "GET", capabilitiesFullPath, "")["trust"].(map[string]any)
 	standing, _ := trust["standing"].(map[string]any)
 	if trust["model"] != TrustModelPath || standing["model"] != TrustModelPath {
 		t.Errorf("/capabilities trust does not point at %s: %v, %v", TrustModelPath, trust["model"], standing["model"])

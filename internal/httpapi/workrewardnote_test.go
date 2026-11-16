@@ -80,7 +80,7 @@ func TestWorkRewardNoteOnAPIAndMCP(t *testing.T) {
 	if len(listed) != 1 || listed[0].(map[string]any)["reward_note"] != note {
 		t.Fatalf("MCP find_work %v", listed)
 	}
-	caps := makeRequest(s, "GET", "/capabilities", "", "").Body.String()
+	caps := makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.String()
 	for _, want := range []string{`"reward_note":{`, `"moves_money":false`, "/protocol.md#work-reward-notes"} {
 		if !strings.Contains(caps, want) {
 			t.Errorf("/capabilities misses %s", want)

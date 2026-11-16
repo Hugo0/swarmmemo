@@ -23,7 +23,7 @@ func TestInboxEntriesSurfaces(t *testing.T) {
 				} `json:"entries"`
 			} `json:"agent_return"`
 		}
-		if err := json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &caps); err != nil {
+		if err := json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps); err != nil {
 			t.Fatal(err)
 		}
 		if caps.AgentReturn.Entries.Enabled != (mode == board.InboxRead) || len(caps.AgentReturn.Entries.Kinds) != len(board.InboxKinds) {
@@ -61,7 +61,7 @@ func TestInboxDispositionSurfaces(t *testing.T) {
 				} `json:"mark_read"`
 			} `json:"inbox"`
 		}
-		if err := json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &caps); err != nil {
+		if err := json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps); err != nil {
 			t.Fatal(err)
 		}
 		if caps.Inbox.Enabled != (mode == board.InboxRead) || caps.Inbox.Dispose.Operation != "updates.dispose" || len(caps.Inbox.Dispose.States) != 5 || !caps.Inbox.Private ||

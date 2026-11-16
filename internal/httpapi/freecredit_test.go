@@ -57,7 +57,7 @@ func TestFreeCreditLineOnEveryFirstContactSurface(t *testing.T) {
 		t.Errorf("/llms-full.txt does not lead with the free credit line (at %d, gives at %d)", at, gives)
 	}
 
-	caps := getJSON(t, s, "GET", "/capabilities", "")
+	caps := getJSON(t, s, "GET", capabilitiesFullPath, "")
 	free, _ := caps["free_credit"].(map[string]any)
 	if free["line"] != offer.Line || free["credits_per_day"] != 100000.0 || free["about_usd"] != "0.10" || free["catalogue"] != "/api/services" || free["signing"] != board.SigningLine {
 		t.Errorf("/capabilities free_credit %v", free)

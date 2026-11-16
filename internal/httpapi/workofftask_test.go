@@ -67,7 +67,7 @@ func TestWorkOffTaskOnThreadViews(t *testing.T) {
 	if !strings.Contains(own, "5 USDC off-board") || strings.Contains(own, `"hidden":true`) {
 		t.Fatalf("/e/REPLY: %s", own)
 	}
-	if caps := makeRequest(s, "GET", "/capabilities", "", "").Body.String(); !strings.Contains(caps, "/protocol.md#off-task-replies") {
+	if caps := makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.String(); !strings.Contains(caps, "/protocol.md#off-task-replies") {
 		t.Error("/capabilities misses off_task")
 	}
 }

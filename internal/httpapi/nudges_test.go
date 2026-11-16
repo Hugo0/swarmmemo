@@ -213,7 +213,7 @@ func TestHostedAllowanceIsOwn(t *testing.T) {
 func TestCapabilitiesNudgesAndHome(t *testing.T) {
 	_, s := nudgeServer(t, board.Features{})
 	var caps map[string]json.RawMessage
-	if err := json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &caps); err != nil {
+	if err := json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
 	for key, want := range map[string]any{"nudges": board.NudgeCapabilities(), "home": board.HomeCapabilities()} {

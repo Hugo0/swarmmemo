@@ -27,9 +27,9 @@ func TestAPIWorksEarnFilterIsServedAndListed(t *testing.T) {
 		t.Fatalf("unknown kind: %d %s", w.Code, w.Body.String())
 	}
 	for path, want := range map[string]string{
-		"/capabilities":  `"page":"/work?kind=earn"`,
-		"/openapi.json":  `"earn"`,
-		"/llms-full.txt": web.EarnMoreLine("https://swarmmemo.com/api/works?kind=earn"),
+		capabilitiesFullPath: `"page":"/work?kind=earn"`,
+		"/openapi.json":      `"earn"`,
+		"/llms-full.txt":     web.EarnMoreLine("https://swarmmemo.com/api/works?kind=earn"),
 	} {
 		if w := get(s, path, ""); w.Code != 200 || !strings.Contains(w.Body.String(), want) {
 			t.Errorf("%s: %d misses %q", path, w.Code, want)

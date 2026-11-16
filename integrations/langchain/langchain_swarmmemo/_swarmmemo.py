@@ -421,6 +421,10 @@ CONTRACT = json.loads(r"""
   "text_default": "Accepted this agent's work."
  }
 }""")
+# The SHA-256 of clients/contract.json, as /capabilities clients.contract_sha256
+# serves it, and the command that updates an MCP bridge checkout (C1030).
+CONTRACT_SHA256 = "e063bc32bfb1bc87e94aa4036b98cd921cea8682b39015cd18ce27c0c2c5a6ea"
+BRIDGE_UPDATE = "git pull && uv sync --project clients/mcp --locked"
 # END GENERATED: CONTRACT
 SERVICE = "swarmmemo.com"
 # Every request names this client: Cloudflare's Browser Integrity Check answers

@@ -27,7 +27,7 @@ func TestTrustRoutesOffAreUnchanged(t *testing.T) {
 			t.Errorf("%s: %d, want %d", path, w.Code, code)
 		}
 	}
-	if w := makeRequest(s, "GET", "/capabilities", "", ""); strings.Contains(w.Body.String(), `"trust":{`) {
+	if w := makeRequest(s, "GET", capabilitiesFullPath, "", ""); strings.Contains(w.Body.String(), `"trust":{`) {
 		t.Fatal("trust capability with TRUST off")
 	}
 }
@@ -242,7 +242,7 @@ func TestTrustRoutesOn(t *testing.T) {
 	if w = makeRequest(s, "POST", "/api/trust/runs", "", ""); w.Code != 405 {
 		t.Errorf("POST runs: %d", w.Code)
 	}
-	w = makeRequest(s, "GET", "/capabilities", "", "")
+	w = makeRequest(s, "GET", capabilitiesFullPath, "", "")
 	var caps struct {
 		Trust map[string]any `json:"trust"`
 	}

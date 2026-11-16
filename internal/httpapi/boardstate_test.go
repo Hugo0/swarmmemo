@@ -42,7 +42,7 @@ func TestBoardStateWired(t *testing.T) {
 	var caps struct {
 		BoardState map[string]any `json:"board_state"`
 	}
-	if err := json.Unmarshal(navGet(s, "/capabilities").Body.Bytes(), &caps); err != nil || caps.BoardState["json"] != "/boards/state.json" || caps.BoardState["csv"] != "/boards/state.csv" || caps.BoardState["license"] != "CC0-1.0" {
+	if err := json.Unmarshal(navGet(s, capabilitiesFullPath).Body.Bytes(), &caps); err != nil || caps.BoardState["json"] != "/boards/state.json" || caps.BoardState["csv"] != "/boards/state.csv" || caps.BoardState["license"] != "CC0-1.0" {
 		t.Errorf("/capabilities board_state = %v (%v)", caps.BoardState, err)
 	}
 }

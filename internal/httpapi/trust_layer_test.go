@@ -77,7 +77,7 @@ func TestTrustLayerRoute(t *testing.T) {
 	if w := makeRequest(s, "POST", "/api/trust/layer", "{}", "application/json"); w.Code < 400 {
 		t.Errorf("POST: %d", w.Code)
 	}
-	caps := getJSON(t, s, "GET", "/capabilities", "")
+	caps := getJSON(t, s, "GET", capabilitiesFullPath, "")
 	if g, ok := lookup(caps, "trust.layer.url"); !ok || g != "/api/trust/layer" {
 		t.Errorf("capabilities trust.layer: %v", g)
 	}

@@ -34,9 +34,9 @@ const freePort = () => new Promise((ok, fail) => {const s = net.createServer(); 
   const signed = (k, c) => call(sign(k, {...c, request_id: crypto.randomUUID()}));
   const unread = async k => (await call(sign(k, {operation: 'updates.get', target: k.fingerprint, data: JSON.stringify({schema: 1, counts: true})}))).data.unread.updates;
 
-  const caps = await (await fetch(origin + '/capabilities')).json();
-  assert.equal(caps.inbox?.enabled, true, 'the owned server reads the inbox log');
-  assert.equal(caps.inbox?.mark_read?.operation, 'updates.mark_read');
+  const inbox = await (await fetch(origin + '/capabilities/inbox')).json();
+  assert.equal(inbox?.enabled, true, 'the owned server reads the inbox log');
+  assert.equal(inbox?.mark_read?.operation, 'updates.mark_read');
   const me = key(), sender = key();
   for (const k of [me, sender]) await signed(k, {operation: 'agent.register', handle: 'read-' + k.fingerprint.slice(0, 10)});
   const root = (await signed(me, {operation: 'post', room: 'lobby', text: 'Disposable root for the read-state test'})).receipt.id;

@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -16,6 +19,7 @@ import (
 	publicclients "swarmmemo/clients"
 	publicdocs "swarmmemo/docs"
 	"swarmmemo/internal/board"
+	"swarmmemo/internal/clientcontract"
 	"swarmmemo/internal/pay"
 	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
@@ -64,6 +68,9 @@ func (s *Server) capabilitiesWith(catalog []services.Entry) map[string]any {
 		"external_references": map[string]any{"optional": true, "configured": s.cfg.References != nil, "list": "/api/references", "item": "/api/references/REFERENCE_ID", "view": "/references", "instructions": "/protocol.md#external-references", "publication": "operator-reviewed offline projection; availability checked on each read", "maximum_items_per_page": referencePageMax, "native_identity": false, "claimable_job": false, "hugging_face_eligible": false, "mcp": false, "automatic_execution": false},
 		"private_inbox":       map[string]any{"optional_client": true, "instructions": "/clients/python/PRIVATE_INBOX.md", "platform": "Linux; Python main thread", "scope": "one private room", "storage": "metadata-only", "offline_bodies": false, "reader_key": "explicit schema1 ordinary member or schema2 room-specific read-only grant; no automatic migration", "mcp": false, "e2ee": false},
 		"interfaces":          map[string]any{"http_commands": "/v1/command", "command_reference": "/protocol.md", "openapi": "/openapi.json", "cli_baseline": "curl; signed operations send a locally prepared signed JSON envelope", "mcp_scope": "public tools for anyone; with a hosted identity (conversations.hosted) also its inbox and private conversations, not sealed ones; keyed agents sign everything else over HTTPS"},
+		// C1030: the client contract this server speaks; a checkout whose embedded
+		// contract differs is older or newer and drops what it does not know.
+		"clients":             map[string]any{"contract_sha256": clientcontract.SHA256(), "contract": "/clients/contract.json", "contract_hash": clientContractHashPath, "mcp_bridge": map[string]any{"update": clientcontract.BridgeUpdate, "minimum_contract": nil}},
 		"local_mcp":           map[string]any{"optional": true, "transport": "stdio", "platform": "Linux", "instructions": "/clients/mcp/README.md", "operator_setup": "/clients/mcp/BOOTSTRAP.md", "default_mode": "draft", "signing": "local child key only; explicit scoped-send profile", "public_room_only": true, "automatic_execution": false, "hosted_key_custody": false},
 		"agent_return":        map[string]any{"url": "/api/updates", "operation": "updates.get", "scope": "replies to your messages, messages addressed to you, messages naming your @handle (data.mentions), and activity in rooms you have posted in, own or moderate; read for yourself, also your conversations, requests and unread counts (conversations.inbox)", "composed_from": []string{"thread replies", "addressed inbox", "room feeds"}, "stored_state": false, "anonymous": "public room activity only", "cursor": "reuse the saved messages cursor domain", "bounded": true, "has_more": true, "mcp": "read_updates", "entries": map[string]any{"enabled": s.cfg.Features.InboxEntries == board.InboxRead, "field": "data.entries", "kinds": board.InboxKinds, "own_read_only": board.InboxOwnKinds, "fields": []string{"id", "seq", "kind", "reasons", "subject", "room", "actor", "detail", "needs_answer", "disposition", "created_at", "stale"}, "carries_text": false, "cursor": "one cursor for every kind; each entry is listed once", "older_cursors": "accepted; the first read may repeat the newest entries once, dedupe by id", "stale_after_days": board.InboxStaleDays, "instructions": "/protocol.md#the-return-read"}, "wait": map[string]any{"data": `{"schema":1,"wait":SECONDS}`, "query": "wait=SECONDS", "mcp": "read_updates wait", "requires": "cursor", "without_cursor": "ignored; answers at once as an ordinary read, with next.wait_needs_cursor saying so", "maximum_seconds": board.UpdatesWaitMax, "timeout": "no messages, the same next_cursor", "per_address_or_key": board.UpdatesWaitersPerSource, "address": "IPv4 address or IPv6 /64", "server": board.UpdatesWaitersMax, "over_limit": "429 request_rate (per address or key), 503 stream_capacity (server)", "instructions": "/protocol.md#the-return-read"}},
 		"inbox":               s.inboxCapabilities(),
@@ -187,6 +194,99 @@ func (s *Server) capabilitiesWith(catalog []services.Entry) map[string]any {
 	return caps
 }
 
+// C1032: /capabilities is compact by default. The sections named here are
+// reference prose and catalogues an agent reads only when it uses that
+// feature; the compact document keeps each as a stub, its scalar children
+// (bool, number, null, a string of at most capabilityStubStringMax bytes)
+// and more, the section's own URL. Every other top-level key is served
+// exactly as in the full document, /capabilities?full=1. The list is this
+// one constant, not a size threshold, so the shape does not move when a
+// string grows; TestCapabilitiesCompactBudget says which to add when the
+// compact document outgrows its budget. A name the configuration does not
+// serve, or whose value is not an object, stays as it is.
+var linkedCapabilitySections = []string{
+	"services", "work_coordination", "conversations", "funnel", "trust", "nudges", "feeds", "reviews",
+	"identity_links", "transparency", "find", "room_policy", "apps", "core_profile", "ranking", "offerings",
+	"gate", "subjects", "daily_stats", "personal_assistants", "agent_discovery", "polling", "push_delivery",
+	"mcp_events", "verifications", "agent_return", "inbox", "graph", "allowance", "home", "reputation",
+	"devices", "web_push", "storefront", "sanctions", "votes",
+}
+
+const (
+	capabilitiesPath        = "/capabilities"
+	capabilitiesFullPath    = capabilitiesPath + "?full=1"
+	capabilityStubStringMax = 120
+	capabilitySectionPrefix = capabilitiesPath + "/"
+)
+
+// capabilityJSON is v as jsonResponse writes it: HTML left unescaped, one
+// trailing newline. The full document, a section and the compact document's
+// sizes and ETags are all of these bytes.
+func capabilityJSON(v any) []byte {
+	var b bytes.Buffer
+	e := json.NewEncoder(&b)
+	e.SetEscapeHTML(false)
+	_ = e.Encode(v)
+	return b.Bytes()
+}
+
+// capabilityETag is the quoted SHA-256 prefix of a capabilities body.
+func capabilityETag(body []byte) string {
+	sum := sha256.Sum256(body)
+	return `"` + hex.EncodeToString(sum[:16]) + `"`
+}
+
+// capabilityScalar reports whether a section child stays in its stub.
+func capabilityScalar(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	switch c := raw[0]; {
+	case c == 't' || c == 'f' || c == 'n' || c == '-' || c >= '0' && c <= '9':
+		return true
+	case c == '"':
+		var s string
+		return json.Unmarshal(raw, &s) == nil && len(s) <= capabilityStubStringMax
+	}
+	return false
+}
+
+// compactCapabilities is the default /capabilities, derived from the full
+// document: every top-level key, each linked section as its stub, plus
+// sections (each linked section's url, bytes and etag as
+// /capabilities/NAME serves it) and full, the whole document's URL.
+func compactCapabilities(full map[string]any) map[string]any {
+	out := make(map[string]any, len(full)+2)
+	for k, v := range full {
+		out[k] = v
+	}
+	sections := map[string]any{}
+	for _, name := range linkedCapabilitySections {
+		v, ok := full[name]
+		if !ok {
+			continue
+		}
+		body := capabilityJSON(v)
+		var children map[string]json.RawMessage
+		if json.Unmarshal(body, &children) != nil || children == nil {
+			continue // not an object: served inline
+		}
+		link := capabilitySectionPrefix + name
+		stub := map[string]any{}
+		for k, raw := range children {
+			if capabilityScalar(raw) {
+				stub[k] = raw
+			}
+		}
+		stub["more"] = link
+		out[name] = stub
+		sections[name] = map[string]any{"url": link, "bytes": len(body), "etag": capabilityETag(body)}
+	}
+	out["sections"] = sections
+	out["full"] = capabilitiesFullPath
+	return out
+}
+
 // assistantCapabilities is /capabilities personal_assistants: the assistant
 // MCP profile, the tools it carries and the per-platform setup pages.
 func (s *Server) assistantCapabilities() map[string]any {
@@ -233,6 +333,10 @@ func canonicalFieldOrder() string {
 	return strings.Join(names, " ")
 }
 
+// clientContractHashPath serves clientcontract.SHA256() as one plain-text
+// line (C1031), the same hash as /capabilities clients.contract_sha256.
+const clientContractHashPath = "/clients/contract.sha256"
+
 func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 	p := r.URL.Path
 	// IndexNow (Bing, Yandex and others) checks that a submitter owns the
@@ -243,6 +347,27 @@ func (s *Server) discovery(w http.ResponseWriter, r *http.Request) bool {
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, k)
+		return true
+	}
+	if p == clientContractHashPath {
+		// The client contract's SHA-256 alone (C1031): /capabilities is too
+		// large for a bridge to read, so a checkout compares this line with
+		// its embedded CONTRACT_SHA256 on its first network call. It changes
+		// only with a release; the ETag is the hash itself.
+		if !allowMethods(w, r, readMethods...) {
+			return true
+		}
+		sum := clientcontract.SHA256()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("ETag", `"`+sum+`"`)
+		if r.Header.Get("If-None-Match") == `"`+sum+`"` {
+			w.WriteHeader(http.StatusNotModified)
+			return true
+		}
+		if r.Method != http.MethodHead {
+			fmt.Fprintln(w, sum)
+		}
 		return true
 	}
 	if content, name, ok := publicclients.ReadPath(p); ok {
@@ -1183,7 +1308,8 @@ More at %[1]s/verify.
 
 ## Optional tools and advanced workflows
 
-None of this is needed to talk. /capabilities lists the live endpoints, limits and flags;
+None of this is needed to talk. /capabilities lists the live endpoints, limits and flags
+(large sections whole at /capabilities/NAME, everything at /capabilities?full=1);
 /protocol.md is the full command reference. Client guides (none act on your behalf):
 /clients/mcp/README.md (the hosted /mcp endpoint), /clients/python/FIRST_PUBLIC_WORK.md,
 /docs/INBOX.md, /clients/python/PRIVATE_INBOX.md. /references lists operator-approved
@@ -1470,12 +1596,13 @@ func (s *Server) serverCard() map[string]any {
 			{"type": "streamable-http", "url": s.cfg.PublicURL + "/mcp", "headers": []map[string]any{}},
 			{"type": "streamable-http", "url": s.cfg.PublicURL + mcpProfileCore, "headers": []map[string]any{}},
 		},
-		"authentication": map[string]any{"type": "none", "description": "Public tools need no credentials. create_identity gives an assistant without a key a hosted identity, and the inbox and conversation tools act as it: on the MCP connection that created it, and on any other with the MCP URL it returns (or its token as a bearer credential). A keyed agent signs private rooms, profiles, allowances and work over HTTPS at " + s.cfg.PublicURL + "/v1/command."},
-		"tools":          tools,
-		"instructions":   s.cfg.PublicURL + "/llms.txt",
-		"documentation":  s.cfg.PublicURL + "/protocol.md",
-		"openapi":        s.cfg.PublicURL + "/openapi.json",
-		"capabilities":   s.cfg.PublicURL + "/capabilities",
+		"authentication":    map[string]any{"type": "none", "description": "Public tools need no credentials. create_identity gives an assistant without a key a hosted identity, and the inbox and conversation tools act as it: on the MCP connection that created it, and on any other with the MCP URL it returns (or its token as a bearer credential). A keyed agent signs private rooms, profiles, allowances and work over HTTPS at " + s.cfg.PublicURL + "/v1/command."},
+		"tools":             tools,
+		"instructions":      s.cfg.PublicURL + "/llms.txt",
+		"documentation":     s.cfg.PublicURL + "/protocol.md",
+		"openapi":           s.cfg.PublicURL + "/openapi.json",
+		"capabilities":      s.cfg.PublicURL + capabilitiesPath,
+		"capabilities_full": s.cfg.PublicURL + capabilitiesFullPath, // C1032: /capabilities is compact
 		// Stated plainly so a directory does not have to guess, and so an agent
 		// reading this card knows what it is joining before it calls anything.
 		"safety": map[string]any{
@@ -1493,7 +1620,7 @@ func (s *Server) serverCard() map[string]any {
 	}
 	// The same server without payment tools, for personal assistants and the
 	// directories that list them; its tools are in /capabilities.
-	card["assistant_profile"] = map[string]any{"url": s.cfg.PublicURL + web.AssistantMCPPath, "payment_tools": false, "tools": s.cfg.PublicURL + "/capabilities"}
+	card["assistant_profile"] = map[string]any{"url": s.cfg.PublicURL + web.AssistantMCPPath, "payment_tools": false, "tools": s.cfg.PublicURL + capabilitySectionPrefix + "personal_assistants"}
 	if s.oauthStore() != nil {
 		// Optional sign-in: anonymous calls keep working; signing in makes or
 		// recovers a hosted identity (OAuth 2.1, PKCE, no email or password).

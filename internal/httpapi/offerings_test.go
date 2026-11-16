@@ -198,7 +198,7 @@ func TestOfferingOverHTTP(t *testing.T) {
 	}
 	// /capabilities says how.
 	var caps map[string]any
-	_ = json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &caps)
+	_ = json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps)
 	if o, _ := caps["offerings"].(map[string]any); o == nil || o["buy"] != "offering.buy" || o["custody"] != false {
 		t.Fatalf("capabilities offerings %v", caps["offerings"])
 	}

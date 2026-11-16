@@ -112,7 +112,8 @@ func (f *workPrivacyFixture) request(method, path, body string) (int, string) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if path != "/mcp" && response.Header.Get("Cache-Control") != "no-store" {
+	// /capabilities is public and revalidated by ETag (C1032): no-cache.
+	if want := map[bool]string{true: "no-cache", false: "no-store"}[strings.HasPrefix(path, capabilitiesPath)]; path != "/mcp" && response.Header.Get("Cache-Control") != want {
 		f.t.Fatal("work response is cacheable")
 	}
 	return response.StatusCode, string(data)

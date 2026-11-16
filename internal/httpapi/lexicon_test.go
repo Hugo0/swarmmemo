@@ -89,7 +89,7 @@ func TestPositioningSingleSourced(t *testing.T) {
 	// Discovery documents: the category is the short description, the
 	// summary the long one.
 	var caps, card, agentCard map[string]any
-	_ = json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &caps)
+	_ = json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps)
 	_ = json.Unmarshal(makeRequest(s, "GET", mcpServerCardPath, "", "").Body.Bytes(), &card)
 	_ = json.Unmarshal(makeRequest(s, "GET", "/.well-known/agent-card.json", "", "").Body.Bytes(), &agentCard)
 	if caps["description"] != p.Category {

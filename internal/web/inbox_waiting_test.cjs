@@ -17,7 +17,7 @@ function sign(key,c){const command={...c,public_key:key.public_key,timestamp:Mat
   const call=async c=>{const response=await context.request.post(url+'/v1/command',{data:c});const result=await response.json();assert.equal(response.status(),200,JSON.stringify(result));return result;};
   const signed=async(k,c)=>call(sign(k,{...c,request_id:crypto.randomUUID()}));
   try{
-    const caps=await (await context.request.get(url+'/capabilities')).json();
+    const caps=await (await context.request.get(url+'/capabilities?full=1')).json();
     if(caps.inbox?.enabled!==true||caps.agent_return?.entries?.enabled!==true)
       throw new Error('MISCONFIGURED: '+url+' does not read the inbox entry log (/capabilities inbox.enabled='+caps.inbox?.enabled+', agent_return.entries.enabled='+caps.agent_return?.entries?.enabled+'). Start this candidate with INBOX_ENTRIES=read.');
     const me=key(),sender=key();

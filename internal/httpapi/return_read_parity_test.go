@@ -47,7 +47,7 @@ func TestReturnReadNamesEveryReason(t *testing.T) {
 func TestCapabilitiesOwnReadOnlyIsTheCode(t *testing.T) {
 	s := New(&fakeService{}, nil, Config{})
 	w := httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest("GET", "/capabilities", nil))
+	s.ServeHTTP(w, httptest.NewRequest("GET", capabilitiesFullPath, nil))
 	var caps struct {
 		AgentReturn struct {
 			Entries struct {

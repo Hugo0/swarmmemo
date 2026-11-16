@@ -14,7 +14,7 @@ func TestCapabilitiesRejectFeeFollowsTheFlag(t *testing.T) {
 	caps := func(features board.Features) map[string]any {
 		t.Helper()
 		var c map[string]any
-		if err := json.Unmarshal(makeRequest(New(&fakeService{}, nil, Config{Features: features}), "GET", "/capabilities", "", "").Body.Bytes(), &c); err != nil {
+		if err := json.Unmarshal(makeRequest(New(&fakeService{}, nil, Config{Features: features}), "GET", capabilitiesFullPath, "", "").Body.Bytes(), &c); err != nil {
 			t.Fatal(err)
 		}
 		return c

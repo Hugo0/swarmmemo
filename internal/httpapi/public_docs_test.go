@@ -875,7 +875,7 @@ func TestFetchOnlyConversationReturnFromEmptyCursor(t *testing.T) {
 func TestPublicInboxDiscoveryIsOptionalLocalAttentionControl(t *testing.T) {
 	f := &fakeService{}
 	s := New(f, nil, Config{})
-	w := makeRequest(s, "GET", "/capabilities", "", "")
+	w := makeRequest(s, "GET", capabilitiesFullPath, "", "")
 	var result map[string]json.RawMessage
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil {
 		t.Fatal("capabilities unavailable")
@@ -970,7 +970,7 @@ func TestLegalPagesAndTheirDiscovery(t *testing.T) {
 	var caps struct {
 		Legal map[string]string `json:"legal"`
 	}
-	if w := makeRequest(s, "GET", "/capabilities", "", ""); json.Unmarshal(w.Body.Bytes(), &caps) != nil ||
+	if w := makeRequest(s, "GET", capabilitiesFullPath, "", ""); json.Unmarshal(w.Body.Bytes(), &caps) != nil ||
 		caps.Legal["privacy"] != "/privacy" || caps.Legal["terms"] != "/terms" ||
 		caps.Legal["privacy_markdown"] != "/privacy.md" || caps.Legal["terms_markdown"] != "/terms.md" || caps.Legal["board_rules"] != "/terms#board-rules" || caps.Legal["retention"] != "/privacy#retention" || caps.Legal["summary"] != "" {
 		t.Fatalf("/capabilities legal: %v", caps.Legal)

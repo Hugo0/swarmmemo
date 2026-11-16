@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +31,7 @@ func TestCapabilitiesStateAttachmentRetention(t *testing.T) {
 func TestLocalMCPDiscoveryIsOptionalAndNonMutating(t *testing.T) {
 	f := &fakeService{}
 	s := New(f, nil, Config{})
-	w := makeRequest(s, "GET", "/capabilities", "", "")
+	w := makeRequest(s, "GET", capabilitiesFullPath, "", "")
 	var capabilities map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &capabilities); err != nil {
 		t.Fatal(err)
@@ -68,7 +69,7 @@ func TestLocalMCPDiscoveryIsOptionalAndNonMutating(t *testing.T) {
 func TestPrivateInboxDiscoveryKeepsClientAuthorityExplicit(t *testing.T) {
 	service := &fakeService{}
 	s := New(service, nil, Config{})
-	w := makeRequest(s, "GET", "/capabilities", "", "")
+	w := makeRequest(s, "GET", capabilitiesFullPath, "", "")
 	var result map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
@@ -95,7 +96,7 @@ func TestPublicWorkGuideDiscoveryIsReadOnly(t *testing.T) {
 	f := &fakeService{}
 	s := New(f, nil, Config{})
 	var capabilities map[string]any
-	if err := json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &capabilities); err != nil {
+	if err := json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &capabilities); err != nil {
 		t.Fatal(err)
 	}
 	work := capabilities["work_coordination"].(map[string]any)
@@ -227,5 +228,86 @@ func TestPinnedClientVersions(t *testing.T) {
 	}
 	if w = makeRequest(handler, "GET", "/clients/python/verify_log-00000000.py", "", ""); w.Code != 404 {
 		t.Fatalf("an unpublished version: %d", w.Code)
+	}
+}
+
+// C1030: /capabilities names the client contract by its SHA-256, the hash of
+// clients/contract.json as served and as the Python client embeds it, so a
+// bridge checkout can tell it is behind; no minimum contract is set yet.
+func TestCapabilitiesClientsContractHash(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{})
+	var caps map[string]any
+	if err := json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps); err != nil {
+		t.Fatal(err)
+	}
+	clients, _ := caps["clients"].(map[string]any)
+	bridge, _ := clients["mcp_bridge"].(map[string]any)
+	file, err := os.ReadFile(filepath.Join("..", "..", "clients", "contract.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(file)
+	want := hex.EncodeToString(sum[:])
+	if clients["contract_sha256"] != want || bridge == nil || bridge["minimum_contract"] != nil || !strings.Contains(bridge["update"].(string), "uv sync") {
+		t.Fatalf("capabilities clients = %v, want contract_sha256 %s", clients, want)
+	}
+	if v, ok := bridge["minimum_contract"]; !ok || v != nil {
+		t.Fatal("mcp_bridge.minimum_contract must be present and null")
+	}
+	served := makeRequest(s, "GET", clients["contract"].(string), "", "")
+	if served.Code != 200 || served.Body.String() != string(file) {
+		t.Fatalf("%s: %d, not the contract file", clients["contract"], served.Code)
+	}
+	python, err := os.ReadFile(filepath.Join("..", "..", "clients", "python", "swarmmemo.py"))
+	if err != nil || !strings.Contains(string(python), `CONTRACT_SHA256 = "`+want+`"`) {
+		t.Fatal("swarmmemo.py does not embed the served contract's SHA-256; run go generate ./internal/clientcontract")
+	}
+}
+
+// C1031: /clients/contract.sha256 is the contract's hash alone, the same as
+// /capabilities clients.contract_sha256 and the Python client's embedded
+// CONTRACT_SHA256, small and cacheable so a bridge can read it on its first call.
+func TestClientContractHashEndpoint(t *testing.T) {
+	s := New(&fakeService{}, nil, Config{})
+	var caps map[string]any
+	if err := json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps); err != nil {
+		t.Fatal(err)
+	}
+	clients, _ := caps["clients"].(map[string]any)
+	if clients["contract_hash"] != "/clients/contract.sha256" {
+		t.Fatalf("capabilities clients.contract_hash = %v", clients["contract_hash"])
+	}
+	file, err := os.ReadFile(filepath.Join("..", "..", "clients", "contract.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(file)
+	want := hex.EncodeToString(sum[:])
+	w := makeRequest(s, "GET", "/clients/contract.sha256", "", "")
+	if w.Code != 200 || w.Body.String() != want+"\n" || clients["contract_sha256"] != want {
+		t.Fatalf("GET /clients/contract.sha256: %d %q, want %s", w.Code, w.Body.String(), want)
+	}
+	python, err := os.ReadFile(filepath.Join("..", "..", "clients", "python", "swarmmemo.py"))
+	if err != nil || !strings.Contains(string(python), `CONTRACT_SHA256 = "`+want+`"`) {
+		t.Fatal("swarmmemo.py does not embed the served hash; run go generate ./internal/clientcontract")
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Fatalf("Content-Type %q", ct)
+	}
+	if cc, etag := w.Header().Get("Cache-Control"), w.Header().Get("ETag"); cc != "public, max-age=300" || etag != `"`+want+`"` {
+		t.Fatalf("Cache-Control %q, ETag %q", cc, etag)
+	}
+	req := httptest.NewRequest("GET", "/clients/contract.sha256", nil)
+	req.Header.Set("If-None-Match", `"`+want+`"`)
+	again := httptest.NewRecorder()
+	s.ServeHTTP(again, req)
+	if again.Code != 304 || again.Body.Len() != 0 {
+		t.Fatalf("If-None-Match: %d %q, want 304 and no body", again.Code, again.Body.String())
+	}
+	if head := makeRequest(s, "HEAD", "/clients/contract.sha256", "", ""); head.Code != 200 || head.Body.Len() != 0 {
+		t.Fatalf("HEAD: %d, %d bytes", head.Code, head.Body.Len())
+	}
+	if post := makeRequest(s, "POST", "/clients/contract.sha256", "", ""); post.Code != 405 {
+		t.Fatalf("POST: %d, want 405", post.Code)
 	}
 }

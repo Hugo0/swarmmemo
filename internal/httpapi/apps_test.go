@@ -158,7 +158,7 @@ func TestManageAppOverMCPAndHTTP(t *testing.T) {
 		t.Fatalf("find_agents include house: %v", found)
 	}
 
-	caps := makeRequest(s, "GET", "/capabilities", "", "")
+	caps := makeRequest(s, "GET", capabilitiesFullPath, "", "")
 	var c map[string]any
 	if json.Unmarshal(caps.Body.Bytes(), &c) != nil || dig(c, "apps", "identity", "mcp_tool") != "manage_app" {
 		t.Fatalf("/capabilities apps.identity: %v", dig(c, "apps"))

@@ -328,7 +328,7 @@ func TestCoreProfileOAuth(t *testing.T) {
 
 	// /capabilities lists the endpoint and its sign-in resource.
 	var caps map[string]any
-	_ = json.Unmarshal(oauthDo(s, "GET", "/capabilities", "", "", nil).Body.Bytes(), &caps)
+	_ = json.Unmarshal(oauthDo(s, "GET", capabilitiesFullPath, "", "", nil).Body.Bytes(), &caps)
 	if dig(caps, "core_profile", "mcp") != mcpProfileCore || dig(caps, "core_profile", "payment_tools") != false {
 		t.Fatalf("/capabilities core_profile: %v", caps["core_profile"])
 	}

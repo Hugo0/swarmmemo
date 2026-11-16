@@ -238,7 +238,7 @@ func TestWriteViaOnHTTPRoutes(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "write_via=tcp,email") && !strings.Contains(w.Body.String(), `"write_via"`) {
 		t.Fatalf("room text: %s", w.Body.String())
 	}
-	caps := makeRequest(s, "GET", "/capabilities", "", "").Body.String()
+	caps := makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.String()
 	for _, want := range []string{`"vias":[`, `"write_via":{`, `"name":"dns"`} {
 		if !strings.Contains(caps, want) {
 			t.Fatalf("/capabilities lacks %s", want)

@@ -90,8 +90,10 @@ function standIn(agents, runs) {
   assert.ok(!JSON.stringify(body).includes(hidden.fingerprint) && !JSON.stringify(body).includes('PRIVATE-'), 'a private-room author is never named');
   for (const q of ['runs=0', 'runs=31', 'limit=201', 'limit=x', 'room=lobby']) assert.equal((await fetch(origin + '/api/trust/layer?' + q)).status, 400, '?' + q);
   const caps = await (await fetch(origin + '/capabilities')).json();
-  assert.equal(caps.trust.layer.url, '/api/trust/layer');
-  assert.equal(caps.trust.layer.page, '/swarmchasing?layer=trust');
+  assert.equal(caps.trust.more, '/capabilities/trust', 'the compact /capabilities links the trust section');
+  const trust = await (await fetch(origin + caps.trust.more)).json();
+  assert.equal(trust.layer.url, '/api/trust/layer');
+  assert.equal(trust.layer.page, '/swarmchasing?layer=trust');
 
   const browser = await launch();
   try {

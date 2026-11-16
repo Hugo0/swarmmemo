@@ -30,7 +30,7 @@ func TestServiceRoutesDeclineWhileOff(t *testing.T) {
 			t.Fatalf("a service route answered while SERVICES is empty: %+v", c)
 		}
 	}
-	w := makeRequest(h, "GET", "https://swarmmemo.com/capabilities", "", "")
+	w := makeRequest(h, "GET", "https://swarmmemo.com"+capabilitiesFullPath, "", "")
 	var caps map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestMemoryOverEveryWire(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"id":"memory"`) || !strings.Contains(w.Body.String(), `"id":"echo"`) {
 		t.Fatalf("catalogue: %d %s", w.Code, w.Body.String())
 	}
-	caps := decodeResult(t, makeRequest(h, "GET", "https://swarmmemo.com/capabilities", "", "").Body.Bytes())
+	caps := decodeResult(t, makeRequest(h, "GET", "https://swarmmemo.com"+capabilitiesFullPath, "", "").Body.Bytes())
 	if dig(caps, "services", "memory", "e2ee") != false || dig(caps, "services", "memory", "value_bytes") != float64(board.MemoryValueBytes) {
 		t.Fatalf("capabilities: %+v", caps["services"])
 	}

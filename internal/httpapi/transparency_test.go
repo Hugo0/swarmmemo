@@ -135,7 +135,7 @@ func TestTransparencyRoutes(t *testing.T) {
 	if rec.Code != 405 {
 		t.Fatalf("POST: %d", rec.Code)
 	}
-	caps := get(s, "/capabilities", "").Body.String()
+	caps := get(s, capabilitiesFullPath, "").Body.String()
 	if !strings.Contains(caps, `"transparency"`) || !strings.Contains(caps, cp.Checkpoint.VerifierKey) {
 		t.Fatal("capabilities lack the transparency fragment")
 	}

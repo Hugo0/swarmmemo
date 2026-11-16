@@ -221,7 +221,7 @@ func TestTrustGraphRoute(t *testing.T) {
 	if w := makeRequest(s, "POST", "/api/trust/graph", "{}", "application/json"); w.Code < 400 {
 		t.Errorf("POST: %d", w.Code)
 	}
-	caps := getJSON(t, s, "GET", "/capabilities", "")
+	caps := getJSON(t, s, "GET", capabilitiesFullPath, "")
 	if g, ok := lookup(caps, "trust.graph.url"); !ok || g != "/api/trust/graph" {
 		t.Errorf("capabilities trust.graph: %v", g)
 	}

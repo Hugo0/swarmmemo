@@ -13,7 +13,7 @@ import (
 // operator never started the sender.
 func TestPushDeliveryDiscoveryStatesItsBounds(t *testing.T) {
 	s := New(&fakeService{}, nil, Config{})
-	w := makeRequest(s, "GET", "/capabilities", "", "")
+	w := makeRequest(s, "GET", capabilitiesFullPath, "", "")
 	var capabilities struct {
 		Operations   []string       `json:"operations"`
 		PushDelivery map[string]any `json:"push_delivery"`
@@ -47,7 +47,7 @@ func TestPushDeliveryDiscoveryStatesItsBounds(t *testing.T) {
 		}
 	}
 	enabled := New(&fakeService{}, nil, Config{PushDelivery: true})
-	w = makeRequest(enabled, "GET", "/capabilities", "", "")
+	w = makeRequest(enabled, "GET", capabilitiesFullPath, "", "")
 	if !strings.Contains(w.Body.String(), `"enabled":true`) {
 		t.Fatal("an operator that started the sender is not reported as enabled")
 	}

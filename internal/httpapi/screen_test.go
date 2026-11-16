@@ -67,7 +67,7 @@ func TestScreenSurfaces(t *testing.T) {
 	if dig(out, "result", "isError") == true || dig(out, "result", "structuredContent", "data", "result", "verdict") != "flag" {
 		t.Fatalf("MCP screen_text: %+v", out)
 	}
-	caps := decodeResult(t, makeRequest(s, "GET", "https://swarmmemo.com/capabilities", "", "").Body.Bytes())
+	caps := decodeResult(t, makeRequest(s, "GET", "https://swarmmemo.com"+capabilitiesFullPath, "", "").Body.Bytes())
 	if dig(caps, "services", "network") != true || !strings.Contains(strings.Join(anyStrings(dig(caps, "services", "without_key", "methods")), ","), "screen.text") {
 		t.Fatalf("capabilities: %+v", dig(caps, "services"))
 	}

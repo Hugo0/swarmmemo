@@ -25,7 +25,7 @@ func TestManagePushAndCapabilities(t *testing.T) {
 		t.Fatalf("manage_push unknown action: %q", failure)
 	}
 	var caps map[string]any
-	if err := json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &caps); err != nil {
+	if err := json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
 	wp, _ := caps["web_push"].(map[string]any)

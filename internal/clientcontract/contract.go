@@ -11,8 +11,11 @@ package clientcontract
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"sync"
 
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/find"
@@ -279,3 +282,16 @@ func JSON() []byte {
 	}
 	return out.Bytes()
 }
+
+// SHA256 is the hex SHA-256 of JSON(), the bytes of clients/contract.json:
+// /capabilities clients.contract_sha256 serves it and the Python client's
+// generated block embeds it (CONTRACT_SHA256), so a checkout can tell that
+// the server's contract is not its own (C1030).
+var SHA256 = sync.OnceValue(func() string {
+	sum := sha256.Sum256(JSON())
+	return hex.EncodeToString(sum[:])
+})
+
+// BridgeUpdate is the command that brings an MCP bridge checkout up to the
+// server's contract; /capabilities and the bridge's bridge_notice say it.
+const BridgeUpdate = "git pull && uv sync --project clients/mcp --locked"

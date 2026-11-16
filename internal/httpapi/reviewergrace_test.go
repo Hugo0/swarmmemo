@@ -13,7 +13,7 @@ func TestCapabilitiesShowReviewerGrace(t *testing.T) {
 	grace := func(s *Server) map[string]any {
 		t.Helper()
 		var c map[string]any
-		if err := json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &c); err != nil {
+		if err := json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &c); err != nil {
 			t.Fatal(err)
 		}
 		return c["work_coordination"].(map[string]any)["reviewer"].(map[string]any)["silent_reviewer"].(map[string]any)

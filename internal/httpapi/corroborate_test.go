@@ -108,7 +108,7 @@ func TestCorroborateWire(t *testing.T) {
 	if code, _, raw = get("/api/services"); code != 200 || !strings.Contains(raw, `"id":"corroborate"`) || !strings.Contains(raw, `"free":true`) {
 		t.Fatalf("catalogue: %d", code)
 	}
-	if _, out, _ = get("/capabilities"); dig(out, "services", "corroborate", "free") != true || dig(out, "services", "network") != true {
+	if _, out, _ = get(capabilitiesFullPath); dig(out, "services", "corroborate", "free") != true || dig(out, "services", "network") != true {
 		t.Fatalf("capabilities: %v", dig(out, "services", "corroborate"))
 	}
 }

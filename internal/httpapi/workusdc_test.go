@@ -66,7 +66,7 @@ func TestWorkUSDCRewardOnAPIAndMCP(t *testing.T) {
 	t.Cleanup(func() { store.Close() })
 	s := New(store, nil, Config{PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com"})
 
-	caps := makeRequest(s, "GET", "/capabilities", "", "").Body.String()
+	caps := makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.String()
 	for _, want := range []string{`"usdc":{`, `"enabled":true`, `"command":"work.settle"`, `"network":"eip155:8453"`} {
 		if !strings.Contains(caps, want) {
 			t.Errorf("/capabilities misses %s", want)

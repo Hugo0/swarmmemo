@@ -46,6 +46,10 @@ class Supervisor:
         self.profile_path = str(Path(profile_path).absolute())
         self.fingerprint = profile.fingerprint
         self.busy = False
+        self.noticed = False
+        # C1031: until a worker reports contract_checked, ask it to read the
+        # server's contract hash after its first network request.
+        self.contract_checked = False
 
     async def call(self, action, arguments):
         if self.busy: return {"ok": False, "error": "bridge_busy"}
@@ -56,8 +60,9 @@ class Supervisor:
         try:
             if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
                 return {"ok": False, "error": "worker_ownership_lost"}
-            raw = encoded({"action": action, "arguments": arguments,
-                           "expected_profile_fingerprint": self.fingerprint})
+            request = {"action": action, "arguments": arguments, "expected_profile_fingerprint": self.fingerprint}
+            if not self.contract_checked: request["check_contract"] = True
+            raw = encoded(request)
             if len(raw) > MAX_BYTES: return {"ok": False, "error": "invalid_request"}
             process = subprocess.Popen([sys.executable, "-I", "-B", str(WORKER), self.profile_path, str(os.getpid())],
                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -81,10 +86,13 @@ class Supervisor:
                 await anyio.sleep(0.01)
             result = strict_json(bytes(output))
             if (not isinstance(result, dict) or type(result.get("ok")) is not bool
-                    or set(result) != ({"ok", "result"} if result["ok"] else {"ok", "error"})):
+                    or set(result) - ({"contract_checked"} if result["ok"] else set()) != ({"ok", "result"} if result["ok"] else {"ok", "error"})
+                    or result.get("contract_checked", True) is not True):
                 return {"ok": False, "error": "worker_failed"}
+            if result.pop("contract_checked", False): self.contract_checked = True
             if result["ok"] and not isinstance(result["result"], dict):
                 return {"ok": False, "error": "worker_failed"}
+            if result["ok"] and "bridge_notice" in result["result"]: self.notice(result["result"])
             if not result["ok"]:
                 code = result["error"]
                 if not isinstance(code, str): return {"ok": False, "error": "worker_failed"}
@@ -102,6 +110,20 @@ class Supervisor:
                         await self.reap(process, deadline)
             finally:
                 self.busy = False
+
+    def notice(self, result):
+        """C1030: each worker is a new process, so the bridge's one notice per
+        process is kept here: the first bridge_notice reaches the model and one
+        fixed line goes to stderr; later ones are dropped."""
+        notice = result.pop("bridge_notice")
+        if self.noticed: return
+        self.noticed = True
+        count = notice.get("unknown_count") if isinstance(notice, dict) else None
+        result["bridge_notice"] = notice
+        if isinstance(notice, dict) and "server_contract_sha256" in notice and not count:
+            print("bridge_outdated: server contract differs; update the checkout", file=sys.stderr, flush=True)
+        else:
+            print(f"bridge_outdated: server added fields {count if type(count) is int else 0}; update the checkout", file=sys.stderr, flush=True)
 
     @staticmethod
     async def reap(process, deadline):

@@ -80,7 +80,7 @@ func TestSanctionsOverHTTP(t *testing.T) {
 		t.Fatal("/stats has no sanction counts matching the API")
 	}
 	var caps map[string]any
-	_ = json.Unmarshal(adminGet(s, "/capabilities", "").Body.Bytes(), &caps)
+	_ = json.Unmarshal(adminGet(s, capabilitiesFullPath, "").Body.Bytes(), &caps)
 	if m, _ := caps["sanctions"].(map[string]any); m["error"] != "sanctioned" || m["stats"] != "/api/stats/moderation" {
 		t.Fatalf("capabilities %v", caps["sanctions"])
 	}

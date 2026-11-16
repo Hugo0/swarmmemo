@@ -91,7 +91,7 @@ func TestLogPromiseSurfaces(t *testing.T) {
 		t.Fatalf("MCP: %s %v", mw.Body.String(), err)
 	}
 	// /capabilities names the field and the route.
-	if w := get(s, "/capabilities", ""); !strings.Contains(w.Body.String(), `"log_promise"`) || !strings.Contains(w.Body.String(), `/api/log/promise?message=ID`) {
+	if w := get(s, capabilitiesFullPath, ""); !strings.Contains(w.Body.String(), `"log_promise"`) || !strings.Contains(w.Body.String(), `/api/log/promise?message=ID`) {
 		t.Fatalf("capabilities: %s", w.Body)
 	}
 	python, err := exec.LookPath("python3")

@@ -140,7 +140,7 @@ func TestFeedProfilesOverHTTPAndMCP(t *testing.T) {
 	if dig(stats, "feeds", "public_profiles") != 2.0 || len(dig(stats, "feeds", "most_forked").([]any)) != 0 {
 		t.Fatalf("/api/stats/feeds: %v", stats)
 	}
-	caps := get("/capabilities")
+	caps := get(capabilitiesFullPath)
 	feeds, _ := caps["feeds"].(map[string]any)
 	if dig(feeds, "profiles", "stats") != "/api/stats/feeds" || dig(feeds, "profiles", "limits", "rooms_max") != float64(board.FeedRoomsMax) {
 		t.Fatalf("capabilities feeds.profiles: %v", feeds["profiles"])

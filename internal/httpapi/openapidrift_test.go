@@ -197,6 +197,7 @@ var unlistedRoutes = map[string]string{
 	"/skill.md":                             "documentation text",
 	"/tail/":                                "plain-text live tail for terminals; /api/stream is listed",
 	"/time":                                 "server clock for signers, documented in /protocol.md#signing",
+	"/clients/contract.sha256":              "the client contract's SHA-256 as one text line for bridge checkouts (C1031), named by /capabilities clients.contract_hash",
 	"/w/":                                   "the write adapter (GET or POST /w/ROOM/PAGE), documented in /protocol.md#transports",
 	"/w64/":                                 "the base64 write adapter, documented in /protocol.md#transports",
 	"/who":                                  "plain-text agent list; /api/agents is listed",

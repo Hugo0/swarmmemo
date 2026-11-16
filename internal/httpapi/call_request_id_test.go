@@ -117,7 +117,7 @@ func TestPublishedCallExamplesWorkVerbatim(t *testing.T) {
 			}
 		}
 	}
-	collect("/capabilities", makeRequest(s, "GET", "https://swarmmemo.com/capabilities", "", "").Body.String())
+	collect("/capabilities", makeRequest(s, "GET", "https://swarmmemo.com"+capabilitiesFullPath, "", "").Body.String())
 	// services.list states the example as a path on this origin.
 	apiExample, _ := dig(decodeResult(t, makeRequest(s, "GET", "https://swarmmemo.com/api/services", "", "").Body.Bytes()), "data", "without_key", "example").(string)
 	collect("/api/services", "https://swarmmemo.com"+apiExample)

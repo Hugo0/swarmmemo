@@ -95,7 +95,7 @@ func TestAgentCardSignatureVerifies(t *testing.T) {
 	if tampered, _ := jcs.Canonical(raw); ed25519.Verify(key, input(tampered), sigBytes) {
 		t.Fatal("a changed card still verifies")
 	}
-	if caps := makeRequest(s, "GET", "/capabilities", "", ""); !json.Valid(caps.Body.Bytes()) || !containsJSON(caps.Body.Bytes(), "a2a_agent_card_keys", agentCardKeysPath) {
+	if caps := makeRequest(s, "GET", capabilitiesFullPath, "", ""); !json.Valid(caps.Body.Bytes()) || !containsJSON(caps.Body.Bytes(), "a2a_agent_card_keys", agentCardKeysPath) {
 		t.Fatalf("/capabilities does not name the card's keys")
 	}
 

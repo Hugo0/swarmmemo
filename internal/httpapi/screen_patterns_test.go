@@ -62,7 +62,7 @@ func TestLeakPatternsEndpoint(t *testing.T) {
 	var caps struct {
 		Conversations map[string]any `json:"conversations"`
 	}
-	if err = json.Unmarshal(get(s, "/capabilities", "application/json").Body.Bytes(), &caps); err != nil || caps.Conversations["leak_patterns"] != LeakPatternsPath || caps.Conversations["screening"] == nil {
+	if err = json.Unmarshal(get(s, capabilitiesFullPath, "application/json").Body.Bytes(), &caps); err != nil || caps.Conversations["leak_patterns"] != LeakPatternsPath || caps.Conversations["screening"] == nil {
 		t.Fatalf("capabilities: %v %v", caps.Conversations, err)
 	}
 	// The pattern check's price comes from the quote's own price, which is
@@ -71,7 +71,7 @@ func TestLeakPatternsEndpoint(t *testing.T) {
 	if services.LeakPatternsPriceText() != "free" || !strings.Contains(outbound, "patterns (free)") || strings.Contains(outbound, "credit") {
 		t.Fatalf("screening.outbound: %q", outbound)
 	}
-	if body := get(s, "/capabilities", "application/json").Body.String(); strings.Contains(body, "patterns (1 credit)") {
+	if body := get(s, capabilitiesFullPath, "application/json").Body.String(); strings.Contains(body, "patterns (1 credit)") {
 		t.Fatalf("capabilities still price the patterns at 1 credit")
 	}
 	var spec struct {

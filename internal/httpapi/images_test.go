@@ -256,7 +256,7 @@ func TestImageURLsInJSONAndCapabilities(t *testing.T) {
 		t.Fatalf("room image_url %q", room.Room.ImageURL)
 	}
 	var caps map[string]any
-	_ = json.Unmarshal(request(f.on, "GET", "/capabilities", "").Body.Bytes(), &caps)
+	_ = json.Unmarshal(request(f.on, "GET", capabilitiesFullPath, "").Body.Bytes(), &caps)
 	images, _ := caps["images"].(map[string]any)
 	if images["renderer"] != "local" || images["post"] != "/e/MESSAGE_ID.png" || images["renders_urls"] != false {
 		t.Fatalf("capabilities images %v", images)

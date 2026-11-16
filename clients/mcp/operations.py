@@ -206,7 +206,39 @@ def arguments_checked(profile, action, args):
     return copy.deepcopy(args)
 
 
+# C1031: the server's contract hash, read once per bridge process after its
+# first real network request (the supervisor passes check_contract until a
+# worker reports contract_checked). A differing hash is named in bridge_notice;
+# an unreachable or malformed answer is ignored and never fails the call.
+CONTRACT_HASH_PATH = "/clients/contract.sha256"
+CONTRACT_HASH_SECONDS = 3
+_check_contract = False
+_contract_checked = False
+_server_contract = None
+
+
+def _contract_text(profile):
+    request = urllib.request.Request(profile.origin + CONTRACT_HASH_PATH, headers={"Accept": "text/plain", "User-Agent": memo.USER_AGENT})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), memo.NoRedirect())
+    with opener.open(request, timeout=CONTRACT_HASH_SECONDS) as response:
+        return response.read(129)
+
+
+def _compare_contract(profile):
+    global _check_contract, _contract_checked, _server_contract
+    _check_contract, _contract_checked = False, True
+    try: text = _contract_text(profile).decode("ascii").strip()
+    except Exception: return
+    if re.fullmatch(HEX64, text) and text != memo.CONTRACT_SHA256: _server_contract = text
+
+
 def _request(profile, path, body=None):
+    result = _send(profile, path, body)
+    if _check_contract: _compare_contract(profile)
+    return result
+
+
+def _send(profile, path, body=None):
     # The caller supplies only code-built fixed paths. The supervisor enforces
     # the outer wall-clock budget even if DNS or a trickle defeats socket timeouts.
     payload = None if body is None else json.dumps(body, ensure_ascii=False).encode()
@@ -303,10 +335,43 @@ def _valid_flaky(check, text):
     return True
 
 
+# C1030: a top-level field this checkout's contract does not know (a newer
+# server added it) is dropped, never passed to the model, and named once per
+# process in bridge_notice; the fields it knows stay strict. Only names that
+# look like field names are listed (at most NOTICE_NAMES), never server text.
+FIELD_NAME = r"^[a-z][a-z0-9_]{0,39}$"
+NOTICE_NAMES = 8
+_dropped = set()
+_noticed = False
+
+
+def _known(obj, required, optional):
+    """obj's known fields (a copy) and the names it dropped; required stay required."""
+    fields = required | optional
+    if not isinstance(obj, dict) or not required <= obj.keys(): raise BridgeError("invalid_response")
+    dropped = set(obj) - fields
+    _dropped.update(dropped)
+    return {key: value for key, value in obj.items() if key in fields}, dropped
+
+
+def _notice():
+    """bridge_notice on the first answer of this process that dropped a field."""
+    global _noticed
+    if not (_dropped or _server_contract) or _noticed: return None
+    _noticed = True
+    names = sorted(name for name in _dropped if re.fullmatch(FIELD_NAME, name))[:NOTICE_NAMES]
+    notice = {"unknown_fields": names, "unknown_count": len(_dropped), "update": memo.BRIDGE_UPDATE}
+    if _server_contract: notice["server_contract_sha256"] = _server_contract
+    return notice
+
+
 # A work object's fields: the json tags of the Go Work struct, required
 # (always sent) and optional.
 WORK_REQUIRED = frozenset(memo.CONTRACT["structs"]["work"]["required"])
 WORK_OPTIONAL = frozenset(memo.CONTRACT["structs"]["work"]["optional"])
+# A requester, worker or reviewer (Go AgentRef).
+AGENT_REQUIRED = frozenset(memo.CONTRACT["structs"]["agent_ref"]["required"])
+AGENT_OPTIONAL = frozenset(memo.CONTRACT["structs"]["agent_ref"]["optional"])
 # A standing task's read (Go WorkStanding): its seats as counts, its limits,
 # its tiers, optional daily USDC caps, optional results_max with full (C346)
 # optional per_agent_max (C672) and per_agent_cooldown_days (C830).
@@ -405,8 +470,8 @@ def _valid_create_options(data):
 def _standing(standing):
     """A standing task's seats (Go WorkStanding), on a work or a works.list
     filtered by standing; anything else is invalid_response."""
-    if (not isinstance(standing, dict) or set(standing) - STANDING_COUNTS - STANDING_OPTIONAL - {"tiers"} or not STANDING_COUNTS <= standing.keys()
-            or standing.get("full", True) is not True
+    standing, _ = _known(standing, STANDING_COUNTS, STANDING_OPTIONAL | {"tiers"})
+    if (standing.get("full", True) is not True
             or any(name in standing and (type(standing[name]) is not int or not 1 <= standing[name] <= LIMITS["work_standing_results_maximum"]) for name in ("results_max", "per_agent_max"))
             or ("per_agent_cooldown_days" in standing and (type(standing["per_agent_cooldown_days"]) is not int
                                                            or not 1 <= standing["per_agent_cooldown_days"] <= LIMITS["work_standing_cooldown_days_maximum"]))
@@ -453,7 +518,7 @@ def _valid_result_money(money):
 
 
 def _work(profile, work, expected=None):
-    if not isinstance(work, dict) or set(work) - WORK_REQUIRED - WORK_OPTIONAL or not WORK_REQUIRED <= work.keys(): raise BridgeError("invalid_response")
+    work, _ = _known(work, WORK_REQUIRED, WORK_OPTIONAL)
     # reward_usdc is a reward's USDC asset (amount a decimal string, RFC 0016);
     # reward_state the whole reward's; reward_note one line of display text,
     # 1 to work_reward_note_chars characters, for a reward the poster pays, not the board.
@@ -489,7 +554,7 @@ def _work(profile, work, expected=None):
     # C661: a result queued for a seat says when one opens by itself.
     if "next_open_at" in work and (type(work["next_open_at"]) is not int or not 0 < work["next_open_at"] < 2**63): raise BridgeError("invalid_response")
     # standing: a standing task's seats; standing_id and tier: a result it opened.
-    if "standing" in work: _standing(work["standing"])
+    if "standing" in work: work["standing"] = _standing(work["standing"])
     if "standing_id" in work and (not isinstance(work["standing_id"], str) or not re.fullmatch(HEX32, work["standing_id"]) or work["standing_id"] == work.get("id")): raise BridgeError("invalid_response")
     if "tier" in work and (not isinstance(work["tier"], str) or not re.fullmatch(STANDING_TIER, work["tier"])): raise BridgeError("invalid_response")
     # request is the task at its newest version, bounded (4096 bytes on one
@@ -606,8 +671,9 @@ def _work(profile, work, expected=None):
         if name in work and not isinstance(work[name], dict): raise BridgeError("invalid_response")
     for name in ("requester", "worker", "reviewer"):
         if name not in work: continue
-        agent = work[name]
-        if not isinstance(agent, dict) or set(agent) - memo.struct_fields("agent_ref") or not isinstance(agent.get("id"), str) or not re.fullmatch(HEX64, agent["id"]): raise BridgeError("invalid_response")
+        agent, _ = _known(work[name], AGENT_REQUIRED, AGENT_OPTIONAL)
+        work[name] = agent
+        if not isinstance(agent["id"], str) or not re.fullmatch(HEX64, agent["id"]): raise BridgeError("invalid_response")
         try:
             if hashlib.sha256(memo.unb64(agent["public_key"])).hexdigest() != agent["id"]: raise ValueError()
         except Exception: raise BridgeError("invalid_response") from None
@@ -629,14 +695,12 @@ def _transition(profile, item, work_id):
     # (fallback "reviewer_silent"); the field sets are the server's
     # WorkTransition (Inner Ozma 29b5fbe9).
     optional = WORK_TRANSITION_OPTIONAL
-    fields = WORK_TRANSITION_REQUIRED | optional
-    if not isinstance(item, dict) or not fields - optional <= item.keys(): raise BridgeError("invalid_response")
     # A field this bridge does not know is the service's unsigned annotation
     # beside the signed command: dropped, never passed on, so a newer service
     # does not break an older bridge (C692). The signed command and its data
     # stay strict: an unknown signed field may change what the entry means
     # (as target did for an accept's fence, C691).
-    item = {key: value for key, value in item.items() if key in fields}
+    item, _ = _known(item, WORK_TRANSITION_REQUIRED, optional)
     if "fallback" in item and item["fallback"] not in ENUMS["work_transition_fallbacks"]: raise BridgeError("invalid_response")
     if "note" in item and (not isinstance(item["note"], str) or not 0 < len(item["note"].encode()) <= 512 or "\n" in item["note"]): raise BridgeError("invalid_response")
     for name in ("sequence", "accepted_at", "fence"):
@@ -769,7 +833,7 @@ def _dispatch(profile, action, a):
         if "items" in status: status["items"] = [_summary(item) for item in status["items"]]
         return {"profile_fingerprint": profile.fingerprint, "mode": profile.mode, "origin": profile.origin, "service_id": profile.service_id,
                 "public_key": profile.public_key, "room": profile.room, "delegation": profile.delegation, "operations": list(profile.operations),
-                "queue": status, "network_requests": 0}
+                "queue": status, "network_requests": 0, "contract_sha256": memo.CONTRACT_SHA256}
     if action.startswith("stage_"):
         if action == "stage_post":
             command = {"operation": "post", "room": profile.room, "visibility": "public", "page": a.get("page", "main"), "kind": a.get("kind", "note"), "text": a["text"], "delegation": profile.delegation}
@@ -859,10 +923,15 @@ def _dispatch(profile, action, a):
             "has_more": data["has_more"], "next_cursor": _cursor(result.get("next_cursor", ""))}
 
 
-def dispatch(profile, action, arguments):
+def dispatch(profile, action, arguments, check_contract=False):
+    global _check_contract
     try:
         args = arguments_checked(profile, action, arguments)
+        _dropped.clear()
+        _check_contract = check_contract and not _contract_checked
         result = {**_dispatch(profile, action, args), "observed_at": int(time.time())}
+        notice = _notice()
+        if notice: result["bridge_notice"] = notice
         # Account for BOTH structured and text MCP representations, including the
         # extra JSON quoting of embedded canonical payloads. No partial events.
         wrapper = {"structuredContent": result, "content": [{"type": "text", "text": encoded(result).decode()}]}

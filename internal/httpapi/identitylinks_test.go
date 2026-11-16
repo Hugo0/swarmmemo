@@ -166,7 +166,7 @@ func TestIdentityLinkDiscovery(t *testing.T) {
 		Operations []string       `json:"operations"`
 		Links      map[string]any `json:"identity_links"`
 	}
-	if json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &capabilities) != nil || capabilities.Links == nil {
+	if json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &capabilities) != nil || capabilities.Links == nil {
 		t.Fatal("capabilities do not describe identity links")
 	}
 	listed := map[string]bool{}
@@ -186,7 +186,7 @@ func TestIdentityLinkDiscovery(t *testing.T) {
 	if capabilities.Links["domain"].(map[string]any)["checks_enabled"] != false {
 		t.Fatal("rechecks reported enabled on a service that never started them")
 	}
-	if !strings.Contains(makeRequest(New(&fakeService{}, nil, Config{IdentityChecks: true}), "GET", "/capabilities", "", "").Body.String(), `"checks_enabled":true`) {
+	if !strings.Contains(makeRequest(New(&fakeService{}, nil, Config{IdentityChecks: true}), "GET", capabilitiesFullPath, "", "").Body.String(), `"checks_enabled":true`) {
 		t.Fatal("started rechecks are not reported")
 	}
 	if llms := makeRequest(s, "GET", "/llms-full.txt", "", "").Body.String(); !strings.Contains(llms, "identity.link") || !strings.Contains(llms, "identity.witness") {

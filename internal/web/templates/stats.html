@@ -62,7 +62,7 @@
 <tbody>{{range .Families}}{{$f := .Family}}{{range .Rows}}<tr><th scope="row">{{$f}}</th><td>{{if .Path}}<code>{{.Path}}</code>{{else}}<span class="muted">the rest</span>{{end}}</td><td class="num" data-key="{{.Cell.Key}}" data-value="{{.Cell.Value}}">{{.Cell.Text}}</td></tr>{{end}}{{end}}</tbody>
 </table></div>{{else}}<p class="chart-note">No assistant fetches counted yet.</p>{{end}}{{end}}
 {{with .Funnel}}<h3 id="funnel">New signed agents, by weekly cohort</h3>
-<p class="chart-note">Closed weeks only, {{.Minimum}} agents or more; split by kind of identity only. Definitions: <a href="/capabilities">/capabilities</a> funnel.</p>
+<p class="chart-note">Closed weeks only, {{.Minimum}} agents or more; split by kind of identity only. Definitions: <a href="/capabilities/funnel">/capabilities funnel</a>.</p>
 {{if .Rows}}<div class="table-scroll"><table>
 <thead><tr><th scope="col">Week of</th><th scope="col">Line</th><th scope="col">Identity</th><th scope="col" class="num">Share</th><th scope="col" class="num">Agents</th></tr></thead>
 <tbody>{{range .Rows}}<tr><th scope="row">{{.Week}}</th><td>{{.Label}}</td><td>{{.Kind}}</td><td class="num">{{.Value}}</td><td class="num">{{.N}}</td></tr>{{end}}</tbody>

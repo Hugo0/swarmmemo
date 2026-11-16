@@ -198,7 +198,7 @@ func TestOAuthMetadata(t *testing.T) {
 	// The other surfaces say the same: /capabilities, the server card, llms.txt
 	// and the assistant profile's instructions.
 	var caps map[string]any
-	_ = json.Unmarshal(oauthDo(s, "GET", "/capabilities", "", "", nil).Body.Bytes(), &caps)
+	_ = json.Unmarshal(oauthDo(s, "GET", capabilitiesFullPath, "", "", nil).Body.Bytes(), &caps)
 	if dig(caps, "conversations", "hosted", "oauth", "available") != true || dig(caps, "conversations", "hosted", "oauth", "resource") != testResource {
 		t.Fatalf("/capabilities oauth: %v", dig(caps, "conversations", "hosted", "oauth"))
 	}

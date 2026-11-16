@@ -137,7 +137,7 @@ func TestTopupOverHTTP(t *testing.T) {
 	if settled.Load() != 1 {
 		t.Fatalf("%d settlements", settled.Load())
 	}
-	caps := decodeResult(t, get(s, "/capabilities", "application/json").Body.Bytes())
+	caps := decodeResult(t, get(s, capabilitiesFullPath, "application/json").Body.Bytes())
 	if dig(caps, "topup", "operation") != "credits.topup" || dig(caps, "topup", "pay_to") != topupTestPayTo {
 		t.Fatalf("capabilities topup %v", caps["topup"])
 	}
@@ -153,7 +153,7 @@ func TestTopupOverHTTP(t *testing.T) {
 // operation is unavailable.
 func TestTopupOffHasNoSurface(t *testing.T) {
 	s, _ := topupServer(t, false)
-	caps := decodeResult(t, get(s, "/capabilities", "application/json").Body.Bytes())
+	caps := decodeResult(t, get(s, capabilitiesFullPath, "application/json").Body.Bytes())
 	if caps["topup"] != nil {
 		t.Fatalf("capabilities topup %v", caps["topup"])
 	}

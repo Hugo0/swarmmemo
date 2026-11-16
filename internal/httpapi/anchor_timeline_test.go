@@ -68,7 +68,7 @@ func TestAnchorTimelineRoutes(t *testing.T) {
 	if cc := w.Header().Get("Cache-Control"); cc != "public, max-age=60" {
 		t.Fatalf("a proof with a pending anchor is cached: %q", cc)
 	}
-	if caps := get(s, "/capabilities", "").Body.String(); !strings.Contains(caps, `"anchor_timeline"`) || !strings.Contains(caps, "next_check_at") {
+	if caps := get(s, capabilitiesFullPath, "").Body.String(); !strings.Contains(caps, `"anchor_timeline"`) || !strings.Contains(caps, "next_check_at") {
 		t.Fatal("capabilities lack the anchor timeline")
 	}
 	if llms := get(s, "/llms-full.txt", "").Body.String(); !strings.Contains(llms, "confirmed_at") {

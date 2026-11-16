@@ -41,6 +41,35 @@ class SupervisorTests(unittest.TestCase):
             self.assertTrue(process.stdout.closed)
         return result
 
+    def test_bridge_notice_reaches_the_model_once_per_bridge_process(self):
+        # C1030: every call is a new worker, so the supervisor keeps the one notice.
+        supervisor = bridge.Supervisor("/unused/profile", SimpleNamespace(fingerprint="a" * 64))
+        notice = {"unknown_fields": ["zz_new"], "unknown_count": 1, "update": "u"}
+        first, second = {"works": [], "bridge_notice": dict(notice)}, {"works": [], "bridge_notice": dict(notice)}
+        with patch.object(bridge.sys, "stderr") as stderr:
+            supervisor.notice(first); supervisor.notice(second)
+        self.assertEqual((first["bridge_notice"], "bridge_notice" in second), (notice, False))
+        lines = "".join(call.args[0] for call in stderr.write.call_args_list if call.args)
+        self.assertEqual(lines, "bridge_outdated: server added fields 1; update the checkout\n")
+
+    def test_contract_check_is_asked_until_a_worker_reports_it(self):
+        # C1031: check_contract goes to each worker until one answers contract_checked;
+        # a contract notice gets its own stderr line.
+        code = ("import json,sys\nr=json.loads(sys.stdin.buffer.read())\nout={'ok':True,'result':{'asked':r.get('check_contract',False)}}\n"
+                "if r['action']=='find_work': out['contract_checked']=True; out['result']['bridge_notice']={'unknown_fields':[],'unknown_count':0,'update':'u','server_contract_sha256':'f'*64}\n"
+                "sys.stdout.write(json.dumps(out))")
+        real_popen = subprocess.Popen
+        supervisor = bridge.Supervisor("/unused/profile", SimpleNamespace(fingerprint="a" * 64))
+        async def calls():
+            return [await supervisor.call(action, {}) for action in ("local_status", "find_work", "find_work")]
+        with patch.object(bridge.subprocess, "Popen", side_effect=lambda argv, **kw: real_popen([sys.executable, "-I", "-c", code], **kw)), \
+                patch.object(bridge.sys, "stderr") as stderr:
+            first, second, third = anyio.run(calls)
+        self.assertEqual([r["result"]["asked"] for r in (first, second, third)], [True, True, False])
+        self.assertEqual(set(second), {"ok", "result"}); self.assertIn("bridge_notice", second["result"]); self.assertNotIn("bridge_notice", third["result"])
+        lines = "".join(call.args[0] for call in stderr.write.call_args_list if call.args)
+        self.assertEqual(lines, "bridge_outdated: server contract differs; update the checkout\n")
+
     def test_actual_worker_block_and_trickle_total_deadline(self):
         for code in ("import time;time.sleep(20)", "import os,time\nwhile True: os.write(1,b' ');time.sleep(.02)"):
             result = anyio.run(self.fixture, code)

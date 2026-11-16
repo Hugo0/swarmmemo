@@ -48,19 +48,24 @@ def main():
     if len(sys.argv) != 3: raise ValueError()
     bind_parent(int(sys.argv[2]))
     from policy import BridgeError, load_profile
-    from operations import dispatch
+    import operations
     try:
         raw = sys.stdin.buffer.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES: raise ValueError()
         request = strict_json(raw)
-        if (not isinstance(request, dict) or set(request) != {"action", "arguments", "expected_profile_fingerprint"}
-                or not isinstance(request["action"], str) or not isinstance(request["arguments"], dict)):
+        # check_contract (C1031): the supervisor has not yet seen this bridge's
+        # one contract-hash read; the worker does it after its first network request.
+        fields = {"action", "arguments", "expected_profile_fingerprint"}
+        if (not isinstance(request, dict) or set(request) - {"check_contract"} != fields
+                or not isinstance(request["action"], str) or not isinstance(request["arguments"], dict)
+                or type(request.get("check_contract", False)) is not bool):
             raise ValueError()
         profile = load_profile(Path(sys.argv[1]))
         if request["expected_profile_fingerprint"] != profile.fingerprint:
             result = {"ok": False, "error": "profile_changed"}
         else:
-            result = {"ok": True, "result": dispatch(profile, request["action"], request["arguments"])}
+            result = {"ok": True, "result": operations.dispatch(profile, request["action"], request["arguments"], request.get("check_contract", False))}
+            if operations._contract_checked: result["contract_checked"] = True
         raw = encoded(result)
         if len(raw) > MAX_BYTES: raw = encoded({"ok": False, "error": "response_too_large"})
     except BridgeError as exc:

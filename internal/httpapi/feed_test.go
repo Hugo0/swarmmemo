@@ -93,7 +93,7 @@ func TestFeedOverHTTPAndMCP(t *testing.T) {
 		t.Fatalf("read_feed null reply_agents_max: %q", failure)
 	}
 	// Capabilities.
-	w := makeRequest(s, "GET", "/capabilities", "", "")
+	w := makeRequest(s, "GET", capabilitiesFullPath, "", "")
 	var caps struct {
 		Feeds struct {
 			DefaultHash string         `json:"default_hash"`

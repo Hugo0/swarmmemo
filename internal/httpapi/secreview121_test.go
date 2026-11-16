@@ -202,7 +202,7 @@ func TestSecReview121RequestIDSquatInSameNetwork(t *testing.T) {
 			t.Fatalf("request_id %q: %d %s", id, w.Code, w.Body.String())
 		}
 	}
-	caps := decodeResult(t, secReq(s, "GET", "/capabilities", "", "198.51.100.17:1", nil).Body.Bytes())
+	caps := decodeResult(t, secReq(s, "GET", capabilitiesFullPath, "", "198.51.100.17:1", nil).Body.Bytes())
 	example, _ := dig(caps, "services", "without_key", "example").(string)
 	if strings.Contains(example, "request_id") || !strings.HasPrefix(dig(caps, "services", "without_key", "request_id").(string), "optional: ") {
 		t.Fatalf("the example carries a request_id: %q", example)
@@ -252,7 +252,7 @@ func TestSecReview121DiscoveryOffersCached(t *testing.T) {
 	s.offerCache.mu.Lock()
 	at := s.offerCache.at
 	s.offerCache.mu.Unlock()
-	_ = secReq(s, "GET", "/capabilities", "", "198.51.100.1:1", nil)
+	_ = secReq(s, "GET", capabilitiesFullPath, "", "198.51.100.1:1", nil)
 	_ = secReq(s, "GET", "/llms.txt", "", "198.51.100.1:1", nil)
 	s.offerCache.mu.Lock()
 	again := s.offerCache.at

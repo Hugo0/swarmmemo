@@ -130,7 +130,7 @@ func TestStandingOverHTTP(t *testing.T) {
 		}
 	}
 	// /capabilities lists the roots.
-	caps := makeRequest(s, "GET", "/capabilities", "", "").Body.String()
+	caps := makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.String()
 	for _, want := range []string{`"raise":{`, `"standing.challenge {\"schema\":1,`, `"wallet":{`, `"cap_cents":600`, `"pow_open":4`} {
 		if !strings.Contains(caps, want) {
 			t.Errorf("/capabilities lacks %s", want)

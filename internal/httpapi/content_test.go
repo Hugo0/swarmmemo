@@ -218,7 +218,7 @@ func TestDailyStatsCountPastesAndDocs(t *testing.T) {
 func TestCapabilitiesShareTextIsDocs(t *testing.T) {
 	_, h := anonCallServer(t, 2000, "paste", "docs")
 	var caps map[string]any
-	if err := json.Unmarshal(makeRequest(h, "GET", "/capabilities", "", "").Body.Bytes(), &caps); err != nil {
+	if err := json.Unmarshal(makeRequest(h, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
 	paste, _ := dig(caps, "services", "paste").(map[string]any)

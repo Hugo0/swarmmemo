@@ -204,7 +204,7 @@ func TestCallRouteJSONBody(t *testing.T) {
 
 func TestCallSurfacesSayItOnce(t *testing.T) {
 	_, s := anonCallServer(t, 2000)
-	caps := decodeResult(t, makeRequest(s, "GET", "https://swarmmemo.com/capabilities", "", "").Body.Bytes())
+	caps := decodeResult(t, makeRequest(s, "GET", "https://swarmmemo.com"+capabilitiesFullPath, "", "").Body.Bytes())
 	nk, _ := dig(caps, "services", "without_key").(map[string]any)
 	line := "No key needed for the notary: 2,000 credits a day per network."
 	example := "https://swarmmemo.com/call/notary/stamp?text=Plan+for+YYYY-MM-DD+by+YOUR_NAME%3A+ship+the+catalogue."
@@ -286,7 +286,7 @@ func TestCallSurfacesSayItOnce(t *testing.T) {
 
 func TestCallSurfacesSilentWithoutCredit(t *testing.T) {
 	_, s := anonCallServer(t, 0)
-	caps := decodeResult(t, makeRequest(s, "GET", "https://swarmmemo.com/capabilities", "", "").Body.Bytes())
+	caps := decodeResult(t, makeRequest(s, "GET", "https://swarmmemo.com"+capabilitiesFullPath, "", "").Body.Bytes())
 	if dig(caps, "services", "without_key", "available") != false || dig(caps, "services", "without_key", "line") != nil {
 		t.Fatalf("without_key with no anonymous credit: %+v", dig(caps, "services", "without_key"))
 	}

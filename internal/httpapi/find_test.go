@@ -65,7 +65,7 @@ func TestFindSurfaces(t *testing.T) {
 	}
 
 	// Discovery.
-	_, caps := reviewGet(t, s, "/capabilities")
+	_, caps := reviewGet(t, s, capabilitiesFullPath)
 	if f, _ := caps["find"].(map[string]any); f["http"] != "GET /api/find?q=TEXT" || f["mcp"] != "find" {
 		t.Fatalf("capabilities find %v", caps["find"])
 	}
@@ -150,7 +150,7 @@ func TestFindDoorSurfaces(t *testing.T) {
 		t.Fatalf("page %d %s", w.Code, page)
 	}
 
-	_, caps := reviewGet(t, s, "/capabilities")
+	_, caps := reviewGet(t, s, capabilitiesFullPath)
 	if f, _ := caps["find"].(map[string]any); f["doors"] == nil || f["params"].(map[string]any)["door"] == nil {
 		t.Fatalf("capabilities find %v", caps["find"])
 	}

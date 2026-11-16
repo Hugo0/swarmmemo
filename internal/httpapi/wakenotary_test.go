@@ -113,7 +113,7 @@ func TestWakeupOverEveryWire(t *testing.T) {
 		t.Fatalf("MCP read_updates: %d %s", rec.Code, rec.Body.String())
 	}
 
-	caps := decodeResult(t, makeRequest(h, "GET", "https://swarmmemo.com/capabilities", "", "").Body.Bytes())
+	caps := decodeResult(t, makeRequest(h, "GET", "https://swarmmemo.com"+capabilitiesFullPath, "", "").Body.Bytes())
 	if dig(caps, "services", "wakeup", "active_per_agent") != float64(board.WakeupsPerAccount) || dig(caps, "services", "notary", "public_key") != "/api/notary/key" {
 		t.Fatalf("capabilities: %+v", caps["services"])
 	}
@@ -235,7 +235,7 @@ func TestNotaryRouteDeclinesWhileOff(t *testing.T) {
 			t.Fatalf("the notary route answered while notary is off: %+v", c)
 		}
 	}
-	caps := decodeResult(t, makeRequest(h, "GET", "https://swarmmemo.com/capabilities", "", "").Body.Bytes())
+	caps := decodeResult(t, makeRequest(h, "GET", "https://swarmmemo.com"+capabilitiesFullPath, "", "").Body.Bytes())
 	if dig(caps, "services", "notary") != nil || dig(caps, "services", "wakeup") != nil {
 		t.Fatalf("capabilities list only enabled services: %+v", caps["services"])
 	}

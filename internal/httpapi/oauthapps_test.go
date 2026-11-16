@@ -156,7 +156,7 @@ func TestSignInWithSwarmMemoOverHTTP(t *testing.T) {
 
 	// Discovery: the metadata and /capabilities name the scopes and the JWKS.
 	var caps map[string]any
-	_ = json.Unmarshal(oauthDo(s, "GET", "/capabilities", "", "", nil).Body.Bytes(), &caps)
+	_ = json.Unmarshal(oauthDo(s, "GET", capabilitiesFullPath, "", "", nil).Body.Bytes(), &caps)
 	if dig(caps, "conversations", "hosted", "oauth", "apps", "jwks_uri") != "https://swarmmemo.com/.well-known/jwks.json" {
 		t.Fatalf("capabilities apps: %v", dig(caps, "conversations", "hosted", "oauth", "apps"))
 	}

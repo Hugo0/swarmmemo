@@ -194,7 +194,7 @@ func TestLoginWithProviders(t *testing.T) {
 		t.Fatalf("/login: %s", list)
 	}
 	var caps map[string]any
-	_ = json.Unmarshal(oauthDo(s, "GET", "/capabilities", "", "", nil).Body.Bytes(), &caps)
+	_ = json.Unmarshal(oauthDo(s, "GET", capabilitiesFullPath, "", "", nil).Body.Bytes(), &caps)
 	enabled := fmt.Sprint(dig(caps, "conversations", "hosted", "oauth", "providers", "enabled"))
 	if !strings.Contains(enabled, "kind:x") || !strings.Contains(enabled, "kind:github") || strings.Contains(enabled, "google") ||
 		!strings.Contains(enabled, "redirect_uri:https://swarmmemo.com/login/x/callback") {

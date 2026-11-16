@@ -66,7 +66,7 @@ func TestLogKeysRoute(t *testing.T) {
 	if w = get(s, "/api/log/anchors", ""); !strings.Contains(w.Body.String(), `"keys_url":"/api/log/keys"`) {
 		t.Fatalf("anchors: %s", w.Body)
 	}
-	caps := get(s, "/capabilities", "").Body.String()
+	caps := get(s, capabilitiesFullPath, "").Body.String()
 	if !strings.Contains(caps, `"key_id":"`+id+`"`) || !strings.Contains(caps, `"keys":"/api/log/keys"`) {
 		t.Fatal("capabilities lack key_id or the keys route")
 	}

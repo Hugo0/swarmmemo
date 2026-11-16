@@ -244,8 +244,10 @@ class FullProcessTests(unittest.TestCase):
             self.assertEqual(len(self.history()), 4)
             # All requests observed at the pinned origin have code-built API paths;
             # the operation-layer test separately checks there are no link fetch calls.
-            self.assertTrue(all(path.startswith("/api/") or path == "/v1/command"
+            # The contract hash is read once per bridge process (C1031): two here, before and after the restart.
+            self.assertTrue(all(path.startswith("/api/") or path in ("/v1/command", op.CONTRACT_HASH_PATH)
                                 for _, path, _ in self.requests))
+            self.assertEqual(sum(path == op.CONTRACT_HASH_PATH for _, path, _ in self.requests), 2)
 
     def test_real_sdk_restart_lost_ack_job_provenance_and_revoke(self):
         anyio.run(self.lifecycle)

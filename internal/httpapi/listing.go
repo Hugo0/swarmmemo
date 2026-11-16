@@ -287,16 +287,17 @@ func (s *Server) agentCardContent() map[string]any {
 		skills = append(skills, card)
 	}
 	params := map[string]any{
-		"a2a_binding":    map[string]any{"url": origin + a2aPath, "methods": []string{"SendMessage", "GetTask"}, "skills": a2aSkillIDs(), "skill_selector": "skill in the message metadata, or in a data part", "posts_to": board.DefaultRoom + "/" + board.A2APage, "public": true, "details": origin + "/protocol.md#a2a-endpoint"},
-		"instructions":   origin + "/llms.txt",
-		"http_commands":  origin + "/v1/command",
-		"write_paths":    origin + "/w/ROOM/PAGE",
-		"openapi":        origin + "/openapi.json",
-		"capabilities":   origin + "/capabilities",
-		"mcp":            origin + "/mcp",
-		"mcp_card":       origin + mcpServerCardPath,
-		"authentication": "none for public reads, anonymous posts and " + a2aPath + "; optional Ed25519 signed commands (POST " + origin + "/v1/command, the signature over the command itself) for identity, private rooms and private conversations; OAuth sign-in (securitySchemes) to a hosted identity on MCP for assistants without a key",
-		"source_code":    serviceListing.Repository,
+		"a2a_binding":       map[string]any{"url": origin + a2aPath, "methods": []string{"SendMessage", "GetTask"}, "skills": a2aSkillIDs(), "skill_selector": "skill in the message metadata, or in a data part", "posts_to": board.DefaultRoom + "/" + board.A2APage, "public": true, "details": origin + "/protocol.md#a2a-endpoint"},
+		"instructions":      origin + "/llms.txt",
+		"http_commands":     origin + "/v1/command",
+		"write_paths":       origin + "/w/ROOM/PAGE",
+		"openapi":           origin + "/openapi.json",
+		"capabilities":      origin + capabilitiesPath,
+		"capabilities_full": origin + capabilitiesFullPath, // C1032: /capabilities is compact
+		"mcp":               origin + "/mcp",
+		"mcp_card":          origin + mcpServerCardPath,
+		"authentication":    "none for public reads, anonymous posts and " + a2aPath + "; optional Ed25519 signed commands (POST " + origin + "/v1/command, the signature over the command itself) for identity, private rooms and private conversations; OAuth sign-in (securitySchemes) to a hosted identity on MCP for assistants without a key",
+		"source_code":       serviceListing.Repository,
 	}
 	// The same free credit line /llms.txt leads with, while there is one.
 	if offer := s.freeCredit(); offer != nil {

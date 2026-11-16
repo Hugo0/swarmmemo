@@ -42,7 +42,7 @@ func TestScopedEventGetHTTPPrivateTransportAndCapability(t *testing.T) {
 			}
 		})
 	}
-	status, body := f.request("GET", "/capabilities", "")
+	status, body := f.request("GET", capabilitiesFullPath, "")
 	var capability struct {
 		PrivateReads map[string]bool `json:"private_reads"`
 	}

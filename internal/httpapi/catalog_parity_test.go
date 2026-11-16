@@ -88,7 +88,7 @@ func TestCapabilitiesEnabledMatchesCatalogue(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := catalogServer(board.Features{Services: slices.Clone(tc.configured)})
-			caps := decodeResult(t, makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes())
+			caps := decodeResult(t, makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes())
 			if !slices.Equal(s.cfg.Features.Services, tc.configured) {
 				t.Fatalf("capabilities changed the configured services: %v, want %v", s.cfg.Features.Services, tc.configured)
 			}
@@ -135,7 +135,7 @@ func TestServiceSurfacesListTheCatalogue(t *testing.T) {
 	}
 
 	// /capabilities: the entries, their examples, the live price, the gives.
-	caps := decodeResult(t, makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes())
+	caps := decodeResult(t, makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes())
 	entries := dig(caps, "services", "entries").([]any)
 	examples := map[string]map[string]any{}
 	listed = nil
@@ -379,7 +379,7 @@ func TestServiceExamplesParseOnEveryWire(t *testing.T) {
 // what runs.
 func TestServiceSurfacesAbsentWhileOff(t *testing.T) {
 	s, svc := catalogServer(board.Features{})
-	caps := decodeResult(t, makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes())
+	caps := decodeResult(t, makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes())
 	if _, ok := caps["services"]; ok {
 		t.Fatal("/capabilities lists services while none is enabled")
 	}

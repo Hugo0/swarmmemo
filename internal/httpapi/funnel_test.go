@@ -27,7 +27,7 @@ func funnelServer(t *testing.T, features board.Features) (*Server, *board.Store)
 // /capabilities funnel is board.FunnelCapabilities, byte for byte.
 func TestCapabilitiesFunnelFromGo(t *testing.T) {
 	s, _ := funnelServer(t, board.Features{})
-	w := get(s, "/capabilities", "application/json")
+	w := get(s, capabilitiesFullPath, "application/json")
 	var caps map[string]json.RawMessage
 	if err := json.Unmarshal(w.Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)

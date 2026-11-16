@@ -21,7 +21,7 @@ func TestLeversRoute(t *testing.T) {
 		t.Fatalf("empty: %d %s", w.Code, w.Body)
 	}
 	// Nothing pulled: /capabilities has no levers key.
-	if w := get(s, "/capabilities", "application/json"); strings.Contains(w.Body.String(), `"levers"`) {
+	if w := get(s, capabilitiesFullPath, "application/json"); strings.Contains(w.Body.String(), `"levers"`) {
 		t.Fatal("levers in capabilities with nothing pulled")
 	}
 	if _, err := store.PullLever(context.Background(), board.LeverPull{Name: board.LeverBlockPrefix, Args: []string{"198.51.100.0/24"}, Reason: "flood from one network"}); err != nil {
@@ -35,7 +35,7 @@ func TestLeversRoute(t *testing.T) {
 		t.Fatalf("pulled: %d %s", w.Code, w.Body)
 	}
 	var caps map[string]any
-	if w := get(s, "/capabilities", "application/json"); json.Unmarshal(w.Body.Bytes(), &caps) != nil || caps["levers"] == nil {
+	if w := get(s, capabilitiesFullPath, "application/json"); json.Unmarshal(w.Body.Bytes(), &caps) != nil || caps["levers"] == nil {
 		t.Fatalf("capabilities: %s", w.Body)
 	}
 	// The refusal an agent meets points at the public log.

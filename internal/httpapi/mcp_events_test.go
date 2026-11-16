@@ -241,7 +241,7 @@ func TestMCPEventsSubscribeNeedsAnIdentity(t *testing.T) {
 // Discovery states the block at parity with the MCP methods.
 func TestMCPEventsDiscovery(t *testing.T) {
 	s := eventsServer(t, true)
-	caps := discoveryJSON(t, s, "/capabilities")
+	caps := discoveryJSON(t, s, capabilitiesFullPath)
 	block, _ := caps["mcp_events"].(map[string]any)
 	if block == nil || block["protocol_version"] != "2026-07-28" || block["enabled"] != true || len(block["events"].([]any)) != 8 {
 		t.Fatalf("capabilities mcp_events: %+v", block)

@@ -168,15 +168,105 @@ func (s *Server) serveRead(w http.ResponseWriter, r *http.Request) {
 	s.hotCache().Serve(w, r, hotKey(r), web.CachePolicy{TTL: hotReadTTL, Changes: changes, OwnFailures: true}, read)
 }
 
-// serveCapabilities answers /capabilities, through the cache when anonymous.
+// serveCapabilities answers /capabilities (compact, C1032),
+// /capabilities?full=1 (the whole document) and /capabilities/NAME (one
+// top-level key of the whole document), through the cache when anonymous.
+// Every answer carries an ETag of its bytes and Cache-Control no-cache, so a
+// reader revalidates (prices stay live) and a matching If-None-Match is a
+// 304, from the cache too.
 func (s *Server) serveCapabilities(w http.ResponseWriter, r *http.Request) {
+	name, section := strings.CutPrefix(r.URL.Path, capabilitySectionPrefix)
+	full, anonymous := capabilitiesView(r)
 	render := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jsonResponse(w, 200, s.capabilitiesWith(s.liveCatalog(r)))
+		caps := s.capabilitiesWith(s.liveCatalog(r))
+		var v any = caps
+		switch {
+		case section:
+			part, ok := caps[name]
+			if !ok {
+				writeError(w, capabilitySectionMissing(caps))
+				return
+			}
+			v = part
+		case !full:
+			v = compactCapabilities(caps)
+		}
+		body := capabilityJSON(v)
+		h := w.Header()
+		h.Set("Content-Type", "application/json; charset=utf-8")
+		h.Set("ETag", capabilityETag(body))
+		h.Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
 	})
+	w = &notModifiedWriter{ResponseWriter: w, match: r.Header.Get("If-None-Match")}
 	changes, ok := s.revisions()
-	if !ok || !anonymousAnswer(r) || r.Context().Err() != nil {
+	if !ok || !anonymous || r.Context().Err() != nil {
 		render(w, r)
 		return
 	}
-	s.hotCache().Serve(w, r, hotKey(r), web.CachePolicy{TTL: capabilitiesTTL, Changes: changes, OwnFailures: true}, render)
+	key := "capabilities " + r.URL.Path
+	if full {
+		key += "?full=1"
+	}
+	s.hotCache().Serve(w, r, key, web.CachePolicy{TTL: capabilitiesTTL, Changes: changes, OwnFailures: true}, render)
 }
+
+// capabilitiesView reports whether r asks for the whole document
+// (full=1 on /capabilities) and whether its answer is everyone's: an
+// anonymous GET or HEAD whose query names nothing but full and format.
+func capabilitiesView(r *http.Request) (full, anonymous bool) {
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	full = err == nil && r.URL.Path == capabilitiesPath && q.Get("full") == "1"
+	anonymous = err == nil && readMethod(r) && r.Header.Get("Authorization") == "" && r.Header.Get("Cookie") == "" && !r.URL.ForceQuery
+	for k := range q {
+		if k != "full" && k != "format" {
+			anonymous = false
+		}
+	}
+	return full, anonymous
+}
+
+// capabilitySectionMissing is the 404 for /capabilities/NAME that names no
+// top-level key; details lists the linked sections.
+func capabilitySectionMissing(caps map[string]any) *board.Error {
+	var linked []string
+	for _, name := range linkedCapabilitySections {
+		if _, ok := caps[name]; ok {
+			linked = append(linked, name)
+		}
+	}
+	return &board.Error{Status: http.StatusNotFound, Code: "not_found", Message: "No such capabilities section. Any top-level key of " + capabilitiesFullPath + " is one, at " + capabilitySectionPrefix + "NAME; details.sections lists the ones " + capabilitiesPath + " links.", Details: map[string]any{"sections": linked, "full": capabilitiesFullPath}}
+}
+
+// notModifiedWriter turns a 200 whose ETag the reader's If-None-Match names
+// into a 304 without a body, whether the answer was rendered or kept.
+type notModifiedWriter struct {
+	http.ResponseWriter
+	match         string
+	wrote, unsent bool
+}
+
+func (w *notModifiedWriter) WriteHeader(code int) {
+	if !w.wrote && code == http.StatusOK && w.match != "" && etagMatches(w.match, w.Header().Get("ETag")) {
+		w.wrote, w.unsent = true, true
+		w.Header().Del("Content-Type")
+		w.Header().Del("Content-Length")
+		w.ResponseWriter.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.wrote = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *notModifiedWriter) Write(b []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.unsent {
+		return len(b), nil
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *notModifiedWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

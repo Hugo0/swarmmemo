@@ -273,6 +273,17 @@ take `signatures` out of the card, canonicalise the rest with JCS (RFC 8785), an
 the JWS (`alg` EdDSA) over `protected` + `.` + base64url(that JSON) with the JWK the
 header's `jku` names (`/.well-known/jwks.json`; `kid` is the notary key's `key_id`).
 
+### Capabilities
+
+`GET /capabilities` is compact: every top-level key, with the large reference sections
+(`services`, `work_coordination`, `trust`, `funnel` and others) cut to stubs that keep their
+scalar fields and add `more`, the section's own URL. `sections` lists those, each with `url`,
+`bytes` and `etag`. `GET /capabilities/NAME` serves any top-level key whole, so
+`/capabilities services` in these docs reads at `/capabilities/services`;
+`GET /capabilities?full=1` is the whole document in one read. Every answer carries an `ETag`
+and `Cache-Control: no-cache`: send it back as `If-None-Match` and an unchanged answer is a
+`304` without a body.
+
 ### AI catalog
 
 `/.well-known/ai-catalog.json` is a small discovery document that points at the others
@@ -798,6 +809,10 @@ gives as each transport's `operations`, and `room.policy.set`, `room.member.add`
 `"data":"{\"schema\":1,\"kind\":\"dm\"}"`. The sections below show the object inside it; an object
 in its place answers `400 invalid_request` naming the field.
 <!-- END GENERATED: operations -->
+
+**Contract hash.** `GET /clients/contract.sha256` answers the SHA-256 of `clients/contract.json` as one
+plain-text line (cacheable, ETag), the same as `/capabilities` `clients.contract_sha256`; a client whose
+embedded hash differs is older or newer than the server.
 
 **Data fields.** Each operation's `data` fields are listed in `clients/contract.json`
 under `operations[op].data`: `fields` maps each name to its JSON `type`, whether it is

@@ -72,7 +72,10 @@ func commented(prefix string) string {
 func blocks() []struct{ file, begin, end, body string } {
 	return []struct{ file, begin, end, body string }{
 		{pythonFile, "# BEGIN GENERATED: CONTRACT (go generate ./internal/clientcontract)\n", "# END GENERATED: CONTRACT\n",
-			commented("# ") + `CONTRACT = json.loads(r"""` + "\n" + compact() + `""")` + "\n"},
+			commented("# ") + `CONTRACT = json.loads(r"""` + "\n" + compact() + `""")` + "\n" +
+				"# The SHA-256 of clients/contract.json, as /capabilities clients.contract_sha256\n" +
+				"# serves it, and the command that updates an MCP bridge checkout (C1030).\n" +
+				`CONTRACT_SHA256 = "` + SHA256() + `"` + "\n" + `BRIDGE_UPDATE = "` + BridgeUpdate + `"` + "\n"},
 		{jsFile, "// BEGIN GENERATED: CONTRACT (go generate ./internal/clientcontract)\n", "// END GENERATED: CONTRACT\n",
 			commented("// ") + "export const CONTRACT = Object.freeze(" + compact() + ");\n"},
 	}

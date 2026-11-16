@@ -38,7 +38,7 @@ func TestVerificationOutputOverMCPAndHTTP(t *testing.T) {
 		t.Fatalf("mismatched output: %q", failure)
 	}
 	var caps map[string]any
-	_ = json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &caps)
+	_ = json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps)
 	if dig(caps, "verifications", "output", "maximum_bytes") != float64(board.VerificationOutputBytes) {
 		t.Fatalf("capabilities: %v", caps["verifications"])
 	}

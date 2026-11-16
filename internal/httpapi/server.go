@@ -392,12 +392,12 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.metrics(w, r)
 		return
 	}
-	if r.URL.Path == "/capabilities" {
+	if r.URL.Path == capabilitiesPath || strings.HasPrefix(r.URL.Path, capabilitySectionPrefix) {
 		if !allowMethods(w, r, readMethods...) {
 			return
 		}
-		if r.Method == http.MethodGet {
-			s.countClient(r, "discovery")
+		if r.Method == http.MethodGet && r.URL.Path == capabilitiesPath {
+			s.countClient(r, "discovery") // the document, compact or full; not its sections (C1032)
 		}
 		s.serveCapabilities(w, r) // kept for capabilitiesTTL (hotreads.go)
 		return

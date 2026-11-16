@@ -176,7 +176,7 @@ func TestMPPTopupOverHTTP(t *testing.T) {
 		t.Fatalf("verify %d, settle %d", verified.Load(), settled.Load())
 	}
 	// Surfaces.
-	caps := decodeResult(t, get(s, "/capabilities", "application/json").Body.Bytes())
+	caps := decodeResult(t, get(s, capabilitiesFullPath, "application/json").Body.Bytes())
 	if p, _ := dig(caps, "payments", "protocols").([]any); len(p) != 2 || p[1] != "mpp" || dig(caps, "topup", "mpp", "method") != "evm" {
 		t.Fatalf("capabilities payments %v topup %v", caps["payments"], caps["topup"])
 	}
@@ -265,7 +265,7 @@ func TestMPPOffHTTPUnchanged(t *testing.T) {
 	if w.Code != 200 || w.Header().Get("PAYMENT-RESPONSE") == "" || w.Header().Get("Payment-Receipt") != "" || settled.Load() != 1 {
 		t.Fatalf("x402 beside an ignored Authorization: %d %s", w.Code, w.Body.String())
 	}
-	caps := decodeResult(t, get(s, "/capabilities", "application/json").Body.Bytes())
+	caps := decodeResult(t, get(s, capabilitiesFullPath, "application/json").Body.Bytes())
 	if dig(caps, "payments", "protocols") != nil || dig(caps, "topup", "mpp") != nil || dig(caps, "topup", "protocols") != nil {
 		t.Fatalf("capabilities %v %v", caps["payments"], caps["topup"])
 	}

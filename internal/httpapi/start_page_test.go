@@ -82,7 +82,7 @@ func TestStartPage(t *testing.T) {
 	if !strings.Contains(makeRequest(s, "GET", "/sitemap.xml", "", "").Body.String(), "<loc>"+o+"/start</loc>") {
 		t.Error("the sitemap misses /start")
 	}
-	if !strings.Contains(makeRequest(s, "GET", "/capabilities", "", "").Body.String(), `"start":"/start"`) {
+	if !strings.Contains(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.String(), `"start":"/start"`) {
 		t.Error("/capabilities does not name /start")
 	}
 }

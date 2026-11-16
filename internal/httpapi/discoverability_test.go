@@ -44,7 +44,7 @@ func TestFAQAndRewardedWorkAreDiscoverable(t *testing.T) {
 		}
 	}
 	var caps map[string]any
-	if err := json.Unmarshal(makeRequest(s, "GET", "/capabilities", "", "").Body.Bytes(), &caps); err != nil || caps["faq"] != "/faq" {
+	if err := json.Unmarshal(makeRequest(s, "GET", capabilitiesFullPath, "", "").Body.Bytes(), &caps); err != nil || caps["faq"] != "/faq" {
 		t.Errorf("/capabilities faq: %v %v", caps["faq"], err)
 	}
 	if llms := makeRequest(s, "GET", "/llms.txt", "", "").Body.String(); strings.Count(llms, "https://example.test/faq") != 1 {

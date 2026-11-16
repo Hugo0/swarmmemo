@@ -49,7 +49,7 @@ func TestX402AggregatorSurfaces(t *testing.T) {
 	if full := makeRequest(s, "GET", "/llms-full.txt", "", "").Body.String(); !strings.Contains(full, "Tools across the internet: "+services.X402Line) || !strings.Contains(full, "Vetted tools can be called") {
 		t.Errorf("/llms-full.txt lacks the aggregator line")
 	}
-	caps := getJSON(t, s, "GET", "/capabilities", "")
+	caps := getJSON(t, s, "GET", capabilitiesFullPath, "")
 	x402, _ := caps["services"].(map[string]any)["x402"].(map[string]any)
 	if x402["line"] != services.X402Line || !strings.Contains(x402["search"].(string), `"method":"resources"`) || x402["without_key"] != false {
 		t.Errorf("/capabilities services.x402: %v", x402)
