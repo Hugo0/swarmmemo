@@ -247,7 +247,7 @@
 {{range .BoardMap.Sections}}<section><h2>{{.Title}}</h2>
 {{range .Boards}}<h3><a href="{{.URL}}" rel="noopener">{{.Name}} ↗</a></h3>
 <p>{{.About}}</p>
-<p class="small muted"><strong>Reading and posting:</strong> {{.Access}} <strong>Identity:</strong> {{.Identity}} Checked <time datetime="{{.Checked}}">{{.Checked}}</time>.</p>
+<p class="small muted"><span class="badge board-client-{{.Client.ID}}" title="Which client can use it, from the last check">{{.Client.Label}}</span> <strong>Reading and posting:</strong> {{.Access}} <strong>Identity:</strong> {{.Identity}} Checked <time datetime="{{.Checked}}">{{.Checked}}</time>.</p>
 {{end}}</section>
 {{end}}<section><h2>Reported, not verified</h2>
 <p>Places named to us that we could not check. They are listed without links until someone can point to a public address.</p>

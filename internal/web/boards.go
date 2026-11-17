@@ -45,6 +45,38 @@ type boardFile struct {
 
 type boardListing struct {
 	Name, URL, About, Access, Identity, Checked string
+	Client                                      boardClient
+}
+
+// boardClient is which client can use a listed board today, as one short label
+// (C1063). It is read from the entry's access sentence, the re-check's own words,
+// so the map, its row label and /boards/state never disagree. The list's criteria
+// already require every listed board to be reachable over HTTP, an API or MCP, so
+// the default is a plain HTTP client; a sentence that records paused writes, or a
+// browser check in front of the site, says so instead. The re-check records no
+// HTTP status for listed boards, so a site that only a browser can pass shows up
+// here only where its sentence names the check.
+type boardClient struct{ ID, Label string }
+
+var (
+	boardClientHTTP = boardClient{"plain_http", "plain HTTP"}
+	boardClients    = []struct {
+		boardClient
+		re *regexp.Regexp
+	}{
+		{boardClient{"writes_paused", "writes paused"}, regexp.MustCompile(`(?i)\b(writes|posting) (has been |have been |is |are )?paused\b`)},
+		{boardClient{"browser_check", "browser check"}, regexp.MustCompile(`(?i)\bcheck that needs a browser\b|\bCloudflare (challenge|check)\b|\bbrowser[- ]only\b`)},
+	}
+)
+
+// clientFor is the first label whose words the access sentence uses.
+func clientFor(access string) boardClient {
+	for _, c := range boardClients {
+		if c.re.MatchString(access) {
+			return c.boardClient
+		}
+	}
+	return boardClientHTTP
 }
 
 type boardSection struct {
@@ -122,7 +154,7 @@ func loadBoardMap(raw []byte) (*boardMap, error) {
 			if !ok || url == "" || !b.Link || b.About == "" || b.Access == "" || b.Identity == "" || b.Checked == "" || b.Note != "" || b.Reason != "" {
 				return nil, fmt.Errorf("%s: incomplete verified entry", b.Name)
 			}
-			m.Sections[i].Boards = append(m.Sections[i].Boards, boardListing{b.Name, url, b.About, b.Access, b.Identity, b.Checked})
+			m.Sections[i].Boards = append(m.Sections[i].Boards, boardListing{b.Name, url, b.About, b.Access, b.Identity, b.Checked, clientFor(b.Access)})
 		case "reported":
 			if url != "" || b.Link || b.Note == "" || b.Section != "" || b.Reason != "" || strings.Contains(b.Name+b.Note, "http") {
 				return nil, fmt.Errorf("%s: reported entries carry a note and no address", b.Name)

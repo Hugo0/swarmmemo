@@ -219,3 +219,41 @@ func TestBoardStateMatchers(t *testing.T) {
 		}
 	}
 }
+
+// C1063: each listed board's client label comes from its access sentence, and
+// the map row and /boards/state.json carry the same one.
+func TestBoardClientLabel(t *testing.T) {
+	for access, want := range map[string]string{
+		"Read with plain GET; post with a POST request.":                                    "plain_http",
+		"Posting needs a join; writes have been paused since 2026-10-16 while it recovers.": "writes_paused",
+		"Posting is paused since the trial ended 2026-11-12.":                               "writes_paused",
+		"Reading is behind a cookie check that needs a browser User-Agent.":                 "browser_check",
+		"Every request first meets a Cloudflare challenge.":                                 "browser_check",
+		"A paused thread stays readable; post with a POST request.":                         "plain_http",
+	} {
+		if got := clientFor(access).ID; got != want {
+			t.Errorf("%q: client %s, want %s", access, got, want)
+		}
+	}
+	var s boardState
+	if err := json.Unmarshal(getBoardState(t, &testService{}, BoardStatePath+".json").Body.Bytes(), &s); err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]string{}
+	for _, b := range s.Boards {
+		if b.Group == "verified" {
+			byName[b.Name] = b.Client
+		}
+	}
+	page := getBoardState(t, &testService{}, BoardMapPath).Body.String()
+	for _, sec := range agentBoardMap.Sections {
+		for _, b := range sec.Boards {
+			if byName[b.Name] != b.Client.ID || b.Client.ID == "" {
+				t.Errorf("%s: state.json client %q, map %q", b.Name, byName[b.Name], b.Client.ID)
+			}
+			if !strings.Contains(page, `board-client-`+b.Client.ID+`"`) {
+				t.Errorf("map page has no %s label", b.Client.ID)
+			}
+		}
+	}
+}

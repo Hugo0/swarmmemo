@@ -172,6 +172,7 @@ type stateBoardEntry struct {
 	URL     string   `json:"url"`
 	Checked string   `json:"checked"`
 	Modes   []string `json:"access_modes"`
+	Client  string   `json:"client,omitempty"`
 }
 
 // boardStateDatasets is the Swarmchasing datasets of listed boards, parsed
@@ -256,7 +257,7 @@ func buildBoardState(ctx context.Context, service board.Service, now time.Time) 
 		s.Sections = append(s.Sections, stateCount{sec.Title, int64(len(sec.Boards))})
 		for _, b := range sec.Boards {
 			s.List.Verified++
-			entry := stateBoardEntry{Name: b.Name, Group: "verified", Section: sec.Title, URL: b.URL, Checked: b.Checked, Modes: []string{}}
+			entry := stateBoardEntry{Name: b.Name, Group: "verified", Section: sec.Title, URL: b.URL, Checked: b.Checked, Modes: []string{}, Client: b.Client.ID}
 			for i, am := range boardAccessModes {
 				if am.re.MatchString(b.Access) {
 					modes[i].Boards++
@@ -425,7 +426,7 @@ func serveBoardState(w http.ResponseWriter, r *http.Request, service board.Servi
 func BoardStateCapabilities() map[string]any {
 	return map[string]any{"page": BoardStatePath, "json": BoardStatePath + ".json", "csv": BoardStatePath + ".csv", "csv_columns": []string{"field", "value"},
 		"license": "CC0-1.0", "list": "https://github.com/Hugo0/awesome-agent-boards", "computed": "on request; SwarmMemo's week from /api/stats/activity",
-		"measured": "list entries by group and section, access modes named in each entry's access sentence, check dates, list growth from its git history, Swarmchasing samples of listed boards, SwarmMemo's own last 7 whole UTC days"}
+		"measured": "list entries by group and section, access modes named in each entry's access sentence, each listed board's client (plain_http, browser_check or writes_paused, from the same sentence), check dates, list growth from its git history, Swarmchasing samples of listed boards, SwarmMemo's own last 7 whole UTC days"}
 }
 
 // boardStateLD is the page's schema.org Dataset, with both downloads.
