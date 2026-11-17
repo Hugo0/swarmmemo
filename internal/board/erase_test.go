@@ -255,3 +255,184 @@ func eraseRows(t *testing.T, s *Store, account string) string {
 // Schema 54 (erasure_log): a populated schema-53 database migrates to
 // exactly a new database's schema and keeps every row.
 func TestSchema54Upgrade(t *testing.T) { schema29UpgradeFrom(t, 53) }
+
+// C1051: an erased account's offering leaves the directory: it is retired,
+// its listing and pay_to are blanked and its signed revisions lose their
+// bytes, while a paid call it has not answered refuses the erasure.
+func TestEraseOfferings(t *testing.T) {
+	s := offeringStore(t, &fakeFacilitator{})
+	key := keyFor(203)
+	a := keyID(key)
+	provider(t, s, key, "erase-seller")
+	publish(t, s, key, listing("oracle", nil))
+	if list := run(t, s, Command{Operation: "offering.list"}).Data["offerings"].([]map[string]any); len(list) != 1 {
+		t.Fatalf("offering.list before: %v", list)
+	}
+	if _, err := s.db.Exec(`INSERT INTO offering_calls(id,account,name,rev,payer,amount,network,asset,pay_to,input,input_sha256,auth_nonce,quote_hash,valid_before,state,poll_hash,created_at,claim_by)
+ VALUES('call-erase',?,'oracle',1,'0xpayer',5000000,'n','a',?,'{}','h','nonce-erase','q',1,'paid','p',1,1)`, a, offeringWallet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OperatorEraseAccount(testContext, a, "req-off", true); err == nil || !strings.Contains(err.Error(), "offering calls") {
+		t.Fatalf("paid call: %v", err)
+	}
+	if _, err := s.db.Exec("UPDATE offering_calls SET state='answered' WHERE id='call-erase'"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.OperatorEraseAccount(testContext, a, "req-off", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eraseCount(r, "offerings", "retired") != 1 || eraseCount(r, "offering_revisions", "blanked") != 1 {
+		t.Fatalf("counts %+v", r.Counts)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM offerings WHERE account=? AND (state<>'retired' OR listing<>'{}' OR pay_to<>'')", a); n != 0 {
+		t.Fatal("offering kept its listing or pay_to")
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM offering_revisions WHERE account=? AND (listing<>'{}' OR signature<>'' OR signed_payload<>'' OR instr(listing,?)>0)", a, offeringWallet); n != 0 {
+		t.Fatal("revision kept its signed listing")
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM offering_calls WHERE id='call-erase' AND pay_to=?", offeringWallet); n != 1 {
+		t.Fatal("the paid call lost its own pay_to")
+	}
+	if list := run(t, s, Command{Operation: "offering.list"}).Data["offerings"].([]map[string]any); len(list) != 0 {
+		t.Fatalf("offering.list after: %v", list)
+	}
+	got := run(t, s, Command{Operation: "offering.get", Target: a + "/oracle"}).Data["offering"].(map[string]any)
+	if got["state"] != "retired" || got["pay_to"] != "" || got["title"] != "" {
+		t.Fatalf("offering.get after: %v", got)
+	}
+	again, err := s.OperatorEraseAccount(testContext, a, "req-off-2", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eraseCount(again, "offerings", "retired") != 0 || eraseCount(again, "offering_revisions", "blanked") != 0 {
+		t.Fatalf("second run %+v", again.Counts)
+	}
+}
+
+// eraseAccountColumns are the columns that name an account or one of its
+// keys; every table holding one is either a store EraseAccount handles or
+// listed in eraseKeptTables with the reason it stays.
+var eraseAccountColumns = []string{"account", "agent", "author", "caller", "public_key", "requester", "worker"}
+
+// eraseHandledElsewhere are tables an erasure touches without a count of
+// their own.
+var eraseHandledElsewhere = map[string]string{
+	"notary_receipts": "EraseToolHistory unnames the account's receipts",
+	"erasure_log":     "the erasure's own record",
+}
+
+// eraseKeptTables are the tables with an account column an erasure leaves,
+// and why. A new table lands here only with a reason; anything holding the
+// account's words or personal data belongs in EraseAccount instead.
+var eraseKeptTables = map[string]string{
+	"account_breakers":     "abuse breakers on the account: numbers and a server reason",
+	"agent_days":           "activity counts per day, numbers only",
+	"agent_funnel":         "funnel stages, numbers and labels only",
+	"apps":                 "an app's public name and homepage: a product, its house agents still run",
+	"credit_topups":        "payments with wallets and transaction hashes (accounting)",
+	"delegations":          "signed key delegations: public keys only, revoked with the parent's keys",
+	"endorsement_records":  "votes and vouches as weights (other accounts' standing rests on them)",
+	"honors":               "operator-awarded public titles",
+	"identity_house":       "an identity's app: a link to another account, no content",
+	"leases":               "short-lived room locks that expire on their own",
+	"ledger_entries":       "credit ledger (accounting)",
+	"ledger_holds":         "credit holds (accounting; held credits refuse an erasure)",
+	"ledger_lots":          "credit lots (accounting)",
+	"members":              "room membership, no content",
+	"moderation_decisions": "moderation decisions (an erasure does not end a sanction)",
+	"notary_public_keys":   "the notary's own keys",
+	"oauth_codes":          "one-time sign-in codes that expire within minutes; the sign-ins are revoked",
+	"oauth_signing_keys":   "the server's own signing keys",
+	"offering_calls":       "the other party's record of a paid call, with its own pay_to",
+	"post_mentions":        "other members' posts that mention the account",
+	"private_read_grants":  "signed read grants: public keys only, revoked with the owner's keys",
+	"proof_bonds":          "bonds with wallets and transaction hashes (accounting)",
+	"room_moderation_log":  "moderation records",
+	"room_moderators":      "room roles; the keys are revoked, so they cannot act",
+	"runs_network_blocks":  "moderation records on code runs",
+	"runs_reviews":         "moderation reviews of code by hash",
+	"runs_usage":           "run counts per day, numbers only",
+	"sanctions":            "sanctions (an erasure does not end a sanction)",
+	"seal_epochs":          "sealed rooms' signed key epochs, which other members' messages rest on",
+	"spend_limits":         "limits on revoked tokens, numbers only",
+	"standing_assessments": "proof roots and assessments: one outside account never makes a second identity (login.go)",
+	"standing_challenges":  "proof challenges that expire within the challenge window",
+	"tier_grant_log":       "operator grant records (accounting)",
+	"tier_grants":          "operator grants (accounting)",
+	"trust_current":        "trust scores, numbers only",
+	"trust_penalties":      "trust penalties (sanctions)",
+	"trust_penalty_log":    "trust penalty records (sanctions)",
+	"trust_scores":         "trust scores, numbers only",
+	"votes":                "votes as weights (other accounts' standing rests on them)",
+	"wakeup_notices":       "fired wakeup notices: ids and times, cancelled with the wakeups",
+	"webhook_rates":        "delivery counts per hour, numbers only",
+	"work_review_fees":     "review fees (accounting; fees in flight refuse an erasure)",
+	"work_rewards":         "work rewards (accounting; rewards in flight refuse an erasure)",
+	"work_transitions":     "signed work transitions (the other party's record of the work)",
+	"work_usdc":            "USDC payouts and their transaction hashes (accounting)",
+	"x402_payments":        "payments with wallets and transaction hashes (accounting)",
+}
+
+// C1051: every table with an account column is erased or kept on purpose,
+// so a new store cannot be missed. The handled stores are the ones a real
+// erasure names in its counts.
+func TestEraseCoversEveryAccountTable(t *testing.T) {
+	s := openTest(t, Config{})
+	tx, err := s.db.BeginTx(testContext, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts, err := EraseAccount(testContext, tx, keyID(keyFor(204)), 1, EraseEvidence{})
+	_ = tx.Rollback()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handled := map[string]bool{}
+	for _, c := range counts {
+		handled[c.Store] = true
+	}
+	for table := range eraseHandledElsewhere {
+		handled[table] = true
+	}
+	cols := map[string]bool{}
+	for _, c := range eraseAccountColumns {
+		cols[c] = true
+	}
+	rows, err := s.db.Query("SELECT m.name,p.name FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' ORDER BY m.name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables := map[string]bool{}
+	all := map[string]bool{}
+	for rows.Next() {
+		var table, col string
+		if err = rows.Scan(&table, &col); err != nil {
+			t.Fatal(err)
+		}
+		all[table] = true
+		if cols[col] {
+			tables[table] = true
+		}
+	}
+	rows.Close()
+	for table := range tables {
+		_, kept := eraseKeptTables[table]
+		switch {
+		case handled[table] && kept:
+			t.Errorf("%s is erased and also listed as kept: drop it from eraseKeptTables", table)
+		case !handled[table] && !kept:
+			t.Errorf("%s has an account column but account erasure neither handles it nor lists it in eraseKeptTables with a reason", table)
+		}
+	}
+	for table, why := range eraseKeptTables {
+		if !tables[table] || why == "" {
+			t.Errorf("eraseKeptTables lists %s, which has no account column (or no reason)", table)
+		}
+	}
+	for table := range handled {
+		if !all[table] && table != "pastes" {
+			t.Errorf("erasure names store %s, which is no table", table)
+		}
+	}
+}

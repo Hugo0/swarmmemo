@@ -54,6 +54,10 @@ var ErasureKept = []string{
 	"moderation decisions, reports and sanctions (an erasure does not end a sanction)",
 	"votes and vouches as weights (other accounts' standing rests on them)",
 	"signed work transitions (the other party's record of the work)",
+	"offering calls, their inputs, answers and pay_to (the other party's record of a paid call)",
+	"payments, top-ups and bonds with their wallets and transaction hashes (accounting)",
+	"standing proofs' roots and assessments (one outside account never makes a second identity)",
+	"activity counts and funnel rows (numbers only, never content)",
 	"other members' messages and replies",
 	"the fingerprint itself, so no one else can claim the erased history",
 }
@@ -98,6 +102,7 @@ func EraseObligations(ctx context.Context, tx *sql.Tx, account string) ([]string
 		{"work rewards in flight", "SELECT count(*) FROM work_rewards WHERE (requester IN " + eraseOwn + " OR worker IN " + eraseOwn + ") AND state IN ('held','pending')"},
 		{"review fees in flight", "SELECT count(*) FROM work_review_fees WHERE (requester IN " + eraseOwn + " OR worker IN " + eraseOwn + ") AND state IN ('held','pending')"},
 		{"USDC payouts in flight", "SELECT count(*) FROM work_usdc WHERE (requester IN " + eraseOwn + " OR worker IN " + eraseOwn + ") AND state IN ('promised','payable')"},
+		{"offering calls paid or in payment and not yet answered", "SELECT count(*) FROM offering_calls WHERE account IN " + eraseOwn + " AND state IN ('verifying','authorized','settling','paid','overdue')"},
 	}
 	var out []string
 	for _, c := range checks {
@@ -188,6 +193,18 @@ func EraseAccount(ctx context.Context, tx *sql.Tx, account string, now int64, ke
 		{"seal_wraps", "own sealed-conversation keys removed", "DELETE FROM seal_wraps WHERE account IN " + eraseOwn},
 		{"conversation_members", "left (other members' messages stay)", "UPDATE conversation_members SET state='left',changed_at=?2 WHERE account IN " + eraseOwn + " AND state IN ('active','requested')"},
 		{"works", "titles of work it posted blanked (states and amounts kept)", "UPDATE works SET title='' WHERE requester IN " + eraseOwn + " AND title<>''"},
+		// Offerings (C1051): retired and unlisted; the listing and pay_to go,
+		// the signed revisions lose their bytes. Calls keep their own pay_to
+		// (the payer's record of a paid call).
+		{"offerings", "retired, listing and pay_to blanked (calls keep their own)", "UPDATE offerings SET listing='{}',pay_to='',updated_at=CASE WHEN state='active' THEN ?2 ELSE updated_at END,state='retired' WHERE account IN " + eraseOwn + " AND (state='active' OR listing<>'{}' OR pay_to<>'')"},
+		{"offering_revisions", "listing, signature and signed payload blanked", "UPDATE offering_revisions SET listing='{}',signature='',signed_payload='' WHERE account IN " + eraseOwn + " AND (listing<>'{}' OR signature<>'' OR signed_payload<>'')"},
+		{"verifications", "hidden as erased by owner, signed record blanked", "UPDATE verifications SET hidden_reason=CASE WHEN hidden_at=0 THEN '" + ErasedReason + "' ELSE hidden_reason END,hidden_at=CASE WHEN hidden_at=0 THEN ?2 ELSE hidden_at END,signature='',signed_payload='' WHERE account IN " + eraseOwn + " AND (hidden_at=0 OR signature<>'' OR signed_payload<>'')"},
+		{"reviews", "review text blanked (verdicts kept as weights)", "UPDATE reviews SET review='' WHERE account IN " + eraseOwn + " AND review<>''"},
+		{"peer_capabilities", "removed with the profile", "DELETE FROM peer_capabilities WHERE account IN " + eraseOwn},
+		{"mcp_event_subscriptions", "removed with their deliveries", "DELETE FROM mcp_event_subscriptions WHERE account IN " + eraseOwn},
+		{"runs_log", "inputs, outputs and errors blanked (hashes kept)", "UPDATE runs_log SET input='',output='',error='',egress='' WHERE account IN " + eraseOwn + " AND (input<>'' OR output<>'' OR error<>'' OR egress<>'')"},
+		{"service_jobs", "finished jobs' data blanked", "UPDATE service_jobs SET data='' WHERE account IN " + eraseOwn + " AND state IN ('done','failed','cancelled') AND data<>''"},
+		{"moderation_jobs", "screened copies blanked (decisions kept)", "UPDATE moderation_jobs SET content='' WHERE agent IN " + eraseOwn + " AND state IN ('done','failed') AND content<>''"},
 	}
 	for _, st := range steps {
 		var args []any
