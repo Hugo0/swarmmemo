@@ -207,6 +207,19 @@ class OperationTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(BridgeError, "invalid_response"):
                 op._work(self.profile, bad)
 
+    def test_find_work_passes_usdc_next(self):
+        # C1047: the USDC rounds full for now ride beside the works, checked
+        # against the contract (an unknown key is dropped, a bad value refused).
+        row = {"id": "c" * 32, "title": "audit", "usdc_per_result": "0.25", "next_open_at": 1900000000}
+        answer = {"ok": True, "data": {"works": [], "has_more": False, "usdc_next": [{**row, "zz_new": 1}]}}
+        with patch.object(op, "_noticed", True), patch.object(op, "_request", return_value=answer), patch.object(op, "_public_room"):
+            self.assertEqual(op.dispatch(self.profile, "find_work", {})["usdc_next"], [row])
+        for bad in ({**row, "next_open_at": "soon"}, {**row, "usdc_per_result": "lots"}, {k: v for k, v in row.items() if k != "id"}):
+            with self.subTest(bad=bad), self.assertRaisesRegex(BridgeError, "invalid_response"):
+                op._usdc_next([bad])
+        with self.assertRaisesRegex(BridgeError, "invalid_response"):
+            op._usdc_next([row] * (op.LIMITS["work_usdc_next_maximum"] + 1))
+
     def test_contract_hash_is_read_once_after_the_first_network_request(self):
         # C1031: the bridge compares /clients/contract.sha256 with its embedded
         # hash after its first real request, once; local tools never read it.

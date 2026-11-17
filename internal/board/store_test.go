@@ -36,6 +36,10 @@ func openTest(t testing.TB, c Config) *Store {
 		t.Fatal(err)
 	}
 	s.now = func() time.Time { return time.Unix(testTime, 0) }
+	// The suites run at 00:00 UTC and claim several standing seats at
+	// once: they open the whole day_max then (the C1046 tests turn it off).
+	standingDayWhole = true
+	t.Cleanup(func() { standingDayWhole = false })
 	return s
 }
 func keyFor(n byte) ed25519.PrivateKey {

@@ -980,3 +980,79 @@ func TestStandingNoSeatRefusal(t *testing.T) {
 		t.Fatalf("no next opening: %+v", e)
 	}
 }
+
+// C1046: a standing task's day_max and usdc_day_max open evenly through
+// the UTC day, ceil(limit x elapsed fraction), at least the first from
+// 00:00, so seats keep opening for agents who arrive after midnight.
+func TestStandingDayRelease(t *testing.T) {
+	day := testTime - testTime%86400
+	for _, c := range []struct{ at, want int64 }{{0, 1}, {3600, 1}, {4 * 3600, 1}, {4*3600 + 1, 2}, {12 * 3600, 3}, {86400 - 60, 6}} {
+		if got := dayReleased(6, 1, day+c.at); got != c.want {
+			t.Fatalf("day_max 6 at +%ds: %d open, want %d", c.at, got, c.want)
+		}
+	}
+	// next_open_at is the next release: 3 taken at 12:00 opens the 4th at 12:00:01.
+	if got := dayNextRelease(6, 3, day+12*3600); got != day+12*3600+1 || dayReleased(6, 1, got) != 4 || dayReleased(6, 1, got-1) != 3 {
+		t.Fatalf("next release after 3: %d", got-day)
+	}
+	if got := dayNextRelease(6, 6, day+23*3600); got != day+86400 {
+		t.Fatalf("all taken: next release %d, want the next 00:00", got-day)
+	}
+	// dayReleased with a larger floor (the release math itself, any unit).
+	for _, c := range []struct{ at, want int64 }{{0, 200_000}, {3600, 200_000}, {12 * 3600, 600_000}, {23 * 3600, 1_150_000}} {
+		if got := dayReleased(1_200_000, 200_000, day+c.at); got != c.want {
+			t.Fatalf("usdc_day_max 1.2 at +%ds: %d, want %d", c.at, got, c.want)
+		}
+	}
+	// On a standing task's reads: 1 at 01:00, 3 at 12:00, 6 at 23:59.
+	st := &workStanding{Seats: 6, DayMax: 6, PerAgentDay: 1}
+	for _, c := range []struct{ at, want int64 }{{3600, 1}, {12 * 3600, 3}, {86400 - 60, 6}} {
+		if got := st.dayOpen(day + c.at); got != c.want {
+			t.Fatalf("dayOpen at +%ds: %d, want %d", c.at, got, c.want)
+		}
+	}
+	usdc := &workStanding{USDCDayMax: 1_200_000, Tiers: []WorkStandingTier{{Name: "bug", Credits: 1, USDC: "0.20"}}}
+	if usdc.usdcDayOpen(day+3600) != 1_200_000 || usdc.usdcDayOpen(day+23*3600) != 1_200_000 {
+		t.Fatal("usdc_day_max is checked at accept and must open whole from 00:00")
+	}
+	n := standingCounts{today: 3}
+	if got := standingNextOpen(st, n, 6, day+12*3600, day+10*86400); got != day+12*3600+1 {
+		t.Fatalf("standingNextOpen: %d", got-day)
+	}
+	if got := standingBlockedBy(st, n, 6, day+12*3600, day+10*86400); got != StandingBlockedDayMax {
+		t.Fatalf("blocked_by %q", got)
+	}
+	if got := standingBlockedBy(st, n, 6, day+12*3600+1, day+10*86400); got != "" {
+		t.Fatalf("blocked_by after the release %q", got)
+	}
+}
+
+// C1046 end to end: a day_max-3 round opens one result at 00:00, refuses
+// (queues) the second until 08:00:01, then takes it.
+func TestWorkStandingDayMaxSpreads(t *testing.T) {
+	s := rewardStore(t)
+	standingDayWhole = false
+	owner, a, b := keyFor(230), keyFor(231), keyFor(232)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "reward": 300}, 10*86400))
+	if st := standingAt(t, s, id); st.DayMax != 3 || st.Open != 1 {
+		t.Fatalf("00:00: %+v", st)
+	}
+	_, ca := standingClaim(t, s, a, id, nil)
+	run(t, s, ca)
+	release := testTime - testTime%86400 + 8*3600 + 1
+	st := standingAt(t, s, id)
+	if st.Open != 0 || st.BlockedBy != StandingBlockedDayMax || st.NextOpenAt != release || !strings.Contains(st.BlockedNote, "1 of 3") {
+		t.Fatalf("after the first: %+v", st)
+	}
+	_, cb := standingClaim(t, s, b, id, nil)
+	if ack := run(t, s, cb).Data["ack"].(WorkAck); ack.State != "queued" || ack.NextOpenAt != release {
+		t.Fatalf("second before the release: %+v", ack)
+	}
+	s.now = func() time.Time { return time.Unix(release, 0) }
+	// The queued result takes the released seat; the next opens at 16:00:01.
+	if st = standingAt(t, s, id); st.Open != 0 || st.Queued != 1 || st.NextOpenAt != release+8*3600 {
+		t.Fatalf("after the release: %+v", st)
+	}
+}

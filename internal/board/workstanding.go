@@ -966,9 +966,9 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 	case st.full(n):
 		return n, errResultsMaxReached(st, n)
 	case n.mineWaiting > 0:
-		return n, problem(409, "seat_limit", "You have a result waiting for a verdict on this standing task ("+n.mineWaitingID+"); send your next one once it is decided.")
+		return n, errOwnResultWaiting(n.mineWaitingID, false)
 	case n.mineQueued > 0:
-		return n, problem(409, "seat_limit", "You have a result queued for a seat on this standing task ("+n.mineQueuedID+"); it opens for a verdict with that id when a seat does. Send your next one once it is decided.")
+		return n, errOwnResultWaiting(n.mineQueuedID, true)
 	case used.today >= st.PerAgentDay:
 		at := int64(0)
 		if midnight <= until {
@@ -994,8 +994,8 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 		return refusal
 	}
 	switch {
-	case n.today >= st.DayMax:
-		return n, queue(StandingBlockedDayMax, errNoSeat(StandingBlockedDayMax, next, until, now, fmt.Sprintf("it takes %s a day and has them today (day_max)", plural(st.DayMax, "result")), dayCause(next, midnight)))
+	case n.today >= st.dayOpen(now):
+		return n, queue(StandingBlockedDayMax, errNoSeat(StandingBlockedDayMax, next, until, now, dayMaxWhy(st.DayMax, n.today), dayCause(next, dayNextRelease(st.DayMax, n.today+n.queued, now))))
 	case n.waiting >= st.Seats:
 		return n, queue(StandingBlockedSeats, errNoSeat(StandingBlockedSeats, next, until, now, fmt.Sprintf("all %s hold a result waiting for a verdict; an accept or a reject frees one sooner", plural(st.Seats, "seat")), "at the latest, when a waiting result's verdict deadline passes"))
 	case standingPoolFinal(st, n, pool, now, until):
@@ -1077,7 +1077,7 @@ func standingQueueNote(st *workStanding, q *standingQueue, item workRow) string 
 	why := map[string]string{
 		StandingBlockedSeats:  fmt.Sprintf("all %s hold a result waiting for a verdict", plural(st.Seats, "seat")),
 		StandingBlockedPool:   "its credit pool holds no reward for another result",
-		StandingBlockedDayMax: fmt.Sprintf("it has taken its %s today (day_max)", plural(st.DayMax, "result")),
+		StandingBlockedDayMax: dayMaxWhy(st.DayMax, -1),
 	}[q.blockedBy]
 	return fmt.Sprintf("Your result is queued (work_id %s, state queued): no seat is open on this standing task right now (%s). It is held, not lost, and counts in standing.submitted; it opens for the requester's verdict with this same id when a seat opens for it, at the earliest %s (next_open_at), in the order results were queued. Nothing more to send: work.get %s reads queued until then, submitted after. If no seat opens for it by %s it expires.",
 		item.ID, why, time.Unix(q.nextOpenAt, 0).UTC().Format(time.RFC3339), item.ID, time.Unix(item.Deadline, 0).UTC().Format(time.RFC3339))
@@ -1175,7 +1175,7 @@ func (s *Store) promoteStandingQueue(ctx context.Context, tx *sql.Tx, id string,
 		if err != nil {
 			return err
 		}
-		if n.today >= st.DayMax || n.waiting >= st.Seats || pool < st.maxCredits() {
+		if n.today >= st.dayOpen(now) || n.waiting >= st.Seats || pool < st.maxCredits() {
 			return nil // the task's own limit: the rest of the queue waits too
 		}
 		if n.mineWaiting > 0 {
@@ -1572,13 +1572,24 @@ func errNoSeat(blockedBy string, at, until, now int64, why, cause string) error 
 	return e
 }
 
-// dayCause is what holds a day_max refusal's next seat: the day's limit
-// alone, or after it the seats still held by results awaiting a verdict.
-func dayCause(next, midnight int64) string {
-	if next > midnight {
+// dayCause is what holds a day_max refusal's next seat: the day's next
+// release alone (release, dayNextRelease), or after it the seats still held
+// by results awaiting a verdict.
+func dayCause(next, release int64) string {
+	if next > release {
 		return "daily limit, then a waiting result's verdict deadline"
 	}
 	return "daily limit"
+}
+
+// dayMaxWhy says a day_max refusal's limit: all of the day's results
+// taken, or (taken below dayMax, or -1 unknown) those released so far,
+// the rest opening through the UTC day (C1046).
+func dayMaxWhy(dayMax, taken int64) string {
+	if taken >= dayMax {
+		return fmt.Sprintf("it takes %s a day and has them today (day_max)", plural(dayMax, "result"))
+	}
+	return fmt.Sprintf("it takes %s a day, opened evenly through the UTC day, and has taken those open so far (day_max)", plural(dayMax, "result"))
 }
 
 func plural(n int64, word string) string {
@@ -1777,9 +1788,14 @@ func (s *Store) standingAccept(ctx context.Context, tx *sql.Tx, w workRow, d wor
 	case st.USDCPerAgentDay > 0 && mine+want > st.USDCPerAgentDay:
 		capped = fmt.Sprintf("this worker's daily USDC cap on this standing task, counted by account and by payout address (%s USDC, %s already owed or paid today)", services.FormatUSDC(st.USDCPerAgentDay), services.FormatUSDC(mine))
 		resets = usdcCapResets(day)
-	case st.USDCDayMax > 0 && all+want > st.USDCDayMax:
-		capped = fmt.Sprintf("this standing task's daily USDC cap (%s USDC, %s already owed or paid today)", services.FormatUSDC(st.USDCDayMax), services.FormatUSDC(all))
-		resets = usdcCapResets(day)
+	case st.USDCDayMax > 0 && all+want > st.usdcDayOpen(now):
+		capped = fmt.Sprintf("this standing task's daily USDC cap (%s USDC, released evenly through the UTC day: %s by now; %s already owed or paid today)",
+			services.FormatUSDC(st.USDCDayMax), services.FormatUSDC(st.usdcDayOpen(now)), services.FormatUSDC(all))
+		if at := dayNextRelease(st.USDCDayMax, all+want-1, now); at < day+86400 {
+			resets = "More of the day's USDC is released at " + time.Unix(at, 0).UTC().Format(time.RFC3339) + "; a result accepted after that can owe USDC again."
+		} else {
+			resets = usdcCapResets(day)
+		}
 	case owed+want > st.owedUSDCMax():
 		capped = fmt.Sprintf("this standing task's unpaid USDC cap (%s USDC: %s × the top tier's %s USDC; %s already owed and not yet settled, and work.settle lowers it)",
 			services.FormatUSDC(st.owedUSDCMax()), plural(st.Seats, "seat"), services.FormatUSDC(st.maxUSDC()), services.FormatUSDC(owed))
@@ -2113,10 +2129,11 @@ func projectWorkStandingSeats(ctx context.Context, tx rowQuerier, w workRow, eff
 		p.USDCOwed, p.USDCOwedMax = services.FormatUSDC(n.owedUSDC), services.FormatUSDC(st.owedUSDCMax())
 	}
 	rewards := (pool + lapsed) / st.maxCredits()
-	if effective == "open" && now <= p.ResultsUntil && pool >= 0 && n.today < st.DayMax && !p.Full {
-		// Also bounded by what the day still allows (day_max, checkStandingSeat);
-		// results queued for a seat take the next ones (C661).
-		p.Open = max(0, min(st.Seats-n.waiting, rewards, st.DayMax-n.today)-n.queued)
+	if dayOpen := st.dayOpen(now); effective == "open" && now <= p.ResultsUntil && pool >= 0 && n.today < dayOpen && !p.Full {
+		// Also bounded by what the day has released so far (day_max,
+		// checkStandingSeat, C1046); results queued for a seat take the
+		// next ones (C661).
+		p.Open = max(0, min(st.Seats-n.waiting, rewards, dayOpen-n.today)-n.queued)
 		if st.ResultsMax > 0 {
 			p.Open = min(p.Open, st.ResultsMax-n.counted())
 		}
@@ -2144,7 +2161,7 @@ func standingBlockedBy(st *workStanding, n standingCounts, rewards, now, until i
 		return StandingBlockedSeats
 	case rewards < 1:
 		return StandingBlockedPool
-	case n.today >= st.DayMax:
+	case n.today >= st.dayOpen(now):
 		return StandingBlockedDayMax
 	}
 	// Else what results queued for a seat take next (C661).
@@ -2153,7 +2170,7 @@ func standingBlockedBy(st *workStanding, n standingCounts, rewards, now, until i
 		return StandingBlockedSeats
 	case rewards-n.queued < 1:
 		return StandingBlockedPool
-	case n.today+n.queued >= st.DayMax:
+	case n.today+n.queued >= st.dayOpen(now):
 		return StandingBlockedDayMax
 	}
 	return ""
@@ -2178,6 +2195,10 @@ func (p *WorkStanding) blockedNote() string {
 	case StandingBlockedResultsUntil:
 		return "takes no new results: its deadline leaves less than the verdict window"
 	case StandingBlockedDayMax:
+		if p.OpenedToday < p.DayMax {
+			// C1046: the day's results open through the day.
+			return fmt.Sprintf("today's results open so far taken: %d of %d, the rest open through the UTC day (day_max)", p.OpenedToday, p.DayMax)
+		}
 		return fmt.Sprintf("today's %s taken (day_max)", plural(p.DayMax, "result"))
 	case StandingBlockedSeats:
 		if p.Queued > 0 {
@@ -2254,16 +2275,17 @@ func (s *Store) standingReaderBlock(ctx context.Context, q workQuerier, links *c
 // standingNextOpen is when a standing task with no seat open gets one by
 // itself, or 0 when nothing but a requester's act would open one (or not
 // before results_until). The day's results (day_max) count from 00:00 UTC
-// (readStandingCounts, checkStandingSeat), so that cap lifts at the next
-// 00:00 UTC; seats held by results waiting for a verdict, or a pool short
+// (readStandingCounts, checkStandingSeat) and open evenly through the day
+// (dayReleased, C1046), so that cap lifts at the day's next release
+// (dayNextRelease), the next 00:00 UTC once all are taken; seats held by results waiting for a verdict, or a pool short
 // of a reward, free when the first waiting result lapses at its verdict
 // deadline (a verdict may free one sooner). USDC owed holds no seat (C386).
 // Results queued for a seat (C661) take the next seats, rewards and day_max
 // slots first.
 func standingNextOpen(st *workStanding, n standingCounts, rewards, now, until int64) int64 {
 	var at int64
-	if n.today+n.queued >= st.DayMax {
-		at = now - now%86400 + 86400
+	if n.today+n.queued >= st.dayOpen(now) {
+		at = dayNextRelease(st.DayMax, n.today+n.queued, now)
 	}
 	if st.Seats-n.waiting-n.queued <= 0 || rewards-n.queued < 1 {
 		if n.nextVerdict == 0 {
@@ -2275,6 +2297,52 @@ func standingNextOpen(st *workStanding, n standingCounts, rewards, now, until in
 		return 0
 	}
 	return at
+}
+
+// dayReleased is how much of a daily cap (limit: day_max results, or
+// usdc_day_max USDC units) the UTC day has released by now (C1046): the
+// cap opens evenly through the day, ceil(limit x the elapsed fraction of
+// the day), at least first from 00:00 (one result; the largest tier's
+// USDC) and all of it by the day's end. Releasing it all at 00:00 let
+// midnight racers take every USDC seat in the day's first hours, before
+// most newcomers arrive. It is the one rule every day_max and usdc_day_max
+// check reads (checkStandingSeat, promoteStandingQueue, standing reads,
+// the accept's USDC cap).
+func dayReleased(limit, first, now int64) int64 {
+	return min(limit, max(first, (limit*(now%86400)+86399)/86400))
+}
+
+// dayNextRelease is when dayReleased(limit, ...) first passes used: the
+// day's next release after now, or the next 00:00 UTC once used reaches
+// limit. ceil(limit x e / 86400) > used once e > used x 86400 / limit.
+func dayNextRelease(limit, used, now int64) int64 {
+	day := now - now%86400
+	if used >= limit {
+		return day + 86400
+	}
+	return max(now+1, day+used*86400/limit+1)
+}
+
+// dayOpen is the results the day has released on this standing task by
+// now (day_max, dayReleased).
+func (st *workStanding) dayOpen(now int64) int64 {
+	if standingDayWhole {
+		return st.DayMax
+	}
+	return dayReleased(st.DayMax, 1, now)
+}
+
+// standingDayWhole is a test seam: the older suites, whose clock sits at
+// 00:00 UTC, open the whole day_max at once (before C1046). Never set
+// outside tests.
+var standingDayWhole bool
+
+// usdcDayOpen is the USDC (units) open to pay today on this standing task:
+// the whole usdc_day_max from 00:00. It is checked when the requester
+// accepts, so a curve here would turn early accepts into credits-only
+// payouts; day_max already spreads the seats that lead to them (C1046).
+func (st *workStanding) usdcDayOpen(now int64) int64 {
+	return st.USDCDayMax
 }
 
 // standingSummary is works.list data standing: the seats of the standing

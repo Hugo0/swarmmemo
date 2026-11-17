@@ -150,7 +150,8 @@ export const CONTRACT = Object.freeze({
   "work_standing_tiers_maximum": 3,
   "work_title_bytes": 160,
   "work_usdc_maximum_micro": 1000000000,
-  "work_usdc_minimum_micro": 10000
+  "work_usdc_minimum_micro": 10000,
+  "work_usdc_next_maximum": 3
  },
  "message_work": {
   "result_fields": ["result_of","title","state","url"],
@@ -384,6 +385,7 @@ export const CONTRACT = Object.freeze({
   "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["blocked_by","blocked_note","full","next_open_at","next_round","next_round_open_at","per_agent_cooldown_days","per_agent_max","queued","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day"]},
   "work_standing_tier": {"required":["credits","name"],"optional":["usdc"]},
   "work_transition": {"required":["accepted_at","author","fence","generation","operation","public_key","sequence","signature","signed_payload","state"],"optional":["checks","delegation_id","fallback","note","previous_reviewer","reject_fee","resolved_from","result_sha256","result_sha256_signed","reviewer"]},
+  "work_usdc_next": {"required":["id","next_open_at","title","usdc_per_result"],"optional":[]},
   "work_waiting_result": {"required":["deadline","result_id","submitted_at","work_id","worker"],"optional":[]},
   "work_your_result": {"required":["result_id","state","submitted_at","work_id"],"optional":["tier","verdict"]}
  },

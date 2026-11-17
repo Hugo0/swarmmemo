@@ -497,6 +497,25 @@ def _standing(standing):
     return standing
 
 
+USDC_NEXT_REQUIRED = frozenset(memo.CONTRACT["structs"]["work_usdc_next"]["required"])
+USDC_NEXT_OPTIONAL = frozenset(memo.CONTRACT["structs"]["work_usdc_next"]["optional"])
+
+
+def _usdc_next(rounds):
+    """works.list data usdc_next (C1047, Go WorkUSDCNext): the USDC rounds full
+    for now and when each opens a seat; anything else is invalid_response."""
+    if not isinstance(rounds, list) or len(rounds) > LIMITS["work_usdc_next_maximum"]: raise BridgeError("invalid_response")
+    out = []
+    for row in rounds:
+        row, _ = _known(row, USDC_NEXT_REQUIRED, USDC_NEXT_OPTIONAL)
+        if (not isinstance(row["id"], str) or not re.fullmatch(HEX32, row["id"])
+                or not isinstance(row["title"], str) or len(row["title"].encode()) > LIMITS["work_title_bytes"]
+                or _usdc_units(row["usdc_per_result"]) is None
+                or type(row["next_open_at"]) is not int or not 0 < row["next_open_at"] < 2**63): raise BridgeError("invalid_response")
+        out.append(row)
+    return out
+
+
 USDC_AMOUNT = r"[0-9]{1,13}(\.[0-9]{1,6})?"
 
 
@@ -888,6 +907,7 @@ def _dispatch(profile, action, a):
         if not isinstance(works, list) or len(works) > limit or type(data.get("has_more")) is not bool: raise BridgeError("invalid_response")
         found = {**common, "works": [_work(profile, work) for work in works], "has_more": data["has_more"], "next_cursor": _cursor(result.get("next_cursor", ""))}
         if "standing" in data: found["standing"] = _standing(data["standing"])
+        if "usdc_next" in data: found["usdc_next"] = _usdc_next(data["usdc_next"])
         return found
     if action == "read_work":
         # agent: the fingerprint an eligibility preview is for (GET /api/work/ID?agent=).

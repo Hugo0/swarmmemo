@@ -1486,6 +1486,10 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 				}
 				if seats, err = s.checkStandingSeat(ctx, tx, root, standing, w, now); err != nil {
 					if !errors.As(err, &queued) {
+						if !forReply {
+							// C1048: what to do instead of retrying.
+							err = s.ownResultNextStep(ctx, tx, root, w.Worker, err, now)
+						}
 						return Result{}, err
 					}
 					if forReply {
@@ -2713,6 +2717,16 @@ scan:
 		}
 		if summary != nil {
 			result.Data["standing"] = summary
+		}
+	}
+	if (claimableOnly || ranked) && !history && !moneyFree {
+		// C1047: the USDC rounds full for now, and when each opens a seat.
+		next, err := usdcNextRounds(ctx, tx, c.Room, generation, now)
+		if err != nil {
+			return Result{}, workReadError(err)
+		}
+		if len(next) > 0 {
+			result.Data["usdc_next"] = next
 		}
 	}
 	if hasMore {

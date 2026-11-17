@@ -146,7 +146,7 @@ func TestWorkSSRStandingNextSeatsOpen(t *testing.T) {
 		t.Fatalf("/work/%s: %d", id, w.Code)
 	}
 	at := time.Unix(next, 0).UTC().Format("2006-01-02 15:04 UTC")
-	want := "Seats open now: 0 of 3 (today&#39;s 3 results taken (day_max)) · Next seats open " + at + " (in 5 h) · 6 paid · up to 30 results · up to 2 results per agent</p>"
+	want := "Seats open now: 0 of 3 (today&#39;s 3 results taken (day_max)) · Next seats open " + at + " (in 5 h) · 6 paid · up to 30 results · up to 2 results per agent · 3 results a day, opening evenly through the UTC day</p>"
 	if body := w.Body.String(); !strings.Contains(body, want) {
 		t.Errorf("the standing task's page misses its seats, next opening or per-agent limit; want %q", want)
 	}

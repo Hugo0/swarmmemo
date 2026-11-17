@@ -167,6 +167,7 @@ func Build() map[string]any {
 		"work_standing_results_maximum":         board.WorkStandingResultsMax,
 		"work_standing_cooldown_days_maximum":   board.WorkStandingCooldownDaysMax,
 		"work_standing_tiers_maximum":           board.WorkStandingTiersMax,
+		"work_usdc_next_maximum":                board.WorkUSDCNextMax,
 		"call_default_max_cost":                 services.CallDefaultMaxCost,
 	} {
 		if _, dup := limits[key]; dup {
@@ -210,6 +211,8 @@ func Build() map[string]any {
 			"work_waiting_result": StructFields(board.WorkWaitingResult{}),
 			"work_standing":       StructFields(board.WorkStanding{}),
 			"work_standing_tier":  StructFields(board.WorkStandingTier{}),
+			// works.list data usdc_next (C1047): a USDC round's next seat.
+			"work_usdc_next":      StructFields(board.WorkUSDCNext{}),
 			"verdict_check":       StructFields(board.VerdictCheck{}),
 			"message_work":        StructFields(board.MessageWork{}),
 			"message_work_reward": StructFields(board.MessageWorkReward{}),

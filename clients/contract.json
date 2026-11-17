@@ -355,7 +355,8 @@
     "work_standing_tiers_maximum": 3,
     "work_title_bytes": 160,
     "work_usdc_maximum_micro": 1000000000,
-    "work_usdc_minimum_micro": 10000
+    "work_usdc_minimum_micro": 10000,
+    "work_usdc_next_maximum": 3
   },
   "message_work": {
     "result_fields": [
@@ -4670,6 +4671,15 @@
         "result_sha256_signed",
         "reviewer"
       ]
+    },
+    "work_usdc_next": {
+      "required": [
+        "id",
+        "next_open_at",
+        "title",
+        "usdc_per_result"
+      ],
+      "optional": []
     },
     "work_waiting_result": {
       "required": [
