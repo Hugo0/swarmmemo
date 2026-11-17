@@ -28,6 +28,13 @@ const PostingParamsNamespace = "posting"
 // version 0).
 const AnonymousTopLevelPerHour = 4
 
+// AnonymousTopLevelPerRoomDay is the compiled-in daily thread limit without
+// a key (C1060): one network starts at most this many top-level posts in
+// each room per UTC day, counted with the room's own top_level_per_day
+// (checkTopLevelPerDay). A key or a hosted identity is counted by the room's
+// policy alone.
+const AnonymousTopLevelPerRoomDay = 4
+
 // RepeatFloodCopies and NewKeyPostsPerHour are the flood guard's compiled-in
 // numbers (postflood.go, C795).
 const (
@@ -39,6 +46,9 @@ type postingParams struct {
 	// AnonymousTopLevelPerHour bounds the top-level posts one network makes
 	// without a key in a UTC hour.
 	AnonymousTopLevelPerHour int64 `json:"anonymous_top_level_per_hour"`
+	// AnonymousTopLevelPerRoomDay bounds the top-level posts one network
+	// makes without a key in one room in a UTC day (top_level_daily_limit).
+	AnonymousTopLevelPerRoomDay int64 `json:"anonymous_top_level_per_room_day"`
 	// RepeatFloodCopies is the near-copy of a public post, by one account or
 	// network within an hour, that is refused (repeat_flood).
 	RepeatFloodCopies int64 `json:"repeat_flood_copies"`
@@ -48,19 +58,23 @@ type postingParams struct {
 }
 
 func defaultPostingParams() postingParams {
-	return postingParams{AnonymousTopLevelPerHour: AnonymousTopLevelPerHour, RepeatFloodCopies: RepeatFloodCopies, NewKeyPostsPerHour: NewKeyPostsPerHour}
+	return postingParams{AnonymousTopLevelPerHour: AnonymousTopLevelPerHour, AnonymousTopLevelPerRoomDay: AnonymousTopLevelPerRoomDay, RepeatFloodCopies: RepeatFloodCopies, NewKeyPostsPerHour: NewKeyPostsPerHour}
 }
 
 // parsePostingParams reads a stored body strictly. A body stored before
-// C795 has no repeat_flood_copies or new_key_posts_per_hour; those take
-// their defaults, while anonymous_top_level_per_hour stays required.
+// C795 has no repeat_flood_copies or new_key_posts_per_hour, and one before
+// C1060 no anonymous_top_level_per_room_day; those take their defaults,
+// while anonymous_top_level_per_hour stays required.
 func parsePostingParams(body []byte) (postingParams, error) {
-	p := postingParams{RepeatFloodCopies: RepeatFloodCopies, NewKeyPostsPerHour: NewKeyPostsPerHour}
+	p := postingParams{AnonymousTopLevelPerRoomDay: AnonymousTopLevelPerRoomDay, RepeatFloodCopies: RepeatFloodCopies, NewKeyPostsPerHour: NewKeyPostsPerHour}
 	if err := services.StrictObject(body, &p); err != nil {
-		return p, errors.New("posting params: a strict JSON object of anonymous_top_level_per_hour, repeat_flood_copies and new_key_posts_per_hour")
+		return p, errors.New("posting params: a strict JSON object of anonymous_top_level_per_hour, anonymous_top_level_per_room_day, repeat_flood_copies and new_key_posts_per_hour")
 	}
 	if p.AnonymousTopLevelPerHour < 1 || p.AnonymousTopLevelPerHour > 1_000_000 {
 		return p, errors.New("posting params: anonymous_top_level_per_hour is 1 to 1000000")
+	}
+	if p.AnonymousTopLevelPerRoomDay < 1 || p.AnonymousTopLevelPerRoomDay > 1_000_000 {
+		return p, errors.New("posting params: anonymous_top_level_per_room_day is 1 to 1000000")
 	}
 	if p.RepeatFloodCopies < 2 || p.RepeatFloodCopies > 1_000_000 {
 		return p, errors.New("posting params: repeat_flood_copies is 2 to 1000000")

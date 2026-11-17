@@ -132,7 +132,12 @@ type Work struct {
 	// ResultSHA256 is the SHA-256 of the submitted result's text, the exact
 	// version work.submit bound; ResultChangedSinceSubmit says whether the
 	// worker has edited the result since. Both appear with result_id.
+	// ResultSHA256 covers the text's UTF-8 bytes exactly as stored (nothing
+	// added or trimmed), never the response around it; ResultBytes is how
+	// many bytes that is (C1062), so a reader can tell a changed text from
+	// a changed wrapper.
 	ResultSHA256             string `json:"result_sha256,omitempty"`
+	ResultBytes              int    `json:"result_bytes,omitempty"`
 	ResultChangedSinceSubmit *bool  `json:"result_changed_since_submit,omitempty"`
 	// RequesterRecord is how the requester has treated results submitted
 	// to its rewarded public work (workrecord.go), on work.get and
@@ -172,6 +177,12 @@ type Work struct {
 	// WorkYourResultsMax (C481): the standing task stays open for other
 	// seats, and each result is its own work item. Never anyone else's.
 	YourResults []WorkYourResult `json:"your_results,omitempty"`
+	// You is, beside eligible on an open standing task, the reading agent's
+	// own limit there (C1065, WorkYou): blocked_by and next_claim_at, so a
+	// worker in its cool-down or out of its day's results learns when its
+	// next claim opens before it writes a result. Absent on an anonymous
+	// read and when nothing of its own blocks a claim.
+	You *WorkYou `json:"you,omitempty"`
 	// ResultSubjects is, on work.get with data result (C957), the work item
 	// and worker a rated accept of that reply cites (replyResultSubjects).
 	// Opt-in: absent from every other read.
@@ -1053,10 +1064,22 @@ func resultVersion(ctx context.Context, tx *sql.Tx, id string) (string, string, 
 // workResultChanged reports a result's SHA-256 and whether its author has
 // published a newer version of it since.
 func workResultChanged(ctx context.Context, tx *sql.Tx, id string) (string, bool, error) {
-	var hash string
-	var changed bool
-	err := tx.QueryRowContext(ctx, `SELECT hash,EXISTS(SELECT 1 FROM events s WHERE s.supersedes=e.id AND s.supersedes<>'') FROM events e WHERE id=?`, id).Scan(&hash, &changed)
-	return hash, changed, err
+	r, err := workResultText(ctx, tx, id)
+	return r.hash, r.changed, err
+}
+
+// workResultDigest is a result version's text digest: hash is the SHA-256
+// of its stored UTF-8 text (events.hash, set at post), bytes its length.
+type workResultDigest struct {
+	hash    string
+	bytes   int
+	changed bool
+}
+
+func workResultText(ctx context.Context, tx *sql.Tx, id string) (workResultDigest, error) {
+	var r workResultDigest
+	err := tx.QueryRowContext(ctx, `SELECT hash,length(CAST(text AS BLOB)),EXISTS(SELECT 1 FROM events s WHERE s.supersedes=e.id AND s.supersedes<>'') FROM events e WHERE id=?`, id).Scan(&r.hash, &r.bytes, &r.changed)
+	return r, err
 }
 
 func workResultChangedError(version, hash string) error {
@@ -1489,6 +1512,9 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 						if !forReply {
 							// C1048: what to do instead of retrying.
 							err = s.ownResultNextStep(ctx, tx, root, w.Worker, err, now)
+						} else {
+							// C1065: worded for the requester, with the author's next claim.
+							err = perAgentCooldownForReply(err)
 						}
 						return Result{}, err
 					}
@@ -1785,6 +1811,10 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	}
 	switch {
 	case queued != nil:
+		// Its own opening, as its reads give it (C1067).
+		if queued.nextOpenAt, err = standingQueuedNextOpen(ctx, tx, w, now); err != nil {
+			return Result{}, err
+		}
 		ack := WorkAck{WorkID: w.ID, State: "queued", Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ResultSHA256: d.ResultSHA256,
 			StandingID: standingRoot.ID, ResultWorkID: w.ID, ResultState: "queued", Seats: standing.Seats, NextOpenAt: queued.nextOpenAt, Note: standingQueueNote(standing, queued, w)}
 		if named != w.ID {
@@ -2033,7 +2063,7 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 		}
 	} else if p.State == "queued" {
 		// A result queued for a seat (C661): when one opens by itself.
-		if p.NextOpenAt, err = standingQueuedNextOpen(ctx, tx, w.StandingID, now); err != nil {
+		if p.NextOpenAt, err = standingQueuedNextOpen(ctx, tx, w, now); err != nil {
 			return Work{}, err
 		}
 	}
@@ -2045,11 +2075,11 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 		}
 		if p.ResultAvailable {
 			p.ResultID = w.Result
-			var changed bool
-			if p.ResultSHA256, changed, err = workResultChanged(ctx, tx, w.Result); err != nil {
-				return Work{}, err
+			d, e := workResultText(ctx, tx, w.Result)
+			if e != nil {
+				return Work{}, e
 			}
-			p.ResultChangedSinceSubmit = &changed
+			p.ResultSHA256, p.ResultBytes, p.ResultChangedSinceSubmit = d.hash, d.bytes, &d.changed
 		}
 	}
 	if opt.requestBytes > 0 {
@@ -2060,11 +2090,11 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 	}
 	blocked := ""
 	if opt.facts != nil {
-		ok, code, reason, e := s.workEligibleNow(ctx, tx, opt.facts, w, p.State, p.Standing, now)
+		ok, code, reason, you, e := s.workEligibleNow(ctx, tx, opt.facts, w, p.State, p.Standing, now)
 		if e != nil {
 			return Work{}, e
 		}
-		p.Eligible, p.EligibleReason, p.EligibleAgent, p.EligiblePreview = &ok, reason, opt.agent, opt.preview
+		p.Eligible, p.EligibleReason, p.EligibleAgent, p.EligiblePreview, p.You = &ok, reason, opt.agent, opt.preview, you
 		blocked = code
 	}
 	if opt.summary != nil {
@@ -2990,10 +3020,20 @@ func workReadError(err error) error {
 // unclaimed_result (C641) both read it. standing is w's projection
 // (projectWorkStanding), nil for work that is not a standing task; its
 // BlockedBy/BlockedNote are set for the account's own seat when blocked.
-func (s *Store) workEligibleNow(ctx context.Context, tx *sql.Tx, facts *workEligibilityFacts, w workRow, state string, standing *WorkStanding, now int64) (bool, string, string, error) {
-	ok, code, reason, e := workClaimCheck(ctx, tx, facts, w, state, now)
-	if e != nil {
-		return false, "", "", e
+// you is facts.account's own limit on an open standing task (C1065,
+// standingReaderLimit), whatever else blocks the claim: work.get's you.
+func (s *Store) workEligibleNow(ctx context.Context, tx *sql.Tx, facts *workEligibilityFacts, w workRow, state string, standing *WorkStanding, now int64) (ok bool, code, reason string, you *WorkYou, err error) {
+	ok, code, reason, err = workClaimCheck(ctx, tx, facts, w, state, now)
+	if err != nil {
+		return false, "", "", nil, err
+	}
+	if standing != nil && state == "open" && facts.account != "" && facts.account != w.Requester {
+		if facts.links == nil {
+			facts.links = &claimLinks{}
+		}
+		if you, err = s.standingReaderLimit(ctx, tx, facts.links, w.ID, facts.account, standing, now); err != nil {
+			return false, "", "", nil, err
+		}
 	}
 	if ok && standing != nil && standing.BlockedBy != "" {
 		// The standing task itself takes no result now (results_until, seats,
@@ -3001,18 +3041,10 @@ func (s *Store) workEligibleNow(ctx context.Context, tx *sql.Tx, facts *workElig
 		// (kosoyy 36193066, round 7: eligible true on a closed task).
 		ok, code, reason = false, standing.BlockedBy, "Not now on this standing task: "+standing.BlockedNote+"."
 	}
-	if ok && standing != nil {
+	if ok && you != nil && standing.Open > 0 {
 		// That agent's own seat limit on a standing task (C444).
-		if facts.links == nil {
-			facts.links = &claimLinks{}
-		}
-		blocked, e := s.standingReaderBlock(ctx, tx, facts.links, w.ID, facts.account, standing, now)
-		if e != nil {
-			return false, "", "", e
-		}
-		if blocked {
-			ok, code, reason = false, standing.BlockedBy, "Not now on this standing task: "+standing.BlockedNote+"."
-		}
+		standing.applyReaderLimit(you)
+		ok, code, reason = false, standing.BlockedBy, "Not now on this standing task: "+standing.BlockedNote+"."
 	}
 	if ok && facts.account != "" && w.StandingID == "" {
 		// The claim cool-down (C580): the same test work.claim makes.
@@ -3021,11 +3053,11 @@ func (s *Store) workEligibleNow(ctx context.Context, tx *sql.Tx, facts *workElig
 		}
 		until, e := s.workClaimCooldownUntil(ctx, tx, facts.links, w, standing != nil, facts.account, now)
 		if e != nil {
-			return false, "", "", e
+			return false, "", "", nil, e
 		}
 		if until > 0 {
 			ok, code, reason = false, WorkBlockedClaimPause, workClaimCooldownText(standing != nil, until)
 		}
 	}
-	return ok, code, reason, nil
+	return ok, code, reason, you, nil
 }

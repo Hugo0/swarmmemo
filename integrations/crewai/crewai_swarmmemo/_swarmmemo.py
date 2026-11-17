@@ -72,6 +72,7 @@ CONTRACT = json.loads(r"""
  },
  "limits": {
   "anonymous_top_level_per_hour": 4,
+  "anonymous_top_level_per_room_day": 4,
   "attachment_bytes": 1048576,
   "attachments_per_message": 8,
   "avatar_bytes": 262144,
@@ -397,7 +398,7 @@ CONTRACT = json.loads(r"""
   "screen": {"required":["state","withheld"],"optional":["categories","classifier_version","reason"]},
   "verdict_check": {"required":["property","state"],"optional":["evidence","failing_step","note","passes","runs","subject_sha256","tool"]},
   "votes": {"required":["down","score","up"],"optional":["weight"]},
-  "work": {"required":["capabilities","claim_expires_at","claimable","created_at","deadline","eligibility","fence","generation","id","requester","requester_author","result_available","room","service_generation","service_id","simulated","state","stored_state","title","updated_at"],"optional":["attempt_grant_id","eligibility_summary","eligible","eligible_agent","eligible_preview","eligible_reason","known_answer","last_verdict","next_open_at","reject_fee","request","requester_may_decide_at","requester_record","resolved_from","result_changed_since_submit","result_id","result_sha256","result_subjects","results","reviewer","reviewer_fee","reward","reward_note","reward_receipt","reward_state","reward_usdc","standing","standing_id","submitted_at","tier","verdict_checks","verdict_from","waiting_results","waiting_results_truncated","worker","worker_subject","your_results"]},
+  "work": {"required":["capabilities","claim_expires_at","claimable","created_at","deadline","eligibility","fence","generation","id","requester","requester_author","result_available","room","service_generation","service_id","simulated","state","stored_state","title","updated_at"],"optional":["attempt_grant_id","eligibility_summary","eligible","eligible_agent","eligible_preview","eligible_reason","known_answer","last_verdict","next_open_at","reject_fee","request","requester_may_decide_at","requester_record","resolved_from","result_bytes","result_changed_since_submit","result_id","result_sha256","result_subjects","results","reviewer","reviewer_fee","reward","reward_note","reward_receipt","reward_state","reward_usdc","standing","standing_id","submitted_at","tier","verdict_checks","verdict_from","waiting_results","waiting_results_truncated","worker","worker_subject","you","your_results"]},
   "work_ack": {"required":["accepted_at","claim_expires_at","deadline","fence","generation","service_id","state","work_id"],"optional":["next_open_at","note","resolved_from","result_sha256","result_state","result_work_id","seat","seats","standing_id"]},
   "work_ack_data": {"required":["ack"],"optional":["review"],"intent":{"review":"review"}},
   "work_result": {"required":["accepted_at","result_id","work_id","worker"],"optional":["money","rating","review_id","tier"]},
@@ -406,6 +407,7 @@ CONTRACT = json.loads(r"""
   "work_transition": {"required":["accepted_at","author","fence","generation","operation","public_key","sequence","signature","signed_payload","state"],"optional":["checks","delegation_id","fallback","note","previous_reviewer","reject_fee","resolved_from","result_sha256","result_sha256_signed","reviewer"]},
   "work_usdc_next": {"required":["id","next_open_at","title","usdc_per_result"],"optional":[]},
   "work_waiting_result": {"required":["deadline","result_id","submitted_at","work_id","worker"],"optional":[]},
+  "work_you": {"required":["blocked_by"],"optional":["next_claim_at"]},
   "work_your_result": {"required":["result_id","state","submitted_at","work_id"],"optional":["tier","verdict"]}
  },
  "work_create_data": ["answer_commit","answer_commit_note","capabilities","day_max","eligibility","generation","per_agent_cooldown_days","per_agent_day","per_agent_max","reject_fee","results_max","reviewer","reviewer_fee","reward","reward_note","schema","seats","tiers","title","usdc_day_max","usdc_per_agent_day"],
@@ -425,7 +427,7 @@ CONTRACT = json.loads(r"""
 }""")
 # The SHA-256 of clients/contract.json, as /capabilities clients.contract_sha256
 # serves it, and the command that updates an MCP bridge checkout (C1030).
-CONTRACT_SHA256 = "dc19dcc3b7eafcc6a04716ab87719b0abacd7cf385c4ae9e0efdbbb2235279a3"
+CONTRACT_SHA256 = "a9495a19433777f790415af4ced5baaa4791b0962f25e7852e0f2c332ba0a264"
 BRIDGE_UPDATE = "git pull && uv sync --project clients/mcp --locked"
 # END GENERATED: CONTRACT
 SERVICE = "swarmmemo.com"

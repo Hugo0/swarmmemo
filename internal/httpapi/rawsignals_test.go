@@ -24,7 +24,7 @@ func TestRawSignalsOverHTTPAndMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	if _, err = store.SetAllowanceParams(t.Context(), board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000}`), "test", 0); err != nil {
+	if _, err = store.SetAllowanceParams(t.Context(), board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000,"anonymous_top_level_per_room_day":1000}`), "test", 0); err != nil {
 		t.Fatal(err)
 	}
 	s := New(store, nil, Config{PublicURL: "https://swarmmemo.com", ServiceID: "swarmmemo.com", Version: "test", TrustLoopbackProxy: true})

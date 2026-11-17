@@ -206,3 +206,100 @@ func TestUnpaidTaskHint(t *testing.T) {
 		t.Fatal("a rewarded task was called unpaid")
 	}
 }
+
+// C1068: a late accept of a sponsored reward the sweeper has not released
+// yet pays from its first house escrow; only a released one is held again.
+func TestSponsoredLateAcceptHoldsOnce(t *testing.T) {
+	lt := newLateTest(t)
+	s := lt.s
+	setSponsorParams(t, s, `{"schema":1,"task_reward_max":100,"task_daily_per_identity":1,"task_daily_total":1000}`)
+	owner, worker, other := keyFor(247), keyFor(248), keyFor(249)
+	register(t, s, owner)
+	register(t, s, worker)
+	register(t, s, other)
+	payee := keyID(worker)
+
+	houseHolds := func() int64 {
+		return sqlCount(t, s, "SELECT count(*) FROM ledger_holds WHERE account=?", SponsorAccount)
+	}
+	holdOf := func(id string) string {
+		var h string
+		if err := s.db.QueryRow("SELECT hold_id FROM work_rewards WHERE work_id=?", id).Scan(&h); err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	held := func() int64 {
+		return sqlCount(t, s, "SELECT count(*) FROM ledger_holds WHERE account=? AND state='held'", SponsorAccount)
+	}
+
+	// Accepted late inside the sweeper's window: the reward is still held.
+	inside := rewardRequest(t, s, owner, "lobby")
+	run(t, s, rewardCreate(s, owner, inside, 100, 3600))
+	if creditIn(t, s, SponsorAccount, "held") != 100 {
+		t.Fatalf("not sponsored: house held %d", creditIn(t, s, SponsorAccount, "held"))
+	}
+	fence := claimAndSubmit(t, s, worker, inside, "lobby")
+	// Another requester's sponsored task, due an hour later, for the second
+	// case.
+	later := rewardRequest(t, s, other, "lobby")
+	run(t, s, rewardCreate(s, other, later, 100, 7200))
+	if creditIn(t, s, SponsorAccount, "held") != 200 {
+		t.Fatalf("not sponsored: house held %d", creditIn(t, s, SponsorAccount, "held"))
+	}
+	laterFence := claimAndSubmit(t, s, worker, later, "lobby")
+	first, before := holdOf(inside), houseHolds()
+	lt.clock.Store(getTestWork(t, s, inside).Deadline + 60)
+	if w := getTestWork(t, s, inside); w.Reward.State != "held" {
+		t.Fatalf("before the sweep: %+v", w.Reward)
+	}
+	run(t, s, lt.accept(owner, inside, fence))
+	w := getTestWork(t, s, inside)
+	if w.State != "accepted" || w.Reward.State != "paid" || holdOf(inside) != first {
+		t.Fatalf("inside the window: %s %+v, hold %s, first %s", w.State, w.Reward, holdOf(inside), first)
+	}
+	if n := houseHolds(); n != before {
+		t.Fatalf("house escrows %d, want %d (no second one)", n, before)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM ledger_holds WHERE account=? AND request_key=?", SponsorAccount, "escrow:"+workLateHoldKey+inside); n != 0 {
+		t.Fatalf("a late hold was minted for a held reward: %d", n)
+	}
+	if got := creditIn(t, s, payee, "remaining"); got != 100 {
+		t.Fatalf("the worker received %d", got)
+	}
+	if held() != 1 || creditIn(t, s, SponsorAccount, "held") != 100 {
+		t.Fatalf("house holds left held %d, held credit %d (only the other task's 100)", held(), creditIn(t, s, SponsorAccount, "held"))
+	}
+	lt.sweep()
+	if got := creditIn(t, s, payee, "remaining"); got != 100 || creditIn(t, s, SponsorAccount, "held") != 100 {
+		t.Fatalf("after the sweep: worker %d, house held %d", got, creditIn(t, s, SponsorAccount, "held"))
+	}
+	if err := s.Integrity(testContext); err != nil {
+		t.Fatal(err)
+	}
+
+	// Released by the sweeper, then accepted late: held again from the
+	// house and paid once.
+	lt.clock.Store(getTestWork(t, s, later).Deadline + 60)
+	lt.sweep()
+	if r := getTestWork(t, s, later).Reward; r.State != "released" || creditIn(t, s, SponsorAccount, "held") != 0 {
+		t.Fatalf("after the deadline: %+v", r)
+	}
+	run(t, s, lt.accept(other, later, laterFence))
+	w = getTestWork(t, s, later)
+	if w.State != "accepted" || w.Reward.State != "paid" {
+		t.Fatalf("released then late: %s %+v", w.State, w.Reward)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM ledger_holds WHERE account=? AND request_key=?", SponsorAccount, "escrow:"+workLateHoldKey+later); n != 1 {
+		t.Fatalf("late house holds %d, want 1", n)
+	}
+	if got := creditIn(t, s, payee, "remaining"); got != 200 {
+		t.Fatalf("the worker holds %d, want 200", got)
+	}
+	if held() != 0 || creditIn(t, s, SponsorAccount, "held") != 0 || lastingIn(t, s, keyID(other)) != 0 {
+		t.Fatalf("house holds left held %d; requester lasting %d", held(), lastingIn(t, s, keyID(other)))
+	}
+	if err := s.Integrity(testContext); err != nil {
+		t.Fatal(err)
+	}
+}

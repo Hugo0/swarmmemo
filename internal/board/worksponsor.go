@@ -305,6 +305,12 @@ func (s *Store) refuseSponsoredSelfDealing(ctx context.Context, tx *sql.Tx, r *r
 // reholdSponsoredReward holds a late accept's sponsored reward again from
 // the house account, which the deadline returned it to.
 func (s *Store) reholdSponsoredReward(ctx context.Context, tx *sql.Tx, r *rewardRow, now int64) error {
+	// Only a reward the sweeper already released is held again; one still
+	// held (an accept inside the sweeper's window) pays from its own hold,
+	// as reholdWorkReward does, else a second house escrow strands the first.
+	if r == nil || r.State != "released" {
+		return nil
+	}
 	h, err := s.ledger.led.EscrowHouse(ctx, tx, SponsorAccount, allowance.Credit, r.Amount, workLateHoldKey+r.WorkID, "sponsored first task, late accept: work "+r.WorkID,
 		ledger.Ref{Service: "board", Op: WorkSponsorOp, PublicRef: r.WorkID}, now+60, now)
 	if err != nil {

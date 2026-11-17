@@ -468,7 +468,10 @@ type compactWork struct {
 	// standing task a result opened this task on.
 	Standing   *board.WorkStandingSeats `json:"standing,omitempty"`
 	StandingID string                   `json:"standing_id,omitempty"`
-	URL        string                   `json:"url"`
+	// You is the caller's own limit on a standing task and when its next
+	// claim opens (C1065), as read_work gives it.
+	You *board.WorkYou `json:"you,omitempty"`
+	URL string         `json:"url"`
 }
 
 type compactWorkUSDC struct {
@@ -495,7 +498,7 @@ func compactWorks(result *board.Result, origin string) error {
 	}
 	rows := make([]compactWork, 0, len(works))
 	for _, w := range works {
-		row := compactWork{ID: w.ID, Title: w.Title, State: w.State, RewardNote: w.RewardNote, Eligibility: w.Eligibility, Eligible: w.Eligible, EligibleReason: w.EligibleReason, EligibilitySummary: w.EligibilitySummary, Deadline: w.Deadline, Claimable: w.Claimable, StandingID: w.StandingID, URL: origin + "/work/" + w.ID}
+		row := compactWork{ID: w.ID, Title: w.Title, State: w.State, RewardNote: w.RewardNote, Eligibility: w.Eligibility, Eligible: w.Eligible, EligibleReason: w.EligibleReason, EligibilitySummary: w.EligibilitySummary, Deadline: w.Deadline, Claimable: w.Claimable, StandingID: w.StandingID, You: w.You, URL: origin + "/work/" + w.ID}
 		if w.Standing != nil {
 			seats := w.Standing.WorkStandingSeats
 			row.Standing = &seats

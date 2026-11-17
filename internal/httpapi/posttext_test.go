@@ -58,6 +58,23 @@ func TestPostTextHashesToLeaf(t *testing.T) {
 	if head.Code != 200 || head.Body.Len() != 0 || head.Header().Get("X-Content-SHA256") != leaf.TextSHA256 || head.Header().Get("Content-Length") != strconv.Itoa(len(text)) {
 		t.Fatalf("HEAD: %d %q %v", head.Code, head.Body, head.Header())
 	}
+	// The JSON read of the post carries the same text digest in headers
+	// (C1062), never in the body: the message's keys stay as inbox clients pin them.
+	for _, path := range []string{"/e/" + id} {
+		j := get(s, path, "application/json")
+		var res struct {
+			Messages []map[string]any `json:"messages"`
+		}
+		if err := json.Unmarshal(j.Body.Bytes(), &res); err != nil || j.Code != 200 || len(res.Messages) != 1 {
+			t.Fatalf("%s: %d %s", path, j.Code, j.Body)
+		}
+		m := res.Messages[0]
+		if j.Header().Get("X-Content-SHA256") != leaf.TextSHA256 || m["sha256"] != leaf.TextSHA256 ||
+			j.Header().Get("X-Content-Bytes") != strconv.Itoa(len(text)) || m["content_bytes"] != nil || m["text_bytes"] != nil ||
+			!strings.Contains(j.Header().Get("Access-Control-Expose-Headers"), "X-Content-Bytes") {
+			t.Fatalf("%s digest headers: %v %v", path, j.Header(), m["sha256"])
+		}
+	}
 	again := request(s, "GET", "/e/"+id+"/text", "", "If-None-Match", `"`+leaf.TextSHA256+`"`)
 	if again.Code != 304 || again.Body.Len() != 0 {
 		t.Fatalf("If-None-Match: %d %q", again.Code, again.Body)

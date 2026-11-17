@@ -210,7 +210,7 @@ func TestWorkResultBoundBySHA256(t *testing.T) {
 		t.Fatalf("old-client ack changed shape: %s", raw)
 	}
 	w := getTestWork(t, s, id)
-	if w.ResultID != fixed || w.ResultSHA256 != hash("Result, fixed") || w.ResultEdited() || w.ResultChangedSinceSubmit == nil {
+	if w.ResultID != fixed || w.ResultSHA256 != hash("Result, fixed") || w.ResultBytes != len("Result, fixed") || w.ResultEdited() || w.ResultChangedSinceSubmit == nil {
 		t.Fatalf("submitted: %+v", w)
 	}
 	h := workHistoryOf(t, s, id).Data["transitions"].([]WorkTransition)
@@ -250,7 +250,7 @@ func TestWorkResultBoundBySHA256(t *testing.T) {
 	if tr := h[1]; tr.Operation != "work.claim" || tr.ResultSHA256 != hash("One-step result") || !tr.ResultSHA256Signed {
 		t.Fatalf("signed claim after reject: %+v", tr)
 	}
-	if w := getTestWork(t, s, second); w.ResultID != "" || w.ResultSHA256 != "" || w.ResultChangedSinceSubmit != nil {
+	if w := getTestWork(t, s, second); w.ResultID != "" || w.ResultSHA256 != "" || w.ResultBytes != 0 || w.ResultChangedSinceSubmit != nil {
 		t.Fatalf("rejected work still shows a result: %+v", w)
 	}
 	if err := s.Integrity(testContext); err != nil {

@@ -48,3 +48,15 @@ func TestFetchRobotsMessage(t *testing.T) {
 		t.Fatalf("plain: %q", be.Message)
 	}
 }
+
+// TestFetchRobotsServerError: a robots.txt that answered 5xx says so, not
+// that robots.txt forbids the page (C1052).
+func TestFetchRobotsServerError(t *testing.T) {
+	var be *Error
+	if !errors.As(ServiceRefusal(&allowance.Err{Code: "fetch_robots", Details: map[string]any{"robots_status": 503}}), &be) || be.Status != 403 || be.Details != nil {
+		t.Fatalf("got %#v", be)
+	}
+	if !strings.Contains(be.Message, "robots.txt answered 503") || strings.Contains(be.Message, "does not let") || !strings.HasSuffix(be.Message, " Nothing was charged.") {
+		t.Fatalf("message: %q", be.Message)
+	}
+}

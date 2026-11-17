@@ -185,6 +185,74 @@ func TestEraseAccount(t *testing.T) {
 	}
 }
 
+// C1059: an erasure keeps the account's standing proofs only as keyed
+// hashes: no raw GitHub login, wallet or root is left, a second run changes
+// nothing, and a sign-in with the same outside account still finds the
+// erased holder, so it cannot make a second identity.
+func TestEraseHashesStandingAssessments(t *testing.T) {
+	s := openTest(t, Config{})
+	alice, bob := keyFor(205), keyFor(206)
+	a, b := keyID(alice), keyID(bob)
+	register(t, s, alice)
+	register(t, s, bob)
+	const wallet = "0x52908400098527886E0F7030069857D2E4169EE7"
+	ghRoot, wRoot := "github:4242", walletRoot(wallet)
+	for _, q := range []string{
+		"INSERT INTO standing_assessments(agent,kind,value,root,assessed,detail,created_at) VALUES(?1,'github','alice-gh','" + ghRoot + "',300,'{\"login\":\"alice-gh\"}',1)",
+		"INSERT INTO standing_assessments(agent,kind,value,root,assessed,detail,created_at) VALUES(?1,'wallet','" + wallet + "','" + wRoot + "',200,'{\"address\":\"" + wallet + "\"}',1)",
+	} {
+		if _, err := s.db.Exec(q, a); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	dump := func() string {
+		t.Helper()
+		var out string
+		if err := s.db.QueryRow("SELECT coalesce(group_concat(kind||' '||value||' '||root||' '||detail,'|'),'') FROM (SELECT * FROM standing_assessments WHERE agent=? ORDER BY kind)", a).Scan(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if _, err := s.OperatorEraseAccount(testContext, a, "req-sa", true); err != nil {
+		t.Fatal(err)
+	}
+	after := dump()
+	for _, leak := range []string{"alice-gh", "4242", strings.ToLower(wallet)[2:], wallet[2:]} {
+		if strings.Contains(strings.ToLower(after), strings.ToLower(leak)) {
+			t.Fatalf("standing_assessments keeps %q after erase: %s", leak, after)
+		}
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM standing_assessments WHERE agent=?1 AND value LIKE 'hmac:%' AND root LIKE 'hmac:%' AND detail='' AND assessed>0", a); n != 2 {
+		t.Fatalf("hashed assessments: %d, want 2: %s", n, after)
+	}
+	if _, err := s.OperatorEraseAccount(testContext, a, "req-sa-2", true); err != nil {
+		t.Fatal(err)
+	}
+	if again := dump(); again != after {
+		t.Fatalf("a second erase changed the hashes:\n%s\n%s", after, again)
+	}
+	// The same GitHub account or wallet, now linked by another account,
+	// still meets the erased holder; an unseen root meets nobody.
+	for _, root := range []string{ghRoot, wRoot} {
+		if _, err := s.db.Exec("INSERT INTO standing_assessments(agent,kind,value,root,created_at) VALUES(?,?,?,?,2)", b, strings.SplitN(root, ":", 2)[0], root, root); err != nil {
+			t.Fatal(err)
+		}
+		owner, err := s.loginOwner(testContext, root)
+		if err != nil || !owner.keyHeld {
+			t.Fatalf("%s after erase: %+v %v (the erased holder is not found)", root, owner, err)
+		}
+		if _, err = s.db.Exec("DELETE FROM standing_assessments WHERE agent=?", b); err != nil {
+			t.Fatal(err)
+		}
+		if owner, err = s.loginOwner(testContext, root); err != nil || !owner.keyHeld {
+			t.Fatalf("%s held only by the erased account: %+v %v", root, owner, err)
+		}
+	}
+	if owner, err := s.loginOwner(testContext, "github:9999"); err != nil || owner != (loginOwnerOf{}) {
+		t.Fatalf("unseen root: %+v %v", owner, err)
+	}
+}
+
 // Raw and write records of a post under an open report stay as evidence.
 func TestEraseHoldsEvidence(t *testing.T) {
 	s := openTest(t, Config{})
@@ -356,7 +424,7 @@ var eraseKeptTables = map[string]string{
 	"sanctions":            "sanctions (an erasure does not end a sanction)",
 	"seal_epochs":          "sealed rooms' signed key epochs, which other members' messages rest on",
 	"spend_limits":         "limits on revoked tokens, numbers only",
-	"standing_assessments": "proof roots and assessments: one outside account never makes a second identity (login.go)",
+	"standing_assessments": "proof assessments, values and roots only as keyed hashes (erasedMAC): one outside account never makes a second identity (login.go)",
 	"standing_challenges":  "proof challenges that expire within the challenge window",
 	"tier_grant_log":       "operator grant records (accounting)",
 	"tier_grants":          "operator grants (accounting)",
@@ -383,7 +451,7 @@ func TestEraseCoversEveryAccountTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	counts, err := EraseAccount(testContext, tx, keyID(keyFor(204)), 1, EraseEvidence{})
+	counts, err := s.EraseAccount(testContext, tx, keyID(keyFor(204)), 1, EraseEvidence{})
 	_ = tx.Rollback()
 	if err != nil {
 		t.Fatal(err)

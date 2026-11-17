@@ -208,3 +208,33 @@ func TestWorkSSRStandingNextRound(t *testing.T) {
 		t.Error("a round with no claimable successor links one")
 	}
 }
+
+// C1067: a queued result's page says when it opens from its own work.get
+// next_open_at (the time its claim's ACK gave).
+func TestWorkSSRQueuedResultOpening(t *testing.T) {
+	standingID, resultID := strings.Repeat("c", 32), strings.Repeat("f", 32)
+	opens := int64(1788595201)
+	result := board.Work{ID: resultID, Room: "bounties", Title: "Standing bug bounty", State: "queued", StoredState: "open", Requester: board.AgentRef{ID: strings.Repeat("2", 64)},
+		Eligibility: "open", StandingID: standingID, Deadline: 1789171200, NextOpenAt: opens}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": result}}, nil
+		case "works.list":
+			return board.Result{OK: true, Data: map[string]any{"works": []board.Work{}}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": c.MessageID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	w := httptest.NewRecorder()
+	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+resultID, nil))
+	if w.Code != 200 {
+		t.Fatalf("/work/%s: %d", resultID, w.Code)
+	}
+	if want := "at the earliest " + time.Unix(opens, 0).UTC().Format("2006-01-02 15:04 UTC"); !strings.Contains(w.Body.String(), want) {
+		t.Errorf("the queued result's page misses %q", want)
+	}
+}

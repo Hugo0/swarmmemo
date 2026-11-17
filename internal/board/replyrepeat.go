@@ -17,7 +17,7 @@ package board
 // A looping client's repeats are not always word for word (C1017): on
 // 2026-11-15 one key's hourly routine replied to one standing task 22 times
 // with the same tool report, each carrying that run's call id, timestamps
-// and allowance count. So a reply of at least ReplyRepeatMaskMinBytes, once
+// and allowance count. So a reply of at least ReplyRepeatMaskMinRunes, once
 // compared, has its volatile tokens masked (replyRepeatText): ids and hashes
 // (16 or more hex characters, a digit among them, with or without a 0x
 // prefix, C1028: an EVM transaction hash) and numbers. A short reply still
@@ -28,6 +28,7 @@ import (
 	"database/sql"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -38,9 +39,10 @@ const (
 	// reads, newest first (C1043: oldest first, a long thread's recent
 	// repeats fell past the bound).
 	replyRepeatScan = 256
-	// ReplyRepeatMaskMinBytes is the least compared length (copyText) of a
-	// reply whose ids and numbers are masked before comparing.
-	ReplyRepeatMaskMinBytes = 200
+	// ReplyRepeatMaskMinRunes is the least compared length (copyText), in
+	// characters (runes, as the docs say; C1058), of a reply whose ids and
+	// numbers are masked before comparing.
+	ReplyRepeatMaskMinRunes = 200
 )
 
 var (
@@ -53,11 +55,11 @@ var (
 )
 
 // replyRepeatText is a reply as the repeat check compares it: copyText, and
-// for a text of at least ReplyRepeatMaskMinBytes, every id or hash and every
+// for a text of at least ReplyRepeatMaskMinRunes, every id or hash and every
 // number masked, so a run's call id or counter does not make it new.
 func replyRepeatText(text string) string {
 	t := copyText(text)
-	if len(t) < ReplyRepeatMaskMinBytes {
+	if utf8.RuneCountInString(t) < ReplyRepeatMaskMinRunes {
 		return t
 	}
 	t = replyRepeatIDRE.ReplaceAllStringFunc(t, func(id string) string {

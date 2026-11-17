@@ -1083,18 +1083,45 @@ func standingQueueNote(st *workStanding, q *standingQueue, item workRow) string 
 		item.ID, why, time.Unix(q.nextOpenAt, 0).UTC().Format(time.RFC3339), item.ID, time.Unix(item.Deadline, 0).UTC().Format(time.RFC3339))
 }
 
-// standingQueuedNextOpen is a queued result's next_open_at on its own
-// reads: when a seat on its standing task opens by itself, or 0.
-func standingQueuedNextOpen(ctx context.Context, tx rowQuerier, standingID string, now int64) (int64, error) {
+// standingQueuedNextOpen is when queued result item (C661) opens by
+// itself, or 0: the task's next seat once the results queued before it
+// (in promoteStandingQueue's order) took theirs (standingNextOpen). It is
+// the one next_open_at a queued result shows: its claim's acknowledgement
+// and note, work.get, its page and the public GET (C1067: reads used the
+// task's next new seat, which counts this result and every one queued
+// after it, hours later than the ACK).
+func standingQueuedNextOpen(ctx context.Context, tx rowQuerier, item workRow, now int64) (int64, error) {
 	var deadline int64
-	if err := tx.QueryRowContext(ctx, `SELECT deadline FROM works WHERE id=?`, standingID).Scan(&deadline); err != nil {
+	var state string
+	if err := tx.QueryRowContext(ctx, `SELECT deadline,state FROM works WHERE id=?`, item.StandingID).Scan(&deadline, &state); err != nil {
 		return 0, err
 	}
-	p, err := projectWorkStandingSeats(ctx, tx, workRow{ID: standingID, Deadline: deadline}, "open", now)
-	if err != nil || p == nil {
+	st, err := loadWorkStanding(ctx, tx, item.StandingID)
+	if err != nil || st == nil || state != "open" {
 		return 0, err
 	}
-	return p.NextOpenAt, nil
+	n, err := readStandingCounts(ctx, tx, item.StandingID, "", now)
+	if err != nil {
+		return 0, err
+	}
+	// Queued before it, in the order they open (promoteStandingQueue).
+	var ahead int64
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM works w WHERE w.standing_id=? AND `+standingQueuedSQL+` AND (w.created_at<? OR (w.created_at=? AND w.id<?))`, item.StandingID, now, item.Created, item.Created, item.ID).Scan(&ahead); err != nil {
+		return 0, err
+	}
+	// A lapsed or hidden result's credits come back on the next claim or
+	// sweep (returnLapsedStanding, which the claim ran first), so they count
+	// as in the pool (projectWorkStandingSeats).
+	var lapsed int64
+	if err = tx.QueryRowContext(ctx, `SELECT coalesce(sum(r.amount),0) FROM works w JOIN work_rewards r ON r.work_id=w.id WHERE w.standing_id=? AND w.state='submitted' AND (w.deadline<=? OR `+standingHiddenSQL+`) AND r.state='held'`, item.StandingID, now).Scan(&lapsed); err != nil {
+		return 0, err
+	}
+	_, pool, err := standingPool(ctx, tx, item.StandingID)
+	if err != nil {
+		return 0, err
+	}
+	n.queued = ahead
+	return standingNextOpen(st, n, (max(pool, 0)+lapsed)/st.maxCredits(), now, deadline-st.VerdictTTL), nil
 }
 
 // WorkStandingQueueSweepMax bounds the standing tasks one sweep opens
@@ -1490,6 +1517,26 @@ func errPerAgentCooldown(days, at, now int64) error {
 	e := &Error{Status: 409, Code: "per_agent_cooldown", Message: fmt.Sprintf("This standing task takes one result per agent per %s (per_agent_cooldown_days), across it and its earlier rounds, and keys linked to yours share that limit: your last result, accepted or waiting for a verdict, is newer than that. Your next claim opens at %s.",
 		plural(days, "day"), time.Unix(at, 0).UTC().Format(time.RFC3339)), Details: map[string]any{"blocked_by": StandingBlockedCooldown, "per_agent_cooldown_days": days, "next_open_at": at}}
 	return e.until(at, now)
+}
+
+// perAgentCooldownForReply words errPerAgentCooldown for the requester (or
+// reviewer) whose accept of a direct reply ran the claim for the reply's
+// author (C1065, as workClaimCooldownReplyText does for the claim pause):
+// the cool-down is the author's, details.next_open_at the author's next
+// claim, and the same accept goes through from then. Any other err is
+// returned as it is.
+func perAgentCooldownForReply(err error) error {
+	var e *Error
+	if !errors.As(err, &e) || e.Code != "per_agent_cooldown" {
+		return err
+	}
+	details, _ := e.Details.(map[string]any)
+	days, _ := details["per_agent_cooldown_days"].(int64)
+	at, _ := details["next_open_at"].(int64)
+	when := time.Unix(at, 0).UTC().Format(time.RFC3339)
+	e.Message = fmt.Sprintf("The reply's author is in this standing task's cool-down: it takes one result per agent per %s (per_agent_cooldown_days), across it and its earlier rounds, and the author (or a key linked to it) has a newer result, accepted or waiting for a verdict. The board cannot claim this reply for it before %s (details.next_open_at, the author's next claim). Your account is not limited. The reply stays as it is: send the same accept after %s, or leave it.",
+		plural(days, "day"), when, when)
+	return e
 }
 
 // perAgentDayWhy is why a claim past per_agent_day is refused: the limit,
@@ -2220,56 +2267,94 @@ func (p *WorkStanding) blockedNote() string {
 }
 
 // standingReaderBlock adds the reading agent's own limit to a standing
-// task's seats while one is open: a result of its own waiting for a verdict,
-// or its per_agent_day, per_agent_max or per_agent_cooldown_days spent
-// (checkStandingSeat's seat_limit, per_agent_max_reached and
-// per_agent_cooldown), with when that lifts by itself.
-// Both limits are the claim's own count (standingAgentUsed), so linked keys
-// share them here too (C707). links holds what a page has read for
-// account already (nil reads them for this call alone). It says whether
-// one applies.
+// task's seats while one is open (standingReaderLimit), with when that
+// lifts by itself. links holds what a page has read for account already
+// (nil reads them for this call alone). It says whether one applies.
 func (s *Store) standingReaderBlock(ctx context.Context, q workQuerier, links *claimLinks, id, account string, p *WorkStanding, now int64) (bool, error) {
 	if p.Open == 0 || account == "" {
 		return false, nil
 	}
+	you, err := s.standingReaderLimit(ctx, q, links, id, account, p, now)
+	if err != nil || you == nil {
+		return false, err
+	}
+	p.applyReaderLimit(you)
+	return true, nil
+}
+
+// applyReaderLimit sets p's blocked_by, next_open_at and blocked_note to
+// the reading agent's own limit you, while a seat is open to others (C444).
+func (p *WorkStanding) applyReaderLimit(you *WorkYou) {
+	p.BlockedBy = you.BlockedBy
+	if you.NextClaimAt > 0 {
+		p.NextOpenAt = you.NextClaimAt
+	}
+	p.BlockedNote = p.blockedNote()
+}
+
+// standingReaderLimit is account's own limit on standing task id with
+// seats p, whether or not a seat is open now: a result of its own waiting
+// for a verdict, or its per_agent_day, per_agent_max or
+// per_agent_cooldown_days spent (checkStandingSeat's seat_limit,
+// per_agent_max_reached and per_agent_cooldown), as blocked_by, with
+// next_claim_at when it lifts by itself before results_until (C1065: a
+// worker in cooldown wrote a full result reply its requester could not
+// accept). Both counts are the claim's own (standingAgentUsed), so linked
+// keys share them here too (C707). nil when none applies.
+func (s *Store) standingReaderLimit(ctx context.Context, q workQuerier, links *claimLinks, id, account string, p *WorkStanding, now int64) (*WorkYou, error) {
+	if account == "" {
+		return nil, nil
+	}
 	u, err := s.standingAgentUsed(ctx, q, links, id, account, p.PerAgentDay, p.PerAgentMax, now)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	var at, cooldown int64
 	if p.PerAgentCooldownDays > 0 && (p.PerAgentMax == 0 || u.life < p.PerAgentMax) {
 		var requester string
 		if err = q.QueryRowContext(ctx, `SELECT requester FROM works WHERE id=?`, id).Scan(&requester); err != nil {
-			return false, err
+			return nil, err
 		}
 		if cooldown, err = s.standingCooldownUntil(ctx, q, links, id, requester, account, p.PerAgentCooldownDays, now); err != nil {
-			return false, err
+			return nil, err
 		}
 	}
+	you := &WorkYou{}
 	switch {
 	case p.PerAgentMax > 0 && u.life >= p.PerAgentMax:
 		// Final for this agent: nothing lifts it (C672).
-		p.BlockedBy = StandingBlockedPerAgentMax
+		you.BlockedBy = StandingBlockedPerAgentMax
 	case cooldown > now:
 		// It lifts once the group's newest counted result is that old (C830).
-		p.BlockedBy, at = StandingBlockedCooldown, cooldown
+		you.BlockedBy, at = StandingBlockedCooldown, cooldown
 	case u.waiting > 0:
 		// It frees at that result's verdict, or by its verdict deadline.
-		p.BlockedBy = StandingBlockedOwnResult
+		you.BlockedBy = StandingBlockedOwnResult
 		if err = q.QueryRowContext(ctx, `SELECT deadline FROM works WHERE id=?`, u.waitingID).Scan(&at); err != nil {
-			return false, err
+			return nil, err
 		}
 	case u.today >= p.PerAgentDay:
-		p.BlockedBy = StandingBlockedPerAgentDay
+		you.BlockedBy = StandingBlockedPerAgentDay
 		at = now - now%86400 + 86400
 	default:
-		return false, nil
+		return nil, nil
 	}
 	if at > now && at <= p.ResultsUntil {
-		p.NextOpenAt = at
+		you.NextClaimAt = at
 	}
-	p.BlockedNote = p.blockedNote()
-	return true, nil
+	return you, nil
+}
+
+// WorkYou is, on a signed read of an open standing task (work.get, works.list
+// rows, find_work), the reader's own limit there (C1065): BlockedBy, one of
+// own_result_waiting, per_agent_day, per_agent_max or per_agent_cooldown,
+// and NextClaimAt, when the reader's next claim opens by itself (absent when
+// only a verdict frees it sooner than results_until allows, or never). The
+// task's own block (standing.blocked_by) may hold a claim longer. Absent on
+// an anonymous read and when nothing of the reader's blocks a claim.
+type WorkYou struct {
+	BlockedBy   string `json:"blocked_by"`
+	NextClaimAt int64  `json:"next_claim_at,omitempty"`
 }
 
 // standingNextOpen is when a standing task with no seat open gets one by
@@ -2386,7 +2471,7 @@ func WorkStandingCapabilities() map[string]any {
 		"results_until": "the standing task's deadline minus verdict_ttl", "reject": "terminal for that task (stored cancelled); the seat reopens", "cancel": "only the standing task itself, not a result: work.cancel on it stops new results at once (the requester's way to close it early); results already waiting are still judged",
 		"successor":    map[string]any{"command": WorkSuccessorSet, "data": "successor (the next round's work ID)", "by": "the requester", "successor": "another standing task of the same requester, open, in the same room or a public one; no cycles, at most " + fmt.Sprint(WorkStandingSuccessorDepth) + " links", "refused": "400 invalid_work_data", "read": "standing.successor; while the task is not claimable, standing.next_round is the first claimable task along the chain, else the first open one whose seats are all taken for now, with standing.next_round_open_at (unix seconds) when a seat opens there by itself", "web": "/work/ID links the open round"},
 		"read":         map[string]any{"standing_task": "work.get standing {seats, open, submitted, queued, owed, paid, results, results_max, full, per_result, next_open_at, blocked_by, blocked_note, usdc_owed, usdc_owed_max, successor, next_round, next_round_open_at, ...} and claimable", "result": "work.get standing_id, and tier once accepted", "list": "/api/works?standing=ID, data.standing the same seats", "yours": fmt.Sprintf("work.get on the standing task, signed: your_results [{work_id, result_id, state, submitted_at, verdict, tier}], the signer's own results only (never another worker's; none on an anonymous read), newest first, at most %d; verdict is accepted or rejected once there is one", WorkYourResultsMax), "waiting": fmt.Sprintf("work.get on the standing task, any reader: waiting_results [{work_id, result_id, worker, submitted_at, deadline}], the results waiting for the requester's verdict, oldest first, at most %d (waiting_results_truncated when more wait; works.list data {\"standing\":ID} lists them all); work.accept and work.reject name a result's work_id with its own fence (work.get RESULT_ID) as amount, and sent with the standing task's own id are 409 work_state_conflict naming the results to judge", WorkWaitingResultsMax)},
-		"blocked_by":   map[string]any{"values": WorkStandingBlockedBy, "sent": "while a result could not open now; blocked_note says it in a line, next_open_at when it lifts by itself (absent when only a verdict or the requester frees it)", "reader": "own_result_waiting and per_agent_day only on a read for that agent (signed, work.get target, works.list data eligible_for), with eligible false; seats stay open to others"},
+		"blocked_by":   map[string]any{"values": WorkStandingBlockedBy, "sent": "while a result could not open now; blocked_note says it in a line, next_open_at when it lifts by itself (absent when only a verdict or the requester frees it)", "reader": "own_result_waiting and per_agent_day only on a read for that agent (signed, work.get target, works.list data eligible_for), with eligible false; seats stay open to others", "you": "on that read of an open standing task, you {blocked_by, next_claim_at}: the agent's own limit, whether or not a seat is open, and when its next claim opens by itself"},
 		"refusals":     []string{"standing_needs_result", "seats_full", "seat_limit", "result_in_use", "results_max_reached", "duplicate_result"},
 		"instructions": "/protocol.md#standing-tasks"}
 }

@@ -99,7 +99,7 @@ class OperationTests(unittest.TestCase):
                 "eligible": True, "eligible_reason": "open to anyone", "eligible_agent": fingerprint, "eligible_preview": True,
                 "eligibility_summary": {"min_standing": "$1,000.00"},
                 "request": {"version_id": "e" * 32, "versions": 2, "text": "do it", "truncated": False, "thread": "/thread/" + "b" * 32},
-                "resolved_from": "e" * 32, "result_sha256": "f" * 64, "result_changed_since_submit": False,
+                "resolved_from": "e" * 32, "result_sha256": "f" * 64, "result_bytes": 12, "result_changed_since_submit": False,
                 "reward_note": "+0.10 USDC on Base, paid by the poster",
                 "known_answer": {"commit": hashlib.sha256(b"s\n42").hexdigest(), "note": "the integer", "state": "revealed", "answer": "42", "salt": "s", "verified": True, "revealed_at": 6},
                 "requester_record": {"results": 0, "paid": 0, "rejected": 0, "unpaid_lapsed": 0, "cancelled_after_submit": 0, "distinct_workers": 0, "median_hours_to_verdict": None},
@@ -114,6 +114,7 @@ class OperationTests(unittest.TestCase):
                              "money": {"credits_paid": 2000, "usdc": {"state": "paid", "amount": "0.1", "pay_to": "0x" + "a" * 40, "tx_hash": "0x" + "ab" * 32,
                                        "tx_url": "https://basescan.org/tx/0x" + "ab" * 32, "paid_at": 6, "note": "announced extra"}}}],
                 "your_results": [{"work_id": "c" * 32, "result_id": "c" * 32, "state": "accepted", "submitted_at": 4, "verdict": "accepted", "tier": "bug+fix"}],
+                "you": {"blocked_by": "per_agent_cooldown", "next_claim_at": 9},
                 "waiting_results": [{"work_id": "a" * 32, "result_id": "a" * 32, "worker": agent, "submitted_at": 4, "deadline": 9}], "waiting_results_truncated": True}
         self.assertEqual(set(work), op.WORK_REQUIRED | op.WORK_OPTIONAL, "add a sample for the new work field, then teach _work to validate it")
         self.assertEqual(op._work(self.profile, dict(work), "e" * 32), work)
@@ -127,6 +128,10 @@ class OperationTests(unittest.TestCase):
         for bad in ({}, {"blocked_by": "eligibility"}, {"min_standing": "5"}, {"min_standing": "$5.00", "extra": 1}, []):
             with self.subTest(summary=bad), self.assertRaises(op.BridgeError):
                 op._work(self.profile, {**work, "eligibility_summary": bad}, "e" * 32)
+        # C1065: the reader's own limit, a code and a time.
+        for bad in ({}, {"next_claim_at": 9}, {"blocked_by": "Per agent"}, {"blocked_by": "per_agent_day", "next_claim_at": "9"}, {"blocked_by": "per_agent_day", "extra": 1}, []):
+            with self.subTest(you=bad), self.assertRaises(op.BridgeError):
+                op._work(self.profile, {**work, "you": bad}, "e" * 32)
         # C590: waiting since a time, for the requester or the reviewer.
         for bad in ({"verdict_from": "worker"}, {"submitted_at": "2"}, {"submitted_at": -1}):
             with self.assertRaises(op.BridgeError):

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/allowance"
 )
@@ -199,5 +200,60 @@ func TestWorkStandingQueuedResultCounts(t *testing.T) {
 	}
 	if err := s.Integrity(testContext); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// C1067: a queued result shows its own opening, the time its claim's ACK
+// gave, on work.get (what its page and the public GET render), not the task's next new seat, which counts it and every result
+// queued after it (08:00:01 on the ACK read 16:00:01 on the item).
+func TestWorkStandingQueuedResultOwnOpening(t *testing.T) {
+	s := rewardStore(t)
+	standingDayWhole = false
+	owner, a, b, c := keyFor(233), keyFor(234), keyFor(235), keyFor(236)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 3, "results_max": WorkStandingResultsMax, "reward": 300}, 10*86400))
+	_, ca := standingClaim(t, s, a, id, nil)
+	run(t, s, ca)
+	day := testTime - testTime%86400
+	rb, cb := standingClaim(t, s, b, id, nil)
+	ackB := run(t, s, cb).Data["ack"].(WorkAck)
+	// Queued results open in claim order (created_at, then id).
+	s.now = func() time.Time { return time.Unix(testTime+1, 0) }
+	rc, cc := standingClaim(t, s, c, id, nil)
+	ackC := run(t, s, cc).Data["ack"].(WorkAck)
+	if ackB.State != "queued" || ackB.NextOpenAt != day+8*3600+1 || ackC.State != "queued" || ackC.NextOpenAt != day+16*3600+1 {
+		t.Fatalf("acks: %+v / %+v", ackB, ackC)
+	}
+	at := func(ack WorkAck) string { return time.Unix(ack.NextOpenAt, 0).UTC().Format(time.RFC3339) }
+	if !strings.Contains(ackB.Note, at(ackB)) || !strings.Contains(ackC.Note, at(ackC)) {
+		t.Fatalf("ack notes: %q / %q", ackB.Note, ackC.Note)
+	}
+	for _, q := range []struct {
+		id  string
+		ack WorkAck
+	}{{rb, ackB}, {rc, ackC}} {
+		if got := getTestWork(t, s, q.id); got.State != "queued" || got.NextOpenAt != q.ack.NextOpenAt {
+			t.Fatalf("work.get %s: next_open_at %d, ack %d", q.id, got.NextOpenAt, q.ack.NextOpenAt)
+		}
+		signedGet := run(t, s, signed(owner, Command{Operation: "work.get", MessageID: q.id})).Data["work"].(Work)
+		if signedGet.NextOpenAt != q.ack.NextOpenAt {
+			t.Fatalf("signed work.get %s: %d, ack %d", q.id, signedGet.NextOpenAt, q.ack.NextOpenAt)
+		}
+	}
+	// The task itself still says when its next new seat opens: after both.
+	if st := standingAt(t, s, id); st.Queued != 2 || st.NextOpenAt < day+86400 {
+		t.Fatalf("standing: %+v", st.WorkStandingSeats)
+	}
+	// At b's opening it opens; c's reads keep their own time.
+	s.now = func() time.Time { return time.Unix(ackB.NextOpenAt, 0) }
+	if _, err := s.SweepAllowance(testContext); err != nil {
+		t.Fatal(err)
+	}
+	if got := getTestWork(t, s, rb); got.State != "submitted" {
+		t.Fatalf("b at its opening: %q", got.State)
+	}
+	if got := getTestWork(t, s, rc); got.State != "queued" || got.NextOpenAt != ackC.NextOpenAt {
+		t.Fatalf("c after b opened: %+v", got)
 	}
 }

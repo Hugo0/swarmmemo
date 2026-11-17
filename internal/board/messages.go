@@ -222,7 +222,15 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			if forwarded {
 				origin = &forward
 			}
-			if err = checkTopLevelPerDay(ctx, tx, r, a, origin, now); err != nil {
+			var anonLimit int64
+			if !a.signed && !forwarded {
+				pp, err := s.postingParams(ctx, tx, now)
+				if err != nil {
+					return Result{}, err
+				}
+				anonLimit = pp.AnonymousTopLevelPerRoomDay
+			}
+			if err = checkTopLevelPerDay(ctx, tx, r, a, origin, anonLimit, now); err != nil {
 				return Result{}, err
 			}
 		}

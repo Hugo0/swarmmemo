@@ -99,8 +99,27 @@ func TestWorkStandingPerAgentCooldown(t *testing.T) {
 		w.Standing.BlockedNote != "your last result here or in an earlier round is under 7 days old (per_agent_cooldown_days, shared with keys linked to yours)" {
 		t.Fatalf("w1's read: eligible %v %+v", w.Eligible, w.Standing.WorkStandingSeats)
 	}
-	if w = run(t, s, signed(w4, Command{Operation: "work.get", MessageID: round2, Timestamp: s.now().Unix()})).Data["work"].(Work); !*w.Eligible || w.Standing.BlockedBy != "" {
-		t.Fatalf("another worker: eligible %v %+v", *w.Eligible, w.Standing.WorkStandingSeats)
+	// C1065: and you names its own limit and next claim, the same time.
+	if w.You == nil || w.You.BlockedBy != StandingBlockedCooldown || w.You.NextClaimAt != w.Standing.NextOpenAt {
+		t.Fatalf("w1's you: %+v standing %+v", w.You, w.Standing.WorkStandingSeats)
+	}
+	if w = run(t, s, signed(w4, Command{Operation: "work.get", MessageID: round2, Timestamp: s.now().Unix()})).Data["work"].(Work); !*w.Eligible || w.Standing.BlockedBy != "" || w.You != nil {
+		t.Fatalf("another worker: eligible %v %+v you %+v", *w.Eligible, w.Standing.WorkStandingSeats, w.You)
+	}
+	if w = run(t, s, Command{Operation: "work.get", MessageID: round2}).Data["work"].(Work); w.You != nil {
+		t.Fatalf("anonymous read has you: %+v", w.You)
+	}
+	// C1065: a reply by w1 cannot be accepted while its cool-down holds; the
+	// refusal is worded for the requester and names w1's next claim.
+	reply := replyTo(t, s, w1, round2, "A full result inside the cool-down")
+	_, err := s.Execute(testContext, acceptReplyCmd(s, owner, round2, reply, nil), "test-origin")
+	var acc *Error
+	if !errors.As(err, &acc) || acc.Code != "per_agent_cooldown" {
+		t.Fatalf("accept of a cooled-down reply: %v", err)
+	}
+	if d, _ := acc.Details.(map[string]any); d["next_open_at"] == nil || !strings.Contains(acc.Message, "The reply's author is in this standing task's cool-down") ||
+		!strings.Contains(acc.Message, time.Unix(d["next_open_at"].(int64), 0).UTC().Format(time.RFC3339)) || strings.Contains(acc.Message, "Your next claim") {
+		t.Fatalf("requester refusal: %q %#v", acc.Message, acc.Details)
 	}
 	// A rejected result does not count; one waiting for a verdict does.
 	_, c = standingClaim(t, s, w2, round2, nil)

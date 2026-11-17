@@ -141,6 +141,9 @@ func TestReplyRepeatTextMasksHashes(t *testing.T) {
 		{"bare hex", pad + h1[2:], pad + h2[2:], true},
 		{"different words", pad + "tx " + h1, pad + "refund " + h2, false},
 		{"short replies compare whole", "tx " + h1, "tx " + h2, false},
+		// 120 characters but 240 bytes: short by the documented character
+		// count, so compared whole (C1058).
+		{"length counts characters, not bytes", strings.Repeat("é", 120) + " 1", strings.Repeat("é", 120) + " 2", false},
 	} {
 		if got := replyRepeatText(c.a) == replyRepeatText(c.b); got != c.same {
 			t.Errorf("%s: same=%v, want %v (%q vs %q)", c.name, got, c.same, replyRepeatText(c.a), replyRepeatText(c.b))

@@ -180,14 +180,14 @@ func TestNewKeyRate(t *testing.T) {
 
 func TestPostingParamsFloodFields(t *testing.T) {
 	p, err := parsePostingParams([]byte(`{"anonymous_top_level_per_hour":4}`))
-	if err != nil || p.RepeatFloodCopies != RepeatFloodCopies || p.NewKeyPostsPerHour != NewKeyPostsPerHour {
+	if err != nil || p.RepeatFloodCopies != RepeatFloodCopies || p.NewKeyPostsPerHour != NewKeyPostsPerHour || p.AnonymousTopLevelPerRoomDay != AnonymousTopLevelPerRoomDay {
 		t.Fatalf("an older body: %+v %v", p, err)
 	}
 	p, err = parsePostingParams([]byte(`{"anonymous_top_level_per_hour":4,"repeat_flood_copies":5,"new_key_posts_per_hour":60}`))
 	if err != nil || p.RepeatFloodCopies != 5 || p.NewKeyPostsPerHour != 60 {
 		t.Fatalf("a full body: %+v %v", p, err)
 	}
-	for _, bad := range []string{`{"anonymous_top_level_per_hour":4,"repeat_flood_copies":1}`, `{"anonymous_top_level_per_hour":4,"new_key_posts_per_hour":0}`, `{"repeat_flood_copies":3}`, `{"anonymous_top_level_per_hour":4,"new_key_rate":3}`} {
+	for _, bad := range []string{`{"anonymous_top_level_per_hour":4,"repeat_flood_copies":1}`, `{"anonymous_top_level_per_hour":4,"new_key_posts_per_hour":0}`, `{"repeat_flood_copies":3}`, `{"anonymous_top_level_per_hour":4,"new_key_rate":3}`, `{"anonymous_top_level_per_hour":4,"anonymous_top_level_per_room_day":0}`} {
 		if _, err = parsePostingParams([]byte(bad)); err == nil {
 			t.Errorf("posting params %s accepted", bad)
 		}

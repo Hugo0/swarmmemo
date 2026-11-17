@@ -123,3 +123,82 @@ func TestTopLevelPerDayOwnerSigned(t *testing.T) {
 	fails(t, s, signed(mod, Command{Operation: "post", Room: "salon", Text: "former three"}), "top_level_daily_limit")
 	run(t, s, signed(owner, Command{Operation: "post", Room: "salon", Text: "owner still exempt"}))
 }
+
+// C1060: without a key, a network starts at most
+// anonymous_top_level_per_room_day threads in each room a UTC day, in a room
+// with no policy too, on the room's own counter; a signed poster and replies
+// are not held to it, and a room limit below it stays the binding one.
+func TestAnonymousTopLevelPerRoomDay(t *testing.T) {
+	s := openTest(t, Config{})
+	// The hourly anonymous rate is not what this test is about.
+	if _, err := s.SetAllowanceParams(testContext, PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000}`), "test", 0); err != nil {
+		t.Fatal(err)
+	}
+	anon := func(room, text, replyTo, source string) error {
+		_, err := s.Execute(testContext, Command{Operation: "post", Room: room, Text: text, ReplyTo: replyTo}, source)
+		return err
+	}
+	var first string
+	for i := range AnonymousTopLevelPerRoomDay {
+		r, err := s.Execute(testContext, Command{Operation: "post", Room: "research", Text: fmt.Sprintf("article %d", i)}, "203.0.113.5")
+		if err != nil {
+			t.Fatalf("thread %d: %v", i, err)
+		}
+		if first == "" {
+			first = r.Receipt.ID
+		}
+	}
+	err := anon("research", "article too many", "", "203.0.113.77") // same /24
+	var e *Error
+	if !errors.As(err, &e) || e.Status != 429 || e.Code != "top_level_daily_limit" || e.NextOpenAt != s.now().Unix()-s.now().Unix()%86400+86400 ||
+		!strings.HasPrefix(e.Message, "Without a key, a network starts at most 4 threads (top-level posts) in #research a UTC day") ||
+		!strings.Contains(e.Message, "this room has no daily thread limit") || !strings.Contains(e.Message, "create_identity") || !strings.Contains(e.Message, KeygenCLI) {
+		t.Fatalf("fifth anonymous thread: %v", err)
+	}
+	if d, ok := e.Details.(map[string]any); !ok || d["limit"] != int64(4) || d["counted_by"] != "network" || d["signed_limit"] != int64(0) {
+		t.Fatalf("details: %#v", e.Details)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM events WHERE text='article too many'"); n != 0 {
+		t.Fatal("a refused thread must not be published")
+	}
+	if err = anon("research", "a reply", first, "203.0.113.5"); err != nil {
+		t.Fatalf("a reply is not counted: %v", err)
+	}
+	if err = anon("elsewhere", "another room", "", "203.0.113.5"); err != nil {
+		t.Fatalf("another room has its own count: %v", err)
+	}
+	if err = anon("research", "another network", "", "198.51.100.5"); err != nil {
+		t.Fatalf("another network has its own count: %v", err)
+	}
+	author := keyFor(96)
+	register(t, s, author)
+	for i := range AnonymousTopLevelPerRoomDay + 2 {
+		run(t, s, signed(author, Command{Operation: "post", Room: "research", Text: fmt.Sprintf("signed %d", i)}))
+	}
+	// A room's own limit above it names that limit; below it, the room's wins.
+	if _, err = s.OperatorRoom(testContext, Command{Operation: "room.policy.set", Room: "research", Data: `{"top_level_per_day":10}`}); err != nil {
+		t.Fatal(err)
+	}
+	if err = anon("research", "still too many", "", "203.0.113.5"); !errors.As(err, &e) || !strings.Contains(e.Message, "this room's own limit of 10 a day applies") {
+		t.Fatalf("room limit 10: %v", err)
+	}
+	if _, err = s.OperatorRoom(testContext, Command{Operation: "room.policy.set", Room: "research", Data: `{"top_level_per_day":1}`}); err != nil {
+		t.Fatal(err)
+	}
+	if err = anon("research", "first of a new network", "", "192.0.2.5"); err != nil {
+		t.Fatal(err)
+	}
+	if err = anon("research", "second of a new network", "", "192.0.2.5"); !errors.As(err, &e) || !strings.HasPrefix(e.Message, "#research takes one new post per agent a day") {
+		t.Fatalf("room limit 1: %v", err)
+	}
+	// Raising the parameter admits one more.
+	if _, err = s.OperatorRoom(testContext, Command{Operation: "room.policy.set", Room: "research", Data: `{"top_level_per_day":0}`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetAllowanceParams(testContext, PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000,"anonymous_top_level_per_room_day":5}`), "test", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err = anon("research", "the fifth, raised", "", "203.0.113.5"); err != nil {
+		t.Fatalf("raised: %v", err)
+	}
+}

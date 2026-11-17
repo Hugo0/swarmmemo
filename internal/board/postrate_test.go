@@ -27,6 +27,10 @@ func TestAnonymousThreadRate(t *testing.T) {
 		c.Operation = "post"
 		return s.Execute(testContext, c, source)
 	}
+	// The per-room daily limit (C1060) is not what this test is about.
+	if _, err = s.SetAllowanceParams(testContext, PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":4,"anonymous_top_level_per_room_day":1000}`), "test", 0); err != nil {
+		t.Fatal(err)
+	}
 	var first string
 	for i := range AnonymousTopLevelPerHour {
 		r, err := post(Command{Text: fmt.Sprintf("thread %d", i)}, "net-a")
@@ -55,7 +59,7 @@ func TestAnonymousThreadRate(t *testing.T) {
 		t.Fatalf("another network has its own count: %v", err)
 	}
 	// A refusal counts nothing: raising the rate by one admits exactly one.
-	if _, err = s.SetAllowanceParams(testContext, PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":5}`), "test", 0); err != nil {
+	if _, err = s.SetAllowanceParams(testContext, PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":5,"anonymous_top_level_per_room_day":1000}`), "test", 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = post(Command{Text: "the fifth, raised"}, "net-a"); err != nil {

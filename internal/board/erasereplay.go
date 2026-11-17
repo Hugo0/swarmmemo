@@ -169,7 +169,7 @@ func (s *Store) replayErasure(ctx context.Context, e erasureSideEntry) error {
 	if err != nil {
 		return err
 	}
-	if _, err = EraseAccount(ctx, tx, e.Account, now, keep); err != nil {
+	if _, err = s.EraseAccount(ctx, tx, e.Account, now, keep); err != nil {
 		return err
 	}
 	ids, err := eraseIDs(ctx, tx, e.Account)

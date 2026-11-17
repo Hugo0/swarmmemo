@@ -126,7 +126,7 @@ func BenchmarkRepliesWaiting(b *testing.B) {
 	}
 	defer s.Close()
 	s.now = func() time.Time { return time.Unix(1, 0) }
-	if _, err = s.SetAllowanceParams(testContext, PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000000}`), "bench", 0); err != nil {
+	if _, err = s.SetAllowanceParams(testContext, PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000000,"anonymous_top_level_per_room_day":1000000}`), "bench", 0); err != nil {
 		b.Fatal(err)
 	}
 	s.now = func() time.Time { return time.Unix(testTime, 0) }

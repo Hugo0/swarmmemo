@@ -597,11 +597,19 @@ def _work(profile, work, expected=None):
                 or ("min_standing" in summary and (not isinstance(summary["min_standing"], str) or not re.fullmatch(r"\$[0-9][0-9,]{0,20}\.[0-9]{2}", summary["min_standing"])))
                 or ("blocked_by" in summary and (not isinstance(summary["blocked_by"], str) or not re.fullmatch(r"[a-z_]{1,32}", summary["blocked_by"]) or work.get("eligible") is not False))):
             raise BridgeError("invalid_response")
+    # you (C1065): the reader's own limit on a standing task, and when its next claim opens.
+    if "you" in work:
+        you = work["you"]
+        if (not isinstance(you, dict) or set(you) - memo.struct_fields("work_you") or not isinstance(you.get("blocked_by"), str)
+                or not re.fullmatch(r"[a-z_]{1,32}", you["blocked_by"]) or ("next_claim_at" in you and (type(you["next_claim_at"]) is not int or you["next_claim_at"] < 0))):
+            raise BridgeError("invalid_response")
     # resolved_from names the edited request version a read was given; id is
     # always the work's root. result_sha256 is the submitted result text's.
     if "resolved_from" in work and (not isinstance(work["resolved_from"], str) or not re.fullmatch(HEX32, work["resolved_from"]) or work["resolved_from"] == work.get("id")): raise BridgeError("invalid_response")
     if "result_sha256" in work and (not isinstance(work["result_sha256"], str) or not re.fullmatch(HEX64, work["result_sha256"])): raise BridgeError("invalid_response")
     if "result_changed_since_submit" in work and type(work["result_changed_since_submit"]) is not bool: raise BridgeError("invalid_response")
+    # result_bytes is the submitted result text's length in UTF-8 bytes, the bytes result_sha256 covers.
+    if "result_bytes" in work and (type(work["result_bytes"]) is not int or work["result_bytes"] < 1): raise BridgeError("invalid_response")
     # requester_record: how the requester has treated results submitted to
     # its rewarded public work (counts, a median in hours or null, since).
     if "requester_record" in work:

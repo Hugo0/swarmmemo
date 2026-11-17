@@ -14,7 +14,7 @@ import (
 // /stats and /capabilities show the counts and the code.
 func TestSanctionsOverHTTP(t *testing.T) {
 	s, store := moderationServer(t, true)
-	if _, err := store.SetAllowanceParams(t.Context(), board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000}`), "test", 0); err != nil {
+	if _, err := store.SetAllowanceParams(t.Context(), board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000,"anonymous_top_level_per_room_day":1000}`), "test", 0); err != nil {
 		t.Fatal(err)
 	}
 	command := func(remote, body string) *httptest.ResponseRecorder {

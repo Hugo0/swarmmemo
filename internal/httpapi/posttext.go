@@ -38,19 +38,16 @@ func (s *Server) postTextRoute(w http.ResponseWriter, r *http.Request) bool {
 		writeError(w, err)
 		return true
 	}
-	sum := sha256.Sum256([]byte(m.Text))
-	hash := hex.EncodeToString(sum[:])
-	if hash != m.Hash {
+	h := w.Header()
+	if !setContentDigest(h, m) {
 		// The stored digest is what the log covers; bytes that no longer
 		// match it are never served as the post.
 		writeError(w, &board.Error{Status: 503, Code: "text_unavailable", Message: "The post's text could not be read back intact. Retry shortly.", RetryAfter: 5})
 		return true
 	}
-	etag := `"` + hash + `"`
-	h := w.Header()
+	etag := `"` + m.Hash + `"`
 	h.Set("Content-Type", "text/plain; charset=utf-8")
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	h.Set("X-Content-SHA256", hash)
 	h.Set("ETag", etag)
 	// Each version keeps its own ID, so these bytes never change at this
 	// address; the max-age is short only so a removal reaches shared caches
@@ -58,7 +55,7 @@ func (s *Server) postTextRoute(w http.ResponseWriter, r *http.Request) bool {
 	h.Set("Cache-Control", "public, max-age=300")
 	h.Set("X-Robots-Tag", "noindex")
 	if expose := h.Get("Access-Control-Expose-Headers"); expose != "" {
-		h.Set("Access-Control-Expose-Headers", expose+", X-Content-SHA256, ETag")
+		h.Set("Access-Control-Expose-Headers", expose+", ETag")
 	}
 	if etagMatches(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
@@ -69,6 +66,26 @@ func (s *Server) postTextRoute(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodHead {
 		_, _ = w.Write([]byte(m.Text))
 	}
+	return true
+}
+
+// setContentDigest puts a post's text digest in the response headers (C1062):
+// X-Content-SHA256 is the SHA-256 of the text's UTF-8 bytes exactly as
+// stored, nothing added or trimmed (the message's sha256), and
+// X-Content-Bytes their count. Both cover the text alone, never the JSON or
+// page around it, so a reader tells a changed text from a changed wrapper.
+// They ride headers because shipped inbox clients refuse extra keys on a
+// message. Every CORS answer exposes both (serveHTTP), since a kept hot
+// read replays them onto a fresh response. It sets nothing and reports
+// false when the text served no longer hashes to the stored digest (a
+// removed or withheld post's text).
+func setContentDigest(h http.Header, m board.Message) bool {
+	sum := sha256.Sum256([]byte(m.Text))
+	if hex.EncodeToString(sum[:]) != m.Hash {
+		return false
+	}
+	h.Set("X-Content-SHA256", m.Hash)
+	h.Set("X-Content-Bytes", strconv.Itoa(len(m.Text)))
 	return true
 }
 

@@ -258,6 +258,7 @@
   },
   "limits": {
     "anonymous_top_level_per_hour": 4,
+    "anonymous_top_level_per_room_day": 4,
     "attachment_bytes": 1048576,
     "attachments_per_message": 8,
     "avatar_bytes": 262144,
@@ -4530,6 +4531,7 @@
         "requester_may_decide_at",
         "requester_record",
         "resolved_from",
+        "result_bytes",
         "result_changed_since_submit",
         "result_id",
         "result_sha256",
@@ -4552,6 +4554,7 @@
         "waiting_results_truncated",
         "worker",
         "worker_subject",
+        "you",
         "your_results"
       ]
     },
@@ -4690,6 +4693,14 @@
         "worker"
       ],
       "optional": []
+    },
+    "work_you": {
+      "required": [
+        "blocked_by"
+      ],
+      "optional": [
+        "next_claim_at"
+      ]
     },
     "work_your_result": {
       "required": [

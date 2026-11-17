@@ -1000,12 +1000,8 @@ func (f *fetch) retrieve(ctx context.Context, u *url.URL, now int64) (*fetchedPa
 		if err := f.denied(ctx, q, current.Hostname()); err != nil {
 			return nil, err
 		}
-		allowed, line, err := f.robotsAllow(ctx, current, now)
-		if err != nil {
+		if err := f.robotsAllow(ctx, current, now); err != nil {
 			return nil, err
-		}
-		if !allowed {
-			return nil, robotsRefusal(line, current.Hostname())
 		}
 		resp, err := f.get(ctx, current, now)
 		if err != nil {
@@ -1190,11 +1186,13 @@ func (f *fetch) countHost(ctx context.Context, host string, now int64) error {
 	return nil
 }
 
-// robotsAllow reports whether robots.txt lets us fetch u, reading and
-// caching the origin's robots.txt first: a 4xx means no rules, and an
-// unreachable file (5xx, a network failure, a redirect off the host) means
-// everything is disallowed.
-func (f *fetch) robotsAllow(ctx context.Context, u *url.URL, now int64) (bool, string, error) {
+// robotsAllow is nil when robots.txt lets us fetch u, reading and caching
+// the origin's robots.txt first (RFC 9309): a 4xx means no rules, and a 5xx
+// or a redirect off the host means everything is disallowed (fetch_robots).
+// A host that cannot be reached at all (DNS, connect, TLS, timeout) is
+// fetch_upstream_error, not cached and retryable: it says nothing about
+// what robots.txt allows (C1052).
+func (f *fetch) robotsAllow(ctx context.Context, u *url.URL, now int64) error {
 	origin := u.Scheme + "://" + u.Host
 	f.mu.Lock()
 	e := f.robots[origin]
@@ -1202,7 +1200,7 @@ func (f *fetch) robotsAllow(ctx context.Context, u *url.URL, now int64) (bool, s
 	if e == nil || now >= e.expires {
 		rules, err := f.readRobots(ctx, u, now)
 		if err != nil {
-			return false, "", err
+			return err
 		}
 		e = &robotsEntry{rules: rules, expires: now + FetchRobotsSeconds}
 		f.mu.Lock()
@@ -1223,18 +1221,25 @@ func (f *fetch) robotsAllow(ctx context.Context, u *url.URL, now int64) (bool, s
 	if u.RawQuery != "" {
 		path += "?" + u.RawQuery
 	}
-	ok, line := e.rules.decide(path)
-	return ok, line, nil
+	if ok, line := e.rules.decide(path); !ok {
+		return robotsRefusal(line, e.rules.status, u.Hostname())
+	}
+	return nil
 }
 
 // robotsRefusal is fetch_robots, carrying for the board's message (never
 // as response keys) the robots.txt line that matched (robots_line, from
-// robotsLine; absent when the file could not be read) and the public_data
-// datasets that read host (datasets, PublicDataDatasetsForHost).
-func robotsRefusal(line, host string) error {
+// robotsLine; absent when the file could not be read), the 5xx status
+// robots.txt answered when that disallowed everything (robots_status), and
+// the public_data datasets that read host (datasets,
+// PublicDataDatasetsForHost).
+func robotsRefusal(line string, status int, host string) error {
 	d := map[string]any{}
 	if line != "" {
 		d["robots_line"] = line
+	}
+	if status != 0 {
+		d["robots_status"] = status
 	}
 	if ids := PublicDataDatasetsForHost(host); len(ids) > 0 {
 		d["datasets"] = ids
@@ -1265,11 +1270,10 @@ func (f *fetch) readRobots(ctx context.Context, u *url.URL, now int64) (robotsRu
 	for hop := 0; ; hop++ {
 		resp, err := f.get(ctx, current, now)
 		if err != nil {
-			var ae *allowance.Err
-			if errors.As(err, &ae) && ae.Code != "fetch_upstream_error" {
-				return robotsRules{}, err // our own bounds, or an address the page cannot have either
-			}
-			return robotsRules{disallowAll: true}, nil
+			// Our own bounds, an address the page cannot have either, or
+			// an unreachable host: the page cannot be read either, and
+			// robots.txt said nothing (C1052).
+			return robotsRules{}, err
 		}
 		status := resp.StatusCode
 		switch {
@@ -1286,7 +1290,7 @@ func (f *fetch) readRobots(ctx context.Context, u *url.URL, now int64) (robotsRu
 			body, err := io.ReadAll(io.LimitReader(resp.Body, fetchRobotsBytes))
 			resp.Body.Close()
 			if err != nil {
-				return robotsRules{disallowAll: true}, nil
+				return robotsRules{}, refusal("fetch_upstream_error")
 			}
 			return parseRobots(strings.ToValidUTF8(string(body), ""), FetchRobotsToken), nil
 		case status >= 400 && status < 500:
@@ -1294,7 +1298,7 @@ func (f *fetch) readRobots(ctx context.Context, u *url.URL, now int64) (robotsRu
 			return robotsRules{}, nil
 		}
 		resp.Body.Close()
-		return robotsRules{disallowAll: true}, nil
+		return robotsRules{disallowAll: true, status: status}, nil
 	}
 }
 

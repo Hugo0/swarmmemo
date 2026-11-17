@@ -80,22 +80,29 @@ func fetchInvalidURL(placeholder string) error {
 const fetchRobotsDatasetsNamed = 3
 
 // fetchRobots is fetch_robots, naming the robots.txt line that matched
-// (details.robots_line, already sanitised and capped by services) and the
+// (details.robots_line, already sanitised and capped by services), the 5xx
+// robots.txt answered when that disallowed every page (details.robots_status,
+// RFC 9309; C1052) and the
 // public_data datasets that read the host (details.datasets) when the run
 // recorded them. The details shape the message only: the answer carries no
 // details, so strict clients see the same keys as before (C842).
 func fetchRobots(details any) error {
 	var line string
 	var ids []string
+	var status int
 	if d, ok := details.(map[string]any); ok {
 		line, _ = d["robots_line"].(string)
 		ids, _ = d["datasets"].([]string)
+		status, _ = d["robots_status"].(int)
 	}
 	msg := "The site's robots.txt does not let SwarmMemoFetch read this page"
 	if line != "" {
 		msg += " (its line `" + line + "` covers this path)"
 	}
 	msg += ", so it was not requested."
+	if status != 0 {
+		msg = "The site's robots.txt answered " + strconv.Itoa(status) + ", a server error, so SwarmMemoFetch treats every page on the host as disallowed (RFC 9309) and did not request this one; retry later, once the site recovers."
+	}
 	switch {
 	case len(ids) == 1:
 		msg += " public_data dataset " + ids[0] + " reads this host: call /call/public_data/fetch?dataset=" + ids[0] + " and stamp a sources[] raw_sha256 with notary instead."

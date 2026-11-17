@@ -24,7 +24,7 @@ func viaFixture(t *testing.T) (*board.Store, *Server) {
 	t.Cleanup(func() { _ = store.Close() })
 	// Every route posts a thread from one address: lift the anonymous thread
 	// rate (board's TestAnonymousThreadRate covers it).
-	if _, err = store.SetAllowanceParams(t.Context(), board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000}`), "test", 0); err != nil {
+	if _, err = store.SetAllowanceParams(t.Context(), board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000,"anonymous_top_level_per_room_day":1000}`), "test", 0); err != nil {
 		t.Fatal(err)
 	}
 	return store, New(store, nil, Config{BridgeTokens: map[string]string{"email": testBridgeToken}})

@@ -105,3 +105,37 @@ func TestFetchRobotsNamesTheDataset(t *testing.T) {
 		t.Fatalf("details: %#v", ae.Details)
 	}
 }
+
+// TestFetchRobotsUnreachable: robots.txt answering 5xx refuses with the
+// status (RFC 9309); a host that drops the robots.txt connection is
+// fetch_upstream_error, retryable, never fetch_robots; a 404 allows (C1052).
+func TestFetchRobotsUnreachable(t *testing.T) {
+	five := newSite(t, false, map[string]http.HandlerFunc{
+		"/robots.txt": func(w http.ResponseWriter, r *http.Request) { http.Error(w, "down", http.StatusServiceUnavailable) },
+	})
+	r := newFetchRig(t, five, fetchOpts{hosts: map[string][]net.IP{"site.test": {publicIP}}})
+	_, err := r.fetch("alice", noScreen("http://site.test/page"))
+	var ae *allowance.Err
+	if !errors.As(err, &ae) || ae.Code != "fetch_robots" {
+		t.Fatalf("5xx: %v", err)
+	}
+	if d, _ := ae.Details.(map[string]any); d["robots_status"] != 503 || d["robots_line"] != nil {
+		t.Fatalf("5xx details: %#v", ae.Details)
+	}
+	drop := newSite(t, false, map[string]http.HandlerFunc{
+		"/robots.txt": func(w http.ResponseWriter, r *http.Request) {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+		},
+	})
+	r = newFetchRig(t, drop, fetchOpts{hosts: map[string][]net.IP{"site.test": {publicIP}}})
+	_, err = r.fetch("alice", noScreen("http://site.test/page"))
+	if !errors.As(err, &ae) || ae.Code != "fetch_upstream_error" {
+		t.Fatalf("unreachable: %v", err)
+	}
+	if drop.hit("/page") != 0 {
+		t.Fatal("page requested without robots.txt")
+	}
+}

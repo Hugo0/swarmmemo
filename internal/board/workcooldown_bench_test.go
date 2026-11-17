@@ -178,10 +178,10 @@ func TestWorkEligibilityPageCacheUnchanged(t *testing.T) {
 				code, reason string
 			}
 			var got, want answer
-			if got.ok, got.code, got.reason, err = s.workEligibleNow(testContext, tx, shared, w, w.State, st, now); err != nil {
+			if got.ok, got.code, got.reason, _, err = s.workEligibleNow(testContext, tx, shared, w, w.State, st, now); err != nil {
 				t.Fatal(err)
 			}
-			if want.ok, want.code, want.reason, err = s.workEligibleNow(testContext, tx, &workEligibilityFacts{account: account}, w, w.State, &st2, now); err != nil {
+			if want.ok, want.code, want.reason, _, err = s.workEligibleNow(testContext, tx, &workEligibilityFacts{account: account}, w, w.State, &st2, now); err != nil {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(got, want) {

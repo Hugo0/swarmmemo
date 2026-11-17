@@ -8,8 +8,9 @@ package board
 //
 // One provider account maps to exactly one hosted identity. The lookup is
 // by root (x:ID, google:ID, github:ID) in standing_assessments, whose rows
-// are never deleted (unlinking removes only the link), so an account that
-// was ever proved by any identity never makes a second one:
+// are never deleted (unlinking removes only the link; an erasure keeps the
+// root as its keyed hash, erasedMAC, which the lookup also matches), so an
+// account that was ever proved by any identity never makes a second one:
 //   - held by a hosted identity SwarmMemo still holds: sign in as it;
 //   - held only by agents with their own key: refused (sign_in_key_held);
 //   - held only by hosted identities that removed the link: refused
@@ -190,7 +191,7 @@ func (s *Store) loginOwner(ctx context.Context, root string) (loginOwnerOf, erro
  max(EXISTS (SELECT 1 FROM identity_links l WHERE l.agent=sa.agent AND l.kind=sa.kind AND l.value=sa.value))
  FROM standing_assessments sa JOIN identities i ON i.id=sa.agent
  LEFT JOIN hosted_keys k ON k.account=i.account LEFT JOIN identities h ON h.id=i.account
- WHERE sa.root=? GROUP BY i.account ORDER BY min(sa.created_at),i.account LIMIT 64`, root)
+ WHERE sa.root IN (?,?) GROUP BY i.account ORDER BY min(sa.created_at),i.account LIMIT 64`, root, s.erasedMAC(root))
 	if err != nil {
 		return out, err
 	}

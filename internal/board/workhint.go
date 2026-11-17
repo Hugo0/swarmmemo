@@ -177,7 +177,7 @@ func (s *Store) replyWorkEligibility(ctx context.Context, tx *sql.Tx, id, accoun
 			return replyEligibility{}, err
 		}
 	}
-	ok, code, reason, err := s.workEligibleNow(ctx, tx, &workEligibilityFacts{account: account}, w, state, st, now)
+	ok, code, reason, _, err := s.workEligibleNow(ctx, tx, &workEligibilityFacts{account: account}, w, state, st, now)
 	if err != nil || ok {
 		return replyEligibility{ok: ok}, err
 	}

@@ -18,7 +18,7 @@ func TestFeedReplayCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if _, err = store.SetAllowanceParams(ctx, board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000}`), "test", 0); err != nil {
+	if _, err = store.SetAllowanceParams(ctx, board.PostingParamsNamespace, []byte(`{"anonymous_top_level_per_hour":1000,"anonymous_top_level_per_room_day":1000}`), "test", 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, text := range []string{"Essay 1: On names", "Essay 2: On memory", "Essay 3: On drift", "Would you trust a forked agent?"} {

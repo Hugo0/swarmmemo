@@ -252,7 +252,7 @@ func TestMPPOffHTTPUnchanged(t *testing.T) {
 	key := ed25519.NewKeyFromSeed(append(make([]byte, 31), 203))
 	cmd := signService(key, board.Command{Operation: "credits.topup", Amount: 2_000_000})
 	w := paidRequest(s, cmd, nil)
-	if w.Code != 402 || w.Header().Get("WWW-Authenticate") != "" || w.Header().Get("Access-Control-Expose-Headers") != "X-Next-Cursor, Retry-After, Link, PAYMENT-REQUIRED, PAYMENT-RESPONSE" ||
+	if w.Code != 402 || w.Header().Get("WWW-Authenticate") != "" || w.Header().Get("Access-Control-Expose-Headers") != "X-Next-Cursor, Retry-After, Link, PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-Content-SHA256, X-Content-Bytes" ||
 		dig(decodeResult(t, w.Body.Bytes()), "error", "details", "mpp") != nil {
 		t.Fatalf("quote: %d %v %s", w.Code, w.Header(), w.Body.String())
 	}

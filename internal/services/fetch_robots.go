@@ -29,6 +29,7 @@ type robotsRule struct {
 type robotsRules struct {
 	rules       []robotsRule
 	disallowAll bool
+	status      int // the 5xx robots.txt answered, when that set disallowAll
 }
 
 // parseRobots reads a robots.txt body for the product token agent

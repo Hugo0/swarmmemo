@@ -56,7 +56,7 @@ var ErasureKept = []string{
 	"signed work transitions (the other party's record of the work)",
 	"offering calls, their inputs, answers and pay_to (the other party's record of a paid call)",
 	"payments, top-ups and bonds with their wallets and transaction hashes (accounting)",
-	"standing proofs' roots and assessments (one outside account never makes a second identity)",
+	"standing proofs' assessments, their values and roots only as keyed hashes (one outside account never makes a second identity)",
 	"activity counts and funnel rows (numbers only, never content)",
 	"other members' messages and replies",
 	"the fingerprint itself, so no one else can claim the erased history",
@@ -122,7 +122,7 @@ func EraseObligations(ctx context.Context, tx *sql.Tx, account string) ([]string
 // no second connection). It is idempotent: a second run counts zero rows, so
 // a restore can replay erasure_log through it. Raw write records live in
 // their own database and are erased by OperatorEraseAccount after commit.
-func EraseAccount(ctx context.Context, tx *sql.Tx, account string, now int64, keep EraseEvidence) ([]EraseCount, error) {
+func (s *Store) EraseAccount(ctx context.Context, tx *sql.Tx, account string, now int64, keep EraseEvidence) ([]EraseCount, error) {
 	if !fingerprintRE.MatchString(account) {
 		return nil, errAgentFingerprint()
 	}
@@ -240,6 +240,12 @@ func EraseAccount(ctx context.Context, tx *sql.Tx, account string, now int64, ke
 		return nil, err
 	}
 	counts = append(counts, EraseCount{"feedback", "text blanked", n})
+	// Standing proofs (C1059) stay, so one outside account never makes a
+	// second identity (login.go), but only as keyed hashes: value and root
+	// become erasedMAC, the detail goes.
+	if err = s.eraseAssessmentValues(ctx, tx, account); err != nil {
+		return nil, err
+	}
 	// Write signals (90-day store, signals.go): erased, except those that
 	// are evidence for an open report or an active sanction.
 	ws, err := eraseWriteSignals(ctx, tx, account, keep)
@@ -248,6 +254,56 @@ func EraseAccount(ctx context.Context, tx *sql.Tx, account string, now int64, ke
 	}
 	counts = append(counts, ws)
 	return counts, nil
+}
+
+// erasedHashPrefix starts a standing_assessments value or root an erasure
+// replaced by its keyed hash.
+const erasedHashPrefix = "hmac:"
+
+// erasedMAC is v as an erasure keeps it: its keyed hash under the signals
+// key (signalMAC), named by the key's id, so a row kept under another key is
+// never compared with the current one.
+func (s *Store) erasedMAC(v string) string {
+	return erasedHashPrefix + s.signals.id + ":" + s.signalMAC("erased:"+v)
+}
+
+// eraseAssessmentValues replaces each raw link value and root in the
+// account's standing_assessments rows with its keyed hash and blanks the
+// detail. A root lookup (loginOwner) hashes what it looks for the same way,
+// so an erased outside account still matches; the plain value is gone.
+func (s *Store) eraseAssessmentValues(ctx context.Context, tx *sql.Tx, account string) error {
+	rows, err := tx.QueryContext(ctx, "SELECT agent,kind,value,root FROM standing_assessments WHERE agent IN "+eraseOwn+" AND (value NOT LIKE '"+erasedHashPrefix+"%' OR detail<>'')", account)
+	if err != nil {
+		return err
+	}
+	type assessment struct{ agent, kind, value, root string }
+	var all []assessment
+	for rows.Next() {
+		var a assessment
+		if err = rows.Scan(&a.agent, &a.kind, &a.value, &a.root); err != nil {
+			rows.Close()
+			return err
+		}
+		all = append(all, a)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, a := range all {
+		value, root := a.value, a.root
+		if !strings.HasPrefix(value, erasedHashPrefix) {
+			value = s.erasedMAC(a.kind + "\x00" + a.value)
+		}
+		if root != "" && !strings.HasPrefix(root, erasedHashPrefix) {
+			root = s.erasedMAC(root)
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE standing_assessments SET value=?,root=?,detail='' WHERE agent=? AND kind=? AND value=?", value, root, a.agent, a.kind, a.value); err != nil {
+			return fmt.Errorf("erase standing_assessments: %w", err)
+		}
+	}
+	return nil
 }
 
 // numberedParams is n numbered SQL parameters starting at ?from.
@@ -359,7 +415,7 @@ func (s *Store) eraseRun(ctx context.Context, tx *sql.Tx, r ErasureReceipt, now 
 	if run.digests, err = eraseLinkDigests(ctx, tx, r.Account); err != nil {
 		return run, err
 	}
-	if run.receipt.Counts, err = EraseAccount(ctx, tx, r.Account, now, run.keep); err != nil {
+	if run.receipt.Counts, err = s.EraseAccount(ctx, tx, r.Account, now, run.keep); err != nil {
 		return run, err
 	}
 	// The raw records are in their own database (another file and

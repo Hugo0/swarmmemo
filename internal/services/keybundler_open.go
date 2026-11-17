@@ -756,7 +756,9 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 		v, has := vets[h.ID]
 		byOperator := has && !neverVetted(h.Category) && v.holds(host, h.Method, q.price, q.priced)
 		vetted := h.Vetted || byOperator
-		why := f.whyNot(vetted, h.Category, hosts[h.ID], q.price, q.priced)
+		// The host the listing invokes when no descriptor recorded one: a
+		// denylisted host is refused here as the call refuses it (C1057).
+		why := f.whyNot(vetted, h.Category, host, q.price, q.priced)
 		if why == "" && h.Live != nil && !*h.Live {
 			why = "tool_unavailable"
 		}

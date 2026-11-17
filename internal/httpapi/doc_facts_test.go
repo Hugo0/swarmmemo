@@ -85,7 +85,7 @@ func docFacts() []docFact {
 		// Repeated replies (board/replyrepeat.go, C599).
 		{"docs/PROTOCOL.md", "within the last {N} (only `request_id`, nonce and timestamp differ)", durationFact(board.SignedRetrySeconds)},
 		{"docs/PROTOCOL.md", "already replied to that message within the last {N} hours", countFact(board.ReplyRepeatWindowSeconds / 3600)},
-		{"docs/PROTOCOL.md", "in a reply of {N} characters or more", countFact(board.ReplyRepeatMaskMinBytes)},
+		{"docs/PROTOCOL.md", "in a reply of {N} characters or more", countFact(board.ReplyRepeatMaskMinRunes)},
 		// Repeat promotion (repeatpromo.go, C760).
 		{"docs/PROTOCOL.md", "into {N} or more places", countFact(board.PromoRepeatThreads)},
 		{"docs/PROTOCOL.md", "places within the last {N} hours", countFact(board.PromoRepeatWindowSeconds / 3600)},

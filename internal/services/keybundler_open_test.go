@@ -157,7 +157,7 @@ func testBundlerHits() string {
  {"id":"` + toolUnvet + `","title":"Unvetted weather","description":"` + long + `","capabilities":["weather"],"payment":{"price_hint":"0.001"},"unvetted":true},
  {"id":"` + toolPricey + `","title":"Pricey","description":"pricey","payment":{"price_hint":"0.5"}},
  {"id":"` + toolDead + `","title":"Dead weather","description":"dead","payment":{"price_hint":"0.001"}},
- {"id":"` + toolDenied + `","title":"Denied weather","description":"denied","payment":{"price_hint":"0.001"}},
+ {"id":"` + toolDenied + `","title":"Denied weather","description":"denied","payment":{"price_hint":"0.001"},"invocation":{"method":"POST","url":"https://evil.example.net/w"}},
  {"id":"../runs/x","title":"path","description":"bad id"},
  {"id":"a/b","title":"slash","description":"bad id"}
 ]`
@@ -369,6 +369,10 @@ func TestBundlerSearch(t *testing.T) {
 	}
 	if p := hits["tool:"+toolPricey]; p["callable"] != false || p["why_not"] != "tool_price_over_cap" {
 		t.Fatalf("pricey hit %v", p)
+	}
+	// A denylisted host is refused before any descriptor recorded it (C1057).
+	if d := hits["tool:"+toolDenied]; d["callable"] != false || d["why_not"] != "tool_denied" {
+		t.Fatalf("denied hit %v", d)
 	}
 	tools := page["tools"].(map[string]any)
 	if tools["max_price"] != "0.02" || tools["allow_unvetted"] != false {

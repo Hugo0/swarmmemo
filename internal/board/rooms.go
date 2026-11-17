@@ -982,10 +982,22 @@ func prefixAccounts(ctx context.Context, tx *sql.Tx, prefix string) ([]string, e
 // not counted; a bridged post never is, whoever relays it. The count is a
 // counter row incremented in the post's transaction, so a refused or failed
 // post does not count; yesterday's rows are pruned as today's are written.
-func checkTopLevelPerDay(ctx context.Context, tx *sql.Tx, r Room, a actor, forward *Forwarded, now int64) error {
+//
+// anonLimit is the posting params' anonymous_top_level_per_room_day for an
+// unsigned, unbridged poster (C1060), else 0: such a poster is held to the
+// lower of it and the room's own limit, in every room, on the same counter.
+// Signed and hosted posters see the room's policy alone.
+func checkTopLevelPerDay(ctx context.Context, tx *sql.Tx, r Room, a actor, forward *Forwarded, anonLimit, now int64) error {
 	p, err := loadPolicy(ctx, tx, r.Name)
-	if err != nil || p.TopLevelPerDay == 0 {
+	if err != nil {
 		return err
+	}
+	limit, anonCap := p.TopLevelPerDay, false
+	if anonLimit > 0 && (limit == 0 || anonLimit < limit) {
+		limit, anonCap = anonLimit, true
+	}
+	if limit == 0 {
+		return nil
 	}
 	if forward == nil {
 		role, err := roomRole(ctx, tx, r, a)
@@ -1012,8 +1024,19 @@ func checkTopLevelPerDay(ctx context.Context, tx *sql.Tx, r Room, a actor, forwa
 	if n, err = bumpCounter(ctx, tx, prefix+r.Name+":"+subject); err != nil {
 		return err
 	}
-	if n <= p.TopLevelPerDay {
+	if n <= limit {
 		return nil
+	}
+	if anonCap {
+		keyed := "this room has no daily thread limit"
+		if p.TopLevelPerDay > 0 {
+			keyed = fmt.Sprintf("this room's own limit of %d a day applies", p.TopLevelPerDay)
+		}
+		e := rateError(now, "top_level_daily_limit", fmt.Sprintf(
+			"Without a key, a network starts at most %d threads (top-level posts) in #%s a UTC day; this post was not published. With a signing key or a hosted identity, %s: make one free in one call (MCP create_identity, or %s; no signup: /docs) and post again. Or reply to any thread, post in another room, or start a new thread here after 00:00 UTC (next_open_at).",
+			limit, r.Name, keyed, KeygenCLI)).(*Error)
+		e.Details = map[string]any{"limit": limit, "counted_by": "network", "signed_limit": p.TopLevelPerDay}
+		return e
 	}
 	quota := "one new post"
 	if p.TopLevelPerDay > 1 {

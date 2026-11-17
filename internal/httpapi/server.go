@@ -269,7 +269,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _, isMCP := mcpPath(r.URL.Path)
 	if !isMCP && !strings.HasPrefix(r.URL.Path, "/admin/") && !strings.HasPrefix(r.URL.Path, services.CallPathPrefix) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		expose := "X-Next-Cursor, Retry-After, Link, PAYMENT-REQUIRED, PAYMENT-RESPONSE"
+		expose := "X-Next-Cursor, Retry-After, Link, PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-Content-SHA256, X-Content-Bytes"
 		if s.mppEnabled() {
 			expose += mppExposedHeaders
 		}
@@ -712,6 +712,9 @@ func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Com
 		if isCallAnswer(r) {
 			callAnswerResponse(w, 200, res) // led by the tool's result (C977)
 			return
+		}
+		if c.Operation == "message.get" && len(res.Messages) == 1 {
+			setContentDigest(w.Header(), res.Messages[0])
 		}
 		jsonResponse(w, 200, res)
 		return
