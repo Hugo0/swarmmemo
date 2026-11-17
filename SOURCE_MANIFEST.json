@@ -1006,8 +1006,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "d159d9232be78bed74be69536cd3c1e21c6f4e35ccfcc41e3a365c84347325d5",
-      "size": 697381
+      "sha256": "e9cc0882fbc22086f2aea6b696f05d560c56f77528564029cd35591b510e9563",
+      "size": 697807
     },
     {
       "mode": "0644",
@@ -1078,8 +1078,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_NOTARY.md",
-      "sha256": "aa30fb4445ed8bc7299e9ecbdb07c113d10e7ef445f089f60e66181d5bea3749",
-      "size": 4793
+      "sha256": "7653c02835302fb2f38fa3b8c827fc3ec57542d03926a476a9e20d785053891f",
+      "size": 4843
     },
     {
       "mode": "0644",
@@ -1192,8 +1192,8 @@
     {
       "mode": "0644",
       "path": "docs/firststep.go",
-      "sha256": "79d70921361de5b161db6b07702ad5811f415bcec8d9b5bd5ce90663c3b4a0c6",
-      "size": 1513
+      "sha256": "169c3a2a62545af055877891ae5a43852dce446984db8cfa9e8fbfb7741c04d9",
+      "size": 1980
     },
     {
       "mode": "0644",
@@ -1204,8 +1204,8 @@
     {
       "mode": "0644",
       "path": "docs/jobs.go",
-      "sha256": "964e4c4ded10f9604e1e2537e6ea518c81e27c75eed6e8401c2d8524dde53a2c",
-      "size": 25098
+      "sha256": "d04d548687291276ce0e3942ce62e79e7a5b32f8b7053411c269a4d213f9ba42",
+      "size": 25218
     },
     {
       "mode": "0644",
@@ -4546,8 +4546,8 @@
     {
       "mode": "0644",
       "path": "internal/board/work.go",
-      "sha256": "141ea67689758191df75b2ba72009473413f8d94f52cc740f1e5ef07f9489b87",
-      "size": 129893
+      "sha256": "f9b1ebddb286340309bd754458fc7a14d1aab2ed0021610eabaaaffe7d5ff43a",
+      "size": 130422
     },
     {
       "mode": "0644",
@@ -4912,8 +4912,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workstanding.go",
-      "sha256": "3d06569bccc4c980321840ac05eacd77a7dd04b190cdf6c0969dfc9043728b88",
-      "size": 121101
+      "sha256": "4b9b60146bf71cfc54e780bc3bfefd6c583fdd7b075c0494e03a4f6133e2574c",
+      "size": 121511
     },
     {
       "mode": "0644",
@@ -4990,8 +4990,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workstanding_test.go",
-      "sha256": "b133c2612202168365073cc26aa0b139c8c5419cdcf382bc6c35f0d2d1c1d057",
-      "size": 50480
+      "sha256": "6b4fc66be24b30c4980c8692f52cccd1286d50351e61e1d94541104cbc45e96f",
+      "size": 51126
     },
     {
       "mode": "0644",
@@ -5638,8 +5638,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/docs_tools_test.go",
-      "sha256": "f4e4045987b0d14f50ec1815b10c9f836370bb15b07d857020828788fa45aa08",
-      "size": 8599
+      "sha256": "a6b06c723dac15a490f558c018d29f09666637f4ee7eb1272bfbfdfd0097d735",
+      "size": 9455
     },
     {
       "mode": "0644",
@@ -7246,8 +7246,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/work.go",
-      "sha256": "050e5f7e0a118e8e00b814b8be6857041861777bfcb65e479c377576d783eddf",
-      "size": 9829
+      "sha256": "77e78a9bdb58a9762492e16dfd671eb2cce465aa34004c58d114f47f046d2cbe",
+      "size": 10046
     },
     {
       "mode": "0644",
@@ -8692,14 +8692,14 @@
     {
       "mode": "0644",
       "path": "internal/services/notary.go",
-      "sha256": "258d8b8d91455a3a421d7e9ddba22dd6c27febea37abfc2aeaf2c1c4bdeda903",
-      "size": 29058
+      "sha256": "4138c53eb89f08b57224709b4d66fca21560631a1367a46df9cfbdcaaa58fe49",
+      "size": 29586
     },
     {
       "mode": "0644",
       "path": "internal/services/notary_test.go",
-      "sha256": "c2162acc9563359b1784fb4a2767c1abbb5e94f432f7ace9801ab7587329e81a",
-      "size": 14236
+      "sha256": "c17de1fb777e1b7f7edb836126ed5cc40cff9d200519cb190b50c18a7edef6d1",
+      "size": 14538
     },
     {
       "mode": "0644",
@@ -10504,8 +10504,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "b2ea60a4d2b3f81190110e9998f5aa319e15637ed3c31935b3bc7009464023a9",
-      "size": 60826
+      "sha256": "6b78c62ee62c49a8a777cfac52ee0afb9724e3c15e3875b31c3d177954b7e9e5",
+      "size": 60884
     },
     {
       "mode": "0644",

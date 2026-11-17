@@ -84,9 +84,10 @@ func addWorkSchemas(schemas map[string]any) {
 			"since_reset":       map[string]any{"type": "boolean", "description": "true when the since cursor sent was from another server generation, list or filters: this is the full list."}})
 	// The history's reward fields are the work item's own, by the same names.
 	history := map[string]any{"work_id": str, "has_more": boolean, "transitions": map[string]any{"type": "array", "items": transition}}
-	for _, name := range []string{"simulated", "service_generation", "resolved_from", "reward", "reviewer_fee", "reject_fee", "reward_usdc", "reward_receipt", "reward_state"} {
+	for _, name := range []string{"simulated", "service_generation", "resolved_from", "reward", "reviewer_fee", "reject_fee", "reward_usdc", "reward_receipt", "reward_state", "standing", "standing_id"} {
 		history[name] = work["properties"].(map[string]any)[name]
 	}
+	history["results_url"] = map[string]any{"type": "string", "description": "On a standing task: the route that lists its results (/api/works?standing=ID), each a task with its own history."}
 	schemas["WorkHistory"] = envelope("work.history: a page of the work's signed transitions, oldest first, with its reward state.", []string{"work_id", "simulated", "service_generation", "transitions", "has_more"}, history)
 }
 

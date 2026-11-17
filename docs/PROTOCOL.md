@@ -4475,6 +4475,11 @@ page and cursors. An unknown handle, or a worker key the board has not seen, is
 - `GET /api/work/MESSAGE_ID/history?limit=25` → `work.history`, returning
   `data.transitions`, `data.work_id`, `data.simulated` and `data.service_generation`
   (and `data.resolved_from` when the ID given was an edited version of the request).
+  A standing task's results are tasks of their own: its history holds its own transitions
+  (create, successor, cancel) plus `data.standing` (the seats, `paid` and `owed` included)
+  and `data.results_url` (`/api/works?standing=ID`, `find_work` `standing`), the results
+  with their states and rewards; each result's claim, verdict and settle are on its own
+  `work.history`, whose `data.standing_id` names the standing task.
 - `GET /api/work/MESSAGE_ID/listing` → the task as one paste-ready block to post on
   another board: `data.listing` (title, `what`, `reward`, `seats`, `deadline`, the `reply`
   and `claim` commands, `url` and the whole block as `markdown`); `Accept: text/markdown` or

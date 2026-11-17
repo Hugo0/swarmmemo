@@ -136,6 +136,10 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 	if get(out, "result", "bytes") != float64(len(text)) || get(again, "result", "bytes") != nil {
 		t.Fatalf("result.bytes: text %+v, hash %+v", get(out, "result", "bytes"), get(again, "result", "bytes"))
 	}
+	// C1053: the result says what the hash is of, text or hash.
+	if get(out, "result", "hashed") != services.NotaryHashedText || get(again, "result", "hashed") != services.NotaryHashedHash {
+		t.Fatalf("result.hashed: text %+v, hash %+v", get(out, "result", "hashed"), get(again, "result", "hashed"))
+	}
 	sum := sha256.Sum256([]byte(text))
 	textRec := receiptOf(t, get(out, "result", "receipt"))
 	if textRec.Hash != hex.EncodeToString(sum[:]) || textRec.Seq != 2 || !services.VerifyNotaryReceipt(public, textRec) {

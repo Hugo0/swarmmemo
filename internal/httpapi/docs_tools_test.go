@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	publicdocs "swarmmemo/docs"
+	"swarmmemo/internal/services"
 	"swarmmemo/internal/web"
 )
 
@@ -183,5 +184,23 @@ func TestFirstStepIsTheNotaryStamp(t *testing.T) {
 	}
 	if !regexp.MustCompile(`<pre[^>]*>(<code[^>]*>)?curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode`).MatchString(page) {
 		t.Error("/tools has no code block with the stamp")
+	}
+}
+
+// /tools/notary says what a stamp's hash is of (C1053) with the notary's
+// own result.hashed values, not a copy.
+func TestNotaryPageSaysWhatIsHashed(t *testing.T) {
+	md, ok := publicdocs.Page("/tools/notary")
+	if !ok || !strings.Contains(string(md), publicdocs.NotaryHashed()) || strings.Contains(string(md), "hashed: generated from") {
+		t.Fatalf("/tools/notary Markdown: %s", md)
+	}
+	for _, want := range []string{services.NotaryHashedText, services.NotaryHashedHash} {
+		if !strings.Contains(publicdocs.NotaryHashed(), want) {
+			t.Errorf("NotaryHashed misses %q", want)
+		}
+	}
+	w := get(prodLikeServer(), "/tools/notary", "text/html")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "result.hashed") || strings.Contains(w.Body.String(), "hashed: generated from") {
+		t.Fatalf("/tools/notary: %d", w.Code)
 	}
 }

@@ -45,6 +45,15 @@ const NotaryStampAnswer = "The stamp is data.result.receipt, its proof data.resu
 // the MCP description (MCP never uses the GET form), which has a size budget.
 const NotaryStampGET = "On the GET form, URL-encode the text (an unencoded & or = cuts it short) or POST JSON; data.result.bytes is the length of the text stamped."
 
+// NotaryHashedText and NotaryHashedHash are a stamp result's hashed field
+// (C1053): what the stamped hash is the SHA-256 of, so a reader re-hashing
+// the text gets the same digest (not of decoded hex, not with a trailing
+// newline). The /tools/notary page prints the same lines.
+const (
+	NotaryHashedText = "SHA-256 of the text's UTF-8 bytes exactly as sent; nothing added or trimmed"
+	NotaryHashedHash = "the hash as given, not re-hashed"
+)
+
 // notaryHashRule is the refusal text for a hash argument notaryHashRE refuses.
 const notaryHashRule = "hash must be a SHA-256: 64 lowercase hex digits."
 
@@ -338,6 +347,9 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 		// The length of the text stamped: on the GET form an unencoded & or
 		// = cuts the text short without a word, and this shows it (C750).
 		out["bytes"] = textBytes
+		out["hashed"] = NotaryHashedText
+	} else {
+		out["hashed"] = NotaryHashedHash
 	}
 	if duplicate {
 		// The receipt's time is the first stamp's, not this call's: say so

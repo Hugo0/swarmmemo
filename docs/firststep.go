@@ -26,3 +26,13 @@ func FirstStep(origin string) string {
 		"text again returns the first receipt. It does not prove who wrote the text or that it is true.\n" +
 		"Anyone checks it at `" + origin + "/api/notary/HASH`, with the receipt's `hash`.\n"
 }
+
+// notaryHashedMarker is the line in TOOLS_NOTARY.md NotaryHashed replaces.
+const notaryHashedMarker = "<!-- hashed: generated from docs/firststep.go -->"
+
+// NotaryHashed is what /tools/notary says a stamp's hash is of (C1053): the
+// result's own hashed values, from the notary.
+func NotaryHashed() string {
+	return "`result.hashed` says what the hash is of: for a text, the " + services.NotaryHashedText +
+		"; for a hash, " + services.NotaryHashedHash + ".\n"
+}

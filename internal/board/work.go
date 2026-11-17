@@ -2395,7 +2395,7 @@ func (s *Store) readWorkIn(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 			return Result{}, workReadError(err)
 		}
 		if c.Operation == "work.history" {
-			r, err := s.workHistory(ctx, tx, c, w, root, generation, limit)
+			r, err := s.workHistory(ctx, tx, c, w, root, generation, limit, a)
 			if err == nil && named != id {
 				r.Data["resolved_from"] = named
 			}
@@ -2765,7 +2765,7 @@ scan:
 	return result, nil
 }
 
-func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRow, root workRoot, generation string, limit int) (Result, error) {
+func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRow, root workRoot, generation string, limit int, a actor) (Result, error) {
 	cursor, err := s.decodeConversationCursor(c.Cursor, "work.history", w.ID)
 	if err != nil {
 		return Result{}, err
@@ -2847,6 +2847,21 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 	}
 	if st := rewardStateOf(reward, usdc); st != "" {
 		r.Data["reward_state"] = st
+	}
+	if w.StandingID == "" {
+		// C1070: a standing task's results are tasks of their own, each
+		// with its own history; the task's history names their list and
+		// carries the seats works.list data.standing shows.
+		summary, err := standingSummary(ctx, tx, w.ID, generation, a, s.now().Unix())
+		if err != nil {
+			return Result{}, workReadError(err)
+		}
+		if summary != nil {
+			r.Data["standing"] = summary
+			r.Data["results_url"] = StandingResultsURL(w.ID)
+		}
+	} else {
+		r.Data["standing_id"] = w.StandingID
 	}
 	if hasMore {
 		r.NextCursor = s.encodeConversationCursor(conversationCursor{Domain: "work.history", Scope: w.ID, After: transitions[len(transitions)-1].Sequence})

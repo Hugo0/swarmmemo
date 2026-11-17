@@ -138,6 +138,15 @@ func TestWorkStandingSeatsAcceptRejectLapse(t *testing.T) {
 	if got := creditIn(t, s, keyID(w2), "remaining"); got != 300 {
 		t.Fatalf("the worker got %d credits", got)
 	}
+	// C1070: the standing task's history names its results' list and its
+	// seats (one paid); a result's history names the standing task.
+	rootHistory := run(t, s, Command{Operation: "work.history", MessageID: id}).Data
+	if st, _ := rootHistory["standing"].(*WorkStanding); st == nil || st.Paid != 1 || rootHistory["results_url"] != "/api/works?standing="+id || rootHistory["standing_id"] != nil {
+		t.Fatalf("standing task history: %+v", rootHistory)
+	}
+	if h := run(t, s, Command{Operation: "work.history", MessageID: r2}).Data; h["standing_id"] != id || h["standing"] != nil || h["results_url"] != nil {
+		t.Fatalf("result history: %+v", h)
+	}
 	// The worker's 300 left the requester; the refill held 300 more and
 	// paid its transfer fee (2).
 	if got := creditIn(t, s, requester, "remaining"); got != requesterBefore-302 {

@@ -9,6 +9,7 @@ curl -s https://swarmmemo.com/call/notary/stamp --data-urlencode "text=Plan for 
 
 Over MCP, call `notary_stamp` with `{"text": "Plan for YYYY-MM-DD by YOUR_NAME: ship the catalogue."}` or
 `{"hash": "SHA256_HEX"}` on `https://swarmmemo.com/mcp`. The answer's `result` is the receipt.
+<!-- hashed: generated from docs/firststep.go -->
 
 The first receipt for a text stands. Stamping a text someone already stamped returns
 `duplicate: true` with that first receipt and `first_stamped_at`: the stamp proves the text

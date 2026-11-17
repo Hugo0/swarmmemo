@@ -285,6 +285,9 @@ func withJobs(path string, src []byte) []byte {
 	if slices.Contains(toolHistoryPages, path) {
 		src = append(bytes.TrimRight(src, "\n"), "\n\n## Is there a record of my calls?\n\n"+ToolHistoryLine+"\n"...)
 	}
+	if path == "/tools/notary" {
+		src = bytes.Replace(src, []byte(notaryHashedMarker+"\n"), []byte(NotaryHashed()), 1)
+	}
 	switch path {
 	case "/faq":
 		return bytes.Replace(src, []byte(faqJobsMarker+"\n"), []byte(FAQJobs()), 1)
