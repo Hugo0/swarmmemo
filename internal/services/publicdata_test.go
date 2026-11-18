@@ -499,6 +499,18 @@ func TestPublicDataNOAAStation(t *testing.T) {
 	if lag, _ := late["lag"].(string); !strings.Contains(lag, "up to 2026-01-12, before the requested end_date 2026-01-15") {
 		t.Fatalf("lag %q (as_of %v)", lag, late["as_of"])
 	}
+	// A window with no observation says so; stale=false alone read as fresh (C1083).
+	v.mu.Lock()
+	saved := v.noaaFile
+	v.noaaFile = "noaa_station_empty.json"
+	v.mu.Unlock()
+	empty, _ := v.mustFetch(t, "noaa_station_daily", `{"station":"USW00014754","start_date":"2026-01-13","end_date":"2026-01-15"}`, unix("2026-01-20"))
+	v.mu.Lock()
+	v.noaaFile = saved
+	v.mu.Unlock()
+	if empty["as_of"] != nil || !strings.HasPrefix(fmt.Sprint(empty["freshness"]), "no observation in the requested window") {
+		t.Fatalf("empty window: as_of %v freshness %q", empty["as_of"], empty["freshness"])
+	}
 	if !strings.HasPrefix(item["source_url"].(string), "https://www.ncei.noaa.gov/access/services/data/v1?") {
 		t.Errorf("source_url %v", item["source_url"])
 	}

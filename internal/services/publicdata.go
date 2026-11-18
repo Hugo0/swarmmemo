@@ -489,6 +489,10 @@ type pdItem struct {
 // pdFreshness is a dated item's freshness note.
 const pdFreshness = "stale and cache describe our cached copy; as_of is the source's own observation date."
 
+// pdFreshnessEmpty is the freshness note of an item with no dated
+// observation in the requested window (as_of null).
+const pdFreshnessEmpty = "no observation in the requested window (as_of null): stale and cache describe our cached copy, not the data; widen the dates."
+
 // pdSourceRec is one upstream document an item used.
 type pdSourceRec struct {
 	URL         string  `json:"url"`
@@ -650,6 +654,10 @@ func (p *publicData) runOne(ctx context.Context, req pdRequest, now int64) (item
 	if run.asOf != "" {
 		item.AsOf = &run.asOf
 		item.Freshness = pdFreshness
+	} else if _, dated := item.Params["start_date"]; dated || item.Params["end_date"] != nil {
+		// C1083 (outside agent 01988788, #bounties 16c6f57b): an empty
+		// window with stale=false read as "fresh data".
+		item.Freshness = pdFreshnessEmpty
 	}
 	// Lag also covers a window wholly newer than the source: as_of is then
 	// empty (nothing in the window) but the source's last date is still known.

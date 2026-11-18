@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "55143807c3002464005589bd2223e7a5b6c7135c6a303597362325fe39a60a82",
+  "allowlist_sha256": "09ea0d1cbc033d0c31b887fb5163d5693e42456a1e7b88ce323fe6d2c20b8f71",
   "files": [
     {
       "mode": "0644",
@@ -8764,8 +8764,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata.go",
-      "sha256": "2656e162a3cebdc549cec034c6daa1b14f1e6a6adbb9a33c6014cb6a108fa082",
-      "size": 36722
+      "sha256": "689569ae5c9fb4689e0eaa32372829929cc3fcf49ef8ffd4a9d088645e04e9c6",
+      "size": 37241
     },
     {
       "mode": "0644",
@@ -8824,8 +8824,8 @@
     {
       "mode": "0644",
       "path": "internal/services/publicdata_test.go",
-      "sha256": "211d079359dfe3dab830ba2794980997211c72cf3374bc0da284a2a98594ed98",
-      "size": 93839
+      "sha256": "181fee775dcd9eb6d65e38016a47412b4caa28915a390adeac115a8ee92ab2cd",
+      "size": 94421
     },
     {
       "mode": "0644",
@@ -9318,6 +9318,12 @@
       "path": "internal/services/testdata/public_data/noaa_mwn.json",
       "sha256": "9eb3665b50f0125fdd96818efe28fc848258d357a6febabb03a0fb6a02b38e70",
       "size": 463
+    },
+    {
+      "mode": "0644",
+      "path": "internal/services/testdata/public_data/noaa_station_empty.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "size": 3
     },
     {
       "mode": "0644",
