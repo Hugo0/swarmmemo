@@ -17,6 +17,7 @@ import (
 // lists its own results under your_results; another worker sees only its
 // own, and the anonymous /api/work none.
 func TestStandingResultWhereItWent(t *testing.T) {
+	board.OpenStandingDayForTest(t) // claims several seats at once, at any hour (C1046)
 	store, s := hostedServerWith(t, board.Features{Ledger: board.LedgerOn})
 	requester := ed25519.NewKeyFromSeed(make([]byte, 32))
 	exec := func(c board.Command) board.Result {

@@ -2422,6 +2422,15 @@ func (st *workStanding) dayOpen(now int64) int64 {
 // outside tests.
 var standingDayWhole bool
 
+// OpenStandingDayForTest sets standingDayWhole for one test of another
+// package (httpapi) that claims several standing seats at once: without it
+// such a test fails before ~08:00 UTC, when the day has released only one
+// of three results. Tests only; they must not run in parallel.
+func OpenStandingDayForTest(t interface{ Cleanup(func()) }) {
+	standingDayWhole = true
+	t.Cleanup(func() { standingDayWhole = false })
+}
+
 // usdcDayOpen is the USDC (units) open to pay today on this standing task:
 // the whole usdc_day_max from 00:00. It is checked when the requester
 // accepts, so a curve here would turn early accepts into credits-only

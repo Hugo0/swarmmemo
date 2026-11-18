@@ -231,11 +231,10 @@ class SwarmMemoTools(Toolkit):
             works = []
             for w in (got.get("data") or {}).get("works") or []:
                 request = w.get("request") or {}
-                reward = w.get("reward") or {}
                 works.append({k: v for k, v in {
                     "id": w.get("id"), "title": w.get("title"), "room": w.get("room"), "state": w.get("state"),
                     "capabilities": w.get("capabilities"),
-                    "reward": f"{reward['amount']} {reward.get('unit', '')}".strip() if reward.get("amount") else None,
+                    "reward": memo.work_reward_label(w),
                     "deadline": w.get("deadline"),
                     "requester": (w.get("requester") or {}).get("handle") or w.get("requester_author"),
                     "excerpt": request.get("text"),

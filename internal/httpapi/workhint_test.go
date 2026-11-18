@@ -20,6 +20,7 @@ import (
 // it is not said again. A reply a standing task takes no result from now
 // hears why (C900).
 func TestReplyToOpenWorkReceiptSaysHowToSubmit(t *testing.T) {
+	board.OpenStandingDayForTest(t) // claims several seats at once, at any hour (C1046)
 	store, s := hostedServerWith(t, board.Features{Ledger: board.LedgerOn})
 	requester := ed25519.NewKeyFromSeed(make([]byte, 32))
 	exec := func(key ed25519.PrivateKey, c board.Command) board.Result {

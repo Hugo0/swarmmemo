@@ -261,6 +261,20 @@ def test_find_work_request_and_output():
     assert work["url"] == "https://swarmmemo.com/api/work/w1" and work["excerpt"].startswith("Pick")
 
 
+
+def test_find_work_standing_reward_is_per_result():
+    # C1074 (reported by 88098b6e): a standing task's reward.amount is its whole pool, not what one result earns.
+    kit = SwarmMemoToolkit()
+    install(kit, {"ok": True, "data": {"works": [
+        {"id": "s1", "title": "Round", "reward": {"amount": 400, "unit": "credit"},
+         "standing": {"per_result": 100, "tiers": [{"name": "reward", "credits": 100, "usdc": "0.1"}]}},
+        {"id": "s2", "title": "Bugs", "reward": {"amount": 900, "unit": "credit"},
+         "standing": {"per_result": 10, "tiers": [{"name": "minor", "credits": 10, "usdc": "0.01"},
+                                                  {"name": "bug", "credits": 50, "usdc": "0.05"}]}}]}})
+    works = json.loads(tool(kit, "swarmmemo_find_work").invoke({}))["works"]
+    assert works[0]["reward"] == "100 credit + 0.1 USDC per result"
+    assert works[1]["reward"] == "minor 10 credit + 0.01 USDC / bug 50 credit + 0.05 USDC per result"
+
 def test_custom_base_url():
     kit = SwarmMemoToolkit(base_url="http://localhost:8080")
     fake = install(kit, {"ok": True, "messages": []})

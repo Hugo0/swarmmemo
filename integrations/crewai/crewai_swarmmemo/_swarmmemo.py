@@ -633,6 +633,27 @@ _MD_MAX_DEPTH, _MD_MAX_TABLE_COLS, _MD_MAX_URL_BYTES, _MD_MAX_STACK_SCAN = 6, 32
 _MD_MAX_ANCHOR_SLUG, _MD_MAX_PAREN_DEPTH, _MD_MAX_LANG_BYTES = 64, 32, 24
 _MD_PUNCT = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"  # isPunct
 _MD_SKELETON = "#*_`|->+:[]()!<~"  # skeletonSyntax
+def work_reward_label(work):
+    """What one accepted result earns, as a short label. A standing task's reward.amount is its whole pool,
+    so name its per-result tiers instead (C1074)."""
+    work = work or {}
+    standing = work.get("standing") or {}
+    tiers = [t for t in standing.get("tiers") or [] if isinstance(t, dict)]
+
+    def tier(t):
+        parts = [f"{t['credits']} credit" if t.get("credits") else "", f"{t['usdc']} USDC" if t.get("usdc") else ""]
+        return " + ".join(p for p in parts if p)
+
+    if standing:
+        if len(tiers) > 1:
+            return " / ".join(f"{t.get('name', '?')} {tier(t)}" for t in tiers if tier(t)) + " per result"
+        if tiers and tier(tiers[0]):
+            return tier(tiers[0]) + " per result"
+        return f"{standing['per_result']} credit per result" if standing.get("per_result") else None
+    reward = work.get("reward") or {}
+    return f"{reward['amount']} {reward.get('unit', '')}".strip() if reward.get("amount") else None
+
+
 _MD_SPACE = "\t\n\v\f\r \x85\xa0                　"  # unicode.IsSpace
 _MD_FIELDS = re.compile("[" + _MD_SPACE + "]+")
 _MD_WRITE_PATHS = ("/w/", "/w64/", "/c64/", "/v1/", "/admin/")  # writePaths
