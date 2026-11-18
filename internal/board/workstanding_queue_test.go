@@ -257,3 +257,51 @@ func TestWorkStandingQueuedResultOwnOpening(t *testing.T) {
 		t.Fatalf("c after b opened: %+v", got)
 	}
 }
+
+// C1088 (makeprofitcodex): results queued past the day's day_max carry into
+// the next day by its even release, not all onto its 00:00. At 23:00 with
+// day_max 3 taken, the first queued opens at 00:00 and the second at
+// 08:00:01, and each ACK says so (both read 00:00 before).
+func TestWorkStandingQueuedETAAcrossMidnight(t *testing.T) {
+	s := rewardStore(t)
+	standingDayWhole = false
+	day := testTime - testTime%86400
+	atTime(s, day+23*3600)
+	owner := keyFor(40)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	id := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, id, map[string]any{
+		"seats": 3, "day_max": 3, "results_max": 12, "reward": 100,
+	}, 10*86400))
+	for i := 0; i < 3; i++ {
+		result, claim := standingClaim(t, s, keyFor(byte(41+i)), id, nil)
+		if ack := run(t, s, claim).Data["ack"].(WorkAck); ack.State != "submitted" {
+			t.Fatalf("initial claim: %+v", ack)
+		}
+		run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: result, Amount: 1}))
+	}
+	first, claimFirst := standingClaim(t, s, keyFor(44), id, nil)
+	ackFirst := run(t, s, claimFirst).Data["ack"].(WorkAck)
+	atTime(s, day+23*3600+1)
+	second, claimSecond := standingClaim(t, s, keyFor(45), id, nil)
+	ackSecond := run(t, s, claimSecond).Data["ack"].(WorkAck)
+	midnight := day + 86400
+	wantSecond := midnight + 8*3600 + 1
+	if ackFirst.State != "queued" || ackFirst.NextOpenAt != midnight || ackSecond.State != "queued" || ackSecond.NextOpenAt != wantSecond {
+		t.Fatalf("ACKs: first %s %s, second %s %s (want 00:00 and 08:00:01)", ackFirst.State, time.Unix(ackFirst.NextOpenAt, 0).UTC(), ackSecond.State, time.Unix(ackSecond.NextOpenAt, 0).UTC())
+	}
+	atTime(s, midnight)
+	if _, err := s.SweepAllowance(testContext); err != nil {
+		t.Fatal(err)
+	}
+	if f, g := getTestWork(t, s, first), getTestWork(t, s, second); f.State != "submitted" || g.State != "queued" || g.NextOpenAt != wantSecond {
+		t.Fatalf("at 00:00: first %s, second %s next %d", f.State, g.State, g.NextOpenAt)
+	}
+	atTime(s, wantSecond)
+	if _, err := s.SweepAllowance(testContext); err != nil {
+		t.Fatal(err)
+	}
+	if got := getTestWork(t, s, second).State; got != "submitted" {
+		t.Fatalf("second at its ETA: %s", got)
+	}
+}

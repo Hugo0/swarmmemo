@@ -809,6 +809,9 @@ func TestPublicDataFXRates(t *testing.T) {
 	if !strings.Contains(d["date_note"].(string), "2026-09-11") || !strings.HasSuffix(item["source_url"].(string), "eurofxref-hist-90d.xml") {
 		t.Errorf("date_note %v source %v", d["date_note"], item["source_url"])
 	}
+	if !strings.Contains(d["date_note"].(string), "weekend") {
+		t.Errorf("a Sunday is a weekend: %v", d["date_note"])
+	}
 	_, d = v.mustFetch(t, "fx_rates", `{"date":"2026-09-17"}`, monday)
 	eq(t, "exact day", d["rate_date"], "2026-09-17")
 	if _, ok := d["date_note"]; ok {

@@ -172,6 +172,20 @@ func parseECBFX(raw []byte) (any, error) {
 // fxAnswer picks the day (date, or the latest earlier one; the newest when
 // date is unset) and quotes symbols per 1 base. EUR-base rates are the ECB's
 // own; any other base is a cross rate from the EUR legs, marked derived.
+// fxDateNote says why date has no row: a weekend, a day after the newest row in this copy (the ECB publishes
+// around 16:00 CET on working days, so a working morning has none yet), or a working day the ECB skipped
+// (a TARGET holiday). A missing row after the newest one is never called a holiday (45028cae, 11-18).
+func fxDateNote(date, newest string) string {
+	t, _ := pdDate(date)
+	switch {
+	case t.Weekday() == time.Saturday || t.Weekday() == time.Sunday:
+		return date + " is a weekend; the ECB publishes no reference rates on weekends"
+	case date > newest:
+		return "no ECB reference rates for " + date + " in this copy yet (the ECB publishes around 16:00 CET on working days; newest here " + newest + ")"
+	}
+	return date + " has no ECB reference rates (a TARGET holiday)"
+}
+
 func fxAnswer(days []fxDay, base string, symbols []string, date string, today time.Time) fxData {
 	out := fxData{Base: base, RequestedDate: date, Rates: []fxRow{}}
 	var day *fxDay
@@ -187,7 +201,7 @@ func fxAnswer(days []fxDay, base string, symbols []string, date string, today ti
 	}
 	out.RateDate = sptr(day.Date)
 	if date != "" && day.Date != date {
-		out.DateNote = date + " has no ECB reference rates (weekend or TARGET holiday); answering the latest earlier day, " + day.Date
+		out.DateNote = fxDateNote(date, days[0].Date) + "; answering the latest earlier day, " + day.Date
 	}
 	ref := today
 	if t, ok := pdDate(date); ok {

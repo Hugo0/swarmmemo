@@ -1007,6 +1007,12 @@ func TestStandingDayRelease(t *testing.T) {
 	if got := dayNextRelease(6, 6, day+23*3600); got != day+86400 {
 		t.Fatalf("all taken: next release %d, want the next 00:00", got-day)
 	}
+	// C1088: used past the limit (results queued ahead) carries into later days.
+	for _, c := range []struct{ used, want int64 }{{7, 86400 + 4*3600 + 1}, {12, 2 * 86400}, {14, 2*86400 + 8*3600 + 1}} {
+		if got := dayNextRelease(6, c.used, day+23*3600); got != day+c.want {
+			t.Fatalf("used %d of 6: next release %d, want %d", c.used, got-day, c.want)
+		}
+	}
 	// dayReleased with a larger floor (the release math itself, any unit).
 	for _, c := range []struct{ at, want int64 }{{0, 200_000}, {3600, 200_000}, {12 * 3600, 600_000}, {23 * 3600, 1_150_000}} {
 		if got := dayReleased(1_200_000, 200_000, day+c.at); got != c.want {

@@ -48,6 +48,14 @@ class ParityTest(unittest.TestCase):
                 code = parity.main([dataset, a, b, "--json", *extra])
             return code, (json.loads(out.getvalue()) if out.getvalue() else None), err.getvalue()
 
+    def test_saved_http_response(self):
+        for result, flags in ((ITEM, ()), ({"results": [ITEM]}, ("--index", "0"))):
+            with self.subTest(flags=flags):
+                saved = {"ok": True, "data": {"result": result}}
+                code, report, _ = self.run_parity("noaa_station_daily", REFERENCE, saved, *flags)
+                self.assertEqual(code, 0)
+                self.assertTrue(report["ok"])
+
     def test_agreeing_values_pass(self):
         code, report, _ = self.run_parity("noaa_station_daily", REFERENCE, ITEM)
         self.assertEqual(code, 0, report)

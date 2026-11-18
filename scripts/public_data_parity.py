@@ -52,6 +52,9 @@ def empty(v: Any) -> bool:
 def unwrap_swarmmemo(doc: Any, index: int | None) -> tuple[Any, list[str]]:
     """The data of a public_data item, and warnings about it (stale, errors)."""
     warnings: list[str] = []
+    # A saved HTTP answer wraps the item in {ok, data: {result}} (b36e1c36, #bounties f8a686e4).
+    if isinstance(doc, dict) and "dataset" not in doc and doc.get("ok") is True and isinstance(doc.get("data"), dict):
+        doc = doc["data"]
     if isinstance(doc, dict) and "result" in doc and isinstance(doc["result"], dict):
         doc = doc["result"]
     if isinstance(doc, dict) and "results" in doc:

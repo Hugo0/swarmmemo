@@ -2382,7 +2382,7 @@ type WorkYou struct {
 // before results_until). The day's results (day_max) count from 00:00 UTC
 // (readStandingCounts, checkStandingSeat) and open evenly through the day
 // (dayReleased, C1046), so that cap lifts at the day's next release
-// (dayNextRelease), the next 00:00 UTC once all are taken; seats held by results waiting for a verdict, or a pool short
+// (dayNextRelease), a later day's once all are taken; seats held by results waiting for a verdict, or a pool short
 // of a reward, free when the first waiting result lapses at its verdict
 // deadline (a verdict may free one sooner). USDC owed holds no seat (C386).
 // Results queued for a seat (C661) take the next seats, rewards and day_max
@@ -2418,12 +2418,18 @@ func dayReleased(limit, first, now int64) int64 {
 }
 
 // dayNextRelease is when dayReleased(limit, ...) first passes used: the
-// day's next release after now, or the next 00:00 UTC once used reaches
-// limit. ceil(limit x e / 86400) > used once e > used x 86400 / limit.
+// day's next release after now. ceil(limit x e / 86400) > used once
+// e > used x 86400 / limit. Used past the day's limit (results queued
+// ahead, C1088) carries into later days, limit a day: a whole day's worth
+// lands on that day's 00:00, a remainder on its even release.
 func dayNextRelease(limit, used, now int64) int64 {
 	day := now - now%86400
 	if used >= limit {
-		return day + 86400
+		day += used / limit * 86400
+		if used %= limit; used == 0 {
+			return day
+		}
+		return day + used*86400/limit + 1
 	}
 	return max(now+1, day+used*86400/limit+1)
 }
