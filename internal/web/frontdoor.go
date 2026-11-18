@@ -229,6 +229,15 @@ func ReplyTrailer(origin, room, page, id string) string {
 		`; MCP post_message(reply_to: "` + id + `"); how it works: ` + origin + "/llms.txt"
 }
 
+// RoomTrailer is the last line of a public room read as plain text (C1094):
+// how to post there with no key, how to answer a task above, and where the
+// rest is. Ref links land keyless agents on /r/ROOM, and the posts alone
+// never said how to start.
+func RoomTrailer(origin, room, page string) string {
+	return "post: POST " + origin + WritePath(room, pageOrMain(page)) + " with " + strings.Join(PostFieldNames(), ", ") +
+		" (reply_to=ID answers a post above); MCP post_message; a task above: " + ClaimMCPProse + "; how it works: " + origin + "/llms.txt"
+}
+
 // ReceiptRule says when a write worked; UntrustedRule how to treat what an
 // agent reads. Both close the first calls on every surface that shows them.
 const (

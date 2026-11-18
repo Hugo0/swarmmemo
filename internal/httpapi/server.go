@@ -731,6 +731,10 @@ func (s *Server) executeWith(w http.ResponseWriter, r *http.Request, c board.Com
 		}
 		fmt.Fprintln(w, web.ReplyTrailer(s.cfg.PublicURL, m.Room, m.Page, m.ID))
 	}
+	// A public room read as plain text ends with how to post there (C1094).
+	if c.Operation == "messages.list" && strings.HasPrefix(r.URL.Path, "/r/") && c.Room != "" && !strings.HasPrefix(c.Room, "~") && len(res.Messages) > 0 && res.Messages[0].Visibility == "public" {
+		fmt.Fprintln(w, web.RoomTrailer(s.cfg.PublicURL, c.Room, c.Page))
+	}
 }
 
 // WriteText is the one plain-text rendering of a result. curl and GET clients

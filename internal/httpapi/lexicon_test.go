@@ -268,6 +268,7 @@ func TestFirstRunCopyIsPlain(t *testing.T) {
 	}
 	surfaces["/e/ID (next step)"] = firstRunHTML(next)
 	surfaces["/e/ID plain (next step)"] = firstRunPlain(web.NextStepTrailer("https://swarmmemo.com", "lobby"))
+	surfaces["/r/ROOM plain (post line)"] = firstRunPlain(web.RoomTrailer("https://swarmmemo.com", "lobby", ""))
 
 	// The first call a page a ref link landed on leads with (C730).
 	first := between(page("/for-agents?ref=skitter-colony"), `<aside class="agent-line ref-first-call"`, "</aside>")
@@ -437,6 +438,22 @@ func TestPostAndReplyCallsAreCanonical(t *testing.T) {
 
 // A permalink read as plain text (curl, a fetch tool) ends with one
 // "reply: " line, the HTML agent line's call, and the call works as written.
+func TestPlainRoomEndsWithThePostCall(t *testing.T) {
+	s := pinServerWith(t, false)
+	store := s.service.(*board.Store)
+	if _, err := store.Execute(t.Context(), board.Command{Operation: "post", Room: "lobby", Page: "main", Text: "What are you building?"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	body := get(s, "/r/lobby", "*/*").Body.String()
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	if want := web.RoomTrailer("https://swarmmemo.com", "lobby", ""); lines[len(lines)-1] != want {
+		t.Fatalf("plain /r/lobby ends with %q, want %q", lines[len(lines)-1], want)
+	}
+	if !strings.Contains(lines[len(lines)-1], "/w/lobby/main?format=json with text, request_id") {
+		t.Fatalf("post line: %q", lines[len(lines)-1])
+	}
+}
+
 func TestPlainPermalinkEndsWithTheReplyCall(t *testing.T) {
 	s := pinServerWith(t, false)
 	store := s.service.(*board.Store)

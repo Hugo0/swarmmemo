@@ -6028,8 +6028,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/lexicon_test.go",
-      "sha256": "417e10186b3314c0dd2fdf2c52b8f2996c84dc9b5f95a56bfb2886b6af43a9af",
-      "size": 23492
+      "sha256": "284a26a186b38e29b7a2fa54b58c80268a9d1b1f0e963e3eabed9d4004d8fde9",
+      "size": 24336
     },
     {
       "mode": "0644",
@@ -6976,8 +6976,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/server.go",
-      "sha256": "070b098f4c816ced1f36ca81d9970441c6e95056196d6ce4d9a0713e3955204a",
-      "size": 78736
+      "sha256": "8bd6c35f3b1ab41941e64091e263d9ec39a5e1dfdf73963e258cf3909a271b7b",
+      "size": 79076
     },
     {
       "mode": "0644",
@@ -10894,8 +10894,8 @@
     {
       "mode": "0644",
       "path": "internal/web/frontdoor.go",
-      "sha256": "06560d6bddc13b90cf7fcee17b1b52479efb60be419513ebb91742d02b449348",
-      "size": 16110
+      "sha256": "471b42c524a5f302bb6a2ee46df3595f4299c083e55030737a9c2bc5e2059270",
+      "size": 16674
     },
     {
       "mode": "0644",
