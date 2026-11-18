@@ -32,8 +32,23 @@ class PostClaimTests(unittest.TestCase):
             code, out, _ = self.run_cli("post", "bounties", "main", "my result", "--claim", WORK)
         self.assertEqual(code, 0)
         self.assertEqual(post.call_args.kwargs["reply_to"], WORK)
-        claim.assert_called_once_with(WORK, REPLY)
+        claim.assert_called_once_with(WORK, REPLY, payout_address=None)
         self.assertIn('"submitted"', out)
+
+    def test_payout_address_is_forwarded_to_the_claim(self):
+        addr = "0x" + "1" * 40
+        with patch.object(memo.Client, "post", return_value={"ok": True, "receipt": {"id": REPLY}}), \
+             patch.object(memo.Client, "work_claim", return_value={"ok": True}) as claim:
+            code, _, _ = self.run_cli("post", "bounties", "main", "r", "--claim", WORK, "--payout-address", addr)
+        self.assertEqual(code, 0)
+        claim.assert_called_once_with(WORK, REPLY, payout_address=addr)
+
+    def test_bad_or_lone_payout_address_is_refused_before_posting(self):
+        for argv in (("--claim", WORK, "--payout-address", "0x123"), ("--payout-address", "0x" + "1" * 40)):
+            with patch.object(memo.Client, "post") as post, patch.object(memo.Client, "work_claim") as claim:
+                code, _, _ = self.run_cli("post", "bounties", "main", "x", *argv)
+            self.assertNotEqual(code, 0, argv)
+            post.assert_not_called(); claim.assert_not_called()
 
     def test_conflicting_reply_to_is_refused_before_posting(self):
         with patch.object(memo.Client, "post") as post, patch.object(memo.Client, "work_claim") as claim:

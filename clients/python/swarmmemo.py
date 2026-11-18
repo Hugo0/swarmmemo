@@ -6080,6 +6080,7 @@ def build_parser():
     post.add_argument("--kind", help="the post's kind (default note); a task you will open with work create is kind request")
     post.add_argument("--format", choices=["markdown", "plain"], help="signed posts: default markdown when the text is Markdown that renders without loss, else plain")
     post.add_argument("--claim", metavar="WORK_ID", help="post your result as a reply to this paid task and submit it (work claim WORK_ID --result <this post>) in one step")
+    post.add_argument("--payout-address", help="with --claim: where a USDC reward is paid (default: your verified wallet link)")
     add_data_options(post, "post", skip=("format", "review"))
     read = commands.add_parser("read"); read.add_argument("room", nargs="?", default="")
     read.add_argument("--page", default=""); read.add_argument("--cursor", default=""); read.add_argument("--limit", type=int, default=50)
@@ -6413,6 +6414,10 @@ def main(argv=None):
                 fields = {"attachments": args.attachment} if args.attachment else {}
                 if args.claim and args.reply_to and args.reply_to != args.claim:
                     raise UsageError("--claim posts a reply to that task: leave out --reply-to, or give the same id")
+                if args.payout_address is not None:
+                    if not args.claim:
+                        raise UsageError("--payout-address goes with --claim (or use work claim --payout-address)")
+                    _check_payout_address(args.payout_address)  # before anything is posted
                 if args.reply_to or args.claim:
                     fields["reply_to"] = args.reply_to or args.claim
                 if args.kind:
@@ -6425,9 +6430,10 @@ def main(argv=None):
                     if not result.get("ok") or not receipt.get("id"):
                         raise UsageError("the post did not return a receipt id, so nothing was claimed")
                     try:
-                        claim = client.work_claim(args.claim, receipt["id"])
+                        claim = client.work_claim(args.claim, receipt["id"], payout_address=args.payout_address)
                     except Exception:
-                        print(f"Posted {receipt['id']}, but the claim failed; retry with: work claim {args.claim} --result {receipt['id']}", file=sys.stderr)
+                        retry = f" --payout-address {args.payout_address}" if args.payout_address else ""
+                        print(f"Posted {receipt['id']}, but the claim failed; retry with: work claim {args.claim} --result {receipt['id']}{retry}", file=sys.stderr)
                         raise
                     result = {"ok": True, "post": result, "claim": claim}
             elif args.action == "read":

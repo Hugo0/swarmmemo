@@ -34,8 +34,8 @@
     {
       "mode": "0644",
       "path": "CONTRIBUTORS.md",
-      "sha256": "6158c1738809c2f73b099d2ffa3fa383362693b147c13ba2dd3d3fde138de278",
-      "size": 19946
+      "sha256": "c2dc3a6758150e536ec20efed6e742705b3cbac0c35d14675455bae6dd1dd7b2",
+      "size": 20144
     },
     {
       "mode": "0644",
@@ -226,8 +226,8 @@
     {
       "mode": "0644",
       "path": "clients/python/swarmmemo.py",
-      "sha256": "a771a28d3894033d46999e1136f659a4dee17ea380997837dcc22a6986549d6d",
-      "size": 422902
+      "sha256": "d0ab7201720fecc50a08d016a46d8a6d76a2cef46d3b64680821661f0c7c9624",
+      "size": 423479
     },
     {
       "mode": "0644",
@@ -1336,8 +1336,8 @@
     {
       "mode": "0644",
       "path": "integrations/agno/agno_swarmmemo/_swarmmemo.py",
-      "sha256": "a771a28d3894033d46999e1136f659a4dee17ea380997837dcc22a6986549d6d",
-      "size": 422902
+      "sha256": "d0ab7201720fecc50a08d016a46d8a6d76a2cef46d3b64680821661f0c7c9624",
+      "size": 423479
     },
     {
       "mode": "0644",
@@ -1396,8 +1396,8 @@
     {
       "mode": "0644",
       "path": "integrations/crewai/crewai_swarmmemo/_swarmmemo.py",
-      "sha256": "a771a28d3894033d46999e1136f659a4dee17ea380997837dcc22a6986549d6d",
-      "size": 422902
+      "sha256": "d0ab7201720fecc50a08d016a46d8a6d76a2cef46d3b64680821661f0c7c9624",
+      "size": 423479
     },
     {
       "mode": "0644",
@@ -1456,8 +1456,8 @@
     {
       "mode": "0644",
       "path": "integrations/langchain/langchain_swarmmemo/_swarmmemo.py",
-      "sha256": "a771a28d3894033d46999e1136f659a4dee17ea380997837dcc22a6986549d6d",
-      "size": 422902
+      "sha256": "d0ab7201720fecc50a08d016a46d8a6d76a2cef46d3b64680821661f0c7c9624",
+      "size": 423479
     },
     {
       "mode": "0644",
@@ -10522,8 +10522,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "ba7c2b90fa4faac356ee521d471b3326bff58181b3a6afd9939851ae7d101657",
-      "size": 61241
+      "sha256": "bd5fefd3190d3bcb9cc3e8d32aae615d68b580bb9e25307593dbd3832357f778",
+      "size": 61337
     },
     {
       "mode": "0644",
@@ -13072,8 +13072,8 @@
     {
       "mode": "0644",
       "path": "scripts/test_post_claim.py",
-      "sha256": "648a299a070ebbee7009ec7e140add50a18920840f5be1beed576c769523cea2",
-      "size": 2360
+      "sha256": "32f9dc5c1252246e173a36f5be21ecaecf501a083fdf03b3a307cde65c8adf91",
+      "size": 3373
     },
     {
       "mode": "0644",
