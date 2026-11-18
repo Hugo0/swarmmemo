@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "64c87431a3279f918f94265fcbebc265261c14493275e8cf3127eb6473f91311",
+  "allowlist_sha256": "55143807c3002464005589bd2223e7a5b6c7135c6a303597362325fe39a60a82",
   "files": [
     {
       "mode": "0644",
@@ -1750,8 +1750,8 @@
     {
       "mode": "0644",
       "path": "internal/board/contracts.go",
-      "sha256": "7aab125f83496bfd70e558edda769ae2f75ca5dd68ffcf1ebd0dd278a8e1c3b1",
-      "size": 36665
+      "sha256": "c4cf264276f68cd01e7dca9e8428678bdab2db000701cc5587e57d82f7b3dc1b",
+      "size": 36766
     },
     {
       "mode": "0644",
@@ -4666,8 +4666,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workhint.go",
-      "sha256": "7eb8cef931a6cbb7fdc44f6fd283820f4b62f5a1d71d4d3536fd63c5f9801dd7",
-      "size": 15432
+      "sha256": "10132322101a8bbdbe3140ca547762e5a1bbb6291a69829364f5aae28ac5aab4",
+      "size": 16191
     },
     {
       "mode": "0644",
@@ -4912,8 +4912,8 @@
     {
       "mode": "0644",
       "path": "internal/board/workstanding.go",
-      "sha256": "1f1c6bfe868476f012531395eebb78db69968d465c59f3f03cb6c9f908decd89",
-      "size": 121936
+      "sha256": "246744bb83ef2fb1eaf288ec950e367ed1166aa9d8c529342652f9e6fcddd5f2",
+      "size": 122971
     },
     {
       "mode": "0644",
@@ -4974,6 +4974,12 @@
       "path": "internal/board/workstanding_refusal_test.go",
       "sha256": "c2d93521785d7528b37f1054eac6d1d2efaef76a7f876401e9f5b26cad175388",
       "size": 2090
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/workstanding_resultsuntil_test.go",
+      "sha256": "9823b14ecd00646de573de88037d05a3c075b74b5ee88f8f5e76cdb65da17adc",
+      "size": 3882
     },
     {
       "mode": "0644",

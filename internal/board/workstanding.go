@@ -32,7 +32,8 @@ package board
 // as cancelled, reason hidden, and is left out of that record (C281). A
 // reject is terminal for that result (stored cancelled; its last
 // transition is the reject). The root takes results until its deadline
-// leaves less than the verdict window.
+// leaves less than the verdict window (results_until); a result posted by
+// then stays claimable and acceptable until the deadline (C1076).
 //
 // Results cap (C346). Optional results_max bounds the results a standing
 // task takes over its life: those accepted (paid or USDC owed) and those
@@ -895,22 +896,41 @@ func (s *Store) openStandingSeat(ctx context.Context, tx *sql.Tx, c Command, a a
 	if c.Target == "" {
 		return workRow{}, problem(400, "standing_needs_result", "This is a standing task: post your result as a reply to it, then send work.claim with target, the reply's ID. Each result opens its own task.")
 	}
-	if now > root.Deadline-st.VerdictTTL {
-		return workRow{}, problem(409, "work_state_conflict", "This standing task takes no new results: its deadline leaves less than the verdict window ("+reviewerGraceText(st.VerdictTTL)+") a result needs.")
-	}
+	until := root.Deadline - st.VerdictTTL
 	id, err := resultFirstVersion(ctx, tx, c.Target)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !workIDRE.MatchString(id)) {
+		if now > until {
+			return workRow{}, errStandingResultsUntil(st, until)
+		}
 		return workRow{}, problem(400, "invalid_work_result", "Result must be a visible signed direct reply to the standing task ("+root.ID+"), in its room, by your account: reply to "+root.ID+" and send that reply's ID.")
 	}
 	if err != nil {
 		return workRow{}, err
 	}
+	if now > until {
+		// C1076: past results_until the task takes no new result, but one
+		// posted (and last edited) by then stays claimable and acceptable
+		// until the deadline. Its verdict deadline is at most the task's.
+		var posted int64
+		if err = tx.QueryRowContext(ctx, `SELECT coalesce(max(created_at),0) FROM events WHERE id=? OR origin=?`, id, id).Scan(&posted); err != nil {
+			return workRow{}, err
+		}
+		if posted > until {
+			return workRow{}, errStandingResultsUntil(st, until)
+		}
+	}
 	item := workRow{ID: id, Requester: root.Requester, Title: root.Title, Caps: root.Caps, State: "submitted", Created: now, Updated: now,
-		Deadline: now + st.VerdictTTL, Fence: 1, Worker: a.account, Eligibility: root.Eligibility, StandingID: root.ID}
+		Deadline: min(now+st.VerdictTTL, root.Deadline), Fence: 1, Worker: a.account, Eligibility: root.Eligibility, StandingID: root.ID}
 	if a.grant != nil {
 		item.AttemptGrantID = a.grant.ID
 	}
 	return item, nil
+}
+
+// errStandingResultsUntil refuses a result posted after a standing task's
+// results_until (C1076): too late for a verdict before its deadline.
+func errStandingResultsUntil(st *workStanding, until int64) error {
+	return problem(409, "work_state_conflict", "This standing task takes no new results: its deadline leaves less than the verdict window ("+reviewerGraceText(st.VerdictTTL)+") a result needs. A result posted by its results_until ("+time.Unix(until, 0).UTC().Format(time.RFC3339)+") can still be submitted until the deadline.")
 }
 
 // checkStandingSeat refuses a result the standing task cannot take now: one

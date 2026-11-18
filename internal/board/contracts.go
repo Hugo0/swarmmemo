@@ -372,8 +372,9 @@ type Receipt struct {
 	ReplyWorkNextOpenAt int64 `json:"-"`
 	// ReplyWorkBlocked is why the open standing task a fresh signed reply
 	// answers takes no result from its author now (C900): work.get's
-	// eligible reason. ReplyWorkBlockedID names that task unless the block
-	// is final. ReplyWork stays "" (no claim now). WorkHintLine says both.
+	// eligible reason; or, signed or not, that it came after the task's
+	// results_until and can never be claimed (C1076). ReplyWorkBlockedID
+	// names that task unless the block is final. ReplyWork stays "" (no claim now). WorkHintLine says both.
 	ReplyWorkBlocked   string `json:"-"`
 	ReplyWorkBlockedID string `json:"-"`
 	WorkHint           string `json:"work_hint,omitempty"`

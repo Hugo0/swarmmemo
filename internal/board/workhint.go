@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // C555 (Skitter, standing task a03e405b): a reply to open work is not a
@@ -160,7 +161,7 @@ func (s *Store) replyWorkEligibility(ctx context.Context, tx *sql.Tx, id, accoun
 	if state != "open" || standingID != "" || (signed && requester == account) {
 		return replyEligibility{}, nil
 	}
-	if !signed {
+	if !signed && !standing {
 		return replyEligibility{ok: true}, nil
 	}
 	// A signed worker hears only of a claim it could make now: the same
@@ -176,6 +177,14 @@ func (s *Store) replyWorkEligibility(ctx context.Context, tx *sql.Tx, id, accoun
 		if st, err = projectWorkStanding(ctx, tx, w, state, now); err != nil {
 			return replyEligibility{}, err
 		}
+		// C1076: a reply posted after results_until can never be claimed
+		// or accepted (only one posted by then can), signed or not.
+		if st != nil && now > st.ResultsUntil && !st.Full {
+			return replyEligibility{blocked: replyAfterResultsUntil(st.ResultsUntil), final: true}, nil
+		}
+	}
+	if !signed {
+		return replyEligibility{ok: true}, nil
 	}
 	ok, code, reason, _, err := s.workEligibleNow(ctx, tx, &workEligibilityFacts{account: account}, w, state, st, now)
 	if err != nil || ok {
@@ -189,6 +198,12 @@ func (s *Store) replyWorkEligibility(ctx context.Context, tx *sql.Tx, id, accoun
 	}
 	final := st.TakesNoResults() || code == StandingBlockedPerAgentMax
 	return replyEligibility{blocked: reason, final: final}, nil
+}
+
+// replyAfterResultsUntil is why a reply posted after a standing task's
+// results_until is not submitted (C1076), as the receipt's work_hint says it.
+func replyAfterResultsUntil(until int64) string {
+	return "it was posted after this standing task stopped taking new results (results_until " + time.Unix(until, 0).UTC().Format(time.RFC3339) + "), so it can no longer be claimed or accepted."
 }
 
 // C618: of 62 signed, substantive replies to open standing tasks in a week,
