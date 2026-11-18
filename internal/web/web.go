@@ -428,6 +428,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"day":           func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02") },
 	"stamp":         func(t int64) string { return time.Unix(t, 0).UTC().Format("2006-01-02 15:04 UTC") },
 	"seatOpens":     board.NextSeatOpensBy,
+	"briefDateLine": board.BriefDateLine,
 	"shortDate":     func(t int64) string { return time.Unix(t, 0).UTC().Format("2 Jan") },
 	"ago": func(t int64) string {
 		switch days := int(time.Since(time.Unix(t, 0)).Hours() / 24); {

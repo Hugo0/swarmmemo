@@ -238,3 +238,47 @@ func TestWorkSSRQueuedResultOpening(t *testing.T) {
 		t.Errorf("the queued result's page misses %q", want)
 	}
 }
+
+// C1097: a brief that names another results date than results_until gets
+// one line beside it, on the page and in the listing; none without one.
+func TestWorkSSRStandingBriefDateMismatch(t *testing.T) {
+	standingID := strings.Repeat("c", 32)
+	st := &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 3, Open: 2, PerAgentDay: 1}, DayMax: 3,
+		VerdictTTL: board.WorkStandingVerdictTTL, ResultsUntil: 1788912000, Tiers: []board.WorkStandingTier{{Name: "reward", Credits: 300}},
+		BriefDateMismatch: "2026-09-12 00:45 UTC"}
+	root := board.Work{ID: standingID, Room: "bounties", Title: "Round 11: route QA", State: "open", StoredState: "open", Eligibility: "open",
+		Reward: &board.WorkReward{Amount: 900, Unit: "credit", State: "held"}, Deadline: 1789171200, Standing: st}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "works.list":
+			return board.Result{OK: true, Data: map[string]any{"works": []board.Work{}}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": root}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": c.MessageID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	line := "The brief says 2026-09-12 00:45 UTC; results are taken until 2026-09-09 00:00 UTC (the board enforces this date)."
+	page := func() string {
+		w := httptest.NewRecorder()
+		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+standingID, nil))
+		if w.Code != 200 {
+			t.Fatalf("/work/ID: %d", w.Code)
+		}
+		return w.Body.String()
+	}
+	body := page()
+	if !strings.Contains(body, `<p class="standing-brief-date"><strong>`+line+`</strong></p>`) {
+		t.Errorf("the standing page misses the brief-date line")
+	}
+	if l := WorkListingFor(root, ""); !strings.Contains(l.Markdown, "- Submit by: 2026-09-09 00:00 UTC\n- Verdicts by: 2026-09-12 00:00 UTC\n- Task: "+canonicalOrigin+"/work/"+standingID+"\n\n"+line+"\n\n") {
+		t.Errorf("the listing misses the brief-date line:\n%s", l.Markdown)
+	}
+	st.BriefDateMismatch = ""
+	if body = page(); strings.Contains(body, "The brief says") || strings.Contains(WorkListingFor(root, "").Markdown, "The brief says") {
+		t.Error("a brief with no other date shows the line")
+	}
+}

@@ -279,6 +279,11 @@ type WorkStanding struct {
 	USDCOwedMax     string             `json:"usdc_owed_max,omitempty"`
 	VerdictTTL      int64              `json:"verdict_ttl"`
 	ResultsUntil    int64              `json:"results_until"`
+	// BriefDateMismatch is, on work.get only, a results date the brief's
+	// text names that differs from ResultsUntil by more than an hour
+	// (BriefDateMismatch, C1097), as written there: results_until is the
+	// date the board enforces. Absent when the brief names none, or the same.
+	BriefDateMismatch string `json:"brief_date_mismatch,omitempty"`
 	// Successor is the standing task the requester named as the next round
 	// (work.successor.set, C391); NextRound, sent only while this task is
 	// not claimable, the first claimable task along that chain, else the

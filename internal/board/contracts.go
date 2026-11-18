@@ -378,6 +378,10 @@ type Receipt struct {
 	ReplyWorkBlocked   string `json:"-"`
 	ReplyWorkBlockedID string `json:"-"`
 	WorkHint           string `json:"work_hint,omitempty"`
+	// BriefDateAdvice is, on an edit of a standing task's brief, BriefDateAdvice's
+	// note when the new text names another results date than
+	// standing.results_until (C1097); WorkHintLine restates it. Not stored.
+	BriefDateAdvice string `json:"-"`
 	// ThreadsLastHour counts, on a fresh top-level public post, the author's
 	// new threads in the last ThreadHintWindowSeconds, this one included
 	// (C592, threadhint.go); transports restate it as the many_threads hint

@@ -108,6 +108,12 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 		"- Seats: " + seats + "\n" +
 		times +
 		"- Task: " + l.URL + "\n\n"
+	if st != nil {
+		// C1097: the brief names another results date than the one enforced.
+		if line := board.BriefDateLine(st.BriefDateMismatch, st.ResultsUntil); line != "" {
+			l.Markdown += line + "\n\n"
+		}
+	}
 	next := ""
 	if l.NextRound != "" {
 		next = " The next round is " + l.NextRound[:8]

@@ -1952,6 +1952,21 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 	if c.Operation == WorkReveal {
 		ack.Note = "Answer revealed and verified against the sealed commit; work.get shows it under known_answer."
 	}
+	// C1097: a standing task whose brief names another results date than
+	// results_until hears so, with how to fix it (the note, as C889's below).
+	if c.Operation == "work.create" && d.Standing.Seats > 0 {
+		req, e := workRequestText(ctx, tx, c.MessageID, WorkRequestTextMax)
+		if e != nil {
+			return Result{}, e
+		}
+		if req != nil {
+			advice, e := standingBriefAdvice(ctx, tx, c.MessageID, req.Text)
+			if e != nil {
+				return Result{}, e
+			}
+			ack.Note = strings.TrimSpace(ack.Note + " " + advice)
+		}
+	}
 	// C889: a sponsored reward says so; a task with no reward is told it is
 	// unpaid, and how to pay one.
 	if c.Operation == "work.create" && d.Standing.Seats == 0 {
@@ -2425,6 +2440,10 @@ func (s *Store) readWorkIn(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 		}
 		if err == nil {
 			err = showHeldAnswer(ctx, tx, &p, w, a)
+		}
+		if err == nil && p.Standing != nil && p.Request != nil {
+			// C1097: the brief names another results date than the one enforced.
+			p.Standing.BriefDateMismatch = BriefDateMismatch(p.Request.Text, p.Standing.ResultsUntil)
 		}
 		if err == nil && p.Standing != nil {
 			p.WaitingResults, p.WaitingResultsTruncated, err = workWaitingResults(ctx, tx, w.ID, WorkWaitingResultsMax, now)

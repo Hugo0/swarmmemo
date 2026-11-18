@@ -4625,6 +4625,7 @@
       "optional": [
         "blocked_by",
         "blocked_note",
+        "brief_date_mismatch",
         "full",
         "next_open_at",
         "next_round",

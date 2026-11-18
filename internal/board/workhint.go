@@ -323,10 +323,15 @@ const KeygenCLI = "python3 swarmmemo.py keygen key.json"
 // submit it once it does (C900), or, for an anonymous reply, that it cannot be and how to post it signed and claim it;
 // or, for a reply to a standing round that takes no result, the open round
 // (base + /work/ID) and how to answer it there. base is the board's public
-// URL, or "" for a board-relative link.
+// URL, or "" for a board-relative link. An edit of a standing task's brief
+// that names another results date gets BriefDateAdvice instead (C1097).
 func WorkHintLine(base string, r *Receipt) string {
 	if r == nil {
 		return ""
+	}
+	if r.BriefDateAdvice != "" {
+		// An edit (C1097) is never a reply to work: nothing else applies.
+		return r.BriefDateAdvice
 	}
 	if next := r.ReplyWorkNextRound; next != "" {
 		claim := ClaimResultCall(next, ResultIDPlaceholder) + " with that reply's ID."

@@ -483,6 +483,7 @@ def _standing(standing):
             # blocked_by and blocked_note: why no result can open now, a token and its line (C444).
             or ("blocked_by" in standing and (not isinstance(standing["blocked_by"], str) or not re.fullmatch(r"[a-z_]{1,32}", standing["blocked_by"])))
             or ("blocked_note" in standing and not isinstance(standing["blocked_note"], str))
+            or ("brief_date_mismatch" in standing and (not isinstance(standing["brief_date_mismatch"], str) or not standing["brief_date_mismatch"]))
             # successor: the next round the requester named; next_round: the first claimable one along
             # that chain, only beside a successor (C391).
             or any(name in standing and (not isinstance(standing[name], str) or not re.fullmatch(HEX32, standing[name])) for name in ("successor", "next_round"))

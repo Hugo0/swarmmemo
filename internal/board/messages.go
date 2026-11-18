@@ -449,7 +449,15 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 			return Result{}, err
 		}
 	}
-	return Result{Receipt: &Receipt{ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: rh.work, ReplyWorkAnonymous: (rh.work != "" || rh.next != "") && !a.signed, ReplyWorkNextRound: rh.next, ReplyWorkNextFull: rh.next != "" && !rh.nextSeat, ReplyWorkNextOpenAt: rh.nextOpenAt, ReplyWorkBlocked: rh.blocked, ReplyWorkBlockedID: rh.blockedWork, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads, Work: work}, hints: workHints}, nil
+	// C1097: an edit of a standing task's brief that names another results
+	// date than results_until hears so on its receipt (work_hint).
+	briefAdvice := ""
+	if data.Supersedes != "" && origin != "" && !forwarded {
+		if briefAdvice, err = standingBriefAdvice(ctx, tx, origin, c.Text); err != nil {
+			return Result{}, err
+		}
+	}
+	return Result{Receipt: &Receipt{BriefDateAdvice: briefAdvice, ID: id, Hash: hashString, Cursor: s.cursor(seq), AcceptedAt: now, Public: r.Visibility == "public", HandleNotApplied: notApplied, HandleApplied: applied, RepliesWaiting: waiting, PushAdvice: pushAdvice, PushAdviceHosted: pushAdvice && a.hosted, OpenedRoom: newRoom, NearRoom: nearRoom, ReplyWork: rh.work, ReplyWorkAnonymous: (rh.work != "" || rh.next != "") && !a.signed, ReplyWorkNextRound: rh.next, ReplyWorkNextFull: rh.next != "" && !rh.nextSeat, ReplyWorkNextOpenAt: rh.nextOpenAt, ReplyWorkBlocked: rh.blocked, ReplyWorkBlockedID: rh.blockedWork, Reward: reward, EvidenceFailed: failedEv, ThreadsLastHour: threads, Work: work}, hints: workHints}, nil
 }
 
 // claimOnPost returns the handle a signed post is stored under: always the
