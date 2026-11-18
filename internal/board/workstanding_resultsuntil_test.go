@@ -1,6 +1,7 @@
 package board
 
 import (
+	"crypto/ed25519"
 	"strings"
 	"testing"
 	"time"
@@ -82,5 +83,69 @@ func TestStandingNewResultRefusedAfterResultsUntil(t *testing.T) {
 	anon := run(t, s, Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "Bug: anonymous late one " + randomID()[:8]})
 	if line := WorkHintLine("", anon.Receipt); !strings.Contains(line, "can no longer be claimed") {
 		t.Fatalf("anonymous late reply's hint: %q", line)
+	}
+}
+
+// C1079: past results_until, a signed reply posted by then stays on its
+// author's home as unclaimed_result, saying to claim by the deadline, until
+// the deadline; a reply posted after results_until is never listed.
+func TestHomeUnclaimedResultAfterResultsUntil(t *testing.T) {
+	s := rewardStore(t)
+	OpenStandingDayForTest(t)
+	owner, early, other, late := keyFor(130), keyFor(131), keyFor(133), keyFor(132)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	id := rewardRequest(t, s, owner, "lobby")
+	ttl := int64(5 * 86400)
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 200}, ttl))
+	deadline := testTime + ttl
+	until := deadline - WorkStandingVerdictTTL
+	unclaimed := func(key ed25519.PrivateKey) []HomeItem {
+		t.Helper()
+		var out []HomeItem
+		for _, it := range run(t, s, signed(key, Command{Operation: "home", Timestamp: s.now().Unix()})).Data["items"].([]HomeItem) {
+			if it.Kind == "unclaimed_result" {
+				out = append(out, it)
+			}
+		}
+		return out
+	}
+	s.now = func() time.Time { return time.Unix(testTime+3600, 0) }
+	old := replyTo(t, s, early, id, "Bug: the export button 500s on empty rooms.")
+	kept := replyTo(t, s, other, id, "Bug: search drops accents.")
+	if u := unclaimed(early); len(u) != 1 || strings.Contains(u[0].Text, "result by ") {
+		t.Fatalf("before results_until: %+v", u)
+	}
+
+	// Past results_until: the old reply is still listed, with the deadline.
+	s.now = func() time.Time { return time.Unix(until+3600, 0) }
+	u := unclaimed(early)
+	if len(u) != 1 || u[0].Call["message_id"] != id || u[0].Call["target"] != old {
+		t.Fatalf("old reply after results_until: %+v", u)
+	}
+	if by := "claim the task with it as your result by " + time.Unix(deadline, 0).UTC().Format(time.RFC3339); !strings.Contains(u[0].Text, by) {
+		t.Fatalf("old reply's line %q, want %q", u[0].Text, by)
+	}
+	// A reply posted after results_until is not.
+	replyTo(t, s, late, id, "Bug: the feed skips a page after a reload.")
+	if u := unclaimed(late); len(u) != 0 {
+		t.Fatalf("a reply after results_until is listed: %+v", u)
+	}
+	// Its call claims it.
+	ack := run(t, s, workWith(s, early, Command{Operation: "work.claim", MessageID: id, Target: old}, nil)).Data["ack"].(WorkAck)
+	if ack.WorkID != old || ack.State != "submitted" {
+		t.Fatalf("claim from the home item: %+v", ack)
+	}
+	if u := unclaimed(early); len(u) != 0 {
+		t.Fatalf("listed after its claim: %+v", u)
+	}
+
+	// Past the deadline nothing is listed: the other old reply, listed
+	// until then, is gone.
+	if u := unclaimed(other); len(u) != 1 || u[0].Call["target"] != kept {
+		t.Fatalf("other old reply before the deadline: %+v", u)
+	}
+	s.now = func() time.Time { return time.Unix(deadline+3600, 0) }
+	if u := unclaimed(other); len(u) != 0 {
+		t.Fatalf("listed past the deadline: %+v", u)
 	}
 }

@@ -2090,6 +2090,7 @@ func TestPublicDataDataSHA256(t *testing.T) {
 	eq(t, "recomputed from data", services.PDDataSHA256(a["data"]), h)
 	// The catalogue states the recipe.
 	eq(t, "catalogue recipe", services.PublicDataDatasetsForTest(v.cfg)["data_sha256_how"], services.PublicDataSHA256How)
+	eq(t, "catalogue price note", services.PublicDataDatasetsForTest(v.cfg)["price_note"], services.ToolsCostLine)
 
 	// The exact Python recipe, on unicode, nested and unsorted keys, control
 	// characters, HTML characters and every float shape:

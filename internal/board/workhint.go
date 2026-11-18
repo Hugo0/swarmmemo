@@ -49,7 +49,7 @@ func (s *Store) replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a
 	if h.next, h.nextSeat, h.nextOpenAt, err = replyNextRound(ctx, tx, id, a, now, generation); err != nil || h.next != "" {
 		return h, err
 	}
-	e, err := s.replyWorkEligibility(ctx, tx, id, a.account, a.signed, now, generation)
+	e, err := s.replyWorkEligibility(ctx, tx, id, a.account, a.signed, now, now, generation)
 	if err != nil {
 		return h, err
 	}
@@ -114,14 +114,6 @@ func replyNextRound(ctx context.Context, tx *sql.Tx, id string, a actor, now int
 	return standingForwardRound(ctx, tx, successor, now)
 }
 
-// replyWorkClaimable is the one rule the receipt's work_hint and home's
-// unclaimed_result (C618) share: whether a reply by account (signed or not)
-// to work id could be claimed as its result now (replyWorkEligibility).
-func (s *Store) replyWorkClaimable(ctx context.Context, tx *sql.Tx, id, account string, signed bool, now int64, generation string) (bool, error) {
-	e, err := s.replyWorkEligibility(ctx, tx, id, account, signed, now, generation)
-	return e.ok, err
-}
-
 // C900: of 383 replies to open tasks in 7 days, 165 were never claimed, many
 // posted to standing tasks whose seats were full for their author (day_max,
 // per_agent_day, a drained pool). C641 rightly stopped offering a claim
@@ -132,22 +124,27 @@ func (s *Store) replyWorkClaimable(ctx context.Context, tx *sql.Tx, id, account 
 // replyEligibility is replyWorkEligibility's answer: ok when the reply could
 // be claimed now; else, for a signed worker on an open standing task that
 // takes no result from it now, blocked is workEligibleNow's reason, and
-// final says nothing but the requester lifts it.
+// final says nothing but the requester lifts it. claimBy is the standing
+// task's deadline when the reply is claimable only because it was posted by
+// results_until, now past (C1079): the claim must come by then.
 type replyEligibility struct {
 	ok      bool
 	blocked string
 	final   bool
+	claimBy int64
 }
 
-// replyWorkEligibility answers whether a reply by account (signed or not) to
-// work id could be claimed as its result now. Only open work takes a claim,
+// replyWorkEligibility is the one rule the receipt's work_hint and home's
+// unclaimed_result (C618) share: whether a reply by account (signed or not),
+// last posted or edited at posted (now for a fresh reply), to work id could
+// be claimed as its result now. Only open work takes a claim,
 // never the requester's own, and a result item on a standing task is not
 // itself claimed; a signed worker hears of it only when it is eligible to
 // claim it now (workEligibleNow, what work.get's eligible reads: the work's
 // rule, a standing task's own block, its seat there, the claim cool-down),
 // and of a standing block why not (C900). It reads in the caller's
 // transaction (never the pool).
-func (s *Store) replyWorkEligibility(ctx context.Context, tx *sql.Tx, id, account string, signed bool, now int64, generation string) (replyEligibility, error) {
+func (s *Store) replyWorkEligibility(ctx context.Context, tx *sql.Tx, id, account string, signed bool, now, posted int64, generation string) (replyEligibility, error) {
 	var requester, standingID, state string
 	var standing bool
 	err := tx.QueryRowContext(ctx, `SELECT w.requester,w.standing_id,`+workEffectiveSQL+`,EXISTS(SELECT 1 FROM work_standing s WHERE s.work_id=w.id) FROM works w WHERE w.id=?`, now, generation, now, id).
@@ -173,22 +170,35 @@ func (s *Store) replyWorkEligibility(ctx context.Context, tx *sql.Tx, id, accoun
 		return replyEligibility{}, err
 	}
 	var st *WorkStanding
+	var claimBy int64
 	if standing {
 		if st, err = projectWorkStanding(ctx, tx, w, state, now); err != nil {
 			return replyEligibility{}, err
 		}
-		// C1076: a reply posted after results_until can never be claimed
-		// or accepted (only one posted by then can), signed or not.
 		if st != nil && now > st.ResultsUntil && !st.Full {
-			return replyEligibility{blocked: replyAfterResultsUntil(st.ResultsUntil), final: true}, nil
+			// C1076: a reply posted after results_until can never be
+			// claimed or accepted, signed or not.
+			if posted > st.ResultsUntil {
+				return replyEligibility{blocked: replyAfterResultsUntil(st.ResultsUntil), final: true}, nil
+			}
+			// C1079: one posted by then stays claimable until the deadline
+			// (openStandingSeat), on the seats, pool and limits a claim now
+			// checks (checkStandingSeat): read them as if the task still
+			// took results now.
+			late := w
+			late.Deadline = now + st.VerdictTTL
+			if st, err = projectWorkStanding(ctx, tx, late, state, now); err != nil {
+				return replyEligibility{}, err
+			}
+			claimBy = w.Deadline
 		}
 	}
 	if !signed {
-		return replyEligibility{ok: true}, nil
+		return replyEligibility{ok: true, claimBy: claimBy}, nil
 	}
 	ok, code, reason, _, err := s.workEligibleNow(ctx, tx, &workEligibilityFacts{account: account}, w, state, st, now)
 	if err != nil || ok {
-		return replyEligibility{ok: ok}, err
+		return replyEligibility{ok: ok, claimBy: claimBy}, err
 	}
 	// The standing task's own block or the worker's seat there (C900), not
 	// the work's rule or the claim cool-down: those keep saying nothing. Nor
@@ -218,15 +228,17 @@ const UnclaimedResultDays = 7
 const unclaimedResultScan = 50
 
 // unclaimedResult is one signed reply of the account's that it could still
-// claim open work with: the reply, the work it answers, and that work's title.
+// claim open work with: the reply, the work it answers, and that work's
+// title; claimBy is the standing task's deadline when the claim must come
+// by then (posted by results_until, now past: C1079), else 0.
 type unclaimedResult struct {
 	reply, work, title string
-	at                 int64
+	at, claimBy        int64
 }
 
 // unclaimedResults are account's fresh replies (signed, visible, the newest
 // version, at most UnclaimedResultDays old, in the work's own room, never
-// yet a result) to work it could claim with them now (replyWorkClaimable),
+// yet a result) to work it could claim with them now (replyWorkEligibility),
 // with no claim of its own on that work since the reply: the newest first,
 // one per work, at most HomeCountMax. It reads in the caller's transaction.
 func (s *Store) unclaimedResults(ctx context.Context, tx *sql.Tx, account string, now int64, generation string) ([]unclaimedResult, error) {
@@ -279,11 +291,11 @@ func (s *Store) unclaimedResults(ctx context.Context, tx *sql.Tx, account string
 			return nil, err
 		}
 		seen[id] = true // the newest reply speaks for the work
-		ok, err := s.replyWorkClaimable(ctx, tx, id, account, true, now, generation)
+		e, err := s.replyWorkEligibility(ctx, tx, id, account, true, now, c.at, generation)
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
+		if !e.ok {
 			continue
 		}
 		// A claim of the account's on that work since the reply (another
@@ -297,7 +309,7 @@ func (s *Store) unclaimedResults(ctx context.Context, tx *sql.Tx, account string
 		if claimed {
 			continue
 		}
-		out = append(out, unclaimedResult{reply: c.reply, work: id, title: title, at: c.at})
+		out = append(out, unclaimedResult{reply: c.reply, work: id, title: title, at: c.at, claimBy: e.claimBy})
 	}
 	return out, nil
 }

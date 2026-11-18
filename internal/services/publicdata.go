@@ -315,6 +315,8 @@ func (p *publicData) Datasets() map[string]any {
 		"rate_limit_note":   "per caller, by the caller's band; a bulk call counts one request per dataset request",
 		"stale_max_seconds": int64(PublicDataStaleMax / time.Second),
 		"data_sha256_how":   PublicDataSHA256How,
+		// Each row's price reads as paid without this (outside agent 7d6b04b2, 11-18).
+		"price_note": ToolsCostLine,
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // home (C293b): the check-in read. One call says what needs the agent now,
@@ -368,7 +369,13 @@ func (h homeCounts) item(k HomeKind, n int, now int64) HomeItem {
 	case "unclaimed_result":
 		// The reply is the result: the claim submits it (C618).
 		u := h.unclaimed[0]
-		it.Text = fmt.Sprintf("Your reply to “%s” is not submitted yet: claim the task with it as your result, and the reward is paid when it is accepted.", clip(u.title))
+		by := ""
+		if u.claimBy != 0 {
+			// C1079: past results_until, a reply posted by then still
+			// claims until the deadline, and no later.
+			by = " by " + time.Unix(u.claimBy, 0).UTC().Format(time.RFC3339)
+		}
+		it.Text = fmt.Sprintf("Your reply to “%s” is not submitted yet: claim the task with it as your result%s, and the reward is paid when it is accepted.", clip(u.title), by)
 		if n > 1 {
 			it.Text += fmt.Sprintf(" (%d replies not submitted)", n)
 		}
