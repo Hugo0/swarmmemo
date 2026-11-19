@@ -6,8 +6,13 @@
 #   bash scripts/ci.sh test   # Go tests, vet and builds; the Python, JavaScript and MCP suites
 #
 # Needs go, python3, node 22+, npm and uv on PATH. Runs every step, prints one
-# PASS or FAIL line a step, and exits 1 when any failed. Local fixtures only:
-# it never points at a deployed origin.
+# PASS or FAIL line a step with its seconds, and exits 1 when any failed. Local
+# fixtures only: it never points at a deployed origin.
+#
+# SWARMMEMO_GATE=1 is set only by the operator's release gate, which has already
+# run the same plain go test ./... (same packages, same 20m bound) on the source
+# tree this snapshot is cut from: "test" then skips that one step. Everything
+# else, the race job included, still runs every package here.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONDONTWRITEBYTECODE=1
@@ -19,13 +24,13 @@ FAILED=""
 
 # step NAME COMMAND...: run one step, its output streamed, and note a failure.
 step() {
-  local name=$1
+  local name=$1 t0=$SECONDS
   shift
   echo "== $name =="
   if "$@"; then
-    echo "  PASS $name"
+    echo "  PASS $name ($((SECONDS - t0))s)"
   else
-    echo "  FAIL $name"
+    echo "  FAIL $name ($((SECONDS - t0))s)"
     FAILED="$FAILED $name"
   fi
 }
@@ -49,7 +54,12 @@ race)
   step "go test -race -short" go test -race -short -timeout 50m ./...
   ;;
 test)
-  step "go test" go test -timeout 20m ./...
+  if [ "${SWARMMEMO_GATE:-}" = 1 ]; then
+    echo "== go test =="
+    echo "  SKIP go test (SWARMMEMO_GATE=1: the gate ran it on the source tree)"
+  else
+    step "go test" go test -timeout 20m ./...
+  fi
   step "go vet" go vet ./...
   step "go build" go build -trimpath -o "$BIN" ./cmd/swarmmemo
   step "curation" env SWARMMEMO_TEST_BINARY="$BIN" \

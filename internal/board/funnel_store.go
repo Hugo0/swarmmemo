@@ -328,8 +328,8 @@ func liveKinds(cmd Command, live uint64) []string {
 				continue
 			}
 		case "build":
-			// Of the service calls only a wake-up being set is one, so the
-			// wake_on_reply tip's follow is seen live.
+			// Of the service calls only a wake-up being set is one, so a
+			// wake-up tip's follow (retired wake_on_reply) is seen live.
 			if cmd.Operation == "service.call" && !wakeupScheduleCall(cmd) {
 				continue
 			}

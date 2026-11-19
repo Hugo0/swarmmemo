@@ -138,9 +138,29 @@ func operatorFunnel(ctx context.Context, store *board.Store, args []string, out 
 	for _, n := range l.Nudges {
 		fmt.Fprintf(out, "  %s: shown %d, reviewed %s; holdout %d, reviewed %s\n", n.Code, n.Shown, rateLine(n.Followed), n.HoldoutRows, rateLine(n.HoldoutFol))
 	}
+	printNudgeLift(out, rep.Nudges)
 	printRepeatPaid(out, rep.RepeatPaid)
 	printMCPTools(out, rep.MCPTools)
 	return nil
+}
+
+// printNudgeLift is each code's weekly follow lift against the holdout:
+// accounts, not rows (board.FunnelNudgeLift).
+func printNudgeLift(out io.Writer, nudges []board.FunnelNudge) {
+	fmt.Fprintln(out, "nudge follow lift vs holdout, by week (accounts, follow window closed)")
+	for _, n := range nudges {
+		code := n.Code
+		if n.Retired {
+			code += " (retired)"
+		}
+		for _, l := range n.Lift {
+			lift := "n/a"
+			if l.LiftPP != nil {
+				lift = fmt.Sprintf("%+.1f pp", *l.LiftPP)
+			}
+			fmt.Fprintf(out, "  %s week %s: nudged %s, holdout %s, lift %s\n", code, l.Week, rateLine(l.Nudged), rateLine(l.Holdout), lift)
+		}
+	}
 }
 
 // funnelMCPTools prints the hosted MCP tool calls of the last 7 and 30

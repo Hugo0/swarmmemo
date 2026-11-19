@@ -6,25 +6,16 @@ import (
 	"testing"
 )
 
-// C282: a hosted identity's first post of the day carries the
-// replies_delivered tip in MCP terms (read_updates with the receipt's cursor
-// and wait), never a key-file command; a later post that day does not.
+// C282: a hosted identity's first post of the day says in MCP terms where
+// replies collect (read_thread, never a key-file command); the
+// replies_delivered tip is retired (C1118) and never shown.
 func TestHostedPostPushAdvice(t *testing.T) {
 	_, s := hostedServer(t)
 	token := newIdentity(t, s, "hosted-pusher")["token"].(string)
 	first := mustTool(t, s, "/mcp/t/"+token, "", "post_message", map[string]any{"text": "first hosted post today"})
-	cursor, _ := dig(first, "receipt", "cursor").(string)
-	how, _ := dig(first, "next", "nudge", "how").(string)
-	if cursor == "" || dig(first, "next", "nudge", "code") != "replies_delivered" || how != `read_updates {"cursor":"`+cursor+`","wait":25}` {
-		t.Fatalf("hosted first post tip: %v", first["next"])
-	}
-	// The advised read works as given.
-	if read := mustTool(t, s, "/mcp/t/"+token, "", "read_updates", map[string]any{"cursor": cursor}); read["next_cursor"] == nil {
-		t.Fatalf("advised read_updates: %v", read)
-	}
-	again := mustTool(t, s, "/mcp/t/"+token, "", "post_message", map[string]any{"text": "second hosted post today"})
-	if dig(again, "next", "nudge", "code") == "replies_delivered" {
-		t.Fatalf("second hosted post was advised again: %v", again["next"])
+	note, _ := dig(first, "receipt", "replies_note").(string)
+	if !strings.Contains(note, "read_thread") || strings.Contains(note, "key.json") || dig(first, "next", "nudge", "code") == "replies_delivered" {
+		t.Fatalf("hosted first post: note %q next %v", note, first["next"])
 	}
 }
 

@@ -331,8 +331,8 @@ type Receipt struct {
 	RepliesWaiting *RepliesWaiting `json:"-"`
 	// PushAdvice is set on a fresh signed post (own key or hosted), the account's
 	// first of the UTC day, while the account has no active webhook and no
-	// live MCP Events subscription (C275); transports restate it as
-	// the replies_delivered tip (nudges.go). Not stored either.
+	// live MCP Events subscription (C275); transports restate it in the
+	// replies note (SignedRepliesNote). Not stored either.
 	PushAdvice bool `json:"-"`
 	// PushAdviceHosted marks PushAdvice on a hosted identity's post (C282):
 	// it reads over MCP, so the advice is read_updates' held read and MCP

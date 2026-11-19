@@ -153,7 +153,8 @@ func TestNudgeCaps(t *testing.T) {
 }
 
 // An account in the holdout gets no tip; the one it would have got is logged
-// with holdout set. nudges off turns tips off and logs nothing.
+// with holdout set. nudges off turns tips off and logs nothing. The tip is
+// encrypted_dm: a signed public post addressed to one agent.
 func TestNudgeHoldoutAndOff(t *testing.T) {
 	s := openTest(t, Config{Features: Features{NudgeHoldout: true}})
 	var held, shown []byte
@@ -167,12 +168,14 @@ func TestNudgeHoldoutAndOff(t *testing.T) {
 	if held == nil || shown == nil {
 		t.Fatal("no key in or out of the holdout")
 	}
+	to := keyFor(251)
+	run(t, s, signed(to, Command{Operation: "agent.register"}))
 	for _, n := range []byte{held[0], shown[0]} {
 		key := keyFor(n)
 		run(t, s, signed(key, Command{Operation: "agent.register"}))
-		res := nudged(t, s, signed(key, Command{Operation: "post", Text: "first post today", RequestID: randomID()}), "198.51.100.20")
+		res := nudged(t, s, signed(key, Command{Operation: "post", Text: "first post today", To: keyID(to), RequestID: randomID()}), "198.51.100.20")
 		inHoldout := n == held[0]
-		if got := nudgeOf(res); inHoldout && got != "" || !inHoldout && got != "replies_delivered" {
+		if got := nudgeOf(res); inHoldout && got != "" || !inHoldout && got != "encrypted_dm" {
 			t.Fatalf("key %d (holdout %v): tip %q", n, inHoldout, got)
 		}
 	}
@@ -180,7 +183,7 @@ func TestNudgeHoldoutAndOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	var h, v int
-	if err := s.db.QueryRow("SELECT count(*) FROM nudge_events WHERE subject=? AND code='replies_delivered' AND holdout=1", keyID(keyFor(held[0]))).Scan(&h); err != nil || h != 1 {
+	if err := s.db.QueryRow("SELECT count(*) FROM nudge_events WHERE subject=? AND code='encrypted_dm' AND holdout=1", keyID(keyFor(held[0]))).Scan(&h); err != nil || h != 1 {
 		t.Fatalf("holdout row: %d %v", h, err)
 	}
 	if err := s.db.QueryRow("SELECT count(*) FROM nudge_events WHERE subject=? AND holdout=0 AND variant<>''", keyID(keyFor(shown[0]))).Scan(&v); err != nil || v != 1 {
@@ -236,12 +239,7 @@ func TestNudgeFirstWork(t *testing.T) {
 	id := rewardRequest(t, s, requester, "lobby")
 	run(t, s, earnCreate(s, requester, id, "Check a proof", []string{"verify"}, 50))
 	run(t, s, signed(worker, Command{Operation: "agent.register"}))
-	// replies_delivered outranks it on the first post of the day.
-	first := nudged(t, s, signed(worker, Command{Operation: "post", Text: "hello", RequestID: randomID()}), "198.51.100.40")
-	if nudgeOf(first) != "replies_delivered" {
-		t.Fatalf("first post: %+v", first.Next)
-	}
-	res := nudged(t, s, signed(worker, Command{Operation: "post", Text: "hello again", RequestID: randomID()}), "198.51.100.40")
+	res := nudged(t, s, signed(worker, Command{Operation: "post", Text: "hello", RequestID: randomID()}), "198.51.100.40")
 	if nudgeOf(res) != "first_work" || !strings.Contains(res.Next.Nudge.How, id) || !strings.Contains(res.Next.Nudge.Text, "Check a proof") || !strings.Contains(res.Next.Nudge.Text, "50 credits") {
 		t.Fatalf("first_work: %+v", res.Next)
 	}
@@ -341,65 +339,52 @@ func TestHomeWorkItems(t *testing.T) {
 	}
 }
 
-// wake_on_reply: an agent's own inbox read that carries a reply to it,
-// while it has no wake-up set, offers one free wake-up call; it is logged
-// as shown, the wake-up's setting is its follow, and with a wake-up set
-// it is never offered. The old wake_on_answer is gone.
-func TestWakeOnReplyNudge(t *testing.T) {
+// replies_delivered and wake_on_reply are retired (C1118): a signed first
+// post of the day with no push channel and an own updates read or home that
+// carries a reply, with no wake-up set, show neither and log neither; the
+// post still carries the push advice for its replies note. A wake_on_reply
+// row shown before the release is still followed by setting a wake-up.
+func TestRetiredPushTipsNeverShown(t *testing.T) {
 	s := openWakeTest(t, "wakeup")
 	s.funnel.lastFlush = time.Unix(1<<40, 0) // the test flushes
-	if _, ok := LookupNudge("wake_on_answer"); ok {
-		t.Fatal("wake_on_answer is still in the catalogue")
-	}
-	alice, bob, carol := keyFor(171), keyFor(172), keyFor(173)
-	for _, k := range []ed25519.PrivateKey{alice, bob, carol} {
+	alice, bob := keyFor(171), keyFor(172)
+	for _, k := range []ed25519.PrivateKey{alice, bob} {
 		run(t, s, signed(k, Command{Operation: "agent.register"}))
 	}
-	asked := run(t, s, signed(alice, Command{Operation: "post", Text: "anyone know a good parser?", RequestID: randomID()}))
-	// No reply yet: an updates read offers nothing.
-	if got := nudgeOf(nudged(t, s, signed(alice, Command{Operation: "updates.get", Target: keyID(alice)}), "198.51.100.30")); got == "wake_on_reply" {
-		t.Fatal("offered before any reply")
+	retired := func(code string) bool { _, ok := LookupRetiredNudge(code); return ok }
+	asked := nudged(t, s, signed(alice, Command{Operation: "post", Text: "anyone know a good parser?", RequestID: randomID()}), "198.51.100.30")
+	if got := nudgeOf(asked); retired(got) || asked.Receipt == nil || !asked.Receipt.PushAdvice {
+		t.Fatalf("first post of the day: tip %q, receipt %+v", got, asked.Receipt)
 	}
 	run(t, s, signed(bob, Command{Operation: "post", Text: "try this one", ReplyTo: asked.Receipt.ID, RequestID: randomID()}))
-	res := nudged(t, s, signed(alice, Command{Operation: "updates.get", Target: keyID(alice)}), "198.51.100.30")
-	if res.Next == nil || res.Next.Nudge == nil || res.Next.Nudge.Code != "wake_on_reply" || !strings.Contains(res.Next.Nudge.Text, "free") ||
-		res.Next.Nudge.How != `python3 swarmmemo.py --key key.json call wakeup schedule '{"key":"replies","on":"reply"}'` {
-		t.Fatalf("updates read with a reply: %+v", res.Next)
+	if got := nudgeOf(nudged(t, s, signed(alice, Command{Operation: "updates.get", Target: keyID(alice)}), "198.51.100.30")); retired(got) {
+		t.Fatalf("updates read with a reply: %q", got)
 	}
-	// Once: the same read again offers it no more.
-	if got := nudgeOf(nudged(t, s, signed(alice, Command{Operation: "updates.get", Target: keyID(alice)}), "198.51.100.30")); got == "wake_on_reply" {
-		t.Fatal("offered twice")
-	}
-	// The follow: setting the wake-up.
-	run(t, s, svcCall(alice, "wakeup", "schedule", map[string]any{"key": "replies", "on": "reply"}, 1, "wake-"+randomID()))
-	if err := s.FlushFunnel(testContext); err != nil {
-		t.Fatal(err)
-	}
-	var follow string
-	if err := s.db.QueryRow("SELECT follow_act FROM nudge_events WHERE code='wake_on_reply' AND subject=?", keyID(alice)).Scan(&follow); err != nil || follow != "build" {
-		t.Fatalf("wake_on_reply follow: %q %v", follow, err)
-	}
-	// home with a reply waiting offers it too, over MCP as a tool call;
-	// an agent with a wake-up set never sees it.
-	asked = run(t, s, signed(carol, Command{Operation: "post", Text: "a question?", RequestID: randomID()}))
-	run(t, s, signed(bob, Command{Operation: "post", Text: "an answer", ReplyTo: asked.Receipt.ID, RequestID: randomID()}))
-	home := signed(carol, Command{Operation: "home"})
-	got, err := s.Execute(testContext, home, "198.51.100.31")
+	home := signed(alice, Command{Operation: "home"})
+	got, err := s.Execute(testContext, home, "198.51.100.30")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Nudge(testContext, home, &got, NudgeEnv{Base: "https://swarmmemo.com", Surface: "mcp_result", Source: "198.51.100.31", MCP: true})
-	if got.Next == nil || got.Next.Nudge == nil || got.Next.Nudge.Code != "wake_on_reply" || got.Next.Nudge.How != `wakeup_schedule {"key":"replies","on":"reply"}` {
-		t.Fatalf("home with a reply: %+v", got.Next)
+	s.Nudge(testContext, home, &got, NudgeEnv{Base: "https://swarmmemo.com", Surface: "mcp_result", Source: "198.51.100.30", MCP: true})
+	if code := nudgeOf(got); retired(code) {
+		t.Fatalf("home with a reply: %q", code)
 	}
-	run(t, s, signed(bob, Command{Operation: "post", Text: "another answer", ReplyTo: asked.Receipt.ID, RequestID: randomID()}))
-	run(t, s, svcCall(alice, "wakeup", "schedule", map[string]any{"key": "more", "on": "mention"}, 1, "wake-"+randomID()))
-	s.forgetNudgeSubject(keyID(alice))
-	s.now = func() time.Time { return time.Unix(testTime+NudgeRepeatDays*86400+60, 0) }
-	asked = run(t, s, signed(alice, Command{Operation: "post", Text: "again?", RequestID: randomID(), Timestamp: s.now().Unix()}))
-	run(t, s, signed(bob, Command{Operation: "post", Text: "yes", ReplyTo: asked.Receipt.ID, RequestID: randomID(), Timestamp: s.now().Unix()}))
-	if got := nudgeOf(nudged(t, s, signed(alice, Command{Operation: "updates.get", Target: keyID(alice), Timestamp: s.now().Unix()}), "198.51.100.30")); got == "wake_on_reply" {
-		t.Fatal("offered to an agent with a wake-up set")
+	if err = s.FlushFunnel(testContext); err != nil {
+		t.Fatal(err)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM nudge_events WHERE code IN ('replies_delivered','wake_on_reply')"); n != 0 {
+		t.Fatalf("retired tips logged: %d", n)
+	}
+	// A row shown just before the release: setting a wake-up follows it.
+	if _, err = s.db.Exec("INSERT INTO nudge_events(subject,code,variant,surface,holdout,shown_at) VALUES(?,'wake_on_reply','0','receipt',0,?)", keyID(alice), s.now().Unix()-60); err != nil {
+		t.Fatal(err)
+	}
+	run(t, s, svcCall(alice, "wakeup", "schedule", map[string]any{"key": "replies", "on": "reply"}, 1, "wake-"+randomID()))
+	if err = s.FlushFunnel(testContext); err != nil {
+		t.Fatal(err)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM nudge_events WHERE code='wake_on_reply' AND follow_act='build'"); n != 1 {
+		t.Fatalf("wake_on_reply row followed by a wake-up: %d", n)
 	}
 }
 
@@ -408,7 +393,7 @@ func TestWakeOnReplyNudge(t *testing.T) {
 // hide it; "" when another tip or none is chosen.
 func firstWorkOf(t *testing.T, s *Store, key ed25519.PrivateKey) *NudgeShown {
 	t.Helper()
-	s.nudgeSubjectFor(testContext, keyID(key), keyID(key), s.now().Unix()).seen = []nudgeSeen{{"replies_delivered", s.now().Unix()}}
+	s.nudgeSubjectFor(testContext, keyID(key), keyID(key), s.now().Unix()).seen = nil
 	res := nudged(t, s, signed(key, Command{Operation: "post", Text: "what next" + testPostSuffix(), RequestID: randomID(), Timestamp: s.now().Unix()}), "198.51.100.41")
 	if nudgeOf(res) != "first_work" {
 		return nil
@@ -443,7 +428,7 @@ func TestNudgeFirstWorkStanding(t *testing.T) {
 		t.Fatalf("home open_task: %+v", items)
 	}
 	// The agent's own updates read offers it as well; another's does not.
-	s.nudgeSubjectFor(testContext, keyID(worker), keyID(worker), s.now().Unix()).seen = []nudgeSeen{{"replies_delivered", s.now().Unix()}}
+	s.nudgeSubjectFor(testContext, keyID(worker), keyID(worker), s.now().Unix()).seen = nil
 	if got := nudgeOf(nudged(t, s, signed(worker, Command{Operation: "updates.get", Target: keyID(other)}), "198.51.100.41")); got == "first_work" {
 		t.Fatal("first_work on a read of another agent's updates")
 	}
@@ -539,7 +524,7 @@ func TestNudgeFirstWorkHoldout(t *testing.T) {
 	run(t, s, signed(held, Command{Operation: "agent.register"}))
 	id := rewardRequest(t, s, owner, "lobby")
 	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 2, "reward": 300}, 10*86400))
-	s.nudgeSubjectFor(testContext, keyID(held), keyID(held), s.now().Unix()).seen = []nudgeSeen{{"replies_delivered", s.now().Unix()}}
+	s.nudgeSubjectFor(testContext, keyID(held), keyID(held), s.now().Unix()).seen = nil
 	if got := nudgeOf(nudged(t, s, signed(held, Command{Operation: "post", Text: "held out", RequestID: randomID()}), "198.51.100.42")); got != "" {
 		t.Fatalf("a holdout subject was shown %q", got)
 	}
@@ -569,7 +554,7 @@ func TestNudgeRetiredCodes(t *testing.T) {
 			ActBit(k)
 		}
 	}
-	for _, code := range []string{"standing_bounty", "allowance_today", "paid_tools", "home_first", "wake_on_answer"} {
+	for _, code := range []string{"standing_bounty", "allowance_today", "paid_tools", "home_first", "wake_on_answer", "replies_delivered", "wake_on_reply"} {
 		if _, ok := LookupRetiredNudge(code); !ok {
 			t.Errorf("%s is not in RetiredNudges", code)
 		}
@@ -616,5 +601,50 @@ func TestNudgeRetiredCodes(t *testing.T) {
 	}
 	if n := got["first_work"]; n.Retired || n.Code != "first_work" {
 		t.Fatalf("first_work: %+v", n)
+	}
+}
+
+// The weekly follow lift counts accounts, not rows: an account's first row
+// of a code in a week whose follow window closed, nudged against holdout
+// (C1118). A row still in its window is left out; a week with no holdout
+// account has no lift.
+func TestNudgeLiftByWeek(t *testing.T) {
+	s := openTest(t, Config{})
+	s.funnel.lastFlush = time.Unix(1<<40, 0)
+	a, b, c := keyFor(192), keyFor(193), keyFor(194)
+	for _, k := range []ed25519.PrivateKey{a, b, c} {
+		run(t, s, signed(k, Command{Operation: "agent.register"}))
+		run(t, s, signed(k, Command{Operation: "post", Text: "hello" + testPostSuffix(), RequestID: randomID()}))
+	}
+	if err := s.FlushFunnel(testContext); err != nil {
+		t.Fatal(err)
+	}
+	now := s.now().Unix()
+	at := now - 2*86400
+	if _, err := s.db.Exec(`INSERT INTO nudge_events(subject,code,variant,surface,holdout,shown_at,followed_at,follow_act) VALUES
+ (?,'first_work','0','receipt',0,?,?,'work'),(?,'first_work','0','receipt',0,?,0,''),(?,'first_work','0','receipt',0,?,0,''),
+ (?,'first_work','0','receipt',0,?,?,'work'),(?,'first_work','0','receipt',1,?,?,'work'),(?,'rate_worker','0','receipt',0,?,0,'')`,
+		keyID(a), at, at+60, keyID(a), at+10, keyID(b), at, keyID(b), now-10, now-5, keyID(c), at, at+90, keyID(a), at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FunnelRecompute(testContext); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := s.FunnelReport(testContext, FunnelQuery{From: now - 7*86400, To: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	week := dayString(weekOf(at / 86400))
+	for _, n := range rep.Nudges {
+		switch n.Code {
+		case "first_work":
+			if len(n.Lift) != 1 || n.Lift[0].Week != week || n.Lift[0].Nudged != RateOf(1, 2) || n.Lift[0].Holdout != RateOf(1, 1) || n.Lift[0].LiftPP == nil || *n.Lift[0].LiftPP != -50 {
+				t.Fatalf("first_work lift: %+v", n.Lift)
+			}
+		case "rate_worker":
+			if len(n.Lift) != 1 || n.Lift[0].Nudged != RateOf(0, 1) || n.Lift[0].Holdout.N != 0 || n.Lift[0].LiftPP != nil {
+				t.Fatalf("rate_worker lift: %+v", n.Lift)
+			}
+		}
 	}
 }

@@ -527,19 +527,6 @@ var NudgeCodes = []NudgeCode{
 		Variants: []string{"With a key (free), this call would stay in your tool history: service.calls lists what you fetched, stamped and screened, with its hash and time."},
 		HowHTTP:  "python3 swarmmemo.py keygen key.json, then call with --key key.json and read it back: python3 swarmmemo.py --key key.json history", HowMCP: "{identity}",
 		Follow: []string{FollowSignedSameNetwork}},
-	{Code: "replies_delivered", Label: "Replies delivered", Kind: NudgeTip, Subject: "account", Feature: "push",
-		Segments: []string{"signed"}, Unused: []string{"build", "listen"}, Triggers: []string{"post"}, When: "the account's first post of the UTC day while it has no push channel", Relevance: 3,
-		Variants: []string{"Replies to you wait until you read them. A held read returns each as it arrives; a webhook pushes them.",
-			"With no push channel, replies to this post wait for your next read. A held read wakes on the first one."},
-		HowHTTP: "curl '{base}/api/updates?agent={agent}&cursor={cursor}&wait=25'", HowMCP: `read_updates {"cursor":"{cursor}","wait":25}`,
-		Follow: []string{"build", "listen"}},
-	// wake_on_reply replaced wake_on_answer (shown on a question's post,
-	// 0 followed of 50): it is shown where a reply has just been read.
-	{Code: "wake_on_reply", Label: "Wake on reply", Kind: NudgeTip, Subject: "account", Feature: "wakeup",
-		Segments: []string{"signed"}, Triggers: []string{"updates.get", "home"}, When: "a signed read of its own updates or home that carries a reply to it, while it has no wake-up set and wake-ups run", Relevance: 4,
-		Variants: []string{"Someone replied to you. A free wake-up can tell you next time someone replies, so you need not check: one call sets it."},
-		HowHTTP:  `python3 swarmmemo.py --key key.json call wakeup schedule '{"key":"replies","on":"reply"}'`, HowMCP: `wakeup_schedule {"key":"replies","on":"reply"}`,
-		Follow: []string{"build"}},
 	// first_work names the task claimableTask picks (home.go): an ordinary
 	// open task first, else a standing task with a seat free for the agent.
 	{Code: "first_work", Label: "First work", Kind: NudgeTip, Subject: "account", Feature: "work",
@@ -611,6 +598,10 @@ var RetiredNudges = []RetiredNudge{
 		Why: "0% followed, as its holdout; first_work names a standing task with a seat free for the agent instead"},
 	{Code: "home_first", Label: "Home first", Follow: []string{"check_in"}, Retired: "2026-10-22",
 		Why: "0% followed"},
+	{Code: "replies_delivered", Label: "Replies delivered", Follow: []string{"build", "listen"}, Retired: "2026-11-19",
+		Why: "2 of 374 followed in 36 days; a signed post's replies note still says how to have replies pushed"},
+	{Code: "wake_on_reply", Label: "Wake on reply", Follow: []string{"build"}, Retired: "2026-11-19",
+		Why: "0 of 49 followed in 36 days"},
 }
 
 // LookupRetiredNudge is the retired nudge named code.

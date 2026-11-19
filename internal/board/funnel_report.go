@@ -439,6 +439,60 @@ type FunnelNudge struct {
 	D7Holdout Rate `json:"d7_holdout"`
 	Useful    int  `json:"rated_useful"`
 	NotUseful int  `json:"rated_not_useful"`
+	// Lift is the follow lift against the holdout, by week (C1118).
+	Lift []FunnelNudgeLift `json:"lift_by_week,omitempty"`
+}
+
+// FunnelNudgeLift is one week of a code's follow lift against the holdout,
+// per account rather than per row (a few accounts can hold most of a
+// code's rows): each account counts once a week, by its first row of the
+// code that week whose follow window (NudgeFollowSeconds) has closed.
+// Nudged is the share of shown accounts that followed; Holdout the share
+// of held-out accounts that did the same act unprompted. LiftPP is Nudged
+// minus Holdout in points, set when both sides have accounts.
+type FunnelNudgeLift struct {
+	Week    string   `json:"week"`
+	Nudged  Rate     `json:"nudged"`
+	Holdout Rate     `json:"holdout"`
+	LiftPP  *float64 `json:"lift_pp,omitempty"`
+}
+
+// nudgeLift is the weekly lift from each (week, account)'s first closed
+// row: whether it was held out, whether it was followed.
+func nudgeLift(first map[[2]string][2]bool) []FunnelNudgeLift {
+	type tally struct{ nk, nn, hk, hn int }
+	weeks := map[string]*tally{}
+	for key, v := range first {
+		t := weeks[key[0]]
+		if t == nil {
+			t = &tally{}
+			weeks[key[0]] = t
+		}
+		k, n := &t.nk, &t.nn
+		if v[0] {
+			k, n = &t.hk, &t.hn
+		}
+		*n++
+		if v[1] {
+			*k++
+		}
+	}
+	names := make([]string, 0, len(weeks))
+	for w := range weeks {
+		names = append(names, w)
+	}
+	slices.Sort(names)
+	out := make([]FunnelNudgeLift, 0, len(names))
+	for _, w := range names {
+		t := weeks[w]
+		l := FunnelNudgeLift{Week: w, Nudged: rate(t.nk, t.nn), Holdout: rate(t.hk, t.hn)}
+		if t.nn > 0 && t.hn > 0 {
+			d := math.Round((l.Nudged.Pct-l.Holdout.Pct)*10) / 10
+			l.LiftPP = &d
+		}
+		out = append(out, l)
+	}
+	return out
 }
 
 // FunnelFeedback is feedback by about and rating, by screen state (capped:
@@ -1014,6 +1068,7 @@ func funnelSegments(cohort []FunnelRow, today int64, active func(string, int64, 
 }
 
 func (s *Store) funnelNudges(ctx context.Context, q FunnelQuery, today int64, all []FunnelRow, active func(string, int64, int64, uint64) bool) ([]FunnelNudge, error) {
+	now := s.now().Unix()
 	known := map[string]bool{}
 	for _, r := range all {
 		known[r.Account] = true
@@ -1053,6 +1108,7 @@ func (s *Store) funnelNudges(ctx context.Context, q FunnelQuery, today int64, al
 		}
 		n := FunnelNudge{Code: c.Code, Label: c.Label, Retired: retired}
 		var fol, hn, hf, dn, dk, hdn, hdk, nfol, nhf int
+		first := map[[2]string][2]bool{} // (week, account): holdout, followed
 		for _, r := range byCode[c.Code] {
 			switch r.rated {
 			case "useful":
@@ -1076,6 +1132,11 @@ func (s *Store) funnelNudges(ctx context.Context, q FunnelQuery, today int64, al
 				continue
 			}
 			d := r.shown / 86400
+			if key := [2]string{dayString(weekOf(d)), r.subject}; r.shown+NudgeFollowSeconds <= now {
+				if _, ok := first[key]; !ok {
+					first[key] = [2]bool{r.holdout, r.followed > 0}
+				}
+			}
 			closed := d+13 < today
 			kept := closed && active(r.subject, d+7, d+13, VerifiableActs)
 			if r.holdout {
@@ -1105,6 +1166,7 @@ func (s *Store) funnelNudges(ctx context.Context, q FunnelQuery, today int64, al
 		n.Followed, n.HoldoutRows, n.HoldoutFol = rate(fol, n.Shown), hn, rate(hf, hn)
 		n.D7, n.D7Holdout = rate(dk, dn), rate(hdk, hdn)
 		n.NetworkFollowed, n.NetworkHoldoutFol = rate(nfol, n.NetworkShown), rate(nhf, n.NetworkHoldoutRows)
+		n.Lift = nudgeLift(first)
 		out = append(out, n)
 	}
 	return out, nil

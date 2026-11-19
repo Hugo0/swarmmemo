@@ -58,7 +58,7 @@ func TestOperatorFunnel(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if err = operatorFunnel(ctx, store, []string{"--days", "7"}, &out); err != nil || !strings.Contains(out.String(), "identity") {
+	if err = operatorFunnel(ctx, store, []string{"--days", "7"}, &out); err != nil || !strings.Contains(out.String(), "identity") || !strings.Contains(out.String(), "nudge follow lift vs holdout") {
 		t.Fatalf("text: %v %s", err, out.String())
 	}
 	page := filepath.Join(t.TempDir(), "funnel.html")
