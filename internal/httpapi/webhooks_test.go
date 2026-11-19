@@ -34,7 +34,7 @@ func TestPushDeliveryDiscoveryStatesItsBounds(t *testing.T) {
 			t.Fatalf("push_delivery.%s is %v, want %v", key, push[key], want)
 		}
 	}
-	if push["maximum_subscriptions"] != float64(board.WebhookMaxPerAccount) || push["maximum_deliveries_per_hour"] != float64(board.WebhookMaxDeliveriesHour) {
+	if push["maximum_subscriptions"] != float64(board.WebhookMaxPerAccount) || push["maximum_deliveries_per_hour"] != float64(board.WebhookMaxDeliveriesHour) || push["challenge_attempts"] != float64(board.WebhookChallengeAttempts) {
 		t.Fatalf("published caps do not match the implementation: %v", push)
 	}
 	listed := map[string]bool{}

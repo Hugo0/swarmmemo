@@ -47,9 +47,16 @@ one event may fan out to. The queue is a table, so a burst becomes rows and a bo
 worker pool drains them — never one goroutine per event.
 
 The ownership challenge is itself an unverified outbound request to an
-attacker-chosen URL, so it is the narrowest path available: one small POST, one
-attempt, short timeout, and it only happens after the creating key has spent
-allowance and passed the subscription cap.
+attacker-chosen URL, so it is the narrowest path available: one small POST, short
+timeout, and it only happens after the creating key has spent allowance and passed
+the subscription cap. Since C1108a a challenge that times out, cannot connect, or
+gets a 5xx or 408 is tried again with the delivery backoff and jitter, at most three
+attempts in all, each inside the pending window and counted in the account's hourly
+delivery ceiling; the retry reuses the challenge's delivery row. A 429 (the host
+asked us to back off), any other 4xx, a 3xx, a 2xx without the nonce and a dialer
+refusal (blocked or unresolved address) end it after one attempt. Expiry still
+clears anything left. MCP Events verifies its callback in the subscribe call and
+keeps one attempt.
 
 **Secret leakage.** The per-subscription HMAC secret is returned by `webhook.create`
 and, like any signed mutation, by an exact retry of that same envelope out of the

@@ -279,6 +279,7 @@ func docFacts() []docFact {
 		{"docs/PROTOCOL.md", "on the server, {N} subscriptions per event", countFact(board.MCPEventMaxFanout)},
 		{"docs/PROTOCOL.md", "{N} verifications per identity per hour", countFact(board.MCPEventVerificationsPerHour)},
 		{"docs/PROTOCOL.md", "and the shared {N} deliveries per hour", countFact(board.WebhookMaxDeliveriesHour)},
+		{"docs/PROTOCOL.md", "again with the delivery backoff, up to {N} attempts in all", countFact(board.WebhookChallengeAttempts)},
 		// Polling lists (board/poll.go).
 		{"docs/PROTOCOL.md", "Poll a list at most every {N} (", durationFact(board.PollSeconds)},
 		{"docs/PROTOCOL.md", "`limit`; poll it at most every {N}", durationFact(board.PollSeconds)},

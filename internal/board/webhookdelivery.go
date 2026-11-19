@@ -342,6 +342,12 @@ func (s *Store) settle(ctx context.Context, d *webhookDelivery, ok, permanent bo
 		_, err := s.db.ExecContext(ctx, "DELETE FROM "+deliveries+" WHERE seq=?", d.seq)
 		return err
 	}
+	if d.kind == "challenge" && !d.mcp && !permanent {
+		retried, err := s.retryChallenge(ctx, d, reason, now)
+		if err != nil || retried {
+			return err
+		}
+	}
 	attempts := d.attempts + 1
 	exhausted := permanent || attempts >= WebhookMaxAttempts || d.kind == "challenge"
 	if !exhausted {
@@ -376,6 +382,63 @@ func (s *Store) settle(ctx context.Context, d *webhookDelivery, ok, permanent bo
 	// service's 404 or 410 for a browser (webpush.go), until it opts in again.
 	_, err := s.db.ExecContext(ctx, "UPDATE "+subscriptions+" SET state='disabled',disabled_at=? WHERE id=? AND state<>'disabled'", now, d.subscription)
 	return err
+}
+
+// challengeTransient reports whether a failed challenge may be tried again: a
+// timeout, a connection error, a 5xx or a 408. Everything else ends it: a 429
+// (the host asked us to back off), any other 4xx, a 3xx, and a dialer refusal
+// (webhook_address_blocked, webhook_unresolved), which send reports as a
+// non-permanent "request failed" but which a consent probe must not repeat.
+func challengeTransient(reason string) bool {
+	switch reason {
+	case "request failed: timeout", "request failed: connection failed", "status 408":
+		return true
+	}
+	return len(reason) == len("status 5xx") && strings.HasPrefix(reason, "status 5")
+}
+
+// retryChallenge reschedules a transiently failed challenge, reusing its
+// delivery row: at most WebhookChallengeAttempts in all, each inside the
+// pending window and counted against the account's hourly delivery ceiling.
+// It reports false when the challenge ends here instead.
+func (s *Store) retryChallenge(ctx context.Context, d *webhookDelivery, reason string, now int64) (bool, error) {
+	attempts := d.attempts + 1
+	if !challengeTransient(reason) || attempts >= WebhookChallengeAttempts {
+		return false, nil
+	}
+	next := now + webhookBackoff(attempts, rand.Float64)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var created int64
+	err = tx.QueryRowContext(ctx, "SELECT created_at FROM webhook_subscriptions WHERE id=? AND state='pending'", d.subscription).Scan(&created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// The retry must land before expiry, which would only clear it unsent.
+	if next >= created+WebhookPendingTTL {
+		return false, nil
+	}
+	used, err := webhookHourUsed(ctx, tx, d.account, next)
+	if err != nil || used >= WebhookMaxDeliveriesHour {
+		return false, err
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO webhook_rates(account,hour,count) VALUES(?,?,1) ON CONFLICT(account,hour) DO UPDATE SET count=count+1", d.account, next/3600); err != nil {
+		return false, err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE webhook_deliveries SET attempts=?,next_at=?,leased_until=0 WHERE seq=?", attempts, next, d.seq); err != nil {
+		return false, err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE webhook_subscriptions SET last_error=? WHERE id=?",
+		"challenge attempt "+strconv.FormatInt(attempts, 10)+" failed, will retry: "+reason, d.subscription); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // deliverOnce claims and completes at most one delivery. It reports whether it

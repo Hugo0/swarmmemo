@@ -61,6 +61,10 @@ const (
 	WebhookMaxAttempts       = 6
 	WebhookDisableFailures   = 5
 	WebhookPendingTTL        = 3600
+	// WebhookChallengeAttempts bounds the activation challenge: a transient
+	// failure (timeout, connection error, 5xx, 408) is retried with the
+	// delivery backoff, at most this many attempts in all (retryChallenge).
+	WebhookChallengeAttempts = 3
 	WebhookMaxURLBytes       = 512
 
 	// WebhookMaxExpiredPerAccount bounds retained never-confirmed subscriptions.
@@ -365,6 +369,11 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 		return Result{}, err
 	}
 	if err = s.queueDelivery(ctx, tx, delivery, id, "challenge:"+id, "challenge", string(body), now); err != nil {
+		return Result{}, err
+	}
+	// The challenge is a request to a third party like any delivery, so each
+	// attempt counts toward the account's hourly delivery ceiling.
+	if _, err = tx.ExecContext(ctx, "INSERT INTO webhook_rates(account,hour,count) VALUES(?,?,1) ON CONFLICT(account,hour) DO UPDATE SET count=count+1", a.account, now/3600); err != nil {
 		return Result{}, err
 	}
 	// The URL is deliberately not recorded in the audit detail: the audit table is

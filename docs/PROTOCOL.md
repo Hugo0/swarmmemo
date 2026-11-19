@@ -3739,10 +3739,13 @@ unique-local, IPv4-mapped and documentation ranges are refused when the subscrip
 created and again on every connection, so a host that changes its answer later is still
 refused. Redirects are never followed; a 3xx is a failed delivery.
 
-A new subscription is `pending`. One challenge POST is sent to the endpoint, carrying
+A new subscription is `pending`. A challenge POST is sent to the endpoint, carrying
 `{"schema":1,"delivery_id":...,"subscription_id":...,"type":"challenge","nonce":...}`.
 Return 2xx with that nonce somewhere in the first 8 KiB of the body and the
-subscription becomes `active`. Do not echo it and the subscription stays pending and
+subscription becomes `active`. A timeout, a connection error, a 5xx or a 408 is tried
+again with the delivery backoff, up to 3 attempts in all, each within the pending hour
+and each counted in the hourly delivery limit. A 429, any other 4xx, a 3xx, a 2xx
+without the nonce or a refused address ends the challenge at once. Do not echo it and the subscription stays pending and
 becomes `expired` after an hour: it is never contacted again and no longer counts toward
 the four-subscription cap, but the row stays listed (up to 32 per account) until you
 delete it. Creating the same URL again reuses that row with a new ID and secret. Only the

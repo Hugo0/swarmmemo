@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "bce8455d77d0685e9a7964a2c189a0c49c1e1ad5a2d42ade4f440b6fd171dbf1",
+  "allowlist_sha256": "4b4dc522798362c4ecc78486d438a38cc3a2eb8d4f9300c4a821e9fe50da3748",
   "files": [
     {
       "mode": "0644",
@@ -34,8 +34,8 @@
     {
       "mode": "0644",
       "path": "CONTRIBUTORS.md",
-      "sha256": "c2dc3a6758150e536ec20efed6e742705b3cbac0c35d14675455bae6dd1dd7b2",
-      "size": 20144
+      "sha256": "6e65c35909c3941d47414f3703886c9058a5c852d37c625285eaa3dcb5672b23",
+      "size": 20343
     },
     {
       "mode": "0644",
@@ -1006,8 +1006,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "c3539c313cb6d55629a6f9956f30260a19cbf2e2b997e7ebbe22143c429e0ab6",
-      "size": 699425
+      "sha256": "5da497044c7b1522dd3b2a4b98e249040129a050ab9d82806469a02a7cff71f0",
+      "size": 699714
     },
     {
       "mode": "0644",
@@ -1228,8 +1228,8 @@
     {
       "mode": "0644",
       "path": "docs/rfcs/0006-webhooks.md",
-      "sha256": "f1225859fcfb3007a9a8734b7b70118597de2a60c1c474fa0fc89aa721f15b42",
-      "size": 10066
+      "sha256": "099b3ee0f0610e19f4ec209262f6a68662abaab9a30fa37e78e12e8a454aad14",
+      "size": 10624
     },
     {
       "mode": "0644",
@@ -4503,9 +4503,15 @@
     },
     {
       "mode": "0644",
+      "path": "internal/board/webhookchallenge_test.go",
+      "sha256": "e534e1298178c6e42f3976de0ceb94d2d5fa048e46567b448b06e6a6b112d40d",
+      "size": 8961
+    },
+    {
+      "mode": "0644",
       "path": "internal/board/webhookdelivery.go",
-      "sha256": "05860e0ba2a5509d0de3158f83a35322879d4258fe88a258ae7a34800f776502",
-      "size": 19688
+      "sha256": "1b4c02a7e7f8ce5ec8b767f5101608a9697acc9449b3b609efaf5c3442315e42",
+      "size": 22327
     },
     {
       "mode": "0644",
@@ -4516,8 +4522,8 @@
     {
       "mode": "0644",
       "path": "internal/board/webhooks.go",
-      "sha256": "f09b7009171a2c625ada7e57c36623c420838d6c42e11737e0f1f2efa06070b9",
-      "size": 25215
+      "sha256": "9f354448412019912d5082e57268921b286e8ee072ffc6c8dc5b6b20a30c7df0",
+      "size": 25814
     },
     {
       "mode": "0644",
@@ -5638,8 +5644,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/discovery.go",
-      "sha256": "9d2a5a5b4a745c4fedec39a3422159b80d43868785321c7c571e788d54dae43a",
-      "size": 176588
+      "sha256": "4efef629b2d659516008e50f21f59e909f826e926ede453e4c60a03c023f22bc",
+      "size": 176833
     },
     {
       "mode": "0644",
@@ -5650,8 +5656,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/doc_facts_test.go",
-      "sha256": "3c124696302f7767de63cbb37db5629d722d4197d69ee25d86f79f7400f196d8",
-      "size": 39805
+      "sha256": "4b62f1b3c1c291c419a36fee871e542e2f08f2ac467af2c3fb01c6e8f20db182",
+      "size": 39934
     },
     {
       "mode": "0644",
@@ -7264,8 +7270,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/webhooks_test.go",
-      "sha256": "0106eb087b0a8de26dbdbd2e8a6af9b692053611f1bdfabf1696a494f0e9b6cf",
-      "size": 3206
+      "sha256": "be4b6f938fc1ee017b90351b82b98834a11a1ae79f9e16c37cd2c55d369ee3ef",
+      "size": 3279
     },
     {
       "mode": "0644",
