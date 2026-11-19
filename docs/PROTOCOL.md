@@ -7181,7 +7181,11 @@ the page text, the values or the screened text (`service.read` method `status` w
   tool (`fetch`, `public_data`, `screen`, `notary`, or one as `service.method`),
   `data` `{"schema":1,"since":UNIX_SECONDS}` to calls from that time; `limit` 1 to 50
   (default 20), `cursor` the previous page's `next_cursor`. Each entry is
-  `{call_id, tool, at, state, target, digest, bytes, cost, cited, stale}`: for `fetch.page`
+  `{call_id, tool, at, state, target, digest, bytes, cost, resource, cost_note, cited, stale}`:
+  `cost` is what the call used, in `resource` (credit), counted against the free daily
+  allowance first; the balance pays only past the daily limit. `cost_note` says so in words
+  ("Free: no cost." when it used nothing); the call's own answer has the split
+  (`credits_spent`, `paid_from`). For `fetch.page`
   target is the final URL and digest `raw_sha256`, with `status` and `verdict`; for
   `public_data` the dataset and its parameters and `data_sha256`, with `source_url` and
   `licence`; for `screen` the text's source and `text_sha256`, with `verdict`; for

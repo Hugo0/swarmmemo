@@ -195,20 +195,20 @@ func (e *Engine) History(ctx context.Context, q allowance.Querier, h HistoryQuer
 			args = append(args, method)
 		}
 		args = append(args, h.Limit+1)
-		r, err := q.QueryContext(ctx, `SELECT id,service,method,state,cost,created_at,body,public FROM service_calls
+		r, err := q.QueryContext(ctx, `SELECT id,service,method,state,resource,cost,created_at,body,public FROM service_calls
  WHERE account=? AND created_at>=? AND (created_at<? OR created_at=? AND id<?) AND service IN (`+in+`)`+cond+`
  ORDER BY created_at DESC, id DESC LIMIT ?`, args...)
 		if err != nil {
 			return nil, "", err
 		}
 		for r.Next() {
-			var id, svc, m, state, body, public string
+			var id, svc, m, state, resource, body, public string
 			var cost, at int64
-			if err = r.Scan(&id, &svc, &m, &state, &cost, &at, &body, &public); err != nil {
+			if err = r.Scan(&id, &svc, &m, &state, &resource, &cost, &at, &body, &public); err != nil {
 				r.Close()
 				return nil, "", err
 			}
-			rows = append(rows, HistoryRow{ID: id, Account: h.Account, Entry: e.callEntry(id, svc, m, state, cost, at, body, public, h.Now)})
+			rows = append(rows, HistoryRow{ID: id, Account: h.Account, Entry: e.callEntry(id, svc, m, state, resource, cost, at, body, public, h.Now)})
 		}
 		if err = r.Close(); err != nil {
 			return nil, "", err
@@ -280,17 +280,17 @@ func (e *Engine) HistoryByID(ctx context.Context, q allowance.Querier, id string
 		}
 		return HistoryRow{ID: id, Account: account, Notary: true, Hash: hash, Entry: notaryEntry(id, e.notaryID(), hash, at, cost, now)}, true, nil
 	}
-	var svc, m, state, body, public, account string
+	var svc, m, state, resource, body, public, account string
 	var cost, at int64
-	err := q.QueryRowContext(ctx, "SELECT service,method,state,cost,created_at,body,public,account FROM service_calls WHERE id=?", id).
-		Scan(&svc, &m, &state, &cost, &at, &body, &public, &account)
+	err := q.QueryRowContext(ctx, "SELECT service,method,state,resource,cost,created_at,body,public,account FROM service_calls WHERE id=?", id).
+		Scan(&svc, &m, &state, &resource, &cost, &at, &body, &public, &account)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !containsString(calls, svc) {
 		return HistoryRow{}, false, nil
 	}
 	if err != nil {
 		return HistoryRow{}, false, err
 	}
-	return HistoryRow{ID: id, Account: account, Entry: e.callEntry(id, svc, m, state, cost, at, body, public, now)}, true, nil
+	return HistoryRow{ID: id, Account: account, Entry: e.callEntry(id, svc, m, state, resource, cost, at, body, public, now)}, true, nil
 }
 
 // EraseHistory is the owner-erasure step for tool history: the account's
@@ -316,20 +316,34 @@ func containsString(list []string, s string) bool {
 	return false
 }
 
-// historyBase is the entry every tool shares; cited is the board's.
-func historyBase(id, tool, state string, at, cost, now int64) map[string]any {
+// historyBase is the entry every tool shares; cited is the board's. cost is
+// what the call used, in resource (credit for every listed tool), and
+// cost_note reads it in plain words (C1107).
+func historyBase(id, tool, state, resource string, at, cost, now int64) map[string]any {
 	return map[string]any{"call_id": id, "tool": tool, "at": at, "state": state, "target": "", "digest": "", "bytes": int64(0),
-		"cost": cost, "cited": false, "stale": at < now-HistoryStaleDays*86400}
+		"cost": cost, "resource": resource, "cost_note": historyCostNote(cost, resource), "cited": false, "stale": at < now-HistoryStaleDays*86400}
 }
 
+// historyCostNote is an entry's cost_note (C1107). A call's cost is counted
+// against the free daily allowance first and spends the balance only past
+// the daily limit; the stored row keeps no split between the two (the call's
+// own answer has it: credits_spent, paid_from), so the note says the order.
+func historyCostNote(cost int64, resource string) string {
+	if cost <= 0 {
+		return "Free: no cost."
+	}
+	return costUnits(cost, resource) + ", counted against the free daily allowance first; the agent's balance pays only past the daily limit."
+}
+
+// notaryEntry is a notary receipt's entry; notary.stamp is priced in credit.
 func notaryEntry(id, service, hash string, at, cost, now int64) map[string]any {
-	e := historyBase(id, service+".stamp", "done", at, cost, now)
+	e := historyBase(id, service+".stamp", "done", string(allowance.Credit), at, cost, now)
 	e["target"], e["digest"] = hash, hash
 	return e
 }
 
-func (e *Engine) callEntry(id, service, method, state string, cost, at int64, body, public string, now int64) map[string]any {
-	out := historyBase(id, service+"."+method, state, at, cost, now)
+func (e *Engine) callEntry(id, service, method, state, resource string, cost, at int64, body, public string, now int64) map[string]any {
+	out := historyBase(id, service+"."+method, state, resource, at, cost, now)
 	p, ok := e.cfg.Registry.providers[service].(Historian)
 	if !ok || state != "done" {
 		return out

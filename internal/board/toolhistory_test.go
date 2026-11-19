@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -243,6 +244,62 @@ func TestToolHistoryCite(t *testing.T) {
 	}
 	if _, ok, _ := s.CitedCall(testContext, id); ok {
 		t.Error("an erased account's call is still cited")
+	}
+}
+
+// C1107: an entry's cost stays, beside its resource and a cost_note that
+// reads it as counted against the free daily allowance first, never a bare
+// charge: on a real notary stamp the allowance covered (credits_spent 0 in
+// the call's own answer), on a cited fetch.page at /api/calls/ID, and as
+// "Free: no cost." on a call that used nothing.
+func TestToolHistoryCostNote(t *testing.T) {
+	s := toolHistoryStore(t)
+	u := keyFor(175)
+	register(t, s, u)
+	me := keyID(u)
+	res := run(t, s, signed(u, Command{Operation: "service.call", Target: "notary", Data: svcData("stamp", map[string]any{"text": "c1107"}, 1), RequestID: randomID()}))
+	var answer struct {
+		Call services.CallRecord `json:"call"`
+	}
+	raw, _ := json.Marshal(res.Data)
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		t.Fatal(err)
+	}
+	if call := answer.Call; call.CreditsSpent == nil || *call.CreditsSpent != 0 || call.PaidFrom != services.PaidFromFreeAllowance || call.Cost != 1 {
+		t.Fatalf("stamp call = %+v, want cost 1 from the free allowance", res.Data["call"])
+	}
+	stamp, _ := historyPage(t, s, u, Command{Target: "notary"})
+	if len(stamp) != 1 || stamp[0]["cost"] != float64(1) || stamp[0]["resource"] != "credit" ||
+		stamp[0]["cost_note"] != "1 credit, counted against the free daily allowance first; the agent's balance pays only past the daily limit." {
+		t.Fatalf("stamp entry = %v", stamp)
+	}
+
+	id, failed := fmt.Sprintf("%032x", 21), fmt.Sprintf("%032x", 22)
+	seedHistoryCall(t, s, id, me, "fetch", "page", `{"url":"https://a.example/","raw_sha256":"`+strings.Repeat("a", 64)+`"}`, testTime-100)
+	seedHistoryCall(t, s, failed, me, "fetch", "page", `{}`, testTime-90)
+	if _, err := s.db.Exec("UPDATE service_calls SET cost=CASE id WHEN ? THEN 409 ELSE 0 END, state=CASE id WHEN ? THEN 'done' ELSE 'failed' END WHERE id IN (?,?)", id, id, id, failed); err != nil {
+		t.Fatal(err)
+	}
+	run(t, s, signed(u, Command{Operation: "service.cite", Target: id, Data: `{"schema":1,"public":true}`, RequestID: randomID()}))
+	page, ok, err := s.CitedCall(testContext, id)
+	if err != nil || !ok {
+		t.Fatalf("cited call: %v %v", ok, err)
+	}
+	entry := page["call"].(map[string]any)
+	if entry["cost"] != int64(409) || entry["resource"] != "credit" ||
+		entry["cost_note"] != "409 credits, counted against the free daily allowance first; the agent's balance pays only past the daily limit." {
+		t.Errorf("cited entry = %v", entry)
+	}
+	got, _ := historyPage(t, s, u, Command{Target: "fetch"})
+	byID := map[string]map[string]any{}
+	for _, c := range got {
+		byID[c["call_id"].(string)] = c
+	}
+	if e := byID[failed]; e == nil || e["cost"] != float64(0) || e["cost_note"] != "Free: no cost." {
+		t.Errorf("failed entry = %v", e)
+	}
+	if entryKeys, _ := ToolHistoryCapabilities()["entry"].([]string); !slices.Contains(entryKeys, "cost_note") || !slices.Contains(entryKeys, "resource") {
+		t.Errorf("capabilities entry = %v", entryKeys)
 	}
 }
 

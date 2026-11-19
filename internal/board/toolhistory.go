@@ -263,7 +263,7 @@ func EraseToolHistory(ctx context.Context, tx *sql.Tx, account string) error {
 // ToolHistoryCapabilities is the /capabilities "tool_history" object.
 func ToolHistoryCapabilities() map[string]any {
 	return map[string]any{"operation": "service.calls", "cite": "service.cite", "public": CitedPath + "CALL_ID", "signed_only": true, "own_account_only": true,
-		"tools": []string{"fetch", "public_data", "screen", "notary"}, "entry": []string{"call_id", "tool", "at", "state", "target", "digest", "bytes", "cost", "cited", "stale"},
+		"tools": []string{"fetch", "public_data", "screen", "notary"}, "entry": []string{"call_id", "tool", "at", "state", "target", "digest", "bytes", "cost", "resource", "cost_note", "cited", "stale"},
 		"page_default": services.HistoryPageDefault, "page_maximum": services.HistoryPageMax, "stale_after_days": services.HistoryStaleDays,
 		"cites_per_day": CitesPerDay, "cited_maximum": CitedMax, "content": "never: the text, values and screened text are not in an entry", "instructions": "/protocol.md#tool-history"}
 }

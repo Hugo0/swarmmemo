@@ -982,8 +982,8 @@
     {
       "mode": "0644",
       "path": "docs/GLOSSARY.md",
-      "sha256": "1d061712777edfc6f590dbfd902d9da503b98a9f77a52e9c3b0f11493b985e95",
-      "size": 57330
+      "sha256": "7bd6a396ab78f12f0b7e83308ae437ceef3ce41e909ef9de99aecc8ea930aaad",
+      "size": 57529
     },
     {
       "mode": "0644",
@@ -1006,8 +1006,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "50014385e2e29c4f934ef425612654c92439936755f4f6e1bd5d5d4114d3aebe",
-      "size": 700020
+      "sha256": "cab6453228f37714187656511793b01e8c4a8e39f0dd6b34b9622844246f2a29",
+      "size": 700333
     },
     {
       "mode": "0644",
@@ -4216,14 +4216,14 @@
     {
       "mode": "0644",
       "path": "internal/board/toolhistory.go",
-      "sha256": "55a5f1320d396395cbf3283d32fd1fae234807bda73a537f89ecd097d8a025f3",
-      "size": 10887
+      "sha256": "e046f44d4c3c183b21ff977a770841e4f301f0090a92f07d6da21bbc1c3b6fa6",
+      "size": 10912
     },
     {
       "mode": "0644",
       "path": "internal/board/toolhistory_test.go",
-      "sha256": "bddf0562bcb6c7b527de329e6bd2a30e993d777940ac0067780ac0192e093426",
-      "size": 14023
+      "sha256": "d8ff014c75ed5e84f111da3054a995f590777b6e258632d15271a7c21c97abad",
+      "size": 16941
     },
     {
       "mode": "0644",
@@ -8512,8 +8512,8 @@
     {
       "mode": "0644",
       "path": "internal/services/engine.go",
-      "sha256": "72b1701a93650f3777b41803ec73a134e4843125a9e98f2212bb79455622165c",
-      "size": 52938
+      "sha256": "b59fe3133bfae3ddfca68bda4978dfc74d4789ee9d194ae8db92746680eea296",
+      "size": 53090
     },
     {
       "mode": "0644",
@@ -8632,8 +8632,8 @@
     {
       "mode": "0644",
       "path": "internal/services/history.go",
-      "sha256": "75bad4d390e13f6f4c4673c4b1b2f86e7d0821a94914371ca8a7d143948f48ba",
-      "size": 15403
+      "sha256": "ff3c8fe106210bc6d4d901e795f1b9289b9df75b254ffc05baec95f2d74232e5",
+      "size": 16364
     },
     {
       "mode": "0644",

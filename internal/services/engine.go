@@ -88,16 +88,7 @@ func costNote(cost, spent int64, left *int64, resource string) string {
 	if cost <= 0 {
 		return "Free: no cost."
 	}
-	unit := func(n int64) string {
-		u := "bytes"
-		if resource == string(allowance.Credit) {
-			u = "credits"
-			if n == 1 {
-				u = "credit"
-			}
-		}
-		return groupDigits(n) + " " + u
-	}
+	unit := func(n int64) string { return costUnits(n, resource) }
 	from := "from your free daily allowance"
 	if left != nil {
 		from += " (" + groupDigits(*left) + " left)"
@@ -109,6 +100,18 @@ func costNote(cost, spent int64, left *int64, resource string) string {
 		return unit(cost) + " spent from your balance."
 	}
 	return unit(cost) + ": " + unit(cost-spent) + " " + from + ", " + unit(spent) + " spent from your balance."
+}
+
+// costUnits is n in resource's unit: "409 credits", "1 credit", "512 bytes".
+func costUnits(n int64, resource string) string {
+	u := "bytes"
+	if resource == string(allowance.Credit) {
+		u = "credits"
+		if n == 1 {
+			u = "credit"
+		}
+	}
+	return groupDigits(n) + " " + u
 }
 
 // groupDigits writes n with comma thousands separators: 99907 is "99,907".
