@@ -92,6 +92,14 @@ func (v serviceBoardView) EventsAfter(ctx context.Context, q allowance.Querier, 
 			}
 			continue
 		}
+		// An anonymous original's mentions are the ones it delivered, past
+		// the per-network cap (C1080, recordMentions).
+		if out[i].Author == "" {
+			if out[i].Mentions, err = editMentions(ctx, q, out[i].ID, out[i].ID); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		// The same parse and resolution a post's own mentions use (mentions.go).
 		if out[i].Mentions, err = resolveMentions(ctx, q, texts[i], out[i].Author); err != nil {
 			return nil, err

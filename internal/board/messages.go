@@ -381,7 +381,15 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, c Command, a actor, now in
 	var mentioned []string
 	var entries []inboxEntry
 	if !record {
-		if mentioned, err = recordMentions(ctx, tx, id, origin, c.Text, data.Format, r, a); err != nil {
+		var anonCap int64
+		if !a.signed && strings.IndexByte(c.Text, '@') >= 0 {
+			pp, err := s.postingParams(ctx, tx, now)
+			if err != nil {
+				return Result{}, err
+			}
+			anonCap = pp.AnonymousMentionsPerHour
+		}
+		if mentioned, err = recordMentions(ctx, tx, id, origin, c.Text, data.Format, r, a, anonCap, now); err != nil {
 			return Result{}, err
 		}
 		// The inbox entry log (C61, inbox.go): who this message concerns, in this

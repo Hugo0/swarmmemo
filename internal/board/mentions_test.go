@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mentionReasons is each webhook delivery's message ID and reason for one
@@ -287,5 +288,62 @@ func testMentionWakeupFiresOnTheEditThatAddsIt(t *testing.T, mode InboxMode) {
 	edit(original, "hi again @alice")
 	if n := wakeWork(t, s); n != 0 {
 		t.Fatalf("an edit of a message that already mentioned alice fired %d", n)
+	}
+}
+
+// Without a key, one network's posts notify at most AnonymousMentionsPerHour
+// distinct agents in a rolling hour (C1080): a fourth handle is linked but
+// gets no mention row, update or webhook, while the post publishes and an
+// agent already told this hour is told again; the hour after, a new one is
+// told. Another network and a signed author have their own counts.
+func TestAnonymousMentionCap(t *testing.T) { forInboxModes(t, testAnonymousMentionCap) }
+
+func testAnonymousMentionCap(t *testing.T, mode InboxMode) {
+	s := openTest(t, withInbox(updatesConfig(), mode))
+	var names []string
+	for i, h := range []string{"ann", "ben", "cat", "dan", "eve"} {
+		handleKey(t, s, byte(60+i), h)
+		names = append(names, h)
+	}
+	dan := keyID(keyFor(63))
+	hook, _ := activeWebhook(t, s, dan, "https://hooks.example.org/dan")
+	now := int64(testTime)
+	s.now = func() time.Time { return time.Unix(now, 0) }
+	anon := func(text, source string) string {
+		t.Helper()
+		r, err := s.Execute(testContext, Command{Operation: "post", Room: "lobby", Text: text}, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.Receipt.ID
+	}
+	mentioned := func(id string) int64 {
+		return sqlCount(t, s, "SELECT count(*) FROM post_mentions WHERE root=?", id)
+	}
+	if first := anon("hi @ann @ben", "net-a"); mentioned(first) != 2 {
+		t.Fatalf("first: %d", mentioned(first))
+	}
+	over := anon("and @cat, @dan too", "net-a")
+	if mentioned(over) != 1 || sqlCount(t, s, "SELECT count(*) FROM events WHERE id=?", over) != 1 {
+		t.Fatalf("past the cap: %d mentions", mentioned(over))
+	}
+	if again := anon("@ann @eve again", "net-a"); mentioned(again) != 1 {
+		t.Fatalf("an agent told this hour is told again, a new one not: %d", mentioned(again))
+	}
+	if other := anon("@dan from elsewhere", "net-b"); mentioned(other) != 1 {
+		t.Fatalf("another network: %d", mentioned(other))
+	}
+	if all := run(t, s, signed(keyFor(70), Command{Operation: "post", Room: "lobby", Text: "@" + strings.Join(names, " @")})).Receipt.ID; mentioned(all) != 5 {
+		t.Fatalf("signed: %d", mentioned(all))
+	}
+	if r := mentionReasons(t, s, hook); r[over] != "" || len(r) != 2 {
+		t.Fatalf("dan's webhook reasons %v", r)
+	}
+	if got := run(t, s, Command{Operation: "message.get", MessageID: over}).Messages[0].MentionAgents; got["dan"] != dan {
+		t.Fatalf("the uncounted mention is still linked: %v", got)
+	}
+	now += 3601
+	if later := anon("@dan an hour on", "net-a"); mentioned(later) != 1 {
+		t.Fatalf("the next hour: %d", mentioned(later))
 	}
 }

@@ -52,6 +52,7 @@ export const CONTRACT = Object.freeze({
   "work_usdc_states": ["promised","payable","paid","void"]
  },
  "limits": {
+  "anonymous_mentions_per_hour": 3,
   "anonymous_top_level_per_hour": 4,
   "anonymous_top_level_per_room_day": 4,
   "attachment_bytes": 1048576,

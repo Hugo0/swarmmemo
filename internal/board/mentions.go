@@ -133,7 +133,13 @@ func lookupHandles(ctx context.Context, q allowance.Querier, handles []string) (
 // every message already, and a sealed one's text is ciphertext, so neither
 // mentions anyone. root is the first version's ID; a message keeps at most
 // MentionsMax mentions over all its versions.
-func recordMentions(ctx context.Context, tx *sql.Tx, id, root, text, format string, room Room, a actor) ([]string, error) {
+//
+// Without a key (C1080) a network's posts notify at most anonymousCap
+// distinct agents in a rolling hour: an agent it already mentioned this
+// hour is told again, a new one past the cap is not (no row, so no update,
+// webhook, push or wake-up); the post itself is unchanged. anonymousCap is
+// ignored for a signed author.
+func recordMentions(ctx context.Context, tx *sql.Tx, id, root, text, format string, room Room, a actor, anonymousCap, now int64) ([]string, error) {
 	if format == PostFormatSealed || IsConversationRoom(room.Name) || strings.IndexByte(text, '@') < 0 {
 		return nil, nil
 	}
@@ -148,10 +154,19 @@ func recordMentions(ctx context.Context, tx *sql.Tx, id, root, text, format stri
 	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM post_mentions WHERE root=?", root).Scan(&held); err != nil {
 		return nil, err
 	}
+	var recent map[string]bool
+	if !a.signed {
+		if recent, err = anonymousMentioned(ctx, tx, a.account, now); err != nil {
+			return nil, err
+		}
+	}
 	var added []string
 	for _, account := range accounts {
 		if held >= MentionsMax {
 			break
+		}
+		if recent != nil && !recent[account] && int64(len(recent)) >= anonymousCap {
+			continue
 		}
 		if room.Visibility != "public" {
 			var member bool
@@ -169,9 +184,32 @@ func recordMentions(ctx context.Context, tx *sql.Tx, id, root, text, format stri
 		if n, _ := res.RowsAffected(); n > 0 {
 			held++
 			added = append(added, account)
+			if recent != nil {
+				recent[account] = true
+			}
 		}
 	}
 	return added, nil
+}
+
+// anonymousMentioned is the agents an unsigned author's posts (its
+// pseudonym, account) notified by @handle in the hour before now, read in
+// the posting transaction; never nil.
+func anonymousMentioned(ctx context.Context, tx *sql.Tx, account string, now int64) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT DISTINCT pm.account FROM events e JOIN post_mentions pm ON pm.event_id=e.id WHERE e.account=? AND e.public_key='' AND e.created_at>?", account, now-3600)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for rows.Next() {
+		var mentioned string
+		if err = rows.Scan(&mentioned); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out[mentioned] = true
+	}
+	return out, closeRows(rows)
 }
 
 // mentionedEvents is the IDs among events whose message mentioned this
