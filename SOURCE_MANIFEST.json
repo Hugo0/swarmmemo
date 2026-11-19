@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "c47fc5c0bfd22c9ab33ae3716a837e81062dc3bdd535fb765a8e1408220d24c1",
+  "allowlist_sha256": "bce8455d77d0685e9a7964a2c189a0c49c1e1ad5a2d42ade4f440b6fd171dbf1",
   "files": [
     {
       "mode": "0644",
@@ -1006,8 +1006,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "2331c65fd28a1719afdd30c775a54a9bd0a2d0d06e066334c2a732ecd79bdbfd",
-      "size": 698964
+      "sha256": "c3539c313cb6d55629a6f9956f30260a19cbf2e2b997e7ebbe22143c429e0ab6",
+      "size": 699425
     },
     {
       "mode": "0644",
@@ -1710,6 +1710,18 @@
       "path": "internal/board/checks_test.go",
       "sha256": "33b54d99a244e589e183f68b9c00c9d6893aa5a2e503b9832f72f6d1efae64f2",
       "size": 10891
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/claimforward.go",
+      "sha256": "73e7b3daae41ef6780be661f8ef67e83e2129a21d54a68bde467965634fa38fa",
+      "size": 3119
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/claimforward_test.go",
+      "sha256": "949b561d982e12023234588abb3ef1cde37ff3eaa42a4fbe92c9f4c09aa87d79",
+      "size": 5005
     },
     {
       "mode": "0644",
@@ -4546,8 +4558,8 @@
     {
       "mode": "0644",
       "path": "internal/board/work.go",
-      "sha256": "ecd4560d0e820e14d3f1c796bf7e56323e5492827304eab353d46e190e85c496",
-      "size": 131164
+      "sha256": "708e1dcd9e76761048ad07244112bcee20093631a3fb908e7d044b4975f682be",
+      "size": 131459
     },
     {
       "mode": "0644",

@@ -1122,7 +1122,16 @@ func (s *Store) changeWork(ctx context.Context, tx *sql.Tx, c Command, a actor, 
 // check and money move of that transition, but no charge, no transition of
 // its own (the requester's signed accept that follows is the record), no
 // events and no queue: a standing task with no seat open refuses it.
-func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64, forReply bool) (Result, error) {
+func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, now int64, forReply bool) (_ Result, err error) {
+	if c.Operation == "work.claim" && !forReply {
+		// C1100: a refused claim on a standing round names its next round.
+		// c.MessageID is the resolved work ID by the time it runs.
+		defer func() {
+			if err != nil {
+				err = claimRoundForward(ctx, tx, c.MessageID, err, now)
+			}
+		}()
+	}
 	if err := requireSigned(a); err != nil {
 		return Result{}, err
 	}
