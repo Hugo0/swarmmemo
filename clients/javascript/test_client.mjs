@@ -599,6 +599,19 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     data: `{"schema":1,"review":{"subject":"agent:${agent}","verdict":"mixed","dimensions":{"good":40},"relationship":"customer","evidence":["work:${id}"]}}`});
   requests.length = 0;
   await assert.rejects(signed.acceptWork(id, 3, {rating: 101}), errorCode('invalid_option')); requests.length = 0;
+  // C1105: 1-9 reads like stars but publishes an unusable review: refused before anything is sent,
+  // unless ratingLowOk; 0 is explicit. A reject takes no rating, so the guard never applies to it.
+  for (const low of [1, 5, 9]) {
+    await assert.rejects(signed.acceptWork(id, 3, {rating: low}), e => e.code === 'invalid_option' && e.message.includes('not stars (50 neutral; 65+ good, 35+ mixed, 10+ bad, below 10 unusable)') && e.message.includes('ratingLowOk'));
+    assert.deepEqual(requests, []);
+  }
+  for (const [options, verdict] of [[{rating: 0}, 'unusable'], [{rating: 50}, 'mixed'], [{rating: 5, ratingLowOk: true}, 'unusable']]) {
+    await signed.acceptWork(id, 3, options);
+    const sent = JSON.parse(requests.at(-1).body.data);
+    assert.equal(JSON.parse(shown(sent.review).data).review.verdict, verdict); assert.equal(sent.ratingLowOk, undefined); requests.length = 0;
+  }
+  await signed.rejectWork(id, 3, 'Missing the tests.', {generation});
+  assert.equal(requests.at(-1).body.operation, 'work.reject'); requests.length = 0;
   await assert.rejects(anonymous.acceptWork(id, 3, {rating: 50}), errorCode('missing_key'));
   await assert.rejects(signed.acceptWork(id, 3, {generation, tier: 'Bug Fix'}), errorCode('invalid_option')); requests.length = 0;
   await assert.rejects(signed.acceptWork(id, 3, {generation, result: 'r1'}), errorCode('invalid_option'));

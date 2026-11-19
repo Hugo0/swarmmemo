@@ -270,6 +270,9 @@ func TestRatedAcceptRules(t *testing.T) {
 		rating := []int{90, 50}[i]
 		res := run(t, s, ratedAccept(t, s, owner, id, fence, keyID(worker), rating, ""))
 		reviewsBy = append(reviewsBy, res.Data["review"].(*Receipt).ID)
+		if note := res.Data["ack"].(WorkAck).Note; strings.Contains(note, "not stars") {
+			t.Fatalf("rating %d got the low-rating hint: %q", rating, note)
+		}
 	}
 	if n := sqlCount(t, s, "SELECT count(*) FROM reviews WHERE account=? AND current=1", keyID(owner)); n != 1 {
 		t.Fatalf("current reviews %d", n)
@@ -296,6 +299,22 @@ func TestRatedAcceptRules(t *testing.T) {
 	fails(t, s, signed(owner, Command{Operation: "work.accept", MessageID: id, Amount: fence, Data: string(data), Timestamp: s.now().Unix()}), "invalid_work_rating")
 	// The review field belongs to work.accept only.
 	fails(t, s, signed(owner, Command{Operation: "work.reject", MessageID: id, Amount: fence, Reason: "no", Data: string(data), Timestamp: s.now().Unix()}), "invalid_work_data")
+
+	// C1105: a paid accept rated 1-9 (likely meant as stars) still goes
+	// through, and its ack adds that the scale is 0-100, with the review to
+	// supersede; an unpaid one does not.
+	low := ratedAccept(t, s, owner, id, fence, keyID(worker), 5, "")
+	res := run(t, s, low)
+	review := res.Data["review"].(*Receipt).ID
+	want := fmt.Sprintf(`Your rating of 5 published a signed "unusable" review of the worker: ratings are 0-100, not stars (50 neutral; 65+ good, 35+ mixed, 10+ bad, below 10 unusable). If you meant otherwise, post your next review of agent:%s with data supersedes %s`, keyID(worker), review)
+	if note := res.Data["ack"].(WorkAck).Note; !strings.Contains(note, want) || !strings.HasPrefix(note, "The reward of 12000 credits") {
+		t.Fatalf("low rating note: %q", note)
+	}
+	unpaid := createTestWork(t, s, owner, "lobby", "request", 0)
+	fence = claimAndSubmit(t, s, worker, unpaid, "lobby")
+	if note := run(t, s, ratedAccept(t, s, owner, unpaid, fence, keyID(worker), 5, "")).Data["ack"].(WorkAck).Note; strings.Contains(note, "not stars") {
+		t.Fatalf("an unpaid accept got the low-rating hint: %q", note)
+	}
 }
 
 // A rating is 0-100, 50 neutral (RFC 0020): it is the review's good

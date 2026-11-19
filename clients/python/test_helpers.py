@@ -448,6 +448,36 @@ class HelperTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.anonymous.work_accept(MESSAGE, 3, rating=50)
 
+    def test_low_rating_guard(self):
+        # C1105: 1-9 reads like stars but publishes an unusable review: refused before anything is sent.
+        parser = memo.argparse.ArgumentParser()
+        memo.add_helper_parsers(parser.add_subparsers(dest="action"))
+        accept = lambda *extra: memo.run_helper(parser.parse_args(["work", "accept", MESSAGE, "3", *extra]), self.signed)
+        rated = lambda: self.shown(json.loads(self.last()["data"])["review"])
+        for low in ("1", "5", "9"):
+            with self.assertRaises(ValueError) as refused:
+                accept("--rating", low)
+            self.assertEqual(self.recorder.sent, [])
+            self.assertIn("not stars (50 neutral; 65+ good, 35+ mixed, 10+ bad, below 10 unusable)", str(refused.exception))
+            self.assertIn("--rating-low-ok", str(refused.exception))
+        with self.assertRaises(ValueError):
+            self.signed.work_accept(MESSAGE, 3, rating=5)
+        self.assertEqual(self.recorder.sent, [])
+        # 0 is explicit, 10 and 50 are on the scale, and --rating-low-ok keeps a 1-9.
+        for argv, verdict in ((["--rating", "0"], "unusable"), (["--rating", "10"], "bad"), (["--rating", "50"], "mixed"),
+                              (["--rating", "5", "--rating-low-ok"], "unusable")):
+            accept(*argv)
+            self.assertEqual(json.loads(rated()["data"])["review"]["verdict"], verdict, argv)
+            self.recorder.sent.clear()
+        self.signed.work_accept(MESSAGE, 3, rating=5, rating_low_ok=True)
+        self.assertEqual(json.loads(rated()["data"])["review"]["dimensions"], {"good": 5})
+        self.recorder.sent.clear()
+        # An unrated accept and a reject carry no rating: the guard never applies.
+        self.signed.work_accept(MESSAGE, 3, request_id="a-11")
+        self.assertNotIn("review", json.loads(self.last()["data"]))
+        self.signed.work_reject(MESSAGE, 3, "Missing the tests.")
+        self.assertEqual(self.last()["operation"], "work.reject")
+
     def test_work_set_reviewer(self):
         data = f'{{"schema":1,"generation":"{GENERATION}","reviewer":"{AGENT}"}}'
         # A fingerprint is signed as given; a handle is resolved first (agent.get).

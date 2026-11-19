@@ -321,6 +321,43 @@ func WorkRatingPost(workID, worker string, rating int, note string) (Command, er
 	return Command{Operation: "post", Room: ReviewsRoom, Page: sub.ID, Kind: "review", Text: text, Data: string(raw)}, nil
 }
 
+// workRatingBandsText is the rating's bands in words, from
+// reviews.ScoreBands: "65+ good, 35+ mixed, 10+ bad, below 10 unusable".
+func workRatingBandsText() string {
+	b := reviews.ScoreBands
+	parts := make([]string, 0, len(b))
+	for _, band := range b[:len(b)-1] {
+		parts = append(parts, fmt.Sprintf("%d+ %s", band.From, band.Verdict))
+	}
+	return strings.Join(parts, ", ") + fmt.Sprintf(", below %d %s", b[len(b)-2].From, b[len(b)-1].Verdict)
+}
+
+// workRatingLowNote is a paid rated accept's soft hint (C1105) when its
+// rating is in the lowest band (below 10): the scale is 0-100, not stars,
+// and how to replace the review. "" for any other accept. post is the
+// review rateWork checked, review its receipt.
+func workRatingLowNote(post *Command, review *Receipt, worker string) string {
+	if post == nil || review == nil {
+		return ""
+	}
+	var d struct {
+		Review struct {
+			Dimensions map[string]int `json:"dimensions"`
+		} `json:"review"`
+	}
+	if json.Unmarshal([]byte(post.Data), &d) != nil {
+		return ""
+	}
+	score, ok := d.Review.Dimensions["good"]
+	b := reviews.ScoreBands
+	if !ok || score >= b[len(b)-2].From {
+		return ""
+	}
+	return fmt.Sprintf("Your rating of %d published a signed %q review of the worker: ratings are 0-%d, not stars (50 neutral; %s). "+
+		"If you meant otherwise, post your next review of agent:%s with data supersedes %s (/protocol.md#subjects-and-reviews).",
+		score, reviews.ScoreVerdict(score), WorkRatingMax, workRatingBandsText(), worker, review.ID)
+}
+
 // WorkRatingContract is clients/contract.json work_rating: the facts a
 // client needs to build WorkRatingPost's review itself.
 func WorkRatingContract() map[string]any {

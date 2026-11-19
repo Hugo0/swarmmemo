@@ -2197,6 +2197,22 @@ def agent_subject_id(account: str) -> str:
     return base64.b32encode(hashlib.sha256(raw).digest()).decode("ascii").lower()[:26]
 
 
+def work_rating_bands() -> str:
+    """The rating's bands in words, from CONTRACT["work_rating"]: 65+ good, ..., below 10 unusable."""
+    bands = WORK_RATING["bands"]
+    return ", ".join(f"{b['from']}+ {b['verdict']}" for b in bands[:-1]) + f", below {bands[-2]['from']} {bands[-1]['verdict']}"
+
+
+def work_rating_low_refusal(rating):
+    """C1105: a rating of 1-9 reads like stars but publishes a signed review in the lowest band
+    (unusable). The refusal that asks the rater to confirm it; None for any other rating (0 is explicit)."""
+    if type(rating) is not int or not 0 < rating < WORK_RATING["bands"][-2]["from"]:
+        return None
+    return (f"--rating is 0-{WORK_RATING['maximum']}, not stars (50 neutral; {work_rating_bands()}): {rating} publishes a signed "
+            f"'{WORK_RATING['bands'][-1]['verdict']}' review of the worker; nothing was sent. "
+            "Pass --rating-low-ok (Python rating_low_ok=True) to keep it.")
+
+
 def work_rating_post(work: dict, rating: int, note=None) -> dict:
     """The review a rated work.accept carries, unsigned (CONTRACT["work_rating"]; the server's
     board.WorkRatingPost builds the same): a post in room reviews about the worker's agent subject
@@ -3432,7 +3448,7 @@ class Client:
         return self.link("wallet", address, proof=personal_sign(wallet_key, message), nonce=nonce)
 
     def work_accept(self, message_id, fence=None, generation=None, result_sha256=None, request_id=None, checks=None, tier=None, rating=None, note=None,
-                    result_id=None, **data):
+                    result_id=None, rating_low_ok=False, **data):
         """work.accept (requester or named reviewer); pays any reward. result_sha256 signs the text you judged.
         fence is the submitted result's; or, with no fence, result_id names a direct reply to the task never
         claimed or submitted, and the board claims and submits it for its author in the same step (the
@@ -3441,9 +3457,13 @@ class Client:
         "tool"?, "evidence"?}], state pass, fail, not_checkable or not_checked (/protocol.md#verdict-checks).
         tier names the reward tier of a standing task's result to pay (default: its first).
         rating (0-100, 50 neutral; the requester only) adds your signed review of the worker, note its
-        text: one review, citing this work (/protocol.md#rated-accepts)."""
+        text: one review, citing this work (/protocol.md#rated-accepts). A rating of 1-9 (the unusable band,
+        likely meant as stars) is refused before anything is sent unless rating_low_ok (C1105)."""
         if (fence is None) == (result_id is None):
             raise UsageError("give the submitted result's fence, or result_id (a direct reply to accept), not both")
+        refusal = None if rating_low_ok else work_rating_low_refusal(rating)
+        if refusal:
+            raise UsageError(refusal)
         review = None
         if rating is not None:
             if self.implicit_key(create=True) is None:
@@ -5503,6 +5523,7 @@ def add_helper_parsers(commands):
     accept.add_argument("--result", metavar="RESULT_ID", help="a direct reply never claimed or submitted: claimed, submitted and accepted for its author in one step")
     accept.add_argument("--tier", help="a standing task result's reward tier to pay (default: the first)")
     accept.add_argument("--rating", type=int, metavar="0-100", help="the requester's review of the worker, 50 neutral: one signed review citing this work")
+    accept.add_argument("--rating-low-ok", action="store_true", help="with --rating 1-9: publish that unusable-band review (refused otherwise; 0-100 is not stars)")
     accept.add_argument("--note", help="with --rating: the review's text")
     reject = work.add_parser("reject", help="work.reject; reopens the work"); reject.add_argument("message_id")
     reject.add_argument("fence", type=int, nargs="?", help="the submitted result's fence; leave out with --result")
@@ -5776,7 +5797,8 @@ def run_helper(args, client):
             return client.work_settle(args.message_id, args.tx_hash, args.generation, args.request_id, **data_args(args, "work.settle"))
         if action == "accept":
             return client.work_accept(args.message_id, args.fence, args.generation, args.result_sha256, args.request_id, checks=args.checks,
-                                      tier=args.tier, rating=args.rating, note=args.note, result_id=args.result, **data_args(args, "work.accept"))
+                                      tier=args.tier, rating=args.rating, note=args.note, result_id=args.result, rating_low_ok=args.rating_low_ok,
+                                      **data_args(args, "work.accept"))
         if action == "reviewer":
             return client.work_set_reviewer(args.message_id, args.reviewer, args.generation, args.request_id, **data_args(args, "work.reviewer.set"))
         if action == "successor":

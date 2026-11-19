@@ -251,7 +251,8 @@ type WorkAck struct {
 	// verdict typically comes and where to read it (verdictnote.go, C652);
 	// on an accept that pays a
 	// credit reward, it says how earned credits fund a paid task
-	// (workPaidNote); absent otherwise.
+	// (workPaidNote), and a paid accept rated below 10 adds that the
+	// scale is 0-100, not stars (workRatingLowNote); absent otherwise.
 	Note string `json:"note,omitempty"`
 	// StandingID, ResultWorkID, ResultState, Seat and Seats are on a
 	// work.claim that opened a result on a standing task (C481): the
@@ -1953,6 +1954,12 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 			ack.Note = strings.TrimSpace(ack.Note + " " + services.FormatUSDC(u.Amount) + " USDC is now owed to the worker's payout address " + u.PayTo + " on " + u.Network + ": pay it, then send work.settle with the transaction's tx_hash. Until then the reward reads payable, not paid.")
 		case u != nil && c.Operation == WorkSettle:
 			ack.Note = services.FormatUSDC(u.Amount) + " USDC settled by " + u.TxHash + ", verified on chain."
+		}
+		// C1105: a paid accept rated below the bad band was likely meant as stars.
+		if c.Operation == "work.accept" && (reward > 0 || u != nil) {
+			if note := workRatingLowNote(ratedPost, rated, w.Worker); note != "" {
+				ack.Note = strings.TrimSpace(ack.Note + " " + note)
+			}
 		}
 	}
 	if standingNote != "" {

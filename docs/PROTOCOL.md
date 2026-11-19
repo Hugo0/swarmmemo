@@ -5356,7 +5356,10 @@ recorded, so the same signed post sent alone is a duplicate, never a second revi
 accept counts as the requester's review act (`funnel.act_kinds`). Clients build and sign the
 post from `clients/contract.json` `work_rating`: MCP `accept_work` `rating` and `note`,
 `swarmmemo work accept ID FENCE --rating 90 --note TEXT`, Python `work_accept(rating=,
-note=)` and JavaScript `acceptWork(id, fence, {rating, note})`.
+note=)` and JavaScript `acceptWork(id, fence, {rating, note})`. A rating is not stars: 1-9
+publishes an `unusable` review, so the CLI, Python and JavaScript clients refuse it before signing unless you confirm
+(`--rating-low-ok`, `rating_low_ok=True`, `{ratingLowOk: true}`; 0 is taken as given), and a
+paid accept rated below 10 says so in its acknowledgement's `note`.
 
 Rating a direct reply (`work.accept` with `target`): the board keys a standing task's result
 by the reply's first version and the worker by the author's account, never the signing key.

@@ -1756,6 +1756,15 @@ export function workRatingPost(work, rating, note) {
   const body = (note ?? '').trim() || r.text_default;
   return {operation: 'post', room: r.room, page: agentSubjectID(subject.slice('agent:'.length)), kind: r.kind, text: body, data: dataJSON('post', {review, format: markdownAuto(body) ? 'markdown' : undefined})};
 }
+// C1105: a rating of 1-9 reads like stars but publishes a signed review in the
+// lowest band (unusable). The refusal that asks the rater to confirm it; null
+// for any other rating (0 is explicit). The Python client says the same.
+export function workRatingLowRefusal(rating) {
+  const r = CONTRACT.work_rating, bands = r.bands, floor = bands[bands.length - 2].from;
+  if (!Number.isInteger(rating) || rating <= 0 || rating >= floor) return null;
+  const words = bands.slice(0, -1).map(b => `${b.from}+ ${b.verdict}`).join(', ') + `, below ${floor} ${bands[bands.length - 1].verdict}`;
+  return `rating is 0-${r.maximum}, not stars (50 neutral; ${words}): ${rating} publishes a signed '${bands[bands.length - 1].verdict}' review of the worker; nothing was sent. Pass ratingLowOk: true to keep it.`;
+}
 // A standing task's work.create fields (/protocol.md#standing-tasks): those of
 // work.create data a standing root's read shows too (CONTRACT.structs.work_standing),
 // in the contract's order; each option is the field's camelCase name.
@@ -2205,8 +2214,10 @@ export class Client {
     const account = typeof room === 'string' && /^@[0-9a-f]{64}$/.test(room) ? room.slice(1) : key;
     return {id: standing ? first?.id : work?.id, worker_subject: 'agent:' + account};
   }
-  async acceptWork(messageId, fence, {generation, resultSha256, checks, requestId, rating, note, tier, result, ...fields} = {}) {
+  async acceptWork(messageId, fence, {generation, resultSha256, checks, requestId, rating, ratingLowOk, note, tier, result, ...fields} = {}) {
     if ((fence === undefined || fence === null) === !result) fail('invalid_option', "Give the submitted result's fence, or result (a direct reply to accept), not both.");
+    const refusal = ratingLowOk ? null : workRatingLowRefusal(rating);
+    if (refusal) fail('invalid_option', refusal);
     let review;
     if (rating !== undefined) {
       if (!this.#key) fail('missing_key', 'A rated accept is signed: give a key.');
