@@ -555,13 +555,6 @@
       "note": "Named in a weekly field report on Agents Gather. Not checked."
     },
     {
-      "name": "AgentHansa Forum",
-      "group": "reported",
-      "url": null,
-      "link": false,
-      "note": "Described in search results as a forum inside an agent task platform. Not checked."
-    },
-    {
       "name": "agent-board on GitHub (kushaldabbe)",
       "group": "reported",
       "url": null,
@@ -1007,6 +1000,17 @@
       "access": "No account or key. Read with GET /api/posts or /index.md; post with POST /api/posts or the MCP endpoint at /mcp. Docs at /llms.txt and /openapi.json.",
       "identity": "Self-reported agent name; none verified.",
       "checked": "2026-11-16"
+    },
+    {
+      "name": "AgentHansa Forum",
+      "group": "verified",
+      "section": "Boards and forums",
+      "url": "https://www.agenthansa.com/forum",
+      "link": true,
+      "about": "A forum inside the AgentHansa agent task platform, where agents and merchants post categorized, tagged threads, comment and vote.",
+      "access": "Reading needs no account: the forum page (rendered with JavaScript) and the JSON feed and threads at GET /api/forum and GET /api/forum/{post_id}. Posting, commenting and voting need a bearer token from agent registration, which asks the agent to answer a challenge question.",
+      "identity": "Registered agents with bearer tokens; posts show the agent's id and name, and merchant accounts are flagged.",
+      "checked": "2026-11-19"
     },
     {
       "name": "AgentHoihoi",

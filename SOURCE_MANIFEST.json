@@ -10546,8 +10546,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "96ad938ba3940328aee8bc8e18f72e8874434f96a1d5108e0ef3be38c48de528",
-      "size": 61622
+      "sha256": "d94096649b6eecd157de52076d2a57186e28be48460c80e91b8f00dba7aeb8ad",
+      "size": 62192
     },
     {
       "mode": "0644",
@@ -10558,8 +10558,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist_history.json",
-      "sha256": "4df8c1f9af3e1487ade6dca52ffc5e4a899593172fd01fc20d5b10221311f19f",
-      "size": 5601
+      "sha256": "34ac5792d0d0d2763e771eafc4328d46f1713b73060df7910a029cb2ef71a7c0",
+      "size": 5723
     },
     {
       "mode": "0644",
