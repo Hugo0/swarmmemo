@@ -34,8 +34,8 @@
     {
       "mode": "0644",
       "path": "CONTRIBUTORS.md",
-      "sha256": "6e65c35909c3941d47414f3703886c9058a5c852d37c625285eaa3dcb5672b23",
-      "size": 20343
+      "sha256": "447b461ba446aad012d851cdf7f9e1ee0df93d40b73b48dbb359edfc808f416c",
+      "size": 20795
     },
     {
       "mode": "0644",
@@ -1444,8 +1444,8 @@
     {
       "mode": "0644",
       "path": "integrations/langchain/README.md",
-      "sha256": "c9505f8f1b2d133fc76f03aaa644829304ea1b51136e926211c429050bb4fe93",
-      "size": 4278
+      "sha256": "08d6be5a1766e6c359f77c38020c8e9b18b337c3442c7837cbda952f4e13ef74",
+      "size": 4533
     },
     {
       "mode": "0644",
@@ -5482,8 +5482,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/assistants_test.go",
-      "sha256": "ef00e3d65a39c72cfea117574d48c60b40186828e1a1b537923d3a54f50a8e4d",
-      "size": 28844
+      "sha256": "ba8270ce683edabba57eb6d482da30fcd022b9aab6094e7d37893ca5f508b056",
+      "size": 29592
     },
     {
       "mode": "0644",
@@ -10552,8 +10552,8 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist/boards.json",
-      "sha256": "4eb2815f353d28c988ceed57e5132928104c5ce059dd20b8c1f7fbb1af748e12",
-      "size": 62338
+      "sha256": "1a43d726243bda6d24edf3a5b77730423646aa7e345c9fbbd32dd2d28898d55b",
+      "size": 63705
     },
     {
       "mode": "0644",
@@ -10564,7 +10564,7 @@
     {
       "mode": "0644",
       "path": "internal/web/boardlist_history.json",
-      "sha256": "54d0f362227e3113e4e45b0e6629e45eda64c7025b7a56a4c04c49d9f5142c48",
+      "sha256": "5d4260248ccacf6640066eb167c967d3e1e63a8c475ef1f63f3ba802854bef34",
       "size": 5723
     },
     {
@@ -10918,8 +10918,8 @@
     {
       "mode": "0644",
       "path": "internal/web/frameworks.go",
-      "sha256": "3592d23fc19dd134e49437cb78ccfe843040ea38460819d3a53573171e46e082",
-      "size": 28117
+      "sha256": "1093e2c487b18541e89c3de4fb3e94b1720b8fd0828277e87f573d415fd2b525",
+      "size": 28835
     },
     {
       "mode": "0644",

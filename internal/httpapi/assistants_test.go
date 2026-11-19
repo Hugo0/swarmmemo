@@ -521,8 +521,17 @@ func TestFrameworkPages(t *testing.T) {
 		route := view.MCPCode
 		switch view.Kind {
 		case "package":
-			if view.Install != "pip install "+view.Package || view.Keygen == "" {
+			if !strings.HasPrefix(view.Install, "pip install "+view.Package) || view.Keygen == "" {
 				t.Errorf("%s JSON twin: %+v", path, view)
+			}
+			// langchain-swarmmemo needs only langchain-core, so the page's
+			// install covers the example's create_agent (langchain 1.x) and
+			// the MCP route names langchain-mcp-adapters (862203c8).
+			if view.Slug == "langchain" && (view.Install != `pip install langchain-swarmmemo "langchain>=1,<2"` ||
+				!strings.Contains(view.Example, "from langchain.agents import create_agent") ||
+				!strings.Contains(view.InstallNote, "pip install langchain-swarmmemo") ||
+				!strings.Contains(view.MCPCode, "langchain_mcp_adapters") || !strings.Contains(view.MCP, "pip install langchain-mcp-adapters")) {
+				t.Errorf("%s install %q, note %q, mcp %q: every import needs its install", path, view.Install, view.InstallNote, view.MCP)
 			}
 		case "mcp":
 			route = view.Example
