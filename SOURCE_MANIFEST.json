@@ -982,8 +982,8 @@
     {
       "mode": "0644",
       "path": "docs/GLOSSARY.md",
-      "sha256": "cb754c550a094430da81f1a96695d9e3df73d7be889c555fda884eea26a936bc",
-      "size": 57248
+      "sha256": "1d061712777edfc6f590dbfd902d9da503b98a9f77a52e9c3b0f11493b985e95",
+      "size": 57330
     },
     {
       "mode": "0644",
@@ -6052,8 +6052,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/lexicon_test.go",
-      "sha256": "284a26a186b38e29b7a2fa54b58c80268a9d1b1f0e963e3eabed9d4004d8fde9",
-      "size": 24336
+      "sha256": "e514eb8f87e3b9081cbfbd47329b8ea63bc7fc17b00cb3a11ec2f0928dc6339e",
+      "size": 24811
     },
     {
       "mode": "0644",
@@ -6106,8 +6106,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/login.go",
-      "sha256": "59ea4e33a301d0b4bfd72835a2d311bac36e6a2bc937aabecd1686d592d37736",
-      "size": 19911
+      "sha256": "9c458a7b024c2637a672fe15ae1ab0cb09f76c0010b683c31839ea345d4ded77",
+      "size": 19947
     },
     {
       "mode": "0644",
@@ -6538,8 +6538,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/oauth.go",
-      "sha256": "a3c5072134bc5d22666a2515d66e82f2c665e6e94a7dc6e8c33d48adcbaca722",
-      "size": 59252
+      "sha256": "3db4aa908726234426cb40f675fe819e6d2d6444dc632dfb103905ee2c4e27ed",
+      "size": 60651
     },
     {
       "mode": "0644",
@@ -6550,8 +6550,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/oauth_test.go",
-      "sha256": "d59debd50c6f98930469adae7aff6e73746af2a6267c910bfd63d043cadeb720",
-      "size": 52902
+      "sha256": "ba0c697ffddfe86954a642fcba5da21cb7d4422ba38ba4aaa161c527782492cc",
+      "size": 55123
     },
     {
       "mode": "0644",
@@ -6562,8 +6562,8 @@
     {
       "mode": "0644",
       "path": "internal/httpapi/oauthapps_test.go",
-      "sha256": "9578c9bbce8379137f38ec761772b27f3310b6921a5c57033033ea68161b5f53",
-      "size": 9681
+      "sha256": "7bb42bb8053a2ade67164e1a7ad02c1a2f61e9399c05309ab180320f1c95ddf6",
+      "size": 9832
     },
     {
       "mode": "0644",

@@ -77,7 +77,11 @@ func TestSignInWithSwarmMemoOverHTTP(t *testing.T) {
 
 	// Sign in: the answer is an app token for the app's SwarmMemo resource.
 	request, cookie := consent(t, s, authorizeQuery(client.ID, testRedirect, "st", map[string]string{"scope": "identity app-rooms", "resource": ""}))
-	back, _ := continued(t, s, cookie, submit(s, request, cookie, map[string]string{"action": "create"}, nil))
+	created := submit(s, request, cookie, map[string]string{"action": "create"}, nil)
+	if strings.Contains(created.Body.String(), "oauth-next") {
+		t.Fatal("an app's recovery page shows assistant starter prompts")
+	}
+	back, _ := continued(t, s, cookie, created)
 	status, tokens, _ := tokenRequest(s, url.Values{"grant_type": {"authorization_code"}, "code": {back.Query().Get("code")}, "client_id": {client.ID},
 		"redirect_uri": {testRedirect}, "code_verifier": {testVerifier}})
 	access, _ := tokens["access_token"].(string)

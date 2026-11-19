@@ -385,7 +385,8 @@ func (s *Server) signedInPage(w http.ResponseWriter, r *http.Request, req authRe
 	req.Nonce = s.consentNonce(w, r)
 	req.Expires = time.Now().Unix() + oauthConsentSeconds
 	req.Account = res.Account
-	v := pageView{Title: "Signed in with " + label, Client: req.ClientName, Agent: res.Account, Handle: res.Handle, Provider: label, Request: s.signRequest(req)}
+	v := pageView{Title: "Signed in with " + label, Client: req.ClientName, Agent: res.Account, Handle: res.Handle, Provider: label, Request: s.signRequest(req),
+		Assistant: starterAssistant(req)}
 	if u, err := url.Parse(req.RedirectURI); err == nil {
 		v.Host = u.Host
 	}

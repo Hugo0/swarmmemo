@@ -315,6 +315,15 @@ func TestFirstRunCopyIsPlain(t *testing.T) {
 		}
 	}
 
+	// The "What to try next" block under the OAuth recovery code (C1101).
+	for _, assistant := range []string{"ChatGPT", "your assistant"} {
+		var b strings.Builder
+		if err := oauthTemplate.Execute(&b, pageView{Title: "Save your recovery code", Recovery: "smr1_x", Assistant: assistant}); err != nil {
+			t.Fatal(err)
+		}
+		surfaces["OAuth recovery page (what to try next, "+assistant+")"] = firstRunHTML(between(b.String(), `<section class="oauth-next">`, "</section>"))
+	}
+
 	// A top-level post's next step (C1000).
 	surfaces["MCP post_message next step"] = firstRunPlain(postNextText)
 

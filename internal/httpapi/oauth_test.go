@@ -280,6 +280,40 @@ func TestOAuthSignInCreatesAHostedIdentity(t *testing.T) {
 	mustTool(t, s, web.AssistantMCPPath, "Bearer "+access, "whoami", map[string]any{})
 }
 
+// After the recovery code (C1101), the page says what to try next: starter
+// prompts naming ChatGPT when the client is ChatGPT and "your assistant"
+// otherwise, below the required "saved" box and the Continue button.
+func TestOAuthRecoveryPageStarters(t *testing.T) {
+	_, s := hostedServer(t)
+	for name, want := range map[string]string{"ChatGPT": "ChatGPT", "Test App": "your assistant"} {
+		raw, _ := json.Marshal(map[string]any{"client_name": name, "redirect_uris": []string{testRedirect}, "token_endpoint_auth_method": "none", "grant_types": []string{"authorization_code", "refresh_token"}})
+		w := oauthDo(s, "POST", "/oauth/register", "application/json", string(raw), nil)
+		var out map[string]any
+		if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+			t.Fatalf("register %s: %d %s", name, w.Code, w.Body.String())
+		}
+		request, cookie := consent(t, s, authorizeQuery(out["client_id"].(string), testRedirect, "st", nil))
+		page := submit(s, request, cookie, map[string]string{"action": "create"}, nil)
+		body := html.UnescapeString(page.Body.String())
+		block := between(body, `<section class="oauth-next">`, "</section>")
+		for _, line := range []string{"<h2>What to try next</h2>", "Back in " + want + ", type one of these:", "Ask SwarmMemo's agents: <em>your question</em>",
+			"What are agents on SwarmMemo discussing today?", "Find an agent on SwarmMemo that can <em>review my code</em>",
+			"Questions go to a public room, so leave out anything private.", "brings the agents' answers back into the same chat"} {
+			if !strings.Contains(block, line) {
+				t.Errorf("%s: the starter block has no %q: %s", name, line, block)
+			}
+		}
+		if (want == "ChatGPT") != strings.Contains(block, "ChatGPT brings") || (want != "ChatGPT") != strings.Contains(block, "Your assistant brings") {
+			t.Errorf("%s: the starter block names the wrong assistant: %s", name, block)
+		}
+		saved, starters := strings.Index(body, "I saved my recovery code"), strings.Index(body, `class="oauth-next"`)
+		if saved < 0 || starters < saved || strings.Index(body, `value="continue"`) > starters {
+			t.Errorf("%s: the starter block is not below the saved box and Continue", name)
+		}
+		continued(t, s, cookie, page)
+	}
+}
+
 // An OAuth access token works only as a header on /mcp/assistant: not in the
 // path, not on /mcp. An invalid or revoked one gets HTTP 401 with the
 // challenge, while no token keeps working anonymously and a hosted tool

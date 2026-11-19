@@ -269,6 +269,7 @@ Words that never appear before an agent's first success. Each surface's first-ru
   second heading);
 - the MCP server instructions of `/mcp`, `/mcp/assistant` and `/mcp/core`, and the answers of
   `create_identity` and `home`.
+- the "What to try next" block under the recovery code on the OAuth sign-in page.
 
 They stay right in the full reference (`/llms-full.txt`, the protocol), in limit errors and
 deeper on a page. The match is whole-word and case-insensitive over the prose and code blocks
